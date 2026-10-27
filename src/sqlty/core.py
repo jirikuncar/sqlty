@@ -14,7 +14,7 @@ from collections import Counter
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, NamedTuple
 
-from sqlty._check import MARKER, RowUsage, apply_suppressions, is_any_row
+from sqlty._check import RowUsage, apply_suppressions, is_any_row
 from sqlty._check import diagnostics as check_diagnostics
 from sqlty._core import (
     Schema,
@@ -35,10 +35,10 @@ from sqlty._core import rewrite_source as _rewrite_source
 from sqlty._core import schema_skipped_objects as _schema_skipped_objects
 from sqlty._core import schema_skipped_tables as _schema_skipped_tables
 from sqlty._core import strip_source as _strip_source
+from sqlty._drivers import MARKER
 from sqlty._helpers import HelperIndex, find_helper_calls
 from sqlty._lint import Diagnostic
 from sqlty._source import ParsedSource
-from sqlty._widening import widens
 
 if TYPE_CHECKING:
     pass
@@ -167,7 +167,9 @@ class ParamInfo(NamedTuple):
     ``nullable`` is ``False`` when ``None`` cannot be passed (the parameter is stored in a
     ``NOT NULL`` column), ``True`` when it can, ``None`` when the query does not say.
     ``cast`` is ``True`` when the type is that of an explicit cast (``%s::int``), which
-    accepts any value.
+    accepts any value. ``untyped_sql_type`` is the type PostgreSQL gives the parameter when
+    the driver sends it untyped, as asyncpg does, when that differs from ``sql_type``: the
+    ``%s`` of ``%s + INTERVAL '1 day'`` is an ``interval`` then, and any date or time otherwise.
     """
 
     number: int
@@ -176,6 +178,7 @@ class ParamInfo(NamedTuple):
     sql_type: str | None
     nullable: bool | None
     cast: bool = False
+    untyped_sql_type: str | None = None
 
 
 def analyze_params(
@@ -192,7 +195,7 @@ def analyze_params(
     Example:
         >>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT NOT NULL, age INTEGER)"
         >>> analyze_params("SELECT name FROM users WHERE id = %s AND age > %(min)s", schema_sql=schema)
-        [ParamInfo(number=1, name=None, python_type='int', sql_type='INT', nullable=None, cast=False), ParamInfo(number=2, name='min', python_type='int', sql_type='INT', nullable=None, cast=False)]
+        [ParamInfo(number=1, name=None, python_type='int', sql_type='INT', nullable=None, cast=False, untyped_sql_type=None), ParamInfo(number=2, name='min', python_type='int', sql_type='INT', nullable=None, cast=False, untyped_sql_type=None)]
         >>> [(p.python_type, p.nullable) for p in analyze_params("INSERT INTO users (id, name, age) VALUES ($1, $2, $3)", schema_sql=schema)]
         [('int', False), ('str', False), ('int', True)]
         >>> analyze_params("SELECT 1 FROM users WHERE id = ANY(%s)", schema_sql=schema)[0].python_type
@@ -209,7 +212,8 @@ def query_diagnostics(
 
     The rules are ``unknown-table``, ``unknown-column``, ``ambiguous-column``,
     ``unknown-function``, ``unknown-type``, ``unsupported-syntax``,
-    ``insert-missing-column`` and ``ungrouped-column``. Tables and columns are only judged when ``schema_sql``
+    ``insert-missing-column``, ``insert-value-count`` and ``ungrouped-column``. Tables and columns are only judged
+    when ``schema_sql``
     defines some tables.
 
     Example:
@@ -243,6 +247,8 @@ def schema_skipped_objects(
     Example:
         >>> schema_skipped_objects("CREATE TABLE ok (id INT); CREATE VIEW v AS SELECT id FROM (")
         [('view', 'v')]
+        >>> schema_skipped_objects("CREATE VIRTUAL TABLE words USING spellfix1", dialect="sqlite")
+        [('table', 'words')]
     """
     return _schema_skipped_objects(schema_sql, dialect=dialect)
 
@@ -311,12 +317,15 @@ def fix_source(
     untyped: bool = False,
     rules: dict[str, str] | None = None,
     json_types: str = "typing.Any",
+    helpers: HelperIndex | None = None,
+    module: str | None = None,
 ) -> str:
     """Apply what ``sqlty check --fix`` fixes; rules set to ``"ignore"`` are skipped.
 
     A fix for a rule is not applied to a query whose reported line carries
     ``# sqlty: ignore`` or ``# sqlty: ignore[rule]`` naming that rule, so a
     suppressed ``select-star`` is not expanded. Other rules on the line are fixed.
+    A string passed to a helper with its row type (see ``check_source``) is not wrapped.
 
     Example:
         >>> fix_source('q = "--sql SELECT 1"  # sqlty: ignore[inline-sql-comment]')
@@ -325,7 +334,17 @@ def fix_source(
     Raises:
         ValueError: unsupported ``import_style``, or ``rules`` names an unknown rule or severity
     """
-    parsed = ParsedSource.of(source)
+    parsed = ParsedSource.of(source, module)
+    suppressed: dict[int, list[str] | None] = {
+        line: None if ignore.rules is None else list(ignore.rules)
+        for line, ignore in parsed.ignores.items()
+    }
+    for call in find_helper_calls(parsed, helpers, module):
+        for line in call.typed_lines:
+            if line not in suppressed:
+                suppressed[line] = ["stale-rewrite"]
+            elif (named := suppressed[line]) is not None:
+                named.append("stale-rewrite")
     fixed = _fix_source(
         parsed.text,
         dialect=dialect,
@@ -333,11 +352,7 @@ def fix_source(
         import_style=import_style,
         untyped=untyped,
         rules=rules,
-        suppressed={
-            line: None if ignore.rules is None else list(ignore.rules)
-            for line, ignore in parsed.ignores.items()
-        }
-        or None,
+        suppressed=suppressed or None,
     )
     if json_types == "typing.TypedDict" and fixed != parsed.text:
         from sqlty._json_types import add_json_types
@@ -363,12 +378,12 @@ def check_source(
 ) -> list[Diagnostic]:
     """Check Python source for SQL type issues.
 
-    A column that can be NULL infers as ``T | None`` (``stale-type`` compares against
+    A column that can be NULL infers as ``T | None`` (``narrow-type`` compares against
     that), and ``nullable-mismatch`` reports a row field that does not admit ``None`` for it.
 
     When ``SQL[UserType](...)`` names a type defined in the same source,
     structural checks (column count, type, name, TypedDict keys) run instead
-    of ``stale-type``.
+    of ``stale-type`` and ``narrow-type``.
 
     A string literal passed to a parameter annotated
     ``Annotated[LiteralString, SQL]`` is a query too, checked against the row
@@ -424,16 +439,7 @@ def check_source(
     return diagnostics if row_usage else usage.filter(diagnostics)
 
 
-# The name rules `breaking` turns on: a schema change shows up as a name that no longer
-# resolves, or an INSERT that no longer sets every required column.
-BREAKING_RULES = (
-    "unknown-table",
-    "unknown-column",
-    "ambiguous-column",
-    "unknown-function",
-    "unknown-type",
-    "insert-missing-column",
-)
+CODE_RULES = ("stale-rewrite", "unused-ignore")
 
 
 def breaking_source(
@@ -452,11 +458,12 @@ def breaking_source(
     """The diagnostics ``source`` gets against ``against_sql`` but not against its own
     ``schema_sql``: what a schema change breaks, as ``sqlty breaking`` reports it.
 
-    Both checks enable the name rules of ``BREAKING_RULES`` on top of ``rules``, so a
+    Both checks apply ``rules`` as ``check_source`` does, so with the default severities a
     dropped or renamed table or column, and a new ``NOT NULL`` column an ``INSERT``
-    leaves out, are reported, besides the row type checks. An annotation wider than the
+    leaves out, are reported, besides the row type checks; a rule set to ``"ignore"``
+    stays off. An annotation wider than the
     other schema's rows (``str | None`` for a ``NOT NULL`` column) still reads them, so it
-    is not reported.
+    is not reported. Nor are ``CODE_RULES``, which judge the code rather than the schema.
 
     Example:
         >>> old = "CREATE TABLE users (id INT NOT NULL, bio TEXT)"
@@ -464,9 +471,6 @@ def breaking_source(
         >>> [d["message"] for d in breaking_source('q = "--sql\\\\nSELECT bio FROM users"', schema_sql=old, against_sql=new)]
         ['column `bio` does not exist in `users`']
     """
-    rules = (rules or {}) | {
-        name: "error" for name in BREAKING_RULES if (rules or {}).get(name, "ignore") == "ignore"
-    }
     parsed = ParsedSource.of(source, module)
 
     def check(schema: str | Schema | None) -> list[Diagnostic]:
@@ -486,7 +490,10 @@ def breaking_source(
     return [
         d
         for d in check(against_sql)
-        if (d.get("line"), d["rule"], d["message"]) not in own and not widens(d)
+        if (d.get("line"), d["rule"], d["message"]) not in own
+        and d["rule"] not in CODE_RULES
+        # An annotation wider than the rows still reads them.
+        and d["rule"] not in {"stale-type", "redundant-optional", "redundant-literal"}
     ]
 
 
@@ -503,7 +510,7 @@ def query_statistics(
 
     Counts ``typed`` queries, ``partially typed`` ones (a column's type is
     unknown), ``unparsed`` ones, and skipped strings by rule
-    (``fstring-skipped``, ``tstring-skipped``, ``unchecked-query``). Queries
+    (``fstring-skipped``, ``tstring-skipped``, ``unchecked-query``, ``dynamic-query``). Queries
     that return no rows are not counted.
 
     Example:
@@ -522,7 +529,7 @@ def query_statistics(
     for call in find_helper_calls(parsed, helpers, module):
         if call.query is None:
             if not is_any_row(call):
-                counts["unchecked-query"] += 1
+                counts["dynamic-query" if call.dynamic else "unchecked-query"] += 1
         elif not MARKER.match(call.query) and (
             outcome := _outcome(call.query, dialect, schema_sql)
         ):

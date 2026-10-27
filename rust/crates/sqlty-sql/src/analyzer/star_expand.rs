@@ -146,10 +146,7 @@ fn unquoted_reference(factor: &TableFactor) -> Option<String> {
 /// assert_eq!(result_stars("SELECT 1 WHERE EXISTS (SELECT * FROM t)", "postgres"), Some(vec![]));
 /// ```
 pub fn result_stars(sql: &str, dialect: &str) -> Option<Vec<String>> {
-    let stmt = parse_first(sql, SqlDialect::from_name(dialect))?;
-    let mut stars = Vec::new();
-    statement_stars(&stmt, &mut stars);
-    Some(stars)
+    super::api::parse(sql, dialect).result_stars()
 }
 
 /// `clause` followed by the stars among `items` (`SELECT u.*, o.*`), if there are any.
@@ -167,7 +164,7 @@ fn wildcards(items: &[SelectItem], clause: &str) -> Option<String> {
     (!found.is_empty()).then(|| format!("{clause} {}", found.join(", ")))
 }
 
-fn statement_stars(stmt: &Statement, stars: &mut Vec<String>) {
+pub(super) fn statement_stars(stmt: &Statement, stars: &mut Vec<String>) {
     let returning = match stmt {
         Statement::Query(query) => return query_stars(query, stars),
         Statement::Insert(insert) => &insert.returning,

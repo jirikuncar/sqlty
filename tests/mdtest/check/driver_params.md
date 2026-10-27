@@ -53,6 +53,28 @@ cur.executemany("INSERT INTO users (id, name) VALUES (%s, %s)", [(1, "a"), (2, "
 cur.executemany("INSERT INTO users (id, name) VALUES (%s, %s)", [(1, "a"), (2.5, "b")])
 ```
 
+## A single value is not a sequence of parameters
+
+psycopg takes a sequence or a mapping of parameters, and raises `TypeError` for
+a single value.
+
+```python
+import psycopg
+from decimal import Decimal
+
+def find(cur: psycopg.Cursor, user_id: int, name: str) -> None:
+    cur.execute("SELECT id FROM users WHERE id = %s", (user_id,))
+    cur.execute("SELECT id FROM users", None)
+    # error: [param-type-mismatch] "parameters are a single int, which psycopg rejects"
+    cur.execute("SELECT id FROM users WHERE id = %s", user_id)
+    # error: [param-type-mismatch] "parameters are a single str, which psycopg rejects"
+    cur.execute("SELECT id FROM users WHERE name = %s", name)
+    # error: [param-type-mismatch] "parameters are a single decimal.Decimal, which psycopg rejects"
+    cur.execute("SELECT id FROM users WHERE age = %s", params=Decimal(1))
+    # error: [param-type-mismatch] "parameters are a single int, which psycopg rejects"
+    cur.executemany("DELETE FROM users WHERE id = %s", [1, 2])
+```
+
 ## A query bound to a name or wrapped in SQL
 
 ```python
@@ -106,6 +128,80 @@ async def main() -> None:
     await conn.fetch("SELECT id FROM users WHERE id = $1", b"1")
     # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
     await conn.execute("DELETE FROM users WHERE id = $1 AND age = $2", 1)
+```
+
+### asyncpg does not convert text
+
+psycopg sends a `str` untyped, and the server converts it to the parameter's type.
+asyncpg encodes each argument as its parameter's type instead: it rejects a `str` for
+a number, a date or time, or an array, and takes a `bool` for a number.
+
+```python
+import asyncpg
+
+async def main() -> None:
+    conn = await asyncpg.connect("postgres://x")
+    # error: [param-type-mismatch] "parameter 1 expects int, got str"
+    await conn.fetch("SELECT id FROM users WHERE id = $1", "1")
+    # error: [param-type-mismatch] "parameter 1 expects list[int], got str"
+    await conn.fetch("SELECT id FROM users WHERE id = ANY($1)", "{1}")
+    await conn.fetch("SELECT id FROM users WHERE name = $1 AND age = $2", "a", True)
+    await conn.fetch("SELECT id FROM users WHERE id = $1::text::int", "1")
+```
+
+### A parameter shifted by an interval
+
+PostgreSQL resolves `$1 - INTERVAL '3 months'` before the comparison around it: an
+untyped `$1` becomes an `interval`, and comparing that with a `timestamptz` fails.
+psycopg sends the type of a `datetime`, so the query works there, but asyncpg sends
+parameters untyped. A cast fixes it.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE keys (id INTEGER PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL);
+```
+
+```python
+import datetime
+
+import asyncpg
+import psycopg
+
+async def main(now: datetime.datetime) -> None:
+    conn = await asyncpg.connect("postgres://x")
+    # error: [param-type-mismatch] "parameter 1 is an `interval` to PostgreSQL, as asyncpg sends it untyped, so it cannot stand for a `timestamptz`: cast it, `$1::timestamptz`"
+    await conn.execute("DELETE FROM keys WHERE created_at < $1 - INTERVAL '3 months'", now)
+    await conn.execute("DELETE FROM keys WHERE created_at < $1::timestamptz - INTERVAL '3 months'", now)
+    with psycopg.connect("dbname=x") as sync:
+        sync.execute("DELETE FROM keys WHERE created_at < %s - INTERVAL '3 months'", (now,))
+```
+
+A shifted parameter stored in a column takes the column's type the same way. Alone, it is
+an `interval` to asyncpg, and any date, time or `timedelta` to psycopg.
+
+```python
+import datetime
+
+import asyncpg
+import psycopg
+
+async def main(now: datetime.datetime) -> None:
+    conn = await asyncpg.connect("postgres://x")
+    # error: [param-type-mismatch] "parameter 1 is an `interval` to PostgreSQL, as asyncpg sends it untyped, so it cannot stand for a `timestamptz`: cast it, `$1::timestamptz`"
+    await conn.execute("INSERT INTO keys (id, created_at) VALUES (1, $1 + INTERVAL '1 day')", now)
+    # error: [param-type-mismatch] "parameter 1 is an `interval` to PostgreSQL, as asyncpg sends it untyped, so it cannot stand for a `timestamptz`: cast it, `$1::timestamptz`"
+    await conn.execute("UPDATE keys SET created_at = $1 - INTERVAL '1 day'", now)
+    # error: [param-type-mismatch] "parameter 1 expects datetime.timedelta, got datetime.datetime"
+    await conn.fetch("SELECT $1 + INTERVAL '1 day'", now)
+    await conn.fetch("SELECT $1 + INTERVAL '1 day'", datetime.timedelta(days=1))
+    with psycopg.connect("dbname=x") as sync:
+        sync.execute(
+            "INSERT INTO keys (id, created_at) SELECT n, %s + n * INTERVAL '1 second' FROM generate_series(1, 3) n",
+            (now,),
+        )
+        sync.execute("SELECT %s + INTERVAL '1 day'", (now,))
+        sync.execute("SELECT %s + INTERVAL '1 day'", (datetime.date.today(),))
 ```
 
 ## Names are resolved per scope

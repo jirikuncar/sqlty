@@ -36,3 +36,4 @@ bench-result.json
 
 # Hypothesis example database (tests/test_fuzz.py)
 .hypothesis/
+*.snap.new

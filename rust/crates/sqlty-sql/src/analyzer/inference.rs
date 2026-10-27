@@ -6,9 +6,10 @@
 //! ones in `rules/common/`, each in file order, and the first that applies is used. An
 //! operator no rule covers is typed by the analyzer's code, as before rules existed.
 
-use sqlparser::ast::BinaryOperator;
+use sqlparser::ast::{BinaryOperator, UnaryOperator};
 
 use super::dialect::SqlDialect;
+use super::functions::Returns;
 
 /// The result type of a rule.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,9 +75,9 @@ pub(crate) struct BinaryRule {
     /// The dialects the rule applies to; empty for all.
     dialects: &'static [SqlDialect],
     /// The SQL types the left operand may have; `None` for any.
-    left: Option<&'static [&'static str]>,
+    left: Option<u128>,
     /// The SQL types the right operand may have; `None` for any.
-    right: Option<&'static [&'static str]>,
+    right: Option<u128>,
     pub(crate) result: RuleType,
     pub(crate) nullability: RuleNullability,
     /// The SQL type a placeholder on the left gets when the right operand matches.
@@ -101,7 +102,7 @@ impl BinaryRule {
         &self,
         dialect: SqlDialect,
         left: bool,
-        other: Option<&str>,
+        other: Option<Operand>,
     ) -> Option<&'static str> {
         let (parameter, other_types) = if left {
             (self.left_parameter, self.right)
@@ -131,8 +132,8 @@ impl BinaryRule {
     pub(crate) fn applies(
         &self,
         dialect: SqlDialect,
-        left: Option<&str>,
-        right: Option<&str>,
+        left: Option<Operand>,
+        right: Option<Operand>,
     ) -> bool {
         (self.dialects.is_empty() || self.dialects.contains(&dialect))
             && admits(self.left, left)
@@ -151,10 +152,13 @@ pub(crate) enum FunctionType {
     Unknown,
     /// Typed by the analyzer's code: the rule gives the nullability only.
     Code,
-    /// The argument's type, values included: `MIN` and `MAX` return one of them.
-    Argument,
-    /// The argument's Python type and values under another SQL type.
+    /// The type of the argument at this position, values included: `MIN` and `MAX` return
+    /// one of them.
+    Argument(usize),
+    /// The first argument's Python type and values under another SQL type.
     ArgumentAs(&'static str),
+    /// A type that follows from the arguments as the analyzer's code computes it.
+    Returns(Returns),
 }
 
 /// How a function rule's result can be NULL.
@@ -167,11 +171,17 @@ pub(crate) enum FunctionNullability {
     /// An aggregate's: NULL over no rows, unless the group is known to hold one (a plain
     /// `GROUP BY`), and as its argument is over the rows (`analyzer/nullability.rs`).
     Aggregate,
-    /// A scalar function's, as the analyzer's function table says: NULL when an argument is.
+    /// NULL when an argument is, such as `lower`.
     Strict,
+    /// NULL only when every argument is: `COALESCE` skips NULLs.
+    AllArguments,
+    /// NULL when one of the first k arguments is: `CONCAT_WS` skips NULLs after its separator.
+    Leading(usize),
+    /// As `analyzer/nullability.rs` decides from the call: `LAG`'s default, `IF`'s branches.
+    Code,
 }
 
-/// An inference rule for a function call, by its first argument.
+/// An inference rule for a function call, by its first two arguments.
 #[derive(Debug)]
 pub(crate) struct FunctionRule {
     pub(crate) id: &'static str,
@@ -179,7 +189,11 @@ pub(crate) struct FunctionRule {
     pub(crate) reasoning: &'static str,
     dialects: &'static [SqlDialect],
     /// The SQL types the first argument may have; `None` for any.
-    argument: Option<&'static [&'static str]>,
+    argument: Option<u128>,
+    /// The SQL types the second argument may have; `None` for any.
+    second: Option<u128>,
+    /// The SQL types one argument at least must have; `None` for any arguments.
+    any: Option<u128>,
     pub(crate) result: FunctionType,
     pub(crate) nullability: FunctionNullability,
 }
@@ -194,23 +208,65 @@ impl FunctionRule {
         }
     }
 
-    /// Whether the rule needs the argument's type to decide whether it applies.
-    pub(crate) fn reads_argument(&self) -> bool {
-        self.argument.is_some()
+    /// Whether the rule needs the type of the argument at `position` (0 or 1) to decide
+    /// whether it applies, or to give its result.
+    pub(crate) fn reads(&self, position: usize) -> bool {
+        let predicate = if position == 0 {
+            self.argument
+        } else {
+            self.second
+        };
+        predicate.is_some() || self.result == FunctionType::Argument(position)
     }
 
-    /// Whether the rule applies in `dialect` to an argument of this SQL type.
-    pub(crate) fn applies(&self, dialect: SqlDialect, argument: Option<&str>) -> bool {
+    /// Whether the rule needs the type of every argument to decide whether it applies.
+    pub(crate) fn reads_all(&self) -> bool {
+        self.any.is_some()
+    }
+
+    /// Whether the rule applies in `dialect` to arguments of these SQL types: the first,
+    /// the second, and all of them where [`FunctionRule::reads_all`].
+    pub(crate) fn applies(
+        &self,
+        dialect: SqlDialect,
+        argument: Option<Operand>,
+        second: Option<Operand>,
+        all: &[Option<Operand>],
+    ) -> bool {
         (self.dialects.is_empty() || self.dialects.contains(&dialect))
             && admits(self.argument, argument)
+            && admits(self.second, second)
+            && self
+                .any
+                .is_none_or(|_| all.iter().any(|&operand| admits(self.any, operand)))
     }
 }
 
-/// Whether an operand of SQL type `operand` satisfies `types`; `@known` admits any typed one.
-fn admits(types: Option<&[&str]>, operand: Option<&str>) -> bool {
-    types.is_none_or(|types| {
-        operand.is_some_and(|operand| types.contains(&operand) || types.contains(&"@known"))
+/// Whether a rule types every call of the function `name` (upper case) in `dialect`,
+/// whatever its arguments.
+pub(crate) fn typed_by_rule(name: &str, dialect: SqlDialect) -> bool {
+    function_rules(name).iter().any(|rule| {
+        rule.argument.is_none()
+            && rule.second.is_none()
+            && rule.any.is_none()
+            && (rule.dialects.is_empty() || rule.dialects.contains(&dialect))
     })
+}
+
+/// An operand's SQL type as rules match it: one bit of the types they can name, from
+/// [`operand`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Operand(u128);
+
+/// The [`Operand`] of SQL type `sql`; `None` for an untyped operand.
+pub(crate) fn operand(sql: Option<&str>) -> Option<Operand> {
+    sql.map(|sql| Operand(type_bit(sql)))
+}
+
+/// Whether `operand` satisfies the predicate `types`, a mask of the SQL types it admits;
+/// `@known` admits any typed operand.
+fn admits(types: Option<u128>, operand: Option<Operand>) -> bool {
+    types.is_none_or(|types| operand.is_some_and(|Operand(bit)| types & (bit | KNOWN) != 0))
 }
 
 include!(concat!(env!("OUT_DIR"), "/inference_rules.rs"));
@@ -221,6 +277,17 @@ mod tests {
     use std::cell::Cell;
 
     use super::*;
+
+    #[test]
+    fn extending_dialects_are_sqlparser_dialects() {
+        for &name in EXTENDING_DIALECTS {
+            assert_eq!(
+                SqlDialect::from_name(name),
+                SqlDialect::Other(name),
+                "{name}"
+            );
+        }
+    }
 
     #[test]
     fn every_rule_is_documented() {
@@ -236,6 +303,26 @@ mod tests {
                 !rule.reasoning.trim().is_empty(),
                 "{} has no reasoning",
                 rule.id
+            );
+        }
+    }
+
+    #[test]
+    fn every_result_type_has_a_python_type() {
+        use crate::analyzer::expr::from_sql_type;
+        let binary = BINARY_RULES.iter().filter_map(|rule| match rule.result {
+            RuleType::Sql(name) => Some((rule.id, rule.dialects, name)),
+            _ => None,
+        });
+        let functions = FUNCTION_RULES.iter().filter_map(|rule| match rule.result {
+            FunctionType::Sql(name) => Some((rule.id, rule.dialects, name)),
+            _ => None,
+        });
+        for (id, dialects, name) in binary.chain(functions) {
+            let dialect = dialects.first().copied().unwrap_or(SqlDialect::Postgres);
+            assert!(
+                name.ends_with("RANGE") || from_sql_type(name, dialect).python.is_some(),
+                "{id} returns {name}, which has no Python type"
             );
         }
     }
@@ -285,14 +372,26 @@ mod tests {
         for op in &operators {
             for &dialect in &dialects {
                 for rule in binary_rules(op) {
-                    matched += usize::from(rule.applies(dialect, Some("INT"), Some("JSONB")));
-                    matched += usize::from(rule.parameter(dialect, false, Some("JSONB")).is_some());
+                    matched += usize::from(rule.applies(
+                        dialect,
+                        operand(Some("INT")),
+                        operand(Some("JSONB")),
+                    ));
+                    matched += usize::from(
+                        rule.parameter(dialect, false, operand(Some("JSONB")))
+                            .is_some(),
+                    );
                 }
             }
         }
         for name in ["COUNT", "SUM", "AVG", "MIN", "UNKNOWN"] {
             for rule in function_rules(name) {
-                matched += usize::from(rule.applies(SqlDialect::Postgres, Some("SMALLINT")));
+                matched += usize::from(rule.applies(
+                    SqlDialect::Postgres,
+                    operand(Some("SMALLINT")),
+                    operand(Some("TEXT")),
+                    &[],
+                ));
             }
         }
         COUNTING.with(|counting| counting.set(false));
@@ -304,6 +403,18 @@ mod tests {
         drop(std::hint::black_box(vec![matched]));
         COUNTING.with(|counting| counting.set(false));
         assert_eq!(ALLOCATIONS.with(Cell::get), 1);
+    }
+
+    #[test]
+    fn operand_predicates_are_masks() {
+        let jsonb = Some(type_bit("JSONB"));
+        let (typed, named) = (operand(Some("app.mood")), operand(Some("JSONB")));
+        assert!(admits(jsonb, named));
+        assert!(!admits(jsonb, typed));
+        assert!(!admits(jsonb, None));
+        assert!(admits(Some(KNOWN), typed));
+        assert!(!admits(Some(KNOWN), None));
+        assert!(admits(None, None));
     }
 
     #[test]

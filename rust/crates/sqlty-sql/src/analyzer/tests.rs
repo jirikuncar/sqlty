@@ -1,6 +1,9 @@
 //! Analyzer unit tests that cross module boundaries.
 
-use super::preprocess::{numbered_placeholders, parse_first, parser_input, sqlite_type_names};
+use super::input::parser_input;
+use super::preprocess::{
+    numbered_placeholders, parse_first, parse_query, sqlite_type_names, PARSES,
+};
 use super::query::Analyzer;
 use super::*;
 
@@ -72,45 +75,72 @@ fn test_parser_input() {
         parser_input(
             "  --sql\r\nSELECT %s, %(id)s, %b, %(a-b)t, '%s', 5 %% 2",
             SqlDialect::MySql
-        ),
-        "SELECT NULL, NULL, NULL, NULL, 'NULL', 5 % 2"
+        )
+        .text(),
+        "SELECT NULL, NULL, NULL, NULL, '%s', 5 % 2"
     );
-    assert_eq!(parser_input("--sql SELECT 1", SqlDialect::MySql), "");
     assert_eq!(
-        parser_input("SELECT %d, %%(a)s", SqlDialect::MySql),
+        parser_input("SELECT '100%%', 'it\\'s %s', %s", SqlDialect::MySql).text(),
+        "SELECT '100%', 'it\\'s %s', NULL"
+    );
+    assert_eq!(
+        parser_input(
+            "SELECT 'a (TABLE foo', 'FOR NO KEY UPDATE', 'x MULTISET' /* (TABLE foo) */",
+            SqlDialect::Postgres
+        )
+        .text(),
+        "SELECT 'a (TABLE foo', 'FOR NO KEY UPDATE', 'x MULTISET' /* (TABLE foo) */"
+    );
+    assert_eq!(
+        parser_input("(TABLE a) UNION ALL TABLE \"b\".c", SqlDialect::Postgres).text(),
+        "(SELECT * FROM a) UNION ALL SELECT * FROM \"b\".c"
+    );
+    assert_eq!(
+        parser_input(
+            "INSERT INTO t (id) overriding System VALUE VALUES ('OVERRIDING USER VALUE')",
+            SqlDialect::Postgres
+        )
+        .text(),
+        "INSERT INTO t (id)  VALUES ('OVERRIDING USER VALUE')"
+    );
+    assert_eq!(parser_input("--sql SELECT 1", SqlDialect::MySql).text(), "");
+    assert_eq!(
+        parser_input("SELECT %d, %%(a)s", SqlDialect::MySql).text(),
         "SELECT %d, %(a)s"
     );
     assert_eq!(
         parser_input(
             "SELECT 1 FOR no key update OF a, s.b FOR KEY SHARE FOR SHARE OF \"c\" NOWAIT",
             SqlDialect::Postgres
-        ),
-        "SELECT 1 FOR UPDATE OF a FOR SHARE FOR SHARE OF \"c\" NOWAIT"
+        )
+        .text(),
+        "SELECT 1 FOR update OF a FOR SHARE FOR SHARE OF \"c\" NOWAIT"
     );
     assert_eq!(
-        parser_input("SELECT 1 FOR NO KEY UPDATE OF a, b", SqlDialect::MySql),
+        parser_input("SELECT 1 FOR NO KEY UPDATE OF a, b", SqlDialect::MySql).text(),
         "SELECT 1 FOR NO KEY UPDATE OF a, b"
     );
     assert_eq!(
         parser_input(
             "INSERT INTO t (a) VALUES (1) ON CONFLICT (a, lower(b)) WHERE c = ')DO(' OR d = 'x''DO' DO NOTHING",
             SqlDialect::Postgres
-        ),
+        )
+        .text(),
         "INSERT INTO t (a) VALUES (1) ON CONFLICT (a, lower(b)) DO NOTHING"
     );
     assert_eq!(
-        parser_input("SELECT 1 ON CONFLICT (a) WHERE b", SqlDialect::Postgres),
+        parser_input("SELECT 1 ON CONFLICT (a) WHERE b", SqlDialect::Postgres).text(),
         "SELECT 1 ON CONFLICT (a) WHERE b"
     );
     assert_eq!(
         parser_input(
             "SELECT CIDR '10.0.0.0/8', inet 'it''s', \"name\" 'x', 'oid ''1''' -- money '1'",
             SqlDialect::Postgres
-        ),
+        ).text(),
         "SELECT CAST('10.0.0.0/8' AS CIDR), CAST('it''s' AS inet), \"name\" 'x', 'oid ''1''' -- money '1'"
     );
     assert_eq!(
-        parser_input("SELECT inet '1.2.3.4'", SqlDialect::MySql),
+        parser_input("SELECT inet '1.2.3.4'", SqlDialect::MySql).text(),
         "SELECT inet '1.2.3.4'"
     );
     assert_eq!(
@@ -168,6 +198,26 @@ fn names_in(sql: &str, dialect: &str) -> Vec<String> {
         .into_iter()
         .map(|col| col.name)
         .collect()
+}
+
+#[test]
+fn test_a_query_is_parsed_once() {
+    for (sql, dialect) in [
+        ("SELECT 1", SqlDialect::Postgres),
+        (
+            "SELECT %s, 'TABLE t' FROM t FOR NO KEY UPDATE",
+            SqlDialect::Postgres,
+        ),
+        ("SELECT 7 MOD 3", SqlDialect::MySql),
+        (
+            "SELECT a FROM t WHERE a BETWEEN SYMMETRIC 1 AND 2",
+            SqlDialect::Postgres,
+        ),
+    ] {
+        PARSES.with(|n| n.set(0));
+        assert!(parse_query(sql, dialect).is_some(), "{sql}");
+        assert_eq!(PARSES.with(std::cell::Cell::get), 1, "{sql}");
+    }
 }
 
 #[test]
@@ -374,7 +424,7 @@ fn test_name_diagnostics() {
     assert_eq!(rules("SELECT frob(n) FROM a"), ["unknown-function"]);
     assert_eq!(rules("SELECT n::mood FROM a"), ["unknown-type"]);
     assert_eq!(rules("SELECT g FROM a"), ["unknown-type"]);
-    assert_eq!(rules("SELECT 1 UNION TABLE a"), ["unsupported-syntax"]);
+    assert!(rules("SELECT id, t FROM b UNION TABLE b").is_empty());
 }
 
 #[test]
@@ -393,7 +443,7 @@ fn test_name_diagnostics_stay_quiet() {
     }
     // A table function's columns are not read, which is reported, not guessed.
     assert_eq!(
-        rules("SELECT word FROM pg_get_keywords() AS k"),
+        rules("SELECT path FROM ST_Dump(NULL) AS d"),
         ["unsupported-syntax"]
     );
 }
@@ -418,4 +468,65 @@ fn sqlite_multi_word_type_names_are_joined() {
         )
     );
     assert_eq!(sqlite_type_names("CREATE TABLE t (a INT NOT NULL)"), None);
+}
+
+fn without_hints(sql: &str) -> Option<String> {
+    parse_function_without_hints(sql).map(|stmts| stmts[0].to_string())
+}
+
+fn without_hints_expected(plain: &str) -> Option<String> {
+    let stmts = parse_ddl(plain, SqlDialect::Postgres);
+    Some(stmts.expect(plain)[0].to_string())
+}
+
+#[test]
+fn planner_hints_are_dropped_where_sqlparser_stops() {
+    for (sql, expected) in [
+        (
+            "CREATE FUNCTION f(rows int, cost int) RETURNS TABLE (cost numeric) LANGUAGE sql \
+             STABLE ROWS 1 COST 0.5 NOT LEAKPROOF SUPPORT pg_catalog.f_support PARALLEL SAFE \
+             AS $_$ SELECT 1 FROM t ORDER BY a ROWS 2 $_$",
+            "CREATE FUNCTION f(rows int, cost int) RETURNS TABLE (cost numeric) LANGUAGE sql \
+             STABLE PARALLEL SAFE AS $_$ SELECT 1 FROM t ORDER BY a ROWS 2 $_$",
+        ),
+        (
+            "CREATE FUNCTION f() RETURNS SETOF public.support LANGUAGE sql ROWS 1e+06 \
+             COST /* c */ .5 SUPPORT s . \"F\" NOT -- c\n LEAKPROOF AS 'it''s'",
+            "CREATE FUNCTION f() RETURNS SETOF public.support LANGUAGE sql AS 'it''s'",
+        ),
+        (
+            "CREATE FUNCTION f(leakproof bool) RETURNS leakproof LANGUAGE sql COST +1_000 \
+             SET search_path = support, leakproof SET search_path TO rows RETURN leakproof",
+            "CREATE FUNCTION f(leakproof bool) RETURNS leakproof LANGUAGE sql \
+             SET search_path = support, leakproof SET search_path TO rows RETURN leakproof",
+        ),
+    ] {
+        assert_eq!(
+            without_hints(sql),
+            without_hints_expected(expected),
+            "{sql}"
+        );
+    }
+    assert_eq!(
+        without_hints("CREATE FUNCTION f() RETURNS int LANGUAGE sql WINDOW COST 5 AS 'SELECT 1'"),
+        None
+    );
+}
+
+#[test]
+fn planner_hints_spare_names_that_collide_with_them() {
+    let pairs: Vec<&str> = include_str!("planner_hints.sql")
+        .split(";\n")
+        .map(str::trim)
+        .filter(|sql| !sql.is_empty())
+        .collect();
+    assert_eq!(pairs.len(), 234);
+    for pair in pairs.chunks(2) {
+        assert_eq!(
+            without_hints(pair[0]),
+            without_hints_expected(pair[1]),
+            "{}",
+            pair[0]
+        );
+    }
 }

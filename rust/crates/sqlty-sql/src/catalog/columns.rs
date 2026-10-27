@@ -23,6 +23,10 @@ pub(super) struct RawColumn {
     /// An INSERT that leaves it out still gives it a value: a `DEFAULT`, `serial`,
     /// identity, generated or auto-increment column, or SQLite's rowid.
     pub(super) has_default: bool,
+    /// The `DEFAULT` an INSERT that leaves the column out writes.
+    pub(super) default: Option<Expr>,
+    /// The expression a generated column is computed from.
+    pub(super) generated: Option<Expr>,
     /// Part of the primary key, which keeps it `NOT NULL` whatever a MySQL `MODIFY` says.
     pub(super) primary_key: bool,
     /// The values a `CHECK` constraint limits the column to, when it lists them.
@@ -30,6 +34,8 @@ pub(super) struct RawColumn {
     /// Compared with a collation that may equate different strings (`NOCASE`, `_ci`):
     /// the stored values are not the ones a `CHECK` or a domain lists.
     pub(super) collated: bool,
+    /// MySQL's `INVISIBLE`: left out of `SELECT *`.
+    pub(super) invisible: bool,
 }
 
 impl RawColumn {
@@ -78,8 +84,22 @@ pub(super) fn loose_collation(name: &ObjectName) -> bool {
 }
 
 pub(super) fn raw_column(column: &ColumnDef, dialect: SqlDialect) -> RawColumn {
-    let serial = matches!(&column.data_type, DataType::Custom(name, _)
-        if parts(name, dialect).last().is_some_and(|n| matches!(n.as_str(), "serial" | "bigserial" | "smallserial" | "serial2" | "serial4" | "serial8")));
+    // `serial` is an integer with a sequence default, which SQLite only names.
+    let serial = match &column.data_type {
+        DataType::Custom(name, _) => match parts(name, dialect).last().map(String::as_str) {
+            Some("serial" | "serial4") => Some(DataType::Integer(None)),
+            Some("bigserial" | "serial8") => Some(DataType::BigInt(None)),
+            Some("smallserial" | "serial2") => Some(DataType::SmallInt(None)),
+            _ => None,
+        },
+        _ => None,
+    };
+    let ty = match (&serial, dialect) {
+        (_, SqlDialect::Sqlite) | (None, _) => column.data_type.clone(),
+        (Some(_), SqlDialect::MySql) => DataType::BigIntUnsigned(None),
+        (Some(integer), _) => integer.clone(),
+    };
+    let serial = serial.is_some();
     let not_null = serial
         || column.options.iter().any(|option| {
             matches!(
@@ -133,14 +153,36 @@ pub(super) fn raw_column(column: &ColumnDef, dialect: SqlDialect) -> RawColumn {
         name,
         ident: match column.name.quote_style {
             Some(_) => column.name.to_string(),
-            None => column.name.value.to_lowercase(),
+            None if dialect == SqlDialect::Postgres => column.name.value.to_lowercase(),
+            None => column.name.value.clone(),
         },
-        ty: column.data_type.clone(),
+        ty,
         not_null,
         has_default,
+        default: column
+            .options
+            .iter()
+            .find_map(|option| match &option.option {
+                ColumnOption::Default(expr) => Some(expr.clone()),
+                _ => None,
+            }),
+        generated: column
+            .options
+            .iter()
+            .find_map(|option| match &option.option {
+                ColumnOption::Generated {
+                    generation_expr: Some(expr),
+                    ..
+                } => Some(expr.clone()),
+                _ => None,
+            }),
         primary_key,
         values,
         collated,
+        invisible: column
+            .options
+            .iter()
+            .any(|option| matches!(option.option, ColumnOption::Invisible)),
     }
 }
 

@@ -1,0 +1,175 @@
+# PostgreSQL geometric functions.
+
+[[function]]
+id = "postgres.geometry.boolean"
+functions = ["ISCLOSED", "ISOPEN"]
+dialects = ["postgres"]
+type = "BOOLEAN"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.11 Geometric Functions and Operators, Table 9.37 Geometric Functions"
+reasoning = "The documentation gives each of these a `boolean` result."
+
+[[function]]
+id = "postgres.geometry.box"
+functions = ["BOUND_BOX", "BOX"]
+dialects = ["postgres"]
+type = "BOX"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.11 Geometric Functions and Operators, Table 9.38 Geometric Type Conversion Functions"
+reasoning = "The documentation gives each of these a `box` result."
+
+[[function]]
+id = "postgres.geometry.circle"
+function = "CIRCLE"
+dialects = ["postgres"]
+type = "CIRCLE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.11 Geometric Functions and Operators, Table 9.38 Geometric Type Conversion Functions"
+reasoning = "The documentation gives the function a `circle` result."
+
+[[function]]
+id = "postgres.geometry.double"
+functions = ["AREA", "DIAMETER", "HEIGHT", "RADIUS", "SLOPE", "WIDTH"]
+dialects = ["postgres"]
+type = "DOUBLE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.11 Geometric Functions and Operators, Table 9.37 Geometric Functions"
+reasoning = "The documentation gives each of these a `double precision` result."
+
+[[function]]
+id = "postgres.geometry.int"
+function = "NPOINTS"
+dialects = ["postgres"]
+type = "INT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.11 Geometric Functions and Operators, Table 9.37 Geometric Functions"
+reasoning = "The documentation gives the function an `integer` result."
+
+[[function]]
+id = "postgres.geometry.line"
+function = "LINE"
+dialects = ["postgres"]
+type = "LINE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.11 Geometric Functions and Operators, Table 9.38 Geometric Type Conversion Functions"
+reasoning = "The documentation gives the function a `line` result."
+
+[[function]]
+id = "postgres.geometry.lseg"
+functions = ["DIAGONAL", "LSEG"]
+dialects = ["postgres"]
+type = "LSEG"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.11 Geometric Functions and Operators, Table 9.37 Geometric Functions, Table 9.38 Geometric Type Conversion Functions"
+reasoning = "The documentation gives each of these a `lseg` result."
+
+[[function]]
+id = "postgres.geometry.path"
+functions = ["PATH", "PCLOSE", "POPEN"]
+dialects = ["postgres"]
+type = "PATH"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.11 Geometric Functions and Operators, Table 9.37 Geometric Functions, Table 9.38 Geometric Type Conversion Functions"
+reasoning = "The documentation gives each of these a `path` result."
+
+[[function]]
+id = "postgres.geometry.point"
+functions = ["CENTER", "POINT"]
+dialects = ["postgres"]
+type = "POINT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.11 Geometric Functions and Operators, Table 9.37 Geometric Functions, Table 9.38 Geometric Type Conversion Functions"
+reasoning = "The documentation gives each of these a `point` result."
+
+[[function]]
+id = "postgres.geometry.polygon"
+function = "POLYGON"
+dialects = ["postgres"]
+type = "POLYGON"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.11 Geometric Functions and Operators, Table 9.38 Geometric Type Conversion Functions"
+reasoning = "The documentation gives the function a `polygon` result."
+
+[[rule]]
+id = "postgres.geometry.distance"
+operator = "LtDashGt"
+dialects = ["postgres"]
+left = ["BOX", "CIRCLE", "LINE", "LSEG", "PATH", "POINT", "POLYGON"]
+type = "DOUBLE"
+reference = "PostgreSQL 17 documentation, 9.11, Table 9.36 Geometric Operators (geometric_type <-> geometric_type → double precision)"
+reasoning = "The distance between two shapes is a double."
+
+[[rule]]
+id = "postgres.geometry.predicates"
+operators = ["QuestionDash", "QuestionDashPipe", "QuestionHash", "QuestionDoublePipe", "AndLtPipe", "LtCaret", "LtLtPipe", "GtCaret", "PipeAndGt", "PipeGtGt", "TildeEq"]
+dialects = ["postgres"]
+type = "BOOLEAN"
+reference = "PostgreSQL 17 documentation, 9.11, Table 9.36 Geometric Operators (?#, ?-, ?-|, ?||, &<|, <<|, |>>, |&>, <^, >^, ~= → boolean)"
+reasoning = "These operators test how two shapes lie: intersecting, aligned, above, below or the same."
+
+[[rule]]
+id = "postgres.geometry.box-intersection"
+operator = "PGBitwiseXor"
+dialects = ["postgres"]
+left = ["BOX"]
+right = ["BOX"]
+type = "BOX"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.11, Table 9.36 Geometric Operators (box # box → box)"
+reasoning = "The intersection of two boxes is a box, or NULL when they do not overlap."
+
+[[rule]]
+id = "postgres.geometry.intersection-point"
+operator = "PGBitwiseXor"
+dialects = ["postgres"]
+left = ["LINE", "LSEG"]
+right = ["LINE", "LSEG"]
+type = "POINT"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.11, Table 9.36 Geometric Operators (geometric_type # geometric_type → point)"
+reasoning = "Two lines or segments meet at a point, or NULL when they do not intersect."
+
+[[rule]]
+id = "postgres.geometry.closest-point"
+operator = "DoubleHash"
+dialects = ["postgres"]
+type = "POINT"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.11, Table 9.36 Geometric Operators (geometric_type ## geometric_type → point)"
+reasoning = "The closest point to the first shape on the second is a point, or NULL for parallel segments."
+
+[[rule]]
+id = "postgres.geometry.center"
+operator = "Prefix:DoubleAt"
+dialects = ["postgres"]
+right = ["BOX", "CIRCLE", "LSEG", "POLYGON"]
+type = "POINT"
+reference = "PostgreSQL 17 documentation, 9.11, Table 9.36 Geometric Operators (@@ geometric_type → point)"
+reasoning = "The center of a shape is a point."
+
+[[rule]]
+id = "postgres.geometry.length-operator"
+operator = "Prefix:AtDashAt"
+dialects = ["postgres"]
+right = ["LSEG", "PATH"]
+type = "DOUBLE"
+reference = "PostgreSQL 17 documentation, 9.11, Table 9.36 Geometric Operators (@-@ geometric_type → double precision)"
+reasoning = "The total length of a segment or path is a double."
+
+[[rule]]
+id = "postgres.geometry.point-count"
+operator = "Prefix:Hash"
+dialects = ["postgres"]
+right = ["PATH", "POLYGON"]
+type = "INT"
+reference = "PostgreSQL 17 documentation, 9.11, Table 9.36 Geometric Operators (# geometric_type → integer)"
+reasoning = "The number of points of a path or polygon is an integer."
+
+[[rule]]
+id = "postgres.geometry.orientation"
+operators = ["Prefix:QuestionDash", "Prefix:QuestionPipe"]
+dialects = ["postgres"]
+right = ["LINE", "LSEG"]
+type = "BOOLEAN"
+reference = "PostgreSQL 17 documentation, 9.11, Table 9.36 Geometric Operators (?- line → boolean, ?| line → boolean)"
+reasoning = "Whether a line or segment is horizontal or vertical is a predicate."

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import codecs
+import contextlib
 import json
 import logging
 import os
@@ -109,6 +111,55 @@ def test_check_fix_writes_fixes_and_reports_the_rest(tmp_path, monkeypatch, caps
     assert "Fixed 1 file(s)" in out
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["check"],
+        ["check", "--statistics"],
+        ["check", "--fix"],
+        ["rewrite"],
+        ["rewrite", "--diff"],
+        ["strip"],
+    ],
+)
+def test_jobs_do_not_change_the_output(tmp_path, monkeypatch, capsys, command) -> None:
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
+    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL, name TEXT);")
+    (tmp_path / "rows.py").write_text(
+        "from typing import TypedDict\nclass User(TypedDict):\n    name: str | None\n"
+    )
+    # Enough files that a thread takes them two at a time.
+    for n in range(40):
+        (tmp_path / f"q{n}.py").write_text(
+            "from rows import User\n"
+            "from sqlty import SQL\n"
+            f'a = SQL[tuple[str]]("--sql\\nSELECT id + {n} FROM users")\n'
+            f'b = SQL[User]("--sql\\nSELECT name FROM users WHERE id = {n}")\n'
+            'c = "--sql\\nSELECT * FROM users"\n'
+            'd = f"--sql\\nSELECT {column} FROM users"\n'
+        )
+    monkeypatch.chdir(tmp_path)
+    files = {path: path.read_text() for path in tmp_path.iterdir()}
+
+    outputs = []
+    for jobs in ("1", "4"):
+        for path, text in files.items():
+            path.write_text(text)
+        outputs.append(
+            (_run([*command, "--jobs", jobs, "."], capsys), sorted(p.read_text() for p in files))
+        )
+
+    assert outputs[0] == outputs[1]
+    (_, out, err), written = outputs[0]
+    assert out or err or written != sorted(files.values())
+
+
+def test_jobs_must_be_positive(capsys) -> None:
+    code, _, err = _run(["check", "--jobs", "0", "."], capsys)
+    assert code == 2
+    assert "expected a positive integer, got '0'" in err
+
+
 def test_invalid_untyped_config_is_an_error(tmp_path) -> None:
     (tmp_path / "pyproject.toml").write_text("[tool.sqlty]\nuntyped = true\n")
     args = build_parser().parse_args(["check", str(tmp_path)])
@@ -185,21 +236,21 @@ def test_check_explain_prints_the_rules_under_a_type_diagnostic(
     )
     monkeypatch.chdir(tmp_path)
 
-    main(["check", "--explain", "q.py"])
-    out = capsys.readouterr().out.splitlines()
+    code, out, _ = _run(["check", "--explain", "q.py"], capsys)
+    out = out.splitlines()
 
+    assert code == 1
     assert out[:4] == [
-        "q.py:2: [stale-type] SQL[tuple[int, str]] should be SQL[tuple[int, int]]",
+        "q.py:2: [narrow-type] SQL[tuple[int, str]] should be SQL[tuple[int, int]]",
         "  total: type and nullability by inference rule postgres.aggregate.sum-integers",
         "    Summing small integers widens to bigint so the sum fits.",
         "    Reference: PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions "
         "(sum ( smallint ) → bigint, sum ( integer ) → bigint)",
     ]
-    assert out[4].startswith("q.py:3: [stale-type]")
-    assert out[5] == "Found 2 warning(s)"
+    assert out[4].startswith("q.py:3: [narrow-type]")
+    assert out[5] == "Found 2 error(s)"
 
-    main(["check", "q.py"])
-    assert "inference rule" not in capsys.readouterr().out
+    assert "inference rule" not in _run(["check", "q.py"], capsys)[1]
 
 
 def test_check_reads_type_overrides(tmp_path, monkeypatch, capsys) -> None:
@@ -239,15 +290,18 @@ def test_check_statistics_counts_queries(tmp_path, monkeypatch, capsys) -> None:
         "from sqlty import SQL\n"
         'typed = SQL[tuple[int]]("--sql\\nSELECT id FROM users")\n'
         'partial = "--sql\\nSELECT id, nope FROM users"\n'
-        'broken = "--sql\\nSELECT xmlelement(name foo)"\n'
+        'broken = "--sql\\nSELECT NULL::xml IS DOCUMENT"\n'
         'dynamic = f"--sql\\nSELECT {column} FROM users"\n'
         'ddl = "--sql\\nCREATE TABLE t (a INT)"\n'
+        "from typing import Annotated, LiteralString\n"
+        "def fetch[T](query: Annotated[LiteralString, SQL], form: type[T], /) -> list[T]: ...\n"
+        "fetch(QUERY, int)\n"
     )
     monkeypatch.chdir(tmp_path)
 
     main(["check", "--statistics", "."])
     assert capsys.readouterr().out.splitlines()[-1] == (
-        "Queries: 1 typed, 1 partially typed, 1 unparsed, 1 skipped (fstring-skipped: 1)"
+        "Queries: 1 typed, 1 partially typed, 1 unparsed, 2 skipped (fstring-skipped: 1, dynamic-query: 1)"
     )
 
     main(["check", "--statistics", "-q", "."])
@@ -297,6 +351,85 @@ def test_configured_functions_apply_to_their_own_project(tmp_path, monkeypatch, 
     out = capsys.readouterr().out
     assert "a/q.py" in out
     assert "b/q.py" not in out
+
+
+HELPER_CALL = '\n\nfetch_all("SELECT nope FROM t", int)\n'
+
+
+def _helper_project(root, import_path: str = "pkg.h.fetch_all") -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "pyproject.toml").write_text(
+        f'[tool.sqlty]\nschema = "schema.sql"\n\n[[tool.sqlty.functions]]\n'
+        f'import-path = "{import_path}"\nquery-param = "query"\nreturn-type-param = "form"\n'
+    )
+    (root / "schema.sql").write_text("CREATE TABLE t (id INTEGER);\n")
+
+
+@pytest.mark.parametrize(
+    ("import_path", "helper", "caller", "also_checked"),
+    [
+        ("pkg.h.fetch_all", "pkg/h.py", "use.py", []),
+        ("pkg.h.fetch_all", "src/pkg/h.py", "use.py", []),
+        ("pkg.h.fetch_all", "pkg/h.py", "use.py", ["pkg/__init__.py"]),
+        ("app.db.fetch_all", "backend/app/db.py", "backend/app/q.py", []),
+    ],
+)
+def test_configured_functions_outside_the_checked_paths_bind_positionally(
+    tmp_path, monkeypatch, capsys, import_path, helper, caller, also_checked
+) -> None:
+    """A configured helper's parameters are read from its module when only callers are checked."""
+    _helper_project(tmp_path, import_path)
+    (tmp_path / helper).parent.mkdir(parents=True)
+    (tmp_path / helper).parent.joinpath("__init__.py").write_text("VERSION = 1\n")
+    (tmp_path / helper).write_text("def fetch_all(query, form): ...\n")
+    module = import_path.rpartition(".")[0]
+    (tmp_path / caller).write_text(f"from {module} import fetch_all{HELPER_CALL}")
+    monkeypatch.chdir(tmp_path)
+
+    code, out, _ = _run(["check", caller, *also_checked], capsys)
+
+    assert code == 1
+    assert f"{caller}:3: [unknown-column]" in out
+
+
+def test_configured_functions_bind_only_where_their_module_is_found(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """A project without the helper's module does not bind calls by another project's copy."""
+    for name in ("a", "b"):
+        _helper_project(tmp_path / name)
+        (tmp_path / name / "use.py").write_text(f"from pkg.h import fetch_all{HELPER_CALL}")
+    (tmp_path / "a" / "pkg").mkdir()
+    (tmp_path / "a" / "pkg" / "__init__.py").write_text("")
+    (tmp_path / "a" / "pkg" / "h.py").write_text("def fetch_all(query, form): ...\n")
+    monkeypatch.chdir(tmp_path)
+
+    code, out, _ = _run(["check", "a/use.py", "b/use.py"], capsys)
+
+    assert code == 1
+    assert "a/use.py:3: [unknown-column]" in out
+    assert "b/use.py" not in out
+
+
+def test_configured_function_modules_are_never_imported(tmp_path, monkeypatch, capsys) -> None:
+    """The module of a configured helper outside the checked paths is read, not executed."""
+    marker = tmp_path / "imported.txt"
+    _helper_project(tmp_path)
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text(f"open({str(marker)!r}, 'w')\n")
+    (tmp_path / "pkg" / "h.py").write_text(
+        f"open({str(marker)!r}, 'w')\nraise RuntimeError\ndef fetch_all(query, form): ...\n"
+    )
+    (tmp_path / "use.py").write_text(f"from pkg.h import fetch_all{HELPER_CALL}")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    code, out, _ = _run(["check", "use.py"], capsys)
+
+    assert code == 1
+    assert "use.py:3: [unknown-column]" in out
+    assert not marker.exists()
+    assert "pkg.h" not in sys.modules
 
 
 def _run(argv: list[str], capsys) -> tuple[int, str, str]:
@@ -442,13 +575,19 @@ def test_check_exit_codes(tmp_path, monkeypatch, capsys) -> None:
     (tmp_path / "bad.py").write_text(
         'from sqlty import SQL\nq = SQL[tuple[int, int]]("--sql\\nSELECT 1::INTEGER AS n")\n'
     )
+    (tmp_path / "wide.py").write_text(
+        'from sqlty import SQL\nq = SQL[tuple[int | None]]("--sql\\nSELECT 1::INTEGER AS n")\n'
+    )
     monkeypatch.chdir(tmp_path)
 
     assert _run(["check", "ok.py"], capsys)[0] == 0
-    # stale-type is a warning by default: reported, exit 0.
+    # narrow-type is an error by default, stale-type a warning.
+    assert _run(["check", "bad.py"], capsys)[0] == 1
+    assert _run(["check", "wide.py"], capsys)[0] == 0
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty.rules]\nnarrow-type = "warn"\n')
     assert _run(["check", "bad.py"], capsys)[0] == 0
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty.rules]\nstale-type = "error"\n')
-    assert _run(["check", "bad.py"], capsys)[0] == 1
+    assert _run(["check", "wide.py"], capsys)[0] == 1
 
 
 def test_internal_error_exits_2(tmp_path, monkeypatch, capsys) -> None:
@@ -915,20 +1054,20 @@ _OVERRIDES = """[tool.sqlty]
 schema = "schema.sql"
 
 [tool.sqlty.rules]
-stale-type = "error"
+narrow-type = "error"
 
 [[tool.sqlty.overrides]]
 include = ["tests/**", "conftest.py"]
 
 [tool.sqlty.overrides.rules]
-stale-type = "ignore"
+narrow-type = "ignore"
 
 [[tool.sqlty.overrides]]
 include = ["tests/legacy"]
 exclude = ["test_skip.py"]
 
 [tool.sqlty.overrides.rules]
-stale-type = "warn"
+narrow-type = "warn"
 """
 
 
@@ -951,8 +1090,8 @@ def test_overrides_set_rule_severities_per_path(tmp_path, monkeypatch, capsys) -
     sep = os.sep
     assert code == 1
     assert out.splitlines()[:2] == [
-        f"app{sep}q.py:2: [stale-type] SQL[tuple[str]] should be SQL[tuple[int]]",
-        f"tests{sep}legacy{sep}test_old.py:2: [stale-type] SQL[tuple[str]] should be SQL[tuple[int]]",
+        f"app{sep}q.py:2: [narrow-type] SQL[tuple[str]] should be SQL[tuple[int]]",
+        f"tests{sep}legacy{sep}test_old.py:2: [narrow-type] SQL[tuple[str]] should be SQL[tuple[int]]",
     ]
     assert "Found 1 error(s), 1 warning(s)" in out
 
@@ -973,7 +1112,7 @@ def test_rule_flags_win_over_overrides(tmp_path, monkeypatch, capsys) -> None:
     _overrides_project(tmp_path)
     monkeypatch.chdir(tmp_path)
 
-    _, out, _ = _run(["check", "--warn", "stale-type", "."], capsys)
+    _, out, _ = _run(["check", "--warn", "narrow-type", "."], capsys)
 
     assert "Found 5 warning(s)" in out
 
@@ -1252,6 +1391,23 @@ def test_check_output_formats(tmp_path, monkeypatch, capsys) -> None:
     )
 
 
+def test_check_reports_in_line_order(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
+    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL);")
+    (tmp_path / "q.py").write_text(
+        "import psycopg\n"
+        "def f(conn: psycopg.Connection) -> None:\n"
+        '    conn.execute("--sql\\nSELECT id FROM users WHERE id = %s", ())\n'
+        '    conn.execute("--sql\\nSELECT nmae FROM users")\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit):
+        main(["check", "q.py"])
+    lines = [line.split(": [")[0] for line in capsys.readouterr().out.splitlines()[:-1]]
+    assert lines == ["q.py:3", "q.py:3", "q.py:4"]
+
+
 def test_json_output_stays_parseable_with_fix_and_verbose(tmp_path, monkeypatch, capsys) -> None:
     (tmp_path / "q.py").write_text('q = "--sql\\nSELECT id::INTEGER FROM users"\n')
     monkeypatch.chdir(tmp_path)
@@ -1276,10 +1432,50 @@ def test_a_file_that_is_not_utf8_is_skipped(tmp_path, monkeypatch, caplog, comma
         assert (tmp_path / "ok.py").read_text().startswith("from sqlty import SQL")
 
 
-def test_skill_prints_and_installs(tmp_path, capsys) -> None:
-    main(["skill"])
-    skill = capsys.readouterr().out
-    assert skill.startswith("---\nname: sqlty\n")
+@pytest.mark.parametrize("command", ["rewrite", "strip", "check --fix"])
+def test_a_byte_order_mark_and_crlf_line_endings_are_kept(tmp_path, monkeypatch, command) -> None:
+    source = 'q = "--sql\\nSELECT id::INTEGER FROM users"\r\nr = 1\r\n'
+    if command == "strip":
+        source = 'from sqlty import SQL\r\nq = SQL[tuple[int]]("--sql\\nSELECT id::INTEGER FROM users")\r\n'
+    elif command == "check --fix":
+        source = 'q = "--sql SELECT id::INTEGER FROM users"\r\nr = 1\r\n'
+    path = tmp_path / "q.py"
+    path.write_bytes(codecs.BOM_UTF8 + source.encode())
+    monkeypatch.chdir(tmp_path)
 
-    main(["skill", "--install", str(tmp_path / "skills")])
-    assert (tmp_path / "skills" / "sqlty" / "SKILL.md").read_text() == skill
+    with contextlib.suppress(SystemExit):
+        main([*command.split(), "q.py"])
+    written = path.read_bytes()
+    assert written != codecs.BOM_UTF8 + source.encode()
+    assert written.startswith(codecs.BOM_UTF8)
+    assert written.count(b"\r\n") == written.count(b"\n")
+    assert codecs.BOM_UTF8 not in written[3:]
+
+
+def test_skill_prints_lists_and_installs(tmp_path, capsys, caplog) -> None:
+    skills = Path(__file__).parent.parent / "skills"
+    main(["skill"])
+    assert capsys.readouterr().out == (skills / "sqlty" / "SKILL.md").read_text()
+
+    main(["skill", "--list"])
+    listed = [line.split()[0] for line in capsys.readouterr().out.splitlines()]
+    assert listed == sorted(path.name for path in skills.iterdir())
+
+    for name in listed:
+        main(["skill", name])
+        assert capsys.readouterr().out == (skills / name / "SKILL.md").read_text()
+
+    with pytest.raises(SystemExit) as exit:
+        main(["skill", "nope"])
+    assert exit.value.code == 2
+    assert "Unknown skill 'nope'" in caplog.text
+
+    main(["skill", "--install", str(tmp_path / "installed")])
+    installed = {
+        p.relative_to(tmp_path / "installed")
+        for p in (tmp_path / "installed").rglob("*")
+        if p.is_file()
+    }
+    assert installed == {p.relative_to(skills) for p in skills.rglob("*") if p.is_file()}
+    for path in installed:
+        assert (tmp_path / "installed" / path).read_text() == (skills / path).read_text()

@@ -23,7 +23,28 @@ CREATE FUNCTION touch() RETURNS void LANGUAGE sql AS 'SELECT 1';
 
 ```sql
 SELECT answer(), full_name('a'), full_name('a', 'b'), app.tags(), touch()
--- inferred: tuple[int, str, str, list[str], None]
+-- inferred: tuple[int | None, str | None, str | None, list[str] | None, None]
+```
+
+## Nullability
+
+A function may return NULL whatever its arguments, so a call is nullable. A `STRICT`
+function, also spelled `RETURNS NULL ON NULL INPUT`, returns NULL when an argument is
+NULL: a call is nullable only when an argument is.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE t (a INTEGER, b INTEGER NOT NULL);
+CREATE FUNCTION loose(x integer) RETURNS integer LANGUAGE sql AS 'SELECT x';
+CREATE FUNCTION tight(x integer) RETURNS integer STRICT LANGUAGE sql AS 'SELECT x';
+CREATE FUNCTION spelled(x integer) RETURNS integer RETURNS NULL ON NULL INPUT LANGUAGE sql AS 'SELECT x';
+CREATE FUNCTION called(x integer) RETURNS integer CALLED ON NULL INPUT LANGUAGE sql AS 'SELECT x';
+```
+
+```sql
+SELECT loose(b), tight(a), tight(b), spelled(b), called(b) FROM t
+-- inferred: tuple[int | None, int | None, int, int, int | None]
 ```
 
 ## The call decides the overload
@@ -42,7 +63,7 @@ CREATE FUNCTION g(a text) RETURNS text LANGUAGE sql AS 'SELECT 1';
 
 ```sql
 SELECT f(1), f(1, 2)
--- inferred: tuple[int, str]
+-- inferred: tuple[int | None, str | None]
 ```
 
 ```sql
@@ -66,7 +87,7 @@ CREATE OR REPLACE FUNCTION answer() RETURNS bigint LANGUAGE sql AS 'SELECT 42';
 
 ```sql
 SELECT answer()
--- inferred: tuple[int]
+-- inferred: tuple[int | None]
 ```
 
 ## DROP FUNCTION
@@ -83,7 +104,7 @@ DROP FUNCTION gone;
 
 ```sql
 SELECT f(1)
--- inferred: tuple[int]
+-- inferred: tuple[int | None]
 ```
 
 ```sql
@@ -104,7 +125,7 @@ CREATE FUNCTION share() RETURNS percent LANGUAGE sql AS 'SELECT 1';
 
 ```sql
 SELECT current_status(), share()
--- inferred: tuple[typing.Literal['new', 'done'], int]
+-- inferred: tuple[typing.Literal['new', 'done'] | None, int | None]
 ```
 
 ## Set-returning functions in FROM
@@ -160,6 +181,51 @@ SELECT u.id FROM first_user() AS u
 ```sql
 SELECT lo, hi FROM bounds(3)
 -- inferred: tuple[int | None, int | None]
+```
+
+## Planner hints
+
+`ROWS`, `COST`, `LEAKPROOF` and `SUPPORT` only guide the planner, so a function
+with them keeps its type. `pg_dump` writes them after the language.
+
+`schema.sql`:
+
+```sql
+CREATE FUNCTION accepted(ids integer[]) RETURNS SETOF integer
+    LANGUAGE sql STABLE ROWS 1 PARALLEL SAFE
+    AS $_$ SELECT x FROM unnest($1) AS x $_$;
+CREATE FUNCTION admission(ids integer[]) RETURNS TABLE(admitted boolean)
+    LANGUAGE sql STABLE COST 10 LEAKPROOF ROWS 1
+    AS $_$ SELECT EXISTS (SELECT FROM accepted($1)) $_$;
+```
+
+```sql
+SELECT * FROM accepted('{1}')
+-- inferred: tuple[int]
+```
+
+```sql
+SELECT a.admitted FROM admission('{1}') AS a
+-- inferred: tuple[bool | None]
+```
+
+## A return type named like a planner hint
+
+A type named `support` is the return type, not a `SUPPORT` hint. `pg_dump`
+writes a large estimate in exponent form.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE support (id integer NOT NULL);
+CREATE FUNCTION tickets() RETURNS SETOF support
+    LANGUAGE sql STABLE ROWS 1e+06
+    AS $_$ SELECT * FROM support $_$;
+```
+
+```sql
+SELECT id FROM tickets()
+-- inferred: tuple[int]
 ```
 
 ## A function whose definition sqlparser cannot read

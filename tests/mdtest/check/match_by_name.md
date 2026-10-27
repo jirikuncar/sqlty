@@ -157,6 +157,56 @@ class User:
 query = SQL[User]("--sql\nSELECT id, name, created_at FROM users")
 ```
 
+## Dataclass annotations that take no column
+
+A `ClassVar`, the `KW_ONLY` marker and a `field(init=False)` are not arguments
+of the constructor `class_row` calls, so no column fills them.
+
+```python
+from dataclasses import KW_ONLY, dataclass, field
+from typing import ClassVar
+from sqlty import SQL
+
+@dataclass
+class User:
+    id: int
+    table: ClassVar[str]
+    _: KW_ONLY
+    name: str
+    label: str = field(init=False, default="")
+
+# error:
+query = SQL[User]("--sql\nSELECT id, name FROM users")
+# error: [column-count-mismatch] "User has 2 fields but query returns 3 columns"
+labelled = SQL[User]("--sql\nSELECT id, name, name AS label FROM users")
+```
+
+## Dataclass fields of a base class
+
+A dataclass inherits the fields of the dataclasses it extends in the same
+module, bases first.
+
+```python
+from dataclasses import dataclass
+from sqlty import SQL
+
+@dataclass
+class Row:
+    id: int
+
+@dataclass
+class User(Row):
+    name: str
+    email: str | None = None
+
+# error:
+query = SQL[User]("--sql\nSELECT id, name FROM users")
+# error: [column-count-mismatch] "User has 2 required and 3 total fields but query returns 1 columns"
+short = SQL[User]("--sql\nSELECT name FROM users")
+# error: [column-type-mismatch] "User.id is int but query column 'id' infers str"
+typed = SQL[User]("--sql\nSELECT name AS id, name FROM users")
+```
+
 ## Pydantic fields with defaults are optional
 
 ```python
@@ -189,6 +239,58 @@ class User(BaseModel):
 query = SQL[User]("--sql\nSELECT id, name, email, created_at FROM users")
 ```
 
+## Pydantic class variables and private attributes
+
+A `ClassVar` and a private `_attribute` are not fields of a model.
+
+```python
+from typing import ClassVar
+from pydantic import BaseModel
+from sqlty import SQL
+
+class User(BaseModel):
+    id: int
+    table: ClassVar[str]
+    _cache: dict[str, int] = {}
+
+# error:
+query = SQL[User]("--sql\nSELECT id FROM users")
+# error: [typeddict-key-mismatch] "User has no field for query column '_cache'"
+cached = SQL[User]("--sql\nSELECT id, name AS _cache FROM users")
+```
+
+## Pydantic fields and config of a base model
+
+A model inherits the fields and the `extra` setting of the models it extends
+in the same module.
+
+```python
+from pydantic import BaseModel, ConfigDict
+from sqlty import SQL
+
+class Row(BaseModel):
+    id: int
+
+class User(Row):
+    name: str
+
+class Open(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: int
+
+class OpenUser(Open):
+    name: str
+
+# error:
+query = SQL[User]("--sql\nSELECT id, name FROM users")
+# error: [column-count-mismatch] "User has 2 required fields but query returns 1 columns"
+short = SQL[User]("--sql\nSELECT name FROM users")
+# error: [typeddict-key-mismatch] "User has no field for query column 'email'"
+extra = SQL[User]("--sql\nSELECT id, name, email FROM users")
+# error:
+kept = SQL[OpenUser]("--sql\nSELECT id, name, email FROM users")
+```
+
 ## Pydantic required field missing from the query
 
 ```python
@@ -218,4 +320,116 @@ class User(NamedTuple):
 # error: [column-type-mismatch] "User.id is int but query column 'name' infers str"
 # error: [column-type-mismatch] "User.name is str but query column 'id' infers int"
 query = SQL[User]("--sql\nSELECT id, name FROM users")
+```
+
+## Declared case of column names
+
+MySQL and SQLite keep the case a column is declared with: `SELECT *` returns
+`userId`, not `userid`. SQLite also names a column reference after its
+declaration; MySQL names it as written. PostgreSQL folds an unquoted name to
+lower case.
+
+### MySQL
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+select-star = "ignore"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE accounts (userId INT PRIMARY KEY, createdAt TEXT NOT NULL);
+```
+
+```sql
+SELECT * FROM accounts
+-- columns: userId: int (INT)
+-- columns: createdAt: str (TEXT)
+```
+
+```sql
+SELECT userid, accounts.CREATEDAT FROM accounts
+-- columns: userid: int (INT)
+-- columns: CREATEDAT: str (TEXT)
+```
+
+```python
+from typing import TypedDict
+from sqlty import SQL
+
+class Account(TypedDict):
+    userId: int
+    createdAt: str
+
+# error:
+q = SQL[Account]("-- sql\nSELECT * FROM accounts")
+```
+
+### SQLite
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE accounts (userId INTEGER PRIMARY KEY, createdAt TEXT NOT NULL);
+```
+
+```sql
+SELECT * FROM accounts
+-- columns: userId: int (INT)
+-- columns: createdAt: str (TEXT)
+```
+
+```sql
+SELECT userid, accounts.CREATEDAT, (createdat) FROM accounts
+-- columns: userId: int (INT)
+-- columns: createdAt: str (TEXT)
+-- columns: createdAt: str (TEXT)
+```
+
+```sql
+SELECT userid FROM (SELECT userId AS UserID FROM accounts)
+-- columns: UserID: int (INT)
+```
+
+```python
+from typing import TypedDict
+from sqlty import SQL
+
+class Account(TypedDict):
+    userId: int
+    createdAt: str
+
+# error:
+q = SQL[Account]("--sql\nSELECT userid, createdat FROM accounts")
+```
+
+### PostgreSQL
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE accounts (userId INT PRIMARY KEY, "createdAt" TEXT NOT NULL);
+```
+
+```sql
+SELECT * FROM accounts
+-- columns: userid: int (INT)
+-- columns: createdAt: str (TEXT)
 ```

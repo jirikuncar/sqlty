@@ -26,11 +26,21 @@ fn error(path: &str, text: &str) -> String {
     compile_one(path, text).expect_err("the rules must not compile")
 }
 
+/// The types of each operand predicate `field` of the generated code, from the comment
+/// beside its mask.
+fn predicates<'a>(code: &'a str, field: &str) -> Vec<&'a str> {
+    code.split(&format!("{field}: Some(0x"))
+        .skip(1)
+        .filter_map(|rest| rest.split_once(" /* ")?.1.split_once(" */)"))
+        .map(|(types, _)| types)
+        .collect()
+}
+
 #[test]
 fn a_rule_becomes_data_and_a_match_arm() {
     let code = compile_one("rules/common/a.inference.toml", VALID).unwrap();
     assert!(code.contains(r#"id: "test.long-arrow""#));
-    assert!(code.contains(r#"left: Some(&["JSON", "JSONB"])"#));
+    assert_eq!(predicates(&code, "left"), ["JSON | JSONB"]);
     assert!(code.contains("BinaryOperator::LongArrow { .. } => &BINARY_RULES[0..1]"));
 }
 
@@ -45,6 +55,35 @@ fn custom_operators_match_their_text() {
     let rule = VALID.replace(r#""LongArrow""#, r#""Custom:<<=""#);
     let code = compile_one("rules/common/a.inference.toml", &rule).unwrap();
     assert!(code.contains(r#""<<=" => &BINARY_RULES[0..1]"#));
+}
+
+#[test]
+fn prefix_operators_get_their_own_match() {
+    let rule = VALID
+        .replace(r#""LongArrow""#, r#""Prefix:DoubleAt""#)
+        .replace("left = ", "right = ")
+        .replace("nullability = \"nullable\"\n", "");
+    let code = compile_one("rules/common/a.inference.toml", &rule).unwrap();
+    assert!(code.contains("UnaryOperator::DoubleAt { .. } => &BINARY_RULES[0..1]"));
+    assert!(!code.contains("BinaryOperator::DoubleAt"));
+}
+
+#[test]
+fn prefix_operators_have_one_operand_and_its_nullability() {
+    let prefix = VALID.replace(r#""LongArrow""#, r#""Prefix:DoubleAt""#);
+    let message = error("rules/common/a.inference.toml", &prefix);
+    assert!(
+        message.ends_with("a prefix operator has no left operand"),
+        "{message}"
+    );
+    let nullable = prefix.replace("left = ", "right = ");
+    let message = error("rules/common/a.inference.toml", &nullable);
+    assert!(message.contains("drop `nullability`"), "{message}");
+    let common = nullable
+        .replace("nullability = \"nullable\"\n", "")
+        .replace(r#"type = "TEXT""#, r#"type = "@common""#);
+    let message = error("rules/common/a.inference.toml", &common);
+    assert!(message.ends_with("a SQL type or `@right`"), "{message}");
 }
 
 #[test]
@@ -206,6 +245,36 @@ fn rules_of_different_dialects_do_not_overlap() {
     assert!(compile_one("rules/dialects/a.inference.toml", &text).is_ok());
 }
 
+#[test]
+fn a_dialect_rule_repeating_a_common_one_is_an_error() {
+    let sqlite = VALID
+        .replace("operator =", "dialects = [\"sqlite\"]\noperator =")
+        .replace("test.long-arrow", "test.sqlite");
+    let files = [
+        (
+            "rules/common/a.inference.toml".to_string(),
+            VALID.to_string(),
+        ),
+        ("rules/sqlite/a.inference.toml".to_string(), sqlite.clone()),
+    ];
+    let message = compile(&files).unwrap_err();
+    assert!(
+        message.contains(
+            "rule test.sqlite (rules/sqlite/a.inference.toml) repeats rule test.long-arrow"
+        ),
+        "{message}"
+    );
+    let other = sqlite.replace("\"TEXT\"", "\"JSON\"");
+    let files = [
+        (
+            "rules/common/a.inference.toml".to_string(),
+            VALID.to_string(),
+        ),
+        ("rules/sqlite/a.inference.toml".to_string(), other),
+    ];
+    assert!(compile(&files).is_ok());
+}
+
 const FUNCTION: &str = r#"
 [[function]]
 id = "test.sum"
@@ -228,8 +297,59 @@ fn function_rules_become_their_own_table() {
         .replace("[\"@integer\"]", "[\"@known\"]")
         .replace("\"BIGINT\"", "\"@argument-as TEXT\"");
     let code = compile_one("rules/common/a.inference.toml", &known).unwrap();
-    assert!(code.contains(r#"argument: Some(&["@known"])"#));
+    assert!(code.contains("argument: Some(0x80000000000000000000000000000000 /* @known */)"));
     assert!(code.contains(r#"result: FunctionType::ArgumentAs("TEXT")"#));
+}
+
+#[test]
+fn function_rules_read_the_first_two_arguments() {
+    let second = FUNCTION
+        .replace("argument = [\"@integer\"]", "arguments = [[], [\"JSON\"]]")
+        .replace("\"BIGINT\"", "\"@argument(1)\"");
+    let code = compile_one("rules/common/a.inference.toml", &second).unwrap();
+    assert!(code.contains("argument: None,\n        second: Some(0x"));
+    assert_eq!(predicates(&code, "second"), ["JSON"]);
+    assert!(code.contains("result: FunctionType::Argument(1)"));
+    let cases = [
+        (
+            FUNCTION.replace("argument =", "arguments = [[], []]\nargument ="),
+            "give `argument` or `arguments`, not both",
+        ),
+        (
+            FUNCTION.replace("argument = [\"@integer\"]", "arguments = [[], [], []]"),
+            "`arguments` reads the first two arguments only",
+        ),
+    ];
+    for (text, expected) in cases {
+        let message = error("rules/common/a.inference.toml", &text);
+        assert!(message.contains(expected), "{message}");
+    }
+}
+
+#[test]
+fn function_rules_read_any_argument() {
+    let any = FUNCTION.replace("argument = [\"@integer\"]", "any-argument = [\"@binary\"]");
+    let code = compile_one("rules/common/a.inference.toml", &any).unwrap();
+    assert!(
+        code.contains("second: None,\n        any: Some(0x"),
+        "{code}"
+    );
+    assert_eq!(
+        predicates(&code, "any"),
+        ["BINARY | BLOB | BYTEA | VARBINARY"]
+    );
+    let unconditional = format!(
+        "{any}{}",
+        FUNCTION
+            .replace("argument = [\"@integer\"]\n", "")
+            .replace("test.", "test.all-")
+    );
+    compile_one("rules/common/a.inference.toml", &unconditional).unwrap();
+    let error = error(
+        "rules/common/a.inference.toml",
+        &format!("{unconditional}{}", any.replace("test.", "test.again-")),
+    );
+    assert!(error.contains("never applies"), "{error}");
 }
 
 #[test]
@@ -279,4 +399,77 @@ fn parameter_types_are_generated_and_checked() {
         message.contains("unknown field `right-parameter`"),
         "{message}"
     );
+}
+
+fn function(id: &str, dialect: &str, name: &str) -> String {
+    format!(
+        "[[function]]\nid = {id:?}\nfunction = {name:?}\ndialects = [{dialect:?}]\ntype = \"TEXT\"\nnullability = \"strict\"\n\
+         reference = \"Reference\"\nreasoning = \"Reason.\"\n"
+    )
+}
+
+fn extended(dialects: &str, files: &[(&str, String)]) -> Result<String, String> {
+    let mut files: Vec<(String, String)> = files
+        .iter()
+        .map(|(path, text)| (path.to_string(), text.clone()))
+        .collect();
+    files.push(("rules/dialects.toml".to_string(), dialects.to_string()));
+    compile(&files)
+}
+
+#[test]
+fn an_extending_dialect_reads_the_first_dialect_with_rules_for_a_name() {
+    let dialects = "[generic]\nextends = [\"postgres\", \"mysql\"]\nreasoning = \"Reason.\"\n";
+    let code = extended(
+        dialects,
+        &[
+            (
+                "rules/postgres/a.inference.toml",
+                function("pg.both", "postgres", "BOTH"),
+            ),
+            (
+                "rules/mysql/a.inference.toml",
+                function("my.both", "mysql", "BOTH") + &function("my.only", "mysql", "ONLY"),
+            ),
+        ],
+    )
+    .unwrap();
+    let dialects_of = |id: &str| {
+        let at = code.find(&format!("id: {id:?}")).unwrap();
+        let line = code[at..]
+            .lines()
+            .find(|l| l.contains("dialects:"))
+            .unwrap();
+        line.trim().to_string()
+    };
+    assert_eq!(
+        dialects_of("pg.both"),
+        r#"dialects: &[SqlDialect::Postgres, SqlDialect::Other("generic")],"#
+    );
+    assert_eq!(dialects_of("my.both"), "dialects: &[SqlDialect::MySql],");
+    assert_eq!(
+        dialects_of("my.only"),
+        r#"dialects: &[SqlDialect::MySql, SqlDialect::Other("generic")],"#
+    );
+    assert!(code.contains(r#"EXTENDING_DIALECTS: &[&str] = &["generic"];"#));
+}
+
+#[test]
+fn only_a_dialect_without_rules_extends_known_dialects() {
+    let message = extended(
+        "[postgres]\nextends = [\"mysql\"]\nreasoning = \"R.\"\n",
+        &[],
+    );
+    assert!(message
+        .unwrap_err()
+        .contains("[postgres] has rules of its own"));
+    let message = extended(
+        "[generic]\nextends = [\"oracle\"]\nreasoning = \"R.\"\n",
+        &[],
+    );
+    assert!(message
+        .unwrap_err()
+        .contains("extends unknown dialect \"oracle\""));
+    let message = extended("[generic]\nextends = []\nreasoning = \"R.\"\n", &[]);
+    assert!(message.unwrap_err().contains("must not be empty"));
 }

@@ -7,6 +7,9 @@ a: int | BIGINT | Unknown
 b: str | TEXT | Unknown
 c: int | INT | Unknown
 d: decimal.Decimal | DECIMAL(10, 2) | Unknown
+[unknown-column] column `i` does not exist: the query has no FROM
+[unknown-column] column `txt` does not exist: the query has no FROM
+[unknown-column] column `n` does not exist: the query has no FROM
 
 SELECT CAST(i AS DOUBLE PRECISION) AS a, CAST(txt AS VARCHAR(20)) AS b FROM t
 a: float | DOUBLE | NonNull
@@ -21,21 +24,29 @@ SELECT i::INT[] AS a, txt::TEXT[] AS b, '{}'::INT[][] AS c
 a: list[int] | ARRAY<INT> | Unknown
 b: list[str] | ARRAY<TEXT> | Unknown
 c: list[list[int]] | ARRAY<ARRAY<INT>> | NonNull
+[unknown-column] column `i` does not exist: the query has no FROM
+[unknown-column] column `txt` does not exist: the query has no FROM
 
 SELECT m::TEXT AS a, txt::mood AS b, i::positive AS c
 a: str | TEXT | Unknown
 b: typing.Literal['sad', 'ok', 'happy'] | MOOD | Unknown
 c: int | INT | Unknown
+[unknown-column] column `m` does not exist: the query has no FROM
+[unknown-column] column `txt` does not exist: the query has no FROM
+[unknown-column] column `i` does not exist: the query has no FROM
 
 SELECT i::pair AS a
 a: ? | PAIR | Unknown
+[unknown-column] column `i` does not exist: the query has no FROM
 
 SELECT i::no_such_type AS a
 a: ? | NO_SUCH_TYPE | Unknown
 [unknown-type] type `no_such_type` has no Python type
+[unknown-column] column `i` does not exist: the query has no FROM
 
 SELECT i::JSONB AS a, i::UUID AS b, i::BYTEA AS c, i::DATE AS d
 a: typing.Any | JSONB | Unknown
 b: uuid.UUID | UUID | Unknown
 c: bytes | VARBINARY | Unknown
 d: datetime.date | DATE | Unknown
+[unknown-column] column `i` does not exist: the query has no FROM

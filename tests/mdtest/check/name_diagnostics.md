@@ -61,10 +61,42 @@ e = SQL[tuple[int]]("--sql\nSELECT * FROM missing")
 f = SQL[tuple[int]]("--sql\nINSERT INTO missing (a) VALUES (1) RETURNING a")
 ```
 
+#### Names a result column's type does not need
+
+A result column's type often needs none of its names: `x IS NULL` is a boolean and
+`x::int` an integer whatever `x` is. Every name it reads is still checked, in subqueries
+too. A column of a type with no Python type is reported only where it is a result.
+
+```toml
+[tool.sqlty.rules]
+stale-rewrite = "ignore"
+```
+
+```python
+# error: [unknown-column] "column `nope` does not exist in `users`"
+a = "--sql\nSELECT EXISTS (SELECT nope FROM users) AS found"
+# error: [unknown-table] "table `missing` is not defined in the schema"
+b = "--sql\nSELECT id IN (SELECT id FROM missing) AS listed FROM users"
+# error: [unknown-column] "column `nmae` does not exist in `users`"
+c = "--sql\nSELECT nmae IS NULL AS anonymous FROM users"
+# error: [unknown-column] "column `idd` does not exist in `users`"
+d = "--sql\nSELECT idd::INTEGER FROM users"
+# error: [unknown-column] "column `nope` does not exist in `users`"
+e = "--sql\nSELECT CASE WHEN nope THEN 1 END AS flag FROM users"
+# error: [unknown-column] "column `nope` does not exist in `users`"
+f = "--sql\nSELECT count(*) FILTER (WHERE nope) AS n FROM users"
+# error: [unknown-column] "column `nope` does not exist in `users`"
+g = "--sql\nSELECT row_number() OVER (ORDER BY nope) AS n FROM users"
+h = "--sql\nSELECT shape IS NULL AS blank FROM users WHERE shape IS NOT NULL"
+```
+
 #### GROUP BY, HAVING and ORDER BY
 
 Their keys are checked like `WHERE`, except a result column named by its alias or
 position, which `GROUP BY` and `ORDER BY` accept. PostgreSQL reads no aliases in `HAVING`.
+A bare name in `ORDER BY` reads a result column first, aliased or not, so `id` in `g`
+is `t.id` even though both tables have the column. Without such a result column, in `h`,
+it reads the tables and is ambiguous.
 
 ```toml
 [tool.sqlty.rules]
@@ -82,6 +114,9 @@ c = "--sql\nSELECT name, count(*) AS n FROM users GROUP BY name HAVING count(nop
 d = "--sql\nSELECT name, count(*) AS n FROM users GROUP BY name HAVING n > 1"
 e = "--sql\nSELECT name AS label, count(*) AS n FROM users GROUP BY label ORDER BY n DESC, 1"
 f = "--sql\nSELECT u.name FROM users u ORDER BY u.id"
+g = "--sql\nSELECT t.id, t.title FROM teams t JOIN users u ON u.team_id = t.id ORDER BY title, id"
+# error: [ambiguous-column] "column reference `id` is ambiguous: `t`, `u` all have it"
+h = "--sql\nSELECT t.title FROM teams t JOIN users u ON u.team_id = t.id ORDER BY id"
 ```
 
 #### Result column aliases in SQLite and MySQL
@@ -177,6 +212,21 @@ i = "--sql\nUPDATE users u SET name = t.title FROM teams t WHERE t.id = u.team_i
 j = "--sql\nDELETE FROM orders o USING users u WHERE u.id = o.user_id AND u.name = 'x'"
 ```
 
+An `INSERT` target may have an alias, and PostgreSQL's `ON CONFLICT DO UPDATE` reads
+the target and `EXCLUDED`, the row that was not inserted.
+
+```python
+from sqlty import SQL
+
+k = SQL[tuple[str]]("--sql\nINSERT INTO users AS u (id, name) VALUES (1, 'a') ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name WHERE u.name <> EXCLUDED.name RETURNING u.name")
+# error: [unknown-column] "column `nope` does not exist in `excluded`"
+# error: [unknown-column] "column `nmae` does not exist in `users`"
+# error: [unknown-column] "column `titel` does not exist in `users`"
+l = "--sql\nINSERT INTO users (id, name) VALUES (1, 'a') ON CONFLICT (id) DO UPDATE SET titel = EXCLUDED.nope WHERE users.nmae IS NULL"
+# error: [ambiguous-column] "column reference `name` is ambiguous: `users`, `excluded` all have it"
+m = "--sql\nINSERT INTO users (id, name) VALUES (1, 'a') ON CONFLICT (id) DO UPDATE SET name = name || EXCLUDED.name"
+```
+
 A subquery over the same table as the outer query names the table once.
 
 ```python
@@ -208,10 +258,6 @@ a = SQL[tuple[int]]("--sql\nSELECT frobnicate(id) FROM users")
 b = SQL[tuple[str]]("--sql\nSELECT name::mood FROM users")
 # error: [unknown-type] "column `users.shape` has type `GEOMETRY`"
 c = SQL[tuple[str]]("--sql\nSELECT shape FROM users")
-# error: [unsupported-syntax] "a TABLE query is not typed"
-d = SQL[tuple[int]]("--sql\nSELECT 1 UNION TABLE users")
-# error: [unsupported-syntax] "`*` over a USING or NATURAL join merges columns"
-e = SQL[tuple[int, str, int, str]]("--sql\nSELECT * FROM users JOIN teams USING (id)")
 # error: [unsupported-syntax] "expression `1 OPERATOR(pg_catalog.+) 1` is not typed"
 f = SQL[tuple[object]]("--sql\nSELECT 1 OPERATOR(pg_catalog.+) 1")
 ```
@@ -228,6 +274,38 @@ def fetch_value[T](query: Annotated[LiteralString, SQL], form: type[T]) -> T | N
 a = fetch_value("SELECT nope FROM users", int)
 # error:
 b = fetch_value("SELECT id FROM users", int)
+```
+
+#### MySQL multi-table UPDATE and DELETE
+
+MySQL's `UPDATE` and `DELETE` may join tables, with `JOIN` or a comma, and read all of
+them. A `SET` target is a column of the table it names, or of the one table that has it.
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, team_id INTEGER);
+CREATE TABLE teams (id INTEGER PRIMARY KEY, title TEXT);
+CREATE TABLE orders (id INTEGER, user_id INTEGER, total NUMERIC(10, 2));
+```
+
+```python
+from sqlty import SQL
+
+a = "-- sql\nUPDATE users u JOIN teams t ON t.id = u.team_id SET t.title = u.name WHERE title IS NULL"
+b = "-- sql\nUPDATE users u, teams t SET t.title = u.name WHERE t.id = u.team_id"
+c = "-- sql\nDELETE o FROM orders o JOIN users u ON u.id = o.user_id WHERE u.name = 'x'"
+d = "-- sql\nDELETE o, u FROM orders o, users u WHERE u.id = o.user_id AND total IS NULL"
+# error: [unknown-column] "column `nmae` does not exist in `t`"
+# error: [unknown-column] "column `titel` does not exist in `u`, `t`"
+e = "-- sql\nUPDATE users u JOIN teams t ON t.id = u.team_id SET t.nmae = 'x', titel = 'y'"
+# error: [unknown-column] "column `nope` does not exist in `u`"
+f = "-- sql\nDELETE o FROM orders o JOIN users u ON u.id = o.user_id WHERE u.nope"
 ```
 
 #### Suppressed inline
@@ -298,9 +376,9 @@ d = SQL[tuple[int]]("--sql\nWITH c AS (SELECT id FROM users) SELECT c.id FROM c"
 e = SQL[tuple[int]]("--sql\nWITH RECURSIVE r(n) AS (VALUES (1) UNION ALL SELECT n + 1 FROM r WHERE n < 5) SELECT n FROM r")
 ```
 
-#### A recursive CTE over VALUES outside PostgreSQL
+#### A recursive CTE over VALUES in SQLite
 
-The anchor's `VALUES` list is untyped there, but the CTE is still a table.
+The anchor's `VALUES` list types the CTE's column.
 
 ```toml
 [tool.sqlty]
@@ -308,8 +386,10 @@ dialect = "sqlite"
 ```
 
 ```python
-# error: [unsupported-syntax] "a VALUES list is not typed"
-q = "--sql\nWITH RECURSIVE r(n) AS (VALUES (1) UNION ALL SELECT n + 1 FROM r WHERE n < 5) SELECT n FROM r"
+from sqlty import SQL
+
+# error:
+q = SQL[tuple[int]]("--sql\nWITH RECURSIVE r(n) AS (VALUES (1) UNION ALL SELECT n + 1 FROM r WHERE n < 5) SELECT n FROM r")
 ```
 
 #### Aliases
@@ -343,8 +423,9 @@ d = SQL[tuple[int]]("--sql\nSELECT id FROM (SELECT 1::INTEGER AS id) AS s")
 #### Table functions
 
 The built-in set-returning functions (`generate_series`, `unnest`, the JSON
-`*_each` and `*_array_elements` families) have known columns. The columns of
-another table function are not read, so a column taken from one is reported
+`*_each` and `*_array_elements` families, and the ones with OUT parameters such
+as `pg_get_keywords`) have known columns. The columns of another table function,
+such as PostGIS's `ST_Dump`, are not read, so a column taken from one is reported
 as unsupported, never as an unknown column or table.
 
 ```python
@@ -354,8 +435,10 @@ a = SQL[tuple[int]]("--sql\nSELECT g FROM generate_series(1, 3) AS g")
 b = SQL[tuple[int]]("--sql\nSELECT g.n FROM generate_series(1, 3) AS g(n)")
 # error:
 c = SQL[tuple[int | None]]("--sql\nSELECT n FROM unnest(ARRAY[1, 2]) AS n")
-# error: [unsupported-syntax] "column `word` may come from table function pg_get_keywords, which sqlty does not read the columns of"
-e = SQL[tuple[str]]("--sql\nSELECT k.word FROM pg_get_keywords() AS k")
+# error:
+e = SQL[tuple[str | None]]("--sql\nSELECT k.word FROM pg_get_keywords() AS k")
+# error: [unsupported-syntax] "column `path` may come from table function st_dump, which sqlty does not read the columns of"
+f = SQL[tuple[list[int]]]("--sql\nSELECT d.path FROM ST_Dump('POINT(0 0)') AS d")
 # error: [unsupported-syntax] "column `tgrelid` may come from system catalog pg_trigger, which sqlty does not read the columns of"
 d = SQL[tuple[int]]("--sql\nSELECT tgrelid FROM pg_trigger")
 ```
@@ -453,8 +536,8 @@ from sqlty import SQL
 a = SQL[tuple[int, str]]("--sql\nINSERT INTO users (id, name) VALUES (1, 'a') RETURNING id, name")
 # error:
 b = SQL[tuple[int]]("--sql\nUPDATE users u SET name = 'a' FROM teams t WHERE t.id = u.team_id RETURNING u.id")
-# error: [unsupported-syntax] "column `title` may come from tables joined to the target"
-c = SQL[tuple[str]]("--sql\nUPDATE users u SET name = 'a' FROM teams t WHERE t.id = u.team_id RETURNING t.title")
+# error:
+c = SQL[tuple[str | None]]("--sql\nUPDATE users u SET name = 'a' FROM teams t WHERE t.id = u.team_id RETURNING t.title")
 ```
 
 #### Known functions and types
@@ -465,6 +548,18 @@ from sqlty import SQL
 
 # error:
 a = SQL[tuple[datetime.datetime, datetime.date, int, str]]("--sql\nSELECT now(), current_date, count(*)::INTEGER, coalesce(name, 'x') FROM users GROUP BY name")
+```
+
+#### Named arguments
+
+In `make_interval(days => 3)`, `days` names a parameter of the function, not a column.
+The value after `=>` is still checked.
+
+```python
+a = "--sql\nDELETE FROM users WHERE now() - make_interval(days => 3) > now()"
+b = "--sql\nUPDATE users SET name = 'a' WHERE now() < now() + make_interval(secs => id)"
+# error: [unknown-column] "column `nope` does not exist in `users`"
+c = "--sql\nDELETE FROM users WHERE now() - make_interval(days => nope) > now()"
 ```
 
 ## Without a schema nothing is guessed
@@ -582,11 +677,11 @@ a = SQL[tuple[int]]("--sql\nSELECT tableoid FROM users")
 b = SQL[tuple[str, str, str, str, str]]("--sql\nSELECT ctid, xmin, xmax, cmin, cmax FROM users")
 # error: [unknown-column] "column `oid` does not exist in `users`"
 oid = SQL[tuple[int]]("--sql\nSELECT oid FROM users")
-# error: [stale-type] "SQL[tuple[int, int]] should be SQL[tuple[int | None, str]]"
+# error: [narrow-type] "SQL[tuple[int, int]] should be SQL[tuple[int | None, str]]"
 c = SQL[tuple[int, int]]("--sql\nSELECT u.id, u.ctid FROM users u")
-# error: [stale-type] "SQL[tuple[int]] should be SQL[tuple[int | None]]"
+# error: [narrow-type] "SQL[tuple[int]] should be SQL[tuple[int | None]]"
 d = SQL[tuple[int]]("--sql\nSELECT id FROM ONLY users")
-# error: [stale-type] "SQL[tuple[int]] should be SQL[tuple[int | None]]"
+# error: [narrow-type] "SQL[tuple[int]] should be SQL[tuple[int | None]]"
 e = SQL[tuple[int]]("--sql\nSELECT users.id FROM ONLY users")
 # error: [unknown-column] "column `rowid` does not exist in `users`"
 f = SQL[tuple[int]]("--sql\nSELECT rowid FROM users")
@@ -649,8 +744,8 @@ x = SQL[tuple[int, str]]("--sql\nSELECT * FROM a")
 y = SQL[tuple[int, str]]("--sql\nSELECT a.* FROM a, generate_series(1, 3) AS g(x)")
 # error: [unsupported-syntax] "view column `opaque.day` is not typed by the view's query"
 z = SQL[tuple[int, object]]("--sql\nSELECT * FROM opaque")
-# error: [unsupported-syntax] "`*` reads table function pg_get_keywords, which sqlty does not read the columns of"
-w = SQL[tuple[int, str, int]]("--sql\nSELECT * FROM a, pg_get_keywords() AS k")
+# error: [unsupported-syntax] "`*` reads table function st_dump, which sqlty does not read the columns of"
+w = SQL[tuple[int, str, int]]("--sql\nSELECT * FROM a, ST_Dump(a.g) AS k")
 ```
 
 ## Functions and types the schema defines
@@ -686,13 +781,13 @@ import typing
 from sqlty import SQL
 
 # error:
-a = SQL[tuple[int]]("--sql\nSELECT add_one(id) FROM users")
+a = SQL[tuple[int | None]]("--sql\nSELECT add_one(id) FROM users")
 # error:
 b = SQL[tuple[typing.Literal['happy', 'sad']]]("--sql\nSELECT 'happy'::mood")
 # error:
 c = SQL[tuple[int]]("--sql\nSELECT id::percent FROM users")
 # error:
-d = SQL[tuple[int]]("--sql\nSELECT user_ids()")
+d = SQL[tuple[int | None]]("--sql\nSELECT user_ids()")
 # error:
 e = SQL[tuple[object]]("--sql\nSELECT ROW('a', 'b')::address")
 # error:
@@ -732,4 +827,15 @@ a = SQL[tuple[int | None]]("--sql\nSELECT (p).x AS x FROM shapes")
 b = SQL[tuple[int | None]]("--sql\nSELECT (shapes.p).y AS y FROM shapes")
 # error: [unknown-type] "column `shapes.p` has type `POINT2`, which has no Python type"
 c = SQL[tuple[object]]("--sql\nSELECT p FROM shapes")
+```
+
+A field of a whole-row reference, `(s).id`, has the column's type. The row
+itself is not reported, like `NULL` and placeholders.
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int, int | None]]("--sql\nSELECT (s).id AS id, ((s).p).x AS x FROM shapes s")
+b = SQL[tuple[object]]("--sql\nSELECT s FROM shapes s")
 ```

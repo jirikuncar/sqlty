@@ -13,8 +13,9 @@ use super::dialect::SqlDialect;
 use super::dml::returning;
 use super::functions::positional_args;
 use super::inference::RuleRef;
+use super::input::parser_input;
 use super::operators::mysql_date_add;
-use super::preprocess::parse_first;
+use super::preprocess::parse_input;
 use super::query::Analyzer;
 use super::scope::Scope;
 use super::SchemaData;
@@ -47,13 +48,15 @@ pub fn explain_select(
     schema: Option<&SchemaData>,
 ) -> Option<Vec<ColumnRules>> {
     let dialect = SqlDialect::from_name(dialect);
-    let stmt = parse_first(sql, dialect)?;
+    let input = parser_input(sql, dialect);
+    let stmt = parse_input(input.text(), dialect)?.into_iter().next()?;
     let mut analyzer = Analyzer::new(
         schema.unwrap_or_else(|| crate::catalog::empty(dialect)),
         dialect,
     );
     let explained = Explained::default();
     analyzer.explain = Some(explained.clone());
+    analyzer.source = super::api::text_source(&input.source, dialect);
     let columns = analyzer.statement_columns(&stmt).ok()??;
     let items = match &stmt {
         Statement::Query(query) => top_projection(query),
@@ -111,10 +114,14 @@ impl Analyzer<'_> {
                     _ => None,
                 }
             }
+            Expr::UnaryOp { op, expr: inner } => match self.prefix_rule(op, inner, scope) {
+                Ok(Some((rule, _))) => Some(rule.explained()),
+                _ => None,
+            },
             Expr::Function(func) => {
                 let name = self.builtin_name(&func.name);
                 let args = positional_args(&func.args);
-                match self.function_rule(&name, args.first().copied(), scope) {
+                match self.function_rule(&name, &args, scope) {
                     Ok(Some((rule, _))) => Some(rule.explained()),
                     _ => None,
                 }

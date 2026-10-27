@@ -34,13 +34,26 @@ SELECT CAST(x AS BLOB) AS a, CAST(x AS DATETIME) AS b, CAST(x AS NVARCHAR(5)) AS
 -- columns: e: str (TEXT)
 ```
 
-## CURRENT_ROLE
+## Session functions without parentheses
+
+PostgreSQL reads these reserved words as functions without parentheses. `CURRENT_SCHEMA`
+is NULL when the search path names no existing schema, and `SYSTEM_USER` when the
+user did not authenticate, as under `trust`:
 
 ```sql
-SELECT CURRENT_USER, CURRENT_ROLE, SESSION_USER
--- columns: current_user: str (TEXT)
--- columns: current_role: str (TEXT)
--- columns: session_user: str (TEXT)
+SELECT CURRENT_USER, CURRENT_ROLE, SESSION_USER, CURRENT_SCHEMA, CURRENT_CATALOG, SYSTEM_USER
+-- columns: current_user: str (NAME)
+-- columns: current_role: str (NAME)
+-- columns: session_user: str (NAME)
+-- columns: current_schema: str | None (NAME)
+-- columns: current_catalog: str (NAME)
+-- columns: system_user: str | None (TEXT)
+-- rules: current_user: postgres.system.name / postgres.system.name
+-- rules: current_role: postgres.system.name / postgres.system.name
+-- rules: session_user: postgres.system.name / postgres.system.name
+-- rules: current_schema: postgres.system.current-schema / postgres.system.current-schema
+-- rules: current_catalog: postgres.system.name / postgres.system.name
+-- rules: system_user: postgres.system.text-nullable / postgres.system.text-nullable
 ```
 
 ## Geometric types

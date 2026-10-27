@@ -190,7 +190,13 @@ mod tests {
         );
         assert_eq!(
             show(merge(&set(&["a"]), &numbers, SqlDialect::MySql)),
-            "conflict"
+            "str | TEXT",
+            "MySQL converts the integer to a string"
+        );
+        assert_eq!(
+            show(merge(&set(&["a"]), &numbers, SqlDialect::Sqlite)),
+            "str | int | ?",
+            "SQLite returns either value"
         );
     }
 

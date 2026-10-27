@@ -1,0 +1,19 @@
+# MySQL conditional expressions.
+
+[[function]]
+id = "mysql.conditional.branches"
+function = "IF"
+dialects = ["mysql"]
+type = "@first-known(1)"
+nullability = "code"
+reference = "MySQL 8.4 Reference Manual, 14.5 Flow Control Functions"
+reasoning = "The result is one of the branches, from the second argument on, resolved to their common type. Its nullability depends on the window frame or the condition, which `analyzer/nullability.rs` reads."
+
+[[function]]
+id = "mysql.conditional.common"
+function = "IFNULL"
+dialects = ["mysql"]
+type = "@first-known"
+nullability = "all-arguments"
+reference = "MySQL 8.4 Reference Manual, 14.5 Flow Control Functions"
+reasoning = "The arguments resolve to one common type, the first known argument's. It skips NULL arguments, so it is NULL only when every argument is."

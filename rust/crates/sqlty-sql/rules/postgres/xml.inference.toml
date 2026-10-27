@@ -1,0 +1,55 @@
+# PostgreSQL XML functions.
+
+[[function]]
+id = "postgres.xml.xml-array"
+function = "XPATH"
+dialects = ["postgres"]
+type = "ARRAY<XML>"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.15.3 Processing XML"
+reasoning = "The documentation gives the function a `xml[]` result."
+
+[[function]]
+id = "postgres.xml.boolean"
+functions = ["XML_IS_WELL_FORMED", "XML_IS_WELL_FORMED_CONTENT", "XML_IS_WELL_FORMED_DOCUMENT", "XMLEXISTS", "XPATH_EXISTS"]
+dialects = ["postgres"]
+type = "BOOLEAN"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.15.2 XML Predicates; 9.15.3 Processing XML"
+reasoning = "The documentation gives each of these a `boolean` result."
+
+[[function]]
+id = "postgres.xml.xml"
+functions = ["CURSOR_TO_XML", "CURSOR_TO_XMLSCHEMA", "DATABASE_TO_XML", "DATABASE_TO_XML_AND_XMLSCHEMA", "DATABASE_TO_XMLSCHEMA", "QUERY_TO_XML", "QUERY_TO_XML_AND_XMLSCHEMA", "QUERY_TO_XMLSCHEMA", "SCHEMA_TO_XML", "SCHEMA_TO_XML_AND_XMLSCHEMA", "SCHEMA_TO_XMLSCHEMA", "TABLE_TO_XML", "TABLE_TO_XML_AND_XMLSCHEMA", "TABLE_TO_XMLSCHEMA", "XMLCOMMENT", "XMLPARSE", "XMLPI", "XMLTEXT"]
+dialects = ["postgres"]
+type = "XML"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.15.4 Mapping Tables to XML; 9.15.1 Producing XML Content; 8.13.1 Creating XML Values"
+reasoning = "The documentation gives each of these a `xml` result."
+
+[[function]]
+id = "postgres.xml.element"
+function = "XMLELEMENT"
+dialects = ["postgres"]
+type = "XML"
+nullability = "non-null"
+reference = "PostgreSQL 17 documentation, 9.15.1 Producing XML Content, 9.15.1.3 xmlelement"
+reasoning = "The element is produced whatever its content: `xmlelement(name a, NULL)` is `<a/>`."
+
+[[function]]
+id = "postgres.xml.any-argument"
+functions = ["XMLCONCAT", "XMLFOREST"]
+dialects = ["postgres"]
+type = "XML"
+nullability = "all-arguments"
+reference = "PostgreSQL 17 documentation, 9.15.1 Producing XML Content, 9.15.1.2 xmlconcat and 9.15.1.4 xmlforest"
+reasoning = "NULL arguments are left out, so the result is NULL only when every argument is."
+
+[[function]]
+id = "postgres.xml.root"
+function = "XMLROOT"
+dialects = ["postgres"]
+type = "XML"
+nullability = "leading(1)"
+reference = "PostgreSQL 17 documentation, 9.15.1 Producing XML Content, 9.15.1.6 xmlroot"
+reasoning = "The result is the first argument with its root node's properties set, NULL only when that argument is."

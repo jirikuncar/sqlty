@@ -85,3 +85,51 @@ a = SQL[Row]("--sql\nSELECT 1::INTEGER AS id")
 # error:
 b = SQL[Missing]("--sql\nSELECT 1::INTEGER AS id")
 ```
+
+## Subclasses of imported row types
+
+A row type inherits the fields of a base imported from a checked module, as of
+one defined in the file.
+
+`pkg/bases.py`:
+
+```python
+from dataclasses import dataclass
+from typing import TypedDict
+
+from pydantic import BaseModel, Field
+
+@dataclass
+class HasId:
+    id: int
+
+class HasIdDict(TypedDict):
+    id: int
+
+class HasIdModel(BaseModel):
+    id: int = Field(alias="user_id")
+```
+
+```python
+from dataclasses import dataclass
+
+from pkg.bases import HasId, HasIdDict, HasIdModel
+from sqlty import SQL
+
+@dataclass
+class User(HasId):
+    name: str
+
+class UserDict(HasIdDict):
+    name: str
+
+class UserModel(HasIdModel):
+    name: str
+
+a = SQL[User]("--sql\nSELECT 1::INTEGER AS id, 'x'::TEXT AS name")
+# error: [column-type-mismatch] "UserDict.id is int but query column 'id' infers str"
+b = SQL[UserDict]("--sql\nSELECT 'x'::TEXT AS id, 'x'::TEXT AS name")
+c = SQL[UserModel]("--sql\nSELECT 1::INTEGER AS user_id, 'x'::TEXT AS name")
+# error: [typeddict-key-mismatch] "UserModel.user_id is required but missing from query"
+d = SQL[UserModel]("--sql\nSELECT 1::INTEGER AS id, 'x'::TEXT AS name")
+```

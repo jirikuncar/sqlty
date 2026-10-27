@@ -235,6 +235,108 @@ SELECT name, placed FROM users JOIN orders ON user_id = users.id
 -- inferred: tuple[str | None, datetime.datetime | None]
 ```
 
+## Star over a USING or NATURAL join lists each merged column once
+
+A merged column is never NULL in an inner join, since NULL keys don't match. In an
+outer join it has the value of the preserved side, and of either side in a `FULL JOIN`.
+PostgreSQL lists the merged columns first, in the order of the `USING` list.
+
+`schema.sql`:
+```sql
+CREATE TABLE users (id INTEGER NOT NULL, name TEXT);
+CREATE TABLE orders (total INTEGER, id INTEGER, name TEXT NOT NULL);
+```
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+```sql
+SELECT * FROM users JOIN orders USING (name, id)
+-- columns: name: str (TEXT)
+-- columns: id: int (INT)
+-- columns: total: int | None (INT)
+```
+
+```sql
+SELECT * FROM users NATURAL RIGHT JOIN orders
+-- columns: id: int | None (INT)
+-- columns: name: str (TEXT)
+-- columns: total: int | None (INT)
+```
+
+```sql
+SELECT * FROM users FULL JOIN orders USING (id)
+-- columns: id: int | None (INT)
+-- columns: name: str | None (TEXT)
+-- columns: total: int | None (INT)
+-- columns: name: str | None (TEXT)
+```
+
+### MySQL
+
+MySQL lists the merged columns first, in the order of the first table, and reads a
+`RIGHT JOIN` as a `LEFT JOIN` with the tables swapped.
+
+`schema.sql`:
+```sql
+CREATE TABLE users (id INTEGER NOT NULL, name TEXT);
+CREATE TABLE orders (total INTEGER, id INTEGER, name TEXT NOT NULL);
+```
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+dialect = "mysql"
+```
+
+```sql
+SELECT * FROM users JOIN orders USING (name, id)
+-- columns: id: int (INT)
+-- columns: name: str (TEXT)
+-- columns: total: int | None (INT)
+```
+
+```sql
+SELECT * FROM users RIGHT JOIN orders USING (id)
+-- columns: id: int | None (INT)
+-- columns: total: int | None (INT)
+-- columns: name: str (TEXT)
+-- columns: name: str | None (TEXT)
+```
+
+### SQLite
+
+SQLite keeps the left table's columns in place and drops the right table's copies.
+
+`schema.sql`:
+```sql
+CREATE TABLE users (id INTEGER NOT NULL, name TEXT);
+CREATE TABLE orders (total INTEGER, id INTEGER, name TEXT NOT NULL);
+```
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+dialect = "sqlite"
+```
+
+```sql
+SELECT * FROM users JOIN orders USING (name, id)
+-- columns: id: int (INT)
+-- columns: name: str (TEXT)
+-- columns: total: int | None (INT)
+```
+
+```sql
+SELECT * FROM users LEFT JOIN orders USING (id)
+-- columns: id: int (INT)
+-- columns: name: str | None (TEXT)
+-- columns: total: int | None (INT)
+-- columns: name: str | None (TEXT)
+```
+
 ## Star over a table missing from the schema has no row type
 
 The columns of `*` are unknown, so no type is inferred and nothing is guessed.

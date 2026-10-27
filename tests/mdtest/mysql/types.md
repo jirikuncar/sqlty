@@ -67,6 +67,40 @@ SELECT * FROM items
 -- columns: d: decimal.Decimal | None (UDECIMAL(10, 2))
 ```
 
+## Unions of signed and unsigned integers
+
+Branches of one signedness keep it, at the wider width. A signed and an unsigned
+integer widen to a signed type that holds both, and past `BIGINT UNSIGNED` that is a
+`DECIMAL`.
+
+`schema.sql`:
+```sql
+CREATE TABLE counts (
+    ub BIGINT UNSIGNED NOT NULL,
+    b BIGINT NOT NULL,
+    ui INT UNSIGNED NOT NULL,
+    i INT NOT NULL,
+    ut TINYINT UNSIGNED NOT NULL,
+    t TINYINT NOT NULL
+);
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT ub AS a, ui AS b, ui AS c, ut AS d, ut AS e FROM counts
+UNION ALL SELECT i, ui, i, t, i FROM counts
+-- columns: a: decimal.Decimal (DECIMAL)
+-- columns: b: int (UINT)
+-- columns: c: int (BIGINT)
+-- columns: d: int (SMALLINT)
+-- columns: e: int (INT)
+```
+
 ## Temporal and other columns
 
 MySQL `TIMESTAMP` is stored in UTC, so it reads as `TIMESTAMPTZ`. Blob and text
@@ -137,7 +171,7 @@ schema = "schema.sql"
 SELECT length, TIMEDIFF(NOW(), NOW()) AS d, CAST('10:00' AS TIME) AS c FROM shifts
 -- columns: length: datetime.timedelta (TIME)
 -- columns: d: datetime.timedelta (TIME)
--- columns: c: datetime.timedelta (TIME)
+-- columns: c: datetime.timedelta | None (TIME)
 ```
 
 ## Unsigned NUMERIC and FIXED are rejected
@@ -292,6 +326,60 @@ SELECT SUM(a) AS a, SUM(b) AS b, SUM(c) AS c, SUM(d) AS d, SUM(e) AS e, SUM(f) A
 -- columns: f: float | None (DOUBLE)
 ```
 
+## Arithmetic converts operands to numbers
+
+MySQL computes with each operand converted to a number: unsigned, `YEAR`, `BIT` and
+`BOOLEAN` values become integers, strings become doubles. `SUM`, `AVG`, `ABS`, `ROUND`
+and the bit operators convert them the same way. `SUM` of dates is a `DECIMAL`, and a
+negated date a `DOUBLE`; other arithmetic on dates stays untyped (see below).
+
+`schema.sql`:
+
+```sql
+CREATE TABLE t (
+    ui INT UNSIGNED NOT NULL, yr YEAR NOT NULL, bt BIT(8) NOT NULL, bo BOOLEAN NOT NULL,
+    dt DATE NOT NULL, tx TEXT NOT NULL, n DECIMAL(10, 2) NOT NULL
+);
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT ui + 1.5 AS a, ui / 2 AS b, yr + 1 AS c, bt % 3 AS d, bo * 2 AS e, tx * 2 AS f, n - ui AS g FROM t
+-- columns: a: decimal.Decimal (DECIMAL)
+-- columns: b: decimal.Decimal (DECIMAL)
+-- columns: c: int (UBIGINT)
+-- columns: d: int (BIGINT)
+-- columns: e: int (BIGINT)
+-- columns: f: float (DOUBLE)
+-- columns: g: decimal.Decimal (DECIMAL)
+```
+
+```sql
+SELECT -bt AS a, -dt AS b, ABS(bo) AS c, ABS(tx) AS d, ROUND(ui) AS e, TRUNCATE(yr, 0) AS f, bt & 1 AS g, ~yr AS h FROM t
+-- columns: a: int (BIGINT)
+-- columns: b: float (DOUBLE)
+-- columns: c: int (BIGINT)
+-- columns: d: float (DOUBLE)
+-- columns: e: int (BIGINT)
+-- columns: f: int (BIGINT)
+-- columns: g: int (UBIGINT)
+-- columns: h: int (UBIGINT)
+```
+
+```sql
+SELECT SUM(bt) AS a, SUM(bo) AS b, SUM(dt) AS c, SUM(tx) AS d, AVG(tx) AS e FROM t
+-- columns: a: decimal.Decimal | None (DECIMAL)
+-- columns: b: decimal.Decimal | None (DECIMAL)
+-- columns: c: decimal.Decimal | None (DECIMAL)
+-- columns: d: float | None (DOUBLE)
+-- columns: e: float | None (DOUBLE)
+```
+
 ## Date arithmetic
 
 `date ± INTERVAL n unit` is a `DATE` for day units and coarser, and a
@@ -311,10 +399,226 @@ schema = "schema.sql"
 
 ```sql
 SELECT d + INTERVAL 1 DAY AS a, INTERVAL 1 MONTH + d AS b, d - INTERVAL 1 HOUR AS c, ts + INTERVAL 1 DAY AS e, d + n AS f, d - d AS g FROM events
--- columns: a: datetime.date (DATE)
--- columns: b: datetime.date (DATE)
--- columns: c: datetime.datetime (DATETIME)
--- columns: e: datetime.datetime (DATETIME)
+-- columns: a: datetime.date | None (DATE)
+-- columns: b: datetime.date | None (DATE)
+-- columns: c: datetime.datetime | None (DATETIME)
+-- columns: e: datetime.datetime | None (DATETIME)
 -- columns: f: None (None)
 -- columns: g: None (None)
+```
+
+## VALUES lists
+
+A `VALUES` list has the columns `column_0`, `column_1`, ..., each typed by the common
+type of its rows and nullable when a row's value is.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE t (id INT NOT NULL, name VARCHAR(10));
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT * FROM (VALUES ROW(1, 'a', 1.5), ROW(2, NULL, 2)) AS v
+-- columns: column_0: typing.Literal[1, 2] (None)
+-- columns: column_1: typing.Literal['a'] | None (None)
+-- columns: column_2: decimal.Decimal (DECIMAL)
+```
+
+```sql
+SELECT v.a, v.b FROM (VALUES ROW((SELECT max(id) FROM t), (SELECT name FROM t LIMIT 1))) AS v(a, b)
+-- columns: a: int | None (INT)
+-- columns: b: str | None (VARCHAR(10))
+```
+
+## Partitioned tables
+
+The `PARTITION BY` clause after the column list is read past, with or without the
+`/*!50100 ... */` that `SHOW CREATE TABLE` and `mysqldump` wrap it in.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE events (
+    id INT NOT NULL,
+    kind VARCHAR(10) NOT NULL CHECK (kind IN ('a', 'b')),
+    day DATE NOT NULL
+) ENGINE=InnoDB
+PARTITION BY RANGE COLUMNS(day) (
+    PARTITION p0 VALUES LESS THAN ('2025-01-01'),
+    PARTITION p1 VALUES LESS THAN MAXVALUE
+);
+CREATE TABLE hits (id INT NOT NULL) PARTITION BY HASH(id) PARTITIONS 4;
+CREATE TABLE dumped (id INT NOT NULL)
+/*!50100 PARTITION BY KEY (id) PARTITIONS 2 */;
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT e.id, e.kind, e.day, h.id, d.id FROM events e, hits h, dumped d
+-- columns: id: int (INT)
+-- columns: kind: str (VARCHAR(10))
+-- columns: day: datetime.date (DATE)
+-- columns: id: int (INT)
+-- columns: id: int (INT)
+```
+
+## A table copied with LIKE
+
+`CREATE TABLE ... LIKE`, with or without parentheses, copies the columns of the
+other table, `NOT NULL` included.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INT NOT NULL, name TEXT NOT NULL, note TEXT);
+CREATE TABLE users_archive LIKE users;
+CREATE TABLE IF NOT EXISTS `users_copy` (LIKE `users`);
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT * FROM users_archive
+-- columns: id: int (INT)
+-- columns: name: str (TEXT)
+-- columns: note: str | None (TEXT)
+```
+
+```sql
+SELECT * FROM users_copy
+-- expanded: SELECT id, name, note FROM users_copy
+```
+
+## CREATE TABLE ... AS SELECT
+
+A table created from a query has the query's column names and types, and keeps
+`NOT NULL` where the query cannot return NULL.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INT NOT NULL, name TEXT NOT NULL, note TEXT);
+CREATE TABLE users_backup AS SELECT id, name, note, 'v1' AS version FROM users;
+CREATE TABLE user_ids SELECT id FROM users;
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT * FROM users_backup
+-- columns: id: int (INT)
+-- columns: name: str (TEXT)
+-- columns: note: str | None (TEXT)
+-- columns: version: str (TEXT)
+```
+
+```sql
+SELECT * FROM user_ids
+-- columns: id: int (INT)
+```
+
+## A mysqldump schema
+
+`mysqldump --no-data` wraps views and newer options in executable comments
+(`/*!50001 ... */`), which MySQL runs and other servers skip. They are read as
+MySQL reads them: a view is first created as a placeholder of literal columns,
+then replaced with its query, after its `ALGORITHM`, `DEFINER` and `SQL SECURITY`
+options and with its `WITH CHECK OPTION`.
+
+`schema.sql`:
+
+```sql
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+DROP TABLE IF EXISTS `users`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `users` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `name` varchar(100) NOT NULL,
+  `home` point NOT NULL /*!80003 SRID 4326 */,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+DROP TABLE IF EXISTS `named`;
+/*!50001 DROP VIEW IF EXISTS `named`*/;
+/*!50001 CREATE VIEW `named` AS SELECT
+ 1 AS `id`,
+ 1 AS `name`*/;
+/*!50001 DROP VIEW IF EXISTS `named`*/;
+/*!50001 CREATE ALGORITHM=UNDEFINED */
+/*!50013 DEFINER=`root`@`localhost` SQL SECURITY DEFINER */
+/*!50001 VIEW `named` AS select `users`.`id` AS `id`,`users`.`name` AS `name` from `users` */
+/*!50002 WITH CASCADED CHECK OPTION */;
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT n.id, n.name, u.home FROM named n JOIN users u ON u.id = n.id
+-- columns: id: int (UBIGINT)
+-- columns: name: str (VARCHAR(100))
+-- columns: home: bytes (POINT)
+```
+
+## Invisible columns
+
+An `INVISIBLE` column is read by name only: `SELECT *` and a view over it leave it out.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE accounts (
+    id INT NOT NULL,
+    secret VARCHAR(64) NOT NULL INVISIBLE,
+    note TEXT /*!80023 INVISIBLE */,
+    name TEXT NOT NULL
+);
+CREATE VIEW everything AS SELECT * FROM accounts;
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT * FROM accounts
+-- expanded: SELECT id, name FROM accounts
+```
+
+```sql
+SELECT * FROM everything
+-- columns: id: int (INT)
+-- columns: name: str (TEXT)
+```
+
+```sql
+SELECT a.*, a.secret FROM accounts a
+-- columns: id: int (INT)
+-- columns: name: str (TEXT)
+-- columns: secret: str (VARCHAR(64))
 ```

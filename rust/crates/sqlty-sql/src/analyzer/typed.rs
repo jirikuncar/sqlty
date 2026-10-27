@@ -1,7 +1,10 @@
 //! The type of an expression: its Python type and its SQL type.
 
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
+
+use rustc_hash::FxHashMap;
 
 use super::{python_type, SqlDialect};
 use crate::values::{self, Value};
@@ -73,13 +76,42 @@ impl Typed {
         }
     }
 
-    /// The type of a column of SQL type `sql`: the Python type is the one it maps to.
+    /// The type of a column of SQL type `sql`: the Python type is the one it maps to. The
+    /// mapping is kept per thread, so a type seen before costs two reference counts.
     pub(super) fn of_sql(sql: &str, dialect: SqlDialect) -> Self {
-        Typed {
-            python: python_type(sql, dialect).map(Rc::from),
-            sql: Some(Rc::from(sql)),
-            values: None,
+        type Mapped = FxHashMap<Rc<str>, Option<Rc<str>>>;
+        thread_local! {
+            static MAPPED: RefCell<Vec<(SqlDialect, Mapped)>> = const { RefCell::new(Vec::new()) };
         }
+        MAPPED.with_borrow_mut(|mapped| {
+            let at = match mapped.iter().position(|(seen, _)| *seen == dialect) {
+                Some(at) => at,
+                None => {
+                    mapped.push((dialect, Mapped::default()));
+                    mapped.len() - 1
+                }
+            };
+            let types = &mut mapped[at].1;
+            if let Some((sql, python)) = types.get_key_value(sql) {
+                return Typed {
+                    python: python.clone(),
+                    sql: Some(Rc::clone(sql)),
+                    values: None,
+                };
+            }
+            // Casts may spell many sizes (`VARCHAR(n)`); start over rather than grow without end.
+            if types.len() >= 4096 {
+                types.clear();
+            }
+            let python: Option<Rc<str>> = python_type(sql, dialect).map(Rc::from);
+            let sql: Rc<str> = Rc::from(sql);
+            types.insert(Rc::clone(&sql), python.clone());
+            Typed {
+                python,
+                sql: Some(sql),
+                values: None,
+            }
+        })
     }
 
     pub(super) fn python(&self) -> Option<&str> {

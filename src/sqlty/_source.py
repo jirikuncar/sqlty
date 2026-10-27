@@ -150,6 +150,7 @@ class _Scan:
         self.imports: list[tuple[int, ast.Import | ast.ImportFrom]] = []
         self.classes: list[tuple[int, ast.ClassDef]] = []
         self.calls: list[tuple[int, ast.Call]] = []
+        self.templates: list[tuple[int, ast.TemplateStr]] = []
         self.bindings = bindings
         self.scopes: list[ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | ast.ClassDef] = []
         self.stores: dict[str, list[ast.Name]] = {}
@@ -196,6 +197,9 @@ class _Scan:
                 stack = (*stack, node)
             elif isinstance(node, ast.Call):
                 self.calls.append((depth, node))
+                self.stacks[id(node)] = stack
+            elif isinstance(node, ast.TemplateStr):
+                self.templates.append((depth, node))
                 self.stacks[id(node)] = stack
             elif isinstance(node, (ast.Assign, ast.AnnAssign)):
                 self._typed(node)
@@ -437,6 +441,14 @@ class ParsedSource:
         return [n for n in body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
 
     @functools.cached_property
+    def templates(self) -> list[tuple[ast.TemplateStr, _Stack]]:
+        """Every t-string, with the functions and classes enclosing it, outermost first."""
+        scan = self._scan
+        if scan.deferred:
+            scan.expand(lambda stack: True)
+        return [(node, scan.stacks.get(id(node), ())) for node in _breadth_first(scan.templates)]
+
+    @functools.cached_property
     def methods(self) -> list[tuple[ast.ClassDef, ast.FunctionDef | ast.AsyncFunctionDef]]:
         """Functions defined directly in a class body, with their class."""
         return [
@@ -599,10 +611,10 @@ class ParsedSource:
         Every Rust rule starts from a ``--sql`` / ``-- sql`` marker at the start of a
         string (``mysql-sql-marker``, ``stale-rewrite``, ``inline-sql-comment``,
         ``unparsed-query``, ``fstring-skipped``, ``tstring-skipped``,
-        ``unchecked-query``, ``select-star*``, ``stale-type``, ``untyped-query``); the
-        wrapper call (``SQL[``, spelled as ``import_style`` says) and ``UNTYPED`` count
-        too, which also covers a marker split over concatenated literals in a call. A marker
-        split over implicit concatenation anywhere else (``"--" "sql\\n..."``) matches
+        ``unchecked-query``, ``select-star*``, ``stale-type``, ``narrow-type``,
+        ``untyped-query``); the wrapper call (``SQL[``, spelled as ``import_style`` says)
+        and ``UNTYPED`` count too, which also covers a marker split over concatenated
+        literals in a call. A marker split over implicit concatenation anywhere else (``"--" "sql\\n..."``) matches
         with quotes, prefixes, whitespace and comments allowed between its characters.
         An ``import_style`` the engine rejects always needs the call, so that it raises.
 

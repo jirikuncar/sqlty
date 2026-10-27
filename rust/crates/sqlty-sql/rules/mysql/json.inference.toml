@@ -1,4 +1,4 @@
-# MySQL's JSON accessors.
+# MySQL's JSON accessors and functions.
 
 [[rule]]
 id = "mysql.json.arrow-json"
@@ -19,3 +19,84 @@ type = "JSON"
 nullability = "nullable"
 reference = "MySQL 8.4 Reference Manual, 14.17.3 Functions That Search JSON Values (column->path, the same as JSON_EXTRACT(column, path))"
 reasoning = "`->` extracts a JSON value; a path that matches nothing gives NULL."
+
+[[function]]
+id = "mysql.json.bigint"
+functions = ["JSON_LENGTH", "JSON_DEPTH", "JSON_VALID", "JSON_CONTAINS", "JSON_CONTAINS_PATH", "JSON_OVERLAPS", "JSON_STORAGE_SIZE", "JSON_STORAGE_FREE"]
+dialects = ["mysql"]
+type = "BIGINT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.17.5 Functions That Return JSON Value Attributes; 14.17.3 Functions That Search JSON Values; 14.17.8 JSON Utility Functions"
+reasoning = "The manual describes each of these as returning an integer."
+
+[[function]]
+id = "mysql.json.int"
+function = "JSON_SCHEMA_VALID"
+dialects = ["mysql"]
+type = "INT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.17.7 JSON Schema Validation Functions"
+reasoning = "The manual describes the function as returning an integer."
+
+[[function]]
+id = "mysql.json.json"
+functions = ["JSON_SET", "JSON_INSERT", "JSON_REPLACE", "JSON_REMOVE", "JSON_MERGE_PATCH", "JSON_MERGE_PRESERVE", "JSON_KEYS", "JSON_ARRAY_APPEND", "JSON_ARRAY_INSERT"]
+dialects = ["mysql"]
+type = "JSON"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.17.2 Functions That Create JSON Values; 14.17.3 Functions That Search JSON Values; 14.17.4 Functions That Modify JSON Values"
+reasoning = "The manual describes each of these as returning a JSON value."
+
+[[function]]
+id = "mysql.json.json-non-null"
+functions = ["JSON_OBJECT", "JSON_ARRAY"]
+dialects = ["mysql"]
+type = "JSON"
+nullability = "non-null"
+reference = "MySQL 8.4 Reference Manual, 14.17.2 Functions That Create JSON Values; 14.17.3 Functions That Search JSON Values; 14.17.4 Functions That Modify JSON Values"
+reasoning = "The manual describes each of these as returning a JSON value. It never returns NULL, even for NULL arguments."
+
+[[function]]
+id = "mysql.json.json-nullable"
+functions = ["JSON_EXTRACT", "JSON_SEARCH"]
+dialects = ["mysql"]
+type = "JSON"
+nullability = "nullable"
+reference = "MySQL 8.4 Reference Manual, 14.17.2 Functions That Create JSON Values; 14.17.3 Functions That Search JSON Values; 14.17.4 Functions That Modify JSON Values"
+reasoning = "The manual describes each of these as returning a JSON value. It is NULL for some non-null arguments too: no match, an index out of range or an empty array."
+
+[[function]]
+id = "mysql.json.text"
+functions = ["JSON_UNQUOTE", "JSON_TYPE", "JSON_QUOTE", "JSON_PRETTY"]
+dialects = ["mysql"]
+type = "TEXT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.17.4 Functions That Modify JSON Values; 14.17.5 Functions That Return JSON Value Attributes; 14.17.2 Functions That Create JSON Values; 14.17.8 JSON Utility Functions; 14.17.3 Functions That Search JSON Values"
+reasoning = "The manual describes each of these as returning a string."
+
+[[function]]
+id = "mysql.json.text-nullable"
+function = "JSON_VALUE"
+dialects = ["mysql"]
+type = "TEXT"
+nullability = "nullable"
+reference = "MySQL 8.4 Reference Manual, 14.17.4 Functions That Modify JSON Values; 14.17.5 Functions That Return JSON Value Attributes; 14.17.2 Functions That Create JSON Values; 14.17.8 JSON Utility Functions; 14.17.3 Functions That Search JSON Values"
+reasoning = "The manual describes each of these as returning a string. It is NULL for some non-null arguments too: no match, an index out of range or an empty array."
+
+[[function]]
+id = "mysql.json.merge"
+function = "JSON_MERGE"
+dialects = ["mysql"]
+type = "JSON"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.17.4 Functions That Modify JSON Values (JSON_MERGE(): Deprecated synonym for JSON_MERGE_PRESERVE())"
+reasoning = "The function is JSON_MERGE_PRESERVE, which returns NULL only for a NULL argument."
+
+[[function]]
+id = "mysql.json.validation-report"
+function = "JSON_SCHEMA_VALIDATION_REPORT"
+dialects = ["mysql"]
+type = "JSON"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.17.7 JSON Schema Validation Functions"
+reasoning = "The function returns a JSON report of the validation, and NULL for a NULL argument."

@@ -26,7 +26,9 @@ error that lists the valid ones: a typo such as `postgress` would otherwise read
 queries as generic SQL. Type names are
 spelled the PostgreSQL way, so `INT64` expands to `BIGINT` and `NUMBER` to
 `DECIMAL`. PostgreSQL, MySQL and SQLite are specified by the test suite; the
-others work on a best-effort basis. The `--dialect` CLI flag accepts the
+others work on a best-effort basis. `generic` types functions and operators as
+PostgreSQL does, and the ones PostgreSQL lacks, such as `IF` and `IIF`, as MySQL
+or SQLite does. The `--dialect` CLI flag accepts the
 first three; set others with `dialect` in `pyproject.toml`.
 
 ## PostgreSQL type resolution
@@ -70,7 +72,7 @@ names the documentation it follows and why. `sqlty check --explain` prints the
 rule behind each column under a type diagnostic:
 
 ```text
-q.py:2: [stale-type] SQL[tuple[int, str]] should be SQL[tuple[int | None, str | None]]
+q.py:2: [narrow-type] SQL[tuple[int, str]] should be SQL[tuple[int | None, str | None]]
   total: type and nullability by inference rule postgres.aggregate.sum-integers
     Summing small integers widens to bigint so the sum fits.
     Reference: PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (sum ( smallint ) → bigint, sum ( integer ) → bigint)
@@ -108,8 +110,8 @@ dialect; an unknown function leaves its column untyped (see
 
 The functions common to every dialect (`COUNT`, `SUM`, `AVG`, `MIN`, `MAX`,
 `COALESCE`, `LENGTH`, `UPPER`, `LOWER`, `SUBSTR`, `REPLACE`, ...) are typed
-everywhere. The full lists are in `rust/crates/sqlty-sql/src/analyzer/dialect_functions.rs`;
-`tests/mdtest/mysql/functions.md` and `tests/mdtest/sqlite/functions.md` show
+everywhere. Every function's rule is in `rust/crates/sqlty-sql/rules/`, one file per
+dialect and topic; `tests/mdtest/mysql/functions.md` and `tests/mdtest/sqlite/functions.md` show
 each group.
 
 ## Placeholders

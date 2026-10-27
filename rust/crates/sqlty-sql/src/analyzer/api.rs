@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use sqlparser::ast::Statement;
 use sqlparser::parser::Parser;
 
 use crate::diagnostics::{Diagnostics, NameDiagnostic};
@@ -9,9 +10,11 @@ use crate::diagnostics::{Diagnostics, NameDiagnostic};
 use super::dialect::SqlDialect;
 use super::dml::statement_returns_rows;
 use super::expr::from_sql_type;
+use super::input::{parser_input, Input};
 use super::names::alias_name;
-use super::preprocess::{parse_first, parse_query, parser_input};
+use super::preprocess::{parse_input, parse_query, too_deep, MAX_DEPTH};
 use super::query::{Analyzer, Column};
+use super::star_expand::statement_stars;
 use super::{Inferred, Schema, SchemaData, SkippedObject, ANY};
 
 /// Load schema from CREATE TABLE, VIEW, DOMAIN and TYPE ... AS ENUM statements; in
@@ -142,38 +145,96 @@ pub fn analyze_with_diagnostics(
     dialect: &str,
     schema: Option<&SchemaData>,
 ) -> (Inferred<Option<Vec<Column>>>, Vec<NameDiagnostic>) {
-    let dialect = SqlDialect::from_name(dialect);
-    let Some(stmt) = parse_first(sql, dialect) else {
-        return (Ok(None), Vec::new());
-    };
-    let mut analyzer = Analyzer::new(
-        schema.unwrap_or_else(|| crate::catalog::empty(dialect)),
-        dialect,
-    );
-    analyzer.diag = Diagnostics::collecting();
-    let columns = analyzer.statement_columns(&stmt);
-    (columns, analyzer.diag.items())
+    parse(sql, dialect).analyze_with_diagnostics(schema)
 }
 
 /// Why `sql` does not parse in `dialect`, as sqlparser words it; `None` when it parses
 /// (empty SQL included).
 pub fn parse_error(sql: &str, dialect: &str) -> Option<String> {
+    parse(sql, dialect).error()
+}
+
+/// Parse a query once to ask several things of it, where [`parse_error`],
+/// [`analyze_with_diagnostics`] and [`result_stars`](super::result_stars) would each
+/// parse it again.
+///
+/// ```
+/// use sqlty_sql::analyzer::parse;
+///
+/// let parsed = parse("SELECT * FROM t", "postgres");
+/// assert_eq!(parsed.error(), None);
+/// assert_eq!(parsed.result_stars(), Some(vec!["SELECT *".to_string()]));
+/// assert!(parse("SELEC 1", "postgres").error().is_some());
+/// ```
+pub fn parse(sql: &str, dialect: &str) -> Parsed {
     let dialect = SqlDialect::from_name(dialect);
-    if parse_query(sql, dialect).is_some() {
-        return None;
+    let input = parser_input(sql, dialect).into_owned();
+    let stmts = parse_input(input.text(), dialect);
+    Parsed {
+        input,
+        stmts,
+        dialect,
     }
-    let input = parser_input(sql, dialect);
-    Some(
-        match Parser::parse_sql(dialect.parser_dialect().as_ref(), &input) {
-            Ok(_) => "unsupported in this dialect".to_string(),
-            Err(err) => {
-                let text = err.to_string();
-                text.strip_prefix("sql parser error: ")
-                    .unwrap_or(&text)
-                    .to_string()
-            }
-        },
-    )
+}
+
+/// A query as [`parse`] read it.
+pub struct Parsed {
+    /// The query sqlparser read, from [`parser_input`].
+    input: Input<'static>,
+    stmts: Option<Vec<Statement>>,
+    dialect: SqlDialect,
+}
+
+impl Parsed {
+    /// [`parse_error`] of the query.
+    pub fn error(&self) -> Option<String> {
+        if self.stmts.is_some() {
+            return None;
+        }
+        Some(
+            match Parser::parse_sql(self.dialect.parser_dialect().as_ref(), &self.input.source) {
+                Ok(stmts) if too_deep(&stmts) => {
+                    format!("expressions nest more than {MAX_DEPTH} levels deep")
+                }
+                Ok(_) => "unsupported in this dialect".to_string(),
+                Err(err) => {
+                    let text = err.to_string();
+                    text.strip_prefix("sql parser error: ")
+                        .unwrap_or(&text)
+                        .to_string()
+                }
+            },
+        )
+    }
+
+    /// [`analyze_with_diagnostics`] of the query.
+    pub fn analyze_with_diagnostics(
+        &self,
+        schema: Option<&SchemaData>,
+    ) -> (Inferred<Option<Vec<Column>>>, Vec<NameDiagnostic>) {
+        let Some(stmt) = self.first() else {
+            return (Ok(None), Vec::new());
+        };
+        let mut analyzer = Analyzer::new(
+            schema.unwrap_or_else(|| crate::catalog::empty(self.dialect)),
+            self.dialect,
+        );
+        analyzer.diag = Diagnostics::collecting();
+        analyzer.source = text_source(&self.input.source, self.dialect);
+        let columns = analyzer.statement_columns(stmt);
+        (columns, analyzer.diag.items())
+    }
+
+    /// [`result_stars`](super::result_stars) of the query.
+    pub fn result_stars(&self) -> Option<Vec<String>> {
+        let mut stars = Vec::new();
+        statement_stars(self.first()?, &mut stars);
+        Some(stars)
+    }
+
+    fn first(&self) -> Option<&Statement> {
+        self.stmts.as_ref()?.first()
+    }
 }
 
 /// Whether `sql` yields rows: a query, DML with RETURNING, or unparseable SQL.
@@ -184,4 +245,10 @@ pub fn returns_rows(sql: &str, dialect: &str) -> bool {
         None => true,
         Some(stmts) => stmts.first().is_some_and(statement_returns_rows),
     }
+}
+
+/// The SQL as parsed, `input` from [`parser_input`], in the dialects that name a column by
+/// its expression's text.
+pub(super) fn text_source(input: &str, dialect: SqlDialect) -> Option<std::rc::Rc<str>> {
+    matches!(dialect, SqlDialect::MySql | SqlDialect::Sqlite).then(|| std::rc::Rc::from(input))
 }

@@ -50,6 +50,6 @@ MySQL reads `CURRENT_USER` without parentheses as `CURRENT_USER()`.
 
 ```sql
 SELECT CURRENT_USER, CURRENT_USER() AS u
--- columns: current_user: str (TEXT)
+-- columns: CURRENT_USER: str (TEXT)
 -- columns: u: str (TEXT)
 ```

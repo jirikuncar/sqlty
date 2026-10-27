@@ -38,8 +38,10 @@ pub enum Rule {
     SelectStarNoSchema,
     /// A `--sql` string that is not wrapped in `SQL[T](...)`.
     StaleRewrite,
-    /// A `SQL[tuple[...]]` that neither matches nor refines the inferred row type.
+    /// A `SQL[tuple[...]]` wider than the inferred row type: it admits every row.
     StaleType,
+    /// A `SQL[tuple[...]]` that does not admit every row the query returns.
+    NarrowType,
     /// A `--sql` marker under MySQL, which rejects it.
     MysqlSqlMarker,
     /// `"--sql SELECT ..."`: the whole query is a SQL comment.
@@ -50,6 +52,8 @@ pub enum Rule {
     TstringSkipped,
     /// A `--sql` query that is not plain string literals.
     UncheckedQuery,
+    /// A helper call whose query is not a string literal.
+    DynamicQuery,
     /// A `SQL[UNTYPED]` query.
     UntypedQuery,
     /// A query that does not parse, so it cannot be checked.
@@ -66,7 +70,7 @@ pub enum Rule {
 
 impl Rule {
     /// Every rule.
-    pub const ALL: [Rule; 32] = [
+    pub const ALL: [Rule; 35] = [
         Rule::ColumnCountMismatch,
         Rule::ColumnTypeMismatch,
         Rule::ColumnNameMismatch,
@@ -81,11 +85,13 @@ impl Rule {
         Rule::SelectStarNoSchema,
         Rule::StaleRewrite,
         Rule::StaleType,
+        Rule::NarrowType,
         Rule::MysqlSqlMarker,
         Rule::InlineSqlComment,
         Rule::FstringSkipped,
         Rule::TstringSkipped,
         Rule::UncheckedQuery,
+        Rule::DynamicQuery,
         Rule::UntypedQuery,
         Rule::UnparsedQuery,
         Rule::UnusedIgnore,
@@ -98,6 +104,7 @@ impl Rule {
         Rule::Name(NameRule::UnknownType),
         Rule::Name(NameRule::UnsupportedSyntax),
         Rule::Name(NameRule::InsertMissingColumn),
+        Rule::Name(NameRule::InsertValueCount),
         Rule::Name(NameRule::UngroupedColumn),
     ];
 
@@ -118,11 +125,13 @@ impl Rule {
             Rule::SelectStarNoSchema => "select-star-no-schema",
             Rule::StaleRewrite => "stale-rewrite",
             Rule::StaleType => "stale-type",
+            Rule::NarrowType => "narrow-type",
             Rule::MysqlSqlMarker => "mysql-sql-marker",
             Rule::InlineSqlComment => "inline-sql-comment",
             Rule::FstringSkipped => "fstring-skipped",
             Rule::TstringSkipped => "tstring-skipped",
             Rule::UncheckedQuery => "unchecked-query",
+            Rule::DynamicQuery => "dynamic-query",
             Rule::UntypedQuery => "untyped-query",
             Rule::UnparsedQuery => "unparsed-query",
             Rule::UnusedIgnore => "unused-ignore",
@@ -149,12 +158,14 @@ impl Rule {
             | Rule::LiteralMismatch
             | Rule::ParamCountMismatch
             | Rule::ParamTypeMismatch
+            | Rule::NarrowType
             | Rule::SelectStarNoSchema
             | Rule::Name(
                 NameRule::UnknownTable
                 | NameRule::UnknownColumn
                 | NameRule::AmbiguousColumn
                 | NameRule::InsertMissingColumn
+                | NameRule::InsertValueCount
                 | NameRule::UngroupedColumn,
             ) => Severity::Error,
             Rule::ColumnNameMismatch
@@ -172,7 +183,9 @@ impl Rule {
             | Rule::Name(
                 NameRule::UnknownFunction | NameRule::UnknownType | NameRule::UnsupportedSyntax,
             ) => Severity::Warn,
-            Rule::RedundantOptional | Rule::RedundantLiteral => Severity::Ignore,
+            Rule::RedundantOptional | Rule::RedundantLiteral | Rule::DynamicQuery => {
+                Severity::Ignore
+            }
         }
     }
 }
@@ -310,8 +323,11 @@ mod tests {
         let config = RuleConfig::default();
         assert_eq!(config.severity(Rule::SelectStarNoSchema), Severity::Error);
         assert_eq!(config.severity(Rule::StaleRewrite), Severity::Warn);
+        assert_eq!(config.severity(Rule::StaleType), Severity::Warn);
+        assert_eq!(config.severity(Rule::NarrowType), Severity::Error);
         assert_eq!(config.severity(Rule::UnparsedQuery), Severity::Warn);
         assert_eq!(config.severity(Rule::RedundantOptional), Severity::Ignore);
+        assert_eq!(config.severity(Rule::DynamicQuery), Severity::Ignore);
         assert_eq!(
             config.severity(Rule::Name(NameRule::UnknownTable)),
             Severity::Error

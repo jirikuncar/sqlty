@@ -262,6 +262,105 @@ reference = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators 
 reasoning = "An offset added to an address is an address."
 
 [[rule]]
+id = "postgres.money.amount"
+operators = ["Plus", "Minus"]
+dialects = ["postgres"]
+left = ["MONEY"]
+right = ["MONEY"]
+type = "MONEY"
+reference = "PostgreSQL 17 documentation, 8.2 Monetary Types"
+reasoning = "The sum or difference of two amounts is an amount."
+
+[[rule]]
+id = "postgres.money.ratio"
+operator = "Divide"
+dialects = ["postgres"]
+left = ["MONEY"]
+right = ["MONEY"]
+type = "DOUBLE"
+reference = "PostgreSQL 17 documentation, 8.2 Monetary Types (a money value divided by another money value is double precision)"
+reasoning = "Dividing an amount by an amount cancels the currency and gives a double."
+
+[[rule]]
+id = "postgres.money.scaled"
+operators = ["Multiply", "Divide"]
+dialects = ["postgres"]
+left = ["MONEY"]
+right = ["@numeric"]
+type = "MONEY"
+reference = "PostgreSQL 17 documentation, 8.2 Monetary Types (a money value divided by an integer is truncated toward zero)"
+reasoning = "An amount multiplied or divided by a number is an amount."
+
+[[rule]]
+id = "postgres.money.scaled-right"
+operator = "Multiply"
+dialects = ["postgres"]
+left = ["@numeric"]
+right = ["MONEY"]
+type = "MONEY"
+reference = "PostgreSQL 17 documentation, 8.2 Monetary Types"
+reasoning = "A number multiplied by an amount is an amount."
+
+[[rule]]
+id = "postgres.lsn.difference"
+operator = "Minus"
+dialects = ["postgres"]
+left = ["PG_LSN"]
+right = ["PG_LSN"]
+type = "DECIMAL"
+reference = "PostgreSQL 17 documentation, 8.20 pg_lsn Type (two LSNs subtracted give the number of bytes separating them)"
+reasoning = "The distance between two write-ahead log locations is a byte count, a numeric."
+
+[[rule]]
+id = "postgres.lsn.offset"
+operators = ["Plus", "Minus"]
+dialects = ["postgres"]
+left = ["PG_LSN"]
+right = ["@integer", "DECIMAL", "NUMERIC"]
+type = "PG_LSN"
+reference = "PostgreSQL 17 documentation, 8.20 pg_lsn Type (+(pg_lsn,numeric) and -(pg_lsn,numeric))"
+reasoning = "A location moved by a number of bytes is a location."
+
+[[rule]]
+id = "postgres.lsn.offset-left"
+operator = "Plus"
+dialects = ["postgres"]
+left = ["@integer", "DECIMAL", "NUMERIC"]
+right = ["PG_LSN"]
+type = "PG_LSN"
+reference = "PostgreSQL 17 documentation, 8.20 pg_lsn Type (+(pg_lsn,numeric))"
+reasoning = "A number of bytes added to a location is a location."
+
+[[rule]]
+id = "postgres.geometry.path-concatenation"
+operator = "Plus"
+dialects = ["postgres"]
+left = ["PATH"]
+right = ["PATH"]
+type = "PATH"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.11, Table 9.36 Geometric Operators (path + path → path)"
+reasoning = "Two open paths concatenate into a path, and a closed one gives NULL."
+
+[[rule]]
+id = "postgres.geometry.translate"
+operators = ["Plus", "Minus", "Multiply", "Divide"]
+dialects = ["postgres"]
+left = ["BOX", "CIRCLE", "PATH", "POINT"]
+right = ["POINT"]
+type = "@left"
+reference = "PostgreSQL 17 documentation, 9.11, Table 9.36 Geometric Operators (geometric_type + point → geometric_type, and -, *, /)"
+reasoning = "Translating, scaling or rotating a shape by a point keeps its type."
+
+[[rule]]
+id = "postgres.math.roots"
+operators = ["Prefix:PGSquareRoot", "Prefix:PGCubeRoot"]
+dialects = ["postgres"]
+type = "DOUBLE"
+reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (|/ double precision → double precision, ||/ double precision → double precision)"
+reasoning = "Square and cube roots take and give a double."
+
+[[rule]]
 id = "postgres.arithmetic.division-other"
 operators = ["Divide", "Modulo"]
 dialects = ["postgres"]
@@ -306,6 +405,66 @@ reference = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators 
 reasoning = "On addresses, `&` and `|` mask one address with another."
 
 [[rule]]
+id = "postgres.bitwise.bits"
+operators = ["BitwiseAnd", "BitwiseOr", "PGBitwiseXor"]
+dialects = ["postgres"]
+left = ["BIT", "VARBIT"]
+right = ["BIT", "VARBIT"]
+type = "BIT"
+reference = "PostgreSQL 17 documentation, 9.6, Table 9.14 Bit String Operators (bit & bit → bit, bit | bit → bit, bit # bit → bit)"
+reasoning = "Bitwise operators on bit strings of equal length give a bit string."
+
+[[rule]]
+id = "postgres.bitwise.bits-shift"
+operators = ["PGBitwiseShiftLeft", "PGBitwiseShiftRight"]
+dialects = ["postgres"]
+left = ["BIT", "VARBIT"]
+right = ["@integer"]
+type = "BIT"
+reference = "PostgreSQL 17 documentation, 9.6, Table 9.14 Bit String Operators (bit << integer → bit, bit >> integer → bit)"
+reasoning = "A shifted bit string keeps its length."
+
+[[rule]]
+id = "postgres.bitwise.mac-addresses"
+operators = ["BitwiseAnd", "BitwiseOr"]
+dialects = ["postgres"]
+left = ["MACADDR", "MACADDR8"]
+right = ["MACADDR", "MACADDR8"]
+type = "@left"
+reference = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators (macaddr and macaddr8 support the bitwise logical operators ~, & and |)"
+reasoning = "Masking a MAC address with another gives a MAC address."
+
+[[rule]]
+id = "postgres.range.strictly-left-right"
+operators = ["PGBitwiseShiftLeft", "PGBitwiseShiftRight"]
+dialects = ["postgres"]
+left = ["@range", "@multirange"]
+right = ["@range", "@multirange"]
+type = "BOOLEAN"
+reference = "PostgreSQL 17 documentation, 9.20, Table 9.56 Range Operators and Table 9.57 Multirange Operators (anyrange << anyrange → boolean, anyrange >> anyrange → boolean)"
+reasoning = "On ranges and multiranges, `<<` and `>>` test whether one is strictly left or right of the other."
+
+[[rule]]
+id = "postgres.range.multirange-set-operations"
+operators = ["Plus", "Minus", "Multiply"]
+dialects = ["postgres"]
+left = ["@multirange"]
+right = ["@multirange"]
+type = "@left"
+reference = "PostgreSQL 17 documentation, 9.20, Table 9.57 Multirange Operators (anymultirange + anymultirange → anymultirange, and *, -)"
+reasoning = "The union, intersection and difference of two multiranges are a multirange of their type."
+
+[[rule]]
+id = "postgres.geometry.side"
+operators = ["PGBitwiseShiftLeft", "PGBitwiseShiftRight"]
+dialects = ["postgres"]
+left = ["BOX", "CIRCLE", "POINT", "POLYGON"]
+right = ["BOX", "CIRCLE", "POINT", "POLYGON"]
+type = "BOOLEAN"
+reference = "PostgreSQL 17 documentation, 9.11, Table 9.36 Geometric Operators (geometric_type << geometric_type → boolean, geometric_type >> geometric_type → boolean)"
+reasoning = "On shapes, `<<` and `>>` test whether one is strictly left or right of the other."
+
+[[rule]]
 id = "postgres.bitwise.integers"
 operators = ["BitwiseAnd", "BitwiseOr", "PGBitwiseXor"]
 dialects = ["postgres"]
@@ -340,3 +499,29 @@ dialects = ["postgres"]
 type = "BOOLEAN"
 reference = "PostgreSQL 17 documentation, 9.20, Table 9.56 Range Operators (anyrange -|- anyrange → boolean, anyrange &< anyrange → boolean, anyrange &> anyrange → boolean)"
 reasoning = "Range adjacency and extent tests are predicates."
+
+[[rule]]
+id = "postgres.range.set-operations"
+operators = ["Plus", "Minus", "Multiply"]
+dialects = ["postgres"]
+left = ["@range"]
+right = ["@range"]
+type = "@left"
+reference = "PostgreSQL 17 documentation, 9.20, Table 9.56 Range Operators (anyrange + anyrange → anyrange, anyrange * anyrange → anyrange, anyrange - anyrange → anyrange)"
+reasoning = "The union, intersection and difference of two ranges are a range of their type."
+
+[[rule]]
+id = "postgres.bitwise.not"
+operator = "Prefix:BitwiseNot"
+dialects = ["postgres"]
+type = "@right"
+reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (~ integral_type → integral_type), 9.6, Table 9.14 Bit String Operators (~ bit → bit), 9.12, Table 9.39 IP Address Operators (~ inet → inet)"
+reasoning = "`~` inverts the bits of an integer, a bit string or an address and keeps its type."
+
+[[rule]]
+id = "postgres.math.absolute"
+operator = "Prefix:PGAbs"
+dialects = ["postgres"]
+type = "@right"
+reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (@ numeric_type → numeric_type)"
+reasoning = "`@` is the absolute value, of the operand's type."

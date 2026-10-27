@@ -1,0 +1,127 @@
+# PostgreSQL date and time functions.
+
+[[function]]
+id = "postgres.datetime.argument-type-1"
+function = "DATE_BIN"
+dialects = ["postgres"]
+type = "@argument-type(1)"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.9 Date/Time Functions and Operators, Table 9.33 Date/Time Functions"
+reasoning = "The result has the type of the second argument."
+
+[[function]]
+id = "postgres.datetime.at-zone"
+function = "TIMEZONE"
+dialects = ["postgres"]
+type = "@at-zone(1)"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.9.4 AT TIME ZONE and AT LOCAL, timezone(zone, timestamp), timezone(timestamp)"
+reasoning = "Converting the second argument, or the only one for the session time zone, between time zones swaps the two timestamp types, and a time gains a zone."
+
+[[function]]
+id = "postgres.datetime.boolean"
+function = "ISFINITE"
+dialects = ["postgres"]
+type = "BOOLEAN"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.9 Date/Time Functions and Operators, Table 9.33 Date/Time Functions"
+reasoning = "The documentation gives the function a `boolean` result."
+
+[[function]]
+id = "postgres.datetime.date"
+functions = ["MAKE_DATE", "DATE"]
+dialects = ["postgres"]
+type = "DATE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 4.2.9 Type Casts, the function-like syntax of a cast; 9.9 Date/Time Functions and Operators, Table 9.33 Date/Time Functions"
+reasoning = "The documentation gives each of these a `date` result."
+
+[[function]]
+id = "postgres.datetime.double"
+function = "DATE_PART"
+dialects = ["postgres"]
+type = "DOUBLE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.9 Date/Time Functions and Operators, Table 9.33 Date/Time Functions"
+reasoning = "The documentation gives the function a `double precision` result."
+
+[[function]]
+id = "postgres.datetime.interval"
+functions = ["JUSTIFY_DAYS", "JUSTIFY_HOURS", "JUSTIFY_INTERVAL", "MAKE_INTERVAL"]
+dialects = ["postgres"]
+type = "INTERVAL"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.9 Date/Time Functions and Operators, Table 9.33 Date/Time Functions"
+reasoning = "The documentation gives each of these an `interval` result."
+
+[[function]]
+id = "postgres.datetime.text"
+function = "TIMEOFDAY"
+dialects = ["postgres"]
+type = "TEXT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.9 Date/Time Functions and Operators, Table 9.33 Date/Time Functions"
+reasoning = "The documentation gives the function a `text` result."
+
+[[function]]
+id = "postgres.datetime.time"
+function = "MAKE_TIME"
+dialects = ["postgres"]
+type = "TIME"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.9 Date/Time Functions and Operators, Table 9.33 Date/Time Functions"
+reasoning = "The documentation gives each of these a `time without time zone` result."
+
+[[function]]
+id = "postgres.datetime.time-non-null"
+function = "LOCALTIME"
+dialects = ["postgres"]
+type = "TIME"
+nullability = "non-null"
+reference = "PostgreSQL 17 documentation, 9.9 Date/Time Functions and Operators, Table 9.33 Date/Time Functions"
+reasoning = "The documentation gives each of these a `time without time zone` result. It never returns NULL, even for NULL arguments."
+
+[[function]]
+id = "postgres.datetime.timestamp"
+function = "MAKE_TIMESTAMP"
+dialects = ["postgres"]
+type = "TIMESTAMP"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.9 Date/Time Functions and Operators, Table 9.33 Date/Time Functions"
+reasoning = "The documentation gives each of these a `timestamp without time zone` result."
+
+[[function]]
+id = "postgres.datetime.timestamp-non-null"
+function = "LOCALTIMESTAMP"
+dialects = ["postgres"]
+type = "TIMESTAMP"
+nullability = "non-null"
+reference = "PostgreSQL 17 documentation, 9.9 Date/Time Functions and Operators, Table 9.33 Date/Time Functions"
+reasoning = "The documentation gives each of these a `timestamp without time zone` result. It never returns NULL, even for NULL arguments."
+
+[[function]]
+id = "postgres.datetime.timestamptz"
+functions = ["TRANSACTION_TIMESTAMP", "STATEMENT_TIMESTAMP", "CLOCK_TIMESTAMP", "TO_TIMESTAMP", "MAKE_TIMESTAMPTZ", "DATE_ADD", "DATE_SUBTRACT"]
+dialects = ["postgres"]
+type = "TIMESTAMPTZ"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.8 Data Type Formatting Functions, Table 9.26 Formatting Functions; 9.9 Date/Time Functions and Operators, Table 9.33 Date/Time Functions"
+reasoning = "The documentation gives each of these a `timestamp with time zone` result."
+
+[[function]]
+id = "postgres.datetime.truncated"
+function = "DATE_TRUNC"
+dialects = ["postgres"]
+type = "@trunc(1)"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.9 Date/Time Functions and Operators, Table 9.33 Date/Time Functions"
+reasoning = "Truncating keeps the second argument's type, an interval's or timestamp's, and a date becomes a timestamp with time zone."
+
+[[function]]
+id = "postgres.datetime.void"
+functions = ["PG_SLEEP", "PG_SLEEP_FOR", "PG_SLEEP_UNTIL"]
+dialects = ["postgres"]
+type = "@void"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.9.6 Delaying Execution"
+reasoning = "Each of these returns `void`, which the driver reads as None."

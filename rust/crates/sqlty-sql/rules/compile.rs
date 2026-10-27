@@ -1,7 +1,7 @@
 //! The inference rule compiler: `rules/**/*.inference.toml` to Rust source. `build.rs`
 //! runs it; `tests/inference_compiler.rs` tests it.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use serde::Deserialize;
@@ -16,7 +16,7 @@ const DIALECTS: [(&str, &str); 4] = [
 
 /// Canonical SQL types the analyzer gives operands, which `left` and `right` may name.
 /// `ARRAY` is any array.
-const SQL_TYPES: [&str; 42] = [
+const SQL_TYPES: [&str; 88] = [
     "UDECIMAL",
     "UTINYINT",
     "USMALLINT",
@@ -57,12 +57,58 @@ const SQL_TYPES: [&str; 42] = [
     "MACADDR",
     "TSVECTOR",
     "TSQUERY",
+    "PATH",
+    "LSEG",
+    "XID",
+    "NAME",
+    "REGTYPE",
+    "RECORD",
     "MONEY",
+    "INT4RANGE",
+    "INT8RANGE",
+    "NUMRANGE",
+    "DATERANGE",
+    "TSRANGE",
+    "TSTZRANGE",
+    "INT4MULTIRANGE",
+    "INT8MULTIRANGE",
+    "NUMMULTIRANGE",
+    "DATEMULTIRANGE",
+    "TSMULTIRANGE",
+    "TSTZMULTIRANGE",
+    "OID",
+    "XML",
+    "ACLITEM",
+    "POINT",
+    "LINE",
+    "BOX",
+    "CIRCLE",
+    "POLYGON",
+    "GEOMETRY",
+    "MACADDR8",
+    "PG_LSN",
+    "PG_SNAPSHOT",
+    "TXID_SNAPSHOT",
+    "XID8",
+    "REGCONFIG",
+    "REGCLASS",
+    "REGCOLLATION",
+    "REGNAMESPACE",
+    "REGOPER",
+    "REGOPERATOR",
+    "REGPROC",
+    "REGPROCEDURE",
+    "REGROLE",
+    "BIT",
+    "VARBIT",
+    "YEAR",
+    "ENUM",
+    "SET",
     "ARRAY",
 ];
 
 /// Named sets of SQL types, `@name` in `left` and `right`.
-const CLASSES: [(&str, &[&str]); 7] = [
+const CLASSES: [(&str, &[&str]); 11] = [
     (
         "@integer",
         &["SMALLINT", "TINYINT", "MEDIUMINT", "INT", "BIGINT"],
@@ -82,11 +128,41 @@ const CLASSES: [(&str, &[&str]); 7] = [
             "DOUBLE",
         ],
     ),
+    (
+        "@unsigned",
+        &["UTINYINT", "USMALLINT", "UMEDIUMINT", "UINT", "UBIGINT"],
+    ),
     ("@text", &["TEXT", "VARCHAR", "CHAR"]),
+    (
+        "@temporal",
+        &["DATE", "TIME", "DATETIME", "TIMESTAMP", "TIMESTAMPTZ"],
+    ),
     ("@json", &["JSON", "JSONB"]),
     ("@address", &["INET", "CIDR"]),
     ("@array", &["ARRAY"]),
     ("@binary", &["BYTEA", "BLOB", "VARBINARY", "BINARY"]),
+    (
+        "@range",
+        &[
+            "INT4RANGE",
+            "INT8RANGE",
+            "NUMRANGE",
+            "DATERANGE",
+            "TSRANGE",
+            "TSTZRANGE",
+        ],
+    ),
+    (
+        "@multirange",
+        &[
+            "INT4MULTIRANGE",
+            "INT8MULTIRANGE",
+            "NUMMULTIRANGE",
+            "DATEMULTIRANGE",
+            "TSMULTIRANGE",
+            "TSTZMULTIRANGE",
+        ],
+    ),
 ];
 
 /// Result types other than a SQL type name.
@@ -110,21 +186,90 @@ const NULLABILITIES: [(&str, &str); 5] = [
     ("nonzero-divisor", "RuleNullability::NonzeroDivisor"),
 ];
 
-/// Result types of a function rule other than a SQL type name; `@argument-as <TYPE>` keeps
-/// the argument's Python type and values under another SQL type.
-const FUNCTION_RESULTS: [(&str, &str); 4] = [
+/// Result types of a function rule other than a SQL type name, as `FunctionType` spells
+/// them; `(k)` takes an argument position, `{}` in the path. `@argument-as <TYPE>` keeps the
+/// first argument's Python type and values under another SQL type.
+const FUNCTION_RESULTS: [(&str, &str); 27] = [
     ("@any", "FunctionType::Any"),
     ("@unknown", "FunctionType::Unknown"),
     ("@code", "FunctionType::Code"),
-    ("@argument", "FunctionType::Argument"),
+    ("@argument", "FunctionType::Argument(0)"),
+    ("@argument(k)", "FunctionType::Argument({})"),
+    ("@void", "FunctionType::Returns(Returns::Void)"),
+    (
+        "@argument-type(k)",
+        "FunctionType::Returns(Returns::Arg({}))",
+    ),
+    ("@same(k)", "FunctionType::Returns(Returns::Same({}))"),
+    ("@element(k)", "FunctionType::Returns(Returns::Elem({}))"),
+    ("@array(k)", "FunctionType::Returns(Returns::ArrayOf({}))"),
+    ("@first-known", "FunctionType::Returns(Returns::FirstKnown)"),
+    (
+        "@first-known(k)",
+        "FunctionType::Returns(Returns::Branches({}))",
+    ),
+    (
+        "@str-to-date(k)",
+        "FunctionType::Returns(Returns::StrToDate({}))",
+    ),
+    ("@bound", "FunctionType::Returns(Returns::Bound)"),
+    ("@mean", "FunctionType::Returns(Returns::Mean)"),
+    ("@real", "FunctionType::Returns(Returns::Real)"),
+    ("@scaled", "FunctionType::Returns(Returns::Scaled)"),
+    ("@trunc(k)", "FunctionType::Returns(Returns::Trunc({}))"),
+    ("@date-add", "FunctionType::Returns(Returns::DateAdd)"),
+    (
+        "@timestamp-add",
+        "FunctionType::Returns(Returns::TimestampAdd)",
+    ),
+    ("@integral", "FunctionType::Returns(Returns::Integral)"),
+    ("@at-zone(k)", "FunctionType::Returns(Returns::AtZone({}))"),
+    ("@series", "FunctionType::Returns(Returns::Series)"),
+    ("@text(k)", "FunctionType::Returns(Returns::Text({}))"),
+    ("@random", "FunctionType::Returns(Returns::Random)"),
+    ("@range(k)", "FunctionType::Returns(Returns::Range({}))"),
+    (
+        "@multirange(k)",
+        "FunctionType::Returns(Returns::Multirange({}))",
+    ),
 ];
 
+/// The Rust path of a function rule's result, when `result` names one: a SQL type, a type of
+/// [`FUNCTION_RESULTS`] or `@argument-as <TYPE>`.
+fn function_result(result: &str) -> Option<String> {
+    if let Some(sql) = result.strip_prefix("@argument-as ") {
+        return is_sql_type(sql).then(|| format!("FunctionType::ArgumentAs({sql:?})"));
+    }
+    if is_parameter_type(result) {
+        return Some(format!("FunctionType::Sql({result:?})"));
+    }
+    positional(&FUNCTION_RESULTS, result)
+}
+
+/// The Rust path `table` gives `value`, with a `(k)` position filled in.
+fn positional(table: &[(&str, &str)], value: &str) -> Option<String> {
+    let (name, position) = match value.strip_suffix(')').and_then(|r| r.split_once('(')) {
+        Some((name, k)) if !k.is_empty() && k.chars().all(|c| c.is_ascii_digit()) => {
+            (format!("{name}(k)"), Some(k))
+        }
+        _ => (value.to_string(), None),
+    };
+    let (_, path) = table.iter().find(|(known, _)| *known == name)?;
+    Some(match position {
+        Some(k) => path.replace("{}", k),
+        None => (*path).to_string(),
+    })
+}
+
 /// How a function rule's result can be NULL.
-const FUNCTION_NULLABILITIES: [(&str, &str); 4] = [
+const FUNCTION_NULLABILITIES: [(&str, &str); 7] = [
     ("non-null", "FunctionNullability::NonNull"),
     ("nullable", "FunctionNullability::Nullable"),
     ("aggregate", "FunctionNullability::Aggregate"),
     ("strict", "FunctionNullability::Strict"),
+    ("all-arguments", "FunctionNullability::AllArguments"),
+    ("leading(k)", "FunctionNullability::Leading({})"),
+    ("code", "FunctionNullability::Code"),
 ];
 
 #[derive(Deserialize)]
@@ -150,6 +295,12 @@ struct FunctionDef {
     dialects: Vec<String>,
     #[serde(default)]
     argument: Vec<String>,
+    /// The types of the first two arguments; an empty list admits any.
+    #[serde(default)]
+    arguments: Vec<Vec<String>>,
+    /// Types one argument at least, at any position, must have.
+    #[serde(default, rename = "any-argument")]
+    any_argument: Vec<String>,
     #[serde(rename = "type")]
     result: String,
     nullability: String,
@@ -157,23 +308,39 @@ struct FunctionDef {
     shadows: Vec<String>,
 }
 
-impl From<FunctionDef> for RuleDef {
-    fn from(def: FunctionDef) -> Self {
-        RuleDef {
-            id: def.id,
-            reference: def.reference,
-            reasoning: def.reasoning,
-            operator: def.function,
-            operators: def.functions,
-            dialects: def.dialects,
-            left: def.argument,
-            right: Vec::new(),
-            result: def.result,
-            nullability: def.nullability,
-            shadows: def.shadows,
+impl FunctionDef {
+    /// The rule, with the first argument's types as `left` and the second's as `right`.
+    fn into_rule(self, file: &str) -> Result<RuleDef, String> {
+        if !self.argument.is_empty() && !self.arguments.is_empty() {
+            return Err(format!(
+                "rule {} ({file}): give `argument` or `arguments`, not both",
+                self.id
+            ));
+        }
+        if self.arguments.len() > 2 {
+            return Err(format!(
+                "rule {} ({file}): `arguments` reads the first two arguments only",
+                self.id
+            ));
+        }
+        let mut arguments = self.arguments.into_iter();
+        let left = arguments.next().unwrap_or(self.argument);
+        Ok(RuleDef {
+            id: self.id,
+            reference: self.reference,
+            reasoning: self.reasoning,
+            operator: self.function,
+            operators: self.functions,
+            dialects: self.dialects,
+            left,
+            right: arguments.next().unwrap_or_default(),
+            any: self.any_argument,
+            result: self.result,
+            nullability: self.nullability,
+            shadows: self.shadows,
             left_parameter: None,
             right_parameter: None,
-        }
+        })
     }
 }
 
@@ -193,6 +360,9 @@ struct RuleDef {
     left: Vec<String>,
     #[serde(default)]
     right: Vec<String>,
+    /// A function rule's `any-argument`.
+    #[serde(skip)]
+    any: Vec<String>,
     #[serde(rename = "type")]
     result: String,
     #[serde(default = "operands")]
@@ -234,6 +404,7 @@ struct Rule {
     dialects: Vec<&'static str>,
     left: Types,
     right: Types,
+    any: Types,
 }
 
 impl Rule {
@@ -249,9 +420,16 @@ impl Rule {
 
 /// The Rust source of the rules in `files`, `(path, contents)` pairs with paths relative to
 /// the crate (`rules/postgres/json.inference.toml`); a rule in a `common/` directory applies
-/// to every dialect. Errors name the rule and its file.
+/// to every dialect. `rules/dialects.toml` names the dialects that read others' rules.
+/// Errors name the rule and its file.
 pub fn compile(files: &[(String, String)]) -> Result<String, String> {
-    let mut sorted: Vec<&(String, String)> = files.iter().collect();
+    let (extension_files, mut sorted): (Vec<_>, Vec<_>) = files
+        .iter()
+        .partition(|(file, _)| file.ends_with(DIALECTS_FILE));
+    let extensions = match extension_files.first() {
+        Some((_, text)) => extensions(text)?,
+        None => Vec::new(),
+    };
     sorted.sort();
     let mut rules: Vec<Rule> = Vec::new();
     for (file, text) in sorted {
@@ -261,8 +439,15 @@ pub fn compile(files: &[(String, String)]) -> Result<String, String> {
             .rule
             .into_iter()
             .map(|def| (def, false))
-            .chain(parsed.function.into_iter().map(|def| (def.into(), true)));
-        for (def, function) in defs {
+            .map(Ok)
+            .chain(
+                parsed
+                    .function
+                    .into_iter()
+                    .map(|def| def.into_rule(file).map(|def| (def, true))),
+            );
+        for def in defs {
+            let (def, function) = def?;
             let rule = check(def, function, file, tier)?;
             if let Some(other) = rules.iter().find(|r| r.def.id == rule.def.id) {
                 return Err(format!(
@@ -288,7 +473,67 @@ pub fn compile(files: &[(String, String)]) -> Result<String, String> {
     }
     rules.sort_by_key(|rule| rule.tier);
     check_overlaps(&rules)?;
-    Ok(generate(&rules))
+    check_inherited(&rules)?;
+    Ok(generate(&rules, &extensions))
+}
+
+const DIALECTS_FILE: &str = "rules/dialects.toml";
+
+/// A dialect of `rules/dialects.toml`, with no rules of its own, that reads the rules of the
+/// dialects it `extends`: a function or operator takes the rules of the first that has any.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExtensionDef {
+    extends: Vec<String>,
+    reasoning: String,
+}
+
+/// A dialect's `SqlDialect` path and the paths of the dialects it extends, in order.
+type Extension = (String, Vec<&'static str>);
+
+fn extensions(text: &str) -> Result<Vec<Extension>, String> {
+    let parsed: BTreeMap<String, ExtensionDef> =
+        toml::from_str(text).map_err(|e| format!("{DIALECTS_FILE}: {e}"))?;
+    parsed
+        .into_iter()
+        .map(|(name, def)| {
+            let fail = |message: &str| Err(format!("{DIALECTS_FILE}: [{name}] {message}"));
+            if DIALECTS.iter().any(|(known, _)| *known == name) {
+                return fail("has rules of its own, so it extends no dialect");
+            }
+            if name.is_empty() || !name.bytes().all(|b| b.is_ascii_lowercase()) {
+                return fail("is not a lower-case dialect name");
+            }
+            if def.reasoning.trim().is_empty() || def.extends.is_empty() {
+                return fail("`extends` and `reasoning` must not be empty");
+            }
+            let mut extends = Vec::new();
+            for dialect in &def.extends {
+                match DIALECTS.iter().find(|(known, _)| known == dialect) {
+                    Some((_, path)) => extends.push(*path),
+                    None => return fail(&format!("extends unknown dialect {dialect:?}")),
+                }
+            }
+            Ok((format!("SqlDialect::Other({name:?})"), extends))
+        })
+        .collect()
+}
+
+/// The dialects `rule` applies to for the function or operator `name`: its own, and each
+/// dialect whose first extended dialect with a rule for `name` is one of them.
+fn applies_to(name: &str, rule: &Rule, rules: &[&Rule], extensions: &[Extension]) -> String {
+    let mut dialects: Vec<&str> = rule.dialects.clone();
+    for (dialect, extends) in extensions {
+        let first = extends.iter().find(|extended| {
+            rules.iter().any(|other| {
+                other.dialects.contains(extended) && other.operators.iter().any(|n| n == name)
+            })
+        });
+        if first.is_some_and(|extended| rule.dialects.contains(extended)) {
+            dialects.push(dialect);
+        }
+    }
+    dialects.join(", ")
 }
 
 /// Validate one rule: everything it names must exist.
@@ -321,8 +566,21 @@ fn check(def: RuleDef, function: bool, file: &str, tier: u8) -> Result<Rule, Str
         }
     } else if let Some(name) = operators.iter().find(|name| !is_operator(name)) {
         return fail(format!(
-            "operator {name:?} is neither a sqlparser `BinaryOperator` variant nor `Custom:<text>`"
+            "operator {name:?} is neither a sqlparser `BinaryOperator` variant, `Custom:<text>` \
+             nor `Prefix:<UnaryOperator variant>`"
         ));
+    } else if operators.iter().any(|name| name.starts_with("Prefix:")) {
+        if !def.left.is_empty() || def.left_parameter.is_some() {
+            return fail("a prefix operator has no left operand".to_string());
+        }
+        if def.nullability != "operands" {
+            return fail(
+                "a prefix operator is NULL when its operand is: drop `nullability`".to_string(),
+            );
+        }
+        if def.result.starts_with('@') && def.result != "@right" {
+            return fail("a prefix operator's type is a SQL type or `@right`".to_string());
+        }
     }
     let mut dialects = Vec::new();
     for name in &def.dialects {
@@ -339,20 +597,13 @@ fn check(def: RuleDef, function: bool, file: &str, tier: u8) -> Result<Rule, Str
     }
     let left = operand_types(&def.left).map_err(|e| format!("rule {} ({file}): {e}", def.id))?;
     let right = operand_types(&def.right).map_err(|e| format!("rule {} ({file}): {e}", def.id))?;
-    let results: &[(&str, &str)] = if function {
-        &FUNCTION_RESULTS
+    let any = operand_types(&def.any).map_err(|e| format!("rule {} ({file}): {e}", def.id))?;
+    let known = if function {
+        function_result(&def.result).is_some()
     } else {
-        &RESULTS
+        RESULTS.iter().any(|(name, _)| *name == def.result) || is_sql_type(&def.result)
     };
-    let argument_as = function
-        && def
-            .result
-            .strip_prefix("@argument-as ")
-            .is_some_and(is_sql_type);
-    if !(results.iter().any(|(name, _)| *name == def.result)
-        || is_sql_type(&def.result)
-        || argument_as)
-    {
+    if !known {
         return fail(format!("unknown result type {:?}", def.result));
     }
     let mut parameters = def.left_parameter.iter().chain(&def.right_parameter);
@@ -364,10 +615,7 @@ fn check(def: RuleDef, function: bool, file: &str, tier: u8) -> Result<Rule, Str
     } else {
         &NULLABILITIES
     };
-    if !nullabilities
-        .iter()
-        .any(|(name, _)| *name == def.nullability)
-    {
+    if positional(nullabilities, &def.nullability).is_none() {
         return fail(format!("unknown nullability {:?}", def.nullability));
     }
     Ok(Rule {
@@ -379,11 +627,13 @@ fn check(def: RuleDef, function: bool, file: &str, tier: u8) -> Result<Rule, Str
         dialects,
         left,
         right,
+        any,
     })
 }
 
-/// A sqlparser variant name (rustc checks it exists) or `Custom:<<=`.
+/// A sqlparser variant name (rustc checks it exists), `Custom:<<=` or `Prefix:DoubleAt`.
 fn is_operator(name: &str) -> bool {
+    let name = name.strip_prefix("Prefix:").unwrap_or(name);
     match name.strip_prefix("Custom:") {
         Some(text) => !text.is_empty() && !text.contains(['"', '\\']),
         None => {
@@ -436,6 +686,7 @@ struct Region<'r> {
     dialects: Vec<&'r str>,
     left: Types,
     right: Types,
+    any: Types,
 }
 
 fn intersect<'r>(a: &'r Rule, b: &'r Rule) -> Option<Region<'r>> {
@@ -469,6 +720,7 @@ fn intersect<'r>(a: &'r Rule, b: &'r Rule) -> Option<Region<'r>> {
         dialects,
         left: both(&a.left, &b.left)?,
         right: both(&a.right, &b.right)?,
+        any: both(&a.any, &b.any)?,
     })
 }
 
@@ -476,6 +728,7 @@ fn intersect<'r>(a: &'r Rule, b: &'r Rule) -> Option<Region<'r>> {
 fn covers(rule: &Rule, region: &Region<'_>) -> bool {
     within(&region.left, &rule.left)
         && within(&region.right, &rule.right)
+        && within(&region.any, &rule.any)
         && (rule.dialects.is_empty()
             || (!region.dialects.is_empty()
                 && region.dialects.iter().all(|d| rule.dialects.contains(d))))
@@ -490,6 +743,7 @@ fn check_overlaps(rules: &[Rule]) -> Result<(), String> {
             dialects: later.dialects.clone(),
             left: later.left.clone(),
             right: later.right.clone(),
+            any: later.any.clone(),
         };
         for operator in &later.operators {
             let shadowing = rules[..i].iter().find(|earlier| {
@@ -533,6 +787,7 @@ fn check_overlaps(rules: &[Rule]) -> Result<(), String> {
                         dialects: earlier.dialects.clone(),
                         left: earlier.left.clone(),
                         right: earlier.right.clone(),
+                        any: earlier.any.clone(),
                     },
                 ) && !covers(
                     earlier,
@@ -540,6 +795,7 @@ fn check_overlaps(rules: &[Rule]) -> Result<(), String> {
                         dialects: later.dialects.clone(),
                         left: later.left.clone(),
                         right: later.right.clone(),
+                        any: later.any.clone(),
                     },
                 );
                 let intended = earlier.def.shadows.contains(&later.def.id);
@@ -557,6 +813,50 @@ fn check_overlaps(rules: &[Rule]) -> Result<(), String> {
     Ok(())
 }
 
+/// A dialect rule that repeats a `common/` rule, with the same operands and outcome, is an
+/// error: the dialect inherits it already, unless another of its rules would catch the
+/// operands first.
+fn check_inherited(rules: &[Rule]) -> Result<(), String> {
+    let same = |a: &Rule, b: &Rule| {
+        a.function == b.function
+            && a.left == b.left
+            && a.right == b.right
+            && a.any == b.any
+            && a.outcome() == b.outcome()
+    };
+    for rule in rules
+        .iter()
+        .filter(|rule| rule.tier == 0 && !rule.dialects.is_empty())
+    {
+        for operator in &rule.operators {
+            let Some(common) = rules.iter().find(|common| {
+                common.tier == 1
+                    && common.operators.contains(operator)
+                    && same(rule, common)
+                    && (common.dialects.is_empty()
+                        || rule.dialects.iter().all(|d| common.dialects.contains(d)))
+            }) else {
+                continue;
+            };
+            let caught = rules.iter().any(|other| {
+                other.tier == 0
+                    && !std::ptr::eq(other, rule)
+                    && other.function == rule.function
+                    && other.operators.contains(operator)
+                    && intersect(rule, other).is_some()
+            });
+            if !caught {
+                return Err(format!(
+                    "rule {} ({}) repeats rule {} ({}) for {operator}, which its dialects \
+                     inherit; remove it",
+                    rule.def.id, rule.file, common.def.id, common.file
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Whether every operand `a` admits, `b` admits too.
 fn within(a: &Types, b: &Types) -> bool {
     match (a, b) {
@@ -567,16 +867,37 @@ fn within(a: &Types, b: &Types) -> bool {
     }
 }
 
-fn generate(rules: &[Rule]) -> String {
+fn generate(rules: &[Rule], extensions: &[Extension]) -> String {
     let binary: Vec<&Rule> = rules.iter().filter(|rule| !rule.function).collect();
     let functions: Vec<&Rule> = rules.iter().filter(|rule| rule.function).collect();
-    let mut out = generate_binary(&binary);
+    let mut out = generate_binary(&binary, extensions);
     out.push('\n');
-    out.push_str(&generate_functions(&functions));
+    out.push_str(&generate_functions(&functions, extensions));
+    out.push_str(
+        "\n/// The dialects of `rules/dialects.toml`, which read other dialects' rules.\n",
+    );
+    let names: Vec<&str> = extensions
+        .iter()
+        .map(|(path, _)| &path["SqlDialect::Other(".len()..path.len() - 1])
+        .collect();
+    let _ = writeln!(
+        out,
+        "#[cfg(test)]\npub(crate) const EXTENDING_DIALECTS: &[&str] = &[{}];",
+        names.join(", ")
+    );
+    out.push_str("\n/// The bit of the SQL type `sql` in an operand predicate; none for a type no rule can name.\n");
+    out.push_str("fn type_bit(sql: &str) -> u128 {\n    match sql {\n");
+    for name in SQL_TYPES {
+        let _ = writeln!(out, "        {name:?} => {:#x},", type_bit(name));
+    }
+    let _ = writeln!(
+        out,
+        "        _ => 0,\n    }}\n}}\n\nconst KNOWN: u128 = {KNOWN:#x};"
+    );
     out
 }
 
-fn generate_functions(rules: &[&Rule]) -> String {
+fn generate_functions(rules: &[&Rule], extensions: &[Extension]) -> String {
     let mut entries: Vec<(&str, &Rule)> = rules
         .iter()
         .flat_map(|rule| {
@@ -597,33 +918,23 @@ fn generate_functions(rules: &[&Rule]) -> String {
             _ => ranges.push((name, i, i + 1)),
         }
         let def = &rule.def;
-        let result = match def.result.strip_prefix("@argument-as ") {
-            Some(sql) => format!("FunctionType::ArgumentAs({sql:?})"),
-            None => FUNCTION_RESULTS
-                .iter()
-                .find(|(known, _)| *known == def.result)
-                .map_or_else(
-                    || format!("FunctionType::Sql({:?})", def.result),
-                    |(_, path)| (*path).to_string(),
-                ),
-        };
-        let nullability = FUNCTION_NULLABILITIES
-            .iter()
-            .find(|(known, _)| *known == def.nullability)
-            .unwrap()
-            .1;
+        let result = function_result(&def.result).unwrap();
+        let nullability = positional(&FUNCTION_NULLABILITIES, &def.nullability).unwrap();
         let _ = writeln!(
             out,
             "    // rule {} ({}), {name}\n    FunctionRule {{\n        id: {:?},\n        \
              reference: {:?},\n        reasoning: {:?},\n        dialects: &[{}],\n        \
-             argument: {},\n        result: {result},\n        nullability: {nullability},\n    }},",
+             argument: {},\n        second: {},\n        any: {},\n        result: {result},\n        \
+             nullability: {nullability},\n    }},",
             def.id,
             rule.file,
             def.id,
             def.reference.trim(),
             def.reasoning.trim(),
-            rule.dialects.join(", "),
+            applies_to(name, rule, rules, extensions),
             operand(&rule.left),
+            operand(&rule.right),
+            operand(&rule.any),
         );
     }
     out.push_str("];\n\n");
@@ -639,7 +950,7 @@ fn generate_functions(rules: &[&Rule]) -> String {
     out
 }
 
-fn generate_binary(rules: &[&Rule]) -> String {
+fn generate_binary(rules: &[&Rule], extensions: &[Extension]) -> String {
     let mut entries: Vec<(&str, &Rule)> = rules
         .iter()
         .flat_map(|rule| rule.operators.iter().map(move |op| (op.as_str(), *rule)))
@@ -680,7 +991,7 @@ fn generate_binary(rules: &[&Rule]) -> String {
             def.id,
             def.reference.trim(),
             def.reasoning.trim(),
-            rule.dialects.join(", "),
+            applies_to(op, rule, rules, extensions),
             operand(&rule.left),
             operand(&rule.right),
             def.left_parameter,
@@ -694,7 +1005,12 @@ fn generate_binary(rules: &[&Rule]) -> String {
     out.push_str("pub(crate) fn binary_rules(op: &BinaryOperator) -> &'static [BinaryRule] {\n");
     out.push_str("    match op {\n");
     let mut custom = Vec::new();
+    let mut prefix = Vec::new();
     for (op, start, end) in &ranges {
+        if let Some(variant) = op.strip_prefix("Prefix:") {
+            prefix.push((variant, *start, *end));
+            continue;
+        }
         match op.strip_prefix("Custom:") {
             Some(text) => custom.push((text, *start, *end)),
             None => {
@@ -716,6 +1032,17 @@ fn generate_binary(rules: &[&Rule]) -> String {
         }
         out.push_str("            _ => &[],\n        },\n");
     }
+    out.push_str("        _ => &[],\n    }\n}\n\n");
+    out.push_str("/// The rules of the prefix operator `op`, in the order they are tried.\n");
+    out.push_str("#[allow(clippy::unneeded_struct_pattern)]\n");
+    out.push_str("pub(crate) fn prefix_rules(op: &UnaryOperator) -> &'static [BinaryRule] {\n");
+    out.push_str("    match op {\n");
+    for (variant, start, end) in prefix {
+        let _ = writeln!(
+            out,
+            "        UnaryOperator::{variant} {{ .. }} => &BINARY_RULES[{start}..{end}],"
+        );
+    }
     out.push_str("        _ => &[],\n    }\n}\n");
     out
 }
@@ -724,14 +1051,27 @@ fn operand(types: &Types) -> String {
     match types {
         None => "None".to_string(),
         Some(pred) => format!(
-            "Some(&[{}])",
+            "Some({:#x} /* {} */)",
+            pred.types
+                .iter()
+                .map(|name| type_bit(name))
+                .fold(if pred.known { KNOWN } else { 0 }, |mask, bit| mask | bit),
             pred.known
                 .then_some("@known")
                 .into_iter()
                 .chain(pred.types.iter().copied())
-                .map(|t| format!("{t:?}"))
                 .collect::<Vec<_>>()
-                .join(", ")
+                .join(" | ")
         ),
     }
+}
+
+/// The bit `@known` sets in an operand predicate; [`SQL_TYPES`] take the bits below it.
+const KNOWN: u128 = 1 << 127;
+const _: () = assert!(SQL_TYPES.len() < 127);
+
+/// The bit of the SQL type `name` in an operand predicate.
+fn type_bit(name: &str) -> u128 {
+    let at = SQL_TYPES.iter().position(|known| *known == name).unwrap();
+    1 << at
 }

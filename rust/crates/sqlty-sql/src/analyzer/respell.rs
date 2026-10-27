@@ -1,0 +1,509 @@
+//! PostgreSQL, MySQL and SQLite syntax sqlparser does not read, respelled as the closest
+//! syntax it does and typed the same: a window frame's `EXCLUDE` in PostgreSQL and SQLite,
+//! SQLite's `a IS b`, `<<`, `>>` and postfix `ISNULL`, MySQL's `!x`, infix `MOD`, `SOUNDS LIKE`,
+//! `INTERVAL(n, n1, ...)`, `LOCK IN SHARE MODE`, its `CHAR(n USING charset)` and the
+//! comma-separated tables of its `UPDATE`, and `BETWEEN SYMMETRIC`, `AT LOCAL`, `COLLATION
+//! FOR`, `trim(both from x, chars)`, `substring(x similar p escape e)`, the SQL/JSON clauses
+//! after a path, `json_array(SELECT ...)`, the XML functions' keywords and the order of
+//! XMLTABLE's column options, PostgreSQL's `(composite).*`, as the field `"*"` the
+//! analyzer expands, and its `SET CONSTRAINTS` and `DO` statements, as statements that return
+//! no rows. [`super::input::parser_input`] runs it on every query, deciding from the
+//! tokens alone: each edit is of syntax sqlparser rejects.
+
+use super::dialect::SqlDialect;
+use super::tokens::{arguments, closing, Edit, Kind, Token};
+
+/// The edits that respell the syntax sqlparser rejects in `sql`, whose `tokens` they are.
+pub(super) fn respell(sql: &str, tokens: &[Token], dialect: SqlDialect, edits: &mut Vec<Edit>) {
+    if !matches!(
+        dialect,
+        SqlDialect::Postgres | SqlDialect::MySql | SqlDialect::Sqlite
+    ) {
+        return;
+    }
+    let word = |i: usize, name: &str| {
+        tokens
+            .get(i)
+            .is_some_and(|t| t.kind == Kind::Word && sql[t.start..t.end].eq_ignore_ascii_case(name))
+    };
+    let is = |i: usize, kind: Kind| tokens.get(i).is_some_and(|t| t.kind == kind);
+    let symbol = |i: usize, text: &str| {
+        tokens
+            .get(i)
+            .is_some_and(|t| t.kind == Kind::Other && &sql[t.start..t.end] == text)
+    };
+    for i in 0..tokens.len() {
+        let call = |name: &str| word(i, name) && is(i + 1, Kind::Open);
+        let starts_statement = i == 0 || symbol(i - 1, ";");
+        if dialect == SqlDialect::Postgres && starts_statement {
+            if let Some(edit) = set_constraints(sql, tokens, i).or_else(|| do_block(sql, tokens, i))
+            {
+                edits.push(edit);
+            }
+        }
+        if dialect != SqlDialect::MySql
+            && word(i, "EXCLUDE")
+            && (word(i + 1, "GROUP")
+                || word(i + 1, "TIES")
+                || (word(i + 1, "CURRENT") && word(i + 2, "ROW"))
+                || (word(i + 1, "NO") && word(i + 2, "OTHERS")))
+        {
+            let last = if word(i + 1, "GROUP") || word(i + 1, "TIES") {
+                i + 1
+            } else {
+                i + 2
+            };
+            // Without the current row or its peers a frame may be empty, as one that only
+            // follows the row may be; `TIES` and `NO OTHERS` keep the current row.
+            let frame = (0..i)
+                .rev()
+                .take_while(|&j| !matches!(tokens[j].kind, Kind::Open | Kind::Close))
+                .find(|&j| word(j, "ROWS") || word(j, "RANGE") || word(j, "GROUPS"));
+            match frame {
+                Some(start) if word(i + 1, "GROUP") || word(i + 1, "CURRENT") => edits.push((
+                    tokens[start].start,
+                    tokens[last].end,
+                    "ROWS BETWEEN 1 FOLLOWING AND 1 FOLLOWING".to_string(),
+                )),
+                _ => edits.push((tokens[i].start, tokens[last].end, String::new())),
+            }
+        } else if dialect == SqlDialect::Postgres
+            && is(i, Kind::Close)
+            && symbol(i + 1, ".")
+            && symbol(i + 2, "*")
+        {
+            edits.push((tokens[i + 2].start, tokens[i + 2].end, "\"*\"".to_string()));
+        } else if dialect == SqlDialect::Sqlite && shift(sql, tokens, i) {
+            edits.push((tokens[i].start, tokens[i + 1].end, "&".to_string()));
+        } else if dialect == SqlDialect::Sqlite
+            && word(i, "ISNULL")
+            && !is(i + 1, Kind::Open)
+            && i > 0
+            && ends_operand(sql, &tokens[i - 1])
+        {
+            edits.push((tokens[i].start, tokens[i].end, "IS NULL".to_string()));
+        } else if dialect == SqlDialect::Sqlite {
+            let not = word(i + 1, "NOT");
+            let operand = if not { i + 2 } else { i + 1 };
+            if word(i, "IS") && tokens.get(operand).is_some_and(|t| !is_predicate(sql, t)) {
+                edits.push(if not {
+                    let not = &tokens[i + 1];
+                    (not.start, not.end, "DISTINCT FROM".to_string())
+                } else {
+                    let at = tokens[operand].start;
+                    (at, at, "NOT DISTINCT FROM ".to_string())
+                });
+            }
+        } else if word(i, "BETWEEN") && (word(i + 1, "SYMMETRIC") || word(i + 1, "ASYMMETRIC")) {
+            edits.push((tokens[i + 1].start, tokens[i + 1].end, String::new()));
+        } else if word(i, "AT") && word(i + 1, "LOCAL") {
+            let local = &tokens[i + 1];
+            edits.push((
+                local.start,
+                local.end,
+                "TIME ZONE current_setting('TimeZone')".to_string(),
+            ));
+        } else if word(i, "COLLATION") && word(i + 1, "FOR") && is(i + 2, Kind::Open) {
+            edits.push((
+                tokens[i].start,
+                tokens[i + 1].end,
+                "pg_collation_for".to_string(),
+            ));
+        } else if call("TRIM") && word(i + 3, "FROM") {
+            let trim = [
+                ("BOTH", "btrim("),
+                ("LEADING", "ltrim("),
+                ("TRAILING", "rtrim("),
+            ]
+            .into_iter()
+            .find(|(side, _)| word(i + 2, side));
+            let chars = arguments(tokens, i + 1)
+                .iter()
+                .any(|&j| tokens[j].kind == Kind::Comma);
+            if let (Some((_, trim)), true) = (trim, chars) {
+                edits.push((tokens[i].start, tokens[i + 3].end, trim.to_string()));
+            }
+        } else if call("SUBSTRING") {
+            let inside = arguments(tokens, i + 1);
+            let similar = inside
+                .iter()
+                .find(|&&j| word(j, "SIMILAR") && !word(j + 1, "TO"));
+            let escape = inside.iter().find(|&&j| word(j, "ESCAPE"));
+            if let Some(&similar) = similar {
+                edits.push((
+                    tokens[similar].start,
+                    tokens[similar].end,
+                    "FROM".to_string(),
+                ));
+                if let Some(&escape) = escape {
+                    edits.push((tokens[escape].start, tokens[escape].end, "FOR".to_string()));
+                }
+            }
+        } else if call("JSON_EXISTS") || call("JSON_QUERY") || call("JSON_VALUE") {
+            edits.extend(json_clauses(sql, tokens, i + 1, word(i, "JSON_EXISTS")));
+        } else if word(i, "UPDATE") && !word(i.wrapping_sub(1), "KEY") {
+            edits.extend(update_tables(sql, tokens, i));
+        } else if (call("XMLELEMENT") || call("XMLPI")) && word(i + 2, "NAME") {
+            edits.push((tokens[i + 2].start, tokens[i + 3].end, "''".to_string()));
+        } else if call("XMLATTRIBUTES") {
+            edits.push((tokens[i].start, tokens[i].end, "ROW".to_string()));
+            for j in arguments(tokens, i + 1) {
+                if word(j, "AS") {
+                    edits.push((tokens[j].start, tokens[j + 1].end, String::new()));
+                }
+            }
+        } else if call("XMLPARSE") {
+            for j in arguments(tokens, i + 1) {
+                if (word(j, "PRESERVE") || word(j, "STRIP")) && word(j + 1, "WHITESPACE") {
+                    edits.push((tokens[j].start, tokens[j + 1].end, String::new()));
+                }
+            }
+        } else if call("XMLSERIALIZE") && (word(i + 2, "DOCUMENT") || word(i + 2, "CONTENT")) {
+            edits.push((tokens[i].start, tokens[i + 2].end, "CAST(".to_string()));
+            for j in arguments(tokens, i + 1) {
+                if word(j, "NO") && word(j + 1, "INDENT") {
+                    edits.push((tokens[j].start, tokens[j + 1].end, String::new()));
+                } else if word(j, "INDENT") {
+                    edits.push((tokens[j].start, tokens[j].end, String::new()));
+                }
+            }
+        } else if call("XMLROOT") {
+            let inside = arguments(tokens, i + 1);
+            for &j in &inside {
+                if word(j, "VERSION") {
+                    edits.push((tokens[j].start, tokens[j].end, String::new()));
+                } else if word(j, "NO")
+                    && word(j + 1, "VALUE")
+                    && word(j.wrapping_sub(1), "VERSION")
+                {
+                    edits.push((tokens[j].start, tokens[j + 1].end, "NULL".to_string()));
+                } else if tokens[j].kind == Kind::Comma && word(j + 1, "STANDALONE") {
+                    let end = closing(tokens, i + 1).map_or(sql.len(), |close| tokens[close].start);
+                    edits.push((tokens[j].start, end, String::new()));
+                }
+            }
+        } else if call("XMLTABLE") {
+            edits.extend(xmltable_options(sql, tokens, i + 1));
+        } else if call("XMLEXISTS") {
+            for j in arguments(tokens, i + 1) {
+                if word(j, "PASSING") {
+                    edits.push((tokens[j].start, tokens[j].end, ",".to_string()));
+                }
+                if word(j, "BY") && (word(j + 1, "REF") || word(j + 1, "VALUE")) {
+                    edits.push((tokens[j].start, tokens[j + 1].end, String::new()));
+                }
+            }
+        } else if dialect == SqlDialect::MySql && call("CHAR") {
+            if let Some(&using) = arguments(tokens, i + 1).iter().find(|&&j| word(j, "USING")) {
+                edits.push((tokens[i].start, tokens[i].start, "CONVERT(".to_string()));
+                edits.push((tokens[using].start, tokens[using].start, ") ".to_string()));
+            }
+        } else if dialect == SqlDialect::MySql && word(i, "SOUNDS") && word(i + 1, "LIKE") {
+            edits.push((tokens[i].start, tokens[i + 1].end, "=".to_string()));
+        } else if dialect == SqlDialect::MySql
+            && word(i, "LOCK")
+            && word(i + 1, "IN")
+            && word(i + 2, "SHARE")
+            && word(i + 3, "MODE")
+        {
+            edits.push((tokens[i].start, tokens[i + 3].end, "FOR SHARE".to_string()));
+        } else if dialect == SqlDialect::MySql
+            && call("INTERVAL")
+            && arguments(tokens, i + 1)
+                .iter()
+                .any(|&j| tokens[j].kind == Kind::Comma)
+        {
+            edits.push((tokens[i].start, tokens[i].end, "`INTERVAL`".to_string()));
+        } else if dialect == SqlDialect::MySql && bang(sql, tokens, i) {
+            // `!` binds tighter than any infix operator: `!a + 1` is `(NOT a) + 1`.
+            if let Some(end) = operand_end(sql, tokens, i + 1) {
+                edits.push((tokens[i].start, tokens[i].end, "(NOT ".to_string()));
+                edits.push((tokens[end].end, tokens[end].end, ")".to_string()));
+            }
+        } else if dialect == SqlDialect::MySql
+            && word(i, "MOD")
+            && i > 0
+            && ends_operand(sql, &tokens[i - 1])
+        {
+            edits.push((tokens[i].start, tokens[i].end, "%".to_string()));
+        } else if call("JSON_ARRAY") && word(i + 2, "SELECT") {
+            if let Some(close) = closing(tokens, i + 1) {
+                edits.push((tokens[i + 2].start, tokens[i + 2].start, "(".to_string()));
+                edits.push((tokens[close].start, tokens[close].start, ")".to_string()));
+            }
+        }
+    }
+}
+
+/// `SET CONSTRAINTS ... DEFERRED` or `IMMEDIATE` starting at token `i`, as a `SET`: neither
+/// returns rows.
+fn set_constraints(sql: &str, tokens: &[Token], i: usize) -> Option<(usize, usize, String)> {
+    let word = |j: usize, name: &str| {
+        tokens
+            .get(j)
+            .is_some_and(|t| t.kind == Kind::Word && sql[t.start..t.end].eq_ignore_ascii_case(name))
+    };
+    if !word(i, "SET") || !word(i + 1, "CONSTRAINTS") {
+        return None;
+    }
+    let mode = (i + 2..tokens.len()).find(|&j| word(j, "DEFERRED") || word(j, "IMMEDIATE"))?;
+    let names = tokens[i + 2..mode].iter().all(|t| {
+        matches!(t.kind, Kind::Word | Kind::Comma)
+            || &sql[t.start..t.end] == "."
+            || sql[t.start..].starts_with('"')
+    });
+    (names && mode > i + 2).then(|| {
+        (
+            tokens[i].start,
+            tokens[mode].end,
+            "SET CONSTRAINTS TO DEFAULT".to_string(),
+        )
+    })
+}
+
+/// PostgreSQL's `DO [LANGUAGE name] code [LANGUAGE name]` starting at token `i`, an anonymous
+/// code block, as a statement that returns no rows; the code is not read.
+fn do_block(sql: &str, tokens: &[Token], i: usize) -> Option<(usize, usize, String)> {
+    let word = |j: usize, name: &str| {
+        tokens
+            .get(j)
+            .is_some_and(|t| t.kind == Kind::Word && sql[t.start..t.end].eq_ignore_ascii_case(name))
+    };
+    if !word(i, "DO") {
+        return None;
+    }
+    let code = if word(i + 1, "LANGUAGE") {
+        i + 3
+    } else {
+        i + 1
+    };
+    let token = tokens.get(code)?;
+    if token.kind != Kind::Other || !sql[token.start..].starts_with(['\'', '$']) {
+        return None;
+    }
+    let last = if word(code + 1, "LANGUAGE") && code + 2 < tokens.len() {
+        code + 2
+    } else {
+        code
+    };
+    Some((tokens[i].start, tokens[last].end, "RESET ALL".to_string()))
+}
+
+/// Whether `token` starts one of the predicates sqlparser reads after `IS [NOT]`, rather
+/// than an operand of SQLite's `IS`, its `IS NOT DISTINCT FROM`.
+fn is_predicate(sql: &str, token: &Token) -> bool {
+    const KEYWORDS: [&str; 11] = [
+        "NULL",
+        "TRUE",
+        "FALSE",
+        "UNKNOWN",
+        "DISTINCT",
+        "JSON",
+        "NORMALIZED",
+        "NFC",
+        "NFD",
+        "NFKC",
+        "NFKD",
+    ];
+    let text = &sql[token.start..token.end];
+    token.kind == Kind::Word && KEYWORDS.iter().any(|k| text.eq_ignore_ascii_case(k))
+}
+
+/// Whether `tokens[i]` starts SQLite's `<<` or `>>`, which sqlparser reads only in other
+/// dialects. They are respelled as `&`, which is typed the same.
+fn shift(sql: &str, tokens: &[Token], i: usize) -> bool {
+    let text = |j: usize| tokens.get(j).map_or("", |t| &sql[t.start..t.end]);
+    let adjacent = |j: usize| tokens[j].end == tokens[j + 1].start;
+    let first = text(i);
+    (first == "<" || first == ">")
+        && text(i + 1) == first
+        && adjacent(i)
+        && !(i > 0 && adjacent(i - 1) && matches!(text(i - 1), "<" | ">" | "-"))
+        && !(i + 2 < tokens.len() && adjacent(i + 1) && matches!(text(i + 2), "<" | ">" | "="))
+}
+
+/// Whether `token` can end an operand, so a `MOD` after it is MySQL's infix operator.
+fn ends_operand(sql: &str, token: &Token) -> bool {
+    const KEYWORDS: [&str; 19] = [
+        "SELECT",
+        "WHERE",
+        "AND",
+        "OR",
+        "NOT",
+        "XOR",
+        "ON",
+        "BY",
+        "WHEN",
+        "THEN",
+        "ELSE",
+        "HAVING",
+        "DISTINCT",
+        "ALL",
+        "RETURNING",
+        "BETWEEN",
+        "LIKE",
+        "CASE",
+        "IN",
+    ];
+    let text = &sql[token.start..token.end];
+    match token.kind {
+        Kind::Close => true,
+        Kind::Word => !KEYWORDS.iter().any(|k| text.eq_ignore_ascii_case(k)),
+        Kind::Other => text.starts_with(['\'', '"', '`']),
+        Kind::Open | Kind::Comma => false,
+    }
+}
+
+/// The clauses after the path of `JSON_EXISTS`, `JSON_QUERY` or `JSON_VALUE`, whose
+/// parenthesis is token `open`, dropped but for `RETURNING type`. `UNKNOWN ON ERROR` makes
+/// `JSON_EXISTS` nullable, so that call is left alone.
+fn json_clauses(
+    sql: &str,
+    tokens: &[Token],
+    open: usize,
+    exists: bool,
+) -> Option<(usize, usize, String)> {
+    const CLAUSES: [&str; 12] = [
+        "PASSING", "WITH", "WITHOUT", "KEEP", "OMIT", "ERROR", "NULL", "EMPTY", "DEFAULT", "TRUE",
+        "FALSE", "UNKNOWN",
+    ];
+    let text = |j: usize| &sql[tokens[j].start..tokens[j].end];
+    let inside = arguments(tokens, open);
+    let comma = inside.iter().position(|&j| tokens[j].kind == Kind::Comma)?;
+    let path = *inside.get(comma + 1)?;
+    let close = closing(tokens, open)?;
+    let rest = &inside[comma + 2..];
+    let clause = |j: &usize| CLAUSES.iter().any(|c| text(*j).eq_ignore_ascii_case(c));
+    if rest.is_empty()
+        || tokens[path].kind != Kind::Other
+        || (exists
+            && rest
+                .iter()
+                .any(|&j| text(j).eq_ignore_ascii_case("UNKNOWN")))
+    {
+        return None;
+    }
+    let returning = rest
+        .iter()
+        .position(|&j| text(j).eq_ignore_ascii_case("RETURNING"))
+        .map(|at| {
+            let end = rest[at + 1..]
+                .iter()
+                .find(|j| clause(j))
+                .map_or(tokens[close].start, |&j| tokens[j].start);
+            format!(" {}", sql[tokens[rest[at]].start..end].trim_end())
+        });
+    Some((
+        tokens[path].end,
+        tokens[close].start,
+        returning.unwrap_or_default(),
+    ))
+}
+
+/// The commas between the tables of the `UPDATE` at token `update`, as cross joins.
+fn update_tables(sql: &str, tokens: &[Token], update: usize) -> Vec<(usize, usize, String)> {
+    let mut depth = 0;
+    let mut commas = Vec::new();
+    for token in &tokens[update + 1..] {
+        match token.kind {
+            Kind::Open => depth += 1,
+            Kind::Close if depth == 0 => break,
+            Kind::Close => depth -= 1,
+            Kind::Comma if depth == 0 => {
+                commas.push((token.start, token.end, " CROSS JOIN".to_string()));
+            }
+            Kind::Word if depth == 0 && sql[token.start..token.end].eq_ignore_ascii_case("SET") => {
+                return commas;
+            }
+            Kind::Other if &sql[token.start..token.end] == ";" => break,
+            _ => {}
+        }
+    }
+    Vec::new()
+}
+
+/// The options of XMLTABLE's columns in the order sqlparser reads them, `PATH`, `DEFAULT`
+/// then `NOT NULL`, where PostgreSQL takes any order; a bare `NULL` is the default.
+fn xmltable_options(sql: &str, tokens: &[Token], open: usize) -> Vec<(usize, usize, String)> {
+    let word = |j: usize, name: &str| {
+        let token = &tokens[j];
+        token.kind == Kind::Word && sql[token.start..token.end].eq_ignore_ascii_case(name)
+    };
+    let inside = arguments(tokens, open);
+    let Some(columns) = inside.iter().position(|&j| word(j, "COLUMNS")) else {
+        return Vec::new();
+    };
+    let end = closing(tokens, open).map_or(sql.len(), |close| tokens[close].start);
+    let mut edits = Vec::new();
+    let mut rest = &inside[columns + 1..];
+    while !rest.is_empty() {
+        let comma = rest.iter().position(|&j| tokens[j].kind == Kind::Comma);
+        let (column, column_end) = match comma {
+            Some(k) => (&rest[..k], tokens[rest[k]].start),
+            None => (rest, end),
+        };
+        rest = comma.map_or(&[][..], |k| &rest[k + 1..]);
+        let mut options: Vec<(u8, usize)> = Vec::new();
+        for (k, &j) in column.iter().enumerate() {
+            let after = |name: &str| k > 0 && word(column[k - 1], name);
+            if word(j, "PATH") {
+                options.push((0, tokens[j].start));
+            } else if word(j, "DEFAULT") {
+                options.push((1, tokens[j].start));
+            } else if word(j, "NOT") && column.get(k + 1).is_some_and(|&n| word(n, "NULL")) {
+                options.push((2, tokens[j].start));
+            } else if word(j, "NULL") && !(after("PATH") || after("DEFAULT") || after("NOT")) {
+                options.push((3, tokens[j].start));
+            }
+        }
+        if options.is_sorted_by_key(|&(rank, _)| rank) && options.iter().all(|o| o.0 < 3) {
+            continue;
+        }
+        let mut clauses: Vec<(u8, &str)> = options
+            .iter()
+            .enumerate()
+            .map(|(k, &(rank, start))| {
+                let stop = options.get(k + 1).map_or(column_end, |&(_, next)| next);
+                (rank, sql[start..stop].trim())
+            })
+            .filter(|&(rank, _)| rank < 3)
+            .collect();
+        clauses.sort_by_key(|&(rank, _)| rank);
+        let text: Vec<&str> = clauses.into_iter().map(|(_, text)| text).collect();
+        edits.push((options[0].1, column_end, text.join(" ")));
+    }
+    edits
+}
+
+/// Whether token `i` is MySQL's prefix `!`, not the start of `!=`.
+fn bang(sql: &str, tokens: &[Token], i: usize) -> bool {
+    let text = |j: usize| tokens.get(j).map(|t| &sql[t.start..t.end]);
+    text(i) == Some("!") && !(text(i + 1) == Some("=") && tokens[i + 1].start == tokens[i].end)
+}
+
+/// The last token of the operand starting at token `j`: a name, number or string (dotted
+/// parts included), a call, a parenthesized expression, or another `!` and its operand.
+fn operand_end(sql: &str, tokens: &[Token], j: usize) -> Option<usize> {
+    let token = tokens.get(j)?;
+    let text = |k: usize| tokens.get(k).map(|t| &sql[t.start..t.end]);
+    if bang(sql, tokens, j) {
+        return operand_end(sql, tokens, j + 1);
+    }
+    let mut end = match token.kind {
+        Kind::Open => return closing(tokens, j),
+        Kind::Word => j,
+        Kind::Other if text(j)?.starts_with(['\'', '"', '`']) => j,
+        _ => return None,
+    };
+    while text(end + 1) == Some(".")
+        && tokens.get(end + 2).is_some_and(|t| {
+            t.kind == Kind::Word || text(end + 2).is_some_and(|s| s.starts_with('`'))
+        })
+    {
+        end += 2;
+    }
+    if tokens.get(end + 1).is_some_and(|t| t.kind == Kind::Open) {
+        return closing(tokens, end + 1);
+    }
+    Some(end)
+}

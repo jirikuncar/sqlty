@@ -1,11 +1,11 @@
 //! Operator typing: numeric promotion, arithmetic and common types.
 
-use sqlparser::ast::{BinaryOperator, Expr, Value};
+use sqlparser::ast::{BinaryOperator, Expr, UnaryOperator, Value};
 
 use super::dialect::SqlDialect;
 use super::expr::{array_element, from_sql_type};
-use super::inference::{binary_rules, BinaryRule, RuleType};
-use super::literals::{merge, python_kind};
+use super::inference::{binary_rules, operand, prefix_rules, BinaryRule, RuleType};
+use super::literals::{merge, python_kind, strip};
 use super::query::Analyzer;
 use super::scope::Scope;
 use super::typed::Typed;
@@ -22,7 +22,8 @@ impl Analyzer<'_> {
         scope: &Scope,
     ) -> Inferred<Typed> {
         use BinaryOperator::*;
-        if self.dialect == SqlDialect::MySql && matches!(op, Plus | Minus) {
+        let interval = matches!(left, Expr::Interval(_)) || matches!(right, Expr::Interval(_));
+        if self.dialect == SqlDialect::MySql && matches!(op, Plus | Minus) && interval {
             let (l, r) = (self.expr(left, scope)?, self.expr(right, scope)?);
             if let Some(typed) = mysql_date_add(op, (left, &l), (right, &r)) {
                 return Ok(from_sql_type(typed, self.dialect));
@@ -40,7 +41,11 @@ impl Analyzer<'_> {
             None if reads => self.rule_operands(left, op, right, scope)?,
             None => (Typed::UNKNOWN, Typed::UNKNOWN),
         };
-        let rank = |t: &Typed| operand_type(t).and_then(numeric_rank);
+        let rank = |t: &Typed| match self.dialect {
+            SqlDialect::MySql => mysql_numeric_rank(t),
+            SqlDialect::Sqlite => sqlite_numeric_rank(t),
+            _ => operand_type(t).and_then(numeric_rank),
+        };
         let promoted = |least: usize| match (rank(&l), rank(&r)) {
             (Some(a), Some(b)) => {
                 from_sql_type(NUMERIC_RANKS[a.max(b).max(least)][0], self.dialect)
@@ -60,6 +65,54 @@ impl Analyzer<'_> {
             RuleType::Right => r,
             RuleType::Common => common_type(l, r, self.dialect).unwrap_or(Typed::UNKNOWN),
         })
+    }
+
+    /// Result type of the prefix operator `op operand`: its inference rule's.
+    pub(super) fn prefix_op(
+        &self,
+        op: &UnaryOperator,
+        operand: &Expr,
+        scope: &Scope,
+    ) -> Inferred<Typed> {
+        Ok(match self.prefix_rule(op, operand, scope)? {
+            Some((rule, typed)) => self.prefixed(rule, typed),
+            None => Typed::UNKNOWN,
+        })
+    }
+
+    /// Result type of a prefix operator's `rule` on an operand of type `typed`.
+    pub(super) fn prefixed(&self, rule: &BinaryRule, typed: Typed) -> Typed {
+        match rule.result {
+            RuleType::Sql(name) => from_sql_type(name, self.dialect),
+            RuleType::Right => strip(typed, self.dialect),
+            _ => Typed::UNKNOWN,
+        }
+    }
+
+    /// The inference rule for `op operand`, with the operand's type.
+    pub(super) fn prefix_rule(
+        &self,
+        op: &UnaryOperator,
+        operand: &Expr,
+        scope: &Scope,
+    ) -> Inferred<Option<(&'static BinaryRule, Typed)>> {
+        let rules = prefix_rules(op);
+        if rules.is_empty() {
+            return Ok(None);
+        }
+        let typed = self.expr(operand, scope)?;
+        Ok(self.prefix_rule_of(op, &typed).map(|rule| (rule, typed)))
+    }
+
+    /// The inference rule for the prefix operator `op` on an operand of type `typed`.
+    pub(super) fn prefix_rule_of(
+        &self,
+        op: &UnaryOperator,
+        typed: &Typed,
+    ) -> Option<&'static BinaryRule> {
+        prefix_rules(op)
+            .iter()
+            .find(|rule| rule.applies(self.dialect, None, operand(rule_type(typed))))
     }
 
     /// The operand types an inference rule reads. In arithmetic a placeholder or `NULL`
@@ -100,7 +153,7 @@ impl Analyzer<'_> {
         // Arithmetic reads both sides: a placeholder takes the other operand's type.
         if reads_left && reads_right || (reads_left || reads_right) && is_arithmetic(op) {
             let typed = self.rule_operands(left, op, right, scope)?;
-            let (l, r) = (rule_type(&typed.0), rule_type(&typed.1));
+            let (l, r) = (operand(rule_type(&typed.0)), operand(rule_type(&typed.1)));
             let found = rules.iter().find(|rule| rule.applies(self.dialect, l, r));
             return Ok(found.map(|rule| (rule, Some(typed.clone()))));
         }
@@ -109,8 +162,8 @@ impl Analyzer<'_> {
         };
         let (l, r) = (side(reads_left, left)?, side(reads_right, right)?);
         let (l, r) = (
-            l.as_ref().and_then(rule_type),
-            r.as_ref().and_then(rule_type),
+            operand(l.as_ref().and_then(rule_type)),
+            operand(r.as_ref().and_then(rule_type)),
         );
         let found = rules.iter().find(|rule| rule.applies(self.dialect, l, r));
         Ok(found.map(|rule| (rule, None)))
@@ -162,6 +215,30 @@ pub(super) fn numeric_rank(sql_type: &str) -> Option<usize> {
     NUMERIC_RANKS
         .iter()
         .position(|names| names.contains(&sql_type))
+}
+
+/// The rank of the number MySQL converts an operand to in arithmetic: unsigned integers,
+/// `YEAR`, `BIT` and `BOOLEAN` values become integers, strings become doubles.
+fn mysql_numeric_rank(typed: &Typed) -> Option<usize> {
+    let ty = rule_type(typed)?;
+    numeric_rank(ty).or(match ty {
+        "UTINYINT" | "USMALLINT" | "UMEDIUMINT" | "UINT" | "UBIGINT" | "YEAR" | "BIT"
+        | "BOOLEAN" => Some(2),
+        "UDECIMAL" => Some(3),
+        "UDOUBLE" | "TEXT" | "VARCHAR" | "CHAR" | "ENUM" | "SET" => Some(5),
+        _ => None,
+    })
+}
+
+/// The rank of the number SQLite converts an operand to in arithmetic: a `BOOLEAN` is the
+/// integer it is stored as, and a string or blob an integer or a real, ranked as a real.
+fn sqlite_numeric_rank(typed: &Typed) -> Option<usize> {
+    let ty = rule_type(typed)?;
+    numeric_rank(ty).or(match ty {
+        "BOOLEAN" => Some(2),
+        "TEXT" | "VARCHAR" | "CHAR" | "BLOB" | "VARBINARY" | "BINARY" => Some(5),
+        _ => None,
+    })
 }
 
 /// MySQL `date ± INTERVAL n unit` (or `INTERVAL n unit + date`): a `DATE` stays a date for
@@ -237,6 +314,11 @@ pub(super) fn common_type(left: Typed, right: Typed, dialect: SqlDialect) -> Opt
             return Some(left);
         }
     }
+    if dialect == SqlDialect::Sqlite {
+        if let Some(union) = sqlite_union(&left, &right) {
+            return Some(union);
+        }
+    }
     if let (Some(x), Some(y)) = (
         left.sql().and_then(array_element),
         right.sql().and_then(array_element),
@@ -246,6 +328,9 @@ pub(super) fn common_type(left: Typed, right: Typed, dialect: SqlDialect) -> Opt
         return Some(from_sql_type(&format!("ARRAY<{elem}>"), dialect));
     }
     let (a, b) = (category(&left)?, category(&right)?);
+    if dialect == SqlDialect::MySql {
+        return mysql_common_type(a, b).map(|common| from_sql_type(common, dialect));
+    }
     const TEMPORAL: [&str; 3] = ["DATE", "TIMESTAMP", "TIMESTAMPTZ"];
     let common = if let (Some(x), Some(y)) = (numeric_rank(a), numeric_rank(b)) {
         NUMERIC_RANKS[x.max(y)][0]
@@ -262,6 +347,93 @@ pub(super) fn common_type(left: Typed, right: Typed, dialect: SqlDialect) -> Opt
         return None;
     };
     Some(from_sql_type(common, dialect))
+}
+
+/// SQLite has no type for an expression: a `CASE` or `UNION` of an integer and a text
+/// gives either value, so its Python type is their union. Numbers still widen.
+fn sqlite_union(left: &Typed, right: &Typed) -> Option<Typed> {
+    const NUMBERS: [&str; 4] = ["int", "float", "decimal.Decimal", "bool"];
+    let (x, y) = (left.python()?, right.python()?);
+    let numeric = |python: &str| python.split(" | ").all(|kind| NUMBERS.contains(&kind));
+    if x == y || (numeric(x) && numeric(y)) {
+        return None;
+    }
+    let mut union: Vec<&str> = x.split(" | ").collect();
+    for kind in y.split(" | ") {
+        if !union.contains(&kind) {
+            union.push(kind);
+        }
+    }
+    Some(Typed::python_only(&union.join(" | ")))
+}
+
+/// MySQL's aggregation of the types of `CASE`, `IF`, `COALESCE` or `UNION` inputs: numbers
+/// widen, temporal types meet at `DATETIME`, a binary string wins and other mixes are text.
+fn mysql_common_type<'a>(a: &'a str, b: &'a str) -> Option<&'a str> {
+    const TEMPORAL: [&str; 4] = ["DATE", "TIME", "DATETIME", "TIMESTAMP"];
+    const BINARY: [&str; 6] = [
+        "VARBINARY",
+        "BINARY",
+        "BLOB",
+        "TINYBLOB",
+        "MEDIUMBLOB",
+        "LONGBLOB",
+    ];
+    let rank = |ty: &str| match ty {
+        "BOOLEAN" | "YEAR" => Some(0),
+        _ => numeric_rank(
+            ty.strip_prefix('U')
+                .filter(|signed| numeric_rank(signed).is_some())
+                .unwrap_or(ty),
+        ),
+    };
+    let known = |ty: &str| {
+        rank(ty).is_some()
+            || TEMPORAL.contains(&ty)
+            || BINARY.contains(&ty)
+            || matches!(ty, "TEXT" | "VARCHAR" | "CHAR" | "JSON")
+    };
+    if !known(a) || !known(b) {
+        return None;
+    }
+    if let (Some((x, x_unsigned)), Some((y, y_unsigned))) = (mysql_integer(a), mysql_integer(b)) {
+        let (unsigned, signed) = match (x_unsigned, y_unsigned) {
+            (true, true) => return Some(MYSQL_UNSIGNED[x.max(y)]),
+            (false, false) => return Some(MYSQL_SIGNED[x.max(y)]),
+            (true, false) => (x, y),
+            (false, true) => (y, x),
+        };
+        // A signed type that holds every value of both, or DECIMAL past BIGINT UNSIGNED.
+        return Some(match MYSQL_SIGNED.get(signed.max(unsigned + 1)) {
+            Some(wider) => wider,
+            None => "DECIMAL",
+        });
+    }
+    Some(match (rank(a), rank(b)) {
+        (Some(x), Some(y)) => NUMERIC_RANKS[x.max(y)][0],
+        _ if a == b => a,
+        _ if TEMPORAL.contains(&a) && TEMPORAL.contains(&b) => "DATETIME",
+        _ if BINARY.contains(&a) || BINARY.contains(&b) => "VARBINARY",
+        _ => "TEXT",
+    })
+}
+
+const MYSQL_SIGNED: [&str; 5] = ["TINYINT", "SMALLINT", "MEDIUMINT", "INT", "BIGINT"];
+const MYSQL_UNSIGNED: [&str; 5] = ["UTINYINT", "USMALLINT", "UMEDIUMINT", "UINT", "UBIGINT"];
+
+/// The width of a MySQL integer type, in [`MYSQL_SIGNED`] order, and whether it is unsigned.
+fn mysql_integer(ty: &str) -> Option<(usize, bool)> {
+    let ty = if ty == "BOOLEAN" { "TINYINT" } else { ty };
+    MYSQL_SIGNED
+        .iter()
+        .position(|name| *name == ty)
+        .map(|width| (width, false))
+        .or_else(|| {
+            MYSQL_UNSIGNED
+                .iter()
+                .position(|name| *name == ty)
+                .map(|width| (width, true))
+        })
 }
 
 /// A string literal: PostgreSQL types it `unknown` until the other inputs decide.

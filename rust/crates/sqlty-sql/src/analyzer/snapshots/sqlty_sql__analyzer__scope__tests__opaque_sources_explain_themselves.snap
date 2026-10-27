@@ -28,13 +28,13 @@ SELECT a.id, g FROM a, generate_series(1, 3) AS g
 id: int | INT | NonNull
 g: int | INT | NonNull
 
-SELECT * FROM pg_get_keywords() AS k
+SELECT * FROM ST_Dump(NULL) AS d
 *: ? | ? | Unknown
-[unsupported-syntax] `*` reads table function pg_get_keywords, which sqlty does not read the columns of
+[unsupported-syntax] `*` reads table function st_dump, which sqlty does not read the columns of
 
-SELECT k.word FROM pg_get_keywords() AS k
-word: ? | ? | Unknown
-[unsupported-syntax] column `word` may come from table function pg_get_keywords, which sqlty does not read the columns of
+SELECT d.path FROM ST_Dump(NULL) AS d
+path: ? | ? | Unknown
+[unsupported-syntax] column `path` may come from table function st_dump, which sqlty does not read the columns of
 
 SELECT * FROM a, LATERAL (SELECT a.id + 1 AS next) AS l
 id: int | INT | NonNull

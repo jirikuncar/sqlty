@@ -4,7 +4,7 @@ Default severity: **warn**
 
 ## What it does
 
-Reports a query that parses, but uses a construct sqlty does not type: an expression it has no rule for, `VALUES` outside PostgreSQL (unless it is the source of an `INSERT` without `RETURNING`, where nothing reads its types), `*` over a `USING` or `NATURAL` join, a column of a table function or of a `FROM`/`USING` source of a DML statement, branches of a set operation that disagree on a type. The result is not trusted, so the column stays untyped.
+Reports a query that parses, but uses a construct sqlty does not type: an expression it has no rule for, `VALUES` outside PostgreSQL, MySQL and SQLite (unless it is the source of an `INSERT` without `RETURNING`, where nothing reads its types), `*` over a `USING` or `NATURAL` join, a column of a table function or of a `FROM`/`USING` source of a DML statement, branches of a set operation that disagree on a type. The result is not trusted, so the column stays untyped.
 
 ```toml
 [tool.sqlty]
@@ -27,11 +27,11 @@ from sqlty import SQL
 q = SQL[tuple[object]]("--sql\nSELECT 1 OPERATOR(pg_catalog.+) 1")
 ```
 
-### `INSERT ... VALUES` outside PostgreSQL
+### `INSERT ... VALUES` in another dialect
 
 ```toml
 [tool.sqlty]
-dialect = "sqlite"
+dialect = "duckdb"
 schema = "schema.sql"
 
 [tool.sqlty.rules]

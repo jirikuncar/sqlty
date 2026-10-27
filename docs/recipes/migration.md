@@ -120,7 +120,7 @@ with the queries whose rows are passed around the most.
 
 Run `sqlty rewrite --check` and `sqlty check` in [CI](ci.md), and promote
 [`stale-type`](../reference/rules.md#stale-type) to an error once the codebase
-is clean.
+is clean, so annotations stay exact rather than only wide enough.
 
 ## Editing typed queries
 
@@ -155,7 +155,7 @@ values as parameters (`%s`) instead.
 
 **Nullable columns.** A column that can be `NULL` infers `T | None`, so a row type
 field must be optional too ([`nullable-mismatch`](../reference/rules.md#nullable-mismatch)).
-Wrappers written by an earlier release are `stale-type`: `sqlty check --fix` updates
+Wrappers written by an earlier release are `narrow-type`: `sqlty check --fix` updates
 them. See [Nullability](../guide/schema-inference.md#nullability).
 
 ## Schema changes in CI

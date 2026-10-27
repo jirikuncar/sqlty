@@ -49,19 +49,33 @@ make typecheck       # mypy + ty on src and examples
 
 ## Inference rules
 
-Operators, aggregates and JSON accessors are typed by `*.inference.toml` files in
-`rust/crates/sqlty-sql/rules/`, compiled by `build.rs` into static match arms.
+Operators, functions, aggregates and JSON accessors are typed by `*.inference.toml`
+files in `rust/crates/sqlty-sql/rules/`, compiled by `build.rs` into static match arms.
+Type a new function or operator with a rule, not in Rust: a rule carries its reference
+and reasoning, and `--explain` shows it. When a result needs code (it depends on an
+argument's value, say), add a `@` result kind to `compile.rs` and cite the rule.
 [`rules/README.md`](rust/crates/sqlty-sql/rules/README.md) has the format, the
 lookup order and how to verify a `reference`. Every rule needs a `reference` to
 vendor documentation of the version the tests target (PostgreSQL 17, MySQL 8.4,
 SQLite 3), checked against the published page, and a one-sentence `reasoning`;
 the build fails otherwise. `sqlty check --explain` and `-- rules:` mdtest
-assertions show which rule typed a column. `rule_dispatch_does_not_allocate`
+assertions show which rule typed a column; every rule needs one, in
+`tests/mdtest/type_inference/rule_coverage.md` if nowhere else
+(`test_every_inference_rule_is_asserted`). `rule_dispatch_does_not_allocate`
 (`analyzer/inference.rs`) keeps rule lookup free of heap allocations.
+
+## Agent Skills
+
+`skills/<name>/SKILL.md` (and its `references/`) are the Agent Skills, installed
+through the plugin manifests (`.claude-plugin/`, `.codex-plugin/`,
+`.cursor-plugin/`) or `sqlty skill --install`. `rust/crates/sqlty-ext/build.rs`
+compiles them into the extension: rebuild it after editing one, or
+`test_agent_skills_are_compiled_in` fails. A new skill gets a row in the table of
+`docs/recipes/agents.md`.
 
 ## Benchmarks
 
-Two layers, both in the Makefile:
+Three layers, all in the Makefile:
 
 - `make bench-ci` (`benchmarks/bench_project.py`, with `tests/test_performance.py`)
   is end-to-end: CLI wall time and RSS on a synthetic project, gated by
@@ -73,6 +87,10 @@ Two layers, both in the Makefile:
   `check_source`/`rewrite_source` on 1k/4k queries. Use it to find where time
   goes and to compare a branch (`ARGS="--save-baseline main"`, then
   `ARGS="--baseline main"`).
+- `make bench-codspeed` runs `benchmarks/test_benchmarks.py` with pytest-codspeed: each
+  query kind of `synth.KINDS` through `analyze_select`/`analyze_params`, the schema
+  load, `rewrite_source` and `check_source`. CI's CodSpeed job counts their
+  instructions on every commit and reports the change on the pull request.
 
 ## Git safety
 

@@ -114,6 +114,43 @@ SELECT array_positions(ia, 1) AS ps, array_dims(ia) AS dims, array_lower(ia, 1) 
 -- columns: gb: int (INT)
 ```
 
+`substring`, `substr`, `overlay` and the trim functions have `bytea`
+overloads, which return `bytea`.
+
+```sql
+SELECT substring(by from 2 for 3) AS a, substr(by, 2) AS b, overlay(by placing '\x00'::bytea from 1) AS c, btrim(by, '\x00'::bytea) AS d, trim(both '\x00'::bytea from by) AS e, substring(tx from 2) AS f FROM t
+-- columns: a: bytes (VARBINARY)
+-- columns: b: bytes (VARBINARY)
+-- columns: c: bytes (VARBINARY)
+-- columns: d: bytes (VARBINARY)
+-- columns: e: bytes (VARBINARY)
+-- columns: f: str (TEXT)
+```
+
+## Trigonometry in degrees and hyperbolic functions
+
+```sql
+SELECT cot(d) AS a, sind(d) AS b, atan2d(d, d) AS c, tanh(d) AS e, atanh(d) AS f FROM t
+-- columns: a: float (DOUBLE)
+-- columns: b: float (DOUBLE)
+-- columns: c: float (DOUBLE)
+-- columns: e: float (DOUBLE)
+-- columns: f: float (DOUBLE)
+```
+
+## Positions, normalization and identifiers
+
+`IS NORMALIZED` of NULL is NULL.
+
+```sql
+SELECT position('a' in tx) AS a, tx IS NFC NORMALIZED AS b, n::text IS NOT NFD NORMALIZED AS c, parse_ident(tx) AS e, pg_postmaster_start_time() AS f FROM t
+-- columns: a: int (INT)
+-- columns: b: bool (BOOLEAN)
+-- columns: c: bool | None (BOOLEAN)
+-- columns: e: list[str] (ARRAY<TEXT>)
+-- columns: f: datetime.datetime (TIMESTAMPTZ)
+```
+
 ## Network addresses
 
 `<<`, `<<=`, `>>` and `>>=` test containment. An address plus or minus an
@@ -179,4 +216,225 @@ SELECT jsonb_object_keys(jb) AS k, regexp_split_to_table(tx, ',') AS part, jsonb
 -- columns: k: str | None (TEXT)
 -- columns: part: str | None (TEXT)
 -- columns: kv: tuple[typing.Any, ...] | None (RECORD)
+```
+
+## Scales, error functions, JSON paths and range bounds
+
+`jsonb_path_match` is NULL when the path's first result is not a boolean.
+
+```sql
+SELECT min_scale(n) AS a, trim_scale(n) AS b, erf(d) AS c, regexp_instr(tx, 'a') AS e, regexp_substr(tx, 'a') AS f, jsonb_path_match(jb, '$.a == 1') AS g, jsonb_path_query_array(jb, '$.a') AS h, set_byte(by, 0, 1) AS i, bit_count(by) AS k, lower_inc(int4range(1, 5)) AS l, range_merge(int4range(1, 2), int4range(3, 4)) AS m FROM t
+-- columns: a: int | None (INT)
+-- columns: b: decimal.Decimal | None (DECIMAL)
+-- columns: c: float (DOUBLE)
+-- columns: e: int (INT)
+-- columns: f: str | None (TEXT)
+-- columns: g: bool | None (BOOLEAN)
+-- columns: h: typing.Any (JSONB)
+-- columns: i: bytes (VARBINARY)
+-- columns: k: int (BIGINT)
+-- columns: l: bool (BOOLEAN)
+-- columns: m: None (INT4RANGE)
+```
+
+```sql
+SELECT range_intersect_agg(int4range(i, i + 1)) AS r FROM t
+-- columns: r: None (INT4RANGE)
+```
+
+## Operators on bytes, roots, jsonb subscripts and ranges
+
+A `jsonb` subscript is `jsonb`, NULL for a missing key. `|/` and `||/` take a
+`double precision`.
+
+```sql
+SELECT by || by AS a, |/ d AS b, ||/ i AS c, jb['a'] AS e, jb['a']['b'] AS f, int4range(1, 5) * int4range(3, 7) AS g, int4range(1, 5) + int4range(3, 7) AS h, int4range(1, 5) - int4range(3, 7) AS k FROM t
+-- columns: a: bytes (VARBINARY)
+-- columns: b: float (DOUBLE)
+-- columns: c: float (DOUBLE)
+-- columns: e: typing.Any (JSONB)
+-- columns: f: typing.Any (JSONB)
+-- columns: g: None (INT4RANGE)
+-- columns: h: None (INT4RANGE)
+-- columns: k: None (INT4RANGE)
+```
+
+## Examples of the documentation
+
+`scripts/compat/pg_docs.py` compares the examples of the PostgreSQL documentation with
+the server. These are the ones it found typed differently. `pg_typeof` returns a
+`regtype`, `cbrt` only has a `double precision` overload, `length` of a path is a
+distance, and `&&`, `||` and `<->` combine text search queries. `substr` and
+`IS NORMALIZED` name their columns after the functions they call.
+
+```sql
+SELECT pg_typeof(33) AS typ, cbrt(64.0) AS root, length(path '((-1,0),(1,0))') AS len,
+    'fat | rat'::tsquery && 'cat'::tsquery AS q,
+    ts_headline('{"cat":"raining cats and dogs"}'::jsonb, 'cat') AS headline
+-- columns: typ: str (REGTYPE)
+-- columns: root: float (DOUBLE)
+-- columns: len: float (DOUBLE)
+-- columns: q: str (TSQUERY)
+-- columns: headline: typing.Any (JSONB)
+```
+
+```sql
+SELECT substr('alphabet', 3), U&'\0061\0308bc' IS NFD NORMALIZED, 'a' IS NOT NORMALIZED
+-- columns: substr: str (TEXT)
+-- columns: is_normalized: bool (BOOLEAN)
+-- columns: ?column?: bool (BOOLEAN)
+```
+
+## Signatures of the server
+
+`scripts/compat/pg_docs.py` also calls every overload of the documented functions and every
+operator. `ts_headline` keeps the JSON type of its document after a configuration,
+`string_agg` of `bytea` is `bytea`, and `age` of a transaction ID counts transactions. The
+session functions return `name`. PostgreSQL has one array type per element type, so
+`array_agg` of arrays, the `ARRAY` of arrays and `unnest` of a two-dimensional array follow
+the dimensions, and `unnest` returns the elements.
+
+```sql
+SELECT ts_headline('english', '{"a": "cats"}'::jsonb, 'cat') AS headline,
+    string_agg('\x01'::bytea, '\x00'::bytea) AS bytes, age('5'::xid) AS xid_age,
+    current_database() AS db, current_user AS usr, array_agg(ARRAY[1, 2]) AS grid,
+    ARRAY[ARRAY[1, 2], ARRAY[3, 4]] AS matrix, unnest(ARRAY[[1, 2], [3, 4]]) AS element
+-- columns: headline: typing.Any (JSONB)
+-- columns: bytes: bytes | None (BYTEA)
+-- columns: xid_age: int (INT)
+-- columns: db: str (NAME)
+-- columns: usr: str (NAME)
+-- columns: grid: list[list[int]] | None (ARRAY<ARRAY<INT>>)
+-- columns: matrix: list[list[int]] (ARRAY<ARRAY<INT>>)
+-- columns: element: int | None (INT)
+```
+
+## Geometry, XML, system information and multiranges
+
+Every function the documentation lists has a type: the geometric functions return their
+geometric type, the XML functions `xml` or `boolean`, and the WAL and snapshot functions
+`pg_lsn` and `pg_snapshot`, which psycopg loads as `str`. The catalog lookups `to_regclass`
+and friends are NULL for a name that does not exist. A multirange keeps its range type:
+`range_merge` and `unnest` of a multirange give the range type, `multirange` and
+`range_agg` the multirange type, and `lower` the bound type.
+
+```sql
+SELECT area(box '(2,2),(0,0)') AS area, center(box '(1,2),(0,0)') AS center,
+    xpath('/a', '<a/>'::xml) AS nodes, xml_is_well_formed('<a/>') AS well_formed,
+    pg_current_wal_lsn() AS lsn, pg_current_snapshot() AS snapshot,
+    to_regclass('users') AS relation, gcd(1071, 462) AS divisor,
+    range_merge('{[1,2), [3,4)}'::int4multirange) AS merged,
+    multirange(int4range(1, 2)) AS multi, lower('{[1.1,2.2)}'::nummultirange) AS low,
+    timezone(timestamptz '2001-02-16 20:38:40-05') AS local_time
+-- columns: area: float (DOUBLE)
+-- columns: center: str (POINT)
+-- columns: nodes: list[str] (ARRAY<XML>)
+-- columns: well_formed: bool (BOOLEAN)
+-- columns: lsn: str | None (PG_LSN)
+-- columns: snapshot: str (PG_SNAPSHOT)
+-- columns: relation: str | None (REGCLASS)
+-- columns: divisor: int (INT)
+-- columns: merged: None (INT4RANGE)
+-- columns: multi: None (INT4MULTIRANGE)
+-- columns: low: decimal.Decimal | None (DECIMAL)
+-- columns: local_time: datetime.datetime (TIMESTAMP)
+```
+
+## Operators on shapes, money, log locations and bit strings
+
+Every operator of `pg_operator` has a type. Shape operators give a shape, a point, a
+distance or a predicate. `#` and `##` are NULL when the shapes do not meet. An amount
+divided by an amount is a `double precision`, and the distance between two log locations
+is a `numeric`.
+
+```sql
+SELECT box '(2,2),(0,0)' + point '(1,1)' AS moved, point '(0,0)' <-> point '(3,4)' AS distance,
+    lseg '[(0,0),(1,1)]' # lseg '[(0,1),(1,0)]' AS crossing, @@ circle '<(1,1),2>' AS center,
+    # path '[(0,0),(1,1)]' AS points, 10::money / 4::money AS ratio,
+    '1/0'::pg_lsn - '0/1'::pg_lsn AS distance_bytes, B'1010' # B'0110' AS xor,
+    B'10' || B'01' AS bits
+-- columns: moved: str (BOX)
+-- columns: distance: float (DOUBLE)
+-- columns: crossing: str | None (POINT)
+-- columns: center: str (POINT)
+-- columns: points: int (INT)
+-- columns: ratio: float (DOUBLE)
+-- columns: distance_bytes: decimal.Decimal (DECIMAL)
+-- columns: xor: str (BIT)
+-- columns: bits: str (VARBIT)
+```
+
+## Syntax sqlparser does not read
+
+sqlparser rejects some PostgreSQL syntax. When a query does not parse, sqlty respells that
+syntax as an equivalent it does read, so the query is typed as PostgreSQL types it:
+
+| Syntax | Read as |
+|---|---|
+| `x BETWEEN SYMMETRIC a AND b` | `x BETWEEN a AND b` |
+| `ts AT LOCAL` | `ts AT TIME ZONE current_setting('TimeZone')` |
+| `COLLATION FOR (x)` | `pg_collation_for(x)` |
+| `trim(both from x, chars)` | `btrim(x, chars)` |
+| `substring(x similar p escape e)` | `substring(x from p for e)` |
+| `JSON_VALUE(x, path PASSING ... DEFAULT ... ON ERROR)` | `JSON_VALUE(x, path)`, keeping `RETURNING` |
+| `json_array(SELECT ...)` | `json_array((SELECT ...))` |
+| `xmlelement(name n, xmlattributes(x AS a), ...)`, `xmlpi(name n, ...)` | `xmlelement('', ROW(x), ...)`, `xmlpi('', ...)` |
+| `xmlroot(x, version v, standalone yes)` | `xmlroot(x, v)` |
+| `xmlserialize(document x AS type indent)` | `CAST(x AS type)` |
+| `xmlparse(content x strip whitespace)`, `xmlexists(path PASSING BY REF x)` | `xmlparse(content x)`, `xmlexists(path, x)` |
+| a window frame's `EXCLUDE CURRENT ROW` or `EXCLUDE GROUP` | a frame that may be empty |
+| a window frame's `EXCLUDE TIES` or `EXCLUDE NO OTHERS` | the frame |
+
+```sql
+SELECT 2 BETWEEN SYMMETRIC 3 AND 1 AS swapped, timestamp '2001-02-16 20:38:40' at local AS local, collation for ('foo'::text) AS collation, trim(both from 'yxTomxx', 'xyz') AS trimmed, substring('Thomas' similar '%#"o_a#"_' escape '#') AS matched, JSON_VALUE(jsonb '[1,2]', 'strict $[$off]' PASSING 1 AS off RETURNING int DEFAULT 9 ON ERROR) AS value, json_array(SELECT 1) AS arr
+-- columns: swapped: bool (BOOLEAN)
+-- columns: local: datetime.datetime (TIMESTAMPTZ)
+-- columns: collation: str | None (TEXT)
+-- columns: trimmed: str (TEXT)
+-- columns: matched: str | None (TEXT)
+-- columns: value: int | None (INT)
+-- columns: arr: typing.Any (JSON)
+```
+
+```sql
+SELECT 2 NOT BETWEEN ASYMMETRIC 1 AND 3 AS outside, trim(leading from 'xxa', 'x') AS lead, trim(trailing from 'axx', 'x') AS trail, JSON_QUERY(jsonb '[1,[2,3],null]', 'lax $[*][$off]' PASSING 1 AS off WITH CONDITIONAL WRAPPER) AS wrapped, JSON_QUERY(jsonb '{"a": "[1, 2]"}', 'lax $.a' RETURNING int[] OMIT QUOTES ERROR ON ERROR) AS unquoted, JSON_EXISTS(jsonb '{"a": [1,2,3]}', 'lax $.a[5]' ERROR ON ERROR) AS found, 'at local' AS text -- at local
+-- columns: outside: bool (BOOLEAN)
+-- columns: lead: str (TEXT)
+-- columns: trail: str (TEXT)
+-- columns: wrapped: typing.Any (JSONB)
+-- columns: unquoted: list[int] | None (ARRAY<INT>)
+-- columns: found: bool (BOOLEAN)
+-- columns: text: typing.Literal['at local'] (None)
+```
+
+The XML functions are NULL when their content is: `xmlelement` never is, `xmlforest` and
+`xmlconcat` only when every argument is, and `xmlroot` when its first is.
+
+```sql
+SELECT xmlelement(name foo, xmlattributes(1 AS bar), NULL) AS element, xmlpi(name php, NULL) AS pi, xmlroot(xmlparse(document '<a/>'), version '1.0', standalone yes) AS root, xmlserialize(content '<a/>'::xml AS varchar(20) indent) AS text, xmlforest(1 AS a, NULL AS b) AS forest, xmlconcat(NULL, NULL) AS concat, xmlparse(content 'x' strip whitespace) AS parsed, xmlexists('/a' PASSING BY REF '<a/>') AS found
+-- columns: element: str (XML)
+-- columns: pi: str | None (XML)
+-- columns: root: str (XML)
+-- columns: text: str (VARCHAR(20))
+-- columns: forest: str (XML)
+-- columns: concat: str | None (XML)
+-- columns: parsed: str (XML)
+-- columns: found: bool (BOOLEAN)
+```
+
+Without the current row a window frame may be empty, and so may its aggregates and
+values:
+
+```sql
+SELECT max(x) OVER (ORDER BY x ROWS CURRENT ROW EXCLUDE CURRENT ROW) AS alone, first_value(x) OVER (ORDER BY x RANGE UNBOUNDED PRECEDING EXCLUDE TIES) AS first, count(*) OVER (ORDER BY x GROUPS UNBOUNDED PRECEDING EXCLUDE GROUP) AS n FROM generate_series(1, 3) AS x
+-- columns: alone: int | None (INT)
+-- columns: first: int (INT)
+-- columns: n: int (BIGINT)
+```
+
+`UNKNOWN ON ERROR` makes `JSON_EXISTS` NULL on an error, so sqlty leaves that call to sqlparser:
+
+```python
+# error: [unparsed-query] "query does not parse: Expected: ), found: UNKNOWN at Line: 1, Column: 47"
+q = "--sql\nSELECT JSON_EXISTS(jsonb '[1]', 'strict $[5]' UNKNOWN ON ERROR)"
 ```

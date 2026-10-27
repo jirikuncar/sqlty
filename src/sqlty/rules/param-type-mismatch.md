@@ -16,7 +16,14 @@ psycopg or sqlite3 connection or cursor, and `execute`, `fetch`, `fetchrow`,
 `fetchval` on an asyncpg connection, when the file binds the receiver to
 `psycopg.connect(...)`, `sqlite3.connect(...)`, `asyncpg.connect(...)`,
 `<connection>.cursor()` or a driver class annotation. The query is a literal,
-`SQL[T]("...")` of one, or a name assigned once to one.
+`SQL[T]("...")` of one, or a name assigned once to one. A single value passed
+as a driver call's parameters, `execute(query, user_id)`, is reported too: the
+driver raises `TypeError` and wants a sequence, `(user_id,)`. sqlite3 reads a
+`str` or `bytes` as a sequence, so those are left alone there.
+
+The fields of a `--sql` t-string are checked as well: psycopg sends each
+`{value}` as a parameter. A t-string with a field that changes the SQL, such as
+`{part:q}`, is not.
 
 An argument is judged only where the source states its type: a literal, a
 variable annotated or assigned a class, a call of a known class (`date(...)`,
@@ -24,7 +31,8 @@ variable annotated or assigned a class, a call of a known class (`date(...)`,
 `str`, which the server coerces to any type. `int`, `float` and `Decimal` are
 interchangeable. On PostgreSQL a `bool` is not a number and an `int` is not a
 `boolean`, since the server has no implicit cast between them; MySQL takes
-either. A parameter with an explicit cast (`%s::text`) takes
+either. asyncpg encodes each argument as its parameter's type: it takes a
+`bool` for a number, but not a `str` for a number, a date or time, `bytes` or a list. A parameter with an explicit cast (`%s::text`) takes
 anything. `None` is reported only for a parameter stored in a `NOT NULL`
 column. SQLite is dynamically typed: with `dialect = "sqlite"` only `None` is
 checked.

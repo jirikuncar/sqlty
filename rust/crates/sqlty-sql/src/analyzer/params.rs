@@ -24,12 +24,13 @@ use crate::placeholders::{self, Styles};
 
 use super::dialect::SqlDialect;
 use super::expr::{array_element, from_sql_type};
-use super::inference::binary_rules;
+use super::inference::{binary_rules, operand};
+use super::input::parser_input;
 use super::literals::strip;
 use super::names::{object_name, table_key};
 use super::nullability::Nullability;
 use super::operators::{is_text, numeric_rank, operand_type};
-use super::preprocess::{parse, parser_input};
+use super::preprocess::parse;
 use super::query::{rename_columns, Analyzer, Column};
 use super::registry::lookup;
 use super::scope::{relations, Scope, Source};
@@ -53,6 +54,12 @@ pub struct Param {
     /// Whether the type is that of an explicit cast (`%s::text`): the server converts
     /// whatever is passed, so the value is not held to it.
     pub cast: bool,
+    /// The SQL type PostgreSQL gives the parameter when the driver sends it untyped, as
+    /// asyncpg does, when that differs from `sql_type`: `$1 - INTERVAL '1 day'` compared
+    /// with a timestamp is a timestamp only if the driver says so, else an interval. Alone,
+    /// `$1 + INTERVAL '1 day'` has only this type: a driver that sends its type may pass
+    /// any date or time.
+    pub untyped_sql_type: Option<String>,
 }
 
 /// What a parameter's uses say about it. The first use that types it wins, and so does the
@@ -62,6 +69,7 @@ struct Hint {
     typed: Typed,
     nullability: Nullability,
     cast: bool,
+    untyped: Option<&'static str>,
 }
 
 #[derive(Default)]
@@ -88,6 +96,40 @@ impl Hints {
         if hint.typed.python.is_none() && typed.python.is_some() {
             hint.typed = typed;
             hint.cast = true;
+        }
+    }
+
+    /// The type of a parameter shifted by an interval, compared with or stored as `typed`: a
+    /// date or time is an interval to PostgreSQL unless the driver sends the type.
+    fn add_shifted(&mut self, index: usize, typed: Typed) {
+        if !is_typed(&typed) {
+            return;
+        }
+        if operand_type(&typed) == Some("INTERVAL") {
+            return self.add(index, typed, Nullability::Unknown);
+        }
+        if !matches!(
+            operand_type(&typed),
+            Some("DATE" | "TIMESTAMP" | "TIMESTAMPTZ" | "TIME" | "TIMETZ")
+        ) {
+            return;
+        }
+        let typed_before = self
+            .0
+            .get(&index)
+            .is_some_and(|hint| hint.typed.python.is_some());
+        self.add(index, typed, Nullability::Unknown);
+        if !typed_before {
+            self.0.entry(index).or_default().untyped = Some("INTERVAL");
+        }
+    }
+
+    /// `%s + INTERVAL '1 day'` alone: PostgreSQL makes an untyped parameter an interval,
+    /// but a driver that sends its type (psycopg) may pass any date or time.
+    fn add_untyped(&mut self, index: usize, untyped: &'static str) {
+        let hint = self.0.entry(index).or_default();
+        if hint.typed.python.is_none() {
+            hint.untyped = Some(untyped);
         }
     }
 
@@ -121,9 +163,8 @@ pub fn analyze_params(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> 
     };
     let read = |styles| {
         let rewritten = placeholders::rewrite(sql, styles);
-        let stmt = parse(&parser_input(&rewritten.text, dialect), dialect)?
-            .into_iter()
-            .next()?;
+        let input = parser_input(&rewritten.text, dialect);
+        let stmt = parse(input.text(), dialect)?.into_iter().next()?;
         Some((stmt, rewritten.names))
     };
     let (stmt, names) = read(styles).or_else(|| {
@@ -160,6 +201,7 @@ pub fn analyze_params(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> 
                     sql_type: hint.typed.sql.map(|ty| ty.to_string()),
                     nullability: hint.nullability,
                     cast: hint.cast,
+                    untyped_sql_type: hint.untyped.map(str::to_string),
                 }
             })
             .collect(),
@@ -361,28 +403,25 @@ impl<'a> Analyzer<'a> {
                 };
                 for row in &values.rows {
                     for (position, expr) in row.content.iter().enumerate() {
-                        match (targets.get(position), placeholder_index(expr)) {
-                            (Some(column), Some(index)) => {
-                                self.hint_column(&table, column, index, out);
-                            }
-                            _ => self.walk_params(expr, &Scope::new(), out),
+                        if let Some(column) = targets.get(position) {
+                            self.hint_stored(expr, &table, column, &Scope::new(), out);
                         }
+                        self.walk_params(expr, &Scope::new(), out);
                     }
                 }
             }
             Some(query) => {
                 // `INSERT ... SELECT $1, $2`: a bare placeholder is stored in its column.
                 if let SetExpr::Select(select) = query.body.as_ref() {
+                    let (analyzer, select_scope) = self.scope_or_empty(&select.from);
                     for (position, item) in select.projection.iter().enumerate() {
                         let (SelectItem::UnnamedExpr(expr)
                         | SelectItem::ExprWithAlias { expr, .. }) = item
                         else {
                             continue;
                         };
-                        if let (Some(column), Some(index)) =
-                            (targets.get(position), placeholder_index(expr))
-                        {
-                            self.hint_column(&table, column, index, out);
+                        if let Some(column) = targets.get(position) {
+                            analyzer.hint_stored(expr, &table, column, &select_scope, out);
                         }
                     }
                 }
@@ -422,12 +461,29 @@ impl<'a> Analyzer<'a> {
                 }
                 AssignmentTarget::Tuple(_) => None,
             };
-            match (table, column, placeholder_index(&assignment.value)) {
-                (Some(table), Some(column), Some(index)) => {
-                    self.hint_column(table, &fold(column, self.dialect), index, out);
-                }
-                _ => self.walk_params(&assignment.value, scope, out),
+            if let (Some(table), Some(column)) = (table, column) {
+                let column = fold(column, self.dialect);
+                self.hint_stored(&assignment.value, table, &column, scope, out);
             }
+            self.walk_params(&assignment.value, scope, out);
+        }
+    }
+
+    /// `value` is stored in `column` of the schema `table`: a placeholder takes the column's
+    /// type and nullability, and so does one shifted by an interval, as in a comparison.
+    fn hint_stored(&self, value: &Expr, table: &str, column: &str, scope: &Scope, out: &mut Hints) {
+        if let Some(index) = placeholder_index(value) {
+            return self.hint_column(table, column, index, out);
+        }
+        let Some(index) = self.shifted_placeholder(value, scope) else {
+            return;
+        };
+        if let Some(col) = self
+            .schema
+            .table(table)
+            .and_then(|columns| columns.iter().find(|col| col.name == column))
+        {
+            out.add_shifted(index, col.typed(self.dialect));
         }
     }
 
@@ -480,6 +536,37 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// `%s - INTERVAL '1 day'` compared with a date or time `other`: alone, the parameter
+    /// is an interval, but a driver that sends its type (psycopg) makes it what `other` is.
+    fn hint_shifted(&self, shifted: &Expr, other: &Expr, scope: &Scope, out: &mut Hints) {
+        let Some(index) = self.shifted_placeholder(shifted, scope) else {
+            return;
+        };
+        if let Ok(typed) = self.expr(other, scope) {
+            out.add_shifted(index, typed);
+        }
+    }
+
+    /// The placeholder of `%s + INTERVAL '1 day'`, `%s - INTERVAL '1 day'` or
+    /// `INTERVAL '1 day' + %s`.
+    fn shifted_placeholder(&self, shifted: &Expr, scope: &Scope) -> Option<usize> {
+        let mut shifted = shifted;
+        while let Expr::Nested(inner) = shifted {
+            shifted = inner;
+        }
+        let Expr::BinaryOp { left, op, right } = shifted else {
+            return None;
+        };
+        let (index, interval) = match (op, placeholder_index(left), placeholder_index(right)) {
+            (BinaryOperator::Plus | BinaryOperator::Minus, Some(index), None) => (index, right),
+            (BinaryOperator::Plus, None, Some(index)) => (index, left),
+            _ => return None,
+        };
+        self.expr(interval, scope)
+            .is_ok_and(|typed| operand_type(&typed) == Some("INTERVAL"))
+            .then_some(index)
+    }
+
     /// A parameter searched with `= ANY(%s)` is an array of what the other side is.
     fn hint_array(&self, array: &Expr, element: &Expr, scope: &Scope, out: &mut Hints) {
         let Some(index) = placeholder_index(array) else {
@@ -518,14 +605,18 @@ impl<'a> Analyzer<'a> {
             return;
         };
         let other_type = operand_type(&typed);
+        let other = operand(other_type);
         let ruled = binary_rules(op)
             .iter()
-            .find_map(|rule| rule.parameter(self.dialect, left, other_type));
+            .find_map(|rule| rule.parameter(self.dialect, left, other));
         if let Some(sql_type) = ruled {
             return out.add(index, self.param_typed(sql_type), Nullability::Unknown);
         }
         let array = typed.sql().is_some_and(|sql| array_element(sql).is_some());
         let sql_type = match (op, other_type) {
+            (Plus | Minus, Some("INTERVAL")) if left || *op == Plus => {
+                return out.add_untyped(index, "INTERVAL");
+            }
             (Plus | Minus | Multiply | Divide | Modulo, Some(ty)) if numeric_rank(ty).is_some() => {
                 return out.add(index, strip(typed, self.dialect), Nullability::Unknown);
             }
@@ -563,6 +654,8 @@ impl<'a> Analyzer<'a> {
                 } else {
                     self.hint_pair(left, right, scope, out);
                     self.hint_pair(right, left, scope, out);
+                    self.hint_shifted(left, right, scope, out);
+                    self.hint_shifted(right, left, scope, out);
                 }
             }
             Expr::AnyOp { left, right, .. } | Expr::AllOp { left, right, .. } => {
@@ -722,6 +815,14 @@ impl<'a> Analyzer<'a> {
             for placeholder in args.iter().flatten() {
                 for other in args.iter().flatten() {
                     self.hint_pair(placeholder, other, scope, out);
+                }
+            }
+            // A later argument stands in for a NULL one.
+            if matches!(name.as_str(), "COALESCE" | "IFNULL") {
+                for arg in args.iter().rev().skip(1).flatten() {
+                    if let Some(index) = placeholder_index(arg) {
+                        out.add(index, Typed::default(), Nullability::Nullable);
+                    }
                 }
             }
         } else if let Some(types) = info.and_then(|info| info.signature) {

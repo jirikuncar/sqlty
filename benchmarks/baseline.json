@@ -69,72 +69,72 @@
     }
   },
   "Linux-ci": {
-    "calibration_s": 0.02961,
+    "calibration_s": 0.01759,
     "meta": {
       "files": 8000,
-      "generate_s": 0.5,
+      "generate_s": 0.3,
       "machine": "x86_64",
       "platform": "Linux",
-      "python": "3.15.0",
+      "python": "3.15.1",
       "queries": 2400,
       "size": "ci",
       "tables": 400
     },
     "metrics": {
       "check": {
-        "exit": 0,
-        "rss_mb": 209.0,
-        "wall_s": 2.9665
+        "exit": 1,
+        "rss_mb": 232.6,
+        "wall_s": 2.0534
       },
       "rewrite_check": {
         "exit": 1,
-        "rss_mb": 61.2,
-        "wall_s": 0.6384
+        "rss_mb": 78.2,
+        "wall_s": 0.31
       },
       "schema_load": {
         "exit": 0,
-        "rss_mb": 53.0,
-        "wall_s": 0.1584
+        "rss_mb": 62.8,
+        "wall_s": 0.0946
       },
       "schema_load_unresolved_alters": {
         "exit": 0,
-        "rss_mb": 57.4,
-        "wall_s": 0.1085
+        "rss_mb": 66.6,
+        "wall_s": 0.0863
       }
     },
     "micro_us": {
-      "analyze_params.aggregate": 34.6,
-      "analyze_params.array_param": 25.0,
-      "analyze_params.cte": 58.3,
-      "analyze_params.full_join": 28.9,
-      "analyze_params.function": 25.1,
-      "analyze_params.join": 38.8,
-      "analyze_params.json": 45.2,
-      "analyze_params.lateral": 54.8,
-      "analyze_params.left_join": 30.6,
-      "analyze_params.literal": 21.4,
-      "analyze_params.named_params": 28.7,
-      "analyze_params.params": 29.7,
-      "analyze_params.recursive_cte": 64.3,
-      "analyze_params.right_join": 29.2,
-      "analyze_params.subquery": 29.4,
-      "analyze_params.view": 21.6,
-      "analyze_select.aggregate": 44.4,
-      "analyze_select.array_param": 27.2,
-      "analyze_select.cte": 59.4,
-      "analyze_select.full_join": 35.0,
-      "analyze_select.function": 27.8,
-      "analyze_select.join": 53.2,
-      "analyze_select.json": 62.8,
-      "analyze_select.lateral": 56.7,
-      "analyze_select.left_join": 39.3,
-      "analyze_select.literal": 30.2,
-      "analyze_select.named_params": 31.9,
-      "analyze_select.params": 35.4,
-      "analyze_select.recursive_cte": 68.8,
-      "analyze_select.right_join": 35.3,
-      "analyze_select.subquery": 34.4,
-      "analyze_select.view": 28.9
+      "analyze_params.aggregate": 17.0,
+      "analyze_params.array_param": 11.0,
+      "analyze_params.cte": 26.9,
+      "analyze_params.full_join": 15.2,
+      "analyze_params.function": 12.2,
+      "analyze_params.join": 19.9,
+      "analyze_params.json": 23.1,
+      "analyze_params.lateral": 25.9,
+      "analyze_params.left_join": 15.6,
+      "analyze_params.literal": 10.5,
+      "analyze_params.named_params": 13.0,
+      "analyze_params.params": 13.6,
+      "analyze_params.recursive_cte": 31.8,
+      "analyze_params.right_join": 15.1,
+      "analyze_params.subquery": 15.2,
+      "analyze_params.view": 10.5,
+      "analyze_select.aggregate": 24.3,
+      "analyze_select.array_param": 13.0,
+      "analyze_select.cte": 30.8,
+      "analyze_select.full_join": 19.0,
+      "analyze_select.function": 14.9,
+      "analyze_select.join": 27.6,
+      "analyze_select.json": 33.0,
+      "analyze_select.lateral": 29.7,
+      "analyze_select.left_join": 20.9,
+      "analyze_select.literal": 17.5,
+      "analyze_select.named_params": 16.2,
+      "analyze_select.params": 18.4,
+      "analyze_select.recursive_cte": 39.2,
+      "analyze_select.right_join": 19.6,
+      "analyze_select.subquery": 24.3,
+      "analyze_select.view": 14.8
     }
   }
 }

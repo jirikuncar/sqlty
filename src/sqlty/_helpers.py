@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import ast
 import re
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from sqlty._params import ParamArg, arg_type, literal_params
@@ -23,6 +25,9 @@ from sqlty._psycopg import UNCHECKED
 from sqlty._source import ParsedSource
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Sequence
+
+    from sqlty._cli import Settings
     from sqlty._type_extractor import TypeInfo
 
 _TYPE_FORMS = frozenset({"type", "Type", "TypeForm"})
@@ -58,10 +63,13 @@ class Helper:
 class HelperCall(NamedTuple):
     """A call passing a query to a helper's query parameter.
 
-    ``query`` is ``None`` for a psycopg composition with a part that is not a literal.
+    ``query`` is ``None`` for a psycopg composition with a part that is not a literal, and
+    for any other argument that is not a string literal, which is ``dynamic``.
     ``params`` holds the arguments the call passes for the query's placeholders, with the
     type of each where the source states it, or ``None`` when the helper takes no parameters
-    or the call does not spell them out.
+    or the call does not spell them out. ``driver`` names the driver of a recognised
+    ``execute``-like call, and ``single`` the type of a single value it passes where the
+    driver takes a sequence or a mapping of parameters.
     """
 
     line: int
@@ -69,6 +77,17 @@ class HelperCall(NamedTuple):
     row: ast.expr | None
     typing_aliases: dict[str, str]
     params: tuple[ParamArg, ...] | None = None
+    end_line: int | None = None
+    driver: str | None = None
+    single: str | None = None
+    dynamic: bool = False
+
+    @property
+    def typed_lines(self) -> range:
+        """The lines of the call when it passes a row type: its strings need no ``SQL[T]``."""
+        return (
+            range(self.line, (self.end_line or self.line) + 1) if self.row is not None else range(0)
+        )
 
 
 def _dotted(node: ast.expr) -> str | None:
@@ -209,6 +228,45 @@ def index_functions(source: str | ParsedSource) -> dict[str, Helper]:
     return {name: helper for name, (_, helper) in found.items()}
 
 
+def helper_roots(config_dir: Path | None, checked: Iterable[Path]) -> tuple[Path, ...]:
+    """Directories a ``[[tool.sqlty.functions]]`` module is read from, the likeliest first.
+
+    ``config_dir/src``, ``config_dir``, the resolved ``checked`` roots inside it, then
+    sqlty's own ``sys.path``.
+
+    Example:
+        >>> [root.name for root in helper_roots(Path("/p"), [Path("/p/app"), Path("/q")])[:3]]
+        ['src', 'p', 'app']
+    """
+    project = config_dir.resolve() if config_dir is not None else None
+    own = [project / "src", project] if project is not None else []
+    inside = [root for root in checked if project is None or root.is_relative_to(project)]
+    return tuple(dict.fromkeys([*own, *inside, *(Path(entry) for entry in sys.path if entry)]))
+
+
+def configured_helpers(
+    index: HelperIndex, checked: Sequence[Path]
+) -> Callable[[Settings], HelperIndex]:
+    """``index`` with the ``[[tool.sqlty.functions]]`` of a file's settings, one fork per project.
+
+    ``checked`` are the checked directories and package roots, passed to `helper_roots`.
+    """
+    forks: dict[tuple[object, Path | None], HelperIndex] = {}
+
+    def helpers_for(settings: Settings) -> HelperIndex:
+        if not settings.functions:
+            return index
+        key = settings.functions, settings.config_dir
+        if (forked := forks.get(key)) is None:
+            forks[key] = forked = index.fork()
+            roots = helper_roots(settings.config_dir, checked)
+            for import_path, query, row in settings.functions:
+                forked.register(import_path, query, row, roots=roots)
+        return forked
+
+    return helpers_for
+
+
 class HelperIndex:
     """Helpers of the modules of a checked tree, by module name.
 
@@ -231,6 +289,7 @@ class HelperIndex:
         self._names: frozenset[str] | None = None
         self._exports: dict[str, dict[str, tuple[str, str]]] = {}
         self._row_types: dict[tuple[str, frozenset[str]], dict[str, TypeInfo]] = {}
+        self._read: dict[tuple[Path, str], ParsedSource | None] = {}
 
     def fork(self) -> HelperIndex:
         """A copy whose later ``register`` calls do not reach this index; sources are shared."""
@@ -242,6 +301,7 @@ class HelperIndex:
         other.type_modules = self.type_modules
         other._exports = self._exports
         other._row_types = self._row_types
+        other._read = self._read
         return other
 
     def add(self, module: str, source: str | ParsedSource) -> bool:
@@ -269,13 +329,22 @@ class HelperIndex:
         self._names = None
         return True
 
-    def register(self, import_path: str, query: str, row: str | None = None) -> None:
+    def register(
+        self,
+        import_path: str,
+        query: str,
+        row: str | None = None,
+        *,
+        roots: Sequence[Path] = (),
+    ) -> None:
         """Register ``import_path`` (``pkg.mod.func`` or ``pkg.mod.Class.method``) as a helper.
 
         Used for ``[[tool.sqlty.functions]]``: the function needs no marked parameter. Its
-        positional parameters are read from the definition when ``pkg.mod`` is indexed;
-        otherwise ``query`` and ``row`` can only be passed by keyword. Of ``@overload``
-        definitions, the first naming both is used unless the implementation names them.
+        positional parameters are read from its definition in ``pkg.mod``, indexed or else
+        read (never imported) from ``pkg/mod.py`` or ``pkg/mod/__init__.py`` under the first
+        of ``roots`` holding it; otherwise ``query`` and ``row`` can only be passed by
+        keyword. Of ``@overload`` definitions, the first naming both is used unless the
+        implementation names them.
 
         Example:
             >>> index = HelperIndex()
@@ -284,10 +353,9 @@ class HelperIndex:
             True
         """
         parts = import_path.split(".")
-        known = [i for i in range(len(parts) - 1, 0, -1) if ".".join(parts[:i]) in self.sources]
-        for i in known[:1] or [i for i in (len(parts) - 1, len(parts) - 2) if i > 0]:
+        for i in range(len(parts) - 1, 0, -1):
             module, name = ".".join(parts[:i]), ".".join(parts[i:])
-            parsed = self.sources.get(module)
+            parsed = self.sources.get(module) or self._module_source(parts[:i], roots)
             definition = min(
                 (d for d in (_definitions(parsed) if parsed else []) if d[0] == name),
                 key=lambda d: _rank(d[1], {query, row} - {None} <= _parameters(d[1].args)),
@@ -295,11 +363,36 @@ class HelperIndex:
             )
             if definition is not None:
                 helper = _helper(name, definition[1], definition[2], query, row)
-            else:
-                helper = Helper(name, (), frozenset(filter(None, [query, row])), query, row)
-            self.modules.setdefault(module, {})[name] = helper
+                self.modules.setdefault(module, {})[name] = helper
+                break
+        else:
+            keywords = frozenset(filter(None, [query, row]))
+            for i in (len(parts) - 1, len(parts) - 2):
+                if i > 0:
+                    module, name = ".".join(parts[:i]), ".".join(parts[i:])
+                    self.modules.setdefault(module, {})[name] = Helper(
+                        name, (), keywords, query, row
+                    )
         self._pattern = None
         self._names = None
+
+    def _module_source(self, parts: list[str], roots: Sequence[Path]) -> ParsedSource | None:
+        """Module ``parts`` read from the first of ``roots`` holding it; never imported."""
+        module = ".".join(parts)
+        for root in roots:
+            for path, name in (
+                (root.joinpath(*parts[:-1], f"{parts[-1]}.py"), module),
+                (root.joinpath(*parts, "__init__.py"), f"{module}.__init__"),
+            ):
+                if (path, name) not in self._read:
+                    try:
+                        text = path.read_text(encoding="utf-8-sig")
+                    except OSError, ValueError:
+                        text = None
+                    self._read[path, name] = None if text is None else ParsedSource(text, name)
+                if (parsed := self._read[path, name]) is not None:
+                    return parsed
+        return None
 
     def _reexports(self, module: str, parsed: ParsedSource) -> dict[str, tuple[str, str]]:
         if (exports := self._exports.get(module)) is None:
@@ -365,6 +458,8 @@ class HelperIndex:
         if (defs := self._row_types.get((module, type_modules))) is None:
             from sqlty._type_extractor import extract_type_definitions
 
+            # Modules that import each other's row types see none while either is read.
+            self._row_types[module, type_modules] = {}
             defs = extract_type_definitions(parsed, self, module, type_modules)
             self._row_types[module, type_modules] = defs
         if name in defs:
@@ -572,6 +667,20 @@ def find_helper_calls(
             source.module = module
         return helpers.fragment(source, dotted)
 
+    def forwarded(call: ast.Call, query: ast.expr) -> bool:
+        """Whether ``query`` is the marked query parameter of a function around ``call``."""
+        if not isinstance(query, ast.Name):
+            return False
+        annotated, marker = parsed.marker_names
+        for scope in reversed(parsed.scopes_of(call)):
+            if isinstance(scope, ast.ClassDef):
+                continue
+            args = scope.args
+            for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs]:
+                if arg.arg == query.id:
+                    return _is_marked(arg.annotation, annotated, marker)
+        return False
+
     aliases = parsed.typing_aliases
     calls = []
     scan = parsed.psycopg if composed else None
@@ -593,21 +702,22 @@ def find_helper_calls(
                     _argument(helper, node, helper.row),
                     aliases,
                     _call_params(helper, node, parsed),
+                    node.end_lineno,
                 )
             )
-        elif scan is not None and query is not None:
+        elif query is not None and not forwarded(node, query):
             pending.append((node, helper, query))
     for node, helper, query in pending:
-        assert scan is not None
-        if (text := scan.render(query, resolve_fragment)) is not None:
-            row = _argument(helper, node, helper.row)
-            calls.append(
-                HelperCall(
-                    node.lineno,
-                    None if text == UNCHECKED else text,
-                    row,
-                    aliases,
-                    _call_params(helper, node, parsed),
-                )
+        text = scan.render(query, resolve_fragment) if scan is not None else None
+        calls.append(
+            HelperCall(
+                node.lineno,
+                None if text == UNCHECKED else text,
+                _argument(helper, node, helper.row),
+                aliases,
+                _call_params(helper, node, parsed),
+                node.end_lineno,
+                dynamic=text is None,
             )
+        )
     return sorted(calls, key=lambda call: call.line)

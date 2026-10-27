@@ -77,7 +77,7 @@ WITH new_user AS (
     RETURNING id, name, email
 )
 SELECT id, name, email FROM new_user
--- inferred: tuple[int, str, str | None]
+-- inferred: tuple[int, str, str]
 ```
 
 ## Derived table

@@ -1,0 +1,10 @@
+# PostgreSQL row constructors.
+
+[[function]]
+id = "postgres.row.record"
+function = "ROW"
+dialects = ["postgres"]
+type = "RECORD"
+nullability = "non-null"
+reference = "PostgreSQL 17 documentation, 4.2.13 Row Constructors"
+reasoning = "The documentation gives the function a `record` result. It never returns NULL, even for NULL arguments."

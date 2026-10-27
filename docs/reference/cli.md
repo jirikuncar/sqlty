@@ -81,7 +81,7 @@ tool such as pre-commit passes file names.
 | Code | Meaning |
 |------|---------|
 | 0 | Nothing to report: no `error` diagnostic from `check`, no file changed by `--check` or `--diff`, or the files were rewritten or stripped |
-| 1 | `check` found an `error`-severity diagnostic, `breaking` found a breaking change, or `rewrite` / `strip` with `--check` or `--diff` found files that would change |
+| 1 | `check` found an `error`-severity diagnostic, `breaking` found an `error`-severity breaking change, or `rewrite` / `strip` with `--check` or `--diff` found files that would change |
 | 2 | Usage or configuration error (unknown option, unknown key or rule in `[tool.sqlty]`, a path that does not exist), a Python file that is not UTF-8 (reported and skipped; the other files are still processed), or an internal error |
 
 ## Common options
@@ -107,9 +107,13 @@ tool such as pre-commit passes file names.
 | `--respect-gitignore`, `--no-respect-gitignore` | Skip the files .gitignore ignores while walking directories (default: [tool.sqlty] respect-gitignore, else true) |
 | `-v`, `--verbose` | Print each file that rewrite, strip or check --fix changes |
 | `-q`, `--quiet` | Suppress non-error output |
+| `-j`, `--jobs N` | Files to work on at once; 1 works on one at a time. Output is the same in any case (default: the number of processors) |
 <!-- /generated:cli-options-common -->
 
 `strip` accepts `--dialect` and `--schema` but does not use them.
+
+sqlty reads Python files as UTF-8. A file it changes keeps its byte order mark
+and its line endings, `\n` or `\r\n`, as the first line has them.
 
 ## `sqlty rewrite`
 
@@ -129,7 +133,7 @@ sqlty rewrite [-h] [--dialect DIALECT] [--schema SCHEMA]
               [--exclude GLOB] [--extend-exclude GLOB]
               [--force-exclude]
               [--respect-gitignore | --no-respect-gitignore] [-v] [-q]
-              [--check] [--diff] [--untyped {skip,sentinel}]
+              [-j N] [--check] [--diff] [--untyped {skip,sentinel}]
               [paths ...]
 ```
 <!-- /generated:cli-usage-rewrite -->
@@ -161,7 +165,7 @@ sqlty strip [-h] [--dialect DIALECT] [--schema SCHEMA]
             [--error RULE] [--warn RULE] [--ignore RULE]
             [--exclude GLOB] [--extend-exclude GLOB] [--force-exclude]
             [--respect-gitignore | --no-respect-gitignore] [-v] [-q]
-            [--check] [--diff]
+            [-j N] [--check] [--diff]
             [paths ...]
 ```
 <!-- /generated:cli-usage-strip -->
@@ -181,8 +185,8 @@ Lint `--sql` strings and `SQL[T](...)` wrappers. Prints one line per
 diagnostic and a summary:
 
 ```text
-queries.py:2: [stale-type] SQL[tuple[int, str]] should be SQL[tuple[int, str, str]]
-Found 1 warning(s)
+queries.py:2: [narrow-type] SQL[tuple[int, str]] should be SQL[tuple[int, str, str]]
+Found 1 error(s)
 ```
 
 <!-- generated:cli-usage-check -->
@@ -192,7 +196,7 @@ sqlty check [-h] [--dialect DIALECT] [--schema SCHEMA]
             [--error RULE] [--warn RULE] [--ignore RULE]
             [--exclude GLOB] [--extend-exclude GLOB] [--force-exclude]
             [--respect-gitignore | --no-respect-gitignore] [-v] [-q]
-            [--fix] [--exit-zero] [--exit-zero-on-warning]
+            [-j N] [--fix] [--exit-zero] [--exit-zero-on-warning]
             [--error-on-warning] [--statistics] [--explain]
             [--output-format {text,json,github}]
             [paths ...]
@@ -234,10 +238,12 @@ a `warn` diagnostic, and `--exit-zero-on-warning` keeps the default; combining
 
 ## `sqlty breaking`
 
-Check the queries and schema of two git revisions across, as during a rolling
+Check the queries and schema of two revisions across, as during a rolling
 deploy: the queries of `--against` on the schema of `--head` (backward), and the
 queries of `--head` on the schema of `--against` (forward). Prints what the other
-schema breaks:
+schema breaks. `--against` is a git revision, a snapshot that `--save` wrote, a
+directory of snapshots, or a schema file (see
+[Baselines without git history](../guide/breaking-changes.md#baselines-without-git-history)):
 
 ```text
 app/q.py:2: [unknown-column] column `bio` does not exist in `users` (backward: the queries of origin/main against the schema of the working tree)
@@ -246,7 +252,7 @@ Found 1 breaking change(s)
 
 <!-- generated:cli-usage-breaking -->
 ```text
-sqlty breaking [-h] --against REF [--head REF]
+sqlty breaking [-h] [--against BASELINE] [--save PATH] [--head REF]
                [--direction {backward,forward,both}] [-q]
                [--output-format {text,json,github}]
                [paths ...]
@@ -256,13 +262,14 @@ sqlty breaking [-h] --against REF [--head REF]
 <!-- generated:cli-options-breaking -->
 | Option | Description |
 |--------|-------------|
-| `--against REF` | The baseline revision: a branch, tag, SHA or HEAD~1 |
+| `--against BASELINE` | The baseline: a revision (a branch, tag, SHA or HEAD~1), a snapshot written by --save, a directory of snapshots (each checked), or a schema .sql file or directory (forward only, as it has no queries) |
+| `--save PATH` | Write a snapshot of --head (its settings, schema and Python files) to PATH, a baseline for a later --against |
 | `--head REF` | The new revision (default: the working tree, uncommitted changes included) |
 | `--direction {backward,forward,both}` | backward: queries of --against on the schema of --head (migrate first); forward: queries of --head on the schema of --against (deploy first) |
-| `--output-format {text,json,github}` | How findings are printed: text (the default), json (an array of objects with file, line, rule, severity, message and direction) or github (GitHub Actions error annotations) |
+| `--output-format {text,json,github}` | How findings are printed: text (the default), json (an array of objects with file, line, rule, severity, message, direction and against) or github (GitHub Actions annotations, each at its severity) |
 <!-- /generated:cli-options-breaking -->
 
-Exit code: 1 when a change breaks either direction, 2 for an unknown revision or
+Exit code: 1 when a change breaks either direction with an `error` diagnostic, 2 for an unknown revision or
 outside a git repository. See [Breaking schema changes](../guide/breaking-changes.md).
 
 ## `sqlty rule`
@@ -274,6 +281,30 @@ Print a rule's documentation, or list every rule with its default severity.
 sqlty rule [-h] [name]
 ```
 <!-- /generated:cli-usage-rule -->
+
+## `sqlty skill`
+
+Print an Agent Skill for coding agents (`sqlty` by default), list them, or write
+them all into the directory your agent reads skills from. See
+[Coding agents](../recipes/agents.md).
+
+```bash
+sqlty skill --install .claude/skills
+```
+
+<!-- generated:cli-usage-skill -->
+```text
+sqlty skill [-h] [--install DIR | --list] [name]
+```
+<!-- /generated:cli-usage-skill -->
+
+<!-- generated:cli-options-skill -->
+| Option | Description |
+|--------|-------------|
+| `name` | Skill to print (default: sqlty) |
+| `--install DIR` | Write every skill to DIR/NAME/ instead of printing one |
+| `--list` | List the skills and what each is for |
+<!-- /generated:cli-options-skill -->
 
 ## `sqlty version`
 

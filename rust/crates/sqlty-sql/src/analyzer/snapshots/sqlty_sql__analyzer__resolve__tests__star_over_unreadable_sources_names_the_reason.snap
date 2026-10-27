@@ -18,14 +18,18 @@ name: str | TEXT | NonNull
 note: str | TEXT | Nullable
 g: int | INT | NonNull
 
-SELECT * FROM users, pg_get_keywords() AS k
+SELECT * FROM users, ST_Dump(NULL) AS d
 *: ? | ? | Unknown
-[unsupported-syntax] `*` reads table function pg_get_keywords, which sqlty does not read the columns of
+[unsupported-syntax] `*` reads table function st_dump, which sqlty does not read the columns of
 
 SELECT nope.* FROM users
 *: ? | ? | Unknown
 [unknown-table] `nope` in `nope.*` is not a table or alias in the FROM clause
 
 SELECT * FROM users JOIN orders USING (id)
-*: ? | ? | Unknown
-[unsupported-syntax] `*` over a USING or NATURAL join merges columns, so it is not expanded
+id: int | INT | NonNull
+name: str | TEXT | NonNull
+note: str | TEXT | Nullable
+user_id: int | INT | NonNull
+total: decimal.Decimal | DECIMAL(10, 2) | Nullable
+note: str | TEXT | NonNull

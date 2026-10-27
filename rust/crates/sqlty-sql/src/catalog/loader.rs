@@ -11,11 +11,15 @@ use std::sync::Arc;
 
 use sqlparser::ast::{
     AlterTable, AlterType, ArgMode, ColumnOption, CreateFunction, CreateTable, CreateTableLikeKind,
-    CreateView, DataType, Expr, FunctionReturnType, ObjectName, ObjectType, Query, Statement,
+    CreateTableOptions, CreateView, DataType, Expr, ForeignKeyConstraint, FunctionCalledOnNull,
+    FunctionReturnType, Ident, ObjectName, ObjectType, Query, SqlOption, Statement,
     TableConstraint, Visit, Visitor,
 };
 
-use crate::analyzer::{canonical_type, typed, view_columns, Column, SkippedObject, SqlDialect};
+use crate::analyzer::{
+    canonical_type, typed, view_columns, Column, Nullability, SkippedObject, SqlDialect,
+};
+use crate::ddl::{RowEvents, RowTrigger};
 use crate::values::{self, Value};
 
 use super::columns::{
@@ -23,7 +27,7 @@ use super::columns::{
     raw_column, RawColumn,
 };
 use super::names::{fold, key_of, lookup_key, parts, schema_for_new, type_key};
-use super::{Catalog, TypeOverrides, BUILTIN_SCHEMAS};
+use super::{Catalog, ForeignKey, TypeOverrides, BUILTIN_SCHEMAS};
 
 #[derive(Clone, Default, PartialEq)]
 pub(super) struct RawTable {
@@ -34,8 +38,25 @@ pub(super) struct RawTable {
     pub(super) unknown: bool,
     /// Groups of columns a `CHECK` keeps at least one of non-null.
     pub(super) nonnull_groups: Vec<Vec<String>>,
+    /// `BEFORE` row triggers by name, and the statements they fire for.
+    pub(super) row_triggers: Vec<(String, RowEvents)>,
+    pub(super) foreign_keys: Vec<RawForeignKey>,
+    /// `ENABLE ROW LEVEL SECURITY`: a query may not see every row.
+    pub(super) row_security: bool,
 }
 
+/// A foreign key as declared, which holds for every row only when `enforced`.
+#[derive(Clone, PartialEq)]
+pub(super) struct RawForeignKey {
+    pub(super) name: Option<String>,
+    pub(super) key: ForeignKey,
+    /// Neither `DEFERRABLE` nor `NOT ENFORCED`.
+    pub(super) immediate: bool,
+    /// Not added `NOT VALID`, or validated since.
+    pub(super) validated: bool,
+}
+
+#[derive(Clone)]
 pub(super) enum Rel {
     Table(RawTable),
     View(Vec<Column>),
@@ -51,13 +72,16 @@ pub(super) enum TypeDef {
     Unknown,
 }
 
+#[derive(Clone)]
 pub(super) struct RawFunction {
     pub(super) args: Vec<DataType>,
     pub(super) required: usize,
     pub(super) variadic: bool,
     pub(super) returns: RawReturn,
+    pub(super) strict: bool,
 }
 
+#[derive(Clone)]
 pub(super) enum RawReturn {
     Scalar(DataType),
     SetOf(DataType),
@@ -66,13 +90,18 @@ pub(super) enum RawReturn {
 
 pub(super) enum OpKind {
     Table(Box<CreateTable>, Vec<Vec<String>>),
-    View(Box<CreateView>),
+    /// A view, or (`true`) a `CREATE TABLE ... AS` table, whose columns are a query's.
+    View(Box<CreateView>, bool),
     Domain(ObjectName, DataType, Option<Vec<Value>>),
     Type(ObjectName, TypeDef),
     AlterTable(Box<AlterTable>),
     AlterType(AlterType),
     Drop(Box<Statement>),
     Function(Box<CreateFunction>),
+    /// A `BEFORE` row trigger, which may change any column of the rows it fires for.
+    RowTrigger(RowTrigger),
+    /// `DROP TRIGGER name [ON table]`.
+    DropTrigger(Vec<String>, Option<Vec<String>>),
     /// A statement that changes the named relation, type or function in a way this
     /// module cannot follow.
     Taint(Taint, Vec<String>),
@@ -111,8 +140,8 @@ pub(super) struct Loader {
     /// The resolved catalog; a change to one relation updates it in place, any other
     /// change drops it to be built again.
     pub(super) cache: Option<Catalog>,
-    /// The cached catalog's function table is stale; `snapshot` rebuilds it once.
-    pub(super) functions_dirty: bool,
+    /// Functions of the cached catalog that are stale; `snapshot` resolves them again.
+    pub(super) stale_functions: FxHashSet<String>,
     /// Old name -> current name of a renamed type: columns declared with the old name
     /// have the type under its new one.
     pub(super) type_aliases: FxHashMap<String, String>,
@@ -120,9 +149,9 @@ pub(super) struct Loader {
     pub(super) skipped: Vec<SkippedObject>,
     /// The Python types the project sets for SQL types and columns.
     pub(super) overrides: Arc<TypeOverrides>,
-    /// Type names `SETOF` functions return: a function returning a table has its rows follow
-    /// the table, so a change to a relation with one of these names refreshes the functions.
-    pub(super) setof_names: FxHashSet<String>,
+    /// Type name -> the functions that return it: a function returning a table has its rows
+    /// follow the table, so a change to a relation of that name refreshes them.
+    pub(super) returned_by: FxHashMap<String, FxHashSet<String>>,
 }
 
 impl Loader {
@@ -136,11 +165,30 @@ impl Loader {
             unknown_functions: FxHashSet::default(),
             search_path: vec!["public".to_string()],
             cache: None,
-            functions_dirty: false,
+            stale_functions: FxHashSet::default(),
             skipped: Vec::new(),
             type_aliases: FxHashMap::default(),
-            setof_names: FxHashSet::default(),
+            returned_by: FxHashMap::default(),
             overrides: Arc::default(),
+        }
+    }
+
+    /// A copy to read more statements into, without the resolved catalog.
+    pub(super) fn fork(&self) -> Self {
+        Loader {
+            dialect: self.dialect,
+            postgres: self.postgres,
+            relations: self.relations.clone(),
+            types: self.types.clone(),
+            functions: self.functions.clone(),
+            unknown_functions: self.unknown_functions.clone(),
+            search_path: self.search_path.clone(),
+            cache: None,
+            stale_functions: self.stale_functions.clone(),
+            type_aliases: self.type_aliases.clone(),
+            skipped: self.skipped.clone(),
+            overrides: Arc::clone(&self.overrides),
+            returned_by: self.returned_by.clone(),
         }
     }
 
@@ -211,8 +259,11 @@ impl Loader {
                     self.give_up(op);
                 }
                 pending = rest;
-            } else if pending.iter().any(|op| !matches!(op.kind, OpKind::View(_))) {
-                pending.retain(|op| matches!(op.kind, OpKind::View(_)));
+            } else if pending
+                .iter()
+                .any(|op| !matches!(op.kind, OpKind::View(..)))
+            {
+                pending.retain(|op| matches!(op.kind, OpKind::View(..)));
             } else {
                 for op in &pending {
                     if !self.apply(op, false) {
@@ -230,7 +281,7 @@ impl Loader {
         let path = op.path.clone();
         let blocked = match &op.kind {
             OpKind::Table(create, likes) => !self.create_table(create, likes, &path),
-            OpKind::View(view) => !self.create_view(view, &path, force),
+            OpKind::View(view, table) => !self.create_view(view, *table, &path, force),
             OpKind::Domain(name, base, values) => {
                 self.cache = None;
                 let key = self.new_key(name, &path);
@@ -257,6 +308,45 @@ impl Loader {
                 false
             }
             OpKind::Taint(what, name) => !self.taint(*what, name, &path),
+            OpKind::RowTrigger(trigger) => {
+                let Some(key) = self.table_key(&trigger.table, &path) else {
+                    return false;
+                };
+                let Some(Rel::Table(table)) = self.relations.get(&key) else {
+                    return false;
+                };
+                let mut table = table.clone();
+                if trigger.events.insert {
+                    for column in &mut table.columns {
+                        column.has_default = true;
+                    }
+                }
+                let name = trigger.name.last().map(|name| name.to_lowercase());
+                let name = name.unwrap_or_default();
+                table.row_triggers.retain(|(other, _)| *other != name);
+                table.row_triggers.push((name, trigger.events));
+                self.set_relation(key, Some(Rel::Table(table)));
+                false
+            }
+            OpKind::DropTrigger(name, table) => {
+                let name = name.last().cloned().unwrap_or_default();
+                let keys: Vec<String> = match table {
+                    Some(table) => self.table_key(table, &path).into_iter().collect(),
+                    // MySQL names a trigger without its table.
+                    None => self.relations.keys().cloned().collect(),
+                };
+                for key in keys {
+                    let Some(Rel::Table(table)) = self.relations.get(&key) else {
+                        continue;
+                    };
+                    if table.row_triggers.iter().any(|(other, _)| *other == name) {
+                        let mut table = table.clone();
+                        table.row_triggers.retain(|(other, _)| *other != name);
+                        self.set_relation(key, Some(Rel::Table(table)));
+                    }
+                }
+                false
+            }
         };
         !blocked
     }
@@ -318,6 +408,8 @@ impl Loader {
                 }
                 table.parents.push(parent);
             }
+        }
+        if self.postgres || self.dialect == SqlDialect::MySql {
             let mut like_sources: Vec<Vec<String>> = likes.to_vec();
             if let Some(
                 CreateTableLikeKind::Parenthesized(like) | CreateTableLikeKind::Plain(like),
@@ -405,15 +497,105 @@ impl Loader {
                 }
             }
         }
+        let column_keys = create.columns.iter().flat_map(|def| {
+            def.options
+                .iter()
+                .filter_map(move |option| match &option.option {
+                    ColumnOption::ForeignKey(fk) => Some((fk, vec![def.name.clone()])),
+                    _ => None,
+                })
+        });
+        let table_keys = create
+            .constraints
+            .iter()
+            .filter_map(|constraint| match constraint {
+                TableConstraint::ForeignKey(fk) => Some((fk, fk.columns.clone())),
+                _ => None,
+            });
+        // MySQL parses the foreign keys of a table of an engine other than InnoDB, and
+        // ignores them.
+        let other_engine = matches!(&create.table_options, CreateTableOptions::Plain(options)
+            if options.iter().any(|option| matches!(option,
+                SqlOption::NamedParenthesizedList(list)
+                    if list.key.value.eq_ignore_ascii_case("engine")
+                        && list.name.as_ref().is_some_and(|name| !name.value.eq_ignore_ascii_case("innodb")))));
+        if !other_engine {
+            let declared: Vec<RawForeignKey> = column_keys
+                .chain(table_keys)
+                .filter_map(|(fk, columns)| {
+                    self.foreign_key(fk, &columns, &key, &table, path, true)
+                })
+                .collect();
+            table.foreign_keys = declared;
+        }
         if create.query.is_none() && !table.columns.is_empty() {
             self.set_relation(key, Some(Rel::Table(table)));
         }
         true
     }
 
+    /// A foreign key of the table `key`, which `table` is, over `columns`; `None` when the
+    /// table it references is not defined.
+    pub(super) fn foreign_key(
+        &self,
+        fk: &ForeignKeyConstraint,
+        columns: &[Ident],
+        key: &str,
+        table: &RawTable,
+        path: &[String],
+        validated: bool,
+    ) -> Option<RawForeignKey> {
+        let target = parts(&fk.foreign_table, self.dialect);
+        let (target, columns_of) = if self.new_key(&fk.foreign_table, path) == key {
+            (key.to_string(), table)
+        } else {
+            let target = self.table_key(&target, path)?;
+            let Some(Rel::Table(referenced)) = self.relations.get(&target) else {
+                return None;
+            };
+            (target, referenced)
+        };
+        let referred: Vec<String> = if fk.referred_columns.is_empty() {
+            columns_of
+                .columns
+                .iter()
+                .filter(|column| column.primary_key)
+                .map(|column| column.name.clone())
+                .collect()
+        } else {
+            fk.referred_columns
+                .iter()
+                .map(|ident| fold(ident, self.dialect))
+                .collect()
+        };
+        let characteristics = fk.characteristics.as_ref();
+        Some(RawForeignKey {
+            name: fk.name.as_ref().map(|name| fold(name, self.dialect)),
+            key: ForeignKey {
+                columns: columns
+                    .iter()
+                    .map(|ident| fold(ident, self.dialect))
+                    .collect(),
+                table: target,
+                referred,
+            },
+            immediate: characteristics.and_then(|c| c.deferrable) != Some(true)
+                && characteristics.and_then(|c| c.enforced) != Some(false),
+            validated,
+        })
+    }
+
     // ---- CREATE VIEW ----------------------------------------------------------------
 
-    pub(super) fn create_view(&mut self, view: &CreateView, path: &[String], force: bool) -> bool {
+    /// A `table` made by `CREATE TABLE ... AS` has no constraints: its columns may hold
+    /// any value of their type, and NULL outside MySQL, which keeps `NOT NULL`.
+    pub(super) fn create_view(
+        &mut self,
+        view: &CreateView,
+        table: bool,
+        path: &[String],
+        force: bool,
+    ) -> bool {
         if view.if_not_exists && self.relations.contains_key(&self.new_key(&view.name, path)) {
             return true;
         }
@@ -423,7 +605,26 @@ impl Loader {
         }
         let key = self.new_key(&view.name, path);
         let dialect = self.dialect;
-        let columns = view_columns(self.snapshot(), dialect, view);
+        let mut columns = view_columns(self.snapshot(), dialect, view);
+        if table {
+            for column in &mut columns {
+                forget_values(column, dialect);
+                let constant = column.python_type.as_deref().and_then(values::parse);
+                if let (None, Some(first)) = (
+                    &column.sql_type,
+                    constant.and_then(|v| v.into_iter().next()),
+                ) {
+                    let sql = match first {
+                        Value::Str(_) => "TEXT",
+                        Value::Int(_) => "INT",
+                    };
+                    (column.python_type, column.sql_type) = typed(sql.to_string(), None, dialect);
+                }
+                if dialect != SqlDialect::MySql {
+                    column.nullability = Nullability::Nullable;
+                }
+            }
+        }
         // A call to a function defined further down may be why a column is untyped.
         if !force && undefined_calls && columns.iter().any(|c| c.python_type.is_none()) {
             return false;
@@ -491,17 +692,7 @@ impl Loader {
         for rel in self.relations.values_mut() {
             let Rel::View(columns) = rel else { continue };
             for column in columns {
-                let (Some(python), Some(sql)) = (&column.python_type, &column.sql_type) else {
-                    continue;
-                };
-                let name = sql.split(['(', '<']).next().unwrap_or_default().trim();
-                let checkable = matches!(
-                    name,
-                    "TEXT" | "VARCHAR" | "SMALLINT" | "INT" | "BIGINT" | "TINYINT" | "MEDIUMINT"
-                );
-                if checkable && values::parse(python).is_some() {
-                    column.python_type = typed(sql.clone(), None, dialect).0;
-                }
+                forget_values(column, dialect);
             }
         }
     }
@@ -525,7 +716,12 @@ impl Loader {
             .iter()
             .any(|schema| key.starts_with(&format!("{schema}.")));
         let bare = key.split_once('.').map_or(key.as_str(), |(_, name)| name);
-        let feeds_functions = self.setof_names.contains(&key) || self.setof_names.contains(bare);
+        let readers: Vec<String> = [key.as_str(), bare]
+            .iter()
+            .filter_map(|name| self.returned_by.get(*name))
+            .flatten()
+            .cloned()
+            .collect();
         match resolved {
             Some(relation) => {
                 if cache.relations.insert(key, relation).is_none() && user {
@@ -538,8 +734,8 @@ impl Loader {
                 }
             }
         }
-        if feeds_functions {
-            self.refresh_functions();
+        for reader in readers {
+            self.refresh_function(reader);
         }
     }
 
@@ -600,8 +796,8 @@ impl Loader {
                 if let Some(key) = key {
                     self.skipped.push(("function", name.join(".")));
                     self.functions.entry(key.clone()).or_default();
-                    self.unknown_functions.insert(key);
-                    self.refresh_functions();
+                    self.unknown_functions.insert(key.clone());
+                    self.refresh_function(key);
                 }
                 true
             }
@@ -686,8 +882,8 @@ impl Loader {
                             self.functions.remove(&key);
                         }
                     }
+                    self.refresh_function(key);
                 }
-                self.refresh_functions();
             }
             _ => {}
         }
@@ -725,16 +921,13 @@ impl Loader {
             Some(FunctionReturnType::DataType(dt)) if outs.len() < 2 => {
                 RawReturn::Scalar(dt.clone())
             }
-            Some(FunctionReturnType::SetOf(dt)) => {
-                self.setof_names.extend(type_key(dt, self.dialect));
-                RawReturn::SetOf(dt.clone())
-            }
+            Some(FunctionReturnType::SetOf(dt)) => RawReturn::SetOf(dt.clone()),
             _ if outs.len() >= 2 => RawReturn::Rows(outs),
             _ if outs.len() == 1 => RawReturn::Scalar(outs[0].1.clone()),
             _ => {
                 self.functions.entry(key.clone()).or_default();
-                self.unknown_functions.insert(key);
-                self.refresh_functions();
+                self.unknown_functions.insert(key.clone());
+                self.refresh_function(key);
                 return;
             }
         };
@@ -748,6 +941,10 @@ impl Loader {
                 .iter()
                 .any(|a| matches!(a.mode, Some(ArgMode::Variadic))),
             returns,
+            strict: matches!(
+                create.called_on_null,
+                Some(FunctionCalledOnNull::Strict | FunctionCalledOnNull::ReturnsNullOnNullInput)
+            ),
         };
         self.unknown_functions.remove(&key);
         let dialect = self.dialect;
@@ -757,10 +954,33 @@ impl Loader {
                 .map(|dt| canonical_type(dt, dialect))
                 .collect()
         };
-        let overloads = self.functions.entry(key).or_default();
+        if let RawReturn::Scalar(ty) | RawReturn::SetOf(ty) = &function.returns {
+            if let Some(name) = type_key(ty, dialect) {
+                self.returned_by
+                    .entry(name)
+                    .or_default()
+                    .insert(key.clone());
+            }
+        }
+        let overloads = self.functions.entry(key.clone()).or_default();
         let wanted = signature(&function);
         overloads.retain(|f| signature(f) != wanted);
         overloads.push(function);
-        self.refresh_functions();
+        self.refresh_function(key);
+    }
+}
+
+/// Widen a `Literal` `column` taken from a text or integer column to `str` / `int`.
+fn forget_values(column: &mut Column, dialect: SqlDialect) {
+    let (Some(python), Some(sql)) = (&column.python_type, &column.sql_type) else {
+        return;
+    };
+    let name = sql.split(['(', '<']).next().unwrap_or_default().trim();
+    let checkable = matches!(
+        name,
+        "TEXT" | "VARCHAR" | "SMALLINT" | "INT" | "BIGINT" | "TINYINT" | "MEDIUMINT"
+    );
+    if checkable && values::parse(python).is_some() {
+        column.python_type = typed(sql.clone(), None, dialect).0;
     }
 }

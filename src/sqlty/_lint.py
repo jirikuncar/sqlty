@@ -22,10 +22,12 @@ Configuration via pyproject.toml:
     select-star-no-schema = "error"     # default
     stale-rewrite = "warn"              # default
     stale-type = "warn"                 # default
+    narrow-type = "error"               # default
     inline-sql-comment = "warn"         # default
     fstring-skipped = "warn"            # default
     tstring-skipped = "warn"            # default
     unchecked-query = "warn"            # default
+    dynamic-query = "ignore"            # default
     untyped-query = "warn"              # default
     unparsed-query = "warn"             # default
     unknown-table = "error"             # default
@@ -35,6 +37,7 @@ Configuration via pyproject.toml:
     unknown-type = "warn"               # default
     unsupported-syntax = "warn"         # default
     insert-missing-column = "error"     # default
+    insert-value-count = "error"        # default
     ungrouped-column = "error"          # default
     unused-ignore = "warn"              # default
     param-count-mismatch = "error"      # default
@@ -160,7 +163,13 @@ RULES: dict[str, LintRule] = {
         name="stale-type",
         default_severity=Severity.WARN,
         fixable=True,
-        description="SQL[tuple[...]] type doesn't match current schema (drift)",
+        description="SQL[tuple[...]] is wider than the rows the query returns (drift)",
+    ),
+    "narrow-type": LintRule(
+        name="narrow-type",
+        default_severity=Severity.ERROR,
+        fixable=True,
+        description="SQL[tuple[...]] doesn't admit every row the query returns",
     ),
     "mysql-sql-marker": LintRule(
         name="mysql-sql-marker",
@@ -191,6 +200,12 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.WARN,
         fixable=False,
         description="--sql query is not plain string literals (raw, bytes, an expression), so it is not checked",
+    ),
+    "dynamic-query": LintRule(
+        name="dynamic-query",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="helper query that is not a string literal (a variable, a call), so it is not checked",
     ),
     "untyped-query": LintRule(
         name="untyped-query",
@@ -245,6 +260,12 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.ERROR,
         fixable=False,
         description="INSERT leaves out a NOT NULL column that has no default",
+    ),
+    "insert-value-count": LintRule(
+        name="insert-value-count",
+        default_severity=Severity.ERROR,
+        fixable=False,
+        description="INSERT gives a different number of values than the columns it writes",
     ),
     "ungrouped-column": LintRule(
         name="ungrouped-column",

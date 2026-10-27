@@ -40,7 +40,7 @@ fn string_literal(expr: &Expr) -> Option<&str> {
     }
 }
 
-fn is_null_literal(expr: &Expr) -> bool {
+pub(super) fn is_null_literal(expr: &Expr) -> bool {
     match expr {
         Expr::Nested(inner) => is_null_literal(inner),
         Expr::Value(value) => matches!(value.value, Value::Null),
@@ -189,6 +189,7 @@ impl<'a> Analyzer<'a> {
     }
 
     /// The shape of a JSON expression; `Any` when it is not known.
+    #[recursive::recursive]
     fn json_shape(&self, expr: &Expr, scope: &Scope) -> Inferred<JsonShape> {
         match expr {
             Expr::Nested(inner) => self.json_shape(inner, scope),

@@ -91,6 +91,18 @@ jobs:
       - name: Run the comparisons
         run: scripts/compat/run.sh
 
+      - name: Compare nullability with rows on PostgreSQL
+        if: ${{ !cancelled() }}
+        run: uv run python scripts/compat/pg_nullability.py
+
+      - name: Compare nullability with MySQL
+        if: ${{ !cancelled() }}
+        run: uv run --with pymysql python scripts/compat/mysql_nullability.py
+
+      - name: Compare the PostgreSQL documentation examples
+        if: ${{ !cancelled() }}
+        run: uv run python scripts/compat/pg_docs.py
+
       - name: Summarize report changes
         if: ${{ !cancelled() }}
         run: |

@@ -65,3 +65,11 @@ INSERT INTO users (id, name, age) VALUES (?, ?, ?)
 SELECT '?' AS q, ':x' AS c FROM users WHERE id = ? -- ? :y
 -- params: 1: int (INT)
 ```
+
+## IS
+
+```sql
+SELECT id FROM users WHERE age IS ? AND name IS NOT :name
+-- params: 1: int (INT)
+-- params: name: str (TEXT)
+```

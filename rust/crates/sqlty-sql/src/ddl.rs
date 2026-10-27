@@ -85,9 +85,23 @@ fn scan(sql: &str, mysql: bool) -> Vec<Piece<'_>> {
     let bytes = sql.as_bytes();
     let mut pieces: Vec<Piece> = Vec::new();
     let mut i = 0;
+    // Inside a MySQL executable comment (`/*!50001 CREATE VIEW ... */`), which MySQL runs.
+    let mut executable = false;
     while i < bytes.len() {
         let b = bytes[i];
         let (kind, end) = match b {
+            b'/' if mysql && bytes[i..].starts_with(b"/*!") => {
+                executable = true;
+                let digits = bytes[i + 3..]
+                    .iter()
+                    .take_while(|b| b.is_ascii_digit())
+                    .count();
+                (Kind::Comment, i + 3 + digits)
+            }
+            b'*' if executable && bytes.get(i + 1) == Some(&b'/') => {
+                executable = false;
+                (Kind::Comment, i + 2)
+            }
             _ if b.is_ascii_whitespace() => {
                 let len = bytes[i..]
                     .iter()
@@ -147,19 +161,24 @@ fn significant(piece: &Piece) -> bool {
 /// One statement of the schema: the pieces between two `;`.
 pub(crate) struct Statement<'a>(Vec<Piece<'a>>);
 
+/// A `BEFORE ... FOR EACH ROW` trigger, which may change each row it fires for.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct RowTrigger {
+    pub name: Vec<String>,
+    pub table: Vec<String>,
+    pub events: RowEvents,
+}
+
+/// The statements a row trigger fires for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RowEvents {
+    pub insert: bool,
+    pub update: bool,
+}
+
 impl Statement<'_> {
     pub(crate) fn sql(&self) -> String {
         render(&self.0).trim().to_string()
-    }
-
-    /// Whether this is a `CREATE ... TABLE` with a column list.
-    pub(crate) fn is_create_table(&self) -> bool {
-        let mut sig = self.0.iter().filter(|p| significant(p));
-        sig.next().is_some_and(|p| is_word(p, "create"))
-            && sig
-                .take_while(|p| p.0 == Kind::Word)
-                .any(|p| is_word(p, "table"))
-            && self.0.iter().any(|p| is_punct(p, "("))
     }
 
     /// Whether this is `CREATE [OR REPLACE] [TEMP | MATERIALIZED | ...] <object>`, e.g. `view`.
@@ -173,11 +192,57 @@ impl Statement<'_> {
             "recursive",
             "secure",
         ];
-        let mut words = self.0.iter().filter(|p| significant(p));
-        words.next().is_some_and(|p| is_word(p, "create"))
-            && words
-                .find(|p| !MODIFIERS.iter().any(|m| is_word(p, m)))
-                .is_some_and(|p| is_word(p, object))
+        let words: Vec<&Piece> = self.0.iter().filter(|p| significant(p)).collect();
+        if !words.first().is_some_and(|p| is_word(p, "create")) {
+            return false;
+        }
+        let mut at = 1;
+        while let Some(word) = words.get(at) {
+            let next = |n: usize, w: &str| words.get(at + n).is_some_and(|p| is_word(p, w));
+            let eq = words.get(at + 1).is_some_and(|p| is_punct(p, "="));
+            at += if MODIFIERS.iter().any(|m| is_word(word, m)) {
+                1
+            // MySQL's `ALGORITHM = UNDEFINED`, `SQL SECURITY DEFINER`.
+            } else if (is_word(word, "algorithm") && eq)
+                || (is_word(word, "sql") && next(1, "security"))
+            {
+                3
+            // MySQL's `DEFINER = user@host` or `DEFINER = CURRENT_USER`.
+            } else if is_word(word, "definer") && eq {
+                if words.get(at + 3).is_some_and(|p| is_punct(p, "@")) {
+                    5
+                } else {
+                    3
+                }
+            } else {
+                return is_word(word, object);
+            };
+        }
+        false
+    }
+
+    /// A `CREATE VIEW` without the `WITH [CASCADED | LOCAL] CHECK OPTION` that ends it,
+    /// which sqlparser does not read; `None` when it has none.
+    pub(crate) fn without_check_option(&self) -> Option<String> {
+        let sig: Vec<usize> = (0..self.0.len())
+            .filter(|&at| significant(&self.0[at]))
+            .collect();
+        let words = |from: usize, expected: &[&str]| {
+            sig.len() >= from + expected.len()
+                && expected
+                    .iter()
+                    .zip(&sig[sig.len() - from - expected.len()..])
+                    .all(|(w, &at)| is_word(&self.0[at], w))
+        };
+        let start = [
+            &["with", "check", "option"][..],
+            &["with", "cascaded", "check", "option"],
+            &["with", "local", "check", "option"],
+        ]
+        .iter()
+        .find(|clause| words(0, clause))
+        .map(|clause| sig[sig.len() - clause.len()])?;
+        Some(render(&self.0[..start]).trim_end().to_string())
     }
 
     /// The name and base type of a `CREATE DOMAIN name [AS] type ...` as written, without
@@ -272,7 +337,47 @@ impl Statement<'_> {
 
     /// Whether this is a `CREATE ... TABLE` with or without a column list, such as
     /// `CREATE TABLE p PARTITION OF parent DEFAULT`.
-    pub(crate) fn is_create_table_any(&self) -> bool {
+    /// The name, module and arguments of SQLite's `CREATE VIRTUAL TABLE name USING module(...)`,
+    /// each argument as its significant tokens: `("docs", "fts5", [["title"], ["tokenize", "=", "'porter'"]])`.
+    pub(crate) fn virtual_table(&self) -> Option<(String, String, Vec<Vec<String>>)> {
+        let pieces = &self.0;
+        let sig: Vec<usize> = (0..pieces.len())
+            .filter(|&at| significant(&pieces[at]))
+            .collect();
+        let word = |n: usize, w: &str| sig.get(n).is_some_and(|&at| is_word(&pieces[at], w));
+        if !(word(0, "create") && word(1, "virtual") && word(2, "table")) {
+            return None;
+        }
+        let first = if word(3, "if") { 6 } else { 3 };
+        let using = (first..sig.len()).find(|&n| word(n, "using"))?;
+        let name = render(&pieces[sig[first]..sig[using]]).trim().to_string();
+        let module = pieces.get(*sig.get(using + 1)?)?.1.to_string();
+        let Some(&open) = sig.get(using + 2).filter(|&&at| is_punct(&pieces[at], "(")) else {
+            return Some((name, module, Vec::new()));
+        };
+        let close = matching_paren(pieces, open)?;
+        let mut args = vec![Vec::new()];
+        let mut at = open + 1;
+        while at < close {
+            let piece = &pieces[at];
+            if is_punct(piece, ",") {
+                args.push(Vec::new());
+            } else if significant(piece) {
+                let end = if is_punct(piece, "(") {
+                    matching_paren(pieces, at)?
+                } else {
+                    at
+                };
+                args.last_mut()?.push(piece.1.to_string());
+                at = end;
+            }
+            at += 1;
+        }
+        args.retain(|arg| !arg.is_empty());
+        Some((name, module, args))
+    }
+
+    pub(crate) fn is_create_table(&self) -> bool {
         let mut sig = self.0.iter().filter(|p| significant(p));
         sig.next().is_some_and(|p| is_word(p, "create"))
             && sig
@@ -321,6 +426,45 @@ impl Statement<'_> {
             .take(2)
             .collect();
         (!name.is_empty()).then_some((kind, name, action))
+    }
+
+    /// A `CREATE TRIGGER name BEFORE INSERT OR UPDATE ... ON table ... FOR EACH ROW`: a
+    /// trigger that may set the columns of each row it inserts or updates.
+    pub(crate) fn before_row_trigger(&self) -> Option<RowTrigger> {
+        let pieces: Vec<&Piece> = self.0.iter().filter(|p| significant(p)).collect();
+        let mut at = pieces.iter().position(|p| is_word(p, "trigger"))? + 1;
+        // Not the first word: MySQL's `DEFINER = ...`, or a `DELIMITER //` line before it.
+        if !pieces[..at].iter().any(|p| is_word(p, "create")) {
+            return None;
+        }
+        if pieces
+            .get(at..at + 3)
+            .is_some_and(|w| is_word(w[0], "if") && is_word(w[1], "not") && is_word(w[2], "exists"))
+        {
+            at += 3;
+        }
+        let (name, used) = name_parts(&pieces[at..]);
+        at += used;
+        if !pieces.get(at).is_some_and(|p| is_word(p, "before")) {
+            return None;
+        }
+        let on = at + pieces[at..].iter().position(|p| is_word(p, "on"))?;
+        let for_each_row = pieces[on..]
+            .windows(3)
+            .any(|w| is_word(w[0], "for") && is_word(w[1], "each") && is_word(w[2], "row"));
+        let fires_on = |event| pieces[at..on].iter().any(|p| is_word(p, event));
+        let events = RowEvents {
+            insert: fires_on("insert"),
+            update: fires_on("update"),
+        };
+        let table = name_parts(&pieces[on + 1..]).0;
+        (for_each_row && (events.insert || events.update) && !table.is_empty()).then_some(
+            RowTrigger {
+                name,
+                table,
+                events,
+            },
+        )
     }
 
     /// The name parts after the first `keyword` (`function` in `CREATE FUNCTION a.f(...)`).
@@ -387,7 +531,9 @@ impl Statement<'_> {
 
     /// The view name as written, e.g. `public.recent`.
     pub(crate) fn view_name(&self) -> String {
-        self.name_after("view", |p| is_punct(p, "(") || is_word(p, "as"))
+        self.name_after("view", |p| {
+            is_punct(p, "(") || is_word(p, "as") || is_word(p, "comment")
+        })
     }
 
     fn name_after(&self, keyword: &str, ends: impl Fn(&Piece) -> bool) -> String {
@@ -439,6 +585,92 @@ impl Statement<'_> {
                 sources,
             )
         })
+    }
+
+    /// The statement with only the first of the table options after its column list,
+    /// such as SQLite's `STRICT, WITHOUT ROWID`, which sqlparser reads only one at a
+    /// time; `None` when there is no second.
+    pub(crate) fn with_first_table_option(&self) -> Option<String> {
+        let pieces = &self.0;
+        let open = pieces.iter().position(|p| is_punct(p, "("))?;
+        let close = matching_paren(pieces, open)?;
+        let comma = (close + 1..pieces.len()).find(|&at| is_punct(&pieces[at], ","))?;
+        Some(render(&pieces[..comma]).trim_end().to_string())
+    }
+
+    /// The statement without the `PARTITION BY ...` that follows its column list, which
+    /// sqlparser does not read for MySQL; `None` when it has none.
+    pub(crate) fn without_partitioning(&self) -> Option<String> {
+        let pieces = &self.0;
+        let open = pieces.iter().position(|p| is_punct(p, "("))?;
+        let close = matching_paren(pieces, open)?;
+        let sig: Vec<usize> = (close + 1..pieces.len())
+            .filter(|&at| significant(&pieces[at]))
+            .collect();
+        let at = sig.windows(2).find_map(|pair| {
+            (is_word(&pieces[pair[0]], "partition") && is_word(&pieces[pair[1]], "by"))
+                .then_some(pair[0])
+        })?;
+        Some(render(&pieces[..at]).trim_end().to_string())
+    }
+
+    /// The MySQL `ALTER TABLE` clauses sqlparser does not read respelled: `ADD [COLUMN]
+    /// (a INT, b INT)` as `ADD COLUMN a INT, ADD COLUMN b INT`, and a `RENAME INDEX | KEY`
+    /// next to other clauses dropped. `None` when it has neither.
+    pub(crate) fn respelled_mysql_alter(&self) -> Option<String> {
+        let pieces = &self.0;
+        let sig: Vec<usize> = (0..pieces.len())
+            .filter(|&at| significant(&pieces[at]))
+            .collect();
+        let word = |i: usize, w: &str| sig.get(i).is_some_and(|&at| is_word(&pieces[at], w));
+        let comma = |i: usize| sig.get(i).is_some_and(|&at| is_punct(&pieces[at], ","));
+        let mut edits: Vec<(usize, usize, String)> = Vec::new();
+        for (i, &at) in sig.iter().enumerate() {
+            if word(i, "add") {
+                let open = sig[i + usize::from(word(i + 1, "column")) + 1..]
+                    .first()
+                    .copied();
+                let Some(open) = open.filter(|&open| is_punct(&pieces[open], "(")) else {
+                    continue;
+                };
+                let Some(close) = matching_paren(pieces, open) else {
+                    continue;
+                };
+                let columns: Vec<String> = split_top_level(&pieces[open + 1..close], ",")
+                    .iter()
+                    .map(|item| format!("ADD COLUMN {}", render(item).trim()))
+                    .collect();
+                edits.push((at, close + 1, columns.join(", ")));
+            } else if word(i, "rename")
+                && (word(i + 1, "index") || word(i + 1, "key"))
+                && word(i + 3, "to")
+            {
+                let Some(&name) = sig.get(i + 4) else {
+                    continue;
+                };
+                if i > 0 && comma(i - 1) {
+                    edits.push((sig[i - 1], name + 1, String::new()));
+                } else if comma(i + 5) {
+                    edits.push((
+                        at,
+                        sig.get(i + 6).copied().unwrap_or(sig[i + 5] + 1),
+                        String::new(),
+                    ));
+                }
+            }
+        }
+        if edits.is_empty() {
+            return None;
+        }
+        let (mut out, mut from) = (String::new(), 0);
+        for (start, end, text) in edits {
+            if start >= from {
+                out.push_str(&render(&pieces[from..start]));
+                out.push_str(&text);
+                from = end;
+            }
+        }
+        Some(out + &render(&pieces[from..]))
     }
 
     /// The statement without table constraints and column `CHECK` / `REFERENCES`
@@ -767,6 +999,80 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_mysql_views() {
+        let sql = "/*!50001 CREATE ALGORITHM=UNDEFINED */ /*!50013 DEFINER=`root`@`%` \
+                   SQL SECURITY DEFINER */ /*!50001 VIEW `v` AS select 1 AS `a` */ \
+                   /*!50002 WITH CASCADED CHECK OPTION */";
+        let stmt = &split_statements(sql, true)[0];
+        assert!(stmt.creates("view"));
+        assert_eq!(stmt.view_name(), "`v`");
+        let view = stmt.without_check_option().unwrap();
+        assert_eq!(
+            view.split_whitespace().collect::<Vec<_>>().join(" "),
+            "CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`%` SQL SECURITY DEFINER VIEW `v` AS select 1 AS `a`"
+        );
+        let stmt = &split_statements("CREATE DEFINER = CURRENT_USER VIEW v AS SELECT 1", true)[0];
+        assert!(stmt.creates("view"));
+        assert_eq!(stmt.without_check_option(), None);
+        assert!(split_statements("/* CREATE VIEW v AS SELECT 1 */", true).is_empty());
+    }
+
+    #[test]
+    fn test_with_first_table_option() {
+        assert_eq!(
+            first("CREATE TABLE t (a INT, b INT) STRICT, WITHOUT ROWID")
+                .with_first_table_option()
+                .as_deref(),
+            Some("CREATE TABLE t (a INT, b INT) STRICT")
+        );
+        assert_eq!(
+            first("CREATE TABLE t (a INT, b INT) STRICT").with_first_table_option(),
+            None
+        );
+    }
+
+    #[test]
+    fn test_without_partitioning() {
+        let sql = "CREATE TABLE t (id INT, PRIMARY KEY (id)) ENGINE=InnoDB \
+                   PARTITION BY RANGE (id) (PARTITION p0 VALUES LESS THAN (10))";
+        assert_eq!(
+            split_statements(sql, true)[0]
+                .without_partitioning()
+                .as_deref(),
+            Some("CREATE TABLE t (id INT, PRIMARY KEY (id)) ENGINE=InnoDB")
+        );
+        let sql = "CREATE TABLE t (id INT)";
+        assert_eq!(split_statements(sql, true)[0].without_partitioning(), None);
+    }
+
+    #[test]
+    fn test_respelled_mysql_alter() {
+        assert_eq!(
+            first("ALTER TABLE t ADD (a INT, b DECIMAL(5, 2) NOT NULL), ADD COLUMN (c INT)")
+                .respelled_mysql_alter()
+                .as_deref(),
+            Some(
+                "ALTER TABLE t ADD COLUMN a INT, ADD COLUMN b DECIMAL(5, 2) NOT NULL, \
+                 ADD COLUMN c INT"
+            )
+        );
+        assert_eq!(
+            first("ALTER TABLE t RENAME INDEX a TO b, RENAME COLUMN x TO y, RENAME KEY c TO d")
+                .respelled_mysql_alter()
+                .as_deref(),
+            Some("ALTER TABLE t RENAME COLUMN x TO y")
+        );
+        assert_eq!(
+            first("ALTER TABLE t ADD a INT").respelled_mysql_alter(),
+            None
+        );
+        assert_eq!(
+            first("ALTER TABLE t ADD PRIMARY KEY (a)").respelled_mysql_alter(),
+            None
+        );
+    }
+
     fn first(sql: &str) -> Statement<'_> {
         split_statements(sql, false).remove(0)
     }
@@ -834,9 +1140,8 @@ mod tests {
 
     #[test]
     fn test_create_table_any_and_lead_words() {
-        assert!(first("CREATE TABLE p PARTITION OF q DEFAULT").is_create_table_any());
-        assert!(!first("CREATE TABLE p PARTITION OF q DEFAULT").is_create_table());
-        assert!(!first("CREATE VIEW v AS SELECT 1").is_create_table_any());
+        assert!(first("CREATE TABLE p PARTITION OF q DEFAULT").is_create_table());
+        assert!(!first("CREATE VIEW v AS SELECT 1").is_create_table());
         assert_eq!(
             first("create or replace function f()").lead_words(3),
             ["create", "or", "replace"]

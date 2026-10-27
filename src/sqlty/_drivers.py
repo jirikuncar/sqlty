@@ -22,10 +22,11 @@ Example:
 from __future__ import annotations
 
 import ast
+import re
 from collections import defaultdict
 
 from sqlty._helpers import HelperCall
-from sqlty._params import ParamArg, arg_type, literal_params
+from sqlty._params import SCALARS, ParamArg, arg_type, literal_params
 from sqlty._source import ParsedSource
 
 # Driver factories and classes, by the dotted name they are imported as, to the driver.
@@ -53,6 +54,14 @@ _METHODS = {
     "asyncpg": {"execute", "fetch", "fetchrow", "fetchval", "executemany"},
 }
 _PARAM_KEYWORD = {"psycopg": "params", "sqlite3": "parameters"}
+# sqlite3 reads a str or bytes as a sequence, one parameter per item.
+_SEQUENCE_SCALARS = {"psycopg": frozenset(), "sqlite3": frozenset({"str", "bytes"})}
+
+MARKER = re.compile(r"\s*--\s?sql(?:\s|$)")
+# A t-string that starts with the marker.
+_MARKED_TEMPLATE = re.compile(r"""(?<![\w])(?:[tT][rR]?|[rR][tT])(?:'|")+\s*--\s?sql""")
+# psycopg's format specs that only pick the wire format of a value.
+_WIRE_FORMATS = frozenset({None, "s", "b", "t"})
 
 
 def _dotted(node: ast.expr) -> str | None:
@@ -248,7 +257,7 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
             params: tuple[ParamArg, ...] | None = tuple(
                 ParamArg(i, arg_type(arg, parsed, stack)) for i, arg in enumerate(call.args[1:], 1)
             )
-            found.append(HelperCall(call.lineno, query, None, aliases, params))
+            found.append(HelperCall(call.lineno, query, None, aliases, params, driver=driver))
             continue
         keyword = _PARAM_KEYWORD[driver]
         arg = call.args[1] if len(call.args) > 1 else None
@@ -256,19 +265,73 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
             arg = next((k.value for k in call.keywords if k.arg == keyword), None)
             if arg is None and any(k.arg is None for k in call.keywords):
                 continue
-        if func.attr == "executemany":
-            if isinstance(arg, (ast.List, ast.Tuple)):
-                for row in arg.elts:
-                    if (params := literal_params(row, parsed, stack)) is not None:
-                        found.append(HelperCall(call.lineno, query, None, aliases, params))
+        many = func.attr == "executemany"
+        if many and not isinstance(arg, (ast.List, ast.Tuple)):
             continue
-        found.append(
-            HelperCall(
-                call.lineno,
-                query,
-                None,
-                aliases,
-                () if arg is None else literal_params(arg, parsed, stack),
-            )
-        )
+        for row in arg.elts if many and isinstance(arg, (ast.List, ast.Tuple)) else [arg]:
+            params = () if row is None else literal_params(row, parsed, stack)
+            kind = arg_type(row, parsed, stack) if row is not None and params is None else None
+            single = kind if kind in SCALARS - _SEQUENCE_SCALARS[driver] else None
+            if not many or params is not None or single is not None:
+                found.append(
+                    HelperCall(
+                        call.lineno, query, None, aliases, params, driver=driver, single=single
+                    )
+                )
     return found
+
+
+def find_template_calls(source: str | ParsedSource) -> list[HelperCall]:
+    """Each ``--sql`` t-string whose fields all pass values, as a call passing those values.
+
+    psycopg sends a field ``{value}``, or one with the ``:s``, ``:b`` or ``:t`` spec, as a
+    parameter, so field *k* binds placeholder *k* of the query. A t-string with any other
+    field is left out: ``tstring-skipped`` reports it, or it inlines SQL.
+
+    Example:
+        >>> [(c.query, c.params) for c in find_template_calls('q = t"--sql\\\\nSELECT {1}, {x:b}"')]
+        [('--sql\\nSELECT %s, %s', (ParamArg(key=1, type='int'), ParamArg(key=2, type=None)))]
+    """
+    parsed = ParsedSource.of(source)
+    if not _MARKED_TEMPLATE.search(parsed.text) or parsed.tree is None:
+        return []
+    found: list[HelperCall] = []
+    for template, stack in parsed.templates:
+        parts: list[str] = []
+        params: list[ParamArg] = []
+        for value in template.values:
+            if isinstance(value, ast.Constant):
+                parts.append(str(value.value).replace("%", "%%"))
+            elif (
+                isinstance(value, ast.Interpolation)
+                and value.conversion == -1
+                and _spec(value) in _WIRE_FORMATS
+            ):
+                parts.append("%s")
+                params.append(ParamArg(len(params) + 1, arg_type(value.value, parsed, stack)))
+            else:
+                break
+        else:
+            query = "".join(parts)
+            if MARKER.match(query):
+                found.append(
+                    HelperCall(
+                        template.lineno,
+                        query,
+                        None,
+                        parsed.typing_aliases,
+                        tuple(params),
+                        driver="psycopg",
+                    )
+                )
+    return found
+
+
+def _spec(field: ast.Interpolation) -> str | None:
+    """The format spec of ``field`` when it is plain text."""
+    match field.format_spec:
+        case None:
+            return None
+        case ast.JoinedStr(values=[ast.Constant(value=str(spec))]):
+            return spec
+    return "{}"

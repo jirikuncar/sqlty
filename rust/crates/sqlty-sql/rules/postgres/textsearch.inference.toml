@@ -1,0 +1,162 @@
+# PostgreSQL text search and geometric operators and functions.
+
+[[rule]]
+id = "postgres.textsearch.and"
+operator = "PGOverlap"
+dialects = ["postgres"]
+left = ["TSQUERY"]
+right = ["TSQUERY"]
+type = "TSQUERY"
+reference = "PostgreSQL 17 documentation, 9.13, Table 9.42 Text Search Operators (tsquery && tsquery → tsquery)"
+reasoning = "`&&` on two queries ANDs them into a query, not an overlap test."
+
+[[rule]]
+id = "postgres.textsearch.or"
+operator = "StringConcat"
+dialects = ["postgres"]
+left = ["TSQUERY"]
+right = ["TSQUERY"]
+type = "TSQUERY"
+reference = "PostgreSQL 17 documentation, 9.13, Table 9.42 Text Search Operators (tsquery || tsquery → tsquery)"
+reasoning = "`||` on two queries ORs them into a query."
+
+[[rule]]
+id = "postgres.textsearch.concat-vectors"
+operator = "StringConcat"
+dialects = ["postgres"]
+left = ["TSVECTOR"]
+right = ["TSVECTOR"]
+type = "TSVECTOR"
+reference = "PostgreSQL 17 documentation, 9.13, Table 9.42 Text Search Operators (tsvector || tsvector → tsvector)"
+reasoning = "`||` on two vectors concatenates them into a vector."
+
+[[rule]]
+id = "postgres.textsearch.followed-by"
+operator = "LtDashGt"
+dialects = ["postgres"]
+left = ["TSQUERY"]
+right = ["TSQUERY"]
+type = "TSQUERY"
+reference = "PostgreSQL 17 documentation, 9.13, Table 9.42 Text Search Operators (tsquery <-> tsquery → tsquery)"
+reasoning = "`<->` on two queries makes a phrase query."
+
+[[function]]
+id = "postgres.geometry.length"
+function = "LENGTH"
+dialects = ["postgres"]
+argument = ["PATH", "LSEG"]
+type = "DOUBLE"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.11, Table 9.37 Geometric Functions (length ( geometric_type ) → double precision)"
+reasoning = "The length of a path or line segment is a distance, a double."
+
+[[function]]
+id = "postgres.textsearch.headline-json"
+function = "TS_HEADLINE"
+dialects = ["postgres"]
+argument = ["JSON", "JSONB"]
+type = "@argument"
+nullability = "strict"
+shadows = ["postgres.textsearch.headline-json-config"]
+reference = "PostgreSQL 17 documentation, 9.13, Table 9.43 Text Search Functions (ts_headline example: ts_headline('{\"cat\":\"raining cats and dogs\"}'::jsonb, 'cat') → {\"cat\": \"raining <b>cats</b> and dogs\"}); the signature there says text, the pg_proc catalog says ts_headline(jsonb, tsquery) returns jsonb and ts_headline(json, tsquery) json"
+reasoning = "A headline of a JSON document is the document with its strings marked, of the same JSON type."
+
+[[function]]
+id = "postgres.textsearch.headline-json-config"
+function = "TS_HEADLINE"
+dialects = ["postgres"]
+arguments = [[], ["JSON", "JSONB"]]
+type = "@argument(1)"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.13, Table 9.43 Text Search Functions (ts_headline example: ts_headline('{\"cat\":\"raining cats and dogs\"}'::jsonb, 'cat') → {\"cat\": \"raining <b>cats</b> and dogs\"}); the signature there says text, the pg_proc catalog says ts_headline(jsonb, tsquery) returns jsonb and ts_headline(json, tsquery) json"
+reasoning = "With a text search configuration first, the document is the second argument, and the headline keeps its JSON type."
+
+[[function]]
+id = "postgres.textsearch.float"
+functions = ["TS_RANK", "TS_RANK_CD"]
+dialects = ["postgres"]
+type = "FLOAT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
+reasoning = "The documentation gives each of these a `real` result."
+
+[[function]]
+id = "postgres.textsearch.text"
+functions = ["TS_HEADLINE", "QUERYTREE"]
+dialects = ["postgres"]
+type = "TEXT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
+reasoning = "The documentation gives each of these a `text` result."
+
+[[function]]
+id = "postgres.textsearch.tsquery"
+functions = ["TO_TSQUERY", "PLAINTO_TSQUERY", "PHRASETO_TSQUERY", "WEBSEARCH_TO_TSQUERY", "TS_REWRITE", "TSQUERY_PHRASE"]
+dialects = ["postgres"]
+type = "TSQUERY"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
+reasoning = "The documentation gives each of these a `tsquery` result."
+
+[[function]]
+id = "postgres.textsearch.tsvector"
+functions = ["TO_TSVECTOR", "SETWEIGHT", "ARRAY_TO_TSVECTOR", "JSON_TO_TSVECTOR", "JSONB_TO_TSVECTOR", "STRIP", "TS_DELETE", "TS_FILTER"]
+dialects = ["postgres"]
+type = "TSVECTOR"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
+reasoning = "The documentation gives each of these a `tsvector` result."
+
+[[function]]
+id = "postgres.textsearch.text-array-nullable"
+function = "TS_LEXIZE"
+dialects = ["postgres"]
+type = "ARRAY<TEXT>"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.44 Text Search Debugging Functions"
+reasoning = "The documentation gives the function a `text[]` result. It is NULL for a word the dictionary does not know."
+
+[[function]]
+id = "postgres.textsearch.text-array"
+function = "TSVECTOR_TO_ARRAY"
+dialects = ["postgres"]
+type = "ARRAY<TEXT>"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
+reasoning = "The documentation gives the function a `text[]` result."
+
+[[function]]
+id = "postgres.textsearch.int"
+function = "NUMNODE"
+dialects = ["postgres"]
+type = "INT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
+reasoning = "The documentation gives the function an `integer` result."
+
+[[function]]
+id = "postgres.textsearch.record"
+functions = ["TS_DEBUG", "TS_PARSE", "TS_STAT", "TS_TOKEN_TYPE"]
+dialects = ["postgres"]
+type = "RECORD"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.44 Text Search Debugging Functions"
+reasoning = "The documentation gives each of these a `record` result."
+
+[[function]]
+id = "postgres.textsearch.regconfig"
+function = "GET_CURRENT_TS_CONFIG"
+dialects = ["postgres"]
+type = "REGCONFIG"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
+reasoning = "The documentation gives the function a `regconfig` result."
+
+[[rule]]
+id = "postgres.textsearch.negate"
+operator = "Prefix:PGPrefixFactorial"
+dialects = ["postgres"]
+right = ["TSQUERY"]
+type = "TSQUERY"
+reference = "PostgreSQL 17 documentation, 9.13, Table 9.42 Text Search Operators (!! tsquery → tsquery)"
+reasoning = "`!!` negates a query into a query."

@@ -69,8 +69,10 @@ The rules resolve the names a query defines, so these are not false positives:
 
 - CTE names, aliases (`FROM users u`, `AS t(a, b)`) and the columns of CTEs and
   subqueries in `FROM`.
-- Table functions (`generate_series`, `unnest`). Their columns are not read, so a
-  column taken from one is reported as `unsupported-syntax` instead of guessed.
+- Columns of table functions sqlty does not read (an extension's or a user's
+  function without a schema definition). A column taken from one is reported as
+  `unsupported-syntax` instead of guessed. The built-in ones, such as
+  `generate_series`, `unnest` and `json_each`, have known columns and are checked.
 - PostgreSQL system catalogs. The common ones (`pg_class`, `pg_attribute`,
   `pg_type`, `pg_namespace`, `pg_index`, `pg_constraint`, `pg_proc`,
   `information_schema.tables` and `.columns`, [the full list](schema-inference.md#migrations-schemas-and-functions))
@@ -86,10 +88,32 @@ The rules resolve the names a query defines, so these are not false positives:
   resolves through the `search_path` only. MySQL and SQLite match names without
   case.
 
-The rules read the select list, `WHERE` and `JOIN ... ON` of a query, and the
-target table, set columns, values and conditions of `INSERT`, `UPDATE` and
-`DELETE`, also when they return no rows. A column named only in `GROUP BY`,
-`HAVING` or `ORDER BY` is not checked: those may name a result column's alias.
+The rules read the select list, `WHERE`, `JOIN ... ON`, `GROUP BY`, `HAVING` and
+`ORDER BY` of a query, and the target table, set columns, values and conditions of
+`INSERT`, `UPDATE` and `DELETE`, also when they return no rows. A name may also be a
+result column's alias where the dialect reads one: SQLite anywhere, MySQL in
+`GROUP BY`, `HAVING` and `ORDER BY`, PostgreSQL only as a bare name in `GROUP BY`
+and `ORDER BY`.
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+```
+
+```python
+from sqlty import SQL
+
+a = SQL[tuple[str]]("--sql\nSELECT name AS n FROM users ORDER BY n")
+# error: [unknown-column] "column `n` does not exist in `users`"
+b = SQL[tuple[str]]("--sql\nSELECT name AS n FROM users ORDER BY lower(n)")
+```
 
 `NULL` and placeholders such as `$1` have no type by nature and are not
 reported.

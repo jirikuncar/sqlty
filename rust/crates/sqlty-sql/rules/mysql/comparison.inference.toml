@@ -1,4 +1,4 @@
-# MySQL comparisons.
+# MySQL comparison operators and functions.
 
 [[rule]]
 id = "mysql.comparison.null-safe-equal"
@@ -8,3 +8,21 @@ type = "BOOLEAN"
 nullability = "non-null"
 reference = "MySQL 8.4 Reference Manual, 14.4.2 Comparison Functions and Operators (<=>)"
 reasoning = "`<=>` is NULL-safe equality: it gives 1 or 0, never NULL."
+
+[[function]]
+id = "mysql.comparison.common"
+functions = ["GREATEST", "LEAST"]
+dialects = ["mysql"]
+type = "@first-known"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.4.2 Comparison Functions and Operators"
+reasoning = "The arguments resolve to one common type, the first known argument's."
+
+[[function]]
+id = "mysql.comparison.bigint"
+function = "ISNULL"
+dialects = ["mysql"]
+type = "BIGINT"
+nullability = "non-null"
+reference = "MySQL 8.4 Reference Manual, 14.4.2 Comparison Functions and Operators"
+reasoning = "The manual describes the function as returning an integer. It never returns NULL, even for NULL arguments."

@@ -11,7 +11,6 @@ use std::sync::Arc;
 
 mod api;
 mod dialect;
-mod dialect_functions;
 mod dml;
 mod explain;
 mod expr;
@@ -19,19 +18,23 @@ mod functions;
 mod grouping;
 mod hashing;
 mod inference;
+mod input;
 mod json;
 mod literals;
 mod memo;
+mod merged_star;
 mod names;
 mod narrowing;
 mod nullability;
 mod operators;
 mod params;
+mod pg_record_functions;
 mod preprocess;
 mod query;
 mod references;
 mod registry;
 mod resolve;
+mod respell;
 mod scope;
 mod sql_type;
 mod star_expand;
@@ -40,13 +43,16 @@ mod table_functions;
 mod test_support;
 #[cfg(test)]
 mod tests;
+mod text_names;
+mod tokens;
 mod typed;
 
 #[cfg(test)]
 pub(crate) use api::load_schema;
 pub use api::{
     analyze_select, analyze_with_diagnostics, composite_columns, infer_type,
-    load_schema_with_overrides, load_schema_with_skipped, parse_error, returns_rows, row_type,
+    load_schema_with_overrides, load_schema_with_skipped, parse, parse_error, returns_rows,
+    row_type, Parsed,
 };
 pub(crate) use api::{typed, view_columns};
 pub use dialect::{SqlDialect, UnknownDialect};
@@ -55,7 +61,7 @@ use expr::from_sql_type;
 pub use inference::RuleRef;
 pub use nullability::Nullability;
 pub use params::{analyze_params, Param};
-pub(crate) use preprocess::parse_ddl;
+pub(crate) use preprocess::{parse_ddl, parse_function_without_hints};
 pub use query::Column;
 pub(crate) use sql_type::canonical_type;
 pub use sql_type::python_types;
@@ -78,6 +84,20 @@ impl SchemaColumn {
             },
             None => from_sql_type(&self.sql_type, dialect),
         }
+    }
+
+    /// The column's name as a result column: its spelling in the schema, without quotes.
+    /// MySQL and SQLite keep the declared case; PostgreSQL folds an unquoted name.
+    fn output_name(&self) -> String {
+        let ident = self.ident.as_str();
+        let unquoted =
+            [('"', '"'), ('`', '`'), ('[', ']')]
+                .into_iter()
+                .find_map(|(open, close)| {
+                    let inner = ident.strip_prefix(open)?.strip_suffix(close)?;
+                    Some(inner.replace(&format!("{close}{close}"), &close.to_string()))
+                });
+        unquoted.unwrap_or_else(|| ident.to_string())
     }
 }
 

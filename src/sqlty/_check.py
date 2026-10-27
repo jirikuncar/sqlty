@@ -20,7 +20,7 @@ from sqlty._core import parse_error as _parse_error
 from sqlty._core import query_diagnostics as _query_diagnostics
 from sqlty._core import select_star_finding as _select_star_finding
 from sqlty._core import wrapped_queries as _wrapped_queries
-from sqlty._drivers import find_driver_calls
+from sqlty._drivers import MARKER, find_driver_calls, find_template_calls
 from sqlty._helpers import HelperIndex, find_helper_calls
 from sqlty._lint import NAME_RULES, Diagnostic
 from sqlty._params import mismatch
@@ -36,7 +36,6 @@ if TYPE_CHECKING:
     from sqlty.core import ParamInfo
 
 # The `--sql` marker that opens a query string, as the engine reads it.
-MARKER = re.compile(r"\s*--\s?sql(?:\s|$)")
 
 
 def is_any_row(call: HelperCall) -> bool:
@@ -188,11 +187,18 @@ class _Check:
 def _check_unchecked_queries(ctx: _Check) -> None:
     for call in ctx.found:
         if call.query is None and not is_any_row(call):
-            ctx.report(
-                "unchecked-query",
-                "psycopg query is not built from literals only, so it is not checked",
-                call.line,
-            )
+            if call.dynamic:
+                ctx.report(
+                    "dynamic-query",
+                    "query is not a string literal, so it is not checked",
+                    call.line,
+                )
+            else:
+                ctx.report(
+                    "unchecked-query",
+                    "psycopg query is not built from literals only, so it is not checked",
+                    call.line,
+                )
 
 
 def _check_params(ctx: _Check) -> None:
@@ -201,6 +207,14 @@ def _check_params(ctx: _Check) -> None:
         or ctx.rule_config.is_enabled("param-count-mismatch")
     ):
         return
+    singles = {(call.line, call.single, call.driver) for call in ctx.driver_calls if call.single}
+    if ctx.rule_config.is_enabled("param-type-mismatch"):
+        for line, single, driver in sorted(singles):
+            ctx.report(
+                "param-type-mismatch",
+                f"parameters are a single {single}, which {driver} rejects: pass a sequence, `(value,)`",
+                line,
+            )
     for call in [*ctx.calls, *ctx.driver_calls]:
         if call.params is not None:
             for rule, message in _param_diagnostics(call, ctx.dialect, ctx.schema_sql):
@@ -235,7 +249,13 @@ def _check_unparsed(ctx: _Check) -> None:
             and not MARKER.match(call.query)
             and (error := _parse_error(call.query, dialect=ctx.dialect))
         ):
-            ctx.report("unparsed-query", f"query does not parse: {error}", call.line)
+            message = f"query does not parse: {error}"
+            if "found: {" in error and (field := _FORMAT_FIELD.search(call.query)):
+                message += f"; `{field[0]}` is a `.format()` field: fill it with `sql.SQL(...).format(...)`, or pass a value as `%s`"
+            ctx.report("unparsed-query", message, call.line)
+
+
+_FORMAT_FIELD = re.compile(r"\{\w*\}")
 
 
 def _check_names(ctx: _Check) -> None:
@@ -410,7 +430,11 @@ def diagnostics(
             ),
         )
     found = find_helper_calls(parsed, helpers, module)
-    driver_calls = find_driver_calls(parsed)
+    typed = {line for call in found for line in call.typed_lines}
+    diagnostics = [
+        d for d in diagnostics if not (d["rule"] == "stale-rewrite" and d.get("line") in typed)
+    ]
+    driver_calls = find_driver_calls(parsed) + find_template_calls(parsed)
     queries = [
         (line, name, query)
         for line, name, query in (
@@ -438,6 +462,7 @@ def diagnostics(
     ctx.row_usage = row_usage or RowUsage()
     for check_pass in _CHECK_PASSES:
         check_pass(ctx)
+    diagnostics.sort(key=lambda diagnostic: diagnostic["line"])
     return diagnostics
 
 
@@ -484,8 +509,33 @@ def _param_diagnostics(
             continue
         label = f"parameter {key}" if isinstance(key, int) else f"parameter '{key}'"
         if arg.type == "None" or (typed and not param.cast):
-            if problem := mismatch(param.python_type, param.nullable, arg.type, postgres=postgres):
+            expected = param.python_type
+            if (
+                expected is None
+                and call.driver == "asyncpg"
+                and param.untyped_sql_type == "INTERVAL"
+            ):
+                expected = "datetime.timedelta"
+            if problem := mismatch(
+                expected,
+                param.nullable,
+                arg.type,
+                postgres=postgres,
+                asyncpg=call.driver == "asyncpg",
+            ):
                 found.append(("param-type-mismatch", f"{label} {problem}"))
+    if call.driver == "asyncpg":
+        for param in params:
+            if param.untyped_sql_type and param.sql_type:
+                untyped, sql_type = param.untyped_sql_type.lower(), param.sql_type.lower()
+                found.append(
+                    (
+                        "param-type-mismatch",
+                        f"parameter {param.number} is an `{untyped}` to PostgreSQL, as asyncpg sends it "
+                        f"untyped, so it cannot stand for a `{sql_type}`: "
+                        f"cast it, `${param.number}::{sql_type}`",
+                    )
+                )
     return found
 
 

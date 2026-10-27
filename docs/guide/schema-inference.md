@@ -92,23 +92,38 @@ What makes a column nullable or not:
   `WITHOUT ROWID` or `STRICT` table. A `CHECK (x IS NOT NULL)` makes `x` non-null too, and
   `CHECK (num_nonnulls(a, b) = 1)` or `CHECK (a IS NOT NULL OR b IS NOT NULL)` makes
   `COALESCE(a, b)` non-null.
+  A generated column is as nullable as its expression, unless it reads another generated
+  column.
 - **Outer joins.** The optional side of `LEFT`, `RIGHT` and `FULL` joins (also nested)
-  is nullable.
+  is nullable. A `LEFT JOIN` from a table to the one its `NOT NULL` foreign key
+  references, on exactly the key's columns, always matches. That excludes a `DEFERRABLE`
+  key, a key added `NOT VALID` and not validated, a referenced table with row-level
+  security, SQLite, and MySQL tables of an engine other than InnoDB. A database that
+  skips foreign key checks (PostgreSQL's `session_replication_role = replica`, MySQL's
+  `foreign_key_checks = 0`) can break it.
 - **Conditions.** `WHERE`, `HAVING` and the `ON` of inner joins narrow what they prove:
   `IS NOT NULL`, comparisons, `IN`, `BETWEEN`, `LIKE`, a strict function such as
-  `lower(x) = 'a'`, and the PostgreSQL `?` operator. `OR` proves only what both sides prove,
-  and the right side of `AND`, `OR` and a `CASE` branch is read under what the left side
+  `lower(x) = 'a'`, and the PostgreSQL `?` operator. `OR` narrows a column only by what both
+  sides prove, but an expression non-null under each side is non-null: `COALESCE(a, b)` under
+  `a IS NOT NULL OR b IS NOT NULL`. The right side of `AND`, `OR` and a `CASE` branch is read under what the left side
   established. A non-null column of an outer-joined table in `WHERE` also drops the
   null-extended rows.
 - **Expressions.** Operators and most functions are NULL when an argument is.
   `COALESCE` is nullable only if every argument is. `NULLIF`, JSON accessors, array
-  subscripts and a `CASE` without `ELSE` can always be NULL.
+  subscripts and a `CASE` without `ELSE` can always be NULL. MySQL and SQLite return
+  NULL where PostgreSQL raises an error, so there a division, a math function outside its
+  domain (`sqrt(-1)`), and in MySQL a date moved out of range or a cast of a string to a
+  date can be NULL too.
 - **Aggregates.** `COUNT` is never NULL. Other aggregates are nullable without a plain
   `GROUP BY` (empty input), with `FILTER`, or when the argument is.
+- **Arrays.** The nullability of an array's elements is not tracked: a `text[]` column,
+  an `ARRAY[...]` and an `array_agg` are `list[str]`, though each can hold NULLs.
 - **Subqueries.** A scalar subquery is nullable unless it always returns one row.
 - **Set operations.** `UNION` is nullable if either side is, `INTERSECT` if both are,
   `EXCEPT` follows its left side.
-- **DML.** `RETURNING` reads the schema like a `SELECT`.
+- **DML.** `RETURNING` reads the schema like a `SELECT`. A column the statement writes
+  with a value that is never NULL is not NULL, and so is one an `INSERT` leaves out for a
+  `DEFAULT` that never is, unless a `BEFORE` row trigger can change the row.
 - **Parameters.** A placeholder echoed into a column (`SELECT %(key)s::text`) can be NULL,
   since a caller may bind `None`. In a call to a [marked helper](helpers.md) whose argument
   for it has a known type other than `None` (a literal, an annotated variable), it is not:
@@ -123,7 +138,7 @@ the opposite. See [Row types](row-types.md#nullable-columns).
 ### Upgrading
 
 Before this release, row types were never `T | None`. Existing `SQL[...]` wrappers over
-nullable columns are now `stale-type`, and row types that omit `| None` are
+nullable columns are now `narrow-type` errors, and row types that omit `| None` are
 `nullable-mismatch` errors. `sqlty check --fix` updates wrappers in place, and
 `sqlty rewrite` writes the new types for unwrapped queries. Add `| None` to the flagged
 row type fields, filter the NULLs in the query, or lower the rule while you migrate:
@@ -201,7 +216,7 @@ values the `Literal` misses, and [`redundant-literal`](../reference/rules.md#red
 `sqlty rewrite` and `sqlty check --fix` now write `typing.Literal[...]` where the values
 are known: string constants (`SELECT 'paid'`; `SELECT 1` stays `int`), `CASE` over
 constants, `CHECK`ed columns and MySQL `ENUM` columns. Existing wrappers that spell `str` or `int` for
-those columns stay valid and are not `stale-type`; an annotation of a different type is.
+those columns stay valid and are not reported; an annotation of a different type is `narrow-type`.
 A row type field that is a `Literal` missing values is now a `literal-mismatch` error; add
 the values, annotate `str`, or lower the rule while you migrate:
 
@@ -302,13 +317,18 @@ In PostgreSQL the schema is a catalog that the statements build, not a list of
 - `ALTER TABLE`: add, drop and rename columns, change a column type, set or drop
   `NOT NULL`, rename the table. A change to a table reaches the tables that
   inherit from it or are its partitions.
+- MySQL's `RENAME TABLE a TO b, c TO d` renames each table in turn.
 - `ALTER TYPE ... ADD VALUE` and `RENAME VALUE` change an enum's `Literal`.
 - `DROP TABLE`, `VIEW`, `TYPE`, `DOMAIN`, `FUNCTION` and `SCHEMA`.
 - `PARTITION OF`, `INHERITS` and `LIKE` give a table its parent's columns.
+- `CREATE TABLE ... AS` gives a table the columns of its query. It has no
+  constraints, so they can all be NULL (MySQL keeps `NOT NULL`). An `ALTER TABLE`
+  that changes its columns leaves its shape unknown.
 - `CREATE FUNCTION ... RETURNS` types calls to the function: a scalar, a
   `SETOF`, or the columns of `RETURNS TABLE (...)` in `FROM`. Overloads are told
   apart by their number of arguments, and a built-in function of the same name
-  wins.
+  wins. Any function can return NULL, so a call is nullable, unless the function is
+  `STRICT` (`RETURNS NULL ON NULL INPUT`): then it is nullable only when an argument is.
 - `pg_catalog` and `information_schema` relations are always known, with their
   PostgreSQL column types and `NOT NULL` columns: `pg_class`, `pg_namespace`,
   `pg_attribute`, `pg_type`, `pg_index`, `pg_constraint`, `pg_enum`, `pg_proc`,
@@ -338,7 +358,7 @@ ALTER TABLE users ADD COLUMN status status NOT NULL;
 CREATE TYPE status AS ENUM ('active', 'banned');
 ALTER TYPE status ADD VALUE 'pending' BEFORE 'active';
 
-CREATE FUNCTION user_count() RETURNS bigint LANGUAGE sql AS 'SELECT count(*) FROM users';
+CREATE FUNCTION user_count() RETURNS bigint STRICT LANGUAGE sql AS 'SELECT count(*) FROM users';
 ```
 
 The `ALTER TABLE` statements come before the enum they use, and that is fine:
@@ -386,7 +406,7 @@ shape: its columns get no type, and `SELECT *` over it is left alone.
 Actions that cannot change columns (constraints, storage options, ownership,
 triggers, partitions, tablespaces) never do this. `sqlty check` warns about each
 table or type it had to leave unknown.
-`CREATE TABLE ... AS`, `ALTER VIEW`, `DROP ... CASCADE` of dependent views and
+`ALTER VIEW`, `DROP ... CASCADE` of dependent views and
 `ALTER SCHEMA ... RENAME` are not followed. Views are analyzed against the
 tables as they are where the view is created.
 
@@ -473,6 +493,15 @@ CREATE TABLE legacy (id UNSIGNED BIG INT NOT NULL, code VARYING CHARACTER(10), p
 legacy = "--sql\nSELECT id, code, price FROM legacy"
 # rewritten: legacy = SQL[tuple[int, str | None, float | None]]("--sql\nSELECT id, code, price FROM legacy")
 ```
+
+#### Virtual tables
+
+`CREATE VIRTUAL TABLE` is read for the `fts3`, `fts4`, `fts5`, `rtree` and
+`rtree_i32` modules. An FTS column can hold any value and is not typed; the
+`rank` of `fts5` is a `float | None` left out of `*`. The id and coordinates of an
+`rtree` table are never NULL: the id is `int`, the coordinates `float` (`int`
+for `rtree_i32`). The columns of a table of another module are unknown, and
+`sqlty check` says so.
 
 ### MySQL
 

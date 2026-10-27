@@ -1,0 +1,23 @@
+{
+  "name": "sqlty",
+  "owner": {
+    "name": "Jiri Kuncar",
+    "email": "jiri.kuncar@gmail.com"
+  },
+  "metadata": {
+    "description": "Agent Skills for sqlty: write, type and check raw SQL in Python, adopt sqlty in a project, wire it into CI, and plan schema changes.",
+    "version": "0.2.2"
+  },
+  "plugins": [
+    {
+      "name": "sqlty",
+      "source": "./",
+      "description": "Agent Skills for sqlty: write, type and check raw SQL in Python, adopt sqlty in a project, wire it into CI, and plan schema changes.",
+      "version": "0.2.2",
+      "homepage": "https://jirikuncar.github.io/sqlty/",
+      "repository": "https://github.com/jirikuncar/sqlty",
+      "license": "MIT",
+      "keywords": ["sql", "python", "type-hints", "static-analysis"]
+    }
+  ]
+}

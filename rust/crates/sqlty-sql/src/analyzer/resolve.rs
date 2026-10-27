@@ -7,16 +7,16 @@
 
 use std::rc::Rc;
 
-use sqlparser::ast::{Expr, Ident, TableWithJoins};
+use sqlparser::ast::{Expr, Ident};
 
 use crate::catalog::fold;
 use crate::diagnostics::NameRule;
 
 use super::dialect::SqlDialect;
 use super::literals::value_set;
-use super::nullability::Nullability;
+use super::nullability::{Facts, Nullability};
 use super::query::{Analyzer, Column};
-use super::scope::{any_merging_join, resolve, Scope, Source, Table};
+use super::scope::{resolve, Scope, Source, Table};
 use super::typed::Typed;
 use super::SchemaColumn;
 
@@ -222,6 +222,16 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// The name the source a column reference reads gives that column; `None` for a
+    /// system column or an unresolved reference.
+    pub(super) fn source_column_name(&self, expr: &Expr, scope: &Scope) -> Option<String> {
+        match self.resolve_reference(expr, scope)?.found {
+            ColumnRef::Virtual { column, .. } => Some(column.name.clone()),
+            ColumnRef::Schema(column) => Some(column.output_name()),
+            ColumnRef::System(_) => None,
+        }
+    }
+
     /// `(reference, table, column)` of the source a column reference reads, found as
     /// [`Self::resolve_column`] finds it.
     pub(super) fn locate_column(
@@ -239,6 +249,14 @@ impl<'a> Analyzer<'a> {
             // `CHECK (column IS NOT NULL)` or `CHECK (num_nulls(column, ...) = 0)`.
             Some(ColumnRef::Schema(_)) if self.checked_non_null(table, &[column]) => {
                 Nullability::NonNull
+            }
+            Some(ColumnRef::Schema(SchemaColumn {
+                not_null: false,
+                generated: Some(expr),
+                ..
+            })) => {
+                let scope = vec![Source::named(table.to_string(), table.to_string())];
+                self.nullability(expr, &scope, &Facts::default())
             }
             found => found.map_or(Nullability::Unknown, |found| found.nullability()),
         }
@@ -287,11 +305,38 @@ impl<'a> Analyzer<'a> {
                 }
                 typed
             }
-            None => {
-                self.explain_unresolved(expr, scope);
-                Typed::UNKNOWN
-            }
+            None => match self.whole_row_table(expr, scope) {
+                Some(table) => {
+                    self.diag.explain_silently();
+                    Typed {
+                        sql: Some(table.to_uppercase().into()),
+                        ..Typed::UNKNOWN
+                    }
+                }
+                None => {
+                    self.explain_unresolved(expr, scope);
+                    Typed::UNKNOWN
+                }
+            },
         }
+    }
+
+    /// The schema table of a PostgreSQL whole-row reference (`SELECT u FROM users u`),
+    /// whose type is the table's row type.
+    pub(super) fn whole_row_table<'s>(&self, expr: &Expr, scope: &'s Scope) -> Option<&'s str> {
+        let Expr::Identifier(ident) = expr else {
+            return None;
+        };
+        if self.dialect != SqlDialect::Postgres || ident.quote_style.is_some() {
+            return None;
+        }
+        let name = fold(ident, self.dialect);
+        let key = scope
+            .iter()
+            .find(|source| source.reference == name)?
+            .table
+            .named()?;
+        self.schema.table(key).map(|_| key)
     }
 
     /// `typed` limited to the values the conditions in force leave the column `expr`
@@ -532,12 +577,7 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Records why a `*` or `t.*` stayed unresolved.
-    pub(super) fn explain_star(
-        &self,
-        reference: Option<&str>,
-        scope: &Scope,
-        from: Option<&[TableWithJoins]>,
-    ) {
+    pub(super) fn explain_star(&self, reference: Option<&str>, scope: &Scope) {
         if !self.diag.enabled() {
             return;
         }
@@ -559,11 +599,6 @@ impl<'a> Analyzer<'a> {
                     format!("`{reference}` in `{reference}.*` is not a table or alias in the FROM clause"),
                 );
             }
-        } else if from.is_some_and(any_merging_join) {
-            return self.diag.record(
-                NameRule::UnsupportedSyntax,
-                "`*` over a USING or NATURAL join merges columns, so it is not expanded",
-            );
         }
         if tables
             .iter()
@@ -718,7 +753,7 @@ mod tests {
             "SELECT * FROM missing",
             "SELECT users.* FROM users, missing",
             "SELECT * FROM users, generate_series(1, 2) AS g",
-            "SELECT * FROM users, pg_get_keywords() AS k",
+            "SELECT * FROM users, ST_Dump(NULL) AS d",
             "SELECT nope.* FROM users",
             "SELECT * FROM users JOIN orders USING (id)",
         ];

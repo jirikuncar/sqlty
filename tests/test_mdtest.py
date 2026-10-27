@@ -42,7 +42,7 @@ def f():
 ## Errors move above their line
 
 ```python
-q = SQL[tuple[str]]("--sql\\nSELECT 1::INTEGER")  # error: [stale-type]
+q = SQL[tuple[str]]("--sql\\nSELECT 1::INTEGER")  # error: [narrow-type]
 # error: [select-star]
 r = "--sql\\nSELECT 2::INTEGER"
 ```
@@ -92,7 +92,7 @@ def f():
 ## Errors move above their line
 
 ```python
-# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
+# error: [narrow-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
 q = SQL[tuple[str]]("--sql\\nSELECT 1::INTEGER")
 # error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
 r = "--sql\\nSELECT 2::INTEGER"

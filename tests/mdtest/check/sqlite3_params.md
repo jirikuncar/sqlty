@@ -27,6 +27,21 @@ conn.execute("SELECT id FROM users WHERE id = ? AND age = ?", (1,))
 conn.execute("INSERT INTO users (id, name) VALUES (?, ?)", (1, None))
 ```
 
+## A single value is not a sequence of parameters
+
+sqlite3 rejects a number or a date as its parameters. A `str` or `bytes` is a
+sequence to it, one parameter per item, so only its length is wrong.
+
+```python
+import sqlite3
+
+def find(conn: sqlite3.Connection, user_id: int, name: str) -> None:
+    conn.execute("SELECT id FROM users WHERE id = ?", (user_id,))
+    conn.execute("SELECT id FROM users WHERE name = ?", name)
+    # error: [param-type-mismatch] "parameters are a single int, which sqlite3 rejects"
+    conn.execute("SELECT id FROM users WHERE id = ?", user_id)
+```
+
 ## Named placeholders
 
 ```python

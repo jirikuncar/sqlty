@@ -49,7 +49,7 @@ unknown-type = "warn"
 from sqlty import SQL
 
 # error: [unknown-type] "type `INT4RANGE` has no Python type"
-q = SQL[tuple[object]]("--sql\nSELECT CAST(x AS INT4RANGE) AS r")
+q = SQL[tuple[object]]("--sql\nSELECT CAST('[1,2)' AS INT4RANGE) AS r")
 ```
 
 ## Why is this bad?

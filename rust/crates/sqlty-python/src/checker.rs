@@ -12,12 +12,13 @@
 //!   unless the wrapper call is one of `any_calls`
 
 use regex::Regex;
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::LazyLock;
 
 use crate::edit::Edit;
 use crate::options::{Dialect, Options};
-use crate::rewriter::infer_sql_content as infer_from_sql_content;
 use crate::rewriter::{
     after_marker, decode_escapes, ends_marker_line, extract_string_content, marked_query,
     strip_line_break, wraps, ImportStyle, Spelling,
@@ -25,10 +26,8 @@ use crate::rewriter::{
 use crate::rules::{Rule, RuleConfig, Severity};
 use crate::scan::Scan;
 use crate::tokens::{content, Call};
-use sqlty_sql::analyzer::{
-    analyze_with_diagnostics, expand_star, parse_error, result_stars, row_type, SchemaData,
-};
-use sqlty_sql::diagnostics::NameRule;
+use sqlty_sql::analyzer::{expand_star, parse, row_type, Column, Parsed, SchemaData};
+use sqlty_sql::diagnostics::{NameDiagnostic, NameRule};
 use std::ops::Range;
 
 /// `--sql SELECT ...`: a space after the marker, then the start of a SQL statement,
@@ -120,7 +119,7 @@ pub fn check_source(
         any_calls: sorted(any_calls),
         diagnostics: Vec::new(),
         spelling: Spelling::of(&scan),
-        inferred: HashMap::new(),
+        analyses: RefCell::default(),
     };
     if options.dialect == Dialect::MySql {
         checker.mysql_markers();
@@ -144,12 +143,48 @@ struct Checker<'a> {
     diagnostics: Vec<Diagnostic>,
     /// How the module can spell the row types it names.
     spelling: Spelling,
-    /// Row types the name diagnostics' analysis already inferred, by marked query, so the
-    /// annotation checks don't analyze a query twice.
-    inferred: HashMap<String, Option<String>>,
+    /// Each marked query's analysis, by its text, so no step parses a query twice.
+    analyses: RefCell<HashMap<String, Rc<Analysis>>>,
+}
+
+/// What the steps of [`check_source`] ask of one marked query.
+struct Analysis {
+    parsed: Parsed,
+    /// The result columns; `None` when the query returns no rows or does not parse.
+    columns: Option<Vec<Column>>,
+    /// Why columns are untyped.
+    diagnostics: Vec<NameDiagnostic>,
+    row_type: Option<String>,
+}
+
+#[cfg(test)]
+thread_local! {
+    static ANALYZED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 impl Checker<'_> {
+    /// The analysis of `query`, a [`marked_query`], computed the first time a step asks.
+    fn analysis(&self, query: &str) -> Rc<Analysis> {
+        if let Some(analysis) = self.analyses.borrow().get(query) {
+            return Rc::clone(analysis);
+        }
+        #[cfg(test)]
+        ANALYZED.with(|count| count.set(count.get() + 1));
+        let parsed = parse(query, self.options.dialect.name());
+        let (columns, diagnostics) = parsed.analyze_with_diagnostics(self.options.schema);
+        let columns = columns.ok().flatten();
+        let analysis = Rc::new(Analysis {
+            row_type: columns.as_deref().and_then(row_type),
+            parsed,
+            columns,
+            diagnostics,
+        });
+        self.analyses
+            .borrow_mut()
+            .insert(query.to_string(), Rc::clone(&analysis));
+        analysis
+    }
+
     fn report(&mut self, rule: Rule, message: String, line: usize) {
         self.report_fix(rule, message, line, Vec::new());
     }
@@ -181,7 +216,10 @@ impl Checker<'_> {
     /// `--sql` strings that `rewrite` would wrap.
     fn stale_rewrites(&mut self) {
         let scan = self.scan;
-        for edit in wraps(scan, self.options, &|_| false) {
+        let edits = wraps(scan, self.options, &|_| false, &|content| {
+            self.infer(content)
+        });
+        for edit in edits {
             self.report_fix(
                 Rule::StaleRewrite,
                 "Source has --sql strings that aren't wrapped in SQL[T]".to_string(),
@@ -274,8 +312,8 @@ impl Checker<'_> {
             );
         }
         if self.rules.is_enabled(Rule::UnparsedQuery) && !template {
-            if let Some(error) = marked_query(sql_content)
-                .and_then(|sql| parse_error(&sql, self.options.dialect.name()))
+            if let Some(error) =
+                marked_query(sql_content).and_then(|sql| self.analysis(&sql).parsed.error())
             {
                 self.report(Rule::UnparsedQuery, unparsed_message(&error), line);
             }
@@ -313,15 +351,8 @@ impl Checker<'_> {
             return;
         }
         if let Some(query) = marked_query(sql_content) {
-            let (columns, found) =
-                analyze_with_diagnostics(&query, self.options.dialect.name(), self.options.schema);
-            let inferred = columns
-                .ok()
-                .flatten()
-                .and_then(|columns| row_type(&columns));
-            self.inferred.insert(query, inferred);
-            for found in found {
-                self.report(Rule::Name(found.rule), found.message, line);
+            for found in &self.analysis(&query).diagnostics {
+                self.report(Rule::Name(found.rule), found.message.clone(), line);
             }
         }
     }
@@ -332,11 +363,9 @@ impl Checker<'_> {
         let Some(query) = marked_query(sql_content) else {
             return;
         };
-        let Some((rule, message)) = select_star_finding(
-            &query,
-            self.options.dialect.name(),
-            self.options.schema.is_some(),
-        ) else {
+        let stars = self.analysis(&query).parsed.result_stars();
+        let Some((rule, message)) = star_finding(stars, &query, self.options.schema.is_some())
+        else {
             return;
         };
         let fix = match (rule, call.strings.as_slice(), self.options.schema) {
@@ -355,16 +384,7 @@ impl Checker<'_> {
     /// The row type of marked string content, from the name diagnostics' analysis when
     /// it ran.
     fn infer(&self, sql_content: &str) -> Option<String> {
-        if !self.inferred.is_empty() {
-            if let Some(inferred) = marked_query(sql_content).and_then(|q| self.inferred.get(&q)) {
-                return inferred.clone();
-            }
-        }
-        infer_from_sql_content(
-            sql_content,
-            self.options.dialect.name(),
-            self.options.schema,
-        )
+        self.analysis(&marked_query(sql_content)?).row_type.clone()
     }
 
     /// Why a query has no row type, and what to do about it: the first name or construct
@@ -374,9 +394,8 @@ impl Checker<'_> {
         let Some(query) = marked_query(sql_content) else {
             return "add casts (for example id::INTEGER) or a schema".to_string();
         };
-        let (columns, diagnostics) =
-            analyze_with_diagnostics(&query, self.options.dialect.name(), self.options.schema);
-        if let Some(diagnostic) = diagnostics.first() {
+        let analysis = self.analysis(&query);
+        if let Some(diagnostic) = analysis.diagnostics.first() {
             let hint = match diagnostic.rule {
                 NameRule::UnknownFunction => {
                     "; cast its result, or declare the function in the schema"
@@ -387,11 +406,10 @@ impl Checker<'_> {
             };
             return format!("{}{hint}", diagnostic.message);
         }
-        let untyped: Vec<String> = columns
-            .ok()
-            .flatten()
-            .unwrap_or_default()
+        let untyped: Vec<String> = analysis
+            .columns
             .iter()
+            .flatten()
             .filter(|column| column.python_type.is_none())
             .map(|column| format!("`{}`", column.name))
             .collect();
@@ -410,7 +428,7 @@ impl Checker<'_> {
 
     /// `untyped-query`, `stale-type` and the literal rules, against the inferred row type.
     fn annotation(&mut self, call: &Call, sql_content: &str, line: usize) {
-        let annotated = &self.scan.source()[call.annotation.clone()];
+        let annotated = call.row_type(self.scan.source());
         let wrapper = if call.template {
             self.options.style.template_name()
         } else {
@@ -437,10 +455,28 @@ impl Checker<'_> {
             return;
         }
 
+        if is_scalar(annotated) && self.rules.is_enabled(Rule::NarrowType) {
+            if let Some(current) = self
+                .infer(sql_content)
+                .map(|current| self.spelling.respell(current))
+                .filter(|current| current.starts_with("tuple["))
+            {
+                let wrapper = if call.template { "SQLTemplate" } else { "SQL" };
+                self.report_fix(
+                    Rule::NarrowType,
+                    format!("{wrapper}[{annotated}] should be {wrapper}[{current}]: a row is never a single value"),
+                    line,
+                    vec![Edit::new(call.annotation.clone(), current)],
+                );
+            }
+            return;
+        }
         let literals = self.rules.is_enabled(Rule::LiteralMismatch)
             || self.rules.is_enabled(Rule::RedundantLiteral);
         if !(annotated.starts_with("tuple[")
-            && (self.rules.is_enabled(Rule::StaleType) || literals))
+            && (self.rules.is_enabled(Rule::StaleType)
+                || self.rules.is_enabled(Rule::NarrowType)
+                || literals))
         {
             return;
         }
@@ -448,9 +484,14 @@ impl Checker<'_> {
             .infer(sql_content)
             .map(|current| self.spelling.respell(current))
         {
-            if !refines_tuple(annotated, &current) {
+            let spelled = spell_unions(annotated);
+            if !refines_tuple(&spelled, &current) {
                 self.report_fix(
-                    Rule::StaleType,
+                    if admits_tuple(&spelled, &current) {
+                        Rule::StaleType
+                    } else {
+                        Rule::NarrowType
+                    },
                     format!(
                         "{}[{annotated}] should be {}[{current}]",
                         if call.template { "SQLTemplate" } else { "SQL" },
@@ -460,7 +501,7 @@ impl Checker<'_> {
                     vec![Edit::new(call.annotation.clone(), current.clone())],
                 );
             }
-            for (rule, message) in literal_findings(annotated, &current) {
+            for (rule, message) in literal_findings(&spelled, &current) {
                 self.report(rule, message, line);
             }
         }
@@ -581,7 +622,16 @@ impl SiteKind {
 /// assert!(select_star_finding("SELECT count(*) FROM users", "postgres", true).is_none());
 /// ```
 pub fn select_star_finding(query: &str, dialect: &str, has_schema: bool) -> Option<(Rule, String)> {
-    let stars = result_stars(query, dialect).unwrap_or_else(|| {
+    star_finding(parse(query, dialect).result_stars(), query, has_schema)
+}
+
+/// [`select_star_finding`] of the `stars` of `query`, `None` when it does not parse.
+fn star_finding(
+    stars: Option<Vec<String>>,
+    query: &str,
+    has_schema: bool,
+) -> Option<(Rule, String)> {
+    let stars = stars.unwrap_or_else(|| {
         // A query that doesn't parse falls back to the text.
         let upper = query.to_uppercase();
         if upper.contains("SELECT *") || upper.contains("SELECT\n*") {
@@ -683,11 +733,37 @@ pub fn wrapped_queries(source: &str, style: &ImportStyle) -> Vec<(usize, String,
             });
             (
                 scan.lines.line_at(call.span.start),
-                source[call.annotation.clone()].to_string(),
+                call.row_type(source).to_string(),
                 query,
             )
         })
         .collect()
+}
+
+/// Whether `annotated` is a builtin scalar or collection, such as `int` or `list[str]`:
+/// a driver returns each row as a tuple, a dict or an instance of a row class.
+fn is_scalar(annotated: &str) -> bool {
+    let members = split_top(annotated, '|');
+    members.iter().any(|member| member.trim() != "None")
+        && members.iter().all(|member| {
+            let base = member.trim().split('[').next().unwrap_or_default();
+            matches!(
+                base.strip_prefix("typing.").unwrap_or(base),
+                "None"
+                    | "int"
+                    | "str"
+                    | "float"
+                    | "bool"
+                    | "bytes"
+                    | "complex"
+                    | "list"
+                    | "set"
+                    | "frozenset"
+                    | "List"
+                    | "Set"
+                    | "FrozenSet"
+            )
+        })
 }
 
 /// The items of a `tuple[...]` type, split at its top-level commas.
@@ -753,6 +829,69 @@ fn split_top(text: &str, sep: char) -> Vec<&str> {
     }
     parts.push(text[start..].trim());
     parts
+}
+
+/// The members of a tuple item, with `Optional[X]`, `Union[A, B]` and a quoted annotation
+/// spelled out: `Optional[str]` and `"str | None"` are `["str", "None"]`.
+fn union_members(item: &str) -> Vec<&str> {
+    let parts = split_top(item, '|');
+    if parts.len() > 1 {
+        return parts.into_iter().flat_map(union_members).collect();
+    }
+    let item = item.trim();
+    let quoted = ['"', '\''].iter().find_map(|&quote| {
+        item.strip_prefix(quote)
+            .and_then(|rest| rest.strip_suffix(quote))
+    });
+    if let Some(inner) = quoted {
+        return union_members(inner);
+    }
+    let bare = item.strip_prefix("typing.").unwrap_or(item);
+    if let Some(inner) = bare
+        .strip_prefix("Optional[")
+        .and_then(|rest| rest.strip_suffix(']'))
+    {
+        let mut members = union_members(inner);
+        members.push("None");
+        return members;
+    }
+    if let Some(inner) = bare
+        .strip_prefix("Union[")
+        .and_then(|rest| rest.strip_suffix(']'))
+    {
+        return split_top(inner, ',')
+            .into_iter()
+            .flat_map(union_members)
+            .collect();
+    }
+    vec![item]
+}
+
+/// `annotated` with each `Optional[X]`, `Union[A, B]` or quoted item spelled `A | B | None`,
+/// as sqlty writes it.
+fn spell_unions(annotated: &str) -> String {
+    let Some(items) = tuple_items(annotated) else {
+        return annotated.to_string();
+    };
+    let items: Vec<String> = items
+        .iter()
+        .map(|item| {
+            let members = union_members(item);
+            let mut spelled: Vec<&str> = members.iter().copied().filter(|m| *m != "None").collect();
+            if spelled.len() < members.len() {
+                spelled.push("None");
+            }
+            spelled.join(" | ")
+        })
+        .collect();
+    format!("tuple[{}]", items.join(", "))
+}
+
+/// Whether two tuple items are the same union, in any order and spelling.
+fn same_union(annotated: &str, inferred: &str) -> bool {
+    let (ours, theirs) = (union_members(annotated), union_members(inferred));
+    ours.iter().all(|member| theirs.contains(member))
+        && theirs.iter().all(|member| ours.contains(member))
 }
 
 fn literal_member(text: &str) -> Option<Lit> {
@@ -929,6 +1068,7 @@ pub(crate) fn refines_tuple(annotated: &str, inferred: &str) -> bool {
             ours.iter().zip(&theirs).all(|(a, i)| {
                 let base = i.split('[').next().unwrap_or(i);
                 a == i
+                    || same_union(a, i)
                     || covers_literal(a, i)
                     || literal_pair(a, i).is_some_and(|pair| pair.same_nullability)
                     || *i == "typing.Any"
@@ -939,6 +1079,45 @@ pub(crate) fn refines_tuple(annotated: &str, inferred: &str) -> bool {
                             .is_some_and(balanced))
             })
         }
+        _ => false,
+    }
+}
+
+/// Whether every row of the inferred `tuple[...]` is a row of the annotated one: `str | None`
+/// admits `str`, `str` admits `Literal['a']`, and `object` or `typing.Any` admit anything.
+fn admits_tuple(annotated: &str, inferred: &str) -> bool {
+    fn literal_class(member: &str) -> Option<&'static str> {
+        let values = member
+            .strip_prefix("typing.")
+            .unwrap_or(member)
+            .strip_prefix("Literal[")?
+            .strip_suffix(']')?;
+        let values = split_top(values, ',');
+        if values.iter().all(|v| v.starts_with(['\'', '"'])) {
+            Some("str")
+        } else if values.iter().all(|v| matches!(*v, "True" | "False")) {
+            Some("bool")
+        } else if values.iter().all(|v| v.parse::<i64>().is_ok()) {
+            Some("int")
+        } else {
+            None
+        }
+    }
+    fn admits(annotated: &str, inferred: &str) -> bool {
+        let members = union_members(annotated);
+        members
+            .iter()
+            .any(|m| matches!(*m, "typing.Any" | "Any" | "object"))
+            || split_top(inferred, '|').iter().all(|member| {
+                members.contains(member)
+                    || literal_class(member).is_some_and(|class| members.contains(&class))
+            })
+    }
+    match (tuple_items(annotated), tuple_items(inferred)) {
+        (Some(ours), Some(theirs)) => match ours.as_slice() {
+            [each, "..."] => theirs.iter().all(|i| admits(each, i)),
+            _ => ours.len() == theirs.len() && ours.iter().zip(&theirs).all(|(a, i)| admits(a, i)),
+        },
         _ => false,
     }
 }
@@ -970,6 +1149,41 @@ mod tests {
     fn override_rule(rule: &str, severity: &str) -> RuleConfig {
         let overrides = HashMap::from([(rule.to_string(), severity.to_string())]);
         RuleConfig::from_overrides(Some(overrides)).unwrap()
+    }
+
+    #[test]
+    fn test_each_query_is_analyzed_once() {
+        let (schema, _) = sqlty_sql::analyzer::load_schema_with_skipped(
+            "CREATE TABLE users (id INTEGER NOT NULL, name TEXT);",
+            "postgres",
+        );
+        let source = concat!(
+            "from sqlty import SQL\n",
+            "a = \"--sql\\nSELECT id, nope FROM users\"\n",
+            "b = SQL[tuple[str]](\"--sql\\nSELECT * FROM users\")\n",
+            "c = SQL[tuple[str]](\"--sql\\nSELECT * FROM users\")\n",
+            "d = SQL[tuple[int]](\"--sql\\nSELEC 1\")\n",
+            "e = \"--sql\\nSELECT id, nope FROM users\"\n",
+        );
+        ANALYZED.with(|count| count.set(0));
+        let diags = check_source(
+            source,
+            "postgres",
+            Some(&schema),
+            &RuleConfig::default(),
+            None,
+            false,
+            &[],
+        );
+        let rules: Vec<Rule> = diags.iter().map(|d| d.rule).collect();
+        assert!(
+            rules.contains(&Rule::Name(NameRule::UnknownColumn)),
+            "{rules:?}"
+        );
+        assert!(rules.contains(&Rule::SelectStar), "{rules:?}");
+        assert!(rules.contains(&Rule::NarrowType), "{rules:?}");
+        assert!(rules.contains(&Rule::UnparsedQuery), "{rules:?}");
+        assert_eq!(ANALYZED.with(std::cell::Cell::get), 3);
     }
 
     #[test]
@@ -1094,9 +1308,35 @@ mod tests {
             false,
             &[],
         );
-        let stale_types: Vec<_> = diags.iter().filter(|d| d.rule == Rule::StaleType).collect();
-        assert_eq!(stale_types.len(), 1);
-        assert!(stale_types[0].message.contains("tuple[int]"));
+        let narrow: Vec<_> = diags
+            .iter()
+            .filter(|d| d.rule == Rule::NarrowType)
+            .collect();
+        assert_eq!(narrow.len(), 1);
+        assert!(narrow[0].message.contains("tuple[int]"));
+    }
+
+    #[test]
+    fn test_wider_annotation_is_stale_not_narrow() {
+        for (annotated, inferred, admitted) in [
+            ("tuple[str | None]", "tuple[str]", true),
+            ("tuple[object, typing.Any]", "tuple[int | None, str]", true),
+            (
+                "tuple[str, int, bool]",
+                "tuple[Literal['a', \"b\"], typing.Literal[-1, 2], Literal[True]]",
+                true,
+            ),
+            ("tuple[str]", "tuple[str | None]", false),
+            ("tuple[int]", "tuple[int, str]", false),
+            ("tuple[int]", "tuple[Literal['a']]", false),
+            ("tuple[int]", "dict[str, int]", false),
+        ] {
+            assert_eq!(
+                admits_tuple(annotated, inferred),
+                admitted,
+                "{annotated} {inferred}"
+            );
+        }
     }
 
     #[test]

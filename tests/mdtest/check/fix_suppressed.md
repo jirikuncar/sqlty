@@ -60,15 +60,15 @@ query = SQL[tuple[str]]("--sql\nSELECT * FROM users")  # sqlty: ignore[select-st
 # fixed: query = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")  # sqlty: ignore[select-star]
 ```
 
-## Suppressed stale-type is not refreshed
+## Suppressed narrow-type is not refreshed
 
 ```python
 from sqlty import SQL
 
-query = SQL[tuple[str]]("--sql\nSELECT id::INTEGER FROM users")  # sqlty: ignore[stale-type]
+query = SQL[tuple[str]]("--sql\nSELECT id::INTEGER FROM users")  # sqlty: ignore[narrow-type]
 # fixed: from sqlty import SQL
 # fixed:
-# fixed: query = SQL[tuple[str]]("--sql\nSELECT id::INTEGER FROM users")  # sqlty: ignore[stale-type]
+# fixed: query = SQL[tuple[str]]("--sql\nSELECT id::INTEGER FROM users")  # sqlty: ignore[narrow-type]
 ```
 
 ## Suppressed inline-sql-comment is not fixed
@@ -83,12 +83,12 @@ query = "--sql SELECT 1"  # sqlty: ignore[inline-sql-comment]
 ```python
 from sqlty import SQL
 
-query = SQL[tuple[str]](  # sqlty: ignore[stale-type]
+query = SQL[tuple[str]](  # sqlty: ignore[narrow-type]
     "--sql\nSELECT id::INTEGER FROM users"
 )
 # fixed: from sqlty import SQL
 # fixed:
-# fixed: query = SQL[tuple[str]](  # sqlty: ignore[stale-type]
+# fixed: query = SQL[tuple[str]](  # sqlty: ignore[narrow-type]
 # fixed:     "--sql\nSELECT id::INTEGER FROM users"
 # fixed: )
 ```
@@ -133,4 +133,29 @@ query = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")  # sqlty: ignore[sele
 # fixed:
 # fixed: other = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 # fixed: query = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")  # sqlty: ignore[select-star]
+```
+
+## A string passed to a helper with its row type is not wrapped
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def fetch_all[T](query: Annotated[LiteralString, SQL], form: type[T] | None = None, /) -> list[T]: ...
+
+names = fetch_all(
+    "--sql\nSELECT id::INTEGER FROM users",
+    int,
+)
+rows = fetch_all("--sql\nSELECT id::INTEGER FROM users")  # sqlty: ignore[select-star]
+# fixed: from typing import Annotated, LiteralString
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: def fetch_all[T](query: Annotated[LiteralString, SQL], form: type[T] | None = None, /) -> list[T]: ...
+# fixed:
+# fixed: names = fetch_all(
+# fixed:     "--sql\nSELECT id::INTEGER FROM users",
+# fixed:     int,
+# fixed: )
+# fixed: rows = fetch_all(SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users"))  # sqlty: ignore[select-star]
 ```

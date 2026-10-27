@@ -57,6 +57,64 @@ SELECT x, y, z FROM a
 -- inferred: tuple[int, int, int | None]
 ```
 
+## Generated columns
+
+A generated column is as nullable as the expression it is computed from.
+`DROP EXPRESSION` makes it a plain column.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE people (
+    first TEXT NOT NULL,
+    last TEXT NOT NULL,
+    nick TEXT,
+    full_name TEXT GENERATED ALWAYS AS (first || ' ' || last) STORED,
+    nick_or_first TEXT GENERATED ALWAYS AS (coalesce(nick, first)) STORED,
+    upper_nick TEXT GENERATED ALWAYS AS (upper(nick)) STORED,
+    initials TEXT GENERATED ALWAYS AS (left(first, 1) || left(last, 1)) STORED
+);
+ALTER TABLE people ALTER COLUMN initials DROP EXPRESSION;
+```
+
+```sql
+SELECT full_name, nick_or_first, upper_nick, initials FROM people
+-- columns: full_name: str (TEXT)
+-- columns: nick_or_first: str (TEXT)
+-- columns: upper_nick: str | None (TEXT)
+-- columns: initials: str | None (TEXT)
+```
+
+### A generated column reading another
+
+SQLite lets a generated column read another, which then stays nullable.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+dialect = "sqlite"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE people (
+    first TEXT NOT NULL,
+    upper_first TEXT AS (upper(first)),
+    shout TEXT AS (upper_first || '!')
+);
+```
+
+```sql
+SELECT upper_first, shout FROM people
+-- inferred: tuple[str, str | None]
+```
+
 ## Casts without a schema stay non-optional
 
 Nothing says `id` can be NULL, so a cast is not made optional.
@@ -275,6 +333,6 @@ The row type is stale once nullability is on: `sqlty check` flags the old annota
 ```python
 from sqlty import SQL
 
-# error: [stale-type] "SQL[tuple[int, str]] should be SQL[tuple[int, str | None]]"
+# error: [narrow-type] "SQL[tuple[int, str]] should be SQL[tuple[int, str | None]]"
 q = SQL[tuple[int, str]]("--sql\nSELECT id, name FROM users")
 ```

@@ -3,22 +3,28 @@
 use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 
-use sqlparser::ast::{Statement, UserDefinedTypeRepresentation};
+use sqlparser::ast::{
+    ColumnOption, ColumnOptionDef, CreateTable, CreateView, Statement,
+    UserDefinedTypeRepresentation,
+};
 use sqlparser::parser::Parser;
 
-use crate::analyzer::{parse_ddl, SkippedObject, SqlDialect};
+use crate::analyzer::{parse_ddl, parse_function_without_hints, SkippedObject, SqlDialect};
 use crate::ddl;
 use crate::values::{self};
 
 use super::alter::changes_columns;
 use super::columns::add_values;
 use super::loader::{Loader, Op, OpKind, Taint, TypeDef};
-use super::names::fold;
+use super::names::{fold, parts};
 use super::Catalog;
 use super::TypeOverrides;
 
 pub(super) static COLLATE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r#"(?i)\s+COLLATE\s+(?:"[^"]*"|[\w.]+)"#).unwrap());
+
+static DROP_EXPRESSION: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(?i)\bDROP\s+EXPRESSION(?:\s+IF\s+EXISTS)?\b").unwrap());
 
 pub(super) fn read_statements(
     statements: &[ddl::Statement],
@@ -45,22 +51,72 @@ pub(super) fn read_statements(
                 kind,
             });
         };
-        if stmt.is_create_table() || (postgres && stmt.is_create_table_any()) {
-            let (likes, text) = match postgres.then(|| stmt.without_like()).flatten() {
+        // PostgreSQL and MySQL copy a table's columns with `LIKE`.
+        let reads_like = postgres || dialect == SqlDialect::MySql;
+        if let Some((name, module, args)) = (dialect == SqlDialect::Sqlite)
+            .then(|| stmt.virtual_table())
+            .flatten()
+        {
+            match virtual_table(&name, &module, &args) {
+                Some(create) => push(OpKind::Table(Box::new(create), Vec::new())),
+                None => skipped.push(("table", name)),
+            }
+        } else if stmt.is_create_table() {
+            let (likes, text) = match reads_like.then(|| stmt.without_like()).flatten() {
                 Some((text, likes)) => (likes, Some(text)),
                 None => (Vec::new(), None),
             };
             let parsed = match &text {
                 None => parse_ddl(&stmt.sql(), dialect)
-                    .or_else(|| parse_ddl(&stmt.without_constraints()?, dialect)),
+                    .or_else(|| parse_ddl(&stmt.without_constraints()?, dialect))
+                    // `STRICT` and `WITHOUT ROWID` both make a PRIMARY KEY NOT NULL, the
+                    // only thing either changes here.
+                    .or_else(|| match dialect {
+                        SqlDialect::Sqlite => parse_ddl(&stmt.with_first_table_option()?, dialect),
+                        _ => None,
+                    })
+                    .or_else(|| {
+                        let text = stmt.without_partitioning()?;
+                        parse_ddl(&text, dialect).or_else(|| {
+                            let reduced = ddl::split_statements(&text, !postgres);
+                            parse_ddl(&reduced.first()?.without_constraints()?, dialect)
+                        })
+                    }),
                 Some(text) => parse_ddl(text, dialect).or_else(|| {
                     let reduced = ddl::split_statements(text, false);
                     parse_ddl(&reduced.first()?.without_constraints()?, dialect)
                 }),
             };
             match parsed.and_then(|stmts| stmts.into_iter().next()) {
+                Some(Statement::CreateTable(create))
+                    if create.columns.is_empty()
+                        && create.like.is_none()
+                        && create.query.is_some() =>
+                {
+                    let view = create.query.as_ref().and_then(|query| {
+                        let sql = format!("CREATE VIEW {} AS {query}", create.name);
+                        match parse_ddl(&sql, dialect)?.into_iter().next()? {
+                            Statement::CreateView(view) => Some(view),
+                            _ => None,
+                        }
+                    });
+                    match view {
+                        Some(view) => push(OpKind::View(
+                            Box::new(CreateView {
+                                if_not_exists: create.if_not_exists,
+                                ..view
+                            }),
+                            true,
+                        )),
+                        None => skipped.push(("table", stmt.table_name())),
+                    }
+                }
                 Some(Statement::CreateTable(create)) => {
-                    if !create.columns.is_empty() || postgres {
+                    if !create.columns.is_empty()
+                        || postgres
+                        || create.like.is_some()
+                        || !likes.is_empty()
+                    {
                         push(OpKind::Table(Box::new(create), likes));
                     }
                 }
@@ -114,8 +170,10 @@ pub(super) fn read_statements(
                 push(OpKind::Type(name, def));
             }
         } else if stmt.creates("view") {
-            match parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next()) {
-                Some(Statement::CreateView(view)) => push(OpKind::View(Box::new(view))),
+            let parsed = parse_ddl(&stmt.sql(), dialect)
+                .or_else(|| parse_ddl(&stmt.without_check_option()?, dialect));
+            match parsed.and_then(|stmts| stmts.into_iter().next()) {
+                Some(Statement::CreateView(view)) => push(OpKind::View(Box::new(view), false)),
                 _ => {
                     skipped.push(("view", stmt.view_name()));
                     if postgres {
@@ -127,13 +185,21 @@ pub(super) fn read_statements(
                 }
             }
         } else if postgres && stmt.creates("function") {
-            match parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next()) {
+            let parsed = parse_ddl(&stmt.sql(), dialect)
+                .or_else(|| parse_function_without_hints(&stmt.sql()));
+            match parsed.and_then(|stmts| stmts.into_iter().next()) {
                 Some(Statement::CreateFunction(create)) => push(OpKind::Function(Box::new(create))),
                 _ => push(OpKind::Taint(
                     Taint::Function,
                     stmt.name_parts_after("function"),
                 )),
             }
+        } else if let Some(trigger) = stmt
+            .before_row_trigger()
+            .filter(|_| matches!(dialect, SqlDialect::Postgres | SqlDialect::MySql))
+        {
+            // A SQLite trigger cannot change the row it fires for.
+            push(OpKind::RowTrigger(trigger));
         } else if matches!(
             dialect,
             SqlDialect::Postgres | SqlDialect::MySql | SqlDialect::Sqlite
@@ -155,8 +221,33 @@ pub(super) fn read_alter_or_drop(
         let sql = stmt.sql();
         parse_ddl(&sql, dialect)
             .or_else(|| parse_ddl(&COLLATE.replace_all(&sql, ""), dialect))
+            // `DROP EXPRESSION` leaves a column with neither expression nor default.
+            .or_else(|| parse_ddl(&DROP_EXPRESSION.replace_all(&sql, "DROP DEFAULT"), dialect))
+            .or_else(|| {
+                let listed = stmt
+                    .respelled_mysql_alter()
+                    .filter(|_| dialect == SqlDialect::MySql);
+                listed.and_then(|sql| parse_ddl(&sql, dialect))
+            })
             .and_then(|stmts| stmts.into_iter().next())
     };
+    // MySQL's `RENAME TABLE a TO b, c TO d` renames each table in turn.
+    if let (SqlDialect::MySql, Some(_)) = (dialect, stmt.target("rename")) {
+        if let Some(Statement::RenameTable(renames)) = parsed() {
+            for rename in renames {
+                let sql = format!(
+                    "ALTER TABLE {} RENAME TO {}",
+                    rename.old_name, rename.new_name
+                );
+                if let Some(Statement::AlterTable(alter)) =
+                    parse_ddl(&sql, dialect).and_then(|stmts| stmts.into_iter().next())
+                {
+                    push(OpKind::AlterTable(Box::new(alter)));
+                }
+            }
+        }
+        return;
+    }
     if let Some((kind, name, action)) = stmt.target_and_action("alter") {
         match (kind.as_str(), parsed()) {
             ("table", Some(Statement::AlterTable(alter))) => {
@@ -188,6 +279,10 @@ pub(super) fn read_alter_or_drop(
             ) => {
                 push(OpKind::Drop(Box::new(drop)));
             }
+            Some(Statement::DropTrigger(drop)) => push(OpKind::DropTrigger(
+                parts(&drop.trigger_name, dialect),
+                drop.table_name.map(|table| parts(&table, dialect)),
+            )),
             _ if matches!(kind.as_str(), "table" | "view" | "materialized") => {
                 push(OpKind::Taint(Taint::Relation, name));
             }
@@ -197,8 +292,12 @@ pub(super) fn read_alter_or_drop(
     }
 }
 
-/// Relations PostgreSQL provides, with their PostgreSQL column types.
-pub(super) const BUILTIN_SQL: &str = include_str!("builtin_catalog.sql");
+/// Relations PostgreSQL provides, with their PostgreSQL column types; the views and hash
+/// functions of `pg_catalog` are generated by `scripts/refresh_pg_catalog.py`.
+pub(super) const BUILTIN_SQL: &str = concat!(
+    include_str!("builtin_catalog.sql"),
+    include_str!("pg_catalog_views.sql")
+);
 
 /// Read schema DDL into a [`Catalog`], and the `(kind, name)` of the tables and views
 /// that could not be parsed. In PostgreSQL the catalog also holds the built-in
@@ -214,16 +313,23 @@ pub(crate) fn load_with(
     dialect: &str,
     overrides: Arc<TypeOverrides>,
 ) -> (Catalog, Vec<SkippedObject>) {
-    let dialect = SqlDialect::from_name(dialect);
-    let mut loader = Loader::new(dialect);
-    loader.overrides = overrides;
-    let mut skipped = Vec::new();
-    if dialect == SqlDialect::Postgres {
+    // The built-ins are read once per process: parsing them costs more than most schemas.
+    static BUILTIN: LazyLock<Loader> = LazyLock::new(|| {
+        let mut loader = Loader::new(SqlDialect::Postgres);
         let builtin = ddl::split_statements(BUILTIN_SQL, false);
-        let ops = read_statements(&builtin, dialect, &mut loader, &mut Vec::new());
+        let ops = read_statements(&builtin, SqlDialect::Postgres, &mut loader, &mut Vec::new());
         loader.run(ops);
         loader.search_path = vec!["public".to_string()];
-    }
+        loader
+    });
+    let dialect = SqlDialect::from_name(dialect);
+    let mut loader = if dialect == SqlDialect::Postgres {
+        BUILTIN.fork()
+    } else {
+        Loader::new(dialect)
+    };
+    loader.overrides = overrides;
+    let mut skipped = Vec::new();
     let statements = ddl::split_statements(schema_sql, dialect == SqlDialect::MySql);
     let ops = read_statements(&statements, dialect, &mut loader, &mut skipped);
     loader.run(ops);
@@ -233,4 +339,65 @@ pub(crate) fn load_with(
         catalog.search_path.push("public".to_string());
     }
     (catalog, skipped)
+}
+
+/// The table an SQLite FTS3, FTS4, FTS5 or R*Tree module declares, `None` for another module.
+/// An FTS column takes any value; FTS5's hidden `rank` is a REAL and FTS3/4's `docid` the rowid.
+/// An R*Tree has an integer id, coordinates that are never NULL, and `+` auxiliary columns.
+fn virtual_table(name: &str, module: &str, args: &[Vec<String>]) -> Option<CreateTable> {
+    let module = module.to_ascii_lowercase();
+    let column = |arg: &[String]| arg.iter().find(|token| *token != "+").cloned();
+    let (columns, hidden) = match module.as_str() {
+        "fts3" | "fts4" | "fts5" => {
+            let mut columns: Vec<String> = args
+                .iter()
+                .filter(|arg| {
+                    !arg.iter().any(|token| token == "=")
+                        && !arg[0].eq_ignore_ascii_case("tokenize")
+                })
+                .filter_map(|arg| column(arg))
+                .collect();
+            let hidden = if module == "fts5" {
+                "rank REAL"
+            } else {
+                "docid INTEGER NOT NULL"
+            };
+            columns.push(hidden.to_string());
+            (columns, hidden.split(' ').next())
+        }
+        "rtree" | "rtree_i32" => {
+            let coordinate = if module == "rtree" { "REAL" } else { "INTEGER" };
+            let columns = args
+                .iter()
+                .enumerate()
+                .map(|(at, arg)| {
+                    let name = column(arg)?;
+                    Some(if at == 0 {
+                        format!("{name} INTEGER NOT NULL")
+                    } else if arg[0] == "+" {
+                        name
+                    } else {
+                        format!("{name} {coordinate} NOT NULL")
+                    })
+                })
+                .collect::<Option<Vec<_>>>()?;
+            (columns, None)
+        }
+        _ => return None,
+    };
+    let sql = format!("CREATE TABLE {name} ({})", columns.join(", "));
+    let Statement::CreateTable(mut create) =
+        parse_ddl(&sql, SqlDialect::Sqlite)?.into_iter().next()?
+    else {
+        return None;
+    };
+    for column in &mut create.columns {
+        if hidden.is_some_and(|hidden| column.name.value.eq_ignore_ascii_case(hidden)) {
+            column.options.push(ColumnOptionDef {
+                name: None,
+                option: ColumnOption::Invisible,
+            });
+        }
+    }
+    Some(create)
 }

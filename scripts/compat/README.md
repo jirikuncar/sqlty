@@ -31,7 +31,7 @@ mdtest, or a converter difference, to document.
 |--------|-------|--------|---------------------|
 | SQLAlchemy | `sqlalchemy` | `reports/sqlalchemy.md` | 7, fixed in #412 |
 | Drivers (live) | `drivers`, a server | `reports/drivers.md` | PostgreSQL geometric types (#411) |
-| sqlglot | `sqlglot`, a server | `reports/sqlglot.md` | MySQL binary strings, `ROUND`/`TRUNCATE`, functions; PostgreSQL range operators (#413) |
+| sqlglot | `sqlglot`, a server | `reports/sqlglot.md` | MySQL binary strings, `ROUND`/`TRUNCATE`, functions; PostgreSQL range operators (#413); generic SQL functions (#598) |
 | Django | `django` | `reports/django.md` | none |
 | Tortoise | `tortoise` | `reports/tortoise.md` | none |
 | SQLModel | `sqlmodel` | `reports/sqlmodel.md` | none |
@@ -40,6 +40,41 @@ mdtest, or a converter difference, to document.
 | peewee | `peewee` | `reports/peewee.md` | none |
 | Pony | `pony`, a server | `reports/pony.md` | none |
 | SQLObject | `sqlobject` | `reports/sqlobject.md` | none |
+| PostgreSQL nullability | `pg_nullability.py`, a server | `reports/pg_nullability.md` | none |
+| MySQL nullability | `mysql_nullability.py`, a server | `reports/mysql_nullability.md` | math functions outside their domain (#587), date arithmetic and casts (#590) |
+| PostgreSQL documentation | `pg_docs.py`, a server | `reports/pg_docs.md` | `pg_typeof`, `cbrt`, `length` of a path, text search operators, `ts_headline` after a configuration, `string_agg` of `bytea`, `age` of a transaction ID, session names, arrays of arrays, the functions of every documented table, multiranges (#558) |
+
+sqlglot's `generic` rows follow `rules/dialects.toml`: `generic` reads PostgreSQL's rules,
+then MySQL's and SQLite's (#598). What it leaves untyped, such as `COUNTIF`,
+`UNIX_SECONDS`, `TO_BASE32`, `SORT_ARRAY` and `STRUCT`, none of the three has, and is out
+of scope, as are `CURRENT_USER()`, `SESSION_USER()` and `CURRENT_CATALOG()`, which only
+parse without parentheses. Its mismatches are decimal literals, which sqlglot reads as `DOUBLE` and
+PostgreSQL as `numeric`, and `SELECT ALL(SELECT 1)`, where `ALL` is the set quantifier.
+
+`pg_nullability.py` is not a harness source: it runs the PostgreSQL queries of the Markdown tests
+on seeded rows (`tests/_pg_seed.py`) and lists the columns sqlty types as nullable that no
+row has NULL in. `tests/test_pg_describe.py` fails on the reverse, a NULL in a column sqlty
+types as non-null.
+
+`mysql_nullability.py` is not a harness source either: it runs the MySQL queries of the
+Markdown tests on MySQL and compares sqlty's nullability with the one MySQL derives for
+`CREATE TABLE ... AS` the query. MySQL marks many expressions nullable that cannot be
+NULL, so the report is a list of leads, not of defects. `tests/test_server_describe.py`
+fails on a name or type that differs.
+
+`pg_docs.py` reads the examples of the function and operator tables of the PostgreSQL
+documentation, for the server's major version, and compares the type the server describes
+for each with sqlty's. It does the same for every overload of a documented function in
+`pg_proc`, called with a typed `NULL` per argument, and for every operator of
+`pg_operator`. A type with no Python type, such as a range, is compared by its SQL type.
+It exits with status 1 on a type that differs, and lists the queries sqlty
+leaves untyped or can't parse. Run it against a new PostgreSQL release to
+find what sqlty doesn't know yet.
+
+`pg_record_functions.py` is not a comparison: it reads the columns of the built-in
+functions that return `record` through OUT parameters from `pg_proc`, and writes them to
+`rust/crates/sqlty-sql/src/analyzer/pg_record_functions.rs`. Run it against a new
+PostgreSQL release to pick up new functions, such as `pg_stat_file` or `ts_stat`.
 
 Every DDL spelling the ORMs write parses and has a type. Their remaining mismatches are
 converters above the driver, listed in `docs/guide/drivers-and-orms.md`: SQLite dates,

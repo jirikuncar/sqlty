@@ -12,7 +12,8 @@ another. `sqlty breaking` checks both mixes before you deploy:
 | backward | the queries of `--against` on the schema of `--head` | migrate first: old code, new schema |
 | forward | the queries of `--head` on the schema of `--against` | deploy first: new code, old schema |
 
-`--against` is the baseline revision: a branch, tag, SHA or `HEAD~1`. `--head`
+`--against` is the baseline revision: a branch, tag, SHA or `HEAD~1`, or a
+file ([Baselines without git history](#baselines-without-git-history)). `--head`
 is the new one, the working tree by default (uncommitted changes included).
 `--direction backward` or `forward` runs one check; both run by default.
 
@@ -22,19 +23,22 @@ into a temporary `git worktree`, removed afterwards, so your working tree is
 never touched.
 
 `sqlty breaking` exits 0 when both mixes are compatible, 1 when a change breaks
-one of them, and 2 on an error such as an unknown revision. `--output-format json`
-prints the findings as a JSON array, each with its `direction`, and `github` as
-GitHub Actions annotations.
+one of them with an `error` diagnostic, and 2 on an error such as an unknown
+revision. A `warn` finding is printed but does not fail the run. `--output-format json`
+prints the findings as a JSON array, each with its `direction` and the baseline it
+was checked `against`, and `github` as GitHub Actions annotations.
 
 ## What it reports
 
 Only what the other schema breaks: a diagnostic a query already gets against its
-own schema is not repeated. On top of the rules you configure, it turns on
-`unknown-table`, `unknown-column`, `ambiguous-column`, `unknown-function`,
-`unknown-type` and [`insert-missing-column`](../reference/rules.md#insert-missing-column),
-so a name that no longer resolves is reported wherever the query reads it: the
-select list, `WHERE`, `JOIN ... ON`, and what `INSERT`, `UPDATE` and `DELETE`
-write. A row type annotation that no longer fits is reported by the usual
+own schema is not repeated. The rules and severities are the ones `sqlty check`
+uses. By default `unknown-table`, `unknown-column`, `ambiguous-column` and
+[`insert-missing-column`](../reference/rules.md#insert-missing-column) are errors,
+and `unknown-function` and `unknown-type` warnings, so a name that no longer
+resolves is reported wherever the query reads it: the select list, `WHERE`,
+`JOIN ... ON`, and what `INSERT`, `UPDATE` and `DELETE` write. A rule you set to
+`ignore`, for all files or in an override, stays off: a function of an extension
+the schema does not declare is no breaking change. A row type annotation that no longer fits is reported by the usual
 [row type checks](row-types.md).
 
 The examples below check code written for `schema.sql` against `against.sql`.
@@ -116,7 +120,7 @@ CREATE TABLE sessions (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL);
 ```python
 from sqlty import SQL
 
-# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[str | None]]"
+# error: [narrow-type] "SQL[tuple[str]] should be SQL[tuple[str | None]]"
 emails = SQL[tuple[str]]("--sql\nSELECT email FROM users")
 ```
 
@@ -165,6 +169,30 @@ from sqlty import SQL
 emails = SQL[tuple[str]]("--sql\nSELECT email FROM users")
 ```
 
+### Rules about the code
+
+[`stale-rewrite`](../reference/rules.md#stale-rewrite) and
+[`unused-ignore`](../reference/rules.md#unused-ignore) judge the code, not the
+schema change, so they are not reported. Below, the old schema can type the marked
+string and leaves the suppression unused, and neither is a breaking change.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT NOT NULL);
+```
+
+`against.sql`:
+
+```sql
+CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT NOT NULL, bio TEXT);
+```
+
+```python
+# error:
+bios = "--sql\nSELECT bio FROM users"  # sqlty: ignore[unknown-column]
+```
+
 ### A column that may now be NULL
 
 Code annotated `str | None` for a column the new schema makes nullable reads the
@@ -190,6 +218,45 @@ from sqlty import SQL
 # error:
 emails = SQL[tuple[str | None]]("--sql\nSELECT email FROM users")
 ```
+
+## Baselines without git history
+
+```bash
+# At release time
+sqlty breaking --save .sqlty/releases/v1.4.json
+
+# In every pull request
+sqlty breaking --against .sqlty/releases/
+```
+
+`--save PATH` writes a snapshot of `--head`: its Python files, the settings each
+is checked with, and its schema. `--against` reads a snapshot as it reads the
+revision it was saved from, so the release stays a baseline after its history is
+rewritten, in a shallow clone, or when it was never a commit.
+
+`--against` takes a path that exists instead of a revision:
+
+| Baseline | Backward | Forward |
+|----------|----------|---------|
+| a git revision | yes | yes |
+| a snapshot (`.json`) | yes | yes |
+| a directory of snapshots | each snapshot | each snapshot |
+| a schema `.sql` file, or a directory of them | no, it has no queries | yes |
+
+A directory of snapshots checks every version in it, named after its file. Keep a
+snapshot for each version that may still run, during a rolling or on-premises
+deploy or a rollback window, and remove it when that version is gone:
+
+```text
+app/q.py:2: [unknown-column] column `bio` does not exist in `users` (backward: the queries of v1.3 against the schema of the working tree)
+```
+
+A schema file, such as the output of `pg_dump --schema-only` in CI, has no
+queries, so it is only checked forward: the new queries against that schema.
+
+!!! note "A snapshot holds source code"
+    A snapshot holds the full text of every checked Python file. Commit it where the
+    code may be read, or store it as a CI artifact.
 
 ## Expand and contract
 

@@ -1,0 +1,6 @@
+# Dialects with no rules of their own that read the rules of others. A function or operator
+# takes the rules of the first dialect in `extends` that has any for it, then `common/`.
+
+[generic]
+extends = ["postgres", "mysql", "sqlite"]
+reasoning = "Generic SQL has no vendor of its own. It reads PostgreSQL's rules, the dialect sqlty follows by default, then MySQL's and SQLite's for functions PostgreSQL does not have, such as `IF`, `RAND` and `IIF`."

@@ -1,0 +1,145 @@
+# PostgreSQL system administration functions.
+
+[[function]]
+id = "postgres.admin.bigint"
+functions = ["PG_DATABASE_SIZE", "PG_TOTAL_RELATION_SIZE", "PG_RELATION_SIZE", "PG_TABLE_SIZE", "PG_INDEXES_SIZE", "PG_SIZE_BYTES"]
+dialects = ["postgres"]
+type = "BIGINT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.28 System Administration Functions, Table 9.100 Database Object Size Functions"
+reasoning = "The documentation gives each of these a `bigint` result."
+
+[[function]]
+id = "postgres.admin.boolean"
+functions = ["PG_TRY_ADVISORY_LOCK", "PG_TRY_ADVISORY_XACT_LOCK", "PG_TRY_ADVISORY_LOCK_SHARED", "PG_TRY_ADVISORY_XACT_LOCK_SHARED", "PG_ADVISORY_UNLOCK", "PG_ADVISORY_UNLOCK_SHARED", "PG_IS_IN_RECOVERY", "PG_TERMINATE_BACKEND", "PG_CANCEL_BACKEND"]
+dialects = ["postgres"]
+type = "BOOLEAN"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.28 System Administration Functions, Table 9.94 Server Signaling Functions, Table 9.96 Recovery Information Functions, Table 9.106 Advisory Lock Functions"
+reasoning = "The documentation gives each of these a `boolean` result."
+
+[[function]]
+id = "postgres.admin.int"
+function = "PG_COLUMN_SIZE"
+dialects = ["postgres"]
+type = "INT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.28 System Administration Functions, Table 9.100 Database Object Size Functions"
+reasoning = "The documentation gives the function an `integer` result."
+
+[[function]]
+id = "postgres.admin.text"
+functions = ["CURRENT_SETTING", "SET_CONFIG", "PG_SIZE_PRETTY", "PG_WALFILE_NAME"]
+dialects = ["postgres"]
+type = "TEXT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.28 System Administration Functions, Table 9.93 Configuration Settings Functions, Table 9.95 Backup Control Functions, Table 9.100 Database Object Size Functions"
+reasoning = "The documentation gives each of these a `text` result."
+
+[[function]]
+id = "postgres.admin.void"
+functions = ["PG_ADVISORY_LOCK", "PG_ADVISORY_XACT_LOCK", "PG_ADVISORY_LOCK_SHARED", "PG_ADVISORY_XACT_LOCK_SHARED", "PG_ADVISORY_UNLOCK_ALL", "BRIN_DESUMMARIZE_RANGE", "PG_DROP_REPLICATION_SLOT", "PG_REPLICATION_ORIGIN_ADVANCE", "PG_REPLICATION_ORIGIN_DROP", "PG_REPLICATION_ORIGIN_SESSION_RESET", "PG_REPLICATION_ORIGIN_SESSION_SETUP", "PG_REPLICATION_ORIGIN_XACT_RESET", "PG_REPLICATION_ORIGIN_XACT_SETUP", "PG_SYNC_REPLICATION_SLOTS", "PG_WAL_REPLAY_PAUSE", "PG_WAL_REPLAY_RESUME"]
+dialects = ["postgres"]
+type = "@void"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.28 System Administration Functions, Table 9.97 Recovery Control Functions, Table 9.99 Replication Management Functions, Table 9.104 Index Maintenance Functions, Table 9.106 Advisory Lock Functions"
+reasoning = "Each of these returns `void`, which the driver reads as None."
+
+[[function]]
+id = "postgres.admin.bigint-nullable"
+functions = ["GIN_CLEAN_PENDING_LIST", "PG_TABLESPACE_SIZE"]
+dialects = ["postgres"]
+type = "BIGINT"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.28 System Administration Functions, Table 9.100 Database Object Size Functions, Table 9.104 Index Maintenance Functions"
+reasoning = "The documentation gives each of these a `bigint` result. They are NULL for an object that does not exist, or a value the server does not have."
+
+[[function]]
+id = "postgres.admin.boolean-nullable"
+functions = ["PG_IS_WAL_REPLAY_PAUSED", "PG_LOG_BACKEND_MEMORY_CONTEXTS", "PG_PROMOTE", "PG_RELOAD_CONF", "PG_REPLICATION_ORIGIN_SESSION_IS_SETUP", "PG_ROTATE_LOGFILE"]
+dialects = ["postgres"]
+type = "BOOLEAN"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.28 System Administration Functions, Table 9.94 Server Signaling Functions, Table 9.97 Recovery Control Functions, Table 9.99 Replication Management Functions"
+reasoning = "The documentation gives each of these a `boolean` result. They are NULL for an object that does not exist, or a value the server does not have."
+
+[[function]]
+id = "postgres.admin.decimal"
+function = "PG_WAL_LSN_DIFF"
+dialects = ["postgres"]
+type = "DECIMAL"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.28 System Administration Functions, Table 9.95 Backup Control Functions"
+reasoning = "The documentation gives the function a `numeric` result."
+
+[[function]]
+id = "postgres.admin.int-nullable"
+functions = ["BRIN_SUMMARIZE_NEW_VALUES", "BRIN_SUMMARIZE_RANGE", "PG_IMPORT_SYSTEM_COLLATIONS"]
+dialects = ["postgres"]
+type = "INT"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.28 System Administration Functions, Table 9.102 Collation Management Functions, Table 9.104 Index Maintenance Functions"
+reasoning = "The documentation gives each of these an `integer` result. They are NULL for an object that does not exist, or a value the server does not have."
+
+[[function]]
+id = "postgres.admin.oid-nullable"
+functions = ["PG_COLUMN_TOAST_CHUNK_ID", "PG_RELATION_FILENODE", "PG_REPLICATION_ORIGIN_CREATE", "PG_REPLICATION_ORIGIN_OID"]
+dialects = ["postgres"]
+type = "OID"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.28 System Administration Functions, Table 9.99 Replication Management Functions, Table 9.100 Database Object Size Functions, Table 9.101 Database Object Location Functions"
+reasoning = "The documentation gives each of these an `oid` result. They are NULL for an object that does not exist, or a value the server does not have."
+
+[[function]]
+id = "postgres.admin.pg-lsn-nullable"
+functions = ["PG_BACKUP_START", "PG_CREATE_RESTORE_POINT", "PG_CURRENT_WAL_FLUSH_LSN", "PG_CURRENT_WAL_INSERT_LSN", "PG_CURRENT_WAL_LSN", "PG_LAST_WAL_RECEIVE_LSN", "PG_LAST_WAL_REPLAY_LSN", "PG_LOG_STANDBY_SNAPSHOT", "PG_LOGICAL_EMIT_MESSAGE", "PG_REPLICATION_ORIGIN_PROGRESS", "PG_REPLICATION_ORIGIN_SESSION_PROGRESS", "PG_SWITCH_WAL"]
+dialects = ["postgres"]
+type = "PG_LSN"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.28 System Administration Functions, Table 9.95 Backup Control Functions, Table 9.96 Recovery Information Functions, Table 9.98 Snapshot Synchronization Functions, Table 9.99 Replication Management Functions"
+reasoning = "The documentation gives each of these a `pg_lsn` result. They are NULL for an object that does not exist, or a value the server does not have."
+
+[[function]]
+id = "postgres.admin.record-nullable"
+functions = ["PG_BACKUP_STOP", "PG_COPY_LOGICAL_REPLICATION_SLOT", "PG_COPY_PHYSICAL_REPLICATION_SLOT", "PG_CREATE_LOGICAL_REPLICATION_SLOT", "PG_CREATE_PHYSICAL_REPLICATION_SLOT", "PG_GET_WAL_RESOURCE_MANAGERS", "PG_LS_ARCHIVE_STATUSDIR", "PG_LS_LOGDIR", "PG_LS_LOGICALMAPDIR", "PG_LS_LOGICALSNAPDIR", "PG_LS_REPLSLOTDIR", "PG_LS_TMPDIR", "PG_LS_WALDIR", "PG_PARTITION_TREE", "PG_REPLICATION_SLOT_ADVANCE", "PG_SPLIT_WALFILE_NAME", "PG_STAT_FILE", "PG_WALFILE_NAME_OFFSET"]
+dialects = ["postgres"]
+type = "RECORD"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.28 System Administration Functions, Table 9.95 Backup Control Functions, Table 9.96 Recovery Information Functions, Table 9.99 Replication Management Functions, Table 9.103 Partitioning Information Functions, Table 9.105 Generic File Access Functions"
+reasoning = "The documentation gives each of these a `record` result. They are NULL for an object that does not exist, or a value the server does not have."
+
+[[function]]
+id = "postgres.admin.regclass-nullable"
+functions = ["PG_FILENODE_RELATION", "PG_PARTITION_ANCESTORS", "PG_PARTITION_ROOT"]
+dialects = ["postgres"]
+type = "REGCLASS"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.28 System Administration Functions, Table 9.101 Database Object Location Functions, Table 9.103 Partitioning Information Functions"
+reasoning = "The documentation gives each of these a `regclass` result. They are NULL for an object that does not exist, or a value the server does not have."
+
+[[function]]
+id = "postgres.admin.text-nullable"
+functions = ["PG_COLLATION_ACTUAL_VERSION", "PG_COLUMN_COMPRESSION", "PG_DATABASE_COLLATION_ACTUAL_VERSION", "PG_EXPORT_SNAPSHOT", "PG_GET_WAL_REPLAY_PAUSE_STATE", "PG_LS_DIR", "PG_READ_FILE", "PG_RELATION_FILEPATH"]
+dialects = ["postgres"]
+type = "TEXT"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.28 System Administration Functions, Table 9.97 Recovery Control Functions, Table 9.98 Snapshot Synchronization Functions, Table 9.100 Database Object Size Functions, Table 9.101 Database Object Location Functions, Table 9.102 Collation Management Functions, Table 9.105 Generic File Access Functions"
+reasoning = "The documentation gives each of these a `text` result. They are NULL for an object that does not exist, or a value the server does not have."
+
+[[function]]
+id = "postgres.admin.timestamptz-nullable"
+function = "PG_LAST_XACT_REPLAY_TIMESTAMP"
+dialects = ["postgres"]
+type = "TIMESTAMPTZ"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.28 System Administration Functions, Table 9.96 Recovery Information Functions"
+reasoning = "The documentation gives the function a `timestamp with time zone` result. It is NULL for an object that does not exist, or a value the server does not have."
+
+[[function]]
+id = "postgres.admin.varbinary-nullable"
+function = "PG_READ_BINARY_FILE"
+dialects = ["postgres"]
+type = "VARBINARY"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.28 System Administration Functions, Table 9.105 Generic File Access Functions"
+reasoning = "The documentation gives the function a `bytea` result. It is NULL for an object that does not exist, or a value the server does not have."

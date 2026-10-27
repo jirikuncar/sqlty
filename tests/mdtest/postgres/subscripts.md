@@ -60,3 +60,35 @@ SELECT ARRAY[1, 2], ARRAY[1.5, 2], ARRAY[name, NULL], ARRAY[1, TRUE] FROM users
 -- columns: array: list[str] (ARRAY<TEXT>)
 -- columns: array: None (None)
 ```
+
+## Field access of a whole-row reference
+
+Each table is also the composite type of its rows, so `(u).name` reads the column
+`u.name`.
+
+```sql
+SELECT (u).id, (u).name, (users).home FROM users AS u, users
+-- columns: id: int (INT)
+-- columns: name: str (TEXT)
+-- columns: home: None (ADDRESS)
+```
+
+## Expanding a composite with `.*`
+
+`(home).*` is a column for each field of the composite, which can be NULL as
+every field can. A whole row's `(u).*` is `u.*`.
+
+```sql
+SELECT id, (home).* FROM users
+-- columns: id: int (INT)
+-- columns: street: str | None (TEXT)
+-- columns: zip: int | None (INT)
+```
+
+```sql
+SELECT (u).* FROM users AS u
+-- columns: id: int (INT)
+-- columns: name: str (TEXT)
+-- columns: tags: list[str] (ARRAY<TEXT>)
+-- columns: home: None (ADDRESS)
+```

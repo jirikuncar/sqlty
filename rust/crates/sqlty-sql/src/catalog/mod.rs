@@ -41,9 +41,10 @@ pub(crate) use read::{load, load_with};
 use rustc_hash::FxHashMap;
 use std::sync::{Arc, LazyLock};
 
-use sqlparser::ast::DataType;
+use sqlparser::ast::{DataType, Expr};
 
 use crate::analyzer::{Column, SqlDialect};
+use crate::ddl::RowEvents;
 
 use names::lookup_key;
 use resolve::Resolver;
@@ -56,7 +57,8 @@ pub(crate) type Typed = (Option<String>, Option<String>);
 pub struct SchemaColumn {
     /// Lowercased name, for lookups and result column names.
     pub name: String,
-    /// The name as SQL spells it, quotes kept, for `SELECT *` expansion.
+    /// The name as SQL spells it, quotes kept, for `SELECT *` expansion. MySQL and SQLite
+    /// keep the case of an unquoted name as declared, which their result columns show.
     pub ident: String,
     /// The canonical SQL type of the column.
     pub sql_type: String,
@@ -68,6 +70,11 @@ pub struct SchemaColumn {
     /// Whether an INSERT that leaves the column out still gives it a value: a `DEFAULT`,
     /// `serial`, identity, generated or auto-increment column, or SQLite's rowid.
     pub has_default: bool,
+    /// The `DEFAULT` an INSERT that leaves the column out writes.
+    pub default: Option<Expr>,
+    /// The expression a generated column is computed from, when it reads no other
+    /// generated column.
+    pub generated: Option<Expr>,
     /// Part of the table's primary key, which PostgreSQL lets a grouped query select
     /// the table's other columns by.
     pub primary_key: bool,
@@ -75,6 +82,9 @@ pub struct SchemaColumn {
     pub allowed_values: Option<Arc<[String]>>,
     /// The values of a `Literal` `python_type`, as data.
     pub(crate) values: Option<Arc<[crate::values::Value]>>,
+    /// MySQL's `INVISIBLE`: read only by name, left out of `SELECT *` and of an `INSERT`
+    /// without a column list.
+    pub invisible: bool,
 }
 
 /// A domain, enum or composite type as its columns see it: the SQL type they show (a
@@ -114,12 +124,33 @@ pub(crate) struct Function {
     /// The types of the arguments before any `VARIADIC` one.
     pub args: Vec<Typed>,
     pub returns: FunctionReturn,
+    /// `STRICT`: NULL exactly when an argument is. Any other function may return NULL.
+    pub strict: bool,
+}
+
+/// A foreign key that holds for every row: `columns` of a table equal `referred` of
+/// the table `table` (a catalog key), or one of them is NULL.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ForeignKey {
+    pub columns: Vec<String>,
+    pub table: String,
+    pub referred: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+struct TableRelation {
+    columns: Vec<SchemaColumn>,
+    /// Groups of columns a `CHECK` keeps at least one of non-null.
+    nonnull_groups: Vec<Vec<String>>,
+    /// The statements a `BEFORE` row trigger fires for.
+    row_triggers: RowEvents,
+    foreign_keys: Vec<ForeignKey>,
+    row_security: bool,
 }
 
 #[derive(Clone, Debug)]
 enum Relation {
-    /// Columns, and the groups of them a `CHECK` keeps at least one of non-null.
-    Table(Vec<SchemaColumn>, Vec<Vec<String>>),
+    Table(TableRelation),
     View(Vec<Column>),
     /// Defined, but its shape is not known.
     Unknown,
@@ -258,7 +289,7 @@ impl Catalog {
     /// unknown shape.
     pub(crate) fn table(&self, name: &str) -> Option<&[SchemaColumn]> {
         match self.find(name)? {
-            Relation::Table(columns, _) => Some(columns),
+            Relation::Table(table) => Some(&table.columns),
             _ => None,
         }
     }
@@ -267,9 +298,36 @@ impl Catalog {
     /// non-null, such as `CHECK (num_nonnulls(a, b) = 1)`.
     pub(crate) fn nonnull_groups(&self, name: &str) -> &[Vec<String>] {
         match self.find(name) {
-            Some(Relation::Table(_, groups)) => groups,
+            Some(Relation::Table(table)) => &table.nonnull_groups,
             _ => &[],
         }
+    }
+
+    /// The statements a `BEFORE ... FOR EACH ROW` trigger of the table `name` fires for:
+    /// such a trigger may change any column of the row a `RETURNING` clause returns.
+    pub(crate) fn row_triggers(&self, name: &str) -> RowEvents {
+        match self.find(name) {
+            Some(Relation::Table(table)) => table.row_triggers,
+            _ => RowEvents::default(),
+        }
+    }
+
+    /// The catalog key of the table `name`, the same for every spelling of it.
+    pub(crate) fn table_id(&self, name: &str) -> Option<&str> {
+        let key = lookup_key(&self.relations, &self.search_path, self.norm(name))?;
+        matches!(self.relations.get(key), Some(Relation::Table(_))).then_some(key)
+    }
+
+    /// The foreign keys of the table `name` that hold for every row and that a query sees
+    /// hold: those referencing a table without row-level security.
+    pub(crate) fn foreign_keys(&self, name: &str) -> impl Iterator<Item = &ForeignKey> {
+        let keys = match self.find(name) {
+            Some(Relation::Table(table)) => table.foreign_keys.as_slice(),
+            _ => &[],
+        };
+        keys.iter().filter(|fk| {
+            matches!(self.relations.get(&fk.table), Some(Relation::Table(target)) if !target.row_security)
+        })
     }
 
     /// Whether the schema defines a table or view `name`, whatever is known of its shape.
@@ -332,6 +390,18 @@ impl Catalog {
         let first = fits.next()?;
         fits.all(|f| f.args == first.args)
             .then_some(first.args.as_slice())
+    }
+
+    /// Whether every overload of `name` a call with `args` arguments fits is `STRICT`;
+    /// `None` when none fits.
+    pub(crate) fn function_strict(&self, name: &str, args: usize) -> Option<bool> {
+        let key = lookup_key(&self.functions, &self.search_path, self.norm(name))?;
+        let mut fits = self.functions[key]
+            .iter()
+            .filter(|f| f.required <= args && args <= f.max)
+            .peekable();
+        fits.peek()?;
+        Some(fits.all(|f| f.strict))
     }
 
     /// Whether the schema defines a function `name`, whatever is known of what it returns.
@@ -628,11 +698,13 @@ mod tests {
         }
     }
 
+    /// Catches loading that grows quadratically, which takes far longer at these sizes; a
+    /// debug build on a shared CI runner takes up to a second.
     fn assert_fast(sql: &str) -> Catalog {
         let start = std::time::Instant::now();
         let catalog = pg(sql);
         assert!(
-            start.elapsed() < std::time::Duration::from_secs(1),
+            start.elapsed() < std::time::Duration::from_secs(5),
             "load took {:?}",
             start.elapsed()
         );
@@ -890,6 +962,41 @@ mod tests {
         assert_eq!(view_cols(&c, "v1"), ["id:INT"]);
         assert_eq!(view_cols(&c, "v2"), ["id:INT", "name:TEXT"]);
         assert_eq!(view_cols(&c, "v3"), ["id:INT", "name:TEXT"]);
+    }
+
+    /// A view after each function resolves only the functions that changed since the last
+    /// one, not all of them.
+    #[test]
+    fn test_functions_between_views_resolve_once() {
+        let mut sql = String::new();
+        for i in 0..200 {
+            sql += &format!("CREATE TABLE t{i} (id int);\n");
+            sql +=
+                &format!("CREATE FUNCTION f{i}() RETURNS SETOF t{i} LANGUAGE sql AS 'select 1';\n");
+            sql += &format!("CREATE VIEW v{i} AS SELECT * FROM f{i}();\n");
+        }
+        let _ = pg("");
+        resolve::FUNCTIONS_RESOLVED.with(|count| count.set(0));
+        let _ = pg("");
+        let builtin = resolve::FUNCTIONS_RESOLVED.with(|count| count.replace(0));
+        let c = pg(&sql);
+        assert_eq!(view_cols(&c, "v199"), ["id:INT"]);
+        // Once before its view, once in the final build.
+        assert_eq!(
+            resolve::FUNCTIONS_RESOLVED.with(std::cell::Cell::get),
+            2 * (200 + builtin)
+        );
+    }
+
+    /// A function returning a table's row follows a later change to the table.
+    #[test]
+    fn test_function_returning_a_row_follows_its_table() {
+        let c = pg("CREATE TABLE t (id int);
+            CREATE VIEW v1 AS SELECT id FROM t;
+            CREATE FUNCTION f() RETURNS t LANGUAGE sql AS 'select 1';
+            ALTER TABLE t ADD COLUMN name text;
+            CREATE VIEW v2 AS SELECT * FROM f();");
+        assert_eq!(view_cols(&c, "v2"), ["id:INT", "name:TEXT"]);
     }
 
     /// Functions do not force the catalog to be built again.

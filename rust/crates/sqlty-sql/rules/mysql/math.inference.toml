@@ -1,0 +1,84 @@
+# MySQL mathematical functions.
+
+[[function]]
+id = "mysql.math.abs-integer"
+function = "ABS"
+dialects = ["mysql"]
+argument = ["BIT", "BOOLEAN"]
+type = "BIGINT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions (ABS(X) Returns the absolute value of X); 11.1.5 Bit-Value Literals (In numeric contexts, MySQL treats a bit literal like an integer)"
+reasoning = "The absolute value of a `BIT` or `BOOLEAN` value is an integer."
+
+[[function]]
+id = "mysql.math.abs-double"
+function = "ABS"
+dialects = ["mysql"]
+argument = ["@temporal", "@text", "ENUM", "SET"]
+type = "DOUBLE"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions (ABS(X) Returns the absolute value of X); 14.3 Type Conversion in Expression Evaluation (MySQL automatically converts strings to numbers as necessary)"
+reasoning = "The absolute value of a temporal value or a string is a double."
+
+[[function]]
+id = "mysql.math.argument-type"
+function = "MOD"
+dialects = ["mysql"]
+type = "@argument-type(0)"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions"
+reasoning = "The result has the type of the first argument."
+
+[[function]]
+id = "mysql.math.integral"
+functions = ["CEIL", "CEILING", "FLOOR"]
+dialects = ["mysql"]
+type = "@integral"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions"
+reasoning = "An exact-value number gives an integer, an approximate one a DOUBLE."
+
+[[function]]
+id = "mysql.math.bigint"
+functions = ["CRC32", "SIGN"]
+dialects = ["mysql"]
+type = "BIGINT"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions"
+reasoning = "The manual describes each of these as returning an integer."
+
+[[function]]
+id = "mysql.math.double"
+functions = ["EXP", "POW", "POWER", "COT"]
+dialects = ["mysql"]
+type = "DOUBLE"
+nullability = "strict"
+reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions"
+reasoning = "The manual describes each of these as returning a DOUBLE."
+
+[[function]]
+id = "mysql.math.double-non-null"
+function = "RAND"
+dialects = ["mysql"]
+type = "DOUBLE"
+nullability = "non-null"
+reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions"
+reasoning = "The manual describes each of these as returning a DOUBLE. It never returns NULL, even for NULL arguments."
+
+[[function]]
+id = "mysql.math.double-nullable"
+functions = ["SQRT", "LN", "LOG", "LOG2", "LOG10", "ACOS", "ASIN"]
+dialects = ["mysql"]
+type = "DOUBLE"
+nullability = "nullable"
+reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions"
+reasoning = "The manual describes each of these as returning a DOUBLE. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."
+
+[[function]]
+id = "mysql.math.text"
+function = "CONV"
+dialects = ["mysql"]
+type = "TEXT"
+nullability = "nullable"
+reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions"
+reasoning = "The manual describes the function as returning a string. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."

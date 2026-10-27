@@ -37,12 +37,15 @@ stale-type = "error"
 | [`unknown-type`](#unknown-type) | Names | warn | no | Cast or column type without a Python type |
 | [`unsupported-syntax`](#unsupported-syntax) | Names | warn | no | Construct that parses but is not typed |
 | [`insert-missing-column`](#insert-missing-column) | Names | error | no | INSERT that leaves out a `NOT NULL` column without a default |
+| [`insert-value-count`](#insert-value-count) | Names | error | no | INSERT that gives a different number of values than the columns it writes |
 | [`ungrouped-column`](#ungrouped-column) | Names | error | no | Grouped query selects a column it neither groups by nor aggregates |
 | [`stale-rewrite`](#stale-rewrite) | Rewrite | warn | yes | `--sql` string not wrapped in `SQL[T](...)` |
-| [`stale-type`](#stale-type) | Rewrite | warn | yes | `SQL[tuple[...]]` neither matches nor refines the inferred row type |
+| [`stale-type`](#stale-type) | Rewrite | warn | yes | `SQL[tuple[...]]` wider than the inferred row type |
+| [`narrow-type`](#narrow-type) | Rewrite | error | yes | `SQL[tuple[...]]` doesn't admit every row the query returns |
 | [`fstring-skipped`](#fstring-skipped) | Rewrite | warn | no | f-string with `--sql` cannot be rewritten |
 | [`tstring-skipped`](#tstring-skipped) | Rewrite | warn | no | t-string with `--sql` and a field that changes the SQL |
 | [`unchecked-query`](#unchecked-query) | Rewrite | warn | no | `--sql` query that is not plain string literals |
+| [`dynamic-query`](#dynamic-query) | Rewrite | ignore | no | Helper query that is not a string literal |
 | [`untyped-query`](#untyped-query) | Rewrite | warn | yes | `SQL[UNTYPED]` query |
 | [`param-count-mismatch`](#param-count-mismatch) | Params | error | no | Call passes a different number of parameters than its query has |
 | [`param-type-mismatch`](#param-type-mismatch) | Params | error | no | Call passes an argument the query's parameter can't take |
@@ -394,7 +397,7 @@ Default: error. An argument whose type, stated in the source, can't be the type
 the query gives its parameter, or `None` for a parameter stored in a `NOT NULL`
 column. A `str`, a number for a numeric parameter, an argument of a cast
 parameter and any argument of unknown type are never reported. Not checked for
-SQLite, except `None`.
+SQLite, except `None`. The fields of a `--sql` t-string are arguments too.
 
 ```python
 from typing import Annotated, LiteralString
@@ -537,8 +540,8 @@ error.
 ```python
 from sqlty import SQL
 
-# error: [unparsed-query] "query does not parse: Expected: ), found: foo"
-q = SQL[tuple[str]]("--sql\nSELECT xmlelement(name foo)")
+# error: [unparsed-query] "found: DOCUMENT"
+q = SQL[tuple[str]]("--sql\nSELECT NULL::xml IS DOCUMENT")
 ```
 
 Fix: rewrite the query in a form the parser reads. `sqlty check --statistics`
@@ -548,10 +551,10 @@ counts such queries as unparsed whether or not the rule is enabled.
 
 The first six rules explain why a result column is untyped: with all of them
 enabled and a schema configured, no column is left untyped without a diagnostic.
-`insert-missing-column` checks what an `INSERT` writes, and `ungrouped-column`
-what a grouped query selects. The rules for SQL the database rejects (unknown
-tables and columns, ambiguous columns, an `INSERT` missing a column, an ungrouped
-column) are errors; those for valid SQL sqlty cannot type are warnings. The
+`insert-missing-column` and `insert-value-count` check what an `INSERT` writes,
+and `ungrouped-column` what a grouped query selects. The rules for SQL the
+database rejects (unknown tables and columns, ambiguous columns, an `INSERT`
+missing a column or a value, an ungrouped column) are errors; those for valid SQL sqlty cannot type are warnings. The
 [name diagnostics guide](../guide/name-diagnostics.md) shows how to change them. All but `unsupported-syntax` are only judged when a
 [schema](../guide/schema-inference.md) is configured, because without one every
 table, column, function and type is unknown. Tables, columns and ambiguity are
@@ -587,15 +590,24 @@ Default: warn. A cast target or schema column type with no Python type.
 ### unsupported-syntax
 
 Default: warn. A construct that parses but that sqlty does not type: an
-expression without a typing rule, `VALUES` outside PostgreSQL, `*` over a `USING` join, a column
-of a table function. `NULL` and placeholders are not reported.
+expression without a typing rule, `VALUES` outside PostgreSQL, MySQL and SQLite,
+`*` over a `USING` join, a column of a table function whose columns sqlty does
+not read. `NULL` and placeholders
+are not reported.
 
 ### insert-missing-column
 
-Default: error. An `INSERT` with a column list (or MySQL's `INSERT ... SET`)
-that leaves out a schema column declared `NOT NULL` without a default. A
-`DEFAULT`, `serial`, identity, generated or auto-increment column, and SQLite's
-`INTEGER PRIMARY KEY`, get a value anyway.
+Default: error. An `INSERT` that leaves out a schema column declared `NOT NULL`
+without a default. A `DEFAULT`, `serial`, identity, generated or auto-increment
+column, and SQLite's `INTEGER PRIMARY KEY`, get a value anyway. Without a
+column list, the values fill the table's columns in order, and PostgreSQL gives
+the columns past them their defaults.
+
+### insert-value-count
+
+Default: error. An `INSERT` whose `VALUES` rows or query have a different
+number of values than the columns it writes. Without a column list, MySQL and
+SQLite want a value for every column, and PostgreSQL at most one.
 
 ### ungrouped-column
 
@@ -624,21 +636,43 @@ the `"--sql SELECT"` form, and strings that are not plain literals
 
 ### stale-type
 
-Default: warn. The `T` in `SQL[tuple[...]]` differs from the type sqlty infers
-now, for example after the query or the schema changed. An item that only
-parametrises an inferred bare generic (`list[str]` for `list`) is not stale.
-Named row types are covered by the row type rules instead.
+Default: warn. The `T` in `SQL[tuple[...]]` admits every row the query returns
+but differs from the type sqlty infers now, for example after a column was made
+`NOT NULL`. The code still works; it handles values that never come. An item
+that only parametrises an inferred bare generic (`list[str]` for `list`) is not
+stale. Named row types are covered by the row type rules instead.
 
 ```python
 from sqlty import SQL
 
-# error: [stale-type] "SQL[tuple[int]] should be SQL[tuple[int, str]]"
-q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# error: [stale-type] "SQL[tuple[int | None]] should be SQL[tuple[int]]"
+q = SQL[tuple[int | None]]("--sql\nSELECT id::INTEGER FROM users")
 ```
 
 Fix: `sqlty check --fix` writes the inferred `T`, keeping parametrised
 generics; see also
 [Editing queries](../guide/writing-queries.md#editing-queries).
+
+### narrow-type
+
+Default: error. The SQL type is wider than the `T` in `SQL[tuple[...]]`: the
+query returns rows the annotation doesn't admit, for example after a column was
+made nullable, added to the query, or retyped. The code gets a `None`, a value or
+a column it doesn't expect, and the type checker can't tell. A single value such
+as `SQL[int]` is flagged too, since a row is never one. Named row types are
+covered by the row type rules instead.
+
+```python
+from sqlty import SQL
+
+# error: [narrow-type] "SQL[tuple[int]] should be SQL[tuple[int, str]]"
+q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# error: [narrow-type] "SQL[int] should be SQL[tuple[int]]"
+count = SQL[int]("--sql\nSELECT count(*)::INTEGER FROM users")
+```
+
+Fix: `sqlty check --fix` writes the inferred `T`; your type checker then finds
+the code that needs to handle it.
 
 ### fstring-skipped
 
@@ -685,6 +719,34 @@ q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM " + table)
 Fix: write the query as one plain literal, or implicitly concatenated ones.
 `SQL[Any](...)`, or `Any` as the row type of a helper called with a psycopg
 composition, opts out explicitly.
+
+### dynamic-query
+
+Default: ignore. A helper call whose query is not a string literal: a variable, a
+constant, a call or a concatenation. sqlty does not check it. A helper's own query
+parameter, forwarded to another helper, is not reported.
+
+```toml
+[tool.sqlty.rules]
+dynamic-query = "warn"
+```
+
+```python
+from typing import Annotated, LiteralString
+
+from sqlty import SQL
+
+
+def fetch_all[T](query: Annotated[LiteralString, SQL], form: type[T], /) -> list[T]: ...
+
+
+NAMES = "SELECT name FROM users"
+# error: [dynamic-query] "query is not a string literal, so it is not checked"
+names = fetch_all(NAMES, str)
+```
+
+Fix: pass the query as a string literal. `sqlty check --statistics` counts these calls
+under `dynamic-query`.
 
 ### untyped-query
 

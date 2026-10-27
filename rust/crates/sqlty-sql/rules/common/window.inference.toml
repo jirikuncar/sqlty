@@ -1,0 +1,41 @@
+# Every dialect's window functions.
+
+[[function]]
+id = "common.window.bigint"
+function = "ROW_NUMBER"
+type = "BIGINT"
+nullability = "non-null"
+reference = "PostgreSQL 17 documentation, 9.22 Window Functions, Table 9.65 General-Purpose Window Functions"
+reasoning = "The documentation gives the function a `bigint` result. It never returns NULL, even for NULL arguments."
+
+[[function]]
+id = "common.window.int"
+function = "NTILE"
+type = "INT"
+nullability = "non-null"
+reference = "PostgreSQL 17 documentation, 9.22 Window Functions, Table 9.65 General-Purpose Window Functions"
+reasoning = "The documentation gives the function an `integer` result. It never returns NULL, even for NULL arguments."
+
+[[function]]
+id = "common.window.distribution"
+functions = ["CUME_DIST", "PERCENT_RANK"]
+type = "DOUBLE"
+nullability = "non-null"
+reference = "PostgreSQL 17 documentation, 9.22 Window Functions, Table 9.65 General-Purpose Window Functions; MySQL 8.4 Reference Manual, 14.20.1 Window Function Descriptions; SQLite documentation, Window Functions"
+reasoning = "Every dialect returns the relative rank as a double precision number. It never returns NULL, even for NULL arguments."
+
+[[function]]
+id = "common.window.value"
+functions = ["LAST_VALUE", "LAG", "LEAD", "FIRST_VALUE"]
+type = "@same(0)"
+nullability = "code"
+reference = "PostgreSQL 17 documentation, 9.22 Window Functions, Table 9.65 General-Purpose Window Functions; MySQL 8.4 Reference Manual, 14.20.1 Window Function Descriptions; SQLite documentation, Window Functions"
+reasoning = "The result is one of the first argument's values or, for `LAG` and `LEAD`, the default. Its nullability depends on the window frame or the condition, which `analyzer/nullability.rs` reads."
+
+[[function]]
+id = "common.window.value-nullable"
+function = "NTH_VALUE"
+type = "@same(0)"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.22 Window Functions, Table 9.65 General-Purpose Window Functions; MySQL 8.4 Reference Manual, 14.20.1 Window Function Descriptions; SQLite documentation, Window Functions"
+reasoning = "The result is one of the first argument's values, or NULL when the frame has fewer rows than the index."

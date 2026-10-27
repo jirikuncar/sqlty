@@ -191,7 +191,9 @@ def test_rewrite_and_strip_round_trip(case: Case) -> None:
     assert core.strip_source(rewritten) == source
     assert core.rewrite_source(rewritten, schema_sql=case.schema) == rewritten
     stale = [
-        d for d in core.check_source(rewritten, schema_sql=case.schema) if d["rule"] == "stale-type"
+        d
+        for d in core.check_source(rewritten, schema_sql=case.schema)
+        if d["rule"] in ("stale-type", "narrow-type")
     ]
     assert stale == [], rewritten
 
@@ -225,7 +227,7 @@ def test_server_agrees(conn: Any, case: Case, rows: int) -> None:
     _load(conn, case, rows)
     psycopg = pytest.importorskip("psycopg")
     try:
-        cursor = conn.execute(case.query)
+        cursor = conn.execute(case.query, prepare=False)
     except psycopg.Error:
         # A combination the server rejects (say `max` of an array) says nothing about sqlty.
         hypothesis.reject()

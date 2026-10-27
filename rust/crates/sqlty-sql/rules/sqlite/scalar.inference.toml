@@ -1,0 +1,91 @@
+# SQLite core scalar functions.
+
+[[function]]
+id = "sqlite.scalar.branches"
+function = "IIF"
+dialects = ["sqlite"]
+type = "@first-known(1)"
+nullability = "code"
+reference = "SQLite documentation, Built-In Scalar SQL Functions"
+reasoning = "The result is one of the branches, from the second argument on, resolved to their common type. Its nullability depends on the window frame or the condition, which `analyzer/nullability.rs` reads."
+
+[[function]]
+id = "sqlite.scalar.common"
+function = "IFNULL"
+dialects = ["sqlite"]
+type = "@first-known"
+nullability = "all-arguments"
+reference = "SQLite documentation, Built-In Scalar SQL Functions"
+reasoning = "The arguments resolve to one common type, the first known argument's. It skips NULL arguments, so it is NULL only when every argument is."
+
+[[function]]
+id = "sqlite.scalar.argument"
+functions = ["LIKELIHOOD", "LIKELY", "UNLIKELY"]
+dialects = ["sqlite"]
+type = "@same(0)"
+nullability = "strict"
+reference = "SQLite documentation, Built-In Scalar SQL Functions"
+reasoning = "The result is one of the first argument's values, so it keeps its type and values."
+
+[[function]]
+id = "sqlite.scalar.bigint"
+functions = ["GLOB", "LIKE", "INSTR", "UNICODE", "RANDOM", "CHANGES", "TOTAL_CHANGES", "LAST_INSERT_ROWID", "SIGN", "SQLITE_COMPILEOPTION_USED"]
+dialects = ["sqlite"]
+type = "BIGINT"
+nullability = "strict"
+reference = "SQLite documentation, Built-In Scalar SQL Functions"
+reasoning = "Each of these returns an integer."
+
+[[function]]
+id = "sqlite.scalar.blob"
+functions = ["ZEROBLOB", "RANDOMBLOB"]
+dialects = ["sqlite"]
+type = "BLOB"
+nullability = "strict"
+reference = "SQLite documentation, Built-In Scalar SQL Functions"
+reasoning = "Each of these returns a BLOB."
+
+[[function]]
+id = "sqlite.scalar.blob-nullable"
+function = "UNHEX"
+dialects = ["sqlite"]
+type = "BLOB"
+nullability = "nullable"
+reference = "SQLite documentation, Built-In Scalar SQL Functions"
+reasoning = "Each of these returns a BLOB. SQLite also returns NULL for a value it cannot read: text that is not a date or not hexadecimal, or a number outside a math function's domain."
+
+[[function]]
+id = "sqlite.scalar.double"
+function = "ROUND"
+dialects = ["sqlite"]
+type = "DOUBLE"
+nullability = "strict"
+reference = "SQLite documentation, Built-In Scalar SQL Functions"
+reasoning = "The function returns a floating-point value."
+
+[[function]]
+id = "sqlite.scalar.text"
+functions = ["LTRIM", "RTRIM", "HEX", "CHAR", "SOUNDEX", "SQLITE_VERSION", "SQLITE_SOURCE_ID", "UNISTR"]
+dialects = ["sqlite"]
+type = "TEXT"
+nullability = "strict"
+reference = "SQLite documentation, Built-In Scalar SQL Functions"
+reasoning = "Each of these returns text."
+
+[[function]]
+id = "sqlite.scalar.text-nullable"
+functions = ["PRINTF", "SQLITE_COMPILEOPTION_GET"]
+dialects = ["sqlite"]
+type = "TEXT"
+nullability = "nullable"
+reference = "SQLite documentation, Built-In Scalar SQL Functions"
+reasoning = "Each of these returns text. SQLite returns NULL for an empty result, such as `printf('%s', '')`, and `sqlite_compileoption_get(N)` for an `N` out of range."
+
+[[function]]
+id = "sqlite.scalar.text-non-null"
+functions = ["TYPEOF", "QUOTE", "UNISTR_QUOTE"]
+dialects = ["sqlite"]
+type = "TEXT"
+nullability = "non-null"
+reference = "SQLite documentation, Built-In Scalar SQL Functions"
+reasoning = "Each of these returns text. It never returns NULL, even for NULL arguments."

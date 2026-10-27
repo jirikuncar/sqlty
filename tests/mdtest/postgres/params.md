@@ -178,6 +178,18 @@ DELETE FROM orders WHERE user_id = %s AND total > %s
 -- params: 2: decimal.Decimal (DECIMAL(10, 2))
 ```
 
+### A COALESCE fallback
+
+A parameter before the last argument of `COALESCE` may be NULL: a later argument stands
+in for it. The last one is not.
+
+```sql
+UPDATE users SET name = COALESCE(%s, name), age = COALESCE(age, %s) WHERE id = %s
+-- params: 1: str (TEXT) NULL
+-- params: 2: int (INT)
+-- params: 3: int (INT)
+```
+
 ## Explicit casts
 
 ```sql
@@ -282,6 +294,28 @@ SELECT id FROM events WHERE ids @> %s AND doc @> %s AND doc ? %s AND doc ->> %s 
 -- params: 5: str (TEXT)
 -- params: 6: ipaddress.IPv4Address | ipaddress.IPv6Address | ipaddress.IPv4Interface | ipaddress.IPv6Interface (INET)
 -- params: 7: str (TEXT)
+```
+
+`%s - INTERVAL '1 day'` alone could be an interval or a timestamp minus one, and
+PostgreSQL reads it as an interval. Compared with a timestamp or a date, the parameter
+is what that side is for a driver that sends parameter types, as psycopg does. asyncpg
+sends them untyped, so PostgreSQL rejects the comparison; `sqlty check` reports it.
+
+```sql
+SELECT id FROM events WHERE at < %s - INTERVAL '3 months' AND (INTERVAL '1 day' + %s) >= at AND span > %s - INTERVAL '1 day'
+-- params: 1: datetime.datetime (TIMESTAMP)
+-- params: 2: datetime.datetime (TIMESTAMP)
+-- params: 3: datetime.timedelta (INTERVAL)
+```
+
+Alone, it has no type sqlty can hold the value to: psycopg may pass a date, a time or a
+`timedelta`. Stored in a column, it is what the column is.
+
+```sql
+INSERT INTO events (id, n, at, span, note, ids, doc, ip) SELECT n, n, %s + n * INTERVAL '1 second', %s - INTERVAL '1 day', '', '{}', '{}', '::1' FROM generate_series(1, 3) n RETURNING %s + INTERVAL '1 day'
+-- params: 1: datetime.datetime (TIMESTAMP)
+-- params: 2: datetime.timedelta (INTERVAL)
+-- params: 3: None (None)
 ```
 
 ### Rows, CASE and AT TIME ZONE

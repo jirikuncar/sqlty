@@ -37,11 +37,22 @@ c = "--sql\nINSERT INTO t (g) VALUES (1)"
 d = SQL[tuple[int]]("--sql\nINSERT INTO t (g) VALUES (1) RETURNING a")
 ```
 
-An `INSERT` without a column list is not checked:
+Without a column list, the values fill the columns in order, and the columns
+past them get their defaults:
 
 ```python
-# error:
+# error: [insert-missing-column] "leaves out `f`"
 e = "--sql\nINSERT INTO t VALUES (DEFAULT)"
+# error:
+f = "--sql\nINSERT INTO t VALUES (DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, 1)"
+# error: [insert-missing-column] "leaves out `f`"
+g = "--sql\nINSERT INTO t DEFAULT VALUES"
+# error: [insert-value-count] "gives 8 values for 7 columns"
+h = "--sql\nINSERT INTO t VALUES (DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, 1, 2, 3)"
+# error:
+i = "--sql\nINSERT INTO t (f, g) SELECT f, g FROM t"
+# error: [insert-value-count] "gives 1 value for 2 columns"
+j = "--sql\nINSERT INTO t (f, g) VALUES (1, 2), (3)"
 ```
 
 ## Migrations
@@ -86,6 +97,18 @@ a = "-- sql\nINSERT INTO t (a) VALUES (1)"
 b = "-- sql\nINSERT INTO t SET b = 1"
 ```
 
+Without a column list, MySQL wants a value for every column, or none:
+
+```python
+# error: [insert-value-count] "gives 2 values for 3 columns"
+c = "-- sql\nINSERT INTO t VALUES (NULL, 1)"
+# error:
+d = "-- sql\nINSERT INTO t VALUES (NULL, 1, 2)"
+# error: [insert-missing-column] "leaves out `a`"
+# error: [insert-missing-column] "leaves out `b`"
+e = "-- sql\nINSERT INTO t VALUES ()"
+```
+
 ## SQLite
 
 The rowid, an `INTEGER PRIMARY KEY`, is filled in.
@@ -110,4 +133,80 @@ a = "--sql\nINSERT INTO t (a) VALUES (1)"
 b = "--sql\nINSERT INTO u (a) VALUES (1)"
 # error: [insert-missing-column] "leaves out `id`"
 c = "--sql\nINSERT INTO v (a) VALUES (1)"
+# error: [insert-value-count] "gives 1 value for 2 columns"
+d = "--sql\nINSERT INTO t VALUES (1)"
+# error:
+e = "--sql\nINSERT INTO t VALUES (NULL, 1)"
+```
+
+## A BEFORE INSERT trigger
+
+A `BEFORE INSERT ... FOR EACH ROW` trigger may set any column of the row, so its
+table is not checked. A statement-level or `AFTER` trigger can't change the row.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE issues (id SERIAL PRIMARY KEY, number INTEGER NOT NULL, title TEXT NOT NULL);
+CREATE TABLE events (id SERIAL PRIMARY KEY, kind TEXT NOT NULL);
+CREATE FUNCTION next_number() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    NEW.number := (SELECT coalesce(max(number), 0) + 1 FROM issues);
+    RETURN NEW;
+END
+$$;
+CREATE TRIGGER issues_number BEFORE INSERT ON issues FOR EACH ROW EXECUTE FUNCTION next_number();
+CREATE TRIGGER events_audit AFTER INSERT ON events FOR EACH ROW EXECUTE FUNCTION next_number();
+```
+
+```python
+# error:
+a = "--sql\nINSERT INTO issues (title) VALUES (%s)"
+# error: [insert-missing-column] "leaves out `kind`"
+b = "--sql\nINSERT INTO events (id) VALUES (1)"
+```
+
+### MySQL
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE issues (id INT AUTO_INCREMENT PRIMARY KEY, number INT NOT NULL);
+DELIMITER //
+CREATE DEFINER = CURRENT_USER TRIGGER issues_number BEFORE INSERT ON issues FOR EACH ROW
+BEGIN
+    SET NEW.number = 1;
+END//
+DELIMITER ;
+```
+
+```python
+# error:
+a = "-- sql\nINSERT INTO issues (id) VALUES (1)"
+```
+
+### SQLite
+
+A SQLite trigger can't change the row it fires for.
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE issues (id INTEGER PRIMARY KEY, number INTEGER NOT NULL);
+CREATE TRIGGER issues_number BEFORE INSERT ON issues FOR EACH ROW BEGIN SELECT 1; END;
+```
+
+```python
+# error: [insert-missing-column] "leaves out `number`"
+a = "--sql\nINSERT INTO issues (id) VALUES (1)"
 ```

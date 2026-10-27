@@ -10,10 +10,12 @@ Commands:
 
 from __future__ import annotations
 
+import codecs
 import fnmatch
 import functools
 import gc
 import glob
+import itertools
 import json
 import logging
 import os
@@ -26,7 +28,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import argparse
     from collections import Counter
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable, Iterator
 
     from sqlty._config import RuleOverride, SchemaSpec, SQLTyConfig
     from sqlty._core import Schema
@@ -71,7 +73,7 @@ def main(argv: list[str] | None = None) -> None:
             case "rule":
                 _cmd_rule(args.name)
             case "skill":
-                _cmd_skill(args.install)
+                _cmd_skill(args.name, args.install, args.list)
             case "version":
                 _cmd_version()
             case _:
@@ -192,7 +194,7 @@ def build_parser() -> argparse.ArgumentParser:
     # --- breaking ---
     breaking_parser = subparsers.add_parser(
         "breaking",
-        help="Check the queries and schema of two git revisions across, as during a rolling "
+        help="Check the queries and schema of two revisions across, as during a rolling "
         "deploy: sqlty breaking --against origin/main",
     )
     breaking_parser.add_argument(
@@ -203,9 +205,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     breaking_parser.add_argument(
         "--against",
-        required=True,
-        metavar="REF",
-        help="The baseline revision: a branch, tag, SHA or HEAD~1",
+        metavar="BASELINE",
+        help="The baseline: a revision (a branch, tag, SHA or HEAD~1), a snapshot written by "
+        "--save, a directory of snapshots (each checked), or a schema .sql file or directory "
+        "(forward only, as it has no queries)",
+    )
+    breaking_parser.add_argument(
+        "--save",
+        metavar="PATH",
+        type=Path,
+        help="Write a snapshot of --head (its settings, schema and Python files) to PATH, a "
+        "baseline for a later --against",
     )
     breaking_parser.add_argument(
         "--head",
@@ -227,8 +237,8 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["text", "json", "github"],
         default="text",
         help="How findings are printed: text (the default), json (an array of objects with "
-        "file, line, rule, severity, message and direction) or github (GitHub Actions error "
-        "annotations)",
+        "file, line, rule, severity, message, direction and against) or github (GitHub "
+        "Actions annotations, each at its severity)",
     )
 
     # --- rule ---
@@ -241,13 +251,20 @@ def build_parser() -> argparse.ArgumentParser:
     # --- skill ---
     skill_parser = subparsers.add_parser(
         "skill",
-        help="Print the Agent Skill for coding agents, or install it (sqlty skill --install .claude/skills)",
+        help="Print an Agent Skill for coding agents, or install them all (sqlty skill --install .claude/skills)",
     )
     skill_parser.add_argument(
+        "name", nargs="?", default="sqlty", help="Skill to print (default: sqlty)"
+    )
+    skill_mode = skill_parser.add_mutually_exclusive_group()
+    skill_mode.add_argument(
         "--install",
         metavar="DIR",
         type=Path,
-        help="Write the skill to DIR/sqlty/SKILL.md instead of printing it",
+        help="Write every skill to DIR/NAME/ instead of printing one",
+    )
+    skill_mode.add_argument(
+        "--list", action="store_true", help="List the skills and what each is for"
     )
 
     # --- version ---
@@ -360,11 +377,48 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help="Print each file that rewrite, strip or check --fix changes",
     )
     parser.add_argument("-q", "--quiet", action="store_true", help="Suppress non-error output")
+    parser.add_argument(
+        "-j",
+        "--jobs",
+        type=_jobs,
+        metavar="N",
+        help="Files to work on at once; 1 works on one at a time. Output is the same in any "
+        "case (default: the number of processors)",
+    )
+
+
+def _jobs(value: str) -> int:
+    import argparse
+
+    if not value.isdigit() or int(value) < 1:
+        raise argparse.ArgumentTypeError(f"expected a positive integer, got {value!r}")
+    return int(value)
+
+
+def _map[T](args: argparse.Namespace, work: Callable[[Path], T], files: list[Path]) -> Iterator[T]:
+    """``work`` on every file, its results in the order of ``files``.
+
+    The engine releases the GIL, so threads check files at once. Whatever prints or writes
+    stays with the caller, which reads the results in order.
+    """
+    jobs = min(args.jobs or os.process_cpu_count() or 1, len(files))
+    if jobs <= 1:
+        yield from map(work, files)
+        return
+    from concurrent.futures import ThreadPoolExecutor
+
+    # A task per file costs more than most files take; four batches a thread keep them balanced.
+    batches = itertools.batched(files, max(1, min(64, len(files) // (jobs * 4))), strict=False)
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        for batch in pool.map(
+            lambda batch: [work(path) for path in batch], batches, buffersize=jobs
+        ):
+            yield from batch
 
 
 # --- Command implementations ---
 
-_SKIPPED_STRING_RULES = ("fstring-skipped", "tstring-skipped", "unchecked-query")
+_SKIPPED_STRING_RULES = ("fstring-skipped", "tstring-skipped", "unchecked-query", "dynamic-query")
 
 
 def _cmd_rewrite(args: argparse.Namespace) -> None:
@@ -376,7 +430,7 @@ def _cmd_rewrite(args: argparse.Namespace) -> None:
     from sqlty._lint import RULES
     from sqlty.core import check_source, rewrite_source
 
-    def transform(path: Path, original: str, settings: Settings) -> str:
+    def transform(path: Path, original: str, settings: Settings) -> tuple[str, list[str]]:
         rewritten = rewrite_source(
             original,
             dialect=settings.dialect,
@@ -385,16 +439,16 @@ def _cmd_rewrite(args: argparse.Namespace) -> None:
             untyped=settings.untyped,
             json_types=settings.json_types,
         )
-        if not args.quiet:
-            skipped_only = dict.fromkeys(RULES, "ignore") | {
-                rule: (settings.rules or {}).get(rule, RULES[rule].default_severity.value)
-                for rule in _SKIPPED_STRING_RULES
-            }
-            for diag in check_source(
-                original, import_style=settings.import_style, rules=skipped_only
-            ):
-                print(f"{path}:{diag['line']}: [{diag['rule']}] {diag['message']}", file=sys.stderr)
-        return rewritten
+        if args.quiet:
+            return rewritten, []
+        skipped_only = dict.fromkeys(RULES, "ignore") | {
+            rule: (settings.rules or {}).get(rule, RULES[rule].default_severity.value)
+            for rule in _SKIPPED_STRING_RULES
+        }
+        diagnostics = check_source(original, import_style=settings.import_style, rules=skipped_only)
+        return rewritten, [
+            f"{path}:{diag['line']}: [{diag['rule']}] {diag['message']}" for diag in diagnostics
+        ]
 
     _transform_files(args, transform, "rewrite", "Rewrote", "rewritten")
 
@@ -403,15 +457,15 @@ def _cmd_strip(args: argparse.Namespace) -> None:
     """Strip command: remove SQL[T](...) wrappers."""
     from sqlty.core import strip_source
 
-    def transform(path: Path, original: str, settings: Settings) -> str:
-        return strip_source(original, import_style=settings.import_style)
+    def transform(path: Path, original: str, settings: Settings) -> tuple[str, list[str]]:
+        return strip_source(original, import_style=settings.import_style), []
 
     _transform_files(args, transform, "strip", "Stripped", "stripped")
 
 
 def _transform_files(
     args: argparse.Namespace,
-    transform: Callable[[Path, str, Settings], str],
+    transform: Callable[[Path, str, Settings], tuple[str, list[str]]],
     verb: str,
     done: str,
     participle: str,
@@ -428,14 +482,20 @@ def _transform_files(
         logger.warning("No Python files found")
         return
 
+    texts = {path: read_source(path) for path in files}
+    unreadable = sum(text is None for text in texts.values())
+    sources = {path: text for path, text in texts.items() if text is not None}
+    settings = {path: resolver.for_file(path) for path in sources}
+    readable = list(sources)
+
+    def work(path: Path) -> tuple[str, list[str]]:
+        return transform(path, sources[path], settings[path])
+
     changed = 0
-    unreadable = 0
-    for path in files:
-        original = read_source(path)
-        if original is None:
-            unreadable += 1
-            continue
-        result = transform(path, original, resolver.for_file(path))
+    for path, (result, warnings) in zip(readable, _map(args, work, readable), strict=True):
+        for warning in warnings:
+            print(warning, file=sys.stderr)
+        original = sources[path]
         if result == original:
             continue
 
@@ -446,9 +506,9 @@ def _transform_files(
         elif args.diff:
             _print_diff(path, original, result)
         else:
-            path.write_text(result, encoding="utf-8")
+            write_source(path, result)
             if verb == "rewrite":
-                _format(path, resolver.for_file(path).format_command)
+                _format(path, settings[path].format_command)
             if args.verbose:
                 print(f"{done} {path}")
 
@@ -467,13 +527,24 @@ def read_source(path: Path) -> str | None:
     """The text of the Python file ``path``, or ``None``, logged, when it is not UTF-8.
 
     sqlty reads and writes sources as UTF-8, Python's default; a file in another
-    encoding is skipped rather than stopping the run.
+    encoding is skipped rather than stopping the run. A byte order mark is left out and
+    line endings read as ``\n``; `write_source` restores both.
     """
     try:
-        return path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8-sig")
     except UnicodeDecodeError as exc:
         logger.error("%s: not UTF-8 (%s at byte %d); skipped", path, exc.reason, exc.start)
         return None
+
+
+def write_source(path: Path, text: str) -> None:
+    """Write ``text`` over the Python file ``path`` with its byte order mark and line endings."""
+    raw = path.read_bytes()
+    path.write_text(
+        text,
+        encoding="utf-8-sig" if raw.startswith(codecs.BOM_UTF8) else "utf-8",
+        newline="\r\n" if raw.split(b"\n", 1)[0].endswith(b"\r") else "\n",
+    )
 
 
 def _format(path: Path, command: tuple[str, ...]) -> bool:
@@ -500,6 +571,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
     from collections import Counter
 
     from sqlty._config import ConfigError
+    from sqlty._helpers import configured_helpers
     from sqlty._source import ParsedSource
     from sqlty.core import HelperIndex, RowUsage, check_source, fix_source, query_statistics
 
@@ -531,17 +603,9 @@ def _cmd_check(args: argparse.Namespace) -> None:
     for path, parsed in sources.items():
         for name in modules[path]:
             helpers.add(name, parsed)
-    configured: dict[tuple[tuple[str, str, str | None], ...], HelperIndex] = {}
-
-    def helpers_for(settings: Settings) -> HelperIndex:
-        """The index for files governed by ``settings``: its own ``functions`` only."""
-        if not settings.functions:
-            return helpers
-        if settings.functions not in configured:
-            configured[settings.functions] = index = helpers.fork()
-            for import_path, query_param, return_param in settings.functions:
-                index.register(import_path, query_param, return_param)
-        return configured[settings.functions]
+    helpers_for = configured_helpers(
+        helpers, _checked_roots(args.paths, [resolver.resolve(path) for path in files])
+    )
 
     total_errors = 0
     total_warnings = 0
@@ -551,51 +615,61 @@ def _cmd_check(args: argparse.Namespace) -> None:
     row_usage = RowUsage()
     reports: list[tuple[Path, Diagnostic, ParsedSource]] = []
 
-    for path in files:
-        parsed = sources[path]
-        settings = resolver.for_file(path)
-        file_helpers = helpers_for(settings)
-        if args.fix:
-            fixed = fix_source(
-                parsed,
-                dialect=settings.dialect,
-                schema_sql=settings.schema,
-                import_style=settings.import_style,
-                untyped=settings.untyped,
-                rules=settings.rules,
-                json_types=settings.json_types,
-            )
-            if fixed != parsed.text:
-                path.write_text(fixed, encoding="utf-8")
-                if _format(path, settings.format_command):
-                    fixed = path.read_text(encoding="utf-8")
-                parsed = ParsedSource(fixed, parsed.module)
-                total_fixed += 1
-                if args.verbose:
-                    # JSON and annotations own stdout; progress goes to stderr then.
-                    text = args.output_format == "text"
-                    print(f"Fixed {path}", file=sys.stdout if text else sys.stderr)
+    settings = {path: resolver.for_file(path) for path in files}
+    file_helpers = {path: helpers_for(settings[path]) for path in files}
+
+    def fix(path: Path) -> str:
+        return fix_source(
+            sources[path],
+            dialect=settings[path].dialect,
+            schema_sql=settings[path].schema,
+            import_style=settings[path].import_style,
+            untyped=settings[path].untyped,
+            rules=settings[path].rules,
+            json_types=settings[path].json_types,
+            helpers=file_helpers[path],
+        )
+
+    if args.fix:
+        for path, fixed in zip(files, _map(args, fix, files), strict=True):
+            if fixed == sources[path].text:
+                continue
+            write_source(path, fixed)
+            if _format(path, settings[path].format_command):
+                fixed = path.read_text(encoding="utf-8-sig")
+            sources[path] = ParsedSource(fixed, sources[path].module)
+            total_fixed += 1
+            if args.verbose:
+                # JSON and annotations own stdout; progress goes to stderr then.
+                text = args.output_format == "text"
+                print(f"Fixed {path}", file=sys.stdout if text else sys.stderr)
+
+    def check(path: Path) -> tuple[list[Diagnostic], Counter[str]]:
         diagnostics = check_source(
-            parsed,
-            dialect=settings.dialect,
-            schema_sql=settings.schema,
-            rules=settings.rules,
-            import_style=settings.import_style,
-            untyped=settings.untyped,
-            helpers=file_helpers,
-            type_modules=settings.type_modules,
+            sources[path],
+            dialect=settings[path].dialect,
+            schema_sql=settings[path].schema,
+            rules=settings[path].rules,
+            import_style=settings[path].import_style,
+            untyped=settings[path].untyped,
+            helpers=file_helpers[path],
+            type_modules=settings[path].type_modules,
             row_usage=row_usage,
         )
-        if args.statistics:
-            statistics += query_statistics(
-                parsed,
-                dialect=settings.dialect,
-                schema_sql=settings.schema,
-                import_style=settings.import_style,
-                helpers=file_helpers,
-            )
+        if not args.statistics:
+            return diagnostics, Counter()
+        counts = query_statistics(
+            sources[path],
+            dialect=settings[path].dialect,
+            schema_sql=settings[path].schema,
+            import_style=settings[path].import_style,
+            helpers=file_helpers[path],
+        )
+        return diagnostics, counts
 
-        reports.extend((path, diag, parsed) for diag in diagnostics)
+    for path, (diagnostics, counts) in zip(files, _map(args, check, files), strict=True):
+        statistics += counts
+        reports.extend((path, diag, sources[path]) for diag in diagnostics)
 
     kept = {id(diag) for diag in row_usage.filter([diag for _, diag, _ in reports])}
     shown: list[dict[str, object]] = []
@@ -614,8 +688,8 @@ def _cmd_check(args: argparse.Namespace) -> None:
         elif not args.quiet:
             print(f"{path}:{diag.get('line', '')}: [{diag['rule']}] {diag['message']}")
             if args.explain and diag["rule"] in _EXPLAINED_RULES and "line" in diag:
-                settings = resolver.for_file(path)
-                for line in _explain(parsed, diag["line"], settings.dialect, settings.schema):
+                own = settings[path]
+                for line in _explain(parsed, diag["line"], own.dialect, own.schema):
                     print(line)
 
     if args.output_format == "json":
@@ -653,24 +727,37 @@ def github_annotation(path: Path, diag: Diagnostic) -> str:
     return f"::{level} {where},title={escape('sqlty ' + diag['rule'], property=True)}::{escape(diag['message'])}"
 
 
-def _cmd_skill(install: Path | None) -> None:
-    """Skill command: print the Agent Skill, or write it under ``install``."""
-    from importlib.resources import files
+def _cmd_skill(name: str, install: Path | None, list_skills: bool) -> None:
+    """Skill command: print one Agent Skill, list them, or write them all under ``install``."""
+    from sqlty._core import skills
 
-    skill = files("sqlty").joinpath("skill", "SKILL.md").read_text(encoding="utf-8")
-    if install is None:
-        print(skill, end="")
+    files = dict(skills())
+    if install is not None:
+        for path, text in files.items():
+            target = install / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
+            print(f"Wrote {target}")
         return
-    target = install / "sqlty" / "SKILL.md"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(skill, encoding="utf-8")
-    print(f"Wrote {target}")
+    names = {path.split("/")[0]: text for path, text in files.items() if path.endswith("/SKILL.md")}
+    if list_skills:
+        width = max(map(len, names))
+        for skill, text in names.items():
+            description = re.search(r"^description: (.*)$", text, re.M)
+            summary = description.group(1).split(". ")[0].rstrip(".") if description else ""
+            print(f"{skill:<{width}}  {summary}")
+        return
+    if name not in names:
+        logger.error("Unknown skill %r; run `sqlty skill --list` for the list", name)
+        sys.exit(EXIT_ERROR)
+    print(names[name], end="")
 
 
 # Diagnostics about the type of a query's rows, which `--explain` traces to inference rules.
 _EXPLAINED_RULES = frozenset(
     {
         "stale-type",
+        "narrow-type",
         "column-type-mismatch",
         "nullable-mismatch",
         "redundant-optional",
@@ -1043,6 +1130,22 @@ def _resolved_root(root: Path) -> Path | None:
     return root if root.is_dir() else None
 
 
+def _checked_roots(paths: Iterable[Path], files: Iterable[Path]) -> list[Path]:
+    """The checked directories, the parents of checked files and the package roots of ``files``.
+
+    Example:
+        >>> [root.name for root in _checked_roots([Path("/missing/q.py")], [])]
+        ['missing']
+    """
+    roots = [path if path.is_dir() else path.parent for path in paths]
+    for file in files:
+        directory = file.parent
+        for _ in _package_path(directory):
+            directory = directory.parent
+        roots.append(directory)
+    return list(dict.fromkeys(root.resolve() for root in roots))
+
+
 def _module_names(path: Path, roots: list[Path]) -> list[str]:
     """Dotted names the resolved ``path`` can be imported by, the likeliest first.
 
@@ -1071,6 +1174,8 @@ class Settings:
 
     dialect: str = "postgres"
     schema: Schema | None = None
+    schema_sql: str | None = None
+    types: dict[str, str] | None = None
     import_style: str | None = None
     untyped: bool = False
     json_types: str = "typing.Any"
@@ -1178,6 +1283,8 @@ class SettingsResolver:
             schema=None
             if schema_sql is None
             else self._schema(schema_sql, dialect, config.get("types")),
+            schema_sql=schema_sql,
+            types=config.get("types"),
             import_style=import_style,
             untyped=untyped == "sentinel",
             json_types=json_types,

@@ -40,6 +40,25 @@ def fetch_all[T](query: Annotated[LiteralString | sql.Composable, SQL], form: ty
 names = fetch_all(sql.SQL("SELECT id FROM users"), str)
 ```
 
+## A field that nothing fills
+
+`{}` and `{name}` are fields of `.format()`. Without it, psycopg sends them as they are,
+and the query does not parse.
+
+```python
+from typing import Annotated, LiteralString
+from psycopg import sql
+from sqlty import SQL
+
+def fetch_all[T](query: Annotated[LiteralString | sql.Composable, SQL], form: type[T], /) -> list[T]: ...
+
+# error: [unparsed-query] "query does not parse: Expected: identifier, found: { at Line: 1, Column: 18; `{}` is a `.format()` field: fill it with `sql.SQL(...).format(...)`, or pass a value as `%s`"
+fetch_all(sql.SQL("UPDATE users SET {} WHERE id = 1 RETURNING id"), int)
+# error: [unparsed-query] "query does not parse: Expected: an expression, found: { at Line: 1, Column: 35; `{name}` is a `.format()` field: fill it with `sql.SQL(...).format(...)`, or pass a value as `%s`"
+fetch_all(sql.SQL("SELECT id FROM users WHERE name = {name}"), int)
+fetch_all(sql.SQL("UPDATE users SET {} WHERE id = 1 RETURNING id").format(sql.SQL("name = 'x'")), int)
+```
+
 ## format() with identifiers, joins and placeholders
 
 ```python

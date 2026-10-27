@@ -1,0 +1,17 @@
+# Every dialect's conditional expressions.
+
+[[function]]
+id = "common.conditional.common"
+function = "COALESCE"
+type = "@first-known"
+nullability = "all-arguments"
+reference = "PostgreSQL 17 documentation, 9.18.2 COALESCE"
+reasoning = "The arguments resolve to one common type, the first known argument's. It skips NULL arguments, so it is NULL only when every argument is."
+
+[[function]]
+id = "common.conditional.nullif"
+function = "NULLIF"
+type = "@same(0)"
+nullability = "nullable"
+reference = "PostgreSQL 17 documentation, 9.18.3 NULLIF; MySQL 8.4 Reference Manual, 14.5 Flow Control Functions; SQLite documentation, Built-In Scalar SQL Functions"
+reasoning = "The result is the first argument or NULL, so it keeps its type and values. It is NULL for some non-null arguments too: no match, an index out of range or an empty array."

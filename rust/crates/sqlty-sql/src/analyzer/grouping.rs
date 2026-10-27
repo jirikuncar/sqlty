@@ -8,13 +8,18 @@
 
 use std::ops::ControlFlow;
 
-use sqlparser::ast::{Expr, GroupByExpr, Query, Select, SelectItem, Value, Visit, Visitor};
+use sqlparser::ast::{
+    Expr, GroupByExpr, Query, Select, SelectItem, SelectItemQualifiedWildcardKind, Value, Visit,
+    Visitor,
+};
 
 use super::dialect::SqlDialect;
 use super::functions::{function_name, positional_args};
+use super::names::object_name;
 use super::query::Analyzer;
 use super::registry::lookup;
-use super::scope::Scope;
+use super::scope::{any_merging_join, Scope, Source};
+use crate::catalog::fold;
 use crate::diagnostics::NameRule;
 
 impl Analyzer<'_> {
@@ -76,6 +81,20 @@ impl Analyzer<'_> {
             }
         }
         for item in &select.projection {
+            let star = match item {
+                // A merged column (`JOIN ... USING`) is either table's; not judged.
+                SelectItem::Wildcard(_) if any_merging_join(&select.from) => None,
+                SelectItem::Wildcard(_) => Some(None),
+                SelectItem::QualifiedWildcard(
+                    SelectItemQualifiedWildcardKind::ObjectName(name),
+                    _,
+                ) => Some(Some(object_name(name))),
+                _ => None,
+            };
+            if let Some(reference) = star {
+                self.check_star(&grouped, reference.as_deref(), scope);
+                continue;
+            }
             let (SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. }) = item
             else {
                 continue;
@@ -94,6 +113,38 @@ impl Analyzer<'_> {
         }
     }
 
+    /// Records `ungrouped-column` for each column `*` or `reference.*` selects that the
+    /// keys don't cover.
+    fn check_star(&self, grouped: &Grouped, reference: Option<&str>, scope: &Scope) {
+        for Source { reference, table } in Self::star_sources(reference, scope) {
+            let Some(table) = table.named() else {
+                continue;
+            };
+            let Some(columns) = self.schema.table(table) else {
+                continue;
+            };
+            if self.virtual_columns(table).is_some()
+                || self.groups_primary_key(grouped, &reference, table)
+            {
+                continue;
+            }
+            for column in columns.iter().filter(|column| !column.invisible) {
+                if !grouped.covers(&reference, &column.name) {
+                    self.record_ungrouped(&reference, &column.name);
+                }
+            }
+        }
+    }
+
+    fn record_ungrouped(&self, reference: &str, column: &str) {
+        self.diag.record(
+            NameRule::UngroupedColumn,
+            format!(
+                "column `{reference}.{column}` must appear in GROUP BY or be used in an aggregate function"
+            ),
+        );
+    }
+
     /// Whether the keys include every primary key column of the schema table `table`,
     /// read by `reference`.
     fn groups_primary_key(&self, grouped: &Grouped, reference: &str, table: &str) -> bool {
@@ -104,13 +155,15 @@ impl Analyzer<'_> {
             .iter()
             .filter(|column| column.primary_key)
             .peekable();
-        key.peek().is_some()
-            && key.all(|column| {
-                grouped
-                    .columns
-                    .iter()
-                    .any(|(r, c)| r == reference && *c == column.name)
-            })
+        key.peek().is_some() && key.all(|column| grouped.covers(reference, &column.name))
+    }
+}
+
+impl Grouped {
+    fn covers(&self, reference: &str, column: &str) -> bool {
+        self.columns
+            .iter()
+            .any(|(r, c)| r == reference && c == column)
     }
 }
 
@@ -163,6 +216,18 @@ impl Visitor for Ungrouped<'_, '_> {
             return ControlFlow::Continue(());
         }
         let Some((reference, table, column)) = self.analyzer.locate_column(expr, self.scope) else {
+            // A whole-row reference (`row_to_json(u)`) reads every column.
+            if let (Expr::Identifier(ident), Some(table)) =
+                (expr, self.analyzer.whole_row_table(expr, self.scope))
+            {
+                let reference = fold(ident, self.analyzer.dialect);
+                if !self
+                    .analyzer
+                    .groups_primary_key(self.grouped, &reference, table)
+                {
+                    self.analyzer.record_ungrouped(&reference, "*");
+                }
+            }
             return ControlFlow::Continue(());
         };
         // Outer columns of a correlated query are grouped, or not, by their own query.
@@ -175,21 +240,12 @@ impl Visitor for Ungrouped<'_, '_> {
         {
             return ControlFlow::Continue(());
         }
-        let covered = self
-            .grouped
-            .columns
-            .iter()
-            .any(|(r, c)| *r == reference && *c == column)
-            || self
+        if !self.grouped.covers(&reference, &column)
+            && !self
                 .analyzer
-                .groups_primary_key(self.grouped, &reference, &table);
-        if !covered {
-            self.analyzer.diag.record(
-                NameRule::UngroupedColumn,
-                format!(
-                    "column `{reference}.{column}` must appear in GROUP BY or be used in an aggregate function"
-                ),
-            );
+                .groups_primary_key(self.grouped, &reference, &table)
+        {
+            self.analyzer.record_ungrouped(&reference, &column);
         }
         ControlFlow::Continue(())
     }
@@ -203,7 +259,7 @@ impl Visitor for Ungrouped<'_, '_> {
 }
 
 /// Whether `expr` is a call of an aggregate function, not as a window function.
-fn is_aggregate_call(expr: &Expr) -> bool {
+pub(super) fn is_aggregate_call(expr: &Expr) -> bool {
     let Expr::Function(func) = expr else {
         return false;
     };

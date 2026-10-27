@@ -44,6 +44,37 @@ SELECT typname, typtype, typlen FROM pg_type
 -- inferred: tuple[str, str, int]
 ```
 
+### Views
+
+Every view of `pg_catalog` is known, generated from PostgreSQL 17 by
+`scripts/refresh_pg_catalog.py`. PostgreSQL does not record whether a view column can
+be NULL, so each one can.
+
+```sql
+SELECT l.pid, l.mode, l.granted, l.waitstart FROM pg_locks l
+-- inferred: tuple[int | None, str | None, bool | None, datetime.datetime | None]
+```
+
+```sql
+SELECT name, statement, parameter_types, prepare_time FROM pg_prepared_statements
+-- inferred: tuple[str | None, str | None, list[str] | None, datetime.datetime | None]
+```
+
+```sql
+SELECT relname, n_tup_ins, n_tup_upd FROM pg_stat_xact_user_tables
+-- inferred: tuple[str | None, int | None, int | None]
+```
+
+### Hash functions
+
+The hash support functions, which PostgreSQL does not document, are typed from the
+catalog: they bucket or shard rows.
+
+```sql
+SELECT hashtext('a'), hashtextextended('a', 0), hashint8extended(NULL, 0)
+-- inferred: tuple[int, int, int | None]
+```
+
 ## information_schema
 
 It is not on the search path: a bare `columns` is not the system view.

@@ -12,14 +12,34 @@ use sqlparser::ast::{
 use crate::analyzer::SqlDialect;
 
 use super::columns::{apply_check, mark_primary_key, nonnull_groups, raw_column};
-use super::loader::{AlterFail, Loader, RawTable, Rel, TypeDef};
-use super::names::{fold, key_of, parts};
+use super::loader::{AlterFail, Loader, RawTable, Rel, Taint, TypeDef};
+use super::names::{fold, parts};
 
 impl Loader {
     /// Returns `false` when the table (or a column it changes) is not defined yet.
     pub(super) fn alter_table(&mut self, alter: &AlterTable, path: &[String]) -> bool {
-        let Some(key) = self.table_key(&parts(&alter.name, self.dialect), path) else {
-            return alter.if_exists;
+        let name = parts(&alter.name, self.dialect);
+        let Some(key) = self.table_key(&name, path) else {
+            if self.lookup(&self.relations, &name, path).is_none() {
+                return alter.if_exists;
+            }
+            // A `CREATE TABLE ... AS` table holds its query's columns, not a column list.
+            let reshapes = alter.operations.iter().any(|op| {
+                matches!(
+                    op,
+                    AlterTableOperation::AddColumn { .. }
+                        | AlterTableOperation::DropColumn { .. }
+                        | AlterTableOperation::RenameColumn { .. }
+                        | AlterTableOperation::ChangeColumn { .. }
+                        | AlterTableOperation::ModifyColumn { .. }
+                        | AlterTableOperation::AlterColumn { .. }
+                        | AlterTableOperation::RenameTable { .. }
+                )
+            });
+            if reshapes {
+                self.taint(Taint::Relation, &name, path);
+            }
+            return true;
         };
         let Some(Rel::Table(root)) = self.relations.get(&key) else {
             return true;
@@ -28,6 +48,16 @@ impl Loader {
         let mut rename = None;
         let mut failed = None;
         for op in &alter.operations {
+            if let AlterTableOperation::AddConstraint {
+                constraint: TableConstraint::ForeignKey(fk),
+                not_valid,
+            } = op
+            {
+                if let Some(fk) = self.foreign_key(fk, &fk.columns, &key, &root, path, !not_valid) {
+                    root.foreign_keys.push(fk);
+                }
+                continue;
+            }
             if let Err(fail) = alter_op(&mut root, op, true, &mut rename, self.dialect) {
                 failed = Some(fail);
                 break;
@@ -74,7 +104,7 @@ impl Loader {
             let (schema, _) = key.split_once('.').unwrap_or(("public", ""));
             let new_key = match parts(&new_name, self.dialect).as_slice() {
                 [only] => format!("{schema}.{only}"),
-                other => key_of(other, self.dialect),
+                _ => self.new_key(&new_name, path),
             };
             self.cache = None;
             if let Some(table) = self.relations.remove(&key) {
@@ -259,7 +289,8 @@ pub(super) fn alter_op(
                 column.name = fold(new_column_name, dialect);
                 column.ident = match new_column_name.quote_style {
                     Some(_) => new_column_name.to_string(),
-                    None => column.name.clone(),
+                    None if dialect == SqlDialect::Postgres => column.name.clone(),
+                    None => new_column_name.value.clone(),
                 };
             }
             None => missing()?,
@@ -281,11 +312,19 @@ pub(super) fn alter_op(
                     table.columns[at].ty = data_type.clone();
                     table.columns[at].values = None;
                 }
-                AlterColumnOperation::SetDefault { .. }
-                | AlterColumnOperation::AddGenerated { .. } => {
+                AlterColumnOperation::SetDefault { value } => {
+                    table.columns[at].has_default = true;
+                    table.columns[at].default = Some(value.clone());
+                }
+                AlterColumnOperation::AddGenerated { .. } => {
                     table.columns[at].has_default = true;
                 }
-                AlterColumnOperation::DropDefault => table.columns[at].has_default = false,
+                // Also `DROP EXPRESSION`, read as `DROP DEFAULT`.
+                AlterColumnOperation::DropDefault => {
+                    table.columns[at].has_default = false;
+                    table.columns[at].default = None;
+                    table.columns[at].generated = None;
+                }
             }
         }
         AlterTableOperation::DropPrimaryKey { .. } => {
@@ -312,18 +351,43 @@ pub(super) fn alter_op(
                 .extend(nonnull_groups(&check.expr, dialect));
         }
         // The dropped constraint may be a `CHECK`, and constraints are not tracked by name.
-        AlterTableOperation::DropConstraint { .. } => {
+        AlterTableOperation::DropConstraint { name, .. } => {
             for column in &mut table.columns {
                 column.values = None;
             }
             table.nonnull_groups.clear();
+            drop_foreign_key(table, &fold(name, dialect));
         }
+        AlterTableOperation::DropForeignKey { name, .. } => {
+            drop_foreign_key(table, &fold(name, dialect));
+        }
+        AlterTableOperation::ValidateConstraint { name } => {
+            let name = fold(name, dialect);
+            for fk in &mut table.foreign_keys {
+                fk.validated |= fk.name.as_ref() == Some(&name);
+            }
+        }
+        AlterTableOperation::EnableRowLevelSecurity => table.row_security = true,
+        AlterTableOperation::DisableRowLevelSecurity => table.row_security = false,
         AlterTableOperation::SwapWith { .. } => return Err(AlterFail::Unsupported),
         // Storage, options, tablespace, triggers, RLS, partitions, comments and the like
         // never change a column.
         _ => {}
     }
     Ok(())
+}
+
+/// Drop the foreign key `name`. A key declared without a name has one the database
+/// generates, so a name that matches none may be it: those are dropped too.
+fn drop_foreign_key(table: &mut RawTable, name: &str) {
+    let named = table
+        .foreign_keys
+        .iter()
+        .any(|fk| fk.name.as_deref() == Some(name));
+    table.foreign_keys.retain(|fk| match &fk.name {
+        Some(own) => own != name,
+        None => named,
+    });
 }
 
 /// Whether an `ALTER TABLE` that sqlparser cannot read may change the table's columns,
@@ -336,7 +400,7 @@ pub(super) fn changes_columns(action: &[String], mentions_type: bool) -> bool {
             word(1),
             "constraint" | "primary" | "unique" | "check" | "foreign" | "exclude"
         ),
-        "rename" => word(1) != "constraint",
+        "rename" => !matches!(word(1), "constraint" | "index" | "key"),
         "alter" => mentions_type,
         "set" => word(1) == "schema",
         "of" => true,

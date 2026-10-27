@@ -101,7 +101,10 @@ know, and an expression it cannot type, such as arithmetic or `NULL`, make the
 row type unknown: the string is left as it is (`SQL[UNTYPED]` with
 [`untyped = "sentinel"`](untyped.md)) and `sqlty check` skips the column.
 Predicates are `bool`, `||` is `str`, and arithmetic on typed operands promotes to the
-wider type. In PostgreSQL, built-in functions such as `left`, `date_trunc`,
+wider type. MySQL converts each operand to a number first, as the server does:
+unsigned, `YEAR`, `BIT` and `BOOLEAN` values become integers, strings become doubles,
+so `text_col + 0` is `float`. SQLite converts a string or blob to an integer or a real,
+typed `float`, and reads a `BOOLEAN` as an integer. In PostgreSQL, built-in functions such as `left`, `date_trunc`,
 `greatest`, `unnest` and the advisory locks are typed too. In PostgreSQL, `CASE`,
 `COALESCE`, `GREATEST`, `LEAST`, `VALUES`, `ARRAY[...]` and `UNION` resolve one type
 for their inputs as the server does: string literals and `NULL` take the type of
@@ -122,7 +125,9 @@ is `tags`), the field of `(row).field`, a keyword such as `case` or `exists`, th
 target of a cast of an unnamed value (`1::int` is `int4`, `'a'::text` is `text`,
 `true::bool` is `bool`), else `?column?` (a plain `true` too). A `CASE` takes the name of its `ELSE`
 expression, if it has one. A `VALUES` list has the columns `column1`,
-`column2`, .... Alias columns that a row type matches by name.
+`column2`, ... (`column_0`, `column_1`, ... in MySQL). MySQL and SQLite name an unaliased expression by its text instead
+(`max(id)`, `1 + 1`), a column by its name, and MySQL a string literal by its value.
+Alias columns that a row type matches by name.
 
 A column that can be NULL is typed `T | None`; see
 [Nullability](schema-inference.md#nullability). Annotate the field of a
@@ -143,7 +148,7 @@ broken = "--sql\nSELEC id FROM users"
 # rewritten: broken = "--sql\nSELEC id FROM users"
 ```
 
-Queries that return rows of an unknown type (`VALUES`, unparseable `SELECT`)
+Queries that return rows of an unknown type, such as a `SELECT` that does not parse,
 are also left alone by default; see [Untyped queries](untyped.md) to mark them
 explicitly.
 
@@ -179,8 +184,10 @@ query = t"--sql\nSELECT id::INTEGER, name::TEXT FROM users WHERE id = {user_id}"
 `string.templatelib.Template` cannot be subclassed, so `SQLTemplate[T]` holds the
 template in `.template`: pass that to psycopg, or pass the query to the
 [psycopg helpers](psycopg.md), which run the template and type the rows as `T`.
-`sqlty check` checks it like `SQL[T]`: `stale-type`, and the row type checks of
-a named row type.
+`sqlty check` checks it like `SQL[T]`: `narrow-type` and `stale-type`, and the
+row type checks of a named row type. Each field's value is a parameter, so it is
+checked against its placeholder like a driver call's
+([`param-type-mismatch`](../reference/rules.md#param-type-mismatch)).
 
 ### Format specs
 
@@ -255,7 +262,8 @@ Per dialect, with the driver each follows and why some types differ, see
 | `SERIAL`, `SMALLSERIAL`, `BIGSERIAL` | `int` |
 | `ENUM` (MySQL), `CITEXT`, `NAME`, `BPCHAR`, `XML`, `MONEY`, `MACADDR`, `MACADDR8`, `TSVECTOR`, `TSQUERY` | `str` |
 | Arrays: `INT[]`, `INT[3]`, `INT ARRAY`, `INT ARRAY[3]`, `INT MULTISET` | `list[T]` with the element type mapped, `list[list[int]]` for `INT[][]` |
-| Anything else (`SET`, `POINT`, ranges, custom types, ...) | unknown: the row type is unknown |
+| `POINT`, `POLYGON` and the other geometric types | `str` (psycopg); `bytes` in MySQL |
+| Anything else (`SET`, ranges, custom types, ...) | unknown: the row type is unknown |
 
 ### Dialect notes
 
@@ -270,7 +278,7 @@ Per dialect, with the driver each follows and why some types differ, see
 - A `TEXT[]` column gives `list[str]`. Narrowing the element type by hand (a
   `list[str]` field for `list[int]`) is not reported: elements are not compared.
   A JSON column gives `Any`, which any field accepts, and any annotation
-  (`dict`, `list[str]`, a `TypedDict`) in `SQL[tuple[...]]` is not `stale-type`.
+  (`dict`, `list[str]`, a `TypedDict`) in `SQL[tuple[...]]` is not reported.
 - An array type needs an element type: `x::INT[]` is a `list[int]`, but a bare
   `x::ARRAY` is rejected and nothing is inferred. A fixed size must be an
   integer literal (`INT[3]`, not `INT[n]`); the size itself is ignored.
@@ -294,15 +302,16 @@ it.
 ### Edit in place
 
 Change the SQL inside the wrapper and run `sqlty check`. It reports
-[`stale-type`](../reference/rules.md#stale-type) when a `SQL[tuple[...]]` no
-longer matches the query, and the
+[`narrow-type`](../reference/rules.md#narrow-type) when a `SQL[tuple[...]]` no
+longer admits the rows of the query,
+[`stale-type`](../reference/rules.md#stale-type) when it is only wider than them, and the
 [row type rules](../reference/rules.md#row-type-rules) when a named
 [row type](row-types.md) no longer fits:
 
 ```python
 from sqlty import SQL
 
-# error: [stale-type] "SQL[tuple[int, str]] should be SQL[tuple[int, str, str]]"
+# error: [narrow-type] "SQL[tuple[int, str]] should be SQL[tuple[int, str, str]]"
 q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
 ```
 

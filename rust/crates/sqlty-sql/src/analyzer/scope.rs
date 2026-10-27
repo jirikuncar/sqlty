@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use sqlparser::ast::{
     DataType, Expr, Join, JoinConstraint, JoinOperator, JsonTableColumn, ObjectName, TableFactor,
-    TableWithJoins,
+    TableWithJoins, Value, XmlTableColumnOption,
 };
 
 use crate::catalog::{fold, FunctionReturn};
@@ -192,7 +192,7 @@ pub(super) fn any_merging_join(from: &[TableWithJoins]) -> bool {
     })
 }
 
-/// The name a relation is referred to by: its alias, else its table name.
+/// The name a relation is referred to by: its alias, else its table or function name.
 pub(super) fn relation_name(factor: &TableFactor) -> Option<String> {
     let alias = match factor {
         TableFactor::Table { name, alias, .. } => {
@@ -201,7 +201,25 @@ pub(super) fn relation_name(factor: &TableFactor) -> Option<String> {
                 |alias| alias.name.value.to_lowercase(),
             ))
         }
-        TableFactor::Derived { alias, .. } => alias.as_ref(),
+        TableFactor::Function { name, alias, .. } => {
+            return Some(alias.as_ref().map_or_else(
+                || function_name_of(name),
+                |alias| alias.name.value.to_lowercase(),
+            ))
+        }
+        TableFactor::UNNEST { alias, .. } => {
+            return Some(alias.as_ref().map_or_else(
+                || "unnest".to_string(),
+                |alias| alias.name.value.to_lowercase(),
+            ))
+        }
+        TableFactor::XmlTable { alias, .. } => {
+            return Some(alias.as_ref().map_or_else(
+                || "xmltable".to_string(),
+                |alias| alias.name.value.to_lowercase(),
+            ))
+        }
+        TableFactor::Derived { alias, .. } | TableFactor::JsonTable { alias, .. } => alias.as_ref(),
         _ => None,
     };
     alias.map(|alias| alias.name.value.to_lowercase())
@@ -247,7 +265,7 @@ pub(super) fn merges_columns(join: &Join) -> bool {
 }
 
 /// The constraint of a join, when its operator has one.
-fn join_constraint(join: &Join) -> Option<&JoinConstraint> {
+pub(super) fn join_constraint(join: &Join) -> Option<&JoinConstraint> {
     use JoinOperator::*;
     match &join.join_operator {
         Join(c)
@@ -536,6 +554,44 @@ impl<'a> Analyzer<'a> {
                 .collect::<Option<Vec<Column>>>()?;
             return Some((alias.name.value.to_lowercase(), columns));
         }
+        if let TableFactor::XmlTable { columns, alias, .. } = factor {
+            let mut columns: Vec<Column> = columns
+                .iter()
+                .map(|column| match &column.option {
+                    XmlTableColumnOption::NamedInfo {
+                        r#type,
+                        path,
+                        default,
+                        nullable,
+                    } => {
+                        // PostgreSQL's postfix `NOT NULL` makes the parser read `PATH 'p' NOT
+                        // NULL` as the path `'p' IS NOT NULL`.
+                        let not_null = !nullable
+                            || [path, default]
+                                .into_iter()
+                                .any(|option| matches!(option, Some(Expr::IsNotNull(_))));
+                        let constant_default = matches!(
+                            default,
+                            Some(Expr::Value(value)) if value.value != Value::Null
+                        );
+                        Column::from_typed(
+                            alias_name(&column.name, self.dialect),
+                            self.cast_typed(r#type),
+                            Nullability::declared(not_null || constant_default),
+                        )
+                    }
+                    XmlTableColumnOption::ForOrdinality => Column::from_typed(
+                        alias_name(&column.name, self.dialect),
+                        self.cast_typed(&DataType::Int(None)),
+                        Nullability::NonNull,
+                    ),
+                })
+                .collect();
+            if let Some(alias) = alias {
+                rename_columns(&mut columns, alias, self.dialect);
+            }
+            return Some((relation_name(factor)?, columns));
+        }
         let (TableFactor::Table {
             alias: Some(alias),
             args: Some(_),
@@ -586,15 +642,11 @@ impl<'a> Analyzer<'a> {
                     .virtuals
                     .get(&derived_table(factor))
                     .is_some_and(|columns| !columns.iter().any(Column::is_unknown_star)),
-                TableFactor::UNNEST { alias, .. } => self
-                    .virtuals
-                    .get(&format!(
-                        "({})",
-                        alias
-                            .as_ref()
-                            .map_or("unnest".to_string(), |a| a.name.value.to_lowercase())
-                    ))
-                    .is_some(),
+                TableFactor::UNNEST { .. }
+                | TableFactor::Function { .. }
+                | TableFactor::JsonTable { .. }
+                | TableFactor::XmlTable { .. } => relation_name(factor)
+                    .is_some_and(|name| self.virtuals.contains_key(&format!("({name})"))),
                 _ => false,
             })
     }
@@ -643,9 +695,10 @@ impl<'a> Analyzer<'a> {
                         self.schema.table(table).map(|columns| {
                             columns
                                 .iter()
+                                .filter(|col| !col.invisible)
                                 .map(|col| {
                                     Column::from_typed(
-                                        col.name.clone(),
+                                        col.output_name(),
                                         col.typed(self.dialect),
                                         Nullability::declared(col.not_null),
                                     )
@@ -677,7 +730,14 @@ impl<'a> Analyzer<'a> {
             .iter()
             .map(|table| self.schema.table(table.named()?))
             .collect::<Option<Vec<_>>>()?;
-        Some(columns.into_iter().flatten().cloned().collect())
+        Some(
+            columns
+                .into_iter()
+                .flatten()
+                .filter(|col| !col.invisible)
+                .cloned()
+                .collect(),
+        )
     }
 }
 
@@ -775,6 +835,14 @@ mod tests {
         assert_eq!(
             name("SELECT 1 FROM generate_series(1, 2)"),
             Some("generate_series".into())
+        );
+        assert_eq!(
+            name("SELECT 1 FROM unnest(ARRAY[1])").as_deref(),
+            Some("unnest")
+        );
+        assert_eq!(
+            name("SELECT 1 FROM JSON_TABLE('[]', '$' COLUMNS (a int PATH '$')) AS J").as_deref(),
+            Some("j")
         );
     }
 
@@ -909,8 +977,8 @@ mod tests {
             "SELECT * FROM pg_catalog.pg_tables",
             "SELECT tablename FROM pg_tables",
             "SELECT a.id, g FROM a, generate_series(1, 3) AS g",
-            "SELECT * FROM pg_get_keywords() AS k",
-            "SELECT k.word FROM pg_get_keywords() AS k",
+            "SELECT * FROM ST_Dump(NULL) AS d",
+            "SELECT d.path FROM ST_Dump(NULL) AS d",
             "SELECT * FROM a, LATERAL (SELECT a.id + 1 AS next) AS l",
             "SELECT * FROM missing",
             "SELECT * FROM missing AS m JOIN a ON true",

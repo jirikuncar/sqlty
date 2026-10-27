@@ -59,10 +59,11 @@ def _classify_class(
     node: ast.ClassDef,
     aliases: dict[str, str] | None = None,
     typeddicts: typing.Container[str] = (),
+    models: typing.Container[str] = (),
 ) -> str | None:
     """Classify a class as TypedDict, NamedTuple, dataclass, BaseModel or Protocol.
 
-    Subclasses of the names in ``typeddicts`` are TypedDicts too.
+    Subclasses of the names in ``typeddicts`` are TypedDicts too, and of ``models`` models.
     """
     aliases = aliases or {}
     for base in node.bases:
@@ -72,7 +73,7 @@ def _classify_class(
             return "TypedDict"
         if base_name == "NamedTuple":
             return "NamedTuple"
-        if base_name == "BaseModel":
+        if base_name == "BaseModel" or (isinstance(base, ast.Name) and base.id in models):
             return "BaseModel"
         if base_name == "Protocol":
             return "Protocol"
@@ -483,6 +484,7 @@ def _extract_fields_from_ast(
     *,
     total: bool = True,
     defaults_optional: bool = False,
+    kind: str = "",
 ) -> tuple[list[tuple[str, str]], frozenset[str]]:
     """Extract annotated fields as (name, type_str) pairs plus required names.
 
@@ -494,6 +496,8 @@ def _extract_fields_from_ast(
     required: set[str] = set()
     for item in node.body:
         if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+            if not _takes_column(item, item.target.id, kind, aliases or {}):
+                continue
             annotation, is_required = _unwrap_qualifiers_ast(item.annotation, aliases or {})
             fields.append((item.target.id, _normalize_type_str(ast.unparse(annotation))))
             if _metadata_has_default(item.annotation, aliases or {}):
@@ -504,6 +508,41 @@ def _extract_fields_from_ast(
             elif total if is_required is None else is_required:
                 required.add(item.target.id)
     return fields, frozenset(required)
+
+
+def _takes_column(item: ast.AnnAssign, name: str, kind: str, aliases: dict[str, str]) -> bool:
+    """Whether the class-body annotation ``item`` is a constructor argument, which a column fills.
+
+    A ``ClassVar`` is not, nor are a dataclass's ``KW_ONLY`` marker and ``field(init=False)``
+    fields, or a Pydantic model's private ``_attributes``.
+
+    Example:
+        >>> items = ast.parse("a: ClassVar[int]\\n_: KW_ONLY\\nb: int = field(init=False)\\nc: int").body
+        >>> [_takes_column(i, ast.unparse(i.target), "dataclass", {}) for i in items]
+        [False, False, False, True]
+    """
+    annotation = item.annotation
+    if _is_name(
+        annotation.value if isinstance(annotation, ast.Subscript) else annotation,
+        "ClassVar",
+        aliases,
+    ):
+        return False
+    if kind == "BaseModel":
+        return not name.startswith("_")
+    if kind != "dataclass":
+        return True
+    if _get_name(annotation) == "KW_ONLY":
+        return False
+    value = item.value
+    return not (
+        isinstance(value, ast.Call)
+        and _get_name(value.func) in ("field", "Field")
+        and any(
+            k.arg == "init" and isinstance(k.value, ast.Constant) and k.value.value is False
+            for k in value.keywords
+        )
+    )
 
 
 def _has_default(value: ast.expr | None) -> bool:
@@ -678,12 +717,14 @@ def _lax_fields(
     return frozenset(lax)
 
 
-def _allows_extra(node: ast.ClassDef, options: dict[str, ast.expr]) -> bool:
+def _allows_extra(
+    node: ast.ClassDef, options: dict[str, ast.expr], models: typing.Container[str] = ()
+) -> bool:
     """Whether a Pydantic model keeps undeclared columns: ``extra="allow"``, or a config not read.
 
     ``extra="ignore"`` (the default) drops them and ``extra="forbid"`` rejects them. A config
     sqlty cannot read from source (a ``model_config`` that is not a literal, ``**`` options, a
-    base other than ``BaseModel`` and ``Generic``) may allow them.
+    base other than ``BaseModel``, ``Generic`` and the ``models`` read from source) may allow them.
 
     Example:
         >>> cls = lambda src: ast.parse(src).body[0]
@@ -705,7 +746,9 @@ def _allows_extra(node: ast.ClassDef, options: dict[str, ast.expr]) -> bool:
         return True
     for base in node.bases:
         root = base.value if isinstance(base, ast.Subscript) else base
-        if _get_name(root) not in ("BaseModel", "Generic"):
+        if _get_name(root) not in ("BaseModel", "Generic") and not (
+            isinstance(root, ast.Name) and root.id in models
+        ):
             return True
     names = ("model_config", "__pydantic_config__")
     for item in node.body:
@@ -730,7 +773,7 @@ def _allows_extra(node: ast.ClassDef, options: dict[str, ast.expr]) -> bool:
     return False
 
 
-def _set_pydantic_names(info: TypeInfo, node: ast.ClassDef) -> None:
+def _set_pydantic_names(info: TypeInfo, nodes: list[ast.ClassDef], aliases: dict[str, str]) -> None:
     """Read validation aliases and the ``extra`` setting from the class source.
 
     A field is matched by its ``alias`` / ``validation_alias`` string (either
@@ -738,8 +781,9 @@ def _set_pydantic_names(info: TypeInfo, node: ast.ClassDef) -> None:
     ``AliasPath``, non-literal aliases and ``alias_generator`` leave the
     field's names unknown (``opaque``).
     """
-    options = _config_options(node)
-    info.allows_extra = _allows_extra(node, options)
+    options = {key: value for node in nodes for key, value in _config_options(node).items()}
+    models = {node.name for node in nodes}
+    info.allows_extra = any(_allows_extra(node, options, models) for node in nodes)
     by_name = _is_true(options.get("populate_by_name")) or _is_true(options.get("validate_by_name"))
     generated = "alias_generator" in options and not (
         isinstance(options["alias_generator"], ast.Constant)
@@ -747,10 +791,12 @@ def _set_pydantic_names(info: TypeInfo, node: ast.ClassDef) -> None:
     )
     columns: dict[str, str] = {}
     opaque: set[str] = set()
-    for item in node.body:
+    for item in (item for node in nodes for item in node.body):
         if not (isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)):
             continue
         name = item.target.id
+        if not _takes_column(item, name, "BaseModel", aliases):
+            continue
         calls = _field_calls(item.annotation, {})
         if isinstance(item.value, ast.Call) and _get_name(item.value.func) == "Field":
             calls.append(item.value)

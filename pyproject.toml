@@ -61,7 +61,8 @@ manifest-path = "rust/crates/sqlty-ext/Cargo.toml"
 # registers the lazy "sqlty" codec lookup (see docs/guide/magic-codec.md).
 # The path is relative to the project root (maturin >= 1.12.1): the wheel gets
 # it at the root (python-source prefix stripped), the sdist at src/.
-include = ["src/sqlty_magic.pth"]
+# The Agent Skills are compiled into the extension, so only the sdist needs them.
+include = ["src/sqlty_magic.pth", { path = "skills/**/*", format = "sdist" }]
 
 [dependency-groups]
 dev = [
@@ -86,6 +87,9 @@ duckdb = ["duckdb>=1.4.0"]
 psycopg = ["psycopg>=3.2.12"]
 fuzz = [
     "hypothesis>=6.140",
+]
+bench = [
+    "pytest-codspeed>=5.0.3",
 ]
 
 [tool.pytest.ini_options]

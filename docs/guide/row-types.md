@@ -42,6 +42,9 @@ d = SQL[UserModel]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 `# error:` lines sit above the line `sqlty check` reports on, warnings
 included; a bare `# error:` means it reports nothing.
 
+A row type defined later in the module can be named by a string, as a
+forward reference: `SQL["User"](...)` is checked as `SQL[User](...)`.
+
 !!! warning "Do not strip files with row types"
     `sqlty strip` turns `SQL[User](...)` back into a plain string, and the
     next `rewrite` writes `SQL[tuple[...]]`. Edit such files in place; see
@@ -51,7 +54,10 @@ included; a bare `# error:` means it reports nothing.
 
 `TypedDict`, `@dataclass` and Pydantic `BaseModel` fields are matched to
 columns by name, as psycopg's `dict_row`, `class_row` and `kwargs_row` pass
-them, so the order of fields and columns does not matter:
+them, so the order of fields and columns does not matter. A column's name is
+the one the database returns: MySQL and SQLite keep the case a column is
+declared with in `SELECT *`, and SQLite also for a column named in the select
+list, while PostgreSQL folds an unquoted name to lower case.
 
 1. Field count
    ([`column-count-mismatch`](../reference/rules.md#column-count-mismatch),
@@ -64,7 +70,11 @@ them, so the order of fields and columns does not matter:
    error).
 
 A field with a default, and a `NotRequired` key, may be missing from the
-query. A column without a field is an error: a TypedDict and a dataclass
+query. A `ClassVar`, a dataclass's `KW_ONLY` marker and `field(init=False)`
+fields, and a Pydantic model's private `_attributes` are not fields: the
+constructor takes no argument for them. A row type that extends one defined
+earlier in the module, or imported from a checked module, inherits its fields,
+and a model its `extra` setting. A column without a field is an error: a TypedDict and a dataclass
 reject it, and a Pydantic model drops it by default (`extra="ignore"`), so it is
 fetched for nothing. Only a model with `extra="allow"` keeps it.
 
@@ -280,7 +290,7 @@ the type, and `register_composite` then builds the class you give it. When a
 field of your row type is annotated with a row type (`NamedTuple`, dataclass,
 `TypedDict`, Pydantic model), `sqlty check` compares the composite's fields with
 it, as it compares query columns with a row type. Composite fields can always
-be NULL.
+be NULL. To read the fields as columns instead, select `(p).*`.
 
 ```toml
 [tool.sqlty]
@@ -501,8 +511,8 @@ c = SQL[Bad]("--sql\nSELECT id::INTEGER, clicks::INTEGER FROM pages")
 ```
 
 A rejected override keeps the base's openness, so the subclass's keys are
-still matched against the query. Only bases defined in the same file and
-spelled as bare names are checked, and types are compared only when the
+still matched against the query. Only bases spelled as bare names, defined in
+the same file or imported from a checked module, are checked, and types are compared only when the
 answer is certain (plain classes and unions of them, with `int` to `float`
 to `complex` promotion).
 

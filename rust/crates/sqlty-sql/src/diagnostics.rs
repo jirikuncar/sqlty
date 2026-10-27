@@ -24,13 +24,15 @@ pub enum NameRule {
     UnsupportedSyntax,
     /// An INSERT that leaves out a `NOT NULL` column without a default.
     InsertMissingColumn,
+    /// An INSERT whose rows have a different number of values than the columns it writes.
+    InsertValueCount,
     /// A column a grouped query selects without grouping by it or aggregating it.
     UngroupedColumn,
 }
 
 impl NameRule {
     /// Every rule, the one list the checker and the Python side read.
-    pub const ALL: [NameRule; 8] = [
+    pub const ALL: [NameRule; 9] = [
         NameRule::UnknownTable,
         NameRule::UnknownColumn,
         NameRule::AmbiguousColumn,
@@ -38,6 +40,7 @@ impl NameRule {
         NameRule::UnknownType,
         NameRule::UnsupportedSyntax,
         NameRule::InsertMissingColumn,
+        NameRule::InsertValueCount,
         NameRule::UngroupedColumn,
     ];
 
@@ -51,6 +54,7 @@ impl NameRule {
             NameRule::UnknownType => "unknown-type",
             NameRule::UnsupportedSyntax => "unsupported-syntax",
             NameRule::InsertMissingColumn => "insert-missing-column",
+            NameRule::InsertValueCount => "insert-value-count",
             NameRule::UngroupedColumn => "ungrouped-column",
         }
     }
@@ -144,6 +148,16 @@ impl Diagnostics {
         let mut inner = self.0.borrow_mut();
         inner.items.truncate(items);
         inner.explained = explained;
+    }
+
+    /// Drop what was recorded after `mark` under a rule `keep` rejects.
+    pub(crate) fn retain_since(&self, (items, _): (usize, usize), keep: impl Fn(NameRule) -> bool) {
+        let mut inner = self.0.borrow_mut();
+        let mut index = 0;
+        inner.items.retain(|item| {
+            index += 1;
+            index <= items || keep(item.rule)
+        });
     }
 
     /// Everything recorded so far, in order.
@@ -262,6 +276,7 @@ mod tests {
                 "unknown-type",
                 "unsupported-syntax",
                 "insert-missing-column",
+                "insert-value-count",
                 "ungrouped-column",
             ]
         );

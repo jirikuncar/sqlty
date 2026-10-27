@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.2"
 edition = "2021"
 description = "Rust engine of sqlty: SQL type inference and Python source rewriting"
 license = "MIT"
@@ -15,6 +15,7 @@ rust-version = "1.88"
 pyo3 = { version = "0.29", features = ["extension-module"] }
 sqlparser = { version = "0.63", features = ["visitor"] }
 regex = "1"
+recursive = "0.1"
 rustc-hash = "2"
 thiserror = "2"
 insta = "1.49"

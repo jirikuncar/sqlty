@@ -31,6 +31,7 @@ the Python packages sqlty depends on at runtime:
 | [PyO3](https://pyo3.rs) | The Python bindings of the Rust engine | MIT or Apache-2.0 |
 | [regex](https://github.com/rust-lang/regex) | Patterns in the source scanner and the SQL preprocessor | MIT or Apache-2.0 |
 | [rustc-hash](https://github.com/rust-lang/rustc-hash) | Hash maps of the schema catalog | MIT or Apache-2.0 |
+| [stacker](https://github.com/rust-lang/stacker), [recursive](https://github.com/orlp/recursive) | Stack for deeply nested expressions | MIT or Apache-2.0, MIT |
 | [thiserror](https://github.com/dtolnay/thiserror) | Error types | MIT or Apache-2.0 |
 | [serde](https://serde.rs), [toml](https://github.com/toml-rs/toml) | Reading the inference rules at build time | MIT or Apache-2.0 |
 | [pathspec](https://github.com/cpburnz/python-pathspec) | `.gitignore` and exclude patterns | MPL-2.0 |
@@ -51,6 +52,7 @@ the Python packages sqlty depends on at runtime:
 | [inline-snapshot](https://github.com/15r10nk/inline-snapshot) | Python snapshot tests | MIT |
 | [insta](https://insta.rs) | Rust snapshot tests | Apache-2.0 |
 | [Criterion.rs](https://github.com/bheisler/criterion.rs) | Engine benchmarks | MIT or Apache-2.0 |
+| [pytest-codspeed](https://github.com/CodSpeedHQ/pytest-codspeed) | Benchmarks CodSpeed measures on every commit | MIT |
 | [DuckDB](https://duckdb.org) | Checking DuckDB's value types | MIT |
 | [PyYAML](https://github.com/yaml/pyyaml) | Reading hook and workflow files in tests | MIT |
 | [Lean 4](https://lean-lang.org), [elan](https://github.com/leanprover/elan) | Proofs about the type mapping | Apache-2.0; elan MIT or Apache-2.0 |

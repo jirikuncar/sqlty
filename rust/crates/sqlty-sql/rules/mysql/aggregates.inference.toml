@@ -1,21 +1,49 @@
-# MySQL SUM.
+# MySQL aggregate functions.
 
 [[function]]
 id = "mysql.aggregate.sum-exact"
 function = "SUM"
 dialects = ["mysql"]
-argument = ["TINYINT", "SMALLINT", "MEDIUMINT", "INT", "BIGINT", "DECIMAL", "NUMERIC", "UTINYINT", "USMALLINT", "UMEDIUMINT", "UINT", "UBIGINT", "UDECIMAL"]
+argument = ["@integer", "DECIMAL", "NUMERIC", "@unsigned", "UDECIMAL", "YEAR", "BIT", "BOOLEAN", "@temporal"]
 type = "DECIMAL"
 nullability = "aggregate"
-reference = "MySQL 8.4 Reference Manual, 14.19.1 Aggregate Function Descriptions (The SUM() and AVG() functions return a DECIMAL value for exact-value arguments)"
-reasoning = "SUM of integers or decimals gives an exact DECIMAL."
+reference = "MySQL 8.4 Reference Manual, 14.19.1 Aggregate Function Descriptions (The SUM() and AVG() functions return a DECIMAL value for exact-value arguments (integer or DECIMAL); The SUM() and AVG() aggregate functions do not work with temporal values. (They convert the values to numbers, losing everything after the first nonnumeric character.))"
+reasoning = "SUM of integers or decimals gives an exact DECIMAL, and so does SUM of `YEAR`, `BIT`, `BOOLEAN` or temporal values, which it converts to integers."
 
 [[function]]
 id = "mysql.aggregate.sum-approximate"
 function = "SUM"
 dialects = ["mysql"]
-argument = ["FLOAT", "REAL", "DOUBLE", "UDOUBLE"]
+argument = ["FLOAT", "REAL", "DOUBLE", "UDOUBLE", "@text", "ENUM", "SET", "JSON"]
 type = "DOUBLE"
 nullability = "aggregate"
-reference = "MySQL 8.4 Reference Manual, 14.19.1 Aggregate Function Descriptions (a DOUBLE value for approximate-value arguments)"
-reasoning = "SUM of floating-point values gives a DOUBLE."
+reference = "MySQL 8.4 Reference Manual, 14.19.1 Aggregate Function Descriptions (a DOUBLE value for approximate-value arguments (FLOAT or DOUBLE)); 14.3 Type Conversion in Expression Evaluation (MySQL automatically converts strings to numbers as necessary)"
+reasoning = "SUM of floating-point values gives a DOUBLE, and so does SUM of strings, which it converts to doubles."
+
+[[function]]
+id = "mysql.aggregate.avg-approximate"
+function = "AVG"
+dialects = ["mysql"]
+argument = ["UDOUBLE", "@text", "ENUM", "SET", "JSON"]
+type = "DOUBLE"
+nullability = "aggregate"
+reference = "MySQL 8.4 Reference Manual, 14.19.1 Aggregate Function Descriptions (a DOUBLE value for approximate-value arguments (FLOAT or DOUBLE)); 14.3 Type Conversion in Expression Evaluation (MySQL automatically converts strings to numbers as necessary)"
+reasoning = "The mean of strings, which AVG converts to doubles, is a DOUBLE."
+
+[[function]]
+id = "mysql.aggregate.double"
+function = "STD"
+dialects = ["mysql"]
+type = "DOUBLE"
+nullability = "aggregate"
+reference = "MySQL 8.4 Reference Manual, 14.19.1 Aggregate Function Descriptions"
+reasoning = "The manual describes the function as returning a DOUBLE."
+
+[[function]]
+id = "mysql.aggregate.json"
+functions = ["JSON_ARRAYAGG", "JSON_OBJECTAGG"]
+dialects = ["mysql"]
+type = "JSON"
+nullability = "aggregate"
+reference = "MySQL 8.4 Reference Manual, 14.19.1 Aggregate Function Descriptions"
+reasoning = "The manual describes each of these as returning a JSON value."

@@ -108,7 +108,7 @@ The element type resolves through the enum or domain, also after a subscript.
 ```sql
 CREATE TYPE order_status AS ENUM ('pending', 'paid');
 CREATE DOMAIN short_text AS varchar(20);
-CREATE TABLE orders (id INTEGER PRIMARY KEY, history order_status[] NOT NULL, labels short_text[]);
+CREATE TABLE orders (id INTEGER PRIMARY KEY, status order_status NOT NULL, history order_status[] NOT NULL, labels short_text[]);
 ```
 
 ```sql
@@ -119,6 +119,40 @@ SELECT history, labels FROM orders
 ```sql
 SELECT history[1], labels[1] FROM orders
 -- inferred: tuple[typing.Literal['pending', 'paid'] | None, str | None]
+```
+
+An array a query builds of enum values lists the labels too:
+
+```sql
+SELECT ARRAY[status] AS a, ARRAY(SELECT status FROM orders) AS b, array_agg(status) AS c FROM orders GROUP BY status
+-- columns: a: list[typing.Literal['pending', 'paid']] (ARRAY<ORDER_STATUS>)
+-- columns: b: list[typing.Literal['pending', 'paid']] (ARRAY<ORDER_STATUS>)
+-- columns: c: list[typing.Literal['pending', 'paid']] (ARRAY<ORDER_STATUS>)
+```
+
+## Enum support functions
+
+`enum_first` and `enum_last` give the first and last label of the argument's
+type, and `enum_range` its labels in order. They read only the type of the
+argument, so a NULL still gives a value.
+
+`schema.sql`:
+
+```sql
+CREATE TYPE order_status AS ENUM ('pending', 'paid', 'shipped');
+CREATE TABLE orders (id INTEGER PRIMARY KEY, status order_status);
+```
+
+```sql
+SELECT enum_first(status) AS a, enum_last(NULL::order_status) AS b, enum_range(status) AS c, enum_range('paid'::order_status, NULL) AS d FROM orders
+-- columns: a: typing.Literal['pending', 'paid', 'shipped'] (ORDER_STATUS)
+-- columns: b: typing.Literal['pending', 'paid', 'shipped'] (ORDER_STATUS)
+-- columns: c: list[typing.Literal['pending', 'paid', 'shipped']] (ARRAY<ORDER_STATUS>)
+-- columns: d: list[typing.Literal['pending', 'paid', 'shipped']] (ARRAY<ORDER_STATUS>)
+-- rules: a: postgres.enum.bound / postgres.enum.bound
+-- rules: b: postgres.enum.bound / postgres.enum.bound
+-- rules: c: postgres.enum.range / postgres.enum.range
+-- rules: d: postgres.enum.range / postgres.enum.range
 ```
 
 ## Rewrite imports typing

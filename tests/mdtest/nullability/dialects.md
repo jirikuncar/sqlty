@@ -140,6 +140,36 @@ SELECT x / y, x % y, x / 2, x % 2, id + y FROM m
 -- inferred: tuple[decimal.Decimal | None, int | None, decimal.Decimal, int, int]
 ```
 
+## MySQL date arithmetic and casts to dates can be NULL
+
+MySQL gives NULL for a date moved out of its range (`DATE '9999-12-31' + INTERVAL 1 DAY`)
+and for a value that does not read as a date or time (`CAST('abc' AS DATE)`). A cast of a
+value that is already a date or time cannot fail.
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE e (d DATE NOT NULL, ts DATETIME NOT NULL, s VARCHAR(10) NOT NULL, n INT NOT NULL);
+```
+
+```sql
+SELECT d + INTERVAL 1 DAY AS a, ts - INTERVAL 1 HOUR AS b, TIMESTAMPADD(DAY, 1, d) AS c, CAST(s AS DATE) AS f, CAST(n AS YEAR) AS g, CONVERT(s, DATETIME) AS h, CAST(ts AS DATE) AS i, CAST(d AS DATETIME) AS j FROM e
+-- columns: a: datetime.date | None (DATE)
+-- columns: b: datetime.datetime | None (DATETIME)
+-- columns: c: datetime.date | None (DATE)
+-- columns: f: datetime.date | None (DATE)
+-- columns: g: int | None (YEAR)
+-- columns: h: datetime.datetime | None (DATETIME)
+-- columns: i: datetime.date (DATE)
+-- columns: j: datetime.datetime (DATETIME)
+```
+
 ## SQLite division and modulo by zero
 
 ```toml
@@ -157,6 +187,44 @@ CREATE TABLE m (id INTEGER NOT NULL PRIMARY KEY, x INTEGER NOT NULL, y INTEGER N
 ```sql
 SELECT x / y, x % y, x / 2, x % 2 FROM m
 -- inferred: tuple[int | None, int | None, int, int]
+```
+
+## Math functions outside their domain are NULL in MySQL and SQLite
+
+PostgreSQL raises an error for `sqrt(-1)` or `ln(0)`. MySQL and SQLite return NULL, so
+these calls are optional even for a NOT NULL argument. SQLite's `pow` is NULL where the
+result is not a number, such as `pow(-8, 0.5)`.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE m (x DOUBLE NOT NULL);
+```
+
+### MySQL
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+```
+
+```sql
+SELECT SQRT(x), LN(x), LOG(x), LOG(2, x), LOG2(x), LOG10(x), ACOS(x), ASIN(x), ATAN(x), POW(x, 2) FROM m
+-- inferred: tuple[float | None, float | None, float | None, float | None, float | None, float | None, float | None, float | None, float, float]
+```
+
+### SQLite
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+schema = "schema.sql"
+```
+
+```sql
+SELECT sqrt(x), ln(x), log(x), log(2, x), log2(x), log10(x), acos(x), asin(x), atan(x), pow(x, 2) FROM m
+-- inferred: tuple[float | None, float | None, float | None, float | None, float | None, float | None, float | None, float | None, float, float | None]
 ```
 
 ## SQLite: only an INTEGER PRIMARY KEY is never NULL
@@ -181,6 +249,7 @@ CREATE TABLE table_key (a INTEGER, b INTEGER, c INTEGER, PRIMARY KEY (a, b));
 CREATE TABLE single_key (a INTEGER, PRIMARY KEY (a));
 CREATE TABLE no_rowid (code TEXT PRIMARY KEY) WITHOUT ROWID;
 CREATE TABLE strict_key (code TEXT PRIMARY KEY) STRICT;
+CREATE TABLE both_options (code TEXT PRIMARY KEY, note TEXT) STRICT, WITHOUT ROWID;
 ```
 
 ```sql
@@ -218,6 +287,13 @@ SELECT a FROM single_key
 ```sql
 SELECT code FROM no_rowid
 -- inferred: tuple[str]
+```
+
+Both options may be given, separated by a comma.
+
+```sql
+SELECT * FROM both_options
+-- inferred: tuple[str, str | None]
 ```
 
 ```sql

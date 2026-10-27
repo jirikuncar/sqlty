@@ -26,7 +26,7 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
 ### Detects stale type
 
 ```python
-# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
+# error: [narrow-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
 q = SQL[tuple[str]]("--sql\nSELECT id::INTEGER FROM t")
 ```
 
@@ -35,6 +35,29 @@ q = SQL[tuple[str]]("--sql\nSELECT id::INTEGER FROM t")
 ```python
 q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM t")
 # error:
+```
+
+### Any spelling of a union
+
+`Optional[X]`, `Union[X, None]` and `None | X` are the `X | None` sqlty writes, and `tuple[X, ...]` admits a row of any length.
+
+```python
+from typing import Literal, Optional, Union
+
+a = SQL[tuple[Optional[int]]]("--sql\nSELECT NULLIF(1::INTEGER, 2)")
+b = SQL[tuple[Union[int, None]]]("--sql\nSELECT NULLIF(1::INTEGER, 2)")
+c = SQL[tuple[None | int]]("--sql\nSELECT NULLIF(1::INTEGER, 2)")
+e = SQL[tuple[Optional[Literal["a", "b"]]]]("--sql\nSELECT NULLIF('a', 'b')")
+# error:
+```
+
+```python
+from typing import Optional
+
+# error: [narrow-type] "SQL[tuple[Optional[str]]] should be SQL[tuple[int | None]]"
+a = SQL[tuple[Optional[str]]]("--sql\nSELECT NULLIF(1::INTEGER, 2)")
+# error: [stale-type] "SQL[tuple[int, ...]] should be SQL[tuple[int, int]]"
+b = SQL[tuple[int, ...]]("--sql\nSELECT 1::INTEGER, 2::INTEGER")
 ```
 
 ### Rule override ignore
@@ -392,8 +415,8 @@ CREATE TABLE users (id INT NOT NULL);
 ```
 
 ```python
+# error: [narrow-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
 # error: [select-star] "SELECT * used — expand to explicit column list"
-# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
 q = SQL[tuple[str]]("--sql\nselect * FROM users")
 ```
 
@@ -415,7 +438,7 @@ q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 ## Check_source detects stale type annotations
 
 ```python
-# error: [stale-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
+# error: [narrow-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
 q = SQL[tuple[str]]("--sql\nSELECT id::INTEGER FROM users")
 ```
 

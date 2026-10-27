@@ -60,6 +60,22 @@ names = fetch_all("SELECT name FROM users", str)
 rows = fetch_all("SELECT id, name FROM users", tuple[int, int])
 ```
 
+A `--sql` string passed with a row type is typed by it, so
+[`stale-rewrite`](../reference/rules.md#stale-rewrite) doesn't ask to wrap it in
+`SQL[T]`, and `sqlty check --fix` leaves it as it is. Without a row type it is
+still reported:
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def fetch_all[T](query: Annotated[LiteralString, SQL], form: type[T] | None = None, /) -> list[T]: ...
+
+names = fetch_all("--sql\nSELECT name FROM users", str)
+# error: [stale-rewrite]
+rows = fetch_all("--sql\nSELECT name FROM users")
+```
+
 A helper without such a parameter is still parsed, and `select-star` applies.
 Row types that are not known (a class from another module, `dict`) are not
 checked.
@@ -120,8 +136,10 @@ return-type-param = "form"
 ```
 
 `query-param` names the parameter that holds the query and `return-type-param`
-the one holding the row type. When `pkg.db` is among the checked paths, both are
-looked up in the definition, so calls may pass them by position; otherwise
+the one holding the row type. Both are read from the definition of `pkg.db`, so
+calls may pass them by position. sqlty reads `pkg/db.py` (or `pkg/db/__init__.py`)
+from the checked paths, the project directory's `src/` or the project directory
+itself, or sqlty's own `sys.path`, and never imports it. Without a definition,
 they are checked only when passed by keyword (`fetch_all(query="...", form=int)`).
 For an `@overload`ed helper, positions come from the implementation, or from the
 first overload naming both parameters when the implementation does not.

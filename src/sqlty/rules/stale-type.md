@@ -4,26 +4,32 @@ Default severity: **warn**
 
 ## What it does
 
-Flags `SQL[tuple[...]]` annotations that no longer match the query. An item
-that only parametrises an inferred generic (`list[str]` for `list`), or narrows
-an inferred `typing.Any` (a JSON column), is more precise than inference and is
-not flagged.
+Flags `SQL[tuple[...]]` annotations that admit every row the query returns but
+no longer match it: `str | None` for a column made `NOT NULL`, `object`, or `str`
+for a column of `Literal` values. An item that only parametrises an inferred
+generic (`list[str]` for `list`), or narrows an inferred `typing.Any` (a JSON
+column), is more precise than inference and is not flagged.
+
+An annotation that doesn't admit every row is
+[`narrow-type`](narrow-type.md) instead.
 
 ## Why is this bad?
 
-The SQL changed after the last rewrite, so the annotation describes rows the
-query no longer returns.
+The SQL or the schema changed after the last rewrite, so the annotation is wider
+than it needs to be. The code still works, but handles values, such as `None`,
+that never come.
 
 ## Example
 
 ```python
 from sqlty import SQL
 
-# error: [stale-type] "SQL[tuple[int]] should be SQL[tuple[int, str]]"
-q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# error: [stale-type] "SQL[tuple[int | None]] should be SQL[tuple[int]]"
+q = SQL[tuple[int | None]]("--sql\nSELECT id::INTEGER FROM users")
 ```
 
-User-defined row types are checked by the `column-*` rules instead.
+User-defined row types are checked by the `column-*` rules and
+`redundant-optional` instead.
 
 ## Fix
 
@@ -32,10 +38,10 @@ User-defined row types are checked by the `column-*` rules instead.
 ```python
 from sqlty import SQL
 
-q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+q = SQL[tuple[int | None]]("--sql\nSELECT id::INTEGER FROM users")
 # fixed: from sqlty import SQL
 # fixed:
-# fixed: q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# fixed: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 ```
 
 Parametrised generics that refine the inferred type are kept by `--fix`:

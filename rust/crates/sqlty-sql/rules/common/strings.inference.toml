@@ -1,0 +1,33 @@
+# Every dialect's string functions.
+
+[[function]]
+id = "common.string.int"
+functions = ["LENGTH", "POSITION", "CHAR_LENGTH", "BIT_LENGTH", "OCTET_LENGTH"]
+type = "INT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators, Table 9.10 Other String Functions and Operators; 9.5 Binary String Functions and Operators, Table 9.11 SQL Binary String Functions and Operators, Table 9.12 Other Binary String Functions; 9.6 Bit String Functions and Operators, Table 9.15 Bit String Functions; 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
+reasoning = "The documentation gives each of these an `integer` result."
+
+[[function]]
+id = "common.string.text"
+functions = ["UPPER", "LOWER", "TRIM", "REPLACE"]
+type = "TEXT"
+nullability = "strict"
+reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators, Table 9.10 Other String Functions and Operators"
+reasoning = "The documentation gives each of these a `text` result."
+
+[[function]]
+id = "common.string.text-non-null"
+function = "CONCAT"
+type = "TEXT"
+nullability = "non-null"
+reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators, Table 9.10 Other String Functions and Operators"
+reasoning = "The documentation gives each of these a `text` result. It skips NULL arguments, except in MySQL."
+
+[[function]]
+id = "common.string.formatted"
+functions = ["FORMAT", "CONCAT_WS"]
+type = "TEXT"
+nullability = "leading(1)"
+reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.10 Other String Functions and Operators (concat_ws, format); MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CONCAT_WS(), FORMAT()); SQLite documentation, Built-In Scalar SQL Functions (concat_ws(), format())"
+reasoning = "Every dialect returns text. Only a NULL first argument makes it NULL: it skips NULLs among the others."
