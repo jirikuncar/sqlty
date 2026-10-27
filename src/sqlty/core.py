@@ -11,7 +11,7 @@ needs the Python runtime; those passes live in ``sqlty._check``.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, NamedTuple
 
 from sqlty._check import RowUsage, apply_suppressions, is_any_row
@@ -389,10 +389,8 @@ def check_source(
     untyped: bool = False,
     helpers: HelperIndex | None = None,
     module: str | None = None,
-    type_modules: Iterable[str] | None = None,
     row_usage: RowUsage | None = None,
     query_variants: int | None = None,
-    pydantic_types: bool = False,
 ) -> list[Diagnostic]:
     """Check Python source for SQL type issues.
 
@@ -410,11 +408,11 @@ def check_source(
     (a ``HelperIndex``) and the ``module`` name of ``source``, which resolves
     relative imports. The same index resolves row type fields annotated with a
     type imported from another module of the index (``NewType``, ``Literal``
-    and ``type`` aliases, ``X = int``), read from its source and never imported.
-    Row type resolution executes only imports of the standard library, of
-    ``typing``, ``pydantic`` and the like, and of ``type_modules`` (module
-    names, submodules included); any other name is unknown, so no import of the
-    checked application runs.
+    and ``type`` aliases, ``X = int``, classes), read from its source and never imported.
+    Row types are read from source only: nothing of the checked code is imported or run.
+    Standard-library classes come from typeshed's class graph and Pydantic's types from a
+    table, so a ``TypedDict`` field ``EmailStr`` is a ``str`` and a model field ``AnyUrl``
+    takes the ``str`` it validates. Any other imported name is unknown.
 
     A ``# sqlty: ignore`` comment on a diagnostic's line drops it; ``# sqlty:
     ignore[rule-a, rule-b]`` drops only those rules. ``unused-ignore`` reports
@@ -436,10 +434,6 @@ def check_source(
     only names the lines that select one: ``(variant: line 11)``. A call with more variants
     is ``dynamic-query`` (``unchecked-query`` for a psycopg composition).
 
-    ``pydantic_types`` (the ``preview`` key) reads Pydantic's types from a static table, not
-    from pydantic: a ``TypedDict`` field ``EmailStr`` is a ``str``, and a model field
-    ``AnyUrl`` takes the ``str`` it validates.
-
     Example:
         >>> check_source('q = SQL[tuple[str]]("--sql\\nSELECT * FROM users")  # sqlty: ignore[select-star-no-schema]')
         []
@@ -460,10 +454,8 @@ def check_source(
         untyped=untyped,
         helpers=helpers,
         module=module or parsed.module,
-        type_modules=type_modules,
         row_usage=row_usage or (usage := RowUsage()),
         variants=query_variants,
-        pydantic_types=pydantic_types,
     )
     diagnostics = apply_suppressions(parsed, diagnostics, rules)
     return diagnostics if row_usage else usage.filter(diagnostics)
@@ -483,9 +475,7 @@ def breaking_source(
     untyped: bool = False,
     helpers: HelperIndex | None = None,
     module: str | None = None,
-    type_modules: Iterable[str] | None = None,
     query_variants: int | None = None,
-    pydantic_types: bool = False,
 ) -> list[Diagnostic]:
     """The diagnostics ``source`` gets against ``against_sql`` but not against its own
     ``schema_sql``: what a schema change breaks, as ``sqlty breaking`` reports it.
@@ -515,9 +505,7 @@ def breaking_source(
             untyped=untyped,
             helpers=helpers,
             module=module,
-            type_modules=type_modules,
             query_variants=query_variants,
-            pydantic_types=pydantic_types,
         )
 
     own = {(d.get("line"), d["rule"], d["message"]) for d in check(schema_sql)}

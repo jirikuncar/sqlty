@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import contextlib
 import typing
 
 from sqlty._source import ParsedSource
@@ -13,10 +14,12 @@ if typing.TYPE_CHECKING:
 
 
 class ModuleTypes:
-    """The aliases and ``NewType``s of a module, then the types it imports from checked modules.
+    """The aliases, ``NewType``s and classes of a module, then the types it imports from checked modules.
 
     Nothing is imported or evaluated: an imported name is resolved from the source of the
-    module that defines it, in that module's own names.
+    module that defines it, in that module's own names. A class is a stand-in deriving
+    from what its bases resolve to, so ``class Email(str)`` fits a ``str`` field and an
+    ``int`` column doesn't fit an ``Email`` one; with a base that is unknown, it is unknown.
 
     Example:
         >>> from sqlty._helpers import HelperIndex
@@ -43,6 +46,8 @@ class ModuleTypes:
     def get(self, name: str, /) -> ast.expr | typing.Any:
         if isinstance(found := self.local.get(name), ast.Assign):
             return self._newtype(name, typing.cast(ast.Call, found.value).args[1])
+        if isinstance(found, ast.ClassDef):
+            return self._class(found)
         if found is not None:
             return found
         if self.helpers is None:
@@ -63,3 +68,20 @@ class ModuleTypes:
                 self._newtypes[name] = new_type(name, base)
                 self._newtypes[name].__module__ = self.module
         return self._newtypes[name]
+
+    def _class(self, node: ast.ClassDef) -> type | None:
+        """The stand-in for class ``node``, built once, ``None`` when a base is unknown."""
+        if node.name not in self._newtypes:
+            # A class deriving from itself, through other classes, is unknown.
+            self._newtypes[node.name] = None
+            parsed = self.parsed
+            bases = [
+                _ast_type(base, parsed.typing_aliases, self, parsed.imported_names)
+                for base in node.bases
+            ]
+            if all(isinstance(base, type) for base in bases):
+                namespace = {"__module__": self.module, "__qualname__": node.name}
+                # Bases Python can't combine, such as `int` and `str`, leave it unknown.
+                with contextlib.suppress(TypeError):
+                    self._newtypes[node.name] = type(node.name, tuple(bases), namespace)
+        return typing.cast("type | None", self._newtypes[node.name])

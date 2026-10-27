@@ -324,13 +324,32 @@ def test_unparseable_schema_view_is_reported(tmp_path, monkeypatch, caplog) -> N
     ]
 
 
-def test_type_modules_config_reaches_the_resolver(tmp_path) -> None:
-    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\ntype-modules = ["app", "lib.types"]\n')
-    args = build_parser().parse_args(["check", str(tmp_path)])
+def test_check_never_imports_the_checked_modules(tmp_path, monkeypatch, capsys) -> None:
+    """A module that writes a file when imported is read from source, and the key that
+    allowed importing one is rejected."""
+    marker = tmp_path / "marker"
+    (tmp_path / "ids.py").write_text(
+        f"import pathlib\npathlib.Path({str(marker)!r}).write_text('imported')\n"
+        "from typing import NewType\nUserId = NewType('UserId', int)\n"
+    )
+    (tmp_path / "app.py").write_text(
+        "from typing import TypedDict\nfrom ids import UserId\nfrom sqlty import SQL\n\n"
+        "class User(TypedDict):\n    id: UserId\n\n"
+        'q = SQL[User]("--sql\\nSELECT id::TEXT FROM users")\n'
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.syspath_prepend(str(tmp_path))
 
-    settings = SettingsResolver(args).for_file(tmp_path / "q.py")
+    with pytest.raises(SystemExit):
+        main(["check", "."])
+    assert "User.id is UserId but query column 'id' infers str" in capsys.readouterr().out
+    assert not marker.exists()
 
-    assert settings.type_modules == ("app", "lib.types")
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\ntype-modules = ["ids"]\n')
+    with pytest.raises(SystemExit):
+        main(["check", "."])
+    assert "unknown key 'type-modules' in [tool.sqlty]: removed" in capsys.readouterr().err
+    assert not marker.exists()
 
 
 def test_configured_functions_apply_to_their_own_project(tmp_path, monkeypatch, capsys) -> None:

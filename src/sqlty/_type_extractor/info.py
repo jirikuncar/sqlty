@@ -40,12 +40,9 @@ class TypeInfo:
         "name",
         "fields",
         "kind",
-        "resolved_hints",
-        "declared_hints",
         "required",
         "closed",
         "extra_items",
-        "extra_items_hint",
         "extra_items_readonly",
         "extra_items_type",
         "field_types",
@@ -67,25 +64,20 @@ class TypeInfo:
         name: str,
         fields: list[tuple[str, str]],
         kind: str,
-        resolved_hints: dict[str, type] | None = None,
         *,
         required: frozenset[str] | None = None,
         closed: bool = False,
         extra_items: str | None = None,
-        extra_items_hint: type | None = None,
     ) -> None:
         self.name = name
         self.fields = fields  # [(field_name, field_type_str), ...] — AST fallback
         self.kind = kind  # "TypedDict", "NamedTuple", "dataclass", "BaseModel", "Protocol"
-        self.resolved_hints = resolved_hints  # {field_name: type_object} — runtime
         self.required = frozenset(n for n, _ in fields) if required is None else required
         self.closed = closed
         self.extra_items = extra_items
-        self.extra_items_hint = extra_items_hint
         self.extra_items_readonly = False
         self.extra_items_type: typing.Any = None
         self.field_types: dict[str, typing.Any] = {}
-        self.declared_hints: dict[str, typing.Any] = {}  # runtime hints, ``| None`` kept
         self.owner = name
         self.lineno = 0
         self.bases: list[str] = []

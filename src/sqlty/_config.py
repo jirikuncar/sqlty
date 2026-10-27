@@ -20,7 +20,6 @@ TOOL_KEYS = (
     "untyped",
     "json-types",
     "param-types",
-    "type-modules",
     "preview",
     "max-query-variants",
     "functions",
@@ -28,6 +27,11 @@ TOOL_KEYS = (
     "format-command",
 )
 """Keys of ``[tool.sqlty]`` that are not file discovery; see also ``DISCOVERY_KEYS``."""
+
+REMOVED_KEYS = {
+    "type-modules": "removed, since `check` reads row types from source and never imports a module",
+}
+"""Keys of ``[tool.sqlty]`` that sqlty no longer reads, with why."""
 
 DISCOVERY_KEYS = ("exclude", "extend-exclude", "respect-gitignore")
 """``[tool.sqlty]`` keys that pick the files to process."""
@@ -103,17 +107,11 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "`rewrite`, `check --fix`",
         "Whether `SQL[R]` calls get the type of their parameters, `SQL[R, P]`",
     ),
-    "type-modules": KeyDoc(
-        "list of strings",
-        "`[]`",
-        "`check`",
-        "Modules `check` may import to resolve row type fields",
-    ),
     "preview": KeyDoc(
         "boolean",
         "`false`",
         "`check`",
-        "Turn on features still in preview: query variants, Pydantic types",
+        "Turn on features still in preview: query variants",
     ),
     "max-query-variants": KeyDoc(
         "positive integer",
@@ -260,6 +258,8 @@ def validate_tool_table(table: dict[str, Any], source: str) -> None:
 
     keys = (*TOOL_KEYS, *DISCOVERY_KEYS)
     for key in table:
+        if key in REMOVED_KEYS:
+            raise ConfigError(f"{source}: unknown key {key!r} in [tool.sqlty]: {REMOVED_KEYS[key]}")
         if key not in keys:
             raise ConfigError(
                 f"{source}: unknown key {key!r} in [tool.sqlty]{_suggest(key, keys)}; "
@@ -388,7 +388,6 @@ class SQLTyConfig(TypedDict, total=False):
         schema = "schema.sql"
         import-style = "from sqlty import SQL"
         untyped = "sentinel"
-        type-modules = ["myapp.types"]
         extend-exclude = ["migrations"]
 
         [tool.sqlty.rules]
@@ -410,8 +409,7 @@ class SQLTyConfig(TypedDict, total=False):
         str  # "typing.Any" (default) or "typing.TypedDict": generated TypedDicts for JSON columns
     )
     param_types: bool  # write the P of SQL[R, P]: a tuple, or a generated TypedDict
-    type_modules: list[str]  # modules whose imports may run to resolve row types
-    preview: bool  # features still in preview: query variants, Pydantic types
+    preview: bool  # features still in preview: query variants
     max_query_variants: int  # the most variants of a query built in branches that check checks
     exclude: list[str]  # globs replacing the default excludes, relative to pyproject.toml
     extend_exclude: list[str]  # globs excluded in addition to the above
@@ -668,12 +666,6 @@ def _parse_table(tool_config: dict[str, Any], source: str) -> SQLTyConfig:
 
     if "max-query-variants" in tool_config:
         config["max_query_variants"] = int(tool_config["max-query-variants"])
-
-    if "type-modules" in tool_config:
-        modules = tool_config["type-modules"]
-        config["type_modules"] = (
-            [str(m) for m in modules] if isinstance(modules, list) else [str(modules)]
-        )
 
     # Parse function configurations
     if "functions" in tool_config and isinstance(tool_config["functions"], list):

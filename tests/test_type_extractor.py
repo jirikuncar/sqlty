@@ -1,7 +1,6 @@
 """Unit tests for _type_extractor module."""
 
 import ast
-import contextlib
 import datetime
 import sys
 import typing
@@ -9,10 +8,10 @@ import uuid
 import warnings
 from collections.abc import Sequence
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
+from sqlty._config import ConfigError, validate_tool_table
 from sqlty._type_extractor import (
     TypeInfo,
     check_type_compatibility,
@@ -25,16 +24,6 @@ from sqlty._type_extractor.subtype import _consistent, _erase, _is_subtype
 from sqlty.core import check_source
 
 TYPING = "typing" if sys.version_info >= (3, 15) else "typing_extensions"
-
-
-def extract(source: str, *, runtime: bool) -> dict[str, TypeInfo]:
-    """Extract types, without runtime resolution (the AST fallback) when ``runtime`` is false."""
-    with (
-        contextlib.nullcontext()
-        if runtime
-        else mock.patch("sqlty._type_extractor.extract._resolve_class", return_value=None)
-    ):
-        return extract_type_definitions(source)
 
 
 class TestParseTupleAnnotation:
@@ -276,11 +265,11 @@ class Item:
         assert types["Item"].kind == "dataclass"
 
 
-class TestRuntimeResolution:
-    """Tests for runtime type resolution via get_type_hints()."""
+class TestFieldTypes:
+    """Field annotations resolve to ``typing`` objects, read from source."""
 
-    def test_resolved_hints_available(self):
-        """TypedDict should have resolved_hints with actual type objects."""
+    def test_field_types_available(self):
+        """A TypedDict's fields resolve to the builtin classes."""
         source = """
 from typing import TypedDict
 
@@ -290,9 +279,7 @@ class User(TypedDict):
 """
         types = extract_type_definitions(source)
         user = types["User"]
-        assert user.resolved_hints is not None
-        assert user.resolved_hints["id"] is int
-        assert user.resolved_hints["name"] is str
+        assert user.field_types == {"id": int, "name": str}
 
     def test_datetime_resolved(self):
         """datetime.datetime annotation resolves to actual datetime class."""
@@ -307,9 +294,8 @@ class Event(TypedDict):
 """
         types = extract_type_definitions(source)
         event = types["Event"]
-        assert event.resolved_hints is not None
-        assert event.resolved_hints["created_at"] is datetime.datetime
-        assert event.resolved_hints["event_date"] is datetime.date
+        assert event.field_types["created_at"] is datetime.datetime
+        assert event.field_types["event_date"] is datetime.date
 
     def test_uuid_resolved(self):
         """uuid.UUID annotation resolves to actual UUID class."""
@@ -322,11 +308,10 @@ class Token(TypedDict):
 """
         types = extract_type_definitions(source)
         token = types["Token"]
-        assert token.resolved_hints is not None
-        assert token.resolved_hints["token_id"] is uuid.UUID
+        assert token.field_types["token_id"] is uuid.UUID
 
-    def test_optional_unwrapped(self):
-        """Optional[int] and int | None resolve to int (unwrapped)."""
+    def test_optional_kept(self):
+        """``int | None`` keeps its ``None``; the compatibility check unwraps it."""
         source = """
 from typing import TypedDict
 
@@ -336,9 +321,8 @@ class User(TypedDict):
 """
         types = extract_type_definitions(source)
         user = types["User"]
-        assert user.resolved_hints is not None
-        assert user.resolved_hints["id"] is int
-        assert user.resolved_hints["name"] is str
+        assert user.field_types == {"id": int | None, "name": str}
+        assert check_type_compatibility(user, "id", "int")
 
     def test_from_datetime_import(self):
         """'from datetime import datetime' resolves correctly.
@@ -356,14 +340,10 @@ class Event(TypedDict):
 """
         types = extract_type_definitions(source)
         event = types["Event"]
-        assert event.resolved_hints is not None
-        # Runtime resolution gives us the actual datetime class
-        import datetime as dt
-
-        assert event.resolved_hints["created_at"] is dt.datetime
+        assert event.field_types["created_at"] is datetime.datetime
 
     def test_dataclass_resolved(self):
-        """Dataclass fields are resolved at runtime."""
+        """Dataclass fields are resolved."""
         source = """
 from dataclasses import dataclass
 
@@ -375,13 +355,10 @@ class Product:
 """
         types = extract_type_definitions(source)
         product = types["Product"]
-        assert product.resolved_hints is not None
-        assert product.resolved_hints["id"] is int
-        assert product.resolved_hints["name"] is str
-        assert product.resolved_hints["price"] is float
+        assert product.field_types == {"id": int, "name": str, "price": float}
 
     def test_namedtuple_resolved(self):
-        """NamedTuple fields are resolved at runtime."""
+        """NamedTuple fields are resolved."""
         source = """
 from typing import NamedTuple
 
@@ -391,13 +368,11 @@ class Row(NamedTuple):
 """
         types = extract_type_definitions(source)
         row = types["Row"]
-        assert row.resolved_hints is not None
-        assert row.resolved_hints["id"] is int
-        assert row.resolved_hints["name"] is str
+        assert row.field_types == {"id": int, "name": str}
 
 
 class TestCheckTypeCompatibility:
-    """Tests for check_type_compatibility using runtime types."""
+    """Tests for check_type_compatibility using resolved types."""
 
     def _make_type_info(self, source: str, name: str) -> TypeInfo:
         types = extract_type_definitions(source)
@@ -488,7 +463,7 @@ class User(TypedDict):
 
 
 class TestTypedDictQualifiers:
-    """Qualifiers and PEP 728 metadata, via runtime and AST fallback."""
+    """Qualifiers and PEP 728 metadata."""
 
     SOURCE = """\
 {imports}
@@ -517,14 +492,12 @@ class Reopened(Extra, closed=False):
     pass
 """
 
-    def _extract(self, runtime: bool) -> dict[str, TypeInfo]:
-        return extract(self.SOURCE.format(imports="", typing=TYPING), runtime=runtime)
+    def _extract(self) -> dict[str, TypeInfo]:
+        return extract_type_definitions(self.SOURCE.format(imports="", typing=TYPING))
 
-    @pytest.mark.parametrize("runtime", [True, False])
-    def test_runtime_and_ast_agree(self, runtime: bool):
-        types = self._extract(runtime)
+    def test_keys_and_openness(self):
+        types = self._extract()
         row, extra = types["Row"], types["Extra"]
-        assert (row.resolved_hints is not None) is runtime
         assert row.fields == [("id", "int"), ("note", "str")]
         assert row.required == {"id"}
         assert row.closed and row.keyed and row.extra_items is None
@@ -533,30 +506,25 @@ class Reopened(Extra, closed=False):
         assert not check_type_compatibility(extra, "ratio", "float")
 
     def test_extra_items_never_is_closed(self):
-        for runtime in (True, False):
-            sealed = self._extract(runtime)["Sealed"]
-            assert sealed.closed and sealed.extra_items is None
-            assert sealed.extra_items_hint is None
+        sealed = self._extract()["Sealed"]
+        assert sealed.closed and sealed.extra_items is None
+        assert sealed.extra_items_type is None
 
     def test_subclasses_inherit_keys_and_closedness(self):
-        for runtime in (True, False):
-            types = self._extract(runtime)
-            for name in ("Child", "GrandChild"):
-                child = types[name]
-                assert child.fields == [("id", "int"), ("note", "str")]
-                assert child.required == {"id", "note"}, name
-                assert child.closed and child.extra_items is None
-            extra_child = types["ExtraChild"]
-            assert extra_child.extra_items == "int" and not extra_child.closed
-            assert not check_type_compatibility(extra_child, "ratio", "float")
+        types = self._extract()
+        for name in ("Child", "GrandChild"):
+            child = types[name]
+            assert child.fields == [("id", "int"), ("note", "str")]
+            assert child.required == {"id", "note"}, name
+            assert child.closed and child.extra_items is None
+        extra_child = types["ExtraChild"]
+        assert extra_child.extra_items == "int" and not extra_child.closed
+        assert not check_type_compatibility(extra_child, "ratio", "float")
 
     def test_closed_false_cannot_reopen_base(self):
-        for runtime in (True, False):
-            reopened = self._extract(runtime)["Reopened"]
-            assert reopened.extra_items == "int" and not reopened.closed
-            assert reopened.errors == [
-                "Reopened cannot set closed=False: base Extra has extra_items"
-            ]
+        reopened = self._extract()["Reopened"]
+        assert reopened.extra_items == "int" and not reopened.closed
+        assert reopened.errors == ["Reopened cannot set closed=False: base Extra has extra_items"]
 
 
 INHERITANCE_SOURCE = """\
@@ -599,7 +567,7 @@ class Narrows(Scores, extra_items=bool):
 
 
 class TestTypedDictInheritance:
-    """PEP 728 inheritance errors and openness fallback, via runtime and AST."""
+    """PEP 728 inheritance errors and openness fallback."""
 
     CASES: typing.ClassVar = {
         "AddsKey": ["AddsKey cannot add key 'name' to closed base Closed"],
@@ -616,16 +584,13 @@ class TestTypedDictInheritance:
         "Narrows": [],
     }
 
-    @pytest.mark.parametrize("runtime", [True, False])
     @pytest.mark.parametrize("name", list(CASES))
-    def test_errors(self, name: str, runtime: bool):
-        types = extract(INHERITANCE_SOURCE.format(imports="", typing=TYPING), runtime=runtime)
-        assert (types[name].resolved_hints is not None) is runtime
+    def test_errors(self, name: str):
+        types = extract_type_definitions(INHERITANCE_SOURCE.format(imports="", typing=TYPING))
         assert types[name].errors == self.CASES[name]
 
-    @pytest.mark.parametrize("runtime", [True, False])
-    def test_rejected_override_keeps_base_openness(self, runtime: bool):
-        types = extract(INHERITANCE_SOURCE.format(imports="", typing=TYPING), runtime=runtime)
+    def test_rejected_override_keeps_base_openness(self):
+        types = extract_type_definitions(INHERITANCE_SOURCE.format(imports="", typing=TYPING))
         widens, seals, retypes = types["Widens"], types["Seals"], types["Retypes"]
         assert widens.closed and widens.extra_items is None and widens.owner == "Closed"
         for info in (seals, retypes):
@@ -768,10 +733,13 @@ class Row(TypedDict):
     missing: Undefined
 """
     row = extract_type_definitions(src)["Row"]
-    assert row.resolved_hints == {
-        "name": str,
+    assert row.field_types == {
+        "id": None,
+        "name": str | None,
         "created_at": datetime.datetime,
         "born": datetime.datetime,
+        "other": None,
+        "missing": None,
     }
     assert check_type_compatibility(row, "id", "int")
     assert check_type_compatibility(row, "missing", "int")
@@ -805,10 +773,12 @@ def test_application_imports_are_not_executed(marker_module) -> None:
     assert not marker_module.exists()
 
 
-def test_type_modules_allow_imports(marker_module) -> None:
-    diagnostics = check_source(MARKER_SOURCE, type_modules=["marker_app_ids"])
-    assert marker_module.exists()
-    assert [d["rule"] for d in diagnostics] == ["column-type-mismatch"]
+def test_type_modules_allow_imports() -> None:
+    """``type-modules`` is gone: ``check`` imports no module, so the key is rejected."""
+    with pytest.raises(
+        ConfigError, match="'type-modules' in \\[tool.sqlty\\]: removed, since `check`"
+    ):
+        validate_tool_table({"type-modules": ["app"]}, "pyproject.toml")
 
 
 def test_checked_code_warnings_are_not_printed() -> None:

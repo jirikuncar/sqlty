@@ -5,55 +5,42 @@ from __future__ import annotations
 import ast
 import copy
 import re
-import typing
 
 from sqlty._type_extractor.ast_fields import _ast_type
 from sqlty._type_extractor.info import TypeInfo
-from sqlty._type_extractor.subtype import _unwrap_optional
+from sqlty._type_extractor.symbols import ModuleTypes
 
 
 def specialize(
-    info: TypeInfo, node: ast.ClassDef, args: list[ast.expr], aliases: dict[str, str]
+    info: TypeInfo, node: ast.ClassDef, args: list[ast.expr], names: ModuleTypes
 ) -> TypeInfo | None:
     """``info`` with the type parameters of its class ``node`` replaced by ``args``.
 
     The parameters are those of ``class Row[T]`` or of a ``Generic[T]`` base. ``None`` when
     the class takes a different number of arguments. An argument sqlty cannot resolve leaves
-    the fields it fills unknown, as an unresolved annotation does.
+    the fields it fills unknown, as an unresolved annotation does. ``names`` are those of the
+    module that names ``Row[...]``.
 
     Example:
         >>> from sqlty._source import ParsedSource
         >>> from sqlty._type_extractor import extract_type_definitions
-        >>> parsed = ParsedSource("from typing import TypedDict\\nclass Row[T](TypedDict):\\n    ids: list[T]")
-        >>> row = extract_type_definitions(parsed, None, None, None)["Row"]
-        >>> specialize(row, parsed.classes[0], [ast.parse("int", mode="eval").body], {}).resolved_hints
-        {'ids': list[int]}
+        >>> parsed = ParsedSource("import datetime\\nfrom typing import TypedDict\\nclass Row[T](TypedDict):\\n    ids: list[T]")
+        >>> row = extract_type_definitions(parsed)["Row"]
+        >>> arg = ast.parse("datetime.date", mode="eval").body
+        >>> specialize(row, parsed.classes[0], [arg], ModuleTypes(parsed, None)).field_types
+        {'ids': list[datetime.date]}
     """
     params = _type_params(node)
     if not params or len(params) != len(args):
         return None
     texts = dict(zip(params, (ast.unparse(arg) for arg in args), strict=True))
     nodes = dict(zip(params, args, strict=True))
-    runtime = {name: _ast_type(arg, aliases) for name, arg in nodes.items()}
     words = re.compile(r"\b(" + "|".join(map(re.escape, params)) + r")\b")
 
     def text(annotation: str) -> str:
         return words.sub(lambda match: texts[match[0]], annotation)
 
-    def hint(tp: typing.Any) -> typing.Any:
-        if isinstance(tp, typing.TypeVar):
-            return runtime.get(tp.__name__)
-        free = [p for p in getattr(tp, "__parameters__", ()) if isinstance(p, typing.TypeVar)]
-        if not free:
-            return tp
-        values = [runtime.get(p.__name__) for p in free]
-        if any(value is None for value in values):
-            return None
-        try:
-            return tp[tuple(values)] if len(values) > 1 else tp[values[0]]
-        except TypeError:
-            return None
-
+    aliases, imports = names.parsed.typing_aliases, names.parsed.imported_names
     out = copy.copy(info)
     out.fields = [(name, text(annotation)) for name, annotation in info.fields]
     out.annotations = {
@@ -61,18 +48,11 @@ def specialize(
         for name, annotation in info.annotations.items()
     }
     out.field_types = {
-        name: _ast_type(out.annotations[name], aliases) if name in out.annotations else tp
+        name: _ast_type(out.annotations[name], aliases, names, imports)
+        if name in out.annotations
+        else tp
         for name, tp in info.field_types.items()
     }
-    if info.declared_hints:
-        out.declared_hints = {name: hint(tp) for name, tp in info.declared_hints.items()}
-        out.declared_hints = {k: v for k, v in out.declared_hints.items() if v is not None}
-    if info.resolved_hints is not None:
-        out.resolved_hints = {
-            name: _unwrap_optional(tp)
-            for name, tp in ((name, hint(tp)) for name, tp in info.resolved_hints.items())
-            if tp is not None
-        }
     return out
 
 

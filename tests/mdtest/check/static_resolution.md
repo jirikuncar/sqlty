@@ -212,7 +212,7 @@ q = SQL[Row]("--sql\nSELECT 'x'::TEXT AS color, 1::INTEGER AS level, '{}'::JSONB
 
 ## Pydantic types
 
-With `preview = true`, Pydantic's types come from a static table, so `check`
+Pydantic's types come from a static table, so `check`
 gives the same result whether pydantic is installed or not.
 
 ### Model fields take what Pydantic validates
@@ -333,7 +333,7 @@ class Email(str):
 class Row(TypedDict):
     email: Email
 
-# error:
+# error: [column-type-mismatch] "Row.email is Email but query column 'email' infers int"
 q = SQL[Row]("--sql\nSELECT 1::INTEGER AS email")
 ```
 
@@ -350,8 +350,117 @@ class Color(enum.StrEnum):
 class Row(TypedDict):
     color: Color
 
-# error:
+# error: [column-type-mismatch] "Row.color is Color but query column 'color' infers int"
 q = SQL[Row]("--sql\nSELECT 1::INTEGER AS color")
+```
+
+### Base column type
+
+The driver returns a plain `str`, which is not an `Email`.
+
+```python
+from typing import TypedDict
+from sqlty import SQL
+
+class Email(str):
+    pass
+
+class Row(TypedDict):
+    email: Email
+
+# error: [column-type-mismatch] "Row.email is Email but query column 'email' infers str"
+q = SQL[Row]("--sql\nSELECT 'a'::TEXT AS email")
+```
+
+### From another module
+
+`emails.py`:
+
+```python
+class Email(str):
+    pass
+```
+
+```python
+from typing import TypedDict
+from sqlty import SQL
+from emails import Email
+
+class Row(TypedDict):
+    email: Email
+
+# error: [column-type-mismatch] "Row.email is Email but query column 'email' infers int"
+q = SQL[Row]("--sql\nSELECT 1::INTEGER AS email")
+```
+
+### Unknown base
+
+A base `check` can't read makes the class unknown, as does a decorator, a keyword
+such as `metaclass=`, or a Pydantic validation hook.
+
+```python
+import functools
+from typing import TypedDict
+from not_installed import Base
+from sqlty import SQL
+
+class Email(Base):
+    pass
+
+@functools.total_ordering
+class Code(str):
+    pass
+
+class Meta(str, metaclass=type):
+    pass
+
+class Hooked(str):
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source, handler):
+        return handler(str)
+
+class Row(TypedDict):
+    email: Email
+    code: Code
+    meta: Meta
+    hooked: Hooked
+
+# error:
+q = SQL[Row]("--sql\nSELECT 1::INTEGER AS email, 1::INTEGER AS code, 1::INTEGER AS meta, 1::INTEGER AS hooked")
+```
+
+### Enum in a Pydantic model
+
+A model validates an enum by value, so its enum fields take any column; a
+`TypedDict` field is the enum a type checker sees.
+
+```python
+import enum
+import http
+from typing import TypedDict
+from pydantic import BaseModel
+from sqlty import SQL
+
+class Color(enum.Enum):
+    RED = "red"
+
+class Level(enum.IntEnum):
+    LOW = 1
+
+class Model(BaseModel):
+    color: Color
+    colors: list[Color] | None
+    level: Level
+    status: http.HTTPStatus
+
+class Row(TypedDict):
+    color: Color
+    status: http.HTTPStatus
+
+m = SQL[Model]("--sql\nSELECT 'red'::TEXT AS color, ARRAY['red']::TEXT[] AS colors, 1::INTEGER AS level, 200::INTEGER AS status")
+# error: [column-type-mismatch] "Row.color is Color but query column 'color' infers str"
+# error: [column-type-mismatch] "Row.status is http.HTTPStatus but query column 'status' infers int"
+r = SQL[Row]("--sql\nSELECT 'red'::TEXT AS color, 200::INTEGER AS status")
 ```
 
 ## Other modules

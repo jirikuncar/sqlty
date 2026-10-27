@@ -39,7 +39,6 @@ class Run:
         self.json_types: str = settings.get("json-types", "typing.Any")
         self.param_types: bool = settings.get("param-types", False)
         self.rules: dict[str, str] | None = settings.get("rules")
-        self.type_modules: list[str] | None = settings.get("type-modules")
         # Preview is on unless a section turns it off: the suite asserts it changes nothing else.
         self.preview: bool = settings.get("preview", True)
         self.query_variants: int | None = (
@@ -194,10 +193,8 @@ class Run:
                 rules=self.rules,
                 import_style=self.import_style,
                 untyped=self.untyped,
-                type_modules=self.type_modules,
                 helpers=self._helpers,
                 query_variants=self.query_variants,
-                pydantic_types=self.preview,
             )
         else:
             found = core.check_source(
@@ -207,10 +204,8 @@ class Run:
                 rules=self.rules,
                 import_style=self.import_style,
                 untyped=self.untyped,
-                type_modules=self.type_modules,
                 helpers=self._helpers,
                 query_variants=self.query_variants,
-                pydantic_types=self.preview,
             )
         diagnostics = [
             (code.md_lines[int(str(d["line"])) - 1], str(d["rule"]), str(d["message"]))

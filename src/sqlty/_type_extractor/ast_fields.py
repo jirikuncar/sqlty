@@ -57,18 +57,21 @@ def _newtype_assignments(tree: ast.Module, aliases: dict[str, str]) -> dict[str,
     }
 
 
-def _module_types(tree: ast.Module, aliases: dict[str, str]) -> dict[str, ast.Assign | ast.expr]:
-    """Module-level names a type can go through, read by `_ast_type`: aliases and ``NewType``s.
+def _module_types(
+    tree: ast.Module, aliases: dict[str, str]
+) -> dict[str, ast.Assign | ast.ClassDef | ast.expr]:
+    """Module-level names a type can go through, read by `_ast_type`: aliases, ``NewType``s, classes.
 
     An alias (``X = T``, ``X: TypeAlias = T``, ``type X = T``) maps to its value, a ``NewType``
-    to its assignment. A name bound more than once, or a generic ``type X[T] = ...``, is left out.
+    to its assignment and a plain class (see `_plain_class`) to its definition. A name bound
+    more than once, or a generic ``type X[T] = ...``, is left out.
 
     Example:
-        >>> src = "Id = int\\ntype Name = str\\nU = NewType('U', Id)\\nx = f()\\nT = int\\nT = str"
+        >>> src = "Id = int\\ntype Name = str\\nU = NewType('U', Id)\\nx = f()\\nT = int\\nT = str\\nclass E(str): ..."
         >>> sorted(_module_types(ast.parse(src), {"NewType": "NewType"}))
-        ['Id', 'Name', 'U']
+        ['E', 'Id', 'Name', 'U']
     """
-    found: dict[str, ast.Assign | ast.expr] = {}
+    found: dict[str, ast.Assign | ast.ClassDef | ast.expr] = {}
     bound: collections.Counter[str] = collections.Counter()
     for node in tree.body:
         match node:
@@ -82,9 +85,37 @@ def _module_types(tree: ast.Module, aliases: dict[str, str]) -> dict[str, ast.As
                 found[name] = value
             case ast.TypeAlias(name=ast.Name(id=name), type_params=[], value=value):
                 found[name] = value
+            case ast.ClassDef(name=name) if _plain_class(node, aliases):
+                found[name] = node
         bound.update(_bound_names(node))
     found |= _newtype_assignments(tree, aliases)
     return {name: value for name, value in found.items() if bound[name] == 1}
+
+
+_PYDANTIC_HOOKS = frozenset({"__get_pydantic_core_schema__", "__get_validators__"})
+
+
+def _plain_class(node: ast.ClassDef, aliases: dict[str, str]) -> bool:
+    """Whether a class is known by its bases alone: not a row type, and nothing changes it.
+
+    A decorator, a keyword (``metaclass=``), type parameters or a Pydantic validation hook
+    may change what the class accepts, so such a class is unknown.
+
+    Example:
+        >>> [_plain_class(ast.parse(src).body[0], {}) for src in ["class E(str): ...", "@d\\nclass E: ..."]]
+        [True, False]
+    """
+    return not (
+        node.decorator_list
+        or node.keywords
+        or node.type_params
+        or _classify_class(node, aliases)
+        or any(
+            isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and item.name in _PYDANTIC_HOOKS
+            for item in node.body
+        )
+    )
 
 
 def _bound_names(node: ast.stmt) -> list[str]:

@@ -26,8 +26,7 @@ def check_type_compatibility(
 ) -> bool:
     """Check if a user type's field can hold values of a SQL column type.
 
-    Uses runtime type objects when available (``resolved_hints``), else the
-    types resolved from source (``field_types``). ``Any``, unions and the
+    Reads the field types resolved from source (``field_types``). ``Any``, unions and the
     ``int`` -> ``float`` promotion are accepted; narrower fields (``bool`` for
     an ``int`` column) are not, unless the field is ``lax`` (see `_LAX_FROM`).
     Annotations neither path can resolve or decide count as compatible.
@@ -51,13 +50,10 @@ def check_type_compatibility(
     declared = dict(user_type.fields)
     if column_name in declared:
         annotation = declared[column_name]
-        hints = user_type.resolved_hints or {}
-        field = (
-            hints[column_name] if column_name in hints else user_type.field_types.get(column_name)
-        )
+        field = user_type.field_types.get(column_name)
     elif user_type.extra_items is not None:
         annotation = user_type.extra_items
-        field = user_type.extra_items_hint or user_type.extra_items_type
+        field = user_type.extra_items_type
     else:
         return column_python_type is None
     lax = column_name in user_type.lax
@@ -194,10 +190,7 @@ def field_type(user_type: TypeInfo, column_name: str) -> typing.Any:
     """
     declared = dict(user_type.fields)
     if column_name in declared:
-        hints = user_type.declared_hints
-        return (
-            hints[column_name] if column_name in hints else user_type.field_types.get(column_name)
-        )
+        return user_type.field_types.get(column_name)
     if user_type.extra_items is not None:
         return user_type.extra_items_type
     return None

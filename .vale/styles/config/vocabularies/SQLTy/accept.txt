@@ -136,3 +136,4 @@ virality
 Yesql
 Zapatos
 Zensical
+typeshed
