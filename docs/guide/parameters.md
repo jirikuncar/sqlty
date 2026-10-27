@@ -159,3 +159,66 @@ async def main() -> None:
     # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
     await fetch("SELECT id FROM users WHERE id = $1 AND name = $2", 1)
 ```
+
+## Typed parameters
+
+`SQL[R, P]` types the parameters of a query as `P`, next to its rows `R`. Your
+type checker then checks the values you pass, without running `sqlty check`:
+
+```python
+from typing import TypedDict
+
+from sqlty import SQL
+
+
+class ById(TypedDict):
+    id: int
+
+
+by_id = SQL[tuple[str], ById]("--sql\nSELECT name FROM users WHERE id = %(id)s")
+by_name = SQL[tuple[int], tuple[str]]("--sql\nSELECT id FROM users WHERE name = %s")
+count = SQL[tuple[int], tuple[()]]("--sql\nSELECT count(*) FROM users")
+
+by_id.bind({"id": 1})
+by_name.bind(("alice",))
+count.bind(())
+```
+
+```python
+from sqlty import SQL
+
+# error: [stale-type] "SQL[tuple[str | None]] should be SQL[tuple[str]]"
+by_id = SQL[tuple[str | None], tuple[int]]("--sql\nSELECT name FROM users WHERE id = %s")
+```
+
+Positional parameters are a `tuple`, one item per placeholder. Named
+parameters are a `TypedDict`, one key per name. A query without parameters
+takes `tuple[()]`.
+
+`query.bind(params)` checks `params` against `P` and returns a `Bound[R]`, a
+`(query, params)` tuple. `cursor.execute(*bound)` runs it, and the
+[psycopg helpers](psycopg.md) take it in place of the query.
+
+`P` defaults to `Any`, so `SQL[R]` takes any parameters and every
+`SQL[R]` you already have stays valid. A query is typed like a function from
+`P` to `R`: a query that takes `str | None` fits where one that takes `str` is
+expected, not the other way around.
+
+`sqlty check` ignores `P`: it compares `R` with the query, and the parameters
+of each call with the query, as in [Checking calls](#checking-calls). Its fixes
+rewrite `R` and keep `P`.
+
+### What each type checker checks
+
+| Call | mypy | pyright | ty |
+|------|------|---------|----|
+| `query.bind(params)` | yes | yes | yes |
+| `execute(conn, query, params)` | no | yes | yes |
+| `scalar(conn, query, params)` | no | no | no |
+
+!!! note "Use `bind` to check `params` on mypy"
+    mypy cannot infer `P` from a dict literal for a `TypedDict`
+    ([python/mypy#19201](https://github.com/python/mypy/issues/19201)), so
+    `execute` keeps a signature that takes any parameters on mypy. `scalar`
+    keeps it on every checker. `execute(conn, query.bind(params))` and
+    `scalar(conn, query.bind(params))` check `params` everywhere.
