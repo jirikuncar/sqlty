@@ -49,6 +49,7 @@ stale-type = "error"
 | [`untyped-query`](#untyped-query) | Rewrite | warn | yes | `SQL[UNTYPED]` query |
 | [`param-count-mismatch`](#param-count-mismatch) | Params | error | no | Call passes a different number of parameters than its query has |
 | [`param-type-mismatch`](#param-type-mismatch) | Params | error | no | Call passes an argument the query's parameter can't take |
+| [`params-type-mismatch`](#params-type-mismatch) | Params | error | no | `P` of `SQL[R, P]` doesn't fit the query's parameters |
 | [`unused-ignore`](#unused-ignore) | Suppression | warn | no | `# sqlty: ignore` comment that suppresses nothing |
 
 `nullable-mismatch` and `redundant-optional` check nullability; see
@@ -427,6 +428,23 @@ execute("SELECT 1 FROM users WHERE id = %s AND name = %s", (1,))
 ```
 
 Fix: pass one argument per placeholder.
+
+### params-type-mismatch
+
+Default: error. The parameter type `P` of `SQL[R, P]` doesn't fit the query: a
+`tuple` with a different number of items than placeholders, a `TypedDict` whose
+keys differ from the names, or an item whose type the parameter can't take,
+judged as `param-type-mismatch` judges an argument. See
+[Typed parameters](../guide/parameters.md#typed-parameters).
+
+```python
+from sqlty import SQL
+
+# error: [params-type-mismatch] "tuple[int, int] has 2 items but the query has 1 parameter"
+q = SQL[tuple[int], tuple[int, int]]("--sql\nSELECT 1 FROM users LIMIT %s")
+```
+
+Fix: change `P`, or let `sqlty rewrite` write it with `param-types = true`.
 
 ## Suppression rules
 
