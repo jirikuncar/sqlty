@@ -75,6 +75,28 @@ with psycopg.connect("dbname=app") as conn:
 # error:
 ```
 
+With [typed parameters](parameters.md#typed-parameters), `SQL[T, P]`,
+pyright and ty check `params` against `P`. `query.bind(params)` checks them on
+every type checker, and `execute` and `scalar` take the `Bound` it returns:
+
+```python
+from typing import TypedDict
+
+import psycopg
+from sqlty import SQL
+from sqlty.drivers.psycopg import execute, scalar
+
+class ById(TypedDict):
+    id: int
+
+name_by_id = SQL[tuple[str], ById]("--sql\nSELECT name::TEXT FROM users WHERE id = %(id)s")
+
+with psycopg.connect("dbname=app") as conn:
+    row = execute(conn, name_by_id, {"id": 1}).fetchone()  # tuple[str] | None
+    name = scalar(conn, name_by_id.bind({"id": 1}))  # str
+# error:
+```
+
 ## `row_factory`
 
 `row_factory(T)` returns the factory from the table above, for cursors you
