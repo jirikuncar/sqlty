@@ -10,6 +10,7 @@ import tokenize
 from functools import cached_property
 
 import sqlty.core as core
+from sqlty._config import MAX_QUERY_VARIANTS
 
 from .parser import Assertion, Kind, Section, Unit
 from .updater import Updater
@@ -38,6 +39,12 @@ class Run:
         self.json_types: str = settings.get("json-types", "typing.Any")
         self.rules: dict[str, str] | None = settings.get("rules")
         self.type_modules: list[str] | None = settings.get("type-modules")
+        # Preview is on unless a section turns it off: the suite asserts it changes nothing else.
+        self.query_variants: int | None = (
+            settings.get("max-query-variants", MAX_QUERY_VARIANTS)
+            if settings.get("preview", True)
+            else None
+        )
         # With an `against.sql` file, `# error:` asserts what `sqlty breaking` reports.
         self.against_sql: str | None = section.files.get("against.sql")
 
@@ -187,6 +194,7 @@ class Run:
                 untyped=self.untyped,
                 type_modules=self.type_modules,
                 helpers=self._helpers,
+                query_variants=self.query_variants,
             )
         else:
             found = core.check_source(
@@ -198,6 +206,7 @@ class Run:
                 untyped=self.untyped,
                 type_modules=self.type_modules,
                 helpers=self._helpers,
+                query_variants=self.query_variants,
             )
         diagnostics = [
             (code.md_lines[int(str(d["line"])) - 1], str(d["rule"]), str(d["message"]))

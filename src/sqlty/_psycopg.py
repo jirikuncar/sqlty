@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from sqlty._source import ParsedSource
 
 Resolver = Callable[["ParsedSource", str], "tuple[ParsedSource, ast.expr] | None"]
+Lookup = Callable[[ast.Name], Any]
 
 _CLASSES = frozenset({"SQL", "Identifier", "Literal", "Placeholder", "Composed"})
 _METHODS = frozenset({"format", "join"})
@@ -33,6 +34,17 @@ class _Dynamic(Exception):
 
 class _Invalid(Exception):
     """A composition psycopg itself rejects."""
+
+
+class Unrenderable(Exception):
+    """A composition that is not built from literals only, or that psycopg rejects.
+
+    ``composed`` tells whether it uses ``psycopg.sql`` at all.
+    """
+
+    def __init__(self, composed: bool) -> None:
+        super().__init__(composed)
+        self.composed = composed
 
 
 def _dotted(node: ast.expr) -> str | None:
@@ -109,6 +121,23 @@ class PsycopgScan:
         except _Invalid, TypeError, ValueError, NotImplementedError, AttributeError:
             return None
 
+    def compose(self, expr: ast.expr, lookup: Lookup, resolve: Resolver | None = None) -> Any:
+        """``expr`` built with the real ``psycopg.sql`` classes, its names read with ``lookup``.
+
+        ``lookup`` may raise any exception, which propagates. Raises ``Unrenderable`` when
+        a part is not a literal, psycopg rejects the composition, or psycopg is missing.
+        """
+        try:
+            from psycopg import sql
+        except ImportError:
+            raise Unrenderable(False) from None
+        self._sql = sql
+        run = _Run(self, sql, resolve, lookup)
+        try:
+            return run.value(expr)
+        except _Dynamic, _Invalid, TypeError, ValueError, NotImplementedError, AttributeError:
+            raise Unrenderable(run.seen) from None
+
     @property
     def table(self) -> dict[str, str]:
         """Local names bound by ``psycopg`` imports, to their dotted target."""
@@ -174,10 +203,13 @@ class PsycopgScan:
 class _Run:
     """One evaluation of an expression."""
 
-    def __init__(self, scan: PsycopgScan, sql: Any, resolve: Resolver | None) -> None:
+    def __init__(
+        self, scan: PsycopgScan, sql: Any, resolve: Resolver | None, lookup: Lookup | None = None
+    ) -> None:
         self.scan = scan
         self.sql = sql
         self.resolve = resolve
+        self.lookup = lookup
         self.seen = False
         self.depth = 0
 
@@ -215,6 +247,8 @@ class _Run:
         if isinstance(node, ast.Constant):
             return node.value
         if isinstance(node, ast.Name):
+            if self.lookup is not None:
+                return self.lookup(node)
             if (target := self.scan.binding(node)) is None:
                 return self._imported(node)
             return self.value(target)

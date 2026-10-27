@@ -655,6 +655,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
             helpers=file_helpers[path],
             type_modules=settings[path].type_modules,
             row_usage=row_usage,
+            query_variants=settings[path].query_variants,
         )
         if not args.statistics:
             return diagnostics, Counter()
@@ -664,6 +665,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
             schema_sql=settings[path].schema,
             import_style=settings[path].import_style,
             helpers=file_helpers[path],
+            query_variants=settings[path].query_variants,
         )
         return diagnostics, counts
 
@@ -1181,6 +1183,7 @@ class Settings:
     json_types: str = "typing.Any"
     rules: dict[str, str] | None = None
     type_modules: tuple[str, ...] = ()
+    query_variants: int | None = None
     functions: tuple[tuple[str, str, str | None], ...] = ()
     format_command: tuple[str, ...] = ()
     overrides: tuple[RuleOverride, ...] = ()
@@ -1277,6 +1280,8 @@ class SettingsResolver:
                 f"{self.source.origin('import_style', label)}: {exc}; "
                 "use 'from sqlty import SQL [as Q]' or 'import sqlty [as sy]'"
             ) from None
+        from sqlty._config import MAX_QUERY_VARIANTS
+
         dialect = args.dialect or config.get("dialect", "postgres")
         return Settings(
             dialect=dialect,
@@ -1290,6 +1295,9 @@ class SettingsResolver:
             json_types=json_types,
             rules=config.get("rules"),
             type_modules=tuple(config.get("type_modules", ())),
+            query_variants=config.get("max_query_variants", MAX_QUERY_VARIANTS)
+            if config.get("preview")
+            else None,
             functions=tuple(
                 (f["import_path"], f["query_param"], f.get("return_type_param"))
                 for f in config.get("functions", [])

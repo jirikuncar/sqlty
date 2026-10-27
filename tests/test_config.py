@@ -108,6 +108,12 @@ def test_unknown_keys_raise_config_error_naming_the_file(tmp_path):
         ("[tool.sqlty]\ntypes = 'DATE'\n", "types must be a table"),
         ("[tool.sqlty.types]\nDATE = 1\n", "types must be a table"),
         ("[tool.sqlty.types]\nDATE = 'list['\n", "is not a Python type expression"),
+        ("[tool.sqlty]\npreview = 'yes'\n", "preview must be true or false"),
+        ("[tool.sqlty]\nmax-query-variants = 0\n", "max-query-variants must be a positive integer"),
+        (
+            "[tool.sqlty]\nmax-query-variants = true\n",
+            "max-query-variants must be a positive integer",
+        ),
     ],
 )
 def test_invalid_settings(tmp_path, toml, message):

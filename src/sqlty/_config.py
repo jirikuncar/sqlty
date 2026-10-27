@@ -20,6 +20,8 @@ TOOL_KEYS = (
     "untyped",
     "json-types",
     "type-modules",
+    "preview",
+    "max-query-variants",
     "functions",
     "types",
     "format-command",
@@ -32,6 +34,9 @@ DISCOVERY_KEYS = ("exclude", "extend-exclude", "respect-gitignore")
 FUNCTION_KEYS = ("import-path", "query-param", "return-type-param")
 
 OVERRIDE_KEYS = ("include", "exclude", "rules")
+
+MAX_QUERY_VARIANTS = 64
+"""Default of ``max-query-variants``."""
 
 
 class KeyDoc(NamedTuple):
@@ -96,6 +101,18 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "`[]`",
         "`check`",
         "Modules `check` may import to resolve row type fields",
+    ),
+    "preview": KeyDoc(
+        "boolean",
+        "`false`",
+        "`check`",
+        "Turn on features still in preview: query variants",
+    ),
+    "max-query-variants": KeyDoc(
+        "positive integer",
+        "`64`",
+        "`check`",
+        "With `preview`, the most variants of a query built in branches that `check` checks",
     ),
     "functions": KeyDoc(
         "array of tables",
@@ -258,6 +275,11 @@ def validate_tool_table(table: dict[str, Any], source: str) -> None:
                     f"{where}; expected one of: {', '.join(severities)}"
                 )
 
+    if not isinstance(table.get("preview", False), bool):
+        raise ConfigError(f"{source}: [tool.sqlty] preview must be true or false")
+    limit = table.get("max-query-variants", MAX_QUERY_VARIANTS)
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+        raise ConfigError(f"{source}: [tool.sqlty] max-query-variants must be a positive integer")
     if "dialect" in table and (problem := dialect_problem(table["dialect"])):
         raise ConfigError(f"{source}: [tool.sqlty] {problem}")
     check_rules(table.get("rules", {}), "[tool.sqlty] rules", "[tool.sqlty.rules]")
@@ -379,6 +401,8 @@ class SQLTyConfig(TypedDict, total=False):
         str  # "typing.Any" (default) or "typing.TypedDict": generated TypedDicts for JSON columns
     )
     type_modules: list[str]  # modules whose imports may run to resolve row types
+    preview: bool  # features still in preview: query variants
+    max_query_variants: int  # the most variants of a query built in branches that check checks
     exclude: list[str]  # globs replacing the default excludes, relative to pyproject.toml
     extend_exclude: list[str]  # globs excluded in addition to the above
     respect_gitignore: bool  # skip what .gitignore ignores while walking
@@ -625,6 +649,12 @@ def _parse_table(tool_config: dict[str, Any], source: str) -> SQLTyConfig:
 
     if "types" in tool_config and isinstance(tool_config["types"], dict):
         config["types"] = {str(k): str(v) for k, v in tool_config["types"].items()}
+
+    if "preview" in tool_config:
+        config["preview"] = bool(tool_config["preview"])
+
+    if "max-query-variants" in tool_config:
+        config["max_query_variants"] = int(tool_config["max-query-variants"])
 
     if "type-modules" in tool_config:
         modules = tool_config["type-modules"]
