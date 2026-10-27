@@ -817,3 +817,15 @@ def test_every_inferred_python_type_is_checked():
 
     scalars = {name for name in python_types() if "[" not in name}
     assert scalars - PYTHON_TYPE_MAP.keys() == set()
+
+
+def test_stdlib_table_matches_typeshed() -> None:
+    """``_stdlib.py`` is what typeshed gives (``make generate-stdlib-types``)."""
+    import importlib.util
+
+    path = Path(__file__).resolve().parent.parent / "scripts" / "generate_stdlib_types.py"
+    spec = importlib.util.spec_from_file_location("generate_stdlib_types", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.OUTPUT.read_text() == module.generate(), "run `make generate-stdlib-types`"

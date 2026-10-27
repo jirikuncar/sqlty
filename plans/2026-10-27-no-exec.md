@@ -1,6 +1,6 @@
 # Plan: resolve row types statically, without `exec`
 
-> **Status:** phases 1 and 2 (symbol table, string annotations, helper modules) done.
+> **Status:** phases 1 to 3 (symbol table, string annotations, helper modules, standard-library classes) done.
 > Owner: @jirikuncar. Epic: [#784](https://github.com/jirikuncar/sqlty/issues/784); every pull request of this plan links it.
 
 ## Goal
@@ -115,7 +115,7 @@ Each phase is one pull request, green on the full CI and on `No-exec harness int
 | 0 | Harness (this pull request) | Harness merged; suite green |
 | 1 | Symbol table + resolver for one module; string annotations | `make test-static-only`: `static_resolution.md` sections *Local aliases* and *String annotations* pass |
 | 2 | Helper modules through the symbol table | `make test-static-only`: `test_cross_module.py`, `generic_fields.md`, *Other modules* pass |
-| 3 | Stdlib classes from typeshed; user classes in the symbol table (still unknown to `compat`) | `make test-static-only`: *Standard library classes* pass; drift test green |
+| 3 | Stdlib classes from typeshed (user classes moved to phase 4, where `compat` first reads them) | `make test-static-only`: *Standard library classes* pass; drift test green |
 | 3b | Pydantic types ([#783](https://github.com/jirikuncar/sqlty/issues/783)); pydantic in the `dev` group | The done criteria of #783 |
 | 4 | Delete the sandbox; collapse `TypeInfo`; rewrite the 19 internal tests to assert behavior or `field_types`; remove `type-modules`; tighten *User classes*; docs | [Definition of done](#definition-of-done) |
 
@@ -198,7 +198,7 @@ Decided:
 3. **How much of typeshed to carry** (design step 3): the implementor's choice, named in
    the phase 3 pull request. Either way the typeshed commit is pinned and recorded, and a
    test fails when the carried data drifts from it.
-   - The class graph only: `scripts/generate_stdlib_types.py` reads the pinned typeshed
+   - **Chosen in phase 3.** The class graph only: `scripts/generate_stdlib_types.py` reads the pinned typeshed
      and writes `_type_extractor/_stdlib.py` (each class with its bases, and the module
      version ranges from `VERSIONS`). Small; nothing parsed at run time.
    - The stdlib `.pyi` files vendored, as ty does (about 1.2 MB zipped), read on demand
