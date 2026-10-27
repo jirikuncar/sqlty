@@ -128,6 +128,24 @@ def test_fix_leaves_nothing_stale(source: str, options: dict) -> None:
     assert not stale
 
 
+@pytest.mark.parametrize(("source", "options"), PYTHON)
+def test_written_params_fit(source: str, options: dict) -> None:
+    """``params-type-mismatch`` never reports a ``P`` that ``param-types`` writes."""
+    rewritten = core.rewrite_source(source, **(options | {"param_types": True}))
+    checked = {
+        key: value for key, value in options.items() if key not in ("json_types", "param_types")
+    }
+
+    def mismatches(text: str) -> list[str]:
+        return sorted(
+            d["message"]
+            for d in core.check_source(text, **checked)
+            if d["rule"] == "params-type-mismatch"
+        )
+
+    assert mismatches(rewritten) == mismatches(source), rewritten
+
+
 def _check_outputs(source: str, options: dict) -> None:
     """``rewrite``, ``strip`` and ``check --fix`` keep valid Python valid and every
     comment, rewrite and strip keep every string as it is, and ``check --fix`` is idempotent."""
