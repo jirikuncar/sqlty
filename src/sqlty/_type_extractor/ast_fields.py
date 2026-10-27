@@ -385,10 +385,27 @@ _IMPORTED_TYPES: dict[str, typing.Any] = {
 }
 
 
+class TypeNames(typing.Protocol):
+    """What `_ast_type` reads a name through: the value of an alias, or a type."""
+
+    def get(self, name: str, /) -> ast.expr | typing.Any: ...
+
+
+class _Hiding:
+    """``names`` without ``hidden``, so an alias that refers to itself is unknown."""
+
+    def __init__(self, names: TypeNames, hidden: str) -> None:
+        self.names = names
+        self.hidden = hidden
+
+    def get(self, name: str, /) -> ast.expr | typing.Any:
+        return None if name == self.hidden else self.names.get(name)
+
+
 def _ast_type(
     node: ast.expr,
     aliases: dict[str, str],
-    newtypes: dict[str, ast.Assign | ast.expr | typing.Any] | None = None,
+    newtypes: TypeNames | None = None,
     imports: dict[str, str] | None = None,
 ) -> typing.Any:
     """Builtin scalars and generics, ``Any``, ``Never``, NewTypes and their unions from source; None if unknown.
@@ -399,9 +416,8 @@ def _ast_type(
     ``typing`` generic aliases (``List``, ``Dict``, ``Set``, ``FrozenSet``,
     ``Tuple``) resolve to their builtins only when imported from ``typing``
     or ``typing_extensions``.
-    ``newtypes`` maps names to their ``NewType`` assignments or alias values (see
-    `_module_types`), or to a ``NewType`` already resolved, such as one imported from a
-    checked module. A string annotation is parsed, never evaluated, and resolved the same way.
+    ``newtypes`` maps names (``X`` or ``mod.X``) to the values of aliases, or to types
+    already resolved, such as ``NewType``s (see ``symbols.ModuleTypes``). A string annotation is parsed, never evaluated, and resolved the same way.
     With ``imports`` (see ``ParsedSource.imported_names``), the ``decimal``,
     ``datetime`` and ``uuid`` types and Pydantic's ``Strict*`` aliases resolve too.
     """
@@ -416,14 +432,13 @@ def _ast_type(
         return _ast_type(parsed, aliases, newtypes, imports)
     if imports and (tp := _IMPORTED_TYPES.get(_qualname(node, imports) or "")):
         return tp
-    if isinstance(node, ast.Name) and isinstance(resolved := newtypes.get(node.id), typing.NewType):
-        return resolved
-    if isinstance(node, ast.Name) and (assign := newtypes.get(node.id)) is not None:
-        others = {k: v for k, v in newtypes.items() if k != node.id}
-        if not isinstance(assign, ast.Assign):
-            return _ast_type(assign, aliases, others, imports)
-        supertype = _ast_type(typing.cast(ast.Call, assign.value).args[1], aliases, others, imports)
-        return None if supertype is None else typing.NewType(node.id, supertype)  # ty: ignore[invalid-newtype]
+    if isinstance(node, (ast.Name, ast.Attribute)) and (
+        (found := newtypes.get(_qualname(node, {}) or "")) is not None
+        and not isinstance(found, ast.AST)
+    ):
+        return found
+    if isinstance(node, ast.Name) and (alias := newtypes.get(node.id)) is not None:
+        return _ast_type(alias, aliases, _Hiding(newtypes, node.id), imports)
     if isinstance(node, ast.Name):
         known = _AST_TYPES | _TYPING_GENERICS if node.id in aliases else _AST_TYPES
         return known.get(aliases.get(node.id, node.id))
@@ -477,7 +492,7 @@ def _annotation_type(annotation: str) -> typing.Any:
 def _ast_key_types(
     nodes: list[ast.ClassDef],
     aliases: dict[str, str],
-    newtypes: dict[str, ast.Assign | ast.expr | typing.Any],
+    newtypes: TypeNames,
     imports: dict[str, str] | None = None,
 ) -> dict[str, typing.Any]:
     """Key types of a TypedDict lineage (bases first) from source, as by ``_ast_type``."""
