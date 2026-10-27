@@ -1,6 +1,6 @@
 # Plan: resolve row types statically, without `exec`
 
-> **Status:** phase 1 (symbol table for one module, string annotations) done.
+> **Status:** phases 1 and 2 (symbol table, string annotations, helper modules) done.
 > Owner: @jirikuncar. Epic: [#784](https://github.com/jirikuncar/sqlty/issues/784); every pull request of this plan links it.
 
 ## Goal

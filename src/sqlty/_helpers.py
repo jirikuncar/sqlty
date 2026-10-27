@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 
     from sqlty._cli import Settings
     from sqlty._type_extractor import TypeInfo
+    from sqlty._type_extractor.symbols import ModuleTypes
 
 _TYPE_FORMS = frozenset({"type", "Type", "TypeForm"})
 # Names that mark where a helper takes the query's parameters: a ``params`` argument holding
@@ -295,6 +296,8 @@ class HelperIndex:
         self._names: frozenset[str] | None = None
         self._exports: dict[str, dict[str, tuple[str, str]]] = {}
         self._row_types: dict[tuple[str, frozenset[str]], dict[str, TypeInfo]] = {}
+        self._types: dict[tuple[str, str], Any] = {}
+        self._names_of: dict[str, ModuleTypes] = {}
         self._read: dict[tuple[Path, str], ParsedSource | None] = {}
 
     def fork(self) -> HelperIndex:
@@ -307,6 +310,8 @@ class HelperIndex:
         other.type_modules = self.type_modules
         other._exports = self._exports
         other._row_types = self._row_types
+        other._types = self._types
+        other._names_of = self._names_of
         other._read = self._read
         return other
 
@@ -326,6 +331,8 @@ class HelperIndex:
         self.prefixes.update(".".join(parts[:i]) for i in range(1, len(parts) + 1))
         self.namespaces.pop(module, None)
         self._exports.pop(module, None)
+        self._names_of.pop(module, None)
+        self._types.clear()
         for key in [key for key in self._row_types if key[0] == module]:
             del self._row_types[key]
         if not parsed.may_define_helpers or not (found := index_functions(parsed)):
@@ -444,17 +451,38 @@ class HelperIndex:
         Returns it with the row types of its module, which its nested types refer to.
         Re-exports are followed; the module is read from its source, never imported.
         """
-        functions, modules = _imports(parsed, parsed.module)
-        prefix, _, name = dotted.rpartition(".")
-        if not prefix:
-            if name not in functions:
-                return None
-            module, name = functions[name]
+        if (target := _target(parsed, dotted)) is None:
+            return None
+        return self._row_type(*target, type_modules)
+
+    def type_of(self, parsed: ParsedSource, dotted: str) -> Any:
+        """The type ``NAME`` or ``module.NAME`` that ``parsed`` imports from a checked module.
+
+        An alias or ``NewType`` is resolved from the source of its module, never imported;
+        re-exports are followed. ``None`` when it is unknown.
+        """
+        target = _target(parsed, dotted)
+        return None if target is None else self._type(*target)
+
+    def _type(self, module: str, name: str, _depth: int = 0) -> Any:
+        if _depth > 8 or (parsed := self.sources.get(module)) is None:
+            return None
+        if (module, name) in self._types:
+            return self._types[module, name]
+        from sqlty._type_extractor.ast_fields import _ast_type
+        from sqlty._type_extractor.symbols import ModuleTypes
+
+        # An import cycle sees the name as unknown while it is resolved.
+        self._types[module, name] = None
+        if (names := self._names_of.get(module)) is None:
+            names = self._names_of[module] = ModuleTypes(parsed, self, module)
+        if name in names.local:
+            found = _ast_type(ast.Name(name), parsed.typing_aliases, names, parsed.imported_names)
         else:
-            head, _, rest = prefix.partition(".")
-            mod = modules.get(head)
-            module = (f"{mod}.{rest}" if rest else mod) if mod is not None else prefix
-        return self._row_type(module, name, type_modules)
+            exports = self._reexports(module, parsed)
+            found = self._type(*exports[name], _depth + 1) if name in exports else None
+        self._types[module, name] = found
+        return found
 
     def _row_type(
         self, module: str, name: str, type_modules: frozenset[str], _depth: int = 0
@@ -497,6 +525,23 @@ class HelperIndex:
         if self._pattern is None:
             self._pattern = re.compile("|".join(map(re.escape, sorted(self.names))) or r"(?!)")
         return self._pattern.search(source) is not None
+
+
+def _target(parsed: ParsedSource, dotted: str) -> tuple[str, str] | None:
+    r"""The module and name that ``NAME`` or ``module.NAME`` of ``parsed`` refers to.
+
+    Example:
+        >>> parsed = ParsedSource("import a.b as m\nfrom c import d")
+        >>> _target(parsed, "m.X"), _target(parsed, "d")
+        (('a.b', 'X'), ('c', 'd'))
+    """
+    functions, modules = _imports(parsed, parsed.module)
+    prefix, _, name = dotted.rpartition(".")
+    if not prefix:
+        return functions.get(name)
+    head, _, rest = prefix.partition(".")
+    mod = modules.get(head)
+    return ((f"{mod}.{rest}" if rest else mod) if mod is not None else prefix), name
 
 
 def _imports(
