@@ -90,14 +90,19 @@ checked paths (`HelperIndex`) and a table of the standard library.
    `int` column then no longer fits an `Email` field. A base that is unknown makes the
    class unknown. The bare `# error:` of *User classes* in `static_resolution.md`
    become specific assertions (the integrity check allows it).
-5. **TypedDict keys.** `__required_keys__` and `extra_items` come from the AST
+5. **Pydantic types** (`EmailStr`, `AnyUrl`, `PastDatetime`, `conint(...)`, ...) resolve from
+   a static table of pydantic's type-checker declarations and lax/strict input types,
+   never from the installed package. Importing pydantic gives false positives today
+   ([#783](https://github.com/jirikuncar/sqlty/issues/783), which carries the
+   details, harness additions and done criteria).
+6. **TypedDict keys.** `__required_keys__` and `extra_items` come from the AST
    (`required`, `_ast_type` of `extra_node`), which already compute them.
-6. **`TypeInfo` shrinks.** `resolved_hints`, `declared_hints` and `extra_items_hint`
+7. **`TypeInfo` shrinks.** `resolved_hints`, `declared_hints` and `extra_items_hint`
    merge into `field_types` (`| None` kept) plus `_unwrap_optional` at use. `compat`,
    `generic`, `_check`, `_json_shape` read one source.
-7. **Delete** `sandbox.py`, `_Unknown`, `_TRUSTED_MODULES`, the `exec` paragraph of the
+8. **Delete** `sandbox.py`, `_Unknown`, `_TRUSTED_MODULES`, the `exec` paragraph of the
    `_type_extractor` docstring and `tests/_static_only.py`.
-8. **Remove `type-modules`** and the `type_modules` parameter of `check_source`,
+9. **Remove `type-modules`** and the `type_modules` parameter of `check_source`,
    `breaking_source`, `extract_type_definitions` and `HelperIndex.row_type`. A config
    that still sets it fails as any unknown key does; the error names this change.
 
@@ -111,6 +116,7 @@ Each phase is one pull request, green on the full CI and on `No-exec harness int
 | 1 | Symbol table + resolver for one module; string annotations | `make test-static-only`: `static_resolution.md` sections *Local aliases* and *String annotations* pass |
 | 2 | Helper modules through the symbol table | `make test-static-only`: `test_cross_module.py`, `generic_fields.md`, *Other modules* pass |
 | 3 | Stdlib classes from typeshed; user classes in the symbol table (still unknown to `compat`) | `make test-static-only`: *Standard library classes* pass; drift test green |
+| 3b | Pydantic types ([#783](https://github.com/jirikuncar/sqlty/issues/783)); pydantic in the `dev` group | The done criteria of #783 |
 | 4 | Delete the sandbox; collapse `TypeInfo`; rewrite the 19 internal tests to assert behavior or `field_types`; remove `type-modules`; tighten *User classes*; docs | [Definition of done](#definition-of-done) |
 
 In phases 1 to 3 the sandbox still runs, so `make test` stays green and only
