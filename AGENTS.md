@@ -18,6 +18,7 @@ uv run prek run --all-files        # all hooks (run before every commit)
 - `SQL[T]` is a `str` subclass. It works anywhere a string works.
 - Every new feature gets an mdtest (see [Markdown tests](#markdown-tests-mdtest)).
 - Review rules for pull requests live in [REVIEW.md](REVIEW.md).
+- Plans live in `plans/`, named `YYYY-MM-DD-<slug>.md` after the day they were written.
 
 ## AI disclosure
 

@@ -34,7 +34,7 @@ Style, naming and refactoring suggestions are Nit at most.
 - Anything CI enforces: ruff, mypy, ty, rustfmt, clippy.
 - `uv.lock`, `rust/Cargo.lock` and expected values filled in by
   `make update-mdtest` or `--inline-snapshot=update`, unless they contradict the change.
-- `PLAN-FUTURE.md`.
+- `plans/2026-02-13-future.md`.
 
 ## Cap the nits
 
