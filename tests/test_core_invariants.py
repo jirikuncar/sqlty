@@ -41,6 +41,7 @@ def _corpus(kind: str) -> list[Any]:
                 "import_style": settings.get("import-style"),
                 "untyped": settings.get("untyped") == "sentinel",
                 "json_types": settings.get("json-types", "typing.Any"),
+                "param_types": settings.get("param-types", False),
             }
             units = [u for u in section.units if u.lang == kind]
             for i, unit in enumerate(units):
@@ -298,7 +299,9 @@ def test_skipping_the_rust_checker_changes_no_diagnostics(
         core.strip_source(source, import_style=style),
         core.fix_source(source, **options),
     ]
-    checked = {key: value for key, value in options.items() if key != "json_types"}
+    checked = {
+        key: value for key, value in options.items() if key not in ("json_types", "param_types")
+    }
     with_shortcut = [core.check_source(text, **checked) for text in variants]
     monkeypatch.setattr(ParsedSource, "may_need_rust_check", lambda self, import_style=None: True)
     assert with_shortcut == [core.check_source(text, **checked) for text in variants]
