@@ -103,7 +103,7 @@ test-e2e:
 	uv run pytest tests/e2e/ -v
 
 .PHONY: check-no-exec-harness
-check-no-exec-harness:  ## Fail if this branch weakened the no-exec harness (plans/2026-10-27-no-exec.md)
+check-no-exec-harness:  ## Fail if this branch weakened the no-exec harness (AGENTS.md#no-exec)
 	uv run python scripts/check_no_exec_harness.py origin/main
 
 .PHONY: test-coverage
