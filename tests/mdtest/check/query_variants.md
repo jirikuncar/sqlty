@@ -1,6 +1,6 @@
 # Query variants from branches
 
-Acceptance spec of [PLAN-QUERY-VARIANTS.md](../../../PLAN-QUERY-VARIANTS.md). A query built
+Acceptance spec of [the query variants plan](../../../plans/2026-10-27-query-variants.md). A query built
 from names bound in branches is checked once per variant. Sections marked `mdtest:xfail`
 are strict: remove the marker when the section passes, and change nothing else
 (`tests/test_query_variants_spec.py`).

@@ -169,7 +169,7 @@ indent-style = "space"
 [tool.rumdl]
 # Long lines are tables and links; spaces in code spans show `--sql ` on purpose.
 disable = ["MD013", "MD038"]
-exclude = ["site", ".vale", ".github", "tests", "scripts/compat/reports", "PLAN-FUTURE.md", "rust/target", "proofs/.lake"]
+exclude = ["site", ".vale", ".github", "tests", "scripts/compat/reports", "plans/2026-02-13-future.md", "rust/target", "proofs/.lake"]
 
 [tool.rumdl.per-file-ignores]
 # The demo GIF needs HTML for its width and centering.

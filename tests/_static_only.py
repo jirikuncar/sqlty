@@ -2,7 +2,7 @@
 
     uv run pytest -p tests._static_only
 
-Delete it with ``sandbox.py``. See PLAN-NO-EXEC.md.
+Delete it with ``sandbox.py``. See plans/2026-10-27-no-exec.md.
 """
 
 from __future__ import annotations
