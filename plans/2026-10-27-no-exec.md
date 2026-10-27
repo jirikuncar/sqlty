@@ -1,6 +1,6 @@
 # Plan: resolve row types statically, without `exec`
 
-> **Status:** harness merged first; implementation not started.
+> **Status:** phase 1 (symbol table for one module, string annotations) done.
 > Owner: @jirikuncar. Epic: [#784](https://github.com/jirikuncar/sqlty/issues/784); every pull request of this plan links it.
 
 ## Goal
