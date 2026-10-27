@@ -16,6 +16,7 @@ if typing.TYPE_CHECKING:
     pass
 
 from sqlty._type_extractor.info import TypeInfo
+from sqlty._type_extractor.stdlib import stdlib_class
 from sqlty._type_extractor.subtype import _QUALIFIERS, _consistent, _is_subtype, _type_repr
 
 _TYPING_MODULES = frozenset({"typing", "typing_extensions"})
@@ -430,8 +431,9 @@ def _ast_type(
         except SyntaxError:
             return None
         return _ast_type(parsed, aliases, newtypes, imports)
-    if imports and (tp := _IMPORTED_TYPES.get(_qualname(node, imports) or "")):
-        return tp
+    if imports and (qualname := _qualname(node, imports)):
+        if tp := _IMPORTED_TYPES.get(qualname) or stdlib_class(qualname):
+            return tp
     if isinstance(node, (ast.Name, ast.Attribute)) and (
         (found := newtypes.get(_qualname(node, {}) or "")) is not None
         and not isinstance(found, ast.AST)

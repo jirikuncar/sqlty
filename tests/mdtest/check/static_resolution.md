@@ -187,6 +187,29 @@ class Row(TypedDict):
 q = SQL[Row]("--sql\nSELECT 1::INTEGER AS path, 'x'::TEXT AS ratio")
 ```
 
+### Derived from a column type
+
+A class keeps the column types it derives from: a `StrEnum` field wants an enum
+member, not any `str`, and an `OrderedDict` takes what a `dict` takes.
+
+```python
+import collections
+import enum
+from typing import TypedDict
+from sqlty import SQL
+
+class Row(TypedDict):
+    color: enum.StrEnum
+    level: enum.IntEnum
+    data: collections.OrderedDict
+    other: collections.OrderedDict
+
+# error: [column-type-mismatch] "Row.color is enum.StrEnum but query column 'color' infers str"
+# error: [column-type-mismatch] "Row.level is enum.IntEnum but query column 'level' infers int"
+# error: [column-type-mismatch] "Row.other is collections.OrderedDict but query column 'other' infers int"
+q = SQL[Row]("--sql\nSELECT 'x'::TEXT AS color, 1::INTEGER AS level, '{}'::JSONB AS data, 1::INTEGER AS other")
+```
+
 ## User classes
 
 ### Subclass of a builtin
