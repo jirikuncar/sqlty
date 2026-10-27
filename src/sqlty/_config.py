@@ -19,6 +19,7 @@ TOOL_KEYS = (
     "import-style",
     "untyped",
     "json-types",
+    "param-types",
     "type-modules",
     "preview",
     "max-query-variants",
@@ -95,6 +96,12 @@ KEY_DOCS: dict[str, KeyDoc] = {
         '`"typing.Any"`',
         "`rewrite`, `check --fix`",
         "How a JSON column of known shape is typed: `typing.Any`, or a generated `TypedDict`",
+    ),
+    "param-types": KeyDoc(
+        "`true`, `false`",
+        "`false`",
+        "`rewrite`, `check --fix`",
+        "Whether `SQL[R]` calls get the type of their parameters, `SQL[R, P]`",
     ),
     "type-modules": KeyDoc(
         "list of strings",
@@ -275,6 +282,8 @@ def validate_tool_table(table: dict[str, Any], source: str) -> None:
                     f"{where}; expected one of: {', '.join(severities)}"
                 )
 
+    if not isinstance(table.get("param-types", False), bool):
+        raise ConfigError(f"{source}: [tool.sqlty] param-types must be true or false")
     if not isinstance(table.get("preview", False), bool):
         raise ConfigError(f"{source}: [tool.sqlty] preview must be true or false")
     limit = table.get("max-query-variants", MAX_QUERY_VARIANTS)
@@ -400,6 +409,7 @@ class SQLTyConfig(TypedDict, total=False):
     json_types: (
         str  # "typing.Any" (default) or "typing.TypedDict": generated TypedDicts for JSON columns
     )
+    param_types: bool  # write the P of SQL[R, P]: a tuple, or a generated TypedDict
     type_modules: list[str]  # modules whose imports may run to resolve row types
     preview: bool  # features still in preview: query variants, Pydantic types
     max_query_variants: int  # the most variants of a query built in branches that check checks
@@ -646,6 +656,9 @@ def _parse_table(tool_config: dict[str, Any], source: str) -> SQLTyConfig:
 
     if "json-types" in tool_config:
         config["json_types"] = str(tool_config["json-types"])
+
+    if "param-types" in tool_config:
+        config["param_types"] = bool(tool_config["param-types"])
 
     if "types" in tool_config and isinstance(tool_config["types"], dict):
         config["types"] = {str(k): str(v) for k, v in tool_config["types"].items()}

@@ -37,6 +37,7 @@ class Run:
         self.import_style: str | None = settings.get("import-style")
         self.untyped: bool = settings.get("untyped") == "sentinel"
         self.json_types: str = settings.get("json-types", "typing.Any")
+        self.param_types: bool = settings.get("param-types", False)
         self.rules: dict[str, str] | None = settings.get("rules")
         self.type_modules: list[str] | None = settings.get("type-modules")
         # Preview is on unless a section turns it off: the suite asserts it changes nothing else.
@@ -140,6 +141,7 @@ class Run:
             untyped=self.untyped,
             rules=self.rules,
             json_types=self.json_types,
+            param_types=self.param_types,
         )
 
     def _rewrite(self, text: str) -> str:
@@ -150,6 +152,7 @@ class Run:
             import_style=self.import_style,
             untyped=self.untyped,
             json_types=self.json_types,
+            param_types=self.param_types,
         )
 
     @cached_property

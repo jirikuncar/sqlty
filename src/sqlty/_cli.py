@@ -438,6 +438,7 @@ def _cmd_rewrite(args: argparse.Namespace) -> None:
             import_style=settings.import_style,
             untyped=settings.untyped,
             json_types=settings.json_types,
+            param_types=settings.param_types,
         )
         if args.quiet:
             return rewritten, []
@@ -627,6 +628,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
             untyped=settings[path].untyped,
             rules=settings[path].rules,
             json_types=settings[path].json_types,
+            param_types=settings[path].param_types,
             helpers=file_helpers[path],
         )
 
@@ -1182,6 +1184,7 @@ class Settings:
     import_style: str | None = None
     untyped: bool = False
     json_types: str = "typing.Any"
+    param_types: bool = False
     rules: dict[str, str] | None = None
     type_modules: tuple[str, ...] = ()
     query_variants: int | None = None
@@ -1295,6 +1298,7 @@ class SettingsResolver:
             import_style=import_style,
             untyped=untyped == "sentinel",
             json_types=json_types,
+            param_types=bool(config.get("param_types")),
             rules=config.get("rules"),
             type_modules=tuple(config.get("type_modules", ())),
             query_variants=config.get("max_query_variants", MAX_QUERY_VARIANTS)
