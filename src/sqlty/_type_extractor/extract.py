@@ -23,6 +23,7 @@ from sqlty._type_extractor.ast_fields import (
     _lax_fields,
     _lineage,
     _metadata_defaults,
+    _module_types,
     _newtype_assignments,
     _own_openness,
     _pydantic_config,
@@ -81,7 +82,8 @@ def extract_type_definitions(
 
     aliases = parsed.typing_aliases
     imports = parsed.imported_names
-    newtypes: dict[str, ast.Assign | typing.Any] = dict(_newtype_assignments(tree, aliases))
+    newtypes = set(_newtype_assignments(tree, aliases))
+    names: dict[str, ast.Assign | ast.expr | typing.Any] = dict(_module_types(tree, aliases))
 
     # Phase 1: AST scan — find recognized classes; TypedDict subclasses
     # are recognized when their base is a TypedDict defined earlier or imported
@@ -126,7 +128,7 @@ def extract_type_definitions(
     if helpers is not None and helpers.type_modules != extra:
         helpers.type_modules = extra
         helpers.namespaces.clear()
-    import_stmts = _namespace_statements(tree, set(newtypes), helpers, module, extra)
+    import_stmts = _namespace_statements(tree, newtypes, helpers, module, extra)
     if helpers is not None:
         # A NewType imported from a checked module, read from its source, for the AST
         # fallback (a BaseModel without pydantic installed).
@@ -134,7 +136,7 @@ def extract_type_definitions(
         for stmt in import_stmts:
             if isinstance(stmt, _Import) and stmt.module and stmt.name and stmt.local in used:
                 if isinstance(tp := _import_value(helpers, stmt), typing.NewType):
-                    newtypes.setdefault(stmt.local, tp)
+                    names.setdefault(stmt.local, tp)
 
     # Phase 3: For each class, try runtime resolution then fall back to AST
     result: dict[str, TypeInfo] = {}
@@ -181,7 +183,7 @@ def extract_type_definitions(
         if configs:
             config = {key: value for c in configs for key, value in c.items()}
             info.lax = frozenset().union(*(_lax_fields(n, config, aliases, imports) for n in nodes))
-        info.field_types = _ast_key_types(nodes, aliases, newtypes, imports)
+        info.field_types = _ast_key_types(nodes, aliases, names, imports)
         info.annotations = _ast_annotations(nodes, aliases)
         for parent in (p for p in parents if p.module != module):
             info.field_types = parent.field_types | info.field_types
@@ -212,7 +214,7 @@ def extract_type_definitions(
             else:
                 hints = info.field_types
                 own_type = (
-                    _ast_type(own.extra_node, aliases, newtypes) if own and own.extra_node else None
+                    _ast_type(own.extra_node, aliases, names) if own and own.extra_node else None
                 )
             header = _header_errors(info.name, keywords, own, own_type, parents)
             info.errors = list(dict.fromkeys(header + _key_errors(info, hints, parents)))
