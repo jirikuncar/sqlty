@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 from sqlty._params import ParamArg, arg_type, literal_params
 from sqlty._psycopg import UNCHECKED
 from sqlty._source import ParsedSource
+from sqlty._variants import Unchecked, Variant, query_variants
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
@@ -70,6 +71,9 @@ class HelperCall(NamedTuple):
     or the call does not spell them out. ``driver`` names the driver of a recognised
     ``execute``-like call, and ``single`` the type of a single value it passes where the
     driver takes a sequence or a mapping of parameters.
+
+    With query variants on, ``variants`` holds every query a call built in branches can
+    run, ``query`` being the first; ``reason`` says why such a call is not checked.
     """
 
     line: int
@@ -81,6 +85,8 @@ class HelperCall(NamedTuple):
     driver: str | None = None
     single: str | None = None
     dynamic: bool = False
+    variants: tuple[Variant, ...] = ()
+    reason: str | None = None
 
     @property
     def typed_lines(self) -> range:
@@ -575,12 +581,18 @@ def _call_params(
 
 
 def find_helper_calls(
-    source: str | ParsedSource, helpers: HelperIndex | None = None, module: str | None = None
+    source: str | ParsedSource,
+    helpers: HelperIndex | None = None,
+    module: str | None = None,
+    *,
+    variants: int | None = None,
 ) -> list[HelperCall]:
     """Calls passing a string literal to a marked query parameter.
 
     Helpers defined in ``source`` count, and so do those of ``helpers`` that
-    ``source`` imports (``module`` is its name, for relative imports).
+    ``source`` imports (``module`` is its name, for relative imports). With
+    ``variants``, a query built from names bound in branches is read on every path,
+    up to that many variants (``query_variants``).
 
     Example:
         >>> src = '''
@@ -709,15 +721,22 @@ def find_helper_calls(
             pending.append((node, helper, query))
     for node, helper, query in pending:
         text = scan.render(query, resolve_fragment) if scan is not None else None
-        calls.append(
-            HelperCall(
-                node.lineno,
-                None if text == UNCHECKED else text,
-                _argument(helper, node, helper.row),
-                aliases,
-                _call_params(helper, node, parsed),
-                node.end_lineno,
-                dynamic=text is None,
-            )
+        call = HelperCall(
+            node.lineno,
+            None if text == UNCHECKED else text,
+            _argument(helper, node, helper.row),
+            aliases,
+            _call_params(helper, node, parsed),
+            node.end_lineno,
+            dynamic=text is None,
         )
+        if variants is not None and (text is None or text == UNCHECKED):
+            found = query_variants(parsed, node, query, variants, resolve_fragment)
+            if isinstance(found, Unchecked):
+                call = call._replace(
+                    reason=found.reason, dynamic=call.dynamic and not found.composed
+                )
+            else:
+                call = call._replace(query=found[0].query, dynamic=False, variants=tuple(found))
+        calls.append(call)
     return sorted(calls, key=lambda call: call.line)

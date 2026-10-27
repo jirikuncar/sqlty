@@ -375,6 +375,7 @@ def check_source(
     module: str | None = None,
     type_modules: Iterable[str] | None = None,
     row_usage: RowUsage | None = None,
+    query_variants: int | None = None,
 ) -> list[Diagnostic]:
     """Check Python source for SQL type issues.
 
@@ -412,6 +413,12 @@ def check_source(
     across files, pass one ``RowUsage`` to every call and drop what its ``filter`` drops
     once all files are checked.
 
+    ``query_variants`` (the ``preview`` key, up to ``max-query-variants``) checks a query
+    a helper call builds from names bound in branches once per variant: each path through
+    ``if``, ``match`` and conditional expressions gives one. A diagnostic of some variants
+    only names the lines that select one: ``(variant: line 11)``. A call with more variants
+    is ``dynamic-query`` (``unchecked-query`` for a psycopg composition).
+
     Example:
         >>> check_source('q = SQL[tuple[str]]("--sql\\nSELECT * FROM users")  # sqlty: ignore[select-star-no-schema]')
         []
@@ -434,6 +441,7 @@ def check_source(
         module=module or parsed.module,
         type_modules=type_modules,
         row_usage=row_usage or (usage := RowUsage()),
+        variants=query_variants,
     )
     diagnostics = apply_suppressions(parsed, diagnostics, rules)
     return diagnostics if row_usage else usage.filter(diagnostics)
@@ -454,6 +462,7 @@ def breaking_source(
     helpers: HelperIndex | None = None,
     module: str | None = None,
     type_modules: Iterable[str] | None = None,
+    query_variants: int | None = None,
 ) -> list[Diagnostic]:
     """The diagnostics ``source`` gets against ``against_sql`` but not against its own
     ``schema_sql``: what a schema change breaks, as ``sqlty breaking`` reports it.
@@ -484,6 +493,7 @@ def breaking_source(
             helpers=helpers,
             module=module,
             type_modules=type_modules,
+            query_variants=query_variants,
         )
 
     own = {(d.get("line"), d["rule"], d["message"]) for d in check(schema_sql)}
@@ -505,13 +515,15 @@ def query_statistics(
     import_style: str | None = None,
     helpers: HelperIndex | None = None,
     module: str | None = None,
+    query_variants: int | None = None,
 ) -> Counter[str]:
     """How the queries of ``source`` fare, as ``sqlty check --statistics`` counts them.
 
     Counts ``typed`` queries, ``partially typed`` ones (a column's type is
     unknown), ``unparsed`` ones, and skipped strings by rule
     (``fstring-skipped``, ``tstring-skipped``, ``unchecked-query``, ``dynamic-query``). Queries
-    that return no rows are not counted.
+    that return no rows are not counted. Each variant of a query built in branches
+    (``query_variants``, as in ``check_source``) counts as a query.
 
     Example:
         >>> query_statistics('q = SQL[tuple[int]]("--sql\\\\nSELECT id::INTEGER FROM users")')
@@ -526,14 +538,14 @@ def query_statistics(
             counts[kind] += 1
         elif outcome := _outcome(text, dialect, schema_sql):
             counts[outcome] += 1
-    for call in find_helper_calls(parsed, helpers, module):
+    for call in find_helper_calls(parsed, helpers, module, variants=query_variants):
         if call.query is None:
             if not is_any_row(call):
                 counts["dynamic-query" if call.dynamic else "unchecked-query"] += 1
-        elif not MARKER.match(call.query) and (
-            outcome := _outcome(call.query, dialect, schema_sql)
-        ):
-            counts[outcome] += 1
+            continue
+        for query in [v.query for v in call.variants] or [call.query]:
+            if not MARKER.match(query) and (outcome := _outcome(query, dialect, schema_sql)):
+                counts[outcome] += 1
     return counts
 
 

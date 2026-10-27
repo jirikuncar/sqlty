@@ -724,9 +724,14 @@ composition, opts out explicitly.
 
 Default: ignore. A helper call whose query is not a string literal: a variable, a
 constant, a call or a concatenation. sqlty does not check it. A helper's own query
-parameter, forwarded to another helper, is not reported.
+parameter, forwarded to another helper, is not reported. With `preview`, a query built
+from literals is checked along every path instead ([Query variants](../guide/query-variants.md)),
+and one with more variants than `max-query-variants` is reported here.
 
 ```toml
+[tool.sqlty]
+preview = false
+
 [tool.sqlty.rules]
 dynamic-query = "warn"
 ```
