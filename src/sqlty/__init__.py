@@ -2,7 +2,7 @@
 
 import sys
 from string.templatelib import Template
-from typing import get_args, overload
+from typing import TYPE_CHECKING, Any, NamedTuple, get_args, overload
 
 if sys.version_info >= (3, 15):
     from typing import TypeForm
@@ -25,11 +25,36 @@ def __getattr__(name: str) -> str:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["SQL", "UNTYPED", "SQLTemplate", "row_form"]
+__all__ = ["SQL", "UNTYPED", "Bound", "SQLTemplate", "row_form"]
 
 
-class SQL[T](str):
-    pass
+class SQL[R, P = Any](str):
+    """A query whose rows are ``R`` and whose parameters are ``P``.
+
+    ``P`` defaults to ``Any``, so ``SQL[R]`` takes any parameters. A query is typed like a
+    function from ``P`` to ``R``: ``SQL[R1, P1]`` fits ``SQL[R2, P2]`` when ``R1`` fits ``R2``
+    and ``P2`` fits ``P1``. Positional parameters are a ``tuple``, named ones a ``TypedDict``.
+
+    Example:
+        >>> query = SQL[tuple[str], tuple[int]]("--sql\\nSELECT name::TEXT FROM users WHERE id = %s")
+        >>> query.bind((1,)).params
+        (1,)
+    """
+
+    if TYPE_CHECKING:
+
+        def __sqlty_row__(self) -> R: ...
+
+    def bind(self, params: P, /) -> Bound[R]:
+        """The query with ``params``, checked against ``P``: ``cursor.execute(*bound)`` runs it."""
+        return Bound(self, params)
+
+
+class Bound[R](NamedTuple):
+    """A query and its parameters, from ``SQL.bind``."""
+
+    query: SQL[R]
+    params: Any
 
 
 class SQLTemplate[T]:
