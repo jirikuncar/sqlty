@@ -301,6 +301,38 @@ def find(a: bool, b: bool, c: bool, d: bool, e: bool, f: bool, g: bool) -> list[
     return fetch_all(query, tuple[int])
 ```
 
+## A branch with a value that is not static
+
+One such branch leaves the whole query unchecked.
+
+```python
+from typing import LiteralString
+
+from db import fetch_all
+
+
+def build(foo: str) -> LiteralString: ...
+
+
+def by_call(foo: str | None) -> list[tuple[int]]:
+    cond: LiteralString
+    if foo is None:
+        cond = "foo IS NULL"
+    else:
+        cond = build(foo)
+    # error: [dynamic-query]
+    return fetch_all("SELECT id FROM foos WHERE " + cond, tuple[int])
+
+
+def by_fstring(n: int | None) -> list[tuple[int]]:
+    if n is None:
+        cond = "n IS NULL"
+    else:
+        cond = f"n = {n}"
+    # error: [dynamic-query]
+    return fetch_all("SELECT id FROM foos WHERE " + cond, tuple[int])
+```
+
 ## A loop stays dynamic
 
 Not modelled, so sqlty does not guess.

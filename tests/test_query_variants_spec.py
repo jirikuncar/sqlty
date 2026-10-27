@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 SPEC = Path(__file__).parent / "mdtest" / "check" / "query_variants.md"
-DIGEST = "10986acf02acb33a70465f6847e81c8ae1c20bbfb72008d0c1e73238789076ea"
+DIGEST = "d8b5de7e86d2b92a8ea2beb05f874f82ef95e62b4753482369770e11d86dab5e"
 
 
 def _normalized(text: str) -> str:

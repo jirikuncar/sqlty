@@ -71,6 +71,19 @@ It is demand-driven: only names the query expression reads are tracked.
 | Call of a function of the module (or a checked module) returning `LiteralString` | union of its `return` variants, with the arguments bound to its parameters; depth-bounded |
 | Same condition (`ast.dump` equal, none of its names reassigned between) tested twice | same branch both times |
 
+### Static values
+
+Stage 1 requires every branch to bind a static value, built only from:
+
+- a string literal (no f-string or t-string);
+- `+` and `+=` of static values;
+- a name whose every binding on the path is static.
+
+A branch binding anything else (a call, a parameter, a subscript, an f-string) leaves the
+query `dynamic-query`/`unchecked-query`: no variant is checked, the others included.
+Later stages widen the set with `Literal` parameters, literal dict lookups and function
+returns (rows below).
+
 Anything else touching a tracked name (`for`/`while` body, `with ... as`, walrus,
 `global`/`nonlocal`, `del`, `try`, a call mutating it) keeps today's result:
 `dynamic-query` or `unchecked-query`. Never a partial check.
@@ -106,13 +119,14 @@ Anything else touching a tracked name (`for`/`while` body, `with ... as`, walrus
 Each phase is one commit that keeps the whole suite green and removes the `xfail`
 markers of the spec sections it implements.
 
-0. **Spike** (no product code): confirm the psycopg notes above against the installed
-   psycopg; record what pyright and ty infer for the example at the join; measure
+0. **Spike** (no product code): psycopg notes confirmed on psycopg 3.2.12; record what pyright and ty infer for the example at the join; measure
    `find_helper_calls` on `benchmarks/` to set the perf budget.
-1. **Evaluator**: `_variants.py` with `if`/`else`, `IfExp`, kills, return/raise
-   pruning, cap. Sections: if/else, mismatch in one/every variant, reassigned, cap.
+1. **Evaluator over static values** (see [Static values](#static-values)): `_variants.py`
+   with `if`/`else`, `IfExp`, `+=`, kills, return/raise pruning, cap. Sections: if/else,
+   mismatch in one/every variant, reassigned, augmented assignment, cap; "A branch with a
+   value that is not static" must keep passing.
 2. **match, elif, correlation**: sections match/case, elif, names together, condition twice.
-3. **String building**: `+=`, `Literal` parameters, dict lookup. Sections accordingly.
+3. **Enumerated inputs**: `Literal` parameters, dict lookup. Sections accordingly.
 4. **Functions**: return variants with argument binding. Section: function fragment.
 5. **psycopg**: route `_psycopg.py` through the evaluator. Section: psycopg composition.
 6. **Docs**: `docs/guide/` page section, `dynamic-query`/`unchecked-query` rule pages,
@@ -154,6 +168,8 @@ What keeps an implementation honest, in order of strength:
 - [ ] Every section of `query_variants.md` passes with no `xfail` marker left, and the
       frozen digest still matches.
 - [ ] Differential oracle passes at `SQLTY_FUZZ_EXAMPLES=5000`.
+- [ ] A branch binding a value that is not static leaves the query unchecked, all
+      variants included.
 - [ ] Unmodelled constructs (loops, `try`, `with`, walrus, mutation) still report
       `dynamic-query`/`unchecked-query`; no check runs on a partial set of variants.
 - [ ] Diagnostics follow the reporting rules above, wording included.
