@@ -1,11 +1,11 @@
-"""The acceptance spec of PLAN-QUERY-VARIANTS.md is frozen: only its xfail markers may go."""
+"""The acceptance spec of plans/2026-10-27-query-variants.md is frozen: only its xfail markers may go."""
 
 import hashlib
 import re
 from pathlib import Path
 
 SPEC = Path(__file__).parent / "mdtest" / "check" / "query_variants.md"
-DIGEST = "d8b5de7e86d2b92a8ea2beb05f874f82ef95e62b4753482369770e11d86dab5e"
+DIGEST = "febd8cbfaa94e556c05669a8b7d08535eba12fbb0a27e982583861ebeb101424"
 
 
 def _normalized(text: str) -> str:

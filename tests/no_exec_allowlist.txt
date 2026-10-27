@@ -1,5 +1,5 @@
 # Functions of src/sqlty that still execute or evaluate user code, as module:qualname.
-# Remove a line with the code it names; never add one. See PLAN-NO-EXEC.md.
+# Remove a line with the code it names; never add one. See plans/2026-10-27-no-exec.md.
 sqlty._type_extractor.sandbox:_own_extra_type
 sqlty._type_extractor.sandbox:_populate.<locals>.flush
 sqlty._type_extractor.sandbox:_resolve_class
