@@ -614,7 +614,7 @@ dependencies = [
 
 [[package]]
 name = "sqlty-bench"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "criterion",
  "sqlty-python",
@@ -623,7 +623,7 @@ dependencies = [
 
 [[package]]
 name = "sqlty-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "pyo3",
  "recursive",
@@ -635,7 +635,7 @@ dependencies = [
 
 [[package]]
 name = "sqlty-python"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "regex",
  "sqlty-sql",
@@ -644,7 +644,7 @@ dependencies = [
 
 [[package]]
 name = "sqlty-sql"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "insta",
  "recursive",
