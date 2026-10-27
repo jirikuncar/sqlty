@@ -178,6 +178,10 @@ class _Module:
             types.append(
                 (field["name"], f"typing.NotRequired[{text}]" if field["optional"] else text)
             )
+        return self.named_class(types, name)
+
+    def named_class(self, types: list[tuple[str, str]], name: str) -> str:
+        """The name of a ``TypedDict`` class with fields ``types``, written once per module."""
         for candidate in [name, *(f"{name}{n}" for n in range(2, 100))]:
             code = _class(candidate, types)
             body = ast.unparse(ast.parse(code).body[0])
