@@ -721,6 +721,11 @@ struct DiagnosticOut {
     message: String,
     severity: &'static str,
     line: usize,
+    /// Byte offsets of what it underlines.
+    start: usize,
+    end: usize,
+    /// `(start, end, replacement)` byte edits that fix it; empty when it has no fix.
+    fix: Vec<(usize, usize, String)>,
 }
 
 /// Check Python source for SQL type issues.
@@ -729,7 +734,9 @@ struct DiagnosticOut {
 /// `typing.Any`; they are not reported as `unchecked-query`.
 ///
 /// Returns:
-///     List of diagnostic dicts with keys: rule, message, severity, line
+///     List of diagnostic dicts with keys: rule, message, severity, line, start, end
+///     (byte offsets of what it underlines) and fix (`(start, end, replacement)` byte edits,
+///     with the imports the fix needs, so it can be applied on its own)
 ///
 /// Raises:
 ///     ValueError: unsupported import_style, or `rules` names an unknown rule or severity
@@ -758,22 +765,31 @@ fn check_source(
         let schema = schema_for(source, schema_sql, dialect);
         let options = Options::new(dialect, schema.as_deref(), import_style, untyped)?;
         let rules = RuleConfig::from_overrides(rules).map_err(ConfigError::from)?;
-        Ok(checker::check_source(source, &options, &rules, &any_calls)
+        let mut diagnostics = checker::check_source(source, &options, &rules, &any_calls);
+        checker::add_fix_imports(source, &options, &mut diagnostics);
+        Ok(diagnostics
             .into_iter()
             .map(|diag| DiagnosticOut {
                 rule: diag.rule.name(),
                 message: diag.message,
                 severity: diag.severity.as_str(),
                 line: diag.line,
+                start: diag.span.start,
+                end: diag.span.end,
+                fix: diag
+                    .fix
+                    .into_iter()
+                    .map(|edit| (edit.range.start, edit.range.end, edit.replacement))
+                    .collect(),
             })
             .collect())
     })
 }
 
-/// `(line, annotation, query)` for each `SQL[T](...)` call in Python source.
+/// `(line, annotation, query, annotation_span)` for each `SQL[T](...)` call in Python source.
 ///
 /// `query` is the `--sql` string without its prefix, or None when the call
-/// doesn't hold a one-line `--sql` string.
+/// doesn't hold a one-line `--sql` string; `annotation_span` is the byte offsets of `T`.
 ///
 /// Raises:
 ///     ValueError: unsupported import_style
@@ -783,7 +799,7 @@ fn wrapped_queries(
     py: Python<'_>,
     source: &str,
     import_style: Option<&str>,
-) -> Result<Vec<(usize, String, Option<String>)>, Error> {
+) -> Result<Vec<checker::WrappedQuery>, Error> {
     detach(py, || {
         let style = ImportStyle::parse(import_style)?;
         Ok(checker::wrapped_queries(source, &style))

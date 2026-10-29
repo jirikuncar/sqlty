@@ -212,7 +212,7 @@ sqlty check [-h] [--dialect DIALECT] [--schema SCHEMA]
 | `--error-on-warning` | Exit 1 when any diagnostic has severity warn; cannot be combined with --exit-zero or --exit-zero-on-warning |
 | `--statistics` | After the summary, print how many queries were typed, partially typed, unparsed and skipped |
 | `--explain` | Under a type diagnostic, print the inference rule (id, reference, reasoning) behind each column's type and nullability |
-| `--output-format {text,json,github}` | How diagnostics are printed: text (file:line: [rule] message, the default), json (an array of objects with file, line, rule, severity and message) or github (GitHub Actions annotations). Summaries, --statistics and --explain are text only |
+| `--output-format {text,json,github}` | How diagnostics are printed: text (file:line: [rule] message, the default), json (an array of objects with file, line, rule, severity, message, the start and end of what it underlines, and the fix edits) or github (GitHub Actions annotations). Summaries, --statistics and --explain are text only |
 <!-- /generated:cli-options-check -->
 
 With `--statistics`, the last line counts the queries of the checked files:
