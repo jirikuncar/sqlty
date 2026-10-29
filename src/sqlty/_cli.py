@@ -187,7 +187,8 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["text", "json", "github"],
         default="text",
         help="How diagnostics are printed: text (file:line: [rule] message, the default), json "
-        "(an array of objects with file, line, rule, severity and message) or github (GitHub "
+        "(an array of objects with file, line, rule, severity, message, the start and end of what "
+        "it underlines, and the fix edits) or github (GitHub "
         "Actions annotations). Summaries, --statistics and --explain are text only",
     )
 
@@ -685,7 +686,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
         elif severity == "warn":
             total_warnings += 1
         if args.output_format == "json":
-            shown.append({"file": str(path), **diag})
+            shown.append({"file": str(path), **json_diagnostic(diag, parsed)})
         elif args.output_format == "github":
             print(github_annotation(path, diag))
         elif not args.quiet:
@@ -714,6 +715,20 @@ def _cmd_check(args: argparse.Namespace) -> None:
         sys.exit(EXIT_FOUND)
     if unreadable:
         sys.exit(EXIT_ERROR)
+
+
+def json_diagnostic(diag: Diagnostic, parsed: ParsedSource) -> dict[str, object]:
+    """``diag`` for ``--output-format json``: its offsets as 1-based lines and columns."""
+
+    def at(offset: int) -> dict[str, int]:
+        line, column = parsed.position(offset)
+        return {"line": line, "column": column}
+
+    fix = [
+        {"start": at(start), "end": at(end), "replacement": text}
+        for start, end, text in diag["fix"]
+    ]
+    return {**diag, "start": at(diag["start"]), "end": at(diag["end"]), "fix": fix}
 
 
 def github_annotation(path: Path, diag: Diagnostic) -> str:

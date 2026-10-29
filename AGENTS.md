@@ -241,6 +241,9 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 - `# error:` takes a rule, a message substring, or both. A test with any
   `# error:` fails on every diagnostic it doesn't assert; a bare `# error:`
   asserts there are none.
+- `# error[9:19]:` also asserts the columns the diagnostic underlines (`start`
+  and `end`): 1-based characters, the end one past the last. A column on another
+  line than the diagnostic's is written `+1.5`. `make update-mdtest` drops ranges.
 
 ### Workflow
 

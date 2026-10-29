@@ -39,6 +39,7 @@ Example:
 from __future__ import annotations
 
 import ast
+import bisect
 import functools
 import io
 import itertools
@@ -58,10 +59,15 @@ _IGNORE_RE = re.compile(r"#\s*sqlty:\s*ignore\b(?:\[([^\]]*)\])?")
 
 @dataclass(frozen=True)
 class _Ignore:
-    """A ``# sqlty: ignore`` comment; ``rules`` is ``None`` for a bare one."""
+    """A ``# sqlty: ignore`` comment; ``rules`` is ``None`` for a bare one.
+
+    ``start`` and ``end`` are the byte offsets of the comment.
+    """
 
     line: int
     rules: tuple[str, ...] | None
+    start: int
+    end: int
 
 
 def is_any(node: ast.expr, aliases: dict[str, str]) -> bool:
@@ -386,6 +392,59 @@ class ParsedSource:
         start = lines[node.lineno - 1] + node.col_offset
         return self.text[start : lines[node.end_lineno - 1] + node.end_col_offset]
 
+    def span(self, node: ast.expr | ast.stmt) -> tuple[int, int]:
+        """The byte offsets (UTF-8) of ``node`` in the text.
+
+        Example:
+            >>> parsed = ParsedSource("x = 1\\nf('é', g)")
+            >>> parsed.span(parsed.calls[0].args[1])
+            (14, 15)
+        """
+        starts = self._byte_lines
+        start = starts[node.lineno - 1] + node.col_offset
+        end_line, end_col = node.end_lineno, node.end_col_offset
+        if end_line is None or end_col is None:
+            return start, start
+        return start, starts[end_line - 1] + end_col
+
+    def line_span(self, line: int) -> tuple[int, int]:
+        """The byte offsets of the 1-based ``line`` without its indentation and line break.
+
+        Example:
+            >>> ParsedSource("x = 1\\n    y = 2\\n").line_span(2)
+            (10, 15)
+        """
+        starts = self._byte_lines
+        if not 0 < line < len(starts):
+            return starts[-1], starts[-1]
+        text = self._bytes[starts[line - 1] : starts[line]]
+        content = text.rstrip(b"\r\n")
+        start = starts[line - 1] + len(content) - len(content.lstrip())
+        return start, starts[line - 1] + len(content)
+
+    def position(self, offset: int) -> tuple[int, int]:
+        """The 1-based line and column of the byte ``offset``; the column counts characters.
+
+        Example:
+            >>> ParsedSource("x = 1\\nf('é', g)").position(14)
+            (2, 8)
+        """
+        starts = self._byte_lines
+        line = max(bisect.bisect_right(starts, offset, hi=len(starts) - 1), 1)
+        column = len(self._bytes[starts[line - 1] : offset].decode(errors="replace"))
+        return line, column + 1
+
+    @functools.cached_property
+    def _bytes(self) -> bytes:
+        return self.text.encode()
+
+    @functools.cached_property
+    def _byte_lines(self) -> list[int]:
+        """Byte offset of each line start, as ``ast`` counts lines, and the length after the last."""
+        return list(
+            itertools.accumulate(map(len, self._bytes.splitlines(keepends=True)), initial=0)
+        )
+
     @functools.cached_property
     def _ascii(self) -> bool:
         return self.text.isascii()
@@ -593,8 +652,7 @@ class ParsedSource:
         if wrapper is None or "Any" not in self.text or not self.may_wrap(import_style):
             return []
         aliases = self.typing_aliases
-        lines = self.text.encode().splitlines(keepends=True)
-        starts = list(itertools.accumulate(map(len, lines), initial=0))
+        starts = self._byte_lines
         offsets = []
         for call in self.calls:
             func = call.func
@@ -660,7 +718,9 @@ class ParsedSource:
                     if names is None
                     else tuple(n.strip() for n in names.split(",") if n.strip())
                 )
-                found[tok.start[0]] = _Ignore(tok.start[0], rules)
+                line, column = tok.start
+                start = self._byte_lines[line - 1] + len(tok.line[:column].encode())
+                found[line] = _Ignore(line, rules, start, start + len(tok.string.encode()))
         except tokenize.TokenError, SyntaxError:
             pass
         return found

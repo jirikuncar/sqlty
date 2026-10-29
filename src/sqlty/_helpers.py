@@ -75,6 +75,8 @@ class HelperCall(NamedTuple):
 
     With query variants on, ``variants`` holds every query a call built in branches can
     run, ``query`` being the first; ``reason`` says why such a call is not checked.
+    ``query_node`` is the argument (or t-string) the query comes from, which a diagnostic
+    about the query underlines.
     """
 
     line: int
@@ -88,6 +90,7 @@ class HelperCall(NamedTuple):
     dynamic: bool = False
     variants: tuple[Variant, ...] = ()
     reason: str | None = None
+    query_node: ast.expr | None = None
 
     @property
     def typed_lines(self) -> range:
@@ -755,6 +758,7 @@ def find_helper_calls(
                     aliases,
                     _call_params(helper, node, parsed),
                     node.end_lineno,
+                    query_node=query,
                 )
             )
         elif query is not None and not forwarded(node, query):
@@ -769,6 +773,7 @@ def find_helper_calls(
             _call_params(helper, node, parsed),
             node.end_lineno,
             dynamic=text is None,
+            query_node=query,
         )
         if variants is not None and (text is None or text == UNCHECKED):
             found = query_variants(parsed, node, query, variants, resolve_fragment)

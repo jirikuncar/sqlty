@@ -33,3 +33,56 @@ c = "three"
 # error: [inline-sql-comment]
 q = "--sql SELECT id FROM users"
 ```
+
+## Columns
+
+A range after `error` asserts the columns a diagnostic underlines: the first, and
+the one after the last, counted in characters from 1. Editors underline the same.
+
+### A row type check underlines the row type
+
+```python
+from sqlty import SQL
+
+# error[9:19]: [narrow-type]
+q = SQL[tuple[int]]("--sql\nSELECT 'é'::TEXT")
+```
+
+### Characters before the span count once
+
+```python
+from sqlty import SQL
+
+# error[15:25]: [narrow-type]
+q = ("é", SQL[tuple[int]]("--sql\nSELECT 1.5::REAL"))
+```
+
+### A query check underlines the strings
+
+```python
+from sqlty import SQL
+
+# error[21:+1.38]: [unknown-column]
+q = SQL[tuple[int]]("--sql\nSELECT "
+                    "nope FROM users")
+```
+
+### A multi-line call reports on its first line
+
+```python
+from sqlty import SQL
+
+# error[+1.5:+1.15]: [narrow-type]
+q = SQL[
+    tuple[int]
+](
+    """--sql
+SELECT 1.5::REAL"""
+)
+```
+
+### An unused suppression underlines the comment
+
+```python
+x = 1  # sqlty: ignore[unknown-column]  # error[8:39]: [unused-ignore]
+```

@@ -207,8 +207,19 @@ class Run:
                 helpers=self._helpers,
                 query_variants=self.query_variants,
             )
+        parsed = core.ParsedSource(code.text)
+
+        def column(offset: int, line: int) -> str:
+            at, col = parsed.position(offset)
+            return str(col) if at == line else f"{at - line:+}.{col}"
+
         diagnostics = [
-            (code.md_lines[int(str(d["line"])) - 1], str(d["rule"]), str(d["message"]))
+            (
+                code.md_lines[d["line"] - 1],
+                d["rule"],
+                d["message"],
+                f"[{column(d['start'], d['line'])}:{column(d['end'], d['line'])}]",
+            )
             for d in found
         ]
         expected = [a for a in assertions if a.expected]
@@ -227,10 +238,13 @@ class Run:
             return []
         path = self.section.path
         return [
-            *(f"{path}:{a.target}: unmatched assertion `# error: {a.expected}`" for a in unmatched),
             *(
-                f'{path}:{line}: unexpected diagnostic [{rule}] "{msg}"'
-                for line, rule, msg in unexpected
+                f"{path}:{a.target}: unmatched assertion `# error{a.range or ''}: {a.expected}`"
+                for a in unmatched
+            ),
+            *(
+                f'{path}:{line}: unexpected diagnostic [{rule}] "{msg}" at {columns}'
+                for line, rule, msg, columns in unexpected
             ),
         ]
 
@@ -246,10 +260,10 @@ class Run:
         return head + "\n" + "\n".join(diff)
 
 
-def _matches(assertion: Assertion, diagnostic: tuple[int, str, str]) -> bool:
-    line, rule, message = diagnostic
+def _matches(assertion: Assertion, diagnostic: tuple[int, str, str, str]) -> bool:
+    line, rule, message, columns = diagnostic
     value = _ERROR_VALUE.match(assertion.expected)
-    if value is None or assertion.target != line:
+    if value is None or assertion.target != line or assertion.range not in (None, columns):
         return False
     return (value["rule"] in (None, rule)) and (
         value["message"] is None or value["message"] in message

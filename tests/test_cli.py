@@ -1400,6 +1400,9 @@ def test_check_output_formats(tmp_path, monkeypatch, capsys) -> None:
             "message": "column `nmae` does not exist in `users`",
             "severity": "error",
             "line": 2,
+            "start": {"line": 2, "column": 21},
+            "end": {"line": 2, "column": 52},
+            "fix": [],
         }
     ]
 
@@ -1408,6 +1411,29 @@ def test_check_output_formats(tmp_path, monkeypatch, capsys) -> None:
     assert capsys.readouterr().out == (
         "::error file=q.py,line=2,title=sqlty unknown-column::column `nmae` does not exist in `users`\n"
     )
+
+
+def test_check_json_locates_fixes_by_character(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "q.py").write_text(
+        'from sqlty import SQL\nq = ("é", SQL[tuple[int]]("--sql\\nSELECT 1.5::REAL"))\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit):
+        main(["check", "--output-format", "json", "q.py"])
+    [diagnostic] = json.loads(capsys.readouterr().out)
+    assert diagnostic["rule"] == "narrow-type"
+    assert (diagnostic["start"], diagnostic["end"]) == (
+        {"line": 2, "column": 15},
+        {"line": 2, "column": 25},
+    )
+    assert diagnostic["fix"] == [
+        {
+            "start": {"line": 2, "column": 15},
+            "end": {"line": 2, "column": 25},
+            "replacement": "tuple[float]",
+        }
+    ]
 
 
 def test_check_reports_in_line_order(tmp_path, monkeypatch, capsys) -> None:
