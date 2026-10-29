@@ -51,6 +51,8 @@ pub struct Diagnostic {
     pub end: usize,
     /// The edits of the fix, with the imports they need; empty when none applies.
     pub fix: Vec<Edit>,
+    /// The check it comes from, when that is not `sqlty check`.
+    pub source: Option<String>,
 }
 
 /// How a rule is configured to report.
@@ -79,13 +81,44 @@ pub trait Workspace {
     fn check(&mut self, path: &Path, text: &str) -> Result<Vec<Diagnostic>, String>;
     /// `text` as `sqlty check --fix` would write it.
     fn fix(&mut self, path: &Path, text: &str) -> Result<String, String>;
+    /// Diagnostics by file that do not depend on the buffers: what the baseline's queries
+    /// get against this schema. Asked once, after the workspace loads.
+    fn breaking(&mut self) -> Result<Vec<(PathBuf, Vec<Diagnostic>)>, String> {
+        Ok(Vec::new())
+    }
+}
+
+/// What the client configures, from the `initializationOptions` of `initialize`:
+/// `{"breaking": {"against": "main", "direction": "both"}}`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Settings {
+    /// `sqlty.breaking.against`: the baseline of `sqlty breaking`; `None` checks no baseline.
+    pub against: Option<String>,
+    /// `sqlty.breaking.direction`: `backward`, `forward` or `both`.
+    pub direction: Option<String>,
+}
+
+impl Settings {
+    fn new(options: Option<&serde_json::Value>) -> Self {
+        let text = |pointer: &str| {
+            options
+                .and_then(|options| options.pointer(pointer))
+                .and_then(serde_json::Value::as_str)
+                .filter(|text| !text.is_empty())
+                .map(str::to_string)
+        };
+        Self {
+            against: text("/breaking/against"),
+            direction: text("/breaking/direction"),
+        }
+    }
 }
 
 /// Serve on standard input and output, as `sqlty server` does.
 pub fn stdio<W, F>(open: F) -> Result<(), Box<dyn Error + Send + Sync>>
 where
     W: Workspace,
-    F: FnMut(&Path) -> Result<W, String> + Send + 'static,
+    F: FnMut(&Path, &Settings) -> Result<W, String> + Send + 'static,
 {
     let (connection, io) = Connection::stdio();
     run(&connection, open)?;
@@ -95,11 +128,12 @@ where
 }
 
 /// Serve `connection` until the client shuts it down. `open` loads the workspace of a
-/// project root; its error is shown to the user, and the root's files go unchecked.
+/// project root with the client's settings; its error is shown to the user, and the
+/// root's files go unchecked.
 pub fn run<W, F>(connection: &Connection, open: F) -> Result<(), Box<dyn Error + Send + Sync>>
 where
     W: Workspace,
-    F: FnMut(&Path) -> Result<W, String> + Send + 'static,
+    F: FnMut(&Path, &Settings) -> Result<W, String> + Send + 'static,
 {
     let (id, params) = connection.initialize_start()?;
     let params: InitializeParams = serde_json::from_value(params)?;
@@ -116,6 +150,7 @@ where
     )?;
     let shared = Shared {
         documents: Arc::default(),
+        background: Arc::default(),
         sender: connection.sender.clone(),
         encoding,
     };
@@ -123,7 +158,8 @@ where
     let worker = {
         let shared = shared.clone();
         let roots = roots(&params);
-        std::thread::spawn(move || worker::work(&queue, &shared, &roots, open))
+        let settings = Settings::new(params.initialization_options.as_ref());
+        std::thread::spawn(move || worker::work(&queue, &shared, &roots, &settings, open))
     };
     for message in &connection.receiver {
         match message {
@@ -159,6 +195,8 @@ struct Document {
 #[derive(Clone)]
 struct Shared {
     documents: Arc<Mutex<HashMap<Url, Document>>>,
+    /// What [`Workspace::breaking`] found, by file: published while the file is not open.
+    background: Arc<Mutex<HashMap<Url, Vec<lsp_types::Diagnostic>>>>,
     sender: Sender<Message>,
     encoding: PositionEncodingKind,
 }
@@ -166,6 +204,12 @@ struct Shared {
 impl Shared {
     fn documents(&self) -> std::sync::MutexGuard<'_, HashMap<Url, Document>> {
         self.documents
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn background(&self) -> std::sync::MutexGuard<'_, HashMap<Url, Vec<lsp_types::Diagnostic>>> {
+        self.background
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
     }
@@ -247,7 +291,8 @@ impl Shared {
                 };
                 let uri = params.text_document.uri;
                 if self.documents().remove(&uri).is_some() {
-                    self.publish(uri, Vec::new(), None);
+                    let background = self.background().get(&uri).cloned();
+                    self.publish(uri, background.unwrap_or_default(), None);
                 }
             }
             DidSaveTextDocument::METHOD => {

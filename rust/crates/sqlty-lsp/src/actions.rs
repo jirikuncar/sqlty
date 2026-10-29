@@ -26,7 +26,12 @@ pub(crate) fn diagnostic(diagnostic: &Diagnostic, index: &LineIndex<'_>) -> lsp_
         code_description: Url::parse(&format!("{RULES}#{}", diagnostic.rule))
             .ok()
             .map(|href| CodeDescription { href }),
-        source: Some("sqlty".to_string()),
+        source: Some(
+            diagnostic
+                .source
+                .clone()
+                .unwrap_or_else(|| "sqlty".to_string()),
+        ),
         message: diagnostic.message.clone(),
         ..lsp_types::Diagnostic::default()
     }

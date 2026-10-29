@@ -1,16 +1,21 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
 use lsp_server::{Connection, Message, Notification, Request, RequestId};
+use lsp_types::Url;
 use serde_json::{json, Value};
 
-use crate::{run, Diagnostic, Edit, Severity, Workspace};
+use crate::{run, Diagnostic, Edit, Settings, Severity, Workspace};
 
-/// Reports each `bad`; its fix writes `good` and imports it.
-struct Fake;
+/// Reports each `bad`; its fix writes `good` and imports it. With a baseline, `old.py`
+/// of its root has a breaking change.
+struct Fake {
+    root: PathBuf,
+    settings: Settings,
+}
 
 impl Workspace for Fake {
     fn check(&mut self, _: &Path, text: &str) -> Result<Vec<Diagnostic>, String> {
@@ -37,12 +42,29 @@ impl Workspace for Fake {
                         replacement: "good".to_string(),
                     },
                 ],
+                source: None,
             })
             .collect())
     }
 
     fn fix(&mut self, _: &Path, text: &str) -> Result<String, String> {
         Ok(text.replace("bad", "good"))
+    }
+
+    fn breaking(&mut self) -> Result<Vec<(PathBuf, Vec<Diagnostic>)>, String> {
+        let Some(against) = &self.settings.against else {
+            return Ok(Vec::new());
+        };
+        let finding = Diagnostic {
+            rule: "unknown-column".to_string(),
+            message: format!("bio is gone (in the code of {against})"),
+            severity: Severity::Error,
+            start: 4,
+            end: 7,
+            fix: Vec::new(),
+            source: Some("sqlty breaking (backward)".to_string()),
+        };
+        Ok(vec![(self.root.join("old.py"), vec![finding])])
     }
 }
 
@@ -56,16 +78,27 @@ struct Client {
 
 impl Client {
     fn start(capabilities: &Value) -> Self {
+        let folders = json!([
+            {"uri": "file:///work", "name": "work"},
+            {"uri": "file:///broken", "name": "broken"},
+        ]);
+        Self::with(capabilities, &folders, &Value::Null)
+    }
+
+    fn with(capabilities: &Value, folders: &Value, options: &Value) -> Self {
         let (server, connection) = Connection::memory();
         let opened = Arc::new(AtomicUsize::new(0));
         let count = Arc::clone(&opened);
         let server = std::thread::spawn(move || {
-            run(&server, move |root: &Path| {
+            run(&server, move |root: &Path, settings: &Settings| {
                 count.fetch_add(1, Ordering::SeqCst);
                 if root.ends_with("broken") {
                     Err("schema.sql does not exist".to_string())
                 } else {
-                    Ok(Fake)
+                    Ok(Fake {
+                        root: root.to_path_buf(),
+                        settings: settings.clone(),
+                    })
                 }
             })
             .map_err(|error| error.to_string())
@@ -77,13 +110,9 @@ impl Client {
             next: 0,
             opened,
         };
-        let folders = json!([
-            {"uri": "file:///work", "name": "work"},
-            {"uri": "file:///broken", "name": "broken"},
-        ]);
         let result = client.request(
             "initialize",
-            json!({"capabilities": capabilities, "workspaceFolders": folders}),
+            json!({"capabilities": capabilities, "workspaceFolders": folders, "initializationOptions": options}),
         );
         assert_eq!(result["serverInfo"]["name"], "sqlty");
         client.notify("initialized", json!({}));
@@ -322,6 +351,81 @@ fn other_languages_and_requests_are_left_alone() {
         json!({"textDocument": {"uri": "file:///work/q.py"}, "position": {"line": 0, "character": 0}}),
     );
     assert_eq!(hover, json!({"error": -32601}));
+    let rest = client.shutdown();
+    assert!(
+        !rest
+            .iter()
+            .any(|method| method == "textDocument/publishDiagnostics"),
+        "{rest:?}"
+    );
+}
+
+#[test]
+fn breaking_changes_in_files_that_are_not_open_are_published() {
+    let root = std::env::temp_dir().join(format!("sqlty-lsp-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("old.py"), "q = bio\n").unwrap();
+    let folder = Url::from_file_path(&root).unwrap();
+    let old = Url::from_file_path(root.join("old.py")).unwrap();
+    let options = json!({"breaking": {"against": "main", "direction": "both"}});
+    let mut client = Client::with(
+        &json!({}),
+        &json!([{"uri": folder, "name": "work"}]),
+        &options,
+    );
+    let new = Url::from_file_path(root.join("new.py")).unwrap();
+    client.open(new.as_str(), "ok\n");
+    let published = client.notification("textDocument/publishDiagnostics");
+    assert_eq!(published["uri"], old.as_str());
+    let diagnostic = &published["diagnostics"][0];
+    assert_eq!(diagnostic["source"], "sqlty breaking (backward)");
+    assert_eq!(diagnostic["message"], "bio is gone (in the code of main)");
+    assert_eq!(
+        diagnostic["range"]["start"],
+        json!({"line": 0, "character": 4})
+    );
+
+    client.open(old.as_str(), "q = bio\n");
+    client.notify(
+        "textDocument/didClose",
+        json!({"textDocument": {"uri": old}}),
+    );
+    let closed = loop {
+        let published = client.notification("textDocument/publishDiagnostics");
+        if published["uri"] == old.as_str() && published["version"].is_null() {
+            break published;
+        }
+    };
+    assert_eq!(
+        closed["diagnostics"][0]["source"],
+        "sqlty breaking (backward)"
+    );
+
+    client.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({"changes": [{"uri": Url::from_file_path(root.join("schema.sql")).unwrap(), "type": 2}]}),
+    );
+    let reloaded = loop {
+        let published = client.notification("textDocument/publishDiagnostics");
+        if published["uri"] == old.as_str() {
+            break published;
+        }
+    };
+    assert_eq!(
+        reloaded["diagnostics"][0]["source"],
+        "sqlty breaking (backward)"
+    );
+    assert_eq!(client.opened.load(Ordering::SeqCst), 2);
+    client.shutdown();
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn without_a_baseline_nothing_is_published_in_the_background() {
+    let mut client = Client::start(&json!({}));
+    client.open("file:///work/q.py", "ok\n");
+    let published = client.notification("textDocument/publishDiagnostics");
+    assert_eq!(published["uri"], "file:///work/q.py");
     let rest = client.shutdown();
     assert!(
         !rest

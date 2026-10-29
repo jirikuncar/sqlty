@@ -1,11 +1,11 @@
 # VS Code extension
 
-> **Status:** stages 1 to 3 implemented. `Diagnostic` has `start`,
+> **Status:** stages 1 to 4 implemented. `Diagnostic` has `start`,
 > `end` and `fix` (with the imports a fix needs), `--output-format json` prints them, and
 > mdtest asserts `# error[9:19]:`. The bridge is `sqlty._lsp_bridge.Workspace`; the
 > [spike](#spike-results) picks [option B](#b-native-rust-server-preferred), a native
 > Rust server: `rust/crates/sqlty-lsp`, run by `sqlty server`, and its client is
-> `editors/vscode/`. Next: breaking.
+> `editors/vscode/`. Next: SQL spans.
 
 ## Goal
 
@@ -147,7 +147,12 @@ bundled server runs.
    interpreter, then `PATH`, and restarts when they change; until stage 6 bundles a wheel
    it does not run in untrusted workspaces. Left for later: the `# sqlty: ignore[...]` quick
    fix, which must not land inside a string, and `redundant-optional` across files.
-4. **Breaking**: forward, then backward.
+4. **Breaking**: forward, then backward. `sqlty.breaking.*` reach the server as
+   `initializationOptions`; `sqlty._lsp_breaking.Baseline` resolves the baseline when the
+   workspace loads (a worktree for a revision, removed on exit). Forward runs with each
+   check; backward runs on load and reload, and the server publishes it for the files that
+   are not open. Left for later: following a ref that moves while the server runs (a
+   saved schema or config re-resolves it).
 5. **SQL spans**: names inside the query string.
 6. **Release**: Marketplace and [Open VSX](https://open-vsx.org) (Cursor and VSCodium),
    `docs/recipes/vscode.md`.

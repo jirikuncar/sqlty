@@ -8,16 +8,22 @@ use lsp_server::Response;
 use lsp_types::{CodeAction, CodeActionKind, CodeActionOrCommand, MessageType, OneOf, Url};
 
 use crate::text::{diff, LineIndex};
-use crate::{actions, Job, Shared, Workspace, FIX_ALL};
+use crate::{actions, Job, Settings, Shared, Workspace, FIX_ALL};
 
-pub(crate) fn work<W, F>(queue: &Receiver<Job>, shared: &Shared, roots: &[PathBuf], open: F)
-where
+pub(crate) fn work<W, F>(
+    queue: &Receiver<Job>,
+    shared: &Shared,
+    roots: &[PathBuf],
+    settings: &Settings,
+    open: F,
+) where
     W: Workspace,
-    F: FnMut(&Path) -> Result<W, String>,
+    F: FnMut(&Path, &Settings) -> Result<W, String>,
 {
     let mut workspaces = Workspaces {
         open,
         roots,
+        settings,
         loaded: HashMap::new(),
     };
     while let Ok(first) = queue.recv() {
@@ -25,7 +31,7 @@ where
         let mut checks: Vec<Url> = Vec::new();
         for job in std::iter::once(first).chain(queue.try_iter()) {
             match job {
-                Job::Reload => workspaces.loaded.clear(),
+                Job::Reload => workspaces.reload(shared),
                 Job::FixAll(id, uri) => {
                     let action = fix_all(&mut workspaces, shared, &uri);
                     let actions: Vec<_> = action
@@ -49,6 +55,7 @@ where
 struct Workspaces<'a, W, F> {
     open: F,
     roots: &'a [PathBuf],
+    settings: &'a Settings,
     /// By project root; an error is shown once, when the root is first loaded.
     loaded: HashMap<PathBuf, Result<W, String>>,
 }
@@ -56,7 +63,7 @@ struct Workspaces<'a, W, F> {
 impl<W, F> Workspaces<'_, W, F>
 where
     W: Workspace,
-    F: FnMut(&Path) -> Result<W, String>,
+    F: FnMut(&Path, &Settings) -> Result<W, String>,
 {
     fn of(&mut self, path: &Path, shared: &Shared) -> Option<&mut W> {
         let root = self
@@ -66,22 +73,69 @@ where
             .max_by_key(|root| root.components().count())
             .cloned()
             .or_else(|| path.parent().map(Path::to_path_buf))?;
-        let open = &mut self.open;
-        let loaded = self.loaded.entry(root).or_insert_with_key(|root| {
-            let loaded = open(root);
-            if let Err(message) = &loaded {
-                shared.message(MessageType::ERROR, format!("sqlty: {message}"));
+        if !self.loaded.contains_key(&root) {
+            self.load(root.clone(), shared);
+        }
+        self.loaded.get_mut(&root)?.as_mut().ok()
+    }
+
+    /// Open the workspace of `root` and publish what it finds in files that are not open.
+    fn load(&mut self, root: PathBuf, shared: &Shared) {
+        let mut loaded = (self.open)(&root, self.settings);
+        match &mut loaded {
+            Err(message) => shared.message(MessageType::ERROR, format!("sqlty: {message}")),
+            Ok(workspace) => publish_breaking(workspace, shared),
+        }
+        self.loaded.insert(root, loaded);
+    }
+
+    /// Open every loaded workspace again: its settings or schema changed.
+    fn reload(&mut self, shared: &Shared) {
+        let roots: Vec<PathBuf> = self.loaded.drain().map(|(root, _)| root).collect();
+        let stale: Vec<Url> = shared.background().drain().map(|(uri, _)| uri).collect();
+        for root in roots {
+            self.load(root, shared);
+        }
+        for uri in stale {
+            let current = shared.background().contains_key(&uri);
+            if !current && !shared.documents().contains_key(&uri) {
+                shared.publish(uri, Vec::new(), None);
             }
-            loaded
-        });
-        loaded.as_mut().ok()
+        }
+    }
+}
+
+/// Publish [`Workspace::breaking`] for the files that are not open; an open file's checks
+/// include its own.
+fn publish_breaking<W: Workspace>(workspace: &mut W, shared: &Shared) {
+    let found = match workspace.breaking() {
+        Ok(found) => found,
+        Err(message) => {
+            shared.log(format!("sqlty: checking the baseline: {message}"));
+            return;
+        }
+    };
+    for (path, diagnostics) in found {
+        let (Ok(uri), Ok(text)) = (Url::from_file_path(&path), std::fs::read_to_string(&path))
+        else {
+            continue;
+        };
+        let index = LineIndex::new(&text, &shared.encoding);
+        let published: Vec<_> = diagnostics
+            .iter()
+            .map(|d| actions::diagnostic(d, &index))
+            .collect();
+        shared.background().insert(uri.clone(), published.clone());
+        if !shared.documents().contains_key(&uri) {
+            shared.publish(uri, published, None);
+        }
     }
 }
 
 fn check<W, F>(workspaces: &mut Workspaces<'_, W, F>, shared: &Shared, uri: Url)
 where
     W: Workspace,
-    F: FnMut(&Path) -> Result<W, String>,
+    F: FnMut(&Path, &Settings) -> Result<W, String>,
 {
     let Some((text, version)) = shared
         .documents()
@@ -124,7 +178,7 @@ fn fix_all<W, F>(
 ) -> Option<CodeAction>
 where
     W: Workspace,
-    F: FnMut(&Path) -> Result<W, String>,
+    F: FnMut(&Path, &Settings) -> Result<W, String>,
 {
     let (text, version) = shared
         .documents()

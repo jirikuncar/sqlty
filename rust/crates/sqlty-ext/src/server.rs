@@ -1,10 +1,12 @@
 //! `sqlty server`: the language server of `sqlty-lsp`, checking with `sqlty._lsp_bridge`.
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
-use sqlty_lsp::{Diagnostic, Edit, Severity, Workspace};
+use pyo3::types::PyDict;
+use sqlty_lsp::{Diagnostic, Edit, Settings, Severity, Workspace};
 
 /// Serve the language server on standard input and output until the client exits.
 #[pyfunction]
@@ -17,14 +19,18 @@ pub(crate) fn serve(py: Python<'_>) -> PyResult<()> {
 struct BridgeWorkspace(Py<PyAny>);
 
 impl BridgeWorkspace {
-    fn open(root: &Path) -> Result<Self, String> {
+    fn open(root: &Path, settings: &Settings) -> Result<Self, String> {
         Python::attach(|py| {
-            py.import("sqlty._lsp_bridge")
-                .and_then(|bridge| bridge.getattr("Workspace"))
-                .and_then(|workspace| workspace.call1((root.to_string_lossy(),)))
-                .map(|workspace| Self(workspace.unbind()))
-                .map_err(|error| error.value(py).to_string())
+            let options = PyDict::new(py);
+            options.set_item("against", settings.against.as_deref())?;
+            if let Some(direction) = &settings.direction {
+                options.set_item("direction", direction)?;
+            }
+            let workspace = py.import("sqlty._lsp_bridge")?.getattr("Workspace")?;
+            let workspace = workspace.call((root.to_string_lossy(),), Some(&options))?;
+            Ok(Self(workspace.unbind()))
         })
+        .map_err(|error: PyErr| Python::attach(|py| error.value(py).to_string()))
     }
 
     fn call<T: for<'a, 'py> FromPyObject<'a, 'py>>(
@@ -52,6 +58,23 @@ impl Workspace for BridgeWorkspace {
     fn fix(&mut self, path: &Path, text: &str) -> Result<String, String> {
         self.call("fix", path, text)
     }
+
+    fn breaking(&mut self) -> Result<Vec<(PathBuf, Vec<Diagnostic>)>, String> {
+        let found: HashMap<String, Vec<BridgeDiagnostic>> = Python::attach(|py| {
+            self.0
+                .bind(py)
+                .call_method0("breaking")
+                .and_then(|found| found.extract())
+                .map_err(|error| traceback(py, &error))
+        })?;
+        Ok(found
+            .into_iter()
+            .map(|(path, found)| {
+                let found = found.into_iter().map(Diagnostic::from).collect();
+                (PathBuf::from(path), found)
+            })
+            .collect())
+    }
 }
 
 /// A `sqlty._lint.Diagnostic`.
@@ -69,6 +92,8 @@ struct BridgeDiagnostic {
     end: usize,
     #[pyo3(item)]
     fix: Vec<(usize, usize, String)>,
+    #[pyo3(item, default)]
+    source: Option<String>,
 }
 
 impl From<BridgeDiagnostic> for Diagnostic {
@@ -92,6 +117,7 @@ impl From<BridgeDiagnostic> for Diagnostic {
                     replacement,
                 })
                 .collect(),
+            source: found.source,
         }
     }
 }
