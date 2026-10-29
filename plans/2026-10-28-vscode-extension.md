@@ -1,11 +1,11 @@
 # VS Code extension
 
-> **Status:** stages 1 to 5 implemented. `Diagnostic` has `start`,
+> **Status:** implemented. `Diagnostic` has `start`,
 > `end` and `fix` (with the imports a fix needs), `--output-format json` prints them, and
 > mdtest asserts `# error[9:19]:`. The bridge is `sqlty._lsp_bridge.Workspace`; the
 > [spike](#spike-results) picks [option B](#b-native-rust-server-preferred), a native
 > Rust server: `rust/crates/sqlty-lsp`, run by `sqlty server`, and its client is
-> `editors/vscode/`. Next: release.
+> `editors/vscode/`, published by `.github/workflows/vscode.yml` with each release.
 
 ## Goal
 
@@ -88,13 +88,12 @@ with esbuild, packaged with `@vscode/vsce`.
 |---------|---------|---------|
 | `sqlty.path` | `[]` | `sqlty` executables to try first |
 | `sqlty.interpreter` | selected interpreter | where `sqlty` is looked up |
-| `sqlty.importStrategy` | `fromEnvironment` | `fromEnvironment` or `useBundled` |
 | `sqlty.breaking.against` | unset | baseline: a revision or a `--save` snapshot; unset disables breaking |
 | `sqlty.breaking.direction` | `both` | as `--direction` |
 
-Lookup order follows ruff: the interpreter's environment, `PATH`, the bundled wheel. The
-project's own pin wins, so the editor agrees with CI. In an untrusted workspace only the
-bundled server runs.
+Lookup order follows ruff: `sqlty.path`, the interpreter's environment, then `PATH`; no
+wheel is bundled (see stage 6). The project's own pin runs, so the editor agrees with CI.
+An untrusted workspace does not run the extension: its environment would choose the server.
 
 ## Features
 
@@ -159,7 +158,10 @@ bundled server runs.
    that through the escapes and the literals of the query (`query_offset`). Casts, and
    PostgreSQL queries read only after numbering their `?` placeholders, keep the strings.
 6. **Release**: Marketplace and [Open VSX](https://open-vsx.org) (Cursor and VSCodium),
-   `docs/recipes/vscode.md`.
+   `docs/recipes/vscode.md`. The publisher is `jirikuncar`, and the extension takes each
+   release's version. No wheel is bundled, and `sqlty.importStrategy` is gone: sqlty's
+   wheels are per CPython version (3.14 and later, no abi3), so a bundled one would need a
+   bundled interpreter too, and the project's own pin is what CI runs anyway.
 
 ## Spike results
 
@@ -204,5 +206,4 @@ Contention is not a problem for the bridge, so B goes ahead.
 
 - Should a check of an unsaved buffer resolve helpers and row types of other unsaved
   buffers, or the files on disk only?
-- Publisher name and whether the extension version follows the `sqlty` version.
 - Notebooks: queries in cells (LSP 3.17 notebook sync) are out of scope for stage 3.

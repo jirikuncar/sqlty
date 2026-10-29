@@ -137,3 +137,5 @@ Yesql
 Zapatos
 Zensical
 typeshed
+VSCodium
+Neovim

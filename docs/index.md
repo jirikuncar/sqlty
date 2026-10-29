@@ -79,6 +79,7 @@ built for.
 2. Follow the [Quickstart](quickstart.md).
 3. Adding sqlty to an existing project? Read [Migration](recipes/migration.md)
    and [CI and pre-commit](recipes/ci.md).
+4. See the diagnostics as you type with the [VS Code extension](recipes/vscode.md).
 
 New to the idea? Start with [Why SQLTy?](motivation.md). Contributing,
 testing and architecture are covered in
