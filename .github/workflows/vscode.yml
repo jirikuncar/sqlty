@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # The extension's version is the release's: it runs the project's own sqlty, so it
-# publishes with every release, as a dry run on a pull request that changes it.
+# publishes with every release or manual run, as a dry run on a pull request that changes it.
 jobs:
   package:
     name: Package
@@ -48,8 +48,11 @@ jobs:
   publish:
     name: Publish to the Marketplace and Open VSX
     needs: package
-    if: github.event_name == 'release' && !github.event.release.prerelease
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && !github.event.release.prerelease)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     environment:
       name: vscode
       url: https://marketplace.visualstudio.com/items?itemName=jirikuncar.sqlty
@@ -70,9 +73,7 @@ jobs:
           name: vsix
           path: editors/vscode
       - name: Publish to the Visual Studio Marketplace
-        run: npx vsce publish --packagePath sqlty.vsix
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: npx vsce publish --oidc --packagePath sqlty.vsix
       - name: Publish to Open VSX
         run: npx ovsx publish sqlty.vsix
         env:

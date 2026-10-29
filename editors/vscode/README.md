@@ -54,5 +54,6 @@ npm test         # opens fixture/ in VS Code; needs a sqlty with `sqlty server` 
 ```
 
 `npm run package` writes `sqlty.vsix`. Each GitHub release publishes it under the
-release's version, to the Visual Studio Marketplace (`VSCE_PAT`) and Open VSX (`OVSX_PAT`),
-secrets of the `vscode` environment (`.github/workflows/vscode.yml`).
+release's version, to the Visual Studio Marketplace (trusted publishing, no token) and Open VSX
+(`OVSX_PAT`, a secret of the `vscode` environment); run the workflow by hand to publish the
+version in `package.json` (`.github/workflows/vscode.yml`).
