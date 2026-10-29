@@ -125,6 +125,15 @@ pass_filenames = false
 files = '^rust/'
 priority = 10
 
+[[repos.hooks]]
+id = "vscode-check"
+name = "VS Code extension (tsc, oxlint, oxfmt)"
+entry = "bash -c 'cd editors/vscode && { [ -d node_modules ] || npm ci --silent --no-audit --no-fund; } && npm run -s check'"
+language = "system"
+pass_filenames = false
+files = '^editors/vscode/'
+priority = 10
+
 [[repos]]
 repo = "https://github.com/astral-sh/ruff-pre-commit"
 rev = "v0.16.10"

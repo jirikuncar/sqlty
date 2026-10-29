@@ -116,6 +116,7 @@ runs them on every commit. Each runs when the files it depends on change:
 | `sqlty rewrite` (in place), `sqlty check`, mypy and ty on `examples/` (except `magic_codec/`) | `examples/`, `src/sqlty/`, `rust/crates/` |
 | `cargo fmt --check` | Rust files |
 | `cargo clippy -D warnings`, `cargo test` | `rust/` |
+| `tsc`, oxlint, oxfmt (`npm run check`) | `editors/vscode/` |
 | ruff (lint + format), uv-lock | Python files, `pyproject.toml` |
 | file checks (whitespace, line endings, YAML/TOML/JSON syntax, ...) | any file |
 
@@ -370,13 +371,16 @@ src/sqlty/
 ├── _type_extractor/     # Row types (TypedDict, dataclass, ...), read from source, never imported
 ├── _lint.py             # Lint rules: severity, diagnostics, RuleConfig
 ├── _decode.py           # Magic codec decoder
-├── _cli.py              # CLI: rewrite, strip, check, version
+├── _cli.py              # CLI: rewrite, strip, check, server, version
+├── _lsp_bridge.py       # Workspace: what sqlty server checks a buffer with
 └── magic.py             # Python codec registration
 rust/crates/             # Cargo workspace (root: rust/Cargo.toml)
 ├── sqlty-sql/           # analyzer/ (type inference), ddl; no PyO3
 │   └── rules/           # inference rules (*.inference.toml), compiled by build.rs; see its README
 ├── sqlty-python/        # tokens, rewriter, checker, fixer
-└── sqlty-ext/           # lib.rs (PyO3), builds sqlty._core
+├── sqlty-lsp/           # the language server of sqlty server; tests without Python
+└── sqlty-ext/           # lib.rs (PyO3), builds sqlty._core; server.rs runs sqlty-lsp
+editors/vscode/          # VS Code client of sqlty server; see its README
 proofs/                  # Lean 4 model of SqlType::python, with proofs; see its README
 ```
 
