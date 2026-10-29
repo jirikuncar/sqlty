@@ -1,6 +1,8 @@
 # VS Code extension
 
-> **Status:** proposed. Preferred: [option B](#b-native-rust-server-preferred), a native
+> **Status:** stage 1 implemented: `Diagnostic` has `start`, `end` and `fix` (with the
+> imports a fix needs), `--output-format json` prints them, and mdtest asserts
+> `# error[9:19]:`. Preferred: [option B](#b-native-rust-server-preferred), a native
 > Rust server.
 
 ## Goal
