@@ -186,6 +186,9 @@ def test_output_formats(cli: Cli, repo: Path) -> None:
             "message": "column `handle` does not exist in `users`",
             "severity": "error",
             "line": 1,
+            "start": {"line": 1, "column": 11},
+            "end": {"line": 1, "column": 44},
+            "fix": [],
             "direction": "forward",
             "against": "HEAD~1",
         }

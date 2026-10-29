@@ -2,6 +2,8 @@
 
 from typing import final
 
+from sqlty._lint import Diagnostic
+
 @final
 class Schema:
     @property
@@ -95,10 +97,10 @@ def check_source(
     import_style: str | None = None,
     untyped: bool = False,
     any_calls: list[int] = ...,
-) -> list[dict[str, str | int | None]]: ...
+) -> list[Diagnostic]: ...
 def wrapped_queries(
     source: str, *, import_style: str | None = None
-) -> list[tuple[int, str, str | None]]: ...
+) -> list[tuple[int, str, str | None, tuple[int, int]]]: ...
 def query_sites(
     source: str, *, import_style: str | None = None, any_calls: list[int] = ...
 ) -> list[tuple[int, str, str]]: ...

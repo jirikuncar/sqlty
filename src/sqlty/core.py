@@ -434,12 +434,20 @@ def check_source(
     only names the lines that select one: ``(variant: line 11)``. A call with more variants
     is ``dynamic-query`` (``unchecked-query`` for a psycopg composition).
 
+    Each diagnostic has the byte offsets of what it is about, ``start`` to ``end``: the
+    row type, the query, a parameter type, or the ``# sqlty: ignore`` comment. ``fix``
+    holds the edits ``sqlty check --fix`` makes for it, as ``(start, end, replacement)``.
+
     Example:
         >>> check_source('q = SQL[tuple[str]]("--sql\\nSELECT * FROM users")  # sqlty: ignore[select-star-no-schema]')
         []
+        >>> source = 'q = SQL[tuple[int]]("--sql\\\\nSELECT 1.5::REAL")'
+        >>> [diagnostic] = check_source(source)
+        >>> diagnostic["rule"], source[diagnostic["start"] : diagnostic["end"]], diagnostic["fix"]
+        ('narrow-type', 'tuple[int]', [(8, 18, 'tuple[float]')])
 
     Returns:
-        List of diagnostic dicts with keys: rule, message, severity, line
+        List of ``Diagnostic`` dicts with keys: rule, message, severity, line, start, end, fix
 
     Raises:
         ValueError: unsupported ``import_style``, or ``rules`` names an unknown rule or severity

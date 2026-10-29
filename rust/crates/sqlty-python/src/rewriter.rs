@@ -185,6 +185,24 @@ pub(crate) fn with_wrapper_imports(
     if wrapped.is_empty() {
         return result;
     }
+    let imports = wrapper_imports(scan, wrapped, istyle, modules);
+    if imports.is_empty() {
+        return result;
+    }
+    if keep_lines {
+        return insert_inline(&result, &imports.join("; "));
+    }
+    insert_imports(&result, &imports)
+}
+
+/// The import lines the `wrapped` calls need that the source of `scan` lacks: see
+/// [`with_wrapper_imports`].
+pub(crate) fn wrapper_imports(
+    scan: &Scan,
+    wrapped: &[&str],
+    istyle: &ImportStyle,
+    modules: &[String],
+) -> Vec<String> {
     let source = scan.source();
     let untyped_call = format!("{}[{}](", istyle.wrapper_name, istyle.untyped_name());
     let needs_untyped_import = wrapped.iter().any(|r| r.starts_with(&untyped_call));
@@ -222,20 +240,24 @@ pub(crate) fn with_wrapper_imports(
         }
     }
     imports.extend(Spelling::of(scan).imports_for(wrapped));
-
-    if imports.is_empty() {
-        return result;
-    }
-    if keep_lines {
-        return insert_inline(&result, &imports.join("; "));
-    }
-    insert_imports(&result, &imports)
+    imports
 }
 
 /// `source` with `imports` added after its header: the docstring, `from __future__`
 /// imports and the comments before them. A blank line after a docstring stays there, above
 /// the imports, and the code below them keeps one.
 pub(crate) fn insert_imports(source: &str, imports: &[String]) -> String {
+    let edit = import_edit(source, imports);
+    format!(
+        "{}{}{}",
+        &source[..edit.range.start],
+        edit.replacement,
+        &source[edit.range.end..]
+    )
+}
+
+/// The insertion [`insert_imports`] makes.
+pub(crate) fn import_edit(source: &str, imports: &[String]) -> Edit {
     let at = header_end(source);
     let eol = line_ending(source, at);
     let sep = if at > 0 && !source[..at].ends_with('\n') {
@@ -249,21 +271,18 @@ pub(crate) fn insert_imports(source: &str, imports: &[String]) -> String {
         .map(str::len)
         .sum::<usize>();
     if at == 0 || blank == 0 {
-        return format!(
-            "{}{sep}{}{eol}{}",
-            &source[..at],
-            imports.join(eol),
-            &source[at..]
-        );
+        return Edit::new(at..at, format!("{sep}{}{eol}", imports.join(eol)));
     }
-    let (above, below) = source.split_at(at + blank);
-    let next = below.trim_start();
+    let next = source[at + blank..].trim_start();
     let gap = if next.is_empty() || next.starts_with("import ") || next.starts_with("from ") {
         ""
     } else {
         eol
     };
-    format!("{above}{}{eol}{gap}{below}", imports.join(eol))
+    Edit::new(
+        at + blank..at + blank,
+        format!("{}{eol}{gap}", imports.join(eol)),
+    )
 }
 
 /// Line ending of the line at `at`, else of the line before it.

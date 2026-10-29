@@ -12,7 +12,7 @@ from pathlib import Path
 
 from .parser import Assertion
 
-_TRAILING_ERROR = re.compile(r"^(.*?\S)\s+#\s+error:.*$")
+_TRAILING_ERROR = re.compile(r"^(.*?\S)\s+#\s+error(?:\[[^\]]*\])?:.*$")
 
 
 class Updater:
@@ -29,7 +29,7 @@ class Updater:
         self._splice(start, start + assertion.span, [_join(prefix, v) for v in values])
 
     def replace_errors(
-        self, assertions: list[Assertion], diagnostics: list[tuple[int, str, str]]
+        self, assertions: list[Assertion], diagnostics: list[tuple[int, str, str, str]]
     ) -> None:
         if not self._claim(("errors", assertions[0].line)):
             return
@@ -44,7 +44,7 @@ class Updater:
         if not diagnostics:
             first = min(assertions, key=lambda a: a.line)
             self._splice(first.line - 1, first.line - 1, [f"{first.indent}# error:"])
-        for line, rule, message in sorted(diagnostics):
+        for line, rule, message, _ in sorted(diagnostics):
             target = self.path.read_text().splitlines()[self._at(line - 1)]
             indent = target[: len(target) - len(target.lstrip())]
             self._splice(line - 1, line - 1, [f'{indent}# error: [{rule}] "{message}"'])

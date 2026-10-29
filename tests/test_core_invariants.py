@@ -8,6 +8,8 @@ checks invariants over all of that code, and what Markdown can't express
 from __future__ import annotations
 
 import ast
+import builtins
+import collections
 import random
 import re
 import time
@@ -144,6 +146,82 @@ def test_written_params_fit(source: str, options: dict) -> None:
         )
 
     assert mismatches(rewritten) == mismatches(source), rewritten
+
+
+@pytest.mark.parametrize(("source", "options"), PYTHON)
+def test_diagnostics_underline_their_subject(source: str, options: dict) -> None:
+    """Each diagnostic underlines whole characters, at or below its line, the same with CRLF."""
+    checked = {
+        key: value for key, value in options.items() if key not in ("json_types", "param_types")
+    }
+
+    def underlined(text: str) -> list[tuple[str, str, list[str]]]:
+        parsed, data = ParsedSource(text), text.encode()
+        found = []
+        for d in core.check_source(text, **checked):
+            assert 0 <= d["start"] < d["end"] <= len(data), d
+            assert parsed.position(d["start"])[0] >= d["line"], d
+            edits = [data[start:end].decode() for start, end, _ in d["fix"]]
+            subject = data[d["start"] : d["end"]].decode().replace("\r\n", "\n")
+            found.append((d["rule"], subject, [edit.replace("\r\n", "\n") for edit in edits]))
+        return found
+
+    assert underlined(source.replace("\n", "\r\n")) == underlined(source)
+
+
+@pytest.mark.parametrize(("source", "options"), PYTHON)
+def test_each_fix_stands_alone(source: str, options: dict) -> None:
+    """A diagnostic's fix applied alone, as an editor's quick fix, binds every name it uses;
+    then ``check --fix`` writes the lines it writes from the start, plus imports it would not add.
+
+    ``json-types`` is left out: only ``check --fix`` generates ``TypedDict``s.
+    """
+    options = options | {"json_types": "typing.Any"}
+    checked = {
+        key: value for key, value in options.items() if key not in ("json_types", "param_types")
+    }
+    expected = collections.Counter(core.fix_source(source, **options).splitlines())
+    data = source.encode()
+    for diagnostic in core.check_source(source, **checked):
+        if not diagnostic["fix"]:
+            continue
+        fixed, end = b"", 0
+        for start, stop, replacement in sorted(diagnostic["fix"]):
+            assert start >= end, diagnostic
+            fixed += data[end:start] + replacement.encode()
+            end = stop
+        quick = (fixed + data[end:]).decode()
+        assert _unbound(quick) <= _unbound(source), (diagnostic, quick)
+        alone = core.fix_source(quick, **options)
+        extra = collections.Counter(alone.splitlines())
+        extra.subtract(expected)
+        assert all(n >= 0 for n in extra.values()), (diagnostic, alone)
+        assert all(line.startswith(("import ", "from ")) for line, n in extra.items() if n), alone
+
+
+def _unbound(source: str) -> set[str]:
+    """The names ``source`` reads that nothing in it binds, in any scope, nor a builtin;
+    none after a ``*`` import."""
+    tree = ast.parse(source)
+    bound = set(dir(builtins))
+    for node in ast.walk(tree):
+        match node:
+            case ast.ImportFrom(names=[ast.alias(name="*")]):
+                return set()
+            case ast.Import(names=names) | ast.ImportFrom(names=names):
+                bound |= {(alias.asname or alias.name).split(".")[0] for alias in names}
+            case ast.Name(ctx=ast.Store()):
+                bound.add(node.id)
+            case ast.FunctionDef() | ast.AsyncFunctionDef() | ast.ClassDef() | ast.TypeAlias():
+                bound.add(ast.unparse(node.name) if isinstance(node, ast.TypeAlias) else node.name)
+            case ast.arg() | ast.TypeVar() | ast.ParamSpec() | ast.TypeVarTuple():
+                bound.add(node.arg if isinstance(node, ast.arg) else node.name)
+    loaded = {
+        node.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+    }
+    return loaded - bound
 
 
 def _check_outputs(source: str, options: dict) -> None:

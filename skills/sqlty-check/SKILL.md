@@ -26,7 +26,7 @@ When it and `sqlty --help` or `sqlty rule NAME` disagree, trust the command.
 |---------|-----|
 | `sqlty check .` | Lint everything |
 | `sqlty check --fix .` | Apply the fixable rules, then report the rest |
-| `sqlty check --output-format json .` | Read the diagnostics as data: `file`, `line`, `rule`, `severity`, `message` |
+| `sqlty check --output-format json .` | Read the diagnostics as data: `file`, `line`, `rule`, `severity`, `message`, the `start` and `end` they underline, and the `fix` edits |
 | `sqlty check --error-on-warning .` | Fail on warnings too |
 | `sqlty check --warn unknown-column .` | Change one rule's severity for one run |
 | `sqlty rule` | List every rule with its default severity |

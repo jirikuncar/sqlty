@@ -193,6 +193,27 @@ Schema(dialect="postgres")
 'tuple[int, str | None]'
 ```
 
+`check_source` returns what `sqlty check` reports. Each diagnostic carries the
+UTF-8 byte offsets of what it is about, `start` to `end`, and the edits of
+`sqlty check --fix` as `(start, end, replacement)`. Editors use them to underline
+the row type or the query and to offer the fix:
+
+```pycon
+>>> from sqlty.core import check_source
+>>> source = 'q = SQL[tuple[int]]("--sql\\nSELECT 1.5::REAL")'
+>>> [diagnostic] = check_source(source)
+>>> diagnostic["rule"], diagnostic["message"]
+('narrow-type', 'SQL[tuple[int]] should be SQL[tuple[float]]')
+>>> source.encode()[diagnostic["start"] : diagnostic["end"]]
+b'tuple[int]'
+>>> diagnostic["fix"]
+[(8, 18, 'tuple[float]')]
+```
+
+!!! note "Offsets count bytes, not characters"
+    Slice `source.encode()`, not `source`: the two differ once a line holds a
+    character outside ASCII.
+
 | Function | Returns |
 |----------|---------|
 | `load_schema(schema_sql, *, dialect="postgres", types=None)` | A parsed `Schema`, for any `schema_sql` argument; `types` is [`[tool.sqlty.types]`](configuration.md#types) |
@@ -206,4 +227,4 @@ Schema(dialect="postgres")
 | `rewrite_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False, json_types="typing.Any")` | Rewritten source; `json_types="typing.TypedDict"` generates `TypedDict`s for JSON columns |
 | `strip_source(source, *, import_style=None)` | Stripped source, without generated `TypedDict`s |
 | `fix_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False, rules=None, json_types="typing.Any")` | Source with `sqlty check --fix` applied |
-| `check_source(source, *, dialect="postgres", schema_sql=None, rules=None, import_style=None)` | List of diagnostics: `Diagnostic` dicts (`sqlty._lint.Diagnostic`, a `TypedDict`) with `rule`, `message`, `severity`, `line` |
+| `check_source(source, *, dialect="postgres", schema_sql=None, rules=None, import_style=None)` | List of diagnostics: `Diagnostic` dicts (`sqlty._lint.Diagnostic`, a `TypedDict`) with `rule`, `message`, `severity`, `line`, `start`, `end`, `fix` |

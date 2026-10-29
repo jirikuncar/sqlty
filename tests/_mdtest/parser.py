@@ -43,10 +43,10 @@ PY_KINDS: tuple[Kind, ...] = (
 )
 DIRECTIVES = frozenset({"skip", "xfail"})
 
-_PY_ASSERTION = re.compile(rf"^(\s*)#\s+({'|'.join(PY_KINDS)}):(?: (.*))?$")
+_PY_ASSERTION = re.compile(rf"^(\s*)#\s+({'|'.join(PY_KINDS)})(\[[^\]]*\])?:(?: (.*))?$")
 _SQL_ASSERTION = re.compile(rf"^(\s*)--\s+({'|'.join(SQL_KINDS)}):(?: (.*))?$")
 _MISPLACED = re.compile(rf"^\s*#\s+({'|'.join(SQL_KINDS)}):")
-_TRAILING_ERROR = re.compile(r"^(.*?\S)\s+#\s+error:(?: (.*))?$")
+_TRAILING_ERROR = re.compile(r"^(.*?\S)\s+#\s+error(\[[^\]]*\])?:(?: (.*))?$")
 _FENCE = re.compile(r"^(\s*)(`{3,}|~{3,})\s*([\w+-]*)\s*(.*)$")
 _HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
 _LABEL = re.compile(r"^`([^`]+)`:\s*$")
@@ -71,6 +71,7 @@ class Assertion:
     indent: str = ""
     target: int | None = None  # ``error``: md line of the code it applies to
     trailing: bool = False  # ``error`` written at the end of its code line
+    range: str | None = None  # ``error[9:19]``: the columns the diagnostic underlines
 
 
 @dataclass
@@ -228,8 +229,12 @@ def _add_python(section: Section, body: list[str], start: int, fail: Fail) -> No
     for offset, text in enumerate(body):
         md = start + offset
         if match := _PY_ASSERTION.match(text):
-            indent, kind, value = match.groups()
-            assertion = Assertion(cast(Kind, kind), (value or "").rstrip(), md, indent=indent)
+            indent, kind, columns, value = match.groups()
+            if columns and kind != "error":
+                raise fail(md, f"only `# error` takes a range, not `# {kind}`")
+            assertion = Assertion(
+                cast(Kind, kind), (value or "").rstrip(), md, indent=indent, range=columns
+            )
             if kind == "error":
                 pending.append(assertion)
             _append(assertions, assertion)
@@ -237,9 +242,11 @@ def _add_python(section: Section, body: list[str], start: int, fail: Fail) -> No
         if _MISPLACED.match(text):
             raise fail(md, f"write `-- {text.split()[1]}` inside the sql block")
         if match := _TRAILING_ERROR.match(text):
-            code, value = match.groups()
+            code, columns, value = match.groups()
             assertions.append(
-                Assertion("error", (value or "").rstrip(), md, target=md, trailing=True)
+                Assertion(
+                    "error", (value or "").rstrip(), md, target=md, trailing=True, range=columns
+                )
             )
             text = code
         if text.strip():
