@@ -1,12 +1,13 @@
 # Benchmarks
 
-Three scripts; all need the release extension:
+Four scripts; all need the release extension:
 `uv run maturin develop --release --manifest-path rust/crates/sqlty-ext/Cargo.toml`.
 
 | Script | What it measures | Make target |
 |--------|------------------|-------------|
 | `bench_core.py` | `sqlty.core` calls on small inputs (µs per call) | `make bench` |
 | `bench_project.py` | A generated large project: CLI wall time and peak RSS | `make bench-project`, `make bench-ci`, `make bench-baseline` |
+| `bench_lsp_bridge.py` | A check per keystroke through the language server's bridge, on the `ci` project: latency and GIL hold | `make bench-bridge` |
 | `test_benchmarks.py` | Each query kind, the schema load, `rewrite_source` and `check_source`, through CodSpeed | `make bench-codspeed` |
 
 ## The synthetic project
