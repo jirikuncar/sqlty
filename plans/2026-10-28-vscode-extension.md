@@ -182,8 +182,9 @@ Contention is not a problem for the bridge, so B goes ahead.
 - `# fixed:` already covers fix-all; per-diagnostic fixes are checked to compose to it in
   `tests/test_core_invariants.py`.
 - Server: B with `lsp_server::Connection::memory()` in `cargo test`; end to end through
-  `sqlty server` with [pytest-lsp](https://lsp-devtools.readthedocs.io/en/latest/) for
-  both options.
+  `sqlty server` in `tests/test_lsp.py`, with a small JSON-RPC client:
+  [pytest-lsp](https://lsp-devtools.readthedocs.io/en/latest/) 1.0.1 breaks the Markdown
+  tests (its `pytest_runtest_call` wrapper does not yield for items without `funcargs`).
 - Client: `@vscode/test-electron` smoke test, in CI only.
 - Hooks: a TypeScript lint and typecheck hook in `prek.toml` for `editors/vscode/`.
 
