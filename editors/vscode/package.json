@@ -49,20 +49,6 @@
           "scope": "resource",
           "markdownDescription": "The Python interpreter whose `sqlty` runs. Empty: the interpreter selected in the Python extension."
         },
-        "sqlty.importStrategy": {
-          "type": "string",
-          "enum": [
-            "fromEnvironment",
-            "useBundled"
-          ],
-          "enumDescriptions": [
-            "The `sqlty` of the interpreter, then the one on `PATH`.",
-            "The `sqlty` bundled with the extension."
-          ],
-          "default": "fromEnvironment",
-          "scope": "resource",
-          "markdownDescription": "Where `sqlty` comes from when `#sqlty.path#` finds none."
-        },
         "sqlty.breaking.against": {
           "type": "string",
           "default": "",
@@ -111,7 +97,7 @@
     "check": "tsc --noEmit && oxlint --deny-warnings src && oxfmt --check src",
     "format": "oxfmt src",
     "test": "npm run build && npm run build-test && vscode-test",
-    "package": "npm run build -- --minify && vsce package"
+    "package": "npm run build -- --minify && cp ../../LICENSE LICENSE && vsce package"
   },
   "dependencies": {
     "@vscode/python-extension": "^1.0.6",
@@ -125,6 +111,7 @@
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^4.1.0",
     "esbuild": "^0.28.2",
+    "ovsx": "^1.3.0",
     "oxfmt": "^0.75.0",
     "oxlint": "^1.90.0",
     "typescript": "^7.0.2"

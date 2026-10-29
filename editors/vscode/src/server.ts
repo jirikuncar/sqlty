@@ -8,7 +8,6 @@ const run = promisify(execFile);
 export type Settings = {
   path: string[];
   interpreter: string[];
-  importStrategy: "fromEnvironment" | "useBundled";
   breaking: { against: string; direction: "both" | "forward" | "backward" };
 };
 
@@ -32,13 +31,11 @@ export async function findServer(
     args: ["server"],
     origin: "sqlty.path",
   }));
-  if (settings.importStrategy === "fromEnvironment") {
-    if (interpreter !== undefined && interpreter.length > 0) {
-      const [command, ...args] = interpreter;
-      candidates.push({ command, args: [...args, "-m", "sqlty", "server"], origin: "interpreter" });
-    }
-    candidates.push({ command: "sqlty", args: ["server"], origin: "PATH" });
+  if (interpreter !== undefined && interpreter.length > 0) {
+    const [command, ...args] = interpreter;
+    candidates.push({ command, args: [...args, "-m", "sqlty", "server"], origin: "interpreter" });
   }
+  candidates.push({ command: "sqlty", args: ["server"], origin: "PATH" });
   for (const candidate of candidates) {
     if (await serves(candidate)) {
       return candidate;

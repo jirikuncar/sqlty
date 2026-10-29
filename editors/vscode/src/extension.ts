@@ -47,9 +47,7 @@ async function start(): Promise<void> {
   const server = await findServer(settings, interpreter);
   if (server === undefined) {
     const message =
-      settings.importStrategy === "useBundled"
-        ? "sqlty: this build of the extension bundles no sqlty; set sqlty.importStrategy to fromEnvironment."
-        : "sqlty: no sqlty with `sqlty server` found. Install sqlty in the selected interpreter, or set sqlty.path.";
+      "sqlty: no sqlty with `sqlty server` found. Install sqlty in the selected interpreter, or set sqlty.path.";
     output?.error(message);
     void vscode.window.showErrorMessage(message);
     return;
@@ -79,7 +77,6 @@ function readSettings(): Settings {
   return {
     path: config.get<string[]>("path", []),
     interpreter: config.get<string[]>("interpreter", []),
-    importStrategy: config.get<Settings["importStrategy"]>("importStrategy", "fromEnvironment"),
     breaking: {
       against: config.get<string>("breaking.against", ""),
       direction: config.get<Settings["breaking"]["direction"]>("breaking.direction", "both"),

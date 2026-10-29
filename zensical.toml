@@ -36,6 +36,7 @@ nav = [
     { "Migration" = "recipes/migration.md" },
     { "CI and pre-commit" = "recipes/ci.md" },
     { "Coding agents" = "recipes/agents.md" },
+    { "VS Code" = "recipes/vscode.md" },
   ] },
   { "Reference" = [
     { "CLI" = "reference/cli.md" },
