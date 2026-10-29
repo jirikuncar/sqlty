@@ -1,8 +1,9 @@
 # VS Code extension
 
-> **Status:** stage 1 implemented: `Diagnostic` has `start`, `end` and `fix` (with the
-> imports a fix needs), `--output-format json` prints them, and mdtest asserts
-> `# error[9:19]:`. Preferred: [option B](#b-native-rust-server-preferred), a native
+> **Status:** stages 1 and 2 implemented. `Diagnostic` has `start`, `end` and `fix`
+> (with the imports a fix needs), `--output-format json` prints them, and mdtest asserts
+> `# error[9:19]:`. The bridge is `sqlty._lsp_bridge.Workspace`; the
+> [spike](#spike-results) picks [option B](#b-native-rust-server-preferred), a native
 > Rust server.
 
 ## Goal
@@ -137,11 +138,38 @@ bundled server runs.
    gains columns and fixes.
 2. **Spike**: B's bridge on a large project (`benchmarks/bench_project.py`); measure check
    latency per keystroke with and without GIL contention. Decide A or B.
+   [Results](#spike-results): B.
 3. **Server and client**: diagnostics, quick fixes, fix-all, settings, discovery.
 4. **Breaking**: forward, then backward.
 5. **SQL spans**: names inside the query string.
 6. **Release**: Marketplace and [Open VSX](https://open-vsx.org) (Cursor and VSCodium),
    `docs/recipes/vscode.md`.
+
+## Spike results
+
+`benchmarks/bench_lsp_bridge.py` loads the project of `bench_project.py` (8,000 files,
+2,400 queries, 400 tables) into `Workspace` and times a check per keystroke. Release build,
+Apple M-series, ms:
+
+| Measure | Median | p95 | Max |
+|---------|--------|-----|-----|
+| Load (once per server start) | 840 to 3,960 (warm or cold disk) | | |
+| Check, a generated module (3 queries) | 0.5 | 1.0 | 41 |
+| Check, 50 modules in one file (92 queries) | 14 | 15 | 16 |
+| Check after an edit to the helpers module | 164 | 166 | 181 |
+| Lag of a thread sleeping 1 ms during checks | 0.3 | 3.8 | 10 |
+| Two large checks, one after the other | 36 | 40 | |
+| Two large checks at once | 35 | 39 | |
+
+- A check costs about 0.2 ms per query, nearly all of it the Python passes. Checks
+  serialize on the GIL, in A and B alike: the server runs one at a time, newest buffer
+  first, and drops a check whose buffer has changed.
+- The Python passes hold the GIL for up to about 10 ms. Only A's protocol loop waits on it;
+  B's Rust thread never takes it, so cancellation and text sync stay responsive.
+- An edit to a module that defines helpers rebuilds the helper index (`Project._index`),
+  160 ms on this project. Rebuilding only when the helper names change is a later gain.
+
+Contention is not a problem for the bridge, so B goes ahead.
 
 ## Tests
 
