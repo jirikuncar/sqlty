@@ -2,9 +2,15 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
+import pytest
+
+from sqlty._config import ConfigError
 from sqlty._lsp_bridge import Workspace
+
+if TYPE_CHECKING:
+    from sqlty._breaking import Direction
 
 HELPER = """\
 from typing import Annotated
@@ -27,6 +33,90 @@ def test_buffers_replace_their_files(tmp_path: Path) -> None:
     assert [d["rule"] for d in workspace.check(q, CALL)] == ["unknown-column"]
     workspace.check(db, HELPER.replace("query: Annotated[str, SQL]", "query: str"))
     assert workspace.check(q, CALL) == []
+
+
+OLD_SCHEMA = "CREATE TABLE users (id INTEGER, bio TEXT);\n"
+NEW_SCHEMA = "CREATE TABLE users (id INTEGER, handle TEXT);\n"
+OLD_CODE = 'bios = "--sql\\nSELECT bio FROM users"\n'
+NEW_CODE = 'handles = "--sql\\nSELECT handle FROM users"\n'
+
+
+def git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+
+@pytest.fixture
+def repo(tmp_path: Path) -> Path:
+    """A repository with `bio`, whose working tree replaces it with `handle`."""
+    (tmp_path / "app").mkdir()
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.sqlty]\nschema = "schema.sql"\nrules = { stale-rewrite = "ignore" }\n'
+    )
+    (tmp_path / "schema.sql").write_text(OLD_SCHEMA)
+    (tmp_path / "app" / "old.py").write_text(OLD_CODE)
+    git(tmp_path, "init", "-q")
+    git(tmp_path, "add", "-A")
+    git(
+        tmp_path, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "old"
+    )
+    (tmp_path / "schema.sql").write_text(NEW_SCHEMA)
+    return tmp_path
+
+
+def test_buffers_are_checked_forward_against_the_baseline(repo: Path) -> None:
+    workspace = Workspace(str(repo / "app"), against="HEAD")
+    new = str(repo / "app" / "new.py")
+    found = [d for d in workspace.check(new, NEW_CODE) if d.get("source")]
+    assert [(d["rule"], d["message"], d["fix"]) for d in found] == [
+        (
+            "unknown-column",
+            "column `handle` does not exist in `users` (with the schema of HEAD)",
+            [],
+        )
+    ]
+    assert found[0].get("source") == "sqlty breaking (forward)"
+
+
+def test_the_baseline_is_checked_backward_once(repo: Path) -> None:
+    workspace = Workspace(str(repo / "app"), against="HEAD")
+    old = repo / "app" / "old.py"
+    [(path, [finding])] = workspace.breaking().items()
+    assert path == str(old)
+    assert finding["message"] == "column `bio` does not exist in `users` (in the code of HEAD)"
+    assert finding.get("source") == "sqlty breaking (backward)"
+    assert OLD_CODE[finding["start"] : finding["end"]] == '"--sql\\nSELECT bio FROM users"'
+
+    def backward(text: str) -> list[tuple[str, int]]:
+        found = workspace.check(str(old), text)
+        return [
+            (d["message"], d["start"])
+            for d in found
+            if d.get("source") == "sqlty breaking (backward)"
+        ]
+
+    assert backward(OLD_CODE) == [(finding["message"], finding["start"])]
+    edited = "# edited\n" + OLD_CODE
+    assert backward(edited) == [
+        ("column `bio` does not exist in `users` (in the code of HEAD, line 1)", 0)
+    ]
+
+
+@pytest.mark.parametrize("direction", ["forward", "backward"])
+def test_one_direction(repo: Path, direction: Direction) -> None:
+    workspace = Workspace(str(repo), against="HEAD", direction=direction)
+    found = workspace.check(str(repo / "app" / "new.py"), NEW_CODE)
+    forward = [d for d in found if d.get("source") == "sqlty breaking (forward)"]
+    assert (len(forward), len(workspace.breaking())) == (
+        (1, 0) if direction == "forward" else (0, 1)
+    )
+
+
+def test_a_baseline_outside_git_must_be_a_file(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="main does not exist, and .* is in no git repository"):
+        Workspace(str(tmp_path), against="main")
+    with pytest.raises(ConfigError, match="unknown revision 'nope'"):
+        git(tmp_path, "init", "-q")
+        Workspace(str(tmp_path), against="nope")
 
 
 class Server:
@@ -135,3 +225,40 @@ def test_server_shows_why_a_project_does_not_load(tmp_path: Path) -> None:
         assert "untyped must be 'skip' or 'sentinel'" in shown["message"]
     finally:
         assert server.stop() == 0
+
+
+def test_server_reports_breaking_changes_against_a_baseline(repo: Path) -> None:
+    server = Server(repo)
+    try:
+        options = {"breaking": {"against": "HEAD", "direction": "both"}}
+        server.request(
+            "initialize",
+            {"capabilities": {}, "rootUri": repo.as_uri(), "initializationOptions": options},
+        )
+        server.send({"method": "initialized", "params": {}})
+        new = repo / "app" / "new.py"
+        document = {"uri": new.as_uri(), "languageId": "python", "version": 1, "text": NEW_CODE}
+        server.send({"method": "textDocument/didOpen", "params": {"textDocument": document}})
+
+        old = server.notification("textDocument/publishDiagnostics")
+        assert old["uri"] == (repo / "app" / "old.py").as_uri()
+        assert [(d["source"], d["message"]) for d in old["diagnostics"]] == [
+            (
+                "sqlty breaking (backward)",
+                "column `bio` does not exist in `users` (in the code of HEAD)",
+            )
+        ]
+        published = server.notification("textDocument/publishDiagnostics")
+        assert published["uri"] == new.as_uri()
+        assert [(d["source"], d["message"]) for d in published["diagnostics"]] == [
+            (
+                "sqlty breaking (forward)",
+                "column `handle` does not exist in `users` (with the schema of HEAD)",
+            )
+        ]
+    finally:
+        assert server.stop() == 0
+    worktrees = subprocess.run(
+        ["git", "worktree", "list"], cwd=repo, capture_output=True, text=True
+    ).stdout
+    assert len(worktrees.splitlines()) == 1, "the baseline's worktree is removed on exit"

@@ -63,6 +63,28 @@
           "scope": "resource",
           "markdownDescription": "Where `sqlty` comes from when `#sqlty.path#` finds none."
         },
+        "sqlty.breaking.against": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "A baseline for `sqlty breaking`: a git revision such as `main`, a snapshot `sqlty breaking --save` wrote, or schema files. Empty: no breaking checks."
+        },
+        "sqlty.breaking.direction": {
+          "type": "string",
+          "enum": [
+            "both",
+            "forward",
+            "backward"
+          ],
+          "enumDescriptions": [
+            "Both directions.",
+            "Your queries against the schema of the baseline: deploy first.",
+            "The baseline's queries against your schema: migrate first."
+          ],
+          "default": "both",
+          "scope": "resource",
+          "markdownDescription": "Which way `#sqlty.breaking.against#` is checked, as `sqlty breaking --direction`."
+        },
         "sqlty.trace.server": {
           "type": "string",
           "enum": [

@@ -9,6 +9,7 @@ export type Settings = {
   path: string[];
   interpreter: string[];
   importStrategy: "fromEnvironment" | "useBundled";
+  breaking: { against: string; direction: "both" | "forward" | "backward" };
 };
 
 export type Server = {

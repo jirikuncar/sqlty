@@ -58,6 +58,7 @@ async function start(): Promise<void> {
   const serverOptions: ServerOptions = { command: server.command, args: server.args };
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: "file", language: "python" }],
+    initializationOptions: { breaking: settings.breaking },
     outputChannel: output,
     synchronize: {
       fileEvents: vscode.workspace.createFileSystemWatcher("**/{pyproject.toml,*.sql}"),
@@ -79,6 +80,10 @@ function readSettings(): Settings {
     path: config.get<string[]>("path", []),
     interpreter: config.get<string[]>("interpreter", []),
     importStrategy: config.get<Settings["importStrategy"]>("importStrategy", "fromEnvironment"),
+    breaking: {
+      against: config.get<string>("breaking.against", ""),
+      direction: config.get<Settings["breaking"]["direction"]>("breaking.direction", "both"),
+    },
   };
 }
 
