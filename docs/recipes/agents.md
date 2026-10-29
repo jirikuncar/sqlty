@@ -126,7 +126,7 @@ object per diagnostic:
 | Key | What it holds |
 |-----|---------------|
 | `line` | The line the diagnostic is reported on, where its call or string starts. A `# sqlty: ignore` comment on this line silences it. |
-| `start`, `end` | What the diagnostic is about: the row type, the query, a parameter type or the comment. Lines and columns start at 1, columns count characters, and `end` is the position after the last one. |
+| `start`, `end` | What the diagnostic is about: the row type, the query or the name in it, a parameter type or the comment. Lines and columns start at 1, columns count characters, and `end` is the position after the last one. |
 | `fix` | The edits `sqlty check --fix` makes for this diagnostic, in the same positions. Empty when it has no fix. |
 
 `line` and `start` differ when a call spans lines: a row type checked against the

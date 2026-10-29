@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use sqlparser::ast::Statement;
 use sqlparser::parser::Parser;
+use sqlparser::tokenizer::{Location, Span};
 
 use crate::diagnostics::{Diagnostics, NameDiagnostic};
 
@@ -12,7 +13,7 @@ use super::dml::statement_returns_rows;
 use super::expr::from_sql_type;
 use super::input::{parser_input, Input};
 use super::names::alias_name;
-use super::preprocess::{parse_input, parse_query, too_deep, MAX_DEPTH};
+use super::preprocess::{parse_input_as_written, parse_query, too_deep, MAX_DEPTH};
 use super::query::{Analyzer, Column};
 use super::star_expand::statement_stars;
 use super::{Inferred, Schema, SchemaData, SkippedObject, ANY};
@@ -169,11 +170,12 @@ pub fn parse_error(sql: &str, dialect: &str) -> Option<String> {
 pub fn parse(sql: &str, dialect: &str) -> Parsed {
     let dialect = SqlDialect::from_name(dialect);
     let input = parser_input(sql, dialect).into_owned();
-    let stmts = parse_input(input.text(), dialect);
+    let (stmts, as_written) = parse_input_as_written(input.text(), dialect);
     Parsed {
         input,
         stmts,
         dialect,
+        as_written,
     }
 }
 
@@ -183,6 +185,8 @@ pub struct Parsed {
     input: Input<'static>,
     stmts: Option<Vec<Statement>>,
     dialect: SqlDialect,
+    /// Whether sqlparser read the input as written, so its spans point into it.
+    as_written: bool,
 }
 
 impl Parsed {
@@ -222,7 +226,33 @@ impl Parsed {
         analyzer.diag = Diagnostics::collecting();
         analyzer.source = text_source(&self.input.source, self.dialect);
         let columns = analyzer.statement_columns(stmt);
-        (columns, analyzer.diag.items())
+        let found = analyzer.diag.located().into_iter().map(|(mut found, at)| {
+            found.span = self.as_written.then(|| self.bytes(at)).flatten();
+            found
+        });
+        (columns, found.collect())
+    }
+
+    /// The bytes of the query sqlparser read at `span`.
+    fn bytes(&self, span: Span) -> Option<std::ops::Range<usize>> {
+        let text = self.input.text();
+        let offset = |at: Location| {
+            let line = usize::try_from(at.line).ok()?.checked_sub(1)?;
+            let column = usize::try_from(at.column).ok()?.checked_sub(1)?;
+            let start = match line {
+                0 => 0,
+                _ => text.match_indices('\n').nth(line - 1)?.0 + 1,
+            };
+            let rest = &text[start..];
+            let within = rest
+                .char_indices()
+                .map(|(i, _)| i)
+                .chain([rest.len()])
+                .nth(column)?;
+            Some(start + within)
+        };
+        let (start, end) = (offset(span.start)?, offset(span.end)?);
+        (start < end).then(|| self.input.original(start, false)..self.input.original(end, true))
     }
 
     /// [`result_stars`](super::result_stars) of the query.

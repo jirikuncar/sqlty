@@ -5,7 +5,10 @@
 //! analyzers of subqueries and CTEs; a catalog-based schema loader can record into it too.
 
 use std::cell::RefCell;
+use std::ops::Range;
 use std::rc::Rc;
+
+use sqlparser::tokenizer::Span;
 
 /// The lint rule a diagnostic belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -67,13 +70,19 @@ pub struct NameDiagnostic {
     pub rule: NameRule,
     /// What could not be resolved and why, for the user.
     pub message: String,
+    /// The bytes of the query it is about, when the analyzer knows where that is written:
+    /// the name of an unknown table, column or function.
+    pub span: Option<Range<usize>>,
 }
 
 #[derive(Default)]
 struct Inner {
     /// Whether anything is collected; the analyzer skips the work of explaining otherwise.
     enabled: bool,
-    items: Vec<NameDiagnostic>,
+    /// Each diagnostic with where sqlparser read its node, empty when unknown.
+    items: Vec<(NameDiagnostic, Span)>,
+    /// The spans of the nodes being analyzed, innermost last; see [`Diagnostics::at`].
+    at: Vec<Span>,
     /// Untyped results accounted for so far, recorded or deliberately silent.
     explained: usize,
 }
@@ -97,20 +106,36 @@ impl Diagnostics {
         self.0.borrow().enabled
     }
 
-    /// Record a diagnostic (once per rule and message).
+    /// Record a diagnostic (once per rule and message) at the node being analyzed.
     pub(crate) fn record(&self, rule: NameRule, message: impl Into<String>) {
         let mut inner = self.0.borrow_mut();
         if !inner.enabled {
             return;
         }
-        let item = NameDiagnostic {
-            rule,
-            message: message.into(),
-        };
+        let message = message.into();
         inner.explained += 1;
-        if !inner.items.contains(&item) {
-            inner.items.push(item);
+        let known =
+            |(found, _): &(NameDiagnostic, Span)| found.rule == rule && found.message == message;
+        if !inner.items.iter().any(known) {
+            let at = inner.at.last().copied().unwrap_or(Span::empty());
+            let item = NameDiagnostic {
+                rule,
+                message,
+                span: None,
+            };
+            inner.items.push((item, at));
         }
+    }
+
+    /// Record at `span` until the guard drops: the name of the node being analyzed, or
+    /// [`Span::empty`] for a node whose diagnostics are not about a name in it. `None` when
+    /// nothing is collected.
+    pub(crate) fn at(&self, span: Span) -> Option<At> {
+        let mut inner = self.0.borrow_mut();
+        inner.enabled.then(|| {
+            inner.at.push(span);
+            At(self.clone())
+        })
     }
 
     /// Account for an untyped result whose reason is reported elsewhere or is not a
@@ -154,15 +179,30 @@ impl Diagnostics {
     pub(crate) fn retain_since(&self, (items, _): (usize, usize), keep: impl Fn(NameRule) -> bool) {
         let mut inner = self.0.borrow_mut();
         let mut index = 0;
-        inner.items.retain(|item| {
+        inner.items.retain(|(item, _)| {
             index += 1;
             index <= items || keep(item.rule)
         });
     }
 
-    /// Everything recorded so far, in order.
+    /// Everything recorded so far, in order, without spans.
+    #[cfg(test)]
     pub(crate) fn items(&self) -> Vec<NameDiagnostic> {
+        self.located().into_iter().map(|(item, _)| item).collect()
+    }
+
+    /// Everything recorded so far, in order, with where sqlparser read it.
+    pub(crate) fn located(&self) -> Vec<(NameDiagnostic, Span)> {
         self.0.borrow().items.clone()
+    }
+}
+
+/// The span [`Diagnostics::at`] pushed, popped on drop.
+pub(crate) struct At(Diagnostics);
+
+impl Drop for At {
+    fn drop(&mut self) {
+        (self.0).0.borrow_mut().at.pop();
     }
 }
 
@@ -174,6 +214,7 @@ mod tests {
         NameDiagnostic {
             rule,
             message: message.to_string(),
+            span: None,
         }
     }
 

@@ -7,6 +7,8 @@ use sqlparser::ast::{
 
 use crate::catalog::{fold, FunctionReturn, SchemaColumn};
 use crate::diagnostics::NameRule;
+use sqlparser::ast::Spanned;
+use sqlparser::tokenizer::Span;
 
 use super::dialect::SqlDialect;
 use super::functions::{positional_args, Returns};
@@ -206,6 +208,7 @@ impl<'a> Analyzer<'a> {
 
     #[recursive::recursive]
     pub(super) fn expr(&self, expr: &Expr, scope: &Scope) -> Inferred<Typed> {
+        let _at = self.diag.enabled().then(|| self.diag.at(name_span(expr)));
         match expr {
             Expr::Cast { data_type, .. } => Ok(self.cast_typed(data_type)),
             // MySQL's `CONVERT(x, type)`; `CONVERT(x USING charset)` is a binary string for
@@ -669,6 +672,17 @@ pub(super) fn is_binary_charset(charset: &ObjectName) -> bool {
 /// Whether `field` is the `"*"` that respell writes for PostgreSQL's `(composite).*`.
 pub(super) fn is_field_star(field: &Ident) -> bool {
     field.value == "*" && field.quote_style == Some('"')
+}
+
+/// Where the name a diagnostic of `expr` is about is written: the column of an identifier,
+/// the name of a function; empty for other nodes, whose diagnostics are about their parts.
+fn name_span(expr: &Expr) -> Span {
+    match expr {
+        Expr::Identifier(ident) => ident.span,
+        Expr::CompoundIdentifier(parts) => Span::union_iter(parts.iter().map(|part| part.span)),
+        Expr::Function(function) => function.name.span(),
+        _ => Span::empty(),
+    }
 }
 
 #[cfg(test)]
