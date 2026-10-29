@@ -1,10 +1,11 @@
 # VS Code extension
 
-> **Status:** stages 1 and 2 implemented, stage 3's server too. `Diagnostic` has `start`,
+> **Status:** stages 1 to 3 implemented. `Diagnostic` has `start`,
 > `end` and `fix` (with the imports a fix needs), `--output-format json` prints them, and
 > mdtest asserts `# error[9:19]:`. The bridge is `sqlty._lsp_bridge.Workspace`; the
 > [spike](#spike-results) picks [option B](#b-native-rust-server-preferred), a native
-> Rust server: `rust/crates/sqlty-lsp`, run by `sqlty server`. Next: the client.
+> Rust server: `rust/crates/sqlty-lsp`, run by `sqlty server`, and its client is
+> `editors/vscode/`. Next: breaking.
 
 ## Goal
 
@@ -142,8 +143,10 @@ bundled server runs.
 3. **Server and client**: diagnostics, quick fixes, fix-all, settings, discovery.
    The server is done: full text sync, UTF-8 positions when the client offers them, one
    check at a time on a worker that owns a `Workspace` per root, `pyproject.toml` and
-   `.sql` changes reload the project. Left for later: the `# sqlty: ignore[...]` quick fix,
-   which must not land inside a string, and `redundant-optional` across files.
+   `.sql` changes reload the project. The client finds `sqlty server` in `sqlty.path`, the
+   interpreter, then `PATH`, and restarts when they change; until stage 6 bundles a wheel
+   it does not run in untrusted workspaces. Left for later: the `# sqlty: ignore[...]` quick
+   fix, which must not land inside a string, and `redundant-optional` across files.
 4. **Breaking**: forward, then backward.
 5. **SQL spans**: names inside the query string.
 6. **Release**: Marketplace and [Open VSX](https://open-vsx.org) (Cursor and VSCodium),

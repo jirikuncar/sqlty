@@ -461,6 +461,52 @@ jobs:
           "$RUNNER_TEMP/venv/bin/sqlty" skill --list
           "$RUNNER_TEMP/venv/bin/sqlty" skill | head -2 | grep -qx 'name: sqlty'
 
+  vscode:
+    name: VS Code extension
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: ${{ github.job }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+          python-version: "3.15"
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: rust -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build Rust extension
+        run: |
+          uv sync --no-install-project
+          uv run maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
+
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Install the extension's dependencies
+        working-directory: editors/vscode
+        run: npm ci --no-audit --no-fund
+
+      # VS Code finds the sqlty of the virtual environment on PATH.
+      - name: Run the smoke test in VS Code
+        working-directory: editors/vscode
+        run: PATH="$GITHUB_WORKSPACE/.venv/bin:$PATH" xvfb-run -a npm test
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -496,6 +542,12 @@ jobs:
       # The hooks check examples with sqlty, so they need the extension.
       - name: Build Rust extension
         run: uv run maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
+
+      # The hook of editors/vscode runs tsc, oxlint and oxfmt.
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
 
       # Type checker tests of SQL[T] run with pytest in the test jobs
       - name: Run prek
