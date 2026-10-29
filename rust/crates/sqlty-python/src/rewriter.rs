@@ -517,17 +517,49 @@ pub(crate) fn decode_escapes(text: &str) -> Cow<'_, str> {
         return Cow::Borrowed(text);
     }
     let mut out = String::with_capacity(text.len());
+    escapes(text, |piece, _| out.push_str(piece));
+    Cow::Owned(out)
+}
+
+/// Where the byte at `decoded` of [`decode_escapes`]`(text)` is written in `text`: in an
+/// escape, at its start, or its end with `end`.
+pub(crate) fn escaped_offset(text: &str, decoded: usize, end: bool) -> usize {
+    let (mut at, mut found) = (0, None);
+    escapes(text, |piece, written: Range<usize>| {
+        let next = at + piece.len();
+        let inside = if end {
+            at < decoded && decoded <= next
+        } else {
+            at <= decoded && decoded < next
+        };
+        if found.is_none() && inside {
+            found = Some(match (written.len() == piece.len(), end) {
+                (true, _) => written.start + decoded - at,
+                (false, false) => written.start,
+                (false, true) => written.end,
+            });
+        }
+        at = next;
+    });
+    found.unwrap_or(text.len())
+}
+
+/// Each piece of [`decode_escapes`]`(text)`, with the bytes of `text` it is decoded from.
+fn escapes(text: &str, mut piece: impl FnMut(&str, Range<usize>)) {
     let mut rest = text;
+    let position = |rest: &str| text.len() - rest.len();
     while let Some(at) = rest.find('\\') {
-        out.push_str(&rest[..at]);
+        let start = position(rest);
+        piece(&rest[..at], start..start + at);
+        let from = start + at;
         let escape = &rest[at + 1..];
         let Some(next) = escape.chars().next() else {
-            out.push('\\');
-            rest = "";
-            break;
+            piece("\\", from..from + 1);
+            return;
         };
         if next == '\r' {
             rest = escape[1..].strip_prefix('\n').unwrap_or(&escape[1..]);
+            piece("", from..position(rest));
             continue;
         }
         let simple = match next {
@@ -545,8 +577,8 @@ pub(crate) fn decode_escapes(text: &str) -> Cow<'_, str> {
             _ => None,
         };
         if let Some(value) = simple {
-            out.push_str(value);
             rest = &escape[next.len_utf8()..];
+            piece(value, from..position(rest));
             continue;
         }
         let (digits, radix) = match next {
@@ -571,17 +603,16 @@ pub(crate) fn decode_escapes(text: &str) -> Cow<'_, str> {
             .and_then(char::from_u32);
         match code {
             Some(ch) => {
-                out.push(ch);
                 rest = &escape[skip + digits..];
+                piece(ch.encode_utf8(&mut [0; 4]), from..position(rest));
             }
             None => {
-                out.push('\\');
+                piece("\\", from..from + 1);
                 rest = escape;
             }
         }
     }
-    out.push_str(rest);
-    Cow::Owned(out)
+    piece(rest, position(rest)..text.len());
 }
 
 /// Remove sqlty and `TYPE_MODULES` imports that are no longer referenced.

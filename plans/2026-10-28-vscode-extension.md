@@ -1,11 +1,11 @@
 # VS Code extension
 
-> **Status:** stages 1 to 4 implemented. `Diagnostic` has `start`,
+> **Status:** stages 1 to 5 implemented. `Diagnostic` has `start`,
 > `end` and `fix` (with the imports a fix needs), `--output-format json` prints them, and
 > mdtest asserts `# error[9:19]:`. The bridge is `sqlty._lsp_bridge.Workspace`; the
 > [spike](#spike-results) picks [option B](#b-native-rust-server-preferred), a native
 > Rust server: `rust/crates/sqlty-lsp`, run by `sqlty server`, and its client is
-> `editors/vscode/`. Next: SQL spans.
+> `editors/vscode/`. Next: release.
 
 ## Goal
 
@@ -153,7 +153,11 @@ bundled server runs.
    check; backward runs on load and reload, and the server publishes it for the files that
    are not open. Left for later: following a ref that moves while the server runs (a
    saved schema or config re-resolves it).
-5. **SQL spans**: names inside the query string.
+5. **SQL spans**: names inside the query string. The analyzer records under the span of
+   the identifier, function or table name it is analyzing (`Diagnostics::at`), and
+   `Input::original` maps it back through the edits made before parsing; the checker maps
+   that through the escapes and the literals of the query (`query_offset`). Casts, and
+   PostgreSQL queries read only after numbering their `?` placeholders, keep the strings.
 6. **Release**: Marketplace and [Open VSX](https://open-vsx.org) (Cursor and VSCodium),
    `docs/recipes/vscode.md`.
 

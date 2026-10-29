@@ -84,7 +84,7 @@ def test_the_baseline_is_checked_backward_once(repo: Path) -> None:
     assert path == str(old)
     assert finding["message"] == "column `bio` does not exist in `users` (in the code of HEAD)"
     assert finding.get("source") == "sqlty breaking (backward)"
-    assert OLD_CODE[finding["start"] : finding["end"]] == '"--sql\\nSELECT bio FROM users"'
+    assert OLD_CODE[finding["start"] : finding["end"]] == "bio"
 
     def backward(text: str) -> list[tuple[str, int]]:
         found = workspace.check(str(old), text)

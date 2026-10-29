@@ -196,7 +196,7 @@ Schema(dialect="postgres")
 `check_source` returns what `sqlty check` reports. Each diagnostic carries the
 UTF-8 byte offsets of what it is about, `start` to `end`, and the edits of
 `sqlty check --fix` as `(start, end, replacement)`. Editors use them to underline
-the row type or the query and to offer the fix:
+the row type, the query or the unknown name in it, and to offer the fix:
 
 ```pycon
 >>> from sqlty.core import check_source

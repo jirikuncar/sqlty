@@ -448,6 +448,66 @@ fn test_name_diagnostics_stay_quiet() {
     );
 }
 
+/// What each diagnostic's span covers in `sql`.
+fn underlined(sql: &str) -> Vec<(&'static str, Option<&str>)> {
+    let schema = Some(load_schema(
+        "CREATE TABLE a (id INT, n INT, g GEOMETRY); CREATE TABLE b (id INT, t TEXT);",
+        "postgres",
+    ));
+    analyze_with_diagnostics(sql, "postgres", schema.as_deref())
+        .1
+        .into_iter()
+        .map(|found| (found.rule.name(), found.span.map(|span| &sql[span])))
+        .collect()
+}
+
+#[test]
+fn test_name_diagnostics_underline_the_name() {
+    assert_eq!(
+        underlined("--sql\nSELECT nope FROM a"),
+        [("unknown-column", Some("nope"))]
+    );
+    assert_eq!(
+        underlined("SELECT a.nope FROM a"),
+        [("unknown-column", Some("a.nope"))]
+    );
+    assert_eq!(
+        underlined("SELECT \"nopé\" FROM a"),
+        [("unknown-column", Some("\"nopé\""))]
+    );
+    assert_eq!(
+        underlined("SELECT id FROM a, b"),
+        [("ambiguous-column", Some("id"))]
+    );
+    assert_eq!(
+        underlined("SELECT id\nFROM a JOIN missing ON true"),
+        [("unknown-table", Some("missing"))]
+    );
+    assert_eq!(
+        underlined("SELECT upper(frob(n)) FROM a"),
+        [("unknown-function", Some("frob"))]
+    );
+    // Inside a cast, about the cast, not the column it reads.
+    assert_eq!(
+        underlined("SELECT n::mood FROM a"),
+        [("unknown-type", None)]
+    );
+    // Through the edits of the query before parsing: `%(who)s` and `%s` become `NULL`.
+    assert_eq!(
+        underlined("SELECT %(who)s, nope FROM a"),
+        [("unknown-column", Some("nope"))]
+    );
+    assert_eq!(
+        underlined("SELECT %s, %s, nope FROM a"),
+        [("unknown-column", Some("nope"))]
+    );
+    // PostgreSQL reads `?` placeholders only after renumbering them, which moves the names.
+    assert_eq!(
+        underlined("SELECT ?, nope FROM a"),
+        [("unknown-column", None)]
+    );
+}
+
 #[test]
 fn test_name_rules_need_a_schema() {
     let found = analyze_with_diagnostics("SELECT nope, id FROM a, b", "postgres", None).1;

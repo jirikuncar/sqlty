@@ -9,6 +9,8 @@ use sqlparser::ast::{
 };
 
 use crate::catalog::{fold, FunctionReturn};
+use sqlparser::ast::Spanned;
+use sqlparser::tokenizer::Span;
 
 use super::dialect::SqlDialect;
 use super::memo::SubqueryMemo;
@@ -509,6 +511,11 @@ impl<'a> Analyzer<'a> {
                         } if analyzer.is_system_catalog(name) => vec![opaque_source(other)],
                         _ => table_scope(other, analyzer.dialect),
                     };
+                    let name = match other {
+                        TableFactor::Table { name, .. } => name.span(),
+                        _ => Span::empty(),
+                    };
+                    let _at = analyzer.diag.at(name);
                     for source in &entries {
                         analyzer.check_table(&source.table);
                     }

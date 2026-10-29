@@ -25,7 +25,7 @@ use crate::rewriter::{
 };
 use crate::rules::{Rule, RuleConfig, Severity};
 use crate::scan::Scan;
-use crate::tokens::{content, Call};
+use crate::tokens::{content, query_offset, Call};
 use sqlty_sql::analyzer::{expand_star, parse, row_type, Column, Parsed, SchemaData};
 use sqlty_sql::diagnostics::{NameDiagnostic, NameRule};
 use std::ops::Range;
@@ -322,7 +322,7 @@ impl Checker<'_> {
             let template = content.contains('{') && composes(scan.source(), first.start);
             self.marker_and_syntax(&content, &at, &first, template);
             if after_marker(&content).is_some() && !template {
-                self.name_diagnostics(&content, &at);
+                self.name_diagnostics(&content, &at, &scan.spans(group));
             }
         }
     }
@@ -351,7 +351,7 @@ impl Checker<'_> {
         };
         let query = At::at_line(line, query);
         self.marker_and_syntax(&sql_content, &query, &call.strings[0], false);
-        self.name_diagnostics(&sql_content, &query);
+        self.name_diagnostics(&sql_content, &query, &call.strings);
         self.select_star(call, &sql_content, &query);
         let annotation = &scan.source()[call.annotation.clone()];
         let start = call.annotation.start + annotation.len() - annotation.trim_start().len();
@@ -415,8 +415,9 @@ impl Checker<'_> {
         }
     }
 
-    /// Why a query has untyped columns (the `name` rules).
-    fn name_diagnostics(&mut self, sql_content: &str, at: &At) {
+    /// Why a query has untyped columns (the `name` rules), at the name when the query
+    /// knows where it is written in the `literals`, else at the query.
+    fn name_diagnostics(&mut self, sql_content: &str, at: &At, literals: &[Range<usize>]) {
         let enabled = NameRule::ALL
             .iter()
             .any(|&rule| self.rules.is_enabled(Rule::Name(rule)));
@@ -424,8 +425,18 @@ impl Checker<'_> {
             return;
         }
         if let Some(query) = marked_query(sql_content) {
+            let source = self.scan.source();
             for found in &self.analysis(&query).diagnostics {
-                self.report(Rule::Name(found.rule), found.message.clone(), at);
+                let name = found.span.as_ref().and_then(|span| {
+                    let start = query_offset(source, literals, span.start, false)?;
+                    Some(start..query_offset(source, literals, span.end, true)?)
+                });
+                let name = name.map(|span| At::at_line(at.line, span));
+                self.report(
+                    Rule::Name(found.rule),
+                    found.message.clone(),
+                    name.as_ref().unwrap_or(at),
+                );
             }
         }
     }

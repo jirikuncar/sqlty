@@ -1400,8 +1400,8 @@ def test_check_output_formats(tmp_path, monkeypatch, capsys) -> None:
             "message": "column `nmae` does not exist in `users`",
             "severity": "error",
             "line": 2,
-            "start": {"line": 2, "column": 21},
-            "end": {"line": 2, "column": 52},
+            "start": {"line": 2, "column": 36},
+            "end": {"line": 2, "column": 40},
             "fix": [],
         }
     ]
