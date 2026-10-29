@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from collections import Counter
     from collections.abc import Callable, Iterable, Iterator
 
+    from sqlty._check import RowUsage
     from sqlty._config import RuleOverride, SchemaSpec, SQLTyConfig
     from sqlty._core import Schema
     from sqlty._lint import Diagnostic
@@ -573,41 +574,20 @@ def _cmd_check(args: argparse.Namespace) -> None:
     from collections import Counter
 
     from sqlty._config import ConfigError
-    from sqlty._helpers import configured_helpers
     from sqlty._source import ParsedSource
-    from sqlty.core import HelperIndex, RowUsage, check_source, fix_source, query_statistics
+    from sqlty.core import RowUsage
 
     if args.error_on_warning and (args.exit_zero or args.exit_zero_on_warning):
         other = "--exit-zero" if args.exit_zero else "--exit-zero-on-warning"
         raise ConfigError(f"--error-on-warning cannot be used with {other}")
     # Parsed trees stay alive for cross-module lookups: collect young objects only, as mypy does.
     gc.set_threshold(200_000, 30, 30)
-    resolver = SettingsResolver(args)
-    files = _collect_python_files(args.paths, resolver.source)
+    project = Project(args)
+    files, sources, settings = project.files, project.sources, project.settings
 
-    if not files and not args.quiet:
+    if not files and not project.unreadable and not args.quiet:
         logger.warning("No Python files found")
         return
-
-    texts = {path: read_source(path) for path in files}
-    unreadable = [path for path, text in texts.items() if text is None]
-    files = [path for path in files if texts[path] is not None]
-    modules = {path: _module_names(resolver.resolve(path), args.paths) for path in files}
-    sources = {
-        path: ParsedSource(
-            source,
-            modules[path][0] + (".__init__" if path.name == "__init__.py" else ""),
-        )
-        for path in files
-        if (source := texts[path]) is not None
-    }
-    helpers = HelperIndex()
-    for path, parsed in sources.items():
-        for name in modules[path]:
-            helpers.add(name, parsed)
-    helpers_for = configured_helpers(
-        helpers, _checked_roots(args.paths, [resolver.resolve(path) for path in files])
-    )
 
     total_errors = 0
     total_warnings = 0
@@ -617,24 +597,8 @@ def _cmd_check(args: argparse.Namespace) -> None:
     row_usage = RowUsage()
     reports: list[tuple[Path, Diagnostic, ParsedSource]] = []
 
-    settings = {path: resolver.for_file(path) for path in files}
-    file_helpers = {path: helpers_for(settings[path]) for path in files}
-
-    def fix(path: Path) -> str:
-        return fix_source(
-            sources[path],
-            dialect=settings[path].dialect,
-            schema_sql=settings[path].schema,
-            import_style=settings[path].import_style,
-            untyped=settings[path].untyped,
-            rules=settings[path].rules,
-            json_types=settings[path].json_types,
-            param_types=settings[path].param_types,
-            helpers=file_helpers[path],
-        )
-
     if args.fix:
-        for path, fixed in zip(files, _map(args, fix, files), strict=True):
+        for path, fixed in zip(files, _map(args, project.fix, files), strict=True):
             if fixed == sources[path].text:
                 continue
             write_source(path, fixed)
@@ -648,28 +612,8 @@ def _cmd_check(args: argparse.Namespace) -> None:
                 print(f"Fixed {path}", file=sys.stdout if text else sys.stderr)
 
     def check(path: Path) -> tuple[list[Diagnostic], Counter[str]]:
-        diagnostics = check_source(
-            sources[path],
-            dialect=settings[path].dialect,
-            schema_sql=settings[path].schema,
-            rules=settings[path].rules,
-            import_style=settings[path].import_style,
-            untyped=settings[path].untyped,
-            helpers=file_helpers[path],
-            row_usage=row_usage,
-            query_variants=settings[path].query_variants,
-        )
-        if not args.statistics:
-            return diagnostics, Counter()
-        counts = query_statistics(
-            sources[path],
-            dialect=settings[path].dialect,
-            schema_sql=settings[path].schema,
-            import_style=settings[path].import_style,
-            helpers=file_helpers[path],
-            query_variants=settings[path].query_variants,
-        )
-        return diagnostics, counts
+        diagnostics = project.check(path, row_usage)
+        return diagnostics, project.statistics(path) if args.statistics else Counter()
 
     for path, (diagnostics, counts) in zip(files, _map(args, check, files), strict=True):
         statistics += counts
@@ -713,7 +657,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
 
     if not args.exit_zero and (total_errors or (args.error_on_warning and total_warnings)):
         sys.exit(EXIT_FOUND)
-    if unreadable:
+    if project.unreadable:
         sys.exit(EXIT_ERROR)
 
 
@@ -1324,6 +1268,109 @@ class SettingsResolver:
             overrides=tuple(config.get("overrides", ())),
             config_dir=config_dir,
         )
+
+
+class Project:
+    """The Python files ``check`` reads, with their sources, settings and helpers, by path.
+
+    ``update`` replaces the text of one file, as an editor does with an unsaved buffer.
+    """
+
+    def __init__(self, args: argparse.Namespace) -> None:
+        from sqlty._source import ParsedSource
+
+        self.paths: list[Path] = args.paths
+        self.resolver = SettingsResolver(args)
+        files = _collect_python_files(args.paths, self.resolver.source)
+        texts = {path: read_source(path) for path in files}
+        self.unreadable = [path for path, text in texts.items() if text is None]
+        self.files = [path for path in files if texts[path] is not None]
+        self.modules = {
+            path: _module_names(self.resolver.resolve(path), args.paths) for path in self.files
+        }
+        self.sources = {
+            path: ParsedSource(text, self._module(path))
+            for path in self.files
+            if (text := texts[path]) is not None
+        }
+        self.settings = {path: self.resolver.for_file(path) for path in self.files}
+        self._index()
+
+    def update(self, path: Path, text: str) -> None:
+        from sqlty._source import ParsedSource
+
+        old = self.sources.get(path)
+        if old is not None and old.text == text:
+            return
+        if old is None:
+            self.files.append(path)
+            self.modules[path] = _module_names(self.resolver.resolve(path), self.paths)
+            self.settings[path] = self.resolver.for_file(path)
+        parsed = self.sources[path] = ParsedSource(text, self._module(path))
+        if old is None or old.may_define_helpers or parsed.may_define_helpers:
+            self._index()
+            return
+        for name in self.modules[path]:
+            self.index.add(name, parsed)
+
+    def check(self, path: Path, row_usage: RowUsage | None = None) -> list[Diagnostic]:
+        from sqlty.core import check_source
+
+        settings = self.settings[path]
+        return check_source(
+            self.sources[path],
+            dialect=settings.dialect,
+            schema_sql=settings.schema,
+            rules=settings.rules,
+            import_style=settings.import_style,
+            untyped=settings.untyped,
+            helpers=self.helpers[path],
+            row_usage=row_usage,
+            query_variants=settings.query_variants,
+        )
+
+    def fix(self, path: Path) -> str:
+        from sqlty.core import fix_source
+
+        settings = self.settings[path]
+        return fix_source(
+            self.sources[path],
+            dialect=settings.dialect,
+            schema_sql=settings.schema,
+            import_style=settings.import_style,
+            untyped=settings.untyped,
+            rules=settings.rules,
+            json_types=settings.json_types,
+            param_types=settings.param_types,
+            helpers=self.helpers[path],
+        )
+
+    def statistics(self, path: Path) -> Counter[str]:
+        from sqlty.core import query_statistics
+
+        settings = self.settings[path]
+        return query_statistics(
+            self.sources[path],
+            dialect=settings.dialect,
+            schema_sql=settings.schema,
+            import_style=settings.import_style,
+            helpers=self.helpers[path],
+            query_variants=settings.query_variants,
+        )
+
+    def _module(self, path: Path) -> str:
+        return self.modules[path][0] + (".__init__" if path.name == "__init__.py" else "")
+
+    def _index(self) -> None:
+        from sqlty._helpers import HelperIndex, configured_helpers
+
+        self.index = HelperIndex()
+        for path, parsed in self.sources.items():
+            for name in self.modules[path]:
+                self.index.add(name, parsed)
+        checked = _checked_roots(self.paths, [self.resolver.resolve(path) for path in self.files])
+        helpers_for = configured_helpers(self.index, checked)
+        self.helpers = {path: helpers_for(self.settings[path]) for path in self.files}
 
 
 def _load_schema(spec: SchemaSpec, base: Path) -> str | None:
