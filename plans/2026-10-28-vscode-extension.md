@@ -1,10 +1,10 @@
 # VS Code extension
 
-> **Status:** stages 1 and 2 implemented. `Diagnostic` has `start`, `end` and `fix`
-> (with the imports a fix needs), `--output-format json` prints them, and mdtest asserts
-> `# error[9:19]:`. The bridge is `sqlty._lsp_bridge.Workspace`; the
+> **Status:** stages 1 and 2 implemented, stage 3's server too. `Diagnostic` has `start`,
+> `end` and `fix` (with the imports a fix needs), `--output-format json` prints them, and
+> mdtest asserts `# error[9:19]:`. The bridge is `sqlty._lsp_bridge.Workspace`; the
 > [spike](#spike-results) picks [option B](#b-native-rust-server-preferred), a native
-> Rust server.
+> Rust server: `rust/crates/sqlty-lsp`, run by `sqlty server`. Next: the client.
 
 ## Goal
 
@@ -140,6 +140,10 @@ bundled server runs.
    latency per keystroke with and without GIL contention. Decide A or B.
    [Results](#spike-results): B.
 3. **Server and client**: diagnostics, quick fixes, fix-all, settings, discovery.
+   The server is done: full text sync, UTF-8 positions when the client offers them, one
+   check at a time on a worker that owns a `Workspace` per root, `pyproject.toml` and
+   `.sql` changes reload the project. Left for later: the `# sqlty: ignore[...]` quick fix,
+   which must not land inside a string, and `redundant-optional` across files.
 4. **Breaking**: forward, then backward.
 5. **SQL spans**: names inside the query string.
 6. **Release**: Marketplace and [Open VSX](https://open-vsx.org) (Cursor and VSCodium),
