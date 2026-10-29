@@ -5,6 +5,7 @@ Commands:
     sqlty strip [OPTIONS] [PATH...]     Strip SQL[T](...) wrappers
     sqlty check [OPTIONS] [PATH...]     Lint SQL type annotations
     sqlty rule [NAME]                   Explain a lint rule, or list them
+    sqlty server                        Run the language server, for editors
     sqlty version                       Print version
 """
 
@@ -75,6 +76,12 @@ def main(argv: list[str] | None = None) -> None:
                 _cmd_rule(args.name)
             case "skill":
                 _cmd_skill(args.name, args.install, args.list)
+            case "server":
+                from sqlty._core import serve
+
+                # Messages own stdout: a stray print must not corrupt one.
+                sys.stdout = sys.stderr
+                serve()
             case "version":
                 _cmd_version()
             case _:
@@ -267,6 +274,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     skill_mode.add_argument(
         "--list", action="store_true", help="List the skills and what each is for"
+    )
+
+    # --- server ---
+    subparsers.add_parser(
+        "server",
+        help="Run the language server on stdin and stdout, for editors (diagnostics and fixes as you type)",
     )
 
     # --- version ---

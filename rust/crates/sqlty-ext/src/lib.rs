@@ -20,6 +20,8 @@
 //! the pieces that need no interpreter (the schema cache, `schema_for`, nullability
 //! mapping). The `#[pyfunction]`s are exercised from Python by `tests/`.
 
+mod server;
+
 use sqlty_python::checker;
 use sqlty_python::fixer;
 use sqlty_python::rewriter;
@@ -868,6 +870,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;
     m.add_function(wrap_pyfunction!(skills, m)?)?;
+    m.add_function(wrap_pyfunction!(server::serve, m)?)?;
     Ok(())
 }
 

@@ -1,10 +1,10 @@
 # VS Code extension
 
-> **Status:** stages 1 and 2 implemented. `Diagnostic` has `start`, `end` and `fix`
-> (with the imports a fix needs), `--output-format json` prints them, and mdtest asserts
-> `# error[9:19]:`. The bridge is `sqlty._lsp_bridge.Workspace`; the
+> **Status:** stages 1 and 2 implemented, stage 3's server too. `Diagnostic` has `start`,
+> `end` and `fix` (with the imports a fix needs), `--output-format json` prints them, and
+> mdtest asserts `# error[9:19]:`. The bridge is `sqlty._lsp_bridge.Workspace`; the
 > [spike](#spike-results) picks [option B](#b-native-rust-server-preferred), a native
-> Rust server.
+> Rust server: `rust/crates/sqlty-lsp`, run by `sqlty server`. Next: the client.
 
 ## Goal
 
@@ -140,6 +140,10 @@ bundled server runs.
    latency per keystroke with and without GIL contention. Decide A or B.
    [Results](#spike-results): B.
 3. **Server and client**: diagnostics, quick fixes, fix-all, settings, discovery.
+   The server is done: full text sync, UTF-8 positions when the client offers them, one
+   check at a time on a worker that owns a `Workspace` per root, `pyproject.toml` and
+   `.sql` changes reload the project. Left for later: the `# sqlty: ignore[...]` quick fix,
+   which must not land inside a string, and `redundant-optional` across files.
 4. **Breaking**: forward, then backward.
 5. **SQL spans**: names inside the query string.
 6. **Release**: Marketplace and [Open VSX](https://open-vsx.org) (Cursor and VSCodium),
@@ -178,8 +182,9 @@ Contention is not a problem for the bridge, so B goes ahead.
 - `# fixed:` already covers fix-all; per-diagnostic fixes are checked to compose to it in
   `tests/test_core_invariants.py`.
 - Server: B with `lsp_server::Connection::memory()` in `cargo test`; end to end through
-  `sqlty server` with [pytest-lsp](https://lsp-devtools.readthedocs.io/en/latest/) for
-  both options.
+  `sqlty server` in `tests/test_lsp.py`, with a small JSON-RPC client:
+  [pytest-lsp](https://lsp-devtools.readthedocs.io/en/latest/) 1.0.1 breaks the Markdown
+  tests (its `pytest_runtest_call` wrapper does not yield for items without `funcargs`).
 - Client: `@vscode/test-electron` smoke test, in CI only.
 - Hooks: a TypeScript lint and typecheck hook in `prek.toml` for `editors/vscode/`.
 

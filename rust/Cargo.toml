@@ -21,6 +21,7 @@ thiserror = "2"
 insta = "1.49"
 sqlty-sql = { path = "crates/sqlty-sql" }
 sqlty-python = { path = "crates/sqlty-python" }
+sqlty-lsp = { path = "crates/sqlty-lsp" }
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
