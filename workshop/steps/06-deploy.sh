@@ -3,12 +3,20 @@
 source "$(dirname "$0")/lib.sh"
 
 cat > Dockerfile <<'DOCKER'
-FROM python:3.14-slim
-RUN pip install --no-cache-dir uv
-ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PROJECT_ENVIRONMENT=/venv PATH=/venv/bin:$PATH
+FROM debian:trixie-slim AS build
+COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /bin/
+ENV UV_MANAGED_PYTHON=1 UV_PYTHON_INSTALL_DIR=/python UV_PROJECT_ENVIRONMENT=/venv \
+    UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 WORKDIR /app
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev
+
+FROM debian:trixie-slim
+COPY --from=build /python /python
+COPY --from=build /venv /venv
+COPY --from=build /app /app
+ENV PATH=/venv/bin:$PATH
+WORKDIR /app
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 DOCKER
 

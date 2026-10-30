@@ -17,7 +17,7 @@ runs two versions side by side while a migration rolls out.
   containers
 
 The scripts install `sqlty>=0.3.0`, the first release with `sqlty server`, which
-the extension runs. Pull `postgres:17-alpine` and `python:3.14-slim` before going on
+the extension runs. Pull `postgres:17-alpine`, `debian:trixie-slim` and `ghcr.io/astral-sh/uv:0.11` before going on
 stage: conference Wi-Fi is not a deployment platform.
 
 ```bash
