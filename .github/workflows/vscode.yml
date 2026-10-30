@@ -58,16 +58,27 @@ jobs:
           path: editors/vscode/sqlty.vsix
 
   publish:
-    name: Publish to the Marketplace and Open VSX
+    name: Publish to ${{ matrix.registry }}
     needs: package
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && !github.event.release.prerelease)
     runs-on: ubuntu-latest
+    # Each registry publishes on its own: re-running one that failed must not republish the other.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - registry: the Visual Studio Marketplace
+            url: https://marketplace.visualstudio.com/items?itemName=jirikuncar.sqlty
+            publish: npx vsce publish --oidc --packagePath sqlty.vsix
+          - registry: Open VSX
+            url: https://open-vsx.org/extension/jirikuncar/sqlty
+            publish: npx ovsx publish --trusted-publishing sqlty.vsix
     permissions:
       contents: read
       id-token: write
     environment:
       name: vscode
-      url: https://marketplace.visualstudio.com/items?itemName=jirikuncar.sqlty
+      url: ${{ matrix.url }}
     defaults:
       run:
         working-directory: editors/vscode
@@ -84,7 +95,5 @@ jobs:
         with:
           name: vsix
           path: editors/vscode
-      - name: Publish to the Visual Studio Marketplace
-        run: npx vsce publish --oidc --packagePath sqlty.vsix
-      - name: Publish to Open VSX
-        run: npx ovsx publish --trusted-publishing sqlty.vsix
+      - name: Publish
+        run: ${{ matrix.publish }}
