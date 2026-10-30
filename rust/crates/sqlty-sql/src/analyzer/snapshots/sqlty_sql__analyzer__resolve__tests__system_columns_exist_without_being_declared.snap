@@ -16,7 +16,7 @@ ctid: str | TID | NonNull
 
 SELECT oid FROM users
 oid: ? | ? | Unknown
-[unknown-column] column `oid` does not exist in `users`
+[unknown-column] column `oid` does not exist in `users`; did you mean `id`?
 
 sqlite:
 SELECT rowid, _rowid_, oid FROM users

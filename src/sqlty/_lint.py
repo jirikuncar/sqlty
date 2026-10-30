@@ -229,7 +229,7 @@ RULES: dict[str, LintRule] = {
     "unknown-column": LintRule(
         name="unknown-column",
         default_severity=Severity.ERROR,
-        fixable=False,
+        fixable=True,
         description="Query reads a column that its table does not have",
     ),
     "ambiguous-column": LintRule(

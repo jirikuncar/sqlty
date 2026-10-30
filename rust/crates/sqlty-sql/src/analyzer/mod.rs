@@ -38,6 +38,7 @@ mod respell;
 mod scope;
 mod sql_type;
 mod star_expand;
+mod suggest;
 mod table_functions;
 #[cfg(test)]
 mod test_support;

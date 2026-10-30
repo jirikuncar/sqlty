@@ -73,6 +73,8 @@ pub struct NameDiagnostic {
     /// The bytes of the query it is about, when the analyzer knows where that is written:
     /// the name of an unknown table, column or function.
     pub span: Option<Range<usize>>,
+    /// What to write at `span` to fix it: the closest column of an unknown one.
+    pub replacement: Option<String>,
 }
 
 #[derive(Default)]
@@ -108,6 +110,16 @@ impl Diagnostics {
 
     /// Record a diagnostic (once per rule and message) at the node being analyzed.
     pub(crate) fn record(&self, rule: NameRule, message: impl Into<String>) {
+        self.record_fix(rule, message, None);
+    }
+
+    /// [`Diagnostics::record`] with what to write at the name to fix it.
+    pub(crate) fn record_fix(
+        &self,
+        rule: NameRule,
+        message: impl Into<String>,
+        replacement: Option<String>,
+    ) {
         let mut inner = self.0.borrow_mut();
         if !inner.enabled {
             return;
@@ -122,6 +134,7 @@ impl Diagnostics {
                 rule,
                 message,
                 span: None,
+                replacement,
             };
             inner.items.push((item, at));
         }
@@ -215,6 +228,7 @@ mod tests {
             rule,
             message: message.to_string(),
             span: None,
+            replacement: None,
         }
     }
 
