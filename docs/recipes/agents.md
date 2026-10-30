@@ -16,6 +16,7 @@ them from the installed `sqlty`.
 | `sqlty-check` | reads a diagnostic, names a row type, checks parameters | `check`, `--fix`, `--explain`, JSON output, `sqlty rule`, suppressions, severities |
 | `sqlty-ci` | sets up or repairs pre-commit or CI | the hooks, the GitHub Actions job, promoting rules to errors |
 | `sqlty-rewrite` | writes a query, or adds or removes wrappers | `rewrite`, `strip`, `--check` and `--diff`, `SQL[UNTYPED]`, `import-style`, the magic codec |
+| `sqlty-server` | sets up sqlty in an editor, or an editor shows nothing or other diagnostics than `check` | `sqlty server`, the VS Code extension and its settings, fix on save, other LSP clients, breaking findings while editing |
 <!-- /skills-table -->
 
 Each skill links to this site, not to files of the repository, so it works in

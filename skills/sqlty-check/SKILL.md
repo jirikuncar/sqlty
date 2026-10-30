@@ -1,6 +1,6 @@
 ---
 name: sqlty-check
-description: Run sqlty check and act on its diagnostics, name the row type of a query, and check query parameters. Use when sqlty check reports a diagnostic such as [unknown-column] or [narrow-type], when replacing SQL[tuple[...]] with a TypedDict, dataclass, NamedTuple or pydantic model, when a column may be NULL, when a call passes the wrong parameters, when suppressing a diagnostic with a sqlty ignore comment, or when changing a rule's severity in [tool.sqlty.rules].
+description: Run sqlty check and act on its diagnostics, name the row type of a query, and check query parameters, including the typed parameters of SQL[R, P]. Use when sqlty check reports a diagnostic such as [unknown-column] or [narrow-type], when replacing SQL[tuple[...]] with a TypedDict, dataclass, NamedTuple or pydantic model, when a column may be NULL, when a call passes the wrong parameters, when suppressing a diagnostic with a sqlty ignore comment, or when changing a rule's severity in [tool.sqlty.rules].
 ---
 
 # sqlty check
@@ -50,7 +50,9 @@ q = SQL[User]("--sql\nSELECT id::INTEGER, name::INTEGER AS name FROM users")
 ```
 
 `sqlty check --fix` updates a stale `SQL[tuple[...]]` but never edits a named
-row type: update its fields yourself.
+row type: update its fields yourself. For `unknown-column` it writes the closest
+column of the tables in scope, when there is one: read the suggestion before you
+accept it.
 
 ### Nullable columns
 
@@ -99,6 +101,37 @@ execute("SELECT id FROM users WHERE id = %s AND age > %s", (1, b"1"))
 execute("SELECT id FROM users WHERE id = %s AND age > %s", (1,))
 ```
 
+### Typed parameters
+
+`SQL[R, P]` types the parameters of a query as `P`: a `tuple` with one item per
+placeholder, or a `TypedDict` with one key per name. `sqlty check` compares a `P`
+you wrote with the query (`params-type-mismatch`). Let `sqlty rewrite` write it
+with `param-types = true`; a type checker is then stricter than the driver, which
+is why it is off by default.
+
+```python
+from sqlty import SQL
+
+# error: [params-type-mismatch] "tuple[int, int] has 2 items but the query has 1 parameter"
+q = SQL[tuple[int], tuple[int, int]]("--sql\nSELECT 1 FROM users LIMIT %s")
+```
+
+### Queries built from parts
+
+A query that isn't a string literal is skipped as `dynamic-query`, which is off
+by default. With `preview = true`, a query built from literals bound in branches is
+checked along every path (`max-query-variants`, `64` by default, caps the paths; a
+query with more is reported, never checked in part). See
+[Query variants](https://jirikuncar.github.io/sqlty/guide/query-variants/).
+
+```toml
+[tool.sqlty]
+preview = true
+```
+
+`type-modules` is gone: `check` reads row types from source and never imports a
+module, so don't add it. A name it can't read is unknown and never reported.
+
 ## Suppress a diagnostic
 
 `# sqlty: ignore[rule]` on the reported line drops that rule there. Name the
@@ -141,4 +174,6 @@ analyze_params("SELECT name FROM users WHERE id = %s", schema_sql=schema)  # %s 
 - [Row types](https://jirikuncar.github.io/sqlty/guide/row-types/)
 - [Nullability](https://jirikuncar.github.io/sqlty/guide/schema-inference/#nullability)
 - [Parameters](https://jirikuncar.github.io/sqlty/guide/parameters/)
+- [Typed parameters](https://jirikuncar.github.io/sqlty/guide/parameters/#typed-parameters)
+- [Query variants](https://jirikuncar.github.io/sqlty/guide/query-variants/)
 - [Python API](https://jirikuncar.github.io/sqlty/reference/python-api/)
