@@ -87,6 +87,4 @@ jobs:
       - name: Publish to the Visual Studio Marketplace
         run: npx vsce publish --oidc --packagePath sqlty.vsix
       - name: Publish to Open VSX
-        run: npx ovsx publish sqlty.vsix
-        env:
-          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: npx ovsx publish --trusted-publishing sqlty.vsix
