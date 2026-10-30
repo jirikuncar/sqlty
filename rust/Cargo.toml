@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.2.2"
+version = "0.3.0"
 edition = "2021"
 description = "Rust engine of sqlty: SQL type inference and Python source rewriting"
 license = "MIT"
