@@ -48,7 +48,7 @@ jobs:
             container: quay.io/pypa/musllinux_1_2_aarch64
           - os: macos-15-intel
             target: x86_64
-          - os: macos-14
+          - os: macos-15
             target: aarch64
             pr: true
           - os: windows-latest

@@ -31,6 +31,30 @@ suite("sqlty", () => {
     assert.match(document.getText(), /SQL\[tuple\[float \| None\]\]/);
     await diagnostics(uri, (found) => found.length === 0);
   });
+
+  test("offers the closest column as the quick fix of unknown-column", async () => {
+    const [folder] = vscode.workspace.workspaceFolders ?? [];
+    const uri = vscode.Uri.joinPath(folder.uri, "typo.py");
+    const document = await vscode.workspace.openTextDocument(uri);
+    await vscode.window.showTextDocument(document);
+
+    const [diagnostic] = await diagnostics(uri, (found) => found.length > 0);
+    assert.equal(
+      diagnostic.message,
+      "column `surname` does not exist in `users`; did you mean `name`?",
+    );
+
+    const actions = await vscode.commands.executeCommand<vscode.CodeAction[]>(
+      "vscode.executeCodeActionProvider",
+      uri,
+      diagnostic.range,
+      vscode.CodeActionKind.QuickFix.value,
+    );
+    const fix = actions.find((action) => action.title === "Fix unknown-column");
+    assert.ok(fix?.edit, "a quick fix with an edit");
+    assert.ok(await vscode.workspace.applyEdit(fix.edit));
+    assert.match(document.getText(), /SELECT id, name FROM users/);
+  });
 });
 
 /** The diagnostics of `uri` once `done` holds for them. */

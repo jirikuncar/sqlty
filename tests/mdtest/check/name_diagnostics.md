@@ -61,6 +61,53 @@ e = SQL[tuple[int]]("--sql\nSELECT * FROM missing")
 f = SQL[tuple[int]]("--sql\nINSERT INTO missing (a) VALUES (1) RETURNING a")
 ```
 
+#### The closest column
+
+A name close to one column of the tables it can come from gets a hint, and
+`sqlty check --fix` writes that column instead. The fixed query has a new type, which
+`stale-type` then writes too. A column whose name needs quotes is written in them,
+unless the quote would end the Python string.
+
+```python
+from sqlty import SQL
+
+# error: [unknown-column] "column `surname` does not exist in `users`; did you mean `name`?"
+a = SQL[tuple[int, str]]("--sql\nSELECT id, surname FROM users")
+# error: [unknown-column] "column `titel` does not exist in `t`; did you mean `title`?"
+b = SQL[tuple[int, str]]("--sql\nSELECT t.id, t.titel FROM teams t")
+# error: [unknown-column] "column `nmae` does not exist in `users`; did you mean `name`?"
+c = SQL[tuple[int, str]]("--sql\nSELECT id, nmae FROM users")
+```
+
+```python
+from sqlty import SQL
+
+a = SQL[tuple[int, str]]("--sql\nSELECT id, surname FROM users")
+b = SQL[tuple[int, str]]("--sql\nSELECT t.id, t.titel FROM teams t")
+c = SQL[tuple[int, str]]('--sql\nSELECT id, mixd FROM users')
+d = SQL[tuple[int, str]]("--sql\nSELECT id, mixd FROM users")
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: a = SQL[tuple[int, str]]("--sql\nSELECT id, name FROM users")
+# fixed: b = SQL[tuple[int, str | None]]("--sql\nSELECT t.id, t.title FROM teams t")
+# fixed: c = SQL[tuple[int, str | None]]('--sql\nSELECT id, "Mixed" FROM users')
+# fixed: d = SQL[tuple[int, str]]("--sql\nSELECT id, mixd FROM users")
+```
+
+No column is suggested when none is close, or when two are equally close: `user_id` of
+`orders` and `team_id` of `users` for `xxxx_id`, or `id` of both tables for `idd`.
+
+```python
+from sqlty import SQL
+
+# error: [unknown-column] "column `phone` does not exist in `users`"
+a = SQL[tuple[int, str]]("--sql\nSELECT id, phone FROM users")
+# error: [unknown-column] "column `xxxx_id` does not exist in `o`, `u`"
+b = SQL[tuple[int]]("--sql\nSELECT xxxx_id FROM orders o JOIN users u ON u.id = o.user_id")
+# error: [unknown-column] "column `idd` does not exist in `t`, `u`"
+c = SQL[tuple[int]]("--sql\nSELECT idd FROM teams t JOIN users u ON u.team_id = t.id")
+```
+
 #### Names a result column's type does not need
 
 A result column's type often needs none of its names: `x IS NULL` is a boolean and

@@ -432,10 +432,33 @@ impl Checker<'_> {
                     Some(start..query_offset(source, literals, span.end, true)?)
                 });
                 let name = name.map(|span| At::at_line(at.line, span));
-                self.report(
+                let fix = found
+                    .replacement
+                    .as_ref()
+                    .zip(found.span.as_ref().zip(name.as_ref()))
+                    .filter(|(replacement, (span, name))| {
+                        let written = &source[name.span.clone()];
+                        let quote = literals
+                            .iter()
+                            .find(|literal| literal.contains(&name.span.start))
+                            .and_then(|literal| {
+                                source[literal.clone()]
+                                    .trim_start_matches(|c: char| c.is_ascii_alphabetic())
+                                    .chars()
+                                    .next()
+                            });
+                        written == &query[(*span).clone()]
+                            && !replacement.contains(['\\', '\n', '\r'])
+                            && quote.is_some_and(|quote| !replacement.contains(quote))
+                    })
+                    .map(|(replacement, (_, name))| {
+                        Edit::new(name.span.clone(), replacement.clone())
+                    });
+                self.report_fix(
                     Rule::Name(found.rule),
                     found.message.clone(),
                     name.as_ref().unwrap_or(at),
+                    fix.into_iter().collect(),
                 );
             }
         }

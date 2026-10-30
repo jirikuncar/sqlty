@@ -39,7 +39,7 @@ note: str | TEXT | Nullable
 
 DELETE FROM t WHERE id = 1 RETURNING nope
 nope: ? | ? | Unknown
-[unknown-column] column `nope` does not exist in `t`
+[unknown-column] column `nope` does not exist in `t`; did you mean `note`?
 
 INSERT INTO t (name) VALUES ('a')
 no rows
