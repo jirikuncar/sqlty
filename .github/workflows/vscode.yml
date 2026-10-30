@@ -4,6 +4,11 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish, as major.minor.patch (the Marketplace takes no pre-release tags)
+        required: true
+        type: string
   pull_request:
     paths:
       - .github/workflows/vscode.yml
@@ -17,7 +22,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # The extension's version is the release's: it runs the project's own sqlty, so it
-# publishes with every release, as a dry run on a pull request that changes it.
+# publishes with every release or manual run (which names its version), as a dry run on a pull request that changes it.
 jobs:
   package:
     name: Package
@@ -34,11 +39,18 @@ jobs:
           node-version: 22
           package-manager-cache: false
       - run: npm ci
-      - name: Take the release's version
-        if: github.event_name == 'release'
-        run: npm version --no-git-tag-version --allow-same-version "${TAG#v}"
+      - name: Take the version of the release or the run
+        if: github.event_name != 'pull_request'
+        run: |
+          version="${VERSION#v}"
+          if [[ "$PRERELEASE" != true && ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$VERSION' is not a major.minor.patch version"
+            exit 1
+          fi
+          npm version --no-git-tag-version --allow-same-version "$version"
         env:
-          TAG: ${{ github.event.release.tag_name }}
+          VERSION: ${{ github.event.release.tag_name || inputs.version }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
       - run: npm run package -- --out sqlty.vsix
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -48,8 +60,11 @@ jobs:
   publish:
     name: Publish to the Marketplace and Open VSX
     needs: package
-    if: github.event_name == 'release' && !github.event.release.prerelease
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && !github.event.release.prerelease)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     environment:
       name: vscode
       url: https://marketplace.visualstudio.com/items?itemName=jirikuncar.sqlty
@@ -70,9 +85,7 @@ jobs:
           name: vsix
           path: editors/vscode
       - name: Publish to the Visual Studio Marketplace
-        run: npx vsce publish --packagePath sqlty.vsix
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: npx vsce publish --oidc --packagePath sqlty.vsix
       - name: Publish to Open VSX
         run: npx ovsx publish sqlty.vsix
         env:
