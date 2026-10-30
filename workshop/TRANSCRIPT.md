@@ -19,7 +19,7 @@ pipeline that ships on every push. On a Friday. Let's go."
 ```bash
 mkdir duckdesk && cd duckdesk && git init -b main
 uv init --bare --app --name duckdesk --python 3.14
-uv add fastapi uvicorn "logfire[fastapi,sqlite3]" "sqlty @ git+https://github.com/jirikuncar/sqlty"
+uv add fastapi uvicorn "logfire[fastapi,sqlite3]" "sqlty>=0.3.0"
 uv add --dev pytest httpx2 prek ruff
 ```
 

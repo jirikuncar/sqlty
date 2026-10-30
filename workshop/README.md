@@ -14,10 +14,9 @@ extension fixes a bug that two green pull requests made together.
   with the app's `.venv` selected as the Python interpreter
 - Optional, for the deploy: `gh`, `flyctl`, and a Logfire project with a write token
 
-`sqlty server`, which the extension runs, isn't in a PyPI release yet, so the
-scripts install sqlty from git. That needs a Rust toolchain, and the first
-`uv sync` takes a few minutes. Once a release ships it, set
-`SQLTY_SPEC="sqlty>=0.3"` and the Rust stage of the `Dockerfile` has nothing to build.
+The scripts install `sqlty>=0.3.0`, the first release with `sqlty server`, which
+the extension runs. To try an unreleased sqlty, set
+`SQLTY_SPEC="sqlty @ git+https://github.com/jirikuncar/sqlty"` (needs Rust).
 
 ```bash
 export DUCKDESK_DIR=~/duckdesk      # where the app is built (default)

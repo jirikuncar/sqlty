@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP="${DUCKDESK_DIR:-$HOME/duckdesk}"
-SQLTY_SPEC="${SQLTY_SPEC:-sqlty @ git+https://github.com/jirikuncar/sqlty}"
+SQLTY_SPEC="${SQLTY_SPEC:-sqlty>=0.3.0}"
 export GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-You}" GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-you@duckdesk.dev}"
 export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME" GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
 

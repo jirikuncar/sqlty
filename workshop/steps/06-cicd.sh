@@ -41,22 +41,14 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 YAML
 
-# The rust stage only matters while sqlty comes from git; a PyPI wheel skips the build.
 cat > Dockerfile <<'DOCKER'
-FROM rust:1-slim-trixie AS build
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/
-ENV UV_PYTHON_INSTALL_DIR=/python UV_PYTHON_PREFERENCE=only-managed UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1
+FROM ghcr.io/astral-sh/uv:python3.14-trixie-slim
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 WORKDIR /app
-COPY pyproject.toml uv.lock .python-version* ./
+COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --no-install-project
 COPY schema.sql seed.sql queries.py main.py ./
-
-FROM debian:trixie-slim
-COPY --from=build /python /python
-COPY --from=build /app /app
 ENV PATH=/app/.venv/bin:$PATH
-WORKDIR /app
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
 DOCKER
 
