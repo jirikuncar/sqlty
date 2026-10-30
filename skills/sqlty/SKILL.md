@@ -23,6 +23,7 @@ and `schema` (SQL files with `CREATE TABLE`, or migrations) decide every type.
 | Read a diagnostic, name a row type, check parameters | `sqlty-check` |
 | Change a table, write a migration, plan a rename | `sqlty-breaking` |
 | Set up or repair pre-commit or CI | `sqlty-ci` |
+| Run sqlty in VS Code or another editor | `sqlty-server` |
 | Introduce sqlty into a project that doesn't use it | `sqlty-adopt` |
 
 `sqlty skill NAME` prints a skill that isn't installed.

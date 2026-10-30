@@ -144,9 +144,16 @@ def test_agent_skill_frontmatter(skill: Path) -> None:
     assert 0 < len(meta["description"]) <= 1024
     assert body.count("\n") <= 500
     commands = set(re.findall(r"`sqlty (\w+)", text))
-    assert commands <= {"rewrite", "strip", "check", "breaking", "rule", "skill", "version"}, (
-        commands
-    )
+    assert commands <= {
+        "rewrite",
+        "strip",
+        "check",
+        "breaking",
+        "rule",
+        "skill",
+        "server",
+        "version",
+    }, commands
 
 
 def test_skills_table_lists_every_skill() -> None:
