@@ -40,8 +40,8 @@ versions run side by side (5 in the scripts; 15 reads better on stage).
 |------|--------|---------|------------------------|
 | 0 | `00-setup.sh` | 0-2 | `uv init`, dependencies |
 | 1 | `01-migrations.sh` | 2-5 | Postgres in Compose; three tables as migrations; a 20-line migrator |
-| 2 | `02-queries.sh` | 5-9 | `sqlty rewrite` writes the row types from the migrations |
-| 3 | `03-api.sh` | 9-12 | FastAPI over psycopg, tests on a fresh database |
+| 2 | `02-queries.sh` | 5-9 | `sqlty rewrite` writes row and parameter types, `INSERT`/`UPDATE ... RETURNING` included |
+| 3 | `03-api.sh` | 9-12 | The request body is the query's parameters; `bind`, ty, tests |
 | 4 | `04-logfire.sh` | 12-14 | Request and query spans, tagged with the version |
 | 5 | `05-prek.sh` | 14-17 | Tests pass, prek still rejects the commit |
 | 6 | `06-deploy.sh` | 17-21 | `git push` builds an image, migrates and rolls it out |

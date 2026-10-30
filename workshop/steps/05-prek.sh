@@ -31,18 +31,20 @@ pass_filenames = false
 files = '\.(py|sql|toml)$'
 
 [[repos.hooks]]
+id = "ty"
+name = "ty"
+entry = "uv run ty check"
+language = "system"
+pass_filenames = false
+types = ["python"]
+
+[[repos.hooks]]
 id = "pytest"
 name = "pytest"
 entry = "uv run pytest -q --tb=line"
 language = "system"
 pass_filenames = false
 files = '\.(py|sql)$'
-TOML
-
-cat >> pyproject.toml <<'TOML'
-
-[tool.ruff]
-line-length = 120
 TOML
 
 mkdir -p .vscode
@@ -69,7 +71,7 @@ class Backlog:
     open_bugs: str
 
 
-BACKLOG = SQL[Backlog]("--sql\nSELECT count(*) AS open_bugs FROM consultations WHERE NOT solved")
+BACKLOG = SQL[Backlog, tuple[()]]("--sql\nSELECT count(*) AS open_bugs FROM consultations WHERE NOT solved")
 PY
 cat >> main.py <<'PY'
 

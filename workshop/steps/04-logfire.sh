@@ -21,9 +21,9 @@ for old, new in [
         "logfire.instrument_fastapi(app)\n",
     ),
     (
-        "    return {\"id\": consultation_id}\n",
-        '    logfire.info("duck {duck_id} hears about {bug!r}", duck_id=booking.duck_id, bug=booking.bug)\n'
-        "    return {\"id\": consultation_id}\n",
+        "    with connect() as conn:\n        return execute(conn, q.BOOK.bind(booking)).fetchone()\n",
+        '    logfire.info("duck {duck_id} hears about {bug!r}", **booking)\n'
+        "    with connect() as conn:\n        return execute(conn, q.BOOK.bind(booking)).fetchone()\n",
     ),
 ]:
     assert old in src, old

@@ -22,12 +22,12 @@ Let's go."
 mkdir duckdesk && cd duckdesk && git init -b main
 uv init --bare --app --name duckdesk --python 3.14
 uv add fastapi uvicorn "psycopg[binary]" "logfire[fastapi,psycopg]" "sqlty>=0.3.0"
-uv add --dev pytest httpx2 prek ruff
+uv add --dev pytest httpx2 prek ruff ty
 ```
 
 "uv gives us Python 3.14 and a lockfile, so the container gets exactly this. FastAPI
-and psycopg for the app, Logfire for telemetry, sqlty for the SQL. prek is a git hook
-runner, and by the end of the talk it is our entire CI/CD."
+and psycopg for the app, Logfire for telemetry, sqlty for the SQL, ty to type check.
+prek is a git hook runner, and by the end of the talk it is our entire CI/CD."
 
 ## Step 1: migrations (2:00)
 
@@ -62,10 +62,12 @@ the tables look like after the last file."
 
 ## Step 2: typed queries (5:00)
 
-Type `queries.py` with plain strings first.
+Add `param-types = true` under `[tool.sqlty]`, then type `queries.py` with plain strings.
 
 "The queries are plain strings starting with `--sql`, a newline, then the SQL. To Python
-that's a string. To Postgres it's a comment. To sqlty it's a query."
+that's a string. To Postgres it's a comment. To sqlty it's a query. Booking is an
+`INSERT ... RETURNING`, solving a bug an `UPDATE ... RETURNING`: both hand back the row
+they wrote."
 
 ```bash
 uv run sqlty rewrite .
@@ -75,27 +77,37 @@ Pause on the result.
 
 "I never wrote `tuple[int, str, str, Decimal]`. sqlty read the migrations: `hourly_rate`
 is `NUMERIC NOT NULL`, so it's a `Decimal`, never `None`. Money in a float is how
-startups lose money. Even `count(c.id)` through a `LEFT JOIN` came out as `int`. And
-`SQL[T]` is a `str` subclass: psycopg takes it as is."
+startups lose money. Even `count(c.id)` through a `LEFT JOIN` came out as `int`."
 
-Replace the tuples with the `Duck` and `Champion` dataclasses, then:
+"And the second type argument is the parameters. `BookParams` is a `TypedDict` sqlty
+generated: `duck_id: int`, not `int | None`, because the column it is written to is
+`NOT NULL`. `SolveParams.id` is `int | None`: a `WHERE` comparison takes a NULL, it just
+matches nothing. `SQL[R, P]` is a function from `P` to `R`, and it's still a `str`
+subclass: psycopg takes it as is."
 
-```bash
-uv run sqlty check .
-```
+Replace the row tuples with the `Duck`, `Consultation` and `Champion` dataclasses, write
+`SQL[Duck](...)` without parameters, and rewrite again.
 
-"Names are nicer than tuples. Now sqlty checks that the fields match the columns:
-names, types and nullability."
+"Names are nicer than tuples. `rewrite` keeps the row types I wrote and fills in the
+parameters, and `sqlty check` makes sure the fields match the columns: names, types
+and nullability. One `Consultation` serves the `INSERT` and the `UPDATE`."
 
 ## Step 3: the API (9:00)
 
-Type `main.py`. Spend the time on one endpoint.
+Type `main.py`. Spend the time on `book` and `solve`.
 
-"`execute` from `sqlty.drivers.psycopg` reads the `T` of `SQL[T]` and picks psycopg's
+"`execute` from `sqlty.drivers.psycopg` reads the `R` of `SQL[R, P]` and picks psycopg's
 row factory: `Duck` objects come out, and the type checker sees `list[Duck]`."
+
+"The body of `POST /consultations` is `BookParams`, the parameters of the query. FastAPI
+validates it and writes it into the OpenAPI docs, so the API contract comes from the
+SQL. `bind` checks the parameters against `P`: pass `{"id": "seven"}` and ty rejects it
+before anything runs. `solve` returns the row the `UPDATE` wrote, or `None` when no row
+matched, which is our 404."
 
 ```bash
 uv run pytest -q
+uv run ty check
 ```
 
 "`conftest.py` drops a test database and runs the same migrations on it. The test books
@@ -130,8 +142,8 @@ Sir Quacksalot's response time is excellent: the duck never answers."
 uv run prek install
 ```
 
-"`prek.toml`: ruff, `sqlty rewrite`, `sqlty check`, pytest. Installed for two moments:
-before a commit, and before a merge commit. Remember the second one."
+"`prek.toml`: ruff, `sqlty rewrite`, `sqlty check`, ty, pytest. Installed for two
+moments: before a commit, and before a merge commit. Remember the second one."
 
 Type the `/backlog` endpoint, with `open_bugs: str`. Commit.
 
@@ -139,9 +151,9 @@ Type the `/backlog` endpoint, with `open_bugs: str`. Commit.
 
 The commit fails at `sqlty check`. Point at `pytest....Passed`.
 
-"The tests passed. A dataclass doesn't validate, so `open_bugs` is quietly an `int` in a
-field that says `str`, and the first caller who does `.upper()` finds out in production.
-The type checker can't see it, because the SQL is a string. sqlty reads the string."
+"The tests passed, and so did ty. A dataclass doesn't validate, so `open_bugs` is quietly
+an `int` in a field that says `str`, and the first caller who does `.upper()` finds out in
+production. ty can't see it, because the SQL is a string. sqlty reads the string."
 
 Fix it to `int`, commit, all green.
 
@@ -170,7 +182,7 @@ git push -u origin main
 English. Bob is very thorough."
 
 Create `feature/ducks-by-colour`: the `DUCKS_BY_COLOUR` query, the `/ducks/{colour}`
-endpoint, a test. Commit. Green.
+endpoint, a test. Save: the fix on save adds `DucksByColourParams`. Commit. Green.
 
 "Meanwhile, on Bob's branch: migration 003."
 

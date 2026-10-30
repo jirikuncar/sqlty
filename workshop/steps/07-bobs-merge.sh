@@ -14,7 +14,7 @@ cat >> main.py <<'PY'
 @app.get("/ducks/{colour}")
 def ducks_by_colour(colour: str) -> list[q.Duck]:
     with connect() as conn:
-        return execute(conn, q.DUCKS_BY_COLOUR, {"colour": colour}).fetchall()
+        return execute(conn, q.DUCKS_BY_COLOUR.bind({"colour": colour})).fetchall()
 PY
 cat >> test_main.py <<'PY'
 
@@ -22,6 +22,8 @@ cat >> test_main.py <<'PY'
 def test_the_navy_has_an_admiral() -> None:
     assert [duck["name"] for duck in client.get("/ducks/navy").json()] == ["Admiral Squeaks"]
 PY
+uv run sqlty rewrite -q .
+uv run ruff format -q queries.py
 commit "Ducks by colour"
 
 say "Bob: the style guide says American English"

@@ -15,6 +15,7 @@ services:
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "duck"]
       interval: 1s
+      retries: 30
 
 networks:
   default:
@@ -61,13 +62,14 @@ from pathlib import Path
 
 import psycopg
 from psycopg import sql
+from psycopg.conninfo import conninfo_to_dict
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://duck:quack@localhost:5432/duckdesk_dev")
 MIGRATIONS = Path(__file__).parent / "migrations"
 
 
 def migrate(url: str = DATABASE_URL) -> None:
-    dbname = psycopg.conninfo.conninfo_to_dict(url)["dbname"]
+    dbname = str(conninfo_to_dict(url)["dbname"])
     with psycopg.connect(url, dbname="postgres", autocommit=True) as server:
         if not server.execute("SELECT 1 FROM pg_database WHERE datname = %s", (dbname,)).fetchone():
             server.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(dbname)))
@@ -79,7 +81,7 @@ def migrate(url: str = DATABASE_URL) -> None:
         for path in sorted(MIGRATIONS.glob("*.sql")):
             if path.name not in applied:
                 with conn.transaction():
-                    conn.execute(path.read_text())
+                    conn.execute(path.read_bytes())
                     conn.execute("INSERT INTO applied_migrations VALUES (%s)", (path.name,))
                 print(f"applied {path.name}")
 
