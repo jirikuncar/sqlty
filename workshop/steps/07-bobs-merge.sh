@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
-# Step 7: two green branches, one red main. Git merges text, not meaning.
+# Step 7: two green branches, one red merge. Git merges text, not meaning; prek checks the meaning.
 source "$(dirname "$0")/lib.sh"
 
 say "you: ducks by colour"
 git switch -q -c feature/ducks-by-colour main
 cat >> queries.py <<'PY'
 
-DUCKS_BY_COLOUR = SQL[Duck]("--sql\nSELECT id, name, colour, hourly_rate FROM ducks WHERE colour = :colour")
+DUCKS_BY_COLOUR = SQL[Duck]("--sql\nSELECT id, name, colour, hourly_rate FROM ducks WHERE colour = %(colour)s")
 PY
 cat >> main.py <<'PY'
 
 
 @app.get("/ducks/{colour}")
 def ducks_by_colour(colour: str) -> list[q.Duck]:
-    return fetch_all(q.DUCKS_BY_COLOUR, colour=colour)
+    with connect() as conn:
+        return execute(conn, q.DUCKS_BY_COLOUR, {"colour": colour}).fetchall()
 PY
 cat >> test_main.py <<'PY'
 
@@ -25,20 +26,21 @@ commit "Ducks by colour"
 
 say "Bob: the style guide says American English"
 git switch -q -c bob/american-spelling main
-sed -i 's/colour/color/g' schema.sql seed.sql queries.py
+cat > migrations/003_american_spelling.sql <<'SQL'
+ALTER TABLE ducks RENAME COLUMN colour TO color;
+SQL
+sed -i 's/colour/color/g' queries.py
 as_bob commit "Use American spelling, per the style guide"
 
-say "both pull requests are green; merge them"
+say "both branches are green; merge them"
 git switch -q main
 as_bob git merge -q --no-ff -m "Merge bob/american-spelling" bob/american-spelling
-git merge -q --no-ff -m "Merge feature/ducks-by-colour" feature/ducks-by-colour
-say "no conflicts. Is main green?"
-if uv run sqlty check .; then
-  echo "expected main to be red" >&2
-  exit 1
-fi
+say "no conflicts, but prek runs on the merge commit too"
+expect_failure git merge -q --no-ff -m "Merge feature/ducks-by-colour" feature/ducks-by-colour
 
 say "the fix the editor offers: Quick Fix > Fix unknown-column (or sqlty check --fix)"
 uv run sqlty check --fix .
 git --no-pager diff --color=always | cat
-commit "Ducks by color"
+git add -A
+git commit -q --no-edit
+say "merged, with the fix"

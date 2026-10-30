@@ -5,9 +5,9 @@ source "$(dirname "$0")/lib.sh"
 cat > queries.py <<'PY'
 LIST_DUCKS = "--sql\nSELECT id, name, colour, hourly_rate FROM ducks ORDER BY hourly_rate DESC"
 
-BOOK = "--sql\nINSERT INTO consultations (duck_id, developer_id, bug) VALUES (:duck_id, :developer_id, :bug) RETURNING id"
+BOOK = "--sql\nINSERT INTO consultations (duck_id, developer_id, bug) VALUES (%(duck_id)s, %(developer_id)s, %(bug)s) RETURNING id"
 
-SOLVE = "--sql\nUPDATE consultations SET solved = TRUE WHERE id = :id"
+SOLVE = "--sql\nUPDATE consultations SET solved = TRUE WHERE id = %(id)s"
 
 LEADERBOARD = """--sql
 SELECT d.name, count(c.id) AS bugs_solved
@@ -24,6 +24,7 @@ cat queries.py
 say "tuples are fine, names are nicer: swap them for dataclasses"
 cat > queries.py <<'PY'
 from dataclasses import dataclass
+from decimal import Decimal
 
 from sqlty import SQL
 
@@ -33,7 +34,7 @@ class Duck:
     id: int
     name: str
     colour: str
-    hourly_rate: float
+    hourly_rate: Decimal
 
 
 @dataclass
@@ -45,10 +46,10 @@ class Champion:
 LIST_DUCKS = SQL[Duck]("--sql\nSELECT id, name, colour, hourly_rate FROM ducks ORDER BY hourly_rate DESC")
 
 BOOK = SQL[tuple[int]](
-    "--sql\nINSERT INTO consultations (duck_id, developer_id, bug) VALUES (:duck_id, :developer_id, :bug) RETURNING id"
+    "--sql\nINSERT INTO consultations (duck_id, developer_id, bug) VALUES (%(duck_id)s, %(developer_id)s, %(bug)s) RETURNING id"
 )
 
-SOLVE = "--sql\nUPDATE consultations SET solved = TRUE WHERE id = :id"
+SOLVE = "--sql\nUPDATE consultations SET solved = TRUE WHERE id = %(id)s"
 
 LEADERBOARD = SQL[Champion]("""--sql
 SELECT d.name, count(c.id) AS bugs_solved
