@@ -48,13 +48,20 @@ uv add --dev sqlty
 
 ## How the server is found
 
-The first `sqlty` that has `sqlty server` runs:
+The first `sqlty` of version 0.3.0 or newer runs:
 
 | Order | Where | Set by |
 |-------|-------|--------|
 | 1 | Each path of `sqlty.path` | You |
 | 2 | `python -m sqlty` of the interpreter | `sqlty.interpreter`, else the one selected in the Python extension |
 | 3 | `sqlty` on `PATH` | Your shell |
+
+!!! warning "An older sqlty is skipped"
+    The extension reads `sqlty --version` and skips a `sqlty` older than it supports,
+    even one in `sqlty.path`: an older server would start and quietly miss the settings it
+    predates, such as `sqlty.breaking.against`. When every `sqlty` found is older, the error
+    names each one, its version and where it was found. Upgrade the project's:
+    `uv add --dev 'sqlty>=0.3.0'`.
 
 The extension restarts the server when one of these changes, or when you run
 **sqlty: Restart Server**. Saving `pyproject.toml` or a `.sql` file reloads the

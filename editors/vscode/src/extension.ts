@@ -44,15 +44,15 @@ async function restart(): Promise<void> {
 async function start(): Promise<void> {
   const settings = readSettings();
   const interpreter = settings.interpreter.length > 0 ? settings.interpreter : await selected();
-  const server = await findServer(settings, interpreter);
-  if (server === undefined) {
-    const message =
-      "sqlty: no sqlty with `sqlty server` found. Install sqlty in the selected interpreter, or set sqlty.path.";
-    output?.error(message);
-    void vscode.window.showErrorMessage(message);
+  const found = await findServer(settings, interpreter);
+  if ("error" in found) {
+    output?.error(found.error);
+    void vscode.window.showErrorMessage(found.error);
     return;
   }
-  output?.info(`Starting ${[server.command, ...server.args].join(" ")} (from ${server.origin})`);
+  const { server } = found;
+  const command = [server.command, ...server.args].join(" ");
+  output?.info(`Starting ${command} (sqlty ${server.version}, from ${server.origin})`);
   const serverOptions: ServerOptions = { command: server.command, args: server.args };
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: "file", language: "python" }],

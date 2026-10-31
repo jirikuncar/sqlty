@@ -20,7 +20,8 @@ Restricted Mode and other editors.
 | `sqlty.trace.server` | `off` | Log the protocol messages in the output channel |
 
 `sqlty` is looked up in `sqlty.path`, then in the interpreter's environment, then on `PATH`.
-A `sqlty` without `sqlty server` is skipped.
+The extension needs sqlty 0.3.0 or newer: an older `sqlty` is skipped, and when every one found
+is older, an error names each with its version. The output channel logs the version that runs.
 
 ## Breaking changes
 
