@@ -93,7 +93,7 @@
   },
   "scripts": {
     "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node20 --sourcemap",
-    "build-test": "esbuild src/test/*.ts --outdir=out/test --format=cjs --platform=node --target=node20",
+    "build-test": "esbuild src/test/*.ts --bundle --external:vscode --outdir=out/test --format=cjs --platform=node --target=node20",
     "check": "tsc --noEmit && oxlint --deny-warnings src && oxfmt --check src",
     "format": "oxfmt src",
     "test": "npm run build && npm run build-test && vscode-test",
