@@ -26,15 +26,18 @@
 //! - `loader`: the operation queue, tables, views, types, functions and `DROP`
 //! - `alter`: `ALTER TABLE` / `ALTER TYPE` semantics
 //! - `resolve`: raw definitions into the resolved [`Catalog`]
+//! - `index`: sorted names for prefix lookups ([`Catalog::relations_with_prefix`])
 //! - `read`: statements into operations, and [`load`]
 
 mod alter;
 mod columns;
+mod index;
 mod loader;
 mod names;
 mod read;
 mod resolve;
 
+pub use index::{Columns, NameRef, RelationKind, RelationRef};
 pub(crate) use names::fold;
 pub(crate) use read::{load, load_with};
 
@@ -46,6 +49,7 @@ use sqlparser::ast::{DataType, Expr};
 use crate::analyzer::{Column, SqlDialect};
 use crate::ddl::RowEvents;
 
+use index::NameIndex;
 use names::lookup_key;
 use resolve::Resolver;
 
@@ -161,18 +165,18 @@ enum Relation {
 #[derive(Default)]
 pub struct Catalog {
     /// `schema.name` -> relation.
-    relations: FxHashMap<String, Relation>,
+    relations: FxHashMap<Arc<str>, Relation>,
     /// `schema.name` -> domain and enum types.
     types: FxHashMap<String, UserType>,
     /// `schema.name` -> composite type fields in declaration order.
     composites: FxHashMap<String, Vec<SchemaColumn>>,
     /// `schema.name` -> overloads; a function of unknown shape is absent.
-    functions: FxHashMap<String, Vec<Function>>,
+    functions: FxHashMap<Arc<str>, Vec<Function>>,
     /// `schema.name` of the functions the schema defines but whose shape is unknown.
-    unknown_functions: FxHashMap<String, ()>,
+    unknown_functions: FxHashMap<Arc<str>, ()>,
     /// `schema.name` of every domain, enum and composite type the schema defines, those
     /// of unknown shape included.
-    type_names: FxHashMap<String, ()>,
+    type_names: FxHashMap<Arc<str>, ()>,
     /// Schemas a bare name is looked up in, in order.
     search_path: Vec<String>,
     /// Relations the schema itself defines, built-ins not counted.
@@ -180,6 +184,8 @@ pub struct Catalog {
     postgres: bool,
     /// The Python types the project sets for SQL types and columns.
     overrides: Arc<TypeOverrides>,
+    /// Sorted names for prefix lookups, sharing the keys above; built once by `load`.
+    index: NameIndex,
 }
 
 /// Python types a project sets for SQL types or columns (`[tool.sqlty.types]`), for
@@ -326,7 +332,7 @@ impl Catalog {
             _ => &[],
         };
         keys.iter().filter(|fk| {
-            matches!(self.relations.get(&fk.table), Some(Relation::Table(target)) if !target.row_security)
+            matches!(self.relations.get(fk.table.as_str()), Some(Relation::Table(target)) if !target.row_security)
         })
     }
 
