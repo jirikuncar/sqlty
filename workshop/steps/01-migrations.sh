@@ -47,11 +47,11 @@ SQL
 
 cat > migrations/002_ducks.sql <<'SQL'
 INSERT INTO ducks (name, colour, hourly_rate) VALUES
-    ('Sir Quacksalot', 'yellow', 99.00),
-    ('Admiral Squeaks', 'navy', 42.00),
+    ('Sir Quack', 'yellow', 99.00),
+    ('Admiral Bubbles', 'navy', 42.00),
     ('Segfault Sam', 'black', 0.00);
 
-INSERT INTO developers (handle) VALUES ('you'), ('bob');
+INSERT INTO developers (handle) VALUES ('ada'), ('bob');
 SQL
 
 cat > migrate.py <<'PY'

@@ -4,70 +4,71 @@ Lines in quotes are said aloud. Code blocks are typed or run. Each step's
 script has the full code: keep it open on a second screen. Two terminals: one
 for typing, one for `./traffic.sh` from step 6 on.
 
+`colour` and `color` sound the same. Say "colour, with a U" and "color, without
+the U", and point at the screen.
+
 ## Cold open (0:00)
 
-"Every developer has a rubber duck. You explain the bug to the duck, the duck
-says nothing, and halfway through your own sentence you find the bug. Ducks are
-the most effective debugging tool ever made, and nobody is selling them as a
-service. Until today.
+"Every developer has a rubber duck. You explain your bug to the duck. The duck says
+nothing. And halfway through your sentence, you find the bug.
 
-This is DuckDesk: rubber ducks, rented by the hour. We pitch to investors in 30
-minutes. They want a working product, deployed, observable, and shipping on every
-push. Our budget for CI is zero, so the pipeline runs on this laptop. On a Friday.
-Let's go."
+Ducks are the best debugging tool ever made. But nobody sells them as a service.
+Until today. This is DuckDesk: rubber ducks, rented by the hour.
 
-## Step 0: an empty project (0:30)
+We meet investors in 20 minutes. They want a product that works, runs in production,
+and ships on every push. We have no money for a CI server, so everything runs on
+this laptop. And it's Friday. Developers say: never deploy on a Friday. Let's go."
+
+## Step 0: an empty project (0:45)
+
+Run `00-setup.sh`, or type:
 
 ```bash
-mkdir duckdesk && cd duckdesk && git init -b main
 uv init --bare --app --name duckdesk --python 3.14
 uv add fastapi uvicorn "psycopg[binary]" "logfire[fastapi,psycopg]" "sqlty>=0.3.0"
 uv add --dev pytest httpx2 prek ruff ty
 ```
 
-"uv gives us Python 3.14 and a lockfile, so the container gets exactly this. FastAPI
-and psycopg for the app, Logfire for telemetry, sqlty for the SQL, ty to type check.
-prek is a git hook runner, and by the end of the talk it is our entire CI/CD."
+"uv gives us Python and a lockfile. The app is FastAPI and Postgres. sqlty checks our
+SQL, ty checks our Python, and prek runs git hooks. By the end, prek is our whole
+pipeline."
 
-## Step 1: migrations (2:00)
+## Step 1: migrations (1:30)
 
 ```bash
 docker compose up -d --wait db
 ```
 
-Type `migrations/001_tables.sql`. Read the table names aloud as you go.
+Type `migrations/001_tables.sql`.
 
-"Three tables. `ducks`: every duck has a name, a colour, and an hourly rate.
-Note the British spelling of colour: our premium duck, Sir Quacksalot, insists on it.
-`developers`: our customers. `consultations`: who asked which duck about which bug,
-and whether the duck solved it."
+"Three tables. `ducks`: a name, a colour, and a price per hour. Colour, with a U. That
+is British spelling, because our best duck is British: Sir Quack. `developers` are our
+customers. `consultations` say which duck heard which bug, and if the bug is solved."
 
-"`002_ducks.sql` is our inventory: Sir Quacksalot, 99 an hour. Admiral Squeaks, 42.
-And Segfault Sam, who is free. You get what you pay for."
+"Our ducks: Sir Quack costs 99 an hour. Admiral Bubbles costs 42. Segfault Sam is free.
+He crashes a lot."
 
 Paste `migrate.py`.
 
-"Twenty lines of migrator: each file once, in order, inside a transaction, and an
-advisory lock so two deploys never migrate at once. The rule: a migration that has
-run anywhere is never edited again. Write that down; it comes back."
+"A small migrator: each file runs once, in order, in a transaction. One rule: when a
+migration has run in production, we never change it. Remember this rule. We need it
+later."
 
 ```toml
 [tool.sqlty]
 schema = "migrations/"
 ```
 
-"And this is the trick: sqlty reads the migrations folder as the schema. It never
-connects to a database. It replays the DDL, `ALTER TABLE`s included, and knows what
-the tables look like after the last file."
+"sqlty reads the migrations folder as the schema. It never connects to the database.
+It reads the SQL files, `ALTER TABLE` too, and knows what the tables look like now."
 
-## Step 2: typed queries (5:00)
+## Step 2: typed queries (3:00)
 
-Add `param-types = true` under `[tool.sqlty]`, then type `queries.py` with plain strings.
+Add `param-types = true`, then type `queries.py` with plain strings.
 
-"The queries are plain strings starting with `--sql`, a newline, then the SQL. To Python
-that's a string. To Postgres it's a comment. To sqlty it's a query. Booking is an
-`INSERT ... RETURNING`, solving a bug an `UPDATE ... RETURNING`: both hand back the row
-they wrote."
+"A query is a normal string. The first line is `--sql`. For the database, that line is
+a comment. For sqlty, it marks a query. Booking a duck is an `INSERT`. Solving a bug is
+an `UPDATE`. Both use `RETURNING`, so they give back the row."
 
 ```bash
 uv run sqlty rewrite .
@@ -75,46 +76,35 @@ uv run sqlty rewrite .
 
 Pause on the result.
 
-"I never wrote `tuple[int, str, str, Decimal]`. sqlty read the migrations: `hourly_rate`
-is `NUMERIC NOT NULL`, so it's a `Decimal`, never `None`. Money in a float is how
-startups lose money. Even `count(c.id)` through a `LEFT JOIN` came out as `int`."
+"I did not write these types. sqlty read the migrations. `hourly_rate` is `NUMERIC NOT
+NULL`, so it is a `Decimal`, never `None`. Money in a float is how startups lose money."
 
-"And the second type argument is the parameters. `BookParams` is a `TypedDict` sqlty
-generated: `duck_id: int`, not `int | None`, because the column it is written to is
-`NOT NULL`. `SolveParams.id` is `int | None`: a `WHERE` comparison takes a NULL, it just
-matches nothing. `SQL[R, P]` is a function from `P` to `R`, and it's still a `str`
-subclass: psycopg takes it as is."
+"The second type is the parameters. `BookParams` was generated: `duck_id` is `int`, not
+`None`, because the column is `NOT NULL`. And it is still a normal string, so psycopg
+takes it."
 
-Replace the row tuples with the `Duck`, `Consultation` and `Champion` dataclasses, write
-`SQL[Duck](...)` without parameters, and rewrite again.
+Run `./steps/run.sh 2` to switch the tuples to dataclasses, then show the file.
 
-"Names are nicer than tuples. `rewrite` keeps the row types I wrote and fills in the
-parameters, and `sqlty check` makes sure the fields match the columns: names, types
-and nullability. One `Consultation` serves the `INSERT` and the `UPDATE`."
+"Names are nicer than tuples. sqlty keeps my dataclasses and checks every field against
+its column: name, type, and `None` or not."
 
-## Step 3: the API (9:00)
+## Step 3: the API (6:00)
 
-Type `main.py`. Spend the time on `book` and `solve`.
+Paste `main.py`. Talk only about `book`.
 
-"`execute` from `sqlty.drivers.psycopg` reads the `R` of `SQL[R, P]` and picks psycopg's
-row factory: `Duck` objects come out, and the type checker sees `list[Duck]`."
-
-"The body of `POST /consultations` is `BookParams`, the parameters of the query. FastAPI
-validates it and writes it into the OpenAPI docs, so the API contract comes from the
-SQL. `bind` checks the parameters against `P`: pass `{"id": "seven"}` and ty rejects it
-before anything runs. `solve` returns the row the `UPDATE` wrote, or `None` when no row
-matched, which is our 404."
+"The request body is `BookParams`: the parameters of the query. FastAPI checks it and
+puts it in the API docs. So the API contract comes from the SQL. `bind` checks the
+parameters, and ty checks `bind`."
 
 ```bash
 uv run pytest -q
-uv run ty check
 ```
 
-"`conftest.py` drops a test database and runs the same migrations on it. The test books
-Admiral Squeaks for 'works on my machine', marks it solved, and the Admiral is crowned.
-Very realistic: 'works on my machine' is never really solved."
+"Each test run starts with a new, empty database. The test books Admiral Bubbles for
+'works on my machine' and marks it solved. In real life, 'works on my machine' is never
+solved. In tests, everything is."
 
-## Step 4: Logfire (12:00)
+## Step 4: Logfire (7:30)
 
 ```python
 logfire.configure(service_name="duckdesk", service_version=VERSION, send_to_logfire="if-token-present")
@@ -122,99 +112,83 @@ logfire.instrument_psycopg()
 logfire.instrument_fastapi(app)
 ```
 
-"Three lines of OpenTelemetry. `service_version` will matter in ten minutes, when two
-versions run at once. Without a token, spans go to the console only, so tests stay quiet."
+"Three lines, and we have OpenTelemetry traces. Without a token, nothing leaves this
+laptop. Remember `service_version`: we need it later."
 
-```bash
-uv run uvicorn main:app --reload
-curl -X POST localhost:8000/consultations -H 'content-type: application/json' \
-  -d '{"duck_id": 1, "developer_id": 2, "bug": "it is always DNS"}'
-```
+Show the Logfire live view, with requests already running.
 
-Switch to the Logfire live view.
+"Here is the request, the SQL inside it, and our log. Sir Quack replies very fast. He
+never says anything."
 
-"The request, the SQL inside it, and our log: 'duck 1 hears about it is always DNS'.
-Sir Quacksalot's response time is excellent: the duck never answers."
-
-## Step 5: prek (14:00)
+## Step 5: prek (8:30)
 
 ```bash
 uv run prek install
 ```
 
-"`prek.toml`: ruff, `sqlty rewrite`, `sqlty check`, ty, pytest. Installed for two
-moments: before a commit, and before a merge commit. Remember the second one."
+"prek runs ruff, sqlty, ty and the tests. It runs before every commit, and before every
+merge commit. Remember the merge."
 
 Type the `/backlog` endpoint, with `open_bugs: str`. Commit.
 
-"Investors love a backlog. I'm in a hurry, so the type says `str`..."
+"Investors love a backlog. I'm in a hurry, so the type says `str`."
 
 The commit fails at `sqlty check`. Point at `pytest....Passed`.
 
-"The tests passed, and so did ty. A dataclass doesn't validate, so `open_bugs` is quietly
-an `int` in a field that says `str`, and the first caller who does `.upper()` finds out in
+"The tests pass. No test calls `/backlog`, so the first real user finds out, in
 production. ty can't see it, because the SQL is a string. sqlty reads the string."
 
-Fix it to `int`, commit, all green.
+Fix it to `int`, commit.
 
-## Step 6: push to deploy (17:00)
+## Step 6: push to deploy (10:30)
 
-Show `deploy.sh`.
+Show three parts of `deploy.sh`: build, migrate, start next to the old version.
 
-"Our CD server. `git archive` builds the image from the commit, not my working tree, so
-what was checked is what ships. Run the migrations. Start the new version next to the old
-one. Wait until it answers. Keep both for a few seconds, the way a fleet rolls over, then
-retire the old one and tag the commit `prod`."
+"This is our deploy server. It builds the image from the commit. It runs the
+migrations. It starts the new version next to the old one. Both versions run for a few
+seconds. Then we stop the old one, and tag the commit `prod`."
 
-"prek runs it as a `pre-push` hook. `git push` is the deploy button. If the deploy fails,
-the push fails, and `main` on the remote never points at something that isn't running."
+"prek runs it before `git push`. So `git push` is our deploy button. When the deploy
+fails, the push fails."
 
 ```bash
 git push -u origin main
 ./traffic.sh        # second terminal
 ```
 
-"Version one is live. While it serves ducks, let me introduce Bob."
+"Version one is live. Now, let me introduce Bob."
 
-## Step 7: Bob's merge (21:00)
+## Step 7: Bob's merge (12:00)
 
-"Bob is our second engineer. Bob read the style guide. The style guide says American
-English. Bob is very thorough."
+"Bob is our second developer. Bob reads the style guide. The style guide says: American
+English. Bob follows every rule."
 
-Create `feature/ducks-by-colour`: the `DUCKS_BY_COLOUR` query, the `/ducks/{colour}`
-endpoint, a test. Save: the fix on save adds `DucksByColourParams`. Commit. Green.
+Create `feature/ducks-by-colour`: the query, the endpoint, a test. Commit. Green.
 
-"Meanwhile, on Bob's branch: migration 003."
-
-```sql
-ALTER TABLE ducks RENAME COLUMN colour TO color;
-```
-
-"Bob renamed the column, his query and the dataclass field. Green. Mine: green. Git
-says no conflicts. Merge Bob's, then mine."
+"On his branch, Bob writes migration 003. He drops the U: colour becomes color. He
+updates his queries too. His branch is green. Mine is green. Merge Bob's, then mine."
 
 The second merge stops at `sqlty check` and pytest.
 
-"Git merges text, not meaning. My new query reads `colour`, a column that stopped existing
-on Bob's branch. Neither branch was wrong; only the two together. Without a CI server,
-the `pre-merge-commit` hook is what notices, and the merge stays open, like a conflict."
+"Git merges text, not meaning. My new query reads colour, with a U. That column is gone
+on Bob's branch. Neither branch was wrong. Only the two together. The merge hook
+catches it, and the merge stays open."
 
-Open `queries.py` in VS Code.
+Open `queries.py` in the editor.
 
-"The extension runs `sqlty server`: same sqlty, same config as the hook. The squiggle is
-under `colour`: 'did you mean `color`?' Quick Fix, 'Fix unknown-column', or just save."
+"The editor runs the same sqlty as the hook. The red line is under colour: did you mean
+color, without the U? One click on the quick fix."
 
-Show that the parameter `%(colour)s` stayed: it's ours, not the table's. `git commit`
-finishes the merge.
+`git commit` finishes the merge.
 
-## Step 8: the rolling deploy (25:00)
+## Step 8: the rolling deploy (15:30)
 
-"Everything is green. Ship it? Look at `traffic.sh`: version one is still serving, and
-it reads `colour`. Migrations run first. The moment 003 renames the column, version one
-starts throwing 500s, and it keeps serving until the new version is up. Every check we
-have looked at one revision. A deploy is two."
+"Everything is green. Ship it? Look at the traffic. Version one still runs, and it reads
+colour, with a U. The migration runs first. It renames the column. And version one
+fails on every request, until the new version is up. Every check looked at one version
+of the code. A deploy runs two versions at once."
 
-Add the guard to `deploy.sh`:
+Add the check to `deploy.sh`:
 
 ```bash
 if git rev-parse -q --verify prod >/dev/null; then
@@ -222,15 +196,15 @@ if git rev-parse -q --verify prod >/dev/null; then
 fi
 ```
 
-"`sqlty breaking`: the queries of `prod` against the schema of what we're pushing.
-Backward only, because our deploy migrates first."
+"`sqlty breaking` checks the code in production against the new schema."
 
 ```bash
 git push
 ```
 
-"Refused: `prod` reads `colour`. So we do the boring thing. Migration 003 has never run
-anywhere but a test database, so we may still change it: expand instead of rename."
+"Refused: production reads colour. Migration 003 never ran in production. Only in test
+databases that we throw away. So we can still change it. We add the new column next to
+the old one, and copy the data."
 
 ```sql
 ALTER TABLE ducks ADD COLUMN color TEXT NOT NULL DEFAULT '';
@@ -243,20 +217,13 @@ git push
 
 Point at `traffic.sh`.
 
-"Two versions, one database, both 200. The old one says `colour`, the new one says
-`color`. Logfire tells them apart by `service_version`. Then the old one retires."
+"Two versions, one database, both fine. The old one says colour, the new one says
+color. Logfire tells them apart by `service_version`. Nobody adds ducks during the
+deploy, so one copy of the data is enough. Next week, migration 004 drops colour."
 
-"Contract: migration 004 drops `colour`. `sqlty breaking` checks it against the new `prod`,
-which no longer reads it."
+## Wrap-up (19:00)
 
-```bash
-git push
-```
-
-## Wrap-up (29:00)
-
-"In 30 minutes: types from the migrations instead of by hand, traces from three lines,
-a hook that caught what the tests missed, a merge that refused to complete, an editor
-that fixed it, and a deploy that refused to break the version still running. No CI server
-was harmed. The duck said nothing the whole time, which is exactly why it works.
-DuckDesk is now accepting investment, in ducks."
+"In 20 minutes: types from migrations, traces in three lines, a hook that caught what
+the tests missed, a merge that stopped, an editor that fixed it, and a deploy that kept
+production alive. We used no CI server. Sir Quack lost his U. He is still not talking to
+Bob. DuckDesk is now open for investment. We accept ducks."

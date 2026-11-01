@@ -85,7 +85,7 @@ def test_a_solved_bug_crowns_the_duck() -> None:
     booking = client.post("/consultations", json={"duck_id": 2, "developer_id": 1, "bug": "works on my machine"})
     assert booking.json()["solved"] is False
     assert client.post(f"/consultations/{booking.json()['id']}/solved").json()["solved"] is True
-    assert client.get("/leaderboard").json()[0] == {"name": "Admiral Squeaks", "bugs_solved": 1}
+    assert client.get("/leaderboard").json()[0] == {"name": "Admiral Bubbles", "bugs_solved": 1}
 
 
 def test_the_body_is_the_parameters_of_the_query() -> None:

@@ -20,7 +20,7 @@ cat >> test_main.py <<'PY'
 
 
 def test_the_navy_has_an_admiral() -> None:
-    assert [duck["name"] for duck in client.get("/ducks/navy").json()] == ["Admiral Squeaks"]
+    assert [duck["name"] for duck in client.get("/ducks/navy").json()] == ["Admiral Bubbles"]
 PY
 uv run sqlty rewrite -q .
 uv run ruff format -q queries.py

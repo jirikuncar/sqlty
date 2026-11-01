@@ -1,12 +1,13 @@
 # DuckDesk: shipping on a Friday with a rubber duck
 
-A 30-minute live-coding talk. We build DuckDesk, a startup that rents rubber
+A 20-minute live-coding talk. We build DuckDesk, a startup that rents rubber
 ducks to developers by the hour, and deploy it on every push, from a laptop.
 sqlty types the SQL, Logfire traces it, prek is the whole pipeline (commit,
-merge and push), the VS Code extension fixes what a merge broke, and Docker
-runs two versions side by side while a migration rolls out.
+merge and push), the editor fixes what a merge broke, and Docker runs two
+versions side by side while a migration rolls out.
 
 [TRANSCRIPT.md](TRANSCRIPT.md) is what to say while typing.
+[recording/](recording/) makes a narrated video of the same story.
 
 ## Before the talk
 
@@ -16,9 +17,8 @@ runs two versions side by side while a migration rolls out.
 - Optional: a Logfire project (`logfire auth`), and `LOGFIRE_TOKEN` exported for the
   containers
 
-The scripts install `sqlty>=0.3.0`, the first release with `sqlty server`, which
-the extension runs. Pull `postgres:17-alpine`, `debian:trixie-slim` and `ghcr.io/astral-sh/uv:0.11` before going on
-stage: conference Wi-Fi is not a deployment platform.
+Pull `postgres:17-alpine`, `debian:trixie-slim` and `ghcr.io/astral-sh/uv:0.11`
+before going on stage: conference Wi-Fi is not a deployment platform.
 
 ```bash
 export DUCKDESK_DIR=~/duckdesk      # where the app is built (default)
@@ -38,12 +38,44 @@ versions run side by side (5 in the scripts; 15 reads better on stage).
 
 | Step | Script | Minutes | What the audience sees |
 |------|--------|---------|------------------------|
-| 0 | `00-setup.sh` | 0-2 | `uv init`, dependencies |
-| 1 | `01-migrations.sh` | 2-5 | Postgres in Compose; three tables as migrations; a 20-line migrator |
-| 2 | `02-queries.sh` | 5-9 | `sqlty rewrite` writes row and parameter types, `INSERT`/`UPDATE ... RETURNING` included |
-| 3 | `03-api.sh` | 9-12 | The request body is the query's parameters; `bind`, ty, tests |
-| 4 | `04-logfire.sh` | 12-14 | Request and query spans, tagged with the version |
-| 5 | `05-prek.sh` | 14-17 | Tests pass, prek still rejects the commit |
-| 6 | `06-deploy.sh` | 17-21 | `git push` builds an image, migrates and rolls it out |
-| 7 | `07-bobs-merge.sh` | 21-25 | Two green branches; prek blocks the merge; Quick Fix |
-| 8 | `08-rolling-deploy.sh` | 25-29 | `sqlty breaking` stops the deploy; expand, then contract |
+| 0 | `00-setup.sh` | 0:45 | `uv init`, dependencies |
+| 1 | `01-migrations.sh` | 1:30 | Postgres in Compose; three tables as migrations; a small migrator |
+| 2 | `02-queries.sh` | 3:00 | `sqlty rewrite` writes row and parameter types, `INSERT`/`UPDATE ... RETURNING` included |
+| 3 | `03-api.sh` | 6:00 | The request body is the query's parameters; `bind`, ty, tests |
+| 4 | `04-logfire.sh` | 7:30 | Request and query spans, tagged with the version |
+| 5 | `05-prek.sh` | 8:30 | Tests pass, prek still rejects the commit |
+| 6 | `06-deploy.sh` | 10:30 | `git push` builds an image, migrates and rolls it out |
+| 7 | `07-bobs-merge.sh` | 12:00 | Two green branches; prek blocks the merge; the quick fix |
+| 8 | `08-rolling-deploy.sh` | 15:30 | `sqlty breaking` stops the deploy; expand, then contract |
+
+## Names
+
+| Say | Not |
+|-----|-----|
+| sqlty: "sequel-tee" | "squilty" |
+| uv: "you-vee", ty: "tee-why", prek: "preck" | |
+| colour: "colour, with a U"; color: "color, without the U" | the same word twice |
+
+## Recording
+
+`recording/make-video.sh` plays the talk in tmux (Neovim with `sqlty server` on the
+left, a shell and the server on the right), types slowly, records it with asciinema
+and renders `build/duckdesk.mp4` with narration and subtitles. It runs the real
+commands, so it needs what the talk needs, plus:
+
+- [Neovim](https://neovim.io) 0.11, tmux, ffmpeg
+- [asciinema](https://asciinema.org) 3 and [agg](https://github.com/asciinema/agg)
+- [Piper](https://github.com/OHF-Voice/piper1-gpl) (`uv tool install piper-tts`) and a voice,
+  such as `en_US-lessac-medium.onnx`
+
+```bash
+cd recording
+PIPER_MODEL=~/voices/en_US-lessac-medium.onnx ./make-video.sh
+./make-video.sh --scenes open,setup      # rehearse some scenes
+```
+
+The narration is in `screenplay.py`; the code it types comes from the step
+scripts. To use your own voice, record the lines that `build/cue-sheet.md`
+lists as `voice/own/<id>.wav` and run `make-video.sh` again: the video waits
+for each of your takes, however long it is. Idle time (installs, builds) is
+cut to 1.5 seconds, never while the voice speaks.
