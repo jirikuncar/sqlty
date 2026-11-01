@@ -86,7 +86,7 @@ Three layers, all in the Makefile:
 - `make bench-rust` runs Criterion benches in `rust/crates/sqlty-bench`: catalog
   load (270 tables with functions), analyzer per query kind,
   `check_source`/`rewrite_source` on 1k/4k queries, and name-index prefix lookups
-  at 50, 540 and 5000 tables. Use it to find where time
+  and `complete` at 50, 540 and 5000 tables. Use it to find where time
   goes and to compare a branch (`ARGS="--save-baseline main"`, then
   `ARGS="--baseline main"`).
 - `make bench-codspeed` runs `benchmarks/test_benchmarks.py` with pytest-codspeed: each

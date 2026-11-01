@@ -72,6 +72,26 @@ fn name_index(c: &mut Criterion) {
         group.bench_function(format!("function_prefix_{tables}_tables"), |b| {
             b.iter(|| schema.functions_with_prefix(black_box("f00"), None, 20));
         });
+        let queries = [
+            ("complete_relation", "SELECT * FROM t004", 18),
+            (
+                "complete_alias_columns",
+                "SELECT a. FROM app.t0000 a JOIN app.t0001 b ON b.parent_id = a.id",
+                9,
+            ),
+            (
+                "complete_columns_in_scope",
+                "SELECT * FROM app.t0000 a JOIN app.t0001 b ON b.parent_id = a.id WHERE s",
+                72,
+            ),
+        ];
+        for (name, query, cursor) in queries {
+            group.bench_function(format!("{name}_{tables}_tables"), |b| {
+                b.iter(|| {
+                    analyzer::complete(black_box(query), cursor, "postgres", Some(&schema), 200)
+                });
+            });
+        }
     }
     group.finish();
 }

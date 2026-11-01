@@ -10,6 +10,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 mod api;
+mod complete;
 mod dialect;
 mod dml;
 mod explain;
@@ -56,6 +57,7 @@ pub use api::{
     row_type, Parsed,
 };
 pub(crate) use api::{typed, view_columns};
+pub use complete::{complete, Candidate, CandidateKind, Completions};
 pub use dialect::{SqlDialect, UnknownDialect};
 pub use explain::{explain_select, ColumnRules};
 use expr::from_sql_type;

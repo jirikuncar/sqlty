@@ -233,6 +233,16 @@ impl Parsed {
         (columns, found.collect())
     }
 
+    /// The columns the analyzer finds in scope of the completion placeholder; `None` when
+    /// the query does not parse or the analyzer never reaches it.
+    pub(super) fn probe(&self, schema: &SchemaData) -> Option<Vec<super::Candidate>> {
+        let mut analyzer = Analyzer::new(schema, self.dialect);
+        analyzer.diag = Diagnostics::collecting();
+        analyzer.source = text_source(&self.input.source, self.dialect);
+        let _ = analyzer.statement_columns(self.first()?);
+        analyzer.diag.probed()
+    }
+
     /// The bytes of the query sqlparser read at `span`.
     fn bytes(&self, span: Span) -> Option<std::ops::Range<usize>> {
         let text = self.input.text();

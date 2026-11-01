@@ -37,6 +37,8 @@ mod names;
 mod read;
 mod resolve;
 
+#[cfg(test)]
+pub(crate) use index::visited;
 pub use index::{Columns, NameRef, RelationKind, RelationRef};
 pub(crate) use names::fold;
 pub(crate) use read::{load, load_with};
@@ -287,6 +289,8 @@ impl Catalog {
     }
 
     fn find(&self, name: &str) -> Option<&Relation> {
+        #[cfg(test)]
+        index::visit();
         lookup_key(&self.relations, &self.search_path, self.norm(name))
             .and_then(|key| self.relations.get(key))
     }

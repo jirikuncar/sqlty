@@ -8,7 +8,8 @@
 //!   [`analyzer::infer_type`] (`tuple[int, str]`), [`analyzer::analyze_select`] (the
 //!   columns), [`analyzer::analyze_with_diagnostics`] (the columns and why some are
 //!   untyped), [`analyzer::analyze_params`] (the types of the placeholders) and
-//!   [`analyzer::expand_star`] (`SELECT *` written out).
+//!   [`analyzer::expand_star`] (`SELECT *` written out), and [`analyzer::complete`] (what
+//!   completes at a cursor in a query).
 //! - [`diagnostics`]: the name diagnostics the analyzer records.
 //! - [`json`], [`placeholders`]: JSON shapes and placeholder rewriting.
 //!
