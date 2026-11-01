@@ -1,6 +1,6 @@
 # Shell panes of the recording: a short prompt, and a state file the director polls.
 PS1='\[\e[1;36m\]\W\[\e[0;33m\]$(b=$(git branch --show-current 2>/dev/null) && [ -n "$b" ] && printf " (%s)" "$b")\[\e[0m\] $ '
-PROMPT_COMMAND='printf "%s %s\n" "$?" "$(date +%s%N)" > "$DUCK_STATE/$DUCK_PANE"'
+PROMPT_COMMAND='printf "%s %s\n" "$?" "$(date +%s%N)" > "$DUCK_STATE/.$DUCK_PANE" && mv "$DUCK_STATE/.$DUCK_PANE" "$DUCK_STATE/$DUCK_PANE"'
 export GIT_AUTHOR_NAME=Ada GIT_AUTHOR_EMAIL=ada@duckdesk.dev GIT_COMMITTER_NAME=Ada GIT_COMMITTER_EMAIL=ada@duckdesk.dev
 export UV_NO_PROGRESS=1 SOAK="${SOAK:-8}"
 cd "$DUCKDESK_DIR"
