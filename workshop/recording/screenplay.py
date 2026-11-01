@@ -179,8 +179,7 @@ SCENES = [
                 where="after",
                 anchor="def book(",
             ),
-            Run("uv run uvicorn main:app", pane="server", wait=False),
-            Hold(3),
+            Run("uv run uvicorn main:app", pane="server", wait="Application startup complete"),
             Run(
                 "curl -s localhost:8000/consultations -H 'content-type: application/json' "
                 """-d '{"duck_id": 1, "developer_id": 2, "bug": "it is always DNS"}'"""

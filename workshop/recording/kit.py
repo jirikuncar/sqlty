@@ -23,10 +23,12 @@ class Say:
 
 @dataclass
 class Run:
+    """Run `cmd` and wait for its prompt, or (`wait="text"`) until `text` appears in the pane."""
+
     cmd: str
     pane: str = "shell"
     ok: bool | None = True
-    wait: bool = True
+    wait: bool | str = True
 
 
 @dataclass

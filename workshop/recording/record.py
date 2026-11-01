@@ -166,9 +166,17 @@ class Director:
             self.pause(1)
             return
         before = self.prompt_state(action.pane)
+        seen = self.screen(target).count(action.wait) if isinstance(action.wait, str) else 0
         self.type(target, action.cmd)
         self.pause(0.4)
         self.tmux("send-keys", "-t", target, "Enter")
+        if isinstance(action.wait, str):
+            deadline = time.time() + 120
+            while self.screen(target).count(action.wait) <= seen:
+                if time.time() > deadline:
+                    raise SystemExit(f"{action.cmd!r} never printed {action.wait!r}")
+                time.sleep(0.2)
+            return
         if not action.wait:
             return
         status = self.wait_prompt(action.pane, before)
@@ -178,6 +186,9 @@ class Director:
             )
         self.lua("vim.cmd('silent! checktime')")
         self.pause(1.2)
+
+    def screen(self, target: str) -> str:
+        return self.tmux("capture-pane", "-p", "-J", "-S", "-", "-t", target)
 
     def open(self, path: str) -> None:
         self.lua(f"vim.cmd.edit({json.dumps(path)})")
