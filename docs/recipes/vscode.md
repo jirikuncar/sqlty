@@ -138,3 +138,9 @@ vim.lsp.enable("sqlty")
 ```
 
 `init_options` is optional: without it, no baseline is checked.
+
+The server also answers `textDocument/completion` in the strings `sqlty check` checks:
+the table names after `FROM` or `JOIN`, and the columns of the tables in scope after
+`alias.` or in `SELECT`, `WHERE` and `ON`. Typing `.` triggers it. It sends
+at most 200 items and marks a longer list incomplete, so the client asks again as you
+type. `completionItem/resolve` adds each column's type and nullability.

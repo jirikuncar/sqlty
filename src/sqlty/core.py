@@ -679,7 +679,7 @@ def complete_source(
 
 
 def _helper_starts(
-    parsed: ParsedSource, helpers: HelperIndex | None, module: str | None
+    parsed: ParsedSource, helpers: HelperIndex | None = None, module: str | None = None
 ) -> list[int]:
     """The byte offsets of the string literals helper calls pass as their query."""
     return [

@@ -1,9 +1,11 @@
-//! The language server of `sqlty server`: diagnostics, quick fixes and fix-all for Python files.
+//! The language server of `sqlty server`: diagnostics, quick fixes, fix-all and completion
+//! for Python files.
 //!
 //! The protocol runs on the thread that calls [`run`]. Checks run on one worker thread that
 //! owns a [`Workspace`] per project root: the Python passes hold the GIL, so two checks could
 //! not overlap anyway. The worker checks the newest text of each buffer and publishes the
-//! result only while that text is current.
+//! result only while that text is current. Completion is answered on the protocol thread
+//! from what the buffer's last check left (see [`CompletionContext`]), never behind a check.
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -17,16 +19,17 @@ use lsp_types::notification::{
     DidChangeTextDocument, DidChangeWatchedFiles, DidCloseTextDocument, DidOpenTextDocument,
     DidSaveTextDocument, LogMessage, Notification as _, PublishDiagnostics, ShowMessage,
 };
-use lsp_types::request::{CodeActionRequest, Request as _};
+use lsp_types::request::{CodeActionRequest, Completion, Request as _, ResolveCompletionItem};
 use lsp_types::{
     CodeActionKind, CodeActionOptions, CodeActionParams, CodeActionProviderCapability,
-    InitializeParams, LogMessageParams, MessageType, PositionEncodingKind,
-    PublishDiagnosticsParams, ServerCapabilities, ServerInfo, ShowMessageParams,
-    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+    CompletionItem, CompletionOptions, CompletionParams, InitializeParams, LogMessageParams,
+    MessageType, PositionEncodingKind, PublishDiagnosticsParams, ServerCapabilities, ServerInfo,
+    ShowMessageParams, TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
     TextDocumentSyncSaveOptions, Url,
 };
 
 mod actions;
+mod completion;
 mod text;
 mod worker;
 
@@ -75,6 +78,21 @@ pub struct Edit {
     pub replacement: String,
 }
 
+/// What completion reads of a project for a buffer, as its last check left it: the
+/// schema, how the file is read, and where its helper calls pass a query.
+#[derive(Clone)]
+pub struct CompletionContext {
+    /// The schema the buffer is checked against, shared: a reload swaps it.
+    pub schema: Option<sqlty_sql::analyzer::Schema>,
+    /// The SQL dialect.
+    pub dialect: String,
+    /// `[tool.sqlty] import-style`, which names the wrapper.
+    pub import_style: Option<String>,
+    /// Byte offsets, in the text last checked, of the string literals helper calls pass
+    /// as their query.
+    pub helper_starts: Vec<usize>,
+}
+
 /// The checks of one project, as `sqlty check ROOT` would run them on its buffers.
 pub trait Workspace {
     /// Diagnostics of `text`, the buffer of the file `path`.
@@ -85,6 +103,11 @@ pub trait Workspace {
     /// get against this schema. Asked once, after the workspace loads.
     fn breaking(&mut self) -> Result<Vec<(PathBuf, Vec<Diagnostic>)>, String> {
         Ok(Vec::new())
+    }
+    /// What completion in the buffer of `path` reads, after [`Workspace::check`] read it;
+    /// `None` offers no completion.
+    fn completion(&mut self, _path: &Path) -> Option<CompletionContext> {
+        None
     }
 }
 
@@ -190,6 +213,8 @@ struct Document {
     version: i32,
     /// The diagnostics of `version`, the base of its quick fixes.
     diagnostics: Option<(i32, Vec<Diagnostic>)>,
+    /// The text last checked, and what completion reads of it.
+    completion: Option<(String, CompletionContext)>,
 }
 
 #[derive(Clone)]
@@ -263,6 +288,7 @@ impl Shared {
                         text: document.text,
                         version: document.version,
                         diagnostics: None,
+                        completion: None,
                     },
                 );
                 let _ = jobs.send(Job::Check(document.uri));
@@ -328,21 +354,43 @@ impl Shared {
     }
 
     fn request(&self, request: Request, jobs: &mpsc::Sender<Job>) {
-        if request.method != CodeActionRequest::METHOD {
-            self.send(Response::new_err(
+        match request.method.as_str() {
+            CodeActionRequest::METHOD => self.code_action(request, jobs),
+            Completion::METHOD => {
+                let Ok(params) = serde_json::from_value::<CompletionParams>(request.params) else {
+                    return self.invalid(request.id, "completion");
+                };
+                let found = self
+                    .documents()
+                    .get(&params.text_document_position.text_document.uri)
+                    .and_then(|document| completion::complete(document, &params, &self.encoding));
+                self.send(Response::new_ok(request.id, found));
+            }
+            ResolveCompletionItem::METHOD => {
+                let Ok(item) = serde_json::from_value::<CompletionItem>(request.params) else {
+                    return self.invalid(request.id, "completion item");
+                };
+                self.send(Response::new_ok(request.id, completion::resolve(item)));
+            }
+            _ => self.send(Response::new_err(
                 request.id,
                 ErrorCode::MethodNotFound as i32,
                 format!("sqlty does not handle {}", request.method),
-            ));
-            return;
+            )),
         }
+    }
+
+    fn invalid(&self, id: lsp_server::RequestId, what: &str) {
+        self.send(Response::new_err(
+            id,
+            ErrorCode::InvalidParams as i32,
+            format!("invalid {what} parameters"),
+        ));
+    }
+
+    fn code_action(&self, request: Request, jobs: &mpsc::Sender<Job>) {
         let Ok(params) = serde_json::from_value::<CodeActionParams>(request.params) else {
-            self.send(Response::new_err(
-                request.id,
-                ErrorCode::InvalidParams as i32,
-                "invalid code action parameters".to_string(),
-            ));
-            return;
+            return self.invalid(request.id, "code action");
         };
         let wants = |kind: &str| {
             params.context.only.as_ref().is_none_or(|only| {
@@ -396,6 +444,11 @@ fn capabilities(encoding: PositionEncodingKind) -> ServerCapabilities {
             ]),
             ..CodeActionOptions::default()
         })),
+        completion_provider: Some(CompletionOptions {
+            trigger_characters: Some(vec![".".to_string()]),
+            resolve_provider: Some(true),
+            ..CompletionOptions::default()
+        }),
         ..ServerCapabilities::default()
     }
 }

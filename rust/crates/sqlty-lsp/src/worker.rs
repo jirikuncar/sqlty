@@ -157,6 +157,7 @@ where
             return;
         }
     };
+    let completion = workspace.completion(&path);
     let mut documents = shared.documents();
     let Some(document) = documents.get_mut(&uri).filter(|d| d.version == version) else {
         return;
@@ -167,6 +168,7 @@ where
         .map(|d| actions::diagnostic(d, &index))
         .collect();
     document.diagnostics = Some((version, diagnostics));
+    document.completion = completion.map(|context| (text.clone(), context));
     drop(documents);
     shared.publish(uri, published, Some(version));
 }

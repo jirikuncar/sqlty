@@ -7,7 +7,7 @@ disk once, as ``sqlty check ROOT`` reads it, and kept up to date with each buffe
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from sqlty._cli import Project, build_parser, read_source
 from sqlty._lsp_breaking import Baseline
@@ -15,6 +15,16 @@ from sqlty._lsp_breaking import Baseline
 if TYPE_CHECKING:
     from sqlty._breaking import Direction
     from sqlty._lint import Diagnostic
+    from sqlty.core import Schema
+
+
+class CompletionContext(TypedDict):
+    """What ``Workspace.completion`` returns."""
+
+    schema: Schema | None
+    dialect: str
+    import_style: str | None
+    helper_starts: list[int]
 
 
 class Workspace:
@@ -58,6 +68,20 @@ class Workspace:
         return {
             str(path): [*self.baseline.backward_of(path, self._text(path))]
             for path in self.baseline.check_backward(self.project)
+        }
+
+    def completion(self, path: str) -> CompletionContext:
+        """What completion reads of the buffer ``check`` last read for ``path``: its schema,
+        dialect and import style, and where its helper calls pass a query (byte offsets)."""
+        from sqlty.core import _helper_starts
+
+        file = Path(path)
+        settings = self.project.settings[file]
+        return {
+            "schema": settings.schema,
+            "dialect": settings.dialect,
+            "import_style": settings.import_style,
+            "helper_starts": _helper_starts(self.project.sources[file], self.project.helpers[file]),
         }
 
     def fix(self, path: str, text: str) -> str:
