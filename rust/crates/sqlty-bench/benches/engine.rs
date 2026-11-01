@@ -3,6 +3,8 @@
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use sqlty_bench::{python_source, schema_sql, QUERIES};
+use sqlty_python::locate::Queries;
+use sqlty_python::rewriter::ImportStyle;
 use sqlty_python::{checker, options::Options, rewriter, rules::RuleConfig};
 use sqlty_sql::analyzer;
 use std::hint::black_box;
@@ -10,7 +12,7 @@ use std::hint::black_box;
 fn catalog_load(c: &mut Criterion) {
     let mut group = c.benchmark_group("catalog_load");
     group.sample_size(10);
-    for tables in [50, 270, 540] {
+    for tables in [50, 270, 540, 5000] {
         let sql = schema_sql(tables);
         group.throughput(Throughput::Bytes(sql.len() as u64));
         group.bench_function(format!("{tables}_tables"), |b| {
@@ -96,11 +98,30 @@ fn name_index(c: &mut Criterion) {
     group.finish();
 }
 
+/// Locating the query under a cursor in a module of 4000 queries: one scan per buffer
+/// version, then a binary search per request.
+fn query_at(c: &mut Criterion) {
+    let source = python_source(4_000);
+    let style = ImportStyle::parse(None).expect("the default import style");
+    let cursor = source.rfind("SELECT").expect("a query") + 7;
+    let mut group = c.benchmark_group("query_at");
+    group.bench_function("scan_4000_queries", |b| {
+        b.iter(|| Queries::new(black_box(&source), &style, &[]));
+    });
+    let queries = Queries::new(&source, &style, &[]);
+    assert!(queries.at(cursor).is_some(), "the cursor is in a query");
+    group.bench_function("lookup_4000_queries", |b| {
+        b.iter(|| queries.at(black_box(cursor)));
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
     catalog_load,
     analyze,
     python_source_passes,
-    name_index
+    name_index,
+    query_at
 );
 criterion_main!(benches);

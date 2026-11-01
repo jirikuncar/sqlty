@@ -64,3 +64,35 @@ BRANCHED = (
 
 def test_check_source_query_variants(benchmark: BenchmarkFixture) -> None:
     assert benchmark(core.check_source, BRANCHED, schema_sql=SCHEMA, query_variants=128) == []
+
+
+# Completion per keystroke must not grow with the schema: each operation is measured at
+# 50, 540 and 5000 tables, so CodSpeed shows a regression and the sizes side by side.
+COMPLETION_SCHEMAS = {
+    tables: core.load_schema(synth.schema_sql(tables)) for tables in (50, 540, 5000)
+}
+COMPLETIONS = {
+    "relation_prefix": 'q = "--sql\\nSELECT * FROM t004"',
+    "alias_columns": 'q = "--sql\\nSELECT a. FROM app.t0000 a JOIN app.t0001 b ON b.parent_id = a.id"',
+    "columns_in_scope": 'q = "--sql\\nSELECT * FROM app.t0000 a JOIN app.t0001 b ON b.parent_id = a.id WHERE s"',
+}
+CURSORS = {"relation_prefix": "t004", "alias_columns": "a.", "columns_in_scope": "WHERE s"}
+
+
+@pytest.mark.parametrize("tables", COMPLETION_SCHEMAS)
+@pytest.mark.parametrize("operation", COMPLETIONS)
+def test_complete_source(benchmark: BenchmarkFixture, operation: str, tables: int) -> None:
+    source = COMPLETIONS[operation]
+    column = source.index(CURSORS[operation]) + len(CURSORS[operation]) + 1
+    found = benchmark(
+        core.complete_source, source, 1, column, schema_sql=COMPLETION_SCHEMAS[tables]
+    )
+    assert found is not None and found.items
+
+
+MODULE = "\n".join(f'q{n} = "--sql\\nSELECT id FROM app.t{n % 50:04d}"' for n in range(4000))
+
+
+def test_query_at_in_a_large_module(benchmark: BenchmarkFixture) -> None:
+    offset = MODULE.rindex("SELECT") + 7
+    assert benchmark(core.query_at, MODULE, offset) is not None
