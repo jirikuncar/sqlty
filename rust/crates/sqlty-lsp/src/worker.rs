@@ -147,6 +147,7 @@ where
     let Ok(path) = uri.to_file_path() else {
         return;
     };
+    let enabled = workspaces.settings.completion;
     let Some(workspace) = workspaces.of(&path, shared) else {
         return;
     };
@@ -157,7 +158,7 @@ where
             return;
         }
     };
-    let completion = workspace.completion(&path);
+    let completion = enabled.then(|| workspace.completion(&path)).flatten();
     let mut documents = shared.documents();
     let Some(document) = documents.get_mut(&uri).filter(|d| d.version == version) else {
         return;

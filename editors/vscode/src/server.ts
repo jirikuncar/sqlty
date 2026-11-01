@@ -8,10 +8,14 @@ const run = promisify(execFile);
 /** The oldest `sqlty server` with every feature the extension uses: bump it with each new one. */
 export const MINIMUM_VERSION = "0.3.0";
 
+/** The first `sqlty server` that answers `textDocument/completion`. */
+export const COMPLETION_VERSION = "0.4.0";
+
 export type Settings = {
   path: string[];
   interpreter: string[];
   breaking: { against: string; direction: "both" | "forward" | "backward" };
+  completion: { enable: boolean };
 };
 
 export type Server = {
@@ -96,4 +100,19 @@ async function versionOf(command: string, args: string[]): Promise<string | unde
 
 function expandHome(path: string): string {
   return path === "~" || path.startsWith("~/") ? join(homedir(), path.slice(1)) : path;
+}
+
+/**
+ * What to tell the user when `sqlty.completion.enable` is on but the server does not
+ * advertise completion: an older server would otherwise offer nothing, silently.
+ */
+export function completionNotice(
+  settings: Settings,
+  advertised: boolean,
+  version: string,
+): string | undefined {
+  if (!settings.completion.enable || advertised) {
+    return undefined;
+  }
+  return `sqlty: completion needs sqlty ${COMPLETION_VERSION} or newer, found ${version}. Upgrade it: \`uv add --dev 'sqlty>=${COMPLETION_VERSION}'\` or \`pip install -U sqlty\`, or set sqlty.completion.enable to false.`;
 }
