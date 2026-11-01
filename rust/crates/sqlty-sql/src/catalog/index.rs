@@ -14,8 +14,23 @@ use crate::analyzer::Column;
 
 #[cfg(test)]
 thread_local! {
-    /// How many sorted entries prefix lookups walked on this thread.
+    /// How many catalog entries lookups reached on this thread: sorted entries a prefix
+    /// lookup walked, and relations looked up by name.
     static VISITED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Count one catalog entry reached.
+#[cfg(test)]
+pub(super) fn visit() {
+    VISITED.with(|count| count.set(count.get() + 1));
+}
+
+/// How many catalog entries the lookups of `run` reach.
+#[cfg(test)]
+pub(crate) fn visited(run: impl FnOnce()) -> usize {
+    VISITED.with(|count| count.set(0));
+    run();
+    VISITED.with(std::cell::Cell::get)
 }
 
 /// A name the catalog defines.
@@ -144,7 +159,7 @@ impl Catalog {
 
     /// Typed text as the catalog keys it: PostgreSQL keeps the case of a quoted name and
     /// folds an unquoted one; other dialects compare names case-insensitively.
-    fn fold_typed(&self, text: &str) -> String {
+    pub(crate) fn fold_typed(&self, text: &str) -> String {
         if !self.postgres {
             return text
                 .trim_start_matches(['"', '`', '['])
@@ -225,7 +240,7 @@ impl Sorted {
                 break;
             }
             #[cfg(test)]
-            VISITED.with(|count| count.set(count.get() + 1));
+            visit();
             let (key_schema, name) = split(key);
             if !name.starts_with(prefix) || schema.is_some_and(|schema| schema != key_schema) {
                 break;
@@ -388,12 +403,6 @@ mod tests {
             .map(|t| t.name)
             .collect();
         assert_eq!(types, ["tone", "tpct", "tpoint"]);
-    }
-
-    fn visited(run: impl FnOnce()) -> usize {
-        VISITED.with(|count| count.set(0));
-        run();
-        VISITED.with(std::cell::Cell::get)
     }
 
     /// A lookup walks the matches it returns (and the entry that ends them), never the

@@ -19,6 +19,7 @@ use super::query::{Analyzer, Column};
 use super::scope::{resolve, Scope, Source, Table};
 use super::suggest;
 use super::typed::Typed;
+use super::Candidate;
 use super::SchemaColumn;
 
 /// Where a resolved column comes from, for explaining why it is untyped.
@@ -444,6 +445,9 @@ impl<'a> Analyzer<'a> {
                 .collect(),
             None => all.iter().collect(),
         };
+        if name == super::complete::PLACEHOLDER {
+            return self.diag.probe(|| self.candidate_columns(&candidates));
+        }
         // A qualifier no FROM item names may still be an alias inside an opaque source.
         let pool: &[&Source] = if candidates.is_empty() { &all } else { &[] };
         let opaque = candidates
@@ -563,6 +567,42 @@ impl<'a> Analyzer<'a> {
         let name = suggest::closest(&fold(column, self.dialect), &keys)?;
         let spelling = names.iter().find(|(key, _)| *key == name)?.1;
         Some((name.to_string(), spelling.map(str::to_string)))
+    }
+
+    /// The columns of `sources`, for completion: what a name in their scope can be.
+    fn candidate_columns(&self, sources: &[&&Source]) -> Vec<Candidate> {
+        let mut found = Vec::new();
+        for source in sources {
+            let Some(table) = source.table.named() else {
+                continue;
+            };
+            let reference = &source.reference;
+            if let Some(columns) = self.virtual_columns(table) {
+                found.extend(
+                    columns
+                        .iter()
+                        .filter(|col| !col.is_unknown_star())
+                        .map(|col| {
+                            Candidate::column(
+                                &col.name,
+                                reference,
+                                col.sql_type.as_deref(),
+                                col.nullability,
+                            )
+                        }),
+                );
+            } else if let Some(columns) = self.schema.table(table) {
+                found.extend(columns.iter().map(|col| {
+                    Candidate::column(
+                        &col.ident,
+                        reference,
+                        Some(&col.sql_type),
+                        Nullability::declared(col.not_null),
+                    )
+                }));
+            }
+        }
+        found
     }
 
     /// The columns a star lists that have no Python type: a schema column of an unmapped

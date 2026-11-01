@@ -87,6 +87,8 @@ struct Inner {
     at: Vec<Span>,
     /// Untyped results accounted for so far, recorded or deliberately silent.
     explained: usize,
+    /// The columns the completion placeholder could name, once the analyzer reaches it.
+    probe: Option<Vec<crate::analyzer::Candidate>>,
 }
 
 /// A shared, append-only list of diagnostics; clones record into the same list.
@@ -101,6 +103,19 @@ impl Diagnostics {
             enabled: true,
             ..Inner::default()
         })))
+    }
+
+    /// The columns [`Diagnostics::probe`] recorded, when the analyzer reached the placeholder.
+    pub(crate) fn probed(&self) -> Option<Vec<crate::analyzer::Candidate>> {
+        self.0.borrow_mut().probe.take()
+    }
+
+    /// Record what the completion placeholder could name; the first record wins.
+    pub(crate) fn probe(&self, candidates: impl FnOnce() -> Vec<crate::analyzer::Candidate>) {
+        let mut inner = self.0.borrow_mut();
+        if inner.enabled && inner.probe.is_none() {
+            inner.probe = Some(candidates());
+        }
     }
 
     /// Whether diagnostics are collected. Guard the building of messages with it.
