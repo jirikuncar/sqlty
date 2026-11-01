@@ -545,7 +545,7 @@ pub(crate) fn escaped_offset(text: &str, decoded: usize, end: bool) -> usize {
 }
 
 /// Each piece of [`decode_escapes`]`(text)`, with the bytes of `text` it is decoded from.
-fn escapes(text: &str, mut piece: impl FnMut(&str, Range<usize>)) {
+pub(crate) fn escapes(text: &str, mut piece: impl FnMut(&str, Range<usize>)) {
     let mut rest = text;
     let position = |rest: &str| text.len() - rest.len();
     while let Some(at) = rest.find('\\') {

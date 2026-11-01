@@ -775,38 +775,29 @@ pub fn query_sites(
     let mut sites = Vec::new();
     let mut skipped: Vec<usize> = Vec::new();
     for group in scan.groups() {
-        let enclosing = scan.enclosing_call(group);
-        if let Some(rule) = group.skipped {
-            skipped.push(group.start);
-            if !(rule == Rule::UncheckedQuery
-                && enclosing.is_some_and(|call| call.is_any(&any_calls)))
-            {
-                sites.push((group.line, SiteKind::Skipped(rule), String::new()));
-            }
-            continue;
+        let Some(rule) = group.skipped else { continue };
+        skipped.push(group.start);
+        if !(rule == Rule::UncheckedQuery
+            && scan
+                .enclosing_call(group)
+                .is_some_and(|call| call.is_any(&any_calls)))
+        {
+            sites.push((group.line, SiteKind::Skipped(rule), String::new()));
         }
-        if enclosing.is_some() {
-            continue;
-        }
-        if let Some(sql) = marked_query(&scan.content(group)) {
-            sites.push((group.line, SiteKind::Query, sql));
+    }
+    for (line, strings, _) in scan.marked_strings() {
+        if let Some(sql) = marked_query(&content(source, &strings)) {
+            sites.push((line, SiteKind::Query, sql));
         }
     }
     for call in &scan.calls {
-        let line = scan.lines.line_at(call.span.start);
-        match call.content(source) {
-            Some(text) => {
-                if let Some(sql) = marked_query(&text) {
-                    sites.push((line, SiteKind::Query, sql));
-                }
-            }
-            None if after_marker(&content(source, &call.strings)).is_some()
-                && !call.is_any(&any_calls)
-                && !holds_start(&skipped, &call.span) =>
-            {
-                sites.push((line, SiteKind::Skipped(Rule::UncheckedQuery), String::new()));
-            }
-            None => {}
+        if call.content(source).is_none()
+            && after_marker(&content(source, &call.strings)).is_some()
+            && !call.is_any(&any_calls)
+            && !holds_start(&skipped, &call.span)
+        {
+            let line = scan.lines.line_at(call.span.start);
+            sites.push((line, SiteKind::Skipped(Rule::UncheckedQuery), String::new()));
         }
     }
     sites.sort_by_key(|site| site.0);

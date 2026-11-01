@@ -128,6 +128,7 @@ from sqlty.core import (
     fix_source,
     infer_type,
     load_schema,
+    query_at,
     returns_rows,
     rewrite_source,
     strip_source,
@@ -214,6 +215,25 @@ b'tuple[int]'
     Slice `source.encode()`, not `source`: the two differ once a line holds a
     character outside ASCII.
 
+`query_at` returns the query under a cursor, for editor features such as
+completion. A string is a query exactly when `check_source` checks it: a
+`--sql` marked string, the argument of `SQL[T](...)`, or a string literal passed
+to a [helper](../guide/helpers.md). `text` is the query as the analyzer reads
+it, `offset` the cursor in it, and `source_offset` maps a byte of `text` back
+to the source:
+
+```pycon
+>>> from sqlty.core import query_at
+>>> source = 'q = "--sql\\nSELECT name FROM users"'
+>>> at = query_at(source, source.index("name"))
+>>> at.text, at.offset, at.route
+('--sql\nSELECT name FROM users', 13, 'marker')
+>>> at.source_offset(at.offset) == source.index("name")
+True
+>>> query_at('q = f"--sql\\nSELECT {x}"', 15) is None
+True
+```
+
 | Function | Returns |
 |----------|---------|
 | `load_schema(schema_sql, *, dialect="postgres", types=None)` | A parsed `Schema`, for any `schema_sql` argument; `types` is [`[tool.sqlty.types]`](configuration.md#types) |
@@ -228,3 +248,4 @@ b'tuple[int]'
 | `strip_source(source, *, import_style=None)` | Stripped source, without generated `TypedDict`s |
 | `fix_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False, rules=None, json_types="typing.Any")` | Source with `sqlty check --fix` applied |
 | `check_source(source, *, dialect="postgres", schema_sql=None, rules=None, import_style=None)` | List of diagnostics: `Diagnostic` dicts (`sqlty._lint.Diagnostic`, a `TypedDict`) with `rule`, `message`, `severity`, `line`, `start`, `end`, `fix` |
+| `query_at(source, offset, *, import_style=None, helpers=None, module=None)` | The `QueryAt` (`text`, `offset`, `route`, `span`, `source_offset(n)`) at byte `offset`, or `None` outside a checked query |
