@@ -84,15 +84,34 @@ Three layers, all in the Makefile:
   the slower `dist` profile (fat LTO, one codegen unit; `rust/Cargo.toml`), so `release` numbers can
   differ slightly from a shipped wheel.
 - `make bench-rust` runs Criterion benches in `rust/crates/sqlty-bench`: catalog
-  load (270 tables with functions), analyzer per query kind,
-  `check_source`/`rewrite_source` on 1k/4k queries, and name-index prefix lookups
-  and `complete` at 50, 540 and 5000 tables. Use it to find where time
-  goes and to compare a branch (`ARGS="--save-baseline main"`, then
-  `ARGS="--baseline main"`).
+  load (50 to 5000 tables with functions), analyzer per query kind,
+  `check_source`/`rewrite_source` on 1k/4k queries, name-index prefix lookups and
+  `complete` at 50, 540 and 5000 tables, and `query_at` in a module of 4000 queries.
+  Use it to find where time goes and to compare a branch
+  (`ARGS="--save-baseline main"`, then `ARGS="--baseline main"`).
 - `make bench-codspeed` runs `benchmarks/test_benchmarks.py` with pytest-codspeed: each
   query kind of `synth.KINDS` through `analyze_select`/`analyze_params`, the schema
-  load, `rewrite_source` and `check_source`. CI's CodSpeed job counts their
-  instructions on every commit and reports the change on the pull request.
+  load, `rewrite_source`, `check_source`, `complete_source` at 50, 540 and 5000
+  tables and `query_at`. CI's CodSpeed job counts their instructions on every commit
+  and reports the change on the pull request.
+
+### Completion budget
+
+Completion runs on every keystroke against schemas of 500+ tables, so no per-keystroke
+operation may grow with the number of tables N. Tests count the catalog entries a
+lookup reaches (`catalog::visited`), not time, and fail when a path starts scanning the
+catalog: `lookups_do_not_depend_on_the_number_of_tables` (`catalog/index.rs`) and
+`work_does_not_depend_on_the_number_of_tables` (`analyzer/complete.rs`) compare 50, 540
+and 5000 tables.
+
+| Operation | Allowed cost | Guarded by |
+|-----------|--------------|------------|
+| Locate the query (`query_at`) | O(log S) per request, O(file) once per buffer version | Criterion `query_at`, CodSpeed `test_query_at_in_a_large_module` |
+| Table prefix | O(log N + k), k capped | entry counts, Criterion and CodSpeed at 50/540/5000 tables |
+| `alias.` columns | O(1) + O(width of that table) | entry counts, Criterion and CodSpeed |
+| Unqualified column | O(sum of the widths of the tables in scope) | entry counts, Criterion and CodSpeed |
+| Index build | O(N log N) per schema load, two pointers per name | `index_shares_the_catalog_keys`, `bench-ci` `schema_load_5000` RSS |
+| Per keystroke | never O(N), never waiting behind a check | `completion_is_answered_while_a_check_runs` (`sqlty-lsp`) |
 
 ## Git safety
 

@@ -470,6 +470,26 @@ mod tests {
         assert_eq!(types, ["tone", "tpct", "tpoint"]);
     }
 
+    /// The index holds the catalog's keys, not copies: two pointers per name, and every
+    /// key's one allocation is shared by the map and both sorted orders.
+    #[test]
+    fn index_shares_the_catalog_keys() {
+        let mut sql = String::new();
+        for i in 0..5000 {
+            sql += &format!("CREATE TABLE t{i} (id int);\n");
+        }
+        let c = pg(&sql);
+        let sorted = &c.index.relations;
+        assert_eq!(sorted.by_key.len(), c.relations.len());
+        assert_eq!(sorted.by_name.len(), c.relations.len());
+        for key in c.relations.keys() {
+            assert_eq!(Arc::strong_count(key), 3, "{key}");
+        }
+        let pointers =
+            (sorted.by_key.capacity() + sorted.by_name.capacity()) * size_of::<Arc<str>>();
+        assert!(pointers <= 2 * 2 * c.relations.len() * size_of::<Arc<str>>());
+    }
+
     /// A lookup walks the matches it returns (and the entry that ends them), never the
     /// rest of the catalog: the counts are the same at 50, 540 and 5000 tables.
     #[test]
