@@ -216,17 +216,25 @@ class Director:
 
     def fix(self, action: Fix) -> None:
         self.open(action.path)
-        while self.lua("print(#vim.diagnostic.get(0))").strip() in ("", "0"):
-            time.sleep(0.3)
-        self.lua(
-            "vim.diagnostic.jump({count = 1, wrap = true, severity = vim.diagnostic.severity.ERROR})"
+        find = (
+            "for _, d in ipairs(vim.diagnostic.get(0)) do "
+            f"if d.code == '{action.rule}' then "
+            "print(vim.json.encode({d.lnum, d.col, d.end_lnum, d.end_col})) return end end"
         )
-        time.sleep(2)
-        self.lua(
-            "vim.lsp.buf.code_action({apply = true, filter = function(a) "
-            "return a.title:find('unknown%-column') ~= nil end})"
-        )
-        time.sleep(2)
+        deadline = time.time() + 30
+        while not (found := self.lua(find).strip()) and time.time() < deadline:
+            time.sleep(0.5)
+        while found:
+            lnum, col, end_lnum, end_col = json.loads(found)
+            self.lua(f"vim.api.nvim_win_set_cursor(0, {{{lnum + 1}, {col}}})")
+            time.sleep(2.5)
+            self.lua(
+                "vim.lsp.buf.code_action({apply = true, "
+                f"filter = function(a) return a.title == 'Fix {action.rule}' end, "
+                f"range = {{start = {{{lnum + 1}, {col}}}, ['end'] = {{{end_lnum + 1}, {end_col}}}}}}})"
+            )
+            time.sleep(3)
+            found = self.lua(find).strip()
         self.type(self.pane("editor"), ":w")
         self.tmux("send-keys", "-t", self.pane("editor"), "Enter")
         time.sleep(1.5)

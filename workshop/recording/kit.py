@@ -49,9 +49,10 @@ class Keys:
 
 @dataclass
 class Fix:
-    """Jump to the first diagnostic of `path` and apply its quick fix."""
+    """Apply the quick fix of every `rule` diagnostic in `path`, one at a time."""
 
     path: str
+    rule: str = "unknown-column"
 
 
 @dataclass
