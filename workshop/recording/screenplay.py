@@ -18,6 +18,15 @@ def prek_with_deploy() -> str:
     )
 
 
+README = """# DuckDesk
+
+Rubber ducks, rented by the hour.
+
+- Talks to every developer
+- Never interrupts
+- Deploys on Friday
+"""
+
 SCENES = [
     Scene(
         "open",
@@ -26,6 +35,7 @@ SCENES = [
                 "Every developer has a rubber duck. You explain your bug to the duck. The duck says nothing. "
                 "And halfway through your sentence, you find the bug."
             ),
+            Write("README.md", README),
             Say(
                 "Ducks are the best debugging tool ever made. But nobody sells them as a service. Until today. "
                 "This is DuckDesk: rubber ducks, rented by the hour."

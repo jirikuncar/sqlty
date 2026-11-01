@@ -70,9 +70,15 @@ commands, so it needs what the talk needs, plus:
 
 ```bash
 cd recording
-PIPER_MODEL=~/voices/en_US-lessac-medium.onnx ./make-video.sh
-./make-video.sh --scenes open,setup      # rehearse some scenes
+export PIPER_MODEL=~/voices/en_US-lessac-medium.onnx
+./make-video.sh                          # every chapter
+./make-video.sh --chapters merge         # after a review: record one chapter again
 ```
+
+Each scene of `screenplay.py` is a chapter, recorded and rendered on its own to
+`build/chapters/<name>.mp4`; `build/duckdesk.mp4` joins them, with a chapter list.
+Recording a chapter plays the chapters before it fast and unrecorded, so the app
+is where the chapter starts, and only chapters whose recording changed render again.
 
 The narration is in `screenplay.py`; the code it types comes from the step
 scripts. To use your own voice, record the lines that `build/cue-sheet.md`

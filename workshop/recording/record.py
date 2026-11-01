@@ -1,9 +1,11 @@
-"""Play the screenplay in tmux (Neovim left, shells right) and record it with asciinema.
+"""Play the screenplay in tmux (Neovim left, shells right) and record each chapter with asciinema.
 
-    uv run python record.py --nvim nvim --asciinema asciinema
+    uv run python record.py --nvim nvim --asciinema asciinema --chapters merge,rolling
 
+Each scene is a chapter. The chapters before the ones asked for are played fast and
+not recorded, to bring the app to where the chapter starts.
 Needs build/cues.json from voice.py: each line's length paces what follows it.
-Writes build/session.cast and build/timeline.json.
+Writes build/chapters/<name>.cast and build/chapters/<name>.json.
 """
 
 import argparse
@@ -16,7 +18,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from kit import Fix, Hold, Keys, Open, Run, Say, Write
+from kit import Fix, Hold, Keys, Open, Run, Say, Scene, Write
 from screenplay import SCENES
 
 HERE = Path(__file__).parent
@@ -28,6 +30,7 @@ SIZE = (200, 50)
 class Director:
     def __init__(self, app: Path, nvim: str, cps: float) -> None:
         self.app, self.nvim, self.cps = app, nvim, cps
+        self.fast = False
         self.state = Path(tempfile.mkdtemp(prefix="duckdesk-"))
         self.socket = self.state / "nvim.sock"
         self.cues = {
@@ -113,11 +116,19 @@ class Director:
             text=True,
         ).stdout
 
+    def pause(self, seconds: float) -> None:
+        time.sleep(0.05 if self.fast else seconds)
+
     def type(self, target: str, text: str) -> None:
         for line_number, line in enumerate(text.split("\n")):
             if line_number:
                 self.tmux("send-keys", "-t", target, "Enter")
-                time.sleep(2.5 / self.cps)
+                self.pause(2.5 / self.cps)
+            if self.fast:
+                if line:
+                    escaped = line[:-1] + "\\;" if line.endswith(";") else line
+                    self.tmux("send-keys", "-t", target, "-l", escaped)
+                continue
             for char in line:
                 self.tmux("send-keys", "-t", target, "-l", "\\;" if char == ";" else char)
                 time.sleep(random.uniform(0.6, 1.4) / self.cps)
@@ -132,6 +143,8 @@ class Director:
         return int(state.split()[0])
 
     def say(self, action: Say) -> None:
+        if self.fast:
+            return
         self.wait_voice()
         start = self.now()
         self.speaking_until = start + self.cues[action.id] + 0.4
@@ -140,6 +153,8 @@ class Director:
         )
 
     def wait_voice(self, extra: float = 0.0) -> None:
+        if self.fast:
+            return
         delay = self.speaking_until + extra - self.now()
         if delay > 0:
             time.sleep(delay)
@@ -148,11 +163,11 @@ class Director:
         target = self.pane(action.pane)
         if action.cmd == "^C":
             self.tmux("send-keys", "-t", target, "C-c")
-            time.sleep(1)
+            self.pause(1)
             return
         before = self.prompt_state(action.pane)
         self.type(target, action.cmd)
-        time.sleep(0.4)
+        self.pause(0.4)
         self.tmux("send-keys", "-t", target, "Enter")
         if not action.wait:
             return
@@ -162,14 +177,14 @@ class Director:
                 f"{action.cmd!r} exited with {status}, expected {'success' if action.ok else 'failure'}"
             )
         self.lua("vim.cmd('silent! checktime')")
-        time.sleep(1.2)
+        self.pause(1.2)
 
     def open(self, path: str) -> None:
-        self.lua(f"vim.cmd.edit({json.dumps(str(self.app / path))})")
-        time.sleep(0.8)
+        self.lua(f"vim.cmd.edit({json.dumps(path)})")
+        self.pause(0.8)
 
     def write(self, action: Write) -> None:
-        path = json.dumps(str(self.app / action.path))
+        path = json.dumps(action.path)
         lines = action.text.removesuffix("\n").split("\n")
         place = {
             "new": "vim.fn.mkdir(vim.fn.fnamemodify(p, ':h'), 'p'); vim.cmd.edit(p); "
@@ -179,7 +194,7 @@ class Director:
             "before": "vim.cmd.edit(p); vim.api.nvim_win_set_cursor(0, {1, 0}); row = vim.fn.search(a, 'c') - 1",
         }[action.where]
         anchor = json.dumps("\\V" + action.anchor.replace("\\", "\\\\"))
-        if not action.typed:
+        if not action.typed or self.fast:
             self.lua(
                 f"local p, a = {path}, {anchor}; {place}\n"
                 f"vim.api.nvim_buf_set_lines(0, row, row, false, vim.json.decode({json.dumps(json.dumps(lines))}))\n"
@@ -187,7 +202,7 @@ class Director:
                 "vim.api.nvim_buf_set_lines(0, -2, -1, false, {}) end\n"
                 "vim.cmd('silent write'); vim.api.nvim_win_set_cursor(0, {math.max(row, 1), 0})"
             )
-            time.sleep(1.5)
+            self.pause(1.5)
             return
         self.lua(
             f"local p, a = {path}, {anchor}; {place}\n"
@@ -200,10 +215,10 @@ class Director:
         self.tmux("send-keys", "-t", editor, "i")
         self.type(editor, "\n".join(lines))
         self.tmux("send-keys", "-t", editor, "Escape")
-        time.sleep(0.3)
+        self.pause(0.3)
         self.type(editor, ":w")
         self.tmux("send-keys", "-t", editor, "Enter")
-        time.sleep(1.5)
+        self.pause(1.5)
 
     def keys(self, action: Keys) -> None:
         editor = self.pane("editor")
@@ -211,7 +226,7 @@ class Director:
         for chunk in chunks:
             self.type(editor, chunk)
             self.tmux("send-keys", "-t", editor, "Enter")
-            time.sleep(0.8)
+            self.pause(0.8)
         self.type(editor, last)
 
     def fix(self, action: Fix) -> None:
@@ -227,7 +242,7 @@ class Director:
         while found:
             lnum, col, end_lnum, end_col = json.loads(found)
             self.lua(f"vim.api.nvim_win_set_cursor(0, {{{lnum + 1}, {col}}})")
-            time.sleep(2.5)
+            self.pause(2.5)
             self.lua(
                 "vim.lsp.buf.code_action({apply = true, "
                 f"filter = function(a) return a.title == 'Fix {action.rule}' end, "
@@ -237,29 +252,60 @@ class Director:
             found = self.lua(find).strip()
         self.type(self.pane("editor"), ":w")
         self.tmux("send-keys", "-t", self.pane("editor"), "Enter")
-        time.sleep(1.5)
+        self.pause(1.5)
 
-    def play(self, names: set[str] | None) -> None:
-        for scene in SCENES:
-            if names and scene.name not in names:
-                continue
-            for action in scene.actions:
-                match action:
-                    case Say():
-                        self.say(action)
-                    case Run():
-                        self.run(action)
-                    case Write():
-                        self.write(action)
-                    case Keys():
-                        self.keys(action)
-                    case Open():
-                        self.open(action.path)
-                    case Fix():
-                        self.fix(action)
-                    case Hold():
-                        self.wait_voice(action.seconds)
-        self.wait_voice(1)
+    def play(self, scene: Scene) -> None:
+        for action in scene.actions:
+            match action:
+                case Say():
+                    self.say(action)
+                case Run():
+                    self.run(action)
+                case Write():
+                    self.write(action)
+                case Keys():
+                    self.keys(action)
+                case Open():
+                    self.open(action.path)
+                case Fix():
+                    self.fix(action)
+                case Hold():
+                    self.wait_voice(action.seconds)
+
+    def record(self, scene: Scene, asciinema: str) -> None:
+        cols, rows = SIZE
+        chapters = BUILD / "chapters"
+        chapters.mkdir(parents=True, exist_ok=True)
+        recorder = subprocess.Popen(
+            [
+                asciinema,
+                "rec",
+                "--headless",
+                "--overwrite",
+                "-q",
+                "-f",
+                "asciicast-v2",
+                "--window-size",
+                f"{cols}x{rows}",
+                "-c",
+                f"env TERM=xterm-256color tmux -L {SESSION} -u attach -t {SESSION}",
+                str(chapters / f"{scene.name}.cast"),
+            ],
+        )
+        self.t0, self.speaking_until, self.timeline = time.time(), 0.0, []
+        time.sleep(1)
+        try:
+            self.play(scene)
+            self.wait_voice(1)
+        finally:
+            subprocess.run(
+                ["tmux", "-L", SESSION, "detach-client", "-s", SESSION], capture_output=True
+            )
+            recorder.wait(timeout=30)
+        (chapters / f"{scene.name}.json").write_text(
+            json.dumps({"cues": self.timeline, "end": round(self.now(), 3)}, indent=2)
+        )
+        print(f"chapter {scene.name}: {self.now():.0f} s recorded")
 
 
 def main() -> None:
@@ -272,7 +318,7 @@ def main() -> None:
     parser.add_argument("--nvim", default="nvim")
     parser.add_argument("--asciinema", default="asciinema")
     parser.add_argument("--cps", type=float, default=11, help="typing speed, characters per second")
-    parser.add_argument("--scenes", help="comma-separated scene names, to rehearse a part")
+    parser.add_argument("--chapters", help="comma-separated chapters to record (default: all)")
     args = parser.parse_args()
 
     app = Path(args.app)
@@ -289,34 +335,25 @@ def main() -> None:
     director = Director(app, args.nvim, args.cps)
     subprocess.run(["tmux", "-L", SESSION, "kill-server"], capture_output=True)
     director.start()
-    cols, rows = SIZE
-    BUILD.mkdir(exist_ok=True)
-    recorder = subprocess.Popen(
-        [
-            args.asciinema,
-            "rec",
-            "--headless",
-            "--overwrite",
-            "-q",
-            "-f",
-            "asciicast-v2",
-            "--window-size",
-            f"{cols}x{rows}",
-            "-c",
-            f"tmux -L {SESSION} -u attach -t {SESSION}",
-            str(BUILD / "session.cast"),
-        ],
-    )
-    director.t0 = time.time()
-    time.sleep(1)
+    names = [scene.name for scene in SCENES]
+    wanted = args.chapters.split(",") if args.chapters else names
+    unknown = set(wanted) - set(names)
+    if unknown:
+        raise SystemExit(
+            f"unknown chapters: {', '.join(sorted(unknown))}; chapters: {', '.join(names)}"
+        )
+    last = max(names.index(name) for name in wanted)
     try:
-        director.play(set(args.scenes.split(",")) if args.scenes else None)
+        for scene in SCENES[: last + 1]:
+            if scene.name in wanted:
+                director.fast = False
+                director.record(scene, args.asciinema)
+            else:
+                director.fast = True
+                director.play(scene)
+                print(f"chapter {scene.name}: played fast")
     finally:
         subprocess.run(["tmux", "-L", SESSION, "kill-server"], capture_output=True)
-        recorder.wait(timeout=30)
-        (BUILD / "timeline.json").write_text(
-            json.dumps({"cues": director.timeline, "end": round(director.now(), 3)}, indent=2)
-        )
 
 
 if __name__ == "__main__":
