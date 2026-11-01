@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, LazyLock};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -8,13 +8,32 @@ use lsp_server::{Connection, Message, Notification, Request, RequestId};
 use lsp_types::Url;
 use serde_json::{json, Value};
 
-use crate::{run, Diagnostic, Edit, Settings, Severity, Workspace};
+use sqlty_sql::analyzer::{load_schema_with_skipped, Schema};
+
+use crate::{run, CompletionContext, Diagnostic, Edit, Settings, Severity, Workspace};
+
+/// Users and orders, and 540 tables `t0`..`t539`.
+static SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
+    let mut sql = String::from(
+        "CREATE TABLE users (id INT NOT NULL, name TEXT);\nCREATE TABLE orders (id INT, user_id INT);\n",
+    );
+    for i in 0..540 {
+        sql += &format!("CREATE TABLE t{i} (id INT);\n");
+    }
+    load_schema_with_skipped(&sql, "postgres").0
+});
+
+/// Lets a check of a buffer holding `slow` finish.
+static RELEASE: AtomicBool = AtomicBool::new(false);
 
 /// Reports each `bad`; its fix writes `good` and imports it. With a baseline, `old.py`
-/// of its root has a breaking change.
+/// of its root has a breaking change. Completes with [`SCHEMA`] and the table `gen{N}`
+/// of its `N`th load; the strings `run(` is called with are helper queries.
 struct Fake {
     root: PathBuf,
     settings: Settings,
+    generation: usize,
+    checked: String,
 }
 
 impl Workspace for Fake {
@@ -22,6 +41,10 @@ impl Workspace for Fake {
         if text.contains("crash") {
             return Err("Traceback: crash".to_string());
         }
+        while text.contains("slow") && !RELEASE.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        self.checked = text.to_string();
         Ok(text
             .match_indices("bad")
             .map(|(at, _)| Diagnostic {
@@ -66,6 +89,25 @@ impl Workspace for Fake {
         };
         Ok(vec![(self.root.join("old.py"), vec![finding])])
     }
+
+    fn completion(&mut self, _: &Path) -> Option<CompletionContext> {
+        let schema = if self.generation == 1 {
+            SCHEMA.clone()
+        } else {
+            let sql = format!("CREATE TABLE gen{} (id INT);", self.generation);
+            load_schema_with_skipped(&sql, "postgres").0
+        };
+        Some(CompletionContext {
+            schema: Some(schema),
+            dialect: "postgres".to_string(),
+            import_style: None,
+            helper_starts: self
+                .checked
+                .match_indices("run(")
+                .map(|(at, _)| at + 4)
+                .collect(),
+        })
+    }
 }
 
 struct Client {
@@ -98,6 +140,8 @@ impl Client {
                     Ok(Fake {
                         root: root.to_path_buf(),
                         settings: settings.clone(),
+                        generation: count.load(Ordering::SeqCst),
+                        checked: String::new(),
                     })
                 }
             })
@@ -433,4 +477,168 @@ fn without_a_baseline_nothing_is_published_in_the_background() {
             .any(|method| method == "textDocument/publishDiagnostics"),
         "{rest:?}"
     );
+}
+
+/// The labels of a completion response, or `null`.
+fn labels(found: &Value) -> Value {
+    if found.is_null() {
+        return Value::Null;
+    }
+    json!(found["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["label"].clone())
+        .collect::<Vec<_>>())
+}
+
+impl Client {
+    fn complete(&mut self, uri: &str, line: u32, character: u32) -> Value {
+        let position = json!({"line": line, "character": character});
+        self.request(
+            "textDocument/completion",
+            json!({"textDocument": {"uri": uri}, "position": position, "context": {"triggerKind": 2, "triggerCharacter": "."}}),
+        )
+    }
+
+    fn change(&self, uri: &str, version: i32, text: &str) {
+        let change = json!({"textDocument": {"uri": uri, "version": version}, "contentChanges": [{"text": text}]});
+        self.notify("textDocument/didChange", change);
+    }
+}
+
+#[test]
+fn completion_is_advertised_with_its_trigger() {
+    let (server, connection) = Connection::memory();
+    let thread = std::thread::spawn(move || {
+        run(&server, |_: &Path, _: &Settings| -> Result<Fake, String> {
+            Err(String::new())
+        })
+        .map_err(|error| error.to_string())
+    });
+    let mut client = Client {
+        connection,
+        server: Some(thread),
+        pending: Vec::new(),
+        next: 0,
+        opened: Arc::default(),
+    };
+    let result = client.request("initialize", json!({"capabilities": {}}));
+    let provider = &result["capabilities"]["completionProvider"];
+    assert_eq!(provider["triggerCharacters"], json!(["."]));
+    assert_eq!(provider["resolveProvider"], true);
+    client.notify("initialized", json!({}));
+    client.shutdown();
+}
+
+#[test]
+fn completion_after_a_dot_lists_the_columns() {
+    let mut client = Client::start(&json!({}));
+    let text = "q = \"--sql\\nSELECT u. FROM users u\"\n";
+    client.open("file:///work/q.py", text);
+    client.notification("textDocument/publishDiagnostics");
+    let found = client.complete("file:///work/q.py", 0, 21);
+    assert_eq!(labels(&found), json!(["id", "name"]));
+    assert_eq!(found["isIncomplete"], false);
+    let item = &found["items"][0];
+    assert_eq!(item["kind"], 5, "a field");
+    assert_eq!(item["sortText"], "0000");
+    assert_eq!(
+        item["textEdit"]["range"],
+        json!({"start": {"line": 0, "character": 21}, "end": {"line": 0, "character": 21}})
+    );
+    assert!(item.get("detail").is_none(), "left to resolve");
+
+    let resolved = client.request("completionItem/resolve", item.clone());
+    assert_eq!(resolved["detail"], "INT NOT NULL");
+    assert_eq!(
+        resolved["documentation"]["value"],
+        "Column of `u`: `INT NOT NULL`"
+    );
+    client.shutdown();
+}
+
+#[test]
+fn completion_in_helper_strings_only() {
+    let mut client = Client::start(&json!({}));
+    let text = "run(\"SELECT * FROM us\")\nother(\"SELECT * FROM us\")\n";
+    client.open("file:///work/q.py", text);
+    client.notification("textDocument/publishDiagnostics");
+    assert_eq!(
+        labels(&client.complete("file:///work/q.py", 0, 21)),
+        json!(["users"])
+    );
+    assert_eq!(client.complete("file:///work/q.py", 1, 23), Value::Null);
+    assert_eq!(client.complete("file:///work/q.py", 0, 1), Value::Null);
+    assert_eq!(client.complete("file:///nowhere/q.py", 0, 1), Value::Null);
+
+    let edited = format!("# a comment\n{text}");
+    client.change("file:///work/q.py", 2, &edited);
+    assert_eq!(
+        labels(&client.complete("file:///work/q.py", 1, 21)),
+        json!(["users"]),
+        "the helper string moved with the edit, before the edit was checked"
+    );
+    client.shutdown();
+}
+
+#[test]
+fn a_long_list_is_capped_and_incomplete() {
+    let mut client = Client::start(&json!({}));
+    let text = "q = \"--sql\\nSELECT * FROM t\"\n";
+    client.open("file:///work/q.py", text);
+    client.notification("textDocument/publishDiagnostics");
+    let found = client.complete("file:///work/q.py", 0, 27);
+    assert_eq!(found["items"].as_array().unwrap().len(), 200);
+    assert_eq!(found["isIncomplete"], true);
+    client.change(
+        "file:///work/q.py",
+        2,
+        "q = \"--sql\\nSELECT * FROM t53\"\n",
+    );
+    let found = client.complete("file:///work/q.py", 0, 29);
+    assert_eq!(found["items"].as_array().unwrap().len(), 11);
+    assert_eq!(found["isIncomplete"], false);
+    client.shutdown();
+}
+
+#[test]
+fn completion_is_answered_while_a_check_runs() {
+    let mut client = Client::start(&json!({}));
+    let text = "q = \"--sql\\nSELECT u. FROM users u\"\n";
+    client.open("file:///work/q.py", text);
+    client.notification("textDocument/publishDiagnostics");
+    client.change("file:///work/q.py", 2, &format!("{text}slow = 1\n"));
+    std::thread::sleep(Duration::from_millis(50));
+    client.notify("$/cancelRequest", json!({"id": 999}));
+    assert_eq!(
+        labels(&client.complete("file:///work/q.py", 0, 21)),
+        json!(["id", "name"])
+    );
+    RELEASE.store(true, Ordering::SeqCst);
+    let published = client.notification("textDocument/publishDiagnostics");
+    assert_eq!(published["version"], 2);
+    client.shutdown();
+}
+
+#[test]
+fn a_reload_swaps_the_schema_completion_reads() {
+    let mut client = Client::start(&json!({}));
+    let text = "q = \"--sql\\nSELECT * FROM gen\"\n";
+    client.open("file:///work/q.py", text);
+    client.notification("textDocument/publishDiagnostics");
+    assert_eq!(
+        labels(&client.complete("file:///work/q.py", 0, 29)),
+        json!([])
+    );
+    client.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({"changes": [{"uri": "file:///work/schema.sql", "type": 2}]}),
+    );
+    client.notification("textDocument/publishDiagnostics");
+    assert_eq!(
+        labels(&client.complete("file:///work/q.py", 0, 29)),
+        json!(["gen2"])
+    );
+    client.shutdown();
 }

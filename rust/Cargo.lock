@@ -851,6 +851,8 @@ dependencies = [
  "lsp-server",
  "lsp-types",
  "serde_json",
+ "sqlty-python",
+ "sqlty-sql",
 ]
 
 [[package]]

@@ -960,12 +960,12 @@ fn complete_source(
     let dialect = dialect.0;
     detach(py, || {
         let style = ImportStyle::parse(import_style)?;
-        let Some(at) = locate::Queries::new(source, &style, &helper_starts).at(offset) else {
+        let queries = locate::Queries::new(source, &style, &helper_starts);
+        let schema = schema(schema_sql, dialect);
+        let Some(found) = locate::complete(&queries, offset, dialect, schema.as_deref(), limit)
+        else {
             return Ok(None);
         };
-        let schema = schema(schema_sql, dialect);
-        let found = analyzer::complete(&at.text, at.offset, dialect, schema.as_deref(), limit);
-        let start = at.source_offset(found.replace.start).unwrap_or(offset);
         let candidates = found
             .candidates
             .into_iter()
@@ -980,8 +980,8 @@ fn complete_source(
             })
             .collect();
         Ok(Some((
-            start.min(offset),
-            offset,
+            found.replace.start,
+            found.replace.end,
             found.incomplete,
             candidates,
         )))

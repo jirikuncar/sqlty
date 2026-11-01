@@ -20,6 +20,8 @@
 
 use std::ops::Range;
 
+use sqlty_sql::analyzer::{self, Completions, SchemaData};
+
 use crate::rewriter::{after_marker, escapes, extract_string_content, ImportStyle};
 use crate::scan::Scan;
 
@@ -161,6 +163,23 @@ impl<'s> Queries<'s> {
             pieces,
         })
     }
+}
+
+/// What completes at byte `offset` of `source`, `None` outside a query `check` reads:
+/// [`Queries::at`], then [`complete`](sqlty_sql::analyzer::complete) on the query, with
+/// [`Completions::replace`] mapped back to the bytes of the source.
+pub fn complete(
+    queries: &Queries<'_>,
+    offset: usize,
+    dialect: &str,
+    schema: Option<&SchemaData>,
+    limit: usize,
+) -> Option<Completions> {
+    let at = queries.at(offset)?;
+    let mut found = analyzer::complete(&at.text, at.offset, dialect, schema, limit);
+    let start = at.source_offset(found.replace.start).unwrap_or(offset);
+    found.replace = start.min(offset)..offset;
+    Some(found)
 }
 
 /// The query under a cursor.

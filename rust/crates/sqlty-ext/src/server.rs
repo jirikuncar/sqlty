@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use sqlty_lsp::{Diagnostic, Edit, Settings, Severity, Workspace};
+use sqlty_lsp::{CompletionContext, Diagnostic, Edit, Settings, Severity, Workspace};
+
+use crate::SchemaHandle;
 
 /// Serve the language server on standard input and output until the client exits.
 #[pyfunction]
@@ -57,6 +59,36 @@ impl Workspace for BridgeWorkspace {
 
     fn fix(&mut self, path: &Path, text: &str) -> Result<String, String> {
         self.call("fix", path, text)
+    }
+
+    fn completion(&mut self, path: &Path) -> Option<CompletionContext> {
+        Python::attach(|py| {
+            let found = self
+                .0
+                .bind(py)
+                .call_method1("completion", (path.to_string_lossy(),))
+                .ok()?;
+            let schema = found.get_item("schema").ok()?;
+            let schema = if schema.is_none() {
+                None
+            } else {
+                Some(
+                    schema
+                        .cast::<SchemaHandle>()
+                        .ok()?
+                        .get()
+                        .loaded
+                        .schema
+                        .clone(),
+                )
+            };
+            Some(CompletionContext {
+                schema,
+                dialect: found.get_item("dialect").ok()?.extract().ok()?,
+                import_style: found.get_item("import_style").ok()?.extract().ok()?,
+                helper_starts: found.get_item("helper_starts").ok()?.extract().ok()?,
+            })
+        })
     }
 
     fn breaking(&mut self) -> Result<Vec<(PathBuf, Vec<Diagnostic>)>, String> {
