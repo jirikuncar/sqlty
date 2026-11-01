@@ -508,27 +508,40 @@ impl Client {
 }
 
 #[test]
-fn completion_is_advertised_with_its_trigger() {
-    let (server, connection) = Connection::memory();
-    let thread = std::thread::spawn(move || {
-        run(&server, |_: &Path, _: &Settings| -> Result<Fake, String> {
-            Err(String::new())
-        })
-        .map_err(|error| error.to_string())
-    });
-    let mut client = Client {
-        connection,
-        server: Some(thread),
-        pending: Vec::new(),
-        next: 0,
-        opened: Arc::default(),
-    };
-    let result = client.request("initialize", json!({"capabilities": {}}));
-    let provider = &result["capabilities"]["completionProvider"];
-    assert_eq!(provider["triggerCharacters"], json!(["."]));
-    assert_eq!(provider["resolveProvider"], true);
-    client.notify("initialized", json!({}));
-    client.shutdown();
+fn completion_is_advertised_with_its_trigger_unless_off() {
+    for (options, advertised) in [
+        (Value::Null, true),
+        (json!({"completion": {"enable": true}}), true),
+        (json!({"completion": {"enable": false}}), false),
+    ] {
+        let (server, connection) = Connection::memory();
+        let thread = std::thread::spawn(move || {
+            run(&server, |_: &Path, _: &Settings| -> Result<Fake, String> {
+                Err(String::new())
+            })
+            .map_err(|error| error.to_string())
+        });
+        let mut client = Client {
+            connection,
+            server: Some(thread),
+            pending: Vec::new(),
+            next: 0,
+            opened: Arc::default(),
+        };
+        let result = client.request(
+            "initialize",
+            json!({"capabilities": {}, "initializationOptions": options}),
+        );
+        let provider = &result["capabilities"]["completionProvider"];
+        if advertised {
+            assert_eq!(provider["triggerCharacters"], json!(["."]));
+            assert_eq!(provider["resolveProvider"], true);
+        } else {
+            assert!(provider.is_null(), "{provider}");
+        }
+        client.notify("initialized", json!({}));
+        client.shutdown();
+    }
 }
 
 #[test]
@@ -640,5 +653,19 @@ fn a_reload_swaps_the_schema_completion_reads() {
         labels(&client.complete("file:///work/q.py", 0, 29)),
         json!(["gen2"])
     );
+    client.shutdown();
+}
+
+#[test]
+fn completion_can_be_turned_off() {
+    let mut client = Client::with(
+        &json!({}),
+        &json!([{"uri": "file:///work", "name": "work"}]),
+        &json!({"completion": {"enable": false}}),
+    );
+    let text = "q = \"--sql\\nSELECT u. FROM users u\"\n";
+    client.open("file:///work/q.py", text);
+    client.notification("textDocument/publishDiagnostics");
+    assert_eq!(client.complete("file:///work/q.py", 0, 21), Value::Null);
     client.shutdown();
 }

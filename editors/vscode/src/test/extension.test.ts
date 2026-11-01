@@ -4,7 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as vscode from "vscode";
 
-import { compareVersions, findServer, MINIMUM_VERSION, type Settings } from "../server";
+import {
+  COMPLETION_VERSION,
+  compareVersions,
+  completionNotice,
+  findServer,
+  MINIMUM_VERSION,
+  type Settings,
+} from "../server";
 
 suite("sqlty", () => {
   test("shows the diagnostics of sqlty check, and fixes them", async () => {
@@ -37,6 +44,35 @@ suite("sqlty", () => {
     await diagnostics(uri, (found) => found.length === 0);
   });
 
+  test("completes the columns of a table in a query string", async () => {
+    const [folder] = vscode.workspace.workspaceFolders ?? [];
+    const uri = vscode.Uri.joinPath(folder.uri, "complete.py");
+    const document = await vscode.workspace.openTextDocument(uri);
+    await vscode.window.showTextDocument(document);
+    // `stale-rewrite` of the unwrapped string: the buffer has been checked.
+    await diagnostics(uri, (found) => found.length > 0);
+
+    const position = document.positionAt(document.getText().indexOf("u.") + 2);
+    const sqlty = async () => {
+      const list = await vscode.commands.executeCommand<vscode.CompletionList>(
+        "vscode.executeCompletionItemProvider",
+        uri,
+        position,
+        ".",
+      );
+      return list.items.filter((item) => item.sortText?.match(/^\d{4}$/));
+    };
+    let items = await sqlty();
+    for (let tries = 0; items.length === 0 && tries < 50; tries++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      items = await sqlty();
+    }
+    assert.deepEqual(
+      items.map((item) => item.label),
+      ["id", "name", "score"],
+    );
+  });
+
   test("offers the closest column as the quick fix of unknown-column", async () => {
     const [folder] = vscode.workspace.workspaceFolders ?? [];
     const uri = vscode.Uri.joinPath(folder.uri, "typo.py");
@@ -67,6 +103,20 @@ suite("findServer", () => {
     path,
     interpreter: [],
     breaking: { against: "", direction: "both" },
+    completion: { enable: true },
+  });
+
+  test("tells when the server is too old to complete", () => {
+    const on = settings([]);
+    const off = { ...on, completion: { enable: false } };
+    assert.equal(completionNotice(on, true, COMPLETION_VERSION), undefined);
+    assert.equal(completionNotice(off, false, MINIMUM_VERSION), undefined);
+    assert.equal(
+      completionNotice(on, false, MINIMUM_VERSION),
+      `sqlty: completion needs sqlty ${COMPLETION_VERSION} or newer, found ${MINIMUM_VERSION}. ` +
+        `Upgrade it: \`uv add --dev 'sqlty>=${COMPLETION_VERSION}'\` or \`pip install -U sqlty\`, ` +
+        "or set sqlty.completion.enable to false.",
+    );
   });
 
   test("compares releases, a pre-release as its release", () => {

@@ -71,6 +71,12 @@
           "scope": "resource",
           "markdownDescription": "Which way `#sqlty.breaking.against#` is checked, as `sqlty breaking --direction`."
         },
+        "sqlty.completion.enable": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "markdownDescription": "Complete table and column names in the query strings `sqlty check` checks. Needs sqlty 0.4.0 or newer; off, the server does no completion work."
+        },
         "sqlty.trace.server": {
           "type": "string",
           "enum": [

@@ -162,6 +162,26 @@ takes a `sqlty.core.HelperIndex` filled with `index.add("pkg.db", db_source)`.
 
 `sqlty rewrite` and `sqlty strip` never touch these calls.
 
+## Completion
+
+`sqlty server` completes table and column names in the strings passed to a helper, as it
+does in `--sql` strings: a string completes exactly when `sqlty check` checks it.
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def fetch_all[T](query: Annotated[LiteralString, SQL], form: type[T]) -> list[T]: ...
+
+fetch_all("SELECT u.<CURSOR> FROM users u", tuple[int, str])
+# completions: email column u
+# completions: id column u
+# completions: name column u
+```
+
+A call the index does not resolve to a helper, an f-string or a variable completes
+nothing. See [VS Code](../recipes/vscode.md#completion) for the editor side.
+
 ## psycopg `sql.SQL` queries
 
 With `psycopg` installed (`sqlty[psycopg]`), a `psycopg.sql` composition passed

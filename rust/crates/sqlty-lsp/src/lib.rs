@@ -112,13 +112,15 @@ pub trait Workspace {
 }
 
 /// What the client configures, from the `initializationOptions` of `initialize`:
-/// `{"breaking": {"against": "main", "direction": "both"}}`.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// `{"breaking": {"against": "main", "direction": "both"}, "completion": {"enable": true}}`.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     /// `sqlty.breaking.against`: the baseline of `sqlty breaking`; `None` checks no baseline.
     pub against: Option<String>,
     /// `sqlty.breaking.direction`: `backward`, `forward` or `both`.
     pub direction: Option<String>,
+    /// `sqlty.completion.enable`: whether to complete names in queries; on unless `false`.
+    pub completion: bool,
 }
 
 impl Settings {
@@ -133,6 +135,10 @@ impl Settings {
         Self {
             against: text("/breaking/against"),
             direction: text("/breaking/direction"),
+            completion: options
+                .and_then(|options| options.pointer("/completion/enable"))
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(true),
         }
     }
 }
@@ -161,10 +167,11 @@ where
     let (id, params) = connection.initialize_start()?;
     let params: InitializeParams = serde_json::from_value(params)?;
     let encoding = encoding(&params);
+    let settings = Settings::new(params.initialization_options.as_ref());
     connection.initialize_finish(
         id,
         serde_json::to_value(lsp_types::InitializeResult {
-            capabilities: capabilities(encoding.clone()),
+            capabilities: capabilities(encoding.clone(), settings.completion),
             server_info: Some(ServerInfo {
                 name: "sqlty".to_string(),
                 version: Some(env!("CARGO_PKG_VERSION").to_string()),
@@ -181,7 +188,6 @@ where
     let worker = {
         let shared = shared.clone();
         let roots = roots(&params);
-        let settings = Settings::new(params.initialization_options.as_ref());
         std::thread::spawn(move || worker::work(&queue, &shared, &roots, &settings, open))
     };
     for message in &connection.receiver {
@@ -426,7 +432,8 @@ fn encoding(params: &InitializeParams) -> PositionEncodingKind {
     }
 }
 
-fn capabilities(encoding: PositionEncodingKind) -> ServerCapabilities {
+/// What the server does; completion only when the client did not turn it off.
+fn capabilities(encoding: PositionEncodingKind, completion: bool) -> ServerCapabilities {
     ServerCapabilities {
         position_encoding: Some(encoding),
         text_document_sync: Some(TextDocumentSyncCapability::Options(
@@ -444,7 +451,7 @@ fn capabilities(encoding: PositionEncodingKind) -> ServerCapabilities {
             ]),
             ..CodeActionOptions::default()
         })),
-        completion_provider: Some(CompletionOptions {
+        completion_provider: completion.then(|| CompletionOptions {
             trigger_characters: Some(vec![".".to_string()]),
             resolve_provider: Some(true),
             ..CompletionOptions::default()
