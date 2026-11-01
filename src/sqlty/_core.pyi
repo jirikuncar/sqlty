@@ -120,6 +120,16 @@ class QueryAt:
 def query_at(
     source: str, offset: int, *, import_style: str | None = None, helper_starts: list[int] = ...
 ) -> QueryAt | None: ...
+def complete_source(
+    source: str,
+    offset: int,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
+    import_style: str | None = None,
+    helper_starts: list[int] = ...,
+    limit: int = 200,
+) -> tuple[int, int, bool, list[tuple[str, str, str | None, str | None, bool | None]]] | None: ...
 def skills() -> list[tuple[str, str]]: ...
 def serve() -> None:
     """Serve the language server on standard input and output until the client exits."""

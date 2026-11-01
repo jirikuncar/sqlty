@@ -123,6 +123,7 @@ from sqlty.core import (
     analyze_params,
     analyze_select,
     check_source,
+    complete_source,
     expand_star,
     explain_select,
     fix_source,
@@ -234,6 +235,21 @@ True
 True
 ```
 
+`complete_source` lists the table and column names that complete at a 1-based
+line and column (in characters) of a query string, with the bytes they replace.
+`sqlty complete FILE:LINE:COL` prints the same for scripts and agents:
+
+```pycon
+>>> from sqlty.core import complete_source
+>>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT)"
+>>> source = 'q = "--sql\\nSELECT u.na FROM users u"'
+>>> found = complete_source(source, 1, source.index(".na") + 4, schema_sql=schema)
+>>> found.items
+[Completion(label='name', kind='column', detail='u', sql_type='TEXT', nullable=True)]
+>>> source.encode()[found.start : found.end]
+b'na'
+```
+
 | Function | Returns |
 |----------|---------|
 | `load_schema(schema_sql, *, dialect="postgres", types=None)` | A parsed `Schema`, for any `schema_sql` argument; `types` is [`[tool.sqlty.types]`](configuration.md#types) |
@@ -249,3 +265,4 @@ True
 | `fix_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False, rules=None, json_types="typing.Any")` | Source with `sqlty check --fix` applied |
 | `check_source(source, *, dialect="postgres", schema_sql=None, rules=None, import_style=None)` | List of diagnostics: `Diagnostic` dicts (`sqlty._lint.Diagnostic`, a `TypedDict`) with `rule`, `message`, `severity`, `line`, `start`, `end`, `fix` |
 | `query_at(source, offset, *, import_style=None, helpers=None, module=None)` | The `QueryAt` (`text`, `offset`, `route`, `span`, `source_offset(n)`) at byte `offset`, or `None` outside a checked query |
+| `complete_source(source, line, column, *, dialect="postgres", schema_sql=None, import_style=None, helpers=None, module=None, limit=200)` | `Completions(start, end, incomplete, items)` of `Completion(label, kind, detail, sql_type, nullable)` at the cursor, or `None` outside a checked query |

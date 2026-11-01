@@ -120,8 +120,11 @@ pub fn complete(
     let folded = schema.fold_typed(typed);
     let mut candidates = match context {
         Context::Relation(qualifier) => {
-            let mut found: Vec<Candidate> = schema
-                .relations_with_prefix(typed, qualifier.as_deref(), limit + 1)
+            let relations = match &qualifier {
+                Some(qualifier) => schema.relations_with_prefix(typed, Some(qualifier), limit + 1),
+                None => schema.visible_relations_with_prefix(typed, limit + 1),
+            };
+            let mut found: Vec<Candidate> = relations
                 .into_iter()
                 .map(|relation| Candidate {
                     label: spelled(relation.name.name, dialect),
@@ -171,9 +174,14 @@ pub fn complete(
                 .collect()
         }
     };
-    candidates.sort_by(|a, b| {
-        (a.label.to_lowercase(), &a.detail).cmp(&(b.label.to_lowercase(), &b.detail))
-    });
+    // The schema's own relations before PostgreSQL's system catalogs.
+    let builtin = |c: &Candidate| {
+        matches!(
+            c.detail.as_deref(),
+            Some("pg_catalog" | "information_schema")
+        ) && c.kind != CandidateKind::Column
+    };
+    candidates.sort_by_cached_key(|c| (builtin(c), c.label.to_lowercase(), c.detail.clone()));
     let incomplete = candidates.len() > limit;
     candidates.truncate(limit);
     Completions {
@@ -537,6 +545,23 @@ mod tests {
             pg("WITH recent AS (SELECT 1) SELECT * FROM re|"),
             ["recent:"]
         );
+    }
+
+    #[test]
+    fn schema_relations_come_before_system_catalogs() {
+        let found = pg("SELECT * FROM |");
+        assert_eq!(
+            found[..4],
+            [
+                "legacy:public",
+                "orders:public",
+                "user_names:public",
+                "users:public"
+            ]
+        );
+        assert!(found[4..]
+            .iter()
+            .all(|label| label.ends_with(":pg_catalog")));
     }
 
     #[test]
