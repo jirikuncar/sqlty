@@ -24,6 +24,7 @@ mod server;
 
 use sqlty_python::checker;
 use sqlty_python::fixer;
+use sqlty_python::locate;
 use sqlty_python::rewriter;
 use sqlty_sql::analyzer;
 
@@ -839,8 +840,83 @@ fn query_sites(
     })
 }
 
-/// No pyclasses, and the only global state is the schema cache behind a `Mutex`, so the
-/// module runs without the GIL on free-threaded builds.
+/// The query under a cursor, found by `query_at`.
+#[pyclass(frozen, name = "QueryAt", module = "sqlty._core")]
+struct QueryAtHandle(locate::QueryAt);
+
+#[pymethods]
+impl QueryAtHandle {
+    /// The query as the analyzer reads it: the string's value, escapes decoded, from the
+    /// `--sql` marker on (the whole value for a helper's query).
+    #[getter]
+    fn text(&self) -> &str {
+        &self.0.text
+    }
+
+    /// The cursor's byte offset in `text`.
+    #[getter]
+    fn offset(&self) -> usize {
+        self.0.offset
+    }
+
+    /// How `check` recognised the query: `marker`, `wrapper` or `helper`.
+    #[getter]
+    fn route(&self) -> &'static str {
+        self.0.route.name()
+    }
+
+    /// Byte offsets of the query's string literals in the source, prefixes and quotes included.
+    #[getter]
+    fn span(&self) -> (usize, usize) {
+        (self.0.span.start, self.0.span.end)
+    }
+
+    /// Where byte `offset` of `text` is written in the source: an offset in an escape
+    /// sequence maps to its start. `None` past the end of `text`, or in the marker.
+    fn source_offset(&self, offset: usize) -> Option<usize> {
+        self.0.source_offset(offset)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "QueryAt(text={:?}, offset={}, route={:?})",
+            self.0.text,
+            self.0.offset,
+            self.0.route.name()
+        )
+    }
+}
+
+/// The query `check` reads at byte `offset` of Python source, or None outside one.
+///
+/// `helper_starts` are the byte offsets of the string literals helper calls pass as
+/// their query (`find_helper_calls`); the marker and `SQL[T](...)` routes are found here.
+///
+/// Raises:
+///     ValueError: unsupported import_style
+#[pyfunction]
+#[pyo3(signature = (source, offset, *, import_style = None, helper_starts = vec![]))]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "PyO3 extracts a Vec, not a slice"
+)]
+fn query_at(
+    py: Python<'_>,
+    source: &str,
+    offset: usize,
+    import_style: Option<&str>,
+    helper_starts: Vec<usize>,
+) -> Result<Option<QueryAtHandle>, Error> {
+    detach(py, || {
+        let style = ImportStyle::parse(import_style)?;
+        Ok(locate::Queries::new(source, &style, &helper_starts)
+            .at(offset)
+            .map(QueryAtHandle))
+    })
+}
+
+/// The pyclasses are frozen, and the only global state is the schema cache behind a
+/// `Mutex`, so the module runs without the GIL on free-threaded builds.
 #[pymodule(gil_used = false)]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     recursive::set_minimum_stack_size(STACK_RED_ZONE);
@@ -869,6 +945,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(check_source, m)?)?;
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;
+    m.add_function(wrap_pyfunction!(query_at, m)?)?;
+    m.add_class::<QueryAtHandle>()?;
     m.add_function(wrap_pyfunction!(skills, m)?)?;
     m.add_function(wrap_pyfunction!(server::serve, m)?)?;
     Ok(())

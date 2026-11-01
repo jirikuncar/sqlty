@@ -8,7 +8,7 @@ use std::borrow::Cow;
 use std::cell::OnceCell;
 use std::ops::Range;
 
-use crate::rewriter::{after_marker, LineIndex};
+use crate::rewriter::{after_marker, decode_escapes, LineIndex};
 use crate::rules::Rule;
 use crate::template::template_content;
 use crate::tokens::{content, string_groups, tokenize, wrapper_calls, Call, Calls, Kind, Token};
@@ -126,6 +126,31 @@ impl<'s> Scan<'s> {
                 .flatten()
                 .filter(|field| !field.is_empty())
         })
+    }
+
+    /// The strings `check` reads as a query by their marker, as `(line, literal spans,
+    /// wrapper)`: a marked group outside any wrapper call, or the marked plain argument of a
+    /// `{wrapper}[T](...)` call. In source order of groups, then of calls.
+    pub(crate) fn marked_strings(&self) -> Vec<(usize, Vec<Range<usize>>, bool)> {
+        let marked = |content: &str| after_marker(&decode_escapes(content)).is_some();
+        let groups = self
+            .groups()
+            .iter()
+            .filter(|group| group.skipped.is_none() && self.enclosing_call(group).is_none())
+            .filter(|group| marked(&self.content(group)))
+            .map(|group| (group.line, self.spans(group), false));
+        let calls = self
+            .calls
+            .iter()
+            .filter(|call| call.content(&self.text).is_some_and(|text| marked(&text)))
+            .map(|call| {
+                (
+                    self.lines.line_at(call.span.start),
+                    call.strings.clone(),
+                    true,
+                )
+            });
+        groups.chain(calls).collect()
     }
 
     /// Spans of plain string literals (no prefix but `u`), outside comments.

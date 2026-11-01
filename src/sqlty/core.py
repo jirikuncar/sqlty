@@ -10,6 +10,7 @@ needs the Python runtime; those passes live in ``sqlty._check``.
 
 from __future__ import annotations
 
+import ast
 from collections import Counter
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, NamedTuple
@@ -17,6 +18,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from sqlty._check import RowUsage, apply_suppressions, is_any_row
 from sqlty._check import diagnostics as check_diagnostics
 from sqlty._core import (
+    QueryAt,
     Schema,
     expand_star,
     infer_type,
@@ -29,6 +31,7 @@ from sqlty._core import explain_select as _explain_select
 from sqlty._core import fix_source as _fix_source
 from sqlty._core import load_schema as _load_schema
 from sqlty._core import parse_error as _parse_error
+from sqlty._core import query_at as _query_at
 from sqlty._core import query_diagnostics as _query_diagnostics
 from sqlty._core import query_sites as _query_sites
 from sqlty._core import rewrite_source as _rewrite_source
@@ -569,6 +572,45 @@ def query_statistics(
     return counts
 
 
+def query_at(
+    source: str | ParsedSource,
+    offset: int,
+    *,
+    import_style: str | None = None,
+    helpers: HelperIndex | None = None,
+    module: str | None = None,
+) -> QueryAt | None:
+    r"""The query ``sqlty check`` reads at byte ``offset`` of ``source``, or ``None`` outside one.
+
+    A string is a query exactly when ``check_source`` checks it: a ``--sql`` marked string,
+    the argument of ``SQL[T](...)``, or a string literal passed to a helper's query
+    parameter (``helpers`` and ``module`` as for ``check_source``). An f-string, a variable
+    or a call to anything else is not. The cursor counts as in the query anywhere between
+    the quotes, both ends included, after the marker.
+
+    ``offset`` counts UTF-8 bytes. The result's ``text`` is the query as the analyzer reads
+    it (escapes decoded, the marker spelled ``--sql``), ``offset`` the cursor in it, and
+    ``source_offset(n)`` maps a byte of ``text`` back to the source.
+
+    Example:
+        >>> source = 'q = "--sql\\nSELECT id FROM users"'
+        >>> at = query_at(source, source.index("id"))
+        >>> at.text, at.offset, at.route
+        ('--sql\nSELECT id FROM users', 13, 'marker')
+        >>> at.source_offset(at.offset) == source.index("id")
+        True
+        >>> query_at(source, 0) is None
+        True
+    """
+    parsed = ParsedSource.of(source, module)
+    starts = [
+        parsed.span(call.query_node)[0]
+        for call in find_helper_calls(parsed, helpers, module)
+        if isinstance(call.query_node, ast.Constant) and isinstance(call.query_node.value, str)
+    ]
+    return _query_at(parsed.text, offset, import_style=import_style, helper_starts=starts)
+
+
 def _outcome(query: str, dialect: str, schema_sql: str | Schema | None) -> str | None:
     """``typed``, ``partially typed`` or ``unparsed``; ``None`` when ``query`` returns no rows."""
     if _parse_error(query, dialect=dialect) is not None:
@@ -587,6 +629,7 @@ def _outcome(query: str, dialect: str, schema_sql: str | Schema | None) -> str |
 __all__ = [
     "ColumnInfo",
     "HelperIndex",
+    "QueryAt",
     "Schema",
     "RowUsage",
     "analyze_select",
@@ -596,6 +639,7 @@ __all__ = [
     "infer_type",
     "json_shapes",
     "load_schema",
+    "query_at",
     "query_diagnostics",
     "returns_rows",
     "rewrite_source",
