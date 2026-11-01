@@ -20,3 +20,14 @@ vim.lsp.config("sqlty", {
   root_markers = { "pyproject.toml" },
 })
 vim.lsp.enable("sqlty")
+
+-- VS Code tells the server when a migration changes on disk (a merge, a branch switch); Neovim needs telling.
+vim.api.nvim_create_autocmd({ "BufEnter", "FocusGained" }, {
+  callback = function()
+    for _, client in ipairs(vim.lsp.get_clients({ name = "sqlty" })) do
+      client:notify("workspace/didChangeWatchedFiles", {
+        changes = { { uri = vim.uri_from_fname(client.root_dir .. "/pyproject.toml"), type = 2 } },
+      })
+    end
+  end,
+})
