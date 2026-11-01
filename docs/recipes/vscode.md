@@ -82,6 +82,81 @@ an inline `--sql` comment is split onto its own line, and so on. Run it on every
 }
 ```
 
+## Completion
+
+Inside a query string, the editor completes table names after `FROM` and `JOIN`, and the
+columns of the tables in scope after `alias.` and in `SELECT`, `WHERE`, `ON`,
+`GROUP BY` and `ORDER BY`. Each column shows its type and nullability. Typing `.` opens
+the list.
+
+A string completes exactly when `sqlty check` checks it, by the same rules:
+
+```python
+from sqlty import SQL
+
+q = SQL[tuple[int, str]]("--sql\nSELECT id, <CURSOR> FROM users")
+# completions: id column users
+# completions: name column users
+```
+
+A string passed to a [query helper](../guide/helpers.md), with no marker:
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def fetch_all[T](query: Annotated[LiteralString, SQL], form: type[T]) -> list[T]: ...
+
+fetch_all("SELECT u.<CURSOR> FROM users u", tuple[int, str])
+# completions: id column u
+# completions: name column u
+```
+
+A method whose receiver has an evident class, as in `check`:
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+class Db:
+    def fetch_one[T](self, query: Annotated[LiteralString, SQL], form: type[T]) -> T: ...
+
+db = Db()
+db.fetch_one("SELECT name FROM users WHERE <CURSOR> = 1", str)
+# completions: id column users
+# completions: name column users
+```
+
+Adjacent literals are one query, so a table name completes in the last of them:
+
+```python
+q = (
+    "--sql\n"
+    "SELECT count(*) "
+    "FROM us<CURSOR>"
+)
+# completions: users table public
+```
+
+A function registered in [`[[tool.sqlty.functions]]`](../guide/helpers.md#helpers-you-cannot-annotate)
+completes too. What `check` does not check does not complete: a call to anything else,
+an f-string, a variable.
+
+```python
+def run(query: str) -> None: ...
+
+run("SELECT <CURSOR> FROM users")
+# completions: None
+```
+
+!!! note "Other suggestions stay in the list"
+    VS Code merges the suggestions of every extension. Inside a query string, sqlty's
+    come first, ranked by `sortText`, and the Python extension's word suggestions
+    follow: a language server cannot remove the suggestions of another.
+
+Turn it off with `"sqlty.completion.enable": false`; the server then does no completion
+work. It needs sqlty 0.4.0 or newer, and with an older one the output channel says so.
+
 ## Breaking changes
 
 Set `sqlty.breaking.against` to a baseline, and the editor also shows what
@@ -114,6 +189,7 @@ fix belongs to the migration or the code, depending on which ships first.
 | `sqlty.interpreter` | `[]` | The interpreter whose `sqlty` runs; empty is the one selected in the Python extension |
 | `sqlty.breaking.against` | empty | A baseline for `sqlty breaking`: a git revision, a `--save` snapshot or schema files |
 | `sqlty.breaking.direction` | `both` | `both`, `forward` or `backward` |
+| `sqlty.completion.enable` | `true` | Complete table and column names in query strings |
 | `sqlty.trace.server` | `off` | Log the protocol messages in the **sqlty** output channel |
 
 ## Restricted Mode
@@ -137,7 +213,8 @@ vim.lsp.config("sqlty", {
 vim.lsp.enable("sqlty")
 ```
 
-`init_options` is optional: without it, no baseline is checked.
+`init_options` is optional: without it, no baseline is checked, and completion is on.
+`completion = { enable = false }` turns completion off.
 
 The server also answers `textDocument/completion` in the strings `sqlty check` checks:
 the table names after `FROM` or `JOIN`, and the columns of the tables in scope after

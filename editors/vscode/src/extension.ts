@@ -6,7 +6,7 @@ import {
   type ServerOptions,
 } from "vscode-languageclient/node";
 
-import { findServer, type Settings } from "./server";
+import { completionNotice, findServer, type Settings } from "./server";
 
 let client: LanguageClient | undefined;
 let output: vscode.LogOutputChannel | undefined;
@@ -56,7 +56,7 @@ async function start(): Promise<void> {
   const serverOptions: ServerOptions = { command: server.command, args: server.args };
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: "file", language: "python" }],
-    initializationOptions: { breaking: settings.breaking },
+    initializationOptions: { breaking: settings.breaking, completion: settings.completion },
     outputChannel: output,
     synchronize: {
       fileEvents: vscode.workspace.createFileSystemWatcher("**/{pyproject.toml,*.sql}"),
@@ -64,6 +64,11 @@ async function start(): Promise<void> {
   };
   client = new LanguageClient("sqlty", "sqlty", serverOptions, clientOptions);
   await client.start();
+  const advertised = client.initializeResult?.capabilities.completionProvider !== undefined;
+  const notice = completionNotice(settings, advertised, server.version);
+  if (notice !== undefined) {
+    output?.warn(notice);
+  }
 }
 
 async function stop(): Promise<void> {
@@ -81,6 +86,7 @@ function readSettings(): Settings {
       against: config.get<string>("breaking.against", ""),
       direction: config.get<Settings["breaking"]["direction"]>("breaking.direction", "both"),
     },
+    completion: { enable: config.get<boolean>("completion.enable", true) },
   };
 }
 
