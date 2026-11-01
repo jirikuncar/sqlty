@@ -177,6 +177,7 @@ User-visible behavior belongs in `docs/guide/` too; edge cases only in
 | Stripping | `tests/mdtest/strip/` | `basic_strip.md` |
 | Lint rules | `tests/mdtest/check/` | `type_annotation.md` |
 | Magic codec | `tests/mdtest/codec/` | `basic_codec.md` |
+| Completion | `tests/mdtest/completion/` | `completion.md` |
 
 ### Structure
 
@@ -237,6 +238,7 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 | `# stripped:` | `python`, whole code | `core.strip_source()` |
 | `# fixed:` | `python`, whole code | `core.fix_source()` (`sqlty check --fix`) |
 | `# decoded:` | `python`, whole code | magic codec `decode()` without imports or the `# coding:` line |
+| `# completions:` | `python`, at its `<CURSOR>` | `core.complete_source()`: `label kind detail` per item, the first ten then `...`; `None` for none |
 | `# error: [rule] "message"` | end of its line, or on the line above | `core.check_source()` |
 
 - Consecutive comments of one kind form a multi-line value.

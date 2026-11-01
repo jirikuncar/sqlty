@@ -16,6 +16,8 @@ from .parser import Assertion, Kind, Section, Unit
 from .updater import Updater
 
 _CODING = re.compile(r"\A#.*coding[:=].*\n?")
+# `# completions:` lists the first ones, then `...`: the system catalogs make lists long.
+_COMPLETIONS_SHOWN = 10
 _ERROR_VALUE = re.compile(r'^(?:\[(?P<rule>[\w-]+)\])?\s*(?:"(?P<message>.*)")?$')
 
 
@@ -128,6 +130,22 @@ class Run:
 
                 decoded = _without_imports(decode(text.encode())[0], self._imports).strip()
                 return _CODING.sub("", decoded, count=1).strip()
+            case "completions":
+                if unit.cursor is None:
+                    raise AssertionError("`# completions:` needs a <CURSOR> in the code")
+                found = core.complete_source(
+                    text,
+                    *unit.cursor,
+                    dialect=self.dialect,
+                    schema_sql=self.schema_sql,
+                    import_style=self.import_style,
+                    helpers=self._helpers,
+                )
+                if found is None or not found.items:
+                    return "None"
+                lines = [f"{c.label} {c.kind} {c.detail or '-'}" for c in found.items]
+                more = found.incomplete or len(lines) > _COMPLETIONS_SHOWN
+                return "\n".join([*lines[:_COMPLETIONS_SHOWN], "..."] if more else lines)
             case "error":
                 raise AssertionError("errors are matched per line")
 

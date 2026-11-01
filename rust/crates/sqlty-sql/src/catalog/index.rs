@@ -88,15 +88,62 @@ impl Catalog {
         limit: usize,
     ) -> Vec<RelationRef<'_>> {
         self.with_prefix(&self.index.relations, prefix, schema, limit)
-            .map(|name| RelationRef {
-                kind: match self.relations[name.key] {
-                    Relation::Table(_) => RelationKind::Table,
-                    Relation::View(_) => RelationKind::View,
-                    Relation::Unknown => RelationKind::Unknown,
-                },
-                name,
-            })
+            .map(|name| self.relation_ref(name.key))
             .collect()
+    }
+
+    fn relation_ref<'a>(&'a self, key: &'a str) -> RelationRef<'a> {
+        RelationRef {
+            kind: match self.relations[key] {
+                Relation::Table(_) => RelationKind::Table,
+                Relation::View(_) => RelationKind::View,
+                Relation::Unknown => RelationKind::Unknown,
+            },
+            name: self.name_ref(key),
+        }
+    }
+
+    fn name_ref<'a>(&self, key: &'a str) -> NameRef<'a> {
+        let (schema, name) = split(key);
+        NameRef {
+            key,
+            schema: self.postgres.then_some(schema),
+            name,
+        }
+    }
+
+    /// The relations a bare name starting with `prefix` finds, those of the `search_path`
+    /// schemas first, in path order, then `pg_catalog`'s: what completion offers, the
+    /// schema's own tables before the system catalogs. At most `limit`. O(p × (log N + k))
+    /// for p schemas on the path.
+    pub fn visible_relations_with_prefix(
+        &self,
+        prefix: &str,
+        limit: usize,
+    ) -> Vec<RelationRef<'_>> {
+        let prefix = self.fold_typed(prefix);
+        let sorted = &self.index.relations;
+        let mut schemas: Vec<&str> = self.search_path.iter().map(String::as_str).collect();
+        schemas.retain(|schema| *schema != "pg_catalog");
+        schemas.push("pg_catalog");
+        let mut keys = Vec::new();
+        for (i, schema) in schemas.iter().enumerate() {
+            if schemas[..i].contains(schema) || keys.len() == limit {
+                continue;
+            }
+            // shortcut: a name hidden by a schema before it still counts toward the walk's
+            // limit, so a heavily shadowed schema may return fewer than it could.
+            keys.extend(
+                sorted
+                    .matching(&prefix, Some(schema), &self.search_path, limit - keys.len())
+                    .into_iter()
+                    .filter(|key| {
+                        let (schema, name) = split(key);
+                        sorted.visible(schema, name, &self.search_path)
+                    }),
+            );
+        }
+        keys.into_iter().map(|key| self.relation_ref(key)).collect()
     }
 
     /// Functions whose name starts with `prefix`, those of unknown shape included; see
@@ -147,14 +194,7 @@ impl Catalog {
         sorted
             .matching(&prefix, schema.as_deref(), &self.search_path, limit)
             .into_iter()
-            .map(move |key| {
-                let (schema, name) = split(key);
-                NameRef {
-                    key,
-                    schema: self.postgres.then_some(schema),
-                    name,
-                }
-            })
+            .map(|key| self.name_ref(key))
     }
 
     /// Typed text as the catalog keys it: PostgreSQL keeps the case of a quoted name and
@@ -320,6 +360,31 @@ mod tests {
     }
 
     #[test]
+    fn visible_relations_list_the_path_first() {
+        let c = pg("CREATE SCHEMA app; SET search_path TO app, public;
+            CREATE TABLE users (id int); CREATE TABLE public.users (id text);
+            CREATE TABLE public.pg_users (id int); CREATE TABLE public.user_roles (id int);
+            CREATE TABLE public.pg_class (id int); CREATE TABLE other.user_secrets (id int);");
+        let found = c.visible_relations_with_prefix("", 4);
+        assert_eq!(
+            names(&found)[..3],
+            [
+                "app.users:Table",
+                "public.pg_users:Table",
+                "public.user_roles:Table"
+            ]
+        );
+        assert_eq!(names(&found)[3], "pg_catalog.pg_attrdef:Table");
+        let found = c.visible_relations_with_prefix("pg_cla", 10);
+        assert_eq!(names(&found), ["pg_catalog.pg_class:Table"]);
+        let found = c.visible_relations_with_prefix("USER", 10);
+        assert_eq!(
+            names(&found),
+            ["app.users:Table", "public.user_roles:Table"]
+        );
+    }
+
+    #[test]
     fn schema_narrows_to_one_schema() {
         let c = pg(
             "CREATE TABLE users (id int); CREATE TABLE other.users (id int);
@@ -428,7 +493,9 @@ mod tests {
                     assert_eq!(c.relations_with_prefix("t1", Some("other"), 5).len(), 5);
                 });
                 let none = visited(|| assert!(c.relations_with_prefix("zz", None, 10).is_empty()));
-                (user, capped, qualified, none)
+                let path_first =
+                    visited(|| assert_eq!(c.visible_relations_with_prefix("t1", 5).len(), 5));
+                (user, capped, qualified, none, path_first)
             })
             .collect();
         assert_eq!(counts[0], counts[1]);

@@ -451,6 +451,33 @@ def test_configured_function_modules_are_never_imported(tmp_path, monkeypatch, c
     assert "pkg.h" not in sys.modules
 
 
+def test_complete_lists_the_names_at_a_cursor(tmp_path, monkeypatch, capsys) -> None:
+    """``sqlty complete`` reads the file's settings and helpers, as ``check`` does."""
+    _helper_project(tmp_path)
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "h.py").write_text("def fetch_all(query, form): ...\n")
+    (tmp_path / "use.py").write_text(
+        'from pkg.h import fetch_all\n\nfetch_all("SELECT t. FROM t", int)\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert _run(["complete", "use.py:3:21"], capsys) == (0, "id\tcolumn\tt\tINT\n", "")
+    code, out, _ = _run(["complete", "use.py:3:21", "--json"], capsys)
+    assert json.loads(out) == {
+        "start": {"line": 3, "column": 21},
+        "end": {"line": 3, "column": 21},
+        "incomplete": False,
+        "items": [
+            {"label": "id", "kind": "column", "detail": "t", "sql_type": "INT", "nullable": True}
+        ],
+    }
+    assert _run(["complete", "use.py:1:1", "--json"], capsys) == (0, "null\n", "")
+    code, _, err = _run(["complete", "missing.py:1:1"], capsys)
+    assert (code, err) == (2, "sqlty: error: missing.py: no such file\n")
+    code, _, err = _run(["complete", "use.py:3"], capsys)
+    assert code == 2 and "expected FILE:LINE:COL" in err
+
+
 def _run(argv: list[str], capsys) -> tuple[int, str, str]:
     """Run ``main`` and return (exit code, stdout, stderr)."""
     code = 0

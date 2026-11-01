@@ -915,6 +915,79 @@ fn query_at(
     })
 }
 
+/// A completion: `(label, kind, detail, sql_type, nullable)`.
+type CandidateOut = (
+    String,
+    &'static str,
+    Option<String>,
+    Option<String>,
+    Option<bool>,
+);
+/// Completions: `(start, end, incomplete, candidates)`.
+type CompletionsOut = (usize, usize, bool, Vec<CandidateOut>);
+
+/// What completes at byte `offset` of Python source: `(start, end, incomplete, candidates)`,
+/// or None outside a query `check` reads.
+///
+/// `start` and `end` are the byte offsets of the source a candidate replaces, the word
+/// before the cursor. Each candidate is `(label, kind, detail, sql_type, nullable)`:
+/// `kind` is `table`, `view`, `cte` or `column`, `detail` the schema of a relation or the
+/// alias of a column. At most `limit`; `incomplete` when there were more.
+/// `helper_starts` is as for `query_at`.
+///
+/// Raises:
+///     ValueError: unsupported import_style
+#[pyfunction]
+#[pyo3(signature = (source, offset, *, dialect = DialectArg::POSTGRES, schema_sql = None, import_style = None, helper_starts = vec![], limit = 200))]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the keyword-only Python signature is the API"
+)]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "PyO3 extracts a Vec, not a slice"
+)]
+fn complete_source(
+    py: Python<'_>,
+    source: &str,
+    offset: usize,
+    dialect: DialectArg,
+    schema_sql: Option<SchemaArg>,
+    import_style: Option<&str>,
+    helper_starts: Vec<usize>,
+    limit: usize,
+) -> Result<Option<CompletionsOut>, Error> {
+    let dialect = dialect.0;
+    detach(py, || {
+        let style = ImportStyle::parse(import_style)?;
+        let Some(at) = locate::Queries::new(source, &style, &helper_starts).at(offset) else {
+            return Ok(None);
+        };
+        let schema = schema(schema_sql, dialect);
+        let found = analyzer::complete(&at.text, at.offset, dialect, schema.as_deref(), limit);
+        let start = at.source_offset(found.replace.start).unwrap_or(offset);
+        let candidates = found
+            .candidates
+            .into_iter()
+            .map(|c| {
+                let kind = match c.kind {
+                    analyzer::CandidateKind::Table => "table",
+                    analyzer::CandidateKind::View => "view",
+                    analyzer::CandidateKind::Cte => "cte",
+                    analyzer::CandidateKind::Column => "column",
+                };
+                (c.label, kind, c.detail, c.sql_type, c.nullable)
+            })
+            .collect();
+        Ok(Some((
+            start.min(offset),
+            offset,
+            found.incomplete,
+            candidates,
+        )))
+    })
+}
+
 /// The pyclasses are frozen, and the only global state is the schema cache behind a
 /// `Mutex`, so the module runs without the GIL on free-threaded builds.
 #[pymodule(gil_used = false)]
@@ -946,6 +1019,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;
     m.add_function(wrap_pyfunction!(query_at, m)?)?;
+    m.add_function(wrap_pyfunction!(complete_source, m)?)?;
     m.add_class::<QueryAtHandle>()?;
     m.add_function(wrap_pyfunction!(skills, m)?)?;
     m.add_function(wrap_pyfunction!(server::serve, m)?)?;

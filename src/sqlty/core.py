@@ -27,6 +27,7 @@ from sqlty._core import (
 from sqlty._core import analyze_columns as _analyze_columns
 from sqlty._core import analyze_params as _analyze_params
 from sqlty._core import analyze_select as _analyze_select
+from sqlty._core import complete_source as _complete_source
 from sqlty._core import explain_select as _explain_select
 from sqlty._core import fix_source as _fix_source
 from sqlty._core import load_schema as _load_schema
@@ -603,12 +604,89 @@ def query_at(
         True
     """
     parsed = ParsedSource.of(source, module)
-    starts = [
+    starts = _helper_starts(parsed, helpers, module)
+    return _query_at(parsed.text, offset, import_style=import_style, helper_starts=starts)
+
+
+class Completion(NamedTuple):
+    """A name that can be typed at the cursor.
+
+    ``kind`` is ``table``, ``view``, ``cte`` or ``column``; ``detail`` the schema of a
+    relation or the alias (or table) of a column.
+    """
+
+    label: str
+    kind: str
+    detail: str | None
+    sql_type: str | None
+    nullable: bool | None
+
+
+class Completions(NamedTuple):
+    """What completes at a cursor: ``items`` replace the bytes ``start`` to ``end`` of the source."""
+
+    start: int
+    end: int
+    incomplete: bool
+    items: list[Completion]
+
+
+def complete_source(
+    source: str | ParsedSource,
+    line: int,
+    column: int,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
+    import_style: str | None = None,
+    helpers: HelperIndex | None = None,
+    module: str | None = None,
+    limit: int = 200,
+) -> Completions | None:
+    r"""The table and column names that complete at 1-based ``line`` and ``column`` of ``source``.
+
+    ``column`` counts characters, as ``sqlty check --output-format json`` does. The cursor
+    must be in a query ``check`` reads (see ``query_at``); elsewhere the result is ``None``.
+    In a query, ``items`` lists the relations (after ``FROM``, ``JOIN``, ``UPDATE``,
+    ``INTO``) or the columns of the relations in scope (after ``alias.`` and in
+    ``SELECT``, ``WHERE``, ``ON``, ...) whose name starts with the word before the cursor,
+    at most ``limit``, with ``incomplete`` set when there were more. ``start`` and ``end``
+    are the byte offsets of that word, which a completion replaces.
+
+    Example:
+        >>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT)"
+        >>> source = 'q = "--sql\\nSELECT u. FROM users u"'
+        >>> found = complete_source(source, 1, source.index("u.") + 3, schema_sql=schema)
+        >>> [(c.label, c.kind, c.sql_type, c.nullable) for c in found.items]
+        [('id', 'column', 'INT', False), ('name', 'column', 'TEXT', True)]
+        >>> complete_source(source, 1, 1, schema_sql=schema) is None
+        True
+    """
+    parsed = ParsedSource.of(source, module)
+    found = _complete_source(
+        parsed.text,
+        parsed.offset(line, column),
+        dialect=dialect,
+        schema_sql=schema_sql,
+        import_style=import_style,
+        helper_starts=_helper_starts(parsed, helpers, module),
+        limit=limit,
+    )
+    if found is None:
+        return None
+    start, end, incomplete, items = found
+    return Completions(start, end, incomplete, [Completion(*item) for item in items])
+
+
+def _helper_starts(
+    parsed: ParsedSource, helpers: HelperIndex | None, module: str | None
+) -> list[int]:
+    """The byte offsets of the string literals helper calls pass as their query."""
+    return [
         parsed.span(call.query_node)[0]
         for call in find_helper_calls(parsed, helpers, module)
         if isinstance(call.query_node, ast.Constant) and isinstance(call.query_node.value, str)
     ]
-    return _query_at(parsed.text, offset, import_style=import_style, helper_starts=starts)
 
 
 def _outcome(query: str, dialect: str, schema_sql: str | Schema | None) -> str | None:
@@ -632,8 +710,11 @@ __all__ = [
     "QueryAt",
     "Schema",
     "RowUsage",
+    "Completion",
+    "Completions",
     "analyze_select",
     "check_source",
+    "complete_source",
     "expand_star",
     "fix_source",
     "infer_type",

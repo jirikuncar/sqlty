@@ -68,6 +68,8 @@ def main(argv: list[str] | None = None) -> None:
                 _cmd_strip(args)
             case "check":
                 _cmd_check(args)
+            case "complete":
+                _cmd_complete(args)
             case "breaking":
                 from sqlty._breaking import main as breaking
 
@@ -198,6 +200,28 @@ def build_parser() -> argparse.ArgumentParser:
         "(an array of objects with file, line, rule, severity, message, the start and end of what "
         "it underlines, and the fix edits) or github (GitHub "
         "Actions annotations). Summaries, --statistics and --explain are text only",
+    )
+
+    # --- complete ---
+    complete_parser = subparsers.add_parser(
+        "complete",
+        help="List the table and column names that complete at FILE:LINE:COL in a query string "
+        "(sqlty complete app.py:12:30), for scripts and agents",
+    )
+    complete_parser.add_argument(
+        "location",
+        type=_location,
+        metavar="FILE:LINE:COL",
+        help="The cursor: a Python file, a 1-based line and a 1-based column in characters",
+    )
+    _add_common_args(complete_parser)
+    complete_parser.set_defaults(paths=None)
+    complete_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print a JSON object with the start and end the completion replaces, whether the "
+        "list is incomplete, and the items with their label, kind, detail, SQL type and "
+        "nullability, instead of one item per line",
     )
 
     # --- breaking ---
@@ -400,6 +424,17 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help="Files to work on at once; 1 works on one at a time. Output is the same in any "
         "case (default: the number of processors)",
     )
+
+
+def _location(value: str) -> tuple[Path, int, int]:
+    """``FILE:LINE:COL`` of ``sqlty complete``."""
+    import argparse
+
+    path, _, rest = value.rpartition(":")
+    path, _, line = path.rpartition(":")
+    if not (path and line.isdigit() and rest.isdigit()):
+        raise argparse.ArgumentTypeError(f"expected FILE:LINE:COL, got {value!r}")
+    return Path(path), int(line), int(rest)
 
 
 def _jobs(value: str) -> int:
@@ -700,6 +735,56 @@ def github_annotation(path: Path, diag: Diagnostic) -> str:
     if "line" in diag:
         where += f",line={diag['line']}"
     return f"::{level} {where},title={escape('sqlty ' + diag['rule'], property=True)}::{escape(diag['message'])}"
+
+
+def _cmd_complete(args: argparse.Namespace) -> None:
+    """Complete command: the names that can be typed at a cursor in a query string.
+
+    The file is read with the settings ``check`` gives it, and the helpers of ``paths``
+    (default: its directory) are indexed, so a configured or imported helper's query
+    completes too.
+    """
+    from sqlty._config import ConfigError
+    from sqlty.core import complete_source
+
+    path, line, column = args.location
+    if not path.is_file():
+        raise ConfigError(f"{path}: no such file")
+    args.paths = [path, *(args.paths or [path.parent])]
+    project = Project(args)
+    path = next((file for file in project.files if file.resolve() == path.resolve()), path)
+    if path not in project.sources:
+        raise ConfigError(f"{path}: not a Python file sqlty reads")
+    settings, parsed = project.settings[path], project.sources[path]
+    found = complete_source(
+        parsed,
+        line,
+        column,
+        dialect=settings.dialect,
+        schema_sql=settings.schema,
+        import_style=settings.import_style,
+        helpers=project.helpers[path],
+    )
+    if args.json:
+
+        def at(offset: int) -> dict[str, int]:
+            line, column = parsed.position(offset)
+            return {"line": line, "column": column}
+
+        result = (
+            None
+            if found is None
+            else {
+                "start": at(found.start),
+                "end": at(found.end),
+                "incomplete": found.incomplete,
+                "items": [item._asdict() for item in found.items],
+            }
+        )
+        print(json.dumps(result, indent=2))
+    elif found is not None:
+        for item in found.items:
+            print("\t".join([item.label, item.kind, item.detail or "", item.sql_type or ""]))
 
 
 def _cmd_skill(name: str, install: Path | None, list_skills: bool) -> None:

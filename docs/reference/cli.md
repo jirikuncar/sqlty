@@ -3,7 +3,7 @@
 <!-- generated:cli-usage -->
 ```text
 sqlty [-h] [--version]
-      {rewrite,strip,check,breaking,rule,skill,server,version} ...
+      {rewrite,strip,check,complete,breaking,rule,skill,server,version} ...
 ```
 <!-- /generated:cli-usage -->
 
@@ -235,6 +235,44 @@ Exit code: 1 if any diagnostic has severity `error`; warnings alone exit 0.
 As in ty, `--exit-zero` always exits 0, `--error-on-warning` also exits 1 on
 a `warn` diagnostic, and `--exit-zero-on-warning` keeps the default; combining
 `--error-on-warning` with either of the others is an error (exit 2).
+
+## `sqlty complete`
+
+List the table and column names that can be typed at a cursor in a query
+string: one per line, as `label`, `kind`, `detail` and `sql_type` separated by
+tabs. The cursor is `FILE:LINE:COL`, a 1-based line and a 1-based column in
+characters:
+
+```text
+$ sqlty complete app.py:12:30
+id	column	u	INT
+name	column	u	TEXT
+```
+
+A string completes exactly when `sqlty check` checks it, with the file's own
+settings. The helpers of the paths after the cursor (default: the file's
+directory) are read, so a configured or imported helper's query completes too.
+Outside a checked query nothing is printed, and `--json` prints `null`.
+
+<!-- generated:cli-usage-complete -->
+```text
+sqlty complete [-h] [--dialect DIALECT] [--schema SCHEMA]
+               [--config-file PATH | --isolated] [-c KEY=VALUE]
+               [--error RULE] [--warn RULE] [--ignore RULE]
+               [--exclude GLOB] [--extend-exclude GLOB]
+               [--force-exclude]
+               [--respect-gitignore | --no-respect-gitignore] [-v] [-q]
+               [-j N] [--json]
+               FILE:LINE:COL [paths ...]
+```
+<!-- /generated:cli-usage-complete -->
+
+<!-- generated:cli-options-complete -->
+| Option | Description |
+|--------|-------------|
+| `FILE:LINE:COL` | The cursor: a Python file, a 1-based line and a 1-based column in characters |
+| `--json` | Print a JSON object with the start and end the completion replaces, whether the list is incomplete, and the items with their label, kind, detail, SQL type and nullability, instead of one item per line |
+<!-- /generated:cli-options-complete -->
 
 ## `sqlty breaking`
 
