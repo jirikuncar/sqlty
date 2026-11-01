@@ -59,5 +59,28 @@ fn python_source_passes(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, catalog_load, analyze, python_source_passes);
+fn name_index(c: &mut Criterion) {
+    let mut group = c.benchmark_group("name_index");
+    for tables in [50, 540, 5000] {
+        let (schema, _) = analyzer::load_schema_with_skipped(&schema_sql(tables), "postgres");
+        group.bench_function(format!("relation_prefix_{tables}_tables"), |b| {
+            b.iter(|| schema.relations_with_prefix(black_box("t004"), None, 20));
+        });
+        group.bench_function(format!("qualified_relation_prefix_{tables}_tables"), |b| {
+            b.iter(|| schema.relations_with_prefix(black_box("v00"), Some("app"), 20));
+        });
+        group.bench_function(format!("function_prefix_{tables}_tables"), |b| {
+            b.iter(|| schema.functions_with_prefix(black_box("f00"), None, 20));
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    catalog_load,
+    analyze,
+    python_source_passes,
+    name_index
+);
 criterion_main!(benches);

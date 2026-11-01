@@ -15,12 +15,16 @@ use crate::ddl::RowEvents;
 use crate::values::{self, Value};
 
 use super::columns::{narrowed, Checks, RawColumn};
+use super::index::NameIndex;
 use super::loader::{Loader, RawFunction, RawReturn, Rel, TypeDef};
 use super::names::{lookup_key, type_key};
 use super::{
     Catalog, Function, FunctionReturn, Relation, SchemaColumn, TableRelation, TypeOverrides,
     UserType, BUILTIN_SCHEMAS,
 };
+
+/// A catalog map, by `schema.name`.
+type Keyed<T> = FxHashMap<Arc<str>, T>;
 
 #[cfg(test)]
 thread_local! {
@@ -71,7 +75,7 @@ impl Loader {
             {
                 user_relations += 1;
             }
-            relations.insert(key.clone(), resolver.relation(key, rel));
+            relations.insert(Arc::from(key.as_str()), resolver.relation(key, rel));
         }
         let mut composites: FxHashMap<String, Vec<SchemaColumn>> = self
             .types
@@ -105,12 +109,13 @@ impl Loader {
                 .types
                 .keys()
                 .chain(self.type_aliases.keys())
-                .map(|key| (key.clone(), ()))
+                .map(|key| (Arc::from(key.as_str()), ()))
                 .collect(),
             search_path: path,
             user_relations,
             postgres: self.postgres,
             overrides: Arc::clone(&self.overrides),
+            index: NameIndex::default(),
         }
     }
 
@@ -120,18 +125,23 @@ impl Loader {
     pub(super) fn build_functions(
         &self,
         resolver: &Resolver<'_>,
-        relations: &FxHashMap<String, Relation>,
-    ) -> (FxHashMap<String, Vec<Function>>, FxHashMap<String, ()>) {
+        relations: &FxHashMap<Arc<str>, Relation>,
+    ) -> (Keyed<Vec<Function>>, Keyed<()>) {
         let functions = self
             .functions
             .iter()
             .filter(|(key, _)| !self.unknown_functions.contains(*key))
-            .map(|(key, overloads)| (key.clone(), function(overloads, resolver, relations)))
+            .map(|(key, overloads)| {
+                (
+                    Arc::from(key.as_str()),
+                    function(overloads, resolver, relations),
+                )
+            })
             .collect();
         let unknown = self
             .unknown_functions
             .iter()
-            .map(|key| (key.clone(), ()))
+            .map(|key| (Arc::from(key.as_str()), ()))
             .collect();
         (functions, unknown)
     }
@@ -161,15 +171,15 @@ impl Loader {
             built.push((key, overloads));
         }
         for (key, overloads) in built {
-            cache.unknown_functions.remove(&key);
+            cache.unknown_functions.remove(key.as_str());
             match overloads {
                 Some(overloads) => {
-                    cache.functions.insert(key, overloads);
+                    cache.functions.insert(Arc::from(key), overloads);
                 }
                 None => {
-                    cache.functions.remove(&key);
+                    cache.functions.remove(key.as_str());
                     if self.unknown_functions.contains(&key) {
-                        cache.unknown_functions.insert(key, ());
+                        cache.unknown_functions.insert(Arc::from(key), ());
                     }
                 }
             }
@@ -464,7 +474,7 @@ pub(super) fn literal_of(labels: &[String]) -> String {
 fn function(
     overloads: &[RawFunction],
     resolver: &Resolver<'_>,
-    relations: &FxHashMap<String, Relation>,
+    relations: &FxHashMap<Arc<str>, Relation>,
 ) -> Vec<Function> {
     #[cfg(test)]
     FUNCTIONS_RESOLVED.with(|count| count.set(count.get() + 1));
@@ -485,7 +495,7 @@ fn function(
                     let set_of = matches!(f.returns, RawReturn::SetOf(_));
                     let rows = type_key(ty, dialect)
                         .and_then(|name| lookup_key(relations, path, &name).map(str::to_string))
-                        .and_then(|key| match relations.get(&key) {
+                        .and_then(|key| match relations.get(key.as_str()) {
                             Some(Relation::Table(table)) => Some(table.columns.clone()),
                             _ => None,
                         });
