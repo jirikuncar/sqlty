@@ -8,6 +8,7 @@ versions side by side while a migration rolls out.
 
 [TRANSCRIPT.md](TRANSCRIPT.md) is what to say while typing.
 [recording/](recording/) makes a narrated video of the same story.
+[types/](types/README.md) is a second talk, on types: one flow, no deploy, the published prek hooks.
 
 ## Before the talk
 
