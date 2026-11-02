@@ -81,7 +81,7 @@ colors the SQL of checked strings with semantic tokens; `highlighting = { enable
 turns that off. VS Code shows one semantic-token provider per file, so the extension
 keeps it off there and highlights strings marked `--sql` with a grammar instead.
 
-For Vim (vim-lsp, ALE, coc.nvim, `:make`) and Helix, see
+For nvim-lint, Vim (vim-lsp, ALE, coc.nvim, `:make`) and Helix, see
 [Neovim, Vim and Helix](https://jirikuncar.github.io/sqlty/recipes/editors/).
 
 ## Breaking changes while editing
