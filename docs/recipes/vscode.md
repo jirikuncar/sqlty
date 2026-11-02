@@ -217,5 +217,5 @@ fix belongs to the migration or the code, depending on which ships first.
 
 ## Other editors
 
-`sqlty server` runs in any LSP client: see [Neovim, Vim and Helix](editors.md) for their
+`sqlty server` runs in any LSP client: see [Neovim, Vim, Helix and Emacs](editors.md) for their
 setup, the server's options and SQL highlighting.
