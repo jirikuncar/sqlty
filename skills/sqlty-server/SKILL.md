@@ -1,6 +1,6 @@
 ---
 name: sqlty-server
-description: Run sqlty in an editor with sqlty server, the language server, and the VS Code extension. Use when setting up sqlty in VS Code, Cursor, VSCodium, Neovim or another LSP client, fixing a query on save with source.fixAll.sqlty, showing sqlty breaking findings while editing, or when the editor reports nothing or different diagnostics than sqlty check.
+description: Run sqlty in an editor with sqlty server, the language server, and the VS Code extension. Use when setting up sqlty in VS Code, Cursor, VSCodium, Neovim, Vim, Helix or another LSP client, highlighting SQL in query strings, fixing a query on save with source.fixAll.sqlty, showing sqlty breaking findings while editing, or when the editor reports nothing or different diagnostics than sqlty check.
 ---
 
 # sqlty server
@@ -79,7 +79,10 @@ vim.lsp.enable("sqlty")
 `init_options` is optional: without it, no baseline is checked. The server also
 colors the SQL of checked strings with semantic tokens; `highlighting = { enable = false }`
 turns that off. VS Code shows one semantic-token provider per file, so the extension
-keeps it off there.
+keeps it off there and highlights strings marked `--sql` with a grammar instead.
+
+For Vim (vim-lsp, ALE, coc.nvim, `:make`) and Helix, see
+[Neovim, Vim and Helix](https://jirikuncar.github.io/sqlty/recipes/editors/).
 
 ## Breaking changes while editing
 
@@ -100,5 +103,6 @@ when it moves, save a schema or run **sqlty: Restart Server**.
 
 ## Reference
 
-- [VS Code and other editors](https://jirikuncar.github.io/sqlty/recipes/vscode/)
+- [VS Code](https://jirikuncar.github.io/sqlty/recipes/vscode/)
+- [Neovim, Vim and Helix](https://jirikuncar.github.io/sqlty/recipes/editors/)
 - [Breaking schema changes](https://jirikuncar.github.io/sqlty/guide/breaking-changes/)

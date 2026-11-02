@@ -217,35 +217,5 @@ fix belongs to the migration or the code, depending on which ships first.
 
 ## Other editors
 
-`sqlty server` is a language server on standard input and output. Any LSP client can run
-it for Python files. For Neovim 0.11:
-
-```lua
-vim.lsp.config("sqlty", {
-  cmd = { "sqlty", "server" },
-  filetypes = { "python" },
-  root_markers = { "pyproject.toml", ".git" },
-  init_options = { breaking = { against = "main", direction = "both" } },
-})
-vim.lsp.enable("sqlty")
-```
-
-`init_options` is optional: without it, no baseline is checked, and completion and
-highlighting are on. `completion = { enable = false }` turns completion off,
-`highlighting = { enable = false }` highlighting.
-
-The server also answers `textDocument/completion` in the strings `sqlty check` checks:
-the table names after `FROM` or `JOIN`, and the columns of the tables in scope after
-`alias.` or in `SELECT`, `WHERE` and `ON`. Typing `.` triggers it. It sends
-at most 200 items and marks a longer list incomplete, so the client asks again as you
-type. `completionItem/resolve` adds each column's type and nullability.
-
-It colors the SQL of the same strings with semantic tokens
-(`textDocument/semanticTokens/full`): keywords, strings, numbers, comments, operators
-and placeholders. Neovim shows them with its default `@lsp.type.*` highlight groups.
-Names are left uncolored: sqlparser knows `name` and `status` as keywords too, so only
-the reserved words and clauses are.
-
-!!! note "VS Code does not ask for semantic tokens"
-    VS Code shows the tokens of one provider per file, so sqlty's would replace Pylance's
-    for the whole file. The extension turns highlighting off.
+`sqlty server` runs in any LSP client: see [Neovim, Vim and Helix](editors.md) for their
+setup, the server's options and SQL highlighting.

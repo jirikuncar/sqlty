@@ -1,7 +1,8 @@
 # Editor integrations
 
 > **Status:** stage 1 done ([#840](https://github.com/jirikuncar/sqlty/pull/840)): `sqlty server` sends
-> semantic tokens. Stage 2 in review: the VS Code grammar.
+> semantic tokens. Stage 2 in review ([#841](https://github.com/jirikuncar/sqlty/pull/841)): the VS Code
+> grammar. Stage 3 in review: the Neovim, Vim and Helix recipe.
 
 Tracks [#839](https://github.com/jirikuncar/sqlty/issues/839): highlight SQL in exactly the
 strings `sqlty check` checks, in VS Code and Neovim, and document the Vim and Neovim
@@ -25,9 +26,9 @@ needs a TextMate injection instead, which can only approximate the routes.
 | Stage | Content | State |
 |-------|---------|-------|
 | 1 | `textDocument/semanticTokens/full` in `sqlty server`, `core.highlight_source`, `# highlighted:` mdtests | done, [#840](https://github.com/jirikuncar/sqlty/pull/840) |
-| 2 | VS Code: TextMate injection for marked strings, with a fixture of strings that must and must not be highlighted | in review |
-| 3 | Vim and Neovim recipe page (`vim.lsp.config`, vim-lsp, ALE, coc.nvim, Helix), split out of `docs/recipes/vscode.md`; skill and agents table updated | todo |
-| 4 | ALE linter definition around `sqlty check --output-format json` | todo |
+| 2 | VS Code: TextMate injection for marked strings, with a fixture of strings that must and must not be highlighted | in review, [#841](https://github.com/jirikuncar/sqlty/pull/841) |
+| 3 | Neovim, Vim and Helix recipe page (`vim.lsp.config`, vim-lsp, ALE, coc.nvim, Helix, a quickfix list), split out of `docs/recipes/vscode.md`; skill and agents table updated | in review |
+| 4 | ALE linter definition around `sqlty check --output-format json` | dropped: ALE runs `sqlty server` as an LSP linter (stage 3), which also reads unsaved buffers |
 
 Not here: an nvim-lint linter (nvim-lint takes no contributions made with generative AI),
 and the nvim-lspconfig and Mason entries, which wait for their popularity thresholds.
@@ -57,3 +58,14 @@ and the nvim-lspconfig and Mason entries, which wait for their popularity thresh
   them; VS Code shows one semantic-token provider per file, so the server cannot either.
 - `fixture/highlight.py` lists strings that must and must not be highlighted; the
   extension test reads its scopes with `_workbench.captureSyntaxTokens`.
+
+## Stage 3
+
+- `docs/recipes/editors.md`: Neovim 0.11 (`vim.lsp.config`) and older (`vim.lsp.start`),
+  the server's options, highlighting with an mdtest of which strings are colored, vim-lsp,
+  ALE as an LSP linter, coc.nvim, `makeprg` for a quickfix list, and Helix.
+- Checked by hand: Neovim 0.9 (`vim.lsp.start`: diagnostics and semantic tokens), Vim 9
+  with ALE (diagnostics) and the `makeprg` quickfix list. vim-lsp, coc.nvim and Helix
+  follow their documentation.
+- A tree-sitter injection is not shipped: it reads `\n` as two characters, so it would read
+  `"--sql\nSELECT 1"` as one SQL comment; semantic tokens read the value.
