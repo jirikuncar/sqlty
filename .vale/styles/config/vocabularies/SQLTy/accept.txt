@@ -140,3 +140,5 @@ typeshed
 VSCodium
 Neovim
 Pylance
+Eglot
+rassumfrassum

@@ -183,16 +183,17 @@ where
     let params: InitializeParams = serde_json::from_value(params)?;
     let encoding = encoding(&params);
     let settings = Settings::new(params.initialization_options.as_ref());
-    connection.initialize_finish(
-        id,
-        serde_json::to_value(lsp_types::InitializeResult {
-            capabilities: capabilities(encoding.clone(), &settings),
-            server_info: Some(ServerInfo {
-                name: "sqlty".to_string(),
-                version: Some(env!("CARGO_PKG_VERSION").to_string()),
-            }),
-        })?,
-    )?;
+    // Not `initialize_finish`: lsp-mode may send a request before `initialized`.
+    let result = lsp_types::InitializeResult {
+        capabilities: capabilities(encoding.clone(), &settings),
+        server_info: Some(ServerInfo {
+            name: "sqlty".to_string(),
+            version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        }),
+    };
+    connection
+        .sender
+        .send(Response::new_ok(id, result).into())?;
     let shared = Shared {
         documents: Arc::default(),
         background: Arc::default(),

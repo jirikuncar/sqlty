@@ -569,6 +569,34 @@ fn completion_and_highlighting_are_advertised_unless_off() {
 }
 
 #[test]
+fn a_request_before_initialized_is_answered() {
+    let (server, connection) = Connection::memory();
+    let thread = std::thread::spawn(move || {
+        run(&server, |_: &Path, _: &Settings| -> Result<Fake, String> {
+            Err(String::new())
+        })
+        .map_err(|error| error.to_string())
+    });
+    let mut client = Client {
+        connection,
+        server: Some(thread),
+        pending: Vec::new(),
+        asked: Vec::new(),
+        next: 0,
+        opened: Arc::default(),
+    };
+    client.request("initialize", json!({"capabilities": {}}));
+    let range = json!({"start": {"line": 0, "character": 0}, "end": {"line": 1, "character": 0}});
+    let answer = client.request(
+        "textDocument/semanticTokens/range",
+        json!({"textDocument": {"uri": "file:///work/q.py"}, "range": range}),
+    );
+    assert_eq!(answer, json!({"error": -32601}), "method not found");
+    client.notify("initialized", json!({}));
+    client.shutdown();
+}
+
+#[test]
 fn completion_after_a_dot_lists_the_columns() {
     let mut client = Client::start(&json!({}));
     let text = "q = \"--sql\\nSELECT u. FROM users u\"\n";
