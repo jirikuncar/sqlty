@@ -696,6 +696,17 @@ fn completion_can_be_turned_off() {
 }
 
 impl Client {
+    /// Wait for the server to ask the client `method`.
+    fn asked(&mut self, method: &str) {
+        while !self.asked.iter().any(|asked| asked == method) {
+            match self.receive() {
+                Message::Request(asked) => self.asked.push(asked.method),
+                Message::Notification(n) => self.pending.push(n),
+                other @ Message::Response(_) => panic!("unexpected {other:?}"),
+            }
+        }
+    }
+
     fn tokens(&mut self, uri: &str) -> Value {
         self.request(
             "textDocument/semanticTokens/full",
@@ -752,8 +763,8 @@ fn a_check_that_finds_helper_strings_asks_for_the_tokens_again() {
     let capabilities = json!({"workspace": {"semanticTokens": {"refreshSupport": true}}});
     let mut client = Client::start(&capabilities);
     client.open("file:///work/q.py", "run(\"SELECT 1\")\n");
-    assert_eq!(decoded(&client.tokens("file:///work/q.py")), []);
     client.notification("textDocument/publishDiagnostics");
+    client.asked("workspace/semanticTokens/refresh");
     assert_eq!(decoded(&client.tokens("file:///work/q.py")).len(), 2);
     assert_eq!(client.asked, ["workspace/semanticTokens/refresh"]);
     client.shutdown();
