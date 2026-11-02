@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Record the DuckDesk talk and render it with narration: build/duckdesk.mp4 and build/duckdesk.srt.
+# Record a DuckDesk talk and render it with narration: build/<talk>/duckdesk.mp4 and .srt.
+#   TALK=types ./make-video.sh               # the types talk (default: TALK=cicd)
 #   PIPER_MODEL=en_US-lessac-medium.onnx ./make-video.sh
 #   ./make-video.sh --chapters merge,rolling     # record only these again, then join all
 set -euo pipefail

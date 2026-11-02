@@ -1,6 +1,6 @@
 """The recorded talk: narration, typing and commands, scene by scene."""
 
-from kit import Fix, Hold, Keys, Open, Run, Say, Scene, Write, code
+from kit import Fix, Hold, Keys, Open, Run, Say, Scene, Write, code, number
 
 
 def commit(message: str, ok: bool | None = True) -> Run:
@@ -344,7 +344,4 @@ SCENES = [
     ),
 ]
 
-for scene in SCENES:
-    lines = [action for action in scene.actions if isinstance(action, Say)]
-    for number, line in enumerate(lines, 1):
-        line.id = f"{scene.name}-{number:02}"
+number(SCENES)

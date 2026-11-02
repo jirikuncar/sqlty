@@ -1,4 +1,4 @@
--- Neovim for the recording: no plugins, sqlty server for diagnostics and quick fixes.
+-- Neovim for the recording: no plugins; sqlty server and ty server for diagnostics and quick fixes.
 vim.o.number = true
 vim.o.autoindent = false
 vim.o.smartindent = false
@@ -19,7 +19,12 @@ vim.lsp.config("sqlty", {
   filetypes = { "python" },
   root_markers = { "pyproject.toml" },
 })
-vim.lsp.enable("sqlty")
+vim.lsp.config("ty", {
+  cmd = { "uv", "run", "--quiet", "ty", "server" },
+  filetypes = { "python" },
+  root_markers = { "pyproject.toml" },
+})
+vim.lsp.enable({ "sqlty", "ty" })
 
 -- VS Code tells the server when a migration changes on disk (a merge, a branch switch); Neovim needs telling.
 vim.api.nvim_create_autocmd({ "BufEnter", "FocusGained" }, {

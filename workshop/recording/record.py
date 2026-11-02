@@ -4,8 +4,8 @@
 
 Each scene is a chapter. The chapters before the ones asked for are played fast and
 not recorded, to bring the app to where the chapter starts.
-Needs build/cues.json from voice.py: each line's length paces what follows it.
-Writes build/chapters/<name>.cast and build/chapters/<name>.json.
+Needs build/<talk>/cues.json from voice.py: each line's length paces what follows it.
+Writes build/<talk>/chapters/<name>.cast and build/chapters/<name>.json.
 """
 
 import argparse
@@ -19,10 +19,9 @@ import time
 from pathlib import Path
 
 from kit import Fix, Hold, Keys, Open, Run, Say, Scene, Write
-from screenplay import SCENES
+from talk import BUILD, SCENES
 
 HERE = Path(__file__).parent
-BUILD = HERE / "build"
 SESSION = "duckdesk"
 SIZE = (200, 50)
 

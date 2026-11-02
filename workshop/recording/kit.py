@@ -8,9 +8,9 @@ STEPS = Path(__file__).parent.parent / "steps"
 HEREDOC = re.compile(r"cat (>>?) (\S+) <<'(\w+)'\n(.*?)\n\3\n", re.DOTALL)
 
 
-def code(step: str, path: str, nth: int = 0) -> str:
+def code(step: str, path: str, nth: int = 0, steps: Path = STEPS) -> str:
     """The `nth` heredoc a step script writes to `path`: code("02", "queries.py", 1)."""
-    script = next(STEPS.glob(f"{step}-*.sh")).read_text()
+    script = next(steps.glob(f"{step}-*.sh")).read_text()
     bodies = [m.group(4) + "\n" for m in HEREDOC.finditer(script) if m.group(2) == path]
     return bodies[nth]
 
@@ -75,6 +75,15 @@ class Scene:
     actions: list = field(default_factory=list)
 
 
+def number(scenes: list[Scene]) -> list[Scene]:
+    """Give every Say its id, <scene>-NN: the name of its voice file and of its own take."""
+    for scene in scenes:
+        lines = [action for action in scene.actions if isinstance(action, Say)]
+        for n, line in enumerate(lines, 1):
+            line.id = f"{scene.name}-{n:02}"
+    return scenes
+
+
 SPOKEN = [
     (r"`", ""),
     (r"\bsqlty\b", "sequel-tee"),
@@ -94,6 +103,14 @@ SPOKEN = [
     (r"\bALTER TABLE\b", "alter table"),
     (r"\bCI\b", "C I"),
     (r"\bBookParams\b", "Book Params"),
+    (r"\bSolveParams\b", "Solve Params"),
+    (r"\bKeyError\b", "Key Error"),
+    (r"\bNoneType\b", "None Type"),
+    (r"\bLEFT JOIN\b", "left join"),
+    (r"\bNULLs\b", "nulls"),
+    (r"\bNULL\b", "null"),
+    (r"\bpreck\.toml\b", "preck dot toml"),
+    (r"\bDuck\.colour\b", "Duck dot colour"),
     (r"\bhourly_rate\b", "hourly rate"),
     (r"\bduck_id\b", "duck I D"),
     (r"\bservice_version\b", "service version"),

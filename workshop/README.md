@@ -59,9 +59,9 @@ versions run side by side (5 in the scripts; 15 reads better on stage).
 
 ## Recording
 
-`recording/make-video.sh` plays the talk in tmux (Neovim with `sqlty server` on the
+`recording/make-video.sh` plays the talk in tmux (Neovim with `sqlty server` and `ty server` on the
 left, a shell and the server on the right), types slowly, records it with asciinema
-and renders `build/duckdesk.mp4` with narration and subtitles. It runs the real
+and renders `build/<talk>/duckdesk.mp4` with narration and subtitles. It runs the real
 commands, so it needs what the talk needs, plus:
 
 - [Neovim](https://neovim.io) 0.11, tmux, ffmpeg
@@ -74,15 +74,16 @@ cd recording
 export PIPER_MODEL=~/voices/en_US-lessac-medium.onnx
 ./make-video.sh                          # every chapter
 ./make-video.sh --chapters merge         # after a review: record one chapter again
+TALK=types ./make-video.sh               # the types talk (types/README.md)
 ```
 
 Each scene of `screenplay.py` is a chapter, recorded and rendered on its own to
-`build/chapters/<name>.mp4`; `build/duckdesk.mp4` joins them, with a chapter list.
+`build/<talk>/chapters/<name>.mp4`; `build/<talk>/duckdesk.mp4` joins them, with a chapter list.
 Recording a chapter plays the chapters before it fast and unrecorded, so the app
 is where the chapter starts, and only chapters whose recording changed render again.
 
-The narration is in `screenplay.py`; the code it types comes from the step
-scripts. To use your own voice, record the lines that `build/cue-sheet.md`
-lists as `voice/own/<id>.wav` and run `make-video.sh` again: the video waits
+The narration is in `screenplay.py` (`screenplay_types.py`); the code it types comes from the
+step scripts. To use your own voice, record the lines that `build/<talk>/cue-sheet.md`
+lists as `voice/<talk>/<id>.wav` and run `make-video.sh` again: the video waits
 for each of your takes, however long it is. Idle time (installs, builds) is
 cut to 1.5 seconds, never while the voice speaks.

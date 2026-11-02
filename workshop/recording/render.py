@@ -1,4 +1,4 @@
-"""Render each recorded chapter with its narration, then join them into build/duckdesk.mp4.
+"""Render each recorded chapter with its narration, then join them into build/<talk>/duckdesk.mp4.
 
     uv run python render.py --agg agg
 
@@ -16,10 +16,8 @@ import wave
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from screenplay import SCENES
+from talk import BUILD, SCENES
 
-HERE = Path(__file__).parent
-BUILD = HERE / "build"
 CHAPTERS = BUILD / "chapters"
 RATE = 22050
 TAIL = 1.0
@@ -59,7 +57,7 @@ def seconds(path: Path) -> float:
 
 
 def render(name: str, args: argparse.Namespace) -> None:
-    """build/chapters/<name>.mp4, and <name>.subs.json with each line's place in it."""
+    """build/<talk>/chapters/<name>.mp4, and <name>.subs.json with each line's place in it."""
     header, *lines = (CHAPTERS / f"{name}.cast").read_text().splitlines()
     events = [json.loads(line) for line in lines]
     timeline = json.loads((CHAPTERS / f"{name}.json").read_text())
@@ -111,7 +109,7 @@ def srt_time(t: float) -> str:
 
 
 def join(names: list[str]) -> None:
-    """build/duckdesk.mp4 from the chapters, with subtitles and a chapter list."""
+    """build/<talk>/duckdesk.mp4 from the chapters, with subtitles and a chapter list."""
     texts = {cue["id"]: cue["text"] for cue in json.loads((BUILD / "cues.json").read_text())}
     (BUILD / "chapters.txt").write_text("".join(f"file 'chapters/{name}.mp4'\n" for name in names))
     meta, subtitles, offset = [";FFMETADATA1"], [], 0.0
@@ -135,7 +133,9 @@ def join(names: list[str]) -> None:
         "-map", "0", "-map", "1", "-map_chapters", "2", "-c", "copy", "-c:s", "mov_text",
         "-metadata:s:s:0", "language=eng", "-movflags", "+faststart", str(BUILD / "duckdesk.mp4"),
     )  # fmt: skip
-    print(f"build/duckdesk.mp4: {offset / 60:.1f} minutes, {len(names)} of {len(SCENES)} chapters")
+    print(
+        f"{BUILD / 'duckdesk.mp4'}: {offset / 60:.1f} minutes, {len(names)} of {len(SCENES)} chapters"
+    )
 
 
 def main() -> None:

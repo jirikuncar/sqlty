@@ -2,7 +2,7 @@
 
     uv run --with piper-tts python voice.py --model en_US-lessac-medium.onnx
 
-Your takes go in voice/own/<id>.wav (any format ffmpeg reads); build/cue-sheet.md lists the ids.
+Your takes go in voice/<talk>/<id>.wav (any format ffmpeg reads); build/<talk>/cue-sheet.md lists the ids.
 """
 
 import argparse
@@ -13,10 +13,8 @@ import wave
 from pathlib import Path
 
 from kit import Say, spoken
-from screenplay import SCENES
+from talk import BUILD, OWN_VOICE, SCENES
 
-HERE = Path(__file__).parent
-BUILD = HERE / "build"
 RATE = 22050
 
 
@@ -61,7 +59,7 @@ def main() -> None:
     cues = []
     for line in lines:
         target = BUILD / "voice" / f"{line.id}.wav"
-        own = next((HERE / "voice" / "own").glob(f"{line.id}.*"), None)
+        own = next(OWN_VOICE.glob(f"{line.id}.*"), None)
         if own:
             normalize(own, target)
         else:
@@ -101,7 +99,7 @@ def main() -> None:
     sheet = [
         "# Cue sheet",
         "",
-        "Record each line as `voice/own/<id>.wav`, then run `make-video.sh` again.",
+        "Record each line as `voice/<talk>/<id>.wav`, then run `make-video.sh` again.",
         "",
     ]
     sheet += [f"- `{cue['id']}` ({cue['duration']:.1f} s): {cue['text']}" for cue in cues]
