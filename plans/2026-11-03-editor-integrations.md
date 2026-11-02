@@ -1,7 +1,7 @@
 # Editor integrations
 
-> **Status:** stage 1 in review ([#840](https://github.com/jirikuncar/sqlty/pull/840)): `sqlty server`
-> sends semantic tokens. Stage 2 in review: the VS Code grammar.
+> **Status:** stage 1 done ([#840](https://github.com/jirikuncar/sqlty/pull/840)): `sqlty server` sends
+> semantic tokens. Stage 2 in review: the VS Code grammar.
 
 Tracks [#839](https://github.com/jirikuncar/sqlty/issues/839): highlight SQL in exactly the
 strings `sqlty check` checks, in VS Code and Neovim, and document the Vim and Neovim
@@ -24,7 +24,7 @@ needs a TextMate injection instead, which can only approximate the routes.
 
 | Stage | Content | State |
 |-------|---------|-------|
-| 1 | `textDocument/semanticTokens/full` in `sqlty server`, `core.highlight_source`, `# highlighted:` mdtests | in review, [#840](https://github.com/jirikuncar/sqlty/pull/840) |
+| 1 | `textDocument/semanticTokens/full` in `sqlty server`, `core.highlight_source`, `# highlighted:` mdtests | done, [#840](https://github.com/jirikuncar/sqlty/pull/840) |
 | 2 | VS Code: TextMate injection for marked strings, with a fixture of strings that must and must not be highlighted | in review |
 | 3 | Vim and Neovim recipe page (`vim.lsp.config`, vim-lsp, ALE, coc.nvim, Helix), split out of `docs/recipes/vscode.md`; skill and agents table updated | todo |
 | 4 | ALE linter definition around `sqlty check --output-format json` | todo |
