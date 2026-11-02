@@ -69,7 +69,7 @@ suite("sqlty", () => {
     }
     assert.deepEqual(
       items.map((item) => item.label),
-      ["id", "name", "score"],
+      ["id", "name", "score"].map((label) => ({ label, description: "u" })),
     );
   });
 
