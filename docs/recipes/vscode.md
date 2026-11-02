@@ -86,8 +86,8 @@ an inline `--sql` comment is split onto its own line, and so on. Run it on every
 
 Inside a query string, the editor completes table names after `FROM` and `JOIN`, and the
 columns of the tables in scope after `alias.` and in `SELECT`, `WHERE`, `ON`,
-`GROUP BY` and `ORDER BY`. Each column shows its type and nullability. Typing `.` opens
-the list.
+`GROUP BY` and `ORDER BY`. Each column shows its table or alias, and its type and
+nullability once selected. Typing `.` opens the list.
 
 A string completes exactly when `sqlty check` checks it, by the same rules:
 

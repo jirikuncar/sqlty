@@ -181,7 +181,16 @@ pub fn complete(
             Some("pg_catalog" | "information_schema")
         ) && c.kind != CandidateKind::Column
     };
-    candidates.sort_by_cached_key(|c| (builtin(c), c.label.to_lowercase(), c.detail.clone()));
+    candidates.sort_by_cached_key(|c| {
+        (
+            builtin(c),
+            c.label.to_lowercase(),
+            c.detail.clone(),
+            c.label.clone(),
+        )
+    });
+    // A table named twice without aliases offers each column twice, from the same source.
+    candidates.dedup_by(|a, b| a.label == b.label && a.kind == b.kind && a.detail == b.detail);
     let incomplete = candidates.len() > limit;
     candidates.truncate(limit);
     Completions {
