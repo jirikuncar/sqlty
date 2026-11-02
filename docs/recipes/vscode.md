@@ -157,6 +157,23 @@ run("SELECT <CURSOR> FROM users")
 Turn it off with `"sqlty.completion.enable": false`; the server then does no completion
 work. It needs sqlty 0.4.0 or newer, and with an older one the output channel says so.
 
+## Highlighting
+
+A string marked `--sql` or `-- sql` is highlighted as SQL: keywords, strings, numbers,
+comments, operators and placeholders. Other strings stay Python strings, and so do
+f-strings, raw strings and bytes:
+
+```python
+q = "--sql\nSELECT name FROM users WHERE id = %(id)s"  # SQL
+plain = "SELECT name FROM users"  # a Python string
+```
+
+The extension adds a TextMate grammar to Python, so highlighting needs no server. A
+grammar sees the text of one string only, so a string checked without a marker stays
+a Python string: the query of an annotated helper or a `[[tool.sqlty.functions]]`
+function, and `SQL[T]("SELECT ...")`. A query split across adjacent literals is
+highlighted in its first literal only.
+
 ## Breaking changes
 
 Set `sqlty.breaking.against` to a baseline, and the editor also shows what

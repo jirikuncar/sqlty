@@ -284,6 +284,26 @@ mod tests {
     }
 
     #[test]
+    fn the_vs_code_grammars_color_the_same_keywords() {
+        for name in ["sql-injection", "sql-injection-multi"] {
+            let path = format!(
+                "{}/../../../editors/vscode/syntaxes/{name}.tmLanguage.json",
+                env!("CARGO_MANIFEST_DIR")
+            );
+            let grammar = std::fs::read_to_string(&path).expect(&path);
+            let alternatives = grammar
+                .split_once("(?:ALL|")
+                .and_then(|(_, rest)| rest.split_once(')'))
+                .map(|(words, _)| {
+                    std::iter::once("ALL")
+                        .chain(words.split('|'))
+                        .collect::<Vec<_>>()
+                });
+            assert_eq!(alternatives.as_deref(), Some(KEYWORDS), "{path}");
+        }
+    }
+
+    #[test]
     fn names_that_sqlparser_knows_as_keywords_stay_names() {
         let sql = "SELECT name, status, \"select\", t.order FROM t WHERE type IS NOT NULL";
         let keywords: Vec<_> = colored(sql, "postgres")

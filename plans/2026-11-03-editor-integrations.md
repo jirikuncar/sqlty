@@ -1,6 +1,7 @@
 # Editor integrations
 
-> **Status:** stage 1 in review: `sqlty server` sends semantic tokens.
+> **Status:** stage 1 done ([#840](https://github.com/jirikuncar/sqlty/pull/840)): `sqlty server` sends
+> semantic tokens. Stage 2 in review: the VS Code grammar.
 
 Tracks [#839](https://github.com/jirikuncar/sqlty/issues/839): highlight SQL in exactly the
 strings `sqlty check` checks, in VS Code and Neovim, and document the Vim and Neovim
@@ -23,8 +24,8 @@ needs a TextMate injection instead, which can only approximate the routes.
 
 | Stage | Content | State |
 |-------|---------|-------|
-| 1 | `textDocument/semanticTokens/full` in `sqlty server`, `core.highlight_source`, `# highlighted:` mdtests | in review |
-| 2 | VS Code: TextMate injection for marked and `SQL[T](...)` strings, with a fixture of strings that must and must not be highlighted | todo |
+| 1 | `textDocument/semanticTokens/full` in `sqlty server`, `core.highlight_source`, `# highlighted:` mdtests | done, [#840](https://github.com/jirikuncar/sqlty/pull/840) |
+| 2 | VS Code: TextMate injection for marked strings, with a fixture of strings that must and must not be highlighted | in review |
 | 3 | Vim and Neovim recipe page (`vim.lsp.config`, vim-lsp, ALE, coc.nvim, Helix), split out of `docs/recipes/vscode.md`; skill and agents table updated | todo |
 | 4 | ALE linter definition around `sqlty check --output-format json` | todo |
 
@@ -43,3 +44,16 @@ and the nvim-lspconfig and Mason entries, which wait for their popularity thresh
 - The server reads helper strings from the last check and asks for
   `workspace/semanticTokens/refresh` when a check changes them.
   `initializationOptions.highlighting.enable` turns it off.
+
+## Stage 2
+
+- `editors/vscode/syntaxes/`: two injections into Python strings, one for single-line
+  strings and one for triple-quoted ones, each split by quote character so a comment or a
+  SQL string never runs past the closing quote. They begin at a `--sql` or `-- sql` marker
+  right after the opening quote, and skip raw, bytes and f-strings.
+- The keyword list is `sqlty_sql::highlight::KEYWORDS`; a Rust test keeps them equal.
+- Not covered: helper and configured-function strings, `SQL[T]("SELECT ...")` without a
+  marker, and the literals after the first of an adjacent group. A grammar cannot see
+  them; VS Code shows one semantic-token provider per file, so the server cannot either.
+- `fixture/highlight.py` lists strings that must and must not be highlighted; the
+  extension test reads its scopes with `_workbench.captureSyntaxTokens`.
