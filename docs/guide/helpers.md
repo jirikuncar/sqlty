@@ -144,6 +144,36 @@ they are checked only when passed by keyword (`fetch_all(query="...", form=int)`
 For an `@overload`ed helper, positions come from the implementation, or from the
 first overload naming both parameters when the implementation does not.
 
+## Queries stored in a name
+
+A helper call that passes a name bound to a `SQL[R](...)` or `SQL[R, P](...)`
+call is checked as if it passed the query. The name can be a module-level
+constant or imported from a checked module.
+
+```python
+from typing import Annotated, Any, LiteralString, TypedDict
+
+from sqlty import SQL
+
+
+def fetch_one[T](query: Annotated[LiteralString, SQL], form: type[T], /, **params: Any) -> T | None: ...
+
+
+class ById(TypedDict):
+    id: int
+
+
+BY_ID = SQL[tuple[str], ById]("--sql\nSELECT name FROM users WHERE id = %(id)s")
+
+# error: [param-type-mismatch] "parameter 'id' expects int, got str"
+fetch_one(BY_ID, tuple[str], id="1")
+```
+
+With a `P`, each argument is compared with its type in `P`, as a type checker
+would: `"1"` is rejected for an `int`, although the server would convert it. This
+works without changing the helper's signature, so it also covers a helper
+registered in `[[tool.sqlty.functions]]`.
+
 ## Helpers in other modules
 
 `sqlty check` indexes the helpers of every file it is given before checking

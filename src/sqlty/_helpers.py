@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 from sqlty._params import ParamArg, arg_type, literal_params
 from sqlty._psycopg import UNCHECKED
 from sqlty._source import ParsedSource
-from sqlty._variants import Unchecked, Variant, query_variants
+from sqlty._variants import Declared, Unchecked, Variant, query_variants
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
@@ -783,5 +783,10 @@ def find_helper_calls(
                 )
             else:
                 call = call._replace(query=found[0].query, dynamic=False, variants=tuple(found))
+        elif text is None and isinstance(query, ast.Name | ast.Attribute):
+            # Without query variants, a name still stands for the query of one `SQL[R](...)`.
+            found = query_variants(parsed, node, query, 1, resolve_fragment)
+            if isinstance(found, list) and isinstance(found[0].query, Declared):
+                call = call._replace(query=found[0].query, dynamic=False)
         calls.append(call)
     return sorted(calls, key=lambda call: call.line)

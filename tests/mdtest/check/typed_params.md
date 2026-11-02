@@ -172,3 +172,217 @@ t = SQL[tuple[str], tuple[int | None, str]]("--sql\nSELECT name FROM users WHERE
 u = SQL[tuple[str], typing.Any]("--sql\nSELECT name FROM users WHERE id = %s")
 # error:
 ```
+
+## Passed to a helper
+
+A `SQL[R, P]` stored in a name and passed to a [registered helper](../../../docs/guide/helpers.md)
+is checked as its query, and the arguments of the call against `P`, as a type checker
+would. The helper needs no annotation.
+
+```toml
+[[tool.sqlty.functions]]
+import-path = "pkg.db.fetch_one"
+query-param = "query"
+return-type-param = "form"
+
+[[tool.sqlty.functions]]
+import-path = "pkg.db.execute"
+query-param = "query"
+```
+
+`pkg/db.py`:
+
+```python
+from typing import Any, LiteralString
+
+async def fetch_one[T](conn: Any, query: LiteralString, form: type[T], /, **params: Any) -> T | None: ...
+def execute(query: LiteralString, params: tuple[Any, ...]) -> None: ...
+```
+
+`pkg/queries.py`:
+
+```python
+from typing import TypedDict
+
+from sqlty import SQL
+
+
+class ById(TypedDict):
+    id: int
+
+
+BY_ID = SQL[tuple[str], ById]("--sql\nSELECT name FROM users WHERE id = %(id)s")
+RENAME = SQL[tuple[()], tuple[str, int]]("--sql\nUPDATE users SET name = %s WHERE id = %s")
+```
+
+### In the same module
+
+```python
+from typing import Any, TypedDict
+
+from sqlty import SQL
+from pkg.db import execute, fetch_one
+
+
+class ById(TypedDict):
+    id: int
+
+
+BY_ID = SQL[tuple[str], ById]("--sql\nSELECT name FROM users WHERE id = %(id)s")
+RENAME = SQL[tuple[()], tuple[str, int]]("--sql\nUPDATE users SET name = %s WHERE id = %s")
+
+
+async def run(conn: Any) -> None:
+    await fetch_one(conn, BY_ID, tuple[str], id=1)
+    await fetch_one(conn, BY_ID, tuple[str], id=True)
+    # error: [param-type-mismatch] "parameter 'id' expects int, got str"
+    await fetch_one(conn, BY_ID, tuple[str], id="not-an-int")
+    # error: [param-count-mismatch] "call is missing parameter 'id'"
+    await fetch_one(conn, BY_ID, tuple[str])
+    # error: [column-type-mismatch] "tuple[int] item 0 is int but query column 'name' infers str"
+    await fetch_one(conn, BY_ID, tuple[int], id=1)
+    execute(RENAME, ("ann", 1))
+    # error: [param-type-mismatch] "parameter 2 expects int, got str"
+    execute(RENAME, ("ann", "1"))
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+    execute(RENAME, ("ann",))
+```
+
+### Imported
+
+```python
+from typing import Any
+
+from pkg import queries
+from pkg.db import execute, fetch_one
+from pkg.queries import BY_ID
+
+
+async def run(conn: Any) -> None:
+    # error: [param-type-mismatch] "parameter 'id' expects int, got str"
+    await fetch_one(conn, BY_ID, tuple[str], id="not-an-int")
+    # error: [param-count-mismatch] "call is missing parameter 'id'"
+    await fetch_one(conn, BY_ID, tuple[str])
+    # error: [param-type-mismatch] "parameter 1 expects str, got int"
+    execute(queries.RENAME, (1, 1))
+```
+
+### `P` imported by the module of the query
+
+`pkg/types.py`:
+
+```python
+from typing import TypedDict
+
+
+class ByName(TypedDict):
+    name: str
+```
+
+`pkg/by_name.py`:
+
+```python
+from sqlty import SQL
+from pkg.types import ByName
+
+BY_NAME = SQL[tuple[int], ByName]("--sql\nSELECT id FROM users WHERE name = %(name)s")
+```
+
+```python
+from typing import Any
+
+from pkg.by_name import BY_NAME
+from pkg.db import fetch_one
+
+
+async def run(conn: Any) -> None:
+    # error: [param-type-mismatch] "parameter 'name' expects str, got int"
+    await fetch_one(conn, BY_NAME, tuple[int], name=1)
+```
+
+### `P` that is not compared
+
+A tuple with `...`, `typing.Any` and a type that is not a `TypedDict` leave the
+arguments to the query, as for a string literal.
+
+```python
+import typing
+from typing import Any
+
+from sqlty import SQL
+from pkg.db import execute, fetch_one
+
+ANY = SQL[tuple[str], typing.Any]("--sql\nSELECT name FROM users WHERE id = %(id)s")
+OPEN = SQL[tuple[()], tuple[int, ...]]("--sql\nUPDATE users SET name = %s WHERE id = %s")
+PLAIN = "SELECT name FROM users WHERE id = %(id)s"
+
+
+async def run(conn: Any) -> None:
+    await fetch_one(conn, ANY, tuple[str], id="1")
+    # error: [param-count-mismatch] "call is missing parameter 'id'"
+    await fetch_one(conn, ANY, tuple[str])
+    execute(OPEN, ("ann", 1))
+    # error: [param-count-mismatch] "call is missing parameter 'id'"
+    await fetch_one(conn, PLAIN, tuple[str])
+```
+
+### Without `preview`
+
+A name bound to a `SQL[R](...)` call is resolved without query variants; one bound
+to a plain string is not.
+
+```toml
+[tool.sqlty]
+preview = false
+```
+
+```python
+from typing import Any
+
+from sqlty import SQL
+from pkg.db import fetch_one
+from pkg.queries import BY_ID
+
+PLAIN = "SELECT name FROM users WHERE id = %(id)s"
+
+
+async def run(conn: Any) -> None:
+    # error: [param-type-mismatch] "parameter 'id' expects int, got str"
+    await fetch_one(conn, BY_ID, tuple[str], id="not-an-int")
+    await fetch_one(conn, PLAIN, tuple[str])
+```
+
+### Without `P`
+
+`SQL[R]` has no `P`: the call is checked against the query, as a string literal is.
+
+```python
+from typing import Any
+
+from sqlty import SQL
+from pkg.db import fetch_one
+
+BY_ID = SQL[tuple[str]]("--sql\nSELECT name FROM users WHERE id = %(id)s")
+
+
+async def run(conn: Any) -> None:
+    await fetch_one(conn, BY_ID, tuple[str], id="1")
+    # error: [param-count-mismatch] "call is missing parameter 'id'"
+    await fetch_one(conn, BY_ID, tuple[str])
+```
+
+### A local name is not the constant
+
+```python
+from typing import Any, LiteralString
+
+from sqlty import SQL
+from pkg.db import fetch_one
+
+BY_ID = SQL[tuple[str]]("--sql\nSELECT name FROM users WHERE id = %(id)s")
+
+
+async def run(conn: Any, BY_ID: LiteralString) -> None:
+    await fetch_one(conn, BY_ID, tuple[str])
+# error:
+```
