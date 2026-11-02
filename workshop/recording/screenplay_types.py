@@ -148,7 +148,7 @@ SCENES = number(
                 Keys(
                     r":g/^LIST_DUCKS/s/tuple\[[^]]*\]/Duck/<CR>"
                     r":g/^BOOK\|^SOLVE/s/tuple\[[^]]*\]/Consultation/<CR>"
-                    r":g/^LEADERBOARD/s/tuple\[[^]]*\]/Champion/<CR>"
+                    r":g/^LEADERBOARD/s/tuple\[[^]]*\]/Champion/<CR>:w<CR>"
                 ),
                 Say("And one more query: a single duck, for its badge."),
                 Write("queries.py", code("03", "queries.py"), where="append"),
