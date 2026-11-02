@@ -27,6 +27,7 @@ use sqlty_python::fixer;
 use sqlty_python::locate;
 use sqlty_python::rewriter;
 use sqlty_sql::analyzer;
+use sqlty_sql::highlight::Highlight;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -988,6 +989,47 @@ fn complete_source(
     })
 }
 
+/// What to color in the queries `check` reads in Python source: `(start, end, kind)` byte
+/// ranges in order, `kind` one of `keyword`, `string`, `number`, `comment`, `operator`
+/// and `parameter`. `helper_starts` is as for `query_at`.
+///
+/// Raises:
+///     ValueError: unsupported import_style
+#[pyfunction]
+#[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, import_style = None, helper_starts = vec![]))]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "PyO3 extracts a Vec, not a slice"
+)]
+fn highlight_source(
+    py: Python<'_>,
+    source: &str,
+    dialect: DialectArg,
+    import_style: Option<&str>,
+    helper_starts: Vec<usize>,
+) -> Result<Vec<(usize, usize, &'static str)>, Error> {
+    let dialect = dialect.0;
+    detach(py, || {
+        let style = ImportStyle::parse(import_style)?;
+        let queries = locate::Queries::new(source, &style, &helper_starts);
+        Ok(queries
+            .highlights(dialect)
+            .into_iter()
+            .map(|(range, kind)| {
+                let kind = match kind {
+                    Highlight::Keyword => "keyword",
+                    Highlight::String => "string",
+                    Highlight::Number => "number",
+                    Highlight::Comment => "comment",
+                    Highlight::Operator => "operator",
+                    Highlight::Parameter => "parameter",
+                };
+                (range.start, range.end, kind)
+            })
+            .collect())
+    })
+}
+
 /// The pyclasses are frozen, and the only global state is the schema cache behind a
 /// `Mutex`, so the module runs without the GIL on free-threaded builds.
 #[pymodule(gil_used = false)]
@@ -1020,6 +1062,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;
     m.add_function(wrap_pyfunction!(query_at, m)?)?;
     m.add_function(wrap_pyfunction!(complete_source, m)?)?;
+    m.add_function(wrap_pyfunction!(highlight_source, m)?)?;
     m.add_class::<QueryAtHandle>()?;
     m.add_function(wrap_pyfunction!(skills, m)?)?;
     m.add_function(wrap_pyfunction!(server::serve, m)?)?;

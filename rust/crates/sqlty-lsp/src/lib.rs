@@ -1,15 +1,17 @@
-//! The language server of `sqlty server`: diagnostics, quick fixes, fix-all and completion
-//! for Python files.
+//! The language server of `sqlty server`: diagnostics, quick fixes, fix-all, completion and
+//! SQL highlighting for Python files.
 //!
 //! The protocol runs on the thread that calls [`run`]. Checks run on one worker thread that
 //! owns a [`Workspace`] per project root: the Python passes hold the GIL, so two checks could
 //! not overlap anyway. The worker checks the newest text of each buffer and publishes the
 //! result only while that text is current. Completion is answered on the protocol thread
-//! from what the buffer's last check left (see [`CompletionContext`]), never behind a check.
+//! from what the buffer's last check left (see [`CompletionContext`]), never behind a check;
+//! so are semantic tokens.
 
 use std::collections::HashMap;
 use std::error::Error;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -19,17 +21,22 @@ use lsp_types::notification::{
     DidChangeTextDocument, DidChangeWatchedFiles, DidCloseTextDocument, DidOpenTextDocument,
     DidSaveTextDocument, LogMessage, Notification as _, PublishDiagnostics, ShowMessage,
 };
-use lsp_types::request::{CodeActionRequest, Completion, Request as _, ResolveCompletionItem};
+use lsp_types::request::{
+    CodeActionRequest, Completion, Request as _, ResolveCompletionItem, SemanticTokensFullRequest,
+    SemanticTokensRefresh,
+};
 use lsp_types::{
     CodeActionKind, CodeActionOptions, CodeActionParams, CodeActionProviderCapability,
     CompletionItem, CompletionOptions, CompletionParams, InitializeParams, LogMessageParams,
-    MessageType, PositionEncodingKind, PublishDiagnosticsParams, ServerCapabilities, ServerInfo,
-    ShowMessageParams, TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-    TextDocumentSyncSaveOptions, Url,
+    MessageType, PositionEncodingKind, PublishDiagnosticsParams, SemanticTokensFullOptions,
+    SemanticTokensOptions, SemanticTokensParams, SemanticTokensServerCapabilities,
+    ServerCapabilities, ServerInfo, ShowMessageParams, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, Url,
 };
 
 mod actions;
 mod completion;
+mod highlight;
 mod text;
 mod worker;
 
@@ -78,8 +85,8 @@ pub struct Edit {
     pub replacement: String,
 }
 
-/// What completion reads of a project for a buffer, as its last check left it: the
-/// schema, how the file is read, and where its helper calls pass a query.
+/// What completion and highlighting read of a project for a buffer, as its last check left
+/// it: the schema, how the file is read, and where its helper calls pass a query.
 #[derive(Clone)]
 pub struct CompletionContext {
     /// The schema the buffer is checked against, shared: a reload swaps it.
@@ -112,7 +119,8 @@ pub trait Workspace {
 }
 
 /// What the client configures, from the `initializationOptions` of `initialize`:
-/// `{"breaking": {"against": "main", "direction": "both"}, "completion": {"enable": true}}`.
+/// `{"breaking": {"against": "main", "direction": "both"}, "completion": {"enable": true},
+/// "highlighting": {"enable": true}}`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     /// `sqlty.breaking.against`: the baseline of `sqlty breaking`; `None` checks no baseline.
@@ -121,6 +129,9 @@ pub struct Settings {
     pub direction: Option<String>,
     /// `sqlty.completion.enable`: whether to complete names in queries; on unless `false`.
     pub completion: bool,
+    /// `highlighting.enable`: whether to send the SQL of checked strings as semantic
+    /// tokens; on unless `false`.
+    pub highlighting: bool,
 }
 
 impl Settings {
@@ -132,13 +143,17 @@ impl Settings {
                 .filter(|text| !text.is_empty())
                 .map(str::to_string)
         };
+        let enabled = |pointer: &str| {
+            options
+                .and_then(|options| options.pointer(pointer))
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(true)
+        };
         Self {
             against: text("/breaking/against"),
             direction: text("/breaking/direction"),
-            completion: options
-                .and_then(|options| options.pointer("/completion/enable"))
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(true),
+            completion: enabled("/completion/enable"),
+            highlighting: enabled("/highlighting/enable"),
         }
     }
 }
@@ -171,7 +186,7 @@ where
     connection.initialize_finish(
         id,
         serde_json::to_value(lsp_types::InitializeResult {
-            capabilities: capabilities(encoding.clone(), settings.completion),
+            capabilities: capabilities(encoding.clone(), &settings),
             server_info: Some(ServerInfo {
                 name: "sqlty".to_string(),
                 version: Some(env!("CARGO_PKG_VERSION").to_string()),
@@ -183,6 +198,10 @@ where
         background: Arc::default(),
         sender: connection.sender.clone(),
         encoding,
+        refresh: settings.highlighting && refresh_support(&params),
+        requests: Arc::default(),
+        completion: settings.completion,
+        highlighting: settings.highlighting,
     };
     let (jobs, queue) = mpsc::channel();
     let worker = {
@@ -230,6 +249,12 @@ struct Shared {
     background: Arc<Mutex<HashMap<Url, Vec<lsp_types::Diagnostic>>>>,
     sender: Sender<Message>,
     encoding: PositionEncodingKind,
+    /// Whether the client takes `workspace/semanticTokens/refresh`.
+    refresh: bool,
+    /// The id of the last request to the client.
+    requests: Arc<AtomicI32>,
+    completion: bool,
+    highlighting: bool,
 }
 
 impl Shared {
@@ -266,6 +291,18 @@ impl Shared {
                 message,
             },
         ));
+    }
+
+    /// Ask the client to request the semantic tokens of its buffers again.
+    fn refresh(&self) {
+        if self.refresh {
+            let id = self.requests.fetch_add(1, Ordering::Relaxed);
+            self.send(Request::new(
+                format!("sqlty-{id}").into(),
+                SemanticTokensRefresh::METHOD.to_string(),
+                (),
+            ));
+        }
     }
 
     fn publish(&self, uri: Url, diagnostics: Vec<lsp_types::Diagnostic>, version: Option<i32>) {
@@ -369,7 +406,20 @@ impl Shared {
                 let found = self
                     .documents()
                     .get(&params.text_document_position.text_document.uri)
+                    .filter(|_| self.completion)
                     .and_then(|document| completion::complete(document, &params, &self.encoding));
+                self.send(Response::new_ok(request.id, found));
+            }
+            SemanticTokensFullRequest::METHOD => {
+                let Ok(params) = serde_json::from_value::<SemanticTokensParams>(request.params)
+                else {
+                    return self.invalid(request.id, "semantic tokens");
+                };
+                let found = self
+                    .documents()
+                    .get(&params.text_document.uri)
+                    .filter(|_| self.highlighting)
+                    .map(|document| highlight::tokens(document, &self.encoding));
                 self.send(Response::new_ok(request.id, found));
             }
             ResolveCompletionItem::METHOD => {
@@ -432,8 +482,9 @@ fn encoding(params: &InitializeParams) -> PositionEncodingKind {
     }
 }
 
-/// What the server does; completion only when the client did not turn it off.
-fn capabilities(encoding: PositionEncodingKind, completion: bool) -> ServerCapabilities {
+/// What the server does; completion and highlighting only when the client did not turn
+/// them off.
+fn capabilities(encoding: PositionEncodingKind, settings: &Settings) -> ServerCapabilities {
     ServerCapabilities {
         position_encoding: Some(encoding),
         text_document_sync: Some(TextDocumentSyncCapability::Options(
@@ -451,13 +502,30 @@ fn capabilities(encoding: PositionEncodingKind, completion: bool) -> ServerCapab
             ]),
             ..CodeActionOptions::default()
         })),
-        completion_provider: completion.then(|| CompletionOptions {
+        semantic_tokens_provider: settings.highlighting.then(|| {
+            SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
+                legend: highlight::legend(),
+                full: Some(SemanticTokensFullOptions::Bool(true)),
+                ..SemanticTokensOptions::default()
+            })
+        }),
+        completion_provider: settings.completion.then(|| CompletionOptions {
             trigger_characters: Some(vec![".".to_string()]),
             resolve_provider: Some(true),
             ..CompletionOptions::default()
         }),
         ..ServerCapabilities::default()
     }
+}
+
+fn refresh_support(params: &InitializeParams) -> bool {
+    params
+        .capabilities
+        .workspace
+        .as_ref()
+        .and_then(|workspace| workspace.semantic_tokens.as_ref())
+        .and_then(|tokens| tokens.refresh_support)
+        .unwrap_or(false)
 }
 
 /// The workspace folders, else the root of the client; a file outside them all is its

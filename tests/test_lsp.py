@@ -206,7 +206,7 @@ def test_server_checks_and_fixes_a_buffer(tmp_path: Path) -> None:
         assert server.stop() == 0
 
 
-def test_server_completes_names_in_helper_and_marked_queries(tmp_path: Path) -> None:
+def test_server_completes_and_highlights_helper_and_marked_queries(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
     (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL, name TEXT);\n")
     (tmp_path / "db.py").write_text(HELPER)
@@ -234,6 +234,14 @@ def test_server_completes_names_in_helper_and_marked_queries(tmp_path: Path) -> 
         assert resolved["detail"] == "INT NOT NULL"
         assert [item["label"] for item in complete(3, 28)["items"]] == ["users"]
         assert complete(0, 3) is None
+
+        legend = init["capabilities"]["semanticTokensProvider"]["legend"]["tokenTypes"]
+        tokens = server.request("textDocument/semanticTokens/full", {"textDocument": {"uri": uri}})
+        data = tokens["data"]
+        kinds = [legend[kind] for kind in data[3::5]]
+        # `u. FROM` is `u.FROM` to the tokenizer until the column is typed.
+        assert kinds == ["keyword", "comment", "keyword", "operator", "keyword"]
+        assert data[:5] == [2, 5, 6, 0, 0], "SELECT of the helper string"
     finally:
         assert server.stop() == 0
 

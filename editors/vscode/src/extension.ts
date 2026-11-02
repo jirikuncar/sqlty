@@ -56,7 +56,12 @@ async function start(): Promise<void> {
   const serverOptions: ServerOptions = { command: server.command, args: server.args };
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: "file", language: "python" }],
-    initializationOptions: { breaking: settings.breaking, completion: settings.completion },
+    initializationOptions: {
+      breaking: settings.breaking,
+      completion: settings.completion,
+      // VS Code shows one semantic-token provider per file: sqlty's would replace Pylance's.
+      highlighting: { enable: false },
+    },
     outputChannel: output,
     synchronize: {
       fileEvents: vscode.workspace.createFileSystemWatcher("**/{pyproject.toml,*.sql}"),

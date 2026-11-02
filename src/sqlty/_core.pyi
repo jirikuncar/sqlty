@@ -130,6 +130,13 @@ def complete_source(
     helper_starts: list[int] = ...,
     limit: int = 200,
 ) -> tuple[int, int, bool, list[tuple[str, str, str | None, str | None, bool | None]]] | None: ...
+def highlight_source(
+    source: str,
+    *,
+    dialect: str = "postgres",
+    import_style: str | None = None,
+    helper_starts: list[int] = ...,
+) -> list[tuple[int, int, str]]: ...
 def skills() -> list[tuple[str, str]]: ...
 def serve() -> None:
     """Serve the language server on standard input and output until the client exits."""

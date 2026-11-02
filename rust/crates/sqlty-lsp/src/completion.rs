@@ -109,7 +109,7 @@ fn item(candidate: Candidate, rank: usize, range: lsp_types::Range) -> Completio
 
 /// `starts`, offsets into `old`, as offsets into `new`: those before the first changed
 /// byte stay, those after the last move with it, and those in between are dropped.
-fn moved(starts: &[usize], old: &str, new: &str) -> Vec<usize> {
+pub(crate) fn moved(starts: &[usize], old: &str, new: &str) -> Vec<usize> {
     let (old, new) = (old.as_bytes(), new.as_bytes());
     let prefix = old.iter().zip(new).take_while(|(a, b)| a == b).count();
     let room = old.len().min(new.len()) - prefix;

@@ -21,6 +21,7 @@
 use std::ops::Range;
 
 use sqlty_sql::analyzer::{self, Completions, SchemaData};
+use sqlty_sql::highlight::{highlight, Highlight};
 
 use crate::rewriter::{after_marker, escapes, extract_string_content, ImportStyle};
 use crate::scan::Scan;
@@ -96,9 +97,75 @@ impl<'s> Queries<'s> {
         if offset > strings[strings.len() - 1].end {
             return None;
         }
-        let mut pieces = Vec::new();
-        let mut value = String::new();
-        let mut cursor = None;
+        let decoded = self.decode(strings)?;
+        let cursor = decoded.literals.iter().find_map(|literal| {
+            if !literal.content.contains(&offset) && literal.content.end != offset {
+                return None;
+            }
+            let pieces = &decoded.pieces[literal.pieces.clone()];
+            Some(
+                pieces
+                    .iter()
+                    .find(|piece| offset < piece.source.end)
+                    .map_or(literal.value_end, |piece| {
+                        piece.value
+                            + if piece.verbatim {
+                                offset - piece.source.start
+                            } else {
+                                0
+                            }
+                    }),
+            )
+        })?;
+        let (shift, text) = text(decoded.value, *route)?;
+        if cursor < shift + MARKER.len() && *route != Route::Helper {
+            return None;
+        }
+        Some(QueryAt {
+            text,
+            offset: cursor - shift,
+            route: *route,
+            span: strings[0].start..strings[strings.len() - 1].end,
+            shift,
+            pieces: decoded.pieces,
+        })
+    }
+
+    /// What to color in every query, as source byte ranges in order: a token written
+    /// across string literals or escape sequences is split at them.
+    pub fn highlights(&self, dialect: &str) -> Vec<(Range<usize>, Highlight)> {
+        let mut found = Vec::new();
+        for (strings, route) in &self.sites {
+            let Some(decoded) = self.decode(strings) else {
+                continue;
+            };
+            let value = decoded.value.as_str();
+            let (marker, sql) = match route {
+                Route::Helper => (None, 0),
+                Route::Marker | Route::Wrapper => {
+                    let Some(rest) = after_marker(value) else {
+                        continue;
+                    };
+                    let start = value.len() - value.trim_start().len();
+                    let end = value.len() - rest.len();
+                    (Some((start..end, Highlight::Comment)), end)
+                }
+            };
+            let tokens = highlight(&value[sql..], dialect)
+                .into_iter()
+                .map(|(range, kind)| (range.start + sql..range.end + sql, kind));
+            for (range, kind) in marker.into_iter().chain(tokens) {
+                for source in source_ranges(&decoded.pieces, range) {
+                    found.push((source, kind));
+                }
+            }
+        }
+        found
+    }
+
+    /// The value of `strings`, one query's literals; `None` with an f-, t- or bytes string.
+    fn decode(&self, strings: &[Range<usize>]) -> Option<Decoded> {
+        let mut decoded = Decoded::default();
         for span in strings {
             let literal = &self.source[span.clone()];
             let quoted = literal.trim_start_matches(|c: char| c.is_ascii_alphabetic());
@@ -108,7 +175,8 @@ impl<'s> Queries<'s> {
             }
             let inner = extract_string_content(quoted);
             let start = span.start + prefix.len() + (quoted.len() - inner.len()) / 2;
-            let first = pieces.len();
+            let first = decoded.pieces.len();
+            let (pieces, value) = (&mut decoded.pieces, &mut decoded.value);
             if prefix.contains('r') {
                 pieces.push(Piece {
                     value: value.len(),
@@ -126,43 +194,67 @@ impl<'s> Queries<'s> {
                     value.push_str(piece);
                 });
             }
-            if (start..=start + inner.len()).contains(&offset) {
-                cursor = Some(
-                    pieces[first..]
-                        .iter()
-                        .find(|piece| offset < piece.source.end)
-                        .map_or(value.len(), |piece| {
-                            piece.value
-                                + if piece.verbatim {
-                                    offset - piece.source.start
-                                } else {
-                                    0
-                                }
-                        }),
-                );
-            }
+            decoded.literals.push(Literal {
+                content: start..start + inner.len(),
+                pieces: first..decoded.pieces.len(),
+                value_end: decoded.value.len(),
+            });
         }
-        let cursor = cursor?;
-        let (shift, text) = match route {
-            Route::Helper => (0, value),
-            Route::Marker | Route::Wrapper => {
-                let rest = after_marker(&value)?;
-                let marker_end = value.len() - rest.len();
-                if cursor < marker_end {
-                    return None;
-                }
-                (marker_end - MARKER.len(), format!("{MARKER}{rest}"))
-            }
-        };
-        Some(QueryAt {
-            text,
-            offset: cursor - shift,
-            route: *route,
-            span: strings[0].start..strings[strings.len() - 1].end,
-            shift,
-            pieces,
-        })
+        Some(decoded)
     }
+}
+
+/// The query `check` reads in `value` and how many bytes of `value` precede it, less the
+/// `--sql` it starts with; `None` for a marker route without a marker.
+fn text(value: String, route: Route) -> Option<(usize, String)> {
+    match route {
+        Route::Helper => Some((0, value)),
+        Route::Marker | Route::Wrapper => {
+            let rest = after_marker(&value)?;
+            let marker_end = value.len() - rest.len();
+            Some((marker_end - MARKER.len(), format!("{MARKER}{rest}")))
+        }
+    }
+}
+
+/// The source bytes `value` of a decoded string is written in: a range per piece it covers,
+/// a whole escape sequence for any of its bytes.
+fn source_ranges(pieces: &[Piece], value: Range<usize>) -> Vec<Range<usize>> {
+    let mut ranges: Vec<Range<usize>> = Vec::new();
+    for (i, piece) in pieces.iter().enumerate() {
+        let piece_end = pieces.get(i + 1).map_or(usize::MAX, |next| next.value);
+        let (start, end) = (value.start.max(piece.value), value.end.min(piece_end));
+        if start >= end {
+            continue;
+        }
+        let source = if piece.verbatim {
+            piece.source.start + start - piece.value..piece.source.start + end - piece.value
+        } else {
+            piece.source.clone()
+        };
+        match ranges.last_mut() {
+            Some(last) if last.end == source.start => last.end = source.end,
+            _ => ranges.push(source),
+        }
+    }
+    ranges
+}
+
+#[derive(Default)]
+struct Decoded {
+    value: String,
+    pieces: Vec<Piece>,
+    literals: Vec<Literal>,
+}
+
+/// One string literal of a query.
+struct Literal {
+    /// Its content in the source, between the quotes.
+    content: Range<usize>,
+    /// Its pieces in [`Decoded::pieces`].
+    pieces: Range<usize>,
+    /// The length of the value up to its end.
+    value_end: usize,
 }
 
 /// What completes at byte `offset` of `source`, `None` outside a query `check` reads:
@@ -349,6 +441,59 @@ mod tests {
             assert_eq!(marked(source, &[]), None, "{source}");
         }
         assert_eq!(marked(r#"run(f"SELECT {x} |", int)"#, &["f\""]), None);
+    }
+
+    /// The source text and kind of each colored range of `source`.
+    fn colored(source: &str, helpers: &[&str]) -> Vec<(String, Highlight)> {
+        let starts: Vec<usize> = helpers.iter().map(|h| source.find(h).unwrap()).collect();
+        Queries::new(source, &ImportStyle::parse(None).unwrap(), &starts)
+            .highlights("postgres")
+            .into_iter()
+            .map(|(range, kind)| (source[range].to_string(), kind))
+            .collect()
+    }
+
+    #[test]
+    fn highlights_each_checked_string() {
+        use Highlight::{Comment, Keyword, Number, Operator, String as Str};
+        assert_eq!(
+            colored(r#"q = "--sql\nSELECT 1 FROM t""#, &[]),
+            [
+                ("--sql".into(), Comment),
+                ("SELECT".into(), Keyword),
+                ("1".into(), Number),
+                ("FROM".into(), Keyword),
+            ]
+        );
+        assert_eq!(
+            colored(
+                "q = (\n  \"--sql\\n\"\n  \"SELECT 'a\\tb' \"\n  'FR' 'OM t')",
+                &[]
+            ),
+            [
+                ("--sql".into(), Comment),
+                ("SELECT".into(), Keyword),
+                (r"'a\tb'".into(), Str),
+                ("FR".into(), Keyword),
+                ("OM".into(), Keyword),
+            ],
+            "a token across literals is split, an escape sequence is whole"
+        );
+        assert_eq!(
+            colored(r#"run("SELECT * FROM t", int)"#, &["\"SELECT"]),
+            [
+                ("SELECT".into(), Keyword),
+                ("*".into(), Operator),
+                ("FROM".into(), Keyword),
+            ]
+        );
+        for unchecked in [
+            r#"q = "SELECT 1""#,
+            r#"q = f"--sql\nSELECT {x}""#,
+            r#"q = SQL[int]("SELECT 1")"#,
+        ] {
+            assert_eq!(colored(unchecked, &[]), [], "{unchecked}");
+        }
     }
 
     #[test]
