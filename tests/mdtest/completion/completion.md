@@ -126,6 +126,28 @@ q = "--sql\nSELECT * FROM users u WHERE u.e<CURSOR>"
 # completions: email column u
 ```
 
+## Same column in several tables
+
+A column offered by several tables is listed once per alias; the editor shows the alias
+next to each entry. A table named twice without aliases lists its columns once.
+
+```python
+q = "--sql\nSELECT <CURSOR> FROM users u JOIN users v ON u.id = v.id"
+# completions: email column u
+# completions: email column v
+# completions: id column u
+# completions: id column v
+# completions: name column u
+# completions: name column v
+```
+
+```python
+q = "--sql\nSELECT <CURSOR> FROM users, users"
+# completions: email column users
+# completions: id column users
+# completions: name column users
+```
+
 ## CTE and subquery scope
 
 ```python
