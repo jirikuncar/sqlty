@@ -213,11 +213,22 @@ vim.lsp.config("sqlty", {
 vim.lsp.enable("sqlty")
 ```
 
-`init_options` is optional: without it, no baseline is checked, and completion is on.
-`completion = { enable = false }` turns completion off.
+`init_options` is optional: without it, no baseline is checked, and completion and
+highlighting are on. `completion = { enable = false }` turns completion off,
+`highlighting = { enable = false }` highlighting.
 
 The server also answers `textDocument/completion` in the strings `sqlty check` checks:
 the table names after `FROM` or `JOIN`, and the columns of the tables in scope after
 `alias.` or in `SELECT`, `WHERE` and `ON`. Typing `.` triggers it. It sends
 at most 200 items and marks a longer list incomplete, so the client asks again as you
 type. `completionItem/resolve` adds each column's type and nullability.
+
+It colors the SQL of the same strings with semantic tokens
+(`textDocument/semanticTokens/full`): keywords, strings, numbers, comments, operators
+and placeholders. Neovim shows them with its default `@lsp.type.*` highlight groups.
+Names are left uncolored: sqlparser knows `name` and `status` as keywords too, so only
+the reserved words and clauses are.
+
+!!! note "VS Code does not ask for semantic tokens"
+    VS Code shows the tokens of one provider per file, so sqlty's would replace Pylance's
+    for the whole file. The extension turns highlighting off.

@@ -76,7 +76,10 @@ vim.lsp.config("sqlty", {
 vim.lsp.enable("sqlty")
 ```
 
-`init_options` is optional: without it, no baseline is checked.
+`init_options` is optional: without it, no baseline is checked. The server also
+colors the SQL of checked strings with semantic tokens; `highlighting = { enable = false }`
+turns that off. VS Code shows one semantic-token provider per file, so the extension
+keeps it off there.
 
 ## Breaking changes while editing
 

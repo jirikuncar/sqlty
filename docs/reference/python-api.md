@@ -127,6 +127,7 @@ from sqlty.core import (
     expand_star,
     explain_select,
     fix_source,
+    highlight_source,
     infer_type,
     load_schema,
     query_at,
@@ -250,6 +251,16 @@ line and column (in characters) of a query string, with the bytes they replace.
 b'na'
 ```
 
+`highlight_source` lists the SQL tokens to color in those same strings, as byte ranges.
+`sqlty server` sends them as semantic tokens:
+
+```pycon
+>>> from sqlty.core import highlight_source
+>>> source = 'q = "--sql\\nSELECT name FROM users WHERE id = %s"'
+>>> [(source[h.start : h.end], h.kind) for h in highlight_source(source)]
+[('--sql', 'comment'), ('SELECT', 'keyword'), ('FROM', 'keyword'), ('WHERE', 'keyword'), ('=', 'operator'), ('%s', 'parameter')]
+```
+
 | Function | Returns |
 |----------|---------|
 | `load_schema(schema_sql, *, dialect="postgres", types=None)` | A parsed `Schema`, for any `schema_sql` argument; `types` is [`[tool.sqlty.types]`](configuration.md#types) |
@@ -266,3 +277,4 @@ b'na'
 | `check_source(source, *, dialect="postgres", schema_sql=None, rules=None, import_style=None)` | List of diagnostics: `Diagnostic` dicts (`sqlty._lint.Diagnostic`, a `TypedDict`) with `rule`, `message`, `severity`, `line`, `start`, `end`, `fix` |
 | `query_at(source, offset, *, import_style=None, helpers=None, module=None)` | The `QueryAt` (`text`, `offset`, `route`, `span`, `source_offset(n)`) at byte `offset`, or `None` outside a checked query |
 | `complete_source(source, line, column, *, dialect="postgres", schema_sql=None, import_style=None, helpers=None, module=None, limit=200)` | `Completions(start, end, incomplete, items)` of `Completion(label, kind, detail, sql_type, nullable)` at the cursor, or `None` outside a checked query |
+| `highlight_source(source, *, dialect="postgres", import_style=None, helpers=None, module=None)` | `Highlight(start, end, kind)` per SQL token of the checked queries, `kind` one of `keyword`, `string`, `number`, `comment`, `operator`, `parameter` |

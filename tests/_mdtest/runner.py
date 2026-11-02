@@ -146,6 +146,23 @@ class Run:
                 lines = [f"{c.label} {c.kind} {c.detail or '-'}" for c in found.items]
                 more = found.incomplete or len(lines) > _COMPLETIONS_SHOWN
                 return "\n".join([*lines[:_COMPLETIONS_SHOWN], "..."] if more else lines)
+            case "highlighted":
+                found = core.highlight_source(
+                    text,
+                    dialect=self.dialect,
+                    import_style=self.import_style,
+                    helpers=self._helpers,
+                )
+                encoded = text.encode()
+                return (
+                    "\n".join(
+                        f"{h.kind} {line}"
+                        for h in found
+                        for line in encoded[h.start : h.end].decode().splitlines()
+                        if line.strip()
+                    )
+                    or "None"
+                )
             case "error":
                 raise AssertionError("errors are matched per line")
 

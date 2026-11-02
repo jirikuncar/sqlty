@@ -30,6 +30,7 @@ from sqlty._core import analyze_select as _analyze_select
 from sqlty._core import complete_source as _complete_source
 from sqlty._core import explain_select as _explain_select
 from sqlty._core import fix_source as _fix_source
+from sqlty._core import highlight_source as _highlight_source
 from sqlty._core import load_schema as _load_schema
 from sqlty._core import parse_error as _parse_error
 from sqlty._core import query_at as _query_at
@@ -678,6 +679,48 @@ def complete_source(
     return Completions(start, end, incomplete, [Completion(*item) for item in items])
 
 
+class Highlight(NamedTuple):
+    """A token to color: the bytes ``start`` to ``end`` of the source.
+
+    ``kind`` is ``keyword``, ``string``, ``number``, ``comment``, ``operator`` or
+    ``parameter``.
+    """
+
+    start: int
+    end: int
+    kind: str
+
+
+def highlight_source(
+    source: str | ParsedSource,
+    *,
+    dialect: str = "postgres",
+    import_style: str | None = None,
+    helpers: HelperIndex | None = None,
+    module: str | None = None,
+) -> list[Highlight]:
+    r"""The SQL tokens to color in the strings ``sqlty check`` reads, in order.
+
+    The strings are those of ``query_at``; every other string stays a Python string. Names
+    are not colored: a word is a keyword only when it is a reserved word or a clause, so
+    ``name`` and ``status`` stay names. A token written across string literals or escape
+    sequences gets one range per piece. ``sqlty server`` sends these as semantic tokens.
+
+    Example:
+        >>> source = 'q = "--sql\\nSELECT 1"; x = "SELECT 2"'
+        >>> [(source[h.start : h.end], h.kind) for h in highlight_source(source)]
+        [('--sql', 'comment'), ('SELECT', 'keyword'), ('1', 'number')]
+    """
+    parsed = ParsedSource.of(source, module)
+    found = _highlight_source(
+        parsed.text,
+        dialect=dialect,
+        import_style=import_style,
+        helper_starts=_helper_starts(parsed, helpers, module),
+    )
+    return [Highlight(*item) for item in found]
+
+
 def _helper_starts(
     parsed: ParsedSource, helpers: HelperIndex | None = None, module: str | None = None
 ) -> list[int]:
@@ -712,11 +755,13 @@ __all__ = [
     "RowUsage",
     "Completion",
     "Completions",
+    "Highlight",
     "analyze_select",
     "check_source",
     "complete_source",
     "expand_star",
     "fix_source",
+    "highlight_source",
     "infer_type",
     "json_shapes",
     "load_schema",

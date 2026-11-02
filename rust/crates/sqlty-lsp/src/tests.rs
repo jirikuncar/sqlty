@@ -114,6 +114,8 @@ struct Client {
     connection: Connection,
     server: Option<JoinHandle<Result<(), String>>>,
     pending: Vec<Notification>,
+    /// What the server asked of the client, by method.
+    asked: Vec<String>,
     next: i32,
     opened: Arc<AtomicUsize>,
 }
@@ -151,6 +153,7 @@ impl Client {
             connection,
             server: Some(server),
             pending: Vec::new(),
+            asked: Vec::new(),
             next: 0,
             opened,
         };
@@ -186,7 +189,8 @@ impl Client {
                         .unwrap_or_else(|error| json!({"error": error.code}));
                 }
                 Message::Notification(notification) => self.pending.push(notification),
-                other => panic!("unexpected {other:?}"),
+                Message::Request(asked) => self.asked.push(asked.method),
+                other @ Message::Response(_) => panic!("unexpected {other:?}"),
             }
         }
     }
@@ -199,7 +203,8 @@ impl Client {
             match self.receive() {
                 Message::Notification(n) if n.method == method => return n.params,
                 Message::Notification(n) => self.pending.push(n),
-                other => panic!("unexpected {other:?}"),
+                Message::Request(asked) => self.asked.push(asked.method),
+                other @ Message::Response(_) => panic!("unexpected {other:?}"),
             }
         }
     }
@@ -508,11 +513,12 @@ impl Client {
 }
 
 #[test]
-fn completion_is_advertised_with_its_trigger_unless_off() {
-    for (options, advertised) in [
-        (Value::Null, true),
-        (json!({"completion": {"enable": true}}), true),
-        (json!({"completion": {"enable": false}}), false),
+fn completion_and_highlighting_are_advertised_unless_off() {
+    for (options, advertised, highlighting) in [
+        (Value::Null, true, true),
+        (json!({"completion": {"enable": true}}), true, true),
+        (json!({"completion": {"enable": false}}), false, true),
+        (json!({"highlighting": {"enable": false}}), true, false),
     ] {
         let (server, connection) = Connection::memory();
         let thread = std::thread::spawn(move || {
@@ -525,6 +531,7 @@ fn completion_is_advertised_with_its_trigger_unless_off() {
             connection,
             server: Some(thread),
             pending: Vec::new(),
+            asked: Vec::new(),
             next: 0,
             opened: Arc::default(),
         };
@@ -532,6 +539,23 @@ fn completion_is_advertised_with_its_trigger_unless_off() {
             "initialize",
             json!({"capabilities": {}, "initializationOptions": options}),
         );
+        let tokens = &result["capabilities"]["semanticTokensProvider"];
+        if highlighting {
+            assert_eq!(tokens["full"], true);
+            assert_eq!(
+                tokens["legend"]["tokenTypes"],
+                json!([
+                    "keyword",
+                    "string",
+                    "number",
+                    "comment",
+                    "operator",
+                    "parameter"
+                ])
+            );
+        } else {
+            assert!(tokens.is_null(), "{tokens}");
+        }
         let provider = &result["capabilities"]["completionProvider"];
         if advertised {
             assert_eq!(provider["triggerCharacters"], json!(["."]));
@@ -668,5 +692,81 @@ fn completion_can_be_turned_off() {
     client.open("file:///work/q.py", text);
     client.notification("textDocument/publishDiagnostics");
     assert_eq!(client.complete("file:///work/q.py", 0, 21), Value::Null);
+    client.shutdown();
+}
+
+impl Client {
+    fn tokens(&mut self, uri: &str) -> Value {
+        self.request(
+            "textDocument/semanticTokens/full",
+            json!({"textDocument": {"uri": uri}}),
+        )
+    }
+}
+
+/// `data` of semantic tokens as `(line, character, length, type)`, positions made absolute.
+fn decoded(tokens: &Value) -> Vec<(u64, u64, u64, u64)> {
+    let data: Vec<u64> = serde_json::from_value(tokens["data"].clone()).unwrap();
+    let (mut line, mut character) = (0, 0);
+    data.chunks(5)
+        .map(|token| {
+            line += token[0];
+            character = if token[0] == 0 {
+                character + token[1]
+            } else {
+                token[1]
+            };
+            (line, character, token[2], token[3])
+        })
+        .collect()
+}
+
+#[test]
+fn semantic_tokens_color_the_sql_of_checked_strings() {
+    let mut client = Client::start(&json!({}));
+    let text =
+        "é = \"--sql\\nSELECT 'é' FROM t\"\nq = \"\"\"--sql\nSELECT 1\"\"\"\nx = \"SELECT 2\"\n";
+    client.open("file:///work/q.py", text);
+    let (keyword, string, number, comment) = (0, 1, 2, 3);
+    assert_eq!(
+        decoded(&client.tokens("file:///work/q.py")),
+        [
+            (0, 5, 5, comment),
+            (0, 12, 6, keyword),
+            (0, 19, 3, string),
+            (0, 23, 4, keyword),
+            (1, 7, 5, comment),
+            (2, 0, 6, keyword),
+            (2, 7, 1, number),
+        ],
+        "in UTF-16 units, before the first check"
+    );
+    assert_eq!(client.tokens("file:///nowhere/q.py"), Value::Null);
+    client.notification("textDocument/publishDiagnostics");
+    assert!(client.asked.is_empty(), "the check found nothing new");
+    client.shutdown();
+}
+
+#[test]
+fn a_check_that_finds_helper_strings_asks_for_the_tokens_again() {
+    let capabilities = json!({"workspace": {"semanticTokens": {"refreshSupport": true}}});
+    let mut client = Client::start(&capabilities);
+    client.open("file:///work/q.py", "run(\"SELECT 1\")\n");
+    assert_eq!(decoded(&client.tokens("file:///work/q.py")), []);
+    client.notification("textDocument/publishDiagnostics");
+    assert_eq!(decoded(&client.tokens("file:///work/q.py")).len(), 2);
+    assert_eq!(client.asked, ["workspace/semanticTokens/refresh"]);
+    client.shutdown();
+}
+
+#[test]
+fn highlighting_can_be_turned_off() {
+    let mut client = Client::with(
+        &json!({}),
+        &json!([{"uri": "file:///work", "name": "work"}]),
+        &json!({"highlighting": {"enable": false}}),
+    );
+    client.open("file:///work/q.py", "q = \"--sql\\nSELECT 1\"\n");
+    assert_eq!(client.tokens("file:///work/q.py"), Value::Null);
     client.shutdown();
 }

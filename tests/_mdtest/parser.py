@@ -32,6 +32,7 @@ Kind = Literal[
     "error",
     "decoded",
     "completions",
+    "highlighted",
 ]
 SQL_KINDS: tuple[Kind, ...] = ("inferred", "expanded", "columns", "json", "params", "rules")
 PY_KINDS: tuple[Kind, ...] = (
@@ -42,6 +43,7 @@ PY_KINDS: tuple[Kind, ...] = (
     "error",
     "decoded",
     "completions",
+    "highlighted",
 )
 DIRECTIVES = frozenset({"skip", "xfail"})
 # Where `# completions:` asks what completes; removed from the code every assertion reads.
