@@ -96,6 +96,31 @@ suite("sqlty", () => {
     assert.ok(await vscode.workspace.applyEdit(fix.edit));
     assert.match(document.getText(), /SELECT id, name FROM users/);
   });
+
+  test("highlights the SQL of marked strings, and no other string", async () => {
+    const [folder] = vscode.workspace.workspaceFolders ?? [];
+    const uri = vscode.Uri.joinPath(folder.uri, "highlight.py");
+    const tokens = await vscode.commands.executeCommand<{ c: string; t: string }[]>(
+      "_workbench.captureSyntaxTokens",
+      uri,
+    );
+    const sql = (scope: string) =>
+      tokens.filter((token) => token.t.split(" ").includes(scope)).map((token) => token.c);
+    const keywords = ["SELECT", "FROM", "WHERE", "SELECT", "AS", "FROM", "SELECT", "FROM", "WHERE"];
+    assert.deepEqual(sql("keyword.other.sql"), [...keywords, "SELECT", "FROM"]);
+    const comments = ["--sql", "-- note", "-- sql", "--sql", "--sql"];
+    assert.deepEqual(sql("comment.line.double-dash.sql"), comments);
+    assert.deepEqual(sql("comment.block.sql"), ["/* the", "key */"]);
+    assert.deepEqual(sql("string.quoted.single.sql").join(""), "'it''s'");
+    assert.deepEqual(sql("variable.parameter.sql"), ["%(id)s", "$1"]);
+    assert.deepEqual(sql("constant.numeric.sql"), ["1"]);
+    const unmarked = ["plain", "formatted", "raw", "data"];
+    const outside = tokens.filter(
+      (token) =>
+        token.t.includes("meta.embedded.sql") && unmarked.some((name) => token.c.includes(name)),
+    );
+    assert.deepEqual(outside, []);
+  });
 });
 
 suite("findServer", () => {

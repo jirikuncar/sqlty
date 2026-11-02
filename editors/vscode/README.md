@@ -1,8 +1,9 @@
 # sqlty for VS Code
 
 Type-check the SQL in your Python code as you type: the diagnostics of `sqlty check`, each
-on the span it is about, with a quick fix where `sqlty check --fix` has one, and completion
-of table and column names in the query strings it checks.
+on the span it is about, with a quick fix where `sqlty check --fix` has one, completion
+of table and column names in the query strings it checks, and SQL highlighting in strings
+marked `--sql`.
 
 The extension runs `sqlty server` from your project, so the editor and CI agree. Add sqlty
 to the project's environment (`uv add --dev sqlty`); the extension bundles none.

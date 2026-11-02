@@ -95,6 +95,28 @@
         "title": "Restart Server",
         "category": "sqlty"
       }
+    ],
+    "grammars": [
+      {
+        "scopeName": "sqlty.sql.injection",
+        "path": "./syntaxes/sql-injection.tmLanguage.json",
+        "injectTo": [
+          "source.python"
+        ],
+        "embeddedLanguages": {
+          "meta.embedded.sql": "sql"
+        }
+      },
+      {
+        "scopeName": "sqlty.sql.injection.multi",
+        "path": "./syntaxes/sql-injection-multi.tmLanguage.json",
+        "injectTo": [
+          "source.python"
+        ],
+        "embeddedLanguages": {
+          "meta.embedded.sql": "sql"
+        }
+      }
     ]
   },
   "scripts": {
