@@ -1,8 +1,8 @@
 # Editor integrations
 
-> **Status:** stage 1 done ([#840](https://github.com/jirikuncar/sqlty/pull/840)): `sqlty server` sends
-> semantic tokens. Stage 2 in review ([#841](https://github.com/jirikuncar/sqlty/pull/841)): the VS Code
-> grammar. Stage 3 in review: the Neovim, Vim and Helix recipe.
+> **Status:** stages 1 ([#840](https://github.com/jirikuncar/sqlty/pull/840), semantic tokens) and 2
+> ([#841](https://github.com/jirikuncar/sqlty/pull/841), the VS Code grammar) done; stage 3 (the
+> Neovim, Vim and Helix recipe) in review; stage 4 dropped. Left: nvim-lint, nvim-lspconfig, Mason.
 
 Tracks [#839](https://github.com/jirikuncar/sqlty/issues/839): highlight SQL in exactly the
 strings `sqlty check` checks, in VS Code and Neovim, and document the Vim and Neovim
@@ -26,7 +26,7 @@ needs a TextMate injection instead, which can only approximate the routes.
 | Stage | Content | State |
 |-------|---------|-------|
 | 1 | `textDocument/semanticTokens/full` in `sqlty server`, `core.highlight_source`, `# highlighted:` mdtests | done, [#840](https://github.com/jirikuncar/sqlty/pull/840) |
-| 2 | VS Code: TextMate injection for marked strings, with a fixture of strings that must and must not be highlighted | in review, [#841](https://github.com/jirikuncar/sqlty/pull/841) |
+| 2 | VS Code: TextMate injection for marked strings, with a fixture of strings that must and must not be highlighted | done, [#841](https://github.com/jirikuncar/sqlty/pull/841) |
 | 3 | Neovim, Vim and Helix recipe page (`vim.lsp.config`, vim-lsp, ALE, coc.nvim, Helix, a quickfix list), split out of `docs/recipes/vscode.md`; skill and agents table updated | in review |
 | 4 | ALE linter definition around `sqlty check --output-format json` | dropped: ALE runs `sqlty server` as an LSP linter (stage 3), which also reads unsaved buffers |
 
