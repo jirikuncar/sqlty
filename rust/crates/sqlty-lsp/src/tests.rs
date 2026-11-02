@@ -556,6 +556,7 @@ fn completion_after_a_dot_lists_the_columns() {
     let item = &found["items"][0];
     assert_eq!(item["kind"], 5, "a field");
     assert_eq!(item["sortText"], "0000");
+    assert_eq!(item["labelDetails"], json!({"description": "u"}));
     assert_eq!(
         item["textEdit"]["range"],
         json!({"start": {"line": 0, "character": 21}, "end": {"line": 0, "character": 21}})

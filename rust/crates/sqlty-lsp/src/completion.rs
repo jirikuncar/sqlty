@@ -5,8 +5,9 @@
 //! waits behind a check. A schema reload swaps the context; a request holds its own `Arc`.
 
 use lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionList, CompletionParams, CompletionResponse,
-    CompletionTextEdit, Documentation, MarkupContent, MarkupKind, PositionEncodingKind, TextEdit,
+    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionList,
+    CompletionParams, CompletionResponse, CompletionTextEdit, Documentation, MarkupContent,
+    MarkupKind, PositionEncodingKind, TextEdit,
 };
 use serde_json::json;
 use sqlty_python::locate::{self, Queries};
@@ -88,6 +89,13 @@ fn item(candidate: Candidate, rank: usize, range: lsp_types::Range) -> Completio
     };
     CompletionItem {
         kind: Some(kind),
+        label_details: candidate
+            .detail
+            .clone()
+            .map(|source| CompletionItemLabelDetails {
+                detail: None,
+                description: Some(source),
+            }),
         sort_text: Some(format!("{rank:04}")),
         text_edit: Some(CompletionTextEdit::Edit(TextEdit::new(
             range,
