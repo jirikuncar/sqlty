@@ -184,6 +184,15 @@ def test_unknown_keys_raise_config_error_naming_the_file(tmp_path):
             "[tool.sqlty]\nmax-query-variants = true\n",
             "max-query-variants must be a positive integer",
         ),
+        ("[tool.sqlty]\nimport-style = 1\n", "import-style must be a string"),
+        ("[tool.sqlty]\nschema = [1]\n", "schema must be a path or a list of paths"),
+        ("[tool.sqlty]\noverrides = {}\n", "overrides must be an array of tables"),
+        ("[[tool.sqlty.overrides]]\nrule = {}\n", "did you mean 'rules'?"),
+        ("[tool.sqlty]\nfunctions = {}\n", "functions must be an array of tables"),
+        (
+            "[[tool.sqlty.functions]]\nimport-path = 1\nquery-param = 'q'\n",
+            "functions]] import-path must be a string",
+        ),
     ],
 )
 def test_invalid_settings(tmp_path, toml, message):
@@ -218,6 +227,22 @@ def test_unreadable_pyproject_is_skipped_with_a_warning(
         config, root = load_config(tmp_path)
     assert (config, root) == ({}, None)
     assert "Failed to parse" in caplog.text
+
+
+def test_pyproject_that_is_not_utf8_is_skipped_with_a_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    (tmp_path / "pyproject.toml").write_bytes(b"[tool.sqlty]\ndialect = '\xff'\n")
+    with caplog.at_level(logging.WARNING):
+        assert load_config(tmp_path) == ({}, None)
+    assert "pyproject.toml: invalid utf-8" in caplog.text
+
+
+def test_values_of_a_parsed_table_are_validated() -> None:
+    with pytest.raises(ConfigError, match="import-style must be a string"):
+        validate_tool_table({"import-style": ("a", 1.5)}, "x")
+    with pytest.raises(ConfigError, match="unknown dialect 'None'"):
+        validate_tool_table({"dialect": None}, "x")
 
 
 def test_incomplete_function_entries_are_skipped(

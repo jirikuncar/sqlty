@@ -13,6 +13,7 @@
 //! - [`edit`]: the [`edit::Edit`]s that rewriting, stripping and fixing make, applied in
 //!   one pass by [`edit::apply_edits`].
 //! - [`rules`]: the lint [`rules::Rule`]s, their severities and the user's overrides.
+//! - [`config`]: the `[tool.sqlty]` table, loaded and validated for every host.
 //! - [`options`]: the settings every entry point shares.
 //!
 //! The tokenizer and scanner are crate-internal.
@@ -32,6 +33,7 @@
 //! ```
 
 pub mod checker;
+pub mod config;
 pub mod edit;
 pub mod fixer;
 pub mod locate;

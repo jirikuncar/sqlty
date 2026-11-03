@@ -10,6 +10,7 @@
 //! - Source: `rewrite_source`, `strip_source`, `fix_source`, `check_source`,
 //!   `wrapped_queries`, `query_sites`.
 //! - Schema: `load_schema`, `schema_skipped_tables`, `schema_skipped_objects`, `name_rules`.
+//! - Configuration: `load_config`, `validate_config` and the key lists.
 //!
 //! Parsed schemas are cached per `(schema text, dialect)` in a small LRU shared by all
 //! threads, because callers pass the same few schemas call after call; `load_schema`
@@ -20,6 +21,7 @@
 //! the pieces that need no interpreter (the schema cache, `schema_for`, nullability
 //! mapping). The `#[pyfunction]`s are exercised from Python by `tests/`.
 
+mod config;
 mod server;
 
 use sqlty_python::checker;
@@ -1099,6 +1101,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<QueryAtHandle>()?;
     m.add_function(wrap_pyfunction!(skills, m)?)?;
     m.add_function(wrap_pyfunction!(server::serve, m)?)?;
+    config::register(m)?;
     Ok(())
 }
 

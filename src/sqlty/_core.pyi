@@ -1,6 +1,6 @@
 """Type stubs for the Rust extension module (sqlty._core)."""
 
-from typing import final
+from typing import Any, final
 
 from sqlty._lint import Diagnostic
 
@@ -154,3 +154,15 @@ def schema_skipped_tables(schema_sql: str | Schema, *, dialect: str = "postgres"
 def schema_skipped_objects(
     schema_sql: str | Schema, *, dialect: str = "postgres"
 ) -> list[tuple[str, str]]: ...
+
+class ConfigSyntaxError(ValueError): ...
+
+CONFIG_FILES: tuple[str, str, str]
+TOOL_KEYS: tuple[str, ...]
+DISCOVERY_KEYS: tuple[str, ...]
+FUNCTION_KEYS: tuple[str, ...]
+
+def load_config(
+    data: bytes, file_name: str, source: str, *, required: bool
+) -> tuple[dict[str, Any], list[str]] | None: ...
+def validate_config(table: dict[str, Any], source: str) -> tuple[dict[str, Any], list[str]]: ...
