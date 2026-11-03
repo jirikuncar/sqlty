@@ -1,8 +1,8 @@
 # Server features in query strings
 
-> **Status:** stage 1 (hover) merged in [#852](https://github.com/jirikuncar/sqlty/pull/852); stage 3 (join completion) in
-> review. Stage 2 needs a decision on where signatures come from, stage 4 on whether to format
-> at all; stage 5 waits for demand after stage 1.
+> **Status:** stage 1 (hover) merged in [#852](https://github.com/jirikuncar/sqlty/pull/852); stage 3 (join completion)
+> merged in [#853](https://github.com/jirikuncar/sqlty/pull/853). Stage 2 needs a decision on where signatures come
+> from, stage 4 on whether to format at all; stage 5 waits for demand after stage 1.
 
 Tracks [#847](https://github.com/jirikuncar/sqlty/issues/847): what `sqlty server` offers inside
 a query string beyond diagnostics, quick fixes, completion and semantic tokens. Every stage needs
@@ -14,7 +14,7 @@ only the schema and the parsed query: no connection, no execution.
 |-------|---------|-------|
 | 1 | Hover: a column's type and source, a table's columns, a result column with its inference rule; `core.hover_source`, `# hover:` mdtests, `textDocument/hover`, `hover.enable` | merged, [#852](https://github.com/jirikuncar/sqlty/pull/852) |
 | 2 | Signature help for functions the inference rules type, from their `function`, `argument` and `reference` | needs a decision: 36 of 389 function rules give arguments, none give arity or parameter names |
-| 3 | Join completion: after `JOIN`, tables linked by a foreign key first, with the `ON` clause | in review |
+| 3 | Join completion: after `JOIN`, tables linked by a foreign key first, with the `ON` clause | merged, [#853](https://github.com/jirikuncar/sqlty/pull/853) |
 | 4 | Formatting: decide whether sqlty formats at all | not started |
 | 5 | Inlay hints of column types for `SELECT *` | waits for demand after stage 1 |
 
