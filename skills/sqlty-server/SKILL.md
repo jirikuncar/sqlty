@@ -7,7 +7,9 @@ description: Run sqlty in an editor with sqlty server, the language server, and 
 
 `sqlty server` is a language server on standard input and output. It reports what
 `sqlty check` reports while you type, each diagnostic under the name, row type or
-query it is about, with the fix of `sqlty check --fix` as a quick fix.
+query it is about, with the fix of `sqlty check --fix` as a quick fix. In a query
+string it completes table and column names, and hover shows a column's type, a table's
+columns or a result column's inference rule.
 
 Run `sqlty version`: this skill may be newer or older than the installed sqlty.
 When it and `sqlty server --help` disagree, trust the command.

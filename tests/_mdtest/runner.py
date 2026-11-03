@@ -146,6 +146,18 @@ class Run:
                 lines = [f"{c.label} {c.kind} {c.detail or '-'}" for c in found.items]
                 more = found.incomplete or len(lines) > _COMPLETIONS_SHOWN
                 return "\n".join([*lines[:_COMPLETIONS_SHOWN], "..."] if more else lines)
+            case "hover":
+                if unit.cursor is None:
+                    raise AssertionError("`# hover:` needs a <CURSOR> in the code")
+                hovered = core.hover_source(
+                    text,
+                    *unit.cursor,
+                    dialect=self.dialect,
+                    schema_sql=self.schema_sql,
+                    import_style=self.import_style,
+                    helpers=self._helpers,
+                )
+                return "None" if hovered is None else hovered.contents
             case "highlighted":
                 found = core.highlight_source(
                     text,

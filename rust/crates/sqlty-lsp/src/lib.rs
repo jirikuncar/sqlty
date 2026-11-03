@@ -1,12 +1,12 @@
-//! The language server of `sqlty server`: diagnostics, quick fixes, fix-all, completion and
-//! SQL highlighting for Python files.
+//! The language server of `sqlty server`: diagnostics, quick fixes, fix-all, completion,
+//! hover and SQL highlighting for Python files.
 //!
 //! The protocol runs on the thread that calls [`run`]. Checks run on one worker thread that
 //! owns a [`Workspace`] per project root: the Python passes hold the GIL, so two checks could
 //! not overlap anyway. The worker checks the newest text of each buffer and publishes the
 //! result only while that text is current. Completion is answered on the protocol thread
 //! from what the buffer's last check left (see [`CompletionContext`]), never behind a check;
-//! so are semantic tokens.
+//! so are hover and semantic tokens.
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -22,21 +22,23 @@ use lsp_types::notification::{
     DidSaveTextDocument, LogMessage, Notification as _, PublishDiagnostics, ShowMessage,
 };
 use lsp_types::request::{
-    CodeActionRequest, Completion, Request as _, ResolveCompletionItem, SemanticTokensFullRequest,
-    SemanticTokensRefresh,
+    CodeActionRequest, Completion, HoverRequest, Request as _, ResolveCompletionItem,
+    SemanticTokensFullRequest, SemanticTokensRefresh,
 };
 use lsp_types::{
     CodeActionKind, CodeActionOptions, CodeActionParams, CodeActionProviderCapability,
-    CompletionItem, CompletionOptions, CompletionParams, InitializeParams, LogMessageParams,
-    MessageType, PositionEncodingKind, PublishDiagnosticsParams, SemanticTokensFullOptions,
-    SemanticTokensOptions, SemanticTokensParams, SemanticTokensServerCapabilities,
-    ServerCapabilities, ServerInfo, ShowMessageParams, TextDocumentSyncCapability,
-    TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, Url,
+    CompletionItem, CompletionOptions, CompletionParams, HoverParams, HoverProviderCapability,
+    InitializeParams, LogMessageParams, MessageType, PositionEncodingKind,
+    PublishDiagnosticsParams, SemanticTokensFullOptions, SemanticTokensOptions,
+    SemanticTokensParams, SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
+    ShowMessageParams, TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+    TextDocumentSyncSaveOptions, Url,
 };
 
 mod actions;
 mod completion;
 mod highlight;
+mod hover;
 mod text;
 mod worker;
 
@@ -120,7 +122,7 @@ pub trait Workspace {
 
 /// What the client configures, from the `initializationOptions` of `initialize`:
 /// `{"breaking": {"against": "main", "direction": "both"}, "completion": {"enable": true},
-/// "highlighting": {"enable": true}}`.
+/// "hover": {"enable": true}, "highlighting": {"enable": true}}`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     /// `sqlty.breaking.against`: the baseline of `sqlty breaking`; `None` checks no baseline.
@@ -129,6 +131,8 @@ pub struct Settings {
     pub direction: Option<String>,
     /// `sqlty.completion.enable`: whether to complete names in queries; on unless `false`.
     pub completion: bool,
+    /// `hover.enable`: whether to say what a word of a query is; on unless `false`.
+    pub hover: bool,
     /// `highlighting.enable`: whether to send the SQL of checked strings as semantic
     /// tokens; on unless `false`.
     pub highlighting: bool,
@@ -153,6 +157,7 @@ impl Settings {
             against: text("/breaking/against"),
             direction: text("/breaking/direction"),
             completion: enabled("/completion/enable"),
+            hover: enabled("/hover/enable"),
             highlighting: enabled("/highlighting/enable"),
         }
     }
@@ -202,6 +207,7 @@ where
         refresh: settings.highlighting && refresh_support(&params),
         requests: Arc::default(),
         completion: settings.completion,
+        hover: settings.hover,
         highlighting: settings.highlighting,
     };
     let (jobs, queue) = mpsc::channel();
@@ -255,6 +261,7 @@ struct Shared {
     /// The id of the last request to the client.
     requests: Arc<AtomicI32>,
     completion: bool,
+    hover: bool,
     highlighting: bool,
 }
 
@@ -411,6 +418,17 @@ impl Shared {
                     .and_then(|document| completion::complete(document, &params, &self.encoding));
                 self.send(Response::new_ok(request.id, found));
             }
+            HoverRequest::METHOD => {
+                let Ok(params) = serde_json::from_value::<HoverParams>(request.params) else {
+                    return self.invalid(request.id, "hover");
+                };
+                let found = self
+                    .documents()
+                    .get(&params.text_document_position_params.text_document.uri)
+                    .filter(|_| self.hover)
+                    .and_then(|document| hover::hover(document, &params, &self.encoding));
+                self.send(Response::new_ok(request.id, found));
+            }
             SemanticTokensFullRequest::METHOD => {
                 let Ok(params) = serde_json::from_value::<SemanticTokensParams>(request.params)
                 else {
@@ -483,8 +501,8 @@ fn encoding(params: &InitializeParams) -> PositionEncodingKind {
     }
 }
 
-/// What the server does; completion and highlighting only when the client did not turn
-/// them off.
+/// What the server does; completion, hover and highlighting only when the client did not
+/// turn them off.
 fn capabilities(encoding: PositionEncodingKind, settings: &Settings) -> ServerCapabilities {
     ServerCapabilities {
         position_encoding: Some(encoding),
@@ -515,6 +533,9 @@ fn capabilities(encoding: PositionEncodingKind, settings: &Settings) -> ServerCa
             resolve_provider: Some(true),
             ..CompletionOptions::default()
         }),
+        hover_provider: settings
+            .hover
+            .then_some(HoverProviderCapability::Simple(true)),
         ..ServerCapabilities::default()
     }
 }

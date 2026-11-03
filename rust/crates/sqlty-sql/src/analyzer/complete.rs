@@ -442,17 +442,17 @@ fn is_word(c: char) -> bool {
 }
 
 /// A token of the query: a word (name or keyword, quoted or not) or one punctuation char.
-struct Tok {
-    text: String,
-    word: bool,
-    span: Range<usize>,
+pub(super) struct Tok {
+    pub(super) text: String,
+    pub(super) word: bool,
+    pub(super) span: Range<usize>,
     /// Open parentheses before it; a `(` and its `)` count the outer level.
-    depth: usize,
+    pub(super) depth: usize,
 }
 
 /// The tokens of `text`, without strings and comments; `None` when `text` ends inside a
 /// string or a comment. A quoted name left open at the end is a word.
-fn lex(text: &str) -> Option<Vec<Tok>> {
+pub(super) fn lex(text: &str) -> Option<Vec<Tok>> {
     let mut tokens = Vec::new();
     let mut depth = 0usize;
     let mut chars = text.char_indices().peekable();

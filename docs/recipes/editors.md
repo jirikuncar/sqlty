@@ -2,7 +2,7 @@
 
 `sqlty server` is a language server on standard input and output. Any LSP client runs it
 for Python files and gets what `sqlty check` reports as you type, the fix of
-`sqlty check --fix` as a quick fix, completion of table and column names, and SQL
+`sqlty check --fix` as a quick fix, completion of table and column names, hover, and SQL
 highlighting in the strings `sqlty check` checks.
 
 Add sqlty to the project's environment (`uv add --dev sqlty`) and start the editor from
@@ -129,6 +129,7 @@ Every client passes the same `initializationOptions` (`init_options` in Neovim,
 init_options = {
   breaking = { against = "main", direction = "both" },
   completion = { enable = true },
+  hover = { enable = true },
   highlighting = { enable = true },
 }
 ```
@@ -138,6 +139,7 @@ init_options = {
 | `breaking.against` | none | A baseline for `sqlty breaking`: a git revision, a `--save` snapshot or schema files |
 | `breaking.direction` | `both` | `both`, `forward` or `backward` |
 | `completion.enable` | `true` | Complete table and column names in query strings |
+| `hover.enable` | `true` | Say what a word of a query string is: a column's type, a table's columns, a result column's inference rule |
 | `highlighting.enable` | `true` | Send the SQL of checked strings as semantic tokens |
 
 ## Vim
