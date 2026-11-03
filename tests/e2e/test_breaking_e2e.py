@@ -427,3 +427,21 @@ def test_a_snapshot_without_a_schema_checks_no_query(
     monkeypatch.chdir(repo)
 
     main(["breaking", "--against", "../head.json", "--quiet"])
+
+
+def test_jobs_give_the_same_findings(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from sqlty._cli import main
+
+    for i in range(4):
+        (repo / "app" / f"m{i}.py").write_text(OLD_CODE + NEW_CODE)
+    monkeypatch.chdir(repo)
+
+    def findings(jobs: str) -> list[str]:
+        with pytest.raises(SystemExit):
+            main(["breaking", "--against", "HEAD~1", "-j", jobs])
+        return capsys.readouterr().out.splitlines()
+
+    assert findings("1") == findings("3")
+    assert findings("3")[-1] == "Found 6 breaking change(s)"

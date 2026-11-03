@@ -16,6 +16,7 @@ schema file, which has no queries and so is only checked forward.
 from __future__ import annotations
 
 import contextlib
+import os
 import shutil
 import subprocess
 import sys
@@ -29,10 +30,13 @@ if TYPE_CHECKING:
     import argparse
 
     from sqlty._cli import Settings, SettingsResolver
+    from sqlty._helpers import HelperIndex
     from sqlty._lint import Diagnostic
     from sqlty._snapshot import Snapshot
     from sqlty._source import ParsedSource
     from sqlty.core import Schema
+
+    _Work = tuple[Path, ParsedSource, Settings, Schema | None, HelperIndex]
 
 Direction = Literal["backward", "forward", "both"]
 SchemaKey = tuple[str | None, str, tuple[tuple[str, str], ...]]
@@ -145,6 +149,7 @@ def run(args: argparse.Namespace) -> list[Finding]:
     from sqlty._snapshot import save
 
     root = _root(args)
+    jobs = args.jobs or os.process_cpu_count() or 1
     paths = [Path(p).resolve().relative_to(root) for p in (args.paths or [Path.cwd()])]
     with contextlib.ExitStack() as stack:
         baselines = _baselines(args.against, root, paths, stack) if args.against else []
@@ -161,9 +166,13 @@ def run(args: argparse.Namespace) -> list[Finding]:
                         file=sys.stderr,
                     )
                 else:
-                    findings += _compare("backward", baseline.label, queries=baseline, schema=head)
+                    findings += _compare(
+                        "backward", baseline.label, queries=baseline, schema=head, jobs=jobs
+                    )
             if args.direction in ("forward", "both"):
-                findings += _compare("forward", baseline.label, queries=head, schema=baseline)
+                findings += _compare(
+                    "forward", baseline.label, queries=head, schema=baseline, jobs=jobs
+                )
         return findings
 
 
@@ -216,10 +225,12 @@ def _compare(
     *,
     queries: Queries,
     schema: Schemas,
+    jobs: int = 1,
 ) -> list[Finding]:
+    """What ``schema`` breaks in ``queries``; up to ``jobs`` processes check the files."""
     from sqlty._helpers import configured_helpers
     from sqlty._source import ParsedSource
-    from sqlty.core import HelperIndex, breaking_source
+    from sqlty.core import HelperIndex
 
     sources: dict[Path, ParsedSource] = {}
     index = HelperIndex()
@@ -228,24 +239,63 @@ def _compare(
         for name in source.names:
             index.add(name, sources[relative])
     helpers_for = configured_helpers(index, queries.roots())
-    findings: list[Finding] = []
+    work: list[_Work] = []
     for relative, parsed in sources.items():
         own = queries.settings(relative)
-        if schema.schema_key(relative, own) == own.schema_key:
-            continue
-        for diagnostic in breaking_source(
-            parsed,
-            schema_sql=own.schema,
-            against_sql=schema.schema(relative, own),
-            dialect=own.dialect,
-            rules=own.rules,
-            import_style=own.import_style,
-            untyped=own.untyped,
-            query_variants=own.query_variants,
-            helpers=helpers_for(own),
-        ):
-            findings.append(Finding(direction, against, relative, diagnostic, parsed))
-    return findings
+        if schema.schema_key(relative, own) != own.schema_key:
+            work.append((relative, parsed, own, schema.schema(relative, own), helpers_for(own)))
+    return [
+        Finding(direction, against, relative, diagnostic, parsed)
+        for (relative, parsed, *_), found in zip(work, _map(work, jobs), strict=True)
+        for diagnostic in found
+    ]
+
+
+_shared: list[_Work] = []
+
+
+def _map(work: list[_Work], jobs: int) -> list[list[Diagnostic]]:
+    """The diagnostics of each item of ``work``, checked by forked processes that inherit it.
+
+    The checks are mostly Python, so threads would wait on the GIL. Without ``fork`` (Windows),
+    or for one job, they run here.
+    """
+    import multiprocessing
+    from concurrent.futures import ProcessPoolExecutor
+
+    jobs = min(jobs, len(work))
+    if jobs <= 1 or "fork" not in multiprocessing.get_all_start_methods():
+        return [_check(item) for item in work]
+    _shared[:] = work
+    try:
+        context = multiprocessing.get_context("fork")
+        size = max(1, min(64, len(work) // (jobs * 4)))
+        chunks = [range(i, min(i + size, len(work))) for i in range(0, len(work), size)]
+        with ProcessPoolExecutor(jobs, mp_context=context) as pool:
+            return [found for chunk in pool.map(_check_shared, chunks) for found in chunk]
+    finally:
+        _shared.clear()
+
+
+def _check_shared(chunk: range) -> list[list[Diagnostic]]:
+    return [_check(_shared[i]) for i in chunk]
+
+
+def _check(item: _Work) -> list[Diagnostic]:
+    from sqlty.core import breaking_source
+
+    _, parsed, own, against, helpers = item
+    return breaking_source(
+        parsed,
+        schema_sql=own.schema,
+        against_sql=against,
+        dialect=own.dialect,
+        rules=own.rules,
+        import_style=own.import_style,
+        untyped=own.untyped,
+        query_variants=own.query_variants,
+        helpers=helpers,
+    )
 
 
 def _baselines(
