@@ -341,7 +341,7 @@ def fix_source(
     A fix for a rule is not applied to a query whose reported line carries
     ``# sqlty: ignore`` or ``# sqlty: ignore[rule]`` naming that rule, so a
     suppressed ``select-star`` is not expanded. Other rules on the line are fixed.
-    A string passed to a helper with its row type (see ``check_source``) is not wrapped.
+    A string passed to a helper with its row type, or to a configured helper, is not wrapped.
 
     Example:
         >>> fix_source('q = "--sql SELECT 1"  # sqlty: ignore[inline-sql-comment]')
