@@ -12,6 +12,8 @@ import importlib
 import importlib.util
 import pkgutil
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -202,6 +204,56 @@ def test_plugin_manifests(manifest: str) -> None:
         assert plugins[0]["source"] == "./"
     elif not manifest.startswith(".claude-plugin"):
         assert data["skills"] == "./skills/"
+
+
+def test_every_place_has_the_release_version() -> None:
+    """The manifests, `Cargo.lock` and the quoted `rev:` agree with `rust/Cargo.toml`."""
+    found = subprocess.run(
+        [sys.executable, ROOT / "scripts" / "bump_version.py", "--check"],
+        capture_output=True,
+        text=True,
+    )
+    assert found.returncode == 0, f"run `scripts/bump_version.py VERSION`:\n{found.stderr}"
+
+
+def test_bump_version_writes_every_place(tmp_path: Path) -> None:
+    """`bump_version.py X` changes the version lines of every place and no other line."""
+    places = {
+        "rust/Cargo.toml": 1,
+        "rust/Cargo.lock": 5,
+        ".claude-plugin/plugin.json": 1,
+        ".claude-plugin/marketplace.json": 2,
+        ".codex-plugin/plugin.json": 1,
+        ".cursor-plugin/plugin.json": 1,
+        "docs/recipes/ci.md": 1,
+        "skills/sqlty-ci/SKILL.md": 1,
+    }
+    for place in ["scripts/bump_version.py", *places]:
+        (tmp_path / place).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / place).write_bytes((ROOT / place).read_bytes())
+
+    def run(*args: str) -> subprocess.CompletedProcess[str]:
+        script = tmp_path / "scripts" / "bump_version.py"
+        return subprocess.run([sys.executable, script, *args], capture_output=True, text=True)
+
+    old = {place: (tmp_path / place).read_text() for place in places}
+    assert run("v9.8.7rc1", "--dry-run").returncode == 0
+    assert all((tmp_path / place).read_text() == text for place, text in old.items())
+
+    assert run("v9.8.7rc1").returncode == 0
+    for place, count in places.items():
+        lines = zip(
+            old[place].splitlines(), (tmp_path / place).read_text().splitlines(), strict=True
+        )
+        changed = [(before, after) for before, after in lines if before != after]
+        assert len(changed) == count, place
+        assert all(re.sub(r"\d+\.\d+\.\d+", "9.8.7rc1", b) == a for b, a in changed), place
+    assert run("--check").returncode == 0
+
+    (tmp_path / "docs/recipes/ci.md").write_text(old["docs/recipes/ci.md"])
+    drifted = run("--check")
+    assert drifted.returncode == 1
+    assert drifted.stderr == "docs/recipes/ci.md: disagrees with rust/Cargo.toml\n"
 
 
 def test_rule_docs_link_to_the_site() -> None:
