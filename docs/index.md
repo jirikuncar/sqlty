@@ -1,4 +1,4 @@
-# SQLTy
+# ![SQLTy](assets/sqlty-wordmark-light.svg#only-light){ width="360" } ![SQLTy](assets/sqlty-wordmark-dark.svg#only-dark){ width="360" } { #sqlty }
 
 Type-safe raw SQL for Python. sqlty infers the row type of each query from
 its SQL, writes it into your source as `SQL[T]`, and checks that it stays

@@ -51,6 +51,8 @@ nav = [
 ]
 
 [project.theme]
+custom_dir = "overrides"
+favicon = "assets/favicon/favicon.ico"
 features = [
   "content.action.edit",
   "content.code.copy",
