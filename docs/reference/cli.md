@@ -292,7 +292,7 @@ Found 1 breaking change(s)
 ```text
 sqlty breaking [-h] [--against BASELINE] [--save PATH] [--head REF]
                [--direction {backward,forward,both}] [-q]
-               [--output-format {text,json,github}]
+               [--output-format {text,json,github}] [-j N]
                [paths ...]
 ```
 <!-- /generated:cli-usage-breaking -->

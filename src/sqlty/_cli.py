@@ -274,6 +274,15 @@ def build_parser() -> argparse.ArgumentParser:
         "file, line, rule, severity, message, direction and against) or github (GitHub "
         "Actions annotations, each at its severity)",
     )
+    breaking_parser.add_argument(
+        "-j",
+        "--jobs",
+        type=_jobs,
+        metavar="N",
+        help="Processes checking files at once; 1 checks them here, as does a platform "
+        "without fork (Windows). Output is the same in any case (default: the number of "
+        "processors)",
+    )
 
     # --- rule ---
     rule_parser = subparsers.add_parser(
