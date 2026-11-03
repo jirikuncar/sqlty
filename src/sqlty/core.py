@@ -613,8 +613,9 @@ def query_at(
 class Completion(NamedTuple):
     """A name that can be typed at the cursor.
 
-    ``kind`` is ``table``, ``view``, ``cte`` or ``column``; ``detail`` the schema of a
-    relation or the alias (or table) of a column.
+    ``kind`` is ``table``, ``view``, ``cte``, ``column``, or ``join`` for a table a
+    foreign key links to one in scope, its ``ON`` clause included; ``detail`` the schema of
+    a relation or the alias (or table) of a column.
     """
 
     label: str

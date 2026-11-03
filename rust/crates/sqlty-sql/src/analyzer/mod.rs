@@ -75,7 +75,8 @@ pub use star_expand::{expand_star, result_stars};
 use typed::Typed;
 
 pub use crate::catalog::{
-    Catalog as SchemaData, Columns, NameRef, RelationKind, RelationRef, SchemaColumn, TypeOverrides,
+    Catalog as SchemaData, Columns, Join, NameRef, RelationKind, RelationRef, SchemaColumn,
+    TypeOverrides,
 };
 
 /// A loaded schema, shared so callers can cache it across queries.

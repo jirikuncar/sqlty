@@ -27,11 +27,13 @@
 //! - `alter`: `ALTER TABLE` / `ALTER TYPE` semantics
 //! - `resolve`: raw definitions into the resolved [`Catalog`]
 //! - `index`: sorted names for prefix lookups ([`Catalog::relations_with_prefix`])
+//! - `joins`: the tables a foreign key links, either way ([`Catalog::joins_with_prefix`])
 //! - `read`: statements into operations, and [`load`]
 
 mod alter;
 mod columns;
 mod index;
+mod joins;
 mod loader;
 mod names;
 mod read;
@@ -40,6 +42,7 @@ mod resolve;
 #[cfg(test)]
 pub(crate) use index::visited;
 pub use index::{Columns, NameRef, RelationKind, RelationRef};
+pub use joins::Join;
 pub(crate) use names::fold;
 pub(crate) use read::{load, load_with};
 

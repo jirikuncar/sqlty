@@ -8,7 +8,7 @@ a query string. A string gets completion exactly when `sqlty check` checks it. T
 
 ```sql
 CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT);
-CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, total NUMERIC);
+CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users, total NUMERIC);
 CREATE VIEW user_names AS SELECT id, name FROM users;
 ```
 
@@ -115,6 +115,34 @@ q = SQL[tuple[int]]("--sql\nSELECT count(*) FROM <CURSOR>")
 # completions: pg_class table pg_catalog
 # completions: pg_config table pg_catalog
 # completions: ...
+```
+
+## Join on a foreign key
+
+After `JOIN`, the tables a foreign key links to one in scope come first, either way, each
+with the `ON` clause that joins them. A table already in scope under its own name is left
+out, since its `ON` clause would be ambiguous.
+
+```python
+q = "--sql\nSELECT * FROM users u JOIN <CURSOR>"
+# completions: orders ON orders.user_id = u.id join public
+# completions: orders table public
+# completions: user_names view public
+# completions: users table public
+# completions: pg_attrdef table pg_catalog
+# completions: pg_attribute table pg_catalog
+# completions: pg_available_extension_versions table pg_catalog
+# completions: pg_available_extensions table pg_catalog
+# completions: pg_backend_memory_contexts table pg_catalog
+# completions: pg_class table pg_catalog
+# completions: ...
+```
+
+```python
+q = "--sql\nSELECT * FROM orders JOIN us<CURSOR>"
+# completions: users ON users.id = orders.user_id join public
+# completions: user_names view public
+# completions: users table public
 ```
 
 ## Prefix

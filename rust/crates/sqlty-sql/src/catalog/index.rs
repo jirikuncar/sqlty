@@ -9,6 +9,7 @@
 
 use std::sync::Arc;
 
+use super::joins::ReferencedBy;
 use super::{Catalog, Relation, SchemaColumn};
 use crate::analyzer::Column;
 
@@ -103,7 +104,7 @@ impl Catalog {
         }
     }
 
-    fn name_ref<'a>(&self, key: &'a str) -> NameRef<'a> {
+    pub(super) fn name_ref<'a>(&self, key: &'a str) -> NameRef<'a> {
         let (schema, name) = split(key);
         NameRef {
             key,
@@ -219,6 +220,7 @@ pub(super) struct NameIndex {
     relations: Sorted,
     functions: Sorted,
     types: Sorted,
+    pub(super) referenced_by: ReferencedBy,
 }
 
 impl NameIndex {
@@ -233,6 +235,7 @@ impl NameIndex {
                     .chain(catalog.unknown_functions.keys()),
             ),
             types: Sorted::new(catalog.type_names.keys()),
+            referenced_by: ReferencedBy::new(catalog),
         }
     }
 }
@@ -309,7 +312,7 @@ impl Sorted {
 }
 
 /// `schema.name` as `(schema, name)`.
-fn split(key: &str) -> (&str, &str) {
+pub(super) fn split(key: &str) -> (&str, &str) {
     key.split_once('.').unwrap_or(("", key))
 }
 

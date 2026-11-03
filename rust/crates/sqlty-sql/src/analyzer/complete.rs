@@ -7,7 +7,8 @@
 //! from the relations in scope only: the cursor's word is replaced by a placeholder column
 //! and the analyzer, reaching it, records the columns its scope offers (aliases, CTEs,
 //! subqueries, `JOIN ... USING` included). When the query does not parse that way, a
-//! token scan of its `FROM` and `JOIN` items stands in.
+//! token scan of its `FROM` and `JOIN` items stands in. After `JOIN`, the tables a foreign
+//! key links to one already in scope come first, with their `ON` clause.
 //!
 //! ```
 //! use sqlty_sql::analyzer::{complete, load_schema_with_skipped, CandidateKind};
@@ -46,6 +47,8 @@ pub enum CandidateKind {
     Cte,
     /// A column of a relation in scope.
     Column,
+    /// A table a foreign key links to one in scope, with the `ON` clause that joins them.
+    Join,
 }
 
 /// One completion.
@@ -99,7 +102,8 @@ pub struct Completions {
 ///
 /// Costs O(length of the query) to read the context, then O(log N + k) for relations,
 /// or the widths of the relations in scope for columns: never a function of how many
-/// tables the schema has. Nothing completes in a string, a comment, after a name that
+/// tables the schema has; after `JOIN`, also O(K + log F + k) per table in scope for the
+/// tables its K foreign keys and the F of the schema link to it. Nothing completes in a string, a comment, after a name that
 /// already ends an expression, or without a context this module knows.
 pub fn complete(
     query: &str,
@@ -119,7 +123,7 @@ pub fn complete(
     let typed = &query[prefix.clone()];
     let folded = schema.fold_typed(typed);
     let mut candidates = match context {
-        Context::Relation(qualifier) => {
+        Context::Relation(qualifier, join) => {
             let relations = match &qualifier {
                 Some(qualifier) => schema.relations_with_prefix(typed, Some(qualifier), limit + 1),
                 None => schema.visible_relations_with_prefix(typed, limit + 1),
@@ -137,6 +141,10 @@ pub fn complete(
                     nullable: None,
                 })
                 .collect();
+            if join {
+                let scope = &before[..before.len() - usize::from(!prefix.is_empty())];
+                found.extend(joins(scope, typed, schema, dialect, limit + 1));
+            }
             if qualifier.is_none() {
                 found.extend(
                     ctes(&before)
@@ -183,6 +191,7 @@ pub fn complete(
     };
     candidates.sort_by_cached_key(|c| {
         (
+            c.kind != CandidateKind::Join,
             builtin(c),
             c.label.to_lowercase(),
             c.detail.clone(),
@@ -203,7 +212,8 @@ pub fn complete(
 /// What the cursor stands for; the qualifier is the schema of a relation, the alias or
 /// table of a column.
 enum Context {
-    Relation(Option<String>),
+    /// Also whether it follows `JOIN`.
+    Relation(Option<String>, bool),
     Column(Option<String>),
 }
 
@@ -255,7 +265,8 @@ fn context(tokens: &[Tok], cursor: usize) -> Option<(Context, Range<usize>)> {
         if crossed || !(is(prev, &RELATION_CLAUSES) || prev.is_some_and(|tok| tok.text == ",")) {
             return None;
         }
-        Context::Relation(qualifier)
+        let join = qualifier.is_none() && is(prev, &["JOIN"]);
+        Context::Relation(qualifier, join)
     } else {
         let after_name = prev.is_some_and(|tok| {
             (tok.word && !is(Some(tok), &COLUMN_CLAUSES) && !is(Some(tok), &OPERATOR_WORDS))
@@ -311,13 +322,99 @@ fn ctes(tokens: &[Tok]) -> Vec<&str> {
         .collect()
 }
 
+/// The tables a foreign key links to those the `FROM` and `JOIN` items of `scope` name,
+/// whose name starts with `typed`, each with the `ON` clause joining it: at most `limit`.
+/// A table whose name is already a qualifier in scope is left out, since its `ON` clause
+/// would be ambiguous.
+fn joins(
+    scope: &[Tok],
+    typed: &str,
+    schema: &SchemaData,
+    dialect: SqlDialect,
+    limit: usize,
+) -> Vec<Candidate> {
+    let in_scope = named_relations(scope, cursor_depth(scope), schema);
+    let qualifiers: Vec<String> = in_scope
+        .iter()
+        .map(|(_, alias, name)| alias.unwrap_or(name).to_lowercase())
+        .collect();
+    let mut found = Vec::new();
+    for (name, alias, written) in &in_scope {
+        let qualifier = alias.unwrap_or(written);
+        for join in schema.joins_with_prefix(name, typed, limit - found.len()) {
+            let table = match join.table.schema {
+                Some(owner) if schema.table_id(join.table.name) != Some(join.table.key) => {
+                    format!(
+                        "{}.{}",
+                        spelled(owner, dialect),
+                        spelled(join.table.name, dialect)
+                    )
+                }
+                _ => spelled(join.table.name, dialect),
+            };
+            if qualifiers.contains(&table.to_lowercase()) {
+                continue;
+            }
+            let on: Vec<String> = join
+                .pairs
+                .iter()
+                .map(|(theirs, ours)| {
+                    format!(
+                        "{table}.{} = {qualifier}.{}",
+                        spelled(theirs, dialect),
+                        spelled(ours, dialect)
+                    )
+                })
+                .collect();
+            found.push(Candidate {
+                label: format!("{table} ON {}", on.join(" AND ")),
+                kind: CandidateKind::Join,
+                detail: join.table.schema.map(str::to_string),
+                sql_type: None,
+                nullable: None,
+            });
+        }
+    }
+    found
+}
+
 /// The columns of the schema relations the `FROM` and `JOIN` items around the cursor name,
 /// read from the tokens: what stands in when the query does not parse.
 fn scanned_columns(query: &str, before: &[Tok], schema: &SchemaData) -> Vec<Candidate> {
-    let depth = cursor_depth(before);
     let Some(tokens) = lex(query) else {
         return Vec::new();
     };
+    let mut found = Vec::new();
+    for (name, alias, written) in named_relations(&tokens, cursor_depth(before), schema) {
+        let alias = match alias {
+            Some(alias) => alias.to_lowercase(),
+            None => schema.fold_typed(written),
+        };
+        match schema.columns_of(&name) {
+            Some(Columns::Table(columns)) => found.extend(columns.iter().map(|col| {
+                Candidate::column(
+                    &col.ident,
+                    &alias,
+                    Some(&col.sql_type),
+                    Nullability::declared(col.not_null),
+                )
+            })),
+            Some(Columns::View(columns)) => found.extend(columns.iter().map(|col| {
+                Candidate::column(&col.name, &alias, col.sql_type.as_deref(), col.nullability)
+            })),
+            None => {}
+        }
+    }
+    found
+}
+
+/// The relations the `FROM` and `JOIN` items of `tokens` at `depth` or around it name: the
+/// name, folded and dotted, then the alias and the last part of the name as written.
+fn named_relations<'t>(
+    tokens: &'t [Tok],
+    depth: usize,
+    schema: &SchemaData,
+) -> Vec<(String, Option<&'t str>, &'t str)> {
     let mut found = Vec::new();
     let mut i = 0;
     let mut in_relations = false;
@@ -336,50 +433,34 @@ fn scanned_columns(query: &str, before: &[Tok], schema: &SchemaData) -> Vec<Cand
             continue;
         }
         let mut name = Vec::new();
+        let mut written = "";
         while let Some(part) = tokens
             .get(i)
             .filter(|part| part.word && !is_keyword(&part.text))
         {
             name.push(schema.fold_typed(&part.text));
+            written = &part.text;
             i += 1;
             if tokens.get(i).is_none_or(|dot| dot.text != ".") {
                 break;
             }
             i += 1;
         }
-        let Some(table) = name.last().cloned() else {
+        if name.is_empty() {
             continue;
-        };
+        }
         if tokens
             .get(i)
             .is_some_and(|tok| tok.text.eq_ignore_ascii_case("AS"))
         {
             i += 1;
         }
-        let alias = match tokens
+        let alias = tokens
             .get(i)
             .filter(|tok| tok.word && !is_keyword(&tok.text))
-        {
-            Some(tok) => {
-                i += 1;
-                tok.text.to_lowercase()
-            }
-            None => table,
-        };
-        match schema.columns_of(&name.join(".")) {
-            Some(Columns::Table(columns)) => found.extend(columns.iter().map(|col| {
-                Candidate::column(
-                    &col.ident,
-                    &alias,
-                    Some(&col.sql_type),
-                    Nullability::declared(col.not_null),
-                )
-            })),
-            Some(Columns::View(columns)) => found.extend(columns.iter().map(|col| {
-                Candidate::column(&col.name, &alias, col.sql_type.as_deref(), col.nullability)
-            })),
-            None => {}
-        }
+            .map(|tok| tok.text.as_str());
+        i += usize::from(alias.is_some());
+        found.push((name.join("."), alias, written));
     }
     found
 }
@@ -553,6 +634,61 @@ mod tests {
         assert_eq!(
             pg("WITH recent AS (SELECT 1) SELECT * FROM re|"),
             ["recent:"]
+        );
+    }
+
+    #[test]
+    fn joins_on_foreign_keys_come_first() {
+        let catalog = load(
+            "CREATE TABLE users (id INT PRIMARY KEY, manager_id INT REFERENCES users);
+            CREATE TABLE orders (id INT PRIMARY KEY, user_id INT REFERENCES users (id));
+            CREATE TABLE items (order_id INT, line INT, PRIMARY KEY (order_id, line),
+                FOREIGN KEY (order_id) REFERENCES orders);
+            CREATE TABLE notes (order_id INT, line INT,
+                FOREIGN KEY (order_id, line) REFERENCES items (order_id, line));
+            CREATE SCHEMA billing;
+            CREATE TABLE billing.invoices (id INT, order_id INT REFERENCES orders);",
+            "postgres",
+        )
+        .0;
+        let pg = |sql: &str| labels(sql, &catalog, "postgres");
+        assert_eq!(
+            pg("SELECT * FROM orders o JOIN |")[..4],
+            [
+                "billing.invoices ON billing.invoices.order_id = o.id:billing",
+                "items ON items.order_id = o.id:public",
+                "users ON users.id = o.user_id:public",
+                "items:public",
+            ]
+        );
+        assert_eq!(
+            pg("SELECT * FROM orders JOIN us|"),
+            ["users ON users.id = orders.user_id:public", "users:public"]
+        );
+        assert_eq!(
+            pg("SELECT * FROM items i JOIN no|"),
+            [
+                "notes ON notes.order_id = i.order_id AND notes.line = i.line:public",
+                "notes:public"
+            ]
+        );
+        assert_eq!(
+            pg("SELECT * FROM users JOIN orders o ON o.user_id = users.id JOIN us|"),
+            ["users:public"],
+            "a name already in scope makes its ON clause ambiguous"
+        );
+        assert_eq!(
+            pg("SELECT * FROM users u JOIN us|"),
+            [
+                "users ON users.id = u.manager_id:public",
+                "users ON users.manager_id = u.id:public",
+                "users:public"
+            ]
+        );
+        assert_eq!(pg("SELECT * FROM orders o, us|"), ["users:public"]);
+        assert_eq!(
+            pg("SELECT * FROM orders o JOIN public.us|"),
+            ["users:public"]
         );
     }
 
@@ -748,14 +884,18 @@ mod tests {
                 50,
             ),
             ("SELECT o.| FROM users u JOIN t7 o ON", 50),
+            ("SELECT * FROM users u JOIN t1|", 5),
+            ("SELECT * FROM t7 x JOIN |", 5),
         ];
         let runs: Vec<Vec<(usize, Vec<String>)>> = [50, 540, 5000]
             .into_iter()
             .map(|tables| {
                 let mut sql = String::from("CREATE SCHEMA app; SET search_path TO app, public;\n");
-                sql += "CREATE TABLE users (id INT, name TEXT);\n";
+                sql += "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);\n";
                 for i in 0..tables {
-                    sql += &format!("CREATE TABLE t{i} (id INT, note TEXT);\n");
+                    sql += &format!(
+                        "CREATE TABLE t{i} (id INT, note TEXT, user_id INT REFERENCES users);\n"
+                    );
                 }
                 let catalog = load(&sql, "postgres").0;
                 queries
@@ -782,6 +922,11 @@ mod tests {
         assert_eq!(counts(&runs[1]), counts(&runs[2]));
         assert_eq!(runs[2][0].1.len(), 5);
         assert_eq!(runs[2][2].1, ["id", "name"]);
+        assert_eq!(
+            runs[2][5].1[..2],
+            ["t1 ON t1.user_id = u.id", "t10 ON t10.user_id = u.id"]
+        );
+        assert_eq!(runs[2][6].1[0], "users ON users.id = x.user_id");
         assert!(
             runs[2].iter().all(|(visited, _)| *visited <= 64),
             "{:?}",

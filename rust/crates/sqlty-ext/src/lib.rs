@@ -976,6 +976,7 @@ fn complete_source(
                     analyzer::CandidateKind::View => "view",
                     analyzer::CandidateKind::Cte => "cte",
                     analyzer::CandidateKind::Column => "column",
+                    analyzer::CandidateKind::Join => "join",
                 };
                 (c.label, kind, c.detail, c.sql_type, c.nullable)
             })
