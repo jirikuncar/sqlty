@@ -624,6 +624,26 @@ def test_exclude_is_relative_to_the_config_file(tmp_path, monkeypatch, capsys) -
     assert f"pkg{os.sep}gen" not in out
 
 
+@pytest.mark.parametrize("changed", [["schema.sql"], ["sqlty.toml"], ["schema.sql", "a.py"]])
+def test_schema_or_config_file_checks_its_project(changed, tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "a.py").write_text(QUERY)
+    (tmp_path / "sub" / "b.py").write_text(QUERY)
+    (tmp_path / "schema.sql").write_text("CREATE TABLE t (id INTEGER);\n")
+    (tmp_path / "notes.sql").write_text("SELECT 1;\n")
+    (tmp_path / "sqlty.toml").write_text('schema = "schema.sql"\n')
+    monkeypatch.chdir(tmp_path)
+
+    _, out, _ = _run(["rewrite", "--check", *changed], capsys)
+
+    assert out.splitlines() == [
+        "Would rewrite a.py",
+        f"Would rewrite sub{os.sep}b.py",
+        "2 file(s) would be rewritten",
+    ]
+    assert _run(["rewrite", "--check", "notes.sql"], capsys)[0] == 0
+
+
 @pytest.mark.parametrize("command", ["rewrite", "strip"])
 def test_exit_codes(command, tmp_path, monkeypatch, capsys) -> None:
     wrapped = 'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")\n'
