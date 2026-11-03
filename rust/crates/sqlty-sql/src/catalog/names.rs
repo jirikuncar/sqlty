@@ -3,6 +3,9 @@
 //! A key is `schema.name` in PostgreSQL and `name` elsewhere. Nothing here reads a
 //! [`super::Catalog`] or a loader; it only turns identifiers into keys.
 
+use std::borrow::Borrow;
+use std::hash::Hash;
+
 use rustc_hash::FxHashMap;
 
 use sqlparser::ast::{DataType, Ident, ObjectName};
@@ -11,13 +14,13 @@ use crate::analyzer::SqlDialect;
 
 /// The key a bare name is tried under in each schema of `path`; PostgreSQL always
 /// searches `pg_catalog` first.
-pub(super) fn lookup_key<'a, T>(
-    map: &'a FxHashMap<String, T>,
+pub(super) fn lookup_key<'a, K: Borrow<str> + Hash + Eq, T>(
+    map: &'a FxHashMap<K, T>,
     path: &[String],
     name: &str,
 ) -> Option<&'a str> {
     if name.contains('.') {
-        return map.get_key_value(name).map(|(key, _)| key.as_str());
+        return map.get_key_value(name).map(|(key, _)| key.borrow());
     }
     let schemas = std::iter::once("pg_catalog").chain(path.iter().map(String::as_str));
     // `schema.name` is built in a stack buffer, so a probe does not allocate; a name too
@@ -34,10 +37,10 @@ pub(super) fn lookup_key<'a, T>(
                 .ok()
                 .and_then(|key| map.get_key_value(key))
         } else {
-            map.get_key_value(&format!("{schema}.{name}"))
+            map.get_key_value(format!("{schema}.{name}").as_str())
         };
         if let Some((key, _)) = found {
-            return Some(key);
+            return Some(key.borrow());
         }
     }
     None

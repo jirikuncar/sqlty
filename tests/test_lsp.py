@@ -206,6 +206,67 @@ def test_server_checks_and_fixes_a_buffer(tmp_path: Path) -> None:
         assert server.stop() == 0
 
 
+def test_server_completes_and_highlights_helper_and_marked_queries(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
+    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL, name TEXT);\n")
+    (tmp_path / "db.py").write_text(HELPER)
+    uri = (tmp_path / "q.py").as_uri()
+    text = 'from db import run\n\nrun("SELECT u. FROM users u")\nq = "--sql\\nSELECT * FROM us"\n'
+    server = Server(tmp_path)
+    try:
+        init = server.request("initialize", {"capabilities": {}, "rootUri": tmp_path.as_uri()})
+        assert init["capabilities"]["completionProvider"]["triggerCharacters"] == ["."]
+        server.send({"method": "initialized", "params": {}})
+        document = {"uri": uri, "languageId": "python", "version": 1, "text": text}
+        server.send({"method": "textDocument/didOpen", "params": {"textDocument": document}})
+        server.notification("textDocument/publishDiagnostics")
+
+        def complete(line: int, character: int) -> Any:
+            position = {"line": line, "character": character}
+            return server.request(
+                "textDocument/completion", {"textDocument": {"uri": uri}, "position": position}
+            )
+
+        found = complete(2, 14)
+        assert [item["label"] for item in found["items"]] == ["id", "name"]
+        assert found["items"][0]["textEdit"]["range"]["start"] == {"line": 2, "character": 14}
+        resolved = server.request("completionItem/resolve", found["items"][0])
+        assert resolved["detail"] == "INT NOT NULL"
+        assert [item["label"] for item in complete(3, 28)["items"]] == ["users"]
+        assert complete(0, 3) is None
+
+        position = {"line": 2, "character": 25}
+        hovered = server.request(
+            "textDocument/hover", {"textDocument": {"uri": uri}, "position": position}
+        )
+        assert hovered["contents"]["value"].startswith("Table `public.users`")
+
+        legend = init["capabilities"]["semanticTokensProvider"]["legend"]["tokenTypes"]
+        tokens = server.request("textDocument/semanticTokens/full", {"textDocument": {"uri": uri}})
+        data = tokens["data"]
+        kinds = [legend[kind] for kind in data[3::5]]
+        # `u. FROM` is `u.FROM` to the tokenizer until the column is typed.
+        assert kinds == ["keyword", "comment", "keyword", "operator", "keyword"]
+        assert data[:5] == [2, 5, 6, 0, 0], "SELECT of the helper string"
+    finally:
+        assert server.stop() == 0
+
+
+def test_completion_context_of_a_buffer(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\ndialect = "sqlite"\n')
+    (tmp_path / "db.py").write_text(HELPER)
+    workspace = Workspace(str(tmp_path))
+    text = 'from db import run\n\nrun("SELECT 1")\nrun(query)\n'
+    workspace.check(str(tmp_path / "q.py"), text)
+    context = workspace.completion(str(tmp_path / "q.py"))
+    assert context == {
+        "schema": None,
+        "dialect": "sqlite",
+        "import_style": None,
+        "helper_starts": [text.index('"SELECT')],
+    }
+
+
 def test_server_shows_why_a_project_does_not_load(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nuntyped = "nope"\n')
     (tmp_path / "q.py").write_text("x = 1\n")

@@ -1,13 +1,17 @@
-//! The language server of `sqlty server`: diagnostics, quick fixes and fix-all for Python files.
+//! The language server of `sqlty server`: diagnostics, quick fixes, fix-all, completion,
+//! hover and SQL highlighting for Python files.
 //!
 //! The protocol runs on the thread that calls [`run`]. Checks run on one worker thread that
 //! owns a [`Workspace`] per project root: the Python passes hold the GIL, so two checks could
 //! not overlap anyway. The worker checks the newest text of each buffer and publishes the
-//! result only while that text is current.
+//! result only while that text is current. Completion is answered on the protocol thread
+//! from what the buffer's last check left (see [`CompletionContext`]), never behind a check;
+//! so are hover and semantic tokens.
 
 use std::collections::HashMap;
 use std::error::Error;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -17,16 +21,24 @@ use lsp_types::notification::{
     DidChangeTextDocument, DidChangeWatchedFiles, DidCloseTextDocument, DidOpenTextDocument,
     DidSaveTextDocument, LogMessage, Notification as _, PublishDiagnostics, ShowMessage,
 };
-use lsp_types::request::{CodeActionRequest, Request as _};
+use lsp_types::request::{
+    CodeActionRequest, Completion, HoverRequest, Request as _, ResolveCompletionItem,
+    SemanticTokensFullRequest, SemanticTokensRefresh,
+};
 use lsp_types::{
     CodeActionKind, CodeActionOptions, CodeActionParams, CodeActionProviderCapability,
+    CompletionItem, CompletionOptions, CompletionParams, HoverParams, HoverProviderCapability,
     InitializeParams, LogMessageParams, MessageType, PositionEncodingKind,
-    PublishDiagnosticsParams, ServerCapabilities, ServerInfo, ShowMessageParams,
-    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+    PublishDiagnosticsParams, SemanticTokensFullOptions, SemanticTokensOptions,
+    SemanticTokensParams, SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
+    ShowMessageParams, TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
     TextDocumentSyncSaveOptions, Url,
 };
 
 mod actions;
+mod completion;
+mod highlight;
+mod hover;
 mod text;
 mod worker;
 
@@ -75,6 +87,21 @@ pub struct Edit {
     pub replacement: String,
 }
 
+/// What completion and highlighting read of a project for a buffer, as its last check left
+/// it: the schema, how the file is read, and where its helper calls pass a query.
+#[derive(Clone)]
+pub struct CompletionContext {
+    /// The schema the buffer is checked against, shared: a reload swaps it.
+    pub schema: Option<sqlty_sql::analyzer::Schema>,
+    /// The SQL dialect.
+    pub dialect: String,
+    /// `[tool.sqlty] import-style`, which names the wrapper.
+    pub import_style: Option<String>,
+    /// Byte offsets, in the text last checked, of the string literals helper calls pass
+    /// as their query.
+    pub helper_starts: Vec<usize>,
+}
+
 /// The checks of one project, as `sqlty check ROOT` would run them on its buffers.
 pub trait Workspace {
     /// Diagnostics of `text`, the buffer of the file `path`.
@@ -86,16 +113,29 @@ pub trait Workspace {
     fn breaking(&mut self) -> Result<Vec<(PathBuf, Vec<Diagnostic>)>, String> {
         Ok(Vec::new())
     }
+    /// What completion in the buffer of `path` reads, after [`Workspace::check`] read it;
+    /// `None` offers no completion.
+    fn completion(&mut self, _path: &Path) -> Option<CompletionContext> {
+        None
+    }
 }
 
 /// What the client configures, from the `initializationOptions` of `initialize`:
-/// `{"breaking": {"against": "main", "direction": "both"}}`.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// `{"breaking": {"against": "main", "direction": "both"}, "completion": {"enable": true},
+/// "hover": {"enable": true}, "highlighting": {"enable": true}}`.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     /// `sqlty.breaking.against`: the baseline of `sqlty breaking`; `None` checks no baseline.
     pub against: Option<String>,
     /// `sqlty.breaking.direction`: `backward`, `forward` or `both`.
     pub direction: Option<String>,
+    /// `sqlty.completion.enable`: whether to complete names in queries; on unless `false`.
+    pub completion: bool,
+    /// `hover.enable`: whether to say what a word of a query is; on unless `false`.
+    pub hover: bool,
+    /// `highlighting.enable`: whether to send the SQL of checked strings as semantic
+    /// tokens; on unless `false`.
+    pub highlighting: bool,
 }
 
 impl Settings {
@@ -107,9 +147,18 @@ impl Settings {
                 .filter(|text| !text.is_empty())
                 .map(str::to_string)
         };
+        let enabled = |pointer: &str| {
+            options
+                .and_then(|options| options.pointer(pointer))
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(true)
+        };
         Self {
             against: text("/breaking/against"),
             direction: text("/breaking/direction"),
+            completion: enabled("/completion/enable"),
+            hover: enabled("/hover/enable"),
+            highlighting: enabled("/highlighting/enable"),
         }
     }
 }
@@ -138,27 +187,33 @@ where
     let (id, params) = connection.initialize_start()?;
     let params: InitializeParams = serde_json::from_value(params)?;
     let encoding = encoding(&params);
-    connection.initialize_finish(
-        id,
-        serde_json::to_value(lsp_types::InitializeResult {
-            capabilities: capabilities(encoding.clone()),
-            server_info: Some(ServerInfo {
-                name: "sqlty".to_string(),
-                version: Some(env!("CARGO_PKG_VERSION").to_string()),
-            }),
-        })?,
-    )?;
+    let settings = Settings::new(params.initialization_options.as_ref());
+    // Not `initialize_finish`: lsp-mode may send a request before `initialized`.
+    let result = lsp_types::InitializeResult {
+        capabilities: capabilities(encoding.clone(), &settings),
+        server_info: Some(ServerInfo {
+            name: "sqlty".to_string(),
+            version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        }),
+    };
+    connection
+        .sender
+        .send(Response::new_ok(id, result).into())?;
     let shared = Shared {
         documents: Arc::default(),
         background: Arc::default(),
         sender: connection.sender.clone(),
         encoding,
+        refresh: settings.highlighting && refresh_support(&params),
+        requests: Arc::default(),
+        completion: settings.completion,
+        hover: settings.hover,
+        highlighting: settings.highlighting,
     };
     let (jobs, queue) = mpsc::channel();
     let worker = {
         let shared = shared.clone();
         let roots = roots(&params);
-        let settings = Settings::new(params.initialization_options.as_ref());
         std::thread::spawn(move || worker::work(&queue, &shared, &roots, &settings, open))
     };
     for message in &connection.receiver {
@@ -190,6 +245,8 @@ struct Document {
     version: i32,
     /// The diagnostics of `version`, the base of its quick fixes.
     diagnostics: Option<(i32, Vec<Diagnostic>)>,
+    /// The text last checked, and what completion reads of it.
+    completion: Option<(String, CompletionContext)>,
 }
 
 #[derive(Clone)]
@@ -199,6 +256,13 @@ struct Shared {
     background: Arc<Mutex<HashMap<Url, Vec<lsp_types::Diagnostic>>>>,
     sender: Sender<Message>,
     encoding: PositionEncodingKind,
+    /// Whether the client takes `workspace/semanticTokens/refresh`.
+    refresh: bool,
+    /// The id of the last request to the client.
+    requests: Arc<AtomicI32>,
+    completion: bool,
+    hover: bool,
+    highlighting: bool,
 }
 
 impl Shared {
@@ -237,6 +301,18 @@ impl Shared {
         ));
     }
 
+    /// Ask the client to request the semantic tokens of its buffers again.
+    fn refresh(&self) {
+        if self.refresh {
+            let id = self.requests.fetch_add(1, Ordering::Relaxed);
+            self.send(Request::new(
+                format!("sqlty-{id}").into(),
+                SemanticTokensRefresh::METHOD.to_string(),
+                (),
+            ));
+        }
+    }
+
     fn publish(&self, uri: Url, diagnostics: Vec<lsp_types::Diagnostic>, version: Option<i32>) {
         self.send(Notification::new(
             PublishDiagnostics::METHOD.to_string(),
@@ -263,6 +339,7 @@ impl Shared {
                         text: document.text,
                         version: document.version,
                         diagnostics: None,
+                        completion: None,
                     },
                 );
                 let _ = jobs.send(Job::Check(document.uri));
@@ -328,21 +405,67 @@ impl Shared {
     }
 
     fn request(&self, request: Request, jobs: &mpsc::Sender<Job>) {
-        if request.method != CodeActionRequest::METHOD {
-            self.send(Response::new_err(
+        match request.method.as_str() {
+            CodeActionRequest::METHOD => self.code_action(request, jobs),
+            Completion::METHOD => {
+                let Ok(params) = serde_json::from_value::<CompletionParams>(request.params) else {
+                    return self.invalid(request.id, "completion");
+                };
+                let found = self
+                    .documents()
+                    .get(&params.text_document_position.text_document.uri)
+                    .filter(|_| self.completion)
+                    .and_then(|document| completion::complete(document, &params, &self.encoding));
+                self.send(Response::new_ok(request.id, found));
+            }
+            HoverRequest::METHOD => {
+                let Ok(params) = serde_json::from_value::<HoverParams>(request.params) else {
+                    return self.invalid(request.id, "hover");
+                };
+                let found = self
+                    .documents()
+                    .get(&params.text_document_position_params.text_document.uri)
+                    .filter(|_| self.hover)
+                    .and_then(|document| hover::hover(document, &params, &self.encoding));
+                self.send(Response::new_ok(request.id, found));
+            }
+            SemanticTokensFullRequest::METHOD => {
+                let Ok(params) = serde_json::from_value::<SemanticTokensParams>(request.params)
+                else {
+                    return self.invalid(request.id, "semantic tokens");
+                };
+                let found = self
+                    .documents()
+                    .get(&params.text_document.uri)
+                    .filter(|_| self.highlighting)
+                    .map(|document| highlight::tokens(document, &self.encoding));
+                self.send(Response::new_ok(request.id, found));
+            }
+            ResolveCompletionItem::METHOD => {
+                let Ok(item) = serde_json::from_value::<CompletionItem>(request.params) else {
+                    return self.invalid(request.id, "completion item");
+                };
+                self.send(Response::new_ok(request.id, completion::resolve(item)));
+            }
+            _ => self.send(Response::new_err(
                 request.id,
                 ErrorCode::MethodNotFound as i32,
                 format!("sqlty does not handle {}", request.method),
-            ));
-            return;
+            )),
         }
+    }
+
+    fn invalid(&self, id: lsp_server::RequestId, what: &str) {
+        self.send(Response::new_err(
+            id,
+            ErrorCode::InvalidParams as i32,
+            format!("invalid {what} parameters"),
+        ));
+    }
+
+    fn code_action(&self, request: Request, jobs: &mpsc::Sender<Job>) {
         let Ok(params) = serde_json::from_value::<CodeActionParams>(request.params) else {
-            self.send(Response::new_err(
-                request.id,
-                ErrorCode::InvalidParams as i32,
-                "invalid code action parameters".to_string(),
-            ));
-            return;
+            return self.invalid(request.id, "code action");
         };
         let wants = |kind: &str| {
             params.context.only.as_ref().is_none_or(|only| {
@@ -378,7 +501,9 @@ fn encoding(params: &InitializeParams) -> PositionEncodingKind {
     }
 }
 
-fn capabilities(encoding: PositionEncodingKind) -> ServerCapabilities {
+/// What the server does; completion, hover and highlighting only when the client did not
+/// turn them off.
+fn capabilities(encoding: PositionEncodingKind, settings: &Settings) -> ServerCapabilities {
     ServerCapabilities {
         position_encoding: Some(encoding),
         text_document_sync: Some(TextDocumentSyncCapability::Options(
@@ -396,8 +521,33 @@ fn capabilities(encoding: PositionEncodingKind) -> ServerCapabilities {
             ]),
             ..CodeActionOptions::default()
         })),
+        semantic_tokens_provider: settings.highlighting.then(|| {
+            SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
+                legend: highlight::legend(),
+                full: Some(SemanticTokensFullOptions::Bool(true)),
+                ..SemanticTokensOptions::default()
+            })
+        }),
+        completion_provider: settings.completion.then(|| CompletionOptions {
+            trigger_characters: Some(vec![".".to_string()]),
+            resolve_provider: Some(true),
+            ..CompletionOptions::default()
+        }),
+        hover_provider: settings
+            .hover
+            .then_some(HoverProviderCapability::Simple(true)),
         ..ServerCapabilities::default()
     }
+}
+
+fn refresh_support(params: &InitializeParams) -> bool {
+    params
+        .capabilities
+        .workspace
+        .as_ref()
+        .and_then(|workspace| workspace.semantic_tokens.as_ref())
+        .and_then(|tokens| tokens.refresh_support)
+        .unwrap_or(false)
 }
 
 /// The workspace folders, else the root of the client; a file outside them all is its
@@ -418,5 +568,7 @@ fn roots(params: &InitializeParams) -> Vec<PathBuf> {
 /// Whether a change to `uri` changes the settings or the schema of its project.
 fn is_config(uri: &Url) -> bool {
     let path = uri.path();
-    path.ends_with("/pyproject.toml") || path.ends_with(".sql")
+    ["/pyproject.toml", "/sqlty.toml", "/Cargo.toml", ".sql"]
+        .iter()
+        .any(|suffix| path.ends_with(suffix))
 }

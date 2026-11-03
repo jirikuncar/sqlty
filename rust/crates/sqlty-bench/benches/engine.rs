@@ -3,6 +3,8 @@
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use sqlty_bench::{python_source, schema_sql, QUERIES};
+use sqlty_python::locate::Queries;
+use sqlty_python::rewriter::ImportStyle;
 use sqlty_python::{checker, options::Options, rewriter, rules::RuleConfig};
 use sqlty_sql::analyzer;
 use std::hint::black_box;
@@ -10,7 +12,7 @@ use std::hint::black_box;
 fn catalog_load(c: &mut Criterion) {
     let mut group = c.benchmark_group("catalog_load");
     group.sample_size(10);
-    for tables in [50, 270, 540] {
+    for tables in [50, 270, 540, 5000] {
         let sql = schema_sql(tables);
         group.throughput(Throughput::Bytes(sql.len() as u64));
         group.bench_function(format!("{tables}_tables"), |b| {
@@ -59,5 +61,67 @@ fn python_source_passes(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, catalog_load, analyze, python_source_passes);
+fn name_index(c: &mut Criterion) {
+    let mut group = c.benchmark_group("name_index");
+    for tables in [50, 540, 5000] {
+        let (schema, _) = analyzer::load_schema_with_skipped(&schema_sql(tables), "postgres");
+        group.bench_function(format!("relation_prefix_{tables}_tables"), |b| {
+            b.iter(|| schema.relations_with_prefix(black_box("t004"), None, 20));
+        });
+        group.bench_function(format!("qualified_relation_prefix_{tables}_tables"), |b| {
+            b.iter(|| schema.relations_with_prefix(black_box("v00"), Some("app"), 20));
+        });
+        group.bench_function(format!("function_prefix_{tables}_tables"), |b| {
+            b.iter(|| schema.functions_with_prefix(black_box("f00"), None, 20));
+        });
+        let queries = [
+            ("complete_relation", "SELECT * FROM t004", 18),
+            (
+                "complete_alias_columns",
+                "SELECT a. FROM app.t0000 a JOIN app.t0001 b ON b.parent_id = a.id",
+                9,
+            ),
+            (
+                "complete_columns_in_scope",
+                "SELECT * FROM app.t0000 a JOIN app.t0001 b ON b.parent_id = a.id WHERE s",
+                72,
+            ),
+        ];
+        for (name, query, cursor) in queries {
+            group.bench_function(format!("{name}_{tables}_tables"), |b| {
+                b.iter(|| {
+                    analyzer::complete(black_box(query), cursor, "postgres", Some(&schema), 200)
+                });
+            });
+        }
+    }
+    group.finish();
+}
+
+/// Locating the query under a cursor in a module of 4000 queries: one scan per buffer
+/// version, then a binary search per request.
+fn query_at(c: &mut Criterion) {
+    let source = python_source(4_000);
+    let style = ImportStyle::parse(None).expect("the default import style");
+    let cursor = source.rfind("SELECT").expect("a query") + 7;
+    let mut group = c.benchmark_group("query_at");
+    group.bench_function("scan_4000_queries", |b| {
+        b.iter(|| Queries::new(black_box(&source), &style, &[]));
+    });
+    let queries = Queries::new(&source, &style, &[]);
+    assert!(queries.at(cursor).is_some(), "the cursor is in a query");
+    group.bench_function("lookup_4000_queries", |b| {
+        b.iter(|| queries.at(black_box(cursor)));
+    });
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    catalog_load,
+    analyze,
+    python_source_passes,
+    name_index,
+    query_at
+);
 criterion_main!(benches);

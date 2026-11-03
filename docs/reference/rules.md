@@ -31,7 +31,7 @@ stale-type = "error"
 | [`mysql-sql-marker`](#mysql-sql-marker) | Query | warn | yes | `--sql` marker with `dialect = "mysql"`, which MySQL rejects |
 | [`unparsed-query`](#unparsed-query) | Query | warn | no | Query that does not parse, so sqlty cannot check it |
 | [`unknown-table`](#unknown-table) | Names | error | no | Table the schema does not define |
-| [`unknown-column`](#unknown-column) | Names | error | no | Column the table does not have |
+| [`unknown-column`](#unknown-column) | Names | error | yes | Column the table does not have |
 | [`ambiguous-column`](#ambiguous-column) | Names | error | no | Unqualified column more than one table has |
 | [`unknown-function`](#unknown-function) | Names | warn | no | Function whose result sqlty cannot type |
 | [`unknown-type`](#unknown-type) | Names | warn | no | Cast or column type without a Python type |
@@ -589,7 +589,8 @@ reported.
 
 Default: error. A column that its table does not have, in the select list,
 `WHERE`, `JOIN ... ON`, `GROUP BY`, `HAVING`, `ORDER BY` and what `INSERT`,
-`UPDATE` and `DELETE` write.
+`UPDATE` and `DELETE` write. When one column of the tables in scope is closest
+to the name, the message suggests it and `--fix` writes it.
 
 ### ambiguous-column
 

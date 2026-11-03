@@ -84,14 +84,35 @@ Three layers, all in the Makefile:
   the slower `dist` profile (fat LTO, one codegen unit; `rust/Cargo.toml`), so `release` numbers can
   differ slightly from a shipped wheel.
 - `make bench-rust` runs Criterion benches in `rust/crates/sqlty-bench`: catalog
-  load (270 tables with functions), analyzer per query kind, and
-  `check_source`/`rewrite_source` on 1k/4k queries. Use it to find where time
-  goes and to compare a branch (`ARGS="--save-baseline main"`, then
-  `ARGS="--baseline main"`).
+  load (50 to 5000 tables with functions), analyzer per query kind,
+  `check_source`/`rewrite_source` on 1k/4k queries, name-index prefix lookups and
+  `complete` at 50, 540 and 5000 tables, and `query_at` in a module of 4000 queries.
+  Use it to find where time goes and to compare a branch
+  (`ARGS="--save-baseline main"`, then `ARGS="--baseline main"`).
 - `make bench-codspeed` runs `benchmarks/test_benchmarks.py` with pytest-codspeed: each
   query kind of `synth.KINDS` through `analyze_select`/`analyze_params`, the schema
-  load, `rewrite_source` and `check_source`. CI's CodSpeed job counts their
-  instructions on every commit and reports the change on the pull request.
+  load, `rewrite_source`, `check_source`, `complete_source` at 50, 540 and 5000
+  tables and `query_at`. CI's CodSpeed job counts their instructions on every commit
+  and reports the change on the pull request.
+
+### Completion budget
+
+Completion runs on every keystroke against schemas of 500+ tables, so no per-keystroke
+operation may grow with the number of tables N. Tests count the catalog entries a
+lookup reaches (`catalog::visited`), not time, and fail when a path starts scanning the
+catalog: `lookups_do_not_depend_on_the_number_of_tables` (`catalog/index.rs`) and
+`work_does_not_depend_on_the_number_of_tables` (`analyzer/complete.rs`) compare 50, 540
+and 5000 tables.
+
+| Operation | Allowed cost | Guarded by |
+|-----------|--------------|------------|
+| Locate the query (`query_at`) | O(log S) per request, O(file) once per buffer version | Criterion `query_at`, CodSpeed `test_query_at_in_a_large_module` |
+| Table prefix | O(log N + k), k capped | entry counts, Criterion and CodSpeed at 50/540/5000 tables |
+| Tables linked after `JOIN` | O(K + log F + k) per table in scope, for its K foreign keys and the F of the schema | entry counts |
+| `alias.` columns | O(1) + O(width of that table) | entry counts, Criterion and CodSpeed |
+| Unqualified column | O(sum of the widths of the tables in scope) | entry counts, Criterion and CodSpeed |
+| Index build | O(N log N + F log F) per schema load, two pointers per name and three words per foreign key | `index_shares_the_catalog_keys`, `bench-ci` `schema_load_5000` RSS |
+| Per keystroke | never O(N), never waiting behind a check | `completion_is_answered_while_a_check_runs` (`sqlty-lsp`) |
 
 ## Git safety
 
@@ -176,6 +197,9 @@ User-visible behavior belongs in `docs/guide/` too; edge cases only in
 | Stripping | `tests/mdtest/strip/` | `basic_strip.md` |
 | Lint rules | `tests/mdtest/check/` | `type_annotation.md` |
 | Magic codec | `tests/mdtest/codec/` | `basic_codec.md` |
+| Completion | `tests/mdtest/completion/` | `completion.md` |
+| Hover | `tests/mdtest/hover/` | `hover.md` |
+| Highlighting | `tests/mdtest/highlighting/` | `highlighting.md` |
 
 ### Structure
 
@@ -236,6 +260,9 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 | `# stripped:` | `python`, whole code | `core.strip_source()` |
 | `# fixed:` | `python`, whole code | `core.fix_source()` (`sqlty check --fix`) |
 | `# decoded:` | `python`, whole code | magic codec `decode()` without imports or the `# coding:` line |
+| `# completions:` | `python`, at its `<CURSOR>` | `core.complete_source()`: `label kind detail` per item, the first ten then `...`; `None` for none |
+| `# hover:` | `python`, at its `<CURSOR>` | `core.hover_source()`: the Markdown contents; `None` for none |
+| `# highlighted:` | `python`, whole code | `core.highlight_source()`: `kind text` per colored token, a line each; `None` for none |
 | `# error: [rule] "message"` | end of its line, or on the line above | `core.check_source()` |
 
 - Consecutive comments of one kind form a multi-line value.
@@ -350,6 +377,7 @@ checked file names, so checking an untrusted pull request is safe. A harness kee
 |-------|-------|---------|
 | Static scan | `tests/test_no_exec.py` | A call in `src/sqlty` to `exec`, `eval`, `compile`, `__import__`, `importlib.import_module`, `get_type_hints`, `types.new_class` and the like, outside `tests/no_exec_allowlist.txt` |
 | Audit hook | `tests/_no_exec.py`, loaded for every test | At runtime, any `exec`/`eval` or import that sqlty code runs, charged to the innermost `src/sqlty` function |
+| No I/O in the engine | `rust/crates/sqlty-sql/clippy.toml` (`sqlty-python` links it), run by `cargo clippy` | A file, process, network or standard stream call in `sqlty-sql` or `sqlty-python`; a test or `build.rs` that needs one says so with `#[expect(clippy::disallowed_methods, ...)]` |
 | Integrity check | `scripts/check_no_exec_harness.py`, CI job `No-exec harness intact`, `make check-no-exec-harness` | Against the merge base: guard files edited or unloaded, allowlist lines added, mdtest assertions removed or edited (a bare `# error:` may become specific), skips or xfails added, test functions removed |
 
 CI runs the base branch's copy of the integrity check, so a pull request can't relax it.

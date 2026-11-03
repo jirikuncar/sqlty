@@ -10,9 +10,12 @@ from __future__ import annotations
 import ast
 import builtins
 import collections
+import io
+import itertools
 import random
 import re
 import time
+import tokenize
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -20,6 +23,9 @@ from typing import Any
 import pytest
 
 import sqlty.core as core
+from sqlty._core import query_sites as _query_sites
+from sqlty._drivers import MARKER
+from sqlty._helpers import find_helper_calls
 from sqlty._source import ParsedSource
 from tests._mdtest.parser import parse
 from tests._mdtest.runner import comments, string_constants, without_generated
@@ -237,6 +243,39 @@ def _check_outputs(source: str, options: dict) -> None:
     ast.parse(fixed)
     assert comments(without_generated(fixed)) == kept, fixed
     assert core.fix_source(fixed, **options) == fixed
+
+
+@pytest.mark.parametrize(("source", "options"), PYTHON)
+def test_query_at_finds_what_check_reads(source: str, options: dict) -> None:
+    """Probing every string literal finds exactly the queries ``check`` reads, by marker or helper."""
+    parsed = ParsedSource(source)
+    style = options["import_style"]
+    tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    templates = {token.start[0] for token in tokens if token.type == tokenize.TSTRING_START}
+    expected = collections.Counter(
+        text
+        for line, kind, text in _query_sites(
+            source, import_style=style, any_calls=parsed.any_calls(style)
+        )
+        if kind == "query" and line not in templates
+    )
+    expected.update(
+        call.query
+        for call in find_helper_calls(parsed)
+        if isinstance(call.query_node, ast.Constant)
+        and isinstance(call.query, str)
+        and not MARKER.match(call.query)
+    )
+    lines = source.splitlines(keepends=True)
+    starts = [0, *itertools.accumulate(len(line.encode()) for line in lines)]
+    found = {}
+    for token in tokens:
+        if token.type == tokenize.STRING:
+            (row, col), quote = token.end, 3 if token.string.endswith(('"""', "'''")) else 1
+            closing = starts[row - 1] + len(lines[row - 1][:col].encode()) - quote
+            if (at := core.query_at(source, closing, import_style=style)) is not None:
+                found[at.span] = at.text
+    assert collections.Counter(found.values()) == expected
 
 
 @pytest.mark.parametrize(("source", "options"), PYTHON)

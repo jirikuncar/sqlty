@@ -73,6 +73,8 @@ pub struct NameDiagnostic {
     /// The bytes of the query it is about, when the analyzer knows where that is written:
     /// the name of an unknown table, column or function.
     pub span: Option<Range<usize>>,
+    /// What to write at `span` to fix it: the closest column of an unknown one.
+    pub replacement: Option<String>,
 }
 
 #[derive(Default)]
@@ -85,6 +87,8 @@ struct Inner {
     at: Vec<Span>,
     /// Untyped results accounted for so far, recorded or deliberately silent.
     explained: usize,
+    /// The columns the completion placeholder could name, once the analyzer reaches it.
+    probe: Option<Vec<crate::analyzer::Candidate>>,
 }
 
 /// A shared, append-only list of diagnostics; clones record into the same list.
@@ -101,6 +105,19 @@ impl Diagnostics {
         })))
     }
 
+    /// The columns [`Diagnostics::probe`] recorded, when the analyzer reached the placeholder.
+    pub(crate) fn probed(&self) -> Option<Vec<crate::analyzer::Candidate>> {
+        self.0.borrow_mut().probe.take()
+    }
+
+    /// Record what the completion placeholder could name; the first record wins.
+    pub(crate) fn probe(&self, candidates: impl FnOnce() -> Vec<crate::analyzer::Candidate>) {
+        let mut inner = self.0.borrow_mut();
+        if inner.enabled && inner.probe.is_none() {
+            inner.probe = Some(candidates());
+        }
+    }
+
     /// Whether diagnostics are collected. Guard the building of messages with it.
     pub(crate) fn enabled(&self) -> bool {
         self.0.borrow().enabled
@@ -108,6 +125,16 @@ impl Diagnostics {
 
     /// Record a diagnostic (once per rule and message) at the node being analyzed.
     pub(crate) fn record(&self, rule: NameRule, message: impl Into<String>) {
+        self.record_fix(rule, message, None);
+    }
+
+    /// [`Diagnostics::record`] with what to write at the name to fix it.
+    pub(crate) fn record_fix(
+        &self,
+        rule: NameRule,
+        message: impl Into<String>,
+        replacement: Option<String>,
+    ) {
         let mut inner = self.0.borrow_mut();
         if !inner.enabled {
             return;
@@ -122,6 +149,7 @@ impl Diagnostics {
                 rule,
                 message,
                 span: None,
+                replacement,
             };
             inner.items.push((item, at));
         }
@@ -215,6 +243,7 @@ mod tests {
             rule,
             message: message.to_string(),
             span: None,
+            replacement: None,
         }
     }
 

@@ -68,6 +68,8 @@ def main(argv: list[str] | None = None) -> None:
                 _cmd_strip(args)
             case "check":
                 _cmd_check(args)
+            case "complete":
+                _cmd_complete(args)
             case "breaking":
                 from sqlty._breaking import main as breaking
 
@@ -200,6 +202,28 @@ def build_parser() -> argparse.ArgumentParser:
         "Actions annotations). Summaries, --statistics and --explain are text only",
     )
 
+    # --- complete ---
+    complete_parser = subparsers.add_parser(
+        "complete",
+        help="List the table and column names that complete at FILE:LINE:COL in a query string "
+        "(sqlty complete app.py:12:30), for scripts and agents",
+    )
+    complete_parser.add_argument(
+        "location",
+        type=_location,
+        metavar="FILE:LINE:COL",
+        help="The cursor: a Python file, a 1-based line and a 1-based column in characters",
+    )
+    _add_common_args(complete_parser)
+    complete_parser.set_defaults(paths=None)
+    complete_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print a JSON object with the start and end the completion replaces, whether the "
+        "list is incomplete, and the items with their label, kind, detail, SQL type and "
+        "nullability, instead of one item per line",
+    )
+
     # --- breaking ---
     breaking_parser = subparsers.add_parser(
         "breaking",
@@ -311,7 +335,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         nargs="*",
         type=Path,
         default=[Path(".")],
-        help="Files or directories (default: .); each file uses its nearest pyproject.toml",
+        help="Files or directories (default: .); each file uses its nearest sqlty.toml, pyproject.toml or Cargo.toml",
     )
     parser.add_argument(
         "--dialect",
@@ -331,9 +355,10 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         "--config-file",
         type=Path,
         metavar="PATH",
-        help="Use this file for every path instead of the nearest pyproject.toml: [tool.sqlty] "
-        "of a pyproject.toml, or top-level keys of another file such as sqlty.toml; its "
-        "relative paths are relative to the current directory. Env: SQLTY_CONFIG_FILE",
+        help="Use this file for every path instead of the nearest config file: [tool.sqlty] "
+        "of a pyproject.toml, [package.metadata.sqlty] or [workspace.metadata.sqlty] of a Cargo.toml, "
+        "or top-level keys of another file such as sqlty.toml; its relative paths are relative to "
+        "the current directory. Env: SQLTY_CONFIG_FILE",
     )
     source.add_argument(
         "--isolated",
@@ -400,6 +425,17 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help="Files to work on at once; 1 works on one at a time. Output is the same in any "
         "case (default: the number of processors)",
     )
+
+
+def _location(value: str) -> tuple[Path, int, int]:
+    """``FILE:LINE:COL`` of ``sqlty complete``."""
+    import argparse
+
+    path, _, rest = value.rpartition(":")
+    path, _, line = path.rpartition(":")
+    if not (path and line.isdigit() and rest.isdigit()):
+        raise argparse.ArgumentTypeError(f"expected FILE:LINE:COL, got {value!r}")
+    return Path(path), int(line), int(rest)
 
 
 def _jobs(value: str) -> int:
@@ -702,6 +738,56 @@ def github_annotation(path: Path, diag: Diagnostic) -> str:
     return f"::{level} {where},title={escape('sqlty ' + diag['rule'], property=True)}::{escape(diag['message'])}"
 
 
+def _cmd_complete(args: argparse.Namespace) -> None:
+    """Complete command: the names that can be typed at a cursor in a query string.
+
+    The file is read with the settings ``check`` gives it, and the helpers of ``paths``
+    (default: its directory) are indexed, so a configured or imported helper's query
+    completes too.
+    """
+    from sqlty._config import ConfigError
+    from sqlty.core import complete_source
+
+    path, line, column = args.location
+    if not path.is_file():
+        raise ConfigError(f"{path}: no such file")
+    args.paths = [path, *(args.paths or [path.parent])]
+    project = Project(args)
+    path = next((file for file in project.files if file.resolve() == path.resolve()), path)
+    if path not in project.sources:
+        raise ConfigError(f"{path}: not a Python file sqlty reads")
+    settings, parsed = project.settings[path], project.sources[path]
+    found = complete_source(
+        parsed,
+        line,
+        column,
+        dialect=settings.dialect,
+        schema_sql=settings.schema,
+        import_style=settings.import_style,
+        helpers=project.helpers[path],
+    )
+    if args.json:
+
+        def at(offset: int) -> dict[str, int]:
+            line, column = parsed.position(offset)
+            return {"line": line, "column": column}
+
+        result = (
+            None
+            if found is None
+            else {
+                "start": at(found.start),
+                "end": at(found.end),
+                "incomplete": found.incomplete,
+                "items": [item._asdict() for item in found.items],
+            }
+        )
+        print(json.dumps(result, indent=2))
+    elif found is not None:
+        for item in found.items:
+            print("\t".join([item.label, item.kind, item.detail or "", item.sql_type or ""]))
+
+
 def _cmd_skill(name: str, install: Path | None, list_skills: bool) -> None:
     """Skill command: print one Agent Skill, list them, or write them all under ``install``."""
     from sqlty._core import skills
@@ -845,7 +931,7 @@ class ConfigSource:
     """Each directory's ``[tool.sqlty]`` after ``--config-file``, ``--isolated``,
     ``-c/--config``, ``--error/--warn/--ignore`` and the exclude flags.
 
-    By default it is the nearest ``pyproject.toml`` with a table. ``config_file``
+    By default it is the nearest ``sqlty.toml``, or ``pyproject.toml`` or ``Cargo.toml`` with a table. ``config_file``
     fixes one file for every directory, with relative paths resolved against
     the current directory (like ruff); ``isolated`` uses no file at all.
     ``overrides`` are TOML assignments applied on top, then ``rule_severity``
@@ -918,7 +1004,7 @@ class ConfigSource:
         """Config governing ``directory``, the directory its relative paths start from, and its
         file name. Inline overrides and rule flags are applied; ``schema`` and the excludes
         given inline are not (``self.schema``, ``exclusions``)."""
-        from sqlty._config import load_config
+        from sqlty._config import find_config
 
         if self._isolated:
             config: SQLTyConfig = {}
@@ -926,8 +1012,9 @@ class ConfigSource:
         elif self._fixed is not None:
             config, config_dir, label = self._fixed, self._cwd, str(self._label)
         else:
-            config, config_dir = load_config(directory)
-            label = f"{config_dir}/pyproject.toml"
+            config, path = find_config(directory)
+            config_dir = path.parent if path else None
+            label = str(path) if path else "pyproject.toml"
         if self._overrides or self._rule_severity:
             rules = {**config.get("rules", {}), **self._overrides.get("rules", {})}
             rules.update(self._rule_severity)
@@ -1145,7 +1232,7 @@ def _module_names(path: Path, roots: list[Path]) -> list[str]:
 
 @dataclass(frozen=True)
 class Settings:
-    """``[tool.sqlty]`` of the nearest ``pyproject.toml``, with CLI flags on top."""
+    """The nearest configuration file (``sqlty.toml``, ``pyproject.toml``, ``Cargo.toml``), with CLI flags on top."""
 
     dialect: str = "postgres"
     schema: Schema | None = None

@@ -17,9 +17,10 @@ use crate::rewriter::{
 };
 use crate::rules::{Rule, RuleConfig};
 use crate::scan::Scan;
+use sqlty_sql::diagnostics::NameRule;
 
 /// The rules whose diagnostics carry a fix.
-const FIXABLE: [Rule; 7] = [
+const FIXABLE: [Rule; 8] = [
     Rule::InlineSqlComment,
     Rule::MysqlSqlMarker,
     Rule::StaleRewrite,
@@ -27,6 +28,7 @@ const FIXABLE: [Rule; 7] = [
     Rule::StaleType,
     Rule::NarrowType,
     Rule::UntypedQuery,
+    Rule::Name(NameRule::UnknownColumn),
 ];
 
 /// Fixing one problem can reveal another (a `"--sql SELECT"` fixed into a query is then
@@ -46,7 +48,8 @@ fn word_regex(name: &str) -> Regex {
 }
 
 /// `check_source` plus the edits of its diagnostics: fix `inline-sql-comment`,
-/// `mysql-sql-marker`, `stale-rewrite`, `select-star`, `stale-type` and `untyped-query`,
+/// `mysql-sql-marker`, `stale-rewrite`, `select-star`, `stale-type`, `untyped-query` and
+/// `unknown-column`,
 /// except where a `# sqlty: ignore` comment on the line the rule reports (`suppressed`, by
 /// line of `source`) suppresses that rule. The imports the fixes need are added last, so
 /// the lines of `suppressed` hold for every pass.

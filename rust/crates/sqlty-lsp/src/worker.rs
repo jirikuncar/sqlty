@@ -8,7 +8,7 @@ use lsp_server::Response;
 use lsp_types::{CodeAction, CodeActionKind, CodeActionOrCommand, MessageType, OneOf, Url};
 
 use crate::text::{diff, LineIndex};
-use crate::{actions, Job, Settings, Shared, Workspace, FIX_ALL};
+use crate::{actions, highlight, Job, Settings, Shared, Workspace, FIX_ALL};
 
 pub(crate) fn work<W, F>(
     queue: &Receiver<Job>,
@@ -147,6 +147,7 @@ where
     let Ok(path) = uri.to_file_path() else {
         return;
     };
+    let enabled = workspaces.settings.completion || workspaces.settings.highlighting;
     let Some(workspace) = workspaces.of(&path, shared) else {
         return;
     };
@@ -157,6 +158,7 @@ where
             return;
         }
     };
+    let completion = enabled.then(|| workspace.completion(&path)).flatten();
     let mut documents = shared.documents();
     let Some(document) = documents.get_mut(&uri).filter(|d| d.version == version) else {
         return;
@@ -167,8 +169,14 @@ where
         .map(|d| actions::diagnostic(d, &index))
         .collect();
     document.diagnostics = Some((version, diagnostics));
+    let before = highlight::reading(document.completion.as_ref(), &text);
+    document.completion = completion.map(|context| (text.clone(), context));
+    let unchanged = before == highlight::reading(document.completion.as_ref(), &text);
     drop(documents);
     shared.publish(uri, published, Some(version));
+    if !unchanged {
+        shared.refresh();
+    }
 }
 
 fn fix_all<W, F>(

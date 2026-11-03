@@ -1,1 +1,1 @@
-CREATE TABLE users (id INTEGER, score REAL);
+CREATE TABLE users (id INTEGER, name TEXT, score REAL);

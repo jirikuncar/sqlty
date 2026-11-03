@@ -84,6 +84,32 @@ user = SQL[User]("--sql\nSELECT id::INTEGER FROM users")
 # stripped: user = "--sql\nSELECT id::INTEGER FROM users"
 ```
 
+## Type the parameters
+
+`param-types = true` makes `rewrite` and `check --fix` write the type of the
+parameters too, `SQL[R, P]`: a `tuple`, or a generated `TypedDict` for named
+parameters. `strip` removes them, and a `P` you wrote is kept.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+param-types = true
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER NOT NULL, name TEXT);
+```
+
+```python
+by_name = "--sql\nSELECT id::INTEGER FROM users WHERE name = %s"
+# rewritten: by_name = SQL[tuple[int], tuple[str | None]]("--sql\nSELECT id::INTEGER FROM users WHERE name = %s")
+```
+
+A type checker then rejects what the driver runs (a list for a `tuple`, extra keys
+for a `TypedDict`), so turn it on when you want that.
+
 ## Check without writing
 
 | Command | Exits 1 when |

@@ -25,6 +25,7 @@ from sqlty._helpers import HelperIndex, find_helper_calls
 from sqlty._lint import NAME_RULES, Diagnostic
 from sqlty._params import _dotted, annotation_type, mismatch
 from sqlty._source import ParsedSource, _wrapper_name, is_any
+from sqlty._variants import Declared
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -252,8 +253,32 @@ def _check_params(ctx: _Check) -> None:
             )
     for call in [*ctx.calls, *ctx.driver_calls]:
         if call.params is not None:
-            for rule, message in _param_diagnostics(call, ctx.dialect, ctx.schema_sql):
+            declared = _declared_annotations(ctx, call.query)
+            for rule, message in _param_diagnostics(call, ctx.dialect, ctx.schema_sql, declared):
                 ctx.report(rule, message, call.line, ctx.query_span(call))
+
+
+def _declared_annotations(
+    ctx: _Check, query: str | None
+) -> tuple[ParsedSource, dict[int | str, ast.expr]] | None:
+    """The ``P`` of the ``SQL[R, P]`` a call's query comes from, as an annotation per parameter key."""
+    if not isinstance(query, Declared) or query.params is None:
+        return None
+    declared, source = query.params, query.source
+    if isinstance(declared, ast.Subscript) and _dotted(declared.value) in ("tuple", "typing.Tuple"):
+        items = declared.slice.elts if isinstance(declared.slice, ast.Tuple) else [declared.slice]
+        if any(isinstance(item, ast.Constant) and item.value is Ellipsis for item in items):
+            return None
+        return source, dict(enumerate(items, 1))
+    from sqlty._type_extractor import extract_type_definitions
+
+    name = ast.unparse(declared)
+    info = extract_type_definitions(source, ctx.helpers, source.module).get(name)
+    if info is None and ctx.helpers is not None and (found := ctx.helpers.row_type(source, name)):
+        info = found[0]
+    if info is None or info.kind != "TypedDict":
+        return None
+    return source, typing.cast("dict[int | str, ast.expr]", info.annotations)
 
 
 def _check_declared_params(ctx: _Check) -> None:
@@ -569,9 +594,16 @@ def _merge_variants(diagnostics: list[Diagnostic], calls: list[HelperCall]) -> l
 
 
 def _param_diagnostics(
-    call: HelperCall, dialect: str, schema_sql: str | Schema | None
+    call: HelperCall,
+    dialect: str,
+    schema_sql: str | Schema | None,
+    declared: tuple[ParsedSource, dict[int | str, ast.expr]] | None = None,
 ) -> list[tuple[str, str]]:
-    """``(rule, message)`` for the arguments a call passes for its query's placeholders."""
+    """``(rule, message)`` for the arguments a call passes for its query's placeholders.
+
+    With ``declared``, the ``P`` of the query's ``SQL[R, P]``, an argument is checked
+    against its annotation in ``P``, as a type checker would, instead of the query.
+    """
     assert call.query is not None and call.params is not None
     from sqlty.core import analyze_params
 
@@ -610,7 +642,12 @@ def _param_diagnostics(
         if (param := by_key.get(key)) is None:
             continue
         label = f"parameter {key}" if isinstance(key, int) else f"parameter '{key}'"
-        if arg.type == "None" or (typed and not param.cast):
+        if declared is not None and (annotation := declared[1].get(key)) is not None:
+            members = [annotation_type(m, declared[0]) for m in _union_members(annotation)]
+            if not any(_fits(arg.type, member) for member in members):
+                spelled = " | ".join(str(member) for member in members)
+                found.append(("param-type-mismatch", f"{label} expects {spelled}, got {arg.type}"))
+        elif arg.type == "None" or (typed and not param.cast):
             expected = param.python_type
             if (
                 expected is None
@@ -639,6 +676,20 @@ def _param_diagnostics(
                     )
                 )
     return found
+
+
+def _fits(actual: str | None, expected: str | None) -> bool:
+    """Whether a type checker takes a value of type ``actual`` for ``expected``; unknown types fit."""
+    if actual is None or expected is None or actual == expected:
+        return True
+    if "list" in (actual, expected):
+        return actual.startswith("list") and expected.startswith("list")
+    return (actual, expected) in {
+        ("bool", "int"),
+        ("bool", "float"),
+        ("int", "float"),
+        ("datetime.datetime", "datetime.date"),
+    }
 
 
 def _declared_params(

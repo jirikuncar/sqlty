@@ -4,11 +4,11 @@ expression: "reports(&queries, \"postgres\", Some(DDL))"
 ---
 SELECT nope FROM users
 nope: ? | ? | Unknown
-[unknown-column] column `nope` does not exist in `users`
+[unknown-column] column `nope` does not exist in `users`; did you mean `note`?
 
 SELECT users.nope FROM users
 nope: ? | ? | Unknown
-[unknown-column] column `nope` does not exist in `users`
+[unknown-column] column `nope` does not exist in `users`; did you mean `note`?
 
 SELECT x.name FROM users
 name: ? | ? | Unknown

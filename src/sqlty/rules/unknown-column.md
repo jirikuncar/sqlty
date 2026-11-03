@@ -30,6 +30,38 @@ from sqlty import SQL
 q = SQL[tuple[int, str]]("--sql\nSELECT id, email FROM users")
 ```
 
+### The closest column
+
+When one column of the tables in scope is closest to the unknown name, the message
+names it, and `sqlty check --fix` or the editor's quick fix ("Fix unknown-column")
+writes it. Close means at most one edit (a typed, missing, changed or swapped character)
+per three characters of the longer name, or one name inside the other when the shorter
+has four characters or more: `surname` holds `name`. Case is ignored. A qualified name
+(`u.surname`) only looks in its own table. A tie suggests nothing: sqlty never guesses
+which column you meant.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER, name TEXT, email TEXT);
+```
+
+```python
+from sqlty import SQL
+
+# error: [unknown-column] "column `surname` does not exist in `users`; did you mean `name`?"
+q = SQL[tuple[int, str]]("--sql\nSELECT id, surname FROM users")
+```
+
+```python
+from sqlty import SQL
+
+q = SQL[tuple[int, str]]("--sql\nSELECT id, surname FROM users")
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: q = SQL[tuple[int | None, str | None]]("--sql\nSELECT id, name FROM users")
+```
+
 ### Composite fields
 
 A field of a composite type the schema declares is checked the same way.
@@ -54,7 +86,7 @@ An unknown column has no type, so its annotation is not checked, and the query f
 
 ## How to fix
 
-Fix the name or add the column to the schema file. Columns of CTEs and derived tables, `USING`/`NATURAL` join columns, outer-query columns in correlated subqueries and `LATERAL`, and whole-row references (`SELECT u FROM users u`) are resolved and not reported. A column that may come from a table function or another source whose columns are not read is reported as `unsupported-syntax`. To accept one case, put `# sqlty: ignore[unknown-column]` on its line.
+Apply the suggested column with `sqlty check --fix`, fix the name, or add the column to the schema file. Columns of CTEs and derived tables, `USING`/`NATURAL` join columns, outer-query columns in correlated subqueries and `LATERAL`, and whole-row references (`SELECT u FROM users u`) are resolved and not reported. A column that may come from a table function or another source whose columns are not read is reported as `unsupported-syntax`. To accept one case, put `# sqlty: ignore[unknown-column]` on its line.
 
 ## Configuration
 

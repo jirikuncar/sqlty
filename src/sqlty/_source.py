@@ -434,6 +434,21 @@ class ParsedSource:
         column = len(self._bytes[starts[line - 1] : offset].decode(errors="replace"))
         return line, column + 1
 
+    def offset(self, line: int, column: int) -> int:
+        """The byte offset of the 1-based ``line`` and ``column`` (in characters), as ``position`` gives.
+
+        A column past the end of its line stops at the line break.
+
+        Example:
+            >>> ParsedSource("x = 1\\nf('é', g)").offset(2, 8)
+            14
+        """
+        starts = self._byte_lines
+        line = min(max(line, 1), len(starts) - 1)
+        text = self._bytes[starts[line - 1] : starts[line]].decode(errors="replace")
+        text = text[: max(column - 1, 0)].split("\n")[0].split("\r")[0]
+        return starts[line - 1] + len(text.encode())
+
     @functools.cached_property
     def _bytes(self) -> bytes:
         return self.text.encode()

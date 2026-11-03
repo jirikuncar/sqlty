@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, LazyLock};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -8,13 +8,32 @@ use lsp_server::{Connection, Message, Notification, Request, RequestId};
 use lsp_types::Url;
 use serde_json::{json, Value};
 
-use crate::{run, Diagnostic, Edit, Settings, Severity, Workspace};
+use sqlty_sql::analyzer::{load_schema_with_skipped, Schema};
+
+use crate::{run, CompletionContext, Diagnostic, Edit, Settings, Severity, Workspace};
+
+/// Users and orders, and 540 tables `t0`..`t539`.
+static SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
+    let mut sql = String::from(
+        "CREATE TABLE users (id INT NOT NULL, name TEXT);\nCREATE TABLE orders (id INT, user_id INT);\n",
+    );
+    for i in 0..540 {
+        sql += &format!("CREATE TABLE t{i} (id INT);\n");
+    }
+    load_schema_with_skipped(&sql, "postgres").0
+});
+
+/// Lets a check of a buffer holding `slow` finish.
+static RELEASE: AtomicBool = AtomicBool::new(false);
 
 /// Reports each `bad`; its fix writes `good` and imports it. With a baseline, `old.py`
-/// of its root has a breaking change.
+/// of its root has a breaking change. Completes with [`SCHEMA`] and the table `gen{N}`
+/// of its `N`th load; the strings `run(` is called with are helper queries.
 struct Fake {
     root: PathBuf,
     settings: Settings,
+    generation: usize,
+    checked: String,
 }
 
 impl Workspace for Fake {
@@ -22,6 +41,10 @@ impl Workspace for Fake {
         if text.contains("crash") {
             return Err("Traceback: crash".to_string());
         }
+        while text.contains("slow") && !RELEASE.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        self.checked = text.to_string();
         Ok(text
             .match_indices("bad")
             .map(|(at, _)| Diagnostic {
@@ -66,12 +89,33 @@ impl Workspace for Fake {
         };
         Ok(vec![(self.root.join("old.py"), vec![finding])])
     }
+
+    fn completion(&mut self, _: &Path) -> Option<CompletionContext> {
+        let schema = if self.generation == 1 {
+            SCHEMA.clone()
+        } else {
+            let sql = format!("CREATE TABLE gen{} (id INT);", self.generation);
+            load_schema_with_skipped(&sql, "postgres").0
+        };
+        Some(CompletionContext {
+            schema: Some(schema),
+            dialect: "postgres".to_string(),
+            import_style: None,
+            helper_starts: self
+                .checked
+                .match_indices("run(")
+                .map(|(at, _)| at + 4)
+                .collect(),
+        })
+    }
 }
 
 struct Client {
     connection: Connection,
     server: Option<JoinHandle<Result<(), String>>>,
     pending: Vec<Notification>,
+    /// What the server asked of the client, by method.
+    asked: Vec<String>,
     next: i32,
     opened: Arc<AtomicUsize>,
 }
@@ -98,6 +142,8 @@ impl Client {
                     Ok(Fake {
                         root: root.to_path_buf(),
                         settings: settings.clone(),
+                        generation: count.load(Ordering::SeqCst),
+                        checked: String::new(),
                     })
                 }
             })
@@ -107,6 +153,7 @@ impl Client {
             connection,
             server: Some(server),
             pending: Vec::new(),
+            asked: Vec::new(),
             next: 0,
             opened,
         };
@@ -142,7 +189,8 @@ impl Client {
                         .unwrap_or_else(|error| json!({"error": error.code}));
                 }
                 Message::Notification(notification) => self.pending.push(notification),
-                other => panic!("unexpected {other:?}"),
+                Message::Request(asked) => self.asked.push(asked.method),
+                other @ Message::Response(_) => panic!("unexpected {other:?}"),
             }
         }
     }
@@ -155,7 +203,8 @@ impl Client {
             match self.receive() {
                 Message::Notification(n) if n.method == method => return n.params,
                 Message::Notification(n) => self.pending.push(n),
-                other => panic!("unexpected {other:?}"),
+                Message::Request(asked) => self.asked.push(asked.method),
+                other @ Message::Response(_) => panic!("unexpected {other:?}"),
             }
         }
     }
@@ -327,17 +376,19 @@ fn a_failed_check_is_logged() {
 
 #[test]
 fn saving_the_config_reloads_the_project() {
-    let mut client = Client::start(&json!({}));
-    client.open("file:///work/q.py", "bad\n");
-    client.notification("textDocument/publishDiagnostics");
-    assert_eq!(client.opened.load(Ordering::SeqCst), 1);
-    client.notify(
-        "textDocument/didSave",
-        json!({"textDocument": {"uri": "file:///work/pyproject.toml"}}),
-    );
-    client.notification("textDocument/publishDiagnostics");
-    assert_eq!(client.opened.load(Ordering::SeqCst), 2);
-    client.shutdown();
+    for name in ["pyproject.toml", "sqlty.toml", "Cargo.toml"] {
+        let mut client = Client::start(&json!({}));
+        client.open("file:///work/q.py", "bad\n");
+        client.notification("textDocument/publishDiagnostics");
+        assert_eq!(client.opened.load(Ordering::SeqCst), 1);
+        client.notify(
+            "textDocument/didSave",
+            json!({"textDocument": {"uri": format!("file:///work/{name}")}}),
+        );
+        client.notification("textDocument/publishDiagnostics");
+        assert_eq!(client.opened.load(Ordering::SeqCst), 2, "{name}");
+        client.shutdown();
+    }
 }
 
 #[test]
@@ -346,11 +397,11 @@ fn other_languages_and_requests_are_left_alone() {
     let document =
         json!({"uri": "file:///work/q.sql", "languageId": "sql", "version": 1, "text": "bad"});
     client.notify("textDocument/didOpen", json!({"textDocument": document}));
-    let hover = client.request(
-        "textDocument/hover",
+    let definition = client.request(
+        "textDocument/definition",
         json!({"textDocument": {"uri": "file:///work/q.py"}, "position": {"line": 0, "character": 0}}),
     );
-    assert_eq!(hover, json!({"error": -32601}));
+    assert_eq!(definition, json!({"error": -32601}));
     let rest = client.shutdown();
     assert!(
         !rest
@@ -433,4 +484,392 @@ fn without_a_baseline_nothing_is_published_in_the_background() {
             .any(|method| method == "textDocument/publishDiagnostics"),
         "{rest:?}"
     );
+}
+
+/// The labels of a completion response, or `null`.
+fn labels(found: &Value) -> Value {
+    if found.is_null() {
+        return Value::Null;
+    }
+    json!(found["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["label"].clone())
+        .collect::<Vec<_>>())
+}
+
+impl Client {
+    fn complete(&mut self, uri: &str, line: u32, character: u32) -> Value {
+        let position = json!({"line": line, "character": character});
+        self.request(
+            "textDocument/completion",
+            json!({"textDocument": {"uri": uri}, "position": position, "context": {"triggerKind": 2, "triggerCharacter": "."}}),
+        )
+    }
+
+    fn change(&self, uri: &str, version: i32, text: &str) {
+        let change = json!({"textDocument": {"uri": uri, "version": version}, "contentChanges": [{"text": text}]});
+        self.notify("textDocument/didChange", change);
+    }
+}
+
+#[test]
+fn completion_hover_and_highlighting_are_advertised_unless_off() {
+    for (options, advertised, hover, highlighting) in [
+        (Value::Null, true, true, true),
+        (json!({"completion": {"enable": true}}), true, true, true),
+        (json!({"completion": {"enable": false}}), false, true, true),
+        (json!({"hover": {"enable": false}}), true, false, true),
+        (
+            json!({"highlighting": {"enable": false}}),
+            true,
+            true,
+            false,
+        ),
+    ] {
+        let (server, connection) = Connection::memory();
+        let thread = std::thread::spawn(move || {
+            run(&server, |_: &Path, _: &Settings| -> Result<Fake, String> {
+                Err(String::new())
+            })
+            .map_err(|error| error.to_string())
+        });
+        let mut client = Client {
+            connection,
+            server: Some(thread),
+            pending: Vec::new(),
+            asked: Vec::new(),
+            next: 0,
+            opened: Arc::default(),
+        };
+        let result = client.request(
+            "initialize",
+            json!({"capabilities": {}, "initializationOptions": options}),
+        );
+        let tokens = &result["capabilities"]["semanticTokensProvider"];
+        if highlighting {
+            assert_eq!(tokens["full"], true);
+            assert_eq!(
+                tokens["legend"]["tokenTypes"],
+                json!([
+                    "keyword",
+                    "string",
+                    "number",
+                    "comment",
+                    "operator",
+                    "parameter"
+                ])
+            );
+        } else {
+            assert!(tokens.is_null(), "{tokens}");
+        }
+        assert_eq!(
+            result["capabilities"]["hoverProvider"],
+            if hover { json!(true) } else { Value::Null }
+        );
+        let provider = &result["capabilities"]["completionProvider"];
+        if advertised {
+            assert_eq!(provider["triggerCharacters"], json!(["."]));
+            assert_eq!(provider["resolveProvider"], true);
+        } else {
+            assert!(provider.is_null(), "{provider}");
+        }
+        client.notify("initialized", json!({}));
+        client.shutdown();
+    }
+}
+
+#[test]
+fn a_request_before_initialized_is_answered() {
+    let (server, connection) = Connection::memory();
+    let thread = std::thread::spawn(move || {
+        run(&server, |_: &Path, _: &Settings| -> Result<Fake, String> {
+            Err(String::new())
+        })
+        .map_err(|error| error.to_string())
+    });
+    let mut client = Client {
+        connection,
+        server: Some(thread),
+        pending: Vec::new(),
+        asked: Vec::new(),
+        next: 0,
+        opened: Arc::default(),
+    };
+    client.request("initialize", json!({"capabilities": {}}));
+    let range = json!({"start": {"line": 0, "character": 0}, "end": {"line": 1, "character": 0}});
+    let answer = client.request(
+        "textDocument/semanticTokens/range",
+        json!({"textDocument": {"uri": "file:///work/q.py"}, "range": range}),
+    );
+    assert_eq!(answer, json!({"error": -32601}), "method not found");
+    client.notify("initialized", json!({}));
+    client.shutdown();
+}
+
+#[test]
+fn completion_after_a_dot_lists_the_columns() {
+    let mut client = Client::start(&json!({}));
+    let text = "q = \"--sql\\nSELECT u. FROM users u\"\n";
+    client.open("file:///work/q.py", text);
+    client.notification("textDocument/publishDiagnostics");
+    let found = client.complete("file:///work/q.py", 0, 21);
+    assert_eq!(labels(&found), json!(["id", "name"]));
+    assert_eq!(found["isIncomplete"], false);
+    let item = &found["items"][0];
+    assert_eq!(item["kind"], 5, "a field");
+    assert_eq!(item["sortText"], "0000");
+    assert_eq!(item["labelDetails"], json!({"description": "u"}));
+    assert_eq!(
+        item["textEdit"]["range"],
+        json!({"start": {"line": 0, "character": 21}, "end": {"line": 0, "character": 21}})
+    );
+    assert!(item.get("detail").is_none(), "left to resolve");
+
+    let resolved = client.request("completionItem/resolve", item.clone());
+    assert_eq!(resolved["detail"], "INT NOT NULL");
+    assert_eq!(
+        resolved["documentation"]["value"],
+        "Column of `u`: `INT NOT NULL`"
+    );
+    client.shutdown();
+}
+
+#[test]
+fn completion_in_helper_strings_only() {
+    let mut client = Client::start(&json!({}));
+    let text = "run(\"SELECT * FROM us\")\nother(\"SELECT * FROM us\")\n";
+    client.open("file:///work/q.py", text);
+    client.notification("textDocument/publishDiagnostics");
+    assert_eq!(
+        labels(&client.complete("file:///work/q.py", 0, 21)),
+        json!(["users"])
+    );
+    assert_eq!(client.complete("file:///work/q.py", 1, 23), Value::Null);
+    assert_eq!(client.complete("file:///work/q.py", 0, 1), Value::Null);
+    assert_eq!(client.complete("file:///nowhere/q.py", 0, 1), Value::Null);
+
+    let edited = format!("# a comment\n{text}");
+    client.change("file:///work/q.py", 2, &edited);
+    assert_eq!(
+        labels(&client.complete("file:///work/q.py", 1, 21)),
+        json!(["users"]),
+        "the helper string moved with the edit, before the edit was checked"
+    );
+    client.shutdown();
+}
+
+#[test]
+fn a_long_list_is_capped_and_incomplete() {
+    let mut client = Client::start(&json!({}));
+    let text = "q = \"--sql\\nSELECT * FROM t\"\n";
+    client.open("file:///work/q.py", text);
+    client.notification("textDocument/publishDiagnostics");
+    let found = client.complete("file:///work/q.py", 0, 27);
+    assert_eq!(found["items"].as_array().unwrap().len(), 200);
+    assert_eq!(found["isIncomplete"], true);
+    client.change(
+        "file:///work/q.py",
+        2,
+        "q = \"--sql\\nSELECT * FROM t53\"\n",
+    );
+    let found = client.complete("file:///work/q.py", 0, 29);
+    assert_eq!(found["items"].as_array().unwrap().len(), 11);
+    assert_eq!(found["isIncomplete"], false);
+    client.shutdown();
+}
+
+#[test]
+fn completion_is_answered_while_a_check_runs() {
+    let mut client = Client::start(&json!({}));
+    let text = "q = \"--sql\\nSELECT u. FROM users u\"\n";
+    client.open("file:///work/q.py", text);
+    client.notification("textDocument/publishDiagnostics");
+    client.change("file:///work/q.py", 2, &format!("{text}slow = 1\n"));
+    std::thread::sleep(Duration::from_millis(50));
+    client.notify("$/cancelRequest", json!({"id": 999}));
+    assert_eq!(
+        labels(&client.complete("file:///work/q.py", 0, 21)),
+        json!(["id", "name"])
+    );
+    RELEASE.store(true, Ordering::SeqCst);
+    let published = client.notification("textDocument/publishDiagnostics");
+    assert_eq!(published["version"], 2);
+    client.shutdown();
+}
+
+#[test]
+fn a_reload_swaps_the_schema_completion_reads() {
+    let mut client = Client::start(&json!({}));
+    let text = "q = \"--sql\\nSELECT * FROM gen\"\n";
+    client.open("file:///work/q.py", text);
+    client.notification("textDocument/publishDiagnostics");
+    assert_eq!(
+        labels(&client.complete("file:///work/q.py", 0, 29)),
+        json!([])
+    );
+    client.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({"changes": [{"uri": "file:///work/schema.sql", "type": 2}]}),
+    );
+    client.notification("textDocument/publishDiagnostics");
+    assert_eq!(
+        labels(&client.complete("file:///work/q.py", 0, 29)),
+        json!(["gen2"])
+    );
+    client.shutdown();
+}
+
+#[test]
+fn completion_can_be_turned_off() {
+    let mut client = Client::with(
+        &json!({}),
+        &json!([{"uri": "file:///work", "name": "work"}]),
+        &json!({"completion": {"enable": false}}),
+    );
+    let text = "q = \"--sql\\nSELECT u. FROM users u\"\n";
+    client.open("file:///work/q.py", text);
+    client.notification("textDocument/publishDiagnostics");
+    assert_eq!(client.complete("file:///work/q.py", 0, 21), Value::Null);
+    client.shutdown();
+}
+
+impl Client {
+    fn hover(&mut self, uri: &str, line: u32, character: u32) -> Value {
+        let position = json!({"line": line, "character": character});
+        self.request(
+            "textDocument/hover",
+            json!({"textDocument": {"uri": uri}, "position": position}),
+        )
+    }
+}
+
+#[test]
+fn hover_says_what_a_word_of_a_query_is() {
+    let mut client = Client::start(&json!({}));
+    let text =
+        "q = \"--sql\\nSELECT 1 FROM users u WHERE u.id = 1\"\nrun(\"SELECT 1 FROM users\")\n";
+    client.open("file:///work/q.py", text);
+    client.notification("textDocument/publishDiagnostics");
+    let found = client.hover("file:///work/q.py", 0, 43);
+    assert_eq!(
+        found["contents"],
+        json!({"kind": "markdown", "value": "Column `id` of `u`: `INT NOT NULL`"})
+    );
+    assert_eq!(
+        found["range"],
+        json!({"start": {"line": 0, "character": 42}, "end": {"line": 0, "character": 44}})
+    );
+    let table = client.hover("file:///work/q.py", 1, 21);
+    assert!(
+        table["contents"]["value"]
+            .as_str()
+            .unwrap()
+            .starts_with("Table `public.users`\n- `id` `INT NOT NULL`"),
+        "{table}"
+    );
+    assert_eq!(client.hover("file:///work/q.py", 0, 1), Value::Null);
+    assert_eq!(client.hover("file:///nowhere/q.py", 0, 1), Value::Null);
+    client.shutdown();
+}
+
+#[test]
+fn hover_can_be_turned_off() {
+    let mut client = Client::with(
+        &json!({}),
+        &json!([{"uri": "file:///work", "name": "work"}]),
+        &json!({"hover": {"enable": false}}),
+    );
+    client.open("file:///work/q.py", "q = \"--sql\\nSELECT 1 FROM users\"\n");
+    client.notification("textDocument/publishDiagnostics");
+    assert_eq!(client.hover("file:///work/q.py", 0, 26), Value::Null);
+    client.shutdown();
+}
+
+impl Client {
+    /// Wait for the server to ask the client `method`.
+    fn asked(&mut self, method: &str) {
+        while !self.asked.iter().any(|asked| asked == method) {
+            match self.receive() {
+                Message::Request(asked) => self.asked.push(asked.method),
+                Message::Notification(n) => self.pending.push(n),
+                other @ Message::Response(_) => panic!("unexpected {other:?}"),
+            }
+        }
+    }
+
+    fn tokens(&mut self, uri: &str) -> Value {
+        self.request(
+            "textDocument/semanticTokens/full",
+            json!({"textDocument": {"uri": uri}}),
+        )
+    }
+}
+
+/// `data` of semantic tokens as `(line, character, length, type)`, positions made absolute.
+fn decoded(tokens: &Value) -> Vec<(u64, u64, u64, u64)> {
+    let data: Vec<u64> = serde_json::from_value(tokens["data"].clone()).unwrap();
+    let (mut line, mut character) = (0, 0);
+    data.chunks(5)
+        .map(|token| {
+            line += token[0];
+            character = if token[0] == 0 {
+                character + token[1]
+            } else {
+                token[1]
+            };
+            (line, character, token[2], token[3])
+        })
+        .collect()
+}
+
+#[test]
+fn semantic_tokens_color_the_sql_of_checked_strings() {
+    let mut client = Client::start(&json!({}));
+    let text =
+        "é = \"--sql\\nSELECT 'é' FROM t\"\nq = \"\"\"--sql\nSELECT 1\"\"\"\nx = \"SELECT 2\"\n";
+    client.open("file:///work/q.py", text);
+    let (keyword, string, number, comment) = (0, 1, 2, 3);
+    assert_eq!(
+        decoded(&client.tokens("file:///work/q.py")),
+        [
+            (0, 5, 5, comment),
+            (0, 12, 6, keyword),
+            (0, 19, 3, string),
+            (0, 23, 4, keyword),
+            (1, 7, 5, comment),
+            (2, 0, 6, keyword),
+            (2, 7, 1, number),
+        ],
+        "in UTF-16 units, before the first check"
+    );
+    assert_eq!(client.tokens("file:///nowhere/q.py"), Value::Null);
+    client.notification("textDocument/publishDiagnostics");
+    assert!(client.asked.is_empty(), "the check found nothing new");
+    client.shutdown();
+}
+
+#[test]
+fn a_check_that_finds_helper_strings_asks_for_the_tokens_again() {
+    let capabilities = json!({"workspace": {"semanticTokens": {"refreshSupport": true}}});
+    let mut client = Client::start(&capabilities);
+    client.open("file:///work/q.py", "run(\"SELECT 1\")\n");
+    client.notification("textDocument/publishDiagnostics");
+    client.asked("workspace/semanticTokens/refresh");
+    assert_eq!(decoded(&client.tokens("file:///work/q.py")).len(), 2);
+    assert_eq!(client.asked, ["workspace/semanticTokens/refresh"]);
+    client.shutdown();
+}
+
+#[test]
+fn highlighting_can_be_turned_off() {
+    let mut client = Client::with(
+        &json!({}),
+        &json!([{"uri": "file:///work", "name": "work"}]),
+        &json!({"highlighting": {"enable": false}}),
+    );
+    client.open("file:///work/q.py", "q = \"--sql\\nSELECT 1\"\n");
+    assert_eq!(client.tokens("file:///work/q.py"), Value::Null);
+    client.shutdown();
 }

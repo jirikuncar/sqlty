@@ -31,6 +31,9 @@ Kind = Literal[
     "fixed",
     "error",
     "decoded",
+    "completions",
+    "hover",
+    "highlighted",
 ]
 SQL_KINDS: tuple[Kind, ...] = ("inferred", "expanded", "columns", "json", "params", "rules")
 PY_KINDS: tuple[Kind, ...] = (
@@ -40,8 +43,13 @@ PY_KINDS: tuple[Kind, ...] = (
     "fixed",
     "error",
     "decoded",
+    "completions",
+    "hover",
+    "highlighted",
 )
 DIRECTIVES = frozenset({"skip", "xfail"})
+# Where `# completions:` and `# hover:` ask; removed from the code every assertion reads.
+CURSOR = "<CURSOR>"
 
 _PY_ASSERTION = re.compile(rf"^(\s*)#\s+({'|'.join(PY_KINDS)})(\[[^\]]*\])?:(?: (.*))?$")
 _SQL_ASSERTION = re.compile(rf"^(\s*)--\s+({'|'.join(SQL_KINDS)}):(?: (.*))?$")
@@ -90,7 +98,16 @@ class Unit:
 
     @property
     def code(self) -> Code:
-        return Code("\n".join(t for _, t in self.lines), [n for n, _ in self.lines])
+        text = "\n".join(t for _, t in self.lines)
+        return Code(text.replace(CURSOR, "", 1), [n for n, _ in self.lines])
+
+    @property
+    def cursor(self) -> tuple[int, int] | None:
+        """The 1-based line and column of the ``<CURSOR>`` marker, which ``code`` leaves out."""
+        for line, (_, text) in enumerate(self.lines, 1):
+            if (column := text.find(CURSOR)) >= 0:
+                return line, column + 1
+        return None
 
 
 @dataclass

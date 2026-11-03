@@ -64,12 +64,55 @@ pub struct Rewritten {
 /// assert_eq!(found.names, [Some("id".to_string()), None]);
 /// ```
 pub fn rewrite(sql: &str, styles: Styles) -> Rewritten {
-    let bytes = sql.as_bytes();
     let mut out = String::with_capacity(sql.len() + 8);
     let mut names: Vec<Option<String>> = Vec::new();
     let mut named: HashMap<String, usize> = HashMap::new();
-    let mut i = 0;
     let mut copied = 0;
+    scan(sql, styles, |at, end, token| {
+        out.push_str(&sql[copied..at]);
+        match token {
+            Token::Percent => out.push('%'),
+            Token::Positional => {
+                names.push(None);
+                out.push_str(&styles.number(names.len()));
+            }
+            Token::Numbered(number) => out.push_str(&styles.number(number)),
+            Token::Named(name) => {
+                let number = *named.entry(name.to_string()).or_insert_with(|| {
+                    names.push(Some(name.to_string()));
+                    names.len()
+                });
+                out.push_str(&styles.number(number));
+            }
+        }
+        copied = end;
+    });
+    out.push_str(&sql[copied..]);
+    Rewritten { text: out, names }
+}
+
+/// The byte ranges of the `%s` and `%(name)s` placeholders of `sql`, which sqlparser reads
+/// as the `%` operator; `%%` is not one.
+///
+/// ```
+/// use sqlty_sql::placeholders::percent_placeholders;
+///
+/// assert_eq!(percent_placeholders("SELECT %s, %(id)s, 5 %% 2"), [7..9, 11..17]);
+/// ```
+pub fn percent_placeholders(sql: &str) -> Vec<std::ops::Range<usize>> {
+    let mut found = Vec::new();
+    scan(sql, Styles::default(), |at, end, token| {
+        if !matches!(token, Token::Percent) {
+            found.push(at..end);
+        }
+    });
+    found
+}
+
+/// Call `found` with the start, end and kind of each placeholder of `sql`, in order.
+fn scan<'s>(sql: &'s str, styles: Styles, mut found: impl FnMut(usize, usize, Token<'s>)) {
+    let bytes = sql.as_bytes();
+    let mut i = 0;
     while i < bytes.len() {
         let skip_to = match bytes[i] {
             b'\'' => Some(quoted_end(
@@ -87,7 +130,7 @@ pub fn rewrite(sql: &str, styles: Styles) -> Rewritten {
             i = end;
             continue;
         }
-        let found = match bytes[i] {
+        let placeholder = match bytes[i] {
             b'%' => percent(sql, i),
             b'?' if styles.question_marks && !matches!(bytes.get(i + 1), Some(b'|' | b'&')) => {
                 question_mark(sql, i)
@@ -95,31 +138,13 @@ pub fn rewrite(sql: &str, styles: Styles) -> Rewritten {
             b':' if styles.colon_names => colon_name(sql, i),
             _ => None,
         };
-        let Some((end, token)) = found else {
+        let Some((end, token)) = placeholder else {
             i += 1;
             continue;
         };
-        out.push_str(&sql[copied..i]);
-        match token {
-            Token::Percent => out.push('%'),
-            Token::Positional => {
-                names.push(None);
-                out.push_str(&styles.number(names.len()));
-            }
-            Token::Numbered(number) => out.push_str(&styles.number(number)),
-            Token::Named(name) => {
-                let number = *named.entry(name.to_string()).or_insert_with(|| {
-                    names.push(Some(name.to_string()));
-                    names.len()
-                });
-                out.push_str(&styles.number(number));
-            }
-        }
-        copied = end;
+        found(i, end, token);
         i = end;
     }
-    out.push_str(&sql[copied..]);
-    Rewritten { text: out, names }
 }
 
 enum Token<'a> {

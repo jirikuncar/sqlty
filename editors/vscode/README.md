@@ -1,7 +1,9 @@
 # sqlty for VS Code
 
 Type-check the SQL in your Python code as you type: the diagnostics of `sqlty check`, each
-on the span it is about, with a quick fix where `sqlty check --fix` has one.
+on the span it is about, with a quick fix where `sqlty check --fix` has one, completion
+of table and column names in the query strings it checks, and SQL highlighting in strings
+marked `--sql`.
 
 The extension runs `sqlty server` from your project, so the editor and CI agree. Add sqlty
 to the project's environment (`uv add --dev sqlty`); the extension bundles none.
@@ -17,10 +19,12 @@ Restricted Mode and other editors.
 | `sqlty.interpreter` | `[]` | The interpreter whose `sqlty` runs; empty is the one selected in the Python extension |
 | `sqlty.breaking.against` | empty | A baseline for `sqlty breaking`: a git revision, a `--save` snapshot or schema files |
 | `sqlty.breaking.direction` | `both` | `both`, `forward` or `backward`, as `sqlty breaking --direction` |
+| `sqlty.completion.enable` | `true` | Complete table and column names in query strings; needs sqlty 0.4.0 or newer |
 | `sqlty.trace.server` | `off` | Log the protocol messages in the output channel |
 
 `sqlty` is looked up in `sqlty.path`, then in the interpreter's environment, then on `PATH`.
-A `sqlty` without `sqlty server` is skipped.
+The extension needs sqlty 0.3.0 or newer: an older `sqlty` is skipped, and when every one found
+is older, an error names each with its version. The output channel logs the version that runs.
 
 ## Breaking changes
 
@@ -28,7 +32,7 @@ With `sqlty.breaking.against` set to `main`, each check also runs `sqlty breakin
 
 - Forward, with every check: your buffer's queries against the schema of `main`. Source:
   `sqlty breaking (forward)`.
-- Backward, when the project loads and when a schema or `pyproject.toml` is saved: the
+- Backward, when the project loads and when a schema or a configuration file is saved: the
   queries of `main` against your schema, in every file. Source: `sqlty breaking (backward)`.
   A finding in a file you have changed since sits on its first line and names its line in
   `main`.

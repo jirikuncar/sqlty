@@ -10,6 +10,7 @@ needs the Python runtime; those passes live in ``sqlty._check``.
 
 from __future__ import annotations
 
+import ast
 from collections import Counter
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, NamedTuple
@@ -17,6 +18,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from sqlty._check import RowUsage, apply_suppressions, is_any_row
 from sqlty._check import diagnostics as check_diagnostics
 from sqlty._core import (
+    QueryAt,
     Schema,
     expand_star,
     infer_type,
@@ -25,10 +27,14 @@ from sqlty._core import (
 from sqlty._core import analyze_columns as _analyze_columns
 from sqlty._core import analyze_params as _analyze_params
 from sqlty._core import analyze_select as _analyze_select
+from sqlty._core import complete_source as _complete_source
 from sqlty._core import explain_select as _explain_select
 from sqlty._core import fix_source as _fix_source
+from sqlty._core import highlight_source as _highlight_source
+from sqlty._core import hover_source as _hover_source
 from sqlty._core import load_schema as _load_schema
 from sqlty._core import parse_error as _parse_error
+from sqlty._core import query_at as _query_at
 from sqlty._core import query_diagnostics as _query_diagnostics
 from sqlty._core import query_sites as _query_sites
 from sqlty._core import rewrite_source as _rewrite_source
@@ -569,6 +575,213 @@ def query_statistics(
     return counts
 
 
+def query_at(
+    source: str | ParsedSource,
+    offset: int,
+    *,
+    import_style: str | None = None,
+    helpers: HelperIndex | None = None,
+    module: str | None = None,
+) -> QueryAt | None:
+    r"""The query ``sqlty check`` reads at byte ``offset`` of ``source``, or ``None`` outside one.
+
+    A string is a query exactly when ``check_source`` checks it: a ``--sql`` marked string,
+    the argument of ``SQL[T](...)``, or a string literal passed to a helper's query
+    parameter (``helpers`` and ``module`` as for ``check_source``). An f-string, a variable
+    or a call to anything else is not. The cursor counts as in the query anywhere between
+    the quotes, both ends included, after the marker.
+
+    ``offset`` counts UTF-8 bytes. The result's ``text`` is the query as the analyzer reads
+    it (escapes decoded, the marker spelled ``--sql``), ``offset`` the cursor in it, and
+    ``source_offset(n)`` maps a byte of ``text`` back to the source.
+
+    Example:
+        >>> source = 'q = "--sql\\nSELECT id FROM users"'
+        >>> at = query_at(source, source.index("id"))
+        >>> at.text, at.offset, at.route
+        ('--sql\nSELECT id FROM users', 13, 'marker')
+        >>> at.source_offset(at.offset) == source.index("id")
+        True
+        >>> query_at(source, 0) is None
+        True
+    """
+    parsed = ParsedSource.of(source, module)
+    starts = _helper_starts(parsed, helpers, module)
+    return _query_at(parsed.text, offset, import_style=import_style, helper_starts=starts)
+
+
+class Completion(NamedTuple):
+    """A name that can be typed at the cursor.
+
+    ``kind`` is ``table``, ``view``, ``cte``, ``column``, or ``join`` for a table a
+    foreign key links to one in scope, its ``ON`` clause included; ``detail`` the schema of
+    a relation or the alias (or table) of a column.
+    """
+
+    label: str
+    kind: str
+    detail: str | None
+    sql_type: str | None
+    nullable: bool | None
+
+
+class Completions(NamedTuple):
+    """What completes at a cursor: ``items`` replace the bytes ``start`` to ``end`` of the source."""
+
+    start: int
+    end: int
+    incomplete: bool
+    items: list[Completion]
+
+
+def complete_source(
+    source: str | ParsedSource,
+    line: int,
+    column: int,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
+    import_style: str | None = None,
+    helpers: HelperIndex | None = None,
+    module: str | None = None,
+    limit: int = 200,
+) -> Completions | None:
+    r"""The table and column names that complete at 1-based ``line`` and ``column`` of ``source``.
+
+    ``column`` counts characters, as ``sqlty check --output-format json`` does. The cursor
+    must be in a query ``check`` reads (see ``query_at``); elsewhere the result is ``None``.
+    In a query, ``items`` lists the relations (after ``FROM``, ``JOIN``, ``UPDATE``,
+    ``INTO``) or the columns of the relations in scope (after ``alias.`` and in
+    ``SELECT``, ``WHERE``, ``ON``, ...) whose name starts with the word before the cursor,
+    at most ``limit``, with ``incomplete`` set when there were more. ``start`` and ``end``
+    are the byte offsets of that word, which a completion replaces.
+
+    Example:
+        >>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT)"
+        >>> source = 'q = "--sql\\nSELECT u. FROM users u"'
+        >>> found = complete_source(source, 1, source.index("u.") + 3, schema_sql=schema)
+        >>> [(c.label, c.kind, c.sql_type, c.nullable) for c in found.items]
+        [('id', 'column', 'INT', False), ('name', 'column', 'TEXT', True)]
+        >>> complete_source(source, 1, 1, schema_sql=schema) is None
+        True
+    """
+    parsed = ParsedSource.of(source, module)
+    found = _complete_source(
+        parsed.text,
+        parsed.offset(line, column),
+        dialect=dialect,
+        schema_sql=schema_sql,
+        import_style=import_style,
+        helper_starts=_helper_starts(parsed, helpers, module),
+        limit=limit,
+    )
+    if found is None:
+        return None
+    start, end, incomplete, items = found
+    return Completions(start, end, incomplete, [Completion(*item) for item in items])
+
+
+class Hover(NamedTuple):
+    """What a word of a query is: ``contents`` in Markdown, for the bytes ``start`` to ``end``."""
+
+    start: int
+    end: int
+    contents: str
+
+
+def hover_source(
+    source: str | ParsedSource,
+    line: int,
+    column: int,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
+    import_style: str | None = None,
+    helpers: HelperIndex | None = None,
+    module: str | None = None,
+) -> Hover | None:
+    r"""What the word at 1-based ``line`` and ``column`` of a query string is.
+
+    ``column`` counts characters, as in ``complete_source``. A word at the top level of a
+    select item shows its result column: the Python and SQL types and the inference rules
+    behind them. Any other name shows the column, table, view or CTE it names, and a word
+    before ``.`` the columns of that relation. ``None`` outside a query ``check`` reads or
+    on a word that names nothing. ``sqlty server`` answers ``textDocument/hover`` with it.
+
+    Example:
+        >>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT)"
+        >>> source = 'q = "--sql\\nSELECT name FROM users WHERE id = 1"'
+        >>> found = hover_source(source, 1, source.index("id =") + 1, schema_sql=schema)
+        >>> found.contents
+        'Column `id` of `users`: `INT NOT NULL`'
+        >>> source.encode()[found.start : found.end]
+        b'id'
+    """
+    parsed = ParsedSource.of(source, module)
+    found = _hover_source(
+        parsed.text,
+        parsed.offset(line, column),
+        dialect=dialect,
+        schema_sql=schema_sql,
+        import_style=import_style,
+        helper_starts=_helper_starts(parsed, helpers, module),
+    )
+    return None if found is None else Hover(*found)
+
+
+class Highlight(NamedTuple):
+    """A token to color: the bytes ``start`` to ``end`` of the source.
+
+    ``kind`` is ``keyword``, ``string``, ``number``, ``comment``, ``operator`` or
+    ``parameter``.
+    """
+
+    start: int
+    end: int
+    kind: str
+
+
+def highlight_source(
+    source: str | ParsedSource,
+    *,
+    dialect: str = "postgres",
+    import_style: str | None = None,
+    helpers: HelperIndex | None = None,
+    module: str | None = None,
+) -> list[Highlight]:
+    r"""The SQL tokens to color in the strings ``sqlty check`` reads, in order.
+
+    The strings are those of ``query_at``; every other string stays a Python string. Names
+    are not colored: a word is a keyword only when it is a reserved word or a clause, so
+    ``name`` and ``status`` stay names. A token written across string literals or escape
+    sequences gets one range per piece. ``sqlty server`` sends these as semantic tokens.
+
+    Example:
+        >>> source = 'q = "--sql\\nSELECT 1"; x = "SELECT 2"'
+        >>> [(source[h.start : h.end], h.kind) for h in highlight_source(source)]
+        [('--sql', 'comment'), ('SELECT', 'keyword'), ('1', 'number')]
+    """
+    parsed = ParsedSource.of(source, module)
+    found = _highlight_source(
+        parsed.text,
+        dialect=dialect,
+        import_style=import_style,
+        helper_starts=_helper_starts(parsed, helpers, module),
+    )
+    return [Highlight(*item) for item in found]
+
+
+def _helper_starts(
+    parsed: ParsedSource, helpers: HelperIndex | None = None, module: str | None = None
+) -> list[int]:
+    """The byte offsets of the string literals helper calls pass as their query."""
+    return [
+        parsed.span(call.query_node)[0]
+        for call in find_helper_calls(parsed, helpers, module)
+        if isinstance(call.query_node, ast.Constant) and isinstance(call.query_node.value, str)
+    ]
+
+
 def _outcome(query: str, dialect: str, schema_sql: str | Schema | None) -> str | None:
     """``typed``, ``partially typed`` or ``unparsed``; ``None`` when ``query`` returns no rows."""
     if _parse_error(query, dialect=dialect) is not None:
@@ -587,15 +800,24 @@ def _outcome(query: str, dialect: str, schema_sql: str | Schema | None) -> str |
 __all__ = [
     "ColumnInfo",
     "HelperIndex",
+    "QueryAt",
     "Schema",
     "RowUsage",
+    "Completion",
+    "Completions",
+    "Highlight",
+    "Hover",
     "analyze_select",
     "check_source",
+    "complete_source",
     "expand_star",
     "fix_source",
+    "highlight_source",
+    "hover_source",
     "infer_type",
     "json_shapes",
     "load_schema",
+    "query_at",
     "query_diagnostics",
     "returns_rows",
     "rewrite_source",

@@ -48,7 +48,7 @@ uv add --dev sqlty
 
 ## How the server is found
 
-The first `sqlty` that has `sqlty server` runs:
+The first `sqlty` of version 0.3.0 or newer runs:
 
 | Order | Where | Set by |
 |-------|-------|--------|
@@ -56,8 +56,15 @@ The first `sqlty` that has `sqlty server` runs:
 | 2 | `python -m sqlty` of the interpreter | `sqlty.interpreter`, else the one selected in the Python extension |
 | 3 | `sqlty` on `PATH` | Your shell |
 
+!!! warning "An older sqlty is skipped"
+    The extension reads `sqlty --version` and skips a `sqlty` older than it supports,
+    even one in `sqlty.path`: an older server would start and quietly miss the settings it
+    predates, such as `sqlty.breaking.against`. When every `sqlty` found is older, the error
+    names each one, its version and where it was found. Upgrade the project's:
+    `uv add --dev 'sqlty>=0.3.0'`.
+
 The extension restarts the server when one of these changes, or when you run
-**sqlty: Restart Server**. Saving `pyproject.toml` or a `.sql` file reloads the
+**sqlty: Restart Server**. Saving `sqlty.toml`, `pyproject.toml`, `Cargo.toml` or a `.sql` file reloads the
 project's settings and schema without a restart.
 
 ## Fix on save
@@ -75,6 +82,129 @@ an inline `--sql` comment is split onto its own line, and so on. Run it on every
 }
 ```
 
+## Completion
+
+Inside a query string, the editor completes table names after `FROM` and `JOIN`, and the
+columns of the tables in scope after `alias.` and in `SELECT`, `WHERE`, `ON`,
+`GROUP BY` and `ORDER BY`. Each column shows its table or alias, and its type and
+nullability once selected. Typing `.` opens the list. After `JOIN`, the tables a foreign
+key links to one in scope come first, with the `ON` clause that joins them:
+`orders ON orders.user_id = u.id`.
+
+A string completes exactly when `sqlty check` checks it, by the same rules:
+
+```python
+from sqlty import SQL
+
+q = SQL[tuple[int, str]]("--sql\nSELECT id, <CURSOR> FROM users")
+# completions: id column users
+# completions: name column users
+```
+
+A string passed to a [query helper](../guide/helpers.md), with no marker:
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def fetch_all[T](query: Annotated[LiteralString, SQL], form: type[T]) -> list[T]: ...
+
+fetch_all("SELECT u.<CURSOR> FROM users u", tuple[int, str])
+# completions: id column u
+# completions: name column u
+```
+
+A method whose receiver has an evident class, as in `check`:
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+class Db:
+    def fetch_one[T](self, query: Annotated[LiteralString, SQL], form: type[T]) -> T: ...
+
+db = Db()
+db.fetch_one("SELECT name FROM users WHERE <CURSOR> = 1", str)
+# completions: id column users
+# completions: name column users
+```
+
+Adjacent literals are one query, so a table name completes in the last of them:
+
+```python
+q = (
+    "--sql\n"
+    "SELECT count(*) "
+    "FROM us<CURSOR>"
+)
+# completions: users table public
+```
+
+A function registered in [`[[tool.sqlty.functions]]`](../guide/helpers.md#helpers-you-cannot-annotate)
+completes too. What `check` does not check does not complete: a call to anything else,
+an f-string, a variable.
+
+```python
+def run(query: str) -> None: ...
+
+run("SELECT <CURSOR> FROM users")
+# completions: None
+```
+
+!!! note "Other suggestions stay in the list"
+    VS Code merges the suggestions of every extension. Inside a query string, sqlty's
+    come first, ranked by `sortText`, and the Python extension's word suggestions
+    follow: a language server cannot remove the suggestions of another.
+
+Turn it off with `"sqlty.completion.enable": false`; the server then does no completion
+work. It needs sqlty 0.4.0 or newer, and with an older one the output channel says so.
+
+## Hover
+
+Hover a word of a query string to see what it is. A column shows its SQL type, whether
+it can be NULL and where it comes from; a table or view lists its columns; a word at the
+top level of a select item shows the result column, with the inference rule that typed
+it, as `sqlty check --explain` does:
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, total INTEGER);
+```
+
+```python
+q = "--sql\nSELECT user_id, SUM(total) AS spe<CURSOR>nt FROM orders GROUP BY user_id"
+# hover: Result column `spent`: `int | None` (`BIGINT`)
+# hover:
+# hover: Typed by `postgres.aggregate.sum-integers`: Summing small integers widens to bigint so the sum fits.
+# hover:
+# hover: PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (sum ( smallint ) → bigint, sum ( integer ) → bigint)
+```
+
+VS Code shows the hovers of every extension together, so sqlty's sits next to Pylance's.
+
+## Highlighting
+
+A string marked `--sql` or `-- sql` is highlighted as SQL: keywords, strings, numbers,
+comments, operators and placeholders. Other strings stay Python strings, and so do
+f-strings, raw strings and bytes:
+
+```python
+q = "--sql\nSELECT name FROM users WHERE id = %(id)s"  # SQL
+plain = "SELECT name FROM users"  # a Python string
+```
+
+The extension adds a TextMate grammar to Python, so highlighting needs no server. A
+grammar sees the text of one string only, so a string checked without a marker stays
+a Python string: the query of an annotated helper or a `[[tool.sqlty.functions]]`
+function, and `SQL[T]("SELECT ...")`. A query split across adjacent literals is
+highlighted in its first literal only.
+
 ## Breaking changes
 
 Set `sqlty.breaking.against` to a baseline, and the editor also shows what
@@ -89,7 +219,7 @@ Set `sqlty.breaking.against` to a baseline, and the editor also shows what
 | Direction | What is checked | When |
 |-----------|-----------------|------|
 | `forward` | Your queries against the schema of the baseline | With every check of a file |
-| `backward` | The queries of the baseline against your schema | When the project loads, and when you save a schema or `pyproject.toml` |
+| `backward` | The queries of the baseline against your schema | When the project loads, and when you save a schema or a configuration file |
 
 `sqlty.breaking.direction` picks one; the default is `both`. A finding's source is
 `sqlty breaking (forward)` or `sqlty breaking (backward)`, and it has no quick fix: the
@@ -107,6 +237,7 @@ fix belongs to the migration or the code, depending on which ships first.
 | `sqlty.interpreter` | `[]` | The interpreter whose `sqlty` runs; empty is the one selected in the Python extension |
 | `sqlty.breaking.against` | empty | A baseline for `sqlty breaking`: a git revision, a `--save` snapshot or schema files |
 | `sqlty.breaking.direction` | `both` | `both`, `forward` or `backward` |
+| `sqlty.completion.enable` | `true` | Complete table and column names in query strings |
 | `sqlty.trace.server` | `off` | Log the protocol messages in the **sqlty** output channel |
 
 ## Restricted Mode
@@ -117,17 +248,5 @@ fix belongs to the migration or the code, depending on which ships first.
 
 ## Other editors
 
-`sqlty server` is a language server on standard input and output. Any LSP client can run
-it for Python files. For Neovim 0.11:
-
-```lua
-vim.lsp.config("sqlty", {
-  cmd = { "sqlty", "server" },
-  filetypes = { "python" },
-  root_markers = { "pyproject.toml", ".git" },
-  init_options = { breaking = { against = "main", direction = "both" } },
-})
-vim.lsp.enable("sqlty")
-```
-
-`init_options` is optional: without it, no baseline is checked.
+`sqlty server` runs in any LSP client: see [Neovim, Vim, Helix and Emacs](editors.md) for their
+setup, the server's options and SQL highlighting.

@@ -6,7 +6,7 @@ import {
   type ServerOptions,
 } from "vscode-languageclient/node";
 
-import { findServer, type Settings } from "./server";
+import { completionNotice, findServer, type Settings } from "./server";
 
 let client: LanguageClient | undefined;
 let output: vscode.LogOutputChannel | undefined;
@@ -44,26 +44,38 @@ async function restart(): Promise<void> {
 async function start(): Promise<void> {
   const settings = readSettings();
   const interpreter = settings.interpreter.length > 0 ? settings.interpreter : await selected();
-  const server = await findServer(settings, interpreter);
-  if (server === undefined) {
-    const message =
-      "sqlty: no sqlty with `sqlty server` found. Install sqlty in the selected interpreter, or set sqlty.path.";
-    output?.error(message);
-    void vscode.window.showErrorMessage(message);
+  const found = await findServer(settings, interpreter);
+  if ("error" in found) {
+    output?.error(found.error);
+    void vscode.window.showErrorMessage(found.error);
     return;
   }
-  output?.info(`Starting ${[server.command, ...server.args].join(" ")} (from ${server.origin})`);
+  const { server } = found;
+  const command = [server.command, ...server.args].join(" ");
+  output?.info(`Starting ${command} (sqlty ${server.version}, from ${server.origin})`);
   const serverOptions: ServerOptions = { command: server.command, args: server.args };
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: "file", language: "python" }],
-    initializationOptions: { breaking: settings.breaking },
+    initializationOptions: {
+      breaking: settings.breaking,
+      completion: settings.completion,
+      // VS Code shows one semantic-token provider per file: sqlty's would replace Pylance's.
+      highlighting: { enable: false },
+    },
     outputChannel: output,
     synchronize: {
-      fileEvents: vscode.workspace.createFileSystemWatcher("**/{pyproject.toml,*.sql}"),
+      fileEvents: vscode.workspace.createFileSystemWatcher(
+        "**/{pyproject.toml,sqlty.toml,Cargo.toml,*.sql}",
+      ),
     },
   };
   client = new LanguageClient("sqlty", "sqlty", serverOptions, clientOptions);
   await client.start();
+  const advertised = client.initializeResult?.capabilities.completionProvider !== undefined;
+  const notice = completionNotice(settings, advertised, server.version);
+  if (notice !== undefined) {
+    output?.warn(notice);
+  }
 }
 
 async function stop(): Promise<void> {
@@ -81,6 +93,7 @@ function readSettings(): Settings {
       against: config.get<string>("breaking.against", ""),
       direction: config.get<Settings["breaking"]["direction"]>("breaking.direction", "both"),
     },
+    completion: { enable: config.get<boolean>("completion.enable", true) },
   };
 }
 

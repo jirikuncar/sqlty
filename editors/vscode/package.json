@@ -71,6 +71,12 @@
           "scope": "resource",
           "markdownDescription": "Which way `#sqlty.breaking.against#` is checked, as `sqlty breaking --direction`."
         },
+        "sqlty.completion.enable": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "markdownDescription": "Complete table and column names in the query strings `sqlty check` checks. Needs sqlty 0.4.0 or newer; off, the server does no completion work."
+        },
         "sqlty.trace.server": {
           "type": "string",
           "enum": [
@@ -89,11 +95,33 @@
         "title": "Restart Server",
         "category": "sqlty"
       }
+    ],
+    "grammars": [
+      {
+        "scopeName": "sqlty.sql.injection",
+        "path": "./syntaxes/sql-injection.tmLanguage.json",
+        "injectTo": [
+          "source.python"
+        ],
+        "embeddedLanguages": {
+          "meta.embedded.sql": "sql"
+        }
+      },
+      {
+        "scopeName": "sqlty.sql.injection.multi",
+        "path": "./syntaxes/sql-injection-multi.tmLanguage.json",
+        "injectTo": [
+          "source.python"
+        ],
+        "embeddedLanguages": {
+          "meta.embedded.sql": "sql"
+        }
+      }
     ]
   },
   "scripts": {
     "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node20 --sourcemap",
-    "build-test": "esbuild src/test/*.ts --outdir=out/test --format=cjs --platform=node --target=node20",
+    "build-test": "esbuild src/test/*.ts --bundle --external:vscode --outdir=out/test --format=cjs --platform=node --target=node20",
     "check": "tsc --noEmit && oxlint --deny-warnings src && oxfmt --check src",
     "format": "oxfmt src",
     "test": "npm run build && npm run build-test && vscode-test",

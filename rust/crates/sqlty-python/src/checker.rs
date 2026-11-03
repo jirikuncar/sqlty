@@ -432,10 +432,33 @@ impl Checker<'_> {
                     Some(start..query_offset(source, literals, span.end, true)?)
                 });
                 let name = name.map(|span| At::at_line(at.line, span));
-                self.report(
+                let fix = found
+                    .replacement
+                    .as_ref()
+                    .zip(found.span.as_ref().zip(name.as_ref()))
+                    .filter(|(replacement, (span, name))| {
+                        let written = &source[name.span.clone()];
+                        let quote = literals
+                            .iter()
+                            .find(|literal| literal.contains(&name.span.start))
+                            .and_then(|literal| {
+                                source[literal.clone()]
+                                    .trim_start_matches(|c: char| c.is_ascii_alphabetic())
+                                    .chars()
+                                    .next()
+                            });
+                        written == &query[(*span).clone()]
+                            && !replacement.contains(['\\', '\n', '\r'])
+                            && quote.is_some_and(|quote| !replacement.contains(quote))
+                    })
+                    .map(|(replacement, (_, name))| {
+                        Edit::new(name.span.clone(), replacement.clone())
+                    });
+                self.report_fix(
                     Rule::Name(found.rule),
                     found.message.clone(),
                     name.as_ref().unwrap_or(at),
+                    fix.into_iter().collect(),
                 );
             }
         }
@@ -752,38 +775,29 @@ pub fn query_sites(
     let mut sites = Vec::new();
     let mut skipped: Vec<usize> = Vec::new();
     for group in scan.groups() {
-        let enclosing = scan.enclosing_call(group);
-        if let Some(rule) = group.skipped {
-            skipped.push(group.start);
-            if !(rule == Rule::UncheckedQuery
-                && enclosing.is_some_and(|call| call.is_any(&any_calls)))
-            {
-                sites.push((group.line, SiteKind::Skipped(rule), String::new()));
-            }
-            continue;
+        let Some(rule) = group.skipped else { continue };
+        skipped.push(group.start);
+        if !(rule == Rule::UncheckedQuery
+            && scan
+                .enclosing_call(group)
+                .is_some_and(|call| call.is_any(&any_calls)))
+        {
+            sites.push((group.line, SiteKind::Skipped(rule), String::new()));
         }
-        if enclosing.is_some() {
-            continue;
-        }
-        if let Some(sql) = marked_query(&scan.content(group)) {
-            sites.push((group.line, SiteKind::Query, sql));
+    }
+    for (line, strings, _) in scan.marked_strings() {
+        if let Some(sql) = marked_query(&content(source, &strings)) {
+            sites.push((line, SiteKind::Query, sql));
         }
     }
     for call in &scan.calls {
-        let line = scan.lines.line_at(call.span.start);
-        match call.content(source) {
-            Some(text) => {
-                if let Some(sql) = marked_query(&text) {
-                    sites.push((line, SiteKind::Query, sql));
-                }
-            }
-            None if after_marker(&content(source, &call.strings)).is_some()
-                && !call.is_any(&any_calls)
-                && !holds_start(&skipped, &call.span) =>
-            {
-                sites.push((line, SiteKind::Skipped(Rule::UncheckedQuery), String::new()));
-            }
-            None => {}
+        if call.content(source).is_none()
+            && after_marker(&content(source, &call.strings)).is_some()
+            && !call.is_any(&any_calls)
+            && !holds_start(&skipped, &call.span)
+        {
+            let line = scan.lines.line_at(call.span.start);
+            sites.push((line, SiteKind::Skipped(Rule::UncheckedQuery), String::new()));
         }
     }
     sites.sort_by_key(|site| site.0);

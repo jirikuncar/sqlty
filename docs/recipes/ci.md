@@ -21,7 +21,7 @@ default_language_version:
   python: python3.14  # sqlty requires Python >= 3.14
 repos:
   - repo: https://github.com/jirikuncar/sqlty
-    rev: v0.2.2
+    rev: v0.3.0
     hooks:
       - id: sqlty-rewrite
       - id: sqlty-check
@@ -68,8 +68,8 @@ repos:
 and leave the rewritten files for you to stage. Use `uv run sqlty ...` as the
 entry if sqlty lives in a uv-managed environment.
 
-Each file uses the nearest `pyproject.toml` above it that has a `[tool.sqlty]`
-table, so one command covers several projects with their own settings. In a
+Each file uses the nearest `sqlty.toml` above it, or `pyproject.toml` or `Cargo.toml`
+with a sqlty table, so one command covers several projects with their own settings. In a
 monorepo, a package `pyproject.toml` without `[tool.sqlty]` is skipped and its
 files use the root config; one with its own table replaces the root config
 entirely (tables are not merged).
