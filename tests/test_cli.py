@@ -526,6 +526,17 @@ def test_unknown_key_is_an_error(tmp_path, monkeypatch, capsys) -> None:
     assert "unknown key 'bogus' in [tool.sqlty]" in err
 
 
+def test_invalid_value_in_sqlty_toml_names_the_file(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "sqlty.toml").write_text('untyped = "nope"\n')
+    (tmp_path / "q.py").write_text("x = 1\n")
+    monkeypatch.chdir(tmp_path)
+
+    code, _, err = _run(["check", "."], capsys)
+
+    assert code == 2
+    assert "sqlty.toml: untyped must be 'skip' or 'sentinel'" in err
+
+
 def test_snake_case_key_suggests_the_kebab_case_one(tmp_path, monkeypatch, capsys) -> None:
     _project(tmp_path, 'import_style = "import sqlty"\n')
     monkeypatch.chdir(tmp_path)

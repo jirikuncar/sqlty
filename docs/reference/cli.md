@@ -92,10 +92,10 @@ tool such as pre-commit passes file names.
 | Option | Description |
 |--------|-------------|
 | `-h`, `--help` | show this help message and exit |
-| `paths ...` | Files or directories (default: .); each file uses its nearest pyproject.toml |
+| `paths ...` | Files or directories (default: .); each file uses its nearest sqlty.toml or pyproject.toml |
 | `--dialect DIALECT` | SQL dialect: postgres, mysql, sqlite, or another sqlparser dialect such as duckdb (default: [tool.sqlty] dialect, else postgres) |
 | `--schema SCHEMA` | Schema .sql file, directory or glob for every path; repeat for several (default: [tool.sqlty] schema per project) |
-| `--config-file PATH` | Use this file for every path instead of the nearest pyproject.toml: [tool.sqlty] of a pyproject.toml, or top-level keys of another file such as sqlty.toml; its relative paths are relative to the current directory. Env: SQLTY_CONFIG_FILE |
+| `--config-file PATH` | Use this file for every path instead of the nearest config file: [tool.sqlty] of a pyproject.toml, or top-level keys of another file such as sqlty.toml; its relative paths are relative to the current directory. Env: SQLTY_CONFIG_FILE |
 | `--isolated` | Ignore every configuration file; use the defaults and command-line flags |
 | `-c`, `--config KEY=VALUE` | Override a configuration key with a TOML assignment, for example `-c 'dialect = "mysql"'` or `-c 'rules.select-star = "ignore"'`; repeat for several. Paths are relative to the current directory |
 | `--error RULE` | Treat RULE as severity error; repeat for several, the last flag for a rule wins |

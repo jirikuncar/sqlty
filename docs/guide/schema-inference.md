@@ -420,10 +420,10 @@ replaces the whole column definition, `NOT NULL` and `ENUM` labels included.
 `sqlty rewrite` and `sqlty check` use, in order:
 
 1. `--schema PATH` on the command line, relative to the current directory.
-2. `schema` in `[tool.sqlty]`, relative to the directory of `pyproject.toml`.
+2. `schema` in `sqlty.toml` or `[tool.sqlty]`, relative to the directory of that file.
 
-Each file uses the nearest `pyproject.toml` above it that has a `[tool.sqlty]`
-table. A schema file that does not exist is reported as a warning and
+Each file uses the nearest `sqlty.toml`, or `pyproject.toml` with a `[tool.sqlty]`
+table, above it. A schema file that does not exist is reported as a warning and
 inference continues without it.
 
 The [magic codec](magic-codec.md) never uses a schema.

@@ -84,6 +84,31 @@ def test_nearest_sqlty_table_wins(tmp_path, packaging_only):
         assert (config["dialect"], config_dir) == ("sqlite", pkg.resolve())
 
 
+def test_sqlty_toml_wins_over_pyproject_in_its_directory(tmp_path: Path) -> None:
+    """``sqlty.toml`` holds the keys at the top level and wins over ``pyproject.toml``, like ruff."""
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\ndialect = "mysql"\n')
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "pyproject.toml").write_text('[tool.sqlty]\ndialect = "postgres"\n')
+    (pkg / "sqlty.toml").write_text('dialect = "sqlite"\n[rules]\nselect-star = "ignore"\n')
+
+    config, config_dir = load_config(pkg)
+    assert (config, config_dir) == (
+        {"dialect": "sqlite", "rules": {"select-star": "ignore"}},
+        pkg.resolve(),
+    )
+
+    (tmp_path / "sqlty.toml").write_text("")
+    assert load_config(tmp_path) == ({}, tmp_path.resolve())
+
+
+def test_unknown_key_in_sqlty_toml_names_the_file(tmp_path: Path) -> None:
+    (tmp_path / "sqlty.toml").write_text("bogus = 1\n")
+
+    with pytest.raises(ConfigError, match=r"sqlty\.toml: unknown key 'bogus'"):
+        load_config(tmp_path)
+
+
 def test_unknown_keys_raise_config_error_naming_the_file(tmp_path):
     _config._parse_pyproject_cached.cache_clear()
     pyproject = tmp_path / "pyproject.toml"
