@@ -16,6 +16,7 @@ from __future__ import annotations
 import ast
 import re
 import sys
+import threading
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -307,6 +308,8 @@ class HelperIndex:
         self._types: dict[tuple[str, str], Any] = {}
         self._names_of: dict[str, ModuleTypes] = {}
         self._read: dict[tuple[Path, str], ParsedSource | None] = {}
+        # Held while a cycle sentinel is cached, so only the thread that set it can read it.
+        self._lock = threading.RLock()
 
     def fork(self) -> HelperIndex:
         """A copy whose later ``register`` calls do not reach this index; sources are shared."""
@@ -320,6 +323,7 @@ class HelperIndex:
         other._types = self._types
         other._names_of = self._names_of
         other._read = self._read
+        other._lock = self._lock
         return other
 
     def add(self, module: str, source: str | ParsedSource) -> bool:
@@ -472,35 +476,39 @@ class HelperIndex:
     def _type(self, module: str, name: str, _depth: int = 0) -> Any:
         if _depth > 8 or (parsed := self.sources.get(module)) is None:
             return None
-        if (module, name) in self._types:
-            return self._types[module, name]
         from sqlty._type_extractor.ast_fields import _ast_type
         from sqlty._type_extractor.symbols import ModuleTypes
 
-        # An import cycle sees the name as unknown while it is resolved.
-        self._types[module, name] = None
-        if (names := self._names_of.get(module)) is None:
-            names = self._names_of[module] = ModuleTypes(parsed, self, module)
-        if name in names.local:
-            found = _ast_type(ast.Name(name), parsed.typing_aliases, names, parsed.imported_names)
-        else:
-            exports = self._reexports(module, parsed)
-            found = self._type(*exports[name], _depth + 1) if name in exports else None
-        self._types[module, name] = found
-        return found
+        with self._lock:
+            if (module, name) in self._types:
+                return self._types[module, name]
+            # An import cycle sees the name as unknown while it is resolved.
+            self._types[module, name] = None
+            if (names := self._names_of.get(module)) is None:
+                names = self._names_of[module] = ModuleTypes(parsed, self, module)
+            if name in names.local:
+                found = _ast_type(
+                    ast.Name(name), parsed.typing_aliases, names, parsed.imported_names
+                )
+            else:
+                exports = self._reexports(module, parsed)
+                found = self._type(*exports[name], _depth + 1) if name in exports else None
+            self._types[module, name] = found
+            return found
 
     def _row_type(
         self, module: str, name: str, _depth: int = 0
     ) -> tuple[TypeInfo, dict[str, TypeInfo]] | None:
         if _depth > 8 or (parsed := self.sources.get(module)) is None:
             return None
-        if (defs := self._row_types.get(module)) is None:
-            from sqlty._type_extractor import extract_type_definitions
+        with self._lock:
+            if (defs := self._row_types.get(module)) is None:
+                from sqlty._type_extractor import extract_type_definitions
 
-            # Modules that import each other's row types see none while either is read.
-            self._row_types[module] = {}
-            defs = extract_type_definitions(parsed, self, module)
-            self._row_types[module] = defs
+                # Modules that import each other's row types see none while either is read.
+                self._row_types[module] = {}
+                defs = extract_type_definitions(parsed, self, module)
+                self._row_types[module] = defs
         if name in defs:
             return defs[name], defs
         exports = self._reexports(module, parsed)

@@ -1426,6 +1426,38 @@ def test_redundant_optional_reads_every_query_of_a_shared_row_type(
     assert "pkg/a.py:3: [redundant-optional] Coupon.owner_id" in out.replace(os.sep, "/")
 
 
+def test_redundant_optional_does_not_depend_on_jobs(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.sqlty]\nschema = "s.sql"\n\n[tool.sqlty.rules]\nredundant-optional = "error"\n'
+    )
+    (tmp_path / "s.sql").write_text(
+        "CREATE TABLE a (id integer NOT NULL, x integer NOT NULL);\n"
+        "CREATE TABLE b (id integer NOT NULL, x integer);\n"
+    )
+    (tmp_path / "app").mkdir()
+    row = "class {}(TypedDict):\n    id: int\n    x: int | None\n"
+    # Enough row types that reading the module overlaps the other thread's checks.
+    padding = "".join(row.format(f"P{n}") for n in range(2000))
+    (tmp_path / "app" / "rows.py").write_text(
+        "from typing import TypedDict\n" + row.format("R") + row.format("S") + padding
+    )
+    (tmp_path / "app" / "q1.py").write_text(
+        "from sqlty import SQL\nfrom app.rows import R, S\n"
+        'q1 = SQL[R]("--sql\\nSELECT id, x FROM a")\n'
+        'q3 = SQL[S]("--sql\\nSELECT id, x FROM a")\n'
+    )
+    (tmp_path / "app" / "q2.py").write_text(
+        'from sqlty import SQL\nfrom app.rows import R\nq2 = SQL[R]("--sql\\nSELECT id, x FROM b")\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    outputs = {_run(["check", "--jobs", jobs, "app"], capsys)[1] for jobs in ["1"] + ["4"] * 10}
+
+    assert [line for out in outputs for line in out.splitlines() if "redundant" in line] == [
+        f"app{os.sep}q1.py:4: [redundant-optional] S.x is int | None but query column 'x' is never NULL"
+    ]
+
+
 def test_json_types_must_name_a_type(tmp_path, monkeypatch, capsys) -> None:
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\njson-types = "pydantic"\n')
     (tmp_path / "q.py").write_text('q = "--sql\\nSELECT 1::INTEGER AS n"\n')
