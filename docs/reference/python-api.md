@@ -251,6 +251,17 @@ line and column (in characters) of a query string, with the bytes they replace.
 b'na'
 ```
 
+`hover_source` says what the word at a 1-based line and column of a query string is, in
+Markdown. `sqlty server` answers hover with it:
+
+```pycon
+>>> from sqlty.core import hover_source
+>>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT)"
+>>> source = 'q = "--sql\\nSELECT name FROM users WHERE id = 1"'
+>>> hover_source(source, 1, source.index("id =") + 1, schema_sql=schema)
+Hover(start=41, end=43, contents='Column `id` of `users`: `INT NOT NULL`')
+```
+
 `highlight_source` lists the SQL tokens to color in those same strings, as byte ranges.
 `sqlty server` sends them as semantic tokens:
 
@@ -277,4 +288,5 @@ b'na'
 | `check_source(source, *, dialect="postgres", schema_sql=None, rules=None, import_style=None)` | List of diagnostics: `Diagnostic` dicts (`sqlty._lint.Diagnostic`, a `TypedDict`) with `rule`, `message`, `severity`, `line`, `start`, `end`, `fix` |
 | `query_at(source, offset, *, import_style=None, helpers=None, module=None)` | The `QueryAt` (`text`, `offset`, `route`, `span`, `source_offset(n)`) at byte `offset`, or `None` outside a checked query |
 | `complete_source(source, line, column, *, dialect="postgres", schema_sql=None, import_style=None, helpers=None, module=None, limit=200)` | `Completions(start, end, incomplete, items)` of `Completion(label, kind, detail, sql_type, nullable)` at the cursor, or `None` outside a checked query |
+| `hover_source(source, line, column, *, dialect="postgres", schema_sql=None, import_style=None, helpers=None, module=None)` | `Hover(start, end, contents)`: what the word at the cursor is, in Markdown, or `None` |
 | `highlight_source(source, *, dialect="postgres", import_style=None, helpers=None, module=None)` | `Highlight(start, end, kind)` per SQL token of the checked queries, `kind` one of `keyword`, `string`, `number`, `comment`, `operator`, `parameter` |

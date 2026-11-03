@@ -31,6 +31,7 @@ from sqlty._core import complete_source as _complete_source
 from sqlty._core import explain_select as _explain_select
 from sqlty._core import fix_source as _fix_source
 from sqlty._core import highlight_source as _highlight_source
+from sqlty._core import hover_source as _hover_source
 from sqlty._core import load_schema as _load_schema
 from sqlty._core import parse_error as _parse_error
 from sqlty._core import query_at as _query_at
@@ -679,6 +680,54 @@ def complete_source(
     return Completions(start, end, incomplete, [Completion(*item) for item in items])
 
 
+class Hover(NamedTuple):
+    """What a word of a query is: ``contents`` in Markdown, for the bytes ``start`` to ``end``."""
+
+    start: int
+    end: int
+    contents: str
+
+
+def hover_source(
+    source: str | ParsedSource,
+    line: int,
+    column: int,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
+    import_style: str | None = None,
+    helpers: HelperIndex | None = None,
+    module: str | None = None,
+) -> Hover | None:
+    r"""What the word at 1-based ``line`` and ``column`` of a query string is.
+
+    ``column`` counts characters, as in ``complete_source``. A word at the top level of a
+    select item shows its result column: the Python and SQL types and the inference rules
+    behind them. Any other name shows the column, table, view or CTE it names, and a word
+    before ``.`` the columns of that relation. ``None`` outside a query ``check`` reads or
+    on a word that names nothing. ``sqlty server`` answers ``textDocument/hover`` with it.
+
+    Example:
+        >>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT)"
+        >>> source = 'q = "--sql\\nSELECT name FROM users WHERE id = 1"'
+        >>> found = hover_source(source, 1, source.index("id =") + 1, schema_sql=schema)
+        >>> found.contents
+        'Column `id` of `users`: `INT NOT NULL`'
+        >>> source.encode()[found.start : found.end]
+        b'id'
+    """
+    parsed = ParsedSource.of(source, module)
+    found = _hover_source(
+        parsed.text,
+        parsed.offset(line, column),
+        dialect=dialect,
+        schema_sql=schema_sql,
+        import_style=import_style,
+        helper_starts=_helper_starts(parsed, helpers, module),
+    )
+    return None if found is None else Hover(*found)
+
+
 class Highlight(NamedTuple):
     """A token to color: the bytes ``start`` to ``end`` of the source.
 
@@ -756,12 +805,14 @@ __all__ = [
     "Completion",
     "Completions",
     "Highlight",
+    "Hover",
     "analyze_select",
     "check_source",
     "complete_source",
     "expand_star",
     "fix_source",
     "highlight_source",
+    "hover_source",
     "infer_type",
     "json_shapes",
     "load_schema",

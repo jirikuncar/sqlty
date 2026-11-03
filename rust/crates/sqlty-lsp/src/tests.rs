@@ -395,11 +395,11 @@ fn other_languages_and_requests_are_left_alone() {
     let document =
         json!({"uri": "file:///work/q.sql", "languageId": "sql", "version": 1, "text": "bad"});
     client.notify("textDocument/didOpen", json!({"textDocument": document}));
-    let hover = client.request(
-        "textDocument/hover",
+    let definition = client.request(
+        "textDocument/definition",
         json!({"textDocument": {"uri": "file:///work/q.py"}, "position": {"line": 0, "character": 0}}),
     );
-    assert_eq!(hover, json!({"error": -32601}));
+    assert_eq!(definition, json!({"error": -32601}));
     let rest = client.shutdown();
     assert!(
         !rest
@@ -513,12 +513,18 @@ impl Client {
 }
 
 #[test]
-fn completion_and_highlighting_are_advertised_unless_off() {
-    for (options, advertised, highlighting) in [
-        (Value::Null, true, true),
-        (json!({"completion": {"enable": true}}), true, true),
-        (json!({"completion": {"enable": false}}), false, true),
-        (json!({"highlighting": {"enable": false}}), true, false),
+fn completion_hover_and_highlighting_are_advertised_unless_off() {
+    for (options, advertised, hover, highlighting) in [
+        (Value::Null, true, true, true),
+        (json!({"completion": {"enable": true}}), true, true, true),
+        (json!({"completion": {"enable": false}}), false, true, true),
+        (json!({"hover": {"enable": false}}), true, false, true),
+        (
+            json!({"highlighting": {"enable": false}}),
+            true,
+            true,
+            false,
+        ),
     ] {
         let (server, connection) = Connection::memory();
         let thread = std::thread::spawn(move || {
@@ -556,6 +562,10 @@ fn completion_and_highlighting_are_advertised_unless_off() {
         } else {
             assert!(tokens.is_null(), "{tokens}");
         }
+        assert_eq!(
+            result["capabilities"]["hoverProvider"],
+            if hover { json!(true) } else { Value::Null }
+        );
         let provider = &result["capabilities"]["completionProvider"];
         if advertised {
             assert_eq!(provider["triggerCharacters"], json!(["."]));
@@ -720,6 +730,58 @@ fn completion_can_be_turned_off() {
     client.open("file:///work/q.py", text);
     client.notification("textDocument/publishDiagnostics");
     assert_eq!(client.complete("file:///work/q.py", 0, 21), Value::Null);
+    client.shutdown();
+}
+
+impl Client {
+    fn hover(&mut self, uri: &str, line: u32, character: u32) -> Value {
+        let position = json!({"line": line, "character": character});
+        self.request(
+            "textDocument/hover",
+            json!({"textDocument": {"uri": uri}, "position": position}),
+        )
+    }
+}
+
+#[test]
+fn hover_says_what_a_word_of_a_query_is() {
+    let mut client = Client::start(&json!({}));
+    let text =
+        "q = \"--sql\\nSELECT 1 FROM users u WHERE u.id = 1\"\nrun(\"SELECT 1 FROM users\")\n";
+    client.open("file:///work/q.py", text);
+    client.notification("textDocument/publishDiagnostics");
+    let found = client.hover("file:///work/q.py", 0, 43);
+    assert_eq!(
+        found["contents"],
+        json!({"kind": "markdown", "value": "Column `id` of `u`: `INT NOT NULL`"})
+    );
+    assert_eq!(
+        found["range"],
+        json!({"start": {"line": 0, "character": 42}, "end": {"line": 0, "character": 44}})
+    );
+    let table = client.hover("file:///work/q.py", 1, 21);
+    assert!(
+        table["contents"]["value"]
+            .as_str()
+            .unwrap()
+            .starts_with("Table `public.users`\n- `id` `INT NOT NULL`"),
+        "{table}"
+    );
+    assert_eq!(client.hover("file:///work/q.py", 0, 1), Value::Null);
+    assert_eq!(client.hover("file:///nowhere/q.py", 0, 1), Value::Null);
+    client.shutdown();
+}
+
+#[test]
+fn hover_can_be_turned_off() {
+    let mut client = Client::with(
+        &json!({}),
+        &json!([{"uri": "file:///work", "name": "work"}]),
+        &json!({"hover": {"enable": false}}),
+    );
+    client.open("file:///work/q.py", "q = \"--sql\\nSELECT 1 FROM users\"\n");
+    client.notification("textDocument/publishDiagnostics");
+    assert_eq!(client.hover("file:///work/q.py", 0, 26), Value::Null);
     client.shutdown();
 }
 

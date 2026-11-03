@@ -989,6 +989,37 @@ fn complete_source(
     })
 }
 
+/// What the word at byte `offset` of Python source is: `(start, end, contents)`, the bytes of
+/// the word and Markdown, or None outside a query `check` reads or on a word that names
+/// nothing. `helper_starts` is as for `query_at`.
+///
+/// Raises:
+///     ValueError: unsupported import_style
+#[pyfunction]
+#[pyo3(signature = (source, offset, *, dialect = DialectArg::POSTGRES, schema_sql = None, import_style = None, helper_starts = vec![]))]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "PyO3 extracts a Vec, not a slice"
+)]
+fn hover_source(
+    py: Python<'_>,
+    source: &str,
+    offset: usize,
+    dialect: DialectArg,
+    schema_sql: Option<SchemaArg>,
+    import_style: Option<&str>,
+    helper_starts: Vec<usize>,
+) -> Result<Option<(usize, usize, String)>, Error> {
+    let dialect = dialect.0;
+    detach(py, || {
+        let style = ImportStyle::parse(import_style)?;
+        let queries = locate::Queries::new(source, &style, &helper_starts);
+        let schema = schema(schema_sql, dialect);
+        Ok(locate::hover(&queries, offset, dialect, schema.as_deref())
+            .map(|found| (found.range.start, found.range.end, found.contents)))
+    })
+}
+
 /// What to color in the queries `check` reads in Python source: `(start, end, kind)` byte
 /// ranges in order, `kind` one of `keyword`, `string`, `number`, `comment`, `operator`
 /// and `parameter`. `helper_starts` is as for `query_at`.
@@ -1063,6 +1094,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(query_at, m)?)?;
     m.add_function(wrap_pyfunction!(complete_source, m)?)?;
     m.add_function(wrap_pyfunction!(highlight_source, m)?)?;
+    m.add_function(wrap_pyfunction!(hover_source, m)?)?;
     m.add_class::<QueryAtHandle>()?;
     m.add_function(wrap_pyfunction!(skills, m)?)?;
     m.add_function(wrap_pyfunction!(server::serve, m)?)?;

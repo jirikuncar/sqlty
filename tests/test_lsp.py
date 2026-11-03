@@ -235,6 +235,12 @@ def test_server_completes_and_highlights_helper_and_marked_queries(tmp_path: Pat
         assert [item["label"] for item in complete(3, 28)["items"]] == ["users"]
         assert complete(0, 3) is None
 
+        position = {"line": 2, "character": 25}
+        hovered = server.request(
+            "textDocument/hover", {"textDocument": {"uri": uri}, "position": position}
+        )
+        assert hovered["contents"]["value"].startswith("Table `public.users`")
+
         legend = init["capabilities"]["semanticTokensProvider"]["legend"]["tokenTypes"]
         tokens = server.request("textDocument/semanticTokens/full", {"textDocument": {"uri": uri}})
         data = tokens["data"]

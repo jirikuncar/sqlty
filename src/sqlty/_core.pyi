@@ -130,6 +130,15 @@ def complete_source(
     helper_starts: list[int] = ...,
     limit: int = 200,
 ) -> tuple[int, int, bool, list[tuple[str, str, str | None, str | None, bool | None]]] | None: ...
+def hover_source(
+    source: str,
+    offset: int,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
+    import_style: str | None = None,
+    helper_starts: list[int] = ...,
+) -> tuple[int, int, str] | None: ...
 def highlight_source(
     source: str,
     *,

@@ -32,6 +32,7 @@ Kind = Literal[
     "error",
     "decoded",
     "completions",
+    "hover",
     "highlighted",
 ]
 SQL_KINDS: tuple[Kind, ...] = ("inferred", "expanded", "columns", "json", "params", "rules")
@@ -43,10 +44,11 @@ PY_KINDS: tuple[Kind, ...] = (
     "error",
     "decoded",
     "completions",
+    "hover",
     "highlighted",
 )
 DIRECTIVES = frozenset({"skip", "xfail"})
-# Where `# completions:` asks what completes; removed from the code every assertion reads.
+# Where `# completions:` and `# hover:` ask; removed from the code every assertion reads.
 CURSOR = "<CURSOR>"
 
 _PY_ASSERTION = re.compile(rf"^(\s*)#\s+({'|'.join(PY_KINDS)})(\[[^\]]*\])?:(?: (.*))?$")

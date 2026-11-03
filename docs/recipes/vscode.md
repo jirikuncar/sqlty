@@ -157,6 +157,35 @@ run("SELECT <CURSOR> FROM users")
 Turn it off with `"sqlty.completion.enable": false`; the server then does no completion
 work. It needs sqlty 0.4.0 or newer, and with an older one the output channel says so.
 
+## Hover
+
+Hover a word of a query string to see what it is. A column shows its SQL type, whether
+it can be NULL and where it comes from; a table or view lists its columns; a word at the
+top level of a select item shows the result column, with the inference rule that typed
+it, as `sqlty check --explain` does:
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, total INTEGER);
+```
+
+```python
+q = "--sql\nSELECT user_id, SUM(total) AS spe<CURSOR>nt FROM orders GROUP BY user_id"
+# hover: Result column `spent`: `int | None` (`BIGINT`)
+# hover:
+# hover: Typed by `postgres.aggregate.sum-integers`: Summing small integers widens to bigint so the sum fits.
+# hover:
+# hover: PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (sum ( smallint ) → bigint, sum ( integer ) → bigint)
+```
+
+VS Code shows the hovers of every extension together, so sqlty's sits next to Pylance's.
+
 ## Highlighting
 
 A string marked `--sql` or `-- sql` is highlighted as SQL: keywords, strings, numbers,
