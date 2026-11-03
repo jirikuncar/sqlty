@@ -16,7 +16,7 @@ from __future__ import annotations
 import ast
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -49,6 +49,7 @@ class Helper:
     shares ``T`` with the return type. A method is named ``Class.method`` and its
     ``self`` / ``cls`` is not listed; ``kind`` is ``instance`` for a method that is
     only callable on an instance (a call through the class would shift the arguments).
+    ``configured`` marks a helper of ``[[tool.sqlty.functions]]``.
     """
 
     name: str
@@ -60,6 +61,7 @@ class Helper:
     params: str | None = None
     rest: str | None = None
     named: str | None = None
+    configured: bool = False
 
 
 class HelperCall(NamedTuple):
@@ -76,7 +78,8 @@ class HelperCall(NamedTuple):
     With query variants on, ``variants`` holds every query a call built in branches can
     run, ``query`` being the first; ``reason`` says why such a call is not checked.
     ``query_node`` is the argument (or t-string) the query comes from, which a diagnostic
-    about the query underlines.
+    about the query underlines. ``configured`` marks a call to a helper of
+    ``[[tool.sqlty.functions]]``.
     """
 
     line: int
@@ -91,13 +94,17 @@ class HelperCall(NamedTuple):
     variants: tuple[Variant, ...] = ()
     reason: str | None = None
     query_node: ast.expr | None = None
+    configured: bool = False
 
     @property
     def typed_lines(self) -> range:
-        """The lines of the call when it passes a row type: its strings need no ``SQL[T]``."""
-        return (
-            range(self.line, (self.end_line or self.line) + 1) if self.row is not None else range(0)
-        )
+        """The lines of the call when its strings need no ``SQL[T]``.
+
+        They need none when the call passes a row type, or the helper is configured: its
+        signature is not the user's to change.
+        """
+        typed = self.row is not None or self.configured
+        return range(self.line, (self.end_line or self.line) + 1) if typed else range(0)
 
 
 def _dotted(node: ast.expr) -> str | None:
@@ -213,7 +220,7 @@ def index_functions(source: str | ParsedSource) -> dict[str, Helper]:
     Example:
         >>> src = "from typing import Annotated\\nfrom sqlty import SQL\\ndef f[T](q: Annotated[str, SQL], t: type[T], /) -> T: ..."
         >>> index_functions(src)["f"]
-        Helper(name='f', positional=('q', 't'), keywords=frozenset(), query='q', row='t', kind='function', params=None, rest=None, named=None)
+        Helper(name='f', positional=('q', 't'), keywords=frozenset(), query='q', row='t', kind='function', params=None, rest=None, named=None, configured=False)
     """
     parsed = ParsedSource.of(source)
     annotated, marker = parsed.marker_names
@@ -374,7 +381,7 @@ class HelperIndex:
             )
             if definition is not None:
                 helper = _helper(name, definition[1], definition[2], query, row)
-                self.modules.setdefault(module, {})[name] = helper
+                self.modules.setdefault(module, {})[name] = replace(helper, configured=True)
                 break
         else:
             keywords = frozenset(filter(None, [query, row]))
@@ -382,7 +389,7 @@ class HelperIndex:
                 if i > 0:
                     module, name = ".".join(parts[:i]), ".".join(parts[i:])
                     self.modules.setdefault(module, {})[name] = Helper(
-                        name, (), keywords, query, row
+                        name, (), keywords, query, row, configured=True
                     )
         self._pattern = None
         self._names = None
@@ -759,6 +766,7 @@ def find_helper_calls(
                     _call_params(helper, node, parsed),
                     node.end_lineno,
                     query_node=query,
+                    configured=helper.configured,
                 )
             )
         elif query is not None and not forwarded(node, query):
@@ -774,6 +782,7 @@ def find_helper_calls(
             node.end_lineno,
             dynamic=text is None,
             query_node=query,
+            configured=helper.configured,
         )
         if variants is not None and (text is None or text == UNCHECKED):
             found = query_variants(parsed, node, query, variants, resolve_fragment)

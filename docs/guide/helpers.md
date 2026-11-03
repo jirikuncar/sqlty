@@ -144,6 +144,36 @@ they are checked only when passed by keyword (`fetch_all(query="...", form=int)`
 For an `@overload`ed helper, positions come from the implementation, or from the
 first overload naming both parameters when the implementation does not.
 
+### Query strings of registered helpers
+
+`stale-rewrite` doesn't report a `--sql` string passed to a registered helper,
+with or without a row type: the helper's signature is not yours to change, so
+wrapping the query in `SQL[T]` would type nothing.
+
+```toml
+[[tool.sqlty.functions]]
+import-path = "pkg.db.pg_fetchone"
+query-param = "query"
+```
+
+`pkg/db.py`:
+
+```python
+from typing import Any
+
+async def pg_fetchone(db: Any, query: str, *args: Any) -> Any: ...
+```
+
+```python
+from typing import Any
+
+from pkg.db import pg_fetchone
+
+async def first(db: Any) -> Any:
+    # error:
+    return await pg_fetchone(db, "--sql\nSELECT 1")
+```
+
 ## Queries stored in a name
 
 A helper call that passes a name bound to a `SQL[R](...)` or `SQL[R, P](...)`
