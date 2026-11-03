@@ -89,6 +89,7 @@ fn named(query: &str, word: &Tok, dialect: &str, schema: &SchemaData) -> Option<
             }
         }
         CandidateKind::Cte => format!("CTE `{}` of the query", candidate.label),
+        CandidateKind::Join => return None,
         CandidateKind::Table | CandidateKind::View => {
             let name = match &candidate.detail {
                 Some(schema) => format!("{schema}.{}", candidate.label),

@@ -108,9 +108,10 @@ and 5000 tables.
 |-----------|--------------|------------|
 | Locate the query (`query_at`) | O(log S) per request, O(file) once per buffer version | Criterion `query_at`, CodSpeed `test_query_at_in_a_large_module` |
 | Table prefix | O(log N + k), k capped | entry counts, Criterion and CodSpeed at 50/540/5000 tables |
+| Tables linked after `JOIN` | O(K + log F + k) per table in scope, for its K foreign keys and the F of the schema | entry counts |
 | `alias.` columns | O(1) + O(width of that table) | entry counts, Criterion and CodSpeed |
 | Unqualified column | O(sum of the widths of the tables in scope) | entry counts, Criterion and CodSpeed |
-| Index build | O(N log N) per schema load, two pointers per name | `index_shares_the_catalog_keys`, `bench-ci` `schema_load_5000` RSS |
+| Index build | O(N log N + F log F) per schema load, two pointers per name and three words per foreign key | `index_shares_the_catalog_keys`, `bench-ci` `schema_load_5000` RSS |
 | Per keystroke | never O(N), never waiting behind a check | `completion_is_answered_while_a_check_runs` (`sqlty-lsp`) |
 
 ## Git safety

@@ -70,6 +70,7 @@ fn item(candidate: Candidate, rank: usize, range: lsp_types::Range) -> Completio
         CandidateKind::View => (CompletionItemKind::STRUCT, "view"),
         CandidateKind::Cte => (CompletionItemKind::MODULE, "CTE of the query"),
         CandidateKind::Column => (CompletionItemKind::FIELD, "column"),
+        CandidateKind::Join => (CompletionItemKind::STRUCT, "join on a foreign key"),
     };
     let nullability = match candidate.nullable {
         Some(true) => " NULL",

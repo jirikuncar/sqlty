@@ -1,7 +1,8 @@
 # Server features in query strings
 
-> **Status:** stage 1 (hover) in review, [#852](https://github.com/jirikuncar/sqlty/pull/852). Stages 2 to 4 not started; stage 5 waits for
-> demand after stage 1.
+> **Status:** stage 1 (hover) merged in [#852](https://github.com/jirikuncar/sqlty/pull/852); stage 3 (join completion) in
+> review. Stage 2 needs a decision on where signatures come from, stage 4 on whether to format
+> at all; stage 5 waits for demand after stage 1.
 
 Tracks [#847](https://github.com/jirikuncar/sqlty/issues/847): what `sqlty server` offers inside
 a query string beyond diagnostics, quick fixes, completion and semantic tokens. Every stage needs
@@ -11,9 +12,9 @@ only the schema and the parsed query: no connection, no execution.
 
 | Stage | Content | State |
 |-------|---------|-------|
-| 1 | Hover: a column's type and source, a table's columns, a result column with its inference rule; `core.hover_source`, `# hover:` mdtests, `textDocument/hover`, `hover.enable` | in review, [#852](https://github.com/jirikuncar/sqlty/pull/852) |
-| 2 | Signature help for functions the inference rules type, from their `function`, `argument` and `reference` | not started |
-| 3 | Join completion: after `JOIN`, tables linked by a foreign key first, with the `ON` clause | not started; the catalog keeps no foreign keys yet |
+| 1 | Hover: a column's type and source, a table's columns, a result column with its inference rule; `core.hover_source`, `# hover:` mdtests, `textDocument/hover`, `hover.enable` | merged, [#852](https://github.com/jirikuncar/sqlty/pull/852) |
+| 2 | Signature help for functions the inference rules type, from their `function`, `argument` and `reference` | needs a decision: 36 of 389 function rules give arguments, none give arity or parameter names |
+| 3 | Join completion: after `JOIN`, tables linked by a foreign key first, with the `ON` clause | in review |
 | 4 | Formatting: decide whether sqlty formats at all | not started |
 | 5 | Inlay hints of column types for `SELECT *` | waits for demand after stage 1 |
 
@@ -33,6 +34,23 @@ only the schema and the parsed query: no connection, no execution.
   `initializationOptions.hover.enable = false` turns it off for other clients.
 - Not covered: functions and operators (stage 2 adds their signatures), parameters, and
   names in `INSERT` column lists.
+
+## Stage 3
+
+- The catalog keeps each table's enforced foreign keys, child to parent. `load` adds the
+  reverse to the name index: `(parent, child, key)` sorted by parent and child name, so the
+  children of a table whose name starts with what was typed are a binary search and a walk.
+  `Catalog::joins_with_prefix` costs O(K + log F + k) for K keys of the table and F of the
+  schema, never a function of the number of tables.
+- After `JOIN` (not `JOIN schema.`), each `FROM` and `JOIN` item before the cursor offers
+  the tables its keys link, either way, as a `join` candidate labelled
+  `orders ON orders.user_id = u.id`, ranked before the plain names. Both sides are written
+  as the query writes them: the alias in scope, and the table's bare name, or
+  `schema.name` when a bare name finds another table.
+- A table whose name is already a qualifier in scope is left out: its `ON` clause would be
+  ambiguous without an alias, and sqlty does not invent one.
+- Not covered: deferrable, `NOT ENFORCED` and `NOT VALID` keys, which the catalog drops;
+  views and CTEs, which have no keys.
 
 ## Stage 4
 
