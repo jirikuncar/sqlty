@@ -1,6 +1,6 @@
 # Server features in query strings
 
-> **Status:** stage 1 (hover) in review. Stages 2 to 4 not started; stage 5 waits for
+> **Status:** stage 1 (hover) in review, [#852](https://github.com/jirikuncar/sqlty/pull/852). Stages 2 to 4 not started; stage 5 waits for
 > demand after stage 1.
 
 Tracks [#847](https://github.com/jirikuncar/sqlty/issues/847): what `sqlty server` offers inside
@@ -11,7 +11,7 @@ only the schema and the parsed query: no connection, no execution.
 
 | Stage | Content | State |
 |-------|---------|-------|
-| 1 | Hover: a column's type and source, a table's columns, a result column with its inference rule; `core.hover_source`, `# hover:` mdtests, `textDocument/hover`, `hover.enable` | in review |
+| 1 | Hover: a column's type and source, a table's columns, a result column with its inference rule; `core.hover_source`, `# hover:` mdtests, `textDocument/hover`, `hover.enable` | in review, [#852](https://github.com/jirikuncar/sqlty/pull/852) |
 | 2 | Signature help for functions the inference rules type, from their `function`, `argument` and `reference` | not started |
 | 3 | Join completion: after `JOIN`, tables linked by a foreign key first, with the `ON` clause | not started; the catalog keeps no foreign keys yet |
 | 4 | Formatting: decide whether sqlty formats at all | not started |
