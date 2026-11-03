@@ -1,4 +1,4 @@
-"""Configuration loading from pyproject.toml."""
+"""Configuration loading from sqlty.toml or pyproject.toml."""
 
 import ast
 import copy
@@ -69,7 +69,7 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "string or list of strings",
         "none",
         "`rewrite`, `check`",
-        "Schema `.sql` files, directories or globs, relative to `pyproject.toml`",
+        "Schema `.sql` files, directories or globs, relative to the configuration file",
     ),
     "rules": KeyDoc(
         "table of rule = severity",
@@ -411,7 +411,7 @@ class SQLTyConfig(TypedDict, total=False):
     param_types: bool  # write the P of SQL[R, P]: a tuple, or a generated TypedDict
     preview: bool  # features still in preview: query variants
     max_query_variants: int  # the most variants of a query built in branches that check checks
-    exclude: list[str]  # globs replacing the default excludes, relative to pyproject.toml
+    exclude: list[str]  # globs replacing the default excludes, relative to the configuration file
     extend_exclude: list[str]  # globs excluded in addition to the above
     respect_gitignore: bool  # skip what .gitignore ignores while walking
     functions: list[FunctionConfigComplete]  # List of functions to track and analyze
@@ -454,26 +454,30 @@ def expand_schema(spec: SchemaSpec | Path, base: Path) -> list[Path]:
 
 
 def load_config(project_root: Path | None = None) -> tuple[SQLTyConfig, Path | None]:
-    """Load the ``[tool.sqlty]`` table of the nearest ``pyproject.toml`` that has one.
+    """Load the nearest ``sqlty.toml``, or ``[tool.sqlty]`` of the nearest ``pyproject.toml``.
 
-    Walks up from ``project_root``, skipping ``pyproject.toml`` files without a
-    ``[tool.sqlty]`` table (like ruff), so a package's packaging-only
-    ``pyproject.toml`` does not hide the workspace config. The closest table
-    wins; tables are never merged.
+    Walks up from ``project_root``. In each directory a ``sqlty.toml`` wins over
+    ``pyproject.toml``, and a ``pyproject.toml`` without a ``[tool.sqlty]`` table is
+    skipped (like ruff), so a package's packaging-only ``pyproject.toml`` does not
+    hide the workspace config. The closest file wins; files are never merged.
 
     Args:
         project_root: Directory to start the upward search from; cwd if None.
 
     Returns:
         Tuple of (configuration dictionary, directory containing that
-        pyproject.toml, or None if none was found or it failed to parse)
+        file, or None if none was found or a pyproject.toml failed to parse)
     """
     if project_root is None:
         project_root = Path.cwd()
 
-    # Search for pyproject.toml up the directory tree
     current = project_root.resolve()
     while current != current.parent:
+        sqlty_toml = current / "sqlty.toml"
+        if sqlty_toml.is_file():
+            return copy.deepcopy(
+                _load_config_file_cached(sqlty_toml, sqlty_toml.stat().st_mtime_ns)
+            ), current
         pyproject_path = current / "pyproject.toml"
         if pyproject_path.exists():
             try:
@@ -499,6 +503,11 @@ def _parse_pyproject_cached(pyproject_path: Path, mtime_ns: int) -> SQLTyConfig 
     are not cached.
     """
     return _parse_pyproject(pyproject_path)
+
+
+@lru_cache(maxsize=256)
+def _load_config_file_cached(path: Path, mtime_ns: int) -> SQLTyConfig:
+    return load_config_file(path)
 
 
 def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig | None:

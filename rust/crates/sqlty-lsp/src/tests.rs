@@ -376,17 +376,19 @@ fn a_failed_check_is_logged() {
 
 #[test]
 fn saving_the_config_reloads_the_project() {
-    let mut client = Client::start(&json!({}));
-    client.open("file:///work/q.py", "bad\n");
-    client.notification("textDocument/publishDiagnostics");
-    assert_eq!(client.opened.load(Ordering::SeqCst), 1);
-    client.notify(
-        "textDocument/didSave",
-        json!({"textDocument": {"uri": "file:///work/pyproject.toml"}}),
-    );
-    client.notification("textDocument/publishDiagnostics");
-    assert_eq!(client.opened.load(Ordering::SeqCst), 2);
-    client.shutdown();
+    for name in ["pyproject.toml", "sqlty.toml"] {
+        let mut client = Client::start(&json!({}));
+        client.open("file:///work/q.py", "bad\n");
+        client.notification("textDocument/publishDiagnostics");
+        assert_eq!(client.opened.load(Ordering::SeqCst), 1);
+        client.notify(
+            "textDocument/didSave",
+            json!({"textDocument": {"uri": format!("file:///work/{name}")}}),
+        );
+        client.notification("textDocument/publishDiagnostics");
+        assert_eq!(client.opened.load(Ordering::SeqCst), 2, "{name}");
+        client.shutdown();
+    }
 }
 
 #[test]

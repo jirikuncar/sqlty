@@ -17,7 +17,7 @@ on disk, except when a compound statement (``def``, ``class``, ``@``, ``if``,
 ...) comes right after the coding line, with no docstring, blank or comment
 line in between; then one line is added. The ``# coding: sqlty``
 declaration becomes ``utf-8``, so the decoded text runs without the codec.
-``import-style`` comes from ``[tool.sqlty]`` in pyproject.toml; on any error the
+``import-style`` comes from the nearest ``sqlty.toml`` or pyproject.toml; on any error the
 source is returned unchanged. Import ``sqlty.magic`` to register the codec.
 """
 

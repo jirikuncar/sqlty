@@ -568,5 +568,5 @@ fn roots(params: &InitializeParams) -> Vec<PathBuf> {
 /// Whether a change to `uri` changes the settings or the schema of its project.
 fn is_config(uri: &Url) -> bool {
     let path = uri.path();
-    path.ends_with("/pyproject.toml") || path.ends_with(".sql")
+    path.ends_with("/pyproject.toml") || path.ends_with("/sqlty.toml") || path.ends_with(".sql")
 }

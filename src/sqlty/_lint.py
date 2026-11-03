@@ -5,7 +5,7 @@ Rules use kebab-case names and have three severity levels:
 - "warn": warning (exit code 0, shown in output)
 - "ignore": suppressed entirely
 
-Configuration via pyproject.toml:
+Configuration via sqlty.toml (``[rules]``) or pyproject.toml:
 
     [tool.sqlty.rules]
     column-count-mismatch = "error"     # default
