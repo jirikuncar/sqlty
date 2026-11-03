@@ -451,6 +451,33 @@ def test_configured_function_modules_are_never_imported(tmp_path, monkeypatch, c
     assert "pkg.h" not in sys.modules
 
 
+def test_complete_lists_the_names_at_a_cursor(tmp_path, monkeypatch, capsys) -> None:
+    """``sqlty complete`` reads the file's settings and helpers, as ``check`` does."""
+    _helper_project(tmp_path)
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "h.py").write_text("def fetch_all(query, form): ...\n")
+    (tmp_path / "use.py").write_text(
+        'from pkg.h import fetch_all\n\nfetch_all("SELECT t. FROM t", int)\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert _run(["complete", "use.py:3:21"], capsys) == (0, "id\tcolumn\tt\tINT\n", "")
+    code, out, _ = _run(["complete", "use.py:3:21", "--json"], capsys)
+    assert json.loads(out) == {
+        "start": {"line": 3, "column": 21},
+        "end": {"line": 3, "column": 21},
+        "incomplete": False,
+        "items": [
+            {"label": "id", "kind": "column", "detail": "t", "sql_type": "INT", "nullable": True}
+        ],
+    }
+    assert _run(["complete", "use.py:1:1", "--json"], capsys) == (0, "null\n", "")
+    code, _, err = _run(["complete", "missing.py:1:1"], capsys)
+    assert (code, err) == (2, "sqlty: error: missing.py: no such file\n")
+    code, _, err = _run(["complete", "use.py:3"], capsys)
+    assert code == 2 and "expected FILE:LINE:COL" in err
+
+
 def _run(argv: list[str], capsys) -> tuple[int, str, str]:
     """Run ``main`` and return (exit code, stdout, stderr)."""
     code = 0
@@ -497,6 +524,28 @@ def test_unknown_key_is_an_error(tmp_path, monkeypatch, capsys) -> None:
 
     assert code == 2
     assert "unknown key 'bogus' in [tool.sqlty]" in err
+
+
+def test_invalid_value_in_sqlty_toml_names_the_file(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "sqlty.toml").write_text('untyped = "nope"\n')
+    (tmp_path / "q.py").write_text("x = 1\n")
+    monkeypatch.chdir(tmp_path)
+
+    code, _, err = _run(["check", "."], capsys)
+
+    assert code == 2
+    assert "sqlty.toml: untyped must be 'skip' or 'sentinel'" in err
+
+
+def test_invalid_value_in_cargo_toml_names_the_file(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "Cargo.toml").write_text('[package.metadata.sqlty]\nuntyped = "nope"\n')
+    (tmp_path / "q.py").write_text("x = 1\n")
+    monkeypatch.chdir(tmp_path)
+
+    code, _, err = _run(["check", "."], capsys)
+
+    assert code == 2
+    assert "Cargo.toml: untyped must be 'skip' or 'sentinel'" in err
 
 
 def test_snake_case_key_suggests_the_kebab_case_one(tmp_path, monkeypatch, capsys) -> None:
@@ -824,6 +873,8 @@ def test_isolated_skips_an_invalid_config(tmp_path, monkeypatch, capsys) -> None
     [
         ("sqlty.toml", 'schema = "db/schema.sql"\n'),
         ("pyproject.toml", '[tool.sqlty]\nschema = "db/schema.sql"\n'),
+        ("Cargo.toml", '[package.metadata.sqlty]\nschema = "db/schema.sql"\n'),
+        ("Cargo.toml", '[workspace.metadata.sqlty]\nschema = "db/schema.sql"\n'),
     ],
 )
 def test_config_file_replaces_discovery(tmp_path, monkeypatch, name, content) -> None:
@@ -853,6 +904,11 @@ def test_config_file_replaces_discovery(tmp_path, monkeypatch, name, content) ->
         (None, "", "config file does not exist"),
         ("", "", "config path is not a file"),
         ("pyproject.toml", "[project]\n", "no [tool.sqlty] table"),
+        (
+            "Cargo.toml",
+            "[package]\n",
+            "no [package.metadata.sqlty] or [workspace.metadata.sqlty] table",
+        ),
         ("sqlty.toml", "dialect = \n", "sqlty.toml: "),
         ("sqlty.toml", "dialet = 'mysql'\n", "did you mean 'dialect'"),
         ("sqlty.toml", "untyped = 'x'\n", "sqlty.toml: untyped must be"),
@@ -1400,6 +1456,9 @@ def test_check_output_formats(tmp_path, monkeypatch, capsys) -> None:
             "message": "column `nmae` does not exist in `users`",
             "severity": "error",
             "line": 2,
+            "start": {"line": 2, "column": 36},
+            "end": {"line": 2, "column": 40},
+            "fix": [],
         }
     ]
 
@@ -1408,6 +1467,29 @@ def test_check_output_formats(tmp_path, monkeypatch, capsys) -> None:
     assert capsys.readouterr().out == (
         "::error file=q.py,line=2,title=sqlty unknown-column::column `nmae` does not exist in `users`\n"
     )
+
+
+def test_check_json_locates_fixes_by_character(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "q.py").write_text(
+        'from sqlty import SQL\nq = ("é", SQL[tuple[int]]("--sql\\nSELECT 1.5::REAL"))\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit):
+        main(["check", "--output-format", "json", "q.py"])
+    [diagnostic] = json.loads(capsys.readouterr().out)
+    assert diagnostic["rule"] == "narrow-type"
+    assert (diagnostic["start"], diagnostic["end"]) == (
+        {"line": 2, "column": 15},
+        {"line": 2, "column": 25},
+    )
+    assert diagnostic["fix"] == [
+        {
+            "start": {"line": 2, "column": 15},
+            "end": {"line": 2, "column": 25},
+            "replacement": "tuple[float]",
+        }
+    ]
 
 
 def test_check_reports_in_line_order(tmp_path, monkeypatch, capsys) -> None:

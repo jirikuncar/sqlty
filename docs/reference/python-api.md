@@ -123,11 +123,14 @@ from sqlty.core import (
     analyze_params,
     analyze_select,
     check_source,
+    complete_source,
     expand_star,
     explain_select,
     fix_source,
+    highlight_source,
     infer_type,
     load_schema,
+    query_at,
     returns_rows,
     rewrite_source,
     strip_source,
@@ -193,6 +196,82 @@ Schema(dialect="postgres")
 'tuple[int, str | None]'
 ```
 
+`check_source` returns what `sqlty check` reports. Each diagnostic carries the
+UTF-8 byte offsets of what it is about, `start` to `end`, and the edits of
+`sqlty check --fix` as `(start, end, replacement)`. Editors use them to underline
+the row type, the query or the unknown name in it, and to offer the fix:
+
+```pycon
+>>> from sqlty.core import check_source
+>>> source = 'q = SQL[tuple[int]]("--sql\\nSELECT 1.5::REAL")'
+>>> [diagnostic] = check_source(source)
+>>> diagnostic["rule"], diagnostic["message"]
+('narrow-type', 'SQL[tuple[int]] should be SQL[tuple[float]]')
+>>> source.encode()[diagnostic["start"] : diagnostic["end"]]
+b'tuple[int]'
+>>> diagnostic["fix"]
+[(8, 18, 'tuple[float]')]
+```
+
+!!! note "Offsets count bytes, not characters"
+    Slice `source.encode()`, not `source`: the two differ once a line holds a
+    character outside ASCII.
+
+`query_at` returns the query under a cursor, for editor features such as
+completion. A string is a query exactly when `check_source` checks it: a
+`--sql` marked string, the argument of `SQL[T](...)`, or a string literal passed
+to a [helper](../guide/helpers.md). `text` is the query as the analyzer reads
+it, `offset` the cursor in it, and `source_offset` maps a byte of `text` back
+to the source:
+
+```pycon
+>>> from sqlty.core import query_at
+>>> source = 'q = "--sql\\nSELECT name FROM users"'
+>>> at = query_at(source, source.index("name"))
+>>> at.text, at.offset, at.route
+('--sql\nSELECT name FROM users', 13, 'marker')
+>>> at.source_offset(at.offset) == source.index("name")
+True
+>>> query_at('q = f"--sql\\nSELECT {x}"', 15) is None
+True
+```
+
+`complete_source` lists the table and column names that complete at a 1-based
+line and column (in characters) of a query string, with the bytes they replace.
+`sqlty complete FILE:LINE:COL` prints the same for scripts and agents:
+
+```pycon
+>>> from sqlty.core import complete_source
+>>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT)"
+>>> source = 'q = "--sql\\nSELECT u.na FROM users u"'
+>>> found = complete_source(source, 1, source.index(".na") + 4, schema_sql=schema)
+>>> found.items
+[Completion(label='name', kind='column', detail='u', sql_type='TEXT', nullable=True)]
+>>> source.encode()[found.start : found.end]
+b'na'
+```
+
+`hover_source` says what the word at a 1-based line and column of a query string is, in
+Markdown. `sqlty server` answers hover with it:
+
+```pycon
+>>> from sqlty.core import hover_source
+>>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT)"
+>>> source = 'q = "--sql\\nSELECT name FROM users WHERE id = 1"'
+>>> hover_source(source, 1, source.index("id =") + 1, schema_sql=schema)
+Hover(start=41, end=43, contents='Column `id` of `users`: `INT NOT NULL`')
+```
+
+`highlight_source` lists the SQL tokens to color in those same strings, as byte ranges.
+`sqlty server` sends them as semantic tokens:
+
+```pycon
+>>> from sqlty.core import highlight_source
+>>> source = 'q = "--sql\\nSELECT name FROM users WHERE id = %s"'
+>>> [(source[h.start : h.end], h.kind) for h in highlight_source(source)]
+[('--sql', 'comment'), ('SELECT', 'keyword'), ('FROM', 'keyword'), ('WHERE', 'keyword'), ('=', 'operator'), ('%s', 'parameter')]
+```
+
 | Function | Returns |
 |----------|---------|
 | `load_schema(schema_sql, *, dialect="postgres", types=None)` | A parsed `Schema`, for any `schema_sql` argument; `types` is [`[tool.sqlty.types]`](configuration.md#types) |
@@ -206,4 +285,8 @@ Schema(dialect="postgres")
 | `rewrite_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False, json_types="typing.Any")` | Rewritten source; `json_types="typing.TypedDict"` generates `TypedDict`s for JSON columns |
 | `strip_source(source, *, import_style=None)` | Stripped source, without generated `TypedDict`s |
 | `fix_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False, rules=None, json_types="typing.Any")` | Source with `sqlty check --fix` applied |
-| `check_source(source, *, dialect="postgres", schema_sql=None, rules=None, import_style=None)` | List of diagnostics: `Diagnostic` dicts (`sqlty._lint.Diagnostic`, a `TypedDict`) with `rule`, `message`, `severity`, `line` |
+| `check_source(source, *, dialect="postgres", schema_sql=None, rules=None, import_style=None)` | List of diagnostics: `Diagnostic` dicts (`sqlty._lint.Diagnostic`, a `TypedDict`) with `rule`, `message`, `severity`, `line`, `start`, `end`, `fix` |
+| `query_at(source, offset, *, import_style=None, helpers=None, module=None)` | The `QueryAt` (`text`, `offset`, `route`, `span`, `source_offset(n)`) at byte `offset`, or `None` outside a checked query |
+| `complete_source(source, line, column, *, dialect="postgres", schema_sql=None, import_style=None, helpers=None, module=None, limit=200)` | `Completions(start, end, incomplete, items)` of `Completion(label, kind, detail, sql_type, nullable)` at the cursor, or `None` outside a checked query |
+| `hover_source(source, line, column, *, dialect="postgres", schema_sql=None, import_style=None, helpers=None, module=None)` | `Hover(start, end, contents)`: what the word at the cursor is, in Markdown, or `None` |
+| `highlight_source(source, *, dialect="postgres", import_style=None, helpers=None, module=None)` | `Highlight(start, end, kind)` per SQL token of the checked queries, `kind` one of `keyword`, `string`, `number`, `comment`, `operator`, `parameter` |

@@ -2,6 +2,8 @@
 
 from typing import final
 
+from sqlty._lint import Diagnostic
+
 @final
 class Schema:
     @property
@@ -95,14 +97,59 @@ def check_source(
     import_style: str | None = None,
     untyped: bool = False,
     any_calls: list[int] = ...,
-) -> list[dict[str, str | int | None]]: ...
+) -> list[Diagnostic]: ...
 def wrapped_queries(
     source: str, *, import_style: str | None = None
-) -> list[tuple[int, str, str | None]]: ...
+) -> list[tuple[int, str, str | None, tuple[int, int]]]: ...
 def query_sites(
     source: str, *, import_style: str | None = None, any_calls: list[int] = ...
 ) -> list[tuple[int, str, str]]: ...
+
+@final
+class QueryAt:
+    @property
+    def text(self) -> str: ...
+    @property
+    def offset(self) -> int: ...
+    @property
+    def route(self) -> str: ...
+    @property
+    def span(self) -> tuple[int, int]: ...
+    def source_offset(self, offset: int) -> int | None: ...
+
+def query_at(
+    source: str, offset: int, *, import_style: str | None = None, helper_starts: list[int] = ...
+) -> QueryAt | None: ...
+def complete_source(
+    source: str,
+    offset: int,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
+    import_style: str | None = None,
+    helper_starts: list[int] = ...,
+    limit: int = 200,
+) -> tuple[int, int, bool, list[tuple[str, str, str | None, str | None, bool | None]]] | None: ...
+def hover_source(
+    source: str,
+    offset: int,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
+    import_style: str | None = None,
+    helper_starts: list[int] = ...,
+) -> tuple[int, int, str] | None: ...
+def highlight_source(
+    source: str,
+    *,
+    dialect: str = "postgres",
+    import_style: str | None = None,
+    helper_starts: list[int] = ...,
+) -> list[tuple[int, int, str]]: ...
 def skills() -> list[tuple[str, str]]: ...
+def serve() -> None:
+    """Serve the language server on standard input and output until the client exits."""
+
 def schema_skipped_tables(schema_sql: str | Schema, *, dialect: str = "postgres") -> list[str]: ...
 def schema_skipped_objects(
     schema_sql: str | Schema, *, dialect: str = "postgres"

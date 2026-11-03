@@ -257,7 +257,11 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
             params: tuple[ParamArg, ...] | None = tuple(
                 ParamArg(i, arg_type(arg, parsed, stack)) for i, arg in enumerate(call.args[1:], 1)
             )
-            found.append(HelperCall(call.lineno, query, None, aliases, params, driver=driver))
+            found.append(
+                HelperCall(
+                    call.lineno, query, None, aliases, params, driver=driver, query_node=first
+                )
+            )
             continue
         keyword = _PARAM_KEYWORD[driver]
         arg = call.args[1] if len(call.args) > 1 else None
@@ -275,7 +279,14 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
             if not many or params is not None or single is not None:
                 found.append(
                     HelperCall(
-                        call.lineno, query, None, aliases, params, driver=driver, single=single
+                        call.lineno,
+                        query,
+                        None,
+                        aliases,
+                        params,
+                        driver=driver,
+                        single=single,
+                        query_node=first,
                     )
                 )
     return found
@@ -322,6 +333,7 @@ def find_template_calls(source: str | ParsedSource) -> list[HelperCall]:
                         parsed.typing_aliases,
                         tuple(params),
                         driver="psycopg",
+                        query_node=template,
                     )
                 )
     return found

@@ -16,6 +16,8 @@ from .parser import Assertion, Kind, Section, Unit
 from .updater import Updater
 
 _CODING = re.compile(r"\A#.*coding[:=].*\n?")
+# `# completions:` lists the first ones, then `...`: the system catalogs make lists long.
+_COMPLETIONS_SHOWN = 10
 _ERROR_VALUE = re.compile(r'^(?:\[(?P<rule>[\w-]+)\])?\s*(?:"(?P<message>.*)")?$')
 
 
@@ -128,6 +130,51 @@ class Run:
 
                 decoded = _without_imports(decode(text.encode())[0], self._imports).strip()
                 return _CODING.sub("", decoded, count=1).strip()
+            case "completions":
+                if unit.cursor is None:
+                    raise AssertionError("`# completions:` needs a <CURSOR> in the code")
+                found = core.complete_source(
+                    text,
+                    *unit.cursor,
+                    dialect=self.dialect,
+                    schema_sql=self.schema_sql,
+                    import_style=self.import_style,
+                    helpers=self._helpers,
+                )
+                if found is None or not found.items:
+                    return "None"
+                lines = [f"{c.label} {c.kind} {c.detail or '-'}" for c in found.items]
+                more = found.incomplete or len(lines) > _COMPLETIONS_SHOWN
+                return "\n".join([*lines[:_COMPLETIONS_SHOWN], "..."] if more else lines)
+            case "hover":
+                if unit.cursor is None:
+                    raise AssertionError("`# hover:` needs a <CURSOR> in the code")
+                hovered = core.hover_source(
+                    text,
+                    *unit.cursor,
+                    dialect=self.dialect,
+                    schema_sql=self.schema_sql,
+                    import_style=self.import_style,
+                    helpers=self._helpers,
+                )
+                return "None" if hovered is None else hovered.contents
+            case "highlighted":
+                found = core.highlight_source(
+                    text,
+                    dialect=self.dialect,
+                    import_style=self.import_style,
+                    helpers=self._helpers,
+                )
+                encoded = text.encode()
+                return (
+                    "\n".join(
+                        f"{h.kind} {line}"
+                        for h in found
+                        for line in encoded[h.start : h.end].decode().splitlines()
+                        if line.strip()
+                    )
+                    or "None"
+                )
             case "error":
                 raise AssertionError("errors are matched per line")
 
@@ -207,8 +254,19 @@ class Run:
                 helpers=self._helpers,
                 query_variants=self.query_variants,
             )
+        parsed = core.ParsedSource(code.text)
+
+        def column(offset: int, line: int) -> str:
+            at, col = parsed.position(offset)
+            return str(col) if at == line else f"{at - line:+}.{col}"
+
         diagnostics = [
-            (code.md_lines[int(str(d["line"])) - 1], str(d["rule"]), str(d["message"]))
+            (
+                code.md_lines[d["line"] - 1],
+                d["rule"],
+                d["message"],
+                f"[{column(d['start'], d['line'])}:{column(d['end'], d['line'])}]",
+            )
             for d in found
         ]
         expected = [a for a in assertions if a.expected]
@@ -227,10 +285,13 @@ class Run:
             return []
         path = self.section.path
         return [
-            *(f"{path}:{a.target}: unmatched assertion `# error: {a.expected}`" for a in unmatched),
             *(
-                f'{path}:{line}: unexpected diagnostic [{rule}] "{msg}"'
-                for line, rule, msg in unexpected
+                f"{path}:{a.target}: unmatched assertion `# error{a.range or ''}: {a.expected}`"
+                for a in unmatched
+            ),
+            *(
+                f'{path}:{line}: unexpected diagnostic [{rule}] "{msg}" at {columns}'
+                for line, rule, msg, columns in unexpected
             ),
         ]
 
@@ -246,10 +307,10 @@ class Run:
         return head + "\n" + "\n".join(diff)
 
 
-def _matches(assertion: Assertion, diagnostic: tuple[int, str, str]) -> bool:
-    line, rule, message = diagnostic
+def _matches(assertion: Assertion, diagnostic: tuple[int, str, str, str]) -> bool:
+    line, rule, message, columns = diagnostic
     value = _ERROR_VALUE.match(assertion.expected)
-    if value is None or assertion.target != line:
+    if value is None or assertion.target != line or assertion.range not in (None, columns):
         return False
     return (value["rule"] in (None, rule)) and (
         value["message"] is None or value["message"] in message

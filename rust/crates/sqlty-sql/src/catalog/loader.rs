@@ -724,12 +724,12 @@ impl Loader {
             .collect();
         match resolved {
             Some(relation) => {
-                if cache.relations.insert(key, relation).is_none() && user {
+                if cache.relations.insert(Arc::from(key), relation).is_none() && user {
                     cache.user_relations += 1;
                 }
             }
             None => {
-                if cache.relations.remove(&key).is_some() && user {
+                if cache.relations.remove(key.as_str()).is_some() && user {
                     cache.user_relations -= 1;
                 }
             }

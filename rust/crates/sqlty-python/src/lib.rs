@@ -9,6 +9,7 @@
 //!   [`rewriter::strip_source`] takes the wrappers off again.
 //! - [`checker`]: [`checker::check_source`] lints the source into [`checker::Diagnostic`]s.
 //! - [`fixer`]: [`fixer::fix_source`] applies the fixes the checker's diagnostics carry.
+//! - [`locate`]: [`locate::Queries`] finds the query under a cursor.
 //! - [`edit`]: the [`edit::Edit`]s that rewriting, stripping and fixing make, applied in
 //!   one pass by [`edit::apply_edits`].
 //! - [`rules`]: the lint [`rules::Rule`]s, their severities and the user's overrides.
@@ -33,6 +34,7 @@
 pub mod checker;
 pub mod edit;
 pub mod fixer;
+pub mod locate;
 pub mod options;
 pub mod rewriter;
 pub mod rules;

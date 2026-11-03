@@ -8,14 +8,14 @@ Mixed: int | INT | NonNull
 
 SELECT Mixed FROM "Case"
 mixed: ? | ? | Unknown
-[unknown-column] column `Mixed` does not exist in `case`
+[unknown-column] column `Mixed` does not exist in `case`; did you mean `"Mixed"`?
 
 SELECT PLAIN FROM "Case"
 plain: int | INT | Nullable
 
 SELECT "PLAIN" FROM "Case"
 PLAIN: ? | ? | Unknown
-[unknown-column] column `PLAIN` does not exist in `case`
+[unknown-column] column `PLAIN` does not exist in `case`; did you mean `plain`?
 
 mysql:
 SELECT mixed FROM `Case`

@@ -230,11 +230,22 @@ pub(super) fn parse_query(sql: &str, dialect: SqlDialect) -> Option<Vec<Statemen
 
 /// [`parse_query`] of what [`parser_input`] made of a query.
 pub(super) fn parse_input(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
-    parse(sql, dialect).or_else(|| {
-        (dialect == SqlDialect::Postgres && sql.contains('?'))
-            .then(|| parse(&numbered_placeholders(sql), dialect))
-            .flatten()
-    })
+    parse_input_as_written(sql, dialect).0
+}
+
+/// [`parse_input`], and whether sqlparser read `sql` as written: its spans are then
+/// positions in `sql`.
+pub(super) fn parse_input_as_written(
+    sql: &str,
+    dialect: SqlDialect,
+) -> (Option<Vec<Statement>>, bool) {
+    if let Some(stmts) = parse(sql, dialect) {
+        return (Some(stmts), true);
+    }
+    let numbered = (dialect == SqlDialect::Postgres && sql.contains('?'))
+        .then(|| parse(&numbered_placeholders(sql), dialect))
+        .flatten();
+    (numbered, false)
 }
 
 /// Index just past the quoted string or identifier that opens at `start`; a doubled quote

@@ -1,18 +1,19 @@
 # Configuration
 
-sqlty reads `[tool.sqlty]` from `pyproject.toml`. The CLI uses, for each
-file, the nearest `pyproject.toml` above it, unless
+sqlty reads `sqlty.toml`, `[tool.sqlty]` from `pyproject.toml`, or `[package.metadata.sqlty]`
+or `[workspace.metadata.sqlty]` from `Cargo.toml`. The CLI uses, for each file, the nearest
+of them above it, unless
 [`--config-file` or `--isolated`](cli.md#configuration-flags) picks one file or none; the magic codec
 searches from the current directory. Command-line flags override the file. An unknown key, rule or
 severity is an error (exit 2) that names the file and suggests the closest match.
 
-In every case a `pyproject.toml` without `[tool.sqlty]` is skipped, so a
-package's packaging-only `pyproject.toml` in a monorepo does not hide the
-root config. The closest table wins; settings are not merged with tables in
+In every case a `pyproject.toml` without `[tool.sqlty]`, or a `Cargo.toml` without
+either Cargo table, is skipped, so a package's packaging-only file in a monorepo
+does not hide the root config. The closest file wins; settings are not merged with files in
 parent directories. To change one setting for a nested project, give it its
-own complete `[tool.sqlty]` table. Command-line flags (`--dialect`,
+own complete configuration. Command-line flags (`--dialect`,
 `--schema`, `--untyped`, `--exclude`, `--extend-exclude`, `--error`/`--warn`/`--ignore`)
-and `-c KEY=VALUE` assignments override the table for every path.
+and `-c KEY=VALUE` assignments override the file for every path.
 
 ```toml
 [tool.sqlty]
@@ -30,11 +31,73 @@ import-path = "db.sql"
 query-param = "query"
 ```
 
+## `sqlty.toml`
+
+`sqlty.toml` holds the same keys at the top level, without the `tool.sqlty` prefix.
+
+`sqlty.toml`:
+
+```toml
+dialect = "postgres"
+schema = "schema.sql"
+
+[rules]
+select-star = "ignore"
+
+[[functions]]
+import-path = "db.sql"
+query-param = "query"
+```
+
+A project without a `pyproject.toml` needs no Python packaging file to hold
+its settings. In a directory with both, `sqlty.toml` wins and `pyproject.toml` is
+not read, as in ruff. Relative paths start from the directory of the file
+that holds them, whichever it is.
+
+## `Cargo.toml`
+
+A Rust crate keeps the same keys under `[package.metadata.sqlty]`, where Cargo
+allows tool settings and ignores them.
+
+`Cargo.toml`:
+
+```toml
+[package]
+name = "app"
+version = "0.1.0"
+
+[package.metadata.sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+
+[package.metadata.sqlty.rules]
+select-star = "ignore"
+```
+
+A Cargo workspace keeps them under `[workspace.metadata.sqlty]` of its root
+`Cargo.toml`. A member crate without its own `[package.metadata.sqlty]` uses the
+workspace table, since the upward search skips the member's `Cargo.toml` and reaches
+the root. A root `Cargo.toml` with both tables reads `[package.metadata.sqlty]`.
+
+`Cargo.toml`:
+
+```toml
+[workspace]
+members = ["app", "worker"]
+
+[workspace.metadata.sqlty]
+dialect = "postgres"
+schema = "db/schema.sql"
+```
+
+A directory with more than one file reads the first of `sqlty.toml`,
+`pyproject.toml` and `Cargo.toml` that holds a sqlty table, and no other.
+
 <!-- generated:config-keys -->
 | Key | Type | Default | Used by | Summary |
 |-----|------|---------|---------|---------|
 | [`dialect`](#dialect) | `"postgres"`, `"sqlite"`, `"mysql"` | `"postgres"` | `rewrite`, `check` | SQL dialect of queries and schema |
-| [`schema`](#schema) | string or list of strings | none | `rewrite`, `check` | Schema `.sql` files, directories or globs, relative to `pyproject.toml` |
+| [`schema`](#schema) | string or list of strings | none | `rewrite`, `check` | Schema `.sql` files, directories or globs, relative to the configuration file |
 | [`rules`](#rules) | table of rule = severity | per-rule defaults | `check` | Severity per lint rule: `"error"`, `"warn"` or `"ignore"` |
 | [`overrides`](#overrides) | array of tables | `[]` | `check` | Rule severities for the files `include` matches and `exclude` does not, on top of `rules` |
 | [`import-style`](#import-style) | string | `"from sqlty import SQL"` | `rewrite`, `strip`, `check`, magic codec | How rewritten code imports and spells the wrapper |
@@ -61,7 +124,7 @@ SQL dialect for queries and the schema: `"postgres"` (default), `"sqlite"`,
 ## `schema`
 
 A `.sql` file with `CREATE TABLE` statements, or a list of them, relative to
-the directory of `pyproject.toml`. Each entry is a file, a directory (every
+the directory of the configuration file. Each entry is a file, a directory (every
 `*.sql` below it) or a glob (`tables/*.sql`, `**/*.sql`). The files are joined
 in the order of the list; directory and glob matches are sorted by path, and a
 file named twice is read once. CLI: `--schema`, repeatable (relative to the
@@ -113,7 +176,7 @@ exclude = ["generated/important.py"]
 select-star = "ignore"
 ```
 
-Globs are relative to the `pyproject.toml` directory and match like
+Globs are relative to the directory of the configuration file and match like
 [`exclude`](#exclude-and-extend-exclude): a glob without a slash matches a file
 or directory name at any depth, and a matching directory covers every file in
 it. Every entry that matches a file is merged over `rules`, later entries
@@ -297,7 +360,7 @@ The default excludes are:
 
 A glob without a slash matches a file or
 directory name at any depth; one with a slash matches the path relative to
-the `pyproject.toml` that holds it, and `**` recurses. Files named on the
+the configuration file that holds it, and `**` recurses. Files named on the
 command line are always processed, unless `--force-exclude` is given. The CLI's `--exclude` and
 `--extend-exclude` take the same globs, relative to the current directory.
 

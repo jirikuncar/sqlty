@@ -43,6 +43,18 @@ class Variant(NamedTuple):
     lines: tuple[int, ...]
 
 
+class Declared(str):
+    """The query of a ``SQL[R]("...")`` call, with the ``P`` of ``SQL[R, P]`` and the source that spells it."""
+
+    params: ast.expr | None
+    source: ParsedSource
+
+    def __new__(cls, query: str, params: ast.expr | None, source: ParsedSource) -> Declared:
+        declared = super().__new__(cls, query)
+        declared.params, declared.source = params, source
+        return declared
+
+
 class Unchecked(NamedTuple):
     """A query that is not checked: a part is not static, or it has too many variants.
 
@@ -622,6 +634,14 @@ class _Walk:
                 return [(built, none, path)]
             case ast.Attribute():
                 return self.imported(node, path, frame)
+            case ast.Call(func=func, args=[ast.Constant(value=str() as query)]) if (
+                _dotted(func.value if isinstance(func, ast.Subscript) else func)
+                in frame.parsed.marker_names[1]
+            ):
+                match func:
+                    case ast.Subscript(slice=ast.Tuple(elts=[_, params])):
+                        return [(Declared(query, params, frame.parsed), none, path)]
+                return [(Declared(query, None, frame.parsed), none, path)]
             case ast.Call():
                 return self.call(node, path, frame)
         raise _Dynamic

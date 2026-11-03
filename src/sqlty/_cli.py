@@ -5,6 +5,7 @@ Commands:
     sqlty strip [OPTIONS] [PATH...]     Strip SQL[T](...) wrappers
     sqlty check [OPTIONS] [PATH...]     Lint SQL type annotations
     sqlty rule [NAME]                   Explain a lint rule, or list them
+    sqlty server                        Run the language server, for editors
     sqlty version                       Print version
 """
 
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
     from collections import Counter
     from collections.abc import Callable, Iterable, Iterator
 
+    from sqlty._check import RowUsage
     from sqlty._config import RuleOverride, SchemaSpec, SQLTyConfig
     from sqlty._core import Schema
     from sqlty._lint import Diagnostic
@@ -66,6 +68,8 @@ def main(argv: list[str] | None = None) -> None:
                 _cmd_strip(args)
             case "check":
                 _cmd_check(args)
+            case "complete":
+                _cmd_complete(args)
             case "breaking":
                 from sqlty._breaking import main as breaking
 
@@ -74,6 +78,12 @@ def main(argv: list[str] | None = None) -> None:
                 _cmd_rule(args.name)
             case "skill":
                 _cmd_skill(args.name, args.install, args.list)
+            case "server":
+                from sqlty._core import serve
+
+                # Messages own stdout: a stray print must not corrupt one.
+                sys.stdout = sys.stderr
+                serve()
             case "version":
                 _cmd_version()
             case _:
@@ -187,8 +197,31 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["text", "json", "github"],
         default="text",
         help="How diagnostics are printed: text (file:line: [rule] message, the default), json "
-        "(an array of objects with file, line, rule, severity and message) or github (GitHub "
+        "(an array of objects with file, line, rule, severity, message, the start and end of what "
+        "it underlines, and the fix edits) or github (GitHub "
         "Actions annotations). Summaries, --statistics and --explain are text only",
+    )
+
+    # --- complete ---
+    complete_parser = subparsers.add_parser(
+        "complete",
+        help="List the table and column names that complete at FILE:LINE:COL in a query string "
+        "(sqlty complete app.py:12:30), for scripts and agents",
+    )
+    complete_parser.add_argument(
+        "location",
+        type=_location,
+        metavar="FILE:LINE:COL",
+        help="The cursor: a Python file, a 1-based line and a 1-based column in characters",
+    )
+    _add_common_args(complete_parser)
+    complete_parser.set_defaults(paths=None)
+    complete_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print a JSON object with the start and end the completion replaces, whether the "
+        "list is incomplete, and the items with their label, kind, detail, SQL type and "
+        "nullability, instead of one item per line",
     )
 
     # --- breaking ---
@@ -267,6 +300,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--list", action="store_true", help="List the skills and what each is for"
     )
 
+    # --- server ---
+    subparsers.add_parser(
+        "server",
+        help="Run the language server on stdin and stdout, for editors (diagnostics and fixes as you type)",
+    )
+
     # --- version ---
     subparsers.add_parser("version", help="Print version and exit")
     return parser
@@ -296,7 +335,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         nargs="*",
         type=Path,
         default=[Path(".")],
-        help="Files or directories (default: .); each file uses its nearest pyproject.toml",
+        help="Files or directories (default: .); each file uses its nearest sqlty.toml, pyproject.toml or Cargo.toml",
     )
     parser.add_argument(
         "--dialect",
@@ -316,9 +355,10 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         "--config-file",
         type=Path,
         metavar="PATH",
-        help="Use this file for every path instead of the nearest pyproject.toml: [tool.sqlty] "
-        "of a pyproject.toml, or top-level keys of another file such as sqlty.toml; its "
-        "relative paths are relative to the current directory. Env: SQLTY_CONFIG_FILE",
+        help="Use this file for every path instead of the nearest config file: [tool.sqlty] "
+        "of a pyproject.toml, [package.metadata.sqlty] or [workspace.metadata.sqlty] of a Cargo.toml, "
+        "or top-level keys of another file such as sqlty.toml; its relative paths are relative to "
+        "the current directory. Env: SQLTY_CONFIG_FILE",
     )
     source.add_argument(
         "--isolated",
@@ -385,6 +425,17 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help="Files to work on at once; 1 works on one at a time. Output is the same in any "
         "case (default: the number of processors)",
     )
+
+
+def _location(value: str) -> tuple[Path, int, int]:
+    """``FILE:LINE:COL`` of ``sqlty complete``."""
+    import argparse
+
+    path, _, rest = value.rpartition(":")
+    path, _, line = path.rpartition(":")
+    if not (path and line.isdigit() and rest.isdigit()):
+        raise argparse.ArgumentTypeError(f"expected FILE:LINE:COL, got {value!r}")
+    return Path(path), int(line), int(rest)
 
 
 def _jobs(value: str) -> int:
@@ -572,41 +623,20 @@ def _cmd_check(args: argparse.Namespace) -> None:
     from collections import Counter
 
     from sqlty._config import ConfigError
-    from sqlty._helpers import configured_helpers
     from sqlty._source import ParsedSource
-    from sqlty.core import HelperIndex, RowUsage, check_source, fix_source, query_statistics
+    from sqlty.core import RowUsage
 
     if args.error_on_warning and (args.exit_zero or args.exit_zero_on_warning):
         other = "--exit-zero" if args.exit_zero else "--exit-zero-on-warning"
         raise ConfigError(f"--error-on-warning cannot be used with {other}")
     # Parsed trees stay alive for cross-module lookups: collect young objects only, as mypy does.
     gc.set_threshold(200_000, 30, 30)
-    resolver = SettingsResolver(args)
-    files = _collect_python_files(args.paths, resolver.source)
+    project = Project(args)
+    files, sources, settings = project.files, project.sources, project.settings
 
-    if not files and not args.quiet:
+    if not files and not project.unreadable and not args.quiet:
         logger.warning("No Python files found")
         return
-
-    texts = {path: read_source(path) for path in files}
-    unreadable = [path for path, text in texts.items() if text is None]
-    files = [path for path in files if texts[path] is not None]
-    modules = {path: _module_names(resolver.resolve(path), args.paths) for path in files}
-    sources = {
-        path: ParsedSource(
-            source,
-            modules[path][0] + (".__init__" if path.name == "__init__.py" else ""),
-        )
-        for path in files
-        if (source := texts[path]) is not None
-    }
-    helpers = HelperIndex()
-    for path, parsed in sources.items():
-        for name in modules[path]:
-            helpers.add(name, parsed)
-    helpers_for = configured_helpers(
-        helpers, _checked_roots(args.paths, [resolver.resolve(path) for path in files])
-    )
 
     total_errors = 0
     total_warnings = 0
@@ -616,24 +646,8 @@ def _cmd_check(args: argparse.Namespace) -> None:
     row_usage = RowUsage()
     reports: list[tuple[Path, Diagnostic, ParsedSource]] = []
 
-    settings = {path: resolver.for_file(path) for path in files}
-    file_helpers = {path: helpers_for(settings[path]) for path in files}
-
-    def fix(path: Path) -> str:
-        return fix_source(
-            sources[path],
-            dialect=settings[path].dialect,
-            schema_sql=settings[path].schema,
-            import_style=settings[path].import_style,
-            untyped=settings[path].untyped,
-            rules=settings[path].rules,
-            json_types=settings[path].json_types,
-            param_types=settings[path].param_types,
-            helpers=file_helpers[path],
-        )
-
     if args.fix:
-        for path, fixed in zip(files, _map(args, fix, files), strict=True):
+        for path, fixed in zip(files, _map(args, project.fix, files), strict=True):
             if fixed == sources[path].text:
                 continue
             write_source(path, fixed)
@@ -647,28 +661,8 @@ def _cmd_check(args: argparse.Namespace) -> None:
                 print(f"Fixed {path}", file=sys.stdout if text else sys.stderr)
 
     def check(path: Path) -> tuple[list[Diagnostic], Counter[str]]:
-        diagnostics = check_source(
-            sources[path],
-            dialect=settings[path].dialect,
-            schema_sql=settings[path].schema,
-            rules=settings[path].rules,
-            import_style=settings[path].import_style,
-            untyped=settings[path].untyped,
-            helpers=file_helpers[path],
-            row_usage=row_usage,
-            query_variants=settings[path].query_variants,
-        )
-        if not args.statistics:
-            return diagnostics, Counter()
-        counts = query_statistics(
-            sources[path],
-            dialect=settings[path].dialect,
-            schema_sql=settings[path].schema,
-            import_style=settings[path].import_style,
-            helpers=file_helpers[path],
-            query_variants=settings[path].query_variants,
-        )
-        return diagnostics, counts
+        diagnostics = project.check(path, row_usage)
+        return diagnostics, project.statistics(path) if args.statistics else Counter()
 
     for path, (diagnostics, counts) in zip(files, _map(args, check, files), strict=True):
         statistics += counts
@@ -685,7 +679,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
         elif severity == "warn":
             total_warnings += 1
         if args.output_format == "json":
-            shown.append({"file": str(path), **diag})
+            shown.append({"file": str(path), **json_diagnostic(diag, parsed)})
         elif args.output_format == "github":
             print(github_annotation(path, diag))
         elif not args.quiet:
@@ -712,8 +706,22 @@ def _cmd_check(args: argparse.Namespace) -> None:
 
     if not args.exit_zero and (total_errors or (args.error_on_warning and total_warnings)):
         sys.exit(EXIT_FOUND)
-    if unreadable:
+    if project.unreadable:
         sys.exit(EXIT_ERROR)
+
+
+def json_diagnostic(diag: Diagnostic, parsed: ParsedSource) -> dict[str, object]:
+    """``diag`` for ``--output-format json``: its offsets as 1-based lines and columns."""
+
+    def at(offset: int) -> dict[str, int]:
+        line, column = parsed.position(offset)
+        return {"line": line, "column": column}
+
+    fix = [
+        {"start": at(start), "end": at(end), "replacement": text}
+        for start, end, text in diag["fix"]
+    ]
+    return {**diag, "start": at(diag["start"]), "end": at(diag["end"]), "fix": fix}
 
 
 def github_annotation(path: Path, diag: Diagnostic) -> str:
@@ -728,6 +736,56 @@ def github_annotation(path: Path, diag: Diagnostic) -> str:
     if "line" in diag:
         where += f",line={diag['line']}"
     return f"::{level} {where},title={escape('sqlty ' + diag['rule'], property=True)}::{escape(diag['message'])}"
+
+
+def _cmd_complete(args: argparse.Namespace) -> None:
+    """Complete command: the names that can be typed at a cursor in a query string.
+
+    The file is read with the settings ``check`` gives it, and the helpers of ``paths``
+    (default: its directory) are indexed, so a configured or imported helper's query
+    completes too.
+    """
+    from sqlty._config import ConfigError
+    from sqlty.core import complete_source
+
+    path, line, column = args.location
+    if not path.is_file():
+        raise ConfigError(f"{path}: no such file")
+    args.paths = [path, *(args.paths or [path.parent])]
+    project = Project(args)
+    path = next((file for file in project.files if file.resolve() == path.resolve()), path)
+    if path not in project.sources:
+        raise ConfigError(f"{path}: not a Python file sqlty reads")
+    settings, parsed = project.settings[path], project.sources[path]
+    found = complete_source(
+        parsed,
+        line,
+        column,
+        dialect=settings.dialect,
+        schema_sql=settings.schema,
+        import_style=settings.import_style,
+        helpers=project.helpers[path],
+    )
+    if args.json:
+
+        def at(offset: int) -> dict[str, int]:
+            line, column = parsed.position(offset)
+            return {"line": line, "column": column}
+
+        result = (
+            None
+            if found is None
+            else {
+                "start": at(found.start),
+                "end": at(found.end),
+                "incomplete": found.incomplete,
+                "items": [item._asdict() for item in found.items],
+            }
+        )
+        print(json.dumps(result, indent=2))
+    elif found is not None:
+        for item in found.items:
+            print("\t".join([item.label, item.kind, item.detail or "", item.sql_type or ""]))
 
 
 def _cmd_skill(name: str, install: Path | None, list_skills: bool) -> None:
@@ -873,7 +931,7 @@ class ConfigSource:
     """Each directory's ``[tool.sqlty]`` after ``--config-file``, ``--isolated``,
     ``-c/--config``, ``--error/--warn/--ignore`` and the exclude flags.
 
-    By default it is the nearest ``pyproject.toml`` with a table. ``config_file``
+    By default it is the nearest ``sqlty.toml``, or ``pyproject.toml`` or ``Cargo.toml`` with a table. ``config_file``
     fixes one file for every directory, with relative paths resolved against
     the current directory (like ruff); ``isolated`` uses no file at all.
     ``overrides`` are TOML assignments applied on top, then ``rule_severity``
@@ -946,7 +1004,7 @@ class ConfigSource:
         """Config governing ``directory``, the directory its relative paths start from, and its
         file name. Inline overrides and rule flags are applied; ``schema`` and the excludes
         given inline are not (``self.schema``, ``exclusions``)."""
-        from sqlty._config import load_config
+        from sqlty._config import find_config
 
         if self._isolated:
             config: SQLTyConfig = {}
@@ -954,8 +1012,9 @@ class ConfigSource:
         elif self._fixed is not None:
             config, config_dir, label = self._fixed, self._cwd, str(self._label)
         else:
-            config, config_dir = load_config(directory)
-            label = f"{config_dir}/pyproject.toml"
+            config, path = find_config(directory)
+            config_dir = path.parent if path else None
+            label = str(path) if path else "pyproject.toml"
         if self._overrides or self._rule_severity:
             rules = {**config.get("rules", {}), **self._overrides.get("rules", {})}
             rules.update(self._rule_severity)
@@ -1173,7 +1232,7 @@ def _module_names(path: Path, roots: list[Path]) -> list[str]:
 
 @dataclass(frozen=True)
 class Settings:
-    """``[tool.sqlty]`` of the nearest ``pyproject.toml``, with CLI flags on top."""
+    """The nearest configuration file (``sqlty.toml``, ``pyproject.toml``, ``Cargo.toml``), with CLI flags on top."""
 
     dialect: str = "postgres"
     schema: Schema | None = None
@@ -1309,6 +1368,109 @@ class SettingsResolver:
             overrides=tuple(config.get("overrides", ())),
             config_dir=config_dir,
         )
+
+
+class Project:
+    """The Python files ``check`` reads, with their sources, settings and helpers, by path.
+
+    ``update`` replaces the text of one file, as an editor does with an unsaved buffer.
+    """
+
+    def __init__(self, args: argparse.Namespace) -> None:
+        from sqlty._source import ParsedSource
+
+        self.paths: list[Path] = args.paths
+        self.resolver = SettingsResolver(args)
+        files = _collect_python_files(args.paths, self.resolver.source)
+        texts = {path: read_source(path) for path in files}
+        self.unreadable = [path for path, text in texts.items() if text is None]
+        self.files = [path for path in files if texts[path] is not None]
+        self.modules = {
+            path: _module_names(self.resolver.resolve(path), args.paths) for path in self.files
+        }
+        self.sources = {
+            path: ParsedSource(text, self._module(path))
+            for path in self.files
+            if (text := texts[path]) is not None
+        }
+        self.settings = {path: self.resolver.for_file(path) for path in self.files}
+        self._index()
+
+    def update(self, path: Path, text: str) -> None:
+        from sqlty._source import ParsedSource
+
+        old = self.sources.get(path)
+        if old is not None and old.text == text:
+            return
+        if old is None:
+            self.files.append(path)
+            self.modules[path] = _module_names(self.resolver.resolve(path), self.paths)
+            self.settings[path] = self.resolver.for_file(path)
+        parsed = self.sources[path] = ParsedSource(text, self._module(path))
+        if old is None or old.may_define_helpers or parsed.may_define_helpers:
+            self._index()
+            return
+        for name in self.modules[path]:
+            self.index.add(name, parsed)
+
+    def check(self, path: Path, row_usage: RowUsage | None = None) -> list[Diagnostic]:
+        from sqlty.core import check_source
+
+        settings = self.settings[path]
+        return check_source(
+            self.sources[path],
+            dialect=settings.dialect,
+            schema_sql=settings.schema,
+            rules=settings.rules,
+            import_style=settings.import_style,
+            untyped=settings.untyped,
+            helpers=self.helpers[path],
+            row_usage=row_usage,
+            query_variants=settings.query_variants,
+        )
+
+    def fix(self, path: Path) -> str:
+        from sqlty.core import fix_source
+
+        settings = self.settings[path]
+        return fix_source(
+            self.sources[path],
+            dialect=settings.dialect,
+            schema_sql=settings.schema,
+            import_style=settings.import_style,
+            untyped=settings.untyped,
+            rules=settings.rules,
+            json_types=settings.json_types,
+            param_types=settings.param_types,
+            helpers=self.helpers[path],
+        )
+
+    def statistics(self, path: Path) -> Counter[str]:
+        from sqlty.core import query_statistics
+
+        settings = self.settings[path]
+        return query_statistics(
+            self.sources[path],
+            dialect=settings.dialect,
+            schema_sql=settings.schema,
+            import_style=settings.import_style,
+            helpers=self.helpers[path],
+            query_variants=settings.query_variants,
+        )
+
+    def _module(self, path: Path) -> str:
+        return self.modules[path][0] + (".__init__" if path.name == "__init__.py" else "")
+
+    def _index(self) -> None:
+        from sqlty._helpers import HelperIndex, configured_helpers
+
+        self.index = HelperIndex()
+        for path, parsed in self.sources.items():
+            for name in self.modules[path]:
+                self.index.add(name, parsed)
+        checked = _checked_roots(self.paths, [self.resolver.resolve(path) for path in self.files])
+        helpers_for = configured_helpers(self.index, checked)
+        self.helpers = {path: helpers_for(self.settings[path]) for path in self.files}
 
 
 def _load_schema(spec: SchemaSpec, base: Path) -> str | None:

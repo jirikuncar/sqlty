@@ -1,0 +1,114 @@
+{
+  "scopeName": "sqlty.sql.injection.multi",
+  "injectionSelector": "L:string.quoted.multi.python -string.quoted.raw -string.interpolated -string.quoted.binary",
+  "patterns": [
+    {
+      "include": "#triple-double"
+    },
+    {
+      "include": "#triple-single"
+    }
+  ],
+  "repository": {
+    "triple-double": {
+      "contentName": "meta.embedded.sql",
+      "begin": "(?<=\")[ \\t]*(--sql|-- sql(?=[ \\t]*(?:--[^\\\"'\\\\]*)?(?:\\\\[nr]|$)))",
+      "beginCaptures": {
+        "1": {
+          "name": "comment.line.double-dash.sql"
+        }
+      },
+      "end": "(?=\"\"\")",
+      "patterns": [
+        {
+          "include": "#escape"
+        },
+        {
+          "name": "comment.line.double-dash.sql",
+          "begin": "--",
+          "end": "(?=\\\\n|\"\"\")|$"
+        },
+        {
+          "name": "comment.block.sql",
+          "begin": "/\\*",
+          "end": "\\*/|(?=\"\"\")"
+        },
+        {
+          "name": "string.quoted.single.sql",
+          "begin": "'",
+          "end": "'|(?=\"\"\")",
+          "patterns": [
+            {
+              "include": "#escape"
+            }
+          ]
+        },
+        {
+          "include": "#sql"
+        }
+      ]
+    },
+    "triple-single": {
+      "contentName": "meta.embedded.sql",
+      "begin": "(?<=')[ \\t]*(--sql|-- sql(?=[ \\t]*(?:--[^\\\"'\\\\]*)?(?:\\\\[nr]|$)))",
+      "beginCaptures": {
+        "1": {
+          "name": "comment.line.double-dash.sql"
+        }
+      },
+      "end": "(?=''')",
+      "patterns": [
+        {
+          "include": "#escape"
+        },
+        {
+          "name": "comment.line.double-dash.sql",
+          "begin": "--",
+          "end": "(?=\\\\n|''')|$"
+        },
+        {
+          "name": "comment.block.sql",
+          "begin": "/\\*",
+          "end": "\\*/|(?=''')"
+        },
+        {
+          "name": "string.quoted.single.sql",
+          "begin": "'",
+          "end": "'|(?=''')",
+          "patterns": [
+            {
+              "include": "#escape"
+            }
+          ]
+        },
+        {
+          "include": "#sql"
+        }
+      ]
+    },
+    "escape": {
+      "name": "constant.character.escape.python",
+      "match": "\\\\(?:x[0-9A-Fa-f]{2}|[0-7]{1,3}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|N\\{[\\w\\s]+?\\}|[\\\\\\\"'abfnrtv\\n])"
+    },
+    "sql": {
+      "patterns": [
+        {
+          "name": "keyword.other.sql",
+          "match": "(?i)(?:(?<=\\\\[ntr])|(?<![\\w.$]))(?:ALL|ALTER|ANALYSE|ANALYZE|AND|ANY|ARRAY|AS|ASC|ASYMMETRIC|BETWEEN|BOTH|BY|CASE|CAST|CHECK|COLLATE|CONFLICT|CONSTRAINT|CREATE|CROSS|CURRENT_DATE|CURRENT_TIME|CURRENT_TIMESTAMP|CURRENT_USER|DEFAULT|DELETE|DESC|DISTINCT|DO|DROP|ELSE|END|EXCEPT|EXISTS|FALSE|FETCH|FILTER|FOR|FOREIGN|FROM|FULL|GROUP|HAVING|ILIKE|IN|INNER|INSERT|INTERSECT|INTO|IS|ISNULL|JOIN|LATERAL|LEADING|LEFT|LIKE|LIMIT|LOCALTIME|LOCALTIMESTAMP|MERGE|NATURAL|NOT|NOTHING|NOTNULL|NULL|NULLS|OFFSET|ON|ONLY|OR|ORDER|OUTER|OVER|PARTITION|PRIMARY|RECURSIVE|REFERENCES|REPLACE|RETURNING|RIGHT|SELECT|SESSION_USER|SET|SIMILAR|SOME|SYMMETRIC|TABLE|THEN|TO|TRAILING|TRUE|UNION|UNIQUE|UPDATE|USING|VALUES|VARIADIC|WHEN|WHERE|WINDOW|WITH)\\b"
+        },
+        {
+          "name": "constant.numeric.sql",
+          "match": "(?:(?<=\\\\[ntr])|(?<![\\w.$]))\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?\\b"
+        },
+        {
+          "name": "variable.parameter.sql",
+          "match": "\\$\\d+|%\\(\\w+\\)[sbt]|%[sbt]\\b|\\?\\d*|(?<![:\\w]):[A-Za-z_]\\w*"
+        },
+        {
+          "name": "keyword.operator.sql",
+          "match": "::|->>?|#>>?|\\|\\||<>|[<>!=]=?|[-+*/%|&^~@]"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,147 @@
+{
+  "name": "sqlty",
+  "displayName": "sqlty",
+  "description": "Type-check the SQL in your Python code as you type",
+  "version": "0.0.1",
+  "private": true,
+  "publisher": "jirikuncar",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jirikuncar/sqlty",
+    "directory": "editors/vscode"
+  },
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "categories": [
+    "Linters"
+  ],
+  "activationEvents": [
+    "onLanguage:python"
+  ],
+  "main": "./dist/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "sqlty runs the sqlty of the workspace's environment."
+    }
+  },
+  "contributes": {
+    "configuration": {
+      "title": "sqlty",
+      "properties": {
+        "sqlty.path": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "resource",
+          "markdownDescription": "`sqlty` executables to try first, for example `[\"~/.local/bin/sqlty\"]`."
+        },
+        "sqlty.interpreter": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "resource",
+          "markdownDescription": "The Python interpreter whose `sqlty` runs. Empty: the interpreter selected in the Python extension."
+        },
+        "sqlty.breaking.against": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "A baseline for `sqlty breaking`: a git revision such as `main`, a snapshot `sqlty breaking --save` wrote, or schema files. Empty: no breaking checks."
+        },
+        "sqlty.breaking.direction": {
+          "type": "string",
+          "enum": [
+            "both",
+            "forward",
+            "backward"
+          ],
+          "enumDescriptions": [
+            "Both directions.",
+            "Your queries against the schema of the baseline: deploy first.",
+            "The baseline's queries against your schema: migrate first."
+          ],
+          "default": "both",
+          "scope": "resource",
+          "markdownDescription": "Which way `#sqlty.breaking.against#` is checked, as `sqlty breaking --direction`."
+        },
+        "sqlty.completion.enable": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "markdownDescription": "Complete table and column names in the query strings `sqlty check` checks. Needs sqlty 0.4.0 or newer; off, the server does no completion work."
+        },
+        "sqlty.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "markdownDescription": "Log the messages between VS Code and `sqlty server` in the output channel."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "sqlty.restart",
+        "title": "Restart Server",
+        "category": "sqlty"
+      }
+    ],
+    "grammars": [
+      {
+        "scopeName": "sqlty.sql.injection",
+        "path": "./syntaxes/sql-injection.tmLanguage.json",
+        "injectTo": [
+          "source.python"
+        ],
+        "embeddedLanguages": {
+          "meta.embedded.sql": "sql"
+        }
+      },
+      {
+        "scopeName": "sqlty.sql.injection.multi",
+        "path": "./syntaxes/sql-injection-multi.tmLanguage.json",
+        "injectTo": [
+          "source.python"
+        ],
+        "embeddedLanguages": {
+          "meta.embedded.sql": "sql"
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node20 --sourcemap",
+    "build-test": "esbuild src/test/*.ts --bundle --external:vscode --outdir=out/test --format=cjs --platform=node --target=node20",
+    "check": "tsc --noEmit && oxlint --deny-warnings src && oxfmt --check src",
+    "format": "oxfmt src",
+    "test": "npm run build && npm run build-test && vscode-test",
+    "package": "npm run build -- --minify && cp ../../LICENSE LICENSE && vsce package"
+  },
+  "dependencies": {
+    "@vscode/python-extension": "^1.0.6",
+    "vscode-languageclient": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.0.0",
+    "@types/vscode": "~1.93.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.1.0",
+    "esbuild": "^0.28.2",
+    "ovsx": "^1.3.0",
+    "oxfmt": "^0.75.0",
+    "oxlint": "^1.90.0",
+    "typescript": "^7.0.2"
+  }
+}

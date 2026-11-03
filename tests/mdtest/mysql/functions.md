@@ -441,6 +441,49 @@ SELECT id & 3 AS a, id | 4 AS b, id ^ 1 AS c, ~id AS d, id << 1 AS e, id >> 1 AS
 -- columns: g: int (UBIGINT)
 ```
 
+## Operator precedence
+
+MySQL ranks `^` above `*`, `<<` and `>>` between `+` and `&`, and `XOR` between `AND`
+and `OR` ([operator precedence](https://dev.mysql.com/doc/refman/8.4/en/operator-precedence.html)).
+`a XOR n IS NULL` is `a XOR (n IS NULL)`, `NULL` when `a` is.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE t (a INT, n INT NOT NULL, x DOUBLE);
+```
+
+```sql
+SELECT a XOR n IS NULL AS c FROM t
+-- columns: c: bool | None (BOOLEAN)
+```
+
+```sql
+SELECT a XOR n <=> NULL AS c FROM t
+-- columns: c: bool | None (BOOLEAN)
+```
+
+```sql
+SELECT 2 ^ 3 * 1.5 AS c FROM t
+-- columns: c: decimal.Decimal (DECIMAL)
+```
+
+```sql
+SELECT n ^ 1 * x AS c FROM t
+-- columns: c: float | None (DOUBLE)
+```
+
+`DIV` and `%` (`MOD`) by zero are `NULL`, so `n DIV 2 ^ 1`, which is `n DIV (2 ^ 1)`, may be.
+
+```sql
+SELECT n DIV 2 ^ 1 AS a, n MOD 3 ^ 1 AS b, 1 + 2 << 1 AS c, -2 ^ 3 AS d, n OR a XOR n AND n AS e FROM t
+-- columns: a: int | None (BIGINT)
+-- columns: b: int | None (BIGINT)
+-- columns: c: int (UBIGINT)
+-- columns: d: int (UBIGINT)
+-- columns: e: bool | None (BOOLEAN)
+```
+
 ## Strings and JSON, more functions
 
 `CHAR` skips `NULL` codes, so it is never `NULL`. `LOAD_FILE` is `NULL` for a

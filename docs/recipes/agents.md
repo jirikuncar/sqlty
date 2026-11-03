@@ -16,6 +16,7 @@ them from the installed `sqlty`.
 | `sqlty-check` | reads a diagnostic, names a row type, checks parameters | `check`, `--fix`, `--explain`, JSON output, `sqlty rule`, suppressions, severities |
 | `sqlty-ci` | sets up or repairs pre-commit or CI | the hooks, the GitHub Actions job, promoting rules to errors |
 | `sqlty-rewrite` | writes a query, or adds or removes wrappers | `rewrite`, `strip`, `--check` and `--diff`, `SQL[UNTYPED]`, `import-style`, the magic codec |
+| `sqlty-server` | sets up sqlty in an editor, or an editor shows nothing or other diagnostics than `check` | `sqlty server`, the VS Code extension and its settings, fix on save, Neovim, Vim, Helix and Emacs, SQL highlighting, breaking findings while editing |
 <!-- /skills-table -->
 
 Each skill links to this site, not to files of the repository, so it works in
@@ -106,13 +107,31 @@ object per diagnostic:
 [
   {
     "file": "app/queries.py",
-    "rule": "unknown-column",
-    "message": "column `nmae` does not exist in `users`",
+    "rule": "narrow-type",
+    "message": "SQL[tuple[int]] should be SQL[tuple[float]]",
     "severity": "error",
-    "line": 3
+    "line": 3,
+    "start": {"line": 3, "column": 9},
+    "end": {"line": 3, "column": 19},
+    "fix": [
+      {
+        "start": {"line": 3, "column": 9},
+        "end": {"line": 3, "column": 19},
+        "replacement": "tuple[float]"
+      }
+    ]
   }
 ]
 ```
+
+| Key | What it holds |
+|-----|---------------|
+| `line` | The line the diagnostic is reported on, where its call or string starts. A `# sqlty: ignore` comment on this line silences it. |
+| `start`, `end` | What the diagnostic is about: the row type, the query or the name in it, a parameter type or the comment. Lines and columns start at 1, columns count characters, and `end` is the position after the last one. |
+| `fix` | The edits `sqlty check --fix` makes for this diagnostic, in the same positions. Empty when it has no fix. |
+
+`line` and `start` differ when a call spans lines: a row type checked against the
+query is reported on the call's first line and underlines the type wherever it is.
 
 `--output-format github` prints them as GitHub Actions annotations, which show on
 the lines of the pull request's diff. See [CI and pre-commit](ci.md#github-actions).

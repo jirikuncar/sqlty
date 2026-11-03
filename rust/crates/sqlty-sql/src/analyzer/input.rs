@@ -56,10 +56,8 @@ const POSTGRES_TYPED_STRINGS: [&str; 19] = [
 /// A placeholder in a string literal is left alone, as the database would read it, but
 /// `%%` there still becomes `%`, as psycopg sends it.
 pub(super) fn parser_input(sql: &str, dialect: SqlDialect) -> Input<'_> {
-    let sql = match SQL_MARKER.find(sql) {
-        Some(marker) => &sql[marker.end()..],
-        None => sql,
-    };
+    let marker = SQL_MARKER.find(sql).map_or(0, |marker| marker.end());
+    let sql = &sql[marker..];
     let tokens = tokens(sql, dialect);
     let mut edits = Vec::new();
     fixes(sql, &tokens, dialect, &mut edits);
@@ -68,11 +66,27 @@ pub(super) fn parser_input(sql: &str, dialect: SqlDialect) -> Input<'_> {
     respell(sql, &tokens, dialect, &mut respelling);
     let respelled = (!respelling.is_empty()).then(|| {
         respelling.extend(edits.iter().cloned());
-        apply(sql, respelling).into_owned()
+        respelling
+    });
+    let parsed = respelled.as_ref().unwrap_or(&edits);
+    let mut moves: Vec<_> = parsed
+        .iter()
+        .map(|(start, end, text)| (*start, *end, text.len()))
+        .collect();
+    moves.sort_unstable();
+    let mut last = 0;
+    moves.retain(|&(start, end, _)| {
+        let kept = start >= last;
+        if kept {
+            last = end;
+        }
+        kept
     });
     Input {
+        respelled: respelled.map(|respelling| apply(sql, respelling).into_owned()),
         source: apply(sql, edits),
-        respelled,
+        marker,
+        moves,
     }
 }
 
@@ -82,6 +96,10 @@ pub(super) struct Input<'a> {
     pub(super) source: Cow<'a, str>,
     /// The query with them, when it has any.
     respelled: Option<String>,
+    /// The length of the `--sql` line before the query.
+    marker: usize,
+    /// The edits that made [`Input::text`]: start, end and the length of the new text.
+    moves: Vec<(usize, usize, usize)>,
 }
 
 impl Input<'_> {
@@ -90,10 +108,29 @@ impl Input<'_> {
         self.respelled.as_deref().unwrap_or(&self.source)
     }
 
+    /// Where the byte at `offset` of [`Input::text`] was in the query; an offset inside an
+    /// edit's text maps to the edit's start, or its end with `end`.
+    pub(super) fn original(&self, offset: usize, end: bool) -> usize {
+        let mut shift = 0isize;
+        for &(start, stop, len) in &self.moves {
+            let at = start.saturating_add_signed(shift);
+            if offset < at || (end && offset == at) {
+                break;
+            }
+            if offset < at + len || (end && offset == at + len) {
+                return self.marker + if end { stop } else { start };
+            }
+            shift += len as isize - (stop - start) as isize;
+        }
+        self.marker + offset.saturating_add_signed(-shift)
+    }
+
     pub(super) fn into_owned(self) -> Input<'static> {
         Input {
             source: Cow::Owned(self.source.into_owned()),
             respelled: self.respelled,
+            marker: self.marker,
+            moves: self.moves,
         }
     }
 }

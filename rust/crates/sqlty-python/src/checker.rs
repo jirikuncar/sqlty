@@ -20,12 +20,12 @@ use std::sync::LazyLock;
 use crate::edit::Edit;
 use crate::options::{Dialect, Options};
 use crate::rewriter::{
-    after_marker, decode_escapes, ends_marker_line, extract_string_content, marked_query,
-    strip_line_break, wraps, ImportStyle, Spelling,
+    after_marker, decode_escapes, ends_marker_line, extract_string_content, import_edit,
+    marked_query, strip_line_break, type_modules, wrapper_imports, wraps, ImportStyle, Spelling,
 };
 use crate::rules::{Rule, RuleConfig, Severity};
 use crate::scan::Scan;
-use crate::tokens::{content, Call};
+use crate::tokens::{content, query_offset, Call};
 use sqlty_sql::analyzer::{expand_star, parse, row_type, Column, Parsed, SchemaData};
 use sqlty_sql::diagnostics::{NameDiagnostic, NameRule};
 use std::ops::Range;
@@ -55,9 +55,9 @@ pub(crate) static INLINE_SQL_COMMENT_CONTENT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(&format!("^{INLINE_SQL_COMMENT}")).unwrap());
 
 /// Plain strings opening with a `--sql` marker line, which MySQL and MariaDB reject:
-/// they read `--` as a comment only before whitespace. Each with its line and the edit
-/// to `-- sql`.
-fn mysql_markers(scan: &Scan) -> Vec<(usize, Edit)> {
+/// they read `--` as a comment only before whitespace. Each with the literal's span and
+/// the edit to `-- sql`.
+fn mysql_markers(scan: &Scan) -> Vec<(Range<usize>, Edit)> {
     let source = scan.source();
     scan.plain_literals()
         .filter_map(|(start, end)| {
@@ -69,7 +69,7 @@ fn mysql_markers(scan: &Scan) -> Vec<(usize, Edit)> {
                 .then(|| {
                     let at = start + literal.find(marked).unwrap_or_default();
                     let edit = Edit::new(at..at + "--sql".len(), "-- sql");
-                    (scan.lines.line_at(start), edit)
+                    (start..end, edit)
                 })
         })
         .collect()
@@ -98,8 +98,10 @@ pub struct Diagnostic {
     pub message: String,
     /// How loudly the rule reports, as configured.
     pub severity: Severity,
-    /// 1-based line of the source the diagnostic points at.
+    /// 1-based line of the source the diagnostic points at: where its call or string starts.
     pub line: usize,
+    /// Byte range of what it is about: the row type, the query's strings, or the call.
+    pub span: Range<usize>,
     /// The edits `sqlty check --fix` makes for it; empty when it has no fix.
     pub fix: Vec<Edit>,
 }
@@ -130,6 +132,61 @@ pub fn check_source(
     checker.unwrapped_strings();
     checker.wrapped_calls();
     checker.finish()
+}
+
+/// Adds to each fix the imports its new names need (the wrapper, `UNTYPED`, `datetime`, ...),
+/// which [`fix_source`](crate::fixer::fix_source) adds once for all fixes: one fix applied
+/// alone, as an editor's quick fix does, then leaves code that runs.
+pub fn add_fix_imports(source: &str, options: &Options, diagnostics: &mut [Diagnostic]) {
+    if diagnostics.iter().all(|diag| diag.fix.is_empty()) {
+        return;
+    }
+    let scan = Scan::new(source, &options.style.wrapper_name);
+    let modules = type_modules(options);
+    let mut by_head: HashMap<String, Option<Edit>> = HashMap::new();
+    for diag in diagnostics {
+        let heads: Vec<String> = match diag.rule {
+            Rule::StaleRewrite => diag
+                .fix
+                .iter()
+                .filter_map(|edit| edit.replacement.split_once('('))
+                .map(|(head, _)| format!("{head}("))
+                .collect(),
+            Rule::StaleType | Rule::NarrowType | Rule::UntypedQuery => diag
+                .fix
+                .iter()
+                .map(|edit| format!("[{}](", edit.replacement))
+                .collect(),
+            _ => continue,
+        };
+        let mut imports: Vec<Edit> = Vec::new();
+        for head in heads {
+            let edit = by_head.entry(head).or_insert_with_key(|head| {
+                let lines = wrapper_imports(&scan, &[head], &options.style, &modules);
+                (!lines.is_empty()).then(|| import_edit(source, &lines))
+            });
+            if let Some(edit) = edit.as_ref().filter(|edit| !imports.contains(edit)) {
+                imports.push(edit.clone());
+            }
+        }
+        diag.fix.splice(0..0, imports);
+    }
+}
+
+/// Where a diagnostic points: the line it is reported on, and the bytes it underlines.
+struct At {
+    line: usize,
+    span: Range<usize>,
+}
+
+impl At {
+    fn new(scan: &Scan, span: Range<usize>) -> Self {
+        Self::at_line(scan.lines.line_at(span.start), span)
+    }
+
+    fn at_line(line: usize, span: Range<usize>) -> Self {
+        Self { line, span }
+    }
 }
 
 /// What the steps of [`check_source`] share: the scanned source, the settings and the
@@ -185,17 +242,18 @@ impl Checker<'_> {
         analysis
     }
 
-    fn report(&mut self, rule: Rule, message: String, line: usize) {
-        self.report_fix(rule, message, line, Vec::new());
+    fn report(&mut self, rule: Rule, message: String, at: &At) {
+        self.report_fix(rule, message, at, Vec::new());
     }
 
-    fn report_fix(&mut self, rule: Rule, message: String, line: usize, fix: Vec<Edit>) {
+    fn report_fix(&mut self, rule: Rule, message: String, at: &At, fix: Vec<Edit>) {
         if self.rules.is_enabled(rule) {
             self.diagnostics.push(Diagnostic {
                 rule,
                 message,
                 severity: self.rules.severity(rule),
-                line,
+                line: at.line,
+                span: at.span.clone(),
                 fix,
             });
         }
@@ -203,11 +261,12 @@ impl Checker<'_> {
 
     /// Plain strings whose marker line MySQL reads as an expression.
     fn mysql_markers(&mut self) {
-        for (line, edit) in mysql_markers(self.scan) {
+        for (span, edit) in mysql_markers(self.scan) {
+            let at = At::new(self.scan, span);
             self.report_fix(
                 Rule::MysqlSqlMarker,
                 r#"MySQL reads "--sql" as an expression, not a comment; use "-- sql""#.to_string(),
-                line,
+                &at,
                 vec![edit],
             );
         }
@@ -220,10 +279,11 @@ impl Checker<'_> {
             self.infer(content)
         });
         for edit in edits {
+            let at = At::new(scan, edit.range.clone());
             self.report_fix(
                 Rule::StaleRewrite,
                 "Source has --sql strings that aren't wrapped in SQL[T]".to_string(),
-                scan.lines.line_at(edit.range.start),
+                &at,
                 vec![edit],
             );
         }
@@ -233,6 +293,10 @@ impl Checker<'_> {
     fn unwrapped_strings(&mut self) {
         let scan = self.scan;
         for group in scan.groups() {
+            let at = At {
+                line: group.line,
+                span: group.start..group.end,
+            };
             let enclosing = scan.enclosing_call(group);
             if let Some(rule) = group.skipped {
                 if !(rule == Rule::UncheckedQuery
@@ -244,7 +308,7 @@ impl Checker<'_> {
                         }
                         _ => skipped_message(rule),
                     };
-                    self.report(rule, message, group.line);
+                    self.report(rule, message, &at);
                 }
                 continue;
             }
@@ -256,9 +320,9 @@ impl Checker<'_> {
             // psycopg's `sql.SQL("... {} ...")` is a template its `.format()` fills; the
             // helper call that receives it checks the composed query.
             let template = content.contains('{') && composes(scan.source(), first.start);
-            self.marker_and_syntax(&content, group.line, &first, template);
+            self.marker_and_syntax(&content, &at, &first, template);
             if after_marker(&content).is_some() && !template {
-                self.name_diagnostics(&content, group.line);
+                self.name_diagnostics(&content, &at, &scan.spans(group));
             }
         }
     }
@@ -274,16 +338,25 @@ impl Checker<'_> {
         let scan = self.scan;
         let line = scan.lines.line_at(call.span.start);
         let Some(sql_content) = call.content(scan.source()) else {
-            self.unchecked_argument(call, line);
+            self.unchecked_argument(call, &At::at_line(line, call.span.clone()));
             return;
         };
         if after_marker(&sql_content).is_none() {
             return;
         }
-        self.marker_and_syntax(&sql_content, line, &call.strings[0], false);
-        self.name_diagnostics(&sql_content, line);
-        self.select_star(call, &sql_content, line);
-        self.annotation(call, &sql_content, line);
+        let query = match call.strings.as_slice() {
+            [first, .., last] => first.start..last.end,
+            [only] => only.clone(),
+            [] => call.span.clone(),
+        };
+        let query = At::at_line(line, query);
+        self.marker_and_syntax(&sql_content, &query, &call.strings[0], false);
+        self.name_diagnostics(&sql_content, &query, &call.strings);
+        self.select_star(call, &sql_content, &query);
+        let annotation = &scan.source()[call.annotation.clone()];
+        let start = call.annotation.start + annotation.len() - annotation.trim_start().len();
+        let end = call.annotation.start + annotation.trim_end().len();
+        self.annotation(call, &sql_content, &At::at_line(line, start..end));
     }
 
     /// `inline-sql-comment` and `unparsed-query` of marked string content, which starts in
@@ -291,7 +364,7 @@ impl Checker<'_> {
     fn marker_and_syntax(
         &mut self,
         sql_content: &str,
-        line: usize,
+        at: &At,
         first: &Range<usize>,
         template: bool,
     ) {
@@ -307,7 +380,7 @@ impl Checker<'_> {
             self.report_fix(
                 Rule::InlineSqlComment,
                 INLINE_MESSAGE.to_string(),
-                line,
+                at,
                 fix.into_iter().collect(),
             );
         }
@@ -315,14 +388,14 @@ impl Checker<'_> {
             if let Some(error) =
                 marked_query(sql_content).and_then(|sql| self.analysis(&sql).parsed.error())
             {
-                self.report(Rule::UnparsedQuery, unparsed_message(&error), line);
+                self.report(Rule::UnparsedQuery, unparsed_message(&error), at);
             }
         }
     }
 
     /// `unchecked-query` for a call whose argument is not plain literals, unless it is
     /// interpolated (reported as a skipped f- or t-string) or opts out with `Any`.
-    fn unchecked_argument(&mut self, call: &Call, line: usize) {
+    fn unchecked_argument(&mut self, call: &Call, at: &At) {
         let source = self.scan.source();
         let interpolated = call.strings.iter().any(|span| {
             source[span.clone()]
@@ -337,13 +410,14 @@ impl Checker<'_> {
             self.report(
                 Rule::UncheckedQuery,
                 skipped_message(Rule::UncheckedQuery),
-                line,
+                at,
             );
         }
     }
 
-    /// Why a query has untyped columns (the `name` rules).
-    fn name_diagnostics(&mut self, sql_content: &str, line: usize) {
+    /// Why a query has untyped columns (the `name` rules), at the name when the query
+    /// knows where it is written in the `literals`, else at the query.
+    fn name_diagnostics(&mut self, sql_content: &str, at: &At, literals: &[Range<usize>]) {
         let enabled = NameRule::ALL
             .iter()
             .any(|&rule| self.rules.is_enabled(Rule::Name(rule)));
@@ -351,15 +425,48 @@ impl Checker<'_> {
             return;
         }
         if let Some(query) = marked_query(sql_content) {
+            let source = self.scan.source();
             for found in &self.analysis(&query).diagnostics {
-                self.report(Rule::Name(found.rule), found.message.clone(), line);
+                let name = found.span.as_ref().and_then(|span| {
+                    let start = query_offset(source, literals, span.start, false)?;
+                    Some(start..query_offset(source, literals, span.end, true)?)
+                });
+                let name = name.map(|span| At::at_line(at.line, span));
+                let fix = found
+                    .replacement
+                    .as_ref()
+                    .zip(found.span.as_ref().zip(name.as_ref()))
+                    .filter(|(replacement, (span, name))| {
+                        let written = &source[name.span.clone()];
+                        let quote = literals
+                            .iter()
+                            .find(|literal| literal.contains(&name.span.start))
+                            .and_then(|literal| {
+                                source[literal.clone()]
+                                    .trim_start_matches(|c: char| c.is_ascii_alphabetic())
+                                    .chars()
+                                    .next()
+                            });
+                        written == &query[(*span).clone()]
+                            && !replacement.contains(['\\', '\n', '\r'])
+                            && quote.is_some_and(|quote| !replacement.contains(quote))
+                    })
+                    .map(|(replacement, (_, name))| {
+                        Edit::new(name.span.clone(), replacement.clone())
+                    });
+                self.report_fix(
+                    Rule::Name(found.rule),
+                    found.message.clone(),
+                    name.as_ref().unwrap_or(at),
+                    fix.into_iter().collect(),
+                );
             }
         }
     }
 
     /// `select-star` and `select-star-no-schema`: a `*` or `t.*` that shapes the result.
     /// With a schema, a query in one literal is fixed by expanding the star.
-    fn select_star(&mut self, call: &Call, sql_content: &str, line: usize) {
+    fn select_star(&mut self, call: &Call, sql_content: &str, at: &At) {
         let Some(query) = marked_query(sql_content) else {
             return;
         };
@@ -378,7 +485,7 @@ impl Checker<'_> {
             ),
             _ => None,
         };
-        self.report_fix(rule, message, line, fix.into_iter().collect());
+        self.report_fix(rule, message, at, fix.into_iter().collect());
     }
 
     /// The row type of marked string content, from the name diagnostics' analysis when
@@ -427,7 +534,7 @@ impl Checker<'_> {
     }
 
     /// `untyped-query`, `stale-type` and the literal rules, against the inferred row type.
-    fn annotation(&mut self, call: &Call, sql_content: &str, line: usize) {
+    fn annotation(&mut self, call: &Call, sql_content: &str, at: &At) {
         let annotated = call.row_type(self.scan.source());
         let wrapper = if call.template {
             self.options.style.template_name()
@@ -451,7 +558,7 @@ impl Checker<'_> {
                 ),
             };
             let fix = current.map(|current| Edit::new(call.annotation.clone(), current));
-            self.report_fix(Rule::UntypedQuery, message, line, fix.into_iter().collect());
+            self.report_fix(Rule::UntypedQuery, message, at, fix.into_iter().collect());
             return;
         }
 
@@ -465,7 +572,7 @@ impl Checker<'_> {
                 self.report_fix(
                     Rule::NarrowType,
                     format!("{wrapper}[{annotated}] should be {wrapper}[{current}]: a row is never a single value"),
-                    line,
+                    at,
                     vec![Edit::new(call.annotation.clone(), current)],
                 );
             }
@@ -497,12 +604,12 @@ impl Checker<'_> {
                         if call.template { "SQLTemplate" } else { "SQL" },
                         if call.template { "SQLTemplate" } else { "SQL" }
                     ),
-                    line,
+                    at,
                     vec![Edit::new(call.annotation.clone(), current.clone())],
                 );
             }
             for (rule, message) in literal_findings(&spelled, &current) {
-                self.report(rule, message, line);
+                self.report(rule, message, at);
             }
         }
     }
@@ -668,38 +775,29 @@ pub fn query_sites(
     let mut sites = Vec::new();
     let mut skipped: Vec<usize> = Vec::new();
     for group in scan.groups() {
-        let enclosing = scan.enclosing_call(group);
-        if let Some(rule) = group.skipped {
-            skipped.push(group.start);
-            if !(rule == Rule::UncheckedQuery
-                && enclosing.is_some_and(|call| call.is_any(&any_calls)))
-            {
-                sites.push((group.line, SiteKind::Skipped(rule), String::new()));
-            }
-            continue;
+        let Some(rule) = group.skipped else { continue };
+        skipped.push(group.start);
+        if !(rule == Rule::UncheckedQuery
+            && scan
+                .enclosing_call(group)
+                .is_some_and(|call| call.is_any(&any_calls)))
+        {
+            sites.push((group.line, SiteKind::Skipped(rule), String::new()));
         }
-        if enclosing.is_some() {
-            continue;
-        }
-        if let Some(sql) = marked_query(&scan.content(group)) {
-            sites.push((group.line, SiteKind::Query, sql));
+    }
+    for (line, strings, _) in scan.marked_strings() {
+        if let Some(sql) = marked_query(&content(source, &strings)) {
+            sites.push((line, SiteKind::Query, sql));
         }
     }
     for call in &scan.calls {
-        let line = scan.lines.line_at(call.span.start);
-        match call.content(source) {
-            Some(text) => {
-                if let Some(sql) = marked_query(&text) {
-                    sites.push((line, SiteKind::Query, sql));
-                }
-            }
-            None if after_marker(&content(source, &call.strings)).is_some()
-                && !call.is_any(&any_calls)
-                && !holds_start(&skipped, &call.span) =>
-            {
-                sites.push((line, SiteKind::Skipped(Rule::UncheckedQuery), String::new()));
-            }
-            None => {}
+        if call.content(source).is_none()
+            && after_marker(&content(source, &call.strings)).is_some()
+            && !call.is_any(&any_calls)
+            && !holds_start(&skipped, &call.span)
+        {
+            let line = scan.lines.line_at(call.span.start);
+            sites.push((line, SiteKind::Skipped(Rule::UncheckedQuery), String::new()));
         }
     }
     sites.sort_by_key(|site| site.0);
@@ -719,9 +817,14 @@ fn holds_start(starts: &[usize], span: &Range<usize>) -> bool {
     starts.get(first).is_some_and(|&start| start < span.end)
 }
 
-/// `(line, annotation, query)` for each `{wrapper}[T](...)` call; `query` is the string
-/// without its marker, `None` unless the call holds a marked string literal.
-pub fn wrapped_queries(source: &str, style: &ImportStyle) -> Vec<(usize, String, Option<String>)> {
+/// `(line, annotation, query, annotation_span)` of a `{wrapper}[T](...)` call: see
+/// [`wrapped_queries`].
+pub type WrappedQuery = (usize, String, Option<String>, (usize, usize));
+
+/// `(line, annotation, query, annotation_span)` for each `{wrapper}[T](...)` call; `query`
+/// is the string without its marker, `None` unless the call holds a marked string literal,
+/// and `annotation_span` holds the byte offsets of `T`.
+pub fn wrapped_queries(source: &str, style: &ImportStyle) -> Vec<WrappedQuery> {
     let scan = Scan::new(source, &style.wrapper_name);
     scan.calls
         .iter()
@@ -735,6 +838,7 @@ pub fn wrapped_queries(source: &str, style: &ImportStyle) -> Vec<(usize, String,
                 scan.lines.line_at(call.span.start),
                 call.row_type(source).to_string(),
                 query,
+                (call.annotation.start, call.annotation.end),
             )
         })
         .collect()
@@ -1668,7 +1772,7 @@ s = SQL[T]("plain")
         let queries: Vec<(usize, Option<String>)> =
             wrapped_queries(source, &ImportStyle::default())
                 .into_iter()
-                .map(|(line, _, query)| (line, query))
+                .map(|(line, _, query, _)| (line, query))
                 .collect();
         assert_eq!(
             queries,

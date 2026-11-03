@@ -347,6 +347,39 @@ pub(crate) fn content(source: &str, spans: &[Range<usize>]) -> String {
         .collect()
 }
 
+/// Where the byte at `offset` of [`marked_query`](crate::rewriter::marked_query) of
+/// [`content`]`(source, spans)` is written in `source`, the end of an escape it is in with
+/// `end`; `None` in the marker, or in a t-string, whose fields the query does not show.
+pub(crate) fn query_offset(
+    source: &str,
+    spans: &[Range<usize>],
+    offset: usize,
+    end: bool,
+) -> Option<usize> {
+    let mut joined = String::new();
+    let mut starts = Vec::with_capacity(spans.len());
+    for span in spans {
+        let literal = &source[span.clone()];
+        let quoted = literal.trim_start_matches(|c: char| c.is_ascii_alphabetic());
+        if literal[..literal.len() - quoted.len()].eq_ignore_ascii_case("t") {
+            return None;
+        }
+        let inner = crate::rewriter::extract_string_content(quoted);
+        let opening = (quoted.len() - inner.len()) / 2;
+        starts.push((joined.len(), span.end - quoted.len() + opening));
+        joined.push_str(inner);
+    }
+    let decoded = crate::rewriter::decode_escapes(&joined);
+    let after = crate::rewriter::after_marker(&decoded)?;
+    let at = offset.checked_sub("--sql".len())? + decoded.len() - after.len();
+    let at = crate::rewriter::escaped_offset(&joined, at, end);
+    let &(written, start) = starts
+        .iter()
+        .rev()
+        .find(|&&(written, _)| written < at || (!end && written == at))?;
+    Some(start + at - written)
+}
+
 /// A `{wrapper}[T](...)` call.
 pub(crate) struct Call {
     pub span: Range<usize>,

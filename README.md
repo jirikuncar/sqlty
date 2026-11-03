@@ -160,7 +160,8 @@ sqlty strip .                  # undo: back to plain strings
 sqlty one module at a time and back out. New project:
 [Quickstart](https://jirikuncar.github.io/sqlty/quickstart/). Existing codebase:
 [Migration](https://jirikuncar.github.io/sqlty/recipes/migration/), starting
-with `pg_dump --schema-only app > schema.sql`.
+with `pg_dump --schema-only app > schema.sql`. In the editor:
+[VS Code](https://jirikuncar.github.io/sqlty/recipes/vscode/).
 
 Not a fit for ORMs, SQL built at runtime, or runtime validation;
 [Why SQLTy?](https://jirikuncar.github.io/sqlty/motivation/) compares it with

@@ -1,0 +1,99 @@
+name: VS Code extension
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish, as major.minor.patch (the Marketplace takes no pre-release tags)
+        required: true
+        type: string
+  pull_request:
+    paths:
+      - .github/workflows/vscode.yml
+      - editors/vscode/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vscode-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# The extension's version is the release's: it runs the project's own sqlty, so it
+# publishes with every release or manual run (which names its version), as a dry run on a pull request that changes it.
+jobs:
+  package:
+    name: Package
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: npm ci
+      - name: Take the version of the release or the run
+        if: github.event_name != 'pull_request'
+        run: |
+          version="${VERSION#v}"
+          if [[ "$PRERELEASE" != true && ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$VERSION' is not a major.minor.patch version"
+            exit 1
+          fi
+          npm version --no-git-tag-version --allow-same-version "$version"
+        env:
+          VERSION: ${{ github.event.release.tag_name || inputs.version }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+      - run: npm run package -- --out sqlty.vsix
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vsix
+          path: editors/vscode/sqlty.vsix
+
+  publish:
+    name: Publish to ${{ matrix.registry }}
+    needs: package
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && !github.event.release.prerelease)
+    runs-on: ubuntu-latest
+    # Each registry publishes on its own: re-running one that failed must not republish the other.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - registry: the Visual Studio Marketplace
+            url: https://marketplace.visualstudio.com/items?itemName=jirikuncar.sqlty
+            publish: npx vsce publish --oidc --packagePath sqlty.vsix
+          - registry: Open VSX
+            url: https://open-vsx.org/extension/jirikuncar/sqlty
+            publish: npx ovsx publish --trusted-publishing sqlty.vsix
+    permissions:
+      contents: read
+      id-token: write
+    environment:
+      name: vscode
+      url: ${{ matrix.url }}
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: npm ci
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: vsix
+          path: editors/vscode
+      - name: Publish
+        run: ${{ matrix.publish }}

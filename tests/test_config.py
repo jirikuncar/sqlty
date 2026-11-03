@@ -14,7 +14,7 @@ from sqlty._config import ConfigError, load_config, validate_tool_table
 
 def test_parses_each_pyproject_once(tmp_path, monkeypatch):
     """A nested tree of 20 files parses each ancestor pyproject.toml once, not once per file."""
-    _config._parse_pyproject_cached.cache_clear()
+    _config._parse_native_cached.cache_clear()
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\ndialect = "mysql"\n')
     files = []
     for a in range(2):
@@ -30,13 +30,13 @@ def test_parses_each_pyproject_once(tmp_path, monkeypatch):
         files[i].write_text("")
 
     parsed: list[str] = []
-    real_parse = _config._parse_pyproject
+    real_parse = _config._parse_native
 
     def counting_parse(path):
         parsed.append(str(path))
         return real_parse(path)
 
-    monkeypatch.setattr(_config, "_parse_pyproject", counting_parse)
+    monkeypatch.setattr(_config, "_parse_native", counting_parse)
 
     results = [load_config(f.parent) for f in files]
 
@@ -48,7 +48,7 @@ def test_parses_each_pyproject_once(tmp_path, monkeypatch):
 
 def test_edited_pyproject_is_reread(tmp_path):
     """A new mtime_ns on pyproject.toml makes the cached parse stale."""
-    _config._parse_pyproject_cached.cache_clear()
+    _config._parse_native_cached.cache_clear()
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[tool.sqlty]\ndialect = "mysql"\n')
     assert load_config(tmp_path)[0]["dialect"] == "mysql"
@@ -84,8 +84,78 @@ def test_nearest_sqlty_table_wins(tmp_path, packaging_only):
         assert (config["dialect"], config_dir) == ("sqlite", pkg.resolve())
 
 
+def test_sqlty_toml_wins_over_pyproject_in_its_directory(tmp_path: Path) -> None:
+    """``sqlty.toml`` holds the keys at the top level and wins over ``pyproject.toml``, like ruff."""
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\ndialect = "mysql"\n')
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "pyproject.toml").write_text('[tool.sqlty]\ndialect = "postgres"\n')
+    (pkg / "sqlty.toml").write_text('dialect = "sqlite"\n[rules]\nselect-star = "ignore"\n')
+
+    config, config_dir = load_config(pkg)
+    assert (config, config_dir) == (
+        {"dialect": "sqlite", "rules": {"select-star": "ignore"}},
+        pkg.resolve(),
+    )
+
+    (tmp_path / "sqlty.toml").write_text("")
+    assert load_config(tmp_path) == ({}, tmp_path.resolve())
+
+
+def test_cargo_toml_metadata_table_is_read(tmp_path: Path) -> None:
+    """``[package.metadata.sqlty]`` configures a crate; a ``Cargo.toml`` without it is skipped."""
+    (tmp_path / "Cargo.toml").write_text(
+        '[package]\nname = "app"\n\n[package.metadata.sqlty]\ndialect = "sqlite"\n'
+        '[package.metadata.sqlty.rules]\nselect-star = "ignore"\n'
+    )
+    crate = tmp_path / "crate"
+    crate.mkdir()
+    (crate / "Cargo.toml").write_text(
+        '[package]\nname = "crate"\n[package.metadata.docs]\nall = true\n'
+    )
+
+    assert load_config(crate) == (
+        {"dialect": "sqlite", "rules": {"select-star": "ignore"}},
+        tmp_path.resolve(),
+    )
+
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\ndialect = "mysql"\n')
+    assert load_config(crate)[0] == {"dialect": "mysql"}
+
+    (crate / "Cargo.toml").write_text("[package.metadata.sqlty]\nbogus = 1\n")
+    with pytest.raises(ConfigError, match=r"Cargo\.toml: unknown key 'bogus'"):
+        load_config(crate)
+
+
+def test_cargo_workspace_metadata_table_is_read(tmp_path: Path) -> None:
+    """A member crate without its own table uses ``[workspace.metadata.sqlty]`` of the workspace root."""
+    (tmp_path / "Cargo.toml").write_text(
+        '[workspace]\nmembers = ["crate"]\n\n[workspace.metadata.sqlty]\ndialect = "sqlite"\n'
+    )
+    crate = tmp_path / "crate"
+    crate.mkdir()
+    (crate / "Cargo.toml").write_text('[package]\nname = "crate"\n')
+
+    assert load_config(crate) == ({"dialect": "sqlite"}, tmp_path.resolve())
+
+    (crate / "Cargo.toml").write_text('[package.metadata.sqlty]\ndialect = "mysql"\n')
+    assert load_config(crate) == ({"dialect": "mysql"}, crate.resolve())
+
+    (tmp_path / "Cargo.toml").write_text(
+        '[package.metadata.sqlty]\ndialect = "postgres"\n[workspace.metadata.sqlty]\ndialect = "sqlite"\n'
+    )
+    assert load_config(tmp_path)[0] == {"dialect": "postgres"}
+
+
+def test_unknown_key_in_sqlty_toml_names_the_file(tmp_path: Path) -> None:
+    (tmp_path / "sqlty.toml").write_text("bogus = 1\n")
+
+    with pytest.raises(ConfigError, match=r"sqlty\.toml: unknown key 'bogus'"):
+        load_config(tmp_path)
+
+
 def test_unknown_keys_raise_config_error_naming_the_file(tmp_path):
-    _config._parse_pyproject_cached.cache_clear()
+    _config._parse_native_cached.cache_clear()
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[tool.sqlty]\ndialect = "mysql"\nbogus = 1\n')
 
@@ -117,7 +187,7 @@ def test_unknown_keys_raise_config_error_naming_the_file(tmp_path):
     ],
 )
 def test_invalid_settings(tmp_path, toml, message):
-    _config._parse_pyproject_cached.cache_clear()
+    _config._parse_native_cached.cache_clear()
     (tmp_path / "pyproject.toml").write_text(toml)
 
     with pytest.raises(_config.ConfigError, match=message):
@@ -125,7 +195,7 @@ def test_invalid_settings(tmp_path, toml, message):
 
 
 def test_exclude_settings_are_loaded(tmp_path):
-    _config._parse_pyproject_cached.cache_clear()
+    _config._parse_native_cached.cache_clear()
     (tmp_path / "pyproject.toml").write_text(
         '[tool.sqlty]\nexclude = ["a"]\nextend-exclude = ["b"]\n'
     )

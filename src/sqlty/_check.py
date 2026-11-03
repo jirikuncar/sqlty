@@ -11,7 +11,7 @@ import ast
 import re
 import typing
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, NamedTuple, cast
+from typing import TYPE_CHECKING, NamedTuple
 
 from sqlty._core import analyze_columns as _analyze_columns
 from sqlty._core import check_source as _check_source
@@ -25,6 +25,7 @@ from sqlty._helpers import HelperIndex, find_helper_calls
 from sqlty._lint import NAME_RULES, Diagnostic
 from sqlty._params import _dotted, annotation_type, mismatch
 from sqlty._source import ParsedSource, _wrapper_name, is_any
+from sqlty._variants import Declared
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -45,6 +46,10 @@ def is_any_row(call: HelperCall) -> bool:
 
 
 _CONTAINERS = (dict, list, set, frozenset, tuple)
+
+type _RowQuery = tuple[int, str, str | None, tuple[int, int]]
+"""``(line, row type, query, span)`` of a query whose row type is named: ``span`` is the
+byte offsets of the row type."""
 
 
 class _RowColumn(NamedTuple):
@@ -88,7 +93,7 @@ class _Check:
         rule_config: RuleConfig,
         found: list[HelperCall],
         driver_calls: list[HelperCall],
-        queries: list[tuple[int, str, str | None]],
+        queries: list[_RowQuery],
         declared: list[tuple[int, ast.expr, str]],
         helpers: HelperIndex | None,
         module: str | None,
@@ -109,9 +114,9 @@ class _Check:
         self._unparsed: dict[str, str] = {}
         self.rows = [self._unparse(call.row) if call.row else None for call in self.calls]
         named = [
-            (call.line, row, _bound(call, dialect))
+            (call.line, row, _bound(call, dialect), parsed.span(call.row))
             for call, row in zip(self.calls, self.rows, strict=True)
-            if row
+            if row and call.row is not None
         ]
         self.type_defs: dict[str, TypeInfo] = (
             extract_type_definitions(parsed, helpers, module)
@@ -129,18 +134,18 @@ class _Check:
                 if (imported := helpers.row_type(parsed, name)) is not None:
                     self.type_defs[name], self.imported_defs[name] = imported
         # A row type named through an alias (`type Row = User`) is checked as what it names.
-        self.aliased: list[tuple[int, str, str | None, ast.expr]] = []
-        resolved = []
-        for line, name, query in [*queries, *named]:
+        self.aliased: list[tuple[_RowQuery, ast.expr]] = []
+        resolved: list[_RowQuery] = []
+        for line, name, query, span in [*queries, *named]:
             target = _alias_target(name, parsed.type_aliases)
             if target is None:
                 if name not in self.type_defs:
                     self._specialize(name)
-                resolved.append((line, name, query))
+                resolved.append((line, name, query, span))
             elif (base := ast.unparse(target)) in self.type_defs:
-                resolved.append((line, base, query))
+                resolved.append((line, base, query, span))
             else:
-                self.aliased.append((line, name, query, target))
+                self.aliased.append(((line, name, query, span), target))
         self.user_queries = [q for q in resolved if q[1] in self.type_defs]
 
     def _specialize(self, name: str) -> None:
@@ -179,17 +184,28 @@ class _Check:
             self._unparsed[key] = ast.unparse(row)
         return self._unparsed[key]
 
-    def report(self, rule: str, message: str, line: int) -> Diagnostic | None:
+    def report(
+        self, rule: str, message: str, line: int, span: tuple[int, int] | None = None
+    ) -> Diagnostic | None:
+        """Report at ``line``, underlining ``span`` (byte offsets), else the line itself."""
         if not self.rule_config.is_enabled(rule):
             return None
+        start, end = span or self.parsed.line_span(line)
         diagnostic: Diagnostic = {
             "rule": rule,
             "message": message,
             "severity": self.rule_config.severity(rule).value,
             "line": line,
+            "start": start,
+            "end": end,
+            "fix": [],
         }
         self.diagnostics.append(diagnostic)
         return diagnostic
+
+    def query_span(self, call: HelperCall) -> tuple[int, int] | None:
+        """The byte offsets of the argument the query of ``call`` comes from."""
+        return None if call.query_node is None else self.parsed.span(call.query_node)
 
 
 def _check_unchecked_queries(ctx: _Check) -> None:
@@ -200,18 +216,21 @@ def _check_unchecked_queries(ctx: _Check) -> None:
                     "dynamic-query" if call.dynamic else "unchecked-query",
                     f"query has {call.reason}, so it is not checked",
                     call.line,
+                    ctx.query_span(call),
                 )
             elif call.dynamic:
                 ctx.report(
                     "dynamic-query",
                     "query is not a string literal, so it is not checked",
                     call.line,
+                    ctx.query_span(call),
                 )
             else:
                 ctx.report(
                     "unchecked-query",
                     "psycopg query is not built from literals only, so it is not checked",
                     call.line,
+                    ctx.query_span(call),
                 )
 
 
@@ -221,18 +240,45 @@ def _check_params(ctx: _Check) -> None:
         or ctx.rule_config.is_enabled("param-count-mismatch")
     ):
         return
-    singles = {(call.line, call.single, call.driver) for call in ctx.driver_calls if call.single}
+    singles = {
+        (call.line, call.single, call.driver): call for call in ctx.driver_calls if call.single
+    }
     if ctx.rule_config.is_enabled("param-type-mismatch"):
-        for line, single, driver in sorted(singles):
+        for (line, single, driver), call in sorted(singles.items(), key=lambda item: item[0]):
             ctx.report(
                 "param-type-mismatch",
                 f"parameters are a single {single}, which {driver} rejects: pass a sequence, `(value,)`",
                 line,
+                ctx.query_span(call),
             )
     for call in [*ctx.calls, *ctx.driver_calls]:
         if call.params is not None:
-            for rule, message in _param_diagnostics(call, ctx.dialect, ctx.schema_sql):
-                ctx.report(rule, message, call.line)
+            declared = _declared_annotations(ctx, call.query)
+            for rule, message in _param_diagnostics(call, ctx.dialect, ctx.schema_sql, declared):
+                ctx.report(rule, message, call.line, ctx.query_span(call))
+
+
+def _declared_annotations(
+    ctx: _Check, query: str | None
+) -> tuple[ParsedSource, dict[int | str, ast.expr]] | None:
+    """The ``P`` of the ``SQL[R, P]`` a call's query comes from, as an annotation per parameter key."""
+    if not isinstance(query, Declared) or query.params is None:
+        return None
+    declared, source = query.params, query.source
+    if isinstance(declared, ast.Subscript) and _dotted(declared.value) in ("tuple", "typing.Tuple"):
+        items = declared.slice.elts if isinstance(declared.slice, ast.Tuple) else [declared.slice]
+        if any(isinstance(item, ast.Constant) and item.value is Ellipsis for item in items):
+            return None
+        return source, dict(enumerate(items, 1))
+    from sqlty._type_extractor import extract_type_definitions
+
+    name = ast.unparse(declared)
+    info = extract_type_definitions(source, ctx.helpers, source.module).get(name)
+    if info is None and ctx.helpers is not None and (found := ctx.helpers.row_type(source, name)):
+        info = found[0]
+    if info is None or info.kind != "TypedDict":
+        return None
+    return source, typing.cast("dict[int | str, ast.expr]", info.annotations)
 
 
 def _check_declared_params(ctx: _Check) -> None:
@@ -245,13 +291,13 @@ def _check_declared_params(ctx: _Check) -> None:
         params = analyze_params(query, dialect=ctx.dialect, schema_sql=ctx.schema_sql)
         if params is not None:
             for message in _declared_params_diagnostics(ctx, declared, params):
-                ctx.report("params-type-mismatch", message, line)
+                ctx.report("params-type-mismatch", message, line, ctx.parsed.span(declared))
 
 
 def _check_typeddict_inheritance(ctx: _Check) -> None:
     if not ctx.rule_config.is_enabled("typeddict-inheritance"):
         return
-    names = [name for _, name, _ in ctx.user_queries if name not in ctx.imported_defs]
+    names = [query[1] for query in ctx.user_queries if query[1] not in ctx.imported_defs]
     for info in _typeddict_lineage(names, ctx.type_defs):
         for message in info.errors:
             ctx.report("typeddict-inheritance", message, info.lineno)
@@ -264,7 +310,7 @@ def _check_select_star(ctx: _Check) -> None:
                 call.query, dialect=ctx.dialect, has_schema=ctx.schema_sql is not None
             )
         ):
-            ctx.report(*found, call.line)
+            ctx.report(*found, call.line, ctx.query_span(call))
 
 
 def _check_unparsed(ctx: _Check) -> None:
@@ -279,7 +325,7 @@ def _check_unparsed(ctx: _Check) -> None:
             message = f"query does not parse: {error}"
             if "found: {" in error and (field := _FORMAT_FIELD.search(call.query)):
                 message += f"; `{field[0]}` is a `.format()` field: fill it with `sql.SQL(...).format(...)`, or pass a value as `%s`"
-            ctx.report("unparsed-query", message, call.line)
+            ctx.report("unparsed-query", message, call.line, ctx.query_span(call))
 
 
 _FORMAT_FIELD = re.compile(r"\{\w*\}")
@@ -294,12 +340,12 @@ def _check_names(ctx: _Check) -> None:
         for rule, message in _query_diagnostics(
             call.query, dialect=ctx.dialect, schema_sql=ctx.schema_sql
         ):
-            ctx.report(rule, message, call.line)
+            ctx.report(rule, message, call.line, ctx.query_span(call))
 
 
 def _check_structural(ctx: _Check) -> None:
     """Rows named by a type defined in this source (or an imported one)."""
-    for line, name, query in ctx.user_queries:
+    for line, name, query, span in ctx.user_queries:
         if (columns := _columns(query, ctx.dialect, ctx.schema_sql)) is None:
             continue
         info = ctx.type_defs[name]
@@ -316,7 +362,7 @@ def _check_structural(ctx: _Check) -> None:
         for rule, message in _structural_diagnostics(
             name, info, columns, ctx.rule_config, defs, ctx.composite
         ):
-            diagnostic = ctx.report(rule, message, line)
+            diagnostic = ctx.report(rule, message, line, span)
             if diagnostic is not None and rule == "redundant-optional":
                 field = message.split(" is ", 1)[0].removeprefix(f"{name}.")
                 ctx.row_usage.redundant.append(((info.module, info.name, field), diagnostic))
@@ -373,7 +419,7 @@ def _row_type_of(annotation: ast.expr | None, type_defs: Mapping[str, TypeInfo])
 def _check_aliases(ctx: _Check) -> None:
     """Rows named by a module-level alias of a tuple or scalar type (``type Row = tuple[int, str]``)."""
     shapes: dict[str, _RowShape | None] = {}
-    for line, name, query, target in ctx.aliased:
+    for (line, name, query, span), target in ctx.aliased:
         if (columns := _columns(query, ctx.dialect, ctx.schema_sql)) is None:
             continue
         if name not in shapes:
@@ -381,7 +427,7 @@ def _check_aliases(ctx: _Check) -> None:
         for rule, message in _value_diagnostics(
             shapes[name], columns, ctx.rule_config, ctx.type_defs
         ):
-            ctx.report(rule, message, line)
+            ctx.report(rule, message, line, span)
 
 
 def _alias_target(name: str, aliases: Mapping[str, ast.expr]) -> ast.expr | None:
@@ -410,7 +456,7 @@ def _check_values(ctx: _Check) -> None:
         for rule, message in _value_diagnostics(
             shapes[row], columns, ctx.rule_config, ctx.type_defs
         ):
-            ctx.report(rule, message, call.line)
+            ctx.report(rule, message, call.line, ctx.parsed.span(call.row))
 
 
 _CHECK_PASSES = (
@@ -449,17 +495,14 @@ def diagnostics(
 
     diagnostics: list[Diagnostic] = []
     if parsed.may_need_rust_check(import_style):
-        diagnostics = cast(
-            "list[Diagnostic]",
-            _check_source(
-                parsed.text,
-                dialect=dialect,
-                schema_sql=schema_sql,
-                rules=rules,
-                import_style=import_style,
-                untyped=untyped,
-                any_calls=parsed.any_calls(import_style),
-            ),
+        diagnostics = _check_source(
+            parsed.text,
+            dialect=dialect,
+            schema_sql=schema_sql,
+            rules=rules,
+            import_style=import_style,
+            untyped=untyped,
+            any_calls=parsed.any_calls(import_style),
         )
     found = find_helper_calls(parsed, helpers, module, variants=variants)
     typed = {line for call in found for line in call.typed_lines}
@@ -469,8 +512,8 @@ def diagnostics(
     ]
     driver_calls = find_driver_calls(parsed) + find_template_calls(parsed)
     queries = [
-        (line, name, query)
-        for line, name, query in (
+        (line, name, query, span)
+        for line, name, query, span in (
             _wrapped_queries(parsed.text, import_style=import_style)
             if parsed.may_wrap(import_style)
             else []
@@ -551,9 +594,16 @@ def _merge_variants(diagnostics: list[Diagnostic], calls: list[HelperCall]) -> l
 
 
 def _param_diagnostics(
-    call: HelperCall, dialect: str, schema_sql: str | Schema | None
+    call: HelperCall,
+    dialect: str,
+    schema_sql: str | Schema | None,
+    declared: tuple[ParsedSource, dict[int | str, ast.expr]] | None = None,
 ) -> list[tuple[str, str]]:
-    """``(rule, message)`` for the arguments a call passes for its query's placeholders."""
+    """``(rule, message)`` for the arguments a call passes for its query's placeholders.
+
+    With ``declared``, the ``P`` of the query's ``SQL[R, P]``, an argument is checked
+    against its annotation in ``P``, as a type checker would, instead of the query.
+    """
     assert call.query is not None and call.params is not None
     from sqlty.core import analyze_params
 
@@ -592,7 +642,12 @@ def _param_diagnostics(
         if (param := by_key.get(key)) is None:
             continue
         label = f"parameter {key}" if isinstance(key, int) else f"parameter '{key}'"
-        if arg.type == "None" or (typed and not param.cast):
+        if declared is not None and (annotation := declared[1].get(key)) is not None:
+            members = [annotation_type(m, declared[0]) for m in _union_members(annotation)]
+            if not any(_fits(arg.type, member) for member in members):
+                spelled = " | ".join(str(member) for member in members)
+                found.append(("param-type-mismatch", f"{label} expects {spelled}, got {arg.type}"))
+        elif arg.type == "None" or (typed and not param.cast):
             expected = param.python_type
             if (
                 expected is None
@@ -621,6 +676,20 @@ def _param_diagnostics(
                     )
                 )
     return found
+
+
+def _fits(actual: str | None, expected: str | None) -> bool:
+    """Whether a type checker takes a value of type ``actual`` for ``expected``; unknown types fit."""
+    if actual is None or expected is None or actual == expected:
+        return True
+    if "list" in (actual, expected):
+        return actual.startswith("list") and expected.startswith("list")
+    return (actual, expected) in {
+        ("bool", "int"),
+        ("bool", "float"),
+        ("int", "float"),
+        ("datetime.datetime", "datetime.date"),
+    }
 
 
 def _declared_params(
@@ -990,6 +1059,9 @@ def apply_suppressions(
                         "message": f"'{written}' suppresses no diagnostic",
                         "severity": severity,
                         "line": ignore.line,
+                        "start": ignore.start,
+                        "end": ignore.end,
+                        "fix": [],
                     }
                 )
     return kept

@@ -1,13 +1,14 @@
 # Benchmarks
 
-Three scripts; all need the release extension:
+Four scripts; all need the release extension:
 `uv run maturin develop --release --manifest-path rust/crates/sqlty-ext/Cargo.toml`.
 
 | Script | What it measures | Make target |
 |--------|------------------|-------------|
 | `bench_core.py` | `sqlty.core` calls on small inputs (µs per call) | `make bench` |
 | `bench_project.py` | A generated large project: CLI wall time and peak RSS | `make bench-project`, `make bench-ci`, `make bench-baseline` |
-| `test_benchmarks.py` | Each query kind, the schema load, `rewrite_source` and `check_source`, through CodSpeed | `make bench-codspeed` |
+| `bench_lsp_bridge.py` | A check per keystroke through the language server's bridge, on the `ci` project: latency and GIL hold | `make bench-bridge` |
+| `test_benchmarks.py` | Each query kind, the schema load, `rewrite_source`, `check_source`, and completion at 50, 540 and 5000 tables, through CodSpeed | `make bench-codspeed` |
 
 ## The synthetic project
 
@@ -32,6 +33,8 @@ maximum of `--repeats` runs (RSS from `wait4` of that child).
 - `schema_load`: parse the 400-500 table schema through one `analyze_select`.
 - `schema_load_unresolved_alters`: 2000 tables plus 2000 `ALTER TABLE` on tables
   that do not exist.
+- `schema_load_5000`: the synthetic schema at 5000 tables, the size completion must
+  survive. Its RSS bounds the catalog and its name index.
 - `micro_us`: microseconds per `analyze_select` / `analyze_params` call for each
   query kind, schema cached.
 

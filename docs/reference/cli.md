@@ -3,7 +3,7 @@
 <!-- generated:cli-usage -->
 ```text
 sqlty [-h] [--version]
-      {rewrite,strip,check,breaking,rule,skill,version} ...
+      {rewrite,strip,check,complete,breaking,rule,skill,server,version} ...
 ```
 <!-- /generated:cli-usage -->
 
@@ -92,10 +92,10 @@ tool such as pre-commit passes file names.
 | Option | Description |
 |--------|-------------|
 | `-h`, `--help` | show this help message and exit |
-| `paths ...` | Files or directories (default: .); each file uses its nearest pyproject.toml |
+| `paths ...` | Files or directories (default: .); each file uses its nearest sqlty.toml, pyproject.toml or Cargo.toml |
 | `--dialect DIALECT` | SQL dialect: postgres, mysql, sqlite, or another sqlparser dialect such as duckdb (default: [tool.sqlty] dialect, else postgres) |
 | `--schema SCHEMA` | Schema .sql file, directory or glob for every path; repeat for several (default: [tool.sqlty] schema per project) |
-| `--config-file PATH` | Use this file for every path instead of the nearest pyproject.toml: [tool.sqlty] of a pyproject.toml, or top-level keys of another file such as sqlty.toml; its relative paths are relative to the current directory. Env: SQLTY_CONFIG_FILE |
+| `--config-file PATH` | Use this file for every path instead of the nearest config file: [tool.sqlty] of a pyproject.toml, [package.metadata.sqlty] or [workspace.metadata.sqlty] of a Cargo.toml, or top-level keys of another file such as sqlty.toml; its relative paths are relative to the current directory. Env: SQLTY_CONFIG_FILE |
 | `--isolated` | Ignore every configuration file; use the defaults and command-line flags |
 | `-c`, `--config KEY=VALUE` | Override a configuration key with a TOML assignment, for example `-c 'dialect = "mysql"'` or `-c 'rules.select-star = "ignore"'`; repeat for several. Paths are relative to the current directory |
 | `--error RULE` | Treat RULE as severity error; repeat for several, the last flag for a rule wins |
@@ -212,7 +212,7 @@ sqlty check [-h] [--dialect DIALECT] [--schema SCHEMA]
 | `--error-on-warning` | Exit 1 when any diagnostic has severity warn; cannot be combined with --exit-zero or --exit-zero-on-warning |
 | `--statistics` | After the summary, print how many queries were typed, partially typed, unparsed and skipped |
 | `--explain` | Under a type diagnostic, print the inference rule (id, reference, reasoning) behind each column's type and nullability |
-| `--output-format {text,json,github}` | How diagnostics are printed: text (file:line: [rule] message, the default), json (an array of objects with file, line, rule, severity and message) or github (GitHub Actions annotations). Summaries, --statistics and --explain are text only |
+| `--output-format {text,json,github}` | How diagnostics are printed: text (file:line: [rule] message, the default), json (an array of objects with file, line, rule, severity, message, the start and end of what it underlines, and the fix edits) or github (GitHub Actions annotations). Summaries, --statistics and --explain are text only |
 <!-- /generated:cli-options-check -->
 
 With `--statistics`, the last line counts the queries of the checked files:
@@ -235,6 +235,44 @@ Exit code: 1 if any diagnostic has severity `error`; warnings alone exit 0.
 As in ty, `--exit-zero` always exits 0, `--error-on-warning` also exits 1 on
 a `warn` diagnostic, and `--exit-zero-on-warning` keeps the default; combining
 `--error-on-warning` with either of the others is an error (exit 2).
+
+## `sqlty complete`
+
+List the table and column names that can be typed at a cursor in a query
+string: one per line, as `label`, `kind`, `detail` and `sql_type` separated by
+tabs. The cursor is `FILE:LINE:COL`, a 1-based line and a 1-based column in
+characters:
+
+```text
+$ sqlty complete app.py:12:30
+id	column	u	INT
+name	column	u	TEXT
+```
+
+A string completes exactly when `sqlty check` checks it, with the file's own
+settings. The helpers of the paths after the cursor (default: the file's
+directory) are read, so a configured or imported helper's query completes too.
+Outside a checked query nothing is printed, and `--json` prints `null`.
+
+<!-- generated:cli-usage-complete -->
+```text
+sqlty complete [-h] [--dialect DIALECT] [--schema SCHEMA]
+               [--config-file PATH | --isolated] [-c KEY=VALUE]
+               [--error RULE] [--warn RULE] [--ignore RULE]
+               [--exclude GLOB] [--extend-exclude GLOB]
+               [--force-exclude]
+               [--respect-gitignore | --no-respect-gitignore] [-v] [-q]
+               [-j N] [--json]
+               FILE:LINE:COL [paths ...]
+```
+<!-- /generated:cli-usage-complete -->
+
+<!-- generated:cli-options-complete -->
+| Option | Description |
+|--------|-------------|
+| `FILE:LINE:COL` | The cursor: a Python file, a 1-based line and a 1-based column in characters |
+| `--json` | Print a JSON object with the start and end the completion replaces, whether the list is incomplete, and the items with their label, kind, detail, SQL type and nullability, instead of one item per line |
+<!-- /generated:cli-options-complete -->
 
 ## `sqlty breaking`
 

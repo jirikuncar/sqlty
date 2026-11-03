@@ -10,6 +10,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 mod api;
+mod complete;
 mod dialect;
 mod dml;
 mod explain;
@@ -17,6 +18,7 @@ mod expr;
 mod functions;
 mod grouping;
 mod hashing;
+mod hover;
 mod inference;
 mod input;
 mod json;
@@ -38,6 +40,7 @@ mod respell;
 mod scope;
 mod sql_type;
 mod star_expand;
+mod suggest;
 mod table_functions;
 #[cfg(test)]
 mod test_support;
@@ -55,9 +58,11 @@ pub use api::{
     row_type, Parsed,
 };
 pub(crate) use api::{typed, view_columns};
+pub use complete::{complete, Candidate, CandidateKind, Completions};
 pub use dialect::{SqlDialect, UnknownDialect};
 pub use explain::{explain_select, ColumnRules};
 use expr::from_sql_type;
+pub use hover::{hover, Hover};
 pub use inference::RuleRef;
 pub use nullability::Nullability;
 pub use params::{analyze_params, Param};
@@ -69,7 +74,10 @@ use sql_type::{decimal_type, python_type, ANY, DECIMAL};
 pub use star_expand::{expand_star, result_stars};
 use typed::Typed;
 
-pub use crate::catalog::{Catalog as SchemaData, SchemaColumn, TypeOverrides};
+pub use crate::catalog::{
+    Catalog as SchemaData, Columns, Join, NameRef, RelationKind, RelationRef, SchemaColumn,
+    TypeOverrides,
+};
 
 /// A loaded schema, shared so callers can cache it across queries.
 pub type Schema = Arc<SchemaData>;

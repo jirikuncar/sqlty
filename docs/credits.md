@@ -33,7 +33,8 @@ the Python packages sqlty depends on at runtime:
 | [rustc-hash](https://github.com/rust-lang/rustc-hash) | Hash maps of the schema catalog | MIT or Apache-2.0 |
 | [stacker](https://github.com/rust-lang/stacker), [recursive](https://github.com/orlp/recursive) | Stack for deeply nested expressions | MIT or Apache-2.0, MIT |
 | [thiserror](https://github.com/dtolnay/thiserror) | Error types | MIT or Apache-2.0 |
-| [serde](https://serde.rs), [toml](https://github.com/toml-rs/toml) | Reading the inference rules at build time | MIT or Apache-2.0 |
+| [lsp-server](https://github.com/rust-lang/rust-analyzer/tree/master/lib/lsp-server), [lsp-types](https://github.com/gluon-lang/lsp-types), [crossbeam-channel](https://github.com/crossbeam-rs/crossbeam) | The language server of `sqlty server` | MIT or Apache-2.0, MIT, MIT or Apache-2.0 |
+| [serde](https://serde.rs), [toml](https://github.com/toml-rs/toml) | Reading the inference rules at build time; serde and [`serde_json`](https://github.com/serde-rs/json) also the messages of `sqlty server` | MIT or Apache-2.0 |
 | [pathspec](https://github.com/cpburnz/python-pathspec) | `.gitignore` and exclude patterns | MPL-2.0 |
 | [typing_extensions](https://github.com/python/typing_extensions) | Typing features before Python 3.15 | PSF-2.0 |
 | [psycopg](https://www.psycopg.org/psycopg3/) | The optional `sqlty[psycopg]` helpers | LGPL-3.0 |

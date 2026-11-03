@@ -48,7 +48,10 @@ SOURCES = [ROOT / "tests" / "mdtest", ROOT / "docs"]
 KNOWN_DIFFERENCES: dict[str, str] = {
     "mysql:tests/mdtest/mysql/functions.md:217": "MySQL predicates are `int`; sqlty types `MEMBER OF` like `IN`",
     "mysql:tests/mdtest/mysql/functions.md:418": "MySQL predicates are `int`; sqlty types `SOUNDS LIKE` like `=`",
-    "mysql:tests/mdtest/mysql/functions.md:571": "MySQL predicates are `int`; sqlty types `!x` like `NOT x`",
+    "mysql:tests/mdtest/mysql/functions.md:457": "MySQL predicates are `int`; sqlty types `XOR` like `AND`",
+    "mysql:tests/mdtest/mysql/functions.md:462": "MySQL predicates are `int`; sqlty types `XOR` like `AND`",
+    "mysql:tests/mdtest/mysql/functions.md:479": "MySQL predicates are `int`; sqlty types `XOR` like `AND`",
+    "mysql:tests/mdtest/mysql/functions.md:614": "MySQL predicates are `int`; sqlty types `!x` like `NOT x`",
 }
 
 # MySQL column type, without its length or attributes -> Python types sqlty may give it
@@ -266,6 +269,14 @@ def test_matches_mysql(case: Case, mysql: MySQL) -> None:
     mysql.load(case.schema_sql)
     server = [(name, mysql_types(ty)) for name, ty, _ in mysql.describe(case.query)]
     check(case, "mysql", compare(ours, server))
+
+
+def test_known_differences_name_queries() -> None:
+    """Each known difference is keyed by a query's line, so a line that moved is caught here."""
+    queries = {
+        f"{dialect}:{case.id}" for dialect in ("mysql", "sqlite") for case in corpus(dialect)
+    }
+    assert sorted(KNOWN_DIFFERENCES.keys() - queries) == []
 
 
 def test_corpus_is_not_empty() -> None:

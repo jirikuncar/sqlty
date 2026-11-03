@@ -137,3 +137,8 @@ Yesql
 Zapatos
 Zensical
 typeshed
+VSCodium
+Neovim
+Pylance
+Eglot
+rassumfrassum

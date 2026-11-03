@@ -185,6 +185,24 @@ pub(crate) fn with_wrapper_imports(
     if wrapped.is_empty() {
         return result;
     }
+    let imports = wrapper_imports(scan, wrapped, istyle, modules);
+    if imports.is_empty() {
+        return result;
+    }
+    if keep_lines {
+        return insert_inline(&result, &imports.join("; "));
+    }
+    insert_imports(&result, &imports)
+}
+
+/// The import lines the `wrapped` calls need that the source of `scan` lacks: see
+/// [`with_wrapper_imports`].
+pub(crate) fn wrapper_imports(
+    scan: &Scan,
+    wrapped: &[&str],
+    istyle: &ImportStyle,
+    modules: &[String],
+) -> Vec<String> {
     let source = scan.source();
     let untyped_call = format!("{}[{}](", istyle.wrapper_name, istyle.untyped_name());
     let needs_untyped_import = wrapped.iter().any(|r| r.starts_with(&untyped_call));
@@ -222,20 +240,24 @@ pub(crate) fn with_wrapper_imports(
         }
     }
     imports.extend(Spelling::of(scan).imports_for(wrapped));
-
-    if imports.is_empty() {
-        return result;
-    }
-    if keep_lines {
-        return insert_inline(&result, &imports.join("; "));
-    }
-    insert_imports(&result, &imports)
+    imports
 }
 
 /// `source` with `imports` added after its header: the docstring, `from __future__`
 /// imports and the comments before them. A blank line after a docstring stays there, above
 /// the imports, and the code below them keeps one.
 pub(crate) fn insert_imports(source: &str, imports: &[String]) -> String {
+    let edit = import_edit(source, imports);
+    format!(
+        "{}{}{}",
+        &source[..edit.range.start],
+        edit.replacement,
+        &source[edit.range.end..]
+    )
+}
+
+/// The insertion [`insert_imports`] makes.
+pub(crate) fn import_edit(source: &str, imports: &[String]) -> Edit {
     let at = header_end(source);
     let eol = line_ending(source, at);
     let sep = if at > 0 && !source[..at].ends_with('\n') {
@@ -249,21 +271,18 @@ pub(crate) fn insert_imports(source: &str, imports: &[String]) -> String {
         .map(str::len)
         .sum::<usize>();
     if at == 0 || blank == 0 {
-        return format!(
-            "{}{sep}{}{eol}{}",
-            &source[..at],
-            imports.join(eol),
-            &source[at..]
-        );
+        return Edit::new(at..at, format!("{sep}{}{eol}", imports.join(eol)));
     }
-    let (above, below) = source.split_at(at + blank);
-    let next = below.trim_start();
+    let next = source[at + blank..].trim_start();
     let gap = if next.is_empty() || next.starts_with("import ") || next.starts_with("from ") {
         ""
     } else {
         eol
     };
-    format!("{above}{}{eol}{gap}{below}", imports.join(eol))
+    Edit::new(
+        at + blank..at + blank,
+        format!("{}{eol}{gap}", imports.join(eol)),
+    )
 }
 
 /// Line ending of the line at `at`, else of the line before it.
@@ -498,17 +517,49 @@ pub(crate) fn decode_escapes(text: &str) -> Cow<'_, str> {
         return Cow::Borrowed(text);
     }
     let mut out = String::with_capacity(text.len());
+    escapes(text, |piece, _| out.push_str(piece));
+    Cow::Owned(out)
+}
+
+/// Where the byte at `decoded` of [`decode_escapes`]`(text)` is written in `text`: in an
+/// escape, at its start, or its end with `end`.
+pub(crate) fn escaped_offset(text: &str, decoded: usize, end: bool) -> usize {
+    let (mut at, mut found) = (0, None);
+    escapes(text, |piece, written: Range<usize>| {
+        let next = at + piece.len();
+        let inside = if end {
+            at < decoded && decoded <= next
+        } else {
+            at <= decoded && decoded < next
+        };
+        if found.is_none() && inside {
+            found = Some(match (written.len() == piece.len(), end) {
+                (true, _) => written.start + decoded - at,
+                (false, false) => written.start,
+                (false, true) => written.end,
+            });
+        }
+        at = next;
+    });
+    found.unwrap_or(text.len())
+}
+
+/// Each piece of [`decode_escapes`]`(text)`, with the bytes of `text` it is decoded from.
+pub(crate) fn escapes(text: &str, mut piece: impl FnMut(&str, Range<usize>)) {
     let mut rest = text;
+    let position = |rest: &str| text.len() - rest.len();
     while let Some(at) = rest.find('\\') {
-        out.push_str(&rest[..at]);
+        let start = position(rest);
+        piece(&rest[..at], start..start + at);
+        let from = start + at;
         let escape = &rest[at + 1..];
         let Some(next) = escape.chars().next() else {
-            out.push('\\');
-            rest = "";
-            break;
+            piece("\\", from..from + 1);
+            return;
         };
         if next == '\r' {
             rest = escape[1..].strip_prefix('\n').unwrap_or(&escape[1..]);
+            piece("", from..position(rest));
             continue;
         }
         let simple = match next {
@@ -526,8 +577,8 @@ pub(crate) fn decode_escapes(text: &str) -> Cow<'_, str> {
             _ => None,
         };
         if let Some(value) = simple {
-            out.push_str(value);
             rest = &escape[next.len_utf8()..];
+            piece(value, from..position(rest));
             continue;
         }
         let (digits, radix) = match next {
@@ -552,17 +603,16 @@ pub(crate) fn decode_escapes(text: &str) -> Cow<'_, str> {
             .and_then(char::from_u32);
         match code {
             Some(ch) => {
-                out.push(ch);
                 rest = &escape[skip + digits..];
+                piece(ch.encode_utf8(&mut [0; 4]), from..position(rest));
             }
             None => {
-                out.push('\\');
+                piece("\\", from..from + 1);
                 rest = escape;
             }
         }
     }
-    out.push_str(rest);
-    Cow::Owned(out)
+    piece(rest, position(rest)..text.len());
 }
 
 /// Remove sqlty and `TYPE_MODULES` imports that are no longer referenced.

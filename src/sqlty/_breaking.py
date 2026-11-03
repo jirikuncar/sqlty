@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from sqlty._cli import Settings, SettingsResolver
     from sqlty._lint import Diagnostic
     from sqlty._snapshot import Snapshot
+    from sqlty._source import ParsedSource
     from sqlty.core import Schema
 
 Direction = Literal["backward", "forward", "both"]
@@ -126,6 +127,7 @@ class Finding:
     against: str
     path: Path
     diagnostic: Diagnostic
+    source: ParsedSource
 
 
 def run(args: argparse.Namespace) -> list[Finding]:
@@ -167,14 +169,19 @@ def report(
     finding's severity."""
     import json
 
-    from sqlty._cli import github_annotation
+    from sqlty._cli import github_annotation, json_diagnostic
 
     if quiet:
         return
     head = head or "the working tree"
     if output_format == "json":
         rows = [
-            {"file": str(f.path), **f.diagnostic, "direction": f.direction, "against": f.against}
+            {
+                "file": str(f.path),
+                **json_diagnostic(f.diagnostic, f.source),
+                "direction": f.direction,
+                "against": f.against,
+            }
             for f in findings
         ]
         print(json.dumps(rows, indent=2))
@@ -226,7 +233,7 @@ def _compare(
             query_variants=own.query_variants,
             helpers=helpers_for(own),
         ):
-            findings.append(Finding(direction, against, relative, diagnostic))
+            findings.append(Finding(direction, against, relative, diagnostic, parsed))
     return findings
 
 

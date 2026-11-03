@@ -15,6 +15,7 @@ use crate::values::{self};
 
 use super::alter::changes_columns;
 use super::columns::add_values;
+use super::index::NameIndex;
 use super::loader::{Loader, Op, OpKind, Taint, TypeDef};
 use super::names::{fold, parts};
 use super::Catalog;
@@ -338,6 +339,7 @@ pub(crate) fn load_with(
     if catalog.search_path.is_empty() {
         catalog.search_path.push("public".to_string());
     }
+    catalog.index = NameIndex::new(&catalog);
     (catalog, skipped)
 }
 

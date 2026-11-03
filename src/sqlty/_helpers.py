@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 from sqlty._params import ParamArg, arg_type, literal_params
 from sqlty._psycopg import UNCHECKED
 from sqlty._source import ParsedSource
-from sqlty._variants import Unchecked, Variant, query_variants
+from sqlty._variants import Declared, Unchecked, Variant, query_variants
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
@@ -75,6 +75,8 @@ class HelperCall(NamedTuple):
 
     With query variants on, ``variants`` holds every query a call built in branches can
     run, ``query`` being the first; ``reason`` says why such a call is not checked.
+    ``query_node`` is the argument (or t-string) the query comes from, which a diagnostic
+    about the query underlines.
     """
 
     line: int
@@ -88,6 +90,7 @@ class HelperCall(NamedTuple):
     dynamic: bool = False
     variants: tuple[Variant, ...] = ()
     reason: str | None = None
+    query_node: ast.expr | None = None
 
     @property
     def typed_lines(self) -> range:
@@ -755,6 +758,7 @@ def find_helper_calls(
                     aliases,
                     _call_params(helper, node, parsed),
                     node.end_lineno,
+                    query_node=query,
                 )
             )
         elif query is not None and not forwarded(node, query):
@@ -769,6 +773,7 @@ def find_helper_calls(
             _call_params(helper, node, parsed),
             node.end_lineno,
             dynamic=text is None,
+            query_node=query,
         )
         if variants is not None and (text is None or text == UNCHECKED):
             found = query_variants(parsed, node, query, variants, resolve_fragment)
@@ -778,5 +783,10 @@ def find_helper_calls(
                 )
             else:
                 call = call._replace(query=found[0].query, dynamic=False, variants=tuple(found))
+        elif text is None and isinstance(query, ast.Name | ast.Attribute):
+            # Without query variants, a name still stands for the query of one `SQL[R](...)`.
+            found = query_variants(parsed, node, query, 1, resolve_fragment)
+            if isinstance(found, list) and isinstance(found[0].query, Declared):
+                call = call._replace(query=found[0].query, dynamic=False)
         calls.append(call)
     return sorted(calls, key=lambda call: call.line)

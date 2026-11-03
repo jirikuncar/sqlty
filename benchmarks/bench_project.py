@@ -134,6 +134,8 @@ def run(size: str, repeats: int, keep: str | None) -> dict:
         for name, text in (
             ("schema_load", (root / "schema.sql").read_text()),
             ("schema_load_unresolved_alters", synth.unresolved_alter_schema(2000)),
+            # The name index completion reads is pointers into the catalog: O(N), no copy.
+            ("schema_load_5000", synth.schema_sql(5000)),
         ):
             sp = root / f"{name}.sql"
             sp.write_text(text)
