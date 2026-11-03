@@ -289,6 +289,11 @@ mod tests {
     /// A sqlparser upgrade that overrides another [`MySqlDialect`] method fails here until
     /// `forward!` lists it.
     #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        clippy::disallowed_types,
+        reason = "test runs cargo metadata and reads sqlparser"
+    )]
     fn mysql_forwards_every_override() {
         let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
         let metadata = std::process::Command::new(cargo)

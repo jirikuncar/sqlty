@@ -881,6 +881,7 @@ mod lean_table {
     }
 
     #[test]
+    #[expect(clippy::disallowed_methods, reason = "test reads files")]
     fn lean_scalar_table_is_current() {
         let names: BTreeSet<&str> = SQL_TO_PYTHON_TYPE
             .keys()
