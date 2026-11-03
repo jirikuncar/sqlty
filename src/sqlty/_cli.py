@@ -335,7 +335,8 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         nargs="*",
         type=Path,
         default=[Path(".")],
-        help="Files or directories (default: .); each file uses its nearest sqlty.toml, pyproject.toml or Cargo.toml",
+        help="Files or directories (default: .); each file uses its nearest sqlty.toml, pyproject.toml or Cargo.toml. "
+        "A project's config or schema file stands for the whole project",
     )
     parser.add_argument(
         "--dialect",
@@ -528,7 +529,7 @@ def _transform_files(
     alone and exits 1 when any would change.
     """
     resolver = SettingsResolver(args)
-    files = _collect_python_files(args.paths, resolver.source)
+    files = _collect_python_files(_project_paths(args.paths, resolver.source), resolver.source)
 
     if not files and not args.quiet:
         logger.warning("No Python files found")
@@ -916,7 +917,33 @@ def _collect_python_files(paths: list[Path], source: ConfigSource | None = None)
             files.extend(_walk(path, source))
         else:
             raise ConfigError(f"path does not exist: {path}")
-    return files
+    return list(dict.fromkeys(files))
+
+
+def _project_paths(paths: list[Path], source: ConfigSource) -> list[Path]:
+    """``paths`` with a project's config or schema file replaced by its directory.
+
+    A schema or config change can break any query of the project, so a pre-commit hook
+    that passes only the changed files still checks them all.
+    """
+    from sqlty._config import expand_schema
+
+    projects = []
+    for path in paths:
+        if path.is_file() and path.suffix != ".py":
+            config, config_dir, label = source.load(path.parent.resolve())
+            if config_dir is not None:
+                schema = expand_schema(config.get("schema", []), config_dir)
+                owned = {Path(label).resolve(), *(file.resolve() for file in schema)}
+                if path.resolve() in owned:
+                    cwd = Path.cwd().resolve()
+                    path = (
+                        config_dir.relative_to(cwd)
+                        if config_dir.is_relative_to(cwd)
+                        else config_dir
+                    )
+        projects.append(path)
+    return list(dict.fromkeys(projects))
 
 
 def _config_file(args: argparse.Namespace) -> Path | None:
@@ -1379,14 +1406,14 @@ class Project:
     def __init__(self, args: argparse.Namespace) -> None:
         from sqlty._source import ParsedSource
 
-        self.paths: list[Path] = args.paths
         self.resolver = SettingsResolver(args)
-        files = _collect_python_files(args.paths, self.resolver.source)
+        self.paths: list[Path] = _project_paths(args.paths, self.resolver.source)
+        files = _collect_python_files(self.paths, self.resolver.source)
         texts = {path: read_source(path) for path in files}
         self.unreadable = [path for path, text in texts.items() if text is None]
         self.files = [path for path in files if texts[path] is not None]
         self.modules = {
-            path: _module_names(self.resolver.resolve(path), args.paths) for path in self.files
+            path: _module_names(self.resolver.resolve(path), self.paths) for path in self.files
         }
         self.sources = {
             path: ParsedSource(text, self._module(path))

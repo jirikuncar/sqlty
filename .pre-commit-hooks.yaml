@@ -1,19 +1,22 @@
 # sqlty requires Python >= 3.14: set `language_version: python3.14` on the hook
 # or `default_language_version: {python: python3.14}` in .pre-commit-config.yaml.
-# Rewrite and check work file by file, so pre-commit may run them in parallel.
+# A changed schema (.sql) or config (.toml) file runs a hook on its whole project.
+# Check reads files only, so pre-commit may run it in parallel; rewrite runs serially,
+# as the batch holding a schema file writes the files of the other batches too.
 - id: sqlty-rewrite
   name: sqlty rewrite
   description: Wrap --sql strings in SQL[T](...) calls in place
   entry: sqlty rewrite
   language: python
-  types: [python]
+  types_or: [python, sql, toml]
+  require_serial: true
 
 - id: sqlty-check
   name: sqlty check
   description: Lint SQL[T] queries; fails only on error-severity rules (by default row type mismatches and SELECT * without a schema; drift such as stale-type is a warning)
   entry: sqlty check
   language: python
-  types: [python]
+  types_or: [python, sql, toml]
 
 # Deprecated alias of sqlty-rewrite, kept so existing configs using `id: sqlty` work.
 # It used to generate stubs; it now rewrites the staged files in place.
@@ -22,4 +25,5 @@
   description: Deprecated alias of sqlty-rewrite (rewrites files in place; no longer generates stubs)
   entry: sqlty rewrite
   language: python
-  types: [python]
+  types_or: [python, sql, toml]
+  require_serial: true
