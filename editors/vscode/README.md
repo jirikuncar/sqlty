@@ -32,7 +32,7 @@ With `sqlty.breaking.against` set to `main`, each check also runs `sqlty breakin
 
 - Forward, with every check: your buffer's queries against the schema of `main`. Source:
   `sqlty breaking (forward)`.
-- Backward, when the project loads and when a schema or `pyproject.toml` is saved: the
+- Backward, when the project loads and when a schema or a configuration file is saved: the
   queries of `main` against your schema, in every file. Source: `sqlty breaking (backward)`.
   A finding in a file you have changed since sits on its first line and names its line in
   `main`.

@@ -1,14 +1,14 @@
 # Configuration
 
-sqlty reads `sqlty.toml`, or `[tool.sqlty]` from `pyproject.toml`. The CLI uses, for each
-file, the nearest of them above it, unless
+sqlty reads `sqlty.toml`, `[tool.sqlty]` from `pyproject.toml`, or `[package.metadata.sqlty]`
+from `Cargo.toml`. The CLI uses, for each file, the nearest of them above it, unless
 [`--config-file` or `--isolated`](cli.md#configuration-flags) picks one file or none; the magic codec
 searches from the current directory. Command-line flags override the file. An unknown key, rule or
 severity is an error (exit 2) that names the file and suggests the closest match.
 
-In every case a `pyproject.toml` without `[tool.sqlty]` is skipped, so a
-package's packaging-only `pyproject.toml` in a monorepo does not hide the
-root config. The closest file wins; settings are not merged with files in
+In every case a `pyproject.toml` without `[tool.sqlty]`, or a `Cargo.toml` without
+`[package.metadata.sqlty]`, is skipped, so a package's packaging-only file in a monorepo
+does not hide the root config. The closest file wins; settings are not merged with files in
 parent directories. To change one setting for a nested project, give it its
 own complete configuration. Command-line flags (`--dialect`,
 `--schema`, `--untyped`, `--exclude`, `--extend-exclude`, `--error`/`--warn`/`--ignore`)
@@ -52,6 +52,30 @@ A project without a `pyproject.toml` needs no Python packaging file to hold
 its settings. In a directory with both, `sqlty.toml` wins and `pyproject.toml` is
 not read, as in ruff. Relative paths start from the directory of the file
 that holds them, whichever it is.
+
+## `Cargo.toml`
+
+A Rust crate keeps the same keys under `[package.metadata.sqlty]`, where Cargo
+allows tool settings and ignores them.
+
+`Cargo.toml`:
+
+```toml
+[package]
+name = "app"
+version = "0.1.0"
+
+[package.metadata.sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+
+[package.metadata.sqlty.rules]
+select-star = "ignore"
+```
+
+A directory with more than one file reads the first of `sqlty.toml`,
+`pyproject.toml` and `Cargo.toml` that holds a sqlty table, and no other.
+`[workspace.metadata.sqlty]` is not read: give the workspace root a `sqlty.toml`.
 
 <!-- generated:config-keys -->
 | Key | Type | Default | Used by | Summary |

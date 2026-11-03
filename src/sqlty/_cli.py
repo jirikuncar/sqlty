@@ -335,7 +335,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         nargs="*",
         type=Path,
         default=[Path(".")],
-        help="Files or directories (default: .); each file uses its nearest sqlty.toml or pyproject.toml",
+        help="Files or directories (default: .); each file uses its nearest sqlty.toml, pyproject.toml or Cargo.toml",
     )
     parser.add_argument(
         "--dialect",
@@ -356,7 +356,8 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         type=Path,
         metavar="PATH",
         help="Use this file for every path instead of the nearest config file: [tool.sqlty] "
-        "of a pyproject.toml, or top-level keys of another file such as sqlty.toml; its "
+        "of a pyproject.toml, [package.metadata.sqlty] of a Cargo.toml, or top-level keys of "
+        "another file such as sqlty.toml; its "
         "relative paths are relative to the current directory. Env: SQLTY_CONFIG_FILE",
     )
     source.add_argument(
@@ -930,7 +931,7 @@ class ConfigSource:
     """Each directory's ``[tool.sqlty]`` after ``--config-file``, ``--isolated``,
     ``-c/--config``, ``--error/--warn/--ignore`` and the exclude flags.
 
-    By default it is the nearest ``sqlty.toml``, or ``pyproject.toml`` with a table. ``config_file``
+    By default it is the nearest ``sqlty.toml``, or ``pyproject.toml`` or ``Cargo.toml`` with a table. ``config_file``
     fixes one file for every directory, with relative paths resolved against
     the current directory (like ruff); ``isolated`` uses no file at all.
     ``overrides`` are TOML assignments applied on top, then ``rule_severity``
@@ -1003,7 +1004,7 @@ class ConfigSource:
         """Config governing ``directory``, the directory its relative paths start from, and its
         file name. Inline overrides and rule flags are applied; ``schema`` and the excludes
         given inline are not (``self.schema``, ``exclusions``)."""
-        from sqlty._config import load_config
+        from sqlty._config import find_config
 
         if self._isolated:
             config: SQLTyConfig = {}
@@ -1011,13 +1012,9 @@ class ConfigSource:
         elif self._fixed is not None:
             config, config_dir, label = self._fixed, self._cwd, str(self._label)
         else:
-            config, config_dir = load_config(directory)
-            name = (
-                "sqlty.toml"
-                if config_dir and (config_dir / "sqlty.toml").is_file()
-                else "pyproject.toml"
-            )
-            label = f"{config_dir}/{name}"
+            config, path = find_config(directory)
+            config_dir = path.parent if path else None
+            label = str(path) if path else "pyproject.toml"
         if self._overrides or self._rule_severity:
             rules = {**config.get("rules", {}), **self._overrides.get("rules", {})}
             rules.update(self._rule_severity)
@@ -1235,7 +1232,7 @@ def _module_names(path: Path, roots: list[Path]) -> list[str]:
 
 @dataclass(frozen=True)
 class Settings:
-    """The nearest ``sqlty.toml`` or ``[tool.sqlty]`` of ``pyproject.toml``, with CLI flags on top."""
+    """The nearest configuration file (``sqlty.toml``, ``pyproject.toml``, ``Cargo.toml``), with CLI flags on top."""
 
     dialect: str = "postgres"
     schema: Schema | None = None

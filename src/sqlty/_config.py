@@ -1,4 +1,4 @@
-"""Configuration loading from sqlty.toml or pyproject.toml."""
+"""Configuration loading from sqlty.toml, pyproject.toml or Cargo.toml."""
 
 import ast
 import copy
@@ -10,6 +10,11 @@ from pathlib import Path
 from typing import Any, NamedTuple, TypedDict, cast
 
 SchemaSpec = str | list[str]
+
+NATIVE_TABLES = {
+    "pyproject.toml": ("tool", "sqlty"),
+    "Cargo.toml": ("package", "metadata", "sqlty"),
+}
 
 TOOL_KEYS = (
     "dialect",
@@ -454,55 +459,57 @@ def expand_schema(spec: SchemaSpec | Path, base: Path) -> list[Path]:
 
 
 def load_config(project_root: Path | None = None) -> tuple[SQLTyConfig, Path | None]:
-    """Load the nearest ``sqlty.toml``, or ``[tool.sqlty]`` of the nearest ``pyproject.toml``.
-
-    Walks up from ``project_root``. In each directory a ``sqlty.toml`` wins over
-    ``pyproject.toml``, and a ``pyproject.toml`` without a ``[tool.sqlty]`` table is
-    skipped (like ruff), so a package's packaging-only ``pyproject.toml`` does not
-    hide the workspace config. The closest file wins; files are never merged.
-
-    Args:
-        project_root: Directory to start the upward search from; cwd if None.
+    """Load the nearest configuration above ``project_root``; see ``find_config``.
 
     Returns:
-        Tuple of (configuration dictionary, directory containing that
-        file, or None if none was found or a pyproject.toml failed to parse)
+        Tuple of (configuration dictionary, directory containing its file, or None
+        if none was found or a native file failed to parse)
     """
-    if project_root is None:
-        project_root = Path.cwd()
+    config, path = find_config(project_root)
+    return config, path.parent if path else None
 
-    current = project_root.resolve()
+
+def find_config(project_root: Path | None = None) -> tuple[SQLTyConfig, Path | None]:
+    """Find the nearest ``sqlty.toml``, ``[tool.sqlty]`` of ``pyproject.toml`` or
+    ``[package.metadata.sqlty]`` of ``Cargo.toml``, and the file it came from.
+
+    Walks up from ``project_root`` (cwd if None). In each directory the files are
+    tried in that order, and a native file without its sqlty table is skipped (like
+    ruff), so a packaging-only ``pyproject.toml`` or ``Cargo.toml`` does not hide the
+    workspace config. The closest file wins; files are never merged. A native file
+    that fails to parse is logged and yields ``({}, None)``.
+    """
+    current = (project_root or Path.cwd()).resolve()
     while current != current.parent:
         sqlty_toml = current / "sqlty.toml"
         if sqlty_toml.is_file():
-            return copy.deepcopy(
-                _load_config_file_cached(sqlty_toml, sqlty_toml.stat().st_mtime_ns)
-            ), current
-        pyproject_path = current / "pyproject.toml"
-        if pyproject_path.exists():
+            config = _load_config_file_cached(sqlty_toml, sqlty_toml.stat().st_mtime_ns)
+            return copy.deepcopy(config), sqlty_toml
+        for name in NATIVE_TABLES:
+            native = current / name
+            if not native.exists():
+                continue
             try:
-                config = _parse_pyproject_cached(pyproject_path, pyproject_path.stat().st_mtime_ns)
+                found = _parse_native_cached(native, native.stat().st_mtime_ns)
             except ConfigError:
                 raise
             except Exception as e:
-                logging.getLogger(__name__).warning("Failed to parse %s: %s", pyproject_path, e)
+                logging.getLogger(__name__).warning("Failed to parse %s: %s", native, e)
                 return {}, None
-            if config is not None:
-                return copy.deepcopy(config), current
+            if found is not None:
+                return copy.deepcopy(found), native
         current = current.parent
-
-    # No [tool.sqlty] table found
     return {}, None
 
 
 @lru_cache(maxsize=256)
-def _parse_pyproject_cached(pyproject_path: Path, mtime_ns: int) -> SQLTyConfig | None:
-    """Parse ``pyproject_path`` once per (path, mtime_ns); an edit changes the mtime and re-parses.
+def _parse_native_cached(path: Path, mtime_ns: int) -> SQLTyConfig | None:
+    """Parse ``path`` once per (path, mtime_ns); an edit changes the mtime and re-parses.
 
     The mtime is part of the key so long-running processes see edits. Failures
     are not cached.
     """
-    return _parse_pyproject(pyproject_path)
+    return _parse_native(path)
 
 
 @lru_cache(maxsize=256)
@@ -510,34 +517,29 @@ def _load_config_file_cached(path: Path, mtime_ns: int) -> SQLTyConfig:
     return load_config_file(path)
 
 
-def _parse_pyproject(pyproject_path: Path) -> SQLTyConfig | None:
-    """Parse pyproject.toml and extract [tool.sqlty] section.
-
-    Args:
-        pyproject_path: Path to pyproject.toml
-
-    Returns:
-        Configuration dictionary, or None if there is no [tool.sqlty] table
-    """
+def _parse_native(path: Path) -> SQLTyConfig | None:
+    """The sqlty table of a ``pyproject.toml`` or ``Cargo.toml``, or None without one."""
     import tomllib
 
-    with open(pyproject_path, "rb") as f:
-        data: dict[str, Any] = tomllib.load(f)
+    with open(path, "rb") as f:
+        table = _native_table(tomllib.load(f), path.name)
+    return None if table is None else _parse_table(table, str(path))
 
-    # Extract [tool.sqlty] section
-    tool_config: dict[str, Any] | None = data.get("tool", {}).get("sqlty")
-    if tool_config is None:
-        return None
-    return _parse_table(tool_config, str(pyproject_path))
+
+def _native_table(data: dict[str, Any], name: str) -> dict[str, Any] | None:
+    table: Any = data
+    for key in NATIVE_TABLES[name]:
+        table = table.get(key) if isinstance(table, dict) else None
+    return table if isinstance(table, dict) else None
 
 
 def load_config_file(path: Path) -> SQLTyConfig:
     """Load the configuration of a file named by ``--config``.
 
-    A file named ``pyproject.toml`` must have a ``[tool.sqlty]`` table; any other
-    file, such as ``sqlty.toml``, holds the same keys at the top level. Raises
-    ``ConfigError`` when the file is missing, is not TOML, is a ``pyproject.toml``
-    without ``[tool.sqlty]`` or has an invalid key.
+    A file named ``pyproject.toml`` must have a ``[tool.sqlty]`` table and one named
+    ``Cargo.toml`` a ``[package.metadata.sqlty]`` table; any other file, such as
+    ``sqlty.toml``, holds the same keys at the top level. Raises ``ConfigError`` when
+    the file is missing, is not TOML, lacks its table or has an invalid key.
 
     Example:
         >>> load_config_file(Path("missing.toml"))  # doctest: +ELLIPSIS
@@ -555,10 +557,10 @@ def load_config_file(path: Path) -> SQLTyConfig:
             data: dict[str, Any] = tomllib.load(f)
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"{path}: {exc}") from None
-    if path.name == "pyproject.toml":
-        table = data.get("tool", {}).get("sqlty")
+    if path.name in NATIVE_TABLES:
+        table = _native_table(data, path.name)
         if table is None:
-            raise ConfigError(f"{path}: no [tool.sqlty] table")
+            raise ConfigError(f"{path}: no [{'.'.join(NATIVE_TABLES[path.name])}] table")
         data = table
     return _parse_table(data, str(path))
 
