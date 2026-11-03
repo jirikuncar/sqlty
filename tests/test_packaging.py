@@ -41,21 +41,26 @@ def test_every_hook_has_expected_result() -> None:
     assert {h["id"] for h in HOOKS} == set(HOOK_RESULTS)
 
 
+@pytest.mark.parametrize("staged", ["queries.py", "schema.sql"])
 @pytest.mark.parametrize("hook", HOOKS, ids=[h["id"] for h in HOOKS])
-def test_pre_commit_hook_runs(hook: dict[str, Any], tmp_path: Path) -> None:
-    """Each published hook runs the CLI the way pre-commit does: entry + args + filenames."""
+def test_pre_commit_hook_runs(hook: dict[str, Any], staged: str, tmp_path: Path) -> None:
+    """Each published hook runs the CLI the way pre-commit does: entry + args + filenames.
+
+    A staged schema file alone runs the hook on its whole project.
+    """
     entry = shlex.split(hook["entry"])
     assert entry[0] == "sqlty"
     assert hook["language"] == "python"
-    assert hook["types"] == ["python"]
+    assert hook["types_or"] == ["python", "sql", "toml"]
     assert hook.get("pass_filenames", True)
 
-    (tmp_path / "pyproject.toml").write_text("[tool.sqlty]\n")
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
+    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL);\n")
     sample = tmp_path / "queries.py"
     sample.write_text('q = "--sql\\nSELECT id::INTEGER FROM users"\n')
 
     result = subprocess.run(
-        [sys.executable, "-m", "sqlty", *entry[1:], *hook.get("args", []), str(sample)],
+        [sys.executable, "-m", "sqlty", *entry[1:], *hook.get("args", []), staged],
         capture_output=True,
         text=True,
         cwd=tmp_path,

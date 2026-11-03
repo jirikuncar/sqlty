@@ -7,8 +7,8 @@ Any CI system can use them.
 
 ## Pre-commit
 
-The sqlty repository publishes two hooks. Both receive the staged Python
-files as arguments:
+The sqlty repository publishes two hooks. Both receive the staged Python, SQL
+and TOML files as arguments:
 
 | Hook id | Runs |
 |---------|------|
@@ -42,6 +42,13 @@ default; an annotation only wider than the rows,
 promote it (see [below](#fail-on-drift-and-mismatches)). The `sqlty` hook
 id is a deprecated alias of `sqlty-rewrite`: it rewrites the staged files.
 
+!!! note "A schema change checks the whole project"
+    A changed schema or config file can break queries in files you didn't touch.
+    When one of the files is the `schema` of a project, or the `sqlty.toml`,
+    `pyproject.toml` or `Cargo.toml` that configures it, sqlty runs on every
+    Python file of that project, as `sqlty check .` would. Other `.sql` and
+    `.toml` files are ignored.
+
 To skip the build or reuse the `sqlty` already installed in your
 environment, use local hooks instead:
 
@@ -55,13 +62,13 @@ repos:
         entry: sqlty rewrite .
         language: system
         pass_filenames: false
-        types: [python]
+        types_or: [python, sql, toml]
       - id: sqlty-check
         name: sqlty check
         entry: sqlty check .
         language: system
         pass_filenames: false
-        types: [python]
+        types_or: [python, sql, toml]
 ```
 
 `sqlty rewrite` edits files in place, which makes pre-commit fail the commit

@@ -63,6 +63,7 @@ repos:
 | the hook environment can't install sqlty | keep `default_language_version` at Python 3.14 or newer |
 | the install compiles Rust, or `cargo` is missing | install a Rust toolchain, or use the local hooks below |
 | `sqlty-rewrite` fails the commit | it rewrote files: review and stage them |
+| a schema change passes but breaks queries | update `rev`: older hooks run only on Python files, newer ones check the whole project when its schema or config changes |
 
 Local hooks reuse the `sqlty` of your environment and need no build:
 
@@ -76,13 +77,13 @@ repos:
         entry: uv run sqlty rewrite .
         language: system
         pass_filenames: false
-        types: [python]
+        types_or: [python, sql, toml]
       - id: sqlty-check
         name: sqlty check
         entry: uv run sqlty check .
         language: system
         pass_filenames: false
-        types: [python]
+        types_or: [python, sql, toml]
 ```
 
 ## Fail on drift
