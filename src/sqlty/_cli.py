@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from collections import Counter
     from collections.abc import Callable, Iterable, Iterator
 
+    from sqlty._breaking import SchemaKey
     from sqlty._check import RowUsage
     from sqlty._config import RuleOverride, SchemaSpec, SQLTyConfig
     from sqlty._core import Schema
@@ -1249,6 +1250,11 @@ class Settings:
     format_command: tuple[str, ...] = ()
     overrides: tuple[RuleOverride, ...] = ()
     config_dir: Path | None = None
+
+    @property
+    def schema_key(self) -> SchemaKey:
+        """What ``schema`` is loaded from: two settings with one key check queries alike."""
+        return self.schema_sql, self.dialect, tuple(sorted((self.types or {}).items()))
 
 
 class SettingsResolver:

@@ -69,6 +69,8 @@ class Baseline:
         settings = project.settings[path]
         found: list[SourcedDiagnostic] = []
         for baseline in self.baselines:
+            if baseline.schema_key(relative, settings) == settings.schema_key:
+                continue
             for diagnostic in breaking_source(
                 project.sources[path],
                 schema_sql=settings.schema,

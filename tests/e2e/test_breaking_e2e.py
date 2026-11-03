@@ -390,3 +390,40 @@ def test_baseline_errors(cli: Cli, repo: Path, args: list[str], message: str) ->
     result = cli(["breaking", *args], {"cwd": repo})
 
     assert (result.returncode, result.stderr.strip()) == (2, message)
+
+
+@pytest.mark.parametrize("against", ["HEAD", "../head.json", "../head.sql"])
+def test_an_unchanged_schema_checks_no_query(
+    cli: Cli, repo: Path, against: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sqlty.core
+    from sqlty._cli import main
+
+    cli(["breaking", "--save", "../head.json"], {"cwd": repo})
+    (repo.parent / "head.sql").write_text(NEW_SCHEMA)
+    checked: list[str] = []
+    monkeypatch.setattr(
+        sqlty.core, "breaking_source", lambda source, **_: checked.append(source.text) or []
+    )
+    monkeypatch.chdir(repo)
+
+    main(["breaking", "--against", against, "--quiet"])
+    assert checked == []
+    (repo / "schema.sql").write_text(OLD_SCHEMA)
+    main(["breaking", "--against", against, "--direction", "forward", "--quiet"])
+    assert checked == [NEW_CODE]
+
+
+def test_a_snapshot_without_a_schema_checks_no_query(
+    cli: Cli, repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sqlty.core
+    from sqlty._cli import main
+
+    (repo / "pyproject.toml").write_text("[tool.sqlty]\n")
+    cli(["breaking", "--save", "../head.json"], {"cwd": repo})
+    (repo / "app" / "new.py").write_text(NEW_CODE)
+    monkeypatch.setattr(sqlty.core, "breaking_source", None)
+    monkeypatch.chdir(repo)
+
+    main(["breaking", "--against", "../head.json", "--quiet"])
