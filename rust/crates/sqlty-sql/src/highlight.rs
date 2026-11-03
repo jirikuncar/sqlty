@@ -284,6 +284,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::disallowed_methods, reason = "test reads files")]
     fn the_vs_code_grammars_color_the_same_keywords() {
         for name in ["sql-injection", "sql-injection-multi"] {
             let path = format!(

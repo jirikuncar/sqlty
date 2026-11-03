@@ -377,6 +377,7 @@ checked file names, so checking an untrusted pull request is safe. A harness kee
 |-------|-------|---------|
 | Static scan | `tests/test_no_exec.py` | A call in `src/sqlty` to `exec`, `eval`, `compile`, `__import__`, `importlib.import_module`, `get_type_hints`, `types.new_class` and the like, outside `tests/no_exec_allowlist.txt` |
 | Audit hook | `tests/_no_exec.py`, loaded for every test | At runtime, any `exec`/`eval` or import that sqlty code runs, charged to the innermost `src/sqlty` function |
+| No I/O in the engine | `rust/crates/sqlty-sql/clippy.toml` (`sqlty-python` links it), run by `cargo clippy` | A file, process, network or standard stream call in `sqlty-sql` or `sqlty-python`; a test or `build.rs` that needs one says so with `#[expect(clippy::disallowed_methods, ...)]` |
 | Integrity check | `scripts/check_no_exec_harness.py`, CI job `No-exec harness intact`, `make check-no-exec-harness` | Against the merge base: guard files edited or unloaded, allowlist lines added, mdtest assertions removed or edited (a bare `# error:` may become specific), skips or xfails added, test functions removed |
 
 CI runs the base branch's copy of the integrity check, so a pull request can't relax it.
