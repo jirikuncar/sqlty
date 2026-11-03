@@ -148,6 +148,35 @@ jobs:
           uv run --no-sync python -c "import sys; from sqlty import _core; assert not sys._is_gil_enabled()"
           uv run --no-sync pytest -p no:randomly tests/test_threads.py
 
+  # The bundled VS Code engine of #855 runs on WebAssembly: keep the engine crates building
+  # for it. sqlty-lsp needs file paths, which wasm32-unknown-unknown has no notion of.
+  wasm:
+    name: Engine builds for WebAssembly
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal \
+            --target wasm32-unknown-unknown --target wasm32-wasip1
+          rustup default stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: rust -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build for wasm32-unknown-unknown
+        run: cargo build --manifest-path rust/Cargo.toml --target wasm32-unknown-unknown -p sqlty-sql -p sqlty-python
+
+      - name: Build for wasm32-wasip1
+        run: cargo build --manifest-path rust/Cargo.toml --target wasm32-wasip1 -p sqlty-sql -p sqlty-python -p sqlty-lsp
+
   pg-fidelity:
     name: PostgreSQL column names, types and nullability
     runs-on: ubuntu-latest
