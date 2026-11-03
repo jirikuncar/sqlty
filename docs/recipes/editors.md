@@ -69,6 +69,57 @@ column named `name` or `status` reads as a name.
     A tree-sitter injection reads the source, where `\n` is two characters, so it would
     read `"--sql\nSELECT 1"` as one SQL comment. The server reads the string's value.
 
+### nvim-lint
+
+[nvim-lint](https://codeberg.org/mfussenegger/nvim-lint) has no sqlty linter yet. Define one
+around `sqlty check --output-format json`:
+
+```lua
+local lint = require("lint")
+local severities = {
+  error = vim.diagnostic.severity.ERROR,
+  warn = vim.diagnostic.severity.WARN,
+}
+
+lint.linters.sqlty = {
+  cmd = "sqlty",
+  args = { "check", "--output-format", "json" },
+  stdin = false,
+  ignore_exitcode = true,
+  parser = function(output)
+    local ok, found = pcall(vim.json.decode, output)
+    if not ok or type(found) ~= "table" then
+      return {}
+    end
+    local diagnostics = {}
+    for _, d in ipairs(found) do
+      table.insert(diagnostics, {
+        lnum = d.start.line - 1,
+        col = d.start.column - 1,
+        end_lnum = d["end"].line - 1,
+        end_col = d["end"].column - 1,
+        severity = severities[d.severity],
+        message = d.message,
+        code = d.rule,
+        source = "sqlty",
+      })
+    end
+    return diagnostics
+  end,
+}
+lint.linters_by_ft.python = { "sqlty" }
+
+vim.api.nvim_create_autocmd("BufWritePost", {
+  callback = function()
+    lint.try_lint()
+  end,
+})
+```
+
+`sqlty check` reads the file from disk, so the linter runs on save; `sqlty server` also
+checks unsaved buffers. Lines and columns in the JSON are 1-based, and nvim-lint counts
+from 0.
+
 ## Settings
 
 Every client passes the same `initializationOptions` (`init_options` in Neovim,

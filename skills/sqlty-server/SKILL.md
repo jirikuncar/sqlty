@@ -81,7 +81,7 @@ colors the SQL of checked strings with semantic tokens; `highlighting = { enable
 turns that off. VS Code shows one semantic-token provider per file, so the extension
 keeps it off there and highlights strings marked `--sql` with a grammar instead.
 
-For Vim (vim-lsp, ALE, coc.nvim, `:make`), Helix and Emacs (Eglot, lsp-mode), see
+For nvim-lint, Vim (vim-lsp, ALE, coc.nvim, `:make`), Helix and Emacs (Eglot, lsp-mode), see
 [Neovim, Vim, Helix and Emacs](https://jirikuncar.github.io/sqlty/recipes/editors/).
 Eglot runs one server per major mode: run sqlty next to ty or ruff through
 `rass python -- sqlty server`, with sqlty's highlighting off, or use lsp-mode with
