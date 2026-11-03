@@ -19,6 +19,7 @@ recursive = "0.1"
 rustc-hash = "2"
 thiserror = "2"
 insta = "1.49"
+toml = { version = "1.1", features = ["preserve_order"] }
 sqlty-sql = { path = "crates/sqlty-sql" }
 sqlty-python = { path = "crates/sqlty-python" }
 sqlty-lsp = { path = "crates/sqlty-lsp" }

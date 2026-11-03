@@ -841,6 +841,7 @@ dependencies = [
  "sqlty-sql",
  "stacker",
  "thiserror",
+ "toml",
 ]
 
 [[package]]
@@ -862,6 +863,7 @@ dependencies = [
  "regex",
  "sqlty-sql",
  "thiserror",
+ "toml",
 ]
 
 [[package]]

@@ -9,41 +9,17 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, NamedTuple, TypedDict, cast
 
+from sqlty import _core
+
 SchemaSpec = str | list[str]
 
-NATIVE_TABLES = {
-    "pyproject.toml": (("tool", "sqlty"),),
-    "Cargo.toml": (("package", "metadata", "sqlty"), ("workspace", "metadata", "sqlty")),
-}
-
-TOOL_KEYS = (
-    "dialect",
-    "schema",
-    "rules",
-    "overrides",
-    "import-style",
-    "untyped",
-    "json-types",
-    "param-types",
-    "preview",
-    "max-query-variants",
-    "functions",
-    "types",
-    "format-command",
-)
+TOOL_KEYS = _core.TOOL_KEYS
 """Keys of ``[tool.sqlty]`` that are not file discovery; see also ``DISCOVERY_KEYS``."""
 
-REMOVED_KEYS = {
-    "type-modules": "removed, since `check` reads row types from source and never imports a module",
-}
-"""Keys of ``[tool.sqlty]`` that sqlty no longer reads, with why."""
-
-DISCOVERY_KEYS = ("exclude", "extend-exclude", "respect-gitignore")
+DISCOVERY_KEYS = _core.DISCOVERY_KEYS
 """``[tool.sqlty]`` keys that pick the files to process."""
 
-FUNCTION_KEYS = ("import-path", "query-param", "return-type-param")
-
-OVERRIDE_KEYS = ("include", "exclude", "rules")
+FUNCTION_KEYS = _core.FUNCTION_KEYS
 
 MAX_QUERY_VARIANTS = 64
 """Default of ``max-query-variants``."""
@@ -259,101 +235,7 @@ def validate_tool_table(table: dict[str, Any], source: str) -> None:
         Traceback (most recent call last):
         sqlty._config.ConfigError: pyproject.toml: unknown key 'import_style' in [tool.sqlty] (did you mean 'import-style'?); ...
     """
-    from sqlty._lint import RULES, Severity
-
-    keys = (*TOOL_KEYS, *DISCOVERY_KEYS)
-    for key in table:
-        if key in REMOVED_KEYS:
-            raise ConfigError(f"{source}: unknown key {key!r} in [tool.sqlty]: {REMOVED_KEYS[key]}")
-        if key not in keys:
-            raise ConfigError(
-                f"{source}: unknown key {key!r} in [tool.sqlty]{_suggest(key, keys)}; "
-                f"expected one of: {', '.join(keys)}"
-            )
-    severities = [s.value for s in Severity]
-
-    def check_rules(rules: object, key: str, where: str) -> None:
-        if not isinstance(rules, dict):
-            raise ConfigError(f"{source}: {key} must be a table of rule = severity")
-        for rule, severity in rules.items():
-            if rule not in RULES:
-                raise ConfigError(
-                    f"{source}: unknown rule {rule!r} in {where}"
-                    f"{_suggest(rule, list(RULES))}; run `sqlty rule` for the list"
-                )
-            if severity not in severities:
-                raise ConfigError(
-                    f"{source}: invalid severity {severity!r} for rule {rule!r} in "
-                    f"{where}; expected one of: {', '.join(severities)}"
-                )
-
-    if not isinstance(table.get("param-types", False), bool):
-        raise ConfigError(f"{source}: [tool.sqlty] param-types must be true or false")
-    if not isinstance(table.get("preview", False), bool):
-        raise ConfigError(f"{source}: [tool.sqlty] preview must be true or false")
-    limit = table.get("max-query-variants", MAX_QUERY_VARIANTS)
-    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
-        raise ConfigError(f"{source}: [tool.sqlty] max-query-variants must be a positive integer")
-    if "dialect" in table and (problem := dialect_problem(table["dialect"])):
-        raise ConfigError(f"{source}: [tool.sqlty] {problem}")
-    check_rules(table.get("rules", {}), "[tool.sqlty] rules", "[tool.sqlty.rules]")
-    overrides = table.get("overrides", [])
-    if not isinstance(overrides, list) or not all(isinstance(o, dict) for o in overrides):
-        raise ConfigError(f"{source}: [tool.sqlty] overrides must be an array of tables")
-    for override in overrides:
-        for key in override:
-            if key not in OVERRIDE_KEYS:
-                raise ConfigError(
-                    f"{source}: unknown key {key!r} in [[tool.sqlty.overrides]]"
-                    f"{_suggest(key, OVERRIDE_KEYS)}; expected one of: {', '.join(OVERRIDE_KEYS)}"
-                )
-        for key in ("include", "exclude"):
-            globs = override.get(key, [])
-            if not isinstance(globs, list) or not all(isinstance(g, str) for g in globs):
-                raise ConfigError(
-                    f"{source}: [[tool.sqlty.overrides]] {key} must be a list of glob strings"
-                )
-        check_rules(
-            override.get("rules", {}),
-            "[[tool.sqlty.overrides]] rules",
-            "[tool.sqlty.overrides.rules]",
-        )
-    functions = table.get("functions", [])
-    if not isinstance(functions, list):
-        raise ConfigError(f"{source}: [tool.sqlty] functions must be an array of tables")
-    for function in functions:
-        if isinstance(function, dict):
-            for key in function:
-                if key not in FUNCTION_KEYS:
-                    raise ConfigError(
-                        f"{source}: unknown key {key!r} in [[tool.sqlty.functions]]"
-                        f"{_suggest(key, FUNCTION_KEYS)}; expected one of: {', '.join(FUNCTION_KEYS)}"
-                    )
-    types = table.get("types", {})
-    if not isinstance(types, dict) or not all(isinstance(v, str) for v in types.values()):
-        raise ConfigError(
-            f"{source}: [tool.sqlty] types must be a table of SQL type or table.column = "
-            'Python type, such as DATE = "datetime.date"'
-        )
-    for key, python in types.items():
-        try:
-            ast.parse(python, mode="eval")
-        except SyntaxError:
-            raise ConfigError(
-                f"{source}: [tool.sqlty.types] {key} = {python!r} is not a Python type expression"
-            ) from None
-    command = table.get("format-command", [])
-    if not isinstance(command, list) or not all(isinstance(part, str) for part in command):
-        raise ConfigError(
-            f"{source}: [tool.sqlty] format-command must be a list of strings, "
-            'such as ["ruff", "format"]'
-        )
-    if not isinstance(table.get("respect-gitignore", True), bool):
-        raise ConfigError(f"{source}: [tool.sqlty] respect-gitignore must be true or false")
-    for key in ("exclude", "extend-exclude"):
-        value = table.get(key, [])
-        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
-            raise ConfigError(f"{source}: [tool.sqlty] {key} must be a list of glob strings")
+    _parse_table(table, source)
 
 
 class RuleOverride(TypedDict):
@@ -424,12 +306,6 @@ class SQLTyConfig(TypedDict, total=False):
     format_command: list[str]  # formatter run on changed files, path appended
 
 
-def _schema_spec(value: Any) -> SchemaSpec:
-    if isinstance(value, list):
-        return [str(v) for v in value]
-    return str(value)
-
-
 def expand_schema(spec: SchemaSpec | Path, base: Path) -> list[Path]:
     """List the schema files named by ``spec``, in order.
 
@@ -486,7 +362,7 @@ def find_config(project_root: Path | None = None) -> tuple[SQLTyConfig, Path | N
         if sqlty_toml.is_file():
             config = _load_config_file_cached(sqlty_toml, sqlty_toml.stat().st_mtime_ns)
             return copy.deepcopy(config), sqlty_toml
-        for name in NATIVE_TABLES:
+        for name in _core.CONFIG_FILES[1:]:
             native = current / name
             if not native.exists():
                 continue
@@ -494,8 +370,8 @@ def find_config(project_root: Path | None = None) -> tuple[SQLTyConfig, Path | N
                 found = _parse_native_cached(native, native.stat().st_mtime_ns)
             except ConfigError:
                 raise
-            except Exception as e:
-                logging.getLogger(__name__).warning("Failed to parse %s: %s", native, e)
+            except (_core.ConfigSyntaxError, OSError) as e:
+                logging.getLogger(__name__).warning("Failed to parse %s", e)
                 return {}, None
             if found is not None:
                 return copy.deepcopy(found), native
@@ -520,21 +396,7 @@ def _load_config_file_cached(path: Path, mtime_ns: int) -> SQLTyConfig:
 
 def _parse_native(path: Path) -> SQLTyConfig | None:
     """The sqlty table of a ``pyproject.toml`` or ``Cargo.toml``, or None without one."""
-    import tomllib
-
-    with open(path, "rb") as f:
-        table = _native_table(tomllib.load(f), path.name)
-    return None if table is None else _parse_table(table, str(path))
-
-
-def _native_table(data: dict[str, Any], name: str) -> dict[str, Any] | None:
-    for keys in NATIVE_TABLES[name]:
-        table: Any = data
-        for key in keys:
-            table = table.get(key) if isinstance(table, dict) else None
-        if isinstance(table, dict):
-            return table
-    return None
+    return _load(path, required=False)
 
 
 def load_config_file(path: Path) -> SQLTyConfig:
@@ -550,24 +412,27 @@ def load_config_file(path: Path) -> SQLTyConfig:
         Traceback (most recent call last):
         sqlty._config.ConfigError: config file does not exist: missing.toml
     """
-    import tomllib
-
     if not path.exists():
         raise ConfigError(f"config file does not exist: {path}")
     if not path.is_file():
         raise ConfigError(f"config path is not a file: {path}")
     try:
-        with open(path, "rb") as f:
-            data: dict[str, Any] = tomllib.load(f)
-    except tomllib.TOMLDecodeError as exc:
-        raise ConfigError(f"{path}: {exc}") from None
-    if path.name in NATIVE_TABLES:
-        table = _native_table(data, path.name)
-        if table is None:
-            tables = " or ".join(f"[{'.'.join(keys)}]" for keys in NATIVE_TABLES[path.name])
-            raise ConfigError(f"{path}: no {tables} table")
-        data = table
-    return _parse_table(data, str(path))
+        config = _load(path, required=True)
+    except _core.ConfigSyntaxError as exc:
+        raise ConfigError(str(exc)) from None
+    assert config is not None
+    return config
+
+
+def _load(path: Path, *, required: bool) -> SQLTyConfig | None:
+    data = path.read_bytes()
+    try:
+        found = _core.load_config(data, path.name, str(path), required=required)
+    except _core.ConfigSyntaxError:
+        raise
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from None
+    return None if found is None else _converted(*found, str(path))
 
 
 def parse_overrides(assignments: list[str]) -> SQLTyConfig:
@@ -628,90 +493,28 @@ def validate_rule_severity(pairs: list[tuple[str, str]]) -> dict[str, str]:
 
 def _parse_table(tool_config: dict[str, Any], source: str) -> SQLTyConfig:
     """Validate a ``[tool.sqlty]`` table and convert it to ``SQLTyConfig``."""
-    validate_tool_table(tool_config, source)
-    config: SQLTyConfig = {}
+    try:
+        found = _core.validate_config(tool_config, source)
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from None
+    return _converted(*found, source)
 
-    if "exclude" in tool_config:
-        config["exclude"] = list(tool_config["exclude"])
-    if "extend-exclude" in tool_config:
-        config["extend_exclude"] = list(tool_config["extend-exclude"])
-    if "respect-gitignore" in tool_config:
-        config["respect_gitignore"] = tool_config["respect-gitignore"]
 
-    # Parse each configuration option
-    if "dialect" in tool_config:
-        config["dialect"] = str(tool_config["dialect"])
-
-    # Single schema path (top-level convenience key)
-    if "schema" in tool_config:
-        config["schema"] = _schema_spec(tool_config["schema"])
-    if "format-command" in tool_config:
-        config["format_command"] = list(tool_config["format-command"])
-
-    # Rule severity overrides: [tool.sqlty.rules]
-    if "rules" in tool_config and isinstance(tool_config["rules"], dict):
-        config["rules"] = {str(k): str(v) for k, v in tool_config["rules"].items()}
-    if "overrides" in tool_config:
-        config["overrides"] = [
-            {
-                "include": list(o.get("include", [])),
-                "exclude": list(o.get("exclude", [])),
-                "rules": dict(o.get("rules", {})),
-            }
-            for o in tool_config["overrides"]
+def _converted(table: dict[str, Any], skipped: list[str], source: str) -> SQLTyConfig:
+    for key, python in table.get("types", {}).items():
+        try:
+            ast.parse(python, mode="eval")
+        except SyntaxError:
+            raise ConfigError(
+                f"{source}: [tool.sqlty.types] {key} = {python!r} is not a Python type expression"
+            ) from None
+    for entry in skipped:
+        logging.getLogger(__name__).warning(
+            "Skipping function config missing required fields: %s", entry
+        )
+    if "functions" in table:
+        table["functions"] = [
+            {key.replace("-", "_"): value for key, value in function.items()}
+            for function in table["functions"]
         ]
-
-    # Allow hyphenated key in pyproject: import-style
-    if "import-style" in tool_config:
-        config["import_style"] = str(tool_config["import-style"])
-
-    if "untyped" in tool_config:
-        config["untyped"] = str(tool_config["untyped"])
-
-    if "json-types" in tool_config:
-        config["json_types"] = str(tool_config["json-types"])
-
-    if "param-types" in tool_config:
-        config["param_types"] = bool(tool_config["param-types"])
-
-    if "types" in tool_config and isinstance(tool_config["types"], dict):
-        config["types"] = {str(k): str(v) for k, v in tool_config["types"].items()}
-
-    if "preview" in tool_config:
-        config["preview"] = bool(tool_config["preview"])
-
-    if "max-query-variants" in tool_config:
-        config["max_query_variants"] = int(tool_config["max-query-variants"])
-
-    # Parse function configurations
-    if "functions" in tool_config and isinstance(tool_config["functions"], list):
-        functions: list[FunctionConfigComplete] = []
-        for func_config in tool_config["functions"]:
-            if not isinstance(func_config, dict):
-                continue
-
-            # Validate required fields
-            if "import-path" not in func_config or "query-param" not in func_config:
-                logging.getLogger(__name__).warning(
-                    "Skipping function config missing required fields: %s", func_config
-                )
-                continue
-
-            # Build function config with all fields
-            function_dict: dict[str, Any] = {
-                "import_path": str(func_config["import-path"]),
-                "query_param": str(func_config["query-param"]),
-            }
-
-            # Optional return-type-param field
-            if "return-type-param" in func_config:
-                function_dict["return_type_param"] = str(func_config["return-type-param"])
-
-            # Cast to FunctionConfigComplete after all fields are set
-            function = cast(FunctionConfigComplete, function_dict)
-            functions.append(function)
-
-        if functions:
-            config["functions"] = functions
-
-    return config
+    return cast(SQLTyConfig, {key.replace("-", "_"): value for key, value in table.items()})
