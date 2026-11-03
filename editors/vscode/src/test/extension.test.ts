@@ -121,6 +121,11 @@ suite("sqlty", () => {
     );
     assert.deepEqual(outside, []);
   });
+
+  test("loads in Restricted Mode, for highlighting only", () => {
+    const extension = vscode.extensions.getExtension("jirikuncar.sqlty");
+    assert.equal(extension?.packageJSON.capabilities.untrustedWorkspaces.supported, "limited");
+  });
 });
 
 suite("findServer", () => {
