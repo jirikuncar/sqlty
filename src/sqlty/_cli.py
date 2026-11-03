@@ -356,9 +356,9 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         type=Path,
         metavar="PATH",
         help="Use this file for every path instead of the nearest config file: [tool.sqlty] "
-        "of a pyproject.toml, [package.metadata.sqlty] of a Cargo.toml, or top-level keys of "
-        "another file such as sqlty.toml; its "
-        "relative paths are relative to the current directory. Env: SQLTY_CONFIG_FILE",
+        "of a pyproject.toml, [package.metadata.sqlty] or [workspace.metadata.sqlty] of a Cargo.toml, "
+        "or top-level keys of another file such as sqlty.toml; its relative paths are relative to "
+        "the current directory. Env: SQLTY_CONFIG_FILE",
     )
     source.add_argument(
         "--isolated",

@@ -127,6 +127,26 @@ def test_cargo_toml_metadata_table_is_read(tmp_path: Path) -> None:
         load_config(crate)
 
 
+def test_cargo_workspace_metadata_table_is_read(tmp_path: Path) -> None:
+    """A member crate without its own table uses ``[workspace.metadata.sqlty]`` of the workspace root."""
+    (tmp_path / "Cargo.toml").write_text(
+        '[workspace]\nmembers = ["crate"]\n\n[workspace.metadata.sqlty]\ndialect = "sqlite"\n'
+    )
+    crate = tmp_path / "crate"
+    crate.mkdir()
+    (crate / "Cargo.toml").write_text('[package]\nname = "crate"\n')
+
+    assert load_config(crate) == ({"dialect": "sqlite"}, tmp_path.resolve())
+
+    (crate / "Cargo.toml").write_text('[package.metadata.sqlty]\ndialect = "mysql"\n')
+    assert load_config(crate) == ({"dialect": "mysql"}, crate.resolve())
+
+    (tmp_path / "Cargo.toml").write_text(
+        '[package.metadata.sqlty]\ndialect = "postgres"\n[workspace.metadata.sqlty]\ndialect = "sqlite"\n'
+    )
+    assert load_config(tmp_path)[0] == {"dialect": "postgres"}
+
+
 def test_unknown_key_in_sqlty_toml_names_the_file(tmp_path: Path) -> None:
     (tmp_path / "sqlty.toml").write_text("bogus = 1\n")
 
