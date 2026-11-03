@@ -3,9 +3,10 @@
 > **Status:** stages 1 ([#840](https://github.com/jirikuncar/sqlty/pull/840), semantic tokens), 2
 > ([#841](https://github.com/jirikuncar/sqlty/pull/841), the VS Code grammar) and 3
 > ([#843](https://github.com/jirikuncar/sqlty/pull/843), the Neovim, Vim and Helix recipe) done;
-> stage 4 dropped. An nvim-lint linter definition is on the recipe page
-> ([#845](https://github.com/jirikuncar/sqlty/issues/845)); its upstream pull request has to be
-> written by hand. Left: nvim-lspconfig and Mason ([#846](https://github.com/jirikuncar/sqlty/issues/846)).
+> stage 4 dropped; stage 5 (Emacs, [#849](https://github.com/jirikuncar/sqlty/pull/849)) done. An
+> nvim-lint linter definition is on the recipe page ([#845](https://github.com/jirikuncar/sqlty/issues/845));
+> its upstream pull request has to be written by hand. Left: nvim-lspconfig and Mason
+> ([#846](https://github.com/jirikuncar/sqlty/issues/846)).
 
 Tracks [#839](https://github.com/jirikuncar/sqlty/issues/839): highlight SQL in exactly the
 strings `sqlty check` checks, in VS Code and Neovim, and document the Vim and Neovim
@@ -32,6 +33,7 @@ needs a TextMate injection instead, which can only approximate the routes.
 | 2 | VS Code: TextMate injection for marked strings, with a fixture of strings that must and must not be highlighted | done, [#841](https://github.com/jirikuncar/sqlty/pull/841) |
 | 3 | Neovim, Vim and Helix recipe page (`vim.lsp.config`, vim-lsp, ALE, coc.nvim, Helix, a quickfix list), split out of `docs/recipes/vscode.md`; skill and agents table updated | done, [#843](https://github.com/jirikuncar/sqlty/pull/843) |
 | 4 | ALE linter definition around `sqlty check --output-format json` | dropped: ALE runs `sqlty server` as an LSP linter (stage 3), which also reads unsaved buffers |
+| 5 | Emacs: Eglot (alone, and next to ty and ruff through `rass`) and lsp-mode (an add-on client) on the recipe page | done, [#849](https://github.com/jirikuncar/sqlty/pull/849) |
 
 Not here: an nvim-lint linter upstream (nvim-lint takes no contributions made with generative AI;
 the recipe page documents the definition users paste meanwhile, checked with Neovim 0.9),
@@ -73,3 +75,16 @@ and the nvim-lspconfig and Mason entries, which wait for their popularity thresh
   follow their documentation.
 - A tree-sitter injection is not shipped: it reads `\n` as two characters, so it would read
   `"--sql\nSELECT 1"` as one SQL comment; semantic tokens read the value.
+
+## Stage 5
+
+- Checked in Docker (Debian trixie, Emacs 30.1 with Eglot 1.17 and 1.26 from GNU ELPA,
+  lsp-mode from MELPA; Emacs 31.1 read for its defaults): diagnostics, the `breaking`
+  baseline, the quick fix, completion and semantic tokens.
+- Eglot runs one server per major mode. `rass` (rassumfrassum) multiplexes them, and Emacs 31
+  offers `rass python` first. It forwards semantic-token requests to the first server but
+  may take the legend of another, so sqlty goes last with highlighting off.
+- lsp-mode with `lsp-semantic-tokens-enable` asks a server for tokens before `initialized`.
+  `lsp_server::Connection::initialize_finish` fails on that and ruff exits; `sqlty server`
+  now sends the initialize response itself and answers such a request in its main loop.
+- lsp-mode colors one server's semantic tokens per buffer, as VS Code does.

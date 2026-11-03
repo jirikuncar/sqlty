@@ -1,4 +1,4 @@
-# Neovim, Vim and Helix
+# Neovim, Vim, Helix and Emacs
 
 `sqlty server` is a language server on standard input and output. Any LSP client runs it
 for Python files and gets what `sqlty check` reports as you type, the fix of
@@ -122,8 +122,8 @@ from 0.
 
 ## Settings
 
-Every client passes the same `initializationOptions` (`init_options` in Neovim). All are
-optional:
+Every client passes the same `initializationOptions` (`init_options` in Neovim,
+`:initializationOptions` in Emacs). All are optional:
 
 ```lua
 init_options = {
@@ -206,3 +206,71 @@ language-servers = ["ty", "ruff", "sqlty"]
 
 Helix shows the diagnostics, quick fixes and completion. It does not ask for semantic
 tokens, so query strings stay Python strings.
+
+## Emacs
+
+### Eglot
+
+Eglot is part of Emacs 29 and newer. It runs one server per major mode, so this runs
+sqlty alone:
+
+```elisp
+(with-eval-after-load 'eglot
+  (add-to-list 'eglot-server-programs
+               '((python-mode python-ts-mode)
+                 . ("sqlty" "server"
+                    :initializationOptions (:breaking (:against "main"))))))
+```
+
+`M-x eglot` in a Python buffer starts it, or add `eglot-ensure` to `python-mode-hook`.
+
+To run sqlty next to ty and ruff, let [rassumfrassum](https://github.com/joaotavora/rassumfrassum)
+(`rass`) start them behind one connection. Emacs 31 already offers `rass python` for Python
+buffers; add sqlty to it:
+
+```elisp
+(with-eval-after-load 'eglot
+  (add-to-list 'eglot-server-programs
+               '((python-mode python-ts-mode)
+                 . ("rass" "python" "--" "sqlty" "server"
+                    :initializationOptions
+                    (:rass (:sqlty (:breaking (:against "main")
+                                    :highlighting (:enable :json-false))))))))
+```
+
+Install `rass` with `uv tool install rassumfrassum` or in the project's environment. The
+`rass` key of `initializationOptions` sends options to the servers whose executable matches
+the key, here `sqlty` only.
+
+!!! warning "One server colors the buffer"
+    `rass` takes the semantic tokens of the first server only, with the legend of any of
+    them. Keep sqlty last and its highlighting off, or its token types color ty's tokens
+    wrong.
+
+Eglot 1.20 and newer color the SQL of checked strings by themselves, with the
+`eglot-semantic-keyword`, `eglot-semantic-string`, ... faces. Emacs 31 ships it; on Emacs 29
+and 30, `M-x package-install RET eglot` updates it from GNU ELPA.
+
+### lsp-mode
+
+[lsp-mode](https://emacs-lsp.github.io/lsp-mode/) runs several servers in a buffer: register
+sqlty as an add-on, and it runs next to ty, pyright or ruff:
+
+```elisp
+(with-eval-after-load 'lsp-mode
+  (lsp-register-client
+   (make-lsp-client
+    :new-connection (lsp-stdio-connection '("sqlty" "server"))
+    :activation-fn (lsp-activate-on "python")
+    :server-id 'sqlty
+    :add-on? t
+    :initialization-options '(:breaking (:against "main")))))
+```
+
+lsp-mode colors one server's semantic tokens per buffer, and does so only with
+`lsp-semantic-tokens-enable` set. With sqlty alone in the buffer, that colors the SQL with
+the `lsp-face-semhl-keyword`, ... faces; next to ty, ty's tokens win.
+
+!!! warning "lsp-mode can stop ruff server"
+    With `lsp-semantic-tokens-enable`, lsp-mode asks a server for tokens before it has
+    finished starting. ruff exits on it; sqlty answers with an error and keeps running.
