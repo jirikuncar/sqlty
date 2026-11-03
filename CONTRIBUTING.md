@@ -75,8 +75,20 @@ PyPI with trusted publishing. The version comes from `rust/Cargo.toml` (`[worksp
 
 To release:
 
-1. Set the version in `rust/Cargo.toml` and in the plugin manifests
-   (`.claude-plugin/`, `.codex-plugin/`, `.cursor-plugin/`), and merge it.
+1. Set the version everywhere it is written (`rust/Cargo.toml` and `Cargo.lock`, the plugin
+   manifests of `.claude-plugin/`, `.codex-plugin/` and `.cursor-plugin/`, and the `rev:` quoted
+   in the docs and skills), and merge it:
+
+   ```bash
+   uv run python scripts/bump_version.py 0.4.0 --dry-run  # list the files it changes
+   uv run python scripts/bump_version.py 0.4.0
+   ```
+
+   `test_every_place_has_the_release_version` fails while one of them disagrees. The plugin
+   manifests keep `version`: Claude Code then offers an update on a release, not on every
+   commit, which matches the skills to the `sqlty` users install, and
+   `claude plugin validate --strict` passes. The VS Code extension takes its version from
+   the release tag.
 2. Run the Release workflow on `main` by hand (`workflow_dispatch`). Pull requests
    build one wheel per OS; this run builds every wheel and the sdist, installs each wheel on every supported Python, and publishes
    to TestPyPI. Install from there and run `sqlty version`.
