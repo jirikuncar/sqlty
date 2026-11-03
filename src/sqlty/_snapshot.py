@@ -8,14 +8,14 @@ name. A file the snapshot lacks takes the schema of its nearest directory.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, cast
 
 from sqlty._breaking import Source
 
 if TYPE_CHECKING:
-    from sqlty._breaking import Revision
+    from sqlty._breaking import Revision, SchemaKey
     from sqlty._cli import Settings
     from sqlty.core import Schema
 
@@ -135,9 +135,12 @@ class Snapshot:
         from sqlty._cli import Settings
 
         entry = self.data["settings"][self.data["files"][relative.as_posix()]["settings"]]
+        schema = None if entry["schema"] is None else self.data["schemas"][entry["schema"]]
         return Settings(
             dialect=entry["dialect"],
             schema=self._schema(entry["schema"]),
+            schema_sql=schema and schema["sql"],
+            types=schema and schema["types"],
             import_style=entry["import_style"],
             untyped=entry["untyped"],
             rules=entry["rules"],
@@ -145,11 +148,22 @@ class Snapshot:
         )
 
     def schema(self, relative: Path, own: Settings) -> Schema | None:
+        return self._schema(self._index(relative))
+
+    def schema_key(self, relative: Path, own: Settings) -> SchemaKey:
+        if (index := self._index(relative)) is None:
+            return replace(own, schema_sql=None).schema_key
+        entry = self.data["schemas"][index]
+        return replace(
+            own, schema_sql=entry["sql"], dialect=entry["dialect"], types=entry["types"]
+        ).schema_key
+
+    def _index(self, relative: Path) -> int | None:
         if (file := self.data["files"].get(relative.as_posix())) is not None:
-            return self._schema(self.data["settings"][file["settings"]]["schema"])
+            return self.data["settings"][file["settings"]]["schema"]
         directories = self.data["directories"]
         nearest = next((d.as_posix() for d in relative.parents if d.as_posix() in directories), ".")
-        return self._schema(directories.get(nearest))
+        return directories.get(nearest)
 
     def _schema(self, index: int | None) -> Schema | None:
         from sqlty.core import load_schema

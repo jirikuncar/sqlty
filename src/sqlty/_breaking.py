@@ -21,7 +21,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Generator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, NamedTuple, Protocol
 
@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from sqlty.core import Schema
 
 Direction = Literal["backward", "forward", "both"]
+SchemaKey = tuple[str | None, str, tuple[tuple[str, str], ...]]
 
 
 class GitError(Exception):
@@ -68,6 +69,8 @@ class Schemas(Protocol):
 
     def schema(self, relative: Path, own: Settings) -> Schema | None: ...
 
+    def schema_key(self, relative: Path, own: Settings) -> SchemaKey: ...
+
 
 @dataclass
 class Revision:
@@ -84,6 +87,9 @@ class Revision:
 
     def schema(self, relative: Path, own: Settings) -> Schema | None:
         return self.settings(relative).schema
+
+    def schema_key(self, relative: Path, own: Settings) -> SchemaKey:
+        return self.settings(relative).schema_key
 
     def roots(self) -> list[Path]:
         from sqlty._cli import _checked_roots
@@ -119,6 +125,9 @@ class SchemaFiles:
         if key not in self.loaded:
             self.loaded[key] = load_schema(self.sql, dialect=own.dialect, types=own.types)
         return self.loaded[key]
+
+    def schema_key(self, relative: Path, own: Settings) -> SchemaKey:
+        return replace(own, schema_sql=self.sql).schema_key
 
 
 @dataclass(frozen=True)
@@ -222,6 +231,8 @@ def _compare(
     findings: list[Finding] = []
     for relative, parsed in sources.items():
         own = queries.settings(relative)
+        if schema.schema_key(relative, own) == own.schema_key:
+            continue
         for diagnostic in breaking_source(
             parsed,
             schema_sql=own.schema,

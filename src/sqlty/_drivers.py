@@ -53,6 +53,7 @@ _METHODS = {
     "sqlite3": {"execute", "executemany"},
     "asyncpg": {"execute", "fetch", "fetchrow", "fetchval", "executemany"},
 }
+_ANY_METHOD = frozenset().union(*_METHODS.values())
 _PARAM_KEYWORD = {"psycopg": "params", "sqlite3": "parameters"}
 # sqlite3 reads a str or bytes as a sequence, one parameter per item.
 _SEQUENCE_SCALARS = {"psycopg": frozenset(), "sqlite3": frozenset({"str", "bytes"})}
@@ -226,7 +227,10 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
     reported. ``executemany`` gives one entry per row of a list or tuple literal.
     """
     parsed = ParsedSource.of(source)
-    if not any(driver in parsed.text for driver in ("psycopg", "sqlite3", "asyncpg")):
+    text = parsed.text
+    if not any(driver in text for driver in ("psycopg", "sqlite3", "asyncpg")):
+        return []
+    if not any(method in text for method in ("execute", "fetch")):
         return []
     if parsed.tree is None:
         return []
@@ -237,6 +241,7 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
         func = call.func
         if not (
             isinstance(func, ast.Attribute)
+            and func.attr in _ANY_METHOD
             and isinstance(func.value, ast.Name)
             and (driver := scopes.driver(func.value.id, chain := scopes.chain(call)))
             and func.attr in _METHODS[driver]

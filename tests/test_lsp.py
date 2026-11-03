@@ -111,6 +111,19 @@ def test_one_direction(repo: Path, direction: Direction) -> None:
     )
 
 
+def test_an_unchanged_schema_is_not_checked_again(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sqlty.core
+
+    (repo / "schema.sql").write_text(OLD_SCHEMA)
+    workspace = Workspace(str(repo / "app"), against="HEAD")
+    monkeypatch.setattr(sqlty.core, "breaking_source", None)
+    found = workspace.check(str(repo / "app" / "new.py"), NEW_CODE)
+    assert [d["rule"] for d in found] == ["unknown-column"]
+    assert workspace.breaking() == {}
+
+
 def test_a_baseline_outside_git_must_be_a_file(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="main does not exist, and .* is in no git repository"):
         Workspace(str(tmp_path), against="main")
