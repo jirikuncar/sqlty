@@ -1,4 +1,9 @@
-# SQLTy
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jirikuncar/sqlty/main/docs/assets/sqlty-wordmark-dark.svg">
+    <img src="https://raw.githubusercontent.com/jirikuncar/sqlty/main/docs/assets/sqlty-wordmark-light.svg" alt="SQLTy" width="300">
+  </picture>
+</h1>
 
 [![PyPI](https://img.shields.io/pypi/v/sqlty.svg)](https://pypi.org/project/sqlty/)
 [![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](https://www.python.org/downloads/)

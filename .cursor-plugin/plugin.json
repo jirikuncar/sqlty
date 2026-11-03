@@ -10,5 +10,6 @@
   "repository": "https://github.com/jirikuncar/sqlty",
   "license": "MIT",
   "keywords": ["sql", "python", "type-hints", "static-analysis"],
-  "skills": "./skills/"
+  "skills": "./skills/",
+  "logo": "docs/assets/sqlty-icon-dark.svg"
 }

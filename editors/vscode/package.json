@@ -6,6 +6,11 @@
   "private": true,
   "publisher": "jirikuncar",
   "license": "MIT",
+  "icon": "icon.png",
+  "galleryBanner": {
+    "color": "#0e0f10",
+    "theme": "dark"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/jirikuncar/sqlty",
