@@ -115,6 +115,8 @@ def extract_type_definitions(
     typeddicts = {name: info for name, info in imported_bases.items() if info.kind == "TypedDict"}
     # Dataclasses and Pydantic models, whose fields their subclasses inherit.
     bases = {name: info for name, info in imported_bases.items() if info.kind != "TypedDict"}
+    # The bases from other modules each class inherits, through those defined in the file too.
+    imported: dict[str, list[TypeInfo]] = {}
     for node, kind in recognized:
         keywords = {k.arg: k.value for k in node.keywords if k.arg}
         total = not (isinstance(t := keywords.get("total"), ast.Constant) and t.value is False)
@@ -163,7 +165,10 @@ def extract_type_definitions(
                 n: None if _has_enum(tp) else tp for n, tp in info.field_types.items()
             }
         info.annotations = _ast_annotations(nodes, aliases)
-        for parent in (p for p in parents if p.module != module):
+        imported[node.name] = [
+            a for p in parents for a in ([p] if p.module != module else imported.get(p.name, []))
+        ]
+        for parent in imported[node.name]:
             info.field_types = parent.field_types | info.field_types
             info.annotations = parent.annotations | info.annotations
             info.lax |= parent.lax

@@ -133,3 +133,34 @@ c = SQL[UserModel]("--sql\nSELECT 1::INTEGER AS user_id, 'x'::TEXT AS name")
 # error: [typeddict-key-mismatch] "UserModel.user_id is required but missing from query"
 d = SQL[UserModel]("--sql\nSELECT 1::INTEGER AS id, 'x'::TEXT AS name")
 ```
+
+### Through a base defined in the file
+
+The fields of the imported base reach a subclass of a subclass defined in the
+file.
+
+```python
+from dataclasses import dataclass
+
+from pkg.bases import HasId, HasIdModel
+from sqlty import SQL
+
+@dataclass
+class Named(HasId):
+    name: str
+
+@dataclass
+class User(Named):
+    label: str
+
+class NamedModel(HasIdModel):
+    name: str
+
+class UserModel(NamedModel):
+    label: str
+
+a = SQL[User]("--sql\nSELECT 1::INTEGER AS id, 'x'::TEXT AS name, 'x'::TEXT AS label")
+b = SQL[UserModel]("--sql\nSELECT 1::INTEGER AS user_id, 'x'::TEXT AS name, 'x'::TEXT AS label")
+# error: [column-type-mismatch] "UserModel.id is int but query column 'user_id' infers str"
+c = SQL[UserModel]("--sql\nSELECT 'x'::TEXT AS user_id, 'x'::TEXT AS name, 'x'::TEXT AS label")
+```
