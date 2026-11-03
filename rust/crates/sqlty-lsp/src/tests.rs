@@ -376,7 +376,7 @@ fn a_failed_check_is_logged() {
 
 #[test]
 fn saving_the_config_reloads_the_project() {
-    for name in ["pyproject.toml", "sqlty.toml"] {
+    for name in ["pyproject.toml", "sqlty.toml", "Cargo.toml"] {
         let mut client = Client::start(&json!({}));
         client.open("file:///work/q.py", "bad\n");
         client.notification("textDocument/publishDiagnostics");

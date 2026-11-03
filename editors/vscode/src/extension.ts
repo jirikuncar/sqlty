@@ -64,7 +64,9 @@ async function start(): Promise<void> {
     },
     outputChannel: output,
     synchronize: {
-      fileEvents: vscode.workspace.createFileSystemWatcher("**/{pyproject.toml,sqlty.toml,*.sql}"),
+      fileEvents: vscode.workspace.createFileSystemWatcher(
+        "**/{pyproject.toml,sqlty.toml,Cargo.toml,*.sql}",
+      ),
     },
   };
   client = new LanguageClient("sqlty", "sqlty", serverOptions, clientOptions);

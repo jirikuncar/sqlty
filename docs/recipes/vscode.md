@@ -64,7 +64,7 @@ The first `sqlty` of version 0.3.0 or newer runs:
     `uv add --dev 'sqlty>=0.3.0'`.
 
 The extension restarts the server when one of these changes, or when you run
-**sqlty: Restart Server**. Saving `pyproject.toml` or a `.sql` file reloads the
+**sqlty: Restart Server**. Saving `sqlty.toml`, `pyproject.toml`, `Cargo.toml` or a `.sql` file reloads the
 project's settings and schema without a restart.
 
 ## Fix on save
@@ -219,7 +219,7 @@ Set `sqlty.breaking.against` to a baseline, and the editor also shows what
 | Direction | What is checked | When |
 |-----------|-----------------|------|
 | `forward` | Your queries against the schema of the baseline | With every check of a file |
-| `backward` | The queries of the baseline against your schema | When the project loads, and when you save a schema or `pyproject.toml` |
+| `backward` | The queries of the baseline against your schema | When the project loads, and when you save a schema or a configuration file |
 
 `sqlty.breaking.direction` picks one; the default is `both`. A finding's source is
 `sqlty breaking (forward)` or `sqlty breaking (backward)`, and it has no quick fix: the
