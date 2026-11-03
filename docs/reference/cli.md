@@ -92,7 +92,7 @@ tool such as pre-commit passes file names.
 | Option | Description |
 |--------|-------------|
 | `-h`, `--help` | show this help message and exit |
-| `paths ...` | Files or directories (default: .); each file uses its nearest sqlty.toml, pyproject.toml or Cargo.toml |
+| `paths ...` | Files or directories (default: .); each file uses its nearest sqlty.toml, pyproject.toml or Cargo.toml. A project's config or schema file stands for the whole project |
 | `--dialect DIALECT` | SQL dialect: postgres, mysql, sqlite, or another sqlparser dialect such as duckdb (default: [tool.sqlty] dialect, else postgres) |
 | `--schema SCHEMA` | Schema .sql file, directory or glob for every path; repeat for several (default: [tool.sqlty] schema per project) |
 | `--config-file PATH` | Use this file for every path instead of the nearest config file: [tool.sqlty] of a pyproject.toml, [package.metadata.sqlty] or [workspace.metadata.sqlty] of a Cargo.toml, or top-level keys of another file such as sqlty.toml; its relative paths are relative to the current directory. Env: SQLTY_CONFIG_FILE |
