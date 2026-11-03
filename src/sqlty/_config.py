@@ -12,8 +12,8 @@ from typing import Any, NamedTuple, TypedDict, cast
 SchemaSpec = str | list[str]
 
 NATIVE_TABLES = {
-    "pyproject.toml": ("tool", "sqlty"),
-    "Cargo.toml": ("package", "metadata", "sqlty"),
+    "pyproject.toml": (("tool", "sqlty"),),
+    "Cargo.toml": (("package", "metadata", "sqlty"), ("workspace", "metadata", "sqlty")),
 }
 
 TOOL_KEYS = (
@@ -471,7 +471,8 @@ def load_config(project_root: Path | None = None) -> tuple[SQLTyConfig, Path | N
 
 def find_config(project_root: Path | None = None) -> tuple[SQLTyConfig, Path | None]:
     """Find the nearest ``sqlty.toml``, ``[tool.sqlty]`` of ``pyproject.toml`` or
-    ``[package.metadata.sqlty]`` of ``Cargo.toml``, and the file it came from.
+    ``[package.metadata.sqlty]`` (else ``[workspace.metadata.sqlty]``) of ``Cargo.toml``,
+    and the file it came from.
 
     Walks up from ``project_root`` (cwd if None). In each directory the files are
     tried in that order, and a native file without its sqlty table is skipped (like
@@ -527,18 +528,21 @@ def _parse_native(path: Path) -> SQLTyConfig | None:
 
 
 def _native_table(data: dict[str, Any], name: str) -> dict[str, Any] | None:
-    table: Any = data
-    for key in NATIVE_TABLES[name]:
-        table = table.get(key) if isinstance(table, dict) else None
-    return table if isinstance(table, dict) else None
+    for keys in NATIVE_TABLES[name]:
+        table: Any = data
+        for key in keys:
+            table = table.get(key) if isinstance(table, dict) else None
+        if isinstance(table, dict):
+            return table
+    return None
 
 
 def load_config_file(path: Path) -> SQLTyConfig:
     """Load the configuration of a file named by ``--config``.
 
     A file named ``pyproject.toml`` must have a ``[tool.sqlty]`` table and one named
-    ``Cargo.toml`` a ``[package.metadata.sqlty]`` table; any other file, such as
-    ``sqlty.toml``, holds the same keys at the top level. Raises ``ConfigError`` when
+    ``Cargo.toml`` a ``[package.metadata.sqlty]`` or ``[workspace.metadata.sqlty]``
+    table; any other file, such as ``sqlty.toml``, holds the same keys at the top level. Raises ``ConfigError`` when
     the file is missing, is not TOML, lacks its table or has an invalid key.
 
     Example:
@@ -560,7 +564,8 @@ def load_config_file(path: Path) -> SQLTyConfig:
     if path.name in NATIVE_TABLES:
         table = _native_table(data, path.name)
         if table is None:
-            raise ConfigError(f"{path}: no [{'.'.join(NATIVE_TABLES[path.name])}] table")
+            tables = " or ".join(f"[{'.'.join(keys)}]" for keys in NATIVE_TABLES[path.name])
+            raise ConfigError(f"{path}: no {tables} table")
         data = table
     return _parse_table(data, str(path))
 

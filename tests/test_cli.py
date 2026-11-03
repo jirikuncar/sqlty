@@ -874,6 +874,7 @@ def test_isolated_skips_an_invalid_config(tmp_path, monkeypatch, capsys) -> None
         ("sqlty.toml", 'schema = "db/schema.sql"\n'),
         ("pyproject.toml", '[tool.sqlty]\nschema = "db/schema.sql"\n'),
         ("Cargo.toml", '[package.metadata.sqlty]\nschema = "db/schema.sql"\n'),
+        ("Cargo.toml", '[workspace.metadata.sqlty]\nschema = "db/schema.sql"\n'),
     ],
 )
 def test_config_file_replaces_discovery(tmp_path, monkeypatch, name, content) -> None:
@@ -903,7 +904,11 @@ def test_config_file_replaces_discovery(tmp_path, monkeypatch, name, content) ->
         (None, "", "config file does not exist"),
         ("", "", "config path is not a file"),
         ("pyproject.toml", "[project]\n", "no [tool.sqlty] table"),
-        ("Cargo.toml", "[package]\n", "no [package.metadata.sqlty] table"),
+        (
+            "Cargo.toml",
+            "[package]\n",
+            "no [package.metadata.sqlty] or [workspace.metadata.sqlty] table",
+        ),
         ("sqlty.toml", "dialect = \n", "sqlty.toml: "),
         ("sqlty.toml", "dialet = 'mysql'\n", "did you mean 'dialect'"),
         ("sqlty.toml", "untyped = 'x'\n", "sqlty.toml: untyped must be"),
