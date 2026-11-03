@@ -22,6 +22,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => void restart()),
+    vscode.workspace.onDidGrantWorkspaceTrust(() => void restart()),
   );
   const python = await pythonExtension();
   if (python !== undefined) {
@@ -42,6 +43,10 @@ async function restart(): Promise<void> {
 }
 
 async function start(): Promise<void> {
+  if (!vscode.workspace.isTrusted) {
+    output?.info("Restricted Mode: sqlty server starts once the workspace is trusted");
+    return;
+  }
   const settings = readSettings();
   const interpreter = settings.interpreter.length > 0 ? settings.interpreter : await selected();
   const found = await findServer(settings, interpreter);

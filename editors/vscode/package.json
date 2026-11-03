@@ -28,8 +28,8 @@
   "main": "./dist/extension.js",
   "capabilities": {
     "untrustedWorkspaces": {
-      "supported": false,
-      "description": "sqlty runs the sqlty of the workspace's environment."
+      "supported": "limited",
+      "description": "SQL highlighting works in Restricted Mode. sqlty server starts once the workspace is trusted, since it comes from the workspace's environment."
     }
   },
   "contributes": {

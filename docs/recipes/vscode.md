@@ -242,9 +242,13 @@ fix belongs to the migration or the code, depending on which ships first.
 
 ## Restricted Mode
 
-!!! warning "The extension does not run in Restricted Mode"
-    The server comes from the folder's own environment, so a folder you have not trusted
-    would choose what runs. Trust the folder to turn the extension on.
+In Restricted Mode, the extension highlights the SQL of strings marked `--sql` and runs
+nothing. Diagnostics, quick fixes and completion start once you trust the folder, without a
+reload.
+
+!!! warning "The server waits for trust"
+    The server comes from the folder's own environment: `sqlty.path`, the selected
+    interpreter or `PATH`. A folder you have not trusted would choose what runs.
 
 ## Other editors
 
