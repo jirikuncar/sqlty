@@ -77,6 +77,20 @@ SELECT id, nickname FROM users; -- sqlty: ignore[unknown-column]
 `--output-format json`, `github` and `sarif` report them like any other
 diagnostic, with the line and column in the `.sql` file.
 
+## Inferred types
+
+`sqlty check -v` prints the parameters and row type of each named query, as
+`SQL[R, P]` would spell them in Python:
+
+```text
+sql/users.sql: get_user_by_email(email: str) -> tuple[int, str, str]
+sql/users.sql: delete_user($1: int) -> None
+```
+
+`None` is a query without rows, and `unknown` one whose columns are not all
+typed: a diagnostic says why. A query of several statements is typed by its
+first.
+
 `sqlty breaking` compares the query files of both revisions, as it compares the
 Python files: see [Breaking schema changes](breaking-changes.md#queries-in-sql-files).
 
