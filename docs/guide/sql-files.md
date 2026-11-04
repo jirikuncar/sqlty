@@ -76,3 +76,6 @@ SELECT id, nickname FROM users; -- sqlty: ignore[unknown-column]
 
 `--output-format json`, `github` and `sarif` report them like any other
 diagnostic, with the line and column in the `.sql` file.
+
+`sqlty breaking` compares the query files of both revisions, as it compares the
+Python files: see [Breaking schema changes](breaking-changes.md#queries-in-sql-files).

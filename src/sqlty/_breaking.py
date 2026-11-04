@@ -47,7 +47,8 @@ class GitError(Exception):
 
 
 class Source(NamedTuple):
-    """A Python file of a revision, with the module names its helpers are imported by."""
+    """A Python file of a revision, with the module names its helpers are imported by, or a
+    ``.sql`` file of named queries, which has none."""
 
     text: str
     module: str
@@ -107,6 +108,9 @@ class Revision:
         sources: dict[Path, Source] = {}
         for path in self.files:
             if (text := read_source(path)) is None:
+                continue
+            if path.suffix == ".sql":
+                sources[path.relative_to(self.root)] = Source(text, "", ())
                 continue
             names = _module_names(self.resolver.resolve(path), roots)
             module = names[0] + (".__init__" if path.name == "__init__.py" else "")
@@ -240,7 +244,7 @@ def _compare(
     sources: dict[Path, ParsedSource] = {}
     index = HelperIndex()
     for relative, source in queries.sources().items():
-        sources[relative] = ParsedSource(source.text, source.module)
+        sources[relative] = ParsedSource(source.text, source.module or None)
         for name in source.names:
             index.add(name, sources[relative])
     helpers_for = configured_helpers(index, queries.roots())
@@ -287,9 +291,20 @@ def _check_shared(chunk: range) -> list[list[Diagnostic]]:
 
 
 def _check(item: _Work) -> list[Diagnostic]:
+    from sqlty._queries import breaking_query_file
     from sqlty.core import breaking_source
 
-    _, parsed, own, against, helpers = item
+    relative, parsed, own, against, helpers = item
+    if relative.suffix == ".sql":
+        return breaking_query_file(
+            parsed.text,
+            name=relative.stem,
+            query_format=own.query_format,
+            dialect=own.dialect,
+            schema_sql=own.schema,
+            against_sql=against,
+            rules=own.rules,
+        )
     return breaking_source(
         parsed,
         schema_sql=own.schema,
@@ -336,13 +351,20 @@ def _root(args: argparse.Namespace) -> Path:
 
 
 def _revision(label: str, root: Path, paths: list[Path]) -> Revision:
-    from sqlty._cli import SettingsResolver, _collect_python_files, build_parser
+    from sqlty._cli import (
+        SettingsResolver,
+        _collect_python_files,
+        _collect_query_files,
+        build_parser,
+    )
 
     args = build_parser().parse_args(["check", *(str(root / p) for p in paths)])
     with contextlib.chdir(root):
         resolver = SettingsResolver(args)
-    files = _collect_python_files([root / p for p in paths], resolver.source)
-    return Revision(label, root, resolver, [f.resolve() for f in files], paths)
+        files = _collect_python_files([root / p for p in paths], resolver.source)
+        files += _collect_query_files([root / p for p in paths], files, resolver)
+        files = [f.resolve() for f in files]
+    return Revision(label, root, resolver, files, paths)
 
 
 @contextlib.contextmanager
