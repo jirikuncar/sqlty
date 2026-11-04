@@ -148,8 +148,9 @@ jobs:
           uv run --no-sync python -c "import sys; from sqlty import _core; assert not sys._is_gil_enabled()"
           uv run --no-sync pytest -p no:randomly tests/test_threads.py
 
-  # The bundled VS Code engine of #855 runs on WebAssembly: keep the engine crates building
-  # for it. sqlty-lsp needs file paths, which wasm32-unknown-unknown has no notion of.
+  # The bundled VS Code engine of #855 and the docs playground run on WebAssembly: keep the
+  # engine crates building for it. sqlty-lsp needs file paths, which wasm32-unknown-unknown
+  # has no notion of.
   wasm:
     name: Engine builds for WebAssembly
     runs-on: ubuntu-latest
@@ -176,6 +177,16 @@ jobs:
 
       - name: Build for wasm32-wasip1
         run: cargo build --manifest-path rust/Cargo.toml --target wasm32-wasip1 -p sqlty-sql -p sqlty-python -p sqlty-lsp
+
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Run the docs playground's engine
+        run: |
+          make playground
+          node --test tests/playground.test.mjs
 
   pg-fidelity:
     name: PostgreSQL column names, types and nullability

@@ -201,6 +201,7 @@ rust/
     │       ├── rewriter.rs   # Python source rewrite/strip, import-style
     │       ├── checker.rs    # Lint checks (stale-rewrite, stale-type, SELECT *, ...)
     │       └── fixer.rs      # check --fix
+    ├── sqlty-wasm/           # The docs playground's engine, built by `make playground`
     └── sqlty-ext/            # PyO3 module sqlty._core (the maturin manifest)
         └── src/lib.rs        # The sqlty._core functions
 ```
