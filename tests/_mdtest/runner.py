@@ -232,16 +232,28 @@ class Run:
     def _check(self, assertions: list[Assertion], unit: Unit) -> list[str]:
         code = unit.code
         if unit.lang == "sql":
-            from sqlty._queries import check_query_file
+            from sqlty._queries import breaking_query_file, check_query_file
 
-            found = check_query_file(
-                code.text,
-                name="queries",
-                query_format=self.section.settings.get("query-format", "auto"),
-                dialect=self.dialect,
-                schema_sql=self.schema_sql,
-                rules=self.rules,
-            )
+            query_format = self.section.settings.get("query-format", "auto")
+            if self.against_sql is not None:
+                found = breaking_query_file(
+                    code.text,
+                    name="queries",
+                    query_format=query_format,
+                    dialect=self.dialect,
+                    schema_sql=self.schema_sql,
+                    against_sql=self.against_sql,
+                    rules=self.rules,
+                )
+            else:
+                found = check_query_file(
+                    code.text,
+                    name="queries",
+                    query_format=query_format,
+                    dialect=self.dialect,
+                    schema_sql=self.schema_sql,
+                    rules=self.rules,
+                )
         elif self.against_sql is not None:
             found = core.breaking_source(
                 code.text,

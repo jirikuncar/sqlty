@@ -1,6 +1,7 @@
 # Check named queries in `.sql` files
 
-> **Status:** stage 1 (`check`) in review. Stages 2 to 4 to follow.
+> **Status:** stage 1 (`check`) merged in [#906](https://github.com/jirikuncar/sqlty/pull/906);
+> stage 2 (`breaking`) in review. Stages 3 and 4 to follow.
 
 Tracks [#896](https://github.com/jirikuncar/sqlty/issues/896): projects that keep SQL in `.sql`
 files (aiosql, PugSQL, sqlc) get no checks. The engine splits and checks the files
@@ -24,6 +25,13 @@ files (aiosql, PugSQL, sqlc) get no checks. The engine splits and checks the fil
   its statements is checked.
 - Answers to the issue's open questions: `auto` applies only to the files `queries` names;
   Jinja and dbt templates are not rendered (a template parses as `unparsed-query`).
+
+## Stage 2
+
+- A revision's files include the query files its `queries` names; a snapshot keeps them, with
+  `query_format` in their settings (an older snapshot reads `auto`).
+- `breaking_query_file` reports what a query file gets against the other schema and not
+  against its own, as `breaking_source` does for Python.
 
 ## Gaps
 

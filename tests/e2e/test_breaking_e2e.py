@@ -455,3 +455,24 @@ def test_jobs_give_the_same_findings(
 
     assert findings("1") == findings("3")
     assert findings("3")[-1] == "Found 6 breaking change(s)"
+
+
+def test_query_files_are_compared_in_both_directions(cli: Cli, repo: Path) -> None:
+    (repo / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\nqueries = "sql/"\n')
+    (repo / "sql").mkdir()
+    (repo / "sql" / "users.sql").write_text("-- name: bios\nSELECT bio FROM users;\n")
+    commit(repo, OLD_SCHEMA, OLD_CODE, "old with queries")
+    (repo / "sql" / "users.sql").write_text("-- name: handles\nSELECT handle FROM users;\n")
+    commit(repo, NEW_SCHEMA, NEW_CODE, "new with queries")
+    saved = cli(["breaking", "--head", "HEAD~1", "--save", "../v1.json"], {"cwd": repo})
+    assert saved.returncode == 0, saved.stderr
+
+    for against in ("HEAD~1", "../v1.json"):
+        result = cli(["breaking", "--against", against, "sql"], {"cwd": repo})
+
+        assert result.returncode == 1, result.stderr
+        assert [line.split(" (")[0] for line in lines(result)] == [
+            "sql/users.sql:2: [unknown-column] column `bio` does not exist in `users`",
+            "sql/users.sql:2: [unknown-column] column `handle` does not exist in `users`",
+            "Found 2 breaking change(s)",
+        ]
