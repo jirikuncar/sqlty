@@ -31,12 +31,7 @@ suite("sqlty", () => {
       "https://jirikuncar.github.io/sqlty/reference/rules/#narrow-type",
     );
 
-    const actions = await vscode.commands.executeCommand<vscode.CodeAction[]>(
-      "vscode.executeCodeActionProvider",
-      uri,
-      diagnostic.range,
-      "source.fixAll.sqlty",
-    );
+    const actions = await codeActions(uri, diagnostic.range, "source.fixAll.sqlty");
     const fixAll = actions.find((action) => action.kind?.value === "source.fixAll.sqlty");
     assert.ok(fixAll?.edit, "a fix-all action with an edit");
     assert.ok(await vscode.workspace.applyEdit(fixAll.edit));
@@ -85,12 +80,7 @@ suite("sqlty", () => {
       "column `surname` does not exist in `users`; did you mean `name`?",
     );
 
-    const actions = await vscode.commands.executeCommand<vscode.CodeAction[]>(
-      "vscode.executeCodeActionProvider",
-      uri,
-      diagnostic.range,
-      vscode.CodeActionKind.QuickFix.value,
-    );
+    const actions = await codeActions(uri, diagnostic.range, vscode.CodeActionKind.QuickFix.value);
     const fix = actions.find((action) => action.title === "Fix unknown-column");
     assert.ok(fix?.edit, "a quick fix with an edit");
     assert.ok(await vscode.workspace.applyEdit(fix.edit));
@@ -198,6 +188,30 @@ function fakeSqlty(version: string): string {
   writeFileSync(path, `#!/bin/sh\necho "sqlty ${version}"\n`);
   chmodSync(path, 0o755);
   return path;
+}
+
+/** The code actions of `kind` at `range`, asked again while VS Code cancels them. */
+async function codeActions(
+  uri: vscode.Uri,
+  range: vscode.Range,
+  kind: string,
+): Promise<vscode.CodeAction[]> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await vscode.commands.executeCommand<vscode.CodeAction[]>(
+        "vscode.executeCodeActionProvider",
+        uri,
+        range,
+        kind,
+      );
+    } catch (error) {
+      // VS Code cancels the request when an extension registers a code action provider meanwhile.
+      if (!(error instanceof Error && error.name === "Canceled") || attempt === 50) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
 }
 
 /** The diagnostics of `uri` once `done` holds for them. */
