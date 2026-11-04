@@ -249,6 +249,14 @@ SELECT 0x1F AS a, -0x10 AS b, 0x8000000000000000 AS c, 1_000 AS d FROM events
 -- columns: d: int (None)
 ```
 
+The `0x` prefix is case-insensitive.
+
+```sql
+SELECT 0X1F AS a, -0XFF AS b FROM events
+-- columns: a: int (None)
+-- columns: b: int (None)
+```
+
 ## Blob substrings
 
 `substr` of a blob is a blob; `trim` always returns text.

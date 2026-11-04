@@ -136,6 +136,20 @@ SELECT 0x1F AS a, 0x1F + 1 AS b, 1_000 AS c, 0xFFFFFFFFFFFFFFFF AS d
 -- columns: d: decimal.Decimal (None)
 ```
 
+The `0x`, `0o` and `0b` prefixes are case-insensitive, and `_` may follow them.
+
+```sql
+SELECT 0X1F AS a, 0x_1F AS b, 0o17 AS c, 0O7_7 AS d, 0b101 AS e, 0B1_0 + 1 AS f,
+       0o7777777777777777777777 AS g
+-- columns: a: int (None)
+-- columns: b: int (None)
+-- columns: c: int (None)
+-- columns: d: int (None)
+-- columns: e: int (None)
+-- columns: f: int (INT)
+-- columns: g: decimal.Decimal (None)
+```
+
 ## Checks
 
 ```python
