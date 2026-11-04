@@ -126,6 +126,16 @@ SELECT X'41' AS a, B'101' AS b
 -- columns: b: str (BIT)
 ```
 
+`0x1F` is an integer, as are digits grouped with `_`.
+
+```sql
+SELECT 0x1F AS a, 0x1F + 1 AS b, 1_000 AS c, 0xFFFFFFFFFFFFFFFF AS d
+-- columns: a: int (None)
+-- columns: b: int (INT)
+-- columns: c: int (None)
+-- columns: d: decimal.Decimal (None)
+```
+
 ## Checks
 
 ```python
