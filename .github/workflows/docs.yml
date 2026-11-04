@@ -7,6 +7,7 @@ on:
       - "docs/**"
       - "examples/**"
       - "scripts/generate_playground_examples.py"
+      - "scripts/check_playground.py"
       - "overrides/**"
       - "zensical.toml"
       - ".github/workflows/docs.yml"
@@ -17,6 +18,7 @@ on:
       - "docs/**"
       - "examples/**"
       - "scripts/generate_playground_examples.py"
+      - "scripts/check_playground.py"
       - "overrides/**"
       - "zensical.toml"
       - ".github/workflows/docs.yml"
@@ -57,6 +59,16 @@ jobs:
       - name: Build docs (strict)
         run: make docs
 
+      - name: Report the size of the playground engine
+        run: |
+          wasm=docs/assets/playground/sqlty_wasm.wasm
+          echo "Playground engine: $(stat -c %s "$wasm") bytes, $(gzip -9c "$wasm" | wc -c) gzipped" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check the playground under /sqlty/
+        run: |
+          uvx --python 3.13 --from playwright==1.64.1 playwright install --with-deps chromium-headless-shell
+          uvx --python 3.13 --with playwright==1.64.1 python scripts/check_playground.py --site site
+
       - name: Upload Pages artifact
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
@@ -81,3 +93,17 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+      - name: Check the deployed playground
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          uvx --python 3.13 --from playwright==1.64.1 playwright install --with-deps chromium-headless-shell
+          uvx --python 3.13 --with playwright==1.64.1 python scripts/check_playground.py "${PAGE_URL}playground/"
