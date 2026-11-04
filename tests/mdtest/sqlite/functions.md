@@ -239,6 +239,16 @@ SELECT X'41' AS a FROM events
 -- columns: a: bytes (VARBINARY)
 ```
 
+`0x1F` is an integer, 64 bits in two's complement, as are digits grouped with `_`.
+
+```sql
+SELECT 0x1F AS a, -0x10 AS b, 0x8000000000000000 AS c, 1_000 AS d FROM events
+-- columns: a: int (None)
+-- columns: b: int (None)
+-- columns: c: int (None)
+-- columns: d: int (None)
+```
+
 ## Blob substrings
 
 `substr` of a blob is a blob; `trim` always returns text.
