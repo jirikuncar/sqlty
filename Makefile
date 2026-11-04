@@ -152,12 +152,14 @@ bench-rust:  ## Criterion: catalog load, analyzer, check/rewrite_source; extra a
 .PHONY: docs
 docs: playground
 	$(ZENSICAL) build --clean
+	python3 scripts/offline.py site
 
 .PHONY: playground
-playground:  ## The engine as WebAssembly for the docs playground (needs the wasm32-unknown-unknown target)
+playground:  ## The engine as WebAssembly, and Monaco and the fonts, for the docs playground (needs the wasm32-unknown-unknown target)
 	cargo build --manifest-path rust/Cargo.toml --profile wasm --target wasm32-unknown-unknown -p sqlty-wasm
 	cp rust/target/wasm32-unknown-unknown/wasm/sqlty_wasm.wasm docs/assets/playground/
 	python3 scripts/generate_playground_examples.py
+	python3 scripts/vendor_assets.py
 
 .PHONY: check-playground
 check-playground: docs  ## Load the built playground under /sqlty/ in Chromium (needs `playwright install chromium`)

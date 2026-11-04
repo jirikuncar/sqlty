@@ -199,6 +199,15 @@ focus it and press the arrow keys. The page remembers the height and the font si
 A single fix is a quick fix on its diagnostic: click the light bulb, or press
 **Ctrl+.** with the cursor on it. **Ctrl+Z** undoes any of them.
 
+## Offline
+
+The docs work offline once they are open: a service worker keeps every page, and the
+playground once you have opened it. In Chrome or Edge, **Install** in the address bar adds
+SQLTy as an app; in Safari, **Share** then **Add to Home Screen** (iOS) or **File** then
+**Add to Dock** (macOS). The app opens the docs, with the playground among its shortcuts,
+and keeps it ready offline from its first start. Steps from `?steps=<url>` need that URL to
+be reachable; a file opened or dropped on the page does not.
+
 ## Share a session
 
 The page keeps the Python source, the schema, the dialect and `sqlty.toml` in its
