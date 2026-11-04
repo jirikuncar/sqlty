@@ -2,7 +2,8 @@
 
 > **Status:** stage 1 (`check`) merged in [#906](https://github.com/jirikuncar/sqlty/pull/906);
 > stage 2 (`breaking`) merged in [#908](https://github.com/jirikuncar/sqlty/pull/908); stage 3
-> (`server`) in review; stage 4 (`-v`) stacked on it.
+> (`server`) merged in [#913](https://github.com/jirikuncar/sqlty/pull/913); stage 4 (`-v`), the last, in
+> review.
 
 Tracks [#896](https://github.com/jirikuncar/sqlty/issues/896): projects that keep SQL in `.sql`
 files (aiosql, PugSQL, sqlc) get no checks. The engine splits and checks the files

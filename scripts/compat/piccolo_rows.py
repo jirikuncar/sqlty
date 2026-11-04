@@ -1,5 +1,5 @@
 """Rows from Piccolo: each column type's SQL per engine (`column_type`), with the
-column's Python type (`value_type`)."""
+column's Python type (`value_type`), alone and as the base column of an `Array`."""
 
 from __future__ import annotations
 
@@ -27,7 +27,6 @@ def rows() -> Iterator[Row]:
     from piccolo.columns.base import Column
 
     warnings.simplefilter("ignore")
-    version = piccolo.__VERSION__ if hasattr(piccolo, "__VERSION__") else "1.36.0"
     for name in sorted(dir(column_types)):
         cls = getattr(column_types, name)
         if (
@@ -40,16 +39,26 @@ def rows() -> Iterator[Row]:
             column = cls()
         except TypeError:  # needs arguments: Array, ForeignKey
             continue
-        for dialect, engine in ENGINES.items():
-            meta = type(column._meta)
-            with mock.patch.object(
-                meta, "engine_type", new_callable=mock.PropertyMock, return_value=engine
-            ):
-                ddl = column.column_type
-            # JSON values are decoded by Piccolo: any JSON value.
-            python = (
-                "typing.Any"
-                if name in ("JSON", "JSONB")
-                else _python(getattr(column, "value_type", None))
-            )
-            yield Row("piccolo", version, dialect, "column", ddl, python, f"columns.{name}")
+        yield from _rows(piccolo.__VERSION__, column, f"columns.{name}")
+        if name not in ("JSON", "JSONB", "Serial", "BigSerial"):
+            array = column_types.Array(base_column=cls())
+            yield from _rows(piccolo.__VERSION__, array, f"columns.Array({name})")
+
+
+def _rows(version: str, column: object, provenance: str) -> Iterator[Row]:
+    from piccolo.columns.column_types import JSON, Array
+
+    for dialect, engine in ENGINES.items():
+        meta = type(column._meta)
+        with mock.patch.object(
+            meta, "engine_type", new_callable=mock.PropertyMock, return_value=engine
+        ):
+            ddl = column.column_type
+        if isinstance(column, JSON):  # decoded by Piccolo: any JSON value
+            python = "typing.Any"
+        elif isinstance(column, Array):
+            inner = _python(column._get_inner_value_type())
+            python = inner and f"list[{inner}]"
+        else:
+            python = _python(getattr(column, "value_type", None))
+        yield Row("piccolo", version, dialect, "column", ddl, python, provenance)
