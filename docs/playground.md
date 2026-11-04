@@ -13,6 +13,9 @@ queries as you type. It runs in your browser. The engine is compiled to
         <option value="sqlite">SQLite</option>
       </select>
     </label>
+    <button type="button" class="md-button" data-fix>Fix all</button>
+    <button type="button" class="md-button" data-rewrite>Rewrite</button>
+    <button type="button" class="md-button" data-strip>Strip</button>
     <button type="button" class="md-button" data-copy-link>Copy link</button>
     <span data-link-status role="status"></span>
   </div>
@@ -55,11 +58,22 @@ queries as you type. It runs in your browser. The engine is compiled to
 
 | Panel | What it shows | From the command line |
 |---|---|---|
-| Python | Diagnostics under the code, SQL highlighted in query strings, completion and hover in queries | [`sqlty server`](recipes/vscode.md) |
+| Python | Diagnostics under the code with their quick fixes, SQL highlighted in query strings, completion and hover in queries | [`sqlty server`](recipes/vscode.md) |
 | Types | The row type, columns and parameters of each query | `sqlty check --explain` |
 | Problems | What `sqlty check` reports | [`sqlty check`](reference/cli.md) |
 | `sqlty rewrite` | The source with each query wrapped in `SQL[T]` | [`sqlty rewrite`](reference/cli.md) |
 | `sqlty.toml` | The `dialect`, `import-style` and `rules` of [`[tool.sqlty]`](reference/configuration.md); its `dialect` wins over the select | `sqlty.toml` or `pyproject.toml` |
+
+## Change the source
+
+| Button | Applies to the Python source | From the command line |
+|---|---|---|
+| **Fix all** | Every quick fix, as `sqlty check --fix` makes them | `sqlty check --fix` |
+| **Rewrite** | Each query wrapped in `SQL[T]`, as the `sqlty rewrite` panel shows | `sqlty rewrite` |
+| **Strip** | Each `SQL[T]` wrapper removed | `sqlty strip` |
+
+A single fix is a quick fix on its diagnostic: click the light bulb, or press
+**Ctrl+.** with the cursor on it. **Ctrl+Z** undoes any of them.
 
 ## Share a session
 

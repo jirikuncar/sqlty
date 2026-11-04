@@ -53,7 +53,7 @@ const [monaco, ask, shared] = await Promise.all([
   engine(),
   decode(location.hash.slice(1)),
 ]);
-let current = { diagnostics: [], queries: [], highlights: [], rewritten: "" };
+let current = { diagnostics: [], queries: [], highlights: [], rewritten: "", stripped: "", fixed: "" };
 const refreshed = new monaco.Emitter();
 
 for (const [name, base] of [["sqlty-light", "vs"], ["sqlty-dark", "vs-dark"]]) {
@@ -169,6 +169,44 @@ monaco.languages.registerCompletionItemProvider("python", {
         range,
       })),
     };
+  },
+});
+
+monaco.languages.registerCodeActionProvider("python", {
+  provideCodeActions(model, range, context) {
+    if (model !== source.getModel()) return { actions: [], dispose() {} };
+    const actions = context.markers.flatMap((marker) => {
+      const found = current.diagnostics.find(
+        (diagnostic) =>
+          diagnostic.rule === marker.code &&
+          diagnostic.fix.length &&
+          model.getPositionAt(diagnostic.start).lineNumber === marker.startLineNumber &&
+          model.getPositionAt(diagnostic.start).column === marker.startColumn,
+      );
+      if (!found) return [];
+      return [
+        {
+          title: `Fix ${found.rule}`,
+          kind: "quickfix",
+          diagnostics: [marker],
+          isPreferred: true,
+          edit: {
+            edits: found.fix.map((edit) => ({
+              resource: model.uri,
+              versionId: model.getVersionId(),
+              textEdit: {
+                range: monaco.Range.fromPositions(
+                  model.getPositionAt(edit.start),
+                  model.getPositionAt(edit.end),
+                ),
+                text: edit.replacement,
+              },
+            })),
+          },
+        },
+      ];
+    });
+    return { actions, dispose() {} };
   },
 });
 
@@ -290,6 +328,16 @@ source.onDidChangeModelContent(later);
 schema.onDidChangeModelContent(later);
 config.onDidChangeModelContent(later);
 dialect.addEventListener("change", later);
+for (const [button, made] of [["fix", "fixed"], ["rewrite", "rewritten"], ["strip", "stripped"]]) {
+  root.querySelector(`[data-${button}]`).addEventListener("click", () => {
+    refresh();
+    const model = source.getModel();
+    if (current[made] === model.getValue()) return;
+    source.pushUndoStop();
+    source.executeEdits("sqlty", [{ range: model.getFullModelRange(), text: current[made] }]);
+    source.pushUndoStop();
+  });
+}
 root.querySelector("[data-copy-link]").addEventListener("click", async () => {
   const link = await share();
   if (!link) return;

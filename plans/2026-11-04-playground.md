@@ -1,7 +1,7 @@
 # Playground: share links, configuration, fixes and breaking changes
 
-> **Status:** stage 1 (share links and configuration) in review in [#895](https://github.com/jirikuncar/sqlty/pull/895).
-> Stages 2 to 6 not started.
+> **Status:** stage 1 (share links and configuration) merged in [#895](https://github.com/jirikuncar/sqlty/pull/895);
+> stage 2 (fixes, rewrite and strip) in review. Stages 3 to 6 not started.
 
 Tracks [#893](https://github.com/jirikuncar/sqlty/issues/893): what keeps the Playground page
 from being the place to reproduce a bug or show a feature. Every stage keeps the page static:
@@ -26,3 +26,12 @@ no server, nothing leaves the browser.
 - The session (`source`, `schema`, `dialect`, `config`) is JSON, deflated with
   `CompressionStream`, in base64url after `#`. It is written on every edit and restored on
   load and on `hashchange`. Above 8000 characters the page drops the hash and says so.
+
+## Stage 2
+
+- Each diagnostic of `analyze` carries its `fix` edits, with the imports they need
+  (`add_fix_imports`), so one quick fix leaves code that runs, as in `sqlty server`.
+- `analyze` also returns `fixed` (`fix_source`) and `stripped` (`strip_source`): the
+  **Fix all**, **Rewrite** and **Strip** buttons replace the source with them as one undo step.
+- `# sqlty: ignore` comments are read by the Python half of `sqlty check`, so the page reports
+  and fixes what they would silence.

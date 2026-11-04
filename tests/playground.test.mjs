@@ -49,3 +49,12 @@ test("a session survives its share link", async () => {
   assert.deepEqual(await decode(hash), session);
   assert.equal(await decode("not-a-session"), null);
 });
+
+test("a diagnostic carries its quick fix, and the source what fix and strip make", () => {
+  const source = 'q = "--sql\\nSELECT nme FROM users"\n';
+  const answer = ask({ op: "analyze", source, schema, dialect: "postgres" });
+  const typo = answer.diagnostics.find((found) => found.rule === "unknown-column");
+  assert.deepEqual(typo.fix, [{ start: 19, end: 22, replacement: "name" }]);
+  assert.equal(answer.fixed, 'from sqlty import SQL\nq = SQL[tuple[str]]("--sql\\nSELECT name FROM users")\n');
+  assert.equal(ask({ op: "analyze", source: answer.fixed, schema, dialect: "postgres" }).stripped, source.replace("nme", "name"));
+});
