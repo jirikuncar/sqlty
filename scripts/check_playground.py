@@ -1,5 +1,6 @@
 """Load the docs playground in Chromium and check that it works: the engine answers, the
-tour gets its diagnostics, a share link restores a session, and steps move and reset.
+tour gets its diagnostics, a share link restores a session, steps move and reset, and
+the site works offline once its service worker has cached it.
 
     uvx --with playwright python scripts/check_playground.py https://jirikuncar.github.io/sqlty/playground/
     uvx --with playwright python scripts/check_playground.py --site site
@@ -77,6 +78,26 @@ def check(page: Page, url: str) -> None:
     page.goto(stepped)
     page.wait_for_selector("[data-steps]:not([hidden])", timeout=60_000)
     assert page.input_value("[data-step-select]") == "1"
+
+    offline(page, url)
+
+
+def offline(page: Page, url: str) -> None:
+    """The service worker of ``scripts/offline.py`` keeps the docs and the playground offline."""
+    page.goto(url)
+    page.wait_for_function("navigator.serviceWorker.controller !== null", timeout=60_000)
+    cached = "caches.match(new URL('../assets/playground/sqlty_wasm.wasm', location.href))"
+    page.wait_for_function(f"{cached}.then(Boolean)", polling=500, timeout=60_000)
+    page.context.set_offline(True)
+    try:
+        page.goto(url + "?steps=../assets/playground/steps.json")
+        page.wait_for_selector("[data-steps]:not([hidden])", timeout=60_000)
+        problems = page.inner_text("[data-problems]")
+        assert "stale-rewrite" in problems, problems
+        page.goto(url.removesuffix("playground/") + "reference/rules/")
+        assert page.title().startswith("Rules"), page.title()
+    finally:
+        page.context.set_offline(False)
 
 
 @contextlib.contextmanager

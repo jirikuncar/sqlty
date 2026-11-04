@@ -2,7 +2,7 @@ import { load } from "./engine.js";
 import { decode, encode, MAX_LINK } from "./share.js";
 import { fold, unfold } from "./steps.js";
 
-const MONACO = "https://cdn.jsdelivr.net/npm/monaco-editor@0.57.0/min/vs";
+const MONACO = new URL("../vendor/monaco/vs", import.meta.url).href;
 const LEGEND = ["keyword", "string", "number", "comment", "operator", "parameter"];
 
 const SCHEMA = `CREATE TABLE users (
@@ -626,6 +626,7 @@ function resizable(handle, panel) {
   });
 }
 
+navigator.serviceWorker?.ready.then((registration) => registration.active?.postMessage("playground"));
 if (saved.size) root.style.setProperty("--sqlty-font", `${size}px`);
 if (shared) resume(shared);
 else if (linkedDeck?.error) linked.textContent = String(linkedDeck.error.message ?? linkedDeck.error);
