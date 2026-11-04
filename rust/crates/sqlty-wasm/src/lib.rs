@@ -15,9 +15,12 @@
 //! assert_eq!(answer["queries"][0]["row_type"], "tuple[int]");
 //! ```
 
+use std::collections::HashMap;
+
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlty_python::checker::{check_source, query_sites, SiteKind};
+use sqlty_python::config;
 use sqlty_python::locate::{self, Queries};
 use sqlty_python::options::Options;
 use sqlty_python::rewriter::rewrite_source_with;
@@ -44,6 +47,9 @@ struct Request {
     dialect: String,
     #[serde(default)]
     offset: usize,
+    /// A `sqlty.toml`: its `dialect` wins over the request's.
+    #[serde(default)]
+    config: String,
 }
 
 /// Answer a JSON request about the Python `source`, read against `schema` in `dialect`.
@@ -54,25 +60,41 @@ struct Request {
 /// - `complete`: the completions at `offset`, and the `range` they replace; `null` outside
 ///   a query.
 /// - `hover`: what the word at `offset` is, in Markdown; `null` when nothing.
+///
+/// `config` is a `sqlty.toml` whose `dialect`, `import-style` and `rules` apply; another key,
+/// or an invalid one, is an `error`, as `sqlty check` reports it.
 pub fn run(request: &str) -> String {
+    let error = |error: String| json!({ "error": error }).to_string();
     let request: Request = match serde_json::from_str(request) {
         Ok(request) => request,
-        Err(error) => return json!({ "error": error.to_string() }).to_string(),
+        Err(found) => return error(found.to_string()),
     };
+    let settings = match settings(&request.config) {
+        Ok(settings) => settings,
+        Err(found) => return error(found),
+    };
+    let dialect = settings.dialect.as_deref().unwrap_or(&request.dialect);
     let schema = (!request.schema.trim().is_empty())
-        .then(|| load_schema_with_skipped(&request.schema, &request.dialect).0);
-    let options = match Options::new(&request.dialect, schema.as_deref(), None, false) {
-        Ok(options) => options,
-        Err(error) => return json!({ "error": error.to_string() }).to_string(),
+        .then(|| load_schema_with_skipped(&request.schema, dialect).0);
+    let options = Options::new(
+        dialect,
+        schema.as_deref(),
+        settings.import_style.as_deref(),
+        false,
+    );
+    let (options, rules) = match options
+        .and_then(|options| Ok((options, RuleConfig::from_overrides(Some(settings.rules))?)))
+    {
+        Ok(found) => found,
+        Err(found) => return error(found.to_string()),
     };
     let source = request.source.as_str();
-    let dialect = request.dialect.as_str();
     let utf16 = |byte: usize| source[..byte].encode_utf16().count();
     let offset = byte_offset(source, request.offset);
     let queries = Queries::new(source, &options.style, &[]);
     let answer = match request.op {
         Op::Analyze => json!({
-            "diagnostics": check_source(source, &options, &RuleConfig::default(), &[])
+            "diagnostics": check_source(source, &options, &rules, &[])
                 .iter()
                 .map(|found| json!({
                     "rule": found.rule.name(),
@@ -118,6 +140,47 @@ pub fn run(request: &str) -> String {
         },
     };
     answer.to_string()
+}
+
+struct Settings {
+    dialect: Option<String>,
+    import_style: Option<String>,
+    rules: HashMap<String, String>,
+}
+
+/// The settings of the `sqlty.toml` text `config`, validated as `sqlty check` validates it.
+fn settings(config: &str) -> Result<Settings, String> {
+    let table = config::load(config.as_bytes(), "sqlty.toml", "sqlty.toml", true)
+        .map_err(|error| error.to_string())?
+        .map(|config| config.table)
+        .unwrap_or_default();
+    // The other keys name files, which the page has none of.
+    if let Some(key) = table
+        .keys()
+        .find(|key| !["dialect", "import-style", "rules"].contains(&key.as_str()))
+    {
+        return Err(format!(
+            "sqlty.toml: the playground reads only dialect, import-style, rules, not '{key}'"
+        ));
+    }
+    let text = |key: &str| {
+        table
+            .get(key)
+            .and_then(|value| value.as_str())
+            .map(String::from)
+    };
+    let rules = table
+        .get("rules")
+        .and_then(|rules| rules.as_table())
+        .into_iter()
+        .flatten();
+    Ok(Settings {
+        dialect: text("dialect"),
+        import_style: text("import-style"),
+        rules: rules
+            .filter_map(|(rule, severity)| Some((rule.clone(), severity.as_str()?.to_string())))
+            .collect(),
+    })
 }
 
 /// The row type, columns and parameters of the query `sql` on `line`.

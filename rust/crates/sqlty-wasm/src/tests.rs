@@ -82,3 +82,46 @@ fn an_unknown_dialect_is_an_error() {
     let answer = ask(&json!({"op": "analyze", "source": "", "dialect": "postgress"}));
     assert!(answer["error"].as_str().unwrap().contains("postgress"));
 }
+
+#[test]
+fn config_sets_the_dialect_import_style_and_rules() {
+    let source = "q = \"--sql\\nSELECT * FROM users\"\n";
+    let config = "dialect = \"sqlite\"\nimport-style = \"import sqlty\"\n\n[rules]\nstale-rewrite = \"error\"\n";
+    let answer = ask(
+        &json!({"op": "analyze", "source": source, "schema": SCHEMA, "dialect": "mysql", "config": config}),
+    );
+    assert_eq!(answer["diagnostics"][0]["rule"], "stale-rewrite");
+    assert_eq!(answer["diagnostics"][0]["severity"], "error");
+    assert_eq!(
+        answer["rewritten"],
+        "import sqlty\nq = sqlty.SQL[tuple[int, str, str | None]](\"--sql\\nSELECT * FROM users\")\n"
+    );
+    let source = "q = \"--sql\\nSELECT 1 = 1 AS b\"\n";
+    for (dialect, row_type) in [("postgres", "tuple[bool]"), ("sqlite", "tuple[int]")] {
+        let config = format!("dialect = \"{dialect}\"");
+        let answer =
+            ask(&json!({"op": "analyze", "source": source, "dialect": "mysql", "config": config}));
+        assert_eq!(answer["queries"][0]["row_type"], row_type);
+    }
+}
+
+#[test]
+fn config_errors_are_reported_as_sqlty_check_reports_them() {
+    for (config, message) in [
+        (
+            "dialet = \"mysql\"",
+            "unknown key 'dialet' in [tool.sqlty] (did you mean 'dialect'?)",
+        ),
+        ("[rules]\nselect-star = \"loud\"", "loud"),
+        (
+            "schema = \"schema.sql\"",
+            "the playground reads only dialect, import-style, rules, not 'schema'",
+        ),
+        ("import-style = \"from x\"", "Unsupported import-style"),
+    ] {
+        let answer =
+            ask(&json!({"op": "analyze", "source": "", "dialect": "postgres", "config": config}));
+        let error = answer["error"].as_str().unwrap();
+        assert!(error.contains(message), "{error}");
+    }
+}
