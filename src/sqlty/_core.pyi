@@ -98,6 +98,15 @@ def check_source(
     untyped: bool = False,
     any_calls: list[int] = ...,
 ) -> list[Diagnostic]: ...
+def check_queries(
+    source: str,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
+    rules: dict[str, str] | None = None,
+    query_format: str = "auto",
+    name: str = "",
+) -> list[Diagnostic]: ...
 def wrapped_queries(
     source: str, *, import_style: str | None = None
 ) -> list[tuple[int, str, str | None, tuple[int, int]]]: ...

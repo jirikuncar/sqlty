@@ -35,7 +35,15 @@ Kind = Literal[
     "hover",
     "highlighted",
 ]
-SQL_KINDS: tuple[Kind, ...] = ("inferred", "expanded", "columns", "json", "params", "rules")
+SQL_KINDS: tuple[Kind, ...] = (
+    "inferred",
+    "expanded",
+    "columns",
+    "json",
+    "params",
+    "rules",
+    "error",
+)
 PY_KINDS: tuple[Kind, ...] = (
     "rewritten",
     "rewritten-file",
@@ -287,20 +295,25 @@ def _add_python(section: Section, body: list[str], start: int, fail: Fail) -> No
 def _add_sql(section: Section, body: list[str], start: int) -> None:
     lines: list[tuple[int, str]] = []
     assertions: list[Assertion] = []
+    pending: list[Assertion] = []
     for offset, text in enumerate(body):
         if match := _SQL_ASSERTION.match(text):
             indent, kind, value = match.groups()
-            _append(
-                assertions,
-                Assertion(
-                    cast(Kind, kind),
-                    (value or "").rstrip(),
-                    start + offset,
-                    comment="--",
-                    indent=indent,
-                ),
+            assertion = Assertion(
+                cast(Kind, kind),
+                (value or "").rstrip(),
+                start + offset,
+                comment="--",
+                indent=indent,
             )
+            if kind == "error":
+                pending.append(assertion)
+            _append(assertions, assertion)
         else:
+            if text.strip():
+                for a in pending:
+                    a.target = start + offset
+                pending.clear()
             lines.append((start + offset, text))
     if assertions:
         section.units.append(Unit("sql", lines, assertions))

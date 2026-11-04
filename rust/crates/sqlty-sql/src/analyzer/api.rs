@@ -149,6 +149,18 @@ pub fn analyze_with_diagnostics(
     parse(sql, dialect).analyze_with_diagnostics(schema)
 }
 
+/// The byte range of each statement of `sql`: split on `;` outside quotes, comments and
+/// dollar-quoted bodies, without the space and comments around it.
+///
+/// ```
+/// let sql = "SELECT 1; -- two\nSELECT 'a;b'";
+/// let ranges = sqlty_sql::analyzer::statement_ranges(sql, "postgres");
+/// assert_eq!(ranges.iter().map(|r| &sql[r.clone()]).collect::<Vec<_>>(), ["SELECT 1", "SELECT 'a;b'"]);
+/// ```
+pub fn statement_ranges(sql: &str, dialect: &str) -> Vec<std::ops::Range<usize>> {
+    crate::ddl::statement_ranges(sql, SqlDialect::from_name(dialect) == SqlDialect::MySql)
+}
+
 /// Why `sql` does not parse in `dialect`, as sqlparser words it; `None` when it parses
 /// (empty SQL included).
 pub fn parse_error(sql: &str, dialect: &str) -> Option<String> {

@@ -27,6 +27,7 @@ mod server;
 use sqlty_python::checker;
 use sqlty_python::fixer;
 use sqlty_python::locate;
+use sqlty_python::queries;
 use sqlty_python::rewriter;
 use sqlty_sql::analyzer;
 use sqlty_sql::highlight::Highlight;
@@ -793,6 +794,55 @@ fn check_source(
     })
 }
 
+/// Check the named queries of a `.sql` file: `unparsed-query` and the name rules of each
+/// statement. `query_format` is a `query-format` value (`"auto"`, `"aiosql"`, `"sqlc"`,
+/// `"pugsql"`, `"file"`); `name` is the file name without its extension, the name of a
+/// query of a file without headers.
+///
+/// Example:
+///     check_queries("-- name: get-user^\nSELECT nope FROM users", schema_sql="CREATE TABLE users (id INT)")
+///
+/// Returns:
+///     The diagnostic dicts of `check_source`, without fixes; `line` is 1-based.
+///
+/// Raises:
+///     ValueError: unknown `query_format`, or `rules` names an unknown rule or severity
+#[pyfunction]
+#[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, schema_sql = None, rules = None, query_format = "auto", name = ""))]
+fn check_queries(
+    py: Python<'_>,
+    source: &str,
+    dialect: DialectArg,
+    schema_sql: Option<SchemaArg>,
+    rules: Option<HashMap<String, String>>,
+    query_format: &str,
+    name: &str,
+) -> Result<Vec<DiagnosticOut>, Error> {
+    let dialect = dialect.0;
+    let format = query_format
+        .parse::<queries::Format>()
+        .map_err(|()| ConfigError::QueryFormat(query_format.to_string()))?;
+    detach(py, || {
+        let schema = schema(schema_sql, dialect);
+        let options = Options::new(dialect, schema.as_deref(), None, false)?;
+        let rules = RuleConfig::from_overrides(rules).map_err(ConfigError::from)?;
+        Ok(
+            queries::check_queries(source, format, name, &options, &rules)
+                .into_iter()
+                .map(|diag| DiagnosticOut {
+                    rule: diag.rule.name(),
+                    message: diag.message,
+                    severity: diag.severity.as_str(),
+                    line: diag.line,
+                    start: diag.span.start,
+                    end: diag.span.end,
+                    fix: Vec::new(),
+                })
+                .collect(),
+        )
+    })
+}
+
 /// `(line, annotation, query, annotation_span)` for each `SQL[T](...)` call in Python source.
 ///
 /// `query` is the `--sql` string without its prefix, or None when the call
@@ -1093,6 +1143,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(expand_star, m)?)?;
     m.add_function(wrap_pyfunction!(select_star_finding, m)?)?;
     m.add_function(wrap_pyfunction!(check_source, m)?)?;
+    m.add_function(wrap_pyfunction!(check_queries, m)?)?;
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;
     m.add_function(wrap_pyfunction!(query_at, m)?)?;

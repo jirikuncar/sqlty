@@ -14,7 +14,7 @@ Usage:
     parsed.calls_to(names)  # Call nodes, skipping bodies whose source never matches ``names``
     parsed.typing_aliases   # local names of typing members: {'t': 'typing', 'A': 'Any'}
     parsed.imported_names   # absolute imports, local name to dotted name: {'D': 'decimal.Decimal'}
-    parsed.ignores          # {line: _Ignore} for "# sqlty: ignore" comments
+    parsed.ignores          # {line: Ignore} for "# sqlty: ignore" comments
 
 Pass the object wherever a function takes ``source: str | ParsedSource``
 (``check_source``, ``HelperIndex.add``, ``find_helper_calls``,
@@ -58,7 +58,7 @@ _IGNORE_RE = re.compile(r"#\s*sqlty:\s*ignore\b(?:\[([^\]]*)\])?")
 
 
 @dataclass(frozen=True)
-class _Ignore:
+class Ignore:
     """A ``# sqlty: ignore`` comment; ``rules`` is ``None`` for a bare one.
 
     ``start`` and ``end`` are the byte offsets of the comment.
@@ -714,12 +714,12 @@ class ParsedSource:
         return "sqlty:" in self.text
 
     @functools.cached_property
-    def ignores(self) -> dict[int, _Ignore]:
+    def ignores(self) -> dict[int, Ignore]:
         """``# sqlty: ignore`` comments by line, read from COMMENT tokens only.
 
         Tokenizes only when the text contains ``sqlty:``.
         """
-        found: dict[int, _Ignore] = {}
+        found: dict[int, Ignore] = {}
         if not self.has_ignore_comments:
             return found
         tokens = tokenize.generate_tokens(io.StringIO(self.text).readline)
@@ -735,7 +735,7 @@ class ParsedSource:
                 )
                 line, column = tok.start
                 start = self._byte_lines[line - 1] + len(tok.line[:column].encode())
-                found[line] = _Ignore(line, rules, start, start + len(tok.string.encode()))
+                found[line] = Ignore(line, rules, start, start + len(tok.string.encode()))
         except tokenize.TokenError, SyntaxError:
             pass
         return found
