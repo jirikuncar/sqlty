@@ -23,7 +23,15 @@ const SITE = %(site)s;
 const PLAYGROUND = %(playground)s;
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SITE)).then(() => self.skipWaiting()));
+  event.waitUntil(
+    (async () => {
+      // A build that replaces one with the playground cached keeps it cached.
+      const had = await caches.match("assets/playground/sqlty_wasm.wasm");
+      const cache = await caches.open(CACHE);
+      await cache.addAll(had ? [...SITE, ...PLAYGROUND] : SITE);
+      await self.skipWaiting();
+    })(),
+  );
 });
 
 self.addEventListener("activate", (event) => {

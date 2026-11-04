@@ -225,6 +225,7 @@ async function openFile() {
   const input = Object.assign(document.createElement("input"), { type: "file", accept: ".json,application/json" });
   const file = await new Promise((resolve) => {
     input.addEventListener("change", () => resolve(input.files[0]));
+    input.addEventListener("cancel", () => resolve(null));
     input.click();
   });
   if (file) take(JSON.parse(await file.text()));
@@ -436,6 +437,7 @@ function restore(saved) {
     if (typeof value === "string") replace(model, value);
   }
   if ([...dialect.options].some((option) => option.value === saved.dialect)) dialect.value = saved.dialect;
+  later();
 }
 
 // A deck, or null, from a URL that `?steps=` names, relative to the page.
@@ -597,20 +599,30 @@ window.addEventListener("hashchange", async () => {
 
 // A shared session: its steps, then the edits made on its step.
 function resume(saved) {
-  if (Array.isArray(saved.steps)) begin(saved, saved.step ?? 0);
-  restore(saved);
+  try {
+    begin(Array.isArray(saved.steps) ? saved : null, saved.step ?? 0);
+    restore(saved);
+  } catch (error) {
+    linked.textContent = String(error.message ?? error);
+  }
   example.value = chosen();
 }
 
 // Drag `handle` to resize `panel`, or focus it and press the arrow keys.
 function resizable(handle, panel) {
-  const set = (height) => {
+  let wanted = saved.console;
+  const fit = () => {
+    if (!wanted) return;
     const most = root.clientHeight - 10 * 16;
-    const fitted = Math.max(48, Math.min(most, height));
-    root.style.setProperty("--sqlty-console", `${fitted}px`);
-    remember({ console: fitted });
+    root.style.setProperty("--sqlty-console", `${Math.max(48, Math.min(most, wanted))}px`);
   };
-  if (saved.console) root.style.setProperty("--sqlty-console", `${saved.console}px`);
+  const set = (height) => {
+    wanted = Math.max(48, Math.min(root.clientHeight - 10 * 16, height));
+    fit();
+    remember({ console: wanted });
+  };
+  fit();
+  new ResizeObserver(fit).observe(root);
   handle.addEventListener("pointerdown", (event) => {
     handle.setPointerCapture(event.pointerId);
     const from = event.clientY;
@@ -630,10 +642,7 @@ navigator.serviceWorker?.ready.then((registration) => registration.active?.postM
 if (saved.size) root.style.setProperty("--sqlty-font", `${size}px`);
 if (shared) resume(shared);
 else if (linkedDeck?.error) linked.textContent = String(linkedDeck.error.message ?? linkedDeck.error);
-else if (linkedDeck) {
-  begin(linkedDeck);
-  example.value = chosen();
-}
+else if (linkedDeck) resume(linkedDeck);
 refresh();
 
 async function engine() {
