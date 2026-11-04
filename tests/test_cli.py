@@ -1712,3 +1712,30 @@ def test_unknown_query_format_is_an_error(tmp_path, monkeypatch, capsys) -> None
 
     assert code == 2
     assert "unknown query-format 'aiosq' (did you mean 'aiosql'?)" in err
+
+
+def test_check_verbose_prints_the_types_of_named_queries(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "sqlty.toml").write_text('schema = "schema.sql"\nqueries = "sql/"\n')
+    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INT NOT NULL, email TEXT);\n")
+    (tmp_path / "sql").mkdir()
+    (tmp_path / "sql" / "users.sql").write_text(
+        "-- name: by-email^\nSELECT id, email FROM users WHERE email = :email;\n"
+        "-- name: drop!\nDELETE FROM users WHERE id = $1;\n"
+        "-- name: broken\nSELECT nope FROM users;\n"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    code, out, _ = _run(["check", "-v", "."], capsys)
+
+    path = f"sql{os.sep}users.sql"
+    assert (code, out.splitlines()) == (
+        1,
+        [
+            f"{path}:6: [unknown-column] column `nope` does not exist in `users`",
+            f"{path}: by_email(email: str) -> tuple[int, str]",
+            f"{path}: drop($1: int) -> None",
+            f"{path}: broken() -> unknown",
+            "Found 1 error(s)",
+        ],
+    )
+    assert _run(["check", "-v", "--output-format", "json", "."], capsys)[1].startswith("[")

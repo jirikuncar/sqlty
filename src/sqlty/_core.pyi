@@ -114,6 +114,9 @@ def check_queries(
     query_format: str = "auto",
     name: str = "",
 ) -> list[Diagnostic]: ...
+def named_queries(
+    source: str, *, query_format: str = "auto", name: str = ""
+) -> list[tuple[str, int, int]]: ...
 def wrapped_queries(
     source: str, *, import_style: str | None = None
 ) -> list[tuple[int, str, str | None, tuple[int, int]]]: ...
