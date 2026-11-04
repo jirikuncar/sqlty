@@ -1,4 +1,5 @@
 import { load } from "./engine.js";
+import { decode, encode, MAX_LINK } from "./share.js";
 
 const MONACO = "https://cdn.jsdelivr.net/npm/monaco-editor@0.57.0/min/vs";
 const LEGEND = ["keyword", "string", "number", "comment", "operator", "parameter"];
@@ -41,8 +42,17 @@ stale = SQL[tuple[int, str]]("--sql\\nSELECT id, email FROM users")
 joined = "--sql\\nSELECT o.id, u.name FROM orders AS o JOIN users AS u ON u.id = o.user_id"
 `;
 
+const CONFIG = `# The [tool.sqlty] keys that need no files: dialect, import-style and rules.
+[rules]
+stale-rewrite = "error"
+`;
+
 const root = document.getElementById("sqlty-playground");
-const [monaco, ask] = await Promise.all([loadMonaco(), engine()]);
+const [monaco, ask, shared] = await Promise.all([
+  loadMonaco(),
+  engine(),
+  decode(location.hash.slice(1)),
+]);
 let current = { diagnostics: [], queries: [], highlights: [], rewritten: "" };
 const refreshed = new monaco.Emitter();
 
@@ -86,12 +96,19 @@ const schema = monaco.editor.create(root.querySelector("[data-schema]"), {
   value: SCHEMA,
   language: "sql",
 });
+const config = monaco.editor.create(root.querySelector("[data-config]"), {
+  ...options,
+  value: CONFIG,
+  language: "ini",
+});
 const rewritten = monaco.editor.create(root.querySelector("[data-rewritten]"), {
   ...options,
   language: "python",
   readOnly: true,
 });
 const dialect = root.querySelector("[data-dialect]");
+const linked = root.querySelector("[data-link-status]");
+if (shared) restore(shared);
 
 function request(op, offset = 0) {
   return {
@@ -100,6 +117,7 @@ function request(op, offset = 0) {
     source: source.getValue(),
     schema: schema.getValue(),
     dialect: dialect.value,
+    config: config.getValue(),
   };
 }
 
@@ -210,6 +228,32 @@ function refresh() {
   refreshed.fire();
 }
 
+function session() {
+  return {
+    source: source.getValue(),
+    schema: schema.getValue(),
+    dialect: dialect.value,
+    config: config.getValue(),
+  };
+}
+
+function restore(saved) {
+  for (const [editor, value] of [[source, saved.source], [schema, saved.schema], [config, saved.config]]) {
+    if (typeof value === "string") editor.setValue(value);
+  }
+  if ([...dialect.options].some((option) => option.value === saved.dialect)) dialect.value = saved.dialect;
+}
+
+async function share() {
+  const hash = await encode(session());
+  const url = new URL(location.href);
+  url.hash = hash;
+  const fits = url.href.length <= MAX_LINK;
+  history.replaceState(null, "", fits ? url : url.pathname);
+  linked.textContent = fits ? "" : `Too large to share as a link (${url.href.length} characters).`;
+  return fits ? url.href : null;
+}
+
 function describe(query) {
   const item = document.createElement("li");
   const head = document.createElement("code");
@@ -237,11 +281,25 @@ function describe(query) {
 let timer;
 const later = () => {
   clearTimeout(timer);
-  timer = setTimeout(refresh, 150);
+  timer = setTimeout(() => {
+    refresh();
+    share();
+  }, 150);
 };
 source.onDidChangeModelContent(later);
 schema.onDidChangeModelContent(later);
-dialect.addEventListener("change", refresh);
+config.onDidChangeModelContent(later);
+dialect.addEventListener("change", later);
+root.querySelector("[data-copy-link]").addEventListener("click", async () => {
+  const link = await share();
+  if (!link) return;
+  await navigator.clipboard.writeText(link);
+  linked.textContent = "Link copied.";
+});
+window.addEventListener("hashchange", async () => {
+  const saved = await decode(location.hash.slice(1));
+  if (saved) restore(saved);
+});
 refresh();
 
 async function engine() {
