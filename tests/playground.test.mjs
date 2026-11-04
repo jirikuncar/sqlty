@@ -70,3 +70,9 @@ test("each example of examples/ checks as sqlty check does", async () => {
     assert.equal(answer.rewritten, example.source, example.name);
   }
 });
+
+test("a column names the inference rule that typed it, as --explain does", () => {
+  const source = 'q = "--sql\\nSELECT SUM(id) AS total FROM users"';
+  const [column] = ask({ op: "analyze", source, schema, dialect: "postgres" }).queries[0].columns;
+  assert.equal(column.type_rule.id, "postgres.aggregate.sum-integers");
+});

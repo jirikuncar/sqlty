@@ -1,8 +1,9 @@
 # Playground: share links, configuration, fixes and breaking changes
 
-> **Status:** stage 1 (share links and configuration) merged in [#895](https://github.com/jirikuncar/sqlty/pull/895);
-> stage 2 (fixes, rewrite and strip) merged in [#899](https://github.com/jirikuncar/sqlty/pull/899); stage 3
-> (examples) in review. Stages 4 to 6 not started.
+> **Status:** stages 1 (share links and configuration), 2 (fixes, rewrite and strip) and 3 (examples)
+> merged in [#895](https://github.com/jirikuncar/sqlty/pull/895), [#899](https://github.com/jirikuncar/sqlty/pull/899)
+> and [#900](https://github.com/jirikuncar/sqlty/pull/900); stage 4 (output views) in review. Stages 5 and 6
+> not started.
 
 Tracks [#893](https://github.com/jirikuncar/sqlty/issues/893): what keeps the Playground page
 from being the place to reproduce a bug or show a feature. Every stage keeps the page static:
@@ -46,3 +47,10 @@ no server, nothing leaves the browser.
   example with a share link.
 - `tests/playground.test.mjs` checks every example on the WebAssembly build: no `error`
   diagnostic, and nothing left to rewrite, as the `examples` hook asserts with `sqlty check`.
+
+## Stage 4
+
+- Each column of `analyze` names its `type_rule` and `nullability_rule` (`explain_select`),
+  shown under the column in Types as `sqlty check --explain` prints them.
+- Each diagnostic has its `line`; a read-only panel shows the problems as
+  `sqlty check --output-format json` prints them, with lines and columns from the editor.

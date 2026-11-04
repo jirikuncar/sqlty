@@ -27,7 +27,8 @@ use sqlty_python::options::Options;
 use sqlty_python::rewriter::{rewrite_source_with, strip_source, Suppressed};
 use sqlty_python::rules::RuleConfig;
 use sqlty_sql::analyzer::{
-    analyze_params, analyze_select, load_schema_with_skipped, row_type, CandidateKind, Nullability,
+    analyze_params, analyze_select, explain_select, load_schema_with_skipped, row_type,
+    CandidateKind, Nullability, RuleRef,
 };
 use sqlty_sql::highlight::Highlight;
 
@@ -106,6 +107,7 @@ pub fn run(request: &str) -> String {
                     "rule": found.rule.name(),
                     "message": found.message,
                     "severity": found.severity.as_str(),
+                    "line": found.line,
                     "start": utf16(found.span.start),
                     "end": utf16(found.span.end),
                     "fix": found.fix.iter().map(|edit| json!({
@@ -201,14 +203,22 @@ fn settings(config: &str) -> Result<Settings, String> {
 fn described(line: usize, sql: &str, dialect: &str, options: &Options<'_>) -> Value {
     let columns = analyze_select(sql, dialect, options.schema).ok().flatten();
     let params = analyze_params(sql, dialect, options.schema).unwrap_or_default();
+    let explained = explain_select(sql, dialect, options.schema).unwrap_or_default();
+    let rule = |rule: Option<RuleRef>| {
+        rule.map(
+            |rule| json!({"id": rule.id, "reference": rule.reference, "reasoning": rule.reasoning}),
+        )
+    };
     json!({
         "line": line,
         "sql": sql,
         "row_type": columns.as_deref().and_then(row_type),
-        "columns": columns.iter().flatten().map(|column| json!({
+        "columns": columns.iter().flatten().enumerate().map(|(i, column)| json!({
             "name": column.name,
             "type": column.display_type(),
             "sql_type": column.sql_type,
+            "type_rule": rule(explained.get(i).and_then(|found| found.type_rule)),
+            "nullability_rule": rule(explained.get(i).and_then(|found| found.nullability_rule)),
         })).collect::<Vec<_>>(),
         "params": params.iter().map(|param| json!({
             "index": param.index,

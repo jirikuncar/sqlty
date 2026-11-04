@@ -20,8 +20,8 @@ fn analyze_types_each_query_and_its_parameters() {
             "sql": "--sql\nSELECT id, email FROM users WHERE name = %s",
             "row_type": "tuple[int, str | None]",
             "columns": [
-                {"name": "id", "type": "int", "sql_type": "INT"},
-                {"name": "email", "type": "str | None", "sql_type": "TEXT"},
+                {"name": "id", "type": "int", "sql_type": "INT", "type_rule": null, "nullability_rule": null},
+                {"name": "email", "type": "str | None", "sql_type": "TEXT", "type_rule": null, "nullability_rule": null},
             ],
             "params": [{"index": 1, "name": null, "type": "str", "sql_type": "TEXT", "nullable": null}],
         }])
@@ -45,6 +45,7 @@ fn analyze_reports_diagnostics_in_utf16_units() {
             "rule": "unknown-column",
             "message": "column `nme` does not exist in `users`; did you mean `name`?",
             "severity": "error",
+            "line": 1,
             "start": 35,
             "end": 38,
             "fix": [{"start": 35, "end": 38, "replacement": "name"}],
@@ -146,4 +147,21 @@ fn analyze_gives_quick_fixes_and_what_fix_and_strip_make() {
         ask(&json!({"op": "analyze", "source": fixed, "schema": SCHEMA, "dialect": "postgres"}));
     assert_eq!(answer["stripped"], source);
     assert_eq!(answer["diagnostics"], json!([]));
+}
+
+#[test]
+fn each_column_names_the_inference_rules_that_typed_it() {
+    let source = "q = \"--sql\\nSELECT SUM(id) AS total FROM users\"\n";
+    let answer =
+        ask(&json!({"op": "analyze", "source": source, "schema": SCHEMA, "dialect": "postgres"}));
+    let column = &answer["queries"][0]["columns"][0];
+    assert_eq!(column["type_rule"]["id"], "postgres.aggregate.sum-integers");
+    assert!(column["type_rule"]["reference"]
+        .as_str()
+        .unwrap()
+        .contains("PostgreSQL"));
+    assert!(!column["type_rule"]["reasoning"]
+        .as_str()
+        .unwrap()
+        .is_empty());
 }

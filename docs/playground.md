@@ -42,6 +42,10 @@ queries as you type. It runs in your browser. The engine is compiled to
       <div class="sqlty-playground-editor" data-rewritten></div>
     </section>
     <section>
+      <h3><code>sqlty check --output-format json</code></h3>
+      <div class="sqlty-playground-editor" data-json></div>
+    </section>
+    <section>
       <h3><code>sqlty.toml</code></h3>
       <div class="sqlty-playground-editor sqlty-playground-config" data-config></div>
     </section>
@@ -62,9 +66,10 @@ queries as you type. It runs in your browser. The engine is compiled to
 | Panel | What it shows | From the command line |
 |---|---|---|
 | Python | Diagnostics under the code with their quick fixes, SQL highlighted in query strings, completion and hover in queries | [`sqlty server`](recipes/vscode.md) |
-| Types | The row type, columns and parameters of each query | `sqlty check --explain` |
+| Types | The row type, columns and parameters of each query, and the inference rule behind a column's type or nullability | `sqlty check --explain` |
 | Problems | What `sqlty check` reports | [`sqlty check`](reference/cli.md) |
 | `sqlty rewrite` | The source with each query wrapped in `SQL[T]` | [`sqlty rewrite`](reference/cli.md) |
+| `sqlty check --output-format json` | The problems as `sqlty check` prints them for scripts, with the edits of their fixes | [`sqlty check --output-format json`](reference/cli.md) |
 | `sqlty.toml` | The `dialect`, `import-style` and `rules` of [`[tool.sqlty]`](reference/configuration.md); its `dialect` wins over the select | `sqlty.toml` or `pyproject.toml` |
 
 ## Examples
