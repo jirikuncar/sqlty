@@ -1,9 +1,9 @@
 # Playground: share links, configuration, fixes and breaking changes
 
-> **Status:** stages 1 (share links and configuration), 2 (fixes, rewrite and strip) and 3 (examples)
-> merged in [#895](https://github.com/jirikuncar/sqlty/pull/895), [#899](https://github.com/jirikuncar/sqlty/pull/899)
-> and [#900](https://github.com/jirikuncar/sqlty/pull/900); stage 4 (output views) in review. Stages 5 and 6
-> not started.
+> **Status:** stages 1 to 4 merged in [#895](https://github.com/jirikuncar/sqlty/pull/895),
+> [#899](https://github.com/jirikuncar/sqlty/pull/899), [#900](https://github.com/jirikuncar/sqlty/pull/900) and
+> [#901](https://github.com/jirikuncar/sqlty/pull/901); stage 6 (site test and size) in review. Stage 5 (breaking
+> changes) waits for the comparison of `_breaking.py` to move to Rust.
 
 Tracks [#893](https://github.com/jirikuncar/sqlty/issues/893): what keeps the Playground page
 from being the place to reproduce a bug or show a feature. Every stage keeps the page static:
@@ -54,3 +54,13 @@ no server, nothing leaves the browser.
   shown under the column in Types as `sqlty check --explain` prints them.
 - Each diagnostic has its `line`; a read-only panel shows the problems as
   `sqlty check --output-format json` prints them, with lines and columns from the editor.
+
+## Stage 6
+
+- `scripts/check_playground.py` loads the page in Chromium: the tour gets its diagnostics, a
+  share link restores a session, and **Fix all** fixes it. `docs.yml` runs it on the build,
+  served under `/sqlty/` as GitHub Pages serves it, and on the deployed page after
+  `deploy-pages`; `make check-playground` runs the first.
+- The `wasm` profile (`opt-level = "z"`) makes the engine 6.6 MB, 1.5 MB gzipped, from 10.7 and
+  2.3 MB, for about 1.6 times the analysis time (17 ms for a 600-line file). `wasm-opt` is not
+  used: it would add binaryen to the build. The build job reports the size in its summary.

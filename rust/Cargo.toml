@@ -59,3 +59,9 @@ inherits = "release"
 lto = "fat"
 codegen-units = 1
 strip = true
+
+# The docs playground's engine (`make playground`): a third of the bytes of `dist` to
+# download, for about 1.6 times its analysis time, still well under a keystroke.
+[profile.wasm]
+inherits = "dist"
+opt-level = "z"
