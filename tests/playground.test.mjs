@@ -58,3 +58,15 @@ test("a diagnostic carries its quick fix, and the source what fix and strip make
   assert.equal(answer.fixed, 'from sqlty import SQL\nq = SQL[tuple[str]]("--sql\\nSELECT name FROM users")\n');
   assert.equal(ask({ op: "analyze", source: answer.fixed, schema, dialect: "postgres" }).stripped, source.replace("nme", "name"));
 });
+
+test("each example of examples/ checks as sqlty check does", async () => {
+  const url = new URL("../docs/assets/playground/examples.json", import.meta.url);
+  const examples = JSON.parse(await readFile(url, "utf8"));
+  assert.ok(examples.length >= 5);
+  for (const example of examples) {
+    const answer = ask({ op: "analyze", ...example });
+    assert.equal(answer.error, undefined, example.name);
+    assert.deepEqual(answer.diagnostics.filter((found) => found.severity === "error"), [], example.name);
+    assert.equal(answer.rewritten, example.source, example.name);
+  }
+});

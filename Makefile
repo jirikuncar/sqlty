@@ -156,6 +156,7 @@ docs: playground
 playground:  ## The engine as WebAssembly for the docs playground (needs the wasm32-unknown-unknown target)
 	cargo build --manifest-path rust/Cargo.toml --profile dist --target wasm32-unknown-unknown -p sqlty-wasm
 	cp rust/target/wasm32-unknown-unknown/dist/sqlty_wasm.wasm docs/assets/playground/
+	python3 scripts/generate_playground_examples.py
 
 .PHONY: lint-docs
 lint-docs:

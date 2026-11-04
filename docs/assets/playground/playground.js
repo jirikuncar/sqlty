@@ -48,10 +48,11 @@ stale-rewrite = "error"
 `;
 
 const root = document.getElementById("sqlty-playground");
-const [monaco, ask, shared] = await Promise.all([
+const [monaco, ask, shared, examples] = await Promise.all([
   loadMonaco(),
   engine(),
   decode(location.hash.slice(1)),
+  fetch(new URL("examples.json", import.meta.url)).then((response) => response.json()),
 ]);
 let current = { diagnostics: [], queries: [], highlights: [], rewritten: "", stripped: "", fixed: "" };
 const refreshed = new monaco.Emitter();
@@ -108,6 +109,12 @@ const rewritten = monaco.editor.create(root.querySelector("[data-rewritten]"), {
 });
 const dialect = root.querySelector("[data-dialect]");
 const linked = root.querySelector("[data-link-status]");
+const example = root.querySelector("[data-example]");
+examples.unshift({ name: "Tour", source: SOURCE, schema: SCHEMA, dialect: "postgres", config: CONFIG });
+example.replaceChildren(
+  ...examples.map(({ name }, index) => Object.assign(document.createElement("option"), { value: index, textContent: name })),
+);
+example.addEventListener("change", () => restore(examples[example.value]));
 if (shared) restore(shared);
 
 function request(op, offset = 0) {
