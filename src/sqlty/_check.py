@@ -24,7 +24,7 @@ from sqlty._drivers import MARKER, find_driver_calls, find_template_calls
 from sqlty._helpers import HelperIndex, find_helper_calls
 from sqlty._lint import NAME_RULES, Diagnostic
 from sqlty._params import _dotted, annotation_type, mismatch
-from sqlty._source import ParsedSource, _wrapper_name, is_any
+from sqlty._source import Ignore, ParsedSource, _wrapper_name, is_any
 from sqlty._variants import Declared
 
 if TYPE_CHECKING:
@@ -1022,14 +1022,17 @@ def _value_diagnostics(
 
 
 def apply_suppressions(
-    parsed: ParsedSource,
+    ignores: dict[int, Ignore],
     diagnostics: list[Diagnostic],
     rules: dict[str, str] | None,
+    marker: str = "#",
 ) -> list[Diagnostic]:
-    """Drop diagnostics suppressed by a comment on their line; add ``unused-ignore``."""
+    """Drop diagnostics suppressed by a comment on their line; add ``unused-ignore``.
+
+    ``marker`` starts a comment in the checked language: ``#``, or ``--`` in SQL.
+    """
     from sqlty._lint import RuleConfig
 
-    ignores = parsed.ignores
     if not ignores:
         return diagnostics
 
@@ -1052,7 +1055,7 @@ def apply_suppressions(
             else:
                 unused = [name for name in ignore.rules if (ignore.line, name) not in used]
             for name in unused:
-                written = "# sqlty: ignore" if name is None else f"# sqlty: ignore[{name}]"
+                written = f"{marker} sqlty: ignore" + ("" if name is None else f"[{name}]")
                 kept.append(
                     {
                         "rule": "unused-ignore",

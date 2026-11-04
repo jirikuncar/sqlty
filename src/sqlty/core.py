@@ -472,7 +472,7 @@ def check_source(
         row_usage=row_usage or (usage := RowUsage()),
         variants=query_variants,
     )
-    diagnostics = apply_suppressions(parsed, diagnostics, rules)
+    diagnostics = apply_suppressions(parsed.ignores, diagnostics, rules)
     return diagnostics if row_usage else usage.filter(diagnostics)
 
 

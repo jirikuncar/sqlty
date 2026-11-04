@@ -1681,3 +1681,34 @@ def test_skill_prints_lists_and_installs(tmp_path, capsys, caplog) -> None:
     assert installed == {p.relative_to(skills) for p in skills.rglob("*") if p.is_file()}
     for path in installed:
         assert (tmp_path / "installed" / path).read_text() == (skills / path).read_text()
+
+
+def test_check_reads_the_named_queries_of_query_files(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "sqlty.toml").write_text('schema = "migrations/"\nqueries = ["sql/**/*.sql"]\n')
+    (tmp_path / "migrations").mkdir()
+    (tmp_path / "migrations" / "001.sql").write_text("CREATE TABLE users (id INT, email TEXT);\n")
+    (tmp_path / "sql" / "nested").mkdir(parents=True)
+    (tmp_path / "sql" / "nested" / "users.sql").write_text(
+        "-- name: by-email^\nSELECT id, emial\n  FROM users WHERE email = :email;\n"
+    )
+    (tmp_path / "notes.sql").write_text("SELECT nope FROM nothing;\n")
+    monkeypatch.chdir(tmp_path)
+
+    expected = f"sql{os.sep}nested{os.sep}users.sql:2: [unknown-column] column `emial` does not exist in `users`; did you mean `email`?"
+    for paths in (["."], ["sql"], [str(Path("sql/nested/users.sql"))]):
+        code, out, _ = _run(["check", *paths], capsys)
+        assert (code, out.splitlines()) == (1, [expected, "Found 1 error(s)"])
+    code, out, _ = _run(["check", "--output-format", "json", "."], capsys)
+    [found] = json.loads(out)
+    assert (found["start"], found["end"]) == ({"line": 2, "column": 12}, {"line": 2, "column": 17})
+    assert _run(["check", "notes.sql", "migrations"], capsys)[:2] == (0, "")
+
+
+def test_unknown_query_format_is_an_error(tmp_path, monkeypatch, capsys) -> None:
+    _project(tmp_path, 'query-format = "aiosq"\n')
+    monkeypatch.chdir(tmp_path)
+
+    code, _, err = _run(["check", "."], capsys)
+
+    assert code == 2
+    assert "unknown query-format 'aiosq' (did you mean 'aiosql'?)" in err

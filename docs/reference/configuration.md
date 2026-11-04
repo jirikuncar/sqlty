@@ -98,6 +98,8 @@ A directory with more than one file reads the first of `sqlty.toml`,
 |-----|------|---------|---------|---------|
 | [`dialect`](#dialect) | `"postgres"`, `"sqlite"`, `"mysql"` | `"postgres"` | `rewrite`, `check` | SQL dialect of queries and schema |
 | [`schema`](#schema) | string or list of strings | none | `rewrite`, `check` | Schema `.sql` files, directories or globs, relative to the configuration file |
+| [`queries`](#queries) | string or list of strings | none | `check` | `.sql` files of named queries (aiosql, sqlc, PugSQL), directories or globs, relative to the configuration file |
+| [`query-format`](#query-format) | `"auto"`, `"aiosql"`, `"sqlc"`, `"pugsql"`, `"file"` | `"auto"` | `check` | How `queries` files name their queries; `auto` reads each file's first header |
 | [`rules`](#rules) | table of rule = severity | per-rule defaults | `check` | Severity per lint rule: `"error"`, `"warn"` or `"ignore"` |
 | [`overrides`](#overrides) | array of tables | `[]` | `check` | Rule severities for the files `include` matches and `exclude` does not, on top of `rules` |
 | [`import-style`](#import-style) | string | `"from sqlty import SQL"` | `rewrite`, `strip`, `check`, magic codec | How rewritten code imports and spells the wrapper |
@@ -134,6 +136,26 @@ current directory). See [Schema inference](../guide/schema-inference.md).
 [tool.sqlty]
 schema = ["extensions.sql", "tables/"]
 ```
+
+## `queries`
+
+`.sql` files of named queries that `sqlty check` reads, relative to the directory
+of the configuration file: files, directories (every `*.sql` below them) and
+globs, as in `schema`. Kept apart from `schema`, so a migration is never read as
+a query. See [Queries in `.sql` files](../guide/sql-files.md).
+
+```toml
+[tool.sqlty]
+schema = "migrations/"
+queries = ["sql/**/*.sql"]
+```
+
+## `query-format`
+
+How the `queries` files name their queries: `"aiosql"` (`-- name: get-user^`),
+`"sqlc"` (`-- name: GetUser :one`), `"pugsql"` (`-- :name get_user :one`) or
+`"file"` (no header: one query per file). `"auto"`, the default, reads each
+file's first header, and picks `"file"` when it has none.
 
 ## `rules`
 

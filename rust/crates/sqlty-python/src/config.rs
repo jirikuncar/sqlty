@@ -30,9 +30,11 @@ use sqlty_sql::Dialect;
 pub const CONFIG_FILES: [&str; 3] = ["sqlty.toml", "pyproject.toml", "Cargo.toml"];
 
 /// Keys of `[tool.sqlty]` that are not file discovery; see also [`DISCOVERY_KEYS`].
-pub const TOOL_KEYS: [&str; 13] = [
+pub const TOOL_KEYS: [&str; 15] = [
     "dialect",
     "schema",
+    "queries",
+    "query-format",
     "rules",
     "overrides",
     "import-style",
@@ -169,11 +171,29 @@ pub fn validate(mut table: Table, source: &str) -> Result<Config, InvalidConfig>
             ));
         }
     }
-    if table
-        .get("schema")
-        .is_some_and(|schema| !schema.is_str() && !is_strings(schema))
-    {
-        return fail("[tool.sqlty] schema must be a path or a list of paths".into());
+    for key in ["schema", "queries"] {
+        if table
+            .get(key)
+            .is_some_and(|value| !value.is_str() && !is_strings(value))
+        {
+            return fail(format!(
+                "[tool.sqlty] {key} must be a path or a list of paths"
+            ));
+        }
+    }
+    if let Some(format) = table.get("query-format") {
+        let names = crate::queries::Format::NAMES;
+        match format.as_str() {
+            Some(name) if name.parse::<crate::queries::Format>().is_ok() => {}
+            Some(name) => {
+                return fail(format!(
+                    "[tool.sqlty] unknown query-format '{name}'{}; expected one of: {}",
+                    suggest(name, &names),
+                    names.join(", ")
+                ))
+            }
+            None => return fail("[tool.sqlty] query-format must be a string".into()),
+        }
     }
     if let Some(rules) = table.get("rules") {
         check_rules(rules, "[tool.sqlty] rules", "[tool.sqlty.rules]").map_err(named)?;
