@@ -1,5 +1,6 @@
 import { load } from "./engine.js";
 import { decode, encode, MAX_LINK } from "./share.js";
+import { fold, unfold } from "./steps.js";
 
 const MONACO = "https://cdn.jsdelivr.net/npm/monaco-editor@0.57.0/min/vs";
 const LEGEND = ["keyword", "string", "number", "comment", "operator", "parameter"];
@@ -48,12 +49,18 @@ stale-rewrite = "error"
 `;
 
 const root = document.getElementById("sqlty-playground");
-const [monaco, ask, shared, examples] = await Promise.all([
+const [monaco, ask, shared, examples, linkedDeck] = await Promise.all([
   loadMonaco(),
   engine(),
   decode(location.hash.slice(1)),
   fetch(new URL("examples.json", import.meta.url)).then((response) => response.json()),
+  fetchDeck(new URLSearchParams(location.search).get("steps")).catch((error) => ({ error })),
 ]);
+const SIZES = [11, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32];
+const saved = remembered();
+let size = SIZES.includes(saved.size) ? saved.size : 13;
+let steps = [];
+let step = 0;
 let current = { diagnostics: [], queries: [], highlights: [], rewritten: "", stripped: "", fixed: "" };
 const refreshed = new monaco.Emitter();
 
@@ -82,7 +89,7 @@ const options = {
   theme: theme(),
   automaticLayout: true,
   minimap: { enabled: false },
-  fontSize: 13,
+  fontSize: size,
   scrollBeyondLastLine: false,
   wordBasedSuggestions: "off",
   "semanticHighlighting.enabled": true,
@@ -109,12 +116,30 @@ const output = monaco.editor.create(root.querySelector("[data-json]"), {
 const dialect = root.querySelector("[data-dialect]");
 const linked = root.querySelector("[data-link-status]");
 const example = root.querySelector("[data-example]");
+const stepper = root.querySelector("[data-steps]");
+const picker = root.querySelector("[data-step-select]");
+const notes = root.querySelector("[data-notes]");
+const present = root.querySelector("[data-present]");
 examples.unshift({ name: "Tour", source: SOURCE, schema: SCHEMA, dialect: "postgres", config: CONFIG });
-example.replaceChildren(
-  ...examples.map(({ name }, index) => Object.assign(document.createElement("option"), { value: index, textContent: name })),
-);
-example.addEventListener("change", () => restore(examples[example.value]));
-if (shared) restore(shared);
+examples.push({ name: "Tour in steps", deck: new URL("steps.json", import.meta.url) }, { name: "Open a file...", file: true });
+const option = (value, textContent) => Object.assign(document.createElement("option"), { value, textContent });
+const custom = Object.assign(option(-1, "Steps"), { hidden: true });
+example.replaceChildren(custom, ...examples.map(({ name }, index) => option(index, name)));
+example.value = 0;
+const chosen = () => (steps.length ? -1 : 0);
+example.addEventListener("change", async () => {
+  const picked = examples[example.value];
+  try {
+    if (picked.file) await openFile();
+    else if (picked.deck) begin(await fetchDeck(picked.deck));
+    else {
+      begin(null);
+      restore(picked);
+    }
+  } catch (error) {
+    linked.textContent = String(error.message ?? error);
+  }
+});
 
 function request(op, offset = 0) {
   return {
@@ -138,6 +163,81 @@ function open(name) {
 function show(name) {
   for (const tab of tabs) tab.setAttribute("aria-selected", String(tab.dataset.tab === name));
   for (const panel of root.querySelectorAll("[data-panel]")) panel.hidden = panel.dataset.panel !== name;
+}
+
+// Walk through `deck`, a list of steps (steps.js), from its step `at`; null leaves the steps.
+function begin(deck, at = 0) {
+  steps = deck ? unfold(deck) : [];
+  custom.textContent = deck?.title || "Steps";
+  custom.hidden = !deck;
+  stepper.hidden = !steps.length;
+  picker.replaceChildren(...steps.map(({ title }, index) => option(index, `${index + 1}/${steps.length} ${title}`)));
+  if (steps.length) go(at);
+  else {
+    root.querySelector('[data-tab="notes"]').hidden = true;
+    if (root.querySelector('[data-tab="notes"][aria-selected="true"]')) show("problems");
+  }
+}
+
+function go(at) {
+  step = Math.max(0, Math.min(steps.length - 1, at));
+  const here = steps[step];
+  picker.value = step;
+  root.querySelector('[data-step="-1"]').disabled = step === 0;
+  root.querySelector('[data-step="1"]').disabled = step === steps.length - 1;
+  notes.replaceChildren(
+    ...here.notes.split(/\n\s*\n/).filter(Boolean).map((text) => Object.assign(document.createElement("p"), { textContent: text })),
+  );
+  root.querySelector('[data-tab="notes"]').hidden = !here.notes;
+  restore(here);
+  open(here.file ?? "python");
+  show(here.panel ?? (here.notes ? "notes" : "problems"));
+}
+
+// Replace a model's text as one edit, so Ctrl+Z brings the old text back.
+function replace(model, text) {
+  if (model.getValue() === text) return;
+  model.pushStackElement();
+  model.pushEditOperations([], [{ range: model.getFullModelRange(), text }], () => null);
+  model.pushStackElement();
+}
+
+function zoom(by) {
+  size = SIZES[Math.max(0, Math.min(SIZES.length - 1, SIZES.indexOf(size) + by))];
+  for (const each of monaco.editor.getEditors()) each.updateOptions({ fontSize: size });
+  root.style.setProperty("--sqlty-font", `${size}px`);
+  remember({ size });
+}
+
+async function presenting(on) {
+  root.classList.toggle("sqlty-present", on);
+  present.setAttribute("aria-pressed", String(on));
+  present.textContent = on ? "Exit" : "Present";
+  try {
+    if (on && !document.fullscreenElement) await root.requestFullscreen?.();
+    if (!on && document.fullscreenElement) await document.exitFullscreen();
+  } catch {
+    // Without the Fullscreen API (iPhone), the playground still covers the page.
+  }
+}
+
+async function openFile() {
+  const input = Object.assign(document.createElement("input"), { type: "file", accept: ".json,application/json" });
+  const file = await new Promise((resolve) => {
+    input.addEventListener("change", () => resolve(input.files[0]));
+    input.click();
+  });
+  if (file) take(JSON.parse(await file.text()));
+  example.value = chosen();
+}
+
+// A JSON file: a deck with `steps`, or one session.
+function take(found) {
+  if (Array.isArray(found?.steps)) begin(found);
+  else {
+    begin(null);
+    restore(found);
+  }
 }
 
 monaco.languages.registerDocumentSemanticTokensProvider("python", {
@@ -274,10 +374,16 @@ function refresh() {
   problems.replaceChildren(
     ...answer.diagnostics.map((found) => {
       const item = document.createElement("li");
+      item.dataset.severity = found.severity;
       const at = model.getPositionAt(found.start);
+      const rule = Object.assign(document.createElement("a"), {
+        href: new URL(`../reference/rules/#${found.rule}`, location.href).href,
+        textContent: found.rule,
+        title: `The ${found.rule} rule`,
+      });
       const button = Object.assign(document.createElement("button"), {
         type: "button",
-        textContent: `${at.lineNumber}: [${found.rule}] ${found.message}`,
+        textContent: `${at.lineNumber}:${at.column} ${found.message}`,
       });
       button.addEventListener("click", () => {
         open("python");
@@ -285,11 +391,11 @@ function refresh() {
         editor.revealPositionInCenter(at);
         editor.focus();
       });
-      item.append(button);
+      item.append(button, rule);
       return item;
     }),
   );
-  if (!answer.diagnostics.length) problems.textContent = "No problems.";
+  if (!answer.diagnostics.length) problems.replaceChildren(Object.assign(document.createElement("li"), { textContent: "No problems." }));
   root.querySelector('[data-tab="problems"]').textContent = `Problems (${answer.diagnostics.length})`;
   root.querySelector("[data-types]").replaceChildren(...answer.queries.map(describe));
   rewritten.setValue(answer.rewritten);
@@ -316,19 +422,44 @@ function checked(found, model) {
 }
 
 function session() {
-  return {
+  const edited = {
     source: models.python.getValue(),
     schema: models.schema.getValue(),
     dialect: dialect.value,
     config: models.config.getValue(),
   };
+  return steps.length ? { ...edited, steps: fold(steps).steps, step } : edited;
 }
 
 function restore(saved) {
   for (const [model, value] of [[models.python, saved.source], [models.schema, saved.schema], [models.config, saved.config]]) {
-    if (typeof value === "string") model.setValue(value);
+    if (typeof value === "string") replace(model, value);
   }
   if ([...dialect.options].some((option) => option.value === saved.dialect)) dialect.value = saved.dialect;
+}
+
+// A deck, or null, from a URL that `?steps=` names, relative to the page.
+async function fetchDeck(url) {
+  if (!url) return null;
+  const response = await fetch(new URL(url, location.href));
+  if (!response.ok) throw new Error(`Cannot load the steps of ${url}: ${response.status}.`);
+  return response.json();
+}
+
+function remembered() {
+  try {
+    return JSON.parse(localStorage.getItem("sqlty-playground")) ?? {};
+  } catch {
+    return {};
+  }
+}
+
+function remember(change) {
+  try {
+    localStorage.setItem("sqlty-playground", JSON.stringify({ ...remembered(), ...change }));
+  } catch {
+    // Private windows may refuse storage: the page works without it.
+  }
 }
 
 async function share() {
@@ -402,6 +533,46 @@ for (const model of Object.values(models)) model.onDidChangeContent(later);
 dialect.addEventListener("change", later);
 for (const tab of files) tab.addEventListener("click", () => open(tab.dataset.file));
 for (const tab of tabs) tab.addEventListener("click", () => show(tab.dataset.tab));
+for (const button of root.querySelectorAll("[data-zoom]")) {
+  button.addEventListener("click", () => zoom(Number(button.dataset.zoom)));
+}
+for (const button of root.querySelectorAll("[data-step]")) {
+  button.addEventListener("click", () => go(step + Number(button.dataset.step)));
+}
+picker.addEventListener("change", () => go(Number(picker.value)));
+root.querySelector("[data-step-reset]").addEventListener("click", () => go(step));
+present.addEventListener("click", () => presenting(!root.classList.contains("sqlty-present")));
+document.addEventListener("fullscreenchange", () => {
+  if (!document.fullscreenElement && root.classList.contains("sqlty-present")) presenting(false);
+});
+document.addEventListener("keydown", (event) => {
+  if (!root.contains(event.target) && !root.classList.contains("sqlty-present")) return;
+  const mod = event.ctrlKey || event.metaKey;
+  const inEditor = event.target.closest?.(".monaco-editor");
+  if (mod && (event.key === "=" || event.key === "+" || event.key === "-")) zoom(event.key === "-" ? -1 : 1);
+  else if (mod && event.shiftKey && event.key.toLowerCase() === "f") presenting(!root.classList.contains("sqlty-present"));
+  else if (event.key === "Escape" && root.classList.contains("sqlty-present") && !inEditor && event.target.tagName !== "SELECT") {
+    presenting(false);
+  }
+  else if (steps.length && (event.altKey || !inEditor) && (event.key === "PageDown" || event.key === "PageUp")) {
+    go(step + (event.key === "PageDown" ? 1 : -1));
+  } else return;
+  event.preventDefault();
+  event.stopPropagation();
+}, true);
+root.addEventListener("dragover", (event) => event.preventDefault());
+root.addEventListener("drop", async (event) => {
+  const [file] = event.dataTransfer.files;
+  if (!file || !file.name.endsWith(".json")) return;
+  event.preventDefault();
+  try {
+    take(JSON.parse(await file.text()));
+    example.value = chosen();
+  } catch (error) {
+    linked.textContent = `${file.name}: ${error.message}`;
+  }
+});
+resizable(root.querySelector("[data-splitter]"), root.querySelector(".sqlty-console"));
 for (const [button, made] of [["fix", "fixed"], ["rewrite", "rewritten"], ["strip", "stripped"]]) {
   root.querySelector(`[data-${button}]`).addEventListener("click", () => {
     refresh();
@@ -421,8 +592,47 @@ root.querySelector("[data-copy-link]").addEventListener("click", async () => {
 });
 window.addEventListener("hashchange", async () => {
   const saved = await decode(location.hash.slice(1));
-  if (saved) restore(saved);
+  if (saved) resume(saved);
 });
+
+// A shared session: its steps, then the edits made on its step.
+function resume(saved) {
+  if (Array.isArray(saved.steps)) begin(saved, saved.step ?? 0);
+  restore(saved);
+  example.value = chosen();
+}
+
+// Drag `handle` to resize `panel`, or focus it and press the arrow keys.
+function resizable(handle, panel) {
+  const set = (height) => {
+    const most = root.clientHeight - 10 * 16;
+    const fitted = Math.max(48, Math.min(most, height));
+    root.style.setProperty("--sqlty-console", `${fitted}px`);
+    remember({ console: fitted });
+  };
+  if (saved.console) root.style.setProperty("--sqlty-console", `${saved.console}px`);
+  handle.addEventListener("pointerdown", (event) => {
+    handle.setPointerCapture(event.pointerId);
+    const from = event.clientY;
+    const height = panel.offsetHeight;
+    const move = (moved) => set(height - (moved.clientY - from));
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", () => handle.removeEventListener("pointermove", move), { once: true });
+  });
+  handle.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    set(panel.offsetHeight + (event.key === "ArrowUp" ? 32 : -32));
+  });
+}
+
+if (saved.size) root.style.setProperty("--sqlty-font", `${size}px`);
+if (shared) resume(shared);
+else if (linkedDeck?.error) linked.textContent = String(linkedDeck.error.message ?? linkedDeck.error);
+else if (linkedDeck) {
+  begin(linkedDeck);
+  example.value = chosen();
+}
 refresh();
 
 async function engine() {

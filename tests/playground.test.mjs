@@ -6,6 +6,7 @@ import { test } from "node:test";
 
 import { load } from "../docs/assets/playground/engine.js";
 import { decode, encode } from "../docs/assets/playground/share.js";
+import { fold, unfold } from "../docs/assets/playground/steps.js";
 
 const ask = await load(await readFile(new URL("../docs/assets/playground/sqlty_wasm.wasm", import.meta.url)));
 const schema = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);";
@@ -83,4 +84,25 @@ test("a column names the inference rule that typed it, as --explain does", () =>
   const source = 'q = "--sql\\nSELECT SUM(id) AS total FROM users"';
   const [column] = ask({ op: "analyze", source, schema, dialect: "postgres" }).queries[0].columns;
   assert.equal(column.type_rule.id, "postgres.aggregate.sum-integers");
+});
+
+test("a step keeps the files of the step before that it leaves out", () => {
+  const [first, second] = unfold({ steps: [{ source: "a", schema: "s" }, { title: "Two", source: "b", panel: "types" }] });
+  assert.deepEqual([first.title, first.source, first.schema], ["Step 1", "a", "s"]);
+  assert.deepEqual([second.title, second.source, second.schema, second.panel], ["Two", "b", "s", "types"]);
+  assert.deepEqual(unfold(fold([first, second])), [first, second]);
+  assert.deepEqual(fold([first, second]).steps[1], { title: "Two", source: "b", panel: "types" });
+});
+
+test("a deck without steps is an error", () => {
+  assert.throws(() => unfold({ steps: [] }), /steps/);
+  assert.throws(() => unfold({ steps: [{ source: 1 }] }), /Step 1/);
+});
+
+test("each step of the docs' Tour in steps is typed", async () => {
+  const deck = JSON.parse(await readFile(new URL("../docs/assets/playground/steps.json", import.meta.url), "utf8"));
+  for (const step of unfold(deck)) {
+    const answer = ask({ op: "analyze", ...step });
+    assert.ok(!answer.error && answer.queries.length, step.title);
+  }
 });
