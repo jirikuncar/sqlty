@@ -23,7 +23,8 @@
     "Linters"
   ],
   "activationEvents": [
-    "onLanguage:python"
+    "onLanguage:python",
+    "onLanguage:sql"
   ],
   "main": "./dist/extension.js",
   "capabilities": {

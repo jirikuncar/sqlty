@@ -137,17 +137,17 @@ where
     W: Workspace,
     F: FnMut(&Path, &Settings) -> Result<W, String>,
 {
-    let Some((text, version)) = shared
+    let Some((text, version, python)) = shared
         .documents()
         .get(&uri)
-        .map(|d| (d.text.clone(), d.version))
+        .map(|d| (d.text.clone(), d.version, d.python))
     else {
         return;
     };
     let Ok(path) = uri.to_file_path() else {
         return;
     };
-    let enabled = workspaces.settings.completion || workspaces.settings.highlighting;
+    let enabled = python && (workspaces.settings.completion || workspaces.settings.highlighting);
     let Some(workspace) = workspaces.of(&path, shared) else {
         return;
     };
@@ -191,6 +191,7 @@ where
     let (text, version) = shared
         .documents()
         .get(uri)
+        .filter(|d| d.python)
         .map(|d| (d.text.clone(), d.version))?;
     let path = uri.to_file_path().ok()?;
     let fixed = workspaces
