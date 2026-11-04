@@ -36,6 +36,14 @@ test("a configuration applies its dialect, import style and rules", () => {
   assert.match(answer.rewritten, /^import sqlty\n/);
 });
 
+test("param-types = true makes Rewrite and Fix all write the parameter types", () => {
+  const source = 'q = "--sql\\nSELECT name FROM users WHERE id = %s"\n';
+  const answer = ask({ op: "analyze", source, schema, dialect: "postgres", config: "param-types = true" });
+  const typed = 'q = SQL[tuple[str], tuple[int | None]]("--sql\\nSELECT name FROM users WHERE id = %s")\n';
+  assert.equal(answer.rewritten, `from sqlty import SQL\n${typed}`);
+  assert.equal(answer.fixed, answer.rewritten);
+});
+
 test("a configuration key that needs files is an error", () => {
   const answer = ask({ op: "analyze", source: "", dialect: "postgres", config: 'schema = "schema.sql"' });
   assert.match(answer.error, /not 'schema'/);

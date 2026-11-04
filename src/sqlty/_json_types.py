@@ -111,16 +111,6 @@ def add_json_types(
     return module.with_classes(source)
 
 
-def strip_json_types(source: str) -> str:
-    """``source`` without the classes ``add_json_types`` wrote.
-
-    Example:
-        >>> strip_json_types("import typing\\n\\n\\n# sqlty: generated\\nclass A(typing.TypedDict):\\n    a: int\\n\\n\\nq = 1\\n")
-        'import typing\\nq = 1\\n'
-    """
-    return _GROUP.sub("", source) if MARKER in source else source
-
-
 class _Module:
     """The top-level names of a module and the classes generated for it so far."""
 

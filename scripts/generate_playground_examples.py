@@ -4,8 +4,8 @@ playground sessions, for its Examples select.
     uv run python scripts/generate_playground_examples.py
 
 Each numbered project gives its ``README.md`` title, ``queries.py``, ``schema.sql`` and the
-``[tool.sqlty]`` keys the playground reads (``dialect``, ``import-style``, ``rules``) as a
-``sqlty.toml``. ``make playground`` runs it; the output is not committed.
+``[tool.sqlty]`` keys the playground reads (``dialect``, ``import-style``, ``param-types``,
+``rules``) as a ``sqlty.toml``. ``make playground`` runs it; the output is not committed.
 """
 
 from __future__ import annotations
@@ -24,7 +24,9 @@ def main() -> None:
         pyproject = project / "pyproject.toml"
         tool = tomllib.loads(pyproject.read_text())["tool"]["sqlty"] if pyproject.exists() else {}
         config = [
-            f"{key} = {json.dumps(tool[key])}" for key in ("dialect", "import-style") if key in tool
+            f"{key} = {json.dumps(tool[key])}"
+            for key in ("dialect", "import-style", "param-types")
+            if key in tool
         ]
         if rules := tool.get("rules"):
             config += [

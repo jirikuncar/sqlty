@@ -7,7 +7,7 @@
 //!
 //! - Inference: `infer_type`, `analyze_select`, `analyze_columns`, `analyze_params`,
 //!   `expand_star`, `query_diagnostics`, `parse_error`, `returns_rows`.
-//! - Source: `rewrite_source`, `strip_source`, `fix_source`, `check_source`,
+//! - Source: `rewrite_source`, `add_param_types`, `strip_source`, `fix_source`, `check_source`,
 //!   `wrapped_queries`, `query_sites`.
 //! - Schema: `load_schema`, `schema_skipped_tables`, `schema_skipped_objects`, `name_rules`.
 //! - Configuration: `load_config`, `validate_config` and the key lists.
@@ -27,6 +27,7 @@ mod server;
 use sqlty_python::checker;
 use sqlty_python::fixer;
 use sqlty_python::locate;
+use sqlty_python::params;
 use sqlty_python::queries;
 use sqlty_python::rewriter;
 use sqlty_sql::analyzer;
@@ -631,6 +632,30 @@ fn rewrite_source(
     })
 }
 
+/// Write the parameter type P of each SQL[R]("--sql\n...") call: SQL[R, P].
+///
+/// Positional parameters are a tuple, named ones a TypedDict generated below a
+/// `# sqlty: generated` line after the imports.
+///
+/// Raises:
+///     ValueError: unsupported import_style
+#[pyfunction]
+#[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, schema_sql = None, import_style = None))]
+fn add_param_types(
+    py: Python<'_>,
+    source: &str,
+    dialect: DialectArg,
+    schema_sql: Option<SchemaArg>,
+    import_style: Option<&str>,
+) -> Result<String, Error> {
+    let dialect = dialect.0;
+    detach(py, || {
+        let schema = schema_for(source, schema_sql, dialect);
+        let options = Options::new(dialect, schema.as_deref(), import_style, false)?;
+        Ok(params::add_param_types(source, &options))
+    })
+}
+
 /// Strip Python source: SQL[T]("--sql\n...") -> "--sql\n...".
 ///
 /// Removes unused imports added by rewrite.
@@ -1162,6 +1187,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_error, m)?)?;
     m.add_function(wrap_pyfunction!(returns_rows, m)?)?;
     m.add_function(wrap_pyfunction!(rewrite_source, m)?)?;
+    m.add_function(wrap_pyfunction!(add_param_types, m)?)?;
     m.add_function(wrap_pyfunction!(strip_source, m)?)?;
     m.add_function(wrap_pyfunction!(fix_source, m)?)?;
     m.add_function(wrap_pyfunction!(expand_star, m)?)?;
