@@ -52,6 +52,18 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "`rewrite`, `check`",
         "Schema `.sql` files, directories or globs, relative to the configuration file",
     ),
+    "queries": KeyDoc(
+        "string or list of strings",
+        "none",
+        "`check`",
+        "`.sql` files of named queries (aiosql, sqlc, PugSQL), directories or globs, relative to the configuration file",
+    ),
+    "query-format": KeyDoc(
+        '`"auto"`, `"aiosql"`, `"sqlc"`, `"pugsql"`, `"file"`',
+        '`"auto"`',
+        "`check`",
+        "How `queries` files name their queries; `auto` reads each file's first header",
+    ),
     "rules": KeyDoc(
         "table of rule = severity",
         "per-rule defaults",
@@ -288,6 +300,8 @@ class SQLTyConfig(TypedDict, total=False):
 
     dialect: str
     schema: SchemaSpec  # Schema file, directory or glob, or a list of them
+    queries: SchemaSpec  # .sql files of named queries, as files, directories or globs
+    query_format: str  # "auto" (default), "aiosql", "sqlc", "pugsql" or "file"
     rules: dict[str, str]  # rule-name -> severity (error/warn/ignore)
     overrides: list[RuleOverride]  # rule severities for files matching globs
     import_style: str  # e.g., "from sqlty import SQL as Q" or "import sqlty"

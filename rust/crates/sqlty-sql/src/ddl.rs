@@ -779,6 +779,20 @@ pub(crate) fn split_statements(sql: &str, mysql: bool) -> Vec<Statement<'_>> {
         .collect()
 }
 
+/// The byte range of each statement of `sql`, split on `;` outside quotes, comments and
+/// dollar-quoted bodies; leading and trailing space and comments are left out.
+pub(crate) fn statement_ranges(sql: &str, mysql: bool) -> Vec<std::ops::Range<usize>> {
+    let at = |piece: &Piece| piece.1.as_ptr() as usize - sql.as_ptr() as usize;
+    split_statements(sql, mysql)
+        .iter()
+        .filter_map(|stmt| {
+            let first = stmt.0.iter().find(|p| significant(p))?;
+            let last = stmt.0.iter().rfind(|p| significant(p))?;
+            Some(at(first)..at(last) + last.1.len())
+        })
+        .collect()
+}
+
 /// Split on `sep` outside parentheses.
 fn split_top_level<'a, 'b>(pieces: &'b [Piece<'a>], sep: &str) -> Vec<&'b [Piece<'a>]> {
     let (mut parts, mut depth, mut from) = (Vec::new(), 0usize, 0);

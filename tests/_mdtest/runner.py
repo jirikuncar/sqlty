@@ -231,7 +231,18 @@ class Run:
 
     def _check(self, assertions: list[Assertion], unit: Unit) -> list[str]:
         code = unit.code
-        if self.against_sql is not None:
+        if unit.lang == "sql":
+            from sqlty._queries import check_query_file
+
+            found = check_query_file(
+                code.text,
+                name="queries",
+                query_format=self.section.settings.get("query-format", "auto"),
+                dialect=self.dialect,
+                schema_sql=self.schema_sql,
+                rules=self.rules,
+            )
+        elif self.against_sql is not None:
             found = core.breaking_source(
                 code.text,
                 schema_sql=self.schema_sql,
@@ -281,12 +292,12 @@ class Run:
         if not (unmatched or unexpected):
             return []
         if self.updater:
-            self.updater.replace_errors(assertions, diagnostics)
+            self.updater.replace_errors(assertions, diagnostics, unit.lang)
             return []
         path = self.section.path
         return [
             *(
-                f"{path}:{a.target}: unmatched assertion `# error{a.range or ''}: {a.expected}`"
+                f"{path}:{a.target}: unmatched assertion `{a.comment} error{a.range or ''}: {a.expected}`"
                 for a in unmatched
             ),
             *(

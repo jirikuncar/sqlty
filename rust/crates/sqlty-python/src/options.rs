@@ -18,6 +18,9 @@ pub enum ConfigError {
     /// The dialect is not one sqlty knows.
     #[error(transparent)]
     Dialect(#[from] UnknownDialect),
+    /// The `query-format` setting is not one of [`Format::NAMES`](crate::queries::Format::NAMES).
+    #[error("unknown query-format '{0}'; expected one of: auto, aiosql, sqlc, pugsql, file")]
+    QueryFormat(String),
 }
 
 /// What check, rewrite and fix are told besides the source.
