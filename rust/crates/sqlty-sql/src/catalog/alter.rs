@@ -11,7 +11,7 @@ use sqlparser::ast::{
 
 use crate::analyzer::SqlDialect;
 
-use super::columns::{apply_check, mark_primary_key, nonnull_groups, raw_column};
+use super::columns::{apply_check, mark_primary_key, nonnull_groups, raw_column, unique_key};
 use super::loader::{AlterFail, Loader, RawTable, Rel, Taint, TypeDef};
 use super::names::{fold, parts};
 
@@ -340,6 +340,15 @@ pub(super) fn alter_op(
                 mark_primary_key(&mut table.columns, &index_column.column.expr, dialect);
             }
         }
+        AlterTableOperation::AddConstraint {
+            constraint: TableConstraint::Unique(unique),
+            ..
+        } => {
+            let name = unique.name.as_ref().or(unique.index_name.as_ref());
+            table
+                .unique
+                .extend(unique_key(name, &unique.columns, dialect));
+        }
         // A `CHECK` added `NOT VALID` does not hold for the rows already there.
         AlterTableOperation::AddConstraint {
             constraint: TableConstraint::Check(check),
@@ -356,8 +365,11 @@ pub(super) fn alter_op(
                 column.values = None;
             }
             table.nonnull_groups.clear();
-            drop_foreign_key(table, &fold(name, dialect));
+            let name = fold(name, dialect);
+            drop_foreign_key(table, &name);
+            drop_unique(table, &name);
         }
+        AlterTableOperation::DropIndex { name } => drop_unique(table, &fold(name, dialect)),
         AlterTableOperation::DropForeignKey { name, .. } => {
             drop_foreign_key(table, &fold(name, dialect));
         }
@@ -385,6 +397,18 @@ fn drop_foreign_key(table: &mut RawTable, name: &str) {
         .iter()
         .any(|fk| fk.name.as_deref() == Some(name));
     table.foreign_keys.retain(|fk| match &fk.name {
+        Some(own) => own != name,
+        None => named,
+    });
+}
+
+/// Drop the unique key `name`; like [`drop_foreign_key`], an unnamed key may be it.
+pub(super) fn drop_unique(table: &mut RawTable, name: &str) {
+    let named = table
+        .unique
+        .iter()
+        .any(|key| key.name.as_deref() == Some(name));
+    table.unique.retain(|key| match &key.name {
         Some(own) => own != name,
         None => named,
     });

@@ -236,7 +236,11 @@ impl<'a> Analyzer<'a> {
                         .unwrap_or_else(|| vec![Column::unknown("*")]);
                     rename_columns(&mut columns, &cte.alias, self.dialect);
                 }
-                inner.virtuals.insert(name, columns);
+                let key = (!recursive)
+                    .then(|| inner.output_key(&cte.query, &columns))
+                    .flatten();
+                inner.virtuals.insert(name.clone(), columns);
+                inner.virtuals.set_key(&name, key);
             }
             return inner.query_body(query);
         }
@@ -375,6 +379,7 @@ impl<'a> Analyzer<'a> {
                 analyzer.check_references(having, &scope);
             }
             analyzer.check_grouping(select, &scope);
+            analyzer.check_fanout(select, &scope);
         }
         analyzer.facts = analyzer.select_facts(select, &scope);
         let keyword = select.select_token.0.span.start;

@@ -31,11 +31,17 @@ pub enum NameRule {
     InsertValueCount,
     /// A column a grouped query selects without grouping by it or aggregating it.
     UngroupedColumn,
+    /// An aggregate over rows a one-to-many join repeats.
+    FanoutAggregate,
+    /// An aggregating query joining one table one-to-many to two others.
+    ChasmJoin,
+    /// A join whose conditions match no primary or unique key.
+    UnprovenJoin,
 }
 
 impl NameRule {
     /// Every rule, the one list the checker and the Python side read.
-    pub const ALL: [NameRule; 9] = [
+    pub const ALL: [NameRule; 12] = [
         NameRule::UnknownTable,
         NameRule::UnknownColumn,
         NameRule::AmbiguousColumn,
@@ -45,6 +51,9 @@ impl NameRule {
         NameRule::InsertMissingColumn,
         NameRule::InsertValueCount,
         NameRule::UngroupedColumn,
+        NameRule::FanoutAggregate,
+        NameRule::ChasmJoin,
+        NameRule::UnprovenJoin,
     ];
 
     /// The kebab-case rule name, as in `[tool.sqlty.rules]`.
@@ -59,6 +68,9 @@ impl NameRule {
             NameRule::InsertMissingColumn => "insert-missing-column",
             NameRule::InsertValueCount => "insert-value-count",
             NameRule::UngroupedColumn => "ungrouped-column",
+            NameRule::FanoutAggregate => "fanout-aggregate",
+            NameRule::ChasmJoin => "chasm-join",
+            NameRule::UnprovenJoin => "unproven-join",
         }
     }
 }
@@ -348,6 +360,9 @@ mod tests {
                 "insert-missing-column",
                 "insert-value-count",
                 "ungrouped-column",
+                "fanout-aggregate",
+                "chasm-join",
+                "unproven-join",
             ]
         );
     }

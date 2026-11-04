@@ -512,8 +512,8 @@ fn name_rules() -> Vec<&'static str> {
 
 /// Why a query has untyped columns, or names what it cannot, as `(rule, message)` pairs:
 /// `unknown-table`, `unknown-column`, `ambiguous-column`, `unknown-function`,
-/// `unknown-type`, `unsupported-syntax`, `insert-missing-column`, `insert-value-count` and
-/// `ungrouped-column`.
+/// `unknown-type`, `unsupported-syntax`, `insert-missing-column`, `insert-value-count`,
+/// `ungrouped-column`, `fanout-aggregate`, `chasm-join` and `unproven-join`.
 /// Tables, columns and
 /// ambiguity are only judged with a schema.
 ///

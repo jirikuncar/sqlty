@@ -154,6 +154,8 @@ struct TableRelation {
     /// The statements a `BEFORE` row trigger fires for.
     row_triggers: RowEvents,
     foreign_keys: Vec<ForeignKey>,
+    /// Columns of each `UNIQUE` constraint or unique index.
+    unique: Vec<Vec<String>>,
     row_security: bool,
 }
 
@@ -341,6 +343,32 @@ impl Catalog {
         keys.iter().filter(|fk| {
             matches!(self.relations.get(fk.table.as_str()), Some(Relation::Table(target)) if !target.row_security)
         })
+    }
+
+    /// The keys of the table `name`: its primary key, then each `UNIQUE` constraint or
+    /// unique index. Two rows never share a non-null value of a key. `None` when `name` is
+    /// not a table whose shape is known.
+    pub(crate) fn unique_keys(&self, name: &str) -> Option<Vec<Vec<&str>>> {
+        let Some(Relation::Table(table)) = self.find(name) else {
+            return None;
+        };
+        let primary: Vec<&str> = table
+            .columns
+            .iter()
+            .filter(|column| column.primary_key)
+            .map(|column| column.name.as_str())
+            .collect();
+        let unique = table
+            .unique
+            .iter()
+            .map(|key| key.iter().map(String::as_str).collect());
+        Some(
+            (!primary.is_empty())
+                .then_some(primary)
+                .into_iter()
+                .chain(unique)
+                .collect(),
+        )
     }
 
     /// Whether the schema defines a table or view `name`, whatever is known of its shape.
@@ -682,6 +710,31 @@ mod tests {
             t.iter().map(|c| c.not_null).collect::<Vec<_>>(),
             [true, true, false, true]
         );
+    }
+
+    #[test]
+    fn unique_keys_follow_constraints_indexes_and_drops() {
+        let c = pg(
+            "CREATE TABLE t (a int PRIMARY KEY, b int UNIQUE, c int, d int, e int, \
+             CONSTRAINT t_cd UNIQUE (c, d)); \
+             CREATE UNIQUE INDEX t_e ON t (e); CREATE UNIQUE INDEX t_lower ON t (lower(e::text)); \
+             CREATE UNIQUE INDEX t_partial ON t (c) WHERE d > 0; \
+             ALTER TABLE t DROP CONSTRAINT t_cd; ALTER TABLE t ADD UNIQUE (d); \
+             ALTER TABLE t RENAME COLUMN e TO f;",
+        );
+        assert_eq!(
+            c.unique_keys("t").unwrap(),
+            [vec!["a"], vec!["b"], vec!["d"]]
+        );
+        let c = pg("CREATE TABLE t (a int); CREATE UNIQUE INDEX t_a ON t (a); DROP INDEX t_a;");
+        assert!(c.unique_keys("t").unwrap().is_empty());
+        let (c, _) = load(
+            "CREATE TABLE t (a TEXT, b TEXT, PRIMARY KEY (a, b));",
+            "sqlite",
+        );
+        assert_eq!(c.unique_keys("t").unwrap(), [vec!["a", "b"]]);
+        let (c, _) = load("CREATE TABLE t (a INT, UNIQUE KEY t_a (a));", "mysql");
+        assert_eq!(c.unique_keys("t").unwrap(), [vec!["a"]]);
     }
 
     #[test]
