@@ -180,41 +180,46 @@ def report(
     findings: list[Finding],
     head: str | None,
     quiet: bool,
-    output_format: Literal["text", "json", "github"] = "text",
+    output_format: Literal["text", "json", "github", "sarif"] = "text",
 ) -> None:
     """Print each finding: ``path:line: [rule] message (direction)``, a JSON array with a
-    ``direction`` and ``against`` per finding, or GitHub Actions annotations at each
-    finding's severity."""
+    ``direction`` and ``against`` per finding, GitHub Actions annotations at each
+    finding's severity, or a SARIF log."""
     import json
 
     from sqlty._cli import github_annotation, json_diagnostic
+    from sqlty._sarif import sarif_log
 
     if quiet:
         return
     head = head or "the working tree"
-    if output_format == "json":
+
+    def message(finding: Finding) -> str:
+        if finding.direction == "backward":
+            title = f"the queries of {finding.against} against the schema of {head}"
+        else:
+            title = f"the queries of {head} against the schema of {finding.against}"
+        return f"{finding.diagnostic['message']} ({finding.direction}: {title})"
+
+    if output_format in ("json", "sarif"):
         rows = [
             {
                 "file": str(f.path),
                 **json_diagnostic(f.diagnostic, f.source),
+                **({"message": message(f)} if output_format == "sarif" else {}),
                 "direction": f.direction,
                 "against": f.against,
             }
             for f in findings
         ]
-        print(json.dumps(rows, indent=2))
+        print(json.dumps(rows if output_format == "json" else sarif_log(rows), indent=2))
         return
     for finding in findings:
         d = finding.diagnostic
-        if finding.direction == "backward":
-            title = f"the queries of {finding.against} against the schema of {head}"
-        else:
-            title = f"the queries of {head} against the schema of {finding.against}"
-        message = f"{d['message']} ({finding.direction}: {title})"
         if output_format == "github":
-            print(github_annotation(finding.path, {**d, "message": message}))
+            print(github_annotation(finding.path, {**d, "message": message(finding)}))
         else:
-            print(f"{finding.path}:{d.get('line', '')}: [{d['rule']}] {message}")
+            print(f"{finding.path}:{d.get('line', '')}: [{d['rule']}] {message(finding)}")
     if findings and output_format == "text":
         print(f"Found {len(findings)} breaking change(s)")
 

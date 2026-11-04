@@ -26,7 +26,8 @@ never touched.
 one of them with an `error` diagnostic, and 2 on an error such as an unknown
 revision. A `warn` finding is printed but does not fail the run. `--output-format json`
 prints the findings as a JSON array, each with its `direction` and the baseline it
-was checked `against`, and `github` as GitHub Actions annotations.
+was checked `against`, `github` as GitHub Actions annotations, and `sarif` as a
+SARIF log for [GitHub code scanning](../recipes/ci.md#github-code-scanning).
 
 ## What it reports
 

@@ -195,12 +195,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     check_parser.add_argument(
         "--output-format",
-        choices=["text", "json", "github"],
+        choices=["text", "json", "github", "sarif"],
         default="text",
         help="How diagnostics are printed: text (file:line: [rule] message, the default), json "
         "(an array of objects with file, line, rule, severity, message, the start and end of what "
-        "it underlines, and the fix edits) or github (GitHub "
-        "Actions annotations). Summaries, --statistics and --explain are text only",
+        "it underlines, and the fix edits), github (GitHub Actions annotations) or sarif (a "
+        "SARIF 2.1.0 log, for GitHub code scanning). Summaries, --statistics and --explain are "
+        "text only",
     )
 
     # --- complete ---
@@ -268,11 +269,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     breaking_parser.add_argument(
         "--output-format",
-        choices=["text", "json", "github"],
+        choices=["text", "json", "github", "sarif"],
         default="text",
         help="How findings are printed: text (the default), json (an array of objects with "
-        "file, line, rule, severity, message, direction and against) or github (GitHub "
-        "Actions annotations, each at its severity)",
+        "file, line, rule, severity, message, direction and against), github (GitHub "
+        "Actions annotations, each at its severity) or sarif (a SARIF 2.1.0 log, for GitHub "
+        "code scanning)",
     )
     breaking_parser.add_argument(
         "-j",
@@ -689,7 +691,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
             total_errors += 1
         elif severity == "warn":
             total_warnings += 1
-        if args.output_format == "json":
+        if args.output_format in ("json", "sarif"):
             shown.append({"file": str(path), **json_diagnostic(diag, parsed)})
         elif args.output_format == "github":
             print(github_annotation(path, diag))
@@ -702,6 +704,10 @@ def _cmd_check(args: argparse.Namespace) -> None:
 
     if args.output_format == "json":
         print(json.dumps(shown, indent=2))
+    elif args.output_format == "sarif":
+        from sqlty._sarif import sarif_log
+
+        print(json.dumps(sarif_log(shown), indent=2))
     text = args.output_format == "text" and not args.quiet
     if total_fixed and text:
         print(f"Fixed {total_fixed} file(s)")
