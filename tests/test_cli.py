@@ -1544,6 +1544,55 @@ def test_check_json_locates_fixes_by_character(tmp_path, monkeypatch, capsys) ->
     ]
 
 
+def test_check_sarif_output_is_valid_sarif(tmp_path, monkeypatch, capsys) -> None:
+    import jsonschema
+
+    (tmp_path / "q.py").write_text(
+        'from sqlty import SQL\nq = ("é", SQL[tuple[int]]("--sql\\nSELECT 1.5::REAL"))\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit):
+        main(["check", "--output-format", "sarif", "q.py"])
+    log = json.loads(capsys.readouterr().out)
+    schema = json.loads(
+        (Path(__file__).parent / "fixtures" / "sarif-schema-2.1.0.json").read_text()
+    )
+    jsonschema.validate(log, schema)
+    [run] = log["runs"]
+    rules = {rule["id"]: rule for rule in run["tool"]["driver"]["rules"]}
+    assert (
+        rules["narrow-type"]["helpUri"]
+        == "https://jirikuncar.github.io/sqlty/reference/rules/#narrow-type"
+    )
+    assert rules["narrow-type"]["defaultConfiguration"] == {"level": "error"}
+    region = {"startLine": 2, "startColumn": 15, "endLine": 2, "endColumn": 25}
+    [result] = run["results"]
+    assert result["ruleId"] == "narrow-type"
+    assert result["level"] == "error"
+    assert result["locations"] == [
+        {"physicalLocation": {"artifactLocation": {"uri": "q.py"}, "region": region}}
+    ]
+    assert result["fixes"] == [
+        {
+            "artifactChanges": [
+                {
+                    "artifactLocation": {"uri": "q.py"},
+                    "replacements": [
+                        {"deletedRegion": region, "insertedContent": {"text": "tuple[float]"}}
+                    ],
+                }
+            ]
+        }
+    ]
+
+    with pytest.raises(SystemExit):
+        main(["check", "--output-format", "sarif", str(tmp_path / "q.py")])
+    [result] = json.loads(capsys.readouterr().out)["runs"][0]["results"]
+    artifact = result["locations"][0]["physicalLocation"]["artifactLocation"]
+    assert artifact == {"uri": (tmp_path / "q.py").as_uri()}
+
+
 def test_check_reports_in_line_order(tmp_path, monkeypatch, capsys) -> None:
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
     (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL);")

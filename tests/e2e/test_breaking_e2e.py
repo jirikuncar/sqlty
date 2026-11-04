@@ -201,6 +201,16 @@ def test_output_formats(cli: Cli, repo: Path) -> None:
         "in `users` (forward: the queries of HEAD against the schema of HEAD~1)\n"
     )
 
+    result = cli([*args, "--output-format", "sarif"], {"cwd": repo})
+    assert result.returncode == 1
+    [finding] = json.loads(result.stdout)["runs"][0]["results"]
+    assert finding["message"] == {
+        "text": "column `handle` does not exist in `users` (forward: the queries of HEAD "
+        "against the schema of HEAD~1)"
+    }
+    assert finding["locations"][0]["physicalLocation"]["artifactLocation"] == {"uri": "app/q.py"}
+    assert finding["properties"] == {"direction": "forward", "against": "HEAD~1"}
+
 
 def test_quiet_prints_nothing(cli: Cli, repo: Path) -> None:
     result = cli(["breaking", "--against", "HEAD~1", "--head", "HEAD", "-q"], {"cwd": repo})

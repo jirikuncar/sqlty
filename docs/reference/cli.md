@@ -198,7 +198,7 @@ sqlty check [-h] [--dialect DIALECT] [--schema SCHEMA]
             [--respect-gitignore | --no-respect-gitignore] [-v] [-q]
             [-j N] [--fix] [--exit-zero] [--exit-zero-on-warning]
             [--error-on-warning] [--statistics] [--explain]
-            [--output-format {text,json,github}]
+            [--output-format {text,json,github,sarif}]
             [paths ...]
 ```
 <!-- /generated:cli-usage-check -->
@@ -212,7 +212,7 @@ sqlty check [-h] [--dialect DIALECT] [--schema SCHEMA]
 | `--error-on-warning` | Exit 1 when any diagnostic has severity warn; cannot be combined with --exit-zero or --exit-zero-on-warning |
 | `--statistics` | After the summary, print how many queries were typed, partially typed, unparsed and skipped |
 | `--explain` | Under a type diagnostic, print the inference rule (id, reference, reasoning) behind each column's type and nullability |
-| `--output-format {text,json,github}` | How diagnostics are printed: text (file:line: [rule] message, the default), json (an array of objects with file, line, rule, severity, message, the start and end of what it underlines, and the fix edits) or github (GitHub Actions annotations). Summaries, --statistics and --explain are text only |
+| `--output-format {text,json,github,sarif}` | How diagnostics are printed: text (file:line: [rule] message, the default), json (an array of objects with file, line, rule, severity, message, the start and end of what it underlines, and the fix edits), github (GitHub Actions annotations) or sarif (a SARIF 2.1.0 log, for GitHub code scanning). Summaries, --statistics and --explain are text only |
 <!-- /generated:cli-options-check -->
 
 With `--statistics`, the last line counts the queries of the checked files:
@@ -292,7 +292,7 @@ Found 1 breaking change(s)
 ```text
 sqlty breaking [-h] [--against BASELINE] [--save PATH] [--head REF]
                [--direction {backward,forward,both}] [-q]
-               [--output-format {text,json,github}] [-j N]
+               [--output-format {text,json,github,sarif}] [-j N]
                [paths ...]
 ```
 <!-- /generated:cli-usage-breaking -->
@@ -304,7 +304,7 @@ sqlty breaking [-h] [--against BASELINE] [--save PATH] [--head REF]
 | `--save PATH` | Write a snapshot of --head (its settings, schema and Python files) to PATH, a baseline for a later --against |
 | `--head REF` | The new revision (default: the working tree, uncommitted changes included) |
 | `--direction {backward,forward,both}` | backward: queries of --against on the schema of --head (migrate first); forward: queries of --head on the schema of --against (deploy first) |
-| `--output-format {text,json,github}` | How findings are printed: text (the default), json (an array of objects with file, line, rule, severity, message, direction and against) or github (GitHub Actions annotations, each at its severity) |
+| `--output-format {text,json,github,sarif}` | How findings are printed: text (the default), json (an array of objects with file, line, rule, severity, message, direction and against), github (GitHub Actions annotations, each at its severity) or sarif (a SARIF 2.1.0 log, for GitHub code scanning) |
 <!-- /generated:cli-options-breaking -->
 
 Exit code: 1 when a change breaks either direction with an `error` diagnostic, 2 for an unknown revision or

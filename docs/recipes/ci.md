@@ -161,6 +161,41 @@ Each step catches something the others don't:
 Actions annotation, so it shows on its line in the pull request's diff. See [Schema changes in CI](migration.md#schema-changes-in-ci)
 for the `--direction` options.
 
+## GitHub code scanning
+
+```yaml
+# .github/workflows/sqlty-code-scanning.yml
+name: sqlty code scanning
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  sqlty:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync
+      - run: uv run sqlty check --output-format sarif --exit-zero . > sqlty.sarif
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: sqlty.sarif
+```
+
+`--output-format sarif` prints a [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)
+log: each diagnostic with its rule, severity, location and fix edits, and every rule with
+a link to its documentation. GitHub code scanning keeps the findings across runs, so you
+can triage and dismiss them in the **Security** tab. GitLab, Azure DevOps and the VS Code
+SARIF Viewer read the same file.
+
+`--exit-zero` lets the upload step run when `sqlty check` finds errors. Keep the
+`sqlty check` step of [GitHub Actions](#github-actions) to fail the pull request.
+`sqlty breaking --output-format sarif` works too, with each finding's `direction` and
+`against` in its `properties`.
+
 ## Keeping sources stripped
 
 If you commit plain `--sql` strings and rely on the
