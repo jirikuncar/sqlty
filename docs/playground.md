@@ -25,7 +25,7 @@ queries as you type. It runs in your browser. The engine is compiled to
       <button type="button" class="sqlty-button sqlty-button--primary" data-fix>Fix all</button>
       <button type="button" class="sqlty-button" data-rewrite>Rewrite</button>
       <button type="button" class="sqlty-button" data-strip>Strip</button>
-      <button type="button" class="sqlty-button" data-copy-link><span class="sqlty-wide">Copy link</span><span class="sqlty-narrow">Link</span></button>
+      <button type="button" class="sqlty-button" data-copy-link><span class="sqlty-wide">Copy link</span><span class="sqlty-narrow"></span></button>
       <span class="sqlty-group" role="group" aria-label="Font size">
         <button type="button" class="sqlty-button" data-zoom="-1" title="Smaller (Ctrl+-)" aria-label="Smaller">A&minus;</button>
         <button type="button" class="sqlty-button" data-zoom="1" title="Larger (Ctrl+=)" aria-label="Larger">A+</button>
@@ -81,6 +81,7 @@ queries as you type. It runs in your browser. The engine is compiled to
   .sqlty-group .sqlty-button:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
   .sqlty-group .sqlty-button:last-child { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
   .sqlty-narrow { display: none; }
+  .sqlty-narrow::before { content: "Link"; }
   .sqlty-status { flex-basis: 100%; font-size: 0.64rem; }
   .sqlty-status:empty { display: none; }
   #sqlty-playground select, .sqlty-button {
@@ -262,11 +263,11 @@ size of the editor and the console, for a projector or a screen share.
 
 | Keys | What they do |
 |---|---|
-| **Ctrl+Shift+F** | Present, or stop presenting; **Esc** also stops, outside the editor |
+| **Ctrl+Shift+F** | Present, or stop presenting; **Escape** also stops, outside the editor |
 | **Ctrl+=**, **Ctrl+-** | A larger or a smaller font |
 | **Alt+PageDown**, **Alt+PageUp** | The next or the previous step; outside the editor, **PageDown** and **PageUp** too, as most presentation remotes send |
 
-On macOS, **Cmd** works as **Ctrl**.
+On macOS, **Command** works as **Ctrl**.
 
 !!! note "Row types from classes need Python"
     The playground reads `tuple[...]` row types. A `TypedDict`, dataclass or Pydantic
