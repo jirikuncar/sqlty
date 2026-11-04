@@ -40,6 +40,7 @@ help:
 	@echo "Docs:"
 	@echo "  docs              - Build the docs site, strict via zensical.toml (output: site/)"
 	@echo "  docs-serve        - Serve the docs locally with live reload"
+	@echo "  playground        - Build the engine as WebAssembly for the docs playground"
 	@echo "  generate-docs     - Regenerate the tables in docs/reference/{configuration,cli}.md"
 	@echo ""
 	@echo "Examples:"
@@ -148,8 +149,13 @@ bench-rust:  ## Criterion: catalog load, analyzer, check/rewrite_source; extra a
 # --- Docs ---
 
 .PHONY: docs
-docs:
+docs: playground
 	$(ZENSICAL) build --clean
+
+.PHONY: playground
+playground:  ## The engine as WebAssembly for the docs playground (needs the wasm32-unknown-unknown target)
+	cargo build --manifest-path rust/Cargo.toml --profile dist --target wasm32-unknown-unknown -p sqlty-wasm
+	cp rust/target/wasm32-unknown-unknown/dist/sqlty_wasm.wasm docs/assets/playground/
 
 .PHONY: lint-docs
 lint-docs:
@@ -165,7 +171,7 @@ generate-stdlib-types:
 	uv run python scripts/generate_stdlib_types.py
 
 .PHONY: docs-serve
-docs-serve:
+docs-serve: playground
 	$(ZENSICAL) serve
 
 # --- Examples ---
