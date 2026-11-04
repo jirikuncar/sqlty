@@ -73,9 +73,11 @@ Query builders such as [Kysely](https://github.com/kysely-org/kysely),
 [jOOQ](https://github.com/jOOQ/jOOQ) and SQLAlchemy type results through a
 DSL instead of SQL strings. [psycopg](https://www.psycopg.org/psycopg3/docs/advanced/typing.html)
 types rows by row factory, which sqlty's [psycopg helpers](guide/psycopg.md)
-build on. Linters such as [SQLFluff](https://github.com/sqlfluff/sqlfluff)
-and [Squawk](https://github.com/sbdchd/squawk) check style and migrations,
-not result types.
+build on. Linters such as [SQLFluff](https://github.com/sqlfluff/sqlfluff),
+[sqruff](https://github.com/quarylabs/sqruff) and
+[Squawk](https://github.com/sbdchd/squawk) check style and migrations, not
+result types. They complement sqlty: sqruff lints and formats the SQL, sqlty
+checks the types of what it returns.
 
 ### Further reading
 
