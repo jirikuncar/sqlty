@@ -154,6 +154,8 @@ struct TableRelation {
     /// The statements a `BEFORE` row trigger fires for.
     row_triggers: RowEvents,
     foreign_keys: Vec<ForeignKey>,
+    /// Columns of each `UNIQUE` constraint or unique index.
+    unique: Vec<Vec<String>>,
     row_security: bool,
 }
 
@@ -341,6 +343,62 @@ impl Catalog {
         keys.iter().filter(|fk| {
             matches!(self.relations.get(fk.table.as_str()), Some(Relation::Table(target)) if !target.row_security)
         })
+    }
+
+    /// The keys of the table `name`: its primary key, then each `UNIQUE` constraint or
+    /// unique index. Two rows never share a non-null value of a key. `None` when `name` is
+    /// not a table whose shape is known.
+    pub(crate) fn unique_keys(&self, name: &str) -> Option<Vec<Vec<&str>>> {
+        let Some(Relation::Table(table)) = self.find(name) else {
+            return None;
+        };
+        let primary: Vec<&str> = table
+            .columns
+            .iter()
+            .filter(|column| column.primary_key)
+            .map(|column| column.name.as_str())
+            .collect();
+        let unique = table
+            .unique
+            .iter()
+            .map(|key| key.iter().map(String::as_str).collect());
+        Some(
+            (!primary.is_empty())
+                .then_some(primary)
+                .into_iter()
+                .chain(unique)
+                .collect(),
+        )
+    }
+
+    /// The entity a column of the table `name` holds a key of: the primary or unique key
+    /// column its foreign keys lead to, as `(table key, column)`. `None` when the column
+    /// is no key and references none.
+    pub(crate) fn entity(&self, name: &str, column: &str) -> Option<(&str, String)> {
+        let mut table = self.table_id(name)?;
+        let mut column = column.to_string();
+        // A foreign key cycle has no root; stop after any chain a schema could hold.
+        for _ in 0..32 {
+            let Some(Relation::Table(relation)) = self.relations.get(table) else {
+                return None;
+            };
+            let next = relation.foreign_keys.iter().find_map(|fk| {
+                let at = fk.columns.iter().position(|c| *c == column)?;
+                let (parent, _) = self.relations.get_key_value(fk.table.as_str())?;
+                Some((&**parent, fk.referred.get(at)?.clone()))
+            });
+            match next {
+                Some((parent, referred)) if (parent, &referred) != (table, &column) => {
+                    (table, column) = (parent, referred);
+                }
+                _ => {
+                    let keys = self.unique_keys(table)?;
+                    let keyed = keys.iter().flatten().any(|c| *c == column);
+                    return keyed.then_some((table, column));
+                }
+            }
+        }
+        None
     }
 
     /// Whether the schema defines a table or view `name`, whatever is known of its shape.
@@ -682,6 +740,46 @@ mod tests {
             t.iter().map(|c| c.not_null).collect::<Vec<_>>(),
             [true, true, false, true]
         );
+    }
+
+    #[test]
+    fn unique_keys_follow_constraints_indexes_and_drops() {
+        let c = pg(
+            "CREATE TABLE t (a int PRIMARY KEY, b int UNIQUE, c int, d int, e int, \
+             CONSTRAINT t_cd UNIQUE (c, d)); \
+             CREATE UNIQUE INDEX t_e ON t (e); CREATE UNIQUE INDEX t_lower ON t (lower(e::text)); \
+             CREATE UNIQUE INDEX t_partial ON t (c) WHERE d > 0; \
+             ALTER TABLE t DROP CONSTRAINT t_cd; ALTER TABLE t ADD UNIQUE (d); \
+             ALTER TABLE t RENAME COLUMN e TO f;",
+        );
+        assert_eq!(
+            c.unique_keys("t").unwrap(),
+            [vec!["a"], vec!["b"], vec!["d"]]
+        );
+        let c = pg("CREATE TABLE t (a int); CREATE UNIQUE INDEX t_a ON t (a); DROP INDEX t_a;");
+        assert!(c.unique_keys("t").unwrap().is_empty());
+        let (c, _) = load(
+            "CREATE TABLE t (a TEXT, b TEXT, PRIMARY KEY (a, b));",
+            "sqlite",
+        );
+        assert_eq!(c.unique_keys("t").unwrap(), [vec!["a", "b"]]);
+        let (c, _) = load("CREATE TABLE t (a INT, UNIQUE KEY t_a (a));", "mysql");
+        assert_eq!(c.unique_keys("t").unwrap(), [vec!["a"]]);
+    }
+
+    #[test]
+    fn entities_follow_foreign_keys_to_a_key() {
+        let c = pg("CREATE TABLE a (id int PRIMARY KEY, note int); \
+             CREATE TABLE b (id int PRIMARY KEY REFERENCES a, a_id int REFERENCES a (id)); \
+             CREATE TABLE c (b_id int REFERENCES b); \
+             CREATE TABLE x (id int PRIMARY KEY, y_id int UNIQUE); \
+             CREATE TABLE y (id int PRIMARY KEY, x_id int UNIQUE REFERENCES x (y_id)); \
+             ALTER TABLE x ADD FOREIGN KEY (y_id) REFERENCES y (x_id);");
+        let root = |table: &str, column: &str| c.entity(table, column);
+        assert_eq!(root("c", "b_id"), Some(("public.a", "id".to_string())));
+        assert_eq!(root("b", "a_id"), root("a", "id"));
+        assert_eq!(root("a", "note"), None);
+        assert_eq!(root("x", "y_id"), None, "a cycle has no root");
     }
 
     #[test]

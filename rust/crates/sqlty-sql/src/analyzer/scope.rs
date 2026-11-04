@@ -307,6 +307,8 @@ pub(super) fn resolve(reference: &str, scope: &Scope) -> Table {
 #[derive(Clone, Default)]
 pub(super) struct Virtuals {
     tables: Rc<HashMap<String, Rc<[Column]>>>,
+    /// Output columns no two rows of a table share, when known (see `output_key`).
+    keys: Rc<HashMap<String, Vec<String>>>,
     /// Subqueries analyzed against exactly these tables; any insert starts a fresh memo.
     pub(super) memo: SubqueryMemo,
 }
@@ -321,8 +323,25 @@ impl Virtuals {
     }
 
     pub(super) fn insert(&mut self, table: String, columns: Vec<Column>) {
+        self.set_key(&table, None);
         Rc::make_mut(&mut self.tables).insert(table, columns.into());
         self.memo = SubqueryMemo::default();
+    }
+
+    pub(super) fn key(&self, table: &str) -> Option<&[String]> {
+        self.keys.get(table).map(Vec::as_slice)
+    }
+
+    pub(super) fn set_key(&mut self, table: &str, key: Option<Vec<String>>) {
+        match key {
+            Some(key) => {
+                Rc::make_mut(&mut self.keys).insert(table.to_string(), key);
+            }
+            None if self.keys.contains_key(table) => {
+                Rc::make_mut(&mut self.keys).remove(table);
+            }
+            None => {}
+        }
     }
 }
 
@@ -496,7 +515,9 @@ impl<'a> Analyzer<'a> {
                         rename_columns(&mut columns, alias, analyzer.dialect);
                     }
                     let table = derived_table(factor);
+                    let key = analyzer.output_key(subquery, &columns);
                     analyzer.virtuals.insert(table.clone(), columns);
+                    analyzer.virtuals.set_key(&table, key);
                     // Without an alias (SQLite, PostgreSQL 16) its columns are read unqualified.
                     let reference = alias
                         .as_ref()

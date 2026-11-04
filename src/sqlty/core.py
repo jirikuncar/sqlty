@@ -218,7 +218,8 @@ def query_diagnostics(
 
     The rules are ``unknown-table``, ``unknown-column``, ``ambiguous-column``,
     ``unknown-function``, ``unknown-type``, ``unsupported-syntax``,
-    ``insert-missing-column``, ``insert-value-count`` and ``ungrouped-column``. Tables and columns are only judged
+    ``insert-missing-column``, ``insert-value-count``, ``ungrouped-column``,
+    ``fanout-aggregate``, ``chasm-join``, ``unproven-join`` and ``entity-mismatch``. Tables and columns are only judged
     when ``schema_sql``
     defines some tables.
 

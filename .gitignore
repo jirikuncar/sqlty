@@ -29,6 +29,8 @@ src/sqlty/_core.*.pyd
 
 # Docs build output
 site/
+docs/assets/playground/sqlty_wasm.wasm
+docs/assets/playground/examples.json
 bench-result.json
 
 # Claude Code local settings

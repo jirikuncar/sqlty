@@ -2,7 +2,8 @@
 
 from sqlty._lint import NAME_RULES, RULES, RuleConfig, Severity
 
-# SQL the database rejects is an error; SQL sqlty can't type is a warning.
+# SQL the database rejects is an error; SQL sqlty can't type is a warning. unproven-join
+# is off, as a schema without keys would report every join, and entity-mismatch is opt-in.
 DEFAULTS = {
     "unknown-table": Severity.ERROR,
     "unknown-column": Severity.ERROR,
@@ -13,6 +14,10 @@ DEFAULTS = {
     "unknown-function": Severity.WARN,
     "unknown-type": Severity.WARN,
     "unsupported-syntax": Severity.WARN,
+    "fanout-aggregate": Severity.WARN,
+    "chasm-join": Severity.WARN,
+    "unproven-join": Severity.IGNORE,
+    "entity-mismatch": Severity.IGNORE,
 }
 
 

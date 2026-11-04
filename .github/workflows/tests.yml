@@ -70,7 +70,7 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           # Built wheels (duckdb has none for 3.15) are kept with the lock; main writes them.
@@ -101,7 +101,7 @@ jobs:
         run: uv run pytest
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
+        uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with:
           tool: nextest@0.9.148
 
@@ -121,7 +121,7 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           # Built wheels (duckdb has none for 3.15) are kept with the lock; main writes them.
@@ -148,8 +148,9 @@ jobs:
           uv run --no-sync python -c "import sys; from sqlty import _core; assert not sys._is_gil_enabled()"
           uv run --no-sync pytest -p no:randomly tests/test_threads.py
 
-  # The bundled VS Code engine of #855 runs on WebAssembly: keep the engine crates building
-  # for it. sqlty-lsp needs file paths, which wasm32-unknown-unknown has no notion of.
+  # The bundled VS Code engine of #855 and the docs playground run on WebAssembly: keep the
+  # engine crates building for it. sqlty-lsp needs file paths, which wasm32-unknown-unknown
+  # has no notion of.
   wasm:
     name: Engine builds for WebAssembly
     runs-on: ubuntu-latest
@@ -176,6 +177,16 @@ jobs:
 
       - name: Build for wasm32-wasip1
         run: cargo build --manifest-path rust/Cargo.toml --target wasm32-wasip1 -p sqlty-sql -p sqlty-python -p sqlty-lsp
+
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Run the docs playground's engine
+        run: |
+          make playground
+          node --test tests/playground.test.mjs
 
   pg-fidelity:
     name: PostgreSQL column names, types and nullability
@@ -204,7 +215,7 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           # Built wheels (duckdb has none for 3.15) are kept with the lock; main writes them.
@@ -261,7 +272,7 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           # Built wheels (duckdb has none for 3.15) are kept with the lock; main writes them.
@@ -300,7 +311,7 @@ jobs:
           persist-credentials: false
 
       - name: Check the proofs and build the model
-        uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
+        uses: leanprover/lean-action@fe408643ea7367d8c0404a8be3975bb145f5fb64 # v1.7.0
         with:
           lake-package-directory: proofs
           build: true
@@ -308,7 +319,7 @@ jobs:
           lint: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           # Built wheels (duckdb has none for 3.15) are kept with the lock; main writes them.
@@ -347,7 +358,7 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           # Built wheels (duckdb has none for 3.15) are kept with the lock; main writes them.
@@ -400,7 +411,7 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -431,7 +442,7 @@ jobs:
 
       # Simulation counts instructions, so a run is stable on a shared runner: the engine
       # is CPU-bound, with no I/O for instruction counting to miss.
-      - uses: CodSpeedHQ/action@821a40cd6c80e3cfe387caf55668287addd808da # v5.5.0
+      - uses: CodSpeedHQ/action@78102a468f96d8e0ccb92d0ec49425753fc42062 # v5.6.0
         if: vars.CODSPEED == 'true'
         with:
           mode: simulation
@@ -453,7 +464,7 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           # Built wheels (duckdb has none for 3.15) are kept with the lock; main writes them.
@@ -500,7 +511,7 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -546,7 +557,7 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           # Built wheels (duckdb has none for 3.15) are kept with the lock; main writes them.

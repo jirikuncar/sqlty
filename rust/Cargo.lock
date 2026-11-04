@@ -881,6 +881,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sqlty-wasm"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sqlty-python",
+ "sqlty-sql",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

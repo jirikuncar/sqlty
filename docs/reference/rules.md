@@ -39,6 +39,10 @@ stale-type = "error"
 | [`insert-missing-column`](#insert-missing-column) | Names | error | no | INSERT that leaves out a `NOT NULL` column without a default |
 | [`insert-value-count`](#insert-value-count) | Names | error | no | INSERT that gives a different number of values than the columns it writes |
 | [`ungrouped-column`](#ungrouped-column) | Names | error | no | Grouped query selects a column it neither groups by nor aggregates |
+| [`fanout-aggregate`](#fanout-aggregate) | Names | warn | no | Aggregate over rows a one-to-many join repeats |
+| [`chasm-join`](#chasm-join) | Names | warn | no | Aggregating query joins one table one-to-many to two others |
+| [`unproven-join`](#unproven-join) | Names | ignore | no | Join in an aggregating query that matches no primary or unique key |
+| [`entity-mismatch`](#entity-mismatch) | Names | ignore | no | Comparison between columns holding keys of different tables |
 | [`stale-rewrite`](#stale-rewrite) | Rewrite | warn | yes | `--sql` string not wrapped in `SQL[T](...)` |
 | [`stale-type`](#stale-type) | Rewrite | warn | yes | `SQL[tuple[...]]` wider than the inferred row type |
 | [`narrow-type`](#narrow-type) | Rewrite | error | yes | `SQL[tuple[...]]` doesn't admit every row the query returns |
@@ -570,7 +574,9 @@ counts such queries as unparsed whether or not the rule is enabled.
 The first six rules explain why a result column is untyped: with all of them
 enabled and a schema configured, no column is left untyped without a diagnostic.
 `insert-missing-column` and `insert-value-count` check what an `INSERT` writes,
-and `ungrouped-column` what a grouped query selects. The rules for SQL the
+and `ungrouped-column` what a grouped query selects. `fanout-aggregate`,
+`chasm-join` and `unproven-join` check what joins do to aggregates, and
+`entity-mismatch` what they compare. The rules for SQL the
 database rejects (unknown tables and columns, ambiguous columns, an `INSERT`
 missing a column or a value, an ungrouped column) are errors; those for valid SQL sqlty cannot type are warnings. The
 [name diagnostics guide](../guide/name-diagnostics.md) shows how to change them. All but `unsupported-syntax` are only judged when a
@@ -633,6 +639,34 @@ SQLite want a value for every column, and PostgreSQL at most one.
 Default: error. A grouped query (`GROUP BY`, or an aggregate in the select
 list) that selects a column it neither groups by nor aggregates, which
 PostgreSQL rejects. Grouping by a table's primary key covers its other columns.
+
+### fanout-aggregate
+
+Default: warn. An aggregate such as `SUM`, `AVG` or `COUNT(column)` over a table
+whose rows a one-to-many join repeats: `AVG(orders.total)` over orders joined
+to their items. Keys are primary keys, `UNIQUE` constraints, unique indexes
+without `WHERE`, and the `GROUP BY` or `DISTINCT` columns of a CTE or derived
+table. `MIN`, `MAX` and `DISTINCT` aggregates are not reported.
+
+### chasm-join
+
+Default: warn. An aggregating query that joins one table one-to-many to two
+others that don't join each other, such as orders to items and to payments:
+each row of one branch repeats once per row of the other.
+
+### unproven-join
+
+Default: ignore. A join in an aggregating query whose conditions match no
+primary or unique key on either side, so whether it repeats rows is unknown. Off
+because a schema without declared keys would report every join.
+
+### entity-mismatch
+
+Default: ignore. A comparison in `ON`, `USING`, `WHERE`, `HAVING` or `IN` between
+columns holding keys of different tables: `products.id = orders.customer_id`. A
+key column holds keys of its table, and a foreign key column those of the key it
+references, followed to the end of the chain. Off because intentional joins of
+unrelated keys (polymorphic ids, legacy schemas) would need suppressions.
 
 ## Rewrite rules
 

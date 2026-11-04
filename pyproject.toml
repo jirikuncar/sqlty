@@ -81,6 +81,7 @@ dev = [
     "vale>=3.22.0.0",
     "zizmor>=1.31.1",
     "pydantic[email]>=2.14.1",
+    "jsonschema>=4.26.0",
 ]
 cli = ["rich>=15.0.0"]
 # Only the DuckDB type tests need it, and it has no wheel for every Python.
@@ -174,3 +175,5 @@ exclude = ["site", ".vale", ".github", "tests", "scripts/compat/reports", "plans
 [tool.rumdl.per-file-ignores]
 # The logo and demo GIF need HTML for light/dark variants, width and centering.
 "README.md" = ["MD033"]
+# The editors and panels of the playground are HTML that its script fills in.
+"docs/playground.md" = ["MD033"]

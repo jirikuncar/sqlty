@@ -39,6 +39,10 @@ Configuration via sqlty.toml (``[rules]``) or pyproject.toml:
     insert-missing-column = "error"     # default
     insert-value-count = "error"        # default
     ungrouped-column = "error"          # default
+    fanout-aggregate = "warn"           # default
+    chasm-join = "warn"                 # default
+    unproven-join = "ignore"            # default
+    entity-mismatch = "ignore"          # default
     unused-ignore = "warn"              # default
     param-count-mismatch = "error"      # default
     param-type-mismatch = "error"       # default
@@ -273,6 +277,30 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.ERROR,
         fixable=False,
         description="Grouped query selects a column it neither groups by nor aggregates",
+    ),
+    "fanout-aggregate": LintRule(
+        name="fanout-aggregate",
+        default_severity=Severity.WARN,
+        fixable=False,
+        description="Aggregate over rows a one-to-many join repeats",
+    ),
+    "chasm-join": LintRule(
+        name="chasm-join",
+        default_severity=Severity.WARN,
+        fixable=False,
+        description="Aggregating query joins one table one-to-many to two others",
+    ),
+    "unproven-join": LintRule(
+        name="unproven-join",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="Join in an aggregating query that matches no primary or unique key",
+    ),
+    "entity-mismatch": LintRule(
+        name="entity-mismatch",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="Comparison between columns holding keys of different tables",
     ),
     "param-count-mismatch": LintRule(
         name="param-count-mismatch",

@@ -14,7 +14,7 @@ use crate::ddl;
 use crate::values::{self};
 
 use super::alter::changes_columns;
-use super::columns::add_values;
+use super::columns::{add_values, unique_key};
 use super::index::NameIndex;
 use super::loader::{Loader, Op, OpKind, Taint, TypeDef};
 use super::names::{fold, parts};
@@ -194,6 +194,19 @@ pub(super) fn read_statements(
                     Taint::Function,
                     stmt.name_parts_after("function"),
                 )),
+            }
+        } else if stmt.creates("index") {
+            if let Some(Statement::CreateIndex(index)) =
+                parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next())
+            {
+                let name = index
+                    .name
+                    .as_ref()
+                    .and_then(|name| name.0.last()?.as_ident());
+                let key = unique_key(name, &index.columns, dialect);
+                if let (true, None, Some(key)) = (index.unique, &index.predicate, key) {
+                    push(OpKind::UniqueIndex(parts(&index.table_name, dialect), key));
+                }
             }
         } else if let Some(trigger) = stmt
             .before_row_trigger()

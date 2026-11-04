@@ -183,8 +183,9 @@ impl Statement<'_> {
 
     /// Whether this is `CREATE [OR REPLACE] [TEMP | MATERIALIZED | ...] <object>`, e.g. `view`.
     pub(crate) fn creates(&self, object: &str) -> bool {
-        const MODIFIERS: [&str; 7] = [
+        const MODIFIERS: [&str; 8] = [
             "or",
+            "unique",
             "replace",
             "temp",
             "temporary",
