@@ -52,3 +52,40 @@ def check_query_file(
                 )
             offset += len(line)
     return apply_suppressions(ignores, found, rules, marker="--")
+
+
+def breaking_query_file(
+    source: str,
+    *,
+    schema_sql: str | Schema | None,
+    against_sql: str | Schema | None,
+    name: str = "",
+    query_format: str = "auto",
+    dialect: str = "postgres",
+    rules: dict[str, str] | None = None,
+) -> list[Diagnostic]:
+    """The diagnostics ``source`` gets against ``against_sql`` but not against its own
+    ``schema_sql``, as ``breaking_source`` finds them for Python.
+
+    Example:
+        >>> old, new = "CREATE TABLE users (id INT, bio TEXT)", "CREATE TABLE users (id INT)"
+        >>> [d["message"] for d in breaking_query_file("SELECT bio FROM users", schema_sql=old, against_sql=new)]
+        ['column `bio` does not exist in `users`']
+    """
+
+    def check(schema: str | Schema | None) -> list[Diagnostic]:
+        return check_query_file(
+            source,
+            name=name,
+            query_format=query_format,
+            dialect=dialect,
+            schema_sql=schema,
+            rules=rules,
+        )
+
+    own = {(d["line"], d["rule"], d["message"]) for d in check(schema_sql)}
+    return [
+        d
+        for d in check(against_sql)
+        if (d["line"], d["rule"], d["message"]) not in own and d["rule"] != "unused-ignore"
+    ]
