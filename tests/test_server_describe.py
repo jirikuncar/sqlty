@@ -52,6 +52,7 @@ KNOWN_DIFFERENCES: dict[str, str] = {
     "mysql:tests/mdtest/mysql/functions.md:462": "MySQL predicates are `int`; sqlty types `XOR` like `AND`",
     "mysql:tests/mdtest/mysql/functions.md:479": "MySQL predicates are `int`; sqlty types `XOR` like `AND`",
     "mysql:tests/mdtest/mysql/functions.md:614": "MySQL predicates are `int`; sqlty types `!x` like `NOT x`",
+    "sqlite:tests/mdtest/sqlite/types.md:57": "`INT[]` has INTEGER affinity, but the JSON text ORMs store stays text",
 }
 
 # MySQL column type, without its length or attributes -> Python types sqlty may give it

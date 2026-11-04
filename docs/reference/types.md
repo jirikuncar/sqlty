@@ -46,6 +46,7 @@ These look like bugs but follow the drivers:
 | `BIT(n)` | `str`; `bytes` in `mysql` | psycopg loads a bit string as its text, MySQL drivers as bytes |
 | `JSON`, `JSONB` | `typing.Any` | Any JSON value can be stored. psycopg returns it parsed, PyMySQL and `sqlite3` as text; `Any` admits both, so code that decodes it keeps its [`json-shape-mismatch`](rules.md#json-shape-mismatch) checks |
 | SQLite `UUID` | `str` | SQLite has no UUID storage class: `sqlite3` returns the stored text |
+| SQLite `ARRAY`, `T[]`, `T ARRAY`, `ARRAY_T` | `str` | SQLite has no array type: ORMs store a list as JSON text, which `sqlite3` returns. [`ARRAY = "list"`](configuration.md#types) types the decoded list |
 | SQLite `NUMERIC` affinity (`NUMERIC`, `DECIMAL`, unknown names) | `float` | `sqlite3` returns an integral value as `int`, which a type checker accepts for `float`; precision beyond a double is lost on storage, not by sqlty |
 | MySQL `SET` | `str` | PyMySQL returns the members as one comma-separated string |
 | MySQL `BOOL`, `BOOLEAN` | `bool` | Kept to tell a flag from a number: PyMySQL returns the `TINYINT(1)` it is stored as, an `int`; `TINYINT(1)` itself is `int` |

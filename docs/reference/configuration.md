@@ -333,6 +333,11 @@ schema columns and casts; an expression over a column keeps its type when it
 returns the column's values (`MAX(day)`). See
 [Drivers and ORMs](../guide/drivers-and-orms.md#what-to-annotate).
 
+`ARRAY = "list"` types every array column as a list of its element's type, with
+the element's own override: in SQLite, where an ORM decodes the JSON text it
+stores, `INT[]` and `ARRAY_DATE` become `list[int]` and `list[datetime.date]`
+with `DATE = "datetime.date"`.
+
 `rewrite` and `check --fix` import the module a type names (`import app.models` for
 `app.models.Status`), as they import `datetime`. `strip` leaves that import, since
 it reads no configuration.

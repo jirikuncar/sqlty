@@ -135,14 +135,47 @@ impl Input<'_> {
     }
 }
 
-/// Schema DDL with ISO's `BINARY LARGE OBJECT` as `BLOB` and `T MULTISET` as `T[]`.
-pub(super) fn iso_types(sql: &str, dialect: SqlDialect) -> Cow<'_, str> {
+/// Schema DDL with ISO's `BINARY LARGE OBJECT` as `BLOB` and `T MULTISET` as `T[]`, and in
+/// SQLite the array spellings of ORMs as `T ARRAY`: `T[]`, `ARRAY_T` and a bare `ARRAY`
+/// (`ANY ARRAY`).
+pub(crate) fn iso_types(sql: &str, dialect: SqlDialect) -> Cow<'_, str> {
     let tokens = tokens(sql, dialect);
     let mut edits = Vec::new();
     for i in 0..tokens.len() {
         iso_type(sql, &tokens, i, &mut edits);
+        if dialect == SqlDialect::Sqlite {
+            sqlite_array(sql, &tokens, i, &mut edits);
+        }
     }
     apply(sql, edits)
+}
+
+/// SQLite's array spelling at token `i` as `T ARRAY`. SQLite accepts any type name, so
+/// `INT[]`, `ARRAY_DATE` and `ARRAY` are only names; the ORMs that declare them store JSON text.
+fn sqlite_array(sql: &str, tokens: &[Token], i: usize, edits: &mut Vec<Edit>) {
+    let text = |j: usize| tokens.get(j).map_or("", |t| &sql[t.start..t.end]);
+    let token = &tokens[i];
+    if token.kind != Kind::Word {
+        return;
+    }
+    let word = text(i);
+    // The type of a column definition, or a type on its own (a `[tool.sqlty.types]` key).
+    let declares = i == 0
+        || (is_name(text(i - 1))
+            && i >= 2
+            && matches!(tokens[i - 2].kind, Kind::Open | Kind::Comma));
+    if text(i + 1) == "[" && text(i + 2) == "]" && tokens[i + 1].start == token.end {
+        edits.push((token.end, tokens[i + 2].end, " ARRAY".to_string()));
+    } else if declares && word.eq_ignore_ascii_case("ARRAY") {
+        edits.push((token.start, token.start, "ANY ".to_string()));
+    } else if let Some(element) = word
+        .get(..6)
+        .filter(|prefix| declares && prefix.eq_ignore_ascii_case("ARRAY_"))
+        .and(word.get(6..))
+        .filter(|element| !element.is_empty())
+    {
+        edits.push((token.start, token.end, format!("{element} ARRAY")));
+    }
 }
 
 fn fixes(sql: &str, tokens: &[Token], dialect: SqlDialect, edits: &mut Vec<Edit>) {

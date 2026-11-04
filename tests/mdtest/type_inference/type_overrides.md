@@ -58,6 +58,36 @@ SELECT day || '' AS text FROM events
 -- columns: text: str (TEXT)
 ```
 
+## Arrays of a SQLite ORM
+
+An ORM that stores a SQLite list column as JSON text decodes it to a `list`. With
+`ARRAY = "list"` its elements get the type of the spelling, with the elements'
+own overrides; any other type is used as written.
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+schema = "schema.sql"
+
+[tool.sqlty.types]
+ARRAY = "list"
+DATE = "datetime.date"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE t (a ARRAY, b INT[] NOT NULL, c INTEGER ARRAY, d ARRAY_DATE);
+```
+
+```sql
+SELECT * FROM t
+-- columns: a: list[typing.Any] | None (ARRAY<ANY>)
+-- columns: b: list[int] (ARRAY<INT>)
+-- columns: c: list[int] | None (ARRAY<INT>)
+-- columns: d: list[datetime.date] | None (ARRAY<DATE>)
+```
+
 ## By column
 
 A key with a dot is `table.column`.
