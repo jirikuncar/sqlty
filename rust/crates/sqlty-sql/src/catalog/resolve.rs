@@ -267,6 +267,9 @@ impl<'a> Resolver<'a> {
     /// The type `dt` declares, with the Python type the project sets for it, if any.
     pub(super) fn resolve(&self, dt: &DataType) -> Resolved<'a> {
         let mut resolved = self.resolve_declared(dt);
+        if matches!(dt, DataType::Array(element) if *element != ArrayElemTypeDef::None) {
+            return resolved;
+        }
         if let Some(python) = self.overrides.for_type(&resolved.sql_type) {
             resolved.python_type = Some(python.to_string());
             resolved.allowed_values = None;
@@ -299,15 +302,21 @@ impl<'a> Resolver<'a> {
             let python = python.or_else(|| typed(sql.clone(), None, dialect).0);
             // DuckDB's fixed-size `ARRAY` comes back as a tuple (see `SqlType::python`).
             let fixed = !size.is_empty() && dialect == SqlDialect::Other("duckdb");
+            let python_type = match self.overrides.for_type("ARRAY") {
+                // A bare container is a converter that decodes the elements too.
+                Some("list") => Some(format!(
+                    "list[{}]",
+                    python.as_deref().unwrap_or("typing.Any")
+                )),
+                Some(converted) => Some(converted.to_string()),
+                // SQLite has no arrays: sqlite3 returns the stored text, JSON for the ORMs.
+                None if dialect == SqlDialect::Sqlite => Some("str".to_string()),
+                None if fixed => python.map(|ty| format!("tuple[{ty}, ...]")),
+                None => python.map(|ty| format!("list[{ty}]")),
+            };
             return Resolved {
                 sql_type: format!("ARRAY<{sql}>{size}"),
-                python_type: python.map(|ty| {
-                    if fixed {
-                        format!("tuple[{ty}, ...]")
-                    } else {
-                        format!("list[{ty}]")
-                    }
-                }),
+                python_type,
                 allowed_values: None,
                 values: None,
             };
