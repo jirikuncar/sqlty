@@ -11,21 +11,21 @@ queries as you type. It runs in your browser. The engine is compiled to
 
 <div id="sqlty-playground" markdown="0">
   <div class="sqlty-toolbar">
-    <label>Example
+    <label><span class="sqlty-label">Example</span>
       <select data-example></select>
     </label>
-    <label>Dialect
+    <label><span class="sqlty-label">Dialect</span>
       <select data-dialect>
         <option value="postgres">PostgreSQL</option>
         <option value="mysql">MySQL</option>
         <option value="sqlite">SQLite</option>
       </select>
     </label>
-    <span class="sqlty-actions">
+    <span class="sqlty-actions" role="toolbar" aria-label="Actions">
       <button type="button" class="sqlty-button sqlty-button--primary" data-fix>Fix all</button>
       <button type="button" class="sqlty-button" data-rewrite>Rewrite</button>
       <button type="button" class="sqlty-button" data-strip>Strip</button>
-      <button type="button" class="sqlty-button" data-copy-link>Copy link</button>
+      <button type="button" class="sqlty-button" data-copy-link><span class="sqlty-wide">Copy link</span><span class="sqlty-narrow">Link</span></button>
       <span class="sqlty-group" role="group" aria-label="Font size">
         <button type="button" class="sqlty-button" data-zoom="-1" title="Smaller (Ctrl+-)" aria-label="Smaller">A&minus;</button>
         <button type="button" class="sqlty-button" data-zoom="1" title="Larger (Ctrl+=)" aria-label="Larger">A+</button>
@@ -38,7 +38,7 @@ queries as you type. It runs in your browser. The engine is compiled to
     <button type="button" class="sqlty-button" data-step="-1" title="Previous step (Alt+PageUp)" aria-label="Previous step">&larr;</button>
     <select data-step-select aria-label="Step"></select>
     <button type="button" class="sqlty-button" data-step="1" title="Next step (Alt+PageDown)" aria-label="Next step">&rarr;</button>
-    <button type="button" class="sqlty-button" data-step-reset title="Undo the edits of this step">Reset</button>
+    <button type="button" class="sqlty-button" data-step-reset title="Undo the edits of this step" aria-label="Reset step">&#8634;<span class="sqlty-label"> Reset</span></button>
   </nav>
   <div class="sqlty-tabs" role="tablist" aria-label="Files">
     <button type="button" role="tab" aria-selected="true" data-file="python">queries.py</button>
@@ -80,6 +80,7 @@ queries as you type. It runs in your browser. The engine is compiled to
   .sqlty-group { display: inline-flex; }
   .sqlty-group .sqlty-button:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
   .sqlty-group .sqlty-button:last-child { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
+  .sqlty-narrow { display: none; }
   .sqlty-status { flex-basis: 100%; font-size: 0.64rem; }
   .sqlty-status:empty { display: none; }
   #sqlty-playground select, .sqlty-button {
@@ -135,11 +136,23 @@ queries as you type. It runs in your browser. The engine is compiled to
   .sqlty-console [data-severity="warning"]::before { content: "\25B2"; color: var(--md-code-hl-special-color, #ef6c00); }
   .sqlty-console > div:not([data-notes]) { height: 100%; }
   @media (max-width: 44.984375em) {
-    .sqlty-toolbar label { flex: 1 1 8rem; }
     #sqlty-playground .sqlty-toolbar select { width: 100%; min-width: 0; }
     .sqlty-actions { margin-left: 0; }
     #sqlty-playground .sqlty-steps select { flex: 1 1 0; }
     #sqlty-playground { --sqlty-console: 35dvh; height: calc(100dvh - 3rem); }
+    #sqlty-playground.sqlty-present { padding: 0.4rem 0.5rem 0.5rem; }
+    .sqlty-toolbar { gap: 0.4rem; margin-bottom: 0.4rem; }
+    .sqlty-toolbar label { flex: 1 1 0; min-width: 0; }
+    .sqlty-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .sqlty-actions { flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 0.3rem; }
+    .sqlty-actions::-webkit-scrollbar { display: none; }
+    #sqlty-playground select, .sqlty-button { font-size: 0.62rem; padding: 0.25rem 0.45rem; }
+    #sqlty-playground select { padding-right: 1.5rem; background-position: right 0.75rem center, right 0.45rem center; }
+    .sqlty-actions > *, .sqlty-group { flex: none; }
+    .sqlty-wide { display: none; }
+    .sqlty-narrow { display: inline; }
+    .sqlty-steps { gap: 0.3rem; margin-bottom: 0.3rem; }
+    .sqlty-tabs [role="tab"] { padding: 0.3rem 0.55rem; font-size: 0.62rem; }
   }
 </style>
 
