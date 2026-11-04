@@ -87,21 +87,15 @@ const options = {
   wordBasedSuggestions: "off",
   "semanticHighlighting.enabled": true,
 };
-const source = monaco.editor.create(root.querySelector("[data-source]"), {
-  ...options,
-  value: SOURCE,
-  language: "python",
-});
-const schema = monaco.editor.create(root.querySelector("[data-schema]"), {
-  ...options,
-  value: SCHEMA,
-  language: "sql",
-});
-const config = monaco.editor.create(root.querySelector("[data-config]"), {
-  ...options,
-  value: CONFIG,
-  language: "ini",
-});
+const models = {
+  python: monaco.editor.createModel(SOURCE, "python"),
+  schema: monaco.editor.createModel(SCHEMA, "sql"),
+  config: monaco.editor.createModel(CONFIG, "ini"),
+};
+const editor = monaco.editor.create(root.querySelector("[data-source]"), { ...options, model: models.python });
+const views = new Map();
+const files = root.querySelectorAll("[data-file]");
+const tabs = root.querySelectorAll("[data-tab]");
 const rewritten = monaco.editor.create(root.querySelector("[data-rewritten]"), {
   ...options,
   language: "python",
@@ -126,18 +120,31 @@ function request(op, offset = 0) {
   return {
     op,
     offset,
-    source: source.getValue(),
-    schema: schema.getValue(),
+    source: models.python.getValue(),
+    schema: models.schema.getValue(),
     dialect: dialect.value,
-    config: config.getValue(),
+    config: models.config.getValue(),
   };
+}
+
+// Show a file of `models` in the editor, keeping the cursor and scroll of the one it hides.
+function open(name) {
+  views.set(editor.getModel(), editor.saveViewState());
+  editor.setModel(models[name]);
+  editor.restoreViewState(views.get(models[name]) ?? null);
+  for (const tab of files) tab.setAttribute("aria-selected", String(tab.dataset.file === name));
+}
+
+function show(name) {
+  for (const tab of tabs) tab.setAttribute("aria-selected", String(tab.dataset.tab === name));
+  for (const panel of root.querySelectorAll("[data-panel]")) panel.hidden = panel.dataset.panel !== name;
 }
 
 monaco.languages.registerDocumentSemanticTokensProvider("python", {
   onDidChange: refreshed.event,
   getLegend: () => ({ tokenTypes: LEGEND, tokenModifiers: [] }),
   provideDocumentSemanticTokens(model) {
-    if (model !== source.getModel()) return null;
+    if (model !== models.python) return null;
     const data = [];
     let line = 0;
     let column = 0;
@@ -163,7 +170,7 @@ monaco.languages.registerDocumentSemanticTokensProvider("python", {
 monaco.languages.registerCompletionItemProvider("python", {
   triggerCharacters: [" ", ".", ","],
   provideCompletionItems(model, position) {
-    if (model !== source.getModel()) return { suggestions: [] };
+    if (model !== models.python) return { suggestions: [] };
     const found = ask(request("complete", model.getOffsetAt(position)));
     if (!found?.items) return { suggestions: [] };
     const range = monaco.Range.fromPositions(
@@ -186,7 +193,7 @@ monaco.languages.registerCompletionItemProvider("python", {
 
 monaco.languages.registerCodeActionProvider("python", {
   provideCodeActions(model, range, context) {
-    if (model !== source.getModel()) return { actions: [], dispose() {} };
+    if (model !== models.python) return { actions: [], dispose() {} };
     const actions = context.markers.flatMap((marker) => {
       const found = current.diagnostics.find(
         (diagnostic) =>
@@ -224,7 +231,7 @@ monaco.languages.registerCodeActionProvider("python", {
 
 monaco.languages.registerHoverProvider("python", {
   provideHover(model, position) {
-    if (model !== source.getModel()) return null;
+    if (model !== models.python) return null;
     const found = ask(request("hover", model.getOffsetAt(position)));
     if (!found?.contents) return null;
     return {
@@ -245,7 +252,7 @@ function refresh() {
     return;
   }
   current = answer;
-  const model = source.getModel();
+  const model = models.python;
   monaco.editor.setModelMarkers(
     model,
     "sqlty",
@@ -267,12 +274,23 @@ function refresh() {
   problems.replaceChildren(
     ...answer.diagnostics.map((found) => {
       const item = document.createElement("li");
-      const line = model.getPositionAt(found.start).lineNumber;
-      item.textContent = `${line}: [${found.rule}] ${found.message}`;
+      const at = model.getPositionAt(found.start);
+      const button = Object.assign(document.createElement("button"), {
+        type: "button",
+        textContent: `${at.lineNumber}: [${found.rule}] ${found.message}`,
+      });
+      button.addEventListener("click", () => {
+        open("python");
+        editor.setPosition(at);
+        editor.revealPositionInCenter(at);
+        editor.focus();
+      });
+      item.append(button);
       return item;
     }),
   );
   if (!answer.diagnostics.length) problems.textContent = "No problems.";
+  root.querySelector('[data-tab="problems"]').textContent = `Problems (${answer.diagnostics.length})`;
   root.querySelector("[data-types]").replaceChildren(...answer.queries.map(describe));
   rewritten.setValue(answer.rewritten);
   output.setValue(JSON.stringify(answer.diagnostics.map((found) => checked(found, model)), null, 2));
@@ -299,16 +317,16 @@ function checked(found, model) {
 
 function session() {
   return {
-    source: source.getValue(),
-    schema: schema.getValue(),
+    source: models.python.getValue(),
+    schema: models.schema.getValue(),
     dialect: dialect.value,
-    config: config.getValue(),
+    config: models.config.getValue(),
   };
 }
 
 function restore(saved) {
-  for (const [editor, value] of [[source, saved.source], [schema, saved.schema], [config, saved.config]]) {
-    if (typeof value === "string") editor.setValue(value);
+  for (const [model, value] of [[models.python, saved.source], [models.schema, saved.schema], [models.config, saved.config]]) {
+    if (typeof value === "string") model.setValue(value);
   }
   if ([...dialect.options].some((option) => option.value === saved.dialect)) dialect.value = saved.dialect;
 }
@@ -380,18 +398,19 @@ const later = () => {
     share();
   }, 150);
 };
-source.onDidChangeModelContent(later);
-schema.onDidChangeModelContent(later);
-config.onDidChangeModelContent(later);
+for (const model of Object.values(models)) model.onDidChangeContent(later);
 dialect.addEventListener("change", later);
+for (const tab of files) tab.addEventListener("click", () => open(tab.dataset.file));
+for (const tab of tabs) tab.addEventListener("click", () => show(tab.dataset.tab));
 for (const [button, made] of [["fix", "fixed"], ["rewrite", "rewritten"], ["strip", "stripped"]]) {
   root.querySelector(`[data-${button}]`).addEventListener("click", () => {
     refresh();
-    const model = source.getModel();
+    const model = models.python;
     if (current[made] === model.getValue()) return;
-    source.pushUndoStop();
-    source.executeEdits("sqlty", [{ range: model.getFullModelRange(), text: current[made] }]);
-    source.pushUndoStop();
+    open("python");
+    editor.pushUndoStop();
+    editor.executeEdits("sqlty", [{ range: model.getFullModelRange(), text: current[made] }]);
+    editor.pushUndoStop();
   });
 }
 root.querySelector("[data-copy-link]").addEventListener("click", async () => {

@@ -11,12 +11,12 @@ site_dir = "site"
 strict = true
 nav = [
   { "Home" = "index.md" },
+  { "Playground" = "playground.md" },
   { "Getting started" = [
     { "Installation" = "installation.md" },
     { "Quickstart" = "quickstart.md" },
     { "Why SQLTy?" = "motivation.md" },
     { "Use cases" = "use-cases.md" },
-    { "Playground" = "playground.md" },
   ] },
   { "Guide" = [
     { "Writing queries" = "guide/writing-queries.md" },

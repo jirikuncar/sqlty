@@ -48,7 +48,7 @@ def main() -> None:
 
 def check(page: Page, url: str) -> None:
     page.goto(url)
-    page.wait_for_selector("[data-types] code", timeout=60_000)
+    page.wait_for_selector("[data-types] code", state="attached", timeout=60_000)
     problems = page.inner_text("[data-problems]")
     assert "[unknown-column]" in problems, problems
 
@@ -57,7 +57,7 @@ def check(page: Page, url: str) -> None:
     shared = page.url
     page.goto("about:blank")
     page.goto(shared)
-    page.wait_for_selector("[data-types] code", timeout=60_000)
+    page.wait_for_selector("[data-types] code", state="attached", timeout=60_000)
     assert page.evaluate(f"{SOURCE}.getValue()") == 'q = "--sql\\nSELECT nme FROM users"\n'
     page.click("[data-fix]")
     fixed = page.evaluate(f"{SOURCE}.getValue()")
