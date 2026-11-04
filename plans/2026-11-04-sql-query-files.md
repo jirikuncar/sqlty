@@ -2,7 +2,7 @@
 
 > **Status:** stage 1 (`check`) merged in [#906](https://github.com/jirikuncar/sqlty/pull/906);
 > stage 2 (`breaking`) merged in [#908](https://github.com/jirikuncar/sqlty/pull/908); stage 3
-> (`server`) in review. Stage 4 to follow.
+> (`server`) in review; stage 4 (`-v`) stacked on it.
 
 Tracks [#896](https://github.com/jirikuncar/sqlty/issues/896): projects that keep SQL in `.sql`
 files (aiosql, PugSQL, sqlc) get no checks. The engine splits and checks the files
@@ -40,6 +40,12 @@ files (aiosql, PugSQL, sqlc) get no checks. The engine splits and checks the fil
   unsaved buffer counts) gets the diagnostics of `sqlty check`; any other gets none.
   Completion, hover, highlighting and fix-all stay Python-only.
 - The VS Code extension sends `sql` documents; the Neovim recipe adds `"sql"` to `filetypes`.
+
+## Stage 4
+
+- `sqlty check -v` prints `name(params) -> row` for each named query, after the diagnostics,
+  in text output: `None` for a query without rows, `unknown` for one whose columns are not
+  all typed. A query of several statements is typed by its first.
 
 ## Gaps
 

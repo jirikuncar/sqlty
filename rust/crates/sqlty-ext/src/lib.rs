@@ -843,6 +843,30 @@ fn check_queries(
     })
 }
 
+/// `(name, start, end)` of each named query of a `.sql` file: its byte range starts on the
+/// line after its header. `name` names a query of a file without headers.
+///
+/// Example:
+///     named_queries("-- name: get-user^\nSELECT 1") == [("get_user", 19, 27)]
+///
+/// Raises:
+///     ValueError: unknown `query_format`
+#[pyfunction]
+#[pyo3(signature = (source, *, query_format = "auto", name = ""))]
+fn named_queries(
+    source: &str,
+    query_format: &str,
+    name: &str,
+) -> Result<Vec<(String, usize, usize)>, Error> {
+    let format = query_format
+        .parse::<queries::Format>()
+        .map_err(|()| ConfigError::QueryFormat(query_format.to_string()))?;
+    Ok(queries::split(source, format, name)
+        .into_iter()
+        .map(|query| (query.name, query.body.start, query.body.end))
+        .collect())
+}
+
 /// `(line, annotation, query, annotation_span)` for each `SQL[T](...)` call in Python source.
 ///
 /// `query` is the `--sql` string without its prefix, or None when the call
@@ -1144,6 +1168,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(select_star_finding, m)?)?;
     m.add_function(wrap_pyfunction!(check_source, m)?)?;
     m.add_function(wrap_pyfunction!(check_queries, m)?)?;
+    m.add_function(wrap_pyfunction!(named_queries, m)?)?;
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;
     m.add_function(wrap_pyfunction!(query_at, m)?)?;
