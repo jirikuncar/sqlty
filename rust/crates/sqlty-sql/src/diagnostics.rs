@@ -37,11 +37,13 @@ pub enum NameRule {
     ChasmJoin,
     /// A join whose conditions match no primary or unique key.
     UnprovenJoin,
+    /// A comparison between columns holding keys of different entities.
+    EntityMismatch,
 }
 
 impl NameRule {
     /// Every rule, the one list the checker and the Python side read.
-    pub const ALL: [NameRule; 12] = [
+    pub const ALL: [NameRule; 13] = [
         NameRule::UnknownTable,
         NameRule::UnknownColumn,
         NameRule::AmbiguousColumn,
@@ -54,6 +56,7 @@ impl NameRule {
         NameRule::FanoutAggregate,
         NameRule::ChasmJoin,
         NameRule::UnprovenJoin,
+        NameRule::EntityMismatch,
     ];
 
     /// The kebab-case rule name, as in `[tool.sqlty.rules]`.
@@ -71,6 +74,7 @@ impl NameRule {
             NameRule::FanoutAggregate => "fanout-aggregate",
             NameRule::ChasmJoin => "chasm-join",
             NameRule::UnprovenJoin => "unproven-join",
+            NameRule::EntityMismatch => "entity-mismatch",
         }
     }
 }
@@ -363,6 +367,7 @@ mod tests {
                 "fanout-aggregate",
                 "chasm-join",
                 "unproven-join",
+                "entity-mismatch",
             ]
         );
     }
