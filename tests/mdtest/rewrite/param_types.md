@@ -91,6 +91,109 @@ run("--sql\nSELECT name FROM users WHERE id = %(id)s")
 # rewritten-file: run(SQL[tuple[str], QueryParams]("--sql\nSELECT name FROM users WHERE id = %(id)s"))
 ```
 
+## A parenthesized query names its class
+
+```python
+q = (
+    "--sql\nSELECT name FROM users WHERE id = %(id)s"
+)
+# rewritten-file: import typing
+# rewritten-file: from sqlty import SQL
+# rewritten-file:
+# rewritten-file:
+# rewritten-file: # sqlty: generated
+# rewritten-file: class QParams(typing.TypedDict):
+# rewritten-file:     id: int | None
+# rewritten-file:
+# rewritten-file:
+# rewritten-file: q = (
+# rewritten-file:     SQL[tuple[str], QParams]("--sql\nSELECT name FROM users WHERE id = %(id)s")
+# rewritten-file: )
+```
+
+## Each named query gets its own class
+
+```python
+by_id = "--sql\nSELECT name FROM users WHERE id = %(id)s"
+by_id_again = "--sql\nSELECT email FROM users WHERE id = %(id)s"
+# rewritten-file: import typing
+# rewritten-file: from sqlty import SQL
+# rewritten-file:
+# rewritten-file:
+# rewritten-file: # sqlty: generated
+# rewritten-file: class ByIdParams(typing.TypedDict):
+# rewritten-file:     id: int | None
+# rewritten-file:
+# rewritten-file:
+# rewritten-file: # sqlty: generated
+# rewritten-file: class ByIdAgainParams(typing.TypedDict):
+# rewritten-file:     id: int | None
+# rewritten-file:
+# rewritten-file:
+# rewritten-file: by_id = SQL[tuple[str], ByIdParams]("--sql\nSELECT name FROM users WHERE id = %(id)s")
+# rewritten-file: by_id_again = SQL[tuple[str | None], ByIdAgainParams]("--sql\nSELECT email FROM users WHERE id = %(id)s")
+```
+
+## A name already taken gets a number
+
+```python
+QParams = None
+q = "--sql\nSELECT name FROM users WHERE id = %(id)s"
+# rewritten-file: import typing
+# rewritten-file: from sqlty import SQL
+# rewritten-file:
+# rewritten-file:
+# rewritten-file: # sqlty: generated
+# rewritten-file: class QParams2(typing.TypedDict):
+# rewritten-file:     id: int | None
+# rewritten-file:
+# rewritten-file:
+# rewritten-file: QParams = None
+# rewritten-file: q = SQL[tuple[str], QParams2]("--sql\nSELECT name FROM users WHERE id = %(id)s")
+```
+
+## A class it generated before is reused
+
+```python
+import typing
+
+from sqlty import SQL
+
+
+# sqlty: generated
+class QParams(typing.TypedDict):
+    id: int | None
+
+
+q = SQL[tuple[str]]("--sql\nSELECT name FROM users WHERE id = %(id)s")
+# rewritten-file: import typing
+# rewritten-file:
+# rewritten-file: from sqlty import SQL
+# rewritten-file:
+# rewritten-file:
+# rewritten-file: # sqlty: generated
+# rewritten-file: class QParams(typing.TypedDict):
+# rewritten-file:     id: int | None
+# rewritten-file:
+# rewritten-file:
+# rewritten-file: q = SQL[tuple[str], QParams]("--sql\nSELECT name FROM users WHERE id = %(id)s")
+```
+
+## A keyword parameter takes the functional `TypedDict` syntax
+
+```python
+q = "--sql\nSELECT name FROM users WHERE id = %(from)s"
+# rewritten-file: import typing
+# rewritten-file: from sqlty import SQL
+# rewritten-file:
+# rewritten-file:
+# rewritten-file: # sqlty: generated
+# rewritten-file: QParams = typing.TypedDict('QParams', {'from': int | None})
+# rewritten-file:
+# rewritten-file:
+# rewritten-file: q = SQL[tuple[str], QParams]("--sql\nSELECT name FROM users WHERE id = %(from)s")
+```
+
 ## Unknown and cast parameters are `typing.Any`
 
 ```python

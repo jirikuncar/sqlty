@@ -394,8 +394,7 @@ fn saving_the_config_reloads_the_project() {
 #[test]
 fn other_languages_and_requests_are_left_alone() {
     let mut client = Client::start(&json!({}));
-    let document =
-        json!({"uri": "file:///work/q.sql", "languageId": "sql", "version": 1, "text": "bad"});
+    let document = json!({"uri": "file:///work/q.txt", "languageId": "plaintext", "version": 1, "text": "bad"});
     client.notify("textDocument/didOpen", json!({"textDocument": document}));
     let definition = client.request(
         "textDocument/definition",

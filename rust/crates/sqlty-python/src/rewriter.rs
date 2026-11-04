@@ -370,8 +370,9 @@ pub(crate) fn wraps(
 /// alone (a comment outside them, or line breaks only the call's parentheses
 /// allow), only `SQL[T]` and the trailing comma go: `SQL[T]("a"  # c\n)` becomes
 /// `("a"  # c\n)`. Other arguments are left alone. Removes unused imports added by
-/// rewrite.
+/// rewrite, and the classes `param-types` and `json-types` generated.
 pub fn strip_source(source: &str, istyle: &ImportStyle) -> String {
+    let source: &str = &crate::params::strip_generated(source);
     let scan = Scan::new(source, &istyle.wrapper_name);
     let mut replacements = Vec::new();
     for call in &scan.calls {

@@ -1,8 +1,9 @@
 # Playground: share links, configuration, fixes and breaking changes
 
-> **Status:** stages 1 to 4 merged in [#895](https://github.com/jirikuncar/sqlty/pull/895),
-> [#899](https://github.com/jirikuncar/sqlty/pull/899), [#900](https://github.com/jirikuncar/sqlty/pull/900) and
-> [#901](https://github.com/jirikuncar/sqlty/pull/901); stage 6 (site test and size) in review. Stage 5 (breaking
+> **Status:** stages 1 to 4 and 6 merged in [#895](https://github.com/jirikuncar/sqlty/pull/895),
+> [#899](https://github.com/jirikuncar/sqlty/pull/899), [#900](https://github.com/jirikuncar/sqlty/pull/900),
+> [#901](https://github.com/jirikuncar/sqlty/pull/901) and [#902](https://github.com/jirikuncar/sqlty/pull/902);
+> `param-types` in `sqlty.toml` and `examples/06_param_types/` in review. Stage 5 (breaking
 > changes) waits for the comparison of `_breaking.py` to move to Rust.
 
 Tracks [#893](https://github.com/jirikuncar/sqlty/issues/893): what keeps the Playground page
@@ -54,6 +55,13 @@ no server, nothing leaves the browser.
   shown under the column in Types as `sqlty check --explain` prints them.
 - Each diagnostic has its `line`; a read-only panel shows the problems as
   `sqlty check --output-format json` prints them, with lines and columns from the editor.
+
+## `param-types`
+
+- `add_param_types` moved from `_param_types.py` to `sqlty_python::params`, so the page's
+  `sqlty.toml` takes `param-types` and **Rewrite** and **Fix all** write `SQL[R, P]`. `strip`
+  drops the generated classes in Rust too.
+- `examples/06_param_types/` sets `param-types = true`; the examples loader passes it on.
 
 ## Stage 6
 

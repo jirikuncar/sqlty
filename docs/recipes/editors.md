@@ -21,6 +21,9 @@ vim.lsp.config("sqlty", {
 vim.lsp.enable("sqlty")
 ```
 
+Add `"sql"` to `filetypes` to check the `.sql` files of named queries that the
+[`queries`](../guide/sql-files.md) key names; other `.sql` files get no diagnostics.
+
 Neovim 0.10 and older start the client when a Python buffer opens:
 
 ```lua

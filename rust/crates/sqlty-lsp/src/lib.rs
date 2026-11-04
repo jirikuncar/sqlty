@@ -1,5 +1,5 @@
 //! The language server of `sqlty server`: diagnostics, quick fixes, fix-all, completion,
-//! hover and SQL highlighting for Python files.
+//! hover and SQL highlighting for Python files, and the diagnostics of `.sql` query files.
 //!
 //! The protocol runs on the thread that calls [`run`]. Checks run on one worker thread that
 //! owns a [`Workspace`] per project root: the Python passes hold the GIL, so two checks could
@@ -243,6 +243,8 @@ enum Job {
 struct Document {
     text: String,
     version: i32,
+    /// A Python buffer; a `sql` one is a query file, which only gets diagnostics.
+    python: bool,
     /// The diagnostics of `version`, the base of its quick fixes.
     diagnostics: Option<(i32, Vec<Diagnostic>)>,
     /// The text last checked, and what completion reads of it.
@@ -330,12 +332,13 @@ impl Shared {
                     return;
                 };
                 let document = params.text_document;
-                if document.language_id != "python" {
+                if !matches!(document.language_id.as_str(), "python" | "sql") {
                     return;
                 }
                 self.documents().insert(
                     document.uri.clone(),
                     Document {
+                        python: document.language_id == "python",
                         text: document.text,
                         version: document.version,
                         diagnostics: None,
@@ -414,7 +417,7 @@ impl Shared {
                 let found = self
                     .documents()
                     .get(&params.text_document_position.text_document.uri)
-                    .filter(|_| self.completion)
+                    .filter(|document| self.completion && document.python)
                     .and_then(|document| completion::complete(document, &params, &self.encoding));
                 self.send(Response::new_ok(request.id, found));
             }
@@ -425,7 +428,7 @@ impl Shared {
                 let found = self
                     .documents()
                     .get(&params.text_document_position_params.text_document.uri)
-                    .filter(|_| self.hover)
+                    .filter(|document| self.hover && document.python)
                     .and_then(|document| hover::hover(document, &params, &self.encoding));
                 self.send(Response::new_ok(request.id, found));
             }
@@ -437,7 +440,7 @@ impl Shared {
                 let found = self
                     .documents()
                     .get(&params.text_document.uri)
-                    .filter(|_| self.highlighting)
+                    .filter(|document| self.highlighting && document.python)
                     .map(|document| highlight::tokens(document, &self.encoding));
                 self.send(Response::new_ok(request.id, found));
             }

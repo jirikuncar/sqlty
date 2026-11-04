@@ -51,8 +51,13 @@ class Workspace:
         self.baseline = Baseline(Path(root), against, direction) if against else None
 
     def check(self, path: str, text: str) -> list[Diagnostic]:
-        """Diagnostics of the buffer ``text`` of the file ``path``."""
+        """Diagnostics of the buffer ``text`` of the file ``path``: a Python file, or a
+        ``.sql`` file the ``queries`` key names (any other ``.sql`` file has none)."""
         file = Path(path)
+        if file.suffix == ".sql":
+            return (
+                self.project.check_queries(file, text) if self.project.is_query_file(file) else []
+            )
         self.project.update(file, text)
         found = self.project.check(file)
         if self.baseline is not None:

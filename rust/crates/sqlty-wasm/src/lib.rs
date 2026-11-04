@@ -24,6 +24,7 @@ use sqlty_python::config;
 use sqlty_python::fixer::fix_source;
 use sqlty_python::locate::{self, Queries};
 use sqlty_python::options::Options;
+use sqlty_python::params::add_param_types;
 use sqlty_python::rewriter::{rewrite_source_with, strip_source, Suppressed};
 use sqlty_python::rules::RuleConfig;
 use sqlty_sql::analyzer::{
@@ -65,8 +66,8 @@ struct Request {
 ///   a query.
 /// - `hover`: what the word at `offset` is, in Markdown; `null` when nothing.
 ///
-/// `config` is a `sqlty.toml` whose `dialect`, `import-style` and `rules` apply; another key,
-/// or an invalid one, is an `error`, as `sqlty check` reports it.
+/// `config` is a `sqlty.toml` whose `dialect`, `import-style`, `param-types` and `rules` apply;
+/// another key, or an invalid one, is an `error`, as `sqlty check` reports it.
 pub fn run(request: &str) -> String {
     let error = |error: String| json!({ "error": error }).to_string();
     let request: Request = match serde_json::from_str(request) {
@@ -78,6 +79,7 @@ pub fn run(request: &str) -> String {
         Err(found) => return error(found),
     };
     let dialect = settings.dialect.as_deref().unwrap_or(&request.dialect);
+    let param_types = settings.param_types;
     let schema = (!request.schema.trim().is_empty())
         .then(|| load_schema_with_skipped(&request.schema, dialect).0);
     let options = Options::new(
@@ -96,6 +98,10 @@ pub fn run(request: &str) -> String {
     let utf16 = |byte: usize| source[..byte].encode_utf16().count();
     let offset = byte_offset(source, request.offset);
     let queries = Queries::new(source, &options.style, &[]);
+    let params = |source: String| match param_types {
+        true => add_param_types(&source, &options),
+        false => source,
+    };
     let answer = match request.op {
         Op::Analyze => {
             let mut diagnostics = check_source(source, &options, &rules, &[]);
@@ -127,9 +133,9 @@ pub fn run(request: &str) -> String {
                 .into_iter()
                 .map(|(range, kind)| json!([utf16(range.start), utf16(range.end), highlight(kind)]))
                 .collect::<Vec<_>>(),
-            "rewritten": rewrite_source_with(source, &options, false),
+            "rewritten": params(rewrite_source_with(source, &options, false)),
             "stripped": strip_source(source, &options.style),
-            "fixed": fix_source(source, &options, &rules, &Suppressed::new()),
+            "fixed": params(fix_source(source, &options, &rules, &Suppressed::new())),
             })
         }
         Op::Complete => match locate::complete(&queries, offset, dialect, options.schema, 50) {
@@ -161,6 +167,7 @@ pub fn run(request: &str) -> String {
 struct Settings {
     dialect: Option<String>,
     import_style: Option<String>,
+    param_types: bool,
     rules: HashMap<String, String>,
 }
 
@@ -173,10 +180,10 @@ fn settings(config: &str) -> Result<Settings, String> {
     // The other keys name files, which the page has none of.
     if let Some(key) = table
         .keys()
-        .find(|key| !["dialect", "import-style", "rules"].contains(&key.as_str()))
+        .find(|key| !["dialect", "import-style", "param-types", "rules"].contains(&key.as_str()))
     {
         return Err(format!(
-            "sqlty.toml: the playground reads only dialect, import-style, rules, not '{key}'"
+            "sqlty.toml: the playground reads only dialect, import-style, param-types, rules, not '{key}'"
         ));
     }
     let text = |key: &str| {
@@ -193,6 +200,9 @@ fn settings(config: &str) -> Result<Settings, String> {
     Ok(Settings {
         dialect: text("dialect"),
         import_style: text("import-style"),
+        param_types: table
+            .get("param-types")
+            .is_some_and(|value| value.as_bool() == Some(true)),
         rules: rules
             .filter_map(|(rule, severity)| Some((rule.clone(), severity.as_str()?.to_string())))
             .collect(),

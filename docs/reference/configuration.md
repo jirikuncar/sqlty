@@ -283,6 +283,8 @@ its classes. `strip` removes them. See
 param-types = true
 ```
 
+Example: [`examples/06_param_types/`](https://github.com/jirikuncar/sqlty/tree/main/examples/06_param_types).
+
 !!! warning "Type checkers become stricter than the driver"
     A type checker then rejects calls that psycopg runs: a list for a `tuple`,
     text for another type, a `dict[str, Any]` or extra keys for a `TypedDict`.

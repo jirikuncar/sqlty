@@ -427,7 +427,8 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         "--verbose",
         action="count",
         default=0,
-        help="Print each file that rewrite, strip or check --fix changes",
+        help="Print each file that rewrite, strip or check --fix changes, and with check the "
+        "types of each named query of a query file",
     )
     parser.add_argument("-q", "--quiet", action="store_true", help="Suppress non-error output")
     parser.add_argument(
@@ -658,6 +659,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
     # A row type shared by files is judged by all of its queries: report once every file is read.
     row_usage = RowUsage()
     reports: list[tuple[Path, Diagnostic, ParsedSource]] = []
+    types: list[str] = []
 
     if args.fix:
         for path, fixed in zip(files, _map(args, project.fix, files), strict=True):
@@ -686,6 +688,8 @@ def _cmd_check(args: argparse.Namespace) -> None:
             continue
         query_source = ParsedSource(text)
         reports.extend((path, diag, query_source) for diag in project.check_queries(path, text))
+        if args.verbose and args.output_format == "text" and not args.quiet:
+            types.extend(f"{path}: {line}" for line in project.query_types(path, text))
 
     kept = {id(diag) for diag in row_usage.filter([diag for _, diag, _ in reports])}
     shown: list[dict[str, object]] = []
@@ -708,6 +712,8 @@ def _cmd_check(args: argparse.Namespace) -> None:
                 for line in _explain(parsed, diag["line"], own.dialect, own.schema):
                     print(line)
 
+    for line in types:
+        print(line)
     if args.output_format == "json":
         print(json.dumps(shown, indent=2))
     elif args.output_format == "sarif":
@@ -1495,6 +1501,37 @@ class Project:
             if path not in self.settings
         ]
         self._index()
+
+    def query_types(self, path: Path, text: str) -> list[str]:
+        from sqlty._queries import query_types
+
+        settings = self.resolver.for_file(path)
+        return query_types(
+            text,
+            name=path.stem,
+            query_format=settings.query_format,
+            dialect=settings.dialect,
+            schema_sql=settings.schema,
+        )
+
+    def is_query_file(self, path: Path) -> bool:
+        """Whether the ``queries`` key of ``path``'s project names it, as a file, a directory
+        holding it or a glob; ``path`` need not exist, as an unsaved buffer's may not."""
+        settings = self.resolver.for_file(path)
+        if path.suffix != ".sql" or not settings.queries or settings.config_dir is None:
+            return False
+        resolved = path.resolve()
+        base = settings.config_dir.resolve()
+        if not resolved.is_relative_to(base):
+            return False
+        relative = resolved.relative_to(base).as_posix()
+        return any(
+            relative == entry.strip("/")
+            or relative.startswith(entry.strip("/") + "/")
+            or re.fullmatch(glob.translate(entry, recursive=True, include_hidden=True), relative)
+            is not None
+            for entry in settings.queries
+        )
 
     def check_queries(self, path: Path, text: str) -> list[Diagnostic]:
         from sqlty._queries import check_query_file

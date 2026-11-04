@@ -7,7 +7,7 @@
 //!
 //! - Inference: `infer_type`, `analyze_select`, `analyze_columns`, `analyze_params`,
 //!   `expand_star`, `query_diagnostics`, `parse_error`, `returns_rows`.
-//! - Source: `rewrite_source`, `strip_source`, `fix_source`, `check_source`,
+//! - Source: `rewrite_source`, `add_param_types`, `strip_source`, `fix_source`, `check_source`,
 //!   `wrapped_queries`, `query_sites`.
 //! - Schema: `load_schema`, `schema_skipped_tables`, `schema_skipped_objects`, `name_rules`.
 //! - Configuration: `load_config`, `validate_config` and the key lists.
@@ -27,6 +27,7 @@ mod server;
 use sqlty_python::checker;
 use sqlty_python::fixer;
 use sqlty_python::locate;
+use sqlty_python::params;
 use sqlty_python::queries;
 use sqlty_python::rewriter;
 use sqlty_sql::analyzer;
@@ -631,6 +632,30 @@ fn rewrite_source(
     })
 }
 
+/// Write the parameter type P of each SQL[R]("--sql\n...") call: SQL[R, P].
+///
+/// Positional parameters are a tuple, named ones a TypedDict generated below a
+/// `# sqlty: generated` line after the imports.
+///
+/// Raises:
+///     ValueError: unsupported import_style
+#[pyfunction]
+#[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, schema_sql = None, import_style = None))]
+fn add_param_types(
+    py: Python<'_>,
+    source: &str,
+    dialect: DialectArg,
+    schema_sql: Option<SchemaArg>,
+    import_style: Option<&str>,
+) -> Result<String, Error> {
+    let dialect = dialect.0;
+    detach(py, || {
+        let schema = schema_for(source, schema_sql, dialect);
+        let options = Options::new(dialect, schema.as_deref(), import_style, false)?;
+        Ok(params::add_param_types(source, &options))
+    })
+}
+
 /// Strip Python source: SQL[T]("--sql\n...") -> "--sql\n...".
 ///
 /// Removes unused imports added by rewrite.
@@ -841,6 +866,30 @@ fn check_queries(
                 .collect(),
         )
     })
+}
+
+/// `(name, start, end)` of each named query of a `.sql` file: its byte range starts on the
+/// line after its header. `name` names a query of a file without headers.
+///
+/// Example:
+///     named_queries("-- name: get-user^\nSELECT 1") == [("get_user", 19, 27)]
+///
+/// Raises:
+///     ValueError: unknown `query_format`
+#[pyfunction]
+#[pyo3(signature = (source, *, query_format = "auto", name = ""))]
+fn named_queries(
+    source: &str,
+    query_format: &str,
+    name: &str,
+) -> Result<Vec<(String, usize, usize)>, Error> {
+    let format = query_format
+        .parse::<queries::Format>()
+        .map_err(|()| ConfigError::QueryFormat(query_format.to_string()))?;
+    Ok(queries::split(source, format, name)
+        .into_iter()
+        .map(|query| (query.name, query.body.start, query.body.end))
+        .collect())
 }
 
 /// `(line, annotation, query, annotation_span)` for each `SQL[T](...)` call in Python source.
@@ -1138,12 +1187,14 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_error, m)?)?;
     m.add_function(wrap_pyfunction!(returns_rows, m)?)?;
     m.add_function(wrap_pyfunction!(rewrite_source, m)?)?;
+    m.add_function(wrap_pyfunction!(add_param_types, m)?)?;
     m.add_function(wrap_pyfunction!(strip_source, m)?)?;
     m.add_function(wrap_pyfunction!(fix_source, m)?)?;
     m.add_function(wrap_pyfunction!(expand_star, m)?)?;
     m.add_function(wrap_pyfunction!(select_star_finding, m)?)?;
     m.add_function(wrap_pyfunction!(check_source, m)?)?;
     m.add_function(wrap_pyfunction!(check_queries, m)?)?;
+    m.add_function(wrap_pyfunction!(named_queries, m)?)?;
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;
     m.add_function(wrap_pyfunction!(query_at, m)?)?;

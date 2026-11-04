@@ -24,6 +24,7 @@ from sqlty._core import (
     infer_type,
     returns_rows,
 )
+from sqlty._core import add_param_types as _add_param_types
 from sqlty._core import analyze_columns as _analyze_columns
 from sqlty._core import analyze_params as _analyze_params
 from sqlty._core import analyze_select as _analyze_select
@@ -301,9 +302,7 @@ def rewrite_source(
             rewritten, dialect=dialect, schema_sql=schema_sql, import_style=import_style
         )
     if param_types:
-        from sqlty._param_types import add_param_types
-
-        rewritten = add_param_types(
+        rewritten = _add_param_types(
             rewritten, dialect=dialect, schema_sql=schema_sql, import_style=import_style
         )
     return rewritten
@@ -319,9 +318,7 @@ def strip_source(source: str, *, import_style: str | None = None) -> str:
     Raises:
         ValueError: unsupported ``import_style``
     """
-    from sqlty._json_types import strip_json_types
-
-    return _strip_source(strip_json_types(source), import_style=import_style)
+    return _strip_source(source, import_style=import_style)
 
 
 def fix_source(
@@ -378,9 +375,7 @@ def fix_source(
             fixed, dialect=dialect, schema_sql=schema_sql, import_style=import_style
         )
     if param_types:
-        from sqlty._param_types import add_param_types
-
-        fixed = add_param_types(
+        fixed = _add_param_types(
             fixed, dialect=dialect, schema_sql=schema_sql, import_style=import_style
         )
     return fixed
