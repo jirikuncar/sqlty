@@ -1,7 +1,8 @@
 # Playground: share links, configuration, fixes and breaking changes
 
 > **Status:** stage 1 (share links and configuration) merged in [#895](https://github.com/jirikuncar/sqlty/pull/895);
-> stage 2 (fixes, rewrite and strip) in review. Stages 3 to 6 not started.
+> stage 2 (fixes, rewrite and strip) merged in [#899](https://github.com/jirikuncar/sqlty/pull/899); stage 3
+> (examples) in review. Stages 4 to 6 not started.
 
 Tracks [#893](https://github.com/jirikuncar/sqlty/issues/893): what keeps the Playground page
 from being the place to reproduce a bug or show a feature. Every stage keeps the page static:
@@ -35,3 +36,13 @@ no server, nothing leaves the browser.
   **Fix all**, **Rewrite** and **Strip** buttons replace the source with them as one undo step.
 - `# sqlty: ignore` comments are read by the Python half of `sqlty check`, so the page reports
   and fixes what they would silence.
+
+## Stage 3
+
+- `scripts/generate_playground_examples.py`, run by `make playground`, writes the numbered
+  projects of `examples/` to `docs/assets/playground/examples.json` (not committed): title,
+  `queries.py`, `schema.sql`, and the `dialect`, `import-style` and `rules` of `pyproject.toml`.
+- The **Example** select loads one; **Tour** is the built-in sample. A docs page links to an
+  example with a share link.
+- `tests/playground.test.mjs` checks every example on the WebAssembly build: no `error`
+  diagnostic, and nothing left to rewrite, as the `examples` hook asserts with `sqlty check`.

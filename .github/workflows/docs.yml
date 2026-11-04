@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - "docs/**"
+      - "examples/**"
+      - "scripts/generate_playground_examples.py"
       - "overrides/**"
       - "zensical.toml"
       - ".github/workflows/docs.yml"
@@ -13,6 +15,8 @@ on:
   pull_request:
     paths:
       - "docs/**"
+      - "examples/**"
+      - "scripts/generate_playground_examples.py"
       - "overrides/**"
       - "zensical.toml"
       - ".github/workflows/docs.yml"
