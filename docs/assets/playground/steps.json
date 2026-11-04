@@ -1,0 +1,48 @@
+{
+  "title": "sqlty in six steps",
+  "steps": [
+    {
+      "title": "A query is a string",
+      "panel": "types",
+      "notes": "A string that starts with --sql is a query. sqlty reads schema.sql and types each column of its result: open Types.\n\nProblems already says the query is not wrapped in SQL[T]. Step 4 does that.",
+      "dialect": "postgres",
+      "schema": "CREATE TABLE users (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    email TEXT\n);\n\nCREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    user_id INTEGER NOT NULL REFERENCES users (id),\n    total NUMERIC(10, 2) NOT NULL,\n    placed_at TIMESTAMP NOT NULL\n);\n",
+      "config": "",
+      "source": "users = \"--sql\\nSELECT id, name, email FROM users\"\n"
+    },
+    {
+      "title": "Types follow the SQL",
+      "panel": "types",
+      "notes": "SUM of NUMERIC is a Decimal. count is an int and never NULL. The LEFT JOIN makes every column of orders nullable, so MAX(o.placed_at) can be None.\n\nEach type names the rule that made it, with a link to the database's manual.",
+      "source": "users = \"--sql\\nSELECT id, name, email FROM users\"\n\nspent = \"\"\"--sql\nSELECT u.name, count(o.id) AS orders, SUM(o.total) AS spent, MAX(o.placed_at) AS last_order\nFROM users AS u\nLEFT JOIN orders AS o ON o.user_id = u.id\nGROUP BY u.name\"\"\"\n"
+    },
+    {
+      "title": "Mistakes, before they run",
+      "panel": "problems",
+      "notes": "A typo in a column, and a row type that no longer matches its query. Click a problem to go to its line; Ctrl+. on it, or Fix all, applies the fix.",
+      "source": "from sqlty import SQL\n\nusers = SQL[tuple[int, str]](\"--sql\\nSELECT id, email FROM users\")\n\ntypo = \"--sql\\nSELECT nme FROM users\"\n"
+    },
+    {
+      "title": "Rewrite: the row type in the code",
+      "panel": "rewritten",
+      "notes": "sqlty rewrite wraps each query in SQL[T], its row type, so a type checker sees what each row holds. Press Rewrite to apply it, Strip to take it back.",
+      "source": "users = \"--sql\\nSELECT id, name, email FROM users\"\n\nspent = \"\"\"--sql\nSELECT u.name, SUM(o.total) AS spent\nFROM users AS u\nLEFT JOIN orders AS o ON o.user_id = u.id\nGROUP BY u.name\"\"\"\n"
+    },
+    {
+      "title": "Parameters have types too",
+      "panel": "rewritten",
+      "notes": "With param-types = true, a parameter is typed by what it is compared with, and Rewrite writes a TypedDict for the named ones.",
+      "config": "param-types = true\n",
+      "source": "since = \"\"\"--sql\nSELECT u.name, o.total\nFROM orders AS o\nJOIN users AS u ON u.id = o.user_id\nWHERE o.placed_at > %(since)s AND o.total >= %(least)s\"\"\"\n"
+    },
+    {
+      "title": "The schema changes",
+      "file": "schema",
+      "panel": "problems",
+      "notes": "name becomes nullable, and the code that reads it is now wrong: the row type says str. Edit schema.sql and watch Problems: the migration breaks code it never touched.",
+      "config": "",
+      "schema": "CREATE TABLE users (\n    id INTEGER PRIMARY KEY,\n    name TEXT,\n    email TEXT\n);\n\nCREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    user_id INTEGER NOT NULL REFERENCES users (id),\n    total NUMERIC(10, 2) NOT NULL,\n    placed_at TIMESTAMP NOT NULL\n);\n",
+      "source": "from sqlty import SQL\n\nusers = SQL[tuple[int, str, str | None]](\"--sql\\nSELECT id, name, email FROM users\")\n"
+    }
+  ]
+}
