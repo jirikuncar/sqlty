@@ -13,6 +13,7 @@ mod api;
 mod complete;
 mod dialect;
 mod dml;
+mod entities;
 mod explain;
 mod expr;
 mod fanout;

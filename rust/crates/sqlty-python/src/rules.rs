@@ -72,7 +72,7 @@ pub enum Rule {
 
 impl Rule {
     /// Every rule.
-    pub const ALL: [Rule; 39] = [
+    pub const ALL: [Rule; 40] = [
         Rule::ColumnCountMismatch,
         Rule::ColumnTypeMismatch,
         Rule::ColumnNameMismatch,
@@ -112,6 +112,7 @@ impl Rule {
         Rule::Name(NameRule::FanoutAggregate),
         Rule::Name(NameRule::ChasmJoin),
         Rule::Name(NameRule::UnprovenJoin),
+        Rule::Name(NameRule::EntityMismatch),
     ];
 
     /// The kebab-case rule name.
@@ -198,7 +199,7 @@ impl Rule {
             Rule::RedundantOptional
             | Rule::RedundantLiteral
             | Rule::DynamicQuery
-            | Rule::Name(NameRule::UnprovenJoin) => Severity::Ignore,
+            | Rule::Name(NameRule::UnprovenJoin | NameRule::EntityMismatch) => Severity::Ignore,
         }
     }
 }

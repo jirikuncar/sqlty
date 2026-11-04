@@ -503,7 +503,7 @@ fn columns_in<V: Visit>(node: &V, into: &mut Vec<Expr>) {
 
 /// The `ON` conditions of the joins in `from`, nested ones included; `using` gets each
 /// `USING` list with the relation it joins.
-fn join_conditions<'a>(
+pub(super) fn join_conditions<'a>(
     from: &'a [TableWithJoins],
     into: &mut Vec<&'a Expr>,
     using: &mut impl FnMut(&[Ident], &TableFactor),
@@ -540,7 +540,7 @@ fn join_conditions<'a>(
 }
 
 /// The terms of a condition joined by `AND`.
-fn conjuncts(expr: &Expr) -> Vec<&Expr> {
+pub(super) fn conjuncts(expr: &Expr) -> Vec<&Expr> {
     match expr {
         Expr::BinaryOp {
             left,
@@ -556,7 +556,7 @@ fn conjuncts(expr: &Expr) -> Vec<&Expr> {
     }
 }
 
-fn strip(expr: &Expr) -> &Expr {
+pub(super) fn strip(expr: &Expr) -> &Expr {
     match expr {
         Expr::Nested(inner) => strip(inner),
         other => other,

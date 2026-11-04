@@ -42,6 +42,7 @@ Configuration via sqlty.toml (``[rules]``) or pyproject.toml:
     fanout-aggregate = "warn"           # default
     chasm-join = "warn"                 # default
     unproven-join = "ignore"            # default
+    entity-mismatch = "ignore"          # default
     unused-ignore = "warn"              # default
     param-count-mismatch = "error"      # default
     param-type-mismatch = "error"       # default
@@ -294,6 +295,12 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.IGNORE,
         fixable=False,
         description="Join in an aggregating query that matches no primary or unique key",
+    ),
+    "entity-mismatch": LintRule(
+        name="entity-mismatch",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="Comparison between columns holding keys of different tables",
     ),
     "param-count-mismatch": LintRule(
         name="param-count-mismatch",
