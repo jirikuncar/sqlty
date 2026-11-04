@@ -5,12 +5,13 @@
 
 use sqlparser::ast::{
     ColumnDef, ColumnOption, DataType, Expr, FunctionArg, FunctionArgExpr, FunctionArguments,
-    GeneratedAs, ObjectName,
+    GeneratedAs, Ident, IndexColumn, ObjectName,
 };
 
 use crate::analyzer::SqlDialect;
 use crate::values::{self, Value};
 
+use super::loader::RawUnique;
 use super::names::fold;
 use super::names::parts;
 
@@ -386,4 +387,23 @@ pub(super) fn mark_primary_key(columns: &mut [RawColumn], expr: &Expr, dialect: 
             column.primary_key = true;
         }
     }
+}
+
+/// The key a `UNIQUE` constraint or index declares, when every part of it is a column.
+pub(super) fn unique_key(
+    name: Option<&Ident>,
+    columns: &[IndexColumn],
+    dialect: SqlDialect,
+) -> Option<RawUnique> {
+    let columns = columns
+        .iter()
+        .map(|column| match &column.column.expr {
+            Expr::Identifier(ident) => Some(fold(ident, dialect)),
+            _ => None,
+        })
+        .collect::<Option<Vec<String>>>()?;
+    Some(RawUnique {
+        name: name.map(|name| fold(name, dialect)),
+        columns,
+    })
 }

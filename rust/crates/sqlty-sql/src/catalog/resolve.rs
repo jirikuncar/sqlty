@@ -433,6 +433,17 @@ impl<'a> Resolver<'a> {
                     .filter(|fk| fk.immediate && fk.validated)
                     .map(|fk| fk.key.clone())
                     .collect(),
+                // A key naming a dropped or renamed column no longer holds.
+                unique: table
+                    .unique
+                    .iter()
+                    .filter(|key| {
+                        key.columns
+                            .iter()
+                            .all(|name| table.columns.iter().any(|c| c.name == *name))
+                    })
+                    .map(|key| key.columns.clone())
+                    .collect(),
                 row_security: table.row_security,
             }),
             Rel::View(columns) => Relation::View(columns.clone()),

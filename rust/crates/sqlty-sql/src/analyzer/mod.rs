@@ -15,6 +15,7 @@ mod dialect;
 mod dml;
 mod explain;
 mod expr;
+mod fanout;
 mod functions;
 mod grouping;
 mod hashing;

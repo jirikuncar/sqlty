@@ -274,7 +274,7 @@ pub(super) fn is_aggregate_call(expr: &Expr) -> bool {
 
 /// Whether `expr` calls an aggregate outside a subquery: the query is grouped then, as
 /// one group of all rows.
-fn has_aggregate(expr: &Expr) -> bool {
+pub(super) fn has_aggregate(expr: &Expr) -> bool {
     struct Find {
         queries: usize,
     }

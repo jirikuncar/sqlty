@@ -24,7 +24,7 @@ use crate::values::{self, Value};
 
 use super::columns::{
     apply_check, column_named, is_rowid_type, mark_primary_key, merge_column, nonnull_groups,
-    raw_column, RawColumn,
+    raw_column, unique_key, RawColumn,
 };
 use super::names::{fold, key_of, lookup_key, parts, schema_for_new, type_key};
 use super::{Catalog, ForeignKey, TypeOverrides, BUILTIN_SCHEMAS};
@@ -41,8 +41,18 @@ pub(super) struct RawTable {
     /// `BEFORE` row triggers by name, and the statements they fire for.
     pub(super) row_triggers: Vec<(String, RowEvents)>,
     pub(super) foreign_keys: Vec<RawForeignKey>,
+    /// `UNIQUE` constraints and unique indexes over plain columns.
+    pub(super) unique: Vec<RawUnique>,
     /// `ENABLE ROW LEVEL SECURITY`: a query may not see every row.
     pub(super) row_security: bool,
+}
+
+/// Columns no two rows share a value of (NULLs aside), and the name of the constraint or
+/// index that says so.
+#[derive(Clone, PartialEq)]
+pub(super) struct RawUnique {
+    pub(super) name: Option<String>,
+    pub(super) columns: Vec<String>,
 }
 
 /// A foreign key as declared, which holds for every row only when `enforced`.
@@ -100,6 +110,8 @@ pub(super) enum OpKind {
     Function(Box<CreateFunction>),
     /// A `BEFORE` row trigger, which may change any column of the rows it fires for.
     RowTrigger(RowTrigger),
+    /// `CREATE UNIQUE INDEX` over plain columns, without a `WHERE`.
+    UniqueIndex(Vec<String>, RawUnique),
     /// `DROP TRIGGER name [ON table]`.
     DropTrigger(Vec<String>, Option<Vec<String>>),
     /// A statement that changes the named relation, type or function in a way this
@@ -308,6 +320,18 @@ impl Loader {
                 false
             }
             OpKind::Taint(what, name) => !self.taint(*what, name, &path),
+            OpKind::UniqueIndex(name, unique) => {
+                let Some(key) = self.table_key(name, &path) else {
+                    return false;
+                };
+                let Some(Rel::Table(table)) = self.relations.get(&key) else {
+                    return false;
+                };
+                let mut table = table.clone();
+                table.unique.push(unique.clone());
+                self.set_relation(key, Some(Rel::Table(table)));
+                false
+            }
             OpKind::RowTrigger(trigger) => {
                 let Some(key) = self.table_key(&trigger.table, &path) else {
                     return false;
@@ -490,11 +514,33 @@ impl Loader {
                         && column_named(&table.columns, &pk.columns[0].column.expr, self.dialect)
                             .is_some_and(|c| is_rowid_type(&c.ty)))
                 {
+                    // Still unique: SQLite's NULLs are distinct, as a UNIQUE column's.
+                    table
+                        .unique
+                        .extend(unique_key(pk.name.as_ref(), &pk.columns, self.dialect));
                     continue;
                 }
                 for index_column in &pk.columns {
                     mark_primary_key(&mut table.columns, &index_column.column.expr, self.dialect);
                 }
+            }
+        }
+        for def in &create.columns {
+            for option in &def.options {
+                if let ColumnOption::Unique(_) = option.option {
+                    table.unique.push(RawUnique {
+                        name: option.name.as_ref().map(|name| fold(name, self.dialect)),
+                        columns: vec![fold(&def.name, self.dialect)],
+                    });
+                }
+            }
+        }
+        for constraint in &create.constraints {
+            if let TableConstraint::Unique(unique) = constraint {
+                let name = unique.name.as_ref().or(unique.index_name.as_ref());
+                table
+                    .unique
+                    .extend(unique_key(name, &unique.columns, self.dialect));
             }
         }
         let column_keys = create.columns.iter().flat_map(|def| {
@@ -828,6 +874,14 @@ impl Loader {
                         ObjectType::Table | ObjectType::View | ObjectType::MaterializedView => {
                             if let Some(key) = self.lookup(&self.relations, &name_parts, path) {
                                 self.set_relation(key, None);
+                            }
+                        }
+                        ObjectType::Index => {
+                            let index = name_parts.last().cloned().unwrap_or_default();
+                            for table in self.relations.values_mut() {
+                                if let Rel::Table(table) = table {
+                                    table.unique.retain(|key| key.name.as_ref() != Some(&index));
+                                }
                             }
                         }
                         ObjectType::Type => {
