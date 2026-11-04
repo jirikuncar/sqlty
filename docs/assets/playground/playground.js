@@ -107,6 +107,11 @@ const rewritten = monaco.editor.create(root.querySelector("[data-rewritten]"), {
   language: "python",
   readOnly: true,
 });
+const output = monaco.editor.create(root.querySelector("[data-json]"), {
+  ...options,
+  language: "json",
+  readOnly: true,
+});
 const dialect = root.querySelector("[data-dialect]");
 const linked = root.querySelector("[data-link-status]");
 const example = root.querySelector("[data-example]");
@@ -270,7 +275,26 @@ function refresh() {
   if (!answer.diagnostics.length) problems.textContent = "No problems.";
   root.querySelector("[data-types]").replaceChildren(...answer.queries.map(describe));
   rewritten.setValue(answer.rewritten);
+  output.setValue(JSON.stringify(answer.diagnostics.map((found) => checked(found, model)), null, 2));
   refreshed.fire();
+}
+
+// A diagnostic as `sqlty check --output-format json` prints it.
+function checked(found, model) {
+  const at = (offset) => {
+    const { lineNumber, column } = model.getPositionAt(offset);
+    return { line: lineNumber, column };
+  };
+  return {
+    file: "queries.py",
+    rule: found.rule,
+    message: found.message,
+    severity: found.severity,
+    line: found.line,
+    start: at(found.start),
+    end: at(found.end),
+    fix: found.fix.map((edit) => ({ start: at(edit.start), end: at(edit.end), replacement: edit.replacement })),
+  };
 }
 
 function session() {
@@ -305,22 +329,47 @@ function describe(query) {
   head.textContent = `${query.line}: ${query.row_type ?? "untyped"}`;
   item.append(head);
   const rows = [
-    ...query.columns.map((column) => `${column.name}: ${column.type ?? "?"} (${column.sql_type ?? "?"})`),
-    ...query.params.map(
-      (param) =>
-        `param ${param.name ?? param.index}: ${param.type ?? "?"}${param.nullable === false ? " NOT NULL" : ""}`,
-    ),
+    ...query.columns.map((column) => [
+      `${column.name}: ${column.type ?? "?"} (${column.sql_type ?? "?"})`,
+      ...explain(column),
+    ]),
+    ...query.params.map((param) => [
+      `param ${param.name ?? param.index}: ${param.type ?? "?"}${param.nullable === false ? " NOT NULL" : ""}`,
+    ]),
   ];
   const list = document.createElement("ul");
   list.replaceChildren(
-    ...rows.map((row) => {
+    ...rows.map(([row, ...rules]) => {
       const entry = document.createElement("li");
       entry.textContent = row;
+      if (rules.length) {
+        const nested = document.createElement("ul");
+        nested.replaceChildren(...rules);
+        entry.append(nested);
+      }
       return entry;
     }),
   );
   item.append(list);
   return item;
+}
+
+// What `sqlty check --explain` prints under a column: the inference rules that typed it.
+function explain(column) {
+  const rules = [column.type_rule, column.nullability_rule].filter(
+    (rule, index, all) => rule && all.findIndex((other) => other?.id === rule.id) === index,
+  );
+  return rules.map((rule) => {
+    const parts = [
+      column.type_rule?.id === rule.id && "type",
+      column.nullability_rule?.id === rule.id && "nullability",
+    ].filter(Boolean);
+    const entry = document.createElement("li");
+    const id = document.createElement("code");
+    id.textContent = rule.id;
+    entry.append(`${parts.join(" and ")} by `, id, `: ${rule.reasoning} Reference: ${rule.reference}`);
+    return entry;
+  });
 }
 
 let timer;
