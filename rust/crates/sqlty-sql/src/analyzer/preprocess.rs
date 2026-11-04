@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 use regex::{Captures, Regex};
 use sqlparser::ast::{
     visit_expressions, visit_expressions_mut, DataType, Expr, Function, FunctionArguments,
-    ObjectName, Statement, Visit, Visitor,
+    ObjectName, Statement, Value, ValueWithSpan, Visit, Visitor,
 };
 use sqlparser::keywords::Keyword;
 use sqlparser::parser::Parser;
@@ -16,6 +16,7 @@ use sqlparser::tokenizer::{Token, Tokenizer};
 use super::dialect::SqlDialect;
 use super::dml::selects_into;
 use super::input::{iso_types, parser_input};
+use super::text_names::{line_starts, offset};
 
 /// A `?` placeholder in group 1, or a literal, quoted name, comment or `?|`/`?&` operator to skip.
 pub(super) static QMARK: LazyLock<Regex> = LazyLock::new(|| {
@@ -71,7 +72,49 @@ fn checked(mut stmts: Vec<Statement>, sql: &str, dialect: SqlDialect) -> Option<
             ControlFlow::<()>::Continue(())
         });
     }
+    if spells_integers(sql) {
+        let lines = line_starts(sql);
+        let _ = visit_expressions_mut(&mut stmts, |expr| {
+            integer_literal(expr, sql, &lines, dialect);
+            ControlFlow::<()>::Continue(())
+        });
+    }
     Some(stmts)
+}
+
+/// Whether `sql` may hold a `0x` integer or a digit separator, so that the walk of
+/// [`integer_literal`] is skipped for the queries that do not.
+fn spells_integers(sql: &str) -> bool {
+    sql.as_bytes().windows(3).any(|w| {
+        w.starts_with(b"0x") || (w[0].is_ascii_digit() && w[1] == b'_' && w[2].is_ascii_digit())
+    })
+}
+
+/// An integer spelled `0x1F` or `1_000` as the decimal it is. sqlparser reads `0x1F` as
+/// `X'1F'`, a binary string as in MySQL; PostgreSQL and SQLite read an integer.
+fn integer_literal(expr: &mut Expr, sql: &str, lines: &[usize], dialect: SqlDialect) {
+    let Expr::Value(ValueWithSpan { value, span }) = expr else {
+        return;
+    };
+    match value {
+        Value::Number(digits, _) if digits.contains('_') => digits.retain(|c| c != '_'),
+        Value::HexStringLiteral(hex)
+            if matches!(dialect, SqlDialect::Postgres | SqlDialect::Sqlite)
+                && offset(sql, lines, span.start).is_some_and(|at| sql[at..].starts_with("0x")) =>
+        {
+            let hex = hex.replace('_', "");
+            let Ok(n) = u64::from_str_radix(&hex, 16) else {
+                return;
+            };
+            // SQLite reads 64 bits as two's complement.
+            let digits = match dialect {
+                SqlDialect::Sqlite => n.cast_signed().to_string(),
+                _ => n.to_string(),
+            };
+            *value = Value::Number(digits, false);
+        }
+        _ => {}
+    }
 }
 
 /// Whether `sql` may name one of the functions [`bare_function`] reads, so that the walk
