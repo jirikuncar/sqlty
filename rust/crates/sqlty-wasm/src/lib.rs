@@ -19,11 +19,12 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sqlty_python::checker::{check_source, query_sites, SiteKind};
+use sqlty_python::checker::{add_fix_imports, check_source, query_sites, SiteKind};
 use sqlty_python::config;
+use sqlty_python::fixer::fix_source;
 use sqlty_python::locate::{self, Queries};
 use sqlty_python::options::Options;
-use sqlty_python::rewriter::rewrite_source_with;
+use sqlty_python::rewriter::{rewrite_source_with, strip_source, Suppressed};
 use sqlty_python::rules::RuleConfig;
 use sqlty_sql::analyzer::{
     analyze_params, analyze_select, load_schema_with_skipped, row_type, CandidateKind, Nullability,
@@ -55,8 +56,10 @@ struct Request {
 /// Answer a JSON request about the Python `source`, read against `schema` in `dialect`.
 ///
 /// - `analyze`: `diagnostics` (what `sqlty check` reports, without the row types it reads
-///   from Python), `queries` (row type, columns and parameters of each query),
-///   `highlights` (the SQL tokens to color) and `rewritten` (what `sqlty rewrite` makes).
+///   from Python, each with the `fix` edits of its quick fix), `queries` (row type, columns
+///   and parameters of each query), `highlights` (the SQL tokens to color), and what
+///   `sqlty rewrite`, `sqlty strip` and `sqlty check --fix` make of the source: `rewritten`,
+///   `stripped` and `fixed`.
 /// - `complete`: the completions at `offset`, and the `range` they replace; `null` outside
 ///   a query.
 /// - `hover`: what the word at `offset` is, in Markdown; `null` when nothing.
@@ -93,8 +96,11 @@ pub fn run(request: &str) -> String {
     let offset = byte_offset(source, request.offset);
     let queries = Queries::new(source, &options.style, &[]);
     let answer = match request.op {
-        Op::Analyze => json!({
-            "diagnostics": check_source(source, &options, &rules, &[])
+        Op::Analyze => {
+            let mut diagnostics = check_source(source, &options, &rules, &[]);
+            add_fix_imports(source, &options, &mut diagnostics);
+            json!({
+            "diagnostics": diagnostics
                 .iter()
                 .map(|found| json!({
                     "rule": found.rule.name(),
@@ -102,6 +108,11 @@ pub fn run(request: &str) -> String {
                     "severity": found.severity.as_str(),
                     "start": utf16(found.span.start),
                     "end": utf16(found.span.end),
+                    "fix": found.fix.iter().map(|edit| json!({
+                        "start": utf16(edit.range.start),
+                        "end": utf16(edit.range.end),
+                        "replacement": edit.replacement,
+                    })).collect::<Vec<_>>(),
                 }))
                 .collect::<Vec<_>>(),
             "queries": query_sites(source, &options.style, &[])
@@ -115,7 +126,10 @@ pub fn run(request: &str) -> String {
                 .map(|(range, kind)| json!([utf16(range.start), utf16(range.end), highlight(kind)]))
                 .collect::<Vec<_>>(),
             "rewritten": rewrite_source_with(source, &options, false),
-        }),
+            "stripped": strip_source(source, &options.style),
+            "fixed": fix_source(source, &options, &rules, &Suppressed::new()),
+            })
+        }
         Op::Complete => match locate::complete(&queries, offset, dialect, options.schema, 50) {
             Some(found) => json!({
                 "start": utf16(found.replace.start),

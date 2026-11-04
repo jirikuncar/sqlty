@@ -47,6 +47,7 @@ fn analyze_reports_diagnostics_in_utf16_units() {
             "severity": "error",
             "start": 35,
             "end": 38,
+            "fix": [{"start": 35, "end": 38, "replacement": "name"}],
         }])
     );
 }
@@ -124,4 +125,25 @@ fn config_errors_are_reported_as_sqlty_check_reports_them() {
         let error = answer["error"].as_str().unwrap();
         assert!(error.contains(message), "{error}");
     }
+}
+
+#[test]
+fn analyze_gives_quick_fixes_and_what_fix_and_strip_make() {
+    let source = "é = \"--sql\\nSELECT id FROM users\"\n";
+    let answer =
+        ask(&json!({"op": "analyze", "source": source, "schema": SCHEMA, "dialect": "postgres"}));
+    assert_eq!(answer["diagnostics"][0]["rule"], "stale-rewrite");
+    assert_eq!(
+        answer["diagnostics"][0]["fix"],
+        json!([
+            {"start": 0, "end": 0, "replacement": "from sqlty import SQL\n"},
+            {"start": 4, "end": 33, "replacement": "SQL[tuple[int]](\"--sql\\nSELECT id FROM users\")"},
+        ])
+    );
+    let fixed = "from sqlty import SQL\né = SQL[tuple[int]](\"--sql\\nSELECT id FROM users\")\n";
+    assert_eq!(answer["fixed"], fixed);
+    let answer =
+        ask(&json!({"op": "analyze", "source": fixed, "schema": SCHEMA, "dialect": "postgres"}));
+    assert_eq!(answer["stripped"], source);
+    assert_eq!(answer["diagnostics"], json!([]));
 }
