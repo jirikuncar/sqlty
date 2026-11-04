@@ -1496,6 +1496,25 @@ class Project:
         ]
         self._index()
 
+    def is_query_file(self, path: Path) -> bool:
+        """Whether the ``queries`` key of ``path``'s project names it, as a file, a directory
+        holding it or a glob; ``path`` need not exist, as an unsaved buffer's may not."""
+        settings = self.resolver.for_file(path)
+        if path.suffix != ".sql" or not settings.queries or settings.config_dir is None:
+            return False
+        resolved = path.resolve()
+        base = settings.config_dir.resolve()
+        if not resolved.is_relative_to(base):
+            return False
+        relative = resolved.relative_to(base).as_posix()
+        return any(
+            relative == entry.strip("/")
+            or relative.startswith(entry.strip("/") + "/")
+            or re.fullmatch(glob.translate(entry, recursive=True, include_hidden=True), relative)
+            is not None
+            for entry in settings.queries
+        )
+
     def check_queries(self, path: Path, text: str) -> list[Diagnostic]:
         from sqlty._queries import check_query_file
 

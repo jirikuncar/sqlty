@@ -79,3 +79,7 @@ diagnostic, with the line and column in the `.sql` file.
 
 `sqlty breaking` compares the query files of both revisions, as it compares the
 Python files: see [Breaking schema changes](breaking-changes.md#queries-in-sql-files).
+
+`sqlty server` publishes the diagnostics of a `.sql` buffer that `queries` names,
+as you type. The VS Code extension sends it `sql` files; in Neovim, add `"sql"`
+to the client's [`filetypes`](../recipes/editors.md#neovim).
