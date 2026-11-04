@@ -1,6 +1,7 @@
 # Playground: share links, configuration, fixes and breaking changes
 
-> **Status:** stage 1 (share links and configuration) in review. Stages 2 to 6 not started.
+> **Status:** stage 1 (share links and configuration) in review in [#895](https://github.com/jirikuncar/sqlty/pull/895).
+> Stages 2 to 6 not started.
 
 Tracks [#893](https://github.com/jirikuncar/sqlty/issues/893): what keeps the Playground page
 from being the place to reproduce a bug or show a feature. Every stage keeps the page static:
