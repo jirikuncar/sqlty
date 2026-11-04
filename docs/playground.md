@@ -43,7 +43,7 @@ queries as you type. It runs in your browser. The engine is compiled to
   @media (max-width: 60em) { .sqlty-playground-grid { grid-template-columns: 1fr; } }
 </style>
 
-<script type="module" src="../assets/playground/playground.js"></script>
+<script type="module" src="assets/playground/playground.js"></script>
 
 | Panel | What it shows | From the command line |
 |---|---|---|
