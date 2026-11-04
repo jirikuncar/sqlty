@@ -1,0 +1,4 @@
+[tool.sqlty]
+schema = "schema.sql"
+# Write the type of the parameters of each query: SQL[R, P]
+param-types = true

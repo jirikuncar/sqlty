@@ -70,13 +70,13 @@ queries as you type. It runs in your browser. The engine is compiled to
 | Problems | What `sqlty check` reports | [`sqlty check`](reference/cli.md) |
 | `sqlty rewrite` | The source with each query wrapped in `SQL[T]` | [`sqlty rewrite`](reference/cli.md) |
 | `sqlty check --output-format json` | The problems as `sqlty check` prints them for scripts, with the edits of their fixes | [`sqlty check --output-format json`](reference/cli.md) |
-| `sqlty.toml` | The `dialect`, `import-style` and `rules` of [`[tool.sqlty]`](reference/configuration.md); its `dialect` wins over the select | `sqlty.toml` or `pyproject.toml` |
+| `sqlty.toml` | The `dialect`, `import-style`, `param-types` and `rules` of [`[tool.sqlty]`](reference/configuration.md); its `dialect` wins over the select | `sqlty.toml` or `pyproject.toml` |
 
 ## Examples
 
 The **Example** select loads a project of the
 [`examples/`](https://github.com/jirikuncar/sqlty/tree/main/examples) directory: its
-`queries.py`, `schema.sql`, and the `dialect`, `import-style` and `rules` of its
+`queries.py`, `schema.sql`, and the `dialect`, `import-style`, `param-types` and `rules` of its
 `pyproject.toml`. Each one is what `sqlty check` reads on your machine, so the page shows
 the same problems. **Tour** is the sample the page opens with.
 

@@ -68,6 +68,13 @@ def rewrite_source(
     untyped: bool = False,
     keep_lines: bool = False,
 ) -> str: ...
+def add_param_types(
+    source: str,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
+    import_style: str | None = None,
+) -> str: ...
 def strip_source(source: str, *, import_style: str | None = None) -> str: ...
 def fix_source(
     source: str,
