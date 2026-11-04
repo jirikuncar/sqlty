@@ -60,7 +60,11 @@ async function start(): Promise<void> {
   output?.info(`Starting ${command} (sqlty ${server.version}, from ${server.origin})`);
   const serverOptions: ServerOptions = { command: server.command, args: server.args };
   const clientOptions: LanguageClientOptions = {
-    documentSelector: [{ scheme: "file", language: "python" }],
+    // A `.sql` file gets diagnostics when the `queries` key names it.
+    documentSelector: [
+      { scheme: "file", language: "python" },
+      { scheme: "file", language: "sql" },
+    ],
     initializationOptions: {
       breaking: settings.breaking,
       completion: settings.completion,
