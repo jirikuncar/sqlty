@@ -715,6 +715,19 @@ fn from_imports(scan: &Scan, module: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+/// `(binding, qualified name)` of the top-level imports that bind a name other than a
+/// module's own: `from decimal import Decimal` gives `("Decimal", "decimal.Decimal")`.
+pub(crate) fn imported_names(scan: &Scan) -> Vec<(String, String)> {
+    top_level_imports(scan)
+        .into_iter()
+        .filter_map(|(from, name, binding)| match from {
+            Some(module) if name != "*" => Some((binding, format!("{module}.{name}"))),
+            None if name != binding => Some((binding, name)),
+            _ => None,
+        })
+        .collect()
+}
+
 /// `(from, name, binding)` of every top-level import, `from` being the module of a
 /// `from ... import`: `import os.path` binds `os`, `from a import b as c` binds `c`.
 fn top_level_imports(scan: &Scan) -> Vec<(Option<String>, String, String)> {
