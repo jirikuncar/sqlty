@@ -95,6 +95,13 @@ impl Analyzer<'_> {
                 self.add_equality(conjunct, scope, &mut graph);
             }
         }
+        let grouped: Vec<(usize, String)> = match &select.group_by {
+            GroupByExpr::Expressions(keys, _) => keys
+                .iter()
+                .filter_map(|key| self.column_of(key, scope))
+                .collect(),
+            GroupByExpr::All(_) => Vec::new(),
+        };
         for aggregate in &aggregates {
             let mut nodes: Vec<usize> = Vec::new();
             for column in &aggregate.columns {
@@ -112,6 +119,9 @@ impl Analyzer<'_> {
             let Some(&(node, by)) = repeated.as_ref().and_then(|found| found.first()) else {
                 continue;
             };
+            if aggregate.idempotent && nodes.iter().all(|&node| graph.grouped(node, &grouped)) {
+                continue;
+            }
             let _at = self.diag.at(aggregate.span);
             self.diag.record(
                 NameRule::FanoutAggregate,
@@ -346,6 +356,23 @@ struct Graph {
 }
 
 impl Graph {
+    /// Whether the `grouped` columns cover a key of `a`, directly or through an equality,
+    /// so each group holds copies of one row of `a`.
+    fn grouped(&self, a: usize, grouped: &[(usize, String)]) -> bool {
+        self.keys[a].as_ref().is_some_and(|keys| {
+            keys.iter().any(|key| {
+                key.iter().all(|column| {
+                    let column = (a, column.clone());
+                    grouped.contains(&column)
+                        || self.pairs.iter().any(|(x, y)| {
+                            (*x == column && grouped.contains(y))
+                                || (*y == column && grouped.contains(x))
+                        })
+                })
+            })
+        })
+    }
+
     /// Whether each row of `a` joins at most one row of `b`.
     fn one(&self, a: usize, b: usize) -> bool {
         let Some(keys) = &self.keys[b] else {
@@ -419,6 +446,8 @@ struct Aggregate {
     span: Span,
     /// Whether repeating an input row changes the result.
     sensitive: bool,
+    /// Whether the result is the same over any number of copies of one value (`AVG`).
+    idempotent: bool,
     /// The column references among its arguments.
     columns: Vec<Expr>,
 }
@@ -449,11 +478,12 @@ fn collect_aggregates(expr: &Expr, into: &mut Vec<Aggregate>) {
                     if list.duplicate_treatment == Some(DuplicateTreatment::Distinct));
                 let mut columns = Vec::new();
                 columns_in(&func.args, &mut columns);
+                let name = function_name(func);
                 self.into.push(Aggregate {
                     text: expr.to_string(),
                     span: expr.span(),
-                    sensitive: !distinct
-                        && DUPLICATE_SENSITIVE.contains(&function_name(func).as_str()),
+                    sensitive: !distinct && DUPLICATE_SENSITIVE.contains(&name.as_str()),
+                    idempotent: name == "AVG",
                     columns,
                 });
             }
