@@ -379,3 +379,35 @@ def lookup(maybe: str | None) -> None:
     # error: [nullable-mismatch] "Row.key is str but query column 'key' can be NULL"
     optional = fetch_one("SELECT %(key)s::TEXT AS key, jsonb_build_object('id', u.id, 'key', %(key)s::TEXT) AS doc FROM users u", Row, key=maybe)
 ```
+
+### From `P` of `SQL[R, P]` and the driver call
+
+`P` of `SQL[R, P]` states what the query is bound to, and so do the arguments of the
+driver call that runs a `SQL[R]` query.
+
+```python
+from typing import NamedTuple, TypedDict
+
+import psycopg
+
+from sqlty import SQL
+
+class Row(NamedTuple):
+    key: str
+
+class Key(TypedDict):
+    key: str
+
+class MaybeKey(TypedDict):
+    key: str | None
+
+a = SQL[Row, Key]("--sql\nSELECT %(key)s::TEXT AS key FROM users")
+b = SQL[Row, tuple[str]]("--sql\nSELECT %s::TEXT AS key FROM users")
+# error: [nullable-mismatch] "Row.key is str but query column 'key' can be NULL"
+c = SQL[Row, MaybeKey]("--sql\nSELECT %(key)s::TEXT AS key FROM users")
+
+def run(conn: psycopg.Connection, key: str, maybe: str | None) -> None:
+    conn.execute(SQL[Row]("--sql\nSELECT %(key)s::TEXT AS key FROM users"), {"key": key})
+    # error: [nullable-mismatch] "Row.key is str but query column 'key' can be NULL"
+    conn.execute(SQL[Row]("--sql\nSELECT %(key)s::TEXT AS key FROM users"), {"key": maybe})
+```
