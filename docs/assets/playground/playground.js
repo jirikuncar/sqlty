@@ -210,6 +210,9 @@ async function presenting(on) {
   present.textContent = on ? "Exit" : "Present";
   try {
     if (on && !document.fullscreenElement) await root.requestFullscreen?.();
+    // Chrome then lets Escape reach the page, where it closes suggestions; holding it still exits.
+    if (on) await navigator.keyboard?.lock?.(["Escape"]);
+    else navigator.keyboard?.unlock?.();
     if (!on && document.fullscreenElement) await document.exitFullscreen();
   } catch {
     // Without the Fullscreen API (iPhone), the playground still covers the page.
@@ -377,10 +380,8 @@ function refresh() {
         textContent: found.rule,
         title: `The ${found.rule} rule`,
       });
-      const button = Object.assign(document.createElement("button"), {
-        type: "button",
-        textContent: `${at.lineNumber}:${at.column} ${found.message}`,
-      });
+      const button = Object.assign(document.createElement("button"), { type: "button" });
+      button.append(tag("span", `${at.lineNumber}:${at.column}`, "sqlty-at"), " ", ...coded(found.message));
       button.addEventListener("click", () => {
         open("python");
         editor.setPosition(at);
@@ -470,34 +471,28 @@ async function share() {
 
 function describe(query) {
   const item = document.createElement("li");
-  const head = document.createElement("code");
-  head.textContent = `${query.line}: ${query.row_type ?? "untyped"}`;
-  item.append(head);
-  const rows = [
-    ...query.columns.map((column) => [
-      `${column.name}: ${column.type ?? "?"} (${column.sql_type ?? "?"})`,
-      ...explain(column),
-    ]),
-    ...query.params.map((param) => [
-      `param ${param.name ?? param.index}: ${param.type ?? "?"}${param.nullable === false ? " NOT NULL" : ""}`,
-    ]),
-  ];
-  const list = document.createElement("ul");
-  list.replaceChildren(
-    ...rows.map(([row, ...rules]) => {
-      const entry = document.createElement("li");
-      entry.textContent = row;
-      if (rules.length) {
-        const nested = document.createElement("ul");
-        nested.replaceChildren(...rules);
-        entry.append(nested);
-      }
-      return entry;
-    }),
-  );
-  item.append(list);
+  const head = document.createElement("div");
+  head.append(tag("span", `line ${query.line}`, "sqlty-at"), " ", tag("code", query.row_type ?? "untyped"));
+  const grid = tag("div", "", "sqlty-columns");
+  const row = (kind, name, type, sql, notes = []) => {
+    grid.append(tag("code", name, kind), tag("code", type ?? "?"), tag("span", sql ?? ""));
+    if (!notes.length) return;
+    const why = tag("div", "", "sqlty-why");
+    why.append(...notes);
+    grid.append(why);
+  };
+  for (const column of query.columns) row("column", column.name, column.type, column.sql_type, explain(column));
+  for (const param of query.params) {
+    row("param", param.name ?? `#${param.index}`, param.type, param.nullable === false ? "parameter, NOT NULL" : "parameter");
+  }
+  item.append(head, grid);
   return item;
 }
+
+const tag = (name, text, className = "") => Object.assign(document.createElement(name), { textContent: text, className });
+
+// A message with its `backticked` names as code.
+const coded = (message) => message.split(/`([^`]+)`/).map((part, index) => (index % 2 ? tag("code", part) : part));
 
 // What `sqlty check --explain` prints under a column: the inference rules that typed it.
 function explain(column) {
@@ -509,10 +504,8 @@ function explain(column) {
       column.type_rule?.id === rule.id && "type",
       column.nullability_rule?.id === rule.id && "nullability",
     ].filter(Boolean);
-    const entry = document.createElement("li");
-    const id = document.createElement("code");
-    id.textContent = rule.id;
-    entry.append(`${parts.join(" and ")} by `, id, `: ${rule.reasoning} Reference: ${rule.reference}`);
+    const entry = document.createElement("p");
+    entry.append(`${parts.join(" and ")} by `, tag("code", rule.id), `: ${rule.reasoning} `, tag("cite", rule.reference));
     return entry;
   });
 }
@@ -538,8 +531,15 @@ for (const button of root.querySelectorAll("[data-step]")) {
 picker.addEventListener("change", () => go(Number(picker.value)));
 root.querySelector("[data-step-reset]").addEventListener("click", () => go(step));
 present.addEventListener("click", () => presenting(!root.classList.contains("sqlty-present")));
+// Without keyboard lock (Safari, Firefox) any Escape exits full screen: one meant for the editor keeps presenting.
 document.addEventListener("fullscreenchange", () => {
-  if (!document.fullscreenElement && root.classList.contains("sqlty-present")) presenting(false);
+  const editing = document.activeElement?.closest?.(".monaco-editor");
+  if (!document.fullscreenElement && root.classList.contains("sqlty-present") && !editing) presenting(false);
+});
+// The theme's shortcuts (`.` next page, `s` search) take keys from anything but form fields,
+// and Monaco types into a plain element.
+root.addEventListener("keydown", (event) => {
+  if (event.target.closest?.(".monaco-editor")) event.stopPropagation();
 });
 document.addEventListener("keydown", (event) => {
   if (!root.contains(event.target) && !root.classList.contains("sqlty-present")) return;
