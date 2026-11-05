@@ -155,10 +155,9 @@ jobs:
       name: docs-preview
       url: ${{ steps.preview.outputs.url }}
     steps:
-      # The Worker config comes from the base branch: a pull request may change only the files.
+      # A pull request can change this job too, so the docs-preview approval is what guards the token.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
           sparse-checkout: |
             wrangler.jsonc
