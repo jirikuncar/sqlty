@@ -190,8 +190,10 @@ jobs:
           NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          out=$(npx --yes wrangler@4.158.0 preview --name "pr-$NUMBER" --message "${HEAD_SHA::7}" --json)
-          echo "url=$(jq -er '.preview.urls[0]' <<<"$out")" >> "$GITHUB_OUTPUT"
+          export WRANGLER_OUTPUT_FILE_PATH="$RUNNER_TEMP/wrangler.ndjson"
+          npx --yes wrangler@4.158.0 preview --name "pr-$NUMBER" --message "${HEAD_SHA::7}"
+          url=$(jq -er 'select(.type == "preview") | .preview_urls[0]' "$WRANGLER_OUTPUT_FILE_PATH")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
 
       - name: Install uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
