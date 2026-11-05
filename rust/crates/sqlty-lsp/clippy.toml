@@ -1,2 +1,0 @@
-# `lsp_types::Uri` caches a parse offset in a `Cell`; it hashes and compares by its text.
-ignore-interior-mutability = ["lsp_types::Uri"]

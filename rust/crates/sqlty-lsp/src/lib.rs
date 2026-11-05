@@ -483,7 +483,12 @@ impl Shared {
             return;
         }
         let actions = if wants(CodeActionKind::QUICKFIX.as_str()) {
-            actions::quick_fixes(&self.documents(), &params, &self.encoding)
+            let documents = self.documents();
+            actions::quick_fixes(
+                documents.get(&params.text_document.uri),
+                &params,
+                &self.encoding,
+            )
         } else {
             Vec::new()
         };

@@ -1,6 +1,5 @@
 //! Diagnostics and code actions in the terms of the protocol.
 
-use std::collections::HashMap;
 use std::str::FromStr;
 
 use lsp_types::{
@@ -40,12 +39,12 @@ pub(crate) fn diagnostic(diagnostic: &Diagnostic, index: &LineIndex<'_>) -> lsp_
 
 /// The fix of each diagnostic in the requested range, while the buffer is the one checked.
 pub(crate) fn quick_fixes(
-    documents: &HashMap<Uri, Document>,
+    document: Option<&Document>,
     params: &CodeActionParams,
     encoding: &PositionEncodingKind,
 ) -> Vec<CodeActionOrCommand> {
     let uri = &params.text_document.uri;
-    let Some(document) = documents.get(uri) else {
+    let Some(document) = document else {
         return Vec::new();
     };
     let Some((version, diagnostics)) = &document.diagnostics else {
