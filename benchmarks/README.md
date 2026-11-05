@@ -58,6 +58,8 @@ in `baseline.json`:
 - **Peak RSS** is compared as is, +25% (`--rss-tolerance`).
 - Times under 5 ms are reported, not budgeted; the per-kind micro timings are
   budgeted as two sums (`analyze_select`, `analyze_params`).
+- A run over budget is measured again, up to three runs in all: another job on
+  a shared runner can slow one run, and only the last run fails the job.
 - The baseline is keyed by platform and size (`Darwin-ci`, `Linux-ci`). With no
   entry for the runner's platform the check passes and says so.
 
