@@ -3,7 +3,7 @@
 <!-- generated:cli-usage -->
 ```text
 sqlty [-h] [--version]
-      {rewrite,strip,check,complete,breaking,rule,skill,server,version} ...
+      {rewrite,strip,format,check,complete,breaking,rule,skill,server,version} ...
 ```
 <!-- /generated:cli-usage -->
 

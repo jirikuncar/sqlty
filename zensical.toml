@@ -31,6 +31,7 @@ nav = [
     { "Queries in .sql files" = "guide/sql-files.md" },
     { "Query variants" = "guide/query-variants.md" },
     { "Query parameters" = "guide/parameters.md" },
+    { "Formatting queries" = "guide/formatting.md" },
     { "psycopg" = "guide/psycopg.md" },
     { "Magic codec" = "guide/magic-codec.md" },
   ] },

@@ -87,6 +87,11 @@ impl<'s> Queries<'s> {
         Queries { source, sites }
     }
 
+    /// The string literals of each query, as source byte ranges, in source order.
+    pub fn literals(&self) -> impl Iterator<Item = &[Range<usize>]> {
+        self.sites.iter().map(|(strings, _)| strings.as_slice())
+    }
+
     /// The query whose string content holds byte `offset` (between the quotes, either end
     /// included); `None` outside a query, in its marker, or in an f-, t- or bytes string.
     pub fn at(&self, offset: usize) -> Option<QueryAt> {

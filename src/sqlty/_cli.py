@@ -3,6 +3,7 @@
 Commands:
     sqlty rewrite [OPTIONS] [PATH...]   Rewrite source files
     sqlty strip [OPTIONS] [PATH...]     Strip SQL[T](...) wrappers
+    sqlty format [OPTIONS] [PATH...]    Lay out query strings with sqruff
     sqlty check [OPTIONS] [PATH...]     Lint SQL type annotations
     sqlty rule [NAME]                   Explain a lint rule, or list them
     sqlty server                        Run the language server, for editors
@@ -67,6 +68,8 @@ def main(argv: list[str] | None = None) -> None:
                 _cmd_rewrite(args)
             case "strip":
                 _cmd_strip(args)
+            case "format":
+                _cmd_format(args)
             case "check":
                 _cmd_check(args)
             case "complete":
@@ -148,6 +151,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Do not modify files; print `Would strip <file>` and exit 1 if any file would change",
     )
     strip_parser.add_argument(
+        "--diff",
+        action="store_true",
+        help="Print a unified diff instead of modifying files; exit 1 if any file would change",
+    )
+
+    # --- format ---
+    format_parser = subparsers.add_parser(
+        "format",
+        help="Lay out query strings with sqruff: one plain triple-quoted literal per query",
+    )
+    _add_common_args(format_parser)
+    format_parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Do not modify files; print `Would format <file>` and exit 1 if any file would change",
+    )
+    format_parser.add_argument(
         "--diff",
         action="store_true",
         help="Print a unified diff instead of modifying files; exit 1 if any file would change",
@@ -527,6 +547,18 @@ def _cmd_strip(args: argparse.Namespace) -> None:
         return strip_source(original, import_style=settings.import_style), []
 
     _transform_files(args, transform, "strip", "Stripped", "stripped")
+
+
+def _cmd_format(args: argparse.Namespace) -> None:
+    """Format command: lay out query strings with sqruff."""
+    from sqlty.core import format_source
+
+    def transform(path: Path, original: str, settings: Settings) -> tuple[str, list[str]]:
+        return format_source(
+            original, dialect=settings.dialect, import_style=settings.import_style
+        ), []
+
+    _transform_files(args, transform, "format", "Formatted", "formatted")
 
 
 def _transform_files(
