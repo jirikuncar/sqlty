@@ -35,12 +35,23 @@ uv run pytest tests/ --ignore=tests/e2e --ignore=tests/mdtest  # unit tests only
 uv run pytest tests/e2e/ -v               # end-to-end tests
 uv run pytest -k "integer cast"           # filter by name
 uv run pytest tests/mdtest/rewrite/basic_rewrite.md -v  # single file
+uv run pytest -m timing -n 0 -p no:randomly  # the tests that measure wall time
+uv run pytest -n 0 -p no:randomly          # one process, in file order
 ```
+
+Tests run in parallel (pytest-xdist, `-n auto`) and in random order
+(pytest-randomly; a failure prints its `--randomly-seed`). A test must not depend
+on another having run, nor on the working directory or global state another
+changes. Tests that measure wall time are marked `timing`: the default run
+leaves them out, since parallel workers slow them, and `make test` runs them
+alone afterwards. Tests marked `pg` share one database server (`SQLTY_PG_DSN`), so CI
+runs them in one process: `uv run pytest -m pg -n 0`.
 
 Make targets:
 
 ```bash
-make test            # all tests
+make test            # all tests, then the timing tests alone
+make test-timing     # the tests that measure wall time, alone
 make test-mdtest     # mdtest only
 make test-unit       # unit tests only
 make test-e2e        # e2e only
@@ -57,8 +68,9 @@ and reasoning, and `--explain` shows it. When a result needs code (it depends on
 argument's value, say), add a `@` result kind to `compile.rs` and cite the rule.
 [`rules/README.md`](rust/crates/sqlty-sql/rules/README.md) has the format, the
 lookup order and how to verify a `reference`. Every rule needs a `reference` to
-vendor documentation of the version the tests target (PostgreSQL 17, MySQL 8.4,
-SQLite 3), checked against the published page, and a one-sentence `reasoning`;
+vendor documentation of the version the tests target, one per database
+(`reference.postgres` for PostgreSQL 17, `reference.mysql` for MySQL 8.4,
+`reference.sqlite` for SQLite 3), checked against the published page, and a one-sentence `reasoning`;
 the build fails otherwise. `sqlty check --explain` and `-- rules:` mdtest
 assertions show which rule typed a column; every rule needs one, in
 `tests/mdtest/type_inference/rule_coverage.md` if nowhere else

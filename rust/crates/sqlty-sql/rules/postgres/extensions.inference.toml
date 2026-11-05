@@ -6,7 +6,7 @@ function = "UUID_GENERATE_V1"
 dialects = ["postgres"]
 type = "UUID"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, F.47 uuid-ossp — a UUID generator, Table F.33 Functions for UUID Generation"
+reference.postgres = "PostgreSQL 17 documentation, F.47 uuid-ossp — a UUID generator, Table F.33 Functions for UUID Generation"
 reasoning = "The documentation gives each of these an `uuid` result."
 
 [[function]]
@@ -15,7 +15,7 @@ function = "UUID_GENERATE_V4"
 dialects = ["postgres"]
 type = "UUID"
 nullability = "non-null"
-reference = "PostgreSQL 17 documentation, F.47 uuid-ossp — a UUID generator, Table F.33 Functions for UUID Generation"
+reference.postgres = "PostgreSQL 17 documentation, F.47 uuid-ossp — a UUID generator, Table F.33 Functions for UUID Generation"
 reasoning = "The documentation gives each of these an `uuid` result. It never returns NULL, even for NULL arguments."
 
 [[function]]
@@ -24,5 +24,5 @@ functions = ["GEN_RANDOM_BYTES", "DIGEST"]
 dialects = ["postgres"]
 type = "VARBINARY"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, F.26.5 pgcrypto Random-Data Functions; F.26.1 pgcrypto General Hashing Functions"
+reference.postgres = "PostgreSQL 17 documentation, F.26.5 pgcrypto Random-Data Functions; F.26.1 pgcrypto General Hashing Functions"
 reasoning = "The documentation gives each of these a `bytea` result."

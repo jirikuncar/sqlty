@@ -7,7 +7,7 @@ dialects = ["postgres"]
 argument = ["@range", "@multirange"]
 type = "@bound"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.20 Range/Multirange Functions and Operators, Table 9.58 Range Functions, Table 9.59 Multirange Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.20 Range/Multirange Functions and Operators, Table 9.58 Range Functions, Table 9.59 Multirange Functions"
 reasoning = "A bound has the element type of the range or multirange. It is NULL when the range is empty or the bound is infinite."
 
 [[function]]
@@ -16,7 +16,7 @@ functions = ["LOWER", "UPPER"]
 dialects = ["postgres"]
 type = "@bound"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators; 9.20 Range/Multirange Functions and Operators, Table 9.58 Range Functions, Table 9.59 Multirange Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators; 9.20 Range/Multirange Functions and Operators, Table 9.58 Range Functions, Table 9.59 Multirange Functions"
 reasoning = "A range's bound has the range's element type, and on a string the case-mapped string keeps the string type."
 
 [[function]]
@@ -25,7 +25,7 @@ functions = ["STRING_TO_ARRAY", "REGEXP_SPLIT_TO_ARRAY", "REGEXP_MATCHES", "PARS
 dialects = ["postgres"]
 type = "ARRAY<TEXT>"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.10 Other String Functions and Operators"
+reference.postgres = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.10 Other String Functions and Operators"
 reasoning = "The documentation gives each of these a `text[]` result."
 
 [[function]]
@@ -34,7 +34,7 @@ function = "REGEXP_MATCH"
 dialects = ["postgres"]
 type = "ARRAY<TEXT>"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.10 Other String Functions and Operators"
+reference.postgres = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.10 Other String Functions and Operators"
 reasoning = "The documentation gives each of these a `text[]` result. It is NULL for some non-null arguments too: no match, an index out of range or an empty array."
 
 [[function]]
@@ -43,7 +43,7 @@ functions = ["STARTS_WITH", "REGEXP_LIKE", "UNICODE_ASSIGNED"]
 dialects = ["postgres"]
 type = "BOOLEAN"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators, Table 9.10 Other String Functions and Operators"
+reference.postgres = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators, Table 9.10 Other String Functions and Operators"
 reasoning = "The documentation gives each of these a `boolean` result."
 
 [[function]]
@@ -52,7 +52,7 @@ functions = ["ASCII", "STRPOS", "REGEXP_COUNT", "REGEXP_INSTR", "CHARACTER_LENGT
 dialects = ["postgres"]
 type = "INT"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators, Table 9.10 Other String Functions and Operators"
+reference.postgres = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators, Table 9.10 Other String Functions and Operators"
 reasoning = "The documentation gives each of these an `integer` result."
 
 [[function]]
@@ -61,7 +61,7 @@ function = "PG_CLIENT_ENCODING"
 dialects = ["postgres"]
 type = "NAME"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.10 Other String Functions and Operators"
+reference.postgres = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.10 Other String Functions and Operators"
 reasoning = "The documentation gives the function a `name` result."
 
 [[function]]
@@ -70,7 +70,7 @@ functions = ["LEFT", "RIGHT", "LPAD", "RPAD", "INITCAP", "REPEAT", "REVERSE", "T
 dialects = ["postgres"]
 type = "TEXT"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators, Table 9.10 Other String Functions and Operators; 9.5 Binary String Functions and Operators, Table 9.12 Other Binary String Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators, Table 9.10 Other String Functions and Operators; 9.5 Binary String Functions and Operators, Table 9.12 Other Binary String Functions"
 reasoning = "The documentation gives each of these a `text` result."
 
 [[function]]
@@ -79,7 +79,7 @@ function = "QUOTE_NULLABLE"
 dialects = ["postgres"]
 type = "TEXT"
 nullability = "non-null"
-reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators, Table 9.10 Other String Functions and Operators; 9.5 Binary String Functions and Operators, Table 9.12 Other Binary String Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators, Table 9.10 Other String Functions and Operators; 9.5 Binary String Functions and Operators, Table 9.12 Other Binary String Functions"
 reasoning = "The documentation gives each of these a `text` result. It never returns NULL, even for NULL arguments."
 
 [[function]]
@@ -88,7 +88,7 @@ function = "REGEXP_SUBSTR"
 dialects = ["postgres"]
 type = "TEXT"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators, Table 9.10 Other String Functions and Operators; 9.5 Binary String Functions and Operators, Table 9.12 Other Binary String Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators, Table 9.10 Other String Functions and Operators; 9.5 Binary String Functions and Operators, Table 9.12 Other Binary String Functions"
 reasoning = "The documentation gives each of these a `text` result. It is NULL for some non-null arguments too: no match, an index out of range or an empty array."
 
 [[function]]
@@ -97,5 +97,5 @@ functions = ["TRIM", "LTRIM", "RTRIM", "BTRIM", "OVERLAY"]
 dialects = ["postgres"]
 type = "@text(0)"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators"
+reference.postgres = "PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators"
 reasoning = "A string function of a string gives the first argument's string type, a binary string for a binary one."

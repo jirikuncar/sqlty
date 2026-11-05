@@ -6,7 +6,7 @@ functions = ["SET_BYTE", "SET_BIT"]
 dialects = ["postgres"]
 type = "@argument-type(0)"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.5 Binary String Functions and Operators, Table 9.12 Other Binary String Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.5 Binary String Functions and Operators, Table 9.12 Other Binary String Functions"
 reasoning = "The result has the type of the first argument."
 
 [[function]]
@@ -15,7 +15,7 @@ function = "BIT_COUNT"
 dialects = ["postgres"]
 type = "BIGINT"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.5 Binary String Functions and Operators, Table 9.12 Other Binary String Functions; 9.6 Bit String Functions and Operators, Table 9.15 Bit String Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.5 Binary String Functions and Operators, Table 9.12 Other Binary String Functions; 9.6 Bit String Functions and Operators, Table 9.15 Bit String Functions"
 reasoning = "The documentation gives the function a `bigint` result."
 
 [[function]]
@@ -24,7 +24,7 @@ functions = ["GET_BYTE", "GET_BIT"]
 dialects = ["postgres"]
 type = "INT"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.5 Binary String Functions and Operators, Table 9.12 Other Binary String Functions; 9.6 Bit String Functions and Operators, Table 9.15 Bit String Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.5 Binary String Functions and Operators, Table 9.12 Other Binary String Functions; 9.6 Bit String Functions and Operators, Table 9.15 Bit String Functions"
 reasoning = "The documentation gives each of these an `integer` result."
 
 [[function]]
@@ -33,7 +33,7 @@ functions = ["ENCODE", "CONVERT_FROM"]
 dialects = ["postgres"]
 type = "TEXT"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.5 Binary String Functions and Operators, Table 9.13 Text/Binary String Conversion Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.5 Binary String Functions and Operators, Table 9.13 Text/Binary String Conversion Functions"
 reasoning = "The documentation gives each of these a `text` result."
 
 [[function]]
@@ -42,5 +42,5 @@ functions = ["SHA224", "SHA256", "SHA384", "SHA512", "DECODE", "CONVERT_TO", "CO
 dialects = ["postgres"]
 type = "VARBINARY"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.5 Binary String Functions and Operators, Table 9.12 Other Binary String Functions, Table 9.13 Text/Binary String Conversion Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.5 Binary String Functions and Operators, Table 9.12 Other Binary String Functions, Table 9.13 Text/Binary String Conversion Functions"
 reasoning = "The documentation gives each of these a `bytea` result."

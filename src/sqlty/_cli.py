@@ -1413,9 +1413,12 @@ class SettingsResolver:
             except ValueError as exc:
                 raise ConfigError(f"[tool.sqlty.types]: {exc}") from None
             for kind, name in schema_skipped_objects(schema, dialect=dialect):
-                logger.warning(
-                    "Schema %s %s could not be parsed; its columns are unknown", kind, name
-                )
+                if kind == "statement":
+                    logger.warning("Schema statement could not be parsed and is ignored: %s", name)
+                else:
+                    logger.warning(
+                        "Schema %s %s could not be parsed; its columns are unknown", kind, name
+                    )
         return schema
 
     def resolve(self, path: Path) -> Path:

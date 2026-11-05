@@ -324,6 +324,25 @@ def test_unparseable_schema_view_is_reported(tmp_path, monkeypatch, caplog) -> N
     ]
 
 
+def test_unparseable_schema_statement_is_reported(tmp_path, monkeypatch, caplog) -> None:
+    """A statement that would set a key is named in a warning; one about storage is not."""
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
+    (tmp_path / "schema.sql").write_text(
+        "CREATE TABLE users (id INTEGER NOT NULL, meta TEXT);\n"
+        "ALTER TABLE ONLY users\n    ADD CONSTRAINT pk PRIMARY KEY (id) WITH (fillfactor = 70);\n"
+        "ALTER TABLE ONLY users ALTER COLUMN meta SET STATISTICS 200;\n"
+    )
+    (tmp_path / "a.py").write_text('q = "--sql\\nSELECT id FROM users"\n')
+    monkeypatch.chdir(tmp_path)
+
+    main(["rewrite", "a.py"])
+
+    assert [r.getMessage() for r in caplog.records if "could not be parsed" in r.getMessage()] == [
+        "Schema statement could not be parsed and is ignored: "
+        "ALTER TABLE ONLY users ADD CONSTRAINT pk PRIMARY KEY (id) WITH (fillfactor = 70)"
+    ]
+
+
 def test_check_never_imports_the_checked_modules(tmp_path, monkeypatch, capsys) -> None:
     """A module that writes a file when imported is read from source, and the key that
     allowed importing one is rejected."""
