@@ -79,7 +79,10 @@ q.py:2: [narrow-type] SQL[tuple[int, str]] should be SQL[tuple[int | None, str |
 ```
 
 A column gets the rules of its outermost operator or function call. A column
-reference, a cast, a literal or a set operation has none. From Python,
+reference, a cast, a literal or a set operation has none. A rule shared by
+several databases cites the documentation of each; only the configured
+dialect's is printed, and every one for a dialect none of them documents, such
+as `generic`. From Python,
 `sqlty.core.explain_select` returns the same rules:
 
 ```pycon

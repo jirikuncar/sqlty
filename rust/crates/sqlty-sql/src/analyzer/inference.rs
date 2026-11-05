@@ -63,6 +63,37 @@ pub struct RuleRef {
     pub reasoning: &'static str,
 }
 
+/// How each documented product's part of a [`RuleRef::reference`] starts.
+const PRODUCTS: [(SqlDialect, &str); 3] = [
+    (SqlDialect::Postgres, "PostgreSQL 17"),
+    (SqlDialect::MySql, "MySQL 8.4"),
+    (SqlDialect::Sqlite, "SQLite documentation"),
+];
+
+impl RuleRef {
+    /// The rule with only `dialect`'s part of a reference that cites several products
+    /// (`PostgreSQL 17 ...; MySQL 8.4 ...`); the whole reference for a dialect it does not cite.
+    #[must_use]
+    pub fn for_dialect(self, dialect: SqlDialect) -> Self {
+        let Some((_, product)) = PRODUCTS.iter().find(|(d, _)| *d == dialect) else {
+            return self;
+        };
+        let reference = self.reference;
+        let parts =
+            || std::iter::once(0).chain(reference.match_indices("; ").map(|(at, _)| at + 2));
+        let Some(start) = parts().find(|&at| reference[at..].starts_with(product)) else {
+            return self;
+        };
+        let end = parts()
+            .find(|&at| at > start && PRODUCTS.iter().any(|(_, p)| reference[at..].starts_with(p)))
+            .map_or(reference.len(), |at| at - 2);
+        Self {
+            reference: &self.reference[start..end],
+            ..self
+        }
+    }
+}
+
 /// An inference rule for a binary operator.
 #[derive(Debug)]
 pub(crate) struct BinaryRule {
@@ -277,6 +308,34 @@ mod tests {
     use std::cell::Cell;
 
     use super::*;
+
+    #[test]
+    fn for_dialect_keeps_the_dialects_part_of_the_reference() {
+        let rule = RuleRef {
+            id: "test",
+            reference: "PostgreSQL 17 documentation, 9.3 (a; b); MySQL 8.4 Reference Manual, 14.6.1; 14.6.2; SQLite documentation, 2 Operators",
+            reasoning: "test",
+        };
+        let reference = |dialect| rule.for_dialect(dialect).reference;
+        assert_eq!(
+            reference(SqlDialect::Postgres),
+            "PostgreSQL 17 documentation, 9.3 (a; b)"
+        );
+        assert_eq!(
+            reference(SqlDialect::MySql),
+            "MySQL 8.4 Reference Manual, 14.6.1; 14.6.2"
+        );
+        assert_eq!(
+            reference(SqlDialect::Sqlite),
+            "SQLite documentation, 2 Operators"
+        );
+        assert_eq!(reference(SqlDialect::Other("generic")), rule.reference);
+        let postgres_only = RuleRef {
+            reference: "PostgreSQL 17 documentation, 9.3",
+            ..rule
+        };
+        assert_eq!(postgres_only.for_dialect(SqlDialect::MySql), postgres_only);
+    }
 
     #[test]
     fn extending_dialects_are_sqlparser_dialects() {
