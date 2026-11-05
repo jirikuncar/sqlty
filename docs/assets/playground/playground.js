@@ -185,9 +185,13 @@ function go(at) {
   );
   root.querySelector('[data-tab="notes"]').hidden = !here.notes;
   restore(here);
-  open(here.file ?? "python");
-  show(here.panel ?? (here.notes ? "notes" : "problems"));
+  // The tabs stay as they are, unless the step names one.
+  if (here.file) open(here.file);
+  if (here.panel) show(here.panel);
+  else if (selected(tabs) === "notes" && !here.notes) show("problems");
 }
+
+const selected = (all) => [...all].find((tab) => tab.getAttribute("aria-selected") === "true")?.dataset.tab;
 
 // Replace a model's text as one edit, so Ctrl+Z brings the old text back.
 function replace(model, text) {
@@ -541,16 +545,16 @@ document.addEventListener("fullscreenchange", () => {
 root.addEventListener("keydown", (event) => {
   if (event.target.closest?.(".monaco-editor")) event.stopPropagation();
 });
+// Keys in the editor are the editor's: these act everywhere else in the playground.
 document.addEventListener("keydown", (event) => {
   if (!root.contains(event.target) && !root.classList.contains("sqlty-present")) return;
+  if (event.target.closest?.(".monaco-editor")) return;
   const mod = event.ctrlKey || event.metaKey;
-  const inEditor = event.target.closest?.(".monaco-editor");
   if (mod && (event.key === "=" || event.key === "+" || event.key === "-")) zoom(event.key === "-" ? -1 : 1);
   else if (mod && event.shiftKey && event.key.toLowerCase() === "f") presenting(!root.classList.contains("sqlty-present"));
-  else if (event.key === "Escape" && root.classList.contains("sqlty-present") && !inEditor && event.target.tagName !== "SELECT") {
+  else if (event.key === "Escape" && root.classList.contains("sqlty-present") && event.target.tagName !== "SELECT") {
     presenting(false);
-  }
-  else if (steps.length && (event.altKey || !inEditor) && (event.key === "PageDown" || event.key === "PageUp")) {
+  } else if (steps.length && (event.key === "PageDown" || event.key === "PageUp")) {
     go(step + (event.key === "PageDown" ? 1 : -1));
   } else return;
   event.preventDefault();
