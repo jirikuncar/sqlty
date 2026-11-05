@@ -84,7 +84,25 @@ def check(page: Page, url: str) -> None:
     page.wait_for_selector("[data-steps]:not([hidden])", timeout=60_000)
     assert page.input_value("[data-step-select]") == "1"
 
+    embedded(page, url)
     offline(page, url)
+
+
+def embedded(page: Page, url: str) -> None:
+    """``?embed`` keeps a shared session with only the editor, the console and Fix all."""
+    page.goto(url)
+    page.wait_for_selector("[data-types] code", state="attached", timeout=60_000)
+    page.evaluate(f"{SOURCE}.setValue('q = \"--sql\\\\nSELECT nme FROM users\"\\n')")
+    page.wait_for_function("location.hash.length > 1")
+    shared = page.url.replace("#", "?embed#", 1)
+    page.goto("about:blank")
+    page.goto(shared)
+    page.wait_for_selector("[data-types] code", state="attached", timeout=60_000)
+    assert not page.is_visible(".md-header")
+    assert not page.is_visible("[data-example]")
+    assert page.is_visible("[data-fix]")
+    opened = page.get_attribute("[data-open]", "href")
+    assert "embed" not in opened and opened.split("#")[1] == shared.split("#")[1], opened
 
 
 def offline(page: Page, url: str) -> None:
