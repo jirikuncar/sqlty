@@ -44,7 +44,8 @@ Tests run in parallel (pytest-xdist, `-n auto`) and in random order
 on another having run, nor on the working directory or global state another
 changes. Tests that measure wall time are marked `timing`: the default run
 leaves them out, since parallel workers slow them, and `make test` runs them
-alone afterwards.
+alone afterwards. Tests marked `pg` share one database server (`SQLTY_PG_DSN`), so CI
+runs them in one process: `uv run pytest -m pg -n 0`.
 
 Make targets:
 
