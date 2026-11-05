@@ -61,6 +61,7 @@ SELECT id, name FROM users ORDER BY name;
 
 ```sql
 -- :name find_user :one
+-- error: [select-star] "SELECT * used — expand to explicit column list"
 -- error: [unknown-table] "table `user` is not defined in the schema"
 SELECT * FROM user WHERE id = :id
 ```
@@ -72,6 +73,28 @@ A file without headers is one query, named after the file.
 ```sql
 -- error: [ambiguous-column] "column reference `id` is ambiguous"
 SELECT id FROM users JOIN blogs ON blogs.author_id = users.id
+```
+
+## `SELECT *`
+
+A `*` that shapes the result is `select-star`, as in Python. Each statement is checked.
+
+```sql
+-- name: everyone
+-- error: [select-star] "SELECT * used — expand to explicit column list"
+SELECT * FROM users;
+
+-- name: with-blogs
+-- error: [select-star] "SELECT b.* used — expand to explicit column list"
+SELECT u.name, b.* FROM users u JOIN blogs b ON b.author_id = u.id;
+
+-- name: count-users
+-- error:
+SELECT count(*) FROM users;
+
+-- name: publish<!
+-- error: [select-star] "RETURNING * used — expand to explicit column list"
+INSERT INTO blogs (author_id, title) VALUES (:author_id, :title) RETURNING *;
 ```
 
 ## Parse errors

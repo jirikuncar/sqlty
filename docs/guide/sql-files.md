@@ -60,10 +60,20 @@ SELECT id, nme FROM users WHERE id = $1;
 ## What is checked
 
 The [name rules](../reference/rules.md#name-rules) (`unknown-table`,
-`unknown-column`, `ambiguous-column`, ...) and
-[`unparsed-query`](../reference/rules.md#unparsed-query), with the severities
+`unknown-column`, `ambiguous-column`, ...),
+[`unparsed-query`](../reference/rules.md#unparsed-query) and
+[`select-star`](../reference/rules.md#select-star), with the severities
 `[tool.sqlty.rules]` and `overrides` give them. A file has no row types, so the
 rules that compare one with the query don't apply.
+
+```sql
+-- name: list-users
+-- error: [select-star] "SELECT * used — expand to explicit column list"
+SELECT * FROM users;
+```
+
+`sqlty check --fix` does not expand the star in a `.sql` file: list the columns
+by hand.
 
 `-- sqlty: ignore` and `-- sqlty: ignore[rule]` silence the diagnostics of their
 line, and `unused-ignore` reports one that silences nothing:
