@@ -88,6 +88,8 @@ cli = ["rich>=15.0.0"]
 # Only the DuckDB type tests need it, and it has no wheel for every Python.
 duckdb = ["duckdb>=1.4.0"]
 psycopg = ["psycopg>=3.2.12"]
+# Only the aiosqlite parameter tests need it.
+aiosqlite = ["aiosqlite>=0.22.1"]
 fuzz = [
     "hypothesis>=6.140",
 ]

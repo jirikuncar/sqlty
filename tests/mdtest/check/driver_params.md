@@ -2,8 +2,8 @@
 
 `execute`, `executemany` and the asyncpg fetch methods are checked when the file
 shows what the receiver is: a variable bound to `psycopg.connect(...)`,
-`sqlite3.connect(...)` or `asyncpg.connect(...)`, to `<connection>.cursor()`,
-or annotated with a driver class. The query is a literal, `SQL[T]("...")` of
+`sqlite3.connect(...)`, `aiosqlite.connect(...)` or `asyncpg.connect(...)`, to
+`<connection>.cursor()`, or annotated with a driver class. The query is a literal, `SQL[T]("...")` of
 one, or a name assigned once to one.
 
 `schema.sql`:
