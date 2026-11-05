@@ -133,6 +133,22 @@ q = SQL[Row](
 )
 ```
 
+A `CASE` that maps a value away leaves it out of the column it returns in `ELSE`.
+
+```python
+from typing import Literal, NamedTuple
+
+from sqlty import SQL
+
+
+class Row(NamedTuple):
+    status: Literal["pending", "paid"]
+
+
+# error:
+q = SQL[Row]("--sql\nSELECT CASE WHEN status = 'refunded' THEN 'pending' ELSE status END AS status FROM orders")
+```
+
 ## Fields that take values by class
 
 ```python
