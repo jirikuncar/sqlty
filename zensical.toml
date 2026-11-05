@@ -91,3 +91,30 @@ line_spans = "__span"
 pygments_lang_class = true
 [project.markdown_extensions.pymdownx.inlinehilite]
 [project.markdown_extensions.pymdownx.superfences]
+
+[project.plugins.llmstxt]
+full_output = "llms-full.txt"
+markdown_description = "SQLTy type-checks SQL in Python: it infers row and parameter types from the schema, rewrites queries to typed helpers, and lints them, through a Rust engine with a Python API and CLI."
+
+[project.plugins.llmstxt.sections]
+"Reference" = [
+  { "reference/rules.md" = "Every lint rule, its default severity and how to change it" },
+  { "reference/configuration.md" = "Every `[tool.sqlty]` setting" },
+  { "reference/cli.md" = "Every `sqlty` command and flag" },
+  { "reference/types.md" = "How each SQL type maps to a Python type, per dialect" },
+]
+"Getting started" = [
+  "index.md",
+  "installation.md",
+  "quickstart.md",
+  "motivation.md",
+  "use-cases.md",
+]
+"Guide" = ["guide/*.md"]
+"Optional" = [
+  "recipes/*.md",
+  "reference/python-api.md",
+  "reference/engine.md",
+  "playground.md",
+  "credits.md",
+]
