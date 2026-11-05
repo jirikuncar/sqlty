@@ -115,6 +115,7 @@ const stepper = root.querySelector("[data-steps]");
 const picker = root.querySelector("[data-step-select]");
 const notes = root.querySelector("[data-notes]");
 const present = root.querySelector("[data-present]");
+const opener = root.querySelector("[data-open]");
 examples.unshift({ name: "Tour", source: SOURCE, schema: SCHEMA, dialect: "postgres", config: CONFIG });
 examples.push({ name: "Tour in steps", deck: new URL("steps.json", import.meta.url) }, { name: "Open a file...", file: true });
 const option = (value, textContent) => Object.assign(document.createElement("option"), { value, textContent });
@@ -185,9 +186,13 @@ function go(at) {
   );
   root.querySelector('[data-tab="notes"]').hidden = !here.notes;
   restore(here);
-  open(here.file ?? "python");
-  show(here.panel ?? (here.notes ? "notes" : "problems"));
+  // The tabs stay as they are, unless the step names one.
+  if (here.file) open(here.file);
+  if (here.panel) show(here.panel);
+  else if (selected(tabs) === "notes" && !here.notes) show("problems");
 }
+
+const selected = (all) => [...all].find((tab) => tab.getAttribute("aria-selected") === "true")?.dataset.tab;
 
 // Replace a model's text as one edit, so Ctrl+Z brings the old text back.
 function replace(model, text) {
@@ -210,6 +215,9 @@ async function presenting(on) {
   present.textContent = on ? "Exit" : "Present";
   try {
     if (on && !document.fullscreenElement) await root.requestFullscreen?.();
+    // Chrome then lets Escape reach the page, where it closes suggestions; holding it still exits.
+    if (on) await navigator.keyboard?.lock?.(["Escape"]);
+    else navigator.keyboard?.unlock?.();
     if (!on && document.fullscreenElement) await document.exitFullscreen();
   } catch {
     // Without the Fullscreen API (iPhone), the playground still covers the page.
@@ -377,10 +385,8 @@ function refresh() {
         textContent: found.rule,
         title: `The ${found.rule} rule`,
       });
-      const button = Object.assign(document.createElement("button"), {
-        type: "button",
-        textContent: `${at.lineNumber}:${at.column} ${found.message}`,
-      });
+      const button = Object.assign(document.createElement("button"), { type: "button" });
+      button.append(tag("span", `${at.lineNumber}:${at.column}`, "sqlty-at"), " ", ...coded(found.message));
       button.addEventListener("click", () => {
         open("python");
         editor.setPosition(at);
@@ -464,40 +470,42 @@ async function share() {
   url.hash = hash;
   const fits = url.href.length <= MAX_LINK;
   history.replaceState(null, "", fits ? url : url.pathname);
+  unembedded();
   linked.textContent = fits ? "" : `Too large to share as a link (${url.href.length} characters).`;
   return fits ? url.href : null;
 }
 
+// The page an embedded playground opens: this session with all controls.
+function unembedded() {
+  const url = new URL(location.href);
+  url.searchParams.delete("embed");
+  opener.href = url.href;
+}
+
 function describe(query) {
   const item = document.createElement("li");
-  const head = document.createElement("code");
-  head.textContent = `${query.line}: ${query.row_type ?? "untyped"}`;
-  item.append(head);
-  const rows = [
-    ...query.columns.map((column) => [
-      `${column.name}: ${column.type ?? "?"} (${column.sql_type ?? "?"})`,
-      ...explain(column),
-    ]),
-    ...query.params.map((param) => [
-      `param ${param.name ?? param.index}: ${param.type ?? "?"}${param.nullable === false ? " NOT NULL" : ""}`,
-    ]),
-  ];
-  const list = document.createElement("ul");
-  list.replaceChildren(
-    ...rows.map(([row, ...rules]) => {
-      const entry = document.createElement("li");
-      entry.textContent = row;
-      if (rules.length) {
-        const nested = document.createElement("ul");
-        nested.replaceChildren(...rules);
-        entry.append(nested);
-      }
-      return entry;
-    }),
-  );
-  item.append(list);
+  const head = document.createElement("div");
+  head.append(tag("span", `line ${query.line}`, "sqlty-at"), " ", tag("code", query.row_type ?? "untyped"));
+  const grid = tag("div", "", "sqlty-columns");
+  const row = (kind, name, type, sql, notes = []) => {
+    grid.append(tag("code", name, kind), tag("code", type ?? "?"), tag("span", sql ?? ""));
+    if (!notes.length) return;
+    const why = tag("div", "", "sqlty-why");
+    why.append(...notes);
+    grid.append(why);
+  };
+  for (const column of query.columns) row("column", column.name, column.type, column.sql_type, explain(column));
+  for (const param of query.params) {
+    row("param", param.name ?? `#${param.index}`, param.type, param.nullable === false ? "parameter, NOT NULL" : "parameter");
+  }
+  item.append(head, grid);
   return item;
 }
+
+const tag = (name, text, className = "") => Object.assign(document.createElement(name), { textContent: text, className });
+
+// A message with its `backticked` names as code.
+const coded = (message) => message.split(/`([^`]+)`/).map((part, index) => (index % 2 ? tag("code", part) : part));
 
 // What `sqlty check --explain` prints under a column: the inference rules that typed it.
 function explain(column) {
@@ -509,10 +517,8 @@ function explain(column) {
       column.type_rule?.id === rule.id && "type",
       column.nullability_rule?.id === rule.id && "nullability",
     ].filter(Boolean);
-    const entry = document.createElement("li");
-    const id = document.createElement("code");
-    id.textContent = rule.id;
-    entry.append(`${parts.join(" and ")} by `, id, `: ${rule.reasoning} Reference: ${rule.reference}`);
+    const entry = document.createElement("p");
+    entry.append(`${parts.join(" and ")} by `, tag("code", rule.id), `: ${rule.reasoning} `, tag("cite", rule.reference));
     return entry;
   });
 }
@@ -538,19 +544,26 @@ for (const button of root.querySelectorAll("[data-step]")) {
 picker.addEventListener("change", () => go(Number(picker.value)));
 root.querySelector("[data-step-reset]").addEventListener("click", () => go(step));
 present.addEventListener("click", () => presenting(!root.classList.contains("sqlty-present")));
+// Without keyboard lock (Safari, Firefox) any Escape exits full screen: one meant for the editor keeps presenting.
 document.addEventListener("fullscreenchange", () => {
-  if (!document.fullscreenElement && root.classList.contains("sqlty-present")) presenting(false);
+  const editing = document.activeElement?.closest?.(".monaco-editor");
+  if (!document.fullscreenElement && root.classList.contains("sqlty-present") && !editing) presenting(false);
 });
+// The theme's shortcuts (`.` next page, `s` search) take keys from anything but form fields,
+// and Monaco types into a plain element.
+root.addEventListener("keydown", (event) => {
+  if (event.target.closest?.(".monaco-editor")) event.stopPropagation();
+});
+// Keys in the editor are the editor's: these act everywhere else in the playground.
 document.addEventListener("keydown", (event) => {
   if (!root.contains(event.target) && !root.classList.contains("sqlty-present")) return;
+  if (event.target.closest?.(".monaco-editor")) return;
   const mod = event.ctrlKey || event.metaKey;
-  const inEditor = event.target.closest?.(".monaco-editor");
   if (mod && (event.key === "=" || event.key === "+" || event.key === "-")) zoom(event.key === "-" ? -1 : 1);
   else if (mod && event.shiftKey && event.key.toLowerCase() === "f") presenting(!root.classList.contains("sqlty-present"));
-  else if (event.key === "Escape" && root.classList.contains("sqlty-present") && !inEditor && event.target.tagName !== "SELECT") {
+  else if (event.key === "Escape" && root.classList.contains("sqlty-present") && event.target.tagName !== "SELECT") {
     presenting(false);
-  }
-  else if (steps.length && (event.altKey || !inEditor) && (event.key === "PageDown" || event.key === "PageUp")) {
+  } else if (steps.length && (event.key === "PageDown" || event.key === "PageUp")) {
     go(step + (event.key === "PageDown" ? 1 : -1));
   } else return;
   event.preventDefault();
@@ -589,6 +602,7 @@ root.querySelector("[data-copy-link]").addEventListener("click", async () => {
 window.addEventListener("hashchange", async () => {
   const saved = await decode(location.hash.slice(1));
   if (saved) resume(saved);
+  unembedded();
 });
 
 // A shared session: its steps, then the edits made on its step.
@@ -637,6 +651,7 @@ if (saved.size) root.style.setProperty("--sqlty-font", `${size}px`);
 if (shared) resume(shared);
 else if (linkedDeck?.error) linked.textContent = String(linkedDeck.error.message ?? linkedDeck.error);
 else if (linkedDeck) resume(linkedDeck);
+unembedded();
 refresh();
 
 async function engine() {

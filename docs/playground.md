@@ -1,4 +1,5 @@
 ---
+description: Type-check, fix and rewrite SQL queries in Python in your browser, with sqlty compiled to WebAssembly.
 hide:
   - toc
 ---
@@ -8,6 +9,10 @@ hide:
 Edit the Python source or the schema below: sqlty checks, types and highlights the
 queries as you type. It runs in your browser. The engine is compiled to
 [WebAssembly](https://webassembly.org/), and no code leaves the page.
+
+<script>
+  if (new URLSearchParams(location.search).has("embed")) document.documentElement.classList.add("sqlty-embedded");
+</script>
 
 <div id="sqlty-playground" markdown="0">
   <div class="sqlty-toolbar">
@@ -31,13 +36,14 @@ queries as you type. It runs in your browser. The engine is compiled to
         <button type="button" class="sqlty-button" data-zoom="1" title="Larger (Ctrl+=)" aria-label="Larger">A+</button>
       </span>
       <button type="button" class="sqlty-button" data-present title="Fill the screen (Ctrl+Shift+F)" aria-pressed="false">Present</button>
+      <a class="sqlty-button sqlty-open" data-open target="_blank" rel="noopener">Open in playground</a>
     </span>
     <span class="sqlty-status" data-link-status role="status"></span>
   </div>
   <nav class="sqlty-steps" aria-label="Steps" data-steps hidden>
-    <button type="button" class="sqlty-button" data-step="-1" title="Previous step (Alt+PageUp)" aria-label="Previous step">&larr;</button>
+    <button type="button" class="sqlty-button" data-step="-1" title="Previous step (PageUp)" aria-label="Previous step">&larr;</button>
     <select data-step-select aria-label="Step"></select>
-    <button type="button" class="sqlty-button" data-step="1" title="Next step (Alt+PageDown)" aria-label="Next step">&rarr;</button>
+    <button type="button" class="sqlty-button" data-step="1" title="Next step (PageDown)" aria-label="Next step">&rarr;</button>
     <button type="button" class="sqlty-button" data-step-reset title="Undo the edits of this step" aria-label="Reset step">&#8634;<span class="sqlty-label"> Reset</span></button>
   </nav>
   <div class="sqlty-tabs" role="tablist" aria-label="Files">
@@ -72,6 +78,19 @@ queries as you type. It runs in your browser. The engine is compiled to
     position: fixed; inset: 0; z-index: 10; height: 100dvh; padding: 0.5rem 1rem 1rem;
     background-color: var(--md-default-bg-color);
   }
+  html.sqlty-embedded { overflow: hidden; }
+  .sqlty-embedded .md-header, .sqlty-embedded .md-tabs, .sqlty-embedded .md-sidebar, .sqlty-embedded .md-footer,
+  .sqlty-embedded .md-content__inner > :not(#sqlty-playground) { display: none; }
+  .sqlty-embedded #sqlty-playground {
+    position: fixed; inset: 0; z-index: 10; height: 100dvh; padding: 0.5rem;
+    background-color: var(--md-default-bg-color);
+  }
+  .sqlty-embedded .sqlty-toolbar { margin-bottom: 0.4rem; }
+  .sqlty-embedded .sqlty-toolbar label, .sqlty-embedded [data-rewrite], .sqlty-embedded [data-strip],
+  .sqlty-embedded [data-copy-link], .sqlty-embedded .sqlty-group, .sqlty-embedded [data-present],
+  .sqlty-embedded [data-tab="json"] { display: none; }
+  .sqlty-open { display: none; }
+  .sqlty-embedded .sqlty-open { display: inline-block; text-decoration: none; }
   .sqlty-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.5rem 1rem; margin-bottom: 0.75rem; }
   .sqlty-toolbar label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.64rem; color: var(--md-default-fg-color--light); }
   .sqlty-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-left: auto; }
@@ -126,10 +145,22 @@ queries as you type. It runs in your browser. The engine is compiled to
   .sqlty-console [data-notes] p { margin: 0 0 0.6em; }
   #sqlty-playground .sqlty-console li { margin-left: 0; }
   #sqlty-playground .sqlty-console li ul { margin: 0.2rem 0 0.4rem 1rem; list-style: none; }
-  .sqlty-console [data-problems] li { display: grid; grid-template-columns: 1.2em auto 1fr; column-gap: 0.5em; align-items: baseline; }
-  .sqlty-console [data-problems] a { white-space: nowrap; justify-self: start; }
-  .sqlty-console [data-problems] button { font: inherit; color: inherit; text-align: left; padding: 0.1rem 0; background: none; border: 0; cursor: pointer; }
+  #sqlty-playground .sqlty-console li { line-height: 1.45; margin-bottom: 0.35em; }
+  .sqlty-console [data-problems] li[data-severity] { display: grid; grid-template-columns: 1.2em 1fr auto; column-gap: 0.5em; align-items: baseline; }
+  .sqlty-console [data-problems] a { white-space: nowrap; font-size: 0.85em; color: var(--md-default-fg-color--light); }
+  .sqlty-console [data-problems] a:hover { color: var(--md-accent-fg-color); }
+  .sqlty-console [data-problems] button { font: inherit; color: inherit; text-align: left; padding: 0; background: none; border: 0; cursor: pointer; }
   .sqlty-console [data-problems] button:hover { color: var(--md-accent-fg-color); }
+  .sqlty-console code { font-size: 0.92em; padding: 0 0.1em; word-break: normal; overflow-wrap: anywhere; }
+  .sqlty-console .sqlty-at { font-family: var(--md-code-font-family); font-size: 0.85em; color: var(--md-default-fg-color--light); }
+  #sqlty-playground [data-types] > li { margin-bottom: 0.8em; }
+  .sqlty-columns { display: grid; grid-template-columns: max-content max-content 1fr; column-gap: 1.2em; margin: 0.2em 0 0 1.2em; }
+  .sqlty-columns > span { color: var(--md-default-fg-color--light); }
+  #sqlty-playground .sqlty-columns code { background: none; padding: 0; overflow-wrap: normal; }
+  #sqlty-playground .sqlty-columns code.param { color: var(--md-default-fg-color--light); }
+  .sqlty-why { grid-column: 1 / -1; padding: 0 0 0.3em 1em; font-size: 0.88em; color: var(--md-default-fg-color--light); }
+  .sqlty-why p { margin: 0; }
+  .sqlty-why cite { font-style: normal; opacity: 0.8; }
   .sqlty-console [data-severity="error"]::before { content: "\25CF"; color: var(--md-code-hl-number-color, #c62828); }
   .sqlty-console [data-severity="warn"]::before { content: "\25B2"; color: var(--md-code-hl-special-color, #ef6c00); }
   .sqlty-console > div:not([data-notes]) { height: 100%; }
@@ -150,8 +181,9 @@ queries as you type. It runs in your browser. The engine is compiled to
     .sqlty-wide { display: none; }
     .sqlty-narrow { display: inline; }
     .sqlty-steps { gap: 0.3rem; margin-bottom: 0.3rem; }
-    .sqlty-console [data-problems] li { grid-template-columns: 1.2em 1fr; }
+    .sqlty-console [data-problems] li[data-severity] { grid-template-columns: 1.2em 1fr; }
     .sqlty-console [data-problems] a { grid-column: 2; }
+    .sqlty-columns { margin-left: 0.6em; column-gap: 0.8em; }
     .sqlty-tabs [role="tab"] { padding: 0.3rem 0.55rem; font-size: 0.62rem; }
   }
 </style>
@@ -217,6 +249,19 @@ as the session lives in the part of the URL after `#`.
 A session that compresses to more than 8000 characters gets no link: many browsers
 and chat apps cut longer URLs.
 
+## Embed
+
+Add `?embed` to a link to show only the editor, the console and **Fix all**, with
+**Open in playground** for the other controls. It fills the window, so it fits an
+`<iframe>` in a blog post or slides:
+
+```html
+<iframe src="https://jirikuncar.github.io/sqlty/playground/?embed#..." width="800" height="500"></iframe>
+```
+
+Link previews in social apps show the SQLTy card, not the session: their crawlers never
+see the part of the URL after `#`.
+
 ## Walk through steps
 
 Steps are sessions in order, each one built on the one before: a talk, a lesson or a
@@ -250,8 +295,8 @@ steps are part of the session, so **Copy link** shares them while they fit in a 
 |---|---|---|
 | `title` | The name of the step in the bar | `Step N` |
 | `source`, `schema`, `config`, `dialect` | The files and dialect, as a [session](#share-a-session) holds them | The one of the step before |
-| `panel` | The console tab it opens: `notes`, `problems`, `types` or `json` | **Notes** if it has notes, else **Problems** |
-| `file` | The file tab it opens: `python`, `schema` or `config` | `python` |
+| `panel` | The console tab it opens: `notes`, `problems`, `types` or `json` | The tab open before, or **Problems** if that was **Notes** and the step has none |
+| `file` | The file tab it opens: `python`, `schema` or `config` | The file open before |
 | `notes` | Text for the **Notes** tab; a blank line starts a paragraph | No **Notes** tab |
 
 ## Present
@@ -261,9 +306,9 @@ size of the editor and the console, for a projector or a screen share.
 
 | Keys | What they do |
 |---|---|
-| **Ctrl+Shift+F** | Present, or stop presenting; **Escape** also stops, outside the editor |
+| **Ctrl+Shift+F** | Present, or stop presenting; **Escape** also stops |
 | **Ctrl+=**, **Ctrl+-** | A larger or a smaller font |
-| **Alt+PageDown**, **Alt+PageUp** | The next or the previous step; outside the editor, **PageDown** and **PageUp** too, as most presentation remotes send |
+| **PageDown**, **PageUp** | The next or the previous step, as most presentation remotes send |
 
 On macOS, **Command** works as **Ctrl**.
 
