@@ -40,3 +40,7 @@ bench-result.json
 .hypothesis/
 *.snap.new
 docs/assets/vendor/
+
+# Cloudflare deploys (docs-preview.yml)
+/public/
+.wrangler/
