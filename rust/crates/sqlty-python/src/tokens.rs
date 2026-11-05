@@ -504,8 +504,14 @@ pub(crate) fn template_wrapper(wrapper: &str) -> String {
 }
 
 /// Every `{wrapper}[T](...)` and `mod.{wrapper}[T](...)` call in `source`, in source order,
-/// and the `SQLTemplate[T](...)` calls next to them.
-pub(crate) fn wrapper_calls(source: &str, tokens: &[Token], wrapper: &str) -> Calls {
+/// the calls of the other names sqlty's `SQL` is bound to (`aliases`), and the
+/// `SQLTemplate[T](...)` calls next to them.
+pub(crate) fn wrapper_calls(
+    source: &str,
+    tokens: &[Token],
+    wrapper: &str,
+    aliases: &[String],
+) -> Calls {
     let template = template_wrapper(wrapper);
     let dotted = format!(".{wrapper}");
     let mut calls = Vec::new();
@@ -513,7 +519,10 @@ pub(crate) fn wrapper_calls(source: &str, tokens: &[Token], wrapper: &str) -> Ca
         let name = &source[token.span.clone()];
         let is_template = name == template || name.ends_with(".SQLTemplate");
         if token.kind != Kind::Name
-            || !(name == wrapper || name.ends_with(&dotted) || is_template)
+            || !(name == wrapper
+                || name.ends_with(&dotted)
+                || is_template
+                || aliases.iter().any(|a| a == name))
             || !is_op(source, tokens, i + 1, "[")
         {
             continue;
@@ -591,7 +600,7 @@ mod tests {
     use crate::scan::Scan;
 
     fn calls(source: &str) -> Calls {
-        wrapper_calls(source, &tokenize(source), "SQL")
+        wrapper_calls(source, &tokenize(source), "SQL", &[])
     }
 
     #[test]
