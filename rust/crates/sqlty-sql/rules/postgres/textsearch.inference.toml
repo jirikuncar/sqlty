@@ -7,7 +7,7 @@ dialects = ["postgres"]
 left = ["TSQUERY"]
 right = ["TSQUERY"]
 type = "TSQUERY"
-reference = "PostgreSQL 17 documentation, 9.13, Table 9.42 Text Search Operators (tsquery && tsquery → tsquery)"
+reference.postgres = "PostgreSQL 17 documentation, 9.13, Table 9.42 Text Search Operators (tsquery && tsquery → tsquery)"
 reasoning = "`&&` on two queries ANDs them into a query, not an overlap test."
 
 [[rule]]
@@ -17,7 +17,7 @@ dialects = ["postgres"]
 left = ["TSQUERY"]
 right = ["TSQUERY"]
 type = "TSQUERY"
-reference = "PostgreSQL 17 documentation, 9.13, Table 9.42 Text Search Operators (tsquery || tsquery → tsquery)"
+reference.postgres = "PostgreSQL 17 documentation, 9.13, Table 9.42 Text Search Operators (tsquery || tsquery → tsquery)"
 reasoning = "`||` on two queries ORs them into a query."
 
 [[rule]]
@@ -27,7 +27,7 @@ dialects = ["postgres"]
 left = ["TSVECTOR"]
 right = ["TSVECTOR"]
 type = "TSVECTOR"
-reference = "PostgreSQL 17 documentation, 9.13, Table 9.42 Text Search Operators (tsvector || tsvector → tsvector)"
+reference.postgres = "PostgreSQL 17 documentation, 9.13, Table 9.42 Text Search Operators (tsvector || tsvector → tsvector)"
 reasoning = "`||` on two vectors concatenates them into a vector."
 
 [[rule]]
@@ -37,7 +37,7 @@ dialects = ["postgres"]
 left = ["TSQUERY"]
 right = ["TSQUERY"]
 type = "TSQUERY"
-reference = "PostgreSQL 17 documentation, 9.13, Table 9.42 Text Search Operators (tsquery <-> tsquery → tsquery)"
+reference.postgres = "PostgreSQL 17 documentation, 9.13, Table 9.42 Text Search Operators (tsquery <-> tsquery → tsquery)"
 reasoning = "`<->` on two queries makes a phrase query."
 
 [[function]]
@@ -47,7 +47,7 @@ dialects = ["postgres"]
 argument = ["PATH", "LSEG"]
 type = "DOUBLE"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.11, Table 9.37 Geometric Functions (length ( geometric_type ) → double precision)"
+reference.postgres = "PostgreSQL 17 documentation, 9.11, Table 9.37 Geometric Functions (length ( geometric_type ) → double precision)"
 reasoning = "The length of a path or line segment is a distance, a double."
 
 [[function]]
@@ -58,7 +58,7 @@ argument = ["JSON", "JSONB"]
 type = "@argument"
 nullability = "strict"
 shadows = ["postgres.textsearch.headline-json-config"]
-reference = "PostgreSQL 17 documentation, 9.13, Table 9.43 Text Search Functions (ts_headline example: ts_headline('{\"cat\":\"raining cats and dogs\"}'::jsonb, 'cat') → {\"cat\": \"raining <b>cats</b> and dogs\"}); the signature there says text, the pg_proc catalog says ts_headline(jsonb, tsquery) returns jsonb and ts_headline(json, tsquery) json"
+reference.postgres = "PostgreSQL 17 documentation, 9.13, Table 9.43 Text Search Functions (ts_headline example: ts_headline('{\"cat\":\"raining cats and dogs\"}'::jsonb, 'cat') → {\"cat\": \"raining <b>cats</b> and dogs\"}); the signature there says text, the pg_proc catalog says ts_headline(jsonb, tsquery) returns jsonb and ts_headline(json, tsquery) json"
 reasoning = "A headline of a JSON document is the document with its strings marked, of the same JSON type."
 
 [[function]]
@@ -68,7 +68,7 @@ dialects = ["postgres"]
 arguments = [[], ["JSON", "JSONB"]]
 type = "@argument(1)"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.13, Table 9.43 Text Search Functions (ts_headline example: ts_headline('{\"cat\":\"raining cats and dogs\"}'::jsonb, 'cat') → {\"cat\": \"raining <b>cats</b> and dogs\"}); the signature there says text, the pg_proc catalog says ts_headline(jsonb, tsquery) returns jsonb and ts_headline(json, tsquery) json"
+reference.postgres = "PostgreSQL 17 documentation, 9.13, Table 9.43 Text Search Functions (ts_headline example: ts_headline('{\"cat\":\"raining cats and dogs\"}'::jsonb, 'cat') → {\"cat\": \"raining <b>cats</b> and dogs\"}); the signature there says text, the pg_proc catalog says ts_headline(jsonb, tsquery) returns jsonb and ts_headline(json, tsquery) json"
 reasoning = "With a text search configuration first, the document is the second argument, and the headline keeps its JSON type."
 
 [[function]]
@@ -77,7 +77,7 @@ functions = ["TS_RANK", "TS_RANK_CD"]
 dialects = ["postgres"]
 type = "FLOAT"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
 reasoning = "The documentation gives each of these a `real` result."
 
 [[function]]
@@ -86,7 +86,7 @@ functions = ["TS_HEADLINE", "QUERYTREE"]
 dialects = ["postgres"]
 type = "TEXT"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
 reasoning = "The documentation gives each of these a `text` result."
 
 [[function]]
@@ -95,7 +95,7 @@ functions = ["TO_TSQUERY", "PLAINTO_TSQUERY", "PHRASETO_TSQUERY", "WEBSEARCH_TO_
 dialects = ["postgres"]
 type = "TSQUERY"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
 reasoning = "The documentation gives each of these a `tsquery` result."
 
 [[function]]
@@ -104,7 +104,7 @@ functions = ["TO_TSVECTOR", "SETWEIGHT", "ARRAY_TO_TSVECTOR", "JSON_TO_TSVECTOR"
 dialects = ["postgres"]
 type = "TSVECTOR"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
 reasoning = "The documentation gives each of these a `tsvector` result."
 
 [[function]]
@@ -113,7 +113,7 @@ function = "TS_LEXIZE"
 dialects = ["postgres"]
 type = "ARRAY<TEXT>"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.44 Text Search Debugging Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.44 Text Search Debugging Functions"
 reasoning = "The documentation gives the function a `text[]` result. It is NULL for a word the dictionary does not know."
 
 [[function]]
@@ -122,7 +122,7 @@ function = "TSVECTOR_TO_ARRAY"
 dialects = ["postgres"]
 type = "ARRAY<TEXT>"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
 reasoning = "The documentation gives the function a `text[]` result."
 
 [[function]]
@@ -131,7 +131,7 @@ function = "NUMNODE"
 dialects = ["postgres"]
 type = "INT"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
 reasoning = "The documentation gives the function an `integer` result."
 
 [[function]]
@@ -140,7 +140,7 @@ functions = ["TS_DEBUG", "TS_PARSE", "TS_STAT", "TS_TOKEN_TYPE"]
 dialects = ["postgres"]
 type = "RECORD"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.44 Text Search Debugging Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.44 Text Search Debugging Functions"
 reasoning = "The documentation gives each of these a `record` result."
 
 [[function]]
@@ -149,7 +149,7 @@ function = "GET_CURRENT_TS_CONFIG"
 dialects = ["postgres"]
 type = "REGCONFIG"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions"
 reasoning = "The documentation gives the function a `regconfig` result."
 
 [[rule]]
@@ -158,5 +158,5 @@ operator = "Prefix:PGPrefixFactorial"
 dialects = ["postgres"]
 right = ["TSQUERY"]
 type = "TSQUERY"
-reference = "PostgreSQL 17 documentation, 9.13, Table 9.42 Text Search Operators (!! tsquery → tsquery)"
+reference.postgres = "PostgreSQL 17 documentation, 9.13, Table 9.42 Text Search Operators (!! tsquery → tsquery)"
 reasoning = "`!!` negates a query into a query."

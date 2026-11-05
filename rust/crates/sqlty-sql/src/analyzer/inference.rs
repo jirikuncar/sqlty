@@ -61,6 +61,28 @@ pub struct RuleRef {
     pub reference: &'static str,
     /// Why the rule types the operator or function so, in one sentence.
     pub reasoning: &'static str,
+    references: References,
+}
+
+impl RuleRef {
+    /// The rule with only the documentation of `dialect` as its reference, when the rule
+    /// cites it; with every citation otherwise.
+    #[must_use]
+    pub fn for_dialect(self, dialect: SqlDialect) -> Self {
+        let cited = self.references.each.iter().find(|(d, _)| *d == dialect);
+        Self {
+            reference: cited.map_or(self.references.all, |(_, text)| text),
+            ..self
+        }
+    }
+}
+
+/// The documentation a rule cites, per dialect (`reference.postgres` in its file).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct References {
+    /// Every citation, joined with `; `.
+    pub(crate) all: &'static str,
+    pub(crate) each: &'static [(SqlDialect, &'static str)],
 }
 
 /// An inference rule for a binary operator.
@@ -68,8 +90,7 @@ pub struct RuleRef {
 pub(crate) struct BinaryRule {
     /// Unique, such as `postgres.json.long-arrow`.
     pub(crate) id: &'static str,
-    /// The documentation the rule follows: name, version and section.
-    pub(crate) reference: &'static str,
+    pub(crate) references: References,
     /// Why the rule types the operator so, in one sentence.
     pub(crate) reasoning: &'static str,
     /// The dialects the rule applies to; empty for all.
@@ -91,8 +112,9 @@ impl BinaryRule {
     pub(crate) fn explained(&self) -> RuleRef {
         RuleRef {
             id: self.id,
-            reference: self.reference,
+            reference: self.references.all,
             reasoning: self.reasoning,
+            references: self.references,
         }
     }
 
@@ -185,7 +207,7 @@ pub(crate) enum FunctionNullability {
 #[derive(Debug)]
 pub(crate) struct FunctionRule {
     pub(crate) id: &'static str,
-    pub(crate) reference: &'static str,
+    pub(crate) references: References,
     pub(crate) reasoning: &'static str,
     dialects: &'static [SqlDialect],
     /// The SQL types the first argument may have; `None` for any.
@@ -203,8 +225,9 @@ impl FunctionRule {
     pub(crate) fn explained(&self) -> RuleRef {
         RuleRef {
             id: self.id,
-            reference: self.reference,
+            reference: self.references.all,
             reasoning: self.reasoning,
+            references: self.references,
         }
     }
 
@@ -277,6 +300,33 @@ mod tests {
     use std::cell::Cell;
 
     use super::*;
+
+    #[test]
+    fn for_dialect_keeps_the_dialects_reference() {
+        let rule = RuleRef {
+            id: "test",
+            reference: "PostgreSQL 17 documentation, 9.3; MySQL 8.4 Reference Manual, 14.6.1",
+            reasoning: "test",
+            references: References {
+                all: "PostgreSQL 17 documentation, 9.3; MySQL 8.4 Reference Manual, 14.6.1",
+                each: &[
+                    (SqlDialect::Postgres, "PostgreSQL 17 documentation, 9.3"),
+                    (SqlDialect::MySql, "MySQL 8.4 Reference Manual, 14.6.1"),
+                ],
+            },
+        };
+        let reference = |dialect| rule.for_dialect(dialect).reference;
+        assert_eq!(
+            reference(SqlDialect::Postgres),
+            "PostgreSQL 17 documentation, 9.3"
+        );
+        assert_eq!(
+            reference(SqlDialect::MySql),
+            "MySQL 8.4 Reference Manual, 14.6.1"
+        );
+        assert_eq!(reference(SqlDialect::Sqlite), rule.reference);
+        assert_eq!(reference(SqlDialect::Other("generic")), rule.reference);
+    }
 
     #[test]
     fn extending_dialects_are_sqlparser_dialects() {

@@ -68,8 +68,9 @@ and reasoning, and `--explain` shows it. When a result needs code (it depends on
 argument's value, say), add a `@` result kind to `compile.rs` and cite the rule.
 [`rules/README.md`](rust/crates/sqlty-sql/rules/README.md) has the format, the
 lookup order and how to verify a `reference`. Every rule needs a `reference` to
-vendor documentation of the version the tests target (PostgreSQL 17, MySQL 8.4,
-SQLite 3), checked against the published page, and a one-sentence `reasoning`;
+vendor documentation of the version the tests target, one per database
+(`reference.postgres` for PostgreSQL 17, `reference.mysql` for MySQL 8.4,
+`reference.sqlite` for SQLite 3), checked against the published page, and a one-sentence `reasoning`;
 the build fails otherwise. `sqlty check --explain` and `-- rules:` mdtest
 assertions show which rule typed a column; every rule needs one, in
 `tests/mdtest/type_inference/rule_coverage.md` if nowhere else
