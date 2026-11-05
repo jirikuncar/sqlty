@@ -4,6 +4,14 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/pypi.yml
+      - pyproject.toml
+      - rust/Cargo.lock
+      - rust/Cargo.toml
+      - rust/crates/**
   pull_request:
     paths:
       - .github/workflows/pypi.yml
@@ -50,16 +58,14 @@ jobs:
             target: x86_64
           - os: macos-15
             target: aarch64
-            pr: true
           - os: windows-latest
             target: x64
-            pr: true
           - os: windows-11-arm
             target: aarch64
       fail-fast: false
 
-    # A pull request builds one wheel per OS; a release, or a run by hand, builds all of
-    # them, so the dry run before a release covers every platform.
+    # A pull request builds the Linux x86_64 wheel only; a push to main, a release, or a
+    # run by hand builds all of them, so main catches a macOS or Windows break before a release.
     env:
       SKIP: ${{ github.event_name == 'pull_request' && !matrix.pr }}
 

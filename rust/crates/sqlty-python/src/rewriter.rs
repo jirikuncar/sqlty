@@ -204,8 +204,11 @@ pub(crate) fn wrapper_imports(
     modules: &[String],
 ) -> Vec<String> {
     let source = scan.source();
-    let untyped_call = format!("{}[{}](", istyle.wrapper_name, istyle.untyped_name());
-    let needs_untyped_import = wrapped.iter().any(|r| r.starts_with(&untyped_call));
+    let untyped = format!("[{}]", istyle.untyped_name());
+    let needs_untyped_import = wrapped.iter().any(|r| {
+        r.split_once('(')
+            .is_some_and(|(head, _)| head.trim_end().ends_with(&untyped))
+    });
     let needs = |marker: &str| wrapped.iter().any(|r| r.contains(marker));
     let mut imports = Vec::new();
     for module in modules {
@@ -328,7 +331,8 @@ pub(crate) fn wraps(
     let spelling = Spelling::of(scan);
     let mut replacements = Vec::new();
     for group in scan.groups() {
-        if (psycopg && scan.in_composed_sql(group.tokens[0]))
+        let bare = scan.bare_call(group);
+        if (psycopg && bare.is_none() && scan.in_composed_sql(group.tokens[0]))
             || scan.in_case_pattern(group.tokens[0])
         {
             continue;
@@ -336,6 +340,7 @@ pub(crate) fn wraps(
         let (start, end) = (group.start, group.end);
         let template = scan.is_template(&group.tokens);
         if !(scan.is_plain(group) || template)
+            || (bare.is_some() && template)
             || scan.calls.enclosing(start, end).is_some()
             || interpolated.binary_search(&group.line).is_ok()
             || skip(group.line)
@@ -357,6 +362,11 @@ pub(crate) fn wraps(
         } else {
             istyle.wrapper_name.clone()
         };
+        if let Some((call, name_end)) = bare {
+            let (name, rest) = (&source[call.start..name_end], &source[name_end..call.end]);
+            replacements.push(Edit::new(call, format!("{name}[{type_str}]{rest}")));
+            continue;
+        }
         let wrapped = format!("{wrapper}[{type_str}]({})", &source[start..end]);
         replacements.push(Edit::new(start..end, wrapped));
     }
@@ -700,6 +710,22 @@ fn lines_in_strings(source: &str) -> impl Iterator<Item = (&str, bool)> {
     })
 }
 
+/// The names sqlty's `SQL` is bound to: `SQL` and its aliases, `sqlty.SQL` and the like.
+pub(crate) fn sql_names(source: &str, tokens: &[Token]) -> Vec<String> {
+    if !source.contains("sqlty") {
+        return Vec::new();
+    }
+    imports_of(source, tokens)
+        .into_iter()
+        .filter_map(|(from, name, binding)| match from.as_deref() {
+            Some("sqlty") if name == "SQL" => Some(binding),
+            Some("sqlty") if name == "*" => Some("SQL".to_string()),
+            None if name == "sqlty" => Some(format!("{binding}.SQL")),
+            _ => None,
+        })
+        .collect()
+}
+
 /// `(name, binding)` pairs of top-level `from sqlty import ...` statements, read from
 /// tokens so strings and comments don't count; `*` imports every name.
 fn sqlty_imports(scan: &Scan) -> Vec<(String, String)> {
@@ -731,7 +757,10 @@ pub(crate) fn imported_names(scan: &Scan) -> Vec<(String, String)> {
 /// `(from, name, binding)` of every top-level import, `from` being the module of a
 /// `from ... import`: `import os.path` binds `os`, `from a import b as c` binds `c`.
 fn top_level_imports(scan: &Scan) -> Vec<(Option<String>, String, String)> {
-    let (source, tokens) = (scan.source(), &scan.tokens);
+    imports_of(scan.source(), &scan.tokens)
+}
+
+fn imports_of(source: &str, tokens: &[Token]) -> Vec<(Option<String>, String, String)> {
     let text = |i: usize| {
         tokens
             .get(i)

@@ -291,6 +291,46 @@ impl Checker<'_> {
                 vec![edit],
             );
         }
+        if scan.sql_names.is_empty() {
+            return;
+        }
+        let marker = if self.options.dialect == Dialect::MySql {
+            "-- sql"
+        } else {
+            "--sql"
+        };
+        for group in scan.groups() {
+            let Some((call, name_end)) = scan.bare_call(group) else {
+                continue;
+            };
+            let content = scan.content(group);
+            if !scan.is_plain(group) || after_marker(content.trim()).is_some() {
+                continue;
+            }
+            let Some(row) = self.infer(&format!("{marker}\n{content}")) else {
+                continue;
+            };
+            let source = scan.source();
+            let literal = &source[group.start..];
+            let quote = literal.find(['"', '\'']).unwrap_or_default();
+            let triple = ["\"\"\"", "'''"]
+                .iter()
+                .any(|q| literal[quote..].starts_with(q));
+            let open = group.start + quote + if triple { 3 } else { 1 };
+            let fixed = format!(
+                "{}[{}]{}{marker}\\n{}",
+                &source[call.start..name_end],
+                self.spelling.respell(row),
+                &source[name_end..open],
+                &source[open..call.end],
+            );
+            self.report_fix(
+                Rule::StaleRewrite,
+                "SQL(...) has no row type; it needs a --sql marker and SQL[T]".to_string(),
+                &At::new(scan, call.clone()),
+                vec![Edit::new(call, fixed)],
+            );
+        }
     }
 
     /// Strings outside any wrapper call: the ones `rewrite` skips, and `--sql SELECT`.

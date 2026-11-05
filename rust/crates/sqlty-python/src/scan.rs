@@ -8,7 +8,7 @@ use std::borrow::Cow;
 use std::cell::OnceCell;
 use std::ops::Range;
 
-use crate::rewriter::{after_marker, decode_escapes, LineIndex};
+use crate::rewriter::{after_marker, decode_escapes, sql_names, LineIndex};
 use crate::rules::Rule;
 use crate::template::template_content;
 use crate::tokens::{content, string_groups, tokenize, wrapper_calls, Call, Calls, Kind, Token};
@@ -33,6 +33,8 @@ pub(crate) struct Scan<'s> {
     pub tokens: Vec<Token>,
     pub calls: Calls,
     pub lines: LineIndex,
+    /// The names sqlty's `SQL` is bound to (see [`sql_names`]).
+    pub sql_names: Vec<String>,
     groups: OnceCell<Vec<Group>>,
 }
 
@@ -41,13 +43,15 @@ impl<'s> Scan<'s> {
     pub(crate) fn new(source: impl Into<Cow<'s, str>>, wrapper: &str) -> Self {
         let text = source.into();
         let tokens = tokenize(&text);
-        let calls = wrapper_calls(&text, &tokens, wrapper);
+        let sql_names = sql_names(&text, &tokens);
+        let calls = wrapper_calls(&text, &tokens, wrapper, &sql_names);
         let lines = LineIndex::new(&text);
         Self {
             text,
             tokens,
             calls,
             lines,
+            sql_names,
             groups: OnceCell::new(),
         }
     }
@@ -209,6 +213,24 @@ impl<'s> Scan<'s> {
                     (Kind::Op, ":") | (Kind::Name, "if")
                 )
         })
+    }
+
+    /// The span of `group`'s call, and the end of its name, when `group` is the only
+    /// argument of an untyped `SQL(...)` named one of [`Scan::sql_names`].
+    pub(crate) fn bare_call(&self, group: &Group) -> Option<(Range<usize>, usize)> {
+        let (first, last) = (group.tokens[0], group.tokens[group.tokens.len() - 1]);
+        let text = |i: usize| &self.text[self.tokens[i].span.clone()];
+        let is_op = |i: usize, op: &str| self.tokens[i].kind == Kind::Op && text(i) == op;
+        let close = (last + 1..self.tokens.len())
+            .find(|&i| self.tokens[i].kind != Kind::Comment && !is_op(i, ","))?;
+        let name = first.checked_sub(2)?;
+        let bare = is_op(first - 1, "(")
+            && is_op(close, ")")
+            && self.tokens[name].kind == Kind::Name
+            && self.sql_names.iter().any(|n| n == text(name))
+            && !(name > 0 && is_op(name - 1, "."));
+        let name = &self.tokens[name].span;
+        bare.then(|| (name.start..self.tokens[close].span.end, name.end))
     }
 
     /// Whether the string at token `first` opens the argument of a call named `SQL`
