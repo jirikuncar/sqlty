@@ -128,13 +128,12 @@ queries as you type. It runs in your browser. The engine is compiled to
   .sqlty-console [data-notes] p { margin: 0 0 0.6em; }
   #sqlty-playground .sqlty-console li { margin-left: 0; }
   #sqlty-playground .sqlty-console li ul { margin: 0.2rem 0 0.4rem 1rem; list-style: none; }
-  .sqlty-console [data-problems] li { padding-left: 1.2em; text-indent: -1.2em; }
-  .sqlty-console [data-problems] li::before { display: inline-block; width: 1.2em; text-indent: 0; }
-  .sqlty-console [data-problems] a { white-space: nowrap; margin-left: 0.5em; }
-  .sqlty-console [data-problems] button { display: inline; font: inherit; color: inherit; text-align: left; padding: 0.1rem 0; background: none; border: 0; cursor: pointer; }
+  .sqlty-console [data-problems] li { display: grid; grid-template-columns: 1.2em auto 1fr; column-gap: 0.5em; align-items: baseline; }
+  .sqlty-console [data-problems] a { white-space: nowrap; justify-self: start; }
+  .sqlty-console [data-problems] button { font: inherit; color: inherit; text-align: left; padding: 0.1rem 0; background: none; border: 0; cursor: pointer; }
   .sqlty-console [data-problems] button:hover { color: var(--md-accent-fg-color); }
   .sqlty-console [data-severity="error"]::before { content: "\25CF"; color: var(--md-code-hl-number-color, #c62828); }
-  .sqlty-console [data-severity="warning"]::before { content: "\25B2"; color: var(--md-code-hl-special-color, #ef6c00); }
+  .sqlty-console [data-severity="warn"]::before { content: "\25B2"; color: var(--md-code-hl-special-color, #ef6c00); }
   .sqlty-console > div:not([data-notes]) { height: 100%; }
   @media (max-width: 44.984375em) {
     #sqlty-playground .sqlty-toolbar select { width: 100%; min-width: 0; }
@@ -153,6 +152,8 @@ queries as you type. It runs in your browser. The engine is compiled to
     .sqlty-wide { display: none; }
     .sqlty-narrow { display: inline; }
     .sqlty-steps { gap: 0.3rem; margin-bottom: 0.3rem; }
+    .sqlty-console [data-problems] li { grid-template-columns: 1.2em 1fr; }
+    .sqlty-console [data-problems] a { grid-column: 2; }
     .sqlty-tabs [role="tab"] { padding: 0.3rem 0.55rem; font-size: 0.62rem; }
   }
 </style>
