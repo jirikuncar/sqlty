@@ -35,6 +35,18 @@ SELECT title FROM blogs WHERE author_id = :author_id;
 INSERT INTO blogs (author_id, title, body) VALUES (:author_id, :title, :body) RETURNING id;
 ```
 
+`:obj.attr` reads attribute `attr` of parameter `obj`, as aiosql does:
+
+```sql
+-- name: by-author^
+-- error:
+SELECT title FROM blogs WHERE author_id = :author.id AND title = :post.title;
+
+-- name: greet^
+-- error: [unknown-column] "column `nme` does not exist in `users`; did you mean `name`?"
+SELECT nme FROM users WHERE id = :user.id;
+```
+
 A script (`#`) holds several statements, each checked:
 
 ```sql
@@ -55,6 +67,20 @@ SELECT id, nme FROM users WHERE id = $1;
 -- name: ListUsers :many
 -- error:
 SELECT id, name FROM users ORDER BY name;
+```
+
+### Placeholders
+
+sqlc's `sqlc.arg(name)`, `sqlc.narg(name)` and `@name` are parameters, not columns:
+
+```sql
+-- name: FindUser :one
+-- error:
+SELECT id FROM users WHERE email = sqlc.arg(user_email) AND name = @user_name;
+
+-- name: FindByName :many
+-- error:
+SELECT id FROM users WHERE name = sqlc.narg('name') OR '@x' = name;
 ```
 
 ## PugSQL
