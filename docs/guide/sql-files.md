@@ -48,8 +48,15 @@ first header is no query.
 | `auto` (default) | the first header found | |
 
 A query of several statements, such as an aiosql script (`-- name: reset#`),
-has each statement checked. Placeholders are read as the engine reads them in
-Python strings: `:name` and `$1` are parameters.
+has each statement checked. `:name` and `$1` are parameters, as in Python
+strings, and so are the placeholders of each format:
+
+| Format | Placeholder | Parameter |
+|--------|-------------|-----------|
+| `sqlc` | `@name`, `sqlc.arg(name)`, `sqlc.narg(name)` | `name` |
+| `aiosql` | `:user.email` | attribute `email` of `user` |
+
+Placeholders inside strings and comments are left alone.
 
 ```sql
 -- name: GetUser :one

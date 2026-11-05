@@ -897,11 +897,16 @@ fn check_queries(
     })
 }
 
-/// `(name, start, end)` of each named query of a `.sql` file: its byte range starts on the
-/// line after its header. `name` names a query of a file without headers.
+/// `(name, sql, renames)`: see [`named_queries`].
+type NamedQueryOut = (String, String, Vec<(String, String)>);
+
+/// `(name, sql, renames)` of each named query of a `.sql` file: its SQL from the line after
+/// its header, with sqlc's and aiosql's placeholders rewritten to `:name`, and
+/// `(name in sql, name in the file)` of each aiosql `:obj.attr`. `name` names a query of a
+/// file without headers.
 ///
 /// Example:
-///     named_queries("-- name: get-user^\nSELECT 1") == [("get_user", 19, 27)]
+///     named_queries("-- name: get-user^\nSELECT :u.id") == [("get_user", "SELECT :u_id", [("u_id", "u.id")])]
 ///
 /// Raises:
 ///     ValueError: unknown `query_format`
@@ -911,13 +916,13 @@ fn named_queries(
     source: &str,
     query_format: &str,
     name: &str,
-) -> Result<Vec<(String, usize, usize)>, Error> {
+) -> Result<Vec<NamedQueryOut>, Error> {
     let format = query_format
         .parse::<queries::Format>()
         .map_err(|()| ConfigError::QueryFormat(query_format.to_string()))?;
     Ok(queries::split(source, format, name)
         .into_iter()
-        .map(|query| (query.name, query.body.start, query.body.end))
+        .map(|query| (query.name, query.sql, query.renames))
         .collect())
 }
 

@@ -1758,3 +1758,22 @@ def test_check_verbose_prints_the_types_of_named_queries(tmp_path, monkeypatch, 
         ],
     )
     assert _run(["check", "-v", "--output-format", "json", "."], capsys)[1].startswith("[")
+
+
+def test_check_verbose_names_sqlc_and_aiosql_placeholders(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "sqlty.toml").write_text('schema = "schema.sql"\nqueries = "sql/"\n')
+    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INT NOT NULL, email TEXT);\n")
+    (tmp_path / "sql").mkdir()
+    (tmp_path / "sql" / "sqlc.sql").write_text(
+        "-- name: GetUser :one\nSELECT id FROM users WHERE email = sqlc.arg(email) AND id = @id;\n"
+    )
+    (tmp_path / "sql" / "aiosql.sql").write_text(
+        "-- name: by-user^\nSELECT email FROM users WHERE id = :user.id;\n"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    code, out, _ = _run(["check", "-v", "."], capsys)
+
+    assert code == 0
+    assert f"sql{os.sep}sqlc.sql: GetUser(email: str, id: int) -> tuple[int]" in out.splitlines()
+    assert f"sql{os.sep}aiosql.sql: by_user(user.id: int) -> tuple[str | None]" in out.splitlines()
