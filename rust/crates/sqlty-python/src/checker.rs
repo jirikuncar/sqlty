@@ -537,6 +537,11 @@ impl Checker<'_> {
         }
     }
 
+    /// An inferred row type as the module spells it.
+    fn spell(&self, row_type: String) -> String {
+        unqualify(&self.spelling.respell(row_type), &self.imported)
+    }
+
     /// `untyped-query`, `stale-type` and the literal rules, against the inferred row type.
     fn annotation(&mut self, call: &Call, sql_content: &str, at: &At) {
         let annotated = call.row_type(self.scan.source());
@@ -549,9 +554,7 @@ impl Checker<'_> {
         if annotated == untyped_name {
             let untyped = format!("{wrapper}[{untyped_name}]");
             // A `*` the schema cannot resolve infers no type, so none is guessed.
-            let current = self
-                .infer(sql_content)
-                .map(|current| self.spelling.respell(current));
+            let current = self.infer(sql_content).map(|current| self.spell(current));
             let message = match &current {
                 Some(current) => {
                     format!("{untyped} can now be {wrapper}[{current}]; run sqlty check --fix")
@@ -569,7 +572,7 @@ impl Checker<'_> {
         if is_scalar(annotated) && self.rules.is_enabled(Rule::NarrowType) {
             if let Some(current) = self
                 .infer(sql_content)
-                .map(|current| self.spelling.respell(current))
+                .map(|current| self.spell(current))
                 .filter(|current| current.starts_with("tuple["))
             {
                 let wrapper = if call.template { "SQLTemplate" } else { "SQL" };
@@ -592,7 +595,7 @@ impl Checker<'_> {
             return;
         }
         if let Some(inferred) = self.infer(sql_content) {
-            let current = self.spelling.respell(inferred.clone());
+            let current = self.spell(inferred.clone());
             let spelled = spell_unions(annotated);
             let qualified = spell_unions(&qualify(annotated, &self.imported));
             if !refines_tuple(&spelled, &current) && !refines_tuple(&qualified, &inferred) {
@@ -910,13 +913,34 @@ impl Lit {
 
 /// `annotation` with the names bound by `imported` spelled as their qualified names,
 /// as inferred row types spell them: `Decimal` is `decimal.Decimal` after
-/// `from decimal import Decimal`. Quoted text is left alone.
+/// `from decimal import Decimal`.
 fn qualify(annotation: &str, imported: &[(String, String)]) -> String {
-    let mut out = String::with_capacity(annotation.len());
-    let mut chars = annotation.char_indices().peekable();
+    rename(annotation, |name| {
+        let (head, rest) = name.find('.').map_or((name, ""), |dot| name.split_at(dot));
+        let (_, qualified) = imported.iter().find(|(binding, _)| binding == head)?;
+        Some(format!("{qualified}{rest}"))
+    })
+}
+
+/// `row_type` with the qualified names of `imported` spelled as the module binds them:
+/// `decimal.Decimal` is `Decimal` after `from decimal import Decimal`. `typing` names
+/// stay qualified, as `rewrite` writes them.
+fn unqualify(row_type: &str, imported: &[(String, String)]) -> String {
+    rename(row_type, |name| {
+        let (binding, _) = imported.iter().find(|(_, qualified)| {
+            qualified == name && qualified.contains('.') && !qualified.starts_with("typing.")
+        })?;
+        Some(binding.clone())
+    })
+}
+
+/// `text` with each dotted name outside quotes replaced by what `renamed` gives for it.
+fn rename(text: &str, renamed: impl Fn(&str) -> Option<String>) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.char_indices().peekable();
     while let Some((start, c)) = chars.next() {
         if matches!(c, '\'' | '"') {
-            let mut end = annotation.len();
+            let mut end = text.len();
             while let Some((i, next)) = chars.next() {
                 if next == '\\' {
                     chars.next();
@@ -925,9 +949,9 @@ fn qualify(annotation: &str, imported: &[(String, String)]) -> String {
                     break;
                 }
             }
-            out.push_str(&annotation[start..end]);
+            out.push_str(&text[start..end]);
         } else if c.is_alphabetic() || c == '_' {
-            let mut end = annotation.len();
+            let mut end = text.len();
             while let Some(&(i, next)) = chars.peek() {
                 if !(next.is_alphanumeric() || next == '_' || next == '.') {
                     end = i;
@@ -935,15 +959,8 @@ fn qualify(annotation: &str, imported: &[(String, String)]) -> String {
                 }
                 chars.next();
             }
-            let name = &annotation[start..end];
-            let (head, rest) = name.find('.').map_or((name, ""), |dot| name.split_at(dot));
-            match imported.iter().find(|(binding, _)| binding == head) {
-                Some((_, qualified)) => {
-                    out.push_str(qualified);
-                    out.push_str(rest);
-                }
-                None => out.push_str(name),
-            }
+            let name = &text[start..end];
+            out.push_str(&renamed(name).unwrap_or_else(|| name.to_string()));
         } else {
             out.push(c);
         }

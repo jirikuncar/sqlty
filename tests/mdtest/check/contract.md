@@ -62,8 +62,8 @@ b = SQL[tuple[int, ...]]("--sql\nSELECT 1::INTEGER, 2::INTEGER")
 
 ### Imported names
 
-A name a module imports is the qualified name sqlty writes: `Decimal` after
-`from decimal import Decimal` is `decimal.Decimal`.
+A name a module imports is the qualified name sqlty infers: `Decimal` after
+`from decimal import Decimal` is `decimal.Decimal`, and a fix writes it `Decimal`.
 
 ```python
 import decimal as d
@@ -81,10 +81,19 @@ c = SQL[tuple[UUID, day | None]]("--sql\nSELECT gen_random_uuid(), NULLIF(CURREN
 from decimal import Decimal
 from uuid import UUID
 
-# error: [stale-type] "SQL[tuple[Decimal | None]] should be SQL[tuple[decimal.Decimal]]"
+# error: [stale-type] "SQL[tuple[Decimal | None]] should be SQL[tuple[Decimal]]"
 a = SQL[tuple[Decimal | None]]("--sql\nSELECT 1::NUMERIC")
-# error: [narrow-type] "SQL[tuple[UUID]] should be SQL[tuple[decimal.Decimal]]"
+# error: [narrow-type] "SQL[tuple[UUID]] should be SQL[tuple[Decimal]]"
 b = SQL[tuple[UUID]]("--sql\nSELECT 1::NUMERIC")
+```
+
+```python
+from decimal import Decimal
+
+a = SQL[tuple[Decimal | None]]("--sql\nSELECT 1::NUMERIC")
+# fixed: from decimal import Decimal
+# fixed:
+# fixed: a = SQL[tuple[Decimal]]("--sql\nSELECT 1::NUMERIC")
 ```
 
 ### Rule override ignore
