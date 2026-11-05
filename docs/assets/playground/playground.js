@@ -185,9 +185,13 @@ function go(at) {
   );
   root.querySelector('[data-tab="notes"]').hidden = !here.notes;
   restore(here);
-  open(here.file ?? "python");
-  show(here.panel ?? (here.notes ? "notes" : "problems"));
+  // The tabs stay as they are, unless the step names one.
+  if (here.file) open(here.file);
+  if (here.panel) show(here.panel);
+  else if (selected(tabs) === "notes" && !here.notes) show("problems");
 }
+
+const selected = (all) => [...all].find((tab) => tab.getAttribute("aria-selected") === "true")?.dataset.tab;
 
 // Replace a model's text as one edit, so Ctrl+Z brings the old text back.
 function replace(model, text) {

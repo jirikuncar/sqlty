@@ -263,8 +263,8 @@ steps are part of the session, so **Copy link** shares them while they fit in a 
 |---|---|---|
 | `title` | The name of the step in the bar | `Step N` |
 | `source`, `schema`, `config`, `dialect` | The files and dialect, as a [session](#share-a-session) holds them | The one of the step before |
-| `panel` | The console tab it opens: `notes`, `problems`, `types` or `json` | **Notes** if it has notes, else **Problems** |
-| `file` | The file tab it opens: `python`, `schema` or `config` | `python` |
+| `panel` | The console tab it opens: `notes`, `problems`, `types` or `json` | The tab open before, or **Problems** if that was **Notes** and the step has none |
+| `file` | The file tab it opens: `python`, `schema` or `config` | The file open before |
 | `notes` | Text for the **Notes** tab; a blank line starts a paragraph | No **Notes** tab |
 
 ## Present
