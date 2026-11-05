@@ -1,0 +1,17 @@
+[package]
+name = "sqlty-format"
+version.workspace = true
+edition.workspace = true
+description = "Query string formatting with sqruff for sqlty"
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+sqlty-python.workspace = true
+regex.workspace = true
+sqruff-lib = "0.44"

@@ -671,6 +671,24 @@ fn strip_source(py: Python<'_>, source: &str, import_style: Option<&str>) -> Res
     })
 }
 
+/// Lay out the query strings of Python source with sqruff's layout rules.
+///
+/// Raises:
+///     ValueError: unsupported import_style
+#[pyfunction]
+#[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, import_style = None))]
+fn format_source(
+    py: Python<'_>,
+    source: &str,
+    dialect: DialectArg,
+    import_style: Option<&str>,
+) -> Result<String, Error> {
+    detach(py, || {
+        let style = ImportStyle::parse(import_style)?;
+        Ok(sqlty_format::format_source(source, dialect.0, &style))
+    })
+}
+
 /// Apply what `sqlty check --fix` fixes; rules set to "ignore" are skipped.
 ///
 /// `suppressed` maps a line to the rules a `# sqlty: ignore` comment on it suppresses
@@ -1189,6 +1207,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(rewrite_source, m)?)?;
     m.add_function(wrap_pyfunction!(add_param_types, m)?)?;
     m.add_function(wrap_pyfunction!(strip_source, m)?)?;
+    m.add_function(wrap_pyfunction!(format_source, m)?)?;
     m.add_function(wrap_pyfunction!(fix_source, m)?)?;
     m.add_function(wrap_pyfunction!(expand_star, m)?)?;
     m.add_function(wrap_pyfunction!(select_star_finding, m)?)?;
