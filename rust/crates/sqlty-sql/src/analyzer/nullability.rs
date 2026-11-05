@@ -298,28 +298,111 @@ impl Analyzer<'_> {
         else {
             return false;
         };
-        let Some(columns) = self.schema.table(&child_key) else {
+        let pairs: Vec<_> = pairs.into_iter().map(|(_, c, r)| (c, r)).collect();
+        self.references(&child_key, &parent_key, &pairs, true)
+    }
+
+    /// Whether `pairs` of `(child column, parent column)` are exactly a foreign key of the
+    /// table `child` to the table `parent`, whose columns are `NOT NULL` when `not_null`.
+    fn references(
+        &self,
+        child: &str,
+        parent: &str,
+        pairs: &[(String, String)],
+        not_null: bool,
+    ) -> bool {
+        let Some(columns) = self.schema.table(child) else {
             return false;
         };
-        let not_null = |name: &String| columns.iter().any(|c| c.name == *name && c.not_null);
-        self.schema.foreign_keys(&child_key).any(|fk| {
-            fk.table == parent_key
+        let required = |name: &String| columns.iter().any(|c| c.name == *name && c.not_null);
+        self.schema.foreign_keys(child).any(|fk| {
+            fk.table == parent
                 && fk.columns.len() == pairs.len()
-                && fk.columns.iter().all(not_null)
+                && (!not_null || fk.columns.iter().all(required))
                 && fk
                     .columns
                     .iter()
                     .zip(&fk.referred)
                     .all(|(column, referred)| {
-                        pairs.iter().any(|(_, c, r)| c == column && r == referred)
+                        pairs.iter().any(|(c, r)| c == column && r == referred)
                     })
-                && pairs.iter().all(|(_, c, r)| {
+                && pairs.iter().all(|(c, r)| {
                     fk.columns
                         .iter()
                         .zip(&fk.referred)
                         .any(|(column, referred)| c == column && r == referred)
                 })
         })
+    }
+
+    /// Whether a scalar subquery finds exactly one row: it reads one base table, which its
+    /// `WHERE` joins on exactly the columns of a foreign key of a table outside, columns
+    /// that are not NULL under `facts`.
+    fn finds_its_reference(&self, query: &Query, scope: &Scope, facts: &Facts) -> bool {
+        let SetExpr::Select(select) = query.body.as_ref() else {
+            return false;
+        };
+        let ([from], Some(selection), None, None, false) = (
+            select.from.as_slice(),
+            &select.selection,
+            &select.having,
+            &query.limit_clause,
+            self.dialect == SqlDialect::Sqlite,
+        ) else {
+            return false;
+        };
+        if !from.joins.is_empty()
+            || is_grouped(select)
+            || aggregates(select, self.dialect)
+            || select.distinct.is_some()
+        {
+            return false;
+        }
+        let Some(parent) = self.base_table(&from.relation) else {
+            return false;
+        };
+        let inner = table_scope(&from.relation, self.dialect);
+        let [inner] = inner.as_slice() else {
+            return false;
+        };
+        let mut child = None;
+        let mut pairs = Vec::new();
+        for condition in conjuncts(selection) {
+            let Expr::BinaryOp {
+                left,
+                op: BinaryOperator::Eq,
+                right,
+            } = condition
+            else {
+                return false;
+            };
+            let (Some(a), Some(b)) = (self.qualified(left), self.qualified(right)) else {
+                return false;
+            };
+            let ((referred, outer), outer_expr) =
+                match (a.0 == inner.reference, b.0 == inner.reference) {
+                    (true, false) => ((a.1, b), right),
+                    (false, true) => ((b.1, a), left),
+                    _ => return false,
+                };
+            let Some((reference, table, column)) = self.locate_column(outer_expr, scope) else {
+                return false;
+            };
+            if child.get_or_insert_with(|| (reference.clone(), table.clone()))
+                != &(reference, table)
+                || column != outer.1
+                || self.nullability(outer_expr, scope, facts) != Nullability::NonNull
+            {
+                return false;
+            }
+            pairs.push((column, referred));
+        }
+        let Some((_, child)) = child else {
+            return false;
+        };
+        self.schema
+            .table_id(&child)
+            .is_some_and(|child| self.references(child, &parent, &pairs, false))
     }
 
     /// The catalog key of a base table in FROM: not a CTE, a view or a function.
@@ -767,7 +850,9 @@ impl<'a> Analyzer<'a> {
                     .chain(trim_characters.iter().flatten().map(of)),
             ),
             Expr::Subquery(query) => {
-                if returns_one_row(query, self.dialect) {
+                if returns_one_row(query, self.dialect)
+                    || self.finds_its_reference(query, scope, facts)
+                {
                     self.subquery_column(query, scope)
                 } else {
                     // No row at all reads as NULL.
