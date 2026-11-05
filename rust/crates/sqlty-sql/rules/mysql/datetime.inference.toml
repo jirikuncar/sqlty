@@ -6,7 +6,7 @@ functions = ["SUBTIME", "ADDTIME"]
 dialects = ["mysql"]
 type = "@argument-type(0)"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
 reasoning = "The result has the type of the first argument. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."
 
 [[function]]
@@ -15,7 +15,7 @@ functions = ["SUBDATE", "DATE_ADD", "DATE_SUB", "ADDDATE"]
 dialects = ["mysql"]
 type = "@date-add"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
 reasoning = "Adding to a DATE gives a DATE for day units and a DATETIME for time units; a DATETIME stays one. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."
 
 [[function]]
@@ -24,7 +24,7 @@ functions = ["UNIX_TIMESTAMP", "YEAR", "MONTH", "DAY", "DAYOFMONTH", "DAYOFWEEK"
 dialects = ["mysql"]
 type = "BIGINT"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
 reasoning = "The manual describes each of these as returning an integer."
 
 [[function]]
@@ -33,7 +33,7 @@ functions = ["CURDATE", "UTC_DATE", "FROM_DAYS"]
 dialects = ["mysql"]
 type = "DATE"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
 reasoning = "The manual describes each of these as returning a DATE value."
 
 [[function]]
@@ -42,7 +42,7 @@ functions = ["DATE", "MAKEDATE", "LAST_DAY"]
 dialects = ["mysql"]
 type = "DATE"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
 reasoning = "The manual describes each of these as returning a DATE value. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."
 
 [[function]]
@@ -51,7 +51,7 @@ functions = ["SYSDATE", "UTC_TIMESTAMP"]
 dialects = ["mysql"]
 type = "DATETIME"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
 reasoning = "The manual describes each of these as returning a DATETIME value."
 
 [[function]]
@@ -60,7 +60,7 @@ functions = ["NOW", "CURRENT_TIMESTAMP", "LOCALTIME", "LOCALTIMESTAMP"]
 dialects = ["mysql"]
 type = "DATETIME"
 nullability = "non-null"
-reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
 reasoning = "The manual describes each of these as returning a DATETIME value. It never returns NULL, even for NULL arguments."
 
 [[function]]
@@ -69,7 +69,7 @@ functions = ["TIMESTAMP", "FROM_UNIXTIME", "CONVERT_TZ"]
 dialects = ["mysql"]
 type = "DATETIME"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
 reasoning = "The manual describes each of these as returning a DATETIME value. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."
 
 [[function]]
@@ -78,7 +78,7 @@ functions = ["DATE_FORMAT", "TIME_FORMAT", "DAYNAME", "MONTHNAME"]
 dialects = ["mysql"]
 type = "TEXT"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
 reasoning = "The manual describes each of these as returning a string."
 
 [[function]]
@@ -87,7 +87,7 @@ function = "GET_FORMAT"
 dialects = ["mysql"]
 type = "TEXT"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
 reasoning = "The manual describes each of these as returning a string. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."
 
 [[function]]
@@ -96,7 +96,7 @@ functions = ["CURTIME", "UTC_TIME", "SEC_TO_TIME", "TIMEDIFF"]
 dialects = ["mysql"]
 type = "TIME"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
 reasoning = "The manual describes each of these as returning a TIME value."
 
 [[function]]
@@ -105,7 +105,7 @@ function = "CURRENT_TIME"
 dialects = ["mysql"]
 type = "TIME"
 nullability = "non-null"
-reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
 reasoning = "The manual describes each of these as returning a TIME value. It never returns NULL, even for NULL arguments."
 
 [[function]]
@@ -114,7 +114,7 @@ functions = ["TIME", "MAKETIME"]
 dialects = ["mysql"]
 type = "TIME"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
 reasoning = "The manual describes each of these as returning a TIME value. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."
 
 [[function]]
@@ -123,7 +123,7 @@ function = "STR_TO_DATE"
 dialects = ["mysql"]
 type = "@str-to-date(1)"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
 reasoning = "A literal format decides between DATE, TIME and DATETIME by the parts it reads. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."
 
 [[function]]
@@ -132,5 +132,5 @@ function = "TIMESTAMPADD"
 dialects = ["mysql"]
 type = "@timestamp-add"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
 reasoning = "As DATE_ADD: the unit decides between DATE and DATETIME for a DATE argument. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."
