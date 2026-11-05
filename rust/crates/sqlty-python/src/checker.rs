@@ -21,7 +21,8 @@ use crate::edit::Edit;
 use crate::options::{Dialect, Options};
 use crate::rewriter::{
     after_marker, decode_escapes, ends_marker_line, extract_string_content, import_edit,
-    marked_query, strip_line_break, type_modules, wrapper_imports, wraps, ImportStyle, Spelling,
+    imported_names, marked_query, strip_line_break, type_modules, wrapper_imports, wraps,
+    ImportStyle, Spelling,
 };
 use crate::rules::{Rule, RuleConfig, Severity};
 use crate::scan::Scan;
@@ -121,6 +122,7 @@ pub fn check_source(
         any_calls: sorted(any_calls),
         diagnostics: Vec::new(),
         spelling: Spelling::of(&scan),
+        imported: imported_names(&scan),
         analyses: RefCell::default(),
     };
     if options.dialect == Dialect::MySql {
@@ -200,6 +202,8 @@ struct Checker<'a> {
     diagnostics: Vec<Diagnostic>,
     /// How the module can spell the row types it names.
     spelling: Spelling,
+    /// `(binding, qualified name)` of the names the module imports.
+    imported: Vec<(String, String)>,
     /// Each marked query's analysis, by its text, so no step parses a query twice.
     analyses: RefCell<HashMap<String, Rc<Analysis>>>,
 }
@@ -587,14 +591,13 @@ impl Checker<'_> {
         {
             return;
         }
-        if let Some(current) = self
-            .infer(sql_content)
-            .map(|current| self.spelling.respell(current))
-        {
+        if let Some(inferred) = self.infer(sql_content) {
+            let current = self.spelling.respell(inferred.clone());
             let spelled = spell_unions(annotated);
-            if !refines_tuple(&spelled, &current) {
+            let qualified = spell_unions(&qualify(annotated, &self.imported));
+            if !refines_tuple(&spelled, &current) && !refines_tuple(&qualified, &inferred) {
                 self.report_fix(
-                    if admits_tuple(&spelled, &current) {
+                    if admits_tuple(&spelled, &current) || admits_tuple(&qualified, &inferred) {
                         Rule::StaleType
                     } else {
                         Rule::NarrowType
@@ -903,6 +906,49 @@ impl Lit {
             Lit::Int(number) => number.to_string(),
         }
     }
+}
+
+/// `annotation` with the names bound by `imported` spelled as their qualified names,
+/// as inferred row types spell them: `Decimal` is `decimal.Decimal` after
+/// `from decimal import Decimal`. Quoted text is left alone.
+fn qualify(annotation: &str, imported: &[(String, String)]) -> String {
+    let mut out = String::with_capacity(annotation.len());
+    let mut chars = annotation.char_indices().peekable();
+    while let Some((start, c)) = chars.next() {
+        if matches!(c, '\'' | '"') {
+            let mut end = annotation.len();
+            while let Some((i, next)) = chars.next() {
+                if next == '\\' {
+                    chars.next();
+                } else if next == c {
+                    end = i + 1;
+                    break;
+                }
+            }
+            out.push_str(&annotation[start..end]);
+        } else if c.is_alphabetic() || c == '_' {
+            let mut end = annotation.len();
+            while let Some(&(i, next)) = chars.peek() {
+                if !(next.is_alphanumeric() || next == '_' || next == '.') {
+                    end = i;
+                    break;
+                }
+                chars.next();
+            }
+            let name = &annotation[start..end];
+            let (head, rest) = name.find('.').map_or((name, ""), |dot| name.split_at(dot));
+            match imported.iter().find(|(binding, _)| binding == head) {
+                Some((_, qualified)) => {
+                    out.push_str(qualified);
+                    out.push_str(rest);
+                }
+                None => out.push_str(name),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// `text` split at `sep` outside brackets and quotes.
@@ -1441,6 +1487,18 @@ mod tests {
                 "{annotated} {inferred}"
             );
         }
+    }
+
+    #[test]
+    fn test_qualify_leaves_quoted_text_alone() {
+        let imported = [("Decimal".to_string(), "decimal.Decimal".to_string())];
+        assert_eq!(
+            qualify(
+                "tuple[Decimal, Literal['Decimal', \"a\\\"Decimal\"], Decimals]",
+                &imported
+            ),
+            "tuple[decimal.Decimal, Literal['Decimal', \"a\\\"Decimal\"], Decimals]"
+        );
     }
 
     #[test]
