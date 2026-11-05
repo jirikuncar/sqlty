@@ -1,20 +1,24 @@
-# Deletes a pull request's docs Preview (docs-preview.yml) when it closes. Checks out
-# nothing: only the pull request number reaches the command.
+# Deletes a pull request's docs Preview (the Preview job of docs.yml) when it closes.
+# Checks out nothing: only the pull request number reaches the command.
 name: Docs preview cleanup
 
 on:
-  pull_request_target: # zizmor: ignore[dangerous-triggers] -- checks out nothing
+  pull_request:
     types: [closed]
     paths:
       - "docs/**"
       - "overrides/**"
       - "zensical.toml"
+      - "wrangler.jsonc"
+      - ".github/workflows/docs.yml"
+      - ".github/workflows/docs-preview-cleanup.yml"
 
 permissions: {}
 
 jobs:
   delete:
     name: Delete
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     environment: docs-preview
     steps:
