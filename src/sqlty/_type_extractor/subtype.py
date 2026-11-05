@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections
 import datetime
 import decimal
 import functools
@@ -35,6 +36,10 @@ _LAX_FROM: dict[type, tuple[type, ...]] = _PROMOTED_FROM | {
     decimal.Decimal: (int, float),
     bool: (int,),
     datetime.datetime: (datetime.date,),
+    tuple: (list,),
+    set: (list,),
+    frozenset: (list,),
+    collections.deque: (list,),
 }
 
 
