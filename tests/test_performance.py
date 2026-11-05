@@ -6,6 +6,8 @@ import pytest
 
 from sqlty import _core, core
 
+pytestmark = pytest.mark.timing
+
 STRINGS = 20_000
 BOUND_SECONDS = 0.5
 

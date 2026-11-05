@@ -92,6 +92,11 @@ typecheck-examples:
 .PHONY: test
 test:
 	uv run pytest
+	$(MAKE) test-timing
+
+.PHONY: test-timing
+test-timing:  ## The tests that measure wall time, alone and in order
+	uv run pytest -m timing -n 0 -p no:randomly
 
 .PHONY: test-unit
 test-unit:
@@ -141,7 +146,7 @@ bench-bridge:  ## A check per keystroke through sqlty._lsp_bridge; needs a relea
 
 .PHONY: bench-codspeed
 bench-codspeed:  ## The benchmarks CodSpeed measures in CI, timed locally; needs a release build
-	uv run --group bench pytest benchmarks/ --codspeed -p no:randomly --no-cov
+	uv run --group bench pytest benchmarks/ --codspeed -n 0 -p no:randomly --no-cov
 
 .PHONY: bench-rust
 bench-rust:  ## Criterion: catalog load, analyzer, check/rewrite_source; extra args via ARGS=

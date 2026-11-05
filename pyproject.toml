@@ -82,6 +82,7 @@ dev = [
     "zizmor>=1.31.1",
     "pydantic[email]>=2.14.1",
     "jsonschema>=4.26.0",
+    "pytest-xdist>=3.8.0",
 ]
 cli = ["rich>=15.0.0"]
 # Only the DuckDB type tests need it, and it has no wheel for every Python.
@@ -95,7 +96,8 @@ bench = [
 ]
 
 [tool.pytest.ini_options]
-addopts = ["-p", "tests._mdtest.plugin", "-p", "tests._no_exec", "--cov-report=term-missing", "--cov-report=html", "-v"]
+# In parallel and in random order; `make test-timing` runs the `timing` tests alone.
+addopts = ["-p", "tests._mdtest.plugin", "-p", "tests._no_exec", "--cov-report=term-missing", "--cov-report=html", "-v", "-n", "auto", "-m", "not timing"]
 pythonpath = ["."]
 testpaths = ["tests", "docs", "src/sqlty/rules", "README.md"]
 mdtest_paths = ["tests/mdtest", "docs", "src/sqlty/rules", "README.md", "skills"]
@@ -103,6 +105,7 @@ markers = [
     "e2e: end-to-end tests (subprocess + inline-snapshot)",
     "slow: slow tests that can be skipped with -m 'not slow'",
     "pg: needs a PostgreSQL server (SQLTY_PG_DSN); skipped without it",
+    "timing: measures wall time, so runs alone: `make test-timing`",
 ]
 
 [tool.coverage.run]
