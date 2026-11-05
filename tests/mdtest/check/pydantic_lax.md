@@ -226,6 +226,34 @@ lax = SQL[Lax]("--sql\nSELECT created AS value FROM usage")
 strict = SQL[Strict]("--sql\nSELECT created AS value FROM usage")
 ```
 
+### list to tuple, set, frozenset and deque
+
+```python
+from collections import deque
+from pydantic import BaseModel, ConfigDict
+from pydantic.dataclasses import dataclass
+from sqlty import SQL
+
+class Lax(BaseModel):
+    a: tuple[str, ...]
+    b: set[str]
+    c: frozenset[str]
+    d: deque[str]
+
+@dataclass
+class LaxData:
+    tags: tuple[str, ...]
+
+class Strict(BaseModel):
+    model_config = ConfigDict(strict=True)
+    tags: tuple[str, ...]
+
+lax = SQL[Lax]("--sql\nSELECT t AS a, t AS b, t AS c, t AS d FROM (SELECT ARRAY['x']::TEXT[] AS t) s")
+data = SQL[LaxData]("--sql\nSELECT ARRAY['x']::TEXT[] AS tags")
+# error: [column-type-mismatch] "Strict.tags is tuple[str, ...] but query column 'tags' infers list[str]"
+strict = SQL[Strict]("--sql\nSELECT ARRAY['x']::TEXT[] AS tags")
+```
+
 ## Strict forms
 
 ### `class Config`
