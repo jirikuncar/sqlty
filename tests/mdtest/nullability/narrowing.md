@@ -430,6 +430,37 @@ SELECT t.name FROM fans f LEFT JOIN players p ON p.id = f.id LEFT JOIN teams t O
 -- inferred: tuple[str | None]
 ```
 
+### Scalar subqueries
+
+A scalar subquery that reads one table by exactly the columns a `NOT NULL` foreign
+key of the outer row references finds that row, so it is NULL only when the column
+it selects can be.
+
+```sql
+SELECT
+    (SELECT t.name FROM teams t WHERE t.id = p.team_id),
+    (SELECT t.motto FROM teams t WHERE t.id = p.team_id),
+    (SELECT name FROM teams WHERE p.region = teams.region AND p.code = teams.code)
+FROM players p
+-- inferred: tuple[str, str | None, str]
+```
+
+A nullable key, another condition and a null-extended outer row can find no row.
+
+```sql
+SELECT
+    (SELECT t.name FROM teams t WHERE t.id = p.coach_id),
+    (SELECT t.name FROM teams t WHERE t.id = p.team_id AND t.motto IS NOT NULL),
+    (SELECT t.name FROM teams t WHERE t.region = p.region)
+FROM players p
+-- inferred: tuple[str | None, str | None, str | None]
+```
+
+```sql
+SELECT (SELECT t.name FROM teams t WHERE t.id = p.team_id) FROM fans f LEFT JOIN players p ON p.id = f.id
+-- inferred: tuple[str | None]
+```
+
 ### A key that may not hold
 
 A `DEFERRABLE` key is checked at commit, so a transaction can see a row that
@@ -464,6 +495,11 @@ LEFT JOIN teams n ON n.id = p.next_id
 -- inferred: tuple[str | None, str | None, str | None, str]
 ```
 
+```sql
+SELECT (SELECT t.name FROM teams t WHERE t.id = p.team_id) FROM players p
+-- inferred: tuple[str | None]
+```
+
 ### SQLite
 
 SQLite checks foreign keys only after `PRAGMA foreign_keys = ON`.
@@ -482,6 +518,11 @@ CREATE TABLE players (id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL REFERENCE
 
 ```sql
 SELECT t.name FROM players p LEFT JOIN teams t ON t.id = p.team_id
+-- inferred: tuple[str | None]
+```
+
+```sql
+SELECT (SELECT t.name FROM teams t WHERE t.id = p.team_id) FROM players p
 -- inferred: tuple[str | None]
 ```
 
