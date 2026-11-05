@@ -8,7 +8,8 @@
 {% endblock %}
 {% block extrahead %}
   {% set home = page.is_homepage or page.url in ["", "./", "index.html"] %}
-  {% set title = config.site_name if home else (page.meta.title if page.meta and page.meta.title else page.title | striptags) ~ " - " ~ config.site_name %}
+  {% set name = page.meta.title if page.meta and page.meta.title else page.title | striptags %}
+  {% set title = config.site_name if home else name ~ " - " ~ config.site_name %}
   {% set description = page.meta.description if page.meta and page.meta.description else config.site_description %}
   {% set image = config.site_url ~ "assets/social.png" %}
   <meta property="og:type" content="website">
@@ -26,6 +27,34 @@
   <meta name="twitter:description" content="{{ description }}">
   <meta name="twitter:image" content="{{ image }}">
   <meta name="twitter:image:alt" content="The SQLTy wordmark">
+  {% set website = {"@type": "WebSite", "@id": config.site_url ~ "#website", "name": config.site_name, "url": config.site_url, "description": config.site_description, "inLanguage": "en"} %}
+  {% set software = {
+    "@type": "SoftwareSourceCode",
+    "@id": config.site_url ~ "#software",
+    "name": config.site_name,
+    "description": config.site_description,
+    "url": config.site_url,
+    "codeRepository": config.repo_url,
+    "programmingLanguage": ["Python", "Rust", "SQL"],
+    "license": "https://spdx.org/licenses/MIT",
+    "author": {"@type": "Person", "name": "Jiri Kuncar", "url": "https://github.com/jirikuncar"},
+  } %}
+  {% if home or not page.canonical_url %}
+    {% set graph = [website, software] %}
+  {% else %}
+    {% set article = {
+      "@type": "TechArticle",
+      "headline": name,
+      "url": page.canonical_url,
+      "image": image,
+      "inLanguage": "en",
+      "isPartOf": {"@id": config.site_url ~ "#website"},
+      "about": {"@id": config.site_url ~ "#software"},
+    } %}
+    {% if page.meta and page.meta.description %}{% set article = dict(article, description=page.meta.description) %}{% endif %}
+    {% set graph = [website, software, article] %}
+  {% endif %}
+  <script type="application/ld+json">{{ {"@context": "https://schema.org", "@graph": graph} | tojson }}</script>
   <link rel="icon" href="{{ 'assets/favicon/favicon.ico' | url }}" sizes="32x32">
   <script>
     (() => {
