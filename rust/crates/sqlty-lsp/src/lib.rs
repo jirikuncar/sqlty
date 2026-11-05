@@ -32,7 +32,7 @@ use lsp_types::{
     PublishDiagnosticsParams, SemanticTokensFullOptions, SemanticTokensOptions,
     SemanticTokensParams, SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
     ShowMessageParams, TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-    TextDocumentSyncSaveOptions, Url,
+    TextDocumentSyncSaveOptions, Uri,
 };
 
 mod actions;
@@ -40,6 +40,7 @@ mod completion;
 mod highlight;
 mod hover;
 mod text;
+mod uri;
 mod worker;
 
 #[cfg(test)]
@@ -235,8 +236,8 @@ where
 
 /// What the worker does next.
 enum Job {
-    Check(Url),
-    FixAll(lsp_server::RequestId, Url),
+    Check(Uri),
+    FixAll(lsp_server::RequestId, Uri),
     Reload,
 }
 
@@ -253,9 +254,9 @@ struct Document {
 
 #[derive(Clone)]
 struct Shared {
-    documents: Arc<Mutex<HashMap<Url, Document>>>,
+    documents: Arc<Mutex<HashMap<Uri, Document>>>,
     /// What [`Workspace::breaking`] found, by file: published while the file is not open.
-    background: Arc<Mutex<HashMap<Url, Vec<lsp_types::Diagnostic>>>>,
+    background: Arc<Mutex<HashMap<Uri, Vec<lsp_types::Diagnostic>>>>,
     sender: Sender<Message>,
     encoding: PositionEncodingKind,
     /// Whether the client takes `workspace/semanticTokens/refresh`.
@@ -268,13 +269,13 @@ struct Shared {
 }
 
 impl Shared {
-    fn documents(&self) -> std::sync::MutexGuard<'_, HashMap<Url, Document>> {
+    fn documents(&self) -> std::sync::MutexGuard<'_, HashMap<Uri, Document>> {
         self.documents
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn background(&self) -> std::sync::MutexGuard<'_, HashMap<Url, Vec<lsp_types::Diagnostic>>> {
+    fn background(&self) -> std::sync::MutexGuard<'_, HashMap<Uri, Vec<lsp_types::Diagnostic>>> {
         self.background
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -315,7 +316,7 @@ impl Shared {
         }
     }
 
-    fn publish(&self, uri: Url, diagnostics: Vec<lsp_types::Diagnostic>, version: Option<i32>) {
+    fn publish(&self, uri: Uri, diagnostics: Vec<lsp_types::Diagnostic>, version: Option<i32>) {
         self.send(Notification::new(
             PublishDiagnostics::METHOD.to_string(),
             PublishDiagnosticsParams::new(uri, diagnostics, version),
@@ -564,13 +565,13 @@ fn roots(params: &InitializeParams) -> Vec<PathBuf> {
         .map(|folder| &folder.uri);
     folders
         .chain(params.root_uri.as_ref())
-        .filter_map(|uri| uri.to_file_path().ok())
+        .filter_map(uri::to_path)
         .collect()
 }
 
 /// Whether a change to `uri` changes the settings or the schema of its project.
-fn is_config(uri: &Url) -> bool {
-    let path = uri.path();
+fn is_config(uri: &Uri) -> bool {
+    let path = uri.path().as_str();
     ["/pyproject.toml", "/sqlty.toml", "/Cargo.toml", ".sql"]
         .iter()
         .any(|suffix| path.ends_with(suffix))

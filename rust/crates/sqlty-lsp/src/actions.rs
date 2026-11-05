@@ -1,11 +1,12 @@
 //! Diagnostics and code actions in the terms of the protocol.
 
 use std::collections::HashMap;
+use std::str::FromStr;
 
 use lsp_types::{
     AnnotatedTextEdit, CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams,
     CodeDescription, DiagnosticSeverity, DocumentChanges, NumberOrString, OneOf,
-    OptionalVersionedTextDocumentIdentifier, PositionEncodingKind, TextDocumentEdit, TextEdit, Url,
+    OptionalVersionedTextDocumentIdentifier, PositionEncodingKind, TextDocumentEdit, TextEdit, Uri,
     WorkspaceEdit,
 };
 
@@ -23,7 +24,7 @@ pub(crate) fn diagnostic(diagnostic: &Diagnostic, index: &LineIndex<'_>) -> lsp_
             Severity::Warning => DiagnosticSeverity::WARNING,
         }),
         code: Some(NumberOrString::String(diagnostic.rule.clone())),
-        code_description: Url::parse(&format!("{RULES}#{}", diagnostic.rule))
+        code_description: Uri::from_str(&format!("{RULES}#{}", diagnostic.rule))
             .ok()
             .map(|href| CodeDescription { href }),
         source: Some(
@@ -39,7 +40,7 @@ pub(crate) fn diagnostic(diagnostic: &Diagnostic, index: &LineIndex<'_>) -> lsp_
 
 /// The fix of each diagnostic in the requested range, while the buffer is the one checked.
 pub(crate) fn quick_fixes(
-    documents: &HashMap<Url, Document>,
+    documents: &HashMap<Uri, Document>,
     params: &CodeActionParams,
     encoding: &PositionEncodingKind,
 ) -> Vec<CodeActionOrCommand> {
@@ -86,7 +87,7 @@ pub(crate) fn quick_fixes(
 
 /// Edits of `uri` that the client drops when the buffer is no longer at `version`.
 pub(crate) fn versioned(
-    uri: &Url,
+    uri: &Uri,
     version: i32,
     edits: Vec<OneOf<TextEdit, AnnotatedTextEdit>>,
 ) -> WorkspaceEdit {
