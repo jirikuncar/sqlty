@@ -35,9 +35,9 @@ queries as you type. It runs in your browser. The engine is compiled to
     <span class="sqlty-status" data-link-status role="status"></span>
   </div>
   <nav class="sqlty-steps" aria-label="Steps" data-steps hidden>
-    <button type="button" class="sqlty-button" data-step="-1" title="Previous step (Alt+PageUp)" aria-label="Previous step">&larr;</button>
+    <button type="button" class="sqlty-button" data-step="-1" title="Previous step (PageUp)" aria-label="Previous step">&larr;</button>
     <select data-step-select aria-label="Step"></select>
-    <button type="button" class="sqlty-button" data-step="1" title="Next step (Alt+PageDown)" aria-label="Next step">&rarr;</button>
+    <button type="button" class="sqlty-button" data-step="1" title="Next step (PageDown)" aria-label="Next step">&rarr;</button>
     <button type="button" class="sqlty-button" data-step-reset title="Undo the edits of this step" aria-label="Reset step">&#8634;<span class="sqlty-label"> Reset</span></button>
   </nav>
   <div class="sqlty-tabs" role="tablist" aria-label="Files">
@@ -263,8 +263,8 @@ steps are part of the session, so **Copy link** shares them while they fit in a 
 |---|---|---|
 | `title` | The name of the step in the bar | `Step N` |
 | `source`, `schema`, `config`, `dialect` | The files and dialect, as a [session](#share-a-session) holds them | The one of the step before |
-| `panel` | The console tab it opens: `notes`, `problems`, `types` or `json` | **Notes** if it has notes, else **Problems** |
-| `file` | The file tab it opens: `python`, `schema` or `config` | `python` |
+| `panel` | The console tab it opens: `notes`, `problems`, `types` or `json` | The tab open before, or **Problems** if that was **Notes** and the step has none |
+| `file` | The file tab it opens: `python`, `schema` or `config` | The file open before |
 | `notes` | Text for the **Notes** tab; a blank line starts a paragraph | No **Notes** tab |
 
 ## Present
@@ -274,9 +274,9 @@ size of the editor and the console, for a projector or a screen share.
 
 | Keys | What they do |
 |---|---|
-| **Ctrl+Shift+F** | Present, or stop presenting; **Escape** also stops, outside the editor |
+| **Ctrl+Shift+F** | Present, or stop presenting; **Escape** also stops |
 | **Ctrl+=**, **Ctrl+-** | A larger or a smaller font |
-| **Alt+PageDown**, **Alt+PageUp** | The next or the previous step; outside the editor, **PageDown** and **PageUp** too, as most presentation remotes send |
+| **PageDown**, **PageUp** | The next or the previous step, as most presentation remotes send |
 
 On macOS, **Command** works as **Ctrl**.
 
