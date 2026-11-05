@@ -66,6 +66,26 @@ SELECT CASE WHEN status = 'paid' THEN status ELSE 'other' END AS s FROM orders
 -- inferred: tuple[typing.Literal['paid', 'other']]
 ```
 
+A later branch reads its column without the values the `WHEN`s before it
+matched, whether they failed or were NULL.
+
+```sql
+SELECT CASE WHEN status = 'shipped' THEN 'paid' ELSE status END AS s FROM orders
+-- inferred: tuple[typing.Literal['paid', 'new']]
+```
+
+```sql
+SELECT CASE WHEN status IN ('new') THEN 'early' WHEN status = 'paid' THEN status ELSE status END AS s FROM orders
+-- inferred: tuple[typing.Literal['early', 'paid', 'shipped']]
+```
+
+A `WHEN` that also tests something else may fail with any value of the column.
+
+```sql
+SELECT CASE WHEN status = 'shipped' AND id > 1 THEN 'paid' ELSE status END AS s FROM orders
+-- inferred: tuple[typing.Literal['paid', 'new', 'shipped']]
+```
+
 ## What does not narrow
 
 A negated condition keeps every value, and so does a condition no row can meet.

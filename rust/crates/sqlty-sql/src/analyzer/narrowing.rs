@@ -454,6 +454,46 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// What a `CASE` branch after `cond` learns where `cond` did not hold: the column of
+    /// `column = constant` or `column IN (constants)` keeps its other values, whether
+    /// `cond` was false or NULL.
+    pub(super) fn learn_skipped(&self, cond: &Expr, scope: &Scope) -> Learned {
+        let (column, constants): (&Expr, Vec<&Expr>) = match cond {
+            Expr::Nested(inner) => return self.learn_skipped(inner, scope),
+            Expr::BinaryOp {
+                left,
+                op: BinaryOperator::Eq,
+                right,
+            } if matches!(**left, Expr::Identifier(_) | Expr::CompoundIdentifier(_)) => {
+                (left, vec![right])
+            }
+            Expr::BinaryOp {
+                left,
+                op: BinaryOperator::Eq,
+                right,
+            } => (right, vec![left]),
+            Expr::InList {
+                expr,
+                list,
+                negated: false,
+            } => (expr, list.iter().collect()),
+            _ => return Learned::default(),
+        };
+        let known = self
+            .resolve_column(column, scope)
+            .and_then(|(typed, _)| typed.values);
+        let (Some((reference, name, excluded)), Some(known)) =
+            (self.column_values(column, &constants, scope), known)
+        else {
+            return Learned::default();
+        };
+        let kept = known.iter().filter(|v| !excluded.contains(v)).cloned();
+        Learned {
+            values: vec![(reference, name, kept.collect())],
+            ..Learned::default()
+        }
+    }
+
     /// `column = constant` or `column IN (constants)`: the values the column keeps. Only
     /// where comparison is exact: MySQL compares with case-insensitive collations by
     /// default, and a `citext` column ignores case.
