@@ -6,5 +6,5 @@ functions = ["NEXTVAL", "CURRVAL", "LASTVAL", "SETVAL"]
 dialects = ["postgres"]
 type = "BIGINT"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.17 Sequence Manipulation Functions, Table 9.53 Sequence Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.17 Sequence Manipulation Functions, Table 9.53 Sequence Functions"
 reasoning = "The documentation gives each of these a `bigint` result."

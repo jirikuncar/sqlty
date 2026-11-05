@@ -8,7 +8,7 @@ dialects = ["postgres"]
 left = ["REAL", "FLOAT"]
 right = ["REAL", "FLOAT"]
 type = "@promote"
-reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (numeric_type + numeric_type → numeric_type)"
+reference.postgres = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (numeric_type + numeric_type → numeric_type)"
 reasoning = "Two reals give a real."
 
 [[rule]]
@@ -18,7 +18,7 @@ dialects = ["postgres"]
 left = ["REAL", "FLOAT"]
 right = ["@numeric"]
 type = "DOUBLE"
-reference = "PostgreSQL 17 documentation, 10.2 Operators, Example 10.1 (operators are resolved among the candidates a type converts to; real has operators only with real)"
+reference.postgres = "PostgreSQL 17 documentation, 10.2 Operators, Example 10.1 (operators are resolved among the candidates a type converts to; real has operators only with real)"
 reasoning = "PostgreSQL has real operators for two reals only, so a real with another number resolves to double precision."
 
 [[rule]]
@@ -28,7 +28,7 @@ dialects = ["postgres"]
 left = ["@numeric"]
 right = ["REAL", "FLOAT"]
 type = "DOUBLE"
-reference = "PostgreSQL 17 documentation, 10.2 Operators, Example 10.1 (operators are resolved among the candidates a type converts to; real has operators only with real)"
+reference.postgres = "PostgreSQL 17 documentation, 10.2 Operators, Example 10.1 (operators are resolved among the candidates a type converts to; real has operators only with real)"
 reasoning = "PostgreSQL has real operators for two reals only, so a real with another number resolves to double precision."
 
 [[rule]]
@@ -38,7 +38,7 @@ dialects = ["postgres"]
 left = ["@numeric"]
 right = ["@numeric"]
 type = "@promote"
-reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (numeric_type / numeric_type → numeric_type)"
+reference.postgres = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (numeric_type / numeric_type → numeric_type)"
 reasoning = "Division gives the wider type; a zero divisor raises an error rather than giving NULL."
 
 [[rule]]
@@ -48,7 +48,7 @@ dialects = ["postgres"]
 left = ["DATE"]
 right = ["INTERVAL"]
 type = "TIMESTAMP"
-reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date + interval → timestamp, date - interval → timestamp)"
+reference.postgres = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date + interval → timestamp, date - interval → timestamp)"
 reasoning = "A date moved by an interval can land within a day, so it becomes a timestamp."
 
 [[rule]]
@@ -58,7 +58,7 @@ dialects = ["postgres"]
 left = ["TIMESTAMP", "TIMESTAMPTZ", "TIME", "TIMETZ"]
 right = ["INTERVAL"]
 type = "@left"
-reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (timestamp + interval → timestamp, time with time zone + interval → time with time zone)"
+reference.postgres = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (timestamp + interval → timestamp, time with time zone + interval → time with time zone)"
 reasoning = "A timestamp or time moved by an interval keeps its type."
 
 [[rule]]
@@ -68,7 +68,7 @@ dialects = ["postgres"]
 left = ["INTERVAL"]
 right = ["DATE"]
 type = "TIMESTAMP"
-reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date + interval → timestamp; + is commutative)"
+reference.postgres = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date + interval → timestamp; + is commutative)"
 reasoning = "An interval added to a date gives a timestamp."
 
 [[rule]]
@@ -78,7 +78,7 @@ dialects = ["postgres"]
 left = ["INTERVAL"]
 right = ["TIMESTAMP", "TIMESTAMPTZ", "TIME", "TIMETZ"]
 type = "@right"
-reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (timestamp + interval → timestamp; + is commutative)"
+reference.postgres = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (timestamp + interval → timestamp; + is commutative)"
 reasoning = "An interval added to a timestamp or time keeps its type."
 
 [[rule]]
@@ -88,7 +88,7 @@ dialects = ["postgres"]
 left = ["DATE"]
 right = ["SMALLINT", "INT"]
 type = "DATE"
-reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date + integer → date, date - integer → date)"
+reference.postgres = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date + integer → date, date - integer → date)"
 reasoning = "Whole days added to or taken from a date give a date."
 
 [[rule]]
@@ -98,7 +98,7 @@ dialects = ["postgres"]
 left = ["SMALLINT", "INT"]
 right = ["DATE"]
 type = "DATE"
-reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date + integer → date; + is commutative)"
+reference.postgres = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date + integer → date; + is commutative)"
 reasoning = "Whole days added to a date give a date."
 
 [[rule]]
@@ -108,7 +108,7 @@ dialects = ["postgres"]
 left = ["DATE"]
 right = ["TIME"]
 type = "TIMESTAMP"
-reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date + time → timestamp)"
+reference.postgres = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date + time → timestamp)"
 reasoning = "A date and a time of day make a timestamp."
 
 [[rule]]
@@ -118,7 +118,7 @@ dialects = ["postgres"]
 left = ["TIME"]
 right = ["DATE"]
 type = "TIMESTAMP"
-reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date + time → timestamp; + is commutative)"
+reference.postgres = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date + time → timestamp; + is commutative)"
 reasoning = "A time of day and a date make a timestamp."
 
 [[rule]]
@@ -128,7 +128,7 @@ dialects = ["postgres"]
 left = ["DATE"]
 right = ["TIMETZ"]
 type = "TIMESTAMPTZ"
-reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date + time with time zone → timestamp with time zone)"
+reference.postgres = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date + time with time zone → timestamp with time zone)"
 reasoning = "A date and a time with time zone make a timestamp with time zone."
 
 [[rule]]
@@ -138,7 +138,7 @@ dialects = ["postgres"]
 left = ["TIMETZ"]
 right = ["DATE"]
 type = "TIMESTAMPTZ"
-reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date + time with time zone → timestamp with time zone; + is commutative)"
+reference.postgres = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date + time with time zone → timestamp with time zone; + is commutative)"
 reasoning = "A time with time zone and a date make a timestamp with time zone."
 
 [[rule]]
@@ -148,7 +148,7 @@ dialects = ["postgres"]
 left = ["DATE"]
 right = ["DATE"]
 type = "INT"
-reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date - date → integer)"
+reference.postgres = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (date - date → integer)"
 reasoning = "Subtracting dates counts the days between them."
 
 [[rule]]
@@ -158,7 +158,7 @@ dialects = ["postgres"]
 left = ["TIME"]
 right = ["TIME"]
 type = "INTERVAL"
-reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (time - time → interval)"
+reference.postgres = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (time - time → interval)"
 reasoning = "Subtracting times of day gives an interval."
 
 [[rule]]
@@ -168,7 +168,7 @@ dialects = ["postgres"]
 left = ["TIMESTAMP"]
 right = ["TIMESTAMP"]
 type = "INTERVAL"
-reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (timestamp - timestamp → interval)"
+reference.postgres = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (timestamp - timestamp → interval)"
 reasoning = "Subtracting timestamps gives an interval."
 
 [[rule]]
@@ -178,7 +178,7 @@ dialects = ["postgres"]
 left = ["TIMESTAMPTZ"]
 right = ["TIMESTAMPTZ"]
 type = "INTERVAL"
-reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (timestamp - timestamp → interval)"
+reference.postgres = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (timestamp - timestamp → interval)"
 reasoning = "Subtracting timestamps with time zone gives an interval."
 
 [[rule]]
@@ -188,7 +188,7 @@ dialects = ["postgres"]
 left = ["TIMESTAMP", "TIMESTAMPTZ"]
 right = ["DATE"]
 type = "INTERVAL"
-reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (timestamp - timestamp → interval); 10.2 Operators (an implicit cast, here date to timestamp, picks that operator)"
+reference.postgres = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (timestamp - timestamp → interval); 10.2 Operators (an implicit cast, here date to timestamp, picks that operator)"
 reasoning = "The date converts to a timestamp, so the difference is an interval."
 
 [[rule]]
@@ -198,7 +198,7 @@ dialects = ["postgres"]
 left = ["DATE"]
 right = ["TIMESTAMP", "TIMESTAMPTZ"]
 type = "INTERVAL"
-reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (timestamp - timestamp → interval); 10.2 Operators (an implicit cast, here date to timestamp, picks that operator)"
+reference.postgres = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (timestamp - timestamp → interval); 10.2 Operators (an implicit cast, here date to timestamp, picks that operator)"
 reasoning = "The date converts to a timestamp, so the difference is an interval."
 
 [[rule]]
@@ -208,7 +208,7 @@ dialects = ["postgres"]
 left = ["INTERVAL"]
 right = ["INTERVAL"]
 type = "INTERVAL"
-reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (interval + interval → interval, interval - interval → interval)"
+reference.postgres = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (interval + interval → interval, interval - interval → interval)"
 reasoning = "Adding or subtracting intervals gives an interval."
 
 [[rule]]
@@ -218,7 +218,7 @@ dialects = ["postgres"]
 left = ["INTERVAL"]
 right = ["@numeric"]
 type = "INTERVAL"
-reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (interval * double precision → interval, interval / double precision → interval)"
+reference.postgres = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (interval * double precision → interval, interval / double precision → interval)"
 reasoning = "Scaling an interval by a number gives an interval."
 
 [[rule]]
@@ -228,7 +228,7 @@ dialects = ["postgres"]
 left = ["@numeric"]
 right = ["INTERVAL"]
 type = "INTERVAL"
-reference = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (double precision * interval → interval)"
+reference.postgres = "PostgreSQL 17 documentation, 9.9, Table 9.32 Date/Time Operators (double precision * interval → interval)"
 reasoning = "Scaling an interval by a number gives an interval."
 
 [[rule]]
@@ -238,7 +238,7 @@ dialects = ["postgres"]
 left = ["@address"]
 right = ["@address"]
 type = "BIGINT"
-reference = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (inet - inet → bigint)"
+reference.postgres = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (inet - inet → bigint)"
 reasoning = "The difference of two addresses is a count."
 
 [[rule]]
@@ -248,7 +248,7 @@ dialects = ["postgres"]
 left = ["@address"]
 right = ["@integer"]
 type = "INET"
-reference = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (inet + bigint → inet, inet - bigint → inet)"
+reference.postgres = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (inet + bigint → inet, inet - bigint → inet)"
 reasoning = "An address moved by an offset is an address."
 
 [[rule]]
@@ -258,7 +258,7 @@ dialects = ["postgres"]
 left = ["@integer"]
 right = ["@address"]
 type = "INET"
-reference = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (bigint + inet → inet)"
+reference.postgres = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (bigint + inet → inet)"
 reasoning = "An offset added to an address is an address."
 
 [[rule]]
@@ -268,7 +268,7 @@ dialects = ["postgres"]
 left = ["MONEY"]
 right = ["MONEY"]
 type = "MONEY"
-reference = "PostgreSQL 17 documentation, 8.2 Monetary Types"
+reference.postgres = "PostgreSQL 17 documentation, 8.2 Monetary Types"
 reasoning = "The sum or difference of two amounts is an amount."
 
 [[rule]]
@@ -278,7 +278,7 @@ dialects = ["postgres"]
 left = ["MONEY"]
 right = ["MONEY"]
 type = "DOUBLE"
-reference = "PostgreSQL 17 documentation, 8.2 Monetary Types (a money value divided by another money value is double precision)"
+reference.postgres = "PostgreSQL 17 documentation, 8.2 Monetary Types (a money value divided by another money value is double precision)"
 reasoning = "Dividing an amount by an amount cancels the currency and gives a double."
 
 [[rule]]
@@ -288,7 +288,7 @@ dialects = ["postgres"]
 left = ["MONEY"]
 right = ["@numeric"]
 type = "MONEY"
-reference = "PostgreSQL 17 documentation, 8.2 Monetary Types (a money value divided by an integer is truncated toward zero)"
+reference.postgres = "PostgreSQL 17 documentation, 8.2 Monetary Types (a money value divided by an integer is truncated toward zero)"
 reasoning = "An amount multiplied or divided by a number is an amount."
 
 [[rule]]
@@ -298,7 +298,7 @@ dialects = ["postgres"]
 left = ["@numeric"]
 right = ["MONEY"]
 type = "MONEY"
-reference = "PostgreSQL 17 documentation, 8.2 Monetary Types"
+reference.postgres = "PostgreSQL 17 documentation, 8.2 Monetary Types"
 reasoning = "A number multiplied by an amount is an amount."
 
 [[rule]]
@@ -308,7 +308,7 @@ dialects = ["postgres"]
 left = ["PG_LSN"]
 right = ["PG_LSN"]
 type = "DECIMAL"
-reference = "PostgreSQL 17 documentation, 8.20 pg_lsn Type (two LSNs subtracted give the number of bytes separating them)"
+reference.postgres = "PostgreSQL 17 documentation, 8.20 pg_lsn Type (two LSNs subtracted give the number of bytes separating them)"
 reasoning = "The distance between two write-ahead log locations is a byte count, a numeric."
 
 [[rule]]
@@ -318,7 +318,7 @@ dialects = ["postgres"]
 left = ["PG_LSN"]
 right = ["@integer", "DECIMAL", "NUMERIC"]
 type = "PG_LSN"
-reference = "PostgreSQL 17 documentation, 8.20 pg_lsn Type (+(pg_lsn,numeric) and -(pg_lsn,numeric))"
+reference.postgres = "PostgreSQL 17 documentation, 8.20 pg_lsn Type (+(pg_lsn,numeric) and -(pg_lsn,numeric))"
 reasoning = "A location moved by a number of bytes is a location."
 
 [[rule]]
@@ -328,7 +328,7 @@ dialects = ["postgres"]
 left = ["@integer", "DECIMAL", "NUMERIC"]
 right = ["PG_LSN"]
 type = "PG_LSN"
-reference = "PostgreSQL 17 documentation, 8.20 pg_lsn Type (+(pg_lsn,numeric))"
+reference.postgres = "PostgreSQL 17 documentation, 8.20 pg_lsn Type (+(pg_lsn,numeric))"
 reasoning = "A number of bytes added to a location is a location."
 
 [[rule]]
@@ -339,7 +339,7 @@ left = ["PATH"]
 right = ["PATH"]
 type = "PATH"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.11, Table 9.36 Geometric Operators (path + path → path)"
+reference.postgres = "PostgreSQL 17 documentation, 9.11, Table 9.36 Geometric Operators (path + path → path)"
 reasoning = "Two open paths concatenate into a path, and a closed one gives NULL."
 
 [[rule]]
@@ -349,7 +349,7 @@ dialects = ["postgres"]
 left = ["BOX", "CIRCLE", "PATH", "POINT"]
 right = ["POINT"]
 type = "@left"
-reference = "PostgreSQL 17 documentation, 9.11, Table 9.36 Geometric Operators (geometric_type + point → geometric_type, and -, *, /)"
+reference.postgres = "PostgreSQL 17 documentation, 9.11, Table 9.36 Geometric Operators (geometric_type + point → geometric_type, and -, *, /)"
 reasoning = "Translating, scaling or rotating a shape by a point keeps its type."
 
 [[rule]]
@@ -357,7 +357,7 @@ id = "postgres.math.roots"
 operators = ["Prefix:PGSquareRoot", "Prefix:PGCubeRoot"]
 dialects = ["postgres"]
 type = "DOUBLE"
-reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (|/ double precision → double precision, ||/ double precision → double precision)"
+reference.postgres = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (|/ double precision → double precision, ||/ double precision → double precision)"
 reasoning = "Square and cube roots take and give a double."
 
 [[rule]]
@@ -365,7 +365,7 @@ id = "postgres.arithmetic.division-other"
 operators = ["Divide", "Modulo"]
 dialects = ["postgres"]
 type = "@unknown"
-reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (numeric_type / numeric_type; division by zero raises an error)"
+reference.postgres = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (numeric_type / numeric_type; division by zero raises an error)"
 reasoning = "A zero divisor raises an error, so the result is NULL only when an operand is; other operand types have no known result."
 
 [[rule]]
@@ -374,7 +374,7 @@ operators = ["PGBitwiseShiftLeft", "PGBitwiseShiftRight"]
 dialects = ["postgres"]
 left = ["@address"]
 type = "BOOLEAN"
-reference = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (inet << inet → boolean, inet >> inet → boolean)"
+reference.postgres = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (inet << inet → boolean, inet >> inet → boolean)"
 reasoning = "On addresses, `<<` and `>>` test whether one network contains the other."
 
 [[rule]]
@@ -383,7 +383,7 @@ operators = ["PGBitwiseShiftLeft", "PGBitwiseShiftRight"]
 dialects = ["postgres"]
 right = ["@address"]
 type = "BOOLEAN"
-reference = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (inet << inet → boolean, inet >> inet → boolean)"
+reference.postgres = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (inet << inet → boolean, inet >> inet → boolean)"
 reasoning = "On addresses, `<<` and `>>` test whether one network contains the other."
 
 [[rule]]
@@ -392,7 +392,7 @@ operators = ["BitwiseAnd", "BitwiseOr", "PGBitwiseXor"]
 dialects = ["postgres"]
 left = ["@address"]
 type = "INET"
-reference = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (inet & inet → inet, inet | inet → inet)"
+reference.postgres = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (inet & inet → inet, inet | inet → inet)"
 reasoning = "On addresses, `&` and `|` mask one address with another."
 
 [[rule]]
@@ -401,7 +401,7 @@ operators = ["BitwiseAnd", "BitwiseOr", "PGBitwiseXor"]
 dialects = ["postgres"]
 right = ["@address"]
 type = "INET"
-reference = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (inet & inet → inet, inet | inet → inet)"
+reference.postgres = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (inet & inet → inet, inet | inet → inet)"
 reasoning = "On addresses, `&` and `|` mask one address with another."
 
 [[rule]]
@@ -411,7 +411,7 @@ dialects = ["postgres"]
 left = ["BIT", "VARBIT"]
 right = ["BIT", "VARBIT"]
 type = "BIT"
-reference = "PostgreSQL 17 documentation, 9.6, Table 9.14 Bit String Operators (bit & bit → bit, bit | bit → bit, bit # bit → bit)"
+reference.postgres = "PostgreSQL 17 documentation, 9.6, Table 9.14 Bit String Operators (bit & bit → bit, bit | bit → bit, bit # bit → bit)"
 reasoning = "Bitwise operators on bit strings of equal length give a bit string."
 
 [[rule]]
@@ -421,7 +421,7 @@ dialects = ["postgres"]
 left = ["BIT", "VARBIT"]
 right = ["@integer"]
 type = "BIT"
-reference = "PostgreSQL 17 documentation, 9.6, Table 9.14 Bit String Operators (bit << integer → bit, bit >> integer → bit)"
+reference.postgres = "PostgreSQL 17 documentation, 9.6, Table 9.14 Bit String Operators (bit << integer → bit, bit >> integer → bit)"
 reasoning = "A shifted bit string keeps its length."
 
 [[rule]]
@@ -431,7 +431,7 @@ dialects = ["postgres"]
 left = ["MACADDR", "MACADDR8"]
 right = ["MACADDR", "MACADDR8"]
 type = "@left"
-reference = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators (macaddr and macaddr8 support the bitwise logical operators ~, & and |)"
+reference.postgres = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators (macaddr and macaddr8 support the bitwise logical operators ~, & and |)"
 reasoning = "Masking a MAC address with another gives a MAC address."
 
 [[rule]]
@@ -441,7 +441,7 @@ dialects = ["postgres"]
 left = ["@range", "@multirange"]
 right = ["@range", "@multirange"]
 type = "BOOLEAN"
-reference = "PostgreSQL 17 documentation, 9.20, Table 9.56 Range Operators and Table 9.57 Multirange Operators (anyrange << anyrange → boolean, anyrange >> anyrange → boolean)"
+reference.postgres = "PostgreSQL 17 documentation, 9.20, Table 9.56 Range Operators and Table 9.57 Multirange Operators (anyrange << anyrange → boolean, anyrange >> anyrange → boolean)"
 reasoning = "On ranges and multiranges, `<<` and `>>` test whether one is strictly left or right of the other."
 
 [[rule]]
@@ -451,7 +451,7 @@ dialects = ["postgres"]
 left = ["@multirange"]
 right = ["@multirange"]
 type = "@left"
-reference = "PostgreSQL 17 documentation, 9.20, Table 9.57 Multirange Operators (anymultirange + anymultirange → anymultirange, and *, -)"
+reference.postgres = "PostgreSQL 17 documentation, 9.20, Table 9.57 Multirange Operators (anymultirange + anymultirange → anymultirange, and *, -)"
 reasoning = "The union, intersection and difference of two multiranges are a multirange of their type."
 
 [[rule]]
@@ -461,7 +461,7 @@ dialects = ["postgres"]
 left = ["BOX", "CIRCLE", "POINT", "POLYGON"]
 right = ["BOX", "CIRCLE", "POINT", "POLYGON"]
 type = "BOOLEAN"
-reference = "PostgreSQL 17 documentation, 9.11, Table 9.36 Geometric Operators (geometric_type << geometric_type → boolean, geometric_type >> geometric_type → boolean)"
+reference.postgres = "PostgreSQL 17 documentation, 9.11, Table 9.36 Geometric Operators (geometric_type << geometric_type → boolean, geometric_type >> geometric_type → boolean)"
 reasoning = "On shapes, `<<` and `>>` test whether one is strictly left or right of the other."
 
 [[rule]]
@@ -471,7 +471,7 @@ dialects = ["postgres"]
 left = ["@integer"]
 right = ["@integer"]
 type = "@promote"
-reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (integral_type & integral_type → integral_type)"
+reference.postgres = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (integral_type & integral_type → integral_type)"
 reasoning = "Bitwise operators on integers give the wider integer type."
 
 [[rule]]
@@ -481,7 +481,7 @@ dialects = ["postgres"]
 left = ["@integer"]
 right = ["@integer"]
 type = "@promote-left"
-reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (integral_type << integer → integral_type)"
+reference.postgres = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (integral_type << integer → integral_type)"
 reasoning = "A shift keeps the type of the number it shifts."
 
 [[rule]]
@@ -489,7 +489,7 @@ id = "postgres.network.contained-or-equal"
 operators = ["Custom:<<=", "Custom:>>="]
 dialects = ["postgres"]
 type = "BOOLEAN"
-reference = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (inet <<= inet → boolean, inet >>= inet → boolean)"
+reference.postgres = "PostgreSQL 17 documentation, 9.12, Table 9.39 IP Address Operators (inet <<= inet → boolean, inet >>= inet → boolean)"
 reasoning = "`<<=` and `>>=` test whether one network contains or equals the other."
 
 [[rule]]
@@ -497,7 +497,7 @@ id = "postgres.range.adjacency"
 operators = ["Custom:-|-", "AndLt", "AndGt"]
 dialects = ["postgres"]
 type = "BOOLEAN"
-reference = "PostgreSQL 17 documentation, 9.20, Table 9.56 Range Operators (anyrange -|- anyrange → boolean, anyrange &< anyrange → boolean, anyrange &> anyrange → boolean)"
+reference.postgres = "PostgreSQL 17 documentation, 9.20, Table 9.56 Range Operators (anyrange -|- anyrange → boolean, anyrange &< anyrange → boolean, anyrange &> anyrange → boolean)"
 reasoning = "Range adjacency and extent tests are predicates."
 
 [[rule]]
@@ -507,7 +507,7 @@ dialects = ["postgres"]
 left = ["@range"]
 right = ["@range"]
 type = "@left"
-reference = "PostgreSQL 17 documentation, 9.20, Table 9.56 Range Operators (anyrange + anyrange → anyrange, anyrange * anyrange → anyrange, anyrange - anyrange → anyrange)"
+reference.postgres = "PostgreSQL 17 documentation, 9.20, Table 9.56 Range Operators (anyrange + anyrange → anyrange, anyrange * anyrange → anyrange, anyrange - anyrange → anyrange)"
 reasoning = "The union, intersection and difference of two ranges are a range of their type."
 
 [[rule]]
@@ -515,7 +515,7 @@ id = "postgres.bitwise.not"
 operator = "Prefix:BitwiseNot"
 dialects = ["postgres"]
 type = "@right"
-reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (~ integral_type → integral_type), 9.6, Table 9.14 Bit String Operators (~ bit → bit), 9.12, Table 9.39 IP Address Operators (~ inet → inet)"
+reference.postgres = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (~ integral_type → integral_type), 9.6, Table 9.14 Bit String Operators (~ bit → bit), 9.12, Table 9.39 IP Address Operators (~ inet → inet)"
 reasoning = "`~` inverts the bits of an integer, a bit string or an address and keeps its type."
 
 [[rule]]
@@ -523,5 +523,5 @@ id = "postgres.math.absolute"
 operator = "Prefix:PGAbs"
 dialects = ["postgres"]
 type = "@right"
-reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (@ numeric_type → numeric_type)"
+reference.postgres = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (@ numeric_type → numeric_type)"
 reasoning = "`@` is the absolute value, of the operand's type."

@@ -6,7 +6,7 @@ function = "SET_MASKLEN"
 dialects = ["postgres"]
 type = "@argument-type(0)"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators, Table 9.40 IP Address Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators, Table 9.40 IP Address Functions"
 reasoning = "The result has the type of the first argument."
 
 [[function]]
@@ -15,7 +15,7 @@ functions = ["NETWORK", "INET_MERGE"]
 dialects = ["postgres"]
 type = "CIDR"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators, Table 9.40 IP Address Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators, Table 9.40 IP Address Functions"
 reasoning = "The documentation gives each of these a `cidr` result."
 
 [[function]]
@@ -24,7 +24,7 @@ functions = ["BROADCAST", "HOSTMASK", "NETMASK"]
 dialects = ["postgres"]
 type = "INET"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators, Table 9.40 IP Address Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators, Table 9.40 IP Address Functions"
 reasoning = "The documentation gives each of these an `inet` result."
 
 [[function]]
@@ -33,7 +33,7 @@ functions = ["MASKLEN", "FAMILY"]
 dialects = ["postgres"]
 type = "INT"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators, Table 9.40 IP Address Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators, Table 9.40 IP Address Functions"
 reasoning = "The documentation gives each of these an `integer` result."
 
 [[function]]
@@ -42,7 +42,7 @@ functions = ["HOST", "ABBREV", "TEXT"]
 dialects = ["postgres"]
 type = "TEXT"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators, Table 9.40 IP Address Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators, Table 9.40 IP Address Functions"
 reasoning = "The documentation gives each of these a `text` result."
 
 [[function]]
@@ -51,7 +51,7 @@ function = "INET_SAME_FAMILY"
 dialects = ["postgres"]
 type = "BOOLEAN"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators, Table 9.40 IP Address Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators, Table 9.40 IP Address Functions"
 reasoning = "The documentation gives the function a `boolean` result."
 
 [[function]]
@@ -60,5 +60,5 @@ function = "MACADDR8_SET7BIT"
 dialects = ["postgres"]
 type = "MACADDR8"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators, Table 9.41 MAC Address Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.12 Network Address Functions and Operators, Table 9.41 MAC Address Functions"
 reasoning = "The documentation gives the function a `macaddr8` result."

@@ -112,7 +112,8 @@ impl SchemaColumn {
     }
 }
 
-/// `(kind, name)` of a schema table or view that could not be parsed.
+/// `(kind, name)` of a schema table or view that could not be parsed, or `("statement",
+/// text)` of a statement that does not parse and would set keys, `NOT NULL`, defaults or a type.
 pub type SkippedObject = (&'static str, String);
 
 /// Inference fails outright only for `SUM(column)` of a column missing from a schema table.
