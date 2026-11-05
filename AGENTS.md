@@ -35,12 +35,23 @@ uv run pytest tests/ --ignore=tests/e2e --ignore=tests/mdtest  # unit tests only
 uv run pytest tests/e2e/ -v               # end-to-end tests
 uv run pytest -k "integer cast"           # filter by name
 uv run pytest tests/mdtest/rewrite/basic_rewrite.md -v  # single file
+uv run pytest -m timing -n 0 -p no:randomly  # the tests that measure wall time
+uv run pytest -n 0 -p no:randomly          # one process, in file order
 ```
+
+Tests run in parallel (pytest-xdist, `-n auto`) and in random order
+(pytest-randomly; a failure prints its `--randomly-seed`). A test must not depend
+on another having run, nor on the working directory or global state another
+changes. Tests that measure wall time are marked `timing`: the default run
+leaves them out, since parallel workers slow them, and `make test` runs them
+alone afterwards. Tests marked `pg` share one database server (`SQLTY_PG_DSN`), so CI
+runs them in one process: `uv run pytest -m pg -n 0`.
 
 Make targets:
 
 ```bash
-make test            # all tests
+make test            # all tests, then the timing tests alone
+make test-timing     # the tests that measure wall time, alone
 make test-mdtest     # mdtest only
 make test-unit       # unit tests only
 make test-e2e        # e2e only

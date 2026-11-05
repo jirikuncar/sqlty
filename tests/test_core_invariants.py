@@ -371,6 +371,7 @@ def many_queries() -> str:
     )
 
 
+@pytest.mark.timing
 @pytest.mark.parametrize(
     ("name", "budget_ms"),
     [("rewrite_source", 500), ("strip_source", 200), ("check_source", 500)],
@@ -383,6 +384,7 @@ def test_latency(many_queries: str, name: str, budget_ms: int) -> None:
     assert elapsed_ms < budget_ms, f"{name}: {elapsed_ms:.0f} ms for 50 queries"
 
 
+@pytest.mark.timing
 def test_infer_type_latency() -> None:
     start = time.perf_counter()
     for _ in range(100):
