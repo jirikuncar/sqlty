@@ -166,7 +166,9 @@ def extract_type_definitions(
             }
         info.annotations = _ast_annotations(nodes, aliases)
         imported[node.name] = [
-            a for p in parents for a in ([p] if p.module != module else imported.get(p.name, []))
+            a
+            for p in parents
+            for a in ([p] if imported_bases.get(p.name) is p else imported.get(p.name, []))
         ]
         for parent in imported[node.name]:
             info.field_types = parent.field_types | info.field_types
