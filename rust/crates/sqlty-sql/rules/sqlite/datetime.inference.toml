@@ -6,7 +6,7 @@ function = "UNIXEPOCH"
 dialects = ["sqlite"]
 type = "BIGINT"
 nullability = "code"
-reference = "SQLite documentation, Date And Time Functions"
+reference.sqlite = "SQLite documentation, Date And Time Functions"
 reasoning = "The function returns an integer. SQLite also returns NULL for a time value or modifier it cannot read. With no argument, or `'now'` alone, it reads the current time and is never NULL; `analyzer/nullability.rs` checks the arguments."
 
 [[function]]
@@ -15,7 +15,7 @@ function = "JULIANDAY"
 dialects = ["sqlite"]
 type = "DOUBLE"
 nullability = "code"
-reference = "SQLite documentation, Date And Time Functions"
+reference.sqlite = "SQLite documentation, Date And Time Functions"
 reasoning = "The function returns a floating-point value. SQLite also returns NULL for a time value or modifier it cannot read. With no argument, or `'now'` alone, it reads the current time and is never NULL; `analyzer/nullability.rs` checks the arguments."
 
 [[function]]
@@ -24,7 +24,7 @@ functions = ["DATE", "TIME", "DATETIME"]
 dialects = ["sqlite"]
 type = "TEXT"
 nullability = "code"
-reference = "SQLite documentation, Date And Time Functions"
+reference.sqlite = "SQLite documentation, Date And Time Functions"
 reasoning = "Each of these returns text. SQLite also returns NULL for a time value or modifier it cannot read. With no argument, or `'now'` alone, each reads the current time and is never NULL; `analyzer/nullability.rs` checks the arguments."
 
 [[function]]
@@ -33,5 +33,5 @@ functions = ["TIMEDIFF", "STRFTIME"]
 dialects = ["sqlite"]
 type = "TEXT"
 nullability = "nullable"
-reference = "SQLite documentation, Date And Time Functions"
+reference.sqlite = "SQLite documentation, Date And Time Functions"
 reasoning = "Each of these returns text. SQLite also returns NULL for a time value, modifier or format it cannot read, even for the current time."

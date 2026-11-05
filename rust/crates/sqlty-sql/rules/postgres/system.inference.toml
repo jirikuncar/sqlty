@@ -7,7 +7,7 @@ dialects = ["postgres"]
 argument = ["XID"]
 type = "INT"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.27, Table 9.82 Transaction ID and Snapshot Information Functions (age ( xid ) → integer)"
+reference.postgres = "PostgreSQL 17 documentation, 9.27, Table 9.82 Transaction ID and Snapshot Information Functions (age ( xid ) → integer)"
 reasoning = "The age of a transaction ID is a number of transactions, not an interval."
 
 [[function]]
@@ -16,7 +16,7 @@ function = "AGE"
 dialects = ["postgres"]
 type = "INTERVAL"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.9 Date/Time Functions and Operators, Table 9.33 Date/Time Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.9 Date/Time Functions and Operators, Table 9.33 Date/Time Functions"
 reasoning = "The documentation gives the function an `interval` result."
 
 [[function]]
@@ -25,7 +25,7 @@ functions = ["TXID_CURRENT", "TXID_SNAPSHOT_XMAX", "TXID_SNAPSHOT_XMIN"]
 dialects = ["postgres"]
 type = "BIGINT"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.84 Deprecated Transaction ID and Snapshot Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.84 Deprecated Transaction ID and Snapshot Information Functions"
 reasoning = "The documentation gives each of these a `bigint` result."
 
 [[function]]
@@ -34,7 +34,7 @@ functions = ["HAS_TABLE_PRIVILEGE", "HAS_SCHEMA_PRIVILEGE", "HAS_COLUMN_PRIVILEG
 dialects = ["postgres"]
 type = "BOOLEAN"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions, Table 9.70 Access Privilege Inquiry Functions, Table 9.81 Data Validity Checking Functions, Table 9.82 Transaction ID and Snapshot Information Functions, Table 9.84 Deprecated Transaction ID and Snapshot Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions, Table 9.70 Access Privilege Inquiry Functions, Table 9.81 Data Validity Checking Functions, Table 9.82 Transaction ID and Snapshot Information Functions, Table 9.84 Deprecated Transaction ID and Snapshot Information Functions"
 reasoning = "The documentation gives each of these a `boolean` result."
 
 [[function]]
@@ -43,7 +43,7 @@ functions = ["INET_SERVER_ADDR", "INET_CLIENT_ADDR"]
 dialects = ["postgres"]
 type = "INET"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions"
 reasoning = "The documentation gives each of these an `inet` result. They are NULL over a Unix-domain socket."
 
 [[function]]
@@ -52,7 +52,7 @@ functions = ["PG_BACKEND_PID", "MXID_AGE", "PG_CHAR_TO_ENCODING", "PG_TRIGGER_DE
 dialects = ["postgres"]
 type = "INT"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions, Table 9.74 System Catalog Information Functions, Table 9.82 Transaction ID and Snapshot Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions, Table 9.74 System Catalog Information Functions, Table 9.82 Transaction ID and Snapshot Information Functions"
 reasoning = "The documentation gives each of these an `integer` result."
 
 [[function]]
@@ -61,7 +61,7 @@ functions = ["INET_CLIENT_PORT", "INET_SERVER_PORT"]
 dialects = ["postgres"]
 type = "INT"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions"
 reasoning = "The documentation gives each of these an `integer` result. They are NULL over a Unix-domain socket."
 
 [[function]]
@@ -70,7 +70,7 @@ functions = ["CURRENT_CATALOG", "CURRENT_DATABASE", "CURRENT_ROLE", "CURRENT_USE
 dialects = ["postgres"]
 type = "NAME"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions, Table 9.74 System Catalog Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions, Table 9.74 System Catalog Information Functions"
 reasoning = "The documentation gives each of these a `name` result."
 
 [[function]]
@@ -79,7 +79,7 @@ function = "CURRENT_SCHEMA"
 dialects = ["postgres"]
 type = "NAME"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions (current_schema → name: \"or a null value if the search path is empty\")"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions (current_schema → name: \"or a null value if the search path is empty\")"
 reasoning = "The first schema of the search path is NULL when the path names no existing schema."
 
 [[function]]
@@ -88,7 +88,7 @@ function = "PG_TYPEOF"
 dialects = ["postgres"]
 type = "REGTYPE"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
 reasoning = "The documentation gives the function a `regtype` result."
 
 [[function]]
@@ -97,7 +97,7 @@ functions = ["VERSION", "OBJ_DESCRIPTION", "COL_DESCRIPTION", "FORMAT_TYPE", "UN
 dialects = ["postgres"]
 type = "TEXT"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions, Table 9.80 Comment Information Functions, Table 9.91 Version Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions, Table 9.80 Comment Information Functions, Table 9.91 Version Information Functions"
 reasoning = "The documentation gives each of these a `text` result."
 
 [[function]]
@@ -106,7 +106,7 @@ functions = ["PG_POSTMASTER_START_TIME", "PG_CONF_LOAD_TIME"]
 dialects = ["postgres"]
 type = "TIMESTAMPTZ"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions"
 reasoning = "The documentation gives each of these a `timestamp with time zone` result."
 
 [[function]]
@@ -115,7 +115,7 @@ function = "PG_NOTIFY"
 dialects = ["postgres"]
 type = "@void"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, NOTIFY, pg_notify(text, text)"
+reference.postgres = "PostgreSQL 17 documentation, NOTIFY, pg_notify(text, text)"
 reasoning = "The function returns `void`, which the driver reads as None."
 
 [[function]]
@@ -124,7 +124,7 @@ function = "MAKEACLITEM"
 dialects = ["postgres"]
 type = "ACLITEM"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.72 aclitem Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.72 aclitem Functions"
 reasoning = "The documentation gives the function an `aclitem` result."
 
 [[function]]
@@ -133,7 +133,7 @@ function = "ACLDEFAULT"
 dialects = ["postgres"]
 type = "ARRAY<ACLITEM>"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.72 aclitem Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.72 aclitem Functions"
 reasoning = "The documentation gives the function an `aclitem[]` result."
 
 [[function]]
@@ -142,7 +142,7 @@ functions = ["PG_BLOCKING_PIDS", "PG_SAFE_SNAPSHOT_BLOCKING_PIDS"]
 dialects = ["postgres"]
 type = "ARRAY<INT>"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions"
 reasoning = "The documentation gives each of these an `integer[]` result."
 
 [[function]]
@@ -151,7 +151,7 @@ function = "CURRENT_SCHEMAS"
 dialects = ["postgres"]
 type = "ARRAY<NAME>"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions"
 reasoning = "The documentation gives the function a `name[]` result."
 
 [[function]]
@@ -160,7 +160,7 @@ function = "PG_SETTINGS_GET_FLAGS"
 dialects = ["postgres"]
 type = "ARRAY<TEXT>"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
 reasoning = "The documentation gives the function a `text[]` result. It is NULL for an object that does not exist, or a value the server does not have."
 
 [[function]]
@@ -169,7 +169,7 @@ functions = ["TXID_CURRENT_IF_ASSIGNED", "TXID_SNAPSHOT_XIP"]
 dialects = ["postgres"]
 type = "BIGINT"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.84 Deprecated Transaction ID and Snapshot Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.84 Deprecated Transaction ID and Snapshot Information Functions"
 reasoning = "The documentation gives each of these a `bigint` result. They are NULL for an object that does not exist, or a value the server does not have."
 
 [[function]]
@@ -178,7 +178,7 @@ functions = ["PG_COLLATION_IS_VISIBLE", "PG_CONVERSION_IS_VISIBLE", "PG_FUNCTION
 dialects = ["postgres"]
 type = "BOOLEAN"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions, Table 9.70 Access Privilege Inquiry Functions, Table 9.73 Schema Visibility Inquiry Functions, Table 9.74 System Catalog Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions, Table 9.70 Access Privilege Inquiry Functions, Table 9.73 Schema Visibility Inquiry Functions, Table 9.74 System Catalog Information Functions"
 reasoning = "The documentation gives each of these a `boolean` result. They are NULL for an object that does not exist, or a value the server does not have."
 
 [[function]]
@@ -187,7 +187,7 @@ function = "PG_NOTIFICATION_QUEUE_USAGE"
 dialects = ["postgres"]
 type = "DOUBLE"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions"
 reasoning = "The documentation gives the function a `double precision` result."
 
 [[function]]
@@ -196,7 +196,7 @@ function = "TO_REGTYPEMOD"
 dialects = ["postgres"]
 type = "INT"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
 reasoning = "The documentation gives the function an `integer` result. It is NULL for a type name that does not exist."
 
 [[function]]
@@ -205,7 +205,7 @@ functions = ["PG_MY_TEMP_SCHEMA", "PG_TABLESPACE_DATABASES"]
 dialects = ["postgres"]
 type = "OID"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions, Table 9.74 System Catalog Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions, Table 9.74 System Catalog Information Functions"
 reasoning = "The documentation gives each of these an `oid` result. They are NULL for an object that does not exist, or a value the server does not have."
 
 [[function]]
@@ -214,7 +214,7 @@ function = "PG_CURRENT_SNAPSHOT"
 dialects = ["postgres"]
 type = "PG_SNAPSHOT"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.82 Transaction ID and Snapshot Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.82 Transaction ID and Snapshot Information Functions"
 reasoning = "The documentation gives the function a `pg_snapshot` result."
 
 [[function]]
@@ -223,7 +223,7 @@ functions = ["ACLEXPLODE", "PG_AVAILABLE_WAL_SUMMARIES", "PG_CONTROL_CHECKPOINT"
 dialects = ["postgres"]
 type = "RECORD"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.72 aclitem Functions, Table 9.74 System Catalog Information Functions, Table 9.79 Object Information and Addressing Functions, Table 9.81 Data Validity Checking Functions, Table 9.82 Transaction ID and Snapshot Information Functions, Table 9.85 Committed Transaction Information Functions, Table 9.86 Control Data Functions, Table 9.92 WAL Summarization Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.72 aclitem Functions, Table 9.74 System Catalog Information Functions, Table 9.79 Object Information and Addressing Functions, Table 9.81 Data Validity Checking Functions, Table 9.82 Transaction ID and Snapshot Information Functions, Table 9.85 Committed Transaction Information Functions, Table 9.86 Control Data Functions, Table 9.92 WAL Summarization Information Functions"
 reasoning = "The documentation gives each of these a `record` result. They are NULL for an object that does not exist, or a value the server does not have."
 
 [[function]]
@@ -232,7 +232,7 @@ function = "TO_REGCLASS"
 dialects = ["postgres"]
 type = "REGCLASS"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
 reasoning = "The documentation gives the function a `regclass` result. It is NULL for an object that does not exist, or a value the server does not have."
 
 [[function]]
@@ -241,7 +241,7 @@ function = "TO_REGCOLLATION"
 dialects = ["postgres"]
 type = "REGCOLLATION"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
 reasoning = "The documentation gives the function a `regcollation` result. It is NULL for an object that does not exist, or a value the server does not have."
 
 [[function]]
@@ -250,7 +250,7 @@ function = "TO_REGNAMESPACE"
 dialects = ["postgres"]
 type = "REGNAMESPACE"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
 reasoning = "The documentation gives the function a `regnamespace` result. It is NULL for an object that does not exist, or a value the server does not have."
 
 [[function]]
@@ -259,7 +259,7 @@ function = "TO_REGOPER"
 dialects = ["postgres"]
 type = "REGOPER"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
 reasoning = "The documentation gives the function a `regoper` result. It is NULL for an object that does not exist, or a value the server does not have."
 
 [[function]]
@@ -268,7 +268,7 @@ function = "TO_REGOPERATOR"
 dialects = ["postgres"]
 type = "REGOPERATOR"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
 reasoning = "The documentation gives the function a `regoperator` result. It is NULL for an object that does not exist, or a value the server does not have."
 
 [[function]]
@@ -277,7 +277,7 @@ function = "TO_REGPROC"
 dialects = ["postgres"]
 type = "REGPROC"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
 reasoning = "The documentation gives the function a `regproc` result. It is NULL for an object that does not exist, or a value the server does not have."
 
 [[function]]
@@ -286,7 +286,7 @@ function = "TO_REGPROCEDURE"
 dialects = ["postgres"]
 type = "REGPROCEDURE"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
 reasoning = "The documentation gives the function a `regprocedure` result. It is NULL for an object that does not exist, or a value the server does not have."
 
 [[function]]
@@ -295,7 +295,7 @@ function = "TO_REGROLE"
 dialects = ["postgres"]
 type = "REGROLE"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
 reasoning = "The documentation gives the function a `regrole` result. It is NULL for an object that does not exist, or a value the server does not have."
 
 [[function]]
@@ -304,7 +304,7 @@ functions = ["PG_BASETYPE", "TO_REGTYPE"]
 dialects = ["postgres"]
 type = "REGTYPE"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.74 System Catalog Information Functions"
 reasoning = "The documentation gives each of these a `regtype` result. They are NULL for an object that does not exist, or a value the server does not have."
 
 [[function]]
@@ -313,7 +313,7 @@ functions = ["CURRENT_QUERY", "ICU_UNICODE_VERSION", "PG_COLLATION_FOR", "PG_CUR
 dialects = ["postgres"]
 type = "TEXT"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions, Table 9.74 System Catalog Information Functions, Table 9.79 Object Information and Addressing Functions, Table 9.80 Comment Information Functions, Table 9.82 Transaction ID and Snapshot Information Functions, Table 9.84 Deprecated Transaction ID and Snapshot Information Functions, Table 9.91 Version Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.69 Session Information Functions, Table 9.74 System Catalog Information Functions, Table 9.79 Object Information and Addressing Functions, Table 9.80 Comment Information Functions, Table 9.82 Transaction ID and Snapshot Information Functions, Table 9.84 Deprecated Transaction ID and Snapshot Information Functions, Table 9.91 Version Information Functions"
 reasoning = "The documentation gives each of these a `text` result. They are NULL for an object that does not exist, or a value the server does not have."
 
 [[function]]
@@ -322,7 +322,7 @@ function = "PG_XACT_COMMIT_TIMESTAMP"
 dialects = ["postgres"]
 type = "TIMESTAMPTZ"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.85 Committed Transaction Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.85 Committed Transaction Information Functions"
 reasoning = "The documentation gives the function a `timestamp with time zone` result. It is NULL for an object that does not exist, or a value the server does not have."
 
 [[function]]
@@ -331,7 +331,7 @@ function = "TXID_CURRENT_SNAPSHOT"
 dialects = ["postgres"]
 type = "TXID_SNAPSHOT"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.84 Deprecated Transaction ID and Snapshot Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.84 Deprecated Transaction ID and Snapshot Information Functions"
 reasoning = "The documentation gives the function a `txid_snapshot` result."
 
 [[function]]
@@ -340,7 +340,7 @@ functions = ["PG_CURRENT_XACT_ID_IF_ASSIGNED", "PG_SNAPSHOT_XIP"]
 dialects = ["postgres"]
 type = "XID8"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.82 Transaction ID and Snapshot Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.82 Transaction ID and Snapshot Information Functions"
 reasoning = "The documentation gives each of these a `xid8` result. They are NULL for an object that does not exist, or a value the server does not have."
 
 [[function]]
@@ -349,5 +349,5 @@ functions = ["PG_CURRENT_XACT_ID", "PG_SNAPSHOT_XMAX", "PG_SNAPSHOT_XMIN"]
 dialects = ["postgres"]
 type = "XID8"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.82 Transaction ID and Snapshot Information Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.27 System Information Functions and Operators, Table 9.82 Transaction ID and Snapshot Information Functions"
 reasoning = "The documentation gives each of these a `xid8` result."

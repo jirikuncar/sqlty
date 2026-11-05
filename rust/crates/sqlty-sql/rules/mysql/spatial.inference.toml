@@ -8,7 +8,7 @@ dialects = ["mysql"]
 arguments = [[], ["@numeric"]]
 type = "GEOMETRY"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.16.7.2 Point Property Functions (ST_X(p [, new_x_val]): with the optional second argument, returns a Point object like the first argument); 14.16.7.1 General Geometry Property Functions (ST_SRID(g [, srid]))"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.16.7.2 Point Property Functions (ST_X(p [, new_x_val]): with the optional second argument, returns a Point object like the first argument); 14.16.7.1 General Geometry Property Functions (ST_SRID(g [, srid]))"
 reasoning = "With a second argument, these return the first argument's geometry with that coordinate or SRID set."
 
 [[function]]
@@ -17,7 +17,7 @@ functions = ["ST_DISTANCE_SPHERE", "ST_AREA", "ST_X", "ST_Y", "ST_LATITUDE", "ST
 dialects = ["mysql"]
 type = "DOUBLE"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.16.13 Spatial Convenience Functions; 14.16.7.4 Polygon and MultiPolygon Property Functions; 14.16.7.2 Point Property Functions; 14.16.10 Spatial Geohash Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.16.13 Spatial Convenience Functions; 14.16.7.4 Polygon and MultiPolygon Property Functions; 14.16.7.2 Point Property Functions; 14.16.10 Spatial Geohash Functions"
 reasoning = "The manual describes each of these as returning a DOUBLE, and NULL for a NULL argument."
 
 [[function]]
@@ -26,7 +26,7 @@ functions = ["ST_DISTANCE", "ST_LENGTH", "ST_FRECHETDISTANCE", "ST_HAUSDORFFDIST
 dialects = ["mysql"]
 type = "DOUBLE"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.16.9.1 Spatial Relation Functions That Use Object Shapes; 14.16.7.3 LineString and MultiLineString Property Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.16.9.1 Spatial Relation Functions That Use Object Shapes; 14.16.7.3 LineString and MultiLineString Property Functions"
 reasoning = "The manual describes each of these as returning a DOUBLE; an empty geometry, or a point for ST_Length, gives NULL."
 
 [[function]]
@@ -35,7 +35,7 @@ functions = ["ST_CONTAINS", "ST_CROSSES", "ST_DISJOINT", "ST_EQUALS", "ST_INTERS
 dialects = ["mysql"]
 type = "INT"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.16.9.1 Spatial Relation Functions That Use Object Shapes; 14.16.9.2 Spatial Relation Functions That Use Minimum Bounding Rectangles"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.16.9.1 Spatial Relation Functions That Use Object Shapes; 14.16.9.2 Spatial Relation Functions That Use Minimum Bounding Rectangles"
 reasoning = "Each returns 1 or 0 for whether the relation holds, and NULL when a geometry is empty."
 
 [[function]]
@@ -44,7 +44,7 @@ functions = ["ST_ISEMPTY", "ST_ISSIMPLE", "ST_ISVALID", "ST_SRID"]
 dialects = ["mysql"]
 type = "INT"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.16.7.1 General Geometry Property Functions; 14.16.13 Spatial Convenience Functions (ST_IsValid())"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.16.7.1 General Geometry Property Functions; 14.16.13 Spatial Convenience Functions (ST_IsValid())"
 reasoning = "The manual describes each of these as returning 1 or 0, or an SRID, for any geometry."
 
 [[function]]
@@ -53,7 +53,7 @@ functions = ["ST_DIMENSION", "ST_ISCLOSED", "ST_NUMPOINTS", "ST_NUMGEOMETRIES", 
 dialects = ["mysql"]
 type = "INT"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.16.7.1 General Geometry Property Functions; 14.16.7.3 LineString and MultiLineString Property Functions; 14.16.7.4 Polygon and MultiPolygon Property Functions; 14.16.7.5 GeometryCollection Property Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.16.7.1 General Geometry Property Functions; 14.16.7.3 LineString and MultiLineString Property Functions; 14.16.7.4 Polygon and MultiPolygon Property Functions; 14.16.7.5 GeometryCollection Property Functions"
 reasoning = "Each returns an integer, and NULL for an empty geometry or one of another kind."
 
 [[function]]
@@ -62,7 +62,7 @@ functions = ["ST_GEOMFROMTEXT", "ST_GEOMETRYFROMTEXT", "ST_GEOMCOLLFROMTEXT", "S
 dialects = ["mysql"]
 type = "GEOMETRY"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.16.3 Functions That Create Geometry Values from WKT Values; 14.16.4 Functions That Create Geometry Values from WKB Values; 14.16.5 MySQL-Specific Functions That Create Geometry Values; 14.16.11 Spatial GeoJSON Functions; 14.16.7.1 General Geometry Property Functions (ST_Envelope()); 14.16.8 Spatial Operator Functions; 14.16.13 Spatial Convenience Functions (ST_MakeEnvelope())"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.16.3 Functions That Create Geometry Values from WKT Values; 14.16.4 Functions That Create Geometry Values from WKB Values; 14.16.5 MySQL-Specific Functions That Create Geometry Values; 14.16.11 Spatial GeoJSON Functions; 14.16.7.1 General Geometry Property Functions (ST_Envelope()); 14.16.8 Spatial Operator Functions; 14.16.13 Spatial Convenience Functions (ST_MakeEnvelope())"
 reasoning = "Each builds a geometry, or raises an error for input it cannot read, and returns NULL for a NULL argument."
 
 [[function]]
@@ -71,7 +71,7 @@ functions = ["POINT", "ST_POINTFROMGEOHASH"]
 dialects = ["mysql"]
 type = "POINT"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.16.5 MySQL-Specific Functions That Create Geometry Values (Point(x, y)); 14.16.10 Spatial Geohash Functions (ST_PointFromGeoHash())"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.16.5 MySQL-Specific Functions That Create Geometry Values (Point(x, y)); 14.16.10 Spatial Geohash Functions (ST_PointFromGeoHash())"
 reasoning = "Each builds a Point from its coordinates or geohash."
 
 [[function]]
@@ -80,7 +80,7 @@ functions = ["LINESTRING", "POLYGON", "ST_CENTROID", "ST_CONVEXHULL", "ST_SIMPLI
 dialects = ["mysql"]
 type = "GEOMETRY"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.16.5 MySQL-Specific Functions That Create Geometry Values (LineString(): If the number of arguments is less than two, the return value is NULL); 14.16.7.3 LineString and MultiLineString Property Functions; 14.16.7.4 Polygon and MultiPolygon Property Functions; 14.16.7.5 GeometryCollection Property Functions; 14.16.8 Spatial Operator Functions; 14.16.13 Spatial Convenience Functions (ST_Validate(): NULL if the argument is not geometrically valid)"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.16.5 MySQL-Specific Functions That Create Geometry Values (LineString(): If the number of arguments is less than two, the return value is NULL); 14.16.7.3 LineString and MultiLineString Property Functions; 14.16.7.4 Polygon and MultiPolygon Property Functions; 14.16.7.5 GeometryCollection Property Functions; 14.16.8 Spatial Operator Functions; 14.16.13 Spatial Convenience Functions (ST_Validate(): NULL if the argument is not geometrically valid)"
 reasoning = "Each returns a geometry, and NULL for an empty or invalid geometry, one of another kind, an index out of range, or too few points."
 
 [[function]]
@@ -89,7 +89,7 @@ function = "ST_COLLECT"
 dialects = ["mysql"]
 type = "GEOMETRY"
 nullability = "aggregate"
-reference = "MySQL 8.4 Reference Manual, 14.16.12 Spatial Aggregate Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.16.12 Spatial Aggregate Functions"
 reasoning = "The aggregate collects the group's geometries into one; an empty or all-NULL group gives NULL."
 
 [[function]]
@@ -98,7 +98,7 @@ functions = ["ST_ASTEXT", "ST_ASWKT", "ST_GEOMETRYTYPE", "ST_GEOHASH"]
 dialects = ["mysql"]
 type = "TEXT"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.16.6 Geometry Format Conversion Functions; 14.16.7.1 General Geometry Property Functions (ST_GeometryType()); 14.16.10 Spatial Geohash Functions (ST_GeoHash())"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.16.6 Geometry Format Conversion Functions; 14.16.7.1 General Geometry Property Functions (ST_GeometryType()); 14.16.10 Spatial Geohash Functions (ST_GeoHash())"
 reasoning = "Each returns a string, for an empty geometry too."
 
 [[function]]
@@ -107,7 +107,7 @@ functions = ["ST_ASBINARY", "ST_ASWKB", "ST_BUFFER_STRATEGY"]
 dialects = ["mysql"]
 type = "VARBINARY"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.16.6 Geometry Format Conversion Functions; 14.16.8 Spatial Operator Functions (ST_Buffer_Strategy())"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.16.6 Geometry Format Conversion Functions; 14.16.8 Spatial Operator Functions (ST_Buffer_Strategy())"
 reasoning = "Each returns a binary string: the WKB of a geometry, or a strategy byte string for ST_Buffer."
 
 [[function]]
@@ -116,5 +116,5 @@ function = "ST_ASGEOJSON"
 dialects = ["mysql"]
 type = "JSON"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.16.11 Spatial GeoJSON Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.16.11 Spatial GeoJSON Functions"
 reasoning = "The function returns the geometry as a GeoJSON object."

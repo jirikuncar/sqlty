@@ -14,7 +14,7 @@ operator = "LongArrow"
 left = ["@json"]
 type = "TEXT"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, Table 9.45"
+reference.postgres = "PostgreSQL 17 documentation, Table 9.45"
 reasoning = "Text out."
 "#;
 
@@ -126,6 +126,10 @@ fn errors_name_the_rule_and_file() {
         (
             VALID.replace("Text out.", ""),
             "`reference` and `reasoning` must not be empty",
+        ),
+        (
+            VALID.replace("reference.postgres", "reference.oracle"),
+            "`reference.oracle`: cite one of postgres, mysql, sqlite",
         ),
         (
             VALID.replace("operator =", "dialects = [\"postgres\"]\noperator ="),
@@ -282,7 +286,7 @@ function = "SUM"
 argument = ["@integer"]
 type = "BIGINT"
 nullability = "aggregate"
-reference = "PostgreSQL 17 documentation, Table 9.60"
+reference.postgres = "PostgreSQL 17 documentation, Table 9.60"
 reasoning = "Wider."
 "#;
 
@@ -404,7 +408,7 @@ fn parameter_types_are_generated_and_checked() {
 fn function(id: &str, dialect: &str, name: &str) -> String {
     format!(
         "[[function]]\nid = {id:?}\nfunction = {name:?}\ndialects = [{dialect:?}]\ntype = \"TEXT\"\nnullability = \"strict\"\n\
-         reference = \"Reference\"\nreasoning = \"Reason.\"\n"
+         reference.postgres = \"Reference\"\nreasoning = \"Reason.\"\n"
     )
 }
 

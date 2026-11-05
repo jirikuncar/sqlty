@@ -7,7 +7,7 @@ dialects = ["postgres"]
 left = ["JSONB"]
 type = "JSONB"
 shadows = ["postgres.concat.array-right"]
-reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.46 Additional jsonb Operators (jsonb || jsonb → jsonb)"
+reference.postgres = "PostgreSQL 17 documentation, 9.16.1, Table 9.46 Additional jsonb Operators (jsonb || jsonb → jsonb)"
 reasoning = "`||` on a jsonb value merges JSON."
 
 [[rule]]
@@ -17,7 +17,7 @@ dialects = ["postgres"]
 right = ["JSONB"]
 type = "JSONB"
 shadows = ["postgres.concat.array"]
-reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.46 Additional jsonb Operators (jsonb || jsonb → jsonb)"
+reference.postgres = "PostgreSQL 17 documentation, 9.16.1, Table 9.46 Additional jsonb Operators (jsonb || jsonb → jsonb)"
 reasoning = "`||` on a jsonb value merges JSON."
 
 [[rule]]
@@ -27,7 +27,7 @@ dialects = ["postgres"]
 left = ["@array"]
 right = ["@array"]
 type = "@common"
-reference = "PostgreSQL 17 documentation, 9.19, Table 9.54 Array Operators (anycompatiblearray || anycompatiblearray → anycompatiblearray)"
+reference.postgres = "PostgreSQL 17 documentation, 9.19, Table 9.54 Array Operators (anycompatiblearray || anycompatiblearray → anycompatiblearray)"
 reasoning = "Two arrays concatenate into an array of their common element type."
 
 [[rule]]
@@ -36,7 +36,7 @@ operator = "StringConcat"
 dialects = ["postgres"]
 left = ["@array"]
 type = "@left"
-reference = "PostgreSQL 17 documentation, 9.19, Table 9.54 Array Operators (anycompatiblearray || anycompatible → anycompatiblearray)"
+reference.postgres = "PostgreSQL 17 documentation, 9.19, Table 9.54 Array Operators (anycompatiblearray || anycompatible → anycompatiblearray)"
 reasoning = "Appending an element keeps the array's type."
 
 [[rule]]
@@ -45,7 +45,7 @@ operator = "StringConcat"
 dialects = ["postgres"]
 right = ["@array"]
 type = "@right"
-reference = "PostgreSQL 17 documentation, 9.19, Table 9.54 Array Operators (anycompatible || anycompatiblearray → anycompatiblearray)"
+reference.postgres = "PostgreSQL 17 documentation, 9.19, Table 9.54 Array Operators (anycompatible || anycompatiblearray → anycompatiblearray)"
 reasoning = "Prepending an element keeps the array's type."
 
 [[rule]]
@@ -55,7 +55,7 @@ dialects = ["postgres"]
 left = ["@binary"]
 right = ["@binary"]
 type = "@left"
-reference = "PostgreSQL 17 documentation, 9.5, Table 9.11 SQL Binary String Functions and Operators (bytea || bytea → bytea)"
+reference.postgres = "PostgreSQL 17 documentation, 9.5, Table 9.11 SQL Binary String Functions and Operators (bytea || bytea → bytea)"
 reasoning = "Two binary strings concatenate into a binary string."
 
 [[rule]]
@@ -65,5 +65,5 @@ dialects = ["postgres"]
 left = ["BIT", "VARBIT"]
 right = ["BIT", "VARBIT"]
 type = "VARBIT"
-reference = "PostgreSQL 17 documentation, 9.6, Table 9.14 Bit String Operators (bit || bit → bit)"
+reference.postgres = "PostgreSQL 17 documentation, 9.6, Table 9.14 Bit String Operators (bit || bit → bit)"
 reasoning = "Concatenated bit strings have the sum of their lengths, which the server describes as `bit varying`."

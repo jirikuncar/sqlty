@@ -6,7 +6,7 @@ function = "XPATH"
 dialects = ["postgres"]
 type = "ARRAY<XML>"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.15.3 Processing XML"
+reference.postgres = "PostgreSQL 17 documentation, 9.15.3 Processing XML"
 reasoning = "The documentation gives the function a `xml[]` result."
 
 [[function]]
@@ -15,7 +15,7 @@ functions = ["XML_IS_WELL_FORMED", "XML_IS_WELL_FORMED_CONTENT", "XML_IS_WELL_FO
 dialects = ["postgres"]
 type = "BOOLEAN"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.15.2 XML Predicates; 9.15.3 Processing XML"
+reference.postgres = "PostgreSQL 17 documentation, 9.15.2 XML Predicates; 9.15.3 Processing XML"
 reasoning = "The documentation gives each of these a `boolean` result."
 
 [[function]]
@@ -24,7 +24,7 @@ functions = ["CURSOR_TO_XML", "CURSOR_TO_XMLSCHEMA", "DATABASE_TO_XML", "DATABAS
 dialects = ["postgres"]
 type = "XML"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.15.4 Mapping Tables to XML; 9.15.1 Producing XML Content; 8.13.1 Creating XML Values"
+reference.postgres = "PostgreSQL 17 documentation, 9.15.4 Mapping Tables to XML; 9.15.1 Producing XML Content; 8.13.1 Creating XML Values"
 reasoning = "The documentation gives each of these a `xml` result."
 
 [[function]]
@@ -33,7 +33,7 @@ function = "XMLELEMENT"
 dialects = ["postgres"]
 type = "XML"
 nullability = "non-null"
-reference = "PostgreSQL 17 documentation, 9.15.1 Producing XML Content, 9.15.1.3 xmlelement"
+reference.postgres = "PostgreSQL 17 documentation, 9.15.1 Producing XML Content, 9.15.1.3 xmlelement"
 reasoning = "The element is produced whatever its content: `xmlelement(name a, NULL)` is `<a/>`."
 
 [[function]]
@@ -42,7 +42,7 @@ functions = ["XMLCONCAT", "XMLFOREST"]
 dialects = ["postgres"]
 type = "XML"
 nullability = "all-arguments"
-reference = "PostgreSQL 17 documentation, 9.15.1 Producing XML Content, 9.15.1.2 xmlconcat and 9.15.1.4 xmlforest"
+reference.postgres = "PostgreSQL 17 documentation, 9.15.1 Producing XML Content, 9.15.1.2 xmlconcat and 9.15.1.4 xmlforest"
 reasoning = "NULL arguments are left out, so the result is NULL only when every argument is."
 
 [[function]]
@@ -51,5 +51,5 @@ function = "XMLROOT"
 dialects = ["postgres"]
 type = "XML"
 nullability = "leading(1)"
-reference = "PostgreSQL 17 documentation, 9.15.1 Producing XML Content, 9.15.1.6 xmlroot"
+reference.postgres = "PostgreSQL 17 documentation, 9.15.1 Producing XML Content, 9.15.1.6 xmlroot"
 reasoning = "The result is the first argument with its root node's properties set, NULL only when that argument is."

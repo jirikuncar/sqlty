@@ -6,7 +6,7 @@ function = "ANY_VALUE"
 dialects = ["mysql"]
 type = "@same(0)"
 nullability = "aggregate"
-reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
 reasoning = "The result is one of the first argument's values, so it keeps its type and values."
 
 [[function]]
@@ -15,7 +15,7 @@ function = "SLEEP"
 dialects = ["mysql"]
 type = "BIGINT"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
 reasoning = "The manual describes each of these as returning an integer."
 
 [[function]]
@@ -24,7 +24,7 @@ function = "INET_ATON"
 dialects = ["mysql"]
 type = "BIGINT"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
 reasoning = "The manual describes each of these as returning an integer. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."
 
 [[function]]
@@ -33,7 +33,7 @@ functions = ["IS_IPV4", "IS_IPV6", "IS_IPV4_COMPAT", "IS_IPV4_MAPPED", "IS_UUID"
 dialects = ["mysql"]
 type = "INT"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
 reasoning = "The manual describes each of these as returning an integer."
 
 [[function]]
@@ -42,7 +42,7 @@ function = "GROUPING"
 dialects = ["mysql"]
 type = "INT"
 nullability = "non-null"
-reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
 reasoning = "The manual describes each of these as returning an integer. It never returns NULL, even for NULL arguments."
 
 [[function]]
@@ -51,7 +51,7 @@ function = "BIN_TO_UUID"
 dialects = ["mysql"]
 type = "TEXT"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
 reasoning = "The manual describes each of these as returning a string."
 
 [[function]]
@@ -60,7 +60,7 @@ function = "UUID"
 dialects = ["mysql"]
 type = "TEXT"
 nullability = "non-null"
-reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
 reasoning = "The manual describes each of these as returning a string. It never returns NULL, even for NULL arguments."
 
 [[function]]
@@ -69,7 +69,7 @@ functions = ["INET_NTOA", "INET6_NTOA"]
 dialects = ["mysql"]
 type = "TEXT"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
 reasoning = "The manual describes each of these as returning a string. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."
 
 [[function]]
@@ -78,7 +78,7 @@ function = "UUID_SHORT"
 dialects = ["mysql"]
 type = "UBIGINT"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
 reasoning = "The manual describes the function as returning an unsigned integer."
 
 [[function]]
@@ -87,7 +87,7 @@ function = "UUID_TO_BIN"
 dialects = ["mysql"]
 type = "VARBINARY"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
 reasoning = "The manual describes each of these as returning a binary string."
 
 [[function]]
@@ -96,7 +96,7 @@ function = "INET6_ATON"
 dialects = ["mysql"]
 type = "VARBINARY"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.23 Miscellaneous Functions"
 reasoning = "The manual describes each of these as returning a binary string. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."
 
 [[function]]
@@ -105,5 +105,5 @@ function = "INTERVAL"
 dialects = ["mysql"]
 type = "INT"
 nullability = "non-null"
-reference = "MySQL 8.4 Reference Manual, 14.4.2 Comparison Functions and Operators (INTERVAL(N,N1,N2,N3,...) Returns 0 if N ≤ N1, 1 if N ≤ N2 and so on, or -1 if N is NULL)"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.4.2 Comparison Functions and Operators (INTERVAL(N,N1,N2,N3,...) Returns 0 if N ≤ N1, 1 if N ≤ N2 and so on, or -1 if N is NULL)"
 reasoning = "The function returns the index of the interval `N` falls in, and -1 rather than NULL for a NULL `N`."

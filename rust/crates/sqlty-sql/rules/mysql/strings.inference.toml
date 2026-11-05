@@ -7,7 +7,7 @@ dialects = ["mysql"]
 argument = ["@binary"]
 type = "VARBINARY"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CONCAT(): if the arguments include any binary strings, the result is a binary string)"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CONCAT(): if the arguments include any binary strings, the result is a binary string)"
 reasoning = "A string function of a binary string gives a binary string, which MySQL drivers return as bytes."
 
 [[function]]
@@ -17,7 +17,7 @@ dialects = ["mysql"]
 argument = ["@binary"]
 type = "VARBINARY"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CONCAT(): if the arguments include any binary strings, the result is a binary string)"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CONCAT(): if the arguments include any binary strings, the result is a binary string)"
 reasoning = "A string function of a binary string gives a binary string, which MySQL drivers return as bytes. It is NULL for some non-null arguments too: no match, an index out of range or an empty array."
 
 [[function]]
@@ -27,7 +27,7 @@ dialects = ["mysql"]
 any-argument = ["@binary"]
 type = "VARBINARY"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CONCAT(): if the arguments include any binary strings, the result is a binary string)"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CONCAT(): if the arguments include any binary strings, the result is a binary string)"
 reasoning = "These build their result from all their string arguments, so one binary string makes it a binary string."
 
 [[function]]
@@ -37,7 +37,7 @@ dialects = ["mysql"]
 any-argument = ["@binary"]
 type = "VARBINARY"
 nullability = "leading(1)"
-reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CONCAT(): if the arguments include any binary strings, the result is a binary string)"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CONCAT(): if the arguments include any binary strings, the result is a binary string)"
 reasoning = "These build their result from all their string arguments, so one binary string makes it a binary string. Only a NULL first argument makes it NULL: it skips NULLs among the others."
 
 [[function]]
@@ -47,7 +47,7 @@ dialects = ["mysql"]
 any-argument = ["@binary"]
 type = "VARBINARY"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CONCAT(): if the arguments include any binary strings, the result is a binary string)"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CONCAT(): if the arguments include any binary strings, the result is a binary string)"
 reasoning = "These build their result from all their string arguments, so one binary string makes it a binary string. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."
 
 [[function]]
@@ -57,7 +57,7 @@ dialects = ["mysql"]
 arguments = [[], ["@binary"]]
 type = "VARBINARY"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.8.2 Regular Expressions (REGEXP_REPLACE(), REGEXP_SUBSTR())"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.8.2 Regular Expressions (REGEXP_REPLACE(), REGEXP_SUBSTR())"
 reasoning = "A binary pattern makes the match bytewise and the result a binary string, as a binary subject does."
 
 [[function]]
@@ -67,7 +67,7 @@ dialects = ["mysql"]
 arguments = [[], ["@binary"]]
 type = "VARBINARY"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.8.2 Regular Expressions (REGEXP_REPLACE(), REGEXP_SUBSTR())"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.8.2 Regular Expressions (REGEXP_REPLACE(), REGEXP_SUBSTR())"
 reasoning = "A binary pattern makes the match bytewise and the result a binary string, as a binary subject does. It is NULL for some non-null arguments too: no match, an index out of range or an empty array."
 
 [[function]]
@@ -77,7 +77,7 @@ dialects = ["mysql"]
 argument = ["@binary"]
 type = "VARBINARY"
 nullability = "aggregate"
-reference = "MySQL 8.4 Reference Manual, 14.19.1 Aggregate Function Descriptions (BIT_AND(): binary-string arguments produce a binary string result)"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.19.1 Aggregate Function Descriptions (BIT_AND(): binary-string arguments produce a binary string result)"
 reasoning = "Over binary strings the bit aggregates work bytewise and give a binary string."
 
 [[function]]
@@ -87,7 +87,7 @@ dialects = ["mysql"]
 argument = ["@integer", "@unsigned", "YEAR", "BIT", "BOOLEAN"]
 type = "BIGINT"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions (ROUND(): when the first argument is of any integer type, the return type is always BIGINT; TRUNCATE() follows the same rules)"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions (ROUND(): when the first argument is of any integer type, the return type is always BIGINT; TRUNCATE() follows the same rules)"
 reasoning = "Rounding an integer, including an unsigned, `YEAR`, `BIT` or `BOOLEAN` value, gives a BIGINT."
 
 [[function]]
@@ -97,7 +97,7 @@ dialects = ["mysql"]
 argument = ["DECIMAL", "NUMERIC", "UDECIMAL"]
 type = "@argument"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions (ROUND(): when the first argument is a DECIMAL value, the return type is also DECIMAL; TRUNCATE() follows the same rules)"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions (ROUND(): when the first argument is a DECIMAL value, the return type is also DECIMAL; TRUNCATE() follows the same rules)"
 reasoning = "Rounding a decimal gives a decimal."
 
 [[function]]
@@ -107,7 +107,7 @@ dialects = ["mysql"]
 argument = ["@known"]
 type = "DOUBLE"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions (ROUND(): when the first argument is of any floating-point type or of any non-numeric type, the return type is always DOUBLE; TRUNCATE() follows the same rules)"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions (ROUND(): when the first argument is of any floating-point type or of any non-numeric type, the return type is always DOUBLE; TRUNCATE() follows the same rules)"
 reasoning = "Rounding a float, a string or a date gives a DOUBLE."
 
 [[function]]
@@ -116,7 +116,7 @@ functions = ["BIT_AND", "BIT_OR", "BIT_XOR"]
 dialects = ["mysql"]
 type = "BIGINT"
 nullability = "aggregate"
-reference = "MySQL 8.4 Reference Manual, 14.19.1 Aggregate Function Descriptions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.19.1 Aggregate Function Descriptions"
 reasoning = "The manual describes each of these as returning an integer."
 
 [[function]]
@@ -125,7 +125,7 @@ functions = ["ROUND", "TRUNCATE"]
 dialects = ["mysql"]
 type = "@argument-type(0)"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.6.2 Mathematical Functions"
 reasoning = "The result has the type of the first argument."
 
 [[function]]
@@ -134,7 +134,7 @@ functions = ["REGEXP_INSTR", "REGEXP_LIKE", "LOCATE", "INSTR", "ASCII", "ORD", "
 dialects = ["mysql"]
 type = "BIGINT"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.8.2 Regular Expressions; 14.8 String Functions and Operators; 14.8.1 String Comparison Functions and Operators"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.8.2 Regular Expressions; 14.8 String Functions and Operators; 14.8.1 String Comparison Functions and Operators"
 reasoning = "The manual describes each of these as returning an integer."
 
 [[function]]
@@ -143,7 +143,7 @@ function = "FIELD"
 dialects = ["mysql"]
 type = "BIGINT"
 nullability = "non-null"
-reference = "MySQL 8.4 Reference Manual, 14.8.2 Regular Expressions; 14.8 String Functions and Operators; 14.8.1 String Comparison Functions and Operators"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.8.2 Regular Expressions; 14.8 String Functions and Operators; 14.8.1 String Comparison Functions and Operators"
 reasoning = "The manual describes each of these as returning an integer. It never returns NULL, even for NULL arguments."
 
 [[function]]
@@ -152,7 +152,7 @@ functions = ["BIN", "OCT", "REGEXP_REPLACE", "REPEAT", "HEX", "SPACE", "SUBSTRIN
 dialects = ["mysql"]
 type = "TEXT"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators; 14.8.2 Regular Expressions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators; 14.8.2 Regular Expressions"
 reasoning = "The manual describes each of these as returning a string."
 
 [[function]]
@@ -161,7 +161,7 @@ function = "QUOTE"
 dialects = ["mysql"]
 type = "TEXT"
 nullability = "non-null"
-reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators; 14.8.2 Regular Expressions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators; 14.8.2 Regular Expressions"
 reasoning = "The manual describes each of these as returning a string. It never returns NULL, even for NULL arguments."
 
 [[function]]
@@ -170,7 +170,7 @@ functions = ["REGEXP_SUBSTR", "ELT"]
 dialects = ["mysql"]
 type = "TEXT"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators; 14.8.2 Regular Expressions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators; 14.8.2 Regular Expressions"
 reasoning = "The manual describes each of these as returning a string. It is NULL for some non-null arguments too: no match, an index out of range or an empty array."
 
 [[function]]
@@ -179,7 +179,7 @@ functions = ["UNHEX", "WEIGHT_STRING"]
 dialects = ["mysql"]
 type = "VARBINARY"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators"
 reasoning = "The manual describes each of these as returning a binary string."
 
 [[function]]
@@ -188,7 +188,7 @@ function = "FROM_BASE64"
 dialects = ["mysql"]
 type = "VARBINARY"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators"
 reasoning = "The manual describes each of these as returning a binary string. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."
 
 [[function]]
@@ -197,7 +197,7 @@ functions = ["UPPER", "LOWER", "UCASE", "LCASE", "TRIM", "LTRIM", "RTRIM", "LEFT
 dialects = ["mysql"]
 type = "@text(0)"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators"
 reasoning = "A string function of a string gives the first argument's string type, a binary string for a binary one."
 
 [[function]]
@@ -206,7 +206,7 @@ function = "CHAR"
 dialects = ["mysql"]
 type = "VARBINARY"
 nullability = "non-null"
-reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CHAR(N,... [USING charset_name]): NULL values are skipped. By default, CHAR() returns a binary string)"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CHAR(N,... [USING charset_name]): NULL values are skipped. By default, CHAR() returns a binary string)"
 reasoning = "Without USING, the function returns the characters of its codes as a binary string, skipping NULL codes."
 
 [[function]]
@@ -215,7 +215,7 @@ function = "CHARACTER_LENGTH"
 dialects = ["mysql"]
 type = "INT"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CHARACTER_LENGTH() is a synonym for CHAR_LENGTH())"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (CHARACTER_LENGTH() is a synonym for CHAR_LENGTH())"
 reasoning = "The function counts characters, as CHAR_LENGTH does."
 
 [[function]]
@@ -224,5 +224,5 @@ function = "LOAD_FILE"
 dialects = ["mysql"]
 type = "VARBINARY"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (LOAD_FILE(): If the file does not exist or cannot be read, the function returns NULL)"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.8 String Functions and Operators (LOAD_FILE(): If the file does not exist or cannot be read, the function returns NULL)"
 reasoning = "The function returns a file's contents as a binary string, and NULL for a file it cannot read."
