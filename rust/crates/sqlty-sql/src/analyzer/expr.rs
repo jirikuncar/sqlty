@@ -515,19 +515,25 @@ impl<'a> Analyzer<'a> {
         scope: &Scope,
     ) -> Inferred<Typed> {
         let mut results = Vec::new();
+        // Later branches read a column without the values earlier `WHEN`s took.
+        let mut skipped = self.clone();
         for when in conditions {
             // A branch reads its column where its `WHEN` holds: `WHEN s = 'a' THEN s` is 'a'.
-            let learned = self.learn(&when.condition, true, scope);
+            let learned = skipped.learn(&when.condition, true, scope);
             if learned.limits_values() {
-                let mut inner = self.clone();
-                inner.facts = self.facts.with(learned);
+                let mut inner = skipped.clone();
+                inner.facts = skipped.facts.with(learned);
                 results.push(inner.expr(&when.result, scope)?);
             } else {
-                results.push(self.expr(&when.result, scope)?);
+                results.push(skipped.expr(&when.result, scope)?);
+            }
+            let rest = skipped.learn_skipped(&when.condition, scope);
+            if rest.limits_values() {
+                skipped.facts = skipped.facts.with(rest);
             }
         }
         if let Some(expr) = else_result {
-            results.push(self.expr(expr, scope)?);
+            results.push(skipped.expr(expr, scope)?);
         }
         if self.dialect == SqlDialect::Postgres {
             // PostgreSQL resolves the `ELSE` result first: of `varchar` and `text`, which
