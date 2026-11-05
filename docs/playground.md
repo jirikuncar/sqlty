@@ -126,10 +126,22 @@ queries as you type. It runs in your browser. The engine is compiled to
   .sqlty-console [data-notes] p { margin: 0 0 0.6em; }
   #sqlty-playground .sqlty-console li { margin-left: 0; }
   #sqlty-playground .sqlty-console li ul { margin: 0.2rem 0 0.4rem 1rem; list-style: none; }
-  .sqlty-console [data-problems] li { display: grid; grid-template-columns: 1.2em auto 1fr; column-gap: 0.5em; align-items: baseline; }
-  .sqlty-console [data-problems] a { white-space: nowrap; justify-self: start; }
-  .sqlty-console [data-problems] button { font: inherit; color: inherit; text-align: left; padding: 0.1rem 0; background: none; border: 0; cursor: pointer; }
+  #sqlty-playground .sqlty-console li { line-height: 1.45; margin-bottom: 0.35em; }
+  .sqlty-console [data-problems] li[data-severity] { display: grid; grid-template-columns: 1.2em 1fr auto; column-gap: 0.5em; align-items: baseline; }
+  .sqlty-console [data-problems] a { white-space: nowrap; font-size: 0.85em; color: var(--md-default-fg-color--light); }
+  .sqlty-console [data-problems] a:hover { color: var(--md-accent-fg-color); }
+  .sqlty-console [data-problems] button { font: inherit; color: inherit; text-align: left; padding: 0; background: none; border: 0; cursor: pointer; }
   .sqlty-console [data-problems] button:hover { color: var(--md-accent-fg-color); }
+  .sqlty-console code { font-size: 0.92em; padding: 0 0.1em; word-break: normal; overflow-wrap: anywhere; }
+  .sqlty-console .sqlty-at { font-family: var(--md-code-font-family); font-size: 0.85em; color: var(--md-default-fg-color--light); }
+  #sqlty-playground [data-types] > li { margin-bottom: 0.8em; }
+  .sqlty-columns { display: grid; grid-template-columns: max-content max-content 1fr; column-gap: 1.2em; margin: 0.2em 0 0 1.2em; }
+  .sqlty-columns > span { color: var(--md-default-fg-color--light); }
+  #sqlty-playground .sqlty-columns code { background: none; padding: 0; overflow-wrap: normal; }
+  #sqlty-playground .sqlty-columns code.param { color: var(--md-default-fg-color--light); }
+  .sqlty-why { grid-column: 1 / -1; padding: 0 0 0.3em 1em; font-size: 0.88em; color: var(--md-default-fg-color--light); }
+  .sqlty-why p { margin: 0; }
+  .sqlty-why cite { font-style: normal; opacity: 0.8; }
   .sqlty-console [data-severity="error"]::before { content: "\25CF"; color: var(--md-code-hl-number-color, #c62828); }
   .sqlty-console [data-severity="warn"]::before { content: "\25B2"; color: var(--md-code-hl-special-color, #ef6c00); }
   .sqlty-console > div:not([data-notes]) { height: 100%; }
@@ -150,8 +162,9 @@ queries as you type. It runs in your browser. The engine is compiled to
     .sqlty-wide { display: none; }
     .sqlty-narrow { display: inline; }
     .sqlty-steps { gap: 0.3rem; margin-bottom: 0.3rem; }
-    .sqlty-console [data-problems] li { grid-template-columns: 1.2em 1fr; }
+    .sqlty-console [data-problems] li[data-severity] { grid-template-columns: 1.2em 1fr; }
     .sqlty-console [data-problems] a { grid-column: 2; }
+    .sqlty-columns { margin-left: 0.6em; column-gap: 0.8em; }
     .sqlty-tabs [role="tab"] { padding: 0.3rem 0.55rem; font-size: 0.62rem; }
   }
 </style>
