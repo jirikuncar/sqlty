@@ -101,3 +101,31 @@ async def run(db: aiosqlite.Connection, other) -> None:
     await other.execute("INSERT INTO meta (key, value) VALUES (?, ?)", ("version",))
 # error:
 ```
+
+## Also configured as a helper
+
+A driver method registered in `[[tool.sqlty.functions]]` has its parameters
+reported once.
+
+```toml
+[[tool.sqlty.functions]]
+import-path = "aiosqlite.core.Connection.execute"
+query-param = "sql"
+```
+
+`aiosqlite/core.py`:
+
+```python
+from typing import Any
+
+class Connection:
+    async def execute(self, sql: str, parameters: Any = None) -> Any: ...
+```
+
+```python
+from aiosqlite.core import Connection
+
+async def save(db: Connection) -> None:
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+    await db.execute("--sql\nINSERT INTO meta (key, value) VALUES (?, ?)", ("version",))
+```
