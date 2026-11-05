@@ -103,11 +103,6 @@ const editor = monaco.editor.create(root.querySelector("[data-source]"), { ...op
 const views = new Map();
 const files = root.querySelectorAll("[data-file]");
 const tabs = root.querySelectorAll("[data-tab]");
-const rewritten = monaco.editor.create(root.querySelector("[data-rewritten]"), {
-  ...options,
-  language: "python",
-  readOnly: true,
-});
 const output = monaco.editor.create(root.querySelector("[data-json]"), {
   ...options,
   language: "json",
@@ -399,7 +394,6 @@ function refresh() {
   if (!answer.diagnostics.length) problems.replaceChildren(Object.assign(document.createElement("li"), { textContent: "No problems." }));
   root.querySelector('[data-tab="problems"]').textContent = `Problems (${answer.diagnostics.length})`;
   root.querySelector("[data-types]").replaceChildren(...answer.queries.map(describe));
-  rewritten.setValue(answer.rewritten);
   output.setValue(JSON.stringify(answer.diagnostics.map((found) => checked(found, model)), null, 2));
   refreshed.fire();
 }

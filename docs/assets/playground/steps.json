@@ -24,14 +24,14 @@
     },
     {
       "title": "Rewrite: the row type in the code",
-      "panel": "rewritten",
-      "notes": "sqlty rewrite wraps each query in SQL[T], its row type, so a type checker sees what each row holds. Press Rewrite to apply it, Strip to take it back.",
+      "panel": "notes",
+      "notes": "sqlty rewrite wraps each query in SQL[T], its row type, so a type checker sees what each row holds. Press Rewrite to apply it, and Strip to take it back.",
       "source": "users = \"--sql\\nSELECT id, name, email FROM users\"\n\nspent = \"\"\"--sql\nSELECT u.name, SUM(o.total) AS spent\nFROM users AS u\nLEFT JOIN orders AS o ON o.user_id = u.id\nGROUP BY u.name\"\"\"\n"
     },
     {
       "title": "Parameters have types too",
-      "panel": "rewritten",
-      "notes": "With param-types = true, a parameter is typed by what it is compared with, and Rewrite writes a TypedDict for the named ones.",
+      "panel": "types",
+      "notes": "With param-types = true, a parameter is typed by what it is compared with: Types lists them. Press Rewrite, and it writes a TypedDict for the named ones.",
       "config": "param-types = true\n",
       "source": "since = \"\"\"--sql\nSELECT u.name, o.total\nFROM orders AS o\nJOIN users AS u ON u.id = o.user_id\nWHERE o.placed_at > %(since)s AND o.total >= %(least)s\"\"\"\n"
     },

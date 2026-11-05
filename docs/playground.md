@@ -51,14 +51,12 @@ queries as you type. It runs in your browser. The engine is compiled to
     <button type="button" role="tab" aria-selected="false" data-tab="notes" hidden>Notes</button>
     <button type="button" role="tab" aria-selected="true" data-tab="problems">Problems</button>
     <button type="button" role="tab" aria-selected="false" data-tab="types">Types</button>
-    <button type="button" role="tab" aria-selected="false" data-tab="rewritten">sqlty rewrite</button>
     <button type="button" role="tab" aria-selected="false" data-tab="json">JSON</button>
   </div>
   <div class="sqlty-console" role="tabpanel" aria-label="Output">
     <div data-panel="notes" data-notes hidden></div>
     <ul data-panel="problems" data-problems><li>Loading the engine...</li></ul>
     <ul data-panel="types" data-types hidden></ul>
-    <div data-panel="rewritten" data-rewritten hidden></div>
     <div data-panel="json" data-json hidden></div>
   </div>
 </div>
@@ -175,7 +173,6 @@ The console below the editor shows what sqlty makes of them:
 | Notes | What a step says about itself, when [steps](#walk-through-steps) are open | |
 | Problems | What `sqlty check` reports; click one to go to its line, or its rule to read about it | [`sqlty check`](reference/cli.md) |
 | Types | The row type, columns and parameters of each query, and the inference rule behind a column's type or nullability | `sqlty check --explain` |
-| `sqlty rewrite` | The source with each query wrapped in `SQL[T]` | [`sqlty rewrite`](reference/cli.md) |
 | JSON | The problems as `sqlty check` prints them for scripts, with the edits of their fixes | [`sqlty check --output-format json`](reference/cli.md) |
 
 ## Examples
@@ -195,7 +192,7 @@ focus it and press the arrow keys. The page remembers the height and the font si
 | Button | Applies to the Python source | From the command line |
 |---|---|---|
 | **Fix all** | Every quick fix, as `sqlty check --fix` makes them | `sqlty check --fix` |
-| **Rewrite** | Each query wrapped in `SQL[T]`, as the `sqlty rewrite` tab shows | `sqlty rewrite` |
+| **Rewrite** | Each query wrapped in `SQL[T]` | `sqlty rewrite` |
 | **Strip** | Each `SQL[T]` wrapper removed | `sqlty strip` |
 
 A single fix is a quick fix on its diagnostic: click the light bulb, or press
@@ -253,7 +250,7 @@ steps are part of the session, so **Copy link** shares them while they fit in a 
 |---|---|---|
 | `title` | The name of the step in the bar | `Step N` |
 | `source`, `schema`, `config`, `dialect` | The files and dialect, as a [session](#share-a-session) holds them | The one of the step before |
-| `panel` | The console tab it opens: `notes`, `problems`, `types`, `rewritten` or `json` | **Notes** if it has notes, else **Problems** |
+| `panel` | The console tab it opens: `notes`, `problems`, `types` or `json` | **Notes** if it has notes, else **Problems** |
 | `file` | The file tab it opens: `python`, `schema` or `config` | `python` |
 | `notes` | Text for the **Notes** tab; a blank line starts a paragraph | No **Notes** tab |
 

@@ -2,7 +2,7 @@
 // No DOM, so tests/playground.test.mjs runs it too.
 
 const FIELDS = ["source", "schema", "dialect", "config"];
-const PANELS = ["problems", "types", "rewritten", "json", "notes"];
+const PANELS = ["problems", "types", "json", "notes"];
 const FILES = ["python", "schema", "config"];
 
 // The steps of a deck as full sessions: a step that leaves a file out keeps the one before.
