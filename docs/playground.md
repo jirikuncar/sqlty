@@ -1,4 +1,5 @@
 ---
+description: Type-check, fix and rewrite SQL queries in Python in your browser, with sqlty compiled to WebAssembly.
 hide:
   - toc
 ---
@@ -8,6 +9,10 @@ hide:
 Edit the Python source or the schema below: sqlty checks, types and highlights the
 queries as you type. It runs in your browser. The engine is compiled to
 [WebAssembly](https://webassembly.org/), and no code leaves the page.
+
+<script>
+  if (new URLSearchParams(location.search).has("embed")) document.documentElement.classList.add("sqlty-embedded");
+</script>
 
 <div id="sqlty-playground" markdown="0">
   <div class="sqlty-toolbar">
@@ -31,6 +36,7 @@ queries as you type. It runs in your browser. The engine is compiled to
         <button type="button" class="sqlty-button" data-zoom="1" title="Larger (Ctrl+=)" aria-label="Larger">A+</button>
       </span>
       <button type="button" class="sqlty-button" data-present title="Fill the screen (Ctrl+Shift+F)" aria-pressed="false">Present</button>
+      <a class="sqlty-button sqlty-open" data-open target="_blank" rel="noopener">Open in playground</a>
     </span>
     <span class="sqlty-status" data-link-status role="status"></span>
   </div>
@@ -72,6 +78,19 @@ queries as you type. It runs in your browser. The engine is compiled to
     position: fixed; inset: 0; z-index: 10; height: 100dvh; padding: 0.5rem 1rem 1rem;
     background-color: var(--md-default-bg-color);
   }
+  html.sqlty-embedded { overflow: hidden; }
+  .sqlty-embedded .md-header, .sqlty-embedded .md-tabs, .sqlty-embedded .md-sidebar, .sqlty-embedded .md-footer,
+  .sqlty-embedded .md-content__inner > :not(#sqlty-playground) { display: none; }
+  .sqlty-embedded #sqlty-playground {
+    position: fixed; inset: 0; z-index: 10; height: 100dvh; padding: 0.5rem;
+    background-color: var(--md-default-bg-color);
+  }
+  .sqlty-embedded .sqlty-toolbar { margin-bottom: 0.4rem; }
+  .sqlty-embedded .sqlty-toolbar label, .sqlty-embedded [data-rewrite], .sqlty-embedded [data-strip],
+  .sqlty-embedded [data-copy-link], .sqlty-embedded .sqlty-group, .sqlty-embedded [data-present],
+  .sqlty-embedded [data-tab="json"] { display: none; }
+  .sqlty-open { display: none; }
+  .sqlty-embedded .sqlty-open { display: inline-block; text-decoration: none; }
   .sqlty-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.5rem 1rem; margin-bottom: 0.75rem; }
   .sqlty-toolbar label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.64rem; color: var(--md-default-fg-color--light); }
   .sqlty-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-left: auto; }
@@ -229,6 +248,19 @@ as the session lives in the part of the URL after `#`.
 
 A session that compresses to more than 8000 characters gets no link: many browsers
 and chat apps cut longer URLs.
+
+## Embed
+
+Add `?embed` to a link to show only the editor, the console and **Fix all**, with
+**Open in playground** for the other controls. It fills the window, so it fits an
+`<iframe>` in a blog post or slides:
+
+```html
+<iframe src="https://jirikuncar.github.io/sqlty/playground/?embed#..." width="800" height="500"></iframe>
+```
+
+Link previews in social apps show the SQLTy card, not the session: their crawlers never
+see the part of the URL after `#`.
 
 ## Walk through steps
 

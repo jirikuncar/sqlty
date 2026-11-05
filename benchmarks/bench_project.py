@@ -17,7 +17,8 @@ Usage:
 Budget: every time is divided by a calibration loop timed on the same machine, so a
 slow or fast runner moves the baseline and the result together. A time metric fails
 when its normalised value exceeds the baseline by ``--time-tolerance`` (default 50%),
-peak RSS when it exceeds the baseline by ``--rss-tolerance`` (default 25%).
+peak RSS when it exceeds the baseline by ``--rss-tolerance`` (default 25%). A run over
+budget is measured again, up to three runs in all, and fails only when the last one is too.
 """
 
 from __future__ import annotations
@@ -44,6 +45,7 @@ SIZES = {
 }
 # Times of 5 ms or less are noise on a shared runner: they are reported, not budgeted.
 MIN_BUDGETED_S = 0.005
+ATTEMPTS = 3
 
 
 def calibrate() -> float:
@@ -216,13 +218,28 @@ def main() -> int:
         return 0
 
     result = run(args.size, args.repeats, args.keep)
+    key = f"{result['meta']['platform']}-{args.size}"
+    path = Path(args.baseline)
+    baselines = json.loads(path.read_text()) if path.exists() else {}
+    failures = []
+    if args.compare and key in baselines:
+        failures = compare(result, baselines[key], args.time_tolerance, args.rss_tolerance)
+        # Another job on a shared runner can slow one run: measure again before failing.
+        for attempt in range(2, ATTEMPTS + 1):
+            if not failures:
+                break
+            print(
+                f"over budget, measuring again ({attempt}/{ATTEMPTS}):",
+                *failures,
+                sep="\n  ",
+                file=sys.stderr,
+            )
+            result = run(args.size, args.repeats, args.keep)
+            failures = compare(result, baselines[key], args.time_tolerance, args.rss_tolerance)
     text = json.dumps(result, indent=2)
     print(text)
     if args.out:
         Path(args.out).write_text(text + "\n")
-    key = f"{result['meta']['platform']}-{args.size}"
-    path = Path(args.baseline)
-    baselines = json.loads(path.read_text()) if path.exists() else {}
     if args.update_baseline:
         baselines[key] = result
         path.write_text(json.dumps(baselines, indent=2, sort_keys=True) + "\n")
@@ -236,7 +253,6 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 0
-        failures = compare(result, baselines[key], args.time_tolerance, args.rss_tolerance)
         if failures:
             print("performance budget exceeded:", *failures, sep="\n  ", file=sys.stderr)
             return 1

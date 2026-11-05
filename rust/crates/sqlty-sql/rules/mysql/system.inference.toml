@@ -6,7 +6,7 @@ functions = ["LAST_INSERT_ID", "ROW_COUNT", "FOUND_ROWS", "CONNECTION_ID", "BENC
 dialects = ["mysql"]
 type = "BIGINT"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.15 Information Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.15 Information Functions"
 reasoning = "The manual describes each of these as returning an integer."
 
 [[function]]
@@ -15,7 +15,7 @@ function = "COERCIBILITY"
 dialects = ["mysql"]
 type = "INT"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.15 Information Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.15 Information Functions"
 reasoning = "The manual describes the function as returning an integer."
 
 [[function]]
@@ -24,7 +24,7 @@ functions = ["USER", "CURRENT_USER", "SESSION_USER", "SYSTEM_USER", "CURRENT_ROL
 dialects = ["mysql"]
 type = "TEXT"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.15 Information Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.15 Information Functions"
 reasoning = "The manual describes each of these as returning a string."
 
 [[function]]
@@ -33,7 +33,7 @@ functions = ["DATABASE", "SCHEMA"]
 dialects = ["mysql"]
 type = "TEXT"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.15 Information Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.15 Information Functions"
 reasoning = "The manual describes each of these as returning a string. MySQL also returns NULL for a value it cannot read: a string that is not a valid date or time, an index out of range, or a number outside a math function's domain."
 
 [[function]]
@@ -42,7 +42,7 @@ functions = ["GET_LOCK", "IS_FREE_LOCK", "RELEASE_LOCK"]
 dialects = ["mysql"]
 type = "INT"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.14 Locking Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.14 Locking Functions"
 reasoning = "Each returns 1 or 0, and NULL on an error or, for RELEASE_LOCK, for a lock that does not exist."
 
 [[function]]
@@ -51,7 +51,7 @@ function = "IS_USED_LOCK"
 dialects = ["mysql"]
 type = "UBIGINT"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.14 Locking Functions (IS_USED_LOCK(): returns the connection identifier of the client session that holds the lock. Otherwise, it returns NULL)"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.14 Locking Functions (IS_USED_LOCK(): returns the connection identifier of the client session that holds the lock. Otherwise, it returns NULL)"
 reasoning = "The function returns the connection identifier of the lock's holder, and NULL for a free lock."
 
 [[function]]
@@ -60,7 +60,7 @@ function = "RELEASE_ALL_LOCKS"
 dialects = ["mysql"]
 type = "UBIGINT"
 nullability = "non-null"
-reference = "MySQL 8.4 Reference Manual, 14.14 Locking Functions (RELEASE_ALL_LOCKS(): returns the number of locks released, 0 if there were none)"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.14 Locking Functions (RELEASE_ALL_LOCKS(): returns the number of locks released, 0 if there were none)"
 reasoning = "The function returns the number of locks it released."
 
 [[function]]
@@ -69,7 +69,7 @@ functions = ["PS_CURRENT_THREAD_ID", "PS_THREAD_ID"]
 dialects = ["mysql"]
 type = "UBIGINT"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.21 Performance Schema Functions (PS_THREAD_ID(): or NULL if no thread ID exists for the connection ID)"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.21 Performance Schema Functions (PS_THREAD_ID(): or NULL if no thread ID exists for the connection ID)"
 reasoning = "Each returns a Performance Schema thread ID, a BIGINT UNSIGNED, and NULL when there is no such thread."
 
 [[function]]
@@ -78,7 +78,7 @@ functions = ["FORMAT_BYTES", "FORMAT_PICO_TIME"]
 dialects = ["mysql"]
 type = "TEXT"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.21 Performance Schema Functions"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.21 Performance Schema Functions"
 reasoning = "Each formats a number as a human-readable string, and returns NULL for NULL."
 
 [[function]]
@@ -87,7 +87,7 @@ function = "GTID_SUBSET"
 dialects = ["mysql"]
 type = "BIGINT"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.18.2 Functions Used with Global Transaction Identifiers (GTIDs) (GTID_SUBSET(): Returns NULL if set1 or set2 is NULL)"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.18.2 Functions Used with Global Transaction Identifiers (GTIDs) (GTID_SUBSET(): Returns NULL if set1 or set2 is NULL)"
 reasoning = "The function returns true or false, and NULL for a NULL set."
 
 [[function]]
@@ -96,7 +96,7 @@ function = "GTID_SUBTRACT"
 dialects = ["mysql"]
 type = "TEXT"
 nullability = "strict"
-reference = "MySQL 8.4 Reference Manual, 14.18.2 Functions Used with Global Transaction Identifiers (GTIDs) (GTID_SUBTRACT())"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.18.2 Functions Used with Global Transaction Identifiers (GTIDs) (GTID_SUBTRACT())"
 reasoning = "The function returns a GTID set as a string, and NULL for a NULL set."
 
 [[function]]
@@ -105,7 +105,7 @@ functions = ["SOURCE_POS_WAIT", "MASTER_POS_WAIT"]
 dialects = ["mysql"]
 type = "BIGINT"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.18.4 Position-Based Synchronization Functions (SOURCE_POS_WAIT(): returns NULL if the replication SQL thread is not started)"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.18.4 Position-Based Synchronization Functions (SOURCE_POS_WAIT(): returns NULL if the replication SQL thread is not started)"
 reasoning = "The function returns the number of log events waited for, and NULL when replication is not running."
 
 [[function]]
@@ -114,5 +114,5 @@ function = "ROLES_GRAPHML"
 dialects = ["mysql"]
 type = "TEXT"
 nullability = "nullable"
-reference = "MySQL 8.4 Reference Manual, 14.15 Information Functions (ROLES_GRAPHML())"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.15 Information Functions (ROLES_GRAPHML())"
 reasoning = "The function returns an XML document as a string; the manual does not say it is never NULL."

@@ -85,6 +85,56 @@ q = "--sql\nSELECT user_id, SUM(tot<CURSOR>al) AS spent FROM orders GROUP BY use
 # hover: Column `total` of `orders`: `INT NULL`
 ```
 
+### References of the dialect
+
+A rule that holds for several databases cites each one's documentation. The hover keeps
+the part of the configured dialect.
+
+```python
+q = "--sql\nSELECT total + 1 AS ne<CURSOR>xt FROM orders"
+# hover: Result column `next`: `int | None` (`INT`)
+# hover:
+# hover: Typed by `common.arithmetic.numbers`: Arithmetic on two numbers gives the wider of their types.
+# hover:
+# hover: PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators
+```
+
+#### MySQL
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+dialect = "mysql"
+```
+
+```python
+q = "--sql\nSELECT total + 1 AS ne<CURSOR>xt FROM orders"
+# hover: Result column `next`: `int | None` (`INT`)
+# hover:
+# hover: Typed by `common.arithmetic.numbers`: Arithmetic on two numbers gives the wider of their types.
+# hover:
+# hover: MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators
+```
+
+#### A dialect no reference cites
+
+A dialect without documentation of its own, such as `generic`, gets every reference.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+dialect = "generic"
+```
+
+```python
+q = "--sql\nSELECT total + 1 AS ne<CURSOR>xt FROM orders"
+# hover: Result column `next`: `int | None` (`INT`)
+# hover:
+# hover: Typed by `common.arithmetic.numbers`: Arithmetic on two numbers gives the wider of their types.
+# hover:
+# hover: PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators; MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators; SQLite documentation, SQL Language Expressions, 2 Operators
+```
+
 ## Annotated helper
 
 A string passed to a parameter marked `Annotated[LiteralString, SQL]` is a query, with no

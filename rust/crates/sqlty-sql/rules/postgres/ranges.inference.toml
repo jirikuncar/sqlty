@@ -6,7 +6,7 @@ function = "RANGE_MERGE"
 dialects = ["postgres"]
 type = "@range(0)"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.20 Range/Multirange Functions and Operators, Table 9.58 Range Functions, Table 9.59 Multirange Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.20 Range/Multirange Functions and Operators, Table 9.58 Range Functions, Table 9.59 Multirange Functions"
 reasoning = "The result is the range type of the argument, which is a range or a multirange."
 
 [[function]]
@@ -15,7 +15,7 @@ functions = ["LOWER_INF", "UPPER_INF", "LOWER_INC", "UPPER_INC", "ISEMPTY"]
 dialects = ["postgres"]
 type = "BOOLEAN"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.20 Range/Multirange Functions and Operators, Table 9.58 Range Functions, Table 9.59 Multirange Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.20 Range/Multirange Functions and Operators, Table 9.58 Range Functions, Table 9.59 Multirange Functions"
 reasoning = "The documentation gives each of these a `boolean` result."
 
 [[function]]
@@ -24,7 +24,7 @@ function = "DATERANGE"
 dialects = ["postgres"]
 type = "DATERANGE"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges"
+reference.postgres = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges"
 reasoning = "The documentation gives the function a `daterange` result."
 
 [[function]]
@@ -33,7 +33,7 @@ function = "INT4RANGE"
 dialects = ["postgres"]
 type = "INT4RANGE"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges"
+reference.postgres = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges"
 reasoning = "The documentation gives the function an `int4range` result."
 
 [[function]]
@@ -42,7 +42,7 @@ function = "INT8RANGE"
 dialects = ["postgres"]
 type = "INT8RANGE"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges"
+reference.postgres = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges"
 reasoning = "The documentation gives the function an `int8range` result."
 
 [[function]]
@@ -51,7 +51,7 @@ function = "NUMRANGE"
 dialects = ["postgres"]
 type = "NUMRANGE"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges"
+reference.postgres = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges"
 reasoning = "The documentation gives the function a `numrange` result."
 
 [[function]]
@@ -60,7 +60,7 @@ function = "TSRANGE"
 dialects = ["postgres"]
 type = "TSRANGE"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges"
+reference.postgres = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges"
 reasoning = "The documentation gives the function a `tsrange` result."
 
 [[function]]
@@ -69,7 +69,7 @@ function = "TSTZRANGE"
 dialects = ["postgres"]
 type = "TSTZRANGE"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges"
+reference.postgres = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges"
 reasoning = "The documentation gives the function a `tstzrange` result."
 
 [[function]]
@@ -78,7 +78,7 @@ function = "MULTIRANGE"
 dialects = ["postgres"]
 type = "@multirange(0)"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.20 Range/Multirange Functions and Operators, Table 9.59 Multirange Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.20 Range/Multirange Functions and Operators, Table 9.59 Multirange Functions"
 reasoning = "The result is the multirange type of the range argument."
 
 [[function]]
@@ -87,7 +87,7 @@ function = "DATEMULTIRANGE"
 dialects = ["postgres"]
 type = "DATEMULTIRANGE"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges (Each range type also has a multirange constructor with the same name as the multirange type)"
+reference.postgres = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges (Each range type also has a multirange constructor with the same name as the multirange type)"
 reasoning = "The constructor gives a `datemultirange` from zero or more ranges; it is strict, and a NULL member is an error."
 
 [[function]]
@@ -96,7 +96,7 @@ function = "INT4MULTIRANGE"
 dialects = ["postgres"]
 type = "INT4MULTIRANGE"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges (Each range type also has a multirange constructor with the same name as the multirange type)"
+reference.postgres = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges (Each range type also has a multirange constructor with the same name as the multirange type)"
 reasoning = "The constructor gives an `int4multirange` from zero or more ranges; it is strict, and a NULL member is an error."
 
 [[function]]
@@ -105,7 +105,7 @@ function = "INT8MULTIRANGE"
 dialects = ["postgres"]
 type = "INT8MULTIRANGE"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges (Each range type also has a multirange constructor with the same name as the multirange type)"
+reference.postgres = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges (Each range type also has a multirange constructor with the same name as the multirange type)"
 reasoning = "The constructor gives an `int8multirange` from zero or more ranges; it is strict, and a NULL member is an error."
 
 [[function]]
@@ -114,7 +114,7 @@ function = "NUMMULTIRANGE"
 dialects = ["postgres"]
 type = "NUMMULTIRANGE"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges (Each range type also has a multirange constructor with the same name as the multirange type)"
+reference.postgres = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges (Each range type also has a multirange constructor with the same name as the multirange type)"
 reasoning = "The constructor gives a `nummultirange` from zero or more ranges; it is strict, and a NULL member is an error."
 
 [[function]]
@@ -123,7 +123,7 @@ function = "TSMULTIRANGE"
 dialects = ["postgres"]
 type = "TSMULTIRANGE"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges (Each range type also has a multirange constructor with the same name as the multirange type)"
+reference.postgres = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges (Each range type also has a multirange constructor with the same name as the multirange type)"
 reasoning = "The constructor gives a `tsmultirange` from zero or more ranges; it is strict, and a NULL member is an error."
 
 [[function]]
@@ -132,5 +132,5 @@ function = "TSTZMULTIRANGE"
 dialects = ["postgres"]
 type = "TSTZMULTIRANGE"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges (Each range type also has a multirange constructor with the same name as the multirange type)"
+reference.postgres = "PostgreSQL 17 documentation, 8.17.6 Constructing Ranges and Multiranges (Each range type also has a multirange constructor with the same name as the multirange type)"
 reasoning = "The constructor gives a `tstzmultirange` from zero or more ranges; it is strict, and a NULL member is an error."

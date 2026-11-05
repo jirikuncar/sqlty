@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 
 use lsp_server::Response;
-use lsp_types::{CodeAction, CodeActionKind, CodeActionOrCommand, MessageType, OneOf, Url};
+use lsp_types::{CodeAction, CodeActionKind, CodeActionOrCommand, MessageType, OneOf, Uri};
 
 use crate::text::{diff, LineIndex};
 use crate::{actions, highlight, Job, Settings, Shared, Workspace, FIX_ALL};
@@ -28,7 +28,7 @@ pub(crate) fn work<W, F>(
     };
     while let Ok(first) = queue.recv() {
         // Jobs that arrived during the last check: the last edit of a buffer is checked once.
-        let mut checks: Vec<Url> = Vec::new();
+        let mut checks: Vec<Uri> = Vec::new();
         for job in std::iter::once(first).chain(queue.try_iter()) {
             match job {
                 Job::Reload => workspaces.reload(shared),
@@ -92,7 +92,7 @@ where
     /// Open every loaded workspace again: its settings or schema changed.
     fn reload(&mut self, shared: &Shared) {
         let roots: Vec<PathBuf> = self.loaded.drain().map(|(root, _)| root).collect();
-        let stale: Vec<Url> = shared.background().drain().map(|(uri, _)| uri).collect();
+        let stale: Vec<Uri> = shared.background().drain().map(|(uri, _)| uri).collect();
         for root in roots {
             self.load(root, shared);
         }
@@ -116,8 +116,10 @@ fn publish_breaking<W: Workspace>(workspace: &mut W, shared: &Shared) {
         }
     };
     for (path, diagnostics) in found {
-        let (Ok(uri), Ok(text)) = (Url::from_file_path(&path), std::fs::read_to_string(&path))
-        else {
+        let (Ok(uri), Ok(text)) = (
+            crate::uri::from_path(&path).ok_or(()),
+            std::fs::read_to_string(&path),
+        ) else {
             continue;
         };
         let index = LineIndex::new(&text, &shared.encoding);
@@ -132,7 +134,7 @@ fn publish_breaking<W: Workspace>(workspace: &mut W, shared: &Shared) {
     }
 }
 
-fn check<W, F>(workspaces: &mut Workspaces<'_, W, F>, shared: &Shared, uri: Url)
+fn check<W, F>(workspaces: &mut Workspaces<'_, W, F>, shared: &Shared, uri: Uri)
 where
     W: Workspace,
     F: FnMut(&Path, &Settings) -> Result<W, String>,
@@ -144,7 +146,7 @@ where
     else {
         return;
     };
-    let Ok(path) = uri.to_file_path() else {
+    let Some(path) = crate::uri::to_path(&uri) else {
         return;
     };
     let enabled = python && (workspaces.settings.completion || workspaces.settings.highlighting);
@@ -182,7 +184,7 @@ where
 fn fix_all<W, F>(
     workspaces: &mut Workspaces<'_, W, F>,
     shared: &Shared,
-    uri: &Url,
+    uri: &Uri,
 ) -> Option<CodeAction>
 where
     W: Workspace,
@@ -193,7 +195,7 @@ where
         .get(uri)
         .filter(|d| d.python)
         .map(|d| (d.text.clone(), d.version))?;
-    let path = uri.to_file_path().ok()?;
+    let path = crate::uri::to_path(uri)?;
     let fixed = workspaces
         .of(&path, shared)?
         .fix(&path, &text)

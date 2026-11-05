@@ -115,6 +115,7 @@ const stepper = root.querySelector("[data-steps]");
 const picker = root.querySelector("[data-step-select]");
 const notes = root.querySelector("[data-notes]");
 const present = root.querySelector("[data-present]");
+const opener = root.querySelector("[data-open]");
 examples.unshift({ name: "Tour", source: SOURCE, schema: SCHEMA, dialect: "postgres", config: CONFIG });
 examples.push({ name: "Tour in steps", deck: new URL("steps.json", import.meta.url) }, { name: "Open a file...", file: true });
 const option = (value, textContent) => Object.assign(document.createElement("option"), { value, textContent });
@@ -469,8 +470,16 @@ async function share() {
   url.hash = hash;
   const fits = url.href.length <= MAX_LINK;
   history.replaceState(null, "", fits ? url : url.pathname);
+  unembedded();
   linked.textContent = fits ? "" : `Too large to share as a link (${url.href.length} characters).`;
   return fits ? url.href : null;
+}
+
+// The page an embedded playground opens: this session with all controls.
+function unembedded() {
+  const url = new URL(location.href);
+  url.searchParams.delete("embed");
+  opener.href = url.href;
 }
 
 function describe(query) {
@@ -593,6 +602,7 @@ root.querySelector("[data-copy-link]").addEventListener("click", async () => {
 window.addEventListener("hashchange", async () => {
   const saved = await decode(location.hash.slice(1));
   if (saved) resume(saved);
+  unembedded();
 });
 
 // A shared session: its steps, then the edits made on its step.
@@ -641,6 +651,7 @@ if (saved.size) root.style.setProperty("--sqlty-font", `${size}px`);
 if (shared) resume(shared);
 else if (linkedDeck?.error) linked.textContent = String(linkedDeck.error.message ?? linkedDeck.error);
 else if (linkedDeck) resume(linkedDeck);
+unembedded();
 refresh();
 
 async function engine() {

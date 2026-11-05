@@ -6,7 +6,7 @@ function = "TO_DATE"
 dialects = ["postgres"]
 type = "DATE"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.8 Data Type Formatting Functions, Table 9.26 Formatting Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.8 Data Type Formatting Functions, Table 9.26 Formatting Functions"
 reasoning = "The documentation gives the function a `date` result."
 
 [[function]]
@@ -15,7 +15,7 @@ function = "TO_NUMBER"
 dialects = ["postgres"]
 type = "DECIMAL"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.8 Data Type Formatting Functions, Table 9.26 Formatting Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.8 Data Type Formatting Functions, Table 9.26 Formatting Functions"
 reasoning = "The documentation gives the function a `numeric` result."
 
 [[function]]
@@ -24,5 +24,5 @@ function = "TO_CHAR"
 dialects = ["postgres"]
 type = "TEXT"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.8 Data Type Formatting Functions, Table 9.26 Formatting Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.8 Data Type Formatting Functions, Table 9.26 Formatting Functions"
 reasoning = "The documentation gives the function a `text` result."

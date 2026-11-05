@@ -23,6 +23,37 @@ fn sum_of_a_column_missing_from_the_schema_is_an_error() {
 }
 
 #[test]
+fn unparsed_statements_that_set_keys_or_types_are_skipped() {
+    let long = format!(
+        "ALTER TABLE t ADD CONSTRAINT {} UNIQUE (id) FOO",
+        "c".repeat(80)
+    );
+    let schema = format!(
+        "CREATE TABLE t (id INT, meta TEXT);
+         ALTER TABLE t ALTER COLUMN meta SET NOT NULL FOO;
+         ALTER TABLE t ALTER COLUMN meta SET STATISTICS 200;
+         CREATE TYPE mood AS ENUM ('a') FOO;
+         GRANT SELECT ON t TO someone FOO;
+         {long};"
+    );
+    let (_, skipped) = load_schema_with_skipped(&schema, "postgres");
+    assert_eq!(
+        skipped,
+        [
+            (
+                "statement",
+                "ALTER TABLE t ALTER COLUMN meta SET NOT NULL FOO".to_string()
+            ),
+            (
+                "statement",
+                "CREATE TYPE mood AS ENUM ('a') FOO".to_string()
+            ),
+            ("statement", format!("{}...", &long[..80])),
+        ]
+    );
+}
+
+#[test]
 fn test_dml_returning() {
     assert_eq!(
         infer("DELETE FROM t RETURNING id::INTEGER").as_deref(),

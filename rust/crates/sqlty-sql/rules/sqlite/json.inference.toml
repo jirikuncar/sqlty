@@ -6,7 +6,7 @@ operator = "Arrow"
 dialects = ["sqlite"]
 type = "TEXT"
 nullability = "nullable"
-reference = "SQLite documentation, JSON Functions And Operators, 4.10 The -> and ->> operators (https://www.sqlite.org/json1.html#jptr)"
+reference.sqlite = "SQLite documentation, JSON Functions And Operators, 4.10 The -> and ->> operators (https://www.sqlite.org/json1.html#jptr)"
 reasoning = "`->` gives the text JSON representation of the subcomponent; a missing path gives NULL."
 
 [[rule]]
@@ -15,7 +15,7 @@ operator = "LongArrow"
 dialects = ["sqlite"]
 type = "@any"
 nullability = "nullable"
-reference = "SQLite documentation, JSON Functions And Operators, 4.10 The -> and ->> operators (https://www.sqlite.org/json1.html#jptr)"
+reference.sqlite = "SQLite documentation, JSON Functions And Operators, 4.10 The -> and ->> operators (https://www.sqlite.org/json1.html#jptr)"
 reasoning = "`->>` gives the SQL value of the element (INTEGER, REAL or TEXT), not always text; a missing path gives NULL."
 
 [[function]]
@@ -24,7 +24,7 @@ function = "JSON_EXTRACT"
 dialects = ["sqlite"]
 type = "@any"
 nullability = "nullable"
-reference = "SQLite documentation, JSON Functions And Operators, 4.8 The json_extract() function (https://www.sqlite.org/json1.html#jex)"
+reference.sqlite = "SQLite documentation, JSON Functions And Operators, 4.8 The json_extract() function (https://www.sqlite.org/json1.html#jex)"
 reasoning = "With one path, `json_extract` gives the SQL value of the element (INTEGER, REAL or TEXT), and NULL for a missing path or a JSON null; with more, the text of a JSON array."
 
 [[function]]
@@ -33,7 +33,7 @@ function = "JSONB_EXTRACT"
 dialects = ["sqlite"]
 type = "@any"
 nullability = "nullable"
-reference = "SQLite documentation, JSON Functions And Operators, 4.9 The jsonb_extract() function (https://www.sqlite.org/json1.html#jbex)"
+reference.sqlite = "SQLite documentation, JSON Functions And Operators, 4.9 The jsonb_extract() function (https://www.sqlite.org/json1.html#jbex)"
 reasoning = "`jsonb_extract` gives what `json_extract` does, but an array or object as a JSONB blob; a missing path or a JSON null gives NULL."
 
 [[function]]
@@ -42,7 +42,7 @@ functions = ["JSON_ARRAY_LENGTH", "JSON_VALID", "JSON_ERROR_POSITION"]
 dialects = ["sqlite"]
 type = "BIGINT"
 nullability = "strict"
-reference = "SQLite documentation, JSON Functions And Operators"
+reference.sqlite = "SQLite documentation, JSON Functions And Operators"
 reasoning = "Each of these returns an integer."
 
 [[function]]
@@ -51,7 +51,7 @@ functions = ["JSONB", "JSONB_SET", "JSONB_INSERT", "JSONB_REPLACE", "JSONB_REMOV
 dialects = ["sqlite"]
 type = "BLOB"
 nullability = "strict"
-reference = "SQLite documentation, JSON Functions And Operators, 4.2 The jsonb() function; 4.12 The jsonb_insert(), jsonb_replace, and jsonb_set() functions; 4.16 The jsonb_patch() function (https://www.sqlite.org/json1.html)"
+reference.sqlite = "SQLite documentation, JSON Functions And Operators, 4.2 The jsonb() function; 4.12 The jsonb_insert(), jsonb_replace, and jsonb_set() functions; 4.16 The jsonb_patch() function (https://www.sqlite.org/json1.html)"
 reasoning = "The `jsonb` variants work as their `json` ones, returning the result in the binary JSONB format, a BLOB, and NULL for a NULL document."
 
 [[function]]
@@ -60,7 +60,7 @@ functions = ["JSONB_ARRAY", "JSONB_OBJECT"]
 dialects = ["sqlite"]
 type = "BLOB"
 nullability = "non-null"
-reference = "SQLite documentation, JSON Functions And Operators, 4.4 The jsonb_array() function; 4.14 The jsonb_object() function (https://www.sqlite.org/json1.html)"
+reference.sqlite = "SQLite documentation, JSON Functions And Operators, 4.4 The jsonb_array() function; 4.14 The jsonb_object() function (https://www.sqlite.org/json1.html)"
 reasoning = "Each builds a JSONB array or object, a BLOB; a NULL argument becomes a JSON null in it."
 
 [[function]]
@@ -69,7 +69,7 @@ functions = ["JSON", "JSON_SET", "JSON_INSERT", "JSON_ARRAY_INSERT", "JSON_REPLA
 dialects = ["sqlite"]
 type = "TEXT"
 nullability = "strict"
-reference = "SQLite documentation, JSON Functions And Operators"
+reference.sqlite = "SQLite documentation, JSON Functions And Operators"
 reasoning = "Each of these returns text."
 
 [[function]]
@@ -78,7 +78,7 @@ functions = ["JSON_OBJECT", "JSON_ARRAY"]
 dialects = ["sqlite"]
 type = "TEXT"
 nullability = "non-null"
-reference = "SQLite documentation, JSON Functions And Operators"
+reference.sqlite = "SQLite documentation, JSON Functions And Operators"
 reasoning = "Each of these returns text. It never returns NULL, even for NULL arguments."
 
 [[function]]
@@ -87,7 +87,7 @@ functions = ["JSON_GROUP_ARRAY", "JSON_GROUP_OBJECT"]
 dialects = ["sqlite"]
 type = "TEXT"
 nullability = "aggregate"
-reference = "SQLite documentation, JSON Functions And Operators, 4.23 Array and object aggregate functions (https://www.sqlite.org/json1.html#jgrouparray)"
+reference.sqlite = "SQLite documentation, JSON Functions And Operators, 4.23 Array and object aggregate functions (https://www.sqlite.org/json1.html#jgrouparray)"
 reasoning = "Each of these returns text, an empty array or object over no rows."
 
 [[function]]
@@ -96,5 +96,5 @@ functions = ["JSONB_GROUP_ARRAY", "JSONB_GROUP_OBJECT"]
 dialects = ["sqlite"]
 type = "BLOB"
 nullability = "aggregate"
-reference = "SQLite documentation, JSON Functions And Operators, 4.23 Array and object aggregate functions (https://www.sqlite.org/json1.html#jgrouparray)"
+reference.sqlite = "SQLite documentation, JSON Functions And Operators, 4.23 Array and object aggregate functions (https://www.sqlite.org/json1.html#jgrouparray)"
 reasoning = "The `jsonb_` variants return the array or object in the binary JSONB format, a BLOB, an empty one over no rows."

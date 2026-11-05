@@ -251,13 +251,17 @@ def schema_skipped_objects(
     """``(kind, name)`` of schema tables and views that can't be parsed, so their columns are unknown.
 
     ``kind`` is ``"table"`` or ``"view"``. Unparseable tables are retried without
-    their constraints first, as in :func:`schema_skipped_tables`.
+    their constraints first, as in :func:`schema_skipped_tables`. A ``"statement"`` is a
+    statement that does not parse and would set keys, checks, ``NOT NULL``, defaults or a
+    type, named by its text: an ``ALTER TABLE ... ADD CONSTRAINT`` or a ``CREATE TYPE``.
 
     Example:
         >>> schema_skipped_objects("CREATE TABLE ok (id INT); CREATE VIEW v AS SELECT id FROM (")
         [('view', 'v')]
         >>> schema_skipped_objects("CREATE VIRTUAL TABLE words USING spellfix1", dialect="sqlite")
         [('table', 'words')]
+        >>> schema_skipped_objects("CREATE TABLE t (id INT); ALTER TABLE t ADD PRIMARY KEY (id) WITH (fillfactor = 70)")
+        [('statement', 'ALTER TABLE t ADD PRIMARY KEY (id) WITH (fillfactor = 70)')]
     """
     return _schema_skipped_objects(schema_sql, dialect=dialect)
 
