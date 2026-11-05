@@ -1,11 +1,16 @@
 {
+  "id": "../../",
   "name": "SQLTy",
   "short_name": "SQLTy",
+  "description": "Type-safe SQL queries for Python, and a playground that runs offline.",
+  "start_url": "../../",
+  "scope": "../../",
   "icons": [
     { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
     { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
+  "shortcuts": [{ "name": "Playground", "url": "../../playground/" }],
   "theme_color": "#0e0f10",
   "background_color": "#0e0f10",
   "display": "standalone"
