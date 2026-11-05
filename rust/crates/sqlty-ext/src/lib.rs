@@ -69,7 +69,11 @@ struct LoadedSchema {
     skipped: Vec<analyzer::SkippedObject>,
 }
 
-type CachedSchema = (String, String, Arc<LoadedSchema>);
+/// Schema text the cache owns: the caller's Python string itself, so passing the same
+/// object again is found by its address instead of comparing the whole text.
+type SchemaText = Box<dyn AsRef<str> + Send + Sync>;
+
+type CachedSchema = (SchemaText, String, Arc<LoadedSchema>);
 
 /// Most recently used first. Callers pass the same few schemas call after call, and
 /// parsing a large one costs about a millisecond, so keep the last few parsed.
@@ -82,9 +86,10 @@ fn cache_hit(
     schema_sql: &str,
     dialect: &str,
 ) -> Option<Arc<LoadedSchema>> {
-    let at = cache
-        .iter()
-        .position(|(sql, d, _)| sql == schema_sql && d == dialect)?;
+    let at = cache.iter().position(|(sql, d, _)| {
+        let sql = (**sql).as_ref();
+        d == dialect && (std::ptr::eq(sql, schema_sql) || sql == schema_sql)
+    })?;
     cache[..=at].rotate_right(1);
     Some(Arc::clone(&cache[0].2))
 }
@@ -98,20 +103,23 @@ fn lock_schemas() -> MutexGuard<'static, Vec<CachedSchema>> {
 /// The parsed schema. The cache is not locked while parsing, so a slow schema does not hold
 /// up callers of other schemas; two threads may parse the same one, and the first to finish
 /// is kept.
-fn cached_schema(schema_sql: &str, dialect: &str) -> Arc<LoadedSchema> {
-    if let Some(hit) = cache_hit(&mut lock_schemas(), schema_sql, dialect) {
+fn cached_schema<S: AsRef<str> + Send + Sync + 'static>(
+    schema_sql: S,
+    dialect: &str,
+) -> Arc<LoadedSchema> {
+    if let Some(hit) = cache_hit(&mut lock_schemas(), schema_sql.as_ref(), dialect) {
         return hit;
     }
-    let (schema, skipped) = analyzer::load_schema_with_skipped(schema_sql, dialect);
+    let (schema, skipped) = analyzer::load_schema_with_skipped(schema_sql.as_ref(), dialect);
     let loaded = Arc::new(LoadedSchema { schema, skipped });
     let mut cache = lock_schemas();
-    if let Some(hit) = cache_hit(&mut cache, schema_sql, dialect) {
+    if let Some(hit) = cache_hit(&mut cache, schema_sql.as_ref(), dialect) {
         return hit;
     }
     cache.insert(
         0,
         (
-            schema_sql.to_string(),
+            Box::new(schema_sql),
             dialect.to_string(),
             Arc::clone(&loaded),
         ),
@@ -127,13 +135,13 @@ enum SchemaArg<S = PyBackedStr> {
     Loaded(Arc<LoadedSchema>, Arc<str>, &'static str),
 }
 
-impl<S: AsRef<str>> SchemaArg<S> {
+impl<S: AsRef<str> + Send + Sync + 'static> SchemaArg<S> {
     /// The parsed schema for `dialect`; a handle loaded for another dialect is parsed again.
     fn loaded(self, dialect: &str) -> Arc<LoadedSchema> {
         match self {
-            Self::Text(text) => cached_schema(text.as_ref(), dialect),
+            Self::Text(text) => cached_schema(text, dialect),
             Self::Loaded(loaded, _, loaded_dialect) if loaded_dialect == dialect => loaded,
-            Self::Loaded(_, text, _) => cached_schema(&text, dialect),
+            Self::Loaded(_, text, _) => cached_schema(text, dialect),
         }
     }
 }
@@ -210,13 +218,16 @@ fn load_schema(
     })
 }
 
-fn schema<S: AsRef<str>>(arg: Option<SchemaArg<S>>, dialect: &str) -> Option<analyzer::Schema> {
+fn schema<S: AsRef<str> + Send + Sync + 'static>(
+    arg: Option<SchemaArg<S>>,
+    dialect: &str,
+) -> Option<analyzer::Schema> {
     Some(arg?.loaded(dialect).schema.clone())
 }
 
 /// The schema, unless `source` cannot hold a query: every query, wrapper and
 /// diagnostic involves the text `sql` (`--sql`, `SQL[...]`), in any case.
-fn schema_for<S: AsRef<str>>(
+fn schema_for<S: AsRef<str> + Send + Sync + 'static>(
     source: &str,
     schema_sql: Option<SchemaArg<S>>,
     dialect: &str,
@@ -569,7 +580,7 @@ fn schema_skipped_objects(
     detach(py, || skipped_objects(schema_sql, dialect, None))
 }
 
-fn skipped_objects<S: AsRef<str>>(
+fn skipped_objects<S: AsRef<str> + Send + Sync + 'static>(
     schema_sql: SchemaArg<S>,
     dialect: &str,
     only: Option<&str>,
@@ -1234,7 +1245,7 @@ mod tests {
     fn entry(sql: &str, dialect: &str) -> CachedSchema {
         let (schema, skipped) = analyzer::load_schema_with_skipped(sql, dialect);
         (
-            sql.to_string(),
+            Box::new(sql.to_string()),
             dialect.to_string(),
             Arc::new(LoadedSchema { schema, skipped }),
         )
@@ -1256,7 +1267,7 @@ mod tests {
         ];
         let hit = cache_hit(&mut cache, "CREATE TABLE c (x INT)", "postgres");
         assert!(hit.is_some());
-        let order: Vec<&str> = cache.iter().map(|(sql, _, _)| sql.as_str()).collect();
+        let order: Vec<&str> = cache.iter().map(|(sql, _, _)| (**sql).as_ref()).collect();
         assert_eq!(
             order,
             [
@@ -1273,6 +1284,13 @@ mod tests {
         assert!(cache_hit(&mut cache, "CREATE TABLE a (x INT)", "mysql").is_none());
         assert!(cache_hit(&mut cache, "CREATE TABLE a (y INT)", "postgres").is_none());
         assert!(cache_hit(&mut [], "CREATE TABLE a (x INT)", "postgres").is_none());
+    }
+
+    #[test]
+    fn cache_hit_finds_equal_text_at_another_address() {
+        let mut cache = vec![entry("CREATE TABLE a (x INT)", "postgres")];
+        let copy = String::from("CREATE TABLE a (x INT)");
+        assert!(cache_hit(&mut cache, &copy, "postgres").is_some());
     }
 
     #[test]
@@ -1294,7 +1312,7 @@ mod tests {
 
         for n in 0..SCHEMAS_KEPT * 2 {
             cached_schema(
-                &format!("CREATE TABLE sqlty_ext_bound_{n} (x INT)"),
+                format!("CREATE TABLE sqlty_ext_bound_{n} (x INT)"),
                 "postgres",
             );
         }
