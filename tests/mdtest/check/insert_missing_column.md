@@ -75,6 +75,37 @@ ALTER TABLE t ADD COLUMN d TEXT NOT NULL DEFAULT 'x';
 a = "--sql\nINSERT INTO t (a) VALUES (1)"
 ```
 
+## An identity added by pg_dump
+
+pg_dump adds an identity column with `ALTER TABLE ... ADD GENERATED ... AS
+IDENTITY`, followed by the options of its sequence.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE public.users (
+    id integer NOT NULL,
+    name text NOT NULL
+);
+ALTER TABLE public.users ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.users_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+```
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int]]("--sql\nINSERT INTO users (name) VALUES (%s) RETURNING id")
+```
+
 ## MySQL
 
 `AUTO_INCREMENT` fills a column, and `INSERT ... SET` names the columns it sets.

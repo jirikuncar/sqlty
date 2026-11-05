@@ -24,6 +24,10 @@ use super::TypeOverrides;
 pub(super) static COLLATE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r#"(?i)\s+COLLATE\s+(?:"[^"]*"|[\w.]+)"#).unwrap());
 
+/// The sequence options of `ADD GENERATED ... AS IDENTITY (...)`, which pg_dump writes.
+static IDENTITY_OPTIONS: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(?i)\bAS\s+IDENTITY\s*\([^()]*\)").unwrap());
+
 static DROP_EXPRESSION: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(?i)\bDROP\s+EXPRESSION(?:\s+IF\s+EXISTS)?\b").unwrap());
 
@@ -237,6 +241,8 @@ pub(super) fn read_alter_or_drop(
             .or_else(|| parse_ddl(&COLLATE.replace_all(&sql, ""), dialect))
             // `DROP EXPRESSION` leaves a column with neither expression nor default.
             .or_else(|| parse_ddl(&DROP_EXPRESSION.replace_all(&sql, "DROP DEFAULT"), dialect))
+            // sqlparser rejects most of them; they do not change the column.
+            .or_else(|| parse_ddl(&IDENTITY_OPTIONS.replace_all(&sql, "AS IDENTITY"), dialect))
             .or_else(|| {
                 let listed = stmt
                     .respelled_mysql_alter()
