@@ -405,7 +405,9 @@ the schema never defines (`LIKE`, `INHERITS`, `PARTITION OF`), has an unknown
 shape: its columns get no type, and `SELECT *` over it is left alone.
 Actions that cannot change columns (constraints, storage options, ownership,
 triggers, partitions, tablespaces) never do this. `sqlty check` warns about each
-table or type it had to leave unknown.
+table or type it had to leave unknown, and about each statement it cannot read that
+would set a key, a check, `NOT NULL`, a default or a type: such a statement is
+ignored, so the columns keep what the earlier statements gave them.
 `ALTER VIEW`, `DROP ... CASCADE` of dependent views and
 `ALTER SCHEMA ... RENAME` are not followed. Views are analyzed against the
 tables as they are where the view is created.

@@ -14,7 +14,7 @@ dialects = ["postgres"]
 left = ["JSON"]
 type = "JSON"
 nullability = "nullable"
-reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.45 json and jsonb Operators (json -> text)"
+reference.postgres = "PostgreSQL 17 documentation, 9.16.1, Table 9.45 json and jsonb Operators (json -> text)"
 reasoning = "`->` on a json value gives json; a missing member gives NULL."
 ```
 
@@ -30,7 +30,7 @@ reasoning = "`->` on a json value gives json; a missing member gives NULL."
 | `nullability` | no | One of the nullabilities below; `operands` by default |
 | `shadows` | no | Ids of later rules of the same tier this one takes precedence over where both match |
 | `left-parameter`, `right-parameter` | no | The SQL type (`TEXT`, `ARRAY<TEXT>`, ...) a placeholder on that side gets when the other operand matches its own `left` or `right` |
-| `reference` | yes | The documentation the rule follows: product, version, section |
+| `reference.postgres`, `reference.mysql`, `reference.sqlite` | one at least | The documentation of that database the rule follows: product, version, section. `--explain` and hover show the configured dialect's, or all of them for a dialect none documents |
 | `reasoning` | yes | Why, in one sentence |
 
 Operand types are the canonical names the analyzer gives (`INT`, `BIGINT`,
@@ -55,7 +55,7 @@ left = ["JSONB"]
 type = "JSONB"
 nullability = "nullable"
 right-parameter = "TEXT"
-reference = "PostgreSQL 17 documentation, 9.16.1, Table 9.45 json and jsonb Operators (jsonb -> text → jsonb)"
+reference.postgres = "PostgreSQL 17 documentation, 9.16.1, Table 9.45 json and jsonb Operators (jsonb -> text → jsonb)"
 reasoning = "`->` on a jsonb value gives jsonb; a missing member or element gives NULL."
 ```
 
@@ -91,7 +91,7 @@ dialects = ["postgres"]
 argument = ["SMALLINT", "INT"]
 type = "BIGINT"
 nullability = "aggregate"
-reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (sum ( integer ) → bigint)"
+reference.postgres = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (sum ( integer ) → bigint)"
 reasoning = "Summing small integers widens to bigint so the sum fits."
 ```
 
@@ -185,7 +185,8 @@ own, or an unknown dialect in `extends`, fails the build.
 `cargo build` fails, naming the rule id and its file, for:
 
 - malformed TOML or an unknown key;
-- an empty `reference` or `reasoning`, or a duplicate `id`;
+- an empty `reference` or `reasoning`, a `reference` of another dialect than
+  `postgres`, `mysql` or `sqlite`, or a duplicate `id`;
 - an unknown dialect, operand type, result type or nullability;
 - an operator that is not a variant name (`rustc` then checks the variant
   exists: the generated `match` names it as `BinaryOperator::<name> { .. }`);
@@ -252,7 +253,8 @@ These settle the review of the first proposal in
   result that depends on a literal value (division by a non-zero constant), an
   interval's unit, or facts learned from the left side.
 - **No Cargo feature for `--explain`.** Every rule carries its `id`,
-  `reference` and `reasoning` as `&'static str`; a trace is recorded only when
+  `reference` (each dialect's and all of them joined) and `reasoning` as
+  `&'static str`; a trace is recorded only when
   asked for ([#357](https://github.com/jirikuncar/sqlty/issues/357)), so the
   published wheel supports it.
 - **Allocation.** Choosing a rule is a `match` on the operator and a scan of a

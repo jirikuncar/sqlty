@@ -6,7 +6,7 @@ functions = ["CEIL", "CEILING", "FLOOR", "TRUNC"]
 dialects = ["sqlite"]
 type = "@argument-type(0)"
 nullability = "strict"
-reference = "SQLite documentation, Built-In Mathematical SQL Functions"
+reference.sqlite = "SQLite documentation, Built-In Mathematical SQL Functions"
 reasoning = "The result has the type of the first argument."
 
 [[function]]
@@ -15,7 +15,7 @@ functions = ["EXP", "MOD"]
 dialects = ["sqlite"]
 type = "DOUBLE"
 nullability = "strict"
-reference = "SQLite documentation, Built-In Mathematical SQL Functions"
+reference.sqlite = "SQLite documentation, Built-In Mathematical SQL Functions"
 reasoning = "Each of these returns a floating-point value."
 
 [[function]]
@@ -24,7 +24,7 @@ functions = ["SQRT", "LN", "LOG", "LOG2", "LOG10", "ACOS", "ASIN", "POW", "POWER
 dialects = ["sqlite"]
 type = "DOUBLE"
 nullability = "nullable"
-reference = "SQLite documentation, Built-In Mathematical SQL Functions"
+reference.sqlite = "SQLite documentation, Built-In Mathematical SQL Functions"
 reasoning = "Each of these returns a floating-point value. SQLite also returns NULL for a value it cannot read: text that is not a date or not hexadecimal, or a number outside a math function's domain."
 
 [[function]]
@@ -34,5 +34,5 @@ dialects = ["sqlite"]
 argument = ["@text", "@binary"]
 type = "DOUBLE"
 nullability = "strict"
-reference = "SQLite documentation, Built-In Scalar SQL Functions (abs(X) returns 0.0 if X is a string or blob that cannot be converted to a numeric value)"
+reference.sqlite = "SQLite documentation, Built-In Scalar SQL Functions (abs(X) returns 0.0 if X is a string or blob that cannot be converted to a numeric value)"
 reasoning = "The absolute value of a string or blob is a real, 0.0 when it is not a number."

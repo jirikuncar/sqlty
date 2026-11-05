@@ -7,7 +7,9 @@ operators = ["Plus", "Minus", "Multiply"]
 left = ["@numeric"]
 right = ["@numeric"]
 type = "@promote"
-reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators; MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators; SQLite documentation, SQL Language Expressions, 2 Operators"
+reference.postgres = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators"
+reference.sqlite = "SQLite documentation, SQL Language Expressions, 2 Operators"
 reasoning = "Arithmetic on two numbers gives the wider of their types."
 
 [[rule]]
@@ -17,7 +19,8 @@ left = ["@numeric"]
 right = ["@numeric"]
 type = "@promote"
 nullability = "nonzero-divisor"
-reference = "MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators (Division by zero produces a NULL result); SQLite documentation, SQL Language Expressions, 2 Operators (the result of any binary operator is either a numeric value or NULL)"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators (Division by zero produces a NULL result)"
+reference.sqlite = "SQLite documentation, SQL Language Expressions, 2 Operators (the result of any binary operator is either a numeric value or NULL)"
 reasoning = "Division gives the wider type, and NULL for a zero divisor."
 
 [[rule]]
@@ -25,7 +28,7 @@ id = "common.arithmetic.division-other"
 operators = ["Divide", "Modulo"]
 type = "@unknown"
 nullability = "nonzero-divisor"
-reference = "MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators (Division by zero produces a NULL result)"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators (Division by zero produces a NULL result)"
 reasoning = "A division by zero gives NULL whatever the operand types; other operand types have no known result."
 
 [[rule]]
@@ -34,7 +37,7 @@ operator = "PGExp"
 left = ["DECIMAL", "NUMERIC"]
 right = ["@integer", "DECIMAL", "NUMERIC"]
 type = "DECIMAL"
-reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (numeric ^ numeric → numeric)"
+reference.postgres = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (numeric ^ numeric → numeric)"
 reasoning = "`^` keeps exact numbers exact: an integer converts to numeric implicitly, so numeric ^ integer is numeric."
 
 [[rule]]
@@ -43,12 +46,12 @@ operator = "PGExp"
 left = ["@integer"]
 right = ["DECIMAL", "NUMERIC"]
 type = "DECIMAL"
-reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (numeric ^ numeric → numeric)"
+reference.postgres = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (numeric ^ numeric → numeric)"
 reasoning = "`^` keeps exact numbers exact: an integer converts to numeric implicitly, so integer ^ numeric is numeric."
 
 [[rule]]
 id = "common.arithmetic.power"
 operator = "PGExp"
 type = "DOUBLE"
-reference = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (double precision ^ double precision → double precision)"
+reference.postgres = "PostgreSQL 17 documentation, 9.3, Table 9.4 Mathematical Operators (double precision ^ double precision → double precision)"
 reasoning = "`^` on anything but two exact numbers is computed in double precision."

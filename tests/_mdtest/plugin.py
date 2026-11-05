@@ -31,6 +31,14 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
 
 
+@pytest.hookimpl(tryfirst=True)
+def pytest_configure(config: pytest.Config) -> None:
+    # One writer per file: parallel workers would each rewrite it with their sections only.
+    if config.getoption("--update-mdtest") and config.pluginmanager.has_plugin("xdist"):
+        config.option.numprocesses = 0
+        config.option.dist = "no"
+
+
 def pytest_collect_file(parent: pytest.Collector, file_path: Path) -> MDTestFile | None:
     if file_path.suffix != ".md":
         return None
