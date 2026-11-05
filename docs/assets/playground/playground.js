@@ -545,16 +545,16 @@ document.addEventListener("fullscreenchange", () => {
 root.addEventListener("keydown", (event) => {
   if (event.target.closest?.(".monaco-editor")) event.stopPropagation();
 });
+// Keys in the editor are the editor's: these act everywhere else in the playground.
 document.addEventListener("keydown", (event) => {
   if (!root.contains(event.target) && !root.classList.contains("sqlty-present")) return;
+  if (event.target.closest?.(".monaco-editor")) return;
   const mod = event.ctrlKey || event.metaKey;
-  const inEditor = event.target.closest?.(".monaco-editor");
   if (mod && (event.key === "=" || event.key === "+" || event.key === "-")) zoom(event.key === "-" ? -1 : 1);
   else if (mod && event.shiftKey && event.key.toLowerCase() === "f") presenting(!root.classList.contains("sqlty-present"));
-  else if (event.key === "Escape" && root.classList.contains("sqlty-present") && !inEditor && event.target.tagName !== "SELECT") {
+  else if (event.key === "Escape" && root.classList.contains("sqlty-present") && event.target.tagName !== "SELECT") {
     presenting(false);
-  }
-  else if (steps.length && (event.altKey || !inEditor) && (event.key === "PageDown" || event.key === "PageUp")) {
+  } else if (steps.length && (event.key === "PageDown" || event.key === "PageUp")) {
     go(step + (event.key === "PageDown" ? 1 : -1));
   } else return;
   event.preventDefault();

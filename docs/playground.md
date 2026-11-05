@@ -35,9 +35,9 @@ queries as you type. It runs in your browser. The engine is compiled to
     <span class="sqlty-status" data-link-status role="status"></span>
   </div>
   <nav class="sqlty-steps" aria-label="Steps" data-steps hidden>
-    <button type="button" class="sqlty-button" data-step="-1" title="Previous step (Alt+PageUp)" aria-label="Previous step">&larr;</button>
+    <button type="button" class="sqlty-button" data-step="-1" title="Previous step (PageUp)" aria-label="Previous step">&larr;</button>
     <select data-step-select aria-label="Step"></select>
-    <button type="button" class="sqlty-button" data-step="1" title="Next step (Alt+PageDown)" aria-label="Next step">&rarr;</button>
+    <button type="button" class="sqlty-button" data-step="1" title="Next step (PageDown)" aria-label="Next step">&rarr;</button>
     <button type="button" class="sqlty-button" data-step-reset title="Undo the edits of this step" aria-label="Reset step">&#8634;<span class="sqlty-label"> Reset</span></button>
   </nav>
   <div class="sqlty-tabs" role="tablist" aria-label="Files">
@@ -274,9 +274,9 @@ size of the editor and the console, for a projector or a screen share.
 
 | Keys | What they do |
 |---|---|
-| **Ctrl+Shift+F** | Present, or stop presenting; **Escape** also stops, outside the editor |
+| **Ctrl+Shift+F** | Present, or stop presenting; **Escape** also stops |
 | **Ctrl+=**, **Ctrl+-** | A larger or a smaller font |
-| **Alt+PageDown**, **Alt+PageUp** | The next or the previous step; outside the editor, **PageDown** and **PageUp** too, as most presentation remotes send |
+| **PageDown**, **PageUp** | The next or the previous step, as most presentation remotes send |
 
 On macOS, **Command** works as **Ctrl**.
 

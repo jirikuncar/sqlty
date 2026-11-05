@@ -67,8 +67,13 @@ def check(page: Page, url: str) -> None:
     page.select_option("[data-example]", label="Tour in steps")
     page.wait_for_selector("[data-steps]:not([hidden])")
     first = page.evaluate(f"{SOURCE}.getValue()")
-    page.keyboard.press("Alt+PageDown")
+    page.keyboard.press("PageDown")
     page.wait_for_function("document.querySelector('[data-step-select]').value === '1'")
+    page.click("[data-source] .view-lines")
+    page.keyboard.press("PageDown")
+    page.keyboard.type(".")
+    assert page.input_value("[data-step-select]") == "1"
+    assert page.url.split("#")[0].endswith("/playground/"), page.url
     page.evaluate(f"{SOURCE}.setValue('edited = 1\\n')")
     page.click("[data-step-reset]")
     assert page.evaluate(f"{SOURCE}.getValue()") not in (first, "edited = 1\n")
