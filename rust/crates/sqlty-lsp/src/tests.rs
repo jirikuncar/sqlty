@@ -5,7 +5,6 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use lsp_server::{Connection, Message, Notification, Request, RequestId};
-use lsp_types::Url;
 use serde_json::{json, Value};
 
 use sqlty_sql::analyzer::{load_schema_with_skipped, Schema};
@@ -415,15 +414,15 @@ fn breaking_changes_in_files_that_are_not_open_are_published() {
     let root = std::env::temp_dir().join(format!("sqlty-lsp-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(root.join("old.py"), "q = bio\n").unwrap();
-    let folder = Url::from_file_path(&root).unwrap();
-    let old = Url::from_file_path(root.join("old.py")).unwrap();
+    let folder = crate::uri::from_path(&root).unwrap();
+    let old = crate::uri::from_path(&root.join("old.py")).unwrap();
     let options = json!({"breaking": {"against": "main", "direction": "both"}});
     let mut client = Client::with(
         &json!({}),
         &json!([{"uri": folder, "name": "work"}]),
         &options,
     );
-    let new = Url::from_file_path(root.join("new.py")).unwrap();
+    let new = crate::uri::from_path(&root.join("new.py")).unwrap();
     client.open(new.as_str(), "ok\n");
     let published = client.notification("textDocument/publishDiagnostics");
     assert_eq!(published["uri"], old.as_str());
@@ -453,7 +452,7 @@ fn breaking_changes_in_files_that_are_not_open_are_published() {
 
     client.notify(
         "workspace/didChangeWatchedFiles",
-        json!({"changes": [{"uri": Url::from_file_path(root.join("schema.sql")).unwrap(), "type": 2}]}),
+        json!({"changes": [{"uri": crate::uri::from_path(&root.join("schema.sql")).unwrap(), "type": 2}]}),
     );
     let reloaded = loop {
         let published = client.notification("textDocument/publishDiagnostics");
