@@ -64,6 +64,12 @@ q = "--sql\nselect a,b from t"
     whitespace inside your queries. Run it before `rewrite --check` in CI, as you run
     a code formatter before a linter.
 
+## In the editor
+
+`sqlty server` offers `sqlty format` as the code action `source.format.sqlty`, so an
+editor can run it on save next to your Python formatter. See
+[Format on save](../recipes/vscode.md#format-on-save).
+
 ## Configuration
 
 sqruff reads no configuration file here, so the layout is the same on every machine.

@@ -151,6 +151,7 @@ def test_agent_skill_frontmatter(skill: Path) -> None:
         "strip",
         "check",
         "breaking",
+        "format",
         "rule",
         "skill",
         "server",
