@@ -55,9 +55,9 @@
    "provenance": "columns.Array(BigInt)",
    "schema": ""
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
  },
  {
   "row": {
@@ -145,9 +145,9 @@
    "provenance": "columns.Array(Blob)",
    "schema": ""
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
  },
  {
   "row": {
@@ -205,9 +205,9 @@
    "provenance": "columns.Array(Boolean)",
    "schema": ""
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
  },
  {
   "row": {
@@ -265,9 +265,9 @@
    "provenance": "columns.Array(Bytea)",
    "schema": ""
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
  },
  {
   "row": {
@@ -325,9 +325,9 @@
    "provenance": "columns.Array(Char)",
    "schema": ""
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
  },
  {
   "row": {
@@ -385,7 +385,7 @@
    "provenance": "columns.Array(Date)",
    "schema": ""
   },
-  "sqlty": "float",
+  "sqlty": "str",
   "nullable": false,
   "outcome": "mismatch"
  },
@@ -445,9 +445,9 @@
    "provenance": "columns.Array(Decimal)",
    "schema": ""
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
  },
  {
   "row": {
@@ -505,9 +505,9 @@
    "provenance": "columns.Array(DoublePrecision)",
    "schema": ""
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
  },
  {
   "row": {
@@ -565,9 +565,9 @@
    "provenance": "columns.Array(Email)",
    "schema": ""
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
  },
  {
   "row": {
@@ -625,9 +625,9 @@
    "provenance": "columns.Array(Float)",
    "schema": ""
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
  },
  {
   "row": {
@@ -685,9 +685,9 @@
    "provenance": "columns.Array(Integer)",
    "schema": ""
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
  },
  {
   "row": {
@@ -745,9 +745,9 @@
    "provenance": "columns.Array(Interval)",
    "schema": ""
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
  },
  {
   "row": {
@@ -865,9 +865,9 @@
    "provenance": "columns.Array(Numeric)",
    "schema": ""
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
  },
  {
   "row": {
@@ -925,9 +925,9 @@
    "provenance": "columns.Array(Real)",
    "schema": ""
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
  },
  {
   "row": {
@@ -985,9 +985,9 @@
    "provenance": "columns.Array(Secret)",
    "schema": ""
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
  },
  {
   "row": {
@@ -1075,9 +1075,9 @@
    "provenance": "columns.Array(SmallInt)",
    "schema": ""
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
  },
  {
   "row": {
@@ -1135,9 +1135,9 @@
    "provenance": "columns.Array(Text)",
    "schema": ""
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
  },
  {
   "row": {
@@ -1195,7 +1195,7 @@
    "provenance": "columns.Array(Time)",
    "schema": ""
   },
-  "sqlty": "float",
+  "sqlty": "str",
   "nullable": false,
   "outcome": "mismatch"
  },
@@ -1255,7 +1255,7 @@
    "provenance": "columns.Array(Timestamp)",
    "schema": ""
   },
-  "sqlty": "float",
+  "sqlty": "str",
   "nullable": false,
   "outcome": "mismatch"
  },
@@ -1315,7 +1315,7 @@
    "provenance": "columns.Array(Timestamptz)",
    "schema": ""
   },
-  "sqlty": "float",
+  "sqlty": "str",
   "nullable": false,
   "outcome": "mismatch"
  },
@@ -1375,9 +1375,9 @@
    "provenance": "columns.Array(UUID)",
    "schema": ""
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
  },
  {
   "row": {
@@ -1435,8 +1435,8 @@
    "provenance": "columns.Array(Varchar)",
    "schema": ""
   },
-  "sqlty": null,
-  "nullable": null,
-  "outcome": "sqlty-gap"
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
  }
 ]

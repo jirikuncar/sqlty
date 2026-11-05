@@ -220,7 +220,7 @@ def test_bump_version_writes_every_place(tmp_path: Path) -> None:
     """`bump_version.py X` changes the version lines of every place and no other line."""
     places = {
         "rust/Cargo.toml": 1,
-        "rust/Cargo.lock": 6,
+        "rust/Cargo.lock": 7,
         ".claude-plugin/plugin.json": 1,
         ".claude-plugin/marketplace.json": 2,
         ".codex-plugin/plugin.json": 1,

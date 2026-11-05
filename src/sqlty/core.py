@@ -31,6 +31,7 @@ from sqlty._core import analyze_select as _analyze_select
 from sqlty._core import complete_source as _complete_source
 from sqlty._core import explain_select as _explain_select
 from sqlty._core import fix_source as _fix_source
+from sqlty._core import format_source as _format_source
 from sqlty._core import highlight_source as _highlight_source
 from sqlty._core import hover_source as _hover_source
 from sqlty._core import load_schema as _load_schema
@@ -319,6 +320,29 @@ def strip_source(source: str, *, import_style: str | None = None) -> str:
         ValueError: unsupported ``import_style``
     """
     return _strip_source(source, import_style=import_style)
+
+
+def format_source(
+    source: str, *, dialect: str = "postgres", import_style: str | None = None
+) -> str:
+    r"""Lay out the query strings ``sqlty check`` reads with `sqruff <https://github.com/quarylabs/sqruff>`_.
+
+    Only a query in one plain triple-quoted literal without a backslash is formatted, and
+    only its whitespace changes. The marker line, the indentation of the first line and
+    the whitespace before the closing quotes are kept.
+
+    Example:
+        >>> print(format_source("q = '''--sql\nselect id,name from users'''"))
+        q = '''--sql
+        select
+            id,
+            name
+        from users'''
+
+    Raises:
+        ValueError: unsupported ``import_style``
+    """
+    return _format_source(source, dialect=dialect, import_style=import_style)
 
 
 def fix_source(
@@ -808,6 +832,7 @@ __all__ = [
     "complete_source",
     "expand_star",
     "fix_source",
+    "format_source",
     "highlight_source",
     "hover_source",
     "infer_type",

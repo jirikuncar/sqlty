@@ -122,6 +122,17 @@ class Run:
                         f"check --fix is not idempotent; a second run gives:\n{again}"
                     )
                 return fixed.strip()
+            case "formatted":
+                formatted = core.format_source(
+                    text, dialect=self.dialect, import_style=self.import_style
+                )
+                formatted = _parses(text, formatted)
+                again = core.format_source(
+                    formatted, dialect=self.dialect, import_style=self.import_style
+                )
+                if again != formatted:
+                    raise AssertionError(f"format is not idempotent; a second run gives:\n{again}")
+                return formatted.strip()
             case "stripped":
                 stripped = core.strip_source(text, import_style=self.import_style)
                 return _parses(text, stripped, same_strings=True).strip()

@@ -66,6 +66,7 @@ pub use explain::{explain_select, ColumnRules};
 use expr::from_sql_type;
 pub use hover::{hover, Hover};
 pub use inference::RuleRef;
+pub(crate) use input::iso_types;
 pub use nullability::Nullability;
 pub use params::{analyze_params, Param};
 pub(crate) use preprocess::{parse_ddl, parse_function_without_hints};
