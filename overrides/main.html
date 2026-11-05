@@ -1,4 +1,11 @@
 {% extends "base.html" %}
+{% block fonts %}
+  <link rel="stylesheet" href="{{ 'assets/vendor/inter/index.css' | url }}">
+  <link rel="stylesheet" href="{{ 'assets/vendor/inter/wght-italic.css' | url }}">
+  <link rel="stylesheet" href="{{ 'assets/vendor/jetbrains-mono/index.css' | url }}">
+  <link rel="stylesheet" href="{{ 'assets/vendor/jetbrains-mono/wght-italic.css' | url }}">
+  <style>:root{--md-text-font:"Inter Variable";--md-code-font:"JetBrains Mono Variable"}</style>
+{% endblock %}
 {% block extrahead %}
   <link rel="icon" href="{{ 'assets/favicon/favicon.ico' | url }}" sizes="32x32">
   <script>
@@ -17,8 +24,20 @@
   </script>
   <link rel="apple-touch-icon" href="{{ 'assets/favicon/apple-touch-icon.png' | url }}">
   <link rel="manifest" href="{{ 'assets/favicon/site.webmanifest' | url }}">
+  <meta name="theme-color" content="#0e0f10">
+  <meta name="apple-mobile-web-app-title" content="SQLTy">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <style>
     [data-md-color-scheme="default"] .md-logo img[src$="#only-dark"],
     [data-md-color-scheme="slate"] .md-logo img[src$="#only-light"] { display: none !important }
   </style>
+  <script>
+    if ("serviceWorker" in navigator && location.protocol !== "file:") {
+      navigator.serviceWorker.register("{{ 'sw.js' | url }}").catch(() => {});
+      if (matchMedia("(display-mode: standalone)").matches || navigator.standalone) {
+        navigator.serviceWorker.ready.then((registration) => registration.active?.postMessage("playground"));
+      }
+    }
+  </script>
 {% endblock %}
