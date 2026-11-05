@@ -20,7 +20,7 @@ use regex::Regex;
 use sqlty_sql::analyzer::{parse, statement_ranges};
 use sqlty_sql::diagnostics::NameRule;
 
-use crate::checker::{unparsed_message, Diagnostic};
+use crate::checker::{star_finding, unparsed_message, Diagnostic};
 use crate::options::Options;
 use crate::rules::{Rule, RuleConfig};
 
@@ -159,8 +159,9 @@ fn is_sqlc(rest: &str) -> bool {
     rest.trim_start().starts_with(':')
 }
 
-/// Check each statement of each named query of `source`: `unparsed-query` and the name
-/// rules, at the name when the analyzer knows where it is written, else at the statement.
+/// Check each statement of each named query of `source`: `unparsed-query`, `select-star` and
+/// the name rules, at the name when the analyzer knows where it is written, else at the
+/// statement.
 pub fn check_queries(
     source: &str,
     format: Format,
@@ -189,10 +190,17 @@ pub fn check_queries(
         let body = &source[query.body.clone()];
         for statement in statement_ranges(body, dialect) {
             let at = query.body.start + statement.start..query.body.start + statement.end;
-            let parsed = parse(&body[statement], dialect);
+            let parsed = parse(&body[statement.clone()], dialect);
             if let Some(error) = parsed.error() {
                 report(Rule::UnparsedQuery, unparsed_message(&error), at);
                 continue;
+            }
+            if let Some((rule, message)) = star_finding(
+                parsed.result_stars(),
+                &body[statement.clone()],
+                options.schema.is_some(),
+            ) {
+                report(rule, message, at.clone());
             }
             if !names {
                 continue;
