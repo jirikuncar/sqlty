@@ -73,6 +73,29 @@ c = SQL[tuple[int, float]]("--sql\nSELECT o.id, (SELECT SUM(total) FROM orders) 
 d = SQL[tuple[float]]("--sql\nSELECT SUM(i.amount) FROM orders o JOIN order_items i ON i.order_id = o.id")
 ```
 
+### `AVG` grouped by the repeated table's key
+
+Each group holds copies of one order, so `AVG(o.total)` is `o.total`. `SUM`
+and `COUNT` still count every copy, and `AVG` grouped by another column still
+mixes orders with different numbers of items.
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int, float, float]]("--sql\nSELECT o.id, AVG(o.total), SUM(i.amount) FROM orders o JOIN order_items i ON i.order_id = o.id GROUP BY o.id")
+b = SQL[tuple[int, float]]("--sql\nSELECT i.order_id, AVG(o.total) FROM orders o JOIN order_items i ON i.order_id = o.id GROUP BY i.order_id")
+```
+
+```python
+from sqlty import SQL
+
+# error: [fanout-aggregate] "SUM(o.total) aggregates orders, whose rows repeat once per order_items row"
+a = SQL[tuple[int, float]]("--sql\nSELECT o.id, SUM(o.total) FROM orders o JOIN order_items i ON i.order_id = o.id GROUP BY o.id")
+# error: [fanout-aggregate] "AVG(o.total) aggregates orders, whose rows repeat once per order_items row"
+b = SQL[tuple[int, float]]("--sql\nSELECT o.customer_id, AVG(o.total) FROM orders o JOIN order_items i ON i.order_id = o.id GROUP BY o.customer_id")
+```
+
 ## Aggregated first
 
 A CTE or derived table grouped by the join column, or selected `DISTINCT`, has
