@@ -52,6 +52,11 @@ missing_docs = "warn"
 unused_lifetimes = "warn"
 unused_qualifications = "warn"
 
+# The tests spend most of their time in sqlparser and pyo3: optimised, they halve the suite,
+# and the workspace crates still build at debug speed.
+[profile.dev.package."*"]
+opt-level = 3
+
 # Wheels published to PyPI: `maturin build --profile dist`. Plain `release` (what `uv sync`
 # and `maturin develop --release` use) stays quick to rebuild.
 # No panic = "abort": PyO3 turns panics into Python exceptions.
