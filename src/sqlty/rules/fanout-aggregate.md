@@ -82,7 +82,9 @@ reports it.
 
 `MIN`, `MAX`, `BOOL_AND`, `BOOL_OR` and `DISTINCT` aggregates such as
 `COUNT(DISTINCT o.id)` give the same result over repeated rows and are not
-reported. Nor is `COUNT(*)`, which counts the joined rows;
+reported. Neither is `AVG` when the `GROUP BY` covers a key of the repeated table:
+each group then holds copies of one row, and their average is its value. Nor is
+`COUNT(*)`, which counts the joined rows;
 [`chasm-join`](chasm-join.md) reports a query where every table repeats.
 
 ## Configuration
