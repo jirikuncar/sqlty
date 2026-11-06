@@ -17,6 +17,7 @@ nav = [
     { "Quickstart" = "quickstart.md" },
     { "Why SQLTy?" = "motivation.md" },
     { "Use cases" = "use-cases.md" },
+    { "FAQ" = "faq.md" },
   ] },
   { "Guide" = [
     { "Writing queries" = "guide/writing-queries.md" },
@@ -113,6 +114,7 @@ markdown_description = "SQLTy type-checks SQL in Python: it infers row and param
   "quickstart.md",
   "motivation.md",
   "use-cases.md",
+  "faq.md",
 ]
 "Guide" = ["guide/*.md"]
 "Optional" = [
