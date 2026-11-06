@@ -49,6 +49,11 @@ stale-rewrite = "error"
 `;
 
 const root = document.getElementById("sqlty-playground");
+// A module runs once per document: coming back with instant navigation needs a full load.
+window.document$?.subscribe(() => {
+  const page = document.getElementById("sqlty-playground");
+  if (page && page !== root) location.reload();
+});
 const [monaco, ask, shared, examples, linkedDeck] = await Promise.all([
   loadMonaco(),
   engine(),
