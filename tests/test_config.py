@@ -277,3 +277,73 @@ def test_unknown_dialect_is_an_error_with_a_suggestion() -> None:
     with pytest.raises(ConfigError, match=r"unknown dialect 'postgress'.*did you mean 'postgres'"):
         validate_tool_table({"dialect": "postgress"}, "pyproject.toml")
     validate_tool_table({"dialect": "PostgreSQL"}, "pyproject.toml")
+
+
+def test_extend_applies_a_package_config_on_top_of_another(tmp_path: Path) -> None:
+    """``rules`` and ``types`` merge key by key, other keys replace, extended paths are rebased."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.sqlty]\ndialect = "mysql"\nschema = ["db/*.sql"]\nqueries = "sql"\n'
+        "functions = [{ import-path = 'db.run', query-param = 'q' }]\n"
+        '[tool.sqlty.rules]\nselect-star = "ignore"\nstale-type = "warn"\n'
+        '[tool.sqlty.types]\nDATE = "str"\n'
+    )
+    pkg = tmp_path / "packages" / "billing"
+    pkg.mkdir(parents=True)
+    (pkg / "sqlty.toml").write_text(
+        'extend = "../../pyproject.toml"\n'
+        "functions = [{ import-path = 'billing.run', query-param = 'sql' }]\n"
+        '[rules]\nstale-type = "error"\n[types]\nUUID = "str"\n'
+    )
+
+    assert load_config(pkg / "src") == (
+        {
+            "dialect": "mysql",
+            "schema": ["../../db/*.sql"],
+            "queries": ["../../sql"],
+            "functions": [{"import_path": "billing.run", "query_param": "sql"}],
+            "rules": {"select-star": "ignore", "stale-type": "error"},
+            "types": {"DATE": "str", "UUID": "str"},
+        },
+        pkg.resolve(),
+    )
+
+    (pkg / "sqlty.toml").write_text('extend = "../../pyproject.toml"\nschema = "local.sql"\n')
+    assert load_config(pkg)[0]["schema"] == "local.sql"
+
+
+def test_extend_follows_a_chain_and_rereads_an_edited_base(tmp_path: Path) -> None:
+    from sqlty._config import load_config_file
+
+    base = tmp_path / "base.toml"
+    base.write_text('dialect = "sqlite"\n')
+    (tmp_path / "mid.toml").write_text('extend = "base.toml"\nimport-style = "import sqlty"\n')
+    (tmp_path / "sqlty.toml").write_text('extend = "mid.toml"\n')
+
+    assert load_config(tmp_path)[0] == {"dialect": "sqlite", "import_style": "import sqlty"}
+    assert load_config_file(tmp_path / "sqlty.toml") == load_config(tmp_path)[0]
+
+    base.write_text('dialect = "mysql"\n')
+    stat = base.stat()
+    os.utime(base, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+    assert load_config(tmp_path)[0]["dialect"] == "mysql"
+
+
+@pytest.mark.parametrize(
+    ("files", "message"),
+    [
+        ({"sqlty.toml": 'extend = "missing.toml"\n'}, "config file does not exist"),
+        ({"sqlty.toml": 'extend = "sqlty.toml"\n'}, "extends itself in a cycle"),
+        (
+            {"sqlty.toml": 'extend = "a.toml"\n', "a.toml": 'extend = "sqlty.toml"\n'},
+            "extends itself in a cycle",
+        ),
+        ({"sqlty.toml": "extend = 1\n"}, "extend must be a string"),
+        ({"sqlty.toml": 'extend = "a.toml"\n', "a.toml": "bogus = 1\n"}, "unknown key 'bogus'"),
+    ],
+)
+def test_invalid_extend_is_an_error(tmp_path: Path, files: dict[str, str], message: str) -> None:
+    for name, content in files.items():
+        (tmp_path / name).write_text(content)
+
+    with pytest.raises(ConfigError, match=message):
+        load_config(tmp_path)
