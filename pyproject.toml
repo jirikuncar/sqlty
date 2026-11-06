@@ -45,6 +45,9 @@ Issues = "https://github.com/jirikuncar/sqlty/issues"
 [project.scripts]
 sqlty = "sqlty._cli:main"
 
+[project.entry-points."pygments.lexers"]
+sqlty = "sqlty.lexer:SQLTyLexer"
+
 [project.optional-dependencies]
 psycopg = ["psycopg>=3.2.12"]
 
@@ -83,6 +86,7 @@ dev = [
     "pydantic[email]>=2.14.1",
     "jsonschema>=4.26.0",
     "pytest-xdist>=3.8.0",
+    "types-pygments>=2.19",
 ]
 cli = ["rich>=15.0.0"]
 # Only the DuckDB type tests need it, and it has no wheel for every Python.
