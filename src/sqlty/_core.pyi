@@ -68,7 +68,18 @@ def rewrite_source(
     untyped: bool = False,
     keep_lines: bool = False,
 ) -> str: ...
+def add_param_types(
+    source: str,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
+    import_style: str | None = None,
+) -> str: ...
 def strip_source(source: str, *, import_style: str | None = None) -> str: ...
+def format_source(source: str, *, dialect: str = ..., import_style: str | None = None) -> str: ...
+def sqruff_findings(
+    source: str, *, dialect: str = ..., import_style: str | None = None
+) -> list[tuple[str, str, int, int, int]]: ...
 def fix_source(
     source: str,
     *,
@@ -98,6 +109,18 @@ def check_source(
     untyped: bool = False,
     any_calls: list[int] = ...,
 ) -> list[Diagnostic]: ...
+def check_queries(
+    source: str,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
+    rules: dict[str, str] | None = None,
+    query_format: str = "auto",
+    name: str = "",
+) -> list[Diagnostic]: ...
+def named_queries(
+    source: str, *, query_format: str = "auto", name: str = ""
+) -> list[tuple[str, str, list[tuple[str, str]]]]: ...
 def wrapped_queries(
     source: str, *, import_style: str | None = None
 ) -> list[tuple[int, str, str | None, tuple[int, int]]]: ...

@@ -5,7 +5,6 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use lsp_server::{Connection, Message, Notification, Request, RequestId};
-use lsp_types::Url;
 use serde_json::{json, Value};
 
 use sqlty_sql::analyzer::{load_schema_with_skipped, Schema};
@@ -72,6 +71,10 @@ impl Workspace for Fake {
 
     fn fix(&mut self, _: &Path, text: &str) -> Result<String, String> {
         Ok(text.replace("bad", "good"))
+    }
+
+    fn format(&mut self, _: &Path, text: &str) -> Result<String, String> {
+        Ok(text.replace("x=1", "x = 1"))
     }
 
     fn breaking(&mut self) -> Result<Vec<(PathBuf, Vec<Diagnostic>)>, String> {
@@ -326,6 +329,34 @@ fn fix_all_edits_the_changed_span() {
 }
 
 #[test]
+fn format_is_a_source_action_beside_fix_all() {
+    let mut client = Client::start(&json!({}));
+    client.open("file:///work/q.py", "x=1\ny = bad\n");
+    let range = json!({"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}});
+    let only = |kinds: Value| json!({"textDocument": {"uri": "file:///work/q.py"}, "range": range, "context": {"diagnostics": [], "only": kinds}});
+    let actions = client.request("textDocument/codeAction", only(json!(["source.format"])));
+    assert_eq!(actions[0]["kind"], "source.format.sqlty");
+    assert_eq!(actions[0]["title"], "sqlty: format");
+    let edit = &actions[0]["edit"]["documentChanges"][0]["edits"][0];
+    assert_eq!(edit["newText"], " = ");
+    let both = client.request("textDocument/codeAction", only(json!(["source"])));
+    let kinds: Vec<_> = both
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["kind"].clone())
+        .collect();
+    assert_eq!(
+        kinds,
+        [json!("source.fixAll.sqlty"), json!("source.format.sqlty")]
+    );
+    client.open("file:///work/clean.py", "x = 1\n");
+    let clean = json!({"textDocument": {"uri": "file:///work/clean.py"}, "range": range, "context": {"diagnostics": [], "only": ["source.format"]}});
+    assert_eq!(client.request("textDocument/codeAction", clean), json!([]));
+    client.shutdown();
+}
+
+#[test]
 fn an_edit_is_checked_at_its_version() {
     let mut client = Client::start(&json!({}));
     client.open("file:///work/q.py", "y = bad\n");
@@ -394,8 +425,7 @@ fn saving_the_config_reloads_the_project() {
 #[test]
 fn other_languages_and_requests_are_left_alone() {
     let mut client = Client::start(&json!({}));
-    let document =
-        json!({"uri": "file:///work/q.sql", "languageId": "sql", "version": 1, "text": "bad"});
+    let document = json!({"uri": "file:///work/q.txt", "languageId": "plaintext", "version": 1, "text": "bad"});
     client.notify("textDocument/didOpen", json!({"textDocument": document}));
     let definition = client.request(
         "textDocument/definition",
@@ -416,15 +446,15 @@ fn breaking_changes_in_files_that_are_not_open_are_published() {
     let root = std::env::temp_dir().join(format!("sqlty-lsp-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(root.join("old.py"), "q = bio\n").unwrap();
-    let folder = Url::from_file_path(&root).unwrap();
-    let old = Url::from_file_path(root.join("old.py")).unwrap();
+    let folder = crate::uri::from_path(&root).unwrap();
+    let old = crate::uri::from_path(&root.join("old.py")).unwrap();
     let options = json!({"breaking": {"against": "main", "direction": "both"}});
     let mut client = Client::with(
         &json!({}),
         &json!([{"uri": folder, "name": "work"}]),
         &options,
     );
-    let new = Url::from_file_path(root.join("new.py")).unwrap();
+    let new = crate::uri::from_path(&root.join("new.py")).unwrap();
     client.open(new.as_str(), "ok\n");
     let published = client.notification("textDocument/publishDiagnostics");
     assert_eq!(published["uri"], old.as_str());
@@ -454,7 +484,7 @@ fn breaking_changes_in_files_that_are_not_open_are_published() {
 
     client.notify(
         "workspace/didChangeWatchedFiles",
-        json!({"changes": [{"uri": Url::from_file_path(root.join("schema.sql")).unwrap(), "type": 2}]}),
+        json!({"changes": [{"uri": crate::uri::from_path(&root.join("schema.sql")).unwrap(), "type": 2}]}),
     );
     let reloaded = loop {
         let published = client.notification("textDocument/publishDiagnostics");

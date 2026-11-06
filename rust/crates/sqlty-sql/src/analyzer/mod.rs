@@ -57,7 +57,7 @@ pub(crate) use api::load_schema;
 pub use api::{
     analyze_select, analyze_with_diagnostics, composite_columns, infer_type,
     load_schema_with_overrides, load_schema_with_skipped, parse, parse_error, returns_rows,
-    row_type, Parsed,
+    row_type, statement_ranges, Parsed,
 };
 pub(crate) use api::{typed, view_columns};
 pub use complete::{complete, Candidate, CandidateKind, Completions};
@@ -66,6 +66,7 @@ pub use explain::{explain_select, ColumnRules};
 use expr::from_sql_type;
 pub use hover::{hover, Hover};
 pub use inference::RuleRef;
+pub(crate) use input::iso_types;
 pub use nullability::Nullability;
 pub use params::{analyze_params, Param};
 pub(crate) use preprocess::{parse_ddl, parse_function_without_hints};
@@ -111,7 +112,8 @@ impl SchemaColumn {
     }
 }
 
-/// `(kind, name)` of a schema table or view that could not be parsed.
+/// `(kind, name)` of a schema table or view that could not be parsed, or `("statement",
+/// text)` of a statement that does not parse and would set keys, `NOT NULL`, defaults or a type.
 pub type SkippedObject = (&'static str, String);
 
 /// Inference fails outright only for `SUM(column)` of a column missing from a schema table.

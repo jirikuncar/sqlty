@@ -10,8 +10,7 @@ severity is an error (exit 2) that names the file and suggests the closest match
 In every case a `pyproject.toml` without `[tool.sqlty]`, or a `Cargo.toml` without
 either Cargo table, is skipped, so a package's packaging-only file in a monorepo
 does not hide the root config. The closest file wins; settings are not merged with files in
-parent directories. To change one setting for a nested project, give it its
-own complete configuration. Command-line flags (`--dialect`,
+parent directories, unless it names one with [`extend`](#extend). Command-line flags (`--dialect`,
 `--schema`, `--untyped`, `--exclude`, `--extend-exclude`, `--error`/`--warn`/`--ignore`)
 and `-c KEY=VALUE` assignments override the file for every path.
 
@@ -98,6 +97,8 @@ A directory with more than one file reads the first of `sqlty.toml`,
 |-----|------|---------|---------|---------|
 | [`dialect`](#dialect) | `"postgres"`, `"sqlite"`, `"mysql"` | `"postgres"` | `rewrite`, `check` | SQL dialect of queries and schema |
 | [`schema`](#schema) | string or list of strings | none | `rewrite`, `check` | Schema `.sql` files, directories or globs, relative to the configuration file |
+| [`queries`](#queries) | string or list of strings | none | `check` | `.sql` files of named queries (aiosql, sqlc, PugSQL), directories or globs, relative to the configuration file |
+| [`query-format`](#query-format) | `"auto"`, `"aiosql"`, `"sqlc"`, `"pugsql"`, `"file"` | `"auto"` | `check` | How `queries` files name their queries; `auto` reads each file's first header |
 | [`rules`](#rules) | table of rule = severity | per-rule defaults | `check` | Severity per lint rule: `"error"`, `"warn"` or `"ignore"` |
 | [`overrides`](#overrides) | array of tables | `[]` | `check` | Rule severities for the files `include` matches and `exclude` does not, on top of `rules` |
 | [`import-style`](#import-style) | string | `"from sqlty import SQL"` | `rewrite`, `strip`, `check`, magic codec | How rewritten code imports and spells the wrapper |
@@ -109,6 +110,7 @@ A directory with more than one file reads the first of `sqlty.toml`,
 | [`functions`](#functions) | array of tables | `[]` | `check` | Helper functions whose string argument is a query |
 | [`types`](#types) | table of SQL type or `table.column` = Python type | `{}` | `rewrite`, `check` | Python types a converter above the driver gives a SQL type or a column |
 | [`format-command`](#format-command) | list of strings | none | `rewrite`, `check --fix` | Formatter run on each file `rewrite` or `check --fix` changes, with the path appended |
+| [`extend`](#extend) | string | none | `rewrite`, `strip`, `check`, magic codec | Another configuration file this one is applied on top of, relative to this file |
 | [`exclude`](#exclude-and-extend-exclude) | list of globs | see [Default excludes](#exclude-and-extend-exclude) | `rewrite`, `strip`, `check` | Globs skipped while walking a directory; replaces the default list |
 | [`extend-exclude`](#exclude-and-extend-exclude) | list of globs | `[]` | `rewrite`, `strip`, `check` | Globs skipped in addition to `exclude` or the defaults |
 | [`respect-gitignore`](#respect-gitignore) | boolean | `true` | `rewrite`, `strip`, `check` | Skip the files `.gitignore` ignores while walking a directory |
@@ -134,6 +136,26 @@ current directory). See [Schema inference](../guide/schema-inference.md).
 [tool.sqlty]
 schema = ["extensions.sql", "tables/"]
 ```
+
+## `queries`
+
+`.sql` files of named queries that `sqlty check` reads, relative to the directory
+of the configuration file: files, directories (every `*.sql` below them) and
+globs, as in `schema`. Kept apart from `schema`, so a migration is never read as
+a query. See [Queries in `.sql` files](../guide/sql-files.md).
+
+```toml
+[tool.sqlty]
+schema = "migrations/"
+queries = ["sql/**/*.sql"]
+```
+
+## `query-format`
+
+How the `queries` files name their queries: `"aiosql"` (`-- name: get-user^`),
+`"sqlc"` (`-- name: GetUser :one`), `"pugsql"` (`-- :name get_user :one`) or
+`"file"` (no header: one query per file). `"auto"`, the default, reads each
+file's first header, and picks `"file"` when it has none.
 
 ## `rules`
 
@@ -261,6 +283,8 @@ its classes. `strip` removes them. See
 param-types = true
 ```
 
+Example: [`examples/06_param_types/`](https://github.com/jirikuncar/sqlty/tree/main/examples/06_param_types).
+
 !!! warning "Type checkers become stricter than the driver"
     A type checker then rejects calls that psycopg runs: a list for a `tuple`,
     text for another type, a `dict[str, Any]` or extra keys for a `TypedDict`.
@@ -281,7 +305,7 @@ query-param = "query"
 <!-- generated:config-function-keys -->
 | Key | Required | Description |
 |-----|----------|-------------|
-| `import-path` | yes | Module path and function name, for example `"app.db.sql"`; a method is `"pkg.db.Db.fetch_all"`. Use `"__main__.sql"` or the file name for a script run directly |
+| `import-path` | yes | Module path and function name, for example `"app.db.sql"`; a method is `"pkg.db.Db.fetch_all"`. A package that re-exports it, `pkg.Db.fetch_all`, works too. Use `"__main__.sql"` or the file name for a script run directly |
 | `query-param` | yes | Name of the parameter that holds the query |
 | `return-type-param` | no | Parameter whose argument, such as `return_tp=int`, is the row type of that call instead of an inferred one; `check` compares it with the query columns |
 <!-- /generated:config-function-keys -->
@@ -308,6 +332,11 @@ project's dialect (`NUMERIC` covers `DECIMAL(10, 2)`). The type applies to
 schema columns and casts; an expression over a column keeps its type when it
 returns the column's values (`MAX(day)`). See
 [Drivers and ORMs](../guide/drivers-and-orms.md#what-to-annotate).
+
+`ARRAY = "list"` types every array column as a list of its element's type, with
+the element's own override: in SQLite, where an ORM decodes the JSON text it
+stores, `INT[]` and `ARRAY_DATE` become `list[int]` and `list[datetime.date]`
+with `DATE = "datetime.date"`.
 
 `rewrite` and `check --fix` import the module a type names (`import app.models` for
 `app.models.Status`), as they import `datetime`. `strip` leaves that import, since
@@ -346,6 +375,36 @@ ruff check --select I --fix --quiet "$@" && ruff format --quiet "$@"
 [tool.sqlty]
 format-command = ["sh", "scripts/format.sh"]
 ```
+
+## `extend`
+
+A package in a monorepo keeps its own configuration and shares the rest with the root.
+
+`packages/billing/pyproject.toml`:
+
+```toml
+[tool.sqlty]
+extend = "../../pyproject.toml"
+schema = "db/billing.sql"
+
+[tool.sqlty.rules]
+select-star = "error"
+```
+
+The package's settings are applied on top of the extended file's:
+
+- `rules` and `types` merge key by key, so the package adds or changes single entries.
+- Any other key the package sets replaces the extended one, `functions` and `overrides` included.
+- `schema` and `queries` of the extended file keep pointing at the files it names.
+- `exclude`, `extend-exclude` and `overrides` globs match paths relative to the package's file.
+
+`extend` is relative to the file that holds it, and the extended file may extend another.
+It reads `sqlty.toml`, `pyproject.toml` or `Cargo.toml` as the upward search does. A
+missing file, or a chain that comes back to a file already in it, is an error.
+
+!!! note "The editor reloads on its own files only"
+    `sqlty server` reloads when a `sqlty.toml`, `pyproject.toml` or `Cargo.toml` changes.
+    An extended file of another name takes effect when the server restarts.
 
 ## `exclude` and `extend-exclude`
 

@@ -61,6 +61,10 @@ impl Workspace for BridgeWorkspace {
         self.call("fix", path, text)
     }
 
+    fn format(&mut self, path: &Path, text: &str) -> Result<String, String> {
+        self.call("format", path, text)
+    }
+
     fn completion(&mut self, path: &Path) -> Option<CompletionContext> {
         Python::attach(|py| {
             let found = self

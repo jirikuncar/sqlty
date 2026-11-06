@@ -39,3 +39,8 @@ bench-result.json
 # Hypothesis example database (tests/test_fuzz.py)
 .hypothesis/
 *.snap.new
+docs/assets/vendor/
+
+# Cloudflare deploys (docs-preview.yml)
+/public/
+.wrangler/

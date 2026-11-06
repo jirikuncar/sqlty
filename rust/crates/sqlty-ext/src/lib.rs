@@ -7,7 +7,7 @@
 //!
 //! - Inference: `infer_type`, `analyze_select`, `analyze_columns`, `analyze_params`,
 //!   `expand_star`, `query_diagnostics`, `parse_error`, `returns_rows`.
-//! - Source: `rewrite_source`, `strip_source`, `fix_source`, `check_source`,
+//! - Source: `rewrite_source`, `add_param_types`, `strip_source`, `fix_source`, `check_source`,
 //!   `wrapped_queries`, `query_sites`.
 //! - Schema: `load_schema`, `schema_skipped_tables`, `schema_skipped_objects`, `name_rules`.
 //! - Configuration: `load_config`, `validate_config` and the key lists.
@@ -27,6 +27,8 @@ mod server;
 use sqlty_python::checker;
 use sqlty_python::fixer;
 use sqlty_python::locate;
+use sqlty_python::params;
+use sqlty_python::queries;
 use sqlty_python::rewriter;
 use sqlty_sql::analyzer;
 use sqlty_sql::highlight::Highlight;
@@ -67,7 +69,11 @@ struct LoadedSchema {
     skipped: Vec<analyzer::SkippedObject>,
 }
 
-type CachedSchema = (String, String, Arc<LoadedSchema>);
+/// Schema text the cache owns: the caller's Python string itself, so passing the same
+/// object again is found by its address instead of comparing the whole text.
+type SchemaText = Box<dyn AsRef<str> + Send + Sync>;
+
+type CachedSchema = (SchemaText, String, Arc<LoadedSchema>);
 
 /// Most recently used first. Callers pass the same few schemas call after call, and
 /// parsing a large one costs about a millisecond, so keep the last few parsed.
@@ -80,9 +86,10 @@ fn cache_hit(
     schema_sql: &str,
     dialect: &str,
 ) -> Option<Arc<LoadedSchema>> {
-    let at = cache
-        .iter()
-        .position(|(sql, d, _)| sql == schema_sql && d == dialect)?;
+    let at = cache.iter().position(|(sql, d, _)| {
+        let sql = (**sql).as_ref();
+        d == dialect && (std::ptr::eq(sql, schema_sql) || sql == schema_sql)
+    })?;
     cache[..=at].rotate_right(1);
     Some(Arc::clone(&cache[0].2))
 }
@@ -96,20 +103,23 @@ fn lock_schemas() -> MutexGuard<'static, Vec<CachedSchema>> {
 /// The parsed schema. The cache is not locked while parsing, so a slow schema does not hold
 /// up callers of other schemas; two threads may parse the same one, and the first to finish
 /// is kept.
-fn cached_schema(schema_sql: &str, dialect: &str) -> Arc<LoadedSchema> {
-    if let Some(hit) = cache_hit(&mut lock_schemas(), schema_sql, dialect) {
+fn cached_schema<S: AsRef<str> + Send + Sync + 'static>(
+    schema_sql: S,
+    dialect: &str,
+) -> Arc<LoadedSchema> {
+    if let Some(hit) = cache_hit(&mut lock_schemas(), schema_sql.as_ref(), dialect) {
         return hit;
     }
-    let (schema, skipped) = analyzer::load_schema_with_skipped(schema_sql, dialect);
+    let (schema, skipped) = analyzer::load_schema_with_skipped(schema_sql.as_ref(), dialect);
     let loaded = Arc::new(LoadedSchema { schema, skipped });
     let mut cache = lock_schemas();
-    if let Some(hit) = cache_hit(&mut cache, schema_sql, dialect) {
+    if let Some(hit) = cache_hit(&mut cache, schema_sql.as_ref(), dialect) {
         return hit;
     }
     cache.insert(
         0,
         (
-            schema_sql.to_string(),
+            Box::new(schema_sql),
             dialect.to_string(),
             Arc::clone(&loaded),
         ),
@@ -125,13 +135,13 @@ enum SchemaArg<S = PyBackedStr> {
     Loaded(Arc<LoadedSchema>, Arc<str>, &'static str),
 }
 
-impl<S: AsRef<str>> SchemaArg<S> {
+impl<S: AsRef<str> + Send + Sync + 'static> SchemaArg<S> {
     /// The parsed schema for `dialect`; a handle loaded for another dialect is parsed again.
     fn loaded(self, dialect: &str) -> Arc<LoadedSchema> {
         match self {
-            Self::Text(text) => cached_schema(text.as_ref(), dialect),
+            Self::Text(text) => cached_schema(text, dialect),
             Self::Loaded(loaded, _, loaded_dialect) if loaded_dialect == dialect => loaded,
-            Self::Loaded(_, text, _) => cached_schema(&text, dialect),
+            Self::Loaded(_, text, _) => cached_schema(text, dialect),
         }
     }
 }
@@ -208,13 +218,16 @@ fn load_schema(
     })
 }
 
-fn schema<S: AsRef<str>>(arg: Option<SchemaArg<S>>, dialect: &str) -> Option<analyzer::Schema> {
+fn schema<S: AsRef<str> + Send + Sync + 'static>(
+    arg: Option<SchemaArg<S>>,
+    dialect: &str,
+) -> Option<analyzer::Schema> {
     Some(arg?.loaded(dialect).schema.clone())
 }
 
 /// The schema, unless `source` cannot hold a query: every query, wrapper and
 /// diagnostic involves the text `sql` (`--sql`, `SQL[...]`), in any case.
-fn schema_for<S: AsRef<str>>(
+fn schema_for<S: AsRef<str> + Send + Sync + 'static>(
     source: &str,
     schema_sql: Option<SchemaArg<S>>,
     dialect: &str,
@@ -567,7 +580,7 @@ fn schema_skipped_objects(
     detach(py, || skipped_objects(schema_sql, dialect, None))
 }
 
-fn skipped_objects<S: AsRef<str>>(
+fn skipped_objects<S: AsRef<str> + Send + Sync + 'static>(
     schema_sql: SchemaArg<S>,
     dialect: &str,
     only: Option<&str>,
@@ -630,6 +643,30 @@ fn rewrite_source(
     })
 }
 
+/// Write the parameter type P of each SQL[R]("--sql\n...") call: SQL[R, P].
+///
+/// Positional parameters are a tuple, named ones a TypedDict generated below a
+/// `# sqlty: generated` line after the imports.
+///
+/// Raises:
+///     ValueError: unsupported import_style
+#[pyfunction]
+#[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, schema_sql = None, import_style = None))]
+fn add_param_types(
+    py: Python<'_>,
+    source: &str,
+    dialect: DialectArg,
+    schema_sql: Option<SchemaArg>,
+    import_style: Option<&str>,
+) -> Result<String, Error> {
+    let dialect = dialect.0;
+    detach(py, || {
+        let schema = schema_for(source, schema_sql, dialect);
+        let options = Options::new(dialect, schema.as_deref(), import_style, false)?;
+        Ok(params::add_param_types(source, &options))
+    })
+}
+
 /// Strip Python source: SQL[T]("--sql\n...") -> "--sql\n...".
 ///
 /// Removes unused imports added by rewrite.
@@ -642,6 +679,58 @@ fn strip_source(py: Python<'_>, source: &str, import_style: Option<&str>) -> Res
     detach(py, || {
         let style = ImportStyle::parse(import_style)?;
         Ok(rewriter::strip_source(source, &style))
+    })
+}
+
+/// Lay out the query strings of Python source with sqruff's layout rules.
+///
+/// Raises:
+///     ValueError: unsupported import_style
+#[pyfunction]
+#[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, import_style = None))]
+fn format_source(
+    py: Python<'_>,
+    source: &str,
+    dialect: DialectArg,
+    import_style: Option<&str>,
+) -> Result<String, Error> {
+    detach(py, || {
+        let style = ImportStyle::parse(import_style)?;
+        Ok(sqlty_format::format_source(source, dialect.0, &style))
+    })
+}
+
+/// `(code, message, start, end, query_start)` of a [`sqlty_format::Finding`].
+type SqruffFinding = (&'static str, String, usize, usize, usize);
+
+/// What sqruff's core lint rules, less its layout rules, find in the query strings of
+/// Python source: `(code, message, start, end, query_start)`, byte offsets in `source`.
+///
+/// Raises:
+///     ValueError: unsupported import_style
+#[pyfunction]
+#[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, import_style = None))]
+fn sqruff_findings(
+    py: Python<'_>,
+    source: &str,
+    dialect: DialectArg,
+    import_style: Option<&str>,
+) -> Result<Vec<SqruffFinding>, Error> {
+    detach(py, || {
+        let style = ImportStyle::parse(import_style)?;
+        Ok(sqlty_format::lint_source(source, dialect.0, &style)
+            .into_iter()
+            .map(|found| {
+                let span = found.span;
+                (
+                    found.code,
+                    found.message,
+                    span.start,
+                    span.end,
+                    found.query_start,
+                )
+            })
+            .collect())
     })
 }
 
@@ -791,6 +880,84 @@ fn check_source(
             })
             .collect())
     })
+}
+
+/// Check the named queries of a `.sql` file: `unparsed-query` and the name rules of each
+/// statement. `query_format` is a `query-format` value (`"auto"`, `"aiosql"`, `"sqlc"`,
+/// `"pugsql"`, `"file"`); `name` is the file name without its extension, the name of a
+/// query of a file without headers.
+///
+/// Example:
+///     check_queries("-- name: get-user^\nSELECT nope FROM users", schema_sql="CREATE TABLE users (id INT)")
+///
+/// Returns:
+///     The diagnostic dicts of `check_source`, without fixes; `line` is 1-based.
+///
+/// Raises:
+///     ValueError: unknown `query_format`, or `rules` names an unknown rule or severity
+#[pyfunction]
+#[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, schema_sql = None, rules = None, query_format = "auto", name = ""))]
+fn check_queries(
+    py: Python<'_>,
+    source: &str,
+    dialect: DialectArg,
+    schema_sql: Option<SchemaArg>,
+    rules: Option<HashMap<String, String>>,
+    query_format: &str,
+    name: &str,
+) -> Result<Vec<DiagnosticOut>, Error> {
+    let dialect = dialect.0;
+    let format = query_format
+        .parse::<queries::Format>()
+        .map_err(|()| ConfigError::QueryFormat(query_format.to_string()))?;
+    detach(py, || {
+        let schema = schema(schema_sql, dialect);
+        let options = Options::new(dialect, schema.as_deref(), None, false)?;
+        let rules = RuleConfig::from_overrides(rules).map_err(ConfigError::from)?;
+        Ok(
+            queries::check_queries(source, format, name, &options, &rules)
+                .into_iter()
+                .map(|diag| DiagnosticOut {
+                    rule: diag.rule.name(),
+                    message: diag.message,
+                    severity: diag.severity.as_str(),
+                    line: diag.line,
+                    start: diag.span.start,
+                    end: diag.span.end,
+                    fix: Vec::new(),
+                })
+                .collect(),
+        )
+    })
+}
+
+/// `(name, sql, renames)`: see [`named_queries`].
+type NamedQueryOut = (String, String, Vec<(String, String)>);
+
+/// `(name, sql, renames)` of each named query of a `.sql` file: its SQL from the line after
+/// its header, with sqlc's and aiosql's placeholders rewritten to `:name`, and
+/// `(name in sql, name in the file)` of each aiosql `:obj.attr`. `name` names a query of a
+/// file without headers.
+///
+/// Example:
+///     named_queries("-- name: get-user^\nSELECT :u.id") == [("get_user", "SELECT :u_id", [("u_id", "u.id")])]
+///
+/// Raises:
+///     ValueError: unknown `query_format`
+#[pyfunction]
+#[pyo3(signature = (source, *, query_format = "auto", name = ""))]
+fn named_queries(
+    source: &str,
+    query_format: &str,
+    name: &str,
+) -> Result<Vec<NamedQueryOut>, Error> {
+    let format = query_format
+        .parse::<queries::Format>()
+        .map_err(|()| ConfigError::QueryFormat(query_format.to_string()))?;
+    Ok(queries::split(source, format, name)
+        .into_iter()
+        .map(|query| (query.name, query.sql, query.renames))
+        .collect())
 }
 
 /// `(line, annotation, query, annotation_span)` for each `SQL[T](...)` call in Python source.
@@ -1088,11 +1255,16 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_error, m)?)?;
     m.add_function(wrap_pyfunction!(returns_rows, m)?)?;
     m.add_function(wrap_pyfunction!(rewrite_source, m)?)?;
+    m.add_function(wrap_pyfunction!(add_param_types, m)?)?;
     m.add_function(wrap_pyfunction!(strip_source, m)?)?;
+    m.add_function(wrap_pyfunction!(format_source, m)?)?;
+    m.add_function(wrap_pyfunction!(sqruff_findings, m)?)?;
     m.add_function(wrap_pyfunction!(fix_source, m)?)?;
     m.add_function(wrap_pyfunction!(expand_star, m)?)?;
     m.add_function(wrap_pyfunction!(select_star_finding, m)?)?;
     m.add_function(wrap_pyfunction!(check_source, m)?)?;
+    m.add_function(wrap_pyfunction!(check_queries, m)?)?;
+    m.add_function(wrap_pyfunction!(named_queries, m)?)?;
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;
     m.add_function(wrap_pyfunction!(query_at, m)?)?;
@@ -1113,7 +1285,7 @@ mod tests {
     fn entry(sql: &str, dialect: &str) -> CachedSchema {
         let (schema, skipped) = analyzer::load_schema_with_skipped(sql, dialect);
         (
-            sql.to_string(),
+            Box::new(sql.to_string()),
             dialect.to_string(),
             Arc::new(LoadedSchema { schema, skipped }),
         )
@@ -1135,7 +1307,7 @@ mod tests {
         ];
         let hit = cache_hit(&mut cache, "CREATE TABLE c (x INT)", "postgres");
         assert!(hit.is_some());
-        let order: Vec<&str> = cache.iter().map(|(sql, _, _)| sql.as_str()).collect();
+        let order: Vec<&str> = cache.iter().map(|(sql, _, _)| (**sql).as_ref()).collect();
         assert_eq!(
             order,
             [
@@ -1152,6 +1324,13 @@ mod tests {
         assert!(cache_hit(&mut cache, "CREATE TABLE a (x INT)", "mysql").is_none());
         assert!(cache_hit(&mut cache, "CREATE TABLE a (y INT)", "postgres").is_none());
         assert!(cache_hit(&mut [], "CREATE TABLE a (x INT)", "postgres").is_none());
+    }
+
+    #[test]
+    fn cache_hit_finds_equal_text_at_another_address() {
+        let mut cache = vec![entry("CREATE TABLE a (x INT)", "postgres")];
+        let copy = String::from("CREATE TABLE a (x INT)");
+        assert!(cache_hit(&mut cache, &copy, "postgres").is_some());
     }
 
     #[test]
@@ -1173,7 +1352,7 @@ mod tests {
 
         for n in 0..SCHEMAS_KEPT * 2 {
             cached_schema(
-                &format!("CREATE TABLE sqlty_ext_bound_{n} (x INT)"),
+                format!("CREATE TABLE sqlty_ext_bound_{n} (x INT)"),
                 "postgres",
             );
         }

@@ -24,7 +24,7 @@ PRE_COMMIT_REV = re.compile(rf"rev: v{VERSION}\n")
 PLACES: list[tuple[str, re.Pattern[str], int]] = [
     ("rust/Cargo.toml", re.compile(rf'\[workspace\.package\]\nversion = "{VERSION}"'), 1),
     # Workspace members are the packages without a `source`.
-    ("rust/Cargo.lock", re.compile(rf'name = "sqlty[\w-]*"\nversion = "{VERSION}"\n(?!source)'), 6),
+    ("rust/Cargo.lock", re.compile(rf'name = "sqlty[\w-]*"\nversion = "{VERSION}"\n(?!source)'), 7),
     (".claude-plugin/plugin.json", JSON_VERSION, 1),
     (".claude-plugin/marketplace.json", JSON_VERSION, 2),
     (".codex-plugin/plugin.json", JSON_VERSION, 1),

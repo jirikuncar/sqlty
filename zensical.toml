@@ -11,12 +11,12 @@ site_dir = "site"
 strict = true
 nav = [
   { "Home" = "index.md" },
+  { "Playground" = "playground.md" },
   { "Getting started" = [
     { "Installation" = "installation.md" },
     { "Quickstart" = "quickstart.md" },
     { "Why SQLTy?" = "motivation.md" },
     { "Use cases" = "use-cases.md" },
-    { "Playground" = "playground.md" },
   ] },
   { "Guide" = [
     { "Writing queries" = "guide/writing-queries.md" },
@@ -28,8 +28,10 @@ nav = [
     { "Row types" = "guide/row-types.md" },
     { "JSON shapes" = "guide/json-shapes.md" },
     { "Query helpers" = "guide/helpers.md" },
+    { "Queries in .sql files" = "guide/sql-files.md" },
     { "Query variants" = "guide/query-variants.md" },
     { "Query parameters" = "guide/parameters.md" },
+    { "Formatting queries" = "guide/formatting.md" },
     { "psycopg" = "guide/psycopg.md" },
     { "Magic codec" = "guide/magic-codec.md" },
   ] },
@@ -53,7 +55,7 @@ nav = [
 
 [project.theme]
 custom_dir = "overrides"
-favicon = "assets/favicon/favicon.ico"
+favicon = "assets/favicon/favicon.svg"
 features = [
   "content.action.edit",
   "content.code.copy",

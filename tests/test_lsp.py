@@ -219,6 +219,63 @@ def test_server_checks_and_fixes_a_buffer(tmp_path: Path) -> None:
         assert server.stop() == 0
 
 
+def test_server_formats_the_query_strings_of_a_buffer(tmp_path: Path) -> None:
+    (tmp_path / "sqlty.toml").write_text('dialect = "sqlite"\n')
+    uri = (tmp_path / "q.py").as_uri()
+    text = 'q = """--sql\nselect id,name from users where id=?"""\n'
+    server = Server(tmp_path)
+    try:
+        server.request("initialize", {"capabilities": {}, "rootUri": tmp_path.as_uri()})
+        server.send({"method": "initialized", "params": {}})
+        document = {"uri": uri, "languageId": "python", "version": 1, "text": text}
+        server.send({"method": "textDocument/didOpen", "params": {"textDocument": document}})
+        server.notification("textDocument/publishDiagnostics")
+
+        start = {"line": 0, "character": 0}
+        here = {"textDocument": {"uri": uri}, "range": {"start": start, "end": start}}
+        only = {**here, "context": {"diagnostics": [], "only": ["source.format"]}}
+        [action] = server.request("textDocument/codeAction", only)
+        assert action["kind"] == "source.format.sqlty"
+        [edit] = action["edit"]["documentChanges"][0]["edits"]
+        assert edit == {
+            "range": {"start": {"line": 1, "character": 6}, "end": {"line": 1, "character": 35}},
+            "newText": "\n    id,\n    name\nfrom users\nwhere id = ",
+        }
+    finally:
+        assert server.stop() == 0
+
+
+def test_server_checks_the_query_files_of_a_project(tmp_path: Path) -> None:
+    (tmp_path / "sqlty.toml").write_text('schema = "schema.sql"\nqueries = "sql/"\n')
+    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER, email TEXT);\n")
+    (tmp_path / "sql").mkdir()
+    queries, other = (tmp_path / "sql" / "users.sql").as_uri(), (tmp_path / "schema.sql").as_uri()
+    text = "-- name: by-email^\nSELECT id, emial FROM users WHERE email = :email;\n"
+    server = Server(tmp_path)
+    try:
+        server.request("initialize", {"capabilities": {}, "rootUri": tmp_path.as_uri()})
+        server.send({"method": "initialized", "params": {}})
+        for uri in (queries, other):
+            document = {"uri": uri, "languageId": "sql", "version": 1, "text": text}
+            server.send({"method": "textDocument/didOpen", "params": {"textDocument": document}})
+            published = server.notification("textDocument/publishDiagnostics")
+            assert published["uri"] == uri
+            codes = [(d["code"], d["range"]["start"]) for d in published["diagnostics"]]
+            expected = [("unknown-column", {"line": 1, "character": 11})] if uri == queries else []
+            assert codes == expected
+
+        start = {"line": 1, "character": 0}
+        here = {"textDocument": {"uri": queries}, "range": {"start": start, "end": start}}
+        fix_all = {**here, "context": {"diagnostics": [], "only": ["source.fixAll"]}}
+        assert server.request("textDocument/codeAction", fix_all) in (None, [])
+        tokens = server.request(
+            "textDocument/semanticTokens/full", {"textDocument": {"uri": queries}}
+        )
+        assert tokens is None
+    finally:
+        assert server.stop() == 0
+
+
 def test_server_completes_and_highlights_helper_and_marked_queries(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
     (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL, name TEXT);\n")

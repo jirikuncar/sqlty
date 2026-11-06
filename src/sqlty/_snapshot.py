@@ -1,8 +1,8 @@
 """Snapshots for ``sqlty breaking``: what ``--save`` writes and ``--against`` reads.
 
 A snapshot holds what checking a revision needs, so a release is a baseline without its
-git history: its Python files, the settings each is checked with, and the schemas they
-name. A file the snapshot lacks takes the schema of its nearest directory.
+git history: its Python files and ``.sql`` query files, the settings each is checked with,
+and the schemas they name. A file the snapshot lacks takes the schema of its nearest directory.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, TypedDict, cast
+from typing import TYPE_CHECKING, NotRequired, TypedDict, cast
 
 from sqlty._breaking import Source
 
@@ -35,6 +35,7 @@ class SettingsEntry(TypedDict):
     untyped: bool
     rules: dict[str, str] | None
     functions: list[tuple[str, str, str | None]]
+    query_format: NotRequired[str]
 
 
 class FileEntry(TypedDict):
@@ -72,6 +73,7 @@ def save(revision: Revision, path: Path) -> None:
                 untyped=s.untyped,
                 rules=s.rules,
                 functions=list(s.functions),
+                query_format=s.query_format,
             ),
         )
 
@@ -145,6 +147,7 @@ class Snapshot:
             untyped=entry["untyped"],
             rules=entry["rules"],
             functions=tuple((f[0], f[1], f[2]) for f in entry["functions"]),
+            query_format=entry.get("query_format", "auto"),
         )
 
     def schema(self, relative: Path, own: Settings) -> Schema | None:

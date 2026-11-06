@@ -124,6 +124,21 @@ def test_cycles_terminate(project, capsys):
     assert run(project, capsys, files) == []
 
 
+def test_base_from_a_module_named_like_the_checked_one(project, capsys):
+    for package in ("app", "lib"):
+        (project / package).mkdir()
+    (project / "lib" / "models.py").write_text(
+        "from pydantic import BaseModel\n\nclass Base(BaseModel):\n    x: int\n"
+    )
+    files = {
+        "app/models.py": (
+            "from models import Base\nfrom sqlty import SQL\n\nclass Row(Base):\n    name: str\n\n"
+            'query = SQL[Row]("--sql\\nSELECT name, name AS z FROM users")\n'
+        )
+    }
+    assert run(project, capsys, files) == [("models.py", "typeddict-key-mismatch")]
+
+
 def test_import_from_outside_checked_paths_stays_unknown(project, capsys):
     files = {"use.py": row("from myapp.ids import UserId", id="UserId", id_col="name")}
     assert run(project, capsys, files) == []

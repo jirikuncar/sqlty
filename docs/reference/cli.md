@@ -3,7 +3,7 @@
 <!-- generated:cli-usage -->
 ```text
 sqlty [-h] [--version]
-      {rewrite,strip,check,complete,breaking,rule,skill,server,version} ...
+      {rewrite,strip,format,check,complete,breaking,rule,skill,server,version} ...
 ```
 <!-- /generated:cli-usage -->
 
@@ -105,7 +105,7 @@ tool such as pre-commit passes file names.
 | `--extend-exclude GLOB` | Skip this glob in addition to the other excludes; repeat for several. Relative to the current directory |
 | `--force-exclude` | Apply the excludes to files and directories named on the command line too |
 | `--respect-gitignore`, `--no-respect-gitignore` | Skip the files .gitignore ignores while walking directories (default: [tool.sqlty] respect-gitignore, else true) |
-| `-v`, `--verbose` | Print each file that rewrite, strip or check --fix changes |
+| `-v`, `--verbose` | Print each file that rewrite, strip or check --fix changes, and with check the types of each named query of a query file |
 | `-q`, `--quiet` | Suppress non-error output |
 | `-j`, `--jobs N` | Files to work on at once; 1 works on one at a time. Output is the same in any case (default: the number of processors) |
 <!-- /generated:cli-options-common -->

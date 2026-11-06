@@ -30,6 +30,7 @@ stale-type = "error"
 | [`inline-sql-comment`](#inline-sql-comment) | Query | warn | yes | `"--sql SELECT ..."`: the query is a SQL comment |
 | [`mysql-sql-marker`](#mysql-sql-marker) | Query | warn | yes | `--sql` marker with `dialect = "mysql"`, which MySQL rejects |
 | [`unparsed-query`](#unparsed-query) | Query | warn | no | Query that does not parse, so sqlty cannot check it |
+| [`sqruff`](#sqruff) | Query | ignore | no | Finding of sqruff's core lint rules in a query |
 | [`unknown-table`](#unknown-table) | Names | error | no | Table the schema does not define |
 | [`unknown-column`](#unknown-column) | Names | error | yes | Column the table does not have |
 | [`ambiguous-column`](#ambiguous-column) | Names | error | no | Unqualified column more than one table has |
@@ -568,6 +569,26 @@ q = SQL[tuple[str]]("--sql\nSELECT NULL::xml IS DOCUMENT")
 
 Fix: rewrite the query in a form the parser reads. `sqlty check --statistics`
 counts such queries as unparsed whether or not the rule is enabled.
+
+### sqruff
+
+Default: ignore. What the core lint rules of
+[sqruff](https://github.com/quarylabs/sqruff) find in a query, in the project's
+dialect; the message starts with the sqruff rule code. Its layout rules are left
+to [`sqlty format`](../guide/formatting.md), and a finding on a placeholder is
+dropped. Off because the rules judge style rather than types.
+
+```toml
+[tool.sqlty.rules]
+sqruff = "warn"
+```
+
+```python
+from sqlty import SQL
+
+# error: [sqruff] "AM06: Inconsistent column references in 'GROUP BY/ORDER BY' clauses."
+q = SQL[tuple[str]]("--sql\nSELECT name FROM users GROUP BY 1 ORDER BY name")
+```
 
 ## Name rules
 

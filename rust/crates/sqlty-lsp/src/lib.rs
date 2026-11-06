@@ -1,5 +1,5 @@
 //! The language server of `sqlty server`: diagnostics, quick fixes, fix-all, completion,
-//! hover and SQL highlighting for Python files.
+//! hover and SQL highlighting for Python files, and the diagnostics of `.sql` query files.
 //!
 //! The protocol runs on the thread that calls [`run`]. Checks run on one worker thread that
 //! owns a [`Workspace`] per project root: the Python passes hold the GIL, so two checks could
@@ -32,7 +32,7 @@ use lsp_types::{
     PublishDiagnosticsParams, SemanticTokensFullOptions, SemanticTokensOptions,
     SemanticTokensParams, SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
     ShowMessageParams, TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-    TextDocumentSyncSaveOptions, Url,
+    TextDocumentSyncSaveOptions, Uri,
 };
 
 mod actions;
@@ -40,6 +40,7 @@ mod completion;
 mod highlight;
 mod hover;
 mod text;
+mod uri;
 mod worker;
 
 #[cfg(test)]
@@ -47,6 +48,10 @@ mod tests;
 
 /// The code action kind of `sqlty check --fix`, run by `editor.codeActionsOnSave`.
 pub const FIX_ALL: &str = "source.fixAll.sqlty";
+
+/// The code action kind of `sqlty format`. Not `textDocument/formatting`, which would
+/// take the place of the Python formatter.
+pub const FORMAT: &str = "source.format.sqlty";
 
 /// One diagnostic of a buffer, with byte offsets into its text.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,6 +113,8 @@ pub trait Workspace {
     fn check(&mut self, path: &Path, text: &str) -> Result<Vec<Diagnostic>, String>;
     /// `text` as `sqlty check --fix` would write it.
     fn fix(&mut self, path: &Path, text: &str) -> Result<String, String>;
+    /// `text` as `sqlty format` would write it.
+    fn format(&mut self, path: &Path, text: &str) -> Result<String, String>;
     /// Diagnostics by file that do not depend on the buffers: what the baseline's queries
     /// get against this schema. Asked once, after the workspace loads.
     fn breaking(&mut self) -> Result<Vec<(PathBuf, Vec<Diagnostic>)>, String> {
@@ -235,14 +242,17 @@ where
 
 /// What the worker does next.
 enum Job {
-    Check(Url),
-    FixAll(lsp_server::RequestId, Url),
+    Check(Uri),
+    /// A whole-file action, [`FIX_ALL`] or [`FORMAT`], and the kinds asked for.
+    Source(lsp_server::RequestId, Uri, Vec<&'static str>),
     Reload,
 }
 
 struct Document {
     text: String,
     version: i32,
+    /// A Python buffer; a `sql` one is a query file, which only gets diagnostics.
+    python: bool,
     /// The diagnostics of `version`, the base of its quick fixes.
     diagnostics: Option<(i32, Vec<Diagnostic>)>,
     /// The text last checked, and what completion reads of it.
@@ -251,9 +261,9 @@ struct Document {
 
 #[derive(Clone)]
 struct Shared {
-    documents: Arc<Mutex<HashMap<Url, Document>>>,
+    documents: Arc<Mutex<HashMap<Uri, Document>>>,
     /// What [`Workspace::breaking`] found, by file: published while the file is not open.
-    background: Arc<Mutex<HashMap<Url, Vec<lsp_types::Diagnostic>>>>,
+    background: Arc<Mutex<HashMap<Uri, Vec<lsp_types::Diagnostic>>>>,
     sender: Sender<Message>,
     encoding: PositionEncodingKind,
     /// Whether the client takes `workspace/semanticTokens/refresh`.
@@ -266,13 +276,13 @@ struct Shared {
 }
 
 impl Shared {
-    fn documents(&self) -> std::sync::MutexGuard<'_, HashMap<Url, Document>> {
+    fn documents(&self) -> std::sync::MutexGuard<'_, HashMap<Uri, Document>> {
         self.documents
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn background(&self) -> std::sync::MutexGuard<'_, HashMap<Url, Vec<lsp_types::Diagnostic>>> {
+    fn background(&self) -> std::sync::MutexGuard<'_, HashMap<Uri, Vec<lsp_types::Diagnostic>>> {
         self.background
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -313,7 +323,7 @@ impl Shared {
         }
     }
 
-    fn publish(&self, uri: Url, diagnostics: Vec<lsp_types::Diagnostic>, version: Option<i32>) {
+    fn publish(&self, uri: Uri, diagnostics: Vec<lsp_types::Diagnostic>, version: Option<i32>) {
         self.send(Notification::new(
             PublishDiagnostics::METHOD.to_string(),
             PublishDiagnosticsParams::new(uri, diagnostics, version),
@@ -330,12 +340,13 @@ impl Shared {
                     return;
                 };
                 let document = params.text_document;
-                if document.language_id != "python" {
+                if !matches!(document.language_id.as_str(), "python" | "sql") {
                     return;
                 }
                 self.documents().insert(
                     document.uri.clone(),
                     Document {
+                        python: document.language_id == "python",
                         text: document.text,
                         version: document.version,
                         diagnostics: None,
@@ -414,7 +425,7 @@ impl Shared {
                 let found = self
                     .documents()
                     .get(&params.text_document_position.text_document.uri)
-                    .filter(|_| self.completion)
+                    .filter(|document| self.completion && document.python)
                     .and_then(|document| completion::complete(document, &params, &self.encoding));
                 self.send(Response::new_ok(request.id, found));
             }
@@ -425,7 +436,7 @@ impl Shared {
                 let found = self
                     .documents()
                     .get(&params.text_document_position_params.text_document.uri)
-                    .filter(|_| self.hover)
+                    .filter(|document| self.hover && document.python)
                     .and_then(|document| hover::hover(document, &params, &self.encoding));
                 self.send(Response::new_ok(request.id, found));
             }
@@ -437,7 +448,7 @@ impl Shared {
                 let found = self
                     .documents()
                     .get(&params.text_document.uri)
-                    .filter(|_| self.highlighting)
+                    .filter(|document| self.highlighting && document.python)
                     .map(|document| highlight::tokens(document, &self.encoding));
                 self.send(Response::new_ok(request.id, found));
             }
@@ -474,12 +485,21 @@ impl Shared {
                 })
             })
         };
-        if params.context.only.is_some() && wants(FIX_ALL) {
-            let _ = jobs.send(Job::FixAll(request.id, params.text_document.uri));
+        let kinds: Vec<_> = [FIX_ALL, FORMAT]
+            .into_iter()
+            .filter(|kind| wants(kind))
+            .collect();
+        if params.context.only.is_some() && !kinds.is_empty() {
+            let _ = jobs.send(Job::Source(request.id, params.text_document.uri, kinds));
             return;
         }
         let actions = if wants(CodeActionKind::QUICKFIX.as_str()) {
-            actions::quick_fixes(&self.documents(), &params, &self.encoding)
+            let documents = self.documents();
+            actions::quick_fixes(
+                documents.get(&params.text_document.uri),
+                &params,
+                &self.encoding,
+            )
         } else {
             Vec::new()
         };
@@ -518,6 +538,7 @@ fn capabilities(encoding: PositionEncodingKind, settings: &Settings) -> ServerCa
             code_action_kinds: Some(vec![
                 CodeActionKind::QUICKFIX,
                 CodeActionKind::from(FIX_ALL),
+                CodeActionKind::from(FORMAT),
             ]),
             ..CodeActionOptions::default()
         })),
@@ -561,13 +582,13 @@ fn roots(params: &InitializeParams) -> Vec<PathBuf> {
         .map(|folder| &folder.uri);
     folders
         .chain(params.root_uri.as_ref())
-        .filter_map(|uri| uri.to_file_path().ok())
+        .filter_map(uri::to_path)
         .collect()
 }
 
 /// Whether a change to `uri` changes the settings or the schema of its project.
-fn is_config(uri: &Url) -> bool {
-    let path = uri.path();
+fn is_config(uri: &Uri) -> bool {
+    let path = uri.path().as_str();
     ["/pyproject.toml", "/sqlty.toml", "/Cargo.toml", ".sql"]
         .iter()
         .any(|suffix| path.ends_with(suffix))

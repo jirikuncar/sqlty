@@ -222,7 +222,7 @@ impl TypeOverrides {
                 continue;
             }
             let parsed = sqlparser::parser::Parser::new(dialect.parser_dialect().as_ref())
-                .try_with_sql(key)
+                .try_with_sql(&crate::analyzer::iso_types(key, dialect))
                 .and_then(|mut parser| {
                     let parsed = parser.parse_data_type()?;
                     parser.expect_token(&sqlparser::tokenizer::Token::EOF)?;

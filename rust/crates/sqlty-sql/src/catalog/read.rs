@@ -24,6 +24,32 @@ use super::TypeOverrides;
 pub(super) static COLLATE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r#"(?i)\s+COLLATE\s+(?:"[^"]*"|[\w.]+)"#).unwrap());
 
+/// The sequence options of `ADD GENERATED ... AS IDENTITY (...)`, which pg_dump writes.
+static IDENTITY_OPTIONS: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(?i)\bAS\s+IDENTITY\s*\([^()]*\)").unwrap());
+
+/// Words of an `ALTER TABLE` that sets what inference reads besides the columns: keys,
+/// checks, `NOT NULL` and defaults.
+const KEYS_AND_NULLS: [&str; 7] = [
+    "constraint",
+    "primary",
+    "unique",
+    "foreign",
+    "check",
+    "null",
+    "default",
+];
+
+/// A statement on one line, cut to fit a warning.
+fn statement_text(stmt: &ddl::Statement) -> String {
+    const WIDTH: usize = 80;
+    let text = stmt.sql().split_whitespace().collect::<Vec<_>>().join(" ");
+    match text.char_indices().nth(WIDTH) {
+        Some((at, _)) => format!("{}...", &text[..at]),
+        None => text,
+    }
+}
+
 static DROP_EXPRESSION: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(?i)\bDROP\s+EXPRESSION(?:\s+IF\s+EXISTS)?\b").unwrap());
 
@@ -151,10 +177,14 @@ pub(super) fn read_statements(
                 push(OpKind::Domain(name, base, checked));
             }
         } else if stmt.creates("type") {
+            let parsed = parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next());
+            if parsed.is_none() {
+                skipped.push(("statement", statement_text(stmt)));
+            }
             if let Some(Statement::CreateType {
                 name,
                 representation: Some(representation),
-            }) = parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next())
+            }) = parsed
             {
                 let def = match representation {
                     UserDefinedTypeRepresentation::Enum { labels } => {
@@ -218,7 +248,7 @@ pub(super) fn read_statements(
             dialect,
             SqlDialect::Postgres | SqlDialect::MySql | SqlDialect::Sqlite
         ) {
-            read_alter_or_drop(stmt, dialect, &mut push);
+            read_alter_or_drop(stmt, dialect, &mut push, skipped);
         }
     }
     ops
@@ -228,6 +258,7 @@ pub(super) fn read_alter_or_drop(
     stmt: &ddl::Statement,
     dialect: SqlDialect,
     push: &mut impl FnMut(OpKind),
+    skipped: &mut Vec<SkippedObject>,
 ) {
     // sqlparser rejects `COLLATE` after an ALTER COLUMN type; the collation does not
     // change the type.
@@ -237,6 +268,8 @@ pub(super) fn read_alter_or_drop(
             .or_else(|| parse_ddl(&COLLATE.replace_all(&sql, ""), dialect))
             // `DROP EXPRESSION` leaves a column with neither expression nor default.
             .or_else(|| parse_ddl(&DROP_EXPRESSION.replace_all(&sql, "DROP DEFAULT"), dialect))
+            // sqlparser rejects most of them; they do not change the column.
+            .or_else(|| parse_ddl(&IDENTITY_OPTIONS.replace_all(&sql, "AS IDENTITY"), dialect))
             .or_else(|| {
                 let listed = stmt
                     .respelled_mysql_alter()
@@ -267,8 +300,13 @@ pub(super) fn read_alter_or_drop(
             ("table", Some(Statement::AlterTable(alter))) => {
                 push(OpKind::AlterTable(Box::new(alter)));
             }
-            ("table", _) if !changes_columns(&action, stmt.has_word("type")) => {}
-            ("table", _) => push(OpKind::Taint(Taint::Relation, name)),
+            ("table", _) if changes_columns(&action, stmt.has_word("type")) => {
+                push(OpKind::Taint(Taint::Relation, name));
+            }
+            ("table", _) if KEYS_AND_NULLS.iter().any(|word| stmt.has_word(word)) => {
+                skipped.push(("statement", statement_text(stmt)));
+            }
+            ("table", _) => {}
             ("type", Some(Statement::AlterType(alter))) => push(OpKind::AlterType(alter)),
             // A constraint added to or dropped from a domain changes the values it allows.
             ("domain", _) if action.iter().any(|w| w == "constraint") => {

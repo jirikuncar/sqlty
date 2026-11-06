@@ -90,7 +90,7 @@ To release:
    `claude plugin validate --strict` passes. The VS Code extension takes its version from
    the release tag.
 2. Run the Release workflow on `main` by hand (`workflow_dispatch`). Pull requests
-   build one wheel per OS; this run builds every wheel and the sdist, installs each wheel on every supported Python, and publishes
+   build the Linux x86_64 wheel only, and pushes to `main` every wheel; this run builds every wheel and the sdist, installs each wheel on every supported Python, and publishes
    to TestPyPI. Install from there and run `sqlty version`.
 3. Publish a GitHub Release tagged `vX.Y.Z`. The workflow builds again and uploads to
    PyPI.

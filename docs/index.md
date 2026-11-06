@@ -101,6 +101,8 @@ README:
   row types validated by `sqlty check`.
 - [`05_import_style/`](https://github.com/jirikuncar/sqlty/tree/main/examples/05_import_style):
   a custom `import-style`.
+- [`06_param_types/`](https://github.com/jirikuncar/sqlty/tree/main/examples/06_param_types):
+  parameter types written by `param-types = true`.
 - [`magic_codec/`](https://github.com/jirikuncar/sqlty/tree/main/examples/magic_codec):
   the magic codec.
 

@@ -21,7 +21,8 @@ use crate::edit::Edit;
 use crate::options::{Dialect, Options};
 use crate::rewriter::{
     after_marker, decode_escapes, ends_marker_line, extract_string_content, import_edit,
-    marked_query, strip_line_break, type_modules, wrapper_imports, wraps, ImportStyle, Spelling,
+    imported_names, marked_query, strip_line_break, type_modules, wrapper_imports, wraps,
+    ImportStyle, Spelling,
 };
 use crate::rules::{Rule, RuleConfig, Severity};
 use crate::scan::Scan;
@@ -121,6 +122,7 @@ pub fn check_source(
         any_calls: sorted(any_calls),
         diagnostics: Vec::new(),
         spelling: Spelling::of(&scan),
+        imported: imported_names(&scan),
         analyses: RefCell::default(),
     };
     if options.dialect == Dialect::MySql {
@@ -200,6 +202,8 @@ struct Checker<'a> {
     diagnostics: Vec<Diagnostic>,
     /// How the module can spell the row types it names.
     spelling: Spelling,
+    /// `(binding, qualified name)` of the names the module imports.
+    imported: Vec<(String, String)>,
     /// Each marked query's analysis, by its text, so no step parses a query twice.
     analyses: RefCell<HashMap<String, Rc<Analysis>>>,
 }
@@ -285,6 +289,46 @@ impl Checker<'_> {
                 "Source has --sql strings that aren't wrapped in SQL[T]".to_string(),
                 &at,
                 vec![edit],
+            );
+        }
+        if scan.sql_names.is_empty() {
+            return;
+        }
+        let marker = if self.options.dialect == Dialect::MySql {
+            "-- sql"
+        } else {
+            "--sql"
+        };
+        for group in scan.groups() {
+            let Some((call, name_end)) = scan.bare_call(group) else {
+                continue;
+            };
+            let content = scan.content(group);
+            if !scan.is_plain(group) || after_marker(content.trim()).is_some() {
+                continue;
+            }
+            let Some(row) = self.infer(&format!("{marker}\n{content}")) else {
+                continue;
+            };
+            let source = scan.source();
+            let literal = &source[group.start..];
+            let quote = literal.find(['"', '\'']).unwrap_or_default();
+            let triple = ["\"\"\"", "'''"]
+                .iter()
+                .any(|q| literal[quote..].starts_with(q));
+            let open = group.start + quote + if triple { 3 } else { 1 };
+            let fixed = format!(
+                "{}[{}]{}{marker}\\n{}",
+                &source[call.start..name_end],
+                self.spelling.respell(row),
+                &source[name_end..open],
+                &source[open..call.end],
+            );
+            self.report_fix(
+                Rule::StaleRewrite,
+                "SQL(...) has no row type; it needs a --sql marker and SQL[T]".to_string(),
+                &At::new(scan, call.clone()),
+                vec![Edit::new(call, fixed)],
             );
         }
     }
@@ -533,6 +577,11 @@ impl Checker<'_> {
         }
     }
 
+    /// An inferred row type as the module spells it.
+    fn spell(&self, row_type: String) -> String {
+        unqualify(&self.spelling.respell(row_type), &self.imported)
+    }
+
     /// `untyped-query`, `stale-type` and the literal rules, against the inferred row type.
     fn annotation(&mut self, call: &Call, sql_content: &str, at: &At) {
         let annotated = call.row_type(self.scan.source());
@@ -545,9 +594,7 @@ impl Checker<'_> {
         if annotated == untyped_name {
             let untyped = format!("{wrapper}[{untyped_name}]");
             // A `*` the schema cannot resolve infers no type, so none is guessed.
-            let current = self
-                .infer(sql_content)
-                .map(|current| self.spelling.respell(current));
+            let current = self.infer(sql_content).map(|current| self.spell(current));
             let message = match &current {
                 Some(current) => {
                     format!("{untyped} can now be {wrapper}[{current}]; run sqlty check --fix")
@@ -565,7 +612,7 @@ impl Checker<'_> {
         if is_scalar(annotated) && self.rules.is_enabled(Rule::NarrowType) {
             if let Some(current) = self
                 .infer(sql_content)
-                .map(|current| self.spelling.respell(current))
+                .map(|current| self.spell(current))
                 .filter(|current| current.starts_with("tuple["))
             {
                 let wrapper = if call.template { "SQLTemplate" } else { "SQL" };
@@ -587,14 +634,13 @@ impl Checker<'_> {
         {
             return;
         }
-        if let Some(current) = self
-            .infer(sql_content)
-            .map(|current| self.spelling.respell(current))
-        {
+        if let Some(inferred) = self.infer(sql_content) {
+            let current = self.spell(inferred.clone());
             let spelled = spell_unions(annotated);
-            if !refines_tuple(&spelled, &current) {
+            let qualified = spell_unions(&qualify(annotated, &self.imported));
+            if !refines_tuple(&spelled, &current) && !refines_tuple(&qualified, &inferred) {
                 self.report_fix(
-                    if admits_tuple(&spelled, &current) {
+                    if admits_tuple(&spelled, &current) || admits_tuple(&qualified, &inferred) {
                         Rule::StaleType
                     } else {
                         Rule::NarrowType
@@ -733,7 +779,7 @@ pub fn select_star_finding(query: &str, dialect: &str, has_schema: bool) -> Opti
 }
 
 /// [`select_star_finding`] of the `stars` of `query`, `None` when it does not parse.
-fn star_finding(
+pub(crate) fn star_finding(
     stars: Option<Vec<String>>,
     query: &str,
     has_schema: bool,
@@ -903,6 +949,63 @@ impl Lit {
             Lit::Int(number) => number.to_string(),
         }
     }
+}
+
+/// `annotation` with the names bound by `imported` spelled as their qualified names,
+/// as inferred row types spell them: `Decimal` is `decimal.Decimal` after
+/// `from decimal import Decimal`.
+fn qualify(annotation: &str, imported: &[(String, String)]) -> String {
+    rename(annotation, |name| {
+        let (head, rest) = name.find('.').map_or((name, ""), |dot| name.split_at(dot));
+        let (_, qualified) = imported.iter().find(|(binding, _)| binding == head)?;
+        Some(format!("{qualified}{rest}"))
+    })
+}
+
+/// `row_type` with the qualified names of `imported` spelled as the module binds them:
+/// `decimal.Decimal` is `Decimal` after `from decimal import Decimal`. `typing` names
+/// stay qualified, as `rewrite` writes them.
+fn unqualify(row_type: &str, imported: &[(String, String)]) -> String {
+    rename(row_type, |name| {
+        let (binding, _) = imported.iter().find(|(_, qualified)| {
+            qualified == name && qualified.contains('.') && !qualified.starts_with("typing.")
+        })?;
+        Some(binding.clone())
+    })
+}
+
+/// `text` with each dotted name outside quotes replaced by what `renamed` gives for it.
+fn rename(text: &str, renamed: impl Fn(&str) -> Option<String>) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.char_indices().peekable();
+    while let Some((start, c)) = chars.next() {
+        if matches!(c, '\'' | '"') {
+            let mut end = text.len();
+            while let Some((i, next)) = chars.next() {
+                if next == '\\' {
+                    chars.next();
+                } else if next == c {
+                    end = i + 1;
+                    break;
+                }
+            }
+            out.push_str(&text[start..end]);
+        } else if c.is_alphabetic() || c == '_' {
+            let mut end = text.len();
+            while let Some(&(i, next)) = chars.peek() {
+                if !(next.is_alphanumeric() || next == '_' || next == '.') {
+                    end = i;
+                    break;
+                }
+                chars.next();
+            }
+            let name = &text[start..end];
+            out.push_str(&renamed(name).unwrap_or_else(|| name.to_string()));
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// `text` split at `sep` outside brackets and quotes.
@@ -1441,6 +1544,18 @@ mod tests {
                 "{annotated} {inferred}"
             );
         }
+    }
+
+    #[test]
+    fn test_qualify_leaves_quoted_text_alone() {
+        let imported = [("Decimal".to_string(), "decimal.Decimal".to_string())];
+        assert_eq!(
+            qualify(
+                "tuple[Decimal, Literal['Decimal', \"a\\\"Decimal\"], Decimals]",
+                &imported
+            ),
+            "tuple[decimal.Decimal, Literal['Decimal', \"a\\\"Decimal\"], Decimals]"
+        );
     }
 
     #[test]

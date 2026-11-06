@@ -98,7 +98,14 @@ jobs:
         run: uv run maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
 
       - name: Run tests
-        run: uv run pytest
+        run: uv run pytest -m "not timing and not pg"
+
+      # They share one database server, so they run in one process.
+      - name: Run database tests
+        run: uv run pytest -m pg -n 0
+
+      - name: Run timing tests
+        run: uv run pytest -m timing -n 0 -p no:randomly
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
@@ -143,7 +150,7 @@ jobs:
         run: |
           uv venv --python 3.14t
           uv export --only-group dev --no-hashes --no-emit-project --quiet > "$RUNNER_TEMP/locked.txt"
-          uv pip install maturin pytest --constraint "$RUNNER_TEMP/locked.txt"
+          uv pip install maturin pytest pytest-cov pytest-xdist --constraint "$RUNNER_TEMP/locked.txt"
           uv run --no-sync maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
           uv run --no-sync python -c "import sys; from sqlty import _core; assert not sys._is_gil_enabled()"
           uv run --no-sync pytest -p no:randomly tests/test_threads.py
@@ -242,7 +249,7 @@ jobs:
         run: uv run maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
 
       - name: Compare with the server's column names and types
-        run: uv run pytest tests/test_pg_describe.py tests/test_pg_common_types.py tests/test_driver_values.py -rs -q
+        run: uv run pytest tests/test_pg_describe.py tests/test_pg_common_types.py tests/test_driver_values.py -rs -q -n 0
 
   mysql-fidelity:
     name: MySQL column names and types
@@ -299,7 +306,7 @@ jobs:
         run: uv run maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
 
       - name: Compare with the server's column names and types
-        run: uv run --with pymysql pytest tests/test_server_describe.py tests/test_driver_values.py -rs -q
+        run: uv run --with pymysql pytest tests/test_server_describe.py tests/test_driver_values.py -rs -q -n 0
 
   lean-model:
     name: Lean model of the type mapping
@@ -438,7 +445,7 @@ jobs:
       # variable says so, each benchmark runs once, unmeasured.
       - name: Run the benchmarks once
         if: vars.CODSPEED != 'true'
-        run: uv run pytest benchmarks/ -p no:randomly --no-cov
+        run: uv run pytest benchmarks/ -n 0 -p no:randomly --no-cov
 
       # Simulation counts instructions, so a run is stable on a shared runner: the engine
       # is CPU-bound, with no I/O for instruction counting to miss.
@@ -446,7 +453,7 @@ jobs:
         if: vars.CODSPEED == 'true'
         with:
           mode: simulation
-          run: uv run pytest benchmarks/ --codspeed -p no:randomly --no-cov
+          run: uv run pytest benchmarks/ --codspeed -n 0 -p no:randomly --no-cov
 
   package:
     name: Package (wheel + sdist, Python ${{ matrix.python-version }})
@@ -594,7 +601,7 @@ jobs:
         run: uv run prek run --all-files --show-diff-on-failure
 
       - name: Validate the plugin manifests
-        run: npx --yes @anthropic-ai/claude-code@2.1.302 plugin validate .
+        run: npx --yes @anthropic-ai/claude-code@2.1.311 plugin validate --strict --profile directory .
 
       # Show diff ONLY if previous step failed
       - name: Show git diff

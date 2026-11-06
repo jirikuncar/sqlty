@@ -15,6 +15,8 @@
 //! - [`rules`]: the lint [`rules::Rule`]s, their severities and the user's overrides.
 //! - [`config`]: the `[tool.sqlty]` table, loaded and validated for every host.
 //! - [`options`]: the settings every entry point shares.
+//! - [`params`]: [`params::add_param_types`] writes the `P` of `SQL[R, P]`.
+//! - [`queries`]: [`queries::check_queries`] checks the named queries of a `.sql` file.
 //!
 //! The tokenizer and scanner are crate-internal.
 //!
@@ -38,6 +40,8 @@ pub mod edit;
 pub mod fixer;
 pub mod locate;
 pub mod options;
+pub mod params;
+pub mod queries;
 pub mod rewriter;
 pub mod rules;
 pub(crate) mod scan;

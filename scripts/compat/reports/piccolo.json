@@ -35,6 +35,36 @@
    "version": "1.36.0",
    "dialect": "postgres",
    "kind": "column",
+   "sql": "BIGINT[]",
+   "expected": "list[int]",
+   "provenance": "columns.Array(BigInt)",
+   "schema": ""
+  },
+  "sqlty": "list[int]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "ARRAY",
+   "expected": "list[int]",
+   "provenance": "columns.Array(BigInt)",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
    "sql": "BIGSERIAL",
    "expected": "int",
    "provenance": "columns.BigSerial",
@@ -95,6 +125,36 @@
    "version": "1.36.0",
    "dialect": "postgres",
    "kind": "column",
+   "sql": "BYTEA[]",
+   "expected": "list[bytes]",
+   "provenance": "columns.Array(Blob)",
+   "schema": ""
+  },
+  "sqlty": "list[bytes]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "ARRAY",
+   "expected": "list[bytes]",
+   "provenance": "columns.Array(Blob)",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
    "sql": "BOOLEAN",
    "expected": "bool",
    "provenance": "columns.Boolean",
@@ -116,6 +176,36 @@
    "schema": ""
   },
   "sqlty": "int",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BOOLEAN[]",
+   "expected": "list[bool]",
+   "provenance": "columns.Array(Boolean)",
+   "schema": ""
+  },
+  "sqlty": "list[bool]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "ARRAY",
+   "expected": "list[bool]",
+   "provenance": "columns.Array(Boolean)",
+   "schema": ""
+  },
+  "sqlty": "str",
   "nullable": false,
   "outcome": "mismatch"
  },
@@ -155,6 +245,36 @@
    "version": "1.36.0",
    "dialect": "postgres",
    "kind": "column",
+   "sql": "BYTEA[]",
+   "expected": "list[bytes]",
+   "provenance": "columns.Array(Bytea)",
+   "schema": ""
+  },
+  "sqlty": "list[bytes]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "ARRAY",
+   "expected": "list[bytes]",
+   "provenance": "columns.Array(Bytea)",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
    "sql": "CHAR(255)",
    "expected": "str",
    "provenance": "columns.Char",
@@ -178,6 +298,36 @@
   "sqlty": "str",
   "nullable": false,
   "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "CHAR(255)[]",
+   "expected": "list[str]",
+   "provenance": "columns.Array(Char)",
+   "schema": ""
+  },
+  "sqlty": "list[str]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "ARRAY",
+   "expected": "list[str]",
+   "provenance": "columns.Array(Char)",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
  },
  {
   "row": {
@@ -215,6 +365,36 @@
    "version": "1.36.0",
    "dialect": "postgres",
    "kind": "column",
+   "sql": "DATE[]",
+   "expected": "list[datetime.date]",
+   "provenance": "columns.Array(Date)",
+   "schema": ""
+  },
+  "sqlty": "list[datetime.date]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "ARRAY_DATE",
+   "expected": "list[datetime.date]",
+   "provenance": "columns.Array(Date)",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
    "sql": "NUMERIC",
    "expected": "decimal.Decimal",
    "provenance": "columns.Decimal",
@@ -236,6 +416,36 @@
    "schema": ""
   },
   "sqlty": "float",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "NUMERIC[]",
+   "expected": "list[decimal.Decimal]",
+   "provenance": "columns.Array(Decimal)",
+   "schema": ""
+  },
+  "sqlty": "list[decimal.Decimal]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "ARRAY",
+   "expected": "list[decimal.Decimal]",
+   "provenance": "columns.Array(Decimal)",
+   "schema": ""
+  },
+  "sqlty": "str",
   "nullable": false,
   "outcome": "mismatch"
  },
@@ -275,6 +485,36 @@
    "version": "1.36.0",
    "dialect": "postgres",
    "kind": "column",
+   "sql": "DOUBLE PRECISION[]",
+   "expected": "list[float]",
+   "provenance": "columns.Array(DoublePrecision)",
+   "schema": ""
+  },
+  "sqlty": "list[float]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "ARRAY",
+   "expected": "list[float]",
+   "provenance": "columns.Array(DoublePrecision)",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
    "sql": "VARCHAR(255)",
    "expected": "str",
    "provenance": "columns.Email",
@@ -298,6 +538,36 @@
   "sqlty": "str",
   "nullable": false,
   "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "VARCHAR(255)[]",
+   "expected": "list[str]",
+   "provenance": "columns.Array(Email)",
+   "schema": ""
+  },
+  "sqlty": "list[str]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "ARRAY",
+   "expected": "list[str]",
+   "provenance": "columns.Array(Email)",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
  },
  {
   "row": {
@@ -335,6 +605,36 @@
    "version": "1.36.0",
    "dialect": "postgres",
    "kind": "column",
+   "sql": "FLOAT[]",
+   "expected": "list[float]",
+   "provenance": "columns.Array(Float)",
+   "schema": ""
+  },
+  "sqlty": "list[float]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "ARRAY",
+   "expected": "list[float]",
+   "provenance": "columns.Array(Float)",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
    "sql": "INTEGER",
    "expected": "int",
    "provenance": "columns.Integer",
@@ -358,6 +658,36 @@
   "sqlty": "int",
   "nullable": false,
   "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "INTEGER[]",
+   "expected": "list[int]",
+   "provenance": "columns.Array(Integer)",
+   "schema": ""
+  },
+  "sqlty": "list[int]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "ARRAY",
+   "expected": "list[int]",
+   "provenance": "columns.Array(Integer)",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
  },
  {
   "row": {
@@ -395,6 +725,36 @@
    "version": "1.36.0",
    "dialect": "postgres",
    "kind": "column",
+   "sql": "INTERVAL[]",
+   "expected": "list[datetime.timedelta]",
+   "provenance": "columns.Array(Interval)",
+   "schema": ""
+  },
+  "sqlty": "list[datetime.timedelta]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "ARRAY",
+   "expected": "list[datetime.timedelta]",
+   "provenance": "columns.Array(Interval)",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
    "sql": "JSON",
    "expected": "typing.Any",
    "provenance": "columns.JSON",
@@ -485,6 +845,36 @@
    "version": "1.36.0",
    "dialect": "postgres",
    "kind": "column",
+   "sql": "NUMERIC[]",
+   "expected": "list[decimal.Decimal]",
+   "provenance": "columns.Array(Numeric)",
+   "schema": ""
+  },
+  "sqlty": "list[decimal.Decimal]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "ARRAY",
+   "expected": "list[decimal.Decimal]",
+   "provenance": "columns.Array(Numeric)",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
    "sql": "REAL",
    "expected": "float",
    "provenance": "columns.Real",
@@ -515,6 +905,36 @@
    "version": "1.36.0",
    "dialect": "postgres",
    "kind": "column",
+   "sql": "REAL[]",
+   "expected": "list[float]",
+   "provenance": "columns.Array(Real)",
+   "schema": ""
+  },
+  "sqlty": "list[float]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "ARRAY",
+   "expected": "list[float]",
+   "provenance": "columns.Array(Real)",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
    "sql": "VARCHAR(255)",
    "expected": "str",
    "provenance": "columns.Secret",
@@ -538,6 +958,36 @@
   "sqlty": "str",
   "nullable": false,
   "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "VARCHAR(255)[]",
+   "expected": "list[str]",
+   "provenance": "columns.Array(Secret)",
+   "schema": ""
+  },
+  "sqlty": "list[str]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "ARRAY",
+   "expected": "list[str]",
+   "provenance": "columns.Array(Secret)",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
  },
  {
   "row": {
@@ -605,6 +1055,36 @@
    "version": "1.36.0",
    "dialect": "postgres",
    "kind": "column",
+   "sql": "SMALLINT[]",
+   "expected": "list[int]",
+   "provenance": "columns.Array(SmallInt)",
+   "schema": ""
+  },
+  "sqlty": "list[int]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "ARRAY",
+   "expected": "list[int]",
+   "provenance": "columns.Array(SmallInt)",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
    "sql": "TEXT",
    "expected": "str",
    "provenance": "columns.Text",
@@ -628,6 +1108,36 @@
   "sqlty": "str",
   "nullable": false,
   "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TEXT[]",
+   "expected": "list[str]",
+   "provenance": "columns.Array(Text)",
+   "schema": ""
+  },
+  "sqlty": "list[str]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "ARRAY",
+   "expected": "list[str]",
+   "provenance": "columns.Array(Text)",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
  },
  {
   "row": {
@@ -665,6 +1175,36 @@
    "version": "1.36.0",
    "dialect": "postgres",
    "kind": "column",
+   "sql": "TIME[]",
+   "expected": "list[datetime.time]",
+   "provenance": "columns.Array(Time)",
+   "schema": ""
+  },
+  "sqlty": "list[datetime.time]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "ARRAY_TIME",
+   "expected": "list[datetime.time]",
+   "provenance": "columns.Array(Time)",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
    "sql": "TIMESTAMP",
    "expected": "datetime.datetime",
    "provenance": "columns.Timestamp",
@@ -695,6 +1235,36 @@
    "version": "1.36.0",
    "dialect": "postgres",
    "kind": "column",
+   "sql": "TIMESTAMP[]",
+   "expected": "list[datetime.datetime]",
+   "provenance": "columns.Array(Timestamp)",
+   "schema": ""
+  },
+  "sqlty": "list[datetime.datetime]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "ARRAY_TIMESTAMP",
+   "expected": "list[datetime.datetime]",
+   "provenance": "columns.Array(Timestamp)",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
    "sql": "TIMESTAMPTZ",
    "expected": "datetime.datetime",
    "provenance": "columns.Timestamptz",
@@ -713,6 +1283,36 @@
    "sql": "TIMESTAMPTZ",
    "expected": "datetime.datetime",
    "provenance": "columns.Timestamptz",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "TIMESTAMPTZ[]",
+   "expected": "list[datetime.datetime]",
+   "provenance": "columns.Array(Timestamptz)",
+   "schema": ""
+  },
+  "sqlty": "list[datetime.datetime]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "ARRAY_TIMESTAMPTZ",
+   "expected": "list[datetime.datetime]",
+   "provenance": "columns.Array(Timestamptz)",
    "schema": ""
   },
   "sqlty": "str",
@@ -755,6 +1355,36 @@
    "version": "1.36.0",
    "dialect": "postgres",
    "kind": "column",
+   "sql": "UUID[]",
+   "expected": "list[uuid.UUID]",
+   "provenance": "columns.Array(UUID)",
+   "schema": ""
+  },
+  "sqlty": "list[uuid.UUID]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "ARRAY",
+   "expected": "list[uuid.UUID]",
+   "provenance": "columns.Array(UUID)",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
    "sql": "VARCHAR(255)",
    "expected": "str",
    "provenance": "columns.Varchar",
@@ -778,5 +1408,35 @@
   "sqlty": "str",
   "nullable": false,
   "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "VARCHAR(255)[]",
+   "expected": "list[str]",
+   "provenance": "columns.Array(Varchar)",
+   "schema": ""
+  },
+  "sqlty": "list[str]",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.36.0",
+   "dialect": "sqlite",
+   "kind": "column",
+   "sql": "ARRAY",
+   "expected": "list[str]",
+   "provenance": "columns.Array(Varchar)",
+   "schema": ""
+  },
+  "sqlty": "str",
+  "nullable": false,
+  "outcome": "mismatch"
  }
 ]

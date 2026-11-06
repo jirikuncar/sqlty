@@ -29,6 +29,7 @@ The full table, with the reason for each type, is [Type mapping](../reference/ty
 | MySQL `TIME` | `datetime.timedelta` | `datetime.time` (SQLAlchemy, Tortoise, ormar, peewee, Pony) |
 | PostgreSQL `BIT` | `str` | `BitString` (SQLAlchemy 2.1) |
 | `JSON` in MySQL and SQLite | `str`, typed `typing.Any` | the decoded value |
+| Piccolo's `Array` in SQLite, declared `ARRAY` or `ARRAY_DATE` and the like | the stored JSON text (`ARRAY` untyped, the others by their affinity) | `list` |
 | `AVG` of integers in PostgreSQL | `decimal.Decimal` | `float` (Django's `Avg`) |
 
 ## What to annotate

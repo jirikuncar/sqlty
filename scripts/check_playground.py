@@ -1,5 +1,7 @@
 """Load the docs playground in Chromium and check that it works: the engine answers, the
-tour gets its diagnostics, and a share link restores a session.
+tour gets its diagnostics, a share link restores a session, steps move and reset, and
+a docs example opens in it, and the site works offline once its service worker has cached
+it.
 
     uvx --with playwright python scripts/check_playground.py https://jirikuncar.github.io/sqlty/playground/
     uvx --with playwright python scripts/check_playground.py --site site
@@ -48,20 +50,103 @@ def main() -> None:
 
 def check(page: Page, url: str) -> None:
     page.goto(url)
-    page.wait_for_selector("[data-types] code", timeout=60_000)
+    page.wait_for_selector("[data-types] code", state="attached", timeout=60_000)
     problems = page.inner_text("[data-problems]")
-    assert "[unknown-column]" in problems, problems
+    assert "unknown-column" in problems, problems
 
     page.evaluate(f"{SOURCE}.setValue('q = \"--sql\\\\nSELECT nme FROM users\"\\n')")
     page.wait_for_function("location.hash.length > 1")
     shared = page.url
     page.goto("about:blank")
     page.goto(shared)
-    page.wait_for_selector("[data-types] code", timeout=60_000)
+    page.wait_for_selector("[data-types] code", state="attached", timeout=60_000)
     assert page.evaluate(f"{SOURCE}.getValue()") == 'q = "--sql\\nSELECT nme FROM users"\n'
     page.click("[data-fix]")
     fixed = page.evaluate(f"{SOURCE}.getValue()")
     assert "SELECT name FROM users" in fixed, fixed
+
+    page.evaluate(f'{SOURCE}.setValue(\'q = """--sql\\nselect id,name from users"""\\n\')')
+    page.click("[data-format]")
+    formatted = page.evaluate(f"{SOURCE}.getValue()")
+    assert formatted == 'q = """--sql\nselect\n    id,\n    name\nfrom users"""\n', formatted
+
+    page.select_option("[data-example]", label="Tour in steps")
+    page.wait_for_selector("[data-steps]:not([hidden])")
+    first = page.evaluate(f"{SOURCE}.getValue()")
+    page.keyboard.press("PageDown")
+    page.wait_for_function("document.querySelector('[data-step-select]').value === '1'")
+    page.click("[data-source] .view-lines")
+    page.keyboard.press("PageDown")
+    page.keyboard.type(".")
+    assert page.input_value("[data-step-select]") == "1"
+    assert page.url.split("#")[0].endswith("/playground/"), page.url
+    page.evaluate(f"{SOURCE}.setValue('edited = 1\\n')")
+    page.click("[data-step-reset]")
+    assert page.evaluate(f"{SOURCE}.getValue()") not in (first, "edited = 1\n")
+    page.wait_for_timeout(500)
+    stepped = page.url
+    page.goto("about:blank")
+    page.goto(stepped)
+    page.wait_for_selector("[data-steps]:not([hidden])", timeout=60_000)
+    assert page.input_value("[data-step-select]") == "1"
+
+    embedded(page, url)
+    example(page, url)
+    offline(page, url)
+
+
+def embedded(page: Page, url: str) -> None:
+    """``?embed`` keeps a shared session with only the editor, the console and Fix all."""
+    page.goto(url)
+    page.wait_for_selector("[data-types] code", state="attached", timeout=60_000)
+    page.evaluate(f"{SOURCE}.setValue('q = \"--sql\\\\nSELECT nme FROM users\"\\n')")
+    page.wait_for_function("location.hash.length > 1")
+    shared = page.url.replace("#", "?embed#", 1)
+    page.goto("about:blank")
+    page.goto(shared)
+    page.wait_for_selector("[data-types] code", state="attached", timeout=60_000)
+    assert not page.is_visible(".md-header")
+    assert not page.is_visible("[data-example]")
+    assert page.is_visible("[data-fix]")
+    opened = page.get_attribute("[data-open]", "href")
+    assert "embed" not in opened and opened.split("#")[1] == shared.split("#")[1], opened
+
+
+def example(page: Page, url: str) -> None:
+    """A docs example opens in the playground with its schema, rules and diagnostics."""
+    page.goto(url.removesuffix("playground/") + "guide/name-diagnostics/")
+    page.click(".sqlty-try >> nth=0")
+    page.wait_for_selector("[data-types] code", state="attached", timeout=60_000)
+    problems = page.inner_text("[data-problems]")
+    assert "unknown-column" in problems, problems
+
+    # Back in the docs and to the playground again, without a full load in between.
+    page.evaluate(
+        "document.querySelector('.md-nav__link[href$=\"/guide/name-diagnostics/\"]').click()"
+    )
+    page.wait_for_selector(".sqlty-try")
+    page.evaluate("document.querySelectorAll('.sqlty-try')[1].click()")
+    page.wait_for_selector("[data-types] code", state="attached", timeout=60_000)
+    shared = "import(new URL('../assets/playground/share.js', location.href)).then((m) => m.decode(location.hash.slice(1)))"
+    assert page.evaluate(f"{shared}.then((s) => s.source)") == page.evaluate(f"{SOURCE}.getValue()")
+
+
+def offline(page: Page, url: str) -> None:
+    """The service worker of ``scripts/offline.py`` keeps the docs and the playground offline."""
+    page.goto(url)
+    page.wait_for_function("navigator.serviceWorker.controller !== null", timeout=60_000)
+    cached = "caches.match(new URL('../assets/playground/sqlty_wasm.wasm', location.href))"
+    page.wait_for_function(f"{cached}.then(Boolean)", polling=500, timeout=60_000)
+    page.context.set_offline(True)
+    try:
+        page.goto(url + "?steps=../assets/playground/steps.json")
+        page.wait_for_selector("[data-steps]:not([hidden])", timeout=60_000)
+        problems = page.inner_text("[data-problems]")
+        assert "stale-rewrite" in problems, problems
+        page.goto(url.removesuffix("playground/") + "reference/rules/")
+        assert page.title().startswith("Rules"), page.title()
+    finally:
+        page.context.set_offline(False)
 
 
 @contextlib.contextmanager

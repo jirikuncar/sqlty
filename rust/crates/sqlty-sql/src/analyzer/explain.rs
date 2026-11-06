@@ -41,7 +41,8 @@ pub(super) type Explained = Rc<RefCell<HashMap<usize, Vec<(Option<RuleRef>, Opti
 /// operation) has none.
 ///
 /// `SELECT SUM(id::INT)` names `postgres.aggregate.sum-integers` for its type, and
-/// `SELECT id` names no rule.
+/// `SELECT id` names no rule. A reference that cites several products keeps only the
+/// dialect's part, unless it does not cite the dialect.
 pub fn explain_select(
     sql: &str,
     dialect: &str,
@@ -74,8 +75,8 @@ pub fn explain_select(
                     .unwrap_or_default();
                 ColumnRules {
                     name: column.name,
-                    type_rule,
-                    nullability_rule,
+                    type_rule: type_rule.map(|rule| rule.for_dialect(dialect)),
+                    nullability_rule: nullability_rule.map(|rule| rule.for_dialect(dialect)),
                 }
             })
             .collect(),

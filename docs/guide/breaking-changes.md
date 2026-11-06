@@ -93,6 +93,23 @@ from sqlty import SQL
 emails = SQL[tuple[str]]("--sql\nSELECT email FROM users")
 ```
 
+### Queries in `.sql` files
+
+The files [`queries`](sql-files.md) names are compared too, query by query:
+
+`against.sql`:
+
+```sql
+CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT NOT NULL, nick TEXT NOT NULL DEFAULT '');
+CREATE TABLE sessions (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL);
+```
+
+```sql
+-- name: get-bio^
+-- error: [unknown-column] "column `bio` does not exist in `users`"
+SELECT bio FROM users WHERE id = :id;
+```
+
 ### A new NOT NULL column without a default
 
 An `INSERT` written before the column existed does not set it:
@@ -230,7 +247,7 @@ sqlty breaking --save .sqlty/releases/v1.4.json
 sqlty breaking --against .sqlty/releases/
 ```
 
-`--save PATH` writes a snapshot of `--head`: its Python files, the settings each
+`--save PATH` writes a snapshot of `--head`: its Python and query files, the settings each
 is checked with, and its schema. `--against` reads a snapshot as it reads the
 revision it was saved from, so the release stays a baseline after its history is
 rewritten, in a shallow clone, or when it was never a commit.
@@ -256,7 +273,7 @@ A schema file, such as the output of `pg_dump --schema-only` in CI, has no
 queries, so it is only checked forward: the new queries against that schema.
 
 !!! note "A snapshot holds source code"
-    A snapshot holds the full text of every checked Python file. Commit it where the
+    A snapshot holds the full text of every checked Python and query file. Commit it where the
     code may be read, or store it as a CI artifact.
 
 ## Expand and contract

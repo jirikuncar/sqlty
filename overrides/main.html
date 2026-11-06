@@ -1,10 +1,62 @@
 {% extends "base.html" %}
+{% block fonts %}
+  <link rel="stylesheet" href="{{ 'assets/vendor/inter/index.css' | url }}">
+  <link rel="stylesheet" href="{{ 'assets/vendor/inter/wght-italic.css' | url }}">
+  <link rel="stylesheet" href="{{ 'assets/vendor/jetbrains-mono/index.css' | url }}">
+  <link rel="stylesheet" href="{{ 'assets/vendor/jetbrains-mono/wght-italic.css' | url }}">
+  <style>:root{--md-text-font:"Inter Variable";--md-code-font:"JetBrains Mono Variable"}</style>
+{% endblock %}
 {% block extrahead %}
-  <link rel="icon" href="{{ 'assets/favicon/favicon.svg' | url }}" type="image/svg+xml">
+  {% set home = page.is_homepage or page.url in ["", "./", "index.html"] %}
+  {% set title = config.site_name if home else (page.meta.title if page.meta and page.meta.title else page.title | striptags) ~ " - " ~ config.site_name %}
+  {% set description = page.meta.description if page.meta and page.meta.description else config.site_description %}
+  {% set image = config.site_url ~ "assets/social.png" %}
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="{{ config.site_name }}">
+  <meta property="og:title" content="{{ title }}">
+  <meta property="og:description" content="{{ description }}">
+  {% if page.canonical_url %}<meta property="og:url" content="{{ page.canonical_url }}">{% endif %}
+  <meta property="og:image" content="{{ image }}">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="The SQLTy wordmark">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ title }}">
+  <meta name="twitter:description" content="{{ description }}">
+  <meta name="twitter:image" content="{{ image }}">
+  <meta name="twitter:image:alt" content="The SQLTy wordmark">
+  <link rel="icon" href="{{ 'assets/favicon/favicon.ico' | url }}" sizes="32x32">
+  <script>
+    (() => {
+      const dark = matchMedia("(prefers-color-scheme: dark)");
+      const href = { false: "{{ 'assets/sqlty-mark-light.svg' | url }}", true: "{{ 'assets/sqlty-mark-dark.svg' | url }}" };
+      const swap = () => {
+        const old = document.querySelector('link[rel="icon"][href$=".svg"]');
+        const icon = old.cloneNode();
+        icon.href = href[dark.matches];
+        old.replaceWith(icon);
+      };
+      swap();
+      dark.addEventListener("change", swap);
+    })();
+  </script>
   <link rel="apple-touch-icon" href="{{ 'assets/favicon/apple-touch-icon.png' | url }}">
   <link rel="manifest" href="{{ 'assets/favicon/site.webmanifest' | url }}">
+  <meta name="theme-color" content="#0e0f10">
+  <meta name="apple-mobile-web-app-title" content="SQLTy">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <style>
     [data-md-color-scheme="default"] .md-logo img[src$="#only-dark"],
-    [data-md-color-scheme="slate"] .md-logo img[src$="#only-light"] { display: none }
+    [data-md-color-scheme="slate"] .md-logo img[src$="#only-light"] { display: none !important }
   </style>
+  <script>
+    if ("serviceWorker" in navigator && location.protocol !== "file:") {
+      navigator.serviceWorker.register("{{ 'sw.js' | url }}").catch(() => {});
+      if (matchMedia("(display-mode: standalone)").matches || navigator.standalone) {
+        navigator.serviceWorker.ready.then((registration) => registration.active?.postMessage("playground"));
+      }
+    }
+  </script>
 {% endblock %}

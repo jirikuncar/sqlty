@@ -108,6 +108,23 @@ fn config_sets_the_dialect_import_style_and_rules() {
 }
 
 #[test]
+fn param_types_are_written_by_rewrite_and_fix_all() {
+    let source = "q = \"--sql\\nSELECT name FROM users WHERE id = %(id)s\"\n";
+    let answer = ask(&json!({
+        "op": "analyze", "source": source, "schema": SCHEMA, "dialect": "postgres",
+        "config": "param-types = true",
+    }));
+    let expected = "import typing\nfrom sqlty import SQL\n\n\n# sqlty: generated\n\
+        class QParams(typing.TypedDict):\n    id: int | None\n\n\n\
+        q = SQL[tuple[str], QParams](\"--sql\\nSELECT name FROM users WHERE id = %(id)s\")\n";
+    assert_eq!(answer["rewritten"], expected);
+    assert_eq!(answer["fixed"], expected);
+    let answer =
+        ask(&json!({"op": "analyze", "source": expected, "schema": SCHEMA, "dialect": "postgres"}));
+    assert_eq!(answer["stripped"], source);
+}
+
+#[test]
 fn config_errors_are_reported_as_sqlty_check_reports_them() {
     for (config, message) in [
         (
@@ -117,9 +134,10 @@ fn config_errors_are_reported_as_sqlty_check_reports_them() {
         ("[rules]\nselect-star = \"loud\"", "loud"),
         (
             "schema = \"schema.sql\"",
-            "the playground reads only dialect, import-style, rules, not 'schema'",
+            "the playground reads only dialect, import-style, param-types, rules, not 'schema'",
         ),
         ("import-style = \"from x\"", "Unsupported import-style"),
+        ("param-types = 1", "param-types must be true or false"),
     ] {
         let answer =
             ask(&json!({"op": "analyze", "source": "", "dialect": "postgres", "config": config}));
@@ -147,6 +165,18 @@ fn analyze_gives_quick_fixes_and_what_fix_and_strip_make() {
         ask(&json!({"op": "analyze", "source": fixed, "schema": SCHEMA, "dialect": "postgres"}));
     assert_eq!(answer["stripped"], source);
     assert_eq!(answer["diagnostics"], json!([]));
+}
+
+#[test]
+fn format_lays_out_the_query_strings_in_the_configured_dialect() {
+    let source = "q = \"\"\"--sql\nselect id,name from users where id=?\"\"\"\n";
+    let answer = ask(
+        &json!({"op": "format", "source": source, "dialect": "postgres", "config": "dialect = \"sqlite\""}),
+    );
+    assert_eq!(
+        answer["formatted"],
+        "q = \"\"\"--sql\nselect\n    id,\n    name\nfrom users\nwhere id = ?\"\"\"\n"
+    );
 }
 
 #[test]

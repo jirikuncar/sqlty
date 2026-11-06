@@ -19,12 +19,13 @@ from sqlty._core import composite_fields as _composite_fields
 from sqlty._core import parse_error as _parse_error
 from sqlty._core import query_diagnostics as _query_diagnostics
 from sqlty._core import select_star_finding as _select_star_finding
+from sqlty._core import sqruff_findings as _sqruff_findings
 from sqlty._core import wrapped_queries as _wrapped_queries
 from sqlty._drivers import MARKER, find_driver_calls, find_template_calls
 from sqlty._helpers import HelperIndex, find_helper_calls
 from sqlty._lint import NAME_RULES, Diagnostic
-from sqlty._params import _dotted, annotation_type, mismatch
-from sqlty._source import ParsedSource, _wrapper_name, is_any
+from sqlty._params import ParamArg, _dotted, annotation_type, mismatch
+from sqlty._source import Ignore, ParsedSource, _wrapper_name, is_any
 from sqlty._variants import Declared
 
 if TYPE_CHECKING:
@@ -94,7 +95,7 @@ class _Check:
         found: list[HelperCall],
         driver_calls: list[HelperCall],
         queries: list[_RowQuery],
-        declared: list[tuple[int, ast.expr, str]],
+        declared: list[tuple[int, ast.expr, str, tuple[int, int]]],
         helpers: HelperIndex | None,
         module: str | None,
     ) -> None:
@@ -128,7 +129,7 @@ class _Check:
         self.row_usage = RowUsage()
         if helpers is not None:
             p_names = {
-                ast.unparse(p) for _, p, _ in declared if isinstance(p, ast.Name | ast.Attribute)
+                ast.unparse(p) for _, p, _, _ in declared if isinstance(p, ast.Name | ast.Attribute)
             }
             for name in ({q[1] for q in [*queries, *named]} | p_names) - self.type_defs.keys():
                 if (imported := helpers.row_type(parsed, name)) is not None:
@@ -264,7 +265,13 @@ def _declared_annotations(
     """The ``P`` of the ``SQL[R, P]`` a call's query comes from, as an annotation per parameter key."""
     if not isinstance(query, Declared) or query.params is None:
         return None
-    declared, source = query.params, query.source
+    return _annotations_of(ctx, query.params, query.source)
+
+
+def _annotations_of(
+    ctx: _Check, declared: ast.expr, source: ParsedSource
+) -> tuple[ParsedSource, dict[int | str, ast.expr]] | None:
+    """``P`` of a ``SQL[R, P]`` in ``source``, as an annotation per parameter key."""
     if isinstance(declared, ast.Subscript) and _dotted(declared.value) in ("tuple", "typing.Tuple"):
         items = declared.slice.elts if isinstance(declared.slice, ast.Tuple) else [declared.slice]
         if any(isinstance(item, ast.Constant) and item.value is Ellipsis for item in items):
@@ -287,7 +294,7 @@ def _check_declared_params(ctx: _Check) -> None:
         return
     from sqlty.core import analyze_params
 
-    for line, declared, query in ctx.declared:
+    for line, declared, query, _ in ctx.declared:
         params = analyze_params(query, dialect=ctx.dialect, schema_sql=ctx.schema_sql)
         if params is not None:
             for message in _declared_params_diagnostics(ctx, declared, params):
@@ -345,7 +352,10 @@ def _check_names(ctx: _Check) -> None:
 
 def _check_structural(ctx: _Check) -> None:
     """Rows named by a type defined in this source (or an imported one)."""
+    bound = _bound_params(ctx)
     for line, name, query, span in ctx.user_queries:
+        if params := bound.get(span):
+            query = _bind(query, params, ctx.dialect)
         if (columns := _columns(query, ctx.dialect, ctx.schema_sql)) is None:
             continue
         info = ctx.type_defs[name]
@@ -379,11 +389,41 @@ def _bound(call: HelperCall, dialect: str) -> str | None:
     annotated variable), the placeholder is respelled as one whose nullability is not
     judged, so the column or JSON member it fills is not reported as nullable.
     """
-    if call.query is None or not call.params:
-        return call.query
-    non_null = {arg.key for arg in call.params if arg.type not in (None, "None")}
+    return _bind(call.query, call.params, dialect)
+
+
+def _bound_params(ctx: _Check) -> dict[tuple[int, int], tuple[ParamArg, ...]]:
+    """The arguments a ``SQL[R](...)`` query is bound to, by the span of ``R``.
+
+    From ``P`` of ``SQL[R, P]``, and from the driver call that runs the query.
+    """
+    bindings = [
+        (ctx.parsed.span(call.query_node), call.params)
+        for call in ctx.driver_calls
+        if call.params and call.query_node is not None
+    ]
+    for _, declared, _, span in ctx.declared:
+        if (found := _annotations_of(ctx, declared, ctx.parsed)) is not None:
+            source, annotations = found
+            params = []
+            for key, annotation in annotations.items():
+                types = {annotation_type(m, source) for m in _union_members(annotation)}
+                params.append(ParamArg(key, types.pop() if len(types) == 1 else None))
+            bindings.append((span, tuple(params)))
+    return {
+        row: params
+        for _, _, _, row in ctx.user_queries
+        for (start, end), params in bindings
+        if start <= row[0] and row[1] <= end
+    }
+
+
+def _bind(query: str | None, params: tuple[ParamArg, ...] | None, dialect: str) -> str | None:
+    if query is None or not params:
+        return query
+    non_null = {arg.key for arg in params if arg.type not in (None, "None")}
     if not non_null:
-        return call.query
+        return query
     marker = "$0" if dialect.lower() in ("postgres", "postgresql") else "?"
     position = 0
 
@@ -399,7 +439,7 @@ def _bound(call: HelperCall, dialect: str) -> str | None:
             key = position
         return marker if key in non_null else match[0]
 
-    return _PSYCOPG_PLACEHOLDER.sub(respell, call.query)
+    return _PSYCOPG_PLACEHOLDER.sub(respell, query)
 
 
 def _row_type_of(annotation: ast.expr | None, type_defs: Mapping[str, TypeInfo]) -> TypeInfo | None:
@@ -510,6 +550,23 @@ def diagnostics(
     diagnostics = [
         d for d in diagnostics if not (d["rule"] == "stale-rewrite" and d.get("line") in typed)
     ]
+    sqruff = RuleConfig(overrides=rules)
+    if sqruff.is_enabled("sqruff"):
+        severity = sqruff.severity("sqruff").value
+        diagnostics += [
+            {
+                "rule": "sqruff",
+                "message": f"{code}: {message}",
+                "severity": severity,
+                "line": parsed.position(query_start)[0],
+                "start": start,
+                "end": end,
+                "fix": [],
+            }
+            for code, message, start, end, query_start in _sqruff_findings(
+                parsed.text, dialect=dialect, import_style=import_style
+            )
+        ]
     driver_calls = find_driver_calls(parsed) + find_template_calls(parsed)
     queries = [
         (line, name, query, span)
@@ -694,8 +751,8 @@ def _fits(actual: str | None, expected: str | None) -> bool:
 
 def _declared_params(
     parsed: ParsedSource, import_style: str | None
-) -> list[tuple[int, ast.expr, str]]:
-    """``(line, P, query)`` of each ``SQL[R, P]("...")`` call."""
+) -> list[tuple[int, ast.expr, str, tuple[int, int]]]:
+    """``(line, P, query, span of the call)`` of each ``SQL[R, P]("...")`` call."""
     wrapper = _wrapper_name(import_style)
     if (
         wrapper is None
@@ -704,7 +761,7 @@ def _declared_params(
     ):
         return []
     return [
-        (call.lineno, call.func.slice.elts[1], query.value)
+        (call.lineno, call.func.slice.elts[1], query.value, parsed.span(call))
         for call in parsed.calls
         if isinstance(call.func, ast.Subscript)
         and isinstance(call.func.slice, ast.Tuple)
@@ -1022,14 +1079,17 @@ def _value_diagnostics(
 
 
 def apply_suppressions(
-    parsed: ParsedSource,
+    ignores: dict[int, Ignore],
     diagnostics: list[Diagnostic],
     rules: dict[str, str] | None,
+    marker: str = "#",
 ) -> list[Diagnostic]:
-    """Drop diagnostics suppressed by a comment on their line; add ``unused-ignore``."""
+    """Drop diagnostics suppressed by a comment on their line; add ``unused-ignore``.
+
+    ``marker`` starts a comment in the checked language: ``#``, or ``--`` in SQL.
+    """
     from sqlty._lint import RuleConfig
 
-    ignores = parsed.ignores
     if not ignores:
         return diagnostics
 
@@ -1052,7 +1112,7 @@ def apply_suppressions(
             else:
                 unused = [name for name in ignore.rules if (ignore.line, name) not in used]
             for name in unused:
-                written = "# sqlty: ignore" if name is None else f"# sqlty: ignore[{name}]"
+                written = f"{marker} sqlty: ignore" + ("" if name is None else f"[{name}]")
                 kept.append(
                     {
                         "rule": "unused-ignore",

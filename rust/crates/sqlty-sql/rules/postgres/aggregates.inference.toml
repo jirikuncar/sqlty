@@ -7,7 +7,7 @@ dialects = ["postgres"]
 argument = ["SMALLINT", "INT"]
 type = "BIGINT"
 nullability = "aggregate"
-reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (sum ( smallint ) → bigint, sum ( integer ) → bigint)"
+reference.postgres = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (sum ( smallint ) → bigint, sum ( integer ) → bigint)"
 reasoning = "Summing small integers widens to bigint so the sum fits."
 
 [[function]]
@@ -17,7 +17,7 @@ dialects = ["postgres"]
 argument = ["BIGINT", "DECIMAL", "NUMERIC"]
 type = "DECIMAL"
 nullability = "aggregate"
-reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (sum ( bigint ) → numeric, sum ( numeric ) → numeric)"
+reference.postgres = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (sum ( bigint ) → numeric, sum ( numeric ) → numeric)"
 reasoning = "Summing bigints or numerics gives an exact numeric."
 
 [[function]]
@@ -27,7 +27,7 @@ dialects = ["postgres"]
 argument = ["FLOAT"]
 type = "FLOAT"
 nullability = "aggregate"
-reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (sum ( real ) → real)"
+reference.postgres = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (sum ( real ) → real)"
 reasoning = "Summing reals gives a real."
 
 [[function]]
@@ -37,7 +37,7 @@ dialects = ["postgres"]
 argument = ["DOUBLE"]
 type = "DOUBLE"
 nullability = "aggregate"
-reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (sum ( double precision ) → double precision)"
+reference.postgres = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (sum ( double precision ) → double precision)"
 reasoning = "Summing doubles gives a double."
 
 [[function]]
@@ -47,7 +47,7 @@ dialects = ["postgres"]
 argument = ["VARCHAR"]
 type = "@argument-as TEXT"
 nullability = "aggregate"
-reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (max ( see text ): available for any numeric, string, ... type); the text operators read varchar as text"
+reference.postgres = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (max ( see text ): available for any numeric, string, ... type); the text operators read varchar as text"
 reasoning = "PostgreSQL has no min or max for varchar: it reads the values as text, so the result is text."
 
 [[function]]
@@ -57,7 +57,7 @@ dialects = ["postgres"]
 argument = ["@binary"]
 type = "BYTEA"
 nullability = "aggregate"
-reference = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (string_agg ( value bytea, delimiter bytea ) → bytea)"
+reference.postgres = "PostgreSQL 17 documentation, 9.21, Table 9.60 General-Purpose Aggregate Functions (string_agg ( value bytea, delimiter bytea ) → bytea)"
 reasoning = "Binary strings concatenate into a binary string."
 
 [[function]]
@@ -66,7 +66,7 @@ functions = ["BIT_AND", "BIT_OR", "BIT_XOR", "RANGE_INTERSECT_AGG"]
 dialects = ["postgres"]
 type = "@argument-type(0)"
 nullability = "aggregate"
-reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
 reasoning = "The result has the type of the first argument."
 
 [[function]]
@@ -75,7 +75,7 @@ function = "ARRAY_AGG"
 dialects = ["postgres"]
 type = "@array(0)"
 nullability = "aggregate"
-reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
 reasoning = "The result is an array of the argument's type."
 
 [[function]]
@@ -84,7 +84,7 @@ functions = ["STDDEV", "STDDEV_POP", "STDDEV_SAMP", "VARIANCE", "VAR_POP", "VAR_
 dialects = ["postgres"]
 type = "@mean"
 nullability = "aggregate"
-reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.61 Aggregate Functions for Statistics"
+reference.postgres = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.61 Aggregate Functions for Statistics"
 reasoning = "The statistic is `double precision` for floating-point input and `numeric` otherwise, an interval's an interval."
 
 [[function]]
@@ -93,7 +93,7 @@ function = "ANY_VALUE"
 dialects = ["postgres"]
 type = "@same(0)"
 nullability = "aggregate"
-reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
 reasoning = "The result is one of the first argument's values, so it keeps its type and values."
 
 [[function]]
@@ -102,7 +102,7 @@ function = "REGR_COUNT"
 dialects = ["postgres"]
 type = "BIGINT"
 nullability = "non-null"
-reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.61 Aggregate Functions for Statistics"
+reference.postgres = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.61 Aggregate Functions for Statistics"
 reasoning = "The documentation gives the function a `bigint` result. It never returns NULL, even for NULL arguments."
 
 [[function]]
@@ -111,7 +111,7 @@ functions = ["BOOL_AND", "BOOL_OR", "EVERY"]
 dialects = ["postgres"]
 type = "BOOLEAN"
 nullability = "aggregate"
-reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
 reasoning = "The documentation gives each of these a `boolean` result."
 
 [[function]]
@@ -120,7 +120,7 @@ functions = ["CORR", "COVAR_POP", "COVAR_SAMP", "REGR_SLOPE", "REGR_INTERCEPT", 
 dialects = ["postgres"]
 type = "DOUBLE"
 nullability = "aggregate"
-reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.61 Aggregate Functions for Statistics"
+reference.postgres = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.61 Aggregate Functions for Statistics"
 reasoning = "The documentation gives each of these a `double precision` result."
 
 [[function]]
@@ -129,7 +129,7 @@ function = "GROUPING"
 dialects = ["postgres"]
 type = "INT"
 nullability = "non-null"
-reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.64 Grouping Operations"
+reference.postgres = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.64 Grouping Operations"
 reasoning = "The documentation gives the function an `integer` result. It never returns NULL, even for NULL arguments."
 
 [[function]]
@@ -138,7 +138,7 @@ functions = ["JSON_ARRAYAGG", "JSON_OBJECTAGG"]
 dialects = ["postgres"]
 type = "JSON"
 nullability = "aggregate"
-reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
 reasoning = "The documentation gives each of these a `json` result."
 
 [[function]]
@@ -147,7 +147,7 @@ functions = ["JSON_AGG_STRICT", "JSON_OBJECT_AGG_STRICT", "JSON_OBJECT_AGG_UNIQU
 dialects = ["postgres"]
 type = "JSON"
 nullability = "aggregate"
-reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
 reasoning = "The documentation gives each of these a `json` result."
 
 [[function]]
@@ -156,7 +156,7 @@ functions = ["JSONB_AGG_STRICT", "JSONB_OBJECT_AGG_STRICT", "JSONB_OBJECT_AGG_UN
 dialects = ["postgres"]
 type = "JSONB"
 nullability = "aggregate"
-reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
 reasoning = "The documentation gives each of these a `jsonb` result."
 
 [[function]]
@@ -165,7 +165,7 @@ function = "XMLAGG"
 dialects = ["postgres"]
 type = "XML"
 nullability = "aggregate"
-reference = "PostgreSQL 17 documentation, 9.15.1 Producing XML Content"
+reference.postgres = "PostgreSQL 17 documentation, 9.15.1 Producing XML Content"
 reasoning = "`xmlagg` concatenates `xml` values into one `xml` value, NULL when every input is."
 
 [[function]]
@@ -174,5 +174,5 @@ function = "RANGE_AGG"
 dialects = ["postgres"]
 type = "@multirange(0)"
 nullability = "aggregate"
-reference = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.21 Aggregate Functions, Table 9.60 General-Purpose Aggregate Functions"
 reasoning = "The result is the multirange type of the argument, a range or a multirange. It is NULL when every input is."

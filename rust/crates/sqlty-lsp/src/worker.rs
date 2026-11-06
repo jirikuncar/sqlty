@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 
 use lsp_server::Response;
-use lsp_types::{CodeAction, CodeActionKind, CodeActionOrCommand, MessageType, OneOf, Url};
+use lsp_types::{CodeAction, CodeActionKind, CodeActionOrCommand, MessageType, OneOf, Uri};
 
 use crate::text::{diff, LineIndex};
-use crate::{actions, highlight, Job, Settings, Shared, Workspace, FIX_ALL};
+use crate::{actions, highlight, Job, Settings, Shared, Workspace, FORMAT};
 
 pub(crate) fn work<W, F>(
     queue: &Receiver<Job>,
@@ -28,14 +28,14 @@ pub(crate) fn work<W, F>(
     };
     while let Ok(first) = queue.recv() {
         // Jobs that arrived during the last check: the last edit of a buffer is checked once.
-        let mut checks: Vec<Url> = Vec::new();
+        let mut checks: Vec<Uri> = Vec::new();
         for job in std::iter::once(first).chain(queue.try_iter()) {
             match job {
                 Job::Reload => workspaces.reload(shared),
-                Job::FixAll(id, uri) => {
-                    let action = fix_all(&mut workspaces, shared, &uri);
-                    let actions: Vec<_> = action
+                Job::Source(id, uri, kinds) => {
+                    let actions: Vec<_> = kinds
                         .into_iter()
+                        .filter_map(|kind| source_action(&mut workspaces, shared, &uri, kind))
                         .map(CodeActionOrCommand::CodeAction)
                         .collect();
                     shared.send(Response::new_ok(id, actions));
@@ -92,7 +92,7 @@ where
     /// Open every loaded workspace again: its settings or schema changed.
     fn reload(&mut self, shared: &Shared) {
         let roots: Vec<PathBuf> = self.loaded.drain().map(|(root, _)| root).collect();
-        let stale: Vec<Url> = shared.background().drain().map(|(uri, _)| uri).collect();
+        let stale: Vec<Uri> = shared.background().drain().map(|(uri, _)| uri).collect();
         for root in roots {
             self.load(root, shared);
         }
@@ -116,8 +116,10 @@ fn publish_breaking<W: Workspace>(workspace: &mut W, shared: &Shared) {
         }
     };
     for (path, diagnostics) in found {
-        let (Ok(uri), Ok(text)) = (Url::from_file_path(&path), std::fs::read_to_string(&path))
-        else {
+        let (Ok(uri), Ok(text)) = (
+            crate::uri::from_path(&path).ok_or(()),
+            std::fs::read_to_string(&path),
+        ) else {
             continue;
         };
         let index = LineIndex::new(&text, &shared.encoding);
@@ -132,22 +134,22 @@ fn publish_breaking<W: Workspace>(workspace: &mut W, shared: &Shared) {
     }
 }
 
-fn check<W, F>(workspaces: &mut Workspaces<'_, W, F>, shared: &Shared, uri: Url)
+fn check<W, F>(workspaces: &mut Workspaces<'_, W, F>, shared: &Shared, uri: Uri)
 where
     W: Workspace,
     F: FnMut(&Path, &Settings) -> Result<W, String>,
 {
-    let Some((text, version)) = shared
+    let Some((text, version, python)) = shared
         .documents()
         .get(&uri)
-        .map(|d| (d.text.clone(), d.version))
+        .map(|d| (d.text.clone(), d.version, d.python))
     else {
         return;
     };
-    let Ok(path) = uri.to_file_path() else {
+    let Some(path) = crate::uri::to_path(&uri) else {
         return;
     };
-    let enabled = workspaces.settings.completion || workspaces.settings.highlighting;
+    let enabled = python && (workspaces.settings.completion || workspaces.settings.highlighting);
     let Some(workspace) = workspaces.of(&path, shared) else {
         return;
     };
@@ -179,10 +181,13 @@ where
     }
 }
 
-fn fix_all<W, F>(
+/// The edit of `kind`, [`FIX_ALL`](crate::FIX_ALL) or [`FORMAT`], to the whole buffer; `None` when it
+/// changes nothing.
+fn source_action<W, F>(
     workspaces: &mut Workspaces<'_, W, F>,
     shared: &Shared,
-    uri: &Url,
+    uri: &Uri,
+    kind: &'static str,
 ) -> Option<CodeAction>
 where
     W: Workspace,
@@ -191,17 +196,22 @@ where
     let (text, version) = shared
         .documents()
         .get(uri)
+        .filter(|d| d.python)
         .map(|d| (d.text.clone(), d.version))?;
-    let path = uri.to_file_path().ok()?;
-    let fixed = workspaces
-        .of(&path, shared)?
-        .fix(&path, &text)
-        .map_err(|message| shared.log(format!("sqlty: fixing {}: {message}", path.display())))
+    let path = crate::uri::to_path(uri)?;
+    let workspace = workspaces.of(&path, shared)?;
+    let (title, done) = if kind == FORMAT {
+        ("sqlty: format", workspace.format(&path, &text))
+    } else {
+        ("sqlty: fix all", workspace.fix(&path, &text))
+    };
+    let done = done
+        .map_err(|message| shared.log(format!("{title} {}: {message}", path.display())))
         .ok()?;
-    let edit = diff(&text, &fixed, &LineIndex::new(&text, &shared.encoding))?;
+    let edit = diff(&text, &done, &LineIndex::new(&text, &shared.encoding))?;
     Some(CodeAction {
-        title: "sqlty: fix all".to_string(),
-        kind: Some(CodeActionKind::from(FIX_ALL)),
+        title: title.to_string(),
+        kind: Some(CodeActionKind::from(kind)),
         edit: Some(actions::versioned(uri, version, vec![OneOf::Left(edit)])),
         ..CodeAction::default()
     })

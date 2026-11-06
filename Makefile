@@ -92,6 +92,11 @@ typecheck-examples:
 .PHONY: test
 test:
 	uv run pytest
+	$(MAKE) test-timing
+
+.PHONY: test-timing
+test-timing:  ## The tests that measure wall time, alone and in order
+	uv run pytest -m timing -n 0 -p no:randomly
 
 .PHONY: test-unit
 test-unit:
@@ -141,7 +146,7 @@ bench-bridge:  ## A check per keystroke through sqlty._lsp_bridge; needs a relea
 
 .PHONY: bench-codspeed
 bench-codspeed:  ## The benchmarks CodSpeed measures in CI, timed locally; needs a release build
-	uv run --group bench pytest benchmarks/ --codspeed -p no:randomly --no-cov
+	uv run --group bench pytest benchmarks/ --codspeed -n 0 -p no:randomly --no-cov
 
 .PHONY: bench-rust
 bench-rust:  ## Criterion: catalog load, analyzer, check/rewrite_source; extra args via ARGS=
@@ -152,12 +157,15 @@ bench-rust:  ## Criterion: catalog load, analyzer, check/rewrite_source; extra a
 .PHONY: docs
 docs: playground
 	$(ZENSICAL) build --clean
+	python3 scripts/playground_links.py site
+	python3 scripts/offline.py site
 
 .PHONY: playground
-playground:  ## The engine as WebAssembly for the docs playground (needs the wasm32-unknown-unknown target)
+playground:  ## The engine as WebAssembly, and Monaco and the fonts, for the docs playground (needs the wasm32-unknown-unknown target)
 	cargo build --manifest-path rust/Cargo.toml --profile wasm --target wasm32-unknown-unknown -p sqlty-wasm
 	cp rust/target/wasm32-unknown-unknown/wasm/sqlty_wasm.wasm docs/assets/playground/
 	python3 scripts/generate_playground_examples.py
+	python3 scripts/vendor_assets.py
 
 .PHONY: check-playground
 check-playground: docs  ## Load the built playground under /sqlty/ in Chromium (needs `playwright install chromium`)

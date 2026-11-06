@@ -24,12 +24,14 @@ from sqlty._core import (
     infer_type,
     returns_rows,
 )
+from sqlty._core import add_param_types as _add_param_types
 from sqlty._core import analyze_columns as _analyze_columns
 from sqlty._core import analyze_params as _analyze_params
 from sqlty._core import analyze_select as _analyze_select
 from sqlty._core import complete_source as _complete_source
 from sqlty._core import explain_select as _explain_select
 from sqlty._core import fix_source as _fix_source
+from sqlty._core import format_source as _format_source
 from sqlty._core import highlight_source as _highlight_source
 from sqlty._core import hover_source as _hover_source
 from sqlty._core import load_schema as _load_schema
@@ -249,13 +251,17 @@ def schema_skipped_objects(
     """``(kind, name)`` of schema tables and views that can't be parsed, so their columns are unknown.
 
     ``kind`` is ``"table"`` or ``"view"``. Unparseable tables are retried without
-    their constraints first, as in :func:`schema_skipped_tables`.
+    their constraints first, as in :func:`schema_skipped_tables`. A ``"statement"`` is a
+    statement that does not parse and would set keys, checks, ``NOT NULL``, defaults or a
+    type, named by its text: an ``ALTER TABLE ... ADD CONSTRAINT`` or a ``CREATE TYPE``.
 
     Example:
         >>> schema_skipped_objects("CREATE TABLE ok (id INT); CREATE VIEW v AS SELECT id FROM (")
         [('view', 'v')]
         >>> schema_skipped_objects("CREATE VIRTUAL TABLE words USING spellfix1", dialect="sqlite")
         [('table', 'words')]
+        >>> schema_skipped_objects("CREATE TABLE t (id INT); ALTER TABLE t ADD PRIMARY KEY (id) WITH (fillfactor = 70)")
+        [('statement', 'ALTER TABLE t ADD PRIMARY KEY (id) WITH (fillfactor = 70)')]
     """
     return _schema_skipped_objects(schema_sql, dialect=dialect)
 
@@ -301,9 +307,7 @@ def rewrite_source(
             rewritten, dialect=dialect, schema_sql=schema_sql, import_style=import_style
         )
     if param_types:
-        from sqlty._param_types import add_param_types
-
-        rewritten = add_param_types(
+        rewritten = _add_param_types(
             rewritten, dialect=dialect, schema_sql=schema_sql, import_style=import_style
         )
     return rewritten
@@ -319,9 +323,30 @@ def strip_source(source: str, *, import_style: str | None = None) -> str:
     Raises:
         ValueError: unsupported ``import_style``
     """
-    from sqlty._json_types import strip_json_types
+    return _strip_source(source, import_style=import_style)
 
-    return _strip_source(strip_json_types(source), import_style=import_style)
+
+def format_source(
+    source: str, *, dialect: str = "postgres", import_style: str | None = None
+) -> str:
+    r"""Lay out the query strings ``sqlty check`` reads with `sqruff <https://github.com/quarylabs/sqruff>`_.
+
+    Only a query in one plain triple-quoted literal without a backslash is formatted, and
+    only its whitespace changes. The marker line, the indentation of the first line and
+    the whitespace before the closing quotes are kept.
+
+    Example:
+        >>> print(format_source("q = '''--sql\nselect id,name from users'''"))
+        q = '''--sql
+        select
+            id,
+            name
+        from users'''
+
+    Raises:
+        ValueError: unsupported ``import_style``
+    """
+    return _format_source(source, dialect=dialect, import_style=import_style)
 
 
 def fix_source(
@@ -378,9 +403,7 @@ def fix_source(
             fixed, dialect=dialect, schema_sql=schema_sql, import_style=import_style
         )
     if param_types:
-        from sqlty._param_types import add_param_types
-
-        fixed = add_param_types(
+        fixed = _add_param_types(
             fixed, dialect=dialect, schema_sql=schema_sql, import_style=import_style
         )
     return fixed
@@ -472,7 +495,7 @@ def check_source(
         row_usage=row_usage or (usage := RowUsage()),
         variants=query_variants,
     )
-    diagnostics = apply_suppressions(parsed, diagnostics, rules)
+    diagnostics = apply_suppressions(parsed.ignores, diagnostics, rules)
     return diagnostics if row_usage else usage.filter(diagnostics)
 
 
@@ -813,6 +836,7 @@ __all__ = [
     "complete_source",
     "expand_star",
     "fix_source",
+    "format_source",
     "highlight_source",
     "hover_source",
     "infer_type",

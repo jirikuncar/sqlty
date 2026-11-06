@@ -82,6 +82,23 @@ an inline `--sql` comment is split onto its own line, and so on. Run it on every
 }
 ```
 
+## Format on save
+
+`source.format.sqlty` is `sqlty format` on the file: it lays out the query strings with
+sqruff. It is a code action, not a document formatter, so Ruff or Black still formats the
+Python code. Run both on every save:
+
+```json
+{
+  "[python]": {
+    "editor.codeActionsOnSave": {
+      "source.fixAll.sqlty": "explicit",
+      "source.format.sqlty": "explicit"
+    }
+  }
+}
+```
+
 ## Completion
 
 Inside a query string, the editor completes table names after `FROM` and `JOIN`, and the

@@ -122,6 +122,17 @@ class Run:
                         f"check --fix is not idempotent; a second run gives:\n{again}"
                     )
                 return fixed.strip()
+            case "formatted":
+                formatted = core.format_source(
+                    text, dialect=self.dialect, import_style=self.import_style
+                )
+                formatted = _parses(text, formatted)
+                again = core.format_source(
+                    formatted, dialect=self.dialect, import_style=self.import_style
+                )
+                if again != formatted:
+                    raise AssertionError(f"format is not idempotent; a second run gives:\n{again}")
+                return formatted.strip()
             case "stripped":
                 stripped = core.strip_source(text, import_style=self.import_style)
                 return _parses(text, stripped, same_strings=True).strip()
@@ -231,7 +242,30 @@ class Run:
 
     def _check(self, assertions: list[Assertion], unit: Unit) -> list[str]:
         code = unit.code
-        if self.against_sql is not None:
+        if unit.lang == "sql":
+            from sqlty._queries import breaking_query_file, check_query_file
+
+            query_format = self.section.settings.get("query-format", "auto")
+            if self.against_sql is not None:
+                found = breaking_query_file(
+                    code.text,
+                    name="queries",
+                    query_format=query_format,
+                    dialect=self.dialect,
+                    schema_sql=self.schema_sql,
+                    against_sql=self.against_sql,
+                    rules=self.rules,
+                )
+            else:
+                found = check_query_file(
+                    code.text,
+                    name="queries",
+                    query_format=query_format,
+                    dialect=self.dialect,
+                    schema_sql=self.schema_sql,
+                    rules=self.rules,
+                )
+        elif self.against_sql is not None:
             found = core.breaking_source(
                 code.text,
                 schema_sql=self.schema_sql,
@@ -281,12 +315,12 @@ class Run:
         if not (unmatched or unexpected):
             return []
         if self.updater:
-            self.updater.replace_errors(assertions, diagnostics)
+            self.updater.replace_errors(assertions, diagnostics, unit.lang)
             return []
         path = self.section.path
         return [
             *(
-                f"{path}:{a.target}: unmatched assertion `# error{a.range or ''}: {a.expected}`"
+                f"{path}:{a.target}: unmatched assertion `{a.comment} error{a.range or ''}: {a.expected}`"
                 for a in unmatched
             ),
             *(

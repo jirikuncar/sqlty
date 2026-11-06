@@ -3,6 +3,7 @@
 Commands:
     sqlty rewrite [OPTIONS] [PATH...]   Rewrite source files
     sqlty strip [OPTIONS] [PATH...]     Strip SQL[T](...) wrappers
+    sqlty format [OPTIONS] [PATH...]    Lay out query strings with sqruff
     sqlty check [OPTIONS] [PATH...]     Lint SQL type annotations
     sqlty rule [NAME]                   Explain a lint rule, or list them
     sqlty server                        Run the language server, for editors
@@ -67,6 +68,8 @@ def main(argv: list[str] | None = None) -> None:
                 _cmd_rewrite(args)
             case "strip":
                 _cmd_strip(args)
+            case "format":
+                _cmd_format(args)
             case "check":
                 _cmd_check(args)
             case "complete":
@@ -148,6 +151,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Do not modify files; print `Would strip <file>` and exit 1 if any file would change",
     )
     strip_parser.add_argument(
+        "--diff",
+        action="store_true",
+        help="Print a unified diff instead of modifying files; exit 1 if any file would change",
+    )
+
+    # --- format ---
+    format_parser = subparsers.add_parser(
+        "format",
+        help="Lay out query strings with sqruff: one plain triple-quoted literal per query",
+    )
+    _add_common_args(format_parser)
+    format_parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Do not modify files; print `Would format <file>` and exit 1 if any file would change",
+    )
+    format_parser.add_argument(
         "--diff",
         action="store_true",
         help="Print a unified diff instead of modifying files; exit 1 if any file would change",
@@ -427,7 +447,8 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         "--verbose",
         action="count",
         default=0,
-        help="Print each file that rewrite, strip or check --fix changes",
+        help="Print each file that rewrite, strip or check --fix changes, and with check the "
+        "types of each named query of a query file",
     )
     parser.add_argument("-q", "--quiet", action="store_true", help="Suppress non-error output")
     parser.add_argument(
@@ -526,6 +547,18 @@ def _cmd_strip(args: argparse.Namespace) -> None:
         return strip_source(original, import_style=settings.import_style), []
 
     _transform_files(args, transform, "strip", "Stripped", "stripped")
+
+
+def _cmd_format(args: argparse.Namespace) -> None:
+    """Format command: lay out query strings with sqruff."""
+    from sqlty.core import format_source
+
+    def transform(path: Path, original: str, settings: Settings) -> tuple[str, list[str]]:
+        return format_source(
+            original, dialect=settings.dialect, import_style=settings.import_style
+        ), []
+
+    _transform_files(args, transform, "format", "Formatted", "formatted")
 
 
 def _transform_files(
@@ -647,7 +680,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
     project = Project(args)
     files, sources, settings = project.files, project.sources, project.settings
 
-    if not files and not project.unreadable and not args.quiet:
+    if not files and not project.query_files and not project.unreadable and not args.quiet:
         logger.warning("No Python files found")
         return
 
@@ -658,6 +691,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
     # A row type shared by files is judged by all of its queries: report once every file is read.
     row_usage = RowUsage()
     reports: list[tuple[Path, Diagnostic, ParsedSource]] = []
+    types: list[str] = []
 
     if args.fix:
         for path, fixed in zip(files, _map(args, project.fix, files), strict=True):
@@ -680,6 +714,14 @@ def _cmd_check(args: argparse.Namespace) -> None:
     for path, (diagnostics, counts) in zip(files, _map(args, check, files), strict=True):
         statistics += counts
         reports.extend((path, diag, sources[path]) for diag in diagnostics)
+    for path in project.query_files:
+        if (text := read_source(path)) is None:
+            project.unreadable.append(path)
+            continue
+        query_source = ParsedSource(text)
+        reports.extend((path, diag, query_source) for diag in project.check_queries(path, text))
+        if args.verbose and args.output_format == "text" and not args.quiet:
+            types.extend(f"{path}: {line}" for line in project.query_types(path, text))
 
     kept = {id(diag) for diag in row_usage.filter([diag for _, diag, _ in reports])}
     shown: list[dict[str, object]] = []
@@ -702,6 +744,8 @@ def _cmd_check(args: argparse.Namespace) -> None:
                 for line in _explain(parsed, diag["line"], own.dialect, own.schema):
                     print(line)
 
+    for line in types:
+        print(line)
     if args.output_format == "json":
         print(json.dumps(shown, indent=2))
     elif args.output_format == "sarif":
@@ -934,6 +978,43 @@ def _collect_python_files(paths: list[Path], source: ConfigSource | None = None)
         else:
             raise ConfigError(f"path does not exist: {path}")
     return list(dict.fromkeys(files))
+
+
+def _paths(spec: str | list[str] | tuple[str, ...]) -> list[str]:
+    return [spec] if isinstance(spec, str) else list(spec)
+
+
+def _collect_query_files(
+    paths: list[Path], python_files: list[Path], resolver: SettingsResolver
+) -> list[Path]:
+    """The ``.sql`` files of named queries under ``paths``: those the ``queries`` key matches.
+
+    The projects are those of ``paths`` and of the Python files found under them; a file
+    the ``queries`` globs don't match, a migration say, is never read as queries.
+    """
+    from sqlty._config import expand_schema
+
+    directories = [path if path.is_dir() else path.parent for path in paths]
+    directories += [path.parent for path in python_files]
+    roots = [path.resolve() for path in paths]
+    found: dict[Path, None] = {}
+    for directory in dict.fromkeys(directories):
+        settings = resolver.for_file(directory / "_")
+        if not settings.queries or settings.config_dir is None:
+            continue
+        for file in expand_schema(list(settings.queries), settings.config_dir):
+            resolved = file.resolve()
+            if file.suffix == ".sql" and any(
+                resolved == root or resolved.is_relative_to(root) for root in roots
+            ):
+                found[_relative(file)] = None
+    return sorted(found)
+
+
+def _relative(path: Path) -> Path:
+    cwd = Path.cwd().resolve()
+    resolved = path.resolve()
+    return resolved.relative_to(cwd) if resolved.is_relative_to(cwd) else path
 
 
 def _project_paths(paths: list[Path], source: ConfigSource) -> list[Path]:
@@ -1292,6 +1373,8 @@ class Settings:
     format_command: tuple[str, ...] = ()
     overrides: tuple[RuleOverride, ...] = ()
     config_dir: Path | None = None
+    queries: tuple[str, ...] = ()
+    query_format: str = "auto"
 
     @property
     def schema_key(self) -> SchemaKey:
@@ -1330,9 +1413,12 @@ class SettingsResolver:
             except ValueError as exc:
                 raise ConfigError(f"[tool.sqlty.types]: {exc}") from None
             for kind, name in schema_skipped_objects(schema, dialect=dialect):
-                logger.warning(
-                    "Schema %s %s could not be parsed; its columns are unknown", kind, name
-                )
+                if kind == "statement":
+                    logger.warning("Schema statement could not be parsed and is ignored: %s", name)
+                else:
+                    logger.warning(
+                        "Schema %s %s could not be parsed; its columns are unknown", kind, name
+                    )
         return schema
 
     def resolve(self, path: Path) -> Path:
@@ -1415,6 +1501,8 @@ class SettingsResolver:
             format_command=tuple(config.get("format_command", ())),
             overrides=tuple(config.get("overrides", ())),
             config_dir=config_dir,
+            queries=tuple(_paths(config.get("queries", ()))),
+            query_format=config.get("query_format", "auto"),
         )
 
 
@@ -1442,7 +1530,56 @@ class Project:
             if (text := texts[path]) is not None
         }
         self.settings = {path: self.resolver.for_file(path) for path in self.files}
+        self.query_files = [
+            path
+            for path in _collect_query_files(self.paths, self.files, self.resolver)
+            if path not in self.settings
+        ]
         self._index()
+
+    def query_types(self, path: Path, text: str) -> list[str]:
+        from sqlty._queries import query_types
+
+        settings = self.resolver.for_file(path)
+        return query_types(
+            text,
+            name=path.stem,
+            query_format=settings.query_format,
+            dialect=settings.dialect,
+            schema_sql=settings.schema,
+        )
+
+    def is_query_file(self, path: Path) -> bool:
+        """Whether the ``queries`` key of ``path``'s project names it, as a file, a directory
+        holding it or a glob; ``path`` need not exist, as an unsaved buffer's may not."""
+        settings = self.resolver.for_file(path)
+        if path.suffix != ".sql" or not settings.queries or settings.config_dir is None:
+            return False
+        resolved = path.resolve()
+        base = settings.config_dir.resolve()
+        if not resolved.is_relative_to(base):
+            return False
+        relative = resolved.relative_to(base).as_posix()
+        return any(
+            relative == entry.strip("/")
+            or relative.startswith(entry.strip("/") + "/")
+            or re.fullmatch(glob.translate(entry, recursive=True, include_hidden=True), relative)
+            is not None
+            for entry in settings.queries
+        )
+
+    def check_queries(self, path: Path, text: str) -> list[Diagnostic]:
+        from sqlty._queries import check_query_file
+
+        settings = self.resolver.for_file(path)
+        return check_query_file(
+            text,
+            name=path.stem,
+            query_format=settings.query_format,
+            dialect=settings.dialect,
+            schema_sql=settings.schema,
+            rules=settings.rules,
+        )
 
     def update(self, path: Path, text: str) -> None:
         from sqlty._source import ParsedSource

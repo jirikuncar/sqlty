@@ -7,7 +7,8 @@
 //! after a path, `json_array(SELECT ...)`, the XML functions' keywords and the order of
 //! XMLTABLE's column options, PostgreSQL's `(composite).*`, as the field `"*"` the
 //! analyzer expands, and its `SET CONSTRAINTS` and `DO` statements, as statements that return
-//! no rows. [`super::input::parser_input`] runs it on every query, deciding from the
+//! no rows, and the integers spelled `0X1F`, `0x_1F`, `0o17` or `0b101` in PostgreSQL (only
+//! `0X` in SQLite). [`super::input::parser_input`] runs it on every query, deciding from the
 //! tokens alone: each edit is of syntax sqlparser rejects.
 
 use super::dialect::SqlDialect;
@@ -39,6 +40,12 @@ pub(super) fn respell(sql: &str, tokens: &[Token], dialect: SqlDialect, edits: &
             if let Some(edit) = set_constraints(sql, tokens, i).or_else(|| do_block(sql, tokens, i))
             {
                 edits.push(edit);
+            }
+        }
+        if is(i, Kind::Word) {
+            let (start, end) = (tokens[i].start, tokens[i].end);
+            if let Some(integer) = prefixed_integer(&sql[start..end], dialect) {
+                edits.push((start, end, integer));
             }
         }
         if dialect != SqlDialect::MySql
@@ -233,6 +240,27 @@ pub(super) fn respell(sql: &str, tokens: &[Token], dialect: SqlDialect, edits: &
             }
         }
     }
+}
+
+/// An integer with PostgreSQL's `0x`, `0o` or `0b` prefix, or SQLite's `0x`, in any case and
+/// with `_` between digits, as sqlparser reads it: hexadecimal as a lowercase `0x`, which
+/// [`super::preprocess`] types as an integer, the others as decimal. `None` when it already is.
+fn prefixed_integer(text: &str, dialect: SqlDialect) -> Option<String> {
+    let radix = match (text.as_bytes(), dialect) {
+        ([b'0', b'x' | b'X', _, ..], SqlDialect::Postgres | SqlDialect::Sqlite) => 16,
+        ([b'0', b'o' | b'O', _, ..], SqlDialect::Postgres) => 8,
+        ([b'0', b'b' | b'B', _, ..], SqlDialect::Postgres) => 2,
+        _ => return None,
+    };
+    let digits: String = text[2..].chars().filter(|&c| c != '_').collect();
+    if digits.is_empty() || !digits.chars().all(|c| c.is_digit(radix)) {
+        return None;
+    }
+    let integer = match radix {
+        16 => format!("0x{digits}"),
+        _ => u128::from_str_radix(&digits, radix).ok()?.to_string(),
+    };
+    (integer != text).then_some(integer)
 }
 
 /// `SET CONSTRAINTS ... DEFERRED` or `IMMEDIATE` starting at token `i`, as a `SET`: neither

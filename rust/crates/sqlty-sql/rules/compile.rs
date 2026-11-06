@@ -14,6 +14,9 @@ const DIALECTS: [(&str, &str); 4] = [
     ("clickhouse", "SqlDialect::ClickHouse"),
 ];
 
+/// The dialects a `reference` may cite the documentation of, in the order they are shown.
+const DOCUMENTED: [&str; 3] = ["postgres", "mysql", "sqlite"];
+
 /// Canonical SQL types the analyzer gives operands, which `left` and `right` may name.
 /// `ARRAY` is any array.
 const SQL_TYPES: [&str; 88] = [
@@ -285,7 +288,7 @@ struct RuleFile {
 #[serde(deny_unknown_fields)]
 struct FunctionDef {
     id: String,
-    reference: String,
+    reference: BTreeMap<String, String>,
     reasoning: String,
     #[serde(default)]
     function: Option<String>,
@@ -348,7 +351,7 @@ impl FunctionDef {
 #[serde(deny_unknown_fields)]
 struct RuleDef {
     id: String,
-    reference: String,
+    reference: BTreeMap<String, String>,
     reasoning: String,
     #[serde(default)]
     operator: Option<String>,
@@ -519,6 +522,27 @@ fn extensions(text: &str) -> Result<Vec<Extension>, String> {
         .collect()
 }
 
+/// A rule's `reference` as Rust: every citation joined, and each one by its dialect.
+fn references(cited: &BTreeMap<String, String>) -> String {
+    let by_dialect: Vec<(&str, &str)> = DOCUMENTED
+        .iter()
+        .filter_map(|dialect| Some((*dialect, cited.get(*dialect)?.trim())))
+        .collect();
+    let all: Vec<&str> = by_dialect.iter().map(|(_, text)| *text).collect();
+    let each: Vec<String> = by_dialect
+        .iter()
+        .map(|(dialect, text)| {
+            let rust = DIALECTS.iter().find(|(name, _)| name == dialect).unwrap().1;
+            format!("({rust}, {text:?})")
+        })
+        .collect();
+    format!(
+        "References {{ all: {:?}, each: &[{}] }}",
+        all.join("; "),
+        each.join(", ")
+    )
+}
+
 /// The dialects `rule` applies to for the function or operator `name`: its own, and each
 /// dialect whose first extended dialect with a rule for `name` is one of them.
 fn applies_to(name: &str, rule: &Rule, rules: &[&Rule], extensions: &[Extension]) -> String {
@@ -542,8 +566,21 @@ fn check(def: RuleDef, function: bool, file: &str, tier: u8) -> Result<Rule, Str
     if def.id.trim().is_empty() {
         return Err(format!("{file}: a rule has an empty id"));
     }
-    if def.reference.trim().is_empty() || def.reasoning.trim().is_empty() {
+    if def.reference.values().any(|text| text.trim().is_empty())
+        || def.reference.is_empty()
+        || def.reasoning.trim().is_empty()
+    {
         return fail("`reference` and `reasoning` must not be empty".to_string());
+    }
+    if let Some(dialect) = def
+        .reference
+        .keys()
+        .find(|d| !DOCUMENTED.contains(&d.as_str()))
+    {
+        return fail(format!(
+            "`reference.{dialect}`: cite one of {}",
+            DOCUMENTED.join(", ")
+        ));
     }
     let operators: Vec<String> = def.operator.iter().chain(&def.operators).cloned().collect();
     let (one, many) = if function {
@@ -923,13 +960,13 @@ fn generate_functions(rules: &[&Rule], extensions: &[Extension]) -> String {
         let _ = writeln!(
             out,
             "    // rule {} ({}), {name}\n    FunctionRule {{\n        id: {:?},\n        \
-             reference: {:?},\n        reasoning: {:?},\n        dialects: &[{}],\n        \
+             references: {},\n        reasoning: {:?},\n        dialects: &[{}],\n        \
              argument: {},\n        second: {},\n        any: {},\n        result: {result},\n        \
              nullability: {nullability},\n    }},",
             def.id,
             rule.file,
             def.id,
-            def.reference.trim(),
+            references(&def.reference),
             def.reasoning.trim(),
             applies_to(name, rule, rules, extensions),
             operand(&rule.left),
@@ -982,14 +1019,14 @@ fn generate_binary(rules: &[&Rule], extensions: &[Extension]) -> String {
             .1;
         let _ = writeln!(
             out,
-            "    // rule {} ({}), {op}\n    BinaryRule {{\n        id: {:?},\n        reference: {:?},\n        \
+            "    // rule {} ({}), {op}\n    BinaryRule {{\n        id: {:?},\n        references: {},\n        \
              reasoning: {:?},\n        dialects: &[{}],\n        left: {},\n        right: {},\n        \
              result: {result},\n        nullability: {nullability},\n        left_parameter: {:?},\n        \
              right_parameter: {:?},\n    }},",
             def.id,
             rule.file,
             def.id,
-            def.reference.trim(),
+            references(&def.reference),
             def.reasoning.trim(),
             applies_to(op, rule, rules, extensions),
             operand(&rule.left),

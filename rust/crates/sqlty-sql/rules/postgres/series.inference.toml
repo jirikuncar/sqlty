@@ -6,7 +6,7 @@ function = "GENERATE_SERIES"
 dialects = ["postgres"]
 type = "@series"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.26 Set Returning Functions, Table 9.67 Series Generating Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.26 Set Returning Functions, Table 9.67 Series Generating Functions"
 reasoning = "The series has the type of its bounds: integers, numerics or timestamps."
 
 [[function]]
@@ -15,5 +15,5 @@ function = "GENERATE_SUBSCRIPTS"
 dialects = ["postgres"]
 type = "INT"
 nullability = "strict"
-reference = "PostgreSQL 17 documentation, 9.26 Set Returning Functions, Table 9.68 Subscript Generating Functions"
+reference.postgres = "PostgreSQL 17 documentation, 9.26 Set Returning Functions, Table 9.68 Subscript Generating Functions"
 reasoning = "The documentation gives the function an `integer` result."

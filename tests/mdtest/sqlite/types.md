@@ -32,6 +32,38 @@ SELECT * FROM t
 -- columns: d: int | None (BIG_INT)
 ```
 
+## Array spellings
+
+SQLite has no array type. ORMs such as Piccolo declare a list column `ARRAY`,
+`ARRAY_DATE` or `INT[]` and store it as JSON text, which `sqlite3` returns as `str`.
+The element type is kept, for a converter that decodes the list (see
+[Type overrides](../type_inference/type_overrides.md#arrays-of-a-sqlite-orm)).
+
+`schema.sql`:
+
+```sql
+CREATE TABLE t (
+    a ARRAY,
+    b INT[] NOT NULL,
+    c INTEGER ARRAY,
+    d ARRAY_DATE DEFAULT '[]',
+    e ARRAY_TIMESTAMPTZ,
+    array_ids TEXT,
+    "array" INT
+);
+```
+
+```sql
+SELECT * FROM t
+-- columns: a: str | None (ARRAY<ANY>)
+-- columns: b: str (ARRAY<INT>)
+-- columns: c: str | None (ARRAY<INT>)
+-- columns: d: str | None (ARRAY<DATE>)
+-- columns: e: str | None (ARRAY<TIMESTAMPTZ>)
+-- columns: array_ids: str | None (TEXT)
+-- columns: array: int | None (INT)
+```
+
 ## Affinity of unknown names
 
 `schema.sql`:
