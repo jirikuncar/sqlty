@@ -88,6 +88,11 @@ permalink = true
 [project.markdown_extensions.pymdownx.highlight]
 line_spans = "__span"
 pygments_lang_class = true
+# sqlty's Pygments lexer colors the SQL of query strings, as the editor and playground do.
+extend_pygments_lang = [
+  { name = "python", lang = "sqlty" },
+  { name = "py", lang = "sqlty" },
+]
 [project.markdown_extensions.pymdownx.inlinehilite]
 [project.markdown_extensions.pymdownx.superfences]
 
