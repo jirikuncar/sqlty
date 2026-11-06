@@ -1,3 +1,7 @@
+---
+description: How to set up the sqlty language server in Neovim, Vim, Helix and Emacs for SQL diagnostics, quick fixes, completion and hover in Python strings.
+---
+
 # Neovim, Vim, Helix and Emacs
 
 `sqlty server` is a language server on standard input and output. Any LSP client runs it

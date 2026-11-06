@@ -1,3 +1,7 @@
+---
+description: How to mark SQL string literals in Python with --sql so sqlty infers their row types, how casts declare column types, and why f-strings are skipped.
+---
+
 # Writing queries
 
 sqlty works on string literals that start with `--sql` (or `-- sql`). It infers a row type

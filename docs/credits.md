@@ -1,3 +1,7 @@
+---
+description: Which libraries, tools, specifications and projects sqlty builds on, with their licenses, from sqlparser-rs and PyO3 to sqruff.
+---
+
 # Credits
 
 sqlty builds on other people's work: the libraries it ships with, the tools that

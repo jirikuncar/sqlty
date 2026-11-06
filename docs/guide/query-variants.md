@@ -1,3 +1,7 @@
+---
+description: How sqlty checks a SQL query built from strings bound in if/else branches once per path, which constructions it follows, and how it reports each variant.
+---
+
 # Query variants
 
 A query built from names bound in branches is checked once per path that builds it.

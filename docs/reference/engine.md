@@ -1,3 +1,7 @@
+---
+description: "How sqlty's Rust engine works: type inference, SELECT * expansion, rewrite and checks in one PyO3 extension that parses SQL with sqlparser-rs."
+---
+
 # Engine
 
 sqlty's core operations (type inference, `SELECT *` expansion, rewrite,
