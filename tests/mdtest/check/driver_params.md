@@ -264,3 +264,30 @@ conn = Fake()
 conn.execute("DELETE FROM users WHERE id = %s")
 # error:
 ```
+
+## A driver method also configured as a helper
+
+Its parameters are reported once.
+
+```toml
+[[tool.sqlty.functions]]
+import-path = "psycopg.Connection.execute"
+query-param = "query"
+```
+
+`psycopg.py`:
+
+```python
+from typing import Any
+
+class Connection:
+    def execute(self, query: str, params: Any = None) -> Any: ...
+```
+
+```python
+import psycopg
+
+def rename(conn: psycopg.Connection) -> None:
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+    conn.execute("--sql\nUPDATE users SET name = %s WHERE id = %s", ("a",))
+```
