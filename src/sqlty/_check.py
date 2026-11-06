@@ -545,6 +545,12 @@ def diagnostics(
             any_calls=parsed.any_calls(import_style),
         )
     found = find_helper_calls(parsed, helpers, module, variants=variants)
+    driver_calls = find_driver_calls(parsed) + find_template_calls(parsed)
+    # A driver call also configured as a helper has its parameters checked once, as the driver's.
+    by_driver = {id(call.query_node) for call in driver_calls if call.query_node is not None}
+    found = [
+        call._replace(params=None) if id(call.query_node) in by_driver else call for call in found
+    ]
     typed = {line for call in found for line in call.typed_lines}
     branched = [call for call in found if len(call.variants) > 1]
     diagnostics = [
@@ -567,7 +573,6 @@ def diagnostics(
                 parsed.text, dialect=dialect, import_style=import_style
             )
         ]
-    driver_calls = find_driver_calls(parsed) + find_template_calls(parsed)
     queries = [
         (line, name, query, span)
         for line, name, query, span in (
