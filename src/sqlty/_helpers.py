@@ -405,7 +405,8 @@ class HelperIndex:
     ) -> tuple[str, ast.FunctionDef | ast.AsyncFunctionDef, str] | None:
         """The definition of ``name`` in module ``parts``, following the names it re-exports."""
         module = ".".join(parts)
-        if (parsed := self.sources.get(module) or self._module_source(parts, roots)) is None:
+        indexed = (parsed := self.sources.get(module)) is not None
+        if parsed is None and (parsed := self._module_source(parts, roots)) is None:
             return None
         definition = min(
             (d for d in _definitions(parsed) if d[0] == name),
@@ -415,7 +416,9 @@ class HelperIndex:
         if definition is not None or _depth > 8:
             return definition
         head, dot, rest = name.partition(".")
-        if (target := self._reexports(module, parsed).get(head)) is None:
+        # A module read from one project's roots is not cached: another may have its own.
+        exports = self._reexports(module, parsed) if indexed else _imports(parsed, parsed.module)[0]
+        if (target := exports.get(head)) is None:
             return None
         return self._definition(
             target[0].split("."), target[1] + dot + rest, query, row, roots, _depth + 1

@@ -236,6 +236,21 @@ def test_register_follows_reexports(tmp_path):
     assert index.modules["lib"]["fetch"].positional == ("conn", "sql", "form")
 
 
+def test_register_reads_reexports_per_project(tmp_path):
+    """Two projects re-exporting a helper from different modules each get their own."""
+    for name, target, signature in (("a", "core", "conn, sql"), ("b", "other", "sql, conn")):
+        (tmp_path / name / "pkg").mkdir(parents=True)
+        (tmp_path / name / "pkg" / "__init__.py").write_text(f"from .{target} import run\n")
+        (tmp_path / name / "pkg" / f"{target}.py").write_text(f"def run({signature}): ...\n")
+    base = HelperIndex()
+    found = {}
+    for name in "ab":
+        fork = base.fork()
+        fork.register("pkg.run", "sql", roots=[tmp_path / name])
+        found[name] = fork.modules["pkg"]["run"].positional
+    assert found == {"a": ("conn", "sql"), "b": ("sql", "conn")}
+
+
 def test_register_stops_on_reexport_cycles(tmp_path):
     (tmp_path / "a").mkdir()
     (tmp_path / "a" / "__init__.py").write_text("from .b import X\n")
