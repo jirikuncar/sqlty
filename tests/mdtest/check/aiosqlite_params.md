@@ -1,11 +1,13 @@
 # Check arguments of aiosqlite execute calls
 
-aiosqlite hands the parameters to sqlite3 unchanged, so sqlite3's rules apply.
+aiosqlite hands the parameters of `execute`, `executemany`, `execute_fetchall`
+and `execute_insert` to sqlite3 as they are, so its calls are checked as
+sqlite3's are.
 
 `schema.sql`:
 
 ```sql
-CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, age INTEGER);
 ```
 
 ```toml
@@ -14,91 +16,92 @@ dialect = "sqlite"
 schema = "schema.sql"
 ```
 
-## Annotated connection
-
-```python
-import aiosqlite
-
-async def save(db: aiosqlite.Connection) -> None:
-    await db.execute("INSERT INTO meta (key, value) VALUES (?, ?)", ("version", "1"))
-    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
-    await db.execute("INSERT INTO meta (key, value) VALUES (?, ?)", ("version",))
-    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
-    await db.execute_insert("INSERT INTO meta (key, value) VALUES (?, ?)", ("version",))
-    # error: [param-count-mismatch] "query has 1 parameter, the call passes 0"
-    await db.execute_fetchall("SELECT value FROM meta WHERE key = ?")
-    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
-    await db.executemany("INSERT INTO meta (key, value) VALUES (?, ?)", [("a", "1"), ("b",)])
-    # error: [param-type-mismatch] "parameter 2 is not nullable, got None"
-    await db.execute("INSERT INTO meta (key, value) VALUES (?, ?)", ("version", None))
-    # error: [param-count-mismatch] "call is missing parameter 'key'"
-    await db.execute("SELECT value FROM meta WHERE key = :key", {"name": "a"})
-```
-
-## Imported class names
-
-```python
-from aiosqlite import Connection, Cursor
-
-async def save(db: Connection, cur: Cursor) -> None:
-    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
-    await db.execute("INSERT INTO meta (key, value) VALUES (?, ?)", ("version",))
-    # error: [param-count-mismatch] "query has 1 parameter, the call passes 0"
-    await cur.execute("SELECT value FROM meta WHERE key = ?")
-```
-
-## Awaited and async with receivers
+## An awaited connection
 
 ```python
 import aiosqlite
 
 async def main() -> None:
     db = await aiosqlite.connect("app.db")
+    await db.execute("SELECT id FROM users WHERE id = ?", (1,))
     # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
-    await db.execute("INSERT INTO meta (key, value) VALUES (?, ?)", ("version",))
-    cur = await db.cursor()
+    await db.execute("SELECT id FROM users WHERE id = ? AND age = ?", (1,))
     # error: [param-count-mismatch] "query has 1 parameter, the call passes 0"
-    await cur.execute("SELECT value FROM meta WHERE key = ?")
-
-async def other() -> None:
-    async with aiosqlite.connect("app.db") as db:
-        async with db.cursor() as cur:
-            # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
-            await cur.executemany("INSERT INTO meta (key, value) VALUES (?, ?)", [("a",)])
-        # error: [param-count-mismatch] "query has 1 parameter, the call passes 0"
-        async with db.execute("SELECT value FROM meta WHERE key = ?") as rows:
-            pass
-```
-
-## A single value is not a sequence of parameters
-
-```python
-import aiosqlite
-
-async def find(db: aiosqlite.Connection, key: str, n: int) -> None:
-    await db.execute("SELECT value FROM meta WHERE key = ?", key)
-    # error: [param-type-mismatch] "parameters are a single int, which aiosqlite rejects"
-    await db.execute("SELECT value FROM meta WHERE key = ?", n)
-```
-
-## Keyword parameters
-
-```python
-import aiosqlite
-
-async def save(db: aiosqlite.Connection) -> None:
+    await db.execute_fetchall("SELECT id FROM users WHERE id = ?")
+    # error: [param-type-mismatch] "parameter 2 is not nullable, got None"
+    await db.execute_insert("INSERT INTO users (id, name) VALUES (?, ?)", (1, None))
     # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
-    await db.execute("INSERT INTO meta (key, value) VALUES (?, ?)", parameters=("version",))
+    await db.execute_insert("INSERT INTO users (id, name) VALUES (?, ?)", parameters=(1,))
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+    await db.executemany("INSERT INTO users (id, name) VALUES (?, ?)", [(1, "a"), (2,)])
 ```
 
-## Other methods and receivers are skipped
+## A connection and a cursor in `async with`
 
 ```python
 import aiosqlite
 
-async def run(db: aiosqlite.Connection, other) -> None:
-    await db.executescript("INSERT INTO meta (key, value) VALUES (?, ?)")
-    await other.execute("INSERT INTO meta (key, value) VALUES (?, ?)", ("version",))
+async def main() -> None:
+    async with aiosqlite.connect("app.db") as db:
+        # error: [param-count-mismatch] "query has 1 parameter, the call passes 0"
+        async with db.execute("SELECT id FROM users WHERE id = ?") as cursor:
+            await cursor.fetchall()
+        async with db.cursor() as cur:
+            # error: [param-count-mismatch] "query has 1 parameter, the call passes 2"
+            await cur.execute("SELECT id FROM users WHERE id = ?", (1, 2))
+```
+
+## An awaited cursor
+
+```python
+import aiosqlite
+
+async def main() -> None:
+    db = await aiosqlite.connect("app.db")
+    cursor = await db.cursor()
+    await cursor.execute("SELECT id FROM users WHERE id = ?", (1,))
+    # error: [param-count-mismatch] "call is missing parameter 'id'"
+    await cursor.execute("SELECT id FROM users WHERE id = :id", {"ident": 1})
+```
+
+## Annotated receivers
+
+A connection passed to a function is recognised by its annotation.
+
+```python
+import aiosqlite
+from aiosqlite import Connection
+
+async def find(db: aiosqlite.Connection, user_id: int, name: str) -> None:
+    await db.execute_fetchall("SELECT id FROM users WHERE id = ?", (user_id,))
+    await db.execute_fetchall("SELECT id FROM users WHERE name = ?", name)
+    # error: [param-type-mismatch] "parameters are a single int, which aiosqlite rejects"
+    await db.execute_fetchall("SELECT id FROM users WHERE id = ?", user_id)
+
+async def remove(db: Connection) -> None:
+    # error: [param-count-mismatch] "query has 1 parameter, the call passes 0"
+    await db.execute("DELETE FROM users WHERE id = ?")
+
+async def update(cur: aiosqlite.Cursor) -> None:
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+    await cur.execute("UPDATE users SET age = ? WHERE id = ?", (1,))
+```
+
+## Unrecognised receivers are skipped
+
+```python
+import aiosqlite
+
+async def remove(db, other: "aiosqlite.Connection") -> None:
+    await db.execute("DELETE FROM users WHERE id = ?")
+    await other.execute("DELETE FROM users WHERE id = ?")
+
+class Repository:
+    def __init__(self, db: aiosqlite.Connection) -> None:
+        self.db = db
+
+    async def remove(self) -> None:
+        await self.db.execute("DELETE FROM users WHERE id = ?")
 # error:
 ```
 
@@ -109,11 +112,11 @@ reported once.
 
 ```toml
 [[tool.sqlty.functions]]
-import-path = "aiosqlite.core.Connection.execute"
+import-path = "aiosqlite.Connection.execute"
 query-param = "sql"
 ```
 
-`aiosqlite/core.py`:
+`aiosqlite.py`:
 
 ```python
 from typing import Any
@@ -123,9 +126,9 @@ class Connection:
 ```
 
 ```python
-from aiosqlite.core import Connection
+import aiosqlite
 
-async def save(db: Connection) -> None:
+async def rename(db: aiosqlite.Connection) -> None:
     # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
-    await db.execute("--sql\nINSERT INTO meta (key, value) VALUES (?, ?)", ("version",))
+    await db.execute("--sql\nUPDATE users SET name = ? WHERE id = ?", (1,))
 ```

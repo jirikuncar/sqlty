@@ -2,10 +2,10 @@
 
 A receiver is recognised only when the file shows what it is: a variable bound to
 ``psycopg.connect(...)``, ``sqlite3.connect(...)``, ``aiosqlite.connect(...)`` or
-``asyncpg.connect(...)`` (also awaited, or as ``with ... as name``), to
-``<connection>.cursor()``, or annotated with a driver class. The
-query is a string literal, ``SQL[T]("...")`` of one, or a name assigned exactly one of
-those. Anything else is skipped.
+``asyncpg.connect(...)`` (also as ``with ... as name``, and awaited), to
+``<connection>.cursor()``, or annotated with a driver class. The query is a string
+literal, ``SQL[T]("...")`` of one, or a name assigned exactly one of those. Anything
+else is skipped.
 
 Names are resolved per scope, and a name a loop, comprehension, unpacking, import or
 unannotated parameter binds is unknown.
@@ -41,8 +41,6 @@ _CONNECTIONS = {
     "sqlite3.Connection": "sqlite3",
     "aiosqlite.connect": "aiosqlite",
     "aiosqlite.Connection": "aiosqlite",
-    "aiosqlite.core.connect": "aiosqlite",
-    "aiosqlite.core.Connection": "aiosqlite",
     "asyncpg.connect": "asyncpg",
     "asyncpg.Connection": "asyncpg",
     "asyncpg.create_pool": "asyncpg",
@@ -53,22 +51,21 @@ _CURSORS = {
     "psycopg.AsyncCursor": "psycopg",
     "sqlite3.Cursor": "sqlite3",
     "aiosqlite.Cursor": "aiosqlite",
-    "aiosqlite.cursor.Cursor": "aiosqlite",
 }
 _METHODS = {
     "psycopg": {"execute", "executemany"},
     "sqlite3": {"execute", "executemany"},
+    # aiosqlite hands the parameters to sqlite3 as they are.
     "aiosqlite": {"execute", "executemany", "execute_fetchall", "execute_insert"},
     "asyncpg": {"execute", "fetch", "fetchrow", "fetchval", "executemany"},
 }
 _ANY_METHOD = frozenset().union(*_METHODS.values())
 _PARAM_KEYWORD = {"psycopg": "params", "sqlite3": "parameters", "aiosqlite": "parameters"}
-# sqlite3 reads a str or bytes as a sequence, one parameter per item; aiosqlite hands them to it.
-_SQLITE_SEQUENCES = frozenset({"str", "bytes"})
+# sqlite3 reads a str or bytes as a sequence, one parameter per item.
 _SEQUENCE_SCALARS = {
     "psycopg": frozenset(),
-    "sqlite3": _SQLITE_SEQUENCES,
-    "aiosqlite": _SQLITE_SEQUENCES,
+    "sqlite3": frozenset({"str", "bytes"}),
+    "aiosqlite": frozenset({"str", "bytes"}),
 }
 
 MARKER = re.compile(r"\s*--\s?sql(?:\s|$)")
@@ -241,7 +238,7 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
     """
     parsed = ParsedSource.of(source)
     text = parsed.text
-    if not any(driver in text for driver in ("psycopg", "sqlite", "asyncpg")):
+    if not any(driver in text for driver in ("psycopg", "sqlite3", "aiosqlite", "asyncpg")):
         return []
     if not any(method in text for method in ("execute", "fetch")):
         return []

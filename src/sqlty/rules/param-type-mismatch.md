@@ -13,15 +13,15 @@ out: a `params` argument holding a tuple, list or dict literal, `*args`, or
 
 Driver calls are checked too: `execute` and `executemany` (each row) on a
 psycopg, sqlite3 or aiosqlite connection or cursor, `execute_fetchall` and
-`execute_insert` on an aiosqlite connection, and `execute`, `fetch`, `fetchrow`,
-`fetchval` on an asyncpg connection, when the file binds the receiver to
-`psycopg.connect(...)`, `sqlite3.connect(...)`, `aiosqlite.connect(...)`,
-`asyncpg.connect(...)`, `<connection>.cursor()` or a driver class annotation.
-The query is a literal, `SQL[T]("...")` of one, or a name assigned once to one.
-A single value passed as a driver call's parameters, `execute(query, user_id)`,
-is reported too: the driver raises `TypeError` and wants a sequence,
-`(user_id,)`. sqlite3 (and aiosqlite, which hands them to it) reads a `str` or
-`bytes` as a sequence, so those are left alone there.
+`execute_insert` on an aiosqlite connection, and `execute`, `fetch`,
+`fetchrow`, `fetchval` on an asyncpg connection, when the file binds the
+receiver to `psycopg.connect(...)`, `sqlite3.connect(...)`,
+`aiosqlite.connect(...)`, `asyncpg.connect(...)`, `<connection>.cursor()` or a
+driver class annotation. The query is a literal, `SQL[T]("...")` of one, or
+a name assigned once to one. A single value passed as a driver call's
+parameters, `execute(query, user_id)`, is reported too: the driver raises
+`TypeError` and wants a sequence, `(user_id,)`. sqlite3 (and so aiosqlite)
+reads a `str` or `bytes` as a sequence, so those are left alone there.
 
 The fields of a `--sql` t-string are checked as well: psycopg sends each
 `{value}` as a parameter. A t-string with a field that changes the SQL, such as

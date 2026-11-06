@@ -129,15 +129,15 @@ run("DELETE FROM users WHERE age = %(age)s", age=b"1")
 
 `cursor.execute(query, params)`, `executemany` (each row), and
 `connection.execute(...)` are checked on psycopg, sqlite3 and aiosqlite
-receivers, with `execute_fetchall` and `execute_insert` on aiosqlite ones, and
+receivers, `execute_fetchall` and `execute_insert` on aiosqlite ones, and
 `execute`, `fetch`, `fetchrow`, `fetchval` on asyncpg ones. The receiver must
 be evident in the file: bound to `psycopg.connect(...)`, `sqlite3.connect(...)`,
 `aiosqlite.connect(...)`, `asyncpg.connect(...)`, `<connection>.cursor()` (also
-awaited, or as `with ... as name`), or annotated with a driver class. The query is a literal, `SQL[T]("...")` of one,
-or a name assigned once to one. A call with no parameters is a
-`param-count-mismatch` when the query has placeholders, and a single value
-passed as the parameters, `execute(query, user_id)`, is a `param-type-mismatch`:
-the driver wants a sequence, `(user_id,)`.
+as `with ... as name` and awaited), or annotated with a driver class. The query
+is a literal, `SQL[T]("...")` of one, or a name assigned once to one. A call
+with no parameters is a `param-count-mismatch` when the query has placeholders,
+and a single value passed as the parameters, `execute(query, user_id)`, is a
+`param-type-mismatch`: the driver wants a sequence, `(user_id,)`.
 
 ```python
 import sqlite3
@@ -147,14 +147,14 @@ conn = sqlite3.connect("app.db")
 conn.execute("SELECT id FROM users WHERE id = ?")
 ```
 
-aiosqlite hands its parameters to sqlite3, so its calls follow the same rules:
+A connection passed to a function counts when its parameter is annotated:
 
 ```python
 import aiosqlite
 
-async def save(db: aiosqlite.Connection) -> None:
+async def rename(db: aiosqlite.Connection, name: str) -> None:
     # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
-    await db.execute("INSERT INTO users (id, name) VALUES (?, ?)", (1,))
+    await db.execute("UPDATE users SET name = ? WHERE id = ?", (name,))
 ```
 
 asyncpg-style `*args` numbers its placeholders `$1`, `$2`, ...:
