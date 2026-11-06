@@ -317,7 +317,8 @@ jobs:
         with:
           persist-credentials: false
 
-      # lean-action saves its cache on every run; pull requests only restore main's.
+      # Keyed by the proofs, not the commit: a run saves only when they changed. A pull
+      # request restores its own latest build, else main's.
       - name: Restore the Lake build
         id: lake
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -336,7 +337,7 @@ jobs:
           use-github-cache: false
 
       - name: Save the Lake build
-        if: github.ref == 'refs/heads/main' && steps.lake.outputs.cache-hit != 'true'
+        if: steps.lake.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: proofs/.lake
