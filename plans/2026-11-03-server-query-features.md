@@ -2,8 +2,8 @@
 
 > **Status:** stage 1 (hover) merged in [#852](https://github.com/jirikuncar/sqlty/pull/852); stage 3 (join completion)
 > merged in [#853](https://github.com/jirikuncar/sqlty/pull/853). Stage 4a (`sqlty format` with sqruff) merged in
-> [#930](https://github.com/jirikuncar/sqlty/pull/930); stage 4b (the server's formatting) in review; stage 4c
-> (sqruff's lint rules in `sqlty check`) next. Stage 2 needs a decision on where signatures come from; stage 5 waits
+> [#930](https://github.com/jirikuncar/sqlty/pull/930), stage 4b (the server's formatting) in
+> [#969](https://github.com/jirikuncar/sqlty/pull/969); stage 4c (sqruff's lint rules in `sqlty check`) in review. Stage 2 needs a decision on where signatures come from; stage 5 waits
 > for demand after stage 1.
 
 Tracks [#847](https://github.com/jirikuncar/sqlty/issues/847): what `sqlty server` offers inside
@@ -18,8 +18,8 @@ only the schema and the parsed query: no connection, no execution.
 | 2 | Signature help for functions the inference rules type, from their `function`, `argument` and `reference` | needs a decision: 36 of 389 function rules give arguments, none give arity or parameter names |
 | 3 | Join completion: after `JOIN`, tables linked by a foreign key first, with the `ON` clause | merged, [#853](https://github.com/jirikuncar/sqlty/pull/853) |
 | 4a | `sqlty format` and `core.format_source`: query strings laid out by sqruff's layout rules | merged, [#930](https://github.com/jirikuncar/sqlty/pull/930) |
-| 4b | Formatting in `sqlty server`: the code action `source.format.sqlty` | in review |
-| 4c | sqruff's lint rules in `sqlty check` | next |
+| 4b | Formatting in `sqlty server`: the code action `source.format.sqlty` | merged, [#969](https://github.com/jirikuncar/sqlty/pull/969) |
+| 4c | sqruff's lint rules in `sqlty check`: the `sqruff` rule | in review |
 | 5 | Inlay hints of column types for `SELECT *` | waits for demand after stage 1 |
 
 ## Stage 1
@@ -82,3 +82,10 @@ Python string on its own.
 - The playground's **Format** button is a `format` op of `sqlty-wasm`, asked on click rather
   than in `analyze`, which runs on every keystroke. Linking sqruff takes the engine from
   1.6 MB to 2.7 MB gzipped.
+- 4c: the `sqruff` rule, off by default, reports what sqruff's core rules, less layout, find in
+  every checked query, escaped strings included: `Queries::at` decodes the string and maps a
+  finding back to the source. Placeholders become names of the same length, so offsets hold,
+  and a finding on one is dropped. One rule for every sqruff code, with the code in the
+  message; choosing codes would need a config key. Not in the playground's `analyze`, which
+  runs on every keystroke. A linter is built once per thread and dialect: building sqruff's
+  rules takes about a second, a query a few milliseconds after that.
