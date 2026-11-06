@@ -73,6 +73,10 @@ impl Workspace for Fake {
         Ok(text.replace("bad", "good"))
     }
 
+    fn format(&mut self, _: &Path, text: &str) -> Result<String, String> {
+        Ok(text.replace("x=1", "x = 1"))
+    }
+
     fn breaking(&mut self) -> Result<Vec<(PathBuf, Vec<Diagnostic>)>, String> {
         let Some(against) = &self.settings.against else {
             return Ok(Vec::new());
@@ -257,7 +261,7 @@ fn diagnostics_are_published_in_utf16_units() {
     assert_eq!(diagnostic["severity"], 1);
     assert_eq!(
         diagnostic["codeDescription"]["href"],
-        "https://jirikuncar.github.io/sqlty/reference/rules/#stale-type"
+        "https://sqlty.kuncar.dev/reference/rules/#stale-type"
     );
     client.shutdown();
 }
@@ -321,6 +325,34 @@ fn fix_all_edits_the_changed_span() {
     assert_eq!(edit["range"]["end"], json!({"line": 1, "character": 6}));
     let other = client.request("textDocument/codeAction", only(json!(["refactor"])));
     assert_eq!(other, json!([]));
+    client.shutdown();
+}
+
+#[test]
+fn format_is_a_source_action_beside_fix_all() {
+    let mut client = Client::start(&json!({}));
+    client.open("file:///work/q.py", "x=1\ny = bad\n");
+    let range = json!({"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}});
+    let only = |kinds: Value| json!({"textDocument": {"uri": "file:///work/q.py"}, "range": range, "context": {"diagnostics": [], "only": kinds}});
+    let actions = client.request("textDocument/codeAction", only(json!(["source.format"])));
+    assert_eq!(actions[0]["kind"], "source.format.sqlty");
+    assert_eq!(actions[0]["title"], "sqlty: format");
+    let edit = &actions[0]["edit"]["documentChanges"][0]["edits"][0];
+    assert_eq!(edit["newText"], " = ");
+    let both = client.request("textDocument/codeAction", only(json!(["source"])));
+    let kinds: Vec<_> = both
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["kind"].clone())
+        .collect();
+    assert_eq!(
+        kinds,
+        [json!("source.fixAll.sqlty"), json!("source.format.sqlty")]
+    );
+    client.open("file:///work/clean.py", "x = 1\n");
+    let clean = json!({"textDocument": {"uri": "file:///work/clean.py"}, "range": range, "context": {"diagnostics": [], "only": ["source.format"]}});
+    assert_eq!(client.request("textDocument/codeAction", clean), json!([]));
     client.shutdown();
 }
 

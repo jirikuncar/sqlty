@@ -68,15 +68,15 @@ Never hand-write a guessed `T`: let `rewrite` infer it, then name it (see
 - t-strings are checked as `SQLTemplate[T]`; psycopg's `{x:i}`, `{x:l}` and
   `{part:q}` fields are read in modules that import psycopg.
 - Types follow the dialect's driver: in SQLite a `DATE` is `str` and a `NUMERIC`
-  a `float`. See [Type mapping](https://jirikuncar.github.io/sqlty/reference/types/) before "fixing" a type.
+  a `float`. See [Type mapping](https://sqlty.kuncar.dev/reference/types/) before "fixing" a type.
 
 ## Reference
 
-The documentation is at <https://jirikuncar.github.io/sqlty/>:
+The documentation is at <https://sqlty.kuncar.dev/>:
 
-- [Writing queries](https://jirikuncar.github.io/sqlty/guide/writing-queries/), t-strings included, and the
-  [type mapping](https://jirikuncar.github.io/sqlty/reference/types/)
-- [Row types](https://jirikuncar.github.io/sqlty/guide/row-types/)
-- [Parameters](https://jirikuncar.github.io/sqlty/guide/parameters/)
-- [Schema changes](https://jirikuncar.github.io/sqlty/guide/breaking-changes/)
-- Every rule: `sqlty rule NAME` prints its page; [all rules](https://jirikuncar.github.io/sqlty/reference/rules/)
+- [Writing queries](https://sqlty.kuncar.dev/guide/writing-queries/), t-strings included, and the
+  [type mapping](https://sqlty.kuncar.dev/reference/types/)
+- [Row types](https://sqlty.kuncar.dev/guide/row-types/)
+- [Parameters](https://sqlty.kuncar.dev/guide/parameters/)
+- [Schema changes](https://sqlty.kuncar.dev/guide/breaking-changes/)
+- Every rule: `sqlty rule NAME` prints its page; [all rules](https://sqlty.kuncar.dev/reference/rules/)

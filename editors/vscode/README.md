@@ -4,12 +4,12 @@ Type-check the SQL in your Python code as you type: the diagnostics of `sqlty ch
 on the span it is about, with a quick fix where `sqlty check --fix` has one, completion
 of table and column names in the query strings it checks, and SQL highlighting in strings
 marked `--sql`. The `.sql` files of named queries that the
-[`queries`](https://jirikuncar.github.io/sqlty/guide/sql-files/) key names get their diagnostics too.
+[`queries`](https://sqlty.kuncar.dev/guide/sql-files/) key names get their diagnostics too.
 
 The extension runs `sqlty server` from your project, so the editor and CI agree. Add sqlty
 to the project's environment (`uv add --dev sqlty`); the extension bundles none.
 
-The [documentation](https://jirikuncar.github.io/sqlty/recipes/vscode/) covers the setup,
+The [documentation](https://sqlty.kuncar.dev/recipes/vscode/) covers the setup,
 Restricted Mode and other editors.
 
 ## Settings
@@ -38,13 +38,17 @@ With `sqlty.breaking.against` set to `main`, each check also runs `sqlty breakin
   A finding in a file you have changed since sits on its first line and names its line in
   `main`.
 
-## Fix on save
+## Fix and format on save
+
+`source.fixAll.sqlty` is `sqlty check --fix`; `source.format.sqlty` is `sqlty format`, which
+lays out the query strings and leaves the rest to your Python formatter.
 
 ```json
 {
   "[python]": {
     "editor.codeActionsOnSave": {
-      "source.fixAll.sqlty": "explicit"
+      "source.fixAll.sqlty": "explicit",
+      "source.format.sqlty": "explicit"
     }
   }
 }

@@ -410,6 +410,7 @@ def _helper_project(root, import_path: str = "pkg.h.fetch_all") -> None:
         ("pkg.h.fetch_all", "src/pkg/h.py", "use.py", []),
         ("pkg.h.fetch_all", "pkg/h.py", "use.py", ["pkg/__init__.py"]),
         ("app.db.fetch_all", "backend/app/db.py", "backend/app/q.py", []),
+        ("pkg.fetch_all", "pkg/h.py", "use.py", []),
     ],
 )
 def test_configured_functions_outside_the_checked_paths_bind_positionally(
@@ -418,7 +419,8 @@ def test_configured_functions_outside_the_checked_paths_bind_positionally(
     """A configured helper's parameters are read from its module when only callers are checked."""
     _helper_project(tmp_path, import_path)
     (tmp_path / helper).parent.mkdir(parents=True)
-    (tmp_path / helper).parent.joinpath("__init__.py").write_text("VERSION = 1\n")
+    reexport = "from .h import fetch_all\n" if import_path == "pkg.fetch_all" else ""
+    (tmp_path / helper).parent.joinpath("__init__.py").write_text(f"{reexport}VERSION = 1\n")
     (tmp_path / helper).write_text("def fetch_all(query, form): ...\n")
     module = import_path.rpartition(".")[0]
     (tmp_path / caller).write_text(f"from {module} import fetch_all{HELPER_CALL}")
@@ -641,6 +643,21 @@ def test_exclude_is_relative_to_the_config_file(tmp_path, monkeypatch, capsys) -
 
     assert f"gen{os.sep}m.py" in out
     assert f"pkg{os.sep}gen" not in out
+
+
+def test_extended_config_reads_its_schema(tmp_path, monkeypatch) -> None:
+    _tree(tmp_path, "db/schema.sql", "pkg/q.py")
+    (tmp_path / "db" / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL);")
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "db/schema.sql"\n')
+    (tmp_path / "pkg" / "sqlty.toml").write_text('extend = "../pyproject.toml"\n')
+    (tmp_path / "pkg" / "q.py").write_text('q = "--sql\\nSELECT id FROM users"\n')
+    monkeypatch.chdir(tmp_path)
+
+    main(["rewrite", "pkg"])
+
+    assert (tmp_path / "pkg" / "q.py").read_text() == (
+        'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT id FROM users")\n'
+    )
 
 
 @pytest.mark.parametrize("changed", [["schema.sql"], ["sqlty.toml"], ["schema.sql", "a.py"]])
@@ -1581,8 +1598,7 @@ def test_check_sarif_output_is_valid_sarif(tmp_path, monkeypatch, capsys) -> Non
     [run] = log["runs"]
     rules = {rule["id"]: rule for rule in run["tool"]["driver"]["rules"]}
     assert (
-        rules["narrow-type"]["helpUri"]
-        == "https://jirikuncar.github.io/sqlty/reference/rules/#narrow-type"
+        rules["narrow-type"]["helpUri"] == "https://sqlty.kuncar.dev/reference/rules/#narrow-type"
     )
     assert rules["narrow-type"]["defaultConfiguration"] == {"level": "error"}
     region = {"startLine": 2, "startColumn": 15, "endLine": 2, "endColumn": 25}
@@ -1758,3 +1774,22 @@ def test_check_verbose_prints_the_types_of_named_queries(tmp_path, monkeypatch, 
         ],
     )
     assert _run(["check", "-v", "--output-format", "json", "."], capsys)[1].startswith("[")
+
+
+def test_check_verbose_names_sqlc_and_aiosql_placeholders(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "sqlty.toml").write_text('schema = "schema.sql"\nqueries = "sql/"\n')
+    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INT NOT NULL, email TEXT);\n")
+    (tmp_path / "sql").mkdir()
+    (tmp_path / "sql" / "sqlc.sql").write_text(
+        "-- name: GetUser :one\nSELECT id FROM users WHERE email = sqlc.arg(email) AND id = @id;\n"
+    )
+    (tmp_path / "sql" / "aiosql.sql").write_text(
+        "-- name: by-user^\nSELECT email FROM users WHERE id = :user.id;\n"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    code, out, _ = _run(["check", "-v", "."], capsys)
+
+    assert code == 0
+    assert f"sql{os.sep}sqlc.sql: GetUser(email: str, id: int) -> tuple[int]" in out.splitlines()
+    assert f"sql{os.sep}aiosql.sql: by_user(user.id: int) -> tuple[str | None]" in out.splitlines()

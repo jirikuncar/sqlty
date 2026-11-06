@@ -1,4 +1,4 @@
-"""The Python side of the language server: checks and fixes of an editor's buffers.
+"""The Python side of the language server: checks, fixes and formatting of an editor's buffers.
 
 A buffer's text may differ from its file on disk. The rest of the project is read from
 disk once, as ``sqlty check ROOT`` reads it, and kept up to date with each buffer passed.
@@ -94,6 +94,13 @@ class Workspace:
         file = Path(path)
         self.project.update(file, text)
         return self.project.fix(file)
+
+    def format(self, path: str, text: str) -> str:
+        """``text`` as ``sqlty format`` would write it."""
+        from sqlty.core import format_source
+
+        settings = self.project.settings[Path(path)]
+        return format_source(text, dialect=settings.dialect, import_style=settings.import_style)
 
     def _text(self, path: Path) -> str:
         if (parsed := self.project.sources.get(path)) is not None:

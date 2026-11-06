@@ -1,12 +1,13 @@
 """Load the docs playground in Chromium and check that it works: the engine answers, the
 tour gets its diagnostics, a share link restores a session, steps move and reset, and
-the site works offline once its service worker has cached it.
+a docs example opens in it, and the site works offline once its service worker has cached
+it.
 
-    uvx --with playwright python scripts/check_playground.py https://jirikuncar.github.io/sqlty/playground/
+    uvx --with playwright python scripts/check_playground.py https://sqlty.kuncar.dev/playground/
     uvx --with playwright python scripts/check_playground.py --site site
 
-``--site`` serves a ``make docs`` build under ``/sqlty/``, the prefix of GitHub Pages, so a
-path that only works at the root fails here as on the deployed site. Needs
+``--site`` serves a ``make docs`` build under ``/sqlty/``, so a path that only works at the
+host root fails here, as it would under a version prefix such as ``/latest/``. Needs
 ``playwright install chromium``.
 """
 
@@ -64,6 +65,11 @@ def check(page: Page, url: str) -> None:
     fixed = page.evaluate(f"{SOURCE}.getValue()")
     assert "SELECT name FROM users" in fixed, fixed
 
+    page.evaluate(f'{SOURCE}.setValue(\'q = """--sql\\nselect id,name from users"""\\n\')')
+    page.click("[data-format]")
+    formatted = page.evaluate(f"{SOURCE}.getValue()")
+    assert formatted == 'q = """--sql\nselect\n    id,\n    name\nfrom users"""\n', formatted
+
     page.select_option("[data-example]", label="Tour in steps")
     page.wait_for_selector("[data-steps]:not([hidden])")
     first = page.evaluate(f"{SOURCE}.getValue()")
@@ -85,6 +91,7 @@ def check(page: Page, url: str) -> None:
     assert page.input_value("[data-step-select]") == "1"
 
     embedded(page, url)
+    example(page, url)
     offline(page, url)
 
 
@@ -103,6 +110,25 @@ def embedded(page: Page, url: str) -> None:
     assert page.is_visible("[data-fix]")
     opened = page.get_attribute("[data-open]", "href")
     assert "embed" not in opened and opened.split("#")[1] == shared.split("#")[1], opened
+
+
+def example(page: Page, url: str) -> None:
+    """A docs example opens in the playground with its schema, rules and diagnostics."""
+    page.goto(url.removesuffix("playground/") + "guide/name-diagnostics/")
+    page.click(".sqlty-try >> nth=0")
+    page.wait_for_selector("[data-types] code", state="attached", timeout=60_000)
+    problems = page.inner_text("[data-problems]")
+    assert "unknown-column" in problems, problems
+
+    # Back in the docs and to the playground again, without a full load in between.
+    page.evaluate(
+        "document.querySelector('.md-nav__link[href$=\"/guide/name-diagnostics/\"]').click()"
+    )
+    page.wait_for_selector(".sqlty-try")
+    page.evaluate("document.querySelectorAll('.sqlty-try')[1].click()")
+    page.wait_for_selector("[data-types] code", state="attached", timeout=60_000)
+    shared = "import(new URL('../assets/playground/share.js', location.href)).then((m) => m.decode(location.hash.slice(1)))"
+    assert page.evaluate(f"{shared}.then((s) => s.source)") == page.evaluate(f"{SOURCE}.getValue()")
 
 
 def offline(page: Page, url: str) -> None:

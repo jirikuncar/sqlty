@@ -1,9 +1,8 @@
 {% extends "base.html" %}
 {% block fonts %}
-  <link rel="stylesheet" href="{{ 'assets/vendor/inter/index.css' | url }}">
-  <link rel="stylesheet" href="{{ 'assets/vendor/inter/wght-italic.css' | url }}">
-  <link rel="stylesheet" href="{{ 'assets/vendor/jetbrains-mono/index.css' | url }}">
-  <link rel="stylesheet" href="{{ 'assets/vendor/jetbrains-mono/wght-italic.css' | url }}">
+  <link rel="preload" href="{{ 'assets/vendor/inter/files/inter-latin-wght-normal.woff2' | url }}" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="{{ 'assets/vendor/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2' | url }}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{{ 'assets/vendor/fonts.css' | url }}">
   <style>:root{--md-text-font:"Inter Variable";--md-code-font:"JetBrains Mono Variable"}</style>
 {% endblock %}
 {% block extrahead %}
@@ -53,10 +52,12 @@
   </style>
   <script>
     if ("serviceWorker" in navigator && location.protocol !== "file:") {
-      navigator.serviceWorker.register("{{ 'sw.js' | url }}").catch(() => {});
-      if (matchMedia("(display-mode: standalone)").matches || navigator.standalone) {
-        navigator.serviceWorker.ready.then((registration) => registration.active?.postMessage("playground"));
-      }
+      addEventListener("load", () => {
+        navigator.serviceWorker.register("{{ 'sw.js' | url }}").catch(() => {});
+        if (matchMedia("(display-mode: standalone)").matches || navigator.standalone) {
+          navigator.serviceWorker.ready.then((registration) => registration.active?.postMessage("playground"));
+        }
+      });
     }
   </script>
 {% endblock %}

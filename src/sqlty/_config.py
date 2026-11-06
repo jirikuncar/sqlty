@@ -5,6 +5,7 @@ import copy
 import difflib
 import glob
 import logging
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, NamedTuple, TypedDict, cast
@@ -130,6 +131,12 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "`rewrite`, `check --fix`",
         "Formatter run on each file `rewrite` or `check --fix` changes, with the path appended",
     ),
+    "extend": KeyDoc(
+        "string",
+        "none",
+        "`rewrite`, `strip`, `check`, magic codec",
+        "Another configuration file this one is applied on top of, relative to this file",
+    ),
     "exclude": KeyDoc(
         "list of globs",
         "see [Default excludes](#exclude-and-extend-exclude)",
@@ -157,6 +164,7 @@ FUNCTION_KEY_DOCS: dict[str, KeyDoc] = {
         "none",
         "`check`",
         'Module path and function name, for example `"app.db.sql"`; a method is `"pkg.db.Db.fetch_all"`. '
+        "A package that re-exports it, `pkg.Db.fetch_all`, works too. "
         'Use `"__main__.sql"` or the file name for a script run directly',
         required=True,
     ),
@@ -318,6 +326,7 @@ class SQLTyConfig(TypedDict, total=False):
     functions: list[FunctionConfigComplete]  # List of functions to track and analyze
     types: dict[str, str]  # SQL type or table.column -> Python type a converter gives it
     format_command: list[str]  # formatter run on changed files, path appended
+    extend: str  # another configuration file this one is applied on top of
 
 
 def expand_schema(spec: SchemaSpec | Path, base: Path) -> list[Path]:
@@ -375,7 +384,7 @@ def find_config(project_root: Path | None = None) -> tuple[SQLTyConfig, Path | N
         sqlty_toml = current / "sqlty.toml"
         if sqlty_toml.is_file():
             config = _load_config_file_cached(sqlty_toml, sqlty_toml.stat().st_mtime_ns)
-            return copy.deepcopy(config), sqlty_toml
+            return _extended(copy.deepcopy(config), sqlty_toml, current), sqlty_toml
         for name in _core.CONFIG_FILES[1:]:
             native = current / name
             if not native.exists():
@@ -388,7 +397,7 @@ def find_config(project_root: Path | None = None) -> tuple[SQLTyConfig, Path | N
                 logging.getLogger(__name__).warning("Failed to parse %s", e)
                 return {}, None
             if found is not None:
-                return copy.deepcopy(found), native
+                return _extended(copy.deepcopy(found), native, current), native
         current = current.parent
     return {}, None
 
@@ -405,7 +414,7 @@ def _parse_native_cached(path: Path, mtime_ns: int) -> SQLTyConfig | None:
 
 @lru_cache(maxsize=256)
 def _load_config_file_cached(path: Path, mtime_ns: int) -> SQLTyConfig:
-    return load_config_file(path)
+    return _read_config_file(path)
 
 
 def _parse_native(path: Path) -> SQLTyConfig | None:
@@ -426,6 +435,48 @@ def load_config_file(path: Path) -> SQLTyConfig:
         Traceback (most recent call last):
         sqlty._config.ConfigError: config file does not exist: missing.toml
     """
+    return _extended(_read_config_file(path), path, Path.cwd().resolve())
+
+
+def _extended(
+    config: SQLTyConfig, path: Path, base: Path, chain: tuple[Path, ...] = ()
+) -> SQLTyConfig:
+    """``config`` of ``path`` on top of the file its ``extend`` names, recursively.
+
+    ``rules`` and ``types`` merge key by key; any other key of ``config`` replaces the
+    extended one. ``schema`` and ``queries`` of an extended file are rebased onto ``base``,
+    the directory the relative paths of ``config`` start from.
+    """
+    extend = config.pop("extend", None)
+    if extend is None:
+        return config
+    chain = (*chain, path.resolve())
+    target = (path.parent / extend).resolve()
+    if target in chain:
+        raise ConfigError(f"{path}: extend = {extend!r} extends itself in a cycle")
+    if not target.is_file():
+        raise ConfigError(f"{path}: extend = {extend!r}: config file does not exist: {target}")
+    parent = _extended(
+        copy.deepcopy(_load_config_file_cached(target, target.stat().st_mtime_ns)),
+        target,
+        target.parent,
+        chain,
+    )
+    for key in ("schema", "queries"):
+        if key in parent:
+            spec = parent[key]
+            parent[key] = [
+                os.path.relpath(target.parent / entry, base)
+                for entry in ([spec] if isinstance(spec, str) else spec)
+            ]
+    merged = cast(SQLTyConfig, {**parent, **config})
+    for key in ("rules", "types"):
+        if key in parent and key in config:
+            merged[key] = {**parent[key], **config[key]}  # type: ignore[literal-required]
+    return merged
+
+
+def _read_config_file(path: Path) -> SQLTyConfig:
     if not path.exists():
         raise ConfigError(f"config file does not exist: {path}")
     if not path.is_file():

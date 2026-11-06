@@ -168,6 +168,18 @@ fn analyze_gives_quick_fixes_and_what_fix_and_strip_make() {
 }
 
 #[test]
+fn format_lays_out_the_query_strings_in_the_configured_dialect() {
+    let source = "q = \"\"\"--sql\nselect id,name from users where id=?\"\"\"\n";
+    let answer = ask(
+        &json!({"op": "format", "source": source, "dialect": "postgres", "config": "dialect = \"sqlite\""}),
+    );
+    assert_eq!(
+        answer["formatted"],
+        "q = \"\"\"--sql\nselect\n    id,\n    name\nfrom users\nwhere id = ?\"\"\"\n"
+    );
+}
+
+#[test]
 fn each_column_names_the_inference_rules_that_typed_it() {
     let source = "q = \"--sql\\nSELECT SUM(id) AS total FROM users\"\n";
     let answer =

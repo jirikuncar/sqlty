@@ -4,7 +4,7 @@
 
 Only the latest release receives security fixes, on the Python versions it
 supports: the two latest CPython releases (see
-[Supported Python versions](https://jirikuncar.github.io/sqlty/installation/#supported-python-versions)).
+[Supported Python versions](https://sqlty.kuncar.dev/installation/#supported-python-versions)).
 
 ## Reporting a vulnerability
 

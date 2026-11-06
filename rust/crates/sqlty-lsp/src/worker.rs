@@ -8,7 +8,7 @@ use lsp_server::Response;
 use lsp_types::{CodeAction, CodeActionKind, CodeActionOrCommand, MessageType, OneOf, Uri};
 
 use crate::text::{diff, LineIndex};
-use crate::{actions, highlight, Job, Settings, Shared, Workspace, FIX_ALL};
+use crate::{actions, highlight, Job, Settings, Shared, Workspace, FORMAT};
 
 pub(crate) fn work<W, F>(
     queue: &Receiver<Job>,
@@ -32,10 +32,10 @@ pub(crate) fn work<W, F>(
         for job in std::iter::once(first).chain(queue.try_iter()) {
             match job {
                 Job::Reload => workspaces.reload(shared),
-                Job::FixAll(id, uri) => {
-                    let action = fix_all(&mut workspaces, shared, &uri);
-                    let actions: Vec<_> = action
+                Job::Source(id, uri, kinds) => {
+                    let actions: Vec<_> = kinds
                         .into_iter()
+                        .filter_map(|kind| source_action(&mut workspaces, shared, &uri, kind))
                         .map(CodeActionOrCommand::CodeAction)
                         .collect();
                     shared.send(Response::new_ok(id, actions));
@@ -181,10 +181,13 @@ where
     }
 }
 
-fn fix_all<W, F>(
+/// The edit of `kind`, [`FIX_ALL`](crate::FIX_ALL) or [`FORMAT`], to the whole buffer; `None` when it
+/// changes nothing.
+fn source_action<W, F>(
     workspaces: &mut Workspaces<'_, W, F>,
     shared: &Shared,
     uri: &Uri,
+    kind: &'static str,
 ) -> Option<CodeAction>
 where
     W: Workspace,
@@ -196,15 +199,19 @@ where
         .filter(|d| d.python)
         .map(|d| (d.text.clone(), d.version))?;
     let path = crate::uri::to_path(uri)?;
-    let fixed = workspaces
-        .of(&path, shared)?
-        .fix(&path, &text)
-        .map_err(|message| shared.log(format!("sqlty: fixing {}: {message}", path.display())))
+    let workspace = workspaces.of(&path, shared)?;
+    let (title, done) = if kind == FORMAT {
+        ("sqlty: format", workspace.format(&path, &text))
+    } else {
+        ("sqlty: fix all", workspace.fix(&path, &text))
+    };
+    let done = done
+        .map_err(|message| shared.log(format!("{title} {}: {message}", path.display())))
         .ok()?;
-    let edit = diff(&text, &fixed, &LineIndex::new(&text, &shared.encoding))?;
+    let edit = diff(&text, &done, &LineIndex::new(&text, &shared.encoding))?;
     Some(CodeAction {
-        title: "sqlty: fix all".to_string(),
-        kind: Some(CodeActionKind::from(FIX_ALL)),
+        title: title.to_string(),
+        kind: Some(CodeActionKind::from(kind)),
         edit: Some(actions::versioned(uri, version, vec![OneOf::Left(edit)])),
         ..CodeAction::default()
     })

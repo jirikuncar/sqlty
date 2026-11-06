@@ -30,6 +30,7 @@ queries as you type. It runs in your browser. The engine is compiled to
       <button type="button" class="sqlty-button sqlty-button--primary" data-fix>Fix all</button>
       <button type="button" class="sqlty-button" data-rewrite>Rewrite</button>
       <button type="button" class="sqlty-button" data-strip>Strip</button>
+      <button type="button" class="sqlty-button" data-format>Format</button>
       <button type="button" class="sqlty-button" data-copy-link><span class="sqlty-wide">Copy link</span><span class="sqlty-narrow"></span></button>
       <span class="sqlty-group" role="group" aria-label="Font size">
         <button type="button" class="sqlty-button" data-zoom="-1" title="Smaller (Ctrl+-)" aria-label="Smaller">A&minus;</button>
@@ -86,7 +87,7 @@ queries as you type. It runs in your browser. The engine is compiled to
     background-color: var(--md-default-bg-color);
   }
   .sqlty-embedded .sqlty-toolbar { margin-bottom: 0.4rem; }
-  .sqlty-embedded .sqlty-toolbar label, .sqlty-embedded [data-rewrite], .sqlty-embedded [data-strip],
+  .sqlty-embedded .sqlty-toolbar label, .sqlty-embedded [data-rewrite], .sqlty-embedded [data-strip], .sqlty-embedded [data-format],
   .sqlty-embedded [data-copy-link], .sqlty-embedded .sqlty-group, .sqlty-embedded [data-present],
   .sqlty-embedded [data-tab="json"] { display: none; }
   .sqlty-open { display: none; }
@@ -226,6 +227,7 @@ focus it and press the arrow keys. The page remembers the height and the font si
 | **Fix all** | Every quick fix, as `sqlty check --fix` makes them | `sqlty check --fix` |
 | **Rewrite** | Each query wrapped in `SQL[T]` | `sqlty rewrite` |
 | **Strip** | Each `SQL[T]` wrapper removed | `sqlty strip` |
+| **Format** | Each triple-quoted query laid out by [sqruff](guide/formatting.md) | `sqlty format` |
 
 A single fix is a quick fix on its diagnostic: click the light bulb, or press
 **Ctrl+.** with the cursor on it. **Ctrl+Z** undoes any of them.
@@ -238,6 +240,13 @@ SQLTy as an app; in Safari, **Share** then **Add to Home Screen** (iOS) or **Fil
 **Add to Dock** (macOS). The app opens the docs, with the playground among its shortcuts,
 and keeps it ready offline from its first start. Steps from `?steps=<url>` need that URL to
 be reachable; a file opened or dropped on the page does not.
+
+## Open a docs example
+
+Each Python example of these docs has a **Playground** link under it. It opens
+the example here with the schema and the `[tool.sqlty]` settings of its page, so
+you can edit it and see what changes. An example that needs a helper module, or
+a setting that reads files, has no link.
 
 ## Share a session
 
@@ -256,7 +265,7 @@ Add `?embed` to a link to show only the editor, the console and **Fix all**, wit
 `<iframe>` in a blog post or slides:
 
 ```html
-<iframe src="https://jirikuncar.github.io/sqlty/playground/?embed#..." width="800" height="500"></iframe>
+<iframe src="https://sqlty.kuncar.dev/playground/?embed#..." width="800" height="500"></iframe>
 ```
 
 Link previews in social apps show the SQLTy card, not the session: their crawlers never
