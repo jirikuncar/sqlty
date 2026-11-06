@@ -444,7 +444,8 @@ neither. A database name is letters, digits, `-` and `_`; `default` is reserved.
 
 !!! note "The magic codec reads the default database"
     `# coding: sqlty` decodes a module with the top-level settings, whatever database its
-    path belongs to.
+    path belongs to. [#985](https://github.com/jirikuncar/sqlty/issues/985) tracks naming
+    the database in the declaration.
 
 ## `exclude` and `extend-exclude`
 

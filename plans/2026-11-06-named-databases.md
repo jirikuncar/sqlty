@@ -32,7 +32,8 @@ From the issue:
 - `--dialect` and `--schema` apply to the default database and to a database that does not
   set them.
 - `extend` merges `databases` by name and rebases each database's `schema` and `queries`.
-- Gaps: the magic codec decodes with the top-level settings. `breaking` routes a file
+- Gaps: the magic codec decodes with the top-level settings
+  ([#985](https://github.com/jirikuncar/sqlty/issues/985)). `breaking` routes a file
   through the same resolver.
 
 ## Stage 2
