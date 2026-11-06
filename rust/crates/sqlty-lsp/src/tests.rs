@@ -261,7 +261,7 @@ fn diagnostics_are_published_in_utf16_units() {
     assert_eq!(diagnostic["severity"], 1);
     assert_eq!(
         diagnostic["codeDescription"]["href"],
-        "https://jirikuncar.github.io/sqlty/reference/rules/#stale-type"
+        "https://sqlty.kuncar.dev/reference/rules/#stale-type"
     );
     client.shutdown();
 }

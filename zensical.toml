@@ -1,7 +1,7 @@
 [project]
 site_name = "SQLTy"
 site_description = "Type-safe SQL queries for Python with automatic type inference, source rewriting, and lint checks."
-site_url = "https://jirikuncar.github.io/sqlty/"
+site_url = "https://sqlty.kuncar.dev/"
 repo_url = "https://github.com/jirikuncar/sqlty"
 repo_name = "jirikuncar/sqlty"
 edit_uri = "edit/main/docs/"

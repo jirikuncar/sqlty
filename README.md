@@ -23,13 +23,13 @@ migration that changes a column is caught in review, not in production.
   (<a href="https://github.com/jirikuncar/sqlty/blob/main/docs/assets/demo.tape">view source</a>)
 </p>
 
-**Documentation: [jirikuncar.github.io/sqlty](https://jirikuncar.github.io/sqlty/)**
+**Documentation: [sqlty.kuncar.dev](https://sqlty.kuncar.dev/)**
 
 **Fits if** you write SQL as string literals on Python 3.14+, against
 PostgreSQL, SQLite or MySQL, with a schema dump or SQL migrations in the
 repository. Rows are typed end to end with psycopg 3; with other drivers sqlty
 checks the query and its parameters, and you annotate what the cursor returns
-([Drivers](https://jirikuncar.github.io/sqlty/guide/drivers-and-orms/)).
+([Drivers](https://sqlty.kuncar.dev/guide/drivers-and-orms/)).
 
 > **Beta.** APIs and configuration may change before 1.0. Feedback welcome in
 > [GitHub Issues](https://github.com/jirikuncar/sqlty/issues).
@@ -91,10 +91,10 @@ query = SQL[tuple[int, str]]("--sql\nSELECT id, email FROM users")
 caller that now needs a `None` check. `narrow-type` is an error, so CI fails on
 it; an annotation that is only wider than the rows, such as `str | None` for a
 column made `NOT NULL`, is a `stale-type` warning
-([CI](https://jirikuncar.github.io/sqlty/recipes/ci/)). For rolling deploys,
+([CI](https://sqlty.kuncar.dev/recipes/ci/)). For rolling deploys,
 `sqlty breaking --against origin/main` exits 1 when old code breaks on the new
 schema or new code on the old one
-([Breaking schema changes](https://jirikuncar.github.io/sqlty/guide/breaking-changes/)).
+([Breaking schema changes](https://sqlty.kuncar.dev/guide/breaking-changes/)).
 
 ### A row type that doesn't match its query
 
@@ -111,7 +111,7 @@ query = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 `TypedDict`, `NamedTuple`, dataclasses and Pydantic models are all checked
-([Row types](https://jirikuncar.github.io/sqlty/guide/row-types/)).
+([Row types](https://sqlty.kuncar.dev/guide/row-types/)).
 
 ### Wrong parameters, misspelled columns
 
@@ -144,10 +144,10 @@ conn.execute("--sql\nSELECT emial FROM users")
 ```
 
 `?`, `$1`, `%s` and `:name` placeholders are checked on sqlite3, psycopg and
-asyncpg calls ([Parameters](https://jirikuncar.github.io/sqlty/guide/parameters/)).
+asyncpg calls ([Parameters](https://sqlty.kuncar.dev/guide/parameters/)).
 These are the mistakes coding agents make: every problem is one
 `file:line: [rule] message` line and a non-zero exit code they can act on, and
-the [sqlty skills](https://jirikuncar.github.io/sqlty/recipes/agents/) teach
+the [sqlty skills](https://sqlty.kuncar.dev/recipes/agents/) teach
 them the conventions. In Claude Code, `/plugin install sqlty --marketplace jirikuncar/sqlty`
 installs them.
 
@@ -163,13 +163,13 @@ sqlty strip .                  # undo: back to plain strings
 
 `rewrite` and `strip` only touch the wrapper, never the SQL, so you can adopt
 sqlty one module at a time and back out. New project:
-[Quickstart](https://jirikuncar.github.io/sqlty/quickstart/). Existing codebase:
-[Migration](https://jirikuncar.github.io/sqlty/recipes/migration/), starting
+[Quickstart](https://sqlty.kuncar.dev/quickstart/). Existing codebase:
+[Migration](https://sqlty.kuncar.dev/recipes/migration/), starting
 with `pg_dump --schema-only app > schema.sql`. In the editor:
-[VS Code](https://jirikuncar.github.io/sqlty/recipes/vscode/).
+[VS Code](https://sqlty.kuncar.dev/recipes/vscode/).
 
 Not a fit for ORMs, SQL built at runtime, or runtime validation;
-[Why SQLTy?](https://jirikuncar.github.io/sqlty/motivation/) compares it with
+[Why SQLTy?](https://sqlty.kuncar.dev/motivation/) compares it with
 sqlc, sqlx, PgTyped and others.
 
 ## About
@@ -180,5 +180,5 @@ developed with AI coding agents, mainly Claude Code; every change is reviewed by
 a maintainer (see the
 [AI-assisted contributions](https://github.com/jirikuncar/sqlty/blob/main/CONTRIBUTING.md#ai-assisted-contributions)
 policy). [Contributing](https://github.com/jirikuncar/sqlty/blob/main/CONTRIBUTING.md) ·
-[Credits](https://jirikuncar.github.io/sqlty/credits/) ·
+[Credits](https://sqlty.kuncar.dev/credits/) ·
 MIT [License](https://github.com/jirikuncar/sqlty/blob/main/LICENSE).

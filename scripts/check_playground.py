@@ -3,11 +3,11 @@ tour gets its diagnostics, a share link restores a session, steps move and reset
 a docs example opens in it, and the site works offline once its service worker has cached
 it.
 
-    uvx --with playwright python scripts/check_playground.py https://jirikuncar.github.io/sqlty/playground/
+    uvx --with playwright python scripts/check_playground.py https://sqlty.kuncar.dev/playground/
     uvx --with playwright python scripts/check_playground.py --site site
 
-``--site`` serves a ``make docs`` build under ``/sqlty/``, the prefix of GitHub Pages, so a
-path that only works at the root fails here as on the deployed site. Needs
+``--site`` serves a ``make docs`` build under ``/sqlty/``, so a path that only works at the
+host root fails here, as it would under a version prefix such as ``/latest/``. Needs
 ``playwright install chromium``.
 """
 
