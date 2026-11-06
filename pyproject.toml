@@ -37,7 +37,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/jirikuncar/sqlty"
-Documentation = "https://jirikuncar.github.io/sqlty/"
+Documentation = "https://sqlty.kuncar.dev/"
 Repository = "https://github.com/jirikuncar/sqlty"
 Changelog = "https://github.com/jirikuncar/sqlty/releases"
 Issues = "https://github.com/jirikuncar/sqlty/issues"

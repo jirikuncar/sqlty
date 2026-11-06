@@ -283,7 +283,7 @@ directly when you need the transformation without registering the codec.
 
 ## Documentation Site
 
-The site at <https://jirikuncar.github.io/sqlty/> is built from `docs/` with
+The site at <https://sqlty.kuncar.dev/> is built from `docs/` with
 [Zensical](https://zensical.org/) (configured in `zensical.toml`). Zensical is
 not a project dependency; the Make targets run a pinned version via `uvx`.
 The version is pinned only in the `Makefile` (`ZENSICAL`); CI runs `make docs`.
@@ -315,7 +315,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Getting Help
 
-- **Documentation**: <https://jirikuncar.github.io/sqlty/> (sources in [docs/](docs/))
+- **Documentation**: <https://sqlty.kuncar.dev/> (sources in [docs/](docs/))
 - **Issues**: Report bugs or request features on [GitHub Issues](https://github.com/jirikuncar/sqlty/issues)
 
 ## License

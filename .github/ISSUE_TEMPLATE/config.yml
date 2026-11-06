@@ -4,5 +4,5 @@ contact_links:
     url: https://github.com/jirikuncar/sqlty/security/advisories/new
     about: Report vulnerabilities privately, not as issues.
   - name: Documentation
-    url: https://jirikuncar.github.io/sqlty/
+    url: https://sqlty.kuncar.dev/
     about: Guides and reference.

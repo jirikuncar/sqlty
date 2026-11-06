@@ -265,7 +265,7 @@ Add `?embed` to a link to show only the editor, the console and **Fix all**, wit
 `<iframe>` in a blog post or slides:
 
 ```html
-<iframe src="https://jirikuncar.github.io/sqlty/playground/?embed#..." width="800" height="500"></iframe>
+<iframe src="https://sqlty.kuncar.dev/playground/?embed#..." width="800" height="500"></iframe>
 ```
 
 Link previews in social apps show the SQLTy card, not the session: their crawlers never

@@ -86,7 +86,7 @@ turns that off. VS Code shows one semantic-token provider per file, so the exten
 keeps it off there and highlights strings marked `--sql` with a grammar instead.
 
 For nvim-lint, Vim (vim-lsp, ALE, coc.nvim, `:make`), Helix and Emacs (Eglot, lsp-mode), see
-[Neovim, Vim, Helix and Emacs](https://jirikuncar.github.io/sqlty/recipes/editors/).
+[Neovim, Vim, Helix and Emacs](https://sqlty.kuncar.dev/recipes/editors/).
 Eglot runs one server per major mode: run sqlty next to ty or ruff through
 `rass python -- sqlty server`, with sqlty's highlighting off, or use lsp-mode with
 sqlty as an add-on.
@@ -110,6 +110,6 @@ when it moves, save a schema or run **sqlty: Restart Server**.
 
 ## Reference
 
-- [VS Code](https://jirikuncar.github.io/sqlty/recipes/vscode/)
-- [Neovim, Vim, Helix and Emacs](https://jirikuncar.github.io/sqlty/recipes/editors/)
-- [Breaking schema changes](https://jirikuncar.github.io/sqlty/guide/breaking-changes/)
+- [VS Code](https://sqlty.kuncar.dev/recipes/vscode/)
+- [Neovim, Vim, Helix and Emacs](https://sqlty.kuncar.dev/recipes/editors/)
+- [Breaking schema changes](https://sqlty.kuncar.dev/guide/breaking-changes/)

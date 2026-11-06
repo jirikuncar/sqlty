@@ -28,7 +28,7 @@ suite("sqlty", () => {
     assert.equal(code.value, "narrow-type");
     assert.equal(
       code.target.toString(true),
-      "https://jirikuncar.github.io/sqlty/reference/rules/#narrow-type",
+      "https://sqlty.kuncar.dev/reference/rules/#narrow-type",
     );
 
     const actions = await codeActions(uri, diagnostic.range, "source.fixAll.sqlty");
