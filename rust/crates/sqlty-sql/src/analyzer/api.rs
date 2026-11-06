@@ -146,6 +146,7 @@ pub fn analyze_with_diagnostics(
     dialect: &str,
     schema: Option<&SchemaData>,
 ) -> (Inferred<Option<Vec<Column>>>, Vec<NameDiagnostic>) {
+    let (dialect, schema) = super::route(sql, dialect, schema);
     parse(sql, dialect).analyze_with_diagnostics(schema)
 }
 

@@ -8,9 +8,17 @@ from sqlty._lint import Diagnostic
 class Schema:
     @property
     def dialect(self) -> str: ...
+    @property
+    def absent(self) -> bool: ...
 
 def load_schema(
-    schema_sql: str, *, dialect: str = "postgres", types: list[tuple[str, str]] | None = None
+    schema_sql: str,
+    *,
+    dialect: str = "postgres",
+    types: list[tuple[str, str]] | None = None,
+    name: str | None = None,
+    absent: bool = False,
+    databases: list[tuple[str, Schema | None]] | None = None,
 ) -> Schema: ...
 def infer_type(
     sql: str,

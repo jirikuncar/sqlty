@@ -13,6 +13,7 @@ import typing
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, NamedTuple
 
+from sqlty._core import Schema
 from sqlty._core import analyze_columns as _analyze_columns
 from sqlty._core import check_source as _check_source
 from sqlty._core import composite_fields as _composite_fields
@@ -31,7 +32,6 @@ from sqlty._variants import Declared
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from sqlty._core import Schema
     from sqlty._helpers import HelperCall
     from sqlty._lint import RuleConfig
     from sqlty._type_extractor import TypeInfo
@@ -314,7 +314,10 @@ def _check_select_star(ctx: _Check) -> None:
     for call in ctx.calls:
         if call.query and (
             found := _select_star_finding(
-                call.query, dialect=ctx.dialect, has_schema=ctx.schema_sql is not None
+                call.query,
+                dialect=ctx.dialect,
+                has_schema=ctx.schema_sql is not None
+                and not (isinstance(ctx.schema_sql, Schema) and ctx.schema_sql.absent),
             )
         ):
             ctx.report(*found, call.line, ctx.query_span(call))
