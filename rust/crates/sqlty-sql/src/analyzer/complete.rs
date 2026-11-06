@@ -113,6 +113,7 @@ pub fn complete(
     schema: Option<&SchemaData>,
     limit: usize,
 ) -> Completions {
+    let (dialect, schema) = super::route(query, dialect, schema);
     let dialect = SqlDialect::from_name(dialect);
     let schema = schema.unwrap_or_else(|| crate::catalog::empty(dialect));
     let Some(before) = query.get(..cursor).and_then(lex) else {

@@ -139,7 +139,10 @@ class Section:
     @property
     def schema_sql(self) -> str | None:
         """The ``schema`` files, joined in order."""
-        schema = self.settings.get("schema", [])
+        return self.joined(self.settings.get("schema", []))
+
+    def joined(self, schema: str | list[str]) -> str | None:
+        """The files ``schema`` names, joined in order; ``None`` when it names none."""
         names = [schema] if isinstance(schema, str) else schema
         return "\n".join(self.files[n] for n in names) if names else None
 
@@ -354,10 +357,13 @@ def _parse_config(content: str, line: int, fail: Fail) -> dict[str, Any]:
 
 
 def _validate(section: Section, fail: Fail) -> None:
-    schema = section.settings.get("schema", [])
-    for name in [schema] if isinstance(schema, str) else schema:
-        if name not in section.files:
-            raise fail(section.line, f"schema {name!r} has no `{name}`: block")
+    schemas = [section.settings.get("schema", [])] + [
+        database.get("schema", []) for database in section.settings.get("databases", {}).values()
+    ]
+    for schema in schemas:
+        for name in [schema] if isinstance(schema, str) else schema:
+            if name not in section.files:
+                raise fail(section.line, f"schema {name!r} has no `{name}`: block")
 
 
 def _merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:

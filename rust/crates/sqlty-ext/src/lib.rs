@@ -180,6 +180,15 @@ impl SchemaHandle {
         self.dialect
     }
 
+    /// Whether queries of this database are read without a schema: it was loaded without one.
+    #[getter]
+    fn absent(&self) -> bool {
+        self.loaded
+            .schema
+            .databases()
+            .is_some_and(|databases| databases.absent)
+    }
+
     fn __repr__(&self) -> String {
         format!("Schema(dialect={:?})", self.dialect)
     }
@@ -190,15 +199,24 @@ impl SchemaHandle {
 /// `types` maps a SQL type name (`DATE`) or a `table.column` to the Python type a
 /// converter above the driver gives it (`[tool.sqlty.types]`).
 ///
+/// `databases` maps the name of each other database of the project to its schema, `None`
+/// for one without; a query whose marker names one (`--sql sqlty:db=analytics`) is read
+/// against it, in its dialect. `name` is this database's, and `absent` says it has no
+/// schema: its queries are read without one.
+///
 /// Raises:
 ///     ValueError: a key of `types` is neither a SQL type nor `table.column`
 #[pyfunction]
-#[pyo3(signature = (schema_sql, *, dialect = DialectArg::POSTGRES, types = None))]
+#[pyo3(signature = (schema_sql, *, dialect = DialectArg::POSTGRES, types = None, name = None, absent = false, databases = None))]
+#[allow(clippy::too_many_arguments)]
 fn load_schema(
     py: Python<'_>,
     schema_sql: &str,
     dialect: DialectArg,
     types: Option<Vec<(String, String)>>,
+    name: Option<String>,
+    absent: bool,
+    databases: Option<Vec<(String, Option<PyRef<'_, SchemaHandle>>)>>,
 ) -> PyResult<SchemaHandle> {
     let dialect = dialect.0;
     let overrides = analyzer::TypeOverrides::new(&types.unwrap_or_default(), dialect)
@@ -211,6 +229,33 @@ fn load_schema(
         };
         Arc::new(LoadedSchema { schema, skipped })
     });
+    let loaded = match databases {
+        None if name.is_none() && !absent => loaded,
+        databases => {
+            let others = databases
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(other, handle)| match handle {
+                    Some(handle) => (
+                        other,
+                        handle.dialect,
+                        (!handle.absent()).then(|| handle.loaded.schema.clone()),
+                    ),
+                    None => (other, dialect, None),
+                })
+                .collect();
+            let databases = analyzer::Databases {
+                name: name.unwrap_or_else(|| analyzer::DEFAULT.to_string()),
+                absent,
+                others,
+            };
+            let LoadedSchema { schema, skipped } =
+                Arc::into_inner(loaded).expect("a schema just loaded is not shared");
+            let schema = analyzer::SchemaData::with_databases(schema, databases)
+                .expect("a schema just loaded is not shared");
+            Arc::new(LoadedSchema { schema, skipped })
+        }
+    };
     Ok(SchemaHandle {
         loaded,
         text: Arc::from(schema_sql),
