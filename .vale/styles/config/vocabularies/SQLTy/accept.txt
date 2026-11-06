@@ -144,3 +144,4 @@ Eglot
 rassumfrassum
 sarif
 sqruff
+Pygments
