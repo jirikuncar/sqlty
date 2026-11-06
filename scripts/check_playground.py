@@ -120,6 +120,16 @@ def example(page: Page, url: str) -> None:
     problems = page.inner_text("[data-problems]")
     assert "unknown-column" in problems, problems
 
+    # Back in the docs and to the playground again, without a full load in between.
+    page.evaluate(
+        "document.querySelector('.md-nav__link[href$=\"/guide/name-diagnostics/\"]').click()"
+    )
+    page.wait_for_selector(".sqlty-try")
+    page.evaluate("document.querySelectorAll('.sqlty-try')[1].click()")
+    page.wait_for_selector("[data-types] code", state="attached", timeout=60_000)
+    shared = "import(new URL('../assets/playground/share.js', location.href)).then((m) => m.decode(location.hash.slice(1)))"
+    assert page.evaluate(f"{shared}.then((s) => s.source)") == page.evaluate(f"{SOURCE}.getValue()")
+
 
 def offline(page: Page, url: str) -> None:
     """The service worker of ``scripts/offline.py`` keeps the docs and the playground offline."""
