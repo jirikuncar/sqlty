@@ -36,6 +36,19 @@ class Run:
             self.schema_sql = core.load_schema(
                 self.schema_sql or "", dialect=self.dialect, types=types
             )
+        if databases := settings.get("databases"):
+            self.schema_sql = core.load_schema(
+                section.schema_sql,
+                dialect=self.dialect,
+                types=types,
+                databases={
+                    name: core.load_schema(
+                        section.joined(database.get("schema", [])),
+                        dialect=database.get("dialect", self.dialect),
+                    )
+                    for name, database in databases.items()
+                },
+            )
         self.import_style: str | None = settings.get("import-style")
         self.untyped: bool = settings.get("untyped") == "sentinel"
         self.json_types: str = settings.get("json-types", "typing.Any")

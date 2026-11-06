@@ -154,6 +154,7 @@ impl Hints {
 /// not parse otherwise, being also a JSONB operator), `:name` in SQLite and PostgreSQL
 /// (SQLAlchemy's `text()`).
 pub fn analyze_params(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> Option<Vec<Param>> {
+    let (dialect, schema) = super::route(sql, dialect, schema);
     let dialect = SqlDialect::from_name(dialect);
     let styles = Styles {
         question_marks: dialect != SqlDialect::Postgres,

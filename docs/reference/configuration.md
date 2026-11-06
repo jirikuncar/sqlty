@@ -451,6 +451,53 @@ neither. A database name is letters, digits, `-` and `_`; `default` is reserved.
     path belongs to. [#985](https://github.com/jirikuncar/sqlty/issues/985) tracks naming
     the database in the declaration.
 
+### Name the database in the query
+
+A query string names its database on the marker line, and a `.sql` file in a header
+line above its first query. The name overrides the file's database for that query.
+
+```toml
+[tool.sqlty]
+schema = "app.sql"
+
+[tool.sqlty.databases.analytics]
+dialect = "sqlite"
+schema = "analytics.sql"
+```
+
+`app.sql`:
+
+```sql
+CREATE TABLE users (id TEXT NOT NULL);
+```
+
+`analytics.sql`:
+
+```sql
+CREATE TABLE events (n INTEGER NOT NULL);
+```
+
+```python
+users = "--sql\nSELECT id FROM users"
+events = "--sql sqlty:db=analytics\nSELECT n FROM events"
+# rewritten: users = SQL[tuple[str]]("--sql\nSELECT id FROM users")
+# rewritten: events = SQL[tuple[int]]("--sql sqlty:db=analytics\nSELECT n FROM events")
+```
+
+```sql
+-- sqlty: db=analytics
+
+-- name: count_events
+-- error:
+SELECT COUNT(*) FROM events;
+```
+
+The query is read with that database's `dialect`, `schema` and `types`, and
+`db=default` names the top-level one. Its `rules` stay those of the file. Everything
+after `--sql` on the marker line is a SQL comment, so the database still runs the query
+as written; under MySQL, write `-- sql sqlty:db=analytics`. A name the project does not
+configure is [`unknown-database`](rules.md#unknown-database).
+
 ## `exclude` and `extend-exclude`
 
 Directories the CLI walks skip these globs. `exclude` replaces the default

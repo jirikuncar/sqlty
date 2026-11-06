@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 mod api;
 mod complete;
+mod databases;
 mod dialect;
 mod dml;
 mod entities;
@@ -61,6 +62,9 @@ pub use api::{
 };
 pub(crate) use api::{typed, view_columns};
 pub use complete::{complete, Candidate, CandidateKind, Completions};
+pub use databases::{
+    database_name, route, route_named, unknown_database, unknown_named, Databases, DEFAULT,
+};
 pub use dialect::{SqlDialect, UnknownDialect};
 pub use explain::{explain_select, ColumnRules};
 use expr::from_sql_type;

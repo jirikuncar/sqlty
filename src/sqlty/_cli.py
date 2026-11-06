@@ -1497,6 +1497,7 @@ class SettingsResolver:
                 own_schema = _load_schema(database["schema"], config_dir)
             databases.append(
                 (
+                    name,
                     tuple(database.get("include", ())),
                     tuple(database.get("exclude", ())),
                     self._settings(
@@ -1508,7 +1509,33 @@ class SettingsResolver:
                     ),
                 )
             )
-        return replace(settings, databases=tuple(databases))
+        if not databases:
+            return settings
+        from sqlty.core import load_schema
+
+        named = {"default": settings} | {name: db for name, _, _, db in databases}
+        plain = {
+            name: db.schema or load_schema(None, dialect=db.dialect) for name, db in named.items()
+        }
+        routed = {
+            name: replace(
+                db,
+                schema=load_schema(
+                    db.schema_sql,
+                    dialect=db.dialect,
+                    types=db.types,
+                    name=name,
+                    databases={other: plain[other] for other in named if other != name},
+                ),
+            )
+            for name, db in named.items()
+        }
+        return replace(
+            routed["default"],
+            databases=tuple(
+                (include, exclude, routed[name]) for name, include, exclude, _ in databases
+            ),
+        )
 
     def _settings(
         self,
