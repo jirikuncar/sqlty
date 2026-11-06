@@ -779,7 +779,7 @@ pub fn select_star_finding(query: &str, dialect: &str, has_schema: bool) -> Opti
 }
 
 /// [`select_star_finding`] of the `stars` of `query`, `None` when it does not parse.
-fn star_finding(
+pub(crate) fn star_finding(
     stars: Option<Vec<String>>,
     query: &str,
     has_schema: bool,

@@ -119,7 +119,7 @@ Promote `stale-type` to `error` once the converted modules are clean, and add
 
 ## Reference
 
-- [Migration](https://jirikuncar.github.io/sqlty/recipes/migration/)
-- [Schema inference](https://jirikuncar.github.io/sqlty/guide/schema-inference/)
-- [Drivers and ORMs](https://jirikuncar.github.io/sqlty/guide/drivers-and-orms/)
-- [Configuration](https://jirikuncar.github.io/sqlty/reference/configuration/)
+- [Migration](https://sqlty.kuncar.dev/recipes/migration/)
+- [Schema inference](https://sqlty.kuncar.dev/guide/schema-inference/)
+- [Drivers and ORMs](https://sqlty.kuncar.dev/guide/drivers-and-orms/)
+- [Configuration](https://sqlty.kuncar.dev/reference/configuration/)

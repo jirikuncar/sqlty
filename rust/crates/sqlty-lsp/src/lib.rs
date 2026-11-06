@@ -49,6 +49,10 @@ mod tests;
 /// The code action kind of `sqlty check --fix`, run by `editor.codeActionsOnSave`.
 pub const FIX_ALL: &str = "source.fixAll.sqlty";
 
+/// The code action kind of `sqlty format`. Not `textDocument/formatting`, which would
+/// take the place of the Python formatter.
+pub const FORMAT: &str = "source.format.sqlty";
+
 /// One diagnostic of a buffer, with byte offsets into its text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
@@ -109,6 +113,8 @@ pub trait Workspace {
     fn check(&mut self, path: &Path, text: &str) -> Result<Vec<Diagnostic>, String>;
     /// `text` as `sqlty check --fix` would write it.
     fn fix(&mut self, path: &Path, text: &str) -> Result<String, String>;
+    /// `text` as `sqlty format` would write it.
+    fn format(&mut self, path: &Path, text: &str) -> Result<String, String>;
     /// Diagnostics by file that do not depend on the buffers: what the baseline's queries
     /// get against this schema. Asked once, after the workspace loads.
     fn breaking(&mut self) -> Result<Vec<(PathBuf, Vec<Diagnostic>)>, String> {
@@ -237,7 +243,8 @@ where
 /// What the worker does next.
 enum Job {
     Check(Uri),
-    FixAll(lsp_server::RequestId, Uri),
+    /// A whole-file action, [`FIX_ALL`] or [`FORMAT`], and the kinds asked for.
+    Source(lsp_server::RequestId, Uri, Vec<&'static str>),
     Reload,
 }
 
@@ -478,8 +485,12 @@ impl Shared {
                 })
             })
         };
-        if params.context.only.is_some() && wants(FIX_ALL) {
-            let _ = jobs.send(Job::FixAll(request.id, params.text_document.uri));
+        let kinds: Vec<_> = [FIX_ALL, FORMAT]
+            .into_iter()
+            .filter(|kind| wants(kind))
+            .collect();
+        if params.context.only.is_some() && !kinds.is_empty() {
+            let _ = jobs.send(Job::Source(request.id, params.text_document.uri, kinds));
             return;
         }
         let actions = if wants(CodeActionKind::QUICKFIX.as_str()) {
@@ -527,6 +538,7 @@ fn capabilities(encoding: PositionEncodingKind, settings: &Settings) -> ServerCa
             code_action_kinds: Some(vec![
                 CodeActionKind::QUICKFIX,
                 CodeActionKind::from(FIX_ALL),
+                CodeActionKind::from(FORMAT),
             ]),
             ..CodeActionOptions::default()
         })),

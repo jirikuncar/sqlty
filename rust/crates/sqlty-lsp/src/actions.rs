@@ -13,7 +13,7 @@ use crate::text::LineIndex;
 use crate::{Diagnostic, Document, Severity};
 
 /// The rules reference; each rule is a heading of it.
-const RULES: &str = "https://jirikuncar.github.io/sqlty/reference/rules/";
+const RULES: &str = "https://sqlty.kuncar.dev/reference/rules/";
 
 pub(crate) fn diagnostic(diagnostic: &Diagnostic, index: &LineIndex<'_>) -> lsp_types::Diagnostic {
     lsp_types::Diagnostic {

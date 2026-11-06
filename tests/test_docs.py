@@ -7,14 +7,20 @@ Code blocks with assertions are mdtests, collected by ``tests/_mdtest``.
 
 from __future__ import annotations
 
+import ast
+import base64
 import doctest
 import importlib
 import importlib.util
+import json
 import pkgutil
 import re
 import subprocess
 import sys
+import tomllib
+import zlib
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -55,6 +61,47 @@ def test_generated_reference_is_current() -> None:
     spec.loader.exec_module(module)
     stale = [p.name for p in module.generate(check=True)]
     assert not stale, f"run `make generate-docs`: {stale} out of date"
+
+
+def _script(name: str) -> Any:
+    spec = importlib.util.spec_from_file_location(name, ROOT / "scripts" / f"{name}.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("page", sorted((ROOT / "docs").rglob("*.md")), ids=lambda p: p.stem)
+def test_playground_links_hold_their_example(page: Path) -> None:
+    """Each example a docs page links to the playground is whole Python that the playground
+    checks as its mdtest does: with the config and schema of its headings."""
+    links = _script("playground_links")
+    for session in filter(None, links.examples(page.read_text())):
+        ast.parse(session["source"])
+        assert json.loads(zlib.decompress(base64.urlsafe_b64decode(links.encode(session) + "==")))
+        settings = tomllib.loads(session["config"])
+        check_source(
+            session["source"],
+            dialect=session["dialect"],
+            schema_sql=session["schema"] or None,
+            rules=settings.get("rules"),
+            import_style=settings.get("import-style"),
+        )
+
+
+def test_playground_link_of_a_rule_example() -> None:
+    links = _script("playground_links")
+    text = (ROOT / "src" / "sqlty" / "rules" / "sqruff.md").read_text()
+    session = links.examples(text)[0]
+    assert session["config"] == '[rules]\nsqruff = "warn"\n'
+    assert session["source"].startswith("from sqlty import SQL\n\nquery = SQL[tuple[str, int]]")
+    found = check_source(session["source"], rules={"sqruff": "warn"})
+    assert [d["rule"] for d in found] == ["sqruff"]
+    html = '<div class="language-python highlight"><pre><code>q</code></pre></div>'
+    linked = links.link(html, [None, session], "../")
+    assert linked == html
+    linked = links.link(html * 2, [None, session], "../")
+    assert linked.count('href="../playground/#') == 1
 
 
 def test_config_key_docs_cover_every_key() -> None:
@@ -151,6 +198,7 @@ def test_agent_skill_frontmatter(skill: Path) -> None:
         "strip",
         "check",
         "breaking",
+        "format",
         "rule",
         "skill",
         "server",

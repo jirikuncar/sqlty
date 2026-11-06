@@ -52,7 +52,7 @@ default_language_version:
   python: python3.14  # sqlty requires Python >= 3.14
 repos:
   - repo: https://github.com/jirikuncar/sqlty
-    rev: v0.3.0
+    rev: v0.4.0
     hooks:
       - id: sqlty-rewrite
       - id: sqlty-check
@@ -116,6 +116,6 @@ the root one; they are not merged.
 
 ## Reference
 
-- [CI and pre-commit](https://jirikuncar.github.io/sqlty/recipes/ci/)
-- [Configuration](https://jirikuncar.github.io/sqlty/reference/configuration/)
-- [Rules](https://jirikuncar.github.io/sqlty/reference/rules/)
+- [CI and pre-commit](https://sqlty.kuncar.dev/recipes/ci/)
+- [Configuration](https://sqlty.kuncar.dev/reference/configuration/)
+- [Rules](https://sqlty.kuncar.dev/reference/rules/)
