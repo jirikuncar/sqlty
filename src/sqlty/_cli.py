@@ -1371,6 +1371,8 @@ class Settings:
     query_variants: int | None = None
     preview: bool = False
     functions: tuple[tuple[str, str, str | None], ...] = ()
+    # The functions each named database lists, read against it in any file.
+    database_functions: tuple[tuple[str, str, str | None, str], ...] = ()
     format_command: tuple[str, ...] = ()
     overrides: tuple[RuleOverride, ...] = ()
     config_dir: Path | None = None
@@ -1517,9 +1519,15 @@ class SettingsResolver:
         plain = {
             name: db.schema or load_schema(None, dialect=db.dialect) for name, db in named.items()
         }
+        database_functions = tuple(
+            (f["import_path"], f["query_param"], f.get("return_type_param"), name)
+            for name, database in config["databases"].items()
+            for f in database.get("functions", [])
+        )
         routed = {
             name: replace(
                 db,
+                database_functions=database_functions,
                 schema=load_schema(
                     db.schema_sql,
                     dialect=db.dialect,

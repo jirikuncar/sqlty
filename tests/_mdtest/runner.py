@@ -243,14 +243,19 @@ class Run:
             for path, text in self.section.files.items()
             if path.endswith(".py")
         }
-        functions = self.section.settings.get("functions", [])
+        databases = self.section.settings.get("databases", {})
+        functions = [(f, None) for f in self.section.settings.get("functions", [])] + [
+            (f, name) for name, database in databases.items() for f in database.get("functions", [])
+        ]
         if not modules and not functions:
             return None
         index = core.HelperIndex()
         for module, text in modules.items():
             index.add(module.removesuffix(".__init__"), core.ParsedSource(text, module))
-        for f in functions:
-            index.register(f["import-path"], f["query-param"], f.get("return-type-param"))
+        for f, database in functions:
+            index.register(
+                f["import-path"], f["query-param"], f.get("return-type-param"), database=database
+            )
         return index
 
     def _check(self, assertions: list[Assertion], unit: Unit) -> list[str]:
