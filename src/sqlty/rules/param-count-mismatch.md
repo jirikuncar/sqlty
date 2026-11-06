@@ -18,7 +18,8 @@ Driver calls are checked too: `execute` and `executemany` (each row) on a
 psycopg or sqlite3 connection or cursor, and `execute`, `fetch`, `fetchrow`,
 `fetchval` on an asyncpg connection, when the file binds the receiver to
 `psycopg.connect(...)`, `sqlite3.connect(...)`, `asyncpg.connect(...)`,
-`<connection>.cursor()` or a driver class annotation. The query is a literal,
+`<connection>.cursor()` or a driver class annotation, and the `execute` and
+`scalar` helpers of `sqlty.drivers.psycopg`. The query is a literal,
 `SQL[T]("...")` of one, or a name assigned once to one.
 
 Positional arguments for named placeholders, or the reverse, and calls that do
