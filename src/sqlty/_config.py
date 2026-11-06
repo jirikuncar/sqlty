@@ -164,6 +164,7 @@ FUNCTION_KEY_DOCS: dict[str, KeyDoc] = {
         "none",
         "`check`",
         'Module path and function name, for example `"app.db.sql"`; a method is `"pkg.db.Db.fetch_all"`. '
+        "A package that re-exports it, `pkg.Db.fetch_all`, works too. "
         'Use `"__main__.sql"` or the file name for a script run directly',
         required=True,
     ),
