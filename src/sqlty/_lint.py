@@ -387,7 +387,7 @@ class RuleConfig:
         return self.severity(rule_name) != Severity.IGNORE
 
 
-DOCS_URL = "https://jirikuncar.github.io/sqlty/"
+DOCS_URL = "https://sqlty.kuncar.dev/"
 """The documentation site, which ``rule_doc`` links to."""
 
 
@@ -399,7 +399,7 @@ def rule_doc(name: str) -> str:
     Example:
         >>> rule_doc("stale-type").splitlines()[0]
         '# stale-type'
-        >>> "](https://jirikuncar.github.io/sqlty/guide/schema-inference/)" in rule_doc("insert-missing-column")
+        >>> "](https://sqlty.kuncar.dev/guide/schema-inference/)" in rule_doc("insert-missing-column")
         True
     """
     import re

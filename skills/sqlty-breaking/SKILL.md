@@ -126,5 +126,5 @@ sqlty breaking --against dump.sql
 
 ## Reference
 
-- [Breaking schema changes](https://jirikuncar.github.io/sqlty/guide/breaking-changes/)
-- [Schema changes in CI](https://jirikuncar.github.io/sqlty/recipes/migration/#schema-changes-in-ci)
+- [Breaking schema changes](https://sqlty.kuncar.dev/guide/breaking-changes/)
+- [Schema changes in CI](https://sqlty.kuncar.dev/recipes/migration/#schema-changes-in-ci)

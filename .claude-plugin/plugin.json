@@ -6,7 +6,7 @@
     "name": "Jiri Kuncar",
     "email": "jiri.kuncar@gmail.com"
   },
-  "homepage": "https://jirikuncar.github.io/sqlty/",
+  "homepage": "https://sqlty.kuncar.dev/",
   "repository": "https://github.com/jirikuncar/sqlty",
   "license": "MIT",
   "keywords": ["sql", "python", "type-hints", "static-analysis"]

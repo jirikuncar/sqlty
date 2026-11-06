@@ -154,7 +154,7 @@ editable install, `import sqlty.magic` before the first such module.
 
 ## Reference
 
-- [Writing queries](https://jirikuncar.github.io/sqlty/guide/writing-queries/)
-- [Untyped queries](https://jirikuncar.github.io/sqlty/guide/untyped/)
-- [Magic codec](https://jirikuncar.github.io/sqlty/guide/magic-codec/)
-- [CLI reference](https://jirikuncar.github.io/sqlty/reference/cli/)
+- [Writing queries](https://sqlty.kuncar.dev/guide/writing-queries/)
+- [Untyped queries](https://sqlty.kuncar.dev/guide/untyped/)
+- [Magic codec](https://sqlty.kuncar.dev/guide/magic-codec/)
+- [CLI reference](https://sqlty.kuncar.dev/reference/cli/)
