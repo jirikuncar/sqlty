@@ -3,7 +3,7 @@
 Each case is one call on an ``aiosqlite.Connection`` or a cursor it opened. The source
 holding the call is checked with ``check_source``, then the same source runs against an
 in-memory database with the same schema: a call sqlty reports must fail there, and a call
-it leaves alone must not.
+it leaves alone must not. aiosqlite comes from the ``aiosqlite`` dependency group.
 """
 
 from __future__ import annotations
@@ -12,11 +12,10 @@ import asyncio
 import sqlite3
 from typing import Any
 
+import aiosqlite
 import pytest
 
 from sqlty import core
-
-aiosqlite = pytest.importorskip("aiosqlite")
 
 SCHEMA = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, age INTEGER);"
 
