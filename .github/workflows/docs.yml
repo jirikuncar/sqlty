@@ -67,6 +67,15 @@ jobs:
       - name: Build docs (strict)
         run: make docs
 
+      - name: Keep internal links relative
+        run: |
+          # The site answers at sqlty.kuncar.dev/ and jirikuncar.github.io/sqlty/; only 404.html,
+          # served at any depth, may use root paths.
+          if grep -rnoE '(href|src)="/[^/"][^"]*"' site --include=*.html --exclude=404.html; then
+            echo "Internal links must be relative" >&2
+            exit 1
+          fi
+
       - name: Report the size of the playground engine
         run: |
           wasm=docs/assets/playground/sqlty_wasm.wasm
