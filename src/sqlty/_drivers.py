@@ -61,11 +61,13 @@ _METHODS = {
 }
 _ANY_METHOD = frozenset().union(*_METHODS.values())
 _PARAM_KEYWORD = {"psycopg": "params", "sqlite3": "parameters", "aiosqlite": "parameters"}
-# sqlite3 reads a str or bytes as a sequence, one parameter per item.
+# sqlite3 reads a str or bytes as a sequence, one parameter per item, and so does
+# aiosqlite, which hands the parameters to it.
+_SQLITE_SEQUENCE_SCALARS = frozenset({"str", "bytes"})
 _SEQUENCE_SCALARS = {
     "psycopg": frozenset(),
-    "sqlite3": frozenset({"str", "bytes"}),
-    "aiosqlite": frozenset({"str", "bytes"}),
+    "sqlite3": _SQLITE_SEQUENCE_SCALARS,
+    "aiosqlite": _SQLITE_SEQUENCE_SCALARS,
 }
 
 MARKER = re.compile(r"\s*--\s?sql(?:\s|$)")
