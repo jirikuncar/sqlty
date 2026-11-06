@@ -1380,6 +1380,33 @@ def test_a_query_marker_picks_its_database(tmp_path, monkeypatch, capsys) -> Non
     ]
 
 
+def test_a_database_helper_reads_its_queries_in_any_file(tmp_path, monkeypatch, capsys) -> None:
+    _databases_project(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        _DATABASES
+        + """
+[[tool.sqlty.databases.analytics.functions]]
+import-path = "app.warehouse.fetch"
+query-param = "query"
+return-type-param = "form"
+"""
+    )
+    (tmp_path / "app/warehouse.py").write_text("def fetch(query, form): ...\n")
+    (tmp_path / "app/users.py").write_text(
+        "from app.warehouse import fetch\n"
+        'fetch("SELECT kind FROM events", tuple[str])\n'
+        'fetch("SELECT id FROM users", tuple[int])\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    _, out, _ = _run(["check", "app/users.py"], capsys)
+
+    assert out.splitlines() == [
+        f"app{os.sep}users.py:3: [unknown-table] table `users` is not defined in the schema",
+        "Found 1 error(s)",
+    ]
+
+
 def test_the_server_checks_a_buffer_against_its_database(tmp_path) -> None:
     from sqlty._lsp_bridge import Workspace
 
