@@ -305,7 +305,7 @@ query-param = "query"
 <!-- generated:config-function-keys -->
 | Key | Required | Description |
 |-----|----------|-------------|
-| `import-path` | yes | Module path and function name, for example `"app.db.sql"`; a method is `"pkg.db.Db.fetch_all"`. Use `"__main__.sql"` or the file name for a script run directly |
+| `import-path` | yes | Module path and function name, for example `"app.db.sql"`; a method is `"pkg.db.Db.fetch_all"`. A package that re-exports it, `pkg.Db.fetch_all`, works too. Use `"__main__.sql"` or the file name for a script run directly |
 | `query-param` | yes | Name of the parameter that holds the query |
 | `return-type-param` | no | Parameter whose argument, such as `return_tp=int`, is the row type of that call instead of an inferred one; `check` compares it with the query columns |
 <!-- /generated:config-function-keys -->

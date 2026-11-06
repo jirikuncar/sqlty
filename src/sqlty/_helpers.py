@@ -364,9 +364,10 @@ class HelperIndex:
         Used for ``[[tool.sqlty.functions]]``: the function needs no marked parameter. Its
         positional parameters are read from its definition in ``pkg.mod``, indexed or else
         read (never imported) from ``pkg/mod.py`` or ``pkg/mod/__init__.py`` under the first
-        of ``roots`` holding it; otherwise ``query`` and ``row`` can only be passed by
-        keyword. Of ``@overload`` definitions, the first naming both is used unless the
-        implementation names them.
+        of ``roots`` holding it, following names ``pkg.mod`` re-exports (``from .core import
+        Connection``); otherwise ``query`` and ``row`` can only be passed by keyword. Of
+        ``@overload`` definitions, the first naming both is used unless the implementation
+        names them.
 
         Example:
             >>> index = HelperIndex()
@@ -377,12 +378,7 @@ class HelperIndex:
         parts = import_path.split(".")
         for i in range(len(parts) - 1, 0, -1):
             module, name = ".".join(parts[:i]), ".".join(parts[i:])
-            parsed = self.sources.get(module) or self._module_source(parts[:i], roots)
-            definition = min(
-                (d for d in (_definitions(parsed) if parsed else []) if d[0] == name),
-                key=lambda d: _rank(d[1], {query, row} - {None} <= _parameters(d[1].args)),
-                default=None,
-            )
+            definition = self._definition(parts[:i], name, query, row, roots)
             if definition is not None:
                 helper = _helper(name, definition[1], definition[2], query, row)
                 self.modules.setdefault(module, {})[name] = replace(helper, configured=True)
@@ -397,6 +393,36 @@ class HelperIndex:
                     )
         self._pattern = None
         self._names = None
+
+    def _definition(
+        self,
+        parts: list[str],
+        name: str,
+        query: str,
+        row: str | None,
+        roots: Sequence[Path],
+        _depth: int = 0,
+    ) -> tuple[str, ast.FunctionDef | ast.AsyncFunctionDef, str] | None:
+        """The definition of ``name`` in module ``parts``, following the names it re-exports."""
+        module = ".".join(parts)
+        indexed = (parsed := self.sources.get(module)) is not None
+        if parsed is None and (parsed := self._module_source(parts, roots)) is None:
+            return None
+        definition = min(
+            (d for d in _definitions(parsed) if d[0] == name),
+            key=lambda d: _rank(d[1], {query, row} - {None} <= _parameters(d[1].args)),
+            default=None,
+        )
+        if definition is not None or _depth > 8:
+            return definition
+        head, dot, rest = name.partition(".")
+        # A module read from one project's roots is not cached: another may have its own.
+        exports = self._reexports(module, parsed) if indexed else _imports(parsed, parsed.module)[0]
+        if (target := exports.get(head)) is None:
+            return None
+        return self._definition(
+            target[0].split("."), target[1] + dot + rest, query, row, roots, _depth + 1
+        )
 
     def _module_source(self, parts: list[str], roots: Sequence[Path]) -> ParsedSource | None:
         """Module ``parts`` read from the first of ``roots`` holding it; never imported."""
