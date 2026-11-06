@@ -1,3 +1,7 @@
+---
+description: How to type-check queries passed to your own helper functions with Annotated[LiteralString, SQL], with no --sql marker or SQL[T] wrapper at call sites.
+---
+
 # Query helpers
 
 Code that sends queries through a helper function needs no `--sql` marker and

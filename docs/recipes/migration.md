@@ -1,3 +1,7 @@
+---
+description: How to adopt sqlty in an existing Python codebase one module or one query at a time, turning untyped raw SQL into typed queries without breaking code.
+---
+
 # Migration
 
 sqlty only acts on strings that start with `--sql` (or `-- sql`), so you can adopt it one

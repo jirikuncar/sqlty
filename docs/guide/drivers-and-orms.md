@@ -1,3 +1,7 @@
+---
+description: Where an ORM or database driver returns a different Python type than the raw value sqlty infers, for SQLAlchemy, Django and others, and what to annotate.
+---
+
 # Drivers and ORMs
 
 sqlty types the value your database driver returns. When you run a query through

@@ -1,3 +1,7 @@
+---
+description: How to install the sqlty Agent Skills for Claude Code and other coding agents, so they write typed queries, read diagnostics and plan schema changes.
+---
+
 # Coding agents
 
 sqlty ships [Agent Skills](https://agentskills.io): instructions a coding agent
