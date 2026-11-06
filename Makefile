@@ -158,6 +158,7 @@ bench-rust:  ## Criterion: catalog load, analyzer, check/rewrite_source; extra a
 docs: playground
 	$(ZENSICAL) build --clean
 	python3 scripts/playground_links.py site
+	python3 scripts/structured_data.py site
 	python3 scripts/offline.py site
 
 .PHONY: playground
