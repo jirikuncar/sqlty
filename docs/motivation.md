@@ -1,3 +1,7 @@
+---
+description: Why raw SQL in Python is untyped, how sqlty types it without a database or an ORM, and how it compares with aiosql, PugSQL, sqlc and other prior art.
+---
+
 # Why SQLTy?
 
 ## The problem

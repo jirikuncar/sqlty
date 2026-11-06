@@ -1,3 +1,7 @@
+---
+description: How to replace inferred tuple rows with a TypedDict, NamedTuple, dataclass, Pydantic model or Protocol, and have sqlty check it against the query columns.
+---
+
 # Row types
 
 `sqlty rewrite` writes `SQL[tuple[...]]`. You can replace the tuple with a

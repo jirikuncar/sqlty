@@ -1,3 +1,7 @@
+---
+description: "Reference for every sqlty configuration key in sqlty.toml, pyproject.toml or Cargo.toml: schema, dialect, queries, rules and file selection."
+---
+
 # Configuration
 
 sqlty reads `sqlty.toml`, `[tool.sqlty]` from `pyproject.toml`, or `[package.metadata.sqlty]`

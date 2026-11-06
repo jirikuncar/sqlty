@@ -1,3 +1,7 @@
+---
+description: "Reference for the sqlty command line: rewrite, strip, format, check, complete, breaking, rule, skill, server and version, with flags and exit codes."
+---
+
 # CLI
 
 <!-- generated:cli-usage -->

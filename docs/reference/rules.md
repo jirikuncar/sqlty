@@ -1,3 +1,7 @@
+---
+description: Reference for every sqlty check rule, its default severity and what it reports, and how to change severities in [tool.sqlty.rules].
+---
+
 # Rules
 
 `sqlty check` reports diagnostics as `file:line: [rule] message`. Each rule

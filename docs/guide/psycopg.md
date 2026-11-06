@@ -1,3 +1,7 @@
+---
+description: "How to get typed rows from psycopg 3 with sqlty.drivers.psycopg: the type checker sees SQL[T] rows, and the matching row factory builds T at runtime."
+---
+
 # psycopg
 
 `SQL[T]` is a `str` subclass, so it can be passed to any driver as is. For
