@@ -1,6 +1,7 @@
 """Load the docs playground in Chromium and check that it works: the engine answers, the
 tour gets its diagnostics, a share link restores a session, steps move and reset, and
-the site works offline once its service worker has cached it.
+a docs example opens in it, and the site works offline once its service worker has cached
+it.
 
     uvx --with playwright python scripts/check_playground.py https://jirikuncar.github.io/sqlty/playground/
     uvx --with playwright python scripts/check_playground.py --site site
@@ -90,6 +91,7 @@ def check(page: Page, url: str) -> None:
     assert page.input_value("[data-step-select]") == "1"
 
     embedded(page, url)
+    example(page, url)
     offline(page, url)
 
 
@@ -108,6 +110,15 @@ def embedded(page: Page, url: str) -> None:
     assert page.is_visible("[data-fix]")
     opened = page.get_attribute("[data-open]", "href")
     assert "embed" not in opened and opened.split("#")[1] == shared.split("#")[1], opened
+
+
+def example(page: Page, url: str) -> None:
+    """A docs example opens in the playground with its schema, rules and diagnostics."""
+    page.goto(url.removesuffix("playground/") + "guide/name-diagnostics/")
+    page.click(".sqlty-try >> nth=0")
+    page.wait_for_selector("[data-types] code", state="attached", timeout=60_000)
+    problems = page.inner_text("[data-problems]")
+    assert "unknown-column" in problems, problems
 
 
 def offline(page: Page, url: str) -> None:

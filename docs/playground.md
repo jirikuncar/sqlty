@@ -241,6 +241,13 @@ SQLTy as an app; in Safari, **Share** then **Add to Home Screen** (iOS) or **Fil
 and keeps it ready offline from its first start. Steps from `?steps=<url>` need that URL to
 be reachable; a file opened or dropped on the page does not.
 
+## Open a docs example
+
+Each Python example of these docs has a **Playground** link under it. It opens
+the example here with the schema and the `[tool.sqlty]` settings of its page, so
+you can edit it and see what changes. An example that needs a helper module, or
+a setting that reads files, has no link.
+
 ## Share a session
 
 The page keeps the Python source, the schema, the dialect and `sqlty.toml` in its
