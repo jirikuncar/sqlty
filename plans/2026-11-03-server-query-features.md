@@ -79,3 +79,6 @@ Python string on its own.
   the check worker like `source.fixAll.sqlty`. Not `textDocument/formatting`: VS Code runs one
   document formatter per language, so it would replace Ruff or Black instead of running
   beside them. `.sql` query files are left to sqruff itself.
+- The playground's **Format** button is a `format` op of `sqlty-wasm`, asked on click rather
+  than in `analyze`, which runs on every keystroke. Linking sqruff takes the engine from
+  1.6 MB to 2.7 MB gzipped.

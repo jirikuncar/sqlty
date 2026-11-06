@@ -582,14 +582,16 @@ root.addEventListener("drop", async (event) => {
   }
 });
 resizable(root.querySelector("[data-splitter]"), root.querySelector(".sqlty-console"));
-for (const [button, made] of [["fix", "fixed"], ["rewrite", "rewritten"], ["strip", "stripped"]]) {
+const format = () => ask(request("format")).formatted;
+for (const [button, made] of [["fix", "fixed"], ["rewrite", "rewritten"], ["strip", "stripped"], ["format", format]]) {
   root.querySelector(`[data-${button}]`).addEventListener("click", () => {
     refresh();
     const model = models.python;
-    if (current[made] === model.getValue()) return;
+    const text = typeof made === "function" ? made() : current[made];
+    if (text === undefined || text === model.getValue()) return;
     open("python");
     editor.pushUndoStop();
-    editor.executeEdits("sqlty", [{ range: model.getFullModelRange(), text: current[made] }]);
+    editor.executeEdits("sqlty", [{ range: model.getFullModelRange(), text }]);
     editor.pushUndoStop();
   });
 }

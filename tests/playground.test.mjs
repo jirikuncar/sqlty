@@ -45,6 +45,12 @@ test("param-types = true makes Rewrite and Fix all write the parameter types", (
   assert.equal(answer.fixed, answer.rewritten);
 });
 
+test("format lays out a triple-quoted query with sqruff", () => {
+  const source = 'q = """--sql\nselect id,name from users where id=%s"""\n';
+  const answer = ask({ op: "format", source, dialect: "postgres" });
+  assert.equal(answer.formatted, 'q = """--sql\nselect\n    id,\n    name\nfrom users\nwhere id = %s"""\n');
+});
+
 test("a configuration key that needs files is an error", () => {
   const answer = ask({ op: "analyze", source: "", dialect: "postgres", config: 'schema = "schema.sql"' });
   assert.match(answer.error, /not 'schema'/);
