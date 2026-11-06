@@ -6,4 +6,4 @@ User-agent: Claude-SearchBot
 User-agent: Claude-User
 Allow: /
 
-Sitemap: https://jirikuncar.github.io/sqlty/sitemap.xml
+Sitemap: https://sqlty.kuncar.dev/sitemap.xml
