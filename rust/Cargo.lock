@@ -1264,6 +1264,7 @@ version = "0.4.0"
 dependencies = [
  "serde",
  "serde_json",
+ "sqlty-format",
  "sqlty-python",
  "sqlty-sql",
 ]

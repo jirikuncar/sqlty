@@ -39,6 +39,7 @@ enum Op {
     Analyze,
     Complete,
     Hover,
+    Format,
 }
 
 #[derive(Deserialize)]
@@ -65,6 +66,8 @@ struct Request {
 /// - `complete`: the completions at `offset`, and the `range` they replace; `null` outside
 ///   a query.
 /// - `hover`: what the word at `offset` is, in Markdown; `null` when nothing.
+/// - `format`: `formatted`, what `sqlty format` makes of the source. Not part of `analyze`,
+///   which runs on every keystroke.
 ///
 /// `config` is a `sqlty.toml` whose `dialect`, `import-style`, `param-types` and `rules` apply;
 /// another key, or an invalid one, is an `error`, as `sqlty check` reports it.
@@ -160,6 +163,9 @@ pub fn run(request: &str) -> String {
             }),
             None => Value::Null,
         },
+        Op::Format => {
+            json!({ "formatted": sqlty_format::format_source(source, dialect, &options.style) })
+        }
     };
     answer.to_string()
 }
