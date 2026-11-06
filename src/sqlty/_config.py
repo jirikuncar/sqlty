@@ -137,6 +137,12 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "`rewrite`, `strip`, `check`, magic codec",
         "Another configuration file this one is applied on top of, relative to this file",
     ),
+    "databases": KeyDoc(
+        "table of tables",
+        "`{}`",
+        "`rewrite`, `check`",
+        "Named databases, each with its own `dialect`, `schema` and the files it applies to",
+    ),
     "exclude": KeyDoc(
         "list of globs",
         "see [Default excludes](#exclude-and-extend-exclude)",
@@ -327,6 +333,25 @@ class SQLTyConfig(TypedDict, total=False):
     types: dict[str, str]  # SQL type or table.column -> Python type a converter gives it
     format_command: list[str]  # formatter run on changed files, path appended
     extend: str  # another configuration file this one is applied on top of
+    databases: dict[str, DatabaseConfig]  # named databases, by name
+
+
+class DatabaseConfig(TypedDict, total=False):
+    """A ``[tool.sqlty.databases.NAME]`` table: a catalog of its own, for the files ``include``
+    matches (relative to the configuration file) and ``exclude`` does not.
+
+    Unset keys are those of ``[tool.sqlty]``; ``rules`` and ``types`` merge key by key.
+    """
+
+    dialect: str
+    schema: SchemaSpec
+    queries: SchemaSpec
+    query_format: str
+    rules: dict[str, str]
+    types: dict[str, str]
+    functions: list[FunctionConfigComplete]
+    include: list[str]
+    exclude: list[str]
 
 
 def expand_schema(spec: SchemaSpec | Path, base: Path) -> list[Path]:
@@ -443,8 +468,8 @@ def _extended(
 ) -> SQLTyConfig:
     """``config`` of ``path`` on top of the file its ``extend`` names, recursively.
 
-    ``rules`` and ``types`` merge key by key; any other key of ``config`` replaces the
-    extended one. ``schema`` and ``queries`` of an extended file are rebased onto ``base``,
+    ``rules``, ``types`` and ``databases`` merge key by key; any other key of ``config``
+    replaces the extended one. ``schema`` and ``queries`` of an extended file are rebased onto ``base``,
     the directory the relative paths of ``config`` start from.
     """
     extend = config.pop("extend", None)
@@ -462,17 +487,20 @@ def _extended(
         target.parent,
         chain,
     )
-    for key in ("schema", "queries"):
-        if key in parent:
-            spec = parent[key]
-            parent[key] = [
-                os.path.relpath(target.parent / entry, base)
-                for entry in ([spec] if isinstance(spec, str) else spec)
-            ]
+    for table in [parent, *parent.get("databases", {}).values()]:
+        for key in ("schema", "queries"):
+            if key in table:
+                spec = table[key]
+                table[key] = [
+                    os.path.relpath(target.parent / entry, base)
+                    for entry in ([spec] if isinstance(spec, str) else spec)
+                ]
     merged = cast(SQLTyConfig, {**parent, **config})
     for key in ("rules", "types"):
         if key in parent and key in config:
             merged[key] = {**parent[key], **config[key]}  # type: ignore[literal-required]
+    if "databases" in parent and "databases" in config:
+        merged["databases"] = {**parent["databases"], **config["databases"]}
     return merged
 
 
@@ -566,6 +594,10 @@ def _parse_table(tool_config: dict[str, Any], source: str) -> SQLTyConfig:
 
 
 def _converted(table: dict[str, Any], skipped: list[str], source: str) -> SQLTyConfig:
+    if "databases" in table:
+        table["databases"] = {
+            name: _converted(database, [], source) for name, database in table["databases"].items()
+        }
     for key, python in table.get("types", {}).items():
         try:
             ast.parse(python, mode="eval")

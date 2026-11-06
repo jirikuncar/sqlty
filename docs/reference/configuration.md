@@ -111,6 +111,7 @@ A directory with more than one file reads the first of `sqlty.toml`,
 | [`types`](#types) | table of SQL type or `table.column` = Python type | `{}` | `rewrite`, `check` | Python types a converter above the driver gives a SQL type or a column |
 | [`format-command`](#format-command) | list of strings | none | `rewrite`, `check --fix` | Formatter run on each file `rewrite` or `check --fix` changes, with the path appended |
 | [`extend`](#extend) | string | none | `rewrite`, `strip`, `check`, magic codec | Another configuration file this one is applied on top of, relative to this file |
+| [`databases`](#databases) | table of tables | `{}` | `rewrite`, `check` | Named databases, each with its own `dialect`, `schema` and the files it applies to |
 | [`exclude`](#exclude-and-extend-exclude) | list of globs | see [Default excludes](#exclude-and-extend-exclude) | `rewrite`, `strip`, `check` | Globs skipped while walking a directory; replaces the default list |
 | [`extend-exclude`](#exclude-and-extend-exclude) | list of globs | `[]` | `rewrite`, `strip`, `check` | Globs skipped in addition to `exclude` or the defaults |
 | [`respect-gitignore`](#respect-gitignore) | boolean | `true` | `rewrite`, `strip`, `check` | Skip the files `.gitignore` ignores while walking a directory |
@@ -405,6 +406,45 @@ missing file, or a chain that comes back to a file already in it, is an error.
 !!! note "The editor reloads on its own files only"
     `sqlty server` reloads when a `sqlty.toml`, `pyproject.toml` or `Cargo.toml` changes.
     An extended file of another name takes effect when the server restarts.
+
+## `databases`
+
+One package can query several databases, each with its own dialect and schema. Name each
+one under `databases`; the top-level keys stay the default database.
+
+```toml
+[tool.sqlty]
+schema = "db/app.sql"
+
+[tool.sqlty.databases.analytics]
+dialect = "sqlite"
+schema = "db/analytics.sql"
+queries = ["sql/analytics"]
+include = ["src/app/reports"]
+exclude = ["legacy.py"]
+
+[tool.sqlty.databases.analytics.rules]
+select-star = "ignore"
+```
+
+A file is checked against the first database that names it:
+
+1. A `.sql` file its `queries` names.
+2. A file its `include` globs match and its `exclude` globs don't, matched as
+   [`overrides`](#overrides) match.
+3. Any other file uses the default database.
+
+A database takes `dialect`, `schema`, `queries`, `query-format`, `rules`, `types` and
+`functions`. A key it leaves unset is the top-level one; `rules` and `types` merge key by
+key, so a database changes single entries. Every other setting, such as `import-style`,
+applies to all databases. Its paths and globs are relative to the configuration file.
+
+`--dialect` and `--schema` apply to the default database and to a database that names
+neither. A database name is letters, digits, `-` and `_`; `default` is reserved.
+
+!!! note "The magic codec reads the default database"
+    `# coding: sqlty` decodes a module with the top-level settings, whatever database its
+    path belongs to.
 
 ## `exclude` and `extend-exclude`
 
