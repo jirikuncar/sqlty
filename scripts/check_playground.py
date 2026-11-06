@@ -64,6 +64,11 @@ def check(page: Page, url: str) -> None:
     fixed = page.evaluate(f"{SOURCE}.getValue()")
     assert "SELECT name FROM users" in fixed, fixed
 
+    page.evaluate(f'{SOURCE}.setValue(\'q = """--sql\\nselect id,name from users"""\\n\')')
+    page.click("[data-format]")
+    formatted = page.evaluate(f"{SOURCE}.getValue()")
+    assert formatted == 'q = """--sql\nselect\n    id,\n    name\nfrom users"""\n', formatted
+
     page.select_option("[data-example]", label="Tour in steps")
     page.wait_for_selector("[data-steps]:not([hidden])")
     first = page.evaluate(f"{SOURCE}.getValue()")

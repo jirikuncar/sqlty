@@ -30,6 +30,7 @@ queries as you type. It runs in your browser. The engine is compiled to
       <button type="button" class="sqlty-button sqlty-button--primary" data-fix>Fix all</button>
       <button type="button" class="sqlty-button" data-rewrite>Rewrite</button>
       <button type="button" class="sqlty-button" data-strip>Strip</button>
+      <button type="button" class="sqlty-button" data-format>Format</button>
       <button type="button" class="sqlty-button" data-copy-link><span class="sqlty-wide">Copy link</span><span class="sqlty-narrow"></span></button>
       <span class="sqlty-group" role="group" aria-label="Font size">
         <button type="button" class="sqlty-button" data-zoom="-1" title="Smaller (Ctrl+-)" aria-label="Smaller">A&minus;</button>
@@ -86,7 +87,7 @@ queries as you type. It runs in your browser. The engine is compiled to
     background-color: var(--md-default-bg-color);
   }
   .sqlty-embedded .sqlty-toolbar { margin-bottom: 0.4rem; }
-  .sqlty-embedded .sqlty-toolbar label, .sqlty-embedded [data-rewrite], .sqlty-embedded [data-strip],
+  .sqlty-embedded .sqlty-toolbar label, .sqlty-embedded [data-rewrite], .sqlty-embedded [data-strip], .sqlty-embedded [data-format],
   .sqlty-embedded [data-copy-link], .sqlty-embedded .sqlty-group, .sqlty-embedded [data-present],
   .sqlty-embedded [data-tab="json"] { display: none; }
   .sqlty-open { display: none; }
@@ -226,6 +227,7 @@ focus it and press the arrow keys. The page remembers the height and the font si
 | **Fix all** | Every quick fix, as `sqlty check --fix` makes them | `sqlty check --fix` |
 | **Rewrite** | Each query wrapped in `SQL[T]` | `sqlty rewrite` |
 | **Strip** | Each `SQL[T]` wrapper removed | `sqlty strip` |
+| **Format** | Each triple-quoted query laid out by [sqruff](guide/formatting.md) | `sqlty format` |
 
 A single fix is a quick fix on its diagnostic: click the light bulb, or press
 **Ctrl+.** with the cursor on it. **Ctrl+Z** undoes any of them.

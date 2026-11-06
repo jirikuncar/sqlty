@@ -1,8 +1,9 @@
 # Server features in query strings
 
 > **Status:** stage 1 (hover) merged in [#852](https://github.com/jirikuncar/sqlty/pull/852); stage 3 (join completion)
-> merged in [#853](https://github.com/jirikuncar/sqlty/pull/853). Stage 4a (`sqlty format` with sqruff) in review;
-> stage 4b (the server's formatting) next. Stage 2 needs a decision on where signatures come from; stage 5 waits
+> merged in [#853](https://github.com/jirikuncar/sqlty/pull/853). Stage 4a (`sqlty format` with sqruff) merged in
+> [#930](https://github.com/jirikuncar/sqlty/pull/930); stage 4b (the server's formatting) in review; stage 4c
+> (sqruff's lint rules in `sqlty check`) next. Stage 2 needs a decision on where signatures come from; stage 5 waits
 > for demand after stage 1.
 
 Tracks [#847](https://github.com/jirikuncar/sqlty/issues/847): what `sqlty server` offers inside
@@ -16,8 +17,9 @@ only the schema and the parsed query: no connection, no execution.
 | 1 | Hover: a column's type and source, a table's columns, a result column with its inference rule; `core.hover_source`, `# hover:` mdtests, `textDocument/hover`, `hover.enable` | merged, [#852](https://github.com/jirikuncar/sqlty/pull/852) |
 | 2 | Signature help for functions the inference rules type, from their `function`, `argument` and `reference` | needs a decision: 36 of 389 function rules give arguments, none give arity or parameter names |
 | 3 | Join completion: after `JOIN`, tables linked by a foreign key first, with the `ON` clause | merged, [#853](https://github.com/jirikuncar/sqlty/pull/853) |
-| 4a | `sqlty format` and `core.format_source`: query strings laid out by sqruff's layout rules | in review |
-| 4b | Formatting in `sqlty server`, and sqruff's lint rules in `sqlty check` | next |
+| 4a | `sqlty format` and `core.format_source`: query strings laid out by sqruff's layout rules | merged, [#930](https://github.com/jirikuncar/sqlty/pull/930) |
+| 4b | Formatting in `sqlty server`: the code action `source.format.sqlty` | in review |
+| 4c | sqruff's lint rules in `sqlty check` | next |
 | 5 | Inlay hints of column types for `SELECT *` | waits for demand after stage 1 |
 
 ## Stage 1
@@ -73,3 +75,10 @@ Python string on its own.
 - Not covered in 4a: single-quoted strings (they would need `\n` escapes), concatenated
   literals, `sql.SQL` and helper arguments, which `Queries` finds only with the Python
   helper index.
+- 4b: `sqlty server` offers `sqlty format` as the source action `source.format.sqlty`, run on
+  the check worker like `source.fixAll.sqlty`. Not `textDocument/formatting`: VS Code runs one
+  document formatter per language, so it would replace Ruff or Black instead of running
+  beside them. `.sql` query files are left to sqruff itself.
+- The playground's **Format** button is a `format` op of `sqlty-wasm`, asked on click rather
+  than in `analyze`, which runs on every keystroke. Linking sqruff takes the engine from
+  1.6 MB to 2.7 MB gzipped.
