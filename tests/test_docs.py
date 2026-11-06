@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pygments.lexers import get_lexer_by_name
 
 import sqlty
 from sqlty._config import load_config
@@ -131,6 +132,34 @@ def test_module_doctests(name: str, monkeypatch: pytest.MonkeyPatch) -> None:
     result = doctest.testmod(module, optionflags=doctest.ELLIPSIS)
     assert result.failed == 0
     assert result.attempted > 0 or name not in WITH_EXAMPLES
+
+
+def test_pygments_lexer_colors_sql_in_query_strings() -> None:
+    lexer = get_lexer_by_name("sqlty")
+    source = 'name = "é"\nq = "--sql\\nSELECT \'ü\' FROM users WHERE id = $1"\n'
+    tokens = [(str(kind), text) for kind, text in lexer.get_tokens(source) if text.strip()]
+    assert "".join(text for _, text in lexer.get_tokens(source)) == source
+    assert tokens[2:] == [
+        ("Token.Literal.String.Double", '"'),
+        ("Token.Literal.String.Double", "é"),
+        ("Token.Literal.String.Double", '"'),
+        ("Token.Name", "q"),
+        ("Token.Operator", "="),
+        ("Token.Literal.String.Double", '"'),
+        ("Token.Comment.Single", "--sql"),
+        ("Token.Literal.String.Escape", "\\n"),
+        ("Token.Keyword", "SELECT"),
+        ("Token.Literal.String.Single", "'"),
+        ("Token.Literal.String.Single", "ü"),
+        ("Token.Literal.String.Single", "'"),
+        ("Token.Keyword", "FROM"),
+        ("Token.Literal.String.Double", " users "),
+        ("Token.Keyword", "WHERE"),
+        ("Token.Literal.String.Double", " id "),
+        ("Token.Operator", "="),
+        ("Token.Name.Variable", "$1"),
+        ("Token.Literal.String.Double", '"'),
+    ]
 
 
 def test_rule_docs() -> None:
