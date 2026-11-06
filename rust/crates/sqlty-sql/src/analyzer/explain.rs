@@ -48,6 +48,7 @@ pub fn explain_select(
     dialect: &str,
     schema: Option<&SchemaData>,
 ) -> Option<Vec<ColumnRules>> {
+    let (dialect, schema) = super::route(sql, dialect, schema);
     let dialect = SqlDialect::from_name(dialect);
     let input = parser_input(sql, dialect);
     let stmt = parse_input(input.text(), dialect)?.into_iter().next()?;

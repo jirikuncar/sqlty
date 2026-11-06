@@ -1345,6 +1345,41 @@ def test_a_database_inherits_and_merges_the_project_settings(tmp_path, monkeypat
     ]
 
 
+def test_a_query_marker_picks_its_database(tmp_path, monkeypatch, capsys) -> None:
+    _databases_project(tmp_path)
+    (tmp_path / "app/mixed.py").write_text(
+        'a = "--sql sqlty:db=analytics\\nSELECT kind FROM events"\n'
+        'b = "--sql sqlty:db=analytic\\nSELECT id FROM users"\n'
+    )
+    (tmp_path / "app/reports/back.py").write_text(
+        'q = "--sql sqlty:db=default\\nSELECT id FROM users"\n'
+    )
+    (tmp_path / "app/users.sql").write_text(
+        "-- sqlty: db=default\n\n-- name: ids\nSELECT id FROM users;\n"
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        _DATABASES.replace('queries = ["sql"]', 'queries = ["sql", "app/users.sql"]')
+    )
+    monkeypatch.chdir(tmp_path)
+
+    main(["rewrite", "app/mixed.py", "app/reports/back.py"])
+    _, out, _ = _run(["check", "app/mixed.py", "app/users.sql"], capsys)
+
+    assert (tmp_path / "app/mixed.py").read_text() == (
+        "from sqlty import SQL\n"
+        'a = SQL[tuple[str]]("--sql sqlty:db=analytics\\nSELECT kind FROM events")\n'
+        'b = SQL[tuple[int]]("--sql sqlty:db=analytic\\nSELECT id FROM users")\n'
+    )
+    assert (tmp_path / "app/reports/back.py").read_text() == (
+        'from sqlty import SQL\nq = SQL[tuple[int]]("--sql sqlty:db=default\\nSELECT id FROM users")\n'
+    )
+    assert out.splitlines() == [
+        f"app{os.sep}mixed.py:3: [unknown-database] database `analytic` is not configured; "
+        "did you mean `analytics`?",
+        "Found 1 error(s)",
+    ]
+
+
 def test_the_server_checks_a_buffer_against_its_database(tmp_path) -> None:
     from sqlty._lsp_bridge import Workspace
 

@@ -27,7 +27,9 @@ use crate::rewriter::{
 use crate::rules::{Rule, RuleConfig, Severity};
 use crate::scan::Scan;
 use crate::tokens::{content, query_offset, Call};
-use sqlty_sql::analyzer::{expand_star, parse, row_type, Column, Parsed, SchemaData};
+use sqlty_sql::analyzer::{
+    expand_star, parse, route, row_type, unknown_database, Column, Parsed, SchemaData,
+};
 use sqlty_sql::diagnostics::{NameDiagnostic, NameRule};
 use std::ops::Range;
 
@@ -231,8 +233,9 @@ impl Checker<'_> {
         }
         #[cfg(test)]
         ANALYZED.with(|count| count.set(count.get() + 1));
-        let parsed = parse(query, self.options.dialect.name());
-        let (columns, diagnostics) = parsed.analyze_with_diagnostics(self.options.schema);
+        let (dialect, schema) = route(query, self.options.dialect.name(), self.options.schema);
+        let parsed = parse(query, dialect);
+        let (columns, diagnostics) = parsed.analyze_with_diagnostics(schema);
         let columns = columns.ok().flatten();
         let analysis = Rc::new(Analysis {
             row_type: columns.as_deref().and_then(row_type),
@@ -428,6 +431,11 @@ impl Checker<'_> {
                 fix.into_iter().collect(),
             );
         }
+        if let Some(message) = marked_query(sql_content)
+            .and_then(|query| unknown_database(&query, self.options.schema))
+        {
+            self.report(Rule::UnknownDatabase, message, at);
+        }
         if self.rules.is_enabled(Rule::UnparsedQuery) && !template {
             if let Some(error) =
                 marked_query(sql_content).and_then(|sql| self.analysis(&sql).parsed.error())
@@ -515,18 +523,14 @@ impl Checker<'_> {
             return;
         };
         let stars = self.analysis(&query).parsed.result_stars();
-        let Some((rule, message)) = star_finding(stars, &query, self.options.schema.is_some())
-        else {
+        let (dialect, schema) = route(&query, self.options.dialect.name(), self.options.schema);
+        let Some((rule, message)) = star_finding(stars, &query, schema.is_some()) else {
             return;
         };
-        let fix = match (rule, call.strings.as_slice(), self.options.schema) {
-            (Rule::SelectStar, [span], Some(schema)) => expanded_literal(
-                self.scan.source(),
-                span,
-                sql_content,
-                self.options.dialect.name(),
-                schema,
-            ),
+        let fix = match (rule, call.strings.as_slice(), schema) {
+            (Rule::SelectStar, [span], Some(schema)) => {
+                expanded_literal(self.scan.source(), span, sql_content, dialect, schema)
+            }
             _ => None,
         };
         self.report_fix(rule, message, at, fix.into_iter().collect());
@@ -541,10 +545,11 @@ impl Checker<'_> {
     /// Why a query has no row type, and what to do about it: the first name or construct
     /// the analyzer could not type, else the untyped columns.
     fn untyped_cause(&self, sql_content: &str) -> String {
-        let has_schema = self.options.schema.is_some_and(|schema| !schema.is_empty());
         let Some(query) = marked_query(sql_content) else {
             return "add casts (for example id::INTEGER) or a schema".to_string();
         };
+        let (_, schema) = route(&query, self.options.dialect.name(), self.options.schema);
+        let has_schema = schema.is_some_and(|schema| !schema.is_empty());
         let analysis = self.analysis(&query);
         if let Some(diagnostic) = analysis.diagnostics.first() {
             let hint = match diagnostic.rule {
@@ -719,8 +724,12 @@ fn expanded_literal(
 }
 
 /// A `--sql` marker line at the start of string content.
-static SQL_PREFIX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?s)^(\s*(?:--sql|-- sql)(?:\\r\\n|\\n|\r?\n))(.*)").unwrap());
+static SQL_PREFIX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?s)^(\s*(?:--sql|-- sql)(?:[ \t]+sqlty:[ \t]*db=[\w-]+)?(?:\\r\\n|\\n|\r?\n))(.*)",
+    )
+    .unwrap()
+});
 
 const INLINE_MESSAGE: &str = r#""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty check --fix"#;
 

@@ -193,6 +193,8 @@ pub struct Catalog {
     overrides: Arc<TypeOverrides>,
     /// Sorted names for prefix lookups, sharing the keys above; built once by `load`.
     index: NameIndex,
+    /// The named databases queries are routed to, when the schema was loaded with them.
+    pub(crate) databases: Option<Arc<crate::analyzer::Databases>>,
 }
 
 /// Python types a project sets for SQL types or columns (`[tool.sqlty.types]`), for
