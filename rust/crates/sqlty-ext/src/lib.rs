@@ -700,6 +700,40 @@ fn format_source(
     })
 }
 
+/// `(code, message, start, end, query_start)` of a [`sqlty_format::Finding`].
+type SqruffFinding = (&'static str, String, usize, usize, usize);
+
+/// What sqruff's core lint rules, less its layout rules, find in the query strings of
+/// Python source: `(code, message, start, end, query_start)`, byte offsets in `source`.
+///
+/// Raises:
+///     ValueError: unsupported import_style
+#[pyfunction]
+#[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, import_style = None))]
+fn sqruff_findings(
+    py: Python<'_>,
+    source: &str,
+    dialect: DialectArg,
+    import_style: Option<&str>,
+) -> Result<Vec<SqruffFinding>, Error> {
+    detach(py, || {
+        let style = ImportStyle::parse(import_style)?;
+        Ok(sqlty_format::lint_source(source, dialect.0, &style)
+            .into_iter()
+            .map(|found| {
+                let span = found.span;
+                (
+                    found.code,
+                    found.message,
+                    span.start,
+                    span.end,
+                    found.query_start,
+                )
+            })
+            .collect())
+    })
+}
+
 /// Apply what `sqlty check --fix` fixes; rules set to "ignore" are skipped.
 ///
 /// `suppressed` maps a line to the rules a `# sqlty: ignore` comment on it suppresses
@@ -1224,6 +1258,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(add_param_types, m)?)?;
     m.add_function(wrap_pyfunction!(strip_source, m)?)?;
     m.add_function(wrap_pyfunction!(format_source, m)?)?;
+    m.add_function(wrap_pyfunction!(sqruff_findings, m)?)?;
     m.add_function(wrap_pyfunction!(fix_source, m)?)?;
     m.add_function(wrap_pyfunction!(expand_star, m)?)?;
     m.add_function(wrap_pyfunction!(select_star_finding, m)?)?;

@@ -38,13 +38,17 @@ With `sqlty.breaking.against` set to `main`, each check also runs `sqlty breakin
   A finding in a file you have changed since sits on its first line and names its line in
   `main`.
 
-## Fix on save
+## Fix and format on save
+
+`source.fixAll.sqlty` is `sqlty check --fix`; `source.format.sqlty` is `sqlty format`, which
+lays out the query strings and leaves the rest to your Python formatter.
 
 ```json
 {
   "[python]": {
     "editor.codeActionsOnSave": {
-      "source.fixAll.sqlty": "explicit"
+      "source.fixAll.sqlty": "explicit",
+      "source.format.sqlty": "explicit"
     }
   }
 }

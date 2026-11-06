@@ -19,6 +19,7 @@ from sqlty._core import composite_fields as _composite_fields
 from sqlty._core import parse_error as _parse_error
 from sqlty._core import query_diagnostics as _query_diagnostics
 from sqlty._core import select_star_finding as _select_star_finding
+from sqlty._core import sqruff_findings as _sqruff_findings
 from sqlty._core import wrapped_queries as _wrapped_queries
 from sqlty._drivers import MARKER, find_driver_calls, find_template_calls
 from sqlty._helpers import HelperIndex, find_helper_calls
@@ -549,6 +550,23 @@ def diagnostics(
     diagnostics = [
         d for d in diagnostics if not (d["rule"] == "stale-rewrite" and d.get("line") in typed)
     ]
+    sqruff = RuleConfig(overrides=rules)
+    if sqruff.is_enabled("sqruff"):
+        severity = sqruff.severity("sqruff").value
+        diagnostics += [
+            {
+                "rule": "sqruff",
+                "message": f"{code}: {message}",
+                "severity": severity,
+                "line": parsed.position(query_start)[0],
+                "start": start,
+                "end": end,
+                "fix": [],
+            }
+            for code, message, start, end, query_start in _sqruff_findings(
+                parsed.text, dialect=dialect, import_style=import_style
+            )
+        ]
     driver_calls = find_driver_calls(parsed) + find_template_calls(parsed)
     queries = [
         (line, name, query, span)

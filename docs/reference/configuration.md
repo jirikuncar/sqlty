@@ -10,8 +10,7 @@ severity is an error (exit 2) that names the file and suggests the closest match
 In every case a `pyproject.toml` without `[tool.sqlty]`, or a `Cargo.toml` without
 either Cargo table, is skipped, so a package's packaging-only file in a monorepo
 does not hide the root config. The closest file wins; settings are not merged with files in
-parent directories. To change one setting for a nested project, give it its
-own complete configuration. Command-line flags (`--dialect`,
+parent directories, unless it names one with [`extend`](#extend). Command-line flags (`--dialect`,
 `--schema`, `--untyped`, `--exclude`, `--extend-exclude`, `--error`/`--warn`/`--ignore`)
 and `-c KEY=VALUE` assignments override the file for every path.
 
@@ -111,6 +110,7 @@ A directory with more than one file reads the first of `sqlty.toml`,
 | [`functions`](#functions) | array of tables | `[]` | `check` | Helper functions whose string argument is a query |
 | [`types`](#types) | table of SQL type or `table.column` = Python type | `{}` | `rewrite`, `check` | Python types a converter above the driver gives a SQL type or a column |
 | [`format-command`](#format-command) | list of strings | none | `rewrite`, `check --fix` | Formatter run on each file `rewrite` or `check --fix` changes, with the path appended |
+| [`extend`](#extend) | string | none | `rewrite`, `strip`, `check`, magic codec | Another configuration file this one is applied on top of, relative to this file |
 | [`exclude`](#exclude-and-extend-exclude) | list of globs | see [Default excludes](#exclude-and-extend-exclude) | `rewrite`, `strip`, `check` | Globs skipped while walking a directory; replaces the default list |
 | [`extend-exclude`](#exclude-and-extend-exclude) | list of globs | `[]` | `rewrite`, `strip`, `check` | Globs skipped in addition to `exclude` or the defaults |
 | [`respect-gitignore`](#respect-gitignore) | boolean | `true` | `rewrite`, `strip`, `check` | Skip the files `.gitignore` ignores while walking a directory |
@@ -375,6 +375,36 @@ ruff check --select I --fix --quiet "$@" && ruff format --quiet "$@"
 [tool.sqlty]
 format-command = ["sh", "scripts/format.sh"]
 ```
+
+## `extend`
+
+A package in a monorepo keeps its own configuration and shares the rest with the root.
+
+`packages/billing/pyproject.toml`:
+
+```toml
+[tool.sqlty]
+extend = "../../pyproject.toml"
+schema = "db/billing.sql"
+
+[tool.sqlty.rules]
+select-star = "error"
+```
+
+The package's settings are applied on top of the extended file's:
+
+- `rules` and `types` merge key by key, so the package adds or changes single entries.
+- Any other key the package sets replaces the extended one, `functions` and `overrides` included.
+- `schema` and `queries` of the extended file keep pointing at the files it names.
+- `exclude`, `extend-exclude` and `overrides` globs match paths relative to the package's file.
+
+`extend` is relative to the file that holds it, and the extended file may extend another.
+It reads `sqlty.toml`, `pyproject.toml` or `Cargo.toml` as the upward search does. A
+missing file, or a chain that comes back to a file already in it, is an error.
+
+!!! note "The editor reloads on its own files only"
+    `sqlty server` reloads when a `sqlty.toml`, `pyproject.toml` or `Cargo.toml` changes.
+    An extended file of another name takes effect when the server restarts.
 
 ## `exclude` and `extend-exclude`
 
