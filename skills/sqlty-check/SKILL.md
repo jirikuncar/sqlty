@@ -122,7 +122,7 @@ A query that isn't a string literal is skipped as `dynamic-query`, which is off
 by default. With `preview = true`, a query built from literals bound in branches is
 checked along every path (`max-query-variants`, `64` by default, caps the paths; a
 query with more is reported, never checked in part). See
-[Query variants](https://jirikuncar.github.io/sqlty/guide/query-variants/).
+[Query variants](https://sqlty.kuncar.dev/guide/query-variants/).
 
 ```toml
 [tool.sqlty]
@@ -170,10 +170,10 @@ analyze_params("SELECT name FROM users WHERE id = %s", schema_sql=schema)  # %s 
 
 ## Reference
 
-- [Rules](https://jirikuncar.github.io/sqlty/reference/rules/), and `sqlty rule NAME`
-- [Row types](https://jirikuncar.github.io/sqlty/guide/row-types/)
-- [Nullability](https://jirikuncar.github.io/sqlty/guide/schema-inference/#nullability)
-- [Parameters](https://jirikuncar.github.io/sqlty/guide/parameters/)
-- [Typed parameters](https://jirikuncar.github.io/sqlty/guide/parameters/#typed-parameters)
-- [Query variants](https://jirikuncar.github.io/sqlty/guide/query-variants/)
-- [Python API](https://jirikuncar.github.io/sqlty/reference/python-api/)
+- [Rules](https://sqlty.kuncar.dev/reference/rules/), and `sqlty rule NAME`
+- [Row types](https://sqlty.kuncar.dev/guide/row-types/)
+- [Nullability](https://sqlty.kuncar.dev/guide/schema-inference/#nullability)
+- [Parameters](https://sqlty.kuncar.dev/guide/parameters/)
+- [Typed parameters](https://sqlty.kuncar.dev/guide/parameters/#typed-parameters)
+- [Query variants](https://sqlty.kuncar.dev/guide/query-variants/)
+- [Python API](https://sqlty.kuncar.dev/reference/python-api/)

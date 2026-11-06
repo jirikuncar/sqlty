@@ -1,6 +1,6 @@
 ---
 name: sqlty-server
-description: Run sqlty in an editor with sqlty server, the language server, and the VS Code extension. Use when setting up sqlty in VS Code, Cursor, VSCodium, Neovim, Vim, Helix, Emacs or another LSP client, highlighting SQL in query strings, fixing a query on save with source.fixAll.sqlty, showing sqlty breaking findings while editing, or when the editor reports nothing or different diagnostics than sqlty check.
+description: Run sqlty in an editor with sqlty server, the language server, and the VS Code extension. Use when setting up sqlty in VS Code, Cursor, VSCodium, Neovim, Vim, Helix, Emacs or another LSP client, highlighting SQL in query strings, fixing a query on save with source.fixAll.sqlty, formatting query strings with source.format.sqlty, showing sqlty breaking findings while editing, or when the editor reports nothing or different diagnostics than sqlty check.
 ---
 
 # sqlty server
@@ -52,13 +52,15 @@ project's environment (`uv add --dev sqlty`) and the editor reports what CI repo
 | `sqlty.breaking.direction` | `both` (default), `forward` or `backward` |
 | `sqlty.trace.server` | `off` (default), `messages` or `verbose`: log the protocol in the **sqlty** output channel |
 
-Fix a file on every save with `source.fixAll.sqlty`, which is `sqlty check --fix`:
+Fix a file on every save with `source.fixAll.sqlty`, which is `sqlty check --fix`, and lay
+out its query strings with `source.format.sqlty`, which is `sqlty format`:
 
 ```json
 {
   "[python]": {
     "editor.codeActionsOnSave": {
-      "source.fixAll.sqlty": "explicit"
+      "source.fixAll.sqlty": "explicit",
+      "source.format.sqlty": "explicit"
     }
   }
 }
@@ -84,7 +86,7 @@ turns that off. VS Code shows one semantic-token provider per file, so the exten
 keeps it off there and highlights strings marked `--sql` with a grammar instead.
 
 For nvim-lint, Vim (vim-lsp, ALE, coc.nvim, `:make`), Helix and Emacs (Eglot, lsp-mode), see
-[Neovim, Vim, Helix and Emacs](https://jirikuncar.github.io/sqlty/recipes/editors/).
+[Neovim, Vim, Helix and Emacs](https://sqlty.kuncar.dev/recipes/editors/).
 Eglot runs one server per major mode: run sqlty next to ty or ruff through
 `rass python -- sqlty server`, with sqlty's highlighting off, or use lsp-mode with
 sqlty as an add-on.
@@ -108,6 +110,6 @@ when it moves, save a schema or run **sqlty: Restart Server**.
 
 ## Reference
 
-- [VS Code](https://jirikuncar.github.io/sqlty/recipes/vscode/)
-- [Neovim, Vim, Helix and Emacs](https://jirikuncar.github.io/sqlty/recipes/editors/)
-- [Breaking schema changes](https://jirikuncar.github.io/sqlty/guide/breaking-changes/)
+- [VS Code](https://sqlty.kuncar.dev/recipes/vscode/)
+- [Neovim, Vim, Helix and Emacs](https://sqlty.kuncar.dev/recipes/editors/)
+- [Breaking schema changes](https://sqlty.kuncar.dev/guide/breaking-changes/)

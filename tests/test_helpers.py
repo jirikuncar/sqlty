@@ -220,6 +220,46 @@ def test_register_reads_unindexed_modules_from_roots(tmp_path):
     assert index.modules["pkg.idx"]["run"].positional == ("form", "sql")
 
 
+def test_register_follows_reexports(tmp_path):
+    """A name a package re-exports is read from the module that defines it."""
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "lib" / "__init__.py").write_text("from .core import Db, run as fetch\n")
+    (tmp_path / "lib" / "core.py").write_text(
+        "class Db:\n    async def execute(self, sql, parameters=None): ...\n"
+        "def run(conn, sql, form): ...\n"
+    )
+    index = HelperIndex()
+    for path in ("lib.Db.execute", "lib.fetch"):
+        index.register(path, "sql", "form", roots=[tmp_path])
+    assert index.modules["lib"]["Db.execute"].positional == ("sql", "parameters")
+    assert index.modules["lib"]["Db.execute"].params == "parameters"
+    assert index.modules["lib"]["fetch"].positional == ("conn", "sql", "form")
+
+
+def test_register_reads_reexports_per_project(tmp_path):
+    """Two projects re-exporting a helper from different modules each get their own."""
+    for name, target, signature in (("a", "core", "conn, sql"), ("b", "other", "sql, conn")):
+        (tmp_path / name / "pkg").mkdir(parents=True)
+        (tmp_path / name / "pkg" / "__init__.py").write_text(f"from .{target} import run\n")
+        (tmp_path / name / "pkg" / f"{target}.py").write_text(f"def run({signature}): ...\n")
+    base = HelperIndex()
+    found = {}
+    for name in "ab":
+        fork = base.fork()
+        fork.register("pkg.run", "sql", roots=[tmp_path / name])
+        found[name] = fork.modules["pkg"]["run"].positional
+    assert found == {"a": ("conn", "sql"), "b": ("sql", "conn")}
+
+
+def test_register_stops_on_reexport_cycles(tmp_path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "__init__.py").write_text("from .b import X\n")
+    (tmp_path / "a" / "b.py").write_text("from a import X\n")
+    index = HelperIndex()
+    index.register("a.X.run", "sql", roots=[tmp_path])
+    assert index.modules["a"]["X.run"].positional == ()
+
+
 COMPOSED_DB = """\
 from typing import Annotated, LiteralString
 from psycopg import sql

@@ -84,6 +84,13 @@ def main() -> None:
                 out.write_bytes(archive.extractfile(member).read())
         stamp.write_text(integrity)
         print(f"{name}: {sum(1 for _ in target.rglob('*'))} files from {url}")
+    (VENDOR / "fonts.css").write_text(
+        "".join(
+            (VENDOR / font / css).read_text().replace("url(./", f"url({font}/")
+            for font in ("inter", "jetbrains-mono")
+            for css in ("index.css", "wght-italic.css")
+        )
+    )
 
 
 if __name__ == "__main__":
