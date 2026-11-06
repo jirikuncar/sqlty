@@ -30,7 +30,7 @@ use sqlty_sql::Dialect;
 pub const CONFIG_FILES: [&str; 3] = ["sqlty.toml", "pyproject.toml", "Cargo.toml"];
 
 /// Keys of `[tool.sqlty]` that are not file discovery; see also [`DISCOVERY_KEYS`].
-pub const TOOL_KEYS: [&str; 16] = [
+pub const TOOL_KEYS: [&str; 17] = [
     "dialect",
     "schema",
     "queries",
@@ -47,6 +47,7 @@ pub const TOOL_KEYS: [&str; 16] = [
     "types",
     "format-command",
     "extend",
+    "databases",
 ];
 
 /// Keys of `[tool.sqlty]` that pick the files to process.
@@ -57,6 +58,20 @@ pub const FUNCTION_KEYS: [&str; 3] = ["import-path", "query-param", "return-type
 
 /// Keys of a `[[tool.sqlty.overrides]]` entry.
 pub const OVERRIDE_KEYS: [&str; 3] = ["include", "exclude", "rules"];
+
+/// Keys of a `[tool.sqlty.databases.NAME]` table: what names a catalog, and the files it
+/// applies to. The rest of `[tool.sqlty]` is shared by every database.
+pub const DATABASE_KEYS: [&str; 9] = [
+    "dialect",
+    "schema",
+    "queries",
+    "query-format",
+    "rules",
+    "types",
+    "functions",
+    "include",
+    "exclude",
+];
 
 const REMOVED_KEYS: [(&str, &str); 1] = [(
     "type-modules",
@@ -239,6 +254,59 @@ pub fn validate(mut table: Table, source: &str) -> Result<Config, InvalidConfig>
         }
     }
     let mut skipped_functions = vec![];
+    if let Some(databases) = table.get_mut("databases") {
+        let Some(databases) = databases
+            .as_table_mut()
+            .filter(|d| d.values().all(Value::is_table))
+        else {
+            return fail("[tool.sqlty] databases must be a table of tables".into());
+        };
+        for (name, database) in databases.iter_mut() {
+            let place = format!("[tool.sqlty.databases.{name}]");
+            if name == "default"
+                || name.is_empty()
+                || !name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            {
+                return fail(format!(
+                    "{place}: a database name is letters, digits, '-' and '_', and not 'default'"
+                ));
+            }
+            let Some(entry) = database.as_table_mut() else {
+                unreachable!("checked above")
+            };
+            if let Some(key) = entry
+                .keys()
+                .find(|key| !DATABASE_KEYS.contains(&key.as_str()))
+            {
+                return fail(format!(
+                    "unknown key '{key}' in {place}{}; expected one of: {}",
+                    suggest(key, &DATABASE_KEYS),
+                    DATABASE_KEYS.join(", ")
+                ));
+            }
+            let mut globs = Table::new();
+            for key in ["include", "exclude"] {
+                let value = entry.remove(key).unwrap_or(Value::Array(vec![]));
+                if !is_strings(&value) {
+                    return fail(format!("{place} {key} must be a list of glob strings"));
+                }
+                globs.insert(key.into(), value);
+            }
+            let checked = validate(std::mem::take(entry), source).map_err(|error| {
+                InvalidConfig(
+                    error
+                        .0
+                        .replace("[tool.sqlty.", &format!("[tool.sqlty.databases.{name}."))
+                        .replace("[tool.sqlty]", &place),
+                )
+            })?;
+            skipped_functions.extend(checked.skipped_functions);
+            *entry = checked.table;
+            entry.extend(globs);
+        }
+    }
     if let Some(functions) = table.remove("functions") {
         let Value::Array(functions) = functions else {
             return fail("[tool.sqlty] functions must be an array of tables".into());
@@ -432,6 +500,36 @@ mod tests {
         assert!(invalid("schema = 1").contains("schema must be a path"));
         assert!(invalid("max-query-variants = 0").contains("positive integer"));
         assert!(invalid("types = { DATE = 1 }").contains("types must be a table"));
+        assert!(invalid("databases = 1").contains("databases must be a table of tables"));
+        assert!(invalid("[databases.default]").contains("not 'default'"));
+        assert!(invalid("[databases.'a b']").contains("letters, digits"));
+        assert_eq!(
+            invalid("[databases.analytics]\nimport-style = 'import sqlty'"),
+            "sqlty.toml: unknown key 'import-style' in [tool.sqlty.databases.analytics]; \
+             expected one of: dialect, schema, queries, query-format, rules, types, functions, \
+             include, exclude"
+        );
+        assert!(invalid("[databases.a]\ninclude = 'x'").contains("include must be a list"));
+        assert!(invalid("[databases.a]\ndialect = 'duck'").starts_with(
+            "sqlty.toml: [tool.sqlty.databases.a] unknown dialect 'duck' (did you mean 'duckdb'?)"
+        ));
+    }
+
+    #[test]
+    fn fills_the_globs_of_each_database() {
+        let config = validate(
+            "[databases.analytics]\ndialect = 'duckdb'\nfunctions = [{ import-path = 'r' }]"
+                .parse()
+                .unwrap(),
+            "sqlty.toml",
+        )
+        .unwrap();
+        let expected: Table =
+            "[databases.analytics]\ndialect = 'duckdb'\ninclude = []\nexclude = []"
+                .parse()
+                .unwrap();
+        assert_eq!(config.table, expected);
+        assert_eq!(config.skipped_functions, ["{ import-path = \"r\" }"]);
     }
 
     #[test]

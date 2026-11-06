@@ -25,7 +25,7 @@ import re
 import sys
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     import argparse
@@ -999,15 +999,16 @@ def _collect_query_files(
     roots = [path.resolve() for path in paths]
     found: dict[Path, None] = {}
     for directory in dict.fromkeys(directories):
-        settings = resolver.for_file(directory / "_")
-        if not settings.queries or settings.config_dir is None:
-            continue
-        for file in expand_schema(list(settings.queries), settings.config_dir):
-            resolved = file.resolve()
-            if file.suffix == ".sql" and any(
-                resolved == root or resolved.is_relative_to(root) for root in roots
-            ):
-                found[_relative(file)] = None
+        project = resolver.for_file(directory / "_")
+        for settings in [project, *(database for _, _, database in project.databases)]:
+            if not settings.queries or settings.config_dir is None:
+                continue
+            for file in expand_schema(list(settings.queries), settings.config_dir):
+                resolved = file.resolve()
+                if file.suffix == ".sql" and any(
+                    resolved == root or resolved.is_relative_to(root) for root in roots
+                ):
+                    found[_relative(file)] = None
     return sorted(found)
 
 
@@ -1375,6 +1376,24 @@ class Settings:
     config_dir: Path | None = None
     queries: tuple[str, ...] = ()
     query_format: str = "auto"
+    databases: tuple[tuple[tuple[str, ...], tuple[str, ...], Settings], ...] = ()
+
+    def names_query_file(self, path: Path) -> bool:
+        """Whether ``queries`` names ``path``, as a file, a directory holding it or a glob."""
+        if path.suffix != ".sql" or not self.queries or self.config_dir is None:
+            return False
+        resolved = path.resolve()
+        base = self.config_dir.resolve()
+        if not resolved.is_relative_to(base):
+            return False
+        relative = resolved.relative_to(base).as_posix()
+        return any(
+            relative == entry.strip("/")
+            or relative.startswith(entry.strip("/") + "/")
+            or re.fullmatch(glob.translate(entry, recursive=True, include_hidden=True), relative)
+            is not None
+            for entry in self.queries
+        )
 
     @property
     def schema_key(self) -> SchemaKey:
@@ -1433,10 +1452,21 @@ class SettingsResolver:
         return resolved
 
     def for_file(self, path: Path) -> Settings:
+        """The settings of ``path``: those of the first of its project's ``databases`` whose
+        ``queries`` name it or whose ``include`` matches it, else the project's own."""
         directory = self._directory(path.parent)
         if directory not in self._by_dir:
             self._by_dir[directory] = self._resolve(directory)
         settings = self._by_dir[directory]
+        if settings.databases and not settings.names_query_file(path):
+            assert settings.config_dir is not None
+            for include, exclude, database in settings.databases:
+                if database.names_query_file(path) or (
+                    _is_included(path, settings.config_dir, include)
+                    and not (exclude and _is_included(path, settings.config_dir, exclude))
+                ):
+                    settings = database
+                    break
         if not settings.overrides or settings.config_dir is None:
             return settings
         rules = dict(settings.rules or {})
@@ -1449,14 +1479,49 @@ class SettingsResolver:
         return replace(settings, rules=rules | self.source.cli_rules)
 
     def _resolve(self, directory: Path) -> Settings:
-        from sqlty._config import ConfigError
-        from sqlty.core import strip_source
 
         config, config_dir, label = self.source.load(directory)
-        args = self._args
         schema_sql = self._schema_sql
         if schema_sql is None and "schema" in config and config_dir is not None:
             schema_sql = _load_schema(config["schema"], config_dir)
+        settings = self._settings(config, config_dir, label, schema_sql, self._args.dialect)
+        databases = []
+        for name, database in config.get("databases", {}).items():
+            merged = cast("SQLTyConfig", {**config, **database})
+            merged.pop("databases")
+            for key in ("rules", "types"):
+                if key in config and key in database:
+                    merged[key] = {**config[key], **database[key]}
+            own_schema = schema_sql
+            if "schema" in database and config_dir is not None:
+                own_schema = _load_schema(database["schema"], config_dir)
+            databases.append(
+                (
+                    tuple(database.get("include", ())),
+                    tuple(database.get("exclude", ())),
+                    self._settings(
+                        merged,
+                        config_dir,
+                        f"{label} [tool.sqlty.databases.{name}]",
+                        own_schema,
+                        None if "dialect" in database else self._args.dialect,
+                    ),
+                )
+            )
+        return replace(settings, databases=tuple(databases))
+
+    def _settings(
+        self,
+        config: SQLTyConfig,
+        config_dir: Path | None,
+        label: str,
+        schema_sql: str | None,
+        dialect_flag: str | None,
+    ) -> Settings:
+        from sqlty._config import ConfigError
+        from sqlty.core import strip_source
+
+        args = self._args
         untyped = getattr(args, "untyped", None) or config.get("untyped", "skip")
         if untyped not in ("skip", "sentinel"):
             raise ConfigError(
@@ -1477,7 +1542,7 @@ class SettingsResolver:
             ) from None
         from sqlty._config import MAX_QUERY_VARIANTS
 
-        dialect = args.dialect or config.get("dialect", "postgres")
+        dialect = dialect_flag or config.get("dialect", "postgres")
         return Settings(
             dialect=dialect,
             schema=None
@@ -1552,21 +1617,7 @@ class Project:
     def is_query_file(self, path: Path) -> bool:
         """Whether the ``queries`` key of ``path``'s project names it, as a file, a directory
         holding it or a glob; ``path`` need not exist, as an unsaved buffer's may not."""
-        settings = self.resolver.for_file(path)
-        if path.suffix != ".sql" or not settings.queries or settings.config_dir is None:
-            return False
-        resolved = path.resolve()
-        base = settings.config_dir.resolve()
-        if not resolved.is_relative_to(base):
-            return False
-        relative = resolved.relative_to(base).as_posix()
-        return any(
-            relative == entry.strip("/")
-            or relative.startswith(entry.strip("/") + "/")
-            or re.fullmatch(glob.translate(entry, recursive=True, include_hidden=True), relative)
-            is not None
-            for entry in settings.queries
-        )
+        return self.resolver.for_file(path).names_query_file(path)
 
     def check_queries(self, path: Path, text: str) -> list[Diagnostic]:
         from sqlty._queries import check_query_file
