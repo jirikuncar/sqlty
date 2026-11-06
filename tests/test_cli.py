@@ -643,6 +643,21 @@ def test_exclude_is_relative_to_the_config_file(tmp_path, monkeypatch, capsys) -
     assert f"pkg{os.sep}gen" not in out
 
 
+def test_extended_config_reads_its_schema(tmp_path, monkeypatch) -> None:
+    _tree(tmp_path, "db/schema.sql", "pkg/q.py")
+    (tmp_path / "db" / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL);")
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "db/schema.sql"\n')
+    (tmp_path / "pkg" / "sqlty.toml").write_text('extend = "../pyproject.toml"\n')
+    (tmp_path / "pkg" / "q.py").write_text('q = "--sql\\nSELECT id FROM users"\n')
+    monkeypatch.chdir(tmp_path)
+
+    main(["rewrite", "pkg"])
+
+    assert (tmp_path / "pkg" / "q.py").read_text() == (
+        'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT id FROM users")\n'
+    )
+
+
 @pytest.mark.parametrize("changed", [["schema.sql"], ["sqlty.toml"], ["schema.sql", "a.py"]])
 def test_schema_or_config_file_checks_its_project(changed, tmp_path, monkeypatch, capsys) -> None:
     (tmp_path / "sub").mkdir()
