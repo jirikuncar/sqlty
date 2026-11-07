@@ -47,6 +47,14 @@ leaves them out, since parallel workers slow them, and `make test` runs them
 alone afterwards. Tests marked `pg` share one database server (`SQLTY_PG_DSN`), so CI
 runs them in one process: `uv run pytest -m pg -n 0`.
 
+A test that needs a package sqlty does not depend on imports it at the top, and
+the package goes in a dependency group (`[dependency-groups]` in `pyproject.toml`),
+which `uv sync --all-groups` and CI install. Don't use `pytest.importorskip`: a
+missing package would skip the test silently, and `No-exec harness intact` fails on
+any new skip. Skip only on what CI does not provide everywhere: a server
+(`SQLTY_PG_DSN`), a package installed for one job (`--with pymysql`) or with no
+wheel for every Python (`duckdb`).
+
 Make targets:
 
 ```bash
