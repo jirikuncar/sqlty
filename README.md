@@ -143,8 +143,8 @@ conn.execute(SQL[tuple[str | None]]("--sql\nSELECT email FROM users WHERE id = ?
 conn.execute("--sql\nSELECT emial FROM users")
 ```
 
-`?`, `$1`, `%s` and `:name` placeholders are checked on sqlite3, psycopg and
-asyncpg calls ([Parameters](https://sqlty.kuncar.dev/guide/parameters/)).
+`?`, `$1`, `%s` and `:name` placeholders are checked on sqlite3, aiosqlite,
+psycopg and asyncpg calls ([Parameters](https://sqlty.kuncar.dev/guide/parameters/)).
 These are the mistakes coding agents make: every problem is one
 `file:line: [rule] message` line and a non-zero exit code they can act on, and
 the [sqlty skills](https://sqlty.kuncar.dev/recipes/agents/) teach
