@@ -107,6 +107,13 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "`check`",
         "Turn on features still in preview: query variants",
     ),
+    "driver-calls": KeyDoc(
+        "boolean",
+        "`true`",
+        "`check`",
+        "Check `execute`-like calls on psycopg, sqlite3 and asyncpg connections; "
+        "the `sqlty.drivers` helpers are checked either way",
+    ),
     "max-query-variants": KeyDoc(
         "positive integer",
         "`64`",
@@ -325,6 +332,7 @@ class SQLTyConfig(TypedDict, total=False):
     )
     param_types: bool  # write the P of SQL[R, P]: a tuple, or a generated TypedDict
     preview: bool  # features still in preview: query variants
+    driver_calls: bool  # check execute-like calls on driver connections
     max_query_variants: int  # the most variants of a query built in branches that check checks
     exclude: list[str]  # globs replacing the default excludes, relative to the configuration file
     extend_exclude: list[str]  # globs excluded in addition to the above

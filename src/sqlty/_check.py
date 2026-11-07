@@ -528,11 +528,13 @@ def diagnostics(
     module: str | None,
     row_usage: RowUsage | None = None,
     variants: int | None = None,
+    receivers: bool = True,
 ) -> list[Diagnostic]:
     """Every diagnostic before inline suppression: the Rust pass, then the Python passes.
 
     ``variants`` turns on query variants (``find_helper_calls``): each variant of a call
     is checked as a call of its own, then ``_merge_variants`` reports at the call.
+    ``receivers`` off checks no driver calls but those of the ``sqlty.drivers`` helpers.
     """
     from sqlty._lint import RuleConfig
 
@@ -548,7 +550,7 @@ def diagnostics(
             any_calls=parsed.any_calls(import_style),
         )
     found = find_helper_calls(parsed, helpers, module, variants=variants)
-    driver_calls = find_driver_calls(parsed) + find_template_calls(parsed)
+    driver_calls = find_driver_calls(parsed, receivers=receivers) + find_template_calls(parsed)
     # A driver call also configured as a helper has its parameters checked once, as the driver's.
     by_driver = {id(call.query_node) for call in driver_calls if call.query_node is not None}
     found = [

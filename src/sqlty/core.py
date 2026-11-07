@@ -441,6 +441,7 @@ def check_source(
     module: str | None = None,
     row_usage: RowUsage | None = None,
     query_variants: int | None = None,
+    driver_calls: bool = True,
 ) -> list[Diagnostic]:
     """Check Python source for SQL type issues.
 
@@ -484,6 +485,10 @@ def check_source(
     only names the lines that select one: ``(variant: line 11)``. A call with more variants
     is ``dynamic-query`` (``unchecked-query`` for a psycopg composition).
 
+    ``driver_calls`` (the ``driver-calls`` key) checks the parameters of ``execute``-like
+    calls on psycopg, sqlite3 and asyncpg connections; off, only the ``sqlty.drivers``
+    helpers are.
+
     Each diagnostic has the byte offsets of what it is about, ``start`` to ``end``: the
     row type, the query, a parameter type, or the ``# sqlty: ignore`` comment. ``fix``
     holds the edits ``sqlty check --fix`` makes for it, as ``(start, end, replacement)``.
@@ -514,6 +519,7 @@ def check_source(
         module=module or parsed.module,
         row_usage=row_usage or (usage := RowUsage()),
         variants=query_variants,
+        receivers=driver_calls,
     )
     diagnostics = apply_suppressions(parsed.ignores, diagnostics, rules)
     return diagnostics if row_usage else usage.filter(diagnostics)
@@ -534,6 +540,7 @@ def breaking_source(
     helpers: HelperIndex | None = None,
     module: str | None = None,
     query_variants: int | None = None,
+    driver_calls: bool = True,
 ) -> list[Diagnostic]:
     """The diagnostics ``source`` gets against ``against_sql`` but not against its own
     ``schema_sql``: what a schema change breaks, as ``sqlty breaking`` reports it.
@@ -564,6 +571,7 @@ def breaking_source(
             helpers=helpers,
             module=module,
             query_variants=query_variants,
+            driver_calls=driver_calls,
         )
 
     own = {(d.get("line"), d["rule"], d["message"]) for d in check(schema_sql)}

@@ -110,6 +110,7 @@ A directory with more than one file reads the first of `sqlty.toml`,
 | [`json-types`](#json-types) | `"typing.Any"`, `"typing.TypedDict"` | `"typing.Any"` | `rewrite`, `check --fix` | How a JSON column of known shape is typed: `typing.Any`, or a generated `TypedDict` |
 | [`param-types`](#param-types) | `true`, `false` | `false` | `rewrite`, `check --fix` | Whether `SQL[R]` calls get the type of their parameters, `SQL[R, P]` |
 | [`preview`](#preview) | boolean | `false` | `check` | Turn on features still in preview: query variants |
+| [`driver-calls`](#driver-calls) | boolean | `true` | `check` | Check `execute`-like calls on psycopg, sqlite3 and asyncpg connections; the `sqlty.drivers` helpers are checked either way |
 | [`max-query-variants`](#max-query-variants) | positive integer | `64` | `check` | With `preview`, the most variants of a query built in branches that `check` checks |
 | [`functions`](#functions) | array of tables | `[]` | `check` | Helper functions whose string argument is a query |
 | [`types`](#types) | table of SQL type or `table.column` = Python type | `{}` | `rewrite`, `check` | Python types a converter above the driver gives a SQL type or a column |
@@ -254,6 +255,19 @@ query with more is reported as `dynamic-query`, or `unchecked-query` for a
 [tool.sqlty]
 preview = true
 max-query-variants = 256
+```
+
+## `driver-calls`
+
+`false` stops `check` from looking for [driver calls](../guide/parameters.md#driver-calls),
+`execute` and the like on psycopg, sqlite3 and asyncpg connections, in files that
+import a driver. Queries marked `SQL[T]` or `--sql`, configured
+[`functions`](#functions) and the `sqlty.drivers` helpers are still checked. Turn it
+off when every query goes through those, to save the walk over each call of those files.
+
+```toml
+[tool.sqlty]
+driver-calls = false
 ```
 
 ## `untyped`

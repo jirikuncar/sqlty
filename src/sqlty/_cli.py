@@ -1370,6 +1370,7 @@ class Settings:
     rules: dict[str, str] | None = None
     query_variants: int | None = None
     preview: bool = False
+    driver_calls: bool = True
     functions: tuple[tuple[str, str, str | None], ...] = ()
     # The functions each named database lists, read against it in any file.
     database_functions: tuple[tuple[str, str, str | None, str], ...] = ()
@@ -1594,6 +1595,7 @@ class SettingsResolver:
             if config.get("preview")
             else None,
             preview=bool(config.get("preview")),
+            driver_calls=config.get("driver_calls", True),
             functions=tuple(
                 (f["import_path"], f["query_param"], f.get("return_type_param"))
                 for f in config.get("functions", [])
@@ -1698,6 +1700,7 @@ class Project:
             helpers=self.helpers[path],
             row_usage=row_usage,
             query_variants=settings.query_variants,
+            driver_calls=settings.driver_calls,
         )
 
     def fix(self, path: Path) -> str:

@@ -54,6 +54,7 @@ _METHODS = {
     "asyncpg": {"execute", "fetch", "fetchrow", "fetchval", "executemany", "fetchmany"},
 }
 _ANY_METHOD = frozenset().union(*_METHODS.values())
+_METHOD_NAMES = re.compile(rf"\b(?:{'|'.join(sorted(_ANY_METHOD))})\b")
 _ASYNCPG_MANY = frozenset({"executemany", "fetchmany"})
 _PARAM_KEYWORD = {"psycopg": "params", "sqlite3": "parameters"}
 # sqlite3 reads a str or bytes as a sequence, one parameter per item.
@@ -231,11 +232,12 @@ def _literal(node: ast.expr | None) -> str | None:
     return None
 
 
-def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
+def find_driver_calls(source: str | ParsedSource, *, receivers: bool = True) -> list[HelperCall]:
     """Calls of ``execute``-like methods on a recognised connection or cursor, with their query and parameters.
 
     A call with no parameters has ``params == ()``, so a query that has placeholders is
     reported. ``executemany`` (and asyncpg's ``fetchmany``) gives one entry per row of a list or tuple literal.
+    With ``receivers`` off (``driver-calls = false``) only the ``sqlty.drivers.psycopg`` helpers count.
     """
     parsed = ParsedSource.of(source)
     text = parsed.text
@@ -245,14 +247,16 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
         return []
     if parsed.tree is None:
         return []
-    scopes = _Scopes(parsed)
-    found: list[HelperCall] = []
-    aliases = parsed.typing_aliases
     helpers = any(
         f"{name}.".startswith(_BUNDLED_MODULE) or _BUNDLED_MODULE.startswith(f"{name}.")
         for name in parsed.imported_names.values()
     )
-    for call in parsed.calls_to(None):
+    if not (helpers or receivers):
+        return []
+    scopes = _Scopes(parsed)
+    found: list[HelperCall] = []
+    aliases = parsed.typing_aliases
+    for call in parsed.calls_to(None if helpers else _METHOD_NAMES):
         if helpers and (bundled := _bundled(call, parsed)) is not None:
             for first, arg in bundled:
                 query = _literal(first)
@@ -262,7 +266,8 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
             continue
         func = call.func
         if not (
-            isinstance(func, ast.Attribute)
+            receivers
+            and isinstance(func, ast.Attribute)
             and func.attr in _ANY_METHOD
             and isinstance(func.value, ast.Name)
             and (driver := scopes.driver(func.value.id, chain := scopes.chain(call)))

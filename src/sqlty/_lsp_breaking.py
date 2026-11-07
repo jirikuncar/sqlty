@@ -80,6 +80,7 @@ class Baseline:
                 import_style=settings.import_style,
                 untyped=settings.untyped,
                 query_variants=settings.query_variants,
+                driver_calls=settings.driver_calls,
                 helpers=project.helpers[path],
             ):
                 message = f"{diagnostic['message']} (with the schema of {baseline.label})"

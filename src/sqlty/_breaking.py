@@ -314,6 +314,7 @@ def _check(item: _Work) -> list[Diagnostic]:
         import_style=own.import_style,
         untyped=own.untyped,
         query_variants=own.query_variants,
+        driver_calls=own.driver_calls,
         helpers=helpers,
     )
 

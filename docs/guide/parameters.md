@@ -142,6 +142,8 @@ query is a literal, `SQL[T]("...")` of one, or a name assigned once to one. A ca
 `param-count-mismatch` when the query has placeholders, and a single value
 passed as the parameters, `execute(query, user_id)`, is a `param-type-mismatch`:
 the driver wants a sequence, `(user_id,)`.
+[`driver-calls = false`](../reference/configuration.md#driver-calls) turns off
+all of this but the `sqlty.drivers` helpers.
 
 ```python
 import sqlite3

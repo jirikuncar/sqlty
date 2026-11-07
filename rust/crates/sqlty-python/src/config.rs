@@ -30,7 +30,7 @@ use sqlty_sql::Dialect;
 pub const CONFIG_FILES: [&str; 3] = ["sqlty.toml", "pyproject.toml", "Cargo.toml"];
 
 /// Keys of `[tool.sqlty]` that are not file discovery; see also [`DISCOVERY_KEYS`].
-pub const TOOL_KEYS: [&str; 17] = [
+pub const TOOL_KEYS: [&str; 18] = [
     "dialect",
     "schema",
     "queries",
@@ -42,6 +42,7 @@ pub const TOOL_KEYS: [&str; 17] = [
     "json-types",
     "param-types",
     "preview",
+    "driver-calls",
     "max-query-variants",
     "functions",
     "types",
@@ -162,7 +163,12 @@ pub fn validate(mut table: Table, source: &str) -> Result<Config, InvalidConfig>
             ));
         }
     }
-    for key in ["param-types", "preview", "respect-gitignore"] {
+    for key in [
+        "param-types",
+        "preview",
+        "driver-calls",
+        "respect-gitignore",
+    ] {
         if table.get(key).is_some_and(|value| !value.is_bool()) {
             return fail(format!("[tool.sqlty] {key} must be true or false"));
         }
@@ -206,7 +212,7 @@ pub fn validate(mut table: Table, source: &str) -> Result<Config, InvalidConfig>
                     "[tool.sqlty] unknown query-format '{name}'{}; expected one of: {}",
                     suggest(name, &names),
                     names.join(", ")
-                ))
+                ));
             }
             None => return fail("[tool.sqlty] query-format must be a string".into()),
         }
@@ -497,6 +503,7 @@ mod tests {
         assert!(invalid("dialect = 'postgress'").contains("did you mean 'postgres'?"));
         assert!(invalid("dialect = 1").contains("dialect must be a string"));
         assert!(invalid("extend = []").contains("extend must be a string"));
+        assert!(invalid("driver-calls = 1").contains("driver-calls must be true or false"));
         assert!(invalid("schema = 1").contains("schema must be a path"));
         assert!(invalid("max-query-variants = 0").contains("positive integer"));
         assert!(invalid("types = { DATE = 1 }").contains("types must be a table"));

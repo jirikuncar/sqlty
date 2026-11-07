@@ -56,6 +56,7 @@ class Run:
         self.rules: dict[str, str] | None = settings.get("rules")
         # Preview is on unless a section turns it off: the suite asserts it changes nothing else.
         self.preview: bool = settings.get("preview", True)
+        self.driver_calls: bool = settings.get("driver-calls", True)
         self.query_variants: int | None = (
             settings.get("max-query-variants", MAX_QUERY_VARIANTS) if self.preview else None
         )
@@ -294,6 +295,7 @@ class Run:
                 untyped=self.untyped,
                 helpers=self._helpers,
                 query_variants=self.query_variants,
+                driver_calls=self.driver_calls,
             )
         else:
             found = core.check_source(
@@ -305,6 +307,7 @@ class Run:
                 untyped=self.untyped,
                 helpers=self._helpers,
                 query_variants=self.query_variants,
+                driver_calls=self.driver_calls,
             )
         parsed = core.ParsedSource(code.text)
 
