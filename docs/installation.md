@@ -1,3 +1,7 @@
+---
+description: How to install sqlty with uv or pip, which Python versions and platforms have wheels, how to add the coding agent skills and verify the install.
+---
+
 # Installation
 
 ## Requirements

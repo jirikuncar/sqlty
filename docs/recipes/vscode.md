@@ -1,3 +1,7 @@
+---
+description: How to use the sqlty VS Code extension to see SQL diagnostics in Python as you type, with quick fixes, column completion and SQL highlighting.
+---
+
 # VS Code
 
 The sqlty extension shows what `sqlty check` reports while you type, each diagnostic

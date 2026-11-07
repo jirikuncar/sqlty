@@ -25,7 +25,7 @@ import ast
 import re
 from collections import defaultdict
 
-from sqlty._helpers import HelperCall
+from sqlty._helpers import MARKER, HelperCall
 from sqlty._params import SCALARS, ParamArg, arg_type, literal_params
 from sqlty._source import ParsedSource
 
@@ -58,7 +58,6 @@ _PARAM_KEYWORD = {"psycopg": "params", "sqlite3": "parameters"}
 # sqlite3 reads a str or bytes as a sequence, one parameter per item.
 _SEQUENCE_SCALARS = {"psycopg": frozenset(), "sqlite3": frozenset({"str", "bytes"})}
 
-MARKER = re.compile(r"\s*--\s?sql(?:\s|$)")
 # A t-string that starts with the marker.
 _MARKED_TEMPLATE = re.compile(r"""(?<![\w])(?:[tT][rR]?|[rR][tT])(?:'|")+\s*--\s?sql""")
 # psycopg's format specs that only pick the wire format of a value.

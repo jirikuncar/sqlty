@@ -1,3 +1,7 @@
+---
+description: "Reference for every sqlty configuration key in sqlty.toml, pyproject.toml or Cargo.toml: schema, dialect, queries, rules and file selection."
+---
+
 # Configuration
 
 sqlty reads `sqlty.toml`, `[tool.sqlty]` from `pyproject.toml`, or `[package.metadata.sqlty]`
@@ -493,6 +497,54 @@ The query is read with that database's `dialect`, `schema` and `types`, and
 after `--sql` on the marker line is a SQL comment, so the database still runs the query
 as written; under MySQL, write `-- sql sqlty:db=analytics`. A name the project does not
 configure is [`unknown-database`](rules.md#unknown-database).
+
+### Helpers of a database
+
+A helper a database lists in its `functions` checks its calls against that database, in
+any file. You can keep a warehouse client next to the application code, without moving
+its callers under the database's `include`.
+
+```toml
+[tool.sqlty]
+schema = "app.sql"
+
+[tool.sqlty.databases.analytics]
+dialect = "sqlite"
+schema = "analytics.sql"
+
+[[tool.sqlty.databases.analytics.functions]]
+import-path = "app.warehouse.fetch"
+query-param = "query"
+return-type-param = "form"
+```
+
+`app.sql`:
+
+```sql
+CREATE TABLE users (id TEXT NOT NULL);
+```
+
+`analytics.sql`:
+
+```sql
+CREATE TABLE events (n INTEGER NOT NULL);
+```
+
+`app/warehouse.py`:
+
+```python
+def fetch[T](query: str, form: type[T]) -> list[T]: ...
+```
+
+```python
+from app.warehouse import fetch
+
+# error: [column-type-mismatch] "tuple[str] item 0 is str but query column 'n' infers int"
+fetch("SELECT n FROM events", tuple[str])
+```
+
+A query that names its database, `--sql sqlty:db=default` say, keeps it. Completion and
+hover in a helper's query still read the file's database.
 
 ## `exclude` and `extend-exclude`
 
