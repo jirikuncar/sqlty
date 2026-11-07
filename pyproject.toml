@@ -1,6 +1,6 @@
 [project]
 name = "sqlty"
-version = "0.5.0.post1"
+dynamic = ["version"]
 description = "Type-safe raw SQL for Python: row and parameter types inferred from your SQL and schema, no ORM or database needed"
 readme = "README.md"
 requires-python = ">=3.14"
