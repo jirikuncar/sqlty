@@ -105,6 +105,15 @@ def test_playground_link_of_a_rule_example() -> None:
     assert linked.count('href="../playground/#') == 1
 
 
+def test_readme_playground_links_are_current() -> None:
+    links = _script("playground_links")
+    text = (ROOT / "README.md").read_text()
+    current = {links.encode(session) for session in filter(None, links.examples(text))}
+    linked = re.findall(r"https://sqlty\.kuncar\.dev/playground/#([\w-]+)", text)
+    assert linked
+    assert set(linked) <= current
+
+
 def test_config_key_docs_cover_every_key() -> None:
     from sqlty._config import DISCOVERY_KEYS, FUNCTION_KEY_DOCS, FUNCTION_KEYS, KEY_DOCS, TOOL_KEYS
 

@@ -201,5 +201,5 @@ fanout-aggregate = "error"
 chasm-join = "error"
 ```
 
-Try them in the [playground](../playground.md): pick **Joins and Aggregates**
-in Examples.
+Open the **Joins and Aggregates** example in the [playground](../playground.md)
+to try them.
