@@ -5,7 +5,8 @@ description: "How to go from plain SQL strings in Python to typed, checked queri
 # Quickstart
 
 This page takes one file from plain SQL strings to typed, checked queries.
-Install sqlty first ([Installation](installation.md)).
+Install sqlty first ([Installation](installation.md)), or follow along in the
+[playground](playground.md): its **Rewrite** button is `sqlty rewrite`.
 
 ## 1. Mark queries with `--sql`
 

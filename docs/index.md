@@ -6,7 +6,8 @@ description: "Type-safe raw SQL for Python: sqlty infers the row type of each qu
 
 Type-safe raw SQL for Python. sqlty infers the row type of each query from
 its SQL, writes it into your source as `SQL[T]`, and checks that it stays
-correct.
+correct. Try it in your browser, with nothing to install, in the
+[playground](playground.md).
 
 !!! warning "Beta"
     sqlty is in beta. APIs and configuration may change before 1.0.
@@ -79,11 +80,12 @@ built for.
 
 ## Next steps
 
-1. [Install sqlty](installation.md).
-2. Follow the [Quickstart](quickstart.md).
-3. Adding sqlty to an existing project? Read [Migration](recipes/migration.md)
+1. Try it in the [playground](playground.md).
+2. [Install sqlty](installation.md).
+3. Follow the [Quickstart](quickstart.md).
+4. Adding sqlty to an existing project? Read [Migration](recipes/migration.md)
    and [CI and pre-commit](recipes/ci.md).
-4. See the diagnostics as you type with the [VS Code extension](recipes/vscode.md).
+5. See the diagnostics as you type with the [VS Code extension](recipes/vscode.md).
 
 New to the idea? Start with [Why SQLTy?](motivation.md). Contributing,
 testing and architecture are covered in

@@ -89,6 +89,8 @@ jobs:
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: ${{ matrix.target }}
+          # Host builds otherwise use the runner image's rustc, which can lag the MSRV.
+          rust-toolchain: stable
           args: --profile dist --out dist --find-interpreter --manifest-path rust/crates/sqlty-ext/Cargo.toml
           manylinux: ${{ matrix.manylinux || 'auto' }}
           container: ${{ matrix.container }}

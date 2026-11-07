@@ -15,9 +15,11 @@ spelled out (a `params` argument holding a tuple, list or dict literal,
   twice is one parameter; extra keys are ignored, as the drivers do.
 
 Driver calls are checked too: `execute` and `executemany` (each row) on a
-psycopg or sqlite3 connection or cursor, and `execute`, `fetch`, `fetchrow`,
-`fetchval` on an asyncpg connection, when the file binds the receiver to
-`psycopg.connect(...)`, `sqlite3.connect(...)`, `asyncpg.connect(...)`,
+psycopg, sqlite3 or aiosqlite connection or cursor, `execute_fetchall` and
+`execute_insert` on an aiosqlite connection, and `execute`, `fetch`,
+`fetchrow`, `fetchval`, `executemany` and `fetchmany` (each row) on an asyncpg
+connection, when the file binds the receiver to `psycopg.connect(...)`,
+`sqlite3.connect(...)`, `aiosqlite.connect(...)`, `asyncpg.connect(...)`,
 `<connection>.cursor()` or a driver class annotation, and the `execute` and
 `scalar` helpers of `sqlty.drivers.psycopg`. The query is a literal,
 `SQL[T]("...")` of one, or a name assigned once to one.

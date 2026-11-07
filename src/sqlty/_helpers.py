@@ -805,7 +805,6 @@ def find_helper_calls(
 
     aliases = parsed.typing_aliases
     calls = []
-    scan = parsed.psycopg if composed else None
     pending: list[tuple[ast.Call, Helper, ast.expr]] = []
     names = {name.rpartition(".")[2] for name in own}
     if helpers is not None and imported:
@@ -832,7 +831,7 @@ def find_helper_calls(
         elif query is not None and not forwarded(node, query):
             pending.append((node, helper, query))
     for node, helper, query in pending:
-        text = scan.render(query, resolve_fragment) if scan is not None else None
+        text = parsed.psycopg.render(query, resolve_fragment) if composed else None
         call = HelperCall(
             node.lineno,
             None if text == UNCHECKED else text,

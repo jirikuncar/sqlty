@@ -23,7 +23,8 @@ migration that changes a column is caught in review, not in production.
   (<a href="https://github.com/jirikuncar/sqlty/blob/main/docs/assets/demo.tape">view source</a>)
 </p>
 
-**Documentation: [sqlty.kuncar.dev](https://sqlty.kuncar.dev/)**
+**Documentation: [sqlty.kuncar.dev](https://sqlty.kuncar.dev/)** ·
+**Try it in your browser: [Playground](https://sqlty.kuncar.dev/playground/)**
 
 **Fits if** you write SQL as string literals on Python 3.14+, against
 PostgreSQL, SQLite or MySQL, with a schema dump or SQL migrations in the
@@ -58,6 +59,8 @@ query = "--sql\nSELECT id, name, email FROM users"
 # rewritten: query = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")
 ```
 
+[Open in playground](https://sqlty.kuncar.dev/playground/#eJw9jcsKwjAURH_lkpWFdiN0o7iI5arFPiRGsZBNSWMN9GGbdiHiv9tQdDGbM8OcNzHt2EtFVkC6UfUv2IAgnme6SojmjBEGHHThQpPXygVV57qCHUtjGI3qjSCiIS4QIx9TZU8ChpQjcLqNcN7AQhcQJhz3yODEwpiyDI6YzZ_A8cYhSadcouhnuFIWHChbLH3f-ZfO2qoKnVdKDtb1bM1Q9spYLNvmrktLyecL_GI_Gw)
+
 `SQL[T]` is a `str` subclass, so the query still runs anywhere a string does,
 and mypy, pyright and ty see `T`. Without a schema, casts such as `id::INTEGER`
 type the columns; a query with neither stays as it is. With a space instead of
@@ -86,6 +89,8 @@ from sqlty import SQL
 # error: [narrow-type] "SQL[tuple[int, str]] should be SQL[tuple[int, str | None]]"
 query = SQL[tuple[int, str]]("--sql\nSELECT id, email FROM users")
 ```
+
+[Open in playground](https://sqlty.kuncar.dev/playground/#eJw1jUsOgjAURbfy0pEksAGNAyRPYwQ_pQMJdWCgYBNooS0DYty7NMbh_Z37JlZPphJkDaQxugc7dm4G2Q_aOMhvKVdcjZMwM2y9LN00dKKUyoVgnXk8VpxE0TLiXOWYYsJA1iGI_ik72NNLBpMVxnIScEVCILZ6LZl_SyjGDIHFuxR_JVjJGo5nhgekcKXHLKYFnLD44xjeWbDxlFo-O1E5jxm0da0R1tuVVo1svUs-X3IeRJA)
 
 `sqlty check --fix .` updates the type, and your type checker finds every
 caller that now needs a `None` check. `narrow-type` is an error, so CI fails on
@@ -143,8 +148,8 @@ conn.execute(SQL[tuple[str | None]]("--sql\nSELECT email FROM users WHERE id = ?
 conn.execute("--sql\nSELECT emial FROM users")
 ```
 
-`?`, `$1`, `%s` and `:name` placeholders are checked on sqlite3, psycopg and
-asyncpg calls ([Parameters](https://sqlty.kuncar.dev/guide/parameters/)).
+`?`, `$1`, `%s` and `:name` placeholders are checked on sqlite3, aiosqlite,
+psycopg and asyncpg calls ([Parameters](https://sqlty.kuncar.dev/guide/parameters/)).
 These are the mistakes coding agents make: every problem is one
 `file:line: [rule] message` line and a non-zero exit code they can act on, and
 the [sqlty skills](https://sqlty.kuncar.dev/recipes/agents/) teach

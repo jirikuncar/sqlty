@@ -2,7 +2,7 @@
 
 > **Status:** stage 1 merged in [#984](https://github.com/jirikuncar/sqlty/pull/984), stage 2
 > in [#986](https://github.com/jirikuncar/sqlty/pull/986); stage 3 (helpers of a database) in
-> review.
+> [#991](https://github.com/jirikuncar/sqlty/pull/991).
 
 Tracks [#912](https://github.com/jirikuncar/sqlty/issues/912), Case 2: one package queries
 several databases, each with its own dialect and schema. Case 1, the monorepo, shipped as
