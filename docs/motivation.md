@@ -81,8 +81,6 @@ sqlty lacks:
   call; asyncpg_typed returns `T`.
 - asyncpg's types. sqlty follows psycopg, which returns `json` parsed, ranges as
   its own `Range` and geometric types as text.
-- A check of asyncpg's `fetchmany`; `execute`, `executemany`, `fetch`, `fetchrow`
-  and `fetchval` are checked.
 - A comparison of `StrEnum` values with `CREATE TYPE ... AS ENUM`.
 - A check against the live database: a schema dump that drifts from it goes
   unnoticed.

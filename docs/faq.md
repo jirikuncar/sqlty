@@ -13,6 +13,22 @@ string as `SQL[T]`, for example `SQL[tuple[int, str]]`. `SQL[T]` is a
 pyright and ty see the row type. `sqlty check .` reports when the SQL and `T` no
 longer agree. See the [Quickstart](quickstart.md).
 
+## When should I use sqlty?
+
+When you write raw SQL as string literals and want the type checker to know what
+each query returns and takes. sqlty fits a codebase with a schema dump or
+migrations in the repository, where a renamed or retyped column should fail CI,
+not production. It also fits code that adopts types one query at a time, scripts
+and notebooks, and SQL written by AI assistants. See [Use cases](use-cases.md).
+
+## When should I not use sqlty?
+
+When the SQL is not a literal: a query built at run time, by string operations
+or a query builder, is not read. When you use an ORM's query API, use the ORM's
+typing support instead. sqlty checks statically, so if you need rows validated
+as they arrive, use Pydantic. See
+[When to use something else](motivation.md#when-to-use-something-else).
+
 ## How can I write raw SQL in Python without an ORM?
 
 Keep the SQL as a string literal and pass it to your driver: psycopg, PyMySQL,
@@ -80,6 +96,15 @@ a query is not formatted. See [Formatting queries](guide/formatting.md).
 No. You write the SQL yourself, and sqlty checks it. It infers types, rewrites
 the annotations in your source and lints the queries, but it never generates
 SQL or maps tables to classes. See [Why SQLTy?](motivation.md).
+
+## How does sqlty compare with asyncpg_typed?
+
+asyncpg_typed checks types you declare by hand when asyncpg prepares each query
+on a live PostgreSQL server. sqlty infers the types from casts or a schema and
+checks them statically, with no database, for PostgreSQL, MySQL, SQLite and
+DuckDB, and it also infers nullability. asyncpg_typed types the rows asyncpg
+returns and compares `StrEnum` values with the database; sqlty does neither yet.
+See [asyncpg_typed](motivation.md#asyncpg_typed).
 
 ## Which Python versions are supported?
 

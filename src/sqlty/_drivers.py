@@ -51,9 +51,10 @@ _CURSORS = {
 _METHODS = {
     "psycopg": {"execute", "executemany"},
     "sqlite3": {"execute", "executemany"},
-    "asyncpg": {"execute", "fetch", "fetchrow", "fetchval", "executemany"},
+    "asyncpg": {"execute", "fetch", "fetchrow", "fetchval", "executemany", "fetchmany"},
 }
 _ANY_METHOD = frozenset().union(*_METHODS.values())
+_ASYNCPG_MANY = frozenset({"executemany", "fetchmany"})
 _PARAM_KEYWORD = {"psycopg": "params", "sqlite3": "parameters"}
 # sqlite3 reads a str or bytes as a sequence, one parameter per item.
 _SEQUENCE_SCALARS = {"psycopg": frozenset(), "sqlite3": frozenset({"str", "bytes"})}
@@ -223,7 +224,7 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
     """Calls of ``execute``-like methods on a recognised connection or cursor, with their query and parameters.
 
     A call with no parameters has ``params == ()``, so a query that has placeholders is
-    reported. ``executemany`` gives one entry per row of a list or tuple literal.
+    reported. ``executemany`` (and asyncpg's ``fetchmany``) gives one entry per row of a list or tuple literal.
     """
     parsed = ParsedSource.of(source)
     text = parsed.text
@@ -263,15 +264,33 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
             continue
         stack = parsed.scopes_of(call)
         if driver == "asyncpg":
-            if func.attr == "executemany":
-                continue
-            params: tuple[ParamArg, ...] | None = tuple(
-                ParamArg(i, arg_type(arg, parsed, stack)) for i, arg in enumerate(call.args[1:], 1)
-            )
-            found.append(
+            if func.attr in _ASYNCPG_MANY:
+                rows = call.args[1] if len(call.args) > 1 else None
+                if rows is None:
+                    rows = next((k.value for k in call.keywords if k.arg == "args"), None)
+                if not isinstance(rows, (ast.List, ast.Tuple)):
+                    continue
+                arg_lists = [
+                    row.elts
+                    for row in rows.elts
+                    if isinstance(row, (ast.List, ast.Tuple))
+                    and not any(isinstance(item, ast.Starred) for item in row.elts)
+                ]
+            else:
+                arg_lists = [call.args[1:]]
+            found.extend(
                 HelperCall(
-                    call.lineno, query, None, aliases, params, driver=driver, query_node=first
+                    call.lineno,
+                    query,
+                    None,
+                    aliases,
+                    tuple(
+                        ParamArg(i, arg_type(arg, parsed, stack)) for i, arg in enumerate(args, 1)
+                    ),
+                    driver=driver,
+                    query_node=first,
                 )
+                for args in arg_lists
             )
             continue
         keyword = _PARAM_KEYWORD[driver]
