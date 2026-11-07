@@ -13,6 +13,22 @@ string as `SQL[T]`, for example `SQL[tuple[int, str]]`. `SQL[T]` is a
 pyright and ty see the row type. `sqlty check .` reports when the SQL and `T` no
 longer agree. See the [Quickstart](quickstart.md).
 
+## When should I use sqlty?
+
+When you write raw SQL as string literals and want the type checker to know what
+each query returns and takes. sqlty fits a codebase with a schema dump or
+migrations in the repository, where a renamed or retyped column should fail CI,
+not production. It also fits code that adopts types one query at a time, scripts
+and notebooks, and SQL written by AI assistants. See [Use cases](use-cases.md).
+
+## When should I not use sqlty?
+
+When the SQL is not a literal: a query built at run time, by string operations
+or a query builder, is not read. When you use an ORM's query API, use the ORM's
+typing support instead. sqlty checks statically, so if you need rows validated
+as they arrive, use Pydantic. See
+[When to use something else](motivation.md#when-to-use-something-else).
+
 ## How can I write raw SQL in Python without an ORM?
 
 Keep the SQL as a string literal and pass it to your driver: psycopg, PyMySQL,
@@ -45,6 +61,31 @@ No. sqlty reads column types from casts in the query or from `CREATE TABLE`
 statements in a schema file, such as a `pg_dump --schema-only` dump or a
 migrations snapshot. It runs offline, in an editor, pre-commit or CI. See
 [Schema inference](guide/schema-inference.md).
+
+## Can sqlty catch totals that a join counts twice?
+
+Yes. `fanout-aggregate` reports a `SUM`, `AVG` or `COUNT` over a table whose
+rows a one-to-many join repeats, such as averaging order totals after joining
+their items. `chasm-join` reports a table joined one-to-many to two others,
+such as orders to items and to payments. sqlty reads the primary, unique and
+foreign keys of your schema, so no database is needed. See
+[Joins and aggregates](guide/joins.md).
+
+## Can sqlty catch a join on the wrong key?
+
+Yes, once you turn on `entity-mismatch` in `[tool.sqlty.rules]`. It follows
+foreign keys to the table whose keys each column holds, and reports a
+comparison such as `products.id = orders.customer_id`. It is off by default,
+because a polymorphic id or a schema without foreign keys can compare
+unrelated keys on purpose. See
+[Joins on the wrong key](guide/joins.md#joins-on-the-wrong-key).
+
+## Is sqlty a semantic layer?
+
+No. Semantic layers such as MetricFlow, Cube and LookML define metrics and
+generate the SQL that computes them, guarding against aggregates over rows a
+join repeats. sqlty generates no SQL: it reports those aggregates in the SQL
+you write. See [Joins and aggregates](guide/joins.md).
 
 ## Which databases and drivers does sqlty support?
 
@@ -80,6 +121,15 @@ a query is not formatted. See [Formatting queries](guide/formatting.md).
 No. You write the SQL yourself, and sqlty checks it. It infers types, rewrites
 the annotations in your source and lints the queries, but it never generates
 SQL or maps tables to classes. See [Why SQLTy?](motivation.md).
+
+## How does sqlty compare with asyncpg_typed?
+
+asyncpg_typed checks types you declare by hand when asyncpg prepares each query
+on a live PostgreSQL server. sqlty infers the types from casts or a schema and
+checks them statically, with no database, for PostgreSQL, MySQL, SQLite and
+DuckDB, and it also infers nullability. asyncpg_typed types the rows asyncpg
+returns and compares `StrEnum` values with the database; sqlty does neither yet.
+See [asyncpg_typed](motivation.md#asyncpg_typed).
 
 ## Which Python versions are supported?
 

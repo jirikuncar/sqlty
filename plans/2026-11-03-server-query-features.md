@@ -3,8 +3,9 @@
 > **Status:** stage 1 (hover) merged in [#852](https://github.com/jirikuncar/sqlty/pull/852); stage 3 (join completion)
 > merged in [#853](https://github.com/jirikuncar/sqlty/pull/853). Stage 4a (`sqlty format` with sqruff) merged in
 > [#930](https://github.com/jirikuncar/sqlty/pull/930), stage 4b (the server's formatting) in
-> [#969](https://github.com/jirikuncar/sqlty/pull/969); stage 4c (sqruff's lint rules in `sqlty check`) in review. Stage 2 needs a decision on where signatures come from; stage 5 waits
-> for demand after stage 1.
+> [#969](https://github.com/jirikuncar/sqlty/pull/969); stage 4c (sqruff's lint rules in `sqlty check`) in
+> [#972](https://github.com/jirikuncar/sqlty/pull/972). Stage 2 needs a decision on where signatures come from; stage 5
+> waits for demand after stage 1.
 
 Tracks [#847](https://github.com/jirikuncar/sqlty/issues/847): what `sqlty server` offers inside
 a query string beyond diagnostics, quick fixes, completion and semantic tokens. Every stage needs
