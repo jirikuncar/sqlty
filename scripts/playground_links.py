@@ -35,6 +35,7 @@ from tests._mdtest.parser import (  # noqa: E402
     _merge,
 )
 
+LABEL = "Open in playground"
 KEYS = {"dialect", "import-style", "param-types", "rules", "schema"}
 BLOCK = re.compile(r'<div class="language-(?:python|py) highlight">.*?</code></pre>', re.S)
 STYLE = """<style>
@@ -68,7 +69,7 @@ def link(html: str, sessions: list[dict[str, str] | None], root: str) -> str:
             return block[0]
         href = escape(f"{root}playground/#{encode(session)}")
         title = "Open this example in the playground"
-        return f'{block[0]}<a class="sqlty-try" href="{href}" title="{title}">Playground</a>'
+        return f'{block[0]}<a class="sqlty-try" href="{href}" title="{title}">{LABEL}</a>'
 
     return BLOCK.sub(linked, html)
 

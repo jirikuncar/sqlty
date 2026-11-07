@@ -243,7 +243,7 @@ be reachable; a file opened or dropped on the page does not.
 
 ## Open a docs example
 
-Each Python example of these docs has a **Playground** link under it. It opens
+Each Python example of these docs has an **Open in playground** link under it. It opens
 the example here with the schema and the `[tool.sqlty]` settings of its page, so
 you can edit it and see what changes. An example that needs a helper module, or
 a setting that reads files, has no link.
