@@ -1,3 +1,7 @@
+---
+description: How sqlty types query placeholders like %s, $1, ? and :name from where they sit in the SQL, and checks the arguments each call passes against them.
+---
+
 # Query parameters
 
 A placeholder (`%s`, `%(name)s`, `$1`, `?`, `:name`) has no type of its own.

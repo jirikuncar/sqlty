@@ -1,3 +1,7 @@
+---
+description: How to format SQL query strings inside Python files with sqlty format, using sqruff layout rules in your project's dialect, in place or as a diff.
+---
+
 # Formatting queries
 
 `sqlty format` lays out the query strings `sqlty check` reads with the layout rules of

@@ -1,3 +1,7 @@
+---
+description: How to run sqlty in pre-commit and CI, such as GitHub Actions, so a pull request with a query that no longer matches the schema fails the build.
+---
+
 # CI and pre-commit
 
 Run sqlty where it blocks bad queries: before a commit and on every pull

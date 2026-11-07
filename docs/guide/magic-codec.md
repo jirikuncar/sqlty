@@ -1,3 +1,7 @@
+---
+description: How to run Python scripts, notebooks and prototypes with --sql queries typed at import time by the sqlty magic codec, without a sqlty rewrite step.
+---
+
 # Magic codec
 
 The magic codec rewrites `--sql` strings when Python reads a source file, so

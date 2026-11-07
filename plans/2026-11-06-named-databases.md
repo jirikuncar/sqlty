@@ -1,7 +1,8 @@
 # Named databases in one project
 
-> **Status:** stage 1 merged in [#984](https://github.com/jirikuncar/sqlty/pull/984); stage 2
-> (`sqlty:db=NAME` per query) in review. Stage 3 to follow.
+> **Status:** stage 1 merged in [#984](https://github.com/jirikuncar/sqlty/pull/984), stage 2
+> in [#986](https://github.com/jirikuncar/sqlty/pull/986); stage 3 (helpers of a database) in
+> review.
 
 Tracks [#912](https://github.com/jirikuncar/sqlty/issues/912), Case 2: one package queries
 several databases, each with its own dialect and schema. Case 1, the monorepo, shipped as
@@ -55,3 +56,13 @@ need no per-query settings. `unknown-database` reports a name the project lacks.
 - Gaps: a database's `rules` do not apply to a query that names it, only to its files.
   Python passes that take only a dialect (sqruff, the parameter binding of helper
   calls) read the file's. `breaking` loads its `--against` schema without the others.
+
+## Stage 3
+
+- A database's `functions` are registered for every file of the project, tagged with the
+  database; a call's query that names no database gets a `-- sqlty: db=NAME` header line,
+  so the routing of stage 2 reads it. A header line moves no column of a diagnostic, which
+  underlines the argument.
+- Gaps: completion and hover in a helper's query read the file's database, since
+  `query_at` finds the string without the helper. A snapshot of `breaking` keeps the
+  top-level `functions` only, as it keeps no databases.

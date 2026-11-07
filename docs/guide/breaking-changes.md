@@ -1,3 +1,7 @@
+---
+description: "How to find schema changes that break a rolling deploy with sqlty breaking: old code on the new schema, new code on the old schema, before you migrate."
+---
+
 # Breaking schema changes
 
 ```bash

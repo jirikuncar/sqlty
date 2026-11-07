@@ -87,6 +87,35 @@ q = SQL[tuple[int]]("--sql sqlty:db=analytic\nSELECT 1::INTEGER")
 r = "--sql sqlty:db=warehouse\nSELECT 1::INTEGER"
 ```
 
+## Helpers of a database
+
+A helper listed in a database's `functions` checks its calls against that database, in
+any file. A query that names its database keeps it.
+
+```toml
+[[tool.sqlty.databases.analytics.functions]]
+import-path = "pkg.warehouse.fetch"
+query-param = "query"
+return-type-param = "form"
+```
+
+`pkg/warehouse.py`:
+
+```python
+def fetch[T](query: str, form: type[T]) -> list[T]: ...
+```
+
+```python
+from pkg.warehouse import fetch
+
+fetch("SELECT n FROM events", tuple[int])
+fetch("--sql sqlty:db=default\nSELECT id FROM users", tuple[str])
+# error: [column-type-mismatch] "tuple[str] item 0 is str but query column 'n' infers int"
+fetch("SELECT n FROM events", tuple[str])
+# error: [unknown-table] "table `users` is not defined in the schema"
+fetch("SELECT id FROM users", tuple[str])
+```
+
 ## Query files
 
 A `.sql` file names its database in a header line above its first query.

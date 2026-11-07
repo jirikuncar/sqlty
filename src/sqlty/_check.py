@@ -22,8 +22,8 @@ from sqlty._core import query_diagnostics as _query_diagnostics
 from sqlty._core import select_star_finding as _select_star_finding
 from sqlty._core import sqruff_findings as _sqruff_findings
 from sqlty._core import wrapped_queries as _wrapped_queries
-from sqlty._drivers import MARKER, find_driver_calls, find_template_calls
-from sqlty._helpers import HelperIndex, find_helper_calls
+from sqlty._drivers import find_driver_calls, find_template_calls
+from sqlty._helpers import MARKER, HelperIndex, find_helper_calls
 from sqlty._lint import NAME_RULES, Diagnostic
 from sqlty._params import ParamArg, _dotted, annotation_type, mismatch
 from sqlty._source import Ignore, ParsedSource, _wrapper_name, is_any

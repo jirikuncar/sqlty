@@ -1,3 +1,7 @@
+---
+description: How sqlty types JSON objects and arrays built inside a PostgreSQL query, so a nested API response from one query is still type-checked.
+---
+
 # JSON shapes
 
 A JSON column is `Any` to sqlty: the schema says `JSONB` and nothing more. A query that
