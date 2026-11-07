@@ -311,6 +311,23 @@ def test_extend_applies_a_package_config_on_top_of_another(tmp_path: Path) -> No
     assert load_config(pkg)[0]["schema"] == "local.sql"
 
 
+def test_extend_merges_databases_by_name_and_rebases_their_paths(tmp_path: Path) -> None:
+    (tmp_path / "sqlty.toml").write_text(
+        '[databases.a]\nschema = "a.sql"\ninclude = ["x"]\n[databases.b]\ndialect = "mysql"\n'
+    )
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "sqlty.toml").write_text(
+        'extend = "../sqlty.toml"\n[databases.b]\nqueries = "sql"\n'
+    )
+
+    assert load_config(tmp_path / "pkg")[0] == {
+        "databases": {
+            "a": {"schema": ["../a.sql"], "include": ["x"], "exclude": []},
+            "b": {"queries": "sql", "include": [], "exclude": []},
+        }
+    }
+
+
 def test_extend_follows_a_chain_and_rereads_an_edited_base(tmp_path: Path) -> None:
     from sqlty._config import load_config_file
 

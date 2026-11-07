@@ -25,6 +25,45 @@
   <meta name="twitter:description" content="{{ description }}">
   <meta name="twitter:image" content="{{ image }}">
   <meta name="twitter:image:alt" content="The SQLTy wordmark">
+  {% if home %}
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": {{ config.site_name | tojson }},
+      "url": {{ config.site_url | tojson }},
+      "description": {{ config.site_description | tojson }}
+    }
+  </script>
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": {{ config.site_name | tojson }},
+      "description": {{ config.site_description | tojson }},
+      "url": {{ config.site_url | tojson }},
+      "image": {{ image | tojson }},
+      "applicationCategory": "DeveloperApplication",
+      "applicationSubCategory": "Static analysis",
+      "featureList": [
+        "Infers Python row types of SQL queries from casts or CREATE TABLE statements",
+        "Checks row types, parameters and column names against the schema",
+        "Reports aggregates a one-to-many join inflates",
+        "Reports joins between keys of different tables",
+        "Reports schema changes that break deployed code",
+        "Formats SQL query strings"
+      ],
+      "operatingSystem": "Linux, macOS, Windows",
+      "softwareRequirements": "Python 3.14 or newer",
+      "downloadUrl": "https://pypi.org/project/sqlty/",
+      "installUrl": {{ (config.site_url ~ "installation/") | tojson }},
+      "license": "https://opensource.org/license/mit",
+      "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "sameAs": [{{ config.repo_url | tojson }}, "https://pypi.org/project/sqlty/"]
+    }
+  </script>
+  {% endif %}
   <link rel="icon" href="{{ 'assets/favicon/favicon.ico' | url }}" sizes="32x32">
   <script>
     (() => {

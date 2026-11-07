@@ -1,3 +1,7 @@
+---
+description: "Reference for every sqlty configuration key in sqlty.toml, pyproject.toml or Cargo.toml: schema, dialect, queries, rules and file selection."
+---
+
 # Configuration
 
 sqlty reads `sqlty.toml`, `[tool.sqlty]` from `pyproject.toml`, or `[package.metadata.sqlty]`
@@ -111,6 +115,7 @@ A directory with more than one file reads the first of `sqlty.toml`,
 | [`types`](#types) | table of SQL type or `table.column` = Python type | `{}` | `rewrite`, `check` | Python types a converter above the driver gives a SQL type or a column |
 | [`format-command`](#format-command) | list of strings | none | `rewrite`, `check --fix` | Formatter run on each file `rewrite` or `check --fix` changes, with the path appended |
 | [`extend`](#extend) | string | none | `rewrite`, `strip`, `check`, magic codec | Another configuration file this one is applied on top of, relative to this file |
+| [`databases`](#databases) | table of tables | `{}` | `rewrite`, `check` | Named databases, each with its own `dialect`, `schema` and the files it applies to |
 | [`exclude`](#exclude-and-extend-exclude) | list of globs | see [Default excludes](#exclude-and-extend-exclude) | `rewrite`, `strip`, `check` | Globs skipped while walking a directory; replaces the default list |
 | [`extend-exclude`](#exclude-and-extend-exclude) | list of globs | `[]` | `rewrite`, `strip`, `check` | Globs skipped in addition to `exclude` or the defaults |
 | [`respect-gitignore`](#respect-gitignore) | boolean | `true` | `rewrite`, `strip`, `check` | Skip the files `.gitignore` ignores while walking a directory |
@@ -405,6 +410,141 @@ missing file, or a chain that comes back to a file already in it, is an error.
 !!! note "The editor reloads on its own files only"
     `sqlty server` reloads when a `sqlty.toml`, `pyproject.toml` or `Cargo.toml` changes.
     An extended file of another name takes effect when the server restarts.
+
+## `databases`
+
+One package can query several databases, each with its own dialect and schema. Name each
+one under `databases`; the top-level keys stay the default database.
+
+```toml
+[tool.sqlty]
+schema = "db/app.sql"
+
+[tool.sqlty.databases.analytics]
+dialect = "sqlite"
+schema = "db/analytics.sql"
+queries = ["sql/analytics"]
+include = ["src/app/reports"]
+exclude = ["legacy.py"]
+
+[tool.sqlty.databases.analytics.rules]
+select-star = "ignore"
+```
+
+A file is checked against the first database that names it:
+
+1. A `.sql` file its `queries` names.
+2. A file its `include` globs match and its `exclude` globs don't, matched as
+   [`overrides`](#overrides) match.
+3. Any other file uses the default database.
+
+A database takes `dialect`, `schema`, `queries`, `query-format`, `rules`, `types` and
+`functions`. A key it leaves unset is the top-level one; `rules` and `types` merge key by
+key, so a database changes single entries. Every other setting, such as `import-style`,
+applies to all databases. Its paths and globs are relative to the configuration file.
+
+`--dialect` and `--schema` apply to the default database and to a database that names
+neither. A database name is letters, digits, `-` and `_`; `default` is reserved.
+
+!!! note "The magic codec reads the default database"
+    `# coding: sqlty` decodes a module with the top-level settings, whatever database its
+    path belongs to. [#985](https://github.com/jirikuncar/sqlty/issues/985) tracks naming
+    the database in the declaration.
+
+### Name the database in the query
+
+A query string names its database on the marker line, and a `.sql` file in a header
+line above its first query. The name overrides the file's database for that query.
+
+```toml
+[tool.sqlty]
+schema = "app.sql"
+
+[tool.sqlty.databases.analytics]
+dialect = "sqlite"
+schema = "analytics.sql"
+```
+
+`app.sql`:
+
+```sql
+CREATE TABLE users (id TEXT NOT NULL);
+```
+
+`analytics.sql`:
+
+```sql
+CREATE TABLE events (n INTEGER NOT NULL);
+```
+
+```python
+users = "--sql\nSELECT id FROM users"
+events = "--sql sqlty:db=analytics\nSELECT n FROM events"
+# rewritten: users = SQL[tuple[str]]("--sql\nSELECT id FROM users")
+# rewritten: events = SQL[tuple[int]]("--sql sqlty:db=analytics\nSELECT n FROM events")
+```
+
+```sql
+-- sqlty: db=analytics
+
+-- name: count_events
+-- error:
+SELECT COUNT(*) FROM events;
+```
+
+The query is read with that database's `dialect`, `schema` and `types`, and
+`db=default` names the top-level one. Its `rules` stay those of the file. Everything
+after `--sql` on the marker line is a SQL comment, so the database still runs the query
+as written; under MySQL, write `-- sql sqlty:db=analytics`. A name the project does not
+configure is [`unknown-database`](rules.md#unknown-database).
+
+### Helpers of a database
+
+A helper a database lists in its `functions` checks its calls against that database, in
+any file. You can keep a warehouse client next to the application code, without moving
+its callers under the database's `include`.
+
+```toml
+[tool.sqlty]
+schema = "app.sql"
+
+[tool.sqlty.databases.analytics]
+dialect = "sqlite"
+schema = "analytics.sql"
+
+[[tool.sqlty.databases.analytics.functions]]
+import-path = "app.warehouse.fetch"
+query-param = "query"
+return-type-param = "form"
+```
+
+`app.sql`:
+
+```sql
+CREATE TABLE users (id TEXT NOT NULL);
+```
+
+`analytics.sql`:
+
+```sql
+CREATE TABLE events (n INTEGER NOT NULL);
+```
+
+`app/warehouse.py`:
+
+```python
+def fetch[T](query: str, form: type[T]) -> list[T]: ...
+```
+
+```python
+from app.warehouse import fetch
+
+# error: [column-type-mismatch] "tuple[str] item 0 is str but query column 'n' infers int"
+fetch("SELECT n FROM events", tuple[str])
+```
+
+A query that names its database, `--sql sqlty:db=default` say, keeps it. Completion and
+hover in a helper's query still read the file's database.
 
 ## `exclude` and `extend-exclude`
 

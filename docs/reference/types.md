@@ -1,3 +1,7 @@
+---
+description: Which Python type each SQL type maps to in sqlty for PostgreSQL, MySQL, SQLite and DuckDB, matching what psycopg, PyMySQL, sqlite3 and DuckDB return.
+---
+
 # Type mapping
 
 Each SQL type maps to the Python type the dialect's usual driver returns for it.

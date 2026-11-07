@@ -154,19 +154,40 @@ q = "--sql\nSELECT * FROM users u WHERE u.e<CURSOR>"
 # completions: email column u
 ```
 
+## Qualified names
+
+With nothing typed and several relations in scope, each column is offered as
+`alias.column`, so the inserted name says whose it is and never turns ambiguous. Once a
+prefix is typed, or with one relation in scope, columns are offered bare.
+
+```python
+q = "--sql\nSELECT id FROM users u JOIN orders o ON <CURSOR>"
+# completions: o.id column o
+# completions: o.total column o
+# completions: o.user_id column o
+# completions: u.email column u
+# completions: u.id column u
+# completions: u.name column u
+```
+
+```python
+q = "--sql\nSELECT id FROM users u JOIN orders o ON u.id = o.user_id WHERE to<CURSOR>"
+# completions: total column o
+```
+
 ## Same column in several tables
 
-A column offered by several tables is listed once per alias; the editor shows the alias
-next to each entry. A table named twice without aliases lists its columns once.
+A column offered by several tables is listed once per alias. A table named twice without
+aliases lists its columns once.
 
 ```python
 q = "--sql\nSELECT <CURSOR> FROM users u JOIN users v ON u.id = v.id"
-# completions: email column u
-# completions: email column v
-# completions: id column u
-# completions: id column v
-# completions: name column u
-# completions: name column v
+# completions: u.email column u
+# completions: u.id column u
+# completions: u.name column u
+# completions: v.email column v
+# completions: v.id column v
+# completions: v.name column v
 ```
 
 ```python

@@ -3,13 +3,13 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.5.1"
 edition = "2021"
 description = "Rust engine of sqlty: SQL type inference and Python source rewriting"
 license = "MIT"
 repository = "https://github.com/jirikuncar/sqlty"
 publish = false
-rust-version = "1.88"
+rust-version = "1.99"
 
 [workspace.dependencies]
 pyo3 = { version = "0.30", features = ["extension-module"] }

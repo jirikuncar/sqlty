@@ -18,9 +18,9 @@ uv add sqlty            # or: pip install sqlty; sqlty requires Python >= 3.14
 ```
 
 Find the dialect from the driver (`psycopg` or `asyncpg`: `postgres`;
-`sqlite3`: `sqlite`; `pymysql` or `mysqlclient`: `mysql`) and the schema. A
-schema saves a cast in every query. Dump it from the database, or point at
-the migrations:
+`sqlite3` or `aiosqlite`: `sqlite`; `pymysql` or `mysqlclient`: `mysql`) and
+the schema. A schema saves a cast in every query. Dump it from the database,
+or point at the migrations:
 
 ```bash
 pg_dump --schema-only app > schema.sql      # PostgreSQL
@@ -110,6 +110,11 @@ Start with what passes today, then tighten:
 Promote `stale-type` to `error` once the converted modules are clean, and add
 `sqlty breaking` when schema changes start going through pull requests. See
 `sqlty-ci`.
+
+Once the schema declares its primary, unique and foreign keys, fix the
+`fanout-aggregate` warnings, promote it to `error`, and consider turning on
+`entity-mismatch` (off by default). See
+[Joins and aggregates](https://sqlty.kuncar.dev/guide/joins/).
 
 ## Don't
 

@@ -1,3 +1,7 @@
+---
+description: "Why a query column has no type: the six sqlty rules that report misspelled columns, unknown tables and functions, and valid SQL sqlty cannot type."
+---
+
 # Name diagnostics
 
 A query that reads a misspelled column, an unknown table or a function sqlty

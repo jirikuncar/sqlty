@@ -17,11 +17,13 @@ nav = [
     { "Quickstart" = "quickstart.md" },
     { "Why SQLTy?" = "motivation.md" },
     { "Use cases" = "use-cases.md" },
+    { "FAQ" = "faq.md" },
   ] },
   { "Guide" = [
     { "Writing queries" = "guide/writing-queries.md" },
     { "Schema inference" = "guide/schema-inference.md" },
     { "Name diagnostics" = "guide/name-diagnostics.md" },
+    { "Joins and aggregates" = "guide/joins.md" },
     { "Breaking schema changes" = "guide/breaking-changes.md" },
     { "Drivers and ORMs" = "guide/drivers-and-orms.md" },
     { "Untyped queries" = "guide/untyped.md" },
@@ -88,6 +90,11 @@ permalink = true
 [project.markdown_extensions.pymdownx.highlight]
 line_spans = "__span"
 pygments_lang_class = true
+# sqlty's Pygments lexer colors the SQL of query strings, as the editor and playground do.
+extend_pygments_lang = [
+  { name = "python", lang = "sqlty" },
+  { name = "py", lang = "sqlty" },
+]
 [project.markdown_extensions.pymdownx.inlinehilite]
 [project.markdown_extensions.pymdownx.superfences]
 
@@ -108,6 +115,7 @@ markdown_description = "SQLTy type-checks SQL in Python: it infers row and param
   "quickstart.md",
   "motivation.md",
   "use-cases.md",
+  "faq.md",
 ]
 "Guide" = ["guide/*.md"]
 "Optional" = [

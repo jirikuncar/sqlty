@@ -14,4 +14,6 @@ workspace = true
 [dependencies]
 sqlty-python.workspace = true
 regex.workspace = true
+# On upgrade, check quarylabs/sqruff#5251: 0.44 lays out a query only up to an unparsable
+# `{name}` field. Once fixed, drop the `\{\w*\}` arm of `PLACEHOLDER` in src/lib.rs.
 sqruff-lib = "0.44"

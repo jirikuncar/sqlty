@@ -1273,6 +1273,185 @@ def test_invalid_overrides_are_errors(tmp_path, monkeypatch, capsys, override, m
     assert message in err
 
 
+_DATABASES = """\
+[tool.sqlty]
+schema = "db/app.sql"
+
+[tool.sqlty.rules]
+select-star = "error"
+
+[tool.sqlty.databases.analytics]
+dialect = "sqlite"
+schema = "db/analytics.sql"
+queries = ["sql"]
+include = ["app/reports"]
+exclude = ["legacy.py"]
+
+[tool.sqlty.databases.analytics.rules]
+narrow-type = "error"
+"""
+
+
+def _databases_project(tmp_path: Path) -> None:
+    files = {
+        "pyproject.toml": _DATABASES,
+        "db/app.sql": "CREATE TABLE users (id INTEGER NOT NULL);",
+        "db/analytics.sql": "CREATE TABLE events (kind TEXT NOT NULL);",
+        "app/users.py": 'q = "--sql\\nSELECT * FROM users"\n',
+        "app/reports/events.py": 'q = "--sql\\nSELECT * FROM events"\n',
+        "app/reports/legacy.py": 'q = "--sql\\nSELECT * FROM users"\n',
+        "sql/events.sql": "-- name: get_kinds\nSELECT nope FROM events;\n",
+    }
+    for name, text in files.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+
+
+def test_databases_pick_the_schema_and_rules_of_a_file(tmp_path, monkeypatch, capsys) -> None:
+    _databases_project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    main(["rewrite", "app"])
+    _, out, _ = _run(["check", "."], capsys)
+
+    wrapped = 'from sqlty import SQL\nq = SQL[{}]("--sql\\nSELECT * FROM {}")\n'
+    assert (tmp_path / "app/users.py").read_text() == wrapped.format("tuple[int]", "users")
+    assert (tmp_path / "app/reports/events.py").read_text() == wrapped.format(
+        "tuple[str]", "events"
+    )
+    assert (tmp_path / "app/reports/legacy.py").read_text() == wrapped.format("tuple[int]", "users")
+    sep = os.sep
+    assert out.splitlines() == [
+        f"app{sep}reports{sep}events.py:2: [select-star] SELECT * used — expand to explicit column list",
+        f"app{sep}reports{sep}legacy.py:2: [select-star] SELECT * used — expand to explicit column list",
+        f"app{sep}users.py:2: [select-star] SELECT * used — expand to explicit column list",
+        f"sql{sep}events.sql:2: [unknown-column] column `nope` does not exist in `events`",
+        "Found 4 error(s)",
+    ]
+
+
+def test_a_database_inherits_and_merges_the_project_settings(tmp_path, monkeypatch, capsys) -> None:
+    _databases_project(tmp_path)
+    (tmp_path / "app/reports/events.py").write_text(
+        'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT kind FROM events")\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    _, out, _ = _run(["check", "--dialect", "mysql", "app/reports/events.py"], capsys)
+
+    assert out.splitlines() == [
+        f"app{os.sep}reports{os.sep}events.py:2: [narrow-type] SQL[tuple[int]] should be SQL[tuple[str]]",
+        "Found 1 error(s)",
+    ]
+
+
+def test_a_query_marker_picks_its_database(tmp_path, monkeypatch, capsys) -> None:
+    _databases_project(tmp_path)
+    (tmp_path / "app/mixed.py").write_text(
+        'a = "--sql sqlty:db=analytics\\nSELECT kind FROM events"\n'
+        'b = "--sql sqlty:db=analytic\\nSELECT id FROM users"\n'
+    )
+    (tmp_path / "app/reports/back.py").write_text(
+        'q = "--sql sqlty:db=default\\nSELECT id FROM users"\n'
+    )
+    (tmp_path / "app/users.sql").write_text(
+        "-- sqlty: db=default\n\n-- name: ids\nSELECT id FROM users;\n"
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        _DATABASES.replace('queries = ["sql"]', 'queries = ["sql", "app/users.sql"]')
+    )
+    monkeypatch.chdir(tmp_path)
+
+    main(["rewrite", "app/mixed.py", "app/reports/back.py"])
+    _, out, _ = _run(["check", "app/mixed.py", "app/users.sql"], capsys)
+
+    assert (tmp_path / "app/mixed.py").read_text() == (
+        "from sqlty import SQL\n"
+        'a = SQL[tuple[str]]("--sql sqlty:db=analytics\\nSELECT kind FROM events")\n'
+        'b = SQL[tuple[int]]("--sql sqlty:db=analytic\\nSELECT id FROM users")\n'
+    )
+    assert (tmp_path / "app/reports/back.py").read_text() == (
+        'from sqlty import SQL\nq = SQL[tuple[int]]("--sql sqlty:db=default\\nSELECT id FROM users")\n'
+    )
+    assert out.splitlines() == [
+        f"app{os.sep}mixed.py:3: [unknown-database] database `analytic` is not configured; "
+        "did you mean `analytics`?",
+        "Found 1 error(s)",
+    ]
+
+
+def test_a_database_helper_reads_its_queries_in_any_file(tmp_path, monkeypatch, capsys) -> None:
+    _databases_project(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        _DATABASES
+        + """
+[[tool.sqlty.databases.analytics.functions]]
+import-path = "app.warehouse.fetch"
+query-param = "query"
+return-type-param = "form"
+"""
+    )
+    (tmp_path / "app/warehouse.py").write_text("def fetch(query, form): ...\n")
+    (tmp_path / "app/users.py").write_text(
+        "from app.warehouse import fetch\n"
+        'fetch("SELECT kind FROM events", tuple[str])\n'
+        'fetch("SELECT id FROM users", tuple[int])\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    _, out, _ = _run(["check", "app/users.py"], capsys)
+
+    assert out.splitlines() == [
+        f"app{os.sep}users.py:3: [unknown-table] table `users` is not defined in the schema",
+        "Found 1 error(s)",
+    ]
+
+
+def test_the_server_checks_a_buffer_against_its_database(tmp_path) -> None:
+    from sqlty._lsp_bridge import Workspace
+
+    _databases_project(tmp_path)
+    workspace = Workspace(str(tmp_path))
+
+    found = workspace.check(
+        str(tmp_path / "app/reports/new.py"), 'q = "--sql\\nSELECT nope FROM events"\n'
+    )
+    assert workspace.completion(str(tmp_path / "app/reports/new.py"))["dialect"] == "sqlite"
+    assert [d["rule"] for d in found] == ["unknown-column"]
+    assert (
+        workspace.check(str(tmp_path / "sql/new.sql"), "-- name: q\nSELECT kind FROM events;\n")
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    ("database", "message"),
+    [
+        ("[tool.sqlty.databases.default]\n", "a database name is letters, digits"),
+        (
+            "[tool.sqlty.databases.a]\nuntyped = 'skip'\n",
+            "unknown key 'untyped' in [tool.sqlty.databases.a]",
+        ),
+        (
+            "[tool.sqlty.databases.a]\ninclude = 'app'\n",
+            "[tool.sqlty.databases.a] include must be a list",
+        ),
+        (
+            "[tool.sqlty.databases.a.rules]\nselect-starr = 'x'\n",
+            "in [tool.sqlty.databases.a.rules]",
+        ),
+    ],
+)
+def test_invalid_databases_are_errors(tmp_path, monkeypatch, capsys, database, message) -> None:
+    (tmp_path / "pyproject.toml").write_text(database)
+    monkeypatch.chdir(tmp_path)
+
+    code, _, err = _run(["check", "."], capsys)
+
+    assert code == 2
+    assert message in err
+
+
 def _gitignore_project(tmp_path: Path, config: str = "") -> set[str]:
     """A git work tree with ignored files; returns the files `check` reads."""
     (tmp_path / ".git" / "info").mkdir(parents=True)

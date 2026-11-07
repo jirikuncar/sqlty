@@ -43,8 +43,7 @@ from sqlty._core import rewrite_source as _rewrite_source
 from sqlty._core import schema_skipped_objects as _schema_skipped_objects
 from sqlty._core import schema_skipped_tables as _schema_skipped_tables
 from sqlty._core import strip_source as _strip_source
-from sqlty._drivers import MARKER
-from sqlty._helpers import HelperIndex, find_helper_calls
+from sqlty._helpers import MARKER, HelperIndex, find_helper_calls
 from sqlty._lint import Diagnostic
 from sqlty._source import ParsedSource
 
@@ -53,22 +52,43 @@ if TYPE_CHECKING:
 
 
 def load_schema(
-    schema_sql: str, *, dialect: str = "postgres", types: Mapping[str, str] | None = None
+    schema_sql: str | None,
+    *,
+    dialect: str = "postgres",
+    types: Mapping[str, str] | None = None,
+    name: str | None = None,
+    databases: Mapping[str, Schema | None] | None = None,
 ) -> Schema:
     """Parse ``schema_sql`` once, for passing as ``schema_sql`` to the other functions.
 
     ``types`` maps a SQL type name or a ``table.column`` to the Python type a converter
     above the driver gives it, as ``[tool.sqlty.types]`` does.
 
+    ``databases`` maps the name of each other database of the project to its schema
+    (``None`` for one without): a query whose first line names one, ``--sql
+    sqlty:db=analytics``, is read against it in its dialect. ``name`` is this database's,
+    ``"default"`` unless set; ``schema_sql=None`` loads a database without a schema.
+
     Example:
         >>> schema = load_schema("CREATE TABLE t (d DATE)", dialect="sqlite", types={"DATE": "datetime.date"})
         >>> infer_type("SELECT d FROM t", dialect="sqlite", schema_sql=schema)
         'tuple[datetime.date | None]'
+        >>> events = load_schema("CREATE TABLE events (n INTEGER NOT NULL)", dialect="sqlite")
+        >>> project = load_schema(None, databases={"analytics": events})
+        >>> infer_type("--sql sqlty:db=analytics\\nSELECT n FROM events", schema_sql=project)
+        'tuple[int]'
 
     Raises:
         ValueError: a key of ``types`` is neither a SQL type nor ``table.column``
     """
-    return _load_schema(schema_sql, dialect=dialect, types=list(types.items()) if types else None)
+    return _load_schema(
+        schema_sql or "",
+        dialect=dialect,
+        types=list(types.items()) if types else None,
+        name=name,
+        absent=schema_sql is None,
+        databases=list(databases.items()) if databases is not None else None,
+    )
 
 
 class ColumnInfo(NamedTuple):

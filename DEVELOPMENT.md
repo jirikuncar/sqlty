@@ -6,7 +6,7 @@ This guide covers development setup and workflows for SQLTy.
 
 - Python 3.14+
 - [uv](https://docs.astral.sh/uv/) - Fast Python package installer and resolver
-- [Rust toolchain](https://rustup.rs/) (builds the engine, `sqlty._core`, and runs the cargo hooks)
+- [Rust toolchain](https://rustup.rs/) 1.99+ (builds the engine, `sqlty._core`, and runs the cargo hooks)
 
 ## Setup
 
@@ -285,7 +285,9 @@ directly when you need the transformation without registering the codec.
 
 The site at <https://sqlty.kuncar.dev/> is built from `docs/` with
 [Zensical](https://zensical.org/) (configured in `zensical.toml`). Zensical is
-not a project dependency; the Make targets run a pinned version via `uvx`.
+not a project dependency; the Make targets run a pinned version with `uv run --with`, in the
+project environment, so sqlty's Pygments lexer (`sqlty.lexer`) colors the SQL of the Python
+examples as the playground does. Build the extension first (`maturin develop`).
 The version is pinned only in the `Makefile` (`ZENSICAL`); CI runs `make docs`.
 
 ```bash

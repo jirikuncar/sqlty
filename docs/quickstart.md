@@ -1,3 +1,7 @@
+---
+description: "How to go from plain SQL strings in Python to typed, checked queries: mark them with --sql, run sqlty rewrite to add SQL[T], then run sqlty check."
+---
+
 # Quickstart
 
 This page takes one file from plain SQL strings to typed, checked queries.

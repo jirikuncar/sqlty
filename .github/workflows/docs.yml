@@ -10,6 +10,7 @@ on:
       - "scripts/vendor_assets.py"
       - "scripts/offline.py"
       - "scripts/playground_links.py"
+      - "scripts/structured_data.py"
       - "tests/_mdtest/parser.py"
       - "scripts/check_playground.py"
       - "overrides/**"
@@ -17,6 +18,8 @@ on:
       - ".github/workflows/docs.yml"
       - "Makefile"
       - "rust/**"
+      - "src/sqlty/lexer.py"
+      - "pyproject.toml"
   pull_request:
     paths:
       - "docs/**"
@@ -25,6 +28,7 @@ on:
       - "scripts/vendor_assets.py"
       - "scripts/offline.py"
       - "scripts/playground_links.py"
+      - "scripts/structured_data.py"
       - "tests/_mdtest/parser.py"
       - "scripts/check_playground.py"
       - "overrides/**"
@@ -32,6 +36,8 @@ on:
       - ".github/workflows/docs.yml"
       - "Makefile"
       - "rust/**"
+      - "src/sqlty/lexer.py"
+      - "pyproject.toml"
   workflow_dispatch:
 
 permissions:
@@ -63,6 +69,13 @@ jobs:
         with:
           workspaces: rust -> target
           save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # sqlty's Pygments lexer colors the SQL in the Python examples.
+      - name: Install sqlty
+        run: |
+          uv sync --no-dev --no-install-project
+          uv pip install "maturin>=1.12.1,<2.0"
+          uv run --no-sync maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
 
       - name: Build docs (strict)
         run: make docs

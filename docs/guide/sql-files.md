@@ -1,3 +1,7 @@
+---
+description: How to type-check named queries in .sql files used with aiosql, PugSQL or sqlc, with the same sqlty rules as for queries in Python strings.
+---
+
 # Queries in `.sql` files
 
 ```toml

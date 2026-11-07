@@ -1,3 +1,7 @@
+---
+description: "Reference for the sqlty Python API: SQL[T], UNTYPED and t-string templates, the psycopg driver helpers, and the sqlty.core analysis functions."
+---
+
 # Python API
 
 ## `sqlty`

@@ -8,7 +8,8 @@
 //! and the analyzer, reaching it, records the columns its scope offers (aliases, CTEs,
 //! subqueries, `JOIN ... USING` included). When the query does not parse that way, a
 //! token scan of its `FROM` and `JOIN` items stands in. After `JOIN`, the tables a foreign
-//! key links to one already in scope come first, with their `ON` clause.
+//! key links to one already in scope come first, with their `ON` clause. An unqualified
+//! column with nothing typed is offered as `alias.column` when several relations are in scope.
 //!
 //! ```
 //! use sqlty_sql::analyzer::{complete, load_schema_with_skipped, CandidateKind};
@@ -112,6 +113,7 @@ pub fn complete(
     schema: Option<&SchemaData>,
     limit: usize,
 ) -> Completions {
+    let (dialect, schema) = super::route(query, dialect, schema);
     let dialect = SqlDialect::from_name(dialect);
     let schema = schema.unwrap_or_else(|| crate::catalog::empty(dialect));
     let Some(before) = query.get(..cursor).and_then(lex) else {
@@ -168,8 +170,9 @@ pub fn complete(
             let found = parse(&probe, dialect.name())
                 .probe(schema)
                 .unwrap_or_else(|| scanned_columns(query, &before, schema));
+            let blank = qualifier.is_none() && typed.is_empty();
             let qualifier = qualifier.map(|q| q.to_lowercase());
-            found
+            let mut found: Vec<Candidate> = found
                 .into_iter()
                 .filter(|candidate| {
                     qualifier.is_none() || candidate.detail.as_deref() == qualifier.as_deref()
@@ -179,7 +182,17 @@ pub fn complete(
                         .fold_typed(&candidate.label)
                         .starts_with(folded.as_str())
                 })
-                .collect()
+                .collect();
+            // With nothing typed and several relations in scope, `alias.column` says whose it is.
+            if blank && found.iter().any(|c| c.detail != found[0].detail) {
+                for candidate in &mut found {
+                    if let Some(source) = &candidate.detail {
+                        candidate.label =
+                            format!("{}.{}", spelled(source, dialect), candidate.label);
+                    }
+                }
+            }
+            found
         }
     };
     // The schema's own relations before PostgreSQL's system catalogs.
@@ -723,22 +736,34 @@ mod tests {
 
     #[test]
     fn unqualified_columns_in_each_clause() {
-        let both = ["id:o", "id:u", "total:o", "user_id:o"];
+        let both = ["o.id:o", "o.total:o", "o.user_id:o", "u.id:u"];
         let from = "FROM users u JOIN orders o ON u.id = o.user_id";
-        assert_eq!(pg(&format!("SELECT u.name, | {from}"))[..1], ["email:u"]);
+        assert_eq!(pg(&format!("SELECT u.name, | {from}"))[..1], ["o.id:o"]);
         assert_eq!(pg(&format!("SELECT * {from} WHERE i|")), ["id:o", "id:u"]);
         assert_eq!(
             pg(&format!("SELECT * {from} WHERE u.id = 1 AND t|")),
             ["total:o"]
         );
-        assert_eq!(pg(&format!("SELECT * {from} ORDER BY |"))[..1], ["email:u"]);
+        assert_eq!(pg(&format!("SELECT * {from} ORDER BY |"))[..1], ["o.id:o"]);
         assert_eq!(
             pg(&format!("SELECT count(*) {from} GROUP BY u|")),
             ["user_id:o"]
         );
         assert_eq!(
             pg(&format!("SELECT * {from} WHERE |")),
-            ["email:u", "id:o", "id:u", "name:u", "total:o", "user_id:o"]
+            [
+                "o.id:o",
+                "o.total:o",
+                "o.user_id:o",
+                "u.email:u",
+                "u.id:u",
+                "u.name:u"
+            ]
+        );
+        assert_eq!(
+            pg("SELECT * FROM users WHERE |"),
+            ["email:users", "id:users", "name:users"],
+            "one relation in scope: its columns need no qualifier"
         );
         assert_eq!(
             pg("SELECT * FROM users u JOIN orders o ON |")
@@ -829,7 +854,7 @@ mod tests {
     #[test]
     fn quoted_names() {
         let catalog = load(
-            r#"CREATE TABLE "UserLog" ("Kind" TEXT, at INT);"#,
+            r#"CREATE TABLE "UserLog" ("Kind" TEXT, at INT); CREATE TABLE users (id INT);"#,
             "postgres",
         )
         .0;
@@ -840,6 +865,14 @@ mod tests {
         assert_eq!(
             labels(r#"SELECT l.| FROM "UserLog" l"#, &catalog, "postgres"),
             [r#""Kind":l"#, "at:l"]
+        );
+        assert_eq!(
+            labels(
+                r#"SELECT * FROM "UserLog" l JOIN users u ON u.id = l.at WHERE |"#,
+                &catalog,
+                "postgres"
+            ),
+            [r#"l."Kind":l"#, "l.at:l", "u.id:u"]
         );
     }
 

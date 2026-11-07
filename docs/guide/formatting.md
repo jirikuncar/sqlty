@@ -1,3 +1,7 @@
+---
+description: How to format SQL query strings inside Python files with sqlty format, using sqruff layout rules in your project's dialect, in place or as a diff.
+---
+
 # Formatting queries
 
 `sqlty format` lays out the query strings `sqlty check` reads with the layout rules of
@@ -24,7 +28,8 @@ select id,name from users u join orders o on o.user_id=u.id where u.id=%s
 ```
 
 The formatter only changes whitespace, so the query means the same. Keywords keep
-their case, and placeholders such as `%s`, `%(name)s` and `?` stay where they are.
+their case, and placeholders such as `%s`, `%(name)s`, `?` and the `{name}` fields of
+`sql.SQL` templates stay where they are.
 
 ## What is formatted
 

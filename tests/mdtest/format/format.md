@@ -48,6 +48,22 @@ select a,b """ """from t""")
 # formatted: select a,b """ """from t""")
 ```
 
+## Format fields
+
+The `{name}` fields of a `str.format` or `sql.SQL` template are kept like placeholders,
+even where a field stands for a keyword's argument, as `{limit}` does.
+
+```python
+q = """--sql
+select a,b from {table} where id={id} limit {limit}"""
+# formatted: q = """--sql
+# formatted: select
+# formatted:     a,
+# formatted:     b
+# formatted: from {table}
+# formatted: where id = {id} limit {limit}"""
+```
+
 ## A query that does not parse
 
 sqruff lays out what it reads and leaves the rest.

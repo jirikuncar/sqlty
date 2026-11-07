@@ -1,3 +1,7 @@
+---
+description: "Type-safe raw SQL for Python: sqlty infers the row type of each query from its SQL, writes it into your source as SQL[T] and checks it without a database."
+---
+
 # ![SQLTy](assets/sqlty-wordmark-light.svg#only-light){ width="360" height="111" fetchpriority="high" } ![SQLTy](assets/sqlty-wordmark-dark.svg#only-dark){ width="360" height="111" fetchpriority="high" } { #sqlty }
 
 Type-safe raw SQL for Python. sqlty infers the row type of each query from
