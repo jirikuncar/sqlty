@@ -18,7 +18,7 @@ TypedDicts and dataclasses for `check`, configuration, the CLI and the
 psycopg helpers.
 
 Wheels include the compiled extension; building from source needs a
-[Rust toolchain](https://rustup.rs/). There is no pure-Python fallback.
+[Rust toolchain](https://rustup.rs/) 1.99 or newer. There is no pure-Python fallback.
 
 ## Dialects
 
