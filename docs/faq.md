@@ -62,6 +62,31 @@ statements in a schema file, such as a `pg_dump --schema-only` dump or a
 migrations snapshot. It runs offline, in an editor, pre-commit or CI. See
 [Schema inference](guide/schema-inference.md).
 
+## Can sqlty catch totals that a join counts twice?
+
+Yes. `fanout-aggregate` reports a `SUM`, `AVG` or `COUNT` over a table whose
+rows a one-to-many join repeats, such as averaging order totals after joining
+their items. `chasm-join` reports a table joined one-to-many to two others,
+such as orders to items and to payments. sqlty reads the primary, unique and
+foreign keys of your schema, so no database is needed. See
+[Joins and aggregates](guide/joins.md).
+
+## Can sqlty catch a join on the wrong key?
+
+Yes, once you turn on `entity-mismatch` in `[tool.sqlty.rules]`. It follows
+foreign keys to the table whose keys each column holds, and reports a
+comparison such as `products.id = orders.customer_id`. It is off by default,
+because a polymorphic id or a schema without foreign keys can compare
+unrelated keys on purpose. See
+[Joins on the wrong key](guide/joins.md#joins-on-the-wrong-key).
+
+## Is sqlty a semantic layer?
+
+No. Semantic layers such as MetricFlow, Cube and LookML define metrics and
+generate the SQL that computes them, guarding against aggregates over rows a
+join repeats. sqlty generates no SQL: it reports those aggregates in the SQL
+you write. See [Joins and aggregates](guide/joins.md).
+
 ## Which databases and drivers does sqlty support?
 
 PostgreSQL, MySQL and SQLite are fully supported, with types following psycopg
