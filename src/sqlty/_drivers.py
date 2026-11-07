@@ -28,7 +28,7 @@ from collections import defaultdict
 
 from sqlty._helpers import MARKER, HelperCall
 from sqlty._params import SCALARS, ParamArg, arg_type, literal_params
-from sqlty._source import ParsedSource, _fields
+from sqlty._source import AST, AstMismatch, ParsedSource, _fields
 
 # Driver factories and classes, by the dotted name they are imported as, to the driver.
 _CONNECTIONS = {
@@ -248,15 +248,43 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
     """Calls of ``execute``-like methods on a recognised connection or cursor, with their query and parameters.
 
     A call with no parameters has ``params == ()``, so a query that has placeholders is
-    reported. ``executemany`` (and asyncpg's ``fetchmany``) gives one entry per row of a list or tuple literal.
+    reported. ``executemany`` (and asyncpg's ``fetchmany``) gives one entry per row of a list
+    or tuple literal. Calls come in the order of their queries.
     """
     parsed = ParsedSource.of(source)
-    text = parsed.text
-    if not any(driver in text for driver in ("psycopg", "sqlite3", "aiosqlite", "asyncpg")):
+    if not _may_hold(parsed.text):
         return []
-    if not any(method in text for method in ("execute", "fetch", "scalar")):
-        return []
-    if parsed.tree is None:
+    if AST == "python" or (facts := parsed.facts) is None:
+        return _find_driver_calls(parsed)
+    aliases = parsed.typing_aliases if facts.driver_calls else {}
+    rust = [
+        HelperCall(
+            line,
+            query,
+            None,
+            aliases,
+            None if params is None else tuple(ParamArg(key, kind) for key, kind in params),
+            driver=driver,
+            single=single,
+            query_span=span,
+        )
+        for line, query, params, driver, single, span in facts.driver_calls
+    ]
+    if AST == "compare":
+        python = [call._replace(query_node=None) for call in _find_driver_calls(parsed)]
+        if rust != python:
+            raise AstMismatch("find_driver_calls", rust, python, parsed.text)
+    return rust
+
+
+def _may_hold(text: str) -> bool:
+    return any(driver in text for driver in ("psycopg", "sqlite3", "aiosqlite", "asyncpg")) and any(
+        method in text for method in ("execute", "fetch", "scalar")
+    )
+
+
+def _find_driver_calls(parsed: ParsedSource) -> list[HelperCall]:
+    if not _may_hold(parsed.text) or parsed.tree is None:
         return []
     scopes = _Scopes(parsed)
     found: list[HelperCall] = []
@@ -317,6 +345,7 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
                     ),
                     driver=driver,
                     query_node=first,
+                    query_span=parsed.span(first),
                 )
                 for args in arg_lists
             )
@@ -332,6 +361,7 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
         elif isinstance(arg, (ast.List, ast.Tuple)):
             for row in arg.elts:
                 found.extend(_calls(call, first, row, driver, parsed, aliases, query, many=True))
+    found.sort(key=lambda call: call.query_span or (0, 0))
     return found
 
 
@@ -365,6 +395,7 @@ def _calls(
             driver=driver,
             single=single,
             query_node=first,
+            query_span=parsed.span(first),
         )
     ]
 
@@ -442,6 +473,7 @@ def find_template_calls(source: str | ParsedSource) -> list[HelperCall]:
                         tuple(params),
                         driver="psycopg",
                         query_node=template,
+                        query_span=parsed.span(template),
                     )
                 )
     return found

@@ -38,6 +38,7 @@
 
 pub mod checker;
 pub mod config;
+pub mod drivers;
 pub mod edit;
 pub mod fixer;
 pub mod locate;

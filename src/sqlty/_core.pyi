@@ -131,7 +131,26 @@ def named_queries(
 ) -> list[tuple[str, str, list[tuple[str, str]]]]: ...
 def module_facts(
     source: str,
-) -> tuple[list[str], list[tuple[str, str]], list[tuple[int, str]]] | None: ...
+) -> (
+    tuple[
+        list[str],
+        list[str],
+        list[tuple[str, str, str, int]],
+        list[tuple[int, str]],
+        list[tuple[str, str]],
+        list[
+            tuple[
+                int,
+                str,
+                list[tuple[int | str, str | None]] | None,
+                str,
+                str | None,
+                tuple[int, int],
+            ]
+        ],
+    ]
+    | None
+): ...
 def wrapped_queries(
     source: str, *, import_style: str | None = None
 ) -> list[tuple[int, str, str | None, tuple[int, int]]]: ...

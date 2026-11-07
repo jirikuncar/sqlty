@@ -1006,16 +1006,76 @@ fn named_queries(
 }
 
 /// What decides whether the Python passes need a syntax tree, see `sqlty_python::module`:
-/// `(called, from_imports, any_calls)`, or None when `source` is not valid Python.
+#[derive(IntoPyObject)]
+enum ParamKey {
+    Index(usize),
+    Name(String),
+}
+
+type PyParam = (ParamKey, Option<String>);
+type PyDriverCall = (
+    usize,
+    String,
+    Option<Vec<PyParam>>,
+    &'static str,
+    Option<String>,
+    (usize, usize),
+);
+type PyFacts = (
+    Vec<String>,
+    Vec<String>,
+    Vec<(String, String, String, u32)>,
+    Vec<(usize, String)>,
+    Vec<(String, String)>,
+    Vec<PyDriverCall>,
+);
+
+/// `(names, attributes, from_imports, any_calls, typing_aliases, driver_calls)` read from
+/// `source` by `sqlty_python::module::facts`, or None when it is not valid Python.
 #[pyfunction]
-#[allow(clippy::type_complexity)]
-fn module_facts(
-    py: Python<'_>,
-    source: &str,
-) -> Option<(Vec<String>, Vec<(String, String)>, Vec<(usize, String)>)> {
+fn module_facts(py: Python<'_>, source: &str) -> Option<PyFacts> {
+    use sqlty_python::drivers::Key;
     detach(py, || {
-        sqlty_python::module::facts(source)
-            .map(|found| (found.called, found.from_imports, found.any_calls))
+        let found = sqlty_python::module::facts(source)?;
+        let from_imports = found
+            .from_imports
+            .into_iter()
+            .map(|i| (i.local, i.original, i.module, i.level))
+            .collect();
+        let driver_calls = found
+            .driver_calls
+            .into_iter()
+            .map(|call| {
+                let params = call.params.map(|params| {
+                    params
+                        .into_iter()
+                        .map(|p| {
+                            let key = match p.key {
+                                Key::Index(index) => ParamKey::Index(index),
+                                Key::Name(name) => ParamKey::Name(name),
+                            };
+                            (key, p.kind)
+                        })
+                        .collect()
+                });
+                (
+                    call.line,
+                    call.query,
+                    params,
+                    call.driver,
+                    call.single,
+                    call.query_span,
+                )
+            })
+            .collect();
+        Some((
+            found.names,
+            found.attributes,
+            from_imports,
+            found.any_calls,
+            found.typing_aliases,
+            driver_calls,
+        ))
     })
 }
 

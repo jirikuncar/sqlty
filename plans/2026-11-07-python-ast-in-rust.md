@@ -1,6 +1,6 @@
 # Python AST passes in Rust
 
-> **Status:** milestone 1 on branch `rust/python-ast-migration`.
+> **Status:** milestones 1 and 2 on branch `rust/python-ast-migration`.
 
 The checks that need a Python syntax tree run in Python on `ast`: helper calls
 (`_helpers.py`), driver calls (`_drivers.py`), `psycopg.sql` compositions (`_psycopg.py`),
@@ -69,11 +69,17 @@ Slowest first, each measured on the 10,000-file synthetic project.
    the Rust offsets, so a file that imports helpers but never calls one is never parsed by
    `ast`. `check -j 1`: 2.88 s to 2.22 s on the full project; 3.85 s to 4.13 s (median, noisy)
    when every file calls a helper, since those files are parsed twice.
-2. Driver and t-string calls.
+2. `sqlty_python::drivers`: `find_driver_calls`, with its scopes, bindings and argument
+   types, and `typing_aliases`. The helper gate resolves `f(...)` through the helper index
+   (`from sqlty.drivers.psycopg import execute` no longer matches a helper `execute`).
+   `check -j 1`, median of 3: 4.15 s to 2.55 s when every file calls a psycopg helper, of
+   which 880 of 10,000 files still reach `ast` (type definitions, helper calls); 2.95 s to
+   2.28 s on the full project. Output is identical in both modes.
+3. Helper calls (`find_helper_calls`) and t-string calls.
+4. Type definitions (`extract_type_definitions`).
 
 ## Open questions
 
-- Raise the MSRV from 1.88 to 1.97.
 - WebAssembly size with the parser in `sqlty-wasm`; it gains every AST check.
 - `_variants.py` evaluates real `psycopg.sql` classes to render compositions; in Rust it
   needs its own model of `SQL`, `Identifier`, `Literal` and `format`.

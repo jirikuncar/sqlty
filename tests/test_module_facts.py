@@ -1,8 +1,8 @@
 """Differential test of ``sqlty_python::module``: what Rust reads of a module against ``ast``.
 
-Generated modules nest imports, aliases and calls in every block kind; the corpus is every
-Python file of the repository and every Python block of the Markdown tests. Raise the number
-of generated examples with ``SQLTY_FUZZ_EXAMPLES``.
+Generated modules nest imports, aliases, driver bindings and calls in every block kind; the
+corpus is every Python file of the repository and every Python block of the Markdown tests.
+Raise the number of generated examples with ``SQLTY_FUZZ_EXAMPLES``.
 """
 
 from __future__ import annotations
@@ -16,29 +16,41 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from sqlty._core import module_facts
-from sqlty._source import ParsedSource
+from sqlty._drivers import _find_driver_calls
+from sqlty._source import Facts, ParsedSource
 
 EXAMPLES = int(os.environ.get("SQLTY_FUZZ_EXAMPLES", "300"))
 ROOT = Path(__file__).parent.parent
 WRAPPERS = ("SQL", "sqlty.SQL", "Q", "x.SQL")
 
 
-def python_facts(text: str) -> tuple[set[str], list[tuple[str, str]], dict[str, list[int]]]:
+def python_facts(text: str) -> Facts:
     parsed = ParsedSource(text)
     assert parsed.tree is not None
-    called = {
-        node.func.id if isinstance(node.func, ast.Name) else node.func.attr
-        for node in ast.walk(parsed.tree)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name | ast.Attribute)
-    }
-    imports = sorted(
-        (alias.asname or alias.name, alias.name)
-        for node in parsed.imports
-        if isinstance(node, ast.ImportFrom)
-        for alias in node.names
+    calls = [node for node in ast.walk(parsed.tree) if isinstance(node, ast.Call)]
+    return Facts(
+        sorted({c.func.id for c in calls if isinstance(c.func, ast.Name)}),
+        sorted({c.func.attr for c in calls if isinstance(c.func, ast.Attribute)}),
+        sorted(
+            (alias.asname or alias.name, alias.name, node.module or "", node.level)
+            for node in parsed.imports
+            if isinstance(node, ast.ImportFrom)
+            for alias in node.names
+        ),
+        [],
+        sorted(parsed._typing_aliases().items()),
+        [
+            (
+                call.line,
+                call.query,
+                None if call.params is None else [tuple(param) for param in call.params],
+                call.driver,
+                call.single,
+                call.query_span,
+            )
+            for call in _find_driver_calls(parsed)
+        ],
     )
-    return called, imports, {wrapper: parsed._any_calls(wrapper) for wrapper in WRAPPERS}
 
 
 def assert_same(text: str) -> None:
@@ -46,15 +58,18 @@ def assert_same(text: str) -> None:
         ast.parse(text)
     except SyntaxError, ValueError:
         return
-    rust = module_facts(text)
+    rust = ParsedSource(text).facts
     assert rust is not None, f"ruff rejects what ast parses:\n{text}"
-    called, from_imports, any_calls = rust
-    python_called, python_imports, python_any = python_facts(text)
-    assert set(called) == python_called, text
-    assert sorted(from_imports) == python_imports, text
+    python = python_facts(text)
+    assert rust.names == python.names, text
+    assert rust.attributes == python.attributes, text
+    assert sorted(rust.from_imports) == python.from_imports, text
+    assert sorted(dict(rust.typing_aliases).items()) == python.typing_aliases, text
+    assert rust.driver_calls == python.driver_calls, text
+    any_calls = ParsedSource(text)
     for wrapper in WRAPPERS:
-        found = [o for o, name in any_calls if name == wrapper or name.endswith(f".{wrapper}")]
-        assert found == python_any[wrapper], (wrapper, text)
+        found = [o for o, name in rust.any_calls if name == wrapper or name.endswith(f".{wrapper}")]
+        assert found == any_calls._any_calls(wrapper), (wrapper, text)
 
 
 IMPORTS = [
@@ -69,6 +84,16 @@ IMPORTS = [
     "from m import run as r, fetch",
     "from . import run",
     "from .m import run as A",
+    "from .typing import Any",
+    "import psycopg",
+    "import sqlite3",
+    "import asyncpg, aiosqlite",
+    "from sqlty.drivers.psycopg import execute, scalar",
+    "from sqlty.drivers import psycopg as h",
+    "from sqlty import SQL",
+    "from datetime import date",
+    "import datetime as dt",
+    "from uuid import UUID as U",
 ]
 SLICES = [
     "Any",
@@ -92,6 +117,109 @@ SLICES = [
     "'('",
 ]
 CALLEES = ["SQL", "sqlty.SQL", "Q", "x.SQL", "f().SQL", "a[0].SQL", "x.y.SQL", "(SQL)"]
+BINDINGS = [
+    "conn = psycopg.connect('')",
+    "conn = await psycopg.AsyncConnection.connect('')",
+    "c = sqlite3.connect('db')",
+    "c = aiosqlite.connect('db')",
+    "cur = conn.cursor()",
+    "cur = c.cursor()",
+    "pool = asyncpg.create_pool()",
+    "x: sqlite3.Cursor",
+    "x: 'psycopg.Cursor' = f()",
+    "q = 'SELECT ?, ?'",
+    "q = '--sql\\nSELECT %(a)s'",
+    "q = SQL[int]('SELECT $1')",
+    "q = sqlty.SQL[int]('SELECT 1', x)",
+    "q = 'a' 'b'",
+    "q, r = 'SELECT 1', 2",
+    "d: date = date(2020, 1, 1)",
+    "d = dt.datetime(1, 2, 3)",
+    "d: 'U'",
+    "n = 1",
+    "n = int(s)",
+    "n: list = []",
+    "for c in y: pass",
+    "c += 1",
+    "(conn := psycopg.connect())",
+    "w = [cur for cur in y]",
+    "with sqlite3.connect('') as w, psycopg.connect() as (a, b): pass",
+    "try: pass\nexcept E as conn: pass",
+    "import sqlite3 as conn",
+    "def cur(): pass",
+    "class c: q = 'x'",
+]
+RECEIVERS = ["conn", "c", "cur", "pool", "w", "x", "a", "q"]
+METHODS = ["execute", "executemany", "fetch", "fetchmany", "fetchval", "execute_fetchall", "cursor"]
+QUERIES = [
+    "'SELECT ?'",
+    "q",
+    "SQL[int]('SELECT $1, $2')",
+    "sqlty.SQL[T]('x')",
+    "f'x'",
+    "b'x'",
+    "('a'  'b')",
+    "r",
+    "*a",
+]
+ARGUMENTS = [
+    "",
+    ", (1, 'a')",
+    ", [n, d, None]",
+    ", {'a': -1, 'b': 1.5, 'c': True}",
+    ", {'a': 1, **k}",
+    ", {1: 2}",
+    ", n",
+    ", 'ab'",
+    ", d",
+    ", b'x'",
+    ", [(1,), (2, 'a')]",
+    ", ((n,), [*a], m)",
+    ", params=(1,)",
+    ", parameters=[1]",
+    ", *a",
+    ", **k",
+    ", args=[(1,)]",
+    ", dt.date(1, 2, 3)",
+    ", (*a,)",
+    ", (-True, +2, -1.5, 1j, -1j, --1)",
+    ", {1, 2}, frozenset()",
+    ", [x for x in y]",
+    ", [None, None]",
+    ", [[1], [2]]",
+    ", f'{n}'",
+    ", ...",
+    ", U(x), date.today(), dt.time()",
+    ", 1, 'a', d",
+]
+HELPERS = ["execute", "scalar", "h.execute", "h.scalar", "psycopg.execute"]
+HELPER_ARGUMENTS = [
+    "",
+    ", (1,)",
+    ", int",
+    ", n",
+    ", int, (1,)",
+    ", params={'a': 1}",
+    ", int, params=n",
+    ", **k",
+    ", [1], [2]",
+]
+driver_calls = st.one_of(
+    st.builds(
+        lambda r, m, q, a, aw: f"{aw}{r}.{m}({q}{a})",
+        st.sampled_from(RECEIVERS),
+        st.sampled_from(METHODS),
+        st.sampled_from(QUERIES),
+        st.sampled_from(ARGUMENTS),
+        st.sampled_from(["", "await "]),
+    ),
+    st.builds(
+        lambda h, q, a: f"{h}(conn, {q}{a})",
+        st.sampled_from(HELPERS),
+        st.sampled_from(QUERIES),
+        st.sampled_from(HELPER_ARGUMENTS),
+    ),
+)
 expressions = st.one_of(
     st.builds(
         lambda w, s: f"{w}[{s}]('--sql\\nSELECT 1')",
@@ -113,6 +241,14 @@ def _wrap(body: list[str], kind: str) -> list[str]:
             return ["try:", *inner, "except E:", *inner, "finally:", *inner]
         case "def":
             return ["@deco(run(1))", "def f(a=r()):", *inner]
+        case "async":
+            return [
+                "@deco(conn.execute('SELECT 1'))",
+                "async def g(cur: psycopg.Cursor, /, n: int, *a: sqlite3.Connection, k: 'date' = d, **kw):",
+                *inner,
+            ]
+        case "lambda":
+            return ["v = lambda conn=c: conn.execute('SELECT ?', (1,))", *body]
         case "class":
             return ["class C:", *inner]
         case "match":
@@ -130,6 +266,9 @@ statements = st.one_of(
     expressions.map(lambda e: [f"v = f'{{{e}}}'"]),
     expressions.map(lambda e: [f"w = [{e} for _ in y]"]),
     st.just(["s = 'žluťoučký kůň'  # ünïcode"]),
+    st.sampled_from(BINDINGS).map(lambda line: line.split("\n")),
+    driver_calls.map(lambda e: [e]),
+    driver_calls.map(lambda e: [f"v = [{e} for _ in y]"]),
 )
 blocks = st.recursive(
     st.lists(statements, min_size=1, max_size=4).map(
@@ -138,17 +277,42 @@ blocks = st.recursive(
     lambda inner: st.builds(
         lambda body, kind, rest: _wrap(body, kind) + rest,
         inner,
-        st.sampled_from(["if", "try", "def", "class", "match", "with", "for"]),
+        st.sampled_from(["if", "try", "def", "async", "lambda", "class", "match", "with", "for"]),
         inner,
     ),
     max_leaves=12,
 )
 
 
+driver_statements = st.one_of(
+    st.sampled_from(BINDINGS).map(lambda line: line.split("\n")),
+    driver_calls.map(lambda e: [e]),
+)
+driver_blocks = st.recursive(
+    st.lists(driver_statements, min_size=1, max_size=6).map(
+        lambda parts: [line for part in parts for line in part]
+    ),
+    lambda inner: st.builds(
+        lambda body, kind, rest: _wrap(body, kind) + rest,
+        inner,
+        st.sampled_from(["if", "try", "def", "async", "lambda", "class", "with", "for"]),
+        inner,
+    ),
+    max_leaves=10,
+)
+driver_imports = st.lists(st.sampled_from(IMPORTS[-10:]), min_size=1, max_size=5, unique=True)
+
+
 @settings(max_examples=EXAMPLES, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 @given(blocks, st.sampled_from(["\n", "\r\n"]))
 def test_generated_modules(lines: list[str], newline: str) -> None:
     assert_same(newline.join(lines) + newline)
+
+
+@settings(max_examples=EXAMPLES, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(driver_imports, driver_blocks, st.sampled_from(["\n", "\r\n"]))
+def test_generated_driver_calls(imports: list[str], lines: list[str], newline: str) -> None:
+    assert_same(newline.join(imports + lines) + newline)
 
 
 def _corpus() -> list[tuple[str, str]]:

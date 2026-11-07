@@ -82,7 +82,8 @@ class HelperCall(NamedTuple):
     With query variants on, ``variants`` holds every query a call built in branches can
     run, ``query`` being the first; ``reason`` says why such a call is not checked.
     ``query_node`` is the argument (or t-string) the query comes from, which a diagnostic
-    about the query underlines. ``configured`` marks a call to a helper of
+    about the query underlines; ``query_span`` its byte offsets, set where Rust found the
+    call and there is no node. ``configured`` marks a call to a helper of
     ``[[tool.sqlty.functions]]``.
     """
 
@@ -99,6 +100,7 @@ class HelperCall(NamedTuple):
     reason: str | None = None
     query_node: ast.expr | None = None
     configured: bool = False
+    query_span: tuple[int, int] | None = None
 
     @property
     def typed_lines(self) -> range:
@@ -642,6 +644,30 @@ def _imports(
     return functions, modules
 
 
+def _may_call(parsed: ParsedSource, helpers: HelperIndex, module: str | None) -> bool:
+    """Whether a call in ``parsed`` can be one of an indexed helper, as Rust reads the calls.
+
+    ``f(...)`` only when ``f`` is imported from a module the index holds it in; ``x.f(...)``
+    whenever a helper is named ``f``. Always true when Rust cannot tell.
+    """
+    if (facts := parsed.facts) is None:
+        return True
+    if not helpers.names.isdisjoint(facts.attributes):
+        return True
+    called = frozenset(facts.names)
+    package = module.rpartition(".")[0].split(".") if module and "." in module else []
+    for local, original, base, level in facts.from_imports:
+        if local not in called:
+            continue
+        if level:
+            if module is None or level - 1 > len(package):
+                continue
+            base = ".".join([*package[: len(package) - (level - 1)], *([base] if base else [])])
+        if helpers.get(base, original) is not None:
+            return True
+    return False
+
+
 def _argument(helper: Helper, call: ast.Call, param: str | None) -> ast.expr | None:
     """The argument of ``call`` bound to ``param``."""
     if param is None:
@@ -736,7 +762,7 @@ def _find_helper_calls(
     imported = helpers is not None and bool(helpers.modules) and helpers.mentions(parsed.text)
     if imported and gate:
         assert helpers is not None
-        imported = parsed.may_call(helpers.names)
+        imported = _may_call(parsed, helpers, module if module is not None else parsed.module)
     composed = "psycopg" in parsed.text
     if not (local or imported):
         return []

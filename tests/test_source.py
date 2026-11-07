@@ -9,7 +9,7 @@ import tokenize
 import pytest
 
 from sqlty._cli import main
-from sqlty._source import ParsedSource
+from sqlty._source import AST, ParsedSource
 from sqlty.core import check_source
 
 SCHEMA = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);\n"
@@ -41,6 +41,8 @@ PLAIN = "import os\n\n\ndef f(x):\n    return os.path.join(x, 'a')  # an ordinar
 @pytest.fixture
 def parses(monkeypatch: pytest.MonkeyPatch) -> collections.Counter[str]:
     """Module-source ``ast.parse`` calls by source text (quoted annotations are not counted)."""
+    if AST == "compare":
+        pytest.skip("SQLTY_AST=compare parses with ast to compare")
     counter: collections.Counter[str] = collections.Counter()
     real = ast.parse
 
