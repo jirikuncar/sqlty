@@ -21,7 +21,7 @@ use crate::options::{ConfigError, Options};
 use crate::rules::Rule;
 use crate::scan::Scan;
 use crate::tokens::{string_at, tokenize, Kind, Token};
-use sqlty_sql::analyzer::{infer_type, returns_rows, SchemaData};
+use sqlty_sql::analyzer::{infer_type, returns_rows, route, SchemaData};
 
 /// Standard-library modules inferred row types are spelled with.
 pub(crate) const TYPE_MODULES: [&str; 5] = ["datetime", "uuid", "decimal", "ipaddress", "typing"];
@@ -204,8 +204,11 @@ pub(crate) fn wrapper_imports(
     modules: &[String],
 ) -> Vec<String> {
     let source = scan.source();
-    let untyped_call = format!("{}[{}](", istyle.wrapper_name, istyle.untyped_name());
-    let needs_untyped_import = wrapped.iter().any(|r| r.starts_with(&untyped_call));
+    let untyped = format!("[{}]", istyle.untyped_name());
+    let needs_untyped_import = wrapped.iter().any(|r| {
+        r.split_once('(')
+            .is_some_and(|(head, _)| head.trim_end().ends_with(&untyped))
+    });
     let needs = |marker: &str| wrapped.iter().any(|r| r.contains(marker));
     let mut imports = Vec::new();
     for module in modules {
@@ -328,7 +331,8 @@ pub(crate) fn wraps(
     let spelling = Spelling::of(scan);
     let mut replacements = Vec::new();
     for group in scan.groups() {
-        if (psycopg && scan.in_composed_sql(group.tokens[0]))
+        let bare = scan.bare_call(group);
+        if (psycopg && bare.is_none() && scan.in_composed_sql(group.tokens[0]))
             || scan.in_case_pattern(group.tokens[0])
         {
             continue;
@@ -336,6 +340,7 @@ pub(crate) fn wraps(
         let (start, end) = (group.start, group.end);
         let template = scan.is_template(&group.tokens);
         if !(scan.is_plain(group) || template)
+            || (bare.is_some() && template)
             || scan.calls.enclosing(start, end).is_some()
             || interpolated.binary_search(&group.line).is_ok()
             || skip(group.line)
@@ -348,7 +353,9 @@ pub(crate) fn wraps(
         }
         let type_str = match infer(&content) {
             Some(inferred) => spelling.respell(inferred),
-            None if untyped && is_untyped(&content, dialect) => istyle.untyped_name(),
+            None if untyped && is_untyped(&content, dialect, options.schema) => {
+                istyle.untyped_name()
+            }
             // Don't wrap when inference fails — SQL[Any] is never useful.
             None => continue,
         };
@@ -357,6 +364,11 @@ pub(crate) fn wraps(
         } else {
             istyle.wrapper_name.clone()
         };
+        if let Some((call, name_end)) = bare {
+            let (name, rest) = (&source[call.start..name_end], &source[name_end..call.end]);
+            replacements.push(Edit::new(call, format!("{name}[{type_str}]{rest}")));
+            continue;
+        }
         let wrapped = format!("{wrapper}[{type_str}]({})", &source[start..end]);
         replacements.push(Edit::new(start..end, wrapped));
     }
@@ -450,14 +462,16 @@ pub(crate) fn after_marker(content: &str) -> Option<&str> {
     ends_marker_line(rest).then_some(rest)
 }
 
-/// Whether the rest of a marker line is blank or a `--` comment, up to a line break.
+/// Whether the rest of a marker line is blank, a `--` comment or a `sqlty:db=NAME`
+/// database, up to a line break.
 pub(crate) fn ends_marker_line(rest: &str) -> bool {
     let Some(end) = LINE_BREAKS.iter().filter_map(|lb| rest.find(lb)).min() else {
         return false;
     };
     let line = &rest[..end];
     let text = line.trim_start_matches([' ', '\t']);
-    text.trim_end().is_empty() || (text.len() < line.len() && text.starts_with("--"))
+    text.trim_end().is_empty()
+        || (text.len() < line.len() && (text.starts_with("--") || text.starts_with("sqlty:")))
 }
 
 pub(crate) fn starts_with_line_break(text: &str) -> bool {
@@ -480,10 +494,10 @@ pub(crate) fn is_sqlty_managed(content: &str) -> bool {
 /// Whether `SQL[UNTYPED]` fits: rows are expected but their type is unknown.
 ///
 /// Requires the marker to end its line; the space form is a SQL comment.
-fn is_untyped(sql_content: &str, dialect: &str) -> bool {
+fn is_untyped(sql_content: &str, dialect: &str, schema: Option<&SchemaData>) -> bool {
     after_marker(sql_content)
         .and_then(strip_line_break)
-        .is_some_and(|query| returns_rows(query, dialect))
+        .is_some_and(|query| returns_rows(query, route(sql_content, dialect, schema).0))
 }
 
 /// Infer the row type of marked string content.
@@ -700,6 +714,22 @@ fn lines_in_strings(source: &str) -> impl Iterator<Item = (&str, bool)> {
     })
 }
 
+/// The names sqlty's `SQL` is bound to: `SQL` and its aliases, `sqlty.SQL` and the like.
+pub(crate) fn sql_names(source: &str, tokens: &[Token]) -> Vec<String> {
+    if !source.contains("sqlty") {
+        return Vec::new();
+    }
+    imports_of(source, tokens)
+        .into_iter()
+        .filter_map(|(from, name, binding)| match from.as_deref() {
+            Some("sqlty") if name == "SQL" => Some(binding),
+            Some("sqlty") if name == "*" => Some("SQL".to_string()),
+            None if name == "sqlty" => Some(format!("{binding}.SQL")),
+            _ => None,
+        })
+        .collect()
+}
+
 /// `(name, binding)` pairs of top-level `from sqlty import ...` statements, read from
 /// tokens so strings and comments don't count; `*` imports every name.
 fn sqlty_imports(scan: &Scan) -> Vec<(String, String)> {
@@ -731,7 +761,10 @@ pub(crate) fn imported_names(scan: &Scan) -> Vec<(String, String)> {
 /// `(from, name, binding)` of every top-level import, `from` being the module of a
 /// `from ... import`: `import os.path` binds `os`, `from a import b as c` binds `c`.
 fn top_level_imports(scan: &Scan) -> Vec<(Option<String>, String, String)> {
-    let (source, tokens) = (scan.source(), &scan.tokens);
+    imports_of(scan.source(), &scan.tokens)
+}
+
+fn imports_of(source: &str, tokens: &[Token]) -> Vec<(Option<String>, String, String)> {
     let text = |i: usize| {
         tokens
             .get(i)
@@ -1471,7 +1504,14 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
 
     #[test]
     fn test_ends_marker_line() {
-        for rest in ["\n", r"\n", r"\r\n", "  \n", " -- users\nSELECT 1"] {
+        for rest in [
+            "\n",
+            r"\n",
+            r"\r\n",
+            "  \n",
+            " -- users\nSELECT 1",
+            " sqlty:db=analytics\nSELECT 1",
+        ] {
             assert!(ends_marker_line(rest), "{rest:?}");
         }
         for rest in [

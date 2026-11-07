@@ -1,3 +1,7 @@
+---
+description: How to type-check queries passed to your own helper functions with Annotated[LiteralString, SQL], with no --sql marker or SQL[T] wrapper at call sites.
+---
+
 # Query helpers
 
 Code that sends queries through a helper function needs no `--sql` marker and
@@ -143,6 +147,41 @@ itself, or sqlty's own `sys.path`, and never imports it. Without a definition,
 they are checked only when passed by keyword (`fetch_all(query="...", form=int)`).
 For an `@overload`ed helper, positions come from the implementation, or from the
 first overload naming both parameters when the implementation does not.
+
+### Re-exported names
+
+`import-path` may name a function or class where your code imports it from, a
+package that re-exports it (`from .core import Db`): its parameters are read
+from the module that defines it.
+
+```toml
+[[tool.sqlty.functions]]
+import-path = "store.Db.execute"
+query-param = "sql"
+```
+
+`store/__init__.py`:
+
+```python
+from .core import Db
+```
+
+`store/core.py`:
+
+```python
+from typing import Any
+
+class Db:
+    async def execute(self, sql: str, parameters: Any = None) -> Any: ...
+```
+
+```python
+import store
+
+async def save(db: store.Db) -> None:
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+    await db.execute("--sql\nINSERT INTO users (id, name) VALUES (%s, %s)", (1,))
+```
 
 ### Query strings of registered helpers
 

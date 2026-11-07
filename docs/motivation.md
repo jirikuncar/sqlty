@@ -1,3 +1,7 @@
+---
+description: Why raw SQL in Python is untyped, how sqlty types it without a database or an ORM, and how it compares with aiosql, PugSQL, sqlc, asyncpg_typed and other prior art.
+---
+
 # Why SQLTy?
 
 ## The problem
@@ -47,6 +51,52 @@ Use something else for:
 | Hand-written annotations | Drift from the SQL silently |
 | sqlty | Needs casts or a schema; queries must be literals |
 
+### asyncpg_typed
+
+[asyncpg_typed](https://github.com/hunyadi/asyncpg_typed) (0.1.7) declares the
+types of an asyncpg query by hand, `sql(query, args=tuple[int], resultset=Row)`,
+and its overloads give `fetch`, `fetchrow` and `fetchval` exact signatures. Each
+call prepares the statement and compares the declared types with what the
+server reports.
+
+| | sqlty | asyncpg_typed |
+|---|-------|---------------|
+| Types come from | casts or a schema, written by `sqlty rewrite` | annotations you write |
+| Checked | statically, with no database | at run time, on every call, against the live server |
+| Databases | PostgreSQL, MySQL, SQLite, DuckDB and other dialects | PostgreSQL through asyncpg |
+| Nullability | inferred from `NOT NULL`, joins and expressions | not reported by prepared statements: a `NULL` in a non-optional column raises `NoneTypeError` |
+| Parameters | typed from where they sit, checked at call sites; `SQL[R, P]` with [`param-types`](reference/configuration.md#param-types) | declared; the type checker checks `*args` |
+| Rows seen by the type checker | `T` through the [psycopg helpers](guide/psycopg.md); asyncpg's `Record` stays `Any` | `list[T]`, `T \| None`, `R1` |
+| Row types | `TypedDict`, `NamedTuple`, dataclass, Pydantic, `Protocol` | `tuple`, `NamedTuple` |
+| Column names | [`column-name-mismatch`](reference/rules.md#column-name-mismatch) | `NameMismatchError` for a `NamedTuple` |
+| Enums | a `Literal` of the values; a `StrEnum` field is accepted without comparing its values | `StrEnum` values compared with `pg_enum` |
+| JSON | `Any`, with [JSON shapes](guide/json-shapes.md) | `JsonType`, decoded with `json` or orjson |
+| Ranges, geometric types | [`unknown-type`](reference/rules.md#unknown-type), and `str` | `asyncpg.Range[T]`, `asyncpg.Point` and the like |
+| t-strings | `{value}` is a parameter | `{1}` is the ordinal of `$1` |
+| SQL built at run time | not checked | `unsafe_sql` takes any `str`, checked when it runs |
+
+sqlty lacks:
+
+- Rows typed through asyncpg. asyncpg returns `Record`, so `SQL[T]` stops at the
+  call; asyncpg_typed returns `T`.
+- asyncpg's types. sqlty follows psycopg, which returns `json` parsed, ranges as
+  its own `Range` and geometric types as text.
+- A comparison of `StrEnum` values with `CREATE TYPE ... AS ENUM`.
+- A check against the live database: a schema dump that drifts from it goes
+  unnoticed.
+
+asyncpg_typed lacks:
+
+- Inference: each type is written by hand, and nothing updates it when the query
+  changes.
+- Static checks: a mismatch surfaces when the query first runs, so tests need a
+  PostgreSQL server.
+- Nullability: an optional annotation is never reported, and a missing one
+  only when a `NULL` arrives.
+- Other databases and drivers, and row types other than tuples.
+- A free call: each call prepares the statement again, and one with an enum
+  column also queries `pg_enum`.
+
 ## Prior art
 
 Typed raw SQL is not new. Most tools get column types from a live database;
@@ -66,6 +116,7 @@ queries inline as string literals.
 | [Prisma TypedSQL](https://www.prisma.io/docs/orm/v7/prisma-client/using-raw-sql/typedsql) | TypeScript | Typed functions from `.sql` files | Yes |
 | [Cornucopia](https://github.com/cornucopia-rs/cornucopia), [Squirrel](https://github.com/giacomocavalieri/squirrel) | Rust, Gleam | Generate typed functions from `.sql` files | Yes |
 | [querky](https://github.com/racinette/querky) | Python | Decorated raw SQL becomes typed functions | Yes |
+| [asyncpg_typed](https://github.com/hunyadi/asyncpg_typed) | Python | Declared argument and row types, checked when asyncpg prepares the query | Yes |
 | [aiosql](https://github.com/nackjicholson/aiosql), [PugSQL](https://github.com/mcfunley/pugsql), [HugSQL](https://github.com/layerware/hugsql) | Python, Clojure | Load named queries from `.sql` files, untyped | No |
 | [sqlglot](https://github.com/tobymao/sqlglot) | Python | `annotate_types` infers expression types from a schema | No |
 

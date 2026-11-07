@@ -1,5 +1,5 @@
-// The docs on Cloudflare Workers: production at sqlty.jirikuncar.workers.dev, a Preview
-// per pull request at pr-<number>-sqlty.jirikuncar.workers.dev (the Preview job of docs.yml).
+// A docs Preview per pull request at pr-<number>-sqlty.jirikuncar.workers.dev (the Preview
+// job of docs.yml). Production is sqlty.kuncar.dev on GitHub Pages.
 {
   "name": "sqlty",
   "compatibility_date": "2026-11-01",

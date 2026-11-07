@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 PLAYGROUND = ("assets/playground/", "assets/vendor/monaco/")
-SKIP = ("sw.js", ".integrity")
+SKIP = ("sw.js", ".integrity", ".md", ".txt")
 
 WORKER = """\
 const CACHE = "sqlty-%(version)s";

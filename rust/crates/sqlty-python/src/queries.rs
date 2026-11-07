@@ -11,16 +11,20 @@
 //! `auto` picks the format of each file from its first header, and `file` when it has none.
 //! A query runs from the line after its header to the next header; text before the first
 //! header is no query.
+//!
+//! The engine reads `:name` and `$1`. sqlc's `@name`, `sqlc.arg(name)` and `sqlc.narg(name)`,
+//! and aiosql's `:obj.attr`, are rewritten to `:name` and `:obj_attr` in [`NamedQuery::sql`],
+//! padded with spaces so a diagnostic's span stays where it is in the file.
 
 use std::ops::Range;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
 use regex::Regex;
-use sqlty_sql::analyzer::{parse, statement_ranges};
+use sqlty_sql::analyzer::{database_name, parse, route_named, statement_ranges, unknown_named};
 use sqlty_sql::diagnostics::NameRule;
 
-use crate::checker::{unparsed_message, Diagnostic};
+use crate::checker::{star_finding, unparsed_message, Diagnostic};
 use crate::options::Options;
 use crate::rules::{Rule, RuleConfig};
 
@@ -66,11 +70,24 @@ pub struct NamedQuery {
     pub name: String,
     /// Byte range of its SQL in the file, from the line after its header.
     pub body: Range<usize>,
+    /// Its SQL with the placeholders of its format rewritten to `:name`, as long as `body`.
+    pub sql: String,
+    /// `(name in sql, name in the file)` of each rewritten aiosql `:obj.attr`.
+    pub renames: Vec<(String, String)>,
 }
 
 /// `-- name: <name><suffix>`, aiosql's header and sqlc's, told apart by sqlc's `:kind`.
 static NAME_HEADER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?m)^[ \t]*--[ \t]*name:[ \t]*([A-Za-z_][\w-]*)([^\n]*)$").expect("valid regex")
+});
+
+/// The placeholders sqlc and aiosql read and the engine does not; strings, comments, casts
+/// and `@@variables` match first so nothing inside them is rewritten.
+static PLACEHOLDER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|/\*(?s:.)*?\*/|::\w+|@@\w+|\bsqlc\.n?arg\(\s*'?(?P<arg>[A-Za-z_]\w*)'?\s*\)|@(?P<at>[A-Za-z_]\w*)|:(?P<obj>[A-Za-z_]\w*)\.(?P<attr>[A-Za-z_]\w*)"#,
+    )
+    .expect("valid regex")
 });
 
 /// `-- :name <name> [:kind]`, PugSQL's header.
@@ -119,6 +136,8 @@ pub fn split(source: &str, format: Format, stem: &str) -> Vec<NamedQuery> {
             return vec![NamedQuery {
                 name: stem.to_string(),
                 body: 0..source.len(),
+                sql: source.to_string(),
+                renames: Vec::new(),
             }]
         }
     };
@@ -127,12 +146,60 @@ pub fn split(source: &str, format: Format, stem: &str) -> Vec<NamedQuery> {
         .enumerate()
         .map(|(i, (header, name))| {
             let end = headers.get(i + 1).map_or(source.len(), |next| next.0.start);
+            let body = (header.end + 1).min(end)..end;
+            let (sql, renames) = placeholders(&source[body.clone()], format);
             NamedQuery {
                 name: name.clone(),
-                body: (header.end + 1).min(end)..end,
+                body,
+                sql,
+                renames,
             }
         })
         .collect()
+}
+
+/// `sql` with sqlc's or aiosql's placeholders rewritten to `:name`, each padded to its length,
+/// and the aiosql renames.
+///
+/// ```
+/// use sqlty_python::queries::{placeholders, Format};
+///
+/// let (sql, _) = placeholders("id = sqlc.arg(id) AND name = @name", Format::Sqlc);
+/// assert_eq!(sql, "id = :id          AND name = :name");
+/// let (sql, renames) = placeholders("email = :user.email", Format::Aiosql);
+/// assert_eq!((sql.as_str(), renames), ("email = :user_email", vec![("user_email".into(), "user.email".into())]));
+/// ```
+pub fn placeholders(sql: &str, format: Format) -> (String, Vec<(String, String)>) {
+    let mut out = String::with_capacity(sql.len());
+    let mut renames: Vec<(String, String)> = Vec::new();
+    let mut last = 0;
+    for found in PLACEHOLDER.captures_iter(sql) {
+        let whole = found.get(0).map_or(0..0, |m| m.range());
+        let name = match (
+            format,
+            found.name("arg").or(found.name("at")),
+            found.name("obj"),
+            found.name("attr"),
+        ) {
+            (Format::Sqlc, Some(name), _, _) => name.as_str().to_string(),
+            (Format::Aiosql, None, Some(obj), Some(attr)) => {
+                let name = format!("{}_{}", obj.as_str(), attr.as_str());
+                let original = format!("{}.{}", obj.as_str(), attr.as_str());
+                if !renames.iter().any(|(renamed, _)| *renamed == name) {
+                    renames.push((name.clone(), original));
+                }
+                name
+            }
+            _ => continue,
+        };
+        out.push_str(&sql[last..whole.start]);
+        out.push(':');
+        out.push_str(&name);
+        out.extend(std::iter::repeat_n(' ', whole.len() - name.len() - 1));
+        last = whole.end;
+    }
+    out.push_str(&sql[last..]);
+    (out, renames)
 }
 
 /// The format of the first header of `source`; `file` when it has none.
@@ -159,8 +226,9 @@ fn is_sqlc(rest: &str) -> bool {
     rest.trim_start().starts_with(':')
 }
 
-/// Check each statement of each named query of `source`: `unparsed-query` and the name
-/// rules, at the name when the analyzer knows where it is written, else at the statement.
+/// Check each statement of each named query of `source`: `unparsed-query`, `select-star` and
+/// the name rules, at the name when the analyzer knows where it is written, else at the
+/// statement.
 pub fn check_queries(
     source: &str,
     format: Format,
@@ -168,7 +236,11 @@ pub fn check_queries(
     options: &Options,
     rules: &RuleConfig,
 ) -> Vec<Diagnostic> {
-    let dialect = options.dialect.name();
+    let database = database_name(source);
+    let (dialect, schema) = match options.schema {
+        Some(schema) => route_named(database, options.dialect.name(), schema),
+        None => (options.dialect.name(), None),
+    };
     let mut found = Vec::new();
     let mut report = |rule: Rule, message: String, span: Range<usize>| {
         if rules.is_enabled(rule) {
@@ -182,22 +254,40 @@ pub fn check_queries(
             });
         }
     };
+    if let Some(message) = database.and_then(|name| unknown_named(name, options.schema)) {
+        let header = source.len() - source.trim_start().len();
+        let end = source[header..]
+            .find('\n')
+            .map_or(source.len(), |at| header + at);
+        report(
+            Rule::UnknownDatabase,
+            message,
+            header..end.min(source.len()),
+        );
+    }
     let names = NameRule::ALL
         .iter()
         .any(|&rule| rules.is_enabled(Rule::Name(rule)));
     for query in split(source, format, stem) {
-        let body = &source[query.body.clone()];
+        let body = query.sql.as_str();
         for statement in statement_ranges(body, dialect) {
             let at = query.body.start + statement.start..query.body.start + statement.end;
-            let parsed = parse(&body[statement], dialect);
+            let parsed = parse(&body[statement.clone()], dialect);
             if let Some(error) = parsed.error() {
                 report(Rule::UnparsedQuery, unparsed_message(&error), at);
                 continue;
             }
+            if let Some((rule, message)) = star_finding(
+                parsed.result_stars(),
+                &body[statement.clone()],
+                schema.is_some(),
+            ) {
+                report(rule, message, at.clone());
+            }
             if !names {
                 continue;
             }
-            for diagnostic in parsed.analyze_with_diagnostics(options.schema).1 {
+            for diagnostic in parsed.analyze_with_diagnostics(schema).1 {
                 let span = diagnostic.span.map_or(at.clone(), |span| {
                     at.start + span.start..at.start + span.end
                 });
@@ -244,6 +334,20 @@ mod tests {
             names(sqlc, Format::Aiosql).is_empty(),
             "sqlc headers are not aiosql's"
         );
+    }
+
+    #[test]
+    fn placeholders_keep_their_length_and_skip_strings_and_casts() {
+        let sql = "SELECT '@a', :u.x, x::pg.t, @@v -- @b\nWHERE sqlc.narg( 'n' ) = @name";
+        assert_eq!(
+            placeholders(sql, Format::Sqlc).0,
+            "SELECT '@a', :u.x, x::pg.t, @@v -- @b\nWHERE :n               = :name"
+        );
+        assert_eq!(
+            placeholders(sql, Format::Aiosql).0,
+            "SELECT '@a', :u_x, x::pg.t, @@v -- @b\nWHERE sqlc.narg( 'n' ) = @name"
+        );
+        assert_eq!(placeholders(sql, Format::Pugsql).0, sql);
     }
 
     #[test]

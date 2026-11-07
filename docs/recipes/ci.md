@@ -1,3 +1,7 @@
+---
+description: How to run sqlty in pre-commit and CI, such as GitHub Actions, so a pull request with a query that no longer matches the schema fails the build.
+---
+
 # CI and pre-commit
 
 Run sqlty where it blocks bad queries: before a commit and on every pull
@@ -21,7 +25,7 @@ default_language_version:
   python: python3.14  # sqlty requires Python >= 3.14
 repos:
   - repo: https://github.com/jirikuncar/sqlty
-    rev: v0.3.0
+    rev: v0.5.1
     hooks:
       - id: sqlty-rewrite
       - id: sqlty-check

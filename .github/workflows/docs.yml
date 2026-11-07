@@ -9,12 +9,17 @@ on:
       - "scripts/generate_playground_examples.py"
       - "scripts/vendor_assets.py"
       - "scripts/offline.py"
+      - "scripts/playground_links.py"
+      - "scripts/structured_data.py"
+      - "tests/_mdtest/parser.py"
       - "scripts/check_playground.py"
       - "overrides/**"
       - "zensical.toml"
       - ".github/workflows/docs.yml"
       - "Makefile"
       - "rust/**"
+      - "src/sqlty/lexer.py"
+      - "pyproject.toml"
   pull_request:
     paths:
       - "docs/**"
@@ -22,12 +27,17 @@ on:
       - "scripts/generate_playground_examples.py"
       - "scripts/vendor_assets.py"
       - "scripts/offline.py"
+      - "scripts/playground_links.py"
+      - "scripts/structured_data.py"
+      - "tests/_mdtest/parser.py"
       - "scripts/check_playground.py"
       - "overrides/**"
       - "zensical.toml"
       - ".github/workflows/docs.yml"
       - "Makefile"
       - "rust/**"
+      - "src/sqlty/lexer.py"
+      - "pyproject.toml"
   workflow_dispatch:
 
 permissions:
@@ -59,6 +69,13 @@ jobs:
         with:
           workspaces: rust -> target
           save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # sqlty's Pygments lexer colors the SQL in the Python examples.
+      - name: Install sqlty
+        run: |
+          uv sync --no-dev --no-install-project
+          uv pip install "maturin>=1.12.1,<2.0"
+          uv run --no-sync maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
 
       - name: Build docs (strict)
         run: make docs
@@ -167,16 +184,15 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: docs-preview
-          path: public/sqlty
+          path: public
 
-      - name: Lay out the site under /sqlty/, as on GitHub Pages
+      - name: Keep only regular files, and no Workers control files
         run: |
           # Workers runs `_worker.js` and reads `_headers` and `_redirects` from the assets.
-          if find public/sqlty \( ! -type f ! -type d \) -o -name '_worker.js' -o -name '_headers' -o -name '_redirects' | grep -q .; then
+          if find public \( ! -type f ! -type d \) -o -name '_worker.js' -o -name '_headers' -o -name '_redirects' | grep -q .; then
             echo "The build may hold only regular files, and no Workers control files" >&2
             exit 1
           fi
-          printf '/ /sqlty/ 302\n' > public/_redirects
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -203,7 +219,7 @@ jobs:
           URL: ${{ steps.preview.outputs.url }}
         run: |
           uvx --python 3.13 --from playwright==1.64.1 playwright install --with-deps chromium-headless-shell
-          uvx --python 3.13 --with playwright==1.64.1 python scripts/check_playground.py "${URL%/}/sqlty/playground/"
+          uvx --python 3.13 --with playwright==1.64.1 python scripts/check_playground.py "${URL%/}/playground/"
 
       - name: Link the Preview from the pull request
         env:
@@ -213,4 +229,4 @@ jobs:
           URL: ${{ steps.preview.outputs.url }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          gh pr comment "$NUMBER" --edit-last --create-if-none --body "Docs preview for ${HEAD_SHA::7}: ${URL%/}/sqlty/ ([playground](${URL%/}/sqlty/playground/))"
+          gh pr comment "$NUMBER" --edit-last --create-if-none --body "Docs preview for ${HEAD_SHA::7}: ${URL%/}/ ([playground](${URL%/}/playground/))"

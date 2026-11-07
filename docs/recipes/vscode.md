@@ -1,3 +1,7 @@
+---
+description: How to use the sqlty VS Code extension to see SQL diagnostics in Python as you type, with quick fixes, column completion and SQL highlighting.
+---
+
 # VS Code
 
 The sqlty extension shows what `sqlty check` reports while you type, each diagnostic
@@ -82,12 +86,31 @@ an inline `--sql` comment is split onto its own line, and so on. Run it on every
 }
 ```
 
+## Format on save
+
+`source.format.sqlty` is `sqlty format` on the file: it lays out the query strings with
+sqruff. It is a code action, not a document formatter, so Ruff or Black still formats the
+Python code. Run both on every save:
+
+```json
+{
+  "[python]": {
+    "editor.codeActionsOnSave": {
+      "source.fixAll.sqlty": "explicit",
+      "source.format.sqlty": "explicit"
+    }
+  }
+}
+```
+
 ## Completion
 
 Inside a query string, the editor completes table names after `FROM` and `JOIN`, and the
 columns of the tables in scope after `alias.` and in `SELECT`, `WHERE`, `ON`,
 `GROUP BY` and `ORDER BY`. Each column shows its table or alias, and its type and
-nullability once selected. Typing `.` opens the list. After `JOIN`, the tables a foreign
+nullability once selected. With nothing typed and several tables in scope, columns come
+qualified, `o.user_id` and `u.id`, so the inserted name is never ambiguous. Typing `.`
+opens the list. After `JOIN`, the tables a foreign
 key links to one in scope come first, with the `ON` clause that joins them:
 `orders ON orders.user_id = u.id`.
 

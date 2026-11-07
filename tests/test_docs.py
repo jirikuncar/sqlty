@@ -7,16 +7,23 @@ Code blocks with assertions are mdtests, collected by ``tests/_mdtest``.
 
 from __future__ import annotations
 
+import ast
+import base64
 import doctest
 import importlib
 import importlib.util
+import json
 import pkgutil
 import re
 import subprocess
 import sys
+import tomllib
+import zlib
 from pathlib import Path
+from typing import Any
 
 import pytest
+from pygments.lexers import get_lexer_by_name
 
 import sqlty
 from sqlty._config import load_config
@@ -57,6 +64,47 @@ def test_generated_reference_is_current() -> None:
     assert not stale, f"run `make generate-docs`: {stale} out of date"
 
 
+def _script(name: str) -> Any:
+    spec = importlib.util.spec_from_file_location(name, ROOT / "scripts" / f"{name}.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("page", sorted((ROOT / "docs").rglob("*.md")), ids=lambda p: p.stem)
+def test_playground_links_hold_their_example(page: Path) -> None:
+    """Each example a docs page links to the playground is whole Python that the playground
+    checks as its mdtest does: with the config and schema of its headings."""
+    links = _script("playground_links")
+    for session in filter(None, links.examples(page.read_text())):
+        ast.parse(session["source"])
+        assert json.loads(zlib.decompress(base64.urlsafe_b64decode(links.encode(session) + "==")))
+        settings = tomllib.loads(session["config"])
+        check_source(
+            session["source"],
+            dialect=session["dialect"],
+            schema_sql=session["schema"] or None,
+            rules=settings.get("rules"),
+            import_style=settings.get("import-style"),
+        )
+
+
+def test_playground_link_of_a_rule_example() -> None:
+    links = _script("playground_links")
+    text = (ROOT / "src" / "sqlty" / "rules" / "sqruff.md").read_text()
+    session = links.examples(text)[0]
+    assert session["config"] == '[rules]\nsqruff = "warn"\n'
+    assert session["source"].startswith("from sqlty import SQL\n\nquery = SQL[tuple[str, int]]")
+    found = check_source(session["source"], rules={"sqruff": "warn"})
+    assert [d["rule"] for d in found] == ["sqruff"]
+    html = '<div class="language-python highlight"><pre><code>q</code></pre></div>'
+    linked = links.link(html, [None, session], "../")
+    assert linked == html
+    linked = links.link(html * 2, [None, session], "../")
+    assert linked.count('href="../playground/#') == 1
+
+
 def test_config_key_docs_cover_every_key() -> None:
     from sqlty._config import DISCOVERY_KEYS, FUNCTION_KEY_DOCS, FUNCTION_KEYS, KEY_DOCS, TOOL_KEYS
 
@@ -84,6 +132,34 @@ def test_module_doctests(name: str, monkeypatch: pytest.MonkeyPatch) -> None:
     result = doctest.testmod(module, optionflags=doctest.ELLIPSIS)
     assert result.failed == 0
     assert result.attempted > 0 or name not in WITH_EXAMPLES
+
+
+def test_pygments_lexer_colors_sql_in_query_strings() -> None:
+    lexer = get_lexer_by_name("sqlty")
+    source = 'name = "é"\nq = "--sql\\nSELECT \'ü\' FROM users WHERE id = $1"\n'
+    tokens = [(str(kind), text) for kind, text in lexer.get_tokens(source) if text.strip()]
+    assert "".join(text for _, text in lexer.get_tokens(source)) == source
+    assert tokens[2:] == [
+        ("Token.Literal.String.Double", '"'),
+        ("Token.Literal.String.Double", "é"),
+        ("Token.Literal.String.Double", '"'),
+        ("Token.Name", "q"),
+        ("Token.Operator", "="),
+        ("Token.Literal.String.Double", '"'),
+        ("Token.Comment.Single", "--sql"),
+        ("Token.Literal.String.Escape", "\\n"),
+        ("Token.Keyword", "SELECT"),
+        ("Token.Literal.String.Single", "'"),
+        ("Token.Literal.String.Single", "ü"),
+        ("Token.Literal.String.Single", "'"),
+        ("Token.Keyword", "FROM"),
+        ("Token.Literal.String.Double", " users "),
+        ("Token.Keyword", "WHERE"),
+        ("Token.Literal.String.Double", " id "),
+        ("Token.Operator", "="),
+        ("Token.Name.Variable", "$1"),
+        ("Token.Literal.String.Double", '"'),
+    ]
 
 
 def test_rule_docs() -> None:
@@ -151,6 +227,7 @@ def test_agent_skill_frontmatter(skill: Path) -> None:
         "strip",
         "check",
         "breaking",
+        "format",
         "rule",
         "skill",
         "server",

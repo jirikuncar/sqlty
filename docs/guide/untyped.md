@@ -1,3 +1,7 @@
+---
+description: What sqlty does when it cannot infer a query's row type, how the UNTYPED sentinel marks such queries, and how the untyped-query rule reports them.
+---
+
 # Untyped queries
 
 Some queries return rows whose type sqlty cannot infer: columns of tables without a schema,

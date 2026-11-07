@@ -1,3 +1,7 @@
+---
+description: How to type-check named queries in .sql files used with aiosql, PugSQL or sqlc, with the same sqlty rules as for queries in Python strings.
+---
+
 # Queries in `.sql` files
 
 ```toml
@@ -48,8 +52,15 @@ first header is no query.
 | `auto` (default) | the first header found | |
 
 A query of several statements, such as an aiosql script (`-- name: reset#`),
-has each statement checked. Placeholders are read as the engine reads them in
-Python strings: `:name` and `$1` are parameters.
+has each statement checked. `:name` and `$1` are parameters, as in Python
+strings, and so are the placeholders of each format:
+
+| Format | Placeholder | Parameter |
+|--------|-------------|-----------|
+| `sqlc` | `@name`, `sqlc.arg(name)`, `sqlc.narg(name)` | `name` |
+| `aiosql` | `:user.email` | attribute `email` of `user` |
+
+Placeholders inside strings and comments are left alone.
 
 ```sql
 -- name: GetUser :one
@@ -60,10 +71,20 @@ SELECT id, nme FROM users WHERE id = $1;
 ## What is checked
 
 The [name rules](../reference/rules.md#name-rules) (`unknown-table`,
-`unknown-column`, `ambiguous-column`, ...) and
-[`unparsed-query`](../reference/rules.md#unparsed-query), with the severities
+`unknown-column`, `ambiguous-column`, ...),
+[`unparsed-query`](../reference/rules.md#unparsed-query) and
+[`select-star`](../reference/rules.md#select-star), with the severities
 `[tool.sqlty.rules]` and `overrides` give them. A file has no row types, so the
 rules that compare one with the query don't apply.
+
+```sql
+-- name: list-users
+-- error: [select-star] "SELECT * used — expand to explicit column list"
+SELECT * FROM users;
+```
+
+`sqlty check --fix` does not expand the star in a `.sql` file: list the columns
+by hand.
 
 `-- sqlty: ignore` and `-- sqlty: ignore[rule]` silence the diagnostics of their
 line, and `unused-ignore` reports one that silences nothing:

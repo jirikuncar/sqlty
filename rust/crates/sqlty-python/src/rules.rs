@@ -66,13 +66,17 @@ pub enum Rule {
     ParamTypeMismatch,
     /// The parameter type `P` of `SQL[R, P]` does not fit the parameters of its query.
     ParamsTypeMismatch,
+    /// A finding of sqruff's lint rules in a query.
+    Sqruff,
+    /// A query names a database the project does not configure.
+    UnknownDatabase,
     /// A rule explaining why a column is untyped.
     Name(NameRule),
 }
 
 impl Rule {
     /// Every rule.
-    pub const ALL: [Rule; 40] = [
+    pub const ALL: [Rule; 42] = [
         Rule::ColumnCountMismatch,
         Rule::ColumnTypeMismatch,
         Rule::ColumnNameMismatch,
@@ -100,6 +104,8 @@ impl Rule {
         Rule::ParamCountMismatch,
         Rule::ParamTypeMismatch,
         Rule::ParamsTypeMismatch,
+        Rule::Sqruff,
+        Rule::UnknownDatabase,
         Rule::Name(NameRule::UnknownTable),
         Rule::Name(NameRule::UnknownColumn),
         Rule::Name(NameRule::AmbiguousColumn),
@@ -145,6 +151,8 @@ impl Rule {
             Rule::ParamCountMismatch => "param-count-mismatch",
             Rule::ParamTypeMismatch => "param-type-mismatch",
             Rule::ParamsTypeMismatch => "params-type-mismatch",
+            Rule::Sqruff => "sqruff",
+            Rule::UnknownDatabase => "unknown-database",
             Rule::Name(rule) => rule.name(),
         }
     }
@@ -169,6 +177,7 @@ impl Rule {
             | Rule::ParamsTypeMismatch
             | Rule::NarrowType
             | Rule::SelectStarNoSchema
+            | Rule::UnknownDatabase
             | Rule::Name(
                 NameRule::UnknownTable
                 | NameRule::UnknownColumn
@@ -199,6 +208,7 @@ impl Rule {
             Rule::RedundantOptional
             | Rule::RedundantLiteral
             | Rule::DynamicQuery
+            | Rule::Sqruff
             | Rule::Name(NameRule::UnprovenJoin | NameRule::EntityMismatch) => Severity::Ignore,
         }
     }

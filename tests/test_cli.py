@@ -410,6 +410,7 @@ def _helper_project(root, import_path: str = "pkg.h.fetch_all") -> None:
         ("pkg.h.fetch_all", "src/pkg/h.py", "use.py", []),
         ("pkg.h.fetch_all", "pkg/h.py", "use.py", ["pkg/__init__.py"]),
         ("app.db.fetch_all", "backend/app/db.py", "backend/app/q.py", []),
+        ("pkg.fetch_all", "pkg/h.py", "use.py", []),
     ],
 )
 def test_configured_functions_outside_the_checked_paths_bind_positionally(
@@ -418,7 +419,8 @@ def test_configured_functions_outside_the_checked_paths_bind_positionally(
     """A configured helper's parameters are read from its module when only callers are checked."""
     _helper_project(tmp_path, import_path)
     (tmp_path / helper).parent.mkdir(parents=True)
-    (tmp_path / helper).parent.joinpath("__init__.py").write_text("VERSION = 1\n")
+    reexport = "from .h import fetch_all\n" if import_path == "pkg.fetch_all" else ""
+    (tmp_path / helper).parent.joinpath("__init__.py").write_text(f"{reexport}VERSION = 1\n")
     (tmp_path / helper).write_text("def fetch_all(query, form): ...\n")
     module = import_path.rpartition(".")[0]
     (tmp_path / caller).write_text(f"from {module} import fetch_all{HELPER_CALL}")
@@ -641,6 +643,21 @@ def test_exclude_is_relative_to_the_config_file(tmp_path, monkeypatch, capsys) -
 
     assert f"gen{os.sep}m.py" in out
     assert f"pkg{os.sep}gen" not in out
+
+
+def test_extended_config_reads_its_schema(tmp_path, monkeypatch) -> None:
+    _tree(tmp_path, "db/schema.sql", "pkg/q.py")
+    (tmp_path / "db" / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL);")
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "db/schema.sql"\n')
+    (tmp_path / "pkg" / "sqlty.toml").write_text('extend = "../pyproject.toml"\n')
+    (tmp_path / "pkg" / "q.py").write_text('q = "--sql\\nSELECT id FROM users"\n')
+    monkeypatch.chdir(tmp_path)
+
+    main(["rewrite", "pkg"])
+
+    assert (tmp_path / "pkg" / "q.py").read_text() == (
+        'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT id FROM users")\n'
+    )
 
 
 @pytest.mark.parametrize("changed", [["schema.sql"], ["sqlty.toml"], ["schema.sql", "a.py"]])
@@ -1256,6 +1273,185 @@ def test_invalid_overrides_are_errors(tmp_path, monkeypatch, capsys, override, m
     assert message in err
 
 
+_DATABASES = """\
+[tool.sqlty]
+schema = "db/app.sql"
+
+[tool.sqlty.rules]
+select-star = "error"
+
+[tool.sqlty.databases.analytics]
+dialect = "sqlite"
+schema = "db/analytics.sql"
+queries = ["sql"]
+include = ["app/reports"]
+exclude = ["legacy.py"]
+
+[tool.sqlty.databases.analytics.rules]
+narrow-type = "error"
+"""
+
+
+def _databases_project(tmp_path: Path) -> None:
+    files = {
+        "pyproject.toml": _DATABASES,
+        "db/app.sql": "CREATE TABLE users (id INTEGER NOT NULL);",
+        "db/analytics.sql": "CREATE TABLE events (kind TEXT NOT NULL);",
+        "app/users.py": 'q = "--sql\\nSELECT * FROM users"\n',
+        "app/reports/events.py": 'q = "--sql\\nSELECT * FROM events"\n',
+        "app/reports/legacy.py": 'q = "--sql\\nSELECT * FROM users"\n',
+        "sql/events.sql": "-- name: get_kinds\nSELECT nope FROM events;\n",
+    }
+    for name, text in files.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+
+
+def test_databases_pick_the_schema_and_rules_of_a_file(tmp_path, monkeypatch, capsys) -> None:
+    _databases_project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    main(["rewrite", "app"])
+    _, out, _ = _run(["check", "."], capsys)
+
+    wrapped = 'from sqlty import SQL\nq = SQL[{}]("--sql\\nSELECT * FROM {}")\n'
+    assert (tmp_path / "app/users.py").read_text() == wrapped.format("tuple[int]", "users")
+    assert (tmp_path / "app/reports/events.py").read_text() == wrapped.format(
+        "tuple[str]", "events"
+    )
+    assert (tmp_path / "app/reports/legacy.py").read_text() == wrapped.format("tuple[int]", "users")
+    sep = os.sep
+    assert out.splitlines() == [
+        f"app{sep}reports{sep}events.py:2: [select-star] SELECT * used — expand to explicit column list",
+        f"app{sep}reports{sep}legacy.py:2: [select-star] SELECT * used — expand to explicit column list",
+        f"app{sep}users.py:2: [select-star] SELECT * used — expand to explicit column list",
+        f"sql{sep}events.sql:2: [unknown-column] column `nope` does not exist in `events`",
+        "Found 4 error(s)",
+    ]
+
+
+def test_a_database_inherits_and_merges_the_project_settings(tmp_path, monkeypatch, capsys) -> None:
+    _databases_project(tmp_path)
+    (tmp_path / "app/reports/events.py").write_text(
+        'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT kind FROM events")\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    _, out, _ = _run(["check", "--dialect", "mysql", "app/reports/events.py"], capsys)
+
+    assert out.splitlines() == [
+        f"app{os.sep}reports{os.sep}events.py:2: [narrow-type] SQL[tuple[int]] should be SQL[tuple[str]]",
+        "Found 1 error(s)",
+    ]
+
+
+def test_a_query_marker_picks_its_database(tmp_path, monkeypatch, capsys) -> None:
+    _databases_project(tmp_path)
+    (tmp_path / "app/mixed.py").write_text(
+        'a = "--sql sqlty:db=analytics\\nSELECT kind FROM events"\n'
+        'b = "--sql sqlty:db=analytic\\nSELECT id FROM users"\n'
+    )
+    (tmp_path / "app/reports/back.py").write_text(
+        'q = "--sql sqlty:db=default\\nSELECT id FROM users"\n'
+    )
+    (tmp_path / "app/users.sql").write_text(
+        "-- sqlty: db=default\n\n-- name: ids\nSELECT id FROM users;\n"
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        _DATABASES.replace('queries = ["sql"]', 'queries = ["sql", "app/users.sql"]')
+    )
+    monkeypatch.chdir(tmp_path)
+
+    main(["rewrite", "app/mixed.py", "app/reports/back.py"])
+    _, out, _ = _run(["check", "app/mixed.py", "app/users.sql"], capsys)
+
+    assert (tmp_path / "app/mixed.py").read_text() == (
+        "from sqlty import SQL\n"
+        'a = SQL[tuple[str]]("--sql sqlty:db=analytics\\nSELECT kind FROM events")\n'
+        'b = SQL[tuple[int]]("--sql sqlty:db=analytic\\nSELECT id FROM users")\n'
+    )
+    assert (tmp_path / "app/reports/back.py").read_text() == (
+        'from sqlty import SQL\nq = SQL[tuple[int]]("--sql sqlty:db=default\\nSELECT id FROM users")\n'
+    )
+    assert out.splitlines() == [
+        f"app{os.sep}mixed.py:3: [unknown-database] database `analytic` is not configured; "
+        "did you mean `analytics`?",
+        "Found 1 error(s)",
+    ]
+
+
+def test_a_database_helper_reads_its_queries_in_any_file(tmp_path, monkeypatch, capsys) -> None:
+    _databases_project(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        _DATABASES
+        + """
+[[tool.sqlty.databases.analytics.functions]]
+import-path = "app.warehouse.fetch"
+query-param = "query"
+return-type-param = "form"
+"""
+    )
+    (tmp_path / "app/warehouse.py").write_text("def fetch(query, form): ...\n")
+    (tmp_path / "app/users.py").write_text(
+        "from app.warehouse import fetch\n"
+        'fetch("SELECT kind FROM events", tuple[str])\n'
+        'fetch("SELECT id FROM users", tuple[int])\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    _, out, _ = _run(["check", "app/users.py"], capsys)
+
+    assert out.splitlines() == [
+        f"app{os.sep}users.py:3: [unknown-table] table `users` is not defined in the schema",
+        "Found 1 error(s)",
+    ]
+
+
+def test_the_server_checks_a_buffer_against_its_database(tmp_path) -> None:
+    from sqlty._lsp_bridge import Workspace
+
+    _databases_project(tmp_path)
+    workspace = Workspace(str(tmp_path))
+
+    found = workspace.check(
+        str(tmp_path / "app/reports/new.py"), 'q = "--sql\\nSELECT nope FROM events"\n'
+    )
+    assert workspace.completion(str(tmp_path / "app/reports/new.py"))["dialect"] == "sqlite"
+    assert [d["rule"] for d in found] == ["unknown-column"]
+    assert (
+        workspace.check(str(tmp_path / "sql/new.sql"), "-- name: q\nSELECT kind FROM events;\n")
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    ("database", "message"),
+    [
+        ("[tool.sqlty.databases.default]\n", "a database name is letters, digits"),
+        (
+            "[tool.sqlty.databases.a]\nuntyped = 'skip'\n",
+            "unknown key 'untyped' in [tool.sqlty.databases.a]",
+        ),
+        (
+            "[tool.sqlty.databases.a]\ninclude = 'app'\n",
+            "[tool.sqlty.databases.a] include must be a list",
+        ),
+        (
+            "[tool.sqlty.databases.a.rules]\nselect-starr = 'x'\n",
+            "in [tool.sqlty.databases.a.rules]",
+        ),
+    ],
+)
+def test_invalid_databases_are_errors(tmp_path, monkeypatch, capsys, database, message) -> None:
+    (tmp_path / "pyproject.toml").write_text(database)
+    monkeypatch.chdir(tmp_path)
+
+    code, _, err = _run(["check", "."], capsys)
+
+    assert code == 2
+    assert message in err
+
+
 def _gitignore_project(tmp_path: Path, config: str = "") -> set[str]:
     """A git work tree with ignored files; returns the files `check` reads."""
     (tmp_path / ".git" / "info").mkdir(parents=True)
@@ -1581,8 +1777,7 @@ def test_check_sarif_output_is_valid_sarif(tmp_path, monkeypatch, capsys) -> Non
     [run] = log["runs"]
     rules = {rule["id"]: rule for rule in run["tool"]["driver"]["rules"]}
     assert (
-        rules["narrow-type"]["helpUri"]
-        == "https://jirikuncar.github.io/sqlty/reference/rules/#narrow-type"
+        rules["narrow-type"]["helpUri"] == "https://sqlty.kuncar.dev/reference/rules/#narrow-type"
     )
     assert rules["narrow-type"]["defaultConfiguration"] == {"level": "error"}
     region = {"startLine": 2, "startColumn": 15, "endLine": 2, "endColumn": 25}
@@ -1758,3 +1953,22 @@ def test_check_verbose_prints_the_types_of_named_queries(tmp_path, monkeypatch, 
         ],
     )
     assert _run(["check", "-v", "--output-format", "json", "."], capsys)[1].startswith("[")
+
+
+def test_check_verbose_names_sqlc_and_aiosql_placeholders(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "sqlty.toml").write_text('schema = "schema.sql"\nqueries = "sql/"\n')
+    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INT NOT NULL, email TEXT);\n")
+    (tmp_path / "sql").mkdir()
+    (tmp_path / "sql" / "sqlc.sql").write_text(
+        "-- name: GetUser :one\nSELECT id FROM users WHERE email = sqlc.arg(email) AND id = @id;\n"
+    )
+    (tmp_path / "sql" / "aiosql.sql").write_text(
+        "-- name: by-user^\nSELECT email FROM users WHERE id = :user.id;\n"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    code, out, _ = _run(["check", "-v", "."], capsys)
+
+    assert code == 0
+    assert f"sql{os.sep}sqlc.sql: GetUser(email: str, id: int) -> tuple[int]" in out.splitlines()
+    assert f"sql{os.sep}aiosql.sql: by_user(user.id: int) -> tuple[str | None]" in out.splitlines()

@@ -8,9 +8,17 @@ from sqlty._lint import Diagnostic
 class Schema:
     @property
     def dialect(self) -> str: ...
+    @property
+    def absent(self) -> bool: ...
 
 def load_schema(
-    schema_sql: str, *, dialect: str = "postgres", types: list[tuple[str, str]] | None = None
+    schema_sql: str,
+    *,
+    dialect: str = "postgres",
+    types: list[tuple[str, str]] | None = None,
+    name: str | None = None,
+    absent: bool = False,
+    databases: list[tuple[str, Schema | None]] | None = None,
 ) -> Schema: ...
 def infer_type(
     sql: str,
@@ -77,6 +85,9 @@ def add_param_types(
 ) -> str: ...
 def strip_source(source: str, *, import_style: str | None = None) -> str: ...
 def format_source(source: str, *, dialect: str = ..., import_style: str | None = None) -> str: ...
+def sqruff_findings(
+    source: str, *, dialect: str = ..., import_style: str | None = None
+) -> list[tuple[str, str, int, int, int]]: ...
 def fix_source(
     source: str,
     *,
@@ -117,7 +128,7 @@ def check_queries(
 ) -> list[Diagnostic]: ...
 def named_queries(
     source: str, *, query_format: str = "auto", name: str = ""
-) -> list[tuple[str, int, int]]: ...
+) -> list[tuple[str, str, list[tuple[str, str]]]]: ...
 def wrapped_queries(
     source: str, *, import_style: str | None = None
 ) -> list[tuple[int, str, str | None, tuple[int, int]]]: ...

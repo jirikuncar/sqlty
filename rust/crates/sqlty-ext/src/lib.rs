@@ -180,6 +180,15 @@ impl SchemaHandle {
         self.dialect
     }
 
+    /// Whether queries of this database are read without a schema: it was loaded without one.
+    #[getter]
+    fn absent(&self) -> bool {
+        self.loaded
+            .schema
+            .databases()
+            .is_some_and(|databases| databases.absent)
+    }
+
     fn __repr__(&self) -> String {
         format!("Schema(dialect={:?})", self.dialect)
     }
@@ -190,15 +199,24 @@ impl SchemaHandle {
 /// `types` maps a SQL type name (`DATE`) or a `table.column` to the Python type a
 /// converter above the driver gives it (`[tool.sqlty.types]`).
 ///
+/// `databases` maps the name of each other database of the project to its schema, `None`
+/// for one without; a query whose marker names one (`--sql sqlty:db=analytics`) is read
+/// against it, in its dialect. `name` is this database's, and `absent` says it has no
+/// schema: its queries are read without one.
+///
 /// Raises:
 ///     ValueError: a key of `types` is neither a SQL type nor `table.column`
 #[pyfunction]
-#[pyo3(signature = (schema_sql, *, dialect = DialectArg::POSTGRES, types = None))]
+#[pyo3(signature = (schema_sql, *, dialect = DialectArg::POSTGRES, types = None, name = None, absent = false, databases = None))]
+#[allow(clippy::too_many_arguments)]
 fn load_schema(
     py: Python<'_>,
     schema_sql: &str,
     dialect: DialectArg,
     types: Option<Vec<(String, String)>>,
+    name: Option<String>,
+    absent: bool,
+    databases: Option<Vec<(String, Option<PyRef<'_, SchemaHandle>>)>>,
 ) -> PyResult<SchemaHandle> {
     let dialect = dialect.0;
     let overrides = analyzer::TypeOverrides::new(&types.unwrap_or_default(), dialect)
@@ -211,6 +229,33 @@ fn load_schema(
         };
         Arc::new(LoadedSchema { schema, skipped })
     });
+    let loaded = match databases {
+        None if name.is_none() && !absent => loaded,
+        databases => {
+            let others = databases
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(other, handle)| match handle {
+                    Some(handle) => (
+                        other,
+                        handle.dialect,
+                        (!handle.absent()).then(|| handle.loaded.schema.clone()),
+                    ),
+                    None => (other, dialect, None),
+                })
+                .collect();
+            let databases = analyzer::Databases {
+                name: name.unwrap_or_else(|| analyzer::DEFAULT.to_string()),
+                absent,
+                others,
+            };
+            let LoadedSchema { schema, skipped } =
+                Arc::into_inner(loaded).expect("a schema just loaded is not shared");
+            let schema = analyzer::SchemaData::with_databases(schema, databases)
+                .expect("a schema just loaded is not shared");
+            Arc::new(LoadedSchema { schema, skipped })
+        }
+    };
     Ok(SchemaHandle {
         loaded,
         text: Arc::from(schema_sql),
@@ -700,6 +745,40 @@ fn format_source(
     })
 }
 
+/// `(code, message, start, end, query_start)` of a [`sqlty_format::Finding`].
+type SqruffFinding = (&'static str, String, usize, usize, usize);
+
+/// What sqruff's core lint rules, less its layout rules, find in the query strings of
+/// Python source: `(code, message, start, end, query_start)`, byte offsets in `source`.
+///
+/// Raises:
+///     ValueError: unsupported import_style
+#[pyfunction]
+#[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, import_style = None))]
+fn sqruff_findings(
+    py: Python<'_>,
+    source: &str,
+    dialect: DialectArg,
+    import_style: Option<&str>,
+) -> Result<Vec<SqruffFinding>, Error> {
+    detach(py, || {
+        let style = ImportStyle::parse(import_style)?;
+        Ok(sqlty_format::lint_source(source, dialect.0, &style)
+            .into_iter()
+            .map(|found| {
+                let span = found.span;
+                (
+                    found.code,
+                    found.message,
+                    span.start,
+                    span.end,
+                    found.query_start,
+                )
+            })
+            .collect())
+    })
+}
+
 /// Apply what `sqlty check --fix` fixes; rules set to "ignore" are skipped.
 ///
 /// `suppressed` maps a line to the rules a `# sqlty: ignore` comment on it suppresses
@@ -897,11 +976,16 @@ fn check_queries(
     })
 }
 
-/// `(name, start, end)` of each named query of a `.sql` file: its byte range starts on the
-/// line after its header. `name` names a query of a file without headers.
+/// `(name, sql, renames)`: see [`named_queries`].
+type NamedQueryOut = (String, String, Vec<(String, String)>);
+
+/// `(name, sql, renames)` of each named query of a `.sql` file: its SQL from the line after
+/// its header, with sqlc's and aiosql's placeholders rewritten to `:name`, and
+/// `(name in sql, name in the file)` of each aiosql `:obj.attr`. `name` names a query of a
+/// file without headers.
 ///
 /// Example:
-///     named_queries("-- name: get-user^\nSELECT 1") == [("get_user", 19, 27)]
+///     named_queries("-- name: get-user^\nSELECT :u.id") == [("get_user", "SELECT :u_id", [("u_id", "u.id")])]
 ///
 /// Raises:
 ///     ValueError: unknown `query_format`
@@ -911,13 +995,13 @@ fn named_queries(
     source: &str,
     query_format: &str,
     name: &str,
-) -> Result<Vec<(String, usize, usize)>, Error> {
+) -> Result<Vec<NamedQueryOut>, Error> {
     let format = query_format
         .parse::<queries::Format>()
         .map_err(|()| ConfigError::QueryFormat(query_format.to_string()))?;
     Ok(queries::split(source, format, name)
         .into_iter()
-        .map(|query| (query.name, query.body.start, query.body.end))
+        .map(|query| (query.name, query.sql, query.renames))
         .collect())
 }
 
@@ -1219,6 +1303,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(add_param_types, m)?)?;
     m.add_function(wrap_pyfunction!(strip_source, m)?)?;
     m.add_function(wrap_pyfunction!(format_source, m)?)?;
+    m.add_function(wrap_pyfunction!(sqruff_findings, m)?)?;
     m.add_function(wrap_pyfunction!(fix_source, m)?)?;
     m.add_function(wrap_pyfunction!(expand_star, m)?)?;
     m.add_function(wrap_pyfunction!(select_star_finding, m)?)?;

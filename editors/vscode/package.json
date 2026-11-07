@@ -149,5 +149,11 @@
     "oxfmt": "^0.75.0",
     "oxlint": "^1.90.0",
     "typescript": "^7.0.2"
+  },
+  "overrides": {
+    "diff": "^8.0.3",
+    "glob": "^14.0.4",
+    "minimatch": "^11.0.5",
+    "serialize-javascript": "^7.1.4"
   }
 }

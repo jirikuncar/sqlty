@@ -1,3 +1,7 @@
+---
+description: How to set up the sqlty language server in Neovim, Vim, Helix and Emacs for SQL diagnostics, quick fixes, completion and hover in Python strings.
+---
+
 # Neovim, Vim, Helix and Emacs
 
 `sqlty server` is a language server on standard input and output. Any LSP client runs it
@@ -279,3 +283,20 @@ the `lsp-face-semhl-keyword`, ... faces; next to ty, ty's tokens win.
 !!! warning "lsp-mode can stop ruff server"
     With `lsp-semantic-tokens-enable`, lsp-mode asks a server for tokens before it has
     finished starting. ruff exits on it; sqlty answers with an error and keeps running.
+
+## Pygments
+
+Installing sqlty registers a [Pygments](https://pygments.org) lexer named `sqlty`: Python,
+with the SQL of the strings `sqlty check` reads colored as the server colors it. Point the
+`python` blocks of an MkDocs or Zensical site at it in `pymdownx.highlight`:
+
+```yaml
+markdown_extensions:
+  - pymdownx.highlight:
+      extend_pygments_lang:
+        - name: python
+          lang: sqlty
+```
+
+Or color a file on the command line with `pygmentize -l sqlty queries.py`. This site
+renders its examples with it.

@@ -1,3 +1,7 @@
+---
+description: Reference for every sqlty check rule, its default severity and what it reports, and how to change severities in [tool.sqlty.rules].
+---
+
 # Rules
 
 `sqlty check` reports diagnostics as `file:line: [rule] message`. Each rule
@@ -30,6 +34,8 @@ stale-type = "error"
 | [`inline-sql-comment`](#inline-sql-comment) | Query | warn | yes | `"--sql SELECT ..."`: the query is a SQL comment |
 | [`mysql-sql-marker`](#mysql-sql-marker) | Query | warn | yes | `--sql` marker with `dialect = "mysql"`, which MySQL rejects |
 | [`unparsed-query`](#unparsed-query) | Query | warn | no | Query that does not parse, so sqlty cannot check it |
+| [`sqruff`](#sqruff) | Query | ignore | no | Finding of sqruff's core lint rules in a query |
+| [`unknown-database`](#unknown-database) | Query | error | no | Query marker names a database the project does not configure |
 | [`unknown-table`](#unknown-table) | Names | error | no | Table the schema does not define |
 | [`unknown-column`](#unknown-column) | Names | error | yes | Column the table does not have |
 | [`ambiguous-column`](#ambiguous-column) | Names | error | no | Unqualified column more than one table has |
@@ -568,6 +574,45 @@ q = SQL[tuple[str]]("--sql\nSELECT NULL::xml IS DOCUMENT")
 
 Fix: rewrite the query in a form the parser reads. `sqlty check --statistics`
 counts such queries as unparsed whether or not the rule is enabled.
+
+### sqruff
+
+Default: ignore. What the core lint rules of
+[sqruff](https://github.com/quarylabs/sqruff) find in a query, in the project's
+dialect; the message starts with the sqruff rule code. Its layout rules are left
+to [`sqlty format`](../guide/formatting.md), and a finding on a placeholder is
+dropped. Off because the rules judge style rather than types.
+
+```toml
+[tool.sqlty.rules]
+sqruff = "warn"
+```
+
+```python
+from sqlty import SQL
+
+# error: [sqruff] "AM06: Inconsistent column references in 'GROUP BY/ORDER BY' clauses."
+q = SQL[tuple[str]]("--sql\nSELECT name FROM users GROUP BY 1 ORDER BY name")
+```
+
+### unknown-database
+
+Default: error. The marker of a query, `--sql sqlty:db=NAME`, or the
+`-- sqlty: db=NAME` header of a `.sql` file names a database that
+[`databases`](configuration.md#databases) does not configure. The query is then read
+against the file's own database. `default` names the top-level one.
+
+```toml
+[tool.sqlty.databases.analytics]
+dialect = "sqlite"
+```
+
+```python
+from sqlty import SQL
+
+# error: [unknown-database] "database `analytic` is not configured; did you mean `analytics`?"
+q = SQL[tuple[int]]("--sql sqlty:db=analytic\nSELECT 1::INTEGER")
+```
 
 ## Name rules
 

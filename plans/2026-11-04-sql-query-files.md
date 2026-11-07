@@ -1,9 +1,10 @@
 # Check named queries in `.sql` files
 
-> **Status:** stage 1 (`check`) merged in [#906](https://github.com/jirikuncar/sqlty/pull/906);
-> stage 2 (`breaking`) merged in [#908](https://github.com/jirikuncar/sqlty/pull/908); stage 3
-> (`server`) merged in [#913](https://github.com/jirikuncar/sqlty/pull/913); stage 4 (`-v`), the last, in
-> review.
+> **Status:** stages 1-4 merged ([#906](https://github.com/jirikuncar/sqlty/pull/906),
+> [#908](https://github.com/jirikuncar/sqlty/pull/908), [#913](https://github.com/jirikuncar/sqlty/pull/913),
+> [#915](https://github.com/jirikuncar/sqlty/pull/915)); the gaps are tracked in
+> [#945](https://github.com/jirikuncar/sqlty/issues/945): `select-star` merged in
+> [#965](https://github.com/jirikuncar/sqlty/pull/965), sqlc/aiosql placeholders in review.
 
 Tracks [#896](https://github.com/jirikuncar/sqlty/issues/896): projects that keep SQL in `.sql`
 files (aiosql, PugSQL, sqlc) get no checks. The engine splits and checks the files
@@ -50,6 +51,7 @@ files (aiosql, PugSQL, sqlc) get no checks. The engine splits and checks the fil
 
 ## Gaps
 
-- sqlc's `@name` and `sqlc.arg(name)` placeholders are not read as parameters, and aiosql's
-  `:obj.attr` attribute access is read as a column of a table `obj`.
-- `select-star` is not reported in query files.
+- sqlc's `@name`, `sqlc.arg(name)` and `sqlc.narg(name)`, and aiosql's `:obj.attr`, are
+  rewritten to `:name` (`:obj_attr`) before the engine reads a query, padded to their length
+  so spans hold. `sqlc.slice(name)` and `sqlc.embed(table)` are not read.
+- `select-star` is reported in query files, but `check --fix` does not expand the star there.

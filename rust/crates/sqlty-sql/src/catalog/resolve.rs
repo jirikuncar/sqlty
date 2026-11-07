@@ -116,6 +116,7 @@ impl Loader {
             postgres: self.postgres,
             overrides: Arc::clone(&self.overrides),
             index: NameIndex::default(),
+            databases: None,
         }
     }
 

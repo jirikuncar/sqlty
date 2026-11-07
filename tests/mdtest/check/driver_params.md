@@ -1,10 +1,10 @@
 # Check arguments of driver execute calls
 
-`execute`, `executemany` and the asyncpg fetch methods are checked when the file
+`execute`, `executemany` and the asyncpg fetch methods, `fetchmany` among them, are checked when the file
 shows what the receiver is: a variable bound to `psycopg.connect(...)`,
-`sqlite3.connect(...)` or `asyncpg.connect(...)`, to `<connection>.cursor()`,
-or annotated with a driver class. The query is a literal, `SQL[T]("...")` of
-one, or a name assigned once to one.
+`sqlite3.connect(...)`, `aiosqlite.connect(...)` or `asyncpg.connect(...)`, to
+`<connection>.cursor()`, or annotated with a driver class. The query is a
+literal, `SQL[T]("...")` of one, or a name assigned once to one.
 
 `schema.sql`:
 
@@ -128,6 +128,23 @@ async def main() -> None:
     await conn.fetch("SELECT id FROM users WHERE id = $1", b"1")
     # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
     await conn.execute("DELETE FROM users WHERE id = $1 AND age = $2", 1)
+```
+
+`executemany` and `fetchmany` check each row of a list or tuple literal:
+
+```python
+import asyncpg
+
+async def main(rows: list[tuple[int, str]]) -> None:
+    conn = await asyncpg.connect("postgres://x")
+    await conn.executemany("INSERT INTO users (id, name) VALUES ($1, $2)", [(1, "a"), (2, "b")])
+    await conn.executemany("INSERT INTO users (id, name) VALUES ($1, $2)", rows)
+    # error: [param-type-mismatch] "parameter 1 expects int, got bytes"
+    await conn.executemany("INSERT INTO users (id, name) VALUES ($1, $2)", [(1, "a"), (b"2", "b")])
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+    await conn.fetchmany("INSERT INTO users (id, name) VALUES ($1, $2) RETURNING id", [(1,)])
+    # error: [param-type-mismatch] "parameter 2 expects str, got int"
+    await conn.fetchmany("INSERT INTO users (id, name) VALUES ($1, $2) RETURNING id", args=[[1, 2]])
 ```
 
 ### asyncpg does not convert text
@@ -263,4 +280,82 @@ conn = psycopg.connect("dbname=x")
 conn = Fake()
 conn.execute("DELETE FROM users WHERE id = %s")
 # error:
+```
+
+## A driver method also configured as a helper
+
+Its parameters are reported once.
+
+```toml
+[[tool.sqlty.functions]]
+import-path = "psycopg.Connection.execute"
+query-param = "query"
+```
+
+`psycopg.py`:
+
+```python
+from typing import Any
+
+class Connection:
+    def execute(self, query: str, params: Any = None) -> Any: ...
+```
+
+```python
+import psycopg
+
+def rename(conn: psycopg.Connection) -> None:
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+    conn.execute("--sql\nUPDATE users SET name = %s WHERE id = %s", ("a",))
+```
+
+## The `sqlty.drivers.psycopg` helpers
+
+`execute` and `scalar` are checked like the connection methods, so a query's
+parameters are counted without a type checker reading `P` of `SQL[T, P]`. A
+single argument after the query of `scalar` is its parameters only when it is a
+literal of them, as it may be the row type.
+
+```python
+import psycopg
+from sqlty import SQL
+from sqlty.drivers import psycopg as typed
+from sqlty.drivers.psycopg import execute, scalar
+
+BY_ID = SQL[tuple[str]]("--sql\nSELECT name FROM users WHERE id = %s AND age = %s")
+
+def run(conn: psycopg.Connection, ids: tuple[int, int]) -> None:
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+    execute(conn, SQL[tuple[str]]("--sql\nSELECT name FROM users WHERE id = %s AND age = %s"), (1,))
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+    execute(conn, BY_ID, params=(1,))
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 0"
+    typed.execute(conn, BY_ID)
+    # error: [param-type-mismatch] "parameters are a single int, which psycopg rejects"
+    execute(conn, "SELECT name FROM users WHERE id = %s", 1)
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+    scalar(conn, BY_ID, (1,))
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+    scalar(conn, "SELECT name FROM users WHERE id = %s AND age = %s", str, (1,))
+    execute(conn, BY_ID, (1, 2))
+    execute(conn, BY_ID, ids)
+    scalar(conn, BY_ID, ids)
+    scalar(conn, BY_ID.bind((1,)))
+```
+
+### Also configured as a helper
+
+```toml
+[[tool.sqlty.functions]]
+import-path = "sqlty.drivers.psycopg.execute"
+query-param = "query"
+```
+
+```python
+import psycopg
+from sqlty.drivers.psycopg import execute
+
+def run(conn: psycopg.Connection) -> None:
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+    execute(conn, "SELECT name FROM users WHERE id = %s AND age = %s", (1,))
 ```

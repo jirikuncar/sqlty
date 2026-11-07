@@ -47,6 +47,8 @@ Configuration via sqlty.toml (``[rules]``) or pyproject.toml:
     param-count-mismatch = "error"      # default
     param-type-mismatch = "error"       # default
     params-type-mismatch = "error"      # default
+    sqruff = "ignore"                   # default
+    unknown-database = "error"          # default
 """
 
 from __future__ import annotations
@@ -314,6 +316,18 @@ RULES: dict[str, LintRule] = {
         fixable=False,
         description="A call passes an argument whose type can't be the type its query parameter takes",
     ),
+    "sqruff": LintRule(
+        name="sqruff",
+        default_severity=Severity.IGNORE,
+        fixable=False,
+        description="Finding of sqruff's core lint rules in a query",
+    ),
+    "unknown-database": LintRule(
+        name="unknown-database",
+        default_severity=Severity.ERROR,
+        fixable=False,
+        description="Query marker names a database the project does not configure",
+    ),
     "params-type-mismatch": LintRule(
         name="params-type-mismatch",
         default_severity=Severity.ERROR,
@@ -380,7 +394,7 @@ class RuleConfig:
         return self.severity(rule_name) != Severity.IGNORE
 
 
-DOCS_URL = "https://jirikuncar.github.io/sqlty/"
+DOCS_URL = "https://sqlty.kuncar.dev/"
 """The documentation site, which ``rule_doc`` links to."""
 
 
@@ -392,7 +406,7 @@ def rule_doc(name: str) -> str:
     Example:
         >>> rule_doc("stale-type").splitlines()[0]
         '# stale-type'
-        >>> "](https://jirikuncar.github.io/sqlty/guide/schema-inference/)" in rule_doc("insert-missing-column")
+        >>> "](https://sqlty.kuncar.dev/guide/schema-inference/)" in rule_doc("insert-missing-column")
         True
     """
     import re

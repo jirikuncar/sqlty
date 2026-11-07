@@ -45,6 +45,7 @@ pub fn hover(
     dialect: &str,
     schema: Option<&SchemaData>,
 ) -> Option<Hover> {
+    let (dialect, schema) = super::route(query, dialect, schema);
     let schema = schema.unwrap_or_else(|| crate::catalog::empty(SqlDialect::from_name(dialect)));
     let tokens = lex(query)?;
     let at = tokens

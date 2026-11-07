@@ -1,3 +1,7 @@
+---
+description: How sqlty reads column types and nullability from CREATE TABLE statements in a schema dump or migrations snapshot, so queries need no casts.
+---
+
 # Schema inference
 
 With a schema file, sqlty reads column types from `CREATE TABLE` statements,

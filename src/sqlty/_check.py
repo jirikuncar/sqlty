@@ -13,15 +13,17 @@ import typing
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, NamedTuple
 
+from sqlty._core import Schema
 from sqlty._core import analyze_columns as _analyze_columns
 from sqlty._core import check_source as _check_source
 from sqlty._core import composite_fields as _composite_fields
 from sqlty._core import parse_error as _parse_error
 from sqlty._core import query_diagnostics as _query_diagnostics
 from sqlty._core import select_star_finding as _select_star_finding
+from sqlty._core import sqruff_findings as _sqruff_findings
 from sqlty._core import wrapped_queries as _wrapped_queries
-from sqlty._drivers import MARKER, find_driver_calls, find_template_calls
-from sqlty._helpers import HelperIndex, find_helper_calls
+from sqlty._drivers import find_driver_calls, find_template_calls
+from sqlty._helpers import MARKER, HelperIndex, find_helper_calls
 from sqlty._lint import NAME_RULES, Diagnostic
 from sqlty._params import ParamArg, _dotted, annotation_type, mismatch
 from sqlty._source import Ignore, ParsedSource, _wrapper_name, is_any
@@ -30,7 +32,6 @@ from sqlty._variants import Declared
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from sqlty._core import Schema
     from sqlty._helpers import HelperCall
     from sqlty._lint import RuleConfig
     from sqlty._type_extractor import TypeInfo
@@ -313,7 +314,10 @@ def _check_select_star(ctx: _Check) -> None:
     for call in ctx.calls:
         if call.query and (
             found := _select_star_finding(
-                call.query, dialect=ctx.dialect, has_schema=ctx.schema_sql is not None
+                call.query,
+                dialect=ctx.dialect,
+                has_schema=ctx.schema_sql is not None
+                and not (isinstance(ctx.schema_sql, Schema) and ctx.schema_sql.absent),
             )
         ):
             ctx.report(*found, call.line, ctx.query_span(call))
@@ -544,12 +548,34 @@ def diagnostics(
             any_calls=parsed.any_calls(import_style),
         )
     found = find_helper_calls(parsed, helpers, module, variants=variants)
+    driver_calls = find_driver_calls(parsed) + find_template_calls(parsed)
+    # A driver call also configured as a helper has its parameters checked once, as the driver's.
+    by_driver = {id(call.query_node) for call in driver_calls if call.query_node is not None}
+    found = [
+        call._replace(params=None) if id(call.query_node) in by_driver else call for call in found
+    ]
     typed = {line for call in found for line in call.typed_lines}
     branched = [call for call in found if len(call.variants) > 1]
     diagnostics = [
         d for d in diagnostics if not (d["rule"] == "stale-rewrite" and d.get("line") in typed)
     ]
-    driver_calls = find_driver_calls(parsed) + find_template_calls(parsed)
+    sqruff = RuleConfig(overrides=rules)
+    if sqruff.is_enabled("sqruff"):
+        severity = sqruff.severity("sqruff").value
+        diagnostics += [
+            {
+                "rule": "sqruff",
+                "message": f"{code}: {message}",
+                "severity": severity,
+                "line": parsed.position(query_start)[0],
+                "start": start,
+                "end": end,
+                "fix": [],
+            }
+            for code, message, start, end, query_start in _sqruff_findings(
+                parsed.text, dialect=dialect, import_style=import_style
+            )
+        ]
     queries = [
         (line, name, query, span)
         for line, name, query, span in (

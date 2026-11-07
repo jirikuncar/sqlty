@@ -3,7 +3,7 @@
 EXAMPLE_DIRS := $(shell find examples -mindepth 1 -maxdepth 1 -type d ! -name ".*" ! -name "magic_codec")
 
 # Zensical is pinned only here (CI runs `make docs`), outside the project dependency groups
-ZENSICAL := uvx --python 3.13 zensical@0.0.65
+ZENSICAL := uv run --no-sync --with zensical==0.1.0 zensical
 
 # Get the absolute path to the repository root
 ROOT_DIR := $(shell pwd)
@@ -157,6 +157,8 @@ bench-rust:  ## Criterion: catalog load, analyzer, check/rewrite_source; extra a
 .PHONY: docs
 docs: playground
 	$(ZENSICAL) build --clean
+	python3 scripts/playground_links.py site
+	python3 scripts/structured_data.py site
 	python3 scripts/offline.py site
 
 .PHONY: playground
