@@ -1,7 +1,8 @@
 # Opt-in entity key types from foreign keys
 
-> **Status:** stage 1 (`entity-mismatch`) in review. Stage 2 (typed ids) needs a decision on
-> where the generated `NewType` module lives and what it is called.
+> **Status:** stage 1 (`entity-mismatch`) merged in [#905](https://github.com/jirikuncar/sqlty/pull/905).
+> Stage 2 (typed ids) needs a decision on where the generated `NewType` module lives and what
+> it is called.
 
 Tracks [#898](https://github.com/jirikuncar/sqlty/issues/898): keys of different tables share a
 SQL type, so a join on the wrong key type-checks and returns plausible rows. Both stages are off

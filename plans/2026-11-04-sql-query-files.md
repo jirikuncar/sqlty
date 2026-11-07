@@ -4,7 +4,8 @@
 > [#908](https://github.com/jirikuncar/sqlty/pull/908), [#913](https://github.com/jirikuncar/sqlty/pull/913),
 > [#915](https://github.com/jirikuncar/sqlty/pull/915)); the gaps are tracked in
 > [#945](https://github.com/jirikuncar/sqlty/issues/945): `select-star` merged in
-> [#965](https://github.com/jirikuncar/sqlty/pull/965), sqlc/aiosql placeholders in review.
+> [#965](https://github.com/jirikuncar/sqlty/pull/965), sqlc/aiosql placeholders in
+> [#966](https://github.com/jirikuncar/sqlty/pull/966). Protocol stubs and `SQL[T].file(...)` are paused.
 
 Tracks [#896](https://github.com/jirikuncar/sqlty/issues/896): projects that keep SQL in `.sql`
 files (aiosql, PugSQL, sqlc) get no checks. The engine splits and checks the files
