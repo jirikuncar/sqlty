@@ -32,10 +32,10 @@ use sqlty_python::rewriter::ImportStyle;
 use sqruff_lib::core::config::FluffConfig;
 use sqruff_lib::core::linter::core::Linter;
 
-/// psycopg's `%s`, `%(name)s` and `%%`, and the `?` of SQLite and MySQL drivers, which
-/// sqruff does not read as values.
+/// psycopg's `%s`, `%(name)s` and `%%`, the `?` of SQLite and MySQL drivers, and the `{name}`
+/// fields of `str.format` and `sql.SQL` templates, which sqruff does not read as values.
 static PLACEHOLDER: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"%(?:\([^)]*\))?[sbt]|%%|\?").unwrap());
+    LazyLock::new(|| Regex::new(r"%(?:\([^)]*\))?[sbt]|%%|\?|\{\w*\}").unwrap());
 
 /// `source` with every query string sqruff can lay out formatted in `dialect`.
 pub fn format_source(source: &str, dialect: &str, style: &ImportStyle) -> String {
