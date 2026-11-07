@@ -54,6 +54,7 @@ _METHODS = {
     "asyncpg": {"execute", "fetch", "fetchrow", "fetchval", "executemany", "fetchmany"},
 }
 _ANY_METHOD = frozenset().union(*_METHODS.values())
+_METHOD_NAMES = re.compile(rf"\b(?:{'|'.join(sorted(_ANY_METHOD))})\b")
 _ASYNCPG_MANY = frozenset({"executemany", "fetchmany"})
 _PARAM_KEYWORD = {"psycopg": "params", "sqlite3": "parameters"}
 # sqlite3 reads a str or bytes as a sequence, one parameter per item.
@@ -252,7 +253,7 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
         f"{name}.".startswith(_BUNDLED_MODULE) or _BUNDLED_MODULE.startswith(f"{name}.")
         for name in parsed.imported_names.values()
     )
-    for call in parsed.calls_to(None):
+    for call in parsed.calls_to(None if helpers else _METHOD_NAMES):
         if helpers and (bundled := _bundled(call, parsed)) is not None:
             for first, arg in bundled:
                 query = _literal(first)
