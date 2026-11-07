@@ -52,7 +52,7 @@ missing_docs = "warn"
 unused_lifetimes = "warn"
 unused_qualifications = "warn"
 
-# The tests spend most of their time in sqlparser and pyo3: optimised, they halve the suite,
+# Most test time goes to sqlparser and pyo3: optimised, a serial `pytest -n 0` takes 40% less,
 # and the workspace crates still build at debug speed.
 [profile.dev.package."*"]
 opt-level = 3
