@@ -48,6 +48,7 @@ Configuration via sqlty.toml (``[rules]``) or pyproject.toml:
     param-type-mismatch = "error"       # default
     params-type-mismatch = "error"      # default
     sqruff = "ignore"                   # default
+    unknown-database = "error"          # default
 """
 
 from __future__ import annotations
@@ -320,6 +321,12 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.IGNORE,
         fixable=False,
         description="Finding of sqruff's core lint rules in a query",
+    ),
+    "unknown-database": LintRule(
+        name="unknown-database",
+        default_severity=Severity.ERROR,
+        fixable=False,
+        description="Query marker names a database the project does not configure",
     ),
     "params-type-mismatch": LintRule(
         name="params-type-mismatch",

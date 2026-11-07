@@ -21,7 +21,7 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 
 use regex::Regex;
-use sqlty_sql::analyzer::{parse, statement_ranges};
+use sqlty_sql::analyzer::{database_name, parse, route_named, statement_ranges, unknown_named};
 use sqlty_sql::diagnostics::NameRule;
 
 use crate::checker::{star_finding, unparsed_message, Diagnostic};
@@ -236,7 +236,11 @@ pub fn check_queries(
     options: &Options,
     rules: &RuleConfig,
 ) -> Vec<Diagnostic> {
-    let dialect = options.dialect.name();
+    let database = database_name(source);
+    let (dialect, schema) = match options.schema {
+        Some(schema) => route_named(database, options.dialect.name(), schema),
+        None => (options.dialect.name(), None),
+    };
     let mut found = Vec::new();
     let mut report = |rule: Rule, message: String, span: Range<usize>| {
         if rules.is_enabled(rule) {
@@ -250,6 +254,17 @@ pub fn check_queries(
             });
         }
     };
+    if let Some(message) = database.and_then(|name| unknown_named(name, options.schema)) {
+        let header = source.len() - source.trim_start().len();
+        let end = source[header..]
+            .find('\n')
+            .map_or(source.len(), |at| header + at);
+        report(
+            Rule::UnknownDatabase,
+            message,
+            header..end.min(source.len()),
+        );
+    }
     let names = NameRule::ALL
         .iter()
         .any(|&rule| rules.is_enabled(Rule::Name(rule)));
@@ -265,14 +280,14 @@ pub fn check_queries(
             if let Some((rule, message)) = star_finding(
                 parsed.result_stars(),
                 &body[statement.clone()],
-                options.schema.is_some(),
+                schema.is_some(),
             ) {
                 report(rule, message, at.clone());
             }
             if !names {
                 continue;
             }
-            for diagnostic in parsed.analyze_with_diagnostics(options.schema).1 {
+            for diagnostic in parsed.analyze_with_diagnostics(schema).1 {
                 let span = diagnostic.span.map_or(at.clone(), |span| {
                     at.start + span.start..at.start + span.end
                 });

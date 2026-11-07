@@ -1,7 +1,7 @@
 [project]
 name = "sqlty"
 dynamic = ["version"]
-description = "Type-safe SQL queries for Python"
+description = "Type-safe raw SQL for Python: row and parameter types inferred from your SQL and schema, no ORM or database needed"
 readme = "README.md"
 requires-python = ">=3.14"
 license = "MIT"
@@ -9,11 +9,22 @@ license-files = ["LICENSE"]
 authors = [{ name = "Jiri Kuncar", email = "jiri.kuncar@gmail.com" }]
 keywords = [
     "sql",
-    "type-hints",
-    "mypy",
+    "raw-sql",
     "type-safety",
+    "type-checking",
+    "type-hints",
     "static-analysis",
+    "linter",
+    "mypy",
+    "pyright",
+    "ty",
+    "postgresql",
+    "sqlite",
+    "mysql",
+    "psycopg",
+    "migrations",
     "code-generation",
+    "orm-alternative",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -27,6 +38,7 @@ classifiers = [
     "Programming Language :: SQL",
     "Topic :: Software Development :: Code Generators",
     "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Quality Assurance",
     "Topic :: Database",
     "Typing :: Typed",
 ]
@@ -36,7 +48,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/jirikuncar/sqlty"
+Homepage = "https://sqlty.kuncar.dev/"
 Documentation = "https://sqlty.kuncar.dev/"
 Repository = "https://github.com/jirikuncar/sqlty"
 Changelog = "https://github.com/jirikuncar/sqlty/releases"

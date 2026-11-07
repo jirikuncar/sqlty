@@ -1,3 +1,7 @@
+---
+description: "When sqlty helps: catch schema drift in CI, type raw SQL without an ORM, adopt it one query at a time, type scripts and notebooks, check AI-written SQL."
+---
+
 # Use cases
 
 ## Catch schema drift in CI

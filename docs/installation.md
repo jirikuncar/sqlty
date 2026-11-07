@@ -1,10 +1,14 @@
+---
+description: How to install sqlty with uv or pip, which Python versions and platforms have wheels, how to add the coding agent skills and verify the install.
+---
+
 # Installation
 
 ## Requirements
 
 - Python 3.14 or 3.15, see [Supported Python versions](#supported-python-versions)
-- A [Rust toolchain](https://rustup.rs/) only when no wheel matches your
-  platform, or when installing from a git checkout
+- A [Rust toolchain](https://rustup.rs/) 1.99 or newer, only when no wheel
+  matches your platform, or when installing from a git checkout
 
 ## Install
 

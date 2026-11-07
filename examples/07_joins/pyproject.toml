@@ -1,0 +1,6 @@
+[tool.sqlty]
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+unproven-join = "warn"
+entity-mismatch = "warn"

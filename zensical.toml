@@ -17,11 +17,13 @@ nav = [
     { "Quickstart" = "quickstart.md" },
     { "Why SQLTy?" = "motivation.md" },
     { "Use cases" = "use-cases.md" },
+    { "FAQ" = "faq.md" },
   ] },
   { "Guide" = [
     { "Writing queries" = "guide/writing-queries.md" },
     { "Schema inference" = "guide/schema-inference.md" },
     { "Name diagnostics" = "guide/name-diagnostics.md" },
+    { "Joins and aggregates" = "guide/joins.md" },
     { "Breaking schema changes" = "guide/breaking-changes.md" },
     { "Drivers and ORMs" = "guide/drivers-and-orms.md" },
     { "Untyped queries" = "guide/untyped.md" },
@@ -113,6 +115,7 @@ markdown_description = "SQLTy type-checks SQL in Python: it infers row and param
   "quickstart.md",
   "motivation.md",
   "use-cases.md",
+  "faq.md",
 ]
 "Guide" = ["guide/*.md"]
 "Optional" = [

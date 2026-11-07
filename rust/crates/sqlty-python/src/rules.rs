@@ -68,13 +68,15 @@ pub enum Rule {
     ParamsTypeMismatch,
     /// A finding of sqruff's lint rules in a query.
     Sqruff,
+    /// A query names a database the project does not configure.
+    UnknownDatabase,
     /// A rule explaining why a column is untyped.
     Name(NameRule),
 }
 
 impl Rule {
     /// Every rule.
-    pub const ALL: [Rule; 41] = [
+    pub const ALL: [Rule; 42] = [
         Rule::ColumnCountMismatch,
         Rule::ColumnTypeMismatch,
         Rule::ColumnNameMismatch,
@@ -103,6 +105,7 @@ impl Rule {
         Rule::ParamTypeMismatch,
         Rule::ParamsTypeMismatch,
         Rule::Sqruff,
+        Rule::UnknownDatabase,
         Rule::Name(NameRule::UnknownTable),
         Rule::Name(NameRule::UnknownColumn),
         Rule::Name(NameRule::AmbiguousColumn),
@@ -149,6 +152,7 @@ impl Rule {
             Rule::ParamTypeMismatch => "param-type-mismatch",
             Rule::ParamsTypeMismatch => "params-type-mismatch",
             Rule::Sqruff => "sqruff",
+            Rule::UnknownDatabase => "unknown-database",
             Rule::Name(rule) => rule.name(),
         }
     }
@@ -173,6 +177,7 @@ impl Rule {
             | Rule::ParamsTypeMismatch
             | Rule::NarrowType
             | Rule::SelectStarNoSchema
+            | Rule::UnknownDatabase
             | Rule::Name(
                 NameRule::UnknownTable
                 | NameRule::UnknownColumn

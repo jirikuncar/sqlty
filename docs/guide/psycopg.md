@@ -1,3 +1,7 @@
+---
+description: "How to get typed rows from psycopg 3 with sqlty.drivers.psycopg: the type checker sees SQL[T] rows, and the matching row factory builds T at runtime."
+---
+
 # psycopg
 
 `SQL[T]` is a `str` subclass, so it can be passed to any driver as is. For
@@ -76,8 +80,9 @@ with psycopg.connect("dbname=app") as conn:
 ```
 
 With [typed parameters](parameters.md#typed-parameters), `SQL[T, P]`,
-pyright and ty check `params` against `P`. `query.bind(params)` checks them on
-every type checker, and `execute` and `scalar` take the `Bound` it returns:
+pyright and ty check `params` against `P`, and `sqlty check` compares them with
+the query's placeholders. `query.bind(params)` checks them on every type
+checker, and `execute` and `scalar` take the `Bound` it returns:
 
 ```python
 from typing import TypedDict

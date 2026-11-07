@@ -17,6 +17,7 @@ pub(super) static STAR_ITEM: LazyLock<Regex> =
 
 /// Expand SELECT * into an explicit `col::TYPE` list, keeping other projections verbatim.
 pub fn expand_star(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> Option<String> {
+    let (dialect, schema) = super::route(sql, dialect, schema);
     let schema = schema.filter(|schema| !schema.is_empty())?;
     let dialect = SqlDialect::from_name(dialect);
     let stmt = parse_first(sql, dialect)?;
