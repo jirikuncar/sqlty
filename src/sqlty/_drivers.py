@@ -27,7 +27,7 @@ from collections import defaultdict
 
 from sqlty._helpers import MARKER, HelperCall
 from sqlty._params import SCALARS, ParamArg, arg_type, literal_params
-from sqlty._source import ParsedSource
+from sqlty._source import ParsedSource, _fields
 
 # Driver factories and classes, by the dotted name they are imported as, to the driver.
 _CONNECTIONS = {
@@ -131,7 +131,7 @@ class _Scopes:
             for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]:
                 if arg is not None:
                     names[arg.arg].append((None, arg.annotation))
-        pending = list(ast.iter_child_nodes(scope))
+        pending = _children(scope)
         while pending:
             node = pending.pop()
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -157,7 +157,7 @@ class _Scopes:
             elif isinstance(node, (ast.Import, ast.ImportFrom)):
                 for alias in node.names:
                     names[(alias.asname or alias.name).partition(".")[0]].append(unknown)
-            pending.extend(ast.iter_child_nodes(node))
+            pending += _children(node)
         return names
 
     def _lookup(self, name: str, scopes: list[_Scope]) -> list[_Binding] | None:
@@ -210,6 +210,17 @@ class _Scopes:
         return _literal(bindings[0][0])
 
 
+def _children(node: ast.AST) -> list[ast.AST]:
+    """The child nodes of ``node`` that can hold a binding: no names, constants or operators."""
+    found: list[ast.AST] = []
+    for field in _fields(type(node)):
+        value = getattr(node, field)
+        for child in value if type(value) is list else (value,):
+            if child is not None and _fields(type(child)):
+                found.append(child)
+    return found
+
+
 def _literal(node: ast.expr | None) -> str | None:
     """The text of a string literal, possibly wrapped as ``SQL[T]("...")``."""
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Subscript) and len(node.args) == 1:
@@ -237,8 +248,12 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
     scopes = _Scopes(parsed)
     found: list[HelperCall] = []
     aliases = parsed.typing_aliases
+    helpers = any(
+        f"{name}.".startswith(_BUNDLED_MODULE) or _BUNDLED_MODULE.startswith(f"{name}.")
+        for name in parsed.imported_names.values()
+    )
     for call in parsed.calls_to(None):
-        if (bundled := _bundled(call, parsed)) is not None:
+        if helpers and (bundled := _bundled(call, parsed)) is not None:
             for first, arg in bundled:
                 query = _literal(first)
                 if query is None and isinstance(first, ast.Name):
@@ -341,7 +356,8 @@ def _calls(
     ]
 
 
-_BUNDLED = frozenset({"sqlty.drivers.psycopg.execute", "sqlty.drivers.psycopg.scalar"})
+_BUNDLED_MODULE = "sqlty.drivers.psycopg."
+_BUNDLED = frozenset({f"{_BUNDLED_MODULE}execute", f"{_BUNDLED_MODULE}scalar"})
 
 
 def _bundled(call: ast.Call, parsed: ParsedSource) -> list[tuple[ast.expr, ast.expr | None]] | None:

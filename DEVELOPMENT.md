@@ -6,7 +6,7 @@ This guide covers development setup and workflows for SQLTy.
 
 - Python 3.14+
 - [uv](https://docs.astral.sh/uv/) - Fast Python package installer and resolver
-- [Rust toolchain](https://rustup.rs/) (builds the engine, `sqlty._core`, and runs the cargo hooks)
+- [Rust toolchain](https://rustup.rs/) 1.99+ (builds the engine, `sqlty._core`, and runs the cargo hooks)
 
 ## Setup
 

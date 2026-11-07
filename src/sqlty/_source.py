@@ -335,7 +335,7 @@ class ParsedSource:
 
     @functools.cached_property
     def _scan(self) -> _Scan:
-        scan = _Scan(bindings="psycopg" in self.text)
+        scan = _Scan()
         if self.tree is not None:
             scan.visit(self.tree)
         return scan
@@ -473,9 +473,11 @@ class ParsedSource:
     def psycopg(self) -> PsycopgScan:
         """What ``psycopg.sql`` compositions need: imports, scopes and single assignments.
 
-        Collected in the same pass as ``imports``, and only when the text mentions ``psycopg``.
+        Collected in a walk of every node, only when the text mentions ``psycopg``.
         """
-        scan = self._scan
+        scan = _Scan(bindings=True)
+        if self.tree is not None and "psycopg" in self.text:
+            scan.visit(self.tree)
         return PsycopgScan(self.imports, scan.scopes, scan.stores, scan.values, self)
 
     @functools.cached_property
