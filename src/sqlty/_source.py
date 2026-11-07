@@ -43,12 +43,26 @@ import bisect
 import functools
 import io
 import itertools
+import os
 import re
 import tokenize
 import typing
 from dataclasses import dataclass
 
+from sqlty._core import module_facts
 from sqlty._psycopg import PsycopgScan
+
+AST = os.environ.get("SQLTY_AST", "python")
+"""Who reads the syntax tree: ``python`` (``ast``), ``rust`` (``sqlty_python::module``, falling
+back to ``ast``), or ``compare``, which runs both and raises ``AstMismatch`` when they differ."""
+
+
+class AstMismatch(AssertionError):
+    """``SQLTY_AST=compare`` found the Rust and Python readings of a module different."""
+
+    def __init__(self, what: str, rust: object, python: object, text: str) -> None:
+        super().__init__(f"{what}: rust {rust!r} != python {python!r}\n{text}")
+
 
 _TYPING_MODULES = frozenset({"typing", "typing_extensions"})
 # A comment runs to the end of its line, so the gap can split text only one way.
@@ -668,6 +682,18 @@ class ParsedSource:
         wrapper = _wrapper_name(import_style)
         if wrapper is None or "Any" not in self.text or not self.may_wrap(import_style):
             return []
+        if AST == "python" or self.facts is None:
+            return self._any_calls(wrapper)
+        rust = [
+            offset
+            for offset, name in self.facts[2]
+            if name == wrapper or name.endswith(f".{wrapper}")
+        ]
+        if AST == "compare" and rust != (python := self._any_calls(wrapper)):
+            raise AstMismatch("any_calls", rust, python, self.text)
+        return rust
+
+    def _any_calls(self, wrapper: str) -> list[int]:
         aliases = self.typing_aliases
         starts = self._byte_lines
         offsets = []
@@ -679,6 +705,27 @@ class ParsedSource:
             if name == wrapper or name.endswith(f".{wrapper}"):
                 offsets.append(starts[func.value.lineno - 1] + func.value.col_offset)
         return sorted(offsets)
+
+    @functools.cached_property
+    def facts(self) -> tuple[list[str], list[tuple[str, str]], list[tuple[int, str]]] | None:
+        """``(called, from_imports, any_calls)`` read by Rust, ``None`` when it cannot parse the text."""
+        return module_facts(self.text)
+
+    def may_call(self, names: frozenset[str]) -> bool:
+        """Whether a call names one of ``names``, as ``f(...)``, ``x.f(...)`` or an imported alias.
+
+        Always true when Rust cannot tell, so ``False`` lets a pass skip ``ast``.
+
+        Example:
+            >>> ParsedSource("from m import run as r\\nr(1)").may_call(frozenset({"run"}))
+            True
+        """
+        if self.facts is None:
+            return True
+        called, from_imports, _ = self.facts
+        return not names.isdisjoint(called) or any(
+            original in names and local in called for local, original in from_imports
+        )
 
     def may_need_rust_check(self, import_style: str | None = None) -> bool:
         """Whether the Rust checker can report anything for the text.

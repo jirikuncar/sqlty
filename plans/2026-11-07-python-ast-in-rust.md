@@ -1,6 +1,6 @@
 # Python AST passes in Rust
 
-> **Status:** proposal.
+> **Status:** milestone 1 on branch `rust/python-ast-migration`.
 
 The checks that need a Python syntax tree run in Python on `ast`: helper calls
 (`_helpers.py`), driver calls (`_drivers.py`), `psycopg.sql` compositions (`_psycopg.py`),
@@ -52,6 +52,24 @@ mdtest corpus and the synthetic project until they agree.
 
 The parse is saved only once stage 5 lands; stages 2 to 4 each move a pass but parse twice
 in between, unless stage 1 hands Python the facts it needs instead of a tree.
+
+## Switch
+
+`SQLTY_AST` picks who reads the tree: `python` (the default, `ast` only), `rust` (Rust first,
+`ast` where Rust cannot decide), and `compare`, which runs both and raises `AstMismatch` when
+they differ. CI runs the mdtests in `compare`; `tests/test_module_facts.py` compares the two
+readings on generated modules (Hypothesis) and on every Python file and mdtest block.
+
+## Milestones
+
+Slowest first, each measured on the 10,000-file synthetic project.
+
+1. `sqlty_python::module::facts`: the called names, `from` imports and `X[Any](...)` calls.
+   `find_helper_calls` skips a file whose calls name no indexed helper, and `any_calls` reads
+   the Rust offsets, so a file that imports helpers but never calls one is never parsed by
+   `ast`. `check -j 1`: 2.88 s to 2.22 s on the full project; 3.85 s to 4.13 s (median, noisy)
+   when every file calls a helper, since those files are parsed twice.
+2. Driver and t-string calls.
 
 ## Open questions
 

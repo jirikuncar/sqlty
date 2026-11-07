@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from sqlty._params import ParamArg, arg_type, literal_params
 from sqlty._psycopg import UNCHECKED
-from sqlty._source import ParsedSource
+from sqlty._source import AST, AstMismatch, ParsedSource
 from sqlty._variants import Declared, Unchecked, Variant, query_variants
 
 if TYPE_CHECKING:
@@ -715,8 +715,28 @@ def find_helper_calls(
         [(5, 'SELECT 1')]
     """
     parsed = ParsedSource.of(source, module)
+    if AST == "compare":
+        rust = _find_helper_calls(parsed, helpers, module, variants=variants, gate=True)
+        python = _find_helper_calls(parsed, helpers, module, variants=variants, gate=False)
+        if rust != python:
+            raise AstMismatch("find_helper_calls", rust, python, parsed.text)
+        return python
+    return _find_helper_calls(parsed, helpers, module, variants=variants, gate=AST == "rust")
+
+
+def _find_helper_calls(
+    parsed: ParsedSource,
+    helpers: HelperIndex | None,
+    module: str | None,
+    *,
+    variants: int | None,
+    gate: bool,
+) -> list[HelperCall]:
     local = parsed.may_define_helpers
     imported = helpers is not None and bool(helpers.modules) and helpers.mentions(parsed.text)
+    if imported and gate:
+        assert helpers is not None
+        imported = parsed.may_call(helpers.names)
     composed = "psycopg" in parsed.text
     if not (local or imported):
         return []

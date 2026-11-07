@@ -12,6 +12,10 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+ruff_python_ast.workspace = true
+ruff_python_parser.workspace = true
+ruff_text_size.workspace = true
+recursive.workspace = true
 sqlty-sql.workspace = true
 regex.workspace = true
 thiserror.workspace = true

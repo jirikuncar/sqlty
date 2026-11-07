@@ -1005,6 +1005,20 @@ fn named_queries(
         .collect())
 }
 
+/// What decides whether the Python passes need a syntax tree, see `sqlty_python::module`:
+/// `(called, from_imports, any_calls)`, or None when `source` is not valid Python.
+#[pyfunction]
+#[allow(clippy::type_complexity)]
+fn module_facts(
+    py: Python<'_>,
+    source: &str,
+) -> Option<(Vec<String>, Vec<(String, String)>, Vec<(usize, String)>)> {
+    detach(py, || {
+        sqlty_python::module::facts(source)
+            .map(|found| (found.called, found.from_imports, found.any_calls))
+    })
+}
+
 /// `(line, annotation, query, annotation_span)` for each `SQL[T](...)` call in Python source.
 ///
 /// `query` is the `--sql` string without its prefix, or None when the call
@@ -1310,6 +1324,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(check_source, m)?)?;
     m.add_function(wrap_pyfunction!(check_queries, m)?)?;
     m.add_function(wrap_pyfunction!(named_queries, m)?)?;
+    m.add_function(wrap_pyfunction!(module_facts, m)?)?;
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;
     m.add_function(wrap_pyfunction!(query_at, m)?)?;
