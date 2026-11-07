@@ -237,8 +237,12 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
     scopes = _Scopes(parsed)
     found: list[HelperCall] = []
     aliases = parsed.typing_aliases
+    helpers = any(
+        f"{name}.".startswith(_BUNDLED_MODULE) or _BUNDLED_MODULE.startswith(f"{name}.")
+        for name in parsed.imported_names.values()
+    )
     for call in parsed.calls_to(None):
-        if (bundled := _bundled(call, parsed)) is not None:
+        if helpers and (bundled := _bundled(call, parsed)) is not None:
             for first, arg in bundled:
                 query = _literal(first)
                 if query is None and isinstance(first, ast.Name):
@@ -323,7 +327,8 @@ def _calls(
     ]
 
 
-_BUNDLED = frozenset({"sqlty.drivers.psycopg.execute", "sqlty.drivers.psycopg.scalar"})
+_BUNDLED_MODULE = "sqlty.drivers.psycopg."
+_BUNDLED = frozenset({f"{_BUNDLED_MODULE}execute", f"{_BUNDLED_MODULE}scalar"})
 
 
 def _bundled(call: ast.Call, parsed: ParsedSource) -> list[tuple[ast.expr, ast.expr | None]] | None:
