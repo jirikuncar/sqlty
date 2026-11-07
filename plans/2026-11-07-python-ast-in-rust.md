@@ -32,7 +32,10 @@ psycopg-heavy run. The gain comes from moving the parse with every pass that rea
 from the Ruff repository, 0.0.21 (2026-11-05), weekly releases. Its README says the API
 "is unstable and will have frequent breaking changes". It needs Rust 1.97 (the workspace
 is on 1.88) and brings `ruff_python_ast`, `ruff_text_size` and `ruff_python_trivia`.
-Pin an exact version and bump it on purpose.
+Pin an exact version and bump it on purpose. [Monty](https://github.com/pydantic/monty) does
+the same: it pins every `ruff_*` crate at one version (0.0.14, `rust-version` 1.98) and
+lowers the ruff AST into its own tree in `crates/monty/src/parse.rs`, so only that file
+sees ruff's types. Stage 1 follows it.
 
 ## Stages
 
