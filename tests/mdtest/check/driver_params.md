@@ -1,6 +1,6 @@
 # Check arguments of driver execute calls
 
-`execute`, `executemany` and the asyncpg fetch methods are checked when the file
+`execute`, `executemany` and the asyncpg fetch methods, `fetchmany` among them, are checked when the file
 shows what the receiver is: a variable bound to `psycopg.connect(...)`,
 `sqlite3.connect(...)` or `asyncpg.connect(...)`, to `<connection>.cursor()`,
 or annotated with a driver class. The query is a literal, `SQL[T]("...")` of
@@ -128,6 +128,23 @@ async def main() -> None:
     await conn.fetch("SELECT id FROM users WHERE id = $1", b"1")
     # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
     await conn.execute("DELETE FROM users WHERE id = $1 AND age = $2", 1)
+```
+
+`executemany` and `fetchmany` check each row of a list or tuple literal:
+
+```python
+import asyncpg
+
+async def main(rows: list[tuple[int, str]]) -> None:
+    conn = await asyncpg.connect("postgres://x")
+    await conn.executemany("INSERT INTO users (id, name) VALUES ($1, $2)", [(1, "a"), (2, "b")])
+    await conn.executemany("INSERT INTO users (id, name) VALUES ($1, $2)", rows)
+    # error: [param-type-mismatch] "parameter 1 expects int, got bytes"
+    await conn.executemany("INSERT INTO users (id, name) VALUES ($1, $2)", [(1, "a"), (b"2", "b")])
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+    await conn.fetchmany("INSERT INTO users (id, name) VALUES ($1, $2) RETURNING id", [(1,)])
+    # error: [param-type-mismatch] "parameter 2 expects str, got int"
+    await conn.fetchmany("INSERT INTO users (id, name) VALUES ($1, $2) RETURNING id", args=[[1, 2]])
 ```
 
 ### asyncpg does not convert text

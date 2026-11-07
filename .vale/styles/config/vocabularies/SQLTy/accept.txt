@@ -18,6 +18,7 @@ aiosqlite
 alex
 APIs
 asyncpg
+asyncpg_typed
 boolean
 booleans
 Cavalieri
@@ -70,6 +71,7 @@ nextest
 NULLs
 ORM
 ormar
+orjson
 ORMs
 Params
 paramstyles

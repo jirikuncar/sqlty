@@ -133,7 +133,7 @@ run("DELETE FROM users WHERE age = %(age)s", age=b"1")
 
 `cursor.execute(query, params)`, `executemany` (each row), and
 `connection.execute(...)` are checked on psycopg and sqlite3 receivers, and
-`execute`, `fetch`, `fetchrow`, `fetchval` on asyncpg ones. The receiver must
+`execute`, `fetch`, `fetchrow`, `fetchval`, `executemany` and `fetchmany` (each row) on asyncpg ones. The receiver must
 be evident in the file: bound to `psycopg.connect(...)`, `sqlite3.connect(...)`,
 `asyncpg.connect(...)`, `<connection>.cursor()` (also as `with ... as name`), or
 annotated with a driver class. The `execute` and `scalar` helpers of
