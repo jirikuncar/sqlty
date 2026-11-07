@@ -18,9 +18,9 @@ uv add sqlty            # or: pip install sqlty; sqlty requires Python >= 3.14
 ```
 
 Find the dialect from the driver (`psycopg` or `asyncpg`: `postgres`;
-`sqlite3`: `sqlite`; `pymysql` or `mysqlclient`: `mysql`) and the schema. A
-schema saves a cast in every query. Dump it from the database, or point at
-the migrations:
+`sqlite3` or `aiosqlite`: `sqlite`; `pymysql` or `mysqlclient`: `mysql`) and
+the schema. A schema saves a cast in every query. Dump it from the database,
+or point at the migrations:
 
 ```bash
 pg_dump --schema-only app > schema.sql      # PostgreSQL
