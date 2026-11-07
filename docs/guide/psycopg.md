@@ -80,8 +80,9 @@ with psycopg.connect("dbname=app") as conn:
 ```
 
 With [typed parameters](parameters.md#typed-parameters), `SQL[T, P]`,
-pyright and ty check `params` against `P`. `query.bind(params)` checks them on
-every type checker, and `execute` and `scalar` take the `Bound` it returns:
+pyright and ty check `params` against `P`, and `sqlty check` compares them with
+the query's placeholders. `query.bind(params)` checks them on every type
+checker, and `execute` and `scalar` take the `Bound` it returns:
 
 ```python
 from typing import TypedDict

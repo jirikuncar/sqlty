@@ -4,7 +4,7 @@ A receiver is recognised only when the file shows what it is: a variable bound t
 ``psycopg.connect(...)``, ``sqlite3.connect(...)`` or ``asyncpg.connect(...)`` (also as
 ``with ... as name``), to ``<connection>.cursor()``, or annotated with a driver class. The
 query is a string literal, ``SQL[T]("...")`` of one, or a name assigned exactly one of
-those. Anything else is skipped.
+those. Anything else is skipped. The ``sqlty.drivers.psycopg`` helpers are psycopg calls.
 
 Names are resolved per scope, and a name a loop, comprehension, unpacking, import or
 unannotated parameter binds is unknown.
@@ -229,7 +229,7 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
     text = parsed.text
     if not any(driver in text for driver in ("psycopg", "sqlite3", "asyncpg")):
         return []
-    if not any(method in text for method in ("execute", "fetch")):
+    if not any(method in text for method in ("execute", "fetch", "scalar")):
         return []
     if parsed.tree is None:
         return []
@@ -237,6 +237,13 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
     found: list[HelperCall] = []
     aliases = parsed.typing_aliases
     for call in parsed.calls_to(None):
+        if (bundled := _bundled(call, parsed)) is not None:
+            for first, arg in bundled:
+                query = _literal(first)
+                if query is None and isinstance(first, ast.Name):
+                    query = scopes.query(first.id, scopes.chain(call))
+                found.extend(_calls(call, first, arg, "psycopg", parsed, aliases, query))
+            continue
         func = call.func
         if not (
             isinstance(func, ast.Attribute)
@@ -273,27 +280,76 @@ def find_driver_calls(source: str | ParsedSource) -> list[HelperCall]:
             arg = next((k.value for k in call.keywords if k.arg == keyword), None)
             if arg is None and any(k.arg is None for k in call.keywords):
                 continue
-        many = func.attr == "executemany"
-        if many and not isinstance(arg, (ast.List, ast.Tuple)):
-            continue
-        for row in arg.elts if many and isinstance(arg, (ast.List, ast.Tuple)) else [arg]:
-            params = () if row is None else literal_params(row, parsed, stack)
-            kind = arg_type(row, parsed, stack) if row is not None and params is None else None
-            single = kind if kind in SCALARS - _SEQUENCE_SCALARS[driver] else None
-            if not many or params is not None or single is not None:
-                found.append(
-                    HelperCall(
-                        call.lineno,
-                        query,
-                        None,
-                        aliases,
-                        params,
-                        driver=driver,
-                        single=single,
-                        query_node=first,
-                    )
-                )
+        if func.attr != "executemany":
+            found.extend(_calls(call, first, arg, driver, parsed, aliases, query))
+        elif isinstance(arg, (ast.List, ast.Tuple)):
+            for row in arg.elts:
+                found.extend(_calls(call, first, row, driver, parsed, aliases, query, many=True))
     return found
+
+
+def _calls(
+    call: ast.Call,
+    first: ast.expr,
+    arg: ast.expr | None,
+    driver: str,
+    parsed: ParsedSource,
+    aliases: dict[str, str],
+    query: str | None,
+    *,
+    many: bool = False,
+) -> list[HelperCall]:
+    """``call`` running ``query`` with the parameters ``arg``, when they are known or a single value."""
+    if query is None:
+        return []
+    stack = parsed.scopes_of(call)
+    params = () if arg is None else literal_params(arg, parsed, stack)
+    kind = arg_type(arg, parsed, stack) if arg is not None and params is None else None
+    single = kind if kind in SCALARS - _SEQUENCE_SCALARS[driver] else None
+    if many and params is None and single is None:
+        return []
+    return [
+        HelperCall(
+            call.lineno,
+            query,
+            None,
+            aliases,
+            params,
+            driver=driver,
+            single=single,
+            query_node=first,
+        )
+    ]
+
+
+_BUNDLED = frozenset({"sqlty.drivers.psycopg.execute", "sqlty.drivers.psycopg.scalar"})
+
+
+def _bundled(call: ast.Call, parsed: ParsedSource) -> list[tuple[ast.expr, ast.expr | None]] | None:
+    """The query and parameters of a call to a ``sqlty.drivers.psycopg`` helper.
+
+    ``None`` for any other call, and nothing when the call does not show its parameters.
+    ``scalar`` takes a row type before the parameters, so a single argument after the query
+    is the parameters only when it is a literal of them.
+    """
+    name = _qualified(_dotted(call.func), parsed)
+    if name not in _BUNDLED:
+        return None
+    args = call.args
+    keyword = next((k.value for k in call.keywords if k.arg == "params"), None)
+    if (
+        len(args) < 2
+        or any(isinstance(arg, ast.Starred) for arg in args)
+        or (keyword is None and any(k.arg is None for k in call.keywords))
+    ):
+        return []
+    rest = args[2:]
+    if name.endswith(".scalar") and len(rest) == 1:
+        if isinstance(rest[0], ast.Name) and keyword is None:
+            return []
+        if not isinstance(rest[0], (ast.Tuple, ast.List, ast.Dict)):
+            rest = []
+    return [(args[1], rest[-1] if rest else keyword)]
 
 
 def find_template_calls(source: str | ParsedSource) -> list[HelperCall]:
