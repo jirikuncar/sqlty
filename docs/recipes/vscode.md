@@ -215,12 +215,25 @@ VS Code shows the hovers of every extension together, so sqlty's sits next to Py
 
 A string marked `--sql` or `-- sql` is highlighted as SQL: keywords, strings, numbers,
 comments, operators and placeholders. Other strings stay Python strings, and so do
-f-strings, raw strings and bytes:
+raw strings and bytes:
 
 ```python
 q = "--sql\nSELECT name FROM users WHERE id = %(id)s"  # SQL
 plain = "SELECT name FROM users"  # a Python string
 ```
+
+In a t-string or an f-string marked `--sql`, the replacement fields keep the colors of
+Python, so you can tell the expressions from the query:
+
+```python
+user_id, column = 1, "name"
+query = t"--sql\nSELECT name FROM users WHERE id = {user_id}"  # SQL, {user_id} as Python
+legacy = f"--sql\nSELECT {column} FROM users"  # SQL, {column} as Python
+```
+
+!!! note "A highlighted f-string is still not checked"
+    `sqlty check` checks t-strings (`SQLTemplate[T]`), but it skips f-strings and reports
+    them as [`fstring-skipped`](../reference/rules.md#fstring-skipped).
 
 The extension adds a TextMate grammar to Python, so highlighting needs no server. A
 grammar sees the text of one string only, so a string checked without a marker stays
