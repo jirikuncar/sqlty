@@ -1,11 +1,44 @@
 {
   "name": "sqlty",
-  "displayName": "sqlty",
-  "description": "Type-check the SQL in your Python code as you type",
+  "displayName": "SQLTy: SQL type checker for Python",
+  "description": "Type-check, complete, highlight and format the SQL in your Python strings against your schema, as you type",
+  "keywords": [
+    "sql",
+    "python",
+    "sql-in-python",
+    "embedded-sql",
+    "inline-sql",
+    "sql-highlighting",
+    "syntax-highlighting",
+    "raw-sql",
+    "type-checking",
+    "type-safety",
+    "static-analysis",
+    "linter",
+    "lsp",
+    "language-server",
+    "autocomplete",
+    "sql-formatter",
+    "schema",
+    "postgresql",
+    "sqlite",
+    "mysql",
+    "psycopg",
+    "asyncpg",
+    "mypy",
+    "pyright",
+    "ty",
+    "migrations",
+    "orm-alternative"
+  ],
   "version": "0.0.1",
   "private": true,
   "publisher": "jirikuncar",
   "license": "MIT",
+  "homepage": "https://sqlty.kuncar.dev/recipes/vscode/",
+  "bugs": {
+    "url": "https://github.com/jirikuncar/sqlty/issues"
+  },
   "icon": "icon.png",
   "galleryBanner": {
     "color": "#0e0f10",
@@ -20,7 +53,9 @@
     "vscode": "^1.93.0"
   },
   "categories": [
-    "Linters"
+    "Linters",
+    "Programming Languages",
+    "Formatters"
   ],
   "activationEvents": [
     "onLanguage:python",

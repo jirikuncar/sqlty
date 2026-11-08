@@ -18,3 +18,7 @@ legacy = f"""--sql
 SELECT '{{literal}}', {limit} FROM users"""
 raw_template = rt"--sql\nSELECT unmarked_template FROM users"
 raw_formatted = rf"--sql\nSELECT unmarked_formatted FROM {plain}"
+leading = f"""
+--sql
+SELECT {limit} FROM users
+"""
