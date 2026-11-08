@@ -91,7 +91,11 @@ jobs:
           target: ${{ matrix.target }}
           # Host builds otherwise use the runner image's rustc, which can lag the MSRV.
           rust-toolchain: stable
-          args: --profile dist --out dist --find-interpreter --manifest-path rust/crates/sqlty-ext/Cargo.toml
+          # One abi3 wheel serves every GIL-enabled CPython from 3.14; each free-threaded
+          # interpreter still needs its own. A pull request builds the abi3 wheel only.
+          args: >-
+            --profile dist --out dist --manifest-path rust/crates/sqlty-ext/Cargo.toml
+            ${{ github.event_name == 'pull_request' && '--interpreter python3.14' || '--find-interpreter' }}
           manylinux: ${{ matrix.manylinux || 'auto' }}
           container: ${{ matrix.container }}
 
@@ -107,7 +111,7 @@ jobs:
         shell: bash
         run: |
           for v in 3.14 3.15; do
-            t=cp${v/./}; wheel=$(ls dist/sqlty-*-$t-$t-*.whl)
+            wheel=$(ls dist/sqlty-*-cp314-abi3-*.whl)
             uv venv -q --python "$v" "venv-$v"
             py="venv-$v/bin/python"; [ -x "$py" ] || py="venv-$v/Scripts/python.exe"
             uv pip install -q --python "$py" "$wheel"

@@ -16,7 +16,7 @@ name = "_core"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3.workspace = true
+pyo3 = { workspace = true, features = ["abi3-py314"] }
 sqlty-sql.workspace = true
 sqlty-python.workspace = true
 sqlty-lsp.workspace = true
