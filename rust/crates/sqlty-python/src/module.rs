@@ -12,7 +12,6 @@ use std::collections::HashMap;
 
 use ruff_python_ast::visitor::{walk_expr, Visitor};
 use ruff_python_ast::{ExceptHandler, Expr, Stmt};
-use ruff_python_parser::{parse_expression, parse_module};
 use ruff_text_size::Ranged;
 
 use crate::drivers::{self, DriverCall};
@@ -62,7 +61,7 @@ pub struct Facts {
 /// assert_eq!(found.any_calls, [(53, "SQL".to_string())]);
 /// ```
 pub fn facts(source: &str) -> Option<Facts> {
-    let parsed = parse_module(source).ok()?;
+    let parsed = crate::parse::module(source)?;
     let module = parsed.syntax();
     let mut imports = Vec::new();
     collect_imports(&module.body, 1, &mut imports);
@@ -212,8 +211,8 @@ impl Aliases<'_> {
     /// Whether `expr` is `typing.Any`, quoted or in `Annotated` too, as `is_any` decides.
     fn is_any(&self, expr: &Expr) -> bool {
         match expr {
-            Expr::StringLiteral(text) => parse_expression(text.value.to_str())
-                .is_ok_and(|parsed| self.is_any(parsed.syntax().body.as_ref())),
+            Expr::StringLiteral(text) => crate::parse::expression(text.value.to_str())
+                .is_some_and(|parsed| self.is_any(parsed.syntax().body.as_ref())),
             Expr::Subscript(sub) if self.member(&sub.value) == Some("Annotated") => match sub
                 .slice
                 .as_ref()

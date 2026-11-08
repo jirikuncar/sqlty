@@ -1612,6 +1612,7 @@ dependencies = [
  "ruff_python_parser",
  "ruff_text_size",
  "sqlty-sql",
+ "stacker",
  "thiserror",
  "toml",
 ]

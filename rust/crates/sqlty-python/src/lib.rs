@@ -45,6 +45,7 @@ pub mod locate;
 pub mod module;
 pub mod options;
 pub mod params;
+pub mod parse;
 pub mod queries;
 pub mod rewriter;
 pub mod rules;
