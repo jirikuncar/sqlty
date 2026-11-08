@@ -97,14 +97,25 @@ suite("sqlty", () => {
     const sql = (scope: string) =>
       tokens.filter((token) => token.t.split(" ").includes(scope)).map((token) => token.c);
     const keywords = ["SELECT", "FROM", "WHERE", "SELECT", "AS", "FROM", "SELECT", "FROM", "WHERE"];
-    assert.deepEqual(sql("keyword.other.sql"), [...keywords, "SELECT", "FROM"]);
+    const interpolated = ["SELECT", "FROM", "SELECT", "FROM", "WHERE", "LIMIT"];
+    interpolated.push("SELECT", "FROM", "SELECT", "FROM");
+    assert.deepEqual(sql("keyword.other.sql"), [...keywords, "SELECT", "FROM", ...interpolated]);
     const comments = ["--sql", "-- note", "-- sql", "--sql", "--sql"];
+    comments.push("--sql", "--sql", "--sql", "--sql");
     assert.deepEqual(sql("comment.line.double-dash.sql"), comments);
     assert.deepEqual(sql("comment.block.sql"), ["/* the", "key */"]);
-    assert.deepEqual(sql("string.quoted.single.sql").join(""), "'it''s'");
+    assert.deepEqual(sql("string.quoted.single.sql").join(""), "'it''s''{{literal}}'");
+    const fields = tokens.filter(
+      (token) =>
+        token.t.includes("meta.embedded.sql") &&
+        token.t.includes("constant.character.format.placeholder.other.python"),
+    );
+    assert.equal(fields.map((token) => token.c).join(""), "{}{}{}{}{}");
+    const expressions = tokens.filter((token) => /\b(user_id|limit)\b/.test(token.c));
+    assert.ok(expressions.every((token) => !token.t.includes("keyword.other.sql")));
     assert.deepEqual(sql("variable.parameter.sql"), ["%(id)s", "$1"]);
     assert.deepEqual(sql("constant.numeric.sql"), ["1"]);
-    const unmarked = ["plain", "formatted", "raw", "data"];
+    const unmarked = ["SELECT plain", "SELECT raw", "SELECT data", "unmarked_"];
     const outside = tokens.filter(
       (token) =>
         token.t.includes("meta.embedded.sql") && unmarked.some((name) => token.c.includes(name)),

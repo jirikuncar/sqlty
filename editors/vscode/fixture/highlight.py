@@ -11,3 +11,14 @@ plain = "SELECT plain FROM users"
 formatted = f"--sql\nSELECT {plain} FROM users"
 raw = r"--sql\nSELECT raw FROM users"
 data = b"--sql\nSELECT data FROM users"
+
+user_id, limit = 1, 10
+templated = t"--sql\nSELECT name FROM users WHERE id = {user_id} LIMIT {limit}"
+legacy = f"""--sql
+SELECT '{{literal}}', {limit} FROM users"""
+raw_template = rt"--sql\nSELECT unmarked_template FROM users"
+raw_formatted = rf"--sql\nSELECT unmarked_formatted FROM {plain}"
+leading = f"""
+--sql
+SELECT {limit} FROM users
+"""
