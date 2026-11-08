@@ -643,6 +643,8 @@ pub(crate) fn escapes(text: &str, mut piece: impl FnMut(&str, Range<usize>)) {
     piece(rest, position(rest)..text.len());
 }
 
+static NO_PARAMS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bNoParams\b").unwrap());
+
 /// Remove sqlty and `TYPE_MODULES` imports that are no longer referenced.
 fn remove_unused_imports(source: &str, istyle: &ImportStyle) -> String {
     let wrapper_marker = format!("{}[", istyle.wrapper_name);
@@ -654,10 +656,10 @@ fn remove_unused_imports(source: &str, istyle: &ImportStyle) -> String {
         .lines()
         .any(|line| line.contains("UNTYPED") && Some(line.trim()) != untyped_import);
     let no_params_import = istyle.no_params_import();
-    let no_params = Regex::new(r"\bNoParams\b").unwrap();
-    let no_params_used = source
-        .lines()
-        .any(|line| no_params.is_match(line) && Some(line.trim()) != no_params_import);
+    let no_params_used = source.contains("NoParams")
+        && source
+            .lines()
+            .any(|line| NO_PARAMS.is_match(line) && Some(line.trim()) != no_params_import);
     let unused = |line: &str| {
         let line = line.trim_end();
         (Some(line) == untyped_import && !untyped_used)

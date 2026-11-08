@@ -292,6 +292,24 @@ from sqlty import Bound
 # rewritten-file: from sqlty import Bound
 ```
 
+## Classes and imports go above the first query
+
+```python
+q = "--sql\nSELECT name FROM users WHERE id = %(id)s"
+import os
+# rewritten-file: import typing
+# rewritten-file: from sqlty import SQL
+# rewritten-file:
+# rewritten-file:
+# rewritten-file: # sqlty: generated
+# rewritten-file: class QParams(typing.TypedDict):
+# rewritten-file:     id: int | None
+# rewritten-file:
+# rewritten-file:
+# rewritten-file: q = SQL[tuple[str], QParams]("--sql\nSELECT name FROM users WHERE id = %(id)s")
+# rewritten-file: import os
+```
+
 ## Strip removes the `NoParams` import
 
 ```python

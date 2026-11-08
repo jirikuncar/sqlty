@@ -275,7 +275,7 @@ impl Module {
             return format!("{}{blocks}{eol}{eol}{}", &source[..at], &source[at..]);
         }
         let scan = Scan::new(source, "");
-        let line = statements(&scan)
+        let line = head(&scan)
             .filter(|statement| is_import(source, &scan.tokens[statement.clone()], true))
             .last()
             .map_or(0, |statement| end_line(&scan, statement));
@@ -297,10 +297,21 @@ impl Module {
     }
 }
 
+/// The statements before the first line of code: the docstring, comments and imports.
+fn head<'a>(scan: &'a Scan) -> impl Iterator<Item = Range<usize>> + 'a {
+    let source = scan.source();
+    statements(scan).take_while(move |statement| {
+        let tokens = &scan.tokens[statement.clone()];
+        is_import(source, tokens, true)
+            || (statement.start == 0 && tokens[0].kind == Kind::Str)
+            || tokens.iter().all(|token| token.kind == Kind::Comment)
+    })
+}
+
 /// `source` with `import M` for each module of [`MODULES`] it names but lacks, in order.
 fn with_imports(source: &str) -> String {
     let scan = Scan::new(source, "");
-    let imports: Vec<(bool, String, Range<usize>)> = statements(&scan)
+    let imports: Vec<(bool, String, Range<usize>)> = head(&scan)
         .filter(|statement| is_import(source, &scan.tokens[statement.clone()], false))
         .map(|statement| {
             let tokens = &scan.tokens[statement.clone()];
