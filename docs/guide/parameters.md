@@ -248,8 +248,9 @@ the other way around.
 
 ### `bind`
 
-`query.bind(params)` checks `params` against `P` and returns a `Bound[R]`, a
-`(query, params)` tuple. `cursor.execute(*bound)` runs it, and the
+`query.bind(params)` checks `params` against `P` and returns a `Bound[R, P]`, a
+`(query, params)` tuple. `P` defaults to `Any`, so `Bound[R]` is any bound query, and a
+function can ask for the parameters a query takes, as `Bound[Any, ById]`. `cursor.execute(*bound)` runs it, and the
 [psycopg helpers](psycopg.md) take it in place of the query. You only need it
 where your type checker does not check `P` otherwise:
 

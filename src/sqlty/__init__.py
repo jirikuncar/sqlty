@@ -2,7 +2,7 @@
 
 import sys
 from string.templatelib import Template
-from typing import TYPE_CHECKING, Any, NamedTuple, get_args, overload
+from typing import TYPE_CHECKING, Any, Generic, NamedTuple, TypeVar, get_args, overload
 
 if sys.version_info >= (3, 15):
     from typing import TypedDict, TypeForm
@@ -45,7 +45,7 @@ class SQL[R, P = Any](str):
 
         def __sqlty_row__(self) -> R: ...
 
-    def bind(self, params: P, /) -> Bound[R]:
+    def bind(self, params: P, /) -> Bound[R, P]:
         """The query with ``params``, checked against ``P``: ``cursor.execute(*bound)`` runs it."""
         return Bound(self, params)
 
@@ -58,10 +58,18 @@ type NoParams = tuple[()] | _NoKeys
 """Parameters of a query without placeholders, ``SQL[R, NoParams]``: ``()`` or ``{}``."""
 
 
-class Bound[R](NamedTuple):
-    """A query and its parameters, from ``SQL.bind``."""
+_R = TypeVar("_R", covariant=True)
+_P = TypeVar("_P", contravariant=True, default=Any)
 
-    query: SQL[R]
+
+class Bound(NamedTuple, Generic[_R, _P]):
+    """A query and its parameters, from ``SQL.bind``: ``Bound[R, P]`` comes from ``SQL[R, P]``.
+
+    ``P`` defaults to ``Any`` and is contravariant like the ``P`` of ``SQL``, so a function
+    taking ``Bound[Any, ById]`` takes the bound queries whose parameters are a ``ById``.
+    """
+
+    query: SQL[_R]
     params: Any
 
 

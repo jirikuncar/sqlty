@@ -1,10 +1,11 @@
 """Wrong parameters are errors; the comment of each line names the checkers that report it."""
 
+from collections.abc import Mapping
 from typing import Any, TypedDict
 
 from psycopg import Connection
 
-from sqlty import SQL, NoParams
+from sqlty import SQL, Bound, NoParams
 from sqlty.drivers.psycopg import execute
 
 
@@ -25,6 +26,19 @@ by_email.bind(("a@example.com", 1))  # error: mypy pyright ty
 count.bind((1,))  # error: mypy pyright ty
 count.bind({"id": 1})  # error: mypy pyright ty
 count.bind(by_id_params)  # error: mypy pyright ty
+
+
+def by_name(bound: Bound[Any, tuple[str | None]]) -> None: ...
+
+
+by_name(by_id.bind({"id": 1}))  # error: mypy pyright ty
+by_name(count.bind(()))  # error: mypy pyright ty
+
+
+def named(bound: Bound[Any, Mapping[str, object]]) -> None: ...
+
+
+named(by_id.bind({"id": 1}))  # error: mypy pyright ty
 
 
 def nullable(query: SQL[Any, tuple[str | None]]) -> None: ...
