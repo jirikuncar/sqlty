@@ -6,6 +6,8 @@ of table and column names in the query strings it checks, and SQL highlighting i
 marked `--sql`. The `.sql` files of named queries that the
 [`queries`](https://sqlty.kuncar.dev/guide/sql-files/) key names get their diagnostics too.
 
+<img src="https://raw.githubusercontent.com/jirikuncar/sqlty/main/docs/assets/vscode-demo.gif" alt="VS Code: a --sql string is highlighted, typing u. completes the columns of users, SQL[tuple[str]] is underlined because id is an integer, and the quick fix rewrites it to SQL[tuple[int]]" width="900">
+
 The extension runs `sqlty server` from your project, so the editor and CI agree. Add sqlty
 to the project's environment (`uv add --dev sqlty`); the extension bundles none.
 
