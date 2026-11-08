@@ -111,9 +111,11 @@ def register(name: str, born: date, age: int | None, other) -> None:
     execute("INSERT INTO users (id, name, born) VALUES (%s, %s, %s)", (1, name, 5))
 ```
 
-Named placeholders match a dict literal or keyword arguments;
+Named placeholders match a dict literal or keyword arguments.
 [`param-count-mismatch`](../reference/rules.md#param-count-mismatch) reports
-names the call does not pass; extra keys are ignored, as the drivers do:
+names the call does not pass, an error. [`extra-param`](../reference/rules.md#extra-param)
+reports keys the query does not use, a warning since the drivers ignore them;
+`extra-param = "error"` in `[tool.sqlty.rules]` fails the check on them:
 
 ```python
 from typing import Annotated, LiteralString
@@ -123,6 +125,7 @@ def execute(query: Annotated[LiteralString, SQL], params: dict[str, object], /) 
 def run(query: Annotated[LiteralString, SQL], /, **params: object) -> None: ...
 
 execute("DELETE FROM users WHERE id = %(id)s", {"id": 1})
+# error: [extra-param] "call passes extra parameter 'ident'"
 # error: [param-count-mismatch] "call is missing parameter 'id'"
 execute("DELETE FROM users WHERE id = %(id)s", {"ident": 1})
 # error: [param-type-mismatch] "parameter 'age' expects int, got bytes"

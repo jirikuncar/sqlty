@@ -239,6 +239,7 @@ def _check_params(ctx: _Check) -> None:
     if not (
         ctx.rule_config.is_enabled("param-type-mismatch")
         or ctx.rule_config.is_enabled("param-count-mismatch")
+        or ctx.rule_config.is_enabled("extra-param")
     ):
         return
     singles = {
@@ -682,13 +683,17 @@ def _param_diagnostics(
         (p.name if named and p.name else p.number): p for p in params
     }
     by_name = bool(passed) and all(isinstance(key, str) for key in passed)
-    if not params and by_name:
-        extra = ", ".join(f"'{key}'" for key in passed)
-        return [("param-count-mismatch", f"query has 0 parameters, the call passes {extra}")]
-    if (named and passed and not by_name) or (positional and by_name):
+    if (named and passed and not by_name) or (positional and by_name and params):
         return []
     found: list[tuple[str, str]] = []
-    if positional and len(passed) != len(by_key):
+    if by_name and (extra := [f"'{key}'" for key in passed if key not in by_key]):
+        found.append(
+            (
+                "extra-param",
+                f"call passes extra parameter{'' if len(extra) == 1 else 's'} {', '.join(extra)}",
+            )
+        )
+    if positional and not by_name and len(passed) != len(by_key):
         found.append(
             (
                 "param-count-mismatch",

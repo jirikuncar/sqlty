@@ -58,6 +58,7 @@ stale-type = "error"
 | [`dynamic-query`](#dynamic-query) | Rewrite | ignore | no | Helper query that is not a string literal |
 | [`untyped-query`](#untyped-query) | Rewrite | warn | yes | `SQL[UNTYPED]` query |
 | [`param-count-mismatch`](#param-count-mismatch) | Params | error | no | Call passes a different number of parameters than its query has |
+| [`extra-param`](#extra-param) | Params | warn | no | Call passes a key its query has no placeholder for |
 | [`param-type-mismatch`](#param-type-mismatch) | Params | error | no | Call passes an argument the query's parameter can't take |
 | [`params-type-mismatch`](#params-type-mismatch) | Params | error | no | `P` of `SQL[R, P]` doesn't fit the query's parameters |
 | [`unused-ignore`](#unused-ignore) | Suppression | warn | no | `# sqlty: ignore` comment that suppresses nothing |
@@ -425,7 +426,7 @@ Fix: pass a value of the expected type.
 ### param-count-mismatch
 
 Default: error. A different number of positional arguments than the query has
-placeholders, or named arguments that don't match the query's names.
+placeholders, or a named placeholder the call doesn't pass.
 
 ```python
 from typing import Annotated, LiteralString
@@ -438,6 +439,23 @@ execute("SELECT 1 FROM users WHERE id = %s AND name = %s", (1,))
 ```
 
 Fix: pass one argument per placeholder.
+
+### extra-param
+
+Default: warn. A key the call passes that the query has no placeholder for,
+which the drivers ignore. Set `extra-param = "error"` to fail the check on it.
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def execute(query: Annotated[LiteralString, SQL], params: dict[str, object]) -> None: ...
+
+# error: [extra-param] "call passes extra parameter 'name'"
+execute("SELECT 1 FROM users WHERE id = %(id)s", {"id": 1, "name": "a"})
+```
+
+Fix: remove the key, or add its placeholder.
 
 ### params-type-mismatch
 

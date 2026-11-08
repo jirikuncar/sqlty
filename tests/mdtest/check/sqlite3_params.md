@@ -49,9 +49,11 @@ import sqlite3
 
 with sqlite3.connect("app.db") as conn:
     conn.execute("SELECT id FROM users WHERE id = :id", {"id": 1})
+    # error: [extra-param] "call passes extra parameter 'ident'"
     # error: [param-count-mismatch] "call is missing parameter 'id'"
     conn.execute("SELECT id FROM users WHERE id = :id", {"ident": 1})
     # SQLite is dynamically typed: no type is wrong, but NULL is for NOT NULL.
+    # error: [extra-param] "call passes extra parameter 'extra'"
     conn.execute("SELECT id FROM users WHERE id = :id", {"id": b"1", "extra": 2})
 ```
 

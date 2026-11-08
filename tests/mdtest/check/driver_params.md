@@ -33,7 +33,7 @@ with psycopg.connect("dbname=x") as conn:
         # error: [param-count-mismatch] "query has 1 parameter, the call passes 0"
         cur.execute("SELECT id FROM users WHERE id = %s")
         cur.execute("SELECT id FROM users")
-        # error: [param-count-mismatch] "query has 0 parameters, the call passes 'id'"
+        # error: [extra-param] "call passes extra parameter 'id'"
         cur.execute("SELECT id FROM users", {"id": 1})
     # error: [param-type-mismatch] "parameter 2 is not nullable, got None"
     conn.execute("INSERT INTO users (id, name) VALUES (%s, %s)", (1, None))

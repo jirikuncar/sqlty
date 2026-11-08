@@ -62,6 +62,8 @@ pub enum Rule {
     UnusedIgnore,
     /// A call passes a different number of parameters than its query has.
     ParamCountMismatch,
+    /// A call passes a key its query has no placeholder for.
+    ExtraParam,
     /// A call passes an argument its query's parameter cannot take.
     ParamTypeMismatch,
     /// The parameter type `P` of `SQL[R, P]` does not fit the parameters of its query.
@@ -76,7 +78,7 @@ pub enum Rule {
 
 impl Rule {
     /// Every rule.
-    pub const ALL: [Rule; 42] = [
+    pub const ALL: [Rule; 43] = [
         Rule::ColumnCountMismatch,
         Rule::ColumnTypeMismatch,
         Rule::ColumnNameMismatch,
@@ -102,6 +104,7 @@ impl Rule {
         Rule::UnparsedQuery,
         Rule::UnusedIgnore,
         Rule::ParamCountMismatch,
+        Rule::ExtraParam,
         Rule::ParamTypeMismatch,
         Rule::ParamsTypeMismatch,
         Rule::Sqruff,
@@ -149,6 +152,7 @@ impl Rule {
             Rule::UnparsedQuery => "unparsed-query",
             Rule::UnusedIgnore => "unused-ignore",
             Rule::ParamCountMismatch => "param-count-mismatch",
+            Rule::ExtraParam => "extra-param",
             Rule::ParamTypeMismatch => "param-type-mismatch",
             Rule::ParamsTypeMismatch => "params-type-mismatch",
             Rule::Sqruff => "sqruff",
@@ -198,6 +202,7 @@ impl Rule {
             | Rule::UntypedQuery
             | Rule::UnparsedQuery
             | Rule::UnusedIgnore
+            | Rule::ExtraParam
             | Rule::Name(
                 NameRule::UnknownFunction
                 | NameRule::UnknownType
