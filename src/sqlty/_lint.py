@@ -45,6 +45,7 @@ Configuration via sqlty.toml (``[rules]``) or pyproject.toml:
     entity-mismatch = "ignore"          # default
     unused-ignore = "warn"              # default
     param-count-mismatch = "error"      # default
+    extra-param = "warn"                # default
     param-type-mismatch = "error"       # default
     params-type-mismatch = "error"      # default
     sqruff = "ignore"                   # default
@@ -308,7 +309,13 @@ RULES: dict[str, LintRule] = {
         name="param-count-mismatch",
         default_severity=Severity.ERROR,
         fixable=False,
-        description="A call passes a different number of parameters, or different names, than its query has placeholders",
+        description="A call passes a different number of parameters than its query has placeholders, or misses a name",
+    ),
+    "extra-param": LintRule(
+        name="extra-param",
+        default_severity=Severity.WARN,
+        fixable=False,
+        description="A call passes a key its query has no placeholder for",
     ),
     "param-type-mismatch": LintRule(
         name="param-type-mismatch",
