@@ -302,6 +302,12 @@ reload.
     The server comes from the folder's own environment: `sqlty.path`, the selected
     interpreter or `PATH`. A folder you have not trusted would choose what runs.
 
+## VS Code for the Web
+
+On [vscode.dev](https://vscode.dev) and [github.dev](https://github.dev), the extension
+highlights the SQL of strings marked `--sql`, as in Restricted Mode. The browser runs no
+processes, so there is no `sqlty server`: no diagnostics, quick fixes or completion.
+
 ## Other editors
 
 `sqlty server` runs in any LSP client: see [Neovim, Vim, Helix and Emacs](editors.md) for their

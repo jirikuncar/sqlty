@@ -9,8 +9,9 @@ marked `--sql`. The `.sql` files of named queries that the
 The extension runs `sqlty server` from your project, so the editor and CI agree. Add sqlty
 to the project's environment (`uv add --dev sqlty`); the extension bundles none.
 
-The [documentation](https://sqlty.kuncar.dev/recipes/vscode/) covers the setup,
-Restricted Mode and other editors.
+On vscode.dev and github.dev, the extension highlights SQL only, since the browser runs no
+`sqlty server`. The [documentation](https://sqlty.kuncar.dev/recipes/vscode/) covers the setup,
+Restricted Mode, VS Code for the Web and other editors.
 
 ## Coming from another SQL highlighter
 

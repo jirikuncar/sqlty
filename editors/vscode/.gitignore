@@ -4,3 +4,4 @@ out/
 .vscode-test/
 *.vsix
 LICENSE
+.vscode-test-web/
