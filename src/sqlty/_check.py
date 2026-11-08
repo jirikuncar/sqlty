@@ -682,7 +682,7 @@ def _param_diagnostics(
         (p.name if named and p.name else p.number): p for p in params
     }
     by_name = bool(passed) and all(isinstance(key, str) for key in passed)
-    if (named and passed and not by_name) or (positional and by_name):
+    if (named and passed and not by_name) or (positional and by_name and params):
         return []
     found: list[tuple[str, str]] = []
     if positional and len(passed) != len(by_key):

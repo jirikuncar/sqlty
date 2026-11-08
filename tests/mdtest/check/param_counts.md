@@ -65,6 +65,21 @@ execute("DELETE FROM users WHERE id = %(id)s", {"id": 1, "age": 3})
 execute("DELETE FROM users WHERE id = %(id)s", {"ident": 1})
 ```
 
+## A mapping for a query without placeholders
+
+psycopg and sqlite3 accept it and ignore its keys, so a forgotten placeholder goes unnoticed.
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def execute(query: Annotated[LiteralString, SQL], params: dict[str, object], /) -> None: ...
+
+# error: [param-count-mismatch] "query has 0 parameters, the call passes 1"
+execute("DELETE FROM users WHERE id = 1", {"id": 1})
+execute("DELETE FROM users WHERE id = 1", {})
+```
+
 ## Positional arguments for named placeholders are not compared
 
 ```python
