@@ -222,11 +222,27 @@ q = "--sql\nSELECT name FROM users WHERE id = %(id)s"  # SQL
 plain = "SELECT name FROM users"  # a Python string
 ```
 
+In a triple-quoted string, the marker may also sit on the first line that is not blank:
+
+```python
+q = """
+--sql
+SELECT name FROM users
+"""
+```
+
 The extension adds a TextMate grammar to Python, so highlighting needs no server. A
 grammar sees the text of one string only, so a string checked without a marker stays
 a Python string: the query of an annotated helper or a `[[tool.sqlty.functions]]`
 function, and `SQL[T]("SELECT ...")`. A query split across adjacent literals is
 highlighted in its first literal only.
+
+!!! tip "Strings marked for another highlighter"
+    [python-string-sql](https://marketplace.visualstudio.com/items?itemName=ptweir.python-string-sql),
+    [Inline SQL](https://marketplace.visualstudio.com/items?itemName=qufiwefefwoyn.inline-sql-syntax)
+    and other SQL highlighters for Python mark strings with the same `--sql` comment, so sqlty
+    highlights and checks them as they are. Keep one highlighter enabled, so one grammar colors
+    each string.
 
 ## Breaking changes
 
