@@ -59,7 +59,7 @@ if MYPY:
 
     def execute[T](
         conn: Connection[Any],
-        query: SQL[T] | SQLTemplate[T] | Bound[T],
+        query: SQL[T] | SQLTemplate[T] | Bound[Any, T],
         params: Params | None = None,
     ) -> Cursor[T]:
         return _execute(conn, query, params)
@@ -69,7 +69,7 @@ else:
     @overload
     def execute[T](
         conn: Connection[Any],
-        query: SQL[T, tuple[()]] | SQLTemplate[T] | Bound[T],
+        query: SQL[T, tuple[()]] | SQLTemplate[T] | Bound[Any, T],
         params: None = None,
     ) -> Cursor[T]: ...
 
@@ -97,7 +97,7 @@ else:
 @overload
 def scalar[T](
     conn: Connection[Any],
-    query: SQL[tuple[T]] | SQLTemplate[tuple[T]] | Bound[tuple[T]],
+    query: SQL[tuple[T]] | SQLTemplate[tuple[T]] | Bound[Any, tuple[T]],
     /,
     params: Params | None = None,
 ) -> T: ...

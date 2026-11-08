@@ -45,7 +45,7 @@ class SQL[R, P = Any](str):
 
         def __sqlty_row__(self) -> R: ...
 
-    def bind(self, params: P, /) -> Bound[R, P]:
+    def bind(self, params: P, /) -> Bound[P, R]:
         """The query with ``params``, checked against ``P``: ``cursor.execute(*bound)`` runs it."""
         return Bound(self, params)
 
@@ -58,15 +58,15 @@ type NoParams = tuple[()] | _NoKeys
 """Parameters of a query without placeholders, ``SQL[R, NoParams]``: ``()`` or ``{}``."""
 
 
-_R = TypeVar("_R", covariant=True)
-_P = TypeVar("_P", contravariant=True, default=Any)
+_P = TypeVar("_P", contravariant=True)
+_R = TypeVar("_R", covariant=True, default=Any)
 
 
-class Bound(NamedTuple, Generic[_R, _P]):
-    """A query and its parameters, from ``SQL.bind``: ``Bound[R, P]`` comes from ``SQL[R, P]``.
+class Bound(NamedTuple, Generic[_P, _R]):
+    """A query and its parameters, from ``SQL.bind``: ``Bound[P, R]`` comes from ``SQL[R, P]``.
 
-    ``P`` defaults to ``Any`` and is contravariant like the ``P`` of ``SQL``, so a function
-    taking ``Bound[Any, ById]`` takes the bound queries whose parameters are a ``ById``.
+    ``P`` comes first, as what a caller checks: ``Bound[ById]`` takes the bound queries whose
+    parameters are a ``ById``, whatever their rows. ``P`` is contravariant like in ``SQL``.
     """
 
     query: SQL[_R]

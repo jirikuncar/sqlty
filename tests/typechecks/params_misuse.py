@@ -15,7 +15,9 @@ class ById(TypedDict):
 
 by_id_params: ById = {"id": 1}
 by_id = SQL[tuple[str], ById]("--sql\nSELECT name::TEXT FROM users WHERE id = %(id)s")
-by_email = SQL[tuple[int], tuple[str | None]]("--sql\nSELECT id::INTEGER FROM users WHERE email = %s")
+by_email = SQL[tuple[int], tuple[str | None]](
+    "--sql\nSELECT id::INTEGER FROM users WHERE email = %s"
+)
 count = SQL[tuple[int], NoParams]("--sql\nSELECT count(*)::INTEGER FROM users")
 
 by_id.bind({"id": "1"})  # error: mypy pyright ty
@@ -28,14 +30,14 @@ count.bind({"id": 1})  # error: mypy pyright ty
 count.bind(by_id_params)  # error: mypy pyright ty
 
 
-def by_name(bound: Bound[Any, tuple[str | None]]) -> None: ...
+def by_name(bound: Bound[tuple[str | None]]) -> None: ...
 
 
 by_name(by_id.bind({"id": 1}))  # error: mypy pyright ty
 by_name(count.bind(()))  # error: mypy pyright ty
 
 
-def named(bound: Bound[Any, Mapping[str, object]]) -> None: ...
+def named(bound: Bound[Mapping[str, object]]) -> None: ...
 
 
 named(by_id.bind({"id": 1}))  # error: mypy pyright ty
