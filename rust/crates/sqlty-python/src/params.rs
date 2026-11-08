@@ -2,7 +2,7 @@
 //!
 //! Each `SQL[R]("--sql\n...")` call gets the type of its parameters:
 //!
-//! - positional parameters (`%s`, `$1`, `?`) are a `tuple`, `tuple[()]` when there are none;
+//! - positional parameters (`%s`, `$1`, `?`) are a `tuple`, `NoParams` when there are none;
 //! - named parameters (`%(name)s`, `:name`) are a `TypedDict` class, written after the imports
 //!   below a `# sqlty: generated` line, as `json-types` writes its classes; `strip` removes it.
 //!
@@ -18,7 +18,7 @@ use sqlty_sql::analyzer::{analyze_params, Nullability, Param};
 
 use crate::edit::{apply_edits, Edit};
 use crate::options::Options;
-use crate::rewriter::decode_escapes;
+use crate::rewriter::{decode_escapes, insert_imports, sqlty_imports};
 use crate::scan::Scan;
 use crate::tokens::{Kind, Token};
 
@@ -69,6 +69,7 @@ pub fn add_param_types(source: &str, options: &Options) -> String {
     let scan = Scan::new(source, &options.style.wrapper_name);
     let mut module = Module::of(&scan);
     let mut edits = Vec::new();
+    let mut no_params = false;
     for call in &scan.calls {
         let row_end = source[..call.annotation.end].trim_end().len();
         if !call.exact || call.template || source[call.annotation.end..].starts_with(',') {
@@ -91,7 +92,10 @@ pub fn add_param_types(source: &str, options: &Options) -> String {
         let text = if types.is_empty() || types.iter().any(|(name, _)| name.is_none()) {
             let items: Vec<&str> = types.iter().map(|(_, text)| text.as_str()).collect();
             match items.is_empty() {
-                true => "tuple[()]".to_string(),
+                true => {
+                    no_params = true;
+                    options.style.no_params_name()
+                }
                 false => format!("tuple[{}]", items.join(", ")),
             }
         } else {
@@ -111,8 +115,43 @@ pub fn add_param_types(source: &str, options: &Options) -> String {
     if edits.is_empty() {
         return source.to_string();
     }
-    let edited = apply_edits(source, edits).0;
-    with_imports(&module.with_classes(&edited))
+    let edited = with_imports(&module.with_classes(&apply_edits(source, edits).0));
+    match options.style.no_params_import() {
+        Some(line) if no_params && !binds_no_params(&edited) => with_sqlty_import(&edited, line),
+        _ => edited,
+    }
+}
+
+/// `source` with `line` below its last `from sqlty import ...`, or with the other imports.
+fn with_sqlty_import(source: &str, line: &str) -> String {
+    let scan = Scan::new(source, "");
+    let text = |i: usize| &source[scan.tokens[i].span.clone()];
+    let Some(at) = statements(&scan)
+        .filter(|statement| {
+            is_import(source, &scan.tokens[statement.clone()], false)
+                && text(statement.start) == "from"
+                && statement.len() > 1
+                && text(statement.start + 1) == "sqlty"
+        })
+        .last()
+        .map(|statement| end_line(&scan, statement))
+    else {
+        return insert_imports(source, &[line.to_string()]);
+    };
+    let eol = if source.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let mut lines: Vec<String> = source.split_inclusive('\n').map(String::from).collect();
+    lines.insert(at.min(lines.len()), format!("{line}{eol}"));
+    lines.concat()
+}
+
+fn binds_no_params(source: &str) -> bool {
+    sqlty_imports(&Scan::new(source, ""))
+        .iter()
+        .any(|(name, binding)| binding == "NoParams" || name == "*")
 }
 
 fn param_type(param: &Param) -> String {
@@ -479,5 +518,27 @@ fn pascal(name: &str) -> String {
     match text.starts_with(|c: char| c.is_ascii_digit()) || text.is_empty() {
         true => format!("Json{text}"),
         false => text,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_params_import_is_added_once() {
+        let options = Options::new("postgres", None, None, false).unwrap();
+        let rewrite = |source: &str| add_param_types(source, &options);
+        let wrapped = "q = SQL[tuple[int]](\"--sql\\nSELECT 1\")\n";
+        assert_eq!(
+            rewrite(&format!("import datetime\nfrom sqlty import SQL\n{wrapped}")),
+            "import datetime\nfrom sqlty import SQL\nfrom sqlty import NoParams\nq = SQL[tuple[int], NoParams](\"--sql\\nSELECT 1\")\n",
+        );
+        for header in ["from sqlty import SQL, NoParams\n", "from sqlty import *\n"] {
+            assert_eq!(
+                rewrite(&format!("{header}{wrapped}")),
+                format!("{header}q = SQL[tuple[int], NoParams](\"--sql\\nSELECT 1\")\n"),
+            );
+        }
     }
 }

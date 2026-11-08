@@ -30,10 +30,24 @@ r = "--sql\nINSERT INTO users (id, name, email) VALUES (%s, %s, %s)"
 
 ## No parameters
 
+`NoParams` takes `()`, `{}` or no argument.
+
 ```python
 q = "--sql\nSELECT name FROM users"
 # rewritten-file: from sqlty import SQL
-# rewritten-file: q = SQL[tuple[str], tuple[()]]("--sql\nSELECT name FROM users")
+# rewritten-file: from sqlty import NoParams
+# rewritten-file: q = SQL[tuple[str], NoParams]("--sql\nSELECT name FROM users")
+```
+
+## `NoParams` imported once
+
+```python
+q = "--sql\nSELECT name FROM users"
+r = "--sql\nSELECT id FROM users"
+# rewritten-file: from sqlty import SQL
+# rewritten-file: from sqlty import NoParams
+# rewritten-file: q = SQL[tuple[str], NoParams]("--sql\nSELECT name FROM users")
+# rewritten-file: r = SQL[tuple[int], NoParams]("--sql\nSELECT id FROM users")
 ```
 
 ## Named parameters
@@ -252,6 +266,29 @@ class ByIdParams(typing.TypedDict):
 
 by_id = SQL[tuple[str], ByIdParams]("--sql\nSELECT name FROM users WHERE id = %(id)s")
 # stripped: by_id = "--sql\nSELECT name FROM users WHERE id = %(id)s"
+```
+
+## Strip removes the `NoParams` import
+
+```python
+from sqlty import SQL
+from sqlty import NoParams
+
+q = SQL[tuple[str], NoParams]("--sql\nSELECT name FROM users")
+# stripped: q = "--sql\nSELECT name FROM users"
+```
+
+## A module import spells it `sqlty.NoParams`
+
+```toml
+[tool.sqlty]
+import-style = "import sqlty"
+```
+
+```python
+q = "--sql\nSELECT name FROM users"
+# rewritten-file: import sqlty
+# rewritten-file: q = sqlty.SQL[tuple[str], sqlty.NoParams]("--sql\nSELECT name FROM users")
 ```
 
 ## SQLite placeholders

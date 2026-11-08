@@ -5,10 +5,10 @@ from string.templatelib import Template
 from typing import TYPE_CHECKING, Any, NamedTuple, get_args, overload
 
 if sys.version_info >= (3, 15):
-    from typing import TypeForm
+    from typing import TypedDict, TypeForm
 else:
     from typing_extensions import Sentinel as sentinel
-    from typing_extensions import TypeForm
+    from typing_extensions import TypedDict, TypeForm
 
 
 def __getattr__(name: str) -> str:
@@ -25,7 +25,7 @@ def __getattr__(name: str) -> str:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["SQL", "UNTYPED", "Bound", "SQLTemplate", "row_form"]
+__all__ = ["SQL", "UNTYPED", "Bound", "NoParams", "SQLTemplate", "row_form"]
 
 
 class SQL[R, P = Any](str):
@@ -48,6 +48,14 @@ class SQL[R, P = Any](str):
     def bind(self, params: P, /) -> Bound[R]:
         """The query with ``params``, checked against ``P``: ``cursor.execute(*bound)`` runs it."""
         return Bound(self, params)
+
+
+class _NoKeys(TypedDict, closed=True):
+    pass
+
+
+type NoParams = tuple[()] | _NoKeys
+"""Parameters of a query without placeholders, ``SQL[R, NoParams]``: ``()`` or ``{}``."""
 
 
 class Bound[R](NamedTuple):

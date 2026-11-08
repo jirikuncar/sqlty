@@ -808,6 +808,12 @@ def _declared_params_diagnostics(
     name = ctx._unparse(declared)
     named = bool(params) and all(param.name is not None for param in params)
     pairs: list[tuple[str, ast.expr | None, ParamInfo, int | str]]
+    if (_dotted(declared) or "").rpartition(".")[2] == "NoParams":
+        if not params:
+            return []
+        return [
+            f"{name} takes none but the query has {len(params)} parameter{'' if len(params) == 1 else 's'}"
+        ]
     if isinstance(declared, ast.Subscript) and _dotted(declared.value) in ("tuple", "typing.Tuple"):
         items = declared.slice.elts if isinstance(declared.slice, ast.Tuple) else [declared.slice]
         if any(isinstance(item, ast.Constant) and item.value is Ellipsis for item in items):
