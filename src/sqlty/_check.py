@@ -553,12 +553,7 @@ def diagnostics(
     driver_calls = find_driver_calls(parsed) + find_template_calls(parsed)
     # A driver call also configured as a helper has its parameters checked once, as the driver's.
     by_driver = {call.query_span for call in driver_calls}
-    found = [
-        call._replace(params=None)
-        if call.query_node is not None and parsed.span(call.query_node) in by_driver
-        else call
-        for call in found
-    ]
+    found = [call._replace(params=None) if call.query_span in by_driver else call for call in found]
     typed = {line for call in found for line in call.typed_lines}
     branched = [call for call in found if len(call.variants) > 1]
     diagnostics = [

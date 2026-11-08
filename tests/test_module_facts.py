@@ -31,12 +31,13 @@ def python_facts(text: str) -> Facts:
     return Facts(
         sorted({c.func.id for c in calls if isinstance(c.func, ast.Name)}),
         sorted({c.func.attr for c in calls if isinstance(c.func, ast.Attribute)}),
-        sorted(
-            (alias.asname or alias.name, alias.name, node.module or "", node.level)
+        [
+            (alias.asname or alias.name, alias.name, None, 0)
+            if isinstance(node, ast.Import)
+            else (alias.asname or alias.name, alias.name, node.module or "", node.level)
             for node in parsed.imports
-            if isinstance(node, ast.ImportFrom)
             for alias in node.names
-        ),
+        ],
         [],
         sorted(parsed._typing_aliases().items()),
         [
@@ -63,7 +64,7 @@ def assert_same(text: str) -> None:
     python = python_facts(text)
     assert rust.names == python.names, text
     assert rust.attributes == python.attributes, text
-    assert sorted(rust.from_imports) == python.from_imports, text
+    assert rust.imports == python.imports, text
     assert sorted(dict(rust.typing_aliases).items()) == python.typing_aliases, text
     assert rust.driver_calls == python.driver_calls, text
     any_calls = ParsedSource(text)

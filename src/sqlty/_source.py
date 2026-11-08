@@ -62,7 +62,7 @@ class Facts(typing.NamedTuple):
 
     names: list[str]
     attributes: list[str]
-    from_imports: list[tuple[str, str, str, int]]
+    imports: list[tuple[str, str, str | None, int]]
     any_calls: list[tuple[int, str]]
     typing_aliases: list[tuple[str, str]]
     driver_calls: list[

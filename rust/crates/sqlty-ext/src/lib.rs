@@ -1024,21 +1024,20 @@ type PyDriverCall = (
 type PyFacts = (
     Vec<String>,
     Vec<String>,
-    Vec<(String, String, String, u32)>,
+    Vec<(String, String, Option<String>, u32)>,
     Vec<(usize, String)>,
     Vec<(String, String)>,
     Vec<PyDriverCall>,
 );
 
-/// `(names, attributes, from_imports, any_calls, typing_aliases, driver_calls)` read from
+/// `(names, attributes, imports, any_calls, typing_aliases, driver_calls)` read from
 /// `source` by `sqlty_python::module::facts`, or None when it is not valid Python.
 #[pyfunction]
 fn module_facts(py: Python<'_>, source: &str) -> Option<PyFacts> {
-    use sqlty_python::drivers::Key;
     detach(py, || {
         let found = sqlty_python::module::facts(source)?;
-        let from_imports = found
-            .from_imports
+        let imports = found
+            .imports
             .into_iter()
             .map(|i| (i.local, i.original, i.module, i.level))
             .collect();
@@ -1046,18 +1045,7 @@ fn module_facts(py: Python<'_>, source: &str) -> Option<PyFacts> {
             .driver_calls
             .into_iter()
             .map(|call| {
-                let params = call.params.map(|params| {
-                    params
-                        .into_iter()
-                        .map(|p| {
-                            let key = match p.key {
-                                Key::Index(index) => ParamKey::Index(index),
-                                Key::Name(name) => ParamKey::Name(name),
-                            };
-                            (key, p.kind)
-                        })
-                        .collect()
-                });
+                let params = py_params(call.params);
                 (
                     call.line,
                     call.query,
@@ -1071,11 +1059,75 @@ fn module_facts(py: Python<'_>, source: &str) -> Option<PyFacts> {
         Some((
             found.names,
             found.attributes,
-            from_imports,
+            imports,
             found.any_calls,
             found.typing_aliases,
             driver_calls,
         ))
+    })
+}
+
+type PyArg = (
+    bool,
+    (usize, usize),
+    Option<String>,
+    Option<String>,
+    Option<Vec<PyParam>>,
+);
+type PySite = (
+    (usize, usize),
+    Option<String>,
+    String,
+    Vec<PyArg>,
+    Vec<(Option<String>, PyArg)>,
+    Option<String>,
+);
+
+fn py_params(params: Option<Vec<sqlty_python::scopes::Param>>) -> Option<Vec<PyParam>> {
+    use sqlty_python::scopes::Key;
+    params.map(|params| {
+        params
+            .into_iter()
+            .map(|p| {
+                let key = match p.key {
+                    Key::Index(index) => ParamKey::Index(index),
+                    Key::Name(name) => ParamKey::Name(name),
+                };
+                (key, p.kind)
+            })
+            .collect()
+    })
+}
+
+/// `(lines, prefix, name, args, keywords, receiver)` of each call in Python source that may
+/// call a helper named one of `names`, or None when Rust does not read the source; each
+/// argument is `(starred, span, text, type, params)`.
+#[pyfunction]
+#[allow(clippy::needless_pass_by_value)]
+fn helper_sites(py: Python<'_>, source: &str, names: Vec<String>) -> Option<Vec<PySite>> {
+    detach(py, || {
+        let arg = |a: sqlty_python::helpers::Arg| {
+            (a.starred, a.span, a.text, a.kind, py_params(a.params))
+        };
+        let found = sqlty_python::helpers::sites(source, &names)?;
+        Some(
+            found
+                .into_iter()
+                .map(|site| {
+                    (
+                        site.lines,
+                        site.prefix,
+                        site.name,
+                        site.args.into_iter().map(arg).collect(),
+                        site.keywords
+                            .into_iter()
+                            .map(|(name, value)| (name, arg(value)))
+                            .collect(),
+                        site.receiver,
+                    )
+                })
+                .collect(),
+        )
     })
 }
 
@@ -1385,6 +1437,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(check_queries, m)?)?;
     m.add_function(wrap_pyfunction!(named_queries, m)?)?;
     m.add_function(wrap_pyfunction!(module_facts, m)?)?;
+    m.add_function(wrap_pyfunction!(helper_sites, m)?)?;
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;
     m.add_function(wrap_pyfunction!(query_at, m)?)?;

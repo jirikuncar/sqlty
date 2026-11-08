@@ -21,7 +21,11 @@ use ruff_python_ast::visitor::{walk_expr, walk_interpolated_string_element, walk
 use ruff_python_ast::{Expr, InterpolatedStringElement, ModExpression, ModModule, Stmt};
 use ruff_python_parser::{parse_expression, parse_module, Parsed};
 
-const STACK_PER_BYTE: usize = if cfg!(debug_assertions) { 16 << 10 } else { 2 << 10 };
+const STACK_PER_BYTE: usize = if cfg!(debug_assertions) {
+    16 << 10
+} else {
+    2 << 10
+};
 const STACK_BASE: usize = 1 << 20;
 /// The longest source parsed in Rust.
 pub const MAX_LEN: usize = 256 << 10;
@@ -88,7 +92,10 @@ fn has_surrogate_escape(source: &str) -> bool {
         let at = i + found;
         let hex = match bytes.get(at + 1) {
             Some(b'u') => bytes.get(at + 2..),
-            Some(b'U') => bytes.get(at + 2..at + 6).filter(|z| *z == b"0000").and(bytes.get(at + 6..)),
+            Some(b'U') => bytes
+                .get(at + 2..at + 6)
+                .filter(|z| *z == b"0000")
+                .and(bytes.get(at + 6..)),
             _ => None,
         };
         if hex.is_some_and(surrogate) {
@@ -103,7 +110,10 @@ fn has_surrogate_escape(source: &str) -> bool {
 }
 
 fn surrogate(hex: &[u8]) -> bool {
-    matches!(hex, [b'd' | b'D', b'8'..=b'9' | b'a'..=b'f' | b'A'..=b'F', ..])
+    matches!(
+        hex,
+        [b'd' | b'D', b'8'..=b'9' | b'a'..=b'f' | b'A'..=b'F', ..]
+    )
 }
 
 fn within_limits<T>(parsed: &Parsed<T>) -> bool {
@@ -144,7 +154,12 @@ fn known_futures(body: &[Stmt]) -> bool {
         let Stmt::ImportFrom(from) = stmt else {
             break;
         };
-        if from.level != 0 || from.module.as_ref().is_none_or(|m| m.as_str() != "__future__") {
+        if from.level != 0
+            || from
+                .module
+                .as_ref()
+                .is_none_or(|m| m.as_str() != "__future__")
+        {
             break;
         }
         if !from

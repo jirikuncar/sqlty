@@ -135,7 +135,7 @@ def module_facts(
     tuple[
         list[str],
         list[str],
-        list[tuple[str, str, str, int]],
+        list[tuple[str, str, str | None, int]],
         list[tuple[int, str]],
         list[tuple[str, str]],
         list[
@@ -151,6 +151,26 @@ def module_facts(
     ]
     | None
 ): ...
+def helper_sites(
+    source: str, names: list[str]
+) -> (
+    list[
+        tuple[
+            tuple[int, int],
+            str | None,
+            str,
+            list[_SiteArg],
+            list[tuple[str | None, _SiteArg]],
+            str | None,
+        ]
+    ]
+    | None
+): ...
+
+_SiteArg = tuple[
+    bool, tuple[int, int], str | None, str | None, list[tuple[int | str, str | None]] | None
+]
+
 def wrapped_queries(
     source: str, *, import_style: str | None = None
 ) -> list[tuple[int, str, str | None, tuple[int, int]]]: ...

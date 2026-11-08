@@ -2,7 +2,7 @@
 //! `ruff_python_parser`, so a file that holds none of it is never parsed by Python's `ast`.
 //!
 //! - [`Facts::names`] / [`Facts::attributes`]: what calls name, `f(...)` / `x.f(...)`, sorted and unique.
-//! - [`Facts::from_imports`]: every `from module import original as local`.
+//! - [`Facts::imports`]: every `import` and `from ... import`, in `ast.walk` order.
 //! - [`Facts::any_calls`]: `(offset, callee)` of each `X[T](...)` whose `T` is `typing.Any`,
 //!   as `sqlty._source.ParsedSource.any_calls` finds them before matching the wrapper.
 //! - [`Facts::typing_aliases`]: `ParsedSource.typing_aliases`, a later pair wins.
@@ -18,17 +18,93 @@ use crate::drivers::{self, DriverCall};
 
 const TYPING_MODULES: [&str; 2] = ["typing", "typing_extensions"];
 
-/// `from module import original as local`, `module` empty for `from . import x`.
+/// `import original as local`, or `from module import original as local`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FromImport {
-    /// The name bound.
+pub struct Import {
+    /// The name bound: `asname`, else the name as spelled (`a.b` for `import a.b`).
     pub local: String,
     /// The name imported.
     pub original: String,
-    /// The module named, without its leading dots.
-    pub module: String,
+    /// The module of a `from` import, without its leading dots; `None` for `import`.
+    pub module: Option<String>,
     /// The number of leading dots.
     pub level: u32,
+}
+
+/// The imports of a module, as the Python passes read them.
+pub(crate) struct Imports {
+    /// Every alias, in `ast.walk` order.
+    pub entries: Vec<Import>,
+    /// `ParsedSource.imported_names`.
+    pub imported: HashMap<String, String>,
+    /// `ParsedSource.typing_aliases` as pairs, a later pair wins.
+    pub typing: Vec<(String, String)>,
+}
+
+impl Imports {
+    pub(crate) fn of(body: &[Stmt]) -> Self {
+        let mut imports = Vec::new();
+        collect_imports(body, 1, &mut imports);
+        imports.sort_by_key(|(depth, _)| *depth);
+        let mut found = Self {
+            entries: Vec::new(),
+            imported: HashMap::new(),
+            typing: Vec::new(),
+        };
+        for (_, stmt) in &imports {
+            match stmt {
+                Stmt::ImportFrom(from) => {
+                    let module_name = from.module.as_ref().map_or("", |m| m.as_str());
+                    let is_typing = TYPING_MODULES.contains(&module_name);
+                    for alias in &from.names {
+                        let local = alias.asname.as_ref().unwrap_or(&alias.name).to_string();
+                        let original = alias.name.to_string();
+                        if is_typing {
+                            found.typing.push((local.clone(), original.clone()));
+                        }
+                        if from.level == 0 && !module_name.is_empty() {
+                            found
+                                .imported
+                                .entry(local.clone())
+                                .or_insert_with(|| format!("{module_name}.{original}"));
+                        }
+                        found.entries.push(Import {
+                            local,
+                            original,
+                            module: Some(module_name.to_string()),
+                            level: from.level,
+                        });
+                    }
+                }
+                Stmt::Import(import) => {
+                    for alias in &import.names {
+                        let name = alias.name.as_str();
+                        if TYPING_MODULES.contains(&name) {
+                            let local = alias.asname.as_ref().unwrap_or(&alias.name).to_string();
+                            found.typing.push((local, name.to_string()));
+                        }
+                        let root = name.split('.').next().unwrap_or(name);
+                        let (local, dotted) = match &alias.asname {
+                            Some(asname) => (asname.as_str(), name),
+                            None => (root, root),
+                        };
+                        found
+                            .imported
+                            .entry(local.to_string())
+                            .or_insert_with(|| dotted.to_string());
+                        found.entries.push(Import {
+                            local: alias.asname.as_ref().unwrap_or(&alias.name).to_string(),
+                            original: name.to_string(),
+                            module: None,
+                            level: 0,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+        found
+    }
 }
 
 /// See the module documentation.
@@ -38,8 +114,8 @@ pub struct Facts {
     pub names: Vec<String>,
     /// The attribute of every `x.f(...)` call, sorted and unique.
     pub attributes: Vec<String>,
-    /// Every `from ... import`, in `ast.walk` order.
-    pub from_imports: Vec<FromImport>,
+    /// Every `import` and `from ... import`, in `ast.walk` order.
+    pub imports: Vec<Import>,
     /// `(offset, callee)` of each `X[T](...)` whose `T` is `typing.Any`.
     pub any_calls: Vec<(usize, String)>,
     /// `(local, original)` names of `typing` and its members, a later pair wins.
@@ -63,55 +139,16 @@ pub struct Facts {
 pub fn facts(source: &str) -> Option<Facts> {
     let parsed = crate::parse::module(source)?;
     let module = parsed.syntax();
-    let mut imports = Vec::new();
-    collect_imports(&module.body, 1, &mut imports);
-    imports.sort_by_key(|(depth, _)| *depth);
-    let mut found = Facts::default();
-    let mut imported: HashMap<String, String> = HashMap::new();
-    for (_, stmt) in &imports {
-        match stmt {
-            Stmt::ImportFrom(from) => {
-                let module_name = from.module.as_ref().map_or("", |m| m.as_str());
-                let is_typing = TYPING_MODULES.contains(&module_name);
-                for alias in &from.names {
-                    let local = alias.asname.as_ref().unwrap_or(&alias.name).to_string();
-                    let original = alias.name.to_string();
-                    if is_typing {
-                        found.typing_aliases.push((local.clone(), original.clone()));
-                    }
-                    if from.level == 0 && !module_name.is_empty() {
-                        imported
-                            .entry(local.clone())
-                            .or_insert_with(|| format!("{module_name}.{original}"));
-                    }
-                    found.from_imports.push(FromImport {
-                        local,
-                        original,
-                        module: module_name.to_string(),
-                        level: from.level,
-                    });
-                }
-            }
-            Stmt::Import(import) => {
-                for alias in &import.names {
-                    let name = alias.name.as_str();
-                    if TYPING_MODULES.contains(&name) {
-                        let local = alias.asname.as_ref().unwrap_or(&alias.name).to_string();
-                        found.typing_aliases.push((local, name.to_string()));
-                    }
-                    let root = name.split('.').next().unwrap_or(name);
-                    let (local, dotted) = match &alias.asname {
-                        Some(asname) => (asname.as_str(), name),
-                        None => (root, root),
-                    };
-                    imported
-                        .entry(local.to_string())
-                        .or_insert_with(|| dotted.to_string());
-                }
-            }
-            _ => {}
-        }
-    }
+    let Imports {
+        entries,
+        imported,
+        typing,
+    } = Imports::of(&module.body);
+    let mut found = Facts {
+        imports: entries,
+        typing_aliases: typing,
+        ..Facts::default()
+    };
     let aliases = Aliases(&found.typing_aliases);
     let mut calls = Calls {
         aliases: &aliases,

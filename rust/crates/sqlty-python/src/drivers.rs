@@ -8,11 +8,11 @@ use std::collections::{HashMap, HashSet};
 use ruff_python_ast::visitor::{
     walk_comprehension, walk_except_handler, walk_expr, walk_stmt, Visitor,
 };
-use ruff_python_ast::{
-    Comprehension, ExceptHandler, Expr, ExprCall, ExprContext, Number, Stmt, StmtFunctionDef,
-    UnaryOp,
-};
+use ruff_python_ast::{Comprehension, ExceptHandler, Expr, ExprCall, ExprContext, Stmt};
 use ruff_text_size::Ranged;
+
+use crate::scopes::{dotted, is_scalar, qualified, Context, Lines, Node, Scan, Scope};
+pub use crate::scopes::{Key, Param};
 
 const CONNECTIONS: [(&str, &str); 13] = [
     ("psycopg.connect", "psycopg"),
@@ -36,17 +36,6 @@ const CURSORS: [(&str, &str); 4] = [
     ("aiosqlite.Cursor", "aiosqlite"),
 ];
 const BUNDLED_MODULE: &str = "sqlty.drivers.psycopg.";
-const BUILTINS: [&str; 5] = ["int", "str", "float", "bool", "bytes"];
-const SEQUENCES: [&str; 4] = ["list", "tuple", "set", "frozenset"];
-const IMPORTED: [&str; 6] = [
-    "datetime.date",
-    "datetime.datetime",
-    "datetime.time",
-    "datetime.timedelta",
-    "uuid.UUID",
-    "decimal.Decimal",
-];
-
 fn methods(driver: &str) -> &'static [&'static str] {
     match driver {
         "psycopg" | "sqlite3" => &["execute", "executemany"],
@@ -71,24 +60,6 @@ fn any_method(name: &str) -> bool {
     ["psycopg", "aiosqlite", "asyncpg"]
         .iter()
         .any(|driver| methods(driver).contains(&name))
-}
-
-/// The parameter a driver call binds, by 1-based position or by name.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Key {
-    /// `%s`, `?`, `$1`: the position.
-    Index(usize),
-    /// `%(name)s`, `:name`: the name.
-    Name(String),
-}
-
-/// An argument passed for a parameter of the query, with its type where the source states it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Param {
-    /// The parameter it binds.
-    pub key: Key,
-    /// Spelled as the engine spells parameter types: `int`, `datetime.date`, `list[int]`, `None`.
-    pub kind: Option<String>,
 }
 
 /// A recognised driver call running a known query.
@@ -126,35 +97,26 @@ pub fn find(source: &str, body: &[Stmt], imported: &HashMap<String, String>) -> 
         let dotted = format!("{name}.");
         dotted.starts_with(BUNDLED_MODULE) || BUNDLED_MODULE.starts_with(&dotted)
     });
-    let mut scan = Scan {
-        helpers,
-        scopes: vec![None],
-        classes: HashSet::new(),
-        stack: Vec::new(),
-        types: HashMap::new(),
-        calls: Vec::new(),
-    };
-    scan.visit_body(body);
-    let Scan {
-        scopes,
-        classes,
-        types,
-        calls,
-        ..
-    } = scan;
+    let scan = Scan::new(body, |call| match call.func.as_ref() {
+        Expr::Attribute(attr) => {
+            (any_method(attr.attr.as_str()) && matches!(*attr.value, Expr::Name(_))) || helpers
+        }
+        Expr::Name(_) => helpers,
+        _ => false,
+    });
     let mut finder = Finder {
-        imported,
+        ctx: Context {
+            imported,
+            scan: &scan,
+        },
         body,
-        scopes: &scopes,
-        classes: &classes,
-        types: &types,
         bindings: HashMap::new(),
         resolving: HashSet::new(),
         lines: None,
         source,
         found: Vec::new(),
     };
-    for (call, stack) in &calls {
+    for (call, stack) in &scan.calls {
         finder.call(call, stack);
     }
     let mut found = finder.found;
@@ -162,127 +124,14 @@ pub fn find(source: &str, body: &[Stmt], imported: &HashMap<String, String>) -> 
     found
 }
 
-/// Scope ids: 0 is the module, then each function and class in pre-order.
-type Scope = usize;
-
-struct Scan<'a> {
-    helpers: bool,
-    scopes: Vec<Option<&'a StmtFunctionDef>>,
-    classes: HashSet<Scope>,
-    stack: Vec<Scope>,
-    types: HashMap<(Scope, &'a str), Option<String>>,
-    calls: Vec<(&'a ExprCall, Vec<Scope>)>,
-}
-
-fn note<'a>(
-    types: &mut HashMap<(Scope, &'a str), Option<String>>,
-    key: (Scope, &'a str),
-    kind: Option<String>,
-) {
-    use std::collections::hash_map::Entry;
-    match types.entry(key) {
-        Entry::Vacant(entry) => {
-            entry.insert(kind);
-        }
-        Entry::Occupied(mut entry) => {
-            if *entry.get() != kind {
-                entry.insert(None);
-            }
-        }
-    }
-}
-
-impl<'a> Visitor<'a> for Scan<'a> {
-    fn visit_stmt(&mut self, stmt: &'a Stmt) {
-        let current = self.stack.last().copied().unwrap_or(0);
-        match stmt {
-            Stmt::FunctionDef(node) => {
-                let scope = self.scopes.len();
-                self.scopes.push(Some(node));
-                let parameters = &node.parameters;
-                for parameter in parameters
-                    .posonlyargs
-                    .iter()
-                    .chain(&parameters.args)
-                    .chain(&parameters.kwonlyargs)
-                {
-                    let kind = class_name(parameter.parameter.annotation.as_deref());
-                    note(
-                        &mut self.types,
-                        (scope, parameter.parameter.name.as_str()),
-                        kind,
-                    );
-                }
-                self.stack.push(scope);
-                walk_stmt(self, stmt);
-                self.stack.pop();
-                return;
-            }
-            Stmt::ClassDef(_) => {
-                let scope = self.scopes.len();
-                self.scopes.push(None);
-                self.classes.insert(scope);
-                self.stack.push(scope);
-                walk_stmt(self, stmt);
-                self.stack.pop();
-                return;
-            }
-            Stmt::Assign(node) => {
-                let kind = match node.value.as_ref() {
-                    Expr::Call(call) => class_name(Some(&call.func)),
-                    _ => None,
-                };
-                for target in &node.targets {
-                    if let Expr::Name(name) = target {
-                        note(&mut self.types, (current, name.id.as_str()), kind.clone());
-                    }
-                }
-            }
-            Stmt::AnnAssign(node) => {
-                let kind =
-                    class_name(Some(&node.annotation)).or_else(|| match node.value.as_deref() {
-                        Some(Expr::Call(call)) => class_name(Some(&call.func)),
-                        _ => None,
-                    });
-                if let Expr::Name(name) = node.target.as_ref() {
-                    note(&mut self.types, (current, name.id.as_str()), kind);
-                }
-            }
-            _ => {}
-        }
-        walk_stmt(self, stmt);
-    }
-
-    #[recursive::recursive]
-    fn visit_expr(&mut self, expr: &'a Expr) {
-        if let Expr::Call(call) = expr {
-            let wanted = match call.func.as_ref() {
-                Expr::Attribute(attr) => {
-                    (any_method(attr.attr.as_str()) && matches!(*attr.value, Expr::Name(_)))
-                        || self.helpers
-                }
-                Expr::Name(_) => self.helpers,
-                _ => false,
-            };
-            if wanted {
-                self.calls.push((call, self.stack.clone()));
-            }
-        }
-        walk_expr(self, expr);
-    }
-}
-
 type Binding<'a> = (Option<&'a Expr>, Option<&'a Expr>);
 
 struct Finder<'a, 's> {
-    imported: &'s HashMap<String, String>,
+    ctx: Context<'a, 's>,
     body: &'a [Stmt],
-    scopes: &'s [Option<&'a StmtFunctionDef>],
-    classes: &'s HashSet<Scope>,
-    types: &'s HashMap<(Scope, &'a str), Option<String>>,
     bindings: HashMap<Scope, HashMap<&'a str, Vec<Binding<'a>>>>,
     resolving: HashSet<(Scope, String)>,
-    lines: Option<Vec<usize>>,
+    lines: Option<Lines>,
     source: &'s str,
     found: Vec<DriverCall>,
 }
@@ -290,7 +139,12 @@ struct Finder<'a, 's> {
 impl<'a> Finder<'a, '_> {
     fn call(&mut self, call: &'a ExprCall, stack: &[Scope]) {
         let chain: Vec<Scope> = std::iter::once(0)
-            .chain(stack.iter().copied().filter(|s| !self.classes.contains(s)))
+            .chain(
+                stack
+                    .iter()
+                    .copied()
+                    .filter(|&s| !self.ctx.scan.is_class(s)),
+            )
             .collect();
         if let Some(bundled) = self.bundled(call) {
             for (first, arg) in bundled {
@@ -348,7 +202,7 @@ impl<'a> Finder<'a, '_> {
                     .enumerate()
                     .map(|(i, item)| Param {
                         key: Key::Index(i + 1),
-                        kind: self.arg_type(item, stack),
+                        kind: self.ctx.arg_type(item, stack),
                     })
                     .collect();
                 self.push(call, first, query.clone(), Some(params), driver, None);
@@ -412,16 +266,15 @@ impl<'a> Finder<'a, '_> {
         };
         let params = match arg {
             None => Some(Vec::new()),
-            Some(arg) => self.literal_params(arg, stack),
+            Some(arg) => self.ctx.literal_params(arg, stack),
         };
         let kind = match (arg, &params) {
-            (Some(arg), None) => self.arg_type(arg, stack),
+            (Some(arg), None) => self.ctx.arg_type(arg, stack),
             _ => None,
         };
         let sequence = matches!(driver, "sqlite3" | "aiosqlite");
         let single = kind.filter(|kind| {
-            (BUILTINS.contains(&kind.as_str()) || IMPORTED.contains(&kind.as_str()))
-                && !(sequence && matches!(kind.as_str(), "str" | "bytes"))
+            is_scalar(kind) && !(sequence && matches!(kind.as_str(), "str" | "bytes"))
         });
         if many && params.is_none() && single.is_none() {
             return;
@@ -451,30 +304,14 @@ impl<'a> Finder<'a, '_> {
 
     fn line(&mut self, offset: usize) -> usize {
         let source = self.source;
-        let lines = self.lines.get_or_insert_with(|| {
-            let bytes = source.as_bytes();
-            let mut starts = Vec::new();
-            let mut i = 0;
-            while i < bytes.len() {
-                match bytes[i] {
-                    b'\n' => starts.push(i + 1),
-                    b'\r' if bytes.get(i + 1) == Some(&b'\n') => {
-                        starts.push(i + 2);
-                        i += 1;
-                    }
-                    b'\r' => starts.push(i + 1),
-                    _ => {}
-                }
-                i += 1;
-            }
-            starts
-        });
-        lines.partition_point(|&start| start <= offset) + 1
+        self.lines
+            .get_or_insert_with(|| Lines::new(source))
+            .line(offset)
     }
 
     /// The query and parameters of a call to a `sqlty.drivers.psycopg` helper, as `_bundled` reads them.
     fn bundled(&self, call: &'a ExprCall) -> Option<Vec<(&'a Expr, Option<&'a Expr>)>> {
-        let name = qualified(dotted(&call.func), self.imported)?;
+        let name = qualified(dotted(&call.func), self.ctx.imported)?;
         let scalar = match name.strip_prefix(BUNDLED_MODULE)? {
             "execute" => false,
             "scalar" => true,
@@ -503,9 +340,9 @@ impl<'a> Finder<'a, '_> {
     fn of(&mut self, scope: Scope) -> &HashMap<&'a str, Vec<Binding<'a>>> {
         if !self.bindings.contains_key(&scope) {
             let mut binder = Binder::default();
-            match self.scopes[scope] {
-                None => binder.visit_body(self.body),
-                Some(function) => {
+            match self.ctx.scan.scopes[scope] {
+                Node::Module | Node::Class(_) => binder.visit_body(self.body),
+                Node::Function(function) => {
                     let parameters = &function.parameters;
                     let all = parameters
                         .posonlyargs
@@ -576,7 +413,7 @@ impl<'a> Finder<'a, '_> {
         chain: &[Scope],
     ) -> Option<&'static str> {
         if let Some(annotation) = annotation {
-            if let Some(name) = qualified(dotted(annotation), self.imported) {
+            if let Some(name) = qualified(dotted(annotation), self.ctx.imported) {
                 if let Some((_, driver)) = CONNECTIONS
                     .iter()
                     .chain(&CURSORS)
@@ -593,7 +430,7 @@ impl<'a> Finder<'a, '_> {
         let Expr::Call(call) = value else {
             return None;
         };
-        if let Some(name) = qualified(dotted(&call.func), self.imported) {
+        if let Some(name) = qualified(dotted(&call.func), self.ctx.imported) {
             if let Some((_, driver)) = CONNECTIONS.iter().find(|(known, _)| *known == name) {
                 return Some(driver);
             }
@@ -612,120 +449,6 @@ impl<'a> Finder<'a, '_> {
         match self.lookup(name, chain)?.as_slice() {
             [(value, _)] => literal(*value),
             _ => None,
-        }
-    }
-
-    fn literal_params(&self, arg: &Expr, stack: &[Scope]) -> Option<Vec<Param>> {
-        let items = match arg {
-            Expr::Tuple(tuple) => &tuple.elts,
-            Expr::List(list) => &list.elts,
-            Expr::Dict(dict) => {
-                let mut found = Vec::new();
-                for item in &dict.items {
-                    let Some(Expr::StringLiteral(key)) = &item.key else {
-                        return None;
-                    };
-                    found.push(Param {
-                        key: Key::Name(key.value.to_str().to_string()),
-                        kind: self.arg_type(&item.value, stack),
-                    });
-                }
-                return Some(found);
-            }
-            _ => return None,
-        };
-        if items.iter().any(|item| matches!(item, Expr::Starred(_))) {
-            return None;
-        }
-        Some(
-            items
-                .iter()
-                .enumerate()
-                .map(|(i, item)| Param {
-                    key: Key::Index(i + 1),
-                    kind: self.arg_type(item, stack),
-                })
-                .collect(),
-        )
-    }
-
-    /// The type `expr` has where the source says so, as `sqlty._params.arg_type` reads it.
-    fn arg_type(&self, expr: &Expr, stack: &[Scope]) -> Option<String> {
-        let name = match expr {
-            Expr::NoneLiteral(_) => "None",
-            Expr::BooleanLiteral(_) => "bool",
-            Expr::NumberLiteral(number) => match number.value {
-                Number::Int(_) => "int",
-                Number::Float(_) => "float",
-                Number::Complex { .. } => return None,
-            },
-            Expr::StringLiteral(_) | Expr::FString(_) => "str",
-            Expr::BytesLiteral(_) => "bytes",
-            Expr::UnaryOp(unary) if matches!(unary.op, UnaryOp::UAdd | UnaryOp::USub) => {
-                match unary.operand.as_ref() {
-                    Expr::NumberLiteral(number) => match number.value {
-                        Number::Int(_) => "int",
-                        Number::Float(_) => "float",
-                        Number::Complex { .. } => return None,
-                    },
-                    Expr::BooleanLiteral(_) => "int",
-                    _ => return None,
-                }
-            }
-            Expr::List(_) | Expr::Tuple(_) | Expr::Set(_) => {
-                let items = match expr {
-                    Expr::List(list) => &list.elts,
-                    Expr::Tuple(tuple) => &tuple.elts,
-                    Expr::Set(set) => &set.elts,
-                    _ => unreachable!(),
-                };
-                let types: HashSet<Option<String>> = items
-                    .iter()
-                    .map(|item| match item {
-                        Expr::Starred(_) => None,
-                        _ => self.arg_type(item, stack),
-                    })
-                    .collect();
-                if let [Some(only)] = types.iter().collect::<Vec<_>>().as_slice() {
-                    if only != "None" {
-                        return Some(format!("list[{only}]"));
-                    }
-                }
-                "list"
-            }
-            Expr::Name(name) => return self.class(self.type_of(stack, name.id.as_str())),
-            Expr::Call(call) => return self.class(dotted(&call.func)),
-            _ => return None,
-        };
-        Some(name.to_string())
-    }
-
-    fn type_of(&self, stack: &[Scope], name: &str) -> Option<String> {
-        stack
-            .iter()
-            .rev()
-            .filter(|scope| !self.classes.contains(scope))
-            .chain(std::iter::once(&0))
-            .find_map(|&scope| self.types.get(&(scope, name)))
-            .cloned()
-            .flatten()
-    }
-
-    fn class(&self, name: Option<String>) -> Option<String> {
-        let name = name?;
-        let (head, rest) = name.split_once('.').unwrap_or((&name, ""));
-        match self.imported.get(head) {
-            None if BUILTINS.contains(&name.as_str()) => Some(name),
-            None if SEQUENCES.contains(&name.as_str()) => Some("list".to_string()),
-            None => None,
-            Some(imported) => {
-                let full = if rest.is_empty() {
-                    imported.clone()
-                } else {
-                    format!("{imported}.{rest}")
-                };
-                IMPORTED.contains(&full.as_str()).then_some(full)
-            }
         }
     }
 }
@@ -751,56 +474,6 @@ fn literal(expr: Option<&Expr>) -> Option<String> {
         },
         Expr::StringLiteral(text) => Some(text.value.to_str().to_string()),
         _ => None,
-    }
-}
-
-/// `a.b.c` for a dotted name, else `None`.
-pub(crate) fn dotted(expr: &Expr) -> Option<String> {
-    let mut parts = Vec::new();
-    let mut node = expr;
-    while let Expr::Attribute(attr) = node {
-        parts.push(attr.attr.as_str());
-        node = &attr.value;
-    }
-    let Expr::Name(name) = node else {
-        return None;
-    };
-    parts.push(name.id.as_str());
-    parts.reverse();
-    Some(parts.join("."))
-}
-
-/// `name` with its first part replaced by what it was imported as.
-fn qualified(name: Option<String>, imported: &HashMap<String, String>) -> Option<String> {
-    let name = name?;
-    let (head, rest) = name.split_once('.').unwrap_or((&name, ""));
-    let found = imported.get(head)?;
-    Some(if rest.is_empty() {
-        found.clone()
-    } else {
-        format!("{found}.{rest}")
-    })
-}
-
-/// The dotted name an annotation or a called expression spells, as `_class_name` reads it.
-fn class_name(expr: Option<&Expr>) -> Option<String> {
-    match expr? {
-        Expr::StringLiteral(text) => {
-            let text = text
-                .value
-                .to_str()
-                .trim_matches(|c: char| c.is_whitespace() || ('\x1c'..='\x1f').contains(&c));
-            text.split('.')
-                .all(|part| {
-                    let mut chars = part.chars();
-                    chars
-                        .next()
-                        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-                        && chars.all(|c| c.is_alphanumeric() || c == '_')
-                })
-                .then(|| text.to_string())
-        }
-        expr => dotted(expr),
     }
 }
 
