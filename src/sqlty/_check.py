@@ -682,6 +682,9 @@ def _param_diagnostics(
         (p.name if named and p.name else p.number): p for p in params
     }
     by_name = bool(passed) and all(isinstance(key, str) for key in passed)
+    if not params and by_name:
+        extra = ", ".join(f"'{key}'" for key in passed)
+        return [("param-count-mismatch", f"query has 0 parameters, the call passes {extra}")]
     if (named and passed and not by_name) or (positional and by_name):
         return []
     found: list[tuple[str, str]] = []

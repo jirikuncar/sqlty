@@ -29,6 +29,24 @@ execute("DELETE FROM users WHERE id = %s", (1, 2))
 execute("DELETE FROM users", (1,))
 ```
 
+## A query without parameters takes no keys
+
+psycopg and sqlite3 ignore a mapping when the query has no placeholders. An
+empty one passes nothing.
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def execute(query: Annotated[LiteralString, SQL], params: dict[str, object], /) -> None: ...
+
+execute("DELETE FROM users", {})
+# error: [param-count-mismatch] "query has 0 parameters, the call passes 'id'"
+execute("DELETE FROM users", {"id": 1})
+# error: [param-count-mismatch] "query has 0 parameters, the call passes 'id', 'name'"
+execute("DELETE FROM users", {"id": 1, "name": "a"})
+```
+
 ## Numbered placeholders
 
 `$2` alone means two parameters, as the server counts them.

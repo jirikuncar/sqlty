@@ -12,7 +12,8 @@ spelled out (a `params` argument holding a tuple, list or dict literal,
 - a different number of positional arguments than the query has placeholders
   (`%s`, `$1`, `?`; the highest `$N` counts);
 - names of the query (`%(name)s`, `:name`) the call does not pass. A name used
-  twice is one parameter; extra keys are ignored, as the drivers do.
+  twice is one parameter; extra keys are ignored, as the drivers do;
+- any key passed to a query without parameters, which the drivers ignore too.
 
 Driver calls are checked too: `execute` and `executemany` (each row) on a
 psycopg, sqlite3 or aiosqlite connection or cursor, `execute_fetchall` and
