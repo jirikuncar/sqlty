@@ -281,6 +281,17 @@ by_id = SQL[tuple[str], ByIdParams]("--sql\nSELECT name FROM users WHERE id = %(
 # stripped: by_id = "--sql\nSELECT name FROM users WHERE id = %(id)s"
 ```
 
+## `NoParams` is imported where `SQL` is
+
+```python
+q = "--sql\nSELECT name FROM users"
+from sqlty import Bound
+# rewritten-file: from sqlty import SQL
+# rewritten-file: from sqlty import NoParams
+# rewritten-file: q = SQL[tuple[str], NoParams]("--sql\nSELECT name FROM users")
+# rewritten-file: from sqlty import Bound
+```
+
 ## Strip removes the `NoParams` import
 
 ```python

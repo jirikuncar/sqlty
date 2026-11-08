@@ -92,6 +92,22 @@ q = SQL[tuple[str], NoParams]("--sql\nSELECT name FROM users WHERE id = %s")
 r = SQL[tuple[str], NoParams]("--sql\nSELECT name FROM users")
 ```
 
+### A `NoParams` of your own is a TypedDict
+
+```python
+from typing import TypedDict
+
+from sqlty import SQL
+
+
+class NoParams(TypedDict):
+    id: int
+
+
+q = SQL[tuple[str], NoParams]("--sql\nSELECT name FROM users WHERE id = %(id)s")
+# error:
+```
+
 ### A tuple for named parameters, a TypedDict for positional ones
 
 ```python

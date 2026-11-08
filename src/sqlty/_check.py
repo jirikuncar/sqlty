@@ -813,7 +813,7 @@ def _declared_params_diagnostics(
     name = ctx._unparse(declared)
     named = bool(params) and all(param.name is not None for param in params)
     pairs: list[tuple[str, ast.expr | None, ParamInfo, int | str]]
-    if (_dotted(declared) or "").rpartition(".")[2] == "NoParams":
+    if (_dotted(declared) or "").rpartition(".")[2] == "NoParams" and name not in ctx.type_defs:
         if not params:
             return []
         return [

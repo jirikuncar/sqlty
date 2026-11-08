@@ -654,9 +654,10 @@ fn remove_unused_imports(source: &str, istyle: &ImportStyle) -> String {
         .lines()
         .any(|line| line.contains("UNTYPED") && Some(line.trim()) != untyped_import);
     let no_params_import = istyle.no_params_import();
+    let no_params = Regex::new(r"\bNoParams\b").unwrap();
     let no_params_used = source
         .lines()
-        .any(|line| line.contains("NoParams") && Some(line.trim()) != no_params_import);
+        .any(|line| no_params.is_match(line) && Some(line.trim()) != no_params_import);
     let unused = |line: &str| {
         let line = line.trim_end();
         (Some(line) == untyped_import && !untyped_used)

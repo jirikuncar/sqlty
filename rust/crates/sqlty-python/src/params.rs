@@ -122,7 +122,7 @@ pub fn add_param_types(source: &str, options: &Options) -> String {
     }
 }
 
-/// `source` with `line` below its last `from sqlty import ...`, or with the other imports.
+/// `source` with `line` below its first `from sqlty import ...`, or with the other imports.
 fn with_sqlty_import(source: &str, line: &str) -> String {
     let scan = Scan::new(source, "");
     let text = |i: usize| &source[scan.tokens[i].span.clone()];
@@ -133,7 +133,7 @@ fn with_sqlty_import(source: &str, line: &str) -> String {
                 && statement.len() > 1
                 && text(statement.start + 1) == "sqlty"
         })
-        .last()
+        .next()
         .map(|statement| end_line(&scan, statement))
     else {
         return insert_imports(source, &[line.to_string()]);
@@ -151,7 +151,7 @@ fn with_sqlty_import(source: &str, line: &str) -> String {
 fn binds_no_params(source: &str) -> bool {
     sqlty_imports(&Scan::new(source, ""))
         .iter()
-        .any(|(name, binding)| binding == "NoParams" || name == "*")
+        .any(|(name, binding)| (name == "NoParams" && binding == "NoParams") || name == "*")
 }
 
 fn param_type(param: &Param) -> String {
@@ -533,6 +533,14 @@ mod tests {
         assert_eq!(
             rewrite(&format!("import datetime\nfrom sqlty import SQL\n{wrapped}")),
             "import datetime\nfrom sqlty import SQL\nfrom sqlty import NoParams\nq = SQL[tuple[int], NoParams](\"--sql\\nSELECT 1\")\n",
+        );
+        assert_eq!(
+            rewrite(&format!("from sqlty import SQL\n{wrapped}from sqlty import Bound\n")),
+            "from sqlty import SQL\nfrom sqlty import NoParams\nq = SQL[tuple[int], NoParams](\"--sql\\nSELECT 1\")\nfrom sqlty import Bound\n",
+        );
+        assert_eq!(
+            rewrite(&format!("from sqlty import SQL, NoParams as NP\n{wrapped}")),
+            "from sqlty import SQL, NoParams as NP\nfrom sqlty import NoParams\nq = SQL[tuple[int], NoParams](\"--sql\\nSELECT 1\")\n",
         );
         for header in ["from sqlty import SQL, NoParams\n", "from sqlty import *\n"] {
             assert_eq!(

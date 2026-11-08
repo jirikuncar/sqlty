@@ -57,6 +57,17 @@ with sqlite3.connect("app.db") as conn:
     conn.execute("SELECT id FROM users WHERE id = :id", {"id": b"1", "extra": 2})
 ```
 
+## `@name` and `$name` placeholders
+
+```python
+import sqlite3
+
+with sqlite3.connect("app.db") as conn:
+    conn.execute("SELECT id FROM users WHERE id = @id OR id = $other", {"id": 1, "other": 2})
+    # error: [param-count-mismatch] "call is missing parameter 'other'"
+    conn.execute("SELECT id FROM users WHERE id = @id OR id = $other", {"id": 1})
+```
+
 ## executemany
 
 ```python
