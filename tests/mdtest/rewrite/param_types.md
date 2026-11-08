@@ -50,6 +50,19 @@ r = "--sql\nSELECT id FROM users"
 # rewritten-file: r = SQL[tuple[int], NoParams]("--sql\nSELECT id FROM users")
 ```
 
+## A `tuple[()]` you wrote is kept
+
+```python
+from sqlty import SQL
+
+q = SQL[tuple[str], tuple[()]]("--sql\nSELECT name FROM users")
+count = SQL[tuple[int], tuple[()]]("--sql\nSELECT count(*) FROM users")
+# rewritten-file: from sqlty import SQL
+# rewritten-file:
+# rewritten-file: q = SQL[tuple[str], tuple[()]]("--sql\nSELECT name FROM users")
+# rewritten-file: count = SQL[tuple[int], tuple[()]]("--sql\nSELECT count(*) FROM users")
+```
+
 ## Named parameters
 
 ```python
