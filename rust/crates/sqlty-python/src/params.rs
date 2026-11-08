@@ -127,13 +127,12 @@ fn with_sqlty_import(source: &str, line: &str) -> String {
     let scan = Scan::new(source, "");
     let text = |i: usize| &source[scan.tokens[i].span.clone()];
     let Some(at) = statements(&scan)
-        .filter(|statement| {
+        .find(|statement| {
             is_import(source, &scan.tokens[statement.clone()], false)
                 && text(statement.start) == "from"
                 && statement.len() > 1
                 && text(statement.start + 1) == "sqlty"
         })
-        .next()
         .map(|statement| end_line(&scan, statement))
     else {
         return insert_imports(source, &[line.to_string()]);
