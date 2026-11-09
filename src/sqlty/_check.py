@@ -330,7 +330,7 @@ def _check_unparsed(ctx: _Check) -> None:
     for call in ctx.calls:
         if (
             call.query is not None
-            and not MARKER.match(call.query)
+            and not (MARKER.match(call.query) and call.query in ctx.parsed.literals)
             and (error := _parse_error(call.query, dialect=ctx.dialect))
         ):
             message = f"query does not parse: {error}"
@@ -346,7 +346,7 @@ def _check_names(ctx: _Check) -> None:
     if not any(ctx.rule_config.is_enabled(name) for name in NAME_RULES):
         return
     for call in ctx.calls:
-        if call.query is None or MARKER.match(call.query):
+        if call.query is None or (MARKER.match(call.query) and call.query in ctx.parsed.literals):
             continue
         for rule, message in _query_diagnostics(
             call.query, dialect=ctx.dialect, schema_sql=ctx.schema_sql

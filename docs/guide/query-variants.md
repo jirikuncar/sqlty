@@ -68,6 +68,29 @@ string literals keeps only the values it matches, so `case "foo": return` drops 
 from the variants after the `match`. A function called without an argument reads the
 default of its parameter.
 
+A `--sql` marker on the first part changes nothing: the query is the whole
+concatenation, not its first literal.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+preview = true
+```
+
+```python
+from typing import Annotated, LiteralString
+
+from sqlty import SQL
+
+
+def fetch_all[T](query: Annotated[LiteralString, SQL], form: type[T], /) -> list[T]: ...
+
+
+def active_users() -> list[tuple[int, str]]:
+    # error: [nullable-mismatch] "tuple[int, str] item 1 is str but query column 'name' can be NULL"
+    return fetch_all("--sql\nSELECT id, name FROM users WHERE " + "active", tuple[int, str])
+```
+
 ## What is not followed
 
 A part that is not static leaves the query unchecked, all of its variants included: one

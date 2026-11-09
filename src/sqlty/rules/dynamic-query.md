@@ -51,6 +51,25 @@ rows = fetch_all(build(), int)
 ids = fetch_one("SELECT id FROM users", int)
 ```
 
+A marked literal joined with `+` is part of a query, not a query, so the call is
+`dynamic-query` too:
+
+```python
+from typing import Annotated, LiteralString
+
+from sqlty import SQL
+
+
+def fetch_all[T](query: Annotated[LiteralString, SQL], form: type[T], /) -> list[T]: ...
+
+
+def where() -> LiteralString: ...
+
+
+# error: [dynamic-query] "query is not a string literal, so it is not checked"
+rows = fetch_all("--sql\nSELECT id FROM users WHERE " + where(), int)
+```
+
 ## Why is this bad?
 
 sqlty reads queries from the source text, so it never sees these: the row type is not
