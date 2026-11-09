@@ -197,7 +197,7 @@ The file tabs above the editor switch between the files `sqlty check` reads:
 |---|---|---|
 | `queries.py` | The Python source: diagnostics under the code with their quick fixes, SQL highlighted in query strings, completion and hover in queries | [`sqlty server`](recipes/vscode.md) |
 | `schema.sql` | The `CREATE TABLE` statements the queries are typed against | [`schema`](reference/configuration.md#schema) |
-| `sqlty.toml` | The `dialect`, `import-style`, `param-types` and `rules` of [`[tool.sqlty]`](reference/configuration.md); its `dialect` wins over the select | `sqlty.toml` or `pyproject.toml` |
+| `sqlty.toml` | The `dialect`, `driver`, `import-style`, `param-types`, `rules` and `types` of [`[tool.sqlty]`](reference/configuration.md); its `dialect` wins over the select | `sqlty.toml` or `pyproject.toml` |
 
 The console below the editor shows what sqlty makes of them:
 
@@ -212,8 +212,8 @@ The console below the editor shows what sqlty makes of them:
 
 The **Example** select loads a project of the
 [`examples/`](https://github.com/jirikuncar/sqlty/tree/main/examples) directory: its
-`queries.py`, `schema.sql`, and the `dialect`, `import-style`, `param-types` and `rules` of its
-`pyproject.toml`. Each one is what `sqlty check` reads on your machine, so the page shows
+`queries.py`, `schema.sql`, and the `dialect`, `driver`, `import-style`, `param-types`,
+`rules` and `types` of its `pyproject.toml`. Each one is what `sqlty check` reads on your machine, so the page shows
 the same problems. **Tour** is the sample the page opens with, and **Tour in steps** walks
 through the same ideas one at a time.
 
