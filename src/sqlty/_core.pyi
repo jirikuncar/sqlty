@@ -1,5 +1,6 @@
 """Type stubs for the Rust extension module (sqlty._core)."""
 
+import ast
 from typing import Any, final
 
 from sqlty._lint import Diagnostic
@@ -151,6 +152,10 @@ def module_facts(
     ]
     | None
 ): ...
+def template_strings(
+    source: str,
+) -> list[tuple[int, tuple[int, int], str | None, list[str | None]]] | None: ...
+def module_outline(source: str) -> tuple[ast.Module, list[ast.ClassDef]] | None: ...
 def helper_sites(
     source: str, names: list[str]
 ) -> (

@@ -5,7 +5,9 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
 use ruff_python_ast::visitor::{walk_expr, walk_stmt, Visitor};
-use ruff_python_ast::{Expr, ExprCall, Number, Stmt, StmtClassDef, StmtFunctionDef, UnaryOp};
+use ruff_python_ast::{
+    Expr, ExprCall, ExprTString, Number, Stmt, StmtClassDef, StmtFunctionDef, UnaryOp,
+};
 
 const BUILTINS: [&str; 5] = ["int", "str", "float", "bool", "bytes"];
 const SEQUENCES: [&str; 4] = ["list", "tuple", "set", "frozenset"];
@@ -66,6 +68,8 @@ pub struct Scan<'a> {
     attributes: HashMap<(Scope, &'a str), Option<String>>,
     /// The calls kept, with their scopes.
     pub calls: Vec<(&'a ExprCall, Vec<Scope>)>,
+    /// Every t-string, with its scopes.
+    pub templates: Vec<(&'a ExprTString, Vec<Scope>)>,
 }
 
 impl<'a> Scan<'a> {
@@ -78,6 +82,7 @@ impl<'a> Scan<'a> {
                 types: HashMap::new(),
                 attributes: HashMap::new(),
                 calls: Vec::new(),
+                templates: Vec::new(),
             },
             want,
         };
@@ -207,10 +212,16 @@ impl<'a, W: FnMut(&'a ExprCall) -> bool> Visitor<'a> for Walker<'a, W> {
 
     #[recursive::recursive]
     fn visit_expr(&mut self, expr: &'a Expr) {
-        if let Expr::Call(call) = expr {
-            if (self.want)(call) {
+        match expr {
+            Expr::Call(call) if (self.want)(call) => {
                 self.scan.calls.push((call, self.scan.stack.clone()));
             }
+            Expr::TString(template) => {
+                self.scan
+                    .templates
+                    .push((template, self.scan.stack.clone()));
+            }
+            _ => {}
         }
         walk_expr(self, expr);
     }

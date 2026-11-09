@@ -622,14 +622,21 @@ def _imports(
         >>> _imports(ParsedSource("from a.b import f as g\\nimport a.c as m"), None)
         ({'g': ('a.b', 'f')}, {'g': 'a.b.f', 'm': 'a.c'})
     """
-    entries = [
+    if AST != "python" and (facts := parsed.facts) is not None:
+        if AST == "compare" and facts.imports != (python := _import_entries(parsed)):
+            raise AstMismatch("imports", facts.imports, python, parsed.text)
+        return _imports_of(facts.imports, module)
+    return _imports_of(_import_entries(parsed), module)
+
+
+def _import_entries(parsed: ParsedSource) -> list[tuple[str, str, str | None, int]]:
+    return [
         (alias.asname or alias.name, alias.name, None, 0)
         if isinstance(node, ast.Import)
         else (alias.asname or alias.name, alias.name, node.module or "", node.level)
         for node in parsed.imports
         for alias in node.names
     ]
-    return _imports_of(entries, module)
 
 
 def _imports_of(

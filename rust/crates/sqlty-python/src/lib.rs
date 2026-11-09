@@ -53,4 +53,5 @@ pub mod rules;
 pub(crate) mod scan;
 pub mod scopes;
 pub(crate) mod template;
+pub mod templates;
 pub(crate) mod tokens;

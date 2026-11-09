@@ -26,6 +26,7 @@ import ast
 import re
 from collections import defaultdict
 
+from sqlty._core import template_strings
 from sqlty._helpers import MARKER, HelperCall
 from sqlty._params import SCALARS, ParamArg, arg_type, literal_params
 from sqlty._source import AST, AstMismatch, ParsedSource, _fields
@@ -443,7 +444,32 @@ def find_template_calls(source: str | ParsedSource) -> list[HelperCall]:
         [('--sql\\nSELECT %s, %s', (ParamArg(key=1, type='int'), ParamArg(key=2, type=None)))]
     """
     parsed = ParsedSource.of(source)
-    if not _MARKED_TEMPLATE.search(parsed.text) or parsed.tree is None:
+    if not _MARKED_TEMPLATE.search(parsed.text):
+        return []
+    if AST == "python":
+        return _find_template_calls(parsed)
+    rust = [
+        HelperCall(
+            line,
+            query,
+            None,
+            parsed.typing_aliases,
+            tuple(ParamArg(key, kind) for key, kind in enumerate(params, 1)),
+            driver="psycopg",
+            query_span=span,
+        )
+        for line, span, query, params in template_strings(parsed.text) or []
+        if query is not None and MARKER.match(query)
+    ]
+    if AST == "compare":
+        python = [call._replace(query_node=None) for call in _find_template_calls(parsed)]
+        if rust != python:
+            raise AstMismatch("find_template_calls", rust, python, parsed.text)
+    return rust
+
+
+def _find_template_calls(parsed: ParsedSource) -> list[HelperCall]:
+    if parsed.tree is None:
         return []
     found: list[HelperCall] = []
     for template, stack in parsed.templates:
@@ -476,7 +502,7 @@ def find_template_calls(source: str | ParsedSource) -> list[HelperCall]:
                         query_span=parsed.span(template),
                     )
                 )
-    return found
+    return sorted(found, key=lambda call: call.query_span or (0, 0))
 
 
 def _spec(field: ast.Interpolation) -> str | None:

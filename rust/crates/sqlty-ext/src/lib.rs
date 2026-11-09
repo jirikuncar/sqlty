@@ -22,6 +22,7 @@
 //! mapping). The `#[pyfunction]`s are exercised from Python by `tests/`.
 
 mod config;
+mod outline;
 mod server;
 
 use sqlty_python::checker;
@@ -1067,6 +1068,30 @@ fn module_facts(py: Python<'_>, source: &str) -> Option<PyFacts> {
     })
 }
 
+type PyTemplate = (usize, (usize, usize), Option<String>, Vec<Option<String>>);
+
+/// `(line, span, query, param types)` of each t-string of `source`, as
+/// `sqlty_python::templates` reads them, or None where Rust does not read `source`.
+#[pyfunction]
+fn template_strings(py: Python<'_>, source: &str) -> Option<Vec<PyTemplate>> {
+    detach(py, || {
+        let found = sqlty_python::templates::templates(source)?;
+        Some(
+            found
+                .into_iter()
+                .map(|t| (t.line, t.span, t.query, t.params))
+                .collect(),
+        )
+    })
+}
+
+/// `ParsedSource.outline` and its classes, built in Rust (see `outline`), or None where Rust
+/// does not read `source`.
+#[pyfunction]
+fn module_outline<'py>(py: Python<'py>, source: &str) -> PyResult<Option<outline::Outline<'py>>> {
+    outline::outline(py, source)
+}
+
 type PyArg = (
     bool,
     (usize, usize),
@@ -1437,6 +1462,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(check_queries, m)?)?;
     m.add_function(wrap_pyfunction!(named_queries, m)?)?;
     m.add_function(wrap_pyfunction!(module_facts, m)?)?;
+    m.add_function(wrap_pyfunction!(module_outline, m)?)?;
+    m.add_function(wrap_pyfunction!(template_strings, m)?)?;
     m.add_function(wrap_pyfunction!(helper_sites, m)?)?;
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;

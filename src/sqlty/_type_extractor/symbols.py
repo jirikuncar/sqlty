@@ -38,7 +38,7 @@ class ModuleTypes:
         self.parsed = parsed
         self.helpers = helpers
         self.module = module or "__main__"
-        tree = parsed.tree
+        tree = parsed.outline
         self.local = {} if tree is None else _module_types(tree, parsed.typing_aliases)
         self._newtypes: dict[str, typing.Any] = {}
         self._imported: dict[str, typing.Any] = {}

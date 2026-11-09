@@ -1571,6 +1571,8 @@ version = "0.5.1"
 dependencies = [
  "pyo3",
  "recursive",
+ "ruff_python_ast",
+ "ruff_text_size",
  "sqlty-format",
  "sqlty-lsp",
  "sqlty-python",

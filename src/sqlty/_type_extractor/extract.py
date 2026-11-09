@@ -65,7 +65,7 @@ def extract_type_definitions(
         Dictionary mapping type name to TypeInfo.
     """
     parsed = ParsedSource.of(source)
-    if (tree := parsed.tree) is None:
+    if (tree := parsed.outline) is None:
         return {}
 
     aliases = parsed.typing_aliases
@@ -78,7 +78,7 @@ def extract_type_definitions(
     typeddict_nodes: dict[str, ast.ClassDef] = {}
     model_nodes: dict[str, ast.ClassDef] = {}
     dataclass_nodes: dict[str, ast.ClassDef] = {}
-    classes = parsed.classes
+    classes = parsed.outline_classes
     if functional := _functional_classes(tree, aliases):
         classes = sorted([*classes, *functional], key=lambda node: node.lineno)
     imported_bases: dict[str, TypeInfo] = {}

@@ -1,6 +1,6 @@
 # Python AST passes in Rust
 
-> **Status:** milestones 1 to 3 on branch `rust/python-ast-migration`.
+> **Status:** milestones 1 to 4 on branch `rust/python-ast-migration`.
 
 The checks that need a Python syntax tree run in Python on `ast`: helper calls
 (`_helpers.py`), driver calls (`_drivers.py`), `psycopg.sql` compositions (`_psycopg.py`),
@@ -83,13 +83,24 @@ Slowest first, each measured on the 10,000-file synthetic project.
    to `ast`. `check -j 1`, median of 3 on a slower day: 4.11 s to 3.31 s on the full project
    (1,303 files no longer reach `ast` for helper calls; 534 still do for type definitions),
    4.83 s to 3.81 s when every file calls a psycopg helper. Output is identical.
-4. Type definitions (`extract_type_definitions`) and t-string calls.
+4. Type definitions and t-string calls, with no `ast` fallback: where Rust declines a file,
+   it has no types and no t-string calls. `ParsedSource.outline` is the module as `ast`
+   nodes built in Rust from the ruff tree (`sqlty-ext/src/outline.rs`), function bodies cut
+   to the statements holding a class; type extraction, `type_aliases` and generic rows read
+   it and its classes. `sqlty_python::templates` reads the `--sql` t-strings, and
+   `imported_names` and the helper index imports come from the Rust facts. On 2,918 files
+   of the standard library and installed packages the outline dumps the same as `ast.parse`
+   cut the same way, positions included; `tests/test_outline.py` and
+   `tests/test_template_strings.py` compare generated modules. One of 10,000 files still
+   reaches `ast.parse` (it defines helpers). `check -j 1`, median of 3: 3.95 s to 3.20 s on
+   the full project, 5.00 s to 3.58 s when every file calls a psycopg helper; output is
+   identical. Building the outline costs about 18 µs a file, against 26 µs for `ast.parse`.
 5. Compositions and query variants.
 
 ## Where ruff and `ast` differ
 
-`sqlty_python::parse` returns `None`, so Python's `ast` decides, wherever the two parsers
-can disagree. Each case is in `parse.rs` tests or `tests/test_helper_sites.py`.
+`sqlty_python::parse` returns `None` wherever the two parsers can disagree: Python's `ast`
+decides in milestones 1 to 3, and from milestone 4 the file has no types or t-string calls. Each case is in `parse.rs` tests or `tests/test_helper_sites.py`.
 
 | Source | `ast.parse` | ruff 0.0.21 | Rust does |
 |--------|-------------|-------------|-----------|
@@ -101,6 +112,8 @@ can disagree. Each case is in `parse.rs` tests or `tests/test_helper_sites.py`.
 | NUL character in a string | `SyntaxError` | accepts | defers |
 | `from __future__ import braces` / unknown feature at the top | `SyntaxError` | accepts | defers; also for `barry_as_FLUFL` |
 | `'\ud800'` | keeps the surrogate | U+FFFD | defers on any `\uD8xx`-`\uDFxx` escape |
+| A file over 256 KiB | reads | reads, on a stack sized by length | declines: no types or t-string calls |
+| `\r\n` or `\r` inside a string (triple-quoted, CRLF file) | `\n` | kept as written | reads the literal again with `\n` (`parse::text`); the outline normalizes the file first |
 | Python 3.15 syntax (`lazy import`, `[*x for x in y]`) | accepts | accepts (lazy imports are imports) | reads |
 | `ｅｘｅｃｕｔｅ(...)` (NFKC) | `execute` | `execute` | same tree; the text gates on raw text skip it in both |
 
@@ -115,11 +128,17 @@ defined (a package re-export under another name alone is missed), and a call in 
 or class whose source never names a helper is skipped unless an earlier pass walked every
 call of the file (`any_calls`); Rust always skips it.
 
+Two Python behaviours changed so both readings agree on the cut outline: a name bound only
+in a function body nested in a module-level statement is no longer a module binding for
+type aliases (`_bound_names`), and t-string calls come in source order, not `ast.walk` order.
+
 ## Open questions
 
 - WebAssembly size with the parser in `sqlty-wasm`; it gains every AST check. On wasm32
   `stacker` allocates the parse stack on the heap, so the per-byte stack needs a lower cap.
-- Each file is parsed by ruff twice (facts, then helper sites); one parse kept between the
-  calls would save about 20 µs a file.
+- Each file is parsed by ruff up to four times (facts, outline, t-strings, helper sites); one
+  parse kept between the calls would save about 10 µs a call.
+- The surrogate escapes and the 256 KiB limit cost a file its types in `rust` mode: decoding
+  string escapes in Rust, and a stack sized by nesting rather than length, would lift both.
 - `_variants.py` evaluates real `psycopg.sql` classes to render compositions; in Rust it
   needs its own model of `SQL`, `Identifier`, `Literal` and `format`.

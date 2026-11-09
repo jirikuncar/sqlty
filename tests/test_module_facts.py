@@ -16,6 +16,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
+import sqlty._source
 from sqlty._drivers import _find_driver_calls
 from sqlty._source import Facts, ParsedSource
 
@@ -68,6 +69,9 @@ def assert_same(text: str) -> None:
     assert sorted(dict(rust.typing_aliases).items()) == python.typing_aliases, text
     assert rust.driver_calls == python.driver_calls, text
     any_calls = ParsedSource(text)
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(sqlty._source, "AST", "rust")
+        assert ParsedSource(text).imported_names == any_calls._imported_names(), text
     for wrapper in WRAPPERS:
         found = [o for o, name in rust.any_calls if name == wrapper or name.endswith(f".{wrapper}")]
         assert found == any_calls._any_calls(wrapper), (wrapper, text)
@@ -305,15 +309,15 @@ driver_imports = st.lists(st.sampled_from(IMPORTS[-10:]), min_size=1, max_size=5
 
 
 @settings(max_examples=EXAMPLES, deadline=None, suppress_health_check=[HealthCheck.too_slow])
-@given(blocks, st.sampled_from(["\n", "\r\n"]))
+@given(blocks, st.sampled_from(["\n", "\r\n", "\r"]))
 def test_generated_modules(lines: list[str], newline: str) -> None:
-    assert_same(newline.join(lines) + newline)
+    assert_same("\n".join([*lines, ""]).replace("\n", newline))
 
 
 @settings(max_examples=EXAMPLES, deadline=None, suppress_health_check=[HealthCheck.too_slow])
-@given(driver_imports, driver_blocks, st.sampled_from(["\n", "\r\n"]))
+@given(driver_imports, driver_blocks, st.sampled_from(["\n", "\r\n", "\r"]))
 def test_generated_driver_calls(imports: list[str], lines: list[str], newline: str) -> None:
-    assert_same(newline.join(imports + lines) + newline)
+    assert_same("\n".join([*imports, *lines, ""]).replace("\n", newline))
 
 
 def _corpus() -> list[tuple[str, str]]:
