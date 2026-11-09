@@ -304,9 +304,21 @@ reload.
 
 ## VS Code for the Web
 
-On [vscode.dev](https://vscode.dev) and [github.dev](https://github.dev), the extension
-highlights the SQL of strings marked `--sql`, as in Restricted Mode. The browser runs no
-processes, so there is no `sqlty server`: no diagnostics, quick fixes or completion.
+On [vscode.dev](https://vscode.dev) and [github.dev](https://github.dev), the browser runs
+no processes, so there is no `sqlty server`. The extension runs the engine itself, compiled
+to WebAssembly, as the [playground](../playground.md) does: diagnostics with their quick
+fixes, completion and hover in the query strings, and SQL highlighting.
+
+The configuration is found as `sqlty check` finds it: the closest `sqlty.toml`,
+`pyproject.toml` with `[tool.sqlty]` or `Cargo.toml` with a sqlty table above each file,
+with `extend` applied, so each project of a monorepo gets its own. The engine reads
+`dialect`, `schema`, `rules`, `types`, `import-style` and `param-types`.
+
+!!! note "What the web leaves out"
+    The checks that read row types from Python source (`column-type-mismatch` of a
+    `TypedDict`, ...), the parameters of driver calls (`param-count-mismatch`), helpers
+    registered in `functions`, named `databases`, `overrides`, `queries` files, fix-all
+    on save and breaking changes need `sqlty server`, on the desktop.
 
 ## Other editors
 

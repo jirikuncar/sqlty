@@ -28,8 +28,8 @@ use sqlty_python::params::add_param_types;
 use sqlty_python::rewriter::{rewrite_source_with, strip_source, Suppressed};
 use sqlty_python::rules::RuleConfig;
 use sqlty_sql::analyzer::{
-    analyze_params, analyze_select, explain_select, load_schema_with_skipped, row_type,
-    CandidateKind, Nullability, RuleRef,
+    analyze_params, analyze_select, explain_select, load_schema_with_overrides,
+    load_schema_with_skipped, row_type, CandidateKind, Nullability, RuleRef, TypeOverrides,
 };
 use sqlty_sql::highlight::Highlight;
 
@@ -40,6 +40,7 @@ enum Op {
     Complete,
     Hover,
     Format,
+    Config,
 }
 
 #[derive(Deserialize)]
@@ -54,6 +55,17 @@ struct Request {
     /// A `sqlty.toml`: its `dialect` wins over the request's.
     #[serde(default)]
     config: String,
+    /// A sqlty table the host already resolved (`extend` applied), as `config` answers it:
+    /// its `dialect`, `import-style`, `param-types`, `rules` and `types` apply.
+    #[serde(default)]
+    settings: Option<serde_json::Map<String, Value>>,
+    /// The path of the file `config` reads `source` from, for its messages; its name picks the
+    /// table (`[tool.sqlty]` of a `pyproject.toml`).
+    #[serde(default)]
+    path: String,
+    /// Whether `config` reports a `pyproject.toml` or `Cargo.toml` without a sqlty table.
+    #[serde(default)]
+    required: bool,
 }
 
 /// Answer a JSON request about the Python `source`, read against `schema` in `dialect`.
@@ -68,23 +80,46 @@ struct Request {
 /// - `hover`: what the word at `offset` is, in Markdown; `null` when nothing.
 /// - `format`: `formatted`, what `sqlty format` makes of the source. Not part of `analyze`,
 ///   which runs on every keystroke.
+/// - `config`: the sqlty table of `source`, the text of the file at `path`, validated as
+///   `sqlty check` validates it, as `{"config": table}`; `null` for a `pyproject.toml` or
+///   `Cargo.toml` without one, unless `required`. A host finds and merges the files
+///   (`extend`), then passes the result as `settings`.
 ///
 /// `config` is a `sqlty.toml` whose `dialect`, `import-style`, `param-types` and `rules` apply;
-/// another key, or an invalid one, is an `error`, as `sqlty check` reports it.
+/// another key, or an invalid one, is an `error`, as `sqlty check` reports it. `settings`
+/// replaces it with a table `config` answered, whose `types` apply too.
 pub fn run(request: &str) -> String {
     let error = |error: String| json!({ "error": error }).to_string();
     let request: Request = match serde_json::from_str(request) {
         Ok(request) => request,
         Err(found) => return error(found.to_string()),
     };
-    let settings = match settings(&request.config) {
+    if let Op::Config = request.op {
+        let path = request.path.as_str();
+        let name = path.rsplit('/').next().unwrap_or(path);
+        return match config::load(request.source.as_bytes(), name, path, request.required) {
+            Ok(found) => json!(found.map(|found| json!({ "config": found.table }))).to_string(),
+            Err(found) => error(found.to_string()),
+        };
+    }
+    let settings = match &request.settings {
+        Some(table) => Ok(resolved(table)),
+        None => settings(&request.config),
+    };
+    let settings = match settings {
         Ok(settings) => settings,
         Err(found) => return error(found),
     };
     let dialect = settings.dialect.as_deref().unwrap_or(&request.dialect);
     let param_types = settings.param_types;
-    let schema = (!request.schema.trim().is_empty())
-        .then(|| load_schema_with_skipped(&request.schema, dialect).0);
+    let overrides = match TypeOverrides::new(&settings.types, dialect) {
+        Ok(overrides) => overrides,
+        Err(found) => return error(format!("[tool.sqlty.types]: {found}")),
+    };
+    let schema = (!request.schema.trim().is_empty()).then(|| match overrides.is_empty() {
+        true => load_schema_with_skipped(&request.schema, dialect).0,
+        false => load_schema_with_overrides(&request.schema, dialect, overrides).0,
+    });
     let options = Options::new(
         dialect,
         schema.as_deref(),
@@ -166,6 +201,7 @@ pub fn run(request: &str) -> String {
         Op::Format => {
             json!({ "formatted": sqlty_format::format_source(source, dialect, &options.style) })
         }
+        Op::Config => unreachable!("answered above"),
     };
     answer.to_string()
 }
@@ -175,6 +211,28 @@ struct Settings {
     import_style: Option<String>,
     param_types: bool,
     rules: HashMap<String, String>,
+    types: Vec<(String, String)>,
+}
+
+/// The settings of a table `config` answered.
+fn resolved(table: &serde_json::Map<String, Value>) -> Settings {
+    let text = |key: &str| table.get(key).and_then(Value::as_str).map(String::from);
+    let pairs = |key: &str| {
+        table
+            .get(key)
+            .and_then(Value::as_object)
+            .into_iter()
+            .flatten()
+            .filter_map(|(key, value)| Some((key.clone(), value.as_str()?.to_string())))
+            .collect::<Vec<_>>()
+    };
+    Settings {
+        dialect: text("dialect"),
+        import_style: text("import-style"),
+        param_types: table.get("param-types") == Some(&Value::Bool(true)),
+        rules: pairs("rules").into_iter().collect(),
+        types: pairs("types"),
+    }
 }
 
 /// The settings of the `sqlty.toml` text `config`, validated as `sqlty check` validates it.
@@ -212,6 +270,7 @@ fn settings(config: &str) -> Result<Settings, String> {
         rules: rules
             .filter_map(|(rule, severity)| Some((rule.clone(), severity.as_str()?.to_string())))
             .collect(),
+        types: Vec::new(),
     })
 }
 

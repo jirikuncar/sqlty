@@ -13,6 +13,7 @@ on:
     paths:
       - .github/workflows/vscode.yml
       - editors/vscode/**
+      - rust/crates/sqlty-wasm/**
 
 permissions:
   contents: read
@@ -38,6 +39,9 @@ jobs:
         with:
           node-version: 22.23.4
           package-manager-cache: false
+      # The web extension runs the engine compiled to WebAssembly.
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal --target wasm32-unknown-unknown && rustup default 1.99.1
       - run: npm ci
       - name: Take the version of the release or the run
         if: github.event_name != 'pull_request'
