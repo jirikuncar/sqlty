@@ -78,7 +78,7 @@ pub enum Rule {
 
 impl Rule {
     /// Every rule.
-    pub const ALL: [Rule; 43] = [
+    pub const ALL: [Rule; 44] = [
         Rule::ColumnCountMismatch,
         Rule::ColumnTypeMismatch,
         Rule::ColumnNameMismatch,
@@ -112,6 +112,7 @@ impl Rule {
         Rule::Name(NameRule::UnknownTable),
         Rule::Name(NameRule::UnknownColumn),
         Rule::Name(NameRule::AmbiguousColumn),
+        Rule::Name(NameRule::DuplicateAlias),
         Rule::Name(NameRule::UnknownFunction),
         Rule::Name(NameRule::UnknownType),
         Rule::Name(NameRule::UnsupportedSyntax),
@@ -186,6 +187,7 @@ impl Rule {
                 NameRule::UnknownTable
                 | NameRule::UnknownColumn
                 | NameRule::AmbiguousColumn
+                | NameRule::DuplicateAlias
                 | NameRule::InsertMissingColumn
                 | NameRule::InsertValueCount
                 | NameRule::UngroupedColumn,

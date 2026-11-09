@@ -412,6 +412,7 @@ impl<'a> Analyzer<'a> {
     /// Scope of a FROM clause, and an analyzer that knows its derived tables. A
     /// `LATERAL` subquery is analyzed with the relations before it.
     pub(super) fn scope_of(&self, from: &[TableWithJoins]) -> Inferred<(Analyzer<'a>, Scope)> {
+        self.check_duplicate_names(from);
         let mut analyzer = self.clone();
         analyzer.merged = merged_columns(from, analyzer.dialect).into();
         let mut scope = Scope::new();

@@ -33,6 +33,7 @@ Configuration via sqlty.toml (``[rules]``) or pyproject.toml:
     unknown-table = "error"             # default
     unknown-column = "error"            # default
     ambiguous-column = "error"          # default
+    duplicate-alias = "error"           # default
     unknown-function = "warn"           # default
     unknown-type = "warn"               # default
     unsupported-syntax = "warn"         # default
@@ -244,6 +245,12 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.ERROR,
         fixable=False,
         description="Unqualified column exists in more than one table of the query",
+    ),
+    "duplicate-alias": LintRule(
+        name="duplicate-alias",
+        default_severity=Severity.ERROR,
+        fixable=False,
+        description="Two tables of a FROM clause are read by the same name",
     ),
     "unknown-function": LintRule(
         name="unknown-function",
