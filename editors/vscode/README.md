@@ -25,16 +25,6 @@ mark SQL strings with the same `--sql` comment, so the strings you marked for th
 highlighted and checked by sqlty against your schema. Keep one highlighter enabled, so one grammar
 colors each string.
 
-## Coming from another SQL highlighter
-
-[python-string-sql](https://marketplace.visualstudio.com/items?itemName=ptweir.python-string-sql),
-[Inline SQL](https://marketplace.visualstudio.com/items?itemName=qufiwefefwoyn.inline-sql-syntax),
-[Python SQL](https://marketplace.visualstudio.com/items?itemName=AzharuddinSyed.python-sql) and
-[SQL in Python Highlighter](https://marketplace.visualstudio.com/items?itemName=eluc1a.sql-in-python-highlighter)
-mark SQL strings with the same `--sql` comment, so the strings you marked for them are already
-highlighted and checked by sqlty against your schema. Keep one highlighter enabled, so one grammar
-colors each string.
-
 ## Settings
 
 | Setting | Default | Meaning |

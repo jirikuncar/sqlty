@@ -117,57 +117,6 @@
         }
       ]
     },
-    "leading-blank-double": {
-      "begin": "(?<=\"\"\")(?=[ \\t]*$)",
-      "end": "(?=\"\"\")",
-      "patterns": [
-        {
-          "include": "#marker-line-double"
-        },
-        {
-          "begin": "^(?=[ \\t]*\\S)",
-          "end": "(?=\"\"\")"
-        }
-      ]
-    },
-    "marker-line-double": {
-      "contentName": "meta.embedded.sql",
-      "begin": "^[ \\t]*(--sql|-- sql(?=[ \\t]*(?:--[^\\\"'\\\\]*)?(?:\\\\[nr]|$)))",
-      "beginCaptures": {
-        "1": {
-          "name": "comment.line.double-dash.sql"
-        }
-      },
-      "end": "(?=\"\"\")",
-      "patterns": [
-        {
-          "include": "#escape"
-        },
-        {
-          "name": "comment.line.double-dash.sql",
-          "begin": "--",
-          "end": "(?=\\\\n|\"\"\")|$"
-        },
-        {
-          "name": "comment.block.sql",
-          "begin": "/\\*",
-          "end": "\\*/|(?=\"\"\")"
-        },
-        {
-          "name": "string.quoted.single.sql",
-          "begin": "'",
-          "end": "'|(?=\"\"\")",
-          "patterns": [
-            {
-              "include": "#escape"
-            }
-          ]
-        },
-        {
-          "include": "#sql"
-        }
-      ]
-    },
     "triple-single": {
       "contentName": "meta.embedded.sql",
       "begin": "(?<=''')(?<![fFtT]''')[ \\t]*(--sql|-- sql(?=[ \\t]*(?:--[^\\\"'\\\\]*)?(?:\\\\[nr]|$)))",
@@ -208,57 +157,6 @@
     },
     "leading-blank-single": {
       "begin": "(?<=''')(?<![fFtT]''')(?=[ \\t]*$)",
-      "end": "(?=''')",
-      "patterns": [
-        {
-          "include": "#marker-line-single"
-        },
-        {
-          "begin": "^(?=[ \\t]*\\S)",
-          "end": "(?=''')"
-        }
-      ]
-    },
-    "marker-line-single": {
-      "contentName": "meta.embedded.sql",
-      "begin": "^[ \\t]*(--sql|-- sql(?=[ \\t]*(?:--[^\\\"'\\\\]*)?(?:\\\\[nr]|$)))",
-      "beginCaptures": {
-        "1": {
-          "name": "comment.line.double-dash.sql"
-        }
-      },
-      "end": "(?=''')",
-      "patterns": [
-        {
-          "include": "#escape"
-        },
-        {
-          "name": "comment.line.double-dash.sql",
-          "begin": "--",
-          "end": "(?=\\\\n|''')|$"
-        },
-        {
-          "name": "comment.block.sql",
-          "begin": "/\\*",
-          "end": "\\*/|(?=''')"
-        },
-        {
-          "name": "string.quoted.single.sql",
-          "begin": "'",
-          "end": "'|(?=''')",
-          "patterns": [
-            {
-              "include": "#escape"
-            }
-          ]
-        },
-        {
-          "include": "#sql"
-        }
-      ]
-    },
-    "leading-blank-single": {
-      "begin": "(?<=''')(?=[ \\t]*$)",
       "end": "(?=''')",
       "patterns": [
         {
