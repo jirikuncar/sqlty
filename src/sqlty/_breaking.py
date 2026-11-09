@@ -9,6 +9,8 @@ already get against its own schema.
 
 Every revision but the working tree is checked out with ``git worktree add --detach``
 into a temporary directory, removed afterwards, so the working tree is never touched.
+Only the analyzed paths, the files of the directories above them and the schema are
+checked out, unless a configuration reads more (see ``_checkout``).
 A baseline can also be a snapshot ``--save`` wrote, which needs no git history, or a
 schema file, which has no queries and so is only checked forward.
 """
@@ -16,12 +18,13 @@ schema file, which has no queries and so is only checked forward.
 from __future__ import annotations
 
 import contextlib
+import glob
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, NamedTuple, Protocol
@@ -157,7 +160,7 @@ def run(args: argparse.Namespace) -> list[Finding]:
     paths = [Path(p).resolve().relative_to(root) for p in (args.paths or [Path.cwd()])]
     with contextlib.ExitStack() as stack:
         baselines = _baselines(args.against, root, paths, stack) if args.against else []
-        head_root = stack.enter_context(_worktree(root, args.head)) if args.head else root
+        head_root = stack.enter_context(_worktree(root, args.head, paths)) if args.head else root
         head = _revision(args.head or "the working tree", head_root, paths)
         if args.save:
             save(head, args.save)
@@ -329,7 +332,7 @@ def _baselines(
 
     path = Path(against)
     if not path.exists():
-        return [_revision(against, stack.enter_context(_worktree(root, against)), paths)]
+        return [_revision(against, stack.enter_context(_worktree(root, against, paths)), paths)]
     if path.suffix == ".json" and path.is_file():
         return [Snapshot.load(path, against, paths)]
     if path.is_dir() and (snapshots := sorted(path.glob("*.json"))):
@@ -368,14 +371,16 @@ def _revision(label: str, root: Path, paths: list[Path]) -> Revision:
 
 
 @contextlib.contextmanager
-def _worktree(root: Path, ref: str) -> Generator[Path]:
-    """``ref`` checked out into a temporary worktree, removed on exit."""
+def _worktree(root: Path, ref: str, paths: list[Path]) -> Generator[Path]:
+    """``ref`` checked out into a temporary worktree, removed on exit: the files
+    ``paths`` need, or all of them."""
     _git(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
     directory = Path(tempfile.mkdtemp(prefix="sqlty-breaking-"))
     # Named like the repository, so its files have the module names they have there.
     checkout = directory / root.name
     try:
-        _git(root, "worktree", "add", "--detach", "--quiet", str(checkout), ref)
+        _git(root, "worktree", "add", "--detach", "--no-checkout", "--quiet", str(checkout), ref)
+        _checkout(checkout, paths)
         yield checkout.resolve()
     finally:
         with contextlib.suppress(GitError):
@@ -383,6 +388,69 @@ def _worktree(root: Path, ref: str) -> Generator[Path]:
         shutil.rmtree(directory, ignore_errors=True)
         with contextlib.suppress(GitError):
             _git(root, "worktree", "prune")
+
+
+def _checkout(checkout: Path, paths: list[Path]) -> None:
+    """Check out what checking ``paths`` reads: each path, the files of the directories
+    above it (where its configuration is found) and the schema and query files the
+    configurations name. Everything when a path is the root or a configuration reads
+    more: ``functions`` modules, ``databases``, a glob or a file outside the repository."""
+    from sqlty._config import ConfigError, find_config
+
+    listed = [
+        n for n in _git(checkout, "ls-tree", "-r", "--name-only", "-z", "HEAD").split("\0") if n
+    ]
+    above = {parent for path in paths for parent in path.parents}
+    full = ["reset", "--hard", "--quiet"]
+    if Path(".") in paths:
+        _git(checkout, *full)
+        return
+    _restore(checkout, [*paths, *(n for n in listed if Path(n).parent in above)], listed)
+    configs = {
+        Path(n).parent
+        for n in listed
+        if Path(n).name in _CONFIG_FILES
+        and (Path(n).parent in above or any(Path(n).is_relative_to(path) for path in paths))
+    }
+    needed: list[str | Path] = []
+    for directory in configs | set(paths):
+        try:
+            config, found = find_config(checkout / directory)
+        except ConfigError:
+            _git(checkout, *full)
+            return
+        if found is None:
+            continue
+        specs = [config.get("schema", []), config.get("queries", [])]
+        entries = [entry for spec in specs for entry in ([spec] if isinstance(spec, str) else spec)]
+        named = [os.path.relpath(found.parent / entry, checkout.resolve()) for entry in entries]
+        if (
+            {"functions", "databases"} & config.keys()
+            or any(glob.has_magic(entry) for entry in entries)
+            or any(name.startswith("..") for name in named)
+        ):
+            _git(checkout, *full)
+            return
+        needed += named
+    _restore(checkout, needed, listed)
+
+
+def _restore(checkout: Path, names: Iterable[str | Path], listed: list[str]) -> None:
+    """Check out the files and directories of ``names`` that HEAD has."""
+    directories = {str(parent) for name in listed for parent in Path(name).parents}
+    present = {str(name) for name in names} & ({*listed} | directories - {"."})
+    if present:
+        _git(
+            checkout,
+            "checkout",
+            "--quiet",
+            "HEAD",
+            "--",
+            *(f":(literal){n}" for n in sorted(present)),
+        )
+
+
+_CONFIG_FILES = ("sqlty.toml", "pyproject.toml", "Cargo.toml")
 
 
 def _git(cwd: Path, *args: str) -> str:
