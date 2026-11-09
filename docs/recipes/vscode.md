@@ -294,13 +294,16 @@ fix belongs to the migration or the code, depending on which ships first.
 
 ## Restricted Mode
 
-In Restricted Mode, the extension highlights the SQL of strings marked `--sql` and runs
-nothing. Diagnostics, quick fixes and completion start once you trust the folder, without a
-reload.
+In Restricted Mode, the extension runs the engine it bundles, compiled to WebAssembly, as on
+[VS Code for the Web](#vs-code-for-the-web): diagnostics with their quick fixes, completion and
+hover in the query strings, with what the web leaves out. When you trust the folder,
+`sqlty server` takes over, without a reload.
 
 !!! warning "The server waits for trust"
     The server comes from the folder's own environment: `sqlty.path`, the selected
-    interpreter or `PATH`. A folder you have not trusted would choose what runs.
+    interpreter or `PATH`. A folder you have not trusted would choose what runs. The bundled
+    engine runs no process and no code of the folder: it only reads its configuration and
+    schema files.
 
 ## VS Code for the Web
 

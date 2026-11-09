@@ -30,3 +30,10 @@ Diagnostics, quick fixes, completion and hover from `sqlty_wasm.wasm`, as the do
 - `databases`, `overrides`, `functions` and `queries` are not read on the web.
 - The `.wasm` ships in the `.vsix` (`npm run build-wasm`, the cargo command of `make playground`):
   12 MB, 2.7 MB gzipped, accepted in #1010.
+
+## Restricted Mode
+
+The desktop extension runs the same engine (`src/engine.ts`) while the workspace is untrusted
+(#855), and starts `sqlty server` in its place once it is trusted. `npm test` checks it in a
+VS Code launched with workspace trust on, since `runTests` always passes
+`--disable-workspace-trust`.
