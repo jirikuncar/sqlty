@@ -92,6 +92,49 @@ def test_paths_limit_the_files_in_both_revisions(cli: Cli, repo: Path) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+# Only what the paths read is checked out, unless the config reads more.
+@pytest.mark.parametrize(
+    ("config", "schema_dir"),
+    [
+        ('[tool.sqlty]\nschema = "db/schema.sql"\n', "db"),
+        ('[tool.sqlty]\nschema = "db/*.sql"\n', "db"),
+        ('[tool.sqlty]\nschema = ["db/"]\n', "db"),
+        ('[tool.sqlty]\nextend = "db/base.toml"\n', "db"),
+        (
+            '[tool.sqlty]\nschema = "db/schema.sql"\n[[tool.sqlty.functions]]\nimport-path = "x.f"\n',
+            "db",
+        ),
+    ],
+)
+def test_a_revision_of_some_paths_reads_their_schema(
+    cli: Cli, tmp_path: Path, config: str, schema_dir: str
+) -> None:
+    repo = tmp_path / "repo"
+    for directory in ("app/deep", schema_dir, "other"):
+        (repo / directory).mkdir(parents=True)
+    git(repo, "init", "-q")
+    git(repo, "config", "user.email", "test@example.com")
+    git(repo, "config", "user.name", "test")
+    (repo / "pyproject.toml").write_text(config)
+    (repo / "db" / "base.toml").write_text('schema = "schema.sql"\n')
+    (repo / "other" / "q.py").write_text(OLD_CODE)
+    for schema, code, message in ((OLD_SCHEMA, OLD_CODE, "old"), (NEW_SCHEMA, NEW_CODE, "new")):
+        (repo / schema_dir / "schema.sql").write_text(schema)
+        (repo / "app" / "deep" / "q.py").write_text(code)
+        git(repo, "add", "-A")
+        git(repo, "commit", "-q", "-m", message)
+
+    result = cli(
+        ["breaking", "--against", "HEAD~1", "--head", "HEAD", "--direction", "forward", "app/deep"],
+        {"cwd": repo},
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert lines(result)[0].startswith("app/deep/q.py:1: [unknown-column] column `handle`")
+    assert lines(result)[1:] == ["Found 1 breaking change(s)"]
+    assert git(repo, "worktree", "list").count("\n") == 1
+
+
 HELPER_CONFIG = """\
 [tool.sqlty]
 schema = "schema.sql"
