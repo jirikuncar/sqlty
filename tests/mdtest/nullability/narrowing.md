@@ -461,6 +461,28 @@ SELECT (SELECT t.name FROM teams t WHERE t.id = p.team_id) FROM fans f LEFT JOIN
 -- inferred: tuple[str | None]
 ```
 
+The same holds for a lookup of the outer row's own key in its table: it finds the outer
+row itself. The key's columns must be equal to themselves, not NULL in the outer row.
+
+```sql
+SELECT
+    (SELECT t2.name FROM teams t2 WHERE t2.id = t.id),
+    (SELECT t2.motto FROM teams t2 WHERE t2.id = t.id),
+    (SELECT t2.name FROM teams t2 WHERE t2.region = t.region AND t2.code = t.code)
+FROM teams t
+-- inferred: tuple[str, str | None, str | None]
+```
+
+```sql
+SELECT
+    (SELECT t2.name FROM teams t2 WHERE t2.region = t.region AND t2.code = t.code),
+    (SELECT t2.name FROM teams t2 WHERE t2.region = t.region),
+    (SELECT t2.name FROM teams t2 WHERE t2.id = t.id + 1)
+FROM teams t
+WHERE t.region IS NOT NULL AND t.code IS NOT NULL
+-- inferred: tuple[str, str | None, str | None]
+```
+
 ### A key that may not hold
 
 A `DEFERRABLE` key is checked at commit, so a transaction can see a row that
