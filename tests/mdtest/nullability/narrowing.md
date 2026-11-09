@@ -393,6 +393,38 @@ SELECT t.name FROM teams t RIGHT JOIN fans f ON f.team_id = t.id
 -- inferred: tuple[str]
 ```
 
+### An action with a column list
+
+PostgreSQL 15's `ON DELETE SET NULL | DEFAULT (cols)` names the columns the action
+sets. The foreign key is read in `CREATE TABLE` and in `ALTER TABLE ... ADD CONSTRAINT`,
+the form `pg_dump` writes.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE teams (region TEXT, code TEXT, name TEXT NOT NULL, PRIMARY KEY (region, code));
+CREATE TABLE players (
+    id INTEGER PRIMARY KEY,
+    region TEXT NOT NULL,
+    code TEXT NOT NULL DEFAULT 'free',
+    FOREIGN KEY (region, code) REFERENCES teams (region, code) ON DELETE SET DEFAULT (code)
+);
+CREATE TABLE fans (id INTEGER PRIMARY KEY, region TEXT NOT NULL, code TEXT NOT NULL DEFAULT 'free');
+ALTER TABLE fans
+    ADD CONSTRAINT fans_team
+    FOREIGN KEY (region, code) REFERENCES teams (region, code) ON DELETE SET DEFAULT (code);
+```
+
+```sql
+SELECT t.name FROM players p LEFT JOIN teams t ON t.region = p.region AND t.code = p.code
+-- inferred: tuple[str]
+```
+
+```sql
+SELECT t.name FROM fans f LEFT JOIN teams t ON t.region = f.region AND t.code = f.code
+-- inferred: tuple[str]
+```
+
 ### When the join can miss
 
 A nullable key column, a condition that is not exactly the key, a referenced relation
