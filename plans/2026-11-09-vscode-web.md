@@ -1,6 +1,7 @@
 # VS Code for the Web
 
-> **Status:** stage 1 in progress.
+> **Status:** stage 1 merged in [#1014](https://github.com/jirikuncar/sqlty/pull/1014); stage 2 waits on the
+> `.vsix` size and config scope questions of [#1010](https://github.com/jirikuncar/sqlty/issues/1010).
 
 Tracks [#1010](https://github.com/jirikuncar/sqlty/issues/1010): the extension does not load on
 vscode.dev or github.dev, so strings marked `--sql` stay plain Python strings there.
