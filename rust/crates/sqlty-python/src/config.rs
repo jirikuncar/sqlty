@@ -30,7 +30,7 @@ use sqlty_sql::Dialect;
 pub const CONFIG_FILES: [&str; 3] = ["sqlty.toml", "pyproject.toml", "Cargo.toml"];
 
 /// Keys of `[tool.sqlty]` that are not file discovery; see also [`DISCOVERY_KEYS`].
-pub const TOOL_KEYS: [&str; 17] = [
+pub const TOOL_KEYS: [&str; 18] = [
     "dialect",
     "schema",
     "queries",
@@ -43,6 +43,7 @@ pub const TOOL_KEYS: [&str; 17] = [
     "param-types",
     "preview",
     "max-query-variants",
+    "coerce-row-types",
     "functions",
     "types",
     "format-command",
@@ -359,6 +360,15 @@ pub fn validate(mut table: Table, source: &str) -> Result<Config, InvalidConfig>
                 .into(),
         );
     }
+    if table
+        .get("coerce-row-types")
+        .is_some_and(|names| !is_strings(names))
+    {
+        return fail(
+            "[tool.sqlty] coerce-row-types must be a list of row type names, such as [\"app.rows.User\"]"
+                .into(),
+        );
+    }
     for key in ["exclude", "extend-exclude"] {
         if table.get(key).is_some_and(|globs| !is_strings(globs)) {
             return fail(format!("[tool.sqlty] {key} must be a list of glob strings"));
@@ -499,6 +509,7 @@ mod tests {
         assert!(invalid("extend = []").contains("extend must be a string"));
         assert!(invalid("schema = 1").contains("schema must be a path"));
         assert!(invalid("max-query-variants = 0").contains("positive integer"));
+        assert!(invalid("coerce-row-types = \"app.User\"").contains("list of row type names"));
         assert!(invalid("types = { DATE = 1 }").contains("types must be a table"));
         assert!(invalid("databases = 1").contains("databases must be a table of tables"));
         assert!(invalid("[databases.default]").contains("not 'default'"));

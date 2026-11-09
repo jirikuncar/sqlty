@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ast
+import copy
+import functools
 import types
 import typing
 
@@ -179,6 +181,10 @@ def extract_type_definitions(
                 info.opaque |= parent.opaque
                 info.allows_extra |= parent.allows_extra
         info.aliases = aliases
+        if not configs and kind != "Protocol":
+            info.coerced = functools.cache(
+                functools.partial(_coerced, info, nodes, names, imports, imported[node.name])
+            )
         if is_typeddict:
             info.bases = [p.name for p in parents]
             own = _own_openness(keywords, aliases)
@@ -197,6 +203,26 @@ def extract_type_definitions(
             result[node.name] = info
 
     return result
+
+
+def _coerced(
+    info: TypeInfo,
+    nodes: list[ast.ClassDef],
+    names: ModuleTypes,
+    imports: dict[str, str],
+    parents: list[TypeInfo],
+) -> TypeInfo:
+    """``info`` read as a Pydantic validator reads it: every field lax, Pydantic types by input."""
+    out = copy.copy(info)
+    field_types = _ast_key_types(
+        nodes, info.aliases, names, imports, _IMPORTED_TYPES | pydantic_names(model=True)
+    )
+    for parent in parents:
+        field_types = (parent.coerced() if parent.coerced else parent).field_types | field_types
+    out.field_types = {n: None if _has_enum(tp) else tp for n, tp in field_types.items()}
+    out.lax = frozenset(name for name, _ in info.fields)
+    out.coerced = None
+    return out
 
 
 def _has_enum(tp: typing.Any) -> bool:
