@@ -98,6 +98,7 @@ class _Check:
         declared: list[tuple[int, ast.expr, str, tuple[int, int]]],
         helpers: HelperIndex | None,
         module: str | None,
+        coerce: frozenset[str] = frozenset(),
     ) -> None:
         from sqlty._type_extractor import extract_type_definitions
 
@@ -134,6 +135,10 @@ class _Check:
             for name in ({q[1] for q in [*queries, *named]} | p_names) - self.type_defs.keys():
                 if (imported := helpers.row_type(parsed, name)) is not None:
                     self.type_defs[name], self.imported_defs[name] = imported
+        for name, info in self.type_defs.items():
+            owner = (info.module or "").removesuffix(".__init__")
+            if info.coerced is not None and f"{owner}.{info.name}".lstrip(".") in coerce:
+                self.type_defs[name] = info.coerced()
         # A row type named through an alias (`type Row = User`) is checked as what it names.
         self.aliased: list[tuple[_RowQuery, ast.expr]] = []
         resolved: list[_RowQuery] = []
@@ -529,11 +534,13 @@ def diagnostics(
     module: str | None,
     row_usage: RowUsage | None = None,
     variants: int | None = None,
+    coerce: frozenset[str] = frozenset(),
 ) -> list[Diagnostic]:
     """Every diagnostic before inline suppression: the Rust pass, then the Python passes.
 
     ``variants`` turns on query variants (``find_helper_calls``): each variant of a call
     is checked as a call of its own, then ``_merge_variants`` reports at the call.
+    ``coerce`` names the row types read as a Pydantic validator reads them.
     """
     from sqlty._lint import RuleConfig
 
@@ -605,6 +612,7 @@ def diagnostics(
         declared=declared,
         helpers=helpers,
         module=module,
+        coerce=coerce,
     )
     ctx.row_usage = row_usage or RowUsage()
     for check_pass in _CHECK_PASSES:

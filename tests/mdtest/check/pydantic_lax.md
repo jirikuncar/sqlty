@@ -406,7 +406,7 @@ class Configured:
 # error: [nullable-mismatch] "Lax.total is int but query column 'total' can be NULL"
 lax = SQL[Lax]("--sql\nSELECT sum(records) AS total FROM usage")
 # error: [column-type-mismatch] "Strict.total is int but query column 'total' infers decimal.Decimal"
-strict = SQL[Strict]("--sql\nSELECT sum(records) AS total FROM usage")
+strict = SQL[Strict]("--sql\nSELECT price AS total FROM usage")
 # error: [column-type-mismatch] "Configured.total is int but query column 'total' infers decimal.Decimal"
 configured = SQL[Configured]("--sql\nSELECT sum(records) AS total FROM usage")
 ```
@@ -475,4 +475,91 @@ class Plain:
 
 # error: [column-type-mismatch]
 plain = SQL[Plain]("--sql\nSELECT sum(records) AS total FROM usage")
+```
+
+## Rows named in `coerce-row-types`
+
+```toml
+[tool.sqlty]
+coerce-row-types = ["rows.Usage", "rows.Child", "rows.Pair", "pkg.Day"]
+```
+
+`rows.py`:
+
+```python
+import datetime
+import enum
+from dataclasses import dataclass
+from typing import NamedTuple
+from pydantic import SecretStr
+
+class Level(enum.StrEnum):
+    LOW = "low"
+
+@dataclass
+class Base:
+    total: int
+    token: SecretStr
+
+@dataclass
+class Child(Base):
+    created: datetime.datetime
+
+class Usage(NamedTuple):
+    total: int
+    level: Level
+
+class Pair(NamedTuple):
+    total: int
+    active: bool
+
+class Strict(NamedTuple):
+    total: int
+```
+
+`pkg/__init__.py`:
+
+```python
+import datetime
+from typing import TypedDict
+
+class Day(TypedDict):
+    created: datetime.datetime
+```
+
+### Fields take the conversions and inputs of a model
+
+```python
+from sqlty import SQL
+from rows import Child, Pair, Usage
+from pkg import Day
+
+usage = SQL[Usage]("--sql\nSELECT price AS total, 'low'::TEXT AS level FROM usage")
+child = SQL[Child]("--sql\nSELECT price AS total, 'x'::TEXT AS token, day AS created FROM usage")
+pair = SQL[Pair]("--sql\nSELECT price AS total, active FROM usage")
+day = SQL[Day]("--sql\nSELECT day AS created FROM usage")
+# error:
+```
+
+### A row not named stays strict
+
+```python
+from sqlty import SQL
+from rows import Base, Strict
+
+# error: [column-type-mismatch] "Strict.total is int but query column 'total' infers decimal.Decimal"
+strict = SQL[Strict]("--sql\nSELECT price AS total FROM usage")
+# error: [column-type-mismatch] "Base.total is int but query column 'total' infers decimal.Decimal"
+# error: [column-type-mismatch] "Base.token is SecretStr but query column 'token' infers str"
+base = SQL[Base]("--sql\nSELECT price AS total, 'x'::TEXT AS token FROM usage")
+```
+
+### A coerced field still rejects what Pydantic does not convert
+
+```python
+from sqlty import SQL
+from rows import Usage
+
+# error: [column-type-mismatch] "Usage.total is int but query column 'total' infers str"
+usage = SQL[Usage]("--sql\nSELECT 'x'::TEXT AS total, 'low'::TEXT AS level FROM usage")
 ```

@@ -59,6 +59,7 @@ class Run:
         self.query_variants: int | None = (
             settings.get("max-query-variants", MAX_QUERY_VARIANTS) if self.preview else None
         )
+        self.coerce_row_types: list[str] = settings.get("coerce-row-types", [])
         # With an `against.sql` file, `# error:` asserts what `sqlty breaking` reports.
         self.against_sql: str | None = section.files.get("against.sql")
 
@@ -294,6 +295,7 @@ class Run:
                 untyped=self.untyped,
                 helpers=self._helpers,
                 query_variants=self.query_variants,
+                coerce_row_types=self.coerce_row_types,
             )
         else:
             found = core.check_source(
@@ -305,6 +307,7 @@ class Run:
                 untyped=self.untyped,
                 helpers=self._helpers,
                 query_variants=self.query_variants,
+                coerce_row_types=self.coerce_row_types,
             )
         parsed = core.ParsedSource(code.text)
 

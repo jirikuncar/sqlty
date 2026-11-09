@@ -318,6 +318,7 @@ def _check(item: _Work) -> list[Diagnostic]:
         untyped=own.untyped,
         query_variants=own.query_variants,
         helpers=helpers,
+        coerce_row_types=own.coerce_row_types,
     )
 
 

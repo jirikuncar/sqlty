@@ -111,6 +111,7 @@ A directory with more than one file reads the first of `sqlty.toml`,
 | [`param-types`](#param-types) | `true`, `false` | `false` | `rewrite`, `check --fix` | Whether `SQL[R]` calls get the type of their parameters, `SQL[R, P]` |
 | [`preview`](#preview) | boolean | `false` | `check` | Turn on features still in preview: query variants |
 | [`max-query-variants`](#max-query-variants) | positive integer | `64` | `check` | With `preview`, the most variants of a query built in branches that `check` checks |
+| [`coerce-row-types`](#coerce-row-types) | list of strings | `[]` | `check` | `TypedDict`, `NamedTuple` and dataclass rows, as `module.Name`, the code validates with Pydantic |
 | [`functions`](#functions) | array of tables | `[]` | `check` | Helper functions whose string argument is a query |
 | [`types`](#types) | table of SQL type or `table.column` = Python type | `{}` | `rewrite`, `check` | Python types a converter above the driver gives a SQL type or a column |
 | [`format-command`](#format-command) | list of strings | none | `rewrite`, `check --fix` | Formatter run on each file `rewrite` or `check --fix` changes, with the path appended |
@@ -294,6 +295,21 @@ Example: [`examples/06_param_types/`](https://github.com/jirikuncar/sqlty/tree/m
     A type checker then rejects calls that psycopg runs: a list for a `tuple`,
     text for another type, a `dict[str, Any]` or extra keys for a `TypedDict`.
     That is why it is off by default.
+
+## `coerce-row-types`
+
+The `TypedDict`, `NamedTuple` and dataclass rows your code validates with Pydantic,
+such as through a `TypeAdapter`, each named `module.Name`. `check` reads their fields
+as it reads those of a `BaseModel`: in lax mode, and with Pydantic's types taking the
+input they validate.
+
+```toml
+[tool.sqlty]
+coerce-row-types = ["app.rows.User", "app.rows.Order"]
+```
+
+A row read straight from the driver gets what the driver returns, so the other rows stay
+strict. See [Rows validated with Pydantic](../guide/row-types.md#rows-validated-with-pydantic).
 
 ## `functions`
 

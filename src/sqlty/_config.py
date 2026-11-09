@@ -113,6 +113,12 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "`check`",
         "With `preview`, the most variants of a query built in branches that `check` checks",
     ),
+    "coerce-row-types": KeyDoc(
+        "list of strings",
+        "`[]`",
+        "`check`",
+        "`TypedDict`, `NamedTuple` and dataclass rows, as `module.Name`, the code validates with Pydantic",
+    ),
     "functions": KeyDoc(
         "array of tables",
         "`[]`",
@@ -326,6 +332,7 @@ class SQLTyConfig(TypedDict, total=False):
     param_types: bool  # write the P of SQL[R, P]: a tuple, or a generated TypedDict
     preview: bool  # features still in preview: query variants
     max_query_variants: int  # the most variants of a query built in branches that check checks
+    coerce_row_types: list[str]  # row types, as module.Name, read as Pydantic validates them
     exclude: list[str]  # globs replacing the default excludes, relative to the configuration file
     extend_exclude: list[str]  # globs excluded in addition to the above
     respect_gitignore: bool  # skip what .gitignore ignores while walking
