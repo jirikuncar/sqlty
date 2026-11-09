@@ -1,0 +1,28 @@
+{
+  "schemas": {
+    "shop": "CREATE TABLE users (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    email TEXT\n);\n\nCREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    user_id INTEGER NOT NULL REFERENCES users (id),\n    total NUMERIC(10, 2) NOT NULL,\n    placed_at TIMESTAMP NOT NULL\n);\n",
+    "joins": "CREATE TABLE customers (\n    id INTEGER PRIMARY KEY,\n    segment TEXT NOT NULL\n);\n\nCREATE TABLE products (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL\n);\n\nCREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    customer_id INTEGER NOT NULL REFERENCES customers (id),\n    total NUMERIC(10, 2) NOT NULL\n);\n\nCREATE TABLE order_items (\n    id INTEGER PRIMARY KEY,\n    order_id INTEGER NOT NULL REFERENCES orders (id),\n    product_id INTEGER NOT NULL REFERENCES products (id),\n    amount NUMERIC(10, 2) NOT NULL\n);\n\nCREATE TABLE payments (\n    id INTEGER PRIMARY KEY,\n    order_id INTEGER NOT NULL REFERENCES orders (id),\n    amount NUMERIC(10, 2) NOT NULL\n);\n"
+  },
+  "questions": [
+    {"schema": "shop", "question": "How many users are there?", "gold": "SELECT COUNT(*) FROM users"},
+    {"schema": "shop", "question": "Names of the users without an email.", "gold": "SELECT name FROM users WHERE email IS NULL"},
+    {"schema": "shop", "question": "Total revenue of all orders.", "gold": "SELECT SUM(total) FROM orders"},
+    {"schema": "shop", "question": "Each user's name and number of orders, including users with no orders.", "gold": "SELECT u.name, COUNT(o.id) FROM users AS u LEFT JOIN orders AS o ON o.user_id = u.id GROUP BY u.id, u.name"},
+    {"schema": "shop", "question": "The 5 users who spent the most, with how much they spent.", "gold": "SELECT u.name, SUM(o.total) AS spent FROM users AS u JOIN orders AS o ON o.user_id = u.id GROUP BY u.id, u.name ORDER BY spent DESC LIMIT 5", "ordered": true},
+    {"schema": "shop", "question": "Ids and totals of the orders placed in 2025.", "gold": "SELECT id, total FROM orders WHERE placed_at >= '2025-01-01' AND placed_at < '2026-01-01'"},
+    {"schema": "shop", "question": "Average order total per user name.", "gold": "SELECT u.name, AVG(o.total) FROM users AS u JOIN orders AS o ON o.user_id = u.id GROUP BY u.id, u.name"},
+    {"schema": "shop", "question": "Names of the users who never placed an order.", "gold": "SELECT name FROM users AS u WHERE NOT EXISTS (SELECT 1 FROM orders AS o WHERE o.user_id = u.id)"},
+    {"schema": "shop", "question": "Each user's name with the time of their latest order.", "gold": "SELECT u.name, MAX(o.placed_at) FROM users AS u JOIN orders AS o ON o.user_id = u.id GROUP BY u.id, u.name"},
+    {"schema": "shop", "question": "Number of orders per month.", "gold": "SELECT date_trunc('month', placed_at) AS month, COUNT(*) FROM orders GROUP BY 1"},
+    {"schema": "shop", "question": "Users whose email ends with @example.com.", "gold": "SELECT * FROM users WHERE email LIKE '%@example.com'"},
+    {"schema": "shop", "question": "The largest order's total and the name of the user who placed it.", "gold": "SELECT o.total, u.name FROM orders AS o JOIN users AS u ON u.id = o.user_id ORDER BY o.total DESC LIMIT 1"},
+    {"schema": "joins", "question": "Total order value per customer segment.", "gold": "SELECT c.segment, SUM(o.total) FROM customers AS c JOIN orders AS o ON o.customer_id = c.id GROUP BY c.segment"},
+    {"schema": "joins", "question": "Number of customers in each segment.", "gold": "SELECT segment, COUNT(*) FROM customers GROUP BY segment"},
+    {"schema": "joins", "question": "For every product, how many order items it has, including products never ordered.", "gold": "SELECT p.name, COUNT(oi.id) FROM products AS p LEFT JOIN order_items AS oi ON oi.product_id = p.id GROUP BY p.id, p.name"},
+    {"schema": "joins", "question": "The 3 products with the highest revenue from order items.", "gold": "SELECT p.name, SUM(oi.amount) AS revenue FROM products AS p JOIN order_items AS oi ON oi.product_id = p.id GROUP BY p.id, p.name ORDER BY revenue DESC LIMIT 3", "ordered": true},
+    {"schema": "joins", "question": "Ids of the orders that have no payments.", "gold": "SELECT o.id FROM orders AS o WHERE NOT EXISTS (SELECT 1 FROM payments AS p WHERE p.order_id = o.id)"},
+    {"schema": "joins", "question": "Ids of the orders whose payments add up to less than the order total.", "gold": "SELECT o.id FROM orders AS o JOIN payments AS p ON p.order_id = o.id GROUP BY o.id, o.total HAVING SUM(p.amount) < o.total"},
+    {"schema": "joins", "question": "Average number of items per order.", "gold": "SELECT AVG(n) FROM (SELECT COUNT(oi.id) AS n FROM orders AS o LEFT JOIN order_items AS oi ON oi.order_id = o.id GROUP BY o.id) AS t"},
+    {"schema": "joins", "question": "Ids of the customers who bought the product named 'Widget'.", "gold": "SELECT DISTINCT o.customer_id FROM orders AS o JOIN order_items AS oi ON oi.order_id = o.id JOIN products AS p ON p.id = oi.product_id WHERE p.name = 'Widget'"}
+  ]
+}

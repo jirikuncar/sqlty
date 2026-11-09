@@ -41,6 +41,12 @@ queries as you type. It runs in your browser. The engine is compiled to
     </span>
     <span class="sqlty-status" data-link-status role="status"></span>
   </div>
+  <form class="sqlty-ask" data-ask hidden>
+    <input type="text" data-ask-question required placeholder="Ask for a query: users who never placed an order" aria-label="Question">
+    <select data-ask-model aria-label="Model"></select>
+    <button type="submit" class="sqlty-button sqlty-button--primary">Ask</button>
+    <span class="sqlty-status" data-ask-status role="status"></span>
+  </form>
   <nav class="sqlty-steps" aria-label="Steps" data-steps hidden>
     <button type="button" class="sqlty-button" data-step="-1" title="Previous step (PageUp)" aria-label="Previous step">&larr;</button>
     <select data-step-select aria-label="Step"></select>
@@ -101,6 +107,12 @@ queries as you type. It runs in your browser. The engine is compiled to
   .sqlty-narrow { display: none; }
   .sqlty-narrow::before { content: "Link"; }
   .sqlty-status { flex-basis: 100%; font-size: 0.64rem; }
+  .sqlty-ask { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
+  .sqlty-ask[hidden] { display: none; }
+  .sqlty-ask input {
+    flex: 1 1 16rem; font: inherit; font-size: 0.7rem; padding: 0.3rem 0.7rem; color: var(--md-default-fg-color);
+    background-color: var(--md-code-bg-color); border: 1px solid var(--md-default-fg-color--lighter); border-radius: 0.2rem;
+  }
   .sqlty-status:empty { display: none; }
   #sqlty-playground select, .sqlty-button {
     font: inherit; font-size: 0.7rem; line-height: 1.4; padding: 0.3rem 0.7rem; white-space: nowrap;

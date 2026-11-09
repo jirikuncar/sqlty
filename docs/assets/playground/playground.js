@@ -653,6 +653,69 @@ function resizable(handle, panel) {
   });
 }
 
+if (new URLSearchParams(location.search).has("ask")) asking(root.querySelector("[data-ask]"));
+
+// Natural language to SQL with a model that runs in the page (ask.js), behind `?ask`.
+async function asking(form) {
+  const llm = await import("./ask.js");
+  const question = form.querySelector("[data-ask-question]");
+  const picked = form.querySelector("[data-ask-model]");
+  const status = form.querySelector("[data-ask-status]");
+  const mib = (bytes) => `${Math.round(bytes / 2 ** 20)} MiB`;
+  picked.replaceChildren(...llm.MODELS.map((model) => option(model.id, `${model.label} (${mib(model.bytes)})`)));
+  picked.value = saved.model ?? llm.MODELS[0].id;
+  picked.addEventListener("change", () => remember({ model: picked.value }));
+  let loaded;
+  form.hidden = false;
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const button = form.querySelector("button");
+    button.disabled = true;
+    try {
+      const model = llm.MODELS.find((found) => found.id === picked.value);
+      if (loaded?.model !== model) {
+        status.textContent = `Loading ${model.label}...`;
+        await loaded?.instance.exit();
+        const instance = await llm.wllama();
+        const complete = await llm.loadModel(instance, model, {
+          onProgress: (done, total) => (status.textContent = `Downloading ${model.label}: ${mib(done)} of ${mib(total)}`),
+        });
+        loaded = { model, instance, complete };
+      }
+      status.textContent = "Writing the query...";
+      const { schema, dialect: chosenDialect, config } = request("analyze");
+      const { sql, attempts } = await llm.answer({
+        complete: (conversation) => {
+          if (conversation.length > 2) status.textContent = `sqlty found problems, asking again (${(conversation.length - 2) / 2})...`;
+          return loaded.complete(conversation);
+        },
+        engine: ask,
+        schema,
+        dialect: chosenDialect,
+        config,
+        question: question.value,
+      });
+      const source = models.python.getValue();
+      const taken = new Set(source.match(/^\w+(?= =)/gm));
+      let name = "answer";
+      for (let n = 2; taken.has(name); n++) name = `answer_${n}`;
+      const added = `\n# ${question.value.replace(/\s+/g, " ")}\n${llm.python(sql, name)}`;
+      const left = attempts.at(-1).problems.length;
+      replace(models.python, source.replace(/\n*$/, "\n") + added);
+      open("python");
+      editor.revealLine(models.python.getLineCount());
+      status.textContent =
+        `${model.label} wrote ${name}` +
+        (attempts.length > 1 ? ` after ${attempts.length - 1} round(s) of sqlty feedback` : "") +
+        (left ? `; ${left} problem(s) left` : "") + ".";
+    } catch (error) {
+      status.textContent = String(error.message ?? error);
+    } finally {
+      button.disabled = false;
+    }
+  });
+}
+
 navigator.serviceWorker?.ready.then((registration) => registration.active?.postMessage("playground"));
 if (saved.size) root.style.setProperty("--sqlty-font", `${size}px`);
 if (shared) resume(shared);
