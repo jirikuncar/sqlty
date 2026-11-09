@@ -52,6 +52,38 @@ pub const TOOL_KEYS: [&str; 19] = [
     "databases",
 ];
 
+/// The `types` a `driver` adds in PostgreSQL, under the project's own: psycopg loads ranges
+/// and multiranges as its own classes
+/// (<https://www.psycopg.org/psycopg3/docs/basic/pgtypes.html>).
+pub fn driver_types(driver: &str, dialect: &str) -> Vec<(String, String)> {
+    const RANGES: [(&str, &str); 6] = [
+        ("INT4", "int"),
+        ("INT8", "int"),
+        ("NUM", "decimal.Decimal"),
+        ("DATE", "datetime.date"),
+        ("TS", "datetime.datetime"),
+        ("TSTZ", "datetime.datetime"),
+    ];
+    if driver != "psycopg" || dialect != "postgres" {
+        return Vec::new();
+    }
+    RANGES
+        .iter()
+        .flat_map(|(base, python)| {
+            [
+                (
+                    format!("{base}RANGE"),
+                    format!("psycopg.types.range.Range[{python}]"),
+                ),
+                (
+                    format!("{base}MULTIRANGE"),
+                    format!("psycopg.types.multirange.Multirange[{python}]"),
+                ),
+            ]
+        })
+        .collect()
+}
+
 /// Keys of `[tool.sqlty]` that pick the files to process.
 pub const DISCOVERY_KEYS: [&str; 3] = ["exclude", "extend-exclude", "respect-gitignore"];
 

@@ -55,8 +55,7 @@ struct Request {
     /// A `sqlty.toml`: its `dialect` wins over the request's.
     #[serde(default)]
     config: String,
-    /// A sqlty table the host already resolved (`extend` applied), as `config` answers it:
-    /// its `dialect`, `import-style`, `param-types`, `rules` and `types` apply.
+    /// A sqlty table the host already resolved (`extend` applied), as `config` answers it.
     #[serde(default)]
     settings: Option<serde_json::Map<String, Value>>,
     /// The path of the file `config` reads `source` from, for its messages; its name picks the
@@ -85,9 +84,9 @@ struct Request {
 ///   `Cargo.toml` without one, unless `required`. A host finds and merges the files
 ///   (`extend`), then passes the result as `settings`.
 ///
-/// `config` is a `sqlty.toml` whose `dialect`, `import-style`, `param-types` and `rules` apply;
-/// another key, or an invalid one, is an `error`, as `sqlty check` reports it. `settings`
-/// replaces it with a table `config` answered, whose `types` apply too.
+/// `config` is a `sqlty.toml` whose `dialect`, `driver`, `import-style`, `param-types`, `rules`
+/// and `types` apply; another key, or an invalid one, is an `error`, as `sqlty check` reports
+/// it. `settings` replaces it with a table `config` answered, `extend` applied.
 pub fn run(request: &str) -> String {
     let error = |error: String| json!({ "error": error }).to_string();
     let request: Request = match serde_json::from_str(request) {
@@ -214,7 +213,7 @@ struct Settings {
     types: Vec<(String, String)>,
 }
 
-/// The settings of a table `config` answered.
+/// The settings of a table `config` answered; a `driver` adds its `types` under the table's.
 fn resolved(table: &serde_json::Map<String, Value>) -> Settings {
     let text = |key: &str| table.get(key).and_then(Value::as_str).map(String::from);
     let pairs = |key: &str| {
@@ -226,14 +225,30 @@ fn resolved(table: &serde_json::Map<String, Value>) -> Settings {
             .filter_map(|(key, value)| Some((key.clone(), value.as_str()?.to_string())))
             .collect::<Vec<_>>()
     };
+    let dialect = text("dialect");
+    let mut types = match text("driver") {
+        Some(driver) => config::driver_types(&driver, dialect.as_deref().unwrap_or("postgres")),
+        None => Vec::new(),
+    };
+    types.extend(pairs("types"));
     Settings {
-        dialect: text("dialect"),
+        dialect,
         import_style: text("import-style"),
         param_types: table.get("param-types") == Some(&Value::Bool(true)),
         rules: pairs("rules").into_iter().collect(),
-        types: pairs("types"),
+        types,
     }
 }
+
+/// The keys the engine reads: the others name files, which the page has none of.
+const READ: [&str; 6] = [
+    "dialect",
+    "driver",
+    "import-style",
+    "param-types",
+    "rules",
+    "types",
+];
 
 /// The settings of the `sqlty.toml` text `config`, validated as `sqlty check` validates it.
 fn settings(config: &str) -> Result<Settings, String> {
@@ -241,37 +256,16 @@ fn settings(config: &str) -> Result<Settings, String> {
         .map_err(|error| error.to_string())?
         .map(|config| config.table)
         .unwrap_or_default();
-    // The other keys name files, which the page has none of.
-    if let Some(key) = table
-        .keys()
-        .find(|key| !["dialect", "import-style", "param-types", "rules"].contains(&key.as_str()))
-    {
+    if let Some(key) = table.keys().find(|key| !READ.contains(&key.as_str())) {
         return Err(format!(
-            "sqlty.toml: the playground reads only dialect, import-style, param-types, rules, not '{key}'"
+            "sqlty.toml: the playground reads only {}, not '{key}'",
+            READ.join(", ")
         ));
     }
-    let text = |key: &str| {
-        table
-            .get(key)
-            .and_then(|value| value.as_str())
-            .map(String::from)
-    };
-    let rules = table
-        .get("rules")
-        .and_then(|rules| rules.as_table())
-        .into_iter()
-        .flatten();
-    Ok(Settings {
-        dialect: text("dialect"),
-        import_style: text("import-style"),
-        param_types: table
-            .get("param-types")
-            .is_some_and(|value| value.as_bool() == Some(true)),
-        rules: rules
-            .filter_map(|(rule, severity)| Some((rule.clone(), severity.as_str()?.to_string())))
-            .collect(),
-        types: Vec::new(),
-    })
+    match json!(table) {
+        Value::Object(table) => Ok(resolved(&table)),
+        _ => unreachable!("a TOML table is a JSON object"),
+    }
 }
 
 /// The row type, columns and parameters of the query `sql` on `line`.

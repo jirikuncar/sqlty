@@ -309,6 +309,15 @@ no processes, so there is no `sqlty server`. The extension runs the engine itsel
 to WebAssembly, as the [playground](../playground.md) does: diagnostics with their quick
 fixes, completion and hover in the query strings, and SQL highlighting.
 
+[Open the examples on github.dev](https://github.dev/jirikuncar/sqlty/blob/main/examples/07_joins/queries.py)
+to try it: install the recommended **SQLTy** extension when VS Code offers it, then open a
+`queries.py` of another example. Each example has its own `pyproject.toml`, so each is
+checked against its own schema.
+
+!!! note "Needs the next release of the extension"
+    vscode.dev and github.dev install the extension from the Marketplace. The engine
+    ships in the release after sqlty 0.5.1; before it, the web extension highlights only.
+
 The configuration is found as `sqlty check` finds it: the closest `sqlty.toml`,
 `pyproject.toml` with `[tool.sqlty]` or `Cargo.toml` with a sqlty table above each file,
 with `extend` applied, so each project of a monorepo gets its own. The engine reads

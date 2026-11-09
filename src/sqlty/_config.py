@@ -26,26 +26,6 @@ MAX_QUERY_VARIANTS = 64
 """Default of ``max-query-variants``."""
 
 
-_RANGES = {
-    "INT4": "int",
-    "INT8": "int",
-    "NUM": "decimal.Decimal",
-    "DATE": "datetime.date",
-    "TS": "datetime.datetime",
-    "TSTZ": "datetime.datetime",
-}
-
-DRIVER_TYPES: dict[str, dict[str, str]] = {
-    "psycopg": {
-        f"{base}{kind.upper()}": f"psycopg.types.{kind}.{name}[{python}]"
-        for base, python in _RANGES.items()
-        for kind, name in (("range", "Range"), ("multirange", "Multirange"))
-    }
-}
-"""The ``types`` a ``driver`` adds in PostgreSQL, under the project's own; see psycopg's
-`adaptation docs <https://www.psycopg.org/psycopg3/docs/basic/pgtypes.html>`_."""
-
-
 def driver_types(
     driver: str | None, dialect: str, types: dict[str, str] | None
 ) -> dict[str, str] | None:
@@ -59,7 +39,7 @@ def driver_types(
     """
     if driver is None or dialect != "postgres":
         return types
-    return DRIVER_TYPES[driver] | (types or {})
+    return dict(_core.driver_types(driver, dialect)) | (types or {})
 
 
 class KeyDoc(NamedTuple):

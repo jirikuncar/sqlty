@@ -134,7 +134,7 @@ fn config_errors_are_reported_as_sqlty_check_reports_them() {
         ("[rules]\nselect-star = \"loud\"", "loud"),
         (
             "schema = \"schema.sql\"",
-            "the playground reads only dialect, import-style, param-types, rules, not 'schema'",
+            "the playground reads only dialect, driver, import-style, param-types, rules, types, not 'schema'",
         ),
         ("import-style = \"from x\"", "Unsupported import-style"),
         ("param-types = 1", "param-types must be true or false"),
@@ -245,5 +245,19 @@ fn settings_resolved_by_the_host_apply_with_their_types() {
     assert_eq!(
         bad["error"],
         "[tool.sqlty.types]: `NOT A TYPE` is not a SQL type"
+    );
+}
+
+#[test]
+fn a_driver_types_ranges_under_the_projects_types() {
+    let source = "q = \"--sql\\nSELECT during, days FROM b\"\n";
+    let answer = ask(&json!({
+        "op": "analyze", "source": source, "dialect": "postgres",
+        "schema": "CREATE TABLE b (during tstzrange NOT NULL, days daterange NOT NULL);",
+        "config": "driver = \"psycopg\"\n\n[types]\nDATERANGE = \"str\"\n",
+    }));
+    assert_eq!(
+        answer["queries"][0]["row_type"],
+        "tuple[psycopg.types.range.Range[datetime.datetime], str]"
     );
 }
