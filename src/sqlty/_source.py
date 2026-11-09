@@ -481,6 +481,32 @@ class ParsedSource:
         return [0, *(m.end() for m in re.finditer(r"\r\n?|\n", self.text)), len(self.text)]
 
     @functools.cached_property
+    def literals(self) -> frozenset[str]:
+        """String literals that are not an operand of ``+``: the marked ones are the queries
+        the engine reads by their marker.
+
+        Example:
+            >>> sorted(ParsedSource("a = 'x'\\nb = 'y' + c").literals)
+            ['x']
+        """
+        if self.tree is None:
+            return frozenset()
+        nodes = list(ast.walk(self.tree))
+        operands = {
+            id(side)
+            for node in nodes
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add)
+            for side in (node.left, node.right)
+        }
+        return frozenset(
+            node.value
+            for node in nodes
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in operands
+        )
+
+    @functools.cached_property
     def psycopg(self) -> PsycopgScan:
         """What ``psycopg.sql`` compositions need: imports, scopes and single assignments.
 

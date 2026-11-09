@@ -359,7 +359,7 @@ impl Checker<'_> {
                 }
                 continue;
             }
-            if enclosing.is_some() {
+            if enclosing.is_some() || group.concatenated {
                 continue;
             }
             let first = scan.tokens[group.tokens[0]].span.clone();

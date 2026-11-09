@@ -622,7 +622,9 @@ def query_statistics(
                 counts["dynamic-query" if call.dynamic else "unchecked-query"] += 1
             continue
         for query in [v.query for v in call.variants] or [call.query]:
-            if not MARKER.match(query) and (outcome := _outcome(query, dialect, schema_sql)):
+            if not (MARKER.match(query) and query in parsed.literals) and (
+                outcome := _outcome(query, dialect, schema_sql)
+            ):
                 counts[outcome] += 1
     return counts
 
