@@ -1,0 +1,4 @@
+[tool.sqlty]
+schema = "schema.sql"
+# Type ranges as psycopg loads them: Range[T] and Multirange[T]
+driver = "psycopg"

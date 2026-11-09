@@ -1370,6 +1370,7 @@ class Settings:
     rules: dict[str, str] | None = None
     query_variants: int | None = None
     preview: bool = False
+    coerce_row_types: frozenset[str] = frozenset()
     functions: tuple[tuple[str, str, str | None], ...] = ()
     # The functions each named database lists, read against it in any file.
     database_functions: tuple[tuple[str, str, str | None, str], ...] = ()
@@ -1575,16 +1576,15 @@ class SettingsResolver:
                 f"{self.source.origin('import_style', label)}: {exc}; "
                 "use 'from sqlty import SQL [as Q]' or 'import sqlty [as sy]'"
             ) from None
-        from sqlty._config import MAX_QUERY_VARIANTS
+        from sqlty._config import MAX_QUERY_VARIANTS, driver_types
 
         dialect = dialect_flag or config.get("dialect", "postgres")
+        types = driver_types(config.get("driver"), dialect, config.get("types"))
         return Settings(
             dialect=dialect,
-            schema=None
-            if schema_sql is None
-            else self._schema(schema_sql, dialect, config.get("types")),
+            schema=None if schema_sql is None else self._schema(schema_sql, dialect, types),
             schema_sql=schema_sql,
-            types=config.get("types"),
+            types=types,
             import_style=import_style,
             untyped=untyped == "sentinel",
             json_types=json_types,
@@ -1594,6 +1594,7 @@ class SettingsResolver:
             if config.get("preview")
             else None,
             preview=bool(config.get("preview")),
+            coerce_row_types=frozenset(config.get("coerce_row_types", ())),
             functions=tuple(
                 (f["import_path"], f["query_param"], f.get("return_type_param"))
                 for f in config.get("functions", [])
@@ -1698,6 +1699,7 @@ class Project:
             helpers=self.helpers[path],
             row_usage=row_usage,
             query_variants=settings.query_variants,
+            coerce_row_types=settings.coerce_row_types,
         )
 
     def fix(self, path: Path) -> str:

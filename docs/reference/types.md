@@ -60,7 +60,7 @@ These look like bugs but follow the drivers:
 | `INET` | `ipaddress.IPv4Address \| ipaddress.IPv6Address \| ipaddress.IPv4Interface \| ipaddress.IPv6Interface` | psycopg loads an address with a prefix (`1.2.3.4/24`) as an interface |
 | `MONEY`, `XML`, `reg*`, `xid`, `tsvector` | `str` | psycopg loads them as text |
 | `INTERVAL` with a year or month part | `datetime.timedelta` | psycopg counts a year as 365 days and a month as 30 |
-| Ranges, multiranges | unknown | psycopg loads them as its own `Range` and `Multirange`; [`unknown-type`](rules.md#unknown-type) names them |
+| Ranges, multiranges | unknown; with [`driver = "psycopg"`](configuration.md#driver), psycopg's `Range` and `Multirange` | psycopg loads them as its own classes, which the mapping does not name unless you opt in; [`unknown-type`](rules.md#unknown-type) names them |
 | PostgreSQL geometric types (`point`, `box`, ...) | `str` | psycopg has no loader for them and returns their text |
 | `DATE 'infinity'`, MySQL `'0000-00-00'` | the column's type | Values outside Python's range: psycopg raises `DataError` for `infinity` (asyncpg and psycopg2 return `date.max`), PyMySQL returns a zero date as `str`, mysqlclient as `None` |
 | DuckDB `T[3]` | `tuple[T, ...]` | The DuckDB client returns a fixed-size `ARRAY` as a tuple, a `LIST` (`T[]`) as a list |
@@ -110,6 +110,44 @@ SELECT CAST(x AS JSONB) AS a, CAST(x AS INET) AS b, CAST(x AS CIDR) AS c, CAST(x
 -- columns: d: str (MONEY)
 -- columns: e: str (BIT(3))
 -- columns: f: list[int] (ARRAY<INT>)
+```
+
+### Ranges with psycopg
+
+[`driver = "psycopg"`](configuration.md#driver) types ranges and multiranges with
+psycopg's classes, as its loaders return them. `lower()` and `upper()` return the
+element type.
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+driver = "psycopg"
+```
+
+```sql
+SELECT CAST(x AS INT4RANGE) AS a, CAST(x AS INT8RANGE) AS b, CAST(x AS NUMRANGE) AS c, CAST(x AS DATERANGE) AS d, CAST(x AS TSRANGE) AS e, CAST(x AS TSTZRANGE) AS f
+-- columns: a: psycopg.types.range.Range[int] (INT4RANGE)
+-- columns: b: psycopg.types.range.Range[int] (INT8RANGE)
+-- columns: c: psycopg.types.range.Range[decimal.Decimal] (NUMRANGE)
+-- columns: d: psycopg.types.range.Range[datetime.date] (DATERANGE)
+-- columns: e: psycopg.types.range.Range[datetime.datetime] (TSRANGE)
+-- columns: f: psycopg.types.range.Range[datetime.datetime] (TSTZRANGE)
+```
+
+```sql
+SELECT CAST(x AS INT4MULTIRANGE) AS a, CAST(x AS INT8MULTIRANGE) AS b, CAST(x AS NUMMULTIRANGE) AS c, CAST(x AS DATEMULTIRANGE) AS d, CAST(x AS TSMULTIRANGE) AS e, CAST(x AS TSTZMULTIRANGE) AS f
+-- columns: a: psycopg.types.multirange.Multirange[int] (INT4MULTIRANGE)
+-- columns: b: psycopg.types.multirange.Multirange[int] (INT8MULTIRANGE)
+-- columns: c: psycopg.types.multirange.Multirange[decimal.Decimal] (NUMMULTIRANGE)
+-- columns: d: psycopg.types.multirange.Multirange[datetime.date] (DATEMULTIRANGE)
+-- columns: e: psycopg.types.multirange.Multirange[datetime.datetime] (TSMULTIRANGE)
+-- columns: f: psycopg.types.multirange.Multirange[datetime.datetime] (TSTZMULTIRANGE)
+```
+
+```sql
+SELECT lower(CAST(x AS DATERANGE)) AS a, upper(CAST(x AS NUMRANGE)) AS b
+-- columns: a: datetime.date | None (DATE)
+-- columns: b: decimal.Decimal | None (DECIMAL)
 ```
 
 ## MySQL
