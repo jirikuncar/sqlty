@@ -6,7 +6,7 @@ of table and column names in the query strings it checks, and SQL highlighting i
 marked `--sql`. The `.sql` files of named queries that the
 [`queries`](https://sqlty.kuncar.dev/guide/sql-files/) key names get their diagnostics too.
 
-<img src="https://raw.githubusercontent.com/jirikuncar/sqlty/main/docs/assets/vscode-demo.gif" alt="VS Code: adding email to a --sql query, saving formats it and fixes its row type; making email nullable in schema.sql flags the query, and the quick fix adds | None; typing u. completes the columns of users" width="900">
+![VS Code: adding email to a --sql query, saving formats it and fixes its row type; making email nullable in schema.sql flags the query, and the quick fix adds | None; typing u. completes the columns of users](https://raw.githubusercontent.com/jirikuncar/sqlty/main/docs/assets/vscode-demo.gif)
 
 The extension runs `sqlty server` from your project, so the editor and CI agree. Add sqlty
 to the project's environment (`uv add --dev sqlty`); the extension bundles none.
