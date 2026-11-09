@@ -10,7 +10,7 @@ import tokenize
 from functools import cached_property
 
 import sqlty.core as core
-from sqlty._config import MAX_QUERY_VARIANTS
+from sqlty._config import MAX_QUERY_VARIANTS, driver_types
 
 from .parser import Assertion, Kind, Section, Unit
 from .updater import Updater
@@ -32,7 +32,8 @@ class Run:
         settings = section.settings
         self.dialect: str = settings.get("dialect", "postgres")
         self.schema_sql: str | core.Schema | None = section.schema_sql
-        if types := settings.get("types"):
+        types = driver_types(settings.get("driver"), self.dialect, settings.get("types"))
+        if types:
             self.schema_sql = core.load_schema(
                 self.schema_sql or "", dialect=self.dialect, types=types
             )

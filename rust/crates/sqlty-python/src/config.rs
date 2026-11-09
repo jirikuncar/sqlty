@@ -30,8 +30,9 @@ use sqlty_sql::Dialect;
 pub const CONFIG_FILES: [&str; 3] = ["sqlty.toml", "pyproject.toml", "Cargo.toml"];
 
 /// Keys of `[tool.sqlty]` that are not file discovery; see also [`DISCOVERY_KEYS`].
-pub const TOOL_KEYS: [&str; 18] = [
+pub const TOOL_KEYS: [&str; 19] = [
     "dialect",
+    "driver",
     "schema",
     "queries",
     "query-format",
@@ -178,6 +179,12 @@ pub fn validate(mut table: Table, source: &str) -> Result<Config, InvalidConfig>
         if table.get(key).is_some_and(|value| !value.is_str()) {
             return fail(format!("[tool.sqlty] {key} must be a string"));
         }
+    }
+    if table
+        .get("driver")
+        .is_some_and(|driver| driver.as_str() != Some("psycopg"))
+    {
+        return fail("[tool.sqlty] driver must be \"psycopg\"".into());
     }
     if let Some(dialect) = table.get("dialect").and_then(Value::as_str) {
         if dialect.parse::<Dialect>().is_err() {
@@ -510,6 +517,7 @@ mod tests {
         assert!(invalid("schema = 1").contains("schema must be a path"));
         assert!(invalid("max-query-variants = 0").contains("positive integer"));
         assert!(invalid("coerce-row-types = \"app.User\"").contains("list of row type names"));
+        assert!(invalid("driver = \"asyncpg\"").contains("must be \"psycopg\""));
         assert!(invalid("types = { DATE = 1 }").contains("types must be a table"));
         assert!(invalid("databases = 1").contains("databases must be a table of tables"));
         assert!(invalid("[databases.default]").contains("not 'default'"));

@@ -100,6 +100,7 @@ A directory with more than one file reads the first of `sqlty.toml`,
 | Key | Type | Default | Used by | Summary |
 |-----|------|---------|---------|---------|
 | [`dialect`](#dialect) | `"postgres"`, `"sqlite"`, `"mysql"` | `"postgres"` | `rewrite`, `check` | SQL dialect of queries and schema |
+| [`driver`](#driver) | `"psycopg"` | none | `rewrite`, `check` | Driver whose own classes type the columns the default mapping leaves untyped: PostgreSQL ranges |
 | [`schema`](#schema) | string or list of strings | none | `rewrite`, `check` | Schema `.sql` files, directories or globs, relative to the configuration file |
 | [`queries`](#queries) | string or list of strings | none | `check` | `.sql` files of named queries (aiosql, sqlc, PugSQL), directories or globs, relative to the configuration file |
 | [`query-format`](#query-format) | `"auto"`, `"aiosql"`, `"sqlc"`, `"pugsql"`, `"file"` | `"auto"` | `check` | How `queries` files name their queries; `auto` reads each file's first header |
@@ -128,6 +129,30 @@ SQL dialect for queries and the schema: `"postgres"` (default), `"sqlite"`,
 `"mysql"`, or another [dialect](engine.md#dialects) sqlparser-rs knows. CLI:
 `--dialect` (the first three only), which overrides this key. See
 [Dialects](../guide/schema-inference.md#dialects).
+
+## `driver`
+
+The driver your code reads rows with, when its own classes type columns that the
+default mapping leaves unknown. `"psycopg"` types PostgreSQL ranges and multiranges as
+psycopg loads them:
+
+| SQL | Python |
+|-----|--------|
+| `int4range`, `int8range` | `psycopg.types.range.Range[int]` |
+| `numrange` | `psycopg.types.range.Range[decimal.Decimal]` |
+| `daterange` | `psycopg.types.range.Range[datetime.date]` |
+| `tsrange`, `tstzrange` | `psycopg.types.range.Range[datetime.datetime]` |
+| `int4multirange`, ... | `psycopg.types.multirange.Multirange[...]` of the same type |
+
+```toml
+[tool.sqlty]
+driver = "psycopg"
+```
+
+The entries sit under [`types`](#types), which can replace any of them. Without
+`driver`, every type the mapping names is from the standard library, so a project
+that does not use psycopg never gets a psycopg import from `rewrite`. Other dialects
+ignore it.
 
 ## `schema`
 
