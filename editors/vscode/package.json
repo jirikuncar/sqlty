@@ -166,7 +166,8 @@
     "check": "tsc --noEmit && oxlint --deny-warnings src && oxfmt --check src",
     "format": "oxfmt src",
     "test": "npm run build && npm run build-test && vscode-test",
-    "package": "npm run build -- --minify && cp ../../LICENSE LICENSE && vsce package"
+    "package": "npm run build -- --minify && cp ../../LICENSE LICENSE && vsce package",
+    "demo": "node scripts/demo.js"
   },
   "dependencies": {
     "@vscode/python-extension": "^1.0.6",

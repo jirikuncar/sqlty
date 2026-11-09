@@ -74,6 +74,10 @@ npm run check    # tsc, oxlint, oxfmt
 npm test         # opens fixture/ in VS Code; needs a sqlty with `sqlty server` on PATH
 ```
 
+`npm run demo` re-records `docs/assets/vscode-demo.gif` from `sqlty.vsix` in
+[openvscode-server](https://github.com/gitpod-io/openvscode-server) at `$OPENVSCODE_SERVER`;
+it needs `sqlty` on `PATH`, Playwright, ffmpeg and gifsicle.
+
 `npm run package` writes `sqlty.vsix`. Each GitHub release publishes it under the
 release's version, to the Visual Studio Marketplace and Open VSX, both by trusted publishing (no
 token; the `vscode` environment); run the workflow by hand to publish the
