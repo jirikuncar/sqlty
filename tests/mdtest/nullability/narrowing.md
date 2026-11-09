@@ -692,6 +692,53 @@ row = fetch_one("SELECT CASE WHEN orders.id IS NOT NULL THEN json_build_object('
 # error:
 ```
 
+### A guard on the whole row or on the foreign key
+
+`w IS NULL` is true for the row of NULLs an outer join adds, so where it is not, the
+joined row is there. A nullable foreign key the join matches exactly finds its row
+where the key is not NULL.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE owners (id INTEGER PRIMARY KEY, name TEXT NOT NULL, region TEXT, code TEXT, UNIQUE (region, code));
+CREATE TABLE orders (
+    id INTEGER PRIMARY KEY,
+    owner_id INTEGER REFERENCES owners (id),
+    region TEXT,
+    code TEXT,
+    FOREIGN KEY (region, code) REFERENCES owners (region, code)
+);
+```
+
+```sql
+SELECT
+    CASE WHEN w IS NULL THEN NULL ELSE jsonb_build_object('id', w.id, 'name', w.name) END AS a,
+    CASE WHEN o.owner_id IS NULL THEN NULL ELSE jsonb_build_object('id', w.id, 'name', w.name) END AS b
+FROM orders o LEFT JOIN owners w ON w.id = o.owner_id
+-- json: a: {id: integer, name: string}
+-- json: b: {id: integer, name: string}
+```
+
+```sql
+SELECT w.name FROM orders o LEFT JOIN owners w ON w.region = o.region AND w.code = o.code
+WHERE o.region IS NOT NULL AND o.code IS NOT NULL
+-- inferred: tuple[str]
+```
+
+Part of the key, or a join on columns that are no foreign key, can find no row.
+
+```sql
+SELECT w.name FROM orders o LEFT JOIN owners w ON w.region = o.region AND w.code = o.code
+WHERE o.region IS NOT NULL
+-- inferred: tuple[str | None]
+```
+
+```sql
+SELECT w.name FROM orders o LEFT JOIN owners w ON w.id = o.id WHERE o.owner_id IS NOT NULL
+-- inferred: tuple[str | None]
+```
+
 ## Narrowing stays in its query
 
 A derived table or CTE is narrowed by its own conditions, not by the outer query.
