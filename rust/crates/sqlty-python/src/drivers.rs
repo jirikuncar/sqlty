@@ -244,7 +244,7 @@ impl<'a> Finder<'a, '_> {
     }
 
     fn query_of(&mut self, first: &'a Expr, chain: &[Scope]) -> Option<String> {
-        literal(Some(first)).or_else(|| match first {
+        literal(Some(first), self.source).or_else(|| match first {
             Expr::Name(name) => self.query(name.id.as_str(), chain),
             _ => None,
         })
@@ -447,7 +447,7 @@ impl<'a> Finder<'a, '_> {
     /// The query literal `name` is bound to, when it has exactly one binding.
     fn query(&mut self, name: &str, chain: &[Scope]) -> Option<String> {
         match self.lookup(name, chain)?.as_slice() {
-            [(value, _)] => literal(*value),
+            [(value, _)] => literal(*value, self.source),
             _ => None,
         }
     }
@@ -462,17 +462,17 @@ fn keyword<'a>(call: &'a ExprCall, name: &str) -> Option<&'a Expr> {
 }
 
 /// The text of a string literal, possibly wrapped as `SQL[T]("...")`.
-fn literal(expr: Option<&Expr>) -> Option<String> {
+fn literal(expr: Option<&Expr>, source: &str) -> Option<String> {
     match expr? {
         Expr::Call(call) if call.arguments.args.len() == 1 => match call.func.as_ref() {
             Expr::Subscript(sub)
                 if matches!(dotted(&sub.value).as_deref(), Some("SQL" | "sqlty.SQL")) =>
             {
-                literal(call.arguments.args.first())
+                literal(call.arguments.args.first(), source)
             }
             _ => None,
         },
-        Expr::StringLiteral(text) => Some(text.value.to_str().to_string()),
+        Expr::StringLiteral(text) => Some(crate::parse::text(text, source)),
         _ => None,
     }
 }

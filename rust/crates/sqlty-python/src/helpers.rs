@@ -76,7 +76,7 @@ pub fn sites(source: &str, names: &[String]) -> Option<Vec<Site>> {
                 continue;
             }
         }
-        found.push(site(call, stack, &ctx, &lines));
+        found.push(site(call, stack, &ctx, &lines, source));
     }
     Some(found)
 }
@@ -118,7 +118,13 @@ fn region(node: Node<'_>, lines: &Lines, len: usize) -> (usize, usize) {
     (lines.start(first, len), lines.start(last + 1, len))
 }
 
-fn site(call: &ExprCall, stack: &[Scope], ctx: &Context<'_, '_>, lines: &Lines) -> Site {
+fn site(
+    call: &ExprCall,
+    stack: &[Scope],
+    ctx: &Context<'_, '_>,
+    lines: &Lines,
+    source: &str,
+) -> Site {
     let (prefix, name, receiver) = match call.func.as_ref() {
         Expr::Name(name) => (None, name.id.to_string(), None),
         Expr::Attribute(attr) => (
@@ -132,7 +138,7 @@ fn site(call: &ExprCall, stack: &[Scope], ctx: &Context<'_, '_>, lines: &Lines) 
         starred: matches!(expr, Expr::Starred(_)),
         span: (expr.start().to_usize(), expr.end().to_usize()),
         text: match expr {
-            Expr::StringLiteral(text) => Some(text.value.to_str().to_string()),
+            Expr::StringLiteral(text) => Some(crate::parse::text(text, source)),
             _ => None,
         },
         kind: ctx.arg_type(expr, stack),

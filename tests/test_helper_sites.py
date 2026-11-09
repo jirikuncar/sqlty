@@ -137,6 +137,11 @@ CASES = {
         "    tuple[\n        int\n    ],\n)\n",
         [(2, "SELECT 1 AS a")],
     ),
+    # `ast` reads a newline in a string as `\n`, however the file spells it.
+    "triple-quoted query": (
+        'from pkg.db import execute\nexecute("""SELECT\n    1""")\n',
+        [(2, "SELECT\n    1")],
+    ),
     "unicode before the row": (
         "from pkg.db import fetch_all\nx = 'žluť'; rows = fetch_all('SELECT 1', tuple[int])\n",
         [(2, "SELECT 1")],
@@ -154,6 +159,7 @@ CASES = {
 def test_corner_cases(text: str, expected: list[tuple[int, str]], index: HelperIndex) -> None:
     assert both(text, index) == expected
     assert both(text.replace("\n", "\r\n"), index) == expected
+    assert both(text.replace("\n", "\r"), index) == expected
 
 
 @pytest.mark.parametrize(
@@ -283,10 +289,10 @@ blocks = st.recursive(
 @given(
     st.lists(st.sampled_from(IMPORTS), min_size=1, max_size=4),
     blocks,
-    st.sampled_from(["\n", "\r\n"]),
+    st.sampled_from(["\n", "\r\n", "\r"]),
 )
 def test_generated_modules(index: HelperIndex, imports: list[str], lines: list[str], newline: str):
-    text = newline.join(["from datetime import date", *imports, *lines]) + newline
+    text = "\n".join(["from datetime import date", *imports, *lines, ""]).replace("\n", newline)
     try:
         ast.parse(text)
     except SyntaxError:

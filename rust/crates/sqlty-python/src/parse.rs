@@ -18,8 +18,11 @@
 
 use ruff_python_ast::token::TokenKind;
 use ruff_python_ast::visitor::{walk_expr, walk_interpolated_string_element, walk_stmt, Visitor};
-use ruff_python_ast::{Expr, InterpolatedStringElement, ModExpression, ModModule, Stmt};
+use ruff_python_ast::{
+    Expr, ExprStringLiteral, InterpolatedStringElement, ModExpression, ModModule, Stmt,
+};
 use ruff_python_parser::{parse_expression, parse_module, Parsed};
+use ruff_text_size::Ranged;
 
 const STACK_PER_BYTE: usize = if cfg!(debug_assertions) {
     16 << 10
@@ -67,6 +70,23 @@ pub fn expression(source: &str) -> Option<Parsed<ModExpression>> {
     let mut depth = Depth::default();
     depth.visit_expr(&parsed.syntax().body);
     (!depth.exceeded).then_some(parsed)
+}
+
+/// The value of a string literal of `source` as `ast` reads it, a newline in the source
+/// (`\r\n` or `\r`) as `\n`, where ruff keeps it as written.
+pub fn text(literal: &ExprStringLiteral, source: &str) -> String {
+    let written = &source[literal.range()];
+    if !written.contains('\r') {
+        return literal.value.to_str().to_string();
+    }
+    let normalized = format!("({})", written.replace("\r\n", "\n").replace('\r', "\n"));
+    match parse_expression(&normalized).map(|parsed| parsed.into_syntax().body) {
+        Ok(body) => match *body {
+            Expr::StringLiteral(inner) => inner.value.to_str().to_string(),
+            _ => literal.value.to_str().to_string(),
+        },
+        Err(_) => literal.value.to_str().to_string(),
+    }
 }
 
 fn guarded<T: Send, E: Send>(
@@ -275,6 +295,19 @@ mod tests {
         ] {
             assert!(module(source).is_some(), "{source:.60}");
         }
+    }
+
+    #[test]
+    fn newlines_in_strings_read_as_ast_reads_them() {
+        let source = "x = (\"\"\"a\r\nb\rc\\r\"\"\"\r\n  'd')\r\n";
+        let parsed = module(source).unwrap();
+        let Stmt::Assign(assign) = &parsed.syntax().body[0] else {
+            panic!()
+        };
+        let Expr::StringLiteral(literal) = assign.value.as_ref() else {
+            panic!()
+        };
+        assert_eq!(text(literal, source), "a\nb\nc\rd");
     }
 
     #[test]
