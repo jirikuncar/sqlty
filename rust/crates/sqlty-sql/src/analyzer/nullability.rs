@@ -376,8 +376,8 @@ impl Analyzer<'_> {
     }
 
     /// Whether a scalar subquery finds exactly one row: it reads one base table, which its
-    /// `WHERE` joins on exactly the columns of a foreign key of a table outside, columns
-    /// that are not NULL under `facts`.
+    /// `WHERE` joins on exactly the columns of a foreign key of a table outside, or on a key
+    /// of that same table, columns that are not NULL under `facts`.
     fn finds_its_reference(&self, query: &Query, scope: &Scope, facts: &Facts) -> bool {
         let SetExpr::Select(select) = query.body.as_ref() else {
             return false;
@@ -440,9 +440,19 @@ impl Analyzer<'_> {
         let Some((_, child)) = child else {
             return false;
         };
-        self.schema
-            .table_id(&child)
-            .is_some_and(|child| self.references(child, &parent, &pairs, false))
+        let Some(child) = self.schema.table_id(&child) else {
+            return false;
+        };
+        // A lookup of the outer row's own key in its table finds that row.
+        let itself = child == parent
+            && pairs.iter().all(|(column, referred)| column == referred)
+            && self.schema.unique_keys(&parent).is_some_and(|keys| {
+                keys.iter().any(|key| {
+                    key.iter()
+                        .all(|name| pairs.iter().any(|(column, _)| column == name))
+                })
+            });
+        itself || self.references(child, &parent, &pairs, false)
     }
 
     /// The catalog key of a base table in FROM: not a CTE, a view or a function.
