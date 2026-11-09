@@ -6,12 +6,16 @@ import {
   type ServerOptions,
 } from "vscode-languageclient/node";
 
+import { startEngine } from "./engine";
 import { completionNotice, findServer, type Settings } from "./server";
 
 let client: LanguageClient | undefined;
+let engine: vscode.Disposable | undefined;
+let extension: vscode.Uri;
 let output: vscode.LogOutputChannel | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  extension = context.extensionUri;
   output = vscode.window.createOutputChannel("sqlty", { log: true });
   context.subscriptions.push(
     output,
@@ -44,7 +48,8 @@ async function restart(): Promise<void> {
 
 async function start(): Promise<void> {
   if (!vscode.workspace.isTrusted) {
-    output?.info("Restricted Mode: sqlty server starts once the workspace is trusted");
+    engine = await startEngine(extension, output!);
+    output?.info("Restricted Mode: the bundled engine checks until the workspace is trusted");
     return;
   }
   const settings = readSettings();
@@ -88,6 +93,8 @@ async function start(): Promise<void> {
 }
 
 async function stop(): Promise<void> {
+  engine?.dispose();
+  engine = undefined;
   const running = client;
   client = undefined;
   await running?.dispose();

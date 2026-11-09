@@ -9,8 +9,8 @@ marked `--sql`. The `.sql` files of named queries that the
 The extension runs `sqlty server` from your project, so the editor and CI agree. Add sqlty
 to the project's environment (`uv add --dev sqlty`); the extension bundles none.
 
-On vscode.dev and github.dev, the browser runs no `sqlty server`, so the extension runs the
-engine compiled to WebAssembly: diagnostics, quick fixes, completion and hover, without the
+On vscode.dev, github.dev and in Restricted Mode, there is no `sqlty server`, so the extension runs
+the engine compiled to WebAssembly: diagnostics, quick fixes, completion and hover, without the
 checks that read Python row types. The [documentation](https://sqlty.kuncar.dev/recipes/vscode/) covers the setup,
 Restricted Mode, VS Code for the Web and other editors.
 
