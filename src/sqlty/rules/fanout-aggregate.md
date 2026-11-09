@@ -70,7 +70,9 @@ GROUP BY c.segment""")
 
 A join is to-one toward a table when its conditions equate, or fix to a
 constant, every column of one of the table's keys: the primary key, a `UNIQUE`
-constraint or a unique index without `WHERE`. The `GROUP BY` or `DISTINCT`
+constraint or a unique index without `WHERE`. A scalar subquery whose columns are
+all qualified, none by that table, is a constant here: the "latest child" pattern
+`i.id = (SELECT max(i2.id) FROM order_items i2 WHERE i2.order_id = o.id)`. The `GROUP BY` or `DISTINCT`
 columns of a CTE or derived table are its key, and so is the key of the one
 table it selects from, when it selects it.
 
