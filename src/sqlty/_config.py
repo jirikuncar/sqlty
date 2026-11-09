@@ -26,6 +26,42 @@ MAX_QUERY_VARIANTS = 64
 """Default of ``max-query-variants``."""
 
 
+_RANGES = {
+    "INT4": "int",
+    "INT8": "int",
+    "NUM": "decimal.Decimal",
+    "DATE": "datetime.date",
+    "TS": "datetime.datetime",
+    "TSTZ": "datetime.datetime",
+}
+
+DRIVER_TYPES: dict[str, dict[str, str]] = {
+    "psycopg": {
+        f"{base}{kind.upper()}": f"psycopg.types.{kind}.{name}[{python}]"
+        for base, python in _RANGES.items()
+        for kind, name in (("range", "Range"), ("multirange", "Multirange"))
+    }
+}
+"""The ``types`` a ``driver`` adds in PostgreSQL, under the project's own; see psycopg's
+`adaptation docs <https://www.psycopg.org/psycopg3/docs/basic/pgtypes.html>`_."""
+
+
+def driver_types(
+    driver: str | None, dialect: str, types: dict[str, str] | None
+) -> dict[str, str] | None:
+    """``types`` with the defaults of ``driver`` under them, for a PostgreSQL project.
+
+    Example:
+        >>> driver_types("psycopg", "postgres", {"DATE": "str"})["INT4RANGE"]
+        'psycopg.types.range.Range[int]'
+        >>> driver_types("psycopg", "sqlite", None) is None
+        True
+    """
+    if driver is None or dialect != "postgres":
+        return types
+    return DRIVER_TYPES[driver] | (types or {})
+
+
 class KeyDoc(NamedTuple):
     """Reference documentation of one configuration key.
 
@@ -46,6 +82,12 @@ KEY_DOCS: dict[str, KeyDoc] = {
         '`"postgres"`',
         "`rewrite`, `check`",
         "SQL dialect of queries and schema",
+    ),
+    "driver": KeyDoc(
+        '`"psycopg"`',
+        "none",
+        "`rewrite`, `check`",
+        "Driver whose own classes type the columns the default mapping leaves untyped: PostgreSQL ranges",
     ),
     "schema": KeyDoc(
         "string or list of strings",
@@ -319,6 +361,7 @@ class SQLTyConfig(TypedDict, total=False):
     """
 
     dialect: str
+    driver: str  # "psycopg": its range classes type range columns
     schema: SchemaSpec  # Schema file, directory or glob, or a list of them
     queries: SchemaSpec  # .sql files of named queries, as files, directories or globs
     query_format: str  # "auto" (default), "aiosql", "sqlc", "pugsql" or "file"

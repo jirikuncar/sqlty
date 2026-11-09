@@ -1576,16 +1576,15 @@ class SettingsResolver:
                 f"{self.source.origin('import_style', label)}: {exc}; "
                 "use 'from sqlty import SQL [as Q]' or 'import sqlty [as sy]'"
             ) from None
-        from sqlty._config import MAX_QUERY_VARIANTS
+        from sqlty._config import MAX_QUERY_VARIANTS, driver_types
 
         dialect = dialect_flag or config.get("dialect", "postgres")
+        types = driver_types(config.get("driver"), dialect, config.get("types"))
         return Settings(
             dialect=dialect,
-            schema=None
-            if schema_sql is None
-            else self._schema(schema_sql, dialect, config.get("types")),
+            schema=None if schema_sql is None else self._schema(schema_sql, dialect, types),
             schema_sql=schema_sql,
-            types=config.get("types"),
+            types=types,
             import_style=import_style,
             untyped=untyped == "sentinel",
             json_types=json_types,
