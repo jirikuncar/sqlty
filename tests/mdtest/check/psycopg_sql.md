@@ -161,6 +161,39 @@ def by_column(column: str) -> list[int]:
     return fetch_all(sql.SQL("SELECT {} FROM users").format(sql.Identifier(column)), int)
 ```
 
+A list filled in place (`append`, `extend`, an item assigned) is not the list it was
+bound to, so a `.join()` of it is dynamic too:
+
+```python
+from typing import Annotated, LiteralString
+from psycopg import sql
+from sqlty import SQL
+
+def fetch_all[T](query: Annotated[LiteralString | sql.Composable, SQL], form: type[T], /) -> list[T]: ...
+
+def search(name: str | None, email: str | None) -> list[int]:
+    parts: list[sql.Composable] = []
+    if name is not None:
+        parts.append(sql.SQL("name = %(name)s"))
+    if email is not None:
+        parts.append(sql.SQL("email = %(email)s"))
+    query = sql.SQL("SELECT id FROM users WHERE {}").format(sql.SQL(" AND ").join(parts))
+    # error: [unchecked-query]
+    return fetch_all(query, int)
+
+def replaced(name: str) -> list[int]:
+    parts = [sql.SQL("TRUE")]
+    parts[0] = sql.SQL("name = %(name)s")
+    query = sql.SQL("SELECT id FROM users WHERE {}").format(sql.SQL(" AND ").join(parts))
+    # error: [unchecked-query]
+    return fetch_all(query, int)
+
+def fixed() -> list[int]:
+    parts = [sql.SQL("name IS NOT NULL"), sql.SQL("email IS NOT NULL")]
+    query = sql.SQL("SELECT id FROM users WHERE {}").format(sql.SQL(" AND ").join(parts))
+    return fetch_all(query, int)
+```
+
 `typing.Any` as the row type opts out explicitly, so it is not reported:
 
 ```python

@@ -1,8 +1,9 @@
 //! `fanout-aggregate`, `chasm-join` and `unproven-join`: aggregates over rows a join repeats.
 //!
-//! A join is to-one toward a relation when its conditions equate, or fix to a constant,
-//! every column of one of that relation's keys: a primary key, `UNIQUE` constraint or
-//! unique index, or the `GROUP BY` and `DISTINCT` columns of a CTE or derived table.
+//! A join is to-one toward a relation when its conditions equate, or fix to a constant or
+//! a scalar subquery that reads none of its columns, every column of one of that
+//! relation's keys: a primary key, `UNIQUE` constraint or unique index, or the `GROUP BY`
+//! and `DISTINCT` columns of a CTE or derived table.
 //! A relation's rows repeat when a relation it reaches through to-one joins is joined to
 //! another one to-many: the other side's key is matched, its own is not. A join whose
 //! cardinality no key proves either way repeats nothing here, and is `unproven-join`.
@@ -194,8 +195,12 @@ impl Analyzer<'_> {
         };
         match (self.column_of(left, scope), self.column_of(right, scope)) {
             (Some(a), Some(b)) if a.0 != b.0 => graph.pairs.push((a, b)),
-            (Some(column), None) if is_constant(right) => graph.fixed.push(column),
-            (None, Some(column)) if is_constant(left) => graph.fixed.push(column),
+            (Some(column), None) if pins(right, &scope[column.0].reference) => {
+                graph.fixed.push(column);
+            }
+            (None, Some(column)) if pins(left, &scope[column.0].reference) => {
+                graph.fixed.push(column);
+            }
             _ => {}
         }
     }
@@ -594,19 +599,47 @@ pub(super) fn strip(expr: &Expr) -> &Expr {
 }
 
 /// Whether `expr` has one value for the whole query: no column, subquery or function.
-fn is_constant(expr: &Expr) -> bool {
-    struct Find;
-    impl Visitor for Find {
+/// Whether `expr` has one value for every row of the source `reference`: a constant, or
+/// scalar subqueries whose columns are all qualified, none by `reference`.
+fn pins(expr: &Expr, reference: &str) -> bool {
+    struct Find<'a> {
+        reference: &'a str,
+        depth: usize,
+    }
+    impl Visitor for Find<'_> {
         type Break = ();
+        fn pre_visit_query(&mut self, _: &Query) -> ControlFlow<()> {
+            self.depth += 1;
+            ControlFlow::Continue(())
+        }
+        fn post_visit_query(&mut self, _: &Query) -> ControlFlow<()> {
+            self.depth -= 1;
+            ControlFlow::Continue(())
+        }
         fn pre_visit_expr(&mut self, expr: &Expr) -> ControlFlow<()> {
             match expr {
-                Expr::Identifier(_)
-                | Expr::CompoundIdentifier(_)
-                | Expr::Function(_)
-                | Expr::Subquery(_) => ControlFlow::Break(()),
+                Expr::CompoundIdentifier(parts)
+                    if self.depth > 0
+                        && parts.len() > 1
+                        && !parts[parts.len() - 2]
+                            .value
+                            .eq_ignore_ascii_case(self.reference) =>
+                {
+                    ControlFlow::Continue(())
+                }
+                Expr::Identifier(_) | Expr::CompoundIdentifier(_) => ControlFlow::Break(()),
+                Expr::Function(_) | Expr::Exists { .. } | Expr::InSubquery { .. }
+                    if self.depth == 0 =>
+                {
+                    ControlFlow::Break(())
+                }
                 _ => ControlFlow::Continue(()),
             }
         }
     }
-    expr.visit(&mut Find).is_continue()
+    expr.visit(&mut Find {
+        reference,
+        depth: 0,
+    })
+    .is_continue()
 }
