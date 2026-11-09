@@ -5,9 +5,10 @@
 //
 // --models holds the GGUF files of ask.js MODELS; --wllama is @wllama/wllama/esm. --isolated
 // sends COOP/COEP, which wllama needs for threads (GitHub Pages cannot send them).
-import { createReadStream, statSync, writeFileSync } from "node:fs";
+import { createReadStream, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import { extname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
@@ -54,7 +55,10 @@ const server = createServer((request, response) => {
 const base = `http://localhost:${server.address().port}`;
 
 const { chromium } = createRequire(import.meta.url)("playwright");
-const browser = await chromium.launch({ executablePath: args.executable });
+// A persistent profile, as a person's browser has: a fresh context's storage quota is too
+// small to cache the 1 GB+ models.
+const profile = mkdtempSync(join(tmpdir(), "ask-eval-"));
+const browser = await chromium.launchPersistentContext(profile, { executablePath: args.executable });
 const page = await browser.newPage();
 page.on("console", (message) => message.type() === "error" && console.error(message.text()));
 await page.goto(`${base}/eval/page.html`);
@@ -63,6 +67,7 @@ const results = await page.evaluate(
   { model: args.model, repairs: Number(args.repairs), threads: args.threads && Number(args.threads) },
 );
 await browser.close();
+rmSync(profile, { recursive: true });
 server.close();
 const out = args.out ?? `ask-eval-${args.model}${args.isolated ? "" : "-1thread"}.json`;
 writeFileSync(out, JSON.stringify({ isolated: args.isolated, ...results }, null, 2));
