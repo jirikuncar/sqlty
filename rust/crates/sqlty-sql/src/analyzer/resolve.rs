@@ -7,16 +7,17 @@
 
 use std::rc::Rc;
 
-use sqlparser::ast::{Expr, Ident};
+use sqlparser::ast::{Expr, Ident, TableAlias, TableFactor, TableWithJoins};
 
 use crate::catalog::fold;
 use crate::diagnostics::NameRule;
 
 use super::dialect::SqlDialect;
 use super::literals::value_set;
+use super::names::table_key;
 use super::nullability::{Facts, Nullability};
 use super::query::{Analyzer, Column};
-use super::scope::{resolve, Scope, Source, Table};
+use super::scope::{relations, resolve, Scope, Source, Table};
 use super::suggest;
 use super::typed::Typed;
 use super::Candidate;
@@ -122,6 +123,50 @@ impl<'a> Analyzer<'a> {
             );
         } else {
             self.diag.explain_silently();
+        }
+    }
+
+    /// `duplicate-alias`: two FROM items read by the same name, which PostgreSQL and MySQL
+    /// reject. Two tables without an alias may share a name when they are in different
+    /// schemas.
+    pub(super) fn check_duplicate_names(&self, from: &[TableWithJoins]) {
+        if !self.diag.enabled() || !matches!(self.dialect, SqlDialect::Postgres | SqlDialect::MySql)
+        {
+            return;
+        }
+        let mut seen: Vec<(String, Option<String>)> = Vec::new();
+        for factor in relations(from) {
+            let (ident, key) = match factor {
+                TableFactor::Table {
+                    alias: None, name, ..
+                } => match name.0.last().and_then(|part| part.as_ident()) {
+                    Some(ident) => (ident, Some(table_key(name, self.dialect))),
+                    None => continue,
+                },
+                TableFactor::Table { alias, .. }
+                | TableFactor::Derived { alias, .. }
+                | TableFactor::TableFunction { alias, .. }
+                | TableFactor::Function { alias, .. }
+                | TableFactor::UNNEST { alias, .. }
+                | TableFactor::JsonTable { alias, .. }
+                | TableFactor::NestedJoin { alias, .. } => match alias {
+                    Some(TableAlias { name, .. }) => (name, None),
+                    None => continue,
+                },
+                _ => continue,
+            };
+            let name = fold(ident, self.dialect);
+            let clash = seen.iter().any(|(seen, seen_key)| {
+                *seen == name && (key.is_none() || seen_key.is_none() || *seen_key == key)
+            });
+            if clash {
+                let _at = self.diag.at(ident.span);
+                self.diag.record(
+                    NameRule::DuplicateAlias,
+                    format!("table name `{}` is specified more than once", ident.value),
+                );
+            }
+            seen.push((name, key));
         }
     }
 
@@ -468,6 +513,15 @@ impl<'a> Analyzer<'a> {
             return self.diag.explain_silently();
         }
         if let Some(qualifier) = &qualifier {
+            // A qualifier of two FROM items is reported by `duplicate-alias`.
+            if scope
+                .iter()
+                .filter(|source| source.reference == *qualifier)
+                .nth(1)
+                .is_some()
+            {
+                return self.diag.explain_silently();
+            }
             if candidates.is_empty() {
                 // `old`/`new` in RETURNING and `excluded` in ON CONFLICT are not FROM items.
                 if matches!(qualifier.as_str(), "old" | "new" | "excluded") {

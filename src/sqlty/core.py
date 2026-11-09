@@ -238,7 +238,7 @@ def query_diagnostics(
 ) -> list[tuple[str, str]]:
     """Why a query has untyped columns, or names what it cannot, as ``(rule, message)`` pairs.
 
-    The rules are ``unknown-table``, ``unknown-column``, ``ambiguous-column``,
+    The rules are ``unknown-table``, ``unknown-column``, ``ambiguous-column``, ``duplicate-alias``,
     ``unknown-function``, ``unknown-type``, ``unsupported-syntax``,
     ``insert-missing-column``, ``insert-value-count``, ``ungrouped-column``,
     ``fanout-aggregate``, ``chasm-join``, ``unproven-join`` and ``entity-mismatch``. Tables and columns are only judged
