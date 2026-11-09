@@ -183,6 +183,21 @@ SELECT lo, hi FROM bounds(3)
 -- inferred: tuple[int | None, int | None]
 ```
 
+The same function under `LATERAL` reads the relations before it, and a `LEFT JOIN`
+makes its columns nullable.
+
+```sql
+SELECT a.seen, b.id FROM users u
+CROSS JOIN LATERAL active_users('2024-01-01') AS a
+LEFT JOIN LATERAL all_users() AS b ON b.id = u.id
+-- inferred: tuple[datetime.datetime | None, int | None]
+```
+
+```sql
+SELECT b.id FROM users u, LATERAL all_users() AS b
+-- inferred: tuple[int]
+```
+
 ## Planner hints
 
 `ROWS`, `COST`, `LEAKPROOF` and `SUPPORT` only guide the planner, so a function
