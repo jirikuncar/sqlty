@@ -34,6 +34,7 @@ use super::nullability::{rows_pass_where, Facts, Nullability};
 use super::query::Analyzer;
 use super::registry::{lookup, Behavior};
 use super::scope::Scope;
+use crate::catalog::fold;
 use crate::values::Value;
 use rustc_hash::FxHashSet;
 
@@ -646,6 +647,11 @@ impl<'a> Analyzer<'a> {
                 if let Some((reference, _, column)) = self.locate_column(expr, scope) {
                     learned.present.insert(reference.clone());
                     learned.columns.insert((reference, column));
+                } else if let (Some(_), Expr::Identifier(ident)) =
+                    (self.whole_row_table(expr, scope), expr)
+                {
+                    // A null-extended row is NULL as a whole; a matched one is not.
+                    learned.present.insert(fold(ident, self.dialect));
                 }
                 return learned;
             }
