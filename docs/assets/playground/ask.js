@@ -2,7 +2,7 @@
 // against the schema, sending the problems back until the query is clean. No DOM: the
 // playground and scripts/ask_eval.mjs both use it.
 
-const WLLAMA = "https://cdn.jsdelivr.net/npm/@wllama/wllama@3.13.0/esm";
+const VENDOR = new URL("../vendor/", import.meta.url).href;
 
 export const MODELS = [
   {
@@ -95,13 +95,19 @@ export async function answer({ complete, engine, schema, dialect, config, questi
 
 let library;
 
-export async function wllama({ wasm = `${WLLAMA}/wasm/wllama.wasm`, module = `${WLLAMA}/index.min.js` } = {}) {
+export async function wllama({
+  wasm = `${VENDOR}wllama/esm/wasm/wllama.wasm`,
+  module = `${VENDOR}wllama/esm/index.min.js`,
+  compat = { worker: `${VENDOR}wllama-compat/wasm/wllama.js`, wasm: `${VENDOR}wllama-compat/wasm/wllama.wasm` },
+} = {}) {
   library ??= import(module).catch((error) => {
     library = undefined;
     throw error;
   });
   const { Wllama } = await library;
-  return new Wllama({ default: wasm }, { suppressNativeLog: true });
+  const instance = new Wllama({ default: wasm }, { suppressNativeLog: true });
+  instance.setCompat(compat);
+  return instance;
 }
 
 export async function loadModel(instance, model, { url = modelUrl(model), onProgress, n_threads } = {}) {

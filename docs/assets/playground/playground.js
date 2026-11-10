@@ -678,7 +678,7 @@ async function asking(form) {
         await loaded?.instance.exit();
         const instance = await llm.wllama();
         const complete = await llm.loadModel(instance, model, {
-          onProgress: (done, total) => (status.textContent = `Downloading ${model.label}: ${mib(done)} of ${mib(total)}`),
+          onProgress: (done, total) => (status.textContent = `Loading ${model.label}: ${mib(done)} of ${mib(total)}`),
         });
         loaded = { model, instance, complete };
       }
@@ -699,11 +699,15 @@ async function asking(form) {
       const taken = new Set(source.match(/^\w+(?= =)/gm));
       let name = "answer";
       for (let n = 2; taken.has(name); n++) name = `answer_${n}`;
-      const added = `\n# ${question.value.replace(/\s+/g, " ")}\n${llm.python(sql, name)}`;
+      // sqlty's rewrite of the answer, `answer = SQL[RowType]("""--sql ...""")`, when it has one.
+      const { rewritten } = attempts.at(-1);
+      const typed = /^from sqlty import SQL$/m.test(source) && rewritten?.match(/^answer = SQL\[[\s\S]*/m)?.[0];
+      const code = typed ? typed.replace(/^answer/, name) : llm.python(sql, name);
+      const added = `\n# ${question.value.replace(/\s+/g, " ")}\n${code}`;
       const left = attempts.at(-1).problems.length;
       replace(models.python, source.replace(/\n*$/, "\n") + added);
       open("python");
-      editor.revealLine(models.python.getLineCount());
+      editor.revealLineNearTop(models.python.getLineCount() - added.split("\n").length + 2);
       status.textContent =
         `${model.label} wrote ${name}` +
         (attempts.length > 1 ? ` after ${attempts.length - 1} round(s) of sqlty feedback` : "") +
