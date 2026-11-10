@@ -19,6 +19,8 @@ pub enum NameRule {
     UnknownColumn,
     /// An unqualified column more than one table has.
     AmbiguousColumn,
+    /// Two FROM items read by the same name.
+    DuplicateAlias,
     /// A function whose result sqlty cannot type.
     UnknownFunction,
     /// A cast or column type without a Python type.
@@ -43,10 +45,11 @@ pub enum NameRule {
 
 impl NameRule {
     /// Every rule, the one list the checker and the Python side read.
-    pub const ALL: [NameRule; 13] = [
+    pub const ALL: [NameRule; 14] = [
         NameRule::UnknownTable,
         NameRule::UnknownColumn,
         NameRule::AmbiguousColumn,
+        NameRule::DuplicateAlias,
         NameRule::UnknownFunction,
         NameRule::UnknownType,
         NameRule::UnsupportedSyntax,
@@ -65,6 +68,7 @@ impl NameRule {
             NameRule::UnknownTable => "unknown-table",
             NameRule::UnknownColumn => "unknown-column",
             NameRule::AmbiguousColumn => "ambiguous-column",
+            NameRule::DuplicateAlias => "duplicate-alias",
             NameRule::UnknownFunction => "unknown-function",
             NameRule::UnknownType => "unknown-type",
             NameRule::UnsupportedSyntax => "unsupported-syntax",
@@ -358,6 +362,7 @@ mod tests {
                 "unknown-table",
                 "unknown-column",
                 "ambiguous-column",
+                "duplicate-alias",
                 "unknown-function",
                 "unknown-type",
                 "unsupported-syntax",

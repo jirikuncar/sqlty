@@ -1,7 +1,7 @@
 # VS Code for the Web
 
-> **Status:** stage 1 merged in [#1014](https://github.com/jirikuncar/sqlty/pull/1014); stage 2 waits on the
-> `.vsix` size and config scope questions of [#1010](https://github.com/jirikuncar/sqlty/issues/1010).
+> **Status:** done. Stage 1 merged in [#1014](https://github.com/jirikuncar/sqlty/pull/1014), stage 2 in
+> [#1043](https://github.com/jirikuncar/sqlty/pull/1043).
 
 Tracks [#1010](https://github.com/jirikuncar/sqlty/issues/1010): the extension does not load on
 vscode.dev or github.dev, so strings marked `--sql` stay plain Python strings there.
@@ -14,16 +14,26 @@ opens `fixture/` in VS Code for the Web (`@vscode/test-web`, headless Chromium) 
 extension loads and activates. `_workbench.captureSyntaxTokens` is desktop only, so the desktop
 smoke test keeps checking the tokens.
 
-## Stage 2: the engine in a web worker
+## Stage 2: the engine in the web extension host
 
-Diagnostics, completion and hover from `sqlty_wasm.wasm`, as the docs playground runs it:
+Diagnostics, quick fixes, completion and hover from `sqlty_wasm.wasm`, as the docs playground runs it:
 
-- A language server in a web worker (`vscode-languageclient/browser`) answers `analyze`,
-  `complete` and `hover` requests of `sqlty_wasm::run`. The playground's `analyze` skips the checks
-  that read row types from Python and the driver-call checks (`param-count-mismatch`); the web
-  extension skips the same.
-- `schema.sql` and `[tool.sqlty]` are read through `vscode.workspace.fs`, since the web host has
-  no file system. `sqlty_wasm::run` takes a `sqlty.toml` text; a `pyproject.toml` needs its
-  `[tool.sqlty]` table passed instead.
-- The `.wasm` ships in the `.vsix`, built by the cargo command of `make playground`. It is 12 MB
-  uncompressed: check the `.vsix` size, since the desktop extension does not need it.
+- The web extension host is already a worker, so `src/web.ts` loads the engine and calls
+  `analyze`, `complete` and `hover` of `sqlty_wasm::run` from VS Code's provider API, without a
+  language server. `analyze` skips the checks that read row types from Python and the
+  driver-call checks (`param-count-mismatch`), as in the playground.
+- `src/web/config.ts` finds the configuration as `sqlty check` does, through
+  `vscode.workspace.fs`: the closest `sqlty.toml`, `pyproject.toml` or `Cargo.toml` with a sqlty
+  table above the file, `extend` applied, `schema` relative to the file that set it (file,
+  directory or glob). The new `config` op of `sqlty_wasm::run` reads and validates each file with
+  the engine's loader, and `settings` passes the merged table, whose `types` now apply too.
+- `databases`, `overrides`, `functions` and `queries` are not read on the web.
+- The `.wasm` ships in the `.vsix` (`npm run build-wasm`, the cargo command of `make playground`):
+  12 MB, 2.7 MB gzipped, accepted in #1010.
+
+## Restricted Mode
+
+The desktop extension runs the same engine (`src/engine.ts`) while the workspace is untrusted
+(#855), and starts `sqlty server` in its place once it is trusted. `npm test` checks it in a
+VS Code launched with workspace trust on, since `runTests` always passes
+`--disable-workspace-trust`.

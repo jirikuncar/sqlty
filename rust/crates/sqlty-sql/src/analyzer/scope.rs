@@ -412,6 +412,7 @@ impl<'a> Analyzer<'a> {
     /// Scope of a FROM clause, and an analyzer that knows its derived tables. A
     /// `LATERAL` subquery is analyzed with the relations before it.
     pub(super) fn scope_of(&self, from: &[TableWithJoins]) -> Inferred<(Analyzer<'a>, Scope)> {
+        self.check_duplicate_names(from);
         let mut analyzer = self.clone();
         analyzer.merged = merged_columns(from, analyzer.dialect).into();
         let mut scope = Scope::new();
@@ -444,7 +445,7 @@ impl<'a> Analyzer<'a> {
                     alias,
                     with_ordinality,
                     ..
-                } => {
+                } if analyzer.function_rows(name, args.len()).is_none() => {
                     let function = function_name_of(name);
                     analyzer
                         .builtin_rows(&function, &table_args(args), &scope)?
@@ -473,27 +474,37 @@ impl<'a> Analyzer<'a> {
                 scope.push(Source::named(reference, table));
                 continue;
             }
-            match factor {
+            // `LATERAL f(x)` is a `Function`, `f(x)` a `Table` with arguments.
+            let schema_function = match factor {
                 TableFactor::Table {
                     name,
                     alias,
                     args: Some(args),
                     ..
-                } if analyzer.function_rows(name, args.args.len()).is_some() => {
-                    let mut columns = analyzer
-                        .function_rows(name, args.args.len())
-                        .unwrap_or_default();
-                    if let Some(alias) = alias {
-                        rename_columns(&mut columns, alias, analyzer.dialect);
-                    }
-                    let reference = alias.as_ref().map_or_else(
-                        || object_name(name),
-                        |alias| alias.name.value.to_lowercase(),
-                    );
-                    let table = format!("({reference})");
-                    analyzer.virtuals.insert(table.clone(), columns);
-                    scope.push(Source::named(reference, table));
+                } => analyzer
+                    .function_rows(name, args.args.len())
+                    .map(|columns| (name, alias, columns)),
+                TableFactor::Function {
+                    name, args, alias, ..
+                } => analyzer
+                    .function_rows(name, args.len())
+                    .map(|columns| (name, alias, columns)),
+                _ => None,
+            };
+            if let Some((name, alias, mut columns)) = schema_function {
+                if let Some(alias) = alias {
+                    rename_columns(&mut columns, alias, analyzer.dialect);
                 }
+                let reference = alias.as_ref().map_or_else(
+                    || object_name(name),
+                    |alias| alias.name.value.to_lowercase(),
+                );
+                let table = format!("({reference})");
+                analyzer.virtuals.insert(table.clone(), columns);
+                scope.push(Source::named(reference, table));
+                continue;
+            }
+            match factor {
                 TableFactor::Table { name, alias, .. } if analyzer.is_virtual(name) => {
                     let table = table_key(name, self.dialect);
                     let reference = alias.as_ref().map_or_else(

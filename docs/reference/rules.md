@@ -39,6 +39,7 @@ stale-type = "error"
 | [`unknown-table`](#unknown-table) | Names | error | no | Table the schema does not define |
 | [`unknown-column`](#unknown-column) | Names | error | yes | Column the table does not have |
 | [`ambiguous-column`](#ambiguous-column) | Names | error | no | Unqualified column more than one table has |
+| [`duplicate-alias`](#duplicate-alias) | Names | error | no | Two tables of a `FROM` clause read by the same name |
 | [`unknown-function`](#unknown-function) | Names | warn | no | Function whose result sqlty cannot type |
 | [`unknown-type`](#unknown-type) | Names | warn | no | Cast or column type without a Python type |
 | [`unsupported-syntax`](#unsupported-syntax) | Names | warn | no | Construct that parses but is not typed |
@@ -665,6 +666,13 @@ to the name, the message suggests it and `--fix` writes it.
 
 Default: error. An unqualified column that more than one table of the query
 has. Columns merged by `USING` or `NATURAL` are not ambiguous.
+
+### duplicate-alias
+
+Default: error. Two tables, subqueries or functions of one `FROM` clause read by
+the same name: `FROM products p JOIN payments p`, or one table joined to itself
+without an alias. PostgreSQL and MySQL reject the query; SQLite accepts it, so
+the rule is not checked there. Needs no schema.
 
 ### unknown-function
 

@@ -33,7 +33,8 @@ class TypeInfo:
     dataclass that accept lax-mode conversions (not strict). ``annotations`` holds
     each field's annotation from source, qualifiers stripped and ``| None`` kept, and
     ``aliases`` the typing names of the source it was read from (see
-    ``ParsedSource.typing_aliases``); JSON shapes are checked against them.
+    ``ParsedSource.typing_aliases``); JSON shapes are checked against them. ``coerced``
+    reads a non-Pydantic row as a Pydantic validator does (``coerce-row-types``).
     """
 
     __slots__ = (
@@ -57,6 +58,7 @@ class TypeInfo:
         "annotations",
         "aliases",
         "module",
+        "coerced",
     )
 
     def __init__(
@@ -89,6 +91,7 @@ class TypeInfo:
         self.annotations: dict[str, ast.expr] = {}
         self.aliases: dict[str, str] = {}
         self.module: str | None = None  # the module that defines it, when known
+        self.coerced: typing.Callable[[], TypeInfo] | None = None
 
     def field_for(self, column: str) -> str | None:
         """The field a query column fills, by name (a Pydantic alias counts); None if none does."""

@@ -294,19 +294,43 @@ fix belongs to the migration or the code, depending on which ships first.
 
 ## Restricted Mode
 
-In Restricted Mode, the extension highlights the SQL of strings marked `--sql` and runs
-nothing. Diagnostics, quick fixes and completion start once you trust the folder, without a
-reload.
+In Restricted Mode, the extension runs the engine it bundles, compiled to WebAssembly, as on
+[VS Code for the Web](#vs-code-for-the-web): diagnostics with their quick fixes, completion and
+hover in the query strings, with what the web leaves out. When you trust the folder,
+`sqlty server` takes over, without a reload.
 
 !!! warning "The server waits for trust"
     The server comes from the folder's own environment: `sqlty.path`, the selected
-    interpreter or `PATH`. A folder you have not trusted would choose what runs.
+    interpreter or `PATH`. A folder you have not trusted would choose what runs. The bundled
+    engine runs no process and no code of the folder: it only reads its configuration and
+    schema files.
 
 ## VS Code for the Web
 
-On [vscode.dev](https://vscode.dev) and [github.dev](https://github.dev), the extension
-highlights the SQL of strings marked `--sql`, as in Restricted Mode. The browser runs no
-processes, so there is no `sqlty server`: no diagnostics, quick fixes or completion.
+On [vscode.dev](https://vscode.dev) and [github.dev](https://github.dev), the browser runs
+no processes, so there is no `sqlty server`. The extension runs the engine itself, compiled
+to WebAssembly, as the [playground](../playground.md) does: diagnostics with their quick
+fixes, completion and hover in the query strings, and SQL highlighting.
+
+[Open the examples on github.dev](https://github.dev/jirikuncar/sqlty/blob/main/examples/07_joins/queries.py)
+to try it: install the recommended **SQLTy** extension when VS Code offers it, then open a
+`queries.py` of another example. Each example has its own `pyproject.toml`, so each is
+checked against its own schema.
+
+!!! note "Needs the next release of the extension"
+    vscode.dev and github.dev install the extension from the Marketplace. The engine
+    ships in the release after sqlty 0.5.1; before it, the web extension highlights only.
+
+The configuration is found as `sqlty check` finds it: the closest `sqlty.toml`,
+`pyproject.toml` with `[tool.sqlty]` or `Cargo.toml` with a sqlty table above each file,
+with `extend` applied, so each project of a monorepo gets its own. The engine reads
+`dialect`, `schema`, `rules`, `types`, `import-style` and `param-types`.
+
+!!! note "What the web leaves out"
+    The checks that read row types from Python source (`column-type-mismatch` of a
+    `TypedDict`, ...), the parameters of driver calls (`param-count-mismatch`), helpers
+    registered in `functions`, named `databases`, `overrides`, `queries` files, fix-all
+    on save and breaking changes need `sqlty server`, on the desktop.
 
 ## Other editors
 

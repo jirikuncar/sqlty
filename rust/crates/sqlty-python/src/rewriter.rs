@@ -354,6 +354,7 @@ pub(crate) fn wraps(
         let template = scan.is_template(&group.tokens);
         if !(scan.is_plain(group) || template)
             || (bare.is_some() && template)
+            || group.concatenated
             || scan.calls.enclosing(start, end).is_some()
             || interpolated.binary_search(&group.line).is_ok()
             || skip(group.line)

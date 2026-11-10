@@ -50,6 +50,12 @@ fn statement_text(stmt: &ddl::Statement) -> String {
     }
 }
 
+/// The column list of PostgreSQL 15's `ON DELETE SET NULL | DEFAULT (cols)`, which
+/// sqlparser does not read; it names the columns the action sets, not the key.
+static FK_ACTION_COLUMNS: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(?i)\bON\s+DELETE\s+SET\s+(NULL|DEFAULT)\s*\([^()]*\)").unwrap()
+});
+
 static DROP_EXPRESSION: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(?i)\bDROP\s+EXPRESSION(?:\s+IF\s+EXISTS)?\b").unwrap());
 
@@ -95,6 +101,7 @@ pub(super) fn read_statements(
             };
             let parsed = match &text {
                 None => parse_ddl(&stmt.sql(), dialect)
+                    .or_else(|| parse_ddl(&without_fk_action_columns(&stmt.sql()), dialect))
                     .or_else(|| parse_ddl(&stmt.without_constraints()?, dialect))
                     // `STRICT` and `WITHOUT ROWID` both make a PRIMARY KEY NOT NULL, the
                     // only thing either changes here.
@@ -254,6 +261,12 @@ pub(super) fn read_statements(
     ops
 }
 
+fn without_fk_action_columns(sql: &str) -> String {
+    FK_ACTION_COLUMNS
+        .replace_all(sql, "ON DELETE SET $1")
+        .into_owned()
+}
+
 pub(super) fn read_alter_or_drop(
     stmt: &ddl::Statement,
     dialect: SqlDialect,
@@ -266,6 +279,7 @@ pub(super) fn read_alter_or_drop(
         let sql = stmt.sql();
         parse_ddl(&sql, dialect)
             .or_else(|| parse_ddl(&COLLATE.replace_all(&sql, ""), dialect))
+            .or_else(|| parse_ddl(&without_fk_action_columns(&sql), dialect))
             // `DROP EXPRESSION` leaves a column with neither expression nor default.
             .or_else(|| parse_ddl(&DROP_EXPRESSION.replace_all(&sql, "DROP DEFAULT"), dialect))
             // sqlparser rejects most of them; they do not change the column.

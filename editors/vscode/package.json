@@ -66,7 +66,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "SQL highlighting works in Restricted Mode. sqlty server starts once the workspace is trusted, since it comes from the workspace's environment."
+      "description": "In Restricted Mode, the bundled engine gives diagnostics, completion and hover, as on the web. sqlty server starts once the workspace is trusted, since it comes from the workspace's environment."
     }
   },
   "contributes": {
@@ -164,13 +164,14 @@
   "scripts": {
     "build": "npm run build-node && npm run build-web",
     "build-node": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node20 --sourcemap",
+    "build-wasm": "cargo build --manifest-path ../../rust/Cargo.toml --profile wasm --target wasm32-unknown-unknown -p sqlty-wasm && mkdir -p dist && cp ../../rust/target/wasm32-unknown-unknown/wasm/sqlty_wasm.wasm dist/",
     "build-web": "esbuild src/web.ts --bundle --outfile=dist/web.js --external:vscode --format=cjs --platform=browser --target=es2022 --sourcemap",
-    "build-test": "esbuild src/test/*.ts --bundle --external:vscode --outdir=out/test --format=cjs --platform=node --target=node20",
+    "build-test": "esbuild src/test/*.ts --bundle --external:vscode --outdir=out/test --format=cjs --platform=node --target=node20 && esbuild src/test/restricted/*.ts --bundle --external:vscode --external:mocha --outdir=out/test/restricted --format=cjs --platform=node --target=node20",
     "check": "tsc --noEmit && oxlint --deny-warnings src && oxfmt --check src",
     "format": "oxfmt src",
-    "test": "npm run build && npm run build-test && vscode-test",
-    "test-web": "npm run build-web && esbuild src/test/web/index.ts --bundle --external:vscode --outfile=out/test/web/index.js --format=cjs --platform=browser --target=es2022 && vscode-test-web --browserType=chromium --headless --quality=stable --extensionDevelopmentPath=. --extensionTestsPath=out/test/web/index.js fixture",
-    "package": "npm run build-node -- --minify && npm run build-web -- --minify && cp ../../LICENSE LICENSE && vsce package",
+    "test": "npm run build-wasm && npm run build && npm run build-test && vscode-test && node out/test/restricted/run.js",
+    "test-web": "npm run build-wasm && npm run build-web && esbuild src/test/web/index.ts --bundle --external:vscode --outfile=out/test/web/index.js --format=cjs --platform=browser --target=es2022 && vscode-test-web --browserType=chromium --headless --quality=stable --extensionDevelopmentPath=. --extensionTestsPath=out/test/web/index.js fixture",
+    "package": "npm run build-wasm && npm run build-node -- --minify && npm run build-web -- --minify && cp ../../LICENSE LICENSE && vsce package",
     "demo": "node scripts/demo.js"
   },
   "dependencies": {

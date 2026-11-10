@@ -33,6 +33,18 @@ SELECT status FROM orders WHERE status IN ('paid', 'shipped')
 -- inferred: tuple[typing.Literal['paid', 'shipped']]
 ```
 
+`<>` and `NOT IN` keep the other values.
+
+```sql
+SELECT status FROM orders WHERE status <> 'paid'
+-- inferred: tuple[typing.Literal['new', 'shipped']]
+```
+
+```sql
+SELECT status FROM orders WHERE status NOT IN ('new', 'paid')
+-- inferred: tuple[typing.Literal['shipped']]
+```
+
 ## AND and OR
 
 ```sql
@@ -77,6 +89,13 @@ SELECT CASE WHEN status = 'shipped' THEN 'paid' ELSE status END AS s FROM orders
 ```sql
 SELECT CASE WHEN status IN ('new') THEN 'early' WHEN status = 'paid' THEN status ELSE status END AS s FROM orders
 -- inferred: tuple[typing.Literal['early', 'paid', 'shipped']]
+```
+
+A simple `CASE status WHEN 'shipped'` is `CASE WHEN status = 'shipped'`.
+
+```sql
+SELECT CASE status WHEN 'shipped' THEN 'paid' WHEN 'new' THEN status ELSE status END AS s FROM orders
+-- inferred: tuple[typing.Literal['paid', 'new']]
 ```
 
 A `WHEN` that also tests something else may fail with any value of the column.

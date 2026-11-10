@@ -125,6 +125,7 @@ _LEAVES = (ast.expr_context, ast.operator, ast.unaryop, ast.cmpop, ast.boolop)
 _STATEMENTS = (ast.mod, ast.stmt, ast.excepthandler, ast.match_case)
 _SCOPE_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 _FIELDS: dict[type, tuple[str, ...]] = {}
+_MUTATORS = frozenset({"append", "extend", "insert", "pop", "remove", "clear", "sort", "reverse"})
 
 
 def _holds_nodes(kind: object) -> bool:
@@ -204,6 +205,8 @@ class _Scan:
             elif isinstance(node, ast.Call):
                 self.calls.append((depth, node))
                 self.stacks[id(node)] = stack
+                if bindings:
+                    self._bind(node)
             elif isinstance(node, ast.TemplateStr):
                 self.templates.append((depth, node))
                 self.stacks[id(node)] = stack
@@ -271,6 +274,14 @@ class _Scan:
         if isinstance(node, ast.Name):
             if isinstance(node.ctx, ast.Store):
                 self.stores.setdefault(node.id, []).append(node)
+        elif isinstance(node, ast.Call | ast.Subscript):
+            # `parts.append(x)` and `parts[0] = x` change the value bound to `parts`.
+            target = node.func if isinstance(node, ast.Call) else node
+            if (isinstance(target, ast.Attribute) and target.attr in _MUTATORS) or (
+                isinstance(target, ast.Subscript) and not isinstance(target.ctx, ast.Load)
+            ):
+                if isinstance(target.value, ast.Name):
+                    self.stores.setdefault(target.value.id, []).append(target.value)
         elif isinstance(node, ast.Assign):
             if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
                 self.values[id(node.targets[0])] = node.value
@@ -468,6 +479,32 @@ class ParsedSource:
     def _lines(self) -> list[int]:
         """Offset of each line start, and the text length after the last line."""
         return [0, *(m.end() for m in re.finditer(r"\r\n?|\n", self.text)), len(self.text)]
+
+    @functools.cached_property
+    def literals(self) -> frozenset[str]:
+        """String literals that are not an operand of ``+``: the marked ones are the queries
+        the engine reads by their marker.
+
+        Example:
+            >>> sorted(ParsedSource("a = 'x'\\nb = 'y' + c").literals)
+            ['x']
+        """
+        if self.tree is None:
+            return frozenset()
+        nodes = list(ast.walk(self.tree))
+        operands = {
+            id(side)
+            for node in nodes
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add)
+            for side in (node.left, node.right)
+        }
+        return frozenset(
+            node.value
+            for node in nodes
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in operands
+        )
 
     @functools.cached_property
     def psycopg(self) -> PsycopgScan:
