@@ -1366,7 +1366,7 @@ class Settings:
     import_style: str | None = None
     untyped: bool = False
     json_types: str = "typing.Any"
-    param_types: bool = False
+    param_types: bool = True
     rules: dict[str, str] | None = None
     query_variants: int | None = None
     preview: bool = False
@@ -1588,7 +1588,7 @@ class SettingsResolver:
             import_style=import_style,
             untyped=untyped == "sentinel",
             json_types=json_types,
-            param_types=bool(config.get("param_types")),
+            param_types=bool(config.get("param_types", True)),
             rules=config.get("rules"),
             query_variants=config.get("max_query_variants", MAX_QUERY_VARIANTS)
             if config.get("preview")

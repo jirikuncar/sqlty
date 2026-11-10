@@ -60,6 +60,6 @@ named = SQL[tuple[int], tuple[int, str | None]]("--sql\nINSERT INTO users (id, n
 
 ## Fix
 
-Run `sqlty rewrite` with `param-types = true` on the query without `P`, or
+Run `sqlty strip` and `sqlty rewrite` on the query to write `P` again, or
 change `P` to match the query. Turn the rule off with
 `params-type-mismatch = "ignore"` in `[tool.sqlty.rules]`.

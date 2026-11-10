@@ -56,7 +56,9 @@ def decode(b: Buffer, errors: str = "strict") -> tuple[str, int]:
     try:
         from sqlty.core import rewrite_source
 
-        decoded = rewrite_source(source, import_style=_import_style(), keep_lines=True)
+        decoded = rewrite_source(
+            source, import_style=_import_style(), keep_lines=True, param_types=False
+        )
         return _CODING.sub(r"\1utf-8", decoded, count=1), length
     except Exception:
         return source, length

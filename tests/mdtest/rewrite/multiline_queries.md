@@ -4,14 +4,16 @@
 
 ```python
 q = "--sql\nSELECT id::INTEGER, name::TEXT FROM users WHERE active = true"
-# rewritten: q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users WHERE active = true")
+# rewritten: from sqlty import NoParams
+# rewritten: q = SQL[tuple[int, str], NoParams]("--sql\nSELECT id::INTEGER, name::TEXT FROM users WHERE active = true")
 ```
 
 ## Triple-quoted single-line string is rewritten
 
 ```python
 q = """--sql\nSELECT id::INTEGER, name::TEXT FROM users"""
-# rewritten: q = SQL[tuple[int, str]]("""--sql\nSELECT id::INTEGER, name::TEXT FROM users""")
+# rewritten: from sqlty import NoParams
+# rewritten: q = SQL[tuple[int, str], NoParams]("""--sql\nSELECT id::INTEGER, name::TEXT FROM users""")
 ```
 
 ## Triple-quoted multiline string is rewritten
@@ -19,7 +21,8 @@ q = """--sql\nSELECT id::INTEGER, name::TEXT FROM users"""
 ```python
 q = """--sql
 SELECT id::INTEGER, name::TEXT FROM users"""
-# rewritten: q = SQL[tuple[int, str]]("""--sql
+# rewritten: from sqlty import NoParams
+# rewritten: q = SQL[tuple[int, str], NoParams]("""--sql
 # rewritten: SELECT id::INTEGER, name::TEXT FROM users""")
 ```
 
@@ -30,7 +33,8 @@ q = """--sql
 SELECT id::INTEGER, name::TEXT
 FROM users
 WHERE active = true"""
-# rewritten: q = SQL[tuple[int, str]]("""--sql
+# rewritten: from sqlty import NoParams
+# rewritten: q = SQL[tuple[int, str], NoParams]("""--sql
 # rewritten: SELECT id::INTEGER, name::TEXT
 # rewritten: FROM users
 # rewritten: WHERE active = true""")
@@ -42,7 +46,8 @@ WHERE active = true"""
 q = """--sql
 SELECT id::INTEGER FROM users"""
 # rewritten-file: from sqlty import SQL
-# rewritten-file: q = SQL[tuple[int]]("""--sql
+# rewritten-file: from sqlty import NoParams
+# rewritten-file: q = SQL[tuple[int], NoParams]("""--sql
 # rewritten-file: SELECT id::INTEGER FROM users""")
 ```
 
@@ -95,7 +100,8 @@ q = f"--sql\nSELECT {column}::INTEGER FROM users"
 q = SQL[tuple[int]](
 "--sql\nSELECT id::INTEGER FROM users"
 )
-# rewritten: q = SQL[tuple[int]](
+# rewritten: from sqlty import NoParams
+# rewritten: q = SQL[tuple[int], NoParams](
 # rewritten: "--sql\nSELECT id::INTEGER FROM users"
 # rewritten: )
 ```

@@ -36,8 +36,9 @@ and adds the import. `queries.py` afterwards:
 user_query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 count_query = "--sql\nSELECT COUNT(*)::INTEGER FROM users"
 # rewritten-file: from sqlty import SQL
-# rewritten-file: user_query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# rewritten-file: count_query = SQL[tuple[int]]("--sql\nSELECT COUNT(*)::INTEGER FROM users")
+# rewritten-file: from sqlty import NoParams
+# rewritten-file: user_query = SQL[tuple[int, str], NoParams]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# rewritten-file: count_query = SQL[tuple[int], NoParams]("--sql\nSELECT COUNT(*)::INTEGER FROM users")
 ```
 
 `SQL[T]` is a `str` subclass, so the queries still work anywhere a string

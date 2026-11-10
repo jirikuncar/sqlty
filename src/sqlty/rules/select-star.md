@@ -54,8 +54,9 @@ from sqlty import SQL
 
 q = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
 # fixed: from sqlty import SQL
+# fixed: from sqlty import NoParams
 # fixed:
-# fixed: q = SQL[tuple[int, str]]("--sql\nSELECT id::INT, name::TEXT FROM users")
+# fixed: q = SQL[tuple[int, str], NoParams]("--sql\nSELECT id::INT, name::TEXT FROM users")
 ```
 
 A qualified star keeps its qualifier, and a bare `*` over several tables lists each
@@ -66,8 +67,9 @@ from sqlty import SQL
 
 r = SQL[tuple[int, str, int]]("--sql\nSELECT u.*, t.id FROM users u JOIN teams t ON t.owner_id = u.id")
 # fixed: from sqlty import SQL
+# fixed: from sqlty import NoParams
 # fixed:
-# fixed: r = SQL[tuple[int, str, int]]("--sql\nSELECT u.id::INT, u.name::TEXT, t.id FROM users u JOIN teams t ON t.owner_id = u.id")
+# fixed: r = SQL[tuple[int, str, int], NoParams]("--sql\nSELECT u.id::INT, u.name::TEXT, t.id FROM users u JOIN teams t ON t.owner_id = u.id")
 ```
 
 Queries with escapes or quotes inside the string, queries split over several

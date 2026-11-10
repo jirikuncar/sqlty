@@ -41,7 +41,7 @@ class Workspace:
         >>> rules
         ['stale-rewrite']
         >>> fixed.splitlines()[-1]
-        'q = SQL[tuple[float]]("--sql\\\\nSELECT 1.5::REAL")'
+        'q = SQL[tuple[float], NoParams]("--sql\\\\nSELECT 1.5::REAL")'
     """
 
     def __init__(

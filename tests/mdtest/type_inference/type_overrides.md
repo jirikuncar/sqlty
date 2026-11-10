@@ -170,5 +170,6 @@ q = "--sql\nSELECT day, status FROM events"
 # rewritten-file: import datetime
 # rewritten-file: import app.models
 # rewritten-file: from sqlty import SQL
-# rewritten-file: q = SQL[tuple[datetime.date, app.models.Status]]("--sql\nSELECT day, status FROM events")
+# rewritten-file: from sqlty import NoParams
+# rewritten-file: q = SQL[tuple[datetime.date, app.models.Status], NoParams]("--sql\nSELECT day, status FROM events")
 ```

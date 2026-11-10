@@ -28,7 +28,7 @@ fn analyze_types_each_query_and_its_parameters() {
     );
     assert_eq!(
         answer["rewritten"],
-        "from sqlty import SQL\nq = SQL[tuple[int, str | None]](\"--sql\\nSELECT id, email FROM users WHERE name = %s\")\n"
+        "from sqlty import SQL\nq = SQL[tuple[int, str | None], tuple[str | None]](\"--sql\\nSELECT id, email FROM users WHERE name = %s\")\n"
     );
     assert_eq!(answer["highlights"][0], json!([5, 10, "comment"]));
     assert_eq!(answer["highlights"][1], json!([12, 18, "keyword"]));
@@ -96,7 +96,7 @@ fn config_sets_the_dialect_import_style_and_rules() {
     assert_eq!(answer["diagnostics"][0]["severity"], "error");
     assert_eq!(
         answer["rewritten"],
-        "import sqlty\nq = sqlty.SQL[tuple[int, str, str | None]](\"--sql\\nSELECT * FROM users\")\n"
+        "import sqlty\nq = sqlty.SQL[tuple[int, str, str | None], sqlty.NoParams](\"--sql\\nSELECT * FROM users\")\n"
     );
     let source = "q = \"--sql\\nSELECT 1 = 1 AS b\"\n";
     for (dialect, row_type) in [("postgres", "tuple[bool]"), ("sqlite", "tuple[int]")] {
@@ -112,7 +112,6 @@ fn param_types_are_written_by_rewrite_and_fix_all() {
     let source = "q = \"--sql\\nSELECT name FROM users WHERE id = %(id)s\"\n";
     let answer = ask(&json!({
         "op": "analyze", "source": source, "schema": SCHEMA, "dialect": "postgres",
-        "config": "param-types = true",
     }));
     let expected = "import typing\nfrom sqlty import SQL\n\n\n# sqlty: generated\n\
         class QParams(typing.TypedDict):\n    id: int | None\n\n\n\
@@ -122,6 +121,13 @@ fn param_types_are_written_by_rewrite_and_fix_all() {
     let answer =
         ask(&json!({"op": "analyze", "source": expected, "schema": SCHEMA, "dialect": "postgres"}));
     assert_eq!(answer["stripped"], source);
+    let answer = ask(&json!({
+        "op": "analyze", "source": source, "schema": SCHEMA, "dialect": "postgres",
+        "config": "param-types = false",
+    }));
+    let expected =
+        "from sqlty import SQL\nq = SQL[tuple[str]](\"--sql\\nSELECT name FROM users WHERE id = %(id)s\")\n";
+    assert_eq!(answer["rewritten"], expected);
 }
 
 #[test]
@@ -159,7 +165,7 @@ fn analyze_gives_quick_fixes_and_what_fix_and_strip_make() {
             {"start": 4, "end": 33, "replacement": "SQL[tuple[int]](\"--sql\\nSELECT id FROM users\")"},
         ])
     );
-    let fixed = "from sqlty import SQL\né = SQL[tuple[int]](\"--sql\\nSELECT id FROM users\")\n";
+    let fixed = "from sqlty import SQL\nfrom sqlty import NoParams\né = SQL[tuple[int], NoParams](\"--sql\\nSELECT id FROM users\")\n";
     assert_eq!(answer["fixed"], fixed);
     let answer =
         ask(&json!({"op": "analyze", "source": fixed, "schema": SCHEMA, "dialect": "postgres"}));

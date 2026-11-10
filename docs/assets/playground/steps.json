@@ -31,8 +31,8 @@
     {
       "title": "Parameters have types too",
       "panel": "types",
-      "notes": "With param-types = true, a parameter is typed by what it is compared with: Types lists them. Press Rewrite, and it writes a TypedDict for the named ones.",
-      "config": "param-types = true\n",
+      "notes": "A parameter is typed by what it is compared with: Types lists them. Press Rewrite, and it writes a TypedDict for the named ones.",
+      "config": "",
       "source": "since = \"\"\"--sql\nSELECT u.name, o.total\nFROM orders AS o\nJOIN users AS u ON u.id = o.user_id\nWHERE o.placed_at > %(since)s AND o.total >= %(least)s\"\"\"\n"
     },
     {

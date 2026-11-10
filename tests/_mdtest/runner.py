@@ -53,7 +53,7 @@ class Run:
         self.import_style: str | None = settings.get("import-style")
         self.untyped: bool = settings.get("untyped") == "sentinel"
         self.json_types: str = settings.get("json-types", "typing.Any")
-        self.param_types: bool = settings.get("param-types", False)
+        self.param_types: bool = settings.get("param-types", True)
         self.rules: dict[str, str] | None = settings.get("rules")
         # Preview is on unless a section turns it off: the suite asserts it changes nothing else.
         self.preview: bool = settings.get("preview", True)

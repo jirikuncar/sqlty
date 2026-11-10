@@ -85,6 +85,7 @@ untyped = "sentinel"
 # error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
 q = "--sql\nSELECT x, y FROM pairs"
 # fixed: from sqlty import SQL
+# fixed: from sqlty import NoParams
 # fixed: from sqlty import UNTYPED
-# fixed: q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
+# fixed: q = SQL[UNTYPED, NoParams]("--sql\nSELECT x, y FROM pairs")
 ```

@@ -325,7 +325,9 @@ CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
 from sqlty import SQL
 
 q = "--sql\nSELECT id, name FROM users"
-# rewritten: q = SQL[tuple[int, str | None]]("--sql\nSELECT id, name FROM users")
+# rewritten: from sqlty import NoParams
+# rewritten:
+# rewritten: q = SQL[tuple[int, str | None], NoParams]("--sql\nSELECT id, name FROM users")
 ```
 
 The row type is stale once nullability is on: `sqlty check` flags the old annotation.

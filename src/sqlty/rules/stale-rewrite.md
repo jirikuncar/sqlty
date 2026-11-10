@@ -25,7 +25,8 @@ q = "--sql\nSELECT id::INTEGER FROM users"
 ```python
 q = "--sql\nSELECT id::INTEGER FROM users"
 # fixed: from sqlty import SQL
-# fixed: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
+# fixed: from sqlty import NoParams
+# fixed: q = SQL[tuple[int], NoParams]("--sql\nSELECT id::INTEGER FROM users")
 ```
 
 Strings rewrite can't type (DDL, DML without `RETURNING`, invalid SQL) are
@@ -52,7 +53,8 @@ from sqlty import SQL
 q1 = SQL("--sql\nSELECT id::INTEGER FROM users")
 q2 = SQL("SELECT id::INTEGER, name::TEXT FROM users")
 # fixed: from sqlty import SQL
+# fixed: from sqlty import NoParams
 # fixed:
-# fixed: q1 = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
-# fixed: q2 = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# fixed: q1 = SQL[tuple[int], NoParams]("--sql\nSELECT id::INTEGER FROM users")
+# fixed: q2 = SQL[tuple[int, str], NoParams]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```

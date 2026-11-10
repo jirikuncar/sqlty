@@ -127,7 +127,7 @@ dialect = "mysql"
 
 ```python
 q = "--sql\nSELECT CAST(id AS SIGNED) FROM users WHERE id = %s"
-# rewritten: q = SQL[tuple[int]]("--sql\nSELECT CAST(id AS SIGNED) FROM users WHERE id = %s")
+# rewritten: q = SQL[tuple[int], tuple[typing.Any]]("--sql\nSELECT CAST(id AS SIGNED) FROM users WHERE id = %s")
 ```
 
 ## SQLite

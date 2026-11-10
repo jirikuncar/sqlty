@@ -234,7 +234,7 @@ fn resolved(table: &serde_json::Map<String, Value>) -> Settings {
     Settings {
         dialect,
         import_style: text("import-style"),
-        param_types: table.get("param-types") == Some(&Value::Bool(true)),
+        param_types: table.get("param-types") != Some(&Value::Bool(false)),
         rules: pairs("rules").into_iter().collect(),
         types,
     }

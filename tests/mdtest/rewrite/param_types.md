@@ -1,11 +1,10 @@
 # Parameter types
 
-With `param-types = true`, `rewrite` writes the type of the parameters of each query,
-`SQL[R, P]`: a `tuple` for positional parameters, and a generated `TypedDict` for named ones.
+`rewrite` writes the type of the parameters of each query, `SQL[R, P]`: a `tuple` for
+positional parameters, and a generated `TypedDict` for named ones.
 
 ```toml
 [tool.sqlty]
-param-types = true
 schema = "schema.sql"
 ```
 
@@ -356,4 +355,20 @@ r = "--sql\nSELECT name FROM users WHERE id = :id"
 # rewritten-file:
 # rewritten-file: q = SQL[tuple[str], tuple[int | None]]("--sql\nSELECT name FROM users WHERE id = ?")
 # rewritten-file: r = SQL[tuple[str], RParams]("--sql\nSELECT name FROM users WHERE id = :id")
+```
+
+## Turned off
+
+`param-types = false` leaves `SQL[R]`.
+
+```toml
+[tool.sqlty]
+param-types = false
+schema = "schema.sql"
+```
+
+```python
+q = "--sql\nSELECT name FROM users WHERE id = %(id)s"
+# rewritten-file: from sqlty import SQL
+# rewritten-file: q = SQL[tuple[str]]("--sql\nSELECT name FROM users WHERE id = %(id)s")
 ```

@@ -87,11 +87,12 @@ b = SQL[tuple[int, str]]("--sql\nSELECT t.id, t.titel FROM teams t")
 c = SQL[tuple[int, str]]('--sql\nSELECT id, mixd FROM users')
 d = SQL[tuple[int, str]]("--sql\nSELECT id, mixd FROM users")
 # fixed: from sqlty import SQL
+# fixed: from sqlty import NoParams
 # fixed:
-# fixed: a = SQL[tuple[int, str]]("--sql\nSELECT id, name FROM users")
-# fixed: b = SQL[tuple[int, str | None]]("--sql\nSELECT t.id, t.title FROM teams t")
-# fixed: c = SQL[tuple[int, str | None]]('--sql\nSELECT id, "Mixed" FROM users')
-# fixed: d = SQL[tuple[int, str]]("--sql\nSELECT id, mixd FROM users")
+# fixed: a = SQL[tuple[int, str], NoParams]("--sql\nSELECT id, name FROM users")
+# fixed: b = SQL[tuple[int, str | None], NoParams]("--sql\nSELECT t.id, t.title FROM teams t")
+# fixed: c = SQL[tuple[int, str | None], NoParams]('--sql\nSELECT id, "Mixed" FROM users')
+# fixed: d = SQL[tuple[int, str], NoParams]("--sql\nSELECT id, mixd FROM users")
 ```
 
 No column is suggested when none is close, or when two are equally close: `user_id` of

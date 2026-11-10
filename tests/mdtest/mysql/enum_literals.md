@@ -50,7 +50,8 @@ SELECT CASE WHEN id > 1 THEN 'x' ELSE 'y' END AS k, COALESCE(kind, 'z') AS z FRO
 
 ```python
 q = "-- sql\nSELECT status, kind FROM orders"
-# rewritten: q = SQL[tuple[typing.Literal['Pending', 'paid', 'it\'s'], typing.Literal['a', 'b'] | None]]("-- sql\nSELECT status, kind FROM orders")
+# rewritten: from sqlty import NoParams
+# rewritten: q = SQL[tuple[typing.Literal['Pending', 'paid', 'it\'s'], typing.Literal['a', 'b'] | None], NoParams]("-- sql\nSELECT status, kind FROM orders")
 ```
 
 `schema.sql`:

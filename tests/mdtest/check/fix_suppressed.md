@@ -23,8 +23,9 @@ from sqlty import SQL
 
 query = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")  # sqlty: ignore[select-star]
 # fixed: from sqlty import SQL
+# fixed: from sqlty import NoParams
 # fixed:
-# fixed: query = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")  # sqlty: ignore[select-star]
+# fixed: query = SQL[tuple[int, str], NoParams]("--sql\nSELECT * FROM users")  # sqlty: ignore[select-star]
 ```
 
 ## Unsuppressed select-star is expanded
@@ -34,8 +35,9 @@ from sqlty import SQL
 
 query = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")
 # fixed: from sqlty import SQL
+# fixed: from sqlty import NoParams
 # fixed:
-# fixed: query = SQL[tuple[int, str]]("--sql\nSELECT id::INT, name::TEXT FROM users")
+# fixed: query = SQL[tuple[int, str], NoParams]("--sql\nSELECT id::INT, name::TEXT FROM users")
 ```
 
 ## A bare ignore suppresses every fix on its line
@@ -45,8 +47,9 @@ from sqlty import SQL
 
 query = SQL[tuple[str]]("--sql\nSELECT * FROM users")  # sqlty: ignore
 # fixed: from sqlty import SQL
+# fixed: from sqlty import NoParams
 # fixed:
-# fixed: query = SQL[tuple[str]]("--sql\nSELECT * FROM users")  # sqlty: ignore
+# fixed: query = SQL[tuple[str], NoParams]("--sql\nSELECT * FROM users")  # sqlty: ignore
 ```
 
 ## An unrelated rule is still fixed
@@ -56,8 +59,9 @@ from sqlty import SQL
 
 query = SQL[tuple[str]]("--sql\nSELECT * FROM users")  # sqlty: ignore[select-star]
 # fixed: from sqlty import SQL
+# fixed: from sqlty import NoParams
 # fixed:
-# fixed: query = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")  # sqlty: ignore[select-star]
+# fixed: query = SQL[tuple[int, str], NoParams]("--sql\nSELECT * FROM users")  # sqlty: ignore[select-star]
 ```
 
 ## Suppressed narrow-type is not refreshed
@@ -67,8 +71,9 @@ from sqlty import SQL
 
 query = SQL[tuple[str]]("--sql\nSELECT id::INTEGER FROM users")  # sqlty: ignore[narrow-type]
 # fixed: from sqlty import SQL
+# fixed: from sqlty import NoParams
 # fixed:
-# fixed: query = SQL[tuple[str]]("--sql\nSELECT id::INTEGER FROM users")  # sqlty: ignore[narrow-type]
+# fixed: query = SQL[tuple[str], NoParams]("--sql\nSELECT id::INTEGER FROM users")  # sqlty: ignore[narrow-type]
 ```
 
 ## Suppressed inline-sql-comment is not fixed
@@ -87,8 +92,9 @@ query = SQL[tuple[str]](  # sqlty: ignore[narrow-type]
     "--sql\nSELECT id::INTEGER FROM users"
 )
 # fixed: from sqlty import SQL
+# fixed: from sqlty import NoParams
 # fixed:
-# fixed: query = SQL[tuple[str]](  # sqlty: ignore[narrow-type]
+# fixed: query = SQL[tuple[str], NoParams](  # sqlty: ignore[narrow-type]
 # fixed:     "--sql\nSELECT id::INTEGER FROM users"
 # fixed: )
 ```
@@ -101,7 +107,8 @@ The import added for another query shifts the lines; the comment still applies.
 other = "--sql\nSELECT id::INTEGER FROM users"
 query = "--sql\nSELECT id::INTEGER FROM users"  # sqlty: ignore[stale-rewrite]
 # fixed: from sqlty import SQL
-# fixed: other = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
+# fixed: from sqlty import NoParams
+# fixed: other = SQL[tuple[int], NoParams]("--sql\nSELECT id::INTEGER FROM users")
 # fixed: query = "--sql\nSELECT id::INTEGER FROM users"  # sqlty: ignore[stale-rewrite]
 ```
 
@@ -113,8 +120,9 @@ from sqlty import SQL
 query = SQL[tuple[str]]("--sql\nSELECT id::INTEGER FROM users")
 other = 1  # sqlty: ignore
 # fixed: from sqlty import SQL
+# fixed: from sqlty import NoParams
 # fixed:
-# fixed: query = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
+# fixed: query = SQL[tuple[int], NoParams]("--sql\nSELECT id::INTEGER FROM users")
 # fixed: other = 1  # sqlty: ignore
 ```
 
@@ -130,9 +138,10 @@ query = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")  # sqlty: ignore[sele
 # fixed: from __future__ import annotations
 # fixed:
 # fixed: from sqlty import SQL
+# fixed: from sqlty import NoParams
 # fixed:
-# fixed: other = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
-# fixed: query = SQL[tuple[int, str]]("--sql\nSELECT * FROM users")  # sqlty: ignore[select-star]
+# fixed: other = SQL[tuple[int], NoParams]("--sql\nSELECT id::INTEGER FROM users")
+# fixed: query = SQL[tuple[int, str], NoParams]("--sql\nSELECT * FROM users")  # sqlty: ignore[select-star]
 ```
 
 ## A string passed to a helper with its row type is not wrapped
@@ -150,6 +159,7 @@ names = fetch_all(
 rows = fetch_all("--sql\nSELECT id::INTEGER FROM users")  # sqlty: ignore[select-star]
 # fixed: from typing import Annotated, LiteralString
 # fixed: from sqlty import SQL
+# fixed: from sqlty import NoParams
 # fixed:
 # fixed: def fetch_all[T](query: Annotated[LiteralString, SQL], form: type[T] | None = None, /) -> list[T]: ...
 # fixed:
@@ -157,5 +167,5 @@ rows = fetch_all("--sql\nSELECT id::INTEGER FROM users")  # sqlty: ignore[select
 # fixed:     "--sql\nSELECT id::INTEGER FROM users",
 # fixed:     int,
 # fixed: )
-# fixed: rows = fetch_all(SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users"))  # sqlty: ignore[select-star]
+# fixed: rows = fetch_all(SQL[tuple[int], NoParams]("--sql\nSELECT id::INTEGER FROM users"))  # sqlty: ignore[select-star]
 ```

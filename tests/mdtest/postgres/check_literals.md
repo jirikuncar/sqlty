@@ -359,7 +359,8 @@ SELECT mood, CASE WHEN id > 1 THEN mood ELSE 'sad' END AS m FROM people
 
 ```python
 q = "--sql\nSELECT status, priority, note FROM orders"
-# rewritten: q = SQL[tuple[typing.Literal['pending', 'paid', 'refunded'], typing.Literal[1, 2, 3] | None, str | None]]("--sql\nSELECT status, priority, note FROM orders")
+# rewritten: from sqlty import NoParams
+# rewritten: q = SQL[tuple[typing.Literal['pending', 'paid', 'refunded'], typing.Literal[1, 2, 3] | None, str | None], NoParams]("--sql\nSELECT status, priority, note FROM orders")
 ```
 
 `schema.sql`:

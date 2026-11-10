@@ -295,7 +295,7 @@ def rewrite_source(
     untyped: bool = False,
     keep_lines: bool = False,
     json_types: str = "typing.Any",
-    param_types: bool = False,
+    param_types: bool = True,
 ) -> str:
     r"""Wrap each ``--sql`` string in ``SQL[T](...)``, ``T`` the row type it infers.
 
@@ -307,7 +307,8 @@ def rewrite_source(
     Example:
         >>> print(rewrite_source('q = "--sql\\nSELECT 1::INTEGER AS n"'))
         from sqlty import SQL
-        q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")
+        from sqlty import NoParams
+        q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER AS n")
 
     Raises:
         ValueError: unsupported ``import_style``
@@ -380,7 +381,7 @@ def fix_source(
     json_types: str = "typing.Any",
     helpers: HelperIndex | None = None,
     module: str | None = None,
-    param_types: bool = False,
+    param_types: bool = True,
 ) -> str:
     """Apply what ``sqlty check --fix`` fixes; rules set to ``"ignore"`` are skipped.
 

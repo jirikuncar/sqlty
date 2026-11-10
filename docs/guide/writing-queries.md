@@ -14,7 +14,8 @@ Put `--sql` on its own line, then the query. In a single-line string, use the
 
 ```python
 query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
-# rewritten: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# rewritten: from sqlty import NoParams
+# rewritten: query = SQL[tuple[int, str], NoParams]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 `--sql` is a SQL line comment, so the database ignores it. A space instead of
@@ -31,7 +32,8 @@ Single quotes work the same way:
 
 ```python
 query = '--sql\nSELECT id::INTEGER FROM users'
-# rewritten: query = SQL[tuple[int]]('--sql\nSELECT id::INTEGER FROM users')
+# rewritten: from sqlty import NoParams
+# rewritten: query = SQL[tuple[int], NoParams]('--sql\nSELECT id::INTEGER FROM users')
 ```
 
 MySQL and MariaDB read `--` as a comment only before whitespace, so their
@@ -49,7 +51,8 @@ dialect = "mysql"
 
 ```python
 query = "-- sql\nSELECT CAST(id AS SIGNED) FROM users"
-# rewritten: query = SQL[tuple[int]]("-- sql\nSELECT CAST(id AS SIGNED) FROM users")
+# rewritten: from sqlty import NoParams
+# rewritten: query = SQL[tuple[int], NoParams]("-- sql\nSELECT CAST(id AS SIGNED) FROM users")
 ```
 
 ## Multi-line queries
@@ -63,7 +66,8 @@ FROM users
 WHERE active
 """
 # rewritten-file: from sqlty import SQL
-# rewritten-file: query = SQL[tuple[int, str]]("""--sql
+# rewritten-file: from sqlty import NoParams
+# rewritten-file: query = SQL[tuple[int, str], NoParams]("""--sql
 # rewritten-file: SELECT id::INTEGER, email::TEXT
 # rewritten-file: FROM users
 # rewritten-file: WHERE active
@@ -75,7 +79,8 @@ Implicitly concatenated strings are one query, wrapped as a whole:
 ```python
 query = ("--sql\nSELECT id::INTEGER, email::TEXT "
          "FROM users")
-# rewritten: query = (SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, email::TEXT "
+# rewritten: from sqlty import NoParams
+# rewritten: query = (SQL[tuple[int, str], NoParams]("--sql\nSELECT id::INTEGER, email::TEXT "
 # rewritten:          "FROM users"))
 ```
 
@@ -99,7 +104,8 @@ query = "--sql\nSELECT created_at::TIMESTAMP, CAST(token AS UUID) FROM sessions"
 # rewritten-file: import datetime
 # rewritten-file: import uuid
 # rewritten-file: from sqlty import SQL
-# rewritten-file: query = SQL[tuple[datetime.datetime, uuid.UUID]]("--sql\nSELECT created_at::TIMESTAMP, CAST(token AS UUID) FROM sessions")
+# rewritten-file: from sqlty import NoParams
+# rewritten-file: query = SQL[tuple[datetime.datetime, uuid.UUID], NoParams]("--sql\nSELECT created_at::TIMESTAMP, CAST(token AS UUID) FROM sessions")
 ```
 
 The rewriter adds `import datetime`, `import uuid`, `import decimal`,
@@ -127,8 +133,9 @@ type, skipping `NULL` and placeholders. Cast the whole expression to type it:
 ```python
 unknown = "--sql\nSELECT COUNT(*), 1, x::INTEGER + 1, name FROM t"
 typed = "--sql\nSELECT COUNT(*), 1, (x::INTEGER + 1)::INTEGER, name::TEXT FROM t"
+# rewritten: from sqlty import NoParams
 # rewritten: unknown = "--sql\nSELECT COUNT(*), 1, x::INTEGER + 1, name FROM t"
-# rewritten: typed = SQL[tuple[int, int, int, str]]("--sql\nSELECT COUNT(*), 1, (x::INTEGER + 1)::INTEGER, name::TEXT FROM t")
+# rewritten: typed = SQL[tuple[int, int, int, str], NoParams]("--sql\nSELECT COUNT(*), 1, (x::INTEGER + 1)::INTEGER, name::TEXT FROM t")
 ```
 
 An unaliased column is named as PostgreSQL names it: the column (also under a
@@ -155,7 +162,8 @@ plain strings:
 deleted = "--sql\nDELETE FROM users WHERE id = 1 RETURNING id::INTEGER"
 purge = "--sql\nDELETE FROM users WHERE id = 1"
 broken = "--sql\nSELEC id FROM users"
-# rewritten: deleted = SQL[tuple[int]]("--sql\nDELETE FROM users WHERE id = 1 RETURNING id::INTEGER")
+# rewritten: from sqlty import NoParams
+# rewritten: deleted = SQL[tuple[int], NoParams]("--sql\nDELETE FROM users WHERE id = 1 RETURNING id::INTEGER")
 # rewritten: purge = "--sql\nDELETE FROM users WHERE id = 1"
 # rewritten: broken = "--sql\nSELEC id FROM users"
 ```
@@ -336,8 +344,9 @@ from sqlty import SQL
 
 q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
 # fixed: from sqlty import SQL
+# fixed: from sqlty import NoParams
 # fixed:
-# fixed: q = SQL[tuple[int, str, str]]("--sql\nSELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
+# fixed: q = SQL[tuple[int, str, str], NoParams]("--sql\nSELECT id::INTEGER, name::TEXT, email::TEXT FROM users")
 ```
 
 This works for every file, including ones with row types you wrote by hand.
@@ -382,7 +391,8 @@ import-style = "from sqlty import SQL as Q"
 ```python
 query = "--sql\nSELECT id::INTEGER FROM users"
 # rewritten-file: from sqlty import SQL as Q
-# rewritten-file: query = Q[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
+# rewritten-file: from sqlty import NoParams
+# rewritten-file: query = Q[tuple[int], NoParams]("--sql\nSELECT id::INTEGER FROM users")
 ```
 
 Example project:

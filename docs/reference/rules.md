@@ -473,7 +473,7 @@ from sqlty import SQL
 q = SQL[tuple[int], tuple[int, int]]("--sql\nSELECT 1 FROM users LIMIT %s")
 ```
 
-Fix: change `P`, or let `sqlty rewrite` write it with `param-types = true`.
+Fix: change `P`, or strip it and let `sqlty rewrite` write it again.
 
 ## Suppression rules
 

@@ -179,6 +179,7 @@ json-types = "typing.TypedDict"
 q = "--sql\nSELECT o.id, (SELECT jsonb_agg(jsonb_build_object('sku', l.sku, 'qty', l.qty, 'note', l.note)) FROM lines l WHERE l.order_id = o.id) AS lines FROM orders o"
 # rewritten-file: import typing
 # rewritten-file: from sqlty import SQL
+# rewritten-file: from sqlty import NoParams
 # rewritten-file:
 # rewritten-file:
 # rewritten-file: # sqlty: generated
@@ -188,7 +189,7 @@ q = "--sql\nSELECT o.id, (SELECT jsonb_agg(jsonb_build_object('sku', l.sku, 'qty
 # rewritten-file:     note: str | None
 # rewritten-file:
 # rewritten-file:
-# rewritten-file: q = SQL[tuple[int, list[LinesItem] | None]]("--sql\nSELECT o.id, (SELECT jsonb_agg(jsonb_build_object('sku', l.sku, 'qty', l.qty, 'note', l.note)) FROM lines l WHERE l.order_id = o.id) AS lines FROM orders o")
+# rewritten-file: q = SQL[tuple[int, list[LinesItem] | None], NoParams]("--sql\nSELECT o.id, (SELECT jsonb_agg(jsonb_build_object('sku', l.sku, 'qty', l.qty, 'note', l.note)) FROM lines l WHERE l.order_id = o.id) AS lines FROM orders o")
 ```
 
 Each class is written after the imports, under a `# sqlty: generated` line, and named after

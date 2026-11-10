@@ -312,8 +312,9 @@ a = SQL[tuple[Literal["paid", "pending", "refunded"]]]("--sql\nSELECT status FRO
 # fixed: from typing import Literal
 # fixed:
 # fixed: from sqlty import SQL
+# fixed: from sqlty import NoParams
 # fixed:
-# fixed: a = SQL[tuple[Literal["paid", "pending", "refunded"]]]("--sql\nSELECT status FROM orders")
+# fixed: a = SQL[tuple[Literal["paid", "pending", "refunded"]], NoParams]("--sql\nSELECT status FROM orders")
 ```
 
 A `Literal` that misses a value is `literal-mismatch`, not `stale-type`.

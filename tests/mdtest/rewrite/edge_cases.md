@@ -4,14 +4,16 @@
 
 ```python
 q = "--sql\nSELECT created_at::TIMESTAMP FROM users"
-# rewritten: q = SQL[tuple[datetime.datetime]]("--sql\nSELECT created_at::TIMESTAMP FROM users")
+# rewritten: from sqlty import NoParams
+# rewritten: q = SQL[tuple[datetime.datetime], NoParams]("--sql\nSELECT created_at::TIMESTAMP FROM users")
 ```
 
 ## Query with UUID type
 
 ```python
 q = "--sql\nSELECT user_id::UUID FROM users"
-# rewritten: q = SQL[tuple[uuid.UUID]]("--sql\nSELECT user_id::UUID FROM users")
+# rewritten: from sqlty import NoParams
+# rewritten: q = SQL[tuple[uuid.UUID], NoParams]("--sql\nSELECT user_id::UUID FROM users")
 ```
 
 ## Invalid SQL is not wrapped
@@ -67,21 +69,24 @@ q = "--sql\nCREATE TABLE t (id INT)"
 
 ```python
 q = "--sql\nUPDATE users SET name = 'x' RETURNING id::INTEGER"
-# rewritten: q = SQL[tuple[int]]("--sql\nUPDATE users SET name = 'x' RETURNING id::INTEGER")
+# rewritten: from sqlty import NoParams
+# rewritten: q = SQL[tuple[int], NoParams]("--sql\nUPDATE users SET name = 'x' RETURNING id::INTEGER")
 ```
 
 ## Multiple queries on separate lines
 
 ```python
 q1 = "--sql\nSELECT id::INTEGER FROM users"
-# rewritten: q1 = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
+# rewritten: from sqlty import NoParams
+# rewritten: q1 = SQL[tuple[int], NoParams]("--sql\nSELECT id::INTEGER FROM users")
 ```
 
 ## Single-quoted string
 
 ```python
 q = '--sql\nSELECT id::INTEGER FROM users'
-# rewritten: q = SQL[tuple[int]]('--sql\nSELECT id::INTEGER FROM users')
+# rewritten: from sqlty import NoParams
+# rewritten: q = SQL[tuple[int], NoParams]('--sql\nSELECT id::INTEGER FROM users')
 ```
 
 ## Space after --sql makes entire line a SQL comment
@@ -106,11 +111,12 @@ t = t'--sql\nSELECT id FROM {table}'
 q = "--sql\nSELECT id::INTEGER FROM users"
 r = '--sql\nSELECT name::TEXT FROM users'
 # rewritten-file: from sqlty import SQL
+# rewritten-file: from sqlty import NoParams
 # rewritten-file: table = "users"
 # rewritten-file: f = f"--sql\nSELECT id FROM {table}"
 # rewritten-file: t = t'--sql\nSELECT id FROM {table}'
-# rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
-# rewritten-file: r = SQL[tuple[str]]('--sql\nSELECT name::TEXT FROM users')
+# rewritten-file: q = SQL[tuple[int], NoParams]("--sql\nSELECT id::INTEGER FROM users")
+# rewritten-file: r = SQL[tuple[str], NoParams]('--sql\nSELECT name::TEXT FROM users')
 ```
 
 ## Apostrophes in comments and escaped quotes hide no strings
@@ -126,11 +132,12 @@ b = br'\'"'
 r = '--sql\nSELECT name::TEXT FROM users'
 # that's all
 # rewritten-file: from sqlty import SQL
+# rewritten-file: from sqlty import NoParams
 # rewritten-file: # it's a helper
 # rewritten-file: a = 'it\'s'
-# rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
+# rewritten-file: q = SQL[tuple[int], NoParams]("--sql\nSELECT id::INTEGER FROM users")
 # rewritten-file: b = br'\'"'
-# rewritten-file: r = SQL[tuple[str]]('--sql\nSELECT name::TEXT FROM users')
+# rewritten-file: r = SQL[tuple[str], NoParams]('--sql\nSELECT name::TEXT FROM users')
 # rewritten-file: # that's all
 ```
 
@@ -138,7 +145,8 @@ r = '--sql\nSELECT name::TEXT FROM users'
 
 ```python
 q = u"--sql\nSELECT id::INTEGER FROM users"
-# rewritten: q = SQL[tuple[int]](u"--sql\nSELECT id::INTEGER FROM users")
+# rewritten: from sqlty import NoParams
+# rewritten: q = SQL[tuple[int], NoParams](u"--sql\nSELECT id::INTEGER FROM users")
 ```
 
 ```python
@@ -155,8 +163,9 @@ A marker line may end with an escaped `\r\n`, as with `\n`.
 ```python
 a = "--sql\r\nSELECT 1 AS n"
 b = "--sql\nSELECT 1 AS n"
-# rewritten: a = SQL[tuple[int]]("--sql\r\nSELECT 1 AS n")
-# rewritten: b = SQL[tuple[int]]("--sql\nSELECT 1 AS n")
+# rewritten: from sqlty import NoParams
+# rewritten: a = SQL[tuple[int], NoParams]("--sql\r\nSELECT 1 AS n")
+# rewritten: b = SQL[tuple[int], NoParams]("--sql\nSELECT 1 AS n")
 ```
 
 ## `SELECT *` without a schema stays unwrapped
@@ -177,7 +186,8 @@ untyped = "sentinel"
 
 ```python
 q = "--sql\nSELECT * FROM users"
-# rewritten: q = SQL[UNTYPED]("--sql\nSELECT * FROM users")
+# rewritten: from sqlty import NoParams
+# rewritten: q = SQL[UNTYPED, NoParams]("--sql\nSELECT * FROM users")
 ```
 
 ## Strings in a `case` pattern stay unwrapped
@@ -194,12 +204,13 @@ def kind(query: str, n: int) -> str:
             return "pair"
         case _: return "--sql\nSELECT 4::INTEGER AS n"
 case = "--sql\nSELECT 5::INTEGER AS n"
+# rewritten: from sqlty import NoParams
 # rewritten: def kind(query: str, n: int) -> str:
 # rewritten:     match query:
 # rewritten:         case "--sql\nSELECT 1::INTEGER AS n" | ("--sql\nSELECT 2::INTEGER AS n"):
 # rewritten:             return "one or two"
-# rewritten:         case [x, "--sql\nSELECT 1::INTEGER AS n"] if x == SQL[tuple[int]]("--sql\nSELECT 3::INTEGER AS n"):
+# rewritten:         case [x, "--sql\nSELECT 1::INTEGER AS n"] if x == SQL[tuple[int], NoParams]("--sql\nSELECT 3::INTEGER AS n"):
 # rewritten:             return "pair"
-# rewritten:         case _: return SQL[tuple[int]]("--sql\nSELECT 4::INTEGER AS n")
-# rewritten: case = SQL[tuple[int]]("--sql\nSELECT 5::INTEGER AS n")
+# rewritten:         case _: return SQL[tuple[int], NoParams]("--sql\nSELECT 4::INTEGER AS n")
+# rewritten: case = SQL[tuple[int], NoParams]("--sql\nSELECT 5::INTEGER AS n")
 ```

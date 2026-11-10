@@ -69,5 +69,6 @@ q = SQL[tuple[int]](r"--sql\nSELECT name FROM users")
 
 ```python
 q = "--sql\nSELECT name FROM \"users\""
-# rewritten: q = SQL[tuple[str]]("--sql\nSELECT name FROM \"users\"")
+# rewritten: from sqlty import NoParams
+# rewritten: q = SQL[tuple[str], NoParams]("--sql\nSELECT name FROM \"users\"")
 ```

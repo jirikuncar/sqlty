@@ -27,9 +27,10 @@ untyped = "sentinel"  # or: sqlty rewrite --untyped sentinel
 pairs = "--sql\nSELECT x, y FROM pairs"
 users = "--sql\nSELECT id::INTEGER FROM users"
 # rewritten-file: from sqlty import SQL
+# rewritten-file: from sqlty import NoParams
 # rewritten-file: from sqlty import UNTYPED
-# rewritten-file: pairs = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
-# rewritten-file: users = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
+# rewritten-file: pairs = SQL[UNTYPED, NoParams]("--sql\nSELECT x, y FROM pairs")
+# rewritten-file: users = SQL[tuple[int], NoParams]("--sql\nSELECT id::INTEGER FROM users")
 ```
 
 [`untyped-query`](../reference/rules.md#untyped-query) reports each `SQL[UNTYPED]`
@@ -52,9 +53,10 @@ form, which is a SQL comment.
 purge = "--sql\nDELETE FROM users WHERE id = 1"
 table = "--sql\nCREATE TABLE users (id INTEGER)"
 deleted = "--sql\nDELETE FROM users RETURNING id::INTEGER"
+# rewritten: from sqlty import NoParams
 # rewritten: purge = "--sql\nDELETE FROM users WHERE id = 1"
 # rewritten: table = "--sql\nCREATE TABLE users (id INTEGER)"
-# rewritten: deleted = SQL[tuple[int]]("--sql\nDELETE FROM users RETURNING id::INTEGER")
+# rewritten: deleted = SQL[tuple[int], NoParams]("--sql\nDELETE FROM users RETURNING id::INTEGER")
 ```
 
 `sqlty check` reports nothing for them:

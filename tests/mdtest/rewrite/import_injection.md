@@ -4,29 +4,35 @@
 
 ```python
 q = "--sql\nSELECT 1::INTEGER"
-# rewritten: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
+# rewritten: from sqlty import NoParams
+# rewritten: q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER")
 # rewritten-file: from sqlty import SQL
-# rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
+# rewritten-file: from sqlty import NoParams
+# rewritten-file: q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER")
 ```
 
 ## Datetime import is added
 
 ```python
 q = "--sql\nSELECT created_at::TIMESTAMP FROM events"
-# rewritten: q = SQL[tuple[datetime.datetime]]("--sql\nSELECT created_at::TIMESTAMP FROM events")
+# rewritten: from sqlty import NoParams
+# rewritten: q = SQL[tuple[datetime.datetime], NoParams]("--sql\nSELECT created_at::TIMESTAMP FROM events")
 # rewritten-file: import datetime
 # rewritten-file: from sqlty import SQL
-# rewritten-file: q = SQL[tuple[datetime.datetime]]("--sql\nSELECT created_at::TIMESTAMP FROM events")
+# rewritten-file: from sqlty import NoParams
+# rewritten-file: q = SQL[tuple[datetime.datetime], NoParams]("--sql\nSELECT created_at::TIMESTAMP FROM events")
 ```
 
 ## UUID import is added
 
 ```python
 q = "--sql\nSELECT user_id::UUID FROM users"
-# rewritten: q = SQL[tuple[uuid.UUID]]("--sql\nSELECT user_id::UUID FROM users")
+# rewritten: from sqlty import NoParams
+# rewritten: q = SQL[tuple[uuid.UUID], NoParams]("--sql\nSELECT user_id::UUID FROM users")
 # rewritten-file: import uuid
 # rewritten-file: from sqlty import SQL
-# rewritten-file: q = SQL[tuple[uuid.UUID]]("--sql\nSELECT user_id::UUID FROM users")
+# rewritten-file: from sqlty import NoParams
+# rewritten-file: q = SQL[tuple[uuid.UUID], NoParams]("--sql\nSELECT user_id::UUID FROM users")
 ```
 
 ## Existing import is not duplicated
@@ -34,9 +40,11 @@ q = "--sql\nSELECT user_id::UUID FROM users"
 ```python
 from sqlty import SQL
 q = "--sql\nSELECT 1::INTEGER"
-# rewritten: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
+# rewritten: from sqlty import NoParams
+# rewritten: q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER")
 # rewritten-file: from sqlty import SQL
-# rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
+# rewritten-file: from sqlty import NoParams
+# rewritten-file: q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER")
 ```
 
 ## Existing sqlty imports are recognised
@@ -52,8 +60,9 @@ from sqlty import SQL, UNTYPED
 q = SQL[tuple[str]]("--sql\nSELECT 1::INTEGER AS n")
 r = "--sql\nSELECT 2::INTEGER AS m"
 # fixed: from sqlty import SQL, UNTYPED
-# fixed: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")
-# fixed: r = SQL[tuple[int]]("--sql\nSELECT 2::INTEGER AS m")
+# fixed: from sqlty import NoParams
+# fixed: q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER AS n")
+# fixed: r = SQL[tuple[int], NoParams]("--sql\nSELECT 2::INTEGER AS m")
 ```
 
 ### Parenthesised over lines
@@ -73,7 +82,8 @@ q = "--sql\nSELECT x, y FROM pairs"
 # rewritten-file:     SQL,  # the wrapper
 # rewritten-file:     UNTYPED,
 # rewritten-file: )
-# rewritten-file: q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
+# rewritten-file: from sqlty import NoParams
+# rewritten-file: q = SQL[UNTYPED, NoParams]("--sql\nSELECT x, y FROM pairs")
 ```
 
 ### Star import
@@ -87,7 +97,7 @@ untyped = "sentinel"
 from sqlty import *
 q = "--sql\nSELECT x, y FROM pairs"
 # rewritten-file: from sqlty import *
-# rewritten-file: q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
+# rewritten-file: q = SQL[UNTYPED, NoParams]("--sql\nSELECT x, y FROM pairs")
 ```
 
 ### Missing names get their own line
@@ -96,8 +106,9 @@ q = "--sql\nSELECT x, y FROM pairs"
 from sqlty import UNTYPED; x = 1
 q = "--sql\nSELECT 1::INTEGER AS n"
 # rewritten-file: from sqlty import SQL
+# rewritten-file: from sqlty import NoParams
 # rewritten-file: from sqlty import UNTYPED; x = 1
-# rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")
+# rewritten-file: q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER AS n")
 # stripped: from sqlty import UNTYPED; x = 1
 # stripped: q = "--sql\nSELECT 1::INTEGER AS n"
 ```
@@ -110,8 +121,9 @@ q = "--sql\nSELECT 1::INTEGER AS n"
 from sqlty import SQL as S
 q = "--sql\nSELECT 1::INTEGER AS n"
 # rewritten-file: from sqlty import SQL
+# rewritten-file: from sqlty import NoParams
 # rewritten-file: from sqlty import SQL as S
-# rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")
+# rewritten-file: q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER AS n")
 ```
 
 ### Alias from the import style
@@ -129,7 +141,8 @@ q = "--sql\nSELECT 1::INTEGER AS n"
 # rewritten-file: from sqlty import (
 # rewritten-file:     SQL as Q,
 # rewritten-file: )
-# rewritten-file: q = Q[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")
+# rewritten-file: from sqlty import NoParams
+# rewritten-file: q = Q[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER AS n")
 ```
 
 ### Text in strings and comments is no import
@@ -144,8 +157,9 @@ q = "--sql\nSELECT 1::INTEGER AS n"
 # rewritten-file: from sqlty import UNTYPED
 # rewritten-file: """
 # rewritten-file: from sqlty import SQL
+# rewritten-file: from sqlty import NoParams
 # rewritten-file: # from sqlty import SQL
-# rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")
+# rewritten-file: q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER AS n")
 ```
 
 ## Placement after the module header
@@ -168,8 +182,9 @@ q = "--sql\nSELECT 1::INTEGER"
 # rewritten-file: from __future__ import annotations
 # rewritten-file:
 # rewritten-file: from sqlty import SQL
+# rewritten-file: from sqlty import NoParams
 # rewritten-file:
-# rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
+# rewritten-file: q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER")
 ```
 
 ### The blank line below a docstring stays
@@ -189,10 +204,11 @@ q = "--sql\nSELECT created_at::TIMESTAMP FROM users"
 # rewritten-file:
 # rewritten-file: import datetime
 # rewritten-file: from sqlty import SQL
+# rewritten-file: from sqlty import NoParams
 # rewritten-file: import os
 # rewritten-file: from pathlib import Path
 # rewritten-file:
-# rewritten-file: q = SQL[tuple[datetime.datetime]]("--sql\nSELECT created_at::TIMESTAMP FROM users")
+# rewritten-file: q = SQL[tuple[datetime.datetime], NoParams]("--sql\nSELECT created_at::TIMESTAMP FROM users")
 ```
 
 ## Other leading comments stay above their code
@@ -201,8 +217,9 @@ q = "--sql\nSELECT created_at::TIMESTAMP FROM users"
 # Count users
 q = "--sql\nSELECT 1::INTEGER"
 # rewritten-file: from sqlty import SQL
+# rewritten-file: from sqlty import NoParams
 # rewritten-file: # Count users
-# rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
+# rewritten-file: q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER")
 ```
 
 ## Import mentioned in the docstring is not an import
@@ -218,7 +235,8 @@ q = "--sql\nSELECT 1::INTEGER"
 # rewritten-file:     from sqlty import SQL
 # rewritten-file: """
 # rewritten-file: from sqlty import SQL
-# rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
+# rewritten-file: from sqlty import NoParams
+# rewritten-file: q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER")
 ```
 
 ## Indented import is not a top-level import
@@ -228,9 +246,10 @@ if TYPE_CHECKING:
     from sqlty import SQL
 q = "--sql\nSELECT 1::INTEGER"
 # rewritten-file: from sqlty import SQL
+# rewritten-file: from sqlty import NoParams
 # rewritten-file: if TYPE_CHECKING:
 # rewritten-file:     from sqlty import SQL
-# rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
+# rewritten-file: q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER")
 ```
 
 ## Import after a compound statement on one line is not top-level
@@ -243,9 +262,10 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING: pass; from sqlty import SQL
 q = "--sql\nSELECT 1::INTEGER AS n"
 # rewritten-file: from sqlty import SQL
+# rewritten-file: from sqlty import NoParams
 # rewritten-file: from typing import TYPE_CHECKING
 # rewritten-file: if TYPE_CHECKING: pass; from sqlty import SQL
-# rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")
+# rewritten-file: q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER AS n")
 # stripped: from typing import TYPE_CHECKING
 # stripped: if TYPE_CHECKING: pass; from sqlty import SQL
 # stripped: q = "--sql\nSELECT 1::INTEGER AS n"
@@ -267,6 +287,7 @@ if TYPE_CHECKING \
     : pass; from sqlty import SQL
 q = "--sql\nSELECT 1::INTEGER AS n"
 # rewritten-file: from sqlty import SQL
+# rewritten-file: from sqlty import NoParams
 # rewritten-file: from typing import TYPE_CHECKING
 # rewritten-file: if (
 # rewritten-file:     TYPE_CHECKING
@@ -275,7 +296,7 @@ q = "--sql\nSELECT 1::INTEGER AS n"
 # rewritten-file: ): pass; from sqlty import SQL
 # rewritten-file: if TYPE_CHECKING \
 # rewritten-file:     : pass; from sqlty import SQL
-# rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")
+# rewritten-file: q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER AS n")
 ```
 
 ## Added imports use the file's line ending
@@ -291,7 +312,8 @@ q = SQL[tuple[str]]("--sql\nSELECT NOW()::TIMESTAMP AS t")
 # fixed: """Events."""
 # fixed: import datetime
 # fixed: from sqlty import SQL
-# fixed: q = SQL[tuple[datetime.datetime]]("--sql\nSELECT NOW()::TIMESTAMP AS t")
+# fixed: from sqlty import NoParams
+# fixed: q = SQL[tuple[datetime.datetime], NoParams]("--sql\nSELECT NOW()::TIMESTAMP AS t")
 ```
 
 ## `from datetime import datetime` shadows the module
@@ -307,12 +329,13 @@ from datetime import datetime
 q = "--sql\nSELECT now() AS t, now()::time AS tm, current_date AS d"
 print(time.time(), datetime.now())
 # rewritten-file: from sqlty import SQL
+# rewritten-file: from sqlty import NoParams
 # rewritten-file: from datetime import date
 # rewritten-file: from datetime import time as datetime_time
 # rewritten-file: import time
 # rewritten-file: from datetime import datetime
 # rewritten-file:
-# rewritten-file: q = SQL[tuple[datetime, datetime_time, date]]("--sql\nSELECT now() AS t, now()::time AS tm, current_date AS d")
+# rewritten-file: q = SQL[tuple[datetime, datetime_time, date], NoParams]("--sql\nSELECT now() AS t, now()::time AS tm, current_date AS d")
 # rewritten-file: print(time.time(), datetime.now())
 ```
 
@@ -344,5 +367,6 @@ q = "--sql\nSELECT now() AS t"
 # rewritten-file: """
 # rewritten-file: import datetime
 # rewritten-file: from sqlty import SQL
-# rewritten-file: q = SQL[tuple[datetime.datetime]]("--sql\nSELECT now() AS t")
+# rewritten-file: from sqlty import NoParams
+# rewritten-file: q = SQL[tuple[datetime.datetime], NoParams]("--sql\nSELECT now() AS t")
 ```

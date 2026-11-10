@@ -17,5 +17,6 @@ Run ``sqlty strip .`` to reverse.
 """
 
 from sqlty import SQL as Q
+from sqlty import NoParams
 
-q = Q[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+q = Q[tuple[int, str], NoParams]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")

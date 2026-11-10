@@ -50,7 +50,8 @@ SELECT status FROM paid UNION ALL SELECT CASE WHEN 1 THEN 'x' ELSE 'y' END
 
 ```python
 q = "--sql\nSELECT status FROM orders"
-# rewritten: q = SQL[tuple[typing.Literal['pending', 'paid']]]("--sql\nSELECT status FROM orders")
+# rewritten: from sqlty import NoParams
+# rewritten: q = SQL[tuple[typing.Literal['pending', 'paid']], NoParams]("--sql\nSELECT status FROM orders")
 ```
 
 `schema.sql`:

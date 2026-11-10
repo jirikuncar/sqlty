@@ -69,7 +69,8 @@ q = "--sql\nSELECT id, during FROM bookings"
 # rewritten-file: import datetime
 # rewritten-file: import psycopg.types.range
 # rewritten-file: from sqlty import SQL
-# rewritten-file: q = SQL[tuple[int, psycopg.types.range.Range[datetime.datetime]]]("--sql\nSELECT id, during FROM bookings")
+# rewritten-file: from sqlty import NoParams
+# rewritten-file: q = SQL[tuple[int, psycopg.types.range.Range[datetime.datetime]], NoParams]("--sql\nSELECT id, during FROM bookings")
 ```
 
 ### `types` replaces an entry

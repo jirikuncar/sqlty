@@ -290,9 +290,10 @@ from psycopg import sql
 composed = sql.SQL("--sql\nSELECT id::INTEGER FROM users")
 plain = "--sql\nSELECT id::INTEGER FROM users"
 wrapped = PgSQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
+# rewritten: from sqlty import NoParams
 # rewritten: from psycopg import sql
 # rewritten:
 # rewritten: composed = sql.SQL("--sql\nSELECT id::INTEGER FROM users")
-# rewritten: plain = PgSQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
-# rewritten: wrapped = PgSQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
+# rewritten: plain = PgSQL[tuple[int], NoParams]("--sql\nSELECT id::INTEGER FROM users")
+# rewritten: wrapped = PgSQL[tuple[int], NoParams]("--sql\nSELECT id::INTEGER FROM users")
 ```

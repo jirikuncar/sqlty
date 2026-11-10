@@ -119,7 +119,7 @@ KEY_DOCS: dict[str, KeyDoc] = {
     ),
     "param-types": KeyDoc(
         "`true`, `false`",
-        "`false`",
+        "`true`",
         "`rewrite`, `check --fix`",
         "Whether `SQL[R]` calls get the type of their parameters, `SQL[R, P]`",
     ),

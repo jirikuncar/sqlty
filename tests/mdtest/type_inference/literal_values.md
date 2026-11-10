@@ -154,7 +154,8 @@ UNION SELECT 'v28' UNION SELECT 'v29' UNION SELECT 'v30' UNION SELECT 'v31' UNIO
 
 ```python
 q = "--sql\nSELECT 'paid' AS status, 1 AS n"
-# rewritten: q = SQL[tuple[typing.Literal['paid'], int]]("--sql\nSELECT 'paid' AS status, 1 AS n")
+# rewritten: from sqlty import NoParams
+# rewritten: q = SQL[tuple[typing.Literal['paid'], int], NoParams]("--sql\nSELECT 'paid' AS status, 1 AS n")
 ```
 
 ## Dialects

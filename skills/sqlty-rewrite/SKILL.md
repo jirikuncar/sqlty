@@ -86,14 +86,14 @@ user = SQL[User]("--sql\nSELECT id::INTEGER FROM users")
 
 ## Type the parameters
 
-`param-types = true` makes `rewrite` and `check --fix` write the type of the
-parameters too, `SQL[R, P]`: a `tuple`, or a generated `TypedDict` for named
-parameters. `strip` removes them, and a `P` you wrote is kept.
+`rewrite` and `check --fix` write the type of the parameters too,
+`SQL[R, P]`: a `tuple`, `NoParams`, or a generated `TypedDict` for named
+parameters. `strip` removes them, and a `P` you wrote is kept. `param-types =
+false` turns it off.
 
 ```toml
 [tool.sqlty]
 schema = "schema.sql"
-param-types = true
 ```
 
 `schema.sql`:

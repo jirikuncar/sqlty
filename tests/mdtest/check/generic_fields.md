@@ -103,8 +103,9 @@ from sqlty import SQL
 
 q = SQL[tuple[int, list[str]]]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
 # fixed: from sqlty import SQL
+# fixed: from sqlty import NoParams
 # fixed:
-# fixed: q = SQL[tuple[int, list[str]]]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
+# fixed: q = SQL[tuple[int, list[str]], NoParams]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
 ```
 
 ## Changed tuple items are still stale
@@ -115,8 +116,9 @@ from sqlty import SQL
 # error: [narrow-type] "SQL[tuple[str, list[str]]] should be SQL[tuple[int, list[str]]]"
 q = SQL[tuple[str, list[str]]]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
 # fixed: from sqlty import SQL
+# fixed: from sqlty import NoParams
 # fixed:
-# fixed: q = SQL[tuple[int, list[str]]]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
+# fixed: q = SQL[tuple[int, list[str]], NoParams]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
 ```
 
 ## Unions with a parametrised item are still stale

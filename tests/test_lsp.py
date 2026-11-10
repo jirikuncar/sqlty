@@ -212,8 +212,8 @@ def test_server_checks_and_fixes_a_buffer(tmp_path: Path) -> None:
         [action] = server.request("textDocument/codeAction", fix_all)
         [edit] = action["edit"]["documentChanges"][0]["edits"]
         assert edit == {
-            "range": {"start": {"line": 2, "character": 14}, "end": {"line": 2, "character": 17}},
-            "newText": "float | None",
+            "range": {"start": {"line": 1, "character": 0}, "end": {"line": 2, "character": 18}},
+            "newText": "from sqlty import NoParams\n\nq = SQL[tuple[float | None], NoParams",
         }
     finally:
         assert server.stop() == 0

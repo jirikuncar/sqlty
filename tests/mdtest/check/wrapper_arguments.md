@@ -14,8 +14,9 @@ from sqlty import SQL
 q = SQL[tuple[str]]("--sql\nSELECT 1::INTEGER "
                     "AS n")
 # fixed: from sqlty import SQL
+# fixed: from sqlty import NoParams
 # fixed:
-# fixed: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER "
+# fixed: q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER "
 # fixed:                     "AS n")
 ```
 
@@ -24,7 +25,8 @@ q = SQL[tuple[str]]("--sql\nSELECT 1::INTEGER "
 ```python
 q = ("--sql\nSELECT 1::INTEGER "
      "AS n")
-# rewritten: q = (SQL[tuple[int]]("--sql\nSELECT 1::INTEGER "
+# rewritten: from sqlty import NoParams
+# rewritten: q = (SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER "
 # rewritten:      "AS n"))
 ```
 
@@ -62,8 +64,9 @@ q = SQL[tuple[str]]("""--sql
 SELECT 1::INTEGER AS n"""  # c
 )
 # fixed: from sqlty import SQL
+# fixed: from sqlty import NoParams
 # fixed:
-# fixed: q = SQL[tuple[int]]("""--sql
+# fixed: q = SQL[tuple[int], NoParams]("""--sql
 # fixed: SELECT 1::INTEGER AS n"""  # c
 # fixed: )
 # stripped: q = ("""--sql
@@ -79,8 +82,9 @@ from sqlty import SQL
 # error: [narrow-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
 q = SQL[tuple[str]]("--sql\nSELECT 1::INTEGER AS n -- \"n\")")
 # fixed: from sqlty import SQL
+# fixed: from sqlty import NoParams
 # fixed:
-# fixed: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n -- \"n\")")
+# fixed: q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER AS n -- \"n\")")
 # stripped: q = "--sql\nSELECT 1::INTEGER AS n -- \"n\")"
 ```
 
@@ -92,8 +96,9 @@ from sqlty import SQL
 # error: [narrow-type] "SQL[tuple[int]] should be SQL[tuple[str]]"
 a, b = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER"), SQL[tuple[int]]("--sql\nSELECT 'x'::TEXT")
 # fixed: from sqlty import SQL
+# fixed: from sqlty import NoParams
 # fixed:
-# fixed: a, b = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER"), SQL[tuple[str]]("--sql\nSELECT 'x'::TEXT")
+# fixed: a, b = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER"), SQL[tuple[str], NoParams]("--sql\nSELECT 'x'::TEXT")
 ```
 
 ## Other arguments are reported, not edited
@@ -235,13 +240,14 @@ z = 1
 # error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
 q = "--sql\nSELECT 1::INTEGER AS n"
 # fixed: from sqlty import SQL
+# fixed: from sqlty import NoParams
 # fixed:
 # fixed: x = 1
 # fixed: y = f"""{x:
 # fixed: }"""
 # fixed: z = 1
 # fixed: """Example: SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")"""
-# fixed: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")
+# fixed: q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER AS n")
 # stripped: from sqlty import SQL
 # stripped:
 # stripped: x = 1
@@ -262,8 +268,9 @@ x = f"{"("}"
 # error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
 q = "--sql\nSELECT 1::INTEGER AS n"
 """Attribute doc."""
+# rewritten: from sqlty import NoParams
 # rewritten: x = f"{"("}"
-# rewritten: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")
+# rewritten: q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER AS n")
 # rewritten: """Attribute doc."""
 ```
 
@@ -284,9 +291,11 @@ q = SQL[tuple[int]](
 # stripped:     "--sql\nSELECT 1::INTEGER "
 # stripped:     "AS n"
 # stripped: )
+# rewritten: from sqlty import NoParams
+# rewritten:
 # rewritten: x = f"{"("}"
 # rewritten: y = 1 if"(" else 2
-# rewritten: q = SQL[tuple[int]](
+# rewritten: q = SQL[tuple[int], NoParams](
 # rewritten:     "--sql\nSELECT 1::INTEGER "
 # rewritten:     "AS n"
 # rewritten: )

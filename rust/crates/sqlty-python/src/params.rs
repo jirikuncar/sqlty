@@ -115,7 +115,7 @@ pub fn add_param_types(source: &str, options: &Options) -> String {
     if edits.is_empty() {
         return source.to_string();
     }
-    let edited = with_imports(&module.with_classes(&apply_edits(source, edits).0));
+    let edited = with_imports(source, &module.with_classes(&apply_edits(source, edits).0));
     match options.style.no_params_import() {
         Some(line) if no_params && !binds_no_params(&edited) => with_sqlty_import(&edited, line),
         _ => edited,
@@ -308,8 +308,8 @@ fn head<'a>(scan: &'a Scan) -> impl Iterator<Item = Range<usize>> + 'a {
     })
 }
 
-/// `source` with `import M` for each module of [`MODULES`] it names but lacks, in order.
-fn with_imports(source: &str) -> String {
+/// `source` with `import M` for each module of [`MODULES`] it lacks and names more often than `before`.
+fn with_imports(before: &str, source: &str) -> String {
     let scan = Scan::new(source, "");
     let imports: Vec<(bool, String, Range<usize>)> = head(&scan)
         .filter(|statement| is_import(source, &scan.tokens[statement.clone()], false))
@@ -332,9 +332,8 @@ fn with_imports(source: &str) -> String {
         .into_iter()
         .filter(|module| !imported.iter().any(|name| name == module))
         .filter(|module| {
-            Regex::new(&format!(r"\b{module}\."))
-                .unwrap()
-                .is_match(source)
+            let uses = Regex::new(&format!(r"\b{module}\.")).unwrap();
+            uses.find_iter(source).count() > uses.find_iter(before).count()
         })
         .collect();
     let Some(last) = imports.last() else {

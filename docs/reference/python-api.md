@@ -153,7 +153,8 @@ Use them to build your own tooling:
 >>> source = rewrite_source('q = "--sql\\nSELECT 1::INTEGER"')
 >>> print(source)
 from sqlty import SQL
-q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
+from sqlty import NoParams
+q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER")
 >>> print(strip_source(source))
 q = "--sql\nSELECT 1::INTEGER"
 ```

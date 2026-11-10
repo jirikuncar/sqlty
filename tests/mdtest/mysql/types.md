@@ -288,8 +288,9 @@ from sqlty import SQL
 
 q = SQL[tuple[int, str]]("-- sql\nSELECT u.* FROM users u")
 # fixed: from sqlty import SQL
+# fixed: from sqlty import NoParams
 # fixed:
-# fixed: q = SQL[tuple[int, str]]("-- sql\nSELECT u.id, u.name FROM users u")
+# fixed: q = SQL[tuple[int, str], NoParams]("-- sql\nSELECT u.id, u.name FROM users u")
 ```
 
 ## SUM of exact and approximate values
