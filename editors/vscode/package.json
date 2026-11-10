@@ -171,7 +171,8 @@
     "format": "oxfmt src",
     "test": "npm run build-wasm && npm run build && npm run build-test && vscode-test && node out/test/restricted/run.js",
     "test-web": "npm run build-wasm && npm run build-web && esbuild src/test/web/index.ts --bundle --external:vscode --outfile=out/test/web/index.js --format=cjs --platform=browser --target=es2022 && vscode-test-web --browserType=chromium --headless --quality=stable --extensionDevelopmentPath=. --extensionTestsPath=out/test/web/index.js fixture",
-    "package": "npm run build-wasm && npm run build-node -- --minify && npm run build-web -- --minify && cp ../../LICENSE LICENSE && vsce package"
+    "package": "npm run build-wasm && npm run build-node -- --minify && npm run build-web -- --minify && cp ../../LICENSE LICENSE && vsce package",
+    "demo": "node scripts/demo.js"
   },
   "dependencies": {
     "@vscode/python-extension": "^1.0.6",
