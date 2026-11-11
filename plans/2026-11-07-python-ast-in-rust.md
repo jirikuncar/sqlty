@@ -160,6 +160,15 @@ does not parse (see `parse`) gets what its strings tell, the lint included, with
 ignore comments read by `tokenize`. `SQLTY_AST=python` and `compare` still run the Python
 passes, as the oracle of the tests.
 
+Review of `06-variants` (a second reader, 400,000 generated inputs against Python): seven
+edge differences and two quadratic paths, fixed on `09-no-fallback` with
+`tests/test_composed_edges.py`: `Declared.format()` without fields keeps its `P`; only a
+lowercase `u` prefix is part of a condition's key; a `Literal` on `*args` is reported on
+the line of the name; `Placeholder(format=)` takes a plain `str` only; an infinite float
+formats as `inf`; a bare generator argument spans the call's parentheses; variants are
+de-duplicated with a set and module constants are read once per source (16 `Literal`
+parameters: 22 s to 1 s; 4,000 constants read by 400 calls: 17.6 s to 0.04 s).
+
 `10-remove-python`: deletes `_variants.py`, `_psycopg.py`, `_drivers.py`, `_params.py`,
 `_json_types.py`, `_type_extractor/` and the passes of `_check.py`, `_helpers.py` and
 `_source.py`, with `SQLTY_AST`, the extension hooks only they called and the tests that
@@ -184,6 +193,8 @@ runs both pipelines.
   module-level query before one nested above it.
 - A `[[tool.sqlty.functions]]` file Rust does not parse (over 256 KiB, a NUL, a syntax
   error for the newest grammar) registers its helper by keyword only; Python read it.
+- A `str.format` field named with a decimal digit outside ASCII (`{١}`) is an index
+  for CPython; Rust reports the query as `unchecked-query`.
 
 ## Where ruff and `ast` differ
 

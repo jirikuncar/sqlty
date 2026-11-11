@@ -14,7 +14,6 @@ use ruff_python_ast::{Expr, ExprContext, ExprName, Number, Operator, Parameters,
 use ruff_text_size::Ranged;
 
 use crate::scopes::dotted;
-use crate::types::info::Dict;
 use crate::types::symbols::Source;
 
 const CLASSES: [&str; 5] = ["SQL", "Identifier", "Literal", "Placeholder", "Composed"];
@@ -436,12 +435,14 @@ fn construct<'a>(class: &str, arguments: Arguments<'a>) -> Eval<Value<'a>> {
             }
             let code = match format {
                 None => 's',
-                Some(value) => match value.as_str() {
-                    Some("s") => 's',
-                    Some("b") => 'b',
-                    Some("t") => 't',
+                // psycopg takes a `str` itself, not a subclass.
+                Some(Value::Str(code)) => match code.as_str() {
+                    "s" => 's',
+                    "b" => 'b',
+                    "t" => 't',
                     _ => return Err(Stop::Error),
                 },
+                Some(_) => return Err(Stop::Error),
             };
             Ok(Value::Placeholder(name, code))
         }
@@ -515,6 +516,9 @@ fn str_format<'a>(template: &str, arguments: &Arguments<'a>) -> Eval<Value<'a>> 
             let index = auto.ok_or(Stop::Error)?;
             auto = Some(index + 1);
             arguments.args.get(index)
+        } else if !name.is_ascii() && name.chars().all(char::is_numeric) {
+            // Python reads any decimal digit as an index.
+            return Err(Stop::Unread);
         } else if name.chars().all(|c| c.is_ascii_digit()) {
             if auto.is_some_and(|auto| auto > 0) {
                 return Err(Stop::Error);
@@ -535,6 +539,9 @@ fn str_format<'a>(template: &str, arguments: &Arguments<'a>) -> Eval<Value<'a>> 
             Value::None => out.push_str("None"),
             Value::Bool(value) => out.push_str(if *value { "True" } else { "False" }),
             Value::Int(Some(digits)) => out.push_str(digits),
+            Value::Float(value) if value.is_infinite() => {
+                out.push_str(if *value > 0.0 { "inf" } else { "-inf" });
+            }
             Value::Float(value) => out.push_str(&crate::unparse::repr_float(*value)),
             value => out.push_str(value.as_str().ok_or(Stop::Unread)?),
         }
@@ -797,19 +804,25 @@ impl<'a> Scan<'a> {
     }
 }
 
-/// `ParsedSource.constants`: module-level names to the value of their one assignment.
-pub fn constants(source: &Source) -> Dict<Option<&Expr>> {
-    fn bind<'e>(found: &mut Dict<Option<&'e Expr>>, name: &str, value: Option<&'e Expr>) {
-        // A name bound again has no single value.
-        let value = if found.get(name).is_some() {
-            None
-        } else {
-            value
-        };
-        found.insert(name, value);
+/// `ParsedSource.constants`: the value of the one module-level assignment to `name`.
+pub fn constant<'a>(source: &'a Source, name: &str) -> Option<&'a Expr> {
+    let table = source.constants.get_or_init(|| constants(source));
+    match source.body().get((*table.get(name)?)?)? {
+        Stmt::Assign(node) => Some(&node.value),
+        Stmt::AnnAssign(node) => node.value.as_deref(),
+        _ => None,
     }
-    let mut found: Dict<Option<&Expr>> = Dict::new();
-    for stmt in source.body() {
+}
+
+/// Module-level names to the statement that gives each its one value.
+fn constants(source: &Source) -> HashMap<String, Option<usize>> {
+    fn bind(found: &mut HashMap<String, Option<usize>>, name: &str, value: Option<usize>) {
+        // A name bound again has no single value.
+        let value = value.filter(|_| !found.contains_key(name));
+        found.insert(name.to_string(), value);
+    }
+    let mut found = HashMap::new();
+    for (at, stmt) in source.body().iter().enumerate() {
         match stmt {
             Stmt::Assign(node) => {
                 if node.targets.iter().all(Expr::is_name_expr) {
@@ -822,13 +835,17 @@ pub fn constants(source: &Source) -> Dict<Option<&Expr>> {
                         }
                     }
                     for name in seen {
-                        bind(&mut found, name, Some(&node.value));
+                        bind(&mut found, name, Some(at));
                     }
                 }
             }
             Stmt::AnnAssign(node) => {
                 if let Expr::Name(target) = node.target.as_ref() {
-                    bind(&mut found, target.id.as_str(), node.value.as_deref());
+                    bind(
+                        &mut found,
+                        target.id.as_str(),
+                        node.value.as_ref().map(|_| at),
+                    );
                 }
             }
             Stmt::AugAssign(node) => {
@@ -997,6 +1014,11 @@ impl<'a, 'r> Run<'a, 'r> {
                     other => other.as_str().ok_or(Stop::Error)?.to_string(),
                 };
                 let arguments = self.arguments(call)?;
+                // `str.format` returns its receiver for a template without fields.
+                let plain = !template.is_empty() && !template.contains(['{', '}']);
+                if plain && method == "format" && matches!(receiver, Value::Declared(_)) {
+                    return Ok(receiver);
+                }
                 match (is_sql, method) {
                     (true, "format") => sql_format(&template, &arguments),
                     (true, _) => sql_join(&template, arguments),
