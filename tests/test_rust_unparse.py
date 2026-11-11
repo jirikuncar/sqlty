@@ -154,6 +154,9 @@ def expected_unparse(source: str) -> str | None:
 
 
 SPELLINGS = [
+    """t'{f'{a!r:>{"'"}} {{'!s}'""",
+    "t'{ x != y  !r }'",
+    "t'{a!r:{b!s}}'",
     "'''a\r\nb'''",
     "b'''a\rb'''",
     "r'''a\r\nb'''",
