@@ -1439,6 +1439,92 @@ fn row_diagnostics(
     })
 }
 
+/// Every diagnostic of `source` before inline suppression, as `sqlty_python::check` reports
+/// them: `(diagnostics, redundant, needed)`, see `row_diagnostics`. None where Rust does
+/// not read the source, or it needs what is not read in Rust yet.
+#[pyfunction]
+#[pyo3(signature = (source, *, version, dialect = DialectArg::POSTGRES, schema_sql = None, rules = None, import_style = None, untyped = false, module = None, coerce = vec![]))]
+#[expect(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    reason = "the keyword-only Python signature is the API"
+)]
+fn module_diagnostics(
+    py: Python<'_>,
+    source: &str,
+    version: (u8, u8),
+    dialect: DialectArg,
+    schema_sql: Option<SchemaArg>,
+    rules: Option<HashMap<String, String>>,
+    import_style: Option<&str>,
+    untyped: bool,
+    module: Option<&str>,
+    coerce: Vec<String>,
+) -> Result<Option<(Vec<DiagnosticOut>, Vec<Option<FieldKey>>, Vec<FieldKey>)>, Error> {
+    use sqlty_python::types::symbols::Source;
+    use sqlty_python::{check, rows};
+    let dialect = dialect.0;
+    detach(py, || {
+        let schema = schema(schema_sql, dialect);
+        let options = Options::new(dialect, schema.as_deref(), import_style, untyped)?;
+        let rules = RuleConfig::from_overrides(rules).map_err(ConfigError::from)?;
+        let Some(parsed) = Source::new(source, version) else {
+            return Ok(None);
+        };
+        let settings = rows::Settings {
+            options: &options,
+            rules: &rules,
+            index: None,
+            module,
+            coerce: &coerce.into_iter().collect(),
+        };
+        let lint = |text: &str| {
+            sqlty_format::lint_source(text, dialect, &options.style)
+                .into_iter()
+                .map(|found| check::Lint {
+                    message: format!("{}: {}", found.code, found.message),
+                    span: found.span,
+                    query_start: found.query_start,
+                })
+                .collect()
+        };
+        let run = check::Run {
+            settings: &settings,
+            has_schema: schema
+                .as_ref()
+                .is_some_and(|schema| !schema.databases().is_some_and(|all| all.absent)),
+            lint: &lint,
+        };
+        let Some(found) = check::diagnostics(&Arc::new(parsed), &run) else {
+            return Ok(None);
+        };
+        let mut needed: Vec<FieldKey> = found.needed.into_iter().collect();
+        needed.sort();
+        let (diagnostics, redundant) = found
+            .diagnostics
+            .into_iter()
+            .map(|reported| {
+                let diag = reported.diagnostic;
+                let out = DiagnosticOut {
+                    rule: diag.rule.name(),
+                    message: diag.message,
+                    severity: diag.severity.as_str(),
+                    line: diag.line,
+                    start: diag.span.start,
+                    end: diag.span.end,
+                    fix: diag
+                        .fix
+                        .into_iter()
+                        .map(|edit| (edit.range.start, edit.range.end, edit.replacement))
+                        .collect(),
+                };
+                (out, reported.redundant)
+            })
+            .unzip();
+        Ok(Some((diagnostics, redundant, needed)))
+    })
+}
+
 /// `(line, annotation, query, annotation_span)` for each `SQL[T](...)` call in Python source.
 ///
 /// `query` is the `--sql` string without its prefix, or None when the call
@@ -1758,6 +1844,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(type_definitions, m)?)?;
     m.add_function(wrap_pyfunction!(type_relations, m)?)?;
     m.add_function(wrap_pyfunction!(row_diagnostics, m)?)?;
+    m.add_function(wrap_pyfunction!(module_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;
     m.add_function(wrap_pyfunction!(query_at, m)?)?;
