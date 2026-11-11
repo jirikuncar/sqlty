@@ -26,6 +26,7 @@ import ast
 import re
 from collections import defaultdict
 
+from sqlty._core import template_strings
 from sqlty._helpers import MARKER, HelperCall
 from sqlty._params import SCALARS, ParamArg, arg_type, literal_params
 from sqlty._source import AST, AstMismatch, ParsedSource, _fields
@@ -445,7 +446,26 @@ def find_template_calls(source: str | ParsedSource) -> list[HelperCall]:
     parsed = ParsedSource.of(source)
     if not _MARKED_TEMPLATE.search(parsed.text):
         return []
-    return _find_template_calls(parsed)
+    if AST == "python":
+        return _find_template_calls(parsed)
+    rust = [
+        HelperCall(
+            line,
+            query,
+            None,
+            parsed.typing_aliases,
+            tuple(ParamArg(key, kind) for key, kind in enumerate(params, 1)),
+            driver="psycopg",
+            query_span=span,
+        )
+        for line, span, query, params in template_strings(parsed.text) or []
+        if query is not None and MARKER.match(query)
+    ]
+    if AST == "compare":
+        python = [call._replace(query_node=None) for call in _find_template_calls(parsed)]
+        if rust != python:
+            raise AstMismatch("find_template_calls", rust, python, parsed.text)
+    return rust
 
 
 def _find_template_calls(parsed: ParsedSource) -> list[HelperCall]:

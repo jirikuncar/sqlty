@@ -151,6 +151,29 @@ def module_facts(
     ]
     | None
 ): ...
+def template_strings(
+    source: str,
+) -> list[tuple[int, tuple[int, int], str | None, list[str | None]]] | None: ...
+def helper_sites(
+    source: str, names: list[str]
+) -> (
+    list[
+        tuple[
+            tuple[int, int],
+            str | None,
+            str,
+            list[_SiteArg],
+            list[tuple[str | None, _SiteArg]],
+            str | None,
+        ]
+    ]
+    | None
+): ...
+
+_SiteArg = tuple[
+    bool, tuple[int, int], str | None, str | None, list[tuple[int | str, str | None]] | None
+]
+
 def wrapped_queries(
     source: str, *, import_style: str | None = None
 ) -> list[tuple[int, str, str | None, tuple[int, int]]]: ...

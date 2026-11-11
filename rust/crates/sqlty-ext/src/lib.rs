@@ -1067,6 +1067,39 @@ fn module_facts(py: Python<'_>, source: &str) -> Option<PyFacts> {
     })
 }
 
+type PyTemplate = (usize, (usize, usize), Option<String>, Vec<Option<String>>);
+
+/// `(line, span, query, param types)` of each t-string of `source`, as
+/// `sqlty_python::templates` reads them, or None where Rust does not read `source`.
+#[pyfunction]
+fn template_strings(py: Python<'_>, source: &str) -> Option<Vec<PyTemplate>> {
+    detach(py, || {
+        let found = sqlty_python::templates::templates(source)?;
+        Some(
+            found
+                .into_iter()
+                .map(|t| (t.line, t.span, t.query, t.params))
+                .collect(),
+        )
+    })
+}
+
+type PyArg = (
+    bool,
+    (usize, usize),
+    Option<String>,
+    Option<String>,
+    Option<Vec<PyParam>>,
+);
+type PySite = (
+    (usize, usize),
+    Option<String>,
+    String,
+    Vec<PyArg>,
+    Vec<(Option<String>, PyArg)>,
+    Option<String>,
+);
+
 fn py_params(params: Option<Vec<sqlty_python::scopes::Param>>) -> Option<Vec<PyParam>> {
     use sqlty_python::scopes::Key;
     params.map(|params| {
@@ -1080,6 +1113,38 @@ fn py_params(params: Option<Vec<sqlty_python::scopes::Param>>) -> Option<Vec<PyP
                 (key, p.kind)
             })
             .collect()
+    })
+}
+
+/// `(lines, prefix, name, args, keywords, receiver)` of each call in Python source that may
+/// call a helper named one of `names`, or None when Rust does not read the source; each
+/// argument is `(starred, span, text, type, params)`.
+#[pyfunction]
+#[allow(clippy::needless_pass_by_value)]
+fn helper_sites(py: Python<'_>, source: &str, names: Vec<String>) -> Option<Vec<PySite>> {
+    detach(py, || {
+        let arg = |a: sqlty_python::helpers::Arg| {
+            (a.starred, a.span, a.text, a.kind, py_params(a.params))
+        };
+        let found = sqlty_python::helpers::sites(source, &names)?;
+        Some(
+            found
+                .into_iter()
+                .map(|site| {
+                    (
+                        site.lines,
+                        site.prefix,
+                        site.name,
+                        site.args.into_iter().map(arg).collect(),
+                        site.keywords
+                            .into_iter()
+                            .map(|(name, value)| (name, arg(value)))
+                            .collect(),
+                        site.receiver,
+                    )
+                })
+                .collect(),
+        )
     })
 }
 
@@ -1389,6 +1454,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(check_queries, m)?)?;
     m.add_function(wrap_pyfunction!(named_queries, m)?)?;
     m.add_function(wrap_pyfunction!(module_facts, m)?)?;
+    m.add_function(wrap_pyfunction!(template_strings, m)?)?;
+    m.add_function(wrap_pyfunction!(helper_sites, m)?)?;
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;
     m.add_function(wrap_pyfunction!(query_at, m)?)?;
