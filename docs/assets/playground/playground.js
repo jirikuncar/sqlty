@@ -666,6 +666,8 @@ async function asking(form) {
   picked.value = saved.model ?? llm.MODELS[0].id;
   picked.addEventListener("change", () => remember({ model: picked.value }));
   let loaded;
+  let placed = false;
+  editor.onDidFocusEditorText(() => (placed = editor.getModel() === models.python));
   form.hidden = false;
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -682,6 +684,13 @@ async function asking(form) {
         });
         loaded = { model, instance, complete };
       }
+      // The query goes after the line of the cursor last placed in queries.py, or at its end; a
+      // `# comment` there is the question when the box is empty.
+      const source = models.python.getValue();
+      const cursor = placed && editor.getModel() === models.python ? editor.getPosition().lineNumber : models.python.getLineCount();
+      const comment = models.python.getLineContent(cursor).match(/^\s*#\s*(\S.*)$/)?.[1];
+      const asked = question.value.trim() || comment;
+      if (!asked) throw new Error("Type a question, or put the cursor on a # comment in queries.py.");
       status.textContent = "Writing the query...";
       const { schema, dialect: chosenDialect, config } = request("analyze");
       const { sql, attempts } = await llm.answer({
@@ -693,21 +702,23 @@ async function asking(form) {
         schema,
         dialect: chosenDialect,
         config,
-        question: question.value,
+        // Sending queries.py too (llm.around) made the eval worse: 14 to 11 of 20 for Coder 1.5B, 12 to 5 for 0.5B.
+        question: asked,
       });
-      const source = models.python.getValue();
       const taken = new Set(source.match(/^\w+(?= =)/gm));
       let name = "answer";
       for (let n = 2; taken.has(name); n++) name = `answer_${n}`;
       // sqlty's rewrite of the answer, `answer = SQL[RowType]("""--sql ...""")`, when it has one.
       const { rewritten } = attempts.at(-1);
       const typed = /^from sqlty import SQL$/m.test(source) && rewritten?.match(/^answer = SQL\[[\s\S]*/m)?.[0];
-      const code = typed ? typed.replace(/^answer/, name) : llm.python(sql, name);
-      const added = `\n# ${question.value.replace(/\s+/g, " ")}\n${code}`;
+      const code = (typed ? typed.replace(/^answer/, name) : llm.python(sql, name)).trimEnd();
+      const lines = source.split("\n");
+      const added = asked === comment && !question.value.trim() ? [code] : ["", `# ${asked.replace(/\s+/g, " ")}`, code];
+      lines.splice(cursor, 0, ...added.join("\n").split("\n"));
       const left = attempts.at(-1).problems.length;
-      replace(models.python, source.replace(/\n*$/, "\n") + added);
+      replace(models.python, lines.join("\n"));
       open("python");
-      editor.revealLineNearTop(models.python.getLineCount() - added.split("\n").length + 2);
+      editor.revealLineNearTop(cursor + 1);
       status.textContent =
         `${model.label} wrote ${name}` +
         (attempts.length > 1 ? ` after ${attempts.length - 1} round(s) of sqlty feedback` : "") +

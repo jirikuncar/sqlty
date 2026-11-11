@@ -42,7 +42,7 @@ queries as you type. It runs in your browser. The engine is compiled to
     <span class="sqlty-status" data-link-status role="status"></span>
   </div>
   <form class="sqlty-ask" data-ask hidden>
-    <input type="text" data-ask-question required placeholder="Ask for a query: users who never placed an order" aria-label="Question">
+    <input type="text" data-ask-question placeholder="Ask for a query, or put the cursor on a # comment in queries.py" aria-label="Question">
     <select data-ask-model aria-label="Model"></select>
     <button type="submit" class="sqlty-button sqlty-button--primary">Ask</button>
     <span class="sqlty-status" data-ask-status role="status"></span>

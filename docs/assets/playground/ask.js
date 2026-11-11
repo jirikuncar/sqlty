@@ -41,7 +41,12 @@ const DIALECTS = { postgres: "PostgreSQL", mysql: "MySQL", sqlite: "SQLite" };
 // A bare --sql string is what the model writes: its being unwrapped is no problem.
 const UNWRAPPED = "stale-rewrite";
 
-export function messages({ schema, dialect, question }) {
+export const HERE = "# <the new query goes here>";
+
+export function messages({ schema, dialect, question, source }) {
+  const file = source?.trim()
+    ? `\n\nThe Python file it goes in, at the line ${HERE}:\n\n\`\`\`python\n${source.trim()}\n\`\`\``
+    : "";
   return [
     {
       role: "system",
@@ -50,8 +55,20 @@ export function messages({ schema, dialect, question }) {
         "Use only its tables and columns, and give every computed column an alias. " +
         "Reply with the query alone in a ```sql block.",
     },
-    { role: "user", content: `${schema.trim()}\n\n${question.trim()}` },
+    { role: "user", content: `${schema.trim()}${file}\n\n${question.trim()}` },
   ];
+}
+
+// The file around `line` (1-based, the new query goes after it), at most `limit` characters.
+export function around(source, line, limit = 4000) {
+  const lines = source.split("\n");
+  lines.splice(line, 0, HERE);
+  const marked = lines.join("\n");
+  if (marked.length <= limit) return marked;
+  const at = marked.indexOf(HERE);
+  const start = Math.max(0, Math.min(at - limit / 2, marked.length - limit));
+  const cut = marked.slice(start, start + limit);
+  return start ? cut.slice(cut.indexOf("\n") + 1) : cut;
 }
 
 export function extract(text) {
@@ -76,8 +93,8 @@ export function problems(engine, { sql, schema, dialect, config = "" }) {
 
 // Ask `complete` (messages in, text out) for a query, and send sqlty's problems back at most
 // `repairs` times. Every attempt is kept, so a caller can show what was fixed.
-export async function answer({ complete, engine, schema, dialect, config, question, repairs = 2 }) {
-  const conversation = messages({ schema, dialect, question });
+export async function answer({ complete, engine, schema, dialect, config, question, source, repairs = 2 }) {
+  const conversation = messages({ schema, dialect, question, source });
   const attempts = [];
   for (let round = 0; round <= repairs; round++) {
     const reply = await complete(conversation);

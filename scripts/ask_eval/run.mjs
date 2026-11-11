@@ -1,8 +1,9 @@
 // Ask each question of questions.json to a model in headless Chromium, as the playground does,
 // and write the attempts to a JSON file for score.py.
 //
-//   node scripts/ask_eval/run.mjs --model qwen2.5-coder-0.5b --models DIR --wllama DIR [--isolated] [--out FILE]
+//   node scripts/ask_eval/run.mjs --model qwen2.5-coder-0.5b --models DIR --wllama DIR [--isolated] [--file] [--out FILE]
 //
+// --file also sends the questions.json source of the schema, as the playground sends queries.py.
 // --models holds the GGUF files of ask.js MODELS; --wllama is @wllama/wllama/esm. --isolated
 // sends COOP/COEP, which wllama needs for threads (GitHub Pages cannot send them).
 import { createReadStream, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -18,6 +19,7 @@ const { values: args } = parseArgs({
     models: { type: "string" },
     wllama: { type: "string" },
     isolated: { type: "boolean", default: false },
+    file: { type: "boolean", default: false },
     threads: { type: "string" },
     repairs: { type: "string", default: "2" },
     out: { type: "string" },
@@ -63,8 +65,8 @@ const page = await browser.newPage();
 page.on("console", (message) => message.type() === "error" && console.error(message.text()));
 await page.goto(`${base}/eval/page.html`);
 const results = await page.evaluate(
-  async ({ model, repairs, threads }) => window.evaluate({ model, repairs, threads }),
-  { model: args.model, repairs: Number(args.repairs), threads: args.threads && Number(args.threads) },
+  async (options) => window.evaluate(options),
+  { model: args.model, repairs: Number(args.repairs), threads: args.threads && Number(args.threads), file: args.file },
 );
 await browser.close();
 rmSync(profile, { recursive: true });
