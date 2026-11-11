@@ -2,7 +2,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "BIGINT",
@@ -17,7 +17,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "INTEGER",
@@ -32,7 +32,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "BIGINT[]",
@@ -47,7 +47,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "ARRAY",
@@ -62,7 +62,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "BIGSERIAL",
@@ -77,7 +77,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "INTEGER",
@@ -92,7 +92,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "BYTEA",
@@ -107,7 +107,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "BLOB",
@@ -122,7 +122,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "BYTEA[]",
@@ -137,7 +137,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "ARRAY",
@@ -152,7 +152,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "BOOLEAN",
@@ -167,7 +167,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "BOOLEAN",
@@ -182,7 +182,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "BOOLEAN[]",
@@ -197,7 +197,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "ARRAY",
@@ -212,7 +212,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "BYTEA",
@@ -227,7 +227,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "BLOB",
@@ -242,7 +242,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "BYTEA[]",
@@ -257,7 +257,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "ARRAY",
@@ -272,7 +272,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "CHAR(255)",
@@ -287,7 +287,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "CHAR(255)",
@@ -302,7 +302,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "CHAR(255)[]",
@@ -317,7 +317,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "ARRAY",
@@ -332,7 +332,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "DATE",
@@ -347,7 +347,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "DATE",
@@ -362,7 +362,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "DATE[]",
@@ -377,7 +377,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "ARRAY_DATE",
@@ -392,7 +392,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "NUMERIC",
@@ -407,7 +407,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "NUMERIC",
@@ -422,7 +422,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "NUMERIC[]",
@@ -437,10 +437,10 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
-   "sql": "ARRAY",
+   "sql": "ARRAY_NUMERIC",
    "expected": "list[decimal.Decimal]",
    "provenance": "columns.Array(Decimal)",
    "schema": ""
@@ -452,7 +452,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "DOUBLE PRECISION",
@@ -467,7 +467,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "DOUBLE PRECISION",
@@ -482,7 +482,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "DOUBLE PRECISION[]",
@@ -497,7 +497,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "ARRAY",
@@ -512,7 +512,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "VARCHAR(255)",
@@ -527,7 +527,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "VARCHAR(255)",
@@ -542,7 +542,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "VARCHAR(255)[]",
@@ -557,7 +557,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "ARRAY",
@@ -572,7 +572,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "FLOAT",
@@ -587,7 +587,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "FLOAT",
@@ -602,7 +602,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "FLOAT[]",
@@ -617,7 +617,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "ARRAY",
@@ -632,7 +632,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "INTEGER",
@@ -647,7 +647,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "INTEGER",
@@ -662,7 +662,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "INTEGER[]",
@@ -677,7 +677,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "ARRAY",
@@ -692,7 +692,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "INTERVAL",
@@ -707,7 +707,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "SECONDS",
@@ -722,7 +722,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "INTERVAL[]",
@@ -737,7 +737,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "ARRAY",
@@ -752,7 +752,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "JSON",
@@ -767,7 +767,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "JSON",
@@ -782,7 +782,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "JSONB",
@@ -797,7 +797,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "JSONB",
@@ -812,7 +812,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "NUMERIC",
@@ -827,7 +827,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "NUMERIC",
@@ -842,7 +842,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "NUMERIC[]",
@@ -857,10 +857,10 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
-   "sql": "ARRAY",
+   "sql": "ARRAY_NUMERIC",
    "expected": "list[decimal.Decimal]",
    "provenance": "columns.Array(Numeric)",
    "schema": ""
@@ -872,7 +872,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "REAL",
@@ -887,7 +887,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "REAL",
@@ -902,7 +902,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "REAL[]",
@@ -917,7 +917,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "ARRAY",
@@ -932,7 +932,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "VARCHAR(255)",
@@ -947,7 +947,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "VARCHAR(255)",
@@ -962,7 +962,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "VARCHAR(255)[]",
@@ -977,7 +977,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "ARRAY",
@@ -992,7 +992,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "SERIAL",
@@ -1007,7 +1007,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "INTEGER",
@@ -1022,7 +1022,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "SMALLINT",
@@ -1037,7 +1037,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "INTEGER",
@@ -1052,7 +1052,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "SMALLINT[]",
@@ -1067,7 +1067,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "ARRAY",
@@ -1082,7 +1082,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "TEXT",
@@ -1097,7 +1097,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "TEXT",
@@ -1112,7 +1112,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "TEXT[]",
@@ -1127,7 +1127,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "ARRAY",
@@ -1142,7 +1142,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "TIME",
@@ -1157,7 +1157,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "TIME",
@@ -1172,7 +1172,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "TIME[]",
@@ -1187,7 +1187,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "ARRAY_TIME",
@@ -1202,7 +1202,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "TIMESTAMP",
@@ -1217,7 +1217,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "TIMESTAMP",
@@ -1232,7 +1232,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "TIMESTAMP[]",
@@ -1247,7 +1247,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "ARRAY_TIMESTAMP",
@@ -1262,7 +1262,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "TIMESTAMPTZ",
@@ -1277,7 +1277,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "TIMESTAMPTZ",
@@ -1292,7 +1292,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "TIMESTAMPTZ[]",
@@ -1307,7 +1307,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "ARRAY_TIMESTAMPTZ",
@@ -1322,7 +1322,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "UUID",
@@ -1337,7 +1337,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "UUID",
@@ -1352,7 +1352,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "UUID[]",
@@ -1367,7 +1367,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "ARRAY",
@@ -1382,7 +1382,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "VARCHAR(255)",
@@ -1397,7 +1397,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "VARCHAR(255)",
@@ -1412,7 +1412,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "postgres",
    "kind": "column",
    "sql": "VARCHAR(255)[]",
@@ -1427,7 +1427,7 @@
  {
   "row": {
    "source": "piccolo",
-   "version": "1.36.0",
+   "version": "1.39.0",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "ARRAY",
@@ -1438,5 +1438,95 @@
   "sqlty": "str",
   "nullable": false,
   "outcome": "mismatch"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.39.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "SMALLINT GENERATED ALWAYS AS IDENTITY",
+   "expected": "int",
+   "provenance": "columns.SmallInt(generated=Identity(always=True, start=None, increment=None))",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.39.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "SMALLINT GENERATED BY DEFAULT AS IDENTITY (START WITH 10 INCREMENT BY 5)",
+   "expected": "int",
+   "provenance": "columns.SmallInt(generated=Identity(always=False, start=10, increment=5))",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.39.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "INTEGER GENERATED ALWAYS AS IDENTITY",
+   "expected": "int",
+   "provenance": "columns.Integer(generated=Identity(always=True, start=None, increment=None))",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.39.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "INTEGER GENERATED BY DEFAULT AS IDENTITY (START WITH 10 INCREMENT BY 5)",
+   "expected": "int",
+   "provenance": "columns.Integer(generated=Identity(always=False, start=10, increment=5))",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.39.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BIGINT GENERATED ALWAYS AS IDENTITY",
+   "expected": "int",
+   "provenance": "columns.BigInt(generated=Identity(always=True, start=None, increment=None))",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
+ },
+ {
+  "row": {
+   "source": "piccolo",
+   "version": "1.39.0",
+   "dialect": "postgres",
+   "kind": "column",
+   "sql": "BIGINT GENERATED BY DEFAULT AS IDENTITY (START WITH 10 INCREMENT BY 5)",
+   "expected": "int",
+   "provenance": "columns.BigInt(generated=Identity(always=False, start=10, increment=5))",
+   "schema": ""
+  },
+  "sqlty": "int",
+  "nullable": false,
+  "outcome": "match"
  }
 ]
