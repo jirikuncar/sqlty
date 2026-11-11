@@ -33,6 +33,7 @@ Configuration via sqlty.toml (``[rules]``) or pyproject.toml:
     unknown-table = "error"             # default
     unknown-column = "error"            # default
     ambiguous-column = "error"          # default
+    duplicate-alias = "error"           # default
     unknown-function = "warn"           # default
     unknown-type = "warn"               # default
     unsupported-syntax = "warn"         # default
@@ -45,6 +46,7 @@ Configuration via sqlty.toml (``[rules]``) or pyproject.toml:
     entity-mismatch = "ignore"          # default
     unused-ignore = "warn"              # default
     param-count-mismatch = "error"      # default
+    extra-param = "warn"                # default
     param-type-mismatch = "error"       # default
     params-type-mismatch = "error"      # default
     sqruff = "ignore"                   # default
@@ -244,6 +246,12 @@ RULES: dict[str, LintRule] = {
         fixable=False,
         description="Unqualified column exists in more than one table of the query",
     ),
+    "duplicate-alias": LintRule(
+        name="duplicate-alias",
+        default_severity=Severity.ERROR,
+        fixable=False,
+        description="Two tables of a FROM clause are read by the same name",
+    ),
     "unknown-function": LintRule(
         name="unknown-function",
         default_severity=Severity.WARN,
@@ -308,7 +316,13 @@ RULES: dict[str, LintRule] = {
         name="param-count-mismatch",
         default_severity=Severity.ERROR,
         fixable=False,
-        description="A call passes a different number of parameters, or different names, than its query has placeholders",
+        description="A call passes a different number of parameters than its query has placeholders, or misses a name",
+    ),
+    "extra-param": LintRule(
+        name="extra-param",
+        default_severity=Severity.WARN,
+        fixable=False,
+        description="A call passes a key its query has no placeholder for",
     ),
     "param-type-mismatch": LintRule(
         name="param-type-mismatch",

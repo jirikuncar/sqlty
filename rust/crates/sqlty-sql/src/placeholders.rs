@@ -24,6 +24,8 @@ pub struct Styles {
     pub question_marks: bool,
     /// `:name`.
     pub colon_names: bool,
+    /// `@name` and `$name` (SQLite).
+    pub sigil_names: bool,
     /// Respell as `$N`, which only PostgreSQL's parser reads as a placeholder; else as `?N`,
     /// which every dialect's does.
     pub dollar_numbers: bool,
@@ -136,6 +138,7 @@ fn scan<'s>(sql: &'s str, styles: Styles, mut found: impl FnMut(usize, usize, To
                 question_mark(sql, i)
             }
             b':' if styles.colon_names => colon_name(sql, i),
+            b'@' | b'$' if styles.sigil_names => colon_name(sql, i),
             _ => None,
         };
         let Some((end, token)) = placeholder else {
@@ -265,12 +268,14 @@ mod tests {
     const ALL: Styles = Styles {
         question_marks: true,
         colon_names: true,
+        sigil_names: false,
         dollar_numbers: true,
         backslash_escapes: false,
     };
     const PLAIN: Styles = Styles {
         question_marks: false,
         colon_names: false,
+        sigil_names: false,
         dollar_numbers: true,
         backslash_escapes: false,
     };
@@ -313,6 +318,19 @@ mod tests {
         assert_eq!(text("a[1:2], t:x, x[y:z]", ALL), "a[1:2], t:x, x[y:z]");
         assert_eq!(text(":a::int, \\:b, :c", ALL), ":a::int, \\:b, $1");
         assert_eq!(text("x = :id", PLAIN), "x = :id");
+    }
+
+    #[test]
+    fn sigil_names() {
+        let sqlite = Styles {
+            sigil_names: true,
+            dollar_numbers: false,
+            ..ALL
+        };
+        let found = rewrite("x = @id AND y = $id OR z = :other AND w = a$b", sqlite);
+        assert_eq!(found.text, "x = ?1 AND y = ?1 OR z = ?2 AND w = a$b");
+        assert_eq!(found.names, [Some("id".into()), Some("other".into())]);
+        assert_eq!(text("x = @id", ALL), "x = @id");
     }
 
     #[test]

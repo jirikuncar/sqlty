@@ -107,6 +107,19 @@ impl ImportStyle {
     pub(crate) fn untyped_import(&self) -> Option<&'static str> {
         (!self.wrapper_name.contains('.')).then_some("from sqlty import UNTYPED")
     }
+
+    /// How `NoParams` is spelled: "NoParams" or "sqlty.NoParams".
+    pub(crate) fn no_params_name(&self) -> String {
+        match self.wrapper_name.rsplit_once('.') {
+            Some((module, _)) => format!("{module}.NoParams"),
+            None => "NoParams".to_string(),
+        }
+    }
+
+    /// Import line `NoParams` needs, or `None` when the module is imported.
+    pub(crate) fn no_params_import(&self) -> Option<&'static str> {
+        (!self.wrapper_name.contains('.')).then_some("from sqlty import NoParams")
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -341,6 +354,7 @@ pub(crate) fn wraps(
         let template = scan.is_template(&group.tokens);
         if !(scan.is_plain(group) || template)
             || (bare.is_some() && template)
+            || group.concatenated
             || scan.calls.enclosing(start, end).is_some()
             || interpolated.binary_search(&group.line).is_ok()
             || skip(group.line)
@@ -630,6 +644,8 @@ pub(crate) fn escapes(text: &str, mut piece: impl FnMut(&str, Range<usize>)) {
     piece(rest, position(rest)..text.len());
 }
 
+static NO_PARAMS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bNoParams\b").unwrap());
+
 /// Remove sqlty and `TYPE_MODULES` imports that are no longer referenced.
 fn remove_unused_imports(source: &str, istyle: &ImportStyle) -> String {
     let wrapper_marker = format!("{}[", istyle.wrapper_name);
@@ -640,9 +656,15 @@ fn remove_unused_imports(source: &str, istyle: &ImportStyle) -> String {
     let untyped_used = source
         .lines()
         .any(|line| line.contains("UNTYPED") && Some(line.trim()) != untyped_import);
+    let no_params_import = istyle.no_params_import();
+    let no_params_used = source.contains("NoParams")
+        && source
+            .lines()
+            .any(|line| NO_PARAMS.is_match(line) && Some(line.trim()) != no_params_import);
     let unused = |line: &str| {
         let line = line.trim_end();
         (Some(line) == untyped_import && !untyped_used)
+            || (Some(line) == no_params_import && !no_params_used)
             || (Some(line) == template_import && !source.contains(&template_marker))
             || (line == istyle.import_line
                 && !source.contains(&wrapper_marker)
@@ -732,7 +754,7 @@ pub(crate) fn sql_names(source: &str, tokens: &[Token]) -> Vec<String> {
 
 /// `(name, binding)` pairs of top-level `from sqlty import ...` statements, read from
 /// tokens so strings and comments don't count; `*` imports every name.
-fn sqlty_imports(scan: &Scan) -> Vec<(String, String)> {
+pub(crate) fn sqlty_imports(scan: &Scan) -> Vec<(String, String)> {
     from_imports(scan, "sqlty")
 }
 

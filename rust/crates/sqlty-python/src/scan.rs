@@ -26,6 +26,8 @@ pub(crate) struct Group {
     pub enclosing: Option<usize>,
     /// Why rewrite leaves the group alone although it holds a `--sql` string.
     pub skipped: Option<Rule>,
+    /// Whether `+` joins the group to another operand: part of a query, not a query.
+    pub concatenated: bool,
 }
 
 pub(crate) struct Scan<'s> {
@@ -79,7 +81,19 @@ impl<'s> Scan<'s> {
         let start = self.tokens[tokens[0]].span.start;
         let end = self.tokens[tokens[tokens.len() - 1]].span.end;
         let skipped = self.skipped_rule(&tokens);
+        let plus = |token: Option<&Token>| {
+            token.is_some_and(|t| t.kind == Kind::Op && &self.text[t.span.clone()] == "+")
+        };
+        let after = self.tokens[tokens[tokens.len() - 1] + 1..]
+            .iter()
+            .find(|t| t.kind != Kind::Comment);
+        let before = self.tokens[..tokens[0]]
+            .iter()
+            .rev()
+            .find(|t| t.kind != Kind::Comment);
+        let concatenated = plus(before) || plus(after);
         Group {
+            concatenated,
             line: self.lines.line_at(start),
             enclosing: self
                 .calls
@@ -140,7 +154,11 @@ impl<'s> Scan<'s> {
         let groups = self
             .groups()
             .iter()
-            .filter(|group| group.skipped.is_none() && self.enclosing_call(group).is_none())
+            .filter(|group| {
+                group.skipped.is_none()
+                    && !group.concatenated
+                    && self.enclosing_call(group).is_none()
+            })
             .filter(|group| marked(&self.content(group)))
             .map(|group| (group.line, self.spans(group), false));
         let calls = self

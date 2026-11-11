@@ -28,3 +28,24 @@ class User(TypedDict):
 # error: [column-count-mismatch] "User has 1 fields but query returns 2 columns"
 q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
+
+A TypedDict with `extra_items` ([PEP 728](https://peps.python.org/pep-0728/))
+accepts the extra columns, as long as they have its type. `extra_items=object`
+accepts any:
+
+```python
+from typing import TypedDict
+
+from sqlty import SQL
+
+
+class Item(TypedDict, extra_items=object):
+    id: int
+    name: str
+
+
+# error:
+q = SQL[Item]("--sql\nSELECT id::INTEGER, name::TEXT, owner_id::INTEGER FROM items")
+```
+
+See [Closed TypedDicts](../../../docs/guide/row-types.md#closed-typeddicts).

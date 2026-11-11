@@ -393,6 +393,38 @@ SELECT t.name FROM teams t RIGHT JOIN fans f ON f.team_id = t.id
 -- inferred: tuple[str]
 ```
 
+### An action with a column list
+
+PostgreSQL 15's `ON DELETE SET NULL | DEFAULT (cols)` names the columns the action
+sets. The foreign key is read in `CREATE TABLE` and in `ALTER TABLE ... ADD CONSTRAINT`,
+the form `pg_dump` writes.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE teams (region TEXT, code TEXT, name TEXT NOT NULL, PRIMARY KEY (region, code));
+CREATE TABLE players (
+    id INTEGER PRIMARY KEY,
+    region TEXT NOT NULL,
+    code TEXT NOT NULL DEFAULT 'free',
+    FOREIGN KEY (region, code) REFERENCES teams (region, code) ON DELETE SET DEFAULT (code)
+);
+CREATE TABLE fans (id INTEGER PRIMARY KEY, region TEXT NOT NULL, code TEXT NOT NULL DEFAULT 'free');
+ALTER TABLE fans
+    ADD CONSTRAINT fans_team
+    FOREIGN KEY (region, code) REFERENCES teams (region, code) ON DELETE SET DEFAULT (code);
+```
+
+```sql
+SELECT t.name FROM players p LEFT JOIN teams t ON t.region = p.region AND t.code = p.code
+-- inferred: tuple[str]
+```
+
+```sql
+SELECT t.name FROM fans f LEFT JOIN teams t ON t.region = f.region AND t.code = f.code
+-- inferred: tuple[str]
+```
+
 ### When the join can miss
 
 A nullable key column, a condition that is not exactly the key, a referenced relation
@@ -459,6 +491,28 @@ FROM players p
 ```sql
 SELECT (SELECT t.name FROM teams t WHERE t.id = p.team_id) FROM fans f LEFT JOIN players p ON p.id = f.id
 -- inferred: tuple[str | None]
+```
+
+The same holds for a lookup of the outer row's own key in its table: it finds the outer
+row itself. The key's columns must be equal to themselves, not NULL in the outer row.
+
+```sql
+SELECT
+    (SELECT t2.name FROM teams t2 WHERE t2.id = t.id),
+    (SELECT t2.motto FROM teams t2 WHERE t2.id = t.id),
+    (SELECT t2.name FROM teams t2 WHERE t2.region = t.region AND t2.code = t.code)
+FROM teams t
+-- inferred: tuple[str, str | None, str | None]
+```
+
+```sql
+SELECT
+    (SELECT t2.name FROM teams t2 WHERE t2.region = t.region AND t2.code = t.code),
+    (SELECT t2.name FROM teams t2 WHERE t2.region = t.region),
+    (SELECT t2.name FROM teams t2 WHERE t2.id = t.id + 1)
+FROM teams t
+WHERE t.region IS NOT NULL AND t.code IS NOT NULL
+-- inferred: tuple[str, str | None, str | None]
 ```
 
 ### A key that may not hold
@@ -636,6 +690,53 @@ class Row(TypedDict):
 
 row = fetch_one("SELECT CASE WHEN orders.id IS NOT NULL THEN json_build_object('id', orders.id, 'user_id', orders.user_id) ELSE NULL END AS doc FROM users LEFT JOIN orders ON orders.user_id = users.id", Row)
 # error:
+```
+
+### A guard on the whole row or on the foreign key
+
+`w IS NULL` is true for the row of NULLs an outer join adds, so where it is not, the
+joined row is there. A nullable foreign key the join matches exactly finds its row
+where the key is not NULL.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE owners (id INTEGER PRIMARY KEY, name TEXT NOT NULL, region TEXT, code TEXT, UNIQUE (region, code));
+CREATE TABLE orders (
+    id INTEGER PRIMARY KEY,
+    owner_id INTEGER REFERENCES owners (id),
+    region TEXT,
+    code TEXT,
+    FOREIGN KEY (region, code) REFERENCES owners (region, code)
+);
+```
+
+```sql
+SELECT
+    CASE WHEN w IS NULL THEN NULL ELSE jsonb_build_object('id', w.id, 'name', w.name) END AS a,
+    CASE WHEN o.owner_id IS NULL THEN NULL ELSE jsonb_build_object('id', w.id, 'name', w.name) END AS b
+FROM orders o LEFT JOIN owners w ON w.id = o.owner_id
+-- json: a: {id: integer, name: string}
+-- json: b: {id: integer, name: string}
+```
+
+```sql
+SELECT w.name FROM orders o LEFT JOIN owners w ON w.region = o.region AND w.code = o.code
+WHERE o.region IS NOT NULL AND o.code IS NOT NULL
+-- inferred: tuple[str]
+```
+
+Part of the key, or a join on columns that are no foreign key, can find no row.
+
+```sql
+SELECT w.name FROM orders o LEFT JOIN owners w ON w.region = o.region AND w.code = o.code
+WHERE o.region IS NOT NULL
+-- inferred: tuple[str | None]
+```
+
+```sql
+SELECT w.name FROM orders o LEFT JOIN owners w ON w.id = o.id WHERE o.owner_id IS NOT NULL
+-- inferred: tuple[str | None]
 ```
 
 ## Narrowing stays in its query

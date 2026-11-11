@@ -64,6 +64,43 @@
     }
   </script>
   {% endif %}
+  {% if page.url == "recipes/vscode/" %}
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "SQLTy for VS Code",
+      "alternateName": "jirikuncar.sqlty",
+      "description": "Type-check, complete, highlight and format the SQL in your Python strings against your schema, as you type",
+      "url": {{ page.canonical_url | tojson }},
+      "image": {{ image | tojson }},
+      "applicationCategory": "DeveloperApplication",
+      "applicationSubCategory": "Code editor extension",
+      "featureList": [
+        "Diagnostics of sqlty check on the SQL in Python strings as you type",
+        "Quick fixes of sqlty check --fix",
+        "Completion of table and column names, and JOIN clauses from foreign keys",
+        "Hover with column types, nullability and the inference rule",
+        "SQL syntax highlighting in strings marked --sql",
+        "Formatting of SQL query strings",
+        "Breaking schema change checks against a git revision"
+      ],
+      "operatingSystem": "Linux, macOS, Windows",
+      "softwareRequirements": "Visual Studio Code 1.93 or newer, or an editor that installs from Open VSX; sqlty 0.3.0 or newer",
+      "downloadUrl": "https://marketplace.visualstudio.com/items?itemName=jirikuncar.sqlty",
+      "installUrl": "https://marketplace.visualstudio.com/items?itemName=jirikuncar.sqlty",
+      "license": "https://opensource.org/license/mit",
+      "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "isPartOf": { "@type": "SoftwareApplication", "name": {{ config.site_name | tojson }}, "url": {{ config.site_url | tojson }} },
+      "sameAs": [
+        "https://marketplace.visualstudio.com/items?itemName=jirikuncar.sqlty",
+        "https://open-vsx.org/extension/jirikuncar/sqlty",
+        {{ (config.repo_url ~ "/tree/main/editors/vscode") | tojson }}
+      ]
+    }
+  </script>
+  {% endif %}
   <link rel="icon" href="{{ 'assets/favicon/favicon.ico' | url }}" sizes="32x32">
   <script>
     (() => {

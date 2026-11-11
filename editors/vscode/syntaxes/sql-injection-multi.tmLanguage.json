@@ -1,18 +1,87 @@
 {
   "scopeName": "sqlty.sql.injection.multi",
-  "injectionSelector": "L:string.quoted.multi.python -string.quoted.raw -string.interpolated -string.quoted.binary",
+  "injectionSelector": "L:string.quoted.multi.python -string.quoted.raw -string.interpolated -string.quoted.binary, L:meta.fstring.python",
   "patterns": [
+    {
+      "include": "#interpolated-triple-double"
+    },
+    {
+      "include": "#interpolated-leading-blank-double"
+    },
+    {
+      "include": "#interpolated-triple-single"
+    },
+    {
+      "include": "#interpolated-leading-blank-single"
+    },
     {
       "include": "#triple-double"
     },
     {
+      "include": "#leading-blank-double"
+    },
+    {
       "include": "#triple-single"
+    },
+    {
+      "include": "#leading-blank-single"
     }
   ],
   "repository": {
     "triple-double": {
       "contentName": "meta.embedded.sql",
-      "begin": "(?<=\")[ \\t]*(--sql|-- sql(?=[ \\t]*(?:--[^\\\"'\\\\]*)?(?:\\\\[nr]|$)))",
+      "begin": "(?<=\"\"\")(?<![fFtT]\"\"\")[ \\t]*(--sql|-- sql(?=[ \\t]*(?:--[^\\\"'\\\\]*)?(?:\\\\[nr]|$)))",
+      "beginCaptures": {
+        "1": {
+          "name": "comment.line.double-dash.sql"
+        }
+      },
+      "end": "(?=\"\"\")",
+      "patterns": [
+        {
+          "include": "#escape"
+        },
+        {
+          "name": "comment.line.double-dash.sql",
+          "begin": "--",
+          "end": "(?=\\\\n|\"\"\")|$"
+        },
+        {
+          "name": "comment.block.sql",
+          "begin": "/\\*",
+          "end": "\\*/|(?=\"\"\")"
+        },
+        {
+          "name": "string.quoted.single.sql",
+          "begin": "'",
+          "end": "'|(?=\"\"\")",
+          "patterns": [
+            {
+              "include": "#escape"
+            }
+          ]
+        },
+        {
+          "include": "#sql"
+        }
+      ]
+    },
+    "leading-blank-double": {
+      "begin": "(?<=\"\"\")(?<![fFtT]\"\"\")(?=[ \\t]*$)",
+      "end": "(?=\"\"\")",
+      "patterns": [
+        {
+          "include": "#marker-line-double"
+        },
+        {
+          "begin": "^(?=[ \\t]*\\S)",
+          "end": "(?=\"\"\")"
+        }
+      ]
+    },
+    "marker-line-double": {
+      "contentName": "meta.embedded.sql",
+      "begin": "^[ \\t]*(--sql|-- sql(?=[ \\t]*(?:--[^\\\"'\\\\]*)?(?:\\\\[nr]|$)))",
       "beginCaptures": {
         "1": {
           "name": "comment.line.double-dash.sql"
@@ -50,7 +119,58 @@
     },
     "triple-single": {
       "contentName": "meta.embedded.sql",
-      "begin": "(?<=')[ \\t]*(--sql|-- sql(?=[ \\t]*(?:--[^\\\"'\\\\]*)?(?:\\\\[nr]|$)))",
+      "begin": "(?<=''')(?<![fFtT]''')[ \\t]*(--sql|-- sql(?=[ \\t]*(?:--[^\\\"'\\\\]*)?(?:\\\\[nr]|$)))",
+      "beginCaptures": {
+        "1": {
+          "name": "comment.line.double-dash.sql"
+        }
+      },
+      "end": "(?=''')",
+      "patterns": [
+        {
+          "include": "#escape"
+        },
+        {
+          "name": "comment.line.double-dash.sql",
+          "begin": "--",
+          "end": "(?=\\\\n|''')|$"
+        },
+        {
+          "name": "comment.block.sql",
+          "begin": "/\\*",
+          "end": "\\*/|(?=''')"
+        },
+        {
+          "name": "string.quoted.single.sql",
+          "begin": "'",
+          "end": "'|(?=''')",
+          "patterns": [
+            {
+              "include": "#escape"
+            }
+          ]
+        },
+        {
+          "include": "#sql"
+        }
+      ]
+    },
+    "leading-blank-single": {
+      "begin": "(?<=''')(?<![fFtT]''')(?=[ \\t]*$)",
+      "end": "(?=''')",
+      "patterns": [
+        {
+          "include": "#marker-line-single"
+        },
+        {
+          "begin": "^(?=[ \\t]*\\S)",
+          "end": "(?=''')"
+        }
+      ]
+    },
+    "marker-line-single": {
+      "contentName": "meta.embedded.sql",
+      "begin": "^[ \\t]*(--sql|-- sql(?=[ \\t]*(?:--[^\\\"'\\\\]*)?(?:\\\\[nr]|$)))",
       "beginCaptures": {
         "1": {
           "name": "comment.line.double-dash.sql"
@@ -107,6 +227,269 @@
         {
           "name": "keyword.operator.sql",
           "match": "::|->>?|#>>?|\\|\\||<>|[<>!=]=?|[-+*/%|&^~@]"
+        }
+      ]
+    },
+    "interpolated-triple-double": {
+      "contentName": "meta.embedded.sql",
+      "begin": "(?<=\\b[fFtT]\"\"\")[ \\t]*(--sql|-- sql(?=[ \\t]*(?:--[^\\\"'\\\\]*)?(?:\\\\[nr]|$)))",
+      "beginCaptures": {
+        "1": {
+          "name": "comment.line.double-dash.sql"
+        }
+      },
+      "end": "(?=\"\"\")",
+      "patterns": [
+        {
+          "include": "#field"
+        },
+        {
+          "include": "#escape"
+        },
+        {
+          "name": "comment.line.double-dash.sql",
+          "begin": "--",
+          "end": "(?=\\\\n|\"\"\")|$",
+          "patterns": [
+            {
+              "include": "#field"
+            }
+          ]
+        },
+        {
+          "name": "comment.block.sql",
+          "begin": "/\\*",
+          "end": "\\*/|(?=\"\"\")",
+          "patterns": [
+            {
+              "include": "#field"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.sql",
+          "begin": "'",
+          "end": "'|(?=\"\"\")",
+          "patterns": [
+            {
+              "include": "#field"
+            },
+            {
+              "include": "#escape"
+            }
+          ]
+        },
+        {
+          "include": "#sql"
+        }
+      ]
+    },
+    "interpolated-leading-blank-double": {
+      "begin": "(?<=\\b[fFtT]\"\"\")(?=[ \\t]*$)",
+      "end": "(?=\"\"\")",
+      "patterns": [
+        {
+          "include": "#interpolated-marker-line-double"
+        },
+        {
+          "begin": "^(?=[ \\t]*\\S)",
+          "end": "(?=\"\"\")",
+          "patterns": [
+            {
+              "include": "#field"
+            }
+          ]
+        }
+      ]
+    },
+    "interpolated-marker-line-double": {
+      "contentName": "meta.embedded.sql",
+      "begin": "^[ \\t]*(--sql|-- sql(?=[ \\t]*(?:--[^\\\"'\\\\]*)?(?:\\\\[nr]|$)))",
+      "beginCaptures": {
+        "1": {
+          "name": "comment.line.double-dash.sql"
+        }
+      },
+      "end": "(?=\"\"\")",
+      "patterns": [
+        {
+          "include": "#field"
+        },
+        {
+          "include": "#escape"
+        },
+        {
+          "name": "comment.line.double-dash.sql",
+          "begin": "--",
+          "end": "(?=\\\\n|\"\"\")|$",
+          "patterns": [
+            {
+              "include": "#field"
+            }
+          ]
+        },
+        {
+          "name": "comment.block.sql",
+          "begin": "/\\*",
+          "end": "\\*/|(?=\"\"\")",
+          "patterns": [
+            {
+              "include": "#field"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.sql",
+          "begin": "'",
+          "end": "'|(?=\"\"\")",
+          "patterns": [
+            {
+              "include": "#field"
+            },
+            {
+              "include": "#escape"
+            }
+          ]
+        },
+        {
+          "include": "#sql"
+        }
+      ]
+    },
+    "interpolated-triple-single": {
+      "contentName": "meta.embedded.sql",
+      "begin": "(?<=\\b[fFtT]''')[ \\t]*(--sql|-- sql(?=[ \\t]*(?:--[^\\\"'\\\\]*)?(?:\\\\[nr]|$)))",
+      "beginCaptures": {
+        "1": {
+          "name": "comment.line.double-dash.sql"
+        }
+      },
+      "end": "(?=''')",
+      "patterns": [
+        {
+          "include": "#field"
+        },
+        {
+          "include": "#escape"
+        },
+        {
+          "name": "comment.line.double-dash.sql",
+          "begin": "--",
+          "end": "(?=\\\\n|''')|$",
+          "patterns": [
+            {
+              "include": "#field"
+            }
+          ]
+        },
+        {
+          "name": "comment.block.sql",
+          "begin": "/\\*",
+          "end": "\\*/|(?=''')",
+          "patterns": [
+            {
+              "include": "#field"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.sql",
+          "begin": "'",
+          "end": "'|(?=''')",
+          "patterns": [
+            {
+              "include": "#field"
+            },
+            {
+              "include": "#escape"
+            }
+          ]
+        },
+        {
+          "include": "#sql"
+        }
+      ]
+    },
+    "interpolated-leading-blank-single": {
+      "begin": "(?<=\\b[fFtT]''')(?=[ \\t]*$)",
+      "end": "(?=''')",
+      "patterns": [
+        {
+          "include": "#interpolated-marker-line-single"
+        },
+        {
+          "begin": "^(?=[ \\t]*\\S)",
+          "end": "(?=''')",
+          "patterns": [
+            {
+              "include": "#field"
+            }
+          ]
+        }
+      ]
+    },
+    "interpolated-marker-line-single": {
+      "contentName": "meta.embedded.sql",
+      "begin": "^[ \\t]*(--sql|-- sql(?=[ \\t]*(?:--[^\\\"'\\\\]*)?(?:\\\\[nr]|$)))",
+      "beginCaptures": {
+        "1": {
+          "name": "comment.line.double-dash.sql"
+        }
+      },
+      "end": "(?=''')",
+      "patterns": [
+        {
+          "include": "#field"
+        },
+        {
+          "include": "#escape"
+        },
+        {
+          "name": "comment.line.double-dash.sql",
+          "begin": "--",
+          "end": "(?=\\\\n|''')|$",
+          "patterns": [
+            {
+              "include": "#field"
+            }
+          ]
+        },
+        {
+          "name": "comment.block.sql",
+          "begin": "/\\*",
+          "end": "\\*/|(?=''')",
+          "patterns": [
+            {
+              "include": "#field"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.sql",
+          "begin": "'",
+          "end": "'|(?=''')",
+          "patterns": [
+            {
+              "include": "#field"
+            },
+            {
+              "include": "#escape"
+            }
+          ]
+        },
+        {
+          "include": "#sql"
+        }
+      ]
+    },
+    "field": {
+      "patterns": [
+        {
+          "name": "constant.character.escape.python",
+          "match": "\\{\\{|\\}\\}"
+        },
+        {
+          "include": "source.python#fstring-multi-brace"
         }
       ]
     }

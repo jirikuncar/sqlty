@@ -6,11 +6,25 @@ of table and column names in the query strings it checks, and SQL highlighting i
 marked `--sql`. The `.sql` files of named queries that the
 [`queries`](https://sqlty.kuncar.dev/guide/sql-files/) key names get their diagnostics too.
 
+![VS Code: adding email to a --sql query, saving formats it and fixes its row type; making email nullable in schema.sql flags the query, and the quick fix adds | None; typing u. completes the columns of users](https://raw.githubusercontent.com/jirikuncar/sqlty/main/docs/assets/vscode-demo.gif)
+
 The extension runs `sqlty server` from your project, so the editor and CI agree. Add sqlty
 to the project's environment (`uv add --dev sqlty`); the extension bundles none.
 
-The [documentation](https://sqlty.kuncar.dev/recipes/vscode/) covers the setup,
-Restricted Mode and other editors.
+On vscode.dev, github.dev and in Restricted Mode, there is no `sqlty server`, so the extension runs
+the engine compiled to WebAssembly: diagnostics, quick fixes, completion and hover, without the
+checks that read Python row types. The [documentation](https://sqlty.kuncar.dev/recipes/vscode/) covers the setup,
+Restricted Mode, VS Code for the Web and other editors.
+
+## Coming from another SQL highlighter
+
+[python-string-sql](https://marketplace.visualstudio.com/items?itemName=ptweir.python-string-sql),
+[Inline SQL](https://marketplace.visualstudio.com/items?itemName=qufiwefefwoyn.inline-sql-syntax),
+[Python SQL](https://marketplace.visualstudio.com/items?itemName=AzharuddinSyed.python-sql) and
+[SQL in Python Highlighter](https://marketplace.visualstudio.com/items?itemName=eluc1a.sql-in-python-highlighter)
+mark SQL strings with the same `--sql` comment, so the strings you marked for them are already
+highlighted and checked by sqlty against your schema. Keep one highlighter enabled, so one grammar
+colors each string.
 
 ## Settings
 
@@ -61,6 +75,10 @@ npm ci
 npm run check    # tsc, oxlint, oxfmt
 npm test         # opens fixture/ in VS Code; needs a sqlty with `sqlty server` on PATH
 ```
+
+`npm run demo` re-records `docs/assets/vscode-demo.gif` from `sqlty.vsix` in
+[openvscode-server](https://github.com/gitpod-io/openvscode-server) at `$OPENVSCODE_SERVER`;
+it needs `sqlty` on `PATH`, Playwright, ffmpeg and gifsicle.
 
 `npm run package` writes `sqlty.vsix`. Each GitHub release publishes it under the
 release's version, to the Visual Studio Marketplace and Open VSX, both by trusted publishing (no

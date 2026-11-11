@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import ast
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING, NamedTuple
 
 from sqlty._check import RowUsage, apply_suppressions, is_any_row
@@ -238,7 +238,7 @@ def query_diagnostics(
 ) -> list[tuple[str, str]]:
     """Why a query has untyped columns, or names what it cannot, as ``(rule, message)`` pairs.
 
-    The rules are ``unknown-table``, ``unknown-column``, ``ambiguous-column``,
+    The rules are ``unknown-table``, ``unknown-column``, ``ambiguous-column``, ``duplicate-alias``,
     ``unknown-function``, ``unknown-type``, ``unsupported-syntax``,
     ``insert-missing-column``, ``insert-value-count``, ``ungrouped-column``,
     ``fanout-aggregate``, ``chasm-join``, ``unproven-join`` and ``entity-mismatch``. Tables and columns are only judged
@@ -441,6 +441,7 @@ def check_source(
     module: str | None = None,
     row_usage: RowUsage | None = None,
     query_variants: int | None = None,
+    coerce_row_types: Collection[str] = (),
 ) -> list[Diagnostic]:
     """Check Python source for SQL type issues.
 
@@ -484,6 +485,10 @@ def check_source(
     only names the lines that select one: ``(variant: line 11)``. A call with more variants
     is ``dynamic-query`` (``unchecked-query`` for a psycopg composition).
 
+    ``coerce_row_types`` (the ``coerce-row-types`` key) names the ``TypedDict``,
+    ``NamedTuple`` and dataclass rows the code validates with Pydantic, such as through a
+    ``TypeAdapter``, as ``module.Name``: their fields take what a ``BaseModel`` field takes.
+
     Each diagnostic has the byte offsets of what it is about, ``start`` to ``end``: the
     row type, the query, a parameter type, or the ``# sqlty: ignore`` comment. ``fix``
     holds the edits ``sqlty check --fix`` makes for it, as ``(start, end, replacement)``.
@@ -514,6 +519,7 @@ def check_source(
         module=module or parsed.module,
         row_usage=row_usage or (usage := RowUsage()),
         variants=query_variants,
+        coerce=frozenset(coerce_row_types),
     )
     diagnostics = apply_suppressions(parsed.ignores, diagnostics, rules)
     return diagnostics if row_usage else usage.filter(diagnostics)
@@ -534,6 +540,7 @@ def breaking_source(
     helpers: HelperIndex | None = None,
     module: str | None = None,
     query_variants: int | None = None,
+    coerce_row_types: Collection[str] = (),
 ) -> list[Diagnostic]:
     """The diagnostics ``source`` gets against ``against_sql`` but not against its own
     ``schema_sql``: what a schema change breaks, as ``sqlty breaking`` reports it.
@@ -564,6 +571,7 @@ def breaking_source(
             helpers=helpers,
             module=module,
             query_variants=query_variants,
+            coerce_row_types=coerce_row_types,
         )
 
     own = {(d.get("line"), d["rule"], d["message"]) for d in check(schema_sql)}
@@ -614,7 +622,9 @@ def query_statistics(
                 counts["dynamic-query" if call.dynamic else "unchecked-query"] += 1
             continue
         for query in [v.query for v in call.variants] or [call.query]:
-            if not MARKER.match(query) and (outcome := _outcome(query, dialect, schema_sql)):
+            if not (MARKER.match(query) and query in parsed.literals) and (
+                outcome := _outcome(query, dialect, schema_sql)
+            ):
                 counts[outcome] += 1
     return counts
 

@@ -39,6 +39,7 @@ stale-type = "error"
 | [`unknown-table`](#unknown-table) | Names | error | no | Table the schema does not define |
 | [`unknown-column`](#unknown-column) | Names | error | yes | Column the table does not have |
 | [`ambiguous-column`](#ambiguous-column) | Names | error | no | Unqualified column more than one table has |
+| [`duplicate-alias`](#duplicate-alias) | Names | error | no | Two tables of a `FROM` clause read by the same name |
 | [`unknown-function`](#unknown-function) | Names | warn | no | Function whose result sqlty cannot type |
 | [`unknown-type`](#unknown-type) | Names | warn | no | Cast or column type without a Python type |
 | [`unsupported-syntax`](#unsupported-syntax) | Names | warn | no | Construct that parses but is not typed |
@@ -58,6 +59,7 @@ stale-type = "error"
 | [`dynamic-query`](#dynamic-query) | Rewrite | ignore | no | Helper query that is not a string literal |
 | [`untyped-query`](#untyped-query) | Rewrite | warn | yes | `SQL[UNTYPED]` query |
 | [`param-count-mismatch`](#param-count-mismatch) | Params | error | no | Call passes a different number of parameters than its query has |
+| [`extra-param`](#extra-param) | Params | warn | no | Call passes a key its query has no placeholder for |
 | [`param-type-mismatch`](#param-type-mismatch) | Params | error | no | Call passes an argument the query's parameter can't take |
 | [`params-type-mismatch`](#params-type-mismatch) | Params | error | no | `P` of `SQL[R, P]` doesn't fit the query's parameters |
 | [`unused-ignore`](#unused-ignore) | Suppression | warn | no | `# sqlty: ignore` comment that suppresses nothing |
@@ -425,7 +427,7 @@ Fix: pass a value of the expected type.
 ### param-count-mismatch
 
 Default: error. A different number of positional arguments than the query has
-placeholders, or named arguments that don't match the query's names.
+placeholders, or a named placeholder the call doesn't pass.
 
 ```python
 from typing import Annotated, LiteralString
@@ -438,6 +440,23 @@ execute("SELECT 1 FROM users WHERE id = %s AND name = %s", (1,))
 ```
 
 Fix: pass one argument per placeholder.
+
+### extra-param
+
+Default: warn. A key the call passes that the query has no placeholder for,
+which the drivers ignore. Set `extra-param = "error"` to fail the check on it.
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def execute(query: Annotated[LiteralString, SQL], params: dict[str, object]) -> None: ...
+
+# error: [extra-param] "call passes extra parameter 'name'"
+execute("SELECT 1 FROM users WHERE id = %(id)s", {"id": 1, "name": "a"})
+```
+
+Fix: remove the key, or add its placeholder.
 
 ### params-type-mismatch
 
@@ -647,6 +666,13 @@ to the name, the message suggests it and `--fix` writes it.
 
 Default: error. An unqualified column that more than one table of the query
 has. Columns merged by `USING` or `NATURAL` are not ambiguous.
+
+### duplicate-alias
+
+Default: error. Two tables, subqueries or functions of one `FROM` clause read by
+the same name: `FROM products p JOIN payments p`, or one table joined to itself
+without an alias. PostgreSQL and MySQL reject the query; SQLite accepts it, so
+the rule is not checked there. Needs no schema.
 
 ### unknown-function
 
