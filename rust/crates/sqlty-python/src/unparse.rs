@@ -730,8 +730,13 @@ pub fn field_text(field: &InterpolatedElement, source: &str) -> String {
         None => field.end().to_usize() - 1,
     };
     let mut text = source.get(start..stop).unwrap_or("");
-    // The old tokenizer ended the text at any `!`, the `!=` before a format spec included.
-    if field.conversion != ConversionFlag::None || (legacy && field.format_spec.is_some()) {
+    if field.conversion != ConversionFlag::None {
+        // `!`, the conversion letter and the blanks around them end the text.
+        let end = text.trim_end().len().saturating_sub(1);
+        text = text[..end].trim_end();
+        text = text.strip_suffix('!').unwrap_or(text);
+    } else if legacy && field.format_spec.is_some() {
+        // The old tokenizer ended the text at any `!`, the `!=` before a format spec included.
         if let Some(bang) = last_bang(text) {
             text = &text[..bang];
         }
