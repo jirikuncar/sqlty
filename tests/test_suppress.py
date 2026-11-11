@@ -1,4 +1,5 @@
-"""``sqlty_python::suppress`` reads ``# sqlty: ignore`` comments as ``ParsedSource.ignores`` does."""
+"""``sqlty_python::suppress`` reads ``# sqlty: ignore`` comments as ``tokenize`` does, which
+reads them in a source that does not parse."""
 
 from __future__ import annotations
 
@@ -25,7 +26,7 @@ def same(source: str) -> int:
             ignore.start,
             ignore.end,
         )
-        for ignore in ParsedSource(source).ignores.values()
+        for ignore in ParsedSource(source)._tokenized_ignores().values()  # noqa: SLF001
     ]
     rust = module_ignores(source, VERSION)
     if rust is None:

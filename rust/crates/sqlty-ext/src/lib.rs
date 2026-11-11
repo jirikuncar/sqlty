@@ -22,7 +22,6 @@
 //! mapping). The `#[pyfunction]`s are exercised from Python by `tests/`.
 
 mod config;
-mod outline;
 mod server;
 
 use sqlty_python::checker;
@@ -46,7 +45,6 @@ use sqlty_python::options::{ConfigError, Options};
 use sqlty_python::rules::RuleConfig;
 
 type ColumnTuple = (String, Option<String>, Option<String>);
-type FieldTuple = (String, Option<String>, Option<String>, Option<bool>);
 type NullableColumnTuple = (
     String,
     Option<String>,
@@ -482,33 +480,6 @@ fn analyze_columns(
     }))
 }
 
-/// Fields of the composite type `type_name` the schema defines, as
-/// `(name, python_type, sql_type, nullable)` tuples; None when it defines no such type.
-#[pyfunction]
-#[pyo3(signature = (type_name, *, dialect = DialectArg::POSTGRES, schema_sql = None))]
-fn composite_fields(
-    type_name: &str,
-    dialect: DialectArg,
-    schema_sql: Option<SchemaArg>,
-) -> Option<Vec<FieldTuple>> {
-    let dialect = dialect.0;
-    let schema = schema(schema_sql, dialect)?;
-    let columns = analyzer::composite_columns(type_name, dialect, &schema)?;
-    Some(
-        columns
-            .into_iter()
-            .map(|col| {
-                (
-                    col.name,
-                    col.python_type,
-                    col.sql_type,
-                    nullable(col.nullability),
-                )
-            })
-            .collect(),
-    )
-}
-
 /// Parameters of a query as `(index, name, python_type, sql_type, nullable, cast)` tuples.
 ///
 /// A placeholder (`%s`, `%(name)s`, `$1`, `?`, `:name`) takes its type from its context: the
@@ -771,40 +742,6 @@ fn format_source(
     })
 }
 
-/// `(code, message, start, end, query_start)` of a [`sqlty_format::Finding`].
-type SqruffFinding = (&'static str, String, usize, usize, usize);
-
-/// What sqruff's core lint rules, less its layout rules, find in the query strings of
-/// Python source: `(code, message, start, end, query_start)`, byte offsets in `source`.
-///
-/// Raises:
-///     ValueError: unsupported import_style
-#[pyfunction]
-#[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, import_style = None))]
-fn sqruff_findings(
-    py: Python<'_>,
-    source: &str,
-    dialect: DialectArg,
-    import_style: Option<&str>,
-) -> Result<Vec<SqruffFinding>, Error> {
-    detach(py, || {
-        let style = ImportStyle::parse(import_style)?;
-        Ok(sqlty_format::lint_source(source, dialect.0, &style)
-            .into_iter()
-            .map(|found| {
-                let span = found.span;
-                (
-                    found.code,
-                    found.message,
-                    span.start,
-                    span.end,
-                    found.query_start,
-                )
-            })
-            .collect())
-    })
-}
-
 /// Apply what `sqlty check --fix` fixes; rules set to "ignore" are skipped.
 ///
 /// `suppressed` maps a line to the rules a `# sqlty: ignore` comment on it suppresses
@@ -860,27 +797,6 @@ fn expand_star(
     })
 }
 
-/// `(rule, message)` of `select-star` or `select-star-no-schema` for a query whose
-/// result has a `*` or `t.*`, or None.
-///
-/// Example:
-///     select_star_finding("SELECT u.* FROM users u", has_schema=True)
-///     # ("select-star", "SELECT u.* used — expand to explicit column list")
-#[pyfunction]
-#[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES, has_schema = false))]
-fn select_star_finding(
-    py: Python<'_>,
-    sql: &str,
-    dialect: DialectArg,
-    has_schema: bool,
-) -> Option<(&'static str, String)> {
-    let dialect = dialect.0;
-    detach(py, || {
-        checker::select_star_finding(sql, dialect, has_schema)
-    })
-    .map(|(rule, message)| (rule.name(), message))
-}
-
 /// A finding of `check_source`, which Python reads as a dict.
 #[derive(IntoPyObject)]
 struct DiagnosticOut {
@@ -893,71 +809,6 @@ struct DiagnosticOut {
     end: usize,
     /// `(start, end, replacement)` byte edits that fix it; empty when it has no fix.
     fix: Vec<(usize, usize, String)>,
-}
-
-/// Check Python source for SQL type issues.
-///
-/// `any_calls` are the byte offsets of the `SQL[T](...)` calls whose `T` is
-/// `typing.Any`; they are not reported as `unchecked-query`.
-///
-/// Returns:
-///     List of diagnostic dicts with keys: rule, message, severity, line, start, end
-///     (byte offsets of what it underlines) and fix (`(start, end, replacement)` byte edits,
-///     with the imports the fix needs, so it can be applied on its own)
-///
-/// Raises:
-///     ValueError: unsupported import_style, or `rules` names an unknown rule or severity
-/// `PsycopgScan.render` of the first argument of every call of a plain name in `source`,
-/// by offset of the argument: the SQL, `"unchecked"`, or None when it is no composition;
-/// `(offset, False)` where the Rust model does not cover what Python computes. None where
-/// Rust does not read the source.
-#[pyfunction]
-fn rendered_compositions(
-    py: Python<'_>,
-    source: &str,
-    version: (u8, u8),
-) -> Option<Vec<(usize, bool, Option<String>)>> {
-    use ruff_python_ast::visitor::{walk_expr, Visitor};
-    use ruff_python_ast::Expr;
-    use ruff_text_size::Ranged;
-    use sqlty_python::compose::{render, Rendered, Scan, UNCHECKED};
-    use sqlty_python::types::symbols::Source;
-
-    struct Calls<'a>(Vec<&'a Expr>);
-    impl<'a> Visitor<'a> for Calls<'a> {
-        fn visit_expr(&mut self, expr: &'a Expr) {
-            if let Expr::Call(call) = expr {
-                if let (Expr::Name(_), Some(first)) =
-                    (call.func.as_ref(), call.arguments.args.first())
-                {
-                    self.0.push(first);
-                }
-            }
-            walk_expr(self, expr);
-        }
-    }
-
-    detach(py, || {
-        let source = Source::new(source, version)?;
-        let scan = Scan::new(&source);
-        let mut calls = Calls(Vec::new());
-        calls.visit_body(source.body());
-        let mut found: Vec<(usize, bool, Option<String>)> = calls
-            .0
-            .into_iter()
-            .map(|arg| {
-                let at = arg.start().to_usize();
-                match render(&scan, arg, None) {
-                    Some(Rendered::Text(text)) => (at, true, Some(text)),
-                    Some(Rendered::Unchecked) => (at, true, Some(UNCHECKED.to_string())),
-                    Some(Rendered::None) => (at, true, None),
-                    None => (at, false, None),
-                }
-            })
-            .collect();
-        found.sort();
-        Some(found)
-    })
 }
 
 /// One call's variants: `(offset of the query, read, variants as (query, lines, declared),
@@ -1316,69 +1167,6 @@ fn module_diagnostics(
 /// `(module, row type, field)` of a `redundant-optional` question.
 type FieldKey = (Option<String>, String, String);
 
-/// The row checks of `sqlty_python::rows` on the `SQL[Row](...)` calls of `source`:
-/// `(diagnostics, redundant, needed)`, where `redundant[i]` is the field diagnostic `i`
-/// calls redundant and `needed` are the fields some query needs `| None` for. None where
-/// Rust does not read the source.
-#[pyfunction]
-#[pyo3(signature = (source, *, version, dialect = DialectArg::POSTGRES, schema_sql = None, rules = None, import_style = None, module = None, coerce = vec![]))]
-#[expect(
-    clippy::too_many_arguments,
-    clippy::type_complexity,
-    reason = "the keyword-only Python signature is the API"
-)]
-fn row_diagnostics(
-    py: Python<'_>,
-    source: &str,
-    version: (u8, u8),
-    dialect: DialectArg,
-    schema_sql: Option<SchemaArg>,
-    rules: Option<HashMap<String, String>>,
-    import_style: Option<&str>,
-    module: Option<&str>,
-    coerce: Vec<String>,
-) -> Result<Option<(Vec<DiagnosticOut>, Vec<Option<FieldKey>>, Vec<FieldKey>)>, Error> {
-    use sqlty_python::rows;
-    use sqlty_python::types::symbols::Source;
-    let dialect = dialect.0;
-    detach(py, || {
-        let schema = schema_for(source, schema_sql, dialect);
-        let options = Options::new(dialect, schema.as_deref(), import_style, false)?;
-        let rules = RuleConfig::from_overrides(rules).map_err(ConfigError::from)?;
-        let Some(parsed) = Source::new(source, version) else {
-            return Ok(None);
-        };
-        let settings = rows::Settings {
-            options: &options,
-            rules: &rules,
-            index: None,
-            module,
-            coerce: &coerce.into_iter().collect(),
-        };
-        let found = rows::check(&Arc::new(parsed), &settings);
-        let mut needed: Vec<FieldKey> = found.needed.into_iter().collect();
-        needed.sort();
-        let (diagnostics, redundant) = found
-            .diagnostics
-            .into_iter()
-            .map(|reported| {
-                let diag = reported.diagnostic;
-                let out = DiagnosticOut {
-                    rule: diag.rule.name(),
-                    message: diag.message,
-                    severity: diag.severity.as_str(),
-                    line: diag.line,
-                    start: diag.span.start,
-                    end: diag.span.end,
-                    fix: Vec::new(),
-                };
-                (out, reported.redundant)
-            })
-            .unzip();
-        Ok(Some((diagnostics, redundant, needed)))
-    })
-}
-
 #[pyfunction]
 #[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, schema_sql = None, rules = None, import_style = None, untyped = false, any_calls = vec![]))]
 #[expect(
@@ -1582,245 +1370,6 @@ fn template_strings(py: Python<'_>, source: &str) -> Option<Vec<PyTemplate>> {
     })
 }
 
-/// `ast.unparse` of the expression `source`, as `sqlty_python::unparse` writes it, or None
-/// where Rust does not read `source`.
-#[pyfunction]
-fn unparse_expression(py: Python<'_>, source: &str) -> Option<String> {
-    detach(py, || {
-        let parsed = sqlty_python::parse::expression(source)?;
-        Some(sqlty_python::unparse::unparse(
-            &parsed.syntax().body,
-            source,
-        ))
-    })
-}
-
-fn shown(tp: Option<&sqlty_python::types::ty::Ty>) -> String {
-    tp.map_or_else(|| "None".to_string(), sqlty_python::types::ty::Ty::repr)
-}
-
-fn flag(value: Option<bool>) -> &'static str {
-    match value {
-        Some(true) => "True",
-        Some(false) => "False",
-        None => "None",
-    }
-}
-
-/// The row types of `source` as `sqlty_python::types` reads them, one text per type that
-/// `tests/test_types_rust.py` builds from `extract_type_definitions` too; None where Rust
-/// does not read `source`.
-#[pyfunction]
-#[pyo3(signature = (source, module, version))]
-fn type_definitions(
-    py: Python<'_>,
-    source: &str,
-    module: Option<&str>,
-    version: (u8, u8),
-) -> Option<Vec<String>> {
-    use sqlty_python::types::{extract::extract_type_definitions, symbols::Source};
-    detach(py, || {
-        let source = Arc::new(Source::new(source, version)?);
-        let found = extract_type_definitions(&source, None, module);
-        let types =
-            |types: &sqlty_python::types::info::Dict<Option<sqlty_python::types::ty::Ty>>| {
-                types
-                    .iter()
-                    .map(|(name, tp)| format!("{name}={}", shown(tp.as_ref())))
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            };
-        let names = |names: &std::collections::BTreeSet<String>| {
-            names.iter().cloned().collect::<Vec<_>>().join(", ")
-        };
-        Some(
-            found
-                .iter()
-                .map(|(name, info)| {
-                    [
-                        format!("name: {name} {}", info.name),
-                        format!("kind: {}", info.kind.as_str()),
-                        format!(
-                            "fields: {}",
-                            info.fields
-                                .iter()
-                                .map(|(n, t)| format!("{n}={t}"))
-                                .collect::<Vec<_>>()
-                                .join("; ")
-                        ),
-                        format!("required: {}", names(&info.required)),
-                        format!(
-                            "openness: {} {} {} {} {}",
-                            flag(Some(info.closed)),
-                            info.extra_items.as_deref().unwrap_or("None"),
-                            flag(Some(info.extra_items_readonly)),
-                            shown(info.extra_items_type.as_ref()),
-                            info.owner
-                        ),
-                        format!("field_types: {}", types(&info.field_types)),
-                        format!("lineno: {}", info.lineno),
-                        format!("bases: {}", info.bases.join(", ")),
-                        format!("errors: {}", info.errors.join("; ")),
-                        format!(
-                            "columns: {}",
-                            info.columns
-                                .iter()
-                                .map(|(c, f)| format!("{c}={f}"))
-                                .collect::<Vec<_>>()
-                                .join("; ")
-                        ),
-                        format!("opaque: {}", names(&info.opaque)),
-                        format!("allows_extra: {}", flag(Some(info.allows_extra))),
-                        format!("lax: {}", names(&info.lax)),
-                        format!(
-                            "annotations: {}",
-                            info.annotations
-                                .iter()
-                                .map(|(n, a)| format!("{n}={}", a.unparse()))
-                                .collect::<Vec<_>>()
-                                .join("; ")
-                        ),
-                        format!(
-                            "coerced: {}",
-                            info.coerced
-                                .as_ref()
-                                .map_or_else(|| "None".to_string(), types)
-                        ),
-                        format!("module: {}", info.module.as_deref().unwrap_or("None")),
-                    ]
-                    .join("\n")
-                })
-                .collect(),
-        )
-    })
-}
-
-/// How the fields of the row type `Row` of `source` relate, as `sqlty_python::types::ty`
-/// decides: `(display, admits_none, is_optional, erased)` of each, what each takes of
-/// `columns` (see `sqlty_python::types::compat`), then for each pair `is_subtype`,
-/// `is_subtype` in lax mode and `consistent`.
-#[pyfunction]
-#[allow(clippy::needless_pass_by_value)]
-fn type_relations(
-    py: Python<'_>,
-    source: &str,
-    version: (u8, u8),
-    columns: Vec<Option<String>>,
-) -> Option<Vec<String>> {
-    use sqlty_python::types::compat;
-    use sqlty_python::types::ty::{consistent, is_subtype, Lit, Promotions};
-    use sqlty_python::types::{extract::extract_type_definitions, symbols::Source};
-    detach(py, || {
-        let source = Arc::new(Source::new(source, version)?);
-        let found = extract_type_definitions(&source, None, None);
-        let row = found.get("Row")?;
-        let types: Vec<Option<&sqlty_python::types::ty::Ty>> =
-            row.field_types.values().map(Option::as_ref).collect();
-        let mut out = Vec::new();
-        for tp in &types {
-            out.push(match tp {
-                Some(tp) => format!(
-                    "{} {} {} {}",
-                    tp.display(),
-                    flag(tp.admits_none()),
-                    flag(Some(tp.is_optional())),
-                    tp.erase().repr()
-                ),
-                None => "None".to_string(),
-            });
-        }
-        let literal = |values: Option<Vec<Lit>>| {
-            values.map_or_else(
-                || "None".to_string(),
-                |values| {
-                    let values: Vec<String> = values
-                        .iter()
-                        .map(|value| match compat::set_member(value) {
-                            Lit::Str(text) => format!("s:{text}"),
-                            Lit::Int(digits) => format!("i:{digits}"),
-                            Lit::Bool(_) => unreachable!("a set member is not a bool"),
-                        })
-                        .collect();
-                    format!("[{}]", values.join(", "))
-                },
-            )
-        };
-        for (name, annotation) in &row.fields {
-            for column in &columns {
-                let column = column.as_deref();
-                out.push(format!(
-                    "{} {} {}",
-                    flag(Some(compat::check_type_compatibility(row, name, column))),
-                    shown(compat::field_type(row, name)),
-                    flag(Some(compat::field_accepts(annotation, column, version))),
-                ));
-            }
-            for inferred in [Lit::Str("a".to_string()), Lit::Int("1".to_string())] {
-                out.push(literal(compat::field_type(row, name).and_then(|tp| {
-                    compat::declared_literal_values(tp, &[inferred]).map(|values| {
-                        let values: std::collections::BTreeSet<Lit> =
-                            values.iter().map(compat::set_member).collect();
-                        values.into_iter().collect()
-                    })
-                })));
-            }
-            out.push(compat::parse_tuple_annotation(annotation).map_or_else(
-                || "None".to_string(),
-                |items| {
-                    let items: Vec<String> =
-                        items.iter().map(|(n, t)| format!("{n}={t}")).collect();
-                    items.join("; ")
-                },
-            ));
-        }
-        for column in columns.iter().flatten() {
-            out.push(literal(compat::column_literal_values(column)));
-            out.push(
-                flag(Some(compat::check_type_compatibility(
-                    row,
-                    "missing",
-                    Some(column),
-                )))
-                .to_string(),
-            );
-        }
-        for a in &types {
-            for b in &types {
-                out.push(format!(
-                    "{} {} {}",
-                    flag(is_subtype(*a, *b, Promotions::Numeric)),
-                    flag(is_subtype(*a, *b, Promotions::Lax)),
-                    flag(consistent(*a, *b))
-                ));
-            }
-        }
-        Some(out)
-    })
-}
-
-/// `ParsedSource.outline` and its classes, built in Rust (see `outline`), or None where Rust
-/// does not read `source`.
-#[pyfunction]
-fn module_outline<'py>(py: Python<'py>, source: &str) -> PyResult<Option<outline::Outline<'py>>> {
-    outline::outline(py, source)
-}
-
-type PyArg = (
-    bool,
-    (usize, usize),
-    Option<String>,
-    Option<String>,
-    Option<Vec<PyParam>>,
-);
-type PySite = (
-    (usize, usize),
-    Option<String>,
-    String,
-    Vec<PyArg>,
-    Vec<(Option<String>, PyArg)>,
-    Option<String>,
-);
-
 fn py_params(params: Option<Vec<sqlty_python::scopes::Param>>) -> Option<Vec<PyParam>> {
     use sqlty_python::scopes::Key;
     params.map(|params| {
@@ -1834,58 +1383,6 @@ fn py_params(params: Option<Vec<sqlty_python::scopes::Param>>) -> Option<Vec<PyP
                 (key, p.kind)
             })
             .collect()
-    })
-}
-
-/// `(lines, prefix, name, args, keywords, receiver)` of each call in Python source that may
-/// call a helper named one of `names`, or None when Rust does not read the source; each
-/// argument is `(starred, span, text, type, params)`.
-#[pyfunction]
-#[allow(clippy::needless_pass_by_value)]
-fn helper_sites(py: Python<'_>, source: &str, names: Vec<String>) -> Option<Vec<PySite>> {
-    detach(py, || {
-        let arg = |a: sqlty_python::helpers::Arg| {
-            (a.starred, a.span, a.text, a.kind, py_params(a.params))
-        };
-        let found = sqlty_python::helpers::sites(source, &names)?;
-        Some(
-            found
-                .into_iter()
-                .map(|site| {
-                    (
-                        site.lines,
-                        site.prefix,
-                        site.name,
-                        site.args.into_iter().map(arg).collect(),
-                        site.keywords
-                            .into_iter()
-                            .map(|(name, value)| (name, arg(value)))
-                            .collect(),
-                        site.receiver,
-                    )
-                })
-                .collect(),
-        )
-    })
-}
-
-/// `(line, annotation, query, annotation_span)` for each `SQL[T](...)` call in Python source.
-///
-/// `query` is the `--sql` string without its prefix, or None when the call
-/// doesn't hold a one-line `--sql` string; `annotation_span` is the byte offsets of `T`.
-///
-/// Raises:
-///     ValueError: unsupported import_style
-#[pyfunction]
-#[pyo3(signature = (source, *, import_style = None))]
-fn wrapped_queries(
-    py: Python<'_>,
-    source: &str,
-    import_style: Option<&str>,
-) -> Result<Vec<checker::WrappedQuery>, Error> {
-    detach(py, || {
-        let style = ImportStyle::parse(import_style)?;
-        Ok(checker::wrapped_queries(source, &style))
     })
 }
 
@@ -2154,7 +1651,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(explain_select, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_columns, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_params, m)?)?;
-    m.add_function(wrap_pyfunction!(composite_fields, m)?)?;
     m.add_function(wrap_pyfunction!(query_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(name_rules, m)?)?;
     m.add_function(wrap_pyfunction!(dialect_names, m)?)?;
@@ -2167,31 +1663,21 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(add_param_types, m)?)?;
     m.add_function(wrap_pyfunction!(strip_source, m)?)?;
     m.add_function(wrap_pyfunction!(format_source, m)?)?;
-    m.add_function(wrap_pyfunction!(sqruff_findings, m)?)?;
     m.add_function(wrap_pyfunction!(fix_source, m)?)?;
     m.add_function(wrap_pyfunction!(expand_star, m)?)?;
-    m.add_function(wrap_pyfunction!(select_star_finding, m)?)?;
     m.add_function(wrap_pyfunction!(check_source, m)?)?;
     m.add_function(wrap_pyfunction!(check_queries, m)?)?;
     m.add_function(wrap_pyfunction!(named_queries, m)?)?;
     m.add_function(wrap_pyfunction!(module_facts, m)?)?;
-    m.add_function(wrap_pyfunction!(module_outline, m)?)?;
     m.add_function(wrap_pyfunction!(template_strings, m)?)?;
-    m.add_function(wrap_pyfunction!(unparse_expression, m)?)?;
-    m.add_function(wrap_pyfunction!(type_definitions, m)?)?;
-    m.add_function(wrap_pyfunction!(type_relations, m)?)?;
-    m.add_function(wrap_pyfunction!(row_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(module_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(module_index, m)?)?;
-    m.add_function(wrap_pyfunction!(rendered_compositions, m)?)?;
     m.add_function(wrap_pyfunction!(call_variants, m)?)?;
     m.add_function(wrap_pyfunction!(module_ignores, m)?)?;
     m.add_function(wrap_pyfunction!(module_helpers, m)?)?;
     m.add_function(wrap_pyfunction!(add_json_types, m)?)?;
     m.add_function(wrap_pyfunction!(module_calls, m)?)?;
     m.add_class::<ModuleIndex>()?;
-    m.add_function(wrap_pyfunction!(helper_sites, m)?)?;
-    m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;
     m.add_function(wrap_pyfunction!(query_at, m)?)?;
     m.add_function(wrap_pyfunction!(complete_source, m)?)?;

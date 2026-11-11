@@ -7,7 +7,6 @@ import ast
 import pytest
 
 from sqlty._cli import main
-from sqlty._source import AST
 from sqlty.core import HelperIndex, check_source
 
 SCHEMA = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);\n"
@@ -340,4 +339,4 @@ def test_compositions_use_fragments_of_other_modules(project, capsys, monkeypatc
         ("unknown.py", "unchecked-query"),
     ]
     columns = (project / "pkg" / "columns.py").read_text()
-    assert parses.count(columns) == (AST != "rust")
+    assert parses.count(columns) == 0

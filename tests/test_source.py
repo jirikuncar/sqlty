@@ -1,4 +1,4 @@
-"""Each source file is parsed once and tokenized only when it has a ``sqlty:`` comment."""
+"""No source file is parsed with ``ast``, and one is tokenized only when it does not parse."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import tokenize
 import pytest
 
 from sqlty._cli import main
-from sqlty._source import AST, ParsedSource
+from sqlty._source import ParsedSource
 from sqlty.core import check_source
 
 SCHEMA = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);\n"
@@ -41,8 +41,6 @@ PLAIN = "import os\n\n\ndef f(x):\n    return os.path.join(x, 'a')  # an ordinar
 @pytest.fixture
 def parses(monkeypatch: pytest.MonkeyPatch) -> collections.Counter[str]:
     """Module-source ``ast.parse`` calls by source text (quoted annotations are not counted)."""
-    if AST == "compare":
-        pytest.skip("SQLTY_AST=compare parses with ast to compare")
     counter: collections.Counter[str] = collections.Counter()
     real = ast.parse
 
@@ -68,33 +66,14 @@ def tokenized(monkeypatch: pytest.MonkeyPatch) -> list[object]:
     return calls
 
 
-def test_check_source_parses_once(parses):
+def test_check_source_does_not_parse(parses):
     source = HELPER + USER_TYPE.replace("from pkg.db import fetch_all\n", "")
     diagnostics = check_source(source, schema_sql=SCHEMA)
     assert [d["rule"] for d in diagnostics] == []
-    assert parses[source] == (AST != "rust")
+    assert not parses
 
 
-def test_helper_calls_bound_the_work(monkeypatch):
-    calls = "".join(
-        f'def f{i}():\n    return fetch_all("SELECT id, name FROM users", tuple[int, str])\n\n'
-        for i in range(50)
-    )
-    unrelated = "".join(
-        f"def g{i}(x):\n    return {{k: [a for a in range(k) if a % 2] for k in x}}\n\n"
-        for i in range(50)
-    )
-    parsed = ParsedSource(HELPER + calls + unrelated)
-    unparsed: list[ast.AST] = []
-    real = ast.unparse
-    monkeypatch.setattr(ast, "unparse", lambda node: unparsed.append(node) or real(node))
-
-    assert check_source(parsed, schema_sql=SCHEMA) == []
-    assert len(unparsed) <= 3
-    assert parsed._scan.visited < 10 * 50
-
-
-def test_cli_parses_each_file_once(tmp_path, monkeypatch, parses, tokenized, capsys):
+def test_cli_parses_no_file(tmp_path, monkeypatch, parses, tokenized, capsys):
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
     (tmp_path / "schema.sql").write_text(SCHEMA)
     pkg = tmp_path / "pkg"
@@ -107,13 +86,8 @@ def test_cli_parses_each_file_once(tmp_path, monkeypatch, parses, tokenized, cap
     main(["check", "."])
     assert capsys.readouterr().out == ""
 
-    # `SQLTY_AST=rust` parses nothing with `ast`.
-    assert parses[HELPER] == (AST != "rust")
-    assert parses[USER_TYPE] == (AST != "rust")
-    # `SQLTY_AST=python` reads the imports of every indexed module to find re-exported helpers.
-    assert parses[PLAIN] == (AST == "python")
-    assert max(parses.values(), default=0) <= 1
-    assert len(tokenized) == (AST != "rust")
+    assert not parses.keys() & set(files.values())
+    assert not tokenized
 
 
 def test_marker_free_file_is_neither_parsed_nor_tokenized(parses, tokenized):
@@ -133,13 +107,6 @@ def test_dashes_in_wide_comments_are_skipped_quickly(parses, tokenized):
     assert not tokenized
 
 
-@pytest.mark.parametrize(
-    "source", ['q = "-" "-sql\\nSELECT 1"', 'q = ("-"  # split\n     "-sql\\nSELECT 1")']
-)
-def test_marker_split_over_literals_and_comments_is_found(source):
-    assert ParsedSource(source).may_need_rust_check()
-
-
 def test_wrapper_without_row_type_is_not_parsed(parses):
     source = 'import os\nq = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")\n'
     assert check_source(source) == []
@@ -148,23 +115,19 @@ def test_wrapper_without_row_type_is_not_parsed(parses):
 
 def test_parsed_source_is_reused(parses):
     parsed = ParsedSource(HELPER + USER_TYPE)
-    check_source(parsed, schema_sql=SCHEMA)
-    check_source(parsed, schema_sql=SCHEMA)
-    # The check in Rust does not parse with `ast` at all.
-    assert parses[parsed.text] == (AST != "rust")
+    assert check_source(parsed, schema_sql=SCHEMA) == check_source(parsed, schema_sql=SCHEMA)
+    assert not parses
 
 
 def test_parsed_source_facts():
-    parsed = ParsedSource("import typing as t\nclass A:\n    class B: ...\nf(g(1))\n")
-    assert parsed.typing_aliases == {"t": "typing"}
-    assert [c.name for c in parsed.classes] == ["A", "B"]
-    assert len(parsed.calls) == 2
-    assert ParsedSource("def f(:").tree is None
+    parsed = ParsedSource("import typing as t\nq = SQL[t.Any](x)\nf('é', g)\n")
+    assert parsed.any_calls() == [23]
+    assert parsed.position(parsed.offset(3, 8)) == (3, 8)
     assert ParsedSource("x = 1  # sqlty: ignore[a, b]\n").ignores[1].rules == ("a", "b")
     assert ParsedSource("x = 1 # not it\n").ignores == {}
+    assert ParsedSource("def f(:  # sqlty: ignore\n").ignores[1].rules is None
 
 
-@pytest.mark.skipif(AST != "rust", reason="what the Rust check reads")
 def test_what_rust_does_not_model_is_reported_unchecked():
     helper = (
         "from typing import Annotated, LiteralString\nfrom psycopg import sql\n"
@@ -176,7 +139,6 @@ def test_what_rust_does_not_model_is_reported_unchecked():
     assert [(d["rule"], d["line"]) for d in check_source(source)] == [("unchecked-query", 5)]
 
 
-@pytest.mark.skipif(AST != "rust", reason="what the Rust check reads")
 def test_a_source_that_does_not_parse_is_read_by_its_strings(parses, tokenized):
     source = "q = '--sql\\nSELECT 1 FROM'  # sqlty: ignore[stale-rewrite]\ndef f(:\n"
     assert [d["rule"] for d in check_source(source)] == ["unparsed-query", "unused-ignore"]

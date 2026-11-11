@@ -15,18 +15,18 @@ those queries (precision).
 
 from __future__ import annotations
 
-import ast
 import contextlib
 import itertools
 import os
+import sys
 import textwrap
+from typing import NamedTuple
 
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from sqlty._source import ParsedSource
-from sqlty._variants import Unchecked, query_variants
+from sqlty._core import call_variants
 
 pytestmark = pytest.mark.skipif(not os.environ.get("SQLTY_FUZZ"), reason="set SQLTY_FUZZ=1 to fuzz")
 
@@ -111,11 +111,16 @@ def _concrete(source: str) -> set[str]:
     return found
 
 
+class Unchecked(NamedTuple):
+    reason: str | None
+
+
 def _static(source: str) -> set[str] | Unchecked:
-    parsed = ParsedSource(source)
-    call = next(c for c in parsed.calls if isinstance(c.func, ast.Name) and c.func.id == "run")
-    found = query_variants(parsed, call, call.args[0], limit=10**6)
-    return found if isinstance(found, Unchecked) else {variant.query for variant in found}
+    found = call_variants(source, sys.version_info[:2], 10**6)
+    assert found is not None, source
+    [(_, read, variants, _, reason)] = [call for call in found if call[0] == source.rindex("q)")]
+    assert read, source
+    return Unchecked(reason) if variants is None else {query for query, _, _ in variants}
 
 
 def _compare(source: str, precise: bool) -> None:

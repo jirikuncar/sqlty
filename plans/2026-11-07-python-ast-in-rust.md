@@ -116,6 +116,7 @@ read yet, which then stays with Python. Merge in order.
 | `07-cli` | the check of `sqlty check`, the language server and `check_source` | the whole suite in `rust`, `compare` and `python` modes | 1.8 s, 5.0 s (`sqlty check`, 8,000 files) |
 | `08-playground` | `suppress`: `# sqlty: ignore`; the playground runs the whole check of a module | 20,000 generated comments, the examples against `check_source` | see below |
 | `09-no-fallback` | `json_types`, `check::sites`, `check::unparsed`: nothing is handed back to Python | the whole suite in `rust`, `compare` and `python` modes; 3,000 generated modules with JSON columns | see below |
+| `10-remove-python` | nothing new: the Python passes, `SQLTY_AST` and the hooks only they used are deleted | the suite, without the comparisons | 16,200 to 5,900 lines of Python |
 
 `05-index`: `index::Builder` holds the sources by module name, `add` and `register` as
 `HelperIndex` does, and `build` gives the shared index (`symbols::Index` for types and row
@@ -158,6 +159,15 @@ variant that is not modelled is `unchecked-query` or `dynamic-query`, and a sour
 does not parse (see `parse`) gets what its strings tell, the lint included, with its
 ignore comments read by `tokenize`. `SQLTY_AST=python` and `compare` still run the Python
 passes, as the oracle of the tests.
+
+`10-remove-python`: deletes `_variants.py`, `_psycopg.py`, `_drivers.py`, `_params.py`,
+`_json_types.py`, `_type_extractor/` and the passes of `_check.py`, `_helpers.py` and
+`_source.py`, with `SQLTY_AST`, the extension hooks only they called and the tests that
+compared the two pipelines (`test_rust_*`, the CI step). Tests of behaviour now go
+through `check_source` or the Rust hooks. What is left in Python parses nothing but
+`[tool.sqlty.types]` expressions (`_config.py`) and tokenizes only a source ruff rejects.
+Merge it last and only once the comparison is no longer wanted: every branch before it
+runs both pipelines.
 
 ### Differences kept
 

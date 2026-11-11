@@ -414,9 +414,10 @@ They catch mistakes; review catches intent.
 src/sqlty/
 ├── __init__.py          # SQL[T] generic str subclass
 ├── core.py              # Public API over the Rust engine
-├── _check.py            # Python check passes of check_source: row types, parameters
+├── _check.py            # check_source over the Rust module check, with suppressions
 ├── _core.pyi            # Stub for sqlty._core (rust/crates/sqlty-ext/src/lib.rs)
-├── _type_extractor/     # Row types (TypedDict, dataclass, ...), read from source, never imported
+├── _source.py           # ParsedSource: text, offsets, ignore comments; the syntax tree is read in Rust
+├── _helpers.py          # HelperIndex over the Rust module index
 ├── _lint.py             # Lint rules: severity, diagnostics, RuleConfig
 ├── _decode.py           # Magic codec decoder
 ├── _cli.py              # CLI: rewrite, strip, check, server, version
@@ -425,7 +426,7 @@ src/sqlty/
 rust/crates/             # Cargo workspace (root: rust/Cargo.toml)
 ├── sqlty-sql/           # analyzer/ (type inference), ddl; no PyO3
 │   └── rules/           # inference rules (*.inference.toml), compiled by build.rs; see its README
-├── sqlty-python/        # tokens, rewriter, checker, fixer
+├── sqlty-python/        # tokens, rewriter, checker, fixer; row types, helper calls, query variants (ruff_python_parser)
 ├── sqlty-lsp/           # the language server of sqlty server; tests without Python
 ├── sqlty-wasm/          # JSON in, JSON out, for WebAssembly: the docs playground (make playground)
 └── sqlty-ext/           # lib.rs (PyO3), builds sqlty._core; server.rs runs sqlty-lsp

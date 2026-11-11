@@ -101,12 +101,6 @@ jobs:
       - name: Run tests
         run: uv run pytest -m "not timing and not pg"
 
-      # Rust and Python readings of every checked module must agree (`SQLTY_AST`).
-      - name: Run tests comparing the Rust and Python syntax trees
-        run: uv run pytest -m "not timing and not pg" tests/mdtest tests/test_cli.py tests/test_helpers.py tests/test_psycopg.py tests/test_driver_values.py tests/test_type_extractor.py tests/test_cross_module.py
-        env:
-          SQLTY_AST: compare
-
       # They share one database server, so they run in one process.
       - name: Run database tests
         run: uv run pytest -m pg -n 0

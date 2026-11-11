@@ -1,6 +1,5 @@
 """Type stubs for the Rust extension module (sqlty._core)."""
 
-import ast
 from pathlib import Path
 from typing import Any, final
 
@@ -52,12 +51,6 @@ def analyze_params(
     dialect: str = "postgres",
     schema_sql: str | Schema | None = None,
 ) -> list[tuple[int, str | None, str | None, str | None, bool | None, bool, str | None]] | None: ...
-def composite_fields(
-    type_name: str,
-    *,
-    dialect: str = "postgres",
-    schema_sql: str | Schema | None = None,
-) -> list[tuple[str, str | None, str | None, bool | None]] | None: ...
 def query_diagnostics(
     sql: str,
     *,
@@ -87,9 +80,6 @@ def add_param_types(
 ) -> str: ...
 def strip_source(source: str, *, import_style: str | None = None) -> str: ...
 def format_source(source: str, *, dialect: str = ..., import_style: str | None = None) -> str: ...
-def sqruff_findings(
-    source: str, *, dialect: str = ..., import_style: str | None = None
-) -> list[tuple[str, str, int, int, int]]: ...
 def fix_source(
     source: str,
     *,
@@ -106,9 +96,6 @@ def expand_star(
     dialect: str = "postgres",
     schema_sql: str | Schema | None = None,
 ) -> str | None: ...
-def select_star_finding(
-    sql: str, *, dialect: str = "postgres", has_schema: bool = False
-) -> tuple[str, str] | None: ...
 def check_source(
     source: str,
     *,
@@ -156,31 +143,6 @@ def module_facts(
 def template_strings(
     source: str,
 ) -> list[tuple[int, tuple[int, int], str | None, list[str | None]]] | None: ...
-def unparse_expression(source: str) -> str | None: ...
-def type_definitions(
-    source: str, module: str | None, version: tuple[int, int]
-) -> list[str] | None: ...
-def type_relations(
-    source: str, version: tuple[int, int], columns: list[str | None]
-) -> list[str] | None: ...
-def row_diagnostics(
-    source: str,
-    *,
-    version: tuple[int, int],
-    dialect: str = "postgres",
-    schema_sql: str | Schema | None = None,
-    rules: dict[str, str] | None = None,
-    import_style: str | None = None,
-    module: str | None = None,
-    coerce: list[str] = ...,
-) -> (
-    tuple[
-        list[Diagnostic],
-        list[tuple[str | None, str, str] | None],
-        list[tuple[str | None, str, str]],
-    ]
-    | None
-): ...
 def module_diagnostics(
     source: str,
     *,
@@ -195,13 +157,11 @@ def module_diagnostics(
     index: ModuleIndex | None = None,
     name: str | None = None,
     variants: int | None = None,
-) -> (
-    tuple[
-        list[Diagnostic],
-        list[tuple[str | None, str, str] | None],
-        list[tuple[str | None, str, str]],
-    ]
-): ...
+) -> tuple[
+    list[Diagnostic],
+    list[tuple[str | None, str, str] | None],
+    list[tuple[str | None, str, str]],
+]: ...
 
 type _Helper = tuple[
     list[str],
@@ -251,33 +211,11 @@ def add_json_types(
 def module_ignores(
     source: str, version: tuple[int, int]
 ) -> list[tuple[int, list[str] | None, int, int]] | None: ...
-def rendered_compositions(
-    source: str, version: tuple[int, int]
-) -> list[tuple[int, bool, str | None]] | None: ...
-def module_outline(source: str) -> tuple[ast.Module, list[ast.ClassDef]] | None: ...
-def helper_sites(
-    source: str, names: list[str]
-) -> (
-    list[
-        tuple[
-            tuple[int, int],
-            str | None,
-            str,
-            list[_SiteArg],
-            list[tuple[str | None, _SiteArg]],
-            str | None,
-        ]
-    ]
-    | None
-): ...
 
 _SiteArg = tuple[
     bool, tuple[int, int], str | None, str | None, list[tuple[int | str, str | None]] | None
 ]
 
-def wrapped_queries(
-    source: str, *, import_style: str | None = None
-) -> list[tuple[int, str, str | None, tuple[int, int]]]: ...
 def query_sites(
     source: str, *, import_style: str | None = None, any_calls: list[int] = ...
 ) -> list[tuple[int, str, str]]: ...

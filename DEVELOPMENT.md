@@ -171,11 +171,11 @@ uv run ruff check --fix .
 
 | Module | Purpose |
 |--------|---------|
-| `core.py` | Public API over the Rust `_core`, plus user-defined row type checks |
+| `core.py` | Public API over the Rust `_core` |
 | `_core.pyi` | Type stubs for the Rust extension module |
 | `_cli.py` | ruff-style CLI: `rewrite`, `strip`, `check`, `version` |
 | `_lint.py` | Lint rules and their severity (error/warn/ignore) |
-| `_type_extractor.py` | Row types (TypedDict, dataclass, ...) for structural checks |
+| `_source.py` | `ParsedSource`: text, offsets and ignore comments of one file |
 | `_decode.py` | Magic codec decoder (bytes -> string transformation) |
 | `magic.py` | Codec registration for Python import system |
 

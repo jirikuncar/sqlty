@@ -1401,3 +1401,37 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
         .sort_by_key(|reported| reported.diagnostic.line);
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::may_need_lexing;
+    use crate::checker::check_source;
+    use crate::options::Options;
+    use crate::rules::RuleConfig;
+
+    #[test]
+    fn lexing_is_skipped_only_where_it_reports_nothing() {
+        let options = Options::new("postgres", None, None, false).expect("valid options");
+        let rules = RuleConfig::from_overrides(None).expect("valid rules");
+        let split = [
+            "q = \"--\" \"sql\\nSELECT 1\"\n",
+            "q = (\"-\"\n    \"-sql\\nSELECT 1\")\n",
+            "q = (\"--s\"  # why\n    \"ql\\nSELECT 1\")\n",
+        ];
+        for text in split {
+            assert!(may_need_lexing(text, "SQL"), "{text}");
+            assert_eq!(check_source(text, &options, &rules, &[]).len(), 1, "{text}");
+        }
+        let plain = [
+            "",
+            "import os\n\n\ndef f(x):\n    return os.path.join(x, 'a')  # a comment\n",
+            "q = 'SELECT 1'\nr = \"-- not a marker\"\n",
+            "x = a - -b  # sq\ny = 'l'\n",
+            "        #     ----------------------------- x: 8.8MB # s.memory\n",
+        ];
+        for text in plain {
+            assert!(!may_need_lexing(text, "SQL"), "{text}");
+            assert!(check_source(text, &options, &rules, &[]).is_empty(), "{text}");
+        }
+    }
+}

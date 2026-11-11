@@ -9,7 +9,6 @@ import sys
 import pytest
 
 from sqlty._cli import main
-from sqlty._source import AST
 from sqlty.core import HelperIndex, check_source
 
 SCHEMA = """\
@@ -168,7 +167,7 @@ def test_modules_are_parsed_once_and_only_when_referenced(monkeypatch):
     for _ in range(3):
         diagnostics = check_source(source, schema_sql=SCHEMA, helpers=index, module="app")
     assert [d["rule"] for d in diagnostics] == ["column-type-mismatch"]
-    assert parses.count(IDS) == (AST != "rust")
+    assert parses.count(IDS) == 0
     assert not any("not_parsed_unless_referenced" in p for p in parses)
 
 
@@ -192,5 +191,5 @@ def test_cross_module_resolution_parses_each_module_once(project, capsys, monkey
     monkeypatch.setattr(ast, "parse", counting)
     files = {"bad.py": row("from pkg.ids import UserId", id="UserId", id_col="name")}
     assert run(project, capsys, files) == [("bad.py", "column-type-mismatch")]
-    assert parses[IDS] == (AST != "rust")
+    assert parses[IDS] == 0
     assert max(parses.values(), default=0) <= 1

@@ -1,33 +1,34 @@
-"""Write ``src/sqlty/_type_extractor/_stdlib.py``, the standard-library classes sqlty knows.
+"""Write ``rust/crates/sqlty-python/src/types/stdlib_table.rs``, the standard-library classes sqlty knows.
 
     uv run python scripts/generate_stdlib_types.py            # rewrite the table
     uv run python scripts/generate_stdlib_types.py --check    # exit 1 if it is out of date
 
 The source is the typeshed that the locked ``mypy`` bundles, read as stubs: nothing of
 the standard library is imported. Inferred column types are a closed set
-(``info.PYTHON_TYPE_MAP``), so a class is carried with the column types it derives from
+(``PYTHON_TYPE_MAP``), so a class is carried with the column types it derives from
 only, and with whether it is an ``enum.Enum``, which Pydantic validates by value. Left out, and so unknown to ``check``: protocols, classes of the modules that
 register column types as virtual subclasses (``numbers``, ``collections.abc``, ...),
 private names, and classes no type can derive from the column types of.
 ``make generate-stdlib-types`` runs it after a ``mypy`` upgrade;
-``tests/test_type_extractor.py`` fails until then.
+``tests/test_stdlib_table.py`` fails until then.
 """
 
 from __future__ import annotations
 
 import argparse
 import ast
+import datetime
+import decimal
+import ipaddress
 import sys
 import typing
+import uuid
 from importlib.metadata import version
 from pathlib import Path
 
 import mypy
 
-from sqlty._type_extractor.info import PYTHON_TYPE_MAP
-
 ROOT = Path(__file__).resolve().parent.parent
-OUTPUT = ROOT / "src" / "sqlty" / "_type_extractor" / "_stdlib.py"
 RUST_OUTPUT = ROOT / "rust" / "crates" / "sqlty-python" / "src" / "types" / "stdlib_table.rs"
 STDLIB = Path(mypy.__file__).parent / "typeshed" / "stdlib"
 OPEN_MODULES = frozenset(
@@ -42,11 +43,30 @@ OPEN_MODULES = frozenset(
     }
 )
 OPEN_BASES = frozenset({"typing.Protocol", "typing_extensions.Protocol", "abc.ABC"})
-COLUMN_TYPES = {
-    f"builtins.{name}" if "." not in name else name: name
-    for name, tp in PYTHON_TYPE_MAP.items()
-    if isinstance(tp, type) and tp is not type(None)
+# The classes of the Python types the engine infers for a column.
+PYTHON_TYPE_MAP: dict[str, type] = {
+    "int": int,
+    "str": str,
+    "float": float,
+    "bool": bool,
+    "bytes": bytes,
+    "list": list,
+    "dict": dict,
+    "datetime.date": datetime.date,
+    "datetime.datetime": datetime.datetime,
+    "datetime.time": datetime.time,
+    "datetime.timedelta": datetime.timedelta,
+    "uuid.UUID": uuid.UUID,
+    "decimal.Decimal": decimal.Decimal,
+    "typing.Any": typing.Any,
+    "ipaddress.IPv4Address": ipaddress.IPv4Address,
+    "ipaddress.IPv6Address": ipaddress.IPv6Address,
+    "ipaddress.IPv4Interface": ipaddress.IPv4Interface,
+    "ipaddress.IPv6Interface": ipaddress.IPv6Interface,
+    "ipaddress.IPv4Network": ipaddress.IPv4Network,
+    "ipaddress.IPv6Network": ipaddress.IPv6Network,
 }
+COLUMN_TYPES = {f"builtins.{name}" if "." not in name else name: name for name in PYTHON_TYPE_MAP}
 
 
 class Stubs:
@@ -261,11 +281,9 @@ pub(super) static CLASSES: &[(&str, u8)] = &[
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.partition("\n")[0])
     parser.add_argument("--check", action="store_true", help="exit 1 if the table is out of date")
-    text = generate()
-    rust = generate_rust(text)
+    rust = generate_rust(generate())
     if parser.parse_args().check:
-        sys.exit(OUTPUT.read_text() != text or RUST_OUTPUT.read_text() != rust)
-    OUTPUT.write_text(text)
+        sys.exit(RUST_OUTPUT.read_text() != rust)
     RUST_OUTPUT.write_text(rust)
 
 

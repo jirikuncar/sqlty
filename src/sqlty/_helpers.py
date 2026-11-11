@@ -5,43 +5,30 @@ no ``--sql`` marker or ``SQL[T]`` wrapper. The row type is the argument bound
 to the parameter annotated ``type[T]`` / ``TypeForm[T]`` where ``T`` also
 appears in the return annotation.
 
+The modules are read in Rust (``sqlty_python::index``); ``HelperIndex`` records how the
+index is filled and builds it when a check asks.
+
 Usage:
     index = HelperIndex()
     index.add("pkg.queries", source_of_pkg_queries)
-    find_helper_calls(source, index, "pkg.app")
+    check_source(source, helpers=index, module="pkg.app")
 """
 
 from __future__ import annotations
 
-import ast
-import bisect
-import re
 import sys
 import threading
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any
 
-from sqlty._core import ModuleIndex, helper_sites, module_helpers, module_index
-from sqlty._params import ParamArg, arg_type, literal_params
-from sqlty._psycopg import UNCHECKED
-from sqlty._source import AST, AstMismatch, ParsedSource
-from sqlty._variants import Declared, Unchecked, Variant, query_variants
+from sqlty._core import ModuleIndex, module_helpers, module_index
+from sqlty._source import ParsedSource
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
     from sqlty._cli import Settings
-    from sqlty._type_extractor import TypeInfo
-    from sqlty._type_extractor.symbols import ModuleTypes
-
-_TYPE_FORMS = frozenset({"type", "Type", "TypeForm"})
-# Names that mark where a helper takes the query's parameters: a ``params`` argument holding
-# a sequence or mapping, ``*args`` (asyncpg), or ``**params``.
-_PARAMS_ARGUMENT = frozenset({"params", "parameters", "args"})
-_PARAMS_VARIADIC = frozenset({"args", "params", "parameters"})
-_PARAMS_KEYWORDS = frozenset({"params", "parameters"})
-MARKER = re.compile(r"\s*--\s?sql(?:\s|$)")
 
 
 @dataclass(frozen=True)
@@ -70,180 +57,10 @@ class Helper:
     database: str | None = None
 
 
-class HelperCall(NamedTuple):
-    """A call passing a query to a helper's query parameter.
-
-    ``query`` is ``None`` for a psycopg composition with a part that is not a literal, and
-    for any other argument that is not a string literal, which is ``dynamic``.
-    ``params`` holds the arguments the call passes for the query's placeholders, with the
-    type of each where the source states it, or ``None`` when the helper takes no parameters
-    or the call does not spell them out. ``driver`` names the driver of a recognised
-    ``execute``-like call, and ``single`` the type of a single value it passes where the
-    driver takes a sequence or a mapping of parameters.
-
-    With query variants on, ``variants`` holds every query a call built in branches can
-    run, ``query`` being the first; ``reason`` says why such a call is not checked.
-    ``query_node`` is the argument (or t-string) the query comes from, which a diagnostic
-    about the query underlines; ``query_span`` its byte offsets, set where Rust found the
-    call and there is no node. ``configured`` marks a call to a helper of
-    ``[[tool.sqlty.functions]]``.
-    """
-
-    line: int
-    query: str | None
-    row: ast.expr | None
-    typing_aliases: dict[str, str]
-    params: tuple[ParamArg, ...] | None = None
-    end_line: int | None = None
-    driver: str | None = None
-    single: str | None = None
-    dynamic: bool = False
-    variants: tuple[Variant, ...] = ()
-    reason: str | None = None
-    query_node: ast.expr | None = None
-    configured: bool = False
-    query_span: tuple[int, int] | None = None
-
-    @property
-    def typed_lines(self) -> range:
-        """The lines of the call when its strings need no ``SQL[T]``.
-
-        They need none when the call passes a row type, or the helper is configured: its
-        signature is not the user's to change.
-        """
-        typed = self.row is not None or self.configured
-        return range(self.line, (self.end_line or self.line) + 1) if typed else range(0)
-
-    def _on(self, database: str | None) -> HelperCall:
-        """The call with its unmarked queries read against ``database``."""
-        if database is None:
-            return self
-        header = f"-- sqlty: db={database}\n"
-
-        def routed(query: str) -> str:
-            if MARKER.match(query):
-                return query
-            if isinstance(query, Declared):
-                return Declared(header + query, query.params, query.source)
-            return header + query
-
-        return self._replace(
-            query=None if self.query is None else routed(self.query),
-            variants=tuple(v._replace(query=routed(v.query)) for v in self.variants),
-        )
-
-
-def _dotted(node: ast.expr) -> str | None:
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute) and (base := _dotted(node.value)):
-        return f"{base}.{node.attr}"
-    return None
-
-
-def _expr(annotation: ast.expr | None) -> ast.expr | None:
-    """The annotation, with a quoted one parsed."""
-    if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
-        try:
-            return ast.parse(annotation.value, mode="eval").body
-        except SyntaxError:
-            return None
-    return annotation
-
-
-def _is_marked(annotation: ast.expr | None, annotated: set[str], marker: set[str]) -> bool:
-    if (annotation := _expr(annotation)) is None:
-        return False
-    for node in ast.walk(annotation):
-        if (
-            isinstance(node, ast.Subscript)
-            and _dotted(node.value) in annotated
-            and isinstance(node.slice, ast.Tuple)
-        ):
-            if any(_dotted(meta) in marker for meta in node.slice.elts[1:]):
-                return True
-    return False
-
-
-def _row_param(args: ast.arguments, returns: ast.expr | None) -> str | None:
-    """The first parameter annotated ``type[T]`` / ``TypeForm[T]`` with ``T`` in ``returns``."""
-    if (returns := _expr(returns)) is None:
-        return None
-    returned = {n.id for n in ast.walk(returns) if isinstance(n, ast.Name)}
-    for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs]:
-        if (annotation := _expr(arg.annotation)) is None:
-            continue
-        for node in ast.walk(annotation):
-            if (
-                isinstance(node, ast.Subscript)
-                and (name := _dotted(node.value))
-                and name.rpartition(".")[2] in _TYPE_FORMS
-                and isinstance(node.slice, ast.Name)
-                and node.slice.id in returned
-            ):
-                return arg.arg
-    return None
-
-
-def _parameters(args: ast.arguments) -> set[str]:
-    return {a.arg for a in [*args.posonlyargs, *args.args, *args.kwonlyargs]}
-
-
-def _kind(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
-    """``static``, ``class`` or ``instance`` for a method, by its decorators."""
-    names = {_dotted(d) for d in node.decorator_list}
-    if "staticmethod" in names:
-        return "static"
-    return "class" if "classmethod" in names else "instance"
-
-
 def _helper_of(name: str, fields: tuple[Any, ...]) -> Helper:
     """The ``Helper`` of what Rust reads of one (``ModuleIndex.helpers``)."""
     positional, keywords, *rest = fields
     return Helper(name, tuple(positional), frozenset(keywords), *rest)
-
-
-def _rank(node: ast.FunctionDef | ast.AsyncFunctionDef, complete: bool) -> tuple[bool, bool]:
-    """Sort key among definitions of one name: complete first, then non-``@overload``."""
-    overload = any((_dotted(d) or "").rpartition(".")[2] == "overload" for d in node.decorator_list)
-    return not complete, overload
-
-
-def _definitions(
-    parsed: ParsedSource,
-) -> list[tuple[str, ast.FunctionDef | ast.AsyncFunctionDef, str]]:
-    """Module-level functions and methods as ``(name, node, kind)``; methods are ``Class.name``."""
-    return [
-        *((node.name, node, "function") for node in parsed.functions),
-        *((f"{cls.name}.{node.name}", node, _kind(node)) for cls, node in parsed.methods),
-    ]
-
-
-def _helper(
-    name: str,
-    node: ast.FunctionDef | ast.AsyncFunctionDef,
-    kind: str,
-    query: str,
-    row: str | None,
-) -> Helper:
-    args = node.args
-    positional = [*args.posonlyargs, *args.args]
-    keywords = [*args.args, *args.kwonlyargs]
-    names = [a.arg for a in [*positional, *args.kwonlyargs]]
-    if kind in ("instance", "class") and positional:
-        keywords = [a for a in keywords if a is not positional[0]]
-        positional = positional[1:]
-    return Helper(
-        name=name,
-        positional=tuple(a.arg for a in positional),
-        keywords=frozenset(a.arg for a in keywords),
-        query=query,
-        row=row,
-        kind=kind,
-        params=next((n for n in names if n in _PARAMS_ARGUMENT and n not in (query, row)), None),
-        rest=args.vararg.arg if args.vararg and args.vararg.arg in _PARAMS_VARIADIC else None,
-        named=args.kwarg.arg if args.kwarg and args.kwarg.arg in _PARAMS_KEYWORDS else None,
-    )
 
 
 def index_functions(source: str | ParsedSource) -> dict[str, Helper]:
@@ -254,27 +71,8 @@ def index_functions(source: str | ParsedSource) -> dict[str, Helper]:
         >>> index_functions(src)["f"]
         Helper(name='f', positional=('q', 't'), keywords=frozenset(), query='q', row='t', kind='function', params=None, rest=None, named=None, configured=False, database=None)
     """
-    parsed = ParsedSource.of(source)
-    annotated, marker = parsed.marker_names
-    if not annotated or not marker:
-        return {}
-    found: dict[str, tuple[tuple[bool, bool], Helper]] = {}
-    for name, node, kind in _definitions(parsed):
-        args = node.args
-        query = next(
-            (
-                a.arg
-                for a in [*args.posonlyargs, *args.args, *args.kwonlyargs]
-                if _is_marked(a.annotation, annotated, marker)
-            ),
-            None,
-        )
-        if query is not None:
-            row = _row_param(args, node.returns)
-            rank = _rank(node, row is not None)
-            if name not in found or rank < found[name][0]:
-                found[name] = rank, _helper(name, node, kind, query, row)
-    return {name: helper for name, (_, helper) in found.items()}
+    found = module_helpers(ParsedSource.of(source).text, sys.version_info[:2])
+    return {name: _helper_of(name, fields) for name, fields in found.items()}
 
 
 def helper_roots(config_dir: Path | None, checked: Iterable[Path]) -> tuple[Path, ...]:
@@ -330,36 +128,22 @@ class HelperIndex:
     """
 
     def __init__(self) -> None:
-        self._modules: dict[str, dict[str, Helper]] = {}
-        self.sources: dict[str, ParsedSource] = {}
-        self.packages: set[str] = set()
-        self.prefixes: set[str] = set()
-        self._pattern: re.Pattern[str] | None = None
-        self._names: frozenset[str] | None = None
-        self._exports: dict[str, dict[str, tuple[str, str]]] = {}
-        self._row_types: dict[str, dict[str, TypeInfo]] = {}
-        self._types: dict[tuple[str, str], Any] = {}
-        self._names_of: dict[str, ModuleTypes] = {}
-        self._read: dict[tuple[Path, str], ParsedSource | None] = {}
-        # Held while a cycle sentinel is cached, so only the thread that set it can read it.
-        self._lock = threading.RLock()
-        # How the index was filled, to build it again in Rust.
+        # How the index is filled: Rust builds it from these.
         self._steps: list[tuple[str, str, str, str | None, list[Path], str | None]] = []
         self._rust: tuple[int, ModuleIndex] | None = None
         self._forked: tuple[HelperIndex, int] | None = None
+        self._lock = threading.RLock()
 
     @property
     def modules(self) -> dict[str, dict[str, Helper]]:
         """The helpers by module and name (``Class.method`` for a method)."""
-        if AST != "rust":
-            return self._modules
         return {
             module: {name: _helper_of(name, fields) for name, fields in found.items()}
             for module, found in self.rust().helpers().items()
         }
 
     def rust(self) -> ModuleIndex:
-        """The index as Rust reads it."""
+        """The index as Rust reads it, built once per state."""
         with self._lock:
             if self._rust is None or self._rust[0] != len(self._steps):
                 parent, forked_at = self._forked or (None, 0)
@@ -372,52 +156,23 @@ class HelperIndex:
             return self._rust[1]
 
     def fork(self) -> HelperIndex:
-        """A copy whose later ``register`` calls do not reach this index; sources are shared."""
+        """A copy whose later ``add`` and ``register`` calls do not reach this index."""
         other = HelperIndex()
-        other._modules = {module: dict(found) for module, found in self._modules.items()}
-        other.sources = self.sources
-        other.packages = set(self.packages)
-        other.prefixes = set(self.prefixes)
-        other._exports = self._exports
-        other._row_types = self._row_types
-        other._types = self._types
-        other._names_of = self._names_of
-        other._read = self._read
-        other._lock = self._lock
         other._steps = list(self._steps)
         other._forked = self, len(self._steps)
+        other._lock = self._lock
         return other
 
     def add(self, module: str, source: str | ParsedSource) -> bool:
-        """Index the helpers of ``source`` as module ``module``; whether it has any.
+        """Index ``source`` as module ``module``; whether it defines a helper.
 
-        The parsed source is kept, so annotations naming types of ``module`` can be
-        resolved without importing it or parsing it again.
+        Annotations naming types of ``module`` are then resolved without importing it.
         """
         parsed = ParsedSource.of(source)
         if parsed.module is None:
             parsed.module = module
-        self.sources[module] = parsed
         self._steps.append(("add", module, parsed.text, parsed.module, [], None))
-        if AST == "rust":
-            return parsed.may_define_helpers and bool(
-                module_helpers(parsed.text, sys.version_info[:2])
-            )
-        if parsed.module is not None and parsed.module.endswith(".__init__"):
-            self.packages.add(module)
-        parts = module.split(".")
-        self.prefixes.update(".".join(parts[:i]) for i in range(1, len(parts) + 1))
-        self._exports.pop(module, None)
-        self._names_of.pop(module, None)
-        self._types.clear()
-        self._row_types.pop(module, None)
-        # A module without helpers can still re-export one under another name.
-        self._pattern = None
-        self._names = None
-        if not parsed.may_define_helpers or not (found := index_functions(parsed)):
-            return False
-        self._modules.setdefault(module, {}).update(found)
-        return True
+        return parsed.may_define_helpers and bool(module_helpers(parsed.text, sys.version_info[:2]))
 
     def register(
         self,
@@ -445,651 +200,3 @@ class HelperIndex:
             True
         """
         self._steps.append(("register", import_path, query, row, list(roots), database))
-        if AST == "rust":
-            return
-        parts = import_path.split(".")
-        for i in range(len(parts) - 1, 0, -1):
-            module, name = ".".join(parts[:i]), ".".join(parts[i:])
-            definition = self._definition(parts[:i], name, query, row, roots)
-            if definition is not None:
-                helper = _helper(name, definition[1], definition[2], query, row)
-                self._modules.setdefault(module, {})[name] = replace(
-                    helper, configured=True, database=database
-                )
-                break
-        else:
-            keywords = frozenset(filter(None, [query, row]))
-            for i in (len(parts) - 1, len(parts) - 2):
-                if i > 0:
-                    module, name = ".".join(parts[:i]), ".".join(parts[i:])
-                    self._modules.setdefault(module, {})[name] = Helper(
-                        name, (), keywords, query, row, configured=True, database=database
-                    )
-        self._pattern = None
-        self._names = None
-
-    def _definition(
-        self,
-        parts: list[str],
-        name: str,
-        query: str,
-        row: str | None,
-        roots: Sequence[Path],
-        _depth: int = 0,
-    ) -> tuple[str, ast.FunctionDef | ast.AsyncFunctionDef, str] | None:
-        """The definition of ``name`` in module ``parts``, following the names it re-exports."""
-        module = ".".join(parts)
-        indexed = (parsed := self.sources.get(module)) is not None
-        if parsed is None and (parsed := self._module_source(parts, roots)) is None:
-            return None
-        definition = min(
-            (d for d in _definitions(parsed) if d[0] == name),
-            key=lambda d: _rank(d[1], {query, row} - {None} <= _parameters(d[1].args)),
-            default=None,
-        )
-        if definition is not None or _depth > 8:
-            return definition
-        head, dot, rest = name.partition(".")
-        # A module read from one project's roots is not cached: another may have its own.
-        exports = self._reexports(module, parsed) if indexed else _imports(parsed, parsed.module)[0]
-        if (target := exports.get(head)) is None:
-            return None
-        return self._definition(
-            target[0].split("."), target[1] + dot + rest, query, row, roots, _depth + 1
-        )
-
-    def _module_source(self, parts: list[str], roots: Sequence[Path]) -> ParsedSource | None:
-        """Module ``parts`` read from the first of ``roots`` holding it; never imported."""
-        module = ".".join(parts)
-        for root in roots:
-            for path, name in (
-                (root.joinpath(*parts[:-1], f"{parts[-1]}.py"), module),
-                (root.joinpath(*parts, "__init__.py"), f"{module}.__init__"),
-            ):
-                if (path, name) not in self._read:
-                    try:
-                        text = path.read_text(encoding="utf-8-sig")
-                    except OSError, ValueError:
-                        text = None
-                    self._read[path, name] = None if text is None else ParsedSource(text, name)
-                if (parsed := self._read[path, name]) is not None:
-                    return parsed
-        return None
-
-    def _reexports(self, module: str, parsed: ParsedSource) -> dict[str, tuple[str, str]]:
-        if (exports := self._exports.get(module)) is None:
-            exports = self._exports[module] = _imports(parsed, parsed.module or module)[0]
-        return exports
-
-    def get(self, module: str, name: str, _depth: int = 0) -> Helper | None:
-        """The helper ``name`` of ``module``, following names the module re-exports.
-
-        ``name`` may be ``Class.method``; a package ``__init__`` doing
-        ``from .db import fetch_all`` exposes ``fetch_all`` as ``module.fetch_all``.
-        """
-        if (found := self.modules.get(module, {}).get(name)) is not None:
-            return found
-        if _depth > 8 or (parsed := self.sources.get(module)) is None:
-            return None
-        exports = self._reexports(module, parsed)
-        head, dot, rest = name.partition(".")
-        if (target := exports.get(head)) is None:
-            return None
-        return self.get(target[0], target[1] + dot + rest, _depth + 1)
-
-    def fragment(self, parsed: ParsedSource, dotted: str) -> tuple[ParsedSource, ast.expr] | None:
-        """The value of ``NAME`` or ``module.NAME`` imported by ``parsed`` from a checked module.
-
-        Only a module-level name assigned once counts; re-exports are followed.
-        """
-        functions, modules = _imports(parsed, parsed.module)
-        prefix, _, name = dotted.rpartition(".")
-        if not prefix:
-            return self._constant(*functions[name]) if name in functions else None
-        head, _, rest = prefix.partition(".")
-        mod = modules.get(head)
-        return self._constant(
-            (f"{mod}.{rest}" if rest else mod) if mod is not None else prefix, name
-        )
-
-    def row_type(
-        self, parsed: ParsedSource, dotted: str
-    ) -> tuple[TypeInfo, dict[str, TypeInfo]] | None:
-        """The row type ``NAME`` or ``module.NAME`` that ``parsed`` imports from a checked module.
-
-        Returns it with the row types of its module, which its nested types refer to.
-        Re-exports are followed; the module is read from its source, never imported.
-        """
-        if (target := _target(parsed, dotted)) is None:
-            return None
-        return self._row_type(*target)
-
-    def type_of(self, parsed: ParsedSource, dotted: str) -> Any:
-        """The type ``NAME`` or ``module.NAME`` that ``parsed`` imports from a checked module.
-
-        An alias or ``NewType`` is resolved from the source of its module, never imported;
-        re-exports are followed. ``None`` when it is unknown.
-        """
-        target = _target(parsed, dotted)
-        return None if target is None else self._type(*target)
-
-    def _type(self, module: str, name: str, _depth: int = 0) -> Any:
-        if _depth > 8 or (parsed := self.sources.get(module)) is None:
-            return None
-        from sqlty._type_extractor.ast_fields import _ast_type
-        from sqlty._type_extractor.symbols import ModuleTypes
-
-        with self._lock:
-            if (module, name) in self._types:
-                return self._types[module, name]
-            # An import cycle sees the name as unknown while it is resolved.
-            self._types[module, name] = None
-            if (names := self._names_of.get(module)) is None:
-                names = self._names_of[module] = ModuleTypes(parsed, self, module)
-            if name in names.local:
-                found = _ast_type(
-                    ast.Name(name), parsed.typing_aliases, names, parsed.imported_names
-                )
-            else:
-                exports = self._reexports(module, parsed)
-                found = self._type(*exports[name], _depth + 1) if name in exports else None
-            self._types[module, name] = found
-            return found
-
-    def _row_type(
-        self, module: str, name: str, _depth: int = 0
-    ) -> tuple[TypeInfo, dict[str, TypeInfo]] | None:
-        if _depth > 8 or (parsed := self.sources.get(module)) is None:
-            return None
-        with self._lock:
-            if (defs := self._row_types.get(module)) is None:
-                from sqlty._type_extractor import extract_type_definitions
-
-                # Modules that import each other's row types see none while either is read.
-                self._row_types[module] = {}
-                defs = extract_type_definitions(parsed, self, module)
-                self._row_types[module] = defs
-        if name in defs:
-            return defs[name], defs
-        exports = self._reexports(module, parsed)
-        return self._row_type(*exports[name], _depth + 1) if name in exports else None
-
-    def _constant(
-        self, module: str, name: str, _depth: int = 0
-    ) -> tuple[ParsedSource, ast.expr] | None:
-        if _depth > 8 or (parsed := self.sources.get(module)) is None:
-            return None
-        if (value := parsed.constants.get(name)) is not None:
-            return parsed, value
-        exports = self._reexports(module, parsed)
-        return self._constant(*exports[name], _depth + 1) if name in exports else None
-
-    @property
-    def names(self) -> frozenset[str]:
-        """Unqualified names of the indexed helpers, methods included."""
-        if self._names is None:
-            names = {
-                name.rpartition(".")[2] for helpers in self.modules.values() for name in helpers
-            }
-            # A module can re-export a helper under another name, which a call then spells.
-            for _ in range(8):
-                renamed = {
-                    local
-                    for module, parsed in self.sources.items()
-                    for local, (_, original) in self._reexports(module, parsed).items()
-                    if original in names and local not in names
-                }
-                if not renamed:
-                    break
-                names |= renamed
-            self._names = frozenset(names)
-        return self._names
-
-    def mentions(self, source: str) -> bool:
-        """Whether ``source`` contains the name of some helper, so it may call one."""
-        if self._pattern is None:
-            self._pattern = re.compile("|".join(map(re.escape, sorted(self.names))) or r"(?!)")
-        return self._pattern.search(source) is not None
-
-
-def _target(parsed: ParsedSource, dotted: str) -> tuple[str, str] | None:
-    r"""The module and name that ``NAME`` or ``module.NAME`` of ``parsed`` refers to.
-
-    Example:
-        >>> parsed = ParsedSource("import a.b as m\nfrom c import d")
-        >>> _target(parsed, "m.X"), _target(parsed, "d")
-        (('a.b', 'X'), ('c', 'd'))
-    """
-    functions, modules = _imports(parsed, parsed.module)
-    prefix, _, name = dotted.rpartition(".")
-    if not prefix:
-        return functions.get(name)
-    head, _, rest = prefix.partition(".")
-    mod = modules.get(head)
-    return ((f"{mod}.{rest}" if rest else mod) if mod is not None else prefix), name
-
-
-def _imports(
-    parsed: ParsedSource, module: str | None
-) -> tuple[dict[str, tuple[str, str]], dict[str, str]]:
-    """Local names bound to imported functions ``(module, name)`` and to modules.
-
-    Example:
-        >>> _imports(ParsedSource("from a.b import f as g\\nimport a.c as m"), None)
-        ({'g': ('a.b', 'f')}, {'g': 'a.b.f', 'm': 'a.c'})
-    """
-    if AST != "python" and (facts := parsed.facts) is not None:
-        if AST == "compare" and facts.imports != (python := _import_entries(parsed)):
-            raise AstMismatch("imports", facts.imports, python, parsed.text)
-        return _imports_of(facts.imports, module)
-    return _imports_of(_import_entries(parsed), module)
-
-
-def _import_entries(parsed: ParsedSource) -> list[tuple[str, str, str | None, int]]:
-    return [
-        (alias.asname or alias.name, alias.name, None, 0)
-        if isinstance(node, ast.Import)
-        else (alias.asname or alias.name, alias.name, node.module or "", node.level)
-        for node in parsed.imports
-        for alias in node.names
-    ]
-
-
-def _imports_of(
-    entries: Iterable[tuple[str, str, str | None, int]], module: str | None
-) -> tuple[dict[str, tuple[str, str]], dict[str, str]]:
-    """``_imports`` of ``(local, original, from-module or None, level)``, in ``ast.walk`` order."""
-    functions: dict[str, tuple[str, str]] = {}
-    modules: dict[str, str] = {}
-    package = module.rpartition(".")[0] if module else ""
-    for local, original, base, level in entries:
-        if base is None:
-            modules[local] = original
-            continue
-        if level:
-            if module is None:
-                continue
-            parts = package.split(".") if package else []
-            if level - 1 > len(parts):
-                continue
-            parts = parts[: len(parts) - (level - 1)]
-            base = ".".join([*parts, *([base] if base else [])])
-        functions[local] = (base, original)
-        modules[local] = f"{base}.{original}" if base else original
-    return functions, modules
-
-
-def _argument(helper: Helper, call: ast.Call, param: str | None) -> ast.expr | None:
-    """The argument of ``call`` bound to ``param``."""
-    if param is None:
-        return None
-    if param in helper.keywords:
-        for keyword in call.keywords:
-            if keyword.arg == param:
-                return keyword.value
-    if param in helper.positional:
-        index = helper.positional.index(param)
-        if any(isinstance(arg, ast.Starred) for arg in call.args[: index + 1]):
-            return None
-        if index < len(call.args):
-            return call.args[index]
-    return None
-
-
-def _call_params(
-    helper: Helper, call: ast.Call, parsed: ParsedSource
-) -> tuple[ParamArg, ...] | None:
-    """The arguments ``call`` passes for the placeholders of its query, or ``None`` when not spelled out.
-
-    A helper takes them as a ``params`` argument (a tuple or list literal, or a dict literal
-    of string keys), as ``*args``, or as ``**params``.
-    """
-    stack = parsed.scopes_of(call)
-
-    def typed(key: int | str, value: ast.expr) -> ParamArg:
-        return ParamArg(key, arg_type(value, parsed, stack))
-
-    if helper.params is not None:
-        arg = _argument(helper, call, helper.params)
-        return literal_params(arg, parsed, stack)
-    if helper.rest is not None:
-        if any(isinstance(arg, ast.Starred) for arg in call.args):
-            return None
-        return tuple(typed(i, arg) for i, arg in enumerate(call.args[len(helper.positional) :], 1))
-    if helper.named is not None:
-        if any(keyword.arg is None for keyword in call.keywords):
-            return None
-        return tuple(
-            typed(keyword.arg, keyword.value)
-            for keyword in call.keywords
-            if keyword.arg is not None and keyword.arg not in helper.keywords
-        )
-    return None
-
-
-def find_helper_calls(
-    source: str | ParsedSource,
-    helpers: HelperIndex | None = None,
-    module: str | None = None,
-    *,
-    variants: int | None = None,
-) -> list[HelperCall]:
-    """Calls passing a string literal to a marked query parameter.
-
-    Helpers defined in ``source`` count, and so do those of ``helpers`` that
-    ``source`` imports (``module`` is its name, for relative imports). With
-    ``variants``, a query built from names bound in branches is read on every path,
-    up to that many variants (``query_variants``).
-
-    Example:
-        >>> src = '''
-        ... from typing import Annotated
-        ... from sqlty import SQL
-        ... def run[T](q: Annotated[str, SQL], t: type[T]) -> T: ...
-        ... run("SELECT 1", int)
-        ... '''
-        >>> [(c.line, c.query) for c in find_helper_calls(src)]
-        [(5, 'SELECT 1')]
-    """
-    parsed = ParsedSource.of(source, module)
-    if AST == "compare":
-        rust = _find_helper_calls(parsed, helpers, module, variants=variants, rust=True)
-        python = _find_helper_calls(parsed, helpers, module, variants=variants, rust=False)
-        if list(map(_comparable, rust)) != list(map(_comparable, python)):
-            raise AstMismatch("find_helper_calls", rust, python, parsed.text)
-        return python
-    return _find_helper_calls(parsed, helpers, module, variants=variants, rust=AST == "rust")
-
-
-def _comparable(call: HelperCall) -> tuple[HelperCall, str | None]:
-    """``call`` with its syntax nodes spelled out, which Rust and ``ast`` build apart."""
-    row = None if call.row is None else ast.dump(call.row, include_attributes=True)
-    return call._replace(row=None, query_node=None), row
-
-
-def _find_helper_calls(
-    parsed: ParsedSource,
-    helpers: HelperIndex | None,
-    module: str | None,
-    *,
-    variants: int | None,
-    rust: bool,
-) -> list[HelperCall]:
-    local = parsed.may_define_helpers
-    imported = helpers is not None and bool(helpers.modules) and helpers.mentions(parsed.text)
-    composed = "psycopg" in parsed.text
-    if not (local or imported):
-        return []
-    if rust and not local:
-        assert helpers is not None
-        sited = _site_calls(parsed, helpers, module if module is not None else parsed.module)
-        if sited is not None:
-            return sited
-    own = index_functions(parsed) if local else {}
-    if not own and not imported:
-        return []
-    functions, modules = (
-        _imports(parsed, module if module is not None else parsed.module) if imported else ({}, {})
-    )
-
-    def lookup(module_name: str, name: str) -> Helper | None:
-        return helpers.get(module_name, name) if helpers is not None else None
-
-    def module_of(prefix: str) -> str:
-        head, _, rest = prefix.partition(".")
-        mod = modules.get(head)
-        return (f"{mod}.{rest}" if rest else mod) if mod is not None else prefix
-
-    def method_of(cls: str, name: str) -> Helper | None:
-        """The method ``name`` of the class spelled ``cls`` in this file."""
-        prefix, _, cls_name = cls.rpartition(".")
-        if prefix:
-            return lookup(module_of(prefix), f"{cls_name}.{name}")
-        if (found := own.get(f"{cls}.{name}")) is not None:
-            return found
-        if cls in functions:
-            module_name, original = functions[cls]
-            return lookup(module_name, f"{original}.{name}")
-        return None
-
-    def resolve(call: ast.Call) -> Helper | None:
-        func = call.func
-        if isinstance(func, ast.Name):
-            if func.id in own:
-                return own[func.id]
-            if func.id in functions:
-                return lookup(*functions[func.id])
-        elif isinstance(func, ast.Attribute) and (prefix := _dotted(func.value)):
-            if (found := lookup(module_of(prefix), func.attr)) is not None:
-                return found
-            if (found := method_of(prefix, func.attr)) is not None:
-                return found if found.kind != "instance" else None
-            if (cls := receiver_class(call, func.value)) is not None:
-                return method_of(cls, func.attr)
-        return None
-
-    def receiver_class(call: ast.Call, receiver: ast.expr) -> str | None:
-        """The class of ``self``, or of a variable or ``self`` attribute with an evident type."""
-        stack = parsed.scopes_of(call)
-        base = receiver.value if isinstance(receiver, ast.Attribute) else receiver
-        if not isinstance(base, ast.Name):
-            return None
-        for outer, inner in zip(reversed(stack[:-1]), reversed(stack[1:]), strict=True):
-            if (
-                isinstance(outer, ast.ClassDef)
-                and not isinstance(inner, ast.ClassDef)
-                and inner.args.args
-                and inner.args.args[0].arg == base.id
-                and _kind(inner) != "static"
-            ):
-                if isinstance(receiver, ast.Attribute):
-                    return parsed.type_of(stack, receiver.attr, attribute=True)
-                return outer.name
-        return parsed.type_of(stack, base.id) if base is receiver else None
-
-    def resolve_fragment(source: ParsedSource, dotted: str) -> tuple[ParsedSource, ast.expr] | None:
-        if helpers is None:
-            return None
-        if source.module is None:
-            source.module = module
-        return helpers.fragment(source, dotted)
-
-    def forwarded(call: ast.Call, query: ast.expr) -> bool:
-        """Whether ``query`` is the marked query parameter of a function around ``call``."""
-        if not isinstance(query, ast.Name):
-            return False
-        annotated, marker = parsed.marker_names
-        for scope in reversed(parsed.scopes_of(call)):
-            if isinstance(scope, ast.ClassDef):
-                continue
-            args = scope.args
-            for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs]:
-                if arg.arg == query.id:
-                    return _is_marked(arg.annotation, annotated, marker)
-        return False
-
-    aliases = parsed.typing_aliases
-    calls = []
-    pending: list[tuple[ast.Call, Helper, ast.expr]] = []
-    names = {name.rpartition(".")[2] for name in own}
-    if helpers is not None and imported:
-        names |= helpers.names
-        names |= {local for local, (_, original) in functions.items() if original in names}
-    pattern = re.compile(rf"\b(?:{'|'.join(map(re.escape, sorted(names)))})\b")
-    for node in parsed.calls_to(pattern):
-        if (helper := resolve(node)) is None:
-            continue
-        query = _argument(helper, node, helper.query)
-        if isinstance(query, ast.Constant) and isinstance(query.value, str):
-            calls.append(
-                HelperCall(
-                    node.lineno,
-                    query.value,
-                    _argument(helper, node, helper.row),
-                    aliases,
-                    _call_params(helper, node, parsed),
-                    node.end_lineno,
-                    query_node=query,
-                    configured=helper.configured,
-                    query_span=parsed.span(query),
-                )._on(helper.database)
-            )
-        elif query is not None and not forwarded(node, query):
-            pending.append((node, helper, query))
-    for node, helper, query in pending:
-        text = parsed.psycopg.render(query, resolve_fragment) if composed else None
-        call = HelperCall(
-            node.lineno,
-            None if text == UNCHECKED else text,
-            _argument(helper, node, helper.row),
-            aliases,
-            _call_params(helper, node, parsed),
-            node.end_lineno,
-            dynamic=text is None,
-            query_node=query,
-            configured=helper.configured,
-            query_span=parsed.span(query),
-        )
-        if variants is not None and (text is None or text == UNCHECKED):
-            found = query_variants(parsed, node, query, variants, resolve_fragment)
-            if isinstance(found, Unchecked):
-                call = call._replace(
-                    reason=found.reason, dynamic=call.dynamic and not found.composed
-                )
-            else:
-                call = call._replace(query=found[0].query, dynamic=False, variants=tuple(found))
-        elif text is None and isinstance(query, ast.Name | ast.Attribute):
-            # Without query variants, a name still stands for the query of one `SQL[R](...)`.
-            found = query_variants(parsed, node, query, 1, resolve_fragment)
-            if isinstance(found, list) and isinstance(found[0].query, Declared):
-                call = call._replace(query=found[0].query, dynamic=False)
-        calls.append(call._on(helper.database))
-    return sorted(calls, key=_order)
-
-
-def _order(call: HelperCall) -> tuple[int, tuple[int, int]]:
-    return call.line, call.query_span or (0, 0)
-
-
-_Arg = tuple[
-    bool, tuple[int, int], str | None, str | None, list[tuple[int | str, str | None]] | None
-]
-
-
-def _site_calls(
-    parsed: ParsedSource, helpers: HelperIndex, module: str | None
-) -> list[HelperCall] | None:
-    """``find_helper_calls`` from the calls Rust reads, for a file that defines no helper.
-
-    ``None`` when Rust cannot decide: it does not read the file, or a helper call passes a
-    query that is not a string literal (a composition, a name, a forwarded parameter).
-    """
-    if (facts := parsed.facts) is None:
-        return None
-    functions, modules = _imports_of(facts.imports, module)
-    names = set(helpers.names)
-    names |= {local for local, (_, original) in functions.items() if original in names}
-    if (sites := helper_sites(parsed.text, sorted(names))) is None:
-        return None
-
-    def module_of(prefix: str) -> str:
-        head, _, rest = prefix.partition(".")
-        mod = modules.get(head)
-        return (f"{mod}.{rest}" if rest else mod) if mod is not None else prefix
-
-    def method_of(cls: str, name: str) -> Helper | None:
-        prefix, _, cls_name = cls.rpartition(".")
-        if prefix:
-            return helpers.get(module_of(prefix), f"{cls_name}.{name}")
-        if cls in functions:
-            module_name, original = functions[cls]
-            return helpers.get(module_name, f"{original}.{name}")
-        return None
-
-    def resolve(prefix: str | None, name: str, receiver: str | None) -> Helper | None:
-        if prefix is None:
-            return helpers.get(*functions[name]) if name in functions else None
-        if (found := helpers.get(module_of(prefix), name)) is not None:
-            return found
-        if (found := method_of(prefix, name)) is not None:
-            return found if found.kind != "instance" else None
-        return method_of(receiver, name) if receiver is not None else None
-
-    aliases = parsed.typing_aliases
-    calls = []
-    for (line, end_line), prefix, name, args, keywords, receiver in sites:
-        if (helper := resolve(prefix, name, receiver)) is None:
-            continue
-        query = _site_argument(helper, args, keywords, helper.query)
-        if query is None:
-            continue
-        starred, span, text, _, _ = query
-        if text is None or starred:
-            return None
-        row = _site_argument(helper, args, keywords, helper.row)
-        calls.append(
-            HelperCall(
-                line,
-                text,
-                None if row is None else _expression_at(parsed, row[1]),
-                aliases,
-                _site_params(helper, args, keywords),
-                end_line,
-                configured=helper.configured,
-                query_span=span,
-            )._on(helper.database)
-        )
-    return sorted(calls, key=_order)
-
-
-def _site_argument(
-    helper: Helper, args: list[_Arg], keywords: list[tuple[str | None, _Arg]], param: str | None
-) -> _Arg | None:
-    """``_argument`` of a call Rust read."""
-    if param is None:
-        return None
-    if param in helper.keywords:
-        for name, value in keywords:
-            if name == param:
-                return value
-    if param in helper.positional:
-        index = helper.positional.index(param)
-        if any(arg[0] for arg in args[: index + 1]):
-            return None
-        if index < len(args):
-            return args[index]
-    return None
-
-
-def _site_params(
-    helper: Helper, args: list[_Arg], keywords: list[tuple[str | None, _Arg]]
-) -> tuple[ParamArg, ...] | None:
-    """``_call_params`` of a call Rust read."""
-    if helper.params is not None:
-        arg = _site_argument(helper, args, keywords, helper.params)
-        found = None if arg is None else arg[4]
-        return None if found is None else tuple(ParamArg(*param) for param in found)
-    if helper.rest is not None:
-        if any(arg[0] for arg in args):
-            return None
-        return tuple(ParamArg(i, arg[3]) for i, arg in enumerate(args[len(helper.positional) :], 1))
-    if helper.named is not None:
-        if any(name is None for name, _ in keywords):
-            return None
-        return tuple(
-            ParamArg(name, value[3])
-            for name, value in keywords
-            if name is not None and name not in helper.keywords
-        )
-    return None
-
-
-def _expression_at(parsed: ParsedSource, span: tuple[int, int]) -> ast.expr:
-    """The expression at byte offsets ``span``, parsed with the positions it has in the file."""
-    start, end = span
-    starts = parsed._byte_lines
-    line = bisect.bisect_right(starts, start) - 1
-    column = start - starts[line]
-    lead = "\n" * line + "(" + " " * (column - 1) if column else "\n" * (line - 1) + "(\n"
-    text = parsed._bytes[start:end].decode()
-    return ast.parse(f"{lead}{text})", mode="eval").body

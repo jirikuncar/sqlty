@@ -24,8 +24,6 @@ import pytest
 
 import sqlty.core as core
 from sqlty._core import query_sites as _query_sites
-from sqlty._drivers import MARKER
-from sqlty._helpers import find_helper_calls
 from sqlty._source import ParsedSource
 from tests._mdtest.parser import parse
 from tests._mdtest.runner import comments, string_constants, without_generated
@@ -259,12 +257,11 @@ def test_query_at_finds_what_check_reads(source: str, options: dict) -> None:
         )
         if kind == "query" and line not in templates
     )
+    # The string literals helper calls pass, which no marker announces.
     expected.update(
-        call.query
-        for call in find_helper_calls(parsed)
-        if isinstance(call.query_node, ast.Constant)
-        and isinstance(call.query, str)
-        and not MARKER.match(call.query)
+        queries[0]
+        for _, queries, _, start in core._helper_sites(parsed, None, None)  # noqa: SLF001
+        if start is not None and queries
     )
     lines = source.splitlines(keepends=True)
     starts = [0, *itertools.accumulate(len(line.encode()) for line in lines)]
@@ -420,30 +417,6 @@ def test_fix_suppression_follows_inserted_import(newline: str) -> None:
     assert f'SELECT * FROM t")  # sqlty: ignore[select-star]{newline}' in fixed
 
 
-@pytest.mark.parametrize(("source", "options"), PYTHON)
-def test_skipping_the_rust_checker_changes_no_diagnostics(
-    source: str, options: dict, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``check_source`` skips the engine for a file without SQL markers; nothing is lost.
-
-    Checks the code as written, rewritten, stripped and fixed, so files with and
-    without markers, wrappers and ``UNTYPED`` are all compared.
-    """
-    style = options["import_style"]
-    variants = [
-        source,
-        core.rewrite_source(source, **options),
-        core.strip_source(source, import_style=style),
-        core.fix_source(source, **options),
-    ]
-    checked = {
-        key: value for key, value in options.items() if key not in ("json_types", "param_types")
-    }
-    with_shortcut = [core.check_source(text, **checked) for text in variants]
-    monkeypatch.setattr(ParsedSource, "may_need_rust_check", lambda self, import_style=None: True)
-    assert with_shortcut == [core.check_source(text, **checked) for text in variants]
-
-
 @pytest.mark.parametrize(
     "source",
     [
@@ -453,7 +426,6 @@ def test_skipping_the_rust_checker_changes_no_diagnostics(
     ],
 )
 def test_split_marker_is_not_skipped(source: str) -> None:
-    assert ParsedSource(source).may_need_rust_check()
     assert [d["rule"] for d in core.check_source(source)] == ["stale-rewrite"]
 
 

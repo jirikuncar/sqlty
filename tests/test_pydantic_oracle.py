@@ -18,8 +18,8 @@ import uuid
 import pydantic
 import pytest
 
-from sqlty._type_extractor import pydantic_types
 from sqlty.core import check_source
+from tests import pydantic_names as pydantic_types
 
 UTC = datetime.UTC
 TEXT = [
@@ -195,10 +195,10 @@ def test_table_covers_pydantic() -> None:
     """Every public type of pydantic is in the table or left unknown on purpose."""
     from pydantic import networks, types
 
-    from sqlty._type_extractor.ast_fields import _STRICT_TYPES
-
     table = [*pydantic_types.TYPES, *pydantic_types.CONSTRAINED, *pydantic_types.GENERIC]
-    assert sorted(types.__all__) == sorted([*table, *_STRICT_TYPES, *pydantic_types.UNKNOWN_TYPES])
+    assert sorted(types.__all__) == sorted(
+        [*table, *pydantic_types.STRICT_TYPES, *pydantic_types.UNKNOWN_TYPES]
+    )
     assert sorted(networks.__all__) == sorted(
         [*pydantic_types.NETWORKS, *pydantic_types.UNKNOWN_NETWORKS]
     )

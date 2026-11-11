@@ -1,18 +1,15 @@
-"""Pydantic's types, read without importing pydantic.
+"""The Pydantic types sqlty reads, for ``test_pydantic_oracle``.
 
-Each type has two readings. A type checker sees pydantic's ``TYPE_CHECKING`` declarations
-(``EmailStr`` is ``str``, ``PastDatetime`` is ``datetime``, ``AnyUrl`` a class of its own);
-a ``TypedDict`` or plain dataclass row holds what the driver returns, so it is checked
-against those. A Pydantic model or dataclass validates its input instead: ``AnyUrl``
-takes a ``str``, ``ByteSize`` an ``int`` or a ``str``. Its lax conversions from there are
-`subtype._LAX_FROM`'s, as for any other field.
+The table sqlty checks with is ``rust/crates/sqlty-python/src/types/pydantic.rs``; this
+copy names the types and how each is read, so the test can ask Pydantic about every one.
+Each type has two readings: what a type checker sees (``EmailStr`` is ``str``, ``AnyUrl``
+a class of its own), and the input a model validates (``AnyUrl`` takes a ``str``).
 """
 
 from __future__ import annotations
 
 import datetime
 import decimal
-import functools
 import ipaddress
 import typing
 import uuid
@@ -107,27 +104,10 @@ UNKNOWN_TYPES = frozenset(
 )
 UNKNOWN_NETWORKS = frozenset({"UrlConstraints", "validate_email"})
 
-
-@functools.cache
-def pydantic_names(model: bool) -> dict[str, typing.Any]:
-    """The types `_ast_type` resolves Pydantic's qualified names to; a model's inputs if ``model``.
-
-    ``conint(...)`` is keyed ``pydantic.conint()``; ``Json[T]`` is ``pydantic.Json[]``, for a
-    model only.
-
-    Example:
-        >>> checker, model = pydantic_names(model=False), pydantic_names(model=True)
-        >>> checker["pydantic.EmailStr"], checker["pydantic.networks.AnyUrl"], model["pydantic.AnyUrl"]
-        (<class 'str'>, <class 'pydantic.AnyUrl'>, <class 'str'>)
-    """
-    found: dict[str, typing.Any] = {}
-    for module, table in (("types", TYPES), ("networks", NETWORKS)):
-        for name, readings in table.items():
-            found[f"pydantic.{name}"] = found[f"pydantic.{module}.{name}"] = readings[model]
-    for name, tp in CONSTRAINED.items():
-        found[f"pydantic.{name}()"] = found[f"pydantic.types.{name}()"] = tp
-    if model:
-        for name, tp in GENERIC.items():
-            for key in (f"pydantic.{name}", f"pydantic.types.{name}"):
-                found[key] = found[f"{key}[]"] = tp
-    return found
+STRICT_TYPES: dict[str, type] = {
+    "StrictInt": int,
+    "StrictFloat": float,
+    "StrictBool": bool,
+    "StrictStr": str,
+    "StrictBytes": bytes,
+}

@@ -1,32 +1,25 @@
-"""``--sql`` t-strings read in Rust (``sqlty_python::templates``) against ``ast``.
-
-Raise the number of generated examples with ``SQLTY_FUZZ_EXAMPLES``.
-"""
+"""``--sql`` t-strings as ``sqlty_python::templates`` reads them: the query a driver runs
+and the type of each field."""
 
 from __future__ import annotations
 
-import ast
-import os
+import re
 
 import pytest
-from hypothesis import HealthCheck, given, settings
-from hypothesis import strategies as st
 
-import sqlty._drivers
-from sqlty._drivers import find_template_calls
-from sqlty._helpers import HelperCall
-from sqlty._source import ParsedSource
+from sqlty._core import template_strings
 
-EXAMPLES = int(os.environ.get("SQLTY_FUZZ_EXAMPLES", "300"))
+MARKER = re.compile(r"\s*--\s?sql(?:\s|$)")
 
 
-def both(text: str, monkeypatch: pytest.MonkeyPatch) -> list[HelperCall]:
-    monkeypatch.setattr(sqlty._drivers, "AST", "rust")
-    rust = find_template_calls(ParsedSource(text))
-    monkeypatch.setattr(sqlty._drivers, "AST", "python")
-    python = [call._replace(query_node=None) for call in find_template_calls(ParsedSource(text))]
-    assert rust == python, text
-    return rust
+def marked(text: str) -> list[tuple[str, list[str | None]]]:
+    found = template_strings(text)
+    assert found is not None, text
+    return [
+        (query, params)
+        for _, _, query, params in found
+        if query is not None and MARKER.match(query)
+    ]
 
 
 CASES = {
@@ -53,65 +46,6 @@ CASES = {
 
 
 @pytest.mark.parametrize(("text", "expected"), CASES.values(), ids=CASES.keys())
-def test_cases(
-    text: str, expected: list[tuple[str, list[str | None]]], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    for newline in ("\n", "\r\n", "\r"):
-        found = both(text.replace("\n", newline), monkeypatch)
-        assert [(c.query, [p.type for p in c.params or ()]) for c in found] == expected
-
-
-FIELDS = st.sampled_from(
-    [
-        "{n}",
-        "{s:b}",
-        "{x:t}",
-        "{1}",
-        "{'a'}",
-        "{n=:s}",
-        "{n=}",
-        "{n!r}",
-        "{n:{w}}",
-        "{n:}",
-        "{ n }",
-        "{(n, s)}",
-    ]
-)
-TEXT = st.sampled_from(["SELECT ", "%", " AND ", "\\n", "{{", "}}", "é", "\n"])
-
-
-@st.composite
-def template(draw: st.DrawFn) -> str:
-    parts = []
-    for i in range(draw(st.integers(1, 2))):
-        quote = draw(st.sampled_from(['"""', "'''"]))
-        head = "--sql\n" if i == 0 and draw(st.booleans()) else ""
-        body = "".join(draw(st.lists(st.one_of(FIELDS, TEXT), max_size=5)))
-        parts.append(f"{draw(st.sampled_from(['t', 'T', 'rt', 'Tr']))}{quote}{head}{body}{quote}")
-    return "(" + " ".join(parts) + ")"
-
-
-@settings(max_examples=EXAMPLES, deadline=None, suppress_health_check=list(HealthCheck))
-@given(
-    st.lists(
-        st.tuples(template(), st.sampled_from(["module", "def", "method"])), min_size=1, max_size=4
-    ),
-    st.sampled_from(["\n", "\r\n", "\r"]),
-)
-def test_generated_modules(templates: list[tuple[str, str]], newline: str) -> None:
-    lines = ["n = 1", "s: str = f()"]
-    for text, scope in templates:
-        match scope:
-            case "def":
-                lines += ["def f(n: float, w):", f"    q = {text}"]
-            case "method":
-                lines += ["class C:", "    def m(self, s: bytes):", f"        q = {text}"]
-            case _:
-                lines.append(f"q = {text}")
-    source = "\n".join([*lines, ""]).replace("\n", newline)
-    try:
-        ast.parse(source)
-    except SyntaxError:
-        return
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        both(source, monkeypatch)
+@pytest.mark.parametrize("newline", ["\n", "\r\n", "\r"])
+def test_cases(text: str, expected: list[tuple[str, list[str | None]]], newline: str) -> None:
+    assert marked(text.replace("\n", newline)) == expected
