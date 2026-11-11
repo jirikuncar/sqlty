@@ -1,9 +1,10 @@
 // Ask each question of questions.json to a model in headless Chromium, as the playground does,
 // and write the attempts to a JSON file for score.py.
 //
-//   node scripts/ask_eval/run.mjs --model qwen2.5-coder-0.5b --models DIR --wllama DIR [--isolated] [--file] [--out FILE]
+//   node scripts/ask_eval/run.mjs --model qwen2.5-coder-0.5b --models DIR --wllama DIR [--isolated] [--file] [--variant NAME] [--thinking] [--out FILE]
 //
-// --file also sends the questions.json source of the schema, as the playground sends queries.py.
+// --variant picks an ask.js VARIANTS prompt, --thinking lets Qwen3 reason first; models.json
+// adds models the playground does not offer. --file also sends the questions.json source of the schema, as the playground sends queries.py.
 // --models holds the GGUF files of ask.js MODELS; --wllama is @wllama/wllama/esm. --isolated
 // sends COOP/COEP, which wllama needs for threads (GitHub Pages cannot send them).
 import { createReadStream, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -20,6 +21,8 @@ const { values: args } = parseArgs({
     wllama: { type: "string" },
     isolated: { type: "boolean", default: false },
     file: { type: "boolean", default: false },
+    variant: { type: "string", default: "base" },
+    thinking: { type: "boolean", default: false },
     threads: { type: "string" },
     repairs: { type: "string", default: "2" },
     out: { type: "string" },
@@ -66,7 +69,7 @@ page.on("console", (message) => message.type() === "error" && console.error(mess
 await page.goto(`${base}/eval/page.html`);
 const results = await page.evaluate(
   async (options) => window.evaluate(options),
-  { model: args.model, repairs: Number(args.repairs), threads: args.threads && Number(args.threads), file: args.file },
+  { model: args.model, repairs: Number(args.repairs), threads: args.threads && Number(args.threads), file: args.file, variant: args.variant, thinking: args.thinking },
 );
 await browser.close();
 rmSync(profile, { recursive: true });

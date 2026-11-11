@@ -43,20 +43,85 @@ const UNWRAPPED = "stale-rewrite";
 
 export const HERE = "# <the new query goes here>";
 
-export function messages({ schema, dialect, question, source }) {
+// Prompt variants the eval compares (scripts/ask_eval): `rules` adds the instructions small
+// models miss, `examples` two worked questions on another schema, `hints` the columns of the
+// query's tables to sqlty's feedback.
+export const VARIANTS = {
+  base: {},
+  rules: { rules: true },
+  examples: { examples: true },
+  hints: { hints: true },
+  all: { rules: true, examples: true, hints: true },
+};
+
+const RULES =
+  " Select only the columns the question asks for." +
+  " Join tables on the columns their REFERENCES name." +
+  " Filter on a date or time with a range, such as placed_at >= '2025-01-01' AND placed_at < '2026-01-01'.";
+
+const EXAMPLE_SCHEMA = `CREATE TABLE authors (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL
+);
+
+CREATE TABLE books (
+    id INTEGER PRIMARY KEY,
+    author_id INTEGER NOT NULL REFERENCES authors (id),
+    title TEXT NOT NULL
+);
+
+CREATE TABLE loans (
+    id INTEGER PRIMARY KEY,
+    book_id INTEGER NOT NULL REFERENCES books (id),
+    loaned_at TIMESTAMP NOT NULL
+);`;
+
+const EXAMPLES = [
+  [
+    "Number of books per author name, including authors without books.",
+    "SELECT a.name, COUNT(b.id) AS books\nFROM authors AS a\nLEFT JOIN books AS b ON b.author_id = a.id\nGROUP BY a.id, a.name",
+  ],
+  [
+    "Titles of the books loaned in 2024.",
+    "SELECT DISTINCT b.title\nFROM books AS b\nJOIN loans AS l ON l.book_id = b.id\nWHERE l.loaned_at >= '2024-01-01' AND l.loaned_at < '2025-01-01'",
+  ],
+];
+
+export function messages({ schema, dialect, question, source, rules = false, examples = false }) {
   const file = source?.trim()
     ? `\n\nThe Python file it goes in, at the line ${HERE}:\n\n\`\`\`python\n${source.trim()}\n\`\`\``
     : "";
+  const shown = examples
+    ? EXAMPLES.flatMap(([asked, sql]) => [
+        { role: "user", content: `${EXAMPLE_SCHEMA}\n\n${asked}` },
+        { role: "assistant", content: `\`\`\`sql\n${sql}\n\`\`\`` },
+      ])
+    : [];
   return [
     {
       role: "system",
       content:
         `You write one ${DIALECTS[dialect] ?? dialect} SELECT query for the schema the user gives. ` +
-        "Use only its tables and columns, and give every computed column an alias. " +
-        "Reply with the query alone in a ```sql block.",
+        "Use only its tables and columns, and give every computed column an alias." +
+        (rules ? RULES : "") +
+        " Reply with the query alone in a ```sql block.",
     },
+    ...shown,
     { role: "user", content: `${schema.trim()}${file}\n\n${question.trim()}` },
   ];
+}
+
+// Columns by table, from CREATE TABLE statements.
+export function tables(schema) {
+  const found = new Map();
+  for (const [, name, body] of schema.matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"?(\w+)"?\s*\(([\s\S]*?)\n\s*\)\s*;/gi)) {
+    const columns = body
+      .split("\n")
+      .map((line) => line.trim().match(/^"?(\w+)"?\s/)?.[1])
+      .filter((column) => column && !/^(PRIMARY|FOREIGN|UNIQUE|CHECK|CONSTRAINT)$/i.test(column));
+    found.set(name.toLowerCase(), columns);
+  }
+  return found;
 }
 
 // The file around `line` (1-based, the new query goes after it), at most `limit` characters.
@@ -93,8 +158,9 @@ export function problems(engine, { sql, schema, dialect, config = "" }) {
 
 // Ask `complete` (messages in, text out) for a query, and send sqlty's problems back at most
 // `repairs` times. Every attempt is kept, so a caller can show what was fixed.
-export async function answer({ complete, engine, schema, dialect, config, question, source, repairs = 2 }) {
-  const conversation = messages({ schema, dialect, question, source });
+export async function answer({ complete, engine, schema, dialect, config, question, source, repairs = 2, ...prompt }) {
+  const conversation = messages({ schema, dialect, question, source, ...prompt });
+  const known = prompt.hints ? tables(schema) : new Map();
   const attempts = [];
   for (let round = 0; round <= repairs; round++) {
     const reply = await complete(conversation);
@@ -102,9 +168,17 @@ export async function answer({ complete, engine, schema, dialect, config, questi
     const checked = problems(engine, { sql, schema, dialect, config });
     attempts.push({ reply, sql, ...checked });
     if (!checked.problems.length) break;
+    const named = new Set(sql.toLowerCase().match(/\w+/g));
+    const hints = [...known].filter(([name]) => named.has(name)).map(([name, columns]) => `- ${name}: ${columns.join(", ")}`);
     conversation.push(
       { role: "assistant", content: `\`\`\`sql\n${sql}\n\`\`\`` },
-      { role: "user", content: `sqlty found these problems:\n${checked.problems.map((found) => `- ${found}`).join("\n")}\nFix the query.` },
+      {
+        role: "user",
+        content:
+          `sqlty found these problems:\n${checked.problems.map((found) => `- ${found}`).join("\n")}\n` +
+          (hints.length ? `The columns of the tables it uses:\n${hints.join("\n")}\n` : "") +
+          "Fix the query.",
+      },
     );
   }
   return { sql: attempts.at(-1).sql, attempts };
@@ -127,7 +201,7 @@ export async function wllama({
   return instance;
 }
 
-export async function loadModel(instance, model, { url = modelUrl(model), onProgress, n_threads } = {}) {
+export async function loadModel(instance, model, { url = modelUrl(model), onProgress, n_threads, thinking = false } = {}) {
   await instance.loadModelFromUrl(url, {
     n_ctx: 4096,
     progressCallback: ({ loaded, total }) => onProgress?.(loaded, total),
@@ -137,9 +211,9 @@ export async function loadModel(instance, model, { url = modelUrl(model), onProg
     instance
       .createChatCompletion({
         messages: conversation,
-        max_tokens: 400,
+        max_tokens: thinking ? 2048 : 400,
         temperature: 0,
-        chat_template_kwargs: { enable_thinking: false },
+        chat_template_kwargs: { enable_thinking: thinking },
       })
       .then((response) => response.choices[0].message.content ?? "");
 }

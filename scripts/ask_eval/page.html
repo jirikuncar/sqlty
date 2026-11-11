@@ -3,23 +3,24 @@
 <title>ask eval</title>
 <script type="module">
   import { load } from "/playground/engine.js";
-  import { MODELS, answer, around, loadModel, wllama } from "/playground/ask.js";
+  import { MODELS, VARIANTS, answer, around, loadModel, wllama } from "/playground/ask.js";
 
-  window.evaluate = async ({ model: id, repairs, threads, file }) => {
+  window.evaluate = async ({ model: id, repairs, threads, file, variant = "base", thinking = false }) => {
     const engine = await load(await (await fetch("/playground/sqlty_wasm.wasm")).arrayBuffer());
     const { schemas, sources, questions } = await (await fetch("/eval/questions.json")).json();
-    const model = MODELS.find((found) => found.id === id);
+    const candidates = await (await fetch("/eval/models.json")).json();
+    const model = [...MODELS, ...candidates].find((found) => found.id === id);
     const instance = await wllama({ wasm: "/wllama/wasm/wllama.wasm", module: "/wllama/index.js" });
     let started = performance.now();
-    const complete = await loadModel(instance, model, { url: `/models/${model.file}`, n_threads: threads });
+    const complete = await loadModel(instance, model, { url: `/models/${model.file}`, n_threads: threads, thinking });
     const loadSeconds = (performance.now() - started) / 1000;
     const answers = [];
     for (const item of questions) {
       started = performance.now();
-      const found = await answer({ complete, engine, schema: schemas[item.schema], dialect: "postgres", question: item.question, repairs,
+      const found = await answer({ complete, engine, schema: schemas[item.schema], dialect: "postgres", question: item.question, repairs, ...VARIANTS[variant],
         source: file ? around(sources[item.schema], sources[item.schema].split("\n").length) : undefined });
       answers.push({ ...item, ...found, seconds: (performance.now() - started) / 1000 });
     }
-    return { model: id, file, crossOriginIsolated: self.crossOriginIsolated, threads: navigator.hardwareConcurrency, loadSeconds, answers };
+    return { model: id, file, variant, thinking, crossOriginIsolated: self.crossOriginIsolated, threads: navigator.hardwareConcurrency, loadSeconds, answers };
   };
 </script>
