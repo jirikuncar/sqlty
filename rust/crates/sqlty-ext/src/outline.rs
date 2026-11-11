@@ -20,6 +20,7 @@ use ruff_python_ast::{
 };
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use sqlty_python::scopes::Lines;
+use sqlty_python::unparse;
 
 macro_rules! ast_types {
     (classes: $($class:ident),*; instances: $($instance:ident),*) => {
@@ -27,6 +28,8 @@ macro_rules! ast_types {
         struct Ast {
             $($class: Py<PyAny>,)*
             $($instance: Py<PyAny>,)*
+            /// Whether imports have `is_lazy`, new in Python 3.15.
+            lazy: bool,
         }
 
         impl Ast {
@@ -35,6 +38,7 @@ macro_rules! ast_types {
                 Ok(Self {
                     $($class: module.getattr(stringify!($class))?.unbind(),)*
                     $($instance: module.getattr(stringify!($instance))?.call0()?.unbind(),)*
+                    lazy: module.getattr("Import")?.getattr("_fields")?.contains("is_lazy")?,
                 })
             }
         }
@@ -74,9 +78,13 @@ pub fn outline<'py>(py: Python<'py>, source: &str) -> PyResult<Option<Outline<'p
     let Some(parsed) = crate::detach(py, || sqlty_python::parse::module(&text)) else {
         return Ok(None);
     };
+    let ast = AST.get_or_try_init(py, || Ast::new(py))?;
+    if !ast.lazy && !crate::detach(py, || sqlty_python::parse::reads_on_314(&text)) {
+        return Ok(None);
+    }
     let mut builder = Builder {
         py,
-        ast: AST.get_or_try_init(py, || Ast::new(py))?,
+        ast,
         source: &text,
         lines: Lines::new(&text),
         tokens: parsed.tokens(),
@@ -416,16 +424,21 @@ impl<'py> Builder<'py, '_> {
             }
             Stmt::Import(node) => {
                 let names = self.aliases(&node.names)?;
-                self.node(&ast.Import, (names, i32::from(node.is_lazy)), range)
+                if ast.lazy {
+                    self.node(&ast.Import, (names, i32::from(node.is_lazy)), range)
+                } else {
+                    self.node(&ast.Import, (names,), range)
+                }
             }
             Stmt::ImportFrom(node) => {
-                let fields = (
-                    node.module.as_ref().map(ruff::Identifier::as_str),
-                    self.aliases(&node.names)?,
-                    node.level,
-                    i32::from(node.is_lazy),
-                );
-                self.node(&ast.ImportFrom, fields, range)
+                let module = node.module.as_ref().map(ruff::Identifier::as_str);
+                let names = self.aliases(&node.names)?;
+                if ast.lazy {
+                    let fields = (module, names, node.level, i32::from(node.is_lazy));
+                    self.node(&ast.ImportFrom, fields, range)
+                } else {
+                    self.node(&ast.ImportFrom, (module, names, node.level), range)
+                }
             }
             Stmt::Global(node) => {
                 let names: Vec<&str> = node.names.iter().map(ruff::Identifier::as_str).collect();
@@ -955,11 +968,11 @@ impl<'py> Builder<'py, '_> {
                 InterpolatedStringElement::Interpolation(field) => {
                     let inner = field.start() + TextSize::from(1);
                     let mut conversion = field.conversion;
-                    if let Some(debug) = &field.debug_text {
-                        let text = debug.as_str();
+                    if field.debug_text.is_some() {
+                        let text = unparse::field_text(field, self.source);
                         pieces.push(Piece {
-                            text: Cow::Owned(text.to_string()),
-                            range: TextRange::at(inner, TextSize::of(text)),
+                            range: TextRange::at(inner, TextSize::of(&text)),
+                            text: Cow::Owned(text),
                             unicode: false,
                         });
                         if conversion == ConversionFlag::None && field.format_spec.is_none() {
@@ -988,7 +1001,7 @@ impl<'py> Builder<'py, '_> {
                         .transpose()?;
                     let conversion = conversion as i8;
                     let node = if template {
-                        let text = self.interpolated_text(field, inner);
+                        let text = unparse::interpolation_text(field, self.source);
                         self.node(
                             &self.ast.Interpolation,
                             (value, text, conversion, spec),
@@ -1006,23 +1019,6 @@ impl<'py> Builder<'py, '_> {
             }
         }
         Ok(())
-    }
-
-    /// The source of the expression of a replacement field, as `Interpolation.str` holds it:
-    /// from the `{` to the `=`, `!`, `:` or `}` after it, without trailing whitespace.
-    fn interpolated_text(&self, field: &ruff::InterpolatedElement, inner: TextSize) -> String {
-        if let Some(debug) = &field.debug_text {
-            return format!("{}{}", debug.leading(), debug.expression());
-        }
-        let stop = match field.format_spec.as_deref() {
-            Some(spec) => spec.start() - TextSize::from(1),
-            None => field.end() - TextSize::from(1),
-        };
-        let mut text = self.source[TextRange::new(inner, stop)].trim_end();
-        if field.conversion != ConversionFlag::None {
-            text = text[..text.len().saturating_sub(2)].trim_end();
-        }
-        text.to_string()
     }
 
     /// The merged text in `pieces` as one `Constant`, unless it is empty.

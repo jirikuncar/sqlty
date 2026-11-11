@@ -3,6 +3,7 @@
 //! as `ast` reads it (adjacent literal text of an f-string merged, `{x=}` spelled out).
 
 use std::fmt::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -684,34 +685,59 @@ pub(crate) fn constants(expr: &Expr, source: &str) -> Vec<String> {
     out
 }
 
+/// Whether field text is read as the tokenizer of CPython 3.15.0b4 and 3.14.6 did (later
+/// releases changed it): the extension sets it from the interpreter it runs in, so that
+/// both engines spell a field alike.
+pub static LEGACY_FIELD_TEXT: AtomicBool = AtomicBool::new(false);
+
 /// `Interpolation.str`: the source of the expression of a t-string field, from the `{` to
-/// the `=`, `!`, `:` or `}` after it, without trailing whitespace.
+/// the `!`, `:` or `}` after it, without the `=` of a debug field and what follows it.
 pub fn interpolation_text(field: &InterpolatedElement, source: &str) -> String {
     let text = field_text(field, source);
-    let text = text.trim_end();
-    text.strip_suffix('=')
-        .filter(|_| field.debug_text.is_some())
-        .map_or(text, str::trim_end)
-        .to_string()
+    if LEGACY_FIELD_TEXT.load(Ordering::Relaxed) {
+        let text = text.trim_end();
+        return text
+            .strip_suffix('=')
+            .filter(|_| field.debug_text.is_some())
+            .map_or(text, str::trim_end)
+            .to_string();
+    }
+    if field.debug_text.is_none() {
+        return text;
+    }
+    // `_strip_interpolation_debug_expr`: whitespace and line continuations after the `=` go.
+    let mut rest = text.as_str();
+    loop {
+        let trimmed = rest.trim_end();
+        let newline = rest[trimmed.len()..].contains(['\n', '\r']);
+        rest = trimmed;
+        match rest.strip_suffix('\\') {
+            Some(joined) if newline => rest = joined,
+            _ => break,
+        }
+    }
+    rest.strip_suffix('=').unwrap_or(&text).to_string()
 }
 
 /// The source of a field as the tokenizer of Python records it (`set_ftstring_expr`): up
-/// to the last `!` outside brackets when a conversion or a format spec follows, without
-/// its comments and with every newline as `\n`.
-fn field_text(field: &InterpolatedElement, source: &str) -> String {
+/// to the `!` of its conversion, the `:` of its format spec or its `}`, without its
+/// comments and with every newline as `\n`.
+pub fn field_text(field: &InterpolatedElement, source: &str) -> String {
+    let legacy = LEGACY_FIELD_TEXT.load(Ordering::Relaxed);
     let start = field.start().to_usize() + 1;
     let stop = match field.format_spec.as_deref() {
         Some(spec) => spec.start().to_usize() - 1,
         None => field.end().to_usize() - 1,
     };
     let mut text = source.get(start..stop).unwrap_or("");
-    if field.format_spec.is_some() || field.conversion != ConversionFlag::None {
+    // The old tokenizer ended the text at any `!`, the `!=` before a format spec included.
+    if field.conversion != ConversionFlag::None || (legacy && field.format_spec.is_some()) {
         if let Some(bang) = last_bang(text) {
             text = &text[..bang];
         }
     }
     let text = text.replace("\r\n", "\n").replace('\r', "\n");
-    without_comments(&text)
+    without_comments(&text, legacy)
 }
 
 /// The offset of the last `!` of `text` outside brackets and string literals.
@@ -746,7 +772,7 @@ fn last_bang(text: &str) -> Option<usize> {
 
 /// `text` without its comments, as `set_ftstring_expr` drops them: a quote opens a string
 /// until the same quote, and a `#` outside one runs to the end of its line.
-fn without_comments(text: &str) -> String {
+fn without_comments(text: &str, legacy: bool) -> String {
     let chars: Vec<char> = text.chars().collect();
     let (mut in_string, mut quote) = (false, ' ');
     let mut hash = false;
@@ -772,7 +798,11 @@ fn without_comments(text: &str) -> String {
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
-        if c == '"' || c == '\'' {
+        if c == '\\' && !legacy {
+            out.push(c);
+            i += 1;
+            out.extend(chars.get(i));
+        } else if c == '"' || c == '\'' {
             if !in_string {
                 in_string = true;
                 quote = c;

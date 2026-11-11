@@ -35,6 +35,7 @@ use sqlty_sql::analyzer;
 use sqlty_sql::highlight::Highlight;
 
 use std::collections::HashMap;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
@@ -2147,6 +2148,12 @@ fn highlight_source(
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     recursive::set_minimum_stack_size(STACK_RED_ZONE);
     recursive::set_stack_allocation_size(STACK_SEGMENT);
+    let legacy = m.py().eval(
+        c"__import__('ast').parse(\"t'{a !r}'\").body[0].value.values[0].str == 'a'",
+        None,
+        None,
+    )?;
+    sqlty_python::unparse::LEGACY_FIELD_TEXT.store(legacy.extract()?, Ordering::Relaxed);
     m.add_function(wrap_pyfunction!(infer_type, m)?)?;
     m.add_function(wrap_pyfunction!(load_schema, m)?)?;
     m.add_class::<SchemaHandle>()?;

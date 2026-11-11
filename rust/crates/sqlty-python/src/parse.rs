@@ -21,7 +21,9 @@ use ruff_python_ast::visitor::{walk_expr, walk_interpolated_string_element, walk
 use ruff_python_ast::{
     Expr, ExprStringLiteral, InterpolatedStringElement, ModExpression, ModModule, Stmt,
 };
-use ruff_python_parser::{parse_expression, parse_module, Parsed};
+use ruff_python_parser::{
+    parse_expression, parse_module, parse_unchecked, Mode, ParseOptions, Parsed,
+};
 use ruff_text_size::Ranged;
 
 const STACK_PER_BYTE: usize = if cfg!(debug_assertions) {
@@ -62,6 +64,15 @@ pub fn module(source: &str) -> Option<Parsed<ModModule>> {
     let mut depth = Depth::default();
     depth.visit_body(&parsed.syntax().body);
     (!depth.exceeded).then_some(parsed)
+}
+
+/// Whether the module `source` holds no syntax newer than Python 3.14, which has no lazy
+/// imports and no unpacking in comprehensions.
+pub fn reads_on_314(source: &str) -> bool {
+    let options =
+        ParseOptions::from(Mode::Module).with_target_version(ruff_python_ast::PythonVersion::PY314);
+    guarded(source, |text| Ok::<_, ()>(parse_unchecked(text, options)))
+        .is_some_and(|parsed| parsed.unsupported_syntax_errors().is_empty())
 }
 
 /// The expression `source`, when `ast.parse(source, mode="eval")` reads it the same.

@@ -11,6 +11,7 @@ from __future__ import annotations
 import ast
 import os
 import pathlib
+import sys
 import typing
 
 import pytest
@@ -90,11 +91,10 @@ CASES = {
     "displays": 'x = [*a, *b]\n{**a, "b": 1}\n{1, 2}\n()\n(a,)\na, *b = c\n[a, b] = c\n',
     "comprehensions": (
         "x = [i for i in range(3) for j in range(i) if i if j]\nx = {k: v for k, v in d}\n"
-        "x = {**d for d in ds}\nx = [*a for a in b]\n"
     ),
     "numbers": "x = 0b1_0 + 0o7 + 0xFF + 1_000 + 1e-3 + 1J + 00 + 9999999999999999999999 + .5 + 5.\n",
     "annotated assignments": "x: int\nx.y: int = 1\n(x): int = 1\nx[0]: int\n",
-    "imports": "import a.b.c as d, e\nfrom ... import x\nfrom .a import (b as c, d)\nfrom a import *\nlazy import f\n",
+    "imports": "import a.b.c as d, e\nfrom ... import x\nfrom .a import (b as c, d)\nfrom a import *\n",
     "match": (
         "match x:\n    case {1: a, **r}: pass\n    case [a, *_]: pass\n    case P(a, b=c) if d: pass\n"
         '    case -1 | 1+2j | "s" | b"b" | a.b: pass\n    case (a as b): pass\n    case True: pass\n'
@@ -120,6 +120,22 @@ CASES = {
 @pytest.mark.parametrize("text", CASES.values(), ids=CASES.keys())
 def test_cases(text: str) -> None:
     same(text)
+
+
+PY315 = {
+    "lazy imports": "lazy import f\nlazy from a import b\n",
+    "unpacking in comprehensions": "x = {**d for d in ds}\nx = [*a for a in b]\n",
+}
+
+
+@pytest.mark.parametrize("text", PY315.values(), ids=PY315.keys())
+def test_syntax_new_in_315(text: str) -> None:
+    if sys.version_info >= (3, 15):
+        same(text)
+    else:
+        with pytest.raises(SyntaxError):
+            ast.parse(text)
+        assert module_outline(text) is None
 
 
 DECLINED = {
