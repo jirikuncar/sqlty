@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 import re
+import sys
 import typing
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, NamedTuple
@@ -610,8 +611,6 @@ def _compare_module(
     coerce: frozenset[str],
 ) -> None:
     """``SQLTY_AST=compare``: ``sqlty_python::check`` must report what these passes do."""
-    import sys
-
     rust = _module_diagnostics(
         parsed.text,
         version=sys.version_info[:2],
@@ -737,8 +736,6 @@ def _compare_rows(
     coerce: frozenset[str],
 ) -> None:
     """``SQLTY_AST=compare``: the row checks of ``sqlty_python::rows`` must find what these do."""
-    import sys
-
     from sqlty._lint import RuleConfig
 
     rust = _row_diagnostics(
