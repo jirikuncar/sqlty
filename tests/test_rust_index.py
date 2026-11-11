@@ -9,6 +9,8 @@ diagnostics from ``sqlty_python`` with its ``index`` as from ``sqlty._check`` wi
 from __future__ import annotations
 
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 from hypothesis import given
@@ -17,6 +19,7 @@ from hypothesis import strategies as st
 from sqlty import _check
 from sqlty._helpers import HelperIndex
 from sqlty._source import ParsedSource
+from sqlty.core import check_source
 from tests.test_rust_check import QUERIES, RULES, SCHEMAS, arguments
 from tests.test_rust_types import FUZZ, parses
 
@@ -47,6 +50,8 @@ TYPES = [
     "from .more import Other, Loop\n",
     "from . import more\n",
     "Back = Loop\n",
+    "class Gen[T](TypedDict):\n    id: T\n    name: str\n",
+    "class P(TypedDict):\n    a: int\n",
 ]
 MORE = [
     "from .types import UserId, Row, Back\n",
@@ -76,6 +81,7 @@ IMPORTS = [
     "from . import db, types as kinds\n",
     "from .. import pkg\n",
     "from .types import Row, UserId, Name, Status, Wide, Point, AdminId, Alias\n",
+    "from pkg.types import Gen, P\n",
     "from pkg.more import Deep, Nested, Other, Loop\n",
     "from .missing import run, Row\n",
 ]
@@ -103,6 +109,11 @@ ROWS = [
     "pkg.types.Point",
     "Local",
     "Any",
+    "Gen",
+    "Gen[int]",
+    "types.Gen[str]",
+    "Local, P",
+    "Gen[UserId], tuple[int]",
 ]
 FIELDS = [
     "int",
@@ -207,6 +218,7 @@ def compare(
     registered: list[tuple[str, str, str | None, str | None]],
     dialect: str = "postgres",
     rules: dict[str, str] | None = None,
+    variants: int | None = None,
 ) -> int:
     """How many diagnostics both report for the last of ``modules``, -1 where Rust declines."""
     index = HelperIndex()
@@ -226,9 +238,10 @@ def compare(
         "import_style": None,
         "untyped": False,
         "module": name,
+        "variants": variants,
     }
     found = _check._diagnostics(  # noqa: SLF001
-        parsed, helpers=index, row_usage=usage, variants=None, coerce=frozenset(), **settings
+        parsed, helpers=index, row_usage=usage, coerce=frozenset(), **settings
     )
     rust = index.rust()
     assert rust is not None
@@ -279,3 +292,124 @@ def test_generated_trees(
     modules, registered = tree
     if all(map(parses, modules.values())):
         compare(modules, registered, dialect, rules)
+
+
+REVIEWED = {
+    "imported params": (
+        {"a": "class P(TypedDict):\n    x: int\n"},
+        "from a import P\nclass Local(TypedDict):\n    v: int\n"
+        "q = SQL[Local, P]('--sql\\nSELECT %(x)s::int AS v')\n",
+        0,
+    ),
+    "imported generic": (
+        {"a": "class Row[T](TypedDict):\n    v: T\n"},
+        "from a import Row\nclass Other[T]: ...\n"
+        "q1 = SQL[Row]('--sql\\nSELECT 1 AS v')\nq2 = SQL[Row[str]]('--sql\\nSELECT 1 AS v')\n",
+        0,
+    ),
+    "trailing indent": (
+        {},
+        'def run(q: "Annotated[str, SQL]\\n "): ...\nrun("SELECT nope FROM t")\n',
+        0,
+    ),
+    "quoted any": (
+        {},
+        "def run[T](q: Annotated[str, SQL], t: type[T]) -> T: ...\n"
+        "run(x + y, \"'Any'\")\nrun(x + y, 'Any\\n ')\nrun(x + y, 'Any')\n",
+        2,
+    ),
+    "class name": (
+        {},
+        "class Db\u093e:\n    def run(self, q: Annotated[str, SQL]): ...\n"
+        "def f(db: 'Db\u093e', ok: 'Db\u093e '):\n    db.run('SELECT nope FROM t')\n",
+        0,
+    ),
+    "from on its own line": (
+        {"a": "def run(q: Annotated[str, SQL]): ...\n"},
+        "from a import run\ndef f():\n    x = (yield\n        from run('SELECT nope FROM t'))\n",
+        1,
+    ),
+    "import line ending a string": (
+        {"a": "def run(q: Annotated[str, SQL]): ...\n"},
+        "from a import run\nx = '''\nimport ''' + str(run('SELECT nope FROM t'))\n",
+        1,
+    ),
+    "import line with a comment ending a string": (
+        {"a": "def run(q: Annotated[str, SQL]): ...\n"},
+        "from a import run\nx = '''\nimport a # ''' + str(run('SELECT nope FROM t'))\n",
+        1,
+    ),
+    "call after an import": (
+        {"a": "def run(q: Annotated[str, SQL]): ...\n"},
+        "from a import run\nimport a; run('SELECT nope FROM t')\n",
+        1,
+    ),
+    "cyclic rows": (
+        {
+            "a": "from b import RB\nclass RA(RB):\n    x: int\nclass RA2(TypedDict):\n    z: int\n",
+            "b": "from a import RA2\nclass RB(TypedDict):\n    y: int\nclass RB2(RA2):\n    w: int\n",
+        },
+        "from a import RA\nfrom b import RB2\n"
+        "SQL[RA]('--sql\\nSELECT 1 AS x')\nSQL[RB2]('--sql\\nSELECT 1 AS w')\n",
+        1,
+    ),
+}
+
+
+@pytest.mark.parametrize("case", REVIEWED.values(), ids=REVIEWED.keys())
+def test_reviewed(case: tuple[dict[str, str], str, int]) -> None:
+    modules, app, expected = case
+    tree = {name: HEAD + source for name, source in modules.items()}
+    rules = {"dynamic-query": "warn", "nullable-mismatch": "ignore"}
+    assert compare({**tree, "app": HEAD + app}, [], rules=rules) == expected
+
+
+def test_registered_file_rust_does_not_read(tmp_path: Path) -> None:
+    helper = "def run(sql, row=None, params=()): ...\n"
+    for name, text in (("broken", "def run(:\n"), ("big", helper + "#" * 300_000)):
+        first, second = tmp_path / name / "one", tmp_path / name / "two"
+        first.mkdir(parents=True)
+        second.mkdir()
+        (first / "ext.py").write_text(text)
+        (second / "ext.py").write_text(helper)
+        index = HelperIndex()
+        index.register("ext.run", "sql", "row", roots=[first, second])
+        # The first root holding the file ends the search: the helper takes keywords only.
+        positional, keywords, *_ = index.rust().helpers()["ext"]["run"]
+        assert (positional, keywords) == ([], ["row", "sql"])
+
+
+def test_names_follow_a_module_added_later() -> None:
+    index = HelperIndex()
+    index.add("db", ParsedSource(HEAD + DB[1], "db"))
+    app = ParsedSource("from alias import zap\nzap('SELECT nope FROM t')\n", "app")
+    settings = {"schema_sql": SCHEMAS["postgres"], "helpers": index, "module": "app"}
+    assert check_source(app, **settings) == []
+    index.add("alias", ParsedSource("from db import run as zap\n", "alias"))
+    assert [d["rule"] for d in check_source(app, **settings)] == ["unknown-column"]
+
+
+def test_one_index_on_two_threads() -> None:
+    """Modules importing each other's row types are read whole by the thread that is first."""
+    modules, _, _ = REVIEWED["cyclic rows"]
+    pad = "".join(f"class Pad{i}(TypedDict):\n    v{i}: int\n" for i in range(200))
+    apps = [
+        HEAD + "from a import RA\nSQL[RA]('--sql\\nSELECT 1 AS x')\n",
+        HEAD + "from b import RB2\nSQL[RB2]('--sql\\nSELECT 1 AS w')\n",
+    ]
+    settings = {"version": sys.version_info[:2], "schema_sql": SCHEMAS["postgres"]}
+
+    def check(index: object, app: str) -> int:
+        found = _check._module_diagnostics(app, index=index, name="app", module="app", **settings)  # noqa: SLF001
+        assert found is not None
+        return len(found[0])
+
+    for _ in range(20):
+        index = HelperIndex()
+        for name, source in modules.items():
+            index.add(name, ParsedSource(HEAD + source + pad, name))
+        rust = index.rust()
+        with ThreadPoolExecutor(2) as pool:
+            raced = list(pool.map(lambda app, rust=rust: check(rust, app), apps))
+        assert sum(raced) == 1
+        assert [check(rust, app) for app in apps] == raced

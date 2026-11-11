@@ -215,22 +215,50 @@ def module_diagnostics(
     coerce: list[str] = ...,
     index: ModuleIndex | None = None,
     name: str | None = None,
-) -> (
-    tuple[
-        list[Diagnostic],
-        list[tuple[str | None, str, str] | None],
-        list[tuple[str | None, str, str]],
-    ]
-    | None
-): ...
+    variants: int | None = None,
+) -> tuple[
+    list[Diagnostic],
+    list[tuple[str | None, str, str] | None],
+    list[tuple[str | None, str, str]],
+]: ...
+
+type _Helper = tuple[
+    list[str],
+    list[str],
+    str,
+    str | None,
+    str,
+    str | None,
+    str | None,
+    str | None,
+    bool,
+    str | None,
+]
 
 @final
-class ModuleIndex: ...
+class ModuleIndex:
+    def extended(
+        self, steps: list[tuple[str, str, str, str | None, list[Path], str | None]]
+    ) -> ModuleIndex: ...
+    def helpers(self) -> dict[str, dict[str, _Helper]]: ...
 
 def module_index(
     version: tuple[int, int],
     steps: list[tuple[str, str, str, str | None, list[Path], str | None]],
-) -> ModuleIndex | None: ...
+) -> ModuleIndex: ...
+def module_helpers(source: str, version: tuple[int, int]) -> dict[str, _Helper]: ...
+def call_variants(
+    source: str, version: tuple[int, int], limit: int
+) -> list[tuple[int, bool, list[tuple[str, list[int], bool]] | None, bool, str | None]] | None: ...
+def module_calls(
+    source: str,
+    *,
+    version: tuple[int, int],
+    index: ModuleIndex | None = None,
+    name: str | None = None,
+    module: str | None = None,
+    variants: int | None = None,
+) -> list[tuple[tuple[int, int] | None, list[str], str | None, int | None]]: ...
 def rendered_compositions(
     source: str, version: tuple[int, int]
 ) -> list[tuple[int, bool, str | None]] | None: ...

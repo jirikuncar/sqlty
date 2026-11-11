@@ -17,6 +17,7 @@ use sqlty_sql::analyzer::{self, Nullability};
 use crate::calls::{helper_calls, is_marked, Call};
 use crate::checker::{self, Diagnostic};
 use crate::index::HelperIndex;
+use crate::rows::Reported;
 use crate::rows::{
     alias_target, bind, row_queries, row_shape, value_diagnostics, Check, Found, RowQuery,
     RowShape, Settings,
@@ -48,6 +49,78 @@ pub struct Run<'a> {
     pub lint: &'a dyn Fn(&str) -> Vec<Lint>,
     /// The modules of the checked paths, the same as `settings.index`.
     pub helpers: Option<&'a HelperIndex>,
+    /// `max-query-variants`, when queries built in branches are read.
+    pub variants: Option<usize>,
+}
+
+/// Where the variants of calls are checked: variant `i` is on line `VARIANT_LINE + i`.
+const VARIANT_LINE: usize = 1 << 30;
+/// The types a `P` of `SQL[R, P]` takes for each parameter key, as arguments are spelled.
+type Annotations = Vec<(Key, Vec<Option<String>>)>;
+
+/// `_fits`: whether a type checker takes a value of type `actual` for `expected`.
+fn fits(actual: Option<&str>, expected: Option<&str>) -> bool {
+    let (Some(actual), Some(expected)) = (actual, expected) else {
+        return true;
+    };
+    if actual == expected {
+        return true;
+    }
+    if actual == "list" || expected == "list" {
+        return actual.starts_with("list") && expected.starts_with("list");
+    }
+    matches!(
+        (actual, expected),
+        ("bool", "int" | "float") | ("int", "float") | ("datetime.datetime", "datetime.date")
+    )
+}
+
+/// `_merge_variants`: the diagnostics of variants reported at their call. One every
+/// variant of a call has is reported once; any other names the lines that select the
+/// first variant having it.
+fn merge_variants(diagnostics: Vec<Reported>, calls: &[Call<'_>]) -> Vec<Reported> {
+    let mut found: HashMap<usize, Vec<Reported>> = HashMap::new();
+    let mut merged = Vec::new();
+    for reported in diagnostics {
+        match reported.diagnostic.line.checked_sub(VARIANT_LINE) {
+            Some(index) => found.entry(index).or_default().push(reported),
+            None => merged.push(reported),
+        }
+    }
+    let mut start = 0;
+    for call in calls {
+        let indexes = start..start + call.variants.len();
+        start = indexes.end;
+        let key = |reported: &Reported| {
+            let diagnostic = &reported.diagnostic;
+            (diagnostic.rule, diagnostic.message.clone())
+        };
+        let keys: Vec<HashSet<(Rule, String)>> = indexes
+            .clone()
+            .map(|index| found.get(&index).into_iter().flatten().map(key).collect())
+            .collect();
+        let common: HashSet<(Rule, String)> = keys
+            .iter()
+            .cloned()
+            .reduce(|common, keys| common.intersection(&keys).cloned().collect())
+            .unwrap_or_default();
+        let mut reported: HashSet<(Rule, String)> = HashSet::new();
+        for (index, variant) in indexes.zip(&call.variants) {
+            for mut one in found.remove(&index).unwrap_or_default() {
+                let key = key(&one);
+                if !reported.insert(key.clone()) {
+                    continue;
+                }
+                one.diagnostic.line = call.line;
+                if !common.contains(&key) && !variant.lines.is_empty() {
+                    let lines: Vec<String> = variant.lines.iter().map(usize::to_string).collect();
+                    one.diagnostic.message += &format!(" (variant: line {})", lines.join(", "));
+                }
+                merged.push(one);
+            }
+        }
+    }
+    merged
 }
 
 type Span = (usize, usize);
@@ -79,6 +152,9 @@ pub(crate) fn may_wrap(text: &str, import_line: &str) -> bool {
 
 /// `_names_params`: whether `text` subscripts `wrapper` with two arguments.
 fn names_params(text: &str, wrapper: &str) -> bool {
+    if !text.contains(&format!("{wrapper}[")) {
+        return false;
+    }
     let Ok(start) = Regex::new(&format!(r"\b{}\[", regex::escape(wrapper))) else {
         return false;
     };
@@ -171,9 +247,18 @@ fn declared_params<'a>(source: &'a Source, wrapper: &str, import_line: &str) -> 
 
 /// `is_any`: whether `expr` is `typing.Any`, quoted or in `Annotated` too.
 fn is_any(expr: &Expr, source: &Source) -> bool {
+    let quoted;
+    let expr = match expr {
+        Expr::StringLiteral(text) => {
+            let Some(parsed) = crate::parse::expression(text.value.to_str()) else {
+                return false;
+            };
+            quoted = parsed;
+            &*quoted.syntax().body
+        }
+        other => other,
+    };
     match expr {
-        Expr::StringLiteral(text) => crate::parse::expression(text.value.to_str())
-            .is_some_and(|parsed| is_any(&parsed.syntax().body, source)),
         Expr::Subscript(sub) if source.typing_name(&sub.value) == Some("Annotated") => {
             match sub.slice.as_ref() {
                 Expr::Tuple(items) => items
@@ -471,7 +556,13 @@ impl<'a> Module<'a, '_> {
         let calls = self.calls().map(|(call, _)| call).chain(&self.driver_calls);
         for call in calls {
             if let (Some(query), Some(params)) = (&call.query, &call.params) {
-                for (rule, message) in self.param_diagnostics(call, query, params) {
+                let declared = call
+                    .declared
+                    .as_ref()
+                    .and_then(|declared| self.annotations_of(declared.params?, declared.source));
+                for (rule, message) in
+                    self.param_diagnostics(call, query, params, declared.as_ref())
+                {
                     reports.push((rule, message, call.line, call.query_span));
                 }
             }
@@ -487,6 +578,7 @@ impl<'a> Module<'a, '_> {
         call: &Call<'_>,
         query: &str,
         passed: &[Param],
+        declared: Option<&Annotations>,
     ) -> Vec<(Rule, String)> {
         let Some(params) = self.params(query) else {
             return Vec::new();
@@ -582,7 +674,26 @@ impl<'a> Module<'a, '_> {
                 Key::Index(index) => format!("parameter {index}"),
                 Key::Name(name) => format!("parameter '{name}'"),
             };
-            if arg.kind.as_deref() == Some("None") || (typed && !param.cast) {
+            let annotated = declared
+                .and_then(|declared| declared.iter().find(|(key, _)| *key == arg.key))
+                .map(|(_, members)| members);
+            if let Some(members) = annotated {
+                let kind = arg.kind.as_deref();
+                if !members.iter().any(|member| fits(kind, member.as_deref())) {
+                    let spelled: Vec<&str> = members
+                        .iter()
+                        .map(|member| member.as_deref().unwrap_or("None"))
+                        .collect();
+                    found.push((
+                        Rule::ParamTypeMismatch,
+                        format!(
+                            "{label} expects {}, got {}",
+                            spelled.join(" | "),
+                            kind.unwrap_or("None")
+                        ),
+                    ));
+                }
+            } else if arg.kind.as_deref() == Some("None") || (typed && !param.cast) {
                 let mut expected = param.python_type.as_deref();
                 if expected.is_none()
                     && asyncpg
@@ -873,8 +984,15 @@ impl<'a> Module<'a, '_> {
         }
     }
 
-    /// `_annotations_of`: `P` of a `SQL[R, P]`, as an annotation per parameter key.
-    fn annotations_of(&self, declared: &'a Expr) -> Option<Vec<(Key, &Expr)>> {
+    /// `_annotations_of`: `P` of a `SQL[R, P]` in `source`, as the types each parameter
+    /// key takes.
+    fn annotations_of(&self, declared: &Expr, source: &Source) -> Option<Annotations> {
+        let types = |annotation: &Expr| -> Vec<Option<String>> {
+            union_members(annotation)
+                .into_iter()
+                .map(|member| annotation_type(member, &source.imports))
+                .collect()
+        };
         if let Expr::Subscript(sub) = declared {
             if matches!(
                 dotted(&sub.value).as_deref(),
@@ -888,17 +1006,26 @@ impl<'a> Module<'a, '_> {
                     items
                         .iter()
                         .enumerate()
-                        .map(|(i, item)| (Key::Index(i + 1), item))
+                        .map(|(i, item)| (Key::Index(i + 1), types(item)))
                         .collect(),
                 );
             }
         }
-        let name = unparse(declared, &self.source.text);
-        let info = self.ctx.own_defs.get(&name)?;
+        let name = unparse(declared, &source.text);
+        let own = if std::ptr::eq(source, self.source) {
+            self.ctx.own_defs.get(&name).cloned()
+        } else {
+            let defs = self.run.helpers?.definitions(source)?;
+            defs.get(&name).cloned()
+        };
+        let info = own.or_else(|| {
+            let index = self.run.settings.index?;
+            Some(index.row_type(source, &name)?.info)
+        })?;
         (info.kind == Kind::TypedDict).then(|| {
             info.annotations
                 .iter()
-                .map(|(key, annotation)| (Key::Name(key.to_string()), &annotation.expr))
+                .map(|(key, annotation)| (Key::Name(key.to_string()), types(&annotation.expr)))
                 .collect()
         })
     }
@@ -914,16 +1041,13 @@ impl<'a> Module<'a, '_> {
             })
             .collect();
         for call in &self.declared {
-            let Some(annotations) = self.annotations_of(call.params) else {
+            let Some(annotations) = self.annotations_of(call.params, self.source) else {
                 continue;
             };
             let params = annotations
                 .into_iter()
-                .map(|(key, annotation)| {
-                    let types: HashSet<Option<String>> = union_members(annotation)
-                        .into_iter()
-                        .map(|member| annotation_type(member, &self.source.imports))
-                        .collect();
+                .map(|(key, types)| {
+                    let types: HashSet<Option<String>> = types.into_iter().collect();
                     let kind = match types.len() {
                         1 => types.into_iter().next().flatten(),
                         _ => None,
@@ -983,9 +1107,95 @@ impl<'a> Module<'a, '_> {
     }
 }
 
+/// A helper call as `fix_source`, `query_statistics` and the highlights read it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Site {
+    /// The first and last line of a call whose strings need no `SQL[T]`.
+    pub typed: Option<(usize, usize)>,
+    /// The queries it can run that the lexer does not read by their marker.
+    pub queries: Vec<String>,
+    /// The rule of a call that is not checked: `dynamic-query` or `unchecked-query`.
+    pub unchecked: Option<Rule>,
+    /// The byte offset of the string literal it passes as its query.
+    pub start: Option<usize>,
+}
+
+/// The helper calls of `source`, by line.
+pub fn sites(
+    source: &Source,
+    helpers: Option<&HelperIndex>,
+    module: Option<&str>,
+    variants: Option<usize>,
+) -> Vec<Site> {
+    let calls = helper_calls(source, helpers, module, variants);
+    let mut read: Option<HashSet<String>> = None;
+    let mut by_marker = |query: &str| {
+        is_marked(query) && read.get_or_insert_with(|| literals(source)).contains(query)
+    };
+    calls
+        .into_iter()
+        .map(|call| {
+            let lines = call.typed_lines();
+            let queries: Vec<String> = match (&call.query, call.variants.is_empty()) {
+                (None, _) => Vec::new(),
+                (Some(query), true) => vec![query.clone()],
+                (Some(_), false) => call.variants.iter().map(|v| v.query.clone()).collect(),
+            };
+            Site {
+                typed: (!lines.is_empty()).then(|| (*lines.start(), *lines.end())),
+                unchecked: (call.query.is_none()
+                    && !call.row.is_some_and(|row| is_any(row, source)))
+                .then_some(if call.dynamic {
+                    Rule::DynamicQuery
+                } else {
+                    Rule::UncheckedQuery
+                }),
+                queries: queries.into_iter().filter(|q| !by_marker(q)).collect(),
+                start: call.query_span.filter(|_| call.literal).map(|span| span.0),
+            }
+        })
+        .collect()
+}
+
+/// The diagnostics of a source that does not parse (see [`crate::parse`]): what its
+/// strings alone tell, by line.
+pub fn unparsed(text: &str, run: &Run<'_>) -> Found {
+    let (options, rules) = (run.settings.options, run.settings.rules);
+    let mut found = Vec::new();
+    if may_need_lexing(text, &options.style.wrapper_name) {
+        found = checker::check_source(text, options, rules, &[]);
+        checker::add_fix_imports(text, options, &mut found);
+    }
+    if rules.is_enabled(Rule::Sqruff) {
+        let (severity, lines) = (
+            rules.severity(Rule::Sqruff),
+            crate::scopes::Lines::new(text),
+        );
+        found.extend((run.lint)(text).into_iter().map(|lint| Diagnostic {
+            rule: Rule::Sqruff,
+            message: lint.message,
+            severity,
+            line: lines.line(lint.query_start),
+            span: lint.span,
+            fix: Vec::new(),
+        }));
+    }
+    found.sort_by_key(|diagnostic| diagnostic.line);
+    Found {
+        diagnostics: found
+            .into_iter()
+            .map(|diagnostic| Reported {
+                diagnostic,
+                redundant: None,
+            })
+            .collect(),
+        needed: HashSet::new(),
+    }
+}
+
 /// `sqlty._check.diagnostics`: every diagnostic of `source` before inline suppression, by
-/// line; `None` for a module that needs what Rust does not read yet.
-pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Option<Found> {
+/// line.
+pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
     static MARKED_TEMPLATE: LazyLock<Regex> = LazyLock::new(|| {
         pattern(r#"(?:^|[^\w])(?:[tT][rR]?|[rR][tT])(?:'|")+[\s\x1c-\x1f]*--[\s\x1c-\x1f]?sql"#)
     });
@@ -1015,7 +1225,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Option<Found> {
         checker::add_fix_imports(text, options, &mut base);
     }
 
-    let mut found = helper_calls(source, run.helpers, run.settings.module)?;
+    let mut found = helper_calls(source, run.helpers, run.settings.module, run.variants);
     let mut driver_calls: Vec<Call<'_>> = Vec::new();
     if drivers::may_hold(text) {
         for call in drivers::find(text, source.body(), &source.imports) {
@@ -1029,8 +1239,11 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Option<Found> {
                 single: call.single,
                 dynamic: false,
                 reason: None,
+                variants: Vec::new(),
+                declared: None,
                 configured: false,
                 query_span: Some(call.query_span),
+                literal: false,
             });
         }
     }
@@ -1057,8 +1270,11 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Option<Found> {
                 single: None,
                 dynamic: false,
                 reason: None,
+                variants: Vec::new(),
+                declared: None,
                 configured: false,
                 query_span: Some(template.span),
+                literal: false,
             });
         }
     }
@@ -1076,6 +1292,25 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Option<Found> {
         }
     }
     let typed: HashSet<usize> = found.iter().flat_map(Call::typed_lines).collect();
+    // Each variant of a call built in branches is checked as a call of its own.
+    let (branched, mut found): (Vec<Call<'_>>, Vec<Call<'_>>) =
+        found.into_iter().partition(|call| call.variants.len() > 1);
+    let variants = branched.iter().flat_map(|call| {
+        call.variants.iter().map(move |variant| Call {
+            query: Some(variant.query.clone()),
+            declared: variant.declared.clone(),
+            variants: Vec::new(),
+            ..call.clone()
+        })
+    });
+    let variants: Vec<Call<'_>> = variants
+        .enumerate()
+        .map(|(index, call)| Call {
+            line: VARIANT_LINE + index,
+            ..call
+        })
+        .collect();
+    found.extend(variants);
     base.retain(|diagnostic| {
         !(diagnostic.rule == Rule::StaleRewrite && typed.contains(&diagnostic.line))
     });
@@ -1099,7 +1334,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Option<Found> {
     let mut out = Found {
         diagnostics: base
             .into_iter()
-            .map(|diagnostic| crate::rows::Reported {
+            .map(|diagnostic| Reported {
                 diagnostic,
                 redundant: None,
             })
@@ -1107,7 +1342,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Option<Found> {
         needed: HashSet::new(),
     };
     if queries.is_empty() && found.is_empty() && driver_calls.is_empty() && declared.is_empty() {
-        return Some(out);
+        return out;
     }
 
     let dialect = options.dialect.name();
@@ -1158,8 +1393,11 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Option<Found> {
     module.values();
     let passes = module.ctx.finish();
     out.diagnostics.extend(passes.diagnostics);
+    if !branched.is_empty() {
+        out.diagnostics = merge_variants(out.diagnostics, &branched);
+    }
     out.needed = passes.needed;
     out.diagnostics
         .sort_by_key(|reported| reported.diagnostic.line);
-    Some(out)
+    out
 }

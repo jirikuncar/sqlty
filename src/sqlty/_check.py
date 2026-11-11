@@ -132,10 +132,13 @@ class _Check:
         self.imported_defs: dict[str, dict[str, TypeInfo]] = {}
         self.row_usage = RowUsage()
         if helpers is not None:
-            p_names = {
+            p_names = [
                 ast.unparse(p) for _, p, _, _ in declared if isinstance(p, ast.Name | ast.Attribute)
-            }
-            for name in ({q[1] for q in [*queries, *named]} | p_names) - self.type_defs.keys():
+            ]
+            # In the order written: modules importing each other's row types read the first whole.
+            for name in dict.fromkeys([*(q[1] for q in [*queries, *named]), *p_names]):
+                if name in self.type_defs:
+                    continue
                 if (imported := helpers.row_type(parsed, name)) is not None:
                     self.type_defs[name], self.imported_defs[name] = imported
         for name, info in self.type_defs.items():
@@ -570,7 +573,7 @@ def diagnostics(
         row_usage.redundant += own.redundant
     if AST == "compare":
         index = None if helpers is None else helpers.rust()
-        if variants is None and (helpers is None or index is not None):
+        if helpers is None or index is not None:
             _compare_module(
                 parsed,
                 found,
@@ -583,9 +586,10 @@ def diagnostics(
                 module,
                 coerce,
                 index,
+                variants,
             )
         else:
-            # What Rust reads so far: the module by itself, each call one query.
+            # An index Rust does not read: the module by itself.
             diagnostics(
                 parsed,
                 dialect=dialect,
@@ -595,6 +599,7 @@ def diagnostics(
                 untyped=untyped,
                 helpers=None,
                 module=module,
+                variants=variants,
                 coerce=coerce,
             )
     return found
@@ -612,6 +617,7 @@ def _compare_module(
     module: str | None,
     coerce: frozenset[str],
     index: ModuleIndex | None = None,
+    variants: int | None = None,
 ) -> None:
     """``SQLTY_AST=compare``: ``sqlty_python::check`` must report what these passes do."""
     rust = _module_diagnostics(
@@ -626,6 +632,7 @@ def _compare_module(
         coerce=sorted(coerce),
         index=index,
         name=parsed.module,
+        variants=variants,
     )
     if rust is None:
         return
