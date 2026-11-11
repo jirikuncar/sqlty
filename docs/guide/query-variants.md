@@ -63,7 +63,10 @@ on every path:
 | A `psycopg.sql` composition of these | `sql.SQL("... {}").format(sql.SQL(where))` |
 
 A condition tested twice takes the same branch both times, as long as nothing it reads
-is assigned in between. Names bound together in one branch stay together. A `case` of
+changes in between: a name it reads is assigned or deleted, has an attribute or item
+assigned (`o.on = ...`, `xs[0] = ...`), or has a method called as a statement
+(`xs.append(...)`). A condition with `:=`, `await` or `yield` may take either branch
+each time. Names bound together in one branch stay together. A `case` of
 string literals keeps only the values it matches, so `case "foo": return` drops `foo`
 from the variants after the `match`. A function called without an argument reads the
 default of its parameter.
