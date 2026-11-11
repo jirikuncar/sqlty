@@ -182,8 +182,7 @@ impl Check<'_> {
 
 /// The diagnostics of the row types `source` names in `SQL[Row](...)` calls.
 pub fn check(source: &Arc<Source>, settings: &Settings<'_>) -> Found {
-    let wrapper = settings.options.style.wrapper_name.as_str();
-    if !source.text.contains(wrapper) {
+    if !crate::check::may_wrap(&source.text, &settings.options.style.import_line) {
         return Found::default();
     }
     let queries = row_queries(source, settings);

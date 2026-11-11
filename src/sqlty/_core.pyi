@@ -1,6 +1,7 @@
 """Type stubs for the Rust extension module (sqlty._core)."""
 
 import ast
+from pathlib import Path
 from typing import Any, final
 
 from sqlty._lint import Diagnostic
@@ -212,6 +213,8 @@ def module_diagnostics(
     untyped: bool = False,
     module: str | None = None,
     coerce: list[str] = ...,
+    index: ModuleIndex | None = None,
+    name: str | None = None,
 ) -> (
     tuple[
         list[Diagnostic],
@@ -220,6 +223,14 @@ def module_diagnostics(
     ]
     | None
 ): ...
+
+@final
+class ModuleIndex: ...
+
+def module_index(
+    version: tuple[int, int],
+    steps: list[tuple[str, str, str, str | None, list[Path], str | None]],
+) -> ModuleIndex | None: ...
 def wrapped_queries(
     source: str, *, import_style: str | None = None
 ) -> list[tuple[int, str, str | None, tuple[int, int]]]: ...

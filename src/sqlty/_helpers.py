@@ -22,7 +22,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from sqlty._core import helper_sites
+from sqlty._core import ModuleIndex, helper_sites, module_index
 from sqlty._params import ParamArg, arg_type, literal_params
 from sqlty._psycopg import UNCHECKED
 from sqlty._source import AST, AstMismatch, ParsedSource
@@ -337,6 +337,15 @@ class HelperIndex:
         self._read: dict[tuple[Path, str], ParsedSource | None] = {}
         # Held while a cycle sentinel is cached, so only the thread that set it can read it.
         self._lock = threading.RLock()
+        # How the index was filled, to build it again in Rust.
+        self._steps: list[tuple[str, str, str, str | None, list[Path], str | None]] = []
+        self._rust: tuple[int, ModuleIndex | None] | None = None
+
+    def rust(self) -> ModuleIndex | None:
+        """The index as Rust reads it; ``None`` when it does not read one of the modules."""
+        if self._rust is None or self._rust[0] != len(self._steps):
+            self._rust = len(self._steps), module_index(sys.version_info[:2], self._steps)
+        return self._rust[1]
 
     def fork(self) -> HelperIndex:
         """A copy whose later ``register`` calls do not reach this index; sources are shared."""
@@ -351,6 +360,7 @@ class HelperIndex:
         other._names_of = self._names_of
         other._read = self._read
         other._lock = self._lock
+        other._steps = list(self._steps)
         return other
 
     def add(self, module: str, source: str | ParsedSource) -> bool:
@@ -363,6 +373,7 @@ class HelperIndex:
         if parsed.module is None:
             parsed.module = module
         self.sources[module] = parsed
+        self._steps.append(("add", module, parsed.text, parsed.module, [], None))
         if parsed.module is not None and parsed.module.endswith(".__init__"):
             self.packages.add(module)
         parts = module.split(".")
@@ -403,6 +414,7 @@ class HelperIndex:
             >>> index.modules["db"]["run"].keywords == {"sql", "form"}
             True
         """
+        self._steps.append(("register", import_path, query, row, list(roots), database))
         parts = import_path.split(".")
         for i in range(len(parts) - 1, 0, -1):
             module, name = ".".join(parts[:i]), ".".join(parts[i:])
@@ -584,9 +596,21 @@ class HelperIndex:
     def names(self) -> frozenset[str]:
         """Unqualified names of the indexed helpers, methods included."""
         if self._names is None:
-            self._names = frozenset(
+            names = {
                 name.rpartition(".")[2] for helpers in self.modules.values() for name in helpers
-            )
+            }
+            # A module can re-export a helper under another name, which a call then spells.
+            for _ in range(8):
+                renamed = {
+                    local
+                    for module, parsed in self.sources.items()
+                    for local, (_, original) in self._reexports(module, parsed).items()
+                    if original in names and local not in names
+                }
+                if not renamed:
+                    break
+                names |= renamed
+            self._names = frozenset(names)
         return self._names
 
     def mentions(self, source: str) -> bool:
