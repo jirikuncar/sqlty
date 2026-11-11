@@ -54,4 +54,7 @@ pub(crate) mod scan;
 pub mod scopes;
 pub(crate) mod template;
 pub mod templates;
+#[allow(missing_docs)]
+pub mod types;
+pub mod unparse;
 pub(crate) mod tokens;

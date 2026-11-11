@@ -32,7 +32,7 @@ pub struct Import {
 }
 
 /// The imports of a module, as the Python passes read them.
-pub(crate) struct Imports {
+pub struct Imports {
     /// Every alias, in `ast.walk` order.
     pub entries: Vec<Import>,
     /// `ParsedSource.imported_names`.
@@ -42,7 +42,8 @@ pub(crate) struct Imports {
 }
 
 impl Imports {
-    pub(crate) fn of(body: &[Stmt]) -> Self {
+    /// The imports of `body`, at any depth.
+    pub fn of(body: &[Stmt]) -> Self {
         let mut imports = Vec::new();
         collect_imports(body, 1, &mut imports);
         imports.sort_by_key(|(depth, _)| *depth);
