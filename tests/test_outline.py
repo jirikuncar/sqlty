@@ -54,9 +54,7 @@ def _summary(info: TypeInfo) -> dict[str, object]:
         return repr(value)
 
     return {
-        slot: plain(getattr(info, slot, None))
-        for slot in type(info).__slots__
-        if slot != "coerced"
+        slot: plain(getattr(info, slot, None)) for slot in type(info).__slots__ if slot != "coerced"
     }
 
 

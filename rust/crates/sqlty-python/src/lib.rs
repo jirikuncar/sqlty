@@ -40,9 +40,9 @@
 pub mod calls;
 #[allow(missing_docs)]
 pub mod check;
+pub mod checker;
 #[allow(missing_docs)]
 pub mod compose;
-pub mod checker;
 pub mod config;
 pub mod drivers;
 pub mod edit;
@@ -66,8 +66,8 @@ pub mod scopes;
 pub mod suppress;
 pub(crate) mod template;
 pub mod templates;
+pub(crate) mod tokens;
 #[allow(missing_docs)]
 pub mod types;
 pub mod unparse;
 pub mod variants;
-pub(crate) mod tokens;

@@ -94,8 +94,8 @@ SQLTY_AST=rust uv run sqlty check .      # the Rust passes
 SQLTY_AST=compare uv run pytest          # both, raising AstMismatch where they differ
 ```
 
-A change to one engine needs the same change in the other; CI runs the mdtests and the
-CLI tests in `compare` mode.
+A change to one engine needs the same change in the other; CI runs the Markdown tests
+and the CLI tests in `compare` mode.
 
 ### Markdown Tests (mdtest)
 

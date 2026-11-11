@@ -898,7 +898,7 @@ def _python_sites(
                 None
                 if call.query is not None or is_any_row(call)
                 else ("dynamic-query" if call.dynamic else "unchecked-query"),
-                call.query_span[0] if literal and call.query_span else None,
+                call.query_span[0] if literal and call.query_span is not None else None,
             )
         )
     return sites

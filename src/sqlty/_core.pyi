@@ -195,13 +195,11 @@ def module_diagnostics(
     index: ModuleIndex | None = None,
     name: str | None = None,
     variants: int | None = None,
-) -> (
-    tuple[
-        list[Diagnostic],
-        list[tuple[str | None, str, str] | None],
-        list[tuple[str | None, str, str]],
-    ]
-): ...
+) -> tuple[
+    list[Diagnostic],
+    list[tuple[str | None, str, str] | None],
+    list[tuple[str | None, str, str]],
+]: ...
 
 type _Helper = tuple[
     list[str],
