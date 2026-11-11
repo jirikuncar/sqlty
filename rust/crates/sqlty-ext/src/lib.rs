@@ -1008,33 +1008,51 @@ type IndexStep = (
     Option<String>,
 );
 
+/// `index` after `steps`; None where Rust does not read one of the modules.
+fn indexed(
+    mut index: sqlty_python::index::Builder,
+    version: (u8, u8),
+    steps: Vec<IndexStep>,
+) -> Option<ModuleIndex> {
+    use sqlty_python::index::Roots;
+    use sqlty_python::types::symbols::Source;
+    for (kind, first, second, third, roots, database) in steps {
+        if kind == "add" {
+            let source = Source::new(&second, version)?.named(third.as_deref());
+            index.add(&first, source);
+        } else {
+            let roots = Roots {
+                paths: &roots,
+                read: &|path| std::fs::read_to_string(path).ok(),
+            };
+            index.register(
+                &first,
+                &second,
+                third.as_deref(),
+                roots,
+                database.as_deref(),
+            );
+        }
+    }
+    let index = index.build();
+    (!index.unread()).then_some(ModuleIndex(index))
+}
+
 /// None where Rust does not read one of the modules.
 #[pyfunction]
 fn module_index(py: Python<'_>, version: (u8, u8), steps: Vec<IndexStep>) -> Option<ModuleIndex> {
-    use sqlty_python::index::{Builder, Roots};
-    use sqlty_python::types::symbols::Source;
     detach(py, || {
-        let mut index = Builder::new(version);
-        for (kind, first, second, third, roots, database) in steps {
-            if kind == "add" {
-                let source = Source::new(&second, version)?.named(third.as_deref());
-                index.add(&first, source);
-            } else {
-                let roots = Roots {
-                    paths: &roots,
-                    read: &|path| std::fs::read_to_string(path).ok(),
-                };
-                index.register(
-                    &first,
-                    &second,
-                    third.as_deref(),
-                    roots,
-                    database.as_deref(),
-                );
-            }
-        }
-        Some(ModuleIndex(index.build()))
+        indexed(sqlty_python::index::Builder::new(version), version, steps)
     })
+}
+
+#[pymethods]
+impl ModuleIndex {
+    /// A fork of the index after `steps`, sharing what is read of the modules; None where
+    /// Rust does not read one of the modules.
+    fn extended(&self, py: Python<'_>, steps: Vec<IndexStep>) -> Option<ModuleIndex> {
+        detach(py, || indexed(self.0.fork(), self.0.version(), steps))
+    }
 }
 
 /// Every diagnostic of `source` before inline suppression, as `sqlty_python::check` reports
@@ -1071,10 +1089,20 @@ fn module_diagnostics(
         let schema = schema(schema_sql, dialect);
         let options = Options::new(dialect, schema.as_deref(), import_style, untyped)?;
         let rules = RuleConfig::from_overrides(rules).map_err(ConfigError::from)?;
-        let Some(parsed) = Source::new(source, version) else {
-            return Ok(None);
+        // The module as the index read it, when it is the same text.
+        let known = name.zip(helpers.as_ref()).and_then(|(name, index)| {
+            let module = name.strip_suffix(".__init__").unwrap_or(name);
+            let known = index.source(module)?;
+            (known.module.as_deref() == Some(name) && *known.text == *source)
+                .then(|| Arc::clone(known))
+        });
+        let parsed = match known {
+            Some(parsed) => parsed,
+            None => match Source::new(source, version) {
+                Some(parsed) => Arc::new(parsed.named(name)),
+                None => return Ok(None),
+            },
         };
-        let parsed = parsed.named(name);
         let settings = rows::Settings {
             options: &options,
             rules: &rules,
@@ -1101,7 +1129,7 @@ fn module_diagnostics(
             helpers: helpers.as_deref(),
             variants,
         };
-        let Some(found) = check::diagnostics(&Arc::new(parsed), &run) else {
+        let Some(found) = check::diagnostics(&parsed, &run) else {
             return Ok(None);
         };
         let mut needed: Vec<FieldKey> = found.needed.into_iter().collect();

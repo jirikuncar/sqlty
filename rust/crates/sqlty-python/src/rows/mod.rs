@@ -169,12 +169,20 @@ impl Check<'_> {
         let Some(info) = self.type_defs.get(class.id.as_str()) else {
             return;
         };
+        // The class of this source on the line of `info`, which may be another module's.
+        let source = self.source;
+        let Some(node) = source.classes().into_iter().find(|node| {
+            source.line(crate::types::extract::class_start(node, &source.text)) == info.lineno
+        }) else {
+            return;
+        };
+        let params = crate::types::extract::type_params(node, source);
         let names = ModuleTypes::new(
             self.source.clone(),
             self.settings.index,
             self.settings.module,
         );
-        if let Some(generic) = specialize(info, slice_items(&row.slice), name, &names) {
+        if let Some(generic) = specialize(info, &params, slice_items(&row.slice), name, &names) {
             self.type_defs.insert(name, Arc::new(generic));
         }
     }
@@ -232,11 +240,10 @@ impl<'a> Check<'a> {
         ctx.own_defs = ctx.type_defs.clone();
         let queries: Vec<RowQuery> = queries.into_iter().chain(named).collect();
         if let Some(index) = settings.index {
-            let names: HashSet<&str> = queries
+            let names = queries
                 .iter()
                 .map(|query| query.1.as_str())
-                .chain(params.iter().map(String::as_str))
-                .collect();
+                .chain(params.iter().map(String::as_str));
             for name in names {
                 if !ctx.type_defs.contains(name) {
                     if let Some(imported) = index.row_type(source, name) {

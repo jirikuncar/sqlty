@@ -112,6 +112,7 @@ read yet, which then stays with Python. Merge in order.
 | `03-row-checks` | `rows`: row shapes, nullability, literals, JSON, generics | 751 test modules, 20,000 a property | 3.1 ms, 14.8 ms (40 queries) |
 | `04-calls` | `calls`, `check`: local helpers, driver and template calls, declared params | 1,335 test modules, 20,000 a property | 3.8 ms, 11.1 ms (60 queries) |
 | `05-index` | `index`: helpers, types and row types of the other modules | see below | see below |
+| `06-variants` | `compose`, `variants`: psycopg compositions, queries built in branches, `SQL[R, P]` behind a name | 19,800 test modules, 12,000 generated | see below |
 
 `05-index`: `index::Builder` holds the sources by module name, `add` and `register` as
 `HelperIndex` does, and `build` gives the shared index (`symbols::Index` for types and row
@@ -120,6 +121,29 @@ types, `get` for helpers). `register` reads module files through a closure of th
 comparison. Found by the fuzz and fixed in both: a helper re-exported under another name
 (`from .db import run as go`) was missed when no other pass had read the calling function,
 so `HelperIndex.names` now includes such names.
+
+`06-variants`: `compose` models `psycopg.sql` (`SQL`, `Identifier`, `Literal`,
+`Placeholder`, `Composed`, `format`, `join`, `+`, and `str.format`) instead of building the
+composition with psycopg; `variants` is `_variants.py`. The check then reads every helper
+call: a query that is not a literal is rendered, read as variants (each checked as a call
+of its own and merged at the call) or as the query of one `SQL[R, P]`, whose `P` the
+arguments are checked against. Rust declines only a module where a composition computes
+what the model does not cover (a `Literal` of a float, say). Compared on 12,000 generated
+modules and trees, and on the whole suite: 19,800 modules, one declined. Found by the fuzz
+and fixed in Python: a `psycopg.ProgrammingError` escaped `render` for a list of
+composables passed as a literal.
+
+### Differences kept
+
+- A rule or severity the configuration misspells raises in Rust for every module; Python
+  raises only for a module the lexer reads (`rules={"bogus": "error"}` without `SQL[`).
+- A call spelled with characters NFKC folds (`ｒｕｎ(...)` for `run`) inside a function:
+  Python finds a helper call only when another pass has read the function, Rust never;
+  Python skips such a driver method, Rust reads it.
+- `HelperIndex.fork()` shares its sources with the parent in Python, so `add` on a fork
+  reaches the parent; the Rust fork copies. Nothing adds to a fork.
+- `register` with `roots`: a file Rust does not read (over 256 KiB, a NUL) makes the Rust
+  index decline while Python is there to read it.
 
 ## Where ruff and `ast` differ
 

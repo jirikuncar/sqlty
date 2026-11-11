@@ -132,10 +132,13 @@ class _Check:
         self.imported_defs: dict[str, dict[str, TypeInfo]] = {}
         self.row_usage = RowUsage()
         if helpers is not None:
-            p_names = {
+            p_names = [
                 ast.unparse(p) for _, p, _, _ in declared if isinstance(p, ast.Name | ast.Attribute)
-            }
-            for name in ({q[1] for q in [*queries, *named]} | p_names) - self.type_defs.keys():
+            ]
+            # In the order written: modules importing each other's row types read the first whole.
+            for name in dict.fromkeys([*(q[1] for q in [*queries, *named]), *p_names]):
+                if name in self.type_defs:
+                    continue
                 if (imported := helpers.row_type(parsed, name)) is not None:
                     self.type_defs[name], self.imported_defs[name] = imported
         for name, info in self.type_defs.items():

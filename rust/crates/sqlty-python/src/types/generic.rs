@@ -12,6 +12,11 @@ use super::pydantic::Known;
 use super::symbols::ModuleTypes;
 use crate::unparse::unparse;
 
+/// Whether Python's `\w` matches `c`.
+pub(crate) fn is_word(c: char) -> bool {
+    opens_word(c.encode_utf8(&mut [0; 4]))
+}
+
 /// Whether `text` opens with a character Python's `\w` matches.
 fn opens_word(text: &str) -> bool {
     static WORD: LazyLock<Regex> =
@@ -78,7 +83,7 @@ fn parse_at(text: &str, range: TextRange) -> Option<Expr> {
     Some(*parsed.ok()?.into_syntax().body)
 }
 
-/// `specialize`: `info` with the type parameters of its class replaced by `args`,
+/// `specialize`: `info` with `params`, the type parameters of its class, replaced by `args`,
 /// expressions of `source`.
 ///
 /// `None` when the class takes a different number of arguments. An argument that cannot be
@@ -86,11 +91,11 @@ fn parse_at(text: &str, range: TextRange) -> Option<Expr> {
 /// `Row[...]`.
 pub fn specialize(
     info: &TypeInfo,
+    params: &[String],
     args: &[Expr],
     source: &str,
     names: &ModuleTypes,
 ) -> Option<TypeInfo> {
-    let params = &info.type_params;
     if params.is_empty() || params.len() != args.len() {
         return None;
     }

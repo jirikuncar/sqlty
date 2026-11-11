@@ -453,7 +453,7 @@ fn class_name(expr: Option<&Expr>) -> Option<String> {
                     chars
                         .next()
                         .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-                        && chars.all(|c| c.is_alphanumeric() || c == '_')
+                        && chars.all(crate::types::generic::is_word)
                 })
                 .then(|| text.to_string())
         }

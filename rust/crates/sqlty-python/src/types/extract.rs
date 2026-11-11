@@ -99,7 +99,7 @@ impl<'a> ClassNode<'a> {
 }
 
 /// Where `ast` puts a class: at `class`, after its decorators.
-fn class_start(node: &StmtClassDef, source: &str) -> ruff_text_size::TextSize {
+pub(crate) fn class_start(node: &StmtClassDef, source: &str) -> ruff_text_size::TextSize {
     if node.decorator_list.is_empty() {
         return node.start();
     }
@@ -137,7 +137,7 @@ fn item(stmt: &Stmt) -> Option<Item<'_>> {
 }
 
 /// `_type_params`: `T` of `class Row[T]`, or of a `Generic[T]` base.
-fn type_params(node: &StmtClassDef, source: &Source) -> Vec<String> {
+pub(crate) fn type_params(node: &StmtClassDef, source: &Source) -> Vec<String> {
     if let Some(params) = node.type_params.as_deref() {
         return params
             .iter()

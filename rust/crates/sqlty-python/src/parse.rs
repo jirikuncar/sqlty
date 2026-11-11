@@ -66,6 +66,12 @@ pub fn module(source: &str) -> Option<Parsed<ModModule>> {
 
 /// The expression `source`, when `ast.parse(source, mode="eval")` reads it the same.
 pub fn expression(source: &str) -> Option<Parsed<ModExpression>> {
+    // A last line of only blanks after a line break is an indent to Python's tokenizer.
+    let last = source.rsplit(['\n', '\r']).next().unwrap_or("");
+    if last.len() < source.len() && !last.is_empty() && last.chars().all(|c| " \t\x0c".contains(c))
+    {
+        return None;
+    }
     let parsed = guarded(source, parse_expression)?;
     if !within_limits(&parsed) || has_huge_int(&parsed, source) {
         return None;

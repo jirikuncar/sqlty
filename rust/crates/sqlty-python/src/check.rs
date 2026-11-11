@@ -244,9 +244,18 @@ fn declared_params<'a>(source: &'a Source, wrapper: &str, import_line: &str) -> 
 
 /// `is_any`: whether `expr` is `typing.Any`, quoted or in `Annotated` too.
 fn is_any(expr: &Expr, source: &Source) -> bool {
+    let quoted;
+    let expr = match expr {
+        Expr::StringLiteral(text) => {
+            let Some(parsed) = crate::parse::expression(text.value.to_str()) else {
+                return false;
+            };
+            quoted = parsed;
+            &*quoted.syntax().body
+        }
+        other => other,
+    };
     match expr {
-        Expr::StringLiteral(text) => crate::parse::expression(text.value.to_str())
-            .is_some_and(|parsed| is_any(&parsed.syntax().body, source)),
         Expr::Subscript(sub) if source.typing_name(&sub.value) == Some("Annotated") => {
             match sub.slice.as_ref() {
                 Expr::Tuple(items) => items
