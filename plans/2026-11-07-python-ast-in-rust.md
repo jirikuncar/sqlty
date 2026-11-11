@@ -159,6 +159,15 @@ does not parse (see `parse`) gets what its strings tell, the lint included, with
 ignore comments read by `tokenize`. `SQLTY_AST=python` and `compare` still run the Python
 passes, as the oracle of the tests.
 
+Review of `06-variants` (a second reader, 400,000 generated inputs against Python): seven
+edge differences and two quadratic paths, fixed on `09-no-fallback` with
+`tests/test_composed_edges.py`: `Declared.format()` without fields keeps its `P`; only a
+lowercase `u` prefix is part of a condition's key; a `Literal` on `*args` is reported on
+the line of the name; `Placeholder(format=)` takes a plain `str` only; an infinite float
+formats as `inf`; a bare generator argument spans the call's parentheses; variants are
+de-duplicated with a set and module constants are read once per source (16 `Literal`
+parameters: 22 s to 1 s; 4,000 constants read by 400 calls: 17.6 s to 0.04 s).
+
 ### Differences kept
 
 - A lone carriage return ends a line for `ast` and ruff but stops `tokenize`, so Python
@@ -174,6 +183,8 @@ passes, as the oracle of the tests.
   module-level query before one nested above it.
 - A `[[tool.sqlty.functions]]` file Rust does not parse (over 256 KiB, a NUL, a syntax
   error for the newest grammar) registers its helper by keyword only; Python read it.
+- A `str.format` field named with a decimal digit outside ASCII (`{١}`) is an index
+  for CPython; Rust reports the query as `unchecked-query`.
 
 ## Where ruff and `ast` differ
 

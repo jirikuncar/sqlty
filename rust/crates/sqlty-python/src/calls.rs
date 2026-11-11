@@ -669,7 +669,7 @@ pub fn helper_calls<'a>(
             driver: None,
             single: None,
             configured: helper.configured,
-            query_span: Some((query.start().to_usize(), query.end().to_usize())),
+            query_span: Some(query_span(call, query)),
             literal: is_literal,
         });
     }
@@ -725,4 +725,14 @@ fn forwarded(
         }
     }
     false
+}
+
+/// Where the query argument is, as `ast` places it: a bare generator spans the parentheses
+/// of its call.
+pub fn query_span(call: &ExprCall, query: &Expr) -> (usize, usize) {
+    let range = match query {
+        Expr::Generator(generator) if !generator.parenthesized => call.arguments.range(),
+        _ => query.range(),
+    };
+    (range.start().to_usize(), range.end().to_usize())
 }

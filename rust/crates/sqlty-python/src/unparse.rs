@@ -386,7 +386,9 @@ impl Unparser<'_> {
                 self.interpolated(&parts, true);
             }
             Expr::StringLiteral(e) => {
-                if e.value.is_unicode() {
+                // `Constant.kind`: only a lowercase `u` on the first part.
+                let written = self.source.get(e.start().to_usize()..);
+                if written.is_some_and(|text| text.starts_with('u')) {
                     self.out.push('u');
                 }
                 self.out.push_str(&repr_str(e.value.to_str()));

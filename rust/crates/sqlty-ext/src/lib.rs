@@ -1015,7 +1015,7 @@ fn call_variants(
             .iter()
             .map(|(call, stack)| {
                 let query: &Expr = &call.arguments.args[0];
-                let at = query.start().to_usize();
+                let at = sqlty_python::calls::query_span(call, query).0;
                 let stack: Vec<_> = stack.iter().map(|scope| scan.scopes[*scope]).collect();
                 match query_variants(&source, &stack, call.range(), query, limit, None) {
                     None => (at, false, None, false, None),

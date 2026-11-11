@@ -449,7 +449,6 @@ fn argument_names(parameters: &Parameters, out: &mut HashSet<String>) {
 /// What a walk needs of a module.
 struct Module<'a> {
     scan: compose::Scan<'a>,
-    constants: Dict<Option<&'a Expr>>,
     /// The names that spell `sqlty.SQL`.
     marker: HashSet<String>,
     /// The frame reading the module-level constants.
@@ -624,7 +623,6 @@ impl<'a, 'r> Walk<'a, 'r> {
         let frame = Frame::new(source, Follow::Constants, &[], &[]);
         let module = Rc::new(Module {
             scan: compose::Scan::new(source),
-            constants: compose::constants(source),
             marker: crate::calls::marker_names(source).1,
             frame: Rc::new(frame.unwrap_or(Frame {
                 source,
@@ -1164,7 +1162,7 @@ impl<'a, 'r> Walk<'a, 'r> {
             };
             let members = literal_members(param.annotation.as_deref(), &frame.source.text)
                 .ok_or(Halt::Dynamic)?;
-            let line = Lines::from([frame.source.lines.line(param.start().to_usize())]);
+            let line = Lines::from([frame.source.lines.line(param.name().start().to_usize())]);
             return Ok(members
                 .into_iter()
                 .map(|member| {
@@ -1180,7 +1178,7 @@ impl<'a, 'r> Walk<'a, 'r> {
             return Err(Halt::Dynamic);
         }
         let module = self.module(frame.source);
-        if let Some(Some(value)) = module.constants.get(name) {
+        if let Some(value) = compose::constant(frame.source, name) {
             let constants = module.frame.clone();
             return self.values(Operand::Expr(value), path, &constants);
         }
@@ -1547,6 +1545,7 @@ pub fn query_variants<'a>(
         return unchecked(&walk, None);
     };
     let mut found: Vec<(String, Option<Declared<'a>>, Lines)> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
     let walked: Walked<'a, ()> = (|| {
         let body = Body::Stmts(frame.body);
         let paths = match walk.block(&frame, body, vec![Path::default()], Some(call), None, false) {
@@ -1561,7 +1560,7 @@ pub fn query_variants<'a>(
                     Value::Str(text) => (text, None),
                     other => (other.as_string()?, None),
                 };
-                if !found.iter().any(|(known, _, _)| *known == text) {
+                if seen.insert(text.clone()) {
                     found.push((text, declared, lines));
                 }
             }

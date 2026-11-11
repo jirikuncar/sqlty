@@ -608,7 +608,7 @@ impl Tree {
             return None;
         }
         let source = self.sources.get(module)?;
-        if let Some(Some(value)) = crate::compose::constants(source).get(name) {
+        if let Some(value) = crate::compose::constant(source, name) {
             return Some((source, value));
         }
         let exports = self.reexports(module, source);
