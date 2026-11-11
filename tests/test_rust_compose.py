@@ -18,8 +18,6 @@ from sqlty._core import rendered_compositions
 from sqlty._source import ParsedSource
 from tests.test_rust_types import FUZZ, parses
 
-pytest.importorskip("psycopg")
-
 HEAD = """\
 import psycopg
 from psycopg import sql

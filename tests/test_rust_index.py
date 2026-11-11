@@ -18,7 +18,8 @@ from hypothesis import strategies as st
 
 from sqlty import _check
 from sqlty._helpers import HelperIndex
-from sqlty._source import AST, ParsedSource
+from sqlty._source import ParsedSource
+from sqlty.core import check_source
 from tests.test_rust_check import QUERIES, RULES, SCHEMAS, arguments
 from tests.test_rust_types import FUZZ, parses
 
@@ -378,13 +379,14 @@ def test_registered_file_rust_does_not_read(tmp_path: Path) -> None:
         assert (positional, keywords) == ([], ["row", "sql"])
 
 
-@pytest.mark.skipif(AST == "rust", reason="the names of the Python index")
 def test_names_follow_a_module_added_later() -> None:
     index = HelperIndex()
     index.add("db", ParsedSource(HEAD + DB[1], "db"))
-    assert "zap" not in index.names
+    app = ParsedSource("from alias import zap\nzap('SELECT nope FROM t')\n", "app")
+    settings = {"schema_sql": SCHEMAS["postgres"], "helpers": index, "module": "app"}
+    assert check_source(app, **settings) == []
     index.add("alias", ParsedSource("from db import run as zap\n", "alias"))
-    assert "zap" in index.names
+    assert [d["rule"] for d in check_source(app, **settings)] == ["unknown-column"]
 
 
 def test_one_index_on_two_threads() -> None:

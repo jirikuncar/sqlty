@@ -9,7 +9,7 @@ import tokenize
 import pytest
 
 from sqlty._cli import main
-from sqlty._source import AST, ParsedSource
+from sqlty._source import AST, AstMismatch, ParsedSource
 from sqlty.core import check_source
 
 SCHEMA = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);\n"
@@ -41,8 +41,6 @@ PLAIN = "import os\n\n\ndef f(x):\n    return os.path.join(x, 'a')  # an ordinar
 @pytest.fixture
 def parses(monkeypatch: pytest.MonkeyPatch) -> collections.Counter[str]:
     """Module-source ``ast.parse`` calls by source text (quoted annotations are not counted)."""
-    if AST == "compare":
-        pytest.skip("SQLTY_AST=compare parses with ast to compare")
     counter: collections.Counter[str] = collections.Counter()
     real = ast.parse
 
@@ -110,8 +108,8 @@ def test_cli_parses_each_file_once(tmp_path, monkeypatch, parses, tokenized, cap
     # `SQLTY_AST=rust` parses nothing with `ast`.
     assert parses[HELPER] == (AST != "rust")
     assert parses[USER_TYPE] == (AST != "rust")
-    # `SQLTY_AST=python` reads the imports of every indexed module to find re-exported helpers.
-    assert parses[PLAIN] == (AST == "python")
+    # The Python index reads the imports of every module to find re-exported helpers.
+    assert parses[PLAIN] == (AST != "rust")
     assert max(parses.values(), default=0) <= 1
     assert len(tokenized) == (AST != "rust")
 
@@ -164,7 +162,6 @@ def test_parsed_source_facts():
     assert ParsedSource("x = 1 # not it\n").ignores == {}
 
 
-@pytest.mark.skipif(AST != "rust", reason="what the Rust check reads")
 def test_what_rust_does_not_model_is_reported_unchecked():
     helper = (
         "from typing import Annotated, LiteralString\nfrom psycopg import sql\n"
@@ -173,10 +170,15 @@ def test_what_rust_does_not_model_is_reported_unchecked():
     )
     # `str.isdigit` digits that `int` may not read.
     source = helper + "run(sql.SQL('SELECT {٣}').format(1, 2, 3, 4), int)\n"
-    assert [(d["rule"], d["line"]) for d in check_source(source)] == [("unchecked-query", 5)]
+    if AST == "compare":
+        with pytest.raises(AstMismatch):
+            check_source(source)
+        return
+    # psycopg reads the digit as an index, and so does the Python pass.
+    expected = [("unchecked-query", 5)] if AST == "rust" else []
+    assert [(d["rule"], d["line"]) for d in check_source(source)] == expected
 
 
-@pytest.mark.skipif(AST != "rust", reason="what the Rust check reads")
 def test_a_source_that_does_not_parse_is_read_by_its_strings(parses, tokenized):
     source = "q = '--sql\\nSELECT 1 FROM'  # sqlty: ignore[stale-rewrite]\ndef f(:\n"
     assert [d["rule"] for d in check_source(source)] == ["unparsed-query", "unused-ignore"]

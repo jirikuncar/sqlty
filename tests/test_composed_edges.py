@@ -7,7 +7,7 @@ import time
 import pytest
 
 from sqlty._helpers import HelperIndex
-from sqlty._source import AST, ParsedSource
+from sqlty._source import AST, AstMismatch, ParsedSource
 from sqlty.core import check_source
 
 SCHEMA = "CREATE TABLE t (id INTEGER NOT NULL, note TEXT);"
@@ -73,10 +73,15 @@ def test_infinite_float_is_formatted_as_inf():
     assert found(body) == [(2, "unknown-column", "column `inf` does not exist in `t`")]
 
 
-@pytest.mark.skipif(AST != "rust", reason="Python reads the digit as an index")
 def test_field_named_with_another_digit_is_not_read_as_a_keyword():
     body = 'def f():\n    run("SELECT {١} FROM t".format("id", "nope"), int)\n'
-    assert [rule for _, rule, _ in found(body)] == ["unchecked-query"]
+    if AST == "compare":
+        with pytest.raises(AstMismatch):
+            found(body)
+        return
+    # Python reads the digit as an index, as CPython does; Rust leaves the query unchecked.
+    expected = "unchecked-query" if AST == "rust" else "unknown-column"
+    assert [rule for _, rule, _ in found(body)] == [expected]
 
 
 def test_bare_generator_argument_spans_the_parentheses():
