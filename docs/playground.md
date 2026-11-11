@@ -197,7 +197,7 @@ The file tabs above the editor switch between the files `sqlty check` reads:
 |---|---|---|
 | `queries.py` | The Python source: diagnostics under the code with their quick fixes, SQL highlighted in query strings, completion and hover in queries | [`sqlty server`](recipes/vscode.md) |
 | `schema.sql` | The `CREATE TABLE` statements the queries are typed against | [`schema`](reference/configuration.md#schema) |
-| `sqlty.toml` | The `dialect`, `driver`, `import-style`, `param-types`, `rules` and `types` of [`[tool.sqlty]`](reference/configuration.md); its `dialect` wins over the select | `sqlty.toml` or `pyproject.toml` |
+| `sqlty.toml` | The `dialect`, `driver`, `import-style`, `param-types`, `preview`, `max-query-variants`, `rules` and `types` of [`[tool.sqlty]`](reference/configuration.md); its `dialect` wins over the select | `sqlty.toml` or `pyproject.toml` |
 
 The console below the editor shows what sqlty makes of them:
 

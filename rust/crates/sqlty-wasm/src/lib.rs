@@ -87,8 +87,8 @@ struct Request {
 ///   `Cargo.toml` without one, unless `required`. A host finds and merges the files
 ///   (`extend`), then passes the result as `settings`.
 ///
-/// `config` is a `sqlty.toml` whose `dialect`, `driver`, `import-style`, `param-types`, `rules`
-/// and `types` apply; another key, or an invalid one, is an `error`, as `sqlty check` reports
+/// `config` is a `sqlty.toml` whose `dialect`, `driver`, `import-style`, `param-types`,
+/// `preview`, `max-query-variants`, `rules` and `types` apply; another key, or an invalid one, is an `error`, as `sqlty check` reports
 /// it. `settings` replaces it with a table `config` answered, `extend` applied.
 pub fn run(request: &str) -> String {
     let error = |error: String| json!({ "error": error }).to_string();
@@ -147,7 +147,14 @@ pub fn run(request: &str) -> String {
             let has_schema = schema
                 .as_ref()
                 .is_some_and(|schema| !schema.databases().is_some_and(|all| all.absent));
-            let diagnostics = checked(source, dialect, &options, &rules, has_schema);
+            let diagnostics = checked(
+                source,
+                dialect,
+                &options,
+                &rules,
+                has_schema,
+                settings.variants,
+            );
             json!({
             "diagnostics": diagnostics
                 .iter()
@@ -214,6 +221,8 @@ struct Settings {
     dialect: Option<String>,
     import_style: Option<String>,
     param_types: bool,
+    /// `max-query-variants`, with `preview`.
+    variants: Option<usize>,
     rules: HashMap<String, String>,
     types: Vec<(String, String)>,
 }
@@ -240,20 +249,29 @@ fn resolved(table: &serde_json::Map<String, Value>) -> Settings {
         dialect,
         import_style: text("import-style"),
         param_types: table.get("param-types") == Some(&Value::Bool(true)),
+        variants: (table.get("preview") == Some(&Value::Bool(true))).then(|| {
+            let most = table.get("max-query-variants").and_then(Value::as_u64);
+            most.map_or(MAX_QUERY_VARIANTS, |most| most as usize)
+        }),
         rules: pairs("rules").into_iter().collect(),
         types,
     }
 }
 
 /// The keys the engine reads: the others name files, which the page has none of.
-const READ: [&str; 6] = [
+const READ: [&str; 8] = [
     "dialect",
     "driver",
     "import-style",
+    "max-query-variants",
     "param-types",
+    "preview",
     "rules",
     "types",
 ];
+
+/// `sqlty._config.MAX_QUERY_VARIANTS`.
+const MAX_QUERY_VARIANTS: usize = 64;
 
 /// The settings of the `sqlty.toml` text `config`, validated as `sqlty check` validates it.
 fn settings(config: &str) -> Result<Settings, String> {
@@ -286,6 +304,7 @@ fn checked(
     options: &Options<'_>,
     rules: &RuleConfig,
     has_schema: bool,
+    variants: Option<usize>,
 ) -> Vec<Diagnostic> {
     let coerce = HashSet::new();
     let settings = rows::Settings {
@@ -310,7 +329,7 @@ fn checked(
         has_schema,
         lint: &lint,
         helpers: None,
-        variants: None,
+        variants,
     };
     let module = Source::new(source, VERSION).map(Arc::new);
     let found = match &module {

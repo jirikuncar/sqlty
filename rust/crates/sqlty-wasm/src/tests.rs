@@ -134,7 +134,7 @@ fn config_errors_are_reported_as_sqlty_check_reports_them() {
         ("[rules]\nselect-star = \"loud\"", "loud"),
         (
             "schema = \"schema.sql\"",
-            "the playground reads only dialect, driver, import-style, param-types, rules, types, not 'schema'",
+            "the playground reads only dialect, driver, import-style, max-query-variants, param-types, preview, rules, types, not 'schema'",
         ),
         ("import-style = \"from x\"", "Unsupported import-style"),
         ("param-types = 1", "param-types must be true or false"),
@@ -311,4 +311,25 @@ fn analyze_honours_ignore_comments() {
 fn analyze_reads_a_source_that_does_not_parse() {
     let source = "q = SQL[tuple[str]](\"--sql\\nSELECT nme FROM users\")\ndef broken(:\n";
     assert_eq!(rules_of(source), ["1:unknown-column"]);
+}
+
+#[test]
+fn preview_checks_each_variant_of_a_query_built_in_branches() {
+    let source = "from typing import Annotated, LiteralString\nfrom sqlty import SQL\n\n\
+        def run[T](q: Annotated[LiteralString, SQL], t: type[T], /) -> list[T]: ...\n\n\
+        def find(active: bool):\n    column = \"id\" if active else \"nme\"\n    \
+        return run(\"SELECT \" + column + \" FROM users\", int)\n";
+    let rules = |config: &str| -> Vec<String> {
+        let answer = ask(&json!({
+            "op": "analyze", "source": source, "schema": SCHEMA, "dialect": "postgres",
+            "config": config,
+        }));
+        let diagnostics = answer["diagnostics"].as_array().unwrap();
+        let rule = |found: &Value| found["rule"].as_str().unwrap().to_string();
+        diagnostics.iter().map(rule).collect()
+    };
+    assert_eq!(rules(""), Vec::<String>::new());
+    assert_eq!(rules("preview = true"), ["unknown-column"]);
+    let limited = rules("preview = true\nmax-query-variants = 1");
+    assert_eq!(limited, Vec::<String>::new());
 }
