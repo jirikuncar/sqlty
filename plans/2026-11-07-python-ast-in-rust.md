@@ -115,6 +115,7 @@ read yet, which then stays with Python. Merge in order.
 | `06-variants` | `compose`, `variants`: psycopg compositions, queries built in branches, `SQL[R, P]` behind a name | 19,800 test modules, 12,000 generated | see below |
 | `07-cli` | the check of `sqlty check`, the language server and `check_source` | the whole suite in `rust`, `compare` and `python` modes | 1.8 s, 5.0 s (`sqlty check`, 8,000 files) |
 | `08-playground` | `suppress`: `# sqlty: ignore`; the playground runs the whole check of a module | 20,000 generated comments, the examples against `check_source` | see below |
+| `09-no-fallback` | `json_types`, `check::sites`, `check::unparsed`: nothing is handed back to Python | the whole suite in `rust`, `compare` and `python` modes; 3,000 generated modules with JSON columns | see below |
 
 `05-index`: `index::Builder` holds the sources by module name, `add` and `register` as
 `HelperIndex` does, and `build` gives the shared index (`symbols::Index` for types and row
@@ -150,6 +151,14 @@ helpers, a driver and ignore comments give the diagnostics of `check_source`. Th
 grows from 12.6 MB to 14.5 MB (2.7 MB to 3.4 MB gzipped); an example takes 1 to 10 ms to
 analyze in node, up to 1 ms more than before.
 
+`09-no-fallback`: with `SQLTY_AST=rust` no pass parses with `ast`: the check, the helper
+index, `fix`, `stats`, the highlights, `# sqlty: ignore` and the `TypedDict`s of JSON
+columns read the ruff tree. The check no longer declines: a composition or a query
+variant that is not modelled is `unchecked-query` or `dynamic-query`, and a source that
+does not parse (see `parse`) gets what its strings tell, the lint included, with its
+ignore comments read by `tokenize`. `SQLTY_AST=python` and `compare` still run the Python
+passes, as the oracle of the tests.
+
 ### Differences kept
 
 - A lone carriage return ends a line for `ast` and ruff but stops `tokenize`, so Python
@@ -161,8 +170,10 @@ analyze in node, up to 1 ms more than before.
   Python skips such a driver method, Rust reads it.
 - `HelperIndex.fork()` shares its sources with the parent in Python, so `add` on a fork
   reaches the parent; the Rust fork copies. Nothing adds to a fork.
-- `register` with `roots`: a file Rust does not read (over 256 KiB, a NUL) makes the Rust
-  index decline while Python is there to read it.
+- The `TypedDict`s of JSON columns are named in source order; `ast.walk` named a
+  module-level query before one nested above it.
+- A `[[tool.sqlty.functions]]` file Rust does not parse (over 256 KiB, a NUL, a syntax
+  error for the newest grammar) registers its helper by keyword only; Python read it.
 
 ## Where ruff and `ast` differ
 

@@ -1052,18 +1052,72 @@ type IndexStep = (
     Option<String>,
 );
 
-/// `index` after `steps`; None where Rust does not read one of the modules.
+type HelperTuple = (
+    Vec<String>,
+    Vec<String>,
+    String,
+    Option<String>,
+    &'static str,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    bool,
+    Option<String>,
+);
+
+fn helper_tuple(helper: &sqlty_python::calls::Helper) -> HelperTuple {
+    use sqlty_python::calls::Kind;
+    let mut keywords: Vec<String> = helper.keywords.iter().cloned().collect();
+    keywords.sort();
+    (
+        helper.positional.clone(),
+        keywords,
+        helper.query.clone(),
+        helper.row.clone(),
+        match helper.kind {
+            Kind::Function => "function",
+            Kind::Static => "static",
+            Kind::Class => "class",
+            Kind::Instance => "instance",
+        },
+        helper.params.clone(),
+        helper.rest.clone(),
+        helper.named.clone(),
+        helper.configured,
+        helper.database.clone(),
+    )
+}
+
+/// The functions and methods of `source` with a marked query parameter, by name
+/// (`Class.method`), as `ModuleIndex.helpers` gives them; none in a source that does not
+/// parse.
+#[pyfunction]
+fn module_helpers(py: Python<'_>, source: &str, version: (u8, u8)) -> HashMap<String, HelperTuple> {
+    use sqlty_python::types::symbols::Source;
+    detach(py, || {
+        let Some(source) = Source::new(source, version) else {
+            return HashMap::new();
+        };
+        sqlty_python::calls::index_functions(&source)
+            .iter()
+            .map(|(name, helper)| (name.to_string(), helper_tuple(helper)))
+            .collect()
+    })
+}
+
+/// `index` after `steps`; a module that does not parse holds nothing.
 fn indexed(
     mut index: sqlty_python::index::Builder,
     version: (u8, u8),
     steps: Vec<IndexStep>,
-) -> Option<ModuleIndex> {
+) -> ModuleIndex {
     use sqlty_python::index::Roots;
     use sqlty_python::types::symbols::Source;
     for (kind, first, second, third, roots, database) in steps {
         if kind == "add" {
-            let source = Source::new(&second, version)?.named(third.as_deref());
-            index.add(&first, source);
+            if let Some(source) = Source::new(&second, version) {
+                index.add(&first, source.named(third.as_deref()));
+            }
         } else {
             let roots = Roots {
                 paths: &roots,
@@ -1078,13 +1132,12 @@ fn indexed(
             );
         }
     }
-    let index = index.build();
-    (!index.unread()).then_some(ModuleIndex(index))
+    ModuleIndex(index.build())
 }
 
-/// None where Rust does not read one of the modules.
+/// The helpers, types and row types of a tree, filled as `HelperIndex` is.
 #[pyfunction]
-fn module_index(py: Python<'_>, version: (u8, u8), steps: Vec<IndexStep>) -> Option<ModuleIndex> {
+fn module_index(py: Python<'_>, version: (u8, u8), steps: Vec<IndexStep>) -> ModuleIndex {
     detach(py, || {
         indexed(sqlty_python::index::Builder::new(version), version, steps)
     })
@@ -1092,9 +1145,23 @@ fn module_index(py: Python<'_>, version: (u8, u8), steps: Vec<IndexStep>) -> Opt
 
 #[pymethods]
 impl ModuleIndex {
-    /// A fork of the index after `steps`, sharing what is read of the modules; None where
-    /// Rust does not read one of the modules.
-    fn extended(&self, py: Python<'_>, steps: Vec<IndexStep>) -> Option<ModuleIndex> {
+    /// The helpers by module and name (`Class.method` for a method), each as
+    /// `(positional, keywords, query, row, kind, params, rest, named, configured, database)`.
+    fn helpers(&self) -> HashMap<String, HashMap<String, HelperTuple>> {
+        let helpers = |found: &sqlty_python::types::info::Dict<sqlty_python::calls::Helper>| {
+            found
+                .iter()
+                .map(|(name, helper)| (name.to_string(), helper_tuple(helper)))
+                .collect()
+        };
+        let modules = self.0.modules.iter();
+        modules
+            .map(|(module, found)| (module.clone(), helpers(found)))
+            .collect()
+    }
+
+    /// A fork of the index after `steps`, sharing what is read of the modules.
+    fn extended(&self, py: Python<'_>, steps: Vec<IndexStep>) -> ModuleIndex {
         detach(py, || indexed(self.0.fork(), self.0.version(), steps))
     }
 }
@@ -1127,8 +1194,8 @@ type SiteTuple = (
 );
 
 /// The helper calls of `source` as `sqlty_python::check::sites` reads them:
-/// `(typed lines, queries, unchecked rule, literal start)`. None where Rust does not read
-/// the source or one of its queries.
+/// `(typed lines, queries, unchecked rule, literal start)`; none in a source that does
+/// not parse.
 #[pyfunction]
 #[pyo3(signature = (source, *, version, index = None, name = None, module = None, variants = None))]
 fn module_calls(
@@ -1139,26 +1206,25 @@ fn module_calls(
     name: Option<&str>,
     module: Option<&str>,
     variants: Option<usize>,
-) -> Option<Vec<SiteTuple>> {
+) -> Vec<SiteTuple> {
     let helpers = index.map(|index| Arc::clone(&index.0));
     detach(py, || {
-        let parsed = parsed_module(source, version, name, helpers.as_deref())?;
-        let sites = sqlty_python::check::sites(&parsed, helpers.as_deref(), module, variants)?;
-        Some(
-            sites
-                .into_iter()
-                .map(|site| {
-                    let unchecked = site.unchecked.map(|rule| rule.name());
-                    (site.typed, site.queries, unchecked, site.start)
-                })
-                .collect(),
-        )
+        let Some(parsed) = parsed_module(source, version, name, helpers.as_deref()) else {
+            return Vec::new();
+        };
+        sqlty_python::check::sites(&parsed, helpers.as_deref(), module, variants)
+            .into_iter()
+            .map(|site| {
+                let unchecked = site.unchecked.map(sqlty_python::rules::Rule::name);
+                (site.typed, site.queries, unchecked, site.start)
+            })
+            .collect()
     })
 }
 
 /// Every diagnostic of `source` before inline suppression, as `sqlty_python::check` reports
-/// them: `(diagnostics, redundant, needed)`, see `row_diagnostics`. None where Rust does
-/// not read the source, or it needs what is not read in Rust yet.
+/// them: `(diagnostics, redundant, needed)`, see `row_diagnostics`. A source that does not
+/// parse gets what its strings alone tell.
 #[pyfunction]
 #[pyo3(signature = (source, *, version, dialect = DialectArg::POSTGRES, schema_sql = None, rules = None, import_style = None, untyped = false, module = None, coerce = vec![], index = None, name = None, variants = None))]
 #[expect(
@@ -1180,7 +1246,7 @@ fn module_diagnostics(
     index: Option<PyRef<'_, ModuleIndex>>,
     name: Option<&str>,
     variants: Option<usize>,
-) -> Result<Option<(Vec<DiagnosticOut>, Vec<Option<FieldKey>>, Vec<FieldKey>)>, Error> {
+) -> Result<(Vec<DiagnosticOut>, Vec<Option<FieldKey>>, Vec<FieldKey>), Error> {
     use sqlty_python::{check, rows};
     let dialect = dialect.0;
     let helpers = index.map(|index| Arc::clone(&index.0));
@@ -1189,9 +1255,7 @@ fn module_diagnostics(
         let schema = schema(schema_sql, dialect);
         let options = Options::new(dialect, schema.as_deref(), import_style, untyped)?;
         let rules = RuleConfig::from_overrides(rules).map_err(ConfigError::from)?;
-        let Some(parsed) = parsed_module(source, version, name, helpers.as_deref()) else {
-            return Ok(None);
-        };
+        let parsed = parsed_module(source, version, name, helpers.as_deref());
         let settings = rows::Settings {
             options: &options,
             rules: &rules,
@@ -1218,8 +1282,9 @@ fn module_diagnostics(
             helpers: helpers.as_deref(),
             variants,
         };
-        let Some(found) = check::diagnostics(&parsed, &run) else {
-            return Ok(None);
+        let found = match &parsed {
+            Some(parsed) => check::diagnostics(parsed, &run),
+            None => check::unparsed(source, &run),
         };
         let mut needed: Vec<FieldKey> = found.needed.into_iter().collect();
         needed.sort();
@@ -1244,7 +1309,7 @@ fn module_diagnostics(
                 (out, reported.redundant)
             })
             .unzip();
-        Ok(Some((diagnostics, redundant, needed)))
+        Ok((diagnostics, redundant, needed))
     })
 }
 
@@ -2121,6 +2186,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(rendered_compositions, m)?)?;
     m.add_function(wrap_pyfunction!(call_variants, m)?)?;
     m.add_function(wrap_pyfunction!(module_ignores, m)?)?;
+    m.add_function(wrap_pyfunction!(module_helpers, m)?)?;
     m.add_function(wrap_pyfunction!(add_json_types, m)?)?;
     m.add_function(wrap_pyfunction!(module_calls, m)?)?;
     m.add_class::<ModuleIndex>()?;

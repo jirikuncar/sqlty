@@ -859,20 +859,19 @@ def _helper_sites(
     module: str | None,
     variants: int | None = None,
 ) -> list[_Site]:
-    rust = None
-    if AST != "python" and (helpers is None or (index := helpers.rust()) is not None):
+    if AST != "python":
         rust = _module_calls(
             parsed.text,
             version=sys.version_info[:2],
-            index=None if helpers is None else index,
+            index=None if helpers is None else helpers.rust(),
             name=parsed.module,
             module=module,
             variants=variants,
         )
-    if AST == "rust" and rust is not None:
-        return rust
+        if AST == "rust":
+            return rust
     python = _python_sites(parsed, helpers, module, variants)
-    if AST == "compare" and rust is not None and rust != python:
+    if AST == "compare" and parsed.facts is not None and rust != python:
         raise AstMismatch("helper_sites", rust, python, parsed.text)
     return python
 

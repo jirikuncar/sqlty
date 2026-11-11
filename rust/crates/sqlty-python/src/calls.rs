@@ -461,20 +461,20 @@ fn call_params(
 }
 
 /// `find_helper_calls`: the calls of the helpers `source` defines or imports from the
-/// modules of `helpers`, by line; `None` where a query is one Rust does not read yet: a
-/// psycopg composition, or a name that may stand for a query.
+/// modules of `helpers`, by line. A query built in a way that is not modelled (see
+/// [`compose`]) is left unchecked.
 pub fn helper_calls<'a>(
     source: &'a Source,
     helpers: Option<&'a HelperIndex>,
     module: Option<&str>,
     variants: Option<usize>,
-) -> Option<Vec<Call<'a>>> {
+) -> Vec<Call<'a>> {
     let text = &*source.text;
     let local = text.contains("Annotated") && text.contains("sqlty") && text.contains("SQL");
     let imported =
         helpers.is_some_and(|helpers| !helpers.modules.is_empty() && helpers.mentions(text));
     if !(local || imported) {
-        return Some(Vec::new());
+        return Vec::new();
     }
     let own = if local {
         index_functions(source)
@@ -482,7 +482,7 @@ pub fn helper_calls<'a>(
         Dict::new()
     };
     if own.is_empty() && !imported {
-        return Some(Vec::new());
+        return Vec::new();
     }
     let (functions, modules) = if imported {
         imports_of(&source.entries, module.or(source.module.as_deref()))
@@ -504,9 +504,13 @@ pub fn helper_calls<'a>(
     }
     let mut names: Vec<String> = names.into_iter().collect();
     names.sort();
-    let pattern = mentions(&names)?;
-    if only_imported(text, &pattern) {
-        return Some(Vec::new());
+    // No pattern holds too many names: every scope is read.
+    let pattern = mentions(&names);
+    if pattern
+        .as_ref()
+        .is_some_and(|pattern| only_imported(text, pattern))
+    {
+        return Vec::new();
     }
     let scan = Scan::new(source.body(), |call: &ExprCall| match call.func.as_ref() {
         Expr::Name(_) => true,
@@ -538,7 +542,9 @@ pub fn helper_calls<'a>(
         if let Some(&scope) = stack.last() {
             let mentioned = *wanted[scope].get_or_insert_with(|| {
                 let (start, end) = region(scan.scopes[scope], &lines, text.len());
-                pattern.is_match(&text[start..end])
+                pattern
+                    .as_ref()
+                    .is_none_or(|pattern| pattern.is_match(&text[start..end]))
             });
             if !mentioned {
                 continue;
@@ -585,7 +591,7 @@ pub fn helper_calls<'a>(
         if built.query.is_none() {
             let rendered = if composed {
                 let scan = psycopg.get_or_insert_with(|| compose::Scan::new(source));
-                compose::render(scan, query, Some(&resolve))?
+                compose::render(scan, query, Some(&resolve)).unwrap_or(Rendered::Unchecked)
             } else {
                 Rendered::None
             };
@@ -603,12 +609,13 @@ pub fn helper_calls<'a>(
                     query,
                     limit,
                     Some(&resolve),
-                )? {
-                    Found::Unchecked { composed, reason } => {
+                ) {
+                    None => {}
+                    Some(Found::Unchecked { composed, reason }) => {
                         built.reason = reason;
                         built.dynamic = built.dynamic && !composed;
                     }
-                    Found::Variants(found) => {
+                    Some(Found::Variants(found)) => {
                         built.query = found.first().map(|variant| variant.query.clone());
                         built.declared = found.first().and_then(|v| v.declared.clone());
                         built.dynamic = false;
@@ -618,8 +625,8 @@ pub fn helper_calls<'a>(
             } else if built.dynamic && matches!(query, Expr::Name(_) | Expr::Attribute(_)) {
                 // Without query variants, a name still stands for the query of one `SQL[R](...)`.
                 let found =
-                    query_variants(source, &around(), call.range(), query, 1, Some(&resolve))?;
-                if let Found::Variants(found) = found {
+                    query_variants(source, &around(), call.range(), query, 1, Some(&resolve));
+                if let Some(Found::Variants(found)) = found {
                     if let Some(declared) = found.into_iter().next().and_then(|v| v.declared) {
                         built.query = Some(declared.query.clone());
                         built.declared = Some(declared);
@@ -667,7 +674,7 @@ pub fn helper_calls<'a>(
         });
     }
     calls.sort_by_key(|call| (call.line, call.query_span));
-    Some(calls)
+    calls
 }
 
 /// Whether `text` names the helpers only on the lines that import them, so calls none.

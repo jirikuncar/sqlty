@@ -555,7 +555,6 @@ def diagnostics(
     ``coerce`` names the row types read as a Pydantic validator reads them.
     """
     own = RowUsage()
-    found = None
     if AST == "rust":
         found = _rust_diagnostics(
             parsed,
@@ -570,7 +569,7 @@ def diagnostics(
             variants,
             coerce,
         )
-    if found is None:
+    else:
         found = _diagnostics(
             parsed,
             dialect=dialect,
@@ -587,37 +586,22 @@ def diagnostics(
     if row_usage is not None:
         row_usage.needed |= own.needed
         row_usage.redundant += own.redundant
-    if AST == "compare":
-        index = None if helpers is None else helpers.rust()
-        if helpers is None or index is not None:
-            _compare_module(
-                parsed,
-                found,
-                own,
-                dialect,
-                schema_sql,
-                rules,
-                import_style,
-                untyped,
-                module,
-                coerce,
-                index,
-                variants,
-            )
-        else:
-            # An index Rust does not read: the module by itself.
-            diagnostics(
-                parsed,
-                dialect=dialect,
-                schema_sql=schema_sql,
-                rules=rules,
-                import_style=import_style,
-                untyped=untyped,
-                helpers=None,
-                module=module,
-                variants=variants,
-                coerce=coerce,
-            )
+    # A source Rust does not parse gets only what its strings tell.
+    if AST == "compare" and parsed.facts is not None:
+        _compare_module(
+            parsed,
+            found,
+            own,
+            dialect,
+            schema_sql,
+            rules,
+            import_style,
+            untyped,
+            module,
+            coerce,
+            None if helpers is None else helpers.rust(),
+            variants,
+        )
     return found
 
 
@@ -633,12 +617,9 @@ def _rust_diagnostics(
     module: str | None,
     variants: int | None,
     coerce: frozenset[str],
-) -> list[Diagnostic] | None:
-    """The diagnostics as ``sqlty_python::check`` reports them; ``None`` where it declines."""
-    index = None
-    if helpers is not None and (index := helpers.rust()) is None:
-        return None
-    rust = _module_diagnostics(
+) -> list[Diagnostic]:
+    """The diagnostics as ``sqlty_python::check`` reports them."""
+    found, redundant, needed = _module_diagnostics(
         parsed.text,
         version=sys.version_info[:2],
         dialect=dialect,
@@ -648,13 +629,10 @@ def _rust_diagnostics(
         untyped=untyped,
         module=module,
         coerce=sorted(coerce),
-        index=index,
+        index=None if helpers is None else helpers.rust(),
         name=parsed.module,
         variants=variants,
     )
-    if rust is None:
-        return None
-    found, redundant, needed = rust
     usage.needed.update(needed)
     usage.redundant += [
         (key, diag) for key, diag in zip(redundant, found, strict=True) if key is not None
@@ -691,8 +669,6 @@ def _compare_module(
         name=parsed.module,
         variants=variants,
     )
-    if rust is None:
-        return
     redundant = {id(diag): key for key, diag in usage.redundant}
     python = (found, [redundant.get(id(diag)) for diag in found], sorted(usage.needed, key=repr))
     if (rust[0], rust[1], sorted(rust[2], key=repr)) != python:

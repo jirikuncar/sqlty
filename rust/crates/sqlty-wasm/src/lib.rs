@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sqlty_python::checker::{add_fix_imports, check_source, query_sites, Diagnostic, SiteKind};
+use sqlty_python::checker::{query_sites, Diagnostic, SiteKind};
 use sqlty_python::config;
 use sqlty_python::fixer::fix_source;
 use sqlty_python::locate::{self, Queries};
@@ -313,16 +313,13 @@ fn checked(
         variants: None,
     };
     let module = Source::new(source, VERSION).map(Arc::new);
-    let found = module
-        .as_ref()
-        .and_then(|module| Some((module, check::diagnostics(module, &run)?)));
-    let Some((module, found)) = found else {
-        let mut diagnostics = check_source(source, options, rules, &[]);
-        add_fix_imports(source, options, &mut diagnostics);
-        return diagnostics;
+    let found = match &module {
+        Some(module) => check::diagnostics(module, &run),
+        None => check::unparsed(source, &run),
     };
+    let ignores = module.as_deref().map(suppress::ignores).unwrap_or_default();
     let needed = found.needed;
-    suppress::apply(&suppress::ignores(module), found.diagnostics, rules)
+    suppress::apply(&ignores, found.diagnostics, rules)
         .into_iter()
         // A field one query needs `| None` for is not redundant for another.
         .filter(|reported| {

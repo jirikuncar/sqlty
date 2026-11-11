@@ -107,13 +107,13 @@ def test_cli_parses_each_file_once(tmp_path, monkeypatch, parses, tokenized, cap
     main(["check", "."])
     assert capsys.readouterr().out == ""
 
-    assert parses[HELPER] == 1
-    # `SQLTY_AST=rust` reads the row types from the Rust outline.
+    # `SQLTY_AST=rust` parses nothing with `ast`.
+    assert parses[HELPER] == (AST != "rust")
     assert parses[USER_TYPE] == (AST != "rust")
     # `SQLTY_AST=python` reads the imports of every indexed module to find re-exported helpers.
     assert parses[PLAIN] == (AST == "python")
-    assert max(parses.values()) <= 1
-    assert len(tokenized) == 1
+    assert max(parses.values(), default=0) <= 1
+    assert len(tokenized) == (AST != "rust")
 
 
 def test_marker_free_file_is_neither_parsed_nor_tokenized(parses, tokenized):
@@ -162,3 +162,23 @@ def test_parsed_source_facts():
     assert ParsedSource("def f(:").tree is None
     assert ParsedSource("x = 1  # sqlty: ignore[a, b]\n").ignores[1].rules == ("a", "b")
     assert ParsedSource("x = 1 # not it\n").ignores == {}
+
+
+@pytest.mark.skipif(AST != "rust", reason="what the Rust check reads")
+def test_what_rust_does_not_model_is_reported_unchecked():
+    helper = (
+        "from typing import Annotated, LiteralString\nfrom psycopg import sql\n"
+        "from sqlty import SQL\n"
+        "def run[T](q: Annotated[LiteralString, SQL], form: type[T], /) -> list[T]: ...\n"
+    )
+    # `str.isdigit` digits that `int` may not read.
+    source = helper + "run(sql.SQL('SELECT {٣}').format(1, 2, 3, 4), int)\n"
+    assert [(d["rule"], d["line"]) for d in check_source(source)] == [("unchecked-query", 5)]
+
+
+@pytest.mark.skipif(AST != "rust", reason="what the Rust check reads")
+def test_a_source_that_does_not_parse_is_read_by_its_strings(parses, tokenized):
+    source = "q = '--sql\\nSELECT 1 FROM'  # sqlty: ignore[stale-rewrite]\ndef f(:\n"
+    assert [d["rule"] for d in check_source(source)] == ["unparsed-query", "unused-ignore"]
+    assert not parses
+    assert len(tokenized) == 1

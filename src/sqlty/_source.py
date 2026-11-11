@@ -46,11 +46,12 @@ import io
 import itertools
 import os
 import re
+import sys
 import tokenize
 import typing
 from dataclasses import dataclass
 
-from sqlty._core import module_facts, module_outline
+from sqlty._core import module_facts, module_ignores, module_outline
 from sqlty._psycopg import PsycopgScan
 
 AST = os.environ.get("SQLTY_AST", "rust")
@@ -899,6 +900,28 @@ class ParsedSource:
         found: dict[int, Ignore] = {}
         if not self.has_ignore_comments:
             return found
+        rust = None
+        if AST != "python":
+            rust = module_ignores(self.text, sys.version_info[:2])
+            if AST == "rust" and rust is not None:
+                return {
+                    line: Ignore(line, None if rules is None else tuple(rules), start, end)
+                    for line, rules, start, end in rust
+                }
+        python = self._tokenized_ignores()
+        # `tokenize` stops at a lone carriage return, which is a line break.
+        if rust is not None and "\r" not in self.text.replace("\r\n", ""):
+            read = [
+                (i.line, None if i.rules is None else list(i.rules), i.start, i.end)
+                for i in python.values()
+            ]
+            if rust != read:
+                raise AstMismatch("ignores", rust, read, self.text)
+        return python
+
+    def _tokenized_ignores(self) -> dict[int, Ignore]:
+        """``ignores`` of a source that does not parse: the comments up to the error."""
+        found: dict[int, Ignore] = {}
         tokens = tokenize.generate_tokens(io.StringIO(self.text).readline)
         try:
             for tok in tokens:

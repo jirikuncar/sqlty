@@ -1120,48 +1120,82 @@ pub struct Site {
     pub start: Option<usize>,
 }
 
-/// The helper calls of `source`, by line; `None` where [`helper_calls`] is.
+/// The helper calls of `source`, by line.
 pub fn sites(
     source: &Source,
     helpers: Option<&HelperIndex>,
     module: Option<&str>,
     variants: Option<usize>,
-) -> Option<Vec<Site>> {
-    let calls = helper_calls(source, helpers, module, variants)?;
+) -> Vec<Site> {
+    let calls = helper_calls(source, helpers, module, variants);
     let mut read: Option<HashSet<String>> = None;
     let mut by_marker = |query: &str| {
         is_marked(query) && read.get_or_insert_with(|| literals(source)).contains(query)
     };
-    Some(
-        calls
+    calls
+        .into_iter()
+        .map(|call| {
+            let lines = call.typed_lines();
+            let queries: Vec<String> = match (&call.query, call.variants.is_empty()) {
+                (None, _) => Vec::new(),
+                (Some(query), true) => vec![query.clone()],
+                (Some(_), false) => call.variants.iter().map(|v| v.query.clone()).collect(),
+            };
+            Site {
+                typed: (!lines.is_empty()).then(|| (*lines.start(), *lines.end())),
+                unchecked: (call.query.is_none()
+                    && !call.row.is_some_and(|row| is_any(row, source)))
+                .then_some(if call.dynamic {
+                    Rule::DynamicQuery
+                } else {
+                    Rule::UncheckedQuery
+                }),
+                queries: queries.into_iter().filter(|q| !by_marker(q)).collect(),
+                start: call.query_span.filter(|_| call.literal).map(|span| span.0),
+            }
+        })
+        .collect()
+}
+
+/// The diagnostics of a source that does not parse (see [`crate::parse`]): what its
+/// strings alone tell, by line.
+pub fn unparsed(text: &str, run: &Run<'_>) -> Found {
+    let (options, rules) = (run.settings.options, run.settings.rules);
+    let mut found = Vec::new();
+    if may_need_lexing(text, &options.style.wrapper_name) {
+        found = checker::check_source(text, options, rules, &[]);
+        checker::add_fix_imports(text, options, &mut found);
+    }
+    if rules.is_enabled(Rule::Sqruff) {
+        let (severity, lines) = (
+            rules.severity(Rule::Sqruff),
+            crate::scopes::Lines::new(text),
+        );
+        found.extend((run.lint)(text).into_iter().map(|lint| Diagnostic {
+            rule: Rule::Sqruff,
+            message: lint.message,
+            severity,
+            line: lines.line(lint.query_start),
+            span: lint.span,
+            fix: Vec::new(),
+        }));
+    }
+    found.sort_by_key(|diagnostic| diagnostic.line);
+    Found {
+        diagnostics: found
             .into_iter()
-            .map(|call| {
-                let lines = call.typed_lines();
-                let queries: Vec<String> = match (&call.query, call.variants.is_empty()) {
-                    (None, _) => Vec::new(),
-                    (Some(query), true) => vec![query.clone()],
-                    (Some(_), false) => call.variants.iter().map(|v| v.query.clone()).collect(),
-                };
-                Site {
-                    typed: (!lines.is_empty()).then(|| (*lines.start(), *lines.end())),
-                    unchecked: (call.query.is_none()
-                        && !call.row.is_some_and(|row| is_any(row, source)))
-                    .then_some(if call.dynamic {
-                        Rule::DynamicQuery
-                    } else {
-                        Rule::UncheckedQuery
-                    }),
-                    queries: queries.into_iter().filter(|q| !by_marker(q)).collect(),
-                    start: call.query_span.filter(|_| call.literal).map(|span| span.0),
-                }
+            .map(|diagnostic| Reported {
+                diagnostic,
+                redundant: None,
             })
             .collect(),
-    )
+        needed: HashSet::new(),
+    }
 }
 
 /// `sqlty._check.diagnostics`: every diagnostic of `source` before inline suppression, by
-/// line; `None` for a module that needs what Rust does not read yet.
-pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Option<Found> {
+/// line.
+pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
     static MARKED_TEMPLATE: LazyLock<Regex> = LazyLock::new(|| {
         pattern(r#"(?:^|[^\w])(?:[tT][rR]?|[rR][tT])(?:'|")+[\s\x1c-\x1f]*--[\s\x1c-\x1f]?sql"#)
     });
@@ -1191,7 +1225,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Option<Found> {
         checker::add_fix_imports(text, options, &mut base);
     }
 
-    let mut found = helper_calls(source, run.helpers, run.settings.module, run.variants)?;
+    let mut found = helper_calls(source, run.helpers, run.settings.module, run.variants);
     let mut driver_calls: Vec<Call<'_>> = Vec::new();
     if drivers::may_hold(text) {
         for call in drivers::find(text, source.body(), &source.imports) {
@@ -1308,7 +1342,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Option<Found> {
         needed: HashSet::new(),
     };
     if queries.is_empty() && found.is_empty() && driver_calls.is_empty() && declared.is_empty() {
-        return Some(out);
+        return out;
     }
 
     let dialect = options.dialect.name();
@@ -1365,5 +1399,5 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Option<Found> {
     out.needed = passes.needed;
     out.diagnostics
         .sort_by_key(|reported| reported.diagnostic.line);
-    Some(out)
+    out
 }

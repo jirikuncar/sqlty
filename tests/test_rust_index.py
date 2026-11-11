@@ -18,7 +18,7 @@ from hypothesis import strategies as st
 
 from sqlty import _check
 from sqlty._helpers import HelperIndex
-from sqlty._source import ParsedSource
+from sqlty._source import AST, ParsedSource
 from tests.test_rust_check import QUERIES, RULES, SCHEMAS, arguments
 from tests.test_rust_types import FUZZ, parses
 
@@ -363,9 +363,12 @@ def test_registered_file_rust_does_not_read(tmp_path: Path) -> None:
         (second / "ext.py").write_text(helper)
         index = HelperIndex()
         index.register("ext.run", "sql", "row", roots=[first, second])
-        assert index.rust() is None
+        # The first root holding the file ends the search: the helper takes keywords only.
+        positional, keywords, *_ = index.rust().helpers()["ext"]["run"]
+        assert (positional, keywords) == ([], ["row", "sql"])
 
 
+@pytest.mark.skipif(AST == "rust", reason="the names of the Python index")
 def test_names_follow_a_module_added_later() -> None:
     index = HelperIndex()
     index.add("db", ParsedSource(HEAD + DB[1], "db"))

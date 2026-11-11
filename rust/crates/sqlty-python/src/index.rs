@@ -480,9 +480,11 @@ impl HelperIndex {
 
     /// Whether `text` contains the name of some helper, so it may call one.
     pub fn mentions(&self, text: &str) -> bool {
-        self.pattern
-            .as_ref()
-            .is_some_and(|pattern| pattern.is_match(text))
+        // No pattern holds too many names: any text may call one.
+        match &self.pattern {
+            Some(pattern) => pattern.is_match(text),
+            None => !self.names.is_empty(),
+        }
     }
 
     /// The types and row types of the modules.

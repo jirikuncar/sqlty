@@ -107,7 +107,7 @@ def test_lone_carriage_returns_are_lines_in_rust_only() -> None:
     # `tokenize` stops at a lone CR, which `ast` and ruff both take for a line break.
     source = "x = 1  # sqlty: ignore\ry = 2  # sqlty: ignore\n"
     assert [found[0] for found in module_ignores(source, VERSION) or []] == [1, 2]
-    assert list(ParsedSource(source).ignores) == [1]
+    assert list(ParsedSource(source)._tokenized_ignores()) == [1]  # noqa: SLF001
 
 
 @settings(max_examples=EXAMPLES, deadline=None)

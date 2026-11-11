@@ -22,7 +22,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from sqlty._core import ModuleIndex, helper_sites, module_index
+from sqlty._core import ModuleIndex, helper_sites, module_helpers, module_index
 from sqlty._params import ParamArg, arg_type, literal_params
 from sqlty._psycopg import UNCHECKED
 from sqlty._source import AST, AstMismatch, ParsedSource
@@ -197,6 +197,12 @@ def _kind(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
     return "class" if "classmethod" in names else "instance"
 
 
+def _helper_of(name: str, fields: tuple[Any, ...]) -> Helper:
+    """The ``Helper`` of what Rust reads of one (``ModuleIndex.helpers``)."""
+    positional, keywords, *rest = fields
+    return Helper(name, tuple(positional), frozenset(keywords), *rest)
+
+
 def _rank(node: ast.FunctionDef | ast.AsyncFunctionDef, complete: bool) -> tuple[bool, bool]:
     """Sort key among definitions of one name: complete first, then non-``@overload``."""
     overload = any((_dotted(d) or "").rpartition(".")[2] == "overload" for d in node.decorator_list)
@@ -324,7 +330,7 @@ class HelperIndex:
     """
 
     def __init__(self) -> None:
-        self.modules: dict[str, dict[str, Helper]] = {}
+        self._modules: dict[str, dict[str, Helper]] = {}
         self.sources: dict[str, ParsedSource] = {}
         self.packages: set[str] = set()
         self.prefixes: set[str] = set()
@@ -339,21 +345,27 @@ class HelperIndex:
         self._lock = threading.RLock()
         # How the index was filled, to build it again in Rust.
         self._steps: list[tuple[str, str, str, str | None, list[Path], str | None]] = []
-        self._rust: tuple[int, ModuleIndex | None] | None = None
+        self._rust: tuple[int, ModuleIndex] | None = None
         self._forked: tuple[HelperIndex, int] | None = None
 
-    def rust(self) -> ModuleIndex | None:
-        """The index as Rust reads it; ``None`` when it does not read one of the modules."""
+    @property
+    def modules(self) -> dict[str, dict[str, Helper]]:
+        """The helpers by module and name (``Class.method`` for a method)."""
+        if AST != "rust":
+            return self._modules
+        return {
+            module: {name: _helper_of(name, fields) for name, fields in found.items()}
+            for module, found in self.rust().helpers().items()
+        }
+
+    def rust(self) -> ModuleIndex:
+        """The index as Rust reads it."""
         with self._lock:
             if self._rust is None or self._rust[0] != len(self._steps):
                 parent, forked_at = self._forked or (None, 0)
                 # A fork of an index that has not changed since shares what Rust read of it.
-                if (
-                    parent is not None
-                    and len(parent._steps) == forked_at
-                    and (base := parent.rust()) is not None
-                ):
-                    built = base.extended(self._steps[forked_at:])
+                if parent is not None and len(parent._steps) == forked_at:
+                    built = parent.rust().extended(self._steps[forked_at:])
                 else:
                     built = module_index(sys.version_info[:2], self._steps)
                 self._rust = len(self._steps), built
@@ -362,7 +374,7 @@ class HelperIndex:
     def fork(self) -> HelperIndex:
         """A copy whose later ``register`` calls do not reach this index; sources are shared."""
         other = HelperIndex()
-        other.modules = {module: dict(found) for module, found in self.modules.items()}
+        other._modules = {module: dict(found) for module, found in self._modules.items()}
         other.sources = self.sources
         other.packages = set(self.packages)
         other.prefixes = set(self.prefixes)
@@ -387,6 +399,10 @@ class HelperIndex:
             parsed.module = module
         self.sources[module] = parsed
         self._steps.append(("add", module, parsed.text, parsed.module, [], None))
+        if AST == "rust":
+            return parsed.may_define_helpers and bool(
+                module_helpers(parsed.text, sys.version_info[:2])
+            )
         if parsed.module is not None and parsed.module.endswith(".__init__"):
             self.packages.add(module)
         parts = module.split(".")
@@ -400,7 +416,7 @@ class HelperIndex:
         self._names = None
         if not parsed.may_define_helpers or not (found := index_functions(parsed)):
             return False
-        self.modules.setdefault(module, {}).update(found)
+        self._modules.setdefault(module, {}).update(found)
         return True
 
     def register(
@@ -429,13 +445,15 @@ class HelperIndex:
             True
         """
         self._steps.append(("register", import_path, query, row, list(roots), database))
+        if AST == "rust":
+            return
         parts = import_path.split(".")
         for i in range(len(parts) - 1, 0, -1):
             module, name = ".".join(parts[:i]), ".".join(parts[i:])
             definition = self._definition(parts[:i], name, query, row, roots)
             if definition is not None:
                 helper = _helper(name, definition[1], definition[2], query, row)
-                self.modules.setdefault(module, {})[name] = replace(
+                self._modules.setdefault(module, {})[name] = replace(
                     helper, configured=True, database=database
                 )
                 break
@@ -444,7 +462,7 @@ class HelperIndex:
             for i in (len(parts) - 1, len(parts) - 2):
                 if i > 0:
                     module, name = ".".join(parts[:i]), ".".join(parts[i:])
-                    self.modules.setdefault(module, {})[name] = Helper(
+                    self._modules.setdefault(module, {})[name] = Helper(
                         name, (), keywords, query, row, configured=True, database=database
                     )
         self._pattern = None
