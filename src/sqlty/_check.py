@@ -17,6 +17,7 @@ from sqlty._core import Schema
 from sqlty._core import analyze_columns as _analyze_columns
 from sqlty._core import check_source as _check_source
 from sqlty._core import composite_fields as _composite_fields
+from sqlty._core import module_diagnostics as _module_diagnostics
 from sqlty._core import parse_error as _parse_error
 from sqlty._core import query_diagnostics as _query_diagnostics
 from sqlty._core import row_diagnostics as _row_diagnostics
@@ -549,6 +550,101 @@ def diagnostics(
     is checked as a call of its own, then ``_merge_variants`` reports at the call.
     ``coerce`` names the row types read as a Pydantic validator reads them.
     """
+    own = RowUsage()
+    found = _diagnostics(
+        parsed,
+        dialect=dialect,
+        schema_sql=schema_sql,
+        rules=rules,
+        import_style=import_style,
+        untyped=untyped,
+        helpers=helpers,
+        module=module,
+        row_usage=own,
+        variants=variants,
+        coerce=coerce,
+    )
+    if row_usage is not None:
+        row_usage.needed |= own.needed
+        row_usage.redundant += own.redundant
+    if AST == "compare":
+        if helpers is None and variants is None:
+            _compare_module(
+                parsed,
+                found,
+                own,
+                dialect,
+                schema_sql,
+                rules,
+                import_style,
+                untyped,
+                module,
+                coerce,
+            )
+        else:
+            # What Rust reads so far: the module by itself, each call one query.
+            diagnostics(
+                parsed,
+                dialect=dialect,
+                schema_sql=schema_sql,
+                rules=rules,
+                import_style=import_style,
+                untyped=untyped,
+                helpers=None,
+                module=module,
+                coerce=coerce,
+            )
+    return found
+
+
+def _compare_module(
+    parsed: ParsedSource,
+    found: list[Diagnostic],
+    usage: RowUsage,
+    dialect: str,
+    schema_sql: str | Schema | None,
+    rules: dict[str, str] | None,
+    import_style: str | None,
+    untyped: bool,
+    module: str | None,
+    coerce: frozenset[str],
+) -> None:
+    """``SQLTY_AST=compare``: ``sqlty_python::check`` must report what these passes do."""
+    import sys
+
+    rust = _module_diagnostics(
+        parsed.text,
+        version=sys.version_info[:2],
+        dialect=dialect,
+        schema_sql=schema_sql,
+        rules=rules,
+        import_style=import_style,
+        untyped=untyped,
+        module=module,
+        coerce=sorted(coerce),
+    )
+    if rust is None:
+        return
+    redundant = {id(diag): key for key, diag in usage.redundant}
+    python = (found, [redundant.get(id(diag)) for diag in found], sorted(usage.needed, key=repr))
+    if (rust[0], rust[1], sorted(rust[2], key=repr)) != python:
+        raise AstMismatch("diagnostics", rust, python, parsed.text)
+
+
+def _diagnostics(
+    parsed: ParsedSource,
+    *,
+    dialect: str,
+    schema_sql: str | Schema | None,
+    rules: dict[str, str] | None,
+    import_style: str | None,
+    untyped: bool,
+    helpers: HelperIndex | None,
+    module: str | None,
+    row_usage: RowUsage,
+    variants: int | None,
+    coerce: frozenset[str],
+) -> list[Diagnostic]:
     from sqlty._lint import RuleConfig
 
     diagnostics: list[Diagnostic] = []
@@ -621,7 +717,7 @@ def diagnostics(
         module=module,
         coerce=coerce,
     )
-    ctx.row_usage = row_usage or RowUsage()
+    ctx.row_usage = row_usage
     for check_pass in _CHECK_PASSES:
         check_pass(ctx)
     if branched:
@@ -847,7 +943,7 @@ def _declared_params(
         or not _names_params(parsed.text, wrapper)
     ):
         return []
-    return [
+    found = [
         (call.lineno, call.func.slice.elts[1], query.value, parsed.span(call))
         for call in parsed.calls
         if isinstance(call.func, ast.Subscript)
@@ -858,6 +954,7 @@ def _declared_params(
         and isinstance(query := call.args[0], ast.Constant)
         and isinstance(query.value, str)
     ]
+    return sorted(found, key=lambda call: call[3])
 
 
 def _names_params(text: str, wrapper: str) -> bool:

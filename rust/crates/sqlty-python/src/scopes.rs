@@ -27,7 +27,7 @@ pub fn is_scalar(kind: &str) -> bool {
 }
 
 /// The parameter an argument binds, by 1-based position or by name.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Key {
     /// `%s`, `?`, `$1`: the position.
     Index(usize),
@@ -345,9 +345,17 @@ impl Context<'_, '_> {
     }
 
     fn class(&self, name: Option<String>) -> Option<String> {
+        class_of(name, self.imported)
+    }
+}
+
+/// `sqlty._params._class`: the type of an instance of the class spelled `name`, when it is
+/// a known one.
+pub fn class_of(name: Option<String>, imported: &HashMap<String, String>) -> Option<String> {
+    {
         let name = name?;
         let (head, rest) = name.split_once('.').unwrap_or((&name, ""));
-        match self.imported.get(head) {
+        match imported.get(head) {
             None if BUILTINS.contains(&name.as_str()) => Some(name),
             None if SEQUENCES.contains(&name.as_str()) => Some("list".to_string()),
             None => None,

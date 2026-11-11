@@ -82,7 +82,7 @@ pub fn sites(source: &str, names: &[String]) -> Option<Vec<Site>> {
 }
 
 /// `\b(?:name|...)\b`, kept for the next file, which almost always asks for the same names.
-fn mentions(names: &[String]) -> Option<Arc<Regex>> {
+pub(crate) fn mentions(names: &[String]) -> Option<Arc<Regex>> {
     static LAST: Mutex<Option<(Vec<String>, Arc<Regex>)>> = Mutex::new(None);
     let mut last = LAST
         .lock()
@@ -100,7 +100,7 @@ fn mentions(names: &[String]) -> Option<Arc<Regex>> {
 
 /// The source of a scope as `ParsedSource._mentions` reads it: whole lines, from the first
 /// decorator to the end of the body.
-fn region(node: Node<'_>, lines: &Lines, len: usize) -> (usize, usize) {
+pub(crate) fn region(node: Node<'_>, lines: &Lines, len: usize) -> (usize, usize) {
     let (range, decorator): (TextRange, Option<TextRange>) = match node {
         Node::Function(function) => (
             function.range(),
@@ -163,7 +163,7 @@ fn site(
 }
 
 /// The class of `self`, or of a variable or `self` attribute with an evident type.
-fn receiver_class(receiver: &Expr, stack: &[Scope], ctx: &Context<'_, '_>) -> Option<String> {
+pub(crate) fn receiver_class(receiver: &Expr, stack: &[Scope], ctx: &Context<'_, '_>) -> Option<String> {
     let base = match receiver {
         Expr::Attribute(attr) => attr.value.as_ref(),
         expr => expr,

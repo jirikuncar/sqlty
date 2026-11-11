@@ -25,6 +25,10 @@ pub struct Source {
     pub aliases: Arc<HashMap<String, String>>,
     /// `ParsedSource.imported_names`.
     pub imports: HashMap<String, String>,
+    /// Every import, in `ast.walk` order.
+    pub entries: Vec<crate::module::Import>,
+    /// `ParsedSource.typing_aliases` as pairs, a later pair wins.
+    pub typing: Vec<(String, String)>,
     pub version: Version,
 }
 
@@ -39,8 +43,10 @@ impl Source {
         Some(Source {
             text: text.to_string(),
             lines: Lines::new(text),
-            aliases: Arc::new(imports.typing.into_iter().collect()),
+            aliases: Arc::new(imports.typing.iter().cloned().collect()),
             imports: imports.imported,
+            entries: imports.entries,
+            typing: imports.typing,
             parsed,
             version,
         })

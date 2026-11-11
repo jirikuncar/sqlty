@@ -641,6 +641,47 @@ impl Unparser<'_> {
     }
 }
 
+/// The text between the fields of an f- or t-string, format specs included, as the
+/// `Constant` nodes of `ast` hold it.
+pub(crate) fn constants(expr: &Expr, source: &str) -> Vec<String> {
+    fn collect(parts: Vec<Part<'_>>, source: &str, out: &mut Vec<String>) {
+        for part in parts {
+            match part {
+                Part::Text(text) => out.push(text),
+                Part::Field(field, _) => {
+                    if let Some(spec) = &field.format_spec {
+                        let mut inner = Vec::new();
+                        fields(&spec.elements, &mut inner, source);
+                        collect(inner, source, out);
+                    }
+                }
+            }
+        }
+    }
+    let mut parts = Vec::new();
+    match expr {
+        Expr::FString(e) => {
+            for part in &e.value {
+                match part {
+                    FStringPartRef::Literal(literal) => push_text(&mut parts, &literal.value),
+                    FStringPartRef::FString(fstring) => {
+                        fields(&fstring.elements, &mut parts, source);
+                    }
+                }
+            }
+        }
+        Expr::TString(e) => {
+            for part in e.value.as_slice() {
+                fields(&part.elements, &mut parts, source);
+            }
+        }
+        _ => {}
+    }
+    let mut out = Vec::new();
+    collect(parts, source, &mut out);
+    out
+}
+
 /// `Interpolation.str`: the source of the expression of a t-string field, from the `{` to
 /// the `=`, `!`, `:` or `}` after it, without trailing whitespace.
 pub fn interpolation_text(field: &InterpolatedElement, source: &str) -> String {

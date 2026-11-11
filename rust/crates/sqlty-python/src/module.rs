@@ -174,6 +174,21 @@ pub fn facts(source: &str) -> Option<Facts> {
     Some(found)
 }
 
+/// `(offset, callee)` of each `X[T](...)` of `body` whose `T` is `typing.Any`, by offset;
+/// `typing` is [`Imports::typing`].
+pub fn any_calls(body: &[Stmt], typing: &[(String, String)]) -> Vec<(usize, String)> {
+    let aliases = Aliases(typing);
+    let mut calls = Calls {
+        aliases: &aliases,
+        names: Vec::new(),
+        attributes: Vec::new(),
+        any_calls: Vec::new(),
+    };
+    calls.visit_body(body);
+    calls.any_calls.sort_unstable();
+    calls.any_calls
+}
+
 /// Imports at any depth, with the depth `ast` gives them: one more than the node holding them.
 fn collect_imports<'a>(body: &'a [Stmt], depth: usize, out: &mut Vec<(usize, &'a Stmt)>) {
     for stmt in body {

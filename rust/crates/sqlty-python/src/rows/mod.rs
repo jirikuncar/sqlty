@@ -7,7 +7,9 @@
 pub mod json_shape;
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
+
+use regex::Regex;
 
 use ruff_python_ast::{Expr, Operator};
 use sqlty_sql::analyzer::{self, Nullability};
@@ -16,6 +18,7 @@ use sqlty_sql::json::JsonShape;
 use crate::checker::{wrapped_queries, Diagnostic};
 use crate::options::Options;
 use crate::rules::{Rule, RuleConfig};
+use crate::scopes::{Key, Param};
 use crate::types::compat::{
     accepts, check_type_compatibility, column_literal_values, declared_literal_values, field_type,
     set_member,
@@ -93,20 +96,26 @@ pub struct Settings<'a> {
     pub coerce: &'a HashSet<String>,
 }
 
-type RowQuery = (usize, String, Option<String>, (usize, usize));
+pub(crate) type RowQuery = (usize, String, Option<String>, (usize, usize));
 
-struct Check<'a> {
-    source: &'a Arc<Source>,
-    settings: &'a Settings<'a>,
-    type_defs: Dict<Arc<TypeInfo>>,
+pub(crate) struct Check<'a> {
+    pub(crate) source: &'a Arc<Source>,
+    pub(crate) settings: &'a Settings<'a>,
+    pub(crate) type_defs: Dict<Arc<TypeInfo>>,
+    /// The row types of the module itself, as extracted.
+    pub(crate) own_defs: Dict<Arc<TypeInfo>>,
     /// The row types of the module an imported row type comes from, by local name.
     imported_defs: HashMap<String, Arc<Dict<Arc<TypeInfo>>>>,
+    /// The queries whose row type is an alias of a tuple or scalar type.
+    aliased: Vec<(RowQuery, &'a Expr)>,
+    /// The queries whose row type is a class.
+    pub(crate) user_queries: Vec<RowQuery>,
     found: Found,
 }
 
 impl Check<'_> {
     /// Report at `line`, underlining `span`, else the line itself.
-    fn report(
+    pub(crate) fn report(
         &mut self,
         rule: Rule,
         message: String,
@@ -131,7 +140,7 @@ impl Check<'_> {
         self.found.diagnostics.last_mut()
     }
 
-    fn columns(&self, query: Option<&str>) -> Option<Vec<RowColumn>> {
+    pub(crate) fn columns(&self, query: Option<&str>) -> Option<Vec<RowColumn>> {
         let options = self.settings.options;
         let columns = analyzer::analyze_select(query?, options.dialect.name(), options.schema);
         let columns: Vec<RowColumn> = columns.ok()??.into_iter().map(RowColumn::from).collect();
@@ -177,93 +186,191 @@ pub fn check(source: &Arc<Source>, settings: &Settings<'_>) -> Found {
     if !source.text.contains(wrapper) {
         return Found::default();
     }
-    let queries: Vec<RowQuery> = wrapped_queries(&source.text, &settings.options.style)
-        .into_iter()
-        .filter(|(_, name, _, _)| !name.starts_with("tuple["))
-        .collect();
+    let queries = row_queries(source, settings);
     if queries.is_empty() {
         return Found::default();
     }
-    let mut ctx = Check {
-        source,
-        settings,
-        type_defs: extract_type_definitions(source, settings.index, settings.module),
-        imported_defs: HashMap::new(),
-        found: Found::default(),
-    };
-    if let Some(index) = settings.index {
-        let names: HashSet<&str> = queries.iter().map(|query| query.1.as_str()).collect();
-        for name in names {
-            if !ctx.type_defs.contains(name) {
-                if let Some(imported) = index.row_type(source, name) {
-                    ctx.type_defs.insert(name, imported.info);
-                    ctx.imported_defs.insert(name.to_string(), imported.defs);
-                }
-            }
-        }
-    }
-    let coerced: Vec<(String, TypeInfo)> = ctx
-        .type_defs
-        .iter()
-        .filter_map(|(name, info)| {
-            let owner = info.module.as_deref().unwrap_or("");
-            let owner = owner.strip_suffix(".__init__").unwrap_or(owner);
-            let qualified = format!("{owner}.{}", info.name);
-            let types = info.coerced.as_ref()?;
-            settings
-                .coerce
-                .contains(qualified.trim_start_matches('.'))
-                .then(|| {
-                    let mut out = TypeInfo::clone(info);
-                    out.field_types = types.clone();
-                    out.lax = info.fields.iter().map(|(name, _)| name.clone()).collect();
-                    out.coerced = None;
-                    (name.to_string(), out)
-                })
-        })
-        .collect();
-    for (name, info) in coerced {
-        ctx.type_defs.insert(name, Arc::new(info));
-    }
+    let mut ctx = Check::new(source, settings, queries, Vec::new(), &[]);
+    ctx.typeddict_inheritance();
+    ctx.structural(&HashMap::new());
+    ctx.aliases();
+    ctx.finish()
+}
 
-    // A row type named through an alias (`type Row = User`) is checked as what it names.
-    let aliases = source.type_aliases();
-    let mut aliased: Vec<(RowQuery, &Expr)> = Vec::new();
-    let mut resolved: Vec<RowQuery> = Vec::new();
-    for (line, name, query, span) in queries {
-        match alias_target(&name, &aliases, source) {
-            None => {
-                if !ctx.type_defs.contains(&name) {
-                    ctx.specialize(&name);
-                }
-                resolved.push((line, name, query, span));
-            }
-            Some(target) => {
-                let base = unparse(target, &source.text);
-                if ctx.type_defs.contains(&base) {
-                    resolved.push((line, base, query, span));
-                } else {
-                    aliased.push(((line, name, query, span), target));
-                }
-            }
-        }
-    }
-    let user_queries: Vec<RowQuery> = resolved
+/// The `SQL[Row](...)` calls of `source` whose row type is not spelled as a tuple.
+pub(crate) fn row_queries(source: &Source, settings: &Settings<'_>) -> Vec<RowQuery> {
+    wrapped_queries(&source.text, &settings.options.style)
         .into_iter()
-        .filter(|query| ctx.type_defs.contains(&query.1))
-        .collect();
+        .filter(|(_, name, _, _)| !name.starts_with("tuple["))
+        .collect()
+}
 
-    check_typeddict_inheritance(&mut ctx, &user_queries);
-    check_structural(&mut ctx, &user_queries);
-    check_aliases(&mut ctx, &aliased);
-    ctx.found
-        .diagnostics
-        .sort_by_key(|reported| reported.diagnostic.line);
-    ctx.found
+impl<'a> Check<'a> {
+    /// `_Check.__init__`: the row types of the `queries` (`SQL[Row](...)` calls) and of the
+    /// calls that name a row (`named`); `params` are the names of the `P` of `SQL[R, P]`.
+    pub(crate) fn new(
+        source: &'a Arc<Source>,
+        settings: &'a Settings<'a>,
+        queries: Vec<RowQuery>,
+        named: Vec<RowQuery>,
+        params: &[String],
+    ) -> Self {
+        let wanted = !(queries.is_empty() && named.is_empty() && params.is_empty());
+        let mut ctx = Check {
+            source,
+            settings,
+            type_defs: if wanted {
+                extract_type_definitions(source, settings.index, settings.module)
+            } else {
+                Dict::new()
+            },
+            own_defs: Dict::new(),
+            imported_defs: HashMap::new(),
+            aliased: Vec::new(),
+            user_queries: Vec::new(),
+            found: Found::default(),
+        };
+        ctx.own_defs = ctx.type_defs.clone();
+        let queries: Vec<RowQuery> = queries.into_iter().chain(named).collect();
+        if let Some(index) = settings.index {
+            let names: HashSet<&str> = queries
+                .iter()
+                .map(|query| query.1.as_str())
+                .chain(params.iter().map(String::as_str))
+                .collect();
+            for name in names {
+                if !ctx.type_defs.contains(name) {
+                    if let Some(imported) = index.row_type(source, name) {
+                        ctx.type_defs.insert(name, imported.info);
+                        ctx.imported_defs.insert(name.to_string(), imported.defs);
+                    }
+                }
+            }
+        }
+        let coerced: Vec<(String, TypeInfo)> = ctx
+            .type_defs
+            .iter()
+            .filter_map(|(name, info)| {
+                let owner = info.module.as_deref().unwrap_or("");
+                let owner = owner.strip_suffix(".__init__").unwrap_or(owner);
+                let qualified = format!("{owner}.{}", info.name);
+                let types = info.coerced.as_ref()?;
+                settings
+                    .coerce
+                    .contains(qualified.trim_start_matches('.'))
+                    .then(|| {
+                        let mut out = TypeInfo::clone(info);
+                        out.field_types = types.clone();
+                        out.lax = info.fields.iter().map(|(name, _)| name.clone()).collect();
+                        out.coerced = None;
+                        (name.to_string(), out)
+                    })
+            })
+            .collect();
+        for (name, info) in coerced {
+            ctx.type_defs.insert(name, Arc::new(info));
+        }
+
+        // A row type named through an alias (`type Row = User`) is checked as what it names.
+        let aliases = source.type_aliases();
+        let mut resolved: Vec<RowQuery> = Vec::new();
+        for (line, name, query, span) in queries {
+            match alias_target(&name, &aliases, source) {
+                None => {
+                    if !ctx.type_defs.contains(&name) {
+                        ctx.specialize(&name);
+                    }
+                    resolved.push((line, name, query, span));
+                }
+                Some(target) => {
+                    let base = unparse(target, &source.text);
+                    if ctx.type_defs.contains(&base) {
+                        resolved.push((line, base, query, span));
+                    } else {
+                        ctx.aliased.push(((line, name, query, span), target));
+                    }
+                }
+            }
+        }
+        ctx.user_queries = resolved
+            .into_iter()
+            .filter(|query| ctx.type_defs.contains(&query.1))
+            .collect();
+        ctx
+    }
+
+    /// The diagnostics, by line.
+    pub(crate) fn finish(mut self) -> Found {
+        self.found
+            .diagnostics
+            .sort_by_key(|reported| reported.diagnostic.line);
+        self.found
+    }
+
+    pub(crate) fn typeddict_inheritance(&mut self) {
+        let queries = std::mem::take(&mut self.user_queries);
+        check_typeddict_inheritance(self, &queries);
+        self.user_queries = queries;
+    }
+
+    /// `bound` are the arguments a query is bound to, by the span of its row type.
+    pub(crate) fn structural(&mut self, bound: &HashMap<(usize, usize), Vec<Param>>) {
+        let queries = std::mem::take(&mut self.user_queries);
+        check_structural(self, &queries, bound);
+        self.user_queries = queries;
+    }
+
+    pub(crate) fn aliases(&mut self) {
+        let aliased = std::mem::take(&mut self.aliased);
+        check_aliases(self, &aliased);
+        self.aliased = aliased;
+    }
+}
+
+/// `_bind`: `query` with the placeholders bound to values that are not `None` respelled
+/// as ones whose nullability is not judged.
+pub(crate) fn bind(query: Option<&str>, params: Option<&[Param]>, dialect: &str) -> Option<String> {
+    static PLACEHOLDER: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"%%|%\((?P<name>[^)]+)\)s|%s").expect("a valid pattern"));
+    let query = query?;
+    let non_null: HashSet<&Key> = params
+        .unwrap_or_default()
+        .iter()
+        .filter(|param| param.kind.as_deref().is_some_and(|kind| kind != "None"))
+        .map(|param| &param.key)
+        .collect();
+    if non_null.is_empty() {
+        return Some(query.to_string());
+    }
+    let dialect = dialect.to_lowercase();
+    let marker = if dialect == "postgres" || dialect == "postgresql" {
+        "$0"
+    } else {
+        "?"
+    };
+    let mut position = 0;
+    let bound = PLACEHOLDER.replace_all(query, |found: &regex::Captures<'_>| {
+        if &found[0] == "%%" {
+            return found[0].to_string();
+        }
+        let key = match found.name("name") {
+            Some(name) => Key::Name(name.as_str().to_string()),
+            None => {
+                position += 1;
+                Key::Index(position)
+            }
+        };
+        if non_null.contains(&key) {
+            marker.to_string()
+        } else {
+            found[0].to_string()
+        }
+    });
+    Some(bound.into_owned())
 }
 
 /// `_alias_target`: what the alias `name` stands for, through aliases of aliases.
-fn alias_target<'a>(
+pub(crate) fn alias_target<'a>(
     name: &str,
     aliases: &HashMap<&str, &'a Expr>,
     source: &Source,
@@ -326,8 +433,17 @@ fn check_typeddict_inheritance(ctx: &mut Check<'_>, user_queries: &[RowQuery]) {
 }
 
 /// Rows named by a type defined in this source (or an imported one).
-fn check_structural(ctx: &mut Check<'_>, user_queries: &[RowQuery]) {
+fn check_structural(
+    ctx: &mut Check<'_>,
+    user_queries: &[RowQuery],
+    bound: &HashMap<(usize, usize), Vec<Param>>,
+) {
     for (line, name, query, span) in user_queries {
+        let dialect = ctx.settings.options.dialect.name();
+        let query = match bound.get(span) {
+            Some(params) if !params.is_empty() => bind(query.as_deref(), Some(params), dialect),
+            _ => query.clone(),
+        };
         let Some(columns) = ctx.columns(query.as_deref()) else {
             continue;
         };
@@ -776,7 +892,7 @@ impl Structural<'_> {
 }
 
 /// The row type of a query that is not a class: what each column must be.
-struct RowShape {
+pub(crate) struct RowShape {
     text: String,
     is_tuple: bool,
     /// `(label, resolved type, annotation)` of each column.
@@ -788,7 +904,7 @@ struct RowShape {
 ///
 /// A scalar type takes one column, `tuple[A, B]` one column per item. Other row types (an
 /// unknown class, `dict`, `tuple[int, ...]`) are not checked.
-fn row_shape(row: &Expr, text: &str, source: &Source) -> Option<RowShape> {
+pub(crate) fn row_shape(row: &Expr, text: &str, source: &Source) -> Option<RowShape> {
     let b = builtins();
     let resolver = Resolver {
         aliases: &source.aliases,
@@ -852,7 +968,7 @@ fn row_shape(row: &Expr, text: &str, source: &Source) -> Option<RowShape> {
 }
 
 /// `_value_diagnostics`: a tuple or scalar row type against the query columns.
-fn value_diagnostics(
+pub(crate) fn value_diagnostics(
     shape: Option<&RowShape>,
     columns: &[RowColumn],
     rules: &RuleConfig,
