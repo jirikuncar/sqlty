@@ -167,7 +167,11 @@ class _Check:
             return
         info = self.type_defs.get(row.value.id)
         node = next(
-            (c for c in self.parsed.classes if info is not None and c.lineno == info.lineno),
+            (
+                c
+                for c in self.parsed.outline_classes
+                if info is not None and c.lineno == info.lineno
+            ),
             None,
         )
         if info is None or node is None:

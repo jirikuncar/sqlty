@@ -22,6 +22,7 @@
 //! mapping). The `#[pyfunction]`s are exercised from Python by `tests/`.
 
 mod config;
+mod outline;
 mod server;
 
 use sqlty_python::checker;
@@ -1085,6 +1086,13 @@ fn template_strings(py: Python<'_>, source: &str) -> Option<Vec<PyTemplate>> {
     })
 }
 
+/// `ParsedSource.outline` and its classes, built in Rust (see `outline`), or None where Rust
+/// does not read `source`.
+#[pyfunction]
+fn module_outline<'py>(py: Python<'py>, source: &str) -> PyResult<Option<outline::Outline<'py>>> {
+    outline::outline(py, source)
+}
+
 type PyArg = (
     bool,
     (usize, usize),
@@ -1474,6 +1482,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(check_queries, m)?)?;
     m.add_function(wrap_pyfunction!(named_queries, m)?)?;
     m.add_function(wrap_pyfunction!(module_facts, m)?)?;
+    m.add_function(wrap_pyfunction!(module_outline, m)?)?;
     m.add_function(wrap_pyfunction!(template_strings, m)?)?;
     m.add_function(wrap_pyfunction!(helper_sites, m)?)?;
     m.add_function(wrap_pyfunction!(unparse_expression, m)?)?;
