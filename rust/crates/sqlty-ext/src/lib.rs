@@ -714,6 +714,31 @@ fn add_param_types(
     })
 }
 
+/// `source` with the `typing.Any` row items of JSON columns of known shape typed, a
+/// `TypedDict` per object below a `# sqlty: generated` line after the imports.
+///
+/// Raises:
+///     ValueError: unsupported import_style
+#[pyfunction]
+#[pyo3(signature = (source, *, version, dialect = DialectArg::POSTGRES, schema_sql = None, import_style = None))]
+fn add_json_types(
+    py: Python<'_>,
+    source: &str,
+    version: (u8, u8),
+    dialect: DialectArg,
+    schema_sql: Option<SchemaArg>,
+    import_style: Option<&str>,
+) -> Result<String, Error> {
+    let dialect = dialect.0;
+    detach(py, || {
+        let schema = schema(schema_sql, dialect);
+        let options = Options::new(dialect, schema.as_deref(), import_style, false)?;
+        Ok(sqlty_python::json_types::add_json_types(
+            source, &options, version,
+        ))
+    })
+}
+
 /// Strip Python source: SQL[T]("--sql\n...") -> "--sql\n...".
 ///
 /// Removes unused imports added by rewrite.
@@ -1778,6 +1803,25 @@ type CallVariants = (
     Option<String>,
 );
 
+type IgnoreTuple = (usize, Option<Vec<String>>, usize, usize);
+
+/// `ParsedSource.ignores` as Rust reads them: `(line, rules, start, end)` of every
+/// `# sqlty: ignore` comment. None where Rust does not read the source.
+#[pyfunction]
+fn module_ignores(py: Python<'_>, source: &str, version: (u8, u8)) -> Option<Vec<IgnoreTuple>> {
+    use sqlty_python::types::symbols::Source;
+
+    detach(py, || {
+        let source = Source::new(source, version)?;
+        Some(
+            sqlty_python::suppress::ignores(&source)
+                .into_iter()
+                .map(|ignore| (ignore.line, ignore.rules, ignore.span.0, ignore.span.1))
+                .collect(),
+        )
+    })
+}
+
 /// `query_variants` of the first argument of every call of a plain name in `source`;
 /// `read` is False where the Rust model does not cover what Python computes. None where
 /// Rust does not read the source.
@@ -2148,7 +2192,9 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(module_index, m)?)?;
     m.add_function(wrap_pyfunction!(rendered_compositions, m)?)?;
     m.add_function(wrap_pyfunction!(call_variants, m)?)?;
+    m.add_function(wrap_pyfunction!(module_ignores, m)?)?;
     m.add_function(wrap_pyfunction!(module_helpers, m)?)?;
+    m.add_function(wrap_pyfunction!(add_json_types, m)?)?;
     m.add_function(wrap_pyfunction!(module_calls, m)?)?;
     m.add_class::<ModuleIndex>()?;
     m.add_function(wrap_pyfunction!(helper_sites, m)?)?;

@@ -259,6 +259,17 @@ def module_calls(
     module: str | None = None,
     variants: int | None = None,
 ) -> list[tuple[tuple[int, int] | None, list[str], str | None, int | None]]: ...
+def add_json_types(
+    source: str,
+    *,
+    version: tuple[int, int],
+    dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
+    import_style: str | None = None,
+) -> str: ...
+def module_ignores(
+    source: str, version: tuple[int, int]
+) -> list[tuple[int, list[str] | None, int, int]] | None: ...
 def rendered_compositions(
     source: str, version: tuple[int, int]
 ) -> list[tuple[int, bool, str | None]] | None: ...
