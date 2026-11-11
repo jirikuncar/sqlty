@@ -194,6 +194,7 @@ def module_diagnostics(
     coerce: list[str] = ...,
     index: ModuleIndex | None = None,
     name: str | None = None,
+    variants: int | None = None,
 ) -> (
     tuple[
         list[Diagnostic],
@@ -210,6 +211,9 @@ def module_index(
     version: tuple[int, int],
     steps: list[tuple[str, str, str, str | None, list[Path], str | None]],
 ) -> ModuleIndex | None: ...
+def call_variants(
+    source: str, version: tuple[int, int], limit: int
+) -> list[tuple[int, bool, list[tuple[str, list[int], bool]] | None, bool, str | None]] | None: ...
 def rendered_compositions(
     source: str, version: tuple[int, int]
 ) -> list[tuple[int, bool, str | None]] | None: ...

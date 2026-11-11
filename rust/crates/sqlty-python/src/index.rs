@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 
 use regex::Regex;
+use ruff_python_ast::Expr;
 
 use crate::calls::{definitions, helper, index_functions, parameter_names, rank, Helper, Kind};
 use crate::module::Import;
@@ -89,7 +90,8 @@ fn target(source: &Source, dotted: &str) -> Option<(String, String)> {
     }
 }
 
-type Defs = Arc<Dict<Arc<TypeInfo>>>;
+/// The row types of a module, by name.
+pub type Defs = Arc<Dict<Arc<TypeInfo>>>;
 /// The module files read for `register`, by path and module name.
 type Read = HashMap<(PathBuf, String), Option<Arc<Source>>>;
 
@@ -424,6 +426,34 @@ impl HelperIndex {
         self.get_at(module, name, 0)
     }
 
+    /// `HelperIndex.fragment`: the value of `NAME` or `module.NAME` that `source` imports
+    /// from a checked module, with the source it is an expression of. Only a module-level
+    /// name assigned once counts; `module` names `source` when it has no name of its own.
+    pub fn fragment<'a>(
+        &'a self,
+        source: &Source,
+        dotted: &str,
+        module: Option<&str>,
+    ) -> Option<(&'a Source, &'a Expr)> {
+        let name = source.module.as_deref().or(module);
+        let (functions, modules) = imports_of(&source.entries, name);
+        match dotted.rsplit_once('.') {
+            None => {
+                let (module, original) = functions.get(dotted)?;
+                self.tree.constant(module, original, 0)
+            }
+            Some((prefix, name)) => self.tree.constant(&module_of(prefix, &modules), name, 0),
+        }
+    }
+
+    /// The row types of `source`, a module of the index, as `extract_type_definitions`
+    /// reads them.
+    pub fn definitions(&self, source: &Source) -> Option<Defs> {
+        let module = source.module.as_deref()?;
+        let known = self.tree.sources.get(module)?;
+        std::ptr::eq(&**known, source).then(|| self.tree.definitions(module, known))
+    }
+
     fn get_at(&self, module: &str, name: &str, depth: usize) -> Option<&Helper> {
         if let Some(found) = self
             .modules
@@ -500,13 +530,22 @@ impl Tree {
         found
     }
 
-    fn row_type_at(&self, module: &str, name: &str, depth: usize) -> Option<RowType> {
+    fn constant(&self, module: &str, name: &str, depth: usize) -> Option<(&Source, &Expr)> {
         if depth > 8 {
             return None;
         }
         let source = self.sources.get(module)?;
+        if let Some(Some(value)) = crate::compose::constants(source).get(name) {
+            return Some((source, value));
+        }
+        let exports = self.reexports(module, source);
+        let (target, original) = exports.get(name)?;
+        self.constant(target, original, depth + 1)
+    }
+
+    fn definitions(&self, module: &str, source: &Arc<Source>) -> Defs {
         let known = lock(&self.row_types).get(module).cloned();
-        let defs = match known {
+        match known {
             Some(defs) => defs,
             None => {
                 // Modules that import each other's row types see none while either is read.
@@ -525,7 +564,15 @@ impl Tree {
                     Arc::default()
                 }
             }
-        };
+        }
+    }
+
+    fn row_type_at(&self, module: &str, name: &str, depth: usize) -> Option<RowType> {
+        if depth > 8 {
+            return None;
+        }
+        let source = self.sources.get(module)?;
+        let defs = self.definitions(module, source);
         if let Some(info) = defs.get(name) {
             return Some(RowType {
                 info: info.clone(),

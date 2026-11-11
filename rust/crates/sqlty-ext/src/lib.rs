@@ -935,6 +935,64 @@ fn rendered_compositions(
     })
 }
 
+/// One call's variants: `(offset of the query, read, variants as (query, lines, declared),
+/// composed, reason)`; variants are None for an unchecked query.
+type CallVariants = (
+    usize,
+    bool,
+    Option<Vec<(String, Vec<usize>, bool)>>,
+    bool,
+    Option<String>,
+);
+
+/// `query_variants` of the first argument of every call of a plain name in `source`;
+/// `read` is False where the Rust model does not cover what Python computes. None where
+/// Rust does not read the source.
+#[pyfunction]
+fn call_variants(
+    py: Python<'_>,
+    source: &str,
+    version: (u8, u8),
+    limit: usize,
+) -> Option<Vec<CallVariants>> {
+    use ruff_python_ast::Expr;
+    use ruff_text_size::Ranged;
+    use sqlty_python::scopes::Scan;
+    use sqlty_python::types::symbols::Source;
+    use sqlty_python::variants::{query_variants, Found};
+
+    detach(py, || {
+        let source = Source::new(source, version)?;
+        let scan = Scan::new(source.body(), |call| {
+            call.func.is_name_expr() && !call.arguments.args.is_empty()
+        });
+        let mut found: Vec<CallVariants> = scan
+            .calls
+            .iter()
+            .map(|(call, stack)| {
+                let query: &Expr = &call.arguments.args[0];
+                let at = query.start().to_usize();
+                let stack: Vec<_> = stack.iter().map(|scope| scan.scopes[*scope]).collect();
+                match query_variants(&source, &stack, call.range(), query, limit, None) {
+                    None => (at, false, None, false, None),
+                    Some(Found::Unchecked { composed, reason }) => {
+                        (at, true, None, composed, reason)
+                    }
+                    Some(Found::Variants(variants)) => {
+                        let variants = variants
+                            .into_iter()
+                            .map(|v| (v.query, v.lines, v.declared.is_some()))
+                            .collect();
+                        (at, true, Some(variants), false, None)
+                    }
+                }
+            })
+            .collect();
+        found.sort();
+        Some(found)
+    })
+}
+
 /// The modules of the checked paths as `sqlty_python::index` reads them, built from the
 /// steps that filled a `sqlty._helpers.HelperIndex`: `("add", module, text, name)` and
 /// `("register", import path, query parameter, row parameter, roots, database)`.
@@ -983,7 +1041,7 @@ fn module_index(py: Python<'_>, version: (u8, u8), steps: Vec<IndexStep>) -> Opt
 /// them: `(diagnostics, redundant, needed)`, see `row_diagnostics`. None where Rust does
 /// not read the source, or it needs what is not read in Rust yet.
 #[pyfunction]
-#[pyo3(signature = (source, *, version, dialect = DialectArg::POSTGRES, schema_sql = None, rules = None, import_style = None, untyped = false, module = None, coerce = vec![], index = None, name = None))]
+#[pyo3(signature = (source, *, version, dialect = DialectArg::POSTGRES, schema_sql = None, rules = None, import_style = None, untyped = false, module = None, coerce = vec![], index = None, name = None, variants = None))]
 #[expect(
     clippy::too_many_arguments,
     clippy::type_complexity,
@@ -1002,6 +1060,7 @@ fn module_diagnostics(
     coerce: Vec<String>,
     index: Option<PyRef<'_, ModuleIndex>>,
     name: Option<&str>,
+    variants: Option<usize>,
 ) -> Result<Option<(Vec<DiagnosticOut>, Vec<Option<FieldKey>>, Vec<FieldKey>)>, Error> {
     use sqlty_python::types::symbols::Source;
     use sqlty_python::{check, rows};
@@ -1040,6 +1099,7 @@ fn module_diagnostics(
                 .is_some_and(|schema| !schema.databases().is_some_and(|all| all.absent)),
             lint: &lint,
             helpers: helpers.as_deref(),
+            variants,
         };
         let Some(found) = check::diagnostics(&Arc::new(parsed), &run) else {
             return Ok(None);
@@ -1942,6 +2002,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(module_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(module_index, m)?)?;
     m.add_function(wrap_pyfunction!(rendered_compositions, m)?)?;
+    m.add_function(wrap_pyfunction!(call_variants, m)?)?;
     m.add_class::<ModuleIndex>()?;
     m.add_function(wrap_pyfunction!(helper_sites, m)?)?;
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;

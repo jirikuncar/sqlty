@@ -12,10 +12,12 @@ use ruff_python_ast::visitor::{walk_expr, Visitor};
 use ruff_python_ast::{Expr, ExprCall, Parameters, Stmt, StmtFunctionDef};
 use ruff_text_size::Ranged;
 
+use crate::compose::{self, Declared, Rendered};
 use crate::helpers::{mentions, receiver_class, region};
 use crate::scopes::{dotted, Context, Key, Lines, Node, Param, Scan, Scope};
 use crate::types::info::Dict;
 use crate::types::symbols::Source;
+use crate::variants::{query_variants, Found, Variant};
 
 const TYPE_FORMS: [&str; 3] = ["type", "Type", "TypeForm"];
 const PARAMS_ARGUMENT: [&str; 3] = ["params", "parameters", "args"];
@@ -71,7 +73,12 @@ pub struct Call<'a> {
     pub driver: Option<&'static str>,
     pub single: Option<String>,
     pub dynamic: bool,
+    /// Why a query built in branches is not checked.
     pub reason: Option<String>,
+    /// Every query a call built in branches can run, `query` being the first.
+    pub variants: Vec<Variant<'a>>,
+    /// The `SQL[R, P]("...")` the query is that of.
+    pub declared: Option<Declared<'a>>,
     pub configured: bool,
     /// The byte offsets of the argument the query comes from.
     pub query_span: Option<(usize, usize)>,
@@ -92,7 +99,7 @@ impl Call<'_> {
 }
 
 /// `ParsedSource.marker_names`: the local spellings of `Annotated` and of `sqlty.SQL`.
-fn marker_names(source: &Source) -> (HashSet<String>, HashSet<String>) {
+pub(crate) fn marker_names(source: &Source) -> (HashSet<String>, HashSet<String>) {
     let (mut annotated, mut marker) = (HashSet::new(), HashSet::new());
     for import in &source.entries {
         match &import.module {
@@ -456,8 +463,9 @@ fn call_params(
 /// psycopg composition, or a name that may stand for a query.
 pub fn helper_calls<'a>(
     source: &'a Source,
-    helpers: Option<&HelperIndex>,
+    helpers: Option<&'a HelperIndex>,
     module: Option<&str>,
+    variants: Option<usize>,
 ) -> Option<Vec<Call<'a>>> {
     let text = &*source.text;
     let local = text.contains("Annotated") && text.contains("sqlty") && text.contains("SQL");
@@ -515,6 +523,11 @@ pub fn helper_calls<'a>(
         }),
     };
     let mut wanted: Vec<Option<bool>> = vec![None; scan.scopes.len()];
+    let composed = text.contains("psycopg");
+    let mut psycopg: Option<compose::Scan<'a>> = None;
+    let resolve = |from: &Source, dotted: &str| {
+        helpers.and_then(|helpers| helpers.fragment(from, dotted, module))
+    };
     let mut calls = Vec::new();
     for (call, stack) in &scan.calls {
         if let Some(&scope) = stack.last() {
@@ -555,37 +568,109 @@ pub fn helper_calls<'a>(
             Expr::StringLiteral(literal) => Some(crate::parse::text(literal, text)),
             _ => None,
         };
-        if literal.is_none() {
-            if forwarded(query, stack, &scan, &annotated, &marker) {
-                continue;
+        if literal.is_none() && forwarded(query, stack, &scan, &annotated, &marker) {
+            continue;
+        }
+        let mut built = Built {
+            dynamic: literal.is_none(),
+            query: literal,
+            ..Built::default()
+        };
+        if built.query.is_none() {
+            let rendered = if composed {
+                let scan = psycopg.get_or_insert_with(|| compose::Scan::new(source));
+                compose::render(scan, query, Some(&resolve))?
+            } else {
+                Rendered::None
+            };
+            match rendered {
+                Rendered::Text(text) => (built.query, built.dynamic) = (Some(text), false),
+                Rendered::Unchecked => built.dynamic = false,
+                Rendered::None => {}
             }
-            if text.contains("psycopg") || matches!(query, Expr::Name(_) | Expr::Attribute(_)) {
-                return None;
+            let around = || -> Vec<Node<'a>> { stack.iter().map(|s| scan.scopes[*s]).collect() };
+            if let (Some(limit), None) = (variants, &built.query) {
+                match query_variants(
+                    source,
+                    &around(),
+                    call.range(),
+                    query,
+                    limit,
+                    Some(&resolve),
+                )? {
+                    Found::Unchecked { composed, reason } => {
+                        built.reason = reason;
+                        built.dynamic = built.dynamic && !composed;
+                    }
+                    Found::Variants(found) => {
+                        built.query = found.first().map(|variant| variant.query.clone());
+                        built.declared = found.first().and_then(|v| v.declared.clone());
+                        built.dynamic = false;
+                        built.variants = found;
+                    }
+                }
+            } else if built.dynamic && matches!(query, Expr::Name(_) | Expr::Attribute(_)) {
+                // Without query variants, a name still stands for the query of one `SQL[R](...)`.
+                let found =
+                    query_variants(source, &around(), call.range(), query, 1, Some(&resolve))?;
+                if let Found::Variants(found) = found {
+                    if let Some(declared) = found.into_iter().next().and_then(|v| v.declared) {
+                        built.query = Some(declared.query.clone());
+                        built.declared = Some(declared);
+                        built.dynamic = false;
+                    }
+                }
             }
         }
         // `HelperCall._on`: an unmarked query is read against the database of its helper.
-        let literal = match (literal, &helper.database) {
-            (Some(query), Some(database)) if !is_marked(&query) => {
-                Some(format!("-- sqlty: db={database}\n{query}"))
-            }
-            (literal, _) => literal,
-        };
+        if let Some(database) = &helper.database {
+            let routed = |query: &mut String| {
+                if !is_marked(query) {
+                    query.insert_str(0, &format!("-- sqlty: db={database}\n"));
+                }
+            };
+            let queries = built
+                .variants
+                .iter_mut()
+                .flat_map(|variant| {
+                    let declared = variant
+                        .declared
+                        .as_mut()
+                        .map(|declared| &mut declared.query);
+                    std::iter::once(&mut variant.query).chain(declared)
+                })
+                .chain(&mut built.query)
+                .chain(built.declared.as_mut().map(|declared| &mut declared.query));
+            queries.for_each(routed);
+        }
         calls.push(Call {
             line: lines.line(call.start().to_usize()),
-            dynamic: literal.is_none(),
-            query: literal,
+            dynamic: built.dynamic,
+            query: built.query,
+            reason: built.reason,
+            variants: built.variants,
+            declared: built.declared,
             row: argument(helper, call, helper.row.as_deref()),
             params: call_params(helper, call, stack, &ctx),
             end_line: Some(lines.line(call.end().to_usize().saturating_sub(1))),
             driver: None,
             single: None,
-            reason: None,
             configured: helper.configured,
             query_span: Some((query.start().to_usize(), query.end().to_usize())),
         });
     }
     calls.sort_by_key(|call| (call.line, call.query_span));
     Some(calls)
+}
+
+/// What a call's query argument is read as.
+#[derive(Default)]
+struct Built<'a> {
+    query: Option<String>,
+    dynamic: bool,
+    reason: Option<String>,
+    variants: Vec<Variant<'a>>,
+    declared: Option<Declared<'a>>,
 }
 
 /// Whether `query` is the marked query parameter of a function around the call.

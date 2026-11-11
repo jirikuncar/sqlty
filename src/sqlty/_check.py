@@ -570,7 +570,7 @@ def diagnostics(
         row_usage.redundant += own.redundant
     if AST == "compare":
         index = None if helpers is None else helpers.rust()
-        if variants is None and (helpers is None or index is not None):
+        if helpers is None or index is not None:
             _compare_module(
                 parsed,
                 found,
@@ -583,9 +583,10 @@ def diagnostics(
                 module,
                 coerce,
                 index,
+                variants,
             )
         else:
-            # What Rust reads so far: the module by itself, each call one query.
+            # An index Rust does not read: the module by itself.
             diagnostics(
                 parsed,
                 dialect=dialect,
@@ -595,6 +596,7 @@ def diagnostics(
                 untyped=untyped,
                 helpers=None,
                 module=module,
+                variants=variants,
                 coerce=coerce,
             )
     return found
@@ -612,6 +614,7 @@ def _compare_module(
     module: str | None,
     coerce: frozenset[str],
     index: ModuleIndex | None = None,
+    variants: int | None = None,
 ) -> None:
     """``SQLTY_AST=compare``: ``sqlty_python::check`` must report what these passes do."""
     rust = _module_diagnostics(
@@ -626,6 +629,7 @@ def _compare_module(
         coerce=sorted(coerce),
         index=index,
         name=parsed.module,
+        variants=variants,
     )
     if rust is None:
         return

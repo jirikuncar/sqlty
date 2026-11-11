@@ -67,4 +67,5 @@ pub mod templates;
 #[allow(missing_docs)]
 pub mod types;
 pub mod unparse;
+pub mod variants;
 pub(crate) mod tokens;

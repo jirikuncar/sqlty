@@ -207,6 +207,7 @@ def compare(
     registered: list[tuple[str, str, str | None, str | None]],
     dialect: str = "postgres",
     rules: dict[str, str] | None = None,
+    variants: int | None = None,
 ) -> int:
     """How many diagnostics both report for the last of ``modules``, -1 where Rust declines."""
     index = HelperIndex()
@@ -226,9 +227,10 @@ def compare(
         "import_style": None,
         "untyped": False,
         "module": name,
+        "variants": variants,
     }
     found = _check._diagnostics(  # noqa: SLF001
-        parsed, helpers=index, row_usage=usage, variants=None, coerce=frozenset(), **settings
+        parsed, helpers=index, row_usage=usage, coerce=frozenset(), **settings
     )
     rust = index.rust()
     assert rust is not None
