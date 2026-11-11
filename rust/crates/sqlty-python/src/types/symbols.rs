@@ -32,6 +32,8 @@ pub struct Source {
     pub version: Version,
     /// `ParsedSource.module`: the dotted name, `pkg.__init__` for a package.
     pub module: Option<String>,
+    /// See [`crate::compose::constant`].
+    pub(crate) constants: std::sync::OnceLock<HashMap<String, Option<usize>>>,
 }
 
 impl Source {
@@ -50,6 +52,7 @@ impl Source {
             entries: imports.entries,
             typing: imports.typing,
             module: None,
+            constants: std::sync::OnceLock::new(),
             parsed,
             version,
         })
