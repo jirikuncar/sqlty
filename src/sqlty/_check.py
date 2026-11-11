@@ -211,6 +211,8 @@ class _Check:
 
     def query_span(self, call: HelperCall) -> tuple[int, int] | None:
         """The byte offsets of the argument the query of ``call`` comes from."""
+        if call.query_span is not None:
+            return call.query_span
         return None if call.query_node is None else self.parsed.span(call.query_node)
 
 
@@ -407,9 +409,9 @@ def _bound_params(ctx: _Check) -> dict[tuple[int, int], tuple[ParamArg, ...]]:
     From ``P`` of ``SQL[R, P]``, and from the driver call that runs the query.
     """
     bindings = [
-        (ctx.parsed.span(call.query_node), call.params)
+        (span, call.params)
         for call in ctx.driver_calls
-        if call.params and call.query_node is not None
+        if call.params and (span := ctx.query_span(call)) is not None
     ]
     for _, declared, _, span in ctx.declared:
         if (found := _annotations_of(ctx, declared, ctx.parsed)) is not None:
@@ -558,10 +560,8 @@ def diagnostics(
     found = find_helper_calls(parsed, helpers, module, variants=variants)
     driver_calls = find_driver_calls(parsed) + find_template_calls(parsed)
     # A driver call also configured as a helper has its parameters checked once, as the driver's.
-    by_driver = {id(call.query_node) for call in driver_calls if call.query_node is not None}
-    found = [
-        call._replace(params=None) if id(call.query_node) in by_driver else call for call in found
-    ]
+    by_driver = {call.query_span for call in driver_calls}
+    found = [call._replace(params=None) if call.query_span in by_driver else call for call in found]
     typed = {line for call in found for line in call.typed_lines}
     branched = [call for call in found if len(call.variants) > 1]
     diagnostics = [

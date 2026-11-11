@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from sqlty._params import ParamArg, arg_type, literal_params
 from sqlty._psycopg import UNCHECKED
-from sqlty._source import ParsedSource
+from sqlty._source import AST, AstMismatch, ParsedSource
 from sqlty._variants import Declared, Unchecked, Variant, query_variants
 
 if TYPE_CHECKING:
@@ -82,7 +82,8 @@ class HelperCall(NamedTuple):
     With query variants on, ``variants`` holds every query a call built in branches can
     run, ``query`` being the first; ``reason`` says why such a call is not checked.
     ``query_node`` is the argument (or t-string) the query comes from, which a diagnostic
-    about the query underlines. ``configured`` marks a call to a helper of
+    about the query underlines; ``query_span`` its byte offsets, set where Rust found the
+    call and there is no node. ``configured`` marks a call to a helper of
     ``[[tool.sqlty.functions]]``.
     """
 
@@ -99,6 +100,7 @@ class HelperCall(NamedTuple):
     reason: str | None = None
     query_node: ast.expr | None = None
     configured: bool = False
+    query_span: tuple[int, int] | None = None
 
     @property
     def typed_lines(self) -> range:
@@ -618,27 +620,44 @@ def _imports(
         >>> _imports(ParsedSource("from a.b import f as g\\nimport a.c as m"), None)
         ({'g': ('a.b', 'f')}, {'g': 'a.b.f', 'm': 'a.c'})
     """
+    if AST != "python" and (facts := parsed.facts) is not None:
+        if AST == "compare" and facts.imports != (python := _import_entries(parsed)):
+            raise AstMismatch("imports", facts.imports, python, parsed.text)
+        return _imports_of(facts.imports, module)
+    return _imports_of(_import_entries(parsed), module)
+
+
+def _import_entries(parsed: ParsedSource) -> list[tuple[str, str, str | None, int]]:
+    return [
+        (alias.asname or alias.name, alias.name, None, 0)
+        if isinstance(node, ast.Import)
+        else (alias.asname or alias.name, alias.name, node.module or "", node.level)
+        for node in parsed.imports
+        for alias in node.names
+    ]
+
+
+def _imports_of(
+    entries: Iterable[tuple[str, str, str | None, int]], module: str | None
+) -> tuple[dict[str, tuple[str, str]], dict[str, str]]:
+    """``_imports`` of ``(local, original, from-module or None, level)``, in ``ast.walk`` order."""
     functions: dict[str, tuple[str, str]] = {}
     modules: dict[str, str] = {}
     package = module.rpartition(".")[0] if module else ""
-    for node in parsed.imports:
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                modules[alias.asname or alias.name] = alias.name
-        elif isinstance(node, ast.ImportFrom):
-            base = node.module or ""
-            if node.level:
-                if module is None:
-                    continue
-                parts = package.split(".") if package else []
-                if node.level - 1 > len(parts):
-                    continue
-                parts = parts[: len(parts) - (node.level - 1)]
-                base = ".".join([*parts, *([node.module] if node.module else [])])
-            for alias in node.names:
-                local = alias.asname or alias.name
-                functions[local] = (base, alias.name)
-                modules[local] = f"{base}.{alias.name}" if base else alias.name
+    for local, original, base, level in entries:
+        if base is None:
+            modules[local] = original
+            continue
+        if level:
+            if module is None:
+                continue
+            parts = package.split(".") if package else []
+            if level - 1 > len(parts):
+                continue
+            parts = parts[: len(parts) - (level - 1)]
+            base = ".".join([*parts, *([base] if base else [])])
+        functions[local] = (base, original)
+        modules[local] = f"{base}.{original}" if base else original
     return functions, modules
 
 
@@ -826,6 +845,7 @@ def find_helper_calls(
                     node.end_lineno,
                     query_node=query,
                     configured=helper.configured,
+                    query_span=parsed.span(query),
                 )._on(helper.database)
             )
         elif query is not None and not forwarded(node, query):
@@ -842,6 +862,7 @@ def find_helper_calls(
             dynamic=text is None,
             query_node=query,
             configured=helper.configured,
+            query_span=parsed.span(query),
         )
         if variants is not None and (text is None or text == UNCHECKED):
             found = query_variants(parsed, node, query, variants, resolve_fragment)
@@ -857,4 +878,8 @@ def find_helper_calls(
             if isinstance(found, list) and isinstance(found[0].query, Declared):
                 call = call._replace(query=found[0].query, dynamic=False)
         calls.append(call._on(helper.database))
-    return sorted(calls, key=lambda call: call.line)
+    return sorted(calls, key=_order)
+
+
+def _order(call: HelperCall) -> tuple[int, tuple[int, int]]:
+    return call.line, call.query_span or (0, 0)

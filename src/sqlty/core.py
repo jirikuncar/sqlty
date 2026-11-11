@@ -830,9 +830,15 @@ def _helper_starts(
 ) -> list[int]:
     """The byte offsets of the string literals helper calls pass as their query."""
     return [
-        parsed.span(call.query_node)[0]
+        call.query_span[0]
         for call in find_helper_calls(parsed, helpers, module)
-        if isinstance(call.query_node, ast.Constant) and isinstance(call.query_node.value, str)
+        if call.query_span is not None
+        and (
+            call.query_node is None
+            or (
+                isinstance(call.query_node, ast.Constant) and isinstance(call.query_node.value, str)
+            )
+        )
     ]
 
 

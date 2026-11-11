@@ -1005,6 +1005,84 @@ fn named_queries(
         .collect())
 }
 
+/// What decides whether the Python passes need a syntax tree, see `sqlty_python::module`:
+#[derive(IntoPyObject)]
+enum ParamKey {
+    Index(usize),
+    Name(String),
+}
+
+type PyParam = (ParamKey, Option<String>);
+type PyDriverCall = (
+    usize,
+    String,
+    Option<Vec<PyParam>>,
+    &'static str,
+    Option<String>,
+    (usize, usize),
+);
+type PyFacts = (
+    Vec<String>,
+    Vec<String>,
+    Vec<(String, String, Option<String>, u32)>,
+    Vec<(usize, String)>,
+    Vec<(String, String)>,
+    Vec<PyDriverCall>,
+);
+
+/// `(names, attributes, imports, any_calls, typing_aliases, driver_calls)` read from
+/// `source` by `sqlty_python::module::facts`, or None when it is not valid Python.
+#[pyfunction]
+fn module_facts(py: Python<'_>, source: &str) -> Option<PyFacts> {
+    detach(py, || {
+        let found = sqlty_python::module::facts(source)?;
+        let imports = found
+            .imports
+            .into_iter()
+            .map(|i| (i.local, i.original, i.module, i.level))
+            .collect();
+        let driver_calls = found
+            .driver_calls
+            .into_iter()
+            .map(|call| {
+                let params = py_params(call.params);
+                (
+                    call.line,
+                    call.query,
+                    params,
+                    call.driver,
+                    call.single,
+                    call.query_span,
+                )
+            })
+            .collect();
+        Some((
+            found.names,
+            found.attributes,
+            imports,
+            found.any_calls,
+            found.typing_aliases,
+            driver_calls,
+        ))
+    })
+}
+
+fn py_params(params: Option<Vec<sqlty_python::scopes::Param>>) -> Option<Vec<PyParam>> {
+    use sqlty_python::scopes::Key;
+    params.map(|params| {
+        params
+            .into_iter()
+            .map(|p| {
+                let key = match p.key {
+                    Key::Index(index) => ParamKey::Index(index),
+                    Key::Name(name) => ParamKey::Name(name),
+                };
+                (key, p.kind)
+            })
+            .collect()
+    })
+}
+
 /// `(line, annotation, query, annotation_span)` for each `SQL[T](...)` call in Python source.
 ///
 /// `query` is the `--sql` string without its prefix, or None when the call
@@ -1310,6 +1388,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(check_source, m)?)?;
     m.add_function(wrap_pyfunction!(check_queries, m)?)?;
     m.add_function(wrap_pyfunction!(named_queries, m)?)?;
+    m.add_function(wrap_pyfunction!(module_facts, m)?)?;
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;
     m.add_function(wrap_pyfunction!(query_at, m)?)?;
