@@ -713,6 +713,31 @@ fn add_param_types(
     })
 }
 
+/// `source` with the `typing.Any` row items of JSON columns of known shape typed, a
+/// `TypedDict` per object below a `# sqlty: generated` line after the imports.
+///
+/// Raises:
+///     ValueError: unsupported import_style
+#[pyfunction]
+#[pyo3(signature = (source, *, version, dialect = DialectArg::POSTGRES, schema_sql = None, import_style = None))]
+fn add_json_types(
+    py: Python<'_>,
+    source: &str,
+    version: (u8, u8),
+    dialect: DialectArg,
+    schema_sql: Option<SchemaArg>,
+    import_style: Option<&str>,
+) -> Result<String, Error> {
+    let dialect = dialect.0;
+    detach(py, || {
+        let schema = schema(schema_sql, dialect);
+        let options = Options::new(dialect, schema.as_deref(), import_style, false)?;
+        Ok(sqlty_python::json_types::add_json_types(
+            source, &options, version,
+        ))
+    })
+}
+
 /// Strip Python source: SQL[T]("--sql\n...") -> "--sql\n...".
 ///
 /// Removes unused imports added by rewrite.
@@ -1094,7 +1119,12 @@ fn parsed_module(
     }
 }
 
-type SiteTuple = (Option<(usize, usize)>, Vec<String>, Option<&'static str>, Option<usize>);
+type SiteTuple = (
+    Option<(usize, usize)>,
+    Vec<String>,
+    Option<&'static str>,
+    Option<usize>,
+);
 
 /// The helper calls of `source` as `sqlty_python::check::sites` reads them:
 /// `(typed lines, queries, unchecked rule, literal start)`. None where Rust does not read
@@ -2091,6 +2121,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(rendered_compositions, m)?)?;
     m.add_function(wrap_pyfunction!(call_variants, m)?)?;
     m.add_function(wrap_pyfunction!(module_ignores, m)?)?;
+    m.add_function(wrap_pyfunction!(add_json_types, m)?)?;
     m.add_function(wrap_pyfunction!(module_calls, m)?)?;
     m.add_class::<ModuleIndex>()?;
     m.add_function(wrap_pyfunction!(helper_sites, m)?)?;

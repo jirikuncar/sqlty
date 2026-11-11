@@ -50,6 +50,7 @@ pub mod fixer;
 pub mod helpers;
 #[allow(missing_docs)]
 pub mod index;
+pub mod json_types;
 pub mod locate;
 pub mod module;
 pub mod options;

@@ -25,6 +25,7 @@ from sqlty._core import (
     infer_type,
     returns_rows,
 )
+from sqlty._core import add_json_types as _add_json_types
 from sqlty._core import add_param_types as _add_param_types
 from sqlty._core import analyze_columns as _analyze_columns
 from sqlty._core import analyze_params as _analyze_params
@@ -323,11 +324,7 @@ def rewrite_source(
         keep_lines=keep_lines,
     )
     if json_types == "typing.TypedDict" and rewritten != source:
-        from sqlty._json_types import add_json_types
-
-        rewritten = add_json_types(
-            rewritten, dialect=dialect, schema_sql=schema_sql, import_style=import_style
-        )
+        rewritten = _json_types(rewritten, dialect, schema_sql, import_style)
     if param_types:
         rewritten = _add_param_types(
             rewritten, dialect=dialect, schema_sql=schema_sql, import_style=import_style
@@ -419,11 +416,7 @@ def fix_source(
         suppressed=suppressed or None,
     )
     if json_types == "typing.TypedDict" and fixed != parsed.text:
-        from sqlty._json_types import add_json_types
-
-        fixed = add_json_types(
-            fixed, dialect=dialect, schema_sql=schema_sql, import_style=import_style
-        )
+        fixed = _json_types(fixed, dialect, schema_sql, import_style)
     if param_types:
         fixed = _add_param_types(
             fixed, dialect=dialect, schema_sql=schema_sql, import_style=import_style
@@ -821,6 +814,30 @@ def highlight_source(
         helper_starts=_helper_starts(parsed, helpers, module),
     )
     return [Highlight(*item) for item in found]
+
+
+def _json_types(
+    source: str, dialect: str, schema_sql: str | Schema | None, import_style: str | None
+) -> str:
+    """``source`` with the ``typing.Any`` row items of JSON columns of known shape typed."""
+    if AST != "python":
+        rust = _add_json_types(
+            source,
+            version=sys.version_info[:2],
+            dialect=dialect,
+            schema_sql=schema_sql,
+            import_style=import_style,
+        )
+        if AST == "rust":
+            return rust
+    from sqlty._json_types import add_json_types
+
+    python = add_json_types(
+        source, dialect=dialect, schema_sql=schema_sql, import_style=import_style
+    )
+    if AST == "compare" and rust != python:
+        raise AstMismatch("add_json_types", rust, python, source)
+    return python
 
 
 def _helper_starts(
