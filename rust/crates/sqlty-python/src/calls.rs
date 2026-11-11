@@ -668,13 +668,17 @@ pub fn helper_calls<'a>(
 
 /// Whether `text` names the helpers only on the lines that import them, so calls none.
 fn only_imported(text: &str, pattern: &Regex) -> bool {
+    // `from run(...)` can end a `yield` or a `raise` written over two lines.
+    static IMPORT: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^[ \t\x0c]*(?:from[ \t]+[\w.]+[ \t]+import|import)[ \t][^;]*$")
+            .expect("a valid pattern")
+    });
     pattern.find_iter(text).all(|found| {
         let start = text[..found.start()]
             .rfind(['\n', '\r'])
             .map_or(0, |at| at + 1);
         let line = text[start..].split(['\n', '\r']).next().unwrap_or("");
-        let line = line.trim_start_matches([' ', '\t', '\x0c']);
-        (line.starts_with("from ") || line.starts_with("import ")) && !line.contains(';')
+        IMPORT.is_match(line)
     })
 }
 

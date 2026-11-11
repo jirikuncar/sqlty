@@ -323,6 +323,16 @@ REVIEWED = {
         "def f(db: 'Db\u093e', ok: 'Db\u093e '):\n    db.run('SELECT nope FROM t')\n",
         0,
     ),
+    "from on its own line": (
+        {"a": "def run(q: Annotated[str, SQL]): ...\n"},
+        "from a import run\ndef f():\n    x = (yield\n        from run('SELECT nope FROM t'))\n",
+        1,
+    ),
+    "call after an import": (
+        {"a": "def run(q: Annotated[str, SQL]): ...\n"},
+        "from a import run\nimport a; run('SELECT nope FROM t')\n",
+        1,
+    ),
     "cyclic rows": (
         {
             "a": "from b import RB\nclass RA(RB):\n    x: int\nclass RA2(TypedDict):\n    z: int\n",
