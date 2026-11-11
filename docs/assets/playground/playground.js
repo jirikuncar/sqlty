@@ -663,7 +663,8 @@ async function asking(form) {
   const status = form.querySelector("[data-ask-status]");
   const mib = (bytes) => `${Math.round(bytes / 2 ** 20)} MiB`;
   picked.replaceChildren(...llm.MODELS.map((model) => option(model.id, `${model.label} (${mib(model.bytes)})`)));
-  picked.value = saved.model ?? llm.MODELS[0].id;
+  picked.value = saved.model;
+  picked.value ||= llm.MODELS[0].id;
   picked.addEventListener("change", () => remember({ model: picked.value }));
   let loaded;
   let placed = false;
@@ -704,6 +705,7 @@ async function asking(form) {
         config,
         // Sending queries.py too (llm.around) made the eval worse: 14 to 11 of 20 for Coder 1.5B, 12 to 5 for 0.5B.
         question: asked,
+        ...model.prompt,
       });
       const taken = new Set(source.match(/^\w+(?= =)/gm));
       let name = "answer";

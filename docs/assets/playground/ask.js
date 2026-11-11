@@ -1,37 +1,28 @@
 // Natural language to SQL in the browser: a small model writes the query and sqlty checks it
 // against the schema, sending the problems back until the query is clean. No DOM: the
-// playground and scripts/ask_eval.mjs both use it.
+// playground and scripts/ask_eval both use it.
 
 const VENDOR = new URL("../vendor/", import.meta.url).href;
 
+// Picked by scripts/ask_eval (36 questions on PostgreSQL): Coder 1.5B with `rules` 29 exact at
+// 23 s a question on CPU, Coder 0.5B with `examples` 21 at 14 s. Coder 3B scored 31 but is
+// under the Qwen Research License; Qwen3, Qwen3.5, Gemma 3 and Llama 3.2 scored 3 to 19.
 export const MODELS = [
-  {
-    id: "qwen2.5-coder-0.5b",
-    label: "Qwen2.5 Coder 0.5B",
-    repo: "Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF",
-    file: "qwen2.5-coder-0.5b-instruct-q4_k_m.gguf",
-    bytes: 491400064,
-  },
-  {
-    id: "qwen3.5-0.8b",
-    label: "Qwen3.5 0.8B",
-    repo: "ggml-org/Qwen3.5-0.8B-GGUF",
-    file: "Qwen3.5-0.8B-Q4_0.gguf",
-    bytes: 563036064,
-  },
   {
     id: "qwen2.5-coder-1.5b",
     label: "Qwen2.5 Coder 1.5B",
     repo: "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF",
     file: "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
     bytes: 1117320768,
+    prompt: { rules: true },
   },
   {
-    id: "qwen3.5-2b",
-    label: "Qwen3.5 2B",
-    repo: "unsloth/Qwen3.5-2B-GGUF",
-    file: "Qwen3.5-2B-Q4_K_M.gguf",
-    bytes: 1280835840,
+    id: "qwen2.5-coder-0.5b",
+    label: "Qwen2.5 Coder 0.5B",
+    repo: "Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF",
+    file: "qwen2.5-coder-0.5b-instruct-q4_k_m.gguf",
+    bytes: 491400064,
+    prompt: { examples: true },
   },
 ];
 
