@@ -816,4 +816,6 @@ def test_stdlib_table_matches_typeshed() -> None:
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    assert module.OUTPUT.read_text() == module.generate(), "run `make generate-stdlib-types`"
+    text = module.generate()
+    assert module.OUTPUT.read_text() == text, "run `make generate-stdlib-types`"
+    assert module.RUST_OUTPUT.read_text() == module.generate_rust(text)
