@@ -459,7 +459,7 @@ pub fn helper_calls<'a>(
     helpers: Option<&HelperIndex>,
     module: Option<&str>,
 ) -> Option<Vec<Call<'a>>> {
-    let text = source.text.as_str();
+    let text = &*source.text;
     let local = text.contains("Annotated") && text.contains("sqlty") && text.contains("SQL");
     let imported =
         helpers.is_some_and(|helpers| !helpers.modules.is_empty() && helpers.mentions(text));

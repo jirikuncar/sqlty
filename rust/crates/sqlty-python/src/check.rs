@@ -69,7 +69,7 @@ fn may_need_lexing(text: &str, wrapper: &str) -> bool {
 }
 
 /// `ParsedSource.may_wrap`: whether the text can hold a `SQL[T](...)` call.
-fn may_wrap(text: &str, import_line: &str) -> bool {
+pub(crate) fn may_wrap(text: &str, import_line: &str) -> bool {
     let name = import_line
         .trim()
         .strip_prefix("from sqlty import SQL as ")
@@ -991,7 +991,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Option<Found> {
     });
     let settings = run.settings;
     let (options, rules) = (settings.options, settings.rules);
-    let text = source.text.as_str();
+    let text = &*source.text;
     let wrapper = options.style.wrapper_name.as_str();
     let import_line = options.style.import_line.as_str();
 

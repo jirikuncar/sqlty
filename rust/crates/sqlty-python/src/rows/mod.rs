@@ -182,8 +182,7 @@ impl Check<'_> {
 
 /// The diagnostics of the row types `source` names in `SQL[Row](...)` calls.
 pub fn check(source: &Arc<Source>, settings: &Settings<'_>) -> Found {
-    let wrapper = settings.options.style.wrapper_name.as_str();
-    if !source.text.contains(wrapper) {
+    if !crate::check::may_wrap(&source.text, &settings.options.style.import_line) {
         return Found::default();
     }
     let queries = row_queries(source, settings);
@@ -915,7 +914,7 @@ pub(crate) fn row_shape(row: &Expr, text: &str, source: &Source) -> Option<RowSh
     let resolve = |expr: &Expr| resolver.resolve(expr, &source.text, &NoNames);
     let annotation = |expr: &Expr| Annotation {
         expr: expr.clone(),
-        source: Arc::from(source.text.as_str()),
+        source: source.text.clone(),
     };
     if let Expr::Subscript(sub) = row {
         if resolve(&sub.value).is_some_and(|tp| tp.is(&b.tuple)) {
@@ -949,7 +948,8 @@ pub(crate) fn row_shape(row: &Expr, text: &str, source: &Source) -> Option<RowSh
         .any(|class| resolved.is(class));
     let has_args = match &resolved {
         Ty::Generic(_, args) => !args.is_empty(),
-        Ty::Literal(_) | Ty::Union(_) => true,
+        Ty::Literal(values) => !values.is_empty(),
+        Ty::Union(_) => true,
         Ty::Never | Ty::Class(_) | Ty::NewType(_) => false,
     };
     if container || has_args {

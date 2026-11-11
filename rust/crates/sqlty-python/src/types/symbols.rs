@@ -18,7 +18,7 @@ use crate::scopes::Lines;
 
 /// A module read once: its tree and what its imports name.
 pub struct Source {
-    pub text: String,
+    pub text: Arc<str>,
     pub parsed: Parsed<ModModule>,
     pub lines: Lines,
     /// `ParsedSource.typing_aliases`.
@@ -43,7 +43,7 @@ impl Source {
         let parsed = crate::parse::module(text)?;
         let imports = Imports::of(&parsed.syntax().body);
         Some(Source {
-            text: text.to_string(),
+            text: Arc::from(text),
             lines: Lines::new(text),
             aliases: Arc::new(imports.typing.iter().cloned().collect()),
             imports: imports.imported,
@@ -421,7 +421,10 @@ impl ModuleTypes {
         ModuleTypes {
             source,
             index: index.map(Arc::downgrade),
-            module: module.unwrap_or("__main__").to_string(),
+            module: module
+                .filter(|module| !module.is_empty())
+                .unwrap_or("__main__")
+                .to_string(),
             local,
             built: Mutex::default(),
             imported: Mutex::default(),
@@ -450,7 +453,7 @@ impl ModuleTypes {
 impl Names for ModuleTypes {
     fn get(&self, name: &str) -> Option<Found<'_>> {
         let body = self.source.body();
-        let text = self.source.text.as_str();
+        let text = &*self.source.text;
         let resolver = self.source.resolver(Known::Imported);
         match self.local.get(name).map(|local| (*local, body)) {
             Some((Local::NewType(index), body)) => {

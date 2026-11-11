@@ -162,7 +162,7 @@ impl Builder {
             Some(_) => source,
             None => source.named(Some(module)),
         });
-        let text = source.text.as_str();
+        let text = &*source.text;
         let found = if text.contains("Annotated") && text.contains("sqlty") && text.contains("SQL")
         {
             index_functions(&source)
