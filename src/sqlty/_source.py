@@ -53,9 +53,10 @@ from dataclasses import dataclass
 from sqlty._core import module_facts, module_outline
 from sqlty._psycopg import PsycopgScan
 
-AST = os.environ.get("SQLTY_AST", "python")
-"""Who reads the syntax tree: ``python`` (``ast``), ``rust`` (``sqlty_python::module``, falling
-back to ``ast``), or ``compare``, which runs both and raises ``AstMismatch`` when they differ."""
+AST = os.environ.get("SQLTY_AST", "rust")
+"""Who reads the syntax tree: ``rust`` (``sqlty_python``, falling back to ``ast`` for a file
+it does not read), ``python`` (``ast``), or ``compare``, which runs both and raises
+``AstMismatch`` when they differ."""
 
 
 class Facts(typing.NamedTuple):

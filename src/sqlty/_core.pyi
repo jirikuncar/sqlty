@@ -205,7 +205,10 @@ def module_diagnostics(
 ): ...
 
 @final
-class ModuleIndex: ...
+class ModuleIndex:
+    def extended(
+        self, steps: list[tuple[str, str, str, str | None, list[Path], str | None]]
+    ) -> ModuleIndex | None: ...
 
 def module_index(
     version: tuple[int, int],

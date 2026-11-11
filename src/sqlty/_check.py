@@ -555,19 +555,35 @@ def diagnostics(
     ``coerce`` names the row types read as a Pydantic validator reads them.
     """
     own = RowUsage()
-    found = _diagnostics(
-        parsed,
-        dialect=dialect,
-        schema_sql=schema_sql,
-        rules=rules,
-        import_style=import_style,
-        untyped=untyped,
-        helpers=helpers,
-        module=module,
-        row_usage=own,
-        variants=variants,
-        coerce=coerce,
-    )
+    found = None
+    if AST == "rust":
+        found = _rust_diagnostics(
+            parsed,
+            own,
+            dialect,
+            schema_sql,
+            rules,
+            import_style,
+            untyped,
+            helpers,
+            module,
+            variants,
+            coerce,
+        )
+    if found is None:
+        found = _diagnostics(
+            parsed,
+            dialect=dialect,
+            schema_sql=schema_sql,
+            rules=rules,
+            import_style=import_style,
+            untyped=untyped,
+            helpers=helpers,
+            module=module,
+            row_usage=own,
+            variants=variants,
+            coerce=coerce,
+        )
     if row_usage is not None:
         row_usage.needed |= own.needed
         row_usage.redundant += own.redundant
@@ -602,6 +618,47 @@ def diagnostics(
                 variants=variants,
                 coerce=coerce,
             )
+    return found
+
+
+def _rust_diagnostics(
+    parsed: ParsedSource,
+    usage: RowUsage,
+    dialect: str,
+    schema_sql: str | Schema | None,
+    rules: dict[str, str] | None,
+    import_style: str | None,
+    untyped: bool,
+    helpers: HelperIndex | None,
+    module: str | None,
+    variants: int | None,
+    coerce: frozenset[str],
+) -> list[Diagnostic] | None:
+    """The diagnostics as ``sqlty_python::check`` reports them; ``None`` where it declines."""
+    index = None
+    if helpers is not None and (index := helpers.rust()) is None:
+        return None
+    rust = _module_diagnostics(
+        parsed.text,
+        version=sys.version_info[:2],
+        dialect=dialect,
+        schema_sql=schema_sql,
+        rules=rules,
+        import_style=import_style,
+        untyped=untyped,
+        module=module,
+        coerce=sorted(coerce),
+        index=index,
+        name=parsed.module,
+        variants=variants,
+    )
+    if rust is None:
+        return None
+    found, redundant, needed = rust
+    usage.needed.update(needed)
+    usage.redundant += [
+        (key, diag) for key, diag in zip(redundant, found, strict=True) if key is not None
+    ]
     return found
 
 

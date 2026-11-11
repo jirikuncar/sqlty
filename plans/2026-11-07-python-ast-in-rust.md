@@ -113,6 +113,7 @@ read yet, which then stays with Python. Merge in order.
 | `04-calls` | `calls`, `check`: local helpers, driver and template calls, declared params | 1,335 test modules, 20,000 a property | 3.8 ms, 11.1 ms (60 queries) |
 | `05-index` | `index`: helpers, types and row types of the other modules | see below | see below |
 | `06-variants` | `compose`, `variants`: psycopg compositions, queries built in branches, `SQL[R, P]` behind a name | 19,800 test modules, 12,000 generated | see below |
+| `07-cli` | the check of `sqlty check`, the language server and `check_source` | the whole suite in `rust`, `compare` and `python` modes | 1.8 s, 5.0 s (`sqlty check`, 8,000 files) |
 
 `05-index`: `index::Builder` holds the sources by module name, `add` and `register` as
 `HelperIndex` does, and `build` gives the shared index (`symbols::Index` for types and row
@@ -132,6 +133,13 @@ what the model does not cover (a `Literal` of a float, say). Compared on 12,000 
 modules and trees, and on the whole suite: 19,800 modules, one declined. Found by the fuzz
 and fixed in Python: a `psycopg.ProgrammingError` escaped `render` for a list of
 composables passed as a literal.
+
+`07-cli`: `SQLTY_AST` defaults to `rust`: `_check.diagnostics` asks
+`sqlty_python::check` with the Rust index of the tree (`HelperIndex.rust()`, a fork extends
+its parent's) and runs the Python passes only for a module Rust declines. A module the
+index holds is not parsed again for its check, and no `ast.parse` runs. `sqlty check` on
+the 8,000 files of `benchmarks/bench_project.py --size ci`: 5.0 s with `SQLTY_AST=python`,
+1.8 s with `rust` (4 jobs; 4.1 s and 2.6 s with one), the same output.
 
 ### Differences kept
 

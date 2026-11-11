@@ -152,6 +152,9 @@ pub(crate) fn may_wrap(text: &str, import_line: &str) -> bool {
 
 /// `_names_params`: whether `text` subscripts `wrapper` with two arguments.
 fn names_params(text: &str, wrapper: &str) -> bool {
+    if !text.contains(&format!("{wrapper}[")) {
+        return false;
+    }
     let Ok(start) = Regex::new(&format!(r"\b{}\[", regex::escape(wrapper))) else {
         return false;
     };

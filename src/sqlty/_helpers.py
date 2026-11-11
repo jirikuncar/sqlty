@@ -340,12 +340,24 @@ class HelperIndex:
         # How the index was filled, to build it again in Rust.
         self._steps: list[tuple[str, str, str, str | None, list[Path], str | None]] = []
         self._rust: tuple[int, ModuleIndex | None] | None = None
+        self._forked: tuple[HelperIndex, int] | None = None
 
     def rust(self) -> ModuleIndex | None:
         """The index as Rust reads it; ``None`` when it does not read one of the modules."""
-        if self._rust is None or self._rust[0] != len(self._steps):
-            self._rust = len(self._steps), module_index(sys.version_info[:2], self._steps)
-        return self._rust[1]
+        with self._lock:
+            if self._rust is None or self._rust[0] != len(self._steps):
+                parent, forked_at = self._forked or (None, 0)
+                # A fork of an index that has not changed since shares what Rust read of it.
+                if (
+                    parent is not None
+                    and len(parent._steps) == forked_at
+                    and (base := parent.rust()) is not None
+                ):
+                    built = base.extended(self._steps[forked_at:])
+                else:
+                    built = module_index(sys.version_info[:2], self._steps)
+                self._rust = len(self._steps), built
+            return self._rust[1]
 
     def fork(self) -> HelperIndex:
         """A copy whose later ``register`` calls do not reach this index; sources are shared."""
@@ -361,6 +373,7 @@ class HelperIndex:
         other._read = self._read
         other._lock = self._lock
         other._steps = list(self._steps)
+        other._forked = self, len(self._steps)
         return other
 
     def add(self, module: str, source: str | ParsedSource) -> bool:

@@ -72,7 +72,7 @@ def test_check_source_parses_once(parses):
     source = HELPER + USER_TYPE.replace("from pkg.db import fetch_all\n", "")
     diagnostics = check_source(source, schema_sql=SCHEMA)
     assert [d["rule"] for d in diagnostics] == []
-    assert parses[source] == 1
+    assert parses[source] == (AST != "rust")
 
 
 def test_helper_calls_bound_the_work(monkeypatch):
@@ -149,7 +149,8 @@ def test_parsed_source_is_reused(parses):
     parsed = ParsedSource(HELPER + USER_TYPE)
     check_source(parsed, schema_sql=SCHEMA)
     check_source(parsed, schema_sql=SCHEMA)
-    assert parses[parsed.text] == 1
+    # The check in Rust does not parse with `ast` at all.
+    assert parses[parsed.text] == (AST != "rust")
 
 
 def test_parsed_source_facts():

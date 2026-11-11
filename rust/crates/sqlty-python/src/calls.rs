@@ -503,6 +503,9 @@ pub fn helper_calls<'a>(
     let mut names: Vec<String> = names.into_iter().collect();
     names.sort();
     let pattern = mentions(&names)?;
+    if only_imported(text, &pattern) {
+        return Some(Vec::new());
+    }
     let scan = Scan::new(source.body(), |call: &ExprCall| match call.func.as_ref() {
         Expr::Name(_) => true,
         Expr::Attribute(attr) => dotted(&attr.value).is_some(),
@@ -661,6 +664,18 @@ pub fn helper_calls<'a>(
     }
     calls.sort_by_key(|call| (call.line, call.query_span));
     Some(calls)
+}
+
+/// Whether `text` names the helpers only on the lines that import them, so calls none.
+fn only_imported(text: &str, pattern: &Regex) -> bool {
+    pattern.find_iter(text).all(|found| {
+        let start = text[..found.start()]
+            .rfind(['\n', '\r'])
+            .map_or(0, |at| at + 1);
+        let line = text[start..].split(['\n', '\r']).next().unwrap_or("");
+        let line = line.trim_start_matches([' ', '\t', '\x0c']);
+        (line.starts_with("from ") || line.starts_with("import ")) && !line.contains(';')
+    })
 }
 
 /// What a call's query argument is read as.
