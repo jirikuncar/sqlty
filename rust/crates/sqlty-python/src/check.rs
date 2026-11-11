@@ -1107,6 +1107,58 @@ impl<'a> Module<'a, '_> {
     }
 }
 
+/// A helper call as `fix_source`, `query_statistics` and the highlights read it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Site {
+    /// The first and last line of a call whose strings need no `SQL[T]`.
+    pub typed: Option<(usize, usize)>,
+    /// The queries it can run that the lexer does not read by their marker.
+    pub queries: Vec<String>,
+    /// The rule of a call that is not checked: `dynamic-query` or `unchecked-query`.
+    pub unchecked: Option<Rule>,
+    /// The byte offset of the string literal it passes as its query.
+    pub start: Option<usize>,
+}
+
+/// The helper calls of `source`, by line; `None` where [`helper_calls`] is.
+pub fn sites(
+    source: &Source,
+    helpers: Option<&HelperIndex>,
+    module: Option<&str>,
+    variants: Option<usize>,
+) -> Option<Vec<Site>> {
+    let calls = helper_calls(source, helpers, module, variants)?;
+    let mut read: Option<HashSet<String>> = None;
+    let mut by_marker = |query: &str| {
+        is_marked(query) && read.get_or_insert_with(|| literals(source)).contains(query)
+    };
+    Some(
+        calls
+            .into_iter()
+            .map(|call| {
+                let lines = call.typed_lines();
+                let queries: Vec<String> = match (&call.query, call.variants.is_empty()) {
+                    (None, _) => Vec::new(),
+                    (Some(query), true) => vec![query.clone()],
+                    (Some(_), false) => call.variants.iter().map(|v| v.query.clone()).collect(),
+                };
+                Site {
+                    typed: (!lines.is_empty()).then(|| (*lines.start(), *lines.end())),
+                    unchecked: (call.query.is_none()
+                        && !call.row.is_some_and(|row| is_any(row, source)))
+                    .then_some(if call.dynamic {
+                        Rule::DynamicQuery
+                    } else {
+                        Rule::UncheckedQuery
+                    }),
+                    queries: queries.into_iter().filter(|q| !by_marker(q)).collect(),
+                    start: call.query_span.filter(|_| call.literal).map(|span| span.0),
+                }
+            })
+            .collect(),
+    )
+}
+
 /// `sqlty._check.diagnostics`: every diagnostic of `source` before inline suppression, by
 /// line; `None` for a module that needs what Rust does not read yet.
 pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Option<Found> {
@@ -1157,6 +1209,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Option<Found> {
                 declared: None,
                 configured: false,
                 query_span: Some(call.query_span),
+                literal: false,
             });
         }
     }
@@ -1187,6 +1240,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Option<Found> {
                 declared: None,
                 configured: false,
                 query_span: Some(template.span),
+                literal: false,
             });
         }
     }

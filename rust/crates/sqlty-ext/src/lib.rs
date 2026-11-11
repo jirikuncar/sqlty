@@ -1074,6 +1074,58 @@ impl ModuleIndex {
     }
 }
 
+/// `source` parsed as the module `name`: what the index read of it when it is the same
+/// text. None where Rust does not read it.
+fn parsed_module(
+    source: &str,
+    version: (u8, u8),
+    name: Option<&str>,
+    index: Option<&sqlty_python::index::HelperIndex>,
+) -> Option<Arc<sqlty_python::types::symbols::Source>> {
+    use sqlty_python::types::symbols::Source;
+    let known = name.zip(index).and_then(|(name, index)| {
+        let module = name.strip_suffix(".__init__").unwrap_or(name);
+        let known = index.source(module)?;
+        (known.module.as_deref() == Some(name) && *known.text == *source).then(|| Arc::clone(known))
+    });
+    match known {
+        Some(parsed) => Some(parsed),
+        None => Some(Arc::new(Source::new(source, version)?.named(name))),
+    }
+}
+
+type SiteTuple = (Option<(usize, usize)>, Vec<String>, Option<&'static str>, Option<usize>);
+
+/// The helper calls of `source` as `sqlty_python::check::sites` reads them:
+/// `(typed lines, queries, unchecked rule, literal start)`. None where Rust does not read
+/// the source or one of its queries.
+#[pyfunction]
+#[pyo3(signature = (source, *, version, index = None, name = None, module = None, variants = None))]
+fn module_calls(
+    py: Python<'_>,
+    source: &str,
+    version: (u8, u8),
+    index: Option<PyRef<'_, ModuleIndex>>,
+    name: Option<&str>,
+    module: Option<&str>,
+    variants: Option<usize>,
+) -> Option<Vec<SiteTuple>> {
+    let helpers = index.map(|index| Arc::clone(&index.0));
+    detach(py, || {
+        let parsed = parsed_module(source, version, name, helpers.as_deref())?;
+        let sites = sqlty_python::check::sites(&parsed, helpers.as_deref(), module, variants)?;
+        Some(
+            sites
+                .into_iter()
+                .map(|site| {
+                    let unchecked = site.unchecked.map(|rule| rule.name());
+                    (site.typed, site.queries, unchecked, site.start)
+                })
+                .collect(),
+        )
+    })
+}
+
 /// Every diagnostic of `source` before inline suppression, as `sqlty_python::check` reports
 /// them: `(diagnostics, redundant, needed)`, see `row_diagnostics`. None where Rust does
 /// not read the source, or it needs what is not read in Rust yet.
@@ -1099,7 +1151,6 @@ fn module_diagnostics(
     name: Option<&str>,
     variants: Option<usize>,
 ) -> Result<Option<(Vec<DiagnosticOut>, Vec<Option<FieldKey>>, Vec<FieldKey>)>, Error> {
-    use sqlty_python::types::symbols::Source;
     use sqlty_python::{check, rows};
     let dialect = dialect.0;
     let helpers = index.map(|index| Arc::clone(&index.0));
@@ -1108,19 +1159,8 @@ fn module_diagnostics(
         let schema = schema(schema_sql, dialect);
         let options = Options::new(dialect, schema.as_deref(), import_style, untyped)?;
         let rules = RuleConfig::from_overrides(rules).map_err(ConfigError::from)?;
-        // The module as the index read it, when it is the same text.
-        let known = name.zip(helpers.as_ref()).and_then(|(name, index)| {
-            let module = name.strip_suffix(".__init__").unwrap_or(name);
-            let known = index.source(module)?;
-            (known.module.as_deref() == Some(name) && *known.text == *source)
-                .then(|| Arc::clone(known))
-        });
-        let parsed = match known {
-            Some(parsed) => parsed,
-            None => match Source::new(source, version) {
-                Some(parsed) => Arc::new(parsed.named(name)),
-                None => return Ok(None),
-            },
+        let Some(parsed) = parsed_module(source, version, name, helpers.as_deref()) else {
+            return Ok(None);
         };
         let settings = rows::Settings {
             options: &options,
@@ -2051,6 +2091,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(rendered_compositions, m)?)?;
     m.add_function(wrap_pyfunction!(call_variants, m)?)?;
     m.add_function(wrap_pyfunction!(module_ignores, m)?)?;
+    m.add_function(wrap_pyfunction!(module_calls, m)?)?;
     m.add_class::<ModuleIndex>()?;
     m.add_function(wrap_pyfunction!(helper_sites, m)?)?;
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;

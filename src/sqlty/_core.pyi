@@ -217,6 +217,15 @@ def module_index(
 def call_variants(
     source: str, version: tuple[int, int], limit: int
 ) -> list[tuple[int, bool, list[tuple[str, list[int], bool]] | None, bool, str | None]] | None: ...
+def module_calls(
+    source: str,
+    *,
+    version: tuple[int, int],
+    index: ModuleIndex | None = None,
+    name: str | None = None,
+    module: str | None = None,
+    variants: int | None = None,
+) -> list[tuple[tuple[int, int] | None, list[str], str | None, int | None]] | None: ...
 def module_ignores(
     source: str, version: tuple[int, int]
 ) -> list[tuple[int, list[str] | None, int, int]] | None: ...

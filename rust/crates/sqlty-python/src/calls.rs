@@ -82,6 +82,8 @@ pub struct Call<'a> {
     pub configured: bool,
     /// The byte offsets of the argument the query comes from.
     pub query_span: Option<(usize, usize)>,
+    /// Whether that argument is a string literal.
+    pub literal: bool,
 }
 
 impl Call<'_> {
@@ -574,6 +576,7 @@ pub fn helper_calls<'a>(
         if literal.is_none() && forwarded(query, stack, &scan, &annotated, &marker) {
             continue;
         }
+        let is_literal = literal.is_some();
         let mut built = Built {
             dynamic: literal.is_none(),
             query: literal,
@@ -660,6 +663,7 @@ pub fn helper_calls<'a>(
             single: None,
             configured: helper.configured,
             query_span: Some((query.start().to_usize(), query.end().to_usize())),
+            literal: is_literal,
         });
     }
     calls.sort_by_key(|call| (call.line, call.query_span));
