@@ -53,7 +53,10 @@ const FUTURES: [&str; 9] = [
 /// The module `source`, when `ast.parse` reads it the same.
 pub fn module(source: &str) -> Option<Parsed<ModModule>> {
     let parsed = guarded(source, parse_module)?;
-    if !within_limits(&parsed) || !known_futures(&parsed.syntax().body) {
+    if !within_limits(&parsed)
+        || has_huge_int(&parsed, source)
+        || !known_futures(&parsed.syntax().body)
+    {
         return None;
     }
     let mut depth = Depth::default();
@@ -64,7 +67,7 @@ pub fn module(source: &str) -> Option<Parsed<ModModule>> {
 /// The expression `source`, when `ast.parse(source, mode="eval")` reads it the same.
 pub fn expression(source: &str) -> Option<Parsed<ModExpression>> {
     let parsed = guarded(source, parse_expression)?;
-    if !within_limits(&parsed) {
+    if !within_limits(&parsed) || has_huge_int(&parsed, source) {
         return None;
     }
     let mut depth = Depth::default();
@@ -127,6 +130,40 @@ fn has_surrogate_escape(source: &str) -> bool {
         }
     }
     false
+}
+
+/// Whether a string of `source` may hold the text of a surrogate escape, which a string
+/// annotation would then spell: `"Literal['\\ud800']"`.
+pub fn may_nest_surrogate(source: &str) -> bool {
+    let bytes = source.as_bytes();
+    bytes.windows(2).enumerate().any(|(at, pair)| match pair {
+        [b'\\', b'u'] => bytes.get(at + 2..).is_some_and(surrogate),
+        [b'\\', b'U'] => bytes
+            .get(at + 2..at + 6)
+            .filter(|zeros| *zeros == b"0000")
+            .and(bytes.get(at + 6..))
+            .is_some_and(surrogate),
+        _ => false,
+    })
+}
+
+/// The most digits of a decimal integer literal `ast.parse` reads (`sys.get_int_max_str_digits`).
+const MAX_INT_DIGITS: usize = 4300;
+
+/// Whether a decimal integer literal has more digits than Python converts.
+fn has_huge_int<T>(parsed: &Parsed<T>, source: &str) -> bool {
+    parsed.tokens().iter().any(|token| {
+        token.kind() == TokenKind::Int && token.range().len().to_usize() > MAX_INT_DIGITS && {
+            let text = &source[token.range()];
+            !text.starts_with("0x")
+                && !text.starts_with("0X")
+                && !text.starts_with("0o")
+                && !text.starts_with("0O")
+                && !text.starts_with("0b")
+                && !text.starts_with("0B")
+                && text.bytes().filter(u8::is_ascii_digit).count() > MAX_INT_DIGITS
+        }
+    })
 }
 
 fn surrogate(hex: &[u8]) -> bool {

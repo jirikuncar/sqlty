@@ -65,13 +65,7 @@ impl Prec {
 
 /// `ast.unparse(expr)`, for an expression of `source`.
 pub fn unparse(expr: &Expr, source: &str) -> String {
-    let mut unparser = Unparser {
-        out: String::new(),
-        source,
-        names: None,
-    };
-    unparser.expr(expr, Prec::Test);
-    unparser.out
+    unparse_names(expr, source, None)
 }
 
 /// The expressions names are replaced with, each an expression of its own source.
@@ -80,10 +74,26 @@ pub type Substitutions<'s> = std::collections::HashMap<&'s str, (&'s Expr, &'s s
 /// [`unparse`] of `expr` with each name of `names` replaced by its expression, as an
 /// `ast.NodeTransformer` that swaps `Name` nodes would have it.
 pub fn unparse_with(expr: &Expr, source: &str, names: &Substitutions<'_>) -> String {
+    unparse_names(expr, source, Some(names))
+}
+
+fn unparse_names(expr: &Expr, source: &str, names: Option<&Substitutions<'_>>) -> String {
+    // Python reads `\r\n` and `\r` as `\n` before it parses, also inside a literal.
+    let written = source.get(expr.range().to_std_range()).unwrap_or("");
+    if written.contains('\r') {
+        let normal = format!("({})", written.replace("\r\n", "\n").replace('\r', "\n"));
+        if let Some(parsed) = crate::parse::expression(&normal) {
+            return unparse_plain(&parsed.syntax().body, &normal, names);
+        }
+    }
+    unparse_plain(expr, source, names)
+}
+
+fn unparse_plain(expr: &Expr, source: &str, names: Option<&Substitutions<'_>>) -> String {
     let mut unparser = Unparser {
         out: String::new(),
         source,
-        names: Some(names),
+        names,
     };
     unparser.expr(expr, Prec::Test);
     unparser.out
@@ -359,7 +369,9 @@ impl Unparser<'_> {
                 for part in &e.value {
                     match part {
                         FStringPartRef::Literal(literal) => push_text(&mut parts, &literal.value),
-                        FStringPartRef::FString(fstring) => fields(&fstring.elements, &mut parts),
+                        FStringPartRef::FString(fstring) => {
+                            fields(&fstring.elements, &mut parts, self.source);
+                        }
                     }
                 }
                 self.out.push('f');
@@ -368,7 +380,7 @@ impl Unparser<'_> {
             Expr::TString(e) => {
                 let mut parts = Vec::new();
                 for part in e.value.as_slice() {
-                    fields(&part.elements, &mut parts);
+                    fields(&part.elements, &mut parts, self.source);
                 }
                 self.out.push('t');
                 self.interpolated(&parts, true);
@@ -606,7 +618,7 @@ impl Unparser<'_> {
         if let Some(spec) = &field.format_spec {
             out.push(':');
             let mut parts = Vec::new();
-            fields(&spec.elements, &mut parts);
+            fields(&spec.elements, &mut parts, self.source);
             for part in &parts {
                 match part {
                     Part::Text(text) => out.push_str(
@@ -632,19 +644,112 @@ impl Unparser<'_> {
 /// `Interpolation.str`: the source of the expression of a t-string field, from the `{` to
 /// the `=`, `!`, `:` or `}` after it, without trailing whitespace.
 pub fn interpolation_text(field: &InterpolatedElement, source: &str) -> String {
-    if let Some(debug) = &field.debug_text {
-        return format!("{}{}", debug.leading(), debug.expression());
-    }
+    let text = field_text(field, source);
+    let text = text.trim_end();
+    text.strip_suffix('=')
+        .filter(|_| field.debug_text.is_some())
+        .map_or(text, str::trim_end)
+        .to_string()
+}
+
+/// The source of a field as the tokenizer of Python records it (`set_ftstring_expr`): up
+/// to the last `!` outside brackets when a conversion or a format spec follows, without
+/// its comments and with every newline as `\n`.
+fn field_text(field: &InterpolatedElement, source: &str) -> String {
     let start = field.start().to_usize() + 1;
     let stop = match field.format_spec.as_deref() {
         Some(spec) => spec.start().to_usize() - 1,
         None => field.end().to_usize() - 1,
     };
-    let mut text = source[start..stop].trim_end();
-    if field.conversion != ConversionFlag::None {
-        text = text[..text.len().saturating_sub(2)].trim_end();
+    let mut text = source.get(start..stop).unwrap_or("");
+    if field.format_spec.is_some() || field.conversion != ConversionFlag::None {
+        if let Some(bang) = last_bang(text) {
+            text = &text[..bang];
+        }
     }
-    text.to_string()
+    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+    without_comments(&text)
+}
+
+/// The offset of the last `!` of `text` outside brackets and string literals.
+fn last_bang(text: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let (mut depth, mut found) = (0usize, None);
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => depth = depth.saturating_sub(1),
+            b'!' if depth == 0 => found = Some(i),
+            quote @ (b'\'' | b'"') => {
+                let triple = bytes[i..].starts_with(&[quote; 3]);
+                let close: &[u8] = if triple {
+                    &[quote; 3][..]
+                } else {
+                    &[quote; 1][..]
+                };
+                i += close.len();
+                while i < bytes.len() && !bytes[i..].starts_with(close) {
+                    i += if bytes[i] == b'\\' { 2 } else { 1 };
+                }
+                i += close.len() - 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    found
+}
+
+/// `text` without its comments, as `set_ftstring_expr` drops them: a quote opens a string
+/// until the same quote, and a `#` outside one runs to the end of its line.
+fn without_comments(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let (mut in_string, mut quote) = (false, ' ');
+    let mut hash = false;
+    let mut i = 0;
+    while i < chars.len() {
+        match chars[i] {
+            '\\' => i += 1,
+            c @ ('"' | '\'') if !in_string => (in_string, quote) = (true, c),
+            c @ ('"' | '\'') if c == quote => in_string = false,
+            '#' if !in_string => {
+                hash = true;
+                break;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    if !hash {
+        return text.to_string();
+    }
+    let (mut in_string, mut quote) = (false, ' ');
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '"' || c == '\'' {
+            if !in_string {
+                in_string = true;
+                quote = c;
+            } else if c == quote {
+                in_string = false;
+            }
+            out.push(c);
+        } else if c == '#' && !in_string {
+            while i < chars.len() && chars[i] != '\n' {
+                i += 1;
+            }
+            if i < chars.len() {
+                out.push('\n');
+            }
+        } else {
+            out.push(c);
+        }
+        i += 1;
+    }
+    out
 }
 
 fn push_text(parts: &mut Vec<Part<'_>>, text: &str) {
@@ -659,14 +764,14 @@ fn push_text(parts: &mut Vec<Part<'_>>, text: &str) {
 
 /// The values of an f- or t-string as `ast` holds them: adjacent text merged, `{x=}` as the
 /// text `x=` and a field converted with `!r` unless it has a conversion or a spec.
-fn fields<'a>(elements: &'a InterpolatedStringElements, parts: &mut Vec<Part<'a>>) {
+fn fields<'a>(elements: &'a InterpolatedStringElements, parts: &mut Vec<Part<'a>>, source: &str) {
     for element in elements {
         match element {
             InterpolatedStringElement::Literal(literal) => push_text(parts, &literal.value),
             InterpolatedStringElement::Interpolation(field) => {
                 let mut conversion = field.conversion;
-                if let Some(debug) = &field.debug_text {
-                    push_text(parts, debug.as_str());
+                if field.debug_text.is_some() {
+                    push_text(parts, &field_text(field, source));
                     if conversion == ConversionFlag::None && field.format_spec.is_none() {
                         conversion = ConversionFlag::Repr;
                     }
@@ -806,17 +911,50 @@ pub fn repr_float(value: f64) -> String {
     if value.is_nan() {
         return "(1e309-1e309)".to_string();
     }
-    let scientific = format!("{value:e}");
+    // The shortest digits that read back as `value`. Of two such spellings equally near,
+    // `repr` takes the even one, where `{value:e}` rounds up: the rounding of the exact
+    // value to as many digits is that one, when it reads back.
+    let shortest = format!("{value:e}");
+    let digits = shortest.split_once('e').map_or(0, |(mantissa, _)| {
+        mantissa.bytes().filter(u8::is_ascii_digit).count()
+    });
+    let rounded = format!("{value:.*e}", digits.saturating_sub(1));
+    let scientific = if rounded.parse::<f64>().ok() == Some(value) {
+        rounded
+    } else {
+        shortest
+    };
     let (mantissa, exponent) = scientific.split_once('e').unwrap_or((&scientific, "0"));
     let exponent: i32 = exponent.parse().unwrap_or(0);
     if (-4..16).contains(&exponent) {
-        let text = format!("{value}");
-        return if text.contains('.') {
-            text
+        let negative = mantissa.starts_with('-');
+        let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
+        let digits = digits.trim_end_matches('0');
+        let digits = if digits.is_empty() { "0" } else { digits };
+        let mut text = String::from(if negative { "-" } else { "" });
+        if exponent < 0 {
+            text.push_str("0.");
+            text.push_str(&"0".repeat(exponent.unsigned_abs() as usize - 1));
+            text.push_str(digits);
         } else {
-            format!("{text}.0")
-        };
+            let whole = exponent.unsigned_abs() as usize + 1;
+            if digits.len() <= whole {
+                text.push_str(digits);
+                text.push_str(&"0".repeat(whole - digits.len()));
+                text.push_str(".0");
+            } else {
+                text.push_str(&digits[..whole]);
+                text.push('.');
+                text.push_str(&digits[whole..]);
+            }
+        }
+        return text;
     }
+    let mantissa = if mantissa.contains('.') {
+        mantissa.trim_end_matches('0').trim_end_matches('.')
+    } else {
+        mantissa
+    };
     let sign = if exponent < 0 { '-' } else { '+' };
     format!("{mantissa}e{sign}{:02}", exponent.abs())
 }

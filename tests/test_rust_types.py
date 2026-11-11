@@ -797,3 +797,123 @@ def test_expressions_of_the_package() -> None:
                         assert found == expected, source
                         checked += 1
     assert checked > 50_000
+
+
+def expected_unparse(source: str) -> str | None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        try:
+            return ast.unparse(ast.parse(source, mode="eval").body)
+        except SyntaxError, ValueError:
+            return None
+
+
+SPELLINGS = [
+    "'''a\r\nb'''",
+    "b'''a\rb'''",
+    "r'''a\r\nb'''",
+    "f'''{x:a\rb}'''",
+    "t'''{a +\r\n b}'''",
+    "t'''{a +\r b}'''",
+    "f'''{x # c\n=}'''",
+    "t'''{a # c\n}'''",
+    "t'''{a +# c\n b}'''",
+    "t'''{a + '#' # c\n}'''",
+    "t'{x!=1:y}'",
+    "t'{a!=b!=c:y}'",
+    "t'{a if b!=c else d:>3}'",
+    "f'{x!=1=:y}'",
+    "t'{x!=1}'",
+    "t'{x!=1!r}'",
+    "t'{a[b!=c]:y}'",
+    "t'{\"!\":y}'",
+    "f'{x = !r}'",
+    "t'{ x = }'",
+    "967742817868973.25",
+    "2126528249093299.25j",
+    "9007199254740993.0",
+    "5e-324",
+    "1e16",
+    "9" * 4300,
+    "9" * 4301,
+]
+
+
+@pytest.mark.parametrize("source", SPELLINGS)
+def test_spellings(source: str) -> None:
+    assert unparse_expression(source) == expected_unparse(source)
+
+
+@FUZZ
+@given(st.floats(allow_nan=False, allow_infinity=False, min_value=0), st.booleans())
+def test_generated_floats(value: float, imaginary: bool) -> None:
+    source = repr(value) + "j" * imaginary
+    assert unparse_expression(source) == expected_unparse(source), source
+
+
+FIELD_PARTS = st.sampled_from(
+    [
+        "x",
+        "a + b",
+        "a != b",
+        "a!=b",
+        "d['k']",
+        'd["!"]',
+        "f(a, b)",
+        "(a\n + b)",
+        "a # c\n",
+        "a +# '\n b",
+    ]
+    + [
+        " x ",
+        "x=",
+        "x = ",
+        "x!r",
+        "x!s",
+        "x:>3",
+        "x!r:>3",
+        "x=:y",
+        "x=!a",
+        "x:{w}",
+        "x\r\n",
+        "x:a\rb",
+    ]
+)
+
+
+@FUZZ
+@given(
+    st.sampled_from(["f", "t", "F", "rf", "tr"]),
+    st.sampled_from(["'''", '"""']),
+    st.lists(
+        st.one_of(
+            st.sampled_from(["a", " ", "\r\n", "\r", "{{", "#", "'"]),
+            FIELD_PARTS.map("{{{}}}".format),
+        )
+    ),
+)
+def test_generated_interpolations(prefix: str, quote: str, parts: list[str]) -> None:
+    source = f"{prefix}{quote}{''.join(parts)}{quote}"
+    if (expected := expected_unparse(source)) is not None:
+        assert unparse_expression(source) == expected, source
+
+
+LINES = {
+    "decorated class on a continued line": (
+        "from dataclasses import dataclass\n@dataclass\nclass \\\n    Row:\n    a: int\n"
+    ),
+    "typing class": "import typing\nclass Row(typing.TypedDict):\n    a: typing.Pattern\n",
+    "CRLF": "from typing import Literal, TypedDict\r\nclass Row(TypedDict):\r\n    a: Literal['''x\r\ny''']\r\n",
+    "under try": "from typing import TypedDict\ntry:\n    class Row(TypedDict):\n        a: int\nexcept E:\n    class Row(TypedDict):\n        b: int\n",
+    "nested": "from typing import TypedDict\nclass Outer:\n    class Row(TypedDict):\n        a: int\n",
+}
+
+
+@pytest.mark.parametrize("source", LINES.values(), ids=LINES.keys())
+def test_lines(source: str) -> None:
+    same(source)
+
+
+def test_surrogate_in_a_string_annotation_is_declined() -> None:
+    source = "from typing import Literal, TypedDict\nclass Row(TypedDict):\n    a: \"Literal['\\\\ud800']\"\n"
+    assert type_definitions(source, None, VERSION) is None

@@ -31,6 +31,9 @@ pub struct Source {
 impl Source {
     /// `text` parsed, or `None` where Rust does not read it (see [`crate::parse`]).
     pub fn new(text: &str, version: Version) -> Option<Source> {
+        if crate::parse::may_nest_surrogate(text) {
+            return None;
+        }
         let parsed = crate::parse::module(text)?;
         let imports = Imports::of(&parsed.syntax().body);
         Some(Source {

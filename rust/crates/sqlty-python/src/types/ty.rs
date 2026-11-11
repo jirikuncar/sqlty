@@ -367,7 +367,7 @@ impl Ty {
     /// `repr(tp)`.
     pub fn repr(&self) -> String {
         match self {
-            Ty::Class(class) if class.module == "typing" => format!("typing.{}", class.name),
+            Ty::Class(class) if Arc::ptr_eq(class, &builtins().any) => "typing.Any".to_string(),
             Ty::Class(class) => format!("<class '{}'>", qualified(class)),
             _ => self.item(),
         }

@@ -61,7 +61,7 @@ impl<'a> ClassNode<'a> {
             .collect();
         ClassNode {
             name: node.name.to_string(),
-            lineno: source.line(node.start_of_class()),
+            lineno: source.line(class_start(node, &source.text)),
             bases: node.bases().iter().collect(),
             keywords,
             decorators: node.decorator_list.iter().map(|d| &d.expression).collect(),
@@ -98,17 +98,16 @@ impl<'a> ClassNode<'a> {
     }
 }
 
-trait ClassStart {
-    fn start_of_class(&self) -> ruff_text_size::TextSize;
-}
-
-impl ClassStart for StmtClassDef {
-    /// Where `ast` puts the class: at `class`, after its decorators.
-    fn start_of_class(&self) -> ruff_text_size::TextSize {
-        self.decorator_list
-            .last()
-            .map_or(self.start(), |_| self.name.start())
+/// Where `ast` puts a class: at `class`, after its decorators.
+fn class_start(node: &StmtClassDef, source: &str) -> ruff_text_size::TextSize {
+    if node.decorator_list.is_empty() {
+        return node.start();
     }
+    // `class` and the name may be lines apart: `class \\\n    Row:`.
+    let before = source[..node.name.start().to_usize()]
+        .trim_end_matches(|c: char| c.is_whitespace() || c == '\\');
+    let keyword = before.len().saturating_sub("class".len());
+    ruff_text_size::TextSize::try_from(keyword).unwrap_or(node.start())
 }
 
 fn item(stmt: &Stmt) -> Option<Item<'_>> {
