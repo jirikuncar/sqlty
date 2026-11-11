@@ -397,6 +397,11 @@ class _Walk:
             return str(value.as_string(None))
         except AttributeError, TypeError, ValueError, NotImplementedError:
             raise _Dynamic from None
+        except Exception as error:
+            # A part psycopg cannot write as a literal, such as a list of identifiers.
+            if type(error).__module__.partition(".")[0] != "psycopg":
+                raise
+            raise _Dynamic from None
 
     def block(
         self,

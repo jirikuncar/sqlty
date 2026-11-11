@@ -210,6 +210,9 @@ def module_index(
     version: tuple[int, int],
     steps: list[tuple[str, str, str, str | None, list[Path], str | None]],
 ) -> ModuleIndex | None: ...
+def rendered_compositions(
+    source: str, version: tuple[int, int]
+) -> list[tuple[int, bool, str | None]] | None: ...
 def module_outline(source: str) -> tuple[ast.Module, list[ast.ClassDef]] | None: ...
 def helper_sites(
     source: str, names: list[str]
