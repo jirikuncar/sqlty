@@ -53,7 +53,11 @@ def _summary(info: TypeInfo) -> dict[str, object]:
             return {k: plain(v) for k, v in value.items()}
         return repr(value)
 
-    return {slot: plain(getattr(info, slot, None)) for slot in type(info).__slots__}
+    return {
+        slot: plain(getattr(info, slot, None))
+        for slot in type(info).__slots__
+        if slot != "coerced"
+    }
 
 
 CASES = {
