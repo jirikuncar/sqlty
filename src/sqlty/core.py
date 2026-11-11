@@ -307,8 +307,7 @@ def rewrite_source(
     Example:
         >>> print(rewrite_source('q = "--sql\\nSELECT 1::INTEGER AS n"'))
         from sqlty import SQL
-        from sqlty import NoParams
-        q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER AS n")
+        q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER AS n")
 
     Raises:
         ValueError: unsupported ``import_style``

@@ -98,8 +98,7 @@ def test_strip_undoes_rewrite(source: str, options: dict, eol: str) -> None:
 
     Other sqlty imports may be there: rewrite adds what is missing on lines of
     its own, which strip removes again. Strip also removes the lines it would
-    add when they were written by hand, so those sources are skipped. A ``P``
-    written into a hand-written ``SQL[R]`` stays, as strip leaves the call alone.
+    add when they were written by hand, so those sources are skipped.
     """
     style = options["import_style"]
     own_lines = {style or "from sqlty import SQL", "from sqlty import UNTYPED"}
@@ -109,8 +108,7 @@ def test_strip_undoes_rewrite(source: str, options: dict, eol: str) -> None:
     ):
         pytest.skip("source already uses sqlty")
     source = source.replace("\n", eol)
-    params = options["param_types"] and not re.search(r"\w\[.+\]\(", source)
-    rewritten = core.rewrite_source(source, **options | {"param_types": params})
+    rewritten = core.rewrite_source(source, **options)
     assert core.strip_source(rewritten, import_style=style) == source
 
 
@@ -355,7 +353,7 @@ def test_unknown_schema_column_raises() -> None:
 def test_crlf_continuation() -> None:
     source = 'q = "--sql\\nSELECT 1::INTEGER " \\\r\n    "AS n"\r\n'
     for output in (core.rewrite_source(source), core.fix_source(source)):
-        assert 'SQL[tuple[int], NoParams]("--sql\\nSELECT 1::INTEGER " \\\r\n    "AS n")' in output
+        assert 'SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER " \\\r\n    "AS n")' in output
         ast.parse(output)
 
 

@@ -108,14 +108,6 @@ impl ImportStyle {
         (!self.wrapper_name.contains('.')).then_some("from sqlty import UNTYPED")
     }
 
-    /// How `NoParams` is spelled: "NoParams" or "sqlty.NoParams".
-    pub(crate) fn no_params_name(&self) -> String {
-        match self.wrapper_name.rsplit_once('.') {
-            Some((module, _)) => format!("{module}.NoParams"),
-            None => "NoParams".to_string(),
-        }
-    }
-
     /// Import line `NoParams` needs, or `None` when the module is imported.
     pub(crate) fn no_params_import(&self) -> Option<&'static str> {
         (!self.wrapper_name.contains('.')).then_some("from sqlty import NoParams")

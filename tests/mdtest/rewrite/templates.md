@@ -53,5 +53,5 @@ q = t"--sql\nSELECT 1::INTEGER AS n"
 r = "--sql\nSELECT 'x'::TEXT AS s"
 # rewritten-file: import sqlty
 # rewritten-file: q = sqlty.SQLTemplate[tuple[int]](t"--sql\nSELECT 1::INTEGER AS n")
-# rewritten-file: r = sqlty.SQL[tuple[str], sqlty.NoParams]("--sql\nSELECT 'x'::TEXT AS s")
+# rewritten-file: r = sqlty.SQL[tuple[str]]("--sql\nSELECT 'x'::TEXT AS s")
 ```

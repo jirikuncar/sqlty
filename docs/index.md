@@ -21,8 +21,7 @@ the file becomes what the `rewritten-file` lines show:
 query = "--sql\nSELECT id::INTEGER, name::TEXT, created_at::TIMESTAMP FROM users"
 # rewritten-file: import datetime
 # rewritten-file: from sqlty import SQL
-# rewritten-file: from sqlty import NoParams
-# rewritten-file: query = SQL[tuple[int, str, datetime.datetime], NoParams]("--sql\nSELECT id::INTEGER, name::TEXT, created_at::TIMESTAMP FROM users")
+# rewritten-file: query = SQL[tuple[int, str, datetime.datetime]]("--sql\nSELECT id::INTEGER, name::TEXT, created_at::TIMESTAMP FROM users")
 ```
 
 Each cast becomes a Python type: `INTEGER` is `int`, `TEXT` is `str`,

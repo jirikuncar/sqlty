@@ -4,19 +4,16 @@
 
 ```python
 q = "--sql\nSELECT id::INTEGER FROM users"
-# rewritten: from sqlty import NoParams
-# rewritten: q = SQL[tuple[int], NoParams]("--sql\nSELECT id::INTEGER FROM users")
+# rewritten: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 ```
 
 ## Multiple columns
 
 ```python
 q = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
-# rewritten: from sqlty import NoParams
-# rewritten: q = SQL[tuple[int, str], NoParams]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# rewritten: q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 # rewritten-file: from sqlty import SQL
-# rewritten-file: from sqlty import NoParams
-# rewritten-file: q = SQL[tuple[int, str], NoParams]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# rewritten-file: q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 ## Non-SQL string is not rewritten
@@ -55,6 +52,5 @@ Rewriting already-rewritten source produces no changes:
 
 ```python
 q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
-# rewritten: from sqlty import NoParams
-# rewritten: q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER")
+# rewritten: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
 ```

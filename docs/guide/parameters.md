@@ -200,7 +200,6 @@ count = "--sql\nSELECT count(*) FROM users"
 # rewritten-file: import datetime
 # rewritten-file: import typing
 # rewritten-file: from sqlty import SQL
-# rewritten-file: from sqlty import NoParams
 # rewritten-file:
 # rewritten-file:
 # rewritten-file: # sqlty: generated
@@ -210,13 +209,14 @@ count = "--sql\nSELECT count(*) FROM users"
 # rewritten-file:
 # rewritten-file: by_id = SQL[tuple[str], ByIdParams]("--sql\nSELECT name FROM users WHERE id = %(id)s")
 # rewritten-file: by_name = SQL[tuple[int, datetime.date | None], tuple[str | None, int | None]]("--sql\nSELECT id, born FROM users WHERE name = %s AND age > %s")
-# rewritten-file: count = SQL[tuple[int], NoParams]("--sql\nSELECT count(*) FROM users")
+# rewritten-file: count = SQL[tuple[int]]("--sql\nSELECT count(*) FROM users")
 ```
 
 - Positional parameters are a `tuple`, one item per placeholder.
 - Named parameters are a `TypedDict`, one key per name, generated after the
   imports below a `# sqlty: generated` line. `sqlty strip` removes it.
-- A query without parameters takes `NoParams`: `()`, `{}` or nothing, and no key.
+- A query without parameters keeps `SQL[R]`. Write `NoParams` yourself to
+  accept only `()`, `{}` or nothing.
 - A parameter is `T | None` unless a `NOT NULL` column stores it, and
   `typing.Any` when its type is unknown or cast (`%s::int` takes anything).
 

@@ -29,25 +29,14 @@ r = "--sql\nINSERT INTO users (id, name, email) VALUES (%s, %s, %s)"
 
 ## No parameters
 
-`NoParams` takes `()`, `{}` or no argument.
+A query without parameters keeps `SQL[R]`: `P` defaults to `Any`.
 
 ```python
 q = "--sql\nSELECT name FROM users"
 # rewritten-file: from sqlty import SQL
-# rewritten-file: from sqlty import NoParams
-# rewritten-file: q = SQL[tuple[str], NoParams]("--sql\nSELECT name FROM users")
+# rewritten-file: q = SQL[tuple[str]]("--sql\nSELECT name FROM users")
 ```
 
-## `NoParams` imported once
-
-```python
-q = "--sql\nSELECT name FROM users"
-r = "--sql\nSELECT id FROM users"
-# rewritten-file: from sqlty import SQL
-# rewritten-file: from sqlty import NoParams
-# rewritten-file: q = SQL[tuple[str], NoParams]("--sql\nSELECT name FROM users")
-# rewritten-file: r = SQL[tuple[int], NoParams]("--sql\nSELECT id FROM users")
-```
 
 ## A `tuple[()]` you wrote is kept
 
@@ -280,16 +269,6 @@ by_id = SQL[tuple[str], ByIdParams]("--sql\nSELECT name FROM users WHERE id = %(
 # stripped: by_id = "--sql\nSELECT name FROM users WHERE id = %(id)s"
 ```
 
-## `NoParams` is imported where `SQL` is
-
-```python
-q = "--sql\nSELECT name FROM users"
-from sqlty import Bound
-# rewritten-file: from sqlty import SQL
-# rewritten-file: from sqlty import NoParams
-# rewritten-file: q = SQL[tuple[str], NoParams]("--sql\nSELECT name FROM users")
-# rewritten-file: from sqlty import Bound
-```
 
 ## Classes and imports go above the first query
 
@@ -309,7 +288,7 @@ import os
 # rewritten-file: import os
 ```
 
-## Strip removes the `NoParams` import
+## Strip removes a `NoParams` import from an older rewrite
 
 ```python
 from sqlty import SQL
@@ -319,18 +298,6 @@ q = SQL[tuple[str], NoParams]("--sql\nSELECT name FROM users")
 # stripped: q = "--sql\nSELECT name FROM users"
 ```
 
-## A module import spells it `sqlty.NoParams`
-
-```toml
-[tool.sqlty]
-import-style = "import sqlty"
-```
-
-```python
-q = "--sql\nSELECT name FROM users"
-# rewritten-file: import sqlty
-# rewritten-file: q = sqlty.SQL[tuple[str], sqlty.NoParams]("--sql\nSELECT name FROM users")
-```
 
 ## SQLite placeholders
 

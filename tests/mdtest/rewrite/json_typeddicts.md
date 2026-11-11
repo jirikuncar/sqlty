@@ -22,7 +22,6 @@ q = "--sql\nSELECT jsonb_build_object('user', jsonb_build_object('id', id, 'name
 r = "--sql\nSELECT jsonb_build_object('id', id) AS item FROM users UNION ALL SELECT jsonb_build_object('id', id, 'email', email) FROM users"
 # rewritten-file: import typing
 # rewritten-file: from sqlty import SQL
-# rewritten-file: from sqlty import NoParams
 # rewritten-file:
 # rewritten-file:
 # rewritten-file: # sqlty: generated
@@ -44,8 +43,8 @@ r = "--sql\nSELECT jsonb_build_object('id', id) AS item FROM users UNION ALL SEL
 # rewritten-file:     email: typing.NotRequired[str | None]
 # rewritten-file:
 # rewritten-file:
-# rewritten-file: q = SQL[tuple[Doc], NoParams]("--sql\nSELECT jsonb_build_object('user', jsonb_build_object('id', id, 'name', name), 'tags', jsonb_build_array('a'), 'counts', jsonb_object_agg(name, id)) AS doc FROM users GROUP BY id, name")
-# rewritten-file: r = SQL[tuple[Item], NoParams]("--sql\nSELECT jsonb_build_object('id', id) AS item FROM users UNION ALL SELECT jsonb_build_object('id', id, 'email', email) FROM users")
+# rewritten-file: q = SQL[tuple[Doc]]("--sql\nSELECT jsonb_build_object('user', jsonb_build_object('id', id, 'name', name), 'tags', jsonb_build_array('a'), 'counts', jsonb_object_agg(name, id)) AS doc FROM users GROUP BY id, name")
+# rewritten-file: r = SQL[tuple[Item]]("--sql\nSELECT jsonb_build_object('id', id) AS item FROM users UNION ALL SELECT jsonb_build_object('id', id, 'email', email) FROM users")
 ```
 
 ## Keys that are not names
@@ -54,14 +53,13 @@ r = "--sql\nSELECT jsonb_build_object('id', id) AS item FROM users UNION ALL SEL
 q = "--sql\nSELECT jsonb_build_object('first-name', name, 'class', 1) AS doc FROM users"
 # rewritten-file: import typing
 # rewritten-file: from sqlty import SQL
-# rewritten-file: from sqlty import NoParams
 # rewritten-file:
 # rewritten-file:
 # rewritten-file: # sqlty: generated
 # rewritten-file: Doc = typing.TypedDict('Doc', {'first-name': str, 'class': int})
 # rewritten-file:
 # rewritten-file:
-# rewritten-file: q = SQL[tuple[Doc], NoParams]("--sql\nSELECT jsonb_build_object('first-name', name, 'class', 1) AS doc FROM users")
+# rewritten-file: q = SQL[tuple[Doc]]("--sql\nSELECT jsonb_build_object('first-name', name, 'class', 1) AS doc FROM users")
 ```
 
 ## A JSON column with no shape stays Any
@@ -70,8 +68,7 @@ q = "--sql\nSELECT jsonb_build_object('first-name', name, 'class', 1) AS doc FRO
 q = "--sql\nSELECT id, prefs FROM users"
 # rewritten-file: import typing
 # rewritten-file: from sqlty import SQL
-# rewritten-file: from sqlty import NoParams
-# rewritten-file: q = SQL[tuple[int, typing.Any], NoParams]("--sql\nSELECT id, prefs FROM users")
+# rewritten-file: q = SQL[tuple[int, typing.Any]]("--sql\nSELECT id, prefs FROM users")
 ```
 
 ## Names in use get a number, generated classes are reused
@@ -96,7 +93,6 @@ r = "--sql\nSELECT jsonb_build_object('id', id) AS doc, jsonb_build_object('name
 # rewritten-file: import typing
 # rewritten-file:
 # rewritten-file: from sqlty import SQL
-# rewritten-file: from sqlty import NoParams
 # rewritten-file:
 # rewritten-file:
 # rewritten-file: class Item:
@@ -113,8 +109,8 @@ r = "--sql\nSELECT jsonb_build_object('id', id) AS doc, jsonb_build_object('name
 # rewritten-file:     name: str
 # rewritten-file:
 # rewritten-file:
-# rewritten-file: q = SQL[tuple[Doc], NoParams]("--sql\nSELECT jsonb_build_object('id', id) AS doc FROM users")
-# rewritten-file: r = SQL[tuple[Doc, Item2], NoParams]("--sql\nSELECT jsonb_build_object('id', id) AS doc, jsonb_build_object('name', name) AS item FROM users")
+# rewritten-file: q = SQL[tuple[Doc]]("--sql\nSELECT jsonb_build_object('id', id) AS doc FROM users")
+# rewritten-file: r = SQL[tuple[Doc, Item2]]("--sql\nSELECT jsonb_build_object('id', id) AS doc, jsonb_build_object('name', name) AS item FROM users")
 ```
 
 ## Strip removes the generated classes
@@ -140,7 +136,6 @@ q = SQL[tuple[Doc]]("--sql\nSELECT jsonb_build_object('id', id) AS doc FROM user
 q = "--sql\nSELECT jsonb_agg(jsonb_build_object('id', id)) AS ids FROM users"
 # fixed: import typing
 # fixed: from sqlty import SQL
-# fixed: from sqlty import NoParams
 # fixed:
 # fixed:
 # fixed: # sqlty: generated
@@ -148,5 +143,5 @@ q = "--sql\nSELECT jsonb_agg(jsonb_build_object('id', id)) AS ids FROM users"
 # fixed:     id: int
 # fixed:
 # fixed:
-# fixed: q = SQL[tuple[list[IdsItem] | None], NoParams]("--sql\nSELECT jsonb_agg(jsonb_build_object('id', id)) AS ids FROM users")
+# fixed: q = SQL[tuple[list[IdsItem] | None]]("--sql\nSELECT jsonb_agg(jsonb_build_object('id', id)) AS ids FROM users")
 ```

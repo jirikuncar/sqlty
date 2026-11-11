@@ -129,8 +129,7 @@ untyped = "sentinel"
 
 ```python
 q = "--sql\r\nSELECT x, y FROM pairs"
-# rewritten: from sqlty import NoParams
-# rewritten: q = SQL[UNTYPED, NoParams]("--sql\r\nSELECT x, y FROM pairs")
+# rewritten: q = SQL[UNTYPED]("--sql\r\nSELECT x, y FROM pairs")
 ```
 
 ## Marker on the second line of a triple-quoted string
@@ -142,8 +141,7 @@ q = "--sql\r\nSELECT x, y FROM pairs"
 q = """
 --sql
 SELECT 1::INTEGER AS n"""
-# rewritten: from sqlty import NoParams
-# rewritten: q = SQL[tuple[int], NoParams]("""
+# rewritten: q = SQL[tuple[int]]("""
 # rewritten: --sql
 # rewritten: SELECT 1::INTEGER AS n""")
 ```

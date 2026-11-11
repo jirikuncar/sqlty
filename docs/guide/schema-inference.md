@@ -40,18 +40,16 @@ users = "--sql\nSELECT id, name, created_at FROM users"
 totals = "--sql\nSELECT u.name, o.total FROM users u JOIN orders o ON o.user_id = u.id"
 everything = "--sql\nSELECT * FROM orders"
 # rewritten: import decimal
-# rewritten: from sqlty import NoParams
-# rewritten: users = SQL[tuple[int, str, datetime.datetime | None], NoParams]("--sql\nSELECT id, name, created_at FROM users")
-# rewritten: totals = SQL[tuple[str, decimal.Decimal], NoParams]("--sql\nSELECT u.name, o.total FROM users u JOIN orders o ON o.user_id = u.id")
-# rewritten: everything = SQL[tuple[int, int | None, decimal.Decimal], NoParams]("--sql\nSELECT * FROM orders")
+# rewritten: users = SQL[tuple[int, str, datetime.datetime | None]]("--sql\nSELECT id, name, created_at FROM users")
+# rewritten: totals = SQL[tuple[str, decimal.Decimal]]("--sql\nSELECT u.name, o.total FROM users u JOIN orders o ON o.user_id = u.id")
+# rewritten: everything = SQL[tuple[int, int | None, decimal.Decimal]]("--sql\nSELECT * FROM orders")
 ```
 
 An explicit cast still wins over the schema:
 
 ```python
 query = "--sql\nSELECT id::TEXT, name FROM users"
-# rewritten: from sqlty import NoParams
-# rewritten: query = SQL[tuple[str, str], NoParams]("--sql\nSELECT id::TEXT, name FROM users")
+# rewritten: query = SQL[tuple[str, str]]("--sql\nSELECT id::TEXT, name FROM users")
 ```
 
 `sqlty check` warns about `SELECT *` even when it can be typed
@@ -85,11 +83,10 @@ left = "--sql\nSELECT u.id, o.id FROM users u LEFT JOIN orders o ON o.user_id = 
 narrowed = "--sql\nSELECT nick FROM users WHERE nick IS NOT NULL"
 total = "--sql\nSELECT count(*), max(total) FROM orders"
 # rewritten: import decimal
-# rewritten: from sqlty import NoParams
-# rewritten: users = SQL[tuple[int, str, str | None], NoParams]("--sql\nSELECT id, name, nick FROM users")
-# rewritten: left = SQL[tuple[int, int | None], NoParams]("--sql\nSELECT u.id, o.id FROM users u LEFT JOIN orders o ON o.user_id = u.id")
-# rewritten: narrowed = SQL[tuple[str], NoParams]("--sql\nSELECT nick FROM users WHERE nick IS NOT NULL")
-# rewritten: total = SQL[tuple[int, decimal.Decimal | None], NoParams]("--sql\nSELECT count(*), max(total) FROM orders")
+# rewritten: users = SQL[tuple[int, str, str | None]]("--sql\nSELECT id, name, nick FROM users")
+# rewritten: left = SQL[tuple[int, int | None]]("--sql\nSELECT u.id, o.id FROM users u LEFT JOIN orders o ON o.user_id = u.id")
+# rewritten: narrowed = SQL[tuple[str]]("--sql\nSELECT nick FROM users WHERE nick IS NOT NULL")
+# rewritten: total = SQL[tuple[int, decimal.Decimal | None]]("--sql\nSELECT count(*), max(total) FROM orders")
 ```
 
 What makes a column nullable or not:
@@ -196,8 +193,7 @@ CREATE TABLE orders (
 
 ```python
 orders = "--sql\nSELECT status, note, CASE WHEN id > 1 THEN 'late' ELSE 'early' END AS timing FROM orders"
-# rewritten: from sqlty import NoParams
-# rewritten: orders = SQL[tuple[typing.Literal['pending', 'paid', 'refunded'], str | None, typing.Literal['late', 'early']], NoParams]("--sql\nSELECT status, note, CASE WHEN id > 1 THEN 'late' ELSE 'early' END AS timing FROM orders")
+# rewritten: orders = SQL[tuple[typing.Literal['pending', 'paid', 'refunded'], str | None, typing.Literal['late', 'early']]]("--sql\nSELECT status, note, CASE WHEN id > 1 THEN 'late' ELSE 'early' END AS timing FROM orders")
 ```
 
 A computed value (arithmetic, `upper(col)`, `col || 'x'`, `SUM`) is the plain `str` or
@@ -256,8 +252,7 @@ CREATE VIEW adults (user_id, user_name) AS SELECT id, name FROM users WHERE age 
 
 ```python
 adults = "--sql\nSELECT user_id, user_name FROM adults"
-# rewritten: from sqlty import NoParams
-# rewritten: adults = SQL[tuple[int, str], NoParams]("--sql\nSELECT user_id, user_name FROM adults")
+# rewritten: adults = SQL[tuple[int, str]]("--sql\nSELECT user_id, user_name FROM adults")
 ```
 
 ## Set operations
@@ -283,8 +278,7 @@ CREATE TABLE archived_events (amount BIGINT NOT NULL);
 ```python
 totals = "--sql\nSELECT sum(amount) FROM (SELECT amount FROM events UNION ALL SELECT amount FROM archived_events) AS u"
 # rewritten: import decimal
-# rewritten: from sqlty import NoParams
-# rewritten: totals = SQL[tuple[decimal.Decimal | None], NoParams]("--sql\nSELECT sum(amount) FROM (SELECT amount FROM events UNION ALL SELECT amount FROM archived_events) AS u")
+# rewritten: totals = SQL[tuple[decimal.Decimal | None]]("--sql\nSELECT sum(amount) FROM (SELECT amount FROM events UNION ALL SELECT amount FROM archived_events) AS u")
 ```
 
 ## Domains and enums
@@ -313,8 +307,7 @@ CREATE TABLE orders (id INTEGER PRIMARY KEY, discount percent, status order_stat
 
 ```python
 orders = "--sql\nSELECT discount, status FROM orders"
-# rewritten: from sqlty import NoParams
-# rewritten: orders = SQL[tuple[int | None, typing.Literal['pending', 'paid']], NoParams]("--sql\nSELECT discount, status FROM orders")
+# rewritten: orders = SQL[tuple[int | None, typing.Literal['pending', 'paid']]]("--sql\nSELECT discount, status FROM orders")
 ```
 
 A field annotated `str` still accepts an enum column, and a `Literal[...]` field
@@ -379,9 +372,8 @@ any order.
 ```python
 users = "--sql\nSELECT * FROM users"
 total = "--sql\nSELECT user_count()"
-# rewritten: from sqlty import NoParams
-# rewritten: users = SQL[tuple[int, str | None, typing.Literal['pending', 'active', 'banned']], NoParams]("--sql\nSELECT * FROM users")
-# rewritten: total = SQL[tuple[int], NoParams]("--sql\nSELECT user_count()")
+# rewritten: users = SQL[tuple[int, str | None, typing.Literal['pending', 'active', 'banned']]]("--sql\nSELECT * FROM users")
+# rewritten: total = SQL[tuple[int]]("--sql\nSELECT user_count()")
 ```
 
 A name written `schema.table` looks in that schema. A bare name follows the
@@ -477,9 +469,8 @@ CREATE TABLE notes (
 ```python
 notes = "--sql\nSELECT id, title, score, attachment, created_at FROM notes"
 stats = "--sql\nSELECT COUNT(*) AS n, MAX(score), CAST(id AS TEXT) FROM notes"
-# rewritten: from sqlty import NoParams
-# rewritten: notes = SQL[tuple[int, str, float | None, bytes | None, str | None], NoParams]("--sql\nSELECT id, title, score, attachment, created_at FROM notes")
-# rewritten: stats = SQL[tuple[int, float | None, str], NoParams]("--sql\nSELECT COUNT(*) AS n, MAX(score), CAST(id AS TEXT) FROM notes")
+# rewritten: notes = SQL[tuple[int, str, float | None, bytes | None, str | None]]("--sql\nSELECT id, title, score, attachment, created_at FROM notes")
+# rewritten: stats = SQL[tuple[int, float | None, str]]("--sql\nSELECT COUNT(*) AS n, MAX(score), CAST(id AS TEXT) FROM notes")
 ```
 
 #### Free-form type names
@@ -506,8 +497,7 @@ CREATE TABLE legacy (id UNSIGNED BIG INT NOT NULL, code VARYING CHARACTER(10), p
 
 ```python
 legacy = "--sql\nSELECT id, code, price FROM legacy"
-# rewritten: from sqlty import NoParams
-# rewritten: legacy = SQL[tuple[int, str | None, float | None], NoParams]("--sql\nSELECT id, code, price FROM legacy")
+# rewritten: legacy = SQL[tuple[int, str | None, float | None]]("--sql\nSELECT id, code, price FROM legacy")
 ```
 
 #### Virtual tables
@@ -550,10 +540,9 @@ orders = "-- sql\nSELECT `id`, total, paid, status, meta, created_at FROM `order
 with_set = "-- sql\nSELECT `id`, tags FROM `orders`"
 casts = "-- sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders"
 # rewritten: import decimal
-# rewritten: from sqlty import NoParams
-# rewritten: orders = SQL[tuple[int, decimal.Decimal | None, int | None, typing.Literal['new', 'paid'] | None, typing.Any, datetime.datetime | None], NoParams]("-- sql\nSELECT `id`, total, paid, status, meta, created_at FROM `orders`")
-# rewritten: with_set = SQL[tuple[int, str | None], NoParams]("-- sql\nSELECT `id`, tags FROM `orders`")
-# rewritten: casts = SQL[tuple[int | None, str], NoParams]("-- sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders")
+# rewritten: orders = SQL[tuple[int, decimal.Decimal | None, int | None, typing.Literal['new', 'paid'] | None, typing.Any, datetime.datetime | None]]("-- sql\nSELECT `id`, total, paid, status, meta, created_at FROM `orders`")
+# rewritten: with_set = SQL[tuple[int, str | None]]("-- sql\nSELECT `id`, tags FROM `orders`")
+# rewritten: casts = SQL[tuple[int | None, str]]("-- sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders")
 ```
 
 `TINYINT(1)` is an `int`, not a `bool`. See the

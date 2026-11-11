@@ -32,7 +32,7 @@ def test_source_without_queries_is_unchanged_by_schema() -> None:
 
 def test_source_with_a_query_uses_the_schema() -> None:
     source = 'q = "--sql\\nSELECT * FROM t"\n'
-    assert "SQL[tuple[int], NoParams]" in core.rewrite_source(source, schema_sql=_schema(0))
+    assert "SQL[tuple[int]]" in core.rewrite_source(source, schema_sql=_schema(0))
 
 
 def test_sources_skipped_for_lack_of_sql_have_no_schema_diagnostics() -> None:

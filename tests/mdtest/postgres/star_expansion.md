@@ -325,6 +325,5 @@ SELECT * FROM t
 
 ```python
 q = SQL[tuple[int, str]]('--sql\nSELECT * FROM t')
-# fixed: from sqlty import NoParams
-# fixed: q = SQL[tuple[int | None, str | None], NoParams]('--sql\nSELECT id::INT, "My Col"::TEXT FROM t')
+# fixed: q = SQL[tuple[int | None, str | None]]('--sql\nSELECT id::INT, "My Col"::TEXT FROM t')
 ```

@@ -40,9 +40,8 @@ from sqlty import SQL
 
 q = SQL[tuple[int | None]]("--sql\nSELECT id::INTEGER FROM users")
 # fixed: from sqlty import SQL
-# fixed: from sqlty import NoParams
 # fixed:
-# fixed: q = SQL[tuple[int], NoParams]("--sql\nSELECT id::INTEGER FROM users")
+# fixed: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 ```
 
 Parametrised generics that refine the inferred type are kept by `--fix`:
@@ -52,7 +51,6 @@ from sqlty import SQL
 
 q = SQL[tuple[int, list[str]]]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
 # fixed: from sqlty import SQL
-# fixed: from sqlty import NoParams
 # fixed:
-# fixed: q = SQL[tuple[int, list[str]], NoParams]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
+# fixed: q = SQL[tuple[int, list[str]]]("--sql\nSELECT id::INTEGER, tags::TEXT[] FROM users")
 ```

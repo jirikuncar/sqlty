@@ -45,7 +45,6 @@ from sqlty import SQL
 
 q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 # fixed: from sqlty import SQL
-# fixed: from sqlty import NoParams
 # fixed:
-# fixed: q = SQL[tuple[int, str], NoParams]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# fixed: q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```

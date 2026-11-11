@@ -43,8 +43,8 @@ def projects(tmp_path: Path) -> dict[str, Path]:
 
 EXPECTED = {
     "plain": QUERY,
-    "schema": 'from sqlty import SQL\nfrom sqlty import NoParams\nq = SQL[tuple[int, str], NoParams]("--sql\\nSELECT id, name FROM users")\n',
-    "styled": 'from sqlty import SQL as Q\nfrom sqlty import NoParams\nq = Q[tuple[int, str], NoParams]("--sql\\nSELECT id, name FROM users")\n',
+    "schema": 'from sqlty import SQL\nq = SQL[tuple[int, str]]("--sql\\nSELECT id, name FROM users")\n',
+    "styled": 'from sqlty import SQL as Q\nq = Q[tuple[int, str]]("--sql\\nSELECT id, name FROM users")\n',
 }
 
 
@@ -72,7 +72,7 @@ def test_cli_schema_overrides_every_config(cli: Cli, projects: dict[str, Path], 
     result = cli(["rewrite", "--schema", override, projects["plain"], projects["schema"]])
     assert result.returncode == 0, result.stderr
     for name in ("plain", "schema"):
-        assert "SQL[tuple[str, int], NoParams]" in (projects[name] / "queries.py").read_text()
+        assert "SQL[tuple[str, int]]" in (projects[name] / "queries.py").read_text()
 
 
 def test_rewrite_single_file_uses_its_config(cli: Cli, projects: dict[str, Path]):

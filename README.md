@@ -56,8 +56,7 @@ CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email VARCHAR(25
 
 ```python
 query = "--sql\nSELECT id, name, email FROM users"
-# rewritten: from sqlty import NoParams
-# rewritten: query = SQL[tuple[int, str, str], NoParams]("--sql\nSELECT id, name, email FROM users")
+# rewritten: query = SQL[tuple[int, str, str]]("--sql\nSELECT id, name, email FROM users")
 ```
 
 [Open in playground](https://sqlty.kuncar.dev/playground/#eJw9jcsKwjAURH_lkpWFdiN0o7iI5arFPiRGsZBNSWMN9GGbdiHiv9tQdDGbM8OcNzHt2EtFVkC6UfUv2IAgnme6SojmjBEGHHThQpPXygVV57qCHUtjGI3qjSCiIS4QIx9TZU8ChpQjcLqNcN7AQhcQJhz3yODEwpiyDI6YzZ_A8cYhSadcouhnuFIWHChbLH3f-ZfO2qoKnVdKDtb1bM1Q9spYLNvmrktLyecL_GI_Gw)

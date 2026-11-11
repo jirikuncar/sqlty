@@ -58,9 +58,8 @@ from sqlty import SQL
 
 q = SQL[tuple[int, str]]("--sql\nSELECT id, surname FROM users")
 # fixed: from sqlty import SQL
-# fixed: from sqlty import NoParams
 # fixed:
-# fixed: q = SQL[tuple[int | None, str | None], NoParams]("--sql\nSELECT id, name FROM users")
+# fixed: q = SQL[tuple[int | None, str | None]]("--sql\nSELECT id, name FROM users")
 ```
 
 ### Composite fields

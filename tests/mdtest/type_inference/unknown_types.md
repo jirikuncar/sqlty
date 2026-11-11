@@ -77,8 +77,7 @@ untyped = "sentinel"
 
 ```python
 query = "--sql\nSELECT some_extension_function(id) AS x FROM users"
-# rewritten: from sqlty import NoParams
-# rewritten: query = SQL[UNTYPED, NoParams]("--sql\nSELECT some_extension_function(id) AS x FROM users")
+# rewritten: query = SQL[UNTYPED]("--sql\nSELECT some_extension_function(id) AS x FROM users")
 ```
 
 ## Checks skip unknown columns

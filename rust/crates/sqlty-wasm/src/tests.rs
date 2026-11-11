@@ -96,7 +96,7 @@ fn config_sets_the_dialect_import_style_and_rules() {
     assert_eq!(answer["diagnostics"][0]["severity"], "error");
     assert_eq!(
         answer["rewritten"],
-        "import sqlty\nq = sqlty.SQL[tuple[int, str, str | None], sqlty.NoParams](\"--sql\\nSELECT * FROM users\")\n"
+        "import sqlty\nq = sqlty.SQL[tuple[int, str, str | None]](\"--sql\\nSELECT * FROM users\")\n"
     );
     let source = "q = \"--sql\\nSELECT 1 = 1 AS b\"\n";
     for (dialect, row_type) in [("postgres", "tuple[bool]"), ("sqlite", "tuple[int]")] {
@@ -165,7 +165,7 @@ fn analyze_gives_quick_fixes_and_what_fix_and_strip_make() {
             {"start": 4, "end": 33, "replacement": "SQL[tuple[int]](\"--sql\\nSELECT id FROM users\")"},
         ])
     );
-    let fixed = "from sqlty import SQL\nfrom sqlty import NoParams\né = SQL[tuple[int], NoParams](\"--sql\\nSELECT id FROM users\")\n";
+    let fixed = "from sqlty import SQL\né = SQL[tuple[int]](\"--sql\\nSELECT id FROM users\")\n";
     assert_eq!(answer["fixed"], fixed);
     let answer =
         ask(&json!({"op": "analyze", "source": fixed, "schema": SCHEMA, "dialect": "postgres"}));

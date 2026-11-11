@@ -29,7 +29,7 @@ from sqlty.core import infer_type
 def test_cli_rewrite_untyped(tmp_path, monkeypatch):
     """``untyped`` comes from [tool.sqlty]; ``--untyped`` overrides it."""
     source = 'q = "--sql\\nSELECT x, y FROM pairs"\n'
-    sentinel = 'from sqlty import SQL\nfrom sqlty import NoParams\nfrom sqlty import UNTYPED\nq = SQL[UNTYPED, NoParams]("--sql\\nSELECT x, y FROM pairs")\n'
+    sentinel = 'from sqlty import SQL\nfrom sqlty import UNTYPED\nq = SQL[UNTYPED]("--sql\\nSELECT x, y FROM pairs")\n'
     target = tmp_path / "q.py"
     monkeypatch.chdir(tmp_path)
 
@@ -62,10 +62,10 @@ def test_each_file_uses_its_nearest_config(tmp_path, monkeypatch, capsys) -> Non
     main(["rewrite", "b", "a"])
 
     assert (tmp_path / "a" / "q.py").read_text() == (
-        'from sqlty import SQL\nfrom sqlty import NoParams\nq = SQL[tuple[int], NoParams]("--sql\\nSELECT id FROM users")\n'
+        'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT id FROM users")\n'
     )
     assert (tmp_path / "b" / "q.py").read_text() == (
-        'import sqlty\nq = sqlty.SQL[tuple[int], sqlty.NoParams]("--sql\\nSELECT id::INTEGER FROM users")\n'
+        'import sqlty\nq = sqlty.SQL[tuple[int]]("--sql\\nSELECT id::INTEGER FROM users")\n'
     )
     main(["check", "a", "b"])
     assert capsys.readouterr().out == ""
@@ -100,15 +100,14 @@ def test_check_fix_writes_fixes_and_reports_the_rest(tmp_path, monkeypatch, caps
 
     assert (tmp_path / "q.py").read_text() == (
         "from sqlty import SQL\n"
-        "from sqlty import NoParams\n"
-        'stale = SQL[tuple[int], NoParams]("--sql\\nSELECT id FROM users")\n'
-        'star = SQL[tuple[int, str], NoParams]("--sql\\nSELECT id::INT, name::TEXT FROM users")\n'
-        'new = SQL[tuple[str], NoParams]("--sql\\nSELECT name FROM users")\n'
-        'bad = SQL[tuple[int], NoParams]("--sql\\nSELECT id FROM users")\n'
+        'stale = SQL[tuple[int]]("--sql\\nSELECT id FROM users")\n'
+        'star = SQL[tuple[int, str]]("--sql\\nSELECT id::INT, name::TEXT FROM users")\n'
+        'new = SQL[tuple[str]]("--sql\\nSELECT name FROM users")\n'
+        'bad = SQL[tuple[int]]("--sql\\nSELECT id FROM users")\n'
         'dynamic = f"--sql\\nSELECT {column} FROM users"\n'
     )
     out = capsys.readouterr().out
-    assert out.startswith("q.py:7: [fstring-skipped]")
+    assert out.startswith("q.py:6: [fstring-skipped]")
     assert "Fixed 1 file(s)" in out
 
 
@@ -657,7 +656,7 @@ def test_extended_config_reads_its_schema(tmp_path, monkeypatch) -> None:
     main(["rewrite", "pkg"])
 
     assert (tmp_path / "pkg" / "q.py").read_text() == (
-        'from sqlty import SQL\nfrom sqlty import NoParams\nq = SQL[tuple[int], NoParams]("--sql\\nSELECT id FROM users")\n'
+        'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT id FROM users")\n'
     )
 
 
@@ -949,7 +948,7 @@ def test_config_file_replaces_discovery(tmp_path, monkeypatch, name, content) ->
     main(["rewrite", "--config-file", str(config), "pkg"])
 
     assert (project / "pkg" / "q.py").read_text() == (
-        'from sqlty import SQL\nfrom sqlty import NoParams\nq = SQL[tuple[int], NoParams]("--sql\\nSELECT id FROM users")\n'
+        'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT id FROM users")\n'
     )
     args = build_parser().parse_args(["check", "--config-file", str(config), "pkg"])
     assert SettingsResolver(args).for_file(project / "pkg" / "q.py").dialect == "postgres"
@@ -1315,7 +1314,7 @@ def test_databases_pick_the_schema_and_rules_of_a_file(tmp_path, monkeypatch, ca
     main(["rewrite", "app"])
     _, out, _ = _run(["check", "."], capsys)
 
-    wrapped = 'from sqlty import SQL\nfrom sqlty import NoParams\nq = SQL[{}, NoParams]("--sql\\nSELECT * FROM {}")\n'
+    wrapped = 'from sqlty import SQL\nq = SQL[{}]("--sql\\nSELECT * FROM {}")\n'
     assert (tmp_path / "app/users.py").read_text() == wrapped.format("tuple[int]", "users")
     assert (tmp_path / "app/reports/events.py").read_text() == wrapped.format(
         "tuple[str]", "events"
@@ -1323,9 +1322,9 @@ def test_databases_pick_the_schema_and_rules_of_a_file(tmp_path, monkeypatch, ca
     assert (tmp_path / "app/reports/legacy.py").read_text() == wrapped.format("tuple[int]", "users")
     sep = os.sep
     assert out.splitlines() == [
-        f"app{sep}reports{sep}events.py:3: [select-star] SELECT * used — expand to explicit column list",
-        f"app{sep}reports{sep}legacy.py:3: [select-star] SELECT * used — expand to explicit column list",
-        f"app{sep}users.py:3: [select-star] SELECT * used — expand to explicit column list",
+        f"app{sep}reports{sep}events.py:2: [select-star] SELECT * used — expand to explicit column list",
+        f"app{sep}reports{sep}legacy.py:2: [select-star] SELECT * used — expand to explicit column list",
+        f"app{sep}users.py:2: [select-star] SELECT * used — expand to explicit column list",
         f"sql{sep}events.sql:2: [unknown-column] column `nope` does not exist in `events`",
         "Found 4 error(s)",
     ]
@@ -1368,15 +1367,14 @@ def test_a_query_marker_picks_its_database(tmp_path, monkeypatch, capsys) -> Non
 
     assert (tmp_path / "app/mixed.py").read_text() == (
         "from sqlty import SQL\n"
-        "from sqlty import NoParams\n"
-        'a = SQL[tuple[str], NoParams]("--sql sqlty:db=analytics\\nSELECT kind FROM events")\n'
-        'b = SQL[tuple[int], NoParams]("--sql sqlty:db=analytic\\nSELECT id FROM users")\n'
+        'a = SQL[tuple[str]]("--sql sqlty:db=analytics\\nSELECT kind FROM events")\n'
+        'b = SQL[tuple[int]]("--sql sqlty:db=analytic\\nSELECT id FROM users")\n'
     )
     assert (tmp_path / "app/reports/back.py").read_text() == (
-        'from sqlty import SQL\nfrom sqlty import NoParams\nq = SQL[tuple[int], NoParams]("--sql sqlty:db=default\\nSELECT id FROM users")\n'
+        'from sqlty import SQL\nq = SQL[tuple[int]]("--sql sqlty:db=default\\nSELECT id FROM users")\n'
     )
     assert out.splitlines() == [
-        f"app{os.sep}mixed.py:4: [unknown-database] database `analytic` is not configured; "
+        f"app{os.sep}mixed.py:3: [unknown-database] database `analytic` is not configured; "
         "did you mean `analytics`?",
         "Found 1 error(s)",
     ]
@@ -1572,7 +1570,7 @@ def test_format_command_runs_before_check_reads_a_fixed_file(tmp_path, monkeypat
     _, out, _ = _run(["check", "--fix", "new.py"], capsys)
 
     assert (tmp_path / "new.py").read_text().startswith("# formatted\n")
-    assert "new.py:5: [fstring-skipped]" in out
+    assert "new.py:4: [fstring-skipped]" in out
 
 
 def test_failing_format_command_keeps_the_file(tmp_path, monkeypatch, capsys, caplog) -> None:
@@ -1601,7 +1599,7 @@ def test_rewrite_is_idempotent_with_ruff_format(tmp_path, monkeypatch, capsys) -
     once = (tmp_path / "q.py").read_text()
     _, out, _ = _run(["rewrite", "--check", "q.py"], capsys)
 
-    assert once.startswith("from sqlty import SQL\nfrom sqlty import NoParams\n\nq = SQL[")
+    assert once.startswith("from sqlty import SQL\n\nq = SQL[")
     assert "All files up to date" in out
 
 
@@ -1700,7 +1698,7 @@ def test_dialect_option_takes_every_dialect(tmp_path, monkeypatch, capsys) -> No
     monkeypatch.chdir(tmp_path)
     code, out, _ = _run(["rewrite", "--diff", "--dialect", "DuckDB", "."], capsys)
     assert code == 1
-    assert 'SQL[tuple[int], NoParams]("--sql' in out
+    assert 'SQL[tuple[int]]("--sql' in out
     code, _, err = _run(["check", "--dialect", "postgress", "."], capsys)
     assert code == 2
     assert "unknown dialect 'postgress' (did you mean 'postgres'?)" in err

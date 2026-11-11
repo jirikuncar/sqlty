@@ -4,8 +4,7 @@
 
 ```python
 q = "--sql\nSELECT id::INTEGER FROM users"
-# rewritten: from sqlty import NoParams
-# rewritten: q = SQL[tuple[int], NoParams]("--sql\nSELECT id::INTEGER FROM users")
+# rewritten: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 ```
 
 ## Strip removes SQL wrapper
@@ -19,8 +18,7 @@ q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 
 ```python
 q = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
-# rewritten: from sqlty import NoParams
-# rewritten: q = SQL[tuple[int, str], NoParams]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# rewritten: q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 ## Multi-column strip
@@ -36,8 +34,7 @@ Rewrite does not modify an existing `SQL[User]` wrapper:
 
 ```python
 q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# rewritten: from sqlty import NoParams
-# rewritten: q = SQL[User, NoParams]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# rewritten: q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 ## SQL[CustomType] without --sql survives both rewrite and strip
@@ -46,8 +43,7 @@ Custom `SQL[T]` wrappers without `--sql` prefix are never touched:
 
 ```python
 q = SQL[User]("SELECT id, name FROM users")
-# rewritten: from sqlty import NoParams
-# rewritten: q = SQL[User, NoParams]("SELECT id, name FROM users")
+# rewritten: q = SQL[User]("SELECT id, name FROM users")
 # stripped: q = SQL[User]("SELECT id, name FROM users")
 ```
 
@@ -75,8 +71,7 @@ q = SQL[tuple[int]]("--sql SELECT id::INTEGER FROM users")
 ```python
 q = """--sql
 SELECT id::INTEGER FROM users"""
-# rewritten: from sqlty import NoParams
-# rewritten: q = SQL[tuple[int], NoParams]("""--sql
+# rewritten: q = SQL[tuple[int]]("""--sql
 # rewritten: SELECT id::INTEGER FROM users""")
 ```
 

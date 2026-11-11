@@ -142,9 +142,8 @@ query is empty to sqlty and the string is never wrapped. Use a newline.
 ```python
 wrong = "--sql SELECT id::INTEGER FROM users"
 right = "--sql\nSELECT id::INTEGER FROM users"
-# rewritten: from sqlty import NoParams
 # rewritten: wrong = "--sql SELECT id::INTEGER FROM users"
-# rewritten: right = SQL[tuple[int], NoParams]("--sql\nSELECT id::INTEGER FROM users")
+# rewritten: right = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 ```
 
 **`strip` removes hand-written row types.** It turns `SQL[User](...)` back

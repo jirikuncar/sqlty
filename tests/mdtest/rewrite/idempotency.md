@@ -4,16 +4,14 @@
 
 ```python
 q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
-# rewritten: from sqlty import NoParams
-# rewritten: q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER")
+# rewritten: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
 ```
 
 ## Already rewritten with multiple types
 
 ```python
 q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# rewritten: from sqlty import NoParams
-# rewritten: q = SQL[tuple[int, str], NoParams]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# rewritten: q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 ## Manual SQL[CustomType] without --sql is not rewritten
@@ -22,8 +20,7 @@ User-defined `SQL[T]` wrappers without `--sql` prefix are left untouched:
 
 ```python
 q = SQL[User]("SELECT id, name FROM users")
-# rewritten: from sqlty import NoParams
-# rewritten: q = SQL[User, NoParams]("SELECT id, name FROM users")
+# rewritten: q = SQL[User]("SELECT id, name FROM users")
 ```
 
 ## Manual SQL[CustomType] with --sql is not double-wrapped
@@ -33,8 +30,7 @@ and skipped regardless of the type parameter:
 
 ```python
 q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# rewritten: from sqlty import NoParams
-# rewritten: q = SQL[User, NoParams]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# rewritten: q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 ## Multiline SQL[CustomType] is not rewritten
@@ -42,8 +38,7 @@ q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```python
 q = SQL[User]("""--sql
 SELECT id::INTEGER, name::TEXT FROM users""")
-# rewritten: from sqlty import NoParams
-# rewritten: q = SQL[User, NoParams]("""--sql
+# rewritten: q = SQL[User]("""--sql
 # rewritten: SELECT id::INTEGER, name::TEXT FROM users""")
 ```
 
@@ -69,11 +64,10 @@ q2 = Query("--sql\nSELECT id::INTEGER FROM users")
 q3 = sqlty.SQL(
     "--sql\nSELECT name::TEXT FROM users",
 )
-# rewritten: from sqlty import NoParams
 # rewritten: from sqlty import SQL as Query
 # rewritten: import sqlty
 # rewritten:
-# rewritten: q1 = SQL[tuple[int, str], NoParams]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# rewritten: q1 = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 # rewritten: q2 = Query[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 # rewritten: q3 = sqlty.SQL[tuple[str]](
 # rewritten:     "--sql\nSELECT name::TEXT FROM users",

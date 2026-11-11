@@ -22,8 +22,7 @@ untyped = "sentinel"
 
 ```python
 q = "--sql\nSELECT x, y FROM pairs"
-# rewritten: from sqlty import NoParams
-# rewritten: q = SQL[UNTYPED, NoParams]("--sql\nSELECT x, y FROM pairs")
+# rewritten: q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 ```
 
 ## Sentinel: DML without RETURNING returns no rows
@@ -107,9 +106,8 @@ untyped = "sentinel"
 q = "--sql\nSELECT id::INTEGER FROM users"
 d = "--sql\nSELEC id FROM users"
 # rewritten-file: from sqlty import SQL
-# rewritten-file: from sqlty import NoParams
 # rewritten-file: from sqlty import UNTYPED
-# rewritten-file: q = SQL[tuple[int], NoParams]("--sql\nSELECT id::INTEGER FROM users")
+# rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 # rewritten-file: d = SQL[UNTYPED]("--sql\nSELEC id FROM users")
 ```
 
@@ -122,8 +120,7 @@ untyped = "sentinel"
 
 ```python
 q = "--sql\nDELETE FROM users RETURNING id::INTEGER"
-# rewritten: from sqlty import NoParams
-# rewritten: q = SQL[tuple[int], NoParams]("--sql\nDELETE FROM users RETURNING id::INTEGER")
+# rewritten: q = SQL[tuple[int]]("--sql\nDELETE FROM users RETURNING id::INTEGER")
 ```
 
 ## Sentinel: existing SQL[UNTYPED] wrapper is left alone
@@ -138,9 +135,8 @@ from sqlty import SQL
 from sqlty import UNTYPED
 q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 # rewritten-file: from sqlty import SQL
-# rewritten-file: from sqlty import NoParams
 # rewritten-file: from sqlty import UNTYPED
-# rewritten-file: q = SQL[UNTYPED, NoParams]("--sql\nSELECT x, y FROM pairs")
+# rewritten-file: q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 ```
 
 ## Sentinel with aliased import
@@ -154,9 +150,8 @@ import-style = "from sqlty import SQL as Q"
 ```python
 q = "--sql\nSELECT x, y FROM pairs"
 # rewritten-file: from sqlty import SQL as Q
-# rewritten-file: from sqlty import NoParams
 # rewritten-file: from sqlty import UNTYPED
-# rewritten-file: q = Q[UNTYPED, NoParams]("--sql\nSELECT x, y FROM pairs")
+# rewritten-file: q = Q[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 ```
 
 ## Sentinel with module import
@@ -170,7 +165,7 @@ import-style = "import sqlty"
 ```python
 q = "--sql\nSELECT x, y FROM pairs"
 # rewritten-file: import sqlty
-# rewritten-file: q = sqlty.SQL[sqlty.UNTYPED, sqlty.NoParams]("--sql\nSELECT x, y FROM pairs")
+# rewritten-file: q = sqlty.SQL[sqlty.UNTYPED]("--sql\nSELECT x, y FROM pairs")
 ```
 
 ## Sentinel with module alias
@@ -184,5 +179,5 @@ import-style = "import sqlty as sy"
 ```python
 q = "--sql\nSELECT x, y FROM pairs"
 # rewritten-file: import sqlty as sy
-# rewritten-file: q = sy.SQL[sy.UNTYPED, sy.NoParams]("--sql\nSELECT x, y FROM pairs")
+# rewritten-file: q = sy.SQL[sy.UNTYPED]("--sql\nSELECT x, y FROM pairs")
 ```

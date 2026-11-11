@@ -64,8 +64,7 @@ EXPECTED = '''\
 q = """--sql
 SELECT id::INTEGER FROM users"""
 # rewritten-file: from sqlty import SQL
-# rewritten-file: from sqlty import NoParams
-# rewritten-file: q = SQL[tuple[int], NoParams]("""--sql
+# rewritten-file: q = SQL[tuple[int]]("""--sql
 # rewritten-file: SELECT id::INTEGER FROM users""")
 ```
 
@@ -73,8 +72,7 @@ SELECT id::INTEGER FROM users"""
 
 ```python
 q = "--sql\\nSELECT name::TEXT FROM users"
-# rewritten: from sqlty import NoParams
-# rewritten: q = SQL[tuple[str], NoParams]("--sql\\nSELECT name::TEXT FROM users")
+# rewritten: q = SQL[tuple[str]]("--sql\\nSELECT name::TEXT FROM users")
 ```
 
 ## Keeps indentation
@@ -83,9 +81,8 @@ q = "--sql\\nSELECT name::TEXT FROM users"
 def f():
     q = "--sql\\nSELECT 1::INTEGER"
     return q
-# rewritten: from sqlty import NoParams
 # rewritten: def f():
-# rewritten:     q = SQL[tuple[int], NoParams]("--sql\\nSELECT 1::INTEGER")
+# rewritten:     q = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")
 # rewritten:     return q
 # stripped: def f():
 # stripped:     q = "--sql\\nSELECT 1::INTEGER"

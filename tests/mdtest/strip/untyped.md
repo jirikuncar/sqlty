@@ -35,8 +35,7 @@ untyped = "sentinel"
 
 ```python
 q = "--sql\nSELECT x, y FROM pairs"
-# rewritten: from sqlty import NoParams
-# rewritten: q = SQL[UNTYPED, NoParams]("--sql\nSELECT x, y FROM pairs")
+# rewritten: q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 ```
 
 ### Strip

@@ -159,8 +159,7 @@ SELECT enum_first(status) AS a, enum_last(NULL::order_status) AS b, enum_range(s
 
 ```python
 q = "--sql\nSELECT status FROM orders"
-# rewritten: from sqlty import NoParams
-# rewritten: q = SQL[tuple[typing.Literal['pending', 'paid']], NoParams]("--sql\nSELECT status FROM orders")
+# rewritten: q = SQL[tuple[typing.Literal['pending', 'paid']]]("--sql\nSELECT status FROM orders")
 ```
 
 `schema.sql`:

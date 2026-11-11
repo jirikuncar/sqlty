@@ -68,7 +68,7 @@ def test_pre_commit_hook_runs(hook: dict[str, Any], staged: str, tmp_path: Path)
     returncode, rewritten = HOOK_RESULTS[hook["id"]]
     assert result.returncode == returncode, result.stdout + result.stderr
     text = sample.read_text()
-    assert ('SQL[tuple[int], NoParams]("--sql' in text) is rewritten, text
+    assert ('SQL[tuple[int]]("--sql' in text) is rewritten, text
     assert ("from sqlty import SQL" in text) is rewritten, text
 
 

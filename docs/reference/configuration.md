@@ -304,8 +304,8 @@ json-types = "typing.TypedDict"
 ## `param-types`
 
 `true` (default) makes `rewrite` and `check --fix` write the type of the
-parameters of a query, `SQL[R, P]`: a `tuple`, `NoParams`, or a generated
-`TypedDict` for named parameters, written as `json-types` writes its classes.
+parameters of a query, `SQL[R, P]`: a `tuple`, or a generated `TypedDict`
+for named parameters, written as `json-types` writes its classes.
 `strip` removes them. `false` leaves them untyped, `SQL[R]`. See
 [Typed parameters](../guide/parameters.md#typed-parameters).
 
@@ -521,9 +521,8 @@ CREATE TABLE events (n INTEGER NOT NULL);
 ```python
 users = "--sql\nSELECT id FROM users"
 events = "--sql sqlty:db=analytics\nSELECT n FROM events"
-# rewritten: from sqlty import NoParams
-# rewritten: users = SQL[tuple[str], NoParams]("--sql\nSELECT id FROM users")
-# rewritten: events = SQL[tuple[int], NoParams]("--sql sqlty:db=analytics\nSELECT n FROM events")
+# rewritten: users = SQL[tuple[str]]("--sql\nSELECT id FROM users")
+# rewritten: events = SQL[tuple[int]]("--sql sqlty:db=analytics\nSELECT n FROM events")
 ```
 
 ```sql

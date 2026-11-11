@@ -86,8 +86,7 @@ import-style = "from sqlty import SQL as Q"
 
 ```python
 q = "--sql\nSELECT id::INTEGER FROM users"
-# rewritten: from sqlty import NoParams
-# rewritten: q = Q[tuple[int], NoParams]("--sql\nSELECT id::INTEGER FROM users")
+# rewritten: q = Q[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 ```
 
 ### Strip
@@ -108,7 +107,7 @@ import-style = "import sqlty"
 
 ```python
 q = "--sql\nSELECT id::INTEGER FROM users"
-# rewritten: q = sqlty.SQL[tuple[int], sqlty.NoParams]("--sql\nSELECT id::INTEGER FROM users")
+# rewritten: q = sqlty.SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 ```
 
 ### Strip
@@ -129,7 +128,7 @@ import-style = "import sqlty as y"
 
 ```python
 q = "--sql\nSELECT id::INTEGER FROM users"
-# rewritten: q = y.SQL[tuple[int], y.NoParams]("--sql\nSELECT id::INTEGER FROM users")
+# rewritten: q = y.SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 ```
 
 ### Strip

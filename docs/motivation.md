@@ -24,8 +24,7 @@ next to the query as `SQL[T]`, a `str` subclass:
 
 ```python
 query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
-# rewritten: from sqlty import NoParams
-# rewritten: query = SQL[tuple[int, str], NoParams]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# rewritten: query = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 ```
 
 The query stays plain SQL that you can read, copy into a console and run.

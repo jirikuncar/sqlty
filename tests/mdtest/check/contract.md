@@ -91,10 +91,9 @@ b = SQL[tuple[UUID]]("--sql\nSELECT 1::NUMERIC")
 from decimal import Decimal
 
 a = SQL[tuple[Decimal | None]]("--sql\nSELECT 1::NUMERIC")
-# fixed: from sqlty import NoParams
 # fixed: from decimal import Decimal
 # fixed:
-# fixed: a = SQL[tuple[Decimal], NoParams]("--sql\nSELECT 1::NUMERIC")
+# fixed: a = SQL[tuple[Decimal]]("--sql\nSELECT 1::NUMERIC")
 ```
 
 ### Rule override ignore

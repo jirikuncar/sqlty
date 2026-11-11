@@ -34,11 +34,10 @@ users = "--sql\nSELECT id FROM users"
 events = "--sql sqlty:db=analytics\nSELECT n FROM events"
 default = "--sql sqlty:db=default\nSELECT id FROM users"
 cached = "-- sql sqlty:db=cache\nSELECT 1 AS one"
-# rewritten: from sqlty import NoParams
-# rewritten: users = SQL[tuple[str], NoParams]("--sql\nSELECT id FROM users")
-# rewritten: events = SQL[tuple[int], NoParams]("--sql sqlty:db=analytics\nSELECT n FROM events")
-# rewritten: default = SQL[tuple[str], NoParams]("--sql sqlty:db=default\nSELECT id FROM users")
-# rewritten: cached = SQL[tuple[int], NoParams]("-- sql sqlty:db=cache\nSELECT 1 AS one")
+# rewritten: users = SQL[tuple[str]]("--sql\nSELECT id FROM users")
+# rewritten: events = SQL[tuple[int]]("--sql sqlty:db=analytics\nSELECT n FROM events")
+# rewritten: default = SQL[tuple[str]]("--sql sqlty:db=default\nSELECT id FROM users")
+# rewritten: cached = SQL[tuple[int]]("-- sql sqlty:db=cache\nSELECT 1 AS one")
 ```
 
 ## Row types are checked against the named database
@@ -72,9 +71,8 @@ from sqlty import SQL
 
 q = SQL[tuple[int, str | None]]("--sql sqlty:db=analytics\nSELECT * FROM events")
 # fixed: from sqlty import SQL
-# fixed: from sqlty import NoParams
 # fixed:
-# fixed: q = SQL[tuple[int, str | None], NoParams]("--sql sqlty:db=analytics\nSELECT n, name FROM events")
+# fixed: q = SQL[tuple[int, str | None]]("--sql sqlty:db=analytics\nSELECT n, name FROM events")
 ```
 
 ## Unknown database

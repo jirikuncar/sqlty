@@ -8,8 +8,7 @@
 q = "--sql\nSELECT ts::TIMESTAMP"
 # rewritten-file: import datetime
 # rewritten-file: from sqlty import SQL
-# rewritten-file: from sqlty import NoParams
-# rewritten-file: q = SQL[tuple[datetime.datetime], NoParams]("--sql\nSELECT ts::TIMESTAMP")
+# rewritten-file: q = SQL[tuple[datetime.datetime]]("--sql\nSELECT ts::TIMESTAMP")
 ```
 
 ### Adds uuid import
@@ -18,8 +17,7 @@ q = "--sql\nSELECT ts::TIMESTAMP"
 q = "--sql\nSELECT uid::UUID"
 # rewritten-file: import uuid
 # rewritten-file: from sqlty import SQL
-# rewritten-file: from sqlty import NoParams
-# rewritten-file: q = SQL[tuple[uuid.UUID], NoParams]("--sql\nSELECT uid::UUID")
+# rewritten-file: q = SQL[tuple[uuid.UUID]]("--sql\nSELECT uid::UUID")
 ```
 
 ### Non sql unchanged
@@ -35,8 +33,7 @@ name = "hello"
 
 ```python
 q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
-# rewritten-file: from sqlty import NoParams
-# rewritten-file: q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER")
+# rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
 ```
 
 ### Single quotes
@@ -44,8 +41,7 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
 ```python
 q = '--sql\nSELECT 1::INTEGER'
 # rewritten-file: from sqlty import SQL
-# rewritten-file: from sqlty import NoParams
-# rewritten-file: q = SQL[tuple[int], NoParams]('--sql\nSELECT 1::INTEGER')
+# rewritten-file: q = SQL[tuple[int]]('--sql\nSELECT 1::INTEGER')
 ```
 
 ### Preserves surrounding code
@@ -55,9 +51,8 @@ x = 1
 q = "--sql\nSELECT 1::INTEGER"
 y = 2
 # rewritten-file: from sqlty import SQL
-# rewritten-file: from sqlty import NoParams
 # rewritten-file: x = 1
-# rewritten-file: q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER")
+# rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
 # rewritten-file: y = 2
 ```
 
@@ -67,9 +62,8 @@ y = 2
 a = "--sql\nSELECT 1::INTEGER"
 b = "--sql\nSELECT id::TEXT FROM t"
 # rewritten-file: from sqlty import SQL
-# rewritten-file: from sqlty import NoParams
-# rewritten-file: a = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER")
-# rewritten-file: b = SQL[tuple[str], NoParams]("--sql\nSELECT id::TEXT FROM t")
+# rewritten-file: a = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
+# rewritten-file: b = SQL[tuple[str]]("--sql\nSELECT id::TEXT FROM t")
 ```
 
 ### Returns str
@@ -171,8 +165,7 @@ q = "--sql\nBEGIN"
 ```python
 q = "--sql\nUPDATE users SET x=1 RETURNING id::INTEGER"
 # rewritten-file: from sqlty import SQL
-# rewritten-file: from sqlty import NoParams
-# rewritten-file: q = SQL[tuple[int], NoParams]("--sql\nUPDATE users SET x=1 RETURNING id::INTEGER")
+# rewritten-file: q = SQL[tuple[int]]("--sql\nUPDATE users SET x=1 RETURNING id::INTEGER")
 ```
 
 ### SELECT without casts is not wrapped — the row type is unknown
@@ -328,8 +321,7 @@ untyped = "sentinel"
 ```python
 q = "--sql\nSELECT 1::INTEGER"
 # rewritten-file: from sqlty import SQL
-# rewritten-file: from sqlty import NoParams
-# rewritten-file: q = SQL[tuple[int], NoParams]("--sql\nSELECT 1::INTEGER")
+# rewritten-file: q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
 ```
 
 ## Regression cases

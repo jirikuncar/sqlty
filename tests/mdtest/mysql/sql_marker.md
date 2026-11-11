@@ -29,9 +29,8 @@ a = "--sql\nSELECT id, name FROM users"
 b = """--sql
 SELECT id, UPPER(name) AS shout FROM users WHERE name LIKE 'a%%'"""
 c = "--sql SELECT id FROM users"
-# rewritten: from sqlty import NoParams
-# rewritten: a = SQL[tuple[int, str], NoParams]("--sql\nSELECT id, name FROM users")
-# rewritten: b = SQL[tuple[int, str], NoParams]("""--sql
+# rewritten: a = SQL[tuple[int, str]]("--sql\nSELECT id, name FROM users")
+# rewritten: b = SQL[tuple[int, str]]("""--sql
 # rewritten: SELECT id, UPPER(name) AS shout FROM users WHERE name LIKE 'a%%'""")
 # rewritten: c = "--sql SELECT id FROM users"
 ```
@@ -76,9 +75,8 @@ a = "-- sql\nSELECT id, name FROM users"
 b = """-- sql
 SELECT id FROM users"""
 c = "-- sql query notes"
-# rewritten: from sqlty import NoParams
-# rewritten: a = SQL[tuple[int, str], NoParams]("-- sql\nSELECT id, name FROM users")
-# rewritten: b = SQL[tuple[int], NoParams]("""-- sql
+# rewritten: a = SQL[tuple[int, str]]("-- sql\nSELECT id, name FROM users")
+# rewritten: b = SQL[tuple[int]]("""-- sql
 # rewritten: SELECT id FROM users""")
 # rewritten: c = "-- sql query notes"
 ```
@@ -114,9 +112,8 @@ b = """--sql
 SELECT CAST(1 AS SIGNED) AS n"""
 c = f"--sql\nSELECT {a}"
 # fixed: from sqlty import SQL
-# fixed: from sqlty import NoParams
-# fixed: a = SQL[tuple[int], NoParams]("-- sql\nSELECT CAST(1 AS SIGNED) AS n")
-# fixed: b = SQL[tuple[int], NoParams]("""-- sql
+# fixed: a = SQL[tuple[int]]("-- sql\nSELECT CAST(1 AS SIGNED) AS n")
+# fixed: b = SQL[tuple[int]]("""-- sql
 # fixed: SELECT CAST(1 AS SIGNED) AS n""")
 # fixed: c = f"--sql\nSELECT {a}"
 ```
@@ -143,9 +140,8 @@ from sqlty import SQL
 
 a = SQL[tuple[int]]("--sql\nSELECT CAST(1 AS SIGNED) AS n")
 # fixed: from sqlty import SQL
-# fixed: from sqlty import NoParams
 # fixed:
-# fixed: a = SQL[tuple[int], NoParams]("--sql\nSELECT CAST(1 AS SIGNED) AS n")
+# fixed: a = SQL[tuple[int]]("--sql\nSELECT CAST(1 AS SIGNED) AS n")
 ```
 
 ## Formatter layout and trailing comments
@@ -180,11 +176,10 @@ a = SQL[tuple[int]](
 b = """--sql -- users
 SELECT CAST(1 AS SIGNED) AS n"""
 # fixed: from sqlty import SQL
-# fixed: from sqlty import NoParams
 # fixed:
-# fixed: a = SQL[tuple[int], NoParams](
+# fixed: a = SQL[tuple[int]](
 # fixed:     "-- sql\nSELECT CAST(1 AS SIGNED) AS n",
 # fixed: )
-# fixed: b = SQL[tuple[int], NoParams]("""-- sql -- users
+# fixed: b = SQL[tuple[int]]("""-- sql -- users
 # fixed: SELECT CAST(1 AS SIGNED) AS n""")
 ```

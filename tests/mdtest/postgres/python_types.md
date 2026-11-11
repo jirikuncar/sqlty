@@ -172,6 +172,5 @@ q = "--sql\nSELECT total, '[]'::jsonb, '1.2.3.4'::inet FROM orders"
 # rewritten-file: import ipaddress
 # rewritten-file: import typing
 # rewritten-file: from sqlty import SQL
-# rewritten-file: from sqlty import NoParams
-# rewritten-file: q = SQL[tuple[decimal.Decimal, typing.Any, ipaddress.IPv4Address | ipaddress.IPv6Address | ipaddress.IPv4Interface | ipaddress.IPv6Interface], NoParams]("--sql\nSELECT total, '[]'::jsonb, '1.2.3.4'::inet FROM orders")
+# rewritten-file: q = SQL[tuple[decimal.Decimal, typing.Any, ipaddress.IPv4Address | ipaddress.IPv6Address | ipaddress.IPv4Interface | ipaddress.IPv6Interface]]("--sql\nSELECT total, '[]'::jsonb, '1.2.3.4'::inet FROM orders")
 ```
