@@ -168,6 +168,15 @@ formats as `inf`; a bare generator argument spans the call's parentheses; varian
 de-duplicated with a set and module constants are read once per source (16 `Literal`
 parameters: 22 s to 1 s; 4,000 constants read by 400 calls: 17.6 s to 0.04 s).
 
+`10-python-default`: `SQLTY_AST` defaults to `python` again; `rust` and `compare` opt in.
+A Lean model of the path set (`Path`, `assume`, `dedupe`, `forget`;
+not committed) proves that taking a branch and merging paths lose no execution, provided
+a condition changes only when a name it reads is bound. The code broke that proviso: a
+condition repeated around `o.on = ...`, `xs.append(...)`, `:=` or `await` kept its branch,
+so real variants went unchecked. Such statements now reset the conditions reading the
+name, and a test with `:=`, `await` or `yield` is never remembered
+in both engines (`tests/test_condition_resets.py`). A call in a test (`check()` twice) still correlates.
+
 ### Differences kept
 
 - A lone carriage return ends a line for `ast` and ruff but stops `tokenize`, so Python

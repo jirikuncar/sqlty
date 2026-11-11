@@ -54,7 +54,7 @@ from dataclasses import dataclass
 from sqlty._core import module_facts, module_ignores, module_outline
 from sqlty._psycopg import PsycopgScan
 
-AST = os.environ.get("SQLTY_AST", "rust")
+AST = os.environ.get("SQLTY_AST", "python")
 """Who reads the syntax tree: ``rust`` (``sqlty_python``, falling back to ``ast`` for a file
 it does not read), ``python`` (``ast``), or ``compare``, which runs both and raises
 ``AstMismatch`` when they differ."""

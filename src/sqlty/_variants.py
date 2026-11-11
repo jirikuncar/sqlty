@@ -352,6 +352,64 @@ def _bound_names(body: list[ast.stmt]) -> set[str]:
     return {name for name, _ in _stores(_own_nodes(body))} | _defined(body)
 
 
+def _base(node: ast.expr) -> str | None:
+    """The name an attribute, item or call chain starts from."""
+    while True:
+        match node:
+            case ast.Name(id=name):
+                return name
+            case ast.Attribute(value=node) | ast.Subscript(value=node) | ast.Await(value=node):
+                pass
+            case ast.Call(func=node):
+                pass
+            case _:
+                return None
+
+
+def _unstable(test: ast.expr) -> set[str] | None:
+    """The names ``:=`` binds in ``test``, when it binds, awaits or yields; else ``None``.
+
+    Such a test may take either branch each time it runs.
+    """
+    bound: set[str] = set()
+    suspends = False
+    todo: list[ast.AST] = [test]
+    while todo:
+        node = todo.pop()
+        if isinstance(node, ast.Lambda):
+            continue
+        if isinstance(node, ast.NamedExpr):
+            bound.add(node.target.id)
+        suspends = suspends or isinstance(node, (ast.Await, ast.Yield, ast.YieldFrom))
+        todo.extend(ast.iter_child_nodes(node))
+    return bound if bound or suspends else None
+
+
+def _changed_names(body: list[ast.stmt]) -> set[str]:
+    """The names a condition must not have read to hold after ``body``.
+
+    Besides the names bound: those whose object changes, by an attribute or item assigned
+    or deleted, a method called as a statement, or ``:=`` inside a comprehension.
+    """
+    names = _bound_names(body)
+    for node in _own_nodes(body):
+        base: str | None = None
+        match node:
+            case ast.Attribute(value=value, ctx=ast.Store() | ast.Del()):
+                base = _base(value)
+            case ast.Subscript(value=value, ctx=ast.Store() | ast.Del()):
+                base = _base(value)
+            case ast.Expr(value=ast.Call(func=ast.Attribute(value=value))):
+                base = _base(value)
+            case ast.Expr(value=ast.Await(value=ast.Call(func=ast.Attribute(value=value)))):
+                base = _base(value)
+            case ast.ListComp() | ast.SetComp() | ast.DictComp() | ast.GeneratorExp():
+                names |= _unstable(node) or set()
+        if base is not None:
+            names.add(base)
+    return names
+
+
 def _closure(roots: list[ast.expr], values: dict[str, list[ast.expr]]) -> set[str]:
     """The names ``roots`` read, and those the values bound to them read, transitively."""
     seen: set[str] = set()
@@ -473,13 +531,13 @@ class _Walk:
                 return self.assign(frame, stmt, paths, branch)
             case ast.If(test=test, body=body, orelse=orelse):
                 if not self.touches(frame, stmt):
-                    return [path.forget(_bound_names([stmt])) for path in paths]
+                    return [path.forget(_changed_names([stmt])) for path in paths]
                 taken = self.block(frame, body, _assume(paths, test, True), None, returns, True)
                 other = self.block(frame, orelse, _assume(paths, test, False), None, returns, True)
                 return _dedupe([*taken, *other])
             case ast.Match():
                 if not self.touches(frame, stmt):
-                    return [path.forget(_bound_names([stmt])) for path in paths]
+                    return [path.forget(_changed_names([stmt])) for path in paths]
                 found = [
                     p
                     for body, entry in self.cases(frame, stmt, paths)
@@ -497,7 +555,7 @@ class _Walk:
                 return []
             case ast.Return() | ast.Raise() | ast.Break() | ast.Continue():
                 return []
-        return [path.forget(_bound_names([stmt])) for path in paths]
+        return [path.forget(_changed_names([stmt])) for path in paths]
 
     def cases(
         self, frame: _Frame, stmt: ast.Match, paths: list[_Path]
@@ -548,7 +606,7 @@ class _Walk:
         paths: list[_Path],
         branch: bool,
     ) -> list[_Path]:
-        names = _bound_names([stmt])
+        names = _changed_names([stmt])
         tracked = [(t.id, value) for t, value in _assignments(stmt) if t.id in frame.relevant]
         if not tracked:
             return [path.forget(names) for path in paths]
@@ -806,6 +864,8 @@ class _Walk:
 
 def _assume(paths: list[_Path], test: ast.expr, outcome: bool) -> list[_Path]:
     """The paths that can take ``outcome`` of ``test``: one tested before must agree."""
+    if (bound := _unstable(test)) is not None:
+        return [path.forget(bound) for path in paths]
     key = ast.dump(test)
     return [
         path if key in path.conds else path.assume(test, outcome)

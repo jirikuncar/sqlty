@@ -8,8 +8,8 @@ use std::rc::Rc;
 
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{
-    ExceptHandler, Expr, ExprCall, ExprContext, ExprName, Operator, Parameter, Parameters, Pattern,
-    Stmt, StmtFunctionDef, StmtIf, StmtMatch, StmtReturn,
+    ExceptHandler, Expr, ExprAttribute, ExprCall, ExprContext, ExprName, ExprSubscript, Operator,
+    Parameter, Parameters, Pattern, Stmt, StmtFunctionDef, StmtIf, StmtMatch, StmtReturn,
 };
 use ruff_text_size::{Ranged, TextRange};
 
@@ -259,9 +259,50 @@ struct Own<'a> {
     stores: Vec<(&'a str, Option<*const ExprName>)>,
     /// Names bound with `def`, `class` or `import`.
     defined: Vec<&'a str>,
+    /// Names whose object changes: an attribute or item assigned or deleted, a method
+    /// called as a statement, a `:=` inside a comprehension.
+    mutated: Vec<&'a str>,
     returns: Vec<(&'a StmtReturn, bool)>,
     exits: bool,
     guarded: usize,
+}
+
+/// The name an attribute, item or call chain starts from.
+fn base(mut expr: &Expr) -> Option<&str> {
+    loop {
+        expr = match expr {
+            Expr::Name(name) => return Some(name.id.as_str()),
+            Expr::Attribute(node) => &node.value,
+            Expr::Subscript(node) => &node.value,
+            Expr::Call(node) => &node.func,
+            Expr::Await(node) => &node.value,
+            _ => return None,
+        };
+    }
+}
+
+/// What makes a test differ each time it runs: the names `:=` binds in it, and whether
+/// it awaits or yields.
+#[derive(Default)]
+struct Unstable<'a> {
+    bound: Vec<&'a str>,
+    suspends: bool,
+}
+
+impl<'a> Visitor<'a> for Unstable<'a> {
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        match expr {
+            Expr::Lambda(_) => return,
+            Expr::Named(node) => {
+                if let Expr::Name(name) = node.target.as_ref() {
+                    self.bound.push(name.id.as_str());
+                }
+            }
+            Expr::Await(_) | Expr::Yield(_) | Expr::YieldFrom(_) => self.suspends = true,
+            _ => {}
+        }
+        visitor::walk_expr(self, expr);
+    }
 }
 
 impl<'a> Own<'a> {
@@ -296,6 +337,13 @@ impl<'a> Own<'a> {
             .chain(self.defined.iter().copied())
             .map(str::to_string)
             .collect()
+    }
+
+    /// The names a condition must not have read to hold after these statements.
+    fn changed_names(&self) -> HashSet<String> {
+        let mut names = self.bound_names();
+        names.extend(self.mutated.iter().map(|name| (*name).to_string()));
+        names
     }
 }
 
@@ -368,17 +416,37 @@ impl<'a> Visitor<'a> for Own<'a> {
                 self.guard(&node.orelse);
                 self.guard(&node.finalbody);
             }
+            Stmt::Expr(node) => {
+                let call = match node.value.as_ref() {
+                    Expr::Await(awaited) => awaited.value.as_ref(),
+                    value => value,
+                };
+                if let Expr::Call(call) = call {
+                    if let Expr::Attribute(method) = call.func.as_ref() {
+                        self.mutated.extend(base(&method.value));
+                    }
+                }
+                visitor::walk_stmt(self, stmt);
+            }
             _ => visitor::walk_stmt(self, stmt),
         }
     }
 
     fn visit_expr(&mut self, expr: &'a Expr) {
         match expr {
-            Expr::Lambda(_)
-            | Expr::ListComp(_)
-            | Expr::SetComp(_)
-            | Expr::DictComp(_)
-            | Expr::Generator(_) => {}
+            Expr::Lambda(_) => {}
+            Expr::ListComp(_) | Expr::SetComp(_) | Expr::DictComp(_) | Expr::Generator(_) => {
+                let mut inner = Unstable::default();
+                visitor::walk_expr(&mut inner, expr);
+                self.mutated.extend(inner.bound);
+            }
+            Expr::Attribute(ExprAttribute { ctx, value, .. })
+            | Expr::Subscript(ExprSubscript { ctx, value, .. })
+                if *ctx != ExprContext::Load =>
+            {
+                self.mutated.extend(base(value));
+                visitor::walk_expr(self, expr);
+            }
             Expr::Name(name) => {
                 if name.ctx != ExprContext::Load {
                     self.stores
@@ -444,6 +512,18 @@ fn argument_names(parameters: &Parameters, out: &mut HashSet<String>) {
             lambdas.visit_expr(default);
         }
     }
+}
+
+/// A test of a branch.
+#[derive(Clone)]
+struct Condition {
+    /// `ast.dump(test)`.
+    key: Rc<str>,
+    /// The names it reads.
+    reads: Rc<HashSet<String>>,
+    /// The names it binds with `:=`, when it binds, awaits or yields: such a test may take
+    /// either branch each time it runs.
+    rebinds: Option<Rc<HashSet<String>>>,
 }
 
 /// What a walk needs of a module.
@@ -611,7 +691,7 @@ struct Walk<'a, 'r> {
     touches: HashMap<(usize, usize), bool>,
     bound: HashMap<(usize, usize), Rc<HashSet<String>>>,
     modules: HashMap<*const Source, Rc<Module<'a>>>,
-    conditions: HashMap<*const Expr, (Rc<str>, Rc<HashSet<String>>)>,
+    conditions: HashMap<*const Expr, Condition>,
 }
 
 impl<'a, 'r> Walk<'a, 'r> {
@@ -639,11 +719,27 @@ impl<'a, 'r> Walk<'a, 'r> {
         module
     }
 
-    /// The key of a condition (`ast.dump(test)`) and the names it reads.
-    fn condition(&mut self, test: &'a Expr, source: &Source) -> (Rc<str>, Rc<HashSet<String>>) {
+    fn condition(&mut self, test: &'a Expr, source: &Source) -> Condition {
         self.conditions
             .entry(std::ptr::from_ref(test))
-            .or_insert_with(|| (Rc::from(unparse(test, &source.text)), Rc::new(names(test))))
+            .or_insert_with(|| {
+                let mut unstable = Unstable::default();
+                unstable.visit_expr(test);
+                let rebinds = !unstable.bound.is_empty() || unstable.suspends;
+                Condition {
+                    key: Rc::from(unparse(test, &source.text)),
+                    reads: Rc::new(names(test)),
+                    rebinds: rebinds.then(|| {
+                        Rc::new(
+                            unstable
+                                .bound
+                                .iter()
+                                .map(|name| (*name).to_string())
+                                .collect(),
+                        )
+                    }),
+                }
+            })
             .clone()
     }
 
@@ -655,12 +751,19 @@ impl<'a, 'r> Walk<'a, 'r> {
         outcome: bool,
         source: &Source,
     ) -> Vec<Path<'a>> {
-        let (key, read) = self.condition(test, source);
+        let Condition {
+            key,
+            reads,
+            rebinds,
+        } = self.condition(test, source);
+        if let Some(bound) = rebinds {
+            return paths.iter().map(|path| path.forget(&bound)).collect();
+        }
         paths
             .iter()
             .filter_map(|path| match path.conds.get(&key) {
                 Some((known, _)) => (*known == outcome).then(|| path.clone()),
-                None => Some(path.assume(&key, outcome, read.clone())),
+                None => Some(path.assume(&key, outcome, reads.clone())),
             })
             .collect()
     }
@@ -668,7 +771,7 @@ impl<'a, 'r> Walk<'a, 'r> {
     fn bound_names(&mut self, node: Node<'a>) -> Rc<HashSet<String>> {
         self.bound
             .entry(node.id())
-            .or_insert_with(|| Rc::new(Own::of(&[node]).bound_names()))
+            .or_insert_with(|| Rc::new(Own::of(&[node]).changed_names()))
             .clone()
     }
 

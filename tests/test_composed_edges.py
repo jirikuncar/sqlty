@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import os
 import time
 
 import pytest
 
 from sqlty._helpers import HelperIndex
-from sqlty._source import ParsedSource
+from sqlty._source import AST, ParsedSource
 from sqlty.core import check_source
 
 SCHEMA = "CREATE TABLE t (id INTEGER NOT NULL, note TEXT);"
@@ -74,9 +73,7 @@ def test_infinite_float_is_formatted_as_inf():
     assert found(body) == [(2, "unknown-column", "column `inf` does not exist in `t`")]
 
 
-@pytest.mark.skipif(
-    os.environ.get("SQLTY_AST", "rust") != "rust", reason="Python reads the digit as an index"
-)
+@pytest.mark.skipif(AST != "rust", reason="Python reads the digit as an index")
 def test_field_named_with_another_digit_is_not_read_as_a_keyword():
     body = 'def f():\n    run("SELECT {١} FROM t".format("id", "nope"), int)\n'
     assert [rule for _, rule, _ in found(body)] == ["unchecked-query"]
