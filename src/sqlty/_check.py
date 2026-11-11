@@ -19,6 +19,7 @@ from sqlty._core import check_source as _check_source
 from sqlty._core import composite_fields as _composite_fields
 from sqlty._core import parse_error as _parse_error
 from sqlty._core import query_diagnostics as _query_diagnostics
+from sqlty._core import row_diagnostics as _row_diagnostics
 from sqlty._core import select_star_finding as _select_star_finding
 from sqlty._core import sqruff_findings as _sqruff_findings
 from sqlty._core import wrapped_queries as _wrapped_queries
@@ -26,7 +27,7 @@ from sqlty._drivers import find_driver_calls, find_template_calls
 from sqlty._helpers import MARKER, HelperIndex, find_helper_calls
 from sqlty._lint import NAME_RULES, Diagnostic
 from sqlty._params import ParamArg, _dotted, annotation_type, mismatch
-from sqlty._source import Ignore, ParsedSource, _wrapper_name, is_any
+from sqlty._source import AST, AstMismatch, Ignore, ParsedSource, _wrapper_name, is_any
 from sqlty._variants import Declared
 
 if TYPE_CHECKING:
@@ -598,6 +599,8 @@ def diagnostics(
         if not name.startswith("tuple[")
     ]
     declared = _declared_params(parsed, import_style)
+    if AST == "compare" and queries:
+        _compare_rows(parsed, queries, dialect, schema_sql, rules, import_style, module, coerce)
     if not (queries or found or driver_calls or declared):
         return diagnostics
     ctx = _Check(
@@ -625,6 +628,62 @@ def diagnostics(
         diagnostics[:] = _merge_variants(diagnostics, branched)
     diagnostics.sort(key=lambda diagnostic: diagnostic["line"])
     return diagnostics
+
+
+def _compare_rows(
+    parsed: ParsedSource,
+    queries: list[_RowQuery],
+    dialect: str,
+    schema_sql: str | Schema | None,
+    rules: dict[str, str] | None,
+    import_style: str | None,
+    module: str | None,
+    coerce: frozenset[str],
+) -> None:
+    """``SQLTY_AST=compare``: the row checks of ``sqlty_python::rows`` must find what these do."""
+    import sys
+
+    from sqlty._lint import RuleConfig
+
+    rust = _row_diagnostics(
+        parsed.text,
+        version=sys.version_info[:2],
+        dialect=dialect,
+        schema_sql=schema_sql,
+        rules=rules,
+        import_style=import_style,
+        module=module,
+        coerce=sorted(coerce),
+    )
+    if rust is None:
+        return
+    found: list[Diagnostic] = []
+    ctx = _Check(
+        parsed,
+        found,
+        dialect=dialect,
+        schema_sql=schema_sql,
+        rule_config=RuleConfig(overrides=rules),
+        found=[],
+        driver_calls=[],
+        queries=queries,
+        declared=[],
+        helpers=None,
+        module=module,
+        coerce=coerce,
+    )
+    for check_pass in (_check_typeddict_inheritance, _check_structural, _check_aliases):
+        check_pass(ctx)
+    found.sort(key=lambda diagnostic: diagnostic["line"])
+    redundant = {id(diag): key for key, diag in ctx.row_usage.redundant}
+    python = (
+        found,
+        [redundant.get(id(diag)) for diag in found],
+        sorted(ctx.row_usage.needed, key=repr),
+    )
+    rust = (rust[0], rust[1], sorted(rust[2], key=repr))
+    if rust != python:
+        raise AstMismatch("row diagnostics", rust, python, parsed.text)
 
 
 _VARIANT_LINE = 1 << 30
@@ -1164,10 +1223,13 @@ def apply_suppressions(
 def _typeddict_lineage(names: list[str], type_defs: dict[str, TypeInfo]) -> list[TypeInfo]:
     """``names`` and their same-source TypedDict bases, bases first, each once."""
     seen: dict[str, TypeInfo] = {}
+    active: set[str] = set()
 
     def visit(name: str) -> None:
-        if name in seen or (info := type_defs.get(name)) is None:
+        if name in seen or name in active or (info := type_defs.get(name)) is None:
             return
+        # A class that redefines its own base (`class Row(Row)`) names itself.
+        active.add(name)
         for base in info.bases:
             visit(base)
         seen[name] = info
@@ -1275,11 +1337,12 @@ def _structural_diagnostics(
     unknown = [col for col, field in owners if field is None and not admits_extra]
     names = {col.name for col in columns}
     missing = [
-        info.column_names(key)[0]
+        filled[0]
         for key, _ in fields
         if key in info.required
         and key not in info.opaque
-        and not names.intersection(info.column_names(key))
+        and (filled := info.column_names(key))
+        and not names.intersection(filled)
     ]
     noun = {"TypedDict": "key", "Protocol": "attribute"}.get(info.kind, "field")
     return (
