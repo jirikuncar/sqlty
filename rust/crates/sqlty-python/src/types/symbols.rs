@@ -8,9 +8,9 @@ use ruff_python_ast::{ExceptHandler, Expr, ExprContext, ModModule, Operator, Stm
 use ruff_python_parser::Parsed;
 
 use super::extract::classify;
-use super::info::TypeInfo;
+use super::info::{Dict, TypeInfo};
 use super::pydantic::Known;
-use super::resolve::{is_name, Found, Names, Resolver};
+use super::resolve::{is_name, Found, Names, Resolver, TYPING_MODULES};
 use super::stdlib::Version;
 use super::ty::{Class, NewType, Ty};
 use crate::module::Imports;
@@ -58,6 +58,89 @@ impl Source {
         collect_classes(self.body(), 1, &mut found);
         found.sort_by_key(|(depth, _)| *depth);
         found.into_iter().map(|(_, class)| class).collect()
+    }
+
+    /// `ParsedSource.line_span`: the byte offsets of the 1-based `line` without its
+    /// indentation and line break.
+    pub fn line_span(&self, line: usize) -> (usize, usize) {
+        let len = self.text.len();
+        let lines =
+            self.lines.count() + usize::from(self.lines.start(self.lines.count(), len) != len);
+        if line == 0 || line >= lines {
+            return (len, len);
+        }
+        let start = self.lines.start(line, len);
+        let text = &self.text.as_bytes()[start..self.lines.start(line + 1, len)];
+        let content = text.len()
+            - text
+                .iter()
+                .rev()
+                .take_while(|b| matches!(b, b'\r' | b'\n'))
+                .count();
+        let indent = text[..content]
+            .iter()
+            .take_while(|b| matches!(b, b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c))
+            .count();
+        (start + indent, start + content)
+    }
+
+    /// `ParsedSource.type_aliases`: the module-level aliases of row types: `type Row = ...`,
+    /// `Row: TypeAlias = ...`, and `Row = tuple[...]` or `Row = OtherRow`.
+    pub fn type_aliases(&self) -> HashMap<&str, &Expr> {
+        let mut aliases = HashMap::new();
+        for stmt in self.body() {
+            match stmt {
+                Stmt::TypeAlias(node) => {
+                    if let (Expr::Name(name), None) = (node.name.as_ref(), &node.type_params) {
+                        aliases.insert(name.id.as_str(), node.value.as_ref());
+                    }
+                }
+                Stmt::AnnAssign(node) => {
+                    if let (Expr::Name(name), Some(value)) = (node.target.as_ref(), &node.value) {
+                        if self.typing_name(&node.annotation) == Some("TypeAlias") {
+                            aliases.insert(name.id.as_str(), value.as_ref());
+                        }
+                    }
+                }
+                Stmt::Assign(node) => {
+                    let [Expr::Name(name)] = node.targets.as_slice() else {
+                        continue;
+                    };
+                    let row = match node.value.as_ref() {
+                        Expr::Name(_) | Expr::Attribute(_) => true,
+                        Expr::Subscript(sub) => matches!(
+                            crate::unparse::unparse(&sub.value, &self.text).as_str(),
+                            "tuple" | "typing.Tuple" | "Tuple"
+                        ),
+                        _ => false,
+                    };
+                    if row {
+                        aliases.insert(name.id.as_str(), node.value.as_ref());
+                    }
+                }
+                _ => {}
+            }
+        }
+        aliases
+    }
+
+    /// `_typing_name`: the `typing` member `expr` names, if any.
+    pub fn typing_name<'e>(&'e self, expr: &'e Expr) -> Option<&'e str> {
+        match expr {
+            Expr::Name(name) => self.aliases.get(name.id.as_str()).map(String::as_str),
+            Expr::Attribute(attr) => match attr.value.as_ref() {
+                Expr::Name(base)
+                    if self
+                        .aliases
+                        .get(base.id.as_str())
+                        .is_some_and(|module| TYPING_MODULES.contains(&module.as_str())) =>
+                {
+                    Some(attr.attr.as_str())
+                }
+                _ => None,
+            },
+            _ => None,
+        }
     }
 
     pub fn resolver(&self, known: Known) -> Resolver<'_> {
@@ -117,8 +200,16 @@ fn collect_classes<'a>(body: &'a [Stmt], depth: usize, out: &mut Vec<(usize, &'a
 pub trait Index: Send + Sync {
     /// The type `NAME` or `module.NAME` that `source` imports from a checked module.
     fn type_of(&self, source: &Source, dotted: &str) -> Option<Ty>;
-    /// The row type `NAME` that `source` imports from a checked module.
-    fn row_type(&self, source: &Source, dotted: &str) -> Option<Arc<TypeInfo>>;
+    /// The row type `NAME` or `module.NAME` that `source` imports from a checked module.
+    fn row_type(&self, source: &Source, dotted: &str) -> Option<RowType>;
+}
+
+/// A row type of another module, with the row types of that module, which its nested types
+/// refer to.
+#[derive(Clone)]
+pub struct RowType {
+    pub info: Arc<TypeInfo>,
+    pub defs: Arc<Dict<Arc<TypeInfo>>>,
 }
 
 /// Whether `expr` is made of what a type is spelled with: names, subscripts, `|`, constants.

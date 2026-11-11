@@ -94,6 +94,7 @@ fn inline_comment_edit(source: &str, span: &Range<usize>) -> Edit {
 pub(crate) const QUOTES: [&str; 4] = ["\"\"\"", "'''", "\"", "'"];
 
 /// A diagnostic result from checking source code.
+#[derive(Debug)]
 pub struct Diagnostic {
     /// The rule that fired.
     pub rule: Rule,

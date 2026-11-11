@@ -938,7 +938,7 @@ pub fn extract_type_definitions(
         for name in classes.iter().flat_map(ClassNode::base_names) {
             if !local.contains(name) && !imported_bases.contains_key(name) {
                 if let Some(found) = index.row_type(source, name) {
-                    imported_bases.insert(name, found);
+                    imported_bases.insert(name, found.info);
                 }
             }
         }

@@ -13,6 +13,7 @@
 
 pub mod compat;
 pub mod extract;
+pub mod generic;
 pub mod info;
 pub mod pydantic;
 pub mod resolve;

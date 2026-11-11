@@ -68,6 +68,22 @@ pub fn unparse(expr: &Expr, source: &str) -> String {
     let mut unparser = Unparser {
         out: String::new(),
         source,
+        names: None,
+    };
+    unparser.expr(expr, Prec::Test);
+    unparser.out
+}
+
+/// The expressions names are replaced with, each an expression of its own source.
+pub type Substitutions<'s> = std::collections::HashMap<&'s str, (&'s Expr, &'s str)>;
+
+/// [`unparse`] of `expr` with each name of `names` replaced by its expression, as an
+/// `ast.NodeTransformer` that swaps `Name` nodes would have it.
+pub fn unparse_with(expr: &Expr, source: &str, names: &Substitutions<'_>) -> String {
+    let mut unparser = Unparser {
+        out: String::new(),
+        source,
+        names: Some(names),
     };
     unparser.expr(expr, Prec::Test);
     unparser.out
@@ -76,6 +92,7 @@ pub fn unparse(expr: &Expr, source: &str) -> String {
 struct Unparser<'s> {
     out: String,
     source: &'s str,
+    names: Option<&'s Substitutions<'s>>,
 }
 
 /// A value of an f- or t-string as `ast` holds it.
@@ -91,6 +108,7 @@ impl Unparser<'_> {
         let mut unparser = Unparser {
             out: String::new(),
             source: self.source,
+            names: self.names,
         };
         unparser.expr(expr, prec);
         unparser.out
@@ -405,7 +423,18 @@ impl Unparser<'_> {
                 self.out.push('*');
                 self.expr(&e.value, Prec::Bor);
             }
-            Expr::Name(e) => self.out.push_str(e.id.as_str()),
+            Expr::Name(e) => match self.names.and_then(|names| names.get(e.id.as_str())) {
+                Some((replacement, source)) => {
+                    let mut unparser = Unparser {
+                        out: String::new(),
+                        source,
+                        names: None,
+                    };
+                    unparser.expr(replacement, prec);
+                    self.out.push_str(&unparser.out);
+                }
+                None => self.out.push_str(e.id.as_str()),
+            },
             Expr::List(e) => {
                 self.out.push('[');
                 self.list(&e.elts);

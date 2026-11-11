@@ -49,6 +49,8 @@ pub mod params;
 pub mod parse;
 pub mod queries;
 pub mod rewriter;
+#[allow(missing_docs)]
+pub mod rows;
 pub mod rules;
 pub(crate) mod scan;
 pub mod scopes;

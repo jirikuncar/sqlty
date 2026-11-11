@@ -1,7 +1,5 @@
 //! Compatibility of a resolved row type with SQL column types.
 
-use std::collections::BTreeSet;
-
 use ruff_python_ast::{Expr, Number};
 
 use super::info::TypeInfo;
@@ -38,7 +36,11 @@ pub fn check_type_compatibility(
     accepts(field, column_python_type, promotions)
 }
 
-fn accepts(field: Option<&Ty>, column_python_type: Option<&str>, promotions: Promotions) -> bool {
+pub fn accepts(
+    field: Option<&Ty>,
+    column_python_type: Option<&str>,
+    promotions: Promotions,
+) -> bool {
     let Some(column) = column_python_type.filter(|column| !column.is_empty()) else {
         return true;
     };
@@ -123,26 +125,32 @@ pub fn set_member(value: &Lit) -> Lit {
 }
 
 /// `declared_literal_values`: the values a resolved annotation admits for a column that
-/// takes `inferred`, as members of a `set`.
+/// takes `inferred`, as a `set` holds them: equal values once (`True` is `1`).
 ///
 /// `None` when the annotation also takes values by class (`str` for string values, `int`
 /// for integers, `Any`), or when it can't be told (an enum or other user class): only an
 /// annotation made of `Literal` members and `None` is a set.
-pub fn declared_literal_values(tp: &Ty, inferred: &[Lit]) -> Option<BTreeSet<Lit>> {
+pub fn declared_literal_values(tp: &Ty, inferred: &[Lit]) -> Option<Vec<Lit>> {
     let b = builtins();
     let covering = if matches!(inferred.first(), Some(Lit::Str(_))) {
         vec![&b.str]
     } else {
         vec![&b.int, &b.float, &b.complex]
     };
-    let mut admitted = BTreeSet::new();
+    let mut admitted: Vec<Lit> = Vec::new();
     for member in tp.members() {
         let mut member = member;
         while let Ty::NewType(new) = member {
             member = &new.supertype;
         }
         match member {
-            Ty::Literal(values) => admitted.extend(values.iter().map(set_member)),
+            Ty::Literal(values) => {
+                for value in values {
+                    if !admitted.iter().any(|v| set_member(v) == set_member(value)) {
+                        admitted.push(value.clone());
+                    }
+                }
+            }
             Ty::Class(_) if member.is_none() => {}
             Ty::Class(class)
                 if member.is_any()

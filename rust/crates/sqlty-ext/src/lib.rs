@@ -882,6 +882,72 @@ struct DiagnosticOut {
 ///
 /// Raises:
 ///     ValueError: unsupported import_style, or `rules` names an unknown rule or severity
+/// `(module, row type, field)` of a `redundant-optional` question.
+type FieldKey = (Option<String>, String, String);
+
+/// The row checks of `sqlty_python::rows` on the `SQL[Row](...)` calls of `source`:
+/// `(diagnostics, redundant, needed)`, where `redundant[i]` is the field diagnostic `i`
+/// calls redundant and `needed` are the fields some query needs `| None` for. None where
+/// Rust does not read the source.
+#[pyfunction]
+#[pyo3(signature = (source, *, version, dialect = DialectArg::POSTGRES, schema_sql = None, rules = None, import_style = None, module = None, coerce = vec![]))]
+#[expect(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    reason = "the keyword-only Python signature is the API"
+)]
+fn row_diagnostics(
+    py: Python<'_>,
+    source: &str,
+    version: (u8, u8),
+    dialect: DialectArg,
+    schema_sql: Option<SchemaArg>,
+    rules: Option<HashMap<String, String>>,
+    import_style: Option<&str>,
+    module: Option<&str>,
+    coerce: Vec<String>,
+) -> Result<Option<(Vec<DiagnosticOut>, Vec<Option<FieldKey>>, Vec<FieldKey>)>, Error> {
+    use sqlty_python::rows;
+    use sqlty_python::types::symbols::Source;
+    let dialect = dialect.0;
+    detach(py, || {
+        let schema = schema_for(source, schema_sql, dialect);
+        let options = Options::new(dialect, schema.as_deref(), import_style, false)?;
+        let rules = RuleConfig::from_overrides(rules).map_err(ConfigError::from)?;
+        let Some(parsed) = Source::new(source, version) else {
+            return Ok(None);
+        };
+        let settings = rows::Settings {
+            options: &options,
+            rules: &rules,
+            index: None,
+            module,
+            coerce: &coerce.into_iter().collect(),
+        };
+        let found = rows::check(&Arc::new(parsed), &settings);
+        let mut needed: Vec<FieldKey> = found.needed.into_iter().collect();
+        needed.sort();
+        let (diagnostics, redundant) = found
+            .diagnostics
+            .into_iter()
+            .map(|reported| {
+                let diag = reported.diagnostic;
+                let out = DiagnosticOut {
+                    rule: diag.rule.name(),
+                    message: diag.message,
+                    severity: diag.severity.as_str(),
+                    line: diag.line,
+                    start: diag.span.start,
+                    end: diag.span.end,
+                    fix: Vec::new(),
+                };
+                (out, reported.redundant)
+            })
+            .unzip();
+        Ok(Some((diagnostics, redundant, needed)))
+    })
+}
+
 #[pyfunction]
 #[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, schema_sql = None, rules = None, import_style = None, untyped = false, any_calls = vec![]))]
 #[expect(
@@ -1260,8 +1326,11 @@ fn type_relations(
             }
             for inferred in [Lit::Str("a".to_string()), Lit::Int("1".to_string())] {
                 out.push(literal(compat::field_type(row, name).and_then(|tp| {
-                    compat::declared_literal_values(tp, &[inferred])
-                        .map(|v| v.into_iter().collect())
+                    compat::declared_literal_values(tp, &[inferred]).map(|values| {
+                        let values: std::collections::BTreeSet<Lit> =
+                            values.iter().map(compat::set_member).collect();
+                        values.into_iter().collect()
+                    })
                 })));
             }
             out.push(compat::parse_tuple_annotation(annotation).map_or_else(
@@ -1680,6 +1749,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(unparse_expression, m)?)?;
     m.add_function(wrap_pyfunction!(type_definitions, m)?)?;
     m.add_function(wrap_pyfunction!(type_relations, m)?)?;
+    m.add_function(wrap_pyfunction!(row_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(helper_sites, m)?)?;
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;

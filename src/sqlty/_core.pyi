@@ -162,6 +162,24 @@ def type_definitions(
 def type_relations(
     source: str, version: tuple[int, int], columns: list[str | None]
 ) -> list[str] | None: ...
+def row_diagnostics(
+    source: str,
+    *,
+    version: tuple[int, int],
+    dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
+    rules: dict[str, str] | None = None,
+    import_style: str | None = None,
+    module: str | None = None,
+    coerce: list[str] = ...,
+) -> (
+    tuple[
+        list[Diagnostic],
+        list[tuple[str | None, str, str] | None],
+        list[tuple[str | None, str, str]],
+    ]
+    | None
+): ...
 def module_outline(source: str) -> tuple[ast.Module, list[ast.ClassDef]] | None: ...
 def helper_sites(
     source: str, names: list[str]

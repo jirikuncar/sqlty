@@ -387,6 +387,11 @@ impl Lines {
         Self(starts)
     }
 
+    /// The number of line starts.
+    pub fn count(&self) -> usize {
+        self.0.len()
+    }
+
     /// The line `offset` is on.
     pub fn line(&self, offset: usize) -> usize {
         self.0.partition_point(|&start| start <= offset)
