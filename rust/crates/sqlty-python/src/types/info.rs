@@ -8,8 +8,14 @@ use ruff_python_ast::Expr;
 use super::ty::Ty;
 
 /// A Python `dict` with `str` keys: insertion order, a key set again keeps its place.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Dict<V>(Vec<(String, V)>);
+
+impl<V> Default for Dict<V> {
+    fn default() -> Self {
+        Dict(Vec::new())
+    }
+}
 
 impl<V> Dict<V> {
     pub fn new() -> Self {

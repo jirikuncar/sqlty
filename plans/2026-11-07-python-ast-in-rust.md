@@ -97,6 +97,30 @@ Slowest first, each measured on the 10,000-file synthetic project.
    identical. Building the outline costs about 18 µs a file, against 26 µs for `ast.parse`.
 5. Compositions and query variants.
 
+## The check in Rust
+
+Milestones 1 to 4 fed Rust facts to the Python passes. The branches `rust-port/NN-*` build
+the passes themselves in `sqlty-python` (no PyO3, no I/O, so it also builds for wasm), as a
+second pipeline next to the Python one, which stays the oracle until the last branch:
+`SQLTY_AST=compare` checks every module both ways and raises on any difference, and
+Hypothesis tests generate modules for both. Rust returns `None` for a module it does not
+read yet, which then stays with Python. Merge in order.
+
+| Branch | Rust | Compared on | Measured (Rust, Python) |
+| --- | --- | --- | --- |
+| `02-types` | `unparse`, `types/*`: the type model and class extraction | 20,000 generated modules a property | 24 us, 213 us a module |
+| `03-row-checks` | `rows`: row shapes, nullability, literals, JSON, generics | 751 test modules, 20,000 a property | 3.1 ms, 14.8 ms (40 queries) |
+| `04-calls` | `calls`, `check`: local helpers, driver and template calls, declared params | 1,335 test modules, 20,000 a property | 3.8 ms, 11.1 ms (60 queries) |
+| `05-index` | `index`: helpers, types and row types of the other modules | see below | see below |
+
+`05-index`: `index::Builder` holds the sources by module name, `add` and `register` as
+`HelperIndex` does, and `build` gives the shared index (`symbols::Index` for types and row
+types, `get` for helpers). `register` reads module files through a closure of the caller.
+`HelperIndex.rust()` builds the same index from the steps that filled it, for the
+comparison. Found by the fuzz and fixed in both: a helper re-exported under another name
+(`from .db import run as go`) was missed when no other pass had read the calling function,
+so `HelperIndex.names` now includes such names.
+
 ## Where ruff and `ast` differ
 
 `sqlty_python::parse` returns `None` wherever the two parsers can disagree: Python's `ast`

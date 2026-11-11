@@ -16,6 +16,7 @@ use sqlty_sql::analyzer::{self, Nullability};
 
 use crate::calls::{helper_calls, is_marked, Call};
 use crate::checker::{self, Diagnostic};
+use crate::index::HelperIndex;
 use crate::rows::{
     alias_target, bind, row_queries, row_shape, value_diagnostics, Check, Found, RowQuery,
     RowShape, Settings,
@@ -45,6 +46,8 @@ pub struct Run<'a> {
     pub has_schema: bool,
     /// The SQL linter, run when `sqruff` is on.
     pub lint: &'a dyn Fn(&str) -> Vec<Lint>,
+    /// The modules of the checked paths, the same as `settings.index`.
+    pub helpers: Option<&'a HelperIndex>,
 }
 
 type Span = (usize, usize);
@@ -1012,7 +1015,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Option<Found> {
         checker::add_fix_imports(text, options, &mut base);
     }
 
-    let mut found = helper_calls(source)?;
+    let mut found = helper_calls(source, run.helpers, run.settings.module)?;
     let mut driver_calls: Vec<Call<'_>> = Vec::new();
     if drivers::may_hold(text) {
         for call in drivers::find(text, source.body(), &source.imports) {

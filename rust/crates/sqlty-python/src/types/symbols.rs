@@ -1,7 +1,7 @@
 //! The names the annotations of a module go through, read from source.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
 
 use ruff_python_ast::visitor::{walk_expr, walk_stmt, Visitor};
 use ruff_python_ast::{ExceptHandler, Expr, ExprContext, ModModule, Operator, Stmt, StmtClassDef};
@@ -30,6 +30,8 @@ pub struct Source {
     /// `ParsedSource.typing_aliases` as pairs, a later pair wins.
     pub typing: Vec<(String, String)>,
     pub version: Version,
+    /// `ParsedSource.module`: the dotted name, `pkg.__init__` for a package.
+    pub module: Option<String>,
 }
 
 impl Source {
@@ -47,9 +49,17 @@ impl Source {
             imports: imports.imported,
             entries: imports.entries,
             typing: imports.typing,
+            module: None,
             parsed,
             version,
         })
+    }
+
+    /// The source as the module `module`.
+    #[must_use]
+    pub fn named(mut self, module: Option<&str>) -> Source {
+        self.module = module.map(str::to_string);
+        self
     }
 
     pub fn body(&self) -> &[Stmt] {
@@ -397,7 +407,8 @@ fn newtype_assignment<'a>(
 /// it is unknown.
 pub struct ModuleTypes {
     pub source: Arc<Source>,
-    index: Option<Arc<dyn Index>>,
+    /// Weak: the index keeps the types of its modules.
+    index: Option<Weak<dyn Index>>,
     module: String,
     local: HashMap<String, Local>,
     built: Mutex<HashMap<String, Option<Ty>>>,
@@ -405,11 +416,11 @@ pub struct ModuleTypes {
 }
 
 impl ModuleTypes {
-    pub fn new(source: Arc<Source>, index: Option<Arc<dyn Index>>, module: Option<&str>) -> Self {
+    pub fn new(source: Arc<Source>, index: Option<&Arc<dyn Index>>, module: Option<&str>) -> Self {
         let local = module_types(source.body(), &source.aliases);
         ModuleTypes {
             source,
-            index,
+            index: index.map(Arc::downgrade),
             module: module.unwrap_or("__main__").to_string(),
             local,
             built: Mutex::default(),
@@ -485,7 +496,7 @@ impl Names for ModuleTypes {
                 Some(Found::Alias(value, text))
             }
             None => {
-                let index = self.index.as_ref()?;
+                let index = self.index.as_ref()?.upgrade()?;
                 let lock = || self.imported.lock().unwrap_or_else(PoisonError::into_inner);
                 if let Some(found) = lock().get(name) {
                     return found.clone().map(Found::Type);

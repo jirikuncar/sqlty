@@ -6,6 +6,8 @@ use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use regex::Regex;
+
+use crate::index::{imports_of, module_of, HelperIndex};
 use ruff_python_ast::visitor::{walk_expr, Visitor};
 use ruff_python_ast::{Expr, ExprCall, Parameters, Stmt, StmtFunctionDef};
 use ruff_text_size::Ranged;
@@ -253,7 +255,7 @@ fn method_kind(function: &StmtFunctionDef) -> Kind {
 }
 
 /// `_helper`: the helper `function` defines, its query parameter being `query`.
-fn helper(
+pub(crate) fn helper(
     name: String,
     function: &StmtFunctionDef,
     kind: Kind,
@@ -312,20 +314,14 @@ fn helper(
     }
 }
 
-/// `index_functions`: the functions and methods of `source` with a marked query
-/// parameter, by name (`Class.method`).
-pub fn index_functions(source: &Source) -> Dict<Helper> {
-    let (annotated, marker) = marker_names(source);
-    let mut found: Dict<((bool, bool), Helper)> = Dict::new();
-    if annotated.is_empty() || marker.is_empty() {
-        return Dict::new();
-    }
+/// `_definitions`: the module-level functions and the methods of `source`, methods as
+/// `Class.name`.
+pub(crate) fn definitions(source: &Source) -> Vec<(String, &StmtFunctionDef, Kind)> {
     let functions = source.body().iter().filter_map(|stmt| match stmt {
         Stmt::FunctionDef(function) => Some((function.name.to_string(), function, Kind::Function)),
         _ => None,
     });
-    let classes = source.classes();
-    let methods = classes.iter().flat_map(|class| {
+    let methods = source.classes().into_iter().flat_map(|class| {
         class.body.iter().filter_map(move |stmt| match stmt {
             Stmt::FunctionDef(function) => Some((
                 format!("{}.{}", class.name, function.name),
@@ -335,7 +331,32 @@ pub fn index_functions(source: &Source) -> Dict<Helper> {
             _ => None,
         })
     });
-    for (name, function, kind) in functions.chain(methods) {
+    functions.chain(methods).collect()
+}
+
+/// `_rank`: the sort key among definitions of one name: complete first, then not `@overload`.
+pub(crate) fn rank(function: &StmtFunctionDef, complete: bool) -> (bool, bool) {
+    let overload = decorators(function)
+        .any(|decorator| decorator.is_some_and(|name| name.rsplit('.').next() == Some("overload")));
+    (!complete, overload)
+}
+
+/// `_parameters`: the names of the parameters a call can name.
+pub(crate) fn parameter_names(function: &StmtFunctionDef) -> HashSet<String> {
+    named_parameters(&function.parameters)
+        .map(|parameter| parameter.name.to_string())
+        .collect()
+}
+
+/// `index_functions`: the functions and methods of `source` with a marked query
+/// parameter, by name (`Class.method`).
+pub fn index_functions(source: &Source) -> Dict<Helper> {
+    let (annotated, marker) = marker_names(source);
+    let mut found: Dict<((bool, bool), Helper)> = Dict::new();
+    if annotated.is_empty() || marker.is_empty() {
+        return Dict::new();
+    }
+    for (name, function, kind) in definitions(source) {
         let Some(query) = named_parameters(&function.parameters)
             .find(|parameter| {
                 annotation_is_marked(parameter.annotation.as_deref(), &annotated, &marker)
@@ -345,10 +366,7 @@ pub fn index_functions(source: &Source) -> Dict<Helper> {
             continue;
         };
         let row = row_param(function);
-        let overload = decorators(function).any(|decorator| {
-            decorator.is_some_and(|name| name.rsplit('.').next() == Some("overload"))
-        });
-        let rank = (row.is_none(), overload);
+        let rank = rank(function, row.is_some());
         if found.get(&name).is_none_or(|(known, _)| rank < *known) {
             found.insert(
                 &name,
@@ -433,23 +451,49 @@ fn call_params(
     None
 }
 
-/// The calls of the helpers `source` defines, by line; `None` where a query is one Rust
-/// does not read yet: a psycopg composition, or a name that may stand for a query.
-pub fn helper_calls(source: &Source) -> Option<Vec<Call<'_>>> {
+/// `find_helper_calls`: the calls of the helpers `source` defines or imports from the
+/// modules of `helpers`, by line; `None` where a query is one Rust does not read yet: a
+/// psycopg composition, or a name that may stand for a query.
+pub fn helper_calls<'a>(
+    source: &'a Source,
+    helpers: Option<&HelperIndex>,
+    module: Option<&str>,
+) -> Option<Vec<Call<'a>>> {
     let text = source.text.as_str();
-    if !(text.contains("Annotated") && text.contains("sqlty") && text.contains("SQL")) {
+    let local = text.contains("Annotated") && text.contains("sqlty") && text.contains("SQL");
+    let imported =
+        helpers.is_some_and(|helpers| !helpers.modules.is_empty() && helpers.mentions(text));
+    if !(local || imported) {
         return Some(Vec::new());
     }
-    let own = index_functions(source);
-    if own.is_empty() {
+    let own = if local {
+        index_functions(source)
+    } else {
+        Dict::new()
+    };
+    if own.is_empty() && !imported {
         return Some(Vec::new());
     }
-    let mut names: Vec<String> = own
+    let (functions, modules) = if imported {
+        imports_of(&source.entries, module.or(source.module.as_deref()))
+    } else {
+        Default::default()
+    };
+    let mut names: HashSet<String> = own
         .iter()
         .map(|(name, _)| name.rsplit('.').next().unwrap_or(name).to_string())
         .collect();
+    if let Some(helpers) = helpers.filter(|_| imported) {
+        names.extend(helpers.names().iter().cloned());
+        let renamed: Vec<String> = functions
+            .iter()
+            .filter(|(_, (_, original))| names.contains(original))
+            .map(|(local, _)| local.clone())
+            .collect();
+        names.extend(renamed);
+    }
+    let mut names: Vec<String> = names.into_iter().collect();
     names.sort();
-    names.dedup();
     let pattern = mentions(&names)?;
     let scan = Scan::new(source.body(), |call: &ExprCall| match call.func.as_ref() {
         Expr::Name(_) => true,
@@ -462,6 +506,14 @@ pub fn helper_calls(source: &Source) -> Option<Vec<Call<'_>>> {
     };
     let lines = Lines::new(text);
     let (annotated, marker) = marker_names(source);
+    let lookup = |module: &str, name: &str| helpers.and_then(|helpers| helpers.get(module, name));
+    let method_of = |class: &str, name: &str| match class.rsplit_once('.') {
+        Some((prefix, class)) => lookup(&module_of(prefix, &modules), &format!("{class}.{name}")),
+        None => own.get(&format!("{class}.{name}")).or_else(|| {
+            let (module, original) = functions.get(class)?;
+            lookup(module, &format!("{original}.{name}"))
+        }),
+    };
     let mut wanted: Vec<Option<bool>> = vec![None; scan.scopes.len()];
     let mut calls = Vec::new();
     for (call, stack) in &scan.calls {
@@ -475,19 +527,20 @@ pub fn helper_calls(source: &Source) -> Option<Vec<Call<'_>>> {
             }
         }
         let helper = match call.func.as_ref() {
-            Expr::Name(name) => own.get(name.id.as_str()),
+            Expr::Name(name) => own.get(name.id.as_str()).or_else(|| {
+                let (module, original) = functions.get(name.id.as_str())?;
+                lookup(module, original)
+            }),
             Expr::Attribute(attr) => {
                 let prefix = dotted(&attr.value).unwrap_or_default();
-                let method = |class: &str| {
-                    (!class.contains('.'))
-                        .then(|| own.get(&format!("{class}.{}", attr.attr)))
-                        .flatten()
-                };
-                match method(&prefix) {
-                    Some(found) => (found.kind != Kind::Instance).then_some(found),
-                    None => {
-                        receiver_class(&attr.value, stack, &ctx).and_then(|class| method(&class))
-                    }
+                let name = attr.attr.as_str();
+                if let Some(found) = lookup(&module_of(&prefix, &modules), name) {
+                    Some(found)
+                } else if let Some(found) = method_of(&prefix, name) {
+                    (found.kind != Kind::Instance).then_some(found)
+                } else {
+                    receiver_class(&attr.value, stack, &ctx)
+                        .and_then(|class| method_of(&class, name))
                 }
             }
             _ => None,
@@ -510,6 +563,13 @@ pub fn helper_calls(source: &Source) -> Option<Vec<Call<'_>>> {
                 return None;
             }
         }
+        // `HelperCall._on`: an unmarked query is read against the database of its helper.
+        let literal = match (literal, &helper.database) {
+            (Some(query), Some(database)) if !is_marked(&query) => {
+                Some(format!("-- sqlty: db={database}\n{query}"))
+            }
+            (literal, _) => literal,
+        };
         calls.push(Call {
             line: lines.line(call.start().to_usize()),
             dynamic: literal.is_none(),

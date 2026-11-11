@@ -46,6 +46,8 @@ pub mod drivers;
 pub mod edit;
 pub mod fixer;
 pub mod helpers;
+#[allow(missing_docs)]
+pub mod index;
 pub mod locate;
 pub mod module;
 pub mod options;

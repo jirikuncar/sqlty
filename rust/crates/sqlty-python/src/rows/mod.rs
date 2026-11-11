@@ -171,7 +171,7 @@ impl Check<'_> {
         };
         let names = ModuleTypes::new(
             self.source.clone(),
-            self.settings.index.cloned(),
+            self.settings.index,
             self.settings.module,
         );
         if let Some(generic) = specialize(info, slice_items(&row.slice), name, &names) {

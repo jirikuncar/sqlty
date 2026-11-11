@@ -14,7 +14,7 @@ import typing
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, NamedTuple
 
-from sqlty._core import Schema
+from sqlty._core import ModuleIndex, Schema
 from sqlty._core import analyze_columns as _analyze_columns
 from sqlty._core import check_source as _check_source
 from sqlty._core import composite_fields as _composite_fields
@@ -569,7 +569,8 @@ def diagnostics(
         row_usage.needed |= own.needed
         row_usage.redundant += own.redundant
     if AST == "compare":
-        if helpers is None and variants is None:
+        index = None if helpers is None else helpers.rust()
+        if variants is None and (helpers is None or index is not None):
             _compare_module(
                 parsed,
                 found,
@@ -581,6 +582,7 @@ def diagnostics(
                 untyped,
                 module,
                 coerce,
+                index,
             )
         else:
             # What Rust reads so far: the module by itself, each call one query.
@@ -609,6 +611,7 @@ def _compare_module(
     untyped: bool,
     module: str | None,
     coerce: frozenset[str],
+    index: ModuleIndex | None = None,
 ) -> None:
     """``SQLTY_AST=compare``: ``sqlty_python::check`` must report what these passes do."""
     rust = _module_diagnostics(
@@ -621,6 +624,8 @@ def _compare_module(
         untyped=untyped,
         module=module,
         coerce=sorted(coerce),
+        index=index,
+        name=parsed.module,
     )
     if rust is None:
         return

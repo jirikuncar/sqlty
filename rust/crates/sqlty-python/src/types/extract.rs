@@ -918,7 +918,7 @@ pub fn extract_type_definitions(
 ) -> Dict<Arc<TypeInfo>> {
     let aliases = &source.aliases;
     let text: Arc<str> = Arc::from(source.text.as_str());
-    let names = ModuleTypes::new(source.clone(), index.cloned(), module);
+    let names = ModuleTypes::new(source.clone(), index, module);
 
     let mut classes: Vec<ClassNode<'_>> = source
         .classes()
