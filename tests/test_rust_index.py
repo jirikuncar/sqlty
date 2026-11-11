@@ -328,6 +328,16 @@ REVIEWED = {
         "from a import run\ndef f():\n    x = (yield\n        from run('SELECT nope FROM t'))\n",
         1,
     ),
+    "import line ending a string": (
+        {"a": "def run(q: Annotated[str, SQL]): ...\n"},
+        "from a import run\nx = '''\nimport ''' + str(run('SELECT nope FROM t'))\n",
+        1,
+    ),
+    "import line with a comment ending a string": (
+        {"a": "def run(q: Annotated[str, SQL]): ...\n"},
+        "from a import run\nx = '''\nimport a # ''' + str(run('SELECT nope FROM t'))\n",
+        1,
+    ),
     "call after an import": (
         {"a": "def run(q: Annotated[str, SQL]): ...\n"},
         "from a import run\nimport a; run('SELECT nope FROM t')\n",
