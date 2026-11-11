@@ -261,3 +261,54 @@ fn a_driver_types_ranges_under_the_projects_types() {
         "tuple[psycopg.types.range.Range[datetime.datetime], str]"
     );
 }
+
+fn rules_of(source: &str) -> Vec<String> {
+    let answer =
+        ask(&json!({"op": "analyze", "source": source, "schema": SCHEMA, "dialect": "postgres"}));
+    let diagnostics = answer["diagnostics"].as_array().unwrap();
+    diagnostics
+        .iter()
+        .map(|found| format!("{}:{}", found["line"], found["rule"].as_str().unwrap()))
+        .collect()
+}
+
+#[test]
+fn analyze_checks_row_types_helpers_and_driver_calls() {
+    let source = r#"import psycopg
+from typing import Annotated, Literal, TypedDict
+from sqlty import SQL
+
+class User(TypedDict):
+    id: int
+    email: str
+
+def run[T](q: Annotated[str, SQL], t: type[T], params=()) -> list[T]: ...
+
+def find(conn: psycopg.Connection, order: Literal["id", "nme"]):
+    SQL[User]("--sql\nSELECT id, email FROM users")
+    run("SELECT id, email FROM users WHERE id = 1", User)
+    conn.execute("SELECT id FROM users WHERE id = %s AND name = %s", (1,))
+    run("SELECT id FROM users ORDER BY " + order, int)
+"#;
+    assert_eq!(
+        rules_of(source),
+        [
+            "12:nullable-mismatch",
+            "13:nullable-mismatch",
+            "14:param-count-mismatch",
+        ]
+    );
+}
+
+#[test]
+fn analyze_honours_ignore_comments() {
+    let source = "q = SQL[tuple[str]](\"--sql\\nSELECT nme FROM users\")  # sqlty: ignore\n\
+                  n = 1  # sqlty: ignore[unknown-column]\n";
+    assert_eq!(rules_of(source), ["2:unused-ignore"]);
+}
+
+#[test]
+fn analyze_reads_a_source_that_does_not_parse() {
+    let source = "q = SQL[tuple[str]](\"--sql\\nSELECT nme FROM users\")\ndef broken(:\n";
+    assert_eq!(rules_of(source), ["1:unknown-column"]);
+}

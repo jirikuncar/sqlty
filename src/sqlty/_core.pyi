@@ -217,6 +217,9 @@ def module_index(
 def call_variants(
     source: str, version: tuple[int, int], limit: int
 ) -> list[tuple[int, bool, list[tuple[str, list[int], bool]] | None, bool, str | None]] | None: ...
+def module_ignores(
+    source: str, version: tuple[int, int]
+) -> list[tuple[int, list[str] | None, int, int]] | None: ...
 def rendered_compositions(
     source: str, version: tuple[int, int]
 ) -> list[tuple[int, bool, str | None]] | None: ...

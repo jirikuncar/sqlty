@@ -15,11 +15,12 @@
 //! assert_eq!(answer["queries"][0]["row_type"], "tuple[int]");
 //! ```
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sqlty_python::checker::{add_fix_imports, check_source, query_sites, SiteKind};
+use sqlty_python::checker::{add_fix_imports, check_source, query_sites, Diagnostic, SiteKind};
 use sqlty_python::config;
 use sqlty_python::fixer::fix_source;
 use sqlty_python::locate::{self, Queries};
@@ -27,6 +28,8 @@ use sqlty_python::options::Options;
 use sqlty_python::params::add_param_types;
 use sqlty_python::rewriter::{rewrite_source_with, strip_source, Suppressed};
 use sqlty_python::rules::RuleConfig;
+use sqlty_python::types::symbols::Source;
+use sqlty_python::{check, rows, suppress};
 use sqlty_sql::analyzer::{
     analyze_params, analyze_select, explain_select, load_schema_with_overrides,
     load_schema_with_skipped, row_type, CandidateKind, Nullability, RuleRef, TypeOverrides,
@@ -69,8 +72,8 @@ struct Request {
 
 /// Answer a JSON request about the Python `source`, read against `schema` in `dialect`.
 ///
-/// - `analyze`: `diagnostics` (what `sqlty check` reports, without the row types it reads
-///   from Python, each with the `fix` edits of its quick fix), `queries` (row type, columns
+/// - `analyze`: `diagnostics` (what `sqlty check` reports for a module by itself, each
+///   with the `fix` edits of its quick fix), `queries` (row type, columns
 ///   and parameters of each query), `highlights` (the SQL tokens to color), and what
 ///   `sqlty rewrite`, `sqlty strip` and `sqlty check --fix` make of the source: `rewritten`,
 ///   `stripped` and `fixed`.
@@ -141,8 +144,10 @@ pub fn run(request: &str) -> String {
     };
     let answer = match request.op {
         Op::Analyze => {
-            let mut diagnostics = check_source(source, &options, &rules, &[]);
-            add_fix_imports(source, &options, &mut diagnostics);
+            let has_schema = schema
+                .as_ref()
+                .is_some_and(|schema| !schema.databases().is_some_and(|all| all.absent));
+            let diagnostics = checked(source, dialect, &options, &rules, has_schema);
             json!({
             "diagnostics": diagnostics
                 .iter()
@@ -266,6 +271,68 @@ fn settings(config: &str) -> Result<Settings, String> {
         Value::Object(table) => Ok(resolved(&table)),
         _ => unreachable!("a TOML table is a JSON object"),
     }
+}
+
+/// The Python the page is read as.
+const VERSION: (u8, u8) = (3, 14);
+
+/// What `sqlty check` reports for the module `source`: its queries, the row types it
+/// names for them, the calls of its helpers and of its drivers, less what a
+/// `# sqlty: ignore` comment suppresses. A source that does not parse gets what its
+/// strings alone tell.
+fn checked(
+    source: &str,
+    dialect: &str,
+    options: &Options<'_>,
+    rules: &RuleConfig,
+    has_schema: bool,
+) -> Vec<Diagnostic> {
+    let coerce = HashSet::new();
+    let settings = rows::Settings {
+        options,
+        rules,
+        index: None,
+        module: None,
+        coerce: &coerce,
+    };
+    let lint = |text: &str| {
+        sqlty_format::lint_source(text, dialect, &options.style)
+            .into_iter()
+            .map(|found| check::Lint {
+                message: format!("{}: {}", found.code, found.message),
+                span: found.span,
+                query_start: found.query_start,
+            })
+            .collect()
+    };
+    let run = check::Run {
+        settings: &settings,
+        has_schema,
+        lint: &lint,
+        helpers: None,
+        variants: None,
+    };
+    let module = Source::new(source, VERSION).map(Arc::new);
+    let found = module
+        .as_ref()
+        .and_then(|module| Some((module, check::diagnostics(module, &run)?)));
+    let Some((module, found)) = found else {
+        let mut diagnostics = check_source(source, options, rules, &[]);
+        add_fix_imports(source, options, &mut diagnostics);
+        return diagnostics;
+    };
+    let needed = found.needed;
+    suppress::apply(&suppress::ignores(module), found.diagnostics, rules)
+        .into_iter()
+        // A field one query needs `| None` for is not redundant for another.
+        .filter(|reported| {
+            !reported
+                .redundant
+                .as_ref()
+                .is_some_and(|key| needed.contains(key))
+        })
+        .map(|reported| reported.diagnostic)
+        .collect()
 }
 
 /// The row type, columns and parameters of the query `sql` on `line`.

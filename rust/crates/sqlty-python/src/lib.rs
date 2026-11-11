@@ -62,6 +62,7 @@ pub mod rows;
 pub mod rules;
 pub(crate) mod scan;
 pub mod scopes;
+pub mod suppress;
 pub(crate) mod template;
 pub mod templates;
 #[allow(missing_docs)]

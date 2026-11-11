@@ -114,6 +114,7 @@ read yet, which then stays with Python. Merge in order.
 | `05-index` | `index`: helpers, types and row types of the other modules | see below | see below |
 | `06-variants` | `compose`, `variants`: psycopg compositions, queries built in branches, `SQL[R, P]` behind a name | 19,800 test modules, 12,000 generated | see below |
 | `07-cli` | the check of `sqlty check`, the language server and `check_source` | the whole suite in `rust`, `compare` and `python` modes | 1.8 s, 5.0 s (`sqlty check`, 8,000 files) |
+| `08-playground` | `suppress`: `# sqlty: ignore`; the playground runs the whole check of a module | 20,000 generated comments, the examples against `check_source` | see below |
 
 `05-index`: `index::Builder` holds the sources by module name, `add` and `register` as
 `HelperIndex` does, and `build` gives the shared index (`symbols::Index` for types and row
@@ -141,8 +142,18 @@ index holds is not parsed again for its check, and no `ast.parse` runs. `sqlty c
 the 8,000 files of `benchmarks/bench_project.py --size ci`: 5.0 s with `SQLTY_AST=python`,
 1.8 s with `rust` (4 jobs; 4.1 s and 2.6 s with one), the same output.
 
+`08-playground`: `sqlty-wasm` answers `analyze` with `check::diagnostics`, so the playground
+reports what `sqlty check` reports for a module by itself: row types, helper calls, driver
+calls, query variants and `# sqlty: ignore` (`suppress`, with `unused-ignore`). A source
+that does not parse keeps the check of its strings. The examples and three modules with
+helpers, a driver and ignore comments give the diagnostics of `check_source`. The module
+grows from 12.6 MB to 14.5 MB (2.7 MB to 3.4 MB gzipped); an example takes 1 to 10 ms to
+analyze in node, up to 1 ms more than before.
+
 ### Differences kept
 
+- A lone carriage return ends a line for `ast` and ruff but stops `tokenize`, so Python
+  reads no `# sqlty: ignore` after one; Rust reads them all.
 - A rule or severity the configuration misspells raises in Rust for every module; Python
   raises only for a module the lexer reads (`rules={"bogus": "error"}` without `SQL[`).
 - A call spelled with characters NFKC folds (`ｒｕｎ(...)` for `run`) inside a function:
