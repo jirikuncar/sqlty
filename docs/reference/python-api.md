@@ -285,12 +285,18 @@ Hover(start=41, end=43, contents='Column `id` of `users`: `INT NOT NULL`')
 | `json_shapes(sql, *, dialect="postgres", schema_sql=None)` | `(column, shape)` pairs for columns that build JSON of a known shape |
 | `analyze_params(sql, *, dialect="postgres", schema_sql=None)` | Query parameters as `ParamInfo(number, name, python_type, sql_type, nullable, cast, untyped_sql_type)`, or `None` |
 | `checks_names(dialect)` | Whether the dialect checks a schema's tables and columns against queries: `postgres`, `mysql` and `sqlite` do |
+| `query_diagnostics(sql, *, dialect="postgres", schema_sql=None)` | Why columns are untyped or names are wrong, as `(rule, message)` pairs; tables and columns are only judged when `schema_sql` defines tables |
 | `returns_rows(sql, *, dialect="postgres")` | Whether the statement yields rows (unparseable SQL counts) |
 | `expand_star(sql, *, dialect="postgres", schema_sql=None)` | Query with `*` replaced by cast columns, or `None` |
 | `rewrite_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False, json_types="typing.Any")` | Rewritten source; `json_types="typing.TypedDict"` generates `TypedDict`s for JSON columns |
+| `format_source(source, *, dialect="postgres", import_style=None)` | Source with the query strings laid out by sqruff; only whitespace changes |
 | `strip_source(source, *, import_style=None)` | Stripped source, without generated `TypedDict`s |
 | `fix_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False, rules=None, json_types="typing.Any")` | Source with `sqlty check --fix` applied |
 | `check_source(source, *, dialect="postgres", schema_sql=None, rules=None, import_style=None)` | List of diagnostics: `Diagnostic` dicts (`sqlty._lint.Diagnostic`, a `TypedDict`) with `rule`, `message`, `severity`, `line`, `start`, `end`, `fix` |
+| `breaking_source(source, *, schema_sql, against_sql, dialect="postgres", rules=None, import_style=None)` | The diagnostics `source` gets against `against_sql` but not against `schema_sql`, as `sqlty breaking` reports them |
+| `query_statistics(source, *, dialect="postgres", schema_sql=None, import_style=None)` | A `Counter` of `typed`, `partially typed` and `unparsed` queries and skipped strings by rule, as `sqlty check --statistics` counts them |
+| `schema_skipped_tables(schema_sql, *, dialect="postgres")` | Names of schema tables that do not parse, so their columns are unknown |
+| `schema_skipped_objects(schema_sql, *, dialect="postgres")` | `(kind, name)` of schema tables, views and key or type statements that do not parse |
 | `query_at(source, offset, *, import_style=None, helpers=None, module=None)` | The `QueryAt` (`text`, `offset`, `route`, `span`, `source_offset(n)`) at byte `offset`, or `None` outside a checked query |
 | `complete_source(source, line, column, *, dialect="postgres", schema_sql=None, import_style=None, helpers=None, module=None, limit=200)` | `Completions(start, end, incomplete, items)` of `Completion(label, kind, detail, sql_type, nullable)` at the cursor, or `None` outside a checked query |
 | `hover_source(source, line, column, *, dialect="postgres", schema_sql=None, import_style=None, helpers=None, module=None)` | `Hover(start, end, contents)`: what the word at the cursor is, in Markdown, or `None` |
