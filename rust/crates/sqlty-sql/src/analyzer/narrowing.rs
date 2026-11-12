@@ -584,9 +584,7 @@ impl<'a> Analyzer<'a> {
         else {
             return Learned::default();
         };
-        let Ok((inner, sources)) = self.correlated(scope).scope_of(&select.from) else {
-            return Learned::default();
-        };
+        let Ok((inner, sources)) = self.correlated(scope).scope_of(&select.from);
         let outer = |reference: &String| {
             !sources.iter().any(|source| source.reference == *reference)
                 && scope.iter().any(|source| source.reference == *reference)
@@ -729,7 +727,6 @@ mod tests {
     fn marks(sql: &str) -> String {
         let schema = Some(load_schema(SCHEMA, "postgres"));
         analyze_select(sql, "postgres", schema.as_deref())
-            .unwrap()
             .unwrap()
             .iter()
             .map(|col| match col.nullability {

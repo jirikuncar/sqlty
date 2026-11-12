@@ -345,9 +345,14 @@ def test_fuzz_fragments() -> None:
     assert checked > 1000
 
 
-def test_unknown_schema_column_raises() -> None:
-    with pytest.raises(RuntimeError, match="Column 'nope' not found in table 'users'"):
-        core.infer_type("SELECT SUM(nope) FROM users", schema_sql="CREATE TABLE users (id INT);")
+def test_sum_of_an_unknown_schema_column_is_untyped() -> None:
+    schema = "CREATE TABLE users (id INT);"
+    assert core.analyze_select("SELECT SUM(nope) FROM users", schema_sql=schema) == [
+        core.ColumnInfo(name="sum", python_type=None, sql_type=None)
+    ]
+    assert core.query_diagnostics("SELECT SUM(nope) FROM users", schema_sql=schema) == [
+        ("unknown-column", "column `nope` does not exist in `users`")
+    ]
 
 
 def test_crlf_continuation() -> None:
@@ -398,15 +403,16 @@ def test_unsupported_import_style_raises(name: str) -> None:
         getattr(core, name)('q = "--sql\\nSELECT 1"', import_style="from x import SQL")
 
 
-def test_user_type_check_skips_unknown_sum_column() -> None:
+@pytest.mark.parametrize("aggregate", ["SUM", "AVG"])
+def test_user_type_check_of_an_aggregate_of_an_unknown_column(aggregate: str) -> None:
     source = (
         "from typing import NamedTuple\nfrom sqlty import SQL\n"
         "class Row(NamedTuple):\n    total: float\n"
-        'q = SQL[Row]("--sql\\nSELECT SUM(nope) AS total FROM users")\n'
+        f'q = SQL[Row]("--sql\\nSELECT {aggregate}(nope) AS total FROM users")\n'
     )
     assert [
         d["rule"] for d in core.check_source(source, schema_sql="CREATE TABLE users (id INT);")
-    ] == ["unknown-column"]
+    ] == ["unknown-column", "nullable-mismatch"]
 
 
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
