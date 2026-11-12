@@ -646,7 +646,7 @@ missing a column or a value, an ungrouped column) are errors; those for valid SQ
 [name diagnostics guide](../guide/name-diagnostics.md) shows how to change them. All but `unsupported-syntax` are only judged when a
 [schema](../guide/schema-inference.md) is configured, because without one every
 table, column, function and type is unknown. Tables, columns and ambiguity are
-checked only in the `postgres`, `mysql` and `sqlite` dialects.
+checked only in the `postgres`, `mysql` and `sqlite` dialects; for any other, `sqlty check` prints a note when a schema is configured.
 
 ### unknown-table
 

@@ -81,13 +81,9 @@ struct Resolved<'s> {
 
 impl<'a> Analyzer<'a> {
     /// Whether table, column and ambiguity rules apply: a schema is configured and the
-    /// dialect's name rules (case folding, quoting) are the ones modelled.
+    /// dialect [checks names](SqlDialect::checks_names).
     pub(super) fn judges_names(&self) -> bool {
-        !self.schema.is_empty()
-            && matches!(
-                self.dialect,
-                SqlDialect::Postgres | SqlDialect::MySql | SqlDialect::Sqlite
-            )
+        !self.schema.is_empty() && self.dialect.checks_names()
     }
 
     /// Whether a CTE, view or subquery column called `name` is the one `column` (folded)

@@ -639,6 +639,15 @@ fn parse_error(py: Python<'_>, sql: &str, dialect: DialectArg) -> Option<String>
     detach(py, || analyzer::parse_error(sql, dialect))
 }
 
+/// Whether `dialect` checks a schema's tables and columns against queries.
+#[pyfunction]
+fn checks_names(dialect: DialectArg) -> bool {
+    dialect
+        .0
+        .parse()
+        .is_ok_and(sqlty_sql::Dialect::checks_names)
+}
+
 /// Whether a query yields rows: a query, DML with RETURNING, or unparseable SQL.
 ///
 /// Empty SQL, DDL, DML without RETURNING and transaction control return no rows.
@@ -2156,6 +2165,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(schema_skipped_tables, m)?)?;
     m.add_function(wrap_pyfunction!(schema_skipped_objects, m)?)?;
     m.add_function(wrap_pyfunction!(parse_error, m)?)?;
+    m.add_function(wrap_pyfunction!(checks_names, m)?)?;
     m.add_function(wrap_pyfunction!(returns_rows, m)?)?;
     m.add_function(wrap_pyfunction!(rewrite_source, m)?)?;
     m.add_function(wrap_pyfunction!(add_param_types, m)?)?;
