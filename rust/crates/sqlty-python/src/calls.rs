@@ -12,10 +12,12 @@ use ruff_python_ast::visitor::{walk_expr, Visitor};
 use ruff_python_ast::{Expr, ExprCall, Parameters, Stmt, StmtFunctionDef};
 use ruff_text_size::Ranged;
 
+use crate::compose::{self, Declared, Rendered};
 use crate::helpers::{mentions, receiver_class, region};
 use crate::scopes::{dotted, Context, Key, Lines, Node, Param, Scan, Scope};
 use crate::types::info::Dict;
 use crate::types::symbols::Source;
+use crate::variants::{query_variants, Found, Variant};
 
 const TYPE_FORMS: [&str; 3] = ["type", "Type", "TypeForm"];
 const PARAMS_ARGUMENT: [&str; 3] = ["params", "parameters", "args"];
@@ -71,10 +73,17 @@ pub struct Call<'a> {
     pub driver: Option<&'static str>,
     pub single: Option<String>,
     pub dynamic: bool,
+    /// Why a query built in branches is not checked.
     pub reason: Option<String>,
+    /// Every query a call built in branches can run, `query` being the first.
+    pub variants: Vec<Variant<'a>>,
+    /// The `SQL[R, P]("...")` the query is that of.
+    pub declared: Option<Declared<'a>>,
     pub configured: bool,
     /// The byte offsets of the argument the query comes from.
     pub query_span: Option<(usize, usize)>,
+    /// Whether that argument is a string literal.
+    pub literal: bool,
 }
 
 impl Call<'_> {
@@ -92,7 +101,7 @@ impl Call<'_> {
 }
 
 /// `ParsedSource.marker_names`: the local spellings of `Annotated` and of `sqlty.SQL`.
-fn marker_names(source: &Source) -> (HashSet<String>, HashSet<String>) {
+pub(crate) fn marker_names(source: &Source) -> (HashSet<String>, HashSet<String>) {
     let (mut annotated, mut marker) = (HashSet::new(), HashSet::new());
     for import in &source.entries {
         match &import.module {
@@ -452,19 +461,20 @@ fn call_params(
 }
 
 /// `find_helper_calls`: the calls of the helpers `source` defines or imports from the
-/// modules of `helpers`, by line; `None` where a query is one Rust does not read yet: a
-/// psycopg composition, or a name that may stand for a query.
+/// modules of `helpers`, by line. A query built in a way that is not modelled (see
+/// [`compose`]) is left unchecked.
 pub fn helper_calls<'a>(
     source: &'a Source,
-    helpers: Option<&HelperIndex>,
+    helpers: Option<&'a HelperIndex>,
     module: Option<&str>,
-) -> Option<Vec<Call<'a>>> {
+    variants: Option<usize>,
+) -> Vec<Call<'a>> {
     let text = &*source.text;
     let local = text.contains("Annotated") && text.contains("sqlty") && text.contains("SQL");
     let imported =
         helpers.is_some_and(|helpers| !helpers.modules.is_empty() && helpers.mentions(text));
     if !(local || imported) {
-        return Some(Vec::new());
+        return Vec::new();
     }
     let own = if local {
         index_functions(source)
@@ -472,7 +482,7 @@ pub fn helper_calls<'a>(
         Dict::new()
     };
     if own.is_empty() && !imported {
-        return Some(Vec::new());
+        return Vec::new();
     }
     let (functions, modules) = if imported {
         imports_of(&source.entries, module.or(source.module.as_deref()))
@@ -494,7 +504,14 @@ pub fn helper_calls<'a>(
     }
     let mut names: Vec<String> = names.into_iter().collect();
     names.sort();
-    let pattern = mentions(&names)?;
+    // No pattern holds too many names: every scope is read.
+    let pattern = mentions(&names);
+    if pattern
+        .as_ref()
+        .is_some_and(|pattern| only_imported(text, pattern))
+    {
+        return Vec::new();
+    }
     let scan = Scan::new(source.body(), |call: &ExprCall| match call.func.as_ref() {
         Expr::Name(_) => true,
         Expr::Attribute(attr) => dotted(&attr.value).is_some(),
@@ -515,12 +532,19 @@ pub fn helper_calls<'a>(
         }),
     };
     let mut wanted: Vec<Option<bool>> = vec![None; scan.scopes.len()];
+    let composed = text.contains("psycopg");
+    let mut psycopg: Option<compose::Scan<'a>> = None;
+    let resolve = |from: &Source, dotted: &str| {
+        helpers.and_then(|helpers| helpers.fragment(from, dotted, module))
+    };
     let mut calls = Vec::new();
     for (call, stack) in &scan.calls {
         if let Some(&scope) = stack.last() {
             let mentioned = *wanted[scope].get_or_insert_with(|| {
                 let (start, end) = region(scan.scopes[scope], &lines, text.len());
-                pattern.is_match(&text[start..end])
+                pattern
+                    .as_ref()
+                    .is_none_or(|pattern| pattern.is_match(&text[start..end]))
             });
             if !mentioned {
                 continue;
@@ -555,37 +579,129 @@ pub fn helper_calls<'a>(
             Expr::StringLiteral(literal) => Some(crate::parse::text(literal, text)),
             _ => None,
         };
-        if literal.is_none() {
-            if forwarded(query, stack, &scan, &annotated, &marker) {
-                continue;
+        if literal.is_none() && forwarded(query, stack, &scan, &annotated, &marker) {
+            continue;
+        }
+        let is_literal = literal.is_some();
+        let mut built = Built {
+            dynamic: literal.is_none(),
+            query: literal,
+            ..Built::default()
+        };
+        if built.query.is_none() {
+            let rendered = if composed {
+                let scan = psycopg.get_or_insert_with(|| compose::Scan::new(source));
+                compose::render(scan, query, Some(&resolve)).unwrap_or(Rendered::Unchecked)
+            } else {
+                Rendered::None
+            };
+            match rendered {
+                Rendered::Text(text) => (built.query, built.dynamic) = (Some(text), false),
+                Rendered::Unchecked => built.dynamic = false,
+                Rendered::None => {}
             }
-            if text.contains("psycopg") || matches!(query, Expr::Name(_) | Expr::Attribute(_)) {
-                return None;
+            let around = || -> Vec<Node<'a>> { stack.iter().map(|s| scan.scopes[*s]).collect() };
+            if let (Some(limit), None) = (variants, &built.query) {
+                match query_variants(
+                    source,
+                    &around(),
+                    call.range(),
+                    query,
+                    limit,
+                    Some(&resolve),
+                ) {
+                    None => {}
+                    Some(Found::Unchecked { composed, reason }) => {
+                        built.reason = reason;
+                        built.dynamic = built.dynamic && !composed;
+                    }
+                    Some(Found::Variants(found)) => {
+                        built.query = found.first().map(|variant| variant.query.clone());
+                        built.declared = found.first().and_then(|v| v.declared.clone());
+                        built.dynamic = false;
+                        built.variants = found;
+                    }
+                }
+            } else if built.dynamic && matches!(query, Expr::Name(_) | Expr::Attribute(_)) {
+                // Without query variants, a name still stands for the query of one `SQL[R](...)`.
+                let found =
+                    query_variants(source, &around(), call.range(), query, 1, Some(&resolve));
+                if let Some(Found::Variants(found)) = found {
+                    if let Some(declared) = found.into_iter().next().and_then(|v| v.declared) {
+                        built.query = Some(declared.query.clone());
+                        built.declared = Some(declared);
+                        built.dynamic = false;
+                    }
+                }
             }
         }
         // `HelperCall._on`: an unmarked query is read against the database of its helper.
-        let literal = match (literal, &helper.database) {
-            (Some(query), Some(database)) if !is_marked(&query) => {
-                Some(format!("-- sqlty: db={database}\n{query}"))
-            }
-            (literal, _) => literal,
-        };
+        if let Some(database) = &helper.database {
+            let routed = |query: &mut String| {
+                if !is_marked(query) {
+                    query.insert_str(0, &format!("-- sqlty: db={database}\n"));
+                }
+            };
+            let queries = built
+                .variants
+                .iter_mut()
+                .flat_map(|variant| {
+                    let declared = variant
+                        .declared
+                        .as_mut()
+                        .map(|declared| &mut declared.query);
+                    std::iter::once(&mut variant.query).chain(declared)
+                })
+                .chain(&mut built.query)
+                .chain(built.declared.as_mut().map(|declared| &mut declared.query));
+            queries.for_each(routed);
+        }
         calls.push(Call {
             line: lines.line(call.start().to_usize()),
-            dynamic: literal.is_none(),
-            query: literal,
+            dynamic: built.dynamic,
+            query: built.query,
+            reason: built.reason,
+            variants: built.variants,
+            declared: built.declared,
             row: argument(helper, call, helper.row.as_deref()),
             params: call_params(helper, call, stack, &ctx),
             end_line: Some(lines.line(call.end().to_usize().saturating_sub(1))),
             driver: None,
             single: None,
-            reason: None,
             configured: helper.configured,
-            query_span: Some((query.start().to_usize(), query.end().to_usize())),
+            query_span: Some(query_span(call, query)),
+            literal: is_literal,
         });
     }
     calls.sort_by_key(|call| (call.line, call.query_span));
-    Some(calls)
+    calls
+}
+
+/// Whether `text` names the helpers only on the lines that import them, so calls none.
+fn only_imported(text: &str, pattern: &Regex) -> bool {
+    // `from run(...)` can end a `yield` or a `raise` written over two lines, and a line
+    // that ends a string can go on with a call: only names may follow.
+    static IMPORT: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^[ \t\x0c]*(?:from[ \t]+[\w.]+[ \t]+import|import)[ \t]+[\w.,*() \t]*$")
+            .expect("a valid pattern")
+    });
+    pattern.find_iter(text).all(|found| {
+        let start = text[..found.start()]
+            .rfind(['\n', '\r'])
+            .map_or(0, |at| at + 1);
+        let line = text[start..].split(['\n', '\r']).next().unwrap_or("");
+        IMPORT.is_match(line)
+    })
+}
+
+/// What a call's query argument is read as.
+#[derive(Default)]
+struct Built<'a> {
+    query: Option<String>,
+    dynamic: bool,
+    reason: Option<String>,
+    variants: Vec<Variant<'a>>,
+    declared: Option<Declared<'a>>,
 }
 
 /// Whether `query` is the marked query parameter of a function around the call.
@@ -610,4 +726,14 @@ fn forwarded(
         }
     }
     false
+}
+
+/// Where the query argument is, as `ast` places it: a bare generator spans the parentheses
+/// of its call.
+pub fn query_span(call: &ExprCall, query: &Expr) -> (usize, usize) {
+    let range = match query {
+        Expr::Generator(generator) if !generator.parenthesized => call.arguments.range(),
+        _ => query.range(),
+    };
+    (range.start().to_usize(), range.end().to_usize())
 }

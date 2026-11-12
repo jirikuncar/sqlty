@@ -871,18 +871,6 @@ struct DiagnosticOut {
     fix: Vec<(usize, usize, String)>,
 }
 
-/// Check Python source for SQL type issues.
-///
-/// `any_calls` are the byte offsets of the `SQL[T](...)` calls whose `T` is
-/// `typing.Any`; they are not reported as `unchecked-query`.
-///
-/// Returns:
-///     List of diagnostic dicts with keys: rule, message, severity, line, start, end
-///     (byte offsets of what it underlines) and fix (`(start, end, replacement)` byte edits,
-///     with the imports the fix needs, so it can be applied on its own)
-///
-/// Raises:
-///     ValueError: unsupported import_style, or `rules` names an unknown rule or severity
 /// The modules of the checked paths as `sqlty_python::index` reads them, built from the
 /// steps that filled a `sqlty._helpers.HelperIndex`: `("add", module, text, name)` and
 /// `("register", import path, query parameter, row parameter, roots, database)`.
@@ -898,32 +886,173 @@ type IndexStep = (
     Option<String>,
 );
 
-/// None where Rust does not read one of the modules.
+type HelperTuple = (
+    Vec<String>,
+    Vec<String>,
+    String,
+    Option<String>,
+    &'static str,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    bool,
+    Option<String>,
+);
+
+fn helper_tuple(helper: &sqlty_python::calls::Helper) -> HelperTuple {
+    use sqlty_python::calls::Kind;
+    let mut keywords: Vec<String> = helper.keywords.iter().cloned().collect();
+    keywords.sort();
+    (
+        helper.positional.clone(),
+        keywords,
+        helper.query.clone(),
+        helper.row.clone(),
+        match helper.kind {
+            Kind::Function => "function",
+            Kind::Static => "static",
+            Kind::Class => "class",
+            Kind::Instance => "instance",
+        },
+        helper.params.clone(),
+        helper.rest.clone(),
+        helper.named.clone(),
+        helper.configured,
+        helper.database.clone(),
+    )
+}
+
+/// The functions and methods of `source` with a marked query parameter, by name
+/// (`Class.method`), as `ModuleIndex.helpers` gives them; none in a source that does not
+/// parse.
 #[pyfunction]
-fn module_index(py: Python<'_>, version: (u8, u8), steps: Vec<IndexStep>) -> Option<ModuleIndex> {
-    use sqlty_python::index::{Builder, Roots};
+fn module_helpers(py: Python<'_>, source: &str, version: (u8, u8)) -> HashMap<String, HelperTuple> {
     use sqlty_python::types::symbols::Source;
     detach(py, || {
-        let mut index = Builder::new(version);
-        for (kind, first, second, third, roots, database) in steps {
-            if kind == "add" {
-                let source = Source::new(&second, version)?.named(third.as_deref());
-                index.add(&first, source);
-            } else {
-                let roots = Roots {
-                    paths: &roots,
-                    read: &|path| std::fs::read_to_string(path).ok(),
-                };
-                index.register(
-                    &first,
-                    &second,
-                    third.as_deref(),
-                    roots,
-                    database.as_deref(),
-                );
+        let Some(source) = Source::new(source, version) else {
+            return HashMap::new();
+        };
+        sqlty_python::calls::index_functions(&source)
+            .iter()
+            .map(|(name, helper)| (name.to_string(), helper_tuple(helper)))
+            .collect()
+    })
+}
+
+/// `index` after `steps`; a module that does not parse holds nothing.
+fn indexed(
+    mut index: sqlty_python::index::Builder,
+    version: (u8, u8),
+    steps: Vec<IndexStep>,
+) -> ModuleIndex {
+    use sqlty_python::index::Roots;
+    use sqlty_python::types::symbols::Source;
+    for (kind, first, second, third, roots, database) in steps {
+        if kind == "add" {
+            if let Some(source) = Source::new(&second, version) {
+                index.add(&first, source.named(third.as_deref()));
             }
+        } else {
+            let roots = Roots {
+                paths: &roots,
+                read: &|path| std::fs::read_to_string(path).ok(),
+            };
+            index.register(
+                &first,
+                &second,
+                third.as_deref(),
+                roots,
+                database.as_deref(),
+            );
         }
-        Some(ModuleIndex(index.build()))
+    }
+    ModuleIndex(index.build())
+}
+
+/// The helpers, types and row types of a tree, filled as `HelperIndex` is.
+#[pyfunction]
+fn module_index(py: Python<'_>, version: (u8, u8), steps: Vec<IndexStep>) -> ModuleIndex {
+    detach(py, || {
+        indexed(sqlty_python::index::Builder::new(version), version, steps)
+    })
+}
+
+#[pymethods]
+impl ModuleIndex {
+    /// The helpers by module and name (`Class.method` for a method), each as
+    /// `(positional, keywords, query, row, kind, params, rest, named, configured, database)`.
+    fn helpers(&self) -> HashMap<String, HashMap<String, HelperTuple>> {
+        let helpers = |found: &sqlty_python::types::info::Dict<sqlty_python::calls::Helper>| {
+            found
+                .iter()
+                .map(|(name, helper)| (name.to_string(), helper_tuple(helper)))
+                .collect()
+        };
+        let modules = self.0.modules.iter();
+        modules
+            .map(|(module, found)| (module.clone(), helpers(found)))
+            .collect()
+    }
+
+    /// A fork of the index after `steps`, sharing what is read of the modules.
+    fn extended(&self, py: Python<'_>, steps: Vec<IndexStep>) -> ModuleIndex {
+        detach(py, || indexed(self.0.fork(), self.0.version(), steps))
+    }
+}
+
+/// `source` parsed as the module `name`: what the index read of it when it is the same
+/// text. None where Rust does not read it.
+fn parsed_module(
+    source: &str,
+    version: (u8, u8),
+    name: Option<&str>,
+    index: Option<&sqlty_python::index::HelperIndex>,
+) -> Option<Arc<sqlty_python::types::symbols::Source>> {
+    use sqlty_python::types::symbols::Source;
+    let known = name.zip(index).and_then(|(name, index)| {
+        let module = name.strip_suffix(".__init__").unwrap_or(name);
+        let known = index.source(module)?;
+        (known.module.as_deref() == Some(name) && *known.text == *source).then(|| Arc::clone(known))
+    });
+    match known {
+        Some(parsed) => Some(parsed),
+        None => Some(Arc::new(Source::new(source, version)?.named(name))),
+    }
+}
+
+type SiteTuple = (
+    Option<(usize, usize)>,
+    Vec<String>,
+    Option<&'static str>,
+    Option<usize>,
+);
+
+/// The helper calls of `source` as `sqlty_python::check::sites` reads them:
+/// `(typed lines, queries, unchecked rule, literal start)`; none in a source that does
+/// not parse.
+#[pyfunction]
+#[pyo3(signature = (source, *, version, index = None, name = None, module = None, variants = None))]
+fn module_calls(
+    py: Python<'_>,
+    source: &str,
+    version: (u8, u8),
+    index: Option<PyRef<'_, ModuleIndex>>,
+    name: Option<&str>,
+    module: Option<&str>,
+    variants: Option<usize>,
+) -> Vec<SiteTuple> {
+    let helpers = index.map(|index| Arc::clone(&index.0));
+    detach(py, || {
+        let Some(parsed) = parsed_module(source, version, name, helpers.as_deref()) else {
+            return Vec::new();
+        };
+        sqlty_python::check::sites(&parsed, helpers.as_deref(), module, variants)
+            .into_iter()
+            .map(|site| {
+                let unchecked = site.unchecked.map(sqlty_python::rules::Rule::name);
+                (site.typed, site.queries, unchecked, site.start)
+            })
+            .collect()
     })
 }
 
@@ -1484,10 +1613,10 @@ fn row_diagnostics(
 }
 
 /// Every diagnostic of `source` before inline suppression, as `sqlty_python::check` reports
-/// them: `(diagnostics, redundant, needed)`, see `row_diagnostics`. None where Rust does
-/// not read the source, or it needs what is not read in Rust yet.
+/// them: `(diagnostics, redundant, needed)`, see `row_diagnostics`. A source that does not
+/// parse gets what its strings alone tell.
 #[pyfunction]
-#[pyo3(signature = (source, *, version, dialect = DialectArg::POSTGRES, schema_sql = None, rules = None, import_style = None, untyped = false, module = None, coerce = vec![], index = None, name = None))]
+#[pyo3(signature = (source, *, version, dialect = DialectArg::POSTGRES, schema_sql = None, rules = None, import_style = None, untyped = false, module = None, coerce = vec![], index = None, name = None, variants = None))]
 #[expect(
     clippy::too_many_arguments,
     clippy::type_complexity,
@@ -1506,8 +1635,8 @@ fn module_diagnostics(
     coerce: Vec<String>,
     index: Option<PyRef<'_, ModuleIndex>>,
     name: Option<&str>,
-) -> Result<Option<(Vec<DiagnosticOut>, Vec<Option<FieldKey>>, Vec<FieldKey>)>, Error> {
-    use sqlty_python::types::symbols::Source;
+    variants: Option<usize>,
+) -> Result<(Vec<DiagnosticOut>, Vec<Option<FieldKey>>, Vec<FieldKey>), Error> {
     use sqlty_python::{check, rows};
     let dialect = dialect.0;
     let helpers = index.map(|index| Arc::clone(&index.0));
@@ -1516,10 +1645,7 @@ fn module_diagnostics(
         let schema = schema(schema_sql, dialect);
         let options = Options::new(dialect, schema.as_deref(), import_style, untyped)?;
         let rules = RuleConfig::from_overrides(rules).map_err(ConfigError::from)?;
-        let Some(parsed) = Source::new(source, version) else {
-            return Ok(None);
-        };
-        let parsed = parsed.named(name);
+        let parsed = parsed_module(source, version, name, helpers.as_deref());
         let settings = rows::Settings {
             options: &options,
             rules: &rules,
@@ -1544,9 +1670,11 @@ fn module_diagnostics(
                 .is_some_and(|schema| !schema.databases().is_some_and(|all| all.absent)),
             lint: &lint,
             helpers: helpers.as_deref(),
+            variants,
         };
-        let Some(found) = check::diagnostics(&Arc::new(parsed), &run) else {
-            return Ok(None);
+        let found = match &parsed {
+            Some(parsed) => check::diagnostics(parsed, &run),
+            None => check::unparsed(source, &run),
         };
         let mut needed: Vec<FieldKey> = found.needed.into_iter().collect();
         needed.sort();
@@ -1571,10 +1699,22 @@ fn module_diagnostics(
                 (out, reported.redundant)
             })
             .unzip();
-        Ok(Some((diagnostics, redundant, needed)))
+        Ok((diagnostics, redundant, needed))
     })
 }
 
+/// Check Python source for SQL type issues.
+///
+/// `any_calls` are the byte offsets of the `SQL[T](...)` calls whose `T` is
+/// `typing.Any`; they are not reported as `unchecked-query`.
+///
+/// Returns:
+///     List of diagnostic dicts with keys: rule, message, severity, line, start, end
+///     (byte offsets of what it underlines) and fix (`(start, end, replacement)` byte edits,
+///     with the imports the fix needs, so it can be applied on its own)
+///
+/// Raises:
+///     ValueError: unsupported import_style, or `rules` names an unknown rule or severity
 /// `PsycopgScan.render` of the first argument of every call of a plain name in `source`,
 /// by offset of the argument: the SQL, `"unchecked"`, or None when it is no composition;
 /// `(offset, False)` where the Rust model does not cover what Python computes. None where
@@ -1620,6 +1760,64 @@ fn rendered_compositions(
                     Some(Rendered::Unchecked) => (at, true, Some(UNCHECKED.to_string())),
                     Some(Rendered::None) => (at, true, None),
                     None => (at, false, None),
+                }
+            })
+            .collect();
+        found.sort();
+        Some(found)
+    })
+}
+
+/// One call's variants: `(offset of the query, read, variants as (query, lines, declared),
+/// composed, reason)`; variants are None for an unchecked query.
+type CallVariants = (
+    usize,
+    bool,
+    Option<Vec<(String, Vec<usize>, bool)>>,
+    bool,
+    Option<String>,
+);
+
+/// `query_variants` of the first argument of every call of a plain name in `source`;
+/// `read` is False where the Rust model does not cover what Python computes. None where
+/// Rust does not read the source.
+#[pyfunction]
+fn call_variants(
+    py: Python<'_>,
+    source: &str,
+    version: (u8, u8),
+    limit: usize,
+) -> Option<Vec<CallVariants>> {
+    use ruff_python_ast::Expr;
+    use ruff_text_size::Ranged;
+    use sqlty_python::scopes::Scan;
+    use sqlty_python::types::symbols::Source;
+    use sqlty_python::variants::{query_variants, Found};
+
+    detach(py, || {
+        let source = Source::new(source, version)?;
+        let scan = Scan::new(source.body(), |call| {
+            call.func.is_name_expr() && !call.arguments.args.is_empty()
+        });
+        let mut found: Vec<CallVariants> = scan
+            .calls
+            .iter()
+            .map(|(call, stack)| {
+                let query: &Expr = &call.arguments.args[0];
+                let at = sqlty_python::calls::query_span(call, query).0;
+                let stack: Vec<_> = stack.iter().map(|scope| scan.scopes[*scope]).collect();
+                match query_variants(&source, &stack, call.range(), query, limit, None) {
+                    None => (at, false, None, false, None),
+                    Some(Found::Unchecked { composed, reason }) => {
+                        (at, true, None, composed, reason)
+                    }
+                    Some(Found::Variants(variants)) => {
+                        let variants = variants
+                            .into_iter()
+                            .map(|v| (v.query, v.lines, v.declared.is_some()))
+                            .collect();
+                        (at, true, Some(variants), false, None)
+                    }
                 }
             })
             .collect();
@@ -1947,8 +2145,11 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(type_relations, m)?)?;
     m.add_function(wrap_pyfunction!(row_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(module_diagnostics, m)?)?;
-    m.add_function(wrap_pyfunction!(rendered_compositions, m)?)?;
     m.add_function(wrap_pyfunction!(module_index, m)?)?;
+    m.add_function(wrap_pyfunction!(rendered_compositions, m)?)?;
+    m.add_function(wrap_pyfunction!(call_variants, m)?)?;
+    m.add_function(wrap_pyfunction!(module_helpers, m)?)?;
+    m.add_function(wrap_pyfunction!(module_calls, m)?)?;
     m.add_class::<ModuleIndex>()?;
     m.add_function(wrap_pyfunction!(helper_sites, m)?)?;
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;

@@ -83,19 +83,23 @@ pub fn sites(source: &str, names: &[String]) -> Option<Vec<Site>> {
 
 /// `\b(?:name|...)\b`, kept for the next file, which almost always asks for the same names.
 pub(crate) fn mentions(names: &[String]) -> Option<Arc<Regex>> {
-    static LAST: Mutex<Option<(Vec<String>, Arc<Regex>)>> = Mutex::new(None);
+    type Last = Option<(Vec<String>, Option<Arc<Regex>>)>;
+    static LAST: Mutex<Last> = Mutex::new(None);
     let mut last = LAST
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some((known, pattern)) = last.as_ref() {
         if known == names {
-            return Some(Arc::clone(pattern));
+            return pattern.clone();
         }
     }
     let escaped: Vec<String> = names.iter().map(|name| regex::escape(name)).collect();
-    let pattern = Arc::new(Regex::new(&format!(r"\b(?:{})\b", escaped.join("|"))).ok()?);
-    *last = Some((names.to_vec(), Arc::clone(&pattern)));
-    Some(pattern)
+    // Too many names for one pattern: kept too, so the next file does not try again.
+    let pattern = Regex::new(&format!(r"\b(?:{})\b", escaped.join("|")))
+        .ok()
+        .map(Arc::new);
+    *last = Some((names.to_vec(), pattern.clone()));
+    pattern
 }
 
 /// The source of a scope as `ParsedSource._mentions` reads it: whole lines, from the first

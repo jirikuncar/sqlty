@@ -382,11 +382,12 @@ class HelperIndex:
         self._names_of.pop(module, None)
         self._types.clear()
         self._row_types.pop(module, None)
+        # A module without helpers can still re-export one under another name.
+        self._pattern = None
+        self._names = None
         if not parsed.may_define_helpers or not (found := index_functions(parsed)):
             return False
         self.modules.setdefault(module, {}).update(found)
-        self._pattern = None
-        self._names = None
         return True
 
     def register(

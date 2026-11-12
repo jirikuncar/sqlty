@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-import ast
+import sys
 
 import pytest
 
-from sqlty._source import ParsedSource
-from sqlty._variants import Unchecked, query_variants
+from sqlty._core import call_variants
+from tests.test_rust_variants import same
 
 BOTH = ["x1", "y2"]
 EVERY = ["x1", "x2", "y1", "y2"]
 
 
 def variants(test: str, between: str, header: str = "def f(n, o, xs, t):") -> list[str]:
-    """The variants of the query."""
+    """The variants of the query, which the Python and Rust passes must read alike."""
     source = f"""\
 {header}
     if {test}:
@@ -28,11 +28,9 @@ def variants(test: str, between: str, header: str = "def f(n, o, xs, t):") -> li
         b = '2'
     run(a + b)
 """
-    parsed = ParsedSource(source)
-    call = next(c for c in parsed.calls if isinstance(c.func, ast.Name) and c.func.id == "run")
-    found = query_variants(parsed, call, call.args[0], 64)
-    assert not isinstance(found, Unchecked)
-    return sorted(str(variant.query) for variant in found)
+    assert same(source) >= 1
+    (*_, call) = call_variants(source, sys.version_info[:2], 64)
+    return sorted(variant[0] for variant in call[2] or ())
 
 
 @pytest.mark.parametrize(
