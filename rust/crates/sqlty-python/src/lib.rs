@@ -36,6 +36,10 @@
 //! assert_eq!(strip_source(&rewritten, &options.style), source);
 //! ```
 
+#[allow(missing_docs)]
+pub mod calls;
+#[allow(missing_docs)]
+pub mod check;
 pub mod checker;
 pub mod config;
 pub mod drivers;
