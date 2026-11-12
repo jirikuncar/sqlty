@@ -54,7 +54,7 @@ fn analyzer_timing() {
             .and_then(|n| n.parse().ok())
             .unwrap_or(50);
         let first = analyze_with_diagnostics(&sql, "postgres", Some(&schema));
-        let shape = first.0.as_ref().map(|c| c.as_ref().map(Vec::len));
+        let shape = first.0.as_ref().map(Vec::len);
         println!("{name}: columns {shape:?}, diagnostics {}", first.1.len());
         let start = Instant::now();
         for _ in 0..iterations {

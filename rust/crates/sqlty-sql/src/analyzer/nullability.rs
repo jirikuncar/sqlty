@@ -1402,7 +1402,6 @@ mod tests {
         let schema = Some(load_schema(schema, dialect));
         analyze_select(sql, dialect, schema.as_deref())
             .unwrap()
-            .unwrap()
             .iter()
             .map(|col| match col.nullability {
                 Nullability::Nullable => 'N',

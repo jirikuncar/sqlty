@@ -5,7 +5,6 @@
 //! names are canonicalized (`INTEGER` becomes `INT`, `NUMERIC(10,2)` becomes
 //! `DECIMAL(10, 2)`), as `SELECT *` expansion writes them back into queries.
 
-use std::fmt;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -120,32 +119,5 @@ impl SchemaColumn {
 /// text)` of a statement that does not parse and would set keys, `NOT NULL`, defaults or a type.
 pub type SkippedObject = (&'static str, String);
 
-/// Inference fails outright only for `SUM(column)` of a column missing from a schema table.
-type Inferred<T> = Result<T, InferError>;
-
-/// Why a query's types cannot be inferred at all, as opposed to being unknown.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum InferError {
-    /// `SUM(column)` names a column that is not in the schema table it reads.
-    SumColumnNotInSchema {
-        /// The column as the query spells it.
-        column: String,
-        /// The schema table the column was looked up in.
-        table: String,
-    },
-}
-
-impl fmt::Display for InferError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            InferError::SumColumnNotInSchema { column, table } => write!(
-                f,
-                "Column '{column}' not found in table '{table}' in schema. \
-                 If you want to query columns not in the schema, use an explicit cast: \
-                 SUM({column}::TYPE)"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for InferError {}
+/// The analyzer's internal results; nothing fails inference, a type is unknown instead.
+type Inferred<T> = Result<T, std::convert::Infallible>;

@@ -115,9 +115,6 @@ def analyze_select(
         >>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT)"
         >>> [c.python_type for c in analyze_select("SELECT id, name FROM users", schema_sql=schema)]
         ['int', 'str | None']
-
-    Raises:
-        RuntimeError: ``SUM(column)`` names a column missing from a schema table.
     """
     columns = _analyze_select(sql, dialect=dialect, schema_sql=schema_sql)
     return None if columns is None else [ColumnInfo(*column) for column in columns]
@@ -140,10 +137,7 @@ def json_shapes(
     """
     from sqlty._json_shape import render
 
-    try:
-        columns = _analyze_columns(sql, dialect=dialect, schema_sql=schema_sql)
-    except RuntimeError:
-        return []
+    columns = _analyze_columns(sql, dialect=dialect, schema_sql=schema_sql)
     return [(c[0], render(c[4])) for c in columns or [] if c[4] is not None]
 
 
@@ -910,10 +904,7 @@ def _outcome(query: str, dialect: str, schema_sql: str | Schema | None) -> str |
         return "unparsed"
     if not returns_rows(query, dialect=dialect):
         return None
-    try:
-        columns = analyze_select(query, dialect=dialect, schema_sql=schema_sql)
-    except RuntimeError:
-        columns = None
+    columns = analyze_select(query, dialect=dialect, schema_sql=schema_sql)
     if columns is not None and all(column.python_type is not None for column in columns):
         return "typed"
     return "partially typed"

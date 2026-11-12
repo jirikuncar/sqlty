@@ -124,9 +124,7 @@ impl Analyzer<'_> {
         };
         let mut quiet = self.correlated(scope);
         quiet.diag = Diagnostics::default();
-        let Ok((analyzer, inner_scope)) = quiet.scope_of(&inner.from) else {
-            return;
-        };
+        let Ok((analyzer, inner_scope)) = quiet.scope_of(&inner.from);
         let (Some(a), Some(b)) = (
             self.entity_of(expr, scope),
             analyzer.entity_of(column, &inner_scope),
