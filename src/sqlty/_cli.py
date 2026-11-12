@@ -1311,10 +1311,19 @@ def _package_path(directory: Path) -> tuple[str, ...]:
 
 
 @functools.cache
-def _resolved_root(root: Path) -> Path | None:
-    """``root`` resolved, or ``None`` when it is not a directory."""
+def _package_names(directory: str) -> tuple[str, ...]:
+    return _package_path(Path(directory))
+
+
+@functools.cache
+def _resolved_root(root: Path) -> tuple[str, str] | None:
+    """``root`` resolved as a prefix of the paths under it (case folded as the platform
+    compares paths) and its name, or ``None`` when it is not a directory."""
     root = root.resolve()
-    return root if root.is_dir() else None
+    if not root.is_dir():
+        return None
+    prefix = os.path.normcase(os.fspath(root))
+    return prefix if prefix.endswith(os.sep) else prefix + os.sep, root.name
 
 
 def _checked_roots(paths: Iterable[Path], files: Iterable[Path]) -> list[Path]:
@@ -1325,12 +1334,11 @@ def _checked_roots(paths: Iterable[Path], files: Iterable[Path]) -> list[Path]:
         ['missing']
     """
     roots = [path if path.is_dir() else path.parent for path in paths]
-    for file in files:
-        directory = file.parent
+    for directory in dict.fromkeys(file.parent for file in files):
         for _ in _package_path(directory):
             directory = directory.parent
         roots.append(directory)
-    return list(dict.fromkeys(root.resolve() for root in roots))
+    return list(dict.fromkeys(root.resolve() for root in dict.fromkeys(roots)))
 
 
 def _module_names(path: Path, roots: list[Path]) -> list[str]:
@@ -1344,15 +1352,19 @@ def _module_names(path: Path, roots: list[Path]) -> list[str]:
         >>> _module_names(Path("missing/pkg/mod.py"), [])
         ['mod']
     """
-    parts = [*_package_path(path.parent), *([] if path.stem == "__init__" else [path.stem])]
+    text = os.fspath(path)
+    directory, name = os.path.split(text)
+    stem = os.path.splitext(name)[0]
+    parts = [*_package_names(directory), *([] if stem == "__init__" else [stem])]
     names = [".".join(parts)]
+    folded = os.path.normcase(text)
     for root in map(_resolved_root, roots):
-        if root is not None and path.is_relative_to(root):
-            relative = list(path.relative_to(root).with_suffix("").parts)
+        if root is not None and folded.startswith(root[0]):
+            relative = os.path.splitext(text[len(root[0]) :])[0].split(os.sep)
             if relative[-1] == "__init__":
                 relative.pop()
-            names += [".".join(relative), ".".join([root.name, *relative])]
-    return list(dict.fromkeys(name for name in names if name)) or [path.stem]
+            names += [".".join(relative), ".".join([root[1], *relative])]
+    return list(dict.fromkeys(name for name in names if name)) or [stem]
 
 
 @dataclass(frozen=True)
@@ -1622,9 +1634,8 @@ class Project:
         texts = {path: read_source(path) for path in files}
         self.unreadable = [path for path, text in texts.items() if text is None]
         self.files = [path for path in files if texts[path] is not None]
-        self.modules = {
-            path: _module_names(self.resolver.resolve(path), self.paths) for path in self.files
-        }
+        self.resolved = {path: self.resolver.resolve(path) for path in self.files}
+        self.modules = {path: _module_names(self.resolved[path], self.paths) for path in self.files}
         self.sources = {
             path: ParsedSource(text, self._module(path))
             for path in self.files
@@ -1676,7 +1687,8 @@ class Project:
             return
         if old is None:
             self.files.append(path)
-            self.modules[path] = _module_names(self.resolver.resolve(path), self.paths)
+            self.resolved[path] = self.resolver.resolve(path)
+            self.modules[path] = _module_names(self.resolved[path], self.paths)
             self.settings[path] = self.resolver.for_file(path)
         parsed = self.sources[path] = ParsedSource(text, self._module(path))
         if old is None or old.may_define_helpers or parsed.may_define_helpers:
@@ -1741,7 +1753,7 @@ class Project:
         for path, parsed in self.sources.items():
             for name in self.modules[path]:
                 self.index.add(name, parsed)
-        checked = _checked_roots(self.paths, [self.resolver.resolve(path) for path in self.files])
+        checked = _checked_roots(self.paths, self.resolved.values())
         helpers_for = configured_helpers(self.index, checked)
         self.helpers = {path: helpers_for(self.settings[path]) for path in self.files}
 

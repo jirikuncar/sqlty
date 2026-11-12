@@ -371,6 +371,19 @@ fn infer_type(
 const STACK_RED_ZONE: usize = 2 << 20;
 const STACK_SEGMENT: usize = 16 << 20;
 
+/// The threads that parse the modules of an index. Rayon's 2 MiB stacks are below the
+/// parser's and analyzer's red zones, so every parse would allocate a new stack.
+fn parse_pool() -> &'static rayon::ThreadPool {
+    static POOL: std::sync::OnceLock<rayon::ThreadPool> = std::sync::OnceLock::new();
+    POOL.get_or_init(|| {
+        rayon::ThreadPoolBuilder::new()
+            .thread_name(|i| format!("sqlty-parse-{i}"))
+            .stack_size(32 << 20)
+            .build()
+            .expect("the parse threads start")
+    })
+}
+
 /// Runs `f` without the GIL, with at least [`STACK_RED_ZONE`] of stack.
 fn detach<T: Send, F: Send + FnOnce() -> T>(py: Python<'_>, f: F) -> T {
     py.detach(|| stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, f))
@@ -964,31 +977,60 @@ fn module_helpers(py: Python<'_>, source: &str, version: (u8, u8)) -> HashMap<St
     })
 }
 
-/// `index` after `steps`; a module that does not parse holds nothing.
+/// `index` after `steps`; a module that does not parse holds nothing. The added sources
+/// are parsed in parallel, each text once however many names its module has.
 fn indexed(
     mut index: sqlty_python::index::Builder,
     version: (u8, u8),
     steps: Vec<IndexStep>,
 ) -> ModuleIndex {
-    use sqlty_python::index::Roots;
+    use rayon::prelude::*;
+    use sqlty_python::index::{helpers_of, Roots};
     use sqlty_python::types::symbols::Source;
-    for (kind, first, second, third, roots, database) in steps {
-        if kind == "add" {
-            if let Some(source) = Source::new(&second, version) {
-                index.add(&first, source.named(third.as_deref()));
+    let mut unique: HashMap<(&str, &str), usize> = HashMap::new();
+    let slots: Vec<Option<usize>> = steps
+        .iter()
+        .map(|(kind, module, text, name, ..)| {
+            let key = (text.as_str(), name.as_deref().unwrap_or(module));
+            let next = unique.len();
+            (kind == "add").then(|| *unique.entry(key).or_insert(next))
+        })
+        .collect();
+    let mut texts: Vec<(&str, &str)> = vec![("", ""); unique.len()];
+    for (key, slot) in unique {
+        texts[slot] = key;
+    }
+    let parsed: Vec<_> = parse_pool().install(|| {
+        texts
+            .into_par_iter()
+            .map(|(text, name)| {
+                let source = Source::new(text, version)?.named(Some(name));
+                source.targets();
+                let found = helpers_of(&source);
+                Some((Arc::new(source), found))
+            })
+            .collect()
+    });
+    for ((_, first, second, third, roots, database), slot) in steps.into_iter().zip(slots) {
+        match slot {
+            Some(slot) => {
+                if let Some((source, found)) = &parsed[slot] {
+                    index.add_found(&first, Arc::clone(source), found);
+                }
             }
-        } else {
-            let roots = Roots {
-                paths: &roots,
-                read: &|path| std::fs::read_to_string(path).ok(),
-            };
-            index.register(
-                &first,
-                &second,
-                third.as_deref(),
-                roots,
-                database.as_deref(),
-            );
+            None => {
+                let roots = Roots {
+                    paths: &roots,
+                    read: &|path| std::fs::read_to_string(path).ok(),
+                };
+                index.register(
+                    &first,
+                    &second,
+                    third.as_deref(),
+                    roots,
+                    database.as_deref(),
+                );
+            }
         }
     }
     ModuleIndex(index.build())
