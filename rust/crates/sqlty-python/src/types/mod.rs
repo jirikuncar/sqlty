@@ -12,9 +12,12 @@
 //! Any other name is unknown, and a field of unknown type is never reported.
 
 pub mod compat;
+pub mod extract;
+pub mod generic;
 pub mod info;
 pub mod pydantic;
 pub mod resolve;
 pub mod stdlib;
 mod stdlib_table;
+pub mod symbols;
 pub mod ty;

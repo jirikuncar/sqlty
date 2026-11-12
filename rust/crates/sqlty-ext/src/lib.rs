@@ -1170,6 +1170,209 @@ fn unparse_expression(py: Python<'_>, source: &str) -> Option<String> {
     })
 }
 
+fn shown(tp: Option<&sqlty_python::types::ty::Ty>) -> String {
+    tp.map_or_else(|| "None".to_string(), sqlty_python::types::ty::Ty::repr)
+}
+
+fn flag(value: Option<bool>) -> &'static str {
+    match value {
+        Some(true) => "True",
+        Some(false) => "False",
+        None => "None",
+    }
+}
+
+/// The row types of `source` as `sqlty_python::types` reads them, one text per type that
+/// `tests/test_types_rust.py` builds from `extract_type_definitions` too; None where Rust
+/// does not read `source`.
+#[pyfunction]
+#[pyo3(signature = (source, module, version))]
+fn type_definitions(
+    py: Python<'_>,
+    source: &str,
+    module: Option<&str>,
+    version: (u8, u8),
+) -> Option<Vec<String>> {
+    use sqlty_python::types::{extract::extract_type_definitions, symbols::Source};
+    detach(py, || {
+        let source = Arc::new(Source::new(source, version)?);
+        let found = extract_type_definitions(&source, None, module);
+        let types =
+            |types: &sqlty_python::types::info::Dict<Option<sqlty_python::types::ty::Ty>>| {
+                types
+                    .iter()
+                    .map(|(name, tp)| format!("{name}={}", shown(tp.as_ref())))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            };
+        let names = |names: &std::collections::BTreeSet<String>| {
+            names.iter().cloned().collect::<Vec<_>>().join(", ")
+        };
+        Some(
+            found
+                .iter()
+                .map(|(name, info)| {
+                    [
+                        format!("name: {name} {}", info.name),
+                        format!("kind: {}", info.kind.as_str()),
+                        format!(
+                            "fields: {}",
+                            info.fields
+                                .iter()
+                                .map(|(n, t)| format!("{n}={t}"))
+                                .collect::<Vec<_>>()
+                                .join("; ")
+                        ),
+                        format!("required: {}", names(&info.required)),
+                        format!(
+                            "openness: {} {} {} {} {}",
+                            flag(Some(info.closed)),
+                            info.extra_items.as_deref().unwrap_or("None"),
+                            flag(Some(info.extra_items_readonly)),
+                            shown(info.extra_items_type.as_ref()),
+                            info.owner
+                        ),
+                        format!("field_types: {}", types(&info.field_types)),
+                        format!("lineno: {}", info.lineno),
+                        format!("bases: {}", info.bases.join(", ")),
+                        format!("errors: {}", info.errors.join("; ")),
+                        format!(
+                            "columns: {}",
+                            info.columns
+                                .iter()
+                                .map(|(c, f)| format!("{c}={f}"))
+                                .collect::<Vec<_>>()
+                                .join("; ")
+                        ),
+                        format!("opaque: {}", names(&info.opaque)),
+                        format!("allows_extra: {}", flag(Some(info.allows_extra))),
+                        format!("lax: {}", names(&info.lax)),
+                        format!(
+                            "annotations: {}",
+                            info.annotations
+                                .iter()
+                                .map(|(n, a)| format!("{n}={}", a.unparse()))
+                                .collect::<Vec<_>>()
+                                .join("; ")
+                        ),
+                        format!(
+                            "coerced: {}",
+                            info.coerced
+                                .as_ref()
+                                .map_or_else(|| "None".to_string(), types)
+                        ),
+                        format!("module: {}", info.module.as_deref().unwrap_or("None")),
+                    ]
+                    .join("\n")
+                })
+                .collect(),
+        )
+    })
+}
+
+/// How the fields of the row type `Row` of `source` relate, as `sqlty_python::types::ty`
+/// decides: `(display, admits_none, is_optional, erased)` of each, what each takes of
+/// `columns` (see `sqlty_python::types::compat`), then for each pair `is_subtype`,
+/// `is_subtype` in lax mode and `consistent`.
+#[pyfunction]
+#[allow(clippy::needless_pass_by_value)]
+fn type_relations(
+    py: Python<'_>,
+    source: &str,
+    version: (u8, u8),
+    columns: Vec<Option<String>>,
+) -> Option<Vec<String>> {
+    use sqlty_python::types::compat;
+    use sqlty_python::types::ty::{consistent, is_subtype, Lit, Promotions};
+    use sqlty_python::types::{extract::extract_type_definitions, symbols::Source};
+    detach(py, || {
+        let source = Arc::new(Source::new(source, version)?);
+        let found = extract_type_definitions(&source, None, None);
+        let row = found.get("Row")?;
+        let types: Vec<Option<&sqlty_python::types::ty::Ty>> =
+            row.field_types.values().map(Option::as_ref).collect();
+        let mut out = Vec::new();
+        for tp in &types {
+            out.push(match tp {
+                Some(tp) => format!(
+                    "{} {} {} {}",
+                    tp.display(),
+                    flag(tp.admits_none()),
+                    flag(Some(tp.is_optional())),
+                    tp.erase().repr()
+                ),
+                None => "None".to_string(),
+            });
+        }
+        let literal = |values: Option<Vec<Lit>>| {
+            values.map_or_else(
+                || "None".to_string(),
+                |values| {
+                    let values: Vec<String> = values
+                        .iter()
+                        .map(|value| match compat::set_member(value) {
+                            Lit::Str(text) => format!("s:{text}"),
+                            Lit::Int(digits) => format!("i:{digits}"),
+                            Lit::Bool(_) => unreachable!("a set member is not a bool"),
+                        })
+                        .collect();
+                    format!("[{}]", values.join(", "))
+                },
+            )
+        };
+        for (name, annotation) in &row.fields {
+            for column in &columns {
+                let column = column.as_deref();
+                out.push(format!(
+                    "{} {} {}",
+                    flag(Some(compat::check_type_compatibility(row, name, column))),
+                    shown(compat::field_type(row, name)),
+                    flag(Some(compat::field_accepts(annotation, column, version))),
+                ));
+            }
+            for inferred in [Lit::Str("a".to_string()), Lit::Int("1".to_string())] {
+                out.push(literal(compat::field_type(row, name).and_then(|tp| {
+                    compat::declared_literal_values(tp, &[inferred]).map(|values| {
+                        let values: std::collections::BTreeSet<Lit> =
+                            values.iter().map(compat::set_member).collect();
+                        values.into_iter().collect()
+                    })
+                })));
+            }
+            out.push(compat::parse_tuple_annotation(annotation).map_or_else(
+                || "None".to_string(),
+                |items| {
+                    let items: Vec<String> =
+                        items.iter().map(|(n, t)| format!("{n}={t}")).collect();
+                    items.join("; ")
+                },
+            ));
+        }
+        for column in columns.iter().flatten() {
+            out.push(literal(compat::column_literal_values(column)));
+            out.push(
+                flag(Some(compat::check_type_compatibility(
+                    row,
+                    "missing",
+                    Some(column),
+                )))
+                .to_string(),
+            );
+        }
+        for a in &types {
+            for b in &types {
+                out.push(format!(
+                    "{} {} {}",
+                    flag(is_subtype(*a, *b, Promotions::Numeric)),
+                    flag(is_subtype(*a, *b, Promotions::Lax)),
+                    flag(consistent(*a, *b))
+                ));
+            }
+        }
+        Some(out)
+    })
+}
+
 /// `(line, annotation, query, annotation_span)` for each `SQL[T](...)` call in Python source.
 ///
 /// `query` is the `--sql` string without its prefix, or None when the call
@@ -1486,6 +1689,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(template_strings, m)?)?;
     m.add_function(wrap_pyfunction!(helper_sites, m)?)?;
     m.add_function(wrap_pyfunction!(unparse_expression, m)?)?;
+    m.add_function(wrap_pyfunction!(type_definitions, m)?)?;
+    m.add_function(wrap_pyfunction!(type_relations, m)?)?;
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;
     m.add_function(wrap_pyfunction!(query_at, m)?)?;

@@ -32,7 +32,7 @@ pub struct Import {
 }
 
 /// The imports of a module, as the Python passes read them.
-pub(crate) struct Imports {
+pub struct Imports {
     /// Every alias, in `ast.walk` order.
     pub entries: Vec<Import>,
     /// `ParsedSource.imported_names`.
@@ -42,7 +42,8 @@ pub(crate) struct Imports {
 }
 
 impl Imports {
-    pub(crate) fn of(body: &[Stmt]) -> Self {
+    /// The imports of `body`, at any depth.
+    pub fn of(body: &[Stmt]) -> Self {
         let mut imports = Vec::new();
         collect_imports(body, 1, &mut imports);
         imports.sort_by_key(|(depth, _)| *depth);
@@ -171,6 +172,21 @@ pub fn facts(source: &str) -> Option<Facts> {
         found.driver_calls = drivers::find(source, &module.body, &imported);
     }
     Some(found)
+}
+
+/// `(offset, callee)` of each `X[T](...)` of `body` whose `T` is `typing.Any`, by offset;
+/// `typing` is [`Imports::typing`].
+pub fn any_calls(body: &[Stmt], typing: &[(String, String)]) -> Vec<(usize, String)> {
+    let aliases = Aliases(typing);
+    let mut calls = Calls {
+        aliases: &aliases,
+        names: Vec::new(),
+        attributes: Vec::new(),
+        any_calls: Vec::new(),
+    };
+    calls.visit_body(body);
+    calls.any_calls.sort_unstable();
+    calls.any_calls
 }
 
 /// Imports at any depth, with the depth `ast` gives them: one more than the node holding them.
