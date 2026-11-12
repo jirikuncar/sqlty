@@ -45,7 +45,23 @@ async function sourceAction(host: Host, kind: string): Promise<void> {
     void vscode.window.showErrorMessage(reason);
     return;
   }
-  await vscode.commands.executeCommand("editor.action.codeAction", { kind, apply: "first" });
+  const document = vscode.window.activeTextEditor?.document;
+  if (document === undefined) {
+    return;
+  }
+  const whole = new vscode.Range(0, 0, document.lineCount, 0);
+  const actions = await vscode.commands.executeCommand<vscode.CodeAction[]>(
+    "vscode.executeCodeActionProvider",
+    document.uri,
+    whole,
+    kind,
+  );
+  const action = actions.find((found) => found.kind?.value === kind && found.edit !== undefined);
+  if (action?.edit === undefined) {
+    void vscode.window.showInformationMessage(`sqlty: ${kind} changes nothing in this file.`);
+    return;
+  }
+  await vscode.workspace.applyEdit(action.edit);
 }
 
 async function debugInformation(host: Host): Promise<void> {
