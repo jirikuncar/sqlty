@@ -1575,6 +1575,59 @@ fn module_diagnostics(
     })
 }
 
+/// `PsycopgScan.render` of the first argument of every call of a plain name in `source`,
+/// by offset of the argument: the SQL, `"unchecked"`, or None when it is no composition;
+/// `(offset, False)` where the Rust model does not cover what Python computes. None where
+/// Rust does not read the source.
+#[pyfunction]
+fn rendered_compositions(
+    py: Python<'_>,
+    source: &str,
+    version: (u8, u8),
+) -> Option<Vec<(usize, bool, Option<String>)>> {
+    use ruff_python_ast::visitor::{walk_expr, Visitor};
+    use ruff_python_ast::Expr;
+    use ruff_text_size::Ranged;
+    use sqlty_python::compose::{render, Rendered, Scan, UNCHECKED};
+    use sqlty_python::types::symbols::Source;
+
+    struct Calls<'a>(Vec<&'a Expr>);
+    impl<'a> Visitor<'a> for Calls<'a> {
+        fn visit_expr(&mut self, expr: &'a Expr) {
+            if let Expr::Call(call) = expr {
+                if let (Expr::Name(_), Some(first)) =
+                    (call.func.as_ref(), call.arguments.args.first())
+                {
+                    self.0.push(first);
+                }
+            }
+            walk_expr(self, expr);
+        }
+    }
+
+    detach(py, || {
+        let source = Source::new(source, version)?;
+        let scan = Scan::new(&source);
+        let mut calls = Calls(Vec::new());
+        calls.visit_body(source.body());
+        let mut found: Vec<(usize, bool, Option<String>)> = calls
+            .0
+            .into_iter()
+            .map(|arg| {
+                let at = arg.start().to_usize();
+                match render(&scan, arg, None) {
+                    Some(Rendered::Text(text)) => (at, true, Some(text)),
+                    Some(Rendered::Unchecked) => (at, true, Some(UNCHECKED.to_string())),
+                    Some(Rendered::None) => (at, true, None),
+                    None => (at, false, None),
+                }
+            })
+            .collect();
+        found.sort();
+        Some(found)
+    })
+}
+
 /// `(line, annotation, query, annotation_span)` for each `SQL[T](...)` call in Python source.
 ///
 /// `query` is the `--sql` string without its prefix, or None when the call
@@ -1894,6 +1947,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(type_relations, m)?)?;
     m.add_function(wrap_pyfunction!(row_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(module_diagnostics, m)?)?;
+    m.add_function(wrap_pyfunction!(rendered_compositions, m)?)?;
     m.add_function(wrap_pyfunction!(module_index, m)?)?;
     m.add_class::<ModuleIndex>()?;
     m.add_function(wrap_pyfunction!(helper_sites, m)?)?;

@@ -41,6 +41,8 @@ pub mod calls;
 #[allow(missing_docs)]
 pub mod check;
 pub mod checker;
+#[allow(missing_docs)]
+pub mod compose;
 pub mod config;
 pub mod drivers;
 pub mod edit;

@@ -231,6 +231,9 @@ def module_index(
     version: tuple[int, int],
     steps: list[tuple[str, str, str, str | None, list[Path], str | None]],
 ) -> ModuleIndex | None: ...
+def rendered_compositions(
+    source: str, version: tuple[int, int]
+) -> list[tuple[int, bool, str | None]] | None: ...
 def wrapped_queries(
     source: str, *, import_style: str | None = None
 ) -> list[tuple[int, str, str | None, tuple[int, int]]]: ...
