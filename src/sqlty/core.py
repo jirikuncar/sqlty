@@ -11,6 +11,7 @@ needs the Python runtime; those passes live in ``sqlty._check``.
 from __future__ import annotations
 
 import ast
+import sys
 from collections import Counter
 from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING, NamedTuple
@@ -24,6 +25,7 @@ from sqlty._core import (
     infer_type,
     returns_rows,
 )
+from sqlty._core import add_json_types as _add_json_types
 from sqlty._core import add_param_types as _add_param_types
 from sqlty._core import analyze_columns as _analyze_columns
 from sqlty._core import analyze_params as _analyze_params
@@ -35,6 +37,7 @@ from sqlty._core import format_source as _format_source
 from sqlty._core import highlight_source as _highlight_source
 from sqlty._core import hover_source as _hover_source
 from sqlty._core import load_schema as _load_schema
+from sqlty._core import module_calls as _module_calls
 from sqlty._core import parse_error as _parse_error
 from sqlty._core import query_at as _query_at
 from sqlty._core import query_diagnostics as _query_diagnostics
@@ -45,7 +48,7 @@ from sqlty._core import schema_skipped_tables as _schema_skipped_tables
 from sqlty._core import strip_source as _strip_source
 from sqlty._helpers import MARKER, HelperIndex, find_helper_calls
 from sqlty._lint import Diagnostic
-from sqlty._source import ParsedSource
+from sqlty._source import AST, AstMismatch, ParsedSource
 
 if TYPE_CHECKING:
     pass
@@ -321,11 +324,7 @@ def rewrite_source(
         keep_lines=keep_lines,
     )
     if json_types == "typing.TypedDict" and rewritten != source:
-        from sqlty._json_types import add_json_types
-
-        rewritten = add_json_types(
-            rewritten, dialect=dialect, schema_sql=schema_sql, import_style=import_style
-        )
+        rewritten = _json_types(rewritten, dialect, schema_sql, import_style)
     if param_types:
         rewritten = _add_param_types(
             rewritten, dialect=dialect, schema_sql=schema_sql, import_style=import_style
@@ -401,8 +400,8 @@ def fix_source(
         line: None if ignore.rules is None else list(ignore.rules)
         for line, ignore in parsed.ignores.items()
     }
-    for call in find_helper_calls(parsed, helpers, module):
-        for line in call.typed_lines:
+    for typed, _, _, _ in _helper_sites(parsed, helpers, module):
+        for line in range(typed[0], typed[1] + 1) if typed else ():
             if line not in suppressed:
                 suppressed[line] = ["stale-rewrite"]
             elif (named := suppressed[line]) is not None:
@@ -417,11 +416,7 @@ def fix_source(
         suppressed=suppressed or None,
     )
     if json_types == "typing.TypedDict" and fixed != parsed.text:
-        from sqlty._json_types import add_json_types
-
-        fixed = add_json_types(
-            fixed, dialect=dialect, schema_sql=schema_sql, import_style=import_style
-        )
+        fixed = _json_types(fixed, dialect, schema_sql, import_style)
     if param_types:
         fixed = _add_param_types(
             fixed, dialect=dialect, schema_sql=schema_sql, import_style=import_style
@@ -616,15 +611,11 @@ def query_statistics(
             counts[kind] += 1
         elif outcome := _outcome(text, dialect, schema_sql):
             counts[outcome] += 1
-    for call in find_helper_calls(parsed, helpers, module, variants=query_variants):
-        if call.query is None:
-            if not is_any_row(call):
-                counts["dynamic-query" if call.dynamic else "unchecked-query"] += 1
-            continue
-        for query in [v.query for v in call.variants] or [call.query]:
-            if not (MARKER.match(query) and query in parsed.literals) and (
-                outcome := _outcome(query, dialect, schema_sql)
-            ):
+    for _, queries, unchecked, _ in _helper_sites(parsed, helpers, module, query_variants):
+        if unchecked is not None:
+            counts[unchecked] += 1
+        for query in queries:
+            if outcome := _outcome(query, dialect, schema_sql):
                 counts[outcome] += 1
     return counts
 
@@ -825,21 +816,92 @@ def highlight_source(
     return [Highlight(*item) for item in found]
 
 
+def _json_types(
+    source: str, dialect: str, schema_sql: str | Schema | None, import_style: str | None
+) -> str:
+    """``source`` with the ``typing.Any`` row items of JSON columns of known shape typed."""
+    if AST != "python":
+        rust = _add_json_types(
+            source,
+            version=sys.version_info[:2],
+            dialect=dialect,
+            schema_sql=schema_sql,
+            import_style=import_style,
+        )
+        if AST == "rust":
+            return rust
+    from sqlty._json_types import add_json_types
+
+    python = add_json_types(
+        source, dialect=dialect, schema_sql=schema_sql, import_style=import_style
+    )
+    if AST == "compare" and rust != python:
+        raise AstMismatch("add_json_types", rust, python, source)
+    return python
+
+
 def _helper_starts(
     parsed: ParsedSource, helpers: HelperIndex | None = None, module: str | None = None
 ) -> list[int]:
     """The byte offsets of the string literals helper calls pass as their query."""
-    return [
-        call.query_span[0]
-        for call in find_helper_calls(parsed, helpers, module)
-        if call.query_span is not None
-        and (
+    return [start for _, _, _, start in _helper_sites(parsed, helpers, module) if start is not None]
+
+
+type _Site = tuple[tuple[int, int] | None, list[str], str | None, int | None]
+"""A helper call: its first and last line when its strings need no ``SQL[T]``, the queries
+it can run that the lexer does not read by their marker, the rule of a call that is not
+checked, and the byte offset of the string literal it passes as its query."""
+
+
+def _helper_sites(
+    parsed: ParsedSource,
+    helpers: HelperIndex | None,
+    module: str | None,
+    variants: int | None = None,
+) -> list[_Site]:
+    if AST != "python":
+        rust = _module_calls(
+            parsed.text,
+            version=sys.version_info[:2],
+            index=None if helpers is None else helpers.rust(),
+            name=parsed.module,
+            module=module,
+            variants=variants,
+        )
+        if AST == "rust":
+            return rust
+    python = _python_sites(parsed, helpers, module, variants)
+    if AST == "compare" and parsed.facts is not None and rust != python:
+        raise AstMismatch("helper_sites", rust, python, parsed.text)
+    return python
+
+
+def _python_sites(
+    parsed: ParsedSource, helpers: HelperIndex | None, module: str | None, variants: int | None
+) -> list[_Site]:
+    sites: list[_Site] = []
+    for call in find_helper_calls(parsed, helpers, module, variants=variants):
+        lines = call.typed_lines
+        queries = (
+            [] if call.query is None else [str(v.query) for v in call.variants] or [str(call.query)]
+        )
+        literal = call.query_span is not None and (
             call.query_node is None
             or (
                 isinstance(call.query_node, ast.Constant) and isinstance(call.query_node.value, str)
             )
         )
-    ]
+        sites.append(
+            (
+                (lines[0], lines[-1]) if lines else None,
+                [q for q in queries if not (MARKER.match(q) and q in parsed.literals)],
+                None
+                if call.query is not None or is_any_row(call)
+                else ("dynamic-query" if call.dynamic else "unchecked-query"),
+                call.query_span[0] if literal and call.query_span is not None else None,
+            )
+        )
+    return sites
 
 
 def _outcome(query: str, dialect: str, schema_sql: str | Schema | None) -> str | None:
