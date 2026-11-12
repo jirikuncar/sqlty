@@ -43,12 +43,46 @@ import bisect
 import functools
 import io
 import itertools
+import os
 import re
 import tokenize
 import typing
 from dataclasses import dataclass
 
+from sqlty._core import module_facts
 from sqlty._psycopg import PsycopgScan
+
+AST = os.environ.get("SQLTY_AST", "python")
+"""Who reads the syntax tree: ``python`` (``ast``), ``rust`` (``sqlty_python::module``, falling
+back to ``ast``), or ``compare``, which runs both and raises ``AstMismatch`` when they differ."""
+
+
+class Facts(typing.NamedTuple):
+    """What ``sqlty_python::module::facts`` reads of a module, see ``ParsedSource.facts``."""
+
+    names: list[str]
+    attributes: list[str]
+    imports: list[tuple[str, str, str | None, int]]
+    any_calls: list[tuple[int, str]]
+    typing_aliases: list[tuple[str, str]]
+    driver_calls: list[
+        tuple[
+            int,
+            str,
+            list[tuple[int | str, str | None]] | None,
+            str,
+            str | None,
+            tuple[int, int],
+        ]
+    ]
+
+
+class AstMismatch(AssertionError):
+    """``SQLTY_AST=compare`` found the Rust and Python readings of a module different."""
+
+    def __init__(self, what: str, rust: object, python: object, text: str) -> None:
+        super().__init__(f"{what}: rust {rust!r} != python {python!r}\n{text}")
+
 
 _TYPING_MODULES = frozenset({"typing", "typing_extensions"})
 # A comment runs to the end of its line, so the gap can split text only one way.
@@ -594,6 +628,14 @@ class ParsedSource:
     @functools.cached_property
     def typing_aliases(self) -> dict[str, str]:
         """Local names for ``typing`` / ``typing_extensions`` and their members, to originals."""
+        if AST == "python" or self.facts is None:
+            return self._typing_aliases()
+        rust = dict(self.facts.typing_aliases)
+        if AST == "compare" and rust != (python := self._typing_aliases()):
+            raise AstMismatch("typing_aliases", rust, python, self.text)
+        return rust
+
+    def _typing_aliases(self) -> dict[str, str]:
         aliases: dict[str, str] = {}
         for node in self.imports:
             if isinstance(node, ast.ImportFrom):
@@ -615,10 +657,10 @@ class ParsedSource:
             >>> {name: ast.unparse(value) for name, value in aliases.items()}
             {'A': 'tuple[int]', 'B': 'A'}
         """
-        if self.tree is None:
+        if (tree := self.tree) is None:
             return {}
         aliases: dict[str, ast.expr] = {}
-        for node in self.tree.body:
+        for node in tree.body:
             match node:
                 case ast.TypeAlias(name=ast.Name(id=name), type_params=[], value=value):
                     aliases[name] = value
@@ -643,6 +685,20 @@ class ParsedSource:
             >>> ParsedSource("import a.b, c as d\\nfrom e.f import g as h").imported_names
             {'a': 'a', 'd': 'c', 'h': 'e.f.g'}
         """
+        if AST == "python" or self.facts is None:
+            return self._imported_names()
+        rust: dict[str, str] = {}
+        for local, original, module, level in self.facts.imports:
+            if module is None:
+                root = original.partition(".")[0]
+                rust.setdefault(*((root, root) if local == original else (local, original)))
+            elif module and not level:
+                rust.setdefault(local, f"{module}.{original}")
+        if AST == "compare" and rust != (python := self._imported_names()):
+            raise AstMismatch("imported_names", rust, python, self.text)
+        return rust
+
+    def _imported_names(self) -> dict[str, str]:
         names: dict[str, str] = {}
         for node in self.imports:
             if isinstance(node, ast.ImportFrom):
@@ -705,6 +761,18 @@ class ParsedSource:
         wrapper = _wrapper_name(import_style)
         if wrapper is None or "Any" not in self.text or not self.may_wrap(import_style):
             return []
+        if AST == "python" or self.facts is None:
+            return self._any_calls(wrapper)
+        rust = [
+            offset
+            for offset, name in self.facts.any_calls
+            if name == wrapper or name.endswith(f".{wrapper}")
+        ]
+        if AST == "compare" and rust != (python := self._any_calls(wrapper)):
+            raise AstMismatch("any_calls", rust, python, self.text)
+        return rust
+
+    def _any_calls(self, wrapper: str) -> list[int]:
         aliases = self.typing_aliases
         starts = self._byte_lines
         offsets = []
@@ -716,6 +784,12 @@ class ParsedSource:
             if name == wrapper or name.endswith(f".{wrapper}"):
                 offsets.append(starts[func.value.lineno - 1] + func.value.col_offset)
         return sorted(offsets)
+
+    @functools.cached_property
+    def facts(self) -> Facts | None:
+        """What Rust reads of the module, ``None`` when it cannot parse the text."""
+        found = module_facts(self.text)
+        return None if found is None else Facts(*found)
 
     def may_need_rust_check(self, import_style: str | None = None) -> bool:
         """Whether the Rust checker can report anything for the text.

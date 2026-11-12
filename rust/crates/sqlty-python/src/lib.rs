@@ -16,6 +16,8 @@
 //! - [`config`]: the `[tool.sqlty]` table, loaded and validated for every host.
 //! - [`options`]: the settings every entry point shares.
 //! - [`params`]: [`params::add_param_types`] writes the `P` of `SQL[R, P]`.
+//! - [`module`]: [`module::facts`] reads, from a Python syntax tree, what decides whether the
+//!   Python passes need one.
 //! - [`queries`]: [`queries::check_queries`] checks the named queries of a `.sql` file.
 //!
 //! The tokenizer and scanner are crate-internal.
@@ -36,14 +38,18 @@
 
 pub mod checker;
 pub mod config;
+pub mod drivers;
 pub mod edit;
 pub mod fixer;
 pub mod locate;
+pub mod module;
 pub mod options;
 pub mod params;
+pub mod parse;
 pub mod queries;
 pub mod rewriter;
 pub mod rules;
 pub(crate) mod scan;
+pub mod scopes;
 pub(crate) mod template;
 pub(crate) mod tokens;
