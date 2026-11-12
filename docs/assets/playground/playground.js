@@ -653,10 +653,10 @@ function resizable(handle, panel) {
   });
 }
 
-if (new URLSearchParams(location.search).has("ask")) asking(root.querySelector("[data-ask]"));
+if (new URLSearchParams(location.search).has("ask")) asking(root.querySelector("[data-ask]"), root.querySelector("[data-ask-open]"));
 
 // Natural language to SQL with a model that runs in the page (ask.js), behind `?ask`.
-async function asking(form) {
+async function asking(form, opener) {
   const llm = await import("./ask.js");
   const question = form.querySelector("[data-ask-question]");
   const picked = form.querySelector("[data-ask-model]");
@@ -669,11 +669,27 @@ async function asking(form) {
   let loaded;
   let placed = false;
   editor.onDidFocusEditorText(() => (placed = editor.getModel() === models.python));
-  form.hidden = false;
+  opener.hidden = false;
+  // A popover sits in the top layer, so the scrolling toolbar does not clip it; it follows the
+  // button and stays within the playground.
+  const place = () => {
+    const box = opener.getBoundingClientRect();
+    const right = Math.min(innerWidth - 8, root.getBoundingClientRect().right);
+    form.style.top = `${box.bottom + 4}px`;
+    form.style.left = `${Math.max(8, Math.min(box.left, right - form.offsetWidth))}px`;
+  };
+  form.addEventListener("toggle", (event) => {
+    const open = event.newState === "open";
+    for (const type of ["scroll", "resize"]) (open ? addEventListener : removeEventListener)(type, place, { passive: true });
+    if (!open) return;
+    place();
+    question.focus();
+  });
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const button = form.querySelector("button");
     button.disabled = true;
+    opener.setAttribute("aria-busy", "true");
     try {
       const model = llm.MODELS.find((found) => found.id === picked.value);
       if (loaded?.model !== model) {
@@ -729,6 +745,7 @@ async function asking(form) {
       status.textContent = String(error.message ?? error);
     } finally {
       button.disabled = false;
+      opener.removeAttribute("aria-busy");
     }
   });
 }

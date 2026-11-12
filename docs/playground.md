@@ -28,20 +28,23 @@ queries as you type. It runs in your browser. The engine is compiled to
     </label>
     <span class="sqlty-actions" role="toolbar" aria-label="Actions">
       <button type="button" class="sqlty-button sqlty-button--primary" data-fix>Fix all</button>
-      <button type="button" class="sqlty-button" data-rewrite>Rewrite</button>
-      <button type="button" class="sqlty-button" data-strip>Strip</button>
-      <button type="button" class="sqlty-button" data-format>Format</button>
+      <span class="sqlty-group" role="group" aria-label="Source">
+        <button type="button" class="sqlty-button" data-rewrite>Rewrite</button>
+        <button type="button" class="sqlty-button" data-strip>Strip</button>
+        <button type="button" class="sqlty-button" data-format>Format</button>
+      </span>
+      <button type="button" class="sqlty-button" data-ask-open popovertarget="sqlty-ask" aria-haspopup="dialog" hidden>Ask</button>
       <button type="button" class="sqlty-button" data-copy-link><span class="sqlty-wide">Copy link</span><span class="sqlty-narrow"></span></button>
-      <span class="sqlty-group" role="group" aria-label="Font size">
+      <span class="sqlty-group" role="group" aria-label="View">
         <button type="button" class="sqlty-button" data-zoom="-1" title="Smaller (Ctrl+-)" aria-label="Smaller">A&minus;</button>
         <button type="button" class="sqlty-button" data-zoom="1" title="Larger (Ctrl+=)" aria-label="Larger">A+</button>
+        <button type="button" class="sqlty-button" data-present title="Fill the screen (Ctrl+Shift+F)" aria-pressed="false">Present</button>
       </span>
-      <button type="button" class="sqlty-button" data-present title="Fill the screen (Ctrl+Shift+F)" aria-pressed="false">Present</button>
       <a class="sqlty-button sqlty-open" data-open target="_blank" rel="noopener">Open in playground</a>
     </span>
     <span class="sqlty-status" data-link-status role="status"></span>
   </div>
-  <form class="sqlty-ask" data-ask hidden>
+  <form class="sqlty-ask" id="sqlty-ask" data-ask popover aria-label="Ask for a query">
     <input type="text" data-ask-question placeholder="Ask for a query, or put the cursor on a # comment in queries.py" aria-label="Question">
     <select data-ask-model aria-label="Model"></select>
     <button type="submit" class="sqlty-button sqlty-button--primary">Ask</button>
@@ -102,13 +105,19 @@ queries as you type. It runs in your browser. The engine is compiled to
   .sqlty-toolbar label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.64rem; color: var(--md-default-fg-color--light); }
   .sqlty-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-left: auto; }
   .sqlty-group { display: inline-flex; }
-  .sqlty-group .sqlty-button:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
-  .sqlty-group .sqlty-button:last-child { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
+  .sqlty-group .sqlty-button:not(:last-child) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+  .sqlty-group .sqlty-button:not(:first-child) { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
+  .sqlty-group .sqlty-button:hover, .sqlty-group .sqlty-button:focus-visible, .sqlty-group [aria-pressed="true"] { position: relative; }
   .sqlty-narrow { display: none; }
   .sqlty-narrow::before { content: "Link"; }
   .sqlty-status { flex-basis: 100%; font-size: 0.64rem; }
-  .sqlty-ask { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
-  .sqlty-ask[hidden] { display: none; }
+  .sqlty-ask {
+    flex-wrap: wrap; gap: 0.4rem; margin: 0; inset: auto; width: min(36rem, calc(100vw - 1rem)); padding: 0.6rem;
+    color: var(--md-default-fg-color); background-color: var(--md-default-bg-color);
+    border: 1px solid var(--md-default-fg-color--lighter); border-radius: 0.2rem; box-shadow: var(--md-shadow-z2);
+  }
+  .sqlty-ask:popover-open { display: flex; }
+  [data-ask-open][aria-busy="true"]::after { content: "\2026"; }
   .sqlty-ask input {
     flex: 1 1 16rem; font: inherit; font-size: 0.7rem; padding: 0.3rem 0.7rem; color: var(--md-default-fg-color);
     background-color: var(--md-code-bg-color); border: 1px solid var(--md-default-fg-color--lighter); border-radius: 0.2rem;
