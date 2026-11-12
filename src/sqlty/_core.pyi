@@ -174,6 +174,7 @@ _SiteArg = tuple[
     bool, tuple[int, int], str | None, str | None, list[tuple[int | str, str | None]] | None
 ]
 
+def unparse_expression(source: str) -> str | None: ...
 def wrapped_queries(
     source: str, *, import_style: str | None = None
 ) -> list[tuple[int, str, str | None, tuple[int, int]]]: ...

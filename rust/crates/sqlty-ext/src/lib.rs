@@ -34,6 +34,7 @@ use sqlty_sql::analyzer;
 use sqlty_sql::highlight::Highlight;
 
 use std::collections::HashMap;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
@@ -1148,6 +1149,19 @@ fn helper_sites(py: Python<'_>, source: &str, names: Vec<String>) -> Option<Vec<
     })
 }
 
+/// `ast.unparse` of the expression `source`, as `sqlty_python::unparse` writes it, or None
+/// where Rust does not read `source`.
+#[pyfunction]
+fn unparse_expression(py: Python<'_>, source: &str) -> Option<String> {
+    detach(py, || {
+        let parsed = sqlty_python::parse::expression(source)?;
+        Some(sqlty_python::unparse::unparse(
+            &parsed.syntax().body,
+            source,
+        ))
+    })
+}
+
 /// `(line, annotation, query, annotation_span)` for each `SQL[T](...)` call in Python source.
 ///
 /// `query` is the `--sql` string without its prefix, or None when the call
@@ -1426,6 +1440,12 @@ fn highlight_source(
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     recursive::set_minimum_stack_size(STACK_RED_ZONE);
     recursive::set_stack_allocation_size(STACK_SEGMENT);
+    let legacy = m.py().eval(
+        c"__import__('ast').parse(\"t'{a !r}'\").body[0].value.values[0].str == 'a'",
+        None,
+        None,
+    )?;
+    sqlty_python::unparse::LEGACY_FIELD_TEXT.store(legacy.extract()?, Ordering::Relaxed);
     m.add_function(wrap_pyfunction!(infer_type, m)?)?;
     m.add_function(wrap_pyfunction!(load_schema, m)?)?;
     m.add_class::<SchemaHandle>()?;
@@ -1456,6 +1476,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(module_facts, m)?)?;
     m.add_function(wrap_pyfunction!(template_strings, m)?)?;
     m.add_function(wrap_pyfunction!(helper_sites, m)?)?;
+    m.add_function(wrap_pyfunction!(unparse_expression, m)?)?;
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;
     m.add_function(wrap_pyfunction!(query_at, m)?)?;
