@@ -197,7 +197,7 @@ The file tabs above the editor switch between the files `sqlty check` reads:
 |---|---|---|
 | `queries.py` | The Python source: diagnostics under the code with their quick fixes, SQL highlighted in query strings, completion and hover in queries | [`sqlty server`](recipes/vscode.md) |
 | `schema.sql` | The `CREATE TABLE` statements the queries are typed against | [`schema`](reference/configuration.md#schema) |
-| `sqlty.toml` | The `dialect`, `driver`, `import-style`, `param-types`, `rules` and `types` of [`[tool.sqlty]`](reference/configuration.md); its `dialect` wins over the select | `sqlty.toml` or `pyproject.toml` |
+| `sqlty.toml` | The `dialect`, `driver`, `import-style`, `param-types`, `preview`, `max-query-variants`, `rules` and `types` of [`[tool.sqlty]`](reference/configuration.md); its `dialect` wins over the select | `sqlty.toml` or `pyproject.toml` |
 
 The console below the editor shows what sqlty makes of them:
 
@@ -321,8 +321,8 @@ size of the editor and the console, for a projector or a screen share.
 
 On macOS, **Command** works as **Ctrl**.
 
-!!! note "Row types from classes need Python"
-    The playground reads `tuple[...]` row types. A `TypedDict`, dataclass or Pydantic
-    model is resolved by the Python half of sqlty, which does not run in the browser,
-    so `sqlty check` can report more on your machine. Keys of `sqlty.toml` that name
+!!! note "One file"
+    The playground checks `queries.py` by itself: row types from classes, helper and
+    driver calls and `# sqlty: ignore` comments work as on your machine, but a helper or
+    a type imported from another module is not followed. Keys of `sqlty.toml` that name
     files, such as `schema` and `overrides`, are errors here.

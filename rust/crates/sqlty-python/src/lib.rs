@@ -50,6 +50,7 @@ pub mod fixer;
 pub mod helpers;
 #[allow(missing_docs)]
 pub mod index;
+pub mod json_types;
 pub mod locate;
 pub mod module;
 pub mod options;
@@ -62,6 +63,7 @@ pub mod rows;
 pub mod rules;
 pub(crate) mod scan;
 pub mod scopes;
+pub mod suppress;
 pub(crate) mod template;
 pub mod templates;
 pub(crate) mod tokens;

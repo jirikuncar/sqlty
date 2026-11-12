@@ -111,7 +111,7 @@ def test_cli_parses_each_file_once(tmp_path, monkeypatch, parses, tokenized, cap
     # The Python index reads the imports of every module to find re-exported helpers.
     assert parses[PLAIN] == (AST != "rust")
     assert max(parses.values()) <= 1
-    assert len(tokenized) == 1
+    assert len(tokenized) == (AST != "rust")
 
 
 def test_marker_free_file_is_neither_parsed_nor_tokenized(parses, tokenized):
