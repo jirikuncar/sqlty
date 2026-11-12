@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import ast
+import bisect
 import re
 import sys
 import threading
@@ -21,6 +22,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from sqlty._core import helper_sites
 from sqlty._params import ParamArg, arg_type, literal_params
 from sqlty._psycopg import UNCHECKED
 from sqlty._source import AST, AstMismatch, ParsedSource
@@ -734,11 +736,39 @@ def find_helper_calls(
         [(5, 'SELECT 1')]
     """
     parsed = ParsedSource.of(source, module)
+    if AST == "compare":
+        rust = _find_helper_calls(parsed, helpers, module, variants=variants, rust=True)
+        python = _find_helper_calls(parsed, helpers, module, variants=variants, rust=False)
+        if list(map(_comparable, rust)) != list(map(_comparable, python)):
+            raise AstMismatch("find_helper_calls", rust, python, parsed.text)
+        return python
+    return _find_helper_calls(parsed, helpers, module, variants=variants, rust=AST == "rust")
+
+
+def _comparable(call: HelperCall) -> tuple[HelperCall, str | None]:
+    """``call`` with its syntax nodes spelled out, which Rust and ``ast`` build apart."""
+    row = None if call.row is None else ast.dump(call.row, include_attributes=True)
+    return call._replace(row=None, query_node=None), row
+
+
+def _find_helper_calls(
+    parsed: ParsedSource,
+    helpers: HelperIndex | None,
+    module: str | None,
+    *,
+    variants: int | None,
+    rust: bool,
+) -> list[HelperCall]:
     local = parsed.may_define_helpers
     imported = helpers is not None and bool(helpers.modules) and helpers.mentions(parsed.text)
     composed = "psycopg" in parsed.text
     if not (local or imported):
         return []
+    if rust and not local:
+        assert helpers is not None
+        sited = _site_calls(parsed, helpers, module if module is not None else parsed.module)
+        if sited is not None:
+            return sited
     own = index_functions(parsed) if local else {}
     if not own and not imported:
         return []
@@ -883,3 +913,127 @@ def find_helper_calls(
 
 def _order(call: HelperCall) -> tuple[int, tuple[int, int]]:
     return call.line, call.query_span or (0, 0)
+
+
+_Arg = tuple[
+    bool, tuple[int, int], str | None, str | None, list[tuple[int | str, str | None]] | None
+]
+
+
+def _site_calls(
+    parsed: ParsedSource, helpers: HelperIndex, module: str | None
+) -> list[HelperCall] | None:
+    """``find_helper_calls`` from the calls Rust reads, for a file that defines no helper.
+
+    ``None`` when Rust cannot decide: it does not read the file, or a helper call passes a
+    query that is not a string literal (a composition, a name, a forwarded parameter).
+    """
+    if (facts := parsed.facts) is None:
+        return None
+    functions, modules = _imports_of(facts.imports, module)
+    names = set(helpers.names)
+    names |= {local for local, (_, original) in functions.items() if original in names}
+    if (sites := helper_sites(parsed.text, sorted(names))) is None:
+        return None
+
+    def module_of(prefix: str) -> str:
+        head, _, rest = prefix.partition(".")
+        mod = modules.get(head)
+        return (f"{mod}.{rest}" if rest else mod) if mod is not None else prefix
+
+    def method_of(cls: str, name: str) -> Helper | None:
+        prefix, _, cls_name = cls.rpartition(".")
+        if prefix:
+            return helpers.get(module_of(prefix), f"{cls_name}.{name}")
+        if cls in functions:
+            module_name, original = functions[cls]
+            return helpers.get(module_name, f"{original}.{name}")
+        return None
+
+    def resolve(prefix: str | None, name: str, receiver: str | None) -> Helper | None:
+        if prefix is None:
+            return helpers.get(*functions[name]) if name in functions else None
+        if (found := helpers.get(module_of(prefix), name)) is not None:
+            return found
+        if (found := method_of(prefix, name)) is not None:
+            return found if found.kind != "instance" else None
+        return method_of(receiver, name) if receiver is not None else None
+
+    aliases = parsed.typing_aliases
+    calls = []
+    for (line, end_line), prefix, name, args, keywords, receiver in sites:
+        if (helper := resolve(prefix, name, receiver)) is None:
+            continue
+        query = _site_argument(helper, args, keywords, helper.query)
+        if query is None:
+            continue
+        starred, span, text, _, _ = query
+        if text is None or starred:
+            return None
+        row = _site_argument(helper, args, keywords, helper.row)
+        calls.append(
+            HelperCall(
+                line,
+                text,
+                None if row is None else _expression_at(parsed, row[1]),
+                aliases,
+                _site_params(helper, args, keywords),
+                end_line,
+                configured=helper.configured,
+                query_span=span,
+            )._on(helper.database)
+        )
+    return sorted(calls, key=_order)
+
+
+def _site_argument(
+    helper: Helper, args: list[_Arg], keywords: list[tuple[str | None, _Arg]], param: str | None
+) -> _Arg | None:
+    """``_argument`` of a call Rust read."""
+    if param is None:
+        return None
+    if param in helper.keywords:
+        for name, value in keywords:
+            if name == param:
+                return value
+    if param in helper.positional:
+        index = helper.positional.index(param)
+        if any(arg[0] for arg in args[: index + 1]):
+            return None
+        if index < len(args):
+            return args[index]
+    return None
+
+
+def _site_params(
+    helper: Helper, args: list[_Arg], keywords: list[tuple[str | None, _Arg]]
+) -> tuple[ParamArg, ...] | None:
+    """``_call_params`` of a call Rust read."""
+    if helper.params is not None:
+        arg = _site_argument(helper, args, keywords, helper.params)
+        found = None if arg is None else arg[4]
+        return None if found is None else tuple(ParamArg(*param) for param in found)
+    if helper.rest is not None:
+        if any(arg[0] for arg in args):
+            return None
+        return tuple(ParamArg(i, arg[3]) for i, arg in enumerate(args[len(helper.positional) :], 1))
+    if helper.named is not None:
+        if any(name is None for name, _ in keywords):
+            return None
+        return tuple(
+            ParamArg(name, value[3])
+            for name, value in keywords
+            if name is not None and name not in helper.keywords
+        )
+    return None
+
+
+def _expression_at(parsed: ParsedSource, span: tuple[int, int]) -> ast.expr:
+    """The expression at byte offsets ``span``, parsed with the positions it has in the file."""
+    start, end = span
+    starts = parsed._byte_lines
+    line = bisect.bisect_right(starts, start) - 1
+    column = start - starts[line]
+    lead = "\n" * line + "(" + " " * (column - 1) if column else "\n" * (line - 1) + "(\n"
+    text = parsed._bytes[start:end].decode()
+    return ast.parse(f"{lead}{text})", mode="eval").body
