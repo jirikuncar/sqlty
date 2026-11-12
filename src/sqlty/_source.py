@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import ast
 import bisect
+import copy
 import functools
 import io
 import itertools
@@ -49,7 +50,7 @@ import tokenize
 import typing
 from dataclasses import dataclass
 
-from sqlty._core import module_facts
+from sqlty._core import module_facts, module_outline
 from sqlty._psycopg import PsycopgScan
 
 AST = os.environ.get("SQLTY_AST", "python")
@@ -350,6 +351,45 @@ def _class_name(node: ast.expr | None) -> str | None:
     return None
 
 
+def _outline(tree: ast.Module) -> ast.Module:
+    """``tree`` with function bodies cut to the statements holding a class, as Rust builds it.
+
+    Example:
+        >>> tree = ast.parse("def f():\\n    x = 1\\n    if c:\\n        y = 2\\n        class A: ...")
+        >>> ast.unparse(_outline(tree))
+        'def f():\\n    if c:\\n\\n        class A:\\n            ...'
+    """
+    tree = copy.deepcopy(tree)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            node.body = _cut(node.body)
+    return tree
+
+
+def _dump(tree: ast.AST | None) -> str | None:
+    return None if tree is None else ast.dump(tree, include_attributes=True)
+
+
+def _holds_class(node: ast.AST) -> bool:
+    return any(isinstance(n, ast.ClassDef) for n in ast.walk(node))
+
+
+def _cut(body: list[ast.stmt]) -> list[ast.stmt]:
+    kept = [stmt for stmt in body if _holds_class(stmt)]
+    for stmt in kept:
+        if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            continue
+        for name in ("body", "orelse", "finalbody"):
+            if isinstance(inner := getattr(stmt, name, None), list):
+                setattr(stmt, name, _cut(inner))
+        for name in ("handlers", "cases"):
+            if isinstance(inner := getattr(stmt, name, None), list):
+                setattr(stmt, name, [part for part in inner if _holds_class(part)])
+                for part in getattr(stmt, name):
+                    part.body = _cut(part.body)
+    return kept
+
+
 def _breadth_first[T](found: list[tuple[int, T]]) -> list[T]:
     """Depth-first pre-order nodes in breadth-first order (stable per depth)."""
     return [node for _, node in sorted(found, key=lambda item: item[0])]
@@ -384,6 +424,29 @@ class ParsedSource:
         if self.tree is not None:
             scan.visit(self.tree)
         return scan
+
+    @functools.cached_property
+    def _outlined(self) -> tuple[ast.Module, list[ast.ClassDef]] | None:
+        if AST == "python":
+            return None if self.tree is None else (self.tree, self.classes)
+        rust = module_outline(self.text)
+        if AST == "compare":
+            python = None if self.tree is None else _outline(self.tree)
+            if _dump(rust and rust[0]) != _dump(python):
+                raise AstMismatch("outline", _dump(rust and rust[0]), _dump(python), self.text)
+        return rust
+
+    @property
+    def outline(self) -> ast.Module | None:
+        """What type extraction reads: the module with function bodies cut to the statements
+        holding a class (see ``_outline``), built in Rust unless ``SQLTY_AST=python``, where it
+        is the whole ``tree``. ``None`` when the text is not valid Python, or Rust declines it."""
+        return None if self._outlined is None else self._outlined[0]
+
+    @property
+    def outline_classes(self) -> list[ast.ClassDef]:
+        """The class definitions of ``outline``, in ``classes`` order."""
+        return [] if self._outlined is None else self._outlined[1]
 
     @functools.cached_property
     def imports(self) -> list[ast.Import | ast.ImportFrom]:
@@ -657,7 +720,7 @@ class ParsedSource:
             >>> {name: ast.unparse(value) for name, value in aliases.items()}
             {'A': 'tuple[int]', 'B': 'A'}
         """
-        if (tree := self.tree) is None:
+        if (tree := self.outline) is None:
             return {}
         aliases: dict[str, ast.expr] = {}
         for node in tree.body:
