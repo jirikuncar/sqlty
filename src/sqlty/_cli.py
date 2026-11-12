@@ -480,13 +480,13 @@ def _jobs(value: str) -> int:
     return int(value)
 
 
-def _map[T](args: argparse.Namespace, work: Callable[[Path], T], files: list[Path]) -> Iterator[T]:
+def _map[T](jobs: int | None, work: Callable[[Path], T], files: list[Path]) -> Iterator[T]:
     """``work`` on every file, its results in the order of ``files``.
 
     The engine releases the GIL, so threads check files at once. Whatever prints or writes
     stays with the caller, which reads the results in order.
     """
-    jobs = min(args.jobs or os.process_cpu_count() or 1, len(files))
+    jobs = min(jobs or os.process_cpu_count() or 1, len(files))
     if jobs <= 1:
         yield from map(work, files)
         return
@@ -590,7 +590,7 @@ def _transform_files(
         return transform(path, sources[path], settings[path])
 
     changed = 0
-    for path, (result, warnings) in zip(readable, _map(args, work, readable), strict=True):
+    for path, (result, warnings) in zip(readable, _map(args.jobs, work, readable), strict=True):
         for warning in warnings:
             print(warning, file=sys.stderr)
         original = sources[path]
@@ -694,7 +694,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
     types: list[str] = []
 
     if args.fix:
-        for path, fixed in zip(files, _map(args, project.fix, files), strict=True):
+        for path, fixed in zip(files, _map(args.jobs, project.fix, files), strict=True):
             if fixed == sources[path].text:
                 continue
             write_source(path, fixed)
@@ -707,13 +707,10 @@ def _cmd_check(args: argparse.Namespace) -> None:
                 text = args.output_format == "text"
                 print(f"Fixed {path}", file=sys.stdout if text else sys.stderr)
 
-    def check(path: Path) -> tuple[list[Diagnostic], Counter[str]]:
-        diagnostics = project.check(path, row_usage)
-        return diagnostics, project.statistics(path) if args.statistics else Counter()
-
-    for path, (diagnostics, counts) in zip(files, _map(args, check, files), strict=True):
-        statistics += counts
+    for path, diagnostics in zip(files, project.check_all(row_usage, args.jobs), strict=True):
         reports.extend((path, diag, sources[path]) for diag in diagnostics)
+    if args.statistics:
+        statistics = sum(_map(args.jobs, project.statistics, files), statistics)
     for path in project.query_files:
         if (text := read_source(path)) is None:
             project.unreadable.append(path)
@@ -1701,6 +1698,30 @@ class Project:
             query_variants=settings.query_variants,
             coerce_row_types=settings.coerce_row_types,
         )
+
+    def check_all(self, row_usage: RowUsage, jobs: int | None) -> Iterable[list[Diagnostic]]:
+        """``check`` of every file, in order. With ``SQLTY_AST=rust`` one Rust call checks
+        them on ``jobs`` threads; otherwise ``jobs`` threads call ``check``."""
+        from sqlty._check import check_modules
+        from sqlty._source import AST
+
+        if AST != "rust":
+            return _map(jobs, lambda path: self.check(path, row_usage), self.files)
+        modules = []
+        for path in self.files:
+            settings = self.settings[path]
+            config = (
+                settings.dialect,
+                settings.schema,
+                settings.rules,
+                settings.import_style,
+                settings.untyped,
+                settings.coerce_row_types,
+                self.helpers[path],
+                settings.query_variants,
+            )
+            modules.append((self.sources[path], config))
+        return check_modules(modules, row_usage, jobs)
 
     def fix(self, path: Path) -> str:
         from sqlty.core import fix_source

@@ -1,6 +1,7 @@
 """Type stubs for the Rust extension module (sqlty._core)."""
 
 import ast
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, final
 
@@ -202,6 +203,33 @@ def row_diagnostics(
     ]
     | None
 ): ...
+def check_modules(
+    modules: Sequence[tuple[str, str | None, int]],
+    configs: Sequence[
+        tuple[
+            str,
+            str | Schema | None,
+            dict[str, str] | None,
+            str | None,
+            bool,
+            list[str],
+            ModuleIndex | None,
+            int | None,
+        ]
+    ],
+    *,
+    version: tuple[int, int],
+    jobs: int | None = None,
+) -> list[
+    tuple[
+        tuple[
+            list[Diagnostic],
+            list[tuple[str | None, str, str] | None],
+            list[tuple[str | None, str, str]],
+        ],
+        bool,
+    ]
+]: ...
 def module_diagnostics(
     source: str,
     *,
