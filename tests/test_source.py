@@ -108,7 +108,8 @@ def test_cli_parses_each_file_once(tmp_path, monkeypatch, parses, tokenized, cap
     assert parses[HELPER] == 1
     # `SQLTY_AST=rust` reads the row types from the Rust outline.
     assert parses[USER_TYPE] == (AST != "rust")
-    assert parses[PLAIN] == 0
+    # The Python index reads the imports of every module to find re-exported helpers.
+    assert parses[PLAIN] == (AST != "rust")
     assert max(parses.values()) <= 1
     assert len(tokenized) == 1
 

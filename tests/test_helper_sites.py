@@ -88,11 +88,10 @@ CASES = {
         "pkg.db.execute('SELECT 1')\nd.execute('SELECT 2')\ndb.execute('SELECT 3')\n",
         [(4, "SELECT 1"), (5, "SELECT 2"), (6, "SELECT 3")],
     ),
-    # Only a file naming a helper as defined is looked at (`HelperIndex.mentions`), so one
-    # calling it only by the name a package re-exports it as is not.
+    # `HelperIndex.names` holds the names a package re-exports a helper as.
     "package re-export under another name": (
         "from pkg import fa\nimport pkg\nfa('SELECT 1', int)\npkg.fa('SELECT 2', int)\n",
-        [],
+        [(3, "SELECT 1"), (4, "SELECT 2")],
     ),
     "package re-export, file also naming the helper": (
         "from pkg import fa\nimport pkg\nfa('SELECT 1', int)\npkg.fa('SELECT 2', int)\n"

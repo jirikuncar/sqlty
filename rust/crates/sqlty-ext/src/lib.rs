@@ -883,6 +883,50 @@ struct DiagnosticOut {
 ///
 /// Raises:
 ///     ValueError: unsupported import_style, or `rules` names an unknown rule or severity
+/// The modules of the checked paths as `sqlty_python::index` reads them, built from the
+/// steps that filled a `sqlty._helpers.HelperIndex`: `("add", module, text, name)` and
+/// `("register", import path, query parameter, row parameter, roots, database)`.
+#[pyclass(frozen, name = "ModuleIndex", module = "sqlty._core")]
+struct ModuleIndex(Arc<sqlty_python::index::HelperIndex>);
+
+type IndexStep = (
+    String,
+    String,
+    String,
+    Option<String>,
+    Vec<std::path::PathBuf>,
+    Option<String>,
+);
+
+/// None where Rust does not read one of the modules.
+#[pyfunction]
+fn module_index(py: Python<'_>, version: (u8, u8), steps: Vec<IndexStep>) -> Option<ModuleIndex> {
+    use sqlty_python::index::{Builder, Roots};
+    use sqlty_python::types::symbols::Source;
+    detach(py, || {
+        let mut index = Builder::new(version);
+        for (kind, first, second, third, roots, database) in steps {
+            if kind == "add" {
+                let source = Source::new(&second, version)?.named(third.as_deref());
+                index.add(&first, source);
+            } else {
+                let roots = Roots {
+                    paths: &roots,
+                    read: &|path| std::fs::read_to_string(path).ok(),
+                };
+                index.register(
+                    &first,
+                    &second,
+                    third.as_deref(),
+                    roots,
+                    database.as_deref(),
+                );
+            }
+        }
+        Some(ModuleIndex(index.build()))
+    })
+}
+
 #[pyfunction]
 #[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, schema_sql = None, rules = None, import_style = None, untyped = false, any_calls = vec![]))]
 #[expect(
@@ -1443,7 +1487,7 @@ fn row_diagnostics(
 /// them: `(diagnostics, redundant, needed)`, see `row_diagnostics`. None where Rust does
 /// not read the source, or it needs what is not read in Rust yet.
 #[pyfunction]
-#[pyo3(signature = (source, *, version, dialect = DialectArg::POSTGRES, schema_sql = None, rules = None, import_style = None, untyped = false, module = None, coerce = vec![]))]
+#[pyo3(signature = (source, *, version, dialect = DialectArg::POSTGRES, schema_sql = None, rules = None, import_style = None, untyped = false, module = None, coerce = vec![], index = None, name = None))]
 #[expect(
     clippy::too_many_arguments,
     clippy::type_complexity,
@@ -1460,10 +1504,14 @@ fn module_diagnostics(
     untyped: bool,
     module: Option<&str>,
     coerce: Vec<String>,
+    index: Option<PyRef<'_, ModuleIndex>>,
+    name: Option<&str>,
 ) -> Result<Option<(Vec<DiagnosticOut>, Vec<Option<FieldKey>>, Vec<FieldKey>)>, Error> {
     use sqlty_python::types::symbols::Source;
     use sqlty_python::{check, rows};
     let dialect = dialect.0;
+    let helpers = index.map(|index| Arc::clone(&index.0));
+    let types = helpers.as_ref().map(|index| index.types());
     detach(py, || {
         let schema = schema(schema_sql, dialect);
         let options = Options::new(dialect, schema.as_deref(), import_style, untyped)?;
@@ -1471,10 +1519,11 @@ fn module_diagnostics(
         let Some(parsed) = Source::new(source, version) else {
             return Ok(None);
         };
+        let parsed = parsed.named(name);
         let settings = rows::Settings {
             options: &options,
             rules: &rules,
-            index: None,
+            index: types.as_ref(),
             module,
             coerce: &coerce.into_iter().collect(),
         };
@@ -1494,6 +1543,7 @@ fn module_diagnostics(
                 .as_ref()
                 .is_some_and(|schema| !schema.databases().is_some_and(|all| all.absent)),
             lint: &lint,
+            helpers: helpers.as_deref(),
         };
         let Some(found) = check::diagnostics(&Arc::new(parsed), &run) else {
             return Ok(None);
@@ -1839,12 +1889,14 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(module_facts, m)?)?;
     m.add_function(wrap_pyfunction!(module_outline, m)?)?;
     m.add_function(wrap_pyfunction!(template_strings, m)?)?;
-    m.add_function(wrap_pyfunction!(helper_sites, m)?)?;
     m.add_function(wrap_pyfunction!(unparse_expression, m)?)?;
     m.add_function(wrap_pyfunction!(type_definitions, m)?)?;
     m.add_function(wrap_pyfunction!(type_relations, m)?)?;
     m.add_function(wrap_pyfunction!(row_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(module_diagnostics, m)?)?;
+    m.add_function(wrap_pyfunction!(module_index, m)?)?;
+    m.add_class::<ModuleIndex>()?;
+    m.add_function(wrap_pyfunction!(helper_sites, m)?)?;
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;
     m.add_function(wrap_pyfunction!(query_at, m)?)?;

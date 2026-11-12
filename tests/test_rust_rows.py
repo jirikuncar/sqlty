@@ -228,33 +228,47 @@ def fitted(draw: st.DrawFn) -> str:
         names = names[: draw(st.integers(0, len(names)))]
         select = ", ".join(f"{draw(st.sampled_from(COLUMNS))} AS {name}" for name in names) or "*"
         row = draw(
-            st.sampled_from(["Row", "Row", "Row[int]", "Row[str | None]", "One", "Pair", "Inner"])
+            st.sampled_from(
+                [
+                    *["Row", "Row", "Row[int]", "Row[str | None]", "One", "Pair", "Inner"],
+                    *["Row[*Ts]", "Row[1:2]", "Row[list[int]]", "Row[(int, str)]"],
+                ]
+            )
         )
         out.append(f'q = SQL[{row}]("--sql\\nSELECT {select} FROM t")\n')
     return "".join(out)
 
 
 def compare(
-    source: str, rules: dict[str, str] | None = None, coerce: frozenset[str] = frozenset()
+    source: str,
+    rules: dict[str, str] | None = None,
+    coerce: frozenset[str] = frozenset(),
+    import_style: str | None = None,
+    module: str = "pkg.mod",
 ) -> int:
     """How many diagnostics both report for ``source``; raises where they differ."""
-    found = [q for q in wrapped_queries(source) if not q[1].startswith("tuple[")]
+    found = [
+        q
+        for q in wrapped_queries(source, import_style=import_style)
+        if not q[1].startswith("tuple[")
+    ]
     _check._compare_rows(  # noqa: SLF001
-        ParsedSource(source), found, "postgres", SCHEMA, rules, None, "pkg.mod", coerce
+        ParsedSource(source), found, "postgres", SCHEMA, rules, import_style, module, coerce
     )
     rust = row_diagnostics(
         source,
         version=sys.version_info[:2],
         schema_sql=SCHEMA,
         rules=rules,
-        module="pkg.mod",
+        import_style=import_style,
+        module=module,
         coerce=sorted(coerce),
     )
     assert rust is not None
     return len(rust[0])
 
 
-HEAD = "from sqlty import SQL\nfrom typing import Literal, NamedTuple, TypedDict\n"
+HEAD = "from sqlty import SQL\nfrom typing import Annotated, Literal, NamedTuple, TypedDict\n"
 CASES = {
     "count": "class Row(TypedDict):\n    a: int\nq = SQL[Row]('--sql\\nSELECT id AS a, name AS b FROM t')\n",
     "type": "class Row(TypedDict):\n    a: str\nq = SQL[Row]('--sql\\nSELECT id AS a FROM t')\n",
@@ -276,6 +290,28 @@ CASES = {
         "class Row(TypedDict):\n    a: int\nclass Row(Row):\n    b: str\n"
         "q = SQL[Row]('--sql\\nSELECT id AS a FROM t')\n"
     ),
+    "empty literal": "type Row = Literal[()]\nq = SQL[Row]('--sql\\nSELECT id, name FROM t')\n",
+    "starred argument": (
+        "class Row[T](TypedDict):\n    a: T\n    v: list[T | None]\n"
+        "q = SQL[Row[*Ts]]('--sql\\nSELECT name AS a, json_build_array(note) AS v, id AS z FROM t')\n"
+    ),
+    "argument in an attribute": (
+        "class Row[T](TypedDict):\n    v: Annotated[int, T.x]\n"
+        "q = SQL[Row[1]]('--sql\\nSELECT json_build_object(\\'a\\', note) AS v FROM t')\n"
+    ),
+    "argument as a target": (
+        "class Row[T](TypedDict):\n    v: Annotated[int, [x for T in y]]\n"
+        "q = SQL[Row[int | str]]('--sql\\nSELECT json_build_object(\\'a\\', note) AS v FROM t')\n"
+    ),
+    "deep argument": (
+        f"class Row[T](TypedDict):\n    a: int\n    w: {'list[' * 120}T{']' * 120}\n"
+        f"q = SQL[Row[{'list[' * 120}int{']' * 120}]]"
+        "('--sql\\nSELECT name AS a, json_build_array(id) AS w FROM t')\n"
+    ),
+    "parameter beside a mark": (
+        "class Row[T](TypedDict):\n    a: T\n    b: Annotated[str, 'T\u00bd', 'T\u0301']\n"
+        "q = SQL[Row[str]]('--sql\\nSELECT name AS a, id AS b FROM t')\n"
+    ),
     "composite": (
         "class Inner(TypedDict):\n    a: str\n    b: str\nclass Row(TypedDict):\n    a: Inner\n"
         "q = SQL[Row]('--sql\\nSELECT both AS a FROM t')\n"
@@ -286,6 +322,19 @@ CASES = {
 @pytest.mark.parametrize("source", CASES.values(), ids=CASES.keys())
 def test_cases(source: str) -> None:
     assert compare(HEAD + source) >= 1
+
+
+def test_bare_wrapper_with_a_module_import() -> None:
+    assert compare("import sqlty\n" + HEAD + CASES["type"], import_style="import sqlty") == 1
+
+
+def test_empty_module_name() -> None:
+    source = (
+        "from typing import NewType\nUserId = NewType('UserId', int)\n"
+        "class Row(TypedDict):\n    a: UserId | None\n"
+        "q = SQL[Row]('--sql\\nSELECT id AS a FROM t')\n"
+    )
+    assert compare(HEAD + source, {"redundant-optional": "error"}, module="") == 1
 
 
 @FUZZ
