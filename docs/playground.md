@@ -28,10 +28,11 @@ queries as you type. It runs in your browser. The engine is compiled to
     </label>
     <span class="sqlty-actions" role="toolbar" aria-label="Actions">
       <button type="button" class="sqlty-button sqlty-button--primary" data-fix>Fix all</button>
-      <span class="sqlty-group" role="group" aria-label="Source">
-        <button type="button" class="sqlty-button" data-rewrite>Rewrite</button>
-        <button type="button" class="sqlty-button" data-strip>Strip</button>
-        <button type="button" class="sqlty-button" data-format>Format</button>
+      <button type="button" class="sqlty-button sqlty-menu-button" data-commands popovertarget="sqlty-commands" aria-haspopup="menu">Commands</button>
+      <span class="sqlty-menu" id="sqlty-commands" role="menu" aria-label="Commands" popover>
+        <button type="button" role="menuitem" data-rewrite>Rewrite<small>Wrap queries in SQL[T]</small></button>
+        <button type="button" role="menuitem" data-strip>Strip<small>Remove the SQL[T] wrappers</small></button>
+        <button type="button" role="menuitem" data-format>Format<small>Format the SQL in queries</small></button>
       </span>
       <button type="button" class="sqlty-button" data-ask-open popovertarget="sqlty-ask" aria-haspopup="dialog" hidden>Ask</button>
       <button type="button" class="sqlty-button" data-copy-link><span class="sqlty-wide">Copy link</span><span class="sqlty-narrow"></span></button>
@@ -96,7 +97,7 @@ queries as you type. It runs in your browser. The engine is compiled to
     background-color: var(--md-default-bg-color);
   }
   .sqlty-embedded .sqlty-toolbar { margin-bottom: 0.4rem; }
-  .sqlty-embedded .sqlty-toolbar label, .sqlty-embedded [data-rewrite], .sqlty-embedded [data-strip], .sqlty-embedded [data-format],
+  .sqlty-embedded .sqlty-toolbar label, .sqlty-embedded [data-commands],
   .sqlty-embedded [data-copy-link], .sqlty-embedded .sqlty-group, .sqlty-embedded [data-present],
   .sqlty-embedded [data-tab="json"] { display: none; }
   .sqlty-open { display: none; }
@@ -117,6 +118,19 @@ queries as you type. It runs in your browser. The engine is compiled to
     border: 1px solid var(--md-default-fg-color--lighter); border-radius: 0.2rem; box-shadow: var(--md-shadow-z2);
   }
   .sqlty-ask:popover-open { display: flex; }
+  .sqlty-menu-button::after { content: ""; display: inline-block; margin-left: 0.45em; vertical-align: 0.15em; border: 0.25em solid transparent; border-top-color: currentColor; border-bottom: 0; }
+  .sqlty-menu {
+    margin: 0; inset: auto; min-width: 12rem; padding: 0.25rem 0; flex-direction: column;
+    color: var(--md-default-fg-color); background-color: var(--md-default-bg-color);
+    border: 1px solid var(--md-default-fg-color--lighter); border-radius: 0.2rem; box-shadow: var(--md-shadow-z2);
+  }
+  .sqlty-menu:popover-open { display: flex; }
+  .sqlty-menu [role="menuitem"] {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 0.05rem; padding: 0.35rem 0.8rem;
+    font: inherit; font-size: 0.7rem; text-align: left; color: inherit; background: none; border: 0; cursor: pointer;
+  }
+  .sqlty-menu small { font-size: 0.6rem; color: var(--md-default-fg-color--light); }
+  .sqlty-menu [role="menuitem"]:hover, .sqlty-menu [role="menuitem"]:focus-visible { outline: none; color: var(--md-accent-fg-color); background-color: var(--md-code-bg-color); }
   [data-ask-open][aria-busy="true"]::after { content: "\2026"; }
   .sqlty-ask input {
     flex: 1 1 16rem; font: inherit; font-size: 0.7rem; padding: 0.3rem 0.7rem; color: var(--md-default-fg-color);
