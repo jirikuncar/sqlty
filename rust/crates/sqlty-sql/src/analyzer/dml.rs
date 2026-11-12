@@ -389,9 +389,7 @@ impl Analyzer<'_> {
             (multi, from) => {
                 let tables: Vec<TableWithJoins> =
                     multi.into_iter().chain(from).flatten().cloned().collect();
-                let Ok((analyzer, joined)) = self.scope_of(&tables) else {
-                    return;
-                };
+                let Ok((analyzer, joined)) = self.scope_of(&tables);
                 let targets = scope.iter().filter(|source| {
                     multi.is_none() && !matches!(source.table, Table::ExtraSources)
                 });

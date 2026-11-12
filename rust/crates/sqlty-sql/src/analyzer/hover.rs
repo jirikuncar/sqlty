@@ -172,7 +172,7 @@ fn result_column(
     dialect: &str,
     schema: &SchemaData,
 ) -> Option<String> {
-    let columns = analyze_select(query, dialect, Some(schema)).ok()??;
+    let columns = analyze_select(query, dialect, Some(schema))?;
     let fits = match item.star {
         None => columns.len() == item.count,
         Some(star) => star > item.index && columns.len() >= item.count,

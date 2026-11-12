@@ -149,7 +149,7 @@ mod tests {
     #[test]
     fn a_query_is_read_against_the_database_it_names() {
         let schema = project();
-        let infer = |sql| infer_type(sql, "postgres", Some(&*schema)).unwrap();
+        let infer = |sql| infer_type(sql, "postgres", Some(&*schema));
         assert_eq!(
             infer("--sql\nSELECT id FROM users").as_deref(),
             Some("tuple[str]")

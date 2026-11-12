@@ -1105,10 +1105,7 @@ def _columns(
     """Columns of a query and whether each can be NULL; ``None`` when it has none or cannot be analysed."""
     if query is None:
         return None
-    try:
-        columns = _analyze_columns(query, dialect=dialect, schema_sql=schema_sql)
-    except RuntimeError:
-        return None
+    columns = _analyze_columns(query, dialect=dialect, schema_sql=schema_sql)
     return [_RowColumn(*column) for column in columns] if columns else None
 
 

@@ -77,7 +77,7 @@ pub fn add_json_types(text: &str, options: &Options<'_>, version: Version) -> St
         }
         let query = crate::parse::text(query, text);
         let columns = analyzer::analyze_select(&query, options.dialect.name(), options.schema);
-        let Ok(Some(columns)) = columns else {
+        let Some(columns) = columns else {
             continue;
         };
         if columns.len() != items.len() {
