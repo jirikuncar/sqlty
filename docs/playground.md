@@ -32,7 +32,7 @@ queries as you type. It runs in your browser. The engine is compiled to
       <span class="sqlty-menu" id="sqlty-commands" role="menu" aria-label="Commands" popover>
         <button type="button" role="menuitem" data-rewrite>Rewrite<small>Wrap queries in SQL[T]</small></button>
         <button type="button" role="menuitem" data-strip>Strip<small>Remove the SQL[T] wrappers</small></button>
-        <button type="button" role="menuitem" data-format>Format<small>Format the SQL in queries</small></button>
+        <button type="button" role="menuitem" data-format>Format<small>Lay out the SQL of each query</small></button>
       </span>
       <button type="button" class="sqlty-button" data-ask-open popovertarget="sqlty-ask" aria-haspopup="dialog" hidden>Ask</button>
       <button type="button" class="sqlty-button" data-copy-link><span class="sqlty-wide">Copy link</span><span class="sqlty-narrow"></span></button>
