@@ -11,6 +11,9 @@ export const MINIMUM_VERSION = "0.3.0";
 /** The first `sqlty server` that answers `textDocument/completion`. */
 export const COMPLETION_VERSION = "0.4.0";
 
+/** The first `sqlty server` with the `source.rewrite.sqlty` and `source.strip.sqlty` actions. */
+export const SOURCE_ACTIONS_VERSION = "0.6.0";
+
 export type Settings = {
   path: string[];
   interpreter: string[];

@@ -35,6 +35,21 @@ def test_buffers_replace_their_files(tmp_path: Path) -> None:
     assert workspace.check(q, CALL) == []
 
 
+def test_buffers_are_rewritten_and_stripped_with_project_settings(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.sqlty]\nschema = "schema.sql"\nimport-style = "import sqlty"\n'
+    )
+    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL);\n")
+    workspace = Workspace(str(tmp_path))
+    q = str(tmp_path / "q.py")
+    plain = 'q = "--sql\\nSELECT id FROM users"\n'
+
+    rewritten = workspace.rewrite(q, plain)
+
+    assert rewritten.splitlines()[-1] == 'q = sqlty.SQL[tuple[int]]("--sql\\nSELECT id FROM users")'
+    assert workspace.strip(q, rewritten) == plain
+
+
 OLD_SCHEMA = "CREATE TABLE users (id INTEGER, bio TEXT);\n"
 NEW_SCHEMA = "CREATE TABLE users (id INTEGER, handle TEXT);\n"
 OLD_CODE = 'bios = "--sql\\nSELECT bio FROM users"\n'

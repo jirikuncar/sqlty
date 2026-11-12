@@ -103,6 +103,31 @@ Python code. Run both on every save:
 }
 ```
 
+## Commands
+
+Open the Command Palette (Ctrl+Shift+P, or Cmd+Shift+P on macOS) and type `sqlty`:
+
+| Command | What it does |
+|---------|--------------|
+| **sqlty: Fix All in File** | `sqlty check --fix` on the file, as `source.fixAll.sqlty` |
+| **sqlty: Format Queries in File** | `sqlty format` on the file, as `source.format.sqlty` |
+| **sqlty: Wrap Queries in SQL[T]** | `sqlty rewrite` on the file, as `source.rewrite.sqlty` |
+| **sqlty: Strip SQL[T] Wrappers** | `sqlty strip` on the file, as `source.strip.sqlty` |
+| **sqlty: Check Workspace** | `sqlty check` of each workspace folder, in the Problems panel |
+| **sqlty: Check Breaking Changes Against...** | Picks a branch, tag, snapshot or schema for `sqlty.breaking.against` |
+| **sqlty: Explain Rule...** | Opens the page of a rule; the rules under the cursor come first |
+| **sqlty: Open in Playground** | Opens the file, its schema and its settings in the [playground](../playground.md), and copies the link |
+| **sqlty: Restart Server** | Starts `sqlty server` again |
+| **sqlty: Show Logs** | Shows the **sqlty** output channel |
+| **sqlty: Show Debug Information** | Logs which `sqlty` runs, from where and with which settings, and copies it for a bug report |
+
+The server checks the files open in the editor. **Check Workspace** runs `sqlty check`
+once for the rest; a file you open is the server's again.
+
+!!! note "Wrap and strip need sqlty 0.6.0"
+    An older `sqlty server` has no `source.rewrite.sqlty` or `source.strip.sqlty`
+    action, and the command says so.
+
 ## Completion
 
 Inside a query string, the editor completes table names after `FROM` and `JOIN`, and the
@@ -329,8 +354,9 @@ with `extend` applied, so each project of a monorepo gets its own. The engine re
 !!! note "What the web leaves out"
     The checks that read row types from Python source (`column-type-mismatch` of a
     `TypedDict`, ...), the parameters of driver calls (`param-count-mismatch`), helpers
-    registered in `functions`, named `databases`, `overrides`, `queries` files, fix-all
-    on save and breaking changes need `sqlty server`, on the desktop.
+    registered in `functions`, named `databases`, `overrides`, `queries` files, the
+    commands that run `sqlty` (Check Workspace and Check Breaking Changes Against) and
+    breaking changes need `sqlty server`, on the desktop.
 
 ## Other editors
 
