@@ -587,6 +587,16 @@ root.addEventListener("drop", async (event) => {
   }
 });
 resizable(root.querySelector("[data-splitter]"), root.querySelector(".sqlty-console"));
+const commands = root.querySelector("#sqlty-commands");
+anchored(commands, root.querySelector("[data-commands]"), () => commands.querySelector("[role=menuitem]").focus());
+commands.addEventListener("click", (event) => event.target.closest("[role=menuitem]") && commands.hidePopover());
+commands.addEventListener("keydown", (event) => {
+  const items = [...commands.querySelectorAll("[role=menuitem]")];
+  const step = { ArrowDown: 1, ArrowUp: -1 }[event.key];
+  if (!step) return;
+  event.preventDefault();
+  items.at((items.indexOf(document.activeElement) + step) % items.length).focus();
+});
 const format = () => ask(request("format")).formatted;
 for (const [button, made] of [["fix", "fixed"], ["rewrite", "rewritten"], ["strip", "stripped"], ["format", format]]) {
   root.querySelector(`[data-${button}]`).addEventListener("click", () => {
@@ -670,21 +680,7 @@ async function asking(form, opener) {
   let placed = false;
   editor.onDidFocusEditorText(() => (placed = editor.getModel() === models.python));
   opener.hidden = false;
-  // A popover sits in the top layer, so the scrolling toolbar does not clip it; it follows the
-  // button and stays within the playground.
-  const place = () => {
-    const box = opener.getBoundingClientRect();
-    const right = Math.min(innerWidth - 8, root.getBoundingClientRect().right);
-    form.style.top = `${box.bottom + 4}px`;
-    form.style.left = `${Math.max(8, Math.min(box.left, right - form.offsetWidth))}px`;
-  };
-  form.addEventListener("toggle", (event) => {
-    const open = event.newState === "open";
-    for (const type of ["scroll", "resize"]) (open ? addEventListener : removeEventListener)(type, place, { passive: true });
-    if (!open) return;
-    place();
-    question.focus();
-  });
+  anchored(form, opener, () => question.focus());
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const button = form.querySelector("button");
@@ -757,6 +753,25 @@ else if (linkedDeck?.error) linked.textContent = String(linkedDeck.error.message
 else if (linkedDeck) resume(linkedDeck);
 unembedded();
 refresh();
+
+// A popover sits in the top layer, so the scrolling toolbar does not clip it; it follows its
+// button and stays within the playground.
+function anchored(popover, button, opened) {
+  const place = () => {
+    const box = button.getBoundingClientRect();
+    const right = Math.min(innerWidth - 8, root.getBoundingClientRect().right);
+    popover.style.top = `${box.bottom + 4}px`;
+    popover.style.left = `${Math.max(8, Math.min(box.left, right - popover.offsetWidth))}px`;
+  };
+  popover.addEventListener("toggle", (event) => {
+    const open = event.newState === "open";
+    for (const type of ["scroll", "resize"]) (open ? addEventListener : removeEventListener)(type, place, { passive: true });
+    button.setAttribute("aria-expanded", open);
+    if (!open) return;
+    place();
+    opened();
+  });
+}
 
 async function engine() {
   const url = new URL("sqlty_wasm.wasm", import.meta.url);
