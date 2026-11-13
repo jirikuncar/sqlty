@@ -9,16 +9,20 @@ from __future__ import annotations
 
 import ast
 import re
+import sys
 import typing
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, NamedTuple
 
-from sqlty._core import Schema
+from sqlty._core import ModuleIndex, Schema
 from sqlty._core import analyze_columns as _analyze_columns
+from sqlty._core import check_modules as _check_modules
 from sqlty._core import check_source as _check_source
 from sqlty._core import composite_fields as _composite_fields
+from sqlty._core import module_diagnostics as _module_diagnostics
 from sqlty._core import parse_error as _parse_error
 from sqlty._core import query_diagnostics as _query_diagnostics
+from sqlty._core import row_diagnostics as _row_diagnostics
 from sqlty._core import select_star_finding as _select_star_finding
 from sqlty._core import sqruff_findings as _sqruff_findings
 from sqlty._core import wrapped_queries as _wrapped_queries
@@ -26,7 +30,7 @@ from sqlty._drivers import find_driver_calls, find_template_calls
 from sqlty._helpers import MARKER, HelperIndex, find_helper_calls
 from sqlty._lint import NAME_RULES, Diagnostic
 from sqlty._params import ParamArg, _dotted, annotation_type, mismatch
-from sqlty._source import Ignore, ParsedSource, _wrapper_name, is_any
+from sqlty._source import AST, AstMismatch, Ignore, ParsedSource, _wrapper_name, is_any
 from sqlty._variants import Declared
 
 if TYPE_CHECKING:
@@ -129,10 +133,13 @@ class _Check:
         self.imported_defs: dict[str, dict[str, TypeInfo]] = {}
         self.row_usage = RowUsage()
         if helpers is not None:
-            p_names = {
+            p_names = [
                 ast.unparse(p) for _, p, _, _ in declared if isinstance(p, ast.Name | ast.Attribute)
-            }
-            for name in ({q[1] for q in [*queries, *named]} | p_names) - self.type_defs.keys():
+            ]
+            # In the order written: modules importing each other's row types read the first whole.
+            for name in dict.fromkeys([*(q[1] for q in [*queries, *named]), *p_names]):
+                if name in self.type_defs:
+                    continue
                 if (imported := helpers.row_type(parsed, name)) is not None:
                     self.type_defs[name], self.imported_defs[name] = imported
         for name, info in self.type_defs.items():
@@ -167,7 +174,11 @@ class _Check:
             return
         info = self.type_defs.get(row.value.id)
         node = next(
-            (c for c in self.parsed.classes if info is not None and c.lineno == info.lineno),
+            (
+                c
+                for c in self.parsed.outline_classes
+                if info is not None and c.lineno == info.lineno
+            ),
             None,
         )
         if info is None or node is None:
@@ -211,6 +222,8 @@ class _Check:
 
     def query_span(self, call: HelperCall) -> tuple[int, int] | None:
         """The byte offsets of the argument the query of ``call`` comes from."""
+        if call.query_span is not None:
+            return call.query_span
         return None if call.query_node is None else self.parsed.span(call.query_node)
 
 
@@ -353,7 +366,7 @@ def _check_names(ctx: _Check) -> None:
     for call in ctx.calls:
         if call.query is None or (MARKER.match(call.query) and call.query in ctx.parsed.literals):
             continue
-        for rule, message in _query_diagnostics(
+        for rule, message, *_ in _query_diagnostics(
             call.query, dialect=ctx.dialect, schema_sql=ctx.schema_sql
         ):
             ctx.report(rule, message, call.line, ctx.query_span(call))
@@ -407,9 +420,9 @@ def _bound_params(ctx: _Check) -> dict[tuple[int, int], tuple[ParamArg, ...]]:
     From ``P`` of ``SQL[R, P]``, and from the driver call that runs the query.
     """
     bindings = [
-        (ctx.parsed.span(call.query_node), call.params)
+        (span, call.params)
         for call in ctx.driver_calls
-        if call.params and call.query_node is not None
+        if call.params and (span := ctx.query_span(call)) is not None
     ]
     for _, declared, _, span in ctx.declared:
         if (found := _annotations_of(ctx, declared, ctx.parsed)) is not None:
@@ -542,6 +555,197 @@ def diagnostics(
     is checked as a call of its own, then ``_merge_variants`` reports at the call.
     ``coerce`` names the row types read as a Pydantic validator reads them.
     """
+    own = RowUsage()
+    if AST == "rust":
+        found = _rust_diagnostics(
+            parsed,
+            own,
+            dialect,
+            schema_sql,
+            rules,
+            import_style,
+            untyped,
+            helpers,
+            module,
+            variants,
+            coerce,
+        )
+    else:
+        found = _diagnostics(
+            parsed,
+            dialect=dialect,
+            schema_sql=schema_sql,
+            rules=rules,
+            import_style=import_style,
+            untyped=untyped,
+            helpers=helpers,
+            module=module,
+            row_usage=own,
+            variants=variants,
+            coerce=coerce,
+        )
+    if row_usage is not None:
+        row_usage.needed |= own.needed
+        row_usage.redundant += own.redundant
+    # A source Rust does not parse gets only what its strings tell.
+    if AST == "compare" and parsed.facts is not None:
+        _compare_module(
+            parsed,
+            found,
+            own,
+            dialect,
+            schema_sql,
+            rules,
+            import_style,
+            untyped,
+            module,
+            coerce,
+            None if helpers is None else helpers.rust(),
+            variants,
+        )
+    return found
+
+
+def _rust_diagnostics(
+    parsed: ParsedSource,
+    usage: RowUsage,
+    dialect: str,
+    schema_sql: str | Schema | None,
+    rules: dict[str, str] | None,
+    import_style: str | None,
+    untyped: bool,
+    helpers: HelperIndex | None,
+    module: str | None,
+    variants: int | None,
+    coerce: frozenset[str],
+) -> list[Diagnostic]:
+    """The diagnostics as ``sqlty_python::check`` reports them."""
+    found, redundant, needed = _module_diagnostics(
+        parsed.text,
+        version=sys.version_info[:2],
+        dialect=dialect,
+        schema_sql=schema_sql,
+        rules=rules,
+        import_style=import_style,
+        untyped=untyped,
+        module=module,
+        coerce=sorted(coerce),
+        index=None if helpers is None else helpers.rust(),
+        name=parsed.module,
+        variants=variants,
+    )
+    usage.needed.update(needed)
+    usage.redundant += [
+        (key, diag) for key, diag in zip(redundant, found, strict=True) if key is not None
+    ]
+    return found
+
+
+type ModuleConfig = tuple[
+    str,
+    Schema | None,
+    dict[str, str] | None,
+    str | None,
+    bool,
+    frozenset[str],
+    HelperIndex | None,
+    int | None,
+]
+"""``(dialect, schema_sql, rules, import_style, untyped, coerce, helpers, variants)``."""
+
+
+def check_modules(
+    modules: Sequence[tuple[ParsedSource, ModuleConfig]], row_usage: RowUsage, jobs: int | None
+) -> list[list[Diagnostic]]:
+    """``check_source`` of every module, with ``row_usage``, in one Rust call that checks
+    them on ``jobs`` threads (all cores when None)."""
+    # By identity: a rules dict does not hash, and files share their settings' objects.
+    known: dict[tuple[int, ...], int] = {}
+    configs: list[ModuleConfig] = []
+    for _, config in modules:
+        if known.setdefault(tuple(map(id, config)), len(configs)) == len(configs):
+            configs.append(config)
+    found = _check_modules(
+        [(parsed.text, parsed.module, known[tuple(map(id, config))]) for parsed, config in modules],
+        [
+            (
+                dialect,
+                schema,
+                rules,
+                style,
+                untyped,
+                sorted(coerce),
+                None if index is None else index.rust(),
+                n,
+            )
+            for dialect, schema, rules, style, untyped, coerce, index, n in configs
+        ],
+        version=sys.version_info[:2],
+        jobs=jobs,
+    )
+    checked = []
+    for (parsed, config), ((diagnostics, redundant, needed), suppressed) in zip(
+        modules, found, strict=True
+    ):
+        row_usage.needed.update(needed)
+        row_usage.redundant += [
+            (key, diag) for key, diag in zip(redundant, diagnostics, strict=True) if key is not None
+        ]
+        if not suppressed:
+            diagnostics = apply_suppressions(parsed.ignores, diagnostics, config[2])
+        checked.append(diagnostics)
+    return checked
+
+
+def _compare_module(
+    parsed: ParsedSource,
+    found: list[Diagnostic],
+    usage: RowUsage,
+    dialect: str,
+    schema_sql: str | Schema | None,
+    rules: dict[str, str] | None,
+    import_style: str | None,
+    untyped: bool,
+    module: str | None,
+    coerce: frozenset[str],
+    index: ModuleIndex | None = None,
+    variants: int | None = None,
+) -> None:
+    """``SQLTY_AST=compare``: ``sqlty_python::check`` must report what these passes do."""
+    rust = _module_diagnostics(
+        parsed.text,
+        version=sys.version_info[:2],
+        dialect=dialect,
+        schema_sql=schema_sql,
+        rules=rules,
+        import_style=import_style,
+        untyped=untyped,
+        module=module,
+        coerce=sorted(coerce),
+        index=index,
+        name=parsed.module,
+        variants=variants,
+    )
+    redundant = {id(diag): key for key, diag in usage.redundant}
+    python = (found, [redundant.get(id(diag)) for diag in found], sorted(usage.needed, key=repr))
+    if (rust[0], rust[1], sorted(rust[2], key=repr)) != python:
+        raise AstMismatch("diagnostics", rust, python, parsed.text)
+
+
+def _diagnostics(
+    parsed: ParsedSource,
+    *,
+    dialect: str,
+    schema_sql: str | Schema | None,
+    rules: dict[str, str] | None,
+    import_style: str | None,
+    untyped: bool,
+    helpers: HelperIndex | None,
+    module: str | None,
+    row_usage: RowUsage,
+    variants: int | None,
+    coerce: frozenset[str],
+) -> list[Diagnostic]:
     from sqlty._lint import RuleConfig
 
     diagnostics: list[Diagnostic] = []
@@ -558,10 +762,8 @@ def diagnostics(
     found = find_helper_calls(parsed, helpers, module, variants=variants)
     driver_calls = find_driver_calls(parsed) + find_template_calls(parsed)
     # A driver call also configured as a helper has its parameters checked once, as the driver's.
-    by_driver = {id(call.query_node) for call in driver_calls if call.query_node is not None}
-    found = [
-        call._replace(params=None) if id(call.query_node) in by_driver else call for call in found
-    ]
+    by_driver = {call.query_span for call in driver_calls}
+    found = [call._replace(params=None) if call.query_span in by_driver else call for call in found]
     typed = {line for call in found for line in call.typed_lines}
     branched = [call for call in found if len(call.variants) > 1]
     diagnostics = [
@@ -594,6 +796,8 @@ def diagnostics(
         if not name.startswith("tuple[")
     ]
     declared = _declared_params(parsed, import_style)
+    if AST == "compare" and queries:
+        _compare_rows(parsed, queries, dialect, schema_sql, rules, import_style, module, coerce)
     if not (queries or found or driver_calls or declared):
         return diagnostics
     ctx = _Check(
@@ -614,13 +818,67 @@ def diagnostics(
         module=module,
         coerce=coerce,
     )
-    ctx.row_usage = row_usage or RowUsage()
+    ctx.row_usage = row_usage
     for check_pass in _CHECK_PASSES:
         check_pass(ctx)
     if branched:
         diagnostics[:] = _merge_variants(diagnostics, branched)
     diagnostics.sort(key=lambda diagnostic: diagnostic["line"])
     return diagnostics
+
+
+def _compare_rows(
+    parsed: ParsedSource,
+    queries: list[_RowQuery],
+    dialect: str,
+    schema_sql: str | Schema | None,
+    rules: dict[str, str] | None,
+    import_style: str | None,
+    module: str | None,
+    coerce: frozenset[str],
+) -> None:
+    """``SQLTY_AST=compare``: the row checks of ``sqlty_python::rows`` must find what these do."""
+    from sqlty._lint import RuleConfig
+
+    rust = _row_diagnostics(
+        parsed.text,
+        version=sys.version_info[:2],
+        dialect=dialect,
+        schema_sql=schema_sql,
+        rules=rules,
+        import_style=import_style,
+        module=module,
+        coerce=sorted(coerce),
+    )
+    if rust is None:
+        return
+    found: list[Diagnostic] = []
+    ctx = _Check(
+        parsed,
+        found,
+        dialect=dialect,
+        schema_sql=schema_sql,
+        rule_config=RuleConfig(overrides=rules),
+        found=[],
+        driver_calls=[],
+        queries=queries,
+        declared=[],
+        helpers=None,
+        module=module,
+        coerce=coerce,
+    )
+    for check_pass in (_check_typeddict_inheritance, _check_structural, _check_aliases):
+        check_pass(ctx)
+    found.sort(key=lambda diagnostic: diagnostic["line"])
+    redundant = {id(diag): key for key, diag in ctx.row_usage.redundant}
+    python = (
+        found,
+        [redundant.get(id(diag)) for diag in found],
+        sorted(ctx.row_usage.needed, key=repr),
+    )
+    rust = (rust[0], rust[1], sorted(rust[2], key=repr))
+    if rust != python:
+        raise AstMismatch("row diagnostics", rust, python, parsed.text)
 
 
 _VARIANT_LINE = 1 << 30
@@ -784,7 +1042,7 @@ def _declared_params(
         or not _names_params(parsed.text, wrapper)
     ):
         return []
-    return [
+    found = [
         (call.lineno, call.func.slice.elts[1], query.value, parsed.span(call))
         for call in parsed.calls
         if isinstance(call.func, ast.Subscript)
@@ -795,6 +1053,7 @@ def _declared_params(
         and isinstance(query := call.args[0], ast.Constant)
         and isinstance(query.value, str)
     ]
+    return sorted(found, key=lambda call: call[3])
 
 
 def _names_params(text: str, wrapper: str) -> bool:
@@ -903,10 +1162,7 @@ def _columns(
     """Columns of a query and whether each can be NULL; ``None`` when it has none or cannot be analysed."""
     if query is None:
         return None
-    try:
-        columns = _analyze_columns(query, dialect=dialect, schema_sql=schema_sql)
-    except RuntimeError:
-        return None
+    columns = _analyze_columns(query, dialect=dialect, schema_sql=schema_sql)
     return [_RowColumn(*column) for column in columns] if columns else None
 
 
@@ -1160,10 +1416,13 @@ def apply_suppressions(
 def _typeddict_lineage(names: list[str], type_defs: dict[str, TypeInfo]) -> list[TypeInfo]:
     """``names`` and their same-source TypedDict bases, bases first, each once."""
     seen: dict[str, TypeInfo] = {}
+    active: set[str] = set()
 
     def visit(name: str) -> None:
-        if name in seen or (info := type_defs.get(name)) is None:
+        if name in seen or name in active or (info := type_defs.get(name)) is None:
             return
+        # A class that redefines its own base (`class Row(Row)`) names itself.
+        active.add(name)
         for base in info.bases:
             visit(base)
         seen[name] = info
@@ -1271,11 +1530,12 @@ def _structural_diagnostics(
     unknown = [col for col, field in owners if field is None and not admits_extra]
     names = {col.name for col in columns}
     missing = [
-        info.column_names(key)[0]
+        filled[0]
         for key, _ in fields
         if key in info.required
         and key not in info.opaque
-        and not names.intersection(info.column_names(key))
+        and (filled := info.column_names(key))
+        and not names.intersection(filled)
     ]
     noun = {"TypedDict": "key", "Protocol": "attribute"}.get(info.kind, "field")
     return (

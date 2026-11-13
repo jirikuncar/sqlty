@@ -28,19 +28,29 @@ queries as you type. It runs in your browser. The engine is compiled to
     </label>
     <span class="sqlty-actions" role="toolbar" aria-label="Actions">
       <button type="button" class="sqlty-button sqlty-button--primary" data-fix>Fix all</button>
-      <button type="button" class="sqlty-button" data-rewrite>Rewrite</button>
-      <button type="button" class="sqlty-button" data-strip>Strip</button>
-      <button type="button" class="sqlty-button" data-format>Format</button>
+      <button type="button" class="sqlty-button sqlty-menu-button" data-commands popovertarget="sqlty-commands" aria-haspopup="menu">Commands</button>
+      <span class="sqlty-menu" id="sqlty-commands" role="menu" aria-label="Commands" popover>
+        <button type="button" role="menuitem" data-rewrite>Rewrite<small>Wrap queries in SQL[T]</small></button>
+        <button type="button" role="menuitem" data-strip>Strip<small>Remove the SQL[T] wrappers</small></button>
+        <button type="button" role="menuitem" data-format>Format<small>Lay out the SQL of each query</small></button>
+      </span>
+      <button type="button" class="sqlty-button" data-ask-open popovertarget="sqlty-ask" aria-haspopup="dialog" hidden>Ask</button>
       <button type="button" class="sqlty-button" data-copy-link><span class="sqlty-wide">Copy link</span><span class="sqlty-narrow"></span></button>
-      <span class="sqlty-group" role="group" aria-label="Font size">
+      <span class="sqlty-group" role="group" aria-label="View">
         <button type="button" class="sqlty-button" data-zoom="-1" title="Smaller (Ctrl+-)" aria-label="Smaller">A&minus;</button>
         <button type="button" class="sqlty-button" data-zoom="1" title="Larger (Ctrl+=)" aria-label="Larger">A+</button>
+        <button type="button" class="sqlty-button" data-present title="Fill the screen (Ctrl+Shift+F)" aria-pressed="false">Present</button>
       </span>
-      <button type="button" class="sqlty-button" data-present title="Fill the screen (Ctrl+Shift+F)" aria-pressed="false">Present</button>
       <a class="sqlty-button sqlty-open" data-open target="_blank" rel="noopener">Open in playground</a>
     </span>
     <span class="sqlty-status" data-link-status role="status"></span>
   </div>
+  <form class="sqlty-ask" id="sqlty-ask" data-ask popover aria-label="Ask for a query">
+    <input type="text" data-ask-question placeholder="Ask for a query, or put the cursor on a # comment in queries.py" aria-label="Question">
+    <select data-ask-model aria-label="Model"></select>
+    <button type="submit" class="sqlty-button sqlty-button--primary">Ask</button>
+    <span class="sqlty-status" data-ask-status role="status"></span>
+  </form>
   <nav class="sqlty-steps" aria-label="Steps" data-steps hidden>
     <button type="button" class="sqlty-button" data-step="-1" title="Previous step (PageUp)" aria-label="Previous step">&larr;</button>
     <select data-step-select aria-label="Step"></select>
@@ -87,7 +97,7 @@ queries as you type. It runs in your browser. The engine is compiled to
     background-color: var(--md-default-bg-color);
   }
   .sqlty-embedded .sqlty-toolbar { margin-bottom: 0.4rem; }
-  .sqlty-embedded .sqlty-toolbar label, .sqlty-embedded [data-rewrite], .sqlty-embedded [data-strip], .sqlty-embedded [data-format],
+  .sqlty-embedded .sqlty-toolbar label, .sqlty-embedded [data-commands],
   .sqlty-embedded [data-copy-link], .sqlty-embedded .sqlty-group, .sqlty-embedded [data-present],
   .sqlty-embedded [data-tab="json"] { display: none; }
   .sqlty-open { display: none; }
@@ -96,11 +106,36 @@ queries as you type. It runs in your browser. The engine is compiled to
   .sqlty-toolbar label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.64rem; color: var(--md-default-fg-color--light); }
   .sqlty-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-left: auto; }
   .sqlty-group { display: inline-flex; }
-  .sqlty-group .sqlty-button:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
-  .sqlty-group .sqlty-button:last-child { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
+  .sqlty-group .sqlty-button:not(:last-child) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+  .sqlty-group .sqlty-button:not(:first-child) { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
+  .sqlty-group .sqlty-button:hover, .sqlty-group .sqlty-button:focus-visible, .sqlty-group [aria-pressed="true"] { position: relative; }
   .sqlty-narrow { display: none; }
   .sqlty-narrow::before { content: "Link"; }
   .sqlty-status { flex-basis: 100%; font-size: 0.64rem; }
+  .sqlty-ask {
+    flex-wrap: wrap; gap: 0.4rem; margin: 0; inset: auto; width: min(36rem, calc(100vw - 1rem)); padding: 0.6rem;
+    color: var(--md-default-fg-color); background-color: var(--md-default-bg-color);
+    border: 1px solid var(--md-default-fg-color--lighter); border-radius: 0.2rem; box-shadow: var(--md-shadow-z2);
+  }
+  .sqlty-ask:popover-open { display: flex; }
+  .sqlty-menu-button::after { content: ""; display: inline-block; margin-left: 0.45em; vertical-align: 0.15em; border: 0.25em solid transparent; border-top-color: currentColor; border-bottom: 0; }
+  .sqlty-menu {
+    margin: 0; inset: auto; min-width: 12rem; padding: 0.25rem 0; flex-direction: column;
+    color: var(--md-default-fg-color); background-color: var(--md-default-bg-color);
+    border: 1px solid var(--md-default-fg-color--lighter); border-radius: 0.2rem; box-shadow: var(--md-shadow-z2);
+  }
+  .sqlty-menu:popover-open { display: flex; }
+  .sqlty-menu [role="menuitem"] {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 0.05rem; padding: 0.35rem 0.8rem;
+    font: inherit; font-size: 0.7rem; text-align: left; color: inherit; background: none; border: 0; cursor: pointer;
+  }
+  .sqlty-menu small { font-size: 0.6rem; color: var(--md-default-fg-color--light); }
+  .sqlty-menu [role="menuitem"]:hover, .sqlty-menu [role="menuitem"]:focus-visible { outline: none; color: var(--md-accent-fg-color); background-color: var(--md-code-bg-color); }
+  [data-ask-open][aria-busy="true"]::after { content: "\2026"; }
+  .sqlty-ask input {
+    flex: 1 1 16rem; font: inherit; font-size: 0.7rem; padding: 0.3rem 0.7rem; color: var(--md-default-fg-color);
+    background-color: var(--md-code-bg-color); border: 1px solid var(--md-default-fg-color--lighter); border-radius: 0.2rem;
+  }
   .sqlty-status:empty { display: none; }
   #sqlty-playground select, .sqlty-button {
     font: inherit; font-size: 0.7rem; line-height: 1.4; padding: 0.3rem 0.7rem; white-space: nowrap;
@@ -197,7 +232,7 @@ The file tabs above the editor switch between the files `sqlty check` reads:
 |---|---|---|
 | `queries.py` | The Python source: diagnostics under the code with their quick fixes, SQL highlighted in query strings, completion and hover in queries | [`sqlty server`](recipes/vscode.md) |
 | `schema.sql` | The `CREATE TABLE` statements the queries are typed against | [`schema`](reference/configuration.md#schema) |
-| `sqlty.toml` | The `dialect`, `driver`, `import-style`, `param-types`, `rules` and `types` of [`[tool.sqlty]`](reference/configuration.md); its `dialect` wins over the select | `sqlty.toml` or `pyproject.toml` |
+| `sqlty.toml` | The `dialect`, `driver`, `import-style`, `param-types`, `preview`, `max-query-variants`, `rules` and `types` of [`[tool.sqlty]`](reference/configuration.md); its `dialect` wins over the select | `sqlty.toml` or `pyproject.toml` |
 
 The console below the editor shows what sqlty makes of them:
 
@@ -231,6 +266,13 @@ focus it and press the arrow keys. The page remembers the height and the font si
 
 A single fix is a quick fix on its diagnostic: click the light bulb, or press
 **Ctrl+.** with the cursor on it. **Ctrl+Z** undoes any of them.
+
+Press **F1** or **Ctrl+Shift+P** (**Cmd+Shift+P** on macOS; Firefox keeps it for a private
+window) in the editor, or right-click it, for the same commands as the
+[VS Code extension](recipes/vscode.md#commands): **sqlty: Fix All in File**, **sqlty: Wrap
+Queries in SQL[T]**, **sqlty: Strip SQL[T] Wrappers**, **sqlty: Format Queries in File**,
+**sqlty: Copy Share Link** and **sqlty: Explain Rule**, which opens the page of the rule
+under the cursor.
 
 ## Offline
 
@@ -321,8 +363,8 @@ size of the editor and the console, for a projector or a screen share.
 
 On macOS, **Command** works as **Ctrl**.
 
-!!! note "Row types from classes need Python"
-    The playground reads `tuple[...]` row types. A `TypedDict`, dataclass or Pydantic
-    model is resolved by the Python half of sqlty, which does not run in the browser,
-    so `sqlty check` can report more on your machine. Keys of `sqlty.toml` that name
+!!! note "One file"
+    The playground checks `queries.py` by itself: row types from classes, helper and
+    driver calls and `# sqlty: ignore` comments work as on your machine, but a helper or
+    a type imported from another module is not followed. Keys of `sqlty.toml` that name
     files, such as `schema` and `overrides`, are errors here.

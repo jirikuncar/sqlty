@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::ops::ControlFlow;
 use std::rc::Rc;
 
+use sqlparser::ast::InTarget;
 use sqlparser::ast::{
     visit_expressions, BinaryOperator, Expr, FromTable, FunctionArg, FunctionArgExpr,
     FunctionArguments, JoinConstraint, JoinOperator, Select, SelectItem, SetExpr, Statement,
@@ -531,10 +532,9 @@ impl<'a> Analyzer<'a> {
         if placeholder_index(other).is_some() {
             return;
         }
-        if let Ok(typed) = self.expr(other, scope) {
-            if is_typed(&typed) {
-                out.add(index, typed, Nullability::Unknown);
-            }
+        let Ok(typed) = self.expr(other, scope);
+        if is_typed(&typed) {
+            out.add(index, typed, Nullability::Unknown);
         }
     }
 
@@ -544,9 +544,8 @@ impl<'a> Analyzer<'a> {
         let Some(index) = self.shifted_placeholder(shifted, scope) else {
             return;
         };
-        if let Ok(typed) = self.expr(other, scope) {
-            out.add_shifted(index, typed);
-        }
+        let Ok(typed) = self.expr(other, scope);
+        out.add_shifted(index, typed);
     }
 
     /// The placeholder of `%s + INTERVAL '1 day'`, `%s - INTERVAL '1 day'` or
@@ -603,9 +602,7 @@ impl<'a> Analyzer<'a> {
         let (Some(index), None) = (placeholder_index(placeholder), placeholder_index(other)) else {
             return;
         };
-        let Ok(typed) = self.expr(other, scope) else {
-            return;
-        };
+        let Ok(typed) = self.expr(other, scope);
         let other_type = operand_type(&typed);
         let other = operand(other_type);
         let ruled = binary_rules(op)
@@ -718,13 +715,21 @@ impl<'a> Analyzer<'a> {
                     self.hint_pair(expr, bound, scope, out);
                 }
             }
-            Expr::InList { expr, list, .. } => {
+            Expr::In {
+                expr,
+                target: InTarget::List(list),
+                ..
+            } => {
                 for item in list {
                     self.hint_pair(item, expr, scope, out);
                     self.hint_pair(expr, item, scope, out);
                 }
             }
-            Expr::InSubquery { expr, subquery, .. } => {
+            Expr::In {
+                expr,
+                target: InTarget::Subquery(subquery),
+                ..
+            } => {
                 if let Some(index) = placeholder_index(expr) {
                     if let Ok(Some(columns)) = self.correlated(scope).query_columns(subquery) {
                         if let [column] = columns.as_slice() {

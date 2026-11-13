@@ -985,7 +985,7 @@ cli = [{ name = "rich", specifier = ">=15.0.0" }]
 dev = [
     { name = "inline-snapshot", specifier = ">=0.15.0" },
     { name = "jsonschema", specifier = ">=4.26.0" },
-    { name = "maturin", specifier = ">=1.12.1,<2.0" },
+    { name = "maturin", specifier = ">=1.15,<2.0" },
     { name = "mypy", specifier = ">=2.4.0" },
     { name = "prek", specifier = ">=0.5.4" },
     { name = "pydantic", extras = ["email"], specifier = ">=2.14.1" },

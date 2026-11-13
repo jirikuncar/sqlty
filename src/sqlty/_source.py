@@ -40,15 +40,52 @@ from __future__ import annotations
 
 import ast
 import bisect
+import copy
 import functools
 import io
 import itertools
+import os
 import re
+import sys
 import tokenize
 import typing
 from dataclasses import dataclass
 
+from sqlty._core import module_facts, module_ignores, module_outline
 from sqlty._psycopg import PsycopgScan
+
+AST = os.environ.get("SQLTY_AST", "python")
+"""Who checks a module: ``python`` (the ``ast`` passes), ``rust`` (``sqlty_python``, which
+parses nothing with ``ast``), or ``compare``, which runs both and raises ``AstMismatch``
+when they differ."""
+
+
+class Facts(typing.NamedTuple):
+    """What ``sqlty_python::module::facts`` reads of a module, see ``ParsedSource.facts``."""
+
+    names: list[str]
+    attributes: list[str]
+    imports: list[tuple[str, str, str | None, int]]
+    any_calls: list[tuple[int, str]]
+    typing_aliases: list[tuple[str, str]]
+    driver_calls: list[
+        tuple[
+            int,
+            str,
+            list[tuple[int | str, str | None]] | None,
+            str,
+            str | None,
+            tuple[int, int],
+        ]
+    ]
+
+
+class AstMismatch(AssertionError):
+    """``SQLTY_AST=compare`` found the Rust and Python readings of a module different."""
+
+    def __init__(self, what: str, rust: object, python: object, text: str) -> None:
+        super().__init__(f"{what}: rust {rust!r} != python {python!r}\n{text}")
+
 
 _TYPING_MODULES = frozenset({"typing", "typing_extensions"})
 # A comment runs to the end of its line, so the gap can split text only one way.
@@ -316,6 +353,45 @@ def _class_name(node: ast.expr | None) -> str | None:
     return None
 
 
+def _outline(tree: ast.Module) -> ast.Module:
+    """``tree`` with function bodies cut to the statements holding a class, as Rust builds it.
+
+    Example:
+        >>> tree = ast.parse("def f():\\n    x = 1\\n    if c:\\n        y = 2\\n        class A: ...")
+        >>> ast.unparse(_outline(tree))
+        'def f():\\n    if c:\\n\\n        class A:\\n            ...'
+    """
+    tree = copy.deepcopy(tree)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            node.body = _cut(node.body)
+    return tree
+
+
+def _dump(tree: ast.AST | None) -> str | None:
+    return None if tree is None else ast.dump(tree, include_attributes=True)
+
+
+def _holds_class(node: ast.AST) -> bool:
+    return any(isinstance(n, ast.ClassDef) for n in ast.walk(node))
+
+
+def _cut(body: list[ast.stmt]) -> list[ast.stmt]:
+    kept = [stmt for stmt in body if _holds_class(stmt)]
+    for stmt in kept:
+        if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            continue
+        for name in ("body", "orelse", "finalbody"):
+            if isinstance(inner := getattr(stmt, name, None), list):
+                setattr(stmt, name, _cut(inner))
+        for name in ("handlers", "cases"):
+            if isinstance(inner := getattr(stmt, name, None), list):
+                setattr(stmt, name, [part for part in inner if _holds_class(part)])
+                for part in getattr(stmt, name):
+                    part.body = _cut(part.body)
+    return kept
+
+
 def _breadth_first[T](found: list[tuple[int, T]]) -> list[T]:
     """Depth-first pre-order nodes in breadth-first order (stable per depth)."""
     return [node for _, node in sorted(found, key=lambda item: item[0])]
@@ -350,6 +426,29 @@ class ParsedSource:
         if self.tree is not None:
             scan.visit(self.tree)
         return scan
+
+    @functools.cached_property
+    def _outlined(self) -> tuple[ast.Module, list[ast.ClassDef]] | None:
+        if AST == "python":
+            return None if self.tree is None else (self.tree, self.classes)
+        rust = module_outline(self.text)
+        if AST == "compare":
+            python = None if self.tree is None else _outline(self.tree)
+            if _dump(rust and rust[0]) != _dump(python):
+                raise AstMismatch("outline", _dump(rust and rust[0]), _dump(python), self.text)
+        return rust
+
+    @property
+    def outline(self) -> ast.Module | None:
+        """What type extraction reads: the module with function bodies cut to the statements
+        holding a class (see ``_outline``), built in Rust unless ``SQLTY_AST=python``, where it
+        is the whole ``tree``. ``None`` when the text is not valid Python, or Rust declines it."""
+        return None if self._outlined is None else self._outlined[0]
+
+    @property
+    def outline_classes(self) -> list[ast.ClassDef]:
+        """The class definitions of ``outline``, in ``classes`` order."""
+        return [] if self._outlined is None else self._outlined[1]
 
     @functools.cached_property
     def imports(self) -> list[ast.Import | ast.ImportFrom]:
@@ -594,6 +693,14 @@ class ParsedSource:
     @functools.cached_property
     def typing_aliases(self) -> dict[str, str]:
         """Local names for ``typing`` / ``typing_extensions`` and their members, to originals."""
+        if AST == "python" or self.facts is None:
+            return self._typing_aliases()
+        rust = dict(self.facts.typing_aliases)
+        if AST == "compare" and rust != (python := self._typing_aliases()):
+            raise AstMismatch("typing_aliases", rust, python, self.text)
+        return rust
+
+    def _typing_aliases(self) -> dict[str, str]:
         aliases: dict[str, str] = {}
         for node in self.imports:
             if isinstance(node, ast.ImportFrom):
@@ -615,10 +722,10 @@ class ParsedSource:
             >>> {name: ast.unparse(value) for name, value in aliases.items()}
             {'A': 'tuple[int]', 'B': 'A'}
         """
-        if self.tree is None:
+        if (tree := self.outline) is None:
             return {}
         aliases: dict[str, ast.expr] = {}
-        for node in self.tree.body:
+        for node in tree.body:
             match node:
                 case ast.TypeAlias(name=ast.Name(id=name), type_params=[], value=value):
                     aliases[name] = value
@@ -643,6 +750,20 @@ class ParsedSource:
             >>> ParsedSource("import a.b, c as d\\nfrom e.f import g as h").imported_names
             {'a': 'a', 'd': 'c', 'h': 'e.f.g'}
         """
+        if AST == "python" or self.facts is None:
+            return self._imported_names()
+        rust: dict[str, str] = {}
+        for local, original, module, level in self.facts.imports:
+            if module is None:
+                root = original.partition(".")[0]
+                rust.setdefault(*((root, root) if local == original else (local, original)))
+            elif module and not level:
+                rust.setdefault(local, f"{module}.{original}")
+        if AST == "compare" and rust != (python := self._imported_names()):
+            raise AstMismatch("imported_names", rust, python, self.text)
+        return rust
+
+    def _imported_names(self) -> dict[str, str]:
         names: dict[str, str] = {}
         for node in self.imports:
             if isinstance(node, ast.ImportFrom):
@@ -705,6 +826,18 @@ class ParsedSource:
         wrapper = _wrapper_name(import_style)
         if wrapper is None or "Any" not in self.text or not self.may_wrap(import_style):
             return []
+        if AST == "python" or self.facts is None:
+            return self._any_calls(wrapper)
+        rust = [
+            offset
+            for offset, name in self.facts.any_calls
+            if name == wrapper or name.endswith(f".{wrapper}")
+        ]
+        if AST == "compare" and rust != (python := self._any_calls(wrapper)):
+            raise AstMismatch("any_calls", rust, python, self.text)
+        return rust
+
+    def _any_calls(self, wrapper: str) -> list[int]:
         aliases = self.typing_aliases
         starts = self._byte_lines
         offsets = []
@@ -716,6 +849,12 @@ class ParsedSource:
             if name == wrapper or name.endswith(f".{wrapper}"):
                 offsets.append(starts[func.value.lineno - 1] + func.value.col_offset)
         return sorted(offsets)
+
+    @functools.cached_property
+    def facts(self) -> Facts | None:
+        """What Rust reads of the module, ``None`` when it cannot parse the text."""
+        found = module_facts(self.text)
+        return None if found is None else Facts(*found)
 
     def may_need_rust_check(self, import_style: str | None = None) -> bool:
         """Whether the Rust checker can report anything for the text.
@@ -761,6 +900,28 @@ class ParsedSource:
         found: dict[int, Ignore] = {}
         if not self.has_ignore_comments:
             return found
+        rust = None
+        if AST != "python":
+            rust = module_ignores(self.text, sys.version_info[:2])
+            if AST == "rust" and rust is not None:
+                return {
+                    line: Ignore(line, None if rules is None else tuple(rules), start, end)
+                    for line, rules, start, end in rust
+                }
+        python = self._tokenized_ignores()
+        # `tokenize` stops at a lone carriage return, which is a line break.
+        if rust is not None and "\r" not in self.text.replace("\r\n", ""):
+            read = [
+                (i.line, None if i.rules is None else list(i.rules), i.start, i.end)
+                for i in python.values()
+            ]
+            if rust != read:
+                raise AstMismatch("ignores", rust, read, self.text)
+        return python
+
+    def _tokenized_ignores(self) -> dict[int, Ignore]:
+        """``ignores`` of a source that does not parse: the comments up to the error."""
+        found: dict[int, Ignore] = {}
         tokens = tokenize.generate_tokens(io.StringIO(self.text).readline)
         try:
             for tok in tokens:

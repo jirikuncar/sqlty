@@ -137,6 +137,7 @@ impl<'a> Analyzer<'a> {
             DataType::Array(
                 ArrayElemTypeDef::AngleBracket(inner)
                 | ArrayElemTypeDef::Parenthesis(inner)
+                | ArrayElemTypeDef::ParenthesisNotNull(inner)
                 | ArrayElemTypeDef::Qualified(inner, _)
                 | ArrayElemTypeDef::SquareBracket(inner, _),
             ) => self.defines_type(inner),
@@ -313,9 +314,7 @@ impl<'a> Analyzer<'a> {
             Expr::Identifier(_) | Expr::CompoundIdentifier(_) => Ok(self.column_expr(expr, scope)),
             Expr::Value(value) => self.value_typed(&value.value),
             Expr::Exists { .. }
-            | Expr::InSubquery { .. }
-            | Expr::InList { .. }
-            | Expr::InUnnest { .. }
+            | Expr::In { .. }
             | Expr::MemberOf(_)
             | Expr::Between { .. }
             | Expr::Like { .. }

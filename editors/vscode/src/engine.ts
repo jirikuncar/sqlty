@@ -15,8 +15,7 @@ export async function startEngine(
 ): Promise<vscode.Disposable> {
   const diagnostics = vscode.languages.createDiagnosticCollection("sqlty");
   const fixes = new WeakMap<vscode.Diagnostic, Edit[]>();
-  const wasm = vscode.Uri.joinPath(extension, "dist", "sqlty_wasm.wasm");
-  const engine = await load(await vscode.workspace.fs.readFile(wasm));
+  const engine = await loadEngine(extension);
 
   const projects = new Map<string, Promise<Project>>();
   const projectOf = (document: vscode.TextDocument): Promise<Project> => {
@@ -131,6 +130,51 @@ export async function startEngine(
       },
       { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] },
     ),
+    vscode.languages.registerCodeActionsProvider(
+      SELECTOR,
+      {
+        async provideCodeActions(document, _range, context) {
+          const only = context.only;
+          if (only === undefined) {
+            return [];
+          }
+          const kinds = Object.keys(WHOLE_FILE).filter((kind) =>
+            only.contains(vscode.CodeActionKind.Empty.append(kind)),
+          );
+          if (kinds.length === 0) {
+            return [];
+          }
+          const analyzed = kinds.some((kind) => kind !== FORMAT)
+            ? await ask(document, { op: "analyze" })
+            : undefined;
+          const formatted = kinds.includes(FORMAT)
+            ? await ask(document, { op: "format" })
+            : undefined;
+          const answers = { ...analyzed, ...formatted };
+          const text = document.getText();
+          return kinds.flatMap((kind) => {
+            const [title, key] = WHOLE_FILE[kind];
+            const done = answers[key];
+            if (typeof done !== "string" || done === text) {
+              return [];
+            }
+            const action = new vscode.CodeAction(title, vscode.CodeActionKind.Empty.append(kind));
+            action.edit = new vscode.WorkspaceEdit();
+            const whole = new vscode.Range(
+              document.positionAt(0),
+              document.positionAt(text.length),
+            );
+            action.edit.replace(document.uri, whole, done);
+            return [action];
+          });
+        },
+      },
+      {
+        providedCodeActionKinds: Object.keys(WHOLE_FILE).map((kind) =>
+          vscode.CodeActionKind.Empty.append(kind),
+        ),
+      },
+    ),
     vscode.languages.registerHoverProvider(SELECTOR, {
       async provideHover(document, position) {
         const answer = await ask(document, { op: "hover", offset: document.offsetAt(position) });
@@ -147,6 +191,16 @@ export async function startEngine(
   checkAll();
   return vscode.Disposable.from(...subscriptions);
 }
+
+const FORMAT = "source.format.sqlty";
+
+/** The whole-file actions of `sqlty server`, as the title and the answer key of the engine. */
+const WHOLE_FILE: Record<string, [string, string]> = {
+  "source.fixAll.sqlty": ["sqlty: fix all", "fixed"],
+  [FORMAT]: ["sqlty: format", "formatted"],
+  "source.rewrite.sqlty": ["sqlty: rewrite", "rewritten"],
+  "source.strip.sqlty": ["sqlty: strip", "stripped"],
+};
 
 type Edit = { start: number; end: number; replacement: string };
 type Found = {
@@ -183,7 +237,9 @@ function diagnostic(document: vscode.TextDocument, found: Found): vscode.Diagnos
 }
 
 /** The engine of `rust/crates/sqlty-wasm`, as `docs/assets/playground/engine.js` loads it. */
-async function load(bytes: Uint8Array): Promise<Engine> {
+export async function loadEngine(extension: vscode.Uri): Promise<Engine> {
+  const wasm = vscode.Uri.joinPath(extension, "dist", "sqlty_wasm.wasm");
+  const bytes = await vscode.workspace.fs.readFile(wasm);
   const { instance } = await WebAssembly.instantiate(bytes as BufferSource);
   const { memory, buffer, run, output } = instance.exports as {
     memory: WebAssembly.Memory;

@@ -101,6 +101,12 @@ jobs:
       - name: Run tests
         run: uv run pytest -m "not timing and not pg"
 
+      # Rust and Python readings of every checked module must agree (`SQLTY_AST`).
+      - name: Run tests comparing the Rust and Python syntax trees
+        run: uv run pytest -m "not timing and not pg" tests/mdtest tests/test_cli.py tests/test_helpers.py tests/test_psycopg.py tests/test_driver_values.py tests/test_type_extractor.py tests/test_cross_module.py
+        env:
+          SQLTY_AST: compare
+
       # They share one database server, so they run in one process.
       - name: Run database tests
         run: uv run pytest -m pg -n 0
@@ -109,7 +115,7 @@ jobs:
         run: uv run pytest -m timing -n 0 -p no:randomly
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: nextest@0.9.148
 
@@ -120,8 +126,13 @@ jobs:
         run: cargo test --doc --workspace --manifest-path rust/Cargo.toml
 
   free-threaded:
-    name: Threads on free-threaded Python 3.14t
+    name: Threads on free-threaded Python ${{ matrix.python }}
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # 3.14t builds a cp314t extension, 3.15t the abi3t one.
+        python: ["3.14t", "3.15t"]
+      fail-fast: false
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -136,7 +147,7 @@ jobs:
           # Built wheels (duckdb has none for 3.15) are kept with the lock; main writes them.
           cache-dependency-glob: uv.lock
           # Jobs install different groups: each keeps its own cache.
-          cache-suffix: ${{ github.job }}
+          cache-suffix: ${{ github.job }}-${{ matrix.python }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Rust toolchain
@@ -149,8 +160,10 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build the extension and run the thread tests
+        env:
+          PYTHON: ${{ matrix.python }}
         run: |
-          uv venv --python 3.14t
+          uv venv --python "$PYTHON"
           uv export --only-group dev --no-hashes --no-emit-project --quiet > "$RUNNER_TEMP/locked.txt"
           uv pip install maturin pytest pytest-cov pytest-xdist --constraint "$RUNNER_TEMP/locked.txt"
           uv run --no-sync maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
@@ -334,10 +347,27 @@ jobs:
           "$RUNNER_TEMP/elan-init" -y --default-toolchain none --no-modify-path
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
+      # Keyed by the proofs, not the commit: a run saves only when they changed. A pull
+      # request restores its own latest build, else main's.
+      - name: Restore the Lake build
+        id: lake
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: proofs/.lake
+          key: lake-${{ runner.os }}-${{ hashFiles('proofs/lean-toolchain', 'proofs/lake-manifest.json') }}-${{ hashFiles('proofs/**/*.lean', 'proofs/lakefile.toml', '!proofs/.lake/**') }}
+          restore-keys: lake-${{ runner.os }}-${{ hashFiles('proofs/lean-toolchain', 'proofs/lake-manifest.json') }}-
+
       # `lean-toolchain` pins Lean itself.
       - name: Check the proofs and build the model
         working-directory: proofs
         run: lake build
+
+      - name: Save the Lake build
+        if: steps.lake.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: proofs/.lake
+          key: ${{ steps.lake.outputs.cache-primary-key }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
@@ -466,7 +496,7 @@ jobs:
 
       # Simulation counts instructions, so a run is stable on a shared runner: the engine
       # is CPU-bound, with no I/O for instruction counting to miss.
-      - uses: CodSpeedHQ/action@78102a468f96d8e0ccb92d0ec49425753fc42062 # v5.6.0
+      - uses: CodSpeedHQ/action@af75f77f17a054769abefaa42fe8dc2975469b5f # v5.6.3
         if: vars.CODSPEED == 'true'
         with:
           mode: simulation
@@ -502,11 +532,21 @@ jobs:
       - name: Install Rust toolchain
         run: rustup toolchain install 1.99.1 --profile minimal && rustup default 1.99.1
 
-      # Build at the lowest supported maturin: older versions resolve
-      # `include` against python-source and drop sqlty_magic.pth from the wheel.
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: rust -> target
+          key: python-${{ matrix.python-version }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # Build at the lowest supported maturin: before 1.12.1 `include` resolved against
+      # python-source and dropped sqlty_magic.pth from the wheel; before 1.15 abi3t broke.
       - name: Build sdist, then wheel from sdist (maturin floor)
+        # The wheel builds in a temporary unpacked sdist; the cached target dir stays shared.
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/rust/target
         run: |
-          echo 'maturin==1.12.1' > "$RUNNER_TEMP/maturin-floor.txt"
+          echo 'maturin==1.15.0' > "$RUNNER_TEMP/maturin-floor.txt"
           uv build --out-dir dist --build-constraint "$RUNNER_TEMP/maturin-floor.txt"
 
       - name: Check sqlty_magic.pth is in the wheel root, RECORD and sdist

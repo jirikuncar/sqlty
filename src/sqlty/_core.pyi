@@ -1,6 +1,9 @@
 """Type stubs for the Rust extension module (sqlty._core)."""
 
-from typing import Any, final
+import ast
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any, Literal, final
 
 from sqlty._lint import Diagnostic
 
@@ -61,11 +64,15 @@ def query_diagnostics(
     *,
     dialect: str = "postgres",
     schema_sql: str | Schema | None = None,
-) -> list[tuple[str, str]]: ...
+) -> list[tuple[str, str, int | None, int | None, str | None, str | None]]: ...
 def name_rules() -> list[str]: ...
 def dialect_names() -> list[str]: ...
 def python_types() -> list[str]: ...
 def parse_error(sql: str, *, dialect: str = "postgres") -> str | None: ...
+def checks_names(dialect: str) -> bool: ...
+def query_tables(
+    sql: str, *, dialect: str = "postgres"
+) -> list[tuple[str, str | None, Literal["read", "write"]]]: ...
 def returns_rows(sql: str, *, dialect: str = "postgres") -> bool: ...
 def rewrite_source(
     source: str,
@@ -129,6 +136,175 @@ def check_queries(
 def named_queries(
     source: str, *, query_format: str = "auto", name: str = ""
 ) -> list[tuple[str, str, list[tuple[str, str]]]]: ...
+def module_facts(
+    source: str,
+) -> (
+    tuple[
+        list[str],
+        list[str],
+        list[tuple[str, str, str | None, int]],
+        list[tuple[int, str]],
+        list[tuple[str, str]],
+        list[
+            tuple[
+                int,
+                str,
+                list[tuple[int | str, str | None]] | None,
+                str,
+                str | None,
+                tuple[int, int],
+            ]
+        ],
+    ]
+    | None
+): ...
+def template_strings(
+    source: str,
+) -> list[tuple[int, tuple[int, int], str | None, list[str | None]]] | None: ...
+def module_outline(source: str) -> tuple[ast.Module, list[ast.ClassDef]] | None: ...
+def helper_sites(
+    source: str, names: list[str]
+) -> (
+    list[
+        tuple[
+            tuple[int, int],
+            str | None,
+            str,
+            list[_SiteArg],
+            list[tuple[str | None, _SiteArg]],
+            str | None,
+        ]
+    ]
+    | None
+): ...
+
+_SiteArg = tuple[
+    bool, tuple[int, int], str | None, str | None, list[tuple[int | str, str | None]] | None
+]
+
+def unparse_expression(source: str) -> str | None: ...
+def type_definitions(
+    source: str, module: str | None, version: tuple[int, int]
+) -> list[str] | None: ...
+def type_relations(
+    source: str, version: tuple[int, int], columns: list[str | None]
+) -> list[str] | None: ...
+def row_diagnostics(
+    source: str,
+    *,
+    version: tuple[int, int],
+    dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
+    rules: dict[str, str] | None = None,
+    import_style: str | None = None,
+    module: str | None = None,
+    coerce: list[str] = ...,
+) -> (
+    tuple[
+        list[Diagnostic],
+        list[tuple[str | None, str, str] | None],
+        list[tuple[str | None, str, str]],
+    ]
+    | None
+): ...
+def check_modules(
+    modules: Sequence[tuple[str, str | None, int]],
+    configs: Sequence[
+        tuple[
+            str,
+            str | Schema | None,
+            dict[str, str] | None,
+            str | None,
+            bool,
+            list[str],
+            ModuleIndex | None,
+            int | None,
+        ]
+    ],
+    *,
+    version: tuple[int, int],
+    jobs: int | None = None,
+) -> list[
+    tuple[
+        tuple[
+            list[Diagnostic],
+            list[tuple[str | None, str, str] | None],
+            list[tuple[str | None, str, str]],
+        ],
+        bool,
+    ]
+]: ...
+def module_diagnostics(
+    source: str,
+    *,
+    version: tuple[int, int],
+    dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
+    rules: dict[str, str] | None = None,
+    import_style: str | None = None,
+    untyped: bool = False,
+    module: str | None = None,
+    coerce: list[str] = ...,
+    index: ModuleIndex | None = None,
+    name: str | None = None,
+    variants: int | None = None,
+) -> tuple[
+    list[Diagnostic],
+    list[tuple[str | None, str, str] | None],
+    list[tuple[str | None, str, str]],
+]: ...
+
+type _Helper = tuple[
+    list[str],
+    list[str],
+    str,
+    str | None,
+    str,
+    str | None,
+    str | None,
+    str | None,
+    bool,
+    str | None,
+]
+
+@final
+class ModuleIndex:
+    def extended(
+        self, steps: list[tuple[str, str, str, str | None, list[Path], str | None]]
+    ) -> ModuleIndex: ...
+    def helpers(self) -> dict[str, dict[str, _Helper]]: ...
+
+def module_index(
+    version: tuple[int, int],
+    steps: list[tuple[str, str, str, str | None, list[Path], str | None]],
+) -> ModuleIndex: ...
+def module_helpers(source: str, version: tuple[int, int]) -> dict[str, _Helper]: ...
+def call_variants(
+    source: str, version: tuple[int, int], limit: int
+) -> list[tuple[int, bool, list[tuple[str, list[int], bool]] | None, bool, str | None]] | None: ...
+def module_calls(
+    source: str,
+    *,
+    version: tuple[int, int],
+    index: ModuleIndex | None = None,
+    name: str | None = None,
+    module: str | None = None,
+    variants: int | None = None,
+) -> list[tuple[tuple[int, int] | None, list[str], str | None, int | None]]: ...
+def add_json_types(
+    source: str,
+    *,
+    version: tuple[int, int],
+    dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
+    import_style: str | None = None,
+) -> str: ...
+def module_ignores(
+    source: str, version: tuple[int, int]
+) -> list[tuple[int, list[str] | None, int, int]] | None: ...
+def rendered_compositions(
+    source: str, version: tuple[int, int]
+) -> list[tuple[int, bool, str | None]] | None: ...
 def wrapped_queries(
     source: str, *, import_style: str | None = None
 ) -> list[tuple[int, str, str | None, tuple[int, int]]]: ...

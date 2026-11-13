@@ -8,6 +8,7 @@
 //! plain list of constants gives no set, and a set that would exceed [`MAX_VALUES`] is
 //! dropped in favour of the plain `str` or `int`.
 
+use sqlparser::ast::InTarget;
 use sqlparser::ast::{BinaryOperator, CastKind, Expr, Ident, Value as SqlValue, ValueWithSpan};
 
 /// The most values a derived set (a `CHECK` list, a `CASE`, a `UNION`) may hold before it
@@ -184,10 +185,11 @@ pub(crate) fn check_values(expr: &Expr, is_target: &dyn Fn(&Ident) -> bool) -> O
                 None
             }
         }
-        Expr::InList {
+        Expr::In {
             expr: column,
-            list,
+            target: InTarget::List(list),
             negated: false,
+            ..
         } if is_column(column, is_target) => list
             .iter()
             .map(constant)

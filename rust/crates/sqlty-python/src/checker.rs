@@ -94,6 +94,7 @@ fn inline_comment_edit(source: &str, span: &Range<usize>) -> Edit {
 pub(crate) const QUOTES: [&str; 4] = ["\"\"\"", "'''", "\"", "'"];
 
 /// A diagnostic result from checking source code.
+#[derive(Debug)]
 pub struct Diagnostic {
     /// The rule that fired.
     pub rule: Rule,
@@ -236,7 +237,6 @@ impl Checker<'_> {
         let (dialect, schema) = route(query, self.options.dialect.name(), self.options.schema);
         let parsed = parse(query, dialect);
         let (columns, diagnostics) = parsed.analyze_with_diagnostics(schema);
-        let columns = columns.ok().flatten();
         let analysis = Rc::new(Analysis {
             row_type: columns.as_deref().and_then(row_type),
             parsed,

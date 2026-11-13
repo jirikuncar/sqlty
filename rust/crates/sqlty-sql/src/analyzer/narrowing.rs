@@ -20,6 +20,7 @@
 use std::collections::HashSet;
 use std::rc::Rc;
 
+use sqlparser::ast::InTarget;
 use sqlparser::ast::{
     BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Query, Select, SetExpr, TableFactor,
     TableWithJoins, UnaryOperator,
@@ -382,13 +383,15 @@ impl<'a> Analyzer<'a> {
             | Expr::IsNotFalse(_) => Learned::default(),
             // An empty subquery or array makes `x IN (...)` false and `x NOT IN (...)` true
             // for a NULL `x`: only `x IN (...)` being true proves `x` is there.
-            Expr::InSubquery {
+            Expr::In {
                 expr: inner,
+                target: InTarget::Subquery(_),
                 negated,
                 ..
             }
-            | Expr::InUnnest {
+            | Expr::In {
                 expr: inner,
+                target: InTarget::Unnest(_) | InTarget::Table { .. },
                 negated,
                 ..
             } => {
@@ -419,10 +422,11 @@ impl<'a> Analyzer<'a> {
                     .extend(self.column_values(right, &[left.as_ref()], scope));
                 learned
             }
-            Expr::InList {
+            Expr::In {
                 expr: inner,
-                list,
+                target: InTarget::List(list),
                 negated: false,
+                ..
             } if truth => {
                 let mut learned = self.proven(cond, scope);
                 let list: Vec<&Expr> = list.iter().collect();
@@ -431,10 +435,11 @@ impl<'a> Analyzer<'a> {
                     .extend(self.column_values(inner, &list, scope));
                 learned
             }
-            Expr::InList {
+            Expr::In {
                 expr: inner,
-                list,
+                target: InTarget::List(list),
                 negated: true,
+                ..
             } if truth => {
                 let mut learned = self.proven(cond, scope);
                 let list: Vec<&Expr> = list.iter().collect();
@@ -499,10 +504,11 @@ impl<'a> Analyzer<'a> {
                 op: BinaryOperator::Eq,
                 right,
             } => (right, vec![left]),
-            Expr::InList {
+            Expr::In {
                 expr,
-                list,
+                target: InTarget::List(list),
                 negated: false,
+                ..
             } => (expr, list.iter().collect()),
             _ => return Learned::default(),
         };
@@ -584,9 +590,7 @@ impl<'a> Analyzer<'a> {
         else {
             return Learned::default();
         };
-        let Ok((inner, sources)) = self.correlated(scope).scope_of(&select.from) else {
-            return Learned::default();
-        };
+        let Ok((inner, sources)) = self.correlated(scope).scope_of(&select.from);
         let outer = |reference: &String| {
             !sources.iter().any(|source| source.reference == *reference)
                 && scope.iter().any(|source| source.reference == *reference)
@@ -665,9 +669,17 @@ impl<'a> Analyzer<'a> {
                         .union(learned);
                 }
             },
-            Expr::InList { expr: inner, .. } => return self.proven(inner, scope),
+            Expr::In {
+                expr: inner,
+                target: InTarget::List(_),
+                ..
+            } => return self.proven(inner, scope),
             // Over an empty set they are false or true, not NULL, whatever the left side is.
-            Expr::InSubquery { .. } | Expr::InUnnest { .. } | Expr::AnyOp { .. } => return learned,
+            Expr::In {
+                target: InTarget::Subquery(_) | InTarget::Unnest(_) | InTarget::Table { .. },
+                ..
+            }
+            | Expr::AnyOp { .. } => return learned,
             Expr::Between {
                 expr: inner,
                 low,
@@ -729,7 +741,6 @@ mod tests {
     fn marks(sql: &str) -> String {
         let schema = Some(load_schema(SCHEMA, "postgres"));
         analyze_select(sql, "postgres", schema.as_deref())
-            .unwrap()
             .unwrap()
             .iter()
             .map(|col| match col.nullability {
