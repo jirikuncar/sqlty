@@ -662,6 +662,26 @@ fn parse_error(py: Python<'_>, sql: &str, dialect: DialectArg) -> Option<String>
     detach(py, || analyzer::parse_error(sql, dialect))
 }
 
+/// The tables a query names, in source order, as `(name, schema, access)` tuples: `access`
+/// is "read" or "write" (the target of an INSERT, UPDATE, DELETE or MERGE). CTEs, derived
+/// tables and table functions are left out; empty when the query does not parse.
+#[pyfunction]
+#[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES))]
+fn query_tables(
+    py: Python<'_>,
+    sql: &str,
+    dialect: DialectArg,
+) -> Vec<(String, Option<String>, &'static str)> {
+    let dialect = dialect.0;
+    detach(py, || analyzer::query_tables(sql, dialect))
+        .into_iter()
+        .map(|table| {
+            let access = if table.write { "write" } else { "read" };
+            (table.name, table.schema, access)
+        })
+        .collect()
+}
+
 /// Whether `dialect` checks a schema's tables and columns against queries.
 #[pyfunction]
 fn checks_names(dialect: DialectArg) -> bool {
@@ -2189,6 +2209,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(schema_skipped_objects, m)?)?;
     m.add_function(wrap_pyfunction!(parse_error, m)?)?;
     m.add_function(wrap_pyfunction!(checks_names, m)?)?;
+    m.add_function(wrap_pyfunction!(query_tables, m)?)?;
     m.add_function(wrap_pyfunction!(returns_rows, m)?)?;
     m.add_function(wrap_pyfunction!(rewrite_source, m)?)?;
     m.add_function(wrap_pyfunction!(add_param_types, m)?)?;

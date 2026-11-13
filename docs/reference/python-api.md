@@ -286,6 +286,7 @@ Hover(start=41, end=43, contents='Column `id` of `users`: `INT NOT NULL`')
 | `analyze_params(sql, *, dialect="postgres", schema_sql=None)` | Query parameters as `ParamInfo(number, name, python_type, sql_type, nullable, cast, untyped_sql_type)`, or `None` |
 | `checks_names(dialect)` | Whether the dialect checks a schema's tables and columns against queries: `postgres`, `mysql` and `sqlite` do |
 | `query_diagnostics(sql, *, dialect="postgres", schema_sql=None, rules=None)` | Why columns are untyped or names are wrong, as `QueryDiagnostic(rule, message, severity, start, end, table, column)`; `rules` as in `check_source`, `"ignore"` rules left out; tables and columns are only judged when `schema_sql` defines tables |
+| `query_tables(sql, *, dialect="postgres")` | The tables a query names, in source order, as `TableRef(name, schema, access)`; `access` is `"write"` for the target of an `INSERT`, `UPDATE`, `DELETE` or `MERGE`, else `"read"`; CTEs, derived tables and table functions are left out |
 | `returns_rows(sql, *, dialect="postgres")` | Whether the statement yields rows (unparseable SQL counts) |
 | `expand_star(sql, *, dialect="postgres", schema_sql=None)` | Query with `*` replaced by cast columns, or `None` |
 | `rewrite_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False, json_types="typing.Any")` | Rewritten source; `json_types="typing.TypedDict"` generates `TypedDict`s for JSON columns |

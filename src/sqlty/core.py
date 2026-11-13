@@ -14,7 +14,7 @@ import ast
 import sys
 from collections import Counter
 from collections.abc import Collection, Mapping
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from sqlty._check import RowUsage, apply_suppressions, is_any_row
 from sqlty._check import diagnostics as check_diagnostics
@@ -43,6 +43,7 @@ from sqlty._core import parse_error as _parse_error
 from sqlty._core import query_at as _query_at
 from sqlty._core import query_diagnostics as _query_diagnostics
 from sqlty._core import query_sites as _query_sites
+from sqlty._core import query_tables as _query_tables
 from sqlty._core import rewrite_source as _rewrite_source
 from sqlty._core import schema_skipped_objects as _schema_skipped_objects
 from sqlty._core import schema_skipped_tables as _schema_skipped_tables
@@ -282,6 +283,31 @@ def query_diagnostics(
         )
         if config.is_enabled(rule)
     ]
+
+
+class TableRef(NamedTuple):
+    """A table a query names: what ``query_tables`` returns."""
+
+    name: str
+    schema: str | None
+    access: Literal["read", "write"]
+
+
+def query_tables(sql: str, *, dialect: str = "postgres") -> list[TableRef]:
+    """The tables ``sql`` reads and writes, in source order, each once per access.
+
+    ``name`` and ``schema`` are as the query writes them; ``schema`` is ``None`` for an
+    unqualified name. ``access`` is ``"write"`` for the target of an ``INSERT``,
+    ``UPDATE``, ``DELETE`` or ``MERGE``, else ``"read"``. CTEs, derived tables and table
+    functions are not tables. Needs no schema; empty when the query does not parse.
+
+    Example:
+        >>> query_tables("INSERT INTO audit.log (id) SELECT id FROM users WHERE id IN (SELECT user_id FROM orders)")
+        [TableRef(name='log', schema='audit', access='write'), TableRef(name='users', schema=None, access='read'), TableRef(name='orders', schema=None, access='read')]
+        >>> query_tables("WITH recent AS (SELECT * FROM orders) SELECT * FROM recent, generate_series(1, 3)")
+        [TableRef(name='orders', schema=None, access='read')]
+    """
+    return [TableRef(*table) for table in _query_tables(sql, dialect=dialect)]
 
 
 def schema_skipped_tables(schema_sql: str | Schema, *, dialect: str = "postgres") -> list[str]:
@@ -950,6 +976,7 @@ __all__ = [
     "HelperIndex",
     "QueryAt",
     "Schema",
+    "TableRef",
     "RowUsage",
     "Completion",
     "Completions",
@@ -973,6 +1000,7 @@ __all__ = [
     "query_at",
     "QueryDiagnostic",
     "query_diagnostics",
+    "query_tables",
     "query_statistics",
     "returns_rows",
     "rewrite_source",
