@@ -71,3 +71,15 @@ PostgreSQL returns one row without columns.
 SELECT
 -- inferred: tuple[()]
 ```
+
+### MySQL rejects it
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+```
+
+```sql
+SELECT
+-- inferred: None
+```
