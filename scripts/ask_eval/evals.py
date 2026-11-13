@@ -55,6 +55,7 @@ DATA = json.loads((HERE / "questions.json").read_text())
 class Question:
     schema: str
     question: str
+    problem: str
 
 
 @dataclass
@@ -80,7 +81,7 @@ DATASET = Dataset[Question, Answer, dict[str, Any]](
     cases=[
         Case(
             name=item["question"],
-            inputs=Question(item["schema"], item["question"]),
+            inputs=Question(item["schema"], item["question"], item["problem"]),
             expected_output=item["gold"],
             metadata={"ordered": item.get("ordered", False)},
         )
@@ -180,6 +181,8 @@ def answered(found: dict[str, Any]) -> Answer:
 
 def label(run: dict[str, Any]) -> str:
     flags = [flag for flag in ("thinking", "file") if run.get(flag)]
+    if run.get("phrasing", "question") != "question":
+        flags.append(run["phrasing"])
     return " ".join([run["model"], run.get("variant", "base"), *flags])
 
 
@@ -278,6 +281,7 @@ async def ask(args) -> tuple[Path, EvaluationReport]:
         "variant": args.variant,
         "thinking": args.thinking,
         "file": args.file,
+        "phrasing": args.phrasing,
         "isolated": not args.single_thread,
         "answers": [],
     }
@@ -293,13 +297,13 @@ async def ask(args) -> tuple[Path, EvaluationReport]:
                 "options => window.ask(options)",
                 {
                     "schema": question.schema,
-                    "question": question.question,
+                    "question": getattr(question, args.phrasing),
                     "repairs": args.repairs,
                     "variant": args.variant,
                     "file": args.file,
                 },
             )
-            run["answers"].append({**question.__dict__, **found})
+            run["answers"].append({**question.__dict__, **found, "question": question.question})
             return answered(found)
 
         dataset = DATASET.model_copy(update={"cases": DATASET.cases[: args.limit]})
@@ -348,6 +352,12 @@ def main() -> None:
     )
     asking.add_argument("--thinking", action="store_true", help="let Qwen3 reason first")
     asking.add_argument("--file", action="store_true", help="send the schema's source too")
+    asking.add_argument(
+        "--phrasing",
+        choices=["question", "problem"],
+        default="question",
+        help="ask what to get, or describe the problem behind it",
+    )
     asking.add_argument("--repairs", type=int, default=2)
     asking.add_argument("--threads", type=int)
     asking.add_argument("--single-thread", action="store_true", help="omit COOP/COEP")

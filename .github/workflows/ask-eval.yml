@@ -18,6 +18,11 @@ on:
       variant:
         description: Prompt (ask.js VARIANTS); `model` is each model's own
         default: model
+      phrasing:
+        description: Ask what to get (`question`) or describe the problem (`problem`)
+        type: choice
+        options: [question, problem]
+        default: question
       new:
         description: Also evaluate models published in the last 35 days
         type: boolean
@@ -55,6 +60,7 @@ jobs:
       MODELS: ${{ github.event_name == 'pull_request' && 'qwen2.5-coder-0.5b' || inputs.models || 'qwen2.5-coder-1.5b,qwen2.5-coder-0.5b' }}
       LIMIT: ${{ github.event_name == 'pull_request' && '6' || '' }}
       VARIANT: ${{ inputs.variant || 'model' }}
+      PHRASING: ${{ inputs.phrasing || 'question' }}
       NEW: ${{ github.event_name == 'schedule' || inputs.new }}
 
     steps:
@@ -105,7 +111,7 @@ jobs:
         run: |
           mkdir -p runs
           for model in ${MODELS//,/ }; do
-            uv run scripts/ask_eval/evals.py ask --model "$model" --variant "$VARIANT" ${LIMIT:+--limit "$LIMIT"} \
+            uv run scripts/ask_eval/evals.py ask --model "$model" --variant "$VARIANT" --phrasing "$PHRASING" ${LIMIT:+--limit "$LIMIT"} \
               --models models --out "runs/$model.json" || echo "::warning::$model failed"
           done
 
