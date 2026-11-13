@@ -105,6 +105,15 @@ def test_playground_link_of_a_rule_example() -> None:
     assert linked.count('href="../playground/#') == 1
 
 
+def test_readme_playground_links_are_current() -> None:
+    links = _script("playground_links")
+    text = (ROOT / "README.md").read_text()
+    current = {links.encode(session) for session in filter(None, links.examples(text))}
+    linked = re.findall(r"https://sqlty\.kuncar\.dev/playground/#([\w-]+)", text)
+    assert linked
+    assert set(linked) <= current
+
+
 def test_config_key_docs_cover_every_key() -> None:
     from sqlty._config import DISCOVERY_KEYS, FUNCTION_KEY_DOCS, FUNCTION_KEYS, KEY_DOCS, TOOL_KEYS
 
@@ -122,6 +131,23 @@ def test_python_api_doctest() -> None:
     result = doctest.DocTestRunner(optionflags=doctest.ELLIPSIS).run(test)
     assert result.attempted > 0
     assert result.failed == 0
+
+
+def test_python_api_table_lists_every_core_function() -> None:
+    import sqlty.core
+
+    text = (ROOT / "docs" / "reference" / "python-api.md").read_text().split("## `sqlty.core`")[1]
+    documented = set(re.findall(r"^\| `(\w+)\(", text, re.MULTILINE))
+    public = {
+        name
+        for name, value in vars(sqlty.core).items()
+        if name.islower()
+        and not name.startswith("_")
+        and callable(value)
+        and getattr(value, "__module__", None) in ("sqlty.core", "sqlty._core")
+    }
+    assert documented == public
+    assert public <= set(sqlty.core.__all__)
 
 
 @pytest.mark.parametrize("name", ["sqlty", "sqlty.drivers.psycopg", *MODULES])

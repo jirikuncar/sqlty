@@ -588,8 +588,15 @@ root.addEventListener("drop", async (event) => {
 });
 resizable(root.querySelector("[data-splitter]"), root.querySelector(".sqlty-console"));
 const format = () => ask(request("format")).formatted;
-for (const [button, made] of [["fix", "fixed"], ["rewrite", "rewritten"], ["strip", "stripped"], ["format", format]]) {
-  root.querySelector(`[data-${button}]`).addEventListener("click", () => {
+// The Command Palette (F1) and context menu name these as the VS Code extension does.
+const commands = [
+  ["fix", "fixed", "Fix All in File"],
+  ["rewrite", "rewritten", "Wrap Queries in SQL[T]"],
+  ["strip", "stripped", "Strip SQL[T] Wrappers"],
+  ["format", format, "Format Queries in File"],
+];
+for (const [button, made, title] of commands) {
+  const run = () => {
     refresh();
     const model = models.python;
     const text = typeof made === "function" ? made() : current[made];
@@ -598,13 +605,31 @@ for (const [button, made] of [["fix", "fixed"], ["rewrite", "rewritten"], ["stri
     editor.pushUndoStop();
     editor.executeEdits("sqlty", [{ range: model.getFullModelRange(), text }]);
     editor.pushUndoStop();
-  });
+  };
+  root.querySelector(`[data-${button}]`).addEventListener("click", run);
+  editor.addAction({ id: `sqlty.${button}`, label: `sqlty: ${title}`, contextMenuGroupId: "sqlty", run });
 }
-root.querySelector("[data-copy-link]").addEventListener("click", async () => {
+const copyLink = async () => {
   const link = await share();
   if (!link) return;
   await navigator.clipboard.writeText(link);
   linked.textContent = "Link copied.";
+};
+root.querySelector("[data-copy-link]").addEventListener("click", copyLink);
+editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyP, () =>
+  editor.trigger("sqlty", "editor.action.quickCommand", null),
+);
+editor.addAction({ id: "sqlty.copyLink", label: "sqlty: Copy Share Link", contextMenuGroupId: "sqlty", run: copyLink });
+editor.addAction({
+  id: "sqlty.explainRule",
+  label: "sqlty: Explain Rule",
+  contextMenuGroupId: "sqlty",
+  run: () => {
+    const model = editor.getModel();
+    const offset = model.getOffsetAt(editor.getPosition());
+    const found = model === models.python && current.diagnostics.find((d) => d.start <= offset && offset <= d.end);
+    window.open(new URL(`../reference/rules/${found ? `#${found.rule}` : ""}`, location.href).href, "_blank", "noopener");
+  },
 });
 window.addEventListener("hashchange", async () => {
   const saved = await decode(location.hash.slice(1));

@@ -93,8 +93,8 @@ with esbuild, packaged with `@vscode/vsce`.
 
 Lookup order follows ruff: `sqlty.path`, the interpreter's environment, then `PATH`; no
 wheel is bundled (see stage 6). The project's own pin runs, so the editor agrees with CI.
-An untrusted workspace gets SQL highlighting only: its environment would choose the server, so
-the server starts once the workspace is trusted.
+An untrusted workspace gets the bundled WebAssembly engine of VS Code for the Web: its
+environment would choose the server, so the server starts once the workspace is trusted.
 
 ## Features
 

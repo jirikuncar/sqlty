@@ -119,15 +119,28 @@ def _plain_class(node: ast.ClassDef, aliases: dict[str, str]) -> bool:
 
 
 def _bound_names(node: ast.stmt) -> list[str]:
-    """Names a module-level statement binds."""
+    """Names a module-level statement binds; a function body nested in it binds none.
+
+    Example:
+        >>> _bound_names(ast.parse("if c:\\n    x = 1\\n    def f():\\n        y = 2").body[0])
+        ['x']
+    """
     match node:
         case ast.FunctionDef(name=name) | ast.AsyncFunctionDef(name=name) | ast.ClassDef(name=name):
             return [name]
         case ast.Import(names=names) | ast.ImportFrom(names=names):
             return [(a.asname or a.name).partition(".")[0] for a in names]
-    return [
-        n.id for n in ast.walk(node) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)
-    ]
+    found: list[str] = []
+    todo: list[ast.AST] = [node]
+    while todo:
+        match todo.pop():
+            case ast.Name(id=name, ctx=ast.Store()):
+                found.append(name)
+            case ast.FunctionDef() | ast.AsyncFunctionDef():
+                pass
+            case child:
+                todo.extend(reversed(list(ast.iter_child_nodes(child))))
+    return found
 
 
 def _classify_class(

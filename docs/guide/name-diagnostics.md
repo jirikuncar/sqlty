@@ -121,3 +121,37 @@ b = SQL[tuple[str]]("--sql\nSELECT name AS n FROM users ORDER BY lower(n)")
 
 `NULL` and placeholders such as `$1` have no type by nature and are not
 reported.
+
+## Dialects that check names
+
+Tables, columns and ambiguity are checked in the `postgres`, `mysql` and `sqlite`
+dialects only, whose rules for case and quoting sqlty models. In any other dialect
+a misspelled column is not reported:
+
+```toml
+[tool.sqlty]
+dialect = "duckdb"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE orders (id INTEGER PRIMARY KEY, total NUMERIC(10, 2) NOT NULL);
+```
+
+```python
+from sqlty import SQL
+
+# error:
+q = SQL("--sql\nSELECT SUM(totl) FROM orders")
+```
+
+So that this does not read as a clean query, `sqlty check` prints a note when a
+schema is configured for such a dialect:
+
+```text
+Table and column names are not checked for duckdb
+```
+
+`sqlty.core.checks_names(dialect)` tells you whether a dialect checks them.

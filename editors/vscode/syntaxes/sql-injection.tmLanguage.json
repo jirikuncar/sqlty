@@ -1,7 +1,13 @@
 {
   "scopeName": "sqlty.sql.injection",
-  "injectionSelector": "L:string.quoted.single.python -string.quoted.raw -string.interpolated -string.quoted.binary",
+  "injectionSelector": "L:string.quoted.single.python -string.quoted.raw -string.interpolated -string.quoted.binary, L:meta.fstring.python",
   "patterns": [
+    {
+      "include": "#interpolated-double"
+    },
+    {
+      "include": "#interpolated-single"
+    },
     {
       "include": "#double"
     },
@@ -10,9 +16,104 @@
     }
   ],
   "repository": {
+    "interpolated-double": {
+      "contentName": "meta.embedded.sql",
+      "begin": "(?<=\\b[fFtT]\")[ \\t]*(--sql|-- sql(?=[ \\t]*(?:--[^\\\"'\\\\]*)?(?:\\\\[nr]|$)))",
+      "beginCaptures": {
+        "1": {
+          "name": "comment.line.double-dash.sql"
+        }
+      },
+      "end": "(?=\")",
+      "patterns": [
+        {
+          "include": "#field"
+        },
+        {
+          "include": "#escape"
+        },
+        {
+          "name": "comment.line.double-dash.sql",
+          "begin": "--",
+          "end": "(?=\\\\n|\")",
+          "patterns": [
+            {
+              "include": "#field"
+            }
+          ]
+        },
+        {
+          "name": "comment.block.sql",
+          "begin": "/\\*",
+          "end": "\\*/|(?=\")",
+          "patterns": [
+            {
+              "include": "#field"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.sql",
+          "begin": "'",
+          "end": "'|(?=\")",
+          "patterns": [
+            {
+              "include": "#field"
+            },
+            {
+              "include": "#escape"
+            }
+          ]
+        },
+        {
+          "include": "#sql"
+        }
+      ]
+    },
+    "interpolated-single": {
+      "contentName": "meta.embedded.sql",
+      "begin": "(?<=\\b[fFtT]')[ \\t]*(--sql|-- sql(?=[ \\t]*(?:--[^\\\"'\\\\]*)?(?:\\\\[nr]|$)))",
+      "beginCaptures": {
+        "1": {
+          "name": "comment.line.double-dash.sql"
+        }
+      },
+      "end": "(?=')",
+      "patterns": [
+        {
+          "include": "#field"
+        },
+        {
+          "include": "#escape"
+        },
+        {
+          "name": "comment.line.double-dash.sql",
+          "begin": "--",
+          "end": "(?=\\\\n|')",
+          "patterns": [
+            {
+              "include": "#field"
+            }
+          ]
+        },
+        {
+          "name": "comment.block.sql",
+          "begin": "/\\*",
+          "end": "\\*/|(?=')",
+          "patterns": [
+            {
+              "include": "#field"
+            }
+          ]
+        },
+        {
+          "include": "#sql"
+        }
+      ]
+    },
     "double": {
       "contentName": "meta.embedded.sql",
-      "begin": "(?<=\")[ \\t]*(--sql|-- sql(?=[ \\t]*(?:--[^\\\"'\\\\]*)?(?:\\\\[nr]|$)))",
+      "begin": "(?<=\")(?<![fFtT\"]\")[ \\t]*(--sql|-- sql(?=[ \\t]*(?:--[^\\\"'\\\\]*)?(?:\\\\[nr]|$)))",
       "beginCaptures": {
         "1": {
           "name": "comment.line.double-dash.sql"
@@ -50,7 +151,7 @@
     },
     "single": {
       "contentName": "meta.embedded.sql",
-      "begin": "(?<=')[ \\t]*(--sql|-- sql(?=[ \\t]*(?:--[^\\\"'\\\\]*)?(?:\\\\[nr]|$)))",
+      "begin": "(?<=')(?<![fFtT']')[ \\t]*(--sql|-- sql(?=[ \\t]*(?:--[^\\\"'\\\\]*)?(?:\\\\[nr]|$)))",
       "beginCaptures": {
         "1": {
           "name": "comment.line.double-dash.sql"
@@ -73,6 +174,17 @@
         },
         {
           "include": "#sql"
+        }
+      ]
+    },
+    "field": {
+      "patterns": [
+        {
+          "name": "constant.character.escape.python",
+          "match": "\\{\\{|\\}\\}"
+        },
+        {
+          "include": "source.python#fstring-single-brace"
         }
       ]
     },

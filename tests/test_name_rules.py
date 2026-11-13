@@ -8,6 +8,7 @@ DEFAULTS = {
     "unknown-table": Severity.ERROR,
     "unknown-column": Severity.ERROR,
     "ambiguous-column": Severity.ERROR,
+    "duplicate-alias": Severity.ERROR,
     "insert-missing-column": Severity.ERROR,
     "insert-value-count": Severity.ERROR,
     "ungrouped-column": Severity.ERROR,

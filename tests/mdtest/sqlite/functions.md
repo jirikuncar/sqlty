@@ -332,8 +332,7 @@ SELECT n, upper FROM (SELECT id AS n, upper(name) AS upper FROM events)
 
 ## Index hints
 
-`INDEXED BY` and `NOT INDEXED` only pick the index a query uses, so sqlty reads the
-query without them:
+`INDEXED BY` and `NOT INDEXED` only pick the index a query uses:
 
 ```sql
 SELECT e.id FROM events AS e INDEXED BY events_name JOIN events AS f NOT INDEXED ON e.id = f.id

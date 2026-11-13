@@ -30,6 +30,22 @@ q = "SELECT 1::INTEGER"
 # rewritten: q = "SELECT 1::INTEGER"
 ```
 
+## Marked string joined with `+` is not rewritten
+
+The query is the whole concatenation, so wrapping its first literal would be wrong.
+
+```python
+q = "--sql\nSELECT id::INTEGER FROM users" + " WHERE id = 1"
+r = "SELECT id::INTEGER FROM users WHERE " + "--sql\nid = 1"
+# rewritten: q = "--sql\nSELECT id::INTEGER FROM users" + " WHERE id = 1"
+# rewritten: r = "SELECT id::INTEGER FROM users WHERE " + "--sql\nid = 1"
+```
+
+```python
+# error:
+q = "--sql\nSELECT id FROM users WHERE " + where
+```
+
 ## Idempotent rewrite
 
 Rewriting already-rewritten source produces no changes:

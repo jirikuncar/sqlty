@@ -1,8 +1,8 @@
 //! Expression typing.
 
 use sqlparser::ast::{
-    AccessExpr, ArrayElemTypeDef, CaseWhen, DataType, Expr, Function, FunctionArgumentClause,
-    FunctionArguments, Ident, ObjectName, Subscript, UnaryOperator, Value,
+    AccessExpr, ArrayElemTypeDef, BinaryOperator, CaseWhen, DataType, Expr, Function,
+    FunctionArgumentClause, FunctionArguments, Ident, ObjectName, Subscript, UnaryOperator, Value,
 };
 
 use crate::catalog::{fold, FunctionReturn, SchemaColumn};
@@ -137,6 +137,7 @@ impl<'a> Analyzer<'a> {
             DataType::Array(
                 ArrayElemTypeDef::AngleBracket(inner)
                 | ArrayElemTypeDef::Parenthesis(inner)
+                | ArrayElemTypeDef::ParenthesisNotNull(inner)
                 | ArrayElemTypeDef::Qualified(inner, _)
                 | ArrayElemTypeDef::SquareBracket(inner, _),
             ) => self.defines_type(inner),
@@ -313,9 +314,7 @@ impl<'a> Analyzer<'a> {
             Expr::Identifier(_) | Expr::CompoundIdentifier(_) => Ok(self.column_expr(expr, scope)),
             Expr::Value(value) => self.value_typed(&value.value),
             Expr::Exists { .. }
-            | Expr::InSubquery { .. }
-            | Expr::InList { .. }
-            | Expr::InUnnest { .. }
+            | Expr::In { .. }
             | Expr::MemberOf(_)
             | Expr::Between { .. }
             | Expr::Like { .. }
@@ -364,10 +363,31 @@ impl<'a> Analyzer<'a> {
                 )
             }
             Expr::Case {
+                operand: None,
                 conditions,
                 else_result,
                 ..
             } => self.case_typed(conditions, else_result.as_deref(), scope),
+            // `CASE x WHEN v` is `CASE WHEN x = v`.
+            Expr::Case {
+                operand: Some(operand),
+                conditions,
+                else_result,
+                ..
+            } => {
+                let searched: Vec<CaseWhen> = conditions
+                    .iter()
+                    .map(|when| CaseWhen {
+                        condition: Expr::BinaryOp {
+                            left: operand.clone(),
+                            op: BinaryOperator::Eq,
+                            right: Box::new(when.condition.clone()),
+                        },
+                        result: when.result.clone(),
+                    })
+                    .collect();
+                self.case_typed(&searched, else_result.as_deref(), scope)
+            }
             Expr::Function(func) => self.call_typed(func, scope),
             _ => Ok(Typed::UNKNOWN),
         }

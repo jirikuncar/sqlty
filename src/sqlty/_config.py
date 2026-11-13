@@ -26,6 +26,22 @@ MAX_QUERY_VARIANTS = 64
 """Default of ``max-query-variants``."""
 
 
+def driver_types(
+    driver: str | None, dialect: str, types: dict[str, str] | None
+) -> dict[str, str] | None:
+    """``types`` with the defaults of ``driver`` under them, for a PostgreSQL project.
+
+    Example:
+        >>> driver_types("psycopg", "postgres", {"DATE": "str"})["INT4RANGE"]
+        'psycopg.types.range.Range[int]'
+        >>> driver_types("psycopg", "sqlite", None) is None
+        True
+    """
+    if driver is None or dialect != "postgres":
+        return types
+    return dict(_core.driver_types(driver, dialect)) | (types or {})
+
+
 class KeyDoc(NamedTuple):
     """Reference documentation of one configuration key.
 
@@ -46,6 +62,12 @@ KEY_DOCS: dict[str, KeyDoc] = {
         '`"postgres"`',
         "`rewrite`, `check`",
         "SQL dialect of queries and schema",
+    ),
+    "driver": KeyDoc(
+        '`"psycopg"`',
+        "none",
+        "`rewrite`, `check`",
+        "Driver whose own classes type the columns the default mapping leaves untyped: PostgreSQL ranges",
     ),
     "schema": KeyDoc(
         "string or list of strings",
@@ -112,6 +134,12 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "`64`",
         "`check`",
         "With `preview`, the most variants of a query built in branches that `check` checks",
+    ),
+    "coerce-row-types": KeyDoc(
+        "list of strings",
+        "`[]`",
+        "`check`",
+        "`TypedDict`, `NamedTuple` and dataclass rows, as `module.Name`, the code validates with Pydantic",
     ),
     "functions": KeyDoc(
         "array of tables",
@@ -313,6 +341,7 @@ class SQLTyConfig(TypedDict, total=False):
     """
 
     dialect: str
+    driver: str  # "psycopg": its range classes type range columns
     schema: SchemaSpec  # Schema file, directory or glob, or a list of them
     queries: SchemaSpec  # .sql files of named queries, as files, directories or globs
     query_format: str  # "auto" (default), "aiosql", "sqlc", "pugsql" or "file"
@@ -326,6 +355,7 @@ class SQLTyConfig(TypedDict, total=False):
     param_types: bool  # write the P of SQL[R, P]: a tuple, or a generated TypedDict
     preview: bool  # features still in preview: query variants
     max_query_variants: int  # the most variants of a query built in branches that check checks
+    coerce_row_types: list[str]  # row types, as module.Name, read as Pydantic validates them
     exclude: list[str]  # globs replacing the default excludes, relative to the configuration file
     extend_exclude: list[str]  # globs excluded in addition to the above
     respect_gitignore: bool  # skip what .gitignore ignores while walking

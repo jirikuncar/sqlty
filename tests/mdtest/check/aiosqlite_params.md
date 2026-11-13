@@ -60,6 +60,7 @@ async def main() -> None:
     db = await aiosqlite.connect("app.db")
     cursor = await db.cursor()
     await cursor.execute("SELECT id FROM users WHERE id = ?", (1,))
+    # error: [extra-param] "call passes extra parameter 'ident'"
     # error: [param-count-mismatch] "call is missing parameter 'id'"
     await cursor.execute("SELECT id FROM users WHERE id = :id", {"ident": 1})
 ```

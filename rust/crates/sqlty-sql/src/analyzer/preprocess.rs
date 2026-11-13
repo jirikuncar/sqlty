@@ -6,8 +6,8 @@ use std::sync::LazyLock;
 
 use regex::{Captures, Regex};
 use sqlparser::ast::{
-    visit_expressions, visit_expressions_mut, DataType, Expr, Function, FunctionArguments,
-    ObjectName, Statement, Value, ValueWithSpan, Visit, Visitor,
+    visit_expressions, visit_expressions_mut, BinaryOperator, DataType, Expr, Function,
+    FunctionArguments, ObjectName, Statement, Value, ValueWithSpan, Visit, Visitor,
 };
 use sqlparser::keywords::Keyword;
 use sqlparser::parser::Parser;
@@ -72,6 +72,12 @@ fn checked(mut stmts: Vec<Statement>, sql: &str, dialect: SqlDialect) -> Option<
             ControlFlow::<()>::Continue(())
         });
     }
+    if dialect == SqlDialect::Sqlite {
+        let _ = visit_expressions_mut(&mut stmts, |expr| {
+            sqlite_is(expr);
+            ControlFlow::<()>::Continue(())
+        });
+    }
     if spells_integers(sql) {
         let lines = line_starts(sql);
         let _ = visit_expressions_mut(&mut stmts, |expr| {
@@ -82,22 +88,31 @@ fn checked(mut stmts: Vec<Statement>, sql: &str, dialect: SqlDialect) -> Option<
     Some(stmts)
 }
 
-/// Whether `sql` may hold a `0x` integer or a digit separator, so that the walk of
+/// Whether `sql` may hold a prefixed integer or a digit separator, so that the walk of
 /// [`integer_literal`] is skipped for the queries that do not.
 fn spells_integers(sql: &str) -> bool {
     sql.as_bytes().windows(3).any(|w| {
-        w.starts_with(b"0x") || (w[0].is_ascii_digit() && w[1] == b'_' && w[2].is_ascii_digit())
+        (w[0] == b'0' && matches!(w[1], b'x' | b'X' | b'o' | b'O' | b'b' | b'B'))
+            || (w[0].is_ascii_digit() && w[1] == b'_' && w[2].is_ascii_digit())
     })
 }
 
-/// An integer spelled `0x1F` or `1_000` as the decimal it is. sqlparser reads `0x1F` as
-/// `X'1F'`, a binary string as in MySQL; PostgreSQL and SQLite read an integer.
+/// An integer spelled `0x1F`, `0o17`, `0b101` or `1_000` as the decimal it is. Outside
+/// PostgreSQL sqlparser reads `0x1F` as `X'1F'`, a binary string as in MySQL; SQLite reads
+/// an integer.
 fn integer_literal(expr: &mut Expr, sql: &str, lines: &[usize], dialect: SqlDialect) {
     let Expr::Value(ValueWithSpan { value, span }) = expr else {
         return;
     };
     match value {
-        Value::Number(digits, _) if digits.contains('_') => digits.retain(|c| c != '_'),
+        Value::Number(digits, _) => match radix(digits) {
+            Some((radix, rest)) => {
+                if let Ok(n) = u128::from_str_radix(&rest.replace('_', ""), radix) {
+                    *digits = n.to_string();
+                }
+            }
+            None => digits.retain(|c| c != '_'),
+        },
         Value::HexStringLiteral(hex)
             if matches!(dialect, SqlDialect::Postgres | SqlDialect::Sqlite)
                 && offset(sql, lines, span.start).is_some_and(|at| sql[at..].starts_with("0x")) =>
@@ -115,6 +130,37 @@ fn integer_literal(expr: &mut Expr, sql: &str, lines: &[usize], dialect: SqlDial
         }
         _ => {}
     }
+}
+
+/// SQLite's `a IS b` as the `a IS NOT DISTINCT FROM b` it is, and `a IS NOT b` as
+/// `a IS DISTINCT FROM b`.
+fn sqlite_is(expr: &mut Expr) {
+    let Expr::BinaryOp {
+        left,
+        op: op @ (BinaryOperator::Is | BinaryOperator::IsNot),
+        right,
+    } = expr
+    else {
+        return;
+    };
+    let (left, right) = (left.clone(), right.clone());
+    *expr = if *op == BinaryOperator::Is {
+        Expr::IsNotDistinctFrom(left, right)
+    } else {
+        Expr::IsDistinctFrom(left, right)
+    };
+}
+
+/// The radix of PostgreSQL's `0x1F`, `0o17` or `0b101`, which sqlparser reads as a number,
+/// and the digits after the prefix.
+fn radix(digits: &str) -> Option<(u32, &str)> {
+    let radix = match digits.as_bytes() {
+        [b'0', b'x' | b'X', ..] => 16,
+        [b'0', b'o' | b'O', ..] => 8,
+        [b'0', b'b' | b'B', ..] => 2,
+        _ => return None,
+    };
+    Some((radix, &digits[2..]))
 }
 
 /// Whether `sql` may name one of the functions [`bare_function`] reads, so that the walk

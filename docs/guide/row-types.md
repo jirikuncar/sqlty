@@ -481,6 +481,60 @@ not. Each type has two readings:
 The `Strict*` types are read as their base type in strict mode. Other names, such
 as `FilePath` and `conset()`, are unknown: `check` does not report their fields.
 
+## Rows validated with Pydantic
+
+A `TypedDict`, `NamedTuple` or dataclass row is checked against what the driver
+returns, since a plain driver does not convert values. When your code validates the
+row with Pydantic, such as `TypeAdapter(User).validate_python(row)`, the row gets
+what Pydantic converts. Name it in [`coerce-row-types`](../reference/configuration.md#coerce-row-types)
+to read it as a `BaseModel`: in [lax mode](#pydantic-lax-mode), and with
+[Pydantic types](#pydantic-types) taking their model input.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+coerce-row-types = ["app.rows.User"]
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, tags TEXT[] NOT NULL, token TEXT NOT NULL);
+```
+
+`app/rows.py`:
+
+```python
+from dataclasses import dataclass
+from typing import TypedDict
+from pydantic import SecretStr
+
+class User(TypedDict):
+    id: int
+    tags: tuple[str, ...]
+    token: SecretStr
+
+@dataclass
+class Account:
+    id: int
+    tags: tuple[str, ...]
+    token: SecretStr
+```
+
+```python
+from sqlty import SQL
+from app.rows import Account, User
+
+users = SQL[User]("--sql\nSELECT id, tags, token FROM users")
+# error: [column-type-mismatch] "Account.tags is tuple[str, ...] but query column 'tags' infers list[str]"
+# error: [column-type-mismatch] "Account.token is SecretStr but query column 'token' infers str"
+accounts = SQL[Account]("--sql\nSELECT id, tags, token FROM users")
+```
+
+`User` takes the `list` psycopg returns for `tags` and the `str` for `token`.
+`Account` is not listed, so it stays strict. Each name is the module that defines the
+row, then its class name; a row imported elsewhere is still named by its defining module.
+
 ## Defaults in `Annotated`
 
 A field whose `Annotated` metadata holds `Field(default=...)` or

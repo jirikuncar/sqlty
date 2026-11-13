@@ -15,11 +15,12 @@
 //! assert_eq!(answer["queries"][0]["row_type"], "tuple[int]");
 //! ```
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sqlty_python::checker::{add_fix_imports, check_source, query_sites, SiteKind};
+use sqlty_python::checker::{query_sites, Diagnostic, SiteKind};
 use sqlty_python::config;
 use sqlty_python::fixer::fix_source;
 use sqlty_python::locate::{self, Queries};
@@ -27,9 +28,11 @@ use sqlty_python::options::Options;
 use sqlty_python::params::add_param_types;
 use sqlty_python::rewriter::{rewrite_source_with, strip_source, Suppressed};
 use sqlty_python::rules::RuleConfig;
+use sqlty_python::types::symbols::Source;
+use sqlty_python::{check, rows, suppress};
 use sqlty_sql::analyzer::{
-    analyze_params, analyze_select, explain_select, load_schema_with_skipped, row_type,
-    CandidateKind, Nullability, RuleRef,
+    analyze_params, analyze_select, explain_select, load_schema_with_overrides,
+    load_schema_with_skipped, row_type, CandidateKind, Nullability, RuleRef, TypeOverrides,
 };
 use sqlty_sql::highlight::Highlight;
 
@@ -40,6 +43,7 @@ enum Op {
     Complete,
     Hover,
     Format,
+    Config,
 }
 
 #[derive(Deserialize)]
@@ -54,12 +58,22 @@ struct Request {
     /// A `sqlty.toml`: its `dialect` wins over the request's.
     #[serde(default)]
     config: String,
+    /// A sqlty table the host already resolved (`extend` applied), as `config` answers it.
+    #[serde(default)]
+    settings: Option<serde_json::Map<String, Value>>,
+    /// The path of the file `config` reads `source` from, for its messages; its name picks the
+    /// table (`[tool.sqlty]` of a `pyproject.toml`).
+    #[serde(default)]
+    path: String,
+    /// Whether `config` reports a `pyproject.toml` or `Cargo.toml` without a sqlty table.
+    #[serde(default)]
+    required: bool,
 }
 
 /// Answer a JSON request about the Python `source`, read against `schema` in `dialect`.
 ///
-/// - `analyze`: `diagnostics` (what `sqlty check` reports, without the row types it reads
-///   from Python, each with the `fix` edits of its quick fix), `queries` (row type, columns
+/// - `analyze`: `diagnostics` (what `sqlty check` reports for a module by itself, each
+///   with the `fix` edits of its quick fix), `queries` (row type, columns
 ///   and parameters of each query), `highlights` (the SQL tokens to color), and what
 ///   `sqlty rewrite`, `sqlty strip` and `sqlty check --fix` make of the source: `rewritten`,
 ///   `stripped` and `fixed`.
@@ -68,23 +82,46 @@ struct Request {
 /// - `hover`: what the word at `offset` is, in Markdown; `null` when nothing.
 /// - `format`: `formatted`, what `sqlty format` makes of the source. Not part of `analyze`,
 ///   which runs on every keystroke.
+/// - `config`: the sqlty table of `source`, the text of the file at `path`, validated as
+///   `sqlty check` validates it, as `{"config": table}`; `null` for a `pyproject.toml` or
+///   `Cargo.toml` without one, unless `required`. A host finds and merges the files
+///   (`extend`), then passes the result as `settings`.
 ///
-/// `config` is a `sqlty.toml` whose `dialect`, `import-style`, `param-types` and `rules` apply;
-/// another key, or an invalid one, is an `error`, as `sqlty check` reports it.
+/// `config` is a `sqlty.toml` whose `dialect`, `driver`, `import-style`, `param-types`,
+/// `preview`, `max-query-variants`, `rules` and `types` apply; another key, or an invalid one, is an `error`, as `sqlty check` reports
+/// it. `settings` replaces it with a table `config` answered, `extend` applied.
 pub fn run(request: &str) -> String {
     let error = |error: String| json!({ "error": error }).to_string();
     let request: Request = match serde_json::from_str(request) {
         Ok(request) => request,
         Err(found) => return error(found.to_string()),
     };
-    let settings = match settings(&request.config) {
+    if let Op::Config = request.op {
+        let path = request.path.as_str();
+        let name = path.rsplit('/').next().unwrap_or(path);
+        return match config::load(request.source.as_bytes(), name, path, request.required) {
+            Ok(found) => json!(found.map(|found| json!({ "config": found.table }))).to_string(),
+            Err(found) => error(found.to_string()),
+        };
+    }
+    let settings = match &request.settings {
+        Some(table) => Ok(resolved(table)),
+        None => settings(&request.config),
+    };
+    let settings = match settings {
         Ok(settings) => settings,
         Err(found) => return error(found),
     };
     let dialect = settings.dialect.as_deref().unwrap_or(&request.dialect);
     let param_types = settings.param_types;
-    let schema = (!request.schema.trim().is_empty())
-        .then(|| load_schema_with_skipped(&request.schema, dialect).0);
+    let overrides = match TypeOverrides::new(&settings.types, dialect) {
+        Ok(overrides) => overrides,
+        Err(found) => return error(format!("[tool.sqlty.types]: {found}")),
+    };
+    let schema = (!request.schema.trim().is_empty()).then(|| match overrides.is_empty() {
+        true => load_schema_with_skipped(&request.schema, dialect).0,
+        false => load_schema_with_overrides(&request.schema, dialect, overrides).0,
+    });
     let options = Options::new(
         dialect,
         schema.as_deref(),
@@ -107,8 +144,17 @@ pub fn run(request: &str) -> String {
     };
     let answer = match request.op {
         Op::Analyze => {
-            let mut diagnostics = check_source(source, &options, &rules, &[]);
-            add_fix_imports(source, &options, &mut diagnostics);
+            let has_schema = schema
+                .as_ref()
+                .is_some_and(|schema| !schema.databases().is_some_and(|all| all.absent));
+            let diagnostics = checked(
+                source,
+                dialect,
+                &options,
+                &rules,
+                has_schema,
+                settings.variants,
+            );
             json!({
             "diagnostics": diagnostics
                 .iter()
@@ -166,6 +212,7 @@ pub fn run(request: &str) -> String {
         Op::Format => {
             json!({ "formatted": sqlty_format::format_source(source, dialect, &options.style) })
         }
+        Op::Config => unreachable!("answered above"),
     };
     answer.to_string()
 }
@@ -174,8 +221,57 @@ struct Settings {
     dialect: Option<String>,
     import_style: Option<String>,
     param_types: bool,
+    /// `max-query-variants`, with `preview`.
+    variants: Option<usize>,
     rules: HashMap<String, String>,
+    types: Vec<(String, String)>,
 }
+
+/// The settings of a table `config` answered; a `driver` adds its `types` under the table's.
+fn resolved(table: &serde_json::Map<String, Value>) -> Settings {
+    let text = |key: &str| table.get(key).and_then(Value::as_str).map(String::from);
+    let pairs = |key: &str| {
+        table
+            .get(key)
+            .and_then(Value::as_object)
+            .into_iter()
+            .flatten()
+            .filter_map(|(key, value)| Some((key.clone(), value.as_str()?.to_string())))
+            .collect::<Vec<_>>()
+    };
+    let dialect = text("dialect");
+    let mut types = match text("driver") {
+        Some(driver) => config::driver_types(&driver, dialect.as_deref().unwrap_or("postgres")),
+        None => Vec::new(),
+    };
+    types.extend(pairs("types"));
+    Settings {
+        dialect,
+        import_style: text("import-style"),
+        param_types: table.get("param-types") == Some(&Value::Bool(true)),
+        variants: (table.get("preview") == Some(&Value::Bool(true))).then(|| {
+            let most = table.get("max-query-variants").and_then(Value::as_u64);
+            most.map_or(MAX_QUERY_VARIANTS, |most| most as usize)
+        }),
+        rules: pairs("rules").into_iter().collect(),
+        types,
+    }
+}
+
+/// The keys the engine reads: the others name files, which the page has none of.
+const READ: [&str; 8] = [
+    "dialect",
+    "driver",
+    "import-style",
+    "max-query-variants",
+    "param-types",
+    "preview",
+    "rules",
+    "types",
+];
+
+/// `sqlty._config.MAX_QUERY_VARIANTS`.
+const MAX_QUERY_VARIANTS: usize = 64;
 
 /// The settings of the `sqlty.toml` text `config`, validated as `sqlty check` validates it.
 fn settings(config: &str) -> Result<Settings, String> {
@@ -183,41 +279,81 @@ fn settings(config: &str) -> Result<Settings, String> {
         .map_err(|error| error.to_string())?
         .map(|config| config.table)
         .unwrap_or_default();
-    // The other keys name files, which the page has none of.
-    if let Some(key) = table
-        .keys()
-        .find(|key| !["dialect", "import-style", "param-types", "rules"].contains(&key.as_str()))
-    {
+    if let Some(key) = table.keys().find(|key| !READ.contains(&key.as_str())) {
         return Err(format!(
-            "sqlty.toml: the playground reads only dialect, import-style, param-types, rules, not '{key}'"
+            "sqlty.toml: the playground reads only {}, not '{key}'",
+            READ.join(", ")
         ));
     }
-    let text = |key: &str| {
-        table
-            .get(key)
-            .and_then(|value| value.as_str())
-            .map(String::from)
+    match json!(table) {
+        Value::Object(table) => Ok(resolved(&table)),
+        _ => unreachable!("a TOML table is a JSON object"),
+    }
+}
+
+/// The Python the page is read as.
+const VERSION: (u8, u8) = (3, 14);
+
+/// What `sqlty check` reports for the module `source`: its queries, the row types it
+/// names for them, the calls of its helpers and of its drivers, less what a
+/// `# sqlty: ignore` comment suppresses. A source that does not parse gets what its
+/// strings alone tell.
+fn checked(
+    source: &str,
+    dialect: &str,
+    options: &Options<'_>,
+    rules: &RuleConfig,
+    has_schema: bool,
+    variants: Option<usize>,
+) -> Vec<Diagnostic> {
+    let coerce = HashSet::new();
+    let settings = rows::Settings {
+        options,
+        rules,
+        index: None,
+        module: None,
+        coerce: &coerce,
     };
-    let rules = table
-        .get("rules")
-        .and_then(|rules| rules.as_table())
+    let lint = |text: &str| {
+        sqlty_format::lint_source(text, dialect, &options.style)
+            .into_iter()
+            .map(|found| check::Lint {
+                message: format!("{}: {}", found.code, found.message),
+                span: found.span,
+                query_start: found.query_start,
+            })
+            .collect()
+    };
+    let run = check::Run {
+        settings: &settings,
+        has_schema,
+        lint: &lint,
+        helpers: None,
+        variants,
+    };
+    let module = Source::new(source, VERSION).map(Arc::new);
+    let found = match &module {
+        Some(module) => check::diagnostics(module, &run),
+        None => check::unparsed(source, &run),
+    };
+    let ignores = module.as_deref().map(suppress::ignores).unwrap_or_default();
+    let needed = found.needed;
+    suppress::apply(&ignores, found.diagnostics, rules)
         .into_iter()
-        .flatten();
-    Ok(Settings {
-        dialect: text("dialect"),
-        import_style: text("import-style"),
-        param_types: table
-            .get("param-types")
-            .is_some_and(|value| value.as_bool() == Some(true)),
-        rules: rules
-            .filter_map(|(rule, severity)| Some((rule.clone(), severity.as_str()?.to_string())))
-            .collect(),
-    })
+        // A field one query needs `| None` for is not redundant for another.
+        .filter(|reported| {
+            !reported
+                .redundant
+                .as_ref()
+                .is_some_and(|key| needed.contains(key))
+        })
+        .map(|reported| reported.diagnostic)
+        .collect()
 }
 
 /// The row type, columns and parameters of the query `sql` on `line`.
 fn described(line: usize, sql: &str, dialect: &str, options: &Options<'_>) -> Value {
-    let columns = analyze_select(sql, dialect, options.schema).ok().flatten();
+    let columns = analyze_select(sql, dialect, options.schema);
     let params = analyze_params(sql, dialect, options.schema).unwrap_or_default();
     let explained = explain_select(sql, dialect, options.schema).unwrap_or_default();
     let rule = |rule: Option<RuleRef>| {
