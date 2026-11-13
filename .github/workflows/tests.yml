@@ -515,11 +515,11 @@ jobs:
       - name: Install Rust toolchain
         run: rustup toolchain install 1.99.1 --profile minimal && rustup default 1.99.1
 
-      # Build at the lowest supported maturin: older versions resolve
-      # `include` against python-source and drop sqlty_magic.pth from the wheel.
+      # Build at the lowest supported maturin: before 1.12.1 `include` resolved against
+      # python-source and dropped sqlty_magic.pth from the wheel; before 1.15 abi3t broke.
       - name: Build sdist, then wheel from sdist (maturin floor)
         run: |
-          echo 'maturin==1.12.1' > "$RUNNER_TEMP/maturin-floor.txt"
+          echo 'maturin==1.15.0' > "$RUNNER_TEMP/maturin-floor.txt"
           uv build --out-dir dist --build-constraint "$RUNNER_TEMP/maturin-floor.txt"
 
       - name: Check sqlty_magic.pth is in the wheel root, RECORD and sdist
