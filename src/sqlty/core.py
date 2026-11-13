@@ -21,6 +21,7 @@ from sqlty._check import diagnostics as check_diagnostics
 from sqlty._core import (
     QueryAt,
     Schema,
+    checks_names,
     expand_star,
     infer_type,
     returns_rows,
@@ -924,6 +925,7 @@ __all__ = [
     "analyze_select",
     "breaking_source",
     "check_source",
+    "checks_names",
     "complete_source",
     "expand_star",
     "explain_select",
