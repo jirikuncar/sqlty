@@ -5,6 +5,7 @@ cover the baselines (git revisions, snapshots, schema files), worktree cleanup,
 directions, paths and exit codes."""
 
 import json
+import os
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -482,7 +483,7 @@ def test_a_snapshot_without_a_schema_checks_no_query(
     main(["breaking", "--against", "../head.json", "--quiet"])
 
 
-def test_jobs_give_the_same_findings(
+def test_processes_give_the_same_findings(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from sqlty._cli import main
@@ -491,13 +492,14 @@ def test_jobs_give_the_same_findings(
         (repo / "app" / f"m{i}.py").write_text(OLD_CODE + NEW_CODE)
     monkeypatch.chdir(repo)
 
-    def findings(jobs: str) -> list[str]:
+    def findings(jobs: int) -> list[str]:
+        monkeypatch.setattr(os, "process_cpu_count", lambda: jobs)
         with pytest.raises(SystemExit):
-            main(["breaking", "--against", "HEAD~1", "-j", jobs])
+            main(["breaking", "--against", "HEAD~1"])
         return capsys.readouterr().out.splitlines()
 
-    assert findings("1") == findings("3")
-    assert findings("3")[-1] == "Found 6 breaking change(s)"
+    assert findings(1) == findings(3)
+    assert findings(3)[-1] == "Found 6 breaking change(s)"
 
 
 def test_query_files_are_compared_in_both_directions(cli: Cli, repo: Path) -> None:

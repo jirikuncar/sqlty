@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from sqlty import _cli
 from sqlty._cli import (
     ConfigSource,
     SettingsResolver,
@@ -122,7 +123,7 @@ def test_check_fix_writes_fixes_and_reports_the_rest(tmp_path, monkeypatch, caps
         ["strip"],
     ],
 )
-def test_jobs_do_not_change_the_output(tmp_path, monkeypatch, capsys, command) -> None:
+def test_threads_do_not_change_the_output(tmp_path, monkeypatch, capsys, command) -> None:
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
     (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL, name TEXT);")
     (tmp_path / "rows.py").write_text(
@@ -142,22 +143,15 @@ def test_jobs_do_not_change_the_output(tmp_path, monkeypatch, capsys, command) -
     files = {path: path.read_text() for path in tmp_path.iterdir()}
 
     outputs = []
-    for jobs in ("1", "4"):
+    for jobs in (1, 4):
+        monkeypatch.setattr(_cli, "_workers", lambda jobs=jobs: jobs)
         for path, text in files.items():
             path.write_text(text)
-        outputs.append(
-            (_run([*command, "--jobs", jobs, "."], capsys), sorted(p.read_text() for p in files))
-        )
+        outputs.append((_run([*command, "."], capsys), sorted(p.read_text() for p in files)))
 
     assert outputs[0] == outputs[1]
     (_, out, err), written = outputs[0]
     assert out or err or written != sorted(files.values())
-
-
-def test_jobs_must_be_positive(capsys) -> None:
-    code, _, err = _run(["check", "--jobs", "0", "."], capsys)
-    assert code == 2
-    assert "expected a positive integer, got '0'" in err
 
 
 def test_invalid_untyped_config_is_an_error(tmp_path) -> None:
@@ -1662,7 +1656,7 @@ def test_redundant_optional_reads_every_query_of_a_shared_row_type(
     assert "pkg/a.py:3: [redundant-optional] Coupon.owner_id" in out.replace(os.sep, "/")
 
 
-def test_redundant_optional_does_not_depend_on_jobs(tmp_path, monkeypatch, capsys) -> None:
+def test_redundant_optional_does_not_depend_on_threads(tmp_path, monkeypatch, capsys) -> None:
     (tmp_path / "pyproject.toml").write_text(
         '[tool.sqlty]\nschema = "s.sql"\n\n[tool.sqlty.rules]\nredundant-optional = "error"\n'
     )
@@ -1687,7 +1681,10 @@ def test_redundant_optional_does_not_depend_on_jobs(tmp_path, monkeypatch, capsy
     )
     monkeypatch.chdir(tmp_path)
 
-    outputs = {_run(["check", "--jobs", jobs, "app"], capsys)[1] for jobs in ["1"] + ["4"] * 10}
+    outputs = set()
+    for jobs in [1] + [4] * 10:
+        monkeypatch.setattr(_cli, "_workers", lambda jobs=jobs: jobs)
+        outputs.add(_run(["check", "app"], capsys)[1])
 
     assert [line for out in outputs for line in out.splitlines() if "redundant" in line] == [
         f"app{os.sep}q1.py:4: [redundant-optional] S.x is int | None but query column 'x' is never NULL"
