@@ -93,9 +93,11 @@ jobs:
           # Host builds otherwise use the runner image's rustc, which can lag the MSRV.
           rust-toolchain: 1.99.1
           # --find-interpreter would skip 3.14 under abi3t-py315; the 3.15 build covers 3.15t and later.
+          # A pull request builds the abi3t wheel only.
           args: >-
             --profile dist --out dist --manifest-path rust/crates/sqlty-ext/Cargo.toml
-            -i ${{ matrix.container && '/opt/python/cp314-cp314/bin/python /opt/python/cp314-cp314t/bin/python /opt/python/cp315-cp315/bin/python' || 'python3.14 python3.15' }}
+            -i ${{ matrix.container && '/opt/python/cp315-cp315/bin/python' || 'python3.15' }}
+            ${{ github.event_name != 'pull_request' && (matrix.container && '/opt/python/cp314-cp314/bin/python /opt/python/cp314-cp314t/bin/python' || 'python3.14') || '' }}
           manylinux: ${{ matrix.manylinux || 'auto' }}
           container: ${{ matrix.container }}
 
@@ -114,6 +116,7 @@ jobs:
           # 3.15 and 3.15t share the one abi3t wheel; the free-threaded build must keep the GIL off.
           for v in 3.14 3.15 3.15t; do
             case $v in 3.14) tag=cp314-cp314 ;; *) tag=cp315-abi3.abi3t ;; esac
+            [ "$GITHUB_EVENT_NAME" = pull_request ] && [ $v = 3.14 ] && continue
             wheel=$(ls dist/sqlty-*-$tag-*.whl)
             uv venv -q --python "$v" "venv-$v"
             py="venv-$v/bin/python"; [ -x "$py" ] || py="venv-$v/Scripts/python.exe"
