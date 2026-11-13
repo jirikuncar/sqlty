@@ -18,4 +18,16 @@ suite("sqlty in Restricted Mode", () => {
     }
     assert.fail("no diagnostics for q.py");
   });
+
+  test("wraps and formats a file with the bundled engine", async () => {
+    const [folder] = vscode.workspace.workspaceFolders ?? [];
+    const uri = vscode.Uri.joinPath(folder.uri, "wrap.py");
+    const document = await vscode.workspace.openTextDocument(uri);
+    await vscode.window.showTextDocument(document);
+    await vscode.commands.executeCommand("sqlty.rewrite");
+    assert.match(document.getText(), /SQL\[tuple\[int \| None\]\]\(/);
+    await vscode.commands.executeCommand("sqlty.strip");
+    assert.equal(document.getText(), 'q = "--sql\\nSELECT id FROM users"\n');
+    await vscode.commands.executeCommand("workbench.action.files.revert");
+  });
 });

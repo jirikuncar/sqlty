@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import ast
+import bisect
 import re
 import sys
 import threading
@@ -21,9 +22,10 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from sqlty._core import ModuleIndex, helper_sites, module_helpers, module_index
 from sqlty._params import ParamArg, arg_type, literal_params
 from sqlty._psycopg import UNCHECKED
-from sqlty._source import ParsedSource
+from sqlty._source import AST, AstMismatch, ParsedSource
 from sqlty._variants import Declared, Unchecked, Variant, query_variants
 
 if TYPE_CHECKING:
@@ -82,7 +84,8 @@ class HelperCall(NamedTuple):
     With query variants on, ``variants`` holds every query a call built in branches can
     run, ``query`` being the first; ``reason`` says why such a call is not checked.
     ``query_node`` is the argument (or t-string) the query comes from, which a diagnostic
-    about the query underlines. ``configured`` marks a call to a helper of
+    about the query underlines; ``query_span`` its byte offsets, set where Rust found the
+    call and there is no node. ``configured`` marks a call to a helper of
     ``[[tool.sqlty.functions]]``.
     """
 
@@ -99,6 +102,7 @@ class HelperCall(NamedTuple):
     reason: str | None = None
     query_node: ast.expr | None = None
     configured: bool = False
+    query_span: tuple[int, int] | None = None
 
     @property
     def typed_lines(self) -> range:
@@ -191,6 +195,12 @@ def _kind(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
     if "staticmethod" in names:
         return "static"
     return "class" if "classmethod" in names else "instance"
+
+
+def _helper_of(name: str, fields: tuple[Any, ...]) -> Helper:
+    """The ``Helper`` of what Rust reads of one (``ModuleIndex.helpers``)."""
+    positional, keywords, *rest = fields
+    return Helper(name, tuple(positional), frozenset(keywords), *rest)
 
 
 def _rank(node: ast.FunctionDef | ast.AsyncFunctionDef, complete: bool) -> tuple[bool, bool]:
@@ -320,7 +330,7 @@ class HelperIndex:
     """
 
     def __init__(self) -> None:
-        self.modules: dict[str, dict[str, Helper]] = {}
+        self._modules: dict[str, dict[str, Helper]] = {}
         self.sources: dict[str, ParsedSource] = {}
         self.packages: set[str] = set()
         self.prefixes: set[str] = set()
@@ -333,11 +343,38 @@ class HelperIndex:
         self._read: dict[tuple[Path, str], ParsedSource | None] = {}
         # Held while a cycle sentinel is cached, so only the thread that set it can read it.
         self._lock = threading.RLock()
+        # How the index was filled, to build it again in Rust.
+        self._steps: list[tuple[str, str, str, str | None, list[Path], str | None]] = []
+        self._rust: tuple[int, ModuleIndex] | None = None
+        self._forked: tuple[HelperIndex, int] | None = None
+
+    @property
+    def modules(self) -> dict[str, dict[str, Helper]]:
+        """The helpers by module and name (``Class.method`` for a method)."""
+        if AST != "rust":
+            return self._modules
+        return {
+            module: {name: _helper_of(name, fields) for name, fields in found.items()}
+            for module, found in self.rust().helpers().items()
+        }
+
+    def rust(self) -> ModuleIndex:
+        """The index as Rust reads it."""
+        with self._lock:
+            if self._rust is None or self._rust[0] != len(self._steps):
+                parent, forked_at = self._forked or (None, 0)
+                # A fork of an index that has not changed since shares what Rust read of it.
+                if parent is not None and len(parent._steps) == forked_at:
+                    built = parent.rust().extended(self._steps[forked_at:])
+                else:
+                    built = module_index(sys.version_info[:2], self._steps)
+                self._rust = len(self._steps), built
+            return self._rust[1]
 
     def fork(self) -> HelperIndex:
         """A copy whose later ``register`` calls do not reach this index; sources are shared."""
         other = HelperIndex()
-        other.modules = {module: dict(found) for module, found in self.modules.items()}
+        other._modules = {module: dict(found) for module, found in self._modules.items()}
         other.sources = self.sources
         other.packages = set(self.packages)
         other.prefixes = set(self.prefixes)
@@ -347,6 +384,8 @@ class HelperIndex:
         other._names_of = self._names_of
         other._read = self._read
         other._lock = self._lock
+        other._steps = list(self._steps)
+        other._forked = self, len(self._steps)
         return other
 
     def add(self, module: str, source: str | ParsedSource) -> bool:
@@ -359,6 +398,11 @@ class HelperIndex:
         if parsed.module is None:
             parsed.module = module
         self.sources[module] = parsed
+        self._steps.append(("add", module, parsed.text, parsed.module, [], None))
+        if AST == "rust":
+            return parsed.may_define_helpers and bool(
+                module_helpers(parsed.text, sys.version_info[:2])
+            )
         if parsed.module is not None and parsed.module.endswith(".__init__"):
             self.packages.add(module)
         parts = module.split(".")
@@ -367,11 +411,12 @@ class HelperIndex:
         self._names_of.pop(module, None)
         self._types.clear()
         self._row_types.pop(module, None)
-        if not parsed.may_define_helpers or not (found := index_functions(parsed)):
-            return False
-        self.modules.setdefault(module, {}).update(found)
+        # A module without helpers can still re-export one under another name.
         self._pattern = None
         self._names = None
+        if not parsed.may_define_helpers or not (found := index_functions(parsed)):
+            return False
+        self._modules.setdefault(module, {}).update(found)
         return True
 
     def register(
@@ -399,13 +444,16 @@ class HelperIndex:
             >>> index.modules["db"]["run"].keywords == {"sql", "form"}
             True
         """
+        self._steps.append(("register", import_path, query, row, list(roots), database))
+        if AST == "rust":
+            return
         parts = import_path.split(".")
         for i in range(len(parts) - 1, 0, -1):
             module, name = ".".join(parts[:i]), ".".join(parts[i:])
             definition = self._definition(parts[:i], name, query, row, roots)
             if definition is not None:
                 helper = _helper(name, definition[1], definition[2], query, row)
-                self.modules.setdefault(module, {})[name] = replace(
+                self._modules.setdefault(module, {})[name] = replace(
                     helper, configured=True, database=database
                 )
                 break
@@ -414,7 +462,7 @@ class HelperIndex:
             for i in (len(parts) - 1, len(parts) - 2):
                 if i > 0:
                     module, name = ".".join(parts[:i]), ".".join(parts[i:])
-                    self.modules.setdefault(module, {})[name] = Helper(
+                    self._modules.setdefault(module, {})[name] = Helper(
                         name, (), keywords, query, row, configured=True, database=database
                     )
         self._pattern = None
@@ -580,9 +628,21 @@ class HelperIndex:
     def names(self) -> frozenset[str]:
         """Unqualified names of the indexed helpers, methods included."""
         if self._names is None:
-            self._names = frozenset(
+            names = {
                 name.rpartition(".")[2] for helpers in self.modules.values() for name in helpers
-            )
+            }
+            # A module can re-export a helper under another name, which a call then spells.
+            for _ in range(8):
+                renamed = {
+                    local
+                    for module, parsed in self.sources.items()
+                    for local, (_, original) in self._reexports(module, parsed).items()
+                    if original in names and local not in names
+                }
+                if not renamed:
+                    break
+                names |= renamed
+            self._names = frozenset(names)
         return self._names
 
     def mentions(self, source: str) -> bool:
@@ -618,27 +678,44 @@ def _imports(
         >>> _imports(ParsedSource("from a.b import f as g\\nimport a.c as m"), None)
         ({'g': ('a.b', 'f')}, {'g': 'a.b.f', 'm': 'a.c'})
     """
+    if AST != "python" and (facts := parsed.facts) is not None:
+        if AST == "compare" and facts.imports != (python := _import_entries(parsed)):
+            raise AstMismatch("imports", facts.imports, python, parsed.text)
+        return _imports_of(facts.imports, module)
+    return _imports_of(_import_entries(parsed), module)
+
+
+def _import_entries(parsed: ParsedSource) -> list[tuple[str, str, str | None, int]]:
+    return [
+        (alias.asname or alias.name, alias.name, None, 0)
+        if isinstance(node, ast.Import)
+        else (alias.asname or alias.name, alias.name, node.module or "", node.level)
+        for node in parsed.imports
+        for alias in node.names
+    ]
+
+
+def _imports_of(
+    entries: Iterable[tuple[str, str, str | None, int]], module: str | None
+) -> tuple[dict[str, tuple[str, str]], dict[str, str]]:
+    """``_imports`` of ``(local, original, from-module or None, level)``, in ``ast.walk`` order."""
     functions: dict[str, tuple[str, str]] = {}
     modules: dict[str, str] = {}
     package = module.rpartition(".")[0] if module else ""
-    for node in parsed.imports:
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                modules[alias.asname or alias.name] = alias.name
-        elif isinstance(node, ast.ImportFrom):
-            base = node.module or ""
-            if node.level:
-                if module is None:
-                    continue
-                parts = package.split(".") if package else []
-                if node.level - 1 > len(parts):
-                    continue
-                parts = parts[: len(parts) - (node.level - 1)]
-                base = ".".join([*parts, *([node.module] if node.module else [])])
-            for alias in node.names:
-                local = alias.asname or alias.name
-                functions[local] = (base, alias.name)
-                modules[local] = f"{base}.{alias.name}" if base else alias.name
+    for local, original, base, level in entries:
+        if base is None:
+            modules[local] = original
+            continue
+        if level:
+            if module is None:
+                continue
+            parts = package.split(".") if package else []
+            if level - 1 > len(parts):
+                continue
+            parts = parts[: len(parts) - (level - 1)]
+            base = ".".join([*parts, *([base] if base else [])])
+        functions[local] = (base, original)
+        modules[local] = f"{base}.{original}" if base else original
     return functions, modules
 
 
@@ -715,11 +792,39 @@ def find_helper_calls(
         [(5, 'SELECT 1')]
     """
     parsed = ParsedSource.of(source, module)
+    if AST == "compare":
+        rust = _find_helper_calls(parsed, helpers, module, variants=variants, rust=True)
+        python = _find_helper_calls(parsed, helpers, module, variants=variants, rust=False)
+        if list(map(_comparable, rust)) != list(map(_comparable, python)):
+            raise AstMismatch("find_helper_calls", rust, python, parsed.text)
+        return python
+    return _find_helper_calls(parsed, helpers, module, variants=variants, rust=AST == "rust")
+
+
+def _comparable(call: HelperCall) -> tuple[HelperCall, str | None]:
+    """``call`` with its syntax nodes spelled out, which Rust and ``ast`` build apart."""
+    row = None if call.row is None else ast.dump(call.row, include_attributes=True)
+    return call._replace(row=None, query_node=None), row
+
+
+def _find_helper_calls(
+    parsed: ParsedSource,
+    helpers: HelperIndex | None,
+    module: str | None,
+    *,
+    variants: int | None,
+    rust: bool,
+) -> list[HelperCall]:
     local = parsed.may_define_helpers
     imported = helpers is not None and bool(helpers.modules) and helpers.mentions(parsed.text)
     composed = "psycopg" in parsed.text
     if not (local or imported):
         return []
+    if rust and not local:
+        assert helpers is not None
+        sited = _site_calls(parsed, helpers, module if module is not None else parsed.module)
+        if sited is not None:
+            return sited
     own = index_functions(parsed) if local else {}
     if not own and not imported:
         return []
@@ -826,6 +931,7 @@ def find_helper_calls(
                     node.end_lineno,
                     query_node=query,
                     configured=helper.configured,
+                    query_span=parsed.span(query),
                 )._on(helper.database)
             )
         elif query is not None and not forwarded(node, query):
@@ -842,6 +948,7 @@ def find_helper_calls(
             dynamic=text is None,
             query_node=query,
             configured=helper.configured,
+            query_span=parsed.span(query),
         )
         if variants is not None and (text is None or text == UNCHECKED):
             found = query_variants(parsed, node, query, variants, resolve_fragment)
@@ -857,4 +964,132 @@ def find_helper_calls(
             if isinstance(found, list) and isinstance(found[0].query, Declared):
                 call = call._replace(query=found[0].query, dynamic=False)
         calls.append(call._on(helper.database))
-    return sorted(calls, key=lambda call: call.line)
+    return sorted(calls, key=_order)
+
+
+def _order(call: HelperCall) -> tuple[int, tuple[int, int]]:
+    return call.line, call.query_span or (0, 0)
+
+
+_Arg = tuple[
+    bool, tuple[int, int], str | None, str | None, list[tuple[int | str, str | None]] | None
+]
+
+
+def _site_calls(
+    parsed: ParsedSource, helpers: HelperIndex, module: str | None
+) -> list[HelperCall] | None:
+    """``find_helper_calls`` from the calls Rust reads, for a file that defines no helper.
+
+    ``None`` when Rust cannot decide: it does not read the file, or a helper call passes a
+    query that is not a string literal (a composition, a name, a forwarded parameter).
+    """
+    if (facts := parsed.facts) is None:
+        return None
+    functions, modules = _imports_of(facts.imports, module)
+    names = set(helpers.names)
+    names |= {local for local, (_, original) in functions.items() if original in names}
+    if (sites := helper_sites(parsed.text, sorted(names))) is None:
+        return None
+
+    def module_of(prefix: str) -> str:
+        head, _, rest = prefix.partition(".")
+        mod = modules.get(head)
+        return (f"{mod}.{rest}" if rest else mod) if mod is not None else prefix
+
+    def method_of(cls: str, name: str) -> Helper | None:
+        prefix, _, cls_name = cls.rpartition(".")
+        if prefix:
+            return helpers.get(module_of(prefix), f"{cls_name}.{name}")
+        if cls in functions:
+            module_name, original = functions[cls]
+            return helpers.get(module_name, f"{original}.{name}")
+        return None
+
+    def resolve(prefix: str | None, name: str, receiver: str | None) -> Helper | None:
+        if prefix is None:
+            return helpers.get(*functions[name]) if name in functions else None
+        if (found := helpers.get(module_of(prefix), name)) is not None:
+            return found
+        if (found := method_of(prefix, name)) is not None:
+            return found if found.kind != "instance" else None
+        return method_of(receiver, name) if receiver is not None else None
+
+    aliases = parsed.typing_aliases
+    calls = []
+    for (line, end_line), prefix, name, args, keywords, receiver in sites:
+        if (helper := resolve(prefix, name, receiver)) is None:
+            continue
+        query = _site_argument(helper, args, keywords, helper.query)
+        if query is None:
+            continue
+        starred, span, text, _, _ = query
+        if text is None or starred:
+            return None
+        row = _site_argument(helper, args, keywords, helper.row)
+        calls.append(
+            HelperCall(
+                line,
+                text,
+                None if row is None else _expression_at(parsed, row[1]),
+                aliases,
+                _site_params(helper, args, keywords),
+                end_line,
+                configured=helper.configured,
+                query_span=span,
+            )._on(helper.database)
+        )
+    return sorted(calls, key=_order)
+
+
+def _site_argument(
+    helper: Helper, args: list[_Arg], keywords: list[tuple[str | None, _Arg]], param: str | None
+) -> _Arg | None:
+    """``_argument`` of a call Rust read."""
+    if param is None:
+        return None
+    if param in helper.keywords:
+        for name, value in keywords:
+            if name == param:
+                return value
+    if param in helper.positional:
+        index = helper.positional.index(param)
+        if any(arg[0] for arg in args[: index + 1]):
+            return None
+        if index < len(args):
+            return args[index]
+    return None
+
+
+def _site_params(
+    helper: Helper, args: list[_Arg], keywords: list[tuple[str | None, _Arg]]
+) -> tuple[ParamArg, ...] | None:
+    """``_call_params`` of a call Rust read."""
+    if helper.params is not None:
+        arg = _site_argument(helper, args, keywords, helper.params)
+        found = None if arg is None else arg[4]
+        return None if found is None else tuple(ParamArg(*param) for param in found)
+    if helper.rest is not None:
+        if any(arg[0] for arg in args):
+            return None
+        return tuple(ParamArg(i, arg[3]) for i, arg in enumerate(args[len(helper.positional) :], 1))
+    if helper.named is not None:
+        if any(name is None for name, _ in keywords):
+            return None
+        return tuple(
+            ParamArg(name, value[3])
+            for name, value in keywords
+            if name is not None and name not in helper.keywords
+        )
+    return None
+
+
+def _expression_at(parsed: ParsedSource, span: tuple[int, int]) -> ast.expr:
+    """The expression at byte offsets ``span``, parsed with the positions it has in the file."""
+    start, end = span
+    starts = parsed._byte_lines
+    line = bisect.bisect_right(starts, start) - 1
+    column = start - starts[line]
+    lead = "\n" * line + "(" + " " * (column - 1) if column else "\n" * (line - 1) + "(\n"
+    text = parsed._bytes[start:end].decode()
+    return ast.parse(f"{lead}{text})", mode="eval").body
