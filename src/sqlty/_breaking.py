@@ -156,7 +156,7 @@ def run(args: argparse.Namespace) -> list[Finding]:
     from sqlty._snapshot import save
 
     root = _root(args)
-    jobs = args.jobs or os.process_cpu_count() or 1
+    jobs = os.process_cpu_count() or 1
     paths = [Path(p).resolve().relative_to(root) for p in (args.paths or [Path.cwd()])]
     with contextlib.ExitStack() as stack:
         baselines = _baselines(args.against, root, paths, stack) if args.against else []

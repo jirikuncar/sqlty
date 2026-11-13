@@ -296,15 +296,6 @@ def build_parser() -> argparse.ArgumentParser:
         "Actions annotations, each at its severity) or sarif (a SARIF 2.1.0 log, for GitHub "
         "code scanning)",
     )
-    breaking_parser.add_argument(
-        "-j",
-        "--jobs",
-        type=_jobs,
-        metavar="N",
-        help="Processes checking files at once; 1 checks them here, as does a platform "
-        "without fork (Windows). Output is the same in any case (default: the number of "
-        "processors)",
-    )
 
     # --- rule ---
     rule_parser = subparsers.add_parser(
@@ -451,14 +442,6 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         "types of each named query of a query file",
     )
     parser.add_argument("-q", "--quiet", action="store_true", help="Suppress non-error output")
-    parser.add_argument(
-        "-j",
-        "--jobs",
-        type=_jobs,
-        metavar="N",
-        help="Files to work on at once; 1 works on one at a time. Output is the same in any "
-        "case (default: the number of processors)",
-    )
 
 
 def _location(value: str) -> tuple[Path, int, int]:
@@ -472,21 +455,23 @@ def _location(value: str) -> tuple[Path, int, int]:
     return Path(path), int(line), int(rest)
 
 
-def _jobs(value: str) -> int:
-    import argparse
+def _workers() -> int:
+    """Threads checking files at once: every processor, or one when the checks are Python
+    (``SQLTY_AST=python``) on a build with the GIL, where more threads only wait on it."""
+    from sqlty._source import AST
 
-    if not value.isdigit() or int(value) < 1:
-        raise argparse.ArgumentTypeError(f"expected a positive integer, got {value!r}")
-    return int(value)
+    if AST == "python" and sys._is_gil_enabled():
+        return 1
+    return os.process_cpu_count() or 1
 
 
-def _map[T](args: argparse.Namespace, work: Callable[[Path], T], files: list[Path]) -> Iterator[T]:
+def _map[T](work: Callable[[Path], T], files: list[Path]) -> Iterator[T]:
     """``work`` on every file, its results in the order of ``files``.
 
     The engine releases the GIL, so threads check files at once. Whatever prints or writes
     stays with the caller, which reads the results in order.
     """
-    jobs = min(args.jobs or os.process_cpu_count() or 1, len(files))
+    jobs = min(_workers(), len(files))
     if jobs <= 1:
         yield from map(work, files)
         return
@@ -590,7 +575,7 @@ def _transform_files(
         return transform(path, sources[path], settings[path])
 
     changed = 0
-    for path, (result, warnings) in zip(readable, _map(args, work, readable), strict=True):
+    for path, (result, warnings) in zip(readable, _map(work, readable), strict=True):
         for warning in warnings:
             print(warning, file=sys.stderr)
         original = sources[path]
@@ -694,7 +679,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
     types: list[str] = []
 
     if args.fix:
-        for path, fixed in zip(files, _map(args, project.fix, files), strict=True):
+        for path, fixed in zip(files, _map(project.fix, files), strict=True):
             if fixed == sources[path].text:
                 continue
             write_source(path, fixed)
@@ -711,7 +696,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
         diagnostics = project.check(path, row_usage)
         return diagnostics, project.statistics(path) if args.statistics else Counter()
 
-    for path, (diagnostics, counts) in zip(files, _map(args, check, files), strict=True):
+    for path, (diagnostics, counts) in zip(files, _map(check, files), strict=True):
         statistics += counts
         reports.extend((path, diag, sources[path]) for diag in diagnostics)
     for path in project.query_files:
@@ -1311,10 +1296,19 @@ def _package_path(directory: Path) -> tuple[str, ...]:
 
 
 @functools.cache
-def _resolved_root(root: Path) -> Path | None:
-    """``root`` resolved, or ``None`` when it is not a directory."""
+def _package_names(directory: str) -> tuple[str, ...]:
+    return _package_path(Path(directory))
+
+
+@functools.cache
+def _resolved_root(root: Path) -> tuple[str, str] | None:
+    """``root`` resolved as a prefix of the paths under it (case folded as the platform
+    compares paths) and its name, or ``None`` when it is not a directory."""
     root = root.resolve()
-    return root if root.is_dir() else None
+    if not root.is_dir():
+        return None
+    prefix = os.path.normcase(os.fspath(root))
+    return prefix if prefix.endswith(os.sep) else prefix + os.sep, root.name
 
 
 def _checked_roots(paths: Iterable[Path], files: Iterable[Path]) -> list[Path]:
@@ -1325,12 +1319,11 @@ def _checked_roots(paths: Iterable[Path], files: Iterable[Path]) -> list[Path]:
         ['missing']
     """
     roots = [path if path.is_dir() else path.parent for path in paths]
-    for file in files:
-        directory = file.parent
+    for directory in dict.fromkeys(file.parent for file in files):
         for _ in _package_path(directory):
             directory = directory.parent
         roots.append(directory)
-    return list(dict.fromkeys(root.resolve() for root in roots))
+    return list(dict.fromkeys(root.resolve() for root in dict.fromkeys(roots)))
 
 
 def _module_names(path: Path, roots: list[Path]) -> list[str]:
@@ -1344,15 +1337,19 @@ def _module_names(path: Path, roots: list[Path]) -> list[str]:
         >>> _module_names(Path("missing/pkg/mod.py"), [])
         ['mod']
     """
-    parts = [*_package_path(path.parent), *([] if path.stem == "__init__" else [path.stem])]
+    text = os.fspath(path)
+    directory, name = os.path.split(text)
+    stem = os.path.splitext(name)[0]
+    parts = [*_package_names(directory), *([] if stem == "__init__" else [stem])]
     names = [".".join(parts)]
+    folded = os.path.normcase(text)
     for root in map(_resolved_root, roots):
-        if root is not None and path.is_relative_to(root):
-            relative = list(path.relative_to(root).with_suffix("").parts)
+        if root is not None and folded.startswith(root[0]):
+            relative = os.path.splitext(text[len(root[0]) :])[0].split(os.sep)
             if relative[-1] == "__init__":
                 relative.pop()
-            names += [".".join(relative), ".".join([root.name, *relative])]
-    return list(dict.fromkeys(name for name in names if name)) or [path.stem]
+            names += [".".join(relative), ".".join([root[1], *relative])]
+    return list(dict.fromkeys(name for name in names if name)) or [stem]
 
 
 @dataclass(frozen=True)
@@ -1624,21 +1621,21 @@ class Project:
         texts = {path: read_source(path) for path in files}
         self.unreadable = [path for path, text in texts.items() if text is None]
         self.files = [path for path in files if texts[path] is not None]
-        self.modules = {
-            path: _module_names(self.resolver.resolve(path), self.paths) for path in self.files
-        }
+        self.resolved = {path: self.resolver.resolve(path) for path in self.files}
+        self.modules = {path: _module_names(self.resolved[path], self.paths) for path in self.files}
         self.sources = {
             path: ParsedSource(text, self._module(path))
             for path in self.files
             if (text := texts[path]) is not None
         }
+        self._fill_index()
         self.settings = {path: self.resolver.for_file(path) for path in self.files}
         self.query_files = [
             path
             for path in _collect_query_files(self.paths, self.files, self.resolver)
             if path not in self.settings
         ]
-        self._index()
+        self._configure_helpers()
 
     def query_types(self, path: Path, text: str) -> list[str]:
         from sqlty._queries import query_types
@@ -1678,7 +1675,8 @@ class Project:
             return
         if old is None:
             self.files.append(path)
-            self.modules[path] = _module_names(self.resolver.resolve(path), self.paths)
+            self.resolved[path] = self.resolver.resolve(path)
+            self.modules[path] = _module_names(self.resolved[path], self.paths)
             self.settings[path] = self.resolver.for_file(path)
         parsed = self.sources[path] = ParsedSource(text, self._module(path))
         if old is None or old.may_define_helpers or parsed.may_define_helpers:
@@ -1737,13 +1735,27 @@ class Project:
         return self.modules[path][0] + (".__init__" if path.name == "__init__.py" else "")
 
     def _index(self) -> None:
-        from sqlty._helpers import HelperIndex, configured_helpers
+        self._fill_index()
+        self._configure_helpers()
+
+    def _fill_index(self) -> None:
+        """The index of the sources; Rust builds its own on a thread of its own meanwhile."""
+        import threading
+
+        from sqlty._helpers import HelperIndex
+        from sqlty._source import AST
 
         self.index = HelperIndex()
         for path, parsed in self.sources.items():
             for name in self.modules[path]:
                 self.index.add(name, parsed)
-        checked = _checked_roots(self.paths, [self.resolver.resolve(path) for path in self.files])
+        if AST != "python":
+            threading.Thread(target=self.index.rust, daemon=True).start()
+
+    def _configure_helpers(self) -> None:
+        from sqlty._helpers import configured_helpers
+
+        checked = _checked_roots(self.paths, self.resolved.values())
         helpers_for = configured_helpers(self.index, checked)
         self.helpers = {path: helpers_for(self.settings[path]) for path in self.files}
 

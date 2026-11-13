@@ -325,6 +325,7 @@ pub(super) fn alter_op(
                     table.columns[at].default = None;
                     table.columns[at].generated = None;
                 }
+                AlterColumnOperation::GenericOptions { .. } => {}
             }
         }
         AlterTableOperation::DropPrimaryKey { .. } => {

@@ -8,6 +8,7 @@
 
 use std::rc::Rc;
 
+use sqlparser::ast::InTarget;
 use sqlparser::ast::{
     AccessExpr, BinaryOperator, CastKind, DataType, Expr, FunctionArguments, Ident, Join,
     JoinConstraint, JoinOperator, Query, Select, SelectItem, SetExpr, Subscript, TableFactor,
@@ -813,8 +814,10 @@ impl<'a> Analyzer<'a> {
                 let of = |inner: &Expr| self.operand_nullability(inner, scope, facts);
                 any_nullable([of(inner), of(low), of(high)])
             }
-            Expr::InList {
-                expr: inner, list, ..
+            Expr::In {
+                expr: inner,
+                target: InTarget::List(list),
+                ..
             } => {
                 let of = |inner: &Expr| self.operand_nullability(inner, scope, facts);
                 any_nullable(std::iter::once(of(inner)).chain(list.iter().map(of)))
@@ -824,9 +827,9 @@ impl<'a> Analyzer<'a> {
                 timestamp,
                 time_zone,
             } => any_nullable([of(timestamp), of(time_zone)]),
-            Expr::InSubquery {
+            Expr::In {
                 expr: inner,
-                subquery,
+                target: InTarget::Subquery(subquery),
                 ..
             } => any_nullable([
                 self.operand_nullability(inner, scope, facts),
@@ -837,9 +840,9 @@ impl<'a> Analyzer<'a> {
                     _ => Nullability::Unknown,
                 },
             ]),
-            Expr::InUnnest {
+            Expr::In {
                 expr: inner,
-                array_expr,
+                target: InTarget::Unnest(array_expr),
                 ..
             } => any_nullable([
                 of(inner),

@@ -69,6 +69,12 @@ impl Source {
         self
     }
 
+    /// `imports_of` this module: the functions and modules its imports bind.
+    pub fn targets(&self) -> &crate::index::Targets {
+        self.targets
+            .get_or_init(|| crate::index::imports_of(&self.entries, self.module.as_deref()))
+    }
+
     pub fn body(&self) -> &[Stmt] {
         &self.parsed.syntax().body
     }

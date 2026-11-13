@@ -8,6 +8,7 @@ diagnostics from ``sqlty_python`` with its ``index`` as from ``sqlty._check`` wi
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -413,3 +414,21 @@ def test_one_index_on_two_threads() -> None:
             raced = list(pool.map(lambda app, rust=rust: check(rust, app), apps))
         assert sum(raced) == 1
         assert [check(rust, app) for app in apps] == raced
+
+
+def test_index_in_a_forked_child() -> None:
+    """A child forked after an index was built, as by ``sqlty breaking``, builds one too."""
+    script = (
+        "import os, sys\n"
+        "from sqlty._core import module_index\n"
+        "steps = [('add', f'm{i}', 'x = 1\\n', f'm{i}', [], None) for i in range(50)]\n"
+        "module_index(sys.version_info[:2], steps)\n"
+        "if (pid := os.fork()) == 0:\n"
+        "    module_index(sys.version_info[:2], steps)\n"
+        "    os._exit(0)\n"
+        "sys.exit(os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1]))\n"
+    )
+    done = subprocess.run(
+        [sys.executable, "-W", "ignore::DeprecationWarning", "-c", script], timeout=60, check=False
+    )
+    assert done.returncode == 0
