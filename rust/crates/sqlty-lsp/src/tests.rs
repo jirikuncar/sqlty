@@ -77,6 +77,14 @@ impl Workspace for Fake {
         Ok(text.replace("x=1", "x = 1"))
     }
 
+    fn rewrite(&mut self, _: &Path, text: &str) -> Result<String, String> {
+        Ok(text.replace("= \"--sql", "= SQL(\"--sql"))
+    }
+
+    fn strip(&mut self, _: &Path, text: &str) -> Result<String, String> {
+        Ok(text.replace("SQL(\"--sql", "\"--sql"))
+    }
+
     fn breaking(&mut self) -> Result<Vec<(PathBuf, Vec<Diagnostic>)>, String> {
         let Some(against) = &self.settings.against else {
             return Ok(Vec::new());
@@ -353,6 +361,30 @@ fn format_is_a_source_action_beside_fix_all() {
     client.open("file:///work/clean.py", "x = 1\n");
     let clean = json!({"textDocument": {"uri": "file:///work/clean.py"}, "range": range, "context": {"diagnostics": [], "only": ["source.format"]}});
     assert_eq!(client.request("textDocument/codeAction", clean), json!([]));
+    client.shutdown();
+}
+
+#[test]
+fn rewrite_and_strip_are_source_actions() {
+    let mut client = Client::start(&json!({}));
+    client.open("file:///work/q.py", "a = \"--sql\"\nb = SQL(\"--sql\")\n");
+    let range = json!({"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}});
+    let only = |kinds: Value| json!({"textDocument": {"uri": "file:///work/q.py"}, "range": range, "context": {"diagnostics": [], "only": kinds}});
+    let rewrite = client.request(
+        "textDocument/codeAction",
+        only(json!(["source.rewrite.sqlty"])),
+    );
+    assert_eq!(rewrite[0]["title"], "sqlty: rewrite");
+    assert_eq!(
+        rewrite[0]["edit"]["documentChanges"][0]["edits"][0]["newText"],
+        "SQL("
+    );
+    let strip = client.request(
+        "textDocument/codeAction",
+        only(json!(["source.strip.sqlty"])),
+    );
+    assert_eq!(strip[0]["title"], "sqlty: strip");
+    assert_eq!(strip.as_array().unwrap().len(), 1);
     client.shutdown();
 }
 

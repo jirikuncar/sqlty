@@ -101,6 +101,12 @@ jobs:
       - name: Run tests
         run: uv run pytest -m "not timing and not pg"
 
+      # Rust and Python readings of every checked module must agree (`SQLTY_AST`).
+      - name: Run tests comparing the Rust and Python syntax trees
+        run: uv run pytest -m "not timing and not pg" tests/mdtest tests/test_cli.py tests/test_helpers.py tests/test_psycopg.py tests/test_driver_values.py tests/test_type_extractor.py tests/test_cross_module.py
+        env:
+          SQLTY_AST: compare
+
       # They share one database server, so they run in one process.
       - name: Run database tests
         run: uv run pytest -m pg -n 0
@@ -109,7 +115,7 @@ jobs:
         run: uv run pytest -m timing -n 0 -p no:randomly
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: nextest@0.9.148
 
@@ -466,7 +472,7 @@ jobs:
 
       # Simulation counts instructions, so a run is stable on a shared runner: the engine
       # is CPU-bound, with no I/O for instruction counting to miss.
-      - uses: CodSpeedHQ/action@78102a468f96d8e0ccb92d0ec49425753fc42062 # v5.6.0
+      - uses: CodSpeedHQ/action@af75f77f17a054769abefaa42fe8dc2975469b5f # v5.6.3
         if: vars.CODSPEED == 'true'
         with:
           mode: simulation

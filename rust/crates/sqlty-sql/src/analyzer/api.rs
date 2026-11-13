@@ -16,7 +16,7 @@ use super::names::alias_name;
 use super::preprocess::{parse_input_as_written, parse_query, too_deep, MAX_DEPTH};
 use super::query::{Analyzer, Column};
 use super::star_expand::statement_stars;
-use super::{Inferred, Schema, SchemaData, SkippedObject, ANY};
+use super::{Schema, SchemaData, SkippedObject, ANY};
 
 /// Load schema from CREATE TABLE, VIEW, DOMAIN and TYPE ... AS ENUM statements; in
 /// PostgreSQL also ALTER, DROP, search_path and functions (see `crate::catalog`).
@@ -109,12 +109,8 @@ pub fn composite_columns(name: &str, dialect: &str, schema: &SchemaData) -> Opti
 }
 
 /// Infer the Python return type for a SQL query, e.g. `tuple[int, str]`.
-pub fn infer_type(
-    sql: &str,
-    dialect: &str,
-    schema: Option<&SchemaData>,
-) -> Inferred<Option<String>> {
-    Ok(analyze_select(sql, dialect, schema)?.and_then(|columns| row_type(&columns)))
+pub fn infer_type(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> Option<String> {
+    analyze_select(sql, dialect, schema).and_then(|columns| row_type(&columns))
 }
 
 /// The row type of result columns, as [`infer_type`] spells it; `None` when a column's type,
@@ -134,7 +130,7 @@ pub fn analyze_select(
     sql: &str,
     dialect: &str,
     schema: Option<&SchemaData>,
-) -> Inferred<Option<Vec<Column>>> {
+) -> Option<Vec<Column>> {
     analyze_with_diagnostics(sql, dialect, schema).0
 }
 
@@ -145,7 +141,7 @@ pub fn analyze_with_diagnostics(
     sql: &str,
     dialect: &str,
     schema: Option<&SchemaData>,
-) -> (Inferred<Option<Vec<Column>>>, Vec<NameDiagnostic>) {
+) -> (Option<Vec<Column>>, Vec<NameDiagnostic>) {
     let (dialect, schema) = super::route(sql, dialect, schema);
     parse(sql, dialect).analyze_with_diagnostics(schema)
 }
@@ -228,9 +224,9 @@ impl Parsed {
     pub fn analyze_with_diagnostics(
         &self,
         schema: Option<&SchemaData>,
-    ) -> (Inferred<Option<Vec<Column>>>, Vec<NameDiagnostic>) {
+    ) -> (Option<Vec<Column>>, Vec<NameDiagnostic>) {
         let Some(stmt) = self.first() else {
-            return (Ok(None), Vec::new());
+            return (None, Vec::new());
         };
         let mut analyzer = Analyzer::new(
             schema.unwrap_or_else(|| crate::catalog::empty(self.dialect)),
@@ -238,7 +234,7 @@ impl Parsed {
         );
         analyzer.diag = Diagnostics::collecting();
         analyzer.source = text_source(&self.input.source, self.dialect);
-        let columns = analyzer.statement_columns(stmt);
+        let Ok(columns) = analyzer.statement_columns(stmt);
         let found = analyzer.diag.located().into_iter().map(|(mut found, at)| {
             found.span = self.as_written.then(|| self.bytes(at)).flatten();
             found

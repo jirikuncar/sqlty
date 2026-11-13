@@ -133,8 +133,58 @@
     },
     "commands": [
       {
+        "command": "sqlty.fixAll",
+        "title": "Fix All in File",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.format",
+        "title": "Format Queries in File",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.rewrite",
+        "title": "Wrap Queries in SQL[T]",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.strip",
+        "title": "Strip SQL[T] Wrappers",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.checkWorkspace",
+        "title": "Check Workspace",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.breakingAgainst",
+        "title": "Check Breaking Changes Against...",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.explainRule",
+        "title": "Explain Rule...",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.openInPlayground",
+        "title": "Open in Playground",
+        "category": "sqlty"
+      },
+      {
         "command": "sqlty.restart",
         "title": "Restart Server",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.showLogs",
+        "title": "Show Logs",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.debugInformation",
+        "title": "Show Debug Information",
         "category": "sqlty"
       }
     ],
@@ -159,7 +209,43 @@
           "meta.embedded.sql": "sql"
         }
       }
-    ]
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "sqlty.fixAll",
+          "when": "editorLangId == python"
+        },
+        {
+          "command": "sqlty.format",
+          "when": "editorLangId == python"
+        },
+        {
+          "command": "sqlty.rewrite",
+          "when": "editorLangId == python"
+        },
+        {
+          "command": "sqlty.strip",
+          "when": "editorLangId == python"
+        },
+        {
+          "command": "sqlty.openInPlayground",
+          "when": "editorLangId == python"
+        },
+        {
+          "command": "sqlty.checkWorkspace",
+          "when": "sqlty.server"
+        },
+        {
+          "command": "sqlty.breakingAgainst",
+          "when": "sqlty.server"
+        },
+        {
+          "command": "sqlty.restart",
+          "when": "!isWeb"
+        }
+      ]
+    }
   },
   "scripts": {
     "build": "npm run build-node && npm run build-web",
@@ -171,7 +257,8 @@
     "format": "oxfmt src",
     "test": "npm run build-wasm && npm run build && npm run build-test && vscode-test && node out/test/restricted/run.js",
     "test-web": "npm run build-wasm && npm run build-web && esbuild src/test/web/index.ts --bundle --external:vscode --outfile=out/test/web/index.js --format=cjs --platform=browser --target=es2022 && vscode-test-web --browserType=chromium --headless --quality=stable --extensionDevelopmentPath=. --extensionTestsPath=out/test/web/index.js fixture",
-    "package": "npm run build-wasm && npm run build-node -- --minify && npm run build-web -- --minify && cp ../../LICENSE LICENSE && vsce package"
+    "package": "npm run build-wasm && npm run build-node -- --minify && npm run build-web -- --minify && cp ../../LICENSE LICENSE && vsce package",
+    "demo": "node scripts/demo.js"
   },
   "dependencies": {
     "@vscode/python-extension": "^1.0.6",

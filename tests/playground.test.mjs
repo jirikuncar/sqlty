@@ -24,6 +24,28 @@ test("a request larger than the memory the module starts with", () => {
   assert.equal(answer.queries[0].columns.length, 20000);
 });
 
+test("a row type, a helper call and an ignore comment are checked", () => {
+  const source = [
+    "from typing import Annotated, LiteralString, TypedDict",
+    "from sqlty import SQL",
+    "class User(TypedDict):",
+    "    id: int",
+    "    nam: str",
+    "def fetch[T](query: Annotated[LiteralString, SQL], form: type[T], /) -> list[T]: ...",
+    'q = SQL[User]("--sql\\nSELECT id, name FROM users")',
+    'r = SQL[User]("--sql\\nSELECT id, name FROM users")  # sqlty: ignore',
+    'names = fetch("SELECT name FROM users", int)',
+    "x = 1  # sqlty: ignore",
+    "",
+  ].join("\n");
+  const answer = ask({ op: "analyze", source, schema, dialect: "postgres" });
+  const found = answer.diagnostics.map((d) => [d.line, d.rule]);
+  assert.ok(found.some(([line, rule]) => line === 7 && rule !== "unused-ignore"), JSON.stringify(found));
+  assert.ok(!found.some(([line]) => line === 8), JSON.stringify(found));
+  assert.ok(found.some(([line, rule]) => line === 9 && rule === "column-type-mismatch"), JSON.stringify(found));
+  assert.deepEqual(found.filter(([, rule]) => rule === "unused-ignore"), [[10, "unused-ignore"]]);
+});
+
 test("an unknown dialect is an error", () => {
   assert.match(ask({ op: "analyze", source: "", dialect: "postgress" }).error, /postgress/);
 });

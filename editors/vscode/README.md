@@ -6,6 +6,8 @@ of table and column names in the query strings it checks, and SQL highlighting i
 marked `--sql`. The `.sql` files of named queries that the
 [`queries`](https://sqlty.kuncar.dev/guide/sql-files/) key names get their diagnostics too.
 
+![VS Code: adding email to a --sql query, saving formats it and fixes its row type; making email nullable in schema.sql flags the query, and the quick fix adds | None; typing u. completes the columns of users](https://raw.githubusercontent.com/jirikuncar/sqlty/main/docs/assets/vscode-demo.gif)
+
 The extension runs `sqlty server` from your project, so the editor and CI agree. Add sqlty
 to the project's environment (`uv add --dev sqlty`); the extension bundles none.
 
@@ -66,6 +68,14 @@ lays out the query strings and leaves the rest to your Python formatter.
 }
 ```
 
+## Commands
+
+Type `sqlty` in the Command Palette: fix, format, wrap (`sqlty rewrite`) or strip the
+queries of a file, check the whole workspace, pick a baseline for breaking changes,
+explain a rule, open the file in the [playground](https://sqlty.kuncar.dev/playground/),
+restart the server, and show its logs or debug information. The
+[docs](https://sqlty.kuncar.dev/recipes/vscode/#commands) list each.
+
 ## Development
 
 ```bash
@@ -73,6 +83,10 @@ npm ci
 npm run check    # tsc, oxlint, oxfmt
 npm test         # opens fixture/ in VS Code; needs a sqlty with `sqlty server` on PATH
 ```
+
+`npm run demo` re-records `docs/assets/vscode-demo.gif` from `sqlty.vsix` in
+[openvscode-server](https://github.com/gitpod-io/openvscode-server) at `$OPENVSCODE_SERVER`;
+it needs `sqlty` on `PATH`, Playwright, ffmpeg and gifsicle.
 
 `npm run package` writes `sqlty.vsix`. Each GitHub release publishes it under the
 release's version, to the Visual Studio Marketplace and Open VSX, both by trusted publishing (no

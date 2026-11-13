@@ -345,9 +345,63 @@ def test_fuzz_fragments() -> None:
     assert checked > 1000
 
 
-def test_unknown_schema_column_raises() -> None:
-    with pytest.raises(RuntimeError, match="Column 'nope' not found in table 'users'"):
-        core.infer_type("SELECT SUM(nope) FROM users", schema_sql="CREATE TABLE users (id INT);")
+def test_sum_of_an_unknown_schema_column_is_untyped() -> None:
+    schema = "CREATE TABLE users (id INT);"
+    assert core.analyze_select("SELECT SUM(nope) FROM users", schema_sql=schema) == [
+        core.ColumnInfo(name="sum", python_type=None, sql_type=None)
+    ]
+    assert [
+        d[:2] for d in core.query_diagnostics("SELECT SUM(nope) FROM users", schema_sql=schema)
+    ] == [("unknown-column", "column `nope` does not exist in `users`")]
+
+
+QUERY_SCHEMA = (
+    "CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT NOT NULL);"
+    "CREATE TABLE orders (id BIGINT PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users (id),"
+    " status TEXT NOT NULL)"
+)
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        ("SELECT u.nope FROM users u", [("unknown-column", "error", "u.nope", "users", "nope")]),
+        ("SELECT naïve FROM users", [("unknown-column", "error", "naïve", "users", "naïve")]),
+        ("SELECT x.id FROM users u", [("unknown-table", "error", "x.id", "x", "id")]),
+        ("SELECT id FROM missing", [("unknown-table", "error", "missing", "missing", None)]),
+        (
+            "SELECT id FROM users u JOIN orders o ON o.user_id = u.id",
+            [("ambiguous-column", "error", "id", None, "id")],
+        ),
+        (
+            "INSERT INTO orders (id, user_id) VALUES (1, 2)",
+            [("insert-missing-column", "error", None, "orders", "status")],
+        ),
+        ("SELECT my_udf(id) FROM users", [("unknown-function", "warn", "my_udf", None, None)]),
+        ("SELECT u.email FROM users u JOIN orders o ON o.id = u.id", []),
+    ],
+)
+def test_query_diagnostics_fields(sql: str, expected: list[tuple[object, ...]]) -> None:
+    found = core.query_diagnostics(sql, schema_sql=QUERY_SCHEMA)
+    assert [
+        (d.rule, d.severity, None if d.start is None else sql[d.start : d.end], d.table, d.column)
+        for d in found
+    ] == expected
+
+
+def test_query_diagnostics_rules() -> None:
+    sql = "SELECT u.email FROM users u JOIN orders o ON o.id = u.id"
+    assert [
+        (d.rule, d.severity)
+        for d in core.query_diagnostics(
+            sql, schema_sql=QUERY_SCHEMA, rules={"entity-mismatch": "warn"}
+        )
+    ] == [("entity-mismatch", "warn")]
+    sql = "SELECT nope FROM users"
+    assert (
+        core.query_diagnostics(sql, schema_sql=QUERY_SCHEMA, rules={"unknown-column": "ignore"})
+        == []
+    )
 
 
 def test_crlf_continuation() -> None:
@@ -398,15 +452,16 @@ def test_unsupported_import_style_raises(name: str) -> None:
         getattr(core, name)('q = "--sql\\nSELECT 1"', import_style="from x import SQL")
 
 
-def test_user_type_check_skips_unknown_sum_column() -> None:
+@pytest.mark.parametrize("aggregate", ["SUM", "AVG"])
+def test_user_type_check_of_an_aggregate_of_an_unknown_column(aggregate: str) -> None:
     source = (
         "from typing import NamedTuple\nfrom sqlty import SQL\n"
         "class Row(NamedTuple):\n    total: float\n"
-        'q = SQL[Row]("--sql\\nSELECT SUM(nope) AS total FROM users")\n'
+        f'q = SQL[Row]("--sql\\nSELECT {aggregate}(nope) AS total FROM users")\n'
     )
     assert [
         d["rule"] for d in core.check_source(source, schema_sql="CREATE TABLE users (id INT);")
-    ] == ["unknown-column"]
+    ] == ["unknown-column", "nullable-mismatch"]
 
 
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
@@ -460,3 +515,33 @@ def test_split_marker_is_not_skipped(source: str) -> None:
 def test_unsupported_import_style_still_raises_without_markers() -> None:
     with pytest.raises(ValueError):
         core.check_source("x = 1\n", import_style="import nothing")
+
+
+@pytest.mark.parametrize(
+    ("sql", "dialect", "expected"),
+    [
+        (
+            "WITH r AS (SELECT * FROM s.a) SELECT * FROM r JOIN b ON true, generate_series(1, 2)",
+            "postgres",
+            [("a", "s", "read"), ("b", None, "read")],
+        ),
+        (
+            "UPDATE users u SET n = (SELECT count(*) FROM users) FROM orders o WHERE o.id = u.id",
+            "postgres",
+            [("users", None, "write"), ("users", None, "read"), ("orders", None, "read")],
+        ),
+        (
+            "DELETE u FROM users u JOIN orders o ON o.user_id = u.id",
+            "mysql",
+            [("users", None, "write"), ("orders", None, "read")],
+        ),
+        (
+            "MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN DELETE",
+            "postgres",
+            [("t", None, "write"), ("s", None, "read")],
+        ),
+        ("SELECT * FROM", "postgres", []),
+    ],
+)
+def test_query_tables(sql: str, dialect: str, expected: list[tuple[str, str | None, str]]) -> None:
+    assert core.query_tables(sql, dialect=dialect) == [core.TableRef(*table) for table in expected]
