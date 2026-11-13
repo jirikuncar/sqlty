@@ -557,7 +557,19 @@ fn name_rules() -> Vec<&'static str> {
         .collect()
 }
 
-/// Why a query has untyped columns, or names what it cannot, as `(rule, message)` pairs:
+/// `(rule, message, start, end, table, column)` of a query diagnostic: `start` and `end`
+/// are character offsets into the query, None when unknown.
+type QueryDiagnosticTuple = (
+    &'static str,
+    String,
+    Option<usize>,
+    Option<usize>,
+    Option<String>,
+    Option<String>,
+);
+
+/// Why a query has untyped columns, or names what it cannot, as `(rule, message, start,
+/// end, table, column)` tuples:
 /// `unknown-table`, `unknown-column`, `ambiguous-column`, `duplicate-alias`, `unknown-function`,
 /// `unknown-type`, `unsupported-syntax`, `insert-missing-column`, `insert-value-count`,
 /// `ungrouped-column`, `fanout-aggregate`, `chasm-join`, `unproven-join` and
@@ -574,13 +586,24 @@ fn query_diagnostics(
     sql: &str,
     dialect: DialectArg,
     schema_sql: Option<SchemaArg>,
-) -> Vec<(String, String)> {
+) -> Vec<QueryDiagnosticTuple> {
     let dialect = dialect.0;
+    let chars = |byte: usize| sql[..byte].chars().count();
     detach(py, || {
         analyzer::analyze_with_diagnostics(sql, dialect, schema(schema_sql, dialect).as_deref())
             .1
             .into_iter()
-            .map(|found| (found.rule.name().to_string(), found.message))
+            .map(|found| {
+                let span = found.span.map(|span| (chars(span.start), chars(span.end)));
+                (
+                    found.rule.name(),
+                    found.message,
+                    span.map(|span| span.0),
+                    span.map(|span| span.1),
+                    found.table,
+                    found.column,
+                )
+            })
             .collect()
     })
 }

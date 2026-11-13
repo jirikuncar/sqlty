@@ -365,7 +365,7 @@ def _check_names(ctx: _Check) -> None:
     for call in ctx.calls:
         if call.query is None or (MARKER.match(call.query) and call.query in ctx.parsed.literals):
             continue
-        for rule, message in _query_diagnostics(
+        for rule, message, *_ in _query_diagnostics(
             call.query, dialect=ctx.dialect, schema_sql=ctx.schema_sql
         ):
             ctx.report(rule, message, call.line, ctx.query_span(call))

@@ -49,7 +49,7 @@ from sqlty._core import schema_skipped_objects as _schema_skipped_objects
 from sqlty._core import schema_skipped_tables as _schema_skipped_tables
 from sqlty._core import strip_source as _strip_source
 from sqlty._helpers import MARKER, HelperIndex, find_helper_calls
-from sqlty._lint import Diagnostic
+from sqlty._lint import Diagnostic, RuleConfig
 from sqlty._source import AST, AstMismatch, ParsedSource
 
 if TYPE_CHECKING:
@@ -232,23 +232,57 @@ def analyze_params(
     return None if params is None else [ParamInfo(*param) for param in params]
 
 
+class QueryDiagnostic(NamedTuple):
+    """A diagnostic of a query: what ``query_diagnostics`` returns.
+
+    ``start`` and ``end`` are character offsets into the query, ``None`` when unknown.
+    ``table`` is the table it is about: an unknown table or qualifier as written, or the
+    schema table (``s.orders`` when the query qualifies it) an unknown column was looked up
+    in. ``column`` is an unknown, ambiguous or left-out column. Each is ``None`` when the
+    diagnostic is not about one, or about several.
+    """
+
+    rule: str
+    message: str
+    severity: str
+    start: int | None
+    end: int | None
+    table: str | None
+    column: str | None
+
+
 def query_diagnostics(
-    sql: str, *, dialect: str = "postgres", schema_sql: str | Schema | None = None
-) -> list[tuple[str, str]]:
-    """Why a query has untyped columns, or names what it cannot, as ``(rule, message)`` pairs.
+    sql: str,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
+    rules: dict[str, str] | None = None,
+) -> list[QueryDiagnostic]:
+    """Why a query has untyped columns, or names what it cannot, as ``QueryDiagnostic`` tuples.
 
     The rules are ``unknown-table``, ``unknown-column``, ``ambiguous-column``, ``duplicate-alias``,
     ``unknown-function``, ``unknown-type``, ``unsupported-syntax``,
     ``insert-missing-column``, ``insert-value-count``, ``ungrouped-column``,
-    ``fanout-aggregate``, ``chasm-join``, ``unproven-join`` and ``entity-mismatch``. Tables and columns are only judged
-    when ``schema_sql``
-    defines some tables.
+    ``fanout-aggregate``, ``chasm-join``, ``unproven-join`` and ``entity-mismatch``. Tables and
+    columns are only judged when ``schema_sql`` defines some tables. ``rules`` sets severities
+    as ``[tool.sqlty.rules]`` does, and a rule set to ``"ignore"`` (by default
+    ``unproven-join`` and ``entity-mismatch``) is left out, as in ``check_source``.
 
     Example:
-        >>> query_diagnostics("SELECT nope FROM users", schema_sql="CREATE TABLE users (id INT)")
-        [('unknown-column', 'column `nope` does not exist in `users`')]
+        >>> schema = "CREATE TABLE users (id INT)"
+        >>> query_diagnostics("SELECT nope FROM users", schema_sql=schema)
+        [QueryDiagnostic(rule='unknown-column', message='column `nope` does not exist in `users`', severity='error', start=7, end=11, table='users', column='nope')]
+        >>> [d.rule for d in query_diagnostics("SELECT u.id FROM users u JOIN users v ON v.id = u.id", schema_sql=schema)]
+        []
     """
-    return _query_diagnostics(sql, dialect=dialect, schema_sql=schema_sql)
+    config = RuleConfig(rules)
+    return [
+        QueryDiagnostic(rule, message, config.severity(rule).value, start, end, table, column)
+        for rule, message, start, end, table, column in _query_diagnostics(
+            sql, dialect=dialect, schema_sql=schema_sql
+        )
+        if config.is_enabled(rule)
+    ]
 
 
 class TableRef(NamedTuple):
@@ -964,6 +998,7 @@ __all__ = [
     "json_shapes",
     "load_schema",
     "query_at",
+    "QueryDiagnostic",
     "query_diagnostics",
     "query_tables",
     "query_statistics",
