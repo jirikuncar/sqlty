@@ -29,6 +29,43 @@ execute("DELETE FROM users WHERE id = %s", (1, 2))
 execute("DELETE FROM users", (1,))
 ```
 
+## A query without parameters takes no keys
+
+psycopg and sqlite3 ignore a mapping when the query has no placeholders, so
+[`extra-param`](../../../src/sqlty/rules/extra-param.md) warns. An empty one
+passes nothing.
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def execute(query: Annotated[LiteralString, SQL], params: dict[str, object], /) -> None: ...
+
+execute("DELETE FROM users", {})
+# error: [extra-param] "call passes extra parameter 'id'"
+execute("DELETE FROM users", {"id": 1})
+# error: [extra-param] "call passes extra parameters 'id', 'name'"
+execute("DELETE FROM users", {"id": 1, "name": "a"})
+```
+
+## Extra parameters can fail the check
+
+```toml
+[tool.sqlty.rules]
+extra-param = "error"
+```
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def execute(query: Annotated[LiteralString, SQL], params: dict[str, object], /) -> None: ...
+
+# error: [extra-param] "call passes extra parameter 'age'"
+# error: [param-count-mismatch] "call is missing parameter 'id'"
+execute("DELETE FROM users WHERE id = %(id)s", {"age": 3})
+```
+
 ## Numbered placeholders
 
 `$2` alone means two parameters, as the server counts them.
@@ -60,7 +97,9 @@ def execute(query: Annotated[LiteralString, SQL], params: dict[str, object], /) 
 execute("DELETE FROM users WHERE id = %(id)s OR age = %(id)s", {"id": 1})
 # error: [param-count-mismatch] "call is missing parameter 'name'"
 execute("DELETE FROM users WHERE id = %(id)s AND name = %(name)s", {"id": 1})
+# error: [extra-param] "call passes extra parameter 'age'"
 execute("DELETE FROM users WHERE id = %(id)s", {"id": 1, "age": 3})
+# error: [extra-param] "call passes extra parameter 'ident'"
 # error: [param-count-mismatch] "call is missing parameter 'id'"
 execute("DELETE FROM users WHERE id = %(id)s", {"ident": 1})
 ```

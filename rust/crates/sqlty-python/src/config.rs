@@ -30,8 +30,9 @@ use sqlty_sql::Dialect;
 pub const CONFIG_FILES: [&str; 3] = ["sqlty.toml", "pyproject.toml", "Cargo.toml"];
 
 /// Keys of `[tool.sqlty]` that are not file discovery; see also [`DISCOVERY_KEYS`].
-pub const TOOL_KEYS: [&str; 17] = [
+pub const TOOL_KEYS: [&str; 19] = [
     "dialect",
+    "driver",
     "schema",
     "queries",
     "query-format",
@@ -43,12 +44,45 @@ pub const TOOL_KEYS: [&str; 17] = [
     "param-types",
     "preview",
     "max-query-variants",
+    "coerce-row-types",
     "functions",
     "types",
     "format-command",
     "extend",
     "databases",
 ];
+
+/// The `types` a `driver` adds in PostgreSQL, under the project's own: psycopg loads ranges
+/// and multiranges as its own classes
+/// (<https://www.psycopg.org/psycopg3/docs/basic/pgtypes.html>).
+pub fn driver_types(driver: &str, dialect: &str) -> Vec<(String, String)> {
+    const RANGES: [(&str, &str); 6] = [
+        ("INT4", "int"),
+        ("INT8", "int"),
+        ("NUM", "decimal.Decimal"),
+        ("DATE", "datetime.date"),
+        ("TS", "datetime.datetime"),
+        ("TSTZ", "datetime.datetime"),
+    ];
+    if driver != "psycopg" || dialect != "postgres" {
+        return Vec::new();
+    }
+    RANGES
+        .iter()
+        .flat_map(|(base, python)| {
+            [
+                (
+                    format!("{base}RANGE"),
+                    format!("psycopg.types.range.Range[{python}]"),
+                ),
+                (
+                    format!("{base}MULTIRANGE"),
+                    format!("psycopg.types.multirange.Multirange[{python}]"),
+                ),
+            ]
+        })
+        .collect()
+}
 
 /// Keys of `[tool.sqlty]` that pick the files to process.
 pub const DISCOVERY_KEYS: [&str; 3] = ["exclude", "extend-exclude", "respect-gitignore"];
@@ -177,6 +211,12 @@ pub fn validate(mut table: Table, source: &str) -> Result<Config, InvalidConfig>
         if table.get(key).is_some_and(|value| !value.is_str()) {
             return fail(format!("[tool.sqlty] {key} must be a string"));
         }
+    }
+    if table
+        .get("driver")
+        .is_some_and(|driver| driver.as_str() != Some("psycopg"))
+    {
+        return fail("[tool.sqlty] driver must be \"psycopg\"".into());
     }
     if let Some(dialect) = table.get("dialect").and_then(Value::as_str) {
         if dialect.parse::<Dialect>().is_err() {
@@ -359,6 +399,15 @@ pub fn validate(mut table: Table, source: &str) -> Result<Config, InvalidConfig>
                 .into(),
         );
     }
+    if table
+        .get("coerce-row-types")
+        .is_some_and(|names| !is_strings(names))
+    {
+        return fail(
+            "[tool.sqlty] coerce-row-types must be a list of row type names, such as [\"app.rows.User\"]"
+                .into(),
+        );
+    }
     for key in ["exclude", "extend-exclude"] {
         if table.get(key).is_some_and(|globs| !is_strings(globs)) {
             return fail(format!("[tool.sqlty] {key} must be a list of glob strings"));
@@ -499,6 +548,8 @@ mod tests {
         assert!(invalid("extend = []").contains("extend must be a string"));
         assert!(invalid("schema = 1").contains("schema must be a path"));
         assert!(invalid("max-query-variants = 0").contains("positive integer"));
+        assert!(invalid("coerce-row-types = \"app.User\"").contains("list of row type names"));
+        assert!(invalid("driver = \"asyncpg\"").contains("must be \"psycopg\""));
         assert!(invalid("types = { DATE = 1 }").contains("types must be a table"));
         assert!(invalid("databases = 1").contains("databases must be a table of tables"));
         assert!(invalid("[databases.default]").contains("not 'default'"));

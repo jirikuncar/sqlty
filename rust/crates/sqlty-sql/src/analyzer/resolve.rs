@@ -7,16 +7,17 @@
 
 use std::rc::Rc;
 
-use sqlparser::ast::{Expr, Ident};
+use sqlparser::ast::{Expr, Ident, TableAlias, TableFactor, TableWithJoins};
 
 use crate::catalog::fold;
-use crate::diagnostics::NameRule;
+use crate::diagnostics::{NameDiagnostic, NameRule};
 
 use super::dialect::SqlDialect;
 use super::literals::value_set;
+use super::names::table_key;
 use super::nullability::{Facts, Nullability};
 use super::query::{Analyzer, Column};
-use super::scope::{resolve, Scope, Source, Table};
+use super::scope::{relations, resolve, Scope, Source, Table};
 use super::suggest;
 use super::typed::Typed;
 use super::Candidate;
@@ -80,13 +81,9 @@ struct Resolved<'s> {
 
 impl<'a> Analyzer<'a> {
     /// Whether table, column and ambiguity rules apply: a schema is configured and the
-    /// dialect's name rules (case folding, quoting) are the ones modelled.
+    /// dialect [checks names](SqlDialect::checks_names).
     pub(super) fn judges_names(&self) -> bool {
-        !self.schema.is_empty()
-            && matches!(
-                self.dialect,
-                SqlDialect::Postgres | SqlDialect::MySql | SqlDialect::Sqlite
-            )
+        !self.schema.is_empty() && self.dialect.checks_names()
     }
 
     /// Whether a CTE, view or subquery column called `name` is the one `column` (folded)
@@ -116,12 +113,58 @@ impl<'a> Analyzer<'a> {
             return;
         }
         if self.judges_names() {
-            self.diag.record(
+            self.diag.record_about(
                 NameRule::UnknownTable,
                 format!("table `{table}` is not defined in the schema"),
+                Some(table),
+                None,
             );
         } else {
             self.diag.explain_silently();
+        }
+    }
+
+    /// `duplicate-alias`: two FROM items read by the same name, which PostgreSQL and MySQL
+    /// reject. Two tables without an alias may share a name when they are in different
+    /// schemas.
+    pub(super) fn check_duplicate_names(&self, from: &[TableWithJoins]) {
+        if !self.diag.enabled() || !matches!(self.dialect, SqlDialect::Postgres | SqlDialect::MySql)
+        {
+            return;
+        }
+        let mut seen: Vec<(String, Option<String>)> = Vec::new();
+        for factor in relations(from) {
+            let (ident, key) = match factor {
+                TableFactor::Table {
+                    alias: None, name, ..
+                } => match name.0.last().and_then(|part| part.as_ident()) {
+                    Some(ident) => (ident, Some(table_key(name, self.dialect))),
+                    None => continue,
+                },
+                TableFactor::Table { alias, .. }
+                | TableFactor::Derived { alias, .. }
+                | TableFactor::TableFunction { alias, .. }
+                | TableFactor::Function { alias, .. }
+                | TableFactor::UNNEST { alias, .. }
+                | TableFactor::JsonTable { alias, .. }
+                | TableFactor::NestedJoin { alias, .. } => match alias {
+                    Some(TableAlias { name, .. }) => (name, None),
+                    None => continue,
+                },
+                _ => continue,
+            };
+            let name = fold(ident, self.dialect);
+            let clash = seen.iter().any(|(seen, seen_key)| {
+                *seen == name && (key.is_none() || seen_key.is_none() || *seen_key == key)
+            });
+            if clash {
+                let _at = self.diag.at(ident.span);
+                self.diag.record(
+                    NameRule::DuplicateAlias,
+                    format!("table name `{}` is specified more than once", ident.value),
+                );
+            }
+            seen.push((name, key));
         }
     }
 
@@ -392,13 +435,15 @@ impl<'a> Analyzer<'a> {
             .collect();
         references.dedup();
         if references.len() > 1 {
-            self.diag.record(
+            self.diag.record_about(
                 NameRule::AmbiguousColumn,
                 format!(
                     "column reference `{}` is ambiguous: {} all have it",
                     ident.value,
                     list(&references)
                 ),
+                None,
+                Some(&ident.value),
             );
         }
     }
@@ -468,14 +513,25 @@ impl<'a> Analyzer<'a> {
             return self.diag.explain_silently();
         }
         if let Some(qualifier) = &qualifier {
+            // A qualifier of two FROM items is reported by `duplicate-alias`.
+            if scope
+                .iter()
+                .filter(|source| source.reference == *qualifier)
+                .nth(1)
+                .is_some()
+            {
+                return self.diag.explain_silently();
+            }
             if candidates.is_empty() {
                 // `old`/`new` in RETURNING and `excluded` in ON CONFLICT are not FROM items.
                 if matches!(qualifier.as_str(), "old" | "new" | "excluded") {
                     return self.diag.explain_silently();
                 }
-                return self.diag.record(
+                return self.diag.record_about(
                     NameRule::UnknownTable,
                     format!("`{qualifier}` is not a table or alias in the FROM clause"),
+                    Some(qualifier),
+                    Some(&column.value),
                 );
             }
         }
@@ -526,8 +582,18 @@ impl<'a> Analyzer<'a> {
                 _ => spelling,
             })
         });
-        self.diag
-            .record_fix(NameRule::UnknownColumn, message, replacement.flatten());
+        let table = match candidates.as_slice() {
+            [source] => source.table.named(),
+            _ => None,
+        };
+        self.diag.push(NameDiagnostic {
+            rule: NameRule::UnknownColumn,
+            message,
+            span: None,
+            replacement: replacement.flatten(),
+            table: table.map(str::to_string),
+            column: Some(column.value.clone()),
+        });
     }
 
     /// The column of `candidates` that `column` most likely misspells, and how SQL spells
@@ -690,9 +756,11 @@ impl<'a> Analyzer<'a> {
         }
         if let Some(reference) = &reference {
             if !scope.iter().any(|source| source.reference == *reference) {
-                return self.diag.record(
+                return self.diag.record_about(
                     NameRule::UnknownTable,
                     format!("`{reference}` in `{reference}.*` is not a table or alias in the FROM clause"),
+                    Some(reference),
+                    None,
                 );
             }
         }

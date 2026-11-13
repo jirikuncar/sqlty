@@ -80,6 +80,7 @@ class Baseline:
                 import_style=settings.import_style,
                 untyped=settings.untyped,
                 query_variants=settings.query_variants,
+                coerce_row_types=settings.coerce_row_types,
                 helpers=project.helpers[path],
             ):
                 message = f"{diagnostic['message']} (with the schema of {baseline.label})"

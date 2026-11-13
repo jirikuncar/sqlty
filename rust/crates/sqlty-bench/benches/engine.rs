@@ -35,7 +35,7 @@ fn analyze(c: &mut Criterion) {
     group.bench_function("all_no_schema", |b| {
         b.iter(|| {
             for (_, sql) in QUERIES {
-                black_box(analyzer::analyze_select(sql, "postgres", None).ok());
+                black_box(analyzer::analyze_select(sql, "postgres", None));
             }
         });
     });

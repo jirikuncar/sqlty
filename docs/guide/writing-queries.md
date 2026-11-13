@@ -79,6 +79,14 @@ query = ("--sql\nSELECT id::INTEGER, email::TEXT "
 # rewritten:          "FROM users"))
 ```
 
+A string joined with `+` is not: the query is the whole expression, not its first
+literal, so it is left alone. Write the parts side by side instead.
+
+```python
+query = "--sql\nSELECT id::INTEGER FROM users" + " WHERE active"
+# rewritten: query = "--sql\nSELECT id::INTEGER FROM users" + " WHERE active"
+```
+
 The rewriter never changes the string itself, only the wrapper around it.
 
 ## Casts declare column types

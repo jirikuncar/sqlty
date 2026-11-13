@@ -63,10 +63,36 @@ on every path:
 | A `psycopg.sql` composition of these | `sql.SQL("... {}").format(sql.SQL(where))` |
 
 A condition tested twice takes the same branch both times, as long as nothing it reads
-is assigned in between. Names bound together in one branch stay together. A `case` of
+changes in between: a name it reads is assigned or deleted, has an attribute or item
+assigned (`o.on = ...`, `xs[0] = ...`), or has a method called as a statement
+(`xs.append(...)`). A condition with `:=`, `await` or `yield` may take either branch
+each time. Names bound together in one branch stay together. A `case` of
 string literals keeps only the values it matches, so `case "foo": return` drops `foo`
 from the variants after the `match`. A function called without an argument reads the
 default of its parameter.
+
+A `--sql` marker on the first part changes nothing: the query is the whole
+concatenation, not its first literal.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+preview = true
+```
+
+```python
+from typing import Annotated, LiteralString
+
+from sqlty import SQL
+
+
+def fetch_all[T](query: Annotated[LiteralString, SQL], form: type[T], /) -> list[T]: ...
+
+
+def active_users() -> list[tuple[int, str]]:
+    # error: [nullable-mismatch] "tuple[int, str] item 1 is str but query column 'name' can be NULL"
+    return fetch_all("--sql\nSELECT id, name FROM users WHERE " + "active", tuple[int, str])
+```
 
 ## What is not followed
 

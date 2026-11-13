@@ -111,9 +111,11 @@ def register(name: str, born: date, age: int | None, other) -> None:
     execute("INSERT INTO users (id, name, born) VALUES (%s, %s, %s)", (1, name, 5))
 ```
 
-Named placeholders match a dict literal or keyword arguments;
+Named placeholders match a dict literal or keyword arguments.
 [`param-count-mismatch`](../reference/rules.md#param-count-mismatch) reports
-names the call does not pass; extra keys are ignored, as the drivers do:
+names the call does not pass, an error. [`extra-param`](../reference/rules.md#extra-param)
+reports keys the query does not use, a warning since the drivers ignore them;
+`extra-param = "error"` in `[tool.sqlty.rules]` fails the check on them:
 
 ```python
 from typing import Annotated, LiteralString
@@ -123,6 +125,7 @@ def execute(query: Annotated[LiteralString, SQL], params: dict[str, object], /) 
 def run(query: Annotated[LiteralString, SQL], /, **params: object) -> None: ...
 
 execute("DELETE FROM users WHERE id = %(id)s", {"id": 1})
+# error: [extra-param] "call passes extra parameter 'ident'"
 # error: [param-count-mismatch] "call is missing parameter 'id'"
 execute("DELETE FROM users WHERE id = %(id)s", {"ident": 1})
 # error: [param-type-mismatch] "parameter 'age' expects int, got bytes"
@@ -198,6 +201,7 @@ count = "--sql\nSELECT count(*) FROM users"
 # rewritten-file: import datetime
 # rewritten-file: import typing
 # rewritten-file: from sqlty import SQL
+# rewritten-file: from sqlty import NoParams
 # rewritten-file:
 # rewritten-file:
 # rewritten-file: # sqlty: generated
@@ -207,13 +211,13 @@ count = "--sql\nSELECT count(*) FROM users"
 # rewritten-file:
 # rewritten-file: by_id = SQL[tuple[str], ByIdParams]("--sql\nSELECT name FROM users WHERE id = %(id)s")
 # rewritten-file: by_name = SQL[tuple[int, datetime.date | None], tuple[str | None, int | None]]("--sql\nSELECT id, born FROM users WHERE name = %s AND age > %s")
-# rewritten-file: count = SQL[tuple[int], tuple[()]]("--sql\nSELECT count(*) FROM users")
+# rewritten-file: count = SQL[tuple[int], NoParams]("--sql\nSELECT count(*) FROM users")
 ```
 
 - Positional parameters are a `tuple`, one item per placeholder.
 - Named parameters are a `TypedDict`, one key per name, generated after the
   imports below a `# sqlty: generated` line. `sqlty strip` removes it.
-- A query without parameters takes `tuple[()]`.
+- A query without parameters takes `NoParams`: `()`, `{}` or nothing, and no key.
 - A parameter is `T | None` unless a `NOT NULL` column stores it, and
   `typing.Any` when its type is unknown or cast (`%s::int` takes anything).
 
@@ -252,7 +256,7 @@ where your type checker does not check `P` otherwise:
 ```python
 from typing import TypedDict
 
-from sqlty import SQL
+from sqlty import SQL, NoParams
 
 
 class ById(TypedDict):
@@ -261,7 +265,7 @@ class ById(TypedDict):
 
 by_id = SQL[tuple[str], ById]("--sql\nSELECT name FROM users WHERE id = %(id)s")
 by_name = SQL[tuple[int], tuple[str]]("--sql\nSELECT id FROM users WHERE name = %s")
-count = SQL[tuple[int], tuple[()]]("--sql\nSELECT count(*) FROM users")
+count = SQL[tuple[int], NoParams]("--sql\nSELECT count(*) FROM users")
 
 by_id.bind({"id": 1})
 by_name.bind(("alice",))

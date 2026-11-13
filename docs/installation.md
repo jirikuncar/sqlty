@@ -4,6 +4,8 @@ description: How to install sqlty with uv or pip, which Python versions and plat
 
 # Installation
 
+To try sqlty first, the [playground](playground.md) runs it in your browser.
+
 ## Requirements
 
 - Python 3.14 or 3.15, see [Supported Python versions](#supported-python-versions)

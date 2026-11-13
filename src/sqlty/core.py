@@ -11,19 +11,22 @@ needs the Python runtime; those passes live in ``sqlty._check``.
 from __future__ import annotations
 
 import ast
+import sys
 from collections import Counter
-from collections.abc import Mapping
-from typing import TYPE_CHECKING, NamedTuple
+from collections.abc import Collection, Mapping
+from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from sqlty._check import RowUsage, apply_suppressions, is_any_row
 from sqlty._check import diagnostics as check_diagnostics
 from sqlty._core import (
     QueryAt,
     Schema,
+    checks_names,
     expand_star,
     infer_type,
     returns_rows,
 )
+from sqlty._core import add_json_types as _add_json_types
 from sqlty._core import add_param_types as _add_param_types
 from sqlty._core import analyze_columns as _analyze_columns
 from sqlty._core import analyze_params as _analyze_params
@@ -35,17 +38,19 @@ from sqlty._core import format_source as _format_source
 from sqlty._core import highlight_source as _highlight_source
 from sqlty._core import hover_source as _hover_source
 from sqlty._core import load_schema as _load_schema
+from sqlty._core import module_calls as _module_calls
 from sqlty._core import parse_error as _parse_error
 from sqlty._core import query_at as _query_at
 from sqlty._core import query_diagnostics as _query_diagnostics
 from sqlty._core import query_sites as _query_sites
+from sqlty._core import query_tables as _query_tables
 from sqlty._core import rewrite_source as _rewrite_source
 from sqlty._core import schema_skipped_objects as _schema_skipped_objects
 from sqlty._core import schema_skipped_tables as _schema_skipped_tables
 from sqlty._core import strip_source as _strip_source
 from sqlty._helpers import MARKER, HelperIndex, find_helper_calls
-from sqlty._lint import Diagnostic
-from sqlty._source import ParsedSource
+from sqlty._lint import Diagnostic, RuleConfig
+from sqlty._source import AST, AstMismatch, ParsedSource
 
 if TYPE_CHECKING:
     pass
@@ -112,9 +117,6 @@ def analyze_select(
         >>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT)"
         >>> [c.python_type for c in analyze_select("SELECT id, name FROM users", schema_sql=schema)]
         ['int', 'str | None']
-
-    Raises:
-        RuntimeError: ``SUM(column)`` names a column missing from a schema table.
     """
     columns = _analyze_select(sql, dialect=dialect, schema_sql=schema_sql)
     return None if columns is None else [ColumnInfo(*column) for column in columns]
@@ -137,10 +139,7 @@ def json_shapes(
     """
     from sqlty._json_shape import render
 
-    try:
-        columns = _analyze_columns(sql, dialect=dialect, schema_sql=schema_sql)
-    except RuntimeError:
-        return []
+    columns = _analyze_columns(sql, dialect=dialect, schema_sql=schema_sql)
     return [(c[0], render(c[4])) for c in columns or [] if c[4] is not None]
 
 
@@ -233,23 +232,82 @@ def analyze_params(
     return None if params is None else [ParamInfo(*param) for param in params]
 
 
-def query_diagnostics(
-    sql: str, *, dialect: str = "postgres", schema_sql: str | Schema | None = None
-) -> list[tuple[str, str]]:
-    """Why a query has untyped columns, or names what it cannot, as ``(rule, message)`` pairs.
+class QueryDiagnostic(NamedTuple):
+    """A diagnostic of a query: what ``query_diagnostics`` returns.
 
-    The rules are ``unknown-table``, ``unknown-column``, ``ambiguous-column``,
+    ``start`` and ``end`` are character offsets into the query, ``None`` when unknown.
+    ``table`` is the table it is about: an unknown table or qualifier as written, or the
+    schema table (``s.orders`` when the query qualifies it) an unknown column was looked up
+    in. ``column`` is an unknown, ambiguous or left-out column. Each is ``None`` when the
+    diagnostic is not about one, or about several.
+    """
+
+    rule: str
+    message: str
+    severity: str
+    start: int | None
+    end: int | None
+    table: str | None
+    column: str | None
+
+
+def query_diagnostics(
+    sql: str,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
+    rules: dict[str, str] | None = None,
+) -> list[QueryDiagnostic]:
+    """Why a query has untyped columns, or names what it cannot, as ``QueryDiagnostic`` tuples.
+
+    The rules are ``unknown-table``, ``unknown-column``, ``ambiguous-column``, ``duplicate-alias``,
     ``unknown-function``, ``unknown-type``, ``unsupported-syntax``,
     ``insert-missing-column``, ``insert-value-count``, ``ungrouped-column``,
-    ``fanout-aggregate``, ``chasm-join``, ``unproven-join`` and ``entity-mismatch``. Tables and columns are only judged
-    when ``schema_sql``
-    defines some tables.
+    ``fanout-aggregate``, ``chasm-join``, ``unproven-join`` and ``entity-mismatch``. Tables and
+    columns are only judged when ``schema_sql`` defines some tables. ``rules`` sets severities
+    as ``[tool.sqlty.rules]`` does, and a rule set to ``"ignore"`` (by default
+    ``unproven-join`` and ``entity-mismatch``) is left out, as in ``check_source``.
 
     Example:
-        >>> query_diagnostics("SELECT nope FROM users", schema_sql="CREATE TABLE users (id INT)")
-        [('unknown-column', 'column `nope` does not exist in `users`')]
+        >>> schema = "CREATE TABLE users (id INT)"
+        >>> query_diagnostics("SELECT nope FROM users", schema_sql=schema)
+        [QueryDiagnostic(rule='unknown-column', message='column `nope` does not exist in `users`', severity='error', start=7, end=11, table='users', column='nope')]
+        >>> [d.rule for d in query_diagnostics("SELECT u.id FROM users u JOIN users v ON v.id = u.id", schema_sql=schema)]
+        []
     """
-    return _query_diagnostics(sql, dialect=dialect, schema_sql=schema_sql)
+    config = RuleConfig(rules)
+    return [
+        QueryDiagnostic(rule, message, config.severity(rule).value, start, end, table, column)
+        for rule, message, start, end, table, column in _query_diagnostics(
+            sql, dialect=dialect, schema_sql=schema_sql
+        )
+        if config.is_enabled(rule)
+    ]
+
+
+class TableRef(NamedTuple):
+    """A table a query names: what ``query_tables`` returns."""
+
+    name: str
+    schema: str | None
+    access: Literal["read", "write"]
+
+
+def query_tables(sql: str, *, dialect: str = "postgres") -> list[TableRef]:
+    """The tables ``sql`` reads and writes, in source order, each once per access.
+
+    ``name`` and ``schema`` are as the query writes them; ``schema`` is ``None`` for an
+    unqualified name. ``access`` is ``"write"`` for the target of an ``INSERT``,
+    ``UPDATE``, ``DELETE`` or ``MERGE``, else ``"read"``. CTEs, derived tables and table
+    functions are not tables. Needs no schema; empty when the query does not parse.
+
+    Example:
+        >>> query_tables("INSERT INTO audit.log (id) SELECT id FROM users WHERE id IN (SELECT user_id FROM orders)")
+        [TableRef(name='log', schema='audit', access='write'), TableRef(name='users', schema=None, access='read'), TableRef(name='orders', schema=None, access='read')]
+        >>> query_tables("WITH recent AS (SELECT * FROM orders) SELECT * FROM recent, generate_series(1, 3)")
+        [TableRef(name='orders', schema=None, access='read')]
+    """
+    return [TableRef(*table) for table in _query_tables(sql, dialect=dialect)]
 
 
 def schema_skipped_tables(schema_sql: str | Schema, *, dialect: str = "postgres") -> list[str]:
@@ -321,11 +379,7 @@ def rewrite_source(
         keep_lines=keep_lines,
     )
     if json_types == "typing.TypedDict" and rewritten != source:
-        from sqlty._json_types import add_json_types
-
-        rewritten = add_json_types(
-            rewritten, dialect=dialect, schema_sql=schema_sql, import_style=import_style
-        )
+        rewritten = _json_types(rewritten, dialect, schema_sql, import_style)
     if param_types:
         rewritten = _add_param_types(
             rewritten, dialect=dialect, schema_sql=schema_sql, import_style=import_style
@@ -401,8 +455,8 @@ def fix_source(
         line: None if ignore.rules is None else list(ignore.rules)
         for line, ignore in parsed.ignores.items()
     }
-    for call in find_helper_calls(parsed, helpers, module):
-        for line in call.typed_lines:
+    for typed, _, _, _ in _helper_sites(parsed, helpers, module):
+        for line in range(typed[0], typed[1] + 1) if typed else ():
             if line not in suppressed:
                 suppressed[line] = ["stale-rewrite"]
             elif (named := suppressed[line]) is not None:
@@ -417,11 +471,7 @@ def fix_source(
         suppressed=suppressed or None,
     )
     if json_types == "typing.TypedDict" and fixed != parsed.text:
-        from sqlty._json_types import add_json_types
-
-        fixed = add_json_types(
-            fixed, dialect=dialect, schema_sql=schema_sql, import_style=import_style
-        )
+        fixed = _json_types(fixed, dialect, schema_sql, import_style)
     if param_types:
         fixed = _add_param_types(
             fixed, dialect=dialect, schema_sql=schema_sql, import_style=import_style
@@ -441,6 +491,7 @@ def check_source(
     module: str | None = None,
     row_usage: RowUsage | None = None,
     query_variants: int | None = None,
+    coerce_row_types: Collection[str] = (),
 ) -> list[Diagnostic]:
     """Check Python source for SQL type issues.
 
@@ -484,6 +535,10 @@ def check_source(
     only names the lines that select one: ``(variant: line 11)``. A call with more variants
     is ``dynamic-query`` (``unchecked-query`` for a psycopg composition).
 
+    ``coerce_row_types`` (the ``coerce-row-types`` key) names the ``TypedDict``,
+    ``NamedTuple`` and dataclass rows the code validates with Pydantic, such as through a
+    ``TypeAdapter``, as ``module.Name``: their fields take what a ``BaseModel`` field takes.
+
     Each diagnostic has the byte offsets of what it is about, ``start`` to ``end``: the
     row type, the query, a parameter type, or the ``# sqlty: ignore`` comment. ``fix``
     holds the edits ``sqlty check --fix`` makes for it, as ``(start, end, replacement)``.
@@ -514,6 +569,7 @@ def check_source(
         module=module or parsed.module,
         row_usage=row_usage or (usage := RowUsage()),
         variants=query_variants,
+        coerce=frozenset(coerce_row_types),
     )
     diagnostics = apply_suppressions(parsed.ignores, diagnostics, rules)
     return diagnostics if row_usage else usage.filter(diagnostics)
@@ -534,6 +590,7 @@ def breaking_source(
     helpers: HelperIndex | None = None,
     module: str | None = None,
     query_variants: int | None = None,
+    coerce_row_types: Collection[str] = (),
 ) -> list[Diagnostic]:
     """The diagnostics ``source`` gets against ``against_sql`` but not against its own
     ``schema_sql``: what a schema change breaks, as ``sqlty breaking`` reports it.
@@ -564,6 +621,7 @@ def breaking_source(
             helpers=helpers,
             module=module,
             query_variants=query_variants,
+            coerce_row_types=coerce_row_types,
         )
 
     own = {(d.get("line"), d["rule"], d["message"]) for d in check(schema_sql)}
@@ -608,13 +666,11 @@ def query_statistics(
             counts[kind] += 1
         elif outcome := _outcome(text, dialect, schema_sql):
             counts[outcome] += 1
-    for call in find_helper_calls(parsed, helpers, module, variants=query_variants):
-        if call.query is None:
-            if not is_any_row(call):
-                counts["dynamic-query" if call.dynamic else "unchecked-query"] += 1
-            continue
-        for query in [v.query for v in call.variants] or [call.query]:
-            if not MARKER.match(query) and (outcome := _outcome(query, dialect, schema_sql)):
+    for _, queries, unchecked, _ in _helper_sites(parsed, helpers, module, query_variants):
+        if unchecked is not None:
+            counts[unchecked] += 1
+        for query in queries:
+            if outcome := _outcome(query, dialect, schema_sql):
                 counts[outcome] += 1
     return counts
 
@@ -815,15 +871,92 @@ def highlight_source(
     return [Highlight(*item) for item in found]
 
 
+def _json_types(
+    source: str, dialect: str, schema_sql: str | Schema | None, import_style: str | None
+) -> str:
+    """``source`` with the ``typing.Any`` row items of JSON columns of known shape typed."""
+    if AST != "python":
+        rust = _add_json_types(
+            source,
+            version=sys.version_info[:2],
+            dialect=dialect,
+            schema_sql=schema_sql,
+            import_style=import_style,
+        )
+        if AST == "rust":
+            return rust
+    from sqlty._json_types import add_json_types
+
+    python = add_json_types(
+        source, dialect=dialect, schema_sql=schema_sql, import_style=import_style
+    )
+    if AST == "compare" and rust != python:
+        raise AstMismatch("add_json_types", rust, python, source)
+    return python
+
+
 def _helper_starts(
     parsed: ParsedSource, helpers: HelperIndex | None = None, module: str | None = None
 ) -> list[int]:
     """The byte offsets of the string literals helper calls pass as their query."""
-    return [
-        parsed.span(call.query_node)[0]
-        for call in find_helper_calls(parsed, helpers, module)
-        if isinstance(call.query_node, ast.Constant) and isinstance(call.query_node.value, str)
-    ]
+    return [start for _, _, _, start in _helper_sites(parsed, helpers, module) if start is not None]
+
+
+type _Site = tuple[tuple[int, int] | None, list[str], str | None, int | None]
+"""A helper call: its first and last line when its strings need no ``SQL[T]``, the queries
+it can run that the lexer does not read by their marker, the rule of a call that is not
+checked, and the byte offset of the string literal it passes as its query."""
+
+
+def _helper_sites(
+    parsed: ParsedSource,
+    helpers: HelperIndex | None,
+    module: str | None,
+    variants: int | None = None,
+) -> list[_Site]:
+    if AST != "python":
+        rust = _module_calls(
+            parsed.text,
+            version=sys.version_info[:2],
+            index=None if helpers is None else helpers.rust(),
+            name=parsed.module,
+            module=module,
+            variants=variants,
+        )
+        if AST == "rust":
+            return rust
+    python = _python_sites(parsed, helpers, module, variants)
+    if AST == "compare" and parsed.facts is not None and rust != python:
+        raise AstMismatch("helper_sites", rust, python, parsed.text)
+    return python
+
+
+def _python_sites(
+    parsed: ParsedSource, helpers: HelperIndex | None, module: str | None, variants: int | None
+) -> list[_Site]:
+    sites: list[_Site] = []
+    for call in find_helper_calls(parsed, helpers, module, variants=variants):
+        lines = call.typed_lines
+        queries = (
+            [] if call.query is None else [str(v.query) for v in call.variants] or [str(call.query)]
+        )
+        literal = call.query_span is not None and (
+            call.query_node is None
+            or (
+                isinstance(call.query_node, ast.Constant) and isinstance(call.query_node.value, str)
+            )
+        )
+        sites.append(
+            (
+                (lines[0], lines[-1]) if lines else None,
+                [q for q in queries if not (MARKER.match(q) and q in parsed.literals)],
+                None
+                if call.query is not None or is_any_row(call)
+                else ("dynamic-query" if call.dynamic else "unchecked-query"),
+                call.query_span[0] if literal and call.query_span is not None else None,
+            )
+        )
+    return sites
 
 
 def _outcome(query: str, dialect: str, schema_sql: str | Schema | None) -> str | None:
@@ -832,10 +965,7 @@ def _outcome(query: str, dialect: str, schema_sql: str | Schema | None) -> str |
         return "unparsed"
     if not returns_rows(query, dialect=dialect):
         return None
-    try:
-        columns = analyze_select(query, dialect=dialect, schema_sql=schema_sql)
-    except RuntimeError:
-        columns = None
+    columns = analyze_select(query, dialect=dialect, schema_sql=schema_sql)
     if columns is not None and all(column.python_type is not None for column in columns):
         return "typed"
     return "partially typed"
@@ -846,15 +976,20 @@ __all__ = [
     "HelperIndex",
     "QueryAt",
     "Schema",
+    "TableRef",
     "RowUsage",
     "Completion",
     "Completions",
     "Highlight",
     "Hover",
+    "analyze_params",
     "analyze_select",
+    "breaking_source",
     "check_source",
+    "checks_names",
     "complete_source",
     "expand_star",
+    "explain_select",
     "fix_source",
     "format_source",
     "highlight_source",
@@ -863,7 +998,10 @@ __all__ = [
     "json_shapes",
     "load_schema",
     "query_at",
+    "QueryDiagnostic",
     "query_diagnostics",
+    "query_tables",
+    "query_statistics",
     "returns_rows",
     "rewrite_source",
     "schema_skipped_objects",

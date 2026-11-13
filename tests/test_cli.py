@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from sqlty import _cli
 from sqlty._cli import (
     ConfigSource,
     SettingsResolver,
@@ -112,6 +113,16 @@ def test_check_fix_writes_fixes_and_reports_the_rest(tmp_path, monkeypatch, caps
 
 
 @pytest.mark.parametrize(
+    ("engine", "gil", "workers"), [("python", True, 1), ("python", False, 8), ("rust", True, 8)]
+)
+def test_workers_follow_the_engine(monkeypatch, engine, gil, workers) -> None:
+    monkeypatch.setattr("sqlty._source.AST", engine)
+    monkeypatch.setattr(sys, "_is_gil_enabled", lambda: gil)
+    monkeypatch.setattr(os, "process_cpu_count", lambda: 8)
+    assert _cli._workers() == workers
+
+
+@pytest.mark.parametrize(
     "command",
     [
         ["check"],
@@ -122,7 +133,7 @@ def test_check_fix_writes_fixes_and_reports_the_rest(tmp_path, monkeypatch, caps
         ["strip"],
     ],
 )
-def test_jobs_do_not_change_the_output(tmp_path, monkeypatch, capsys, command) -> None:
+def test_threads_do_not_change_the_output(tmp_path, monkeypatch, capsys, command) -> None:
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
     (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL, name TEXT);")
     (tmp_path / "rows.py").write_text(
@@ -142,22 +153,15 @@ def test_jobs_do_not_change_the_output(tmp_path, monkeypatch, capsys, command) -
     files = {path: path.read_text() for path in tmp_path.iterdir()}
 
     outputs = []
-    for jobs in ("1", "4"):
+    for jobs in (1, 4):
+        monkeypatch.setattr(_cli, "_workers", lambda jobs=jobs: jobs)
         for path, text in files.items():
             path.write_text(text)
-        outputs.append(
-            (_run([*command, "--jobs", jobs, "."], capsys), sorted(p.read_text() for p in files))
-        )
+        outputs.append((_run([*command, "."], capsys), sorted(p.read_text() for p in files)))
 
     assert outputs[0] == outputs[1]
     (_, out, err), written = outputs[0]
     assert out or err or written != sorted(files.values())
-
-
-def test_jobs_must_be_positive(capsys) -> None:
-    code, _, err = _run(["check", "--jobs", "0", "."], capsys)
-    assert code == 2
-    assert "expected a positive integer, got '0'" in err
 
 
 def test_invalid_untyped_config_is_an_error(tmp_path) -> None:
@@ -341,6 +345,27 @@ def test_unparseable_schema_statement_is_reported(tmp_path, monkeypatch, caplog)
         "Schema statement could not be parsed and is ignored: "
         "ALTER TABLE ONLY users ADD CONSTRAINT pk PRIMARY KEY (id) WITH (fillfactor = 70)"
     ]
+
+
+def test_dialect_that_does_not_check_names_is_noted(tmp_path, monkeypatch, caplog, capsys) -> None:
+    """A typo passes unseen in a dialect whose names are not checked, so ``check`` says so."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.sqlty]\nschema = "schema.sql"\ndialect = "duckdb"\n'
+    )
+    (tmp_path / "schema.sql").write_text("CREATE TABLE orders (total NUMERIC NOT NULL);\n")
+    (tmp_path / "a.py").write_text('q = "--sql\\nSELECT SUM(totl) FROM orders"\n')
+    monkeypatch.chdir(tmp_path)
+
+    main(["check", "a.py"])
+    assert [r.getMessage() for r in caplog.records if "not checked" in r.getMessage()] == [
+        "Table and column names are not checked for duckdb"
+    ]
+    caplog.clear()
+
+    with pytest.raises(SystemExit):
+        main(["check", "--dialect", "postgres", "a.py"])
+    assert not [r for r in caplog.records if "not checked" in r.getMessage()]
+    assert "unknown-column" in capsys.readouterr().out
 
 
 def test_check_never_imports_the_checked_modules(tmp_path, monkeypatch, capsys) -> None:
@@ -1641,7 +1666,7 @@ def test_redundant_optional_reads_every_query_of_a_shared_row_type(
     assert "pkg/a.py:3: [redundant-optional] Coupon.owner_id" in out.replace(os.sep, "/")
 
 
-def test_redundant_optional_does_not_depend_on_jobs(tmp_path, monkeypatch, capsys) -> None:
+def test_redundant_optional_does_not_depend_on_threads(tmp_path, monkeypatch, capsys) -> None:
     (tmp_path / "pyproject.toml").write_text(
         '[tool.sqlty]\nschema = "s.sql"\n\n[tool.sqlty.rules]\nredundant-optional = "error"\n'
     )
@@ -1666,7 +1691,10 @@ def test_redundant_optional_does_not_depend_on_jobs(tmp_path, monkeypatch, capsy
     )
     monkeypatch.chdir(tmp_path)
 
-    outputs = {_run(["check", "--jobs", jobs, "app"], capsys)[1] for jobs in ["1"] + ["4"] * 10}
+    outputs = set()
+    for jobs in [1] + [4] * 10:
+        monkeypatch.setattr(_cli, "_workers", lambda jobs=jobs: jobs)
+        outputs.add(_run(["check", "app"], capsys)[1])
 
     assert [line for out in outputs for line in out.splitlines() if "redundant" in line] == [
         f"app{os.sep}q1.py:4: [redundant-optional] S.x is int | None but query column 'x' is never NULL"

@@ -57,6 +57,12 @@ pub(crate) fn validate_config<'py>(
     converted(py, found)
 }
 
+/// The `types` entries `driver` adds in `dialect`, under the project's own.
+#[pyfunction]
+fn driver_types(driver: &str, dialect: &str) -> Vec<(String, String)> {
+    config::driver_types(driver, dialect)
+}
+
 /// Add the key lists and `ConfigSyntaxError` to the module.
 pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ConfigSyntaxError", m.py().get_type::<ConfigSyntaxError>())?;
@@ -66,6 +72,7 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("FUNCTION_KEYS", config::FUNCTION_KEYS)?;
     m.add_function(wrap_pyfunction!(load_config, m)?)?;
     m.add_function(wrap_pyfunction!(validate_config, m)?)?;
+    m.add_function(wrap_pyfunction!(driver_types, m)?)?;
     Ok(())
 }
 

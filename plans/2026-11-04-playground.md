@@ -3,7 +3,7 @@
 > **Status:** stages 1 to 4 and 6 merged in [#895](https://github.com/jirikuncar/sqlty/pull/895),
 > [#899](https://github.com/jirikuncar/sqlty/pull/899), [#900](https://github.com/jirikuncar/sqlty/pull/900),
 > [#901](https://github.com/jirikuncar/sqlty/pull/901) and [#902](https://github.com/jirikuncar/sqlty/pull/902);
-> `param-types` in `sqlty.toml` and `examples/06_param_types/` in review. Stage 5 (breaking
+> `param-types` in `sqlty.toml` and `examples/06_param_types/` in [#917](https://github.com/jirikuncar/sqlty/pull/917). Stage 5 (breaking
 > changes) waits for the comparison of `_breaking.py` to move to Rust.
 
 Tracks [#893](https://github.com/jirikuncar/sqlty/issues/893): what keeps the Playground page

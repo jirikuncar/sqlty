@@ -53,6 +53,12 @@ pub const FIX_ALL: &str = "source.fixAll.sqlty";
 /// take the place of the Python formatter.
 pub const FORMAT: &str = "source.format.sqlty";
 
+/// The code action kind of `sqlty rewrite`.
+pub const REWRITE: &str = "source.rewrite.sqlty";
+
+/// The code action kind of `sqlty strip`.
+pub const STRIP: &str = "source.strip.sqlty";
+
 /// One diagnostic of a buffer, with byte offsets into its text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
@@ -115,6 +121,10 @@ pub trait Workspace {
     fn fix(&mut self, path: &Path, text: &str) -> Result<String, String>;
     /// `text` as `sqlty format` would write it.
     fn format(&mut self, path: &Path, text: &str) -> Result<String, String>;
+    /// `text` as `sqlty rewrite` would write it.
+    fn rewrite(&mut self, path: &Path, text: &str) -> Result<String, String>;
+    /// `text` as `sqlty strip` would write it.
+    fn strip(&mut self, path: &Path, text: &str) -> Result<String, String>;
     /// Diagnostics by file that do not depend on the buffers: what the baseline's queries
     /// get against this schema. Asked once, after the workspace loads.
     fn breaking(&mut self) -> Result<Vec<(PathBuf, Vec<Diagnostic>)>, String> {
@@ -243,7 +253,7 @@ where
 /// What the worker does next.
 enum Job {
     Check(Uri),
-    /// A whole-file action, [`FIX_ALL`] or [`FORMAT`], and the kinds asked for.
+    /// The whole-file actions asked for: [`FIX_ALL`], [`FORMAT`], [`REWRITE`] or [`STRIP`].
     Source(lsp_server::RequestId, Uri, Vec<&'static str>),
     Reload,
 }
@@ -485,7 +495,7 @@ impl Shared {
                 })
             })
         };
-        let kinds: Vec<_> = [FIX_ALL, FORMAT]
+        let kinds: Vec<_> = [FIX_ALL, FORMAT, REWRITE, STRIP]
             .into_iter()
             .filter(|kind| wants(kind))
             .collect();
@@ -539,6 +549,8 @@ fn capabilities(encoding: PositionEncodingKind, settings: &Settings) -> ServerCa
                 CodeActionKind::QUICKFIX,
                 CodeActionKind::from(FIX_ALL),
                 CodeActionKind::from(FORMAT),
+                CodeActionKind::from(REWRITE),
+                CodeActionKind::from(STRIP),
             ]),
             ..CodeActionOptions::default()
         })),
