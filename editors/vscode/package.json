@@ -133,8 +133,58 @@
     },
     "commands": [
       {
+        "command": "sqlty.fixAll",
+        "title": "Fix All in File",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.format",
+        "title": "Format Queries in File",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.rewrite",
+        "title": "Wrap Queries in SQL[T]",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.strip",
+        "title": "Strip SQL[T] Wrappers",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.checkWorkspace",
+        "title": "Check Workspace",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.breakingAgainst",
+        "title": "Check Breaking Changes Against...",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.explainRule",
+        "title": "Explain Rule...",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.openInPlayground",
+        "title": "Open in Playground",
+        "category": "sqlty"
+      },
+      {
         "command": "sqlty.restart",
         "title": "Restart Server",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.showLogs",
+        "title": "Show Logs",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.debugInformation",
+        "title": "Show Debug Information",
         "category": "sqlty"
       }
     ],
@@ -159,7 +209,43 @@
           "meta.embedded.sql": "sql"
         }
       }
-    ]
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "sqlty.fixAll",
+          "when": "editorLangId == python"
+        },
+        {
+          "command": "sqlty.format",
+          "when": "editorLangId == python"
+        },
+        {
+          "command": "sqlty.rewrite",
+          "when": "editorLangId == python"
+        },
+        {
+          "command": "sqlty.strip",
+          "when": "editorLangId == python"
+        },
+        {
+          "command": "sqlty.openInPlayground",
+          "when": "editorLangId == python"
+        },
+        {
+          "command": "sqlty.checkWorkspace",
+          "when": "sqlty.server"
+        },
+        {
+          "command": "sqlty.breakingAgainst",
+          "when": "sqlty.server"
+        },
+        {
+          "command": "sqlty.restart",
+          "when": "!isWeb"
+        }
+      ]
+    }
   },
   "scripts": {
     "build": "npm run build-node && npm run build-web",

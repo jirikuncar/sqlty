@@ -14,6 +14,7 @@ from sqlty._lsp_breaking import Baseline
 
 if TYPE_CHECKING:
     from sqlty._breaking import Direction
+    from sqlty._cli import Settings
     from sqlty._lint import Diagnostic
     from sqlty.core import Schema
 
@@ -101,6 +102,32 @@ class Workspace:
 
         settings = self.project.settings[Path(path)]
         return format_source(text, dialect=settings.dialect, import_style=settings.import_style)
+
+    def rewrite(self, path: str, text: str) -> str:
+        """``text`` as ``sqlty rewrite`` would write it."""
+        from sqlty.core import rewrite_source
+
+        settings = self._settings(path, text)
+        return rewrite_source(
+            text,
+            dialect=settings.dialect,
+            schema_sql=settings.schema,
+            import_style=settings.import_style,
+            untyped=settings.untyped,
+            json_types=settings.json_types,
+            param_types=settings.param_types,
+        )
+
+    def strip(self, path: str, text: str) -> str:
+        """``text`` as ``sqlty strip`` would write it."""
+        from sqlty.core import strip_source
+
+        return strip_source(text, import_style=self._settings(path, text).import_style)
+
+    def _settings(self, path: str, text: str) -> Settings:
+        file = Path(path)
+        self.project.update(file, text)
+        return self.project.settings[file]
 
     def _text(self, path: Path) -> str:
         if (parsed := self.project.sources.get(path)) is not None:

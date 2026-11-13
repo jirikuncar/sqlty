@@ -68,6 +68,14 @@ lays out the query strings and leaves the rest to your Python formatter.
 }
 ```
 
+## Commands
+
+Type `sqlty` in the Command Palette: fix, format, wrap (`sqlty rewrite`) or strip the
+queries of a file, check the whole workspace, pick a baseline for breaking changes,
+explain a rule, open the file in the [playground](https://sqlty.kuncar.dev/playground/),
+restart the server, and show its logs or debug information. The
+[docs](https://sqlty.kuncar.dev/recipes/vscode/#commands) list each.
+
 ## Development
 
 ```bash
