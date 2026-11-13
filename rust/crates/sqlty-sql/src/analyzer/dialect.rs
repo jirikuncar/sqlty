@@ -117,6 +117,12 @@ impl SqlDialect {
         }
     }
 
+    /// Whether a schema's tables and columns are checked against the query: the dialect's
+    /// name rules (case folding, quoting) are the ones modelled.
+    pub fn checks_names(self) -> bool {
+        matches!(self, Self::Postgres | Self::MySql | Self::Sqlite)
+    }
+
     /// Whether the dialect reads PostgreSQL's `x::type` cast.
     pub(crate) fn has_cast_operator(self) -> bool {
         match self {

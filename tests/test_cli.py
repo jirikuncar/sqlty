@@ -343,6 +343,27 @@ def test_unparseable_schema_statement_is_reported(tmp_path, monkeypatch, caplog)
     ]
 
 
+def test_dialect_that_does_not_check_names_is_noted(tmp_path, monkeypatch, caplog, capsys) -> None:
+    """A typo passes unseen in a dialect whose names are not checked, so ``check`` says so."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.sqlty]\nschema = "schema.sql"\ndialect = "duckdb"\n'
+    )
+    (tmp_path / "schema.sql").write_text("CREATE TABLE orders (total NUMERIC NOT NULL);\n")
+    (tmp_path / "a.py").write_text('q = "--sql\\nSELECT SUM(totl) FROM orders"\n')
+    monkeypatch.chdir(tmp_path)
+
+    main(["check", "a.py"])
+    assert [r.getMessage() for r in caplog.records if "not checked" in r.getMessage()] == [
+        "Table and column names are not checked for duckdb"
+    ]
+    caplog.clear()
+
+    with pytest.raises(SystemExit):
+        main(["check", "--dialect", "postgres", "a.py"])
+    assert not [r for r in caplog.records if "not checked" in r.getMessage()]
+    assert "unknown-column" in capsys.readouterr().out
+
+
 def test_check_never_imports_the_checked_modules(tmp_path, monkeypatch, capsys) -> None:
     """A module that writes a file when imported is read from source, and the key that
     allowed importing one is rejected."""

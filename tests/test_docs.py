@@ -133,6 +133,23 @@ def test_python_api_doctest() -> None:
     assert result.failed == 0
 
 
+def test_python_api_table_lists_every_core_function() -> None:
+    import sqlty.core
+
+    text = (ROOT / "docs" / "reference" / "python-api.md").read_text().split("## `sqlty.core`")[1]
+    documented = set(re.findall(r"^\| `(\w+)\(", text, re.MULTILINE))
+    public = {
+        name
+        for name, value in vars(sqlty.core).items()
+        if name.islower()
+        and not name.startswith("_")
+        and callable(value)
+        and getattr(value, "__module__", None) in ("sqlty.core", "sqlty._core")
+    }
+    assert documented == public
+    assert public <= set(sqlty.core.__all__)
+
+
 @pytest.mark.parametrize("name", ["sqlty", "sqlty.drivers.psycopg", *MODULES])
 def test_module_doctests(name: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """``>>>`` examples in docstrings match what the code returns."""

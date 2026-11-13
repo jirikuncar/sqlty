@@ -527,8 +527,6 @@ pub(crate) fn infer_sql_content(
     schema: Option<&SchemaData>,
 ) -> Option<String> {
     infer_type(&marked_query(sql_content)?, dialect, schema)
-        .ok()
-        .flatten()
 }
 
 /// Marked string content as the analyzer reads it: the string's value, escape sequences
