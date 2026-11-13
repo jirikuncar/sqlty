@@ -89,13 +89,13 @@ jobs:
             new=$(jq -r 'map(.id) | join(",")' new-models.json)
             if [ -n "$new" ]; then MODELS="$MODELS,$new"; fi
           fi
-          echo "MODELS=$MODELS" >> "$GITHUB_ENV"
+          { echo "MODELS=$MODELS"; echo "CACHE_KEY=${MODELS//,/-}"; } >> "$GITHUB_ENV"
 
       - name: Cache the models
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: models
-          key: ask-eval-models-${{ env.MODELS }}
+          key: ask-eval-models-${{ env.CACHE_KEY }}
           restore-keys: ask-eval-models-
 
       - name: Install Chromium
