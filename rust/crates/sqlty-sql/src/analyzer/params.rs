@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::ops::ControlFlow;
 use std::rc::Rc;
 
+use sqlparser::ast::InTarget;
 use sqlparser::ast::{
     visit_expressions, BinaryOperator, Expr, FromTable, FunctionArg, FunctionArgExpr,
     FunctionArguments, JoinConstraint, JoinOperator, Select, SelectItem, SetExpr, Statement,
@@ -714,13 +715,21 @@ impl<'a> Analyzer<'a> {
                     self.hint_pair(expr, bound, scope, out);
                 }
             }
-            Expr::InList { expr, list, .. } => {
+            Expr::In {
+                expr,
+                target: InTarget::List(list),
+                ..
+            } => {
                 for item in list {
                     self.hint_pair(item, expr, scope, out);
                     self.hint_pair(expr, item, scope, out);
                 }
             }
-            Expr::InSubquery { expr, subquery, .. } => {
+            Expr::In {
+                expr,
+                target: InTarget::Subquery(subquery),
+                ..
+            } => {
                 if let Some(index) = placeholder_index(expr) {
                     if let Ok(Some(columns)) = self.correlated(scope).query_columns(subquery) {
                         if let [column] = columns.as_slice() {

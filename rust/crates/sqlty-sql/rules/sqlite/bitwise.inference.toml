@@ -2,7 +2,7 @@
 
 [[rule]]
 id = "sqlite.bitwise"
-operators = ["BitwiseAnd", "BitwiseOr"]
+operators = ["BitwiseAnd", "BitwiseOr", "PGBitwiseShiftLeft", "PGBitwiseShiftRight"]
 dialects = ["sqlite"]
 type = "BIGINT"
 reference.sqlite = "SQLite documentation, SQL Language Expressions, 2 Operators (The result of any binary operator is either a numeric value or NULL)"

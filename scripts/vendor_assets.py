@@ -1,5 +1,6 @@
 """Download what the docs used to load from CDNs into ``docs/assets/vendor/``, so the site
-and its playground work offline: Monaco, and the Inter and JetBrains Mono fonts.
+and its playground work offline: Monaco, wllama (llama.cpp for the playground's ask), and the
+Inter and JetBrains Mono fonts.
 
     python3 scripts/vendor_assets.py
 
@@ -25,6 +26,16 @@ PACKAGES = {
         "https://registry.npmjs.org/monaco-editor/-/monaco-editor-0.57.0.tgz",
         "sha512-5BkI9KGoqrNvBGUe15/QlZq3OooZ8WLg1AxTpaqHRCP3HNpzPPZKE2EDz8M7c+VRmCeUw1Brp4cx/PWm3kI/5A==",
         "package/min/",
+    ),
+    "wllama": (
+        "https://registry.npmjs.org/@wllama/wllama/-/wllama-3.13.0.tgz",
+        "sha512-ZvoRdQAn+E+18EvQ9qS036gudiI9rbZRBJgG/qNICPPwrA0Y6SMMdbziz/j7K/0WxcbJlhaRraVIYsnEy732NA==",
+        "package/",
+    ),
+    "wllama-compat": (
+        "https://registry.npmjs.org/@wllama/wllama-compat/-/wllama-compat-3.13.0.tgz",
+        "sha512-MSWwyzVXpwkstvIGzOsQ9jlRm8kY5S5J0Gdw4E6M9mXqhgO/5tj+YNfxSoqN1GvsAOwui95JPtwX3hO6VZkbzg==",
+        "package/",
     ),
     "inter": (
         "https://registry.npmjs.org/@fontsource-variable/inter/-/inter-5.3.0.tgz",
@@ -54,6 +65,10 @@ UNUSED = (
 def keep(name: str, path: str) -> bool:
     if name == "monaco":
         return not path.startswith(UNUSED) and not path.endswith(".map")
+    if name == "wllama":
+        return path in ("LICENCE", "esm/index.min.js", "esm/wasm/wllama.wasm")
+    if name == "wllama-compat":
+        return path in ("wasm/wllama.js", "wasm/wllama.wasm")
     return path in ("LICENSE", "index.css", "wght-italic.css") or (
         path.startswith("files/") and "-wght-" in path
     )
