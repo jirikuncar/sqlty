@@ -66,7 +66,9 @@ def check(page: Page, url: str) -> None:
     assert "SELECT name FROM users" in fixed, fixed
 
     page.evaluate(f'{SOURCE}.setValue(\'q = """--sql\\nselect id,name from users"""\\n\')')
+    page.click("[data-commands]")
     page.click("[data-format]")
+    assert not page.is_visible("#sqlty-commands")
     formatted = page.evaluate(f"{SOURCE}.getValue()")
     assert formatted == 'q = """--sql\nselect\n    id,\n    name\nfrom users"""\n', formatted
 
