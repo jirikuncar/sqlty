@@ -130,7 +130,7 @@ markers = [
 concurrency = ["multiprocessing"]
 parallel = true
 sigterm = true
-patch = ["subprocess"]
+patch = ["subprocess", "_exit"]
 omit = ["tests/*", "examples/*"]
 
 [tool.coverage.paths]
