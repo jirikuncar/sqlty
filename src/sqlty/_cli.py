@@ -25,7 +25,7 @@ import re
 import sys
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, NoReturn, cast
 
 if TYPE_CHECKING:
     import argparse
@@ -51,6 +51,7 @@ def main(argv: list[str] | None = None) -> None:
     """CLI entry point."""
     parser = build_parser()
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    args.hard_exit = argv is None
 
     if args.version:
         _cmd_version()
@@ -762,10 +763,23 @@ def _cmd_check(args: argparse.Namespace) -> None:
     if args.statistics and text:
         print(_format_statistics(statistics))
 
+    code = 0
     if not args.exit_zero and (total_errors or (args.error_on_warning and total_warnings)):
-        sys.exit(EXIT_FOUND)
-    if project.unreadable:
-        sys.exit(EXIT_ERROR)
+        code = EXIT_FOUND
+    elif project.unreadable:
+        code = EXIT_ERROR
+    if getattr(args, "hard_exit", False):
+        _hard_exit(code)
+    if code:
+        sys.exit(code)
+
+
+def _hard_exit(code: int) -> NoReturn:
+    """End the process without freeing what the run built, as mypy's ``hard_exit`` does:
+    freeing the index of a large project takes about as long as checking it."""
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)
 
 
 def json_diagnostic(diag: Diagnostic, parsed: ParsedSource) -> dict[str, object]:
@@ -1322,12 +1336,11 @@ def _checked_roots(paths: Iterable[Path], files: Iterable[Path]) -> list[Path]:
         ['missing']
     """
     roots = [path if path.is_dir() else path.parent for path in paths]
-    for file in files:
-        directory = file.parent
+    for directory in dict.fromkeys(file.parent for file in files):
         for _ in _package_path(directory):
             directory = directory.parent
         roots.append(directory)
-    return list(dict.fromkeys(root.resolve() for root in roots))
+    return list(dict.fromkeys(root.resolve() for root in dict.fromkeys(roots)))
 
 
 def _module_names(path: Path, roots: list[Path]) -> list[str]:
@@ -1341,15 +1354,29 @@ def _module_names(path: Path, roots: list[Path]) -> list[str]:
         >>> _module_names(Path("missing/pkg/mod.py"), [])
         ['mod']
     """
-    parts = [*_package_path(path.parent), *([] if path.stem == "__init__" else [path.stem])]
-    names = [".".join(parts)]
-    for root in map(_resolved_root, roots):
-        if root is not None and path.is_relative_to(root):
-            relative = list(path.relative_to(root).with_suffix("").parts)
-            if relative[-1] == "__init__":
-                relative.pop()
-            names += [".".join(relative), ".".join([root.name, *relative])]
+    stem = [] if path.stem == "__init__" else [path.stem]
+    cwd = os.getcwd()
+    absolute = tuple(os.path.join(cwd, root) for root in roots)
+    package, relatives = _directory_names(os.path.dirname(path), absolute)
+    names = [".".join([*package, *stem])]
+    for name, relative in relatives:
+        names += [".".join([*relative, *stem]), ".".join([name, *relative, *stem])]
     return list(dict.fromkeys(name for name in names if name)) or [path.stem]
+
+
+@functools.cache
+def _directory_names(
+    directory: str, roots: tuple[str, ...]
+) -> tuple[tuple[str, ...], tuple[tuple[str, tuple[str, ...]], ...]]:
+    """``_module_names`` of the files of ``directory``: its package path, and its path from
+    each of the absolute ``roots`` it is under, with the root's name."""
+    path = Path(directory)
+    relatives = tuple(
+        (root.name, path.relative_to(root).parts)
+        for root in (_resolved_root(Path(root)) for root in roots)
+        if root is not None and path.is_relative_to(root)
+    )
+    return _package_path(path), relatives
 
 
 @dataclass(frozen=True)
@@ -1619,8 +1646,10 @@ class Project:
         texts = {path: read_source(path) for path in files}
         self.unreadable = [path for path, text in texts.items() if text is None]
         self.files = [path for path in files if texts[path] is not None]
+        resolved = [self.resolver.resolve(path) for path in self.files]
         self.modules = {
-            path: _module_names(self.resolver.resolve(path), self.paths) for path in self.files
+            path: _module_names(real, self.paths)
+            for path, real in zip(self.files, resolved, strict=True)
         }
         self.sources = {
             path: ParsedSource(text, self._module(path))
@@ -1633,7 +1662,7 @@ class Project:
             for path in _collect_query_files(self.paths, self.files, self.resolver)
             if path not in self.settings
         ]
-        self._index()
+        self._index(resolved)
 
     def query_types(self, path: Path, text: str) -> list[str]:
         from sqlty._queries import query_types
@@ -1755,14 +1784,16 @@ class Project:
     def _module(self, path: Path) -> str:
         return self.modules[path][0] + (".__init__" if path.name == "__init__.py" else "")
 
-    def _index(self) -> None:
+    def _index(self, resolved: list[Path] | None = None) -> None:
         from sqlty._helpers import HelperIndex, configured_helpers
 
+        if resolved is None:
+            resolved = [self.resolver.resolve(path) for path in self.files]
         self.index = HelperIndex()
         for path, parsed in self.sources.items():
             for name in self.modules[path]:
                 self.index.add(name, parsed)
-        checked = _checked_roots(self.paths, [self.resolver.resolve(path) for path in self.files])
+        checked = _checked_roots(self.paths, resolved)
         helpers_for = configured_helpers(self.index, checked)
         self.helpers = {path: helpers_for(self.settings[path]) for path in self.files}
 
