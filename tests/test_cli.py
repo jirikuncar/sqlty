@@ -113,6 +113,16 @@ def test_check_fix_writes_fixes_and_reports_the_rest(tmp_path, monkeypatch, caps
 
 
 @pytest.mark.parametrize(
+    ("engine", "gil", "workers"), [("python", True, 1), ("python", False, 8), ("rust", True, 8)]
+)
+def test_workers_follow_the_engine(monkeypatch, engine, gil, workers) -> None:
+    monkeypatch.setattr("sqlty._source.AST", engine)
+    monkeypatch.setattr(sys, "_is_gil_enabled", lambda: gil)
+    monkeypatch.setattr(os, "process_cpu_count", lambda: 8)
+    assert _cli._workers() == workers
+
+
+@pytest.mark.parametrize(
     "command",
     [
         ["check"],
