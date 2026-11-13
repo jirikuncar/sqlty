@@ -64,7 +64,7 @@ sqlty = "sqlty.lexer:SQLTyLexer"
 psycopg = ["psycopg>=3.2.12"]
 
 [build-system]
-requires = ["maturin>=1.12.1,<2.0"]
+requires = ["maturin>=1.15,<2.0"]
 build-backend = "maturin"
 
 [tool.maturin]
@@ -82,7 +82,7 @@ include = ["src/sqlty_magic.pth", { path = "skills/**/*", format = "sdist" }]
 [dependency-groups]
 dev = [
     "inline-snapshot>=0.15.0",
-    "maturin>=1.12.1,<2.0",
+    "maturin>=1.15,<2.0",
     "mypy>=2.4.0",
     "prek>=0.5.4",
     "pyright>=1.1.414",
