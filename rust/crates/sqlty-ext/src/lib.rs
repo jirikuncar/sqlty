@@ -371,17 +371,21 @@ fn infer_type(
 const STACK_RED_ZONE: usize = 2 << 20;
 const STACK_SEGMENT: usize = 16 << 20;
 
-/// The threads that parse the modules of an index. Rayon's 2 MiB stacks are below the
-/// parser's and analyzer's red zones, so every parse would allocate a new stack.
-fn parse_pool() -> &'static rayon::ThreadPool {
-    static POOL: std::sync::OnceLock<rayon::ThreadPool> = std::sync::OnceLock::new();
-    POOL.get_or_init(|| {
-        rayon::ThreadPoolBuilder::new()
+/// The threads that parse the modules of an index; `None` in a forked child, where the
+/// parent's threads do not exist and handing them work would never return. Rayon's 2 MiB
+/// stacks are below the parser's and analyzer's red zones, so every parse would allocate
+/// a new stack.
+fn parse_pool() -> Option<&'static rayon::ThreadPool> {
+    static POOL: std::sync::OnceLock<(u32, rayon::ThreadPool)> = std::sync::OnceLock::new();
+    let (pid, pool) = POOL.get_or_init(|| {
+        let pool = rayon::ThreadPoolBuilder::new()
             .thread_name(|i| format!("sqlty-parse-{i}"))
             .stack_size(32 << 20)
             .build()
-            .expect("the parse threads start")
-    })
+            .expect("the parse threads start");
+        (std::process::id(), pool)
+    });
+    (*pid == std::process::id()).then_some(pool)
 }
 
 /// Runs `f` without the GIL, with at least [`STACK_RED_ZONE`] of stack.
@@ -1000,17 +1004,16 @@ fn indexed(
     for (key, slot) in unique {
         texts[slot] = key;
     }
-    let parsed: Vec<_> = parse_pool().install(|| {
-        texts
-            .into_par_iter()
-            .map(|(text, name)| {
-                let source = Source::new(text, version)?.named(Some(name));
-                source.targets();
-                let found = helpers_of(&source);
-                Some((Arc::new(source), found))
-            })
-            .collect()
-    });
+    let parse = |(text, name): (&str, &str)| {
+        let source = Source::new(text, version)?.named(Some(name));
+        source.targets();
+        let found = helpers_of(&source);
+        Some((Arc::new(source), found))
+    };
+    let parsed: Vec<_> = match parse_pool() {
+        Some(pool) => pool.install(|| texts.into_par_iter().map(parse).collect()),
+        None => texts.into_iter().map(parse).collect(),
+    };
     for ((_, first, second, third, roots, database), slot) in steps.into_iter().zip(slots) {
         match slot {
             Some(slot) => {
