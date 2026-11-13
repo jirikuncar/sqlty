@@ -1438,7 +1438,7 @@ class SettingsResolver:
     def _schema(self, schema_sql: str, dialect: str, types: dict[str, str] | None = None) -> Schema:
         """``schema_sql`` parsed once per run, warning about the objects it could not parse."""
         from sqlty._config import ConfigError
-        from sqlty.core import load_schema, schema_skipped_objects
+        from sqlty.core import checks_names, load_schema, schema_skipped_objects
 
         key = (schema_sql, dialect, tuple(sorted((types or {}).items())))
         if (schema := self._schemas.get(key)) is None:
@@ -1446,6 +1446,8 @@ class SettingsResolver:
                 schema = self._schemas[key] = load_schema(schema_sql, dialect=dialect, types=types)
             except ValueError as exc:
                 raise ConfigError(f"[tool.sqlty.types]: {exc}") from None
+            if not checks_names(dialect):
+                logger.warning("Table and column names are not checked for %s", dialect)
             for kind, name in schema_skipped_objects(schema, dialect=dialect):
                 if kind == "statement":
                     logger.warning("Schema statement could not be parsed and is ignored: %s", name)

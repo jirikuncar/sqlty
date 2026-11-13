@@ -35,7 +35,7 @@ b: str | TEXT | Nullable
 c: bool | BOOLEAN | Nullable
 
 SELECT sum(nope) FROM t
-error: Column 'nope' not found in table 't' in schema. If you want to query columns not in the schema, use an explicit cast: SUM(nope::TYPE)
+sum: ? | ? | Nullable
 [unknown-column] column `nope` does not exist in `t`
 
 SELECT sum(i::BIGINT) AS a, sum(unknown_fn(i)) AS b FROM t

@@ -38,7 +38,7 @@ use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
 
@@ -296,16 +296,12 @@ enum Error {
     /// `ValueError`: an unsupported `import_style`, or an unknown rule or severity.
     #[error(transparent)]
     Config(#[from] ConfigError),
-    /// `RuntimeError`: inference found a query it cannot judge.
-    #[error(transparent)]
-    Infer(#[from] analyzer::InferError),
 }
 
 impl From<Error> for PyErr {
     fn from(error: Error) -> Self {
         match error {
             Error::Config(_) => PyValueError::new_err(error.to_string()),
-            Error::Infer(_) => PyRuntimeError::new_err(error.to_string()),
         }
     }
 }
@@ -348,9 +344,6 @@ fn nullable(nullability: analyzer::Nullability) -> Option<bool> {
 ///
 /// Returns:
 ///     Python type string (e.g., "tuple[int, str]") or None if inference fails
-///
-/// Raises:
-///     RuntimeError: SUM(column) names a column missing from a schema table
 #[pyfunction]
 #[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES, schema_sql = None))]
 fn infer_type(
@@ -358,11 +351,11 @@ fn infer_type(
     sql: &str,
     dialect: DialectArg,
     schema_sql: Option<SchemaArg>,
-) -> Result<Option<String>, Error> {
+) -> Option<String> {
     let dialect = dialect.0;
-    Ok(detach(py, || {
+    detach(py, || {
         analyzer::infer_type(sql, dialect, schema(schema_sql, dialect).as_deref())
-    })?)
+    })
 }
 
 /// The stack the analyzer's recursion keeps free: it moves to a new stack of
@@ -404,9 +397,6 @@ fn skills() -> Vec<(&'static str, &'static str)> {
 /// Result columns of a query as `(name, python_type, sql_type)` tuples.
 ///
 /// Returns None when the query returns no rows or doesn't parse; unknown types are None.
-///
-/// Raises:
-///     RuntimeError: SUM(column) names a column missing from a schema table
 #[pyfunction]
 #[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES, schema_sql = None))]
 fn analyze_select(
@@ -414,17 +404,17 @@ fn analyze_select(
     sql: &str,
     dialect: DialectArg,
     schema_sql: Option<SchemaArg>,
-) -> Result<Option<Vec<ColumnTuple>>, Error> {
+) -> Option<Vec<ColumnTuple>> {
     let dialect = dialect.0;
     let columns = detach(py, || {
         analyzer::analyze_select(sql, dialect, schema(schema_sql, dialect).as_deref())
-    })?;
-    Ok(columns.map(|columns| {
+    });
+    columns.map(|columns| {
         columns
             .into_iter()
             .map(|col| (col.name.clone(), col.display_type(), col.sql_type))
             .collect()
-    }))
+    })
 }
 
 /// `(id, reference, reasoning)` of an inference rule.
@@ -469,9 +459,6 @@ fn explain_select(
 /// whether the column can be NULL (True), cannot (False), or is not known (None: an
 /// unresolved column, an unknown function), so row types can be judged against it.
 /// Returns None when the query returns no rows or doesn't parse.
-///
-/// Raises:
-///     RuntimeError: SUM(column) names a column missing from a schema table
 #[pyfunction]
 #[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES, schema_sql = None))]
 fn analyze_columns(
@@ -479,12 +466,12 @@ fn analyze_columns(
     sql: &str,
     dialect: DialectArg,
     schema_sql: Option<SchemaArg>,
-) -> Result<Option<Vec<NullableColumnTuple>>, Error> {
+) -> Option<Vec<NullableColumnTuple>> {
     let dialect = dialect.0;
     let columns = detach(py, || {
         analyzer::analyze_select(sql, dialect, schema(schema_sql, dialect).as_deref())
-    })?;
-    Ok(columns.map(|columns| {
+    });
+    columns.map(|columns| {
         columns
             .into_iter()
             .map(|col| {
@@ -497,7 +484,7 @@ fn analyze_columns(
                 )
             })
             .collect()
-    }))
+    })
 }
 
 /// Fields of the composite type `type_name` the schema defines, as
@@ -587,7 +574,19 @@ fn name_rules() -> Vec<&'static str> {
         .collect()
 }
 
-/// Why a query has untyped columns, or names what it cannot, as `(rule, message)` pairs:
+/// `(rule, message, start, end, table, column)` of a query diagnostic: `start` and `end`
+/// are character offsets into the query, None when unknown.
+type QueryDiagnosticTuple = (
+    &'static str,
+    String,
+    Option<usize>,
+    Option<usize>,
+    Option<String>,
+    Option<String>,
+);
+
+/// Why a query has untyped columns, or names what it cannot, as `(rule, message, start,
+/// end, table, column)` tuples:
 /// `unknown-table`, `unknown-column`, `ambiguous-column`, `duplicate-alias`, `unknown-function`,
 /// `unknown-type`, `unsupported-syntax`, `insert-missing-column`, `insert-value-count`,
 /// `ungrouped-column`, `fanout-aggregate`, `chasm-join`, `unproven-join` and
@@ -604,13 +603,24 @@ fn query_diagnostics(
     sql: &str,
     dialect: DialectArg,
     schema_sql: Option<SchemaArg>,
-) -> Vec<(String, String)> {
+) -> Vec<QueryDiagnosticTuple> {
     let dialect = dialect.0;
+    let chars = |byte: usize| sql[..byte].chars().count();
     detach(py, || {
         analyzer::analyze_with_diagnostics(sql, dialect, schema(schema_sql, dialect).as_deref())
             .1
             .into_iter()
-            .map(|found| (found.rule.name().to_string(), found.message))
+            .map(|found| {
+                let span = found.span.map(|span| (chars(span.start), chars(span.end)));
+                (
+                    found.rule.name(),
+                    found.message,
+                    span.map(|span| span.0),
+                    span.map(|span| span.1),
+                    found.table,
+                    found.column,
+                )
+            })
             .collect()
     })
 }
@@ -667,6 +677,35 @@ fn skipped_objects<S: AsRef<str> + Send + Sync + 'static>(
 fn parse_error(py: Python<'_>, sql: &str, dialect: DialectArg) -> Option<String> {
     let dialect = dialect.0;
     detach(py, || analyzer::parse_error(sql, dialect))
+}
+
+/// The tables a query names, in source order, as `(name, schema, access)` tuples: `access`
+/// is "read" or "write" (the target of an INSERT, UPDATE, DELETE or MERGE). CTEs, derived
+/// tables and table functions are left out; empty when the query does not parse.
+#[pyfunction]
+#[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES))]
+fn query_tables(
+    py: Python<'_>,
+    sql: &str,
+    dialect: DialectArg,
+) -> Vec<(String, Option<String>, &'static str)> {
+    let dialect = dialect.0;
+    detach(py, || analyzer::query_tables(sql, dialect))
+        .into_iter()
+        .map(|table| {
+            let access = if table.write { "write" } else { "read" };
+            (table.name, table.schema, access)
+        })
+        .collect()
+}
+
+/// Whether `dialect` checks a schema's tables and columns against queries.
+#[pyfunction]
+fn checks_names(dialect: DialectArg) -> bool {
+    dialect
+        .0
+        .parse()
+        .is_ok_and(sqlty_sql::Dialect::checks_names)
 }
 
 /// Whether a query yields rows: a query, DML with RETURNING, or unparseable SQL.
@@ -2214,6 +2253,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(schema_skipped_tables, m)?)?;
     m.add_function(wrap_pyfunction!(schema_skipped_objects, m)?)?;
     m.add_function(wrap_pyfunction!(parse_error, m)?)?;
+    m.add_function(wrap_pyfunction!(checks_names, m)?)?;
+    m.add_function(wrap_pyfunction!(query_tables, m)?)?;
     m.add_function(wrap_pyfunction!(returns_rows, m)?)?;
     m.add_function(wrap_pyfunction!(rewrite_source, m)?)?;
     m.add_function(wrap_pyfunction!(add_param_types, m)?)?;

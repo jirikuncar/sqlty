@@ -14,13 +14,14 @@ import ast
 import sys
 from collections import Counter
 from collections.abc import Collection, Mapping
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from sqlty._check import RowUsage, apply_suppressions, is_any_row
 from sqlty._check import diagnostics as check_diagnostics
 from sqlty._core import (
     QueryAt,
     Schema,
+    checks_names,
     expand_star,
     infer_type,
     returns_rows,
@@ -42,12 +43,13 @@ from sqlty._core import parse_error as _parse_error
 from sqlty._core import query_at as _query_at
 from sqlty._core import query_diagnostics as _query_diagnostics
 from sqlty._core import query_sites as _query_sites
+from sqlty._core import query_tables as _query_tables
 from sqlty._core import rewrite_source as _rewrite_source
 from sqlty._core import schema_skipped_objects as _schema_skipped_objects
 from sqlty._core import schema_skipped_tables as _schema_skipped_tables
 from sqlty._core import strip_source as _strip_source
 from sqlty._helpers import MARKER, HelperIndex, find_helper_calls
-from sqlty._lint import Diagnostic
+from sqlty._lint import Diagnostic, RuleConfig
 from sqlty._source import AST, AstMismatch, ParsedSource
 
 if TYPE_CHECKING:
@@ -115,9 +117,6 @@ def analyze_select(
         >>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT)"
         >>> [c.python_type for c in analyze_select("SELECT id, name FROM users", schema_sql=schema)]
         ['int', 'str | None']
-
-    Raises:
-        RuntimeError: ``SUM(column)`` names a column missing from a schema table.
     """
     columns = _analyze_select(sql, dialect=dialect, schema_sql=schema_sql)
     return None if columns is None else [ColumnInfo(*column) for column in columns]
@@ -140,10 +139,7 @@ def json_shapes(
     """
     from sqlty._json_shape import render
 
-    try:
-        columns = _analyze_columns(sql, dialect=dialect, schema_sql=schema_sql)
-    except RuntimeError:
-        return []
+    columns = _analyze_columns(sql, dialect=dialect, schema_sql=schema_sql)
     return [(c[0], render(c[4])) for c in columns or [] if c[4] is not None]
 
 
@@ -236,23 +232,82 @@ def analyze_params(
     return None if params is None else [ParamInfo(*param) for param in params]
 
 
+class QueryDiagnostic(NamedTuple):
+    """A diagnostic of a query: what ``query_diagnostics`` returns.
+
+    ``start`` and ``end`` are character offsets into the query, ``None`` when unknown.
+    ``table`` is the table it is about: an unknown table or qualifier as written, or the
+    schema table (``s.orders`` when the query qualifies it) an unknown column was looked up
+    in. ``column`` is an unknown, ambiguous or left-out column. Each is ``None`` when the
+    diagnostic is not about one, or about several.
+    """
+
+    rule: str
+    message: str
+    severity: str
+    start: int | None
+    end: int | None
+    table: str | None
+    column: str | None
+
+
 def query_diagnostics(
-    sql: str, *, dialect: str = "postgres", schema_sql: str | Schema | None = None
-) -> list[tuple[str, str]]:
-    """Why a query has untyped columns, or names what it cannot, as ``(rule, message)`` pairs.
+    sql: str,
+    *,
+    dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
+    rules: dict[str, str] | None = None,
+) -> list[QueryDiagnostic]:
+    """Why a query has untyped columns, or names what it cannot, as ``QueryDiagnostic`` tuples.
 
     The rules are ``unknown-table``, ``unknown-column``, ``ambiguous-column``, ``duplicate-alias``,
     ``unknown-function``, ``unknown-type``, ``unsupported-syntax``,
     ``insert-missing-column``, ``insert-value-count``, ``ungrouped-column``,
-    ``fanout-aggregate``, ``chasm-join``, ``unproven-join`` and ``entity-mismatch``. Tables and columns are only judged
-    when ``schema_sql``
-    defines some tables.
+    ``fanout-aggregate``, ``chasm-join``, ``unproven-join`` and ``entity-mismatch``. Tables and
+    columns are only judged when ``schema_sql`` defines some tables. ``rules`` sets severities
+    as ``[tool.sqlty.rules]`` does, and a rule set to ``"ignore"`` (by default
+    ``unproven-join`` and ``entity-mismatch``) is left out, as in ``check_source``.
 
     Example:
-        >>> query_diagnostics("SELECT nope FROM users", schema_sql="CREATE TABLE users (id INT)")
-        [('unknown-column', 'column `nope` does not exist in `users`')]
+        >>> schema = "CREATE TABLE users (id INT)"
+        >>> query_diagnostics("SELECT nope FROM users", schema_sql=schema)
+        [QueryDiagnostic(rule='unknown-column', message='column `nope` does not exist in `users`', severity='error', start=7, end=11, table='users', column='nope')]
+        >>> [d.rule for d in query_diagnostics("SELECT u.id FROM users u JOIN users v ON v.id = u.id", schema_sql=schema)]
+        []
     """
-    return _query_diagnostics(sql, dialect=dialect, schema_sql=schema_sql)
+    config = RuleConfig(rules)
+    return [
+        QueryDiagnostic(rule, message, config.severity(rule).value, start, end, table, column)
+        for rule, message, start, end, table, column in _query_diagnostics(
+            sql, dialect=dialect, schema_sql=schema_sql
+        )
+        if config.is_enabled(rule)
+    ]
+
+
+class TableRef(NamedTuple):
+    """A table a query names: what ``query_tables`` returns."""
+
+    name: str
+    schema: str | None
+    access: Literal["read", "write"]
+
+
+def query_tables(sql: str, *, dialect: str = "postgres") -> list[TableRef]:
+    """The tables ``sql`` reads and writes, in source order, each once per access.
+
+    ``name`` and ``schema`` are as the query writes them; ``schema`` is ``None`` for an
+    unqualified name. ``access`` is ``"write"`` for the target of an ``INSERT``,
+    ``UPDATE``, ``DELETE`` or ``MERGE``, else ``"read"``. CTEs, derived tables and table
+    functions are not tables. Needs no schema; empty when the query does not parse.
+
+    Example:
+        >>> query_tables("INSERT INTO audit.log (id) SELECT id FROM users WHERE id IN (SELECT user_id FROM orders)")
+        [TableRef(name='log', schema='audit', access='write'), TableRef(name='users', schema=None, access='read'), TableRef(name='orders', schema=None, access='read')]
+        >>> query_tables("WITH recent AS (SELECT * FROM orders) SELECT * FROM recent, generate_series(1, 3)")
+        [TableRef(name='orders', schema=None, access='read')]
+    """
+    return [TableRef(*table) for table in _query_tables(sql, dialect=dialect)]
 
 
 def schema_skipped_tables(schema_sql: str | Schema, *, dialect: str = "postgres") -> list[str]:
@@ -910,10 +965,7 @@ def _outcome(query: str, dialect: str, schema_sql: str | Schema | None) -> str |
         return "unparsed"
     if not returns_rows(query, dialect=dialect):
         return None
-    try:
-        columns = analyze_select(query, dialect=dialect, schema_sql=schema_sql)
-    except RuntimeError:
-        columns = None
+    columns = analyze_select(query, dialect=dialect, schema_sql=schema_sql)
     if columns is not None and all(column.python_type is not None for column in columns):
         return "typed"
     return "partially typed"
@@ -924,15 +976,20 @@ __all__ = [
     "HelperIndex",
     "QueryAt",
     "Schema",
+    "TableRef",
     "RowUsage",
     "Completion",
     "Completions",
     "Highlight",
     "Hover",
+    "analyze_params",
     "analyze_select",
+    "breaking_source",
     "check_source",
+    "checks_names",
     "complete_source",
     "expand_star",
+    "explain_select",
     "fix_source",
     "format_source",
     "highlight_source",
@@ -941,7 +998,10 @@ __all__ = [
     "json_shapes",
     "load_schema",
     "query_at",
+    "QueryDiagnostic",
     "query_diagnostics",
+    "query_tables",
+    "query_statistics",
     "returns_rows",
     "rewrite_source",
     "schema_skipped_objects",

@@ -237,7 +237,6 @@ impl Checker<'_> {
         let (dialect, schema) = route(query, self.options.dialect.name(), self.options.schema);
         let parsed = parse(query, dialect);
         let (columns, diagnostics) = parsed.analyze_with_diagnostics(schema);
-        let columns = columns.ok().flatten();
         let analysis = Rc::new(Analysis {
             row_type: columns.as_deref().and_then(row_type),
             parsed,

@@ -27,7 +27,7 @@
 //! );
 //! assert!(skipped.is_empty());
 //!
-//! let row = infer_type("SELECT id, name FROM users", "postgres", Some(&*schema)).unwrap();
+//! let row = infer_type("SELECT id, name FROM users", "postgres", Some(&*schema));
 //! assert_eq!(row.as_deref(), Some("tuple[int, str | None]"));
 //! ```
 

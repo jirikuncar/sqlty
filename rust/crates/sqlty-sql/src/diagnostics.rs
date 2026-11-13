@@ -95,6 +95,11 @@ pub struct NameDiagnostic {
     pub span: Option<Range<usize>>,
     /// What to write at `span` to fix it: the closest column of an unknown one.
     pub replacement: Option<String>,
+    /// The table it is about, as the query names it: the unknown table, or the one table an
+    /// unknown column was looked up in.
+    pub table: Option<String>,
+    /// The column it is about: an unknown or ambiguous column, as the query spells it.
+    pub column: Option<String>,
 }
 
 #[derive(Default)]
@@ -145,32 +150,39 @@ impl Diagnostics {
 
     /// Record a diagnostic (once per rule and message) at the node being analyzed.
     pub(crate) fn record(&self, rule: NameRule, message: impl Into<String>) {
-        self.record_fix(rule, message, None);
+        self.record_about(rule, message, None, None);
     }
 
-    /// [`Diagnostics::record`] with what to write at the name to fix it.
-    pub(crate) fn record_fix(
+    /// [`Diagnostics::record`] naming the table and column it is about.
+    pub(crate) fn record_about(
         &self,
         rule: NameRule,
         message: impl Into<String>,
-        replacement: Option<String>,
+        table: Option<&str>,
+        column: Option<&str>,
     ) {
+        self.push(NameDiagnostic {
+            rule,
+            message: message.into(),
+            span: None,
+            replacement: None,
+            table: table.map(str::to_string),
+            column: column.map(str::to_string),
+        });
+    }
+
+    /// Record `item` unless one of its rule and message is recorded already.
+    pub(crate) fn push(&self, item: NameDiagnostic) {
         let mut inner = self.0.borrow_mut();
         if !inner.enabled {
             return;
         }
-        let message = message.into();
         inner.explained += 1;
-        let known =
-            |(found, _): &(NameDiagnostic, Span)| found.rule == rule && found.message == message;
+        let known = |(found, _): &(NameDiagnostic, Span)| {
+            found.rule == item.rule && found.message == item.message
+        };
         if !inner.items.iter().any(known) {
             let at = inner.at.last().copied().unwrap_or(Span::empty());
-            let item = NameDiagnostic {
-                rule,
-                message,
-                span: None,
-                replacement,
-            };
             inner.items.push((item, at));
         }
     }
@@ -264,6 +276,8 @@ mod tests {
             message: message.to_string(),
             span: None,
             replacement: None,
+            table: None,
+            column: None,
         }
     }
 
