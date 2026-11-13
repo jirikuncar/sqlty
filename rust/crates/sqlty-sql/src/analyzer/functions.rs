@@ -14,7 +14,7 @@ use super::operators::{common_of, mysql_date_add, numeric_rank, operand_type};
 use super::query::Analyzer;
 use super::scope::{resolve, Scope};
 use super::typed::Typed;
-use super::{decimal_type, InferError, Inferred};
+use super::{decimal_type, Inferred};
 
 /// A result type a function rule computes from the arguments (`type = "@series"`, ...);
 /// positions count from 0.
@@ -365,40 +365,30 @@ impl<'a> Analyzer<'a> {
     }
 
     /// `SUM` of what no inference rule types: its argument's own type (a value set dropped),
-    /// else `NUMERIC`, or an error for a column the schema table it reads lacks.
+    /// untyped for a column the schema table it reads lacks (`unknown-column` says why), else
+    /// `NUMERIC`.
     pub(super) fn sum(&self, typed: Typed, arg: Option<&Expr>, scope: &Scope) -> Inferred<Typed> {
         let typed = strip(typed, self.dialect);
         if typed.python.is_some() {
             return Ok(typed);
         }
-        let numeric = || {
-            Ok(Typed {
-                python: Some(Rc::from(decimal_type(self.dialect))),
-                sql: Some(Rc::from("NUMERIC")),
-                values: None,
-            })
+        let numeric = Typed {
+            python: Some(Rc::from(decimal_type(self.dialect))),
+            sql: Some(Rc::from("NUMERIC")),
+            values: None,
         };
-        if scope.is_empty() {
-            return numeric();
-        }
-        let (table, column) = match arg {
-            Some(Expr::Identifier(ident)) => (scope[0].table.clone(), &ident.value),
-            Some(Expr::CompoundIdentifier(parts)) if parts.len() >= 2 => (
-                resolve(&parts[parts.len() - 2].value, scope),
-                &parts[parts.len() - 1].value,
-            ),
-            _ => return numeric(),
+        let table = match arg {
+            _ if scope.is_empty() => return Ok(numeric),
+            Some(Expr::Identifier(_)) => scope[0].table.clone(),
+            Some(Expr::CompoundIdentifier(parts)) if parts.len() >= 2 => {
+                resolve(&parts[parts.len() - 2].value, scope)
+            }
+            _ => return Ok(numeric),
         };
-        let Some(table) = table.named().map(str::to_string) else {
-            return numeric();
-        };
-        if self.schema.table(&table).is_some() && self.virtual_columns(&table).is_none() {
-            return Err(InferError::SumColumnNotInSchema {
-                column: column.clone(),
-                table,
-            });
-        }
-        numeric()
+        let missing = table.named().is_some_and(|table| {
+            self.schema.table(table).is_some() && self.virtual_columns(table).is_none()
+        });
+        Ok(if missing { Typed::default() } else { numeric })
     }
 }
 
@@ -494,8 +484,6 @@ mod tests {
             let ddl = format!("CREATE TABLE t (c {declared})");
             let schema = crate::analyzer::load_schema(&ddl, "postgres");
             crate::analyzer::analyze_select("SELECT SUM(c) AS s FROM t", "postgres", Some(&schema))
-                .ok()
-                .flatten()
                 .and_then(|columns| columns[0].sql_type.clone())
         };
         assert_eq!(widen("SMALLINT").as_deref(), Some("BIGINT"));

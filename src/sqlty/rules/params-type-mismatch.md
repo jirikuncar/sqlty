@@ -9,6 +9,7 @@ the query, as [`param-type-mismatch`](param-type-mismatch.md) checks the values 
 call passes:
 
 - A `tuple` needs one item per positional placeholder, and `tuple[()]` none.
+- `NoParams` fits only a query without placeholders.
 - A `TypedDict` needs a required key per named placeholder, and no other key.
 - An item or key whose type can't be the type of its parameter is reported. So
   is one that allows `None` for a parameter stored in a `NOT NULL` column.

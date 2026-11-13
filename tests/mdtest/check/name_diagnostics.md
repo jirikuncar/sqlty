@@ -61,6 +61,21 @@ e = SQL[tuple[int]]("--sql\nSELECT * FROM missing")
 f = SQL[tuple[int]]("--sql\nINSERT INTO missing (a) VALUES (1) RETURNING a")
 ```
 
+#### Aggregates of unknown columns
+
+An aggregate of a column the table lacks is untyped, `SUM` like the others.
+
+```python
+from sqlty import SQL
+
+# error: [unknown-column] "column `totl` does not exist in `orders`; did you mean `total`?"
+a = SQL[tuple[int]]("--sql\nSELECT SUM(totl) FROM orders")
+# error: [unknown-column] "column `totl` does not exist in `orders`; did you mean `total`?"
+b = SQL[tuple[int]]("--sql\nSELECT AVG(totl) FROM orders")
+# error: [unknown-column] "column `totl` does not exist in `o`; did you mean `total`?"
+c = SQL[tuple[int]]("--sql\nSELECT SUM(o.totl) FROM orders o")
+```
+
 #### The closest column
 
 A name close to one column of the tables it can come from gets a hint, and
@@ -292,6 +307,43 @@ from sqlty import SQL
 a = SQL[tuple[int]]("--sql\nSELECT id FROM users u JOIN teams t ON t.id = u.team_id")
 # error: [ambiguous-column] "column reference `id` is ambiguous: `u1`, `u2` all have it"
 b = SQL[tuple[int]]("--sql\nSELECT id FROM users u1 JOIN users u2 ON u1.id = u2.id")
+```
+
+#### Duplicate FROM names
+
+Two FROM items read by one name get one `duplicate-alias`, and no `unknown-column`
+for the columns their qualifier reads. Tables in different schemas may share a name.
+
+```python
+from sqlty import SQL
+
+# error: [duplicate-alias] "table name `p` is specified more than once"
+a = SQL("--sql\nSELECT p.name, p.total FROM users p JOIN orders p ON p.user_id = p.id")
+# error: [duplicate-alias] "table name `users` is specified more than once"
+b = SQL[tuple[int]]("--sql\nSELECT 1 FROM users, users")
+# error: [duplicate-alias] "table name `t` is specified more than once"
+c = SQL[tuple[int]]("--sql\nSELECT 1 FROM users t JOIN (SELECT 1) t ON true")
+# error: [duplicate-alias] "table name `users` is specified more than once"
+d = SQL[tuple[int]]("--sql\nSELECT 1 FROM users JOIN teams users ON true")
+# error: [unknown-table] "table `other.users` is not defined in the schema"
+e = SQL[tuple[int]]("--sql\nSELECT 1 FROM public.users, other.users")
+f = SQL[tuple[int]]("--sql\nSELECT 1 FROM users u JOIN users v ON u.id = v.id")
+```
+
+##### Duplicate FROM names in SQLite
+
+SQLite accepts duplicate names and reads a column from whichever item has it.
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+```
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[str, int]]("--sql\nSELECT p.name, p.user_id FROM users p JOIN orders p ON true")
 ```
 
 #### Functions, types and syntax

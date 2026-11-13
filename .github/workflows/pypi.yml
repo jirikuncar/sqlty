@@ -90,7 +90,7 @@ jobs:
         with:
           target: ${{ matrix.target }}
           # Host builds otherwise use the runner image's rustc, which can lag the MSRV.
-          rust-toolchain: stable
+          rust-toolchain: 1.99.1
           # One abi3 wheel serves every GIL-enabled CPython from 3.14; each free-threaded
           # interpreter still needs its own. A pull request builds the abi3 wheel only.
           args: >-
@@ -104,6 +104,7 @@ jobs:
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         # A release builds from a clean cache: one a pull request wrote could poison it.
         with:
+          version: "0.13.7"
           enable-cache: false
 
       - name: Import the wheel on each Python
@@ -149,6 +150,7 @@ jobs:
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         # A release builds from a clean cache: one a pull request wrote could poison it.
         with:
+          version: "0.13.7"
           enable-cache: false
 
       - name: Build sdist

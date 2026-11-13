@@ -1,0 +1,5 @@
+dialect = "sqlite"
+schema = "schema.sql"
+
+[rules]
+stale-rewrite = "error"

@@ -92,6 +92,29 @@ SELECT SUM(price) FROM products
 -- inferred: tuple[float | None]
 ```
 
+## SUM of a column missing from the schema
+
+The column is untyped, as for any other aggregate; `unknown-column` says why.
+
+`schema.sql`:
+```sql
+CREATE TABLE products (
+    id INTEGER PRIMARY KEY,
+    quantity INTEGER NOT NULL
+);
+```
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+```
+
+```sql
+SELECT SUM(quantty) FROM products
+-- inferred: None
+```
+
 ## SUM with explicit cast overrides schema
 
 `schema.sql`:

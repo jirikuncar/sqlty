@@ -8,18 +8,16 @@ use super::query::Analyzer;
 use super::*;
 
 fn infer(sql: &str) -> Option<String> {
-    infer_type(sql, "postgres", None).unwrap()
+    infer_type(sql, "postgres", None)
 }
 
 #[test]
-fn sum_of_a_column_missing_from_the_schema_is_an_error() {
+fn sum_of_a_column_missing_from_the_schema_is_untyped() {
     let (schema, _) = load_schema_with_skipped("CREATE TABLE users (id INT)", "postgres");
-    let error = infer_type("SELECT SUM(nope) FROM users", "postgres", Some(&schema)).unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        "Column 'nope' not found in table 'users' in schema. If you want to query \
-         columns not in the schema, use an explicit cast: SUM(nope::TYPE)"
-    );
+    let (columns, diagnostics) =
+        analyze_with_diagnostics("SELECT SUM(nope) FROM users", "postgres", Some(&schema));
+    assert_eq!(columns.unwrap()[0].python_type, None);
+    assert_eq!(diagnostics[0].rule.name(), "unknown-column");
 }
 
 #[test]
@@ -93,9 +91,7 @@ fn test_schema_order_and_canonical_types() {
         Some("SELECT id::INT, score::DECIMAL(10, 2), tags::ARRAY<TEXT> FROM users")
     );
     assert_eq!(
-        infer_type("SELECT * FROM users", "postgres", schema.as_deref())
-            .unwrap()
-            .as_deref(),
+        infer_type("SELECT * FROM users", "postgres", schema.as_deref()).as_deref(),
         Some("tuple[int, decimal.Decimal, list[str]]")
     );
 }
@@ -126,14 +122,6 @@ fn test_parser_input() {
         parser_input("(TABLE a) UNION ALL TABLE \"b\".c", SqlDialect::Postgres).text(),
         "(SELECT * FROM a) UNION ALL SELECT * FROM \"b\".c"
     );
-    assert_eq!(
-        parser_input(
-            "INSERT INTO t (id) overriding System VALUE VALUES ('OVERRIDING USER VALUE')",
-            SqlDialect::Postgres
-        )
-        .text(),
-        "INSERT INTO t (id)  VALUES ('OVERRIDING USER VALUE')"
-    );
     assert_eq!(parser_input("--sql SELECT 1", SqlDialect::MySql).text(), "");
     assert_eq!(
         parser_input("SELECT %d, %%(a)s", SqlDialect::MySql).text(),
@@ -152,32 +140,7 @@ fn test_parser_input() {
         "SELECT 1 FOR NO KEY UPDATE OF a, b"
     );
     assert_eq!(
-        parser_input(
-            "INSERT INTO t (a) VALUES (1) ON CONFLICT (a, lower(b)) WHERE c = ')DO(' OR d = 'x''DO' DO NOTHING",
-            SqlDialect::Postgres
-        )
-        .text(),
-        "INSERT INTO t (a) VALUES (1) ON CONFLICT (a, lower(b)) DO NOTHING"
-    );
-    assert_eq!(
-        parser_input("SELECT 1 ON CONFLICT (a) WHERE b", SqlDialect::Postgres).text(),
-        "SELECT 1 ON CONFLICT (a) WHERE b"
-    );
-    assert_eq!(
-        parser_input(
-            "SELECT CIDR '10.0.0.0/8', inet 'it''s', \"name\" 'x', 'oid ''1''' -- money '1'",
-            SqlDialect::Postgres
-        ).text(),
-        "SELECT CAST('10.0.0.0/8' AS CIDR), CAST('it''s' AS inet), \"name\" 'x', 'oid ''1''' -- money '1'"
-    );
-    assert_eq!(
-        parser_input("SELECT inet '1.2.3.4'", SqlDialect::MySql).text(),
-        "SELECT inet '1.2.3.4'"
-    );
-    assert_eq!(
-        infer_type("--sql\nSELECT 1 AS x", "mysql", None)
-            .unwrap()
-            .as_deref(),
+        infer_type("--sql\nSELECT 1 AS x", "mysql", None).as_deref(),
         Some("tuple[int]")
     );
     // Schema DDL is not a query: a `%s` there is not a placeholder.
@@ -205,7 +168,6 @@ fn test_mysql_column_types() {
     ));
     let types: Vec<_> = analyze_select("SELECT * FROM t", "mysql", schema.as_deref())
         .unwrap()
-        .unwrap()
         .into_iter()
         .map(|col| col.sql_type.unwrap())
         .collect();
@@ -224,7 +186,6 @@ fn test_mysql_column_types() {
 
 fn names_in(sql: &str, dialect: &str) -> Vec<String> {
     analyze_select(sql, dialect, None)
-        .unwrap()
         .unwrap()
         .into_iter()
         .map(|col| col.name)
@@ -280,7 +241,6 @@ fn test_dialect_type_aliases() {
         let schema = Some(load_schema(&format!("CREATE TABLE t ({columns})"), dialect));
         analyze_select("SELECT * FROM t", dialect, schema.as_deref())
             .unwrap()
-            .unwrap()
             .into_iter()
             .map(|col| col.sql_type.unwrap())
             .collect()
@@ -320,9 +280,12 @@ fn star_expansion_casts_only_where_the_dialect_has_a_cast_operator() {
 }
 
 #[test]
-fn test_sum_of_unknown_schema_column_is_an_error() {
+fn test_sum_of_unknown_schema_column_is_untyped() {
     let schema = Some(load_schema("CREATE TABLE users (id INT)", "postgres"));
-    assert!(infer_type("SELECT SUM(nope) FROM users", "postgres", schema.as_deref()).is_err());
+    assert_eq!(
+        infer_type("SELECT SUM(nope) FROM users", "postgres", schema.as_deref()),
+        None
+    );
 }
 
 #[test]
@@ -331,7 +294,7 @@ fn test_ctes_and_derived_tables() {
         "CREATE TABLE users (id INTEGER NOT NULL, name TEXT NOT NULL, born DATE NOT NULL)",
         "postgres",
     ));
-    let infer = |sql: &str| infer_type(sql, "postgres", schema.as_deref()).unwrap();
+    let infer = |sql: &str| infer_type(sql, "postgres", schema.as_deref());
     assert_eq!(
         infer("WITH r AS (SELECT id, name FROM users) SELECT id, name FROM r").as_deref(),
         Some("tuple[int, str]")

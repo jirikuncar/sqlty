@@ -17,8 +17,11 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = { workspace = true, features = ["abi3-py314"] }
+rayon = "1.12"
 sqlty-sql.workspace = true
 sqlty-python.workspace = true
+ruff_python_ast.workspace = true
+ruff_text_size.workspace = true
 sqlty-lsp.workspace = true
 sqlty-format.workspace = true
 recursive.workspace = true

@@ -20,6 +20,7 @@
 use std::collections::HashSet;
 use std::rc::Rc;
 
+use sqlparser::ast::InTarget;
 use sqlparser::ast::{
     BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Query, Select, SetExpr, TableFactor,
     TableWithJoins, UnaryOperator,
@@ -34,6 +35,7 @@ use super::nullability::{rows_pass_where, Facts, Nullability};
 use super::query::Analyzer;
 use super::registry::{lookup, Behavior};
 use super::scope::Scope;
+use crate::catalog::fold;
 use crate::values::Value;
 use rustc_hash::FxHashSet;
 
@@ -381,13 +383,15 @@ impl<'a> Analyzer<'a> {
             | Expr::IsNotFalse(_) => Learned::default(),
             // An empty subquery or array makes `x IN (...)` false and `x NOT IN (...)` true
             // for a NULL `x`: only `x IN (...)` being true proves `x` is there.
-            Expr::InSubquery {
+            Expr::In {
                 expr: inner,
+                target: InTarget::Subquery(_),
                 negated,
                 ..
             }
-            | Expr::InUnnest {
+            | Expr::In {
                 expr: inner,
+                target: InTarget::Unnest(_) | InTarget::Table { .. },
                 negated,
                 ..
             } => {
@@ -418,16 +422,44 @@ impl<'a> Analyzer<'a> {
                     .extend(self.column_values(right, &[left.as_ref()], scope));
                 learned
             }
-            Expr::InList {
+            Expr::In {
                 expr: inner,
-                list,
+                target: InTarget::List(list),
                 negated: false,
+                ..
             } if truth => {
                 let mut learned = self.proven(cond, scope);
                 let list: Vec<&Expr> = list.iter().collect();
                 learned
                     .values
                     .extend(self.column_values(inner, &list, scope));
+                learned
+            }
+            Expr::In {
+                expr: inner,
+                target: InTarget::List(list),
+                negated: true,
+                ..
+            } if truth => {
+                let mut learned = self.proven(cond, scope);
+                let list: Vec<&Expr> = list.iter().collect();
+                learned
+                    .values
+                    .extend(self.values_besides(inner, &list, scope));
+                learned
+            }
+            Expr::BinaryOp {
+                left,
+                op: NotEq,
+                right,
+            } if truth => {
+                let mut learned = self.proven(cond, scope);
+                learned
+                    .values
+                    .extend(self.values_besides(left, &[right.as_ref()], scope));
+                learned
+                    .values
+                    .extend(self.values_besides(right, &[left.as_ref()], scope));
                 learned
             }
             // `x IS DISTINCT FROM NULL` is `x IS NOT NULL`; against anything else, `x` may
@@ -472,26 +504,38 @@ impl<'a> Analyzer<'a> {
                 op: BinaryOperator::Eq,
                 right,
             } => (right, vec![left]),
-            Expr::InList {
+            Expr::In {
                 expr,
-                list,
+                target: InTarget::List(list),
                 negated: false,
+                ..
             } => (expr, list.iter().collect()),
             _ => return Learned::default(),
         };
+        Learned {
+            values: self.values_besides(column, &constants, scope),
+            ..Learned::default()
+        }
+    }
+
+    /// The values a column of known values keeps besides `constants`: where `column <>
+    /// constant` or `column NOT IN (constants)` holds, or `column = constant` does not.
+    fn values_besides(
+        &self,
+        column: &Expr,
+        constants: &[&Expr],
+        scope: &Scope,
+    ) -> Vec<ColumnValues> {
         let known = self
             .resolve_column(column, scope)
             .and_then(|(typed, _)| typed.values);
         let (Some((reference, name, excluded)), Some(known)) =
-            (self.column_values(column, &constants, scope), known)
+            (self.column_values(column, constants, scope), known)
         else {
-            return Learned::default();
+            return Vec::new();
         };
         let kept = known.iter().filter(|v| !excluded.contains(v)).cloned();
-        Learned {
-            values: vec![(reference, name, kept.collect())],
-            ..Learned::default()
-        }
+        vec![(reference, name, kept.collect())]
     }
 
     /// `column = constant` or `column IN (constants)`: the values the column keeps. Only
@@ -546,9 +590,7 @@ impl<'a> Analyzer<'a> {
         else {
             return Learned::default();
         };
-        let Ok((inner, sources)) = self.correlated(scope).scope_of(&select.from) else {
-            return Learned::default();
-        };
+        let Ok((inner, sources)) = self.correlated(scope).scope_of(&select.from);
         let outer = |reference: &String| {
             !sources.iter().any(|source| source.reference == *reference)
                 && scope.iter().any(|source| source.reference == *reference)
@@ -609,6 +651,11 @@ impl<'a> Analyzer<'a> {
                 if let Some((reference, _, column)) = self.locate_column(expr, scope) {
                     learned.present.insert(reference.clone());
                     learned.columns.insert((reference, column));
+                } else if let (Some(_), Expr::Identifier(ident)) =
+                    (self.whole_row_table(expr, scope), expr)
+                {
+                    // A null-extended row is NULL as a whole; a matched one is not.
+                    learned.present.insert(fold(ident, self.dialect));
                 }
                 return learned;
             }
@@ -622,9 +669,17 @@ impl<'a> Analyzer<'a> {
                         .union(learned);
                 }
             },
-            Expr::InList { expr: inner, .. } => return self.proven(inner, scope),
+            Expr::In {
+                expr: inner,
+                target: InTarget::List(_),
+                ..
+            } => return self.proven(inner, scope),
             // Over an empty set they are false or true, not NULL, whatever the left side is.
-            Expr::InSubquery { .. } | Expr::InUnnest { .. } | Expr::AnyOp { .. } => return learned,
+            Expr::In {
+                target: InTarget::Subquery(_) | InTarget::Unnest(_) | InTarget::Table { .. },
+                ..
+            }
+            | Expr::AnyOp { .. } => return learned,
             Expr::Between {
                 expr: inner,
                 low,
@@ -686,7 +741,6 @@ mod tests {
     fn marks(sql: &str) -> String {
         let schema = Some(load_schema(SCHEMA, "postgres"));
         analyze_select(sql, "postgres", schema.as_deref())
-            .unwrap()
             .unwrap()
             .iter()
             .map(|col| match col.nullability {

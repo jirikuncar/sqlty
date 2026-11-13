@@ -197,7 +197,7 @@ The file tabs above the editor switch between the files `sqlty check` reads:
 |---|---|---|
 | `queries.py` | The Python source: diagnostics under the code with their quick fixes, SQL highlighted in query strings, completion and hover in queries | [`sqlty server`](recipes/vscode.md) |
 | `schema.sql` | The `CREATE TABLE` statements the queries are typed against | [`schema`](reference/configuration.md#schema) |
-| `sqlty.toml` | The `dialect`, `import-style`, `param-types` and `rules` of [`[tool.sqlty]`](reference/configuration.md); its `dialect` wins over the select | `sqlty.toml` or `pyproject.toml` |
+| `sqlty.toml` | The `dialect`, `driver`, `import-style`, `param-types`, `preview`, `max-query-variants`, `rules` and `types` of [`[tool.sqlty]`](reference/configuration.md); its `dialect` wins over the select | `sqlty.toml` or `pyproject.toml` |
 
 The console below the editor shows what sqlty makes of them:
 
@@ -212,8 +212,8 @@ The console below the editor shows what sqlty makes of them:
 
 The **Example** select loads a project of the
 [`examples/`](https://github.com/jirikuncar/sqlty/tree/main/examples) directory: its
-`queries.py`, `schema.sql`, and the `dialect`, `import-style`, `param-types` and `rules` of its
-`pyproject.toml`. Each one is what `sqlty check` reads on your machine, so the page shows
+`queries.py`, `schema.sql`, and the `dialect`, `driver`, `import-style`, `param-types`,
+`rules` and `types` of its `pyproject.toml`. Each one is what `sqlty check` reads on your machine, so the page shows
 the same problems. **Tour** is the sample the page opens with, and **Tour in steps** walks
 through the same ideas one at a time.
 
@@ -231,6 +231,13 @@ focus it and press the arrow keys. The page remembers the height and the font si
 
 A single fix is a quick fix on its diagnostic: click the light bulb, or press
 **Ctrl+.** with the cursor on it. **Ctrl+Z** undoes any of them.
+
+Press **F1** or **Ctrl+Shift+P** (**Cmd+Shift+P** on macOS; Firefox keeps it for a private
+window) in the editor, or right-click it, for the same commands as the
+[VS Code extension](recipes/vscode.md#commands): **sqlty: Fix All in File**, **sqlty: Wrap
+Queries in SQL[T]**, **sqlty: Strip SQL[T] Wrappers**, **sqlty: Format Queries in File**,
+**sqlty: Copy Share Link** and **sqlty: Explain Rule**, which opens the page of the rule
+under the cursor.
 
 ## Offline
 
@@ -321,8 +328,8 @@ size of the editor and the console, for a projector or a screen share.
 
 On macOS, **Command** works as **Ctrl**.
 
-!!! note "Row types from classes need Python"
-    The playground reads `tuple[...]` row types. A `TypedDict`, dataclass or Pydantic
-    model is resolved by the Python half of sqlty, which does not run in the browser,
-    so `sqlty check` can report more on your machine. Keys of `sqlty.toml` that name
+!!! note "One file"
+    The playground checks `queries.py` by itself: row types from classes, helper and
+    driver calls and `# sqlty: ignore` comments work as on your machine, but a helper or
+    a type imported from another module is not followed. Keys of `sqlty.toml` that name
     files, such as `schema` and `overrides`, are errors here.

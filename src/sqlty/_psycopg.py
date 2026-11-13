@@ -106,7 +106,7 @@ class PsycopgScan:
         from another module, as ``(its source, expression)``.
         """
         try:
-            from psycopg import sql
+            from psycopg import Error, sql
         except ImportError:
             return None
         self._sql = sql
@@ -118,7 +118,8 @@ class PsycopgScan:
             return value.as_string(None)
         except _Dynamic:
             return UNCHECKED if run.seen else None
-        except _Invalid, TypeError, ValueError, NotImplementedError, AttributeError:
+        # `Error`: a part psycopg cannot write as a literal, such as a list of identifiers.
+        except _Invalid, TypeError, ValueError, NotImplementedError, AttributeError, Error:
             return None
 
     def compose(self, expr: ast.expr, lookup: Lookup, resolve: Resolver | None = None) -> Any:

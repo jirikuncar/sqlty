@@ -91,10 +91,7 @@ def add_json_types(
         items = row.slice.elts if isinstance(row.slice, ast.Tuple) else [row.slice]
         if not any(ast.unparse(item) in ("typing.Any", "Any") for item in items):
             continue
-        try:
-            columns = analyze_columns(node.args[0].value, dialect=dialect, schema_sql=schema_sql)
-        except RuntimeError:
-            continue
+        columns = analyze_columns(node.args[0].value, dialect=dialect, schema_sql=schema_sql)
         if columns is None or len(columns) != len(items):
             continue
         for item, (name, _, _, nullable, shape) in zip(items, columns, strict=True):

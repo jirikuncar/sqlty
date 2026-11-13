@@ -160,6 +160,38 @@ from sqlty import SQL
 q = SQL[tuple[float]]("--sql\nSELECT SUM(a.total) FROM orders a JOIN orders b ON b.code = a.code")
 ```
 
+A scalar subquery fixes a key as a constant does, when it reads no column of the joined
+table: the latest item of each order, here. Its columns must be qualified.
+
+```python
+from sqlty import SQL
+
+# error:
+on = SQL[tuple[float]](
+    "--sql\nSELECT SUM(o.total) FROM orders o JOIN order_items i ON i.order_id = o.id"
+    " AND i.id = (SELECT max(i2.id) FROM order_items i2 WHERE i2.order_id = o.id)"
+)
+where = SQL[tuple[float]](
+    "--sql\nSELECT SUM(o.total) FROM orders o JOIN order_items i ON i.order_id = o.id"
+    " WHERE (SELECT max(i2.id) FROM order_items i2 WHERE i2.order_id = o.id) = i.id"
+)
+```
+
+```python
+from sqlty import SQL
+
+# error: [fanout-aggregate] "SUM(o.total) aggregates orders, whose rows repeat once per order_items row"
+own = SQL[tuple[float]](
+    "--sql\nSELECT SUM(o.total) FROM orders o JOIN order_items i ON i.order_id = o.id"
+    " AND i.id = (SELECT max(i2.id) FROM order_items i2 WHERE i2.order_id = i.order_id)"
+)
+# error: [fanout-aggregate] "SUM(o.total) aggregates orders, whose rows repeat once per order_items row"
+unqualified = SQL[tuple[float]](
+    "--sql\nSELECT SUM(o.total) FROM orders o JOIN order_items i ON i.order_id = o.id"
+    " AND i.id = (SELECT max(id) FROM order_items i2 WHERE i2.order_id = o.id)"
+)
+```
+
 ## Chasm
 
 ```python

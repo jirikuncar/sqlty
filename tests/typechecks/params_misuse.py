@@ -4,7 +4,7 @@ from typing import Any, TypedDict
 
 from psycopg import Connection
 
-from sqlty import SQL
+from sqlty import SQL, NoParams
 from sqlty.drivers.psycopg import execute
 
 
@@ -12,9 +12,10 @@ class ById(TypedDict):
     id: int
 
 
+by_id_params: ById = {"id": 1}
 by_id = SQL[tuple[str], ById]("--sql\nSELECT name::TEXT FROM users WHERE id = %(id)s")
 by_email = SQL[tuple[int], tuple[str | None]]("--sql\nSELECT id::INTEGER FROM users WHERE email = %s")
-count = SQL[tuple[int], tuple[()]]("--sql\nSELECT count(*)::INTEGER FROM users")
+count = SQL[tuple[int], NoParams]("--sql\nSELECT count(*)::INTEGER FROM users")
 
 by_id.bind({"id": "1"})  # error: mypy pyright ty
 by_id.bind({"ident": 1})  # error: mypy pyright ty
@@ -22,6 +23,8 @@ by_id.bind((1,))  # error: mypy pyright ty
 by_email.bind((b"a@example.com",))  # error: mypy pyright ty
 by_email.bind(("a@example.com", 1))  # error: mypy pyright ty
 count.bind((1,))  # error: mypy pyright ty
+count.bind({"id": 1})  # error: mypy pyright ty
+count.bind(by_id_params)  # error: mypy pyright ty
 
 
 def nullable(query: SQL[Any, tuple[str | None]]) -> None: ...
@@ -37,3 +40,4 @@ def fetch(conn: Connection[Any]) -> None:
     execute(conn, by_email, ("a@example.com", 1))  # error: pyright ty
     execute(conn, by_email)  # error: pyright ty
     execute(conn, count, (1,))  # error: pyright ty
+    execute(conn, count, {"id": 1})  # error: pyright ty

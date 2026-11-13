@@ -5,6 +5,7 @@ cover the baselines (git revisions, snapshots, schema files), worktree cleanup,
 directions, paths and exit codes."""
 
 import json
+import os
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -90,6 +91,49 @@ def test_paths_limit_the_files_in_both_revisions(cli: Cli, repo: Path) -> None:
     result = cli(["breaking", "--against", "HEAD", "app"], {"cwd": repo})
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+# Only what the paths read is checked out, unless the config reads more.
+@pytest.mark.parametrize(
+    ("config", "schema_dir"),
+    [
+        ('[tool.sqlty]\nschema = "db/schema.sql"\n', "db"),
+        ('[tool.sqlty]\nschema = "db/*.sql"\n', "db"),
+        ('[tool.sqlty]\nschema = ["db/"]\n', "db"),
+        ('[tool.sqlty]\nextend = "db/base.toml"\n', "db"),
+        (
+            '[tool.sqlty]\nschema = "db/schema.sql"\n[[tool.sqlty.functions]]\nimport-path = "x.f"\n',
+            "db",
+        ),
+    ],
+)
+def test_a_revision_of_some_paths_reads_their_schema(
+    cli: Cli, tmp_path: Path, config: str, schema_dir: str
+) -> None:
+    repo = tmp_path / "repo"
+    for directory in ("app/deep", schema_dir, "other"):
+        (repo / directory).mkdir(parents=True)
+    git(repo, "init", "-q")
+    git(repo, "config", "user.email", "test@example.com")
+    git(repo, "config", "user.name", "test")
+    (repo / "pyproject.toml").write_text(config)
+    (repo / "db" / "base.toml").write_text('schema = "schema.sql"\n')
+    (repo / "other" / "q.py").write_text(OLD_CODE)
+    for schema, code, message in ((OLD_SCHEMA, OLD_CODE, "old"), (NEW_SCHEMA, NEW_CODE, "new")):
+        (repo / schema_dir / "schema.sql").write_text(schema)
+        (repo / "app" / "deep" / "q.py").write_text(code)
+        git(repo, "add", "-A")
+        git(repo, "commit", "-q", "-m", message)
+
+    result = cli(
+        ["breaking", "--against", "HEAD~1", "--head", "HEAD", "--direction", "forward", "app/deep"],
+        {"cwd": repo},
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert lines(result)[0].startswith("app/deep/q.py:1: [unknown-column] column `handle`")
+    assert lines(result)[1:] == ["Found 1 breaking change(s)"]
+    assert git(repo, "worktree", "list").count("\n") == 1
 
 
 HELPER_CONFIG = """\
@@ -439,7 +483,7 @@ def test_a_snapshot_without_a_schema_checks_no_query(
     main(["breaking", "--against", "../head.json", "--quiet"])
 
 
-def test_jobs_give_the_same_findings(
+def test_processes_give_the_same_findings(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from sqlty._cli import main
@@ -448,13 +492,14 @@ def test_jobs_give_the_same_findings(
         (repo / "app" / f"m{i}.py").write_text(OLD_CODE + NEW_CODE)
     monkeypatch.chdir(repo)
 
-    def findings(jobs: str) -> list[str]:
+    def findings(jobs: int) -> list[str]:
+        monkeypatch.setattr(os, "process_cpu_count", lambda: jobs)
         with pytest.raises(SystemExit):
-            main(["breaking", "--against", "HEAD~1", "-j", jobs])
+            main(["breaking", "--against", "HEAD~1"])
         return capsys.readouterr().out.splitlines()
 
-    assert findings("1") == findings("3")
-    assert findings("3")[-1] == "Found 6 breaking change(s)"
+    assert findings(1) == findings(3)
+    assert findings(3)[-1] == "Found 6 breaking change(s)"
 
 
 def test_query_files_are_compared_in_both_directions(cli: Cli, repo: Path) -> None:

@@ -1,11 +1,44 @@
 {
   "name": "sqlty",
-  "displayName": "sqlty",
-  "description": "Type-check the SQL in your Python code as you type",
+  "displayName": "SQLTy: SQL type checker for Python",
+  "description": "Type-check, complete, highlight and format the SQL in your Python strings against your schema, as you type",
+  "keywords": [
+    "sql",
+    "python",
+    "sql-in-python",
+    "embedded-sql",
+    "inline-sql",
+    "sql-highlighting",
+    "syntax-highlighting",
+    "raw-sql",
+    "type-checking",
+    "type-safety",
+    "static-analysis",
+    "linter",
+    "lsp",
+    "language-server",
+    "autocomplete",
+    "sql-formatter",
+    "schema",
+    "postgresql",
+    "sqlite",
+    "mysql",
+    "psycopg",
+    "asyncpg",
+    "mypy",
+    "pyright",
+    "ty",
+    "migrations",
+    "orm-alternative"
+  ],
   "version": "0.0.1",
   "private": true,
   "publisher": "jirikuncar",
   "license": "MIT",
+  "homepage": "https://sqlty.kuncar.dev/recipes/vscode/",
+  "bugs": {
+    "url": "https://github.com/jirikuncar/sqlty/issues"
+  },
   "icon": "icon.png",
   "galleryBanner": {
     "color": "#0e0f10",
@@ -20,17 +53,20 @@
     "vscode": "^1.93.0"
   },
   "categories": [
-    "Linters"
+    "Linters",
+    "Programming Languages",
+    "Formatters"
   ],
   "activationEvents": [
     "onLanguage:python",
     "onLanguage:sql"
   ],
   "main": "./dist/extension.js",
+  "browser": "./dist/web.js",
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "SQL highlighting works in Restricted Mode. sqlty server starts once the workspace is trusted, since it comes from the workspace's environment."
+      "description": "In Restricted Mode, the bundled engine gives diagnostics, completion and hover, as on the web. sqlty server starts once the workspace is trusted, since it comes from the workspace's environment."
     }
   },
   "contributes": {
@@ -97,8 +133,58 @@
     },
     "commands": [
       {
+        "command": "sqlty.fixAll",
+        "title": "Fix All in File",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.format",
+        "title": "Format Queries in File",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.rewrite",
+        "title": "Wrap Queries in SQL[T]",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.strip",
+        "title": "Strip SQL[T] Wrappers",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.checkWorkspace",
+        "title": "Check Workspace",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.breakingAgainst",
+        "title": "Check Breaking Changes Against...",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.explainRule",
+        "title": "Explain Rule...",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.openInPlayground",
+        "title": "Open in Playground",
+        "category": "sqlty"
+      },
+      {
         "command": "sqlty.restart",
         "title": "Restart Server",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.showLogs",
+        "title": "Show Logs",
+        "category": "sqlty"
+      },
+      {
+        "command": "sqlty.debugInformation",
+        "title": "Show Debug Information",
         "category": "sqlty"
       }
     ],
@@ -123,15 +209,56 @@
           "meta.embedded.sql": "sql"
         }
       }
-    ]
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "sqlty.fixAll",
+          "when": "editorLangId == python"
+        },
+        {
+          "command": "sqlty.format",
+          "when": "editorLangId == python"
+        },
+        {
+          "command": "sqlty.rewrite",
+          "when": "editorLangId == python"
+        },
+        {
+          "command": "sqlty.strip",
+          "when": "editorLangId == python"
+        },
+        {
+          "command": "sqlty.openInPlayground",
+          "when": "editorLangId == python"
+        },
+        {
+          "command": "sqlty.checkWorkspace",
+          "when": "sqlty.server"
+        },
+        {
+          "command": "sqlty.breakingAgainst",
+          "when": "sqlty.server"
+        },
+        {
+          "command": "sqlty.restart",
+          "when": "!isWeb"
+        }
+      ]
+    }
   },
   "scripts": {
-    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node20 --sourcemap",
-    "build-test": "esbuild src/test/*.ts --bundle --external:vscode --outdir=out/test --format=cjs --platform=node --target=node20",
+    "build": "npm run build-node && npm run build-web",
+    "build-node": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node20 --sourcemap",
+    "build-wasm": "cargo build --manifest-path ../../rust/Cargo.toml --profile wasm --target wasm32-unknown-unknown -p sqlty-wasm && mkdir -p dist && cp ../../rust/target/wasm32-unknown-unknown/wasm/sqlty_wasm.wasm dist/",
+    "build-web": "esbuild src/web.ts --bundle --outfile=dist/web.js --external:vscode --format=cjs --platform=browser --target=es2022 --sourcemap",
+    "build-test": "esbuild src/test/*.ts --bundle --external:vscode --outdir=out/test --format=cjs --platform=node --target=node20 && esbuild src/test/restricted/*.ts --bundle --external:vscode --external:mocha --outdir=out/test/restricted --format=cjs --platform=node --target=node20",
     "check": "tsc --noEmit && oxlint --deny-warnings src && oxfmt --check src",
     "format": "oxfmt src",
-    "test": "npm run build && npm run build-test && vscode-test",
-    "package": "npm run build -- --minify && cp ../../LICENSE LICENSE && vsce package"
+    "test": "npm run build-wasm && npm run build && npm run build-test && vscode-test && node out/test/restricted/run.js",
+    "test-web": "npm run build-wasm && npm run build-web && esbuild src/test/web/index.ts --bundle --external:vscode --outfile=out/test/web/index.js --format=cjs --platform=browser --target=es2022 && vscode-test-web --browserType=chromium --headless --quality=stable --extensionDevelopmentPath=. --extensionTestsPath=out/test/web/index.js fixture",
+    "package": "npm run build-wasm && npm run build-node -- --minify && npm run build-web -- --minify && cp ../../LICENSE LICENSE && vsce package",
+    "demo": "node scripts/demo.js"
   },
   "dependencies": {
     "@vscode/python-extension": "^1.0.6",
@@ -143,8 +270,10 @@
     "@types/vscode": "~1.93.0",
     "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^3.1.0",
+    "@vscode/test-web": "^0.0.81",
     "@vscode/vsce": "^4.1.0",
     "esbuild": "^0.28.2",
+    "mocha": "^11.8.0",
     "ovsx": "^1.3.0",
     "oxfmt": "^0.75.0",
     "oxlint": "^1.90.0",

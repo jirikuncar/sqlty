@@ -612,9 +612,7 @@ mod tests {
 
     fn shape(sql: &str) -> Option<String> {
         let schema = load_schema(SCHEMA, "postgres");
-        let columns = analyze_select(sql, "postgres", Some(&schema))
-            .unwrap()
-            .unwrap();
+        let columns = analyze_select(sql, "postgres", Some(&schema)).unwrap();
         columns[0].json.as_ref().map(JsonShape::to_json)
     }
 
@@ -711,17 +709,14 @@ mod tests {
 
     #[test]
     fn other_dialects_have_no_shapes() {
-        let columns = analyze_select("SELECT json_object('a', 1)", "sqlite", None)
-            .unwrap()
-            .unwrap();
+        let columns = analyze_select("SELECT json_object('a', 1)", "sqlite", None).unwrap();
         assert_eq!(columns[0].json, None);
     }
 
     #[test]
     fn mysql_json_object_is_an_object() {
-        let columns = analyze_select("SELECT json_object('a', 1, 'b', TRUE)", "mysql", None)
-            .unwrap()
-            .unwrap();
+        let columns =
+            analyze_select("SELECT json_object('a', 1, 'b', TRUE)", "mysql", None).unwrap();
         assert_eq!(
             columns[0].json.as_ref().map(JsonShape::to_json),
             analyze_select(
@@ -729,7 +724,6 @@ mod tests {
                 "postgres",
                 None
             )
-            .unwrap()
             .unwrap()[0]
                 .json
                 .as_ref()

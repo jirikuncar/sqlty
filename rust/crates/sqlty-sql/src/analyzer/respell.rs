@@ -1,15 +1,14 @@
-//! PostgreSQL, MySQL and SQLite syntax sqlparser does not read, respelled as the closest
-//! syntax it does and typed the same: a window frame's `EXCLUDE` in PostgreSQL and SQLite,
-//! SQLite's `a IS b`, `<<`, `>>` and postfix `ISNULL`, MySQL's `!x`, infix `MOD`, `SOUNDS LIKE`,
-//! `INTERVAL(n, n1, ...)`, `LOCK IN SHARE MODE`, its `CHAR(n USING charset)` and the
-//! comma-separated tables of its `UPDATE`, and `BETWEEN SYMMETRIC`, `AT LOCAL`, `COLLATION
-//! FOR`, `trim(both from x, chars)`, `substring(x similar p escape e)`, the SQL/JSON clauses
-//! after a path, `json_array(SELECT ...)`, the XML functions' keywords and the order of
-//! XMLTABLE's column options, PostgreSQL's `(composite).*`, as the field `"*"` the
+//! PostgreSQL, MySQL and SQLite syntax sqlparser does not read, respelled as the closest syntax
+//! it does and typed the same: a window frame's `EXCLUDE` in PostgreSQL and SQLite, SQLite's
+//! postfix `ISNULL`, MySQL's `!x`, infix `MOD`, `SOUNDS LIKE`, `INTERVAL(n, n1, ...)`, `LOCK IN
+//! SHARE MODE`, its `CHAR(n USING charset)` and the comma-separated tables of its `UPDATE`, and
+//! `BETWEEN SYMMETRIC`, `AT LOCAL`, `COLLATION FOR`, `substring(x similar p escape e)`, the
+//! SQL/JSON clauses after a path, `json_array(SELECT ...)`, the XML functions' keywords and the
+//! order of XMLTABLE's column options, PostgreSQL's `(composite).*`, as the field `"*"` the
 //! analyzer expands, and its `SET CONSTRAINTS` and `DO` statements, as statements that return
-//! no rows, and the integers spelled `0X1F`, `0x_1F`, `0o17` or `0b101` in PostgreSQL (only
-//! `0X` in SQLite). [`super::input::parser_input`] runs it on every query, deciding from the
-//! tokens alone: each edit is of syntax sqlparser rejects.
+//! no rows, and SQLite's integers spelled `0X1F` or `0x_1F`. [`super::input::parser_input`]
+//! runs it on every query, deciding from the tokens alone: each edit is of syntax sqlparser
+//! rejects.
 
 use super::dialect::SqlDialect;
 use super::tokens::{arguments, closing, Edit, Kind, Token};
@@ -80,8 +79,6 @@ pub(super) fn respell(sql: &str, tokens: &[Token], dialect: SqlDialect, edits: &
             && symbol(i + 2, "*")
         {
             edits.push((tokens[i + 2].start, tokens[i + 2].end, "\"*\"".to_string()));
-        } else if dialect == SqlDialect::Sqlite && shift(sql, tokens, i) {
-            edits.push((tokens[i].start, tokens[i + 1].end, "&".to_string()));
         } else if dialect == SqlDialect::Sqlite
             && word(i, "ISNULL")
             && !is(i + 1, Kind::Open)
@@ -89,18 +86,6 @@ pub(super) fn respell(sql: &str, tokens: &[Token], dialect: SqlDialect, edits: &
             && ends_operand(sql, &tokens[i - 1])
         {
             edits.push((tokens[i].start, tokens[i].end, "IS NULL".to_string()));
-        } else if dialect == SqlDialect::Sqlite {
-            let not = word(i + 1, "NOT");
-            let operand = if not { i + 2 } else { i + 1 };
-            if word(i, "IS") && tokens.get(operand).is_some_and(|t| !is_predicate(sql, t)) {
-                edits.push(if not {
-                    let not = &tokens[i + 1];
-                    (not.start, not.end, "DISTINCT FROM".to_string())
-                } else {
-                    let at = tokens[operand].start;
-                    (at, at, "NOT DISTINCT FROM ".to_string())
-                });
-            }
         } else if word(i, "BETWEEN") && (word(i + 1, "SYMMETRIC") || word(i + 1, "ASYMMETRIC")) {
             edits.push((tokens[i + 1].start, tokens[i + 1].end, String::new()));
         } else if word(i, "AT") && word(i + 1, "LOCAL") {
@@ -116,20 +101,6 @@ pub(super) fn respell(sql: &str, tokens: &[Token], dialect: SqlDialect, edits: &
                 tokens[i + 1].end,
                 "pg_collation_for".to_string(),
             ));
-        } else if call("TRIM") && word(i + 3, "FROM") {
-            let trim = [
-                ("BOTH", "btrim("),
-                ("LEADING", "ltrim("),
-                ("TRAILING", "rtrim("),
-            ]
-            .into_iter()
-            .find(|(side, _)| word(i + 2, side));
-            let chars = arguments(tokens, i + 1)
-                .iter()
-                .any(|&j| tokens[j].kind == Kind::Comma);
-            if let (Some((_, trim)), true) = (trim, chars) {
-                edits.push((tokens[i].start, tokens[i + 3].end, trim.to_string()));
-            }
         } else if call("SUBSTRING") {
             let inside = arguments(tokens, i + 1);
             let similar = inside
@@ -242,25 +213,16 @@ pub(super) fn respell(sql: &str, tokens: &[Token], dialect: SqlDialect, edits: &
     }
 }
 
-/// An integer with PostgreSQL's `0x`, `0o` or `0b` prefix, or SQLite's `0x`, in any case and
-/// with `_` between digits, as sqlparser reads it: hexadecimal as a lowercase `0x`, which
-/// [`super::preprocess`] types as an integer, the others as decimal. `None` when it already is.
+/// SQLite's `0X1F` or `0x_1F`, which sqlparser reads as `0 AS X1F` or `0 AS x_1F`, as the
+/// `0x1F` that [`super::preprocess`] types as an integer. `None` when it already is.
 fn prefixed_integer(text: &str, dialect: SqlDialect) -> Option<String> {
-    let radix = match (text.as_bytes(), dialect) {
-        ([b'0', b'x' | b'X', _, ..], SqlDialect::Postgres | SqlDialect::Sqlite) => 16,
-        ([b'0', b'o' | b'O', _, ..], SqlDialect::Postgres) => 8,
-        ([b'0', b'b' | b'B', _, ..], SqlDialect::Postgres) => 2,
-        _ => return None,
-    };
-    let digits: String = text[2..].chars().filter(|&c| c != '_').collect();
-    if digits.is_empty() || !digits.chars().all(|c| c.is_digit(radix)) {
+    if dialect != SqlDialect::Sqlite || !matches!(text.as_bytes(), [b'0', b'x' | b'X', _, ..]) {
         return None;
     }
-    let integer = match radix {
-        16 => format!("0x{digits}"),
-        _ => u128::from_str_radix(&digits, radix).ok()?.to_string(),
-    };
-    (integer != text).then_some(integer)
+    let digits: String = text[2..].chars().filter(|&c| c != '_').collect();
+    let integer = format!("0x{digits}");
+    (!digits.is_empty() && digits.chars().all(|c| c.is_ascii_hexdigit()) && integer != text)
+        .then_some(integer)
 }
 
 /// `SET CONSTRAINTS ... DEFERRED` or `IMMEDIATE` starting at token `i`, as a `SET`: neither
@@ -315,39 +277,6 @@ fn do_block(sql: &str, tokens: &[Token], i: usize) -> Option<(usize, usize, Stri
         code
     };
     Some((tokens[i].start, tokens[last].end, "RESET ALL".to_string()))
-}
-
-/// Whether `token` starts one of the predicates sqlparser reads after `IS [NOT]`, rather
-/// than an operand of SQLite's `IS`, its `IS NOT DISTINCT FROM`.
-fn is_predicate(sql: &str, token: &Token) -> bool {
-    const KEYWORDS: [&str; 11] = [
-        "NULL",
-        "TRUE",
-        "FALSE",
-        "UNKNOWN",
-        "DISTINCT",
-        "JSON",
-        "NORMALIZED",
-        "NFC",
-        "NFD",
-        "NFKC",
-        "NFKD",
-    ];
-    let text = &sql[token.start..token.end];
-    token.kind == Kind::Word && KEYWORDS.iter().any(|k| text.eq_ignore_ascii_case(k))
-}
-
-/// Whether `tokens[i]` starts SQLite's `<<` or `>>`, which sqlparser reads only in other
-/// dialects. They are respelled as `&`, which is typed the same.
-fn shift(sql: &str, tokens: &[Token], i: usize) -> bool {
-    let text = |j: usize| tokens.get(j).map_or("", |t| &sql[t.start..t.end]);
-    let adjacent = |j: usize| tokens[j].end == tokens[j + 1].start;
-    let first = text(i);
-    (first == "<" || first == ">")
-        && text(i + 1) == first
-        && adjacent(i)
-        && !(i > 0 && adjacent(i - 1) && matches!(text(i - 1), "<" | ">" | "-"))
-        && !(i + 2 < tokens.len() && adjacent(i + 1) && matches!(text(i + 2), "<" | ">" | "="))
 }
 
 /// Whether `token` can end an operand, so a `MOD` after it is MySQL's infix operator.

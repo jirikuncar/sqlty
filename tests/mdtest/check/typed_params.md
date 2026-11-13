@@ -82,6 +82,32 @@ r = SQL[tuple[str], tuple[()]]("--sql\nSELECT name FROM users WHERE id = %s")
 s = SQL[tuple[str], tuple[int]]("--sql\nSELECT name FROM users")
 ```
 
+### `NoParams` for a query with parameters
+
+```python
+from sqlty import SQL, NoParams
+
+# error: [params-type-mismatch] "NoParams takes none but the query has 1 parameter"
+q = SQL[tuple[str], NoParams]("--sql\nSELECT name FROM users WHERE id = %s")
+r = SQL[tuple[str], NoParams]("--sql\nSELECT name FROM users")
+```
+
+### A `NoParams` of your own is a TypedDict
+
+```python
+from typing import TypedDict
+
+from sqlty import SQL
+
+
+class NoParams(TypedDict):
+    id: int
+
+
+q = SQL[tuple[str], NoParams]("--sql\nSELECT name FROM users WHERE id = %(id)s")
+# error:
+```
+
 ### A tuple for named parameters, a TypedDict for positional ones
 
 ```python

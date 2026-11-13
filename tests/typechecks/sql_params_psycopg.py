@@ -9,7 +9,7 @@ from typing import Any, TypedDict, assert_type
 
 from psycopg import Connection, Cursor
 
-from sqlty import SQL
+from sqlty import SQL, NoParams
 from sqlty.drivers.psycopg import execute, scalar
 
 
@@ -19,7 +19,7 @@ class ById(TypedDict):
 
 by_id = SQL[tuple[str], ById]("--sql\nSELECT name::TEXT FROM users WHERE id = %(id)s")
 by_email = SQL[tuple[int], tuple[str | None]]("--sql\nSELECT id::INTEGER FROM users WHERE email = %s")
-count = SQL[tuple[int], tuple[()]]("--sql\nSELECT count(*)::INTEGER FROM users")
+count = SQL[tuple[int], NoParams]("--sql\nSELECT count(*)::INTEGER FROM users")
 old = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users WHERE id = %s")
 
 
@@ -30,6 +30,8 @@ def fetch(conn: Connection[Any]) -> None:
     assert_type(execute(conn, by_email, params=(None,)), Cursor[tuple[int]])
     assert_type(execute(conn, count), Cursor[tuple[int]])
     assert_type(execute(conn, count, None), Cursor[tuple[int]])
+    assert_type(execute(conn, count, ()), Cursor[tuple[int]])
+    assert_type(execute(conn, count, {}), Cursor[tuple[int]])
     assert_type(execute(conn, old), Cursor[tuple[int]])
     assert_type(execute(conn, old, [1]), Cursor[tuple[int]])
     assert_type(execute(conn, old, params={"id": 1}), Cursor[tuple[int]])
