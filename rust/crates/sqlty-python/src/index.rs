@@ -86,9 +86,7 @@ pub fn module_of(prefix: &str, modules: &HashMap<String, String>) -> String {
 
 /// `_target`: the module and name that `NAME` or `module.NAME` of `source` refers to.
 fn target(source: &Source, dotted: &str) -> Option<(String, String)> {
-    let (functions, modules) = source
-        .targets
-        .get_or_init(|| imports_of(&source.entries, source.module.as_deref()));
+    let (functions, modules) = source.targets();
     match dotted.rsplit_once('.') {
         None => functions.get(dotted).cloned(),
         Some((prefix, name)) => Some((module_of(prefix, modules), name.to_string())),
@@ -176,6 +174,26 @@ pub struct HelperIndex {
     pattern: Option<Regex>,
 }
 
+/// The helpers `source` defines, as `Builder::add` indexes them.
+pub fn helpers_of(source: &Source) -> Dict<Helper> {
+    let text = &*source.text;
+    if text.contains("Annotated") && text.contains("sqlty") && text.contains("SQL") {
+        index_functions(source)
+    } else {
+        Dict::new()
+    }
+}
+
+/// A pattern matching any of `names`, `None` for none.
+fn alternation(names: &HashSet<String>) -> Option<Regex> {
+    let mut sorted: Vec<&String> = names.iter().collect();
+    sorted.sort();
+    let escaped: Vec<String> = sorted.iter().map(|name| regex::escape(name)).collect();
+    (!escaped.is_empty())
+        .then(|| Regex::new(&escaped.join("|")).ok())
+        .flatten()
+}
+
 /// An index being filled.
 pub struct Builder {
     modules: HashMap<String, Dict<Helper>>,
@@ -206,17 +224,17 @@ impl Builder {
 
     /// `HelperIndex.add`: index the helpers of `source` as module `module`; whether it has
     pub fn add(&mut self, module: &str, source: Source) -> bool {
-        let source = Arc::new(match source.module {
+        let source = match source.module {
             Some(_) => source,
             None => source.named(Some(module)),
-        });
-        let text = &*source.text;
-        let found = if text.contains("Annotated") && text.contains("sqlty") && text.contains("SQL")
-        {
-            index_functions(&source)
-        } else {
-            Dict::new()
         };
+        let found = helpers_of(&source);
+        self.add_found(module, Arc::new(source), &found)
+    }
+
+    /// `add` with the helpers of `source` already found by `helpers_of`, so that sources
+    /// can be read in parallel and one source shared by the names of its module.
+    pub fn add_found(&mut self, module: &str, source: Arc<Source>, found: &Dict<Helper>) -> bool {
         if let Some(tree) = self.tree.take() {
             self.added.clone_from(&tree.sources);
         }
@@ -390,38 +408,45 @@ impl Builder {
             .flat_map(Dict::iter)
             .map(|(name, _)| name.rsplit('.').next().unwrap_or(name).to_string())
             .collect();
-        // A module can re-export a helper under another name, which a call then spells.
-        let exports: Vec<Functions> = self
-            .sources()
-            .iter()
-            .map(|(module, source)| {
-                let name = source.module.as_deref().unwrap_or(module);
-                imports_of(&source.entries, Some(name)).0
-            })
-            .collect();
+        // A module can re-export a helper under another name, which a call then spells; its
+        // text then holds the name, so only such modules have their imports read.
         let mut names = names;
         for _ in 0..8 {
-            let renamed: Vec<String> = exports
-                .iter()
-                .flatten()
-                .filter(|(local, (_, original))| {
-                    names.contains(original) && !names.contains(*local)
-                })
-                .map(|(local, _)| local.clone())
-                .collect();
+            if names.is_empty() {
+                break;
+            }
+            let named = alternation(&names);
+            let mut renamed = Vec::new();
+            for (module, source) in self.sources() {
+                if named
+                    .as_ref()
+                    .is_some_and(|named| !named.is_match(&source.text))
+                {
+                    continue;
+                }
+                let read;
+                let exports = match source.module {
+                    Some(_) => &source.targets().0,
+                    None => {
+                        read = imports_of(&source.entries, Some(module)).0;
+                        &read
+                    }
+                };
+                renamed.extend(
+                    exports
+                        .iter()
+                        .filter(|(local, (_, original))| {
+                            names.contains(original) && !names.contains(*local)
+                        })
+                        .map(|(local, _)| local.clone()),
+                );
+            }
             if renamed.is_empty() {
                 break;
             }
             names.extend(renamed);
         }
-        let mut sorted: Vec<&String> = names.iter().collect();
-        sorted.sort();
-        let pattern = (!sorted.is_empty())
-            .then(|| {
-                let names: Vec<String> = sorted.iter().map(|name| regex::escape(name)).collect();
-                Regex::new(&names.join("|")).ok()
-            })
-            .flatten();
+        let pattern = alternation(&names);
         let tree = self.tree.unwrap_or_else(|| {
             Arc::new_cyclic(|this| Tree {
                 this: this.clone(),
