@@ -103,12 +103,6 @@ pub(super) fn read_statements(
                 None => parse_ddl(&stmt.sql(), dialect)
                     .or_else(|| parse_ddl(&without_fk_action_columns(&stmt.sql()), dialect))
                     .or_else(|| parse_ddl(&stmt.without_constraints()?, dialect))
-                    // `STRICT` and `WITHOUT ROWID` both make a PRIMARY KEY NOT NULL, the
-                    // only thing either changes here.
-                    .or_else(|| match dialect {
-                        SqlDialect::Sqlite => parse_ddl(&stmt.with_first_table_option()?, dialect),
-                        _ => None,
-                    })
                     .or_else(|| {
                         let text = stmt.without_partitioning()?;
                         parse_ddl(&text, dialect).or_else(|| {

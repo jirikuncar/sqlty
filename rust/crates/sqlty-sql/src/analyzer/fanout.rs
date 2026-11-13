@@ -10,6 +10,7 @@
 
 use std::ops::ControlFlow;
 
+use sqlparser::ast::InTarget;
 use sqlparser::ast::Spanned;
 use sqlparser::ast::{
     BinaryOperator, Distinct, DuplicateTreatment, Expr, FunctionArguments, GroupByExpr, Ident,
@@ -628,11 +629,12 @@ fn pins(expr: &Expr, reference: &str) -> bool {
                     ControlFlow::Continue(())
                 }
                 Expr::Identifier(_) | Expr::CompoundIdentifier(_) => ControlFlow::Break(()),
-                Expr::Function(_) | Expr::Exists { .. } | Expr::InSubquery { .. }
-                    if self.depth == 0 =>
-                {
-                    ControlFlow::Break(())
-                }
+                Expr::Function(_)
+                | Expr::Exists { .. }
+                | Expr::In {
+                    target: InTarget::Subquery(_),
+                    ..
+                } if self.depth == 0 => ControlFlow::Break(()),
                 _ => ControlFlow::Continue(()),
             }
         }

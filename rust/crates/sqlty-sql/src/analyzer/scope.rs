@@ -93,29 +93,6 @@ pub(super) fn table_scope(factor: &TableFactor, dialect: SqlDialect) -> Scope {
     }
 }
 
-/// sqlparser reads PostgreSQL's `FROM ONLY a` as a table `only` aliased `a`; this is the
-/// table `a` it means.
-fn only_table(factor: &TableFactor) -> Option<TableFactor> {
-    let TableFactor::Table {
-        name,
-        alias: Some(alias),
-        ..
-    } = factor
-    else {
-        return None;
-    };
-    let unquoted_only = matches!(name.0.as_slice(), [part]
-        if part.as_ident().is_some_and(|i| i.quote_style.is_none() && i.value.eq_ignore_ascii_case("only")));
-    if !unquoted_only || !alias.columns.is_empty() {
-        return None;
-    }
-    let mut table = factor.clone();
-    if let TableFactor::Table { name, alias, .. } = &mut table {
-        *name = ObjectName::from(vec![alias.take()?.name]);
-    }
-    Some(table)
-}
-
 /// The virtual table a derived table's columns are kept under: `(alias)`, or one named
 /// after the subquery's place in the statement when it has no alias.
 fn derived_table(factor: &TableFactor) -> String {
@@ -417,8 +394,6 @@ impl<'a> Analyzer<'a> {
         analyzer.merged = merged_columns(from, analyzer.dialect).into();
         let mut scope = Scope::new();
         for factor in relations(from) {
-            let only = only_table(factor);
-            let factor = only.as_ref().unwrap_or(factor);
             if let Some((reference, columns)) = analyzer.defined_columns(factor) {
                 let table = format!("({reference})");
                 analyzer.virtuals.insert(table.clone(), columns);
@@ -829,19 +804,6 @@ mod tests {
             scope_of("SELECT 1 FROM unnest(ARRAY[1]) AS u"),
             ["u=Opaque(\"UNNEST\")"]
         );
-    }
-
-    #[test]
-    fn only_is_a_modifier_not_a_table() {
-        let from = from_of("SELECT 1 FROM ONLY a");
-        let TableFactor::Table { name, alias, .. } = &from[0].relation else {
-            panic!("not a table");
-        };
-        assert_eq!(object_name(name), "only");
-        assert!(alias.is_some());
-        let table = only_table(&from[0].relation).expect("rewritten to the table a");
-        assert_eq!(relation_name(&table).as_deref(), Some("a"));
-        assert!(only_table(&from_of("SELECT 1 FROM a")[0].relation).is_none());
     }
 
     #[test]
