@@ -417,7 +417,7 @@ def test_one_index_on_two_threads() -> None:
 
 
 def test_index_in_a_forked_child() -> None:
-    """A child forked after an index was built, as by ``sqlty breaking --jobs``, builds one too."""
+    """A child forked after an index was built, as by ``sqlty breaking``, builds one too."""
     script = (
         "import os, sys\n"
         "from sqlty._core import module_index\n"

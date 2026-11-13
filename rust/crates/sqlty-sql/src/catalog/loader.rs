@@ -464,7 +464,7 @@ impl Loader {
         // SQLite lets a PRIMARY KEY hold NULL, except in a WITHOUT ROWID or STRICT table or
         // as the sole `INTEGER` column, which is the rowid.
         let loose_keys =
-            self.dialect == SqlDialect::Sqlite && !create.without_rowid && !create.strict;
+            self.dialect == SqlDialect::Sqlite && create.sqlite_table_options.options.is_empty();
         if loose_keys {
             for def in &create.columns {
                 let keyed = def
