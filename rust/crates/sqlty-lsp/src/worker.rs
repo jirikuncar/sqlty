@@ -8,7 +8,7 @@ use lsp_server::Response;
 use lsp_types::{CodeAction, CodeActionKind, CodeActionOrCommand, MessageType, OneOf, Uri};
 
 use crate::text::{diff, LineIndex};
-use crate::{actions, highlight, Job, Settings, Shared, Workspace, FORMAT};
+use crate::{actions, highlight, Job, Settings, Shared, Workspace, FORMAT, REWRITE, STRIP};
 
 pub(crate) fn work<W, F>(
     queue: &Receiver<Job>,
@@ -181,8 +181,8 @@ where
     }
 }
 
-/// The edit of `kind`, [`FIX_ALL`](crate::FIX_ALL) or [`FORMAT`], to the whole buffer; `None` when it
-/// changes nothing.
+/// The edit of `kind`, [`FIX_ALL`](crate::FIX_ALL), [`FORMAT`], [`REWRITE`] or [`STRIP`], to the
+/// whole buffer; `None` when it changes nothing.
 fn source_action<W, F>(
     workspaces: &mut Workspaces<'_, W, F>,
     shared: &Shared,
@@ -200,10 +200,11 @@ where
         .map(|d| (d.text.clone(), d.version))?;
     let path = crate::uri::to_path(uri)?;
     let workspace = workspaces.of(&path, shared)?;
-    let (title, done) = if kind == FORMAT {
-        ("sqlty: format", workspace.format(&path, &text))
-    } else {
-        ("sqlty: fix all", workspace.fix(&path, &text))
+    let (title, done) = match kind {
+        FORMAT => ("sqlty: format", workspace.format(&path, &text)),
+        REWRITE => ("sqlty: rewrite", workspace.rewrite(&path, &text)),
+        STRIP => ("sqlty: strip", workspace.strip(&path, &text)),
+        _ => ("sqlty: fix all", workspace.fix(&path, &text)),
     };
     let done = done
         .map_err(|message| shared.log(format!("{title} {}: {message}", path.display())))
