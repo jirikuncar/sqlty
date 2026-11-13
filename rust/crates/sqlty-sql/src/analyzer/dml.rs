@@ -573,13 +573,15 @@ impl Analyzer<'_> {
         };
         for column in known {
             if column.not_null && !column.has_default && !set.contains(&column.name) {
-                self.diag.record(
+                self.diag.record_about(
                     NameRule::InsertMissingColumn,
                     format!(
                         "INSERT into `{}` leaves out `{}`, which is NOT NULL and has no default",
                         object_name(table),
                         column.ident
                     ),
+                    Some(&table_key(table, self.dialect)),
+                    Some(&column.ident),
                 );
             }
         }
@@ -600,13 +602,15 @@ impl Analyzer<'_> {
             };
             let name = fold(ident, self.dialect);
             if !known.iter().any(|c| c.name == name) {
-                self.diag.record(
+                self.diag.record_about(
                     NameRule::UnknownColumn,
                     format!(
                         "column `{}` does not exist in `{}`",
                         ident.value,
                         object_name(table)
                     ),
+                    Some(&table_key(table, self.dialect)),
+                    Some(&ident.value),
                 );
             }
         }

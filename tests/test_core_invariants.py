@@ -350,9 +350,58 @@ def test_sum_of_an_unknown_schema_column_is_untyped() -> None:
     assert core.analyze_select("SELECT SUM(nope) FROM users", schema_sql=schema) == [
         core.ColumnInfo(name="sum", python_type=None, sql_type=None)
     ]
-    assert core.query_diagnostics("SELECT SUM(nope) FROM users", schema_sql=schema) == [
-        ("unknown-column", "column `nope` does not exist in `users`")
-    ]
+    assert [
+        d[:2] for d in core.query_diagnostics("SELECT SUM(nope) FROM users", schema_sql=schema)
+    ] == [("unknown-column", "column `nope` does not exist in `users`")]
+
+
+QUERY_SCHEMA = (
+    "CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT NOT NULL);"
+    "CREATE TABLE orders (id BIGINT PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users (id),"
+    " status TEXT NOT NULL)"
+)
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        ("SELECT u.nope FROM users u", [("unknown-column", "error", "u.nope", "users", "nope")]),
+        ("SELECT naïve FROM users", [("unknown-column", "error", "naïve", "users", "naïve")]),
+        ("SELECT x.id FROM users u", [("unknown-table", "error", "x.id", "x", "id")]),
+        ("SELECT id FROM missing", [("unknown-table", "error", "missing", "missing", None)]),
+        (
+            "SELECT id FROM users u JOIN orders o ON o.user_id = u.id",
+            [("ambiguous-column", "error", "id", None, "id")],
+        ),
+        (
+            "INSERT INTO orders (id, user_id) VALUES (1, 2)",
+            [("insert-missing-column", "error", None, "orders", "status")],
+        ),
+        ("SELECT my_udf(id) FROM users", [("unknown-function", "warn", "my_udf", None, None)]),
+        ("SELECT u.email FROM users u JOIN orders o ON o.id = u.id", []),
+    ],
+)
+def test_query_diagnostics_fields(sql: str, expected: list[tuple[object, ...]]) -> None:
+    found = core.query_diagnostics(sql, schema_sql=QUERY_SCHEMA)
+    assert [
+        (d.rule, d.severity, None if d.start is None else sql[d.start : d.end], d.table, d.column)
+        for d in found
+    ] == expected
+
+
+def test_query_diagnostics_rules() -> None:
+    sql = "SELECT u.email FROM users u JOIN orders o ON o.id = u.id"
+    assert [
+        (d.rule, d.severity)
+        for d in core.query_diagnostics(
+            sql, schema_sql=QUERY_SCHEMA, rules={"entity-mismatch": "warn"}
+        )
+    ] == [("entity-mismatch", "warn")]
+    sql = "SELECT nope FROM users"
+    assert (
+        core.query_diagnostics(sql, schema_sql=QUERY_SCHEMA, rules={"unknown-column": "ignore"})
+        == []
+    )
 
 
 def test_crlf_continuation() -> None:
