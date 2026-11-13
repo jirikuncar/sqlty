@@ -587,6 +587,16 @@ root.addEventListener("drop", async (event) => {
   }
 });
 resizable(root.querySelector("[data-splitter]"), root.querySelector(".sqlty-console"));
+const menu = root.querySelector("#sqlty-commands");
+anchored(menu, root.querySelector("[data-commands]"), () => menu.querySelector("[role=menuitem]").focus());
+menu.addEventListener("click", (event) => event.target.closest("[role=menuitem]") && menu.hidePopover());
+menu.addEventListener("keydown", (event) => {
+  const items = [...menu.querySelectorAll("[role=menuitem]")];
+  const step = { ArrowDown: 1, ArrowUp: -1 }[event.key];
+  if (!step) return;
+  event.preventDefault();
+  items.at((items.indexOf(document.activeElement) + step) % items.length).focus();
+});
 const format = () => ask(request("format")).formatted;
 // The Command Palette (F1) and context menu name these as the VS Code extension does.
 const commands = [
@@ -678,6 +688,89 @@ function resizable(handle, panel) {
   });
 }
 
+if (new URLSearchParams(location.search).has("ask")) asking(root.querySelector("[data-ask]"), root.querySelector("[data-ask-open]"));
+
+// Natural language to SQL with a model that runs in the page (ask.js), behind `?ask`.
+async function asking(form, opener) {
+  const llm = await import("./ask.js");
+  const question = form.querySelector("[data-ask-question]");
+  const picked = form.querySelector("[data-ask-model]");
+  const status = form.querySelector("[data-ask-status]");
+  const mib = (bytes) => `${Math.round(bytes / 2 ** 20)} MiB`;
+  picked.replaceChildren(...llm.MODELS.map((model) => option(model.id, `${model.label} (${mib(model.bytes)})`)));
+  picked.value = saved.model;
+  picked.value ||= llm.MODELS[0].id;
+  picked.addEventListener("change", () => remember({ model: picked.value }));
+  let loaded;
+  let placed = false;
+  editor.onDidFocusEditorText(() => (placed = editor.getModel() === models.python));
+  opener.hidden = false;
+  anchored(form, opener, () => question.focus());
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const button = form.querySelector("button");
+    button.disabled = true;
+    opener.setAttribute("aria-busy", "true");
+    try {
+      const model = llm.MODELS.find((found) => found.id === picked.value);
+      if (loaded?.model !== model) {
+        status.textContent = `Loading ${model.label}...`;
+        await loaded?.instance.exit();
+        const instance = await llm.wllama();
+        const complete = await llm.loadModel(instance, model, {
+          onProgress: (done, total) => (status.textContent = `Loading ${model.label}: ${mib(done)} of ${mib(total)}`),
+        });
+        loaded = { model, instance, complete };
+      }
+      // The query goes after the line of the cursor last placed in queries.py, or at its end; a
+      // `# comment` there is the question when the box is empty.
+      const source = models.python.getValue();
+      const cursor = placed && editor.getModel() === models.python ? editor.getPosition().lineNumber : models.python.getLineCount();
+      const comment = models.python.getLineContent(cursor).match(/^\s*#\s*(\S.*)$/)?.[1];
+      const asked = question.value.trim() || comment;
+      if (!asked) throw new Error("Type a question, or put the cursor on a # comment in queries.py.");
+      status.textContent = "Writing the query...";
+      const { schema, dialect: chosenDialect, config } = request("analyze");
+      const { sql, attempts } = await llm.answer({
+        complete: (conversation) => {
+          if (conversation.length > 2) status.textContent = `sqlty found problems, asking again (${(conversation.length - 2) / 2})...`;
+          return loaded.complete(conversation);
+        },
+        engine: ask,
+        schema,
+        dialect: chosenDialect,
+        config,
+        // Sending queries.py too (llm.around) made the eval worse: 14 to 11 of 20 for Coder 1.5B, 12 to 5 for 0.5B.
+        question: asked,
+        ...model.prompt,
+      });
+      const taken = new Set(source.match(/^\w+(?= =)/gm));
+      let name = "answer";
+      for (let n = 2; taken.has(name); n++) name = `answer_${n}`;
+      // sqlty's rewrite of the answer, `answer = SQL[RowType]("""--sql ...""")`, when it has one.
+      const { rewritten } = attempts.at(-1);
+      const typed = /^from sqlty import SQL$/m.test(source) && rewritten?.match(/^answer = SQL\[[\s\S]*/m)?.[0];
+      const code = (typed ? typed.replace(/^answer/, name) : llm.python(sql, name)).trimEnd();
+      const lines = source.split("\n");
+      const added = asked === comment && !question.value.trim() ? [code] : ["", `# ${asked.replace(/\s+/g, " ")}`, code];
+      lines.splice(cursor, 0, ...added.join("\n").split("\n"));
+      const left = attempts.at(-1).problems.length;
+      replace(models.python, lines.join("\n"));
+      open("python");
+      editor.revealLineNearTop(cursor + 1);
+      status.textContent =
+        `${model.label} wrote ${name}` +
+        (attempts.length > 1 ? ` after ${attempts.length - 1} round(s) of sqlty feedback` : "") +
+        (left ? `; ${left} problem(s) left` : "") + ".";
+    } catch (error) {
+      status.textContent = String(error.message ?? error);
+    } finally {
+      button.disabled = false;
+      opener.removeAttribute("aria-busy");
+    }
+  });
+}
+
 navigator.serviceWorker?.ready.then((registration) => registration.active?.postMessage("playground"));
 if (saved.size) root.style.setProperty("--sqlty-font", `${size}px`);
 if (shared) resume(shared);
@@ -685,6 +778,25 @@ else if (linkedDeck?.error) linked.textContent = String(linkedDeck.error.message
 else if (linkedDeck) resume(linkedDeck);
 unembedded();
 refresh();
+
+// A popover sits in the top layer, so the scrolling toolbar does not clip it; it follows its
+// button and stays within the playground.
+function anchored(popover, button, opened) {
+  const place = () => {
+    const box = button.getBoundingClientRect();
+    const right = Math.min(innerWidth - 8, root.getBoundingClientRect().right);
+    popover.style.top = `${box.bottom + 4}px`;
+    popover.style.left = `${Math.max(8, Math.min(box.left, right - popover.offsetWidth))}px`;
+  };
+  popover.addEventListener("toggle", (event) => {
+    const open = event.newState === "open";
+    for (const type of ["scroll", "resize"]) (open ? addEventListener : removeEventListener)(type, place, { passive: true });
+    button.setAttribute("aria-expanded", open);
+    if (!open) return;
+    place();
+    opened();
+  });
+}
 
 async function engine() {
   const url = new URL("sqlty_wasm.wasm", import.meta.url);
