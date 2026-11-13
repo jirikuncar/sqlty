@@ -17,6 +17,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pyo3.workspace = true
+rayon = "1.12"
 sqlty-sql.workspace = true
 sqlty-python.workspace = true
 ruff_python_ast.workspace = true
