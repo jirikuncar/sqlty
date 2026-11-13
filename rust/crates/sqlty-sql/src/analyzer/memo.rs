@@ -120,6 +120,6 @@ impl<'a> Analyzer<'a> {
 pub(super) fn first_column(columns: &SubqueryColumns) -> Inferred<Option<&Column>> {
     match &**columns {
         Ok(columns) => Ok(columns.as_ref().and_then(|columns| columns.first())),
-        Err(error) => Err(error.clone()),
+        Err(error) => Err(*error),
     }
 }
