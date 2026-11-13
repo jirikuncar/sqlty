@@ -44,6 +44,7 @@ mod sql_type;
 mod star_expand;
 mod suggest;
 mod table_functions;
+mod tables;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]
@@ -78,6 +79,7 @@ pub(crate) use sql_type::canonical_type;
 pub use sql_type::python_types;
 use sql_type::{decimal_type, python_type, ANY, DECIMAL};
 pub use star_expand::{expand_star, result_stars};
+pub use tables::{query_tables, TableRef};
 use typed::Typed;
 
 pub use crate::catalog::{

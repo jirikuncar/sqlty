@@ -466,3 +466,33 @@ def test_split_marker_is_not_skipped(source: str) -> None:
 def test_unsupported_import_style_still_raises_without_markers() -> None:
     with pytest.raises(ValueError):
         core.check_source("x = 1\n", import_style="import nothing")
+
+
+@pytest.mark.parametrize(
+    ("sql", "dialect", "expected"),
+    [
+        (
+            "WITH r AS (SELECT * FROM s.a) SELECT * FROM r JOIN b ON true, generate_series(1, 2)",
+            "postgres",
+            [("a", "s", "read"), ("b", None, "read")],
+        ),
+        (
+            "UPDATE users u SET n = (SELECT count(*) FROM users) FROM orders o WHERE o.id = u.id",
+            "postgres",
+            [("users", None, "write"), ("users", None, "read"), ("orders", None, "read")],
+        ),
+        (
+            "DELETE u FROM users u JOIN orders o ON o.user_id = u.id",
+            "mysql",
+            [("users", None, "write"), ("orders", None, "read")],
+        ),
+        (
+            "MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN DELETE",
+            "postgres",
+            [("t", None, "write"), ("s", None, "read")],
+        ),
+        ("SELECT * FROM", "postgres", []),
+    ],
+)
+def test_query_tables(sql: str, dialect: str, expected: list[tuple[str, str | None, str]]) -> None:
+    assert core.query_tables(sql, dialect=dialect) == [core.TableRef(*table) for table in expected]
