@@ -24,8 +24,7 @@ use super::TypeOverrides;
 pub(super) static COLLATE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r#"(?i)\s+COLLATE\s+(?:"[^"]*"|[\w.]+)"#).unwrap());
 
-/// The sequence options of `AS IDENTITY (...)`, which sqlparser reads only in one order:
-/// pg_dump's `ADD GENERATED` and Piccolo's `START WITH ... INCREMENT BY` write another.
+/// The sequence options of `ADD GENERATED ... AS IDENTITY (...)`, which pg_dump writes.
 static IDENTITY_OPTIONS: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(?i)\bAS\s+IDENTITY\s*\([^()]*\)").unwrap());
 
@@ -103,10 +102,6 @@ pub(super) fn read_statements(
             let parsed = match &text {
                 None => parse_ddl(&stmt.sql(), dialect)
                     .or_else(|| parse_ddl(&without_fk_action_columns(&stmt.sql()), dialect))
-                    .or_else(|| {
-                        let sql = stmt.sql();
-                        parse_ddl(&IDENTITY_OPTIONS.replace_all(&sql, "AS IDENTITY"), dialect)
-                    })
                     .or_else(|| parse_ddl(&stmt.without_constraints()?, dialect))
                     .or_else(|| {
                         let text = stmt.without_partitioning()?;
