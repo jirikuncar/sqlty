@@ -222,6 +222,20 @@ def test_unparseable_schema_table_is_reported_once(tmp_path, monkeypatch, caplog
     ]
 
 
+def test_param_types_is_deprecated(tmp_path, monkeypatch, caplog) -> None:
+    (tmp_path / "pyproject.toml").write_text("[tool.sqlty]\nparam-types = false\n")
+    for name in ("a.py", "b.py"):
+        (tmp_path / name).write_text('q = "--sql\\nSELECT 1::INTEGER WHERE 1 = %s"\n')
+    monkeypatch.chdir(tmp_path)
+
+    main(["rewrite", "a.py", "b.py"])
+
+    assert [r.getMessage() for r in caplog.records if "deprecated" in r.getMessage()] == [
+        f"{tmp_path / 'pyproject.toml'}: param-types is deprecated; parameter types will always be written"
+    ]
+    assert "SQL[tuple[int]](" in (tmp_path / "a.py").read_text()
+
+
 def test_check_explain_prints_the_rules_under_a_type_diagnostic(
     tmp_path, monkeypatch, capsys
 ) -> None:

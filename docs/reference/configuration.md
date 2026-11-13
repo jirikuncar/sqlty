@@ -109,7 +109,7 @@ A directory with more than one file reads the first of `sqlty.toml`,
 | [`import-style`](#import-style) | string | `"from sqlty import SQL"` | `rewrite`, `strip`, `check`, magic codec | How rewritten code imports and spells the wrapper |
 | [`untyped`](#untyped) | `"skip"`, `"sentinel"` | `"skip"` | `rewrite` | Whether queries of unknown row type are wrapped as `SQL[UNTYPED]` |
 | [`json-types`](#json-types) | `"typing.Any"`, `"typing.TypedDict"` | `"typing.Any"` | `rewrite`, `check --fix` | How a JSON column of known shape is typed: `typing.Any`, or a generated `TypedDict` |
-| [`param-types`](#param-types) | `true`, `false` | `true` | `rewrite`, `check --fix` | Whether `SQL[R]` calls get the type of their parameters, `SQL[R, P]` |
+| [`param-types`](#param-types) | `true`, `false` | `true` | `rewrite`, `check --fix` | Deprecated: whether `SQL[R]` calls get the type of their parameters, `SQL[R, P]` |
 | [`preview`](#preview) | boolean | `false` | `check` | Turn on features still in preview: query variants |
 | [`max-query-variants`](#max-query-variants) | positive integer | `64` | `check` | With `preview`, the most variants of a query built in branches that `check` checks |
 | [`coerce-row-types`](#coerce-row-types) | list of strings | `[]` | `check` | `TypedDict`, `NamedTuple` and dataclass rows, as `module.Name`, the code validates with Pydantic |
@@ -303,6 +303,10 @@ json-types = "typing.TypedDict"
 
 ## `param-types`
 
+!!! warning "Deprecated"
+    `rewrite` and `check --fix` will always write parameter types, and setting
+    `param-types` prints a warning. Remove it from your configuration.
+
 `true` (default) makes `rewrite` and `check --fix` write the type of the
 parameters of a query, `SQL[R, P]`: a `tuple`, or a generated `TypedDict`
 for named parameters, written as `json-types` writes its classes.
@@ -319,7 +323,6 @@ Example: [`examples/06_param_types/`](https://github.com/jirikuncar/sqlty/tree/m
 !!! warning "Type checkers become stricter than the driver"
     A type checker then rejects calls that psycopg runs: a list for a `tuple`,
     text for another type, a `dict[str, Any]` or extra keys for a `TypedDict`.
-    Set `param-types = false` to keep `SQL[R]`.
 
 ## `coerce-row-types`
 

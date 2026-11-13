@@ -121,7 +121,7 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "`true`, `false`",
         "`true`",
         "`rewrite`, `check --fix`",
-        "Whether `SQL[R]` calls get the type of their parameters, `SQL[R, P]`",
+        "Deprecated: whether `SQL[R]` calls get the type of their parameters, `SQL[R, P]`",
     ),
     "preview": KeyDoc(
         "boolean",

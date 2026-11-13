@@ -1434,6 +1434,7 @@ class SettingsResolver:
         self._by_dir: dict[Path, Settings] = {}
         self._resolved: dict[Path, Path] = {}
         self._schemas: dict[tuple[str, str, tuple[tuple[str, str], ...]], Schema] = {}
+        self._deprecated: set[str] = set()
 
     def _schema(self, schema_sql: str, dialect: str, types: dict[str, str] | None = None) -> Schema:
         """``schema_sql`` parsed once per run, warning about the objects it could not parse."""
@@ -1592,6 +1593,12 @@ class SettingsResolver:
             ) from None
         from sqlty._config import MAX_QUERY_VARIANTS, driver_types
 
+        origin = self.source.origin("param_types", label)
+        if "param_types" in config and origin not in self._deprecated:
+            self._deprecated.add(origin)
+            logger.warning(
+                "%s: param-types is deprecated; parameter types will always be written", origin
+            )
         dialect = dialect_flag or config.get("dialect", "postgres")
         types = driver_types(config.get("driver"), dialect, config.get("types"))
         return Settings(
