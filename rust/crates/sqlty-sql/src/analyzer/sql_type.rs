@@ -97,12 +97,12 @@ impl SqlType {
                     element: None,
                     size: None,
                 },
-                ArrayElemTypeDef::AngleBracket(inner) | ArrayElemTypeDef::Parenthesis(inner) => {
-                    SqlType::Array {
-                        element: Some(Box::new(of(inner))),
-                        size: None,
-                    }
-                }
+                ArrayElemTypeDef::AngleBracket(inner)
+                | ArrayElemTypeDef::Parenthesis(inner)
+                | ArrayElemTypeDef::ParenthesisNotNull(inner) => SqlType::Array {
+                    element: Some(Box::new(of(inner))),
+                    size: None,
+                },
                 ArrayElemTypeDef::SquareBracket(inner, size)
                 | ArrayElemTypeDef::Qualified(inner, size) => SqlType::Array {
                     element: Some(Box::new(of(inner))),
@@ -135,13 +135,17 @@ impl SqlType {
             DataType::Interval { .. } => SqlType::Interval,
             // ClickHouse wrappers that change the column, not its values.
             DataType::Nullable(inner) | DataType::LowCardinality(inner) => of(inner),
+            DataType::Collate(inner, _) | DataType::Zerofill(inner) => of(inner),
             DataType::Custom(name, args) => {
                 let text = name.to_string().to_uppercase();
-                custom(&text, args, dialect).unwrap_or_else(|| SqlType::Scalar(scalar(dt, dialect)))
+                let args: Vec<String> = args.iter().map(ToString::to_string).collect();
+                custom(&text, &args, dialect)
+                    .unwrap_or_else(|| SqlType::Scalar(scalar(dt, dialect)))
             }
             DataType::Table(_)
             | DataType::NamedTable { .. }
             | DataType::Nested(_)
+            | DataType::Object(_)
             | DataType::Unspecified
             | DataType::Trigger
             | DataType::AnyType => SqlType::Unmapped(scalar(dt, dialect)),

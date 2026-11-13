@@ -13,7 +13,7 @@ rust-version = "1.99"
 
 [workspace.dependencies]
 pyo3 = { version = "0.30", features = ["extension-module"] }
-sqlparser = { version = "0.63", features = ["visitor"] }
+sqlparser = { version = "0.64", features = ["visitor"] }
 regex = "1"
 recursive = "0.1"
 rustc-hash = "2"
