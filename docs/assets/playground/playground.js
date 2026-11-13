@@ -587,11 +587,11 @@ root.addEventListener("drop", async (event) => {
   }
 });
 resizable(root.querySelector("[data-splitter]"), root.querySelector(".sqlty-console"));
-const commands = root.querySelector("#sqlty-commands");
-anchored(commands, root.querySelector("[data-commands]"), () => commands.querySelector("[role=menuitem]").focus());
-commands.addEventListener("click", (event) => event.target.closest("[role=menuitem]") && commands.hidePopover());
-commands.addEventListener("keydown", (event) => {
-  const items = [...commands.querySelectorAll("[role=menuitem]")];
+const menu = root.querySelector("#sqlty-commands");
+anchored(menu, root.querySelector("[data-commands]"), () => menu.querySelector("[role=menuitem]").focus());
+menu.addEventListener("click", (event) => event.target.closest("[role=menuitem]") && menu.hidePopover());
+menu.addEventListener("keydown", (event) => {
+  const items = [...menu.querySelectorAll("[role=menuitem]")];
   const step = { ArrowDown: 1, ArrowUp: -1 }[event.key];
   if (!step) return;
   event.preventDefault();
