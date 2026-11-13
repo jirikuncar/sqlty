@@ -575,8 +575,6 @@ mod tests {
             dialect,
             Some(&schema),
         )
-        .ok()
-        .flatten()
         .and_then(|columns| columns[0].sql_type.clone())
     }
 

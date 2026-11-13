@@ -10,7 +10,7 @@ use std::rc::Rc;
 use sqlparser::ast::{Expr, Ident, TableAlias, TableFactor, TableWithJoins};
 
 use crate::catalog::fold;
-use crate::diagnostics::NameRule;
+use crate::diagnostics::{NameDiagnostic, NameRule};
 
 use super::dialect::SqlDialect;
 use super::literals::value_set;
@@ -81,13 +81,9 @@ struct Resolved<'s> {
 
 impl<'a> Analyzer<'a> {
     /// Whether table, column and ambiguity rules apply: a schema is configured and the
-    /// dialect's name rules (case folding, quoting) are the ones modelled.
+    /// dialect [checks names](SqlDialect::checks_names).
     pub(super) fn judges_names(&self) -> bool {
-        !self.schema.is_empty()
-            && matches!(
-                self.dialect,
-                SqlDialect::Postgres | SqlDialect::MySql | SqlDialect::Sqlite
-            )
+        !self.schema.is_empty() && self.dialect.checks_names()
     }
 
     /// Whether a CTE, view or subquery column called `name` is the one `column` (folded)
@@ -117,9 +113,11 @@ impl<'a> Analyzer<'a> {
             return;
         }
         if self.judges_names() {
-            self.diag.record(
+            self.diag.record_about(
                 NameRule::UnknownTable,
                 format!("table `{table}` is not defined in the schema"),
+                Some(table),
+                None,
             );
         } else {
             self.diag.explain_silently();
@@ -437,13 +435,15 @@ impl<'a> Analyzer<'a> {
             .collect();
         references.dedup();
         if references.len() > 1 {
-            self.diag.record(
+            self.diag.record_about(
                 NameRule::AmbiguousColumn,
                 format!(
                     "column reference `{}` is ambiguous: {} all have it",
                     ident.value,
                     list(&references)
                 ),
+                None,
+                Some(&ident.value),
             );
         }
     }
@@ -527,9 +527,11 @@ impl<'a> Analyzer<'a> {
                 if matches!(qualifier.as_str(), "old" | "new" | "excluded") {
                     return self.diag.explain_silently();
                 }
-                return self.diag.record(
+                return self.diag.record_about(
                     NameRule::UnknownTable,
                     format!("`{qualifier}` is not a table or alias in the FROM clause"),
+                    Some(qualifier),
+                    Some(&column.value),
                 );
             }
         }
@@ -580,8 +582,18 @@ impl<'a> Analyzer<'a> {
                 _ => spelling,
             })
         });
-        self.diag
-            .record_fix(NameRule::UnknownColumn, message, replacement.flatten());
+        let table = match candidates.as_slice() {
+            [source] => source.table.named(),
+            _ => None,
+        };
+        self.diag.push(NameDiagnostic {
+            rule: NameRule::UnknownColumn,
+            message,
+            span: None,
+            replacement: replacement.flatten(),
+            table: table.map(str::to_string),
+            column: Some(column.value.clone()),
+        });
     }
 
     /// The column of `candidates` that `column` most likely misspells, and how SQL spells
@@ -744,9 +756,11 @@ impl<'a> Analyzer<'a> {
         }
         if let Some(reference) = &reference {
             if !scope.iter().any(|source| source.reference == *reference) {
-                return self.diag.record(
+                return self.diag.record_about(
                     NameRule::UnknownTable,
                     format!("`{reference}` in `{reference}.*` is not a table or alias in the FROM clause"),
+                    Some(reference),
+                    None,
                 );
             }
         }

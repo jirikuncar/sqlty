@@ -143,7 +143,7 @@ impl Check<'_> {
     pub(crate) fn columns(&self, query: Option<&str>) -> Option<Vec<RowColumn>> {
         let options = self.settings.options;
         let columns = analyzer::analyze_select(query?, options.dialect.name(), options.schema);
-        let columns: Vec<RowColumn> = columns.ok()??.into_iter().map(RowColumn::from).collect();
+        let columns: Vec<RowColumn> = columns?.into_iter().map(RowColumn::from).collect();
         (!columns.is_empty()).then_some(columns)
     }
 

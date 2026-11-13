@@ -353,7 +353,7 @@ fn checked(
 
 /// The row type, columns and parameters of the query `sql` on `line`.
 fn described(line: usize, sql: &str, dialect: &str, options: &Options<'_>) -> Value {
-    let columns = analyze_select(sql, dialect, options.schema).ok().flatten();
+    let columns = analyze_select(sql, dialect, options.schema);
     let params = analyze_params(sql, dialect, options.schema).unwrap_or_default();
     let explained = explain_select(sql, dialect, options.schema).unwrap_or_default();
     let rule = |rule: Option<RuleRef>| {

@@ -61,6 +61,21 @@ e = SQL[tuple[int]]("--sql\nSELECT * FROM missing")
 f = SQL[tuple[int]]("--sql\nINSERT INTO missing (a) VALUES (1) RETURNING a")
 ```
 
+#### Aggregates of unknown columns
+
+An aggregate of a column the table lacks is untyped, `SUM` like the others.
+
+```python
+from sqlty import SQL
+
+# error: [unknown-column] "column `totl` does not exist in `orders`; did you mean `total`?"
+a = SQL[tuple[int]]("--sql\nSELECT SUM(totl) FROM orders")
+# error: [unknown-column] "column `totl` does not exist in `orders`; did you mean `total`?"
+b = SQL[tuple[int]]("--sql\nSELECT AVG(totl) FROM orders")
+# error: [unknown-column] "column `totl` does not exist in `o`; did you mean `total`?"
+c = SQL[tuple[int]]("--sql\nSELECT SUM(o.totl) FROM orders o")
+```
+
 #### The closest column
 
 A name close to one column of the tables it can come from gets a hint, and
