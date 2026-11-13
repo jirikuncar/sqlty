@@ -1,17 +1,18 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["pydantic-evals>=2.67", "psycopg[binary]", "playwright", "logfire"]
+# dependencies = ["pydantic-evals>=2.67", "psycopg[binary]", "playwright==1.64.1", "logfire"]
 # ///
 """Evaluate the playground's ask on questions.json with pydantic-evals.
 
-    DSN=postgresql://... uv run scripts/ask_eval/evals.py ask --model qwen2.5-coder-1.5b --variant rules --models DIR --wllama DIR
-    DSN=postgresql://... uv run scripts/ask_eval/evals.py score runs/*.json
+    DSN=postgresql://... uv run scripts/ask_eval/evals.py ask --model qwen2.5-coder-1.5b --variant rules --models DIR
+    DSN=postgresql://... uv run scripts/ask_eval/evals.py score runs/*.json --markdown summary.md
 
 `ask` asks a model in headless Chromium, as the playground does, and saves its answers;
 `score` scores saved answers again. A query is `exact` when its rows equal the gold query's
 (in order only when the question asks for it), `lenient` when it has every gold column among
 extra ones; `first_exact` scores the model's first query, before sqlty's problems were sent back.
---models holds the GGUF files of ask.js MODELS and models.json, --wllama is @wllama/wllama/esm.
+--models holds the GGUF files of ask.js MODELS and models.json, downloaded when missing; `make playground` builds the
+engine and vendors wllama. .github/workflows/ask-eval.yml runs it on demand and monthly.
 Spans go to Logfire when LOGFIRE_TOKEN is set.
 """
 
@@ -26,9 +27,11 @@ import http.server
 import json
 import os
 import random
+import re
 import statistics
 import tempfile
 import threading
+import urllib.request
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -194,6 +197,28 @@ async def score(path: Path) -> EvaluationReport:
     )
 
 
+def catalog() -> dict[str, dict[str, Any]]:
+    ask = (ROOT / "docs/assets/playground/ask.js").read_text()
+    entries = re.findall(r'id: "([^"]+)",[^}]*?repo: "([^"]+)",[^}]*?file: "([^"]+)"', ask)
+    offered = [{"id": id, "repo": repo, "file": file} for id, repo, file in entries]
+    return {
+        model["id"]: model for model in [*offered, *json.loads((HERE / "models.json").read_text())]
+    }
+
+
+def download(id: str, directory: Path) -> None:
+    model = catalog()[id]
+    path = directory / model["file"]
+    if path.exists():
+        return
+    directory.mkdir(parents=True, exist_ok=True)
+    partial = path.with_name(path.name + ".part")
+    urllib.request.urlretrieve(
+        f"https://huggingface.co/{model['repo']}/resolve/main/{model['file']}", partial
+    )
+    partial.rename(path)
+
+
 class Handler(http.server.SimpleHTTPRequestHandler):
     mounts: dict[str, Path] = {}
     isolated = True
@@ -226,7 +251,7 @@ async def browser(args):
     Handler.mounts = {
         "/playground/": ROOT / "docs/assets/playground",
         "/eval/": HERE,
-        "/wllama/": Path(args.wllama).resolve(),
+        "/vendor/": ROOT / "docs/assets/vendor",
         "/models/": Path(args.models).resolve(),
     }
     Handler.isolated = not args.single_thread
@@ -256,6 +281,7 @@ async def ask(args) -> tuple[Path, EvaluationReport]:
         "isolated": not args.single_thread,
         "answers": [],
     }
+    download(args.model, Path(args.models))
     async with browser(args) as page:
         run |= await page.evaluate(
             "options => window.load(options)",
@@ -283,8 +309,11 @@ async def ask(args) -> tuple[Path, EvaluationReport]:
     return out, report
 
 
-def summary(reports: list[EvaluationReport]) -> Table:
-    table = Table("run", "exact", "lenient", "first exact", "sqlty clean", "median s", "errors")
+COLUMNS = ("run", "exact", "lenient", "first exact", "sqlty clean", "median s", "errors")
+
+
+def summary(reports: list[EvaluationReport]) -> list[list[str]]:
+    rows = []
     for report in reports:
         count = len(report.cases) + len(report.failures)
         passed = [
@@ -292,13 +321,14 @@ def summary(reports: list[EvaluationReport]) -> Table:
             for name in ("exact", "lenient", "first_exact", "sqlty_clean")
         ]
         seconds = [case.metrics["seconds"] for case in report.cases]
-        table.add_row(
-            report.name,
-            *passed,
-            f"{statistics.median(seconds):.1f}" if seconds else "-",
-            str(len(report.failures)),
-        )
-    return table
+        median = f"{statistics.median(seconds):.1f}" if seconds else "-"
+        rows.append([report.name, *passed, median, str(len(report.failures))])
+    return rows
+
+
+def markdown(rows: list[list[str]]) -> str:
+    lines = [COLUMNS, ["---"] * len(COLUMNS), *rows]
+    return "".join(f"| {' | '.join(line)} |\n" for line in lines)
 
 
 def main() -> None:
@@ -307,17 +337,21 @@ def main() -> None:
     scoring = commands.add_parser("score", help="score saved answers again")
     scoring.add_argument("runs", nargs="+", type=Path)
     scoring.add_argument("--cases", action="store_true", help="print each case")
+    scoring.add_argument("--markdown", type=Path, help="also write the summary as a Markdown table")
     asking = commands.add_parser("ask", help="ask a model in headless Chromium")
     asking.add_argument("--model", required=True)
-    asking.add_argument("--models", required=True)
-    asking.add_argument("--wllama", required=True)
-    asking.add_argument("--variant", default="base", help="an ask.js VARIANTS prompt")
+    asking.add_argument("--models", required=True, help="where the GGUF files are, or go")
+    asking.add_argument(
+        "--variant",
+        default="model",
+        help="an ask.js VARIANTS prompt; `model` is the model's own in ask.js MODELS, else rules",
+    )
     asking.add_argument("--thinking", action="store_true", help="let Qwen3 reason first")
     asking.add_argument("--file", action="store_true", help="send the schema's source too")
     asking.add_argument("--repairs", type=int, default=2)
     asking.add_argument("--threads", type=int)
     asking.add_argument("--single-thread", action="store_true", help="omit COOP/COEP")
-    asking.add_argument("--executable", default="/opt/pw-browsers/chromium")
+    asking.add_argument("--executable", help="a Chromium to use instead of Playwright's")
     asking.add_argument("--limit", type=int, help="ask only the first questions")
     asking.add_argument("--out")
     args = parser.parse_args()
@@ -331,7 +365,13 @@ def main() -> None:
         reports = [asyncio.run(score(path)) for path in args.runs]
         for report in reports if args.cases else ():
             report.print(include_durations=False)
-    Console().print(summary(reports))
+    rows = summary(reports)
+    table = Table(*COLUMNS)
+    for row in rows:
+        table.add_row(*row)
+    Console().print(table)
+    if args.command == "score" and args.markdown:
+        args.markdown.write_text(markdown(rows))
 
 
 if __name__ == "__main__":

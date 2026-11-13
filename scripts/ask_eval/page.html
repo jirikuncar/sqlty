@@ -5,23 +5,24 @@
   import { load } from "/playground/engine.js";
   import { MODELS, VARIANTS, answer, around, loadModel, wllama } from "/playground/ask.js";
 
-  let engine, complete, data;
+  let engine, complete, data, chosen;
 
   window.load = async ({ model: id, threads, thinking = false }) => {
     engine = await load(await (await fetch("/playground/sqlty_wasm.wasm")).arrayBuffer());
     data = await (await fetch("/eval/questions.json")).json();
     const candidates = await (await fetch("/eval/models.json")).json();
-    const model = [...MODELS, ...candidates].find((found) => found.id === id);
-    const instance = await wllama({ wasm: "/wllama/wasm/wllama.wasm", module: "/wllama/index.js" });
+    const model = (chosen = [...MODELS, ...candidates].find((found) => found.id === id));
+    const instance = await wllama();
     const started = performance.now();
     complete = await loadModel(instance, model, { url: `/models/${model.file}`, n_threads: threads, thinking });
     return { loadSeconds: (performance.now() - started) / 1000, crossOriginIsolated: self.crossOriginIsolated, threads: navigator.hardwareConcurrency };
   };
 
-  window.ask = async ({ schema, question, repairs, variant = "base", file = false }) => {
+  window.ask = async ({ schema, question, repairs, variant = "model", file = false }) => {
+    const prompt = variant === "model" ? (chosen.prompt ?? VARIANTS.rules) : VARIANTS[variant];
     const source = data.sources[schema];
     const started = performance.now();
-    const found = await answer({ complete, engine, schema: data.schemas[schema], dialect: "postgres", question, repairs, ...VARIANTS[variant],
+    const found = await answer({ complete, engine, schema: data.schemas[schema], dialect: "postgres", question, repairs, ...prompt,
       source: file ? around(source, source.split("\n").length) : undefined });
     return { ...found, seconds: (performance.now() - started) / 1000 };
   };
