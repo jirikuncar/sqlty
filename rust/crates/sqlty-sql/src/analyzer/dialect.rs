@@ -2,8 +2,8 @@
 
 use sqlparser::ast::{Expr, Statement};
 use sqlparser::dialect::{
-    dialect_from_str, ClickHouseDialect, Dialect, GenericDialect, MySqlDialect, PostgreSqlDialect,
-    Precedence, SQLiteDialect,
+    dialect_from_str, BindPlaceholderStyle, ClickHouseDialect, Dialect, GenericDialect,
+    MySqlDialect, PostgreSqlDialect, Precedence, SQLiteDialect,
 };
 use sqlparser::keywords::Keyword;
 use sqlparser::parser::{Parser, ParserError};
@@ -159,7 +159,8 @@ impl SqlDialect {
 #[derive(Debug)]
 struct MySql(MySqlDialect);
 
-/// Forwards each method that [`MySqlDialect`] overrides, and names them in `FORWARDED`.
+/// Forwards each method that [`MySqlDialect`] overrides, and names them in `FORWARDED`;
+/// `get_next_precedence` falls back to it by hand.
 macro_rules! forward {
     ($($name:ident($($arg:ident: $ty:ty),*) -> $ret:ty;)*) => {
         #[cfg(test)]
@@ -179,7 +180,7 @@ macro_rules! forward {
                     Token::Word(w) if w.keyword == Keyword::DIV => MY_MUL,
                     Token::ShiftLeft | Token::ShiftRight => MY_SHIFT,
                     Token::Word(w) if w.keyword == Keyword::XOR => MY_XOR,
-                    _ => return None,
+                    _ => return self.0.get_next_precedence(parser),
                 };
                 Some(Ok(precedence))
             }
@@ -207,15 +208,19 @@ const MY_SHIFT: u8 = 25;
 const MY_XOR: u8 = 7;
 
 forward! {
+    supports_string_literal_table_alias(explicit: bool) -> bool;
     is_identifier_start(ch: char) -> bool;
     is_identifier_part(ch: char) -> bool;
     is_delimited_identifier_start(ch: char) -> bool;
     identifier_quote_style(identifier: &str) -> Option<char>;
+    ordered_bind_placeholder_style() -> Option<BindPlaceholderStyle>;
     supports_string_literal_backslash_escape() -> bool;
     supports_string_literal_concatenation() -> bool;
     ignores_wildcard_escapes() -> bool;
     supports_numeric_prefix() -> bool;
+    supports_literal_prefix_in_qualified_name() -> bool;
     supports_bitwise_shift_operators() -> bool;
+    supports_singular_value_keyword() -> bool;
     supports_multiline_comment_hints() -> bool;
     parse_infix(parser: &mut Parser, expr: &Expr, precedence: u8) -> Option<Result<Expr, ParserError>>;
     parse_statement(parser: &mut Parser) -> Option<Result<Statement, ParserError>>;
@@ -227,15 +232,19 @@ forward! {
     is_table_factor_alias(explicit: bool, kw: &Keyword, parser: &mut Parser) -> bool;
     supports_table_hints() -> bool;
     requires_single_line_comment_whitespace() -> bool;
+    supports_hash_comment() -> bool;
     supports_match_against() -> bool;
     supports_select_modifiers() -> bool;
     supports_set_names() -> bool;
     supports_comma_separated_set_assignments() -> bool;
+    supports_alter_column_position() -> bool;
     supports_update_order_by() -> bool;
     supports_data_type_signed_suffix() -> bool;
+    supports_data_type_zerofill_suffix() -> bool;
     supports_cross_join_constraint() -> bool;
     supports_double_ampersand_operator() -> bool;
     supports_binary_kw_as_cast() -> bool;
+    supports_table_partitions() -> bool;
     supports_comment_optimizer_hint() -> bool;
     supports_constraint_keyword_without_name() -> bool;
     supports_key_column_option() -> bool;
@@ -330,6 +339,7 @@ mod tests {
             .unwrap()
             .captures_iter(block)
             .map(|c| c.get(1).unwrap().as_str())
+            .filter(|name| *name != "get_next_precedence")
             .collect();
         assert_eq!(overridden, super::FORWARDED);
     }

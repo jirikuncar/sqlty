@@ -9,33 +9,10 @@ use regex::Regex;
 
 use super::dialect::SqlDialect;
 use super::respell::respell;
-use super::tokens::{apply, closing, tokens, Edit, Kind, Token};
+use super::tokens::{apply, tokens, Edit, Kind, Token};
 
 /// A leading `--sql` marker line: MySQL only reads `--` followed by whitespace as a comment.
 static SQL_MARKER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\A\s*--sql[^\n]*\n?").unwrap());
-
-/// PostgreSQL types sqlparser reads a `type 'string'` literal of only as a cast.
-const POSTGRES_TYPED_STRINGS: [&str; 19] = [
-    "bpchar",
-    "cidr",
-    "citext",
-    "daterange",
-    "hstore",
-    "inet",
-    "int4range",
-    "int8range",
-    "jsonpath",
-    "macaddr",
-    "macaddr8",
-    "money",
-    "name",
-    "numrange",
-    "oid",
-    "pg_lsn",
-    "tsrange",
-    "tstzrange",
-    "txid_snapshot",
-];
 
 /// `sql` as sqlparser should read it: the `--sql` marker line dropped (a leading space
 /// form like `--sql SELECT 1` leaves nothing), psycopg placeholders (`%s`, `%(name)s`,
@@ -43,14 +20,9 @@ const POSTGRES_TYPED_STRINGS: [&str; 19] = [
 /// rejects respelled as the closest it reads:
 ///
 /// - ISO's `BINARY LARGE OBJECT` as `BLOB` and `T MULTISET` as the array `T[]`;
-/// - in PostgreSQL, the `WHERE` of `ON CONFLICT (...) WHERE ... DO` dropped (the partial
-///   index that arbitrates the conflict does not change the result), `OVERRIDING SYSTEM
-///   VALUE` and `OVERRIDING USER VALUE` dropped (they pick the stored value, not its
-///   type), `FOR NO KEY UPDATE`
-///   as `FOR UPDATE`, `FOR KEY SHARE` as `FOR SHARE`, `OF` keeping only its first table,
-///   and `cidr '...'` and similar literals as casts;
+/// - in PostgreSQL, `FOR NO KEY UPDATE` as `FOR UPDATE`, `FOR KEY SHARE` as `FOR SHARE`
+///   and `OF` keeping only its first table;
 /// - in PostgreSQL and MySQL, a `TABLE name` query as `SELECT * FROM name`;
-/// - in SQLite, `INDEXED BY name` and `NOT INDEXED` dropped: they only pick an index;
 /// - the rest of [`respell`].
 ///
 /// A placeholder in a string literal is left alone, as the database would read it, but
@@ -185,37 +157,8 @@ fn fixes(sql: &str, tokens: &[Token], dialect: SqlDialect, edits: &mut Vec<Edit>
     };
     for i in 0..tokens.len() {
         iso_type(sql, tokens, i, edits);
-        match dialect {
-            SqlDialect::Postgres => {
-                if word(i, "ON") && word(i + 1, "CONFLICT") {
-                    edits.extend(conflict_predicate(sql, tokens, i + 2));
-                } else if word(i, "FOR") {
-                    row_lock(sql, tokens, i, edits);
-                } else if word(i, "OVERRIDING")
-                    && (word(i + 1, "SYSTEM") || word(i + 1, "USER"))
-                    && word(i + 2, "VALUE")
-                {
-                    edits.push((tokens[i].start, tokens[i + 2].end, String::new()));
-                } else if POSTGRES_TYPED_STRINGS.iter().any(|ty| word(i, ty))
-                    && text(i + 1).starts_with('\'')
-                    && spaced(sql, tokens, i)
-                {
-                    let value = text(i + 1);
-                    edits.push((
-                        tokens[i].start,
-                        tokens[i + 1].end,
-                        format!("CAST({value} AS {})", text(i)),
-                    ));
-                }
-            }
-            SqlDialect::Sqlite => {
-                if word(i, "INDEXED") && word(i + 1, "BY") && is_name(text(i + 2)) {
-                    edits.push((tokens[i].start, tokens[i + 2].end, String::new()));
-                } else if word(i, "NOT") && word(i + 1, "INDEXED") {
-                    edits.push((tokens[i].start, tokens[i + 1].end, String::new()));
-                }
-            }
-            _ => {}
+        if dialect == SqlDialect::Postgres && word(i, "FOR") {
+            row_lock(sql, tokens, i, edits);
         }
         // sqlparser reads `TABLE name` only after a set operator or a `WITH`.
         let set_operator = |j: usize| {
@@ -267,32 +210,6 @@ fn is_name(text: &str) -> bool {
             .bytes()
             .next()
             .is_some_and(|b| b == b'_' || b.is_ascii_alphanumeric())
-}
-
-/// The edit dropping the `WHERE <predicate>` of `ON CONFLICT (cols) WHERE <predicate> DO`,
-/// whose parenthesis is token `open`.
-fn conflict_predicate(sql: &str, tokens: &[Token], open: usize) -> Option<Edit> {
-    if tokens.get(open)?.kind != Kind::Open {
-        return None;
-    }
-    let close = closing(tokens, open)?;
-    let clause = tokens.get(close + 1)?;
-    if !sql[clause.start..clause.end].eq_ignore_ascii_case("WHERE") {
-        return None;
-    }
-    let mut depth = 0;
-    for token in &tokens[close + 2..] {
-        match token.kind {
-            Kind::Open => depth += 1,
-            Kind::Close if depth == 0 => return None,
-            Kind::Close => depth -= 1,
-            Kind::Word if depth == 0 && sql[token.start..token.end].eq_ignore_ascii_case("DO") => {
-                return Some((tokens[close].end, token.start, " ".to_string()));
-            }
-            _ => {}
-        }
-    }
-    None
 }
 
 /// PostgreSQL's row-lock clause at the `FOR` of token `i`, as sqlparser reads it: `NO KEY

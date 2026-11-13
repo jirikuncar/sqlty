@@ -65,7 +65,9 @@ SELECT CURRENT_TIMESTAMP
 
 ## SQL that results in empty column list
 
+PostgreSQL returns one row without columns.
+
 ```sql
 SELECT
--- inferred: None
+-- inferred: tuple[()]
 ```
