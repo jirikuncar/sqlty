@@ -16,9 +16,8 @@ pub(super) fn report(sql: &str, dialect: &str, ddl: Option<&str>) -> String {
     let (result, diagnostics) = analyze_with_diagnostics(sql, dialect, schema.as_deref());
     let mut out = String::new();
     match result {
-        Err(error) => writeln!(out, "error: {error}").unwrap(),
-        Ok(None) => out.push_str("no rows\n"),
-        Ok(Some(columns)) => {
+        None => out.push_str("no rows\n"),
+        Some(columns) => {
             for column in columns {
                 writeln!(
                     out,

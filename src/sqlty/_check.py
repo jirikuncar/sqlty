@@ -366,7 +366,7 @@ def _check_names(ctx: _Check) -> None:
     for call in ctx.calls:
         if call.query is None or (MARKER.match(call.query) and call.query in ctx.parsed.literals):
             continue
-        for rule, message in _query_diagnostics(
+        for rule, message, *_ in _query_diagnostics(
             call.query, dialect=ctx.dialect, schema_sql=ctx.schema_sql
         ):
             ctx.report(rule, message, call.line, ctx.query_span(call))
@@ -1162,10 +1162,7 @@ def _columns(
     """Columns of a query and whether each can be NULL; ``None`` when it has none or cannot be analysed."""
     if query is None:
         return None
-    try:
-        columns = _analyze_columns(query, dialect=dialect, schema_sql=schema_sql)
-    except RuntimeError:
-        return None
+    columns = _analyze_columns(query, dialect=dialect, schema_sql=schema_sql)
     return [_RowColumn(*column) for column in columns] if columns else None
 
 

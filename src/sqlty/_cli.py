@@ -1322,10 +1322,19 @@ def _package_path(directory: Path) -> tuple[str, ...]:
 
 
 @functools.cache
-def _resolved_root(root: Path) -> Path | None:
-    """``root`` resolved, or ``None`` when it is not a directory."""
-    root = root.resolve()
-    return root if root.is_dir() else None
+def _package_names(directory: str) -> tuple[str, ...]:
+    return _package_path(Path(directory))
+
+
+@functools.cache
+def _resolved_root(root: Path, cwd: str) -> tuple[str, str] | None:
+    """``root`` resolved against ``cwd`` as a prefix of the paths under it (case folded as
+    the platform compares paths) and its name, or ``None`` when it is not a directory."""
+    root = Path(cwd, root).resolve()
+    if not root.is_dir():
+        return None
+    prefix = os.path.normcase(os.fspath(root))
+    return prefix if prefix.endswith(os.sep) else prefix + os.sep, root.name
 
 
 def _checked_roots(paths: Iterable[Path], files: Iterable[Path]) -> list[Path]:
@@ -1354,29 +1363,20 @@ def _module_names(path: Path, roots: list[Path]) -> list[str]:
         >>> _module_names(Path("missing/pkg/mod.py"), [])
         ['mod']
     """
-    stem = [] if path.stem == "__init__" else [path.stem]
+    text = os.fspath(path)
+    directory, name = os.path.split(text)
+    stem = os.path.splitext(name)[0]
+    parts = [*_package_names(directory), *([] if stem == "__init__" else [stem])]
+    names = [".".join(parts)]
+    folded = os.path.normcase(text)
     cwd = os.getcwd()
-    absolute = tuple(os.path.join(cwd, root) for root in roots)
-    package, relatives = _directory_names(os.path.dirname(path), absolute)
-    names = [".".join([*package, *stem])]
-    for name, relative in relatives:
-        names += [".".join([*relative, *stem]), ".".join([name, *relative, *stem])]
-    return list(dict.fromkeys(name for name in names if name)) or [path.stem]
-
-
-@functools.cache
-def _directory_names(
-    directory: str, roots: tuple[str, ...]
-) -> tuple[tuple[str, ...], tuple[tuple[str, tuple[str, ...]], ...]]:
-    """``_module_names`` of the files of ``directory``: its package path, and its path from
-    each of the absolute ``roots`` it is under, with the root's name."""
-    path = Path(directory)
-    relatives = tuple(
-        (root.name, path.relative_to(root).parts)
-        for root in (_resolved_root(Path(root)) for root in roots)
-        if root is not None and path.is_relative_to(root)
-    )
-    return _package_path(path), relatives
+    for root in (_resolved_root(root, cwd) for root in roots):
+        if root is not None and folded.startswith(root[0]):
+            relative = os.path.splitext(text[len(root[0]) :])[0].split(os.sep)
+            if relative[-1] == "__init__":
+                relative.pop()
+            names += [".".join(relative), ".".join([root[1], *relative])]
+    return list(dict.fromkeys(name for name in names if name)) or [stem]
 
 
 @dataclass(frozen=True)
@@ -1450,7 +1450,7 @@ class SettingsResolver:
     def _schema(self, schema_sql: str, dialect: str, types: dict[str, str] | None = None) -> Schema:
         """``schema_sql`` parsed once per run, warning about the objects it could not parse."""
         from sqlty._config import ConfigError
-        from sqlty.core import load_schema, schema_skipped_objects
+        from sqlty.core import checks_names, load_schema, schema_skipped_objects
 
         key = (schema_sql, dialect, tuple(sorted((types or {}).items())))
         if (schema := self._schemas.get(key)) is None:
@@ -1458,6 +1458,8 @@ class SettingsResolver:
                 schema = self._schemas[key] = load_schema(schema_sql, dialect=dialect, types=types)
             except ValueError as exc:
                 raise ConfigError(f"[tool.sqlty.types]: {exc}") from None
+            if not checks_names(dialect):
+                logger.warning("Table and column names are not checked for %s", dialect)
             for kind, name in schema_skipped_objects(schema, dialect=dialect):
                 if kind == "statement":
                     logger.warning("Schema statement could not be parsed and is ignored: %s", name)
@@ -1646,11 +1648,8 @@ class Project:
         texts = {path: read_source(path) for path in files}
         self.unreadable = [path for path, text in texts.items() if text is None]
         self.files = [path for path in files if texts[path] is not None]
-        resolved = [self.resolver.resolve(path) for path in self.files]
-        self.modules = {
-            path: _module_names(real, self.paths)
-            for path, real in zip(self.files, resolved, strict=True)
-        }
+        self.resolved = {path: self.resolver.resolve(path) for path in self.files}
+        self.modules = {path: _module_names(self.resolved[path], self.paths) for path in self.files}
         self.sources = {
             path: ParsedSource(text, self._module(path))
             for path in self.files
@@ -1662,7 +1661,7 @@ class Project:
             for path in _collect_query_files(self.paths, self.files, self.resolver)
             if path not in self.settings
         ]
-        self._index(resolved)
+        self._index()
 
     def query_types(self, path: Path, text: str) -> list[str]:
         from sqlty._queries import query_types
@@ -1702,7 +1701,8 @@ class Project:
             return
         if old is None:
             self.files.append(path)
-            self.modules[path] = _module_names(self.resolver.resolve(path), self.paths)
+            self.resolved[path] = self.resolver.resolve(path)
+            self.modules[path] = _module_names(self.resolved[path], self.paths)
             self.settings[path] = self.resolver.for_file(path)
         parsed = self.sources[path] = ParsedSource(text, self._module(path))
         if old is None or old.may_define_helpers or parsed.may_define_helpers:
@@ -1784,16 +1784,14 @@ class Project:
     def _module(self, path: Path) -> str:
         return self.modules[path][0] + (".__init__" if path.name == "__init__.py" else "")
 
-    def _index(self, resolved: list[Path] | None = None) -> None:
+    def _index(self) -> None:
         from sqlty._helpers import HelperIndex, configured_helpers
 
-        if resolved is None:
-            resolved = [self.resolver.resolve(path) for path in self.files]
         self.index = HelperIndex()
         for path, parsed in self.sources.items():
             for name in self.modules[path]:
                 self.index.add(name, parsed)
-        checked = _checked_roots(self.paths, resolved)
+        checked = _checked_roots(self.paths, self.resolved.values())
         helpers_for = configured_helpers(self.index, checked)
         self.helpers = {path: helpers_for(self.settings[path]) for path in self.files}
 

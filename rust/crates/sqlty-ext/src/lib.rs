@@ -38,7 +38,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
 
@@ -296,16 +296,12 @@ enum Error {
     /// `ValueError`: an unsupported `import_style`, or an unknown rule or severity.
     #[error(transparent)]
     Config(#[from] ConfigError),
-    /// `RuntimeError`: inference found a query it cannot judge.
-    #[error(transparent)]
-    Infer(#[from] analyzer::InferError),
 }
 
 impl From<Error> for PyErr {
     fn from(error: Error) -> Self {
         match error {
             Error::Config(_) => PyValueError::new_err(error.to_string()),
-            Error::Infer(_) => PyRuntimeError::new_err(error.to_string()),
         }
     }
 }
@@ -348,9 +344,6 @@ fn nullable(nullability: analyzer::Nullability) -> Option<bool> {
 ///
 /// Returns:
 ///     Python type string (e.g., "tuple[int, str]") or None if inference fails
-///
-/// Raises:
-///     RuntimeError: SUM(column) names a column missing from a schema table
 #[pyfunction]
 #[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES, schema_sql = None))]
 fn infer_type(
@@ -358,11 +351,11 @@ fn infer_type(
     sql: &str,
     dialect: DialectArg,
     schema_sql: Option<SchemaArg>,
-) -> Result<Option<String>, Error> {
+) -> Option<String> {
     let dialect = dialect.0;
-    Ok(detach(py, || {
+    detach(py, || {
         analyzer::infer_type(sql, dialect, schema(schema_sql, dialect).as_deref())
-    })?)
+    })
 }
 
 /// The stack the analyzer's recursion keeps free: it moves to a new stack of
@@ -370,6 +363,23 @@ fn infer_type(
 /// deep fits whatever thread calls it.
 const STACK_RED_ZONE: usize = 2 << 20;
 const STACK_SEGMENT: usize = 16 << 20;
+
+/// The threads that parse the modules of an index; `None` in a forked child, where the
+/// parent's threads do not exist and handing them work would never return. Rayon's 2 MiB
+/// stacks are below the parser's and analyzer's red zones, so every parse would allocate
+/// a new stack.
+fn parse_pool() -> Option<&'static rayon::ThreadPool> {
+    static POOL: std::sync::OnceLock<(u32, rayon::ThreadPool)> = std::sync::OnceLock::new();
+    let (pid, pool) = POOL.get_or_init(|| {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .thread_name(|i| format!("sqlty-parse-{i}"))
+            .stack_size(32 << 20)
+            .build()
+            .expect("the parse threads start");
+        (std::process::id(), pool)
+    });
+    (*pid == std::process::id()).then_some(pool)
+}
 
 /// Runs `f` without the GIL, with at least [`STACK_RED_ZONE`] of stack.
 fn detach<T: Send, F: Send + FnOnce() -> T>(py: Python<'_>, f: F) -> T {
@@ -387,9 +397,6 @@ fn skills() -> Vec<(&'static str, &'static str)> {
 /// Result columns of a query as `(name, python_type, sql_type)` tuples.
 ///
 /// Returns None when the query returns no rows or doesn't parse; unknown types are None.
-///
-/// Raises:
-///     RuntimeError: SUM(column) names a column missing from a schema table
 #[pyfunction]
 #[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES, schema_sql = None))]
 fn analyze_select(
@@ -397,17 +404,17 @@ fn analyze_select(
     sql: &str,
     dialect: DialectArg,
     schema_sql: Option<SchemaArg>,
-) -> Result<Option<Vec<ColumnTuple>>, Error> {
+) -> Option<Vec<ColumnTuple>> {
     let dialect = dialect.0;
     let columns = detach(py, || {
         analyzer::analyze_select(sql, dialect, schema(schema_sql, dialect).as_deref())
-    })?;
-    Ok(columns.map(|columns| {
+    });
+    columns.map(|columns| {
         columns
             .into_iter()
             .map(|col| (col.name.clone(), col.display_type(), col.sql_type))
             .collect()
-    }))
+    })
 }
 
 /// `(id, reference, reasoning)` of an inference rule.
@@ -452,9 +459,6 @@ fn explain_select(
 /// whether the column can be NULL (True), cannot (False), or is not known (None: an
 /// unresolved column, an unknown function), so row types can be judged against it.
 /// Returns None when the query returns no rows or doesn't parse.
-///
-/// Raises:
-///     RuntimeError: SUM(column) names a column missing from a schema table
 #[pyfunction]
 #[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES, schema_sql = None))]
 fn analyze_columns(
@@ -462,12 +466,12 @@ fn analyze_columns(
     sql: &str,
     dialect: DialectArg,
     schema_sql: Option<SchemaArg>,
-) -> Result<Option<Vec<NullableColumnTuple>>, Error> {
+) -> Option<Vec<NullableColumnTuple>> {
     let dialect = dialect.0;
     let columns = detach(py, || {
         analyzer::analyze_select(sql, dialect, schema(schema_sql, dialect).as_deref())
-    })?;
-    Ok(columns.map(|columns| {
+    });
+    columns.map(|columns| {
         columns
             .into_iter()
             .map(|col| {
@@ -480,7 +484,7 @@ fn analyze_columns(
                 )
             })
             .collect()
-    }))
+    })
 }
 
 /// Fields of the composite type `type_name` the schema defines, as
@@ -570,7 +574,19 @@ fn name_rules() -> Vec<&'static str> {
         .collect()
 }
 
-/// Why a query has untyped columns, or names what it cannot, as `(rule, message)` pairs:
+/// `(rule, message, start, end, table, column)` of a query diagnostic: `start` and `end`
+/// are character offsets into the query, None when unknown.
+type QueryDiagnosticTuple = (
+    &'static str,
+    String,
+    Option<usize>,
+    Option<usize>,
+    Option<String>,
+    Option<String>,
+);
+
+/// Why a query has untyped columns, or names what it cannot, as `(rule, message, start,
+/// end, table, column)` tuples:
 /// `unknown-table`, `unknown-column`, `ambiguous-column`, `duplicate-alias`, `unknown-function`,
 /// `unknown-type`, `unsupported-syntax`, `insert-missing-column`, `insert-value-count`,
 /// `ungrouped-column`, `fanout-aggregate`, `chasm-join`, `unproven-join` and
@@ -587,13 +603,24 @@ fn query_diagnostics(
     sql: &str,
     dialect: DialectArg,
     schema_sql: Option<SchemaArg>,
-) -> Vec<(String, String)> {
+) -> Vec<QueryDiagnosticTuple> {
     let dialect = dialect.0;
+    let chars = |byte: usize| sql[..byte].chars().count();
     detach(py, || {
         analyzer::analyze_with_diagnostics(sql, dialect, schema(schema_sql, dialect).as_deref())
             .1
             .into_iter()
-            .map(|found| (found.rule.name().to_string(), found.message))
+            .map(|found| {
+                let span = found.span.map(|span| (chars(span.start), chars(span.end)));
+                (
+                    found.rule.name(),
+                    found.message,
+                    span.map(|span| span.0),
+                    span.map(|span| span.1),
+                    found.table,
+                    found.column,
+                )
+            })
             .collect()
     })
 }
@@ -650,6 +677,35 @@ fn skipped_objects<S: AsRef<str> + Send + Sync + 'static>(
 fn parse_error(py: Python<'_>, sql: &str, dialect: DialectArg) -> Option<String> {
     let dialect = dialect.0;
     detach(py, || analyzer::parse_error(sql, dialect))
+}
+
+/// The tables a query names, in source order, as `(name, schema, access)` tuples: `access`
+/// is "read" or "write" (the target of an INSERT, UPDATE, DELETE or MERGE). CTEs, derived
+/// tables and table functions are left out; empty when the query does not parse.
+#[pyfunction]
+#[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES))]
+fn query_tables(
+    py: Python<'_>,
+    sql: &str,
+    dialect: DialectArg,
+) -> Vec<(String, Option<String>, &'static str)> {
+    let dialect = dialect.0;
+    detach(py, || analyzer::query_tables(sql, dialect))
+        .into_iter()
+        .map(|table| {
+            let access = if table.write { "write" } else { "read" };
+            (table.name, table.schema, access)
+        })
+        .collect()
+}
+
+/// Whether `dialect` checks a schema's tables and columns against queries.
+#[pyfunction]
+fn checks_names(dialect: DialectArg) -> bool {
+    dialect
+        .0
+        .parse()
+        .is_ok_and(sqlty_sql::Dialect::checks_names)
 }
 
 /// Whether a query yields rows: a query, DML with RETURNING, or unparseable SQL.
@@ -964,31 +1020,59 @@ fn module_helpers(py: Python<'_>, source: &str, version: (u8, u8)) -> HashMap<St
     })
 }
 
-/// `index` after `steps`; a module that does not parse holds nothing.
+/// `index` after `steps`; a module that does not parse holds nothing. The added sources
+/// are parsed in parallel, each text once however many names its module has.
 fn indexed(
     mut index: sqlty_python::index::Builder,
     version: (u8, u8),
     steps: Vec<IndexStep>,
 ) -> ModuleIndex {
-    use sqlty_python::index::Roots;
+    use rayon::prelude::*;
+    use sqlty_python::index::{helpers_of, Roots};
     use sqlty_python::types::symbols::Source;
-    for (kind, first, second, third, roots, database) in steps {
-        if kind == "add" {
-            if let Some(source) = Source::new(&second, version) {
-                index.add(&first, source.named(third.as_deref()));
+    let mut unique: HashMap<(&str, &str), usize> = HashMap::new();
+    let slots: Vec<Option<usize>> = steps
+        .iter()
+        .map(|(kind, module, text, name, ..)| {
+            let key = (text.as_str(), name.as_deref().unwrap_or(module));
+            let next = unique.len();
+            (kind == "add").then(|| *unique.entry(key).or_insert(next))
+        })
+        .collect();
+    let mut texts: Vec<(&str, &str)> = vec![("", ""); unique.len()];
+    for (key, slot) in unique {
+        texts[slot] = key;
+    }
+    let parse = |(text, name): (&str, &str)| {
+        let source = Source::new(text, version)?.named(Some(name));
+        source.targets();
+        let found = helpers_of(&source);
+        Some((Arc::new(source), found))
+    };
+    let parsed: Vec<_> = match parse_pool() {
+        Some(pool) => pool.install(|| texts.into_par_iter().map(parse).collect()),
+        None => texts.into_iter().map(parse).collect(),
+    };
+    for ((_, first, second, third, roots, database), slot) in steps.into_iter().zip(slots) {
+        match slot {
+            Some(slot) => {
+                if let Some((source, found)) = &parsed[slot] {
+                    index.add_found(&first, Arc::clone(source), found);
+                }
             }
-        } else {
-            let roots = Roots {
-                paths: &roots,
-                read: &|path| std::fs::read_to_string(path).ok(),
-            };
-            index.register(
-                &first,
-                &second,
-                third.as_deref(),
-                roots,
-                database.as_deref(),
-            );
+            None => {
+                let roots = Roots {
+                    paths: &roots,
+                    read: &|path| std::fs::read_to_string(path).ok(),
+                };
+                index.register(
+                    &first,
+                    &second,
+                    third.as_deref(),
+                    roots,
+                    database.as_deref(),
+                );
+            }
         }
     }
     ModuleIndex(index.build())
@@ -1859,7 +1943,7 @@ fn check_modules(
         // Below the red zone `maybe_grow` maps a new segment for every module.
         .stack_size(STACK_SEGMENT)
         .build()
-        .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
+        .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
     let found = detach(py, || -> Result<Vec<_>, Error> {
         let schemas: Vec<_> = configs.iter_mut().map(CheckConfig::schema).collect();
         let checkers = configs
@@ -2323,6 +2407,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(schema_skipped_tables, m)?)?;
     m.add_function(wrap_pyfunction!(schema_skipped_objects, m)?)?;
     m.add_function(wrap_pyfunction!(parse_error, m)?)?;
+    m.add_function(wrap_pyfunction!(checks_names, m)?)?;
+    m.add_function(wrap_pyfunction!(query_tables, m)?)?;
     m.add_function(wrap_pyfunction!(returns_rows, m)?)?;
     m.add_function(wrap_pyfunction!(rewrite_source, m)?)?;
     m.add_function(wrap_pyfunction!(add_param_types, m)?)?;

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as vscode from "vscode";
 
+import { encode, session, toml } from "../playground";
 import {
   COMPLETION_VERSION,
   compareVersions,
@@ -123,6 +124,36 @@ suite("sqlty", () => {
     assert.deepEqual(outside, []);
   });
 
+  test("wraps and strips the queries of a file from the Command Palette", async () => {
+    const [folder] = vscode.workspace.workspaceFolders ?? [];
+    const uri = vscode.Uri.joinPath(folder.uri, "wrap.py");
+    const document = await vscode.workspace.openTextDocument(uri);
+    await vscode.window.showTextDocument(document);
+    const plain = document.getText();
+    await diagnostics(uri, (found) => found.length > 0);
+
+    await vscode.commands.executeCommand("sqlty.rewrite");
+    assert.match(
+      document.getText(),
+      /^q = SQL\[tuple\[int \| None\]\]\("--sql\\nSELECT id FROM users"\)$/m,
+    );
+    await vscode.commands.executeCommand("sqlty.strip");
+    assert.equal(document.getText(), plain);
+    await vscode.commands.executeCommand("workbench.action.files.revert");
+  });
+
+  test("registers every command it contributes", async () => {
+    const extension = vscode.extensions.getExtension("jirikuncar.sqlty");
+    const contributed: { command: string; category: string }[] =
+      extension?.packageJSON.contributes.commands;
+    const registered = new Set(await vscode.commands.getCommands(true));
+    assert.deepEqual(
+      contributed.filter(({ command }) => !registered.has(command)),
+      [],
+    );
+    assert.deepEqual(new Set(contributed.map(({ category }) => category)), new Set(["sqlty"]));
+  });
+
   test("declares limited support for Restricted Mode", () => {
     const extension = vscode.extensions.getExtension("jirikuncar.sqlty");
     assert.equal(extension?.packageJSON.capabilities.untrustedWorkspaces.supported, "limited");
@@ -190,6 +221,40 @@ suite("findServer", () => {
     } finally {
       process.env.PATH = path;
     }
+  });
+});
+
+suite("playground", () => {
+  test("shares the settings the playground takes, and the dialect beside them", () => {
+    const settings = {
+      dialect: "sqlite",
+      schema: "schema.sql",
+      "import-style": "import sqlty",
+      rules: { "select-star": "error", "stale-rewrite": "ignore" },
+    };
+    assert.deepEqual(session("q = 1\n", { settings, schema: "CREATE TABLE t (id INT);" }), {
+      source: "q = 1\n",
+      schema: "CREATE TABLE t (id INT);",
+      dialect: "sqlite",
+      config:
+        'import-style = "import sqlty"\n\n[rules]\nselect-star = "error"\nstale-rewrite = "ignore"\n',
+    });
+  });
+
+  test("writes nested tables and quoted keys", () => {
+    assert.equal(
+      toml({ types: { "my type": "int" }, a: [1, "b"] }),
+      'a = [1, "b"]\n\n[types]\n"my type" = "int"\n',
+    );
+  });
+
+  test("encodes a session as share.js decodes it", async () => {
+    const shared = session("q = 1\n", { settings: {}, schema: "" });
+    const hash = await encode(shared);
+    assert.match(hash, /^[A-Za-z0-9_-]+$/);
+    const bytes = Buffer.from(hash, "base64url");
+    const inflated = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate"));
+    assert.deepEqual(JSON.parse(await new Response(inflated).text()), shared);
   });
 });
 

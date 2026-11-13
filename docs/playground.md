@@ -232,6 +232,13 @@ focus it and press the arrow keys. The page remembers the height and the font si
 A single fix is a quick fix on its diagnostic: click the light bulb, or press
 **Ctrl+.** with the cursor on it. **Ctrl+Z** undoes any of them.
 
+Press **F1** or **Ctrl+Shift+P** (**Cmd+Shift+P** on macOS; Firefox keeps it for a private
+window) in the editor, or right-click it, for the same commands as the
+[VS Code extension](recipes/vscode.md#commands): **sqlty: Fix All in File**, **sqlty: Wrap
+Queries in SQL[T]**, **sqlty: Strip SQL[T] Wrappers**, **sqlty: Format Queries in File**,
+**sqlty: Copy Share Link** and **sqlty: Explain Rule**, which opens the page of the rule
+under the cursor.
+
 ## Offline
 
 The docs work offline once they are open: a service worker keeps every page, and the
