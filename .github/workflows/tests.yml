@@ -126,8 +126,13 @@ jobs:
         run: cargo test --doc --workspace --manifest-path rust/Cargo.toml
 
   free-threaded:
-    name: Threads on free-threaded Python 3.14t
+    name: Threads on free-threaded Python ${{ matrix.python }}
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # 3.14t builds a cp314t extension, 3.15t the abi3t one.
+        python: ["3.14t", "3.15t"]
+      fail-fast: false
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -142,7 +147,7 @@ jobs:
           # Built wheels (duckdb has none for 3.15) are kept with the lock; main writes them.
           cache-dependency-glob: uv.lock
           # Jobs install different groups: each keeps its own cache.
-          cache-suffix: ${{ github.job }}
+          cache-suffix: ${{ github.job }}-${{ matrix.python }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Rust toolchain
@@ -155,8 +160,10 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build the extension and run the thread tests
+        env:
+          PYTHON: ${{ matrix.python }}
         run: |
-          uv venv --python 3.14t
+          uv venv --python "$PYTHON"
           uv export --only-group dev --no-hashes --no-emit-project --quiet > "$RUNNER_TEMP/locked.txt"
           uv pip install maturin pytest pytest-cov pytest-xdist --constraint "$RUNNER_TEMP/locked.txt"
           uv run --no-sync maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
@@ -532,14 +539,14 @@ jobs:
           key: python-${{ matrix.python-version }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      # Build at the lowest supported maturin: older versions resolve
-      # `include` against python-source and drop sqlty_magic.pth from the wheel.
+      # Build at the lowest supported maturin: before 1.12.1 `include` resolved against
+      # python-source and dropped sqlty_magic.pth from the wheel; before 1.15 abi3t broke.
       - name: Build sdist, then wheel from sdist (maturin floor)
         # The wheel builds in a temporary unpacked sdist; the cached target dir stays shared.
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/rust/target
         run: |
-          echo 'maturin==1.12.1' > "$RUNNER_TEMP/maturin-floor.txt"
+          echo 'maturin==1.15.0' > "$RUNNER_TEMP/maturin-floor.txt"
           uv build --out-dir dist --build-constraint "$RUNNER_TEMP/maturin-floor.txt"
 
       - name: Check sqlty_magic.pth is in the wheel root, RECORD and sdist
