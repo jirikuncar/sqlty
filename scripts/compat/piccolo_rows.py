@@ -1,5 +1,6 @@
 """Rows from Piccolo: each column type's SQL per engine (`column_type`), with the
-column's Python type (`value_type`), alone and as the base column of an `Array`."""
+column's Python type (`value_type`), alone and as the base column of an `Array`, and
+PostgreSQL's identity integers (`generated=Identity(...)`)."""
 
 from __future__ import annotations
 
@@ -43,17 +44,32 @@ def rows() -> Iterator[Row]:
         if name not in ("JSON", "JSONB", "Serial", "BigSerial"):
             array = column_types.Array(base_column=cls())
             yield from _rows(piccolo.__VERSION__, array, f"columns.Array({name})")
+    yield from _identity_rows(piccolo.__VERSION__)
+
+
+def _identity_rows(version: str) -> Iterator[Row]:
+    from piccolo.columns import BigInt, Integer, SmallInt
+    from piccolo.columns.generated import Identity
+
+    for cls in (SmallInt, Integer, BigInt):
+        for identity in (Identity(), Identity(always=False, start=10, increment=5)):
+            column = cls(generated=identity)
+            yield Row(
+                "piccolo",
+                version,
+                "postgres",
+                "column",
+                f"{_column_type(column, 'postgres')} {identity.postgres}",
+                _python(column.value_type),
+                f"columns.{cls.__name__}(generated={identity!r})",
+            )
 
 
 def _rows(version: str, column: object, provenance: str) -> Iterator[Row]:
     from piccolo.columns.column_types import JSON, Array
 
     for dialect, engine in ENGINES.items():
-        meta = type(column._meta)
-        with mock.patch.object(
-            meta, "engine_type", new_callable=mock.PropertyMock, return_value=engine
-        ):
-            ddl = column.column_type
+        ddl = _column_type(column, engine)
         if isinstance(column, JSON):  # decoded by Piccolo: any JSON value
             python = "typing.Any"
         elif isinstance(column, Array):
@@ -62,3 +78,10 @@ def _rows(version: str, column: object, provenance: str) -> Iterator[Row]:
         else:
             python = _python(getattr(column, "value_type", None))
         yield Row("piccolo", version, dialect, "column", ddl, python, provenance)
+
+
+def _column_type(column: object, engine: str) -> str:
+    with mock.patch.object(
+        type(column._meta), "engine_type", new_callable=mock.PropertyMock, return_value=engine
+    ):
+        return column.column_type
