@@ -201,3 +201,24 @@ def test_a_composition_needs_psycopg(monkeypatch: pytest.MonkeyPatch) -> None:
     assert parsed.psycopg.render(parsed.calls[0]) is None
     with pytest.raises(Unrenderable):
         parsed.psycopg.compose(parsed.calls[0], lambda name: None)
+
+
+def test_a_composition_reading_another_module_needs_a_helper_index() -> None:
+    from sqlty._helpers import find_helper_calls
+
+    source = (
+        "from typing import Annotated\nfrom psycopg import sql\nfrom sqlty import SQL\nimport cols\n"
+        "def run(q: Annotated[sql.Composable, SQL]) -> None: ...\n"
+        'run(sql.SQL("SELECT {} FROM t").format(cols.COLS))\n'
+    )
+    assert [(c.line, c.query) for c in find_helper_calls(source)] == [(6, None)]
+
+
+def test_a_composition_nested_too_deep_is_unchecked() -> None:
+    from sqlty._source import ParsedSource
+
+    composed = 'sql.SQL("x")'
+    for _ in range(65):
+        composed = f'sql.SQL("{{}}").format({composed})'
+    parsed = ParsedSource(f"from psycopg import sql\nQ = {composed}\n")
+    assert parsed.psycopg.render(parsed.calls[0]) == "unchecked"

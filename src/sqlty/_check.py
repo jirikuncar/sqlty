@@ -220,12 +220,6 @@ class _Check:
         self.diagnostics.append(diagnostic)
         return diagnostic
 
-    def query_span(self, call: HelperCall) -> tuple[int, int] | None:
-        """The byte offsets of the argument the query of ``call`` comes from."""
-        if call.query_span is not None:
-            return call.query_span
-        return None if call.query_node is None else self.parsed.span(call.query_node)
-
 
 def _check_unchecked_queries(ctx: _Check) -> None:
     for call in ctx.found:
@@ -235,21 +229,21 @@ def _check_unchecked_queries(ctx: _Check) -> None:
                     "dynamic-query" if call.dynamic else "unchecked-query",
                     f"query has {call.reason}, so it is not checked",
                     call.line,
-                    ctx.query_span(call),
+                    call.query_span,
                 )
             elif call.dynamic:
                 ctx.report(
                     "dynamic-query",
                     "query is not a string literal, so it is not checked",
                     call.line,
-                    ctx.query_span(call),
+                    call.query_span,
                 )
             else:
                 ctx.report(
                     "unchecked-query",
                     "psycopg query is not built from literals only, so it is not checked",
                     call.line,
-                    ctx.query_span(call),
+                    call.query_span,
                 )
 
 
@@ -269,13 +263,13 @@ def _check_params(ctx: _Check) -> None:
                 "param-type-mismatch",
                 f"parameters are a single {single}, which {driver} rejects: pass a sequence, `(value,)`",
                 line,
-                ctx.query_span(call),
+                call.query_span,
             )
     for call in [*ctx.calls, *ctx.driver_calls]:
         if call.params is not None:
             declared = _declared_annotations(ctx, call.query)
             for rule, message in _param_diagnostics(call, ctx.dialect, ctx.schema_sql, declared):
-                ctx.report(rule, message, call.line, ctx.query_span(call))
+                ctx.report(rule, message, call.line, call.query_span)
 
 
 def _declared_annotations(
@@ -339,7 +333,7 @@ def _check_select_star(ctx: _Check) -> None:
                 and not (isinstance(ctx.schema_sql, Schema) and ctx.schema_sql.absent),
             )
         ):
-            ctx.report(*found, call.line, ctx.query_span(call))
+            ctx.report(*found, call.line, call.query_span)
 
 
 def _check_unparsed(ctx: _Check) -> None:
@@ -354,7 +348,7 @@ def _check_unparsed(ctx: _Check) -> None:
             message = f"query does not parse: {error}"
             if "found: {" in error and (field := _FORMAT_FIELD.search(call.query)):
                 message += f"; `{field[0]}` is a `.format()` field: fill it with `sql.SQL(...).format(...)`, or pass a value as `%s`"
-            ctx.report("unparsed-query", message, call.line, ctx.query_span(call))
+            ctx.report("unparsed-query", message, call.line, call.query_span)
 
 
 _FORMAT_FIELD = re.compile(r"\{\w*\}")
@@ -369,7 +363,7 @@ def _check_names(ctx: _Check) -> None:
         for rule, message, *_ in _query_diagnostics(
             call.query, dialect=ctx.dialect, schema_sql=ctx.schema_sql
         ):
-            ctx.report(rule, message, call.line, ctx.query_span(call))
+            ctx.report(rule, message, call.line, call.query_span)
 
 
 def _check_structural(ctx: _Check) -> None:
@@ -422,7 +416,7 @@ def _bound_params(ctx: _Check) -> dict[tuple[int, int], tuple[ParamArg, ...]]:
     bindings = [
         (span, call.params)
         for call in ctx.driver_calls
-        if call.params and (span := ctx.query_span(call)) is not None
+        if call.params and (span := call.query_span) is not None
     ]
     for _, declared, _, span in ctx.declared:
         if (found := _annotations_of(ctx, declared, ctx.parsed)) is not None:
@@ -851,7 +845,7 @@ def _compare_rows(
         coerce=sorted(coerce),
     )
     if rust is None:
-        return
+        return  # pragma: no cover - a surrogate escape; the outline comparison fails first
     found: list[Diagnostic] = []
     ctx = _Check(
         parsed,
@@ -1018,7 +1012,12 @@ def _param_diagnostics(
 
 
 def _fits(actual: str | None, expected: str | None) -> bool:
-    """Whether a type checker takes a value of type ``actual`` for ``expected``; unknown types fit."""
+    """Whether a type checker takes a value of type ``actual`` for ``expected``; unknown types fit.
+
+    Example:
+        >>> _fits("list[int]", "list"), _fits("int", "list"), _fits(None, "str")
+        (True, False, True)
+    """
     if actual is None or expected is None or actual == expected:
         return True
     if "list" in (actual, expected):
@@ -1141,7 +1140,15 @@ def _declared_params_diagnostics(
 
 
 def _union_members(annotation: ast.expr | None) -> list[ast.expr]:
-    """The members of a ``X | Y``, ``Optional[X]`` or ``Union[X, Y]`` annotation."""
+    """The members of a ``X | Y``, ``Optional[X]`` or ``Union[X, Y]`` annotation.
+
+    Example:
+        >>> union = ast.parse("Union[int, Optional[str]]", mode="eval").body
+        >>> [ast.unparse(member) for member in _union_members(union)]
+        ['int', 'str', 'None']
+        >>> _union_members(None)
+        []
+    """
     match annotation:
         case None:
             return []

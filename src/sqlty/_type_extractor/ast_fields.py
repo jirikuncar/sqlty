@@ -538,6 +538,12 @@ def _annotation_type(annotation: str) -> typing.Any:
     """Parse an annotation string into a type as `_ast_type` does; None if it can't be resolved.
 
     Only for annotations without their module's imports; ``typing.X`` resolves.
+
+    Example:
+        >>> _annotation_type("typing.Optional[int]")
+        int | None
+        >>> _annotation_type("int |") is None
+        True
     """
     try:
         return _ast_type(ast.parse(annotation, mode="eval").body, {n: n for n in _TYPING_GENERICS})
@@ -855,6 +861,10 @@ def _allows_extra(
         >>> _allows_extra(cls("class A(BaseModel): x: int"), {})
         False
         >>> _allows_extra(cls("class A(BaseModel): model_config = CONFIG"), {})
+        True
+        >>> _allows_extra(cls("class A(BaseModel, **options): x: int"), {})
+        True
+        >>> _allows_extra(cls("class A(BaseModel): model_config = {**CONFIG}"), {})
         True
     """
     if (extra := options.get("extra")) is not None:

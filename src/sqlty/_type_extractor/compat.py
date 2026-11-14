@@ -70,6 +70,8 @@ def admits_none(tp: typing.Any) -> bool | None:
     Example:
         >>> admits_none(int), admits_none(int | None), admits_none(typing.Any), admits_none(None)
         (False, True, True, None)
+        >>> admits_none(typing.TypeVar("T")) is None
+        True
     """
     if tp is None:
         return None
@@ -187,6 +189,14 @@ def field_type(user_type: TypeInfo, column_name: str) -> typing.Any:
     Resolved as `check_type_compatibility` resolves it, but with ``| None`` kept (type
     compatibility ignores it, since every column may be NULL); ``None`` when the field is
     unknown or its annotation can't be resolved.
+
+    Example:
+        >>> from sqlty._type_extractor import extract_type_definitions
+        >>> row = extract_type_definitions("from typing import TypedDict\\nclass R(TypedDict):\\n    a: int")["R"]
+        >>> row
+        TypeInfo('R', fields=[('a', 'int')], kind='TypedDict')
+        >>> field_type(row, "a"), field_type(row, "b")
+        (<class 'int'>, None)
     """
     declared = dict(user_type.fields)
     if column_name in declared:

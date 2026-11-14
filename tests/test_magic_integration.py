@@ -289,7 +289,7 @@ def test_decode_keeps_source_on_bad_import_style(monkeypatch: pytest.MonkeyPatch
 def test_a_broken_config_leaves_the_import_style_unset(tmp_path, monkeypatch: pytest.MonkeyPatch):
     from sqlty import _decode
 
-    (tmp_path / "pyproject.toml").write_text("[tool.sqlty\n")
+    (tmp_path / "pyproject.toml").write_text("[tool.sqlty]\ndialect = 1\n")
     monkeypatch.chdir(tmp_path)
     _decode._import_style.cache_clear()
     try:

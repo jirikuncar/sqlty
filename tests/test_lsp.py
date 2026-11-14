@@ -116,6 +116,31 @@ def test_the_baseline_is_checked_backward_once(repo: Path) -> None:
     ]
 
 
+def test_a_baseline_file_deleted_from_the_workspace(repo: Path) -> None:
+    """Its backward findings stand at the top of the file, as for an edited one."""
+    (repo / "app" / "old.py").unlink()
+    workspace = Workspace(str(repo / "app"), against="HEAD")
+
+    [(path, [finding])] = workspace.breaking().items()
+
+    assert path == str(repo / "app" / "old.py")
+    assert (finding["start"], finding["end"]) == (0, 0)
+    assert finding["message"].endswith("(in the code of HEAD, line 1)")
+
+
+def test_a_schema_file_baseline_outside_a_repository(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
+    (tmp_path / "schema.sql").write_text(NEW_SCHEMA)
+    (tmp_path / "old.sql").write_text(OLD_SCHEMA)
+    workspace = Workspace(str(tmp_path), against="old.sql")
+
+    assert workspace.breaking() == {}
+    found = workspace.check(str(tmp_path / "q.py"), NEW_CODE)
+    assert [d["message"] for d in found if d.get("source")] == [
+        "column `handle` does not exist in `users` (with the schema of old.sql)"
+    ]
+
+
 @pytest.mark.parametrize("direction", ["forward", "backward"])
 def test_one_direction(repo: Path, direction: Direction) -> None:
     workspace = Workspace(str(repo), against="HEAD", direction=direction)

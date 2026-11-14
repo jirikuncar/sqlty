@@ -278,6 +278,7 @@ CASES = {
     "loop": "    q = BASE\n    for x in items:\n        q += ' x'\n    run(q)\n",
     "inside": "    q = BASE\n    try:\n        if flag:\n            q += ' f'\n        run(q)\n"
     "    finally:\n        pass\n",
+    "composed unbound": "    if flag:\n        x = ' a'\n    run(sql.SQL(x))\n    run(BASE)\n",
     "starred": "    run(pick(*TABLE))\n    run(loop(TABLE))\n    run(BASE)\n",
     "unpassed": "    run(deep())\n    run(pick())\n    run(BASE)\n",
     "patterns": "    match kind:\n        case 'a' | 1:\n            q = ' one'\n        case _:\n"

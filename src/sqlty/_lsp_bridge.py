@@ -132,4 +132,7 @@ class Workspace:
     def _text(self, path: Path) -> str:
         if (parsed := self.project.sources.get(path)) is not None:
             return parsed.text
-        return read_source(path) or ""
+        try:
+            return read_source(path) or ""
+        except FileNotFoundError:
+            return ""

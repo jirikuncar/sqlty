@@ -81,7 +81,12 @@ class Facts(typing.NamedTuple):
 
 
 class AstMismatch(AssertionError):
-    """``SQLTY_AST=compare`` found the Rust and Python readings of a module different."""
+    """``SQLTY_AST=compare`` found the Rust and Python readings of a module different.
+
+    Example:
+        >>> str(AstMismatch("facts", 1, 2, "x = 1"))
+        'facts: rust 1 != python 2\\nx = 1'
+    """
 
     def __init__(self, what: str, rust: object, python: object, text: str) -> None:
         super().__init__(f"{what}: rust {rust!r} != python {python!r}\n{text}")
@@ -509,6 +514,8 @@ class ParsedSource:
             >>> parsed = ParsedSource("x = 1\\nf('é', g)")
             >>> parsed.span(parsed.calls[0].args[1])
             (14, 15)
+            >>> parsed.span(ast.Name("f", lineno=2, col_offset=0))
+            (6, 6)
         """
         starts = self._byte_lines
         start = starts[node.lineno - 1] + node.col_offset
@@ -523,6 +530,8 @@ class ParsedSource:
         Example:
             >>> ParsedSource("x = 1\\n    y = 2\\n").line_span(2)
             (10, 15)
+            >>> ParsedSource("x = 1\\n").line_span(9)
+            (6, 6)
         """
         starts = self._byte_lines
         if not 0 < line < len(starts):
@@ -587,6 +596,8 @@ class ParsedSource:
         Example:
             >>> sorted(ParsedSource("a = 'x'\\nb = 'y' + c").literals)
             ['x']
+            >>> ParsedSource("a = (").literals
+            frozenset()
         """
         if self.tree is None:
             return frozenset()
@@ -627,6 +638,8 @@ class ParsedSource:
             >>> sorted(ParsedSource("A = 'x'\\nB = 1\\nB = 2\\ndef C(): ...").constants)
             ['A', 'B', 'C']
             >>> ParsedSource("A = 'x'\\nB = 1\\nB = 2").constants['B'] is None
+            True
+            >>> ParsedSource("A = 'x'\\nA += 'y'").constants['A'] is None
             True
         """
         found: dict[str, ast.expr | None] = {}
@@ -721,6 +734,8 @@ class ParsedSource:
             >>> aliases = ParsedSource("type A = tuple[int]\\nB = A\\nC = 1").type_aliases
             >>> {name: ast.unparse(value) for name, value in aliases.items()}
             {'A': 'tuple[int]', 'B': 'A'}
+            >>> ParsedSource("A = (").type_aliases
+            {}
         """
         if (tree := self.outline) is None:
             return {}

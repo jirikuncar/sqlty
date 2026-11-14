@@ -253,6 +253,8 @@ def index_functions(source: str | ParsedSource) -> dict[str, Helper]:
         >>> src = "from typing import Annotated\\nfrom sqlty import SQL\\ndef f[T](q: Annotated[str, SQL], t: type[T], /) -> T: ..."
         >>> index_functions(src)["f"]
         Helper(name='f', positional=('q', 't'), keywords=frozenset(), query='q', row='t', kind='function', params=None, rest=None, named=None, configured=False, database=None)
+        >>> index_functions("def f(q: str): ...")
+        {}
     """
     parsed = ParsedSource.of(source)
     annotated, marker = parsed.marker_names
@@ -698,7 +700,16 @@ def _import_entries(parsed: ParsedSource) -> list[tuple[str, str, str | None, in
 def _imports_of(
     entries: Iterable[tuple[str, str, str | None, int]], module: str | None
 ) -> tuple[dict[str, tuple[str, str]], dict[str, str]]:
-    """``_imports`` of ``(local, original, from-module or None, level)``, in ``ast.walk`` order."""
+    """``_imports`` of ``(local, original, from-module or None, level)``, in ``ast.walk`` order.
+
+    A relative import resolves only within a named module.
+
+    Example:
+        >>> _imports_of([("q", "q", "db", 1)], "pkg.app")
+        ({'q': ('pkg.db', 'q')}, {'q': 'pkg.db.q'})
+        >>> _imports_of([("q", "q", "db", 1)], None)
+        ({}, {})
+    """
     functions: dict[str, tuple[str, str]] = {}
     modules: dict[str, str] = {}
     package = module.rpartition(".")[0] if module else ""
@@ -990,7 +1001,7 @@ def _site_calls(
     names = set(helpers.names)
     names |= {local for local, (_, original) in functions.items() if original in names}
     if (sites := helper_sites(parsed.text, sorted(names))) is None:
-        return None
+        return None  # pragma: no cover - no pattern compiles for tens of thousands of names
 
     def module_of(prefix: str) -> str:
         head, _, rest = prefix.partition(".")

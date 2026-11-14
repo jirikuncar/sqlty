@@ -43,6 +43,16 @@ with psycopg.connect("dbname=x") as conn:
     conn.execute("DELETE FROM users WHERE id = %s", params=(b"1",))
 ```
 
+### A signed float
+
+```python
+import psycopg
+
+conn = psycopg.connect("dbname=x")
+# error: [param-type-mismatch] "parameter 1 expects str, got float"
+conn.execute("DELETE FROM users WHERE name = %s", (-1.5,))
+```
+
 ## executemany checks each row
 
 ```python
