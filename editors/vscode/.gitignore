@@ -5,3 +5,4 @@ out/
 *.vsix
 LICENSE
 .vscode-test-web/
+coverage/

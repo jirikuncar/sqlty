@@ -131,13 +131,16 @@ concurrency = ["multiprocessing"]
 parallel = true
 sigterm = true
 patch = ["subprocess", "_exit"]
+source_pkgs = ["sqlty"]
 omit = ["tests/*", "examples/*"]
 
 [tool.coverage.paths]
 source = ["src/"]
 
-[tool.coverage.combine]
+[tool.coverage.report]
+fail_under = 97
 show_missing = true
+skip_covered = true
 
 [tool.mypy]
 python_version = "3.15"

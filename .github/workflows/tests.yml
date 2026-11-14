@@ -46,6 +46,9 @@ jobs:
         python-version:
           - "3.14"
           - "3.15"
+        include:
+          - python-version: "3.15"
+            coverage: true
       fail-fast: false
 
     services:
@@ -63,6 +66,7 @@ jobs:
 
     env:
       SQLTY_PG_DSN: postgresql://postgres:postgres@localhost:5432/postgres
+      PYTEST_ADDOPTS: ${{ matrix.coverage && '--cov --cov-append --cov-fail-under=0' || '' }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -81,8 +85,13 @@ jobs:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           python-version: ${{ matrix.python-version }}
 
+      # Coverage builds on nightly for `#[coverage(off)]`.
       - name: Install Rust toolchain
-        run: rustup toolchain install 1.99.1 --profile minimal && rustup default 1.99.1
+        env:
+          TOOLCHAIN: ${{ matrix.coverage && 'nightly-2026-11-01 --component llvm-tools-preview' || '1.99.1' }}
+        run: |
+          rustup toolchain install $TOOLCHAIN --profile minimal
+          rustup default ${TOOLCHAIN%% *}
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -94,6 +103,18 @@ jobs:
 
       - name: Install the dependencies
         run: uv sync --all-groups --no-install-project
+
+      - name: Install cargo-llvm-cov
+        if: matrix.coverage
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: cargo-llvm-cov@0.9.1
+
+      # Every later build is instrumented, and every test process writes a profile.
+      - name: Instrument the Rust build for coverage
+        if: matrix.coverage
+        working-directory: rust
+        run: cargo llvm-cov show-env | sed "s/^\([A-Z_]*\)='\(.*\)'$/\1=\2/" >> "$GITHUB_ENV"
 
       - name: Build Rust extension
         run: uv run maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
@@ -121,6 +142,12 @@ jobs:
 
       - name: Run Rust unit tests
         run: cargo nextest run --workspace --manifest-path rust/Cargo.toml
+
+      - name: Check coverage
+        if: matrix.coverage
+        run: |
+          uv run coverage report
+          cd rust && cargo llvm-cov report --fail-under-lines 94.5
 
       - name: Run Rust doctests
         run: cargo test --doc --workspace --manifest-path rust/Cargo.toml
@@ -208,7 +235,9 @@ jobs:
       - name: Run the docs playground's engine
         run: |
           make playground
-          node --test tests/playground.test.mjs
+          node --test --experimental-test-coverage --test-coverage-include='docs/assets/playground/*.js' \
+            --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=92 \
+            tests/playground.test.mjs
 
   pg-fidelity:
     name: PostgreSQL column names, types and nullability
