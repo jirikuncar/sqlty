@@ -255,7 +255,7 @@
     "build-test": "esbuild src/test/*.ts --bundle --external:vscode --outdir=out/test --format=cjs --platform=node --target=node20 && esbuild src/test/restricted/*.ts --bundle --external:vscode --external:mocha --outdir=out/test/restricted --format=cjs --platform=node --target=node20",
     "check": "tsc --noEmit && oxlint --deny-warnings src && oxfmt --check src",
     "format": "oxfmt src",
-    "test": "npm run build-wasm && npm run build && npm run build-test && vscode-test --coverage && node scripts/coverage.mjs 0 && node out/test/restricted/run.js",
+    "test": "npm run build-wasm && npm run build && npm run build-test && vscode-test --coverage --coverage-reporter json-summary --coverage-output coverage && node scripts/coverage.mjs 0 && node out/test/restricted/run.js",
     "test-web": "npm run build-wasm && npm run build-web && esbuild src/test/web/index.ts --bundle --external:vscode --outfile=out/test/web/index.js --format=cjs --platform=browser --target=es2022 && vscode-test-web --browserType=chromium --headless --quality=stable --extensionDevelopmentPath=. --extensionTestsPath=out/test/web/index.js fixture",
     "package": "npm run build-wasm && npm run build-node -- --minify && npm run build-web -- --minify && cp ../../LICENSE LICENSE && vsce package",
     "demo": "node scripts/demo.js"
