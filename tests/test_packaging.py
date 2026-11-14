@@ -83,11 +83,11 @@ def test_maturin_ships_magic_pth() -> None:
     """The include path is project-root relative, which needs maturin >= 1.12.1.
 
     Older maturin globbed wheel includes relative to ``python-source``, so this
-    path would silently be missing from the wheel.
+    path would silently be missing from the wheel. The abi3t wheel needs 1.15.
     """
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
     assert "src/sqlty_magic.pth" in pyproject["tool"]["maturin"]["include"]
-    assert pyproject["build-system"]["requires"] == ["maturin>=1.12.1,<2.0"]
+    assert pyproject["build-system"]["requires"] == ["maturin>=1.15,<2.0"]
     assert PTH.is_file()
 
 
@@ -218,5 +218,7 @@ def test_supported_pythons_agree() -> None:
     assert len(supported) == 2, "sqlty supports the two latest CPython releases"
     assert project["requires-python"] == f">={supported[0]}"
     assert tests["test"]["strategy"]["matrix"]["python-version"] == supported
-    assert interpreters.split() == supported
-    assert f"for v in {' '.join(supported)};" in imported
+    # The newest one also runs free-threaded, on the same abi3t wheel.
+    importable = [*supported, f"{supported[-1]}t"]
+    assert interpreters.split() == importable
+    assert f"for v in {' '.join(importable)};" in imported

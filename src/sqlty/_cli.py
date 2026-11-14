@@ -25,7 +25,7 @@ import re
 import sys
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, NoReturn, cast
 
 if TYPE_CHECKING:
     import argparse
@@ -51,6 +51,7 @@ def main(argv: list[str] | None = None) -> None:
     """CLI entry point."""
     parser = build_parser()
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    args.hard_exit = argv is None
 
     if args.version:
         _cmd_version()
@@ -692,13 +693,10 @@ def _cmd_check(args: argparse.Namespace) -> None:
                 text = args.output_format == "text"
                 print(f"Fixed {path}", file=sys.stdout if text else sys.stderr)
 
-    def check(path: Path) -> tuple[list[Diagnostic], Counter[str]]:
-        diagnostics = project.check(path, row_usage)
-        return diagnostics, project.statistics(path) if args.statistics else Counter()
-
-    for path, (diagnostics, counts) in zip(files, _map(check, files), strict=True):
-        statistics += counts
+    for path, diagnostics in zip(files, project.check_all(row_usage), strict=True):
         reports.extend((path, diag, sources[path]) for diag in diagnostics)
+    if args.statistics:
+        statistics = sum(_map(project.statistics, files), statistics)
     for path in project.query_files:
         if (text := read_source(path)) is None:
             project.unreadable.append(path)
@@ -750,10 +748,23 @@ def _cmd_check(args: argparse.Namespace) -> None:
     if args.statistics and text:
         print(_format_statistics(statistics))
 
+    code = 0
     if not args.exit_zero and (total_errors or (args.error_on_warning and total_warnings)):
-        sys.exit(EXIT_FOUND)
-    if project.unreadable:
-        sys.exit(EXIT_ERROR)
+        code = EXIT_FOUND
+    elif project.unreadable:
+        code = EXIT_ERROR
+    if getattr(args, "hard_exit", False):
+        _hard_exit(code)
+    if code:
+        sys.exit(code)
+
+
+def _hard_exit(code: int) -> NoReturn:
+    """End the process without freeing what the run built, as mypy's ``hard_exit`` does:
+    freeing the index of a large project takes about as long as checking it."""
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)
 
 
 def json_diagnostic(diag: Diagnostic, parsed: ParsedSource) -> dict[str, object]:
@@ -1301,10 +1312,10 @@ def _package_names(directory: str) -> tuple[str, ...]:
 
 
 @functools.cache
-def _resolved_root(root: Path) -> tuple[str, str] | None:
-    """``root`` resolved as a prefix of the paths under it (case folded as the platform
-    compares paths) and its name, or ``None`` when it is not a directory."""
-    root = root.resolve()
+def _resolved_root(root: Path, cwd: str) -> tuple[str, str] | None:
+    """``root`` resolved against ``cwd`` as a prefix of the paths under it (case folded as
+    the platform compares paths) and its name, or ``None`` when it is not a directory."""
+    root = Path(cwd, root).resolve()
     if not root.is_dir():
         return None
     prefix = os.path.normcase(os.fspath(root))
@@ -1343,7 +1354,8 @@ def _module_names(path: Path, roots: list[Path]) -> list[str]:
     parts = [*_package_names(directory), *([] if stem == "__init__" else [stem])]
     names = [".".join(parts)]
     folded = os.path.normcase(text)
-    for root in map(_resolved_root, roots):
+    cwd = os.getcwd()
+    for root in (_resolved_root(root, cwd) for root in roots):
         if root is not None and folded.startswith(root[0]):
             relative = os.path.splitext(text[len(root[0]) :])[0].split(os.sep)
             if relative[-1] == "__init__":
@@ -1701,6 +1713,30 @@ class Project:
             query_variants=settings.query_variants,
             coerce_row_types=settings.coerce_row_types,
         )
+
+    def check_all(self, row_usage: RowUsage) -> Iterable[list[Diagnostic]]:
+        """``check`` of every file, in order. With ``SQLTY_AST=rust`` one Rust call checks
+        them on its own threads; otherwise threads call ``check``."""
+        from sqlty._check import check_modules
+        from sqlty._source import AST
+
+        if AST != "rust":
+            return _map(lambda path: self.check(path, row_usage), self.files)
+        modules = []
+        for path in self.files:
+            settings = self.settings[path]
+            config = (
+                settings.dialect,
+                settings.schema,
+                settings.rules,
+                settings.import_style,
+                settings.untyped,
+                settings.coerce_row_types,
+                self.helpers[path],
+                settings.query_variants,
+            )
+            modules.append((self.sources[path], config))
+        return check_modules(modules, row_usage, _workers())
 
     def fix(self, path: Path) -> str:
         from sqlty.core import fix_source

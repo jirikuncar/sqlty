@@ -56,7 +56,9 @@ checkout builds from source; both need a [Rust toolchain](https://rustup.rs/). S
 ## Supported Python versions
 
 sqlty supports the two latest CPython releases: 3.14 and 3.15. CI tests both, as
-well as the free-threaded 3.14t, and every release ships wheels for both.
+well as the free-threaded 3.14t and 3.15t. Every release ships wheels for 3.14
+and, on Linux, 3.14t, plus one stable ABI (`abi3t`) wheel per platform that installs
+on 3.15, 3.15t and later.
 
 | Python | Status |
 |--------|--------|
@@ -66,7 +68,7 @@ well as the free-threaded 3.14t, and every release ships wheels for both.
 
 When a new CPython is released, sqlty adds it and drops the oldest supported one.
 The reason is maintenance cost. sqlty's checks follow Python's typing features,
-and its wheels are built per interpreter.
+and its 3.14 wheels are built per interpreter.
 
 An older Python stays supported only while a maintainer takes ownership of it:
 testing it, fixing what breaks on it, and answering its issues. To volunteer, open

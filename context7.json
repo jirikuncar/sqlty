@@ -19,5 +19,5 @@
     "SQL[T] is a str subclass, so a wrapped query works anywhere a string does.",
     "sqlty strip also removes hand-written row types such as SQL[User]; prefer editing the SQL in place and running sqlty check."
   ],
-  "previousVersions": [{ "tag": "v0.5.1" }, { "tag": "v0.5.0" }, { "tag": "v0.4.0" }]
+  "previousVersions": [{ "tag": "v0.6.0" }, { "tag": "v0.5.1" }, { "tag": "v0.5.0" }, { "tag": "v0.4.0" }]
 }

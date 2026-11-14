@@ -1638,9 +1638,11 @@ def test_format_command_must_be_a_list(tmp_path, monkeypatch, capsys) -> None:
     assert "format-command must be a list of strings" in err
 
 
+@pytest.mark.parametrize("ast", ["python", "rust"])
 def test_redundant_optional_reads_every_query_of_a_shared_row_type(
-    tmp_path, monkeypatch, capsys
+    tmp_path, monkeypatch, capsys, ast
 ) -> None:
+    monkeypatch.setattr("sqlty._source.AST", ast)
     (tmp_path / "pyproject.toml").write_text(
         '[tool.sqlty]\nschema = "s.sql"\n\n[tool.sqlty.rules]\nredundant-optional = "error"\n'
     )
@@ -1666,7 +1668,9 @@ def test_redundant_optional_reads_every_query_of_a_shared_row_type(
     assert "pkg/a.py:3: [redundant-optional] Coupon.owner_id" in out.replace(os.sep, "/")
 
 
-def test_redundant_optional_does_not_depend_on_threads(tmp_path, monkeypatch, capsys) -> None:
+@pytest.mark.parametrize("ast", ["python", "rust"])
+def test_redundant_optional_does_not_depend_on_threads(tmp_path, monkeypatch, capsys, ast) -> None:
+    monkeypatch.setattr("sqlty._source.AST", ast)
     (tmp_path / "pyproject.toml").write_text(
         '[tool.sqlty]\nschema = "s.sql"\n\n[tool.sqlty.rules]\nredundant-optional = "error"\n'
     )

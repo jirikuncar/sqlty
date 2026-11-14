@@ -11,11 +11,12 @@ import ast
 import re
 import sys
 import typing
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, NamedTuple
 
 from sqlty._core import ModuleIndex, Schema
 from sqlty._core import analyze_columns as _analyze_columns
+from sqlty._core import check_modules as _check_modules
 from sqlty._core import check_source as _check_source
 from sqlty._core import composite_fields as _composite_fields
 from sqlty._core import module_diagnostics as _module_diagnostics
@@ -638,6 +639,62 @@ def _rust_diagnostics(
         (key, diag) for key, diag in zip(redundant, found, strict=True) if key is not None
     ]
     return found
+
+
+type ModuleConfig = tuple[
+    str,
+    Schema | None,
+    dict[str, str] | None,
+    str | None,
+    bool,
+    frozenset[str],
+    HelperIndex | None,
+    int | None,
+]
+"""``(dialect, schema_sql, rules, import_style, untyped, coerce, helpers, variants)``."""
+
+
+def check_modules(
+    modules: Sequence[tuple[ParsedSource, ModuleConfig]], row_usage: RowUsage, jobs: int | None
+) -> list[list[Diagnostic]]:
+    """``check_source`` of every module, with ``row_usage``, in one Rust call that checks
+    them on ``jobs`` threads (all cores when None)."""
+    # By identity: a rules dict does not hash, and files share their settings' objects.
+    known: dict[tuple[int, ...], int] = {}
+    configs: list[ModuleConfig] = []
+    for _, config in modules:
+        if known.setdefault(tuple(map(id, config)), len(configs)) == len(configs):
+            configs.append(config)
+    found = _check_modules(
+        [(parsed.text, parsed.module, known[tuple(map(id, config))]) for parsed, config in modules],
+        [
+            (
+                dialect,
+                schema,
+                rules,
+                style,
+                untyped,
+                sorted(coerce),
+                None if index is None else index.rust(),
+                n,
+            )
+            for dialect, schema, rules, style, untyped, coerce, index, n in configs
+        ],
+        version=sys.version_info[:2],
+        jobs=jobs,
+    )
+    checked = []
+    for (parsed, config), ((diagnostics, redundant, needed), suppressed) in zip(
+        modules, found, strict=True
+    ):
+        row_usage.needed.update(needed)
+        row_usage.redundant += [
+            (key, diag) for key, diag in zip(redundant, diagnostics, strict=True) if key is not None
+        ]
+        if not suppressed:
+            diagnostics = apply_suppressions(parsed.ignores, diagnostics, config[2])
+        checked.append(diagnostics)
+    return checked
 
 
 def _compare_module(

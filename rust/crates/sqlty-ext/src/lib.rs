@@ -34,7 +34,7 @@ use sqlty_python::rewriter;
 use sqlty_sql::analyzer;
 use sqlty_sql::highlight::Highlight;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -1728,7 +1728,6 @@ fn row_diagnostics(
 #[pyo3(signature = (source, *, version, dialect = DialectArg::POSTGRES, schema_sql = None, rules = None, import_style = None, untyped = false, module = None, coerce = vec![], index = None, name = None, variants = None))]
 #[expect(
     clippy::too_many_arguments,
-    clippy::type_complexity,
     reason = "the keyword-only Python signature is the API"
 )]
 fn module_diagnostics(
@@ -1745,25 +1744,126 @@ fn module_diagnostics(
     index: Option<PyRef<'_, ModuleIndex>>,
     name: Option<&str>,
     variants: Option<usize>,
-) -> Result<(Vec<DiagnosticOut>, Vec<Option<FieldKey>>, Vec<FieldKey>), Error> {
-    use sqlty_python::{check, rows};
-    let dialect = dialect.0;
-    let helpers = index.map(|index| Arc::clone(&index.0));
-    let types = helpers.as_ref().map(|index| index.types());
+) -> Result<ModuleFound, Error> {
+    let mut config = CheckConfig {
+        dialect: dialect.0,
+        schema_sql,
+        rules,
+        import_style: import_style.map(str::to_string),
+        untyped,
+        coerce: coerce.into_iter().collect(),
+        index: index.map(|index| Arc::clone(&index.0)),
+        variants,
+    };
     detach(py, || {
-        let schema = schema(schema_sql, dialect);
-        let options = Options::new(dialect, schema.as_deref(), import_style, untyped)?;
-        let rules = RuleConfig::from_overrides(rules).map_err(ConfigError::from)?;
-        let parsed = parsed_module(source, version, name, helpers.as_deref());
+        let schema = config.schema();
+        let checker = config.checker(schema.as_deref())?;
+        Ok(checker.check(source, version, name, module, false).0)
+    })
+}
+
+/// `(diagnostics, redundant, needed)` of a module, see `row_diagnostics`.
+type ModuleFound = (Vec<DiagnosticOut>, Vec<Option<FieldKey>>, Vec<FieldKey>);
+
+/// A configuration of `check_modules`, as Python passes it: `(dialect, schema_sql, rules,
+/// import_style, untyped, coerce, index, variants)`, see `module_diagnostics`.
+type ConfigArg<'py> = (
+    DialectArg,
+    Option<SchemaArg>,
+    Option<HashMap<String, String>>,
+    Option<String>,
+    bool,
+    Vec<String>,
+    Option<PyRef<'py, ModuleIndex>>,
+    Option<usize>,
+);
+
+/// What `module_diagnostics` reads a module with besides its source and names.
+struct CheckConfig {
+    dialect: &'static str,
+    schema_sql: Option<SchemaArg>,
+    rules: Option<HashMap<String, String>>,
+    import_style: Option<String>,
+    untyped: bool,
+    coerce: HashSet<String>,
+    index: Option<Arc<sqlty_python::index::HelperIndex>>,
+    variants: Option<usize>,
+}
+
+impl CheckConfig {
+    fn new(arg: ConfigArg<'_>) -> Self {
+        let (dialect, schema_sql, rules, import_style, untyped, coerce, index, variants) = arg;
+        Self {
+            dialect: dialect.0,
+            schema_sql,
+            rules,
+            import_style,
+            untyped,
+            coerce: coerce.into_iter().collect(),
+            index: index.map(|index| Arc::clone(&index.0)),
+            variants,
+        }
+    }
+
+    /// The schema, read once: a second call has none.
+    fn schema(&mut self) -> Option<analyzer::Schema> {
+        schema(self.schema_sql.take(), self.dialect)
+    }
+
+    fn checker<'a>(
+        &'a self,
+        schema: Option<&'a analyzer::SchemaData>,
+    ) -> Result<ModuleChecker<'a>, Error> {
+        Ok(ModuleChecker {
+            config: self,
+            options: Options::new(
+                self.dialect,
+                schema,
+                self.import_style.as_deref(),
+                self.untyped,
+            )?,
+            rules: RuleConfig::from_overrides(self.rules.clone()).map_err(ConfigError::from)?,
+            types: self.index.as_ref().map(|index| index.types()),
+            has_schema: schema
+                .is_some_and(|schema| !schema.databases().is_some_and(|all| all.absent)),
+        })
+    }
+}
+
+/// A [`CheckConfig`] read once, for every module checked with it.
+struct ModuleChecker<'a> {
+    config: &'a CheckConfig,
+    options: Options<'a>,
+    rules: RuleConfig,
+    types: Option<Arc<dyn sqlty_python::types::symbols::Index>>,
+    has_schema: bool,
+}
+
+impl ModuleChecker<'_> {
+    /// The diagnostics of `source`; with `suppress`, without those its `# sqlty: ignore`
+    /// comments drop and with their `unused-ignore`, which only a source that parses gets.
+    /// The flag tells whether they were applied.
+    fn check(
+        &self,
+        source: &str,
+        version: (u8, u8),
+        name: Option<&str>,
+        module: Option<&str>,
+        suppress: bool,
+    ) -> (ModuleFound, bool) {
+        use sqlty_python::{check, rows};
+        let helpers = self.config.index.as_deref();
+        let parsed = parsed_module(source, version, name, helpers);
         let settings = rows::Settings {
-            options: &options,
-            rules: &rules,
-            index: types.as_ref(),
+            options: &self.options,
+            rules: &self.rules,
+            index: self.types.as_ref(),
             module,
-            coerce: &coerce.into_iter().collect(),
+            coerce: &self.config.coerce,
         };
+        let dialect = self.config.dialect;
         let lint = |text: &str| {
-            sqlty_format::lint_source(text, dialect, &options.style)
+            sqlty_format::lint_source(text, dialect, &self.options.style)
                 .into_iter()
                 .map(|found| check::Lint {
                     message: format!("{}: {}", found.code, found.message),
@@ -1774,17 +1874,21 @@ fn module_diagnostics(
         };
         let run = check::Run {
             settings: &settings,
-            has_schema: schema
-                .as_ref()
-                .is_some_and(|schema| !schema.databases().is_some_and(|all| all.absent)),
+            has_schema: self.has_schema,
             lint: &lint,
-            helpers: helpers.as_deref(),
-            variants,
+            helpers,
+            variants: self.config.variants,
         };
-        let found = match &parsed {
+        let mut found = match &parsed {
             Some(parsed) => check::diagnostics(parsed, &run),
             None => check::unparsed(source, &run),
         };
+        let suppressed = suppress && parsed.is_some();
+        if let Some(parsed) = parsed.as_ref().filter(|_| suppress) {
+            let ignores = sqlty_python::suppress::ignores(parsed);
+            found.diagnostics =
+                sqlty_python::suppress::apply(&ignores, found.diagnostics, &self.rules);
+        }
         let mut needed: Vec<FieldKey> = found.needed.into_iter().collect();
         needed.sort();
         let (diagnostics, redundant) = found
@@ -1808,8 +1912,58 @@ fn module_diagnostics(
                 (out, reported.redundant)
             })
             .unzip();
-        Ok((diagnostics, redundant, needed))
-    })
+        ((diagnostics, redundant, needed), suppressed)
+    }
+}
+
+/// `module_diagnostics` of every `(source, name, config)` of `modules`, where `config`
+/// indexes `configs` and `name` is the module's dotted name, on `jobs` threads (all
+/// cores when None). Each comes with whether its `# sqlty: ignore` comments are applied:
+/// they are wherever Rust parses the source.
+#[pyfunction]
+#[pyo3(signature = (modules, configs, *, version, jobs = None))]
+fn check_modules(
+    py: Python<'_>,
+    modules: Vec<(PyBackedStr, Option<String>, usize)>,
+    configs: Vec<ConfigArg<'_>>,
+    version: (u8, u8),
+    jobs: Option<usize>,
+) -> PyResult<Vec<(ModuleFound, bool)>> {
+    use rayon::prelude::*;
+
+    if let Some(&(_, _, config)) = modules
+        .iter()
+        .find(|(_, _, config)| *config >= configs.len())
+    {
+        return Err(PyValueError::new_err(format!("no configuration {config}")));
+    }
+    let mut configs: Vec<CheckConfig> = configs.into_iter().map(CheckConfig::new).collect();
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(jobs.unwrap_or(0))
+        // Below the red zone `maybe_grow` maps a new segment for every module.
+        .stack_size(STACK_SEGMENT)
+        .build()
+        .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+    let found = detach(py, || -> Result<Vec<_>, Error> {
+        let schemas: Vec<_> = configs.iter_mut().map(CheckConfig::schema).collect();
+        let checkers = configs
+            .iter()
+            .zip(&schemas)
+            .map(|(config, schema)| config.checker(schema.as_deref()))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(pool.install(|| {
+            modules
+                .into_par_iter()
+                .map(|(source, name, config)| {
+                    stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
+                        let name = name.as_deref();
+                        checkers[config].check(&source, version, name, name, true)
+                    })
+                })
+                .collect()
+        }))
+    })?;
+    Ok(found)
 }
 
 /// Check Python source for SQL type issues.
@@ -2275,6 +2429,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(type_relations, m)?)?;
     m.add_function(wrap_pyfunction!(row_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(module_diagnostics, m)?)?;
+    m.add_function(wrap_pyfunction!(check_modules, m)?)?;
     m.add_function(wrap_pyfunction!(module_index, m)?)?;
     m.add_function(wrap_pyfunction!(rendered_compositions, m)?)?;
     m.add_function(wrap_pyfunction!(call_variants, m)?)?;

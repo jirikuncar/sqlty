@@ -24,6 +24,7 @@ use crate::rows::{
 };
 use crate::rules::Rule;
 use crate::scopes::{class_of, dotted, Key, Param};
+use crate::types::generic::is_word;
 use crate::types::info::Kind;
 use crate::types::resolve::slice_items;
 use crate::types::symbols::Source;
@@ -155,12 +156,15 @@ fn names_params(text: &str, wrapper: &str) -> bool {
     if !text.contains(&format!("{wrapper}[")) {
         return false;
     }
-    let Ok(start) = Regex::new(&format!(r"\b{}\[", regex::escape(wrapper))) else {
-        return false;
-    };
-    for found in start.find_iter(text) {
+    let opening = format!("{wrapper}[");
+    // `\b{wrapper}\[`, without compiling a pattern for every module.
+    let starts_word = wrapper.chars().next().is_some_and(is_word);
+    for (at, _) in text.match_indices(&opening) {
+        if text[..at].chars().next_back().is_some_and(is_word) == starts_word {
+            continue;
+        }
         let mut depth = 0i32;
-        for c in text[found.end()..].chars() {
+        for c in text[at + opening.len()..].chars() {
             match c {
                 ',' if depth == 0 => return true,
                 '[' | '(' => depth += 1,
