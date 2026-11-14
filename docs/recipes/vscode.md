@@ -342,9 +342,9 @@ to try it: install the recommended **SQLTy** extension when VS Code offers it, t
 `queries.py` of another example. Each example has its own `pyproject.toml`, so each is
 checked against its own schema.
 
-!!! note "Needs the next release of the extension"
+!!! note "Needs sqlty 0.6.0"
     vscode.dev and github.dev install the extension from the Marketplace. The engine
-    ships in the release after sqlty 0.5.1; before it, the web extension highlights only.
+    ships with sqlty 0.6.0; earlier releases of the web extension highlight only.
 
 The configuration is found as `sqlty check` finds it: the closest `sqlty.toml`,
 `pyproject.toml` with `[tool.sqlty]` or `Cargo.toml` with a sqlty table above each file,
