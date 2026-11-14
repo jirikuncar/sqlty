@@ -159,3 +159,20 @@ rows = fetch_all("--sql\nSELECT id::INTEGER FROM users")  # sqlty: ignore[select
 # fixed: )
 # fixed: rows = fetch_all(SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users"))  # sqlty: ignore[select-star]
 ```
+
+## A string passed to a helper with its row type is not wrapped under another rule's ignore
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def fetch_all[T](query: Annotated[LiteralString, SQL], form: type[T] | None = None, /) -> list[T]: ...
+
+names = fetch_all("--sql\nSELECT id::INTEGER FROM users", int)  # sqlty: ignore[select-star]
+# fixed: from typing import Annotated, LiteralString
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: def fetch_all[T](query: Annotated[LiteralString, SQL], form: type[T] | None = None, /) -> list[T]: ...
+# fixed:
+# fixed: names = fetch_all("--sql\nSELECT id::INTEGER FROM users", int)  # sqlty: ignore[select-star]
+```

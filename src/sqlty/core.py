@@ -174,6 +174,8 @@ def explain_select(
         'common.arithmetic.numbers'
         >>> explain_select("SELECT 1::INTEGER AS one")
         [ColumnRules(name='one', type_rule=None, nullability_rule=None)]
+        >>> explain_select("SELEC 1") is None
+        True
     """
     columns = _explain_select(sql, dialect=dialect, schema_sql=schema_sql)
     if columns is None:

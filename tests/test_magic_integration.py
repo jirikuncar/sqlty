@@ -284,3 +284,26 @@ def test_decode_keeps_source_on_bad_import_style(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(_decode, "_import_style", lambda: "from x import SQL")
     source = b'q = "--sql\\nSELECT 1"\n'
     assert _decode.decode(source)[0] == source.decode()
+
+
+def test_stream_reader_decodes_what_it_reads():
+    import io
+
+    import sqlty.magic  # noqa: F401
+
+    reader = codecs.getreader("sqlty")(io.BytesIO(b'q = "--sql\\nSELECT 1::INTEGER"\n'))
+    assert "SQL[tuple[int]]" in reader.read()
+    reader.stream = io.BytesIO(b'r = "--sql\\nSELECT 1.5::REAL"\n')
+    assert "SQL[tuple[float]]" in reader.read()
+
+
+def test_main_prints_the_decoded_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import io
+
+    from sqlty import magic
+
+    (tmp_path / "q.py").write_bytes(b'q = "--sql\\nSELECT 1::INTEGER"\n')
+    out = io.StringIO()
+    monkeypatch.setattr("sys.stdout", out)
+    assert magic.main([str(tmp_path / "q.py")]) == 0
+    assert "SQL[tuple[int]]" in out.getvalue()

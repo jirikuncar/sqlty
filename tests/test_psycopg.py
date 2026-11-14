@@ -127,6 +127,12 @@ def test_execute_params(conn: Any) -> None:
     assert execute(conn, query, {"n": 41}).fetchone() == (42,)
 
 
+def test_execute_bound(conn: Any) -> None:
+    query = SQL[tuple[int]]("--sql\nSELECT %(n)s::INTEGER + 1")
+    assert execute(conn, query.bind({"n": 41})).fetchone() == (42,)
+    assert scalar(conn, query.bind({"n": 1})) == 2
+
+
 def test_execute_without_row_form(conn: Any) -> None:
     assert execute(conn, SQL(QUERY)).fetchall() == [(1, "ada")]
 

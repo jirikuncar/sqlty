@@ -54,6 +54,13 @@ CASES = [
     f"import typing\nfrom sqlty import SQL\né = 'é'\nq = {query(f'SELECT {OBJECT} AS doc FROM users')}  # é\n",
     f"import typing\nfrom sqlty import SQL\nq = (\n    {query(f'SELECT {OBJECT} AS doc FROM users')},\n"
     f"    {query(f'SELECT {OBJECT} AS doc FROM users')},\n    {query('SELECT 1')},\n)\n",
+    f"import typing\nfrom sqlty import SQL\nq = {query(f'SELECT {OBJECT} AS doc FROM users', 'typing.Any')}\n",
+    "import typing\nfrom sqlty import SQL\n"
+    f"q = {query('SELECT 1::INTEGER AS a, jsonb_build_object() AS b')}\n",
+    f"import typing\nfrom sqlty import SQL\nq = {query('SELECT tags FROM users')}\n",
+    "import typing\nfrom sqlty import SQL\n"
+    + "".join(f"Doc{n} = 0\n" for n in ["", *range(2, 100)])
+    + f"q = {query(f'SELECT {OBJECT} AS doc FROM users')}\n",
     "def f(:\n",
     "",
 ]

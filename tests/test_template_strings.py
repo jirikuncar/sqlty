@@ -13,6 +13,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 import sqlty._drivers
+from sqlty import SQLTemplate
 from sqlty._drivers import find_template_calls
 from sqlty._helpers import HelperCall
 from sqlty._source import ParsedSource
@@ -115,3 +116,9 @@ def test_generated_modules(templates: list[tuple[str, str]], newline: str) -> No
         return
     with pytest.MonkeyPatch.context() as monkeypatch:
         both(source, monkeypatch)
+
+
+def test_repr_shows_the_template() -> None:
+    user_id = 1
+    query = SQLTemplate[tuple[int]](t"--sql\nSELECT {user_id}")
+    assert repr(query) == f"SQLTemplate({query.template!r})"

@@ -43,6 +43,23 @@ class User(TypedDict):
 q = SQL[User, ById]("--sql\nSELECT id, name FROM users WHERE id = %(id)s")
 ```
 
+## A literal percent sign beside a bound parameter
+
+```python
+from typing import TypedDict
+
+from sqlty import SQL
+
+
+class Row(TypedDict):
+    n: int
+    pct: str
+
+
+q = SQL[Row, tuple[int]]("--sql\nSELECT %s::INTEGER AS n, '100%%'::TEXT AS pct")
+# error:
+```
+
 ## A stale row type is fixed, its parameters kept
 
 ```python
