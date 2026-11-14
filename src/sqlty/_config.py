@@ -6,6 +6,8 @@ import difflib
 import glob
 import logging
 import os
+import re
+import tomllib
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, NamedTuple, TypedDict, cast
@@ -24,6 +26,42 @@ FUNCTION_KEYS = _core.FUNCTION_KEYS
 
 MAX_QUERY_VARIANTS = 64
 """Default of ``max-query-variants``."""
+
+
+_LOWER_BOUND = re.compile(r"(?:>=|~=|==)\s*(\d+)\.(\d+)")
+
+
+def requires_closed(requires_python: str | None) -> bool:
+    """Whether ``requires-python`` rules out every Python before 3.15, which reads
+    ``TypedDict(closed=True)`` (PEP 728).
+
+    Example:
+        >>> [requires_closed(r) for r in (">=3.15", "~=3.16", ">=3.14", ">3.14", None)]
+        [True, True, False, False, False]
+    """
+    return any((int(a), int(b)) >= (3, 15) for a, b in _LOWER_BOUND.findall(requires_python or ""))
+
+
+def requires_python(directory: Path | None) -> str | None:
+    """``[project] requires-python`` of the nearest ``pyproject.toml`` holding it, from ``directory`` up."""
+    current = (directory or Path.cwd()).resolve()
+    for folder in (current, *current.parents):
+        pyproject = folder / "pyproject.toml"
+        if pyproject.is_file():
+            found = _requires_python_cached(pyproject, pyproject.stat().st_mtime_ns)
+            if found is not None:
+                return found
+    return None
+
+
+@lru_cache(maxsize=256)
+def _requires_python_cached(path: Path, mtime_ns: int) -> str | None:
+    try:
+        found = tomllib.loads(path.read_text(encoding="utf-8")).get("project", {})
+    except OSError, UnicodeDecodeError, tomllib.TOMLDecodeError:
+        return None
+    value = found.get("requires-python") if isinstance(found, dict) else None
+    return value if isinstance(value, str) else None
 
 
 def driver_types(

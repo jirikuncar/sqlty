@@ -510,6 +510,7 @@ def _cmd_rewrite(args: argparse.Namespace) -> None:
             untyped=settings.untyped,
             json_types=settings.json_types,
             param_types=settings.param_types,
+            closed_params=settings.closed_params,
         )
         if args.quiet:
             return rewritten, []
@@ -1376,6 +1377,7 @@ class Settings:
     untyped: bool = False
     json_types: str = "typing.Any"
     param_types: bool = False
+    closed_params: bool = False
     rules: dict[str, str] | None = None
     query_variants: int | None = None
     preview: bool = False
@@ -1587,7 +1589,12 @@ class SettingsResolver:
                 f"{self.source.origin('import_style', label)}: {exc}; "
                 "use 'from sqlty import SQL [as Q]' or 'import sqlty [as sy]'"
             ) from None
-        from sqlty._config import MAX_QUERY_VARIANTS, driver_types
+        from sqlty._config import (
+            MAX_QUERY_VARIANTS,
+            driver_types,
+            requires_closed,
+            requires_python,
+        )
 
         dialect = dialect_flag or config.get("dialect", "postgres")
         types = driver_types(config.get("driver"), dialect, config.get("types"))
@@ -1600,6 +1607,7 @@ class SettingsResolver:
             untyped=untyped == "sentinel",
             json_types=json_types,
             param_types=bool(config.get("param_types")),
+            closed_params=requires_closed(requires_python(config_dir)),
             rules=config.get("rules"),
             query_variants=config.get("max_query_variants", MAX_QUERY_VARIANTS)
             if config.get("preview")
@@ -1751,6 +1759,7 @@ class Project:
             rules=settings.rules,
             json_types=settings.json_types,
             param_types=settings.param_types,
+            closed_params=settings.closed_params,
             helpers=self.helpers[path],
         )
 
