@@ -66,15 +66,15 @@ jobs:
         working-directory: editors/vscode
         run: PATH="$GITHUB_WORKSPACE/.venv/bin:$PATH" xvfb-run -a npm test
 
-      - name: Inspect V8 data
+      - name: vscode-test coverage
         if: always()
         working-directory: editors/vscode
         run: |
-          set -x
-          npx c8 report --reporter text --check-coverage=false 2>&1 | head -20
-          npx c8 report --reporter text --check-coverage=false --all=false 2>&1 | head -20
-          npx c8 report --reporter text --check-coverage=false --all=false --exclude-after-remap=false --include 'dist/**' 2>&1 | head -20
-          npx c8 report --reporter text --check-coverage=false --all=false --include 'dist/extension.js' --exclude-after-remap=false 2>&1 | grep -v node_modules | head -30
+          PATH="$GITHUB_WORKSPACE/.venv/bin:$PATH" xvfb-run -a npx vscode-test --coverage --coverage-reporter text --coverage-output cov2 2>&1 | grep -E "\||passing|failing"
+          ls coverage/tmp | wc -l
+          PATH="$GITHUB_WORKSPACE/.venv/bin:$PATH" NODE_V8_COVERAGE=$PWD/cov3 xvfb-run -a npx vscode-test > /dev/null 2>&1; ls cov3
+          npx c8 report --temp-directory cov3 --reporter text --check-coverage=false --all=false 2>&1 | head -20
+          npx c8 report --temp-directory cov3 --reporter text --check-coverage=false --all=false --exclude-after-remap=false --include 'dist/extension.js' 2>&1 | grep -E "src|extension|config|commands|engine|workspace|server|playground" | head -20
 
       - name: Run the web test in VS Code for the Web
         if: false
