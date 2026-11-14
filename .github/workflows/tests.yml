@@ -70,17 +70,11 @@ jobs:
         if: always()
         working-directory: editors/vscode
         run: |
-          ls -la coverage/tmp | head
-          node -e '
-          const fs=require("fs");
-          for (const f of fs.readdirSync("coverage/tmp")) {
-            const d=JSON.parse(fs.readFileSync("coverage/tmp/"+f));
-            for (const r of d.result) if (r.url.includes("dist/extension.js")) {
-              const fn=r.functions;
-              console.log(f, r.url, fn.length, "zero", fn.filter(x=>x.ranges[0].count===0).length, "block", fn.filter(x=>x.isBlockCoverage).length, "ranges", fn.reduce((a,x)=>a+x.ranges.length,0));
-            }
-            console.log(f, d.result.length, d.result.map(r=>r.url).filter(u=>u.includes("sqlty")||u.includes("vscode/")).slice(0,4));
-          }'
+          set -x
+          npx c8 report --reporter text --check-coverage=false 2>&1 | head -20
+          npx c8 report --reporter text --check-coverage=false --all=false 2>&1 | head -20
+          npx c8 report --reporter text --check-coverage=false --all=false --exclude-after-remap=false --include 'dist/**' 2>&1 | head -20
+          npx c8 report --reporter text --check-coverage=false --all=false --include 'dist/extension.js' --exclude-after-remap=false 2>&1 | grep -v node_modules | head -30
 
       - name: Run the web test in VS Code for the Web
         if: false
