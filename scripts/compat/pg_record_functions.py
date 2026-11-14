@@ -62,7 +62,7 @@ def main() -> None:
     for name, types, names in rows:
         if name not in READ_ELSEWHERE:
             overloads.setdefault(name, set()).add(tuple(zip(names, types, strict=True)))
-    arms = []
+    entries = []
     for name, shapes in sorted(overloads.items()):
         if len(shapes) != 1:
             continue
@@ -70,17 +70,26 @@ def main() -> None:
         if any(sql is None for _, sql in typed):
             continue
         columns = "".join(f'("{column}", {json.dumps(sql)}), ' for column, sql in typed)
-        arms.append(f'        "{name}" => &[{columns}],\n')
+        entries.append(f'    ("{name}", &[{columns}]),\n')
     TARGET.write_text(
         f"//! Columns of PostgreSQL {version.split('.')[0]}'s built-in functions that return `record`\n"
         "//! through OUT parameters. Generated from `pg_proc` by\n"
         "//! `scripts/compat/pg_record_functions.py`; do not edit.\n\n"
+        "type Columns = &'static [(&'static str, &'static str)];\n\n"
+        "/// The functions by name, sorted.\n"
+        "static FUNCTIONS: &[(&str, Columns)] = &[\n"
+        f"{''.join(entries)}"
+        "];\n\n"
         "/// The `(name, SQL type)` columns of the built-in function `name` (lower case).\n"
-        "pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'static str)]> {\n"
-        "    Some(match name {\n"
-        f"{''.join(arms)}"
-        "        _ => return None,\n"
-        "    })\n"
+        "pub(super) fn record_columns(name: &str) -> Option<Columns> {\n"
+        "    FUNCTIONS\n"
+        "        .binary_search_by_key(&name, |(function, _)| function)\n"
+        "        .ok()\n"
+        "        .map(|at| FUNCTIONS[at].1)\n"
+        "}\n\n"
+        "#[test]\n"
+        "fn functions_are_sorted() {\n"
+        "    assert!(FUNCTIONS.is_sorted_by_key(|(name, _)| *name));\n"
         "}\n"
     )
     subprocess.run(["rustfmt", "--edition", "2021", str(TARGET)], check=True)
