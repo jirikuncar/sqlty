@@ -2,7 +2,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "integer",
@@ -17,7 +17,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "bigint",
@@ -32,7 +32,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "bytea",
@@ -47,7 +47,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "boolean",
@@ -62,7 +62,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "varchar(100)",
@@ -77,7 +77,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "date",
@@ -92,7 +92,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "timestamp with time zone",
@@ -107,7 +107,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "numeric(10, 2)",
@@ -122,7 +122,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "interval",
@@ -137,7 +137,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "varchar(100)",
@@ -152,7 +152,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "varchar(100)",
@@ -167,7 +167,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "double precision",
@@ -182,7 +182,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "integer",
@@ -197,7 +197,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "bigint",
@@ -212,7 +212,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "inet",
@@ -227,7 +227,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "inet",
@@ -242,7 +242,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "jsonb",
@@ -257,7 +257,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "bigint",
@@ -272,7 +272,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "integer",
@@ -287,7 +287,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "smallint",
@@ -302,7 +302,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "varchar(100)",
@@ -317,7 +317,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "smallint",
@@ -332,7 +332,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "smallint",
@@ -347,7 +347,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "text",
@@ -362,7 +362,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "time",
@@ -377,7 +377,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "column",
    "sql": "uuid",
@@ -392,7 +392,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "count(i)",
@@ -407,7 +407,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "sum(i)",
@@ -422,7 +422,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "avg(i)",
@@ -437,7 +437,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "avg(d)",
@@ -452,7 +452,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "max(d)",
@@ -467,7 +467,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "i / i",
@@ -482,7 +482,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "i * d",
@@ -497,7 +497,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "ts - ts",
@@ -512,7 +512,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "integer AUTO_INCREMENT",
@@ -527,7 +527,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "bigint AUTO_INCREMENT",
@@ -542,7 +542,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "longblob",
@@ -557,7 +557,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "bool",
@@ -572,7 +572,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "varchar(100)",
@@ -587,7 +587,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "date",
@@ -602,7 +602,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "datetime(6)",
@@ -617,7 +617,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "numeric(10, 2)",
@@ -632,7 +632,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "bigint",
@@ -647,7 +647,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "varchar(100)",
@@ -662,7 +662,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "varchar(100)",
@@ -677,7 +677,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "double precision",
@@ -692,7 +692,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "integer",
@@ -707,7 +707,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "bigint",
@@ -722,7 +722,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "char(15)",
@@ -737,7 +737,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "char(39)",
@@ -752,7 +752,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "json",
@@ -767,7 +767,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "bigint UNSIGNED",
@@ -782,7 +782,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "integer UNSIGNED",
@@ -797,7 +797,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "smallint UNSIGNED",
@@ -812,7 +812,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "varchar(100)",
@@ -827,7 +827,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "smallint AUTO_INCREMENT",
@@ -842,7 +842,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "smallint",
@@ -857,7 +857,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "longtext",
@@ -872,7 +872,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "time(6)",
@@ -887,7 +887,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "column",
    "sql": "char(32)",
@@ -902,7 +902,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "count(i)",
@@ -917,7 +917,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "sum(i)",
@@ -932,7 +932,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "avg(i)",
@@ -947,7 +947,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "avg(d)",
@@ -962,7 +962,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "max(d)",
@@ -977,7 +977,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "i / i",
@@ -992,7 +992,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "i * d",
@@ -1007,7 +1007,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "ts - ts",
@@ -1022,7 +1022,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "integer",
@@ -1037,7 +1037,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "integer",
@@ -1052,7 +1052,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "BLOB",
@@ -1067,7 +1067,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "bool",
@@ -1082,7 +1082,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "varchar(100)",
@@ -1097,7 +1097,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "date",
@@ -1112,7 +1112,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "datetime",
@@ -1127,7 +1127,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "decimal",
@@ -1142,7 +1142,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "bigint",
@@ -1157,7 +1157,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "varchar(100)",
@@ -1172,7 +1172,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "varchar(100)",
@@ -1187,7 +1187,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "real",
@@ -1202,7 +1202,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "integer",
@@ -1217,7 +1217,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "bigint",
@@ -1232,7 +1232,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "char(15)",
@@ -1247,7 +1247,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "char(39)",
@@ -1262,7 +1262,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "text",
@@ -1277,7 +1277,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "bigint unsigned",
@@ -1292,7 +1292,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "integer unsigned",
@@ -1307,7 +1307,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "smallint unsigned",
@@ -1322,7 +1322,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "varchar(100)",
@@ -1337,7 +1337,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "integer",
@@ -1352,7 +1352,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "smallint",
@@ -1367,7 +1367,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "text",
@@ -1382,7 +1382,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "time",
@@ -1397,7 +1397,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "column",
    "sql": "char(32)",
@@ -1412,7 +1412,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "count(i)",
@@ -1427,7 +1427,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "sum(i)",
@@ -1442,7 +1442,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "avg(i)",
@@ -1457,7 +1457,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "avg(d)",
@@ -1472,7 +1472,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "max(d)",
@@ -1487,7 +1487,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "i / i",
@@ -1502,7 +1502,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "i * d",
@@ -1517,7 +1517,7 @@
  {
   "row": {
    "source": "django",
-   "version": "6.1.2",
+   "version": "6.1.3",
    "dialect": "sqlite",
    "kind": "expression",
    "sql": "ts - ts",

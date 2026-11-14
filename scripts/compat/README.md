@@ -46,10 +46,10 @@ mdtest, or a converter difference, to document.
 
 sqlglot's `generic` rows follow `rules/dialects.toml`: `generic` reads PostgreSQL's rules,
 then MySQL's and SQLite's (#598). What it leaves untyped, such as `COUNTIF`,
-`UNIX_SECONDS`, `TO_BASE32`, `SORT_ARRAY` and `STRUCT`, none of the three has, and is out
-of scope, as are `CURRENT_USER()`, `SESSION_USER()` and `CURRENT_CATALOG()`, which only
-parse without parentheses. Its mismatches are decimal literals, which sqlglot reads as `DOUBLE` and
-PostgreSQL as `numeric`, and `SELECT ALL(SELECT 1)`, where `ALL` is the set quantifier.
+`UNIX_SECONDS`, `TO_BASE32`, `SORT_ARRAY`, `STRUCT` and `ARRAY(...)` of values, none of the
+three has, and is out of scope, as are `CURRENT_USER()`, `SESSION_USER()` and
+`CURRENT_CATALOG()`, which only parse without parentheses. Its mismatches are decimal
+literals, which sqlglot reads as `DOUBLE` and PostgreSQL as `numeric`, and `SELECT ALL(SELECT 1)`, where `ALL` is the set quantifier.
 
 `pg_nullability.py` is not a harness source: it runs the PostgreSQL queries of the Markdown tests
 on seeded rows (`tests/_pg_seed.py`) and lists the columns sqlty types as nullable that no
