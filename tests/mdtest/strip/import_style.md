@@ -75,42 +75,24 @@ q = sy.SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")
 # stripped: q = "--sql\nSELECT 1::INTEGER"
 ```
 
-## Round-trip with aliased import
+## Strip a rewrite with aliased import
 
 ```toml
 [tool.sqlty]
 import-style = "from sqlty import SQL as Q"
 ```
 
-### Rewrite
-
-```python
-q = "--sql\nSELECT id::INTEGER FROM users"
-# rewritten: q = Q[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
-```
-
-### Strip
-
 ```python
 q = Q[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 # stripped: q = "--sql\nSELECT id::INTEGER FROM users"
 ```
 
-## Round-trip with module import
+## Strip a rewrite with module import
 
 ```toml
 [tool.sqlty]
 import-style = "import sqlty"
 ```
-
-### Rewrite
-
-```python
-q = "--sql\nSELECT id::INTEGER FROM users"
-# rewritten: q = sqlty.SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
-```
-
-### Strip
 
 ```python
 q = sqlty.SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")

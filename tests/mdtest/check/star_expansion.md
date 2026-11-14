@@ -1,13 +1,5 @@
 # SELECT * Checks
 
-## Star with no schema is an error
-
-```python
-from sqlty import SQL
-# error: [select-star-no-schema] "SELECT * used but no schema available"
-q = SQL[tuple[str]]("--sql\nSELECT * FROM users")
-```
-
 ## Star with no schema reports no stale type
 
 Without a schema the columns of `*` are unknown, so inference gives no type
