@@ -66,12 +66,21 @@ jobs:
         working-directory: editors/vscode
         run: PATH="$GITHUB_WORKSPACE/.venv/bin:$PATH" xvfb-run -a npm test
 
-      - uses: actions/upload-artifact@v4
+      - name: Inspect V8 data
         if: always()
-        with:
-          name: v8
-          path: editors/vscode/coverage/tmp
-          include-hidden-files: true
+        working-directory: editors/vscode
+        run: |
+          ls -la coverage/tmp | head
+          node -e '
+          const fs=require("fs");
+          for (const f of fs.readdirSync("coverage/tmp")) {
+            const d=JSON.parse(fs.readFileSync("coverage/tmp/"+f));
+            for (const r of d.result) if (r.url.includes("dist/extension.js")) {
+              const fn=r.functions;
+              console.log(f, r.url, fn.length, "zero", fn.filter(x=>x.ranges[0].count===0).length, "block", fn.filter(x=>x.isBlockCoverage).length, "ranges", fn.reduce((a,x)=>a+x.ranges.length,0));
+            }
+            console.log(f, d.result.length, d.result.map(r=>r.url).filter(u=>u.includes("sqlty")||u.includes("vscode/")).slice(0,4));
+          }'
 
       - name: Run the web test in VS Code for the Web
         if: false
