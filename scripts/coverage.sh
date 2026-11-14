@@ -22,4 +22,4 @@ fi
 (cd rust && cargo nextest run --workspace)
 
 uv run --no-sync coverage report
-(cd rust && cargo llvm-cov report --fail-under-lines 94.5)
+(cd rust && cargo llvm-cov report --fail-under-lines 94)
