@@ -1,10 +1,10 @@
-# piccolo 1.36.0 vs sqlty
+# piccolo 1.39.0 vs sqlty
 
 | Dialect | Kind | Match | Mismatch | sqlty gap | Not comparable |
 |---------|------|-------|----------|-----------|----------------|
-| postgres | column | 48 | 0 | 0 | 0 |
+| postgres | column | 54 | 0 | 0 | 0 |
 | sqlite | column | 17 | 31 | 0 | 0 |
-| **all** | | **65** | **31** | **0** | **0** |
+| **all** | | **71** | **31** | **0** | **0** |
 
 ## mismatch
 
@@ -19,7 +19,7 @@
 | sqlite | `DATE` | `datetime.date` | `str` | columns.Date |
 | sqlite | `ARRAY_DATE` | `list[datetime.date]` | `str` | columns.Array(Date) |
 | sqlite | `NUMERIC` | `decimal.Decimal` | `float` | columns.Decimal |
-| sqlite | `ARRAY` | `list[decimal.Decimal]` | `str` | columns.Array(Decimal) |
+| sqlite | `ARRAY_NUMERIC` | `list[decimal.Decimal]` | `str` | columns.Array(Decimal) |
 | sqlite | `ARRAY` | `list[float]` | `str` | columns.Array(DoublePrecision) |
 | sqlite | `ARRAY` | `list[str]` | `str` | columns.Array(Email) |
 | sqlite | `ARRAY` | `list[float]` | `str` | columns.Array(Float) |
@@ -27,7 +27,7 @@
 | sqlite | `SECONDS` | `datetime.timedelta` | `float` | columns.Interval |
 | sqlite | `ARRAY` | `list[datetime.timedelta]` | `str` | columns.Array(Interval) |
 | sqlite | `NUMERIC` | `decimal.Decimal` | `float` | columns.Numeric |
-| sqlite | `ARRAY` | `list[decimal.Decimal]` | `str` | columns.Array(Numeric) |
+| sqlite | `ARRAY_NUMERIC` | `list[decimal.Decimal]` | `str` | columns.Array(Numeric) |
 | sqlite | `ARRAY` | `list[float]` | `str` | columns.Array(Real) |
 | sqlite | `ARRAY` | `list[str]` | `str` | columns.Array(Secret) |
 | sqlite | `ARRAY` | `list[int]` | `str` | columns.Array(SmallInt) |

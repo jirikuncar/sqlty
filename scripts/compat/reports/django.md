@@ -1,4 +1,4 @@
-# django 6.1.2 vs sqlty
+# django 6.1.3 vs sqlty
 
 | Dialect | Kind | Match | Mismatch | sqlty gap | Not comparable |
 |---------|------|-------|----------|-----------|----------------|

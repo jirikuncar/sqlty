@@ -72,12 +72,13 @@ schema = "schema.sql"
 [tool.sqlty.types]
 ARRAY = "list"
 DATE = "datetime.date"
+NUMERIC = "decimal.Decimal"
 ```
 
 `schema.sql`:
 
 ```sql
-CREATE TABLE t (a ARRAY, b INT[] NOT NULL, c INTEGER ARRAY, d ARRAY_DATE);
+CREATE TABLE t (a ARRAY, b INT[] NOT NULL, c INTEGER ARRAY, d ARRAY_DATE, e ARRAY_NUMERIC);
 ```
 
 ```sql
@@ -86,6 +87,7 @@ SELECT * FROM t
 -- columns: b: list[int] (ARRAY<INT>)
 -- columns: c: list[int] | None (ARRAY<INT>)
 -- columns: d: list[datetime.date] | None (ARRAY<DATE>)
+-- columns: e: list[decimal.Decimal] | None (ARRAY<DECIMAL>)
 ```
 
 ## By column

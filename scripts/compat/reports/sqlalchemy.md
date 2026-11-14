@@ -1,4 +1,4 @@
-# sqlalchemy 2.1.4 vs sqlty
+# sqlalchemy 2.1.8 vs sqlty
 
 | Dialect | Kind | Match | Mismatch | sqlty gap | Not comparable |
 |---------|------|-------|----------|-----------|----------------|
