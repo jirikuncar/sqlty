@@ -118,6 +118,15 @@ conn.execute(query_variable, (b"1",))
 # error:
 ```
 
+### Parameters passed as `**kwargs`
+
+```python
+import psycopg
+
+conn = psycopg.connect("dbname=x")
+conn.execute("DELETE FROM users WHERE id = %s", **options)
+```
+
 ## asyncpg
 
 ```python

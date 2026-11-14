@@ -521,6 +521,9 @@ def test_complete_lists_the_names_at_a_cursor(tmp_path, monkeypatch, capsys) -> 
     assert (code, err) == (2, "sqlty: error: missing.py: no such file\n")
     code, _, err = _run(["complete", "use.py:3"], capsys)
     assert code == 2 and "expected FILE:LINE:COL" in err
+    (tmp_path / "notes.txt").write_text("")
+    code, _, err = _run(["complete", "notes.txt:1:1"], capsys)
+    assert (code, err) == (2, "sqlty: error: notes.txt: not a Python file sqlty reads\n")
 
 
 def _run(argv: list[str], capsys) -> tuple[int, str, str]:
@@ -1067,6 +1070,15 @@ def test_inline_config_works_with_isolated(tmp_path, monkeypatch) -> None:
     assert (settings.dialect, settings.import_style) == ("mysql", None)
 
 
+def test_inline_config_exclude(tmp_path, monkeypatch) -> None:
+    _tree(tmp_path, "gen/g.py", "q.py")
+    monkeypatch.chdir(tmp_path)
+    args = build_parser().parse_args(["check", "-c", 'exclude = ["gen"]', "."])
+    from sqlty._cli import _collect_python_files
+
+    assert _collect_python_files(args.paths, SettingsResolver(args).source) == [Path("q.py")]
+
+
 @pytest.mark.parametrize(
     ("value", "message"),
     [
@@ -1256,6 +1268,30 @@ def test_overrides_set_rule_severities_per_path(tmp_path, monkeypatch, capsys) -
         f"tests{sep}legacy{sep}test_old.py:2: [narrow-type] SQL[tuple[str]] should be SQL[tuple[int]]",
     ]
     assert "Found 1 error(s), 1 warning(s)" in out
+
+
+def test_a_symlink_out_of_the_project_matches_no_glob(tmp_path, monkeypatch) -> None:
+    """Globs match where a symlink points, relative to the config."""
+    project, outside = tmp_path / "proj", tmp_path / "outside"
+    project.mkdir()
+    outside.mkdir()
+    _overrides_project(project)
+    pyproject = project / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text().replace("[tool.sqlty]\n", '[tool.sqlty]\nqueries = ["tests"]\n', 1)
+    )
+    (outside / "test_x.py").write_text("")
+    (outside / "x.sql").write_text("SELECT 1")
+    link, query = project / "tests" / "test_link.py", project / "tests" / "link.sql"
+    link.symlink_to(outside / "test_x.py")
+    query.symlink_to(outside / "x.sql")
+    monkeypatch.chdir(project)
+    resolver = SettingsResolver(build_parser().parse_args(["check", "."]))
+
+    assert resolver.for_file(project / "tests" / "test_q.py").rules == {"narrow-type": "ignore"}
+    assert resolver.for_file(link).rules == {"narrow-type": "error"}
+    assert not resolver.for_file(query).names_query_file(query)
+    assert resolver.resolve(link) == (outside / "test_x.py").resolve()
 
 
 def test_overrides_apply_to_check_fix(tmp_path, monkeypatch, capsys) -> None:

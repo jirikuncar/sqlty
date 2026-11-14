@@ -278,6 +278,13 @@ CASES = {
     "loop": "    q = BASE\n    for x in items:\n        q += ' x'\n    run(q)\n",
     "inside": "    q = BASE\n    try:\n        if flag:\n            q += ' f'\n        run(q)\n"
     "    finally:\n        pass\n",
+    "starred": "    run(pick(*TABLE))\n    run(loop(TABLE))\n    run(BASE)\n",
+    "unpassed": "    run(deep())\n    run(pick())\n    run(BASE)\n",
+    "patterns": "    match kind:\n        case 'a' | 1:\n            q = ' one'\n        case _:\n"
+    "            q = ' rest'\n    run(BASE + q)\n    run(BASE)\n",
+    "annotations": "    run(odd(kind, mode))\n    run(BASE)\n"
+    "def odd(k: 'Literal[', j: f().Literal['a']):\n    return k + j\n",
+    "default": "    @run(BASE)\n    def inner(q=run(BASE)) -> run(BASE):\n        pass\n    run(BASE)\n",
 }
 
 

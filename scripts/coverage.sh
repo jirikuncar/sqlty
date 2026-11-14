@@ -5,6 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+export COVERAGE_FILE=$PWD/.coverage
 uv run --no-sync coverage erase
 eval "$(cd rust && cargo llvm-cov show-env --sh)"
 (cd rust && cargo llvm-cov clean --workspace)

@@ -286,6 +286,18 @@ def test_decode_keeps_source_on_bad_import_style(monkeypatch: pytest.MonkeyPatch
     assert _decode.decode(source)[0] == source.decode()
 
 
+def test_a_broken_config_leaves_the_import_style_unset(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    from sqlty import _decode
+
+    (tmp_path / "pyproject.toml").write_text("[tool.sqlty\n")
+    monkeypatch.chdir(tmp_path)
+    _decode._import_style.cache_clear()
+    try:
+        assert _decode._import_style() is None
+    finally:
+        _decode._import_style.cache_clear()
+
+
 def test_stream_reader_decodes_what_it_reads():
     import io
 

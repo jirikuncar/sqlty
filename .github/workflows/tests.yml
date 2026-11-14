@@ -67,6 +67,8 @@ jobs:
     env:
       SQLTY_PG_DSN: postgresql://postgres:postgres@localhost:5432/postgres
       PYTEST_ADDOPTS: ${{ matrix.coverage && '--cov --cov-append --cov-fail-under=0' || '' }}
+      # Absolute, so processes forked in a test's own directory write their data here too.
+      COVERAGE_FILE: ${{ github.workspace }}/.coverage
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

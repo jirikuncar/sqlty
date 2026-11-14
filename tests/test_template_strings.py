@@ -50,6 +50,7 @@ CASES = {
     "unmarked": ('q = t"SELECT {1}"\nr = "--sql"\n', []),
     "nested in a field": ("q = t\"{t'--sql\\nSELECT {1}'}\"\n", [("--sql\nSELECT %s", ["int"])]),
     "triple-quoted": ('q = t"""--sql\nSELECT {1}\n"""\n', [("--sql\nSELECT %s\n", ["int"])]),
+    "unparsable": ('q = t"--sql\nSELECT {1}"\ndef (\n', []),
 }
 
 

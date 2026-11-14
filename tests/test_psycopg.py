@@ -6,6 +6,7 @@ Database tests run when ``SQLTY_PG_DSN`` points to a PostgreSQL server.
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from typing import Any, Literal, NamedTuple, Protocol, TypedDict
 
@@ -182,3 +183,21 @@ def test_execute_template(conn: Any) -> None:
     query = SQLTemplate[UserTD](t"--sql\nSELECT {n}::INTEGER + 1 AS id, 'ada'::TEXT AS name")
     assert execute(conn, query).fetchone() == {"id": 42, "name": "ada"}
     assert scalar(conn, SQLTemplate[tuple[int]](t"--sql\nSELECT {n}::INTEGER")) == 41
+
+
+def test_a_composition_reads_an_aliased_module_and_starred_arguments() -> None:
+    from sqlty._source import ParsedSource
+
+    parsed = ParsedSource('import psycopg.sql as s\nQ = s.SQL("SELECT 1")\nR = s.SQL(*parts)\n')
+    assert [parsed.psycopg.render(call) for call in parsed.calls] == ["SELECT 1", "unchecked"]
+
+
+def test_a_composition_needs_psycopg(monkeypatch: pytest.MonkeyPatch) -> None:
+    from sqlty._psycopg import Unrenderable
+    from sqlty._source import ParsedSource
+
+    parsed = ParsedSource('from psycopg import sql\nQ = sql.SQL("SELECT 1")\n')
+    monkeypatch.setitem(sys.modules, "psycopg", None)
+    assert parsed.psycopg.render(parsed.calls[0]) is None
+    with pytest.raises(Unrenderable):
+        parsed.psycopg.compose(parsed.calls[0], lambda name: None)
