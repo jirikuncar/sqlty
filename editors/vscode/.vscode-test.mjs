@@ -5,4 +5,5 @@ export default defineConfig({
   workspaceFolder: "fixture",
   launchArgs: ["--disable-extensions"],
   mocha: { timeout: 60_000 },
+  coverage: { include: ["**/dist/extension.js"], reporter: ["json-summary"] },
 });
