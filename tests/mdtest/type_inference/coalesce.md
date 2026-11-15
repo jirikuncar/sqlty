@@ -57,3 +57,12 @@ SELECT coalesce($1, 1) AS a, coalesce(nope(), 'n') AS b, coalesce(NULL, 1) AS c
 -- columns: b: str (None)
 -- columns: c: typing.Literal[1] (None)
 ```
+
+A psycopg placeholder is a parameter too, not a `NULL`, as PostgreSQL reads
+`PREPARE p AS SELECT coalesce($1, 1)`:
+
+```sql
+SELECT coalesce(%s, 1) AS a, coalesce(%(n)s, 'n') AS b
+-- columns: a: int (None)
+-- columns: b: str (None)
+```

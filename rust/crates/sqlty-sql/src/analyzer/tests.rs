@@ -104,11 +104,11 @@ fn test_parser_input() {
             SqlDialect::MySql
         )
         .text(),
-        "SELECT NULL, NULL, NULL, NULL, '%s', 5 % 2"
+        "SELECT ?00, ?00, ?00, ?00, '%s', 5 % 2"
     );
     assert_eq!(
         parser_input("SELECT '100%%', 'it\\'s %s', %s", SqlDialect::MySql).text(),
-        "SELECT '100%', 'it\\'s %s', NULL"
+        "SELECT '100%', 'it\\'s %s', ?00"
     );
     assert_eq!(
         parser_input(
@@ -486,7 +486,7 @@ fn test_name_diagnostics_underline_the_name() {
         underlined("SELECT n::mood FROM a"),
         [("unknown-type", None)]
     );
-    // Through the edits of the query before parsing: `%(who)s` and `%s` become `NULL`.
+    // Through the edits of the query before parsing: `%(who)s` and `%s` become `$00`.
     assert_eq!(
         underlined("SELECT %(who)s, nope FROM a"),
         [("unknown-column", Some("nope"))]
