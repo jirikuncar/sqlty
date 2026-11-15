@@ -214,6 +214,15 @@ def test_exclude_settings_are_loaded(tmp_path):
     assert (config["exclude"], config["extend_exclude"]) == (["a"], ["b"])
 
 
+def test_values_only_the_cli_checks_are_loaded_as_written(tmp_path: Path) -> None:
+    _config._parse_native_cached.cache_clear()
+    (tmp_path / "pyproject.toml").write_text("[tool.sqlty]\nuntyped = [1.5, 1979-05-27]\n")
+
+    config, _ = load_config(tmp_path)
+
+    assert config["untyped"] == [1.5, "1979-05-27"]
+
+
 def test_rules_must_be_a_table() -> None:
     with pytest.raises(ConfigError, match="rules must be a table"):
         validate_tool_table({"rules": ["select-star"]}, "pyproject.toml")

@@ -327,11 +327,9 @@ fn pascal(name: &str) -> String {
         .split(|c: char| !c.is_ascii_alphanumeric())
         .filter(|word| !word.is_empty())
     {
-        let mut chars = word.chars();
-        if let Some(first) = chars.next() {
-            written.push(first.to_ascii_uppercase());
-            written.push_str(chars.as_str());
-        }
+        let (first, rest) = word.split_at(1);
+        written.push_str(&first.to_ascii_uppercase());
+        written.push_str(rest);
     }
     if written.is_empty() || written.starts_with(|c: char| c.is_ascii_digit()) {
         written.insert_str(0, "Json");

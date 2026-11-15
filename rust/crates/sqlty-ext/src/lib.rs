@@ -1596,8 +1596,7 @@ fn type_relations(
                         .iter()
                         .map(|value| match compat::set_member(value) {
                             Lit::Str(text) => format!("s:{text}"),
-                            Lit::Int(digits) => format!("i:{digits}"),
-                            Lit::Bool(_) => unreachable!("a set member is not a bool"),
+                            member => format!("i:{}", member.repr()),
                         })
                         .collect();
                     format!("[{}]", values.join(", "))

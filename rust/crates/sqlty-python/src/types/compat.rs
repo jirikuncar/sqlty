@@ -202,3 +202,21 @@ pub fn split_type_args(text: &str) -> Vec<String> {
     }
     parts
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::types::{extract::extract_type_definitions, symbols::Source};
+
+    #[test]
+    fn rarer_fields_and_args() {
+        let text = "from typing import TypedDict\nclass Row(TypedDict):\n    a: int\n";
+        let source = Arc::new(Source::new(text, (3, 14)).unwrap());
+        let found = extract_type_definitions(&source, None, None);
+        assert!(field_type(found.get("Row").unwrap(), "b").is_none());
+        assert_eq!(split_type_args("int, list[str],"), ["int", "list[str]"]);
+    }
+}

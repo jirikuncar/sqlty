@@ -294,4 +294,12 @@ mod tests {
         let empty = "q = \"\"\"--sql\n   \"\"\"\n";
         assert_eq!(format(empty), empty);
     }
+
+    #[test]
+    fn a_query_whose_fix_moves_more_than_whitespace_stays() {
+        with_linter("postgres", "rules = layout", |linter| {
+            assert_eq!(format_query(linter, "select __sqlty_0__, %s from t"), None);
+            assert_eq!(format_query(linter, "select a -- c\n, b from t"), None);
+        });
+    }
 }

@@ -61,6 +61,9 @@ CASES = [
     "import typing\nfrom sqlty import SQL\n"
     + "".join(f"Doc{n} = 0\n" for n in ["", *range(2, 100)])
     + f"q = {query(f'SELECT {OBJECT} AS doc FROM users')}\n",
+    f"import typing\nfrom sqlty import SQL\nq = {query('SELECT 1', 'list[typing.Any]')}\n",
+    f"import typing\nfrom sqlty import SQL\nq = {query('NOT SQL')}\n",
+    f"import typing\nfrom sqlty import SQL\nq = {query('''SELECT 'null'::jsonb AS d''')}\n",
     "def f(:\n",
     "",
 ]
