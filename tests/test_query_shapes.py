@@ -196,7 +196,7 @@ def test_json(dialect: str, sql: str, shapes: list[tuple[str, str]]) -> None:
 
 EXPRESSION_SCHEMAS = {
     "postgres": "CREATE TABLE f (i INT, tx TEXT, iv INTERVAL, dt DATE, vb VARBIT, c INT CHECK (c IN (1, 2))); CREATE TABLE p (id INT PRIMARY KEY, name TEXT NOT NULL); CREATE TABLE c (id INT PRIMARY KEY, pid INT REFERENCES p (id), arr INT[]); CREATE TABLE g (a INT, b INT, CHECK (num_nonnulls(a, b) >= 1));",
-    "mysql": "CREATE TABLE f (i INT, tx TEXT, d DECIMAL(30, 2), dd DECIMAL(20), dn DECIMAL, dtm DATETIME, c INT CHECK (c IN (1, 2)));",
+    "mysql": "CREATE TABLE f (i INT, tx TEXT, d DECIMAL(30, 2), dd DECIMAL(20), dn DECIMAL, dtm DATETIME, c INT CHECK (c IN (1, 2))); CREATE TABLE m (ui INT UNSIGNED, ub BIGINT UNSIGNED, y YEAR, g GEOMETRY, dt DATE, bl BLOB, ud DECIMAL(10, 2) UNSIGNED, j JSON);",
     "sqlite": "CREATE TABLE f (i INT, tx TEXT, c INT CHECK (c IN (1, 2)));",
 }
 EXPRESSIONS = [
@@ -311,6 +311,98 @@ EXPRESSIONS = [
         [],
     ),
     ("postgres", "SELECT NVL(a, b) AS x FROM g", "x: None", ["unknown-function"]),
+    (
+        "mysql",
+        "SELECT i + INTERVAL 1 DAY FROM f",
+        "i + INTERVAL 1 DAY: None",
+        ["unsupported-syntax"],
+    ),
+    (
+        "mysql",
+        "SELECT INTERVAL 1 DAY - dt FROM m",
+        "INTERVAL 1 DAY - dt: None",
+        ["unsupported-syntax"],
+    ),
+    (
+        "mysql",
+        "SELECT ud + 1, ud % 2, ud / 2, ud | 1 FROM m",
+        "ud + 1: decimal.Decimal | None, ud % 2: decimal.Decimal | None, ud / 2: decimal.Decimal | None, ud | 1: int | None",
+        [],
+    ),
+    (
+        "mysql",
+        "SELECT CAST(1 AS UNSIGNED) * 1.5 FROM m",
+        "CAST(1 AS UNSIGNED) * 1.5: decimal.Decimal",
+        [],
+    ),
+    (
+        "mysql",
+        "SELECT -g, ~dt, -ui, -ud FROM m",
+        "-g: bytes | None, ~dt: None, -ui: int | None, -ud: decimal.Decimal | None",
+        ["unsupported-syntax"],
+    ),
+    (
+        "mysql",
+        "SELECT CASE WHEN true THEN g ELSE 1 END FROM m",
+        "CASE WHEN true THEN g ELSE 1 END: bytes | None",
+        [],
+    ),
+    (
+        "mysql",
+        "SELECT CASE WHEN true THEN ui ELSE ub END FROM m",
+        "CASE WHEN true THEN ui ELSE ub END: int | None",
+        [],
+    ),
+    (
+        "mysql",
+        "SELECT CASE WHEN true THEN i ELSE ub END FROM m, f",
+        "CASE WHEN true THEN i ELSE ub END: decimal.Decimal | None",
+        [],
+    ),
+    (
+        "mysql",
+        "SELECT CASE WHEN true THEN ub ELSE i END FROM m, f",
+        "CASE WHEN true THEN ub ELSE i END: decimal.Decimal | None",
+        [],
+    ),
+    (
+        "mysql",
+        "SELECT CASE WHEN true THEN y ELSE 1 END FROM m",
+        "CASE WHEN true THEN y ELSE 1 END: int | None",
+        [],
+    ),
+    (
+        "mysql",
+        "SELECT CASE WHEN true THEN j ELSE bl END FROM m",
+        "CASE WHEN true THEN j ELSE bl END: bytes | None",
+        [],
+    ),
+    (
+        "mysql",
+        "SELECT CASE WHEN true THEN j ELSE dt END FROM m",
+        "CASE WHEN true THEN j ELSE dt END: str | None",
+        [],
+    ),
+    (
+        "postgres",
+        "SELECT |/ 4.0, @ -1, ~ 1, - i, + i FROM f",
+        "?column?: float, ?column?: int, ?column?: int, ?column?: int | None, ?column?: int | None",
+        [],
+    ),
+    (
+        "sqlite",
+        "SELECT CASE WHEN 1 THEN i WHEN 2 THEN tx ELSE i END FROM f",
+        "CASE WHEN 1 THEN i WHEN 2 THEN tx ELSE i END: int | str | None",
+        [],
+    ),
+    ("mysql", "SELECT !i, - tx FROM f", "!i: bool | None, - tx: float | None", []),
+    (
+        "postgres",
+        "SELECT - iv, @ i FROM f",
+        "?column?: datetime.timedelta | None, ?column?: int | None",
+        [],
+    ),
+    ("postgres", "SELECT i ! FROM f", "?column?: None", ["unsupported-syntax"]),
 ]
 
 

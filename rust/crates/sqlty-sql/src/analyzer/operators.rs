@@ -46,11 +46,10 @@ impl Analyzer<'_> {
             SqlDialect::Sqlite => sqlite_numeric_rank(t),
             _ => operand_type(t).and_then(numeric_rank),
         };
-        let promoted = |least: usize| match (rank(&l), rank(&r)) {
-            (Some(a), Some(b)) => {
+        let promoted = |least: usize| {
+            rank(&l).zip(rank(&r)).map_or(Typed::UNKNOWN, |(a, b)| {
                 from_sql_type(NUMERIC_RANKS[a.max(b).max(least)][0], self.dialect)
-            }
-            _ => Typed::UNKNOWN,
+            })
         };
         Ok(match rule.result {
             RuleType::Sql(name) => from_sql_type(name, self.dialect),
@@ -80,13 +79,13 @@ impl Analyzer<'_> {
         })
     }
 
-    /// Result type of a prefix operator's `rule` on an operand of type `typed`.
+    /// Result type of a prefix operator's `rule` on an operand of type `typed`: a SQL type or,
+    /// for `@right`, the operand's, all that rules/compile.rs lets a prefix rule give.
     pub(super) fn prefixed(&self, rule: &BinaryRule, typed: Typed) -> Typed {
-        match rule.result {
-            RuleType::Sql(name) => from_sql_type(name, self.dialect),
-            RuleType::Right => strip(typed, self.dialect),
-            _ => Typed::UNKNOWN,
-        }
+        let RuleType::Sql(name) = rule.result else {
+            return strip(typed, self.dialect);
+        };
+        from_sql_type(name, self.dialect)
     }
 
     /// The inference rule for `op operand`, with the operand's type.
@@ -220,13 +219,28 @@ pub(super) fn numeric_rank(sql_type: &str) -> Option<usize> {
 /// The rank of the number MySQL converts an operand to in arithmetic: unsigned integers,
 /// `YEAR`, `BIT` and `BOOLEAN` values become integers, strings become doubles.
 fn mysql_numeric_rank(typed: &Typed) -> Option<usize> {
+    const CONVERTED: [(&[&str], usize); 3] = [
+        (
+            &[
+                "UTINYINT",
+                "USMALLINT",
+                "UMEDIUMINT",
+                "UINT",
+                "UBIGINT",
+                "YEAR",
+                "BIT",
+                "BOOLEAN",
+            ],
+            2,
+        ),
+        (&["UDECIMAL"], 3),
+        (&["UDOUBLE", "TEXT", "VARCHAR", "CHAR", "ENUM", "SET"], 5),
+    ];
     let ty = rule_type(typed)?;
-    numeric_rank(ty).or(match ty {
-        "UTINYINT" | "USMALLINT" | "UMEDIUMINT" | "UINT" | "UBIGINT" | "YEAR" | "BIT"
-        | "BOOLEAN" => Some(2),
-        "UDECIMAL" => Some(3),
-        "UDOUBLE" | "TEXT" | "VARCHAR" | "CHAR" | "ENUM" | "SET" => Some(5),
-        _ => None,
+    numeric_rank(ty).or_else(|| {
+        CONVERTED
+            .iter()
+            .find_map(|(names, rank)| names.contains(&ty).then_some(*rank))
     })
 }
 
@@ -256,9 +270,6 @@ pub(super) fn mysql_date_add(
         (Expr::Interval(interval), _) if *op == BinaryOperator::Plus => (right_typed, interval),
         _ => return None,
     };
-    if !matches!(op, BinaryOperator::Plus | BinaryOperator::Minus) {
-        return None;
-    }
     let whole_days = interval.last_field.is_none()
         && matches!(
             interval.leading_field,

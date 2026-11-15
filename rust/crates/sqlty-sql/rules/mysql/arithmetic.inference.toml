@@ -1,13 +1,14 @@
 # MySQL arithmetic. MySQL converts any operand to a number: unsigned integers, `YEAR`,
-# `BIT` and `BOOLEAN` values to integers, strings to doubles (analyzer/operators.rs,
+# `BIT` and `BOOLEAN` values to integers, unsigned decimals and doubles to their signed
+# types, strings to doubles (analyzer/operators.rs,
 # `mysql_numeric_rank`). Arithmetic on dates, which reads them as numbers, stays untyped.
 
 [[rule]]
 id = "mysql.arithmetic.division"
 operator = "Divide"
 dialects = ["mysql"]
-left = ["@numeric", "@unsigned", "YEAR", "BIT", "BOOLEAN", "@text", "ENUM", "SET"]
-right = ["@numeric", "@unsigned", "YEAR", "BIT", "BOOLEAN", "@text", "ENUM", "SET"]
+left = ["@numeric", "@unsigned", "UDECIMAL", "UDOUBLE", "YEAR", "BIT", "BOOLEAN", "@text", "ENUM", "SET"]
+right = ["@numeric", "@unsigned", "UDECIMAL", "UDOUBLE", "YEAR", "BIT", "BOOLEAN", "@text", "ENUM", "SET"]
 type = "@promote-decimal"
 nullability = "nonzero-divisor"
 reference.mysql = "MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators (/ Division; Division by zero produces a NULL result; If any of the operands of a +, -, /, *, % is a real or string value, the precision of the result is the precision of the operand with the maximum precision); 14.3 Type Conversion in Expression Evaluation (MySQL automatically converts strings to numbers as necessary); 11.1.5 Bit-Value Literals (In numeric contexts, MySQL treats a bit literal like an integer)"
@@ -56,8 +57,8 @@ reasoning = "Integer arithmetic with an unsigned operand is unsigned, at BIGINT 
 id = "mysql.arithmetic.converted"
 operators = ["Plus", "Minus", "Multiply"]
 dialects = ["mysql"]
-left = ["@unsigned", "YEAR", "BIT", "BOOLEAN", "@text", "ENUM", "SET"]
-right = ["@numeric", "@unsigned", "YEAR", "BIT", "BOOLEAN", "@text", "ENUM", "SET"]
+left = ["@unsigned", "UDECIMAL", "UDOUBLE", "YEAR", "BIT", "BOOLEAN", "@text", "ENUM", "SET"]
+right = ["@numeric", "@unsigned", "UDECIMAL", "UDOUBLE", "YEAR", "BIT", "BOOLEAN", "@text", "ENUM", "SET"]
 type = "@promote"
 reference.mysql = "MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators (In the case of -, +, and *, the result is calculated with BIGINT (64-bit) precision if both operands are integers. If any of the operands of a +, -, /, *, % is a real or string value, the precision of the result is the precision of the operand with the maximum precision); 14.3 Type Conversion in Expression Evaluation (MySQL automatically converts strings to numbers as necessary); 11.1.5 Bit-Value Literals (In numeric contexts, MySQL treats a bit literal like an integer)"
 reasoning = "MySQL computes with the operands converted to numbers: integers for unsigned, `YEAR`, `BIT` and `BOOLEAN` values, doubles for strings. Dates read as numbers (`20240101`) stay untyped."
@@ -67,7 +68,7 @@ id = "mysql.arithmetic.converted-right"
 operators = ["Plus", "Minus", "Multiply"]
 dialects = ["mysql"]
 left = ["@numeric"]
-right = ["@unsigned", "YEAR", "BIT", "BOOLEAN", "@text", "ENUM", "SET"]
+right = ["@unsigned", "UDECIMAL", "UDOUBLE", "YEAR", "BIT", "BOOLEAN", "@text", "ENUM", "SET"]
 type = "@promote"
 reference.mysql = "MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators (In the case of -, +, and *, the result is calculated with BIGINT (64-bit) precision if both operands are integers. If any of the operands of a +, -, /, *, % is a real or string value, the precision of the result is the precision of the operand with the maximum precision); 14.3 Type Conversion in Expression Evaluation (MySQL automatically converts strings to numbers as necessary); 11.1.5 Bit-Value Literals (In numeric contexts, MySQL treats a bit literal like an integer)"
 reasoning = "MySQL computes with the operands converted to numbers: integers for unsigned, `YEAR`, `BIT` and `BOOLEAN` values, doubles for strings. Dates read as numbers (`20240101`) stay untyped."
@@ -76,8 +77,8 @@ reasoning = "MySQL computes with the operands converted to numbers: integers for
 id = "mysql.arithmetic.modulo-converted"
 operator = "Modulo"
 dialects = ["mysql"]
-left = ["@unsigned", "YEAR", "BIT", "BOOLEAN", "@text", "ENUM", "SET"]
-right = ["@numeric", "@unsigned", "YEAR", "BIT", "BOOLEAN", "@text", "ENUM", "SET"]
+left = ["@unsigned", "UDECIMAL", "UDOUBLE", "YEAR", "BIT", "BOOLEAN", "@text", "ENUM", "SET"]
+right = ["@numeric", "@unsigned", "UDECIMAL", "UDOUBLE", "YEAR", "BIT", "BOOLEAN", "@text", "ENUM", "SET"]
 type = "@promote"
 nullability = "nonzero-divisor"
 reference.mysql = "MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators (In the case of -, +, and *, the result is calculated with BIGINT (64-bit) precision if both operands are integers. If any of the operands of a +, -, /, *, % is a real or string value, the precision of the result is the precision of the operand with the maximum precision); 14.3 Type Conversion in Expression Evaluation (MySQL automatically converts strings to numbers as necessary); 11.1.5 Bit-Value Literals (In numeric contexts, MySQL treats a bit literal like an integer); 14.6.2 Mathematical Functions (MOD(N,0) returns NULL)"
@@ -88,7 +89,7 @@ id = "mysql.arithmetic.modulo-converted-right"
 operator = "Modulo"
 dialects = ["mysql"]
 left = ["@numeric"]
-right = ["@unsigned", "YEAR", "BIT", "BOOLEAN", "@text", "ENUM", "SET"]
+right = ["@unsigned", "UDECIMAL", "UDOUBLE", "YEAR", "BIT", "BOOLEAN", "@text", "ENUM", "SET"]
 type = "@promote"
 nullability = "nonzero-divisor"
 reference.mysql = "MySQL 8.4 Reference Manual, 14.6.1 Arithmetic Operators (In the case of -, +, and *, the result is calculated with BIGINT (64-bit) precision if both operands are integers. If any of the operands of a +, -, /, *, % is a real or string value, the precision of the result is the precision of the operand with the maximum precision); 14.3 Type Conversion in Expression Evaluation (MySQL automatically converts strings to numbers as necessary); 11.1.5 Bit-Value Literals (In numeric contexts, MySQL treats a bit literal like an integer); 14.6.2 Mathematical Functions (MOD(N,0) returns NULL)"
@@ -116,8 +117,8 @@ reasoning = "Negating a temporal value or a string gives a double."
 id = "mysql.bitwise.numbers"
 operators = ["BitwiseAnd", "BitwiseOr", "BitwiseXor", "PGBitwiseShiftLeft", "PGBitwiseShiftRight"]
 dialects = ["mysql"]
-left = ["@numeric", "@unsigned", "YEAR", "BIT", "BOOLEAN", "@text", "ENUM", "SET"]
-right = ["@numeric", "@unsigned", "YEAR", "BIT", "BOOLEAN", "@text", "ENUM", "SET"]
+left = ["@numeric", "@unsigned", "UDECIMAL", "UDOUBLE", "YEAR", "BIT", "BOOLEAN", "@text", "ENUM", "SET"]
+right = ["@numeric", "@unsigned", "UDECIMAL", "UDOUBLE", "YEAR", "BIT", "BOOLEAN", "@text", "ENUM", "SET"]
 type = "UBIGINT"
 reference.mysql = "MySQL 8.4 Reference Manual, 14.12 Bit Functions and Operators (Binary-string evaluation occurs when the arguments have a binary string type ... Numeric evaluation occurs otherwise, with argument conversion to unsigned 64-bit integers as necessary. Numeric evaluation produces an unsigned 64-bit integer)"
 reasoning = "Bit operations on anything but binary strings give an unsigned 64-bit integer."
@@ -126,7 +127,7 @@ reasoning = "Bit operations on anything but binary strings give an unsigned 64-b
 id = "mysql.bitwise.not"
 operator = "Prefix:BitwiseNot"
 dialects = ["mysql"]
-right = ["@numeric", "@unsigned", "YEAR", "BIT", "BOOLEAN", "@text", "ENUM", "SET"]
+right = ["@numeric", "@unsigned", "UDECIMAL", "UDOUBLE", "YEAR", "BIT", "BOOLEAN", "@text", "ENUM", "SET"]
 type = "UBIGINT"
 reference.mysql = "MySQL 8.4 Reference Manual, 14.12 Bit Functions and Operators (Binary-string evaluation occurs when the arguments have a binary string type ... Numeric evaluation occurs otherwise, with argument conversion to unsigned 64-bit integers as necessary. Numeric evaluation produces an unsigned 64-bit integer)"
 reasoning = "`~` on anything but a binary string gives an unsigned 64-bit integer."
