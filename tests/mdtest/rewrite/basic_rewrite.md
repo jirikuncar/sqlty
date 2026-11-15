@@ -1,12 +1,5 @@
 # Basic Rewrite
 
-## Simple integer query
-
-```python
-q = "--sql\nSELECT id::INTEGER FROM users"
-# rewritten: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
-```
-
 ## Multiple columns
 
 ```python

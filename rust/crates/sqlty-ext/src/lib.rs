@@ -751,24 +751,25 @@ fn rewrite_source(
 /// Write the parameter type P of each SQL[R]("--sql\n...") call: SQL[R, P].
 ///
 /// Positional parameters are a tuple, named ones a TypedDict generated below a
-/// `# sqlty: generated` line after the imports.
+/// `# sqlty: generated` line after the imports, with `closed=True` when `closed`.
 ///
 /// Raises:
 ///     ValueError: unsupported import_style
 #[pyfunction]
-#[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, schema_sql = None, import_style = None))]
+#[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, schema_sql = None, import_style = None, closed = false))]
 fn add_param_types(
     py: Python<'_>,
     source: &str,
     dialect: DialectArg,
     schema_sql: Option<SchemaArg>,
     import_style: Option<&str>,
+    closed: bool,
 ) -> Result<String, Error> {
     let dialect = dialect.0;
     detach(py, || {
         let schema = schema_for(source, schema_sql, dialect);
         let options = Options::new(dialect, schema.as_deref(), import_style, false)?;
-        Ok(params::add_param_types(source, &options))
+        Ok(params::add_param_types(source, &options, closed))
     })
 }
 

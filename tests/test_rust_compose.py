@@ -8,6 +8,7 @@ of generated examples with ``SQLTY_FUZZ_EXAMPLES``.
 from __future__ import annotations
 
 import ast
+import functools
 import sys
 
 import pytest
@@ -96,6 +97,7 @@ CALLEES = [
 ]
 
 
+@functools.cache
 def wild() -> st.SearchStrategy[str]:
     """Any expression over the atoms, most of which psycopg rejects."""
 
@@ -138,6 +140,7 @@ TEXTS = [a for a in ATOMS if a.startswith("'")] + ["TABLE", "'SELECT {} FROM {}'
 SQL_CLASSES = ["sql.SQL", "SQL", "s.SQL", "psycopg.sql.SQL"]
 
 
+@functools.cache
 def expressions() -> st.SearchStrategy[str]:
     """Expressions that mostly build a composition, some with a part gone wrong."""
     text = st.recursive(

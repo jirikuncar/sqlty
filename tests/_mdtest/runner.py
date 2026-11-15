@@ -10,7 +10,7 @@ import tokenize
 from functools import cached_property
 
 import sqlty.core as core
-from sqlty._config import MAX_QUERY_VARIANTS, driver_types
+from sqlty._config import MAX_QUERY_VARIANTS, driver_types, requires_closed
 
 from .parser import Assertion, Kind, Section, Unit
 from .updater import Updater
@@ -54,6 +54,9 @@ class Run:
         self.untyped: bool = settings.get("untyped") == "sentinel"
         self.json_types: str = settings.get("json-types", "typing.Any")
         self.param_types: bool = settings.get("param-types", False)
+        self.closed_params = requires_closed(
+            section.config.get("project", {}).get("requires-python")
+        )
         self.rules: dict[str, str] | None = settings.get("rules")
         # Preview is on unless a section turns it off: the suite asserts it changes nothing else.
         self.preview: bool = settings.get("preview", True)
@@ -214,6 +217,7 @@ class Run:
             rules=self.rules,
             json_types=self.json_types,
             param_types=self.param_types,
+            closed_params=self.closed_params,
         )
 
     def _rewrite(self, text: str) -> str:
@@ -225,6 +229,7 @@ class Run:
             untyped=self.untyped,
             json_types=self.json_types,
             param_types=self.param_types,
+            closed_params=self.closed_params,
         )
 
     @cached_property

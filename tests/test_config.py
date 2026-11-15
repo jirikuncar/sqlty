@@ -373,3 +373,13 @@ def test_invalid_extend_is_an_error(tmp_path: Path, files: dict[str, str], messa
 
     with pytest.raises(ConfigError, match=message):
         load_config(tmp_path)
+
+
+def test_requires_python_comes_from_the_nearest_pyproject_holding_it(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text('[project]\nrequires-python = ">=3.15"\n')
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "pyproject.toml").write_text("[tool.sqlty]\nparam-types = true\n")
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "lib" / "pyproject.toml").write_text('[project]\nrequires-python = ">=3.14"\n')
+    assert _config.requires_python(tmp_path / "app") == ">=3.15"
+    assert _config.requires_python(tmp_path / "lib") == ">=3.14"

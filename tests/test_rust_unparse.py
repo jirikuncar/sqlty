@@ -127,11 +127,11 @@ def test_expressions_of_the_package() -> None:
         if path.name == "_stdlib.py":
             continue
         text = path.read_text()
+        lines = text.encode().splitlines(keepends=True)
         for node in ast.walk(ast.parse(text)):
             if isinstance(node, ast.expr) and not isinstance(node, (ast.Slice, ast.Starred)):
                 expected = ast.unparse(node)
-                written = ast.get_source_segment(text, node)
-                assert written is not None
+                written = segment(lines, node)
                 for source in (f"({written}\n)", expected):
                     try:  # the text of an f-string is not an expression
                         if ast.unparse(ast.parse(source, mode="eval").body) != expected:
@@ -142,6 +142,16 @@ def test_expressions_of_the_package() -> None:
                         assert found == expected, source
                         checked += 1
     assert checked > 50_000
+
+
+def segment(lines: list[bytes], node: ast.expr) -> str:
+    """``ast.get_source_segment`` without splitting the whole file again for every node."""
+    assert node.end_lineno is not None and node.end_col_offset is not None
+    first, last = node.lineno - 1, node.end_lineno - 1
+    if first == last:
+        return lines[first][node.col_offset : node.end_col_offset].decode()
+    middle = b"".join(lines[first + 1 : last])
+    return (lines[first][node.col_offset :] + middle + lines[last][: node.end_col_offset]).decode()
 
 
 def expected_unparse(source: str) -> str | None:

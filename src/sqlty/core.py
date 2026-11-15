@@ -357,13 +357,14 @@ def rewrite_source(
     keep_lines: bool = False,
     json_types: str = "typing.Any",
     param_types: bool = False,
+    closed_params: bool = False,
 ) -> str:
     r"""Wrap each ``--sql`` string in ``SQL[T](...)``, ``T`` the row type it infers.
 
     With ``json_types="typing.TypedDict"``, a JSON column of known shape gets a generated
     ``TypedDict`` instead of ``typing.Any``. With ``param_types``, each ``SQL[R]`` call gets the
     type of its parameters, ``SQL[R, P]``: a ``tuple``, or a generated ``TypedDict`` for named
-    parameters.
+    parameters, ``closed=True`` with ``closed_params`` (Python 3.15).
 
     Example:
         >>> print(rewrite_source('q = "--sql\\nSELECT 1::INTEGER AS n"'))
@@ -385,7 +386,11 @@ def rewrite_source(
         rewritten = _json_types(rewritten, dialect, schema_sql, import_style)
     if param_types:
         rewritten = _add_param_types(
-            rewritten, dialect=dialect, schema_sql=schema_sql, import_style=import_style
+            rewritten,
+            dialect=dialect,
+            schema_sql=schema_sql,
+            import_style=import_style,
+            closed=closed_params,
         )
     return rewritten
 
@@ -438,6 +443,7 @@ def fix_source(
     helpers: HelperIndex | None = None,
     module: str | None = None,
     param_types: bool = False,
+    closed_params: bool = False,
 ) -> str:
     """Apply what ``sqlty check --fix`` fixes; rules set to ``"ignore"`` are skipped.
 
@@ -477,7 +483,11 @@ def fix_source(
         fixed = _json_types(fixed, dialect, schema_sql, import_style)
     if param_types:
         fixed = _add_param_types(
-            fixed, dialect=dialect, schema_sql=schema_sql, import_style=import_style
+            fixed,
+            dialect=dialect,
+            schema_sql=schema_sql,
+            import_style=import_style,
+            closed=closed_params,
         )
     return fixed
 

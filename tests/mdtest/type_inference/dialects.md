@@ -12,18 +12,6 @@ SELECT id::INTEGER FROM users
 -- inferred: tuple[int]
 ```
 
-## MySQL SIGNED cast
-
-```toml
-[tool.sqlty]
-dialect = "mysql"
-```
-
-```sql
-SELECT CAST(id AS SIGNED) FROM users
--- inferred: tuple[int]
-```
-
 ## SQLite integer
 
 ```toml

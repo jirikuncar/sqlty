@@ -116,6 +116,7 @@ class Workspace:
             untyped=settings.untyped,
             json_types=settings.json_types,
             param_types=settings.param_types,
+            closed_params=settings.closed_params,
         )
 
     def strip(self, path: str, text: str) -> str:

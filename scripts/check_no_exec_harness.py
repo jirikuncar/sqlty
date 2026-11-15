@@ -9,7 +9,8 @@ is held to. Against the merge base, HEAD must:
   and enabled in ``pyproject.toml``;
 - only remove lines from ``tests/no_exec_allowlist.txt``;
 - keep every mdtest assertion (``# error:``, ``-- columns:``, ...) of the base; a bare
-  ``# error:`` may become a specific one;
+  ``# error:`` may become a specific one, and a copy may go while a block with the same
+  setup and code still asserts it at the same line;
 - add no skip or xfail, and remove no test function.
 
 Needs only the standard library and git.
@@ -36,6 +37,12 @@ SKIPS = re.compile(
     r"|pytest\.(skip|xfail|importorskip)\("
 )
 TEST = re.compile(r"^\s*(async\s+)?def test_\w*", re.MULTILINE)
+FENCE = re.compile(r"^(\s*)(`{3,}|~{3,})\s*([\w+-]*)(.*)$")
+HEADING = re.compile(r"^(#{1,6})\s")
+LABEL = re.compile(r"^`[^`]+`:\s*$")
+
+Context = tuple[str, int]
+"""What an assertion checks: the setup and code of its block, and its line among them."""
 
 
 def git(*args: str) -> str:
@@ -50,6 +57,57 @@ def files(rev: str) -> dict[str, str]:
         if MARKDOWN.match(n) or (n.startswith("tests/") and n.endswith(".py"))
     ]
     return {n: git("show", f"{rev}:{n}") for n in names}
+
+
+def contexts(text: str) -> collections.defaultdict[str, set[Context]]:
+    """The contexts of each assertion line of a Markdown file.
+
+    A block reads the setup of its headings (config, files, directives) and the
+    assertion-free python blocks right before it, as the mdtest runner does.
+    """
+    found: collections.defaultdict[str, set[Context]] = collections.defaultdict(set)
+    setup: list[tuple[int, list[str]]] = []
+    literate: list[str] = []
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if heading := HEADING.match(line):
+            level = len(heading.group(1))
+            while setup and setup[-1][0] >= level:
+                setup.pop()
+            setup.append((level, []))
+            literate = []
+        elif fence := FENCE.match(line):
+            _, marker, lang, rest = fence.groups()
+            end = next(
+                (
+                    j
+                    for j in range(i + 1, len(lines))
+                    if lines[j].strip() == marker[0] * len(marker)
+                ),
+                len(lines),
+            )
+            body = lines[i + 1 : end]
+            label = next((b for b in lines[max(i - 2, 0) : i] if LABEL.match(b)), "")
+            asserted = [n for n, b in enumerate(body) if ASSERTION.match(b) or BARE_ERROR.match(b)]
+            if asserted:
+                code = [b for n, b in enumerate(body) if n not in asserted]
+                block = "\n".join(
+                    [*(t for _, ts in setup for t in ts), *literate, label, lang, *code]
+                )
+                for n in asserted:
+                    found[body[n].strip()].add((block, n - asserted.index(n)))
+                literate = []
+            elif lang == "python" and "ignore" not in rest:
+                literate.append("\n".join(body))
+            elif setup:
+                setup[-1][1].append("\n".join([label, lang, *body]))
+            i = end
+        elif line.startswith("<!-- mdtest:") and setup:
+            setup[-1][1].append(line)
+        i += 1
+    return found
 
 
 def show(rev: str, path: str) -> str | None:
@@ -84,11 +142,20 @@ def problems(base: str) -> list[str]:
         rev: collections.Counter({k: v for k, v in c.items() if not BARE_ERROR.match(k)})
         for rev, c in asserted.items()
     }
+    where: dict[str, collections.defaultdict[str, set[Context]]] = {}
+    for rev, texts in (("base", before), ("head", after)):
+        where[rev] = collections.defaultdict(set)
+        for name, text in texts.items():
+            if name.endswith(".md"):
+                for line, found_at in contexts(text).items():
+                    where[rev][line] |= found_at
     for line, count in sorted((specific["base"] - specific["head"]).items()):
-        found.append(f"assertion removed {count}x: {line}")
+        if not where["base"][line] <= where["head"][line]:
+            found.append(f"assertion removed {count}x: {line}")
     bare = {rev: sum(c.values()) - sum(specific[rev].values()) for rev, c in asserted.items()}
     gained = sum((specific["head"] - specific["base"]).values())
-    if bare["head"] + gained < bare["base"]:
+    bare_lost = not where["base"]["# error:"] <= where["head"]["# error:"]
+    if bare["head"] + gained < bare["base"] and bare_lost:
         found.append(f"bare '# error:' assertions dropped: {bare['base']} -> {bare['head']}")
 
     def count(pattern: re.Pattern[str], texts: dict[str, str]) -> int:

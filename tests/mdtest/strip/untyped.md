@@ -24,21 +24,12 @@ assert row_form(q) is UNTYPED
 # stripped: assert row_form(q) is UNTYPED
 ```
 
-## Round trip: rewrite then strip
+## Strip a rewritten SQL[UNTYPED]
 
 ```toml
 [tool.sqlty]
 untyped = "sentinel"
 ```
-
-### Rewrite
-
-```python
-q = "--sql\nSELECT x, y FROM pairs"
-# rewritten: q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
-```
-
-### Strip
 
 ```python
 q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")

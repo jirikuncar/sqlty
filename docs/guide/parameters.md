@@ -216,7 +216,9 @@ count = "--sql\nSELECT count(*) FROM users"
 
 - Positional parameters are a `tuple`, one item per placeholder.
 - Named parameters are a `TypedDict`, one key per name, generated after the
-  imports below a `# sqlty: generated` line. `sqlty strip` removes it.
+  imports below a `# sqlty: generated` line. `sqlty strip` removes it. When
+  `requires-python` rules out Python 3.14, it is `closed=True`
+  ([PEP 728](https://peps.python.org/pep-0728/)), so an extra key is a type error.
 - A query without parameters takes `NoParams`: `()`, `{}` or nothing, and no key.
 - A parameter is `T | None` unless a `NOT NULL` column stores it, and
   `typing.Any` when its type is unknown or cast (`%s::int` takes anything).

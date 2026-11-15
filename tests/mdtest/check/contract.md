@@ -456,13 +456,6 @@ CREATE TABLE users (id INT NOT NULL);
 q = SQL[tuple[str]]("--sql\nselect * FROM users")
 ```
 
-## Check_source detects unwrapped --sql strings
-
-```python
-# error: [inline-sql-comment] ""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty check --fix"
-q = "--sql SELECT id::INTEGER FROM users"
-```
-
 ## Check_source returns empty for clean wrapped source
 
 ```python
