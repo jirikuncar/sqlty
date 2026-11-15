@@ -383,3 +383,10 @@ def test_requires_python_comes_from_the_nearest_pyproject_holding_it(tmp_path: P
     (tmp_path / "lib" / "pyproject.toml").write_text('[project]\nrequires-python = ">=3.14"\n')
     assert _config.requires_python(tmp_path / "app") == ">=3.15"
     assert _config.requires_python(tmp_path / "lib") == ">=3.14"
+
+
+def test_requires_python_skips_a_pyproject_it_cannot_read(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text('[project]\nrequires-python = ">=3.15"\n')
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "pyproject.toml").write_text("[project\n")
+    assert _config.requires_python(tmp_path / "app") == ">=3.15"
