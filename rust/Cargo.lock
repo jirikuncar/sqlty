@@ -1591,6 +1591,7 @@ dependencies = [
  "sqlty-python",
  "sqlty-sql",
  "sqruff-lib",
+ "sqruff-lib-core",
 ]
 
 [[package]]

@@ -20,3 +20,4 @@ sqruff-lib = "0.44"
 
 [dev-dependencies]
 sqlty-sql.workspace = true
+sqruff-lib-core = "0.44"

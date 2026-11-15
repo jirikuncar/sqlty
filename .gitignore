@@ -13,6 +13,10 @@ wheels/
 .coverage
 htmlcov/
 .coverage.*
+coverage/
+lcov.info
+*.profraw
+*.profdata
 
 # Cache folders
 .mypy_cache/
@@ -44,4 +48,3 @@ docs/assets/vendor/
 # Cloudflare deploys (docs-preview.yml)
 /public/
 .wrangler/
-*.profraw
