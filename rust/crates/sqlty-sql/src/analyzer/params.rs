@@ -729,13 +729,12 @@ impl<'a> Analyzer<'a> {
                 ..
             } => {
                 if let Some(index) = placeholder_index(expr) {
-                    if let Ok(Some(columns)) = self.correlated(scope).query_columns(subquery) {
-                        if let [column] = columns.as_slice() {
-                            let typed =
-                                Typed::new(column.python_type.clone(), column.sql_type.clone());
-                            if is_typed(&typed) {
-                                out.add(index, typed, Nullability::Unknown);
-                            }
+                    let columns = self.correlated(scope).query_columns(subquery);
+                    let columns = columns.unwrap_or_else(|never| match never {});
+                    if let Some([column]) = columns.as_deref() {
+                        let typed = Typed::new(column.python_type.clone(), column.sql_type.clone());
+                        if is_typed(&typed) {
+                            out.add(index, typed, Nullability::Unknown);
                         }
                     }
                 }
