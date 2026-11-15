@@ -325,6 +325,16 @@ def test_cases(source: str) -> None:
     assert compare(HEAD + source) >= 1
 
 
+QUIET = {
+    "literal row": "type Row = Literal['a']\nq = SQL[Row]('--sql\\nSELECT id, name FROM t')\n",
+}
+
+
+@pytest.mark.parametrize("source", QUIET.values(), ids=QUIET.keys())
+def test_quiet_cases(source: str) -> None:
+    assert compare(HEAD + source) == 0
+
+
 OBJECT = "json_build_object('a', id, 'b', name, 'c', ratio, 'd', flag)"
 JSON = {
     "object": OBJECT,

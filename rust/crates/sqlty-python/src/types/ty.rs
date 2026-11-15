@@ -23,6 +23,7 @@ pub struct Class {
     subclassable: bool,
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl std::fmt::Debug for Class {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}.{}", self.module, self.name)
@@ -257,6 +258,18 @@ pub enum Lit {
     Bool(bool),
 }
 
+impl Lit {
+    /// `repr` of the value.
+    pub fn repr(&self) -> String {
+        match self {
+            Lit::Str(text) => crate::unparse::repr_str(text),
+            Lit::Int(digits) => digits.clone(),
+            Lit::Bool(true) => "True".to_string(),
+            Lit::Bool(false) => "False".to_string(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub enum Ty {
     Never,
@@ -269,6 +282,7 @@ pub enum Ty {
     NewType(Arc<NewType>),
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl std::fmt::Debug for Ty {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.repr())
@@ -384,15 +398,7 @@ impl Ty {
             // `Literal[()]` holds the empty tuple.
             Ty::Literal(values) if values.is_empty() => "typing.Literal[()]".to_string(),
             Ty::Literal(values) => {
-                let values: Vec<String> = values
-                    .iter()
-                    .map(|value| match value {
-                        Lit::Str(text) => crate::unparse::repr_str(text),
-                        Lit::Int(digits) => digits.clone(),
-                        Lit::Bool(true) => "True".to_string(),
-                        Lit::Bool(false) => "False".to_string(),
-                    })
-                    .collect();
+                let values: Vec<String> = values.iter().map(Lit::repr).collect();
                 format!("typing.Literal[{}]", values.join(", "))
             }
             Ty::Union(members) => {
@@ -581,4 +587,26 @@ pub fn column_type(python_type: &str) -> Option<Ty> {
 /// `str.strip()`.
 pub fn py_strip(text: &str) -> &str {
     text.trim_matches(|c: char| c.is_whitespace() || ('\x1c'..='\x1f').contains(&c))
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rarer_types() {
+        let new = Arc::new(NewType {
+            name: "UserId".into(),
+            module: "m".into(),
+            supertype: Ty::Never,
+        });
+        assert!(Ty::NewType(new.clone()).same(&Ty::NewType(new)));
+        assert!(Ty::union([]).is_none());
+        assert_eq!(
+            Ty::literal([Lit::Bool(false)]).repr(),
+            "typing.Literal[False]"
+        );
+        assert_eq!(Ty::Never.admits_none(), None);
+    }
 }

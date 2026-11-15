@@ -41,6 +41,10 @@ def test_unparsable_module() -> None:
     assert _core.row_diagnostics(UNPARSABLE, version=VERSION) is None
 
 
+def test_row_diagnostics_of_a_module_without_queries() -> None:
+    assert _core.row_diagnostics("x = 1\n", version=VERSION) == ([], [], [])
+
+
 @pytest.mark.parametrize("split", [_core.check_queries, _core.named_queries])
 def test_unknown_query_format(split: Callable[..., object]) -> None:
     with pytest.raises(ValueError, match="unknown query-format 'bogus'"):

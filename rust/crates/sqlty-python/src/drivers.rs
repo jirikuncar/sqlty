@@ -154,43 +154,37 @@ impl<'a> Finder<'a, '_> {
             return;
         }
         let args = &call.arguments.args;
-        let Expr::Attribute(func) = call.func.as_ref() else {
+        let Some((attr, receiver)) = call
+            .func
+            .as_attribute_expr()
+            .filter(|func| any_method(func.attr.as_str()))
+            .and_then(|func| Some((func.attr.as_str(), func.value.as_name_expr()?)))
+        else {
             return;
         };
-        let attr = func.attr.as_str();
-        let Expr::Name(receiver) = func.value.as_ref() else {
-            return;
-        };
-        if !any_method(attr) {
-            return;
-        }
         let Some(driver) = self.driver(receiver.id.as_str(), &chain) else {
             return;
         };
-        if !methods(driver).contains(&attr)
-            || args.is_empty()
-            || args.iter().any(|arg| matches!(arg, Expr::Starred(_)))
-        {
-            return;
-        }
-        let first = &args[0];
-        let Some(query) = self.query_of(first, &chain) else {
+        let checked = methods(driver).contains(&attr)
+            && !args.iter().any(|arg| matches!(arg, Expr::Starred(_)));
+        let Some((first, query)) = args
+            .first()
+            .filter(|_| checked)
+            .and_then(|first| Some((first, self.query_of(first, &chain)?)))
+        else {
             return;
         };
         if driver == "asyncpg" {
             let arg_lists: Vec<&[Expr]> = if matches!(attr, "executemany" | "fetchmany") {
-                let rows = args.get(1).or_else(|| keyword(call, "args"));
-                let rows = match rows {
-                    Some(Expr::List(list)) => &list.elts,
-                    Some(Expr::Tuple(tuple)) => &tuple.elts,
-                    _ => return,
+                let Some(rows) = args
+                    .get(1)
+                    .or_else(|| keyword(call, "args"))
+                    .and_then(elements)
+                else {
+                    return;
                 };
                 rows.iter()
-                    .filter_map(|row| match row {
-                        Expr::List(list) => Some(&list.elts[..]),
-                        Expr::Tuple(tuple) => Some(&tuple.elts[..]),
-                        _ => None,
-                    })
+                    .filter_map(elements)
                     .filter(|items| !items.iter().any(|item| matches!(item, Expr::Starred(_))))
                     .collect()
             } else {
@@ -223,12 +217,7 @@ impl<'a> Finder<'a, '_> {
         }
         if attr != "executemany" {
             self.calls(call, first, arg, driver, Some(query), stack, false);
-        } else if let Some(Expr::List(_) | Expr::Tuple(_)) = arg {
-            let rows = match arg {
-                Some(Expr::List(list)) => &list.elts,
-                Some(Expr::Tuple(tuple)) => &tuple.elts,
-                _ => unreachable!(),
-            };
+        } else if let Some(rows) = arg.and_then(elements) {
             for row in rows {
                 self.calls(
                     call,
@@ -601,6 +590,15 @@ impl<'a> Visitor<'a> for Stores<'a> {
             }
         }
         walk_expr(self, expr);
+    }
+}
+
+/// The items of a list or tuple literal.
+fn elements(expr: &Expr) -> Option<&[Expr]> {
+    match expr {
+        Expr::List(list) => Some(&list.elts),
+        Expr::Tuple(tuple) => Some(&tuple.elts),
+        _ => None,
     }
 }
 

@@ -261,10 +261,7 @@ pub fn validate(mut table: Table, source: &str) -> Result<Config, InvalidConfig>
         else {
             return fail("[tool.sqlty] overrides must be an array of tables".into());
         };
-        for value in overrides {
-            let Some(entry) = value.as_table_mut() else {
-                unreachable!("checked above")
-            };
+        for entry in overrides.iter_mut().filter_map(Value::as_table_mut) {
             if let Some(key) = entry
                 .keys()
                 .find(|key| !OVERRIDE_KEYS.contains(&key.as_str()))
@@ -313,9 +310,7 @@ pub fn validate(mut table: Table, source: &str) -> Result<Config, InvalidConfig>
                     "{place}: a database name is letters, digits, '-' and '_', and not 'default'"
                 ));
             }
-            let Some(entry) = database.as_table_mut() else {
-                unreachable!("checked above")
-            };
+            let entry = database.as_table_mut().expect("checked above");
             if let Some(key) = entry
                 .keys()
                 .find(|key| !DATABASE_KEYS.contains(&key.as_str()))
@@ -644,5 +639,18 @@ mod tests {
                 .to_string(),
             "Cargo.toml: no [package.metadata.sqlty] or [workspace.metadata.sqlty] table"
         );
+    }
+
+    #[test]
+    fn rarer_configs() {
+        assert!(invalid("query-format = 1").contains("query-format must be a string"));
+        assert!(driver_types("psycopg", "mysql").is_empty());
+        let loaded = load(
+            b"[tool]\nsqlty = 1\n",
+            "pyproject.toml",
+            "pyproject.toml",
+            false,
+        );
+        assert!(matches!(loaded, Ok(None)));
     }
 }

@@ -395,19 +395,14 @@ impl Lines {
         Self(starts)
     }
 
-    /// The number of line starts.
-    pub fn count(&self) -> usize {
-        self.0.len()
-    }
-
     /// The line `offset` is on.
     pub fn line(&self, offset: usize) -> usize {
         self.0.partition_point(|&start| start <= offset)
     }
 
-    /// The offset of the start of the 1-based `line`, or `len` past the last one.
+    /// The offset of the start of the 1-based `line`, or `len` for line 0 or past the last one.
     pub fn start(&self, line: usize, len: usize) -> usize {
-        self.0.get(line - 1).copied().unwrap_or(len)
+        self.0.get(line.wrapping_sub(1)).copied().unwrap_or(len)
     }
 }
 

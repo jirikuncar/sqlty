@@ -530,4 +530,28 @@ mod tests {
         );
         assert!(queries.at(source.find("plain").unwrap()).is_none());
     }
+
+    #[test]
+    fn rarer_sites_and_offsets() {
+        assert_eq!(
+            [Route::Marker, Route::Wrapper, Route::Helper].map(Route::name),
+            ["marker", "wrapper", "helper"]
+        );
+        assert_eq!(colored(r#"run("SELECT 1", int)"#, &["ELECT"]), []);
+        for unchecked in [
+            "from sqlty import SQL\nq = SQL[int](\"SELECT 1\")",
+            "from sqlty import SQL\nq = SQL[int](f\"--sql\\nSELECT {x}\")",
+        ] {
+            assert_eq!(colored(unchecked, &[]), [], "{unchecked}");
+        }
+        let source = r#"q = "--sql\nSELECT '\u2014\t' FROM t""#;
+        let queries = Queries::new(source, &ImportStyle::parse(None).unwrap(), &[]);
+        let escape = source.find(r"\t").unwrap();
+        let at = queries.at(escape + 1).unwrap();
+        assert_eq!(at.text[at.offset..].chars().next(), Some('\t'));
+        let dash = at.text.find('\u{2014}').unwrap();
+        let named = source.find(r"\u").unwrap();
+        assert_eq!(at.source_offset(dash + 1), Some(escape));
+        assert_eq!(at.source_offset(dash), Some(named));
+    }
 }
