@@ -328,7 +328,7 @@ def test_cases(source: str) -> None:
 QUIET = {
     "literal row": "type Row = Literal['a']\nq = SQL[Row]('--sql\\nSELECT id, name FROM t')\n",
     "literal row inline": "q = SQL[Literal['a']]('--sql\\nSELECT id FROM t')\n",
-    "generic row inline": "q = SQL[list[int]]('--sql\\nSELECT id FROM t')\n",
+    "generic row": "type Row = list[int]\nq = SQL[Row]('--sql\\nSELECT id FROM t')\n",
 }
 
 

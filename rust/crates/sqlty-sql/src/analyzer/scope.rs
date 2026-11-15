@@ -699,10 +699,7 @@ impl<'a> Analyzer<'a> {
         reference: Option<&str>,
         scope: &Scope,
     ) -> Option<Vec<Column>> {
-        let sources = Self::star_sources(reference, scope);
-        if sources.is_empty() {
-            return None;
-        }
+        let sources = Some(Self::star_sources(reference, scope)).filter(|s| !s.is_empty())?;
         let columns = sources
             .iter()
             .map(|Source { reference, table }| {
@@ -741,10 +738,7 @@ impl<'a> Analyzer<'a> {
         reference: Option<&str>,
         scope: &Scope,
     ) -> Option<Vec<SchemaColumn>> {
-        let tables = Self::star_tables(reference, scope);
-        if tables.is_empty() {
-            return None;
-        }
+        let tables = Some(Self::star_tables(reference, scope)).filter(|t| !t.is_empty())?;
         let columns = tables
             .iter()
             .map(|table| self.schema.table(table.named()?))

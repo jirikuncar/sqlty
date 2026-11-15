@@ -1170,7 +1170,8 @@ mod tests {
                 CONSTRAINT k FOREIGN KEY (pid) REFERENCES p (id),
                 CONSTRAINT k2 FOREIGN KEY (pid) REFERENCES p (id));
             ALTER TABLE c DROP CONSTRAINT k;
-            CREATE VIEW v AS SELECT id FROM p;");
+            CREATE VIEW v AS SELECT id FROM p;
+            CREATE TABLE r (vid int REFERENCES v (id));");
         let tables: Vec<_> = c
             .joins_with_prefix("p", "", 5)
             .iter()
@@ -1178,6 +1179,7 @@ mod tests {
             .collect();
         assert_eq!(tables, ["c"]);
         assert_eq!(c.entity("v", "id"), None);
+        assert_eq!(c.entity("r", "vid"), None);
     }
 
     #[test]

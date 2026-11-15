@@ -173,11 +173,9 @@ impl Analyzer<'_> {
         let Some(target) = scope.first().map(|source| source.reference.clone()) else {
             return self.facts.clone();
         };
+        let key = scope.first().and_then(|source| source.table.named());
         // A `BEFORE` row trigger may change any column of the row `RETURNING` returns.
-        let triggers = scope
-            .first()
-            .and_then(|source| source.table.named())
-            .map_or_else(RowEvents::default, |key| self.schema.row_triggers(key));
+        let triggers = key.map_or_else(RowEvents::default, |key| self.schema.row_triggers(key));
         let triggered = match stmt {
             Statement::Insert(insert) => {
                 triggers.insert
@@ -227,12 +225,8 @@ impl Analyzer<'_> {
         let non_null = |nullability| nullability == Nullability::NonNull;
         let written: Vec<String> = match stmt {
             Statement::Insert(insert) => {
-                let TableObject::TableName(name) = &insert.table else {
-                    return self.facts.clone();
-                };
-                let table = self
-                    .schema
-                    .table(&table_key(name, self.dialect))
+                let table = key
+                    .and_then(|key| self.schema.table(key))
                     .unwrap_or_default();
                 let columns: Vec<String> = if insert.columns.is_empty() {
                     table
@@ -313,10 +307,8 @@ impl Analyzer<'_> {
                         ..
                     })) => {
                         let mut upsert = scope.clone();
-                        upsert.push(Source::named(
-                            "excluded".to_string(),
-                            table_key(name, self.dialect),
-                        ));
+                        let table = key.unwrap_or_default().to_string();
+                        upsert.push(Source::named("excluded".to_string(), table));
                         let excluded = inserted
                             .iter()
                             .map(|column| {

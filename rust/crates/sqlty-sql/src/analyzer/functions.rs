@@ -92,6 +92,14 @@ pub(super) fn function_name(func: &sqlparser::ast::Function) -> String {
         .unwrap_or_default()
 }
 
+/// The arguments of a call written with a list: none for `CURRENT_DATE` or `f(SELECT ...)`.
+pub(super) fn arg_list(args: &FunctionArguments) -> &[FunctionArg] {
+    match args {
+        FunctionArguments::List(list) => &list.args,
+        _ => &[],
+    }
+}
+
 /// The leading unnamed expression arguments of a call (`*` and named arguments end the list).
 pub(super) fn positional_args(args: &FunctionArguments) -> Vec<&Expr> {
     match args {

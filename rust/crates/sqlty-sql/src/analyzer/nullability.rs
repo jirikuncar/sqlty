@@ -17,7 +17,7 @@ use sqlparser::ast::{
 
 use super::dialect::SqlDialect;
 use super::expr::is_binary_charset;
-use super::functions::{function_name, positional_args};
+use super::functions::{arg_list, function_name, positional_args};
 use super::hashing::ExprKey;
 use super::inference::{
     binary_rules, function_rules, typed_by_rule, FunctionNullability, RuleNullability,
@@ -1223,10 +1223,7 @@ impl<'a> Analyzer<'a> {
         }
         let info = lookup(&name);
         let args = positional_args(&func.args);
-        let all_positional = match &func.args {
-            FunctionArguments::List(list) => list.args.len() == args.len(),
-            _ => true,
-        };
+        let all_positional = arg_list(&func.args).len() == args.len();
         let of = |inner: &Expr| self.nullability(inner, scope, facts);
         let first = || args.first().map_or(Nullability::Unknown, |arg| of(arg));
         let postgres = self.dialect == SqlDialect::Postgres;

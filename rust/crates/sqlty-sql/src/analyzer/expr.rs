@@ -11,7 +11,7 @@ use sqlparser::ast::Spanned;
 use sqlparser::tokenizer::Span;
 
 use super::dialect::SqlDialect;
-use super::functions::{positional_args, Returns};
+use super::functions::{arg_list, positional_args, Returns};
 use super::inference::FunctionType;
 use super::literals::{constant, python_kind, strip, value_set};
 use super::memo::{first_column, Reporting};
@@ -181,11 +181,10 @@ impl<'a> Analyzer<'a> {
 
     /// The type of a call to a function the schema defines.
     fn user_function(&self, name: &ObjectName, args: &FunctionArguments) -> Typed {
-        let count = match args {
-            FunctionArguments::List(list) => list.args.len(),
-            _ => 0,
-        };
-        match self.schema.function(&table_key(name, self.dialect), count) {
+        match self
+            .schema
+            .function(&table_key(name, self.dialect), arg_list(args).len())
+        {
             Some(
                 FunctionReturn::Scalar(typed)
                 | FunctionReturn::SetOf(typed)
@@ -299,7 +298,10 @@ impl<'a> Analyzer<'a> {
             }
             // MySQL full-text relevance is a floating-point number.
             Expr::MatchAgainst { .. } => Ok(from_sql_type("DOUBLE", self.dialect)),
-            Expr::Identifier(_) | Expr::CompoundIdentifier(_) => Ok(self.column_expr(expr, scope)),
+            Expr::Identifier(ident) => {
+                Ok(self.column_expr(expr, std::slice::from_ref(ident), scope))
+            }
+            Expr::CompoundIdentifier(parts) => Ok(self.column_expr(expr, parts, scope)),
             Expr::Value(value) => self.value_typed(&value.value),
             Expr::Exists { .. }
             | Expr::In { .. }

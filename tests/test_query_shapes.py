@@ -210,7 +210,7 @@ def test_json(dialect: str, sql: str, shapes: list[tuple[str, str]]) -> None:
 
 
 EXPRESSION_SCHEMAS = {
-    "postgres": "CREATE TABLE f (i INT, tx TEXT, iv INTERVAL, dt DATE, vb VARBIT, c INT CHECK (c IN (1, 2))); CREATE TABLE p (id INT PRIMARY KEY, name TEXT NOT NULL); CREATE TABLE c (id INT PRIMARY KEY, pid INT REFERENCES p (id), arr INT[]); CREATE TABLE g (a INT, b INT, CHECK (num_nonnulls(a, b) >= 1)); CREATE TABLE vs (x INT CHECK (x IN (1, 2)), y INT CHECK (y IN (3, 4))); CREATE VIEW bad AS SELECT * FROM nope; CREATE TYPE mood AS ENUM ('a'); CREATE TABLE mt (m mood); ALTER TYPE mood RENAME TO feeling; DROP TYPE feeling; CREATE TYPE pair AS (a INT, b TEXT); CREATE TABLE pt (p pair); ALTER TYPE pair RENAME TO duo; CREATE TABLE gt (a INT, b INT GENERATED ALWAYS AS (a + 1) STORED, c INT GENERATED ALWAYS AS (gt.b + 1) STORED); CREATE VIEW pv AS SELECT id FROM p; CREATE FUNCTION fv() RETURNS SETOF pv AS $$ SELECT * FROM pv $$ LANGUAGE sql; CREATE TABLE ut (a INT, b mystery); CREATE VIEW v2 AS SELECT x.id FROM p x, c x; CREATE TYPE pr AS (a INT); CREATE TABLE ptt (q pr);",
+    "postgres": "CREATE TABLE f (i INT, tx TEXT, iv INTERVAL, dt DATE, vb VARBIT, c INT CHECK (c IN (1, 2))); CREATE TABLE p (id INT PRIMARY KEY, name TEXT NOT NULL); CREATE TABLE c (id INT PRIMARY KEY, pid INT REFERENCES p (id), arr INT[]); CREATE TABLE g (a INT, b INT, CHECK (num_nonnulls(a, b) >= 1)); CREATE TABLE vs (x INT CHECK (x IN (1, 2)), y INT CHECK (y IN (3, 4))); CREATE VIEW bad AS SELECT * FROM nope; CREATE TYPE mood AS ENUM ('a'); CREATE TABLE mt (m mood); ALTER TYPE mood RENAME TO feeling; DROP TYPE feeling; CREATE TYPE pair AS (a INT, b TEXT); CREATE TABLE pt (p pair); ALTER TYPE pair RENAME TO duo; CREATE TABLE gt (a INT, b INT GENERATED ALWAYS AS (a + 1) STORED, c INT GENERATED ALWAYS AS (gt.b + 1) STORED); CREATE VIEW pv AS SELECT id FROM p; CREATE FUNCTION fv() RETURNS SETOF pv AS $$ SELECT * FROM pv $$ LANGUAGE sql; CREATE TABLE ut (a INT, b mystery); CREATE VIEW v2 AS SELECT x.id FROM p x, c x; CREATE TYPE pr AS (a INT); CREATE TABLE ptt (q pr); CREATE VIEW v3 AS TABLE p; CREATE TABLE pk2 (x INT, y INT, PRIMARY KEY (x, y));",
     "mysql": "CREATE TABLE f (i INT, tx TEXT, d DECIMAL(30, 2), dd DECIMAL(20), dn DECIMAL, dtm DATETIME, c INT CHECK (c IN (1, 2))); CREATE TABLE m (ui INT UNSIGNED, ub BIGINT UNSIGNED, y YEAR, g GEOMETRY, dt DATE, bl BLOB, ud DECIMAL(10, 2) UNSIGNED, j JSON); CREATE TABLE u (UserName TEXT);",
     "sqlite": "CREATE TABLE f (i INT, tx TEXT, c INT CHECK (c IN (1, 2)));",
 }
@@ -680,6 +680,10 @@ EXPRESSIONS = [
         [],
     ),
     ("postgres", "SELECT * FROM p, pg_nothing() GROUP BY p.id", "*: None", ["unsupported-syntax"]),
+    ("postgres", "SELECT * FROM v3", "*: None", ["unsupported-syntax"]),
+    ("postgres", "SELECT (pt.p).f(1) FROM pt", "p: None", ["unknown-type"]),
+    ("postgres", "SELECT 1 FROM pk2 WHERE pk2.x = pk2.y", "?column?: int", ["entity-mismatch"]),
+    ("postgres", "SELECT x FROM pg_catalog.pg_nothing x", "x: None", []),
 ]
 
 
@@ -737,6 +741,12 @@ STATEMENTS = [
     ("mysql", "INSERT INTO t SET (a, b) = (1, 'x')", None, []),
     ("mysql", "UPDATE (SELECT 1 AS a) AS x SET a = 1", None, []),
     ("clickhouse", "INSERT INTO TABLE FUNCTION remote('x', t) (a) SELECT a FROM t", None, []),
+    (
+        "clickhouse",
+        "INSERT INTO TABLE FUNCTION remote('x', t) (a) SELECT a FROM t RETURNING a",
+        "a: None",
+        [],
+    ),
 ]
 
 
@@ -775,6 +785,10 @@ PARAMS = [
     ("SELECT * FROM (TABLE g) s WHERE s.a = $1", [(1, "int", None)]),
     ("SELECT 1 FROM f WHERE $1 = ANY(nope)", [(1, None, None)]),
     ("SELECT 1 FROM f WHERE $1 IN (SELECT x.i FROM f x, g x)", [(1, "int", None)]),
+    ("TABLE g LIMIT $1", [(1, "int", None)]),
+    ("SELECT 1 FROM f WHERE $1 IN (SELECT i, tx FROM f)", [(1, None, None)]),
+    ("SELECT 1 FROM f WHERE ANY(f.arr) = $1", [(1, None, None)]),
+    ("SELECT 1 FROM f WHERE ANY(f.arr, 1) = $1", [(1, None, None)]),
 ]
 
 

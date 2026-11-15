@@ -326,13 +326,15 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Typed column reference, recording why when it is untyped.
-    pub(super) fn column_expr(&self, expr: &Expr, scope: &Scope) -> Typed {
+    pub(super) fn column_expr(&self, expr: &Expr, parts: &[Ident], scope: &Scope) -> Typed {
         if let Expr::Identifier(ident) = expr {
             self.check_ambiguous(ident, scope);
         }
-        match self.resolve_column(expr, scope) {
-            Some((typed, origin)) => {
-                let typed = self.narrowed_values(expr, scope, typed);
+        match self.resolve_reference(expr, scope) {
+            Some(resolved) => {
+                let origin = self.origin(&resolved.found, &resolved.table, &resolved.column);
+                let typed = resolved.found.typed(self.dialect);
+                let typed = self.narrowed_values(&resolved.reference, &resolved.column, typed);
                 if typed.python.is_none() && self.diag.enabled() {
                     match (origin, &typed.sql) {
                         (Origin::Schema(column), sql_type) => self.diag.record(
@@ -358,7 +360,7 @@ impl<'a> Analyzer<'a> {
                     }
                 }
                 None => {
-                    self.explain_unresolved(expr, scope);
+                    self.explain_unresolved(parts, scope);
                     Typed::UNKNOWN
                 }
             },
@@ -383,23 +385,20 @@ impl<'a> Analyzer<'a> {
         self.schema.table(key).map(|_| key)
     }
 
-    /// `typed` limited to the values the conditions in force leave the column `expr`
+    /// `typed` limited to the values the conditions in force leave `column` of `reference`
     /// (`WHERE status = 'paid'`), when it has a value set.
-    fn narrowed_values(&self, expr: &Expr, scope: &Scope, typed: Typed) -> Typed {
+    fn narrowed_values(&self, reference: &str, column: &str, typed: Typed) -> Typed {
         if self.facts.values.is_empty() {
             return typed;
         }
         let Some(known) = value_set(&typed) else {
             return typed;
         };
-        let Some((reference, _, column)) = self.locate_column(expr, scope) else {
-            return typed;
-        };
         let Some((_, _, allowed)) = self
             .facts
             .values
             .iter()
-            .find(|(r, c, _)| *r == reference && *c == column)
+            .find(|(r, c, _)| r == reference && c == column)
         else {
             return typed;
         };
@@ -448,18 +447,14 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Records the reason a column reference found no column.
-    fn explain_unresolved(&self, expr: &Expr, scope: &Scope) {
+    fn explain_unresolved(&self, parts: &[Ident], scope: &Scope) {
         if !self.diag.enabled() {
             return;
         }
-        let (qualifier, column) = match expr {
-            Expr::Identifier(ident) => (None, ident),
-            Expr::CompoundIdentifier(parts) if parts.len() >= 2 => (
-                Some(parts[parts.len() - 2].value.to_lowercase()),
-                &parts[parts.len() - 1],
-            ),
-            _ => return self.diag.explain_silently(),
-        };
+        let (column, qualifiers) = parts
+            .split_last()
+            .expect("a column reference names a column");
+        let qualifier = qualifiers.last().map(|part| part.value.to_lowercase());
         let name = fold(column, self.dialect);
         let unqualified = qualifier.is_none();
         let all: Vec<&Source> = sources(scope, &self.outer).collect();
@@ -570,15 +565,10 @@ impl<'a> Analyzer<'a> {
         let replacement = suggestion.map(|(name, spelling)| {
             let shown = spelling.as_deref().unwrap_or(&name);
             message.push_str(&format!("; did you mean `{shown}`?"));
-            spelling.map(|spelling| match expr {
-                Expr::CompoundIdentifier(parts) => {
-                    let qualifier: Vec<String> = parts[..parts.len() - 1]
-                        .iter()
-                        .map(Ident::to_string)
-                        .collect();
-                    format!("{}.{spelling}", qualifier.join("."))
-                }
-                _ => spelling,
+            spelling.map(|spelling| {
+                let mut spelled: Vec<String> = qualifiers.iter().map(Ident::to_string).collect();
+                spelled.push(spelling);
+                spelled.join(".")
             })
         });
         let table = match candidates.as_slice() {
@@ -695,8 +685,9 @@ impl<'a> Analyzer<'a> {
                         ),
                     );
                 }
-            } else if let Some(columns) = self.schema.table(table) {
-                for col in columns {
+            } else {
+                // `star_columns` read every table, so the schema has it.
+                for col in self.schema.table(table).unwrap_or_default() {
                     if col.typed(self.dialect).python.is_none() {
                         self.diag.record(
                             NameRule::UnknownType,
@@ -711,9 +702,6 @@ impl<'a> Analyzer<'a> {
     /// A star that expanded to an unknown `*`: a view whose own query could not be typed
     /// says so; for a CTE or derived table that query explains it.
     pub(super) fn explain_view_star(&self, reference: Option<&str>, scope: &Scope) {
-        if !self.diag.enabled() {
-            return;
-        }
         let reference = reference.map(str::to_lowercase);
         let views: Vec<String> = Self::star_tables(reference.as_deref(), scope)
             .iter()

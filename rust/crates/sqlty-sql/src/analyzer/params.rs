@@ -25,6 +25,7 @@ use crate::placeholders::{self, Styles};
 
 use super::dialect::SqlDialect;
 use super::expr::{array_element, from_sql_type};
+use super::functions::arg_list;
 use super::inference::{binary_rules, operand};
 use super::input::parser_input;
 use super::literals::strip;
@@ -254,7 +255,7 @@ impl<'a> Analyzer<'a> {
                 {
                     from.extend(tables.iter().cloned());
                 }
-                let (analyzer, scope) = self.scope_or_empty(&from);
+                let (analyzer, scope) = self.scope_reading(&from);
                 let target = match &update.table.relation {
                     TableFactor::Table { name, .. } => Some(table_key(name, self.dialect)),
                     _ => None,
@@ -269,7 +270,7 @@ impl<'a> Analyzer<'a> {
                     &delete.from;
                 let mut from = tables.clone();
                 from.extend(delete.using.iter().flatten().cloned());
-                let (analyzer, scope) = self.scope_or_empty(&from);
+                let (analyzer, scope) = self.scope_reading(&from);
                 if let Some(selection) = &delete.selection {
                     analyzer.walk_params(selection, &scope, out);
                 }
@@ -281,9 +282,8 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    fn scope_or_empty(&self, from: &[TableWithJoins]) -> (Analyzer<'a>, Scope) {
-        self.scope_of(from)
-            .unwrap_or_else(|_| (self.clone(), Scope::new()))
+    fn scope_reading(&self, from: &[TableWithJoins]) -> (Analyzer<'a>, Scope) {
+        self.scope_of(from).unwrap_or_else(|never| match never {})
     }
 
     fn params_query(&self, query: &Query, out: &mut Hints) {
@@ -342,7 +342,7 @@ impl<'a> Analyzer<'a> {
     }
 
     fn params_select(&self, select: &Select, out: &mut Hints) {
-        let (analyzer, scope) = self.scope_or_empty(&select.from);
+        let (analyzer, scope) = self.scope_reading(&select.from);
         for factor in relations(&select.from) {
             match factor {
                 TableFactor::Derived { subquery, .. } => analyzer.params_query(subquery, out),
@@ -415,7 +415,7 @@ impl<'a> Analyzer<'a> {
             Some((query, body)) => {
                 // `INSERT ... SELECT $1, $2`: a bare placeholder is stored in its column.
                 if let SetExpr::Select(select) = body {
-                    let (analyzer, select_scope) = self.scope_or_empty(&select.from);
+                    let (analyzer, select_scope) = self.scope_reading(&select.from);
                     for (position, item) in select.projection.iter().enumerate() {
                         // Past a `*`, the columns a value lands in are unknown.
                         let (SelectItem::UnnamedExpr(expr)
@@ -869,11 +869,8 @@ fn any_argument(expr: &Expr) -> Option<&Expr> {
     if !matches!(name.as_str(), "ANY" | "SOME" | "ALL") {
         return None;
     }
-    match &function.args {
-        FunctionArguments::List(list) => match list.args.as_slice() {
-            [FunctionArg::Unnamed(FunctionArgExpr::Expr(arg))] => Some(arg),
-            _ => None,
-        },
+    match arg_list(&function.args) {
+        [FunctionArg::Unnamed(FunctionArgExpr::Expr(arg))] => Some(arg),
         _ => None,
     }
 }
