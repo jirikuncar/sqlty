@@ -349,4 +349,23 @@ mod tests {
         assert_eq!(column.to_string(), root.to_string());
         assert_eq!(rest.len(), access_chain.len());
     }
+
+    #[test]
+    fn rarer_column_names() {
+        let cases = [
+            ("(1, 2)", "row"),
+            ("ceil(x)", "ceil"),
+            ("floor(x)", "floor"),
+            ("overlay(x placing 'a' from 1)", "overlay"),
+            ("(select * from t)", "?column?"),
+            ("\"\"", "?column?"),
+            ("1::character varying", "varchar"),
+            ("1::timestamp(3) with time zone", "timestamptz"),
+            ("1::time(3) with time zone", "timetz"),
+            ("1::time without time zone", "time"),
+        ];
+        for (sql, name) in cases {
+            assert_eq!(column_name(&expr(sql)), name, "{sql}");
+        }
+    }
 }

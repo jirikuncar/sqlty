@@ -49,12 +49,11 @@ impl Loader {
         BUILDS.with(|count| count.set(count.get() + 1));
         let dialect = self.dialect;
         let path = self.search_path.clone();
-        let mut user_types: FxHashMap<String, UserType> = FxHashMap::default();
-        for key in self.types.keys() {
-            if let Some(user) = self.resolve_user_type(key, &path, 0) {
-                user_types.insert(key.clone(), user);
-            }
-        }
+        let mut user_types: FxHashMap<String, UserType> = self
+            .types
+            .keys()
+            .filter_map(|key| Some((key.clone(), self.resolve_user_type(key, &path, 0)?)))
+            .collect();
         for (old, new) in &self.type_aliases {
             if let Some(user) = user_types.get(new).cloned() {
                 user_types.entry(old.clone()).or_insert(user);

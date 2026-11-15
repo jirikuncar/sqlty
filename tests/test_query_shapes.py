@@ -195,7 +195,7 @@ def test_json(dialect: str, sql: str, shapes: list[tuple[str, str]]) -> None:
 
 
 EXPRESSION_SCHEMAS = {
-    "postgres": "CREATE TABLE f (i INT, tx TEXT, iv INTERVAL, dt DATE, vb VARBIT, c INT CHECK (c IN (1, 2))); CREATE TABLE p (id INT PRIMARY KEY, name TEXT NOT NULL); CREATE TABLE c (id INT PRIMARY KEY, pid INT REFERENCES p (id), arr INT[]); CREATE TABLE g (a INT, b INT, CHECK (num_nonnulls(a, b) >= 1)); CREATE TABLE vs (x INT CHECK (x IN (1, 2)), y INT CHECK (y IN (3, 4))); CREATE VIEW bad AS SELECT * FROM nope;",
+    "postgres": "CREATE TABLE f (i INT, tx TEXT, iv INTERVAL, dt DATE, vb VARBIT, c INT CHECK (c IN (1, 2))); CREATE TABLE p (id INT PRIMARY KEY, name TEXT NOT NULL); CREATE TABLE c (id INT PRIMARY KEY, pid INT REFERENCES p (id), arr INT[]); CREATE TABLE g (a INT, b INT, CHECK (num_nonnulls(a, b) >= 1)); CREATE TABLE vs (x INT CHECK (x IN (1, 2)), y INT CHECK (y IN (3, 4))); CREATE VIEW bad AS SELECT * FROM nope; CREATE TYPE mood AS ENUM ('a'); CREATE TABLE mt (m mood); ALTER TYPE mood RENAME TO feeling; DROP TYPE feeling; CREATE TYPE pair AS (a INT, b TEXT); CREATE TABLE pt (p pair); ALTER TYPE pair RENAME TO duo; CREATE TABLE gt (a INT, b INT GENERATED ALWAYS AS (a + 1) STORED, c INT GENERATED ALWAYS AS (gt.b + 1) STORED); CREATE VIEW pv AS SELECT id FROM p; CREATE FUNCTION fv() RETURNS SETOF pv AS $$ SELECT * FROM pv $$ LANGUAGE sql;",
     "mysql": "CREATE TABLE f (i INT, tx TEXT, d DECIMAL(30, 2), dd DECIMAL(20), dn DECIMAL, dtm DATETIME, c INT CHECK (c IN (1, 2))); CREATE TABLE m (ui INT UNSIGNED, ub BIGINT UNSIGNED, y YEAR, g GEOMETRY, dt DATE, bl BLOB, ud DECIMAL(10, 2) UNSIGNED, j JSON); CREATE TABLE u (UserName TEXT);",
     "sqlite": "CREATE TABLE f (i INT, tx TEXT, c INT CHECK (c IN (1, 2)));",
 }
@@ -470,6 +470,55 @@ EXPRESSIONS = [
         "a: int | None, i: int | None, tx: str | None, d: decimal.Decimal | None, dd: decimal.Decimal | None, dn: decimal.Decimal | None, dtm: datetime.datetime | None, c: int | None",
         [],
     ),
+    (
+        "postgres",
+        "SELECT * FROM p FULL JOIN p AS q USING (id) WHERE p.id IS NOT NULL AND q.id IS NOT NULL",
+        "id: int, name: str, name: str",
+        [],
+    ),
+    ("postgres", "SELECT * FROM p JOIN p AS q USING (p.id)", "id: int, name: str, name: str", []),
+    (
+        "postgres",
+        "SELECT * FROM p NATURAL JOIN c, f",
+        "id: int, name: str, pid: int | None, arr: list[int] | None, i: int | None, tx: str | None, iv: datetime.timedelta | None, dt: datetime.date | None, vb: str | None, c: typing.Literal[1, 2] | None",
+        [],
+    ),
+    (
+        "postgres",
+        "SELECT * FROM p JOIN p AS q USING (id) CROSS JOIN g",
+        "id: int, name: str, name: str, a: int | None, b: int | None",
+        [],
+    ),
+    ("postgres", "SELECT * FROM p JOIN c USING (nope)", "*: None", ["unsupported-syntax"]),
+    (
+        "postgres",
+        "SELECT i FROM f WHERE (i IS NULL AND i IS NOT NULL) OR (tx IS NULL AND tx IS NOT NULL)",
+        "i: int | None",
+        [],
+    ),
+    ("postgres", "SELECT i FROM f WHERE NULL IS DISTINCT FROM i", "i: int", []),
+    (
+        "postgres",
+        "SELECT CASE WHEN (c = 1) THEN 0 ELSE c END AS x, CASE WHEN 1 = c THEN 0 ELSE c END AS y FROM f",
+        "x: typing.Literal[0, 2] | None, y: typing.Literal[0, 2] | None",
+        [],
+    ),
+    (
+        "postgres",
+        "SELECT i FROM f WHERE EXISTS (SELECT 1 FROM g WHERE g.a = f.i UNION SELECT 1)",
+        "i: int | None",
+        [],
+    ),
+    (
+        "postgres",
+        "SELECT c FROM f WHERE EXISTS (SELECT 1 FROM g WHERE f.c = 1 AND g.a = f.i)",
+        "c: typing.Literal[1]",
+        [],
+    ),
+    ("postgres", "SELECT m FROM mt", "m: None", ["unknown-type"]),
+    ("postgres", "SELECT (p).a, (p).b FROM pt", "a: int | None, b: str | None", []),
+    ("postgres", "SELECT c FROM gt", "c: int | None", []),
+    ("postgres", "SELECT * FROM fv()", "fv: None", []),
 ]
 
 

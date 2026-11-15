@@ -189,17 +189,14 @@ fn iso_type(sql: &str, tokens: &[Token], i: usize, edits: &mut Vec<Edit>) {
     };
     if word(i, "BINARY") && word(i + 1, "LARGE") && word(i + 2, "OBJECT") {
         edits.push((tokens[i].start, tokens[i + 2].end, "BLOB".to_string()));
-    } else if word(i, "MULTISET") && i > 0 && spaced(sql, tokens, i - 1) {
+    } else if word(i, "MULTISET") && i > 0 && spaced(sql, &tokens[i - 1], &tokens[i]) {
         edits.push((tokens[i - 1].end, tokens[i].end, "[]".to_string()));
     }
 }
 
-/// Whether only whitespace, and some, separates token `i` from the next one.
-fn spaced(sql: &str, tokens: &[Token], i: usize) -> bool {
-    let Some(next) = tokens.get(i + 1) else {
-        return false;
-    };
-    let gap = &sql[tokens[i].end..next.start];
+/// Whether only whitespace, and some, separates `before` from `after`.
+fn spaced(sql: &str, before: &Token, after: &Token) -> bool {
+    let gap = &sql[before.end..after.start];
     !gap.is_empty() && gap.bytes().all(|b| b.is_ascii_whitespace())
 }
 

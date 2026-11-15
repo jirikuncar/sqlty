@@ -1126,6 +1126,16 @@ mod tests {
         assert_eq!(view_cols(&c, "v2"), ["id:INT", "name:TEXT"]);
     }
 
+    #[test]
+    fn test_a_function_changed_before_a_rebuild_resolves_with_it() {
+        let c = pg("CREATE TABLE t (id int);
+            CREATE VIEW v1 AS SELECT id FROM t;
+            CREATE FUNCTION f() RETURNS SETOF u LANGUAGE sql AS 'select 1';
+            CREATE TABLE u (name text);
+            CREATE VIEW v2 AS SELECT * FROM f();");
+        assert_eq!(view_cols(&c, "v2"), ["name:TEXT"]);
+    }
+
     /// Functions do not force the catalog to be built again.
     #[test]
     fn test_functions_and_noop_alters_do_not_rebuild_the_catalog() {

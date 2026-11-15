@@ -90,6 +90,31 @@ SELECT * FROM t
 -- columns: e: list[decimal.Decimal] | None (ARRAY<DECIMAL>)
 ```
 
+## Arrays as another type
+
+Any other type for `ARRAY` is used as written, whatever the elements.
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+schema = "schema.sql"
+
+[tool.sqlty.types]
+ARRAY = "str"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE t (a INT[] NOT NULL, b ARRAY_DATE);
+```
+
+```sql
+SELECT * FROM t
+-- columns: a: str (ARRAY<INT>)
+-- columns: b: str | None (ARRAY<DATE>)
+```
+
 ## By column
 
 A key with a dot is `table.column`.

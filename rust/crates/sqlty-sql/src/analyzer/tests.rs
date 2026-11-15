@@ -584,3 +584,50 @@ fn planner_hints_spare_names_that_collide_with_them() {
         );
     }
 }
+
+#[test]
+fn rarer_star_expansions_and_result_stars() {
+    let schema = Some(load_schema(
+        "CREATE TABLE t (a INT); CREATE TABLE u (b INT)",
+        "mysql",
+    ));
+    let expand = |sql: &str| expand_star(sql, "mysql", schema.as_deref());
+    assert_eq!(expand("WITH c AS (SELECT 1 AS x) SELECT * FROM c, t"), None);
+    assert_eq!(expand("SELECT * FROM t, (SELECT 1 AS x) s"), None);
+    assert_eq!(expand("SELECT 1"), None);
+    assert_eq!(
+        expand("SELECT * FROM t, u").as_deref(),
+        Some("SELECT t.a, u.b FROM t, u")
+    );
+    let stars = |sql: &str| parse(sql, "postgres").result_stars();
+    assert_eq!(stars("CREATE TABLE x (a INT)"), Some(vec![]));
+    assert_eq!(
+        stars("(SELECT * FROM t) UNION SELECT a FROM t"),
+        Some(vec!["SELECT *".to_string()])
+    );
+}
+
+#[test]
+fn rarer_parser_inputs() {
+    let text = |sql: &str| parser_input(sql, SqlDialect::Postgres).text().to_string();
+    assert_eq!(text("SELECT 1 FOR"), "SELECT 1 FOR");
+    assert_eq!(
+        text("SELECT 1 FOR UPDATE OF (a)"),
+        "SELECT 1 FOR UPDATE OF (a)"
+    );
+    assert_eq!(
+        text("SELECT 1 FOR UPDATE OF a, (b)"),
+        "SELECT 1 FOR UPDATE OF a, (b)"
+    );
+    assert_eq!(
+        text("SELECT sum(a) OVER (ROWS BETWEEN %s PRECEDING AND CURRENT ROW EXCLUDE GROUP) FROM t"),
+        "SELECT sum(a) OVER (ROWS BETWEEN 1 FOLLOWING AND 1 FOLLOWING) FROM t"
+    );
+    let input = parser_input("--sql\nSELECT %s", SqlDialect::Postgres);
+    assert_eq!(
+        (input.original(8, false), input.original(9, true)),
+        (13, 15)
+    );
+    let input = parser_input("SET CONSTRAINTS %s DEFERRED", SqlDialect::Postgres);
+    assert_eq!(input.original(input.text().len(), true), 27);
+}

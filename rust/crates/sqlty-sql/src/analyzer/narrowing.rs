@@ -85,9 +85,6 @@ impl Learned {
     /// This, minus what it says about the `(reference, column)` pairs of `columns`, which
     /// an UPDATE overwrites. Expressions may read them, so none is kept.
     pub(super) fn without(mut self, columns: &[(String, String)]) -> Self {
-        if columns.is_empty() {
-            return self;
-        }
         self.columns.retain(|pair| !columns.contains(pair));
         self.null.retain(|pair| !columns.contains(pair));
         self.values.retain(|(r, c, _)| {

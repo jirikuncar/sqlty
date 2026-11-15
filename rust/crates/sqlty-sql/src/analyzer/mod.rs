@@ -80,7 +80,7 @@ pub use query::Column;
 pub(crate) use sql_type::canonical_type;
 pub use sql_type::python_types;
 use sql_type::{decimal_type, python_type, ANY, DECIMAL};
-pub use star_expand::{expand_star, result_stars};
+pub use star_expand::expand_star;
 pub use tables::{query_tables, TableRef};
 use typed::Typed;
 

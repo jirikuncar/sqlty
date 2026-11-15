@@ -5,7 +5,7 @@
 //! `RIGHT JOIN` as a `LEFT JOIN` with the tables swapped. SQLite keeps the left table's
 //! columns in place and drops the right table's copies.
 
-use sqlparser::ast::{JoinConstraint, JoinOperator, TableFactor, TableWithJoins};
+use sqlparser::ast::{JoinConstraint, JoinOperator, ObjectName, TableFactor, TableWithJoins};
 
 use crate::catalog::fold;
 
@@ -39,10 +39,7 @@ impl Analyzer<'_> {
         for join in &table.joins {
             let right = self.factor_columns(&join.relation, from, scope)?;
             let names: Vec<String> = match join_constraint(join) {
-                Some(JoinConstraint::Using(names)) => names
-                    .iter()
-                    .map(|name| Some(fold(name.0.last()?.as_ident()?, self.dialect)))
-                    .collect::<Option<_>>()?,
+                Some(JoinConstraint::Using(names)) => using_names(names, self.dialect)?,
                 Some(JoinConstraint::Natural) => left
                     .iter()
                     .filter(|column| position(&right, &column.name).is_some())
@@ -175,4 +172,11 @@ fn position(columns: &[Column], name: &str) -> Option<usize> {
     let mut matches =
         (0..columns.len()).filter(|&index| columns[index].name.eq_ignore_ascii_case(name));
     matches.next().filter(|_| matches.next().is_none())
+}
+
+fn using_names(names: &[ObjectName], dialect: SqlDialect) -> Option<Vec<String>> {
+    names
+        .iter()
+        .map(|name| Some(fold(name.0.last()?.as_ident()?, dialect)))
+        .collect()
 }
