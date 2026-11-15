@@ -27,7 +27,7 @@ impl Analyzer<'_> {
         for table in from {
             columns.extend(self.joined_columns(table, from, scope)?);
         }
-        Some(columns)
+        Some(columns.into_iter().map(|entry| entry.column).collect())
     }
 
     fn joined_columns(
@@ -35,7 +35,7 @@ impl Analyzer<'_> {
         table: &TableWithJoins,
         from: &[TableWithJoins],
         scope: &Scope,
-    ) -> Option<Vec<Column>> {
+    ) -> Option<Vec<Entry>> {
         let mut left = self.factor_columns(&table.relation, from, scope)?;
         for join in &table.joins {
             let right = || self.factor_columns(&join.relation, from, scope);
@@ -49,8 +49,8 @@ impl Analyzer<'_> {
                         Some(names) => using_names(names, self.dialect)?,
                         None => left
                             .iter()
-                            .filter(|column| position(&right, &column.name).is_some())
-                            .map(|column| column.name.clone())
+                            .filter(|entry| position(&right, &entry.column.name).is_some())
+                            .map(|entry| entry.column.name.clone())
                             .collect(),
                     };
                     self.merge(&left, &right, &names, side)?
@@ -65,7 +65,7 @@ impl Analyzer<'_> {
         factor: &TableFactor,
         from: &[TableWithJoins],
         scope: &Scope,
-    ) -> Option<Vec<Column>> {
+    ) -> Option<Vec<Entry>> {
         if let TableFactor::NestedJoin {
             table_with_joins,
             alias: None,
@@ -77,47 +77,69 @@ impl Analyzer<'_> {
         if !self.star_resolvable(from, Some(&name)) {
             return None;
         }
-        self.star_columns(Some(&name), scope)
-            .filter(|columns| !columns.iter().any(Column::is_unknown_star))
+        let columns = self
+            .star_columns(Some(&name), scope)
+            .filter(|columns| !columns.iter().any(Column::is_unknown_star))?;
+        let declared = Self {
+            facts: self.facts.without_joins(),
+            ..self.clone()
+        }
+        .star_columns(Some(&name), scope)?;
+        Some(
+            columns
+                .into_iter()
+                .zip(declared)
+                .map(|(column, declared)| Entry {
+                    column,
+                    origin: Some((name.clone(), declared.nullability)),
+                })
+                .collect(),
+        )
     }
 
     /// `left` and `right` joined on the same-named columns `names`.
     fn merge(
         &self,
-        left: &[Column],
-        right: &[Column],
+        left: &[Entry],
+        right: &[Entry],
         names: &[String],
         side: Side,
-    ) -> Option<Vec<Column>> {
+    ) -> Option<Vec<Entry>> {
         let pairs = names
             .iter()
             .map(|name| Some((position(left, name)?, position(right, name)?)))
             .collect::<Option<Vec<(usize, usize)>>>()?;
+        // A row of a full join has one side or both: COALESCE(l, r) is not NULL when neither
+        // column is, unless another outer join fills their relation with NULLs too.
+        let present = |entry: &Entry| {
+            entry.column.nullability == Nullability::NonNull
+                || entry.origin.as_ref().is_some_and(|(reference, declared)| {
+                    *declared == Nullability::NonNull && self.facts.extensions(reference) == 1
+                })
+        };
         let merged = |(l, r): (usize, usize)| {
             let (from_left, from_right) = (&left[l], &right[r]);
             let nullability = match side {
                 Side::Inner => Nullability::NonNull,
-                Side::Left => from_left.nullability,
-                Side::Right => from_right.nullability,
-                Side::Full
-                    if from_left.nullability == Nullability::NonNull
-                        && from_right.nullability == Nullability::NonNull =>
-                {
-                    Nullability::NonNull
-                }
+                Side::Left => from_left.column.nullability,
+                Side::Right => from_right.column.nullability,
+                Side::Full if present(from_left) && present(from_right) => Nullability::NonNull,
                 Side::Full => Nullability::Nullable,
             };
-            let column = if side == Side::Right {
+            let kept = if side == Side::Right {
                 from_right
             } else {
                 from_left
             };
-            Column {
-                nullability,
-                ..column.clone()
+            Entry {
+                column: Column {
+                    nullability,
+                    ..kept.column.clone()
+                },
+                origin: None,
             }
         };
-        let rest = |columns: &[Column], taken: &[usize]| -> Vec<Column> {
+        let rest = |columns: &[Entry], taken: &[usize]| -> Vec<Entry> {
             (0..columns.len())
                 .filter(|index| !taken.contains(index))
                 .map(|index| columns[index].clone())
@@ -188,6 +210,14 @@ fn shape(join: &Join, dialect: SqlDialect) -> Shape<'_> {
     }
 }
 
+/// A column of a join, with the relation it reads and how that declares it, before any
+/// outer join fills it with NULLs; a merged column has none.
+#[derive(Clone)]
+struct Entry {
+    column: Column,
+    origin: Option<(String, Nullability)>,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Side {
     Inner,
@@ -197,9 +227,9 @@ enum Side {
 }
 
 /// Where the column `name` is in `columns`, or `None` when it is not there exactly once.
-fn position(columns: &[Column], name: &str) -> Option<usize> {
+fn position(columns: &[Entry], name: &str) -> Option<usize> {
     let mut matches =
-        (0..columns.len()).filter(|&index| columns[index].name.eq_ignore_ascii_case(name));
+        (0..columns.len()).filter(|&index| columns[index].column.name.eq_ignore_ascii_case(name));
     matches.next().filter(|_| matches.next().is_none())
 }
 

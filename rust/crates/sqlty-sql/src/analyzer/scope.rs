@@ -164,15 +164,19 @@ pub(super) fn relations(from: &[TableWithJoins]) -> std::vec::IntoIter<&TableFac
 
 /// Whether any join in `from`, nested ones included, merges columns.
 pub(super) fn any_merging_join(from: &[TableWithJoins]) -> bool {
+    let nested = |factor: &TableFactor| match factor {
+        TableFactor::NestedJoin {
+            table_with_joins,
+            alias: None,
+        } => any_merging_join(std::slice::from_ref(table_with_joins)),
+        _ => false,
+    };
     from.iter().any(|table| {
-        table.joins.iter().any(merges_columns)
-            || match &table.relation {
-                TableFactor::NestedJoin {
-                    table_with_joins,
-                    alias: None,
-                } => any_merging_join(std::slice::from_ref(table_with_joins)),
-                _ => false,
-            }
+        nested(&table.relation)
+            || table
+                .joins
+                .iter()
+                .any(|join| merges_columns(join) || nested(&join.relation))
     })
 }
 
@@ -864,6 +868,9 @@ mod tests {
         assert!(!merging("SELECT 1 FROM a, b"));
         assert!(!merging("SELECT 1 FROM a CROSS JOIN b"));
         assert!(merging("SELECT 1 FROM a SEMI JOIN b ON a.id = b.id"));
+        assert!(merging(
+            "SELECT 1 FROM c JOIN (a JOIN b USING (id)) ON true"
+        ));
     }
 
     #[test]

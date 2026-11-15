@@ -104,6 +104,22 @@ impl Facts {
         Rc::make_mut(&mut self.null_extended).extend(extended);
     }
 
+    /// How many outer joins fill the relation `reference` with NULLs.
+    pub(super) fn extensions(&self, reference: &str) -> usize {
+        self.null_extended
+            .iter()
+            .filter(|r| *r == reference)
+            .count()
+    }
+
+    /// These facts before any outer join fills a relation with NULLs.
+    pub(super) fn without_joins(&self) -> Self {
+        Self {
+            null_extended: Rc::default(),
+            ..self.clone()
+        }
+    }
+
     /// Add the relations of `from` that a nullable foreign key finds, see [`Facts::matched`].
     pub(super) fn join_matched(&mut self, matched: Vec<Matched>) {
         if !matched.is_empty() {
