@@ -491,7 +491,7 @@ def asking(page: Page, url: str) -> None:
     page.goto(url + "?ask")
     page.wait_for_selector("[data-ask-open]:not([hidden])", timeout=60_000)
     page.click("[data-ask-open]")
-    assert page.evaluate("document.activeElement.matches('[data-ask-question]')")
+    page.wait_for_function("document.activeElement.matches('[data-ask-question]')")
     page.select_option("[data-ask-model]", index=1)
     status = "document.querySelector('[data-ask-status]').textContent"
 
