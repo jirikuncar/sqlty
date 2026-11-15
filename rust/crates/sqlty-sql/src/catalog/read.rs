@@ -439,8 +439,8 @@ fn virtual_table(name: &str, module: &str, args: &[Vec<String>]) -> Option<Creat
         _ => return None,
     };
     let sql = format!("CREATE TABLE {name} ({})", columns.join(", "));
-    let Statement::CreateTable(mut create) =
-        parse_ddl(&sql, SqlDialect::Sqlite)?.into_iter().next()?
+    let Some(Statement::CreateTable(mut create)) =
+        parse_ddl(&sql, SqlDialect::Sqlite).and_then(|stmts| stmts.into_iter().next())
     else {
         return None;
     };
