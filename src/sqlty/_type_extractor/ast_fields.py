@@ -500,13 +500,8 @@ def _ast_type(
         module = aliases.get(node.value.id, node.value.id)
         return (_AST_TYPES | _TYPING_GENERICS).get(node.attr) if module in _TYPING_MODULES else None
     if isinstance(node, ast.Subscript) and _is_name(node.value, "Annotated", aliases):
-        return _ast_type(
-            node.slice.elts[0] if isinstance(node.slice, ast.Tuple) else node.slice,
-            aliases,
-            newtypes,
-            imports,
-            known,
-        )
+        items = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
+        return _ast_type(items[0], aliases, newtypes, imports, known) if items else None
     if isinstance(node, ast.Subscript) and _is_name(node.value, "Literal", aliases):
         items = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
         if all(isinstance(i, ast.Constant) and isinstance(i.value, (str, int)) for i in items):
@@ -706,7 +701,8 @@ def _field_calls(annotation: ast.expr, aliases: dict[str, str]) -> list[ast.Call
         name = _get_name(annotation.value)
         name = aliases.get(name, name) if name else None
         if name == "Annotated" and isinstance(annotation.slice, ast.Tuple):
-            elts = annotation.slice.elts
+            if not (elts := annotation.slice.elts):
+                break
             calls += [
                 m
                 for m in elts[1:]
@@ -831,8 +827,9 @@ def _lax_fields(
             elif not isinstance(annotation, ast.Subscript):
                 members.append(annotation)
             elif name == "Annotated" and isinstance(annotation.slice, ast.Tuple):
-                metadata[:0] = annotation.slice.elts[1:]
-                pending.append(annotation.slice.elts[0])
+                if elts := annotation.slice.elts:
+                    metadata[:0] = elts[1:]
+                    pending.append(elts[0])
             elif name in (*_QUALIFIERS, "Optional"):
                 pending.append(annotation.slice)
             elif name == "Union" and isinstance(annotation.slice, ast.Tuple):
