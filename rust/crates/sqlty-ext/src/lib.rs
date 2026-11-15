@@ -1945,7 +1945,7 @@ fn check_modules(
         // Below the red zone `maybe_grow` maps a new segment for every module.
         .stack_size(STACK_SEGMENT)
         .build()
-        .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+        .expect("the check threads start");
     let found = detach(py, || -> Result<Vec<_>, Error> {
         let schemas: Vec<_> = configs.iter_mut().map(CheckConfig::schema).collect();
         let checkers = configs

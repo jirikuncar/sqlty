@@ -425,7 +425,7 @@ def test_index_in_a_forked_child() -> None:
         "module_index(sys.version_info[:2], steps)\n"
         "if (pid := os.fork()) == 0:\n"
         "    module_index(sys.version_info[:2], steps)\n"
-        "    os._exit(0)\n"
+        "    sys.exit(0)\n"
         "sys.exit(os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1]))\n"
     )
     done = subprocess.run(
