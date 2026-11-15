@@ -480,21 +480,18 @@ impl Analyzer<'_> {
                     .collect();
                 // A target of a join is a column of any of its tables.
                 if multi.is_some() {
-                    for target in targets {
-                        let idents: Option<Vec<Ident>> = target
+                    let exprs = targets.iter().filter_map(|target| {
+                        let mut idents: Vec<Ident> = target
                             .0
                             .iter()
                             .map(|part| part.as_ident().cloned())
-                            .collect();
-                        let expr = match idents {
-                            Some(mut idents) if idents.len() == 1 => {
-                                Expr::Identifier(idents.remove(0))
-                            }
-                            Some(idents) => Expr::CompoundIdentifier(idents),
-                            None => continue,
-                        };
-                        analyzer.check_references(&expr, &scope);
-                    }
+                            .collect::<Option<_>>()?;
+                        Some(match idents.len() {
+                            1 => Expr::Identifier(idents.remove(0)),
+                            _ => Expr::CompoundIdentifier(idents),
+                        })
+                    });
+                    exprs.for_each(|expr| analyzer.check_references(&expr, &scope));
                 } else if let sqlparser::ast::TableFactor::Table { name, .. } =
                     &update.table.relation
                 {
@@ -543,10 +540,13 @@ impl Analyzer<'_> {
                 || width == 0
                 || (self.dialect == SqlDialect::Postgres && width < visible.len())
         };
-        if let Some(&width) = widths.iter().find(|&&width| !fits(width)) {
-            self.record_value_count(table, width, visible.len());
-        } else if let Some(&width) = widths.iter().min() {
-            self.check_missing_columns(table, &visible[..width]);
+        match widths.iter().find(|&&width| !fits(width)) {
+            Some(&width) => self.record_value_count(table, width, visible.len()),
+            None => widths
+                .iter()
+                .min()
+                .into_iter()
+                .for_each(|&width| self.check_missing_columns(table, &visible[..width])),
         }
     }
 
@@ -596,10 +596,10 @@ impl Analyzer<'_> {
         let Some(known) = self.schema.table(&table_key(table, self.dialect)) else {
             return;
         };
-        for column in columns {
-            let Some(ident) = column.0.last().and_then(|part| part.as_ident()) else {
-                continue;
-            };
+        let idents = columns
+            .iter()
+            .filter_map(|column| column.0.last().and_then(|part| part.as_ident()));
+        for ident in idents {
             let name = fold(ident, self.dialect);
             if !known.iter().any(|c| c.name == name) {
                 self.diag.record_about(

@@ -322,3 +322,55 @@ def test_expressions(dialect: str, sql: str, columns: str, rules: list[str]) -> 
     assert ", ".join(f"{name}: {python}" for name, python, _ in found) == columns
     diagnostics = _core.query_diagnostics(sql, dialect=dialect, schema_sql=schema)
     assert [rule for rule, *_ in diagnostics] == rules
+
+
+STATEMENT_SCHEMAS = {
+    "postgres": "CREATE TABLE t (a INT NOT NULL, b TEXT, c INT NOT NULL DEFAULT 1); CREATE TABLE u (a INT, b TEXT); CREATE FUNCTION f() RETURNS TRIGGER AS $$ BEGIN RETURN NEW; END $$ LANGUAGE plpgsql; CREATE TABLE trg (a INT); CREATE TRIGGER x BEFORE UPDATE ON trg FOR EACH ROW EXECUTE FUNCTION f();",
+    "mysql": "CREATE TABLE t (a INT NOT NULL, b TEXT, c INT NOT NULL DEFAULT 1); CREATE TABLE u (a INT, b TEXT);",
+    "sqlite": "CREATE TABLE t (a INT NOT NULL, b TEXT, c INT NOT NULL DEFAULT 1); CREATE TABLE u (a INT, b TEXT);",
+}
+STATEMENTS = [
+    ("postgres", "UPDATE t SET (a, b) = (1, 'x') RETURNING a, b", "a: int, b: str | None", []),
+    ("postgres", "UPDATE t SET (a, nope) = (1, 'x')", None, ["unknown-column"]),
+    (
+        "postgres",
+        "INSERT INTO t (a) VALUES (1) ON CONFLICT (a) DO UPDATE SET (b, c) = ('x', 2) RETURNING a, b",
+        "a: int, b: str | None",
+        [],
+    ),
+    ("postgres", "INSERT INTO t (a) VALUES (1) ON CONFLICT DO NOTHING", None, []),
+    (
+        "postgres",
+        "MERGE INTO t USING u ON t.a = u.a WHEN MATCHED THEN UPDATE SET (a, b) = (1, 'x')",
+        None,
+        [],
+    ),
+    ("mysql", "UPDATE t JOIN u ON t.a = u.a SET (t.a, u.b) = (1, 'x')", None, []),
+    (
+        "mysql",
+        "INSERT INTO t VALUES (1, 'x', 2) ON DUPLICATE KEY UPDATE a = 1 RETURNING a",
+        "a: int",
+        [],
+    ),
+    (
+        "sqlite",
+        "INSERT INTO t VALUES (1, 'x', 2) ON CONFLICT DO UPDATE SET (a, b) = (2, 'y') RETURNING a",
+        "a: int",
+        [],
+    ),
+    ("postgres", "INSERT INTO t SELECT * FROM nope", None, ["unknown-table"]),
+    ("postgres", "INSERT INTO nope VALUES (1)", None, ["unknown-table"]),
+    ("postgres", "UPDATE ONLY t SET a = 1 RETURNING a", "a: int", []),
+    ("postgres", "UPDATE trg SET a = 1 RETURNING a", "a: int | None", []),
+    ("postgres", "UPDATE t* SET a = 1 RETURNING a", "a: int", []),
+    ("postgres", "DELETE FROM t USING u WHERE t.a = u.a RETURNING t.a", "a: int", []),
+]
+
+
+@pytest.mark.parametrize(("dialect", "sql", "columns", "rules"), STATEMENTS)
+def test_statements(dialect: str, sql: str, columns: str | None, rules: list[str]) -> None:
+    schema = STATEMENT_SCHEMAS[dialect]
+    found = _core.analyze_select(sql, dialect=dialect, schema_sql=schema)
+    assert (found and ", ".join(f"{name}: {python}" for name, python, _ in found)) == columns
+    diagnostics = _core.query_diagnostics(sql, dialect=dialect, schema_sql=schema)
+    assert [rule for rule, *_ in diagnostics] == rules
