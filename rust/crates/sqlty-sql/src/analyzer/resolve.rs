@@ -7,7 +7,7 @@
 
 use std::rc::Rc;
 
-use sqlparser::ast::{Expr, Ident, TableAlias, TableFactor, TableWithJoins};
+use sqlparser::ast::{Expr, Ident, TableFactor, TableWithJoins};
 
 use crate::catalog::fold;
 use crate::diagnostics::{NameDiagnostic, NameRule};
@@ -133,26 +133,25 @@ impl<'a> Analyzer<'a> {
             return;
         }
         let mut seen: Vec<(String, Option<String>)> = Vec::new();
-        for factor in relations(from) {
-            let (ident, key) = match factor {
-                TableFactor::Table {
-                    alias: None, name, ..
-                } => match name.0.last().and_then(|part| part.as_ident()) {
-                    Some(ident) => (ident, Some(table_key(name, self.dialect))),
-                    None => continue,
-                },
-                TableFactor::Table { alias, .. }
-                | TableFactor::Derived { alias, .. }
-                | TableFactor::TableFunction { alias, .. }
-                | TableFactor::Function { alias, .. }
-                | TableFactor::UNNEST { alias, .. }
-                | TableFactor::JsonTable { alias, .. }
-                | TableFactor::NestedJoin { alias, .. } => match alias {
-                    Some(TableAlias { name, .. }) => (name, None),
-                    None => continue,
-                },
-                _ => continue,
-            };
+        let names = relations(from).filter_map(|factor| match factor {
+            TableFactor::Table {
+                alias: None, name, ..
+            } => Some((
+                name.0.last()?.as_ident()?,
+                Some(table_key(name, self.dialect)),
+            )),
+            TableFactor::Table { alias, .. }
+            | TableFactor::Derived { alias, .. }
+            | TableFactor::TableFunction { alias, .. }
+            | TableFactor::Function { alias, .. }
+            | TableFactor::UNNEST { alias, .. }
+            | TableFactor::JsonTable { alias, .. }
+            | TableFactor::NestedJoin { alias, .. } => {
+                alias.as_ref().map(|alias| (&alias.name, None))
+            }
+            _ => None,
+        });
+        for (ident, key) in names {
             let name = fold(ident, self.dialect);
             let clash = seen.iter().any(|(seen, seen_key)| {
                 *seen == name && (key.is_none() || seen_key.is_none() || *seen_key == key)
@@ -638,10 +637,10 @@ impl<'a> Analyzer<'a> {
     /// The columns of `sources`, for completion: what a name in their scope can be.
     fn candidate_columns(&self, sources: &[&&Source]) -> Vec<Candidate> {
         let mut found = Vec::new();
-        for source in sources {
-            let Some(table) = source.table.named() else {
-                continue;
-            };
+        let named = sources
+            .iter()
+            .filter_map(|source| Some((source, source.table.named()?)));
+        for (source, table) in named {
             let reference = &source.reference;
             if let Some(columns) = self.virtual_columns(table) {
                 found.extend(
@@ -678,10 +677,8 @@ impl<'a> Analyzer<'a> {
             return;
         }
         let reference = reference.map(str::to_lowercase);
-        for table in Self::star_tables(reference.as_deref(), scope) {
-            let Some(table) = table.named() else {
-                continue;
-            };
+        let tables = Self::star_tables(reference.as_deref(), scope);
+        for table in tables.iter().filter_map(Table::named) {
             if self.virtuals.contains_key(table) {
                 continue;
             }

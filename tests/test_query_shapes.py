@@ -195,8 +195,8 @@ def test_json(dialect: str, sql: str, shapes: list[tuple[str, str]]) -> None:
 
 
 EXPRESSION_SCHEMAS = {
-    "postgres": "CREATE TABLE f (i INT, tx TEXT, iv INTERVAL, dt DATE, vb VARBIT, c INT CHECK (c IN (1, 2))); CREATE TABLE p (id INT PRIMARY KEY, name TEXT NOT NULL); CREATE TABLE c (id INT PRIMARY KEY, pid INT REFERENCES p (id), arr INT[]); CREATE TABLE g (a INT, b INT, CHECK (num_nonnulls(a, b) >= 1));",
-    "mysql": "CREATE TABLE f (i INT, tx TEXT, d DECIMAL(30, 2), dd DECIMAL(20), dn DECIMAL, dtm DATETIME, c INT CHECK (c IN (1, 2))); CREATE TABLE m (ui INT UNSIGNED, ub BIGINT UNSIGNED, y YEAR, g GEOMETRY, dt DATE, bl BLOB, ud DECIMAL(10, 2) UNSIGNED, j JSON);",
+    "postgres": "CREATE TABLE f (i INT, tx TEXT, iv INTERVAL, dt DATE, vb VARBIT, c INT CHECK (c IN (1, 2))); CREATE TABLE p (id INT PRIMARY KEY, name TEXT NOT NULL); CREATE TABLE c (id INT PRIMARY KEY, pid INT REFERENCES p (id), arr INT[]); CREATE TABLE g (a INT, b INT, CHECK (num_nonnulls(a, b) >= 1)); CREATE TABLE vs (x INT CHECK (x IN (1, 2)), y INT CHECK (y IN (3, 4))); CREATE VIEW bad AS SELECT * FROM nope;",
+    "mysql": "CREATE TABLE f (i INT, tx TEXT, d DECIMAL(30, 2), dd DECIMAL(20), dn DECIMAL, dtm DATETIME, c INT CHECK (c IN (1, 2))); CREATE TABLE m (ui INT UNSIGNED, ub BIGINT UNSIGNED, y YEAR, g GEOMETRY, dt DATE, bl BLOB, ud DECIMAL(10, 2) UNSIGNED, j JSON); CREATE TABLE u (UserName TEXT);",
     "sqlite": "CREATE TABLE f (i INT, tx TEXT, c INT CHECK (c IN (1, 2)));",
 }
 EXPRESSIONS = [
@@ -403,6 +403,20 @@ EXPRESSIONS = [
         [],
     ),
     ("postgres", "SELECT i ! FROM f", "?column?: None", ["unsupported-syntax"]),
+    ("postgres", "SELECT s FROM (SELECT 1) s", "s: None", []),
+    ("postgres", "SELECT i FROM f WHERE c = 1", "i: int | None", []),
+    ("postgres", "SELECT y FROM vs WHERE x = 1", "y: typing.Literal[3, 4] | None", []),
+    ("postgres", "SELECT excluded.i FROM f", "i: None", []),
+    ("mysql", "SELECT Usernme FROM u", "Usernme: None", ["unknown-column"]),
+    ("postgres", "SELECT * FROM bad", "*: None", ["unsupported-syntax"]),
+    ("postgres", "SELECT bad.* FROM bad", "*: None", ["unsupported-syntax"]),
+    (
+        "postgres",
+        "SELECT * FROM bad, (SELECT * FROM nope) n",
+        "*: None",
+        ["unknown-table", "unsupported-syntax"],
+    ),
+    ("postgres", "SELECT * FROM bad CROSS JOIN LATERAL f()", "*: None", ["unsupported-syntax"]),
 ]
 
 
