@@ -447,6 +447,29 @@ EXPRESSIONS = [
         "int array: int | None, p: list | None",
         [],
     ),
+    ("postgres", "SELECT j.* FROM (f JOIN p ON true) AS j", "*: None", ["unsupported-syntax"]),
+    ("postgres", "SELECT * FROM (f JOIN p ON true) AS j", "*: None", ["unsupported-syntax"]),
+    ("postgres", "SELECT g.* FROM f, LATERAL generate_series(1, 2) AS g", "g: int", []),
+    (
+        "postgres",
+        "SELECT * FROM f, LATERAL generate_series(1, 2) AS g",
+        "i: int | None, tx: str | None, iv: datetime.timedelta | None, dt: datetime.date | None, vb: str | None, c: typing.Literal[1, 2] | None, g: int",
+        [],
+    ),
+    ("postgres", "SELECT *", "*: None", []),
+    ("postgres", "SELECT nope.*", "*: None", ["unknown-table"]),
+    (
+        "mysql",
+        "SELECT * FROM JSON_TABLE('[]', '$[*]' COLUMNS (a INT PATH '$.a', NESTED PATH '$.b[*]' COLUMNS (b INT PATH '$'))) AS jt",
+        "*: None",
+        ["unsupported-syntax"],
+    ),
+    (
+        "mysql",
+        "SELECT * FROM JSON_TABLE('[]', '$[*]' COLUMNS (a INT PATH '$.a')) AS jt JOIN f ON true",
+        "a: int | None, i: int | None, tx: str | None, d: decimal.Decimal | None, dd: decimal.Decimal | None, dn: decimal.Decimal | None, dtm: datetime.datetime | None, c: int | None",
+        [],
+    ),
 ]
 
 
