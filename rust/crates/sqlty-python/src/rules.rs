@@ -78,7 +78,7 @@ pub enum Rule {
 
 impl Rule {
     /// Every rule.
-    pub const ALL: [Rule; 44] = [
+    pub const ALL: [Rule; 45] = [
         Rule::ColumnCountMismatch,
         Rule::ColumnTypeMismatch,
         Rule::ColumnNameMismatch,
@@ -123,6 +123,7 @@ impl Rule {
         Rule::Name(NameRule::ChasmJoin),
         Rule::Name(NameRule::UnprovenJoin),
         Rule::Name(NameRule::EntityMismatch),
+        Rule::Name(NameRule::RejectedQuery),
     ];
 
     /// The kebab-case rule name.
@@ -190,7 +191,8 @@ impl Rule {
                 | NameRule::DuplicateAlias
                 | NameRule::InsertMissingColumn
                 | NameRule::InsertValueCount
-                | NameRule::UngroupedColumn,
+                | NameRule::UngroupedColumn
+                | NameRule::RejectedQuery,
             ) => Severity::Error,
             Rule::ColumnNameMismatch
             | Rule::SelectStar

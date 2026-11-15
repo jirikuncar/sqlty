@@ -16,7 +16,7 @@ use super::inference::FunctionType;
 use super::literals::{constant, python_kind, strip, value_set};
 use super::memo::{first_column, Reporting};
 use super::names::{split_access, table_key};
-use super::operators::{category, common_of, common_type, operand_type, type_base};
+use super::operators::{category, common_of, common_type, operand_type, type_base, unmatched};
 use super::query::{Analyzer, Column};
 use super::scope::Scope;
 use super::sql_type::is_unmapped_builtin;
@@ -503,6 +503,11 @@ impl<'a> Analyzer<'a> {
             Value::SingleQuotedString(text) => {
                 Ok(constant(crate::values::Value::Str(text.clone())))
             }
+            Value::HexStringLiteral(hex) if hex.starts_with("0x") => {
+                let message = format!("hex literal too big: {hex}");
+                self.diag.record(NameRule::RejectedQuery, message);
+                Ok(Typed::UNKNOWN)
+            }
             // `X'41'` and `B'101'` are bit strings in PostgreSQL, binary strings elsewhere.
             Value::HexStringLiteral(_) | Value::SingleQuotedByteStringLiteral(_) => {
                 Ok(from_sql_type(
@@ -566,12 +571,21 @@ impl<'a> Analyzer<'a> {
         if let Some(common) = common_of(results.iter().cloned(), self.dialect) {
             return Ok(common);
         }
+        self.reject_unmatched("CASE", &results);
         let first = results.first().cloned().unwrap_or(Typed::UNKNOWN);
         Ok(if value_set(&first).is_some() {
             strip(first, self.dialect)
         } else {
             first
         })
+    }
+
+    /// PostgreSQL rejects `what` over `types` of different categories.
+    pub(super) fn reject_unmatched(&self, what: &str, types: &[Typed]) {
+        if let (SqlDialect::Postgres, Some((a, b))) = (self.dialect, unmatched(types)) {
+            let message = format!("{what} types {a} and {b} cannot be matched");
+            self.diag.record(NameRule::RejectedQuery, message);
+        }
     }
 
     /// A function call: a built-in by its [`Returns`] rule, else one the schema defines.

@@ -44,6 +44,7 @@ Configuration via sqlty.toml (``[rules]``) or pyproject.toml:
     chasm-join = "warn"                 # default
     unproven-join = "ignore"            # default
     entity-mismatch = "ignore"          # default
+    rejected-query = "error"            # default
     unused-ignore = "warn"              # default
     param-count-mismatch = "error"      # default
     extra-param = "warn"                # default
@@ -311,6 +312,12 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.IGNORE,
         fixable=False,
         description="Comparison between columns holding keys of different tables",
+    ),
+    "rejected-query": LintRule(
+        name="rejected-query",
+        default_severity=Severity.ERROR,
+        fixable=False,
+        description="Query the database rejects for a reason no other rule names",
     ),
     "param-count-mismatch": LintRule(
         name="param-count-mismatch",

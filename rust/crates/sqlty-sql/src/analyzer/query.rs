@@ -588,6 +588,21 @@ impl<'a> Analyzer<'a> {
                         .map_or_else(|| column_name(expr), |a| alias_name(a, self.dialect)),
                 ),
                 SelectItem::Wildcard(_) => {
+                    // ClickHouse reads `system.one` without a FROM.
+                    if from.is_some_and(<[_]>::is_empty)
+                        && matches!(
+                            self.dialect,
+                            SqlDialect::Postgres
+                                | SqlDialect::MySql
+                                | SqlDialect::Sqlite
+                                | SqlDialect::Other("duckdb")
+                        )
+                    {
+                        self.diag.record(
+                            NameRule::RejectedQuery,
+                            "`SELECT *` with no FROM selects no columns",
+                        );
+                    }
                     columns.extend(self.star(None, scope, from));
                     if let Some(rules) = &mut rules {
                         rules.resize(columns.len(), (None, None));

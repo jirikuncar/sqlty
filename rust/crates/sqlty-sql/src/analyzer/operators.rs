@@ -465,6 +465,32 @@ pub(super) fn common_of(
     })
 }
 
+/// Two of `types` in different PostgreSQL type categories, which have no common type
+/// (`select_common_type`), by their SQL types. Only categories sqlty is sure of count.
+pub(super) fn unmatched(types: &[Typed]) -> Option<(&str, &str)> {
+    let known: Vec<(char, &str)> = types.iter().filter_map(pg_category).collect();
+    let &(first, name) = known.first()?;
+    let &(_, other) = known.iter().find(|(category, _)| *category != first)?;
+    Some((name, other))
+}
+
+fn pg_category(typed: &Typed) -> Option<(char, &str)> {
+    let name = match typed.sql() {
+        Some(sql) => type_base(sql),
+        None if python_kind(typed) == Some("bool") => "BOOLEAN",
+        None => operand_type(typed)?,
+    };
+    let category = match name {
+        _ if numeric_rank(name).is_some() => 'N',
+        "TEXT" | "VARCHAR" | "CHAR" => 'S',
+        "BOOLEAN" => 'B',
+        "DATE" | "TIMESTAMP" | "TIMESTAMPTZ" | "TIME" | "TIMETZ" => 'D',
+        "INTERVAL" => 'T',
+        _ => return None,
+    };
+    Some((category, name))
+}
+
 /// The type category of a set operation's input; literals know only their Python type.
 pub(super) fn category(typed: &Typed) -> Option<&str> {
     match (typed.sql(), python_kind(typed)) {

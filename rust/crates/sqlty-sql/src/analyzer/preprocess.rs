@@ -119,6 +119,8 @@ fn integer_literal(expr: &mut Expr, sql: &str, lines: &[usize], dialect: SqlDial
         {
             let hex = hex.replace('_', "");
             let Ok(n) = u64::from_str_radix(&hex, 16) else {
+                // Kept with its prefix, which no `X'..'` literal has, for the analyzer to report.
+                *value = Value::HexStringLiteral(format!("0x{hex}"));
                 return;
             };
             *value = Value::Number(n.cast_signed().to_string(), false);

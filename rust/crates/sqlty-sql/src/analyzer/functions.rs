@@ -184,6 +184,7 @@ impl<'a> Analyzer<'a> {
                         common
                     });
                 }
+                self.reject_unmatched("argument", &typed_args);
                 let first = typed_args
                     .iter()
                     .find(|typed| typed.is_known())
