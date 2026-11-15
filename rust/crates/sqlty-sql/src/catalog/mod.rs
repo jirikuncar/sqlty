@@ -392,10 +392,7 @@ impl Catalog {
         let mut column = column.to_string();
         // A foreign key cycle has no root; stop after any chain a schema could hold.
         for _ in 0..32 {
-            let Some(Relation::Table(relation)) = self.relations.get(table) else {
-                return None;
-            };
-            let next = relation.foreign_keys.iter().find_map(|fk| {
+            let next = self.table_at(table)?.foreign_keys.iter().find_map(|fk| {
                 let at = fk.columns.iter().position(|c| *c == column)?;
                 let (parent, _) = self.relations.get_key_value(fk.table.as_str())?;
                 Some((&**parent, fk.referred.get(at)?.clone()))

@@ -646,8 +646,6 @@ impl<'a> Analyzer<'a> {
                         self.hint_pair(l, r, scope, out);
                         self.hint_pair(r, l, scope, out);
                     }
-                } else if let (Some(array), true) = (any_argument(right), is_array_search(op)) {
-                    self.hint_array(array, left, scope, out);
                 } else if let (Some(array), true) = (any_argument(left), is_array_search(op)) {
                     self.hint_array(array, right, scope, out);
                 } else {
@@ -860,7 +858,8 @@ fn is_array_search(op: &BinaryOperator) -> bool {
     is_comparison(op)
 }
 
-/// `x` of `ANY(x)`, `SOME(x)` or `ALL(x)`.
+/// `x` of `ANY(x)`, `SOME(x)` or `ALL(x)` on the left of an operator, which sqlparser reads as a
+/// call (on the right it is an `AnyOp` or `AllOp`).
 fn any_argument(expr: &Expr) -> Option<&Expr> {
     let Expr::Function(function) = expr else {
         return None;

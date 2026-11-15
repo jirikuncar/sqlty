@@ -684,6 +684,12 @@ EXPRESSIONS = [
     ("postgres", "SELECT (pt.p).f(1) FROM pt", "p: None", ["unknown-type"]),
     ("postgres", "SELECT 1 FROM pk2 WHERE pk2.x = pk2.y", "?column?: int", ["entity-mismatch"]),
     ("postgres", "SELECT x FROM pg_catalog.pg_nothing x", "x: None", []),
+    (
+        "postgres",
+        'SELECT coalesce((ptt.q)."*", 1) AS n FROM ptt',
+        "n: typing.Literal[1]",
+        ["unknown-type"],
+    ),
 ]
 
 
@@ -786,6 +792,7 @@ PARAMS = [
     ("SELECT 1 FROM f WHERE $1 = ANY(nope)", [(1, None, None)]),
     ("SELECT 1 FROM f WHERE $1 IN (SELECT x.i FROM f x, g x)", [(1, "int", None)]),
     ("TABLE g LIMIT $1", [(1, "int", None)]),
+    ("SELECT 1 FROM f WHERE $1 IN (SELECT * FROM nope)", [(1, None, None)]),
     ("SELECT 1 FROM f WHERE $1 IN (SELECT i, tx FROM f)", [(1, None, None)]),
     ("SELECT 1 FROM f WHERE ANY(f.arr) = $1", [(1, None, None)]),
     ("SELECT 1 FROM f WHERE ANY(f.arr, 1) = $1", [(1, None, None)]),
@@ -800,6 +807,7 @@ def test_params(sql: str, params: list[tuple[int, str | None, bool | None]]) -> 
 
 
 PARAMS_ELSEWHERE = [
+    ("duckdb", "SELECT a FROM g WHERE a = ? UNION TABLE g", [(1, "int", None)]),
     ("mysql", "SELECT 1 FROM f WHERE i = ANY(?)", [(1, None, None)]),
     ("mysql", "SELECT 1 FROM f WHERE ANY(?) = i", [(1, None, None)]),
     ("mysql", "SELECT 1 FROM f WHERE i = ANY(SELECT ?)", [(1, None, None)]),
