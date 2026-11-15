@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use sqlparser::ast::{
     BinaryOperator, Expr, FunctionArg, FunctionArgExpr, FunctionArgOperator, FunctionArguments,
+    Value,
 };
 
 use super::dialect::SqlDialect;
@@ -170,8 +171,18 @@ impl<'a> Analyzer<'a> {
                 for expr in args {
                     typed_args.push(self.expr(expr, scope)?);
                 }
+                // An argument of unknown type, a placeholder too, can hold any value of the
+                // common type.
+                let opaque = args
+                    .iter()
+                    .zip(&typed_args)
+                    .any(|(expr, typed)| !typed.is_known() && !valueless(expr));
                 if let Some(common) = common_of(typed_args.iter().cloned(), self.dialect) {
-                    return Ok(common);
+                    return Ok(if opaque {
+                        strip(common, self.dialect)
+                    } else {
+                        common
+                    });
                 }
                 let first = typed_args
                     .iter()
@@ -428,6 +439,15 @@ fn decimal_integer_digits(sql_type: &str) -> u32 {
         [precision, scale, ..] => precision.saturating_sub(*scale),
         [precision] => *precision,
         [] => 10,
+    }
+}
+
+/// `NULL`: no value of its own to type.
+fn valueless(expr: &Expr) -> bool {
+    match expr {
+        Expr::Nested(inner) => valueless(inner),
+        Expr::Value(value) => matches!(value.value, Value::Null),
+        _ => false,
     }
 }
 

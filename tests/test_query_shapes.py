@@ -687,7 +687,7 @@ EXPRESSIONS = [
     (
         "postgres",
         'SELECT coalesce((ptt.q)."*", 1) AS n FROM ptt',
-        "n: typing.Literal[1]",
+        "n: int",
         ["unknown-type"],
     ),
 ]
