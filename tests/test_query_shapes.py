@@ -247,8 +247,8 @@ EXPRESSIONS = [
         "x: None",
         ["unsupported-syntax"],
     ),
-    ("postgres", "SELECT COALESCE(i, tx) AS x FROM f", "x: int | None", ["rejected-query"]),
-    ("postgres", "SELECT COALESCE(c, tx) AS x FROM f", "x: int | None", ["rejected-query"]),
+    ("postgres", "SELECT COALESCE(i, tx) AS x FROM f", "x: None", ["rejected-query"]),
+    ("postgres", "SELECT COALESCE(c, tx) AS x FROM f", "x: None", ["rejected-query"]),
     ("mysql", "SELECT CONCAT(tx, i) AS x FROM f", "x: str | None", []),
     ("postgres", "SELECT (SELECT 1) AS x FROM c LEFT JOIN p ON p.id = c.pid", "x: int", []),
     (
@@ -539,7 +539,7 @@ EXPRESSIONS = [
     (
         "postgres",
         "SELECT CASE WHEN i > 0 THEN 1 ELSE dt END AS x FROM f",
-        "x: int | None",
+        "x: None",
         ["rejected-query"],
     ),
     (
