@@ -139,10 +139,7 @@ test("settings, folders and the interpreter restart the server", async () => {
     calls.filter(([name]) => name === "showErrorMessage").map(([, text]) => text),
     [missing, missing],
   );
-  assert.match(
-    String(info),
-    new RegExp(`Checks with: nothing \\(${missing.replace(/[.()]/g, "\\$&")}\\)$`),
-  );
+  assert.ok(String(info).endsWith(`Checks with: nothing (${missing})`), String(info));
 
   python.selected = sqlty("0.3.0");
   calls.length = 0;
