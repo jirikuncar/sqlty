@@ -1,11 +1,12 @@
-//! `*` over `USING` and `NATURAL` joins, which list one column per merged pair.
+//! `*` over `USING` and `NATURAL` joins, which list one column per merged pair, and over
+//! semi and anti joins, which list one side.
 //!
 //! PostgreSQL puts the merged columns first, in the order of the `USING` list (of the left
 //! table for `NATURAL`). MySQL puts them first in the order of the first table, and reads a
 //! `RIGHT JOIN` as a `LEFT JOIN` with the tables swapped. SQLite keeps the left table's
 //! columns in place and drops the right table's copies.
 
-use sqlparser::ast::{JoinConstraint, JoinOperator, ObjectName, TableFactor, TableWithJoins};
+use sqlparser::ast::{Join, JoinConstraint, JoinOperator, ObjectName, TableFactor, TableWithJoins};
 
 use crate::catalog::fold;
 
@@ -37,20 +38,24 @@ impl Analyzer<'_> {
     ) -> Option<Vec<Column>> {
         let mut left = self.factor_columns(&table.relation, from, scope)?;
         for join in &table.joins {
-            let right = self.factor_columns(&join.relation, from, scope)?;
-            let names: Vec<String> = match join_constraint(join) {
-                Some(JoinConstraint::Using(names)) => using_names(names, self.dialect)?,
-                Some(JoinConstraint::Natural) => left
-                    .iter()
-                    .filter(|column| position(&right, &column.name).is_some())
-                    .map(|column| column.name.clone())
-                    .collect(),
-                _ => {
-                    left.extend(right);
-                    continue;
+            let right = || self.factor_columns(&join.relation, from, scope);
+            left = match shape(join, self.dialect) {
+                Shape::Both => [left, right()?].concat(),
+                Shape::LeftOnly => left,
+                Shape::RightOnly => right()?,
+                Shape::Merge(side, using) => {
+                    let right = right()?;
+                    let names: Vec<String> = match using {
+                        Some(names) => using_names(names, self.dialect)?,
+                        None => left
+                            .iter()
+                            .filter(|column| position(&right, &column.name).is_some())
+                            .map(|column| column.name.clone())
+                            .collect(),
+                    };
+                    self.merge(&left, &right, &names, side)?
                 }
             };
-            left = self.merge(&left, &right, &names, &join.join_operator)?;
         }
         Some(left)
     }
@@ -82,17 +87,8 @@ impl Analyzer<'_> {
         left: &[Column],
         right: &[Column],
         names: &[String],
-        operator: &JoinOperator,
+        side: Side,
     ) -> Option<Vec<Column>> {
-        let side = match operator {
-            JoinOperator::Join(_) | JoinOperator::Inner(_) | JoinOperator::StraightJoin(_) => {
-                Side::Inner
-            }
-            JoinOperator::Left(_) | JoinOperator::LeftOuter(_) => Side::Left,
-            JoinOperator::Right(_) | JoinOperator::RightOuter(_) => Side::Right,
-            JoinOperator::FullOuter(_) => Side::Full,
-            _ => return None,
-        };
         let pairs = names
             .iter()
             .map(|name| Some((position(left, name)?, position(right, name)?)))
@@ -156,6 +152,39 @@ impl Analyzer<'_> {
                     .collect()
             }
         })
+    }
+}
+
+/// What `*` lists of a join: both sides, both with the `USING` (or, for `None`, `NATURAL`)
+/// columns merged, or one side only.
+enum Shape<'a> {
+    Both,
+    Merge(Side, Option<&'a [ObjectName]>),
+    LeftOnly,
+    RightOnly,
+}
+
+/// A semi or anti join lists one side; ClickHouse lists both
+/// (`semi_join_include_columns_from_both_sides` is on by default). An `ASOF` join pads the
+/// right side with nulls, as a left join does.
+fn shape(join: &Join, dialect: SqlDialect) -> Shape<'_> {
+    use JoinOperator::*;
+    let filters = dialect != SqlDialect::ClickHouse;
+    let side = match &join.join_operator {
+        Semi(_) | LeftSemi(_) | Anti(_) | LeftAnti(_) if filters => return Shape::LeftOnly,
+        RightSemi(_) | RightAnti(_) if filters => return Shape::RightOnly,
+        Join(_) | Inner(_) | StraightJoin(_) | CrossJoin(_) => Side::Inner,
+        Left(_) | LeftOuter(_) | Semi(_) | LeftSemi(_) | Anti(_) | LeftAnti(_) | AsOf { .. } => {
+            Side::Left
+        }
+        Right(_) | RightOuter(_) | RightSemi(_) | RightAnti(_) => Side::Right,
+        FullOuter(_) => Side::Full,
+        _ => return Shape::Both,
+    };
+    match join_constraint(join) {
+        Some(JoinConstraint::Using(names)) => Shape::Merge(side, Some(names)),
+        Some(JoinConstraint::Natural) => Shape::Merge(side, None),
+        _ => Shape::Both,
     }
 }
 

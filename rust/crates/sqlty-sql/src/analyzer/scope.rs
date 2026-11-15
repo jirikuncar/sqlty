@@ -240,11 +240,16 @@ pub(super) fn merged_columns(from: &[TableWithJoins], dialect: SqlDialect) -> Ve
     merged
 }
 
-/// Whether a join merges same-named columns (`USING`, `NATURAL`), so `*` does not list them all.
+/// Whether a join merges same-named columns (`USING`, `NATURAL`) or keeps one side (semi
+/// and anti joins), so `*` does not list every column of both.
 pub(super) fn merges_columns(join: &Join) -> bool {
+    use JoinOperator::*;
     matches!(
         join_constraint(join),
         Some(JoinConstraint::Using(_) | JoinConstraint::Natural)
+    ) || matches!(
+        join.join_operator,
+        Semi(_) | LeftSemi(_) | RightSemi(_) | Anti(_) | LeftAnti(_) | RightAnti(_)
     )
 }
 
@@ -848,7 +853,7 @@ mod tests {
     }
 
     #[test]
-    fn merging_joins_are_using_and_natural() {
+    fn merging_joins_are_using_natural_semi_and_anti() {
         let merging = |sql: &str| any_merging_join(&from_of(sql));
         assert!(merging("SELECT 1 FROM a JOIN b USING (id)"));
         assert!(merging("SELECT 1 FROM a NATURAL JOIN b"));
@@ -858,6 +863,7 @@ mod tests {
         assert!(!merging("SELECT 1 FROM a JOIN b ON a.id = b.id"));
         assert!(!merging("SELECT 1 FROM a, b"));
         assert!(!merging("SELECT 1 FROM a CROSS JOIN b"));
+        assert!(merging("SELECT 1 FROM a SEMI JOIN b ON a.id = b.id"));
     }
 
     #[test]
