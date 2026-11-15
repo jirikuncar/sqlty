@@ -95,14 +95,10 @@ fn to_py<'py>(py: Python<'py>, value: &Value) -> PyResult<Bound<'py, PyAny>> {
         Value::Float(number) => number.into_pyobject(py)?.into_any(),
         Value::Boolean(flag) => PyBool::new(py, *flag).to_owned().into_any(),
         Value::Datetime(datetime) => datetime.to_string().into_pyobject(py)?.into_any(),
-        Value::Array(items) => PyList::new(
-            py,
-            items
-                .iter()
-                .map(|item| to_py(py, item))
-                .collect::<PyResult<Vec<_>>>()?,
-        )?
-        .into_any(),
+        Value::Array(items) => {
+            let items = items.iter().map(|item| to_py(py, item));
+            PyList::new(py, items.collect::<PyResult<Vec<_>>>()?)?.into_any()
+        }
         Value::Table(table) => table_to_py(py, table)?.into_any(),
     })
 }
@@ -121,12 +117,8 @@ fn to_toml(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     } else if let Ok(text) = value.cast::<PyString>() {
         Value::String(text.to_str()?.to_string())
     } else if value.is_instance_of::<PyList>() || value.is_instance_of::<PyTuple>() {
-        Value::Array(
-            value
-                .try_iter()?
-                .map(|item| to_toml(&item?))
-                .collect::<PyResult<_>>()?,
-        )
+        let items = value.try_iter()?.map(|item| to_toml(&item?));
+        Value::Array(items.collect::<PyResult<_>>()?)
     } else {
         Value::String(value.str()?.to_string())
     })

@@ -543,7 +543,13 @@ from db import fetch_all
 
 
 def find() -> list[tuple[int]]:
-    query = {"a": "SELECT id FROM foos"}[1]
+    query = {"a": "SELECT id FROM foos"}[{}]
+    # error: [dynamic-query] "query is not a string literal, so it is not checked"
+    return fetch_all(query, tuple[int])
+
+
+def find_keyed() -> list[tuple[int]]:
+    query = {{}: "SELECT id FROM foos"}["a"]
     # error: [dynamic-query] "query is not a string literal, so it is not checked"
     return fetch_all(query, tuple[int])
 ```
