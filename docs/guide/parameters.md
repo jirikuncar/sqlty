@@ -185,7 +185,8 @@ async def main() -> None:
 
 `SQL[R, P]` types the parameters of a query as `P`, next to its rows `R`. Your
 type checker then checks the values you pass, without running `sqlty check`.
-`sqlty rewrite` writes `P`:
+`sqlty rewrite` writes `P`; turn it off with
+[`param-types = false`](../reference/configuration.md#param-types).
 
 ```toml
 [tool.sqlty]
@@ -242,7 +243,7 @@ the other way around.
     `P` says what the query needs, not everything psycopg accepts. A type
     checker rejects a list for a `tuple`, text for another type (the server
     would convert it), and a `dict[str, Any]` or extra keys for a `TypedDict`.
-    Write `SQL[R, Any]` to accept anything.
+    Set `param-types = false` to keep `SQL[R]`.
 
 ### `bind`
 

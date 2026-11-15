@@ -106,7 +106,8 @@ execute("SELECT id FROM users WHERE id = %s AND age > %s", (1,))
 `SQL[R, P]` types the parameters of a query as `P`: a `tuple` with one item per
 placeholder, or a `TypedDict` with one key per name. `sqlty check` compares a `P`
 you wrote with the query (`params-type-mismatch`). `sqlty rewrite` writes it;
-a type checker is then stricter than the driver.
+a type checker is then stricter than the driver, and `param-types = false` turns
+it off.
 
 ```python
 from sqlty import SQL
