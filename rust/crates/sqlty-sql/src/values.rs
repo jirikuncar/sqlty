@@ -344,4 +344,19 @@ mod tests {
         );
         assert_eq!(check("status NOT IN ('a')"), None);
     }
+
+    #[test]
+    fn rarer_values_and_checks() {
+        let values = strs(&["a\rb", "c\td", "\u{1}"]);
+        assert_eq!(parse(&render(&values).unwrap()), Some(values));
+        assert_eq!(parse("typing.Literal['a' 'b']"), None);
+        assert_eq!(check("CAST(status = 'a' AS boolean)"), Some(strs(&["a"])));
+        assert_eq!(check("'a' = t.status"), Some(strs(&["a"])));
+        assert_eq!(
+            check("status = 'a' OR (status IS NULL)"),
+            Some(strs(&["a"]))
+        );
+        assert_eq!(check("status = ANY ($1)"), None);
+        assert_eq!(check("status = -'a'"), None);
+    }
 }
