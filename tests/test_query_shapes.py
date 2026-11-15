@@ -417,6 +417,36 @@ EXPRESSIONS = [
         ["unknown-table", "unsupported-syntax"],
     ),
     ("postgres", "SELECT * FROM bad CROSS JOIN LATERAL f()", "*: None", ["unsupported-syntax"]),
+    ("mysql", "SELECT 1e3, 99999999999999999999", "1e3: float, 99999999999999999999: int", []),
+    ("sqlite", "SELECT 1e3, 99999999999999999999", "1e3: float, 99999999999999999999: int", []),
+    ("mysql", "SELECT 'a'::ENUM('A', 'B')", "'a'::ENUM('A', 'B'): str", []),
+    ("mysql", "SELECT CAST(i AS a.b) FROM f", "CAST(i AS a.b): None", ["unknown-type"]),
+    ("postgres", "SELECT CAST(i AS a.b) FROM f", "i: None", ["unknown-type"]),
+    (
+        "postgres",
+        "SELECT (p).name, (p).*, (p).nope FROM p",
+        "name: str, id: int, name: str, nope: None",
+        ["unknown-column"],
+    ),
+    ("postgres", "SELECT CASE WHEN true THEN c ELSE i END FROM f", "i: int | None", []),
+    (
+        "postgres",
+        "SELECT MIN(ARRAY[]), MAX(ARRAY[i]) FROM f",
+        "min: None, max: list[int] | None",
+        ["unsupported-syntax"],
+    ),
+    (
+        "postgres",
+        "SELECT ARRAY[(1, 2)], (ROW(1, 2)).f1, ('(1,2)'::nope).x",
+        "array: list[tuple[typing.Any, ...]], f1: None, x: None",
+        ["unsupported-syntax", "unknown-type"],
+    ),
+    (
+        "postgres",
+        "SELECT CAST(NULL AS INT ARRAY)[1], CAST(NULL AS p[])",
+        "int array: int | None, p: list | None",
+        [],
+    ),
 ]
 
 
