@@ -38,6 +38,7 @@ CREATE TABLE t (
     tags TEXT[] NOT NULL,
     uid UUID
 );
+CREATE TABLE b (data BYTEA NOT NULL, at TIME NOT NULL, doc JSONB);
 """
 COLUMNS = [
     "id",

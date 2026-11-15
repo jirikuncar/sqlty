@@ -252,6 +252,60 @@ def test_cases(call: str) -> None:
     assert found >= (driver == "psycopg")  # dynamic-query is off by default
 
 
+CALLS = {
+    "any row": (
+        "    run(q, Annotated[Any, 1])\n    run(q, 'Annotated[Any, 1]')\n    run(q, Annotated[Any])\n",
+        0,
+    ),
+    "key twice": (
+        "    cur.execute('SELECT id FROM t WHERE id = %(a)s OR id = %(a)s', {'a': 1, 'a': b'x'})\n",
+        1,
+    ),
+    "typed values": (
+        "    cur.execute('SELECT 1 FROM b WHERE data = %s AND at = %s AND doc = %s', "
+        "(b'x', datetime.time(1), 1))\n"
+        "    cur.execute('SELECT 1 FROM b WHERE data = %s AND at = %s', (1, 1))\n",
+        2,
+    ),
+    "declared fit": (
+        "    cur.execute(SQL[Row, tuple[int, list[int]]]('--sql\\nSELECT id, name FROM t "
+        "WHERE id = %s AND id = ANY(%s)'), (1, []))\n"
+        "    cur.execute(SQL[Row, tuple[int, list[int]]]('--sql\\nSELECT id, name FROM t "
+        "WHERE id = %s AND id = ANY(%s)'), (b'x', 'x'))\n",
+        1,
+    ),
+    "declared variable": (
+        "    p = SQL[Row, tuple[int, list[int]]]('--sql\\nSELECT id, name FROM t "
+        "WHERE id = %s AND id = ANY(%s)')\n    cur.execute(p, (1, []))\n    cur.execute(p, (b'x', 'x'))\n",
+        1,
+    ),
+    "number twice": ("    await pg.fetch('SELECT id FROM t WHERE id = $1 OR id = $1', b'x')\n", 1),
+}
+
+
+@pytest.mark.parametrize(("call", "count"), CALLS.values(), ids=CALLS.keys())
+def test_calls(call: str, count: int) -> None:
+    assert compare((HEAD + HELPERS[0] + SETUP + call).replace("DRIVER", "psycopg")) == count
+
+
+DECLARED = {
+    "types": "    SQL[Row, tuple[Union[int, str], Optional[bytes], list[int], list[None], "
+    "datetime.time, Annotated[Any, 1], 'Any', datetime.timedelta]]('--sql\\nSELECT id, name "
+    "FROM t WHERE id = %s AND name = %s AND id = ANY(%s) AND id = ANY(%s) AND %s::TIME IS NULL "
+    "AND %s::JSONB IS NULL AND %s::BYTEA IS NULL AND %s::INTERVAL IS NULL')\n",
+    "named": "    class P(TypedDict):\n        a: int\n        b: bytes\n"
+    "    SQL[Row, P]('--sql\\nSELECT id, name FROM t WHERE id = %(a)s AND name = %(b)s')\n",
+    "shapes": "    NOSQL[a, b]\n    SQL[a, b, c]('--sql\\nSELECT 1')\n"
+    "    x.SQL[Row, P]('--sql\\nSELECT 1')\n    SQL[Row, P](QUERY)\n",
+}
+
+
+@pytest.mark.parametrize("call", DECLARED.values(), ids=DECLARED.keys())
+def test_declared_params(call: str) -> None:
+    head = HEAD.replace("DRIVER", "psycopg") + "from typing import Optional, Union\n"
+    assert compare(head + HELPERS[0] + SETUP.replace("DRIVER", "psycopg") + call) >= 1
+
+
 @FUZZ
 @given(
     sources(),
