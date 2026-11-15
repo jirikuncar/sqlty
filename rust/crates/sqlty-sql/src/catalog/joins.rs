@@ -33,11 +33,10 @@ impl ReferencedBy {
             let Relation::Table(table) = relation else {
                 continue;
             };
-            for (i, fk) in table.foreign_keys.iter().enumerate() {
-                if let Some((parent, _)) = catalog.relations.get_key_value(fk.table.as_str()) {
-                    found.push((Arc::clone(parent), Arc::clone(child), i));
-                }
-            }
+            found.extend(table.foreign_keys.iter().enumerate().filter_map(|(i, fk)| {
+                let (parent, _) = catalog.relations.get_key_value(fk.table.as_str())?;
+                Some((Arc::clone(parent), Arc::clone(child), i))
+            }));
         }
         found.sort_unstable_by(|a, b| {
             (&*a.0, split(&a.1).1, &*a.1, a.2).cmp(&(&*b.0, split(&b.1).1, &*b.1, b.2))

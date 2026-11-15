@@ -617,27 +617,26 @@ impl<'a> Analyzer<'a> {
         }
         let arg = args.first().copied();
         if let Some((rule, typed)) = self.function_rule(&name, &args, scope)? {
-            let at = |position: usize| match typed.get(position) {
-                Some(Some(typed)) => Ok(typed.clone()),
-                _ => args
-                    .get(position)
-                    .map_or(Ok(Typed::UNKNOWN), |arg| self.expr(arg, scope)),
+            let at = |position: usize| {
+                let read: &Option<Typed> = &typed[position];
+                read.clone()
+                    .expect("a rule reads the argument it is typed by")
             };
             let argument = || at(0);
             return Ok(match rule.result {
                 FunctionType::Sql(sql) => from_sql_type(sql, self.dialect),
                 FunctionType::Any => Typed::python_only("typing.Any"),
                 FunctionType::Unknown => Typed::UNKNOWN,
-                FunctionType::Argument(position) => at(position)?,
+                FunctionType::Argument(position) => at(position),
                 FunctionType::ArgumentAs(sql) => {
-                    let typed = argument()?;
+                    let typed = argument();
                     Typed::with_values(
                         typed.python().map(String::from),
                         Some(sql.to_string()),
                         typed.values,
                     )
                 }
-                FunctionType::Code => self.sum(argument()?, arg, scope)?,
+                FunctionType::Code => self.sum(argument(), arg, scope)?,
                 FunctionType::Returns(returns) => {
                     self.function_type_of(returns, &args, &typed, scope)?
                 }

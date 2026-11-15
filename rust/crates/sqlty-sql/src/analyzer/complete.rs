@@ -77,7 +77,7 @@ impl Candidate {
         Candidate {
             label: label.to_string(),
             kind: CandidateKind::Column,
-            detail: Some(source.to_string()),
+            detail: (!source.is_empty()).then(|| source.to_string()),
             sql_type: sql_type.map(str::to_string),
             nullable: match nullability {
                 Nullability::Nullable => Some(true),

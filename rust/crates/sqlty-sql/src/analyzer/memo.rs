@@ -118,8 +118,6 @@ impl<'a> Analyzer<'a> {
 
 /// The first column of a subquery's result, when it has one.
 pub(super) fn first_column(columns: &SubqueryColumns) -> Inferred<Option<&Column>> {
-    match &**columns {
-        Ok(columns) => Ok(columns.as_ref().and_then(|columns| columns.first())),
-        Err(error) => Err(*error),
-    }
+    let columns = (**columns).as_ref().unwrap_or_else(|never| match *never {});
+    Ok(columns.as_ref().and_then(|columns| columns.first()))
 }

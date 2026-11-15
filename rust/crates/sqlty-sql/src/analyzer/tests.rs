@@ -682,8 +682,37 @@ fn rarer_respellings() {
             "SELECT * FROM XMLTABLE('/a' PASSING x)",
             "SELECT * FROM XMLTABLE('/a' PASSING x)",
         ),
+        (
+            SqlDialect::Postgres,
+            "SELECT substring(x similar 'a') FROM t",
+            "SELECT substring(x FROM 'a') FROM t",
+        ),
+        (SqlDialect::MySql, "SELECT !'a'", "SELECT (NOT 'a')"),
+        (SqlDialect::MySql, "SELECT 'a' MOD 2", "SELECT 'a' % 2"),
+        (SqlDialect::MySql, "SELECT 'abc", "SELECT 'abc"),
     ];
     for (dialect, sql, read) in cases {
         assert_eq!(parser_input(sql, dialect).text(), read, "{sql}");
     }
+}
+
+#[test]
+fn rarer_suggestions_highlights_and_placeholders() {
+    assert_eq!(
+        suggest::closest("abcdefgh", &["abcdefgx", "abcdefxx"]),
+        Some("abcdefgx")
+    );
+    assert_eq!(
+        parse_error("SELECT cast(a, b)", "postgres").as_deref(),
+        Some("unsupported in this dialect")
+    );
+    let operators: Vec<_> = crate::highlight::highlight("SELECT a ~~~ b", "postgres")
+        .into_iter()
+        .map(|(range, _)| range)
+        .collect();
+    assert_eq!(operators, [0..6, 9..12]);
+    assert_eq!(
+        crate::placeholders::percent_placeholders("SELECT 5 %% 2, %s"),
+        vec![15..17]
+    );
 }

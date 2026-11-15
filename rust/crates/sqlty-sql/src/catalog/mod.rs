@@ -1148,6 +1148,39 @@ mod tests {
     }
 
     #[test]
+    fn test_a_function_changed_before_a_type_is_resolved_in_the_rebuild() {
+        let c = pg("CREATE TABLE t (id int);
+            CREATE VIEW v1 AS SELECT id FROM t;
+            CREATE FUNCTION f() RETURNS int LANGUAGE sql AS 'select 1';
+            CREATE TYPE e AS ENUM ('a');
+            CREATE VIEW v2 AS SELECT f() AS n;");
+        assert_eq!(view_cols(&c, "v2"), ["n:INT"]);
+    }
+
+    #[test]
+    fn test_a_view_waiting_with_a_table_is_read_after_it() {
+        let c = pg("CREATE TABLE a (LIKE nope); CREATE VIEW v AS SELECT 1 AS x FROM nope2;");
+        assert_eq!(view_cols(&c, "v"), ["x:?"]);
+    }
+
+    #[test]
+    fn test_a_dropped_named_key_leaves_the_others() {
+        let c = pg("CREATE TABLE p (id int PRIMARY KEY);
+            CREATE TABLE c (pid int,
+                CONSTRAINT k FOREIGN KEY (pid) REFERENCES p (id),
+                CONSTRAINT k2 FOREIGN KEY (pid) REFERENCES p (id));
+            ALTER TABLE c DROP CONSTRAINT k;
+            CREATE VIEW v AS SELECT id FROM p;");
+        let tables: Vec<_> = c
+            .joins_with_prefix("p", "", 5)
+            .iter()
+            .map(|j| j.table.name)
+            .collect();
+        assert_eq!(tables, ["c"]);
+        assert_eq!(c.entity("v", "id"), None);
+    }
+
+    #[test]
     fn test_joins_of_views_unknown_tables_and_dangling_keys() {
         let c = pg("CREATE TABLE p (id int PRIMARY KEY);
             CREATE TABLE c (pid int REFERENCES p (id), x int REFERENCES nope (id));

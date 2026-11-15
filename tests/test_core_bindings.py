@@ -82,3 +82,22 @@ def test_completion_of_a_cte() -> None:
     found = _core.complete_source(source, len(source) - 2, limit=1)
     assert found is not None
     assert found[3] == [("c", "cte", None, None, None)]
+
+
+@pytest.mark.parametrize(
+    ("sql", "labels"),
+    [
+        ("SELECT | FROM p, (SELECT 1 AS a)", ["a", "p.id"]),
+        ("SELECT | FROM p n, nope m WHERE (", ["id", "name"]),
+    ],
+)
+def test_completion_of_unnamed_and_unknown_relations(sql: str, labels: list[str]) -> None:
+    source = 'q = "--sql\\n' + sql.replace("|", "") + '"\n'
+    found = _core.complete_source(
+        source,
+        source.index("SELECT ") + 7,
+        schema_sql="CREATE TABLE p (id INT, name TEXT);",
+        limit=2,
+    )
+    assert found is not None
+    assert [label for label, *_ in found[3]] == labels

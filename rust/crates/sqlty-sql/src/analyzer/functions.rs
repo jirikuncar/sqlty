@@ -270,7 +270,10 @@ impl<'a> Analyzer<'a> {
                 let sql_type = typed.sql().unwrap_or_default();
                 match operand_type(&typed) {
                     Some("DOUBLE" | "FLOAT" | "REAL") => sql("DOUBLE"),
-                    Some("DECIMAL" | "NUMERIC") if decimal_integer_digits(sql_type) > 18 => {
+                    Some(ty)
+                        if matches!(ty, "DECIMAL" | "NUMERIC")
+                            && decimal_integer_digits(sql_type) > 18 =>
+                    {
                         Ok(strip(typed, self.dialect))
                     }
                     Some(_) => sql("BIGINT"),

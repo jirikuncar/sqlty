@@ -132,6 +132,14 @@ def test_unexplained_columns_have_no_rules(sql: str) -> None:
     assert [rules for _, *rules in found] == [[None, None]]
 
 
+def test_a_parenthesized_query_is_explained() -> None:
+    found = _core.explain_select("(SELECT count(*) FROM t)", dialect="postgres", schema_sql=SCHEMA)
+    assert found is not None
+    assert [
+        (name, type_rule[0], nullability_rule[0]) for name, type_rule, nullability_rule in found
+    ] == [("count", "common.aggregate.count", "common.aggregate.count")]
+
+
 JSON_SCHEMA = (
     "CREATE TABLE t (a INT NOT NULL, j JSONB); CREATE TYPE n AS (child n); CREATE TABLE r (x n);"
 )
@@ -202,7 +210,7 @@ def test_json(dialect: str, sql: str, shapes: list[tuple[str, str]]) -> None:
 
 
 EXPRESSION_SCHEMAS = {
-    "postgres": "CREATE TABLE f (i INT, tx TEXT, iv INTERVAL, dt DATE, vb VARBIT, c INT CHECK (c IN (1, 2))); CREATE TABLE p (id INT PRIMARY KEY, name TEXT NOT NULL); CREATE TABLE c (id INT PRIMARY KEY, pid INT REFERENCES p (id), arr INT[]); CREATE TABLE g (a INT, b INT, CHECK (num_nonnulls(a, b) >= 1)); CREATE TABLE vs (x INT CHECK (x IN (1, 2)), y INT CHECK (y IN (3, 4))); CREATE VIEW bad AS SELECT * FROM nope; CREATE TYPE mood AS ENUM ('a'); CREATE TABLE mt (m mood); ALTER TYPE mood RENAME TO feeling; DROP TYPE feeling; CREATE TYPE pair AS (a INT, b TEXT); CREATE TABLE pt (p pair); ALTER TYPE pair RENAME TO duo; CREATE TABLE gt (a INT, b INT GENERATED ALWAYS AS (a + 1) STORED, c INT GENERATED ALWAYS AS (gt.b + 1) STORED); CREATE VIEW pv AS SELECT id FROM p; CREATE FUNCTION fv() RETURNS SETOF pv AS $$ SELECT * FROM pv $$ LANGUAGE sql; CREATE TABLE ut (a INT, b mystery);",
+    "postgres": "CREATE TABLE f (i INT, tx TEXT, iv INTERVAL, dt DATE, vb VARBIT, c INT CHECK (c IN (1, 2))); CREATE TABLE p (id INT PRIMARY KEY, name TEXT NOT NULL); CREATE TABLE c (id INT PRIMARY KEY, pid INT REFERENCES p (id), arr INT[]); CREATE TABLE g (a INT, b INT, CHECK (num_nonnulls(a, b) >= 1)); CREATE TABLE vs (x INT CHECK (x IN (1, 2)), y INT CHECK (y IN (3, 4))); CREATE VIEW bad AS SELECT * FROM nope; CREATE TYPE mood AS ENUM ('a'); CREATE TABLE mt (m mood); ALTER TYPE mood RENAME TO feeling; DROP TYPE feeling; CREATE TYPE pair AS (a INT, b TEXT); CREATE TABLE pt (p pair); ALTER TYPE pair RENAME TO duo; CREATE TABLE gt (a INT, b INT GENERATED ALWAYS AS (a + 1) STORED, c INT GENERATED ALWAYS AS (gt.b + 1) STORED); CREATE VIEW pv AS SELECT id FROM p; CREATE FUNCTION fv() RETURNS SETOF pv AS $$ SELECT * FROM pv $$ LANGUAGE sql; CREATE TABLE ut (a INT, b mystery); CREATE VIEW v2 AS SELECT x.id FROM p x, c x;",
     "mysql": "CREATE TABLE f (i INT, tx TEXT, d DECIMAL(30, 2), dd DECIMAL(20), dn DECIMAL, dtm DATETIME, c INT CHECK (c IN (1, 2))); CREATE TABLE m (ui INT UNSIGNED, ub BIGINT UNSIGNED, y YEAR, g GEOMETRY, dt DATE, bl BLOB, ud DECIMAL(10, 2) UNSIGNED, j JSON); CREATE TABLE u (UserName TEXT);",
     "sqlite": "CREATE TABLE f (i INT, tx TEXT, c INT CHECK (c IN (1, 2)));",
 }
@@ -590,6 +598,54 @@ EXPRESSIONS = [
         [],
     ),
     ("sqlite", "SELECT 0xFFFFFFFFFFFFFFFFFF AS a, 0x10 AS b", "a: bytes, b: int", []),
+    ("postgres", "SELECT * FROM v2", "id: int", []),
+    ("postgres", "(SELECT * FROM bad)", "*: None", ["unsupported-syntax"]),
+    ("mysql", "SELECT unnest(j) FROM m", "unnest(j): None", ["unknown-function"]),
+    ("postgres", "SELECT (pt.p).* FROM pt", "a: int | None, b: str | None", []),
+    ("postgres", "SELECT CAST(NULL AS p[])", "p: list | None", []),
+    ("postgres", "SELECT CAST(NULL AS pair[])", "pair: list | None", []),
+    ("postgres", "SELECT (c.arr)[1].x FROM c", "x: None", ["unsupported-syntax"]),
+    ("postgres", "SELECT (pt.p).a.b FROM pt", "b: None", ["unknown-type"]),
+    ("postgres", "SELECT NULLIF(nope, 1) FROM f", "nullif: None", ["unknown-column"]),
+    ("postgres", "SELECT NULLIF(NULL, 1)", "nullif: None", ["unsupported-syntax"]),
+    ("mysql", "SELECT DATE_ADD(dtm) FROM f", "DATE_ADD(dtm): None", ["unsupported-syntax"]),
+    (
+        "mysql",
+        "SELECT FLOOR(d), CEIL(d), ROUND(d), TRUNCATE(d, 0) FROM f",
+        "FLOOR(d): decimal.Decimal | None, CEIL(d): decimal.Decimal | None, ROUND(d): decimal.Decimal | None, TRUNCATE(d, 0): decimal.Decimal | None",
+        [],
+    ),
+    ("postgres", "SELECT * FROM (SELECT 1 AS a) s GROUP BY a", "a: int", []),
+    ("postgres", "SELECT bad FROM bad GROUP BY 1", "bad: None", []),
+    ("postgres", "SELECT (SELECT x.id FROM p x, c x)", "id: int | None", ["duplicate-alias"]),
+    ("mysql", "SELECT i / (2) FROM f", "i / (2): decimal.Decimal | None", []),
+    ("mysql", "SELECT i / '2' FROM f", "i / '2': float | None", []),
+    ("postgres", "SELECT NVL(tx, tx) FROM f", "nvl: None", ["unknown-function"]),
+    ("mysql", "SELECT COALESCE(y, ui) FROM m", "COALESCE(y, ui): int | None", []),
+    (
+        "mysql",
+        "SELECT COALESCE(i, CAST(1 AS SIGNED)) FROM f",
+        "COALESCE(i, CAST(1 AS SIGNED)): int",
+        [],
+    ),
+    (
+        "mysql",
+        "SELECT CASE WHEN TRUE THEN i ELSE y END FROM f, m",
+        "CASE WHEN TRUE THEN i ELSE y END: int | None",
+        [],
+    ),
+    ("postgres", "SELECT 0x1F", "?column?: int", []),
+    ("postgres", "SELECT s FROM (SELECT 1 AS a) s", "s: None", []),
+    ("postgres", "SELECT x.c FROM f x WHERE x.c = 1", "c: typing.Literal[1]", []),
+    ("postgres", "SELECT (c) FROM f WHERE c = 1", "c: typing.Literal[1]", []),
+    ("postgres", "SELECT f.c FROM f WHERE c = 1", "c: typing.Literal[1]", []),
+    ("mysql", "SELECT UserNam FROM u", "UserNam: None", ["unknown-column"]),
+    ("postgres", "SELECT nope.* FROM p", "*: None", ["unknown-table"]),
+    ("postgres", "SELECT *", "*: None", []),
+    ("postgres", "SELECT CAST(NULL AS BINARY LARGE OBJECT)", "blob: bytes | None", []),
+    ("postgres", "SELECT * FROM json_array_elements('[1]')", "value: typing.Any", []),
+    ("postgres", "SELECT MOD(i, 2) FROM f", "mod: int | None", []),
+    ("mysql", "SELECT MOD(i, (2)) FROM f", "MOD(i, (2)): int | None", []),
 ]
 
 
@@ -607,6 +663,7 @@ STATEMENT_SCHEMAS = {
     "postgres": "CREATE TABLE t (a INT NOT NULL, b TEXT, c INT NOT NULL DEFAULT 1); CREATE TABLE u (a INT, b TEXT); CREATE FUNCTION f() RETURNS TRIGGER AS $$ BEGIN RETURN NEW; END $$ LANGUAGE plpgsql; CREATE TABLE trg (a INT); CREATE TRIGGER x BEFORE UPDATE ON trg FOR EACH ROW EXECUTE FUNCTION f();",
     "mysql": "CREATE TABLE t (a INT NOT NULL, b TEXT, c INT NOT NULL DEFAULT 1); CREATE TABLE u (a INT, b TEXT);",
     "sqlite": "CREATE TABLE t (a INT NOT NULL, b TEXT, c INT NOT NULL DEFAULT 1); CREATE TABLE u (a INT, b TEXT);",
+    "clickhouse": "CREATE TABLE t (a INT NOT NULL, b TEXT);",
 }
 STATEMENTS = [
     ("postgres", "UPDATE t SET (a, b) = (1, 'x') RETURNING a, b", "a: int, b: str | None", []),
@@ -645,6 +702,7 @@ STATEMENTS = [
     ("postgres", "DELETE FROM t USING u WHERE t.a = u.a RETURNING t.a", "a: int", []),
     ("mysql", "INSERT INTO t SET (a, b) = (1, 'x')", None, []),
     ("mysql", "UPDATE (SELECT 1 AS a) AS x SET a = 1", None, []),
+    ("clickhouse", "INSERT INTO TABLE FUNCTION remote('x', t) (a) SELECT a FROM t", None, []),
 ]
 
 
@@ -679,11 +737,32 @@ PARAMS = [
     ("SELECT 1 FROM f WHERE ANY(arr) = $1", [(1, None, None)]),
     ("SELECT 1 FROM f WHERE $1 = ANY(i)", [(1, None, None)]),
     ("SELECT 1 FROM f WHERE $1 IN (SELECT NULL)", [(1, None, None)]),
+    ("SELECT 1 FROM f x, g x WHERE x.i = $1", [(1, "int", None)]),
+    ("SELECT * FROM (TABLE g) s WHERE s.a = $1", [(1, "int", None)]),
+    ("SELECT 1 FROM f WHERE $1 = ANY(nope)", [(1, None, None)]),
+    ("SELECT 1 FROM f WHERE $1 IN (SELECT x.i FROM f x, g x)", [(1, "int", None)]),
 ]
 
 
 @pytest.mark.parametrize(("sql", "params"), PARAMS)
 def test_params(sql: str, params: list[tuple[int, str | None, bool | None]]) -> None:
     found = _core.analyze_params(sql, dialect="postgres", schema_sql=PARAMS_SCHEMA)
+    assert found is not None
+    assert [(index, python, nullable) for index, _, python, _, nullable, *_ in found] == params
+
+
+PARAMS_ELSEWHERE = [
+    ("mysql", "SELECT 1 FROM f WHERE i = ANY(?)", [(1, None, None)]),
+    ("mysql", "SELECT 1 FROM f WHERE ANY(?) = i", [(1, None, None)]),
+    ("mysql", "SELECT 1 FROM f WHERE i = ANY(SELECT ?)", [(1, None, None)]),
+    ("clickhouse", "INSERT INTO TABLE FUNCTION remote('x', f) (i) VALUES (1)", []),
+]
+
+
+@pytest.mark.parametrize(("dialect", "sql", "params"), PARAMS_ELSEWHERE)
+def test_params_elsewhere(
+    dialect: str, sql: str, params: list[tuple[int, str | None, bool | None]]
+) -> None:
+    found = _core.analyze_params(sql, dialect=dialect, schema_sql=PARAMS_SCHEMA)
     assert found is not None
     assert [(index, python, nullable) for index, _, python, _, nullable, *_ in found] == params
