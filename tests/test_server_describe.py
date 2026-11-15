@@ -8,11 +8,12 @@ schema is run on the database, and its result columns are compared with
   ``cursor.description``; the declared type of each column of a ``SELECT``, from a
   temporary view.
 - MySQL runs when ``SQLTY_MYSQL_DSN`` points to a disposable server (see
-  ``tests/test_driver_values.py``). The database ``sqlty_describe`` is dropped and
-  created again for each schema. Names come from ``cursor.description``; types and
-  nullability, from ``CREATE TEMPORARY TABLE ... AS`` the query. MySQL's nullability is
-  only reported, by ``scripts/compat/mysql_nullability.py``: the server says nullable for
-  many expressions sqlty proves non-null.
+  ``tests/test_driver_values.py``). The database ``sqlty_describe`` (one per xdist
+  worker) is dropped and created again for each schema. Names come from
+  ``cursor.description``; types and nullability, from ``CREATE TEMPORARY TABLE ... AS``
+  the query. MySQL's nullability is only reported, by
+  ``scripts/compat/mysql_nullability.py``: the server says nullable for many expressions
+  sqlty proves non-null.
 
 What is compared:
 
@@ -184,6 +185,9 @@ def test_matches_sqlite(case: Case) -> None:
     check(case, "sqlite", compare(ours, describe_sqlite(case)))
 
 
+DATABASE = "_".join(filter(None, ["sqlty_describe", os.environ.get("PYTEST_XDIST_WORKER")]))
+
+
 class MySQL:
     """A connection that loads each distinct schema once, into a fresh database."""
 
@@ -196,9 +200,9 @@ class MySQL:
         if schema_sql != self.loaded:
             self.loaded, self.rejected = schema_sql, None
             with self.conn.cursor() as cursor:
-                cursor.execute("DROP DATABASE IF EXISTS sqlty_describe")
-                cursor.execute("CREATE DATABASE sqlty_describe")
-                cursor.execute("USE sqlty_describe")
+                cursor.execute(f"DROP DATABASE IF EXISTS {DATABASE}")
+                cursor.execute(f"CREATE DATABASE {DATABASE}")
+                cursor.execute(f"USE {DATABASE}")
                 for statement in re.split(r";[ \t]*\n", schema_sql):
                     if statement.strip():
                         try:
