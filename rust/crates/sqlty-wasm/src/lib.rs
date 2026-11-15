@@ -15,6 +15,8 @@
 //! assert_eq!(answer["queries"][0]["row_type"], "tuple[int]");
 //! ```
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 

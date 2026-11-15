@@ -15,6 +15,8 @@
 //! assert_eq!(source.matches("--sql").count(), 3);
 //! ```
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 use std::fmt::Write;
 
 /// PostgreSQL schema of `tables` tables, each with a view, a scalar function and a

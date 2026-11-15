@@ -52,6 +52,8 @@ unnested_or_patterns = "warn"
 
 [workspace.lints.rust]
 missing_docs = "warn"
+# Set by cargo-llvm-cov on nightly, for `#[coverage(off)]`.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage_nightly)"] }
 unused_lifetimes = "warn"
 unused_qualifications = "warn"
 

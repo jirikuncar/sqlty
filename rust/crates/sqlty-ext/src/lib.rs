@@ -21,6 +21,8 @@
 //! the pieces that need no interpreter (the schema cache, `schema_for`, nullability
 //! mapping). The `#[pyfunction]`s are exercised from Python by `tests/`.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 mod config;
 mod outline;
 mod server;

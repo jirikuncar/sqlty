@@ -141,20 +141,21 @@ impl<'a> Path<'a> {
 #[derive(Clone, Copy)]
 enum Node<'a> {
     Stmt(&'a Stmt),
-    Elif(&'a StmtIf, usize),
+    /// An `elif` clause of an `if`, by index, with its test.
+    Elif(&'a StmtIf, usize, &'a Expr),
 }
 
 #[derive(Clone, Copy)]
 enum Body<'a> {
     Stmts(&'a [Stmt]),
-    Elif(&'a StmtIf, usize),
+    Elif(&'a StmtIf, usize, &'a Expr),
 }
 
 impl<'a> Body<'a> {
     fn nodes(self) -> Vec<Node<'a>> {
         match self {
             Body::Stmts(stmts) => stmts.iter().map(Node::Stmt).collect(),
-            Body::Elif(node, index) => vec![Node::Elif(node, index)],
+            Body::Elif(node, index, test) => vec![Node::Elif(node, index, test)],
         }
     }
 }
@@ -163,8 +164,10 @@ impl<'a> Body<'a> {
 fn tail(node: &StmtIf, index: usize) -> Body<'_> {
     match node.elif_else_clauses.get(index) {
         None => Body::Stmts(&[]),
-        Some(clause) if clause.test.is_some() => Body::Elif(node, index),
-        Some(clause) => Body::Stmts(&clause.body),
+        Some(clause) => match &clause.test {
+            Some(test) => Body::Elif(node, index, test),
+            None => Body::Stmts(&clause.body),
+        },
     }
 }
 
@@ -172,7 +175,7 @@ impl<'a> Node<'a> {
     fn range(self) -> TextRange {
         match self {
             Node::Stmt(stmt) => stmt.range(),
-            Node::Elif(node, index) => {
+            Node::Elif(node, index, _) => {
                 TextRange::new(node.elif_else_clauses[index].start(), node.end())
             }
         }
@@ -185,24 +188,18 @@ impl<'a> Node<'a> {
     fn id(self) -> (usize, usize) {
         match self {
             Node::Stmt(stmt) => (std::ptr::from_ref(stmt) as usize, usize::MAX),
-            Node::Elif(node, index) => (std::ptr::from_ref(node) as usize, index),
+            Node::Elif(node, index, _) => (std::ptr::from_ref(node) as usize, index),
         }
     }
 
-    /// `(test, body, orelse)` of an `if`.
-    fn branches(self) -> Option<(&'a Expr, Body<'a>, Body<'a>)> {
+    /// `(test, body, orelse)` of an `if`, or the statement that is none.
+    fn branches(self) -> Result<(&'a Expr, Body<'a>, Body<'a>), &'a Stmt> {
         match self {
-            Node::Stmt(Stmt::If(node)) => {
-                Some((&node.test, Body::Stmts(&node.body), tail(node, 0)))
-            }
-            Node::Stmt(_) => None,
-            Node::Elif(node, index) => {
+            Node::Stmt(Stmt::If(node)) => Ok((&node.test, Body::Stmts(&node.body), tail(node, 0))),
+            Node::Stmt(stmt) => Err(stmt),
+            Node::Elif(node, index, test) => {
                 let clause = &node.elif_else_clauses[index];
-                Some((
-                    clause.test.as_ref()?,
-                    Body::Stmts(&clause.body),
-                    tail(node, index + 1),
-                ))
+                Ok((test, Body::Stmts(&clause.body), tail(node, index + 1)))
             }
         }
     }
@@ -239,12 +236,13 @@ fn assignments(stmt: &Stmt) -> Vec<(&ExprName, &Expr)> {
                 found.push((name, value));
             }
         }
-        Stmt::AugAssign(node) => {
-            if let (Expr::Name(name), Operator::Add) = (node.target.as_ref(), node.op) {
-                found.push((name, &node.value));
-            }
-        }
-        _ => {}
+        // An `ast.AugAssign`: `_Own` collects no other statement.
+        other => found.extend(
+            other
+                .as_aug_assign_stmt()
+                .filter(|node| node.op == Operator::Add)
+                .and_then(|node| Some((node.target.as_name_expr()?, &*node.value))),
+        ),
     }
     found
 }
@@ -293,11 +291,9 @@ impl<'a> Visitor<'a> for Unstable<'a> {
     fn visit_expr(&mut self, expr: &'a Expr) {
         match expr {
             Expr::Lambda(_) => return,
-            Expr::Named(node) => {
-                if let Expr::Name(name) = node.target.as_ref() {
-                    self.bound.push(name.id.as_str());
-                }
-            }
+            Expr::Named(node) => self
+                .bound
+                .extend(node.target.as_name_expr().map(|name| name.id.as_str())),
             Expr::Await(_) | Expr::Yield(_) | Expr::YieldFrom(_) => self.suspends = true,
             _ => {}
         }
@@ -311,7 +307,7 @@ impl<'a> Own<'a> {
         for node in nodes {
             match *node {
                 Node::Stmt(stmt) => own.visit_stmt(stmt),
-                Node::Elif(node, index) => {
+                Node::Elif(node, index, _) => {
                     for clause in &node.elif_else_clauses[index..] {
                         if let Some(test) = &clause.test {
                             own.visit_expr(test);
@@ -822,7 +818,7 @@ impl<'a, 'r> Walk<'a, 'r> {
         let all = || paths.to_vec();
         let mut branch = false;
         let blocks: Vec<(Body<'a>, Vec<Path<'a>>)> =
-            if let Some((test, body, orelse)) = node.branches() {
+            if let Ok((test, body, orelse)) = node.branches() {
                 branch = true;
                 vec![
                     (body, self.assume(paths, test, true, frame.source)),
@@ -888,18 +884,17 @@ impl<'a, 'r> Walk<'a, 'r> {
             let bound = walk.bound_names(node);
             paths.iter().map(|path| path.forget(&bound)).collect()
         };
-        if let Some((test, body, orelse)) = node.branches() {
-            if !self.touched(frame, node) {
-                return Ok(forget(self, paths));
+        let stmt = match node.branches() {
+            Ok(_) if !self.touched(frame, node) => return Ok(forget(self, paths)),
+            Ok((test, body, orelse)) => {
+                let entry = self.assume(&paths, test, true, frame.source);
+                let mut taken =
+                    self.block(frame, body, entry, None, returns.as_deref_mut(), true)?;
+                let entry = self.assume(&paths, test, false, frame.source);
+                taken.extend(self.block(frame, orelse, entry, None, returns, true)?);
+                return Ok(dedupe(taken));
             }
-            let entry = self.assume(&paths, test, true, frame.source);
-            let mut taken = self.block(frame, body, entry, None, returns.as_deref_mut(), true)?;
-            let entry = self.assume(&paths, test, false, frame.source);
-            taken.extend(self.block(frame, orelse, entry, None, returns, true)?);
-            return Ok(dedupe(taken));
-        }
-        let Node::Stmt(stmt) = node else {
-            return Ok(forget(self, paths));
+            Err(stmt) => stmt,
         };
         match stmt {
             Stmt::Assign(_) | Stmt::AnnAssign(_) | Stmt::AugAssign(_) => {
@@ -971,9 +966,8 @@ impl<'a, 'r> Walk<'a, 'r> {
                         entry.push(path.clone());
                         rest.push(path);
                     }
-                    Err(halt) => return Err(halt),
-                    Ok(found) => {
-                        for (value, _, after) in found {
+                    found => {
+                        for (value, _, after) in found? {
                             if value.as_str().is_some_and(|text| strings.contains(text)) {
                                 entry.push(after);
                             } else {
@@ -1077,17 +1071,10 @@ impl<'a, 'r> Walk<'a, 'r> {
         path: &Path<'a>,
         frame: &Frame<'a>,
     ) -> Walked<'a, Vec<Taken<'a>>> {
-        self.depth += 1;
-        let found = if self.depth > DEPTH {
-            Err(Halt::Dynamic)
-        } else {
-            match node {
-                Operand::Name(name) => self.name(name, path, frame),
-                Operand::Expr(expr) => self.evaluate(expr, path, frame),
-            }
-        };
-        self.depth -= 1;
-        found
+        self.nested(|walk| match node {
+            Operand::Name(name) => walk.name(name, path, frame),
+            Operand::Expr(expr) => walk.evaluate(expr, path, frame),
+        })
     }
 
     /// The values of `left + right`, an `ast.BinOp` of the two.
@@ -1098,11 +1085,16 @@ impl<'a, 'r> Walk<'a, 'r> {
         path: &Path<'a>,
         frame: &Frame<'a>,
     ) -> Walked<'a, Vec<Taken<'a>>> {
+        self.nested(|walk| walk.sum(left, right, path, frame))
+    }
+
+    /// `find` one level deeper; dynamic past `DEPTH`.
+    fn nested<T>(&mut self, find: impl FnOnce(&mut Self) -> Walked<'a, T>) -> Walked<'a, T> {
         self.depth += 1;
         let found = if self.depth > DEPTH {
             Err(Halt::Dynamic)
         } else {
-            self.sum(left, right, path, frame)
+            find(self)
         };
         self.depth -= 1;
         found
@@ -1198,9 +1190,7 @@ impl<'a, 'r> Walk<'a, 'r> {
                 let mut built: Vec<(String, Value<'a>)> = Vec::new();
                 for item in &node.items {
                     let value = self.single(&item.value, path, frame)?;
-                    let Some(key) = &item.key else {
-                        return Err(Halt::Dynamic);
-                    };
+                    let key = item.key.as_ref().ok_or(Halt::Dynamic)?;
                     let key = self.single(key, path, frame)?;
                     let key = key.as_str().ok_or(Halt::Unread)?.to_string();
                     match built.iter_mut().find(|(known, _)| *known == key) {
@@ -1507,9 +1497,8 @@ impl<'a, 'r> Walk<'a, 'r> {
                         };
                         forked.push((entry, lines, caller));
                     }
-                    Err(halt) => return Err(halt),
-                    Ok(found) => {
-                        for (value, v_lines, after) in found {
+                    found => {
+                        for (value, v_lines, after) in found? {
                             let bound = Bound {
                                 value: Some(value),
                                 lines: Lines::new(),
@@ -1635,7 +1624,7 @@ pub fn query_variants<'a>(
             return Some(Found::Unchecked {
                 composed: false,
                 reason: None,
-            })
+            });
         }
     };
     let unchecked = |walk: &Walk<'_, '_>, reason: Option<String>| {

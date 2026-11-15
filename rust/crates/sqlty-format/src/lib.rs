@@ -19,6 +19,8 @@
 //! );
 //! ```
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::Range;

@@ -8,6 +8,8 @@
 //! from what the buffer's last check left (see [`CompletionContext`]), never behind a check;
 //! so are hover and semantic tokens.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 use std::collections::HashMap;
 use std::error::Error;
 use std::path::{Path, PathBuf};
