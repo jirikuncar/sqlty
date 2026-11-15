@@ -59,6 +59,19 @@ const VARIANT_LINE: usize = 1 << 30;
 /// The types a `P` of `SQL[R, P]` takes for each parameter key, as arguments are spelled.
 type Annotations = Vec<(Key, Vec<Option<String>>)>;
 
+/// A Python `dict` built from `pairs`: each key once, where it first comes, holding its
+/// last value.
+fn dict<K: PartialEq, V>(pairs: impl IntoIterator<Item = (K, V)>) -> Vec<(K, V)> {
+    let mut found: Vec<(K, V)> = Vec::new();
+    for (key, value) in pairs {
+        match found.iter_mut().find(|(known, _)| *known == key) {
+            Some(known) => known.1 = value,
+            None => found.push((key, value)),
+        }
+    }
+    found
+}
+
 /// `_fits`: whether a type checker takes a value of type `actual` for `expected`.
 fn fits(actual: Option<&str>, expected: Option<&str>) -> bool {
     let (Some(actual), Some(expected)) = (actual, expected) else {
@@ -601,14 +614,7 @@ impl<'a> Module<'a, '_> {
             Some(name) if named && !name.is_empty() => Key::Name(name.clone()),
             _ => Key::Index(param.index),
         };
-        let mut by_key: Vec<(Key, &analyzer::Param)> = Vec::new();
-        for param in &params {
-            let key = key_of(param);
-            match by_key.iter_mut().find(|(known, _)| *known == key) {
-                Some(known) => known.1 = param,
-                None => by_key.push((key, param)),
-            }
-        }
+        let by_key = dict(params.iter().map(|param| (key_of(param), param)));
         let find = |key: &Key| {
             by_key
                 .iter()
@@ -827,23 +833,12 @@ impl<'a> Module<'a, '_> {
                     "{name} is a TypedDict but the query takes positional parameters"
                 )];
             }
-            // Of the keys and the parameters, the last of a name stands, where its first is.
-            let mut keys: Vec<&str> = Vec::new();
-            for (key, _) in &info.fields {
-                if !keys.contains(&key.as_str()) {
-                    keys.push(key);
-                }
-            }
-            let mut by_name: Vec<(&str, &analyzer::Param)> = Vec::new();
-            for param in params {
-                let Some(name) = param.name.as_deref() else {
-                    continue;
-                };
-                match by_name.iter_mut().find(|(known, _)| *known == name) {
-                    Some(known) => known.1 = param,
-                    None => by_name.push((name, param)),
-                }
-            }
+            let keys: Vec<&str> = info.fields.iter().map(|(key, _)| key.as_str()).collect();
+            let by_name = dict(
+                params
+                    .iter()
+                    .filter_map(|param| Some((param.name.as_deref()?, param))),
+            );
             let mut found: Vec<String> = by_name
                 .iter()
                 .filter(|(key, _)| !keys.contains(key))
@@ -865,10 +860,10 @@ impl<'a> Module<'a, '_> {
             if !found.is_empty() {
                 return found;
             }
-            for key in keys {
-                let Some((_, param)) = by_name.iter().find(|(known, _)| *known == key) else {
-                    continue;
-                };
+            let in_key_order = keys
+                .iter()
+                .filter_map(|key| by_name.iter().find(|(known, _)| known == key));
+            for &(key, param) in in_key_order {
                 pairs.push((
                     format!("{name}.{key}"),
                     info.annotations.get(key).map(|annotation| &annotation.expr),
@@ -997,23 +992,24 @@ impl<'a> Module<'a, '_> {
                 .map(|member| annotation_type(member, &source.imports))
                 .collect()
         };
-        if let Expr::Subscript(sub) = declared {
-            if matches!(
+        let tuple = declared.as_subscript_expr().filter(|sub| {
+            matches!(
                 dotted(&sub.value).as_deref(),
                 Some("tuple" | "typing.Tuple")
-            ) {
-                let items = slice_items(&sub.slice);
-                if items.iter().any(Expr::is_ellipsis_literal_expr) {
-                    return None;
-                }
-                return Some(
-                    items
-                        .iter()
-                        .enumerate()
-                        .map(|(i, item)| (Key::Index(i + 1), types(item)))
-                        .collect(),
-                );
+            )
+        });
+        if let Some(sub) = tuple {
+            let items = slice_items(&sub.slice);
+            if items.iter().any(Expr::is_ellipsis_literal_expr) {
+                return None;
             }
+            return Some(
+                items
+                    .iter()
+                    .enumerate()
+                    .map(|(i, item)| (Key::Index(i + 1), types(item)))
+                    .collect(),
+            );
         }
         let name = unparse(declared, &source.text);
         let own = if std::ptr::eq(source, self.source) {
@@ -1404,4 +1400,28 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
     out.diagnostics
         .sort_by_key(|reported| reported.diagnostic.line);
     out
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_dict_keeps_the_first_place_and_the_last_value_of_a_key() {
+        assert_eq!(dict([("a", 1), ("b", 2), ("a", 3)]), [("a", 3), ("b", 2)]);
+    }
+
+    #[test]
+    fn an_unknown_type_fits_and_a_bare_list_fits_only_a_list() {
+        assert!(fits(None, Some("int")));
+        assert!(fits(Some("list"), Some("list[int]")));
+        assert!(!fits(Some("list"), Some("int")));
+    }
+
+    #[test]
+    fn a_key_is_spelled_as_python_writes_it() {
+        assert_eq!(key_text(&Key::Index(1)), "1");
+        assert_eq!(key_text(&Key::Name("a".into())), "'a'");
+    }
 }

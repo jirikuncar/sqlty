@@ -216,6 +216,33 @@ u = SQL[tuple[str], typing.Any]("--sql\nSELECT name FROM users WHERE id = %s")
 # error:
 ```
 
+### A key of a base in another module
+
+Its type is not known here, so only the keys declared here are compared.
+
+`pkg/base.py`:
+
+```python
+from typing import TypedDict
+
+
+class Base(TypedDict):
+    id: str
+```
+
+```python
+from sqlty import SQL
+from pkg.base import Base
+
+
+class ByIdAndName(Base):
+    name: int
+
+
+# error: [params-type-mismatch] "ByIdAndName.name is int but query parameter 'name' expects str"
+q = SQL[tuple[str], ByIdAndName]("--sql\nSELECT name FROM users WHERE id = %(id)s AND name = %(name)s")
+```
+
 ## Passed to a helper
 
 A `SQL[R, P]` stored in a name and passed to a [registered helper](../../../docs/guide/helpers.md)

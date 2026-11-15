@@ -280,6 +280,12 @@ CALLS = {
         1,
     ),
     "number twice": ("    await pg.fetch('SELECT id FROM t WHERE id = $1 OR id = $1', b'x')\n", 1),
+    "empty query": ("    cur.execute('')\n    run('', int)\n", 0),
+    "not a format field": ("    cur.execute('SELECT {x.y}')\n", 0),
+    "qualified any": (
+        "    sqlty.SQL[Any]('--sql\\nSELECT 1')\n    x.SQL[Any]('--sql\\nSELECT 1')\n",
+        0,
+    ),
 }
 
 
@@ -297,13 +303,26 @@ DECLARED = {
     "    SQL[Row, P]('--sql\\nSELECT id, name FROM t WHERE id = %(a)s AND name = %(b)s')\n",
     "shapes": "    NOSQL[a, b]\n    SQL[a, b, c]('--sql\\nSELECT 1')\n"
     "    x.SQL[Row, P]('--sql\\nSELECT 1')\n    SQL[Row, P](QUERY)\n",
+    "unparsed": "    SQL[Row, tuple[int]]('--sql\\nSELEC nope %s')\n",
+    "key twice": "    SQL[Row, Twice]('--sql\\nSELECT id FROM t WHERE id = %(a)s OR id = %(a)s')\n",
+    "inherited": "    SQL[Row, Child]('--sql\\nSELECT id FROM t WHERE id = %(a)s AND id = %(b)s')\n",
 }
+DICTS = "class Twice(TypedDict):\n    a: int\n    a: str\nclass Child(Twice):\n    b: int\n"
 
 
 @pytest.mark.parametrize("call", DECLARED.values(), ids=DECLARED.keys())
 def test_declared_params(call: str) -> None:
-    head = HEAD.replace("DRIVER", "psycopg") + "from typing import Optional, Union\n"
+    head = HEAD.replace("DRIVER", "psycopg") + "from typing import Optional, Union\n" + DICTS
     assert compare(head + HELPERS[0] + SETUP.replace("DRIVER", "psycopg") + call) >= 1
+
+
+def test_sqruff_of_a_module_that_does_not_parse() -> None:
+    source = (
+        "from sqlty import SQL\nx = (\nq = SQL[tuple[str, int]]('''--sql\n"
+        "SELECT name, COUNT(*) AS n FROM users\nGROUP BY 1\nORDER BY name''')\n"
+    )
+    assert compare(source, rules={"sqruff": "warn"}) == 2
+    assert compare("x = (\n", rules={"sqruff": "warn"}) == 0
 
 
 @FUZZ
