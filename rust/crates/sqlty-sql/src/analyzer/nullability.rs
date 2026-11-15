@@ -22,6 +22,7 @@ use super::hashing::ExprKey;
 use super::inference::{
     binary_rules, function_rules, typed_by_rule, FunctionNullability, RuleNullability,
 };
+use super::input::PSYCOPG;
 use super::literals::python_kind;
 use super::memo::{first_column, Reporting};
 use super::names::{split_access, table_key};
@@ -785,8 +786,11 @@ impl<'a> Analyzer<'a> {
             Expr::Identifier(_) | Expr::CompoundIdentifier(_) => {
                 self.column_nullability(expr, scope, facts)
             }
-            Expr::Value(value) => match value.value {
+            Expr::Value(value) => match &value.value {
                 Value::Null => Nullability::Nullable,
+                Value::Placeholder(text) if PSYCOPG.contains(&text.as_str()) => {
+                    Nullability::Nullable
+                }
                 Value::Placeholder(_) => Nullability::Unknown,
                 _ => Nullability::NonNull,
             },
