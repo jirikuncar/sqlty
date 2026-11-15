@@ -139,7 +139,7 @@ pub fn run(request: &str) -> String {
     let offset = byte_offset(source, request.offset);
     let queries = Queries::new(source, &options.style, &[]);
     let params = |source: String| match param_types {
-        true => add_param_types(&source, &options),
+        true => add_param_types(&source, &options, false),
         false => source,
     };
     let answer = match request.op {
