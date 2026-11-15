@@ -510,3 +510,30 @@ def test_statements(dialect: str, sql: str, columns: str | None, rules: list[str
     assert (found and ", ".join(f"{name}: {python}" for name, python, _ in found)) == columns
     diagnostics = _core.query_diagnostics(sql, dialect=dialect, schema_sql=schema)
     assert [rule for rule, *_ in diagnostics] == rules
+
+
+PARAMS_SCHEMA = (
+    "CREATE TABLE f (i INT, tx TEXT, arr INT[], d DATE); CREATE TABLE g (a INT NOT NULL);"
+)
+PARAMS = [
+    ("SELECT 1 FROM f WHERE $1 LIKE ANY(ARRAY['a'])", [(1, "str", None)]),
+    ("SELECT 1 FROM f WHERE tx ~ ANY($1)", [(1, "list[str]", None)]),
+    ("SELECT 1 FROM f WHERE ANY($1) = i", [(1, "list[int]", None)]),
+    ("SELECT 1 FROM f WHERE arr @> $1", [(1, "list[int]", None)]),
+    ("SELECT 1 FROM f WHERE $1 && arr", [(1, "list[int]", None)]),
+    ("SELECT $1 || arr FROM f", [(1, "list[int]", None)]),
+    ("SELECT * FROM (SELECT 1 FROM nope) s WHERE $1 = 1", [(1, "int", None)]),
+    (
+        "INSERT INTO g VALUES ($1), ($2, $3)",
+        [(1, "int", False), (2, "int", False), (3, None, None)],
+    ),
+    ("SELECT 1 FROM f WHERE i = ALL(ARRAY[$1])", [(1, None, None)]),
+    ("SELECT 1 FROM f WHERE tx LIKE ALL($1)", [(1, None, None)]),
+]
+
+
+@pytest.mark.parametrize(("sql", "params"), PARAMS)
+def test_params(sql: str, params: list[tuple[int, str | None, bool | None]]) -> None:
+    found = _core.analyze_params(sql, dialect="postgres", schema_sql=PARAMS_SCHEMA)
+    assert found is not None
+    assert [(index, python, nullable) for index, _, python, _, nullable, *_ in found] == params
