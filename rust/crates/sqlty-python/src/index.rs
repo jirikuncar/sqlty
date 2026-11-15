@@ -92,6 +92,9 @@ fn target(source: &Source, dotted: &str) -> Option<(String, String)> {
     }
 }
 
+/// A type, or `None` when unknown, and the re-exports to its definition.
+type Typed = (Option<Ty>, usize);
+
 /// The row types of a module, by name.
 pub type Defs = Arc<Dict<Arc<TypeInfo>>>;
 /// The module files read for `register`, by path and module name.
@@ -112,7 +115,7 @@ pub struct Tree {
     sources: HashMap<String, Arc<Source>>,
     exports: Mutex<HashMap<String, Arc<Functions>>>,
     row_types: Mutex<HashMap<String, Defs>>,
-    types: Mutex<HashMap<(String, String), Option<Ty>>>,
+    types: Mutex<HashMap<(String, String), Typed>>,
     names_of: Mutex<HashMap<String, Arc<ModuleTypes>>>,
     /// Held by the thread that reads types, as `HelperIndex._lock` is: another thread
     /// never sees a module half read.
@@ -554,11 +557,13 @@ impl Tree {
         exports
     }
 
-    fn type_at(&self, module: &str, name: &str, depth: usize) -> Option<Ty> {
-        if depth > 8 {
-            return None;
-        }
-        let source = self.sources.get(module)?;
+    /// The type `name` of `module` and the re-exports to it, or `None` past `hops`. A result
+    /// past `hops` is not cached, and a cached one is `None` past them, so it does not depend
+    /// on which module asked first.
+    fn typed(&self, module: &str, name: &str, hops: usize) -> Option<Typed> {
+        let Some(source) = self.sources.get(module) else {
+            return Some((None, 0));
+        };
         let key = (module.to_string(), name.to_string());
         let known = || lock(&self.types).get(&key).cloned();
         let mut reading = None;
@@ -566,10 +571,12 @@ impl Tree {
             reading = Some(self.read());
             known()
         }) {
-            return found;
+            return (found.1 <= hops).then_some(found);
         }
         // An import cycle sees the name as unknown while it is resolved.
-        let busy = Busy::mark(module, Some(name))?;
+        let Some(busy) = Busy::mark(module, Some(name)) else {
+            return Some((None, 0));
+        };
         let names = {
             let known = lock(&self.names_of).get(module).cloned();
             known.unwrap_or_else(|| {
@@ -584,18 +591,25 @@ impl Tree {
             })
         };
         let found = if names.is_local(name) {
-            crate::parse::expression(name).and_then(|parsed| {
+            let ty = crate::parse::expression(name).and_then(|parsed| {
                 source
                     .resolver(Known::Imported)
                     .resolve(&parsed.syntax().body, name, &*names)
-            })
+            });
+            Some((ty, 0))
         } else {
-            self.reexports(module, source)
-                .get(name)
-                .and_then(|(target, original)| self.type_at(target, original, depth + 1))
+            match self.reexports(module, source).get(name) {
+                Some((target, original)) => {
+                    let (ty, behind) = self.typed(target, original, hops.checked_sub(1)?)?;
+                    Some((ty, behind + 1))
+                }
+                None => Some((None, 0)),
+            }
         };
         drop(busy);
-        lock(&self.types).insert(key, found.clone());
+        if let Some(found) = &found {
+            lock(&self.types).insert(key, found.clone());
+        }
         found
     }
 
@@ -663,7 +677,7 @@ impl Tree {
 impl Index for Tree {
     fn type_of(&self, source: &Source, dotted: &str) -> Option<Ty> {
         let (module, name) = target(source, dotted)?;
-        self.type_at(&module, &name, 0)
+        self.typed(&module, &name, 8)?.0
     }
 
     fn row_type(&self, source: &Source, dotted: &str) -> Option<RowType> {

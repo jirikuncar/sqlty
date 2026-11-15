@@ -340,7 +340,7 @@ class HelperIndex:
         self._names: frozenset[str] | None = None
         self._exports: dict[str, dict[str, tuple[str, str]]] = {}
         self._row_types: dict[str, dict[str, TypeInfo]] = {}
-        self._types: dict[tuple[str, str], Any] = {}
+        self._types: dict[tuple[str, str], tuple[Any, int]] = {}
         self._names_of: dict[str, ModuleTypes] = {}
         self._read: dict[tuple[Path, str], ParsedSource | None] = {}
         # Held while a cycle sentinel is cached, so only the thread that set it can read it.
@@ -575,27 +575,43 @@ class HelperIndex:
         target = _target(parsed, dotted)
         return None if target is None else self._type(*target)
 
-    def _type(self, module: str, name: str, _depth: int = 0) -> Any:
-        if _depth > 8 or (parsed := self.sources.get(module)) is None:
+    def _type(self, module: str, name: str) -> Any:
+        found = self._typed(module, name, 8)
+        return None if found is None else found[0]
+
+    def _typed(self, module: str, name: str, hops: int) -> tuple[Any, int] | None:
+        """The type ``name`` of ``module`` and the re-exports to it, or ``None`` past ``hops``.
+
+        A result past ``hops`` is not cached, and a cached one is ``None`` past them, so it
+        does not depend on which module asked first.
+        """
+        if hops < 0:
             return None
+        if (parsed := self.sources.get(module)) is None:
+            return None, 0
         from sqlty._type_extractor.ast_fields import _ast_type
         from sqlty._type_extractor.symbols import ModuleTypes
 
         with self._lock:
-            if (module, name) in self._types:
-                return self._types[module, name]
+            if (known := self._types.get((module, name))) is not None:
+                return known if known[1] <= hops else None
             # An import cycle sees the name as unknown while it is resolved.
-            self._types[module, name] = None
+            self._types[module, name] = None, 0
             if (names := self._names_of.get(module)) is None:
                 names = self._names_of[module] = ModuleTypes(parsed, self, module)
+            found: tuple[Any, int] | None = None, 0
             if name in names.local:
-                found = _ast_type(
-                    ast.Name(name), parsed.typing_aliases, names, parsed.imported_names
+                found = (
+                    _ast_type(ast.Name(name), parsed.typing_aliases, names, parsed.imported_names),
+                    0,
                 )
+            elif (target := self._reexports(module, parsed).get(name)) is not None:
+                found = self._typed(*target, hops - 1)
+                found = None if found is None else (found[0], found[1] + 1)
+            if found is None:
+                del self._types[module, name]
             else:
-                exports = self._reexports(module, parsed)
-                found = self._type(*exports[name], _depth + 1) if name in exports else None
-            self._types[module, name] = found
+                self._types[module, name] = found
             return found
 
     def _row_type(

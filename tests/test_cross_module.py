@@ -215,3 +215,16 @@ def test_reexport_chains_end_after_eight_hops(project, capsys):
     )
     assert run(project, capsys, {"use.py": use % 8}) == [("use.py", "column-type-mismatch")] * 3
     assert run(project, capsys, {"use.py": use % 9}) == [("use.py", "unchecked-query")]
+
+
+def test_reexport_hops_count_from_the_importing_module():
+    index = HelperIndex()
+    index.add("r0", IDS)
+    for hop in range(1, 13):
+        index.add(f"r{hop}", f"from r{hop - 1} import UserId\n")
+
+    def rules(hop: int) -> list[str]:
+        source = row(f"from r{hop} import UserId", id="UserId", id_col="name")
+        return [d["rule"] for d in check_source(source, schema_sql=SCHEMA, helpers=index)]
+
+    assert [rules(12), rules(4), rules(12)] == [[], ["column-type-mismatch"], []]
