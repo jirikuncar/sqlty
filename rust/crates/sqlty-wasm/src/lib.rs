@@ -41,11 +41,18 @@ use sqlty_sql::highlight::Highlight;
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum Op {
+    Config,
+    #[serde(untagged)]
+    Source(SourceOp),
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum SourceOp {
     Analyze,
     Complete,
     Hover,
     Format,
-    Config,
 }
 
 #[derive(Deserialize)]
@@ -98,14 +105,17 @@ pub fn run(request: &str) -> String {
         Ok(request) => request,
         Err(found) => return error(found.to_string()),
     };
-    if let Op::Config = request.op {
-        let path = request.path.as_str();
-        let name = path.rsplit('/').next().unwrap_or(path);
-        return match config::load(request.source.as_bytes(), name, path, request.required) {
-            Ok(found) => json!(found.map(|found| json!({ "config": found.table }))).to_string(),
-            Err(found) => error(found.to_string()),
-        };
-    }
+    let op = match request.op {
+        Op::Source(op) => op,
+        Op::Config => {
+            let path = request.path.as_str();
+            let name = path.rsplit('/').next().unwrap_or(path);
+            return match config::load(request.source.as_bytes(), name, path, request.required) {
+                Ok(found) => json!(found.map(|found| json!({ "config": found.table }))).to_string(),
+                Err(found) => error(found.to_string()),
+            };
+        }
+    };
     let settings = match &request.settings {
         Some(table) => Ok(resolved(table)),
         None => settings(&request.config),
@@ -144,8 +154,8 @@ pub fn run(request: &str) -> String {
         true => add_param_types(&source, &options),
         false => source,
     };
-    let answer = match request.op {
-        Op::Analyze => {
+    let answer = match op {
+        SourceOp::Analyze => {
             let has_schema = schema
                 .as_ref()
                 .is_some_and(|schema| !schema.databases().is_some_and(|all| all.absent));
@@ -189,7 +199,8 @@ pub fn run(request: &str) -> String {
             "fixed": params(fix_source(source, &options, &rules, &Suppressed::new())),
             })
         }
-        Op::Complete => match locate::complete(&queries, offset, dialect, options.schema, 50) {
+        SourceOp::Complete => match locate::complete(&queries, offset, dialect, options.schema, 50)
+        {
             Some(found) => json!({
                 "start": utf16(found.replace.start),
                 "end": utf16(found.replace.end),
@@ -203,7 +214,7 @@ pub fn run(request: &str) -> String {
             }),
             None => Value::Null,
         },
-        Op::Hover => match locate::hover(&queries, offset, dialect, options.schema) {
+        SourceOp::Hover => match locate::hover(&queries, offset, dialect, options.schema) {
             Some(found) => json!({
                 "start": utf16(found.range.start),
                 "end": utf16(found.range.end),
@@ -211,10 +222,9 @@ pub fn run(request: &str) -> String {
             }),
             None => Value::Null,
         },
-        Op::Format => {
+        SourceOp::Format => {
             json!({ "formatted": sqlty_format::format_source(source, dialect, &options.style) })
         }
-        Op::Config => unreachable!("answered above"),
     };
     answer.to_string()
 }
@@ -287,10 +297,11 @@ fn settings(config: &str) -> Result<Settings, String> {
             READ.join(", ")
         ));
     }
-    match json!(table) {
-        Value::Object(table) => Ok(resolved(&table)),
-        _ => unreachable!("a TOML table is a JSON object"),
-    }
+    let table = table
+        .into_iter()
+        .map(|(key, value)| (key, json!(value)))
+        .collect();
+    Ok(resolved(&table))
 }
 
 /// The Python the page is read as.
