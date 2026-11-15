@@ -202,10 +202,14 @@ impl<'a> Analyzer<'a> {
                         recursive = true;
                     }
                 }
-                let mut columns = inner
-                    .query_columns(&cte.query)?
-                    .unwrap_or_else(|| vec![Column::unknown("*")]);
-                rename_columns(&mut columns, &cte.alias, self.dialect);
+                let columns_of = |inner: &Self| -> Inferred<Vec<Column>> {
+                    let mut columns = inner
+                        .query_columns(&cte.query)?
+                        .unwrap_or_else(|| vec![Column::unknown("*")]);
+                    rename_columns(&mut columns, &cte.alias, self.dialect);
+                    Ok(columns)
+                };
+                let mut columns = columns_of(&inner)?;
                 // A column of a recursive CTE is non-null only if it is in the anchor and in
                 // the recursive term reading the rows so far: repeat until nothing changes.
                 for round in 0..=columns.len() + 1 {
@@ -231,10 +235,7 @@ impl<'a> Analyzer<'a> {
                         break;
                     }
                     inner.virtuals.insert(name.clone(), columns);
-                    columns = inner
-                        .query_columns(&cte.query)?
-                        .unwrap_or_else(|| vec![Column::unknown("*")]);
-                    rename_columns(&mut columns, &cte.alias, self.dialect);
+                    columns = columns_of(&inner)?;
                 }
                 let key = (!recursive)
                     .then(|| inner.output_key(&cte.query, &columns))
@@ -821,11 +822,13 @@ fn is_wild(expr: &Expr) -> bool {
     }
 }
 
+/// What a branch no dialect here types is: `VALUES` or `TABLE`, the only others a set
+/// operation holds.
 fn set_expr_kind(body: &SetExpr) -> &'static str {
-    match body {
-        SetExpr::Values(_) => "a VALUES list",
-        SetExpr::Table(_) => "a TABLE query",
-        _ => "this query form",
+    if matches!(body, SetExpr::Values(_)) {
+        "a VALUES list"
+    } else {
+        "a TABLE query"
     }
 }
 
