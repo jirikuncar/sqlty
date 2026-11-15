@@ -651,7 +651,7 @@ EXPRESSIONS = [
         "postgres",
         "SELECT * FROM p, (SELECT 1) GROUP BY p.id",
         "id: int, name: str, ?column?: int",
-        [],
+        ["ungrouped-column"],
     ),
     ("postgres", 'SELECT 1 FROM ptt WHERE (ptt.q)."*" IS NULL', "?column?: int", []),
     (
@@ -677,7 +677,7 @@ EXPRESSIONS = [
         "postgres",
         "SELECT * FROM p, unnest(ARRAY[1]) GROUP BY p.id",
         "id: int, name: str, unnest: int | None",
-        [],
+        ["ungrouped-column"],
     ),
     ("postgres", "SELECT * FROM p, pg_nothing() GROUP BY p.id", "*: None", ["unsupported-syntax"]),
     ("postgres", "SELECT * FROM v3", "*: None", ["unsupported-syntax"]),

@@ -3,8 +3,8 @@
 //!
 //! A column is grouped when a grouping key names it (`GROUP BY 1` and a result alias
 //! name the select item), when a key is the expression it sits in, or when the keys
-//! include its table's whole primary key, PostgreSQL's functional dependency. Only
-//! columns that resolve to a schema table are judged.
+//! include its table's whole primary key, PostgreSQL's functional dependency. Columns
+//! of schema tables, CTEs and derived tables are judged.
 
 use std::ops::ControlFlow;
 
@@ -120,23 +120,34 @@ impl Analyzer<'_> {
             let Some(table) = table.named() else {
                 continue;
             };
-            let Some(columns) = self.schema.table(table) else {
-                continue;
+            // A CTE or derived table has no primary key to group by.
+            let names: Vec<&str> = match self.virtual_columns(table) {
+                Some(columns) => columns.iter().map(|column| column.name.as_str()).collect(),
+                None => {
+                    let columns = self.schema.table(table).unwrap_or_default();
+                    if Self::groups_primary_key(grouped, &reference, columns) {
+                        continue;
+                    }
+                    columns
+                        .iter()
+                        .filter(|column| !column.invisible)
+                        .map(|column| column.name.as_str())
+                        .collect()
+                }
             };
-            if self.virtual_columns(table).is_some()
-                || Self::groups_primary_key(grouped, &reference, columns)
-            {
-                continue;
-            }
-            for column in columns.iter().filter(|column| !column.invisible) {
-                if !grouped.covers(&reference, &column.name) {
-                    self.record_ungrouped(&reference, &column.name);
+            for column in names {
+                if !grouped.covers(&reference, column) {
+                    self.record_ungrouped(&reference, column);
                 }
             }
         }
     }
 
     fn record_ungrouped(&self, reference: &str, column: &str) {
+        // PostgreSQL calls an unaliased subquery `unnamed_subquery`.
+        let reference = Some(reference)
+            .filter(|reference| !reference.is_empty())
+            .unwrap_or("unnamed_subquery");
         self.diag.record(
             NameRule::UngroupedColumn,
             format!(
@@ -229,10 +240,11 @@ impl Visitor for Ungrouped<'_, '_> {
             .scope
             .iter()
             .any(|source| source.reference == reference);
-        let columns = self.analyzer.schema.table(&table);
-        let Some(columns) =
-            columns.filter(|_| read && self.analyzer.virtual_columns(&table).is_none())
-        else {
+        let columns = match self.analyzer.virtual_columns(&table) {
+            Some(_) => Some(&[][..]),
+            None => self.analyzer.schema.table(&table),
+        };
+        let Some(columns) = columns.filter(|_| read) else {
             return ControlFlow::Continue(());
         };
         if !self.grouped.covers(&reference, &column)
