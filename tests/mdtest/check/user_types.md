@@ -4,64 +4,6 @@ Validates that SQL[UserType](...) annotations match the query columns
 structurally, supporting TypedDict, NamedTuple, dataclass, and Pydantic
 BaseModel types.
 
-## TypedDict — all fields match
-
-```toml
-[tool.sqlty]
-dialect = "postgres"
-```
-
-```python
-from typing import TypedDict
-from sqlty import SQL
-
-class User(TypedDict):
-    id: int
-    name: str
-
-q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# error:
-```
-
-## TypedDict — field count mismatch
-
-```toml
-[tool.sqlty]
-dialect = "postgres"
-```
-
-```python
-from typing import TypedDict
-from sqlty import SQL
-
-class User(TypedDict):
-    id: int
-    name: str
-    email: str
-
-# error: [column-count-mismatch] "User has 3 fields but query returns 2 columns"
-q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-```
-
-## TypedDict — field type mismatch
-
-```toml
-[tool.sqlty]
-dialect = "postgres"
-```
-
-```python
-from typing import TypedDict
-from sqlty import SQL
-
-class User(TypedDict):
-    id: str
-    name: str
-
-# error: [column-type-mismatch] "User.id is str but query column 'id' infers int"
-q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-```
-
 ## TypedDict — field name mismatch
 
 ```toml

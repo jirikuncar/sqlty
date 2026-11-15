@@ -9,6 +9,7 @@ the number of generated examples with ``SQLTY_FUZZ_EXAMPLES``.
 from __future__ import annotations
 
 import ast
+import functools
 import sys
 
 import pytest
@@ -59,6 +60,7 @@ WORDS = ["' a'", "' b'", "'SELECT 1'", "''", "' {}'"]
 TESTS = ["flag", "not flag", "kind == 'a'", "mode", "x", "flag and mode", "q == x", "(y := flag)"]
 
 
+@functools.cache
 def values() -> st.SearchStrategy[str]:
     name = st.sampled_from(NAMES)
     word = st.sampled_from(WORDS)
@@ -128,6 +130,7 @@ def indent(lines: list[str]) -> list[str]:
     return [f"    {line}" for line in lines] or ["    pass"]
 
 
+@functools.cache
 def statements() -> st.SearchStrategy[list[str]]:
     name = st.sampled_from(NAMES[:6])
     value = values()

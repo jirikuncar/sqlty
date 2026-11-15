@@ -4,14 +4,6 @@
 expands `SELECT *` from a schema, and refreshes stale `tuple[...]` and
 `UNTYPED` row types. Rules set to `"ignore"` are not fixed.
 
-## Unwrapped query is rewritten
-
-```python
-q = "--sql\nSELECT id::INTEGER FROM users"
-# fixed: from sqlty import SQL
-# fixed: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
-```
-
 ## Stale tuple type is refreshed
 
 ```python

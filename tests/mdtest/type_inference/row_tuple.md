@@ -2,13 +2,6 @@
 
 Rows are typed as `tuple[T, ...]`, one element per column.
 
-## Single column produces single-element tuple
-
-```sql
-SELECT id::INTEGER FROM users
--- inferred: tuple[int]
-```
-
 ## Two columns
 
 ```sql

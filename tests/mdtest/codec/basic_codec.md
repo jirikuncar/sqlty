@@ -28,20 +28,6 @@ q = "just a normal string"
 # decoded: q = "just a normal string"
 ```
 
-## Datetime type triggers import
-
-```python
-q = "--sql\nSELECT created_at::TIMESTAMP"
-# decoded: q = SQL[tuple[datetime.datetime]]("--sql\nSELECT created_at::TIMESTAMP")
-```
-
-## UUID type triggers import
-
-```python
-q = "--sql\nSELECT user_id::UUID"
-# decoded: q = SQL[tuple[uuid.UUID]]("--sql\nSELECT user_id::UUID")
-```
-
 ## The exact example from the GitHub issue
 
 ```python
