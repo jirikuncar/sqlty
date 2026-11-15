@@ -115,7 +115,7 @@ A column of the outer query is grouped, or not, by the outer query.
 from sqlty import SQL
 
 # error:
-a = SQL[tuple[str]]("--sql\nSELECT status FROM orders WHERE EXISTS (SELECT u.team FROM users u GROUP BY u.team HAVING max(u.id) > orders.total)")
+a = SQL[tuple[int | None]]("--sql\nSELECT (SELECT orders.total + count(*) FROM users u GROUP BY u.team LIMIT 1) FROM orders")
 ```
 
 ## Derived tables and CTEs
