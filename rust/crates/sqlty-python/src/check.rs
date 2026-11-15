@@ -778,7 +778,7 @@ impl<'a> Module<'a, '_> {
         let dotted_name = dotted(declared).unwrap_or_default();
         let count = |n: usize| format!("{n} parameter{}", plural(n));
         // `(label, annotation, parameter, key)`
-        let mut pairs: Vec<(String, Option<&Expr>, &analyzer::Param, String)> = Vec::new();
+        let mut pairs: Vec<(String, &Expr, &analyzer::Param, String)> = Vec::new();
         let info = self.ctx.type_defs.get(&name);
         if dotted_name.rsplit('.').next() == Some("NoParams") && info.is_none() {
             return if params.is_empty() {
@@ -822,7 +822,7 @@ impl<'a> Module<'a, '_> {
                 let number = param.index;
                 pairs.push((
                     format!("{name} item {number}"),
-                    Some(item),
+                    item,
                     param,
                     number.to_string(),
                 ));
@@ -860,13 +860,14 @@ impl<'a> Module<'a, '_> {
             if !found.is_empty() {
                 return found;
             }
-            let in_key_order = keys
-                .iter()
-                .filter_map(|key| by_name.iter().find(|(known, _)| known == key));
-            for &(key, param) in in_key_order {
+            let in_key_order = keys.iter().filter_map(|key| {
+                let (_, param) = by_name.iter().find(|(known, _)| known == key)?;
+                Some((key, *param, &info.annotations.get(key)?.expr))
+            });
+            for (key, param, annotation) in in_key_order {
                 pairs.push((
                     format!("{name}.{key}"),
-                    info.annotations.get(key).map(|annotation| &annotation.expr),
+                    annotation,
                     param,
                     format!("'{key}'"),
                 ));
@@ -879,9 +880,6 @@ impl<'a> Module<'a, '_> {
         let postgres = dialect == "postgres" || dialect == "postgresql";
         let mut found = Vec::new();
         for (label, annotation, param, key) in pairs {
-            let Some(annotation) = annotation else {
-                continue;
-            };
             for member in union_members(annotation) {
                 let actual = annotation_type(member, &self.source.imports);
                 if actual.as_deref() != Some("None") && !(typed && !param.cast) {
@@ -953,13 +951,14 @@ impl<'a> Module<'a, '_> {
                 continue;
             };
             let mut message = format!("query does not parse: {error}");
-            if error.contains("found: {") {
-                if let Some(field) = FORMAT_FIELD.find(&query) {
-                    message.push_str(&format!(
-                        "; `{}` is a `.format()` field: fill it with `sql.SQL(...).format(...)`, or pass a value as `%s`",
-                        field.as_str()
-                    ));
-                }
+            if let Some(field) = FORMAT_FIELD
+                .find(&query)
+                .filter(|_| error.contains("found: {"))
+            {
+                message.push_str(&format!(
+                    "; `{}` is a `.format()` field: fill it with `sql.SQL(...).format(...)`, or pass a value as `%s`",
+                    field.as_str()
+                ));
             }
             self.ctx.report(Rule::UnparsedQuery, message, line, span);
         }

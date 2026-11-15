@@ -100,20 +100,13 @@ pub fn text(literal: &ExprStringLiteral, source: &str) -> String {
         return literal.value.to_str().to_string();
     }
     let normalized = format!("({})", written.replace("\r\n", "\n").replace('\r', "\n"));
-    parse_expression(&normalized)
-        .ok()
-        .and_then(|parsed| {
-            Some(
-                parsed
-                    .syntax()
-                    .body
-                    .as_string_literal_expr()?
-                    .value
-                    .to_str()
-                    .to_string(),
-            )
-        })
-        .unwrap_or_else(|| literal.value.to_str().to_string())
+    let parsed = parse_expression(&normalized).expect("a literal of a parsed source parses");
+    let value = parsed.syntax().body.as_string_literal_expr();
+    value
+        .expect("it is the same literal")
+        .value
+        .to_str()
+        .to_string()
 }
 
 fn guarded<T: Send, E: Send>(

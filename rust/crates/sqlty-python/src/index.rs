@@ -688,4 +688,16 @@ mod tests {
         assert_eq!(functions.keys().collect::<Vec<_>>(), ["e"]);
         assert_eq!(modules.keys().collect::<Vec<_>>(), ["e"]);
     }
+
+    #[test]
+    fn a_fork_takes_the_sources_it_was_built_with() {
+        let a = Arc::new(Source::new("x = 1\n", (3, 14)).unwrap());
+        let mut builder = Builder::new((3, 14));
+        builder.add_found("a", a, &Dict::new());
+        let mut fork = builder.build().fork();
+        let b = Arc::new(Source::new("y = 1\n", (3, 14)).unwrap());
+        assert!(!fork.add_found("b", b, &Dict::new()));
+        let index = fork.build();
+        assert!(index.source("a").is_some() && index.source("b").is_some());
+    }
 }

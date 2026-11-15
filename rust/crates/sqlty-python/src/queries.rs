@@ -380,5 +380,8 @@ mod tests {
             &rules,
         );
         assert!(found.is_empty(), "{found:?}");
+        let options = Options::new("postgres", None, None, false).unwrap();
+        let found = check_queries("SELEC", Format::File, "q", &options, &rules);
+        assert_eq!(found.len(), 1, "{found:?}");
     }
 }

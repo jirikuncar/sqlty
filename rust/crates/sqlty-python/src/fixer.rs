@@ -88,9 +88,6 @@ pub fn fix_source(
                 _ => {}
             }
         }
-        if next == fixed {
-            break;
-        }
         fixed = next;
     }
     if !wrapped.is_empty() {

@@ -252,13 +252,12 @@ fn is_op(source: &str, tokens: &[Token], i: usize, op: &str) -> bool {
         .is_some_and(|t| t.kind == Kind::Op && &source[t.span.clone()] == op)
 }
 
-/// Index of the bracket closing the one at `open`.
+/// Index of the bracket closing the one at `open`, a `(`, `[` or `{`.
 fn closing(source: &str, tokens: &[Token], open: usize) -> Option<usize> {
     let close = match &source[tokens[open].span.clone()] {
         "(" => ")",
         "[" => "]",
-        "{" => "}",
-        _ => return None,
+        _ => "}",
     };
     let depth = tokens[open].depth;
     (open + 1..tokens.len())

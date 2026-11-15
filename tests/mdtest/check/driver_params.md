@@ -303,6 +303,21 @@ conn.execute("DELETE FROM users WHERE id = %s")
 # error:
 ```
 
+### Type parameters and a name bound through itself
+
+```python
+import psycopg
+
+def generic[T](x: T) -> None:
+    conn = psycopg.connect("dbname=x")
+    # error: [param-count-mismatch] "query has 1 parameter, the call passes 0"
+    conn.execute("DELETE FROM users WHERE id = %s")
+
+def circular():
+    cur = cur.cursor()
+    cur.execute("DELETE FROM users WHERE id = %s")
+```
+
 ## A driver method also configured as a helper
 
 Its parameters are reported once.

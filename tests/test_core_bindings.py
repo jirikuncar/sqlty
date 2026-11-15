@@ -75,3 +75,10 @@ def test_cursor_defaults() -> None:
     found = _core.complete_source(source, 26, schema_sql="CREATE VIEW v AS SELECT 1 AS a;")
     assert found is not None
     assert found[3][0] == ("v", "view", "public", None, None)
+
+
+def test_completion_of_a_cte() -> None:
+    source = 'q = "--sql\\nWITH c AS (SELECT 1 AS a) SELECT * FROM "\n'
+    found = _core.complete_source(source, len(source) - 2, limit=1)
+    assert found is not None
+    assert found[3] == [("c", "cte", None, None, None)]

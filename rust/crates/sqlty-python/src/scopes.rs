@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 use ruff_python_ast::visitor::{walk_expr, walk_stmt, Visitor};
 use ruff_python_ast::{
-    Expr, ExprCall, ExprTString, Number, Stmt, StmtClassDef, StmtFunctionDef, UnaryOp,
+    self as ast, Expr, ExprCall, ExprTString, Number, Stmt, StmtClassDef, StmtFunctionDef, UnaryOp,
 };
 
 const BUILTINS: [&str; 5] = ["int", "str", "float", "bool", "bytes"];
@@ -295,13 +295,9 @@ impl Context<'_, '_> {
                     _ => return None,
                 }
             }
-            Expr::List(_) | Expr::Tuple(_) | Expr::Set(_) => {
-                let items = match expr {
-                    Expr::List(list) => &list.elts,
-                    Expr::Tuple(tuple) => &tuple.elts,
-                    Expr::Set(set) => &set.elts,
-                    _ => unreachable!(),
-                };
+            Expr::List(ast::ExprList { elts: items, .. })
+            | Expr::Tuple(ast::ExprTuple { elts: items, .. })
+            | Expr::Set(ast::ExprSet { elts: items, .. }) => {
                 let types: HashSet<Option<String>> = items
                     .iter()
                     .map(|item| match item {

@@ -137,3 +137,27 @@ pub fn apply(ignores: &[Ignore], diagnostics: Vec<Reported>, rules: &RuleConfig)
     }
     kept
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_named_ignore_suppresses_its_rule_without_unused_ignore() {
+        let source = Source::new("q = 1  # sqlty: ignore[select-star]\n", (3, 14)).unwrap();
+        let reported = Reported {
+            diagnostic: Diagnostic {
+                rule: Rule::SelectStar,
+                message: String::new(),
+                severity: crate::rules::Severity::Error,
+                line: 1,
+                span: 0..1,
+                fix: Vec::new(),
+            },
+            redundant: None,
+        };
+        let rules = RuleConfig::default().only(&[Rule::SelectStar]);
+        assert!(apply(&ignores(&source), vec![reported], &rules).is_empty());
+    }
+}

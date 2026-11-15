@@ -538,6 +538,15 @@ mod tests {
             ["marker", "wrapper", "helper"]
         );
         assert_eq!(colored(r#"run("SELECT 1", int)"#, &["ELECT"]), []);
+        assert_eq!(colored(r#"run(f"SELECT {x}")"#, &["f\""]), []);
+        assert_eq!(colored(r#"q = r"\x2d-sql\nSELECT 1""#, &[]), []);
+        assert_eq!(
+            colored(
+                "from sqlty import SQL\nq = SQL[int](r\"\\x2d-sql\\nSELECT 1\")",
+                &[]
+            ),
+            []
+        );
         for unchecked in [
             "from sqlty import SQL\nq = SQL[int](\"SELECT 1\")",
             "from sqlty import SQL\nq = SQL[int](f\"--sql\\nSELECT {x}\")",

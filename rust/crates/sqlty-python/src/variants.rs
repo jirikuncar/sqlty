@@ -813,7 +813,7 @@ impl<'a, 'r> Walk<'a, 'r> {
         node: Node<'a>,
         paths: &[Path<'a>],
         target: TextRange,
-        mut returns: Option<&mut Vec<(Value<'a>, Lines)>>,
+        returns: Option<&mut Vec<(Value<'a>, Lines)>>,
     ) -> Halt<'a> {
         let all = || paths.to_vec();
         let mut branch = false;
@@ -855,21 +855,16 @@ impl<'a, 'r> Walk<'a, 'r> {
                     _ => Vec::new(),
                 }
             };
-        for (body, entry) in blocks {
-            if body.nodes().iter().any(|inner| inner.contains(target)) {
-                if let Err(halt) = self.block(
-                    frame,
-                    body,
-                    entry,
-                    Some(target),
-                    returns.as_deref_mut(),
-                    branch,
-                ) {
-                    return halt;
-                }
-            }
-        }
-        Halt::Reached(paths.to_vec())
+        let holding = blocks
+            .into_iter()
+            .find(|(body, _)| body.nodes().iter().any(|inner| inner.contains(target)));
+        let Some((body, entry)) = holding else {
+            return Halt::Reached(paths.to_vec());
+        };
+        let walked = self.block(frame, body, entry, Some(target), returns, branch);
+        walked
+            .err()
+            .expect("a block holding the target stops at it")
     }
 
     fn statement(

@@ -1659,4 +1659,17 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
             assert_eq!(result.lines().next(), source.lines().next(), "{result}");
         }
     }
+
+    #[test]
+    fn rarer_imports_and_offsets() {
+        assert_eq!(escaped_offset(r"a\nb", 2, true), 3);
+        let edit = import_edit("\"\"\"doc\"\"\"", &["import y".to_string()]);
+        assert!(edit.replacement.starts_with('\n'), "{edit:?}");
+        let style = ImportStyle::or_default(None);
+        let scan = Scan::new("x", &style.wrapper_name);
+        assert_eq!(
+            with_wrapper_imports("x".to_string(), &scan, &[], &style, &[], false),
+            "x"
+        );
+    }
 }

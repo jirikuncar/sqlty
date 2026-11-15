@@ -351,6 +351,13 @@ mod tests {
     }
 
     #[test]
+    fn every_severity_name_round_trips() {
+        for severity in [Severity::Error, Severity::Warn, Severity::Ignore] {
+            assert_eq!(Severity::parse(severity.as_str()), Some(severity));
+        }
+    }
+
+    #[test]
     fn defaults_match_the_documented_table() {
         let config = RuleConfig::default();
         assert_eq!(config.severity(Rule::SelectStarNoSchema), Severity::Error);
