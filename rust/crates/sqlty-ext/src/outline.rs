@@ -75,13 +75,13 @@ pub fn outline<'py>(py: Python<'py>, source: &str) -> PyResult<Option<Outline<'p
     } else {
         Cow::Borrowed(source)
     };
-    let Some(parsed) = crate::detach(py, || sqlty_python::parse::module(&text)) else {
+    let ast = AST.get_or_try_init(py, || Ast::new(py))?;
+    // Python 3.14's `ast` reads less than the parser.
+    let readable = |text: &str| ast.lazy || sqlty_python::parse::reads_on_314(text);
+    let parsed = crate::detach(py, || sqlty_python::parse::module(&text));
+    let Some(parsed) = parsed.filter(|_| crate::detach(py, || readable(&text))) else {
         return Ok(None);
     };
-    let ast = AST.get_or_try_init(py, || Ast::new(py))?;
-    if !ast.lazy && !crate::detach(py, || sqlty_python::parse::reads_on_314(&text)) {
-        return Ok(None);
-    }
     let mut builder = Builder {
         py,
         ast,
@@ -157,15 +157,38 @@ impl<'py> Builder<'py, '_> {
         fields: impl pyo3::call::PyCallArgs<'py>,
         range: TextRange,
     ) -> PyResult<Node<'py>> {
+        self.node_with(class, fields, range, &PyDict::new(self.py))
+    }
+
+    /// An import, `is_lazy` set where Python has it (3.15).
+    fn import(
+        &self,
+        class: &Py<PyAny>,
+        fields: impl pyo3::call::PyCallArgs<'py>,
+        range: TextRange,
+        is_lazy: bool,
+    ) -> PyResult<Node<'py>> {
+        let kwargs = PyDict::new(self.py);
+        let set = || kwargs.set_item(intern!(self.py, "is_lazy"), i32::from(is_lazy));
+        self.ast.lazy.then(set).transpose()?;
+        self.node_with(class, fields, range, &kwargs)
+    }
+
+    fn node_with(
+        &self,
+        class: &Py<PyAny>,
+        fields: impl pyo3::call::PyCallArgs<'py>,
+        range: TextRange,
+        kwargs: &Bound<'py, PyDict>,
+    ) -> PyResult<Node<'py>> {
         let py = self.py;
         let (line, col) = self.position(range.start());
         let (end_line, end_col) = self.position(range.end());
-        let kwargs = PyDict::new(py);
         kwargs.set_item(intern!(py, "lineno"), line)?;
         kwargs.set_item(intern!(py, "col_offset"), col)?;
         kwargs.set_item(intern!(py, "end_lineno"), end_line)?;
         kwargs.set_item(intern!(py, "end_col_offset"), end_col)?;
-        class.bind(py).call(fields, Some(&kwargs))
+        class.bind(py).call(fields, Some(kwargs))
     }
 
     fn bare(
@@ -217,17 +240,20 @@ impl<'py> Builder<'py, '_> {
         }
     }
 
+    fn decorators(&mut self, decorators: &[ruff::Decorator]) -> PyResult<Vec<Node<'py>>> {
+        decorators
+            .iter()
+            .map(|d| self.expr(&d.expression))
+            .collect()
+    }
+
     #[allow(clippy::too_many_lines)]
     fn stmt(&mut self, stmt: &Stmt, depth: usize, cut: bool) -> PyResult<Node<'py>> {
         let ast = self.ast;
         let range = stmt.range();
         match stmt {
             Stmt::FunctionDef(node) => {
-                let decorators: Vec<Node<'py>> = node
-                    .decorator_list
-                    .iter()
-                    .map(|d| self.expr(&d.expression))
-                    .collect::<PyResult<_>>()?;
+                let decorators = self.decorators(&node.decorator_list)?;
                 let fields = (
                     node.name.as_str(),
                     self.parameters(Some(&node.parameters))?,
@@ -249,11 +275,7 @@ impl<'py> Builder<'py, '_> {
                 )
             }
             Stmt::ClassDef(node) => {
-                let decorators: Vec<Node<'py>> = node
-                    .decorator_list
-                    .iter()
-                    .map(|d| self.expr(&d.expression))
-                    .collect::<PyResult<_>>()?;
+                let decorators = self.decorators(&node.decorator_list)?;
                 let (bases, keywords) = match node.arguments.as_deref() {
                     Some(arguments) => (
                         self.exprs(&arguments.args)?,
@@ -350,7 +372,7 @@ impl<'py> Builder<'py, '_> {
                 cut,
             ),
             Stmt::With(node) => {
-                let items: Vec<Node<'py>> = node
+                let items: PyResult<Vec<Node<'py>>> = node
                     .items
                     .iter()
                     .map(|item| {
@@ -360,8 +382,8 @@ impl<'py> Builder<'py, '_> {
                         );
                         self.bare(&ast.withitem, fields)
                     })
-                    .collect::<PyResult<_>>()?;
-                let fields = (items, self.body(&node.body, depth + 1, cut)?, None::<&str>);
+                    .collect();
+                let fields = (items?, self.body(&node.body, depth + 1, cut)?, None::<&str>);
                 let class = if node.is_async {
                     &ast.AsyncWith
                 } else {
@@ -371,7 +393,7 @@ impl<'py> Builder<'py, '_> {
             }
             Stmt::Match(node) => {
                 let subject = self.expr(&node.subject)?;
-                let cases: Vec<Node<'py>> = node
+                let cases: PyResult<Vec<Node<'py>>> = node
                     .cases
                     .iter()
                     .filter(|case| !cut || case.body.iter().any(holds_class))
@@ -383,8 +405,8 @@ impl<'py> Builder<'py, '_> {
                         );
                         self.bare(&ast.match_case, fields)
                     })
-                    .collect::<PyResult<_>>()?;
-                self.node(&ast.Match, (subject, cases), range)
+                    .collect();
+                self.node(&ast.Match, (subject, cases?), range)
             }
             Stmt::Raise(node) => {
                 let fields = (
@@ -394,7 +416,7 @@ impl<'py> Builder<'py, '_> {
                 self.node(&ast.Raise, fields, range)
             }
             Stmt::Try(node) => {
-                let handlers: Vec<Node<'py>> = node
+                let handlers: PyResult<Vec<Node<'py>>> = node
                     .handlers
                     .iter()
                     .filter(|ExceptHandler::ExceptHandler(h)| {
@@ -408,10 +430,10 @@ impl<'py> Builder<'py, '_> {
                         );
                         self.node(&ast.ExceptHandler, fields, h.range())
                     })
-                    .collect::<PyResult<_>>()?;
+                    .collect();
                 let fields = (
                     self.body(&node.body, depth + 1, cut)?,
-                    handlers,
+                    handlers?,
                     self.body(&node.orelse, depth + 1, cut)?,
                     self.body(&node.finalbody, depth + 1, cut)?,
                 );
@@ -424,21 +446,13 @@ impl<'py> Builder<'py, '_> {
             }
             Stmt::Import(node) => {
                 let names = self.aliases(&node.names)?;
-                if ast.lazy {
-                    self.node(&ast.Import, (names, i32::from(node.is_lazy)), range)
-                } else {
-                    self.node(&ast.Import, (names,), range)
-                }
+                self.import(&ast.Import, (names,), range, node.is_lazy)
             }
             Stmt::ImportFrom(node) => {
                 let module = node.module.as_ref().map(ruff::Identifier::as_str);
                 let names = self.aliases(&node.names)?;
-                if ast.lazy {
-                    let fields = (module, names, node.level, i32::from(node.is_lazy));
-                    self.node(&ast.ImportFrom, fields, range)
-                } else {
-                    self.node(&ast.ImportFrom, (module, names, node.level), range)
-                }
+                let fields = (module, names, node.level);
+                self.import(&ast.ImportFrom, fields, range, node.is_lazy)
             }
             Stmt::Global(node) => {
                 let names: Vec<&str> = node.names.iter().map(ruff::Identifier::as_str).collect();
@@ -549,11 +563,7 @@ impl<'py> Builder<'py, '_> {
         };
         let posonly = positional(self, &parameters.posonlyargs)?;
         let args = positional(self, &parameters.args)?;
-        let vararg = parameters
-            .vararg
-            .as_deref()
-            .map(|p| self.parameter(p))
-            .transpose()?;
+        let vararg = parameters.vararg.as_deref().map(|p| self.parameter(p));
         let mut kw_defaults = Vec::new();
         let kwonly = parameters
             .kwonlyargs
@@ -562,12 +572,9 @@ impl<'py> Builder<'py, '_> {
                 kw_defaults.push(self.opt(p.default.as_deref())?);
                 self.parameter(&p.parameter)
             })
-            .collect::<PyResult<Vec<_>>>()?;
-        let kwarg = parameters
-            .kwarg
-            .as_deref()
-            .map(|p| self.parameter(p))
-            .transpose()?;
+            .collect::<PyResult<Vec<_>>>();
+        let kwarg = parameters.kwarg.as_deref().map(|p| self.parameter(p));
+        let (vararg, kwonly, kwarg) = (vararg.transpose()?, kwonly?, kwarg.transpose()?);
         let fields = (posonly, args, vararg, kwonly, kw_defaults, kwarg, defaults);
         self.bare(&self.ast.arguments, fields)
     }
@@ -645,12 +652,12 @@ impl<'py> Builder<'py, '_> {
                     .keywords
                     .iter()
                     .map(|k| self.pattern(&k.pattern))
-                    .collect::<PyResult<Vec<_>>>()?;
+                    .collect::<PyResult<Vec<_>>>();
                 let fields = (
                     self.expr(&p.cls)?,
                     patterns(self, &p.arguments.patterns)?,
                     attrs,
-                    kwd_patterns,
+                    kwd_patterns?,
                 );
                 self.node(&ast.MatchClass, fields, range)
             }
@@ -998,23 +1005,23 @@ impl<'py> Builder<'py, '_> {
                                 TextRange::new(spec.start() - TextSize::from(1), spec.end());
                             self.node(&self.ast.JoinedStr, (inner_values,), range)
                         })
-                        .transpose()?;
+                        .transpose();
                     let conversion = conversion as i8;
                     let node = if template {
                         let text = unparse::interpolation_text(field, self.source);
                         self.node(
                             &self.ast.Interpolation,
-                            (value, text, conversion, spec),
+                            (value, text, conversion, spec?),
                             field.range(),
-                        )?
+                        )
                     } else {
                         self.node(
                             &self.ast.FormattedValue,
-                            (value, conversion, spec),
+                            (value, conversion, spec?),
                             field.range(),
-                        )?
+                        )
                     };
-                    values.push(node);
+                    values.push(node?);
                 }
             }
         }

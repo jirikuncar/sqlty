@@ -429,13 +429,13 @@ fn check_row_type(
 mod tests {
     use super::*;
 
-    fn problems(shape: JsonShape, annotation: &str) -> Vec<String> {
+    fn problems(shape: &JsonShape, annotation: &str) -> Vec<String> {
         let parsed = crate::parse::expression(annotation).unwrap();
         let annotation = Annotation {
             expr: *parsed.into_syntax().body,
             source: Arc::from(annotation),
         };
-        json_problems(&shape, &annotation, &Dict::new(), &HashMap::new(), "")
+        json_problems(shape, &annotation, &Dict::new(), &HashMap::new(), "")
     }
 
     #[test]
@@ -447,11 +447,11 @@ mod tests {
             optional: false,
         }]);
         assert_eq!(
-            problems(JsonShape::Array(Box::new(int)), "str"),
+            problems(&JsonShape::Array(Box::new(int)), "str"),
             ["is str but the query builds an array"]
         );
         assert_eq!(
-            problems(object, "dict[str, str]"),
+            problems(&object, "dict[str, str]"),
             ["a is str but the query builds an integer"]
         );
     }
