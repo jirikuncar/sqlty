@@ -569,6 +569,37 @@ impl<'a> Analyzer<'a> {
     }
 
     /// A parameter searched with `= ANY(%s)` is an array of what the other side is.
+    /// `expr LIKE pattern`: text, or an array of patterns for PostgreSQL's `LIKE ANY ($1)`
+    /// and `LIKE ALL($1)`; Snowflake's `LIKE ANY ($1, ...)` lists them.
+    fn hint_like(&self, expr: &Expr, pattern: &Expr, any: bool, out: &mut Hints) {
+        let patterns = match pattern {
+            Expr::Nested(inner) if any && self.dialect == SqlDialect::Postgres => Some(&**inner),
+            Expr::Nested(_) | Expr::Tuple(_) if any => None,
+            _ => any_argument(pattern),
+        };
+        let mut texts = vec![expr];
+        match (patterns, pattern) {
+            (Some(Expr::Array(array)), _) => texts.extend(&array.elem),
+            (Some(array), _) => {
+                if let Some(index) = placeholder_index(array) {
+                    let text = self.param_typed("TEXT");
+                    let typed = Typed::new(
+                        text.python.map(|python| format!("list[{python}]")),
+                        text.sql.map(|sql| format!("ARRAY<{sql}>")),
+                    );
+                    out.add(index, typed, Nullability::Unknown);
+                }
+            }
+            (None, Expr::Tuple(items)) => texts.extend(items),
+            (None, _) => texts.push(pattern),
+        }
+        for operand in texts {
+            if let Some(index) = placeholder_index(operand) {
+                out.add(index, self.param_typed("TEXT"), Nullability::Unknown);
+            }
+        }
+    }
+
     fn hint_array(&self, array: &Expr, element: &Expr, scope: &Scope, out: &mut Hints) {
         let Some(index) = placeholder_index(array) else {
             return;
@@ -657,6 +688,11 @@ impl<'a> Analyzer<'a> {
             }
             Expr::AnyOp { left, right, .. } | Expr::AllOp { left, right, .. } => {
                 self.hint_array(right, left, scope, out);
+                if let Expr::Array(array) = right.as_ref() {
+                    for element in &array.elem {
+                        self.hint_pair(element, left, scope, out);
+                    }
+                }
                 if let Some(index) = placeholder_index(left) {
                     if let Ok(Typed { sql: Some(sql), .. }) = self.expr(right, scope) {
                         if let Some(element) = array_element(&sql) {
@@ -739,15 +775,13 @@ impl<'a> Analyzer<'a> {
                     }
                 }
             }
-            Expr::Like { expr, pattern, .. }
-            | Expr::ILike { expr, pattern, .. }
-            | Expr::SimilarTo { expr, pattern, .. } => {
-                for operand in [expr, pattern] {
-                    if let Some(index) = placeholder_index(operand) {
-                        out.add(index, self.param_typed("TEXT"), Nullability::Unknown);
-                    }
-                }
+            Expr::Like {
+                expr, pattern, any, ..
             }
+            | Expr::ILike {
+                expr, pattern, any, ..
+            } => self.hint_like(expr, pattern, *any, out),
+            Expr::SimilarTo { expr, pattern, .. } => self.hint_like(expr, pattern, false, out),
             Expr::Cast { expr: inner, .. } => {
                 if let (Some(index), Ok(typed)) = (placeholder_index(inner), self.expr(expr, scope))
                 {

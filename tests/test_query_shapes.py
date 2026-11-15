@@ -780,8 +780,8 @@ PARAMS = [
         "INSERT INTO g VALUES ($1), ($2, $3)",
         [(1, "int", False), (2, "int", False), (3, None, None)],
     ),
-    ("SELECT 1 FROM f WHERE i = ALL(ARRAY[$1])", [(1, None, None)]),
-    ("SELECT 1 FROM f WHERE tx LIKE ALL($1)", [(1, None, None)]),
+    ("SELECT 1 FROM f WHERE i = ALL(ARRAY[$1])", [(1, "int", None)]),
+    ("SELECT 1 FROM f WHERE tx LIKE ALL($1)", [(1, "list[str]", None)]),
     ("SELECT 1 FROM nope WHERE a = $1", [(1, None, None)]),
     ("VALUES ($1)", [(1, None, None)]),
     ("SELECT 1 FROM f WHERE ANY(arr) = $1", [(1, None, None)]),
@@ -812,6 +812,8 @@ PARAMS_ELSEWHERE = [
     ("mysql", "SELECT 1 FROM f WHERE ANY(?) = i", [(1, None, None)]),
     ("mysql", "SELECT 1 FROM f WHERE i = ANY(SELECT ?)", [(1, None, None)]),
     ("clickhouse", "INSERT INTO TABLE FUNCTION remote('x', f) (i) VALUES (1)", []),
+    ("snowflake", "SELECT 1 FROM f WHERE tx LIKE ANY (?, ?)", [(1, "str", None), (2, "str", None)]),
+    ("snowflake", "SELECT 1 FROM f WHERE tx LIKE ANY (?)", [(1, "str", None)]),
 ]
 
 
