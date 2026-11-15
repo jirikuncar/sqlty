@@ -23,13 +23,13 @@ use super::inference::{
     binary_rules, function_rules, typed_by_rule, FunctionNullability, RuleNullability,
 };
 use super::literals::python_kind;
-use super::memo::Reporting;
+use super::memo::{first_column, Reporting};
 use super::names::{split_access, table_key};
 use super::narrowing::Learned;
 use super::operators::operand_type;
 use super::query::Analyzer;
 use super::registry::{lookup, Behavior};
-use super::scope::{table_scope, Scope};
+use super::scope::{table_source, Scope};
 use crate::catalog::fold;
 use rustc_hash::FxHashSet;
 
@@ -271,10 +271,7 @@ impl Analyzer<'_> {
                 .map(|(reference, _)| (reference, None))
                 .collect(),
             // The reference the scope of the SELECT gives the relation.
-            other => table_scope(other, self.dialect)
-                .into_iter()
-                .map(|source| (source.reference, Some(other)))
-                .collect(),
+            other => vec![(table_source(other, self.dialect).reference, Some(other))],
         }
     }
 
@@ -352,10 +349,11 @@ impl Analyzer<'_> {
         pairs: &[(String, String)],
         not_null: bool,
     ) -> bool {
-        let Some(columns) = self.schema.table(child) else {
-            return false;
+        let required = |name: &String| {
+            self.schema
+                .table(child)
+                .is_some_and(|columns| columns.iter().any(|c| c.name == *name && c.not_null))
         };
-        let required = |name: &String| columns.iter().any(|c| c.name == *name && c.not_null);
         self.schema.foreign_keys(child).any(|fk| {
             fk.table == parent
                 && fk.columns.len() == pairs.len()
@@ -402,10 +400,7 @@ impl Analyzer<'_> {
         let Some(parent) = self.base_table(&from.relation) else {
             return false;
         };
-        let inner = table_scope(&from.relation, self.dialect);
-        let [inner] = inner.as_slice() else {
-            return false;
-        };
+        let inner = table_source(&from.relation, self.dialect);
         let mut child = None;
         let mut pairs = Vec::new();
         for condition in conjuncts(selection) {
@@ -438,22 +433,19 @@ impl Analyzer<'_> {
             }
             pairs.push((column, referred));
         }
-        let Some((_, child)) = child else {
-            return false;
-        };
-        let Some(child) = self.schema.table_id(&child) else {
-            return false;
-        };
-        // A lookup of the outer row's own key in its table finds that row.
-        let itself = child == parent
-            && pairs.iter().all(|(column, referred)| column == referred)
-            && self.schema.unique_keys(&parent).is_some_and(|keys| {
-                keys.iter().any(|key| {
-                    key.iter()
-                        .all(|name| pairs.iter().any(|(column, _)| column == name))
-                })
-            });
-        itself || self.references(child, &parent, &pairs, false)
+        let child = child.and_then(|(_, child)| self.schema.table_id(&child));
+        child.is_some_and(|child| {
+            // A lookup of the outer row's own key in its table finds that row.
+            let itself = child == parent
+                && pairs.iter().all(|(column, referred)| column == referred)
+                && self.schema.unique_keys(&parent).is_some_and(|keys| {
+                    keys.iter().any(|key| {
+                        key.iter()
+                            .all(|name| pairs.iter().any(|(column, _)| column == name))
+                    })
+                });
+            itself || self.references(child, &parent, &pairs, false)
+        })
     }
 
     /// The catalog key of a base table in FROM: not a CTE, a view or a function.
@@ -1174,12 +1166,11 @@ impl<'a> Analyzer<'a> {
 
     /// Nullability of the first column of a subquery, as its own query reads it.
     fn subquery_column(&self, query: &Query, scope: &Scope) -> Nullability {
-        match &*self.subquery_columns(query, scope, Reporting::Silent) {
-            Ok(Some(columns)) => columns
-                .first()
-                .map_or(Nullability::Unknown, |col| col.nullability),
-            _ => Nullability::Unknown,
-        }
+        let columns = self.subquery_columns(query, scope, Reporting::Silent);
+        first_column(&columns)
+            .ok()
+            .flatten()
+            .map_or(Nullability::Unknown, |col| col.nullability)
     }
 
     fn case_nullability(

@@ -76,6 +76,11 @@ impl Source {
 pub(super) type Scope = Vec<Source>;
 
 pub(super) fn table_scope(factor: &TableFactor, dialect: SqlDialect) -> Scope {
+    vec![table_source(factor, dialect)]
+}
+
+/// The one source a table factor of FROM gives.
+pub(super) fn table_source(factor: &TableFactor, dialect: SqlDialect) -> Source {
     match factor {
         TableFactor::Table {
             name,
@@ -87,9 +92,9 @@ pub(super) fn table_scope(factor: &TableFactor, dialect: SqlDialect) -> Scope {
                 || object_name(name),
                 |alias| alias.name.value.to_lowercase(),
             );
-            vec![Source::named(reference, table_key(name, dialect))]
+            Source::named(reference, table_key(name, dialect))
         }
-        other => vec![opaque_source(other)],
+        other => opaque_source(other),
     }
 }
 

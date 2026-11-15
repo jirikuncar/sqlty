@@ -194,12 +194,12 @@ def test_json(dialect: str, sql: str, shapes: list[tuple[str, str]]) -> None:
     assert json_shapes(sql, dialect=dialect, schema_sql=JSON_SCHEMA) == shapes
 
 
-FUNCTION_SCHEMAS = {
-    "postgres": "CREATE TABLE f (i INT, tx TEXT, iv INTERVAL, dt DATE, vb VARBIT, c INT CHECK (c IN (1, 2)));",
+EXPRESSION_SCHEMAS = {
+    "postgres": "CREATE TABLE f (i INT, tx TEXT, iv INTERVAL, dt DATE, vb VARBIT, c INT CHECK (c IN (1, 2))); CREATE TABLE p (id INT PRIMARY KEY, name TEXT NOT NULL); CREATE TABLE c (id INT PRIMARY KEY, pid INT REFERENCES p (id), arr INT[]); CREATE TABLE g (a INT, b INT, CHECK (num_nonnulls(a, b) >= 1));",
     "mysql": "CREATE TABLE f (i INT, tx TEXT, d DECIMAL(30, 2), dd DECIMAL(20), dn DECIMAL, dtm DATETIME, c INT CHECK (c IN (1, 2)));",
     "sqlite": "CREATE TABLE f (i INT, tx TEXT, c INT CHECK (c IN (1, 2)));",
 }
-FUNCTIONS = [
+EXPRESSIONS = [
     (
         "mysql",
         "SELECT GREATEST(c, tx) AS x, GREATEST(i, tx) AS y, GREATEST(tx, i) AS z FROM f",
@@ -235,12 +235,88 @@ FUNCTIONS = [
     ("postgres", "SELECT COALESCE(i, tx) AS x FROM f", "x: int | None", []),
     ("postgres", "SELECT COALESCE(c, tx) AS x FROM f", "x: int | None", []),
     ("mysql", "SELECT CONCAT(tx, i) AS x FROM f", "x: str | None", []),
+    ("postgres", "SELECT (SELECT 1) AS x FROM c LEFT JOIN p ON p.id = c.pid", "x: int", []),
+    (
+        "postgres",
+        "SELECT p.name AS x FROM c LEFT JOIN p ON c.pid = c.id",
+        "x: str | None",
+        ["entity-mismatch"],
+    ),
+    (
+        "postgres",
+        "SELECT (SELECT DISTINCT p.name FROM p WHERE p.id = c.pid) AS x FROM c",
+        "x: str | None",
+        [],
+    ),
+    (
+        "postgres",
+        "WITH w AS (SELECT * FROM p) SELECT (SELECT w.name FROM w WHERE w.id = c.pid) AS x FROM c",
+        "x: str | None",
+        [],
+    ),
+    (
+        "postgres",
+        "SELECT (SELECT p.name FROM p WHERE p.id = p.id) AS x FROM c",
+        "x: str | None",
+        [],
+    ),
+    (
+        "postgres",
+        "SELECT (SELECT p.name FROM p WHERE ((p.id) = c.pid)) AS x FROM c",
+        "x: str | None",
+        [],
+    ),
+    (
+        "postgres",
+        "SELECT (SELECT p.name FROM p WHERE public.p.id = c.pid) AS x FROM c",
+        "x: str | None",
+        [],
+    ),
+    (
+        "postgres",
+        "SELECT o.n AS x FROM c OUTER APPLY (SELECT count(*) AS n FROM p) o",
+        "x: int",
+        [],
+    ),
+    (
+        "postgres",
+        "SELECT o.n AS x FROM c LEFT JOIN (SELECT count(*) AS n FROM p) o ON (TRUE)",
+        "x: int",
+        [],
+    ),
+    (
+        "postgres",
+        "SELECT c.id / (1) AS x, c.id / 'a' AS y FROM c",
+        "x: int, y: None",
+        ["unsupported-syntax"],
+    ),
+    ("postgres", "SELECT c.id + 1 AS x FROM c GROUP BY ROLLUP (c.id + 1)", "x: int | None", []),
+    ("postgres", "SELECT c.id AS x FROM c WHERE c.id = ANY ((ARRAY[1, 2]))", "x: int", []),
+    (
+        "postgres",
+        "SELECT c.id = ANY (c.arr) AS x, c.id = ANY ((ARRAY[1, 2])) AS y FROM c",
+        "x: bool | None, y: bool",
+        [],
+    ),
+    (
+        "postgres",
+        "SELECT c.id = ANY ((SELECT * FROM nope)) AS x FROM c",
+        "x: bool",
+        ["unknown-table"],
+    ),
+    (
+        "postgres",
+        "SELECT sum(c.id) OVER w AS x FROM c WINDOW w AS (ORDER BY c.id)",
+        "x: int | None",
+        [],
+    ),
+    ("postgres", "SELECT NVL(a, b) AS x FROM g", "x: None", ["unknown-function"]),
 ]
 
 
-@pytest.mark.parametrize(("dialect", "sql", "columns", "rules"), FUNCTIONS)
-def test_functions(dialect: str, sql: str, columns: str, rules: list[str]) -> None:
-    schema = FUNCTION_SCHEMAS[dialect]
+@pytest.mark.parametrize(("dialect", "sql", "columns", "rules"), EXPRESSIONS)
+def test_expressions(dialect: str, sql: str, columns: str, rules: list[str]) -> None:
+    schema = EXPRESSION_SCHEMAS[dialect]
     found = _core.analyze_select(sql, dialect=dialect, schema_sql=schema)
     assert found is not None
     assert ", ".join(f"{name}: {python}" for name, python, _ in found) == columns
