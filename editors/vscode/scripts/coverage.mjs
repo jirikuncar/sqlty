@@ -18,6 +18,8 @@ for (const directory of directories) {
     reporter: ["json"],
     reportsDirectory: output,
     src: [resolve("src")],
+    // The default leaves out test bundles, which run src/ too.
+    exclude: ["**/.vscode-test/**"],
     excludeNodeModules: true,
     mergeAsync: true,
   }).run();
