@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import ast
 import collections
+import os
+import subprocess
+import sys
 import tokenize
 
 import pytest
@@ -184,3 +187,19 @@ def test_a_source_that_does_not_parse_is_read_by_its_strings(parses, tokenized):
     assert [d["rule"] for d in check_source(source)] == ["unparsed-query", "unused-ignore"]
     assert not parses
     assert len(tokenized) == 1
+
+
+@pytest.mark.parametrize("ast_env", [None, "rust", "compare", "python"])
+def test_rust_checks_by_default_and_python_is_deprecated(ast_env: str | None) -> None:
+    env = {k: v for k, v in os.environ.items() if k != "SQLTY_AST"}
+    if ast_env:
+        env["SQLTY_AST"] = ast_env
+    run = subprocess.run(
+        [sys.executable, "-c", "from sqlty._source import AST; print(AST)"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert run.stdout == f"{ast_env or 'rust'}\n"
+    warned = "FutureWarning: SQLTY_AST=python is deprecated" in run.stderr
+    assert warned is (ast_env == "python")

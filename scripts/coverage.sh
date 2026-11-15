@@ -13,7 +13,7 @@ uv run --no-sync maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.tom
 pytest=(uv run --no-sync pytest --cov --cov-append --cov-fail-under=0)
 "${pytest[@]}" -m "not timing and not pg"
 # Rust and Python readings of every checked module must agree (`SQLTY_AST`).
-for ast in compare rust; do
+for ast in compare python; do
   SQLTY_AST=$ast "${pytest[@]}" -m "not timing and not pg" tests/mdtest tests/test_cli.py \
     tests/test_helpers.py tests/test_psycopg.py tests/test_driver_values.py \
     tests/test_type_extractor.py tests/test_cross_module.py
