@@ -5,7 +5,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use regex::Regex;
@@ -169,7 +168,6 @@ pub struct HelperIndex {
     tree: Arc<Tree>,
     version: Version,
     read: Arc<Mutex<Read>>,
-    unread: Arc<AtomicBool>,
     names: HashSet<String>,
     pattern: Option<Regex>,
 }
@@ -202,8 +200,6 @@ pub struct Builder {
     added: HashMap<String, Arc<Source>>,
     version: Version,
     read: Arc<Mutex<Read>>,
-    /// Whether `register` met a file Rust does not read.
-    unread: Arc<AtomicBool>,
 }
 
 impl Builder {
@@ -214,7 +210,6 @@ impl Builder {
             added: HashMap::new(),
             version,
             read: Arc::default(),
-            unread: Arc::default(),
         }
     }
 
@@ -222,18 +217,8 @@ impl Builder {
         self.tree.as_ref().map_or(&self.added, |tree| &tree.sources)
     }
 
-    /// `HelperIndex.add`: index the helpers of `source` as module `module`; whether it has
-    pub fn add(&mut self, module: &str, source: Source) -> bool {
-        let source = match source.module {
-            Some(_) => source,
-            None => source.named(Some(module)),
-        };
-        let found = helpers_of(&source);
-        self.add_found(module, Arc::new(source), &found)
-    }
-
-    /// `add` with the helpers of `source` already found by `helpers_of`, so that sources
-    /// can be read in parallel and one source shared by the names of its module.
+    /// Index `source` as module `module` with its helpers `found` by `helpers_of`, so that
+    /// sources can be read in parallel and one source shared by the names of its module.
     pub fn add_found(&mut self, module: &str, source: Arc<Source>, found: &Dict<Helper>) -> bool {
         if let Some(tree) = self.tree.take() {
             self.added.clone_from(&tree.sources);
@@ -382,7 +367,6 @@ impl Builder {
                                 let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
                                 let Some(source) = Source::new(text, self.version) else {
                                     // The first root holding the file ends the search.
-                                    self.unread.store(true, Ordering::Relaxed);
                                     return None;
                                 };
                                 Some(Arc::new(source.named(Some(&key.1))))
@@ -417,23 +401,17 @@ impl Builder {
             }
             let named = alternation(&names);
             let mut renamed = Vec::new();
-            for (module, source) in self.sources() {
+            for source in self.sources().values() {
                 if named
                     .as_ref()
                     .is_some_and(|named| !named.is_match(&source.text))
                 {
                     continue;
                 }
-                let read;
-                let exports = match source.module {
-                    Some(_) => &source.targets().0,
-                    None => {
-                        read = imports_of(&source.entries, Some(module)).0;
-                        &read
-                    }
-                };
                 renamed.extend(
-                    exports
+                    source
+                        .targets()
+                        .0
                         .iter()
                         .filter(|(local, (_, original))| {
                             names.contains(original) && !names.contains(*local)
@@ -463,7 +441,6 @@ impl Builder {
             tree,
             version: self.version,
             read: self.read,
-            unread: self.unread,
             names,
             pattern,
         })
@@ -479,7 +456,6 @@ impl HelperIndex {
             added: HashMap::new(),
             version: self.version,
             read: self.read.clone(),
-            unread: self.unread.clone(),
         }
     }
 
@@ -493,11 +469,6 @@ impl HelperIndex {
         self.version
     }
 
-    /// Whether `register` met a file Rust does not read, which Python may read.
-    pub fn unread(&self) -> bool {
-        self.unread.load(Ordering::Relaxed)
-    }
-
     /// The unqualified names of the indexed helpers, methods included.
     pub fn names(&self) -> &HashSet<String> {
         &self.names
@@ -506,10 +477,9 @@ impl HelperIndex {
     /// Whether `text` contains the name of some helper, so it may call one.
     pub fn mentions(&self, text: &str) -> bool {
         // No pattern holds too many names: any text may call one.
-        match &self.pattern {
-            Some(pattern) => pattern.is_match(text),
-            None => !self.names.is_empty(),
-        }
+        self.pattern
+            .as_ref()
+            .map_or(!self.names.is_empty(), |pattern| pattern.is_match(text))
     }
 
     /// The types and row types of the modules.
@@ -590,12 +560,13 @@ impl Tree {
         }
         let source = self.sources.get(module)?;
         let key = (module.to_string(), name.to_string());
-        if let Some(found) = lock(&self.types).get(&key) {
-            return found.clone();
-        }
-        let _reading = self.read();
-        if let Some(found) = lock(&self.types).get(&key) {
-            return found.clone();
+        let known = || lock(&self.types).get(&key).cloned();
+        let mut reading = None;
+        if let Some(found) = known().or_else(|| {
+            reading = Some(self.read());
+            known()
+        }) {
+            return found;
         }
         // An import cycle sees the name as unknown while it is resolved.
         let busy = Busy::mark(module, Some(name))?;
@@ -643,11 +614,11 @@ impl Tree {
 
     fn definitions(&self, module: &str, source: &Arc<Source>) -> Defs {
         let known = || lock(&self.row_types).get(module).cloned();
-        if let Some(defs) = known() {
-            return defs;
-        }
-        let _reading = self.read();
-        if let Some(defs) = known() {
+        let mut reading = None;
+        if let Some(defs) = known().or_else(|| {
+            reading = Some(self.read());
+            known()
+        }) {
             return defs;
         }
         // Modules that import each other's row types see none while either is read.
@@ -698,5 +669,22 @@ impl Index for Tree {
     fn row_type(&self, source: &Source, dotted: &str) -> Option<RowType> {
         let (module, name) = target(source, dotted)?;
         self.row_type_at(&module, &name, 0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_module_without_a_name_has_no_relative_imports() {
+        let source = Source::new(
+            "from . import a\nfrom .b import c\nfrom d import e\n",
+            (3, 14),
+        )
+        .unwrap();
+        let (functions, modules) = imports_of(&source.entries, None);
+        assert_eq!(functions.keys().collect::<Vec<_>>(), ["e"]);
+        assert_eq!(modules.keys().collect::<Vec<_>>(), ["e"]);
     }
 }

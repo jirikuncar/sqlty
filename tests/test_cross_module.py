@@ -194,3 +194,24 @@ def test_cross_module_resolution_parses_each_module_once(project, capsys, monkey
     assert run(project, capsys, files) == [("bad.py", "column-type-mismatch")]
     assert parses[IDS] == (AST != "rust")
     assert max(parses.values(), default=0) <= 1
+
+
+def test_reexport_chains_end_after_eight_hops(project, capsys):
+    (project / "r0.py").write_text(
+        "from typing import NewType, TypedDict\nfrom psycopg import sql\n"
+        'UserId = NewType("UserId", int)\nCOLUMN = sql.SQL("name")\n'
+        "class Row(TypedDict):\n    id: int\n"
+    )
+    for hop in range(1, 10):
+        (project / f"r{hop}.py").write_text(f"from r{hop - 1} import UserId, COLUMN, Row\n")
+    use = (
+        "from typing import Annotated, LiteralString, TypedDict\nfrom psycopg import sql\n"
+        "from sqlty import SQL\nfrom r%d import UserId, COLUMN, Row\n"
+        "def fetch[T](query: Annotated[LiteralString | sql.Composable, SQL], form: type[T], /) -> T: ...\n"
+        "class Mine(TypedDict):\n    id: UserId\n"
+        'fetch("SELECT name AS id FROM users", Mine)\n'
+        'fetch(sql.SQL("SELECT {} AS id FROM users").format(COLUMN), tuple[int])\n'
+        'fetch("SELECT name AS id FROM users", Row)\n'
+    )
+    assert run(project, capsys, {"use.py": use % 8}) == [("use.py", "column-type-mismatch")] * 3
+    assert run(project, capsys, {"use.py": use % 9}) == [("use.py", "unchecked-query")]
