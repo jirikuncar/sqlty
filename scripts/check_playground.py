@@ -351,7 +351,12 @@ def presenting(page: Page) -> None:
     page.focus("[data-zoom='1']")
     page.keyboard.press("Control+Shift+F")
     assert page.get_attribute("[data-present]", "aria-pressed") == "true"
-    page.evaluate("document.exitFullscreen()")
+    # Leaving full screen, as Escape does where the page cannot lock it, stops presenting;
+    # some headless browsers refuse full screen and only send the event.
+    page.evaluate(
+        "document.fullscreenElement ? document.exitFullscreen()"
+        " : document.dispatchEvent(new Event('fullscreenchange'))"
+    )
     page.wait_for_function(
         "!document.querySelector('#sqlty-playground').classList.contains('sqlty-present')"
     )
