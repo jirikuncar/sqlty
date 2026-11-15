@@ -606,6 +606,8 @@ def parse_overrides(assignments: list[str]) -> SQLTyConfig:
     Example:
         >>> parse_overrides(['dialect = "mysql"', 'rules.select-star = "ignore"'])
         {'dialect': 'mysql', 'rules': {'select-star': 'ignore'}}
+        >>> parse_overrides(['rules.select-star = "ignore"', 'rules.extra-param = "warn"'])
+        {'rules': {'select-star': 'ignore', 'extra-param': 'warn'}}
     """
     import tomllib
 

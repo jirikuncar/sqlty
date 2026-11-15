@@ -235,6 +235,7 @@ const SIGNATURES: &[(&[&str], &[&str])] = &[
 const SAME_TYPE: &[&str] = &["COALESCE", "NULLIF", "GREATEST", "LEAST", "IFNULL"];
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

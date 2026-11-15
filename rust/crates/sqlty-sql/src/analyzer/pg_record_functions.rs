@@ -2,16 +2,22 @@
 //! through OUT parameters. Generated from `pg_proc` by
 //! `scripts/compat/pg_record_functions.py`; do not edit.
 
-/// The `(name, SQL type)` columns of the built-in function `name` (lower case).
-pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'static str)]> {
-    Some(match name {
-        "aclexplode" => &[
+type Columns = &'static [(&'static str, &'static str)];
+
+/// The functions by name, sorted.
+static FUNCTIONS: &[(&str, Columns)] = &[
+    (
+        "aclexplode",
+        &[
             ("grantor", "OID"),
             ("grantee", "OID"),
             ("privilege_type", "TEXT"),
             ("is_grantable", "BOOLEAN"),
         ],
-        "pg_available_extension_versions" => &[
+    ),
+    (
+        "pg_available_extension_versions",
+        &[
             ("name", "NAME"),
             ("version", "TEXT"),
             ("superuser", "BOOLEAN"),
@@ -21,23 +27,35 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("requires", "ARRAY<NAME>"),
             ("comment", "TEXT"),
         ],
-        "pg_available_extensions" => &[
+    ),
+    (
+        "pg_available_extensions",
+        &[
             ("name", "NAME"),
             ("default_version", "TEXT"),
             ("comment", "TEXT"),
         ],
-        "pg_available_wal_summaries" => &[
+    ),
+    (
+        "pg_available_wal_summaries",
+        &[
             ("tli", "BIGINT"),
             ("start_lsn", "PG_LSN"),
             ("end_lsn", "PG_LSN"),
         ],
-        "pg_backup_stop" => &[
+    ),
+    (
+        "pg_backup_stop",
+        &[
             ("lsn", "PG_LSN"),
             ("labelfile", "TEXT"),
             ("spcmapfile", "TEXT"),
         ],
-        "pg_config" => &[("name", "TEXT"), ("setting", "TEXT")],
-        "pg_control_checkpoint" => &[
+    ),
+    ("pg_config", &[("name", "TEXT"), ("setting", "TEXT")]),
+    (
+        "pg_control_checkpoint",
+        &[
             ("checkpoint_lsn", "PG_LSN"),
             ("redo_lsn", "PG_LSN"),
             ("redo_wal_file", "TEXT"),
@@ -57,7 +75,10 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("newest_commit_ts_xid", "XID"),
             ("checkpoint_time", "TIMESTAMPTZ"),
         ],
-        "pg_control_init" => &[
+    ),
+    (
+        "pg_control_init",
+        &[
             ("max_data_alignment", "INT"),
             ("database_block_size", "INT"),
             ("blocks_per_segment", "INT"),
@@ -70,24 +91,45 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("float8_pass_by_value", "BOOLEAN"),
             ("data_page_checksum_version", "INT"),
         ],
-        "pg_control_recovery" => &[
+    ),
+    (
+        "pg_control_recovery",
+        &[
             ("min_recovery_end_lsn", "PG_LSN"),
             ("min_recovery_end_timeline", "INT"),
             ("backup_start_lsn", "PG_LSN"),
             ("backup_end_lsn", "PG_LSN"),
             ("end_of_backup_record_required", "BOOLEAN"),
         ],
-        "pg_control_system" => &[
+    ),
+    (
+        "pg_control_system",
+        &[
             ("pg_control_version", "INT"),
             ("catalog_version_no", "INT"),
             ("system_identifier", "BIGINT"),
             ("pg_control_last_modified", "TIMESTAMPTZ"),
         ],
-        "pg_copy_logical_replication_slot" => &[("slot_name", "NAME"), ("lsn", "PG_LSN")],
-        "pg_copy_physical_replication_slot" => &[("slot_name", "NAME"), ("lsn", "PG_LSN")],
-        "pg_create_logical_replication_slot" => &[("slot_name", "NAME"), ("lsn", "PG_LSN")],
-        "pg_create_physical_replication_slot" => &[("slot_name", "NAME"), ("lsn", "PG_LSN")],
-        "pg_cursor" => &[
+    ),
+    (
+        "pg_copy_logical_replication_slot",
+        &[("slot_name", "NAME"), ("lsn", "PG_LSN")],
+    ),
+    (
+        "pg_copy_physical_replication_slot",
+        &[("slot_name", "NAME"), ("lsn", "PG_LSN")],
+    ),
+    (
+        "pg_create_logical_replication_slot",
+        &[("slot_name", "NAME"), ("lsn", "PG_LSN")],
+    ),
+    (
+        "pg_create_physical_replication_slot",
+        &[("slot_name", "NAME"), ("lsn", "PG_LSN")],
+    ),
+    (
+        "pg_cursor",
+        &[
             ("name", "TEXT"),
             ("statement", "TEXT"),
             ("is_holdable", "BOOLEAN"),
@@ -95,7 +137,10 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("is_scrollable", "BOOLEAN"),
             ("creation_time", "TIMESTAMPTZ"),
         ],
-        "pg_event_trigger_ddl_commands" => &[
+    ),
+    (
+        "pg_event_trigger_ddl_commands",
+        &[
             ("classid", "OID"),
             ("objid", "OID"),
             ("objsubid", "INT"),
@@ -106,7 +151,10 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("in_extension", "BOOLEAN"),
             ("command", "PG_DDL_COMMAND"),
         ],
-        "pg_event_trigger_dropped_objects" => &[
+    ),
+    (
+        "pg_event_trigger_dropped_objects",
+        &[
             ("classid", "OID"),
             ("objid", "OID"),
             ("objsubid", "INT"),
@@ -120,8 +168,14 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("address_names", "ARRAY<TEXT>"),
             ("address_args", "ARRAY<TEXT>"),
         ],
-        "pg_extension_update_paths" => &[("source", "TEXT"), ("target", "TEXT"), ("path", "TEXT")],
-        "pg_get_backend_memory_contexts" => &[
+    ),
+    (
+        "pg_extension_update_paths",
+        &[("source", "TEXT"), ("target", "TEXT"), ("path", "TEXT")],
+    ),
+    (
+        "pg_get_backend_memory_contexts",
+        &[
             ("name", "TEXT"),
             ("ident", "TEXT"),
             ("parent", "TEXT"),
@@ -132,7 +186,10 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("free_chunks", "BIGINT"),
             ("used_bytes", "BIGINT"),
         ],
-        "pg_get_catalog_foreign_keys" => &[
+    ),
+    (
+        "pg_get_catalog_foreign_keys",
+        &[
             ("fktable", "REGCLASS"),
             ("fkcols", "ARRAY<TEXT>"),
             ("pktable", "REGCLASS"),
@@ -140,22 +197,36 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("is_array", "BOOLEAN"),
             ("is_opt", "BOOLEAN"),
         ],
-        "pg_get_keywords" => &[
+    ),
+    (
+        "pg_get_keywords",
+        &[
             ("word", "TEXT"),
-            ("catcode", "\"CHAR\""),
             ("barelabel", "BOOLEAN"),
             ("catdesc", "TEXT"),
             ("baredesc", "TEXT"),
         ],
-        "pg_get_multixact_members" => &[("xid", "XID"), ("mode", "TEXT")],
-        "pg_get_object_address" => &[("classid", "OID"), ("objid", "OID"), ("objsubid", "INT")],
-        "pg_get_publication_tables" => &[
+    ),
+    (
+        "pg_get_multixact_members",
+        &[("xid", "XID"), ("mode", "TEXT")],
+    ),
+    (
+        "pg_get_object_address",
+        &[("classid", "OID"), ("objid", "OID"), ("objsubid", "INT")],
+    ),
+    (
+        "pg_get_publication_tables",
+        &[
             ("pubid", "OID"),
             ("relid", "OID"),
             ("attrs", "INT2VECTOR"),
             ("qual", "PG_NODE_TREE"),
         ],
-        "pg_get_replication_slots" => &[
+    ),
+    (
+        "pg_get_replication_slots",
+        &[
             ("slot_name", "NAME"),
             ("plugin", "NAME"),
             ("slot_type", "TEXT"),
@@ -176,25 +247,40 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("failover", "BOOLEAN"),
             ("synced", "BOOLEAN"),
         ],
-        "pg_get_shmem_allocations" => &[
+    ),
+    (
+        "pg_get_shmem_allocations",
+        &[
             ("name", "TEXT"),
             ("off", "BIGINT"),
             ("size", "BIGINT"),
             ("allocated_size", "BIGINT"),
         ],
-        "pg_get_wait_events" => &[("type", "TEXT"), ("name", "TEXT"), ("description", "TEXT")],
-        "pg_get_wal_resource_managers" => &[
+    ),
+    (
+        "pg_get_wait_events",
+        &[("type", "TEXT"), ("name", "TEXT"), ("description", "TEXT")],
+    ),
+    (
+        "pg_get_wal_resource_managers",
+        &[
             ("rm_id", "INT"),
             ("rm_name", "TEXT"),
             ("rm_builtin", "BOOLEAN"),
         ],
-        "pg_get_wal_summarizer_state" => &[
+    ),
+    (
+        "pg_get_wal_summarizer_state",
+        &[
             ("summarized_tli", "BIGINT"),
             ("summarized_lsn", "PG_LSN"),
             ("pending_lsn", "PG_LSN"),
             ("summarizer_pid", "INT"),
         ],
-        "pg_hba_file_rules" => &[
+    ),
+    (
+        "pg_hba_file_rules",
+        &[
             ("rule_number", "INT"),
             ("file_name", "TEXT"),
             ("line_number", "INT"),
@@ -207,7 +293,10 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("options", "ARRAY<TEXT>"),
             ("error", "TEXT"),
         ],
-        "pg_ident_file_mappings" => &[
+    ),
+    (
+        "pg_ident_file_mappings",
+        &[
             ("map_number", "INT"),
             ("file_name", "TEXT"),
             ("line_number", "INT"),
@@ -216,23 +305,35 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("pg_username", "TEXT"),
             ("error", "TEXT"),
         ],
-        "pg_identify_object" => &[
+    ),
+    (
+        "pg_identify_object",
+        &[
             ("type", "TEXT"),
             ("schema", "TEXT"),
             ("name", "TEXT"),
             ("identity", "TEXT"),
         ],
-        "pg_identify_object_as_address" => &[
+    ),
+    (
+        "pg_identify_object_as_address",
+        &[
             ("type", "TEXT"),
             ("object_names", "ARRAY<TEXT>"),
             ("object_args", "ARRAY<TEXT>"),
         ],
-        "pg_last_committed_xact" => &[
+    ),
+    (
+        "pg_last_committed_xact",
+        &[
             ("xid", "XID"),
             ("timestamp", "TIMESTAMPTZ"),
             ("roident", "OID"),
         ],
-        "pg_lock_status" => &[
+    ),
+    (
+        "pg_lock_status",
+        &[
             ("locktype", "TEXT"),
             ("database", "OID"),
             ("relation", "OID"),
@@ -250,64 +351,97 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("fastpath", "BOOLEAN"),
             ("waitstart", "TIMESTAMPTZ"),
         ],
-        "pg_logical_slot_get_binary_changes" => {
-            &[("lsn", "PG_LSN"), ("xid", "XID"), ("data", "VARBINARY")]
-        }
-        "pg_logical_slot_get_changes" => &[("lsn", "PG_LSN"), ("xid", "XID"), ("data", "TEXT")],
-        "pg_logical_slot_peek_binary_changes" => {
-            &[("lsn", "PG_LSN"), ("xid", "XID"), ("data", "VARBINARY")]
-        }
-        "pg_logical_slot_peek_changes" => &[("lsn", "PG_LSN"), ("xid", "XID"), ("data", "TEXT")],
-        "pg_ls_archive_statusdir" => &[
+    ),
+    (
+        "pg_logical_slot_get_changes",
+        &[("lsn", "PG_LSN"), ("xid", "XID"), ("data", "TEXT")],
+    ),
+    (
+        "pg_logical_slot_peek_changes",
+        &[("lsn", "PG_LSN"), ("xid", "XID"), ("data", "TEXT")],
+    ),
+    (
+        "pg_ls_archive_statusdir",
+        &[
             ("name", "TEXT"),
             ("size", "BIGINT"),
             ("modification", "TIMESTAMPTZ"),
         ],
-        "pg_ls_logdir" => &[
+    ),
+    (
+        "pg_ls_logdir",
+        &[
             ("name", "TEXT"),
             ("size", "BIGINT"),
             ("modification", "TIMESTAMPTZ"),
         ],
-        "pg_ls_logicalmapdir" => &[
+    ),
+    (
+        "pg_ls_logicalmapdir",
+        &[
             ("name", "TEXT"),
             ("size", "BIGINT"),
             ("modification", "TIMESTAMPTZ"),
         ],
-        "pg_ls_logicalsnapdir" => &[
+    ),
+    (
+        "pg_ls_logicalsnapdir",
+        &[
             ("name", "TEXT"),
             ("size", "BIGINT"),
             ("modification", "TIMESTAMPTZ"),
         ],
-        "pg_ls_replslotdir" => &[
+    ),
+    (
+        "pg_ls_replslotdir",
+        &[
             ("name", "TEXT"),
             ("size", "BIGINT"),
             ("modification", "TIMESTAMPTZ"),
         ],
-        "pg_ls_tmpdir" => &[
+    ),
+    (
+        "pg_ls_tmpdir",
+        &[
             ("name", "TEXT"),
             ("size", "BIGINT"),
             ("modification", "TIMESTAMPTZ"),
         ],
-        "pg_ls_waldir" => &[
+    ),
+    (
+        "pg_ls_waldir",
+        &[
             ("name", "TEXT"),
             ("size", "BIGINT"),
             ("modification", "TIMESTAMPTZ"),
         ],
-        "pg_mcv_list_items" => &[
+    ),
+    (
+        "pg_mcv_list_items",
+        &[
             ("index", "INT"),
             ("values", "ARRAY<TEXT>"),
             ("nulls", "ARRAY<BOOLEAN>"),
             ("frequency", "DOUBLE"),
             ("base_frequency", "DOUBLE"),
         ],
-        "pg_options_to_table" => &[("option_name", "TEXT"), ("option_value", "TEXT")],
-        "pg_partition_tree" => &[
+    ),
+    (
+        "pg_options_to_table",
+        &[("option_name", "TEXT"), ("option_value", "TEXT")],
+    ),
+    (
+        "pg_partition_tree",
+        &[
             ("relid", "REGCLASS"),
             ("parentrelid", "REGCLASS"),
             ("isleaf", "BOOLEAN"),
             ("level", "INT"),
         ],
-        "pg_prepared_statement" => &[
+    ),
+    (
+        "pg_prepared_statement",
+        &[
             ("name", "TEXT"),
             ("statement", "TEXT"),
             ("prepare_time", "TIMESTAMPTZ"),
@@ -317,15 +451,24 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("generic_plans", "BIGINT"),
             ("custom_plans", "BIGINT"),
         ],
-        "pg_prepared_xact" => &[
+    ),
+    (
+        "pg_prepared_xact",
+        &[
             ("transaction", "XID"),
             ("gid", "TEXT"),
             ("prepared", "TIMESTAMPTZ"),
             ("ownerid", "OID"),
             ("dbid", "OID"),
         ],
-        "pg_replication_slot_advance" => &[("slot_name", "NAME"), ("end_lsn", "PG_LSN")],
-        "pg_sequence_parameters" => &[
+    ),
+    (
+        "pg_replication_slot_advance",
+        &[("slot_name", "NAME"), ("end_lsn", "PG_LSN")],
+    ),
+    (
+        "pg_sequence_parameters",
+        &[
             ("start_value", "BIGINT"),
             ("minimum_value", "BIGINT"),
             ("maximum_value", "BIGINT"),
@@ -334,7 +477,10 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("cache_size", "BIGINT"),
             ("data_type", "OID"),
         ],
-        "pg_show_all_file_settings" => &[
+    ),
+    (
+        "pg_show_all_file_settings",
+        &[
             ("sourcefile", "TEXT"),
             ("sourceline", "INT"),
             ("seqno", "INT"),
@@ -343,7 +489,10 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("applied", "BOOLEAN"),
             ("error", "TEXT"),
         ],
-        "pg_show_all_settings" => &[
+    ),
+    (
+        "pg_show_all_settings",
+        &[
             ("name", "TEXT"),
             ("setting", "TEXT"),
             ("unit", "TEXT"),
@@ -362,14 +511,23 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("sourceline", "INT"),
             ("pending_restart", "BOOLEAN"),
         ],
-        "pg_show_replication_origin_status" => &[
+    ),
+    (
+        "pg_show_replication_origin_status",
+        &[
             ("local_id", "OID"),
             ("external_id", "TEXT"),
             ("remote_lsn", "PG_LSN"),
             ("local_lsn", "PG_LSN"),
         ],
-        "pg_split_walfile_name" => &[("segment_number", "DECIMAL"), ("timeline_id", "BIGINT")],
-        "pg_stat_file" => &[
+    ),
+    (
+        "pg_split_walfile_name",
+        &[("segment_number", "DECIMAL"), ("timeline_id", "BIGINT")],
+    ),
+    (
+        "pg_stat_file",
+        &[
             ("size", "BIGINT"),
             ("access", "TIMESTAMPTZ"),
             ("modification", "TIMESTAMPTZ"),
@@ -377,7 +535,10 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("creation", "TIMESTAMPTZ"),
             ("isdir", "BOOLEAN"),
         ],
-        "pg_stat_get_activity" => &[
+    ),
+    (
+        "pg_stat_get_activity",
+        &[
             ("datid", "OID"),
             ("pid", "INT"),
             ("usesysid", "OID"),
@@ -410,7 +571,10 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("leader_pid", "INT"),
             ("query_id", "BIGINT"),
         ],
-        "pg_stat_get_archiver" => &[
+    ),
+    (
+        "pg_stat_get_archiver",
+        &[
             ("archived_count", "BIGINT"),
             ("last_archived_wal", "TEXT"),
             ("last_archived_time", "TIMESTAMPTZ"),
@@ -419,10 +583,10 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("last_failed_time", "TIMESTAMPTZ"),
             ("stats_reset", "TIMESTAMPTZ"),
         ],
-        "pg_stat_get_backend_subxact" => {
-            &[("subxact_count", "INT"), ("subxact_overflowed", "BOOLEAN")]
-        }
-        "pg_stat_get_io" => &[
+    ),
+    (
+        "pg_stat_get_io",
+        &[
             ("backend_type", "TEXT"),
             ("object", "TEXT"),
             ("context", "TEXT"),
@@ -442,7 +606,10 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("fsync_time", "DOUBLE"),
             ("stats_reset", "TIMESTAMPTZ"),
         ],
-        "pg_stat_get_progress_info" => &[
+    ),
+    (
+        "pg_stat_get_progress_info",
+        &[
             ("pid", "INT"),
             ("datid", "OID"),
             ("relid", "OID"),
@@ -467,7 +634,10 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("param19", "BIGINT"),
             ("param20", "BIGINT"),
         ],
-        "pg_stat_get_recovery_prefetch" => &[
+    ),
+    (
+        "pg_stat_get_recovery_prefetch",
+        &[
             ("stats_reset", "TIMESTAMPTZ"),
             ("prefetch", "BIGINT"),
             ("hit", "BIGINT"),
@@ -479,7 +649,10 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("block_distance", "INT"),
             ("io_depth", "INT"),
         ],
-        "pg_stat_get_replication_slot" => &[
+    ),
+    (
+        "pg_stat_get_replication_slot",
+        &[
             ("slot_name", "TEXT"),
             ("spill_txns", "BIGINT"),
             ("spill_count", "BIGINT"),
@@ -491,7 +664,10 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("total_bytes", "BIGINT"),
             ("stats_reset", "TIMESTAMPTZ"),
         ],
-        "pg_stat_get_slru" => &[
+    ),
+    (
+        "pg_stat_get_slru",
+        &[
             ("name", "TEXT"),
             ("blks_zeroed", "BIGINT"),
             ("blks_hit", "BIGINT"),
@@ -502,7 +678,10 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("truncates", "BIGINT"),
             ("stats_reset", "TIMESTAMPTZ"),
         ],
-        "pg_stat_get_subscription" => &[
+    ),
+    (
+        "pg_stat_get_subscription",
+        &[
             ("subid", "OID"),
             ("relid", "OID"),
             ("pid", "INT"),
@@ -514,13 +693,19 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("latest_end_time", "TIMESTAMPTZ"),
             ("worker_type", "TEXT"),
         ],
-        "pg_stat_get_subscription_stats" => &[
+    ),
+    (
+        "pg_stat_get_subscription_stats",
+        &[
             ("subid", "OID"),
             ("apply_error_count", "BIGINT"),
             ("sync_error_count", "BIGINT"),
             ("stats_reset", "TIMESTAMPTZ"),
         ],
-        "pg_stat_get_wal" => &[
+    ),
+    (
+        "pg_stat_get_wal",
+        &[
             ("wal_records", "BIGINT"),
             ("wal_fpi", "BIGINT"),
             ("wal_bytes", "DECIMAL"),
@@ -531,7 +716,10 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("wal_sync_time", "DOUBLE"),
             ("stats_reset", "TIMESTAMPTZ"),
         ],
-        "pg_stat_get_wal_receiver" => &[
+    ),
+    (
+        "pg_stat_get_wal_receiver",
+        &[
             ("pid", "INT"),
             ("status", "TEXT"),
             ("receive_start_lsn", "PG_LSN"),
@@ -548,7 +736,10 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("sender_port", "INT"),
             ("conninfo", "TEXT"),
         ],
-        "pg_stat_get_wal_senders" => &[
+    ),
+    (
+        "pg_stat_get_wal_senders",
+        &[
             ("pid", "INT"),
             ("state", "TEXT"),
             ("sent_lsn", "PG_LSN"),
@@ -562,18 +753,27 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("sync_state", "TEXT"),
             ("reply_time", "TIMESTAMPTZ"),
         ],
-        "pg_timezone_abbrevs" => &[
+    ),
+    (
+        "pg_timezone_abbrevs",
+        &[
             ("abbrev", "TEXT"),
             ("utc_offset", "INTERVAL"),
             ("is_dst", "BOOLEAN"),
         ],
-        "pg_timezone_names" => &[
+    ),
+    (
+        "pg_timezone_names",
+        &[
             ("name", "TEXT"),
             ("abbrev", "TEXT"),
             ("utc_offset", "INTERVAL"),
             ("is_dst", "BOOLEAN"),
         ],
-        "pg_wal_summary_contents" => &[
+    ),
+    (
+        "pg_wal_summary_contents",
+        &[
             ("relfilenode", "OID"),
             ("reltablespace", "OID"),
             ("reldatabase", "OID"),
@@ -581,9 +781,18 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("relblocknumber", "BIGINT"),
             ("is_limit_block", "BOOLEAN"),
         ],
-        "pg_walfile_name_offset" => &[("file_name", "TEXT"), ("file_offset", "INT")],
-        "pg_xact_commit_timestamp_origin" => &[("timestamp", "TIMESTAMPTZ"), ("roident", "OID")],
-        "ts_debug" => &[
+    ),
+    (
+        "pg_walfile_name_offset",
+        &[("file_name", "TEXT"), ("file_offset", "INT")],
+    ),
+    (
+        "pg_xact_commit_timestamp_origin",
+        &[("timestamp", "TIMESTAMPTZ"), ("roident", "OID")],
+    ),
+    (
+        "ts_debug",
+        &[
             ("alias", "TEXT"),
             ("description", "TEXT"),
             ("token", "TEXT"),
@@ -591,9 +800,27 @@ pub(super) fn record_columns(name: &str) -> Option<&'static [(&'static str, &'st
             ("dictionary", "REGDICTIONARY"),
             ("lexemes", "ARRAY<TEXT>"),
         ],
-        "ts_parse" => &[("tokid", "INT"), ("token", "TEXT")],
-        "ts_stat" => &[("word", "TEXT"), ("ndoc", "INT"), ("nentry", "INT")],
-        "ts_token_type" => &[("tokid", "INT"), ("alias", "TEXT"), ("description", "TEXT")],
-        _ => return None,
-    })
+    ),
+    ("ts_parse", &[("tokid", "INT"), ("token", "TEXT")]),
+    (
+        "ts_stat",
+        &[("word", "TEXT"), ("ndoc", "INT"), ("nentry", "INT")],
+    ),
+    (
+        "ts_token_type",
+        &[("tokid", "INT"), ("alias", "TEXT"), ("description", "TEXT")],
+    ),
+];
+
+/// The `(name, SQL type)` columns of the built-in function `name` (lower case).
+pub(super) fn record_columns(name: &str) -> Option<Columns> {
+    FUNCTIONS
+        .binary_search_by_key(&name, |(function, _)| function)
+        .ok()
+        .map(|at| FUNCTIONS[at].1)
+}
+
+#[test]
+fn functions_are_sorted() {
+    assert!(FUNCTIONS.is_sorted_by_key(|(name, _)| *name));
 }

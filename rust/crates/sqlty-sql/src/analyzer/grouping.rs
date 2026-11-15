@@ -3,8 +3,8 @@
 //!
 //! A column is grouped when a grouping key names it (`GROUP BY 1` and a result alias
 //! name the select item), when a key is the expression it sits in, or when the keys
-//! include its table's whole primary key, PostgreSQL's functional dependency. Only
-//! columns that resolve to a schema table are judged.
+//! include its table's whole primary key, PostgreSQL's functional dependency. Columns
+//! of schema tables, CTEs and derived tables are judged.
 
 use std::ops::ControlFlow;
 
@@ -19,7 +19,7 @@ use super::names::object_name;
 use super::query::Analyzer;
 use super::registry::lookup;
 use super::scope::{any_merging_join, Scope, Source};
-use crate::catalog::fold;
+use crate::catalog::{fold, SchemaColumn};
 use crate::diagnostics::NameRule;
 
 impl Analyzer<'_> {
@@ -120,23 +120,34 @@ impl Analyzer<'_> {
             let Some(table) = table.named() else {
                 continue;
             };
-            let Some(columns) = self.schema.table(table) else {
-                continue;
+            // A CTE or derived table has no primary key to group by.
+            let names: Vec<&str> = match self.virtual_columns(table) {
+                Some(columns) => columns.iter().map(|column| column.name.as_str()).collect(),
+                None => {
+                    let columns = self.schema.table(table).unwrap_or_default();
+                    if Self::groups_primary_key(grouped, &reference, columns) {
+                        continue;
+                    }
+                    columns
+                        .iter()
+                        .filter(|column| !column.invisible)
+                        .map(|column| column.name.as_str())
+                        .collect()
+                }
             };
-            if self.virtual_columns(table).is_some()
-                || self.groups_primary_key(grouped, &reference, table)
-            {
-                continue;
-            }
-            for column in columns.iter().filter(|column| !column.invisible) {
-                if !grouped.covers(&reference, &column.name) {
-                    self.record_ungrouped(&reference, &column.name);
+            for column in names {
+                if !grouped.covers(&reference, column) {
+                    self.record_ungrouped(&reference, column);
                 }
             }
         }
     }
 
     fn record_ungrouped(&self, reference: &str, column: &str) {
+        // PostgreSQL calls an unaliased subquery `unnamed_subquery`.
+        let reference = Some(reference)
+            .filter(|reference| !reference.is_empty())
+            .unwrap_or("unnamed_subquery");
         self.diag.record(
             NameRule::UngroupedColumn,
             format!(
@@ -145,12 +156,8 @@ impl Analyzer<'_> {
         );
     }
 
-    /// Whether the keys include every primary key column of the schema table `table`,
-    /// read by `reference`.
-    fn groups_primary_key(&self, grouped: &Grouped, reference: &str, table: &str) -> bool {
-        let Some(columns) = self.schema.table(table) else {
-            return false;
-        };
+    /// Whether the keys include every primary key column of `columns`, read by `reference`.
+    fn groups_primary_key(grouped: &Grouped, reference: &str, columns: &[SchemaColumn]) -> bool {
         let mut key = columns
             .iter()
             .filter(|column| column.primary_key)
@@ -221,29 +228,27 @@ impl Visitor for Ungrouped<'_, '_> {
                 (expr, self.analyzer.whole_row_table(expr, self.scope))
             {
                 let reference = fold(ident, self.analyzer.dialect);
-                if !self
-                    .analyzer
-                    .groups_primary_key(self.grouped, &reference, table)
-                {
+                let columns = self.analyzer.schema.table(table).unwrap_or_default();
+                if !Analyzer::groups_primary_key(self.grouped, &reference, columns) {
                     self.analyzer.record_ungrouped(&reference, "*");
                 }
             }
             return ControlFlow::Continue(());
         };
         // Outer columns of a correlated query are grouped, or not, by their own query.
-        if !self
+        let read = self
             .scope
             .iter()
-            .any(|source| source.reference == reference)
-            || self.analyzer.schema.table(&table).is_none()
-            || self.analyzer.virtual_columns(&table).is_some()
-        {
+            .any(|source| source.reference == reference);
+        let columns = match self.analyzer.virtual_columns(&table) {
+            Some(_) => Some(&[][..]),
+            None => self.analyzer.schema.table(&table),
+        };
+        let Some(columns) = columns.filter(|_| read) else {
             return ControlFlow::Continue(());
-        }
+        };
         if !self.grouped.covers(&reference, &column)
-            && !self
-                .analyzer
-                .groups_primary_key(self.grouped, &reference, &table)
+            && !Analyzer::groups_primary_key(self.grouped, &reference, columns)
         {
             self.analyzer.record_ungrouped(&reference, &column);
         }

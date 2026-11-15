@@ -220,6 +220,37 @@ def test_cases(definitions: str) -> None:
         assert type_relations(source, VERSION, COLUMNS) == python_relations(source), source
 
 
+MODULES = {
+    "class body targets": "class Row(TypedDict):\n    a: int\n    x.y: int\n    x.z = 1\n    p, q = 1, 2\n",
+    "type parameters": "class Row[*Ts, **P](TypedDict):\n    a: int\n"
+    "class G(TypedDict, Generic[T, 'U']):\n    a: int\n",
+    "functional forms": "X = TypedDict('X', {1: int})\nN = NamedTuple('N', [('a', int, 1)])\n",
+    "empty Annotated": "class Row(BaseModel):\n    a: Annotated[()]\n",
+    "model configs": "class A(BaseModel):\n    model_config = {'extra': 'allow', **base}\n    a: int\n"
+    "class B(BaseModel):\n    class Config:\n        x.y = 1\n        z: int = 1\n    a: int\n"
+    "class C(BaseModel):\n    model_config = ConfigDict(extra=EXTRA)\n    a: int\n"
+    "class D(BaseModel, **opts):\n    a: int\n"
+    "class E(BaseModel, Generic[T]):\n    a: int\n"
+    "class F(BaseModel):\n    model_config = {**base}\n    a: int\n",
+    "strict and fields": "class Row(BaseModel):\n    a: Annotated[int, Strict(strict=False)]\n"
+    "    b: Annotated[int, Strict(flag)]\n    c: int = Field(**opts)\n",
+    "extra items": "class A(TypedDict, extra_items=Unknown):\n    a: int\n"
+    "class B(A, closed=True):\n    b: int\n"
+    "class C(TypedDict, extra_items=int):\n    a: int\n"
+    "class D(C, extra_items=int):\n    b: int\n",
+}
+MODULE_HEAD = (
+    "from typing import Annotated, Generic, NamedTuple, TypedDict, TypeVar\n"
+    "from pydantic import BaseModel, ConfigDict, Field, Strict\n"
+    "T = TypeVar('T')\n"
+)
+
+
+@pytest.mark.parametrize("module", MODULES.values(), ids=MODULES.keys())
+def test_modules(module: str) -> None:
+    same(MODULE_HEAD + module)
+
+
 REAL = [
     "int",
     "str",

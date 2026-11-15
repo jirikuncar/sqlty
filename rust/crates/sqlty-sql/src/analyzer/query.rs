@@ -202,10 +202,14 @@ impl<'a> Analyzer<'a> {
                         recursive = true;
                     }
                 }
-                let mut columns = inner
-                    .query_columns(&cte.query)?
-                    .unwrap_or_else(|| vec![Column::unknown("*")]);
-                rename_columns(&mut columns, &cte.alias, self.dialect);
+                let columns_of = |inner: &Self| -> Inferred<Vec<Column>> {
+                    let mut columns = inner
+                        .query_columns(&cte.query)?
+                        .unwrap_or_else(|| vec![Column::unknown("*")]);
+                    rename_columns(&mut columns, &cte.alias, self.dialect);
+                    Ok(columns)
+                };
+                let mut columns = columns_of(&inner)?;
                 // A column of a recursive CTE is non-null only if it is in the anchor and in
                 // the recursive term reading the rows so far: repeat until nothing changes.
                 for round in 0..=columns.len() + 1 {
@@ -231,10 +235,7 @@ impl<'a> Analyzer<'a> {
                         break;
                     }
                     inner.virtuals.insert(name.clone(), columns);
-                    columns = inner
-                        .query_columns(&cte.query)?
-                        .unwrap_or_else(|| vec![Column::unknown("*")]);
-                    rename_columns(&mut columns, &cte.alias, self.dialect);
+                    columns = columns_of(&inner)?;
                 }
                 let key = (!recursive)
                     .then(|| inner.output_key(&cte.query, &columns))
@@ -587,6 +588,21 @@ impl<'a> Analyzer<'a> {
                         .map_or_else(|| column_name(expr), |a| alias_name(a, self.dialect)),
                 ),
                 SelectItem::Wildcard(_) => {
+                    // ClickHouse reads `system.one` without a FROM.
+                    if from.is_some_and(<[_]>::is_empty)
+                        && matches!(
+                            self.dialect,
+                            SqlDialect::Postgres
+                                | SqlDialect::MySql
+                                | SqlDialect::Sqlite
+                                | SqlDialect::Other("duckdb")
+                        )
+                    {
+                        self.diag.record(
+                            NameRule::RejectedQuery,
+                            "`SELECT *` with no FROM selects no columns",
+                        );
+                    }
                     columns.extend(self.star(None, scope, from));
                     if let Some(rules) = &mut rules {
                         rules.resize(columns.len(), (None, None));
@@ -821,11 +837,13 @@ fn is_wild(expr: &Expr) -> bool {
     }
 }
 
+/// What a branch no dialect here types is: `VALUES` or `TABLE`, the only others a set
+/// operation holds.
 fn set_expr_kind(body: &SetExpr) -> &'static str {
-    match body {
-        SetExpr::Values(_) => "a VALUES list",
-        SetExpr::Table(_) => "a TABLE query",
-        _ => "this query form",
+    if matches!(body, SetExpr::Values(_)) {
+        "a VALUES list"
+    } else {
+        "a TABLE query"
     }
 }
 
@@ -866,6 +884,7 @@ fn names_result_column(key: &Expr, select: &Select) -> bool {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use sqlparser::ast::{Ident, Statement, TableAlias, TableAliasColumnDef};
 

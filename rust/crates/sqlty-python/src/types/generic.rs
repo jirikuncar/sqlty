@@ -139,9 +139,7 @@ pub fn specialize(
             for ((param, arg), (open, start, end)) in params.iter().zip(args).zip(&ranges) {
                 let at = written.len();
                 let range = TextRange::new(size(at + open)?, size(at + end + 1)?);
-                let Expr::Subscript(subscript) = parse_at(&text, range)? else {
-                    return None;
-                };
+                let subscript = parse_at(&text, range)?.subscript_expr()?;
                 let node = match *subscript.slice {
                     Expr::Tuple(tuple)
                         if tuple.range().start().to_usize() == at + start
@@ -162,14 +160,11 @@ pub fn specialize(
         })
         .collect();
     let resolver = names.source.resolver(Known::Imported);
-    out.field_types = info
-        .field_types
+    out.field_types = out
+        .annotations
         .iter()
-        .map(|(name, tp)| {
-            let tp = match out.annotations.get(name) {
-                Some(annotation) => resolver.resolve(&annotation.expr, &annotation.source, names),
-                None => tp.clone(),
-            };
+        .map(|(name, annotation)| {
+            let tp = resolver.resolve(&annotation.expr, &annotation.source, names);
             (name, tp)
         })
         .collect();

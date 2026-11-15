@@ -239,7 +239,13 @@ impl FunctionRule {
         } else {
             self.second
         };
-        predicate.is_some() || self.result == FunctionType::Argument(position)
+        let typed_by_first = matches!(
+            self.result,
+            FunctionType::ArgumentAs(_) | FunctionType::Code
+        );
+        predicate.is_some()
+            || self.result == FunctionType::Argument(position)
+            || (position == 0 && typed_by_first)
     }
 
     /// Whether the rule needs the type of every argument to decide whether it applies.
@@ -295,6 +301,7 @@ fn admits(types: Option<u128>, operand: Option<Operand>) -> bool {
 include!(concat!(env!("OUT_DIR"), "/inference_rules.rs"));
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::alloc::{GlobalAlloc, Layout, System};
     use std::cell::Cell;

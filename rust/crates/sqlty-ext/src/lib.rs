@@ -21,6 +21,8 @@
 //! the pieces that need no interpreter (the schema cache, `schema_for`, nullability
 //! mapping). The `#[pyfunction]`s are exercised from Python by `tests/`.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
+
 mod config;
 mod outline;
 mod server;
@@ -589,8 +591,8 @@ type QueryDiagnosticTuple = (
 /// end, table, column)` tuples:
 /// `unknown-table`, `unknown-column`, `ambiguous-column`, `duplicate-alias`, `unknown-function`,
 /// `unknown-type`, `unsupported-syntax`, `insert-missing-column`, `insert-value-count`,
-/// `ungrouped-column`, `fanout-aggregate`, `chasm-join`, `unproven-join` and
-/// `entity-mismatch`.
+/// `ungrouped-column`, `fanout-aggregate`, `chasm-join`, `unproven-join`, `entity-mismatch`
+/// and `rejected-query`.
 /// Tables, columns and
 /// ambiguity are only judged with a schema.
 ///
@@ -1595,8 +1597,7 @@ fn type_relations(
                         .iter()
                         .map(|value| match compat::set_member(value) {
                             Lit::Str(text) => format!("s:{text}"),
-                            Lit::Int(digits) => format!("i:{digits}"),
-                            Lit::Bool(_) => unreachable!("a set member is not a bool"),
+                            member => format!("i:{}", member.repr()),
                         })
                         .collect();
                     format!("[{}]", values.join(", "))
@@ -1944,7 +1945,7 @@ fn check_modules(
         // Below the red zone `maybe_grow` maps a new segment for every module.
         .stack_size(STACK_SEGMENT)
         .build()
-        .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+        .expect("the check threads start");
     let found = detach(py, || -> Result<Vec<_>, Error> {
         let schemas: Vec<_> = configs.iter_mut().map(CheckConfig::schema).collect();
         let checkers = configs
@@ -2454,6 +2455,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

@@ -91,8 +91,6 @@ def main(argv: list[str] | None = None) -> None:
                 serve()
             case "version":
                 _cmd_version()
-            case _:
-                parser.print_help()
     except ConfigError as exc:
         print(f"sqlty: error: {exc}", file=sys.stderr)
         sys.exit(EXIT_ERROR)
@@ -1236,15 +1234,6 @@ def _is_excluded_entry(
     if by_name.match(name):
         return True
     return relative_dir is not None and bool(by_path.match((relative_dir / name).as_posix()))
-
-
-def _is_excluded(path: Path, base: Path, patterns: tuple[str, ...]) -> bool:
-    """Whether ``path`` matches an exclude glob, relative to ``base`` (``_walk`` batches this per directory)."""
-    resolved = path.resolve()
-    if not resolved.is_relative_to(base):
-        return _is_excluded_entry(resolved.name, None, patterns)
-    relative = PurePosixPath(resolved.relative_to(base).as_posix())
-    return _is_excluded_entry(relative.name, relative.parent, patterns)
 
 
 def _is_included(path: Path, base: Path, patterns: tuple[str, ...]) -> bool:

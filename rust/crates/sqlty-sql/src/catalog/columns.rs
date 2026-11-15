@@ -380,12 +380,10 @@ pub(super) fn column_named<'a>(
 }
 
 pub(super) fn mark_primary_key(columns: &mut [RawColumn], expr: &Expr, dialect: SqlDialect) {
-    if let Expr::Identifier(ident) = expr {
-        let name = fold(ident, dialect);
-        if let Some(column) = columns.iter_mut().find(|c| c.name == name) {
-            column.not_null = true;
-            column.primary_key = true;
-        }
+    let named = |c: &RawColumn| matches!(expr, Expr::Identifier(i) if c.name == fold(i, dialect));
+    for column in columns.iter_mut().filter(|c| named(c)) {
+        column.not_null = true;
+        column.primary_key = true;
     }
 }
 
@@ -406,4 +404,93 @@ pub(super) fn unique_key(
         name: name.map(|name| fold(name, dialect)),
         columns,
     })
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use sqlparser::ast::{Statement, TableConstraint};
+
+    use super::*;
+    use crate::analyzer::parse_ddl;
+
+    fn columns(sql: &str, dialect: SqlDialect) -> Vec<RawColumn> {
+        let Some(Statement::CreateTable(create)) =
+            parse_ddl(sql, dialect).and_then(|s| s.into_iter().next())
+        else {
+            unreachable!()
+        };
+        let mut columns = Vec::new();
+        for column in &create.columns {
+            merge_column(&mut columns, raw_column(column, dialect));
+        }
+        for constraint in &create.constraints {
+            match constraint {
+                TableConstraint::Check(check) => apply_check(&mut columns, &check.expr, dialect),
+                TableConstraint::PrimaryKey(pk) => {
+                    for index_column in &pk.columns {
+                        mark_primary_key(&mut columns, &index_column.column.expr, dialect);
+                    }
+                }
+                _ => {}
+            }
+        }
+        columns
+    }
+
+    fn groups(checks: &str) -> Vec<Vec<String>> {
+        let sql = format!("CREATE TABLE t (a INT, b INT, CHECK ({checks}))");
+        let Some(Statement::CreateTable(create)) =
+            parse_ddl(&sql, SqlDialect::Postgres).and_then(|s| s.into_iter().next())
+        else {
+            unreachable!()
+        };
+        let TableConstraint::Check(check) = &create.constraints[0] else {
+            unreachable!()
+        };
+        nonnull_groups(&check.expr, SqlDialect::Postgres)
+    }
+
+    #[test]
+    fn sqlite_autoincrement_on_a_column_that_is_not_the_rowid_is_a_default() {
+        let found = columns(
+            "CREATE TABLE t (a INT PRIMARY KEY AUTOINCREMENT)",
+            SqlDialect::Sqlite,
+        );
+        assert!(found[0].has_default);
+    }
+
+    #[test]
+    fn checks_of_a_column_and_a_repeated_column_narrow_each_other() {
+        let found = columns(
+            "CREATE TABLE t (a INT CHECK (a IN (1, 2)) CHECK (a IN (2, 3)), a INT CHECK (a IN (2, 4)), b INT, PRIMARY KEY (a, c, (b)))",
+            SqlDialect::Postgres,
+        );
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].values, Some(vec![Value::Int(2)]));
+        assert!(found[0].primary_key && !found[1].primary_key);
+    }
+
+    #[test]
+    fn a_count_of_non_nulls_reads_either_way_round() {
+        let ab = vec![vec!["a".to_string(), "b".to_string()]];
+        for (check, expected) in [
+            ("0 < num_nonnulls(a, b)", ab.clone()),
+            ("1 <= num_nonnulls(a, b)", ab.clone()),
+            ("1 = num_nonnulls(a, b)", ab.clone()),
+            ("num_nonnulls(a, b) > 0", ab.clone()),
+            ("(b IS NOT NULL) OR (a IS NOT NULL)", ab),
+            (
+                "num_nulls(a, b) = 0",
+                vec![vec!["a".to_string()], vec!["b".to_string()]],
+            ),
+            ("1 > num_nonnulls(a, b)", Vec::new()),
+            ("1 >= num_nonnulls(a, b)", Vec::new()),
+            ("num_nonnulls(a, b) = a", Vec::new()),
+            ("num_nonnulls(*) = 1", Vec::new()),
+            ("current_date > 0", Vec::new()),
+        ] {
+            assert_eq!(groups(check), expected, "{check}");
+        }
+    }
 }

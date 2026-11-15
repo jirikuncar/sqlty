@@ -174,6 +174,8 @@ def explain_select(
         'common.arithmetic.numbers'
         >>> explain_select("SELECT 1::INTEGER AS one")
         [ColumnRules(name='one', type_rule=None, nullability_rule=None)]
+        >>> explain_select("SELEC 1") is None
+        True
     """
     columns = _explain_select(sql, dialect=dialect, schema_sql=schema_sql)
     if columns is None:
@@ -263,7 +265,8 @@ def query_diagnostics(
     The rules are ``unknown-table``, ``unknown-column``, ``ambiguous-column``, ``duplicate-alias``,
     ``unknown-function``, ``unknown-type``, ``unsupported-syntax``,
     ``insert-missing-column``, ``insert-value-count``, ``ungrouped-column``,
-    ``fanout-aggregate``, ``chasm-join``, ``unproven-join`` and ``entity-mismatch``. Tables and
+    ``fanout-aggregate``, ``chasm-join``, ``unproven-join``, ``entity-mismatch`` and
+    ``rejected-query``. Tables and
     columns are only judged when ``schema_sql`` defines some tables. ``rules`` sets severities
     as ``[tool.sqlty.rules]`` does, and a rule set to ``"ignore"`` (by default
     ``unproven-join`` and ``entity-mismatch``) is left out, as in ``check_source``.

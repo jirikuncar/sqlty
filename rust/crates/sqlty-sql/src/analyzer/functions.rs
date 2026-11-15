@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use sqlparser::ast::{
     BinaryOperator, Expr, FunctionArg, FunctionArgExpr, FunctionArgOperator, FunctionArguments,
+    Value,
 };
 
 use super::dialect::SqlDialect;
@@ -92,6 +93,14 @@ pub(super) fn function_name(func: &sqlparser::ast::Function) -> String {
         .unwrap_or_default()
 }
 
+/// The arguments of a call written with a list: none for `CURRENT_DATE` or `f(SELECT ...)`.
+pub(super) fn arg_list(args: &FunctionArguments) -> &[FunctionArg] {
+    match args {
+        FunctionArguments::List(list) => &list.args,
+        _ => &[],
+    }
+}
+
 /// The leading unnamed expression arguments of a call (`*` and named arguments end the list).
 pub(super) fn positional_args(args: &FunctionArguments) -> Vec<&Expr> {
     match args {
@@ -162,9 +171,20 @@ impl<'a> Analyzer<'a> {
                 for expr in args {
                     typed_args.push(self.expr(expr, scope)?);
                 }
+                // An argument of unknown type, a placeholder too, can hold any value of the
+                // common type.
+                let opaque = args
+                    .iter()
+                    .zip(&typed_args)
+                    .any(|(expr, typed)| !typed.is_known() && !valueless(expr));
                 if let Some(common) = common_of(typed_args.iter().cloned(), self.dialect) {
-                    return Ok(common);
+                    return Ok(if opaque {
+                        strip(common, self.dialect)
+                    } else {
+                        common
+                    });
                 }
+                self.reject_unmatched("argument", &typed_args);
                 let first = typed_args
                     .iter()
                     .find(|typed| typed.is_known())
@@ -270,7 +290,10 @@ impl<'a> Analyzer<'a> {
                 let sql_type = typed.sql().unwrap_or_default();
                 match operand_type(&typed) {
                     Some("DOUBLE" | "FLOAT" | "REAL") => sql("DOUBLE"),
-                    Some("DECIMAL" | "NUMERIC") if decimal_integer_digits(sql_type) > 18 => {
+                    Some(ty)
+                        if matches!(ty, "DECIMAL" | "NUMERIC")
+                            && decimal_integer_digits(sql_type) > 18 =>
+                    {
                         Ok(strip(typed, self.dialect))
                     }
                     Some(_) => sql("BIGINT"),
@@ -347,17 +370,12 @@ impl<'a> Analyzer<'a> {
         };
         let typed = [typed(0)?, typed(1)?];
         let [first, second] = [0, 1].map(|i| operand(typed[i].as_ref().and_then(operand_type)));
-        let all = if rules.iter().any(FunctionRule::reads_all) {
-            args.iter()
-                .map(|arg| self.expr(arg, scope))
-                .collect::<Inferred<Vec<_>>>()?
-        } else {
-            Vec::new()
-        };
-        let all: Vec<_> = all
-            .iter()
-            .map(|typed| operand(operand_type(typed)))
-            .collect();
+        let mut all = Vec::new();
+        if rules.iter().any(FunctionRule::reads_all) {
+            for arg in args {
+                all.push(operand(operand_type(&self.expr(arg, scope)?)));
+            }
+        }
         let found = rules
             .iter()
             .find(|rule| rule.applies(self.dialect, first, second, &all));
@@ -425,7 +443,17 @@ fn decimal_integer_digits(sql_type: &str) -> u32 {
     }
 }
 
+/// `NULL`: no value of its own to type.
+fn valueless(expr: &Expr) -> bool {
+    match expr {
+        Expr::Nested(inner) => valueless(inner),
+        Expr::Value(value) => matches!(value.value, Value::Null),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use sqlparser::ast::Function;
 

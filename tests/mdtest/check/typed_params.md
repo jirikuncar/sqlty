@@ -43,6 +43,23 @@ class User(TypedDict):
 q = SQL[User, ById]("--sql\nSELECT id, name FROM users WHERE id = %(id)s")
 ```
 
+## A literal percent sign beside a bound parameter
+
+```python
+from typing import TypedDict
+
+from sqlty import SQL
+
+
+class Row(TypedDict):
+    n: int
+    pct: str
+
+
+q = SQL[Row, tuple[int]]("--sql\nSELECT %s::INTEGER AS n, '100%%'::TEXT AS pct")
+# error:
+```
+
 ## A stale row type is fixed, its parameters kept
 
 ```python
@@ -197,6 +214,33 @@ s = SQL[tuple[str], ById]("--sql\nSELECT name FROM users WHERE id = %(id)s")
 t = SQL[tuple[str], tuple[int | None, str]]("--sql\nSELECT name FROM users WHERE id = %s OR name = %s")
 u = SQL[tuple[str], typing.Any]("--sql\nSELECT name FROM users WHERE id = %s")
 # error:
+```
+
+### A key of a base in another module
+
+Its type is not known here, so only the keys declared here are compared.
+
+`pkg/base.py`:
+
+```python
+from typing import TypedDict
+
+
+class Base(TypedDict):
+    id: str
+```
+
+```python
+from sqlty import SQL
+from pkg.base import Base
+
+
+class ByIdAndName(Base):
+    name: int
+
+
+# error: [params-type-mismatch] "ByIdAndName.name is int but query parameter 'name' expects str"
+q = SQL[tuple[str], ByIdAndName]("--sql\nSELECT name FROM users WHERE id = %(id)s AND name = %(name)s")
 ```
 
 ## Passed to a helper

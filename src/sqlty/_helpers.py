@@ -253,6 +253,8 @@ def index_functions(source: str | ParsedSource) -> dict[str, Helper]:
         >>> src = "from typing import Annotated\\nfrom sqlty import SQL\\ndef f[T](q: Annotated[str, SQL], t: type[T], /) -> T: ..."
         >>> index_functions(src)["f"]
         Helper(name='f', positional=('q', 't'), keywords=frozenset(), query='q', row='t', kind='function', params=None, rest=None, named=None, configured=False, database=None)
+        >>> index_functions("def f(q: str): ...")
+        {}
     """
     parsed = ParsedSource.of(source)
     annotated, marker = parsed.marker_names
@@ -338,7 +340,7 @@ class HelperIndex:
         self._names: frozenset[str] | None = None
         self._exports: dict[str, dict[str, tuple[str, str]]] = {}
         self._row_types: dict[str, dict[str, TypeInfo]] = {}
-        self._types: dict[tuple[str, str], Any] = {}
+        self._types: dict[tuple[str, str], tuple[Any, int]] = {}
         self._names_of: dict[str, ModuleTypes] = {}
         self._read: dict[tuple[Path, str], ParsedSource | None] = {}
         # Held while a cycle sentinel is cached, so only the thread that set it can read it.
@@ -573,27 +575,43 @@ class HelperIndex:
         target = _target(parsed, dotted)
         return None if target is None else self._type(*target)
 
-    def _type(self, module: str, name: str, _depth: int = 0) -> Any:
-        if _depth > 8 or (parsed := self.sources.get(module)) is None:
+    def _type(self, module: str, name: str) -> Any:
+        found = self._typed(module, name, 8)
+        return None if found is None else found[0]
+
+    def _typed(self, module: str, name: str, hops: int) -> tuple[Any, int] | None:
+        """The type ``name`` of ``module`` and the re-exports to it, or ``None`` past ``hops``.
+
+        A result past ``hops`` is not cached, and a cached one is ``None`` past them, so it
+        does not depend on which module asked first.
+        """
+        if hops < 0:
             return None
+        if (parsed := self.sources.get(module)) is None:
+            return None, 0
         from sqlty._type_extractor.ast_fields import _ast_type
         from sqlty._type_extractor.symbols import ModuleTypes
 
         with self._lock:
-            if (module, name) in self._types:
-                return self._types[module, name]
+            if (known := self._types.get((module, name))) is not None:
+                return known if known[1] <= hops else None
             # An import cycle sees the name as unknown while it is resolved.
-            self._types[module, name] = None
+            self._types[module, name] = None, 0
             if (names := self._names_of.get(module)) is None:
                 names = self._names_of[module] = ModuleTypes(parsed, self, module)
+            found: tuple[Any, int] | None = None, 0
             if name in names.local:
-                found = _ast_type(
-                    ast.Name(name), parsed.typing_aliases, names, parsed.imported_names
+                found = (
+                    _ast_type(ast.Name(name), parsed.typing_aliases, names, parsed.imported_names),
+                    0,
                 )
+            elif (target := self._reexports(module, parsed).get(name)) is not None:
+                found = self._typed(*target, hops - 1)
+                found = None if found is None else (found[0], found[1] + 1)
+            if found is None:
+                del self._types[module, name]
             else:
-                exports = self._reexports(module, parsed)
-                found = self._type(*exports[name], _depth + 1) if name in exports else None
-            self._types[module, name] = found
+                self._types[module, name] = found
             return found
 
     def _row_type(
@@ -698,7 +716,16 @@ def _import_entries(parsed: ParsedSource) -> list[tuple[str, str, str | None, in
 def _imports_of(
     entries: Iterable[tuple[str, str, str | None, int]], module: str | None
 ) -> tuple[dict[str, tuple[str, str]], dict[str, str]]:
-    """``_imports`` of ``(local, original, from-module or None, level)``, in ``ast.walk`` order."""
+    """``_imports`` of ``(local, original, from-module or None, level)``, in ``ast.walk`` order.
+
+    A relative import resolves only within a named module.
+
+    Example:
+        >>> _imports_of([("q", "q", "db", 1)], "pkg.app")
+        ({'q': ('pkg.db', 'q')}, {'q': 'pkg.db.q'})
+        >>> _imports_of([("q", "q", "db", 1)], None)
+        ({}, {})
+    """
     functions: dict[str, tuple[str, str]] = {}
     modules: dict[str, str] = {}
     package = module.rpartition(".")[0] if module else ""
@@ -990,7 +1017,7 @@ def _site_calls(
     names = set(helpers.names)
     names |= {local for local, (_, original) in functions.items() if original in names}
     if (sites := helper_sites(parsed.text, sorted(names))) is None:
-        return None
+        return None  # pragma: no cover - no pattern compiles for tens of thousands of names
 
     def module_of(prefix: str) -> str:
         head, _, rest = prefix.partition(".")

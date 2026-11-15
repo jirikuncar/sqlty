@@ -1,8 +1,8 @@
 //! Expression typing.
 
 use sqlparser::ast::{
-    AccessExpr, ArrayElemTypeDef, BinaryOperator, CaseWhen, DataType, Expr, Function,
-    FunctionArgumentClause, FunctionArguments, Ident, ObjectName, Subscript, UnaryOperator, Value,
+    AccessExpr, BinaryOperator, CaseWhen, DataType, Expr, Function, FunctionArgumentClause,
+    FunctionArguments, Ident, ObjectName, Subscript, UnaryOperator, Value,
 };
 
 use crate::catalog::{fold, FunctionReturn, SchemaColumn};
@@ -11,12 +11,12 @@ use sqlparser::ast::Spanned;
 use sqlparser::tokenizer::Span;
 
 use super::dialect::SqlDialect;
-use super::functions::{positional_args, Returns};
+use super::functions::{arg_list, positional_args, Returns};
 use super::inference::FunctionType;
 use super::literals::{constant, python_kind, strip, value_set};
 use super::memo::{first_column, Reporting};
 use super::names::{split_access, table_key};
-use super::operators::{category, common_of, common_type, operand_type, type_base};
+use super::operators::{category, common_of, common_type, operand_type, type_base, unmatched};
 use super::query::{Analyzer, Column};
 use super::scope::Scope;
 use super::sql_type::is_unmapped_builtin;
@@ -86,16 +86,14 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// The type of the values `unnest` returns from an array of this SQL type: PostgreSQL's
-    /// flattens every dimension.
+    /// The type of the values PostgreSQL's `unnest` returns from an array of this SQL type:
+    /// it flattens every dimension.
     pub(super) fn unnested_typed(&self, mut array: Option<&str>) -> Typed {
-        if self.dialect == SqlDialect::Postgres {
-            while let Some(inner) = array
-                .and_then(array_element)
-                .filter(|e| e.starts_with("ARRAY<"))
-            {
-                array = Some(inner);
-            }
+        while let Some(inner) = array
+            .and_then(array_element)
+            .filter(|e| e.starts_with("ARRAY<"))
+        {
+            array = Some(inner);
         }
         self.element_typed(array)
     }
@@ -129,20 +127,10 @@ impl<'a> Analyzer<'a> {
         Some((name, fields))
     }
 
-    /// Whether `data_type` is, or is an array of, a domain, enum or composite type the
-    /// schema defines.
+    /// Whether `data_type` is a domain, enum or composite type the schema defines; an array
+    /// of any type is a `list`.
     fn defines_type(&self, data_type: &DataType) -> bool {
-        match data_type {
-            DataType::Custom(name, _) => self.schema.defines_type(&table_key(name, self.dialect)),
-            DataType::Array(
-                ArrayElemTypeDef::AngleBracket(inner)
-                | ArrayElemTypeDef::Parenthesis(inner)
-                | ArrayElemTypeDef::ParenthesisNotNull(inner)
-                | ArrayElemTypeDef::Qualified(inner, _)
-                | ArrayElemTypeDef::SquareBracket(inner, _),
-            ) => self.defines_type(inner),
-            _ => false,
-        }
+        matches!(data_type, DataType::Custom(name, _) if self.schema.defines_type(&table_key(name, self.dialect)))
     }
 
     /// The upper-case name the built-in function `name` is looked up by. In PostgreSQL a
@@ -193,11 +181,10 @@ impl<'a> Analyzer<'a> {
 
     /// The type of a call to a function the schema defines.
     fn user_function(&self, name: &ObjectName, args: &FunctionArguments) -> Typed {
-        let count = match args {
-            FunctionArguments::List(list) => list.args.len(),
-            _ => 0,
-        };
-        match self.schema.function(&table_key(name, self.dialect), count) {
+        match self
+            .schema
+            .function(&table_key(name, self.dialect), arg_list(args).len())
+        {
             Some(
                 FunctionReturn::Scalar(typed)
                 | FunctionReturn::SetOf(typed)
@@ -311,7 +298,10 @@ impl<'a> Analyzer<'a> {
             }
             // MySQL full-text relevance is a floating-point number.
             Expr::MatchAgainst { .. } => Ok(from_sql_type("DOUBLE", self.dialect)),
-            Expr::Identifier(_) | Expr::CompoundIdentifier(_) => Ok(self.column_expr(expr, scope)),
+            Expr::Identifier(ident) => {
+                Ok(self.column_expr(expr, std::slice::from_ref(ident), scope))
+            }
+            Expr::CompoundIdentifier(parts) => Ok(self.column_expr(expr, parts, scope)),
             Expr::Value(value) => self.value_typed(&value.value),
             Expr::Exists { .. }
             | Expr::In { .. }
@@ -513,6 +503,11 @@ impl<'a> Analyzer<'a> {
             Value::SingleQuotedString(text) => {
                 Ok(constant(crate::values::Value::Str(text.clone())))
             }
+            Value::HexStringLiteral(hex) if hex.starts_with("0x") => {
+                let message = format!("hex literal too big: {hex}");
+                self.diag.record(NameRule::RejectedQuery, message);
+                Ok(Typed::UNKNOWN)
+            }
             // `X'41'` and `B'101'` are bit strings in PostgreSQL, binary strings elsewhere.
             Value::HexStringLiteral(_) | Value::SingleQuotedByteStringLiteral(_) => {
                 Ok(from_sql_type(
@@ -576,12 +571,21 @@ impl<'a> Analyzer<'a> {
         if let Some(common) = common_of(results.iter().cloned(), self.dialect) {
             return Ok(common);
         }
+        self.reject_unmatched("CASE", &results);
         let first = results.first().cloned().unwrap_or(Typed::UNKNOWN);
         Ok(if value_set(&first).is_some() {
             strip(first, self.dialect)
         } else {
             first
         })
+    }
+
+    /// PostgreSQL rejects `what` over `types` of different categories.
+    pub(super) fn reject_unmatched(&self, what: &str, types: &[Typed]) {
+        if let (SqlDialect::Postgres, Some((a, b))) = (self.dialect, unmatched(types)) {
+            let message = format!("{what} types {a} and {b} cannot be matched");
+            self.diag.record(NameRule::RejectedQuery, message);
+        }
     }
 
     /// A function call: a built-in by its [`Returns`] rule, else one the schema defines.
@@ -617,27 +621,26 @@ impl<'a> Analyzer<'a> {
         }
         let arg = args.first().copied();
         if let Some((rule, typed)) = self.function_rule(&name, &args, scope)? {
-            let at = |position: usize| match typed.get(position) {
-                Some(Some(typed)) => Ok(typed.clone()),
-                _ => args
-                    .get(position)
-                    .map_or(Ok(Typed::UNKNOWN), |arg| self.expr(arg, scope)),
+            let at = |position: usize| {
+                let read: &Option<Typed> = &typed[position];
+                read.clone()
+                    .expect("a rule reads the argument it is typed by")
             };
             let argument = || at(0);
             return Ok(match rule.result {
                 FunctionType::Sql(sql) => from_sql_type(sql, self.dialect),
                 FunctionType::Any => Typed::python_only("typing.Any"),
                 FunctionType::Unknown => Typed::UNKNOWN,
-                FunctionType::Argument(position) => at(position)?,
+                FunctionType::Argument(position) => at(position),
                 FunctionType::ArgumentAs(sql) => {
-                    let typed = argument()?;
+                    let typed = argument();
                     Typed::with_values(
                         typed.python().map(String::from),
                         Some(sql.to_string()),
                         typed.values,
                     )
                 }
-                FunctionType::Code => self.sum(argument()?, arg, scope)?,
+                FunctionType::Code => self.sum(argument(), arg, scope)?,
                 FunctionType::Returns(returns) => {
                     self.function_type_of(returns, &args, &typed, scope)?
                 }
@@ -712,6 +715,7 @@ fn name_span(expr: &Expr) -> Span {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::super::test_support::reports;
     use super::*;

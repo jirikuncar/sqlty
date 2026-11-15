@@ -584,3 +584,135 @@ fn planner_hints_spare_names_that_collide_with_them() {
         );
     }
 }
+
+#[test]
+fn rarer_star_expansions_and_result_stars() {
+    let schema = Some(load_schema(
+        "CREATE TABLE t (a INT); CREATE TABLE u (b INT)",
+        "mysql",
+    ));
+    let expand = |sql: &str| expand_star(sql, "mysql", schema.as_deref());
+    assert_eq!(expand("WITH c AS (SELECT 1 AS x) SELECT * FROM c, t"), None);
+    assert_eq!(expand("SELECT * FROM t, (SELECT 1 AS x) s"), None);
+    assert_eq!(expand("SELECT 1"), None);
+    assert_eq!(
+        expand("SELECT * FROM t, u").as_deref(),
+        Some("SELECT t.a, u.b FROM t, u")
+    );
+    let stars = |sql: &str| parse(sql, "postgres").result_stars();
+    assert_eq!(stars("CREATE TABLE x (a INT)"), Some(vec![]));
+    assert_eq!(
+        stars("(SELECT * FROM t) UNION SELECT a FROM t"),
+        Some(vec!["SELECT *".to_string()])
+    );
+}
+
+#[test]
+fn rarer_parser_inputs() {
+    let text = |sql: &str| parser_input(sql, SqlDialect::Postgres).text().to_string();
+    assert_eq!(text("SELECT 1 FOR"), "SELECT 1 FOR");
+    assert_eq!(
+        text("SELECT 1 FOR UPDATE OF (a)"),
+        "SELECT 1 FOR UPDATE OF (a)"
+    );
+    assert_eq!(
+        text("SELECT 1 FOR UPDATE OF a, (b)"),
+        "SELECT 1 FOR UPDATE OF a, (b)"
+    );
+    assert_eq!(
+        text("SELECT sum(a) OVER (ROWS BETWEEN %s PRECEDING AND CURRENT ROW EXCLUDE GROUP) FROM t"),
+        "SELECT sum(a) OVER (ROWS BETWEEN 1 FOLLOWING AND 1 FOLLOWING) FROM t"
+    );
+    let input = parser_input("--sql\nSELECT %s", SqlDialect::Postgres);
+    assert_eq!(
+        (input.original(8, false), input.original(9, true)),
+        (13, 15)
+    );
+    let input = parser_input("SET CONSTRAINTS %s DEFERRED", SqlDialect::Postgres);
+    assert_eq!(input.original(input.text().len(), true), 27);
+}
+
+#[test]
+fn rarer_respellings() {
+    let cases = [
+        (
+            SqlDialect::Postgres,
+            "SELECT sum(a) OVER (ORDER BY a ROWS UNBOUNDED PRECEDING EXCLUDE NO OTHERS) FROM t",
+            "SELECT sum(a) OVER (ORDER BY a ROWS UNBOUNDED PRECEDING ) FROM t",
+        ),
+        (
+            SqlDialect::Postgres,
+            "SELECT substring(x similar 'a' escape '#') FROM t",
+            "SELECT substring(x FROM 'a' FOR '#') FROM t",
+        ),
+        (
+            SqlDialect::Postgres,
+            "SELECT XMLSERIALIZE(DOCUMENT x AS text NO INDENT) FROM t",
+            "SELECT CAST( x AS text ) FROM t",
+        ),
+        (
+            SqlDialect::Postgres,
+            "SELECT XMLROOT(x, VERSION NO VALUE) FROM t",
+            "SELECT XMLROOT(x,  NULL) FROM t",
+        ),
+        (SqlDialect::MySql, "SELECT !, 1", "SELECT !, 1"),
+        (SqlDialect::MySql, "SELECT !", "SELECT !"),
+        (
+            SqlDialect::MySql,
+            "SELECT !!a, !(b), !c.d(1)",
+            "SELECT (NOT (NOT a)), (NOT (b)), (NOT c.d(1))",
+        ),
+        (
+            SqlDialect::MySql,
+            "SELECT 1, MOD(5, 2), (MOD 2)",
+            "SELECT 1, MOD(5, 2), (MOD 2)",
+        ),
+        (
+            SqlDialect::Postgres,
+            "SELECT JSON_ARRAY(SELECT 1",
+            "SELECT JSON_ARRAY(SELECT 1",
+        ),
+        (
+            SqlDialect::Postgres,
+            "DO LANGUAGE plpgsql 1",
+            "DO LANGUAGE plpgsql 1",
+        ),
+        (
+            SqlDialect::Postgres,
+            "SELECT * FROM XMLTABLE('/a' PASSING x)",
+            "SELECT * FROM XMLTABLE('/a' PASSING x)",
+        ),
+        (
+            SqlDialect::Postgres,
+            "SELECT substring(x similar 'a') FROM t",
+            "SELECT substring(x FROM 'a') FROM t",
+        ),
+        (SqlDialect::MySql, "SELECT !'a'", "SELECT (NOT 'a')"),
+        (SqlDialect::MySql, "SELECT 'a' MOD 2", "SELECT 'a' % 2"),
+        (SqlDialect::MySql, "SELECT 'abc", "SELECT 'abc"),
+    ];
+    for (dialect, sql, read) in cases {
+        assert_eq!(parser_input(sql, dialect).text(), read, "{sql}");
+    }
+}
+
+#[test]
+fn rarer_suggestions_highlights_and_placeholders() {
+    assert_eq!(
+        suggest::closest("abcdefgh", &["abcdefgx", "abcdefxx"]),
+        Some("abcdefgx")
+    );
+    assert_eq!(
+        parse_error("SELECT cast(a, b)", "postgres").as_deref(),
+        Some("unsupported in this dialect")
+    );
+    let operators: Vec<_> = crate::highlight::highlight("SELECT a ~~~ b", "postgres")
+        .into_iter()
+        .map(|(range, _)| range)
+        .collect();
+    assert_eq!(operators, [0..6, 9..12]);
+    assert_eq!(
+        crate::placeholders::percent_placeholders("SELECT 5 %% 2, %s"),
+        vec![15..17]
+    );
+}

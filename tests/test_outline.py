@@ -114,6 +114,19 @@ CASES = {
         "while x:\n    pass\nelse:\n    pass\nasync def f():\n    async with a as b: pass\n"
         "    async for x in y: pass\n    [x async for x in y]\n"
     ),
+    "every operator, import and kept statement": (
+        "import a.b as c, d\nfrom .e import f as g, h\nfrom . import i\n"
+        "x = a - b >> c ^ d | e & f // g % h @ i ** j << k\n"
+        "y = a != b > c is d in e not in f is not g <= h >= i < j == k\n"
+        "for x in y:\n    break\nelse:\n    continue\n"
+        "if a:\n    pass\nelif b:\n    pass\nelif c:\n    pass\nelse:\n    pass\n"
+        "def f(a, /, b=1, *c, d=2, e, **g): ...\nlambda a, /, b=1, *c, d=2, **e: 0\n"
+        "match x:\n    case None | False | True: pass\n"
+        "x += 1\nx *= 2\nx /= 3\nnonlocal x\n"
+        "def g():\n    if a:\n        class E: pass\n    elif b:\n        pass\n"
+        "async def f():\n    async for x in y:\n        class C: pass\n"
+        "    async with a as b, c:\n        class D: pass\n"
+    ),
 }
 
 

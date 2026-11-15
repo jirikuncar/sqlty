@@ -88,9 +88,6 @@ pub fn fix_source(
                 _ => {}
             }
         }
-        if next == fixed {
-            break;
-        }
         fixed = next;
     }
     if !wrapped.is_empty() {
@@ -153,6 +150,7 @@ fn fix_imports(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

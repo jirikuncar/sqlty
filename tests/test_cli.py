@@ -18,7 +18,6 @@ from sqlty._cli import (
     ConfigSource,
     SettingsResolver,
     _collect_python_files,
-    _is_excluded,
     build_parser,
     main,
 )
@@ -522,6 +521,9 @@ def test_complete_lists_the_names_at_a_cursor(tmp_path, monkeypatch, capsys) -> 
     assert (code, err) == (2, "sqlty: error: missing.py: no such file\n")
     code, _, err = _run(["complete", "use.py:3"], capsys)
     assert code == 2 and "expected FILE:LINE:COL" in err
+    (tmp_path / "notes.txt").write_text("")
+    code, _, err = _run(["complete", "notes.txt:1:1"], capsys)
+    assert (code, err) == (2, "sqlty: error: notes.txt: not a Python file sqlty reads\n")
 
 
 def _run(argv: list[str], capsys) -> tuple[int, str, str]:
@@ -705,15 +707,21 @@ def test_schema_or_config_file_checks_its_project(changed, tmp_path, monkeypatch
     assert _run(["rewrite", "--check", "notes.sql"], capsys)[0] == 0
 
 
-@pytest.mark.parametrize("command", ["rewrite", "strip"])
-def test_exit_codes(command, tmp_path, monkeypatch, capsys) -> None:
-    wrapped = 'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")\n'
-    (tmp_path / "q.py").write_text(QUERY if command == "rewrite" else wrapped)
+@pytest.mark.parametrize(
+    ("command", "source"),
+    [
+        ("rewrite", QUERY),
+        ("strip", 'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")\n'),
+        ("format", "q = '''--sql\nselect id,name from users'''\n"),
+    ],
+)
+def test_exit_codes(command, source, tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "q.py").write_text(source)
     monkeypatch.chdir(tmp_path)
 
     assert _run([command, "--check", "q.py"], capsys)[0] == 1
     assert _run([command, "--diff", "q.py"], capsys)[0] == 1
-    assert (tmp_path / "q.py").read_text() == (QUERY if command == "rewrite" else wrapped)
+    assert (tmp_path / "q.py").read_text() == source
     assert _run([command, "q.py"], capsys)[0] == 0
     assert _run([command, "--check", "q.py"], capsys)[0] == 0
     assert _run([command, "--diff", "q.py"], capsys)[0] == 0
@@ -830,12 +838,13 @@ def test_verbose_names_each_changed_file(
     assert "Fixed f.py" in out
 
 
-def test_exclude_path_glob_outside_its_base_never_matches(tmp_path: Path) -> None:
+def test_exclude_path_glob_outside_its_base_never_matches(tmp_path: Path, monkeypatch) -> None:
     project = tmp_path / "project"
     project.mkdir()
+    monkeypatch.chdir(project)
     outside = tmp_path / "other" / "gen.py"
-    assert not _is_excluded(outside, project.resolve(), ("other/gen.py", "*/gen.py"))
-    assert _is_excluded(outside, project.resolve(), ("gen.py",))
+    assert not ConfigSource(exclude=["other/gen.py", "*/gen.py"]).is_excluded(outside)
+    assert ConfigSource(exclude=["gen.py"]).is_excluded(outside)
 
 
 def test_walk_compiles_exclude_globs_once_per_pattern_set(tmp_path: Path) -> None:
@@ -1061,6 +1070,15 @@ def test_inline_config_works_with_isolated(tmp_path, monkeypatch) -> None:
     assert (settings.dialect, settings.import_style) == ("mysql", None)
 
 
+def test_inline_config_exclude(tmp_path, monkeypatch) -> None:
+    _tree(tmp_path, "gen/g.py", "q.py")
+    monkeypatch.chdir(tmp_path)
+    args = build_parser().parse_args(["check", "-c", 'exclude = ["gen"]', "."])
+    from sqlty._cli import _collect_python_files
+
+    assert _collect_python_files(args.paths, SettingsResolver(args).source) == [Path("q.py")]
+
+
 @pytest.mark.parametrize(
     ("value", "message"),
     [
@@ -1250,6 +1268,30 @@ def test_overrides_set_rule_severities_per_path(tmp_path, monkeypatch, capsys) -
         f"tests{sep}legacy{sep}test_old.py:2: [narrow-type] SQL[tuple[str]] should be SQL[tuple[int]]",
     ]
     assert "Found 1 error(s), 1 warning(s)" in out
+
+
+def test_a_symlink_out_of_the_project_matches_no_glob(tmp_path, monkeypatch) -> None:
+    """Globs match where a symlink points, relative to the config."""
+    project, outside = tmp_path / "proj", tmp_path / "outside"
+    project.mkdir()
+    outside.mkdir()
+    _overrides_project(project)
+    pyproject = project / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text().replace("[tool.sqlty]\n", '[tool.sqlty]\nqueries = ["tests"]\n', 1)
+    )
+    (outside / "test_x.py").write_text("")
+    (outside / "x.sql").write_text("SELECT 1")
+    link, query = project / "tests" / "test_link.py", project / "tests" / "link.sql"
+    link.symlink_to(outside / "test_x.py")
+    query.symlink_to(outside / "x.sql")
+    monkeypatch.chdir(project)
+    resolver = SettingsResolver(build_parser().parse_args(["check", "."]))
+
+    assert resolver.for_file(project / "tests" / "test_q.py").rules == {"narrow-type": "ignore"}
+    assert resolver.for_file(link).rules == {"narrow-type": "error"}
+    assert not resolver.for_file(query).names_query_file(query)
+    assert resolver.resolve(link) == (outside / "test_x.py").resolve()
 
 
 def test_overrides_apply_to_check_fix(tmp_path, monkeypatch, capsys) -> None:
@@ -1607,6 +1649,16 @@ def test_failing_format_command_keeps_the_file(tmp_path, monkeypatch, capsys, ca
     assert code == 0
     assert (tmp_path / "new.py").read_text().startswith("from sqlty import SQL\n")
     assert "format-command" in caplog.text and "cannot format" in caplog.text
+
+
+def test_missing_format_command_keeps_the_file(tmp_path, monkeypatch, capsys, caplog) -> None:
+    _project(tmp_path, f'format-command = ["{(tmp_path / "missing").as_posix()}"]\n')
+    (tmp_path / "new.py").write_text('q = "--sql\\nSELECT 1::INTEGER"\n')
+    monkeypatch.chdir(tmp_path)
+
+    assert _run(["rewrite", "new.py"], capsys)[0] == 0
+    assert (tmp_path / "new.py").read_text().startswith("from sqlty import SQL\n")
+    assert "format-command" in caplog.text and "missing" in caplog.text
 
 
 def test_rewrite_is_idempotent_with_ruff_format(tmp_path, monkeypatch, capsys) -> None:
@@ -2004,3 +2056,29 @@ def test_check_verbose_names_sqlc_and_aiosql_placeholders(tmp_path, monkeypatch,
     assert code == 0
     assert f"sql{os.sep}sqlc.sql: GetUser(email: str, id: int) -> tuple[int]" in out.splitlines()
     assert f"sql{os.sep}aiosql.sql: by_user(user.id: int) -> tuple[str | None]" in out.splitlines()
+
+
+def test_check_skips_a_query_file_that_is_not_utf8(tmp_path, monkeypatch, capsys, caplog) -> None:
+    (tmp_path / "sqlty.toml").write_text('schema = "schema.sql"\nqueries = "sql/"\n')
+    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INT NOT NULL);\n")
+    (tmp_path / "sql").mkdir()
+    (tmp_path / "sql" / "users.sql").write_bytes(
+        b"-- name: by-id\nSELECT nope FROM users; -- \xff\n"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    code, out, _ = _run(["check", "."], capsys)
+
+    assert (code, out) == (2, "")
+    assert "users.sql: not UTF-8" in caplog.text
+
+
+def test_check_reads_no_query_file_outside_its_config(tmp_path, monkeypatch, capsys) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "sqlty.toml").write_text('schema = "schema.sql"\nqueries = ["*.sql"]\n')
+    (project / "schema.sql").write_text("CREATE TABLE users (id INT NOT NULL);\n")
+    (tmp_path / "users.sql").write_text("-- name: by-id\nSELECT nope FROM users;\n")
+    monkeypatch.chdir(project)
+
+    assert _run(["check", "--config-file", "sqlty.toml", "../users.sql"], capsys) == (0, "", "")

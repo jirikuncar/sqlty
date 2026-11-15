@@ -73,3 +73,23 @@ c = SQL[Old[int]]("--sql\nSELECT 'x'::TEXT AS id")
 # error: [column-type-mismatch] "Box[int].value is int but query column 'value' infers str"
 d = SQL[Box[int]]("--sql\nSELECT 'x'::TEXT AS value")
 ```
+
+## Aliases passed to a helper
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+```
+
+```python
+from typing import Annotated
+
+from sqlty import SQL
+
+def fetch[T](query: Annotated[str, SQL], row: type[T]) -> list[T]: ...
+
+type Pair = tuple[int, str]
+
+# error: [column-type-mismatch] "Pair item 1 is str but query column 'int4' infers int"
+rows = fetch("SELECT 1::INTEGER, 2::INTEGER", Pair)
+```

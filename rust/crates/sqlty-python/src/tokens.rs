@@ -252,13 +252,12 @@ fn is_op(source: &str, tokens: &[Token], i: usize, op: &str) -> bool {
         .is_some_and(|t| t.kind == Kind::Op && &source[t.span.clone()] == op)
 }
 
-/// Index of the bracket closing the one at `open`.
+/// Index of the bracket closing the one at `open`, a `(`, `[` or `{`.
 fn closing(source: &str, tokens: &[Token], open: usize) -> Option<usize> {
     let close = match &source[tokens[open].span.clone()] {
         "(" => ")",
         "[" => "]",
-        "{" => "}",
-        _ => return None,
+        _ => "}",
     };
     let depth = tokens[open].depth;
     (open + 1..tokens.len())
@@ -468,15 +467,6 @@ impl Calls {
     }
 }
 
-impl IntoIterator for Calls {
-    type Item = Call;
-    type IntoIter = std::vec::IntoIter<Call>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.calls.into_iter()
-    }
-}
-
 impl<'a> IntoIterator for &'a Calls {
     type Item = &'a Call;
     type IntoIter = std::slice::Iter<'a, Call>;
@@ -595,6 +585,7 @@ pub(crate) fn wrapper_calls(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::scan::Scan;
@@ -773,5 +764,26 @@ mod tests {
             .map(Vec::len)
             .collect();
         assert_eq!(groups, vec![2, 1, 1, 1, 1, 1]);
+    }
+
+    #[test]
+    fn rarer_tokens() {
+        assert_eq!(field_end(b"{a", 1, false), None);
+        assert_eq!(field_end(b"{a:x", 1, true), None);
+        assert_eq!(string_at(" 'x'", 0), None);
+        let groups = |source: &str| -> Vec<usize> {
+            string_groups(source, &tokenize(source))
+                .iter()
+                .map(Vec::len)
+                .collect()
+        };
+        assert_eq!(groups("x = {\"a\"\n\"b\"}"), [2]);
+        assert_eq!(groups("f(g(), \"a\"\n\"b\")"), [2]);
+        assert_eq!(groups("x = (\"a\"\n\"b\""), [1, 1]);
+        let source = "q = t\"x\"";
+        let span = source.find('t').unwrap()..source.len();
+        assert_eq!(query_offset(source, &[span], 0, false), None);
+        assert!(calls("SQL[A(\"a\")\n").is_empty());
+        assert!(!calls("SQL[A]()").first().unwrap().plain);
     }
 }

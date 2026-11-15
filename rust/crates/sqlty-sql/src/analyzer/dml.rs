@@ -173,11 +173,9 @@ impl Analyzer<'_> {
         let Some(target) = scope.first().map(|source| source.reference.clone()) else {
             return self.facts.clone();
         };
+        let key = scope.first().and_then(|source| source.table.named());
         // A `BEFORE` row trigger may change any column of the row `RETURNING` returns.
-        let triggers = match scope.first().map(|source| &source.table) {
-            Some(Table::Named(key)) => self.schema.row_triggers(key),
-            _ => RowEvents::default(),
-        };
+        let triggers = key.map_or_else(RowEvents::default, |key| self.schema.row_triggers(key));
         let triggered = match stmt {
             Statement::Insert(insert) => {
                 triggers.insert
@@ -227,12 +225,8 @@ impl Analyzer<'_> {
         let non_null = |nullability| nullability == Nullability::NonNull;
         let written: Vec<String> = match stmt {
             Statement::Insert(insert) => {
-                let TableObject::TableName(name) = &insert.table else {
-                    return self.facts.clone();
-                };
-                let table = self
-                    .schema
-                    .table(&table_key(name, self.dialect))
+                let table = key
+                    .and_then(|key| self.schema.table(key))
                     .unwrap_or_default();
                 let columns: Vec<String> = if insert.columns.is_empty() {
                     table
@@ -313,10 +307,8 @@ impl Analyzer<'_> {
                         ..
                     })) => {
                         let mut upsert = scope.clone();
-                        upsert.push(Source::named(
-                            "excluded".to_string(),
-                            table_key(name, self.dialect),
-                        ));
+                        let table = key.unwrap_or_default().to_string();
+                        upsert.push(Source::named("excluded".to_string(), table));
                         let excluded = inserted
                             .iter()
                             .map(|column| {
@@ -480,21 +472,14 @@ impl Analyzer<'_> {
                     .collect();
                 // A target of a join is a column of any of its tables.
                 if multi.is_some() {
-                    for target in targets {
-                        let idents: Option<Vec<Ident>> = target
-                            .0
-                            .iter()
-                            .map(|part| part.as_ident().cloned())
-                            .collect();
-                        let expr = match idents {
-                            Some(mut idents) if idents.len() == 1 => {
-                                Expr::Identifier(idents.remove(0))
-                            }
-                            Some(idents) => Expr::CompoundIdentifier(idents),
-                            None => continue,
-                        };
-                        analyzer.check_references(&expr, &scope);
-                    }
+                    let exprs = targets.iter().filter_map(|target| {
+                        let mut idents = idents(target)?;
+                        Some(match idents.len() {
+                            1 => Expr::Identifier(idents.remove(0)),
+                            _ => Expr::CompoundIdentifier(idents),
+                        })
+                    });
+                    exprs.for_each(|expr| analyzer.check_references(&expr, &scope));
                 } else if let sqlparser::ast::TableFactor::Table { name, .. } =
                     &update.table.relation
                 {
@@ -543,10 +528,13 @@ impl Analyzer<'_> {
                 || width == 0
                 || (self.dialect == SqlDialect::Postgres && width < visible.len())
         };
-        if let Some(&width) = widths.iter().find(|&&width| !fits(width)) {
-            self.record_value_count(table, width, visible.len());
-        } else if let Some(&width) = widths.iter().min() {
-            self.check_missing_columns(table, &visible[..width]);
+        match widths.iter().find(|&&width| !fits(width)) {
+            Some(&width) => self.record_value_count(table, width, visible.len()),
+            None => widths
+                .iter()
+                .min()
+                .into_iter()
+                .for_each(|&width| self.check_missing_columns(table, &visible[..width])),
         }
     }
 
@@ -596,10 +584,10 @@ impl Analyzer<'_> {
         let Some(known) = self.schema.table(&table_key(table, self.dialect)) else {
             return;
         };
-        for column in columns {
-            let Some(ident) = column.0.last().and_then(|part| part.as_ident()) else {
-                continue;
-            };
+        let idents = columns
+            .iter()
+            .filter_map(|column| column.0.last().and_then(|part| part.as_ident()));
+        for ident in idents {
             let name = fold(ident, self.dialect);
             if !known.iter().any(|c| c.name == name) {
                 self.diag.record_about(
@@ -646,7 +634,12 @@ fn insert_widths(
     }
 }
 
+fn idents(name: &ObjectName) -> Option<Vec<Ident>> {
+    name.0.iter().map(|part| part.as_ident().cloned()).collect()
+}
+
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::super::test_support::{reports, statement};
     use super::*;

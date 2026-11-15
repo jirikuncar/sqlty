@@ -46,11 +46,10 @@ impl Analyzer<'_> {
             SqlDialect::Sqlite => sqlite_numeric_rank(t),
             _ => operand_type(t).and_then(numeric_rank),
         };
-        let promoted = |least: usize| match (rank(&l), rank(&r)) {
-            (Some(a), Some(b)) => {
+        let promoted = |least: usize| {
+            rank(&l).zip(rank(&r)).map_or(Typed::UNKNOWN, |(a, b)| {
                 from_sql_type(NUMERIC_RANKS[a.max(b).max(least)][0], self.dialect)
-            }
-            _ => Typed::UNKNOWN,
+            })
         };
         Ok(match rule.result {
             RuleType::Sql(name) => from_sql_type(name, self.dialect),
@@ -80,13 +79,13 @@ impl Analyzer<'_> {
         })
     }
 
-    /// Result type of a prefix operator's `rule` on an operand of type `typed`.
+    /// Result type of a prefix operator's `rule` on an operand of type `typed`: a SQL type or,
+    /// for `@right`, the operand's, all that rules/compile.rs lets a prefix rule give.
     pub(super) fn prefixed(&self, rule: &BinaryRule, typed: Typed) -> Typed {
-        match rule.result {
-            RuleType::Sql(name) => from_sql_type(name, self.dialect),
-            RuleType::Right => strip(typed, self.dialect),
-            _ => Typed::UNKNOWN,
-        }
+        let RuleType::Sql(name) = rule.result else {
+            return strip(typed, self.dialect);
+        };
+        from_sql_type(name, self.dialect)
     }
 
     /// The inference rule for `op operand`, with the operand's type.
@@ -220,13 +219,28 @@ pub(super) fn numeric_rank(sql_type: &str) -> Option<usize> {
 /// The rank of the number MySQL converts an operand to in arithmetic: unsigned integers,
 /// `YEAR`, `BIT` and `BOOLEAN` values become integers, strings become doubles.
 fn mysql_numeric_rank(typed: &Typed) -> Option<usize> {
+    const CONVERTED: [(&[&str], usize); 3] = [
+        (
+            &[
+                "UTINYINT",
+                "USMALLINT",
+                "UMEDIUMINT",
+                "UINT",
+                "UBIGINT",
+                "YEAR",
+                "BIT",
+                "BOOLEAN",
+            ],
+            2,
+        ),
+        (&["UDECIMAL"], 3),
+        (&["UDOUBLE", "TEXT", "VARCHAR", "CHAR", "ENUM", "SET"], 5),
+    ];
     let ty = rule_type(typed)?;
-    numeric_rank(ty).or(match ty {
-        "UTINYINT" | "USMALLINT" | "UMEDIUMINT" | "UINT" | "UBIGINT" | "YEAR" | "BIT"
-        | "BOOLEAN" => Some(2),
-        "UDECIMAL" => Some(3),
-        "UDOUBLE" | "TEXT" | "VARCHAR" | "CHAR" | "ENUM" | "SET" => Some(5),
-        _ => None,
+    numeric_rank(ty).or_else(|| {
+        CONVERTED
+            .iter()
+            .find_map(|(names, rank)| names.contains(&ty).then_some(*rank))
     })
 }
 
@@ -256,9 +270,6 @@ pub(super) fn mysql_date_add(
         (Expr::Interval(interval), _) if *op == BinaryOperator::Plus => (right_typed, interval),
         _ => return None,
     };
-    if !matches!(op, BinaryOperator::Plus | BinaryOperator::Minus) {
-        return None;
-    }
     let whole_days = interval.last_field.is_none()
         && matches!(
             interval.leading_field,
@@ -454,6 +465,32 @@ pub(super) fn common_of(
     })
 }
 
+/// Two of `types` in different PostgreSQL type categories, which have no common type
+/// (`select_common_type`), by their SQL types. Only categories sqlty is sure of count.
+pub(super) fn unmatched(types: &[Typed]) -> Option<(&str, &str)> {
+    let known: Vec<(char, &str)> = types.iter().filter_map(pg_category).collect();
+    let &(first, name) = known.first()?;
+    let &(_, other) = known.iter().find(|(category, _)| *category != first)?;
+    Some((name, other))
+}
+
+fn pg_category(typed: &Typed) -> Option<(char, &str)> {
+    let name = match typed.sql() {
+        Some(sql) => type_base(sql),
+        None if python_kind(typed) == Some("bool") => "BOOLEAN",
+        None => operand_type(typed)?,
+    };
+    let category = match name {
+        _ if numeric_rank(name).is_some() => 'N',
+        "TEXT" | "VARCHAR" | "CHAR" => 'S',
+        "BOOLEAN" => 'B',
+        "DATE" | "TIMESTAMP" | "TIMESTAMPTZ" | "TIME" | "TIMETZ" => 'D',
+        "INTERVAL" => 'T',
+        _ => return None,
+    };
+    Some((category, name))
+}
+
 /// The type category of a set operation's input; literals know only their Python type.
 pub(super) fn category(typed: &Typed) -> Option<&str> {
     match (typed.sql(), python_kind(typed)) {
@@ -463,6 +500,7 @@ pub(super) fn category(typed: &Typed) -> Option<&str> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
     use super::super::test_support::reports;

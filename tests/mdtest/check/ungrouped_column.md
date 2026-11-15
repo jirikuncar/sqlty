@@ -94,7 +94,7 @@ e = SQL[tuple[int, str, str | None, int, str, int]]("--sql\nSELECT * FROM users 
 ## Not judged
 
 Aggregates, window functions and subqueries hold their own columns, and a
-column of a derived table, a CTE or an unknown table is not judged.
+column of an unknown table is not judged.
 
 ```python
 from sqlty import SQL
@@ -103,9 +103,34 @@ from sqlty import SQL
 a = SQL[tuple[int, int]]("--sql\nSELECT count(*), max(total) FROM orders")
 b = SQL[tuple[int, int]]("--sql\nSELECT user_id, rank() OVER (ORDER BY user_id) FROM orders")
 c = SQL[tuple[str, int]]("--sql\nSELECT status, (SELECT count(*) FROM users WHERE users.id = 1) FROM orders GROUP BY status")
-d = SQL[tuple[str, int]]("--sql\nSELECT s.status, count(*) FROM (SELECT status, total FROM orders) s GROUP BY total")
 e = SQL[tuple[int]]("--sql\nWITH t AS (SELECT status FROM orders) SELECT count(*) FROM t")
 f = SQL[tuple[str, int]]("--sql\nSELECT status, count(*) FROM orders GROUP BY status HAVING max(total) > 1")
+```
+
+## Outer columns
+
+A column of the outer query is grouped, or not, by the outer query.
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int | None]]("--sql\nSELECT (SELECT orders.total + count(*) FROM users u GROUP BY u.team LIMIT 1) FROM orders")
+```
+
+## Derived tables and CTEs
+
+Their columns have no primary key to group by.
+
+```python
+from sqlty import SQL
+
+# error: [ungrouped-column]
+d = SQL[tuple[str, int]]("--sql\nSELECT s.status, count(*) FROM (SELECT status, total FROM orders) s GROUP BY total")
+# error: [ungrouped-column]
+e = SQL[tuple[int, int]]("--sql\nWITH t AS (SELECT total FROM orders) SELECT total, count(*) FROM t")
+# error: [ungrouped-column] "column `unnamed_subquery.n` must appear in GROUP BY"
+f = SQL[tuple[int, int, int]]("--sql\nSELECT orders.id, n, count(*) FROM orders, (SELECT 1 AS n) GROUP BY orders.id")
 ```
 
 ## MySQL

@@ -368,8 +368,8 @@ impl Checker<'_> {
             // helper call that receives it checks the composed query.
             let template = content.contains('{') && composes(scan.source(), first.start);
             self.marker_and_syntax(&content, &at, &first, template);
-            if after_marker(&content).is_some() && !template {
-                self.name_diagnostics(&content, &at, &scan.spans(group));
+            if let Some(query) = marked_query(&content).filter(|_| !template) {
+                self.name_diagnostics(&query, &at, &scan.spans(group));
             }
         }
     }
@@ -388,22 +388,18 @@ impl Checker<'_> {
             self.unchecked_argument(call, &At::at_line(line, call.span.clone()));
             return;
         };
-        if after_marker(&sql_content).is_none() {
+        let Some(query) = marked_query(&sql_content) else {
             return;
-        }
-        let query = match call.strings.as_slice() {
-            [first, .., last] => first.start..last.end,
-            [only] => only.clone(),
-            [] => call.span.clone(),
         };
-        let query = At::at_line(line, query);
-        self.marker_and_syntax(&sql_content, &query, &call.strings[0], false);
-        self.name_diagnostics(&sql_content, &query, &call.strings);
-        self.select_star(call, &sql_content, &query);
+        let strings = &call.strings;
+        let at = At::at_line(line, strings[0].start..strings[strings.len() - 1].end);
+        self.marker_and_syntax(&sql_content, &at, &strings[0], false);
+        self.name_diagnostics(&query, &at, strings);
+        self.select_star(call, &sql_content, &query, &at);
         let annotation = &scan.source()[call.annotation.clone()];
         let start = call.annotation.start + annotation.len() - annotation.trim_start().len();
         let end = call.annotation.start + annotation.trim_end().len();
-        self.annotation(call, &sql_content, &At::at_line(line, start..end));
+        self.annotation(call, &sql_content, &query, &At::at_line(line, start..end));
     }
 
     /// `inline-sql-comment` and `unparsed-query` of marked string content, which starts in
@@ -469,62 +465,55 @@ impl Checker<'_> {
 
     /// Why a query has untyped columns (the `name` rules), at the name when the query
     /// knows where it is written in the `literals`, else at the query.
-    fn name_diagnostics(&mut self, sql_content: &str, at: &At, literals: &[Range<usize>]) {
+    fn name_diagnostics(&mut self, query: &str, at: &At, literals: &[Range<usize>]) {
         let enabled = NameRule::ALL
             .iter()
             .any(|&rule| self.rules.is_enabled(Rule::Name(rule)));
         if !enabled {
             return;
         }
-        if let Some(query) = marked_query(sql_content) {
-            let source = self.scan.source();
-            for found in &self.analysis(&query).diagnostics {
-                let name = found.span.as_ref().and_then(|span| {
-                    let start = query_offset(source, literals, span.start, false)?;
-                    Some(start..query_offset(source, literals, span.end, true)?)
-                });
-                let name = name.map(|span| At::at_line(at.line, span));
-                let fix = found
-                    .replacement
-                    .as_ref()
-                    .zip(found.span.as_ref().zip(name.as_ref()))
-                    .filter(|(replacement, (span, name))| {
-                        let written = &source[name.span.clone()];
-                        let quote = literals
-                            .iter()
-                            .find(|literal| literal.contains(&name.span.start))
-                            .and_then(|literal| {
-                                source[literal.clone()]
-                                    .trim_start_matches(|c: char| c.is_ascii_alphabetic())
-                                    .chars()
-                                    .next()
-                            });
-                        written == &query[(*span).clone()]
-                            && !replacement.contains(['\\', '\n', '\r'])
-                            && quote.is_some_and(|quote| !replacement.contains(quote))
-                    })
-                    .map(|(replacement, (_, name))| {
-                        Edit::new(name.span.clone(), replacement.clone())
-                    });
-                self.report_fix(
-                    Rule::Name(found.rule),
-                    found.message.clone(),
-                    name.as_ref().unwrap_or(at),
-                    fix.into_iter().collect(),
-                );
-            }
+        let source = self.scan.source();
+        for found in &self.analysis(query).diagnostics {
+            let name = found.span.as_ref().and_then(|span| {
+                let start = query_offset(source, literals, span.start, false)?;
+                Some(start..query_offset(source, literals, span.end, true)?)
+            });
+            let name = name.map(|span| At::at_line(at.line, span));
+            let fix = found
+                .replacement
+                .as_ref()
+                .zip(found.span.as_ref().zip(name.as_ref()))
+                .filter(|(replacement, (span, name))| {
+                    let written = &source[name.span.clone()];
+                    let quote = literals
+                        .iter()
+                        .find(|literal| literal.contains(&name.span.start))
+                        .and_then(|literal| {
+                            source[literal.clone()]
+                                .trim_start_matches(|c: char| c.is_ascii_alphabetic())
+                                .chars()
+                                .next()
+                        });
+                    written == &query[(*span).clone()]
+                        && !replacement.contains(['\\', '\n', '\r'])
+                        && quote.is_some_and(|quote| !replacement.contains(quote))
+                })
+                .map(|(replacement, (_, name))| Edit::new(name.span.clone(), replacement.clone()));
+            self.report_fix(
+                Rule::Name(found.rule),
+                found.message.clone(),
+                name.as_ref().unwrap_or(at),
+                fix.into_iter().collect(),
+            );
         }
     }
 
     /// `select-star` and `select-star-no-schema`: a `*` or `t.*` that shapes the result.
     /// With a schema, a query in one literal is fixed by expanding the star.
-    fn select_star(&mut self, call: &Call, sql_content: &str, at: &At) {
-        let Some(query) = marked_query(sql_content) else {
-            return;
-        };
-        let stars = self.analysis(&query).parsed.result_stars();
-        let (dialect, schema) = route(&query, self.options.dialect.name(), self.options.schema);
-        let Some((rule, message)) = star_finding(stars, &query, schema.is_some()) else {
+    fn select_star(&mut self, call: &Call, sql_content: &str, query: &str, at: &At) {
+        let stars = self.analysis(query).parsed.result_stars();
+        let (dialect, schema) = route(query, self.options.dialect.name(), self.options.schema);
+        let Some((rule, message)) = star_finding(stars, query, schema.is_some()) else {
             return;
         };
         let fix = match (rule, call.strings.as_slice(), schema) {
@@ -544,13 +533,10 @@ impl Checker<'_> {
 
     /// Why a query has no row type, and what to do about it: the first name or construct
     /// the analyzer could not type, else the untyped columns.
-    fn untyped_cause(&self, sql_content: &str) -> String {
-        let Some(query) = marked_query(sql_content) else {
-            return "add casts (for example id::INTEGER) or a schema".to_string();
-        };
-        let (_, schema) = route(&query, self.options.dialect.name(), self.options.schema);
+    fn untyped_cause(&self, query: &str) -> String {
+        let (_, schema) = route(query, self.options.dialect.name(), self.options.schema);
         let has_schema = schema.is_some_and(|schema| !schema.is_empty());
-        let analysis = self.analysis(&query);
+        let analysis = self.analysis(query);
         if let Some(diagnostic) = analysis.diagnostics.first() {
             let hint = match diagnostic.rule {
                 NameRule::UnknownFunction => {
@@ -588,7 +574,7 @@ impl Checker<'_> {
     }
 
     /// `untyped-query`, `stale-type` and the literal rules, against the inferred row type.
-    fn annotation(&mut self, call: &Call, sql_content: &str, at: &At) {
+    fn annotation(&mut self, call: &Call, sql_content: &str, query: &str, at: &At) {
         let annotated = call.row_type(self.scan.source());
         let wrapper = if call.template {
             self.options.style.template_name()
@@ -606,7 +592,7 @@ impl Checker<'_> {
                 }
                 None => format!(
                     "{untyped} has no inferable row type: {}",
-                    self.untyped_cause(sql_content)
+                    self.untyped_cause(query)
                 ),
             };
             let fix = current.map(|current| Edit::new(call.annotation.clone(), current));
@@ -840,11 +826,13 @@ pub fn query_sites(
             sites.push((group.line, SiteKind::Skipped(rule), String::new()));
         }
     }
-    for (line, strings, _) in scan.marked_strings() {
-        if let Some(sql) = marked_query(&content(source, &strings)) {
-            sites.push((line, SiteKind::Query, sql));
-        }
-    }
+    sites.extend(
+        scan.marked_strings()
+            .into_iter()
+            .filter_map(|(line, strings, _)| {
+                marked_query(&content(source, &strings)).map(|sql| (line, SiteKind::Query, sql))
+            }),
+    );
     for call in &scan.calls {
         if call.content(source).is_none()
             && after_marker(&content(source, &call.strings)).is_some()
@@ -1339,6 +1327,7 @@ fn admits_tuple(annotated: &str, inferred: &str) -> bool {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use sqlty_sql::analyzer::SchemaData;
@@ -1906,5 +1895,71 @@ s = SQL[T]("plain")
                 (6, None),
             ]
         );
+    }
+
+    #[test]
+    fn helpers_read_quoted_optional_and_escaped_annotations() {
+        assert_eq!(union_members("\"str | None\""), ["str", "None"]);
+        assert_eq!(spell_unions("int"), "int");
+        assert_eq!(
+            literal_member(r"'\n\r\t\''"),
+            Some(Lit::Str("\n\r\t'".to_string()))
+        );
+        assert_eq!(literal_member(r"'\"), None);
+        assert_eq!(
+            literal_set("Optional[Literal['a']]"),
+            Some((vec![Lit::Str("a".to_string())], true))
+        );
+        assert!(literal_findings("int", "tuple[int]").is_empty());
+        assert_eq!(
+            literal_findings("tuple[Literal[1]]", "tuple[Literal[1, 2]]"),
+            [(
+                Rule::LiteralMismatch,
+                "SQL[tuple[Literal[1]]] item 0 is Literal[1] but its query column can be 2"
+                    .to_string()
+            )]
+        );
+        assert!(!admits_tuple("tuple[int]", "tuple[Literal[1.5]]"));
+        assert!(skipped_message(Rule::TstringSkipped).starts_with("t-string"));
+        assert_eq!(
+            select_star_finding("SELECT * FROMM t", "postgres", true).map(|f| f.0),
+            Some(Rule::SelectStar)
+        );
+    }
+
+    #[test]
+    fn rarer_untyped_causes_unwrapped_calls_and_unexpanded_stars() {
+        let (schema, _) = sqlty_sql::analyzer::load_schema_with_skipped(
+            r#"CREATE TABLE t ("Id" INT, a INT);"#,
+            "postgres",
+        );
+        let check = |source: &str| {
+            check_source(
+                source,
+                "postgres",
+                Some(&schema),
+                &RuleConfig::default(),
+                None,
+                false,
+                &[],
+            )
+        };
+        let found: Vec<String> = check(concat!(
+            "q = SQL[UNTYPED](\"--sql\\nSELECT 1::nope\")\n",
+            "r = SQL[UNTYPED](\"--sql\\nSELECT nope FROM t\")\n",
+        ))
+        .into_iter()
+        .filter(|d| d.rule == Rule::UntypedQuery)
+        .map(|d| d.message)
+        .collect();
+        assert!(
+            found[0].ends_with("; declare the type in the schema"),
+            "{found:?}"
+        );
+        assert!(!found[1].ends_with("in the schema"), "{found:?}");
+        assert!(check("from sqlty import SQL\nq = SQL(\"SELEC 1\")\n").is_empty());
+        let star = check("q = SQL[tuple[int, int]](\"--sql\\nSELECT * FROM t\")\n");
+        assert_eq!(star[0].rule, Rule::SelectStar);
+        assert!(star[0].fix.is_empty());
     }
 }

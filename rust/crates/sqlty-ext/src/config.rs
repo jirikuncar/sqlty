@@ -50,10 +50,8 @@ pub(crate) fn validate_config<'py>(
     table: &Bound<'py, PyDict>,
     source: &str,
 ) -> PyResult<(Bound<'py, PyDict>, Vec<String>)> {
-    let Value::Table(table) = to_toml(table.as_any())? else {
-        unreachable!("a dict converts to a table")
-    };
-    let found = config::validate(table, source).map_err(|error| PyValueError::new_err(error.0))?;
+    let found = config::validate(to_table(table)?, source)
+        .map_err(|error| PyValueError::new_err(error.0))?;
     converted(py, found)
 }
 
@@ -97,14 +95,10 @@ fn to_py<'py>(py: Python<'py>, value: &Value) -> PyResult<Bound<'py, PyAny>> {
         Value::Float(number) => number.into_pyobject(py)?.into_any(),
         Value::Boolean(flag) => PyBool::new(py, *flag).to_owned().into_any(),
         Value::Datetime(datetime) => datetime.to_string().into_pyobject(py)?.into_any(),
-        Value::Array(items) => PyList::new(
-            py,
-            items
-                .iter()
-                .map(|item| to_py(py, item))
-                .collect::<PyResult<Vec<_>>>()?,
-        )?
-        .into_any(),
+        Value::Array(items) => {
+            let items = items.iter().map(|item| to_py(py, item));
+            PyList::new(py, items.collect::<PyResult<Vec<_>>>()?)?.into_any()
+        }
         Value::Table(table) => table_to_py(py, table)?.into_any(),
     })
 }
@@ -113,11 +107,7 @@ fn to_py<'py>(py: Python<'py>, value: &Value) -> PyResult<Bound<'py, PyAny>> {
 /// its `str()`, as a misplaced value is still reported by the key it sits under.
 fn to_toml(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     Ok(if let Ok(dict) = value.cast::<PyDict>() {
-        let mut table = Table::new();
-        for (key, item) in dict {
-            table.insert(key.str()?.to_string(), to_toml(&item)?);
-        }
-        Value::Table(table)
+        Value::Table(to_table(dict)?)
     } else if let Ok(flag) = value.cast::<PyBool>() {
         Value::Boolean(flag.is_true())
     } else if value.is_instance_of::<PyInt>() {
@@ -127,13 +117,17 @@ fn to_toml(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     } else if let Ok(text) = value.cast::<PyString>() {
         Value::String(text.to_str()?.to_string())
     } else if value.is_instance_of::<PyList>() || value.is_instance_of::<PyTuple>() {
-        Value::Array(
-            value
-                .try_iter()?
-                .map(|item| to_toml(&item?))
-                .collect::<PyResult<_>>()?,
-        )
+        let items = value.try_iter()?.map(|item| to_toml(&item?));
+        Value::Array(items.collect::<PyResult<_>>()?)
     } else {
         Value::String(value.str()?.to_string())
     })
+}
+
+fn to_table(dict: &Bound<'_, PyDict>) -> PyResult<Table> {
+    let mut table = Table::new();
+    for (key, item) in dict {
+        table.insert(key.str()?.to_string(), to_toml(&item)?);
+    }
+    Ok(table)
 }

@@ -136,6 +136,36 @@ def test_a_revision_of_some_paths_reads_their_schema(
     assert git(repo, "worktree", "list").count("\n") == 1
 
 
+def test_git_not_installed_is_an_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from sqlty._breaking import GitError, _git
+
+    monkeypatch.setenv("PATH", str(tmp_path))
+
+    with pytest.raises(GitError, match="git is not installed"):
+        _git(tmp_path, "status")
+
+
+def test_a_file_that_is_not_utf8_is_skipped(cli: Cli, repo: Path) -> None:
+    (repo / "app" / "latin.py").write_bytes(b"x = '\\xe9'\n".replace(b"\\xe9", b"\xe9"))
+
+    result = cli(["breaking", "--against", "HEAD~1", "--direction", "forward"], {"cwd": repo})
+
+    assert result.returncode == 1, result.stderr
+    assert "latin.py: not UTF-8" in result.stderr
+
+
+def test_a_revision_whose_config_is_broken(cli: Cli, repo: Path) -> None:
+    (repo / "app" / "pyproject.toml").write_text("[tool.sqlty\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "broken")
+    git(repo, "rm", "-q", "app/pyproject.toml")
+
+    result = cli(["breaking", "--against", "HEAD", "app"], {"cwd": repo})
+
+    assert (result.returncode, result.stdout) == (0, "")
+    assert "Failed to parse" in result.stderr
+
+
 HELPER_CONFIG = """\
 [tool.sqlty]
 schema = "schema.sql"
@@ -444,6 +474,16 @@ def test_baseline_errors(cli: Cli, repo: Path, args: list[str], message: str) ->
     result = cli(["breaking", *args], {"cwd": repo})
 
     assert (result.returncode, result.stderr.strip()) == (2, message)
+
+
+def test_a_snapshot_that_is_not_json_is_an_error(tmp_path: Path) -> None:
+    from sqlty._config import ConfigError
+    from sqlty._snapshot import Snapshot
+
+    (tmp_path / "broken.json").write_text("{")
+
+    with pytest.raises(ConfigError, match="broken.json is not a sqlty snapshot: Expecting"):
+        Snapshot.load(tmp_path / "broken.json", "broken", [])
 
 
 @pytest.mark.parametrize("against", ["HEAD", "../head.json", "../head.sql"])

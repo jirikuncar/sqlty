@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 use ruff_python_ast::visitor::{walk_expr, walk_stmt, Visitor};
 use ruff_python_ast::{
-    Expr, ExprCall, ExprTString, Number, Stmt, StmtClassDef, StmtFunctionDef, UnaryOp,
+    self as ast, Expr, ExprCall, ExprTString, Number, Stmt, StmtClassDef, StmtFunctionDef, UnaryOp,
 };
 
 const BUILTINS: [&str; 5] = ["int", "str", "float", "bool", "bytes"];
@@ -295,13 +295,9 @@ impl Context<'_, '_> {
                     _ => return None,
                 }
             }
-            Expr::List(_) | Expr::Tuple(_) | Expr::Set(_) => {
-                let items = match expr {
-                    Expr::List(list) => &list.elts,
-                    Expr::Tuple(tuple) => &tuple.elts,
-                    Expr::Set(set) => &set.elts,
-                    _ => unreachable!(),
-                };
+            Expr::List(ast::ExprList { elts: items, .. })
+            | Expr::Tuple(ast::ExprTuple { elts: items, .. })
+            | Expr::Set(ast::ExprSet { elts: items, .. }) => {
                 let types: HashSet<Option<String>> = items
                     .iter()
                     .map(|item| match item {
@@ -395,19 +391,14 @@ impl Lines {
         Self(starts)
     }
 
-    /// The number of line starts.
-    pub fn count(&self) -> usize {
-        self.0.len()
-    }
-
     /// The line `offset` is on.
     pub fn line(&self, offset: usize) -> usize {
         self.0.partition_point(|&start| start <= offset)
     }
 
-    /// The offset of the start of the 1-based `line`, or `len` past the last one.
+    /// The offset of the start of the 1-based `line`, or `len` for line 0 or past the last one.
     pub fn start(&self, line: usize, len: usize) -> usize {
-        self.0.get(line - 1).copied().unwrap_or(len)
+        self.0.get(line.wrapping_sub(1)).copied().unwrap_or(len)
     }
 }
 

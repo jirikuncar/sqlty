@@ -331,8 +331,19 @@ impl Catalog {
 
     /// The catalog key of the table `name`, the same for every spelling of it.
     pub(crate) fn table_id(&self, name: &str) -> Option<&str> {
+        self.table_entry(name).map(|(key, _)| key)
+    }
+
+    fn table_entry(&self, name: &str) -> Option<(&str, &TableRelation)> {
         let key = lookup_key(&self.relations, &self.search_path, self.norm(name))?;
-        matches!(self.relations.get(key), Some(Relation::Table(_))).then_some(key)
+        Some((key, self.table_at(key)?))
+    }
+
+    fn table_at(&self, key: &str) -> Option<&TableRelation> {
+        match self.relations.get(key)? {
+            Relation::Table(table) => Some(table),
+            _ => None,
+        }
     }
 
     /// The foreign keys of the table `name` that hold for every row and that a query sees
@@ -381,10 +392,7 @@ impl Catalog {
         let mut column = column.to_string();
         // A foreign key cycle has no root; stop after any chain a schema could hold.
         for _ in 0..32 {
-            let Some(Relation::Table(relation)) = self.relations.get(table) else {
-                return None;
-            };
-            let next = relation.foreign_keys.iter().find_map(|fk| {
+            let next = self.table_at(table)?.foreign_keys.iter().find_map(|fk| {
                 let at = fk.columns.iter().position(|c| *c == column)?;
                 let (parent, _) = self.relations.get_key_value(fk.table.as_str())?;
                 Some((&**parent, fk.referred.get(at)?.clone()))
@@ -544,6 +552,7 @@ pub(crate) fn empty(dialect: SqlDialect) -> &'static Catalog {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::analyzer::canonical_type;
@@ -564,6 +573,19 @@ mod tests {
 
     fn pg(sql: &str) -> Catalog {
         load(sql, "postgres").0
+    }
+
+    #[test]
+    fn lookups_of_a_view_or_an_unknown_name_find_nothing() {
+        let c = pg("CREATE TABLE t (a int PRIMARY KEY);
+            CREATE VIEW v AS SELECT a FROM t;
+            CREATE TABLE u (b int REFERENCES v (a));
+            CREATE FUNCTION f(x int) RETURNS int LANGUAGE sql AS 'SELECT 1';
+            CREATE FUNCTION f(x text) RETURNS SETOF int LANGUAGE sql AS 'SELECT 1';");
+        assert!(c.nonnull_groups("v").is_empty());
+        assert_eq!(c.foreign_keys("nope").count(), 0);
+        assert_eq!(c.entity("u", "b"), None);
+        assert!(c.function("f", 1).is_none());
     }
 
     fn cols(catalog: &Catalog, table: &str) -> Vec<String> {
@@ -1110,6 +1132,66 @@ mod tests {
             ALTER TABLE t ADD COLUMN name text;
             CREATE VIEW v2 AS SELECT * FROM f();");
         assert_eq!(view_cols(&c, "v2"), ["id:INT", "name:TEXT"]);
+    }
+
+    #[test]
+    fn test_a_function_changed_before_a_rebuild_resolves_with_it() {
+        let c = pg("CREATE TABLE t (id int);
+            CREATE VIEW v1 AS SELECT id FROM t;
+            CREATE FUNCTION f() RETURNS SETOF u LANGUAGE sql AS 'select 1';
+            CREATE TABLE u (name text);
+            CREATE VIEW v2 AS SELECT * FROM f();");
+        assert_eq!(view_cols(&c, "v2"), ["name:TEXT"]);
+    }
+
+    #[test]
+    fn test_a_function_changed_before_a_type_is_resolved_in_the_rebuild() {
+        let c = pg("CREATE TABLE t (id int);
+            CREATE VIEW v1 AS SELECT id FROM t;
+            CREATE FUNCTION f() RETURNS int LANGUAGE sql AS 'select 1';
+            CREATE TYPE e AS ENUM ('a');
+            CREATE VIEW v2 AS SELECT f() AS n;");
+        assert_eq!(view_cols(&c, "v2"), ["n:INT"]);
+    }
+
+    #[test]
+    fn test_a_view_waiting_with_a_table_is_read_after_it() {
+        let c = pg("CREATE TABLE a (LIKE nope); CREATE VIEW v AS SELECT 1 AS x FROM nope2;");
+        assert_eq!(view_cols(&c, "v"), ["x:?"]);
+    }
+
+    #[test]
+    fn test_a_dropped_named_key_leaves_the_others() {
+        let c = pg("CREATE TABLE p (id int PRIMARY KEY);
+            CREATE TABLE c (pid int,
+                CONSTRAINT k FOREIGN KEY (pid) REFERENCES p (id),
+                CONSTRAINT k2 FOREIGN KEY (pid) REFERENCES p (id));
+            ALTER TABLE c DROP CONSTRAINT k;
+            CREATE VIEW v AS SELECT id FROM p;
+            CREATE TABLE r (vid int REFERENCES v (id));");
+        let tables: Vec<_> = c
+            .joins_with_prefix("p", "", 5)
+            .iter()
+            .map(|j| j.table.name)
+            .collect();
+        assert_eq!(tables, ["c"]);
+        assert_eq!(c.entity("v", "id"), None);
+        assert_eq!(c.entity("r", "vid"), None);
+    }
+
+    #[test]
+    fn test_joins_of_views_unknown_tables_and_dangling_keys() {
+        let c = pg("CREATE TABLE p (id int PRIMARY KEY);
+            CREATE TABLE c (pid int REFERENCES p (id), x int REFERENCES nope (id));
+            CREATE VIEW v AS SELECT id FROM p;");
+        assert!(c.joins_with_prefix("nope", "", 5).is_empty());
+        assert!(c.joins_with_prefix("v", "", 5).is_empty());
+        let tables: Vec<_> = c
+            .joins_with_prefix("p", "", 5)
+            .iter()
+            .map(|j| j.table.name)
+            .collect();
+        assert_eq!(tables, ["c"]);
     }
 
     /// Functions do not force the catalog to be built again.

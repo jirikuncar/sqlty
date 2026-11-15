@@ -129,14 +129,17 @@ fn site(
     lines: &Lines,
     source: &str,
 ) -> Site {
-    let (prefix, name, receiver) = match call.func.as_ref() {
-        Expr::Name(name) => (None, name.id.to_string(), None),
-        Expr::Attribute(attr) => (
+    let (prefix, name, receiver) = match call.func.as_attribute_expr() {
+        Some(attr) => (
             dotted(&attr.value),
             attr.attr.to_string(),
             receiver_class(&attr.value, stack, ctx),
         ),
-        _ => unreachable!("only names and dotted attributes are kept"),
+        None => {
+            let name = call.func.as_name_expr();
+            let name = name.expect("only names and dotted attributes are kept");
+            (None, name.id.to_string(), None)
+        }
     };
     let arg = |expr: &Expr| Arg {
         starred: matches!(expr, Expr::Starred(_)),
@@ -208,6 +211,7 @@ pub(crate) fn receiver_class(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

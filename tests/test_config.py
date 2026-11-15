@@ -214,6 +214,15 @@ def test_exclude_settings_are_loaded(tmp_path):
     assert (config["exclude"], config["extend_exclude"]) == (["a"], ["b"])
 
 
+def test_values_only_the_cli_checks_are_loaded_as_written(tmp_path: Path) -> None:
+    _config._parse_native_cached.cache_clear()
+    (tmp_path / "pyproject.toml").write_text("[tool.sqlty]\nuntyped = [1.5, 1979-05-27]\n")
+
+    config, _ = load_config(tmp_path)
+
+    assert config["untyped"] == [1.5, "1979-05-27"]
+
+
 def test_rules_must_be_a_table() -> None:
     with pytest.raises(ConfigError, match="rules must be a table"):
         validate_tool_table({"rules": ["select-star"]}, "pyproject.toml")
@@ -374,3 +383,10 @@ def test_requires_python_comes_from_the_nearest_pyproject_holding_it(tmp_path: P
     (tmp_path / "lib" / "pyproject.toml").write_text('[project]\nrequires-python = ">=3.14"\n')
     assert _config.requires_python(tmp_path / "app") == ">=3.15"
     assert _config.requires_python(tmp_path / "lib") == ">=3.14"
+
+
+def test_requires_python_skips_a_pyproject_it_cannot_read(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text('[project]\nrequires-python = ">=3.15"\n')
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "pyproject.toml").write_text("[project\n")
+    assert _config.requires_python(tmp_path / "app") == ">=3.15"

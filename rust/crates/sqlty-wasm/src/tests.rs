@@ -333,3 +333,115 @@ fn preview_checks_each_variant_of_a_query_built_in_branches() {
     let limited = rules("preview = true\nmax-query-variants = 1");
     assert_eq!(limited, Vec::<String>::new());
 }
+
+#[test]
+fn a_request_that_is_not_json_is_an_error() {
+    assert!(run("{").contains("\"error\""));
+}
+
+#[test]
+fn hover_outside_a_query_is_null() {
+    let answer =
+        ask(&json!({"op": "hover", "source": "x = 1", "offset": 99, "dialect": "postgres"}));
+    assert_eq!(answer, Value::Null);
+}
+
+#[test]
+fn sqruff_findings_are_reported_when_enabled() {
+    let source = "q = SQL[tuple[int]](\"--sql\\nSELECT id FROM users WHERE name = NULL\")\n";
+    let answer = ask(&json!({
+        "op": "analyze", "source": source, "schema": SCHEMA, "dialect": "postgres",
+        "config": "[rules]\nsqruff = \"warn\"",
+    }));
+    let rules: Vec<_> = answer["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|found| &found["rule"])
+        .collect();
+    assert_eq!(rules, [&json!("sqruff")]);
+}
+
+#[test]
+fn a_field_one_query_needs_optional_is_not_redundant() {
+    let schema = "CREATE TABLE coupons (id INTEGER PRIMARY KEY, owner_id INTEGER);";
+    let source = "from typing import Annotated, LiteralString, TypedDict\nfrom sqlty import SQL\n\n\
+        def fetch_all[T](query: Annotated[LiteralString, SQL], form: type[T], /) -> list[T]: ...\n\n\
+        class Coupon(TypedDict):\n    id: int\n    owner_id: int | None\n\n\
+        mine = fetch_all(\"SELECT id, owner_id FROM coupons WHERE owner_id = %(owner)s\", Coupon)\n\
+        any_ = fetch_all(\"SELECT id, owner_id FROM coupons\", Coupon)\n";
+    let answer = ask(&json!({
+        "op": "analyze", "source": source, "schema": schema, "dialect": "postgres",
+        "config": "[rules]\nredundant-optional = \"error\"",
+    }));
+    assert_eq!(answer["diagnostics"], json!([]));
+}
+
+#[test]
+fn parameters_stored_in_a_column_know_if_they_take_none() {
+    let source = "q = \"--sql\\nINSERT INTO users (id, name, email) VALUES (%s, %s, %s)\"\n";
+    let answer =
+        ask(&json!({"op": "analyze", "source": source, "schema": SCHEMA, "dialect": "postgres"}));
+    let nullable: Vec<_> = answer["queries"][0]["params"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|param| &param["nullable"])
+        .collect();
+    assert_eq!(nullable, [&json!(false), &json!(false), &json!(true)]);
+}
+
+#[test]
+fn an_offset_past_the_end_is_the_end() {
+    assert_eq!(crate::byte_offset("é", 5), 2);
+}
+
+#[test]
+fn every_highlight_and_candidate_kind_has_a_name() {
+    let source = "q = \"--sql\\nWITH c AS (SELECT 1) SELECT 'a', 1 + $1 FROM \"";
+    let answer = ask(&json!({
+        "op": "analyze", "source": source,
+        "schema": format!("{SCHEMA}\nCREATE VIEW v AS SELECT id FROM users;"), "dialect": "postgres",
+    }));
+    let kinds: std::collections::BTreeSet<_> = answer["highlights"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|found| found[2].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "comment",
+            "keyword",
+            "number",
+            "operator",
+            "parameter",
+            "string"
+        ]
+        .into()
+    );
+    let complete = ask(&json!({
+        "op": "complete", "source": source, "offset": source.len() - 1,
+        "schema": format!("{SCHEMA}\nCREATE VIEW v AS SELECT id FROM users;"), "dialect": "postgres",
+    }));
+    let kinds: std::collections::BTreeSet<_> = complete["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|found| found["kind"].as_str().unwrap())
+        .collect();
+    assert!(
+        ["table", "view", "cte"]
+            .iter()
+            .all(|kind| kinds.contains(kind)),
+        "{kinds:?}"
+    );
+    let source = "q = \"--sql\\nSELECT 1 FROM users JOIN \"";
+    let schema =
+        format!("{SCHEMA}\nCREATE TABLE posts (id INT, user_id INT REFERENCES users (id));");
+    let complete = ask(&json!({
+        "op": "complete", "source": source, "offset": source.len() - 1, "schema": schema, "dialect": "postgres",
+    }));
+    assert_eq!(complete["items"][0]["kind"], "join");
+}

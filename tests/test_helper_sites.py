@@ -145,6 +145,14 @@ CASES = {
         "from pkg.db import fetch_all\nx = 'žluť'; rows = fetch_all('SELECT 1', tuple[int])\n",
         [(2, "SELECT 1")],
     ),
+    "name not passed to the method": (
+        "from pkg.db import execute\nclass Repo:\n    def go(self, q):\n        execute(other)\n",
+        [(4, None)],
+    ),
+    "starred arguments of a method": (
+        "from pkg.db import Db\ndb: Db = Db()\ndb.fetch('SELECT %s', *args)\n",
+        [(3, "SELECT %s")],
+    ),
     # CPython and ruff both normalize identifiers (NFKC), but `HelperIndex.mentions` reads the
     # raw text, so a call spelled with compatibility characters is never looked for.
     "compatibility characters": (

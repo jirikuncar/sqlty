@@ -563,7 +563,41 @@ class Floats(Scores):
 
 class Narrows(Scores, extra_items=bool):
     id: int
+
+class Loosens(Scores, extra_items=str):
+    id: int
 """
+
+
+def test_a_coerced_row_keeps_the_fields_of_a_base_in_another_module():
+    from sqlty._source import ParsedSource
+    from sqlty.core import HelperIndex
+
+    index = HelperIndex()
+    remote = "from dataclasses import dataclass\n@dataclass\nclass Remote:\n    total: int\n"
+    index.add("remote", ParsedSource(remote, "remote"))
+    source = (
+        "from dataclasses import dataclass\nfrom remote import Remote\n"
+        "@dataclass\nclass Derived(Remote):\n    label: str\n"
+    )
+    derived = extract_type_definitions(source, index, "app")["Derived"]
+
+    assert derived.coerced is not None
+    assert derived.coerced().field_types == {"total": int, "label": str}
+
+
+def test_a_row_type_that_does_not_parse_is_left_to_the_type_checker():
+    source = (
+        "from typing import TypedDict\nfrom sqlty import SQL\n"
+        "class Row(TypedDict):\n    id: int\n"
+        'q = SQL["Row["]("--sql\\nSELECT 1 AS id")\n'
+    )
+    assert check_source(source) == []
+
+
+def test_a_functional_named_tuple_with_a_field_not_a_pair_is_skipped():
+    source = "from typing import NamedTuple\nR = NamedTuple('R', [('a', int), 'b'])\n"
+    assert extract_type_definitions(source) == {}
 
 
 class TestTypedDictInheritance:
@@ -582,6 +616,9 @@ class TestTypedDictInheritance:
         "WrongKey": ["WrongKey.views is str but base Mutable has extra_items int | None"],
         "Floats": ["Floats.score is float but base Scores has read-only extra_items int"],
         "Narrows": [],
+        "Loosens": [
+            "Loosens cannot set extra_items=str: base Scores has read-only extra_items int"
+        ],
     }
 
     @pytest.mark.parametrize("name", list(CASES))

@@ -541,6 +541,17 @@ def test_unsupported_import_style_still_raises_without_markers() -> None:
             [("t", None, "write"), ("s", None, "read")],
         ),
         ("SELECT * FROM", "postgres", []),
+        (
+            "DELETE u FROM users u JOIN (SELECT 1 AS id) d ON d.id = u.id",
+            "mysql",
+            [("users", None, "write")],
+        ),
+        (
+            "INSERT INTO TABLE FUNCTION remote('x', t) (a) SELECT a FROM t",
+            "clickhouse",
+            [("t", None, "read")],
+        ),
+        ("SELECT * FROM IDENTIFIER('t')", "snowflake", []),
     ],
 )
 def test_query_tables(sql: str, dialect: str, expected: list[tuple[str, str | None, str]]) -> None:

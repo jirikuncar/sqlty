@@ -40,6 +40,7 @@ pub fn load_schema_with_overrides(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn load_schema(schema_sql: &str, dialect: &str) -> Schema {
     load_schema_with_skipped(schema_sql, dialect).0
 }
@@ -274,7 +275,21 @@ impl Parsed {
         (start < end).then(|| self.input.original(start, false)..self.input.original(end, true))
     }
 
-    /// [`result_stars`](super::result_stars) of the query.
+    /// The stars that shape a statement's result, each named by its clause: `SELECT *`,
+    /// `SELECT u.*`, `RETURNING *`, and `WITH c AS (SELECT *)` for a CTE. `None` if the
+    /// statement does not parse. A star that doesn't shape the result, such as
+    /// `EXISTS (SELECT * ...)` or `count(*)`, is not listed.
+    ///
+    /// Example:
+    /// ```
+    /// use sqlty_sql::analyzer::parse;
+    ///
+    /// let stars = parse("SELECT u.*, o.id FROM users u JOIN orgs o ON o.id = u.org", "postgres").result_stars();
+    /// assert_eq!(stars, Some(vec!["SELECT u.*".to_string()]));
+    /// let stars = parse("WITH c AS (SELECT * FROM t) DELETE FROM t RETURNING *", "postgres").result_stars();
+    /// assert_eq!(stars, Some(vec!["WITH c AS (SELECT *)".to_string(), "RETURNING *".to_string()]));
+    /// assert_eq!(parse("SELECT 1 WHERE EXISTS (SELECT * FROM t)", "postgres").result_stars(), Some(vec![]));
+    /// ```
     pub fn result_stars(&self) -> Option<Vec<String>> {
         let mut stars = Vec::new();
         statement_stars(self.first()?, &mut stars);

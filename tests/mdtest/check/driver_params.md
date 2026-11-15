@@ -43,6 +43,16 @@ with psycopg.connect("dbname=x") as conn:
     conn.execute("DELETE FROM users WHERE id = %s", params=(b"1",))
 ```
 
+### A signed float
+
+```python
+import psycopg
+
+conn = psycopg.connect("dbname=x")
+# error: [param-type-mismatch] "parameter 1 expects str, got float"
+conn.execute("DELETE FROM users WHERE name = %s", (-1.5,))
+```
+
 ## executemany checks each row
 
 ```python
@@ -116,6 +126,15 @@ conn.execute("DELETE FROM users WHERE id = %s", params_variable)
 conn.execute("DELETE FROM users WHERE id = %s", (*rest_args,))
 conn.execute(query_variable, (b"1",))
 # error:
+```
+
+### Parameters passed as `**kwargs`
+
+```python
+import psycopg
+
+conn = psycopg.connect("dbname=x")
+conn.execute("DELETE FROM users WHERE id = %s", **options)
 ```
 
 ## asyncpg
@@ -282,6 +301,21 @@ conn = psycopg.connect("dbname=x")
 conn = Fake()
 conn.execute("DELETE FROM users WHERE id = %s")
 # error:
+```
+
+### Type parameters and a name bound through itself
+
+```python
+import psycopg
+
+def generic[T](x: T) -> None:
+    conn = psycopg.connect("dbname=x")
+    # error: [param-count-mismatch] "query has 1 parameter, the call passes 0"
+    conn.execute("DELETE FROM users WHERE id = %s")
+
+def circular():
+    cur = cur.cursor()
+    cur.execute("DELETE FROM users WHERE id = %s")
 ```
 
 ## A driver method also configured as a helper

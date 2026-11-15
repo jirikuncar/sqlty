@@ -71,8 +71,6 @@ def add_json_types(
         tree = ast.parse(source)
     except SyntaxError, ValueError:
         return source
-    if wrapper is None:
-        return source
     module = _Module(tree, source)
     edits: list[tuple[int, int, str]] = []
     for node in ast.walk(tree):
@@ -98,8 +96,6 @@ def add_json_types(
             if shape is None or ast.unparse(item) not in ("typing.Any", "Any"):
                 continue
             value = {"shape": json.loads(shape), "nullable": nullable is True}
-            if value["shape"] == "any":
-                continue
             edits.append((*module.span(item), module.type_of(value, _pascal(name))))
     if not edits:
         return source

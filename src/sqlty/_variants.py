@@ -686,6 +686,8 @@ class _Walk:
                     if not isinstance(whole, dict):
                         raise _Dynamic
                     for index, k_lines, end in self.values(key, middle, frame):
+                        if not isinstance(index, str):
+                            raise _Dynamic
                         if index in whole:
                             found.append((whole[index], w_lines | k_lines, end))
                 return found
@@ -693,7 +695,10 @@ class _Walk:
                 built = {}
                 for k, v in zip(keys, items, strict=True):
                     assert k is not None
-                    built[self.single(k, path, frame)] = self.single(v, path, frame)
+                    value = self.single(v, path, frame)
+                    if not isinstance(read := self.single(k, path, frame), str):
+                        raise _Dynamic
+                    built[read] = value
                 return [(built, none, path)]
             case ast.Attribute():
                 return self.imported(node, path, frame)

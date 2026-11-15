@@ -37,64 +37,50 @@ enum Prec {
 }
 
 impl Prec {
+    const ALL: [Prec; 18] = [
+        Prec::NamedExpr,
+        Prec::Tuple,
+        Prec::Yield,
+        Prec::Test,
+        Prec::Or,
+        Prec::And,
+        Prec::Not,
+        Prec::Cmp,
+        Prec::Bor,
+        Prec::Bxor,
+        Prec::Band,
+        Prec::Shift,
+        Prec::Arith,
+        Prec::Term,
+        Prec::Factor,
+        Prec::Power,
+        Prec::Await,
+        Prec::Atom,
+    ];
+
     fn next(self) -> Self {
-        use Prec::{
-            And, Arith, Atom, Await, Band, Bor, Bxor, Cmp, Factor, NamedExpr, Not, Or, Power,
-            Shift, Term, Test, Tuple, Yield,
-        };
-        match self {
-            NamedExpr => Tuple,
-            Tuple => Yield,
-            Yield => Test,
-            Test => Or,
-            Or => And,
-            And => Not,
-            Not => Cmp,
-            Cmp => Bor,
-            Bor => Bxor,
-            Bxor => Band,
-            Band => Shift,
-            Shift => Arith,
-            Arith => Term,
-            Term => Factor,
-            Factor => Power,
-            Power => Await,
-            Await | Atom => Atom,
-        }
+        Self::ALL[(self as usize + 1).min(Self::ALL.len() - 1)]
     }
 }
 
 /// `ast.unparse(expr)`, for an expression of `source`.
 pub fn unparse(expr: &Expr, source: &str) -> String {
-    unparse_names(expr, source, None)
-}
-
-/// The expressions names are replaced with, each an expression of its own source.
-pub type Substitutions<'s> = std::collections::HashMap<&'s str, (&'s Expr, &'s str)>;
-
-/// [`unparse`] of `expr` with each name of `names` replaced by its expression, as an
-/// `ast.NodeTransformer` that swaps `Name` nodes would have it.
-pub fn unparse_with(expr: &Expr, source: &str, names: &Substitutions<'_>) -> String {
-    unparse_names(expr, source, Some(names))
-}
-
-fn unparse_names(expr: &Expr, source: &str, names: Option<&Substitutions<'_>>) -> String {
     // Python reads `\r\n` and `\r` as `\n` before it parses, also inside a literal.
     let written = source.get(expr.range().to_std_range()).unwrap_or("");
-    if written.contains('\r') {
-        let normal = format!("({})", written.replace("\r\n", "\n").replace('\r', "\n"));
-        if let Some(parsed) = crate::parse::expression(&normal) {
-            return unparse_plain(&parsed.syntax().body, &normal, names);
-        }
+    let normal = written
+        .contains('\r')
+        .then(|| format!("({})", written.replace("\r\n", "\n").replace('\r', "\n")))
+        .and_then(|normal| Some((crate::parse::expression(&normal)?, normal)));
+    match normal {
+        Some((parsed, normal)) => unparse_plain(&parsed.syntax().body, &normal),
+        None => unparse_plain(expr, source),
     }
-    unparse_plain(expr, source, names)
 }
 
-fn unparse_plain(expr: &Expr, source: &str, names: Option<&Substitutions<'_>>) -> String {
+fn unparse_plain(expr: &Expr, source: &str) -> String {
     let mut unparser = Unparser {
         out: String::new(),
         source,
-        names,
     };
     unparser.expr(expr, Prec::Test);
     unparser.out
@@ -103,7 +89,6 @@ fn unparse_plain(expr: &Expr, source: &str, names: Option<&Substitutions<'_>>) -
 struct Unparser<'s> {
     out: String,
     source: &'s str,
-    names: Option<&'s Substitutions<'s>>,
 }
 
 /// A value of an f- or t-string as `ast` holds it.
@@ -119,7 +104,6 @@ impl Unparser<'_> {
         let mut unparser = Unparser {
             out: String::new(),
             source: self.source,
-            names: self.names,
         };
         unparser.expr(expr, prec);
         unparser.out
@@ -332,11 +316,8 @@ impl Unparser<'_> {
                 this.expr(&e.value, Prec::Atom);
             }),
             Expr::Compare(e) => self.parens(prec > Prec::Cmp, |this| {
-                let mut operands = e.operands.iter();
-                if let Some(left) = operands.next() {
-                    this.expr(left, Prec::Cmp.next());
-                }
-                for (op, operand) in e.ops.iter().zip(operands) {
+                this.expr(&e.operands[0], Prec::Cmp.next());
+                for (op, operand) in e.ops.iter().zip(&e.operands[1..]) {
                     let word = match op {
                         CmpOp::Eq => "==",
                         CmpOp::NotEq => "!=",
@@ -438,18 +419,7 @@ impl Unparser<'_> {
                 self.out.push('*');
                 self.expr(&e.value, Prec::Bor);
             }
-            Expr::Name(e) => match self.names.and_then(|names| names.get(e.id.as_str())) {
-                Some((replacement, source)) => {
-                    let mut unparser = Unparser {
-                        out: String::new(),
-                        source,
-                        names: None,
-                    };
-                    unparser.expr(replacement, prec);
-                    self.out.push_str(&unparser.out);
-                }
-                None => self.out.push_str(e.id.as_str()),
-            },
+            Expr::Name(e) => self.out.push_str(e.id.as_str()),
             Expr::List(e) => {
                 self.out.push('[');
                 self.list(&e.elts);
@@ -486,15 +456,9 @@ impl Unparser<'_> {
         self.expr(&keyword.value, Prec::Test);
     }
 
+    /// A parameter of a lambda, which has no annotation.
     fn parameter(&self, parameter: &Parameter) -> String {
-        match &parameter.annotation {
-            Some(annotation) => format!(
-                "{}: {}",
-                parameter.name.as_str(),
-                self.sub(annotation, Prec::Test)
-            ),
-            None => parameter.name.to_string(),
-        }
+        parameter.name.to_string()
     }
 
     fn parameters(&self, parameters: &Parameters) -> String {
@@ -552,7 +516,7 @@ impl Unparser<'_> {
         let mut fallback = false;
         for (value, constant) in &written {
             if *constant {
-                let (value, possible) = str_literal(value, &quotes, true);
+                let (value, possible) = str_literal(value, &quotes);
                 if !possible.iter().any(|q| quotes.contains(q)) {
                     fallback = true;
                     break;
@@ -673,12 +637,16 @@ pub(crate) fn constants(expr: &Expr, source: &str) -> Vec<String> {
                 }
             }
         }
-        Expr::TString(e) => {
-            for part in e.value.as_slice() {
+        // A t-string: only f- and t-strings are passed.
+        other => {
+            for part in other
+                .as_t_string_expr()
+                .into_iter()
+                .flat_map(|e| e.value.as_slice())
+            {
                 fields(&part.elements, &mut parts, source);
             }
         }
-        _ => {}
     }
     let mut out = Vec::new();
     collect(parts, source, &mut out);
@@ -693,8 +661,12 @@ pub static LEGACY_FIELD_TEXT: AtomicBool = AtomicBool::new(false);
 /// `Interpolation.str`: the source of the expression of a t-string field, from the `{` to
 /// the `!`, `:` or `}` after it, without the `=` of a debug field and what follows it.
 pub fn interpolation_text(field: &InterpolatedElement, source: &str) -> String {
-    let text = field_text(field, source);
-    if LEGACY_FIELD_TEXT.load(Ordering::Relaxed) {
+    interpolation_text_as(field, source, LEGACY_FIELD_TEXT.load(Ordering::Relaxed))
+}
+
+fn interpolation_text_as(field: &InterpolatedElement, source: &str, legacy: bool) -> String {
+    let text = field_text_as(field, source, legacy);
+    if legacy {
         let text = text.trim_end();
         return text
             .strip_suffix('=')
@@ -723,7 +695,10 @@ pub fn interpolation_text(field: &InterpolatedElement, source: &str) -> String {
 /// to the `!` of its conversion, the `:` of its format spec or its `}`, without its
 /// comments and with every newline as `\n`.
 pub fn field_text(field: &InterpolatedElement, source: &str) -> String {
-    let legacy = LEGACY_FIELD_TEXT.load(Ordering::Relaxed);
+    field_text_as(field, source, LEGACY_FIELD_TEXT.load(Ordering::Relaxed))
+}
+
+fn field_text_as(field: &InterpolatedElement, source: &str, legacy: bool) -> String {
     let start = field.start().to_usize() + 1;
     let stop = match field.format_spec.as_deref() {
         Some(spec) => spec.start().to_usize() - 1,
@@ -735,14 +710,15 @@ pub fn field_text(field: &InterpolatedElement, source: &str) -> String {
         let end = text.trim_end().len().saturating_sub(1);
         text = text[..end].trim_end();
         text = text.strip_suffix('!').unwrap_or(text);
-    } else if legacy && field.format_spec.is_some() {
-        // The old tokenizer ended the text at any `!`, the `!=` before a format spec included.
-        if let Some(bang) = last_bang(text) {
-            text = &text[..bang];
-        }
     }
-    let text = text.replace("\r\n", "\n").replace('\r', "\n");
-    without_comments(&text, legacy)
+    let text = without_comments(&text.replace("\r\n", "\n").replace('\r', "\n"), legacy);
+    // The old tokenizer ended the text at its last `!` outside comments, the `!=` before a
+    // format spec included.
+    let cut = legacy && field.conversion == ConversionFlag::None && field.format_spec.is_some();
+    match last_bang(&text).filter(|_| cut) {
+        Some(bang) => text[..bang].to_string(),
+        None => text,
+    }
 }
 
 /// The offset of the last `!` of `text` outside brackets and string literals.
@@ -819,9 +795,8 @@ fn without_comments(text: &str, legacy: bool) -> String {
             while i < chars.len() && chars[i] != '\n' {
                 i += 1;
             }
-            if i < chars.len() {
-                out.push('\n');
-            }
+            // The newline that ends the comment, if any.
+            out.extend(chars.get(i));
         } else {
             out.push(c);
         }
@@ -892,21 +867,16 @@ fn unicode_escape(c: char, out: &mut String) {
 }
 
 /// `_str_literal_helper`: the escaped text and the quotes that can hold it.
-fn str_literal<'q>(text: &str, quotes: &[&'q str], whitespace: bool) -> (String, Vec<&'q str>) {
+fn str_literal<'q>(text: &str, quotes: &[&'q str]) -> (String, Vec<&'q str>) {
     let mut escaped = String::with_capacity(text.len());
     for c in text.chars() {
-        if !whitespace && (c == '\n' || c == '\t') {
-            escaped.push(c);
-        } else if c == '\\' || !printable(c) {
+        if c == '\\' || !printable(c) {
             unicode_escape(c, &mut escaped);
         } else {
             escaped.push(c);
         }
     }
     let mut possible: Vec<&str> = quotes.to_vec();
-    if escaped.contains('\n') {
-        possible.retain(|q| q.len() == 3);
-    }
     possible.retain(|q| !escaped.contains(q));
     if possible.is_empty() {
         let quoted = repr_str(text);
@@ -918,13 +888,10 @@ fn str_literal<'q>(text: &str, quotes: &[&'q str], whitespace: bool) -> (String,
             .unwrap_or(if first == "'" { "'" } else { "\"" });
         return (quoted[1..quoted.len() - 1].to_string(), vec![quote]);
     }
-    if let Some(last) = escaped.chars().last() {
-        possible.sort_by_key(|q| q.starts_with(last));
-        if possible[0].starts_with(last) {
-            escaped.pop();
-            escaped.push('\\');
-            escaped.push(last);
-        }
+    // A quote ending the text is escaped when every quote that can hold it starts with it.
+    possible.sort_by_key(|q| escaped.ends_with(&q[..1]));
+    if escaped.ends_with(&possible[0][..1]) {
+        escaped.insert(escaped.len() - 1, '\\');
     }
     (escaped, possible)
 }
@@ -985,9 +952,6 @@ pub fn repr_bytes(bytes: &[u8]) -> String {
 pub fn repr_float(value: f64) -> String {
     if value.is_infinite() {
         return if value > 0.0 { "1e309" } else { "-1e309" }.to_string();
-    }
-    if value.is_nan() {
-        return "(1e309-1e309)".to_string();
     }
     // The shortest digits that read back as `value`. Of two such spellings equally near,
     // `repr` takes the even one, where `{value:e}` rounds up: the rounding of the exact
@@ -1072,6 +1036,7 @@ fn decimal(literal: &str) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 
@@ -1109,6 +1074,75 @@ mod tests {
             ("'a\\n\\u00e9\\x7f'", "'a\\né\\x7f'"),
         ] {
             assert_eq!(round(source), expected, "{source}");
+        }
+    }
+
+    /// `Interpolation.str` as CPython 3.14.6 (legacy) and 3.14.10 read each field.
+    #[test]
+    fn interpolation_texts() {
+        for (source, legacy, current) in [
+            (
+                "t'{f'{a!r:>{\"'\"}} {{'!s}'",
+                "f'{a!r:>{\"'\"}} {{'",
+                "f'{a!r:>{\"'\"}} {{'",
+            ),
+            ("t'{ x != y  !r }'", " x != y", " x != y  "),
+            ("t'{a!r:{b!s}}'", "a", "a"),
+            ("t'''{a +\r\n b}'''", "a +\n b", "a +\n b"),
+            ("t'''{a # c\n}'''", "a", "a \n"),
+            ("t'''{a +# c\n b}'''", "a +\n b", "a +\n b"),
+            ("t'''{a + '#' # c\n}'''", "a + '#'", "a + '#' \n"),
+            ("t'{x!=1:y}'", "x", "x!=1"),
+            ("t'{a!=b!=c:y}'", "a!=b", "a!=b!=c"),
+            ("t'{a if b!=c else d:>3}'", "a if b", "a if b!=c else d"),
+            ("t'{x!=1}'", "x!=1", "x!=1"),
+            ("t'{x!=1!r}'", "x!=1", "x!=1"),
+            ("t'{a[b!=c]:y}'", "a[b!=c]", "a[b!=c]"),
+            ("t'{\"!\":y}'", "\"!\"", "\"!\""),
+            ("t'{ x = }'", " x", " x "),
+            ("t'{x = !r}'", "x", "x "),
+            ("t'{x=:y}'", "x", "x"),
+            ("t'{x=!a}'", "x", "x"),
+            ("t'''{x = \\\n}'''", "x = \\", "x "),
+            ("t'{a + \"x!\" !r}'", "a + \"x!\"", "a + \"x!\" "),
+            ("t'{(a!=b)!=c:y}'", "(a!=b)", "(a!=b)!=c"),
+            (
+                "t'''{a + '''\"'''!=b:y}'''",
+                "a + '''\"'''",
+                "a + '''\"'''!=b",
+            ),
+            (
+                "t'{a + \"\\\\\" + b!=c:y}'",
+                "a + \"\\\\\" + b",
+                "a + \"\\\\\" + b!=c",
+            ),
+            (
+                "t'''{a + \"\\\"#\" # c\n}'''",
+                "a + \"\\\"",
+                "a + \"\\\"#\" \n",
+            ),
+            ("t'''{a # c'\n + b}'''", "a \n + b", "a \n + b"),
+            ("t'''{a # c\n=}'''", "a", "a \n"),
+            ("t'''{a!=b # c!\n:y}'''", "a", "a!=b \n"),
+            ("t'''{a # c!\n!r}'''", "a", "a \n"),
+        ] {
+            let parsed = crate::parse::expression(source).unwrap();
+            let e = parsed.syntax().body.as_t_string_expr().unwrap();
+            let field = e.value.as_slice()[0]
+                .elements
+                .interpolations()
+                .next()
+                .unwrap();
+            assert_eq!(
+                interpolation_text_as(field, source, true),
+                legacy,
+                "{source}"
+            );
+            assert_eq!(
+                interpolation_text_as(field, source, false),
+                current,
+                "{source}"
+            );
         }
     }
 }
