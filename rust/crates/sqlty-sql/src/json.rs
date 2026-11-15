@@ -477,6 +477,61 @@ mod tests {
     }
 
     #[test]
+    fn literal_scalars_escapes_and_errors() {
+        for (text, shape) in [
+            ("true", Some(JsonShape::Boolean)),
+            (" false ", Some(JsonShape::Boolean)),
+            ("-1e3", Some(JsonShape::Number)),
+            (r#""\n\t\r\b\f\"\\\/\u00e9\ud800""#, Some(JsonShape::String)),
+            ("nul", None),
+            ("nulx", None),
+            ("-", None),
+            ("x", None),
+            ("", None),
+            (r#""\x""#, None),
+            (r#""\u12""#, None),
+            (r#""\uzzzz""#, None),
+            (r#""\"#, None),
+            (r#""abc"#, None),
+            ("[1 2]", None),
+            (r#"{"a" 1}"#, None),
+            (r#"{"a": 1 "b": 2}"#, None),
+            ("{1: 2}", None),
+            (r#"{"\x": 1}"#, None),
+        ] {
+            assert_eq!(JsonShape::of_literal(text), shape, "{text}");
+        }
+    }
+
+    #[test]
+    fn unify_null_and_maps() {
+        let int = JsonValue::new(JsonShape::Integer, false);
+        let null = JsonValue::new(JsonShape::Null, false);
+        assert_eq!(
+            JsonValue::unify(&int, &null),
+            JsonValue::new(JsonShape::Integer, true)
+        );
+        assert_eq!(
+            JsonValue::unify(&null, &int),
+            JsonValue::new(JsonShape::Integer, true)
+        );
+        let map = |nullable| JsonShape::Map(Box::new(JsonValue::new(JsonShape::Integer, nullable)));
+        assert_eq!(map(false).unify(&map(true)), map(true));
+    }
+
+    #[test]
+    fn to_json_spells_never_and_escapes_keys() {
+        let shape = JsonShape::Object(vec![
+            field("a\"\\\u{1}", JsonShape::Never, false),
+            field("b", JsonShape::Null, false),
+        ]);
+        assert_eq!(
+            shape.to_json(),
+            r#"{"object":[{"name":"a\"\\\u0001","value":{"shape":"never","nullable":false},"optional":false},{"name":"b","value":{"shape":"null","nullable":false},"optional":false}]}"#
+        );
+    }
+
+    #[test]
     fn to_json_spells_nested_shapes() {
         let shape = JsonShape::Object(vec![field("tags", array_of(JsonShape::String, true), true)]);
         assert_eq!(
