@@ -125,6 +125,13 @@ def test_explained_stars_have_no_rules(dialect: str, sql: str, names: str) -> No
     assert found == [(name, None, None) for name in names]
 
 
+@pytest.mark.parametrize("sql", ["VALUES (1)", "SELECT -nope", "SELECT nofunc(1)"])
+def test_unexplained_columns_have_no_rules(sql: str) -> None:
+    found = _core.explain_select(sql, dialect="postgres", schema_sql=SCHEMA)
+    assert found is not None
+    assert [rules for _, *rules in found] == [[None, None]]
+
+
 JSON_SCHEMA = (
     "CREATE TABLE t (a INT NOT NULL, j JSONB); CREATE TYPE n AS (child n); CREATE TABLE r (x n);"
 )
@@ -567,6 +574,22 @@ EXPRESSIONS = [
         "i: int | None",
         [],
     ),
+    ("postgres", "SELECT 1 AS x FROM c WHERE c.pid IN (SELECT 1 UNION SELECT 2)", "x: int", []),
+    ("postgres", "SELECT 1 AS x FROM c WHERE c.pid IN (SELECT * FROM p)", "x: int", []),
+    (
+        "mysql",
+        "SELECT ADDDATE(dt, 1) AS a, ADDDATE(dtm, 1) AS b, ADDDATE(ui, 1) AS c FROM f, m",
+        "a: datetime.date | None, b: datetime.datetime | None, c: None",
+        ["unsupported-syntax"],
+    ),
+    ("postgres", "SELECT i / (2) AS a, i / NULL AS b FROM f", "a: int | None, b: int | None", []),
+    (
+        "postgres",
+        "SELECT 0xffffffffffffffffffffffffffffffffffffffff AS a",
+        "a: decimal.Decimal",
+        [],
+    ),
+    ("sqlite", "SELECT 0xFFFFFFFFFFFFFFFFFF AS a, 0x10 AS b", "a: bytes, b: int", []),
 ]
 
 
@@ -620,6 +643,8 @@ STATEMENTS = [
     ("postgres", "UPDATE trg SET a = 1 RETURNING a", "a: int | None", []),
     ("postgres", "UPDATE t* SET a = 1 RETURNING a", "a: int", []),
     ("postgres", "DELETE FROM t USING u WHERE t.a = u.a RETURNING t.a", "a: int", []),
+    ("mysql", "INSERT INTO t SET (a, b) = (1, 'x')", None, []),
+    ("mysql", "UPDATE (SELECT 1 AS a) AS x SET a = 1", None, []),
 ]
 
 

@@ -506,8 +506,8 @@ fn always_matches(join: &Join, dialect: SqlDialect) -> bool {
         JoinOperator::Left(constraint) | JoinOperator::LeftOuter(constraint) => {
             matches!(constraint, JoinConstraint::On(on) if is_true(on))
         }
-        JoinOperator::OuterApply => true,
-        _ => false,
+        // `OUTER APPLY`, the only other outer join asked about.
+        _ => true,
     };
     unconditional
         && matches!(&join.relation, TableFactor::Derived { subquery, .. } if returns_one_row(subquery, dialect))

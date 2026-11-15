@@ -174,10 +174,10 @@ impl Analyzer<'_> {
             return self.facts.clone();
         };
         // A `BEFORE` row trigger may change any column of the row `RETURNING` returns.
-        let triggers = match scope.first().map(|source| &source.table) {
-            Some(Table::Named(key)) => self.schema.row_triggers(key),
-            _ => RowEvents::default(),
-        };
+        let triggers = scope
+            .first()
+            .and_then(|source| source.table.named())
+            .map_or_else(RowEvents::default, |key| self.schema.row_triggers(key));
         let triggered = match stmt {
             Statement::Insert(insert) => {
                 triggers.insert
@@ -481,11 +481,7 @@ impl Analyzer<'_> {
                 // A target of a join is a column of any of its tables.
                 if multi.is_some() {
                     let exprs = targets.iter().filter_map(|target| {
-                        let mut idents: Vec<Ident> = target
-                            .0
-                            .iter()
-                            .map(|part| part.as_ident().cloned())
-                            .collect::<Option<_>>()?;
+                        let mut idents = idents(target)?;
                         Some(match idents.len() {
                             1 => Expr::Identifier(idents.remove(0)),
                             _ => Expr::CompoundIdentifier(idents),
@@ -644,6 +640,10 @@ fn insert_widths(
         }
         _ => None,
     }
+}
+
+fn idents(name: &ObjectName) -> Option<Vec<Ident>> {
+    name.0.iter().map(|part| part.as_ident().cloned()).collect()
 }
 
 #[cfg(test)]
