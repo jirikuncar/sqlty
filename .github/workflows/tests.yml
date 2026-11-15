@@ -154,7 +154,7 @@ jobs:
         if: matrix.coverage
         run: |
           uv run coverage report
-          cd rust && cargo llvm-cov report --fail-under-lines 95
+          cd rust && cargo llvm-cov report --show-missing-lines --fail-under-lines 95
 
       - name: Run Rust doctests
         run: cargo test --doc --workspace --manifest-path rust/Cargo.toml
