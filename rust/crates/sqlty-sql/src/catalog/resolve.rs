@@ -517,6 +517,9 @@ fn function(
                         .and_then(|name| lookup_key(relations, path, &name).map(str::to_string))
                         .and_then(|key| match relations.get(key.as_str()) {
                             Some(Relation::Table(table)) => Some(table.columns.clone()),
+                            Some(Relation::View(columns)) => {
+                                Some(columns.iter().map(view_column).collect())
+                            }
                             _ => None,
                         });
                     match rows {
@@ -572,4 +575,22 @@ fn function(
             }
         })
         .collect()
+}
+
+/// A view's output column as a function returning the view's rows lists it.
+fn view_column(column: &crate::analyzer::Column) -> SchemaColumn {
+    SchemaColumn {
+        name: column.name.clone(),
+        ident: column.name.clone(),
+        sql_type: column.sql_type.clone().unwrap_or_default(),
+        python_type: column.python_type.clone(),
+        not_null: column.nullability == crate::analyzer::Nullability::NonNull,
+        has_default: false,
+        default: None,
+        generated: None,
+        primary_key: false,
+        allowed_values: None,
+        values: column.values.clone(),
+        invisible: false,
+    }
 }

@@ -198,6 +198,36 @@ SELECT b.id FROM users u, LATERAL all_users() AS b
 -- inferred: tuple[int]
 ```
 
+## SETOF a view
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+CREATE VIEW named AS SELECT id, upper(name) AS shout FROM users WHERE name IS NOT NULL;
+CREATE FUNCTION named_users() RETURNS SETOF named LANGUAGE sql AS 'SELECT * FROM named';
+```
+
+```sql
+SELECT * FROM named_users()
+-- inferred: tuple[int, str]
+```
+
+## SETOF a view defined later
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+CREATE FUNCTION later() RETURNS SETOF named LANGUAGE sql AS 'SELECT * FROM named';
+CREATE VIEW named AS SELECT id, name FROM users;
+```
+
+```sql
+SELECT * FROM later()
+-- inferred: tuple[int, str | None]
+```
+
 ## Planner hints
 
 `ROWS`, `COST`, `LEAKPROOF` and `SUPPORT` only guide the planner, so a function

@@ -533,7 +533,7 @@ EXPRESSIONS = [
     ("postgres", "SELECT m FROM mt", "m: None", ["unknown-type"]),
     ("postgres", "SELECT (p).a, (p).b FROM pt", "a: int | None, b: str | None", []),
     ("postgres", "SELECT c FROM gt", "c: int | None", []),
-    ("postgres", "SELECT * FROM fv()", "fv: None", []),
+    ("postgres", "SELECT * FROM fv()", "id: int", []),
     ("postgres", "SELECT unnest(ARRAY[ARRAY[1, 2]]) AS x", "x: int | None", []),
     ("mysql", "SELECT db.lower('a') AS x", "x: None", ["unknown-function"]),
     ("postgres", "SELECT CASE WHEN i > 0 THEN 1 ELSE dt END AS x FROM f", "x: int | None", []),
