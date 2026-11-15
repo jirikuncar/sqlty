@@ -1589,6 +1589,7 @@ version = "0.6.0"
 dependencies = [
  "regex",
  "sqlty-python",
+ "sqlty-sql",
  "sqruff-lib",
 ]
 

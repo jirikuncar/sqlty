@@ -33,6 +33,7 @@ use sqlty_python::locate::Queries;
 use sqlty_python::rewriter::ImportStyle;
 use sqruff_lib::core::config::FluffConfig;
 use sqruff_lib::core::linter::core::Linter;
+use sqruff_lib::core::linter::linted_file::LintedFile;
 
 /// psycopg's `%s`, `%(name)s` and `%%`, the `?` of SQLite and MySQL drivers, and the `{name}`
 /// fields of `str.format` and `sql.SQL` templates, which sqruff does not read as values.
@@ -60,11 +61,8 @@ fn format_with(linter: &Linter, source: &str, style: &ImportStyle) -> String {
                 .find_map(|quote| text.strip_prefix(quote)?.strip_suffix(quote))
                 .filter(|body| !body.contains('\\'))?;
             let start = literal.start + 3;
-            let marker = if body.trim_start().starts_with("--") {
-                body.find('\n').map_or(body.len(), |n| n + 1)
-            } else {
-                0
-            };
+            // A query starts with its marker line.
+            let marker = body.find('\n').map_or(body.len(), |n| n + 1);
             let query = &body[marker..];
             let formatted = format_query(linter, query)?;
             (formatted != query).then(|| Edit::new(start + marker..start + body.len(), formatted))
@@ -125,10 +123,8 @@ fn lint_with(linter: &Linter, source: &str, style: &ImportStyle) -> Vec<Finding>
             .find_iter(&query.text)
             .map(|m| m.range())
             .collect();
-        let Ok(linted) = linter.lint_string(&protected, None, false) else {
-            continue;
-        };
-        for violation in linted.violations() {
+        let linted = linter.lint_string(&protected, None, false).ok();
+        for violation in linted.iter().flat_map(LintedFile::violations) {
             let slice = &violation.source_slice;
             let on_placeholder = placeholders.iter().any(|placeholder| {
                 placeholder.start < slice.end.max(slice.start + 1) && slice.start < placeholder.end
@@ -215,20 +211,24 @@ fn with_linter<T>(dialect: &str, rules: &'static str, f: impl FnOnce(&Linter) ->
     f(&linter)
 }
 
-/// A linter with the sqruff `rules` setting, in `dialect` or ANSI SQL when sqruff has no
-/// such dialect. It reads no configuration file.
+/// A linter with the sqruff `rules` setting in the sqlty `dialect`. It reads no
+/// configuration file.
 fn linter(dialect: &str, rules: &str) -> Linter {
-    let config = |dialect: &str| {
-        FluffConfig::try_from_source(
-            &format!("[sqruff]\ndialect = {dialect}\ntemplater = raw\n{rules}\n"),
-            None,
-        )
-        .ok()
+    Linter::new(config(dialect, rules), None, None, false).expect("the raw templater exists")
+}
+
+fn config(dialect: &str, rules: &str) -> FluffConfig {
+    let dialect = match dialect {
+        "generic" => "ansi",
+        "mssql" => "tsql",
+        "spark" => "sparksql",
+        other => other,
     };
-    let config = config(dialect)
-        .or_else(|| config("ansi"))
-        .expect("sqruff knows ANSI SQL");
-    Linter::new(config, None, None, false).expect("the raw templater exists")
+    FluffConfig::try_from_source(
+        &format!("[sqruff]\ndialect = {dialect}\ntemplater = raw\n{rules}\n"),
+        None,
+    )
+    .expect("sqruff knows every sqlty dialect")
 }
 
 #[cfg(test)]
@@ -268,5 +268,30 @@ mod tests {
         let source =
             "q = \"--sql\\nSELECT a FROM t JOIN u ON t.id = u.id WHERE x = %(x)s AND y=?\"\n";
         assert_eq!(lint(source), []);
+    }
+
+    #[test]
+    fn every_dialect_is_one_sqruff_knows() {
+        for dialect in sqlty_sql::Dialect::NAMES {
+            config(dialect, "");
+        }
+    }
+
+    #[test]
+    fn a_finding_on_a_placeholder_is_not_reported() {
+        let source = "q = \"--sql\\nselect distinct(%s), distinct(a) from t\"\n";
+        assert_eq!(lint(source), [("AL03", "distinct(a)")]);
+    }
+
+    #[test]
+    fn blank_lines_stay_blank_and_an_empty_query_stays() {
+        let style = ImportStyle::parse(None).unwrap();
+        let format = |source: &str| format_source(source, "postgres", &style);
+        assert_eq!(
+            format("q = \"\"\"--sql\n  select 1\n\n  from t where b=%s\"\"\"\n"),
+            "q = \"\"\"--sql\n  select 1\n\n  from t\n  where b = %s\"\"\"\n"
+        );
+        let empty = "q = \"\"\"--sql\n   \"\"\"\n";
+        assert_eq!(format(empty), empty);
     }
 }
