@@ -17,7 +17,7 @@ from hypothesis import strategies as st
 
 from sqlty._core import call_variants
 from sqlty._source import ParsedSource
-from sqlty._variants import Declared, Unchecked, query_variants
+from sqlty._variants import Declared, Unchecked, _Walk, query_variants
 from tests.test_rust_check import RULES
 from tests.test_rust_index import compare
 from tests.test_rust_types import FUZZ, parses
@@ -351,6 +351,15 @@ def test_a_module_without_psycopg() -> None:
         same("from sqlty import SQL\ndef build(flag):\n    run(other(flag))\n    run('SELECT 1')\n")
         >= 1
     )
+
+
+def test_render_lets_an_error_outside_psycopg_through() -> None:
+    class Deep:
+        def as_string(self, context: object) -> str:
+            raise RecursionError
+
+    with pytest.raises(RecursionError):
+        _Walk(None).render(Deep())
 
 
 def test_limits() -> None:
