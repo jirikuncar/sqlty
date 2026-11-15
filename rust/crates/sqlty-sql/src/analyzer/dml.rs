@@ -647,6 +647,7 @@ fn insert_widths(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::super::test_support::{reports, statement};
     use super::*;

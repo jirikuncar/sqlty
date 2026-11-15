@@ -1339,6 +1339,7 @@ fn admits_tuple(annotated: &str, inferred: &str) -> bool {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use sqlty_sql::analyzer::SchemaData;

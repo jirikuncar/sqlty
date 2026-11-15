@@ -463,6 +463,7 @@ pub(super) fn category(typed: &Typed) -> Option<&str> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
     use super::super::test_support::reports;

@@ -816,6 +816,7 @@ fn sqlite_affinity(name: &str) -> Option<String> {
 /// `proofs/SqlTy/Table.lean`: what [`scalar_python`] gives each name it knows, in each
 /// dialect, for the Lean model of the mapping. `SQLTY_UPDATE_PROOFS=1` rewrites it.
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod lean_table {
     use super::*;
     use std::collections::BTreeSet;

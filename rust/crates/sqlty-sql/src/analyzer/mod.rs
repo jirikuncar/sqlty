@@ -46,8 +46,10 @@ mod suggest;
 mod table_functions;
 mod tables;
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod test_support;
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;
 mod text_names;
 mod tokens;

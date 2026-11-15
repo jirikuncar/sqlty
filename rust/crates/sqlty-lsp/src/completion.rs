@@ -136,6 +136,7 @@ pub(crate) fn moved(starts: &[usize], old: &str, new: &str) -> Vec<usize> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::moved;
 

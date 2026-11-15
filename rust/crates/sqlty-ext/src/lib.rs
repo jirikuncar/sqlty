@@ -21,7 +21,7 @@
 //! the pieces that need no interpreter (the schema cache, `schema_for`, nullability
 //! mapping). The `#[pyfunction]`s are exercised from Python by `tests/`.
 
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
 
 mod config;
 mod outline;
@@ -2455,6 +2455,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

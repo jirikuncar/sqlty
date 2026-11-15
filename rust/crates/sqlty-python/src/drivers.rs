@@ -605,6 +605,7 @@ impl<'a> Visitor<'a> for Stores<'a> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::module::facts;

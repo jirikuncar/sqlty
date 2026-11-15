@@ -866,6 +866,7 @@ fn names_result_column(key: &Expr, select: &Select) -> bool {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use sqlparser::ast::{Ident, Statement, TableAlias, TableAliasColumnDef};
 

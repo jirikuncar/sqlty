@@ -712,6 +712,7 @@ fn name_span(expr: &Expr) -> Span {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::super::test_support::reports;
     use super::*;

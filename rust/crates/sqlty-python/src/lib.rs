@@ -36,7 +36,7 @@
 //! assert_eq!(strip_source(&rewritten, &options.style), source);
 //! ```
 
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
 
 #[allow(missing_docs)]
 pub mod calls;

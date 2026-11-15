@@ -16,6 +16,7 @@ pub(crate) fn from_path(path: &Path) -> Option<Uri> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

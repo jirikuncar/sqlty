@@ -603,6 +603,7 @@ fn is_container(python_type: &str) -> bool {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::analyzer::{analyze_select, load_schema};

@@ -322,6 +322,7 @@ impl Statement<'_> {
 
     /// The lowercase words that open the statement, up to `n` (`create`, `or`, `replace`, ...).
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn lead_words(&self, n: usize) -> Vec<String> {
         self.0
             .iter()
@@ -914,6 +915,7 @@ impl Cols<'_, '_> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

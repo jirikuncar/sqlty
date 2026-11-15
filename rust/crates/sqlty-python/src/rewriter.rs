@@ -81,6 +81,7 @@ impl ImportStyle {
 
     /// [`ImportStyle::parse`], with the default for an unsupported style.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn or_default(style: Option<&str>) -> Self {
         Self::parse(style).unwrap_or_default()
     }
@@ -1092,6 +1093,7 @@ fn docstring_end(source: &str, pos: usize) -> Option<(usize, usize)> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

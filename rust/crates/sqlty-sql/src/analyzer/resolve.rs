@@ -799,6 +799,7 @@ fn untyped_column_message(column: &str, sql_type: &str) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::super::test_support::reports;
     use super::*;

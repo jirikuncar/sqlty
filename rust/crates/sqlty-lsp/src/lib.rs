@@ -8,7 +8,7 @@
 //! from what the buffer's last check left (see [`CompletionContext`]), never behind a check;
 //! so are hover and semantic tokens.
 
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -46,6 +46,7 @@ mod uri;
 mod worker;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;
 
 /// The code action kind of `sqlty check --fix`, run by `editor.codeActionsOnSave`.

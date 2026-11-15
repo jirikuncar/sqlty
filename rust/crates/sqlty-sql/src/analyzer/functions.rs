@@ -426,6 +426,7 @@ fn decimal_integer_digits(sql_type: &str) -> u32 {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use sqlparser::ast::Function;
 

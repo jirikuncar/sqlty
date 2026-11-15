@@ -756,6 +756,7 @@ impl<'a> Analyzer<'a> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use sqlparser::ast::{SetExpr, Statement};
 

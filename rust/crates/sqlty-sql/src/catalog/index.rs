@@ -22,12 +22,14 @@ thread_local! {
 
 /// Count one catalog entry reached.
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn visit() {
     VISITED.with(|count| count.set(count.get() + 1));
 }
 
 /// How many catalog entries the lookups of `run` reach.
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn visited(run: impl FnOnce()) -> usize {
     VISITED.with(|count| count.set(0));
     run();
@@ -317,6 +319,7 @@ pub(super) fn split(key: &str) -> (&str, &str) {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::super::load;
     use super::*;

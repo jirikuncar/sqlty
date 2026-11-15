@@ -295,6 +295,7 @@ fn admits(types: Option<u128>, operand: Option<Operand>) -> bool {
 include!(concat!(env!("OUT_DIR"), "/inference_rules.rs"));
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::alloc::{GlobalAlloc, Layout, System};
     use std::cell::Cell;

@@ -418,10 +418,11 @@ impl<'a> Analyzer<'a> {
                 if let SetExpr::Select(select) = query.body.as_ref() {
                     let (analyzer, select_scope) = self.scope_or_empty(&select.from);
                     for (position, item) in select.projection.iter().enumerate() {
+                        // Past a `*`, the columns a value lands in are unknown.
                         let (SelectItem::UnnamedExpr(expr)
                         | SelectItem::ExprWithAlias { expr, .. }) = item
                         else {
-                            continue;
+                            break;
                         };
                         if let Some(column) = targets.get(position) {
                             analyzer.hint_stored(expr, &table, column, &select_scope, out);
@@ -938,6 +939,7 @@ impl Visitor for Walker<'_, '_> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::analyzer::load_schema;
@@ -1158,5 +1160,190 @@ mod tests {
             analyze_params("SELEC 1 %s", "postgres", Some(&schema)),
             None
         );
+    }
+
+    /// Statements and expressions whose placeholders only some code reads.
+    #[test]
+    fn rarer_shapes() {
+        const MORE: &str = "CREATE TABLE things (x mytype, ip INET);
+            CREATE FUNCTION f(x mytype, y INT) RETURNS INT LANGUAGE sql AS 'SELECT 1';";
+        let found = |dialect: &str, sql: &str| -> Vec<String> {
+            let schema = load_schema(&format!("{}{MORE}", schema_for(dialect)), dialect);
+            analyze_params(sql, dialect, Some(&schema))
+                .unwrap()
+                .iter()
+                .map(|p| {
+                    let mark = match p.nullability {
+                        Nullability::NonNull => "!",
+                        Nullability::Nullable => "?",
+                        Nullability::Unknown => "",
+                    };
+                    format!("{}{mark}", p.python_type.as_deref().unwrap_or("-"))
+                })
+                .collect()
+        };
+        let inet = "ipaddress.IPv4Address | ipaddress.IPv6Address | ipaddress.IPv4Interface | ipaddress.IPv6Interface";
+        for (dialect, sql, expected) in [
+            (
+                "postgres",
+                "UPDATE things SET x = %s + INTERVAL '1 day'",
+                vec!["-"],
+            ),
+            (
+                "postgres",
+                "UPDATE users SET age = %s + INTERVAL '1 day'",
+                vec!["-"],
+            ),
+            (
+                "postgres",
+                "SELECT 1 FROM users WHERE born = $1 AND born < $1 + INTERVAL '1 day'",
+                vec!["datetime.date"],
+            ),
+            (
+                "postgres",
+                "UPDATE users SET name = $1, age = $1",
+                vec!["str!"],
+            ),
+            (
+                "mysql",
+                "UPDATE (SELECT * FROM users) u SET u.name = %s",
+                vec!["-"],
+            ),
+            ("postgres", "SET search_path = %s", vec!["-"]),
+            ("postgres", "SELECT 1 FROM nope WHERE a = %s", vec!["-"]),
+            (
+                "mysql",
+                "SELECT 1 FROM users LIMIT %s, %s",
+                vec!["int", "int"],
+            ),
+            (
+                "postgres",
+                "(SELECT 1 FROM users WHERE id = %s)",
+                vec!["int"],
+            ),
+            ("postgres", "TABLE users", vec![]),
+            (
+                "postgres",
+                "SELECT * FROM generate_series(1, stop => %s)",
+                vec!["-"],
+            ),
+            (
+                "postgres",
+                "INSERT INTO users (id) VALUES (%s, %s)",
+                vec!["int!", "-"],
+            ),
+            (
+                "postgres",
+                "INSERT INTO users SELECT *, %s FROM users",
+                vec!["-"],
+            ),
+            (
+                "postgres",
+                "INSERT INTO users (id) SELECT %s, %s",
+                vec!["int!", "-"],
+            ),
+            (
+                "postgres",
+                "INSERT INTO users (id) SELECT 1 UNION SELECT %s",
+                vec!["-"],
+            ),
+            ("postgres", "INSERT INTO users DEFAULT VALUES", vec![]),
+            ("mysql", "INSERT INTO users SET name = %s", vec!["str!"]),
+            (
+                "mysql",
+                "INSERT INTO users (id) VALUES (1) ON DUPLICATE KEY UPDATE name = %s",
+                vec!["str!"],
+            ),
+            (
+                "postgres",
+                "INSERT INTO users (id) VALUES (1) ON CONFLICT (id) DO UPDATE SET name = %s",
+                vec!["str!"],
+            ),
+            (
+                "postgres",
+                "INSERT INTO users (id) VALUES (1) ON CONFLICT DO NOTHING",
+                vec![],
+            ),
+            (
+                "postgres",
+                "UPDATE users SET (name, age) = (%s, %s)",
+                vec!["-", "-"],
+            ),
+            (
+                "postgres",
+                "UPDATE users SET nope = %s + INTERVAL '1 day'",
+                vec!["-"],
+            ),
+            (
+                "postgres",
+                "SELECT tags || %s FROM users",
+                vec!["list[str]"],
+            ),
+            (
+                "postgres",
+                "SELECT ip <<= %s, ip >>= %s, ip << %s FROM things",
+                vec![inet, inet, inet],
+            ),
+            (
+                "postgres",
+                "SELECT 1 FROM users WHERE id = SOME(%s)",
+                vec!["list[int]"],
+            ),
+            (
+                "mysql",
+                "SELECT 1 FROM users WHERE id = ANY(%s)",
+                vec!["list[int]"],
+            ),
+            (
+                "sqlite",
+                "SELECT 1 FROM users WHERE id = ANY(%s)",
+                vec!["list[int]"],
+            ),
+            (
+                "postgres",
+                "SELECT 1 FROM users WHERE %s = ANY(name)",
+                vec!["-"],
+            ),
+            (
+                "postgres",
+                "SELECT born AT TIME ZONE 'UTC' FROM users",
+                vec![],
+            ),
+            (
+                "postgres",
+                "SELECT CASE age WHEN %s THEN 1 END FROM users",
+                vec!["int"],
+            ),
+            (
+                "postgres",
+                "SELECT 1 FROM users WHERE %s IN (SELECT id, name FROM users)",
+                vec!["-"],
+            ),
+            (
+                "postgres",
+                "SELECT 1 FROM users WHERE %s IN (SELECT x FROM things)",
+                vec!["-"],
+            ),
+            ("postgres", "SELECT %s::unknowntype", vec!["-"]),
+            (
+                "postgres",
+                "SELECT SUBSTRING(%s FROM 1 FOR %s)",
+                vec!["str", "int"],
+            ),
+            (
+                "postgres",
+                "SELECT generate_series(%s::date, %s::date, %s)",
+                vec!["datetime.date", "datetime.date", "datetime.timedelta"],
+            ),
+            ("postgres", "SELECT generate_series(1, 10, %s)", vec!["int"]),
+            (
+                "postgres",
+                "SELECT generate_series(%s::timestamp, %s::timestamp, '1 day')",
+                vec!["datetime.datetime", "datetime.datetime"],
+            ),
+            ("postgres", "SELECT f(%s, %s)", vec!["-", "int"]),
+        ] {
+            assert_eq!(found(dialect, sql), expected, "{sql}");
+        }
     }
 }

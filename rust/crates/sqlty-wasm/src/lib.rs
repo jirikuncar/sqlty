@@ -15,7 +15,7 @@
 //! assert_eq!(answer["queries"][0]["row_type"], "tuple[int]");
 //! ```
 
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -458,4 +458,5 @@ mod abi {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

@@ -207,6 +207,7 @@ pub(super) fn split_access<'e>(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use sqlparser::ast::{DataType, Ident, ObjectName};
 

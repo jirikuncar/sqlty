@@ -603,6 +603,7 @@ pub(super) fn lex(text: &str) -> Option<Vec<Tok>> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::catalog::{load, Catalog};

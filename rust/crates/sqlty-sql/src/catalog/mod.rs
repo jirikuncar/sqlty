@@ -544,6 +544,7 @@ pub(crate) fn empty(dialect: SqlDialect) -> &'static Catalog {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::analyzer::canonical_type;
@@ -564,6 +565,19 @@ mod tests {
 
     fn pg(sql: &str) -> Catalog {
         load(sql, "postgres").0
+    }
+
+    #[test]
+    fn lookups_of_a_view_or_an_unknown_name_find_nothing() {
+        let c = pg("CREATE TABLE t (a int PRIMARY KEY);
+            CREATE VIEW v AS SELECT a FROM t;
+            CREATE TABLE u (b int REFERENCES v (a));
+            CREATE FUNCTION f(x int) RETURNS int LANGUAGE sql AS 'SELECT 1';
+            CREATE FUNCTION f(x text) RETURNS SETOF int LANGUAGE sql AS 'SELECT 1';");
+        assert!(c.nonnull_groups("v").is_empty());
+        assert_eq!(c.foreign_keys("nope").count(), 0);
+        assert_eq!(c.entity("u", "b"), None);
+        assert!(c.function("f", 1).is_none());
     }
 
     fn cols(catalog: &Catalog, table: &str) -> Vec<String> {

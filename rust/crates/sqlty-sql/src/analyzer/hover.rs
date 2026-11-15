@@ -306,6 +306,7 @@ fn select_item(tokens: &[Tok], at: usize) -> Option<SelectItem> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::catalog::load;

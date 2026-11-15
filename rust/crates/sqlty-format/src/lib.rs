@@ -19,7 +19,7 @@
 //! );
 //! ```
 
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -232,6 +232,7 @@ fn linter(dialect: &str, rules: &str) -> Linter {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

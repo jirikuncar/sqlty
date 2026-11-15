@@ -247,6 +247,7 @@ impl Diagnostics {
 
     /// Everything recorded so far, in order, without spans.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn items(&self) -> Vec<NameDiagnostic> {
         self.located().into_iter().map(|(item, _)| item).collect()
     }
@@ -267,6 +268,7 @@ impl Drop for At {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

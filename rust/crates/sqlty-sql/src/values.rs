@@ -261,6 +261,7 @@ pub(crate) fn constant(expr: &Expr) -> Option<Value> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use sqlparser::dialect::PostgreSqlDialect;

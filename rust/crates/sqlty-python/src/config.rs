@@ -508,6 +508,7 @@ fn matched(a: &[char], b: &[char]) -> usize {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

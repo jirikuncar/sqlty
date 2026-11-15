@@ -15,7 +15,7 @@
 //! assert_eq!(source.matches("--sql").count(), 3);
 //! ```
 
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
 
 use std::fmt::Write;
 
@@ -126,6 +126,7 @@ pub fn python_source(queries: usize) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{python_source, schema_sql, QUERIES};
     use sqlty_sql::analyzer;
