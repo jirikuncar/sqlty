@@ -218,17 +218,21 @@ fn linter(dialect: &str, rules: &str) -> Linter {
 }
 
 fn config(dialect: &str, rules: &str) -> FluffConfig {
-    let dialect = match dialect {
-        "generic" => "ansi",
-        "mssql" => "tsql",
-        "spark" => "sparksql",
-        other => other,
-    };
+    let dialect = sqruff_dialect(dialect);
     FluffConfig::try_from_source(
         &format!("[sqruff]\ndialect = {dialect}\ntemplater = raw\n{rules}\n"),
         None,
     )
     .expect("sqruff knows every sqlty dialect")
+}
+
+fn sqruff_dialect(dialect: &str) -> &str {
+    match dialect {
+        "generic" => "ansi",
+        "mssql" => "tsql",
+        "spark" => "sparksql",
+        other => other,
+    }
 }
 
 #[cfg(test)]
@@ -273,7 +277,9 @@ mod tests {
     #[test]
     fn every_dialect_is_one_sqruff_knows() {
         for dialect in sqlty_sql::Dialect::NAMES {
-            config(dialect, "");
+            let kind =
+                sqruff_dialect(dialect).parse::<sqruff_lib_core::dialects::init::DialectKind>();
+            assert!(kind.is_ok(), "{dialect}");
         }
     }
 
