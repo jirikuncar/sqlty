@@ -28,6 +28,9 @@ export class Uri {
   static joinPath(base: Uri, ...paths: string[]): Uri {
     return new Uri(Utils.joinPath(base.uri, ...paths));
   }
+  with(change: { path?: string }): Uri {
+    return new Uri(this.uri.with(change));
+  }
   get path(): string {
     return this.uri.path;
   }
