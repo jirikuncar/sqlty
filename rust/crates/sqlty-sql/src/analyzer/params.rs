@@ -397,13 +397,12 @@ impl<'a> Analyzer<'a> {
                 .map(|ident| fold(ident, self.dialect))
                 .collect()
         };
-        match insert.source.as_deref() {
-            Some(Query {
-                body, with: None, ..
-            }) if matches!(body.as_ref(), SetExpr::Values(_)) => {
-                let SetExpr::Values(values) = body.as_ref() else {
-                    return;
-                };
+        match insert
+            .source
+            .as_deref()
+            .map(|query| (query, query.body.as_ref()))
+        {
+            Some((Query { with: None, .. }, SetExpr::Values(values))) => {
                 for row in &values.rows {
                     for (position, expr) in row.content.iter().enumerate() {
                         if let Some(column) = targets.get(position) {
@@ -413,9 +412,9 @@ impl<'a> Analyzer<'a> {
                     }
                 }
             }
-            Some(query) => {
+            Some((query, body)) => {
                 // `INSERT ... SELECT $1, $2`: a bare placeholder is stored in its column.
-                if let SetExpr::Select(select) = query.body.as_ref() {
+                if let SetExpr::Select(select) = body {
                     let (analyzer, select_scope) = self.scope_or_empty(&select.from);
                     for (position, item) in select.projection.iter().enumerate() {
                         // Past a `*`, the columns a value lands in are unknown.

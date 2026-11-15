@@ -631,3 +631,59 @@ fn rarer_parser_inputs() {
     let input = parser_input("SET CONSTRAINTS %s DEFERRED", SqlDialect::Postgres);
     assert_eq!(input.original(input.text().len(), true), 27);
 }
+
+#[test]
+fn rarer_respellings() {
+    let cases = [
+        (
+            SqlDialect::Postgres,
+            "SELECT sum(a) OVER (ORDER BY a ROWS UNBOUNDED PRECEDING EXCLUDE NO OTHERS) FROM t",
+            "SELECT sum(a) OVER (ORDER BY a ROWS UNBOUNDED PRECEDING ) FROM t",
+        ),
+        (
+            SqlDialect::Postgres,
+            "SELECT substring(x similar 'a' escape '#') FROM t",
+            "SELECT substring(x FROM 'a' FOR '#') FROM t",
+        ),
+        (
+            SqlDialect::Postgres,
+            "SELECT XMLSERIALIZE(DOCUMENT x AS text NO INDENT) FROM t",
+            "SELECT CAST( x AS text ) FROM t",
+        ),
+        (
+            SqlDialect::Postgres,
+            "SELECT XMLROOT(x, VERSION NO VALUE) FROM t",
+            "SELECT XMLROOT(x,  NULL) FROM t",
+        ),
+        (SqlDialect::MySql, "SELECT !, 1", "SELECT !, 1"),
+        (SqlDialect::MySql, "SELECT !", "SELECT !"),
+        (
+            SqlDialect::MySql,
+            "SELECT !!a, !(b), !c.d(1)",
+            "SELECT (NOT (NOT a)), (NOT (b)), (NOT c.d(1))",
+        ),
+        (
+            SqlDialect::MySql,
+            "SELECT 1, MOD(5, 2), (MOD 2)",
+            "SELECT 1, MOD(5, 2), (MOD 2)",
+        ),
+        (
+            SqlDialect::Postgres,
+            "SELECT JSON_ARRAY(SELECT 1",
+            "SELECT JSON_ARRAY(SELECT 1",
+        ),
+        (
+            SqlDialect::Postgres,
+            "DO LANGUAGE plpgsql 1",
+            "DO LANGUAGE plpgsql 1",
+        ),
+        (
+            SqlDialect::Postgres,
+            "SELECT * FROM XMLTABLE('/a' PASSING x)",
+            "SELECT * FROM XMLTABLE('/a' PASSING x)",
+        ),
+    ];
+    for (dialect, sql, read) in cases {
+        assert_eq!(parser_input(sql, dialect).text(), read, "{sql}");
+    }
+}

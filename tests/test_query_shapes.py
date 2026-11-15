@@ -519,6 +519,35 @@ EXPRESSIONS = [
     ("postgres", "SELECT (p).a, (p).b FROM pt", "a: int | None, b: str | None", []),
     ("postgres", "SELECT c FROM gt", "c: int | None", []),
     ("postgres", "SELECT * FROM fv()", "fv: None", []),
+    ("postgres", "SELECT unnest(ARRAY[ARRAY[1, 2]]) AS x", "x: int | None", []),
+    ("mysql", "SELECT db.lower('a') AS x", "x: None", ["unknown-function"]),
+    ("postgres", "SELECT CASE WHEN i > 0 THEN 1 ELSE dt END AS x FROM f", "x: int | None", []),
+    (
+        "postgres",
+        "SELECT percentile_disc(ARRAY[0.5]) WITHIN GROUP (ORDER BY nope) AS x FROM f",
+        "x: None",
+        ["unknown-column"],
+    ),
+    ("sqlite", "SELECT * FROM pragma_table_info('f')", "*: None", ["unsupported-syntax"]),
+    ("mysql", "SELECT * FROM generate_series(1, 2)", "*: None", ["unsupported-syntax"]),
+    ("postgres", "SELECT value FROM jsonb_array_elements('[1]')", "value: typing.Any", []),
+    ("postgres", "SELECT key, value FROM json_each('{}')", "key: str, value: typing.Any", []),
+    (
+        "postgres",
+        "SELECT * FROM jsonb_populate_record(NULL, '{}')",
+        "*: None",
+        ["unsupported-syntax"],
+    ),
+    ("postgres", "SELECT i FROM f GROUP BY 5", "i: int | None", ["ungrouped-column"]),
+    ("postgres", "SELECT * FROM (SELECT 1 AS a) s GROUP BY a", "a: int", []),
+    ("postgres", "WITH w AS (SELECT 1 AS a) SELECT * FROM w GROUP BY a", "a: int", []),
+    ("postgres", "SELECT w.* FROM (SELECT 1 AS a) w GROUP BY w.a", "a: int", []),
+    (
+        "postgres",
+        "SELECT p.*, c.* FROM p JOIN c ON c.pid = p.id GROUP BY p.id",
+        "id: int, name: str, id: int, pid: int, arr: list[int] | None",
+        ["ungrouped-column", "ungrouped-column", "ungrouped-column"],
+    ),
 ]
 
 
@@ -601,6 +630,11 @@ PARAMS = [
     ),
     ("SELECT 1 FROM f WHERE i = ALL(ARRAY[$1])", [(1, None, None)]),
     ("SELECT 1 FROM f WHERE tx LIKE ALL($1)", [(1, None, None)]),
+    ("SELECT 1 FROM nope WHERE a = $1", [(1, None, None)]),
+    ("VALUES ($1)", [(1, None, None)]),
+    ("SELECT 1 FROM f WHERE ANY(arr) = $1", [(1, None, None)]),
+    ("SELECT 1 FROM f WHERE $1 = ANY(i)", [(1, None, None)]),
+    ("SELECT 1 FROM f WHERE $1 IN (SELECT NULL)", [(1, None, None)]),
 ]
 
 
