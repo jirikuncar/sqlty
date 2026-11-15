@@ -486,6 +486,9 @@ fn pg_category(typed: &Typed) -> Option<(char, &str)> {
         "BOOLEAN" => 'B',
         "DATE" | "TIMESTAMP" | "TIMESTAMPTZ" | "TIME" | "TIMETZ" => 'D',
         "INTERVAL" => 'T',
+        // Category `U`, whose types match only those they cast to implicitly.
+        "JSON" | "JSONB" => 'J',
+        "UUID" => 'U',
         _ => return None,
     };
     Some((category, name))
