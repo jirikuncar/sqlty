@@ -192,3 +192,57 @@ JSON = [
 @pytest.mark.parametrize(("dialect", "sql", "shapes"), JSON)
 def test_json(dialect: str, sql: str, shapes: list[tuple[str, str]]) -> None:
     assert json_shapes(sql, dialect=dialect, schema_sql=JSON_SCHEMA) == shapes
+
+
+FUNCTION_SCHEMAS = {
+    "postgres": "CREATE TABLE f (i INT, tx TEXT, iv INTERVAL, dt DATE, vb VARBIT, c INT CHECK (c IN (1, 2)));",
+    "mysql": "CREATE TABLE f (i INT, tx TEXT, d DECIMAL(30, 2), dd DECIMAL(20), dn DECIMAL, dtm DATETIME, c INT CHECK (c IN (1, 2)));",
+    "sqlite": "CREATE TABLE f (i INT, tx TEXT, c INT CHECK (c IN (1, 2)));",
+}
+FUNCTIONS = [
+    (
+        "mysql",
+        "SELECT GREATEST(c, tx) AS x, GREATEST(i, tx) AS y, GREATEST(tx, i) AS z FROM f",
+        "x: str | None, y: str | None, z: str | None",
+        [],
+    ),
+    (
+        "sqlite",
+        "SELECT coalesce(c, tx) AS x, coalesce(i, tx) AS y FROM f",
+        "x: int | str | None, y: int | str | None",
+        [],
+    ),
+    ("mysql", "SELECT STR_TO_DATE(tx, 5) AS x FROM f", "x: None", ["unsupported-syntax"]),
+    ("postgres", "SELECT RANGE_MERGE(i) AS x FROM f", "x: None", ["unsupported-syntax"]),
+    ("postgres", "SELECT STDDEV(iv) AS x FROM f", "x: datetime.timedelta | None", []),
+    ("postgres", "SELECT SQRT(tx) AS x FROM f", "x: None", ["unsupported-syntax"]),
+    ("mysql", "SELECT DATE_ADD(dtm, 5) AS x FROM f", "x: datetime.datetime | None", []),
+    (
+        "mysql",
+        "SELECT FLOOR(d) AS x, FLOOR(dd) AS y, FLOOR(dn) AS z, FLOOR(NULL) AS w FROM f",
+        "x: decimal.Decimal | None, y: decimal.Decimal | None, z: int | None, w: None",
+        ["unsupported-syntax"],
+    ),
+    ("postgres", "SELECT TIMEZONE('UTC', dt) AS x FROM f", "x: None", ["unsupported-syntax"]),
+    ("postgres", "SELECT DATE_TRUNC('day', tx) AS x FROM f", "x: None", ["unsupported-syntax"]),
+    ("postgres", "SELECT LTRIM(vb) AS x FROM f", "x: str | None", []),
+    (
+        "postgres",
+        "SELECT RANDOM(1.5::float8, 2.5::float8) AS x FROM f",
+        "x: None",
+        ["unsupported-syntax"],
+    ),
+    ("postgres", "SELECT COALESCE(i, tx) AS x FROM f", "x: int | None", []),
+    ("postgres", "SELECT COALESCE(c, tx) AS x FROM f", "x: int | None", []),
+    ("mysql", "SELECT CONCAT(tx, i) AS x FROM f", "x: str | None", []),
+]
+
+
+@pytest.mark.parametrize(("dialect", "sql", "columns", "rules"), FUNCTIONS)
+def test_functions(dialect: str, sql: str, columns: str, rules: list[str]) -> None:
+    schema = FUNCTION_SCHEMAS[dialect]
+    found = _core.analyze_select(sql, dialect=dialect, schema_sql=schema)
+    assert found is not None
+    assert ", ".join(f"{name}: {python}" for name, python, _ in found) == columns
+    diagnostics = _core.query_diagnostics(sql, dialect=dialect, schema_sql=schema)
+    assert [rule for rule, *_ in diagnostics] == rules

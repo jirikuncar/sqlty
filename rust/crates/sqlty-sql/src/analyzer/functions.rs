@@ -347,17 +347,12 @@ impl<'a> Analyzer<'a> {
         };
         let typed = [typed(0)?, typed(1)?];
         let [first, second] = [0, 1].map(|i| operand(typed[i].as_ref().and_then(operand_type)));
-        let all = if rules.iter().any(FunctionRule::reads_all) {
-            args.iter()
-                .map(|arg| self.expr(arg, scope))
-                .collect::<Inferred<Vec<_>>>()?
-        } else {
-            Vec::new()
-        };
-        let all: Vec<_> = all
-            .iter()
-            .map(|typed| operand(operand_type(typed)))
-            .collect();
+        let mut all = Vec::new();
+        if rules.iter().any(FunctionRule::reads_all) {
+            for arg in args {
+                all.push(operand(operand_type(&self.expr(arg, scope)?)));
+            }
+        }
         let found = rules
             .iter()
             .find(|rule| rule.applies(self.dialect, first, second, &all));
