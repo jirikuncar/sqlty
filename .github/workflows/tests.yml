@@ -107,9 +107,9 @@ jobs:
         env:
           SQLTY_AST: compare
 
-      # They share one database server, so they run in one process.
+      # Each worker gets its own database (tests/conftest.py).
       - name: Run database tests
-        run: uv run pytest -m pg -n 0
+        run: uv run pytest -m pg
 
       - name: Run timing tests
         run: uv run pytest -m timing -n 0 -p no:randomly
@@ -265,7 +265,7 @@ jobs:
         run: uv run maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
 
       - name: Compare with the server's column names and types
-        run: uv run pytest tests/test_pg_describe.py tests/test_pg_common_types.py tests/test_driver_values.py -rs -q -n 0
+        run: uv run pytest tests/test_pg_describe.py tests/test_pg_common_types.py tests/test_driver_values.py -rs -q
 
   mysql-fidelity:
     name: MySQL column names and types
@@ -323,7 +323,7 @@ jobs:
         run: uv run maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
 
       - name: Compare with the server's column names and types
-        run: uv run --with pymysql pytest tests/test_server_describe.py tests/test_driver_values.py -rs -q -n 0
+        run: uv run --with pymysql pytest tests/test_server_describe.py tests/test_driver_values.py -rs -q
 
   lean-model:
     name: Lean model of the type mapping
