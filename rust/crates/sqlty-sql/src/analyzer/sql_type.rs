@@ -703,7 +703,6 @@ fn scalar(dt: &DataType, dialect: SqlDialect) -> String {
         "NUMERIC" | "DEC" | "FIXED" => "DECIMAL",
         "CHARACTER VARYING" | "NVARCHAR" => "VARCHAR",
         "CHARACTER LARGE OBJECT" | "CHAR LARGE OBJECT" => "TEXT",
-        "BINARY LARGE OBJECT" => "VARBINARY",
         "BIT VARYING" => "VARBIT",
         "CHARACTER" | "NCHAR" => "CHAR",
         "TINYTEXT" | "MEDIUMTEXT" | "LONGTEXT" => "TEXT",

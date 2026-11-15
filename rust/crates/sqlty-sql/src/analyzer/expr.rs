@@ -1,8 +1,8 @@
 //! Expression typing.
 
 use sqlparser::ast::{
-    AccessExpr, ArrayElemTypeDef, BinaryOperator, CaseWhen, DataType, Expr, Function,
-    FunctionArgumentClause, FunctionArguments, Ident, ObjectName, Subscript, UnaryOperator, Value,
+    AccessExpr, BinaryOperator, CaseWhen, DataType, Expr, Function, FunctionArgumentClause,
+    FunctionArguments, Ident, ObjectName, Subscript, UnaryOperator, Value,
 };
 
 use crate::catalog::{fold, FunctionReturn, SchemaColumn};
@@ -86,16 +86,14 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// The type of the values `unnest` returns from an array of this SQL type: PostgreSQL's
-    /// flattens every dimension.
+    /// The type of the values PostgreSQL's `unnest` returns from an array of this SQL type:
+    /// it flattens every dimension.
     pub(super) fn unnested_typed(&self, mut array: Option<&str>) -> Typed {
-        if self.dialect == SqlDialect::Postgres {
-            while let Some(inner) = array
-                .and_then(array_element)
-                .filter(|e| e.starts_with("ARRAY<"))
-            {
-                array = Some(inner);
-            }
+        while let Some(inner) = array
+            .and_then(array_element)
+            .filter(|e| e.starts_with("ARRAY<"))
+        {
+            array = Some(inner);
         }
         self.element_typed(array)
     }
@@ -129,20 +127,10 @@ impl<'a> Analyzer<'a> {
         Some((name, fields))
     }
 
-    /// Whether `data_type` is, or is an array of, a domain, enum or composite type the
-    /// schema defines.
+    /// Whether `data_type` is a domain, enum or composite type the schema defines; an array
+    /// of any type is a `list`.
     fn defines_type(&self, data_type: &DataType) -> bool {
-        match data_type {
-            DataType::Custom(name, _) => self.schema.defines_type(&table_key(name, self.dialect)),
-            DataType::Array(
-                ArrayElemTypeDef::AngleBracket(inner)
-                | ArrayElemTypeDef::Parenthesis(inner)
-                | ArrayElemTypeDef::ParenthesisNotNull(inner)
-                | ArrayElemTypeDef::Qualified(inner, _)
-                | ArrayElemTypeDef::SquareBracket(inner, _),
-            ) => self.defines_type(inner),
-            _ => false,
-        }
+        matches!(data_type, DataType::Custom(name, _) if self.schema.defines_type(&table_key(name, self.dialect)))
     }
 
     /// The upper-case name the built-in function `name` is looked up by. In PostgreSQL a

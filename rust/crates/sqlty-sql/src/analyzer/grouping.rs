@@ -19,7 +19,7 @@ use super::names::object_name;
 use super::query::Analyzer;
 use super::registry::lookup;
 use super::scope::{any_merging_join, Scope, Source};
-use crate::catalog::fold;
+use crate::catalog::{fold, SchemaColumn};
 use crate::diagnostics::NameRule;
 
 impl Analyzer<'_> {
@@ -124,7 +124,7 @@ impl Analyzer<'_> {
                 continue;
             };
             if self.virtual_columns(table).is_some()
-                || self.groups_primary_key(grouped, &reference, table)
+                || Self::groups_primary_key(grouped, &reference, columns)
             {
                 continue;
             }
@@ -145,12 +145,8 @@ impl Analyzer<'_> {
         );
     }
 
-    /// Whether the keys include every primary key column of the schema table `table`,
-    /// read by `reference`.
-    fn groups_primary_key(&self, grouped: &Grouped, reference: &str, table: &str) -> bool {
-        let Some(columns) = self.schema.table(table) else {
-            return false;
-        };
+    /// Whether the keys include every primary key column of `columns`, read by `reference`.
+    fn groups_primary_key(grouped: &Grouped, reference: &str, columns: &[SchemaColumn]) -> bool {
         let mut key = columns
             .iter()
             .filter(|column| column.primary_key)
@@ -221,29 +217,26 @@ impl Visitor for Ungrouped<'_, '_> {
                 (expr, self.analyzer.whole_row_table(expr, self.scope))
             {
                 let reference = fold(ident, self.analyzer.dialect);
-                if !self
-                    .analyzer
-                    .groups_primary_key(self.grouped, &reference, table)
-                {
+                let columns = self.analyzer.schema.table(table).unwrap_or_default();
+                if !Analyzer::groups_primary_key(self.grouped, &reference, columns) {
                     self.analyzer.record_ungrouped(&reference, "*");
                 }
             }
             return ControlFlow::Continue(());
         };
         // Outer columns of a correlated query are grouped, or not, by their own query.
-        if !self
+        let read = self
             .scope
             .iter()
-            .any(|source| source.reference == reference)
-            || self.analyzer.schema.table(&table).is_none()
-            || self.analyzer.virtual_columns(&table).is_some()
-        {
+            .any(|source| source.reference == reference);
+        let columns = self.analyzer.schema.table(&table);
+        let Some(columns) =
+            columns.filter(|_| read && self.analyzer.virtual_columns(&table).is_none())
+        else {
             return ControlFlow::Continue(());
-        }
+        };
         if !self.grouped.covers(&reference, &column)
-            && !self
-                .analyzer
-                .groups_primary_key(self.grouped, &reference, &table)
+            && !Analyzer::groups_primary_key(self.grouped, &reference, columns)
         {
             self.analyzer.record_ungrouped(&reference, &column);
         }

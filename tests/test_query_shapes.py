@@ -210,7 +210,7 @@ def test_json(dialect: str, sql: str, shapes: list[tuple[str, str]]) -> None:
 
 
 EXPRESSION_SCHEMAS = {
-    "postgres": "CREATE TABLE f (i INT, tx TEXT, iv INTERVAL, dt DATE, vb VARBIT, c INT CHECK (c IN (1, 2))); CREATE TABLE p (id INT PRIMARY KEY, name TEXT NOT NULL); CREATE TABLE c (id INT PRIMARY KEY, pid INT REFERENCES p (id), arr INT[]); CREATE TABLE g (a INT, b INT, CHECK (num_nonnulls(a, b) >= 1)); CREATE TABLE vs (x INT CHECK (x IN (1, 2)), y INT CHECK (y IN (3, 4))); CREATE VIEW bad AS SELECT * FROM nope; CREATE TYPE mood AS ENUM ('a'); CREATE TABLE mt (m mood); ALTER TYPE mood RENAME TO feeling; DROP TYPE feeling; CREATE TYPE pair AS (a INT, b TEXT); CREATE TABLE pt (p pair); ALTER TYPE pair RENAME TO duo; CREATE TABLE gt (a INT, b INT GENERATED ALWAYS AS (a + 1) STORED, c INT GENERATED ALWAYS AS (gt.b + 1) STORED); CREATE VIEW pv AS SELECT id FROM p; CREATE FUNCTION fv() RETURNS SETOF pv AS $$ SELECT * FROM pv $$ LANGUAGE sql; CREATE TABLE ut (a INT, b mystery); CREATE VIEW v2 AS SELECT x.id FROM p x, c x;",
+    "postgres": "CREATE TABLE f (i INT, tx TEXT, iv INTERVAL, dt DATE, vb VARBIT, c INT CHECK (c IN (1, 2))); CREATE TABLE p (id INT PRIMARY KEY, name TEXT NOT NULL); CREATE TABLE c (id INT PRIMARY KEY, pid INT REFERENCES p (id), arr INT[]); CREATE TABLE g (a INT, b INT, CHECK (num_nonnulls(a, b) >= 1)); CREATE TABLE vs (x INT CHECK (x IN (1, 2)), y INT CHECK (y IN (3, 4))); CREATE VIEW bad AS SELECT * FROM nope; CREATE TYPE mood AS ENUM ('a'); CREATE TABLE mt (m mood); ALTER TYPE mood RENAME TO feeling; DROP TYPE feeling; CREATE TYPE pair AS (a INT, b TEXT); CREATE TABLE pt (p pair); ALTER TYPE pair RENAME TO duo; CREATE TABLE gt (a INT, b INT GENERATED ALWAYS AS (a + 1) STORED, c INT GENERATED ALWAYS AS (gt.b + 1) STORED); CREATE VIEW pv AS SELECT id FROM p; CREATE FUNCTION fv() RETURNS SETOF pv AS $$ SELECT * FROM pv $$ LANGUAGE sql; CREATE TABLE ut (a INT, b mystery); CREATE VIEW v2 AS SELECT x.id FROM p x, c x; CREATE TYPE pr AS (a INT); CREATE TABLE ptt (q pr);",
     "mysql": "CREATE TABLE f (i INT, tx TEXT, d DECIMAL(30, 2), dd DECIMAL(20), dn DECIMAL, dtm DATETIME, c INT CHECK (c IN (1, 2))); CREATE TABLE m (ui INT UNSIGNED, ub BIGINT UNSIGNED, y YEAR, g GEOMETRY, dt DATE, bl BLOB, ud DECIMAL(10, 2) UNSIGNED, j JSON); CREATE TABLE u (UserName TEXT);",
     "sqlite": "CREATE TABLE f (i INT, tx TEXT, c INT CHECK (c IN (1, 2)));",
 }
@@ -646,6 +646,40 @@ EXPRESSIONS = [
     ("postgres", "SELECT * FROM json_array_elements('[1]')", "value: typing.Any", []),
     ("postgres", "SELECT MOD(i, 2) FROM f", "mod: int | None", []),
     ("mysql", "SELECT MOD(i, (2)) FROM f", "MOD(i, (2)): int | None", []),
+    ("sqlite", "SELECT LOCALTIME", "LOCALTIME: None", ["unknown-function"]),
+    (
+        "postgres",
+        "SELECT * FROM p, (SELECT 1) GROUP BY p.id",
+        "id: int, name: str, ?column?: int",
+        [],
+    ),
+    ("postgres", 'SELECT 1 FROM ptt WHERE (ptt.q)."*" IS NULL', "?column?: int", []),
+    (
+        "mysql",
+        "WITH c AS (SELECT 1 AS UserName) SELECT UserNam FROM c",
+        "UserNam: None",
+        ["unknown-column"],
+    ),
+    ("postgres", "SELECT nope FROM p GROUP BY id", "nope: None", ["unknown-column"]),
+    (
+        "postgres",
+        "SELECT * FROM p, pg_catalog.pg_nothing GROUP BY p.id",
+        "*: None",
+        ["unsupported-syntax"],
+    ),
+    (
+        "postgres",
+        "SELECT * FROM p, (c JOIN f ON true) AS j GROUP BY p.id",
+        "*: None",
+        ["unsupported-syntax"],
+    ),
+    (
+        "postgres",
+        "SELECT * FROM p, unnest(ARRAY[1]) GROUP BY p.id",
+        "id: int, name: str, unnest: int | None",
+        [],
+    ),
+    ("postgres", "SELECT * FROM p, pg_nothing() GROUP BY p.id", "*: None", ["unsupported-syntax"]),
 ]
 
 
