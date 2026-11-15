@@ -240,6 +240,8 @@ CASES = {
     "names": "    run('SELECT nope FROM t', int)\n",
     "unparsed": "    run('SELEC', int)\n",
     "template": '    t"--sql\\nSELECT id FROM t WHERE id = {s}"\n',
+    "literals": "    run('--sql\\nSELECT id FROM t', int)\n    'a' F'{n:>{s}}'\n    '' F'{n}'\n"
+    "    t'{q:>3}'\n    run('SELECT nope FROM t', int)\n",
 }
 
 
