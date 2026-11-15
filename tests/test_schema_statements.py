@@ -240,7 +240,78 @@ CASES = {
         "SELECT * FROM t",
         "a::INT",
     ),
+    "partitioned table with an unreadable constraint": (
+        "postgres",
+        "CREATE TABLE t (a INT, CONSTRAINT c bogus stuff) PARTITION BY RANGE (a) bogus",
+        "SELECT * FROM t",
+        "a::INT",
+    ),
+    "like with an unreadable constraint": (
+        "postgres",
+        "CREATE TABLE p (a INT); CREATE TABLE t (LIKE p, b INT, CONSTRAINT c bogus stuff)",
+        "SELECT * FROM t",
+        "a::INT, b::INT",
+    ),
+    "range type": (
+        "postgres",
+        "CREATE TYPE r AS RANGE (SUBTYPE = int4); CREATE TABLE t (a r)",
+        "SELECT * FROM t",
+        "a::R",
+    ),
+    "unreadable drop of a sequence": (
+        "postgres",
+        "CREATE TABLE t (a INT); DROP SEQUENCE s bogus",
+        "SELECT * FROM t",
+        "a::INT",
+    ),
+    "unreadable rename": (
+        "mysql",
+        "CREATE TABLE a (x INT); RENAME TABLE a TO b bogus",
+        "SELECT * FROM a",
+        "x::INT",
+    ),
+    "renames in turn": (
+        "mysql",
+        "CREATE TABLE a (x INT); CREATE TABLE c (y INT); RENAME TABLE a TO b, c TO d",
+        "SELECT * FROM b, d",
+        "x::INT, y::INT",
+    ),
+    "table as query if not exists": (
+        "postgres",
+        "CREATE TABLE IF NOT EXISTS t AS SELECT 1 AS a",
+        "SELECT * FROM t",
+        "a::None",
+    ),
 }
+
+SKIPPED = {
+    "table without columns": ("mysql", "CREATE TABLE t", []),
+    "unreadable view": ("mysql", "CREATE VIEW v AS bogus", [("view", "v")]),
+    "unreadable domain": ("postgres", "CREATE DOMAIN d AS bogus (((", []),
+    "unreadable index": ("postgres", "CREATE INDEX bogus (((", []),
+    "unreadable drop of a table": (
+        "postgres",
+        "CREATE TABLE t (a INT); DROP TABLE t bogus",
+        [("table", "t")],
+    ),
+    "unreadable drop of a type": (
+        "postgres",
+        "CREATE TYPE e AS ENUM ('a'); DROP TYPE e bogus",
+        [("type", "e")],
+    ),
+    "renamed view": (
+        "postgres",
+        "CREATE VIEW v AS SELECT 1 AS a; ALTER VIEW v RENAME TO w",
+        [("table", "v")],
+    ),
+    "virtual table outside SQLite": ("postgres", "CREATE VIRTUAL TABLE v USING fts5(a)", []),
+    "R*Tree without an id": ("sqlite", "CREATE VIRTUAL TABLE r USING rtree(+)", [("table", "r")]),
+}
+
+
+@pytest.mark.parametrize(("dialect", "schema", "expected"), SKIPPED.values(), ids=SKIPPED.keys())
+def test_skipped(dialect: str, schema: str, expected: list[tuple[str, str]]) -> None:
+    assert core.schema_skipped_objects(schema, dialect=dialect) == expected
 
 
 @pytest.mark.parametrize(
