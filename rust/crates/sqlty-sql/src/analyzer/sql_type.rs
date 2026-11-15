@@ -358,8 +358,8 @@ impl SqlType {
                 Some(union(members?))
             }
             SqlType::Interval => Some("datetime.timedelta".to_string()),
-            SqlType::Unmapped(_) => None,
-            SqlType::Scalar(name) => scalar_python(name, dialect),
+            // `parse` reads an unmapped name back as a scalar.
+            SqlType::Scalar(name) | SqlType::Unmapped(name) => scalar_python(name, dialect),
         }
     }
 }
@@ -607,7 +607,7 @@ fn scalar(dt: &DataType, dialect: SqlDialect) -> String {
         DataType::BigInt(None) => Some("BIGINT"),
         DataType::SmallInt(None) => Some("SMALLINT"),
         DataType::Text => Some("TEXT"),
-        DataType::Boolean | DataType::Bool => Some("BOOLEAN"),
+        DataType::Boolean => Some("BOOLEAN"),
         DataType::Uuid => Some("UUID"),
         DataType::Date => Some("DATE"),
         DataType::Bytea => Some("VARBINARY"),

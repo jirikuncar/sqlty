@@ -42,6 +42,37 @@ class TestParser:
             ("SELECT CAST(x AS DEC(8,3) UNSIGNED) FROM t", "mysql", "tuple[decimal.Decimal]"),
             ("SELECT CAST(x AS NUMERIC(8,3) UNSIGNED) FROM t", "mysql", None),
             ("SELECT CAST(x AS FIXED UNSIGNED) FROM t", "mysql", None),
+            ("SELECT CAST(x AS INT ZEROFILL) FROM t", "mysql", "tuple[int]"),
+            ("SELECT CAST(x AS SOMEBLOB) FROM t", "sqlite", "tuple[bytes]"),
+            ("SELECT CAST(x AS FLOATING) FROM t", "sqlite", "tuple[float]"),
+            (
+                "SELECT CAST(x AS TIMESTAMP WITHOUT TIME ZONE) FROM t",
+                "postgres",
+                "tuple[datetime.datetime]",
+            ),
+            ("SELECT CAST(x AS UInt8) FROM t", "clickhouse", "tuple[int]"),
+            ("SELECT CAST(x AS UInt16) FROM t", "clickhouse", "tuple[int]"),
+            ("SELECT CAST(x AS UInt32) FROM t", "clickhouse", "tuple[int]"),
+            ("SELECT CAST(x AS UHUGEINT) FROM t", "duckdb", "tuple[int]"),
+            ("SELECT CAST(x AS BOOL) FROM t", "postgres", "tuple[bool]"),
+            ("SELECT CAST(x AS BINARY LARGE OBJECT) FROM t", "generic", "tuple[bytes]"),
+            ("SELECT CAST(x AS FLOAT(10)) FROM t", "postgres", "tuple[float]"),
+            ("SELECT CAST(x AS FLOAT(53)) FROM t", "postgres", "tuple[float]"),
+            (
+                "SELECT CAST(x AS STRUCT(a INTEGER, b BIGINT)) FROM t",
+                "duckdb",
+                "tuple[dict[str, int]]",
+            ),
+            (
+                "SELECT CAST(x AS STRUCT<a ANY TYPE>) FROM t",
+                "bigquery",
+                "tuple[dict[str, typing.Any]]",
+            ),
+            (
+                "SELECT CAST(x AS STRUCT(a TABLE(b INT))) FROM t",
+                "duckdb",
+                "tuple[dict[str, typing.Any]]",
+            ),
             (
                 "SELECT CAST(x AS STRUCT(a INTEGER[])) FROM t",
                 "duckdb",
@@ -153,6 +184,12 @@ class TestParser:
                 "c5::SET('a'), c6::JSON, c7::BLOB, c8::TEXT, c9::POINT",
             ),
             ("INT8, INT", "sqlite", "c0::BIGINT, c1::INT"),
+            ("STRING COLLATE UTF8_LCASE", "databricks", "c0::TEXT"),
+            (
+                "INT(5) ZEROFILL, VARCHAR(3) COLLATE utf8mb4_bin",
+                "mysql",
+                "c0::UINT(5), c1::VARCHAR(3)",
+            ),
             (
                 "INT[3][3], INT ARRAY[4], TEXT[]",
                 "postgres",
@@ -230,6 +267,64 @@ def _type_table() -> dict[str, str]:
     table = source[start : source.index("\n});", start)]
     pairs = re.findall(r'\("(\w+)", (?:"([\w.]+)"|(\w+))\)', table)
     return {name: literal or constants[const] for name, literal, const in pairs if name != "ENUM"}
+
+
+@pytest.mark.parametrize(
+    ("spelling", "dialect", "sql_type"),
+    [
+        ("REAL", "generic", "FLOAT"),
+        ("BLOB", "generic", "VARBINARY"),
+        ("TIME WITH TIME ZONE", "generic", "TIMETZ"),
+        ("TIME WITHOUT TIME ZONE", "generic", "TIME"),
+        ("INT1", "generic", "TINYINT"),
+        ("INT2", "generic", "SMALLINT"),
+        ("INT16", "generic", "SMALLINT"),
+        ("INT32", "generic", "INT"),
+        ("INT8", "generic", "BIGINT"),
+        ("INT64", "generic", "BIGINT"),
+        ("UINT64", "generic", "UBIGINT"),
+        ("HUGEINT", "generic", "INT128"),
+        ("FLOAT32", "generic", "FLOAT"),
+        ("FLOAT64", "generic", "DOUBLE"),
+        ("NUMBER", "generic", "DECIMAL"),
+        ("BIGNUMERIC", "generic", "BIGDECIMAL"),
+        ("VARCHAR2", "generic", "VARCHAR"),
+        ("NVARCHAR2", "generic", "VARCHAR"),
+        ("CLOB", "generic", "TEXT"),
+        ("UNIQUEIDENTIFIER", "generic", "UUID"),
+        ("DATETIME2", "generic", "TIMESTAMP"),
+        ("TIMESTAMP_TZ", "generic", "TIMESTAMPTZ"),
+        ("TIMESTAMP_LTZ", "generic", "TIMESTAMPTZ"),
+        ("DATETIMEOFFSET", "generic", "TIMESTAMPTZ"),
+        ("FLOAT8", "generic", "DOUBLE"),
+        ("FLOAT4", "generic", "FLOAT"),
+        ("DEC", "generic", "DECIMAL"),
+        ("FIXED", "generic", "DECIMAL"),
+        ("CHARACTER VARYING", "generic", "VARCHAR"),
+        ("NVARCHAR", "generic", "VARCHAR"),
+        ("CHARACTER LARGE OBJECT", "generic", "TEXT"),
+        ("CHAR LARGE OBJECT", "generic", "TEXT"),
+        ("CHARACTER", "generic", "CHAR"),
+        ("NCHAR", "generic", "CHAR"),
+        ("TINYTEXT", "generic", "TEXT"),
+        ("TINYBLOB", "generic", "BLOB"),
+        ("STRING", "generic", "TEXT"),
+        ("BYTEA", "generic", "VARBINARY"),
+        ("INTEGER(10)", "mysql", "INT(10)"),
+        ("BYTES", "bigquery", "BINARY"),
+        ("BINARY LARGE OBJECT", "generic", "VARBINARY"),
+        ("BIT VARYING(3)", "postgres", "VARBIT(3)"),
+        ("REAL", "mysql", "DOUBLE"),
+        ("BLOB", "mysql", "BLOB"),
+        ("INT8", "clickhouse", "TINYINT"),
+        ("DATETIME2", "mysql", "TIMESTAMPTZ"),
+    ],
+)
+def test_type_spellings(spelling: str, dialect: str, sql_type: str):
+    """Each dialect's spelling of a type reads as the one canonical name."""
+    query = f"SELECT CAST(x AS {spelling}) AS c FROM t"
+    [column] = core.analyze_select(query, dialect=dialect)
+    assert column.sql_type == sql_type
 
 
 @pytest.mark.parametrize("dialect", ["postgres", "mysql", "sqlite"])
