@@ -37,12 +37,10 @@ fn quoted_end(bytes: &[u8], start: usize, quote: u8, backslash: bool) -> usize {
     bytes.len()
 }
 
-/// The end of a `$tag$ ... $tag$` body starting at `start`, if one starts there.
+/// The end of a `$tag$ ... $tag$` body starting at `start`, if one starts there. A `$`
+/// after a word is part of it.
 fn dollar_end(sql: &str, start: usize) -> Option<usize> {
     let bytes = sql.as_bytes();
-    if start > 0 && (is_word_byte(bytes[start - 1]) || bytes[start - 1] == b'$') {
-        return None;
-    }
     let mut i = start + 1;
     while i < bytes.len()
         && (bytes[i].is_ascii_alphabetic()
@@ -1137,6 +1135,60 @@ mod tests {
         assert_eq!(
             first("create or replace function f()").lead_words(3),
             ["create", "or", "replace"]
+        );
+    }
+
+    #[test]
+    fn rarer_statements() {
+        fn one(sql: &str, mysql: bool) -> Statement<'_> {
+            split_statements(sql, mysql).remove(0)
+        }
+        assert_eq!(sqls("SELECT 'x"), ["SELECT 'x"]);
+        assert_eq!(
+            sqls("CREATE TABLE a$b (c INT); SELECT $1$"),
+            ["CREATE TABLE a$b (c INT)", "SELECT $1$"]
+        );
+        assert_eq!(sqls("/* a /* b; */ c; */ SELECT 1"), ["SELECT 1"]);
+        let mysql: Vec<String> = split_statements("# c;\nSELECT 1", true)
+            .iter()
+            .map(Statement::sql)
+            .collect();
+        assert_eq!(mysql, ["SELECT 1"]);
+        assert!(!one("CREATE OR REPLACE", false).creates("table"));
+        let (name, module, args) = one("CREATE VIRTUAL TABLE v USING m(a(b), c)", false)
+            .virtual_table()
+            .unwrap();
+        assert_eq!((name.as_str(), module.as_str()), ("v", "m"));
+        assert_eq!(args, [vec!["a", "("], vec!["c"]]);
+        let trigger = "CREATE TRIGGER IF NOT EXISTS x BEFORE INSERT ON t FOR EACH ROW BEGIN END";
+        assert_eq!(
+            one(trigger, false).before_row_trigger().unwrap().table,
+            ["t"]
+        );
+        assert!(one("CREATE TYPE x", false)
+            .name_parts_after("function")
+            .is_empty());
+        let function = one("CREATE FUNCTION IF NOT EXISTS s.f()", false);
+        assert_eq!(function.name_parts_after("function"), ["s", "f"]);
+        assert_eq!(
+            one("SET search_path FROM CURRENT", false).search_path(),
+            None
+        );
+        let alter = |sql| one(sql, true).respelled_mysql_alter();
+        assert_eq!(alter("ALTER TABLE t ADD c INT, RENAME INDEX a TO"), None);
+        assert_eq!(alter("ALTER TABLE t ADD (a INT"), None);
+        // The second rename, left alone, reads as it is.
+        assert_eq!(
+            alter("ALTER TABLE t RENAME INDEX a TO b, RENAME INDEX c TO d").unwrap(),
+            "ALTER TABLE t RENAME INDEX c TO d"
+        );
+        assert_eq!(
+            stripped("CREATE TABLE t (a INT, , CHECK (a > 0))").unwrap(),
+            "CREATE TABLE t (a INT)"
+        );
+        assert_eq!(
+            stripped("CREATE TABLE t (a INT REFERENCES u (a) NOT DEFERRABLE)").unwrap(),
+            "CREATE TABLE t (a INT )"
         );
     }
 }
