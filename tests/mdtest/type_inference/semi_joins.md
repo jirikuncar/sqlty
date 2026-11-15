@@ -74,6 +74,23 @@ SELECT * FROM a LEFT ANTI JOIN b ON a.id = b.id
 -- columns: y: int | None (INT)
 ```
 
+### ARRAY JOIN
+
+`ARRAY JOIN` lists each element of an array in place of the array, so `*` over it is
+not typed.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE a (id Int32, tags Array(String));
+CREATE TABLE b (id Int32, y Int32);
+```
+
+```sql
+SELECT * FROM a JOIN b USING (id) ARRAY JOIN tags
+-- columns: *: None (None)
+```
+
 ## An ASOF join pads the right side with nulls
 
 ```toml

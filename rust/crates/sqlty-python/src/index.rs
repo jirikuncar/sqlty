@@ -596,21 +596,19 @@ impl Tree {
                     .resolver(Known::Imported)
                     .resolve(&parsed.syntax().body, name, &*names)
             });
-            Some((ty, 0))
+            (ty, 0)
         } else {
             match self.reexports(module, source).get(name) {
                 Some((target, original)) => {
                     let (ty, behind) = self.typed(target, original, hops.checked_sub(1)?)?;
-                    Some((ty, behind + 1))
+                    (ty, behind + 1)
                 }
-                None => Some((None, 0)),
+                None => (None, 0),
             }
         };
         drop(busy);
-        if let Some(found) = &found {
-            lock(&self.types).insert(key, found.clone());
-        }
-        found
+        lock(&self.types).insert(key, found.clone());
+        Some(found)
     }
 
     fn constant(&self, module: &str, name: &str, depth: usize) -> Option<(&Source, &Expr)> {

@@ -107,6 +107,17 @@ e = SQL[tuple[int]]("--sql\nWITH t AS (SELECT status FROM orders) SELECT count(*
 f = SQL[tuple[str, int]]("--sql\nSELECT status, count(*) FROM orders GROUP BY status HAVING max(total) > 1")
 ```
 
+## Outer columns
+
+A column of the outer query is grouped, or not, by the outer query.
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[str]]("--sql\nSELECT status FROM orders WHERE EXISTS (SELECT u.team FROM users u GROUP BY u.team HAVING max(u.id) > orders.total)")
+```
+
 ## Derived tables and CTEs
 
 Their columns have no primary key to group by.

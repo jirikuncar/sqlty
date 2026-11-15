@@ -148,6 +148,20 @@ SELECT id FROM users WHERE name LIKE ANY (%s) AND name ILIKE ALL ($2) AND name N
 -- params: 3: str (TEXT)
 ```
 
+A pattern array built by a function is not a parameter.
+
+```sql
+SELECT id FROM users WHERE name LIKE ANY (string_to_array(%s, ','))
+-- params: 1: None (None)
+```
+
+## SIMILAR TO
+
+```sql
+SELECT id FROM users WHERE name SIMILAR TO %s
+-- params: 1: str (TEXT)
+```
+
 ## INSERT takes the target column
 
 A `NOT NULL` column makes the parameter non-null; a nullable column admits `None`.

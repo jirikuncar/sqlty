@@ -228,6 +228,20 @@ SELECT * FROM later()
 -- inferred: tuple[int, str | None]
 ```
 
+## SETOF a table of unknown shape
+
+`schema.sql`:
+
+```sql
+CREATE TABLE copy (LIKE nowhere);
+CREATE FUNCTION copies() RETURNS SETOF copy LANGUAGE sql AS 'SELECT * FROM copy';
+```
+
+```sql
+SELECT * FROM copies()
+-- inferred: None
+```
+
 ## Planner hints
 
 `ROWS`, `COST`, `LEAKPROOF` and `SUPPORT` only guide the planner, so a function
