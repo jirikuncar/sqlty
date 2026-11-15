@@ -54,10 +54,7 @@ impl Catalog {
     /// schema, and k children walked; never a function of how many tables there are.
     pub fn joins_with_prefix(&self, name: &str, prefix: &str, limit: usize) -> Vec<Join<'_>> {
         let prefix = self.fold_typed(prefix);
-        let Some(key) = self.table_id(name) else {
-            return Vec::new();
-        };
-        let Some(Relation::Table(table)) = self.relations.get(key) else {
+        let Some((key, table)) = self.table_entry(name) else {
             return Vec::new();
         };
         let mut found: Vec<Join<'_>> = table
@@ -88,18 +85,19 @@ impl Catalog {
             }
             #[cfg(test)]
             super::index::visit();
-            if let Some(Relation::Table(table)) = self.relations.get(&**child) {
-                let fk = &table.foreign_keys[*i];
-                found.push(Join {
-                    table: self.name_ref(child),
-                    pairs: fk
-                        .columns
-                        .iter()
-                        .map(String::as_str)
-                        .zip(fk.referred.iter().map(String::as_str))
-                        .collect(),
-                });
-            }
+            let table = self
+                .table_at(child)
+                .expect("a foreign key's child is a table");
+            let fk = &table.foreign_keys[*i];
+            found.push(Join {
+                table: self.name_ref(child),
+                pairs: fk
+                    .columns
+                    .iter()
+                    .map(String::as_str)
+                    .zip(fk.referred.iter().map(String::as_str))
+                    .collect(),
+            });
         }
         found
     }

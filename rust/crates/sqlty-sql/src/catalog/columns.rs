@@ -407,6 +407,7 @@ pub(super) fn unique_key(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use sqlparser::ast::{Statement, TableConstraint};
 

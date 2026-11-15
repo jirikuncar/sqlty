@@ -195,7 +195,7 @@ def test_json(dialect: str, sql: str, shapes: list[tuple[str, str]]) -> None:
 
 
 EXPRESSION_SCHEMAS = {
-    "postgres": "CREATE TABLE f (i INT, tx TEXT, iv INTERVAL, dt DATE, vb VARBIT, c INT CHECK (c IN (1, 2))); CREATE TABLE p (id INT PRIMARY KEY, name TEXT NOT NULL); CREATE TABLE c (id INT PRIMARY KEY, pid INT REFERENCES p (id), arr INT[]); CREATE TABLE g (a INT, b INT, CHECK (num_nonnulls(a, b) >= 1)); CREATE TABLE vs (x INT CHECK (x IN (1, 2)), y INT CHECK (y IN (3, 4))); CREATE VIEW bad AS SELECT * FROM nope; CREATE TYPE mood AS ENUM ('a'); CREATE TABLE mt (m mood); ALTER TYPE mood RENAME TO feeling; DROP TYPE feeling; CREATE TYPE pair AS (a INT, b TEXT); CREATE TABLE pt (p pair); ALTER TYPE pair RENAME TO duo; CREATE TABLE gt (a INT, b INT GENERATED ALWAYS AS (a + 1) STORED, c INT GENERATED ALWAYS AS (gt.b + 1) STORED); CREATE VIEW pv AS SELECT id FROM p; CREATE FUNCTION fv() RETURNS SETOF pv AS $$ SELECT * FROM pv $$ LANGUAGE sql;",
+    "postgres": "CREATE TABLE f (i INT, tx TEXT, iv INTERVAL, dt DATE, vb VARBIT, c INT CHECK (c IN (1, 2))); CREATE TABLE p (id INT PRIMARY KEY, name TEXT NOT NULL); CREATE TABLE c (id INT PRIMARY KEY, pid INT REFERENCES p (id), arr INT[]); CREATE TABLE g (a INT, b INT, CHECK (num_nonnulls(a, b) >= 1)); CREATE TABLE vs (x INT CHECK (x IN (1, 2)), y INT CHECK (y IN (3, 4))); CREATE VIEW bad AS SELECT * FROM nope; CREATE TYPE mood AS ENUM ('a'); CREATE TABLE mt (m mood); ALTER TYPE mood RENAME TO feeling; DROP TYPE feeling; CREATE TYPE pair AS (a INT, b TEXT); CREATE TABLE pt (p pair); ALTER TYPE pair RENAME TO duo; CREATE TABLE gt (a INT, b INT GENERATED ALWAYS AS (a + 1) STORED, c INT GENERATED ALWAYS AS (gt.b + 1) STORED); CREATE VIEW pv AS SELECT id FROM p; CREATE FUNCTION fv() RETURNS SETOF pv AS $$ SELECT * FROM pv $$ LANGUAGE sql; CREATE TABLE ut (a INT, b mystery);",
     "mysql": "CREATE TABLE f (i INT, tx TEXT, d DECIMAL(30, 2), dd DECIMAL(20), dn DECIMAL, dtm DATETIME, c INT CHECK (c IN (1, 2))); CREATE TABLE m (ui INT UNSIGNED, ub BIGINT UNSIGNED, y YEAR, g GEOMETRY, dt DATE, bl BLOB, ud DECIMAL(10, 2) UNSIGNED, j JSON); CREATE TABLE u (UserName TEXT);",
     "sqlite": "CREATE TABLE f (i INT, tx TEXT, c INT CHECK (c IN (1, 2)));",
 }
@@ -547,6 +547,25 @@ EXPRESSIONS = [
         "SELECT p.*, c.* FROM p JOIN c ON c.pid = p.id GROUP BY p.id",
         "id: int, name: str, id: int, pid: int, arr: list[int] | None",
         ["ungrouped-column", "ungrouped-column", "ungrouped-column"],
+    ),
+    ("postgres", "SELECT s FROM (SELECT 1 AS a) s", "s: None", []),
+    ("postgres", "SELECT i FROM f WHERE c = 1", "i: int | None", []),
+    ("mysql", "SELECT usernme FROM u", "usernme: None", ["unknown-column"]),
+    ("postgres", "SELECT * FROM bad", "*: None", ["unsupported-syntax"]),
+    ("postgres", "SELECT * FROM ut", "a: int | None, b: None", ["unknown-type"]),
+    (
+        "postgres",
+        "SELECT * FROM f, LATERAL generate_series(1, i)",
+        "i: int | None, tx: str | None, iv: datetime.timedelta | None, dt: datetime.date | None, vb: str | None, c: typing.Literal[1, 2] | None, generate_series: int",
+        [],
+    ),
+    ("postgres", "SELECT x.* FROM f", "*: None", ["unknown-table"]),
+    ("postgres", "SELECT *", "*: None", []),
+    (
+        "postgres",
+        "WITH w AS (SELECT DISTINCT i FROM f) SELECT * FROM (WITH w AS (SELECT i FROM f) SELECT * FROM w) x",
+        "i: int | None",
+        [],
     ),
 ]
 

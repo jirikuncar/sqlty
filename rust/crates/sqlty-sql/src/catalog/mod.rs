@@ -331,8 +331,19 @@ impl Catalog {
 
     /// The catalog key of the table `name`, the same for every spelling of it.
     pub(crate) fn table_id(&self, name: &str) -> Option<&str> {
+        self.table_entry(name).map(|(key, _)| key)
+    }
+
+    fn table_entry(&self, name: &str) -> Option<(&str, &TableRelation)> {
         let key = lookup_key(&self.relations, &self.search_path, self.norm(name))?;
-        matches!(self.relations.get(key), Some(Relation::Table(_))).then_some(key)
+        Some((key, self.table_at(key)?))
+    }
+
+    fn table_at(&self, key: &str) -> Option<&TableRelation> {
+        match self.relations.get(key)? {
+            Relation::Table(table) => Some(table),
+            _ => None,
+        }
     }
 
     /// The foreign keys of the table `name` that hold for every row and that a query sees
@@ -1134,6 +1145,21 @@ mod tests {
             CREATE TABLE u (name text);
             CREATE VIEW v2 AS SELECT * FROM f();");
         assert_eq!(view_cols(&c, "v2"), ["name:TEXT"]);
+    }
+
+    #[test]
+    fn test_joins_of_views_unknown_tables_and_dangling_keys() {
+        let c = pg("CREATE TABLE p (id int PRIMARY KEY);
+            CREATE TABLE c (pid int REFERENCES p (id), x int REFERENCES nope (id));
+            CREATE VIEW v AS SELECT id FROM p;");
+        assert!(c.joins_with_prefix("nope", "", 5).is_empty());
+        assert!(c.joins_with_prefix("v", "", 5).is_empty());
+        let tables: Vec<_> = c
+            .joins_with_prefix("p", "", 5)
+            .iter()
+            .map(|j| j.table.name)
+            .collect();
+        assert_eq!(tables, ["c"]);
     }
 
     /// Functions do not force the catalog to be built again.
