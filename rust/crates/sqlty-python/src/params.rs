@@ -585,6 +585,7 @@ mod tests {
                 .collect(),
             existing: Vec::new(),
             new: Vec::new(),
+            closed: false,
         };
         assert_eq!(module.named_class(&[], "A"), "typing.Any");
         module.new.push(("A".into(), code.into()));
@@ -605,6 +606,6 @@ mod tests {
         let options = Options::new("postgres", None, None, false).unwrap();
         let source =
             "from sqlty import SQL\nq: SQL = SQL[tuple[int]](\"--sql\\nSELECT 1 WHERE %(a)s\")\n";
-        assert!(add_param_types(source, &options).contains("SQL[tuple[int], QParams]"));
+        assert!(add_param_types(source, &options, false).contains("SQL[tuple[int], QParams]"));
     }
 }
