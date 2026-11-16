@@ -1453,15 +1453,24 @@ fn py_params(params: Option<Vec<sqlty_python::scopes::Param>>) -> Option<Vec<PyP
 
 /// `(lines, prefix, name, args, keywords, receiver)` of each call in Python source that may
 /// call a helper named one of `names`, or None when Rust does not read the source; each
-/// argument is `(starred, span, text, type, params)`.
+/// argument is `(starred, span, text, type, params)`. With `index`, a constant imported from
+/// one of its modules has its type; `module` is the name of `source`.
 #[pyfunction]
 #[allow(clippy::needless_pass_by_value)]
-fn helper_sites(py: Python<'_>, source: &str, names: Vec<String>) -> Option<Vec<PySite>> {
+#[pyo3(signature = (source, names, index=None, module=None))]
+fn helper_sites(
+    py: Python<'_>,
+    source: &str,
+    names: Vec<String>,
+    index: Option<PyRef<'_, ModuleIndex>>,
+    module: Option<&str>,
+) -> Option<Vec<PySite>> {
+    let index = index.map(|index| Arc::clone(&index.0));
     detach(py, || {
         let arg = |a: sqlty_python::helpers::Arg| {
             (a.starred, a.span, a.text, a.kind, py_params(a.params))
         };
-        let found = sqlty_python::helpers::sites(source, &names)?;
+        let found = sqlty_python::helpers::sites(source, &names, index.as_deref(), module)?;
         Some(
             found
                 .into_iter()

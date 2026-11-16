@@ -108,6 +108,7 @@ pub fn find(source: &str, body: &[Stmt], imported: &HashMap<String, String>) -> 
         ctx: Context {
             imported,
             scan: &scan,
+            constant: None,
         },
         body,
         bindings: HashMap::new(),

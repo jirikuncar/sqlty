@@ -177,7 +177,7 @@ def template_strings(
 ) -> list[tuple[int, tuple[int, int], str | None, list[str | None]]] | None: ...
 def module_outline(source: str) -> tuple[ast.Module, list[ast.ClassDef]] | None: ...
 def helper_sites(
-    source: str, names: list[str]
+    source: str, names: list[str], index: ModuleIndex | None = None, module: str | None = None
 ) -> (
     list[
         tuple[
