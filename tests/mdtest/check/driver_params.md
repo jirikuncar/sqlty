@@ -65,6 +65,17 @@ cur.executemany("INSERT INTO users (id, name) VALUES (%s, %s)", [(1, "a"), (2, "
 cur.executemany("INSERT INTO users (id, name) VALUES (%s, %s)", [(1, "a"), (2.5, "b")])
 ```
 
+## executemany over a row it cannot read
+
+```python
+import psycopg
+
+def load(cur: psycopg.Cursor, row) -> None:
+    cur.executemany("INSERT INTO users (id, name) VALUES (%s, %s)", [row])
+    # error: [param-type-mismatch] "parameters are a single int, which psycopg rejects"
+    cur.executemany("DELETE FROM users WHERE id = %s", [1, 2])
+```
+
 ## A single value is not a sequence of parameters
 
 psycopg takes a sequence or a mapping of parameters, and raises `TypeError` for

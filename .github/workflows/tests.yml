@@ -66,7 +66,8 @@ jobs:
 
     env:
       SQLTY_PG_DSN: postgresql://postgres:postgres@localhost:5432/postgres
-      PYTEST_ADDOPTS: ${{ matrix.coverage && '--cov --cov-append --cov-fail-under=0' || '' }}
+      # A fixed Hypothesis seed: random examples would make the covered lines differ per run.
+      PYTEST_ADDOPTS: ${{ matrix.coverage && '--cov --cov-append --cov-fail-under=0 --hypothesis-seed=0' || '' }}
       # Absolute, so processes forked in a test's own directory write their data here too.
       COVERAGE_FILE: ${{ github.workspace }}/.coverage
 
