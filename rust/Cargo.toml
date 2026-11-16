@@ -27,6 +27,7 @@ sqlty-sql = { path = "crates/sqlty-sql" }
 sqlty-python = { path = "crates/sqlty-python" }
 sqlty-lsp = { path = "crates/sqlty-lsp" }
 sqlty-format = { path = "crates/sqlty-format" }
+sqlty-project = { path = "crates/sqlty-project" }
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }

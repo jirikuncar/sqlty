@@ -132,13 +132,9 @@ suite("sqlty", () => {
     const plain = document.getText();
     await diagnostics(uri, (found) => found.length > 0);
 
-    await vscode.commands.executeCommand("sqlty.rewrite");
-    assert.match(
-      document.getText(),
-      /^q = SQL\[tuple\[int \| None\]\]\("--sql\\nSELECT id FROM users"\)$/m,
-    );
-    await vscode.commands.executeCommand("sqlty.strip");
-    assert.equal(document.getText(), plain);
+    const wrapped = /^q = SQL\[tuple\[int \| None\]\]\("--sql\\nSELECT id FROM users"\)$/m;
+    assert.match(await untilText("sqlty.rewrite", document, (text) => wrapped.test(text)), wrapped);
+    assert.equal(await untilText("sqlty.strip", document, (text) => text === plain), plain);
     await vscode.commands.executeCommand("workbench.action.files.revert");
   });
 
@@ -272,22 +268,39 @@ async function codeActions(
   range: vscode.Range,
   kind: string,
 ): Promise<vscode.CodeAction[]> {
-  for (let attempt = 0; ; attempt++) {
+  let actions: vscode.CodeAction[] = [];
+  for (let attempt = 0; attempt < 50; attempt++) {
     try {
-      return await vscode.commands.executeCommand<vscode.CodeAction[]>(
+      actions = await vscode.commands.executeCommand<vscode.CodeAction[]>(
         "vscode.executeCodeActionProvider",
         uri,
         range,
         kind,
       );
     } catch (error) {
-      // VS Code cancels the request when an extension registers a code action provider meanwhile.
-      if (!(error instanceof Error && error.name === "Canceled") || attempt === 50) {
+      if (!(error instanceof Error && error.name === "Canceled")) {
         throw error;
       }
-      await new Promise((resolve) => setTimeout(resolve, 100));
     }
+    // A provider registered meanwhile cancels the request: it throws, or answers nothing.
+    if (actions.some((action) => action.kind?.value.startsWith(kind))) {
+      return actions;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
+  return actions;
+}
+
+/** Run `command` until the text of `document` matches `done`: a cancelled run changes nothing. */
+async function untilText(
+  command: string,
+  document: vscode.TextDocument,
+  done: (text: string) => boolean,
+): Promise<string> {
+  for (let attempt = 0; attempt < 50 && !done(document.getText()); attempt++) {
+    await vscode.commands.executeCommand(command);
+  }
+  return document.getText();
 }
 
 /** The diagnostics of `uri` once `done` holds for them. */
