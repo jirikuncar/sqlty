@@ -1312,6 +1312,26 @@ SELECT format() AS string_format
 -- rules: string_format: sqlite.string.format / sqlite.string.format
 ```
 
+## DuckDB
+
+`schema.sql`:
+
+```sql
+CREATE TABLE t (ts TIMESTAMP NOT NULL);
+```
+
+```toml
+[tool.sqlty]
+dialect = "duckdb"
+schema = "schema.sql"
+```
+
+```sql
+SELECT date_part('year', ts) AS year, date_part('epoch', ts) AS epoch FROM t
+-- rules: year: duckdb.datetime.date-part / duckdb.datetime.date-part
+-- rules: epoch: duckdb.datetime.date-part / duckdb.datetime.date-part
+```
+
 ## Other dialects
 
 The rules of `common/` that every dialect above overrides apply in the others, except

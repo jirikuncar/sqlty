@@ -1,8 +1,8 @@
 //! Expression typing.
 
 use sqlparser::ast::{
-    AccessExpr, BinaryOperator, CaseWhen, DataType, Expr, Function, FunctionArgumentClause,
-    FunctionArguments, Ident, ObjectName, Subscript, UnaryOperator, Value,
+    AccessExpr, BinaryOperator, CaseWhen, DataType, DateTimeField, Expr, Function,
+    FunctionArgumentClause, FunctionArguments, Ident, ObjectName, Subscript, UnaryOperator, Value,
 };
 
 use crate::catalog::{fold, FunctionReturn, SchemaColumn};
@@ -11,7 +11,7 @@ use sqlparser::ast::Spanned;
 use sqlparser::tokenizer::Span;
 
 use super::dialect::SqlDialect;
-use super::functions::{arg_list, positional_args, Returns};
+use super::functions::{arg_list, date_part_type, positional_args, Returns};
 use super::inference::FunctionType;
 use super::literals::{constant, python_kind, strip, value_set};
 use super::memo::{first_column, Reporting};
@@ -271,12 +271,36 @@ impl<'a> Analyzer<'a> {
                 };
                 self.function_type_of(returns, &[inner], &[Some(typed), None], scope)
             }
-            Expr::Extract { .. } if self.dialect == SqlDialect::Postgres => {
-                Ok(from_sql_type("DECIMAL", self.dialect))
-            }
-            Expr::Extract { .. } if self.dialect == SqlDialect::MySql => {
-                Ok(from_sql_type("BIGINT", self.dialect))
-            }
+            Expr::Extract { field, .. } => Ok(match self.dialect {
+                // Generic SQL reads PostgreSQL's rules, as for `date_part`.
+                SqlDialect::Postgres | SqlDialect::Other("generic") => {
+                    from_sql_type("DECIMAL", self.dialect)
+                }
+                SqlDialect::MySql => from_sql_type("BIGINT", self.dialect),
+                SqlDialect::Other("duckdb") => {
+                    from_sql_type(date_part_type(&field.to_string()), self.dialect)
+                }
+                // ClickHouse parses `EXTRACT(YEAR FROM x)` as `toYear(x)`, a `UInt16`; the
+                // other calendar and clock parts are `UInt8`.
+                SqlDialect::ClickHouse => match field {
+                    DateTimeField::Year => from_sql_type("USMALLINT", self.dialect),
+                    DateTimeField::Quarter
+                    | DateTimeField::Month
+                    | DateTimeField::Day
+                    | DateTimeField::Hour
+                    | DateTimeField::Minute
+                    | DateTimeField::Second => from_sql_type("UTINYINT", self.dialect),
+                    _ => Typed::UNKNOWN,
+                },
+                SqlDialect::Sqlite => {
+                    self.diag.record(
+                        NameRule::RejectedQuery,
+                        "SQLite has no EXTRACT; use strftime",
+                    );
+                    Typed::UNKNOWN
+                }
+                _ => Typed::UNKNOWN,
+            }),
             // A character set introducer: `_binary 'a'` is a binary string, `_utf8mb4 'a'` text.
             Expr::Prefixed { prefix, .. } if self.dialect == SqlDialect::MySql => {
                 Ok(from_sql_type(

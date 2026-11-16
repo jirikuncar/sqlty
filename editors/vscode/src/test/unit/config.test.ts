@@ -53,7 +53,7 @@ test("schema reads files, directories and globs in order, once each", async () =
   });
 });
 
-test("extend applies a base under the table, rules and types merged", async () => {
+test("extend applies a base under the table, rules and types merged, its schema rebased", async () => {
   const root = tree({
     "base/sqlty.toml":
       "dialect = 'sqlite'\nschema = 'one.sql'\n[rules]\nselect-star = 'error'\nextra-param = 'warn'\n[types]\nx = 'int'\n",
@@ -64,7 +64,7 @@ test("extend applies a base under the table, rules and types merged", async () =
   assert.deepEqual(await at(root, "app"), {
     settings: {
       dialect: "sqlite",
-      schema: "one.sql",
+      schema: ["../base/one.sql"],
       rules: { "select-star": "ignore", "extra-param": "warn" },
       types: { x: "int", y: "str" },
     },
@@ -76,12 +76,12 @@ test("a broken table, a missing, empty or cyclic extend is an error", async () =
   const errors = async (files: Record<string, string>) => {
     const found = await at(tree(files));
     assert.ok("error" in found);
-    return found.error.replace(/\/.*\/sqlty-config-\w+/g, "ROOT");
+    return found.error.replace(/\/\S*?\/sqlty-config-\w+/g, "ROOT");
   };
   assert.match(await errors({ "sqlty.toml": "schema = [" }), /TOML parse error/);
   assert.equal(
     await errors({ "sqlty.toml": "extend = 'gone.toml'" }),
-    "extend = 'gone.toml': config file does not exist: ROOT/gone.toml",
+    "ROOT/sqlty.toml: extend = 'gone.toml': config file does not exist: ROOT/gone.toml",
   );
   assert.equal(
     await errors({ "sqlty.toml": "extend = 'pyproject.toml'", "pyproject.toml": "" }),
@@ -91,4 +91,9 @@ test("a broken table, a missing, empty or cyclic extend is an error", async () =
     await errors({ "sqlty.toml": "extend = 'a.toml'", "a.toml": "extend = 'a.toml'" }),
     "ROOT/a.toml: extend = 'a.toml' extends itself in a cycle",
   );
+});
+
+test("a pyproject.toml that is not TOML is passed over with no table, as sqlty check does", async () => {
+  const root = tree({ "sqlty.toml": "dialect = 'mysql'\n", "app/pyproject.toml": "[tool" });
+  assert.deepEqual(await at(root, "app"), { settings: {}, schema: "" });
 });
