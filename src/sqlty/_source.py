@@ -292,16 +292,26 @@ class _Scan:
             self._note((id(node), arg.arg), _class_name(arg.annotation))
 
     def _typed(self, node: ast.Assign | ast.AnnAssign) -> None:
-        """Record ``name = Cls(...)`` and ``name: Cls`` in the current scope.
+        """Record ``name = Cls(...)``, ``name = 10``, ``name: Final = 10`` and ``name: Cls`` in the current scope.
 
         Also ``self.attr`` the same way inside a method, keyed by the class.
         """
         if isinstance(node, ast.Assign):
             targets = node.targets
-            type_name = _class_name(node.value.func) if isinstance(node.value, ast.Call) else None
+            type_name = (
+                _class_name(node.value.func)
+                if isinstance(node.value, ast.Call)
+                else literal_type(node.value)
+            )
         else:
             targets = [node.target]
-            type_name = _class_name(node.annotation)
+            final = node.annotation
+            if isinstance(final, ast.Subscript):
+                final = final.value
+            if _class_name(final) in ("Final", "typing.Final", "typing_extensions.Final"):
+                type_name = None if node.value is None else literal_type(node.value)
+            else:
+                type_name = _class_name(node.annotation)
             if type_name is None and isinstance(node.value, ast.Call):
                 type_name = _class_name(node.value.func)
         scope = self._stack[-1] if self._stack else None
@@ -343,6 +353,25 @@ class _Scan:
 
 
 _Stack = tuple[ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef, ...]
+
+
+def literal_type(node: ast.expr) -> str | None:
+    """The builtin class of a literal other than ``None``, else ``None``.
+
+    Example:
+        >>> [literal_type(ast.parse(e, mode="eval").body) for e in ("1", "-1.5", "f'{x}'", "None", "x")]
+        ['int', 'float', 'str', None, None]
+    """
+    match node:
+        case ast.Constant(value=value) if type(value) in (bool, int, float, str, bytes):
+            return type(value).__name__
+        case ast.UnaryOp(
+            op=ast.USub() | ast.UAdd(), operand=ast.Constant(value=int() | float() as value)
+        ):
+            return "float" if isinstance(value, float) else "int"
+        case ast.JoinedStr():
+            return "str"
+    return None
 
 
 def _class_name(node: ast.expr | None) -> str | None:
@@ -710,6 +739,12 @@ class ParsedSource:
             if key in types:
                 return types[key]
         return None
+
+    def binds(self, stack: _Stack, name: str) -> bool:
+        """Whether ``name`` is a parameter of, or assigned in, the module or a function of ``stack``."""
+        types = self._scan.types
+        scopes = [*(id(s) for s in stack if not isinstance(s, ast.ClassDef)), None]
+        return any((scope, name) in types for scope in scopes)
 
     @functools.cached_property
     def typing_aliases(self) -> dict[str, str]:

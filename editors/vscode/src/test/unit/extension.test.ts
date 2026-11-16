@@ -71,6 +71,8 @@ afterEach(async () => {
   settings.clear();
   workspace.isTrusted = true;
   process.env.PATH = path;
+  server.starting = Promise.resolve();
+  server.fails = false;
 });
 
 test("Restricted Mode checks with the engine until the workspace is trusted", async () => {
@@ -171,6 +173,49 @@ test("settings, folders and the interpreter restart the server", async () => {
   await restarted("client.start");
   workspace.workspaceFolders = undefined;
   extensions.getExtension = getExtension;
+});
+
+/** The calls to the client and its output, by name. */
+function lifecycle(): string[] {
+  return calls
+    .map(([name]) => name)
+    .filter((name) => /^client\.|^output\.(warn|error)$/.test(name));
+}
+
+test("a change while the server starts restarts it once, after it has started", async () => {
+  settings.set("sqlty.path", [sqlty("0.6.0")]);
+  server.capabilities = { completionProvider: {} };
+  let ready = () => {};
+  server.starting = new Promise((resolve) => (ready = resolve));
+  calls.length = 0;
+  const activating = activate(context as never);
+  await restarted("client.start");
+  await fire("folders");
+  await fire("python");
+  ready();
+  await activating;
+  while (lifecycle().length < 3) {
+    await setTimeout(5);
+  }
+  await setTimeout(20);
+  assert.deepEqual(lifecycle(), ["client.start", "client.dispose", "client.start"]);
+});
+
+test("a server that did not start is replaced", async () => {
+  settings.set("sqlty.path", [sqlty("0.6.0")]);
+  server.capabilities = { completionProvider: {} };
+  server.fails = true;
+  await assert.rejects(activate(context as never), /Server initialization failed/);
+  server.fails = false;
+  calls.length = 0;
+  await fire("folders");
+  await restarted("client.start");
+  assert.deepEqual(
+    calls.filter(([name]) => name === "output.error").map(([, text]) => text),
+    [
+      "Stopping sqlty server failed: Error: Client is not running and can't be stopped. It's current state is: failed",
+    ],
+  );
 });
 
 test("opening a file drops its workspace check results", async () => {
