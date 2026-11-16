@@ -25,6 +25,10 @@ let output: vscode.LogOutputChannel | undefined;
 let running: Server | undefined;
 let problem: string | undefined;
 let wasm: Promise<Engine> | undefined;
+/** The last start or stop: the next one waits for it, as a starting client cannot be stopped. */
+let queue: Promise<void> = Promise.resolve();
+/** A restart queued but not begun: the events of one change restart the server once. */
+let pending: Promise<void> | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   extension = context.extensionUri;
@@ -60,16 +64,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       python.environments.onDidChangeActiveEnvironmentPath(() => void restart()),
     );
   }
-  await start();
+  await restart();
 }
 
 export async function deactivate(): Promise<void> {
-  await stop();
+  await serialized(stop);
 }
 
-async function restart(): Promise<void> {
-  await stop();
-  await start();
+function restart(): Promise<void> {
+  pending ??= serialized(async () => {
+    pending = undefined;
+    await stop();
+    await start();
+  });
+  return pending;
+}
+
+function serialized(step: () => Promise<void>): Promise<void> {
+  const next = queue.then(step);
+  queue = next.catch(() => undefined);
+  return next;
 }
 
 async function start(): Promise<void> {
@@ -130,7 +144,11 @@ async function stop(): Promise<void> {
   engine = undefined;
   const stopping = client;
   client = undefined;
-  await stopping?.dispose();
+  try {
+    await stopping?.dispose();
+  } catch (error) {
+    output?.error(`Stopping sqlty server failed: ${error}`);
+  }
 }
 
 function readSettings(): Settings {
