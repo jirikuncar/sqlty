@@ -140,5 +140,13 @@ mod tests {
         let expected = "[\n  {\n    \"file\": \"\\u00e9\\ud83d\\ude00\\\"\",\n    \"fix\": [],\n    \"line\": 3,\n    \"none\": null\n  }\n]";
         assert_eq!(value.dumps(), expected);
         assert_eq!(Json::Array(Vec::new()).dumps(), "[]");
+        let flags = Json::object([
+            ("on", true.into()),
+            ("off", false.into()),
+            ("some", Some("\n\r\t\u{8}\u{c}\\").into()),
+            ("none", None::<&str>.into()),
+        ]);
+        let expected = "{\n  \"on\": true,\n  \"off\": false,\n  \"some\": \"\\n\\r\\t\\b\\f\\\\\",\n  \"none\": null\n}";
+        assert_eq!(flags.dumps(), expected);
     }
 }

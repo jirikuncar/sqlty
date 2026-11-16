@@ -299,9 +299,7 @@ fn severities(matches: &ArgMatches) -> Vec<(String, String)> {
         let Ok(Some(rules)) = matches.try_get_many::<String>(severity) else {
             continue;
         };
-        let Some(indices) = matches.indices_of(severity) else {
-            continue;
-        };
+        let indices = matches.indices_of(severity).into_iter().flatten();
         for (rule, at) in rules.zip(indices) {
             found.push((at, rule.clone(), severity.to_string()));
         }
@@ -472,14 +470,12 @@ fn workspace(
     flags.dialect.clone_from(&common.dialect);
     flags.untyped = untyped;
     let strings = |value: Option<&toml::Value>| -> Option<Vec<String>> {
-        Some(match value? {
-            toml::Value::String(text) => vec![text.clone()],
-            toml::Value::Array(items) => items
-                .iter()
+        let items = value?.as_array()?.iter();
+        Some(
+            items
                 .filter_map(|item| item.as_str().map(str::to_string))
                 .collect(),
-            _ => Vec::new(),
-        })
+        )
     };
     let mut discovery = Discovery::new(Box::new(files.clone()), &cwd);
     if common.isolated {
@@ -567,33 +563,34 @@ fn transform(
     }
     let settings: Vec<Arc<FileSettings>> = files
         .iter()
-        .map(|path| workspace.settings(path))
-        .collect::<Result<_, _>>()?;
+        .map(|path| {
+            workspace
+                .settings(path)
+                .expect("read as the workspace opened")
+        })
+        .collect();
     let work: Vec<(&str, &FileSettings)> = files
         .iter()
         .zip(&settings)
         .map(|(path, settings)| (workspace.text(path).unwrap_or(""), &**settings))
         .collect();
     let quiet = common.quiet;
-    let results = sqlty_project::par_map(
-        &work,
-        |(text, settings)| -> Result<(String, Vec<Diagnostic>), String> {
-            Ok(match kind {
-                Transform::Rewrite => {
-                    let warnings = match quiet {
-                        true => Vec::new(),
-                        false => sqlty_project::skipped_strings(text, settings)?,
-                    };
-                    (sqlty_project::rewritten(text, settings), warnings)
-                }
-                Transform::Strip => (sqlty_project::stripped(text, settings), Vec::new()),
-                Transform::Format => (sqlty_project::formatted(text, settings), Vec::new()),
-            })
-        },
-    );
+    let results = sqlty_project::par_map(&work, |(text, settings)| -> (String, Vec<Diagnostic>) {
+        match kind {
+            Transform::Rewrite => {
+                let warnings = match quiet {
+                    true => Vec::new(),
+                    false => sqlty_project::skipped_strings(text, settings),
+                };
+                (sqlty_project::rewritten(text, settings), warnings)
+            }
+            Transform::Strip => (sqlty_project::stripped(text, settings), Vec::new()),
+            Transform::Format => (sqlty_project::formatted(text, settings), Vec::new()),
+        }
+    });
     let mut changed = 0;
     for ((path, (original, settings)), result) in files.iter().zip(&work).zip(results) {
-        let (result, warnings) = result?;
+        let (result, warnings) = result;
         for diag in warnings {
             let (rule, message) = (diag.rule.name(), &diag.message);
             host.err(&format!(
@@ -729,9 +726,8 @@ fn check(
             let mut fixed = fixed;
             if format_command(host, path, &settings.format_command) {
                 let absolute = host.cwd().join(path);
-                if let Some(text) = Shared(host.files()).text(&absolute) {
-                    fixed = text.replace("\r\n", "\n");
-                }
+                let text = Shared(host.files()).text(&absolute);
+                fixed = text.map_or(fixed, |text| text.replace("\r\n", "\n"));
             }
             workspace.update(path, &fixed);
             fixed_files += 1;
@@ -779,11 +775,8 @@ fn check(
     let (mut errors, mut warnings) = (0, 0);
     let mut shown = Vec::new();
     for (path, diag, text) in &reports {
-        match diag.severity {
-            Severity::Error => errors += 1,
-            Severity::Warn => warnings += 1,
-            Severity::Ignore => {}
-        }
+        errors += usize::from(diag.severity == Severity::Error);
+        warnings += usize::from(diag.severity == Severity::Warn);
         match args.output_format {
             OutputFormat::Json | OutputFormat::Sarif => {
                 shown.push(json_diagnostic(path, diag, text));
@@ -1072,4 +1065,222 @@ fn sarif_result(row: Json) -> Json {
         result.push(("fixes".to_string(), Json::Array(vec![changes])));
     }
     Json::Object(result)
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    /// A host on a directory of the disk that keeps what the commands print.
+    struct Fake {
+        root: PathBuf,
+        out: String,
+        err: String,
+        env: Vec<(&'static str, &'static str)>,
+    }
+
+    impl Host for Fake {
+        fn out(&mut self, text: &str) {
+            self.out.push_str(text);
+        }
+
+        fn err(&mut self, text: &str) {
+            self.err.push_str(text);
+        }
+
+        fn warn(&mut self, message: &str) {
+            self.err.push_str(&format!("warning: {message}\n"));
+        }
+
+        fn error(&mut self, message: &str) {
+            self.err.push_str(&format!("error: {message}\n"));
+        }
+
+        fn files(&self) -> Arc<dyn Files + Send + Sync> {
+            Arc::new(sqlty_project::Disk)
+        }
+
+        fn write(&mut self, path: &Path, data: &[u8]) -> Result<(), String> {
+            std::fs::write(path, data).map_err(|error| error.to_string())
+        }
+
+        fn run(&mut self, _: &[String]) -> Result<(bool, String), String> {
+            Ok((true, String::new()))
+        }
+
+        fn cwd(&self) -> PathBuf {
+            self.root.clone()
+        }
+
+        fn env(&self, name: &str) -> Option<String> {
+            let found = self.env.iter().find(|(key, _)| *key == name);
+            found.map(|(_, value)| value.to_string())
+        }
+
+        fn python(&self) -> Version {
+            (3, 14)
+        }
+
+        fn extra_roots(&self) -> Vec<PathBuf> {
+            Vec::new()
+        }
+
+        fn version(&self) -> String {
+            "0.0.0".to_string()
+        }
+    }
+
+    fn project(name: &str, files: &[(&str, &str)]) -> Fake {
+        let root = std::env::temp_dir().join(format!("sqlty-cli-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("creates");
+        for (path, text) in files {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().expect("a parent")).expect("creates");
+            std::fs::write(path, text).expect("writes");
+        }
+        Fake {
+            root,
+            out: String::new(),
+            err: String::new(),
+            env: Vec::new(),
+        }
+    }
+
+    fn sqlty(host: &mut Fake, args: &[&str]) -> Option<i32> {
+        let args = std::iter::once("sqlty").chain(args.iter().copied());
+        run(args.map(OsString::from), host)
+    }
+
+    const CONFIG: (&str, &str) = (
+        "pyproject.toml",
+        "[tool.sqlty]\nschema = \"schema.sql\"\nrules = { redundant-optional = \"warn\" }\n",
+    );
+    const SCHEMA: (&str, &str) = (
+        "schema.sql",
+        "CREATE TABLE users (id INT NOT NULL, name TEXT);",
+    );
+    const QUERY: (&str, &str) = ("app/q.py", "q = \"--sql\\nSELECT id FROM users\"\n");
+
+    #[test]
+    fn prints_usage_and_what_clap_rejects() {
+        let mut host = project("usage", &[]);
+        assert_eq!(sqlty(&mut host, &[]), Some(0));
+        assert!(
+            host.out.starts_with("Type-safe SQL queries for Python."),
+            "{}",
+            host.out
+        );
+        assert_eq!(sqlty(&mut host, &["--help"]), Some(0));
+        assert_eq!(sqlty(&mut host, &["check", "--dialect", "nope"]), Some(2));
+        assert!(
+            host.err
+                .contains("invalid value 'nope' for '--dialect <DIALECT>'"),
+            "{}",
+            host.err
+        );
+        assert_eq!(sqlty(&mut host, &["server"]), None);
+        std::fs::remove_dir_all(&host.root).expect("removes");
+    }
+
+    #[test]
+    fn walks_as_the_discovery_flags_say() {
+        let ignored = ("app/.gitignore", "gen.py\n");
+        let generated = ("app/gen.py", "q = \"--sql\\nSELECT nope FROM users\"\n");
+        let mut host = project(
+            "walk",
+            &[
+                CONFIG,
+                SCHEMA,
+                QUERY,
+                ignored,
+                generated,
+                ("app/.git/HEAD", ""),
+            ],
+        );
+        host.env = vec![("SQLTY_CONFIG_FILE", "")];
+        for (args, found) in [
+            (&["check", "--respect-gitignore"][..], 0),
+            (&["check", "--no-respect-gitignore"][..], 1),
+            (&["check", "--exclude", "gen.py"][..], 0),
+            (&["check", "-c", "exclude = [\"gen.py\"]"][..], 0),
+            (&["check", "-c", "extend-exclude = [\"gen.py\"]"][..], 0),
+        ] {
+            host.err.clear();
+            assert_eq!(
+                sqlty(&mut host, args),
+                Some(found),
+                "{args:?}: {}",
+                host.err
+            );
+        }
+        std::fs::remove_dir_all(&host.root).expect("removes");
+    }
+
+    #[test]
+    fn reports_in_every_format() {
+        let fixable = (
+            "app/q.py",
+            "from sqlty import SQL\nq = SQL[tuple[int | None]](\"--sql\\nSELECT id FROM users\")\n",
+        );
+        let mut host = project("formats", &[CONFIG, SCHEMA, fixable]);
+        assert_eq!(
+            sqlty(&mut host, &["check", "--output-format", "github"]),
+            Some(0)
+        );
+        assert!(
+            host.out.starts_with("::warning file=app/q.py,"),
+            "{}",
+            host.out
+        );
+        std::fs::remove_dir_all(&host.root).expect("removes");
+        let unknown = ("app/q.py", "q = \"--sql\\nSELECT nope FROM users\"\n");
+        let mut host = project("sarif", &[CONFIG, SCHEMA, unknown]);
+        assert_eq!(
+            sqlty(&mut host, &["check", "--output-format", "sarif"]),
+            Some(1)
+        );
+        assert!(
+            host.out.contains("\"ruleId\": \"unknown-column\""),
+            "{}",
+            host.out
+        );
+        assert!(!host.out.contains("\"fixes\""), "{}", host.out);
+        std::fs::remove_dir_all(&host.root).expect("removes");
+    }
+
+    #[test]
+    fn checks_what_would_change_quietly() {
+        let mut host = project("quiet", &[CONFIG, SCHEMA, QUERY]);
+        assert_eq!(
+            sqlty(&mut host, &["rewrite", "--check", "--quiet"]),
+            Some(1)
+        );
+        assert_eq!((host.out.as_str(), host.err.as_str()), ("", ""));
+        std::fs::remove_dir_all(&host.root).expect("removes");
+    }
+
+    #[test]
+    fn writes_a_new_file_and_links_the_docs() {
+        let mut host = project("write", &[]);
+        write_source(&mut host, Path::new("new.py"), "x = 1\n").expect("writes");
+        let written = std::fs::read_to_string(host.root.join("new.py")).expect("reads");
+        assert_eq!(written, "x = 1\n");
+        assert_eq!(
+            rule_doc("see [stale-type](stale-type.md)"),
+            format!("see [stale-type]({DOCS_URL}reference/rules/#stale-type)")
+        );
+        std::fs::remove_dir_all(&host.root).expect("removes");
+    }
+
+    #[test]
+    fn writes_sarif_of_any_row() {
+        assert_eq!(sarif_result(Json::Null), Json::Null);
+        let row = Json::object([("file", Json::Null), ("start", Json::Null)]);
+        let Json::Object(fields) = sarif_result(row) else {
+            panic!("an object");
+        };
+        assert_eq!(fields[1], ("level".to_string(), "none".into()));
+    }
 }
