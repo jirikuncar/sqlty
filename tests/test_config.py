@@ -12,6 +12,25 @@ from sqlty import _config
 from sqlty._config import ConfigError, load_config, validate_tool_table
 
 
+def test_packaging_only_pyprojects_inherit_the_nearest_table(tmp_path):
+    """Every file of a nested tree of packaging-only pyproject.toml files gets the root's table."""
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\ndialect = "mysql"\n')
+    leaves = []
+    for a in range(2):
+        (tmp_path / f"a{a}").mkdir()
+        (tmp_path / f"a{a}" / "pyproject.toml").write_text('[project]\nname = "pkg"\n')
+        for c in range(5):
+            leaf = tmp_path / f"a{a}" / f"c{c}"
+            leaf.mkdir()
+            (leaf / "pyproject.toml").write_text('[project]\nname = "pkg"\n')
+            leaves.append(leaf)
+
+    found = [load_config(leaf) for leaf in leaves]
+
+    assert all(config["dialect"] == "mysql" for config, _ in found)
+    assert {root for _, root in found} == {tmp_path}
+
+
 def test_edited_pyproject_is_reread(tmp_path):
     """An edited pyproject.toml is read again."""
     pyproject = tmp_path / "pyproject.toml"

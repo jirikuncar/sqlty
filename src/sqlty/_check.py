@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from sqlty._core import ModuleIndex, Schema
 from sqlty._core import analyze_columns as _analyze_columns
+from sqlty._core import breaking_modules as _breaking_modules
 from sqlty._core import check_modules as _check_modules
 from sqlty._core import check_source as _check_source
 from sqlty._core import composite_fields as _composite_fields
@@ -542,12 +543,14 @@ def diagnostics(
     row_usage: RowUsage | None = None,
     variants: int | None = None,
     coerce: frozenset[str] = frozenset(),
+    suppress: bool = False,
 ) -> list[Diagnostic]:
-    """Every diagnostic before inline suppression: the Rust pass, then the Python passes.
+    """Every diagnostic: the Rust pass, then the Python passes.
 
     ``variants`` turns on query variants (``find_helper_calls``): each variant of a call
     is checked as a call of its own, then ``_merge_variants`` reports at the call.
-    ``coerce`` names the row types read as a Pydantic validator reads them.
+    ``coerce`` names the row types read as a Pydantic validator reads them. ``suppress``
+    drops what ``# sqlty: ignore`` comments suppress and adds their ``unused-ignore``.
     """
     own = RowUsage()
     if AST == "rust":
@@ -563,6 +566,7 @@ def diagnostics(
             module,
             variants,
             coerce,
+            suppress,
         )
     else:
         found = _diagnostics(
@@ -597,6 +601,8 @@ def diagnostics(
             None if helpers is None else helpers.rust(),
             variants,
         )
+    if suppress and AST != "rust":
+        found = apply_suppressions(parsed.ignores, found, rules)
     return found
 
 
@@ -612,6 +618,7 @@ def _rust_diagnostics(
     module: str | None,
     variants: int | None,
     coerce: frozenset[str],
+    suppress: bool,
 ) -> list[Diagnostic]:
     """The diagnostics as ``sqlty_python::check`` reports them."""
     found, redundant, needed = _module_diagnostics(
@@ -627,6 +634,7 @@ def _rust_diagnostics(
         index=None if helpers is None else helpers.rust(),
         name=parsed.module,
         variants=variants,
+        suppress=suppress,
     )
     usage.needed.update(needed)
     usage.redundant += [
@@ -653,42 +661,58 @@ def check_modules(
 ) -> list[list[Diagnostic]]:
     """``check_source`` of every module, with ``row_usage``, in one Rust call that checks
     them on ``jobs`` threads (all cores when None)."""
-    # By identity: a rules dict does not hash, and files share their settings' objects.
-    known: dict[tuple[int, ...], int] = {}
-    configs: list[ModuleConfig] = []
-    for _, config in modules:
-        if known.setdefault(tuple(map(id, config)), len(configs)) == len(configs):
-            configs.append(config)
+    configs = _Configs()
     found = _check_modules(
-        [(parsed.text, parsed.module, known[tuple(map(id, config))]) for parsed, config in modules],
-        [
-            (
-                dialect,
-                schema,
-                rules,
-                style,
-                untyped,
-                sorted(coerce),
-                None if index is None else index.rust(),
-                n,
-            )
-            for dialect, schema, rules, style, untyped, coerce, index, n in configs
-        ],
+        [(parsed.text, parsed.module, configs.index(config)) for parsed, config in modules],
+        configs.rust(),
         version=sys.version_info[:2],
         jobs=jobs,
     )
-    checked = []
-    for (parsed, config), ((diagnostics, redundant, needed), suppressed) in zip(
-        modules, found, strict=True
-    ):
+    for diagnostics, redundant, needed in found:
         row_usage.needed.update(needed)
         row_usage.redundant += [
             (key, diag) for key, diag in zip(redundant, diagnostics, strict=True) if key is not None
         ]
-        if not suppressed:
-            diagnostics = apply_suppressions(parsed.ignores, diagnostics, config[2])
-        checked.append(diagnostics)
-    return checked
+    return [diagnostics for diagnostics, _, _ in found]
+
+
+def breaking_modules(
+    modules: Sequence[tuple[ParsedSource, ModuleConfig, ModuleConfig]], jobs: int | None
+) -> list[list[Diagnostic]]:
+    """``breaking_source`` of every ``(module, own, against)``, in one Rust call that checks
+    them on ``jobs`` threads (all cores when None)."""
+    configs = _Configs()
+    found = _breaking_modules(
+        [
+            (parsed.text, parsed.module, configs.index(own), configs.index(against))
+            for parsed, own, against in modules
+        ],
+        configs.rust(),
+        version=sys.version_info[:2],
+        jobs=jobs,
+    )
+    return found
+
+
+class _Configs:
+    """Configurations, each once, by identity: a rules dict does not hash, and files share
+    their settings' objects."""
+
+    def __init__(self) -> None:
+        self._known: dict[tuple[int, ...], int] = {}
+        self._configs: list[ModuleConfig] = []
+
+    def index(self, config: ModuleConfig) -> int:
+        found = self._known.setdefault(tuple(map(id, config)), len(self._configs))
+        if found == len(self._configs):
+            self._configs.append(config)
+        return found
+
+    def rust(self) -> list[tuple[typing.Any, ...]]:
+        return [
+            (dialect, schema, rules, style, untyped, sorted(coerce), index and index.rust(), n)
+            for dialect, schema, rules, style, untyped, coerce, index, n in self._configs
+        ]
 
 
 def _compare_module(
@@ -1375,12 +1399,8 @@ def apply_suppressions(
     ignores: dict[int, Ignore],
     diagnostics: list[Diagnostic],
     rules: dict[str, str] | None,
-    marker: str = "#",
 ) -> list[Diagnostic]:
-    """Drop diagnostics suppressed by a comment on their line; add ``unused-ignore``.
-
-    ``marker`` starts a comment in the checked language: ``#``, or ``--`` in SQL.
-    """
+    """Drop diagnostics suppressed by a comment on their line; add ``unused-ignore``."""
     from sqlty._lint import RuleConfig
 
     if not ignores:
@@ -1405,7 +1425,7 @@ def apply_suppressions(
             else:
                 unused = [name for name in ignore.rules if (ignore.line, name) not in used]
             for name in unused:
-                written = f"{marker} sqlty: ignore" + ("" if name is None else f"[{name}]")
+                written = "# sqlty: ignore" + ("" if name is None else f"[{name}]")
                 kept.append(
                     {
                         "rule": "unused-ignore",

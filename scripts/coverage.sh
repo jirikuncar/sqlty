@@ -13,11 +13,13 @@ uv run --no-sync maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.tom
 pytest=(uv run --no-sync pytest --cov --cov-append --cov-fail-under=0)
 "${pytest[@]}" -m "not timing and not pg"
 # Rust and Python readings of every checked module must agree (`SQLTY_AST`).
-for ast in compare rust; do
-  SQLTY_AST=$ast "${pytest[@]}" -m "not timing and not pg" tests/mdtest tests/test_cli.py \
-    tests/test_helpers.py tests/test_psycopg.py tests/test_driver_values.py \
-    tests/test_type_extractor.py tests/test_cross_module.py
-done
+subset=(tests/mdtest tests/test_cli.py tests/test_helpers.py tests/test_psycopg.py
+  tests/test_driver_values.py tests/test_type_extractor.py tests/test_cross_module.py)
+SQLTY_AST=compare "${pytest[@]}" -m "not timing and not pg" "${subset[@]}"
+# The deprecated Python passes alone, until 0.8.0 removes them.
+SQLTY_AST=python "${pytest[@]}" -m "not timing and not pg" "${subset[@]}" tests/test_source.py \
+  tests/test_composed_edges.py tests/test_rust_check.py tests/test_rust_index.py tests/test_lsp.py \
+  tests/e2e/test_breaking_e2e.py
 if [[ -n ${SQLTY_PG_DSN:-} ]]; then
   "${pytest[@]}" -m pg -n 0
 fi
