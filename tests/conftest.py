@@ -3,15 +3,18 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 
 import pytest
-from hypothesis import Phase, settings
 
 WORKER = os.environ.get("PYTEST_XDIST_WORKER")
 
 # Coverage must not depend on what Hypothesis happens to generate.
-settings.register_profile("coverage", phases=[Phase.explicit])
+with contextlib.suppress(ImportError):
+    from hypothesis import Phase, settings
+
+    settings.register_profile("coverage", phases=[Phase.explicit])
 
 
 def _worker_database(dsn: str, *, create: bool) -> str:
