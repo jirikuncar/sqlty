@@ -229,7 +229,7 @@ fn dialect(name: &str) -> Result<String, String> {
 }
 
 /// Run `sqlty ARGS...` on `host`; the exit code, or `None` when the command runs in Python
-/// still (`complete`, `breaking`, `server`, `check --statistics` and `--explain`).
+/// still (`complete`, `breaking` and `server`).
 pub fn run(args: impl IntoIterator<Item = OsString>, host: &mut dyn Host) -> Option<i32> {
     let args: Vec<OsString> = args.into_iter().collect();
     let first = args.get(1).and_then(|arg| arg.to_str());
@@ -248,11 +248,6 @@ pub fn run(args: impl IntoIterator<Item = OsString>, host: &mut dyn Host) -> Opt
         }
     };
     let cli = Cli::from_arg_matches(&matches).expect("parsed by its own command");
-    if let Some(Command::Check { check, .. }) = &cli.command {
-        if check.statistics || check.explain {
-            return None;
-        }
-    }
     let severities = matches
         .subcommand()
         .map(|(_, matches)| severities(matches))
@@ -300,10 +295,10 @@ pub fn run(args: impl IntoIterator<Item = OsString>, host: &mut dyn Host) -> Opt
 fn severities(matches: &ArgMatches) -> Vec<(String, String)> {
     let mut found: Vec<(usize, String, String)> = Vec::new();
     for severity in ["error", "warn", "ignore"] {
-        let (Some(rules), Some(indices)) = (
-            matches.get_many::<String>(severity),
-            matches.indices_of(severity),
-        ) else {
+        let Ok(Some(rules)) = matches.try_get_many::<String>(severity) else {
+            continue;
+        };
+        let Some(indices) = matches.indices_of(severity) else {
             continue;
         };
         for (rule, at) in rules.zip(indices) {
@@ -798,6 +793,11 @@ fn check(
                     path.display(),
                     diag.line
                 ));
+                if args.explain && EXPLAINED_RULES.contains(&rule) {
+                    for line in workspace.explain(path, diag.line)? {
+                        host.out(&format!("{line}\n"));
+                    }
+                }
             }
             OutputFormat::Text => {}
         }
@@ -826,6 +826,9 @@ fn check(
         }
         host.out(&format!("Found {}\n", parts.join(", ")));
     }
+    if args.statistics && text {
+        host.out(&format!("{}\n", statistics(&workspace.statistics_all()?)));
+    }
     Ok(
         if !args.exit_zero && (errors > 0 || (args.error_on_warning && warnings > 0)) {
             EXIT_FOUND
@@ -835,6 +838,49 @@ fn check(
             0
         },
     )
+}
+
+/// Diagnostics about the type of a query's rows, which `--explain` traces to inference rules.
+const EXPLAINED_RULES: [&str; 8] = [
+    "stale-type",
+    "narrow-type",
+    "column-type-mismatch",
+    "nullable-mismatch",
+    "redundant-optional",
+    "literal-mismatch",
+    "redundant-literal",
+    "json-shape-mismatch",
+];
+
+/// One line of query counts; skipped strings are broken down by rule.
+fn statistics(modules: &[std::collections::HashMap<&'static str, usize>]) -> String {
+    let count =
+        |name: &str| -> usize { modules.iter().filter_map(|counts| counts.get(name)).sum() };
+    let skipped: Vec<(&str, usize)> = [
+        Rule::FstringSkipped,
+        Rule::TstringSkipped,
+        Rule::UncheckedQuery,
+        Rule::DynamicQuery,
+    ]
+    .into_iter()
+    .map(|rule| (rule.name(), count(rule.name())))
+    .filter(|(_, n)| *n > 0)
+    .collect();
+    let detail: Vec<String> = skipped
+        .iter()
+        .map(|(rule, n)| format!("{rule}: {n}"))
+        .collect();
+    let mut line = format!(
+        "Queries: {} typed, {} partially typed, {} unparsed, {} skipped",
+        count("typed"),
+        count("partially typed"),
+        count("unparsed"),
+        skipped.iter().map(|(_, n)| n).sum::<usize>()
+    );
+    if !detail.is_empty() {
+        line.push_str(&format!(" ({})", detail.join(", ")));
+    }
+    line
 }
 
 /// The 1-based line and column (in characters) of the byte `offset` of `text`.

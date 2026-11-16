@@ -7,10 +7,11 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 use sqlty_python::calls::Helper;
-use sqlty_python::checker::Diagnostic;
+use sqlty_python::checker::{self, Diagnostic, SiteKind};
 use sqlty_python::index::{helpers_of, Builder, HelperIndex, Roots};
 use sqlty_python::project::{self, helper_roots, Discovery, Files, Kind, Listing, Packages, Read};
 use sqlty_python::queries;
+use sqlty_python::rewriter::ImportStyle;
 use sqlty_python::suppress;
 use sqlty_python::types::info::Dict;
 use sqlty_python::types::stdlib::Version;
@@ -560,6 +561,68 @@ impl Workspace {
                 })
                 .collect()
         })
+    }
+
+    /// [`module::statistics`] of every module, in order, on all cores.
+    pub fn statistics_all(&mut self) -> Result<Vec<HashMap<&'static str, usize>>, String> {
+        let work = self.prepared()?;
+        pool().install(|| {
+            work.par_iter()
+                .map(|(path, settings, helpers)| {
+                    stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
+                        let module = &self.modules[path];
+                        let checker = Checker::of(settings, Some(helpers))?;
+                        let parsed = module.parsed.as_deref();
+                        let name = parsed.and_then(|parsed| parsed.module.as_deref());
+                        Ok(module::statistics(&module.text, parsed, name, &checker))
+                    })
+                })
+                .collect()
+        })
+    }
+
+    /// The inference rules behind the columns of the last query that starts on or before
+    /// `line` of the module at `path`, indented, as `sqlty check --explain` prints them.
+    pub fn explain(&mut self, path: &Path, line: usize) -> Result<Vec<String>, String> {
+        let settings = self.settings(path)?;
+        let Some(module) = self.modules.get(path) else {
+            return Ok(Vec::new());
+        };
+        let style = ImportStyle::parse(None).map_err(|error| error.to_string())?;
+        let query = checker::query_sites(&module.text, &style, &[])
+            .into_iter()
+            .rfind(|(start, kind, _)| *kind == SiteKind::Query && *start <= line);
+        let Some((_, _, query)) = query else {
+            return Ok(Vec::new());
+        };
+        let columns =
+            analyzer::explain_select(&query, settings.dialect, settings.schema.as_deref());
+        let mut lines = Vec::new();
+        for column in columns.unwrap_or_default() {
+            let by = [
+                ("type", column.type_rule),
+                ("nullability", column.nullability_rule),
+            ];
+            let mut rules: Vec<_> = by.iter().filter_map(|(_, rule)| *rule).collect();
+            rules.sort_by_key(|rule| rule.id);
+            rules.dedup();
+            for rule in rules {
+                let parts: Vec<&str> = by
+                    .iter()
+                    .filter(|(_, other)| *other == Some(rule))
+                    .map(|(part, _)| *part)
+                    .collect();
+                lines.push(format!(
+                    "  {}: {} by inference rule {}",
+                    column.name,
+                    parts.join(" and "),
+                    rule.id
+                ));
+                lines.push(format!("    {}", rule.reasoning));
+                lines.push(format!("    Reference: {}", rule.reference));
+            }
+        }
+        Ok(lines)
     }
 
     /// Every module with its settings and helpers.

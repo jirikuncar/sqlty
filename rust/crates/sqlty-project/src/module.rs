@@ -1,10 +1,10 @@
 //! One module checked, fixed or rewritten with the settings of its file.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use sqlty_python::check::{self, Lint, Run};
-use sqlty_python::checker::Diagnostic;
+use sqlty_python::checker::{query_sites, Diagnostic, SiteKind};
 use sqlty_python::index::HelperIndex;
 use sqlty_python::options::ConfigError;
 use sqlty_python::options::Options;
@@ -12,7 +12,7 @@ use sqlty_python::rows::{self, Found};
 use sqlty_python::rules::{Rule, RuleConfig};
 use sqlty_python::types::symbols::{Index, Source};
 use sqlty_python::{fixer, json_types, params, rewriter, suppress};
-use sqlty_sql::analyzer::SchemaData;
+use sqlty_sql::analyzer::{self, SchemaData};
 
 use crate::settings::FileSettings;
 
@@ -164,6 +164,51 @@ pub fn helper_starts(parsed: &Source, module: Option<&str>, checker: &Checker<'_
         .into_iter()
         .filter_map(|site| site.start)
         .collect()
+}
+
+/// How the queries of `text` fare, as `sqlty check --statistics` counts them: `typed`,
+/// `partially typed`, `unparsed`, and skipped strings by rule. Queries that return no
+/// rows are not counted.
+pub fn statistics(
+    text: &str,
+    parsed: Option<&Source>,
+    module: Option<&str>,
+    checker: &Checker<'_>,
+) -> HashMap<&'static str, usize> {
+    let (dialect, schema) = (checker.dialect, checker.options.schema);
+    let mut counts = HashMap::new();
+    let mut outcomes = Vec::new();
+    let outcome = |query: &str| {
+        if analyzer::parse_error(query, dialect).is_some() {
+            Some("unparsed")
+        } else if !analyzer::returns_rows(query, dialect) {
+            None
+        } else if analyzer::analyze_select(query, dialect, schema)
+            .is_some_and(|columns| columns.iter().all(|column| column.python_type.is_some()))
+        {
+            Some("typed")
+        } else {
+            Some("partially typed")
+        }
+    };
+    let style = &checker.options.style;
+    let any_calls = parsed.map_or_else(Vec::new, |parsed| check::any_calls(parsed, style));
+    for (_, kind, query) in query_sites(text, style, &any_calls) {
+        outcomes.push(match kind {
+            SiteKind::Query => outcome(&query),
+            SiteKind::Skipped(rule) => Some(rule.name()),
+        });
+    }
+    if let Some(parsed) = parsed {
+        for site in check::sites(parsed, checker.helpers, module, checker.variants) {
+            outcomes.push(site.unchecked.map(Rule::name));
+            outcomes.extend(site.queries.iter().map(|query| outcome(query)));
+        }
+    }
+    for found in outcomes.into_iter().flatten() {
+        *counts.entry(found).or_insert(0) += 1;
+    }
+    counts
 }
 
 /// `changed`, a rewrite of `text`, with JSON and parameter types when the settings ask.
