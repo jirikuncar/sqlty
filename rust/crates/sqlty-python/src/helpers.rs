@@ -234,6 +234,15 @@ mod tests {
     }
 
     #[test]
+    fn the_module_region_is_the_whole_source() {
+        let source = "x = 1\ny = 2\n";
+        assert_eq!(
+            region(Node::Module, &Lines::new(source), source.len()),
+            (0, source.len())
+        );
+    }
+
+    #[test]
     fn decorators_belong_to_their_function() {
         let source = "@fetch\ndef f():\n    g(1)\n";
         assert_eq!(names(source, &["fetch"]), ["g"]);

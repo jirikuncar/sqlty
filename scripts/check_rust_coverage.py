@@ -13,7 +13,8 @@ import sys
 from pathlib import Path
 
 UNREACHABLE = {
-    # pyo3 wrappers of `#[pymethods]` blocks no Python call reaches.
+    # pyo3 emits a `__pymethod_*__` wrapper per method that Python never calls (the bodies
+    # run); `coverage(off)` on the block hides the bodies, not the wrappers.
     ("sqlty-ext/src/lib.rs", "#[pymethods]"),
     # ruff yields IPython escapes only in IPython mode; sqlty parses modules.
     (
@@ -22,10 +23,6 @@ UNREACHABLE = {
     ),
     ("sqlty-ext/src/outline.rs", '"IPython escape command",'),
     ("sqlty-ext/src/outline.rs", ")),"),
-    # The module is scope 0, never on a call's scope stack.
-    ("sqlty-python/src/helpers.rs", "Node::Module => return (0, len),"),
-    # Only tables pass `star_resolvable` on a fresh analyzer.
-    ("sqlty-sql/src/analyzer/star_expand.rs", "_ => return None,"),
 }
 
 
