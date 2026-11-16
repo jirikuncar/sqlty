@@ -427,7 +427,8 @@ rust/crates/             # Cargo workspace (root: rust/Cargo.toml)
 │   └── rules/           # inference rules (*.inference.toml), compiled by build.rs; see its README
 ├── sqlty-python/        # tokens, rewriter, checker, fixer
 ├── sqlty-project/       # a project read from disk: settings, helpers, checks of sqlty server
-├── sqlty-cli/           # the sqlty commands: rewrite, strip, format, check, rule, skill, version
+├── sqlty-cli/           # the sqlty commands: rewrite, strip, format, check, rule, skill, version;
+│                        # main.rs is a standalone `sqlty` executable (cargo run -p sqlty-cli)
 ├── sqlty-lsp/           # the language server of sqlty server; tests without Python
 ├── sqlty-wasm/          # JSON in, JSON out, for WebAssembly: the docs playground (make playground)
 └── sqlty-ext/           # lib.rs (PyO3), builds sqlty._core; server.rs runs sqlty-lsp
