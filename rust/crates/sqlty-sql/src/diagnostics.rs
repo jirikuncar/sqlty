@@ -41,11 +41,13 @@ pub enum NameRule {
     UnprovenJoin,
     /// A comparison between columns holding keys of different entities.
     EntityMismatch,
+    /// A query the database rejects for a reason no other rule names.
+    RejectedQuery,
 }
 
 impl NameRule {
     /// Every rule, the one list the checker and the Python side read.
-    pub const ALL: [NameRule; 14] = [
+    pub const ALL: [NameRule; 15] = [
         NameRule::UnknownTable,
         NameRule::UnknownColumn,
         NameRule::AmbiguousColumn,
@@ -60,6 +62,7 @@ impl NameRule {
         NameRule::ChasmJoin,
         NameRule::UnprovenJoin,
         NameRule::EntityMismatch,
+        NameRule::RejectedQuery,
     ];
 
     /// The kebab-case rule name, as in `[tool.sqlty.rules]`.
@@ -79,6 +82,7 @@ impl NameRule {
             NameRule::ChasmJoin => "chasm-join",
             NameRule::UnprovenJoin => "unproven-join",
             NameRule::EntityMismatch => "entity-mismatch",
+            NameRule::RejectedQuery => "rejected-query",
         }
     }
 }
@@ -247,6 +251,7 @@ impl Diagnostics {
 
     /// Everything recorded so far, in order, without spans.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn items(&self) -> Vec<NameDiagnostic> {
         self.located().into_iter().map(|(item, _)| item).collect()
     }
@@ -267,6 +272,7 @@ impl Drop for At {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 
@@ -387,6 +393,7 @@ mod tests {
                 "chasm-join",
                 "unproven-join",
                 "entity-mismatch",
+                "rejected-query",
             ]
         );
     }

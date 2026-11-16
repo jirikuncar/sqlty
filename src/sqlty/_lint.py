@@ -44,6 +44,7 @@ Configuration via sqlty.toml (``[rules]``) or pyproject.toml:
     chasm-join = "warn"                 # default
     unproven-join = "ignore"            # default
     entity-mismatch = "ignore"          # default
+    rejected-query = "error"            # default
     unused-ignore = "warn"              # default
     param-count-mismatch = "error"      # default
     extra-param = "warn"                # default
@@ -312,6 +313,12 @@ RULES: dict[str, LintRule] = {
         fixable=False,
         description="Comparison between columns holding keys of different tables",
     ),
+    "rejected-query": LintRule(
+        name="rejected-query",
+        default_severity=Severity.ERROR,
+        fixable=False,
+        description="Query the database rejects for a reason no other rule names",
+    ),
     "param-count-mismatch": LintRule(
         name="param-count-mismatch",
         default_severity=Severity.ERROR,
@@ -429,13 +436,9 @@ def rule_doc(name: str) -> str:
     text = (files("sqlty") / "rules" / f"{name}.md").read_text(encoding="utf-8")
 
     def absolute(match: re.Match[str]) -> str:
-        path, anchor = match["path"], match["anchor"] or ""
-        if path.startswith("../../../docs/"):
-            return (
-                f"]({DOCS_URL}{path.removeprefix('../../../docs/').removesuffix('.md')}/{anchor})"
-            )
-        if "/" not in path:
-            return f"]({DOCS_URL}reference/rules/#{path.removesuffix('.md')})"
-        return match[0]
+        if (doc := match["doc"]) is not None:
+            return f"]({DOCS_URL}{doc}/{match['anchor'] or ''})"
+        return f"]({DOCS_URL}reference/rules/#{match['rule']})"
 
-    return re.sub(r"\]\((?P<path>[^)\s:]+\.md)(?P<anchor>#[^)\s]*)?\)", absolute, text)
+    link = r"\]\((?:\.\./\.\./\.\./docs/(?P<doc>[^)\s:]+)|(?P<rule>[^)\s:/]+))\.md(?P<anchor>#[^)\s]*)?\)"
+    return re.sub(link, absolute, text)

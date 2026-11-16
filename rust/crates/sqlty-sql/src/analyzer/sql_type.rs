@@ -358,8 +358,8 @@ impl SqlType {
                 Some(union(members?))
             }
             SqlType::Interval => Some("datetime.timedelta".to_string()),
-            SqlType::Unmapped(_) => None,
-            SqlType::Scalar(name) => scalar_python(name, dialect),
+            // `parse` reads an unmapped name back as a scalar.
+            SqlType::Scalar(name) | SqlType::Unmapped(name) => scalar_python(name, dialect),
         }
     }
 }
@@ -607,7 +607,7 @@ fn scalar(dt: &DataType, dialect: SqlDialect) -> String {
         DataType::BigInt(None) => Some("BIGINT"),
         DataType::SmallInt(None) => Some("SMALLINT"),
         DataType::Text => Some("TEXT"),
-        DataType::Boolean | DataType::Bool => Some("BOOLEAN"),
+        DataType::Boolean => Some("BOOLEAN"),
         DataType::Uuid => Some("UUID"),
         DataType::Date => Some("DATE"),
         DataType::Bytea => Some("VARBINARY"),
@@ -703,7 +703,6 @@ fn scalar(dt: &DataType, dialect: SqlDialect) -> String {
         "NUMERIC" | "DEC" | "FIXED" => "DECIMAL",
         "CHARACTER VARYING" | "NVARCHAR" => "VARCHAR",
         "CHARACTER LARGE OBJECT" | "CHAR LARGE OBJECT" => "TEXT",
-        "BINARY LARGE OBJECT" => "VARBINARY",
         "BIT VARYING" => "VARBIT",
         "CHARACTER" | "NCHAR" => "CHAR",
         "TINYTEXT" | "MEDIUMTEXT" | "LONGTEXT" => "TEXT",
@@ -816,6 +815,7 @@ fn sqlite_affinity(name: &str) -> Option<String> {
 /// `proofs/SqlTy/Table.lean`: what [`scalar_python`] gives each name it knows, in each
 /// dialect, for the Lean model of the mapping. `SQLTY_UPDATE_PROOFS=1` rewrites it.
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod lean_table {
     use super::*;
     use std::collections::BTreeSet;

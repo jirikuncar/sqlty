@@ -78,7 +78,7 @@ argument's value, say), add a `@` result kind to `compile.rs` and cite the rule.
 lookup order and how to verify a `reference`. Every rule needs a `reference` to
 vendor documentation of the version the tests target, one per database
 (`reference.postgres` for PostgreSQL 17, `reference.mysql` for MySQL 8.4,
-`reference.sqlite` for SQLite 3), checked against the published page, and a one-sentence `reasoning`;
+`reference.sqlite` for SQLite 3, `reference.duckdb` for DuckDB 2.0), checked against the published page, and a one-sentence `reasoning`;
 the build fails otherwise. `sqlty check --explain` and `-- rules:` mdtest
 assertions show which rule typed a column; every rule needs one, in
 `tests/mdtest/type_inference/rule_coverage.md` if nowhere else
@@ -420,12 +420,13 @@ src/sqlty/
 ├── _lint.py             # Lint rules: severity, diagnostics, RuleConfig
 ├── _decode.py           # Magic codec decoder
 ├── _cli.py              # CLI: rewrite, strip, check, server, version
-├── _lsp_bridge.py       # Workspace: what sqlty server checks a buffer with
+├── _lsp_bridge.py       # Workspace of sqlty server with a breaking baseline or SQLTY_AST=python
 └── magic.py             # Python codec registration
 rust/crates/             # Cargo workspace (root: rust/Cargo.toml)
 ├── sqlty-sql/           # analyzer/ (type inference), ddl; no PyO3
 │   └── rules/           # inference rules (*.inference.toml), compiled by build.rs; see its README
 ├── sqlty-python/        # tokens, rewriter, checker, fixer
+├── sqlty-project/       # a project read from disk: settings, helpers, checks of sqlty server
 ├── sqlty-lsp/           # the language server of sqlty server; tests without Python
 ├── sqlty-wasm/          # JSON in, JSON out, for WebAssembly: the docs playground (make playground)
 └── sqlty-ext/           # lib.rs (PyO3), builds sqlty._core; server.rs runs sqlty-lsp

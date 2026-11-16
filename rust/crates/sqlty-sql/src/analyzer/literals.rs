@@ -78,6 +78,7 @@ pub(super) fn merge(left: &Typed, right: &Typed, dialect: SqlDialect) -> Option<
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::super::test_support::reports;
     use super::*;

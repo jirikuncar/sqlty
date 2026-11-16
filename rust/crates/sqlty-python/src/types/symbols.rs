@@ -96,13 +96,8 @@ impl Source {
     /// indentation and line break.
     pub fn line_span(&self, line: usize) -> (usize, usize) {
         let len = self.text.len();
-        let lines =
-            self.lines.count() + usize::from(self.lines.start(self.lines.count(), len) != len);
-        if line == 0 || line >= lines {
-            return (len, len);
-        }
         let start = self.lines.start(line, len);
-        let text = &self.text.as_bytes()[start..self.lines.start(line + 1, len)];
+        let text = &self.text.as_bytes()[start..self.lines.start(line + 1, len).max(start)];
         let content = text.len()
             - text
                 .iter()
@@ -120,37 +115,33 @@ impl Source {
     /// `Row: TypeAlias = ...`, and `Row = tuple[...]` or `Row = OtherRow`.
     pub fn type_aliases(&self) -> HashMap<&str, &Expr> {
         let mut aliases = HashMap::new();
+        let row = |value: &Expr| match value {
+            Expr::Name(_) | Expr::Attribute(_) => true,
+            Expr::Subscript(sub) => matches!(
+                crate::unparse::unparse(&sub.value, &self.text).as_str(),
+                "tuple" | "typing.Tuple" | "Tuple"
+            ),
+            _ => false,
+        };
         for stmt in self.body() {
-            match stmt {
-                Stmt::TypeAlias(node) => {
-                    if let (Expr::Name(name), None) = (node.name.as_ref(), &node.type_params) {
-                        aliases.insert(name.id.as_str(), node.value.as_ref());
-                    }
+            let alias = match stmt {
+                Stmt::TypeAlias(node) if node.type_params.is_none() => {
+                    Some((node.name.as_ref(), node.value.as_ref()))
                 }
-                Stmt::AnnAssign(node) => {
-                    if let (Expr::Name(name), Some(value)) = (node.target.as_ref(), &node.value) {
-                        if self.typing_name(&node.annotation) == Some("TypeAlias") {
-                            aliases.insert(name.id.as_str(), value.as_ref());
-                        }
-                    }
+                Stmt::AnnAssign(node)
+                    if self.typing_name(&node.annotation) == Some("TypeAlias") =>
+                {
+                    node.value
+                        .as_deref()
+                        .map(|value| (node.target.as_ref(), value))
                 }
-                Stmt::Assign(node) => {
-                    let [Expr::Name(name)] = node.targets.as_slice() else {
-                        continue;
-                    };
-                    let row = match node.value.as_ref() {
-                        Expr::Name(_) | Expr::Attribute(_) => true,
-                        Expr::Subscript(sub) => matches!(
-                            crate::unparse::unparse(&sub.value, &self.text).as_str(),
-                            "tuple" | "typing.Tuple" | "Tuple"
-                        ),
-                        _ => false,
-                    };
-                    if row {
-                        aliases.insert(name.id.as_str(), node.value.as_ref());
-                    }
+                Stmt::Assign(node) if node.targets.len() == 1 && row(&node.value) => {
+                    Some((&node.targets[0], node.value.as_ref()))
                 }
-                _ => {}
+                _ => None,
+            };
+            if let Some((Expr::Name(name), value)) = alias {
+                aliases.insert(name.id.as_str(), value);
             }
         }
         aliases
@@ -351,31 +342,12 @@ enum Local {
 fn module_types(body: &[Stmt], aliases: &HashMap<String, String>) -> HashMap<String, Local> {
     let mut found: HashMap<String, Local> = HashMap::new();
     for (index, stmt) in body.iter().enumerate() {
-        match stmt {
-            Stmt::Assign(node) => {
-                let [Expr::Name(target)] = node.targets.as_slice() else {
-                    continue;
-                };
-                if is_type_expr(&node.value) {
-                    found.insert(target.id.to_string(), Local::Alias(index));
-                }
-            }
-            Stmt::AnnAssign(node) => {
-                if let (Expr::Name(target), Some(_)) = (node.target.as_ref(), &node.value) {
-                    if is_name(&node.annotation, "TypeAlias", aliases) {
-                        found.insert(target.id.to_string(), Local::Alias(index));
-                    }
-                }
-            }
-            Stmt::TypeAlias(node) => {
-                if let (Expr::Name(target), None) = (node.name.as_ref(), &node.type_params) {
-                    found.insert(target.id.to_string(), Local::Alias(index));
-                }
-            }
-            Stmt::ClassDef(node) if plain_class(node, aliases) => {
+        if let Some((name, _)) = type_alias(stmt, aliases) {
+            found.insert(name.to_string(), Local::Alias(index));
+        } else if let Stmt::ClassDef(node) = stmt {
+            if plain_class(node, aliases) {
                 found.insert(node.name.to_string(), Local::Class(index));
             }
-            _ => {}
         }
     }
     for (index, stmt) in body.iter().enumerate() {
@@ -386,6 +358,24 @@ fn module_types(body: &[Stmt], aliases: &HashMap<String, String>) -> HashMap<Str
     let bound = bound_names(body);
     found.retain(|name, _| bound.get(name.as_str()) == Some(&1));
     found
+}
+
+/// `X = T` with `T` a type expression, `X: TypeAlias = T` or `type X = T`: `X` and `T`.
+fn type_alias<'a>(
+    stmt: &'a Stmt,
+    aliases: &HashMap<String, String>,
+) -> Option<(&'a str, &'a Expr)> {
+    let (target, value): (&Expr, &Expr) = match stmt {
+        Stmt::Assign(node) if node.targets.len() == 1 && is_type_expr(&node.value) => {
+            (&node.targets[0], &node.value)
+        }
+        Stmt::AnnAssign(node) if is_name(&node.annotation, "TypeAlias", aliases) => {
+            (&node.target, node.value.as_deref()?)
+        }
+        Stmt::TypeAlias(node) if node.type_params.is_none() => (&node.name, &node.value),
+        _ => return None,
+    };
+    Some((target.as_name_expr()?.id.as_str(), value))
 }
 
 /// `X = NewType("X", T)` with `T` a type expression: `X` and `T`.
@@ -482,9 +472,7 @@ impl Names for ModuleTypes {
                 .map(Found::Type)
             }
             Some((Local::Class(index), body)) => {
-                let Stmt::ClassDef(node) = &body[index] else {
-                    return None;
-                };
+                let node = body[index].as_class_def_stmt()?;
                 self.build(name, || {
                     let bases: Vec<Option<Ty>> = node
                         .bases()
@@ -503,12 +491,7 @@ impl Names for ModuleTypes {
                 .map(Found::Type)
             }
             Some((Local::Alias(index), body)) => {
-                let value = match &body[index] {
-                    Stmt::Assign(node) => &node.value,
-                    Stmt::AnnAssign(node) => node.value.as_ref()?,
-                    Stmt::TypeAlias(node) => &node.value,
-                    _ => return None,
-                };
+                let (_, value) = type_alias(&body[index], &self.source.aliases)?;
                 Some(Found::Alias(value, text))
             }
             None => {

@@ -10,18 +10,7 @@ import operator
 import types
 import typing
 
-if typing.TYPE_CHECKING:
-    pass
-
-
 _QUALIFIERS = frozenset({"ReadOnly", "Required", "NotRequired"})
-
-
-def _unwrap_qualifiers(tp: typing.Any) -> typing.Any:
-    """Strip ``ReadOnly`` / ``Required`` / ``NotRequired`` wrappers."""
-    while typing.get_origin(tp) in (typing.ReadOnly, typing.Required, typing.NotRequired):
-        tp = typing.get_args(tp)[0]
-    return tp
 
 
 _NEVER = (typing.Never, typing.NoReturn)
@@ -66,6 +55,9 @@ def _is_subtype(
         >>> _is_subtype(bool, int | str), _is_subtype(int, float), _is_subtype(float, int)
         (True, True, False)
         >>> _is_subtype(list[int], list) is None
+        True
+        >>> class Named(typing.Protocol): ...
+        >>> _is_subtype(int, Named) is None
         True
     """
     if src is None or dst is None:
@@ -142,20 +134,3 @@ def _type_repr(tp: typing.Any) -> str:
     if isinstance(tp, type) and not typing.get_args(tp):
         return tp.__name__
     return repr(tp).replace("typing.", "")
-
-
-def _unwrap_optional(tp: type) -> type:
-    """Unwrap Optional[X] / X | None to X.
-
-    SQL columns are inherently nullable, so we strip None from unions.
-    """
-    origin = typing.get_origin(tp)
-
-    # types.UnionType (X | Y syntax, Python 3.10+)
-    if origin is types.UnionType or origin is typing.Union:
-        args = typing.get_args(tp)
-        non_none = [a for a in args if a is not type(None)]
-        if len(non_none) == 1:
-            return non_none[0]  # type: ignore[no-any-return]
-
-    return tp

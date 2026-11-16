@@ -201,6 +201,7 @@ CASES = {
     "stdlib": "A = pathlib.Path\nB = enum.StrEnum\nC = http.HTTPStatus\nD = collections.deque\n"
     "E = asynchat.async_chat\nF = builtins.ValueError\nG = typing.Any\nH = enum.Enum | Color\n"
     "class Color(enum.Enum): ...\nclass Level(enum.IntEnum): ...\nI = list[Level] | None\n",
+    "special forms": "A = Never\nB = NoReturn\nC = Any\nD = Tuple[int]\nE = list[Never]\nF = int | Never\n",
 }
 HEAD = (
     "import typing, typing as t, datetime, uuid, ipaddress, pathlib, enum, http, collections\n"
@@ -218,6 +219,56 @@ def test_cases(definitions: str) -> None:
         source = f"{HEAD}{definitions}class Row({kind}):\n{fields}"
         assert len(same(source)) == 1
         assert type_relations(source, VERSION, COLUMNS) == python_relations(source), source
+
+
+FIELDS = [
+    "tuple[int, str]",
+    "tuple[list[int], str]",
+    "Any",
+    "t.Any",
+    "typing.Tuple[int]",
+    "Tuple[int]",
+]
+
+
+def test_field_annotations() -> None:
+    fields = "".join(f"    f{i}: {annotation}\n" for i, annotation in enumerate(FIELDS))
+    source = f"{HEAD}class Row(TypedDict):\n{fields}"
+    assert type_relations(source, VERSION, COLUMNS) == python_relations(source)
+
+
+MODULES = {
+    "class body targets": "class Row(TypedDict):\n    a: int\n    x.y: int\n    x.z = 1\n    p, q = 1, 2\n",
+    "type parameters": "class Row[*Ts, **P](TypedDict):\n    a: int\n"
+    "class G(TypedDict, Generic[T, 'U']):\n    a: int\n",
+    "functional forms": "X = TypedDict('X', {1: int})\nN = NamedTuple('N', [('a', int, 1)])\n",
+    "empty Annotated": "class Row(BaseModel):\n    a: Annotated[()]\n",
+    "model configs": "class A(BaseModel):\n    model_config = {'extra': 'allow', **base}\n    a: int\n"
+    "class B(BaseModel):\n    class Config:\n        x.y = 1\n        z: int = 1\n    a: int\n"
+    "class C(BaseModel):\n    model_config = ConfigDict(extra=EXTRA)\n    a: int\n"
+    "class D(BaseModel, **opts):\n    a: int\n"
+    "class E(BaseModel, Generic[T]):\n    a: int\n"
+    "class F(BaseModel):\n    model_config = {**base}\n    a: int\n"
+    "class G(BaseModel):\n    model_config = ConfigDict(extra=Extra.allow)\n    a: int\n",
+    "strict and fields": "class Row(BaseModel):\n    a: Annotated[int, Strict(strict=False)]\n"
+    "    b: Annotated[int, Strict(flag)]\n    c: int = Field(**opts)\n    d: int = make()\n",
+    "extra items": "class A(TypedDict, extra_items=Unknown):\n    a: int\n"
+    "class B(A, closed=True):\n    b: int\n"
+    "class C(TypedDict, extra_items=int):\n    a: int\n"
+    "class D(C, extra_items=int):\n    b: int\n",
+    "read-only extra items": "class A(TypedDict, extra_items=ReadOnly[int]):\n    a: int\n"
+    "class B(A, extra_items=str):\n    b: int\n",
+}
+MODULE_HEAD = (
+    "from typing import Annotated, Generic, NamedTuple, ReadOnly, TypedDict, TypeVar\n"
+    "from pydantic import BaseModel, ConfigDict, Field, Strict\n"
+    "T = TypeVar('T')\n"
+)
+
+
+@pytest.mark.parametrize("module", MODULES.values(), ids=MODULES.keys())
+def test_modules(module: str) -> None:
+    same(MODULE_HEAD + module)
 
 
 REAL = [

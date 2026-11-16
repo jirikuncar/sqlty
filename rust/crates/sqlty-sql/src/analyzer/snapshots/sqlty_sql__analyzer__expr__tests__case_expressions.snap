@@ -15,7 +15,8 @@ SELECT CASE WHEN i > 1 THEN i ELSE 2.5 END AS a FROM t
 a: decimal.Decimal | DECIMAL | NonNull
 
 SELECT CASE WHEN i > 1 THEN i ELSE txt END AS a FROM t
-a: int | INT | Nullable
+a: ? | ? | Nullable
+[rejected-query] CASE types INT and TEXT cannot be matched
 
 SELECT CASE i WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'many' END AS a FROM t
 a: typing.Literal['one', 'two', 'many'] | ? | NonNull

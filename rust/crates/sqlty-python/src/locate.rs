@@ -341,6 +341,7 @@ struct Piece {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 
@@ -528,5 +529,38 @@ mod tests {
             ("--sql\nSELECT 37 FROM t", 13)
         );
         assert!(queries.at(source.find("plain").unwrap()).is_none());
+    }
+
+    #[test]
+    fn rarer_sites_and_offsets() {
+        assert_eq!(
+            [Route::Marker, Route::Wrapper, Route::Helper].map(Route::name),
+            ["marker", "wrapper", "helper"]
+        );
+        assert_eq!(colored(r#"run("SELECT 1", int)"#, &["ELECT"]), []);
+        assert_eq!(colored(r#"run(f"SELECT {x}")"#, &["f\""]), []);
+        assert_eq!(colored(r#"q = r"\x2d-sql\nSELECT 1""#, &[]), []);
+        assert_eq!(
+            colored(
+                "from sqlty import SQL\nq = SQL[int](r\"\\x2d-sql\\nSELECT 1\")",
+                &[]
+            ),
+            []
+        );
+        for unchecked in [
+            "from sqlty import SQL\nq = SQL[int](\"SELECT 1\")",
+            "from sqlty import SQL\nq = SQL[int](f\"--sql\\nSELECT {x}\")",
+        ] {
+            assert_eq!(colored(unchecked, &[]), [], "{unchecked}");
+        }
+        let source = r#"q = "--sql\nSELECT '\u2014\t' FROM t""#;
+        let queries = Queries::new(source, &ImportStyle::parse(None).unwrap(), &[]);
+        let escape = source.find(r"\t").unwrap();
+        let at = queries.at(escape + 1).unwrap();
+        assert_eq!(at.text[at.offset..].chars().next(), Some('\t'));
+        let dash = at.text.find('\u{2014}').unwrap();
+        let named = source.find(r"\u").unwrap();
+        assert_eq!(at.source_offset(dash + 1), Some(escape));
+        assert_eq!(at.source_offset(dash), Some(named));
     }
 }

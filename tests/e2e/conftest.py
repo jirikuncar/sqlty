@@ -55,7 +55,7 @@ def _create_cli_runner(
         else:
             env[path_env_var] = str(src_dir)
 
-        # Set the env in run_kwargs
+        env.setdefault("PYTHONWARNINGS", "ignore:SQLTY_AST=python is deprecated:FutureWarning")
         run_kwargs["env"] = env
 
         return subprocess.run(

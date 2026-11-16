@@ -669,12 +669,10 @@ fn set_pydantic_names(info: &mut TypeInfo, nodes: &[&ClassNode<'_>], source: &So
                 }
             }
             let mut keywords: Dict<&Expr> = Dict::new();
-            for call in calls {
-                if let Expr::Call(call) = call {
-                    for keyword in &call.arguments.keywords {
-                        if let Some(arg) = &keyword.arg {
-                            keywords.insert(arg.as_str(), &keyword.value);
-                        }
+            for call in calls.iter().filter_map(|call| call.as_call_expr()) {
+                for keyword in &call.arguments.keywords {
+                    if let Some(arg) = &keyword.arg {
+                        keywords.insert(arg.as_str(), &keyword.value);
                     }
                 }
             }
@@ -753,10 +751,7 @@ fn own_openness<'a>(node: &ClassNode<'a>, source: &Source) -> Option<Openness<'a
 fn extra_repr(info: &TypeInfo) -> String {
     match &info.extra_items_type {
         Some(tp) => tp.display(),
-        None => info
-            .extra_items
-            .clone()
-            .unwrap_or_else(|| "None".to_string()),
+        None => info.extra_items.as_deref().unwrap_or("None").to_string(),
     }
 }
 

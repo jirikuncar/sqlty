@@ -31,6 +31,8 @@
 //! assert_eq!(row.as_deref(), Some("tuple[int, str | None]"));
 //! ```
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
+
 pub mod analyzer;
 pub use analyzer::{SqlDialect as Dialect, UnknownDialect};
 pub(crate) mod catalog;

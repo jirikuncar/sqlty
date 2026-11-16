@@ -1,5 +1,5 @@
 //! What sqlparser reads of a query: the `--sql` marker line dropped, psycopg placeholders
-//! as `NULL`, and the syntax it rejects respelled. Every fix is an edit on one token stream
+//! as numbered ones, and the syntax it rejects respelled. Every fix is an edit on one token stream
 //! ([`super::tokens`]), so none lands inside a string literal, a quoted name or a comment.
 
 use std::borrow::Cow;
@@ -14,9 +14,13 @@ use super::tokens::{apply, tokens, Edit, Kind, Token};
 /// A leading `--sql` marker line: MySQL only reads `--` followed by whitespace as a comment.
 static SQL_MARKER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\A\s*--sql[^\n]*\n?").unwrap());
 
+/// What a psycopg placeholder (`%s`) reads as, in PostgreSQL and elsewhere: a parameter
+/// numbered as none is, which can be NULL since a caller may bind `None`.
+pub(super) const PSYCOPG: [&str; 2] = ["$00", "?00"];
+
 /// `sql` as sqlparser should read it: the `--sql` marker line dropped (a leading space
 /// form like `--sql SELECT 1` leaves nothing), psycopg placeholders (`%s`, `%(name)s`,
-/// `%b`, `%t`) as `NULL`, a value of unknown type, and `%%` as `%`, and the syntax sqlparser
+/// `%b`, `%t`) as [`PSYCOPG`] placeholders, values of unknown type, and `%%` as `%`, and the syntax sqlparser
 /// rejects respelled as the closest it reads:
 ///
 /// - ISO's `BINARY LARGE OBJECT` as `BLOB` and `T MULTISET` as the array `T[]`;
@@ -33,7 +37,7 @@ pub(super) fn parser_input(sql: &str, dialect: SqlDialect) -> Input<'_> {
     let tokens = tokens(sql, dialect);
     let mut edits = Vec::new();
     fixes(sql, &tokens, dialect, &mut edits);
-    placeholders(sql, &tokens, &mut edits);
+    placeholders(sql, &tokens, dialect, &mut edits);
     let mut respelling = Vec::new();
     respell(sql, &tokens, dialect, &mut respelling);
     let respelled = (!respelling.is_empty()).then(|| {
@@ -189,17 +193,14 @@ fn iso_type(sql: &str, tokens: &[Token], i: usize, edits: &mut Vec<Edit>) {
     };
     if word(i, "BINARY") && word(i + 1, "LARGE") && word(i + 2, "OBJECT") {
         edits.push((tokens[i].start, tokens[i + 2].end, "BLOB".to_string()));
-    } else if word(i, "MULTISET") && i > 0 && spaced(sql, tokens, i - 1) {
+    } else if word(i, "MULTISET") && i > 0 && spaced(sql, &tokens[i - 1], &tokens[i]) {
         edits.push((tokens[i - 1].end, tokens[i].end, "[]".to_string()));
     }
 }
 
-/// Whether only whitespace, and some, separates token `i` from the next one.
-fn spaced(sql: &str, tokens: &[Token], i: usize) -> bool {
-    let Some(next) = tokens.get(i + 1) else {
-        return false;
-    };
-    let gap = &sql[tokens[i].end..next.start];
+/// Whether only whitespace, and some, separates `before` from `after`.
+fn spaced(sql: &str, before: &Token, after: &Token) -> bool {
+    let gap = &sql[before.end..after.start];
     !gap.is_empty() && gap.bytes().all(|b| b.is_ascii_whitespace())
 }
 
@@ -257,8 +258,9 @@ fn row_lock(sql: &str, tokens: &[Token], i: usize, edits: &mut Vec<Edit>) {
     }
 }
 
-/// psycopg placeholders as `NULL` and `%%` as `%`; in a string literal, only `%%`.
-fn placeholders(sql: &str, tokens: &[Token], edits: &mut Vec<Edit>) {
+/// psycopg placeholders as [`PSYCOPG`] and `%%` as `%`; in a string literal, only `%%`.
+fn placeholders(sql: &str, tokens: &[Token], dialect: SqlDialect, edits: &mut Vec<Edit>) {
+    let placeholder = PSYCOPG[usize::from(dialect != SqlDialect::Postgres)];
     let bytes = sql.as_bytes();
     let mut quoted = tokens
         .iter()
@@ -281,7 +283,7 @@ fn placeholders(sql: &str, tokens: &[Token], edits: &mut Vec<Edit>) {
             };
             match rest.get(name) {
                 Some(b's' | b'b' | b't') if name != 2 => {
-                    edits.push((at, at + name + 2, "NULL".to_string()));
+                    edits.push((at, at + name + 2, placeholder.to_string()));
                     at + name + 2
                 }
                 _ => at + 1,

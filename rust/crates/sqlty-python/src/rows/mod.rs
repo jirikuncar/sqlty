@@ -450,10 +450,10 @@ fn check_structural(
             Some(params) if !params.is_empty() => bind(query.as_deref(), Some(params), dialect),
             _ => query.clone(),
         };
-        let Some(columns) = ctx.columns(query.as_deref()) else {
-            continue;
-        };
-        let Some(info) = ctx.type_defs.get(name).cloned() else {
+        let (Some(columns), Some(info)) = (
+            ctx.columns(query.as_deref()),
+            ctx.type_defs.get(name).cloned(),
+        ) else {
             continue;
         };
         // A field this query can fill with NULL needs `| None`, whatever other queries do.
@@ -544,16 +544,6 @@ fn nullability_diagnostics(
     Vec::new()
 }
 
-/// `repr` of a literal value.
-fn lit_repr(value: &Lit) -> String {
-    match value {
-        Lit::Str(text) => crate::unparse::repr_str(text),
-        Lit::Int(digits) => digits.clone(),
-        Lit::Bool(true) => "True".to_string(),
-        Lit::Bool(false) => "False".to_string(),
-    }
-}
-
 /// `_literal_diagnostics`: `literal-mismatch` and `redundant-literal` for one field and its
 /// column.
 ///
@@ -581,7 +571,7 @@ fn literal_diagnostics(
     let holds =
         |values: &[Lit], value: &Lit| values.iter().any(|v| set_member(v) == set_member(value));
     let message = |tail: &str, values: &[&Lit]| {
-        let values: Vec<String> = values.iter().map(|value| lit_repr(value)).collect();
+        let values: Vec<String> = values.iter().map(|value| value.repr()).collect();
         format!(
             "{label} is {} but {item} '{}' {tail} {}",
             declared.display(),
@@ -594,7 +584,7 @@ fn literal_diagnostics(
         return vec![(Rule::LiteralMismatch, message("can be", &missing))];
     }
     let mut extra: Vec<&Lit> = admitted.iter().filter(|v| !holds(&inferred, v)).collect();
-    extra.sort_by_key(|value| lit_repr(value));
+    extra.sort_by_key(|value| value.repr());
     if missing.is_empty() && !extra.is_empty() && rules.is_enabled(Rule::RedundantLiteral) {
         return vec![(Rule::RedundantLiteral, message("is never", &extra))];
     }
@@ -814,18 +804,16 @@ impl Structural<'_> {
         }));
         for (key, _) in fields {
             let names = info.column_names(key);
-            if info.required.contains(key)
+            let missing = info.required.contains(key)
                 && !info.opaque.contains(key)
                 && !names
                     .iter()
-                    .any(|name| columns.iter().any(|c| c.name == *name))
-            {
-                if let Some(first) = names.first() {
-                    found.push((
-                        Rule::TypeddictKeyMismatch,
-                        format!("{type_name}.{first} is required but missing from {source}"),
-                    ));
-                }
+                    .any(|name| columns.iter().any(|c| c.name == *name));
+            if let (true, Some(first)) = (missing, names.first()) {
+                found.push((
+                    Rule::TypeddictKeyMismatch,
+                    format!("{type_name}.{first} is required but missing from {source}"),
+                ));
             }
         }
         found
@@ -883,15 +871,15 @@ impl Structural<'_> {
             &info.aliases,
             self.rules,
         ));
-        if let (None, Some(sql_type), Some(nested)) = (
-            &column.python_type,
-            column.sql_type.as_deref().filter(|tp| !tp.is_empty()),
-            row_type_of(annotation, self.defs),
-        ) {
-            if let Some(fields) = (self.composite)(sql_type) {
-                let composite = format!("composite {}", sql_type.to_lowercase());
-                found.extend(self.diagnostics(&label, nested, &fields, &composite));
-            }
+        let nested = column
+            .sql_type
+            .as_deref()
+            .filter(|tp| column.python_type.is_none() && !tp.is_empty())
+            .zip(row_type_of(annotation, self.defs))
+            .and_then(|(sql_type, nested)| Some((sql_type, nested, (self.composite)(sql_type)?)));
+        if let Some((sql_type, nested, fields)) = nested {
+            let composite = format!("composite {}", sql_type.to_lowercase());
+            found.extend(self.diagnostics(&label, nested, &fields, &composite));
         }
         found
     }

@@ -4,7 +4,7 @@ use std::sync::{Arc, LazyLock};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use lsp_server::{Connection, Message, Notification, Request, RequestId};
+use lsp_server::{Connection, Message, Notification, Request, RequestId, Response};
 use serde_json::{json, Value};
 
 use sqlty_sql::analyzer::{load_schema_with_skipped, Schema};
@@ -24,9 +24,12 @@ static SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
 
 /// Lets a check of a buffer holding `slow` finish.
 static RELEASE: AtomicBool = AtomicBool::new(false);
+/// Lets a check of a buffer holding `hold` finish.
+static HOLD: AtomicBool = AtomicBool::new(false);
 
-/// Reports each `bad`; its fix writes `good` and imports it. With a baseline, `old.py`
-/// of its root has a breaking change. Completes with [`SCHEMA`] and the table `gen{N}`
+/// Reports each `bad`; its fix writes `good` and imports it, but fails on `nofix`. With a
+/// baseline, `old.py` of its root has a breaking change, and `gone.py`, which does not
+/// exist; the baseline `broken` fails and `once` has none after the first load. Completes with [`SCHEMA`] and the table `gen{N}`
 /// of its `N`th load; the strings `run(` is called with are helper queries.
 struct Fake {
     root: PathBuf,
@@ -43,13 +46,24 @@ impl Workspace for Fake {
         while text.contains("slow") && !RELEASE.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(5));
         }
+        while text.contains("hold") && !HOLD.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        if text.contains("hang") {
+            std::thread::sleep(3 * crate::EXIT_GRACE);
+        }
+        let severity = if text.contains("warned") {
+            Severity::Warning
+        } else {
+            Severity::Error
+        };
         self.checked = text.to_string();
         Ok(text
             .match_indices("bad")
             .map(|(at, _)| Diagnostic {
                 rule: "stale-type".to_string(),
                 message: "bad should be good".to_string(),
-                severity: Severity::Error,
+                severity,
                 start: at,
                 end: at + 3,
                 fix: vec![
@@ -70,6 +84,9 @@ impl Workspace for Fake {
     }
 
     fn fix(&mut self, _: &Path, text: &str) -> Result<String, String> {
+        if text.contains("nofix") {
+            return Err("cannot fix".to_string());
+        }
         Ok(text.replace("bad", "good"))
     }
 
@@ -89,6 +106,11 @@ impl Workspace for Fake {
         let Some(against) = &self.settings.against else {
             return Ok(Vec::new());
         };
+        match against.as_str() {
+            "broken" => return Err("no such ref".to_string()),
+            "once" if self.generation > 1 => return Ok(Vec::new()),
+            _ => {}
+        }
         let finding = Diagnostic {
             rule: "unknown-column".to_string(),
             message: format!("bio is gone (in the code of {against})"),
@@ -98,7 +120,10 @@ impl Workspace for Fake {
             fix: Vec::new(),
             source: Some("sqlty breaking (backward)".to_string()),
         };
-        Ok(vec![(self.root.join("old.py"), vec![finding])])
+        Ok(vec![
+            (self.root.join("gone.py"), vec![finding.clone()]),
+            (self.root.join("old.py"), vec![finding]),
+        ])
     }
 
     fn completion(&mut self, _: &Path) -> Option<CompletionContext> {
@@ -111,7 +136,10 @@ impl Workspace for Fake {
         Some(CompletionContext {
             schema: Some(schema),
             dialect: "postgres".to_string(),
-            import_style: None,
+            import_style: self
+                .checked
+                .contains("bogus-style")
+                .then(|| "bogus".to_string()),
             helper_starts: self
                 .checked
                 .match_indices("run(")
@@ -421,6 +449,21 @@ fn a_project_that_fails_to_load_is_reported_once() {
     let rest = client.shutdown();
     assert!(
         !rest.iter().any(|method| method == "window/showMessage"),
+        "{rest:?}"
+    );
+}
+
+#[test]
+fn a_running_check_does_not_hold_up_exit() {
+    let client = Client::start(&json!({}));
+    client.open("file:///work/q.py", "hang bad\n");
+    let stopping = std::time::Instant::now();
+    let rest = client.shutdown();
+    assert!(stopping.elapsed() < 2 * crate::EXIT_GRACE);
+    assert!(
+        !rest
+            .iter()
+            .any(|method| method == "textDocument/publishDiagnostics"),
         "{rest:?}"
     );
 }
@@ -934,4 +977,236 @@ fn highlighting_can_be_turned_off() {
     client.open("file:///work/q.py", "q = \"--sql\\nSELECT 1\"\n");
     assert_eq!(client.tokens("file:///work/q.py"), Value::Null);
     client.shutdown();
+}
+
+#[test]
+fn malformed_and_unknown_messages_change_nothing() {
+    let mut client = Client::start(&json!({}));
+    let doc = |uri: &str| json!({"uri": uri, "version": 2});
+    for (method, params) in [
+        ("textDocument/didOpen", json!({})),
+        ("textDocument/didChange", json!({})),
+        (
+            "textDocument/didChange",
+            json!({"textDocument": doc("file:///work/q.py"), "contentChanges": []}),
+        ),
+        (
+            "textDocument/didChange",
+            json!({"textDocument": doc("file:///work/q.py"), "contentChanges": [{"text": "bad"}]}),
+        ),
+        ("textDocument/didClose", json!({})),
+        (
+            "textDocument/didClose",
+            json!({"textDocument": {"uri": "file:///work/q.py"}}),
+        ),
+        ("textDocument/didSave", json!({})),
+        (
+            "textDocument/didSave",
+            json!({"textDocument": {"uri": "file:///work/q.py"}}),
+        ),
+        ("workspace/didChangeWatchedFiles", json!({})),
+        (
+            "workspace/didChangeWatchedFiles",
+            json!({"changes": [{"uri": "file:///work/q.py", "type": 2}]}),
+        ),
+    ] {
+        client.notify(method, params);
+    }
+    let answered = Response::new_ok(RequestId::from(99), Value::Null);
+    client.connection.sender.send(answered.into()).unwrap();
+    for method in [
+        "textDocument/completion",
+        "textDocument/hover",
+        "textDocument/semanticTokens/full",
+        "completionItem/resolve",
+        "textDocument/codeAction",
+    ] {
+        assert_eq!(
+            client.request(method, json!({})),
+            json!({"error": -32602}),
+            "{method}"
+        );
+    }
+    client.open("file:///work/q.py", "bad\n");
+    let published = client.notification("textDocument/publishDiagnostics");
+    assert_eq!(published["diagnostics"].as_array().unwrap().len(), 1);
+    client.shutdown();
+}
+
+#[test]
+fn a_workspace_has_no_breaking_changes_or_completion_unless_it_says() {
+    struct Plain;
+    impl Workspace for Plain {
+        fn check(&mut self, _: &Path, _: &str) -> Result<Vec<Diagnostic>, String> {
+            Ok(Vec::new())
+        }
+        fn fix(&mut self, _: &Path, text: &str) -> Result<String, String> {
+            Ok(text.to_string())
+        }
+        fn format(&mut self, _: &Path, text: &str) -> Result<String, String> {
+            Ok(text.to_string())
+        }
+        fn rewrite(&mut self, _: &Path, text: &str) -> Result<String, String> {
+            Ok(text.to_string())
+        }
+        fn strip(&mut self, _: &Path, text: &str) -> Result<String, String> {
+            Ok(text.to_string())
+        }
+    }
+    assert_eq!(Plain.breaking(), Ok(Vec::new()));
+    assert!(Plain.completion(Path::new("q.py")).is_none());
+}
+
+impl Client {
+    fn actions(&mut self, uri: &str, only: &Value) -> Value {
+        let range =
+            json!({"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}});
+        self.request(
+            "textDocument/codeAction",
+            json!({"textDocument": {"uri": uri}, "range": range, "context": {"diagnostics": [], "only": only}}),
+        )
+    }
+
+    fn logged(&mut self) -> String {
+        self.notification("window/logMessage")["message"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+}
+
+#[test]
+fn no_code_actions_without_current_diagnostics_or_a_fix() {
+    let mut client = Client::start(&json!({}));
+    let fix_all = json!(["source.fixAll"]);
+    assert_eq!(client.actions("file:///work/none.py", &fix_all), json!([]));
+    assert_eq!(
+        client.actions("file:///work/none.py", &json!(null)),
+        json!([])
+    );
+    client.open("file:///work/c.py", "crash\n");
+    assert!(client.logged().contains("crash"));
+    assert_eq!(client.actions("file:///work/c.py", &json!(null)), json!([]));
+    client.open("file:///work/v.py", "bad\n");
+    client.notification("textDocument/publishDiagnostics");
+    client.change("file:///work/v.py", 2, "crash\n");
+    assert!(client.logged().contains("crash"));
+    assert_eq!(client.actions("file:///work/v.py", &json!(null)), json!([]));
+    client.open("file:///work/f.py", "bad nofix\n");
+    client.notification("textDocument/publishDiagnostics");
+    assert_eq!(client.actions("file:///work/f.py", &fix_all), json!([]));
+    assert!(client.logged().ends_with("f.py: cannot fix"));
+    client.shutdown();
+}
+
+#[test]
+fn a_file_outside_the_folders_is_checked_in_its_own_and_one_without_a_path_not_at_all() {
+    let mut client = Client::start(&json!({}));
+    client.open("untitled:Untitled-1", "bad\n");
+    client.open("file:///elsewhere/q.py", "bad\n");
+    let published = client.notification("textDocument/publishDiagnostics");
+    assert_eq!(published["uri"], "file:///elsewhere/q.py");
+    assert_eq!(client.hover("file:///elsewhere/q.py", 0, 99), Value::Null);
+    client.shutdown();
+}
+
+#[test]
+fn highlighting_skips_blank_lines_and_marks_parameters() {
+    let mut client = Client::start(&json!({}));
+    client.open(
+        "file:///work/q.py",
+        "q = \"\"\"--sql\n/* a\n\n b */ SELECT 1 + %s\n\"\"\"\n",
+    );
+    client.notification("textDocument/publishDiagnostics");
+    let types: Vec<u64> = decoded(&client.tokens("file:///work/q.py"))
+        .into_iter()
+        .map(|token| token.3)
+        .collect();
+    assert!(
+        types.contains(&3) && types.contains(&4) && types.contains(&5),
+        "{types:?}"
+    );
+    client.open(
+        "file:///work/s.py",
+        "# bogus-style\nq = \"--sql\\nSELECT 1\"\n",
+    );
+    client.notification("textDocument/publishDiagnostics");
+    assert_eq!(client.tokens("file:///work/s.py"), json!({"data": []}));
+    client.shutdown();
+}
+
+#[test]
+fn a_baseline_that_fails_is_logged() {
+    let mut client = Client::with(
+        &json!({}),
+        &json!([{"uri": "file:///work", "name": "work"}]),
+        &json!({"breaking": {"against": "broken"}}),
+    );
+    client.open("file:///work/q.py", "ok\n");
+    assert_eq!(client.logged(), "sqlty: checking the baseline: no such ref");
+    client.shutdown();
+}
+
+#[test]
+fn breaking_changes_gone_after_a_reload_are_cleared_unless_open() {
+    let root = std::env::temp_dir().join(format!("sqlty-lsp-once-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("old.py"), "q = bio\n").unwrap();
+    let folder = crate::uri::from_path(&root).unwrap();
+    let old = crate::uri::from_path(&root.join("old.py")).unwrap();
+    let mut client = Client::with(
+        &json!({}),
+        &json!([{"uri": folder, "name": "work"}]),
+        &json!({"breaking": {"against": "once"}}),
+    );
+    let new = crate::uri::from_path(&root.join("new.py")).unwrap();
+    client.open(new.as_str(), "ok\n");
+    let published = client.notification("textDocument/publishDiagnostics");
+    assert_eq!(published["uri"], old.as_str());
+    client.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({"changes": [{"uri": crate::uri::from_path(&root.join("schema.sql")).unwrap(), "type": 2}]}),
+    );
+    let cleared = loop {
+        let published = client.notification("textDocument/publishDiagnostics");
+        if published["uri"] == old.as_str() {
+            break published;
+        }
+    };
+    assert_eq!(cleared["diagnostics"], json!([]));
+    client.shutdown();
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn a_check_of_an_older_version_is_dropped() {
+    let mut client = Client::start(&json!({}));
+    client.open("file:///work/q.py", "bad hold\n");
+    std::thread::sleep(Duration::from_millis(50));
+    client.change("file:///work/q.py", 2, "bad warned\n");
+    HOLD.store(true, Ordering::SeqCst);
+    let published = client.notification("textDocument/publishDiagnostics");
+    assert_eq!(published["version"], 2);
+    assert_eq!(published["diagnostics"][0]["severity"], 2);
+    client.shutdown();
+}
+
+#[test]
+fn an_open_file_keeps_its_own_breaking_changes() {
+    let root = std::env::temp_dir().join(format!("sqlty-lsp-open-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("old.py"), "q = bio\n").unwrap();
+    let folder = crate::uri::from_path(&root).unwrap();
+    let old = crate::uri::from_path(&root.join("old.py")).unwrap();
+    let mut client = Client::with(
+        &json!({}),
+        &json!([{"uri": folder, "name": "work"}]),
+        &json!({"breaking": {"against": "main"}}),
+    );
+    client.open(old.as_str(), "ok\n");
+    let published = client.notification("textDocument/publishDiagnostics");
+    assert_eq!(published["uri"], old.as_str());
+    assert_eq!(published["version"], 1);
+    client.shutdown();
+    std::fs::remove_dir_all(&root).unwrap();
 }

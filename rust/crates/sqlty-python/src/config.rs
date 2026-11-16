@@ -261,10 +261,7 @@ pub fn validate(mut table: Table, source: &str) -> Result<Config, InvalidConfig>
         else {
             return fail("[tool.sqlty] overrides must be an array of tables".into());
         };
-        for value in overrides {
-            let Some(entry) = value.as_table_mut() else {
-                unreachable!("checked above")
-            };
+        for entry in overrides.iter_mut().filter_map(Value::as_table_mut) {
             if let Some(key) = entry
                 .keys()
                 .find(|key| !OVERRIDE_KEYS.contains(&key.as_str()))
@@ -313,9 +310,7 @@ pub fn validate(mut table: Table, source: &str) -> Result<Config, InvalidConfig>
                     "{place}: a database name is letters, digits, '-' and '_', and not 'default'"
                 ));
             }
-            let Some(entry) = database.as_table_mut() else {
-                unreachable!("checked above")
-            };
+            let entry = database.as_table_mut().expect("checked above");
             if let Some(key) = entry
                 .keys()
                 .find(|key| !DATABASE_KEYS.contains(&key.as_str()))
@@ -389,6 +384,19 @@ pub fn validate(mut table: Table, source: &str) -> Result<Config, InvalidConfig>
              such as DATE = \"datetime.date\""
                 .into(),
         );
+    }
+    if let Some((key, python)) = table
+        .get("types")
+        .and_then(Value::as_table)
+        .into_iter()
+        .flatten()
+        .filter_map(|(key, python)| Some((key, python.as_str()?)))
+        .find(|(_, python)| crate::parse::expression(python).is_none())
+    {
+        return fail(format!(
+            "[tool.sqlty.types] {key} = {} is not a Python type expression",
+            crate::unparse::repr_str(python)
+        ));
     }
     if table
         .get("format-command")
@@ -508,6 +516,7 @@ fn matched(a: &[char], b: &[char]) -> usize {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 
@@ -552,6 +561,10 @@ mod tests {
         assert!(invalid("driver = \"asyncpg\"").contains("must be \"psycopg\""));
         assert!(invalid("types = { DATE = 1 }").contains("types must be a table"));
         assert!(invalid("databases = 1").contains("databases must be a table of tables"));
+        assert_eq!(
+            invalid("types = { DATE = \"list[\" }"),
+            "sqlty.toml: [tool.sqlty.types] DATE = 'list[' is not a Python type expression"
+        );
         assert!(invalid("[databases.default]").contains("not 'default'"));
         assert!(invalid("[databases.'a b']").contains("letters, digits"));
         assert_eq!(
@@ -643,5 +656,18 @@ mod tests {
                 .to_string(),
             "Cargo.toml: no [package.metadata.sqlty] or [workspace.metadata.sqlty] table"
         );
+    }
+
+    #[test]
+    fn rarer_configs() {
+        assert!(invalid("query-format = 1").contains("query-format must be a string"));
+        assert!(driver_types("psycopg", "mysql").is_empty());
+        let loaded = load(
+            b"[tool]\nsqlty = 1\n",
+            "pyproject.toml",
+            "pyproject.toml",
+            false,
+        );
+        assert!(matches!(loaded, Ok(None)));
     }
 }

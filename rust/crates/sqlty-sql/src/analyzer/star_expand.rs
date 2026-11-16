@@ -131,25 +131,6 @@ fn unquoted_reference(factor: &TableFactor) -> Option<String> {
     ident.quote_style.is_none().then(|| ident.value.clone())
 }
 
-/// The stars that shape a statement's result, each named by its clause: `SELECT *`,
-/// `SELECT u.*`, `RETURNING *`, and `WITH c AS (SELECT *)` for a CTE. `None` if the
-/// statement does not parse. A star that doesn't shape the result, such as
-/// `EXISTS (SELECT * ...)` or `count(*)`, is not listed.
-///
-/// Example:
-/// ```
-/// use sqlty_sql::analyzer::result_stars;
-///
-/// let stars = result_stars("SELECT u.*, o.id FROM users u JOIN orgs o ON o.id = u.org", "postgres");
-/// assert_eq!(stars, Some(vec!["SELECT u.*".to_string()]));
-/// let stars = result_stars("WITH c AS (SELECT * FROM t) DELETE FROM t RETURNING *", "postgres");
-/// assert_eq!(stars, Some(vec!["WITH c AS (SELECT *)".to_string(), "RETURNING *".to_string()]));
-/// assert_eq!(result_stars("SELECT 1 WHERE EXISTS (SELECT * FROM t)", "postgres"), Some(vec![]));
-/// ```
-pub fn result_stars(sql: &str, dialect: &str) -> Option<Vec<String>> {
-    super::api::parse(sql, dialect).result_stars()
-}
-
 /// `clause` followed by the stars among `items` (`SELECT u.*, o.*`), if there are any.
 fn wildcards(items: &[SelectItem], clause: &str) -> Option<String> {
     let found: Vec<String> = items
@@ -252,4 +233,25 @@ pub(super) fn split_top_level(text: &str) -> Vec<&str> {
     }
     items.push(text[start..].trim());
     items
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlparser::dialect::PostgreSqlDialect;
+    use sqlparser::parser::Parser;
+
+    use super::*;
+
+    #[test]
+    fn only_a_table_has_an_unquoted_reference() {
+        let reference = |sql: &str| {
+            let factor = Parser::new(&PostgreSqlDialect {})
+                .try_with_sql(sql)
+                .and_then(|mut parser| parser.parse_table_factor())
+                .unwrap();
+            unquoted_reference(&factor)
+        };
+        assert_eq!(reference("public.t").as_deref(), Some("t"));
+        assert_eq!(reference("(SELECT 1) s"), None);
+    }
 }

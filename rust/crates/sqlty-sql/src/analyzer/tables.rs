@@ -166,6 +166,7 @@ impl Visitor for Tables {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::query_tables;
 

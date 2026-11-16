@@ -45,6 +45,7 @@ def variants(test: str, between: str, header: str = "def f(n, o, xs, t):") -> li
         ("o.on", "x = o.toggle()"),
         ("(lambda: (n := 1))", "pass"),
         ("n", "[x for x in xs if (lambda: (n := 1))]"),
+        ("n", "' '.join(xs)"),
     ],
 )
 def test_condition_holds(test, between):

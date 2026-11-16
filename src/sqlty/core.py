@@ -14,12 +14,13 @@ import ast
 import sys
 from collections import Counter
 from collections.abc import Collection, Mapping
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
-from sqlty._check import RowUsage, apply_suppressions, is_any_row
+from sqlty._check import RowUsage, is_any_row
 from sqlty._check import diagnostics as check_diagnostics
+from sqlty._core import QueryAt as _QueryAt
 from sqlty._core import (
-    QueryAt,
     Schema,
     checks_names,
     expand_star,
@@ -33,6 +34,7 @@ from sqlty._core import analyze_params as _analyze_params
 from sqlty._core import analyze_select as _analyze_select
 from sqlty._core import complete_source as _complete_source
 from sqlty._core import explain_select as _explain_select
+from sqlty._core import fix_module as _fix_module
 from sqlty._core import fix_source as _fix_source
 from sqlty._core import format_source as _format_source
 from sqlty._core import highlight_source as _highlight_source
@@ -43,6 +45,7 @@ from sqlty._core import parse_error as _parse_error
 from sqlty._core import query_at as _query_at
 from sqlty._core import query_diagnostics as _query_diagnostics
 from sqlty._core import query_sites as _query_sites
+from sqlty._core import query_source_offset as _query_source_offset
 from sqlty._core import query_tables as _query_tables
 from sqlty._core import rewrite_source as _rewrite_source
 from sqlty._core import schema_skipped_objects as _schema_skipped_objects
@@ -174,6 +177,8 @@ def explain_select(
         'common.arithmetic.numbers'
         >>> explain_select("SELECT 1::INTEGER AS one")
         [ColumnRules(name='one', type_rule=None, nullability_rule=None)]
+        >>> explain_select("SELEC 1") is None
+        True
     """
     columns = _explain_select(sql, dialect=dialect, schema_sql=schema_sql)
     if columns is None:
@@ -263,7 +268,8 @@ def query_diagnostics(
     The rules are ``unknown-table``, ``unknown-column``, ``ambiguous-column``, ``duplicate-alias``,
     ``unknown-function``, ``unknown-type``, ``unsupported-syntax``,
     ``insert-missing-column``, ``insert-value-count``, ``ungrouped-column``,
-    ``fanout-aggregate``, ``chasm-join``, ``unproven-join`` and ``entity-mismatch``. Tables and
+    ``fanout-aggregate``, ``chasm-join``, ``unproven-join``, ``entity-mismatch`` and
+    ``rejected-query``. Tables and
     columns are only judged when ``schema_sql`` defines some tables. ``rules`` sets severities
     as ``[tool.sqlty.rules]`` does, and a rule set to ``"ignore"`` (by default
     ``unproven-join`` and ``entity-mismatch``) is left out, as in ``check_source``.
@@ -457,25 +463,7 @@ def fix_source(
         ValueError: unsupported ``import_style``, or ``rules`` names an unknown rule or severity
     """
     parsed = ParsedSource.of(source, module)
-    suppressed: dict[int, list[str] | None] = {
-        line: None if ignore.rules is None else list(ignore.rules)
-        for line, ignore in parsed.ignores.items()
-    }
-    for typed, _, _, _ in _helper_sites(parsed, helpers, module):
-        for line in range(typed[0], typed[1] + 1) if typed else ():
-            if line not in suppressed:
-                suppressed[line] = ["stale-rewrite"]
-            elif (named := suppressed[line]) is not None:
-                named.append("stale-rewrite")
-    fixed = _fix_source(
-        parsed.text,
-        dialect=dialect,
-        schema_sql=schema_sql,
-        import_style=import_style,
-        untyped=untyped,
-        rules=rules,
-        suppressed=suppressed or None,
-    )
+    fixed = _fixed(parsed, dialect, schema_sql, import_style, untyped, rules, helpers, module)
     if json_types == "typing.TypedDict" and fixed != parsed.text:
         fixed = _json_types(fixed, dialect, schema_sql, import_style)
     if param_types:
@@ -487,6 +475,56 @@ def fix_source(
             closed=closed_params,
         )
     return fixed
+
+
+def _fixed(
+    parsed: ParsedSource,
+    dialect: str,
+    schema_sql: str | Schema | None,
+    import_style: str | None,
+    untyped: bool,
+    rules: dict[str, str] | None,
+    helpers: HelperIndex | None,
+    module: str | None,
+) -> str:
+    """``fix_source`` before the JSON and parameter types."""
+    if AST != "python":
+        rust = _fix_module(
+            parsed.text,
+            version=sys.version_info[:2],
+            dialect=dialect,
+            schema_sql=schema_sql,
+            import_style=import_style,
+            untyped=untyped,
+            rules=rules,
+            index=None if helpers is None else helpers.rust(),
+            name=parsed.module,
+            module=module,
+        )
+        if AST == "rust":
+            return rust
+    suppressed: dict[int, list[str] | None] = {
+        line: None if ignore.rules is None else list(ignore.rules)
+        for line, ignore in parsed.ignores.items()
+    }
+    for typed, _, _, _ in _helper_sites(parsed, helpers, module):
+        for line in range(typed[0], typed[1] + 1) if typed else ():
+            if line not in suppressed:
+                suppressed[line] = ["stale-rewrite"]
+            elif (named := suppressed[line]) is not None:
+                named.append("stale-rewrite")
+    python = _fix_source(
+        parsed.text,
+        dialect=dialect,
+        schema_sql=schema_sql,
+        import_style=import_style,
+        untyped=untyped,
+        rules=rules,
+        suppressed=suppressed or None,
+    )
+    if AST == "compare" and parsed.facts is not None and rust != python:
+        raise AstMismatch("fix_source", rust, python, parsed.text)
+    return python
 
 
 def check_source(
@@ -580,8 +618,8 @@ def check_source(
         row_usage=row_usage or (usage := RowUsage()),
         variants=query_variants,
         coerce=frozenset(coerce_row_types),
+        suppress=True,
     )
-    diagnostics = apply_suppressions(parsed.ignores, diagnostics, rules)
     return diagnostics if row_usage else usage.filter(diagnostics)
 
 
@@ -685,6 +723,27 @@ def query_statistics(
     return counts
 
 
+@dataclass(frozen=True)
+class QueryAt:
+    """The query under a cursor, found by ``query_at``.
+
+    ``text`` is the query as the analyzer reads it, ``offset`` the cursor in it, ``route``
+    how ``check`` recognised it (``marker``, ``wrapper`` or ``helper``), and ``span`` the
+    byte offsets of its string literals in the source, prefixes and quotes included.
+    """
+
+    text: str
+    offset: int
+    route: str
+    span: tuple[int, int]
+    _at: _QueryAt = field(repr=False, compare=False)
+
+    def source_offset(self, offset: int) -> int | None:
+        """Where byte ``offset`` of ``text`` is written in the source; ``None`` past its end
+        or in the marker."""
+        return _query_source_offset(self._at, offset)
+
+
 def query_at(
     source: str | ParsedSource,
     offset: int,
@@ -717,7 +776,8 @@ def query_at(
     """
     parsed = ParsedSource.of(source, module)
     starts = _helper_starts(parsed, helpers, module)
-    return _query_at(parsed.text, offset, import_style=import_style, helper_starts=starts)
+    at = _query_at(parsed.text, offset, import_style=import_style, helper_starts=starts)
+    return at and QueryAt(at.text, at.offset, at.route, at.span, at)
 
 
 class Completion(NamedTuple):

@@ -136,8 +136,51 @@ pub(crate) fn moved(starts: &[usize], old: &str, new: &str) -> Vec<usize> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::moved;
+    use lsp_types::{CompletionItem, CompletionItemKind, Range};
+    use sqlty_sql::analyzer::{Candidate, CandidateKind};
+
+    use super::{item, moved, resolve};
+
+    #[test]
+    fn each_kind_of_candidate_has_its_icon_and_detail() {
+        let found: Vec<_> = [
+            (CandidateKind::View, Some("public")),
+            (CandidateKind::Cte, None),
+            (CandidateKind::Join, Some("public")),
+        ]
+        .into_iter()
+        .map(|(kind, detail)| {
+            let candidate = Candidate {
+                label: "x".to_string(),
+                kind,
+                detail: detail.map(str::to_string),
+                sql_type: None,
+                nullable: None,
+            };
+            let item = item(candidate, 0, Range::default());
+            (item.kind, item.data.unwrap()["detail"].clone())
+        })
+        .collect();
+        assert_eq!(
+            found,
+            [
+                (Some(CompletionItemKind::STRUCT), "view in public".into()),
+                (Some(CompletionItemKind::MODULE), "CTE of the query".into()),
+                (
+                    Some(CompletionItemKind::STRUCT),
+                    "join on a foreign key in public".into()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_item_without_data_resolves_to_itself() {
+        let item = CompletionItem::new_simple("x".to_string(), "y".to_string());
+        assert_eq!(resolve(item.clone()), item);
+    }
 
     #[test]
     fn helper_strings_follow_an_edit() {

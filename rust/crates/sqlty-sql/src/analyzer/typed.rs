@@ -141,3 +141,18 @@ impl From<(Option<String>, Option<String>)> for Typed {
         Typed::new(python, sql)
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_mapping_starts_over_past_its_size() {
+        for n in 0..=4096 {
+            Typed::of_sql(&format!("VARCHAR({n})"), SqlDialect::Postgres);
+        }
+        let typed = Typed::of_sql("VARCHAR(1)", SqlDialect::Postgres);
+        assert_eq!(typed.python(), Some("str"));
+    }
+}

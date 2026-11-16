@@ -1,7 +1,7 @@
 """Type stubs for the Rust extension module (sqlty._core)."""
 
 import ast
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal, final
 
@@ -106,6 +106,19 @@ def fix_source(
     rules: dict[str, str] | None = None,
     suppressed: dict[int, list[str] | None] | None = None,
 ) -> str: ...
+def fix_module(
+    source: str,
+    *,
+    version: tuple[int, int],
+    dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
+    import_style: str | None = None,
+    untyped: bool = False,
+    rules: dict[str, str] | None = None,
+    index: ModuleIndex | None = None,
+    name: str | None = None,
+    module: str | None = None,
+) -> str: ...
 def expand_star(
     sql: str,
     *,
@@ -164,7 +177,7 @@ def template_strings(
 ) -> list[tuple[int, tuple[int, int], str | None, list[str | None]]] | None: ...
 def module_outline(source: str) -> tuple[ast.Module, list[ast.ClassDef]] | None: ...
 def helper_sites(
-    source: str, names: list[str]
+    source: str, names: list[str], index: ModuleIndex | None = None, module: str | None = None
 ) -> (
     list[
         tuple[
@@ -208,6 +221,13 @@ def row_diagnostics(
     ]
     | None
 ): ...
+def breaking_modules(
+    modules: Sequence[tuple[str, str | None, int, int]],
+    configs: Sequence[tuple[Any, ...]],
+    *,
+    version: tuple[int, int],
+    jobs: int | None = None,
+) -> list[list[Diagnostic]]: ...
 def check_modules(
     modules: Sequence[tuple[str, str | None, int]],
     configs: Sequence[
@@ -227,12 +247,9 @@ def check_modules(
     jobs: int | None = None,
 ) -> list[
     tuple[
-        tuple[
-            list[Diagnostic],
-            list[tuple[str | None, str, str] | None],
-            list[tuple[str | None, str, str]],
-        ],
-        bool,
+        list[Diagnostic],
+        list[tuple[str | None, str, str] | None],
+        list[tuple[str | None, str, str]],
     ]
 ]: ...
 def module_diagnostics(
@@ -249,6 +266,7 @@ def module_diagnostics(
     index: ModuleIndex | None = None,
     name: str | None = None,
     variants: int | None = None,
+    suppress: bool = False,
 ) -> tuple[
     list[Diagnostic],
     list[tuple[str | None, str, str] | None],
@@ -269,12 +287,12 @@ type _Helper = tuple[
 ]
 
 @final
-class ModuleIndex:
-    def extended(
-        self, steps: list[tuple[str, str, str, str | None, list[Path], str | None]]
-    ) -> ModuleIndex: ...
-    def helpers(self) -> dict[str, dict[str, _Helper]]: ...
+class ModuleIndex: ...
 
+def index_extended(
+    index: ModuleIndex, steps: list[tuple[str, str, str, str | None, list[Path], str | None]]
+) -> ModuleIndex: ...
+def index_helpers(index: ModuleIndex) -> dict[str, dict[str, _Helper]]: ...
 def module_index(
     version: tuple[int, int],
     steps: list[tuple[str, str, str, str | None, list[Path], str | None]],
@@ -302,7 +320,7 @@ def add_json_types(
 ) -> str: ...
 def module_ignores(
     source: str, version: tuple[int, int]
-) -> list[tuple[int, list[str] | None, int, int]] | None: ...
+) -> list[tuple[int, list[str] | None, int, int]]: ...
 def rendered_compositions(
     source: str, version: tuple[int, int]
 ) -> list[tuple[int, bool, str | None]] | None: ...
@@ -323,8 +341,8 @@ class QueryAt:
     def route(self) -> str: ...
     @property
     def span(self) -> tuple[int, int]: ...
-    def source_offset(self, offset: int) -> int | None: ...
 
+def query_source_offset(at: QueryAt, offset: int) -> int | None: ...
 def query_at(
     source: str, offset: int, *, import_style: str | None = None, helper_starts: list[int] = ...
 ) -> QueryAt | None: ...
@@ -370,8 +388,33 @@ TOOL_KEYS: tuple[str, ...]
 DISCOVERY_KEYS: tuple[str, ...]
 FUNCTION_KEYS: tuple[str, ...]
 
-def load_config(
-    data: bytes, file_name: str, source: str, *, required: bool
-) -> tuple[dict[str, Any], list[str]] | None: ...
 def validate_config(table: dict[str, Any], source: str) -> tuple[dict[str, Any], list[str]]: ...
 def driver_types(driver: str, dialect: str) -> list[tuple[str, str]]: ...
+def find_config(directory: Path) -> tuple[dict[str, Any], list[str], Path] | None: ...
+def config_file(path: Path, base: Path) -> tuple[dict[str, Any], list[str]]: ...
+def schema_files(entries: list[str], base: str) -> tuple[list[Path], list[str]]: ...
+
+DEFAULT_EXCLUDE: list[str]
+
+class Discovery:
+    def __init__(
+        self,
+        cwd: str,
+        *,
+        isolated: bool,
+        fixed: Mapping[str, object] | None,
+        exclude: list[str] | None,
+        extend_exclude: list[str],
+        respect_gitignore: bool | None,
+    ) -> None: ...
+    def exclusions(self, directory: str) -> list[tuple[Path, list[str]]]: ...
+    def is_excluded(self, path: str) -> bool: ...
+    def route(
+        self, table: Mapping[str, object], base: str, path: str
+    ) -> tuple[str | None, dict[str, str]]: ...
+    def walk(self, root: str) -> list[Path]: ...
+
+def names_query_file(path: str, base: str, queries: list[str]) -> bool: ...
+def module_names(path: Path, roots: list[Path], cwd: Path) -> list[str]: ...
+def checked_roots(paths: list[Path], files: list[Path], cwd: Path) -> list[Path]: ...
+def helper_roots(config_dir: Path | None, checked: list[Path], extra: list[Path]) -> list[Path]: ...

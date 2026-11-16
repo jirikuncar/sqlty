@@ -4,8 +4,7 @@ use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 
 use sqlparser::ast::{
-    ColumnOption, ColumnOptionDef, CreateTable, CreateView, Statement,
-    UserDefinedTypeRepresentation,
+    ColumnOption, ColumnOptionDef, CreateTable, Statement, UserDefinedTypeRepresentation,
 };
 use sqlparser::parser::Parser;
 
@@ -115,38 +114,35 @@ pub(super) fn read_statements(
                     parse_ddl(&reduced.first()?.without_constraints()?, dialect)
                 }),
             };
-            match parsed.and_then(|stmts| stmts.into_iter().next()) {
-                Some(Statement::CreateTable(create))
-                    if create.columns.is_empty()
-                        && create.like.is_none()
-                        && create.query.is_some() =>
-                {
-                    let view = create.query.as_ref().and_then(|query| {
-                        let sql = format!("CREATE VIEW {} AS {query}", create.name);
-                        match parse_ddl(&sql, dialect)?.into_iter().next()? {
-                            Statement::CreateView(view) => Some(view),
-                            _ => None,
-                        }
-                    });
-                    match view {
-                        Some(view) => push(OpKind::View(
-                            Box::new(CreateView {
-                                if_not_exists: create.if_not_exists,
-                                ..view
-                            }),
-                            true,
-                        )),
-                        None => skipped.push(("table", stmt.table_name())),
+            // `CREATE TABLE ... AS query` without columns reads like a view of the query.
+            let parsed = parsed
+                .and_then(|stmts| stmts.into_iter().next())
+                .and_then(|stmt| match stmt {
+                    Statement::CreateTable(create)
+                        if create.columns.is_empty()
+                            && create.like.is_none()
+                            && create.query.is_some() =>
+                    {
+                        let query = create.query.as_ref()?;
+                        let exists = if create.if_not_exists {
+                            "IF NOT EXISTS "
+                        } else {
+                            ""
+                        };
+                        let sql = format!("CREATE VIEW {exists}{} AS {query}", create.name);
+                        parse_ddl(&sql, dialect)?.into_iter().next()
                     }
-                }
-                Some(Statement::CreateTable(create)) => {
+                    stmt => Some(stmt),
+                });
+            match parsed {
+                Some(Statement::CreateView(view)) => push(OpKind::View(Box::new(view), true)),
+                Some(Statement::CreateTable(create))
                     if !create.columns.is_empty()
                         || postgres
                         || create.like.is_some()
-                        || !likes.is_empty()
-                    {
-                        push(OpKind::Table(Box::new(create), likes));
-                    }
+                        || !likes.is_empty() =>
+                {
+                    push(OpKind::Table(Box::new(create), likes));
                 }
                 Some(_) => {}
                 None => skipped.push(("table", stmt.table_name())),
@@ -289,16 +285,12 @@ pub(super) fn read_alter_or_drop(
     // MySQL's `RENAME TABLE a TO b, c TO d` renames each table in turn.
     if let (SqlDialect::MySql, Some(_)) = (dialect, stmt.target("rename")) {
         if let Some(Statement::RenameTable(renames)) = parsed() {
-            for rename in renames {
-                let sql = format!(
-                    "ALTER TABLE {} RENAME TO {}",
-                    rename.old_name, rename.new_name
-                );
-                if let Some(Statement::AlterTable(alter)) =
-                    parse_ddl(&sql, dialect).and_then(|stmts| stmts.into_iter().next())
-                {
-                    push(OpKind::AlterTable(Box::new(alter)));
-                }
+            let sql: String = renames
+                .iter()
+                .map(|r| format!("ALTER TABLE {} RENAME TO {};", r.old_name, r.new_name))
+                .collect();
+            for alter in ddl::split_statements(&sql, true) {
+                read_alter_or_drop(&alter, dialect, push, skipped);
             }
         }
         return;
@@ -447,8 +439,8 @@ fn virtual_table(name: &str, module: &str, args: &[Vec<String>]) -> Option<Creat
         _ => return None,
     };
     let sql = format!("CREATE TABLE {name} ({})", columns.join(", "));
-    let Statement::CreateTable(mut create) =
-        parse_ddl(&sql, SqlDialect::Sqlite)?.into_iter().next()?
+    let Some(Statement::CreateTable(mut create)) =
+        parse_ddl(&sql, SqlDialect::Sqlite).and_then(|stmts| stmts.into_iter().next())
     else {
         return None;
     };

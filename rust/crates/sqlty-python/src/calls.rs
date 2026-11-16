@@ -517,9 +517,11 @@ pub fn helper_calls<'a>(
         Expr::Attribute(attr) => dotted(&attr.value).is_some(),
         _ => false,
     });
+    let constant = |dotted: &str| helpers?.fragment(source, dotted, module);
     let ctx = Context {
         imported: &source.imports,
         scan: &scan,
+        constant: Some(&constant),
     };
     let lines = Lines::new(text);
     let (annotated, marker) = marker_names(source);
@@ -555,7 +557,8 @@ pub fn helper_calls<'a>(
                 let (module, original) = functions.get(name.id.as_str())?;
                 lookup(module, original)
             }),
-            Expr::Attribute(attr) => {
+            // The scan keeps only calls of names and attributes.
+            func => func.as_attribute_expr().and_then(|attr| {
                 let prefix = dotted(&attr.value).unwrap_or_default();
                 let name = attr.attr.as_str();
                 if let Some(found) = lookup(&module_of(&prefix, &modules), name) {
@@ -566,8 +569,7 @@ pub fn helper_calls<'a>(
                     receiver_class(&attr.value, stack, &ctx)
                         .and_then(|class| method_of(&class, name))
                 }
-            }
-            _ => None,
+            }),
         };
         let Some(helper) = helper else {
             continue;
@@ -736,4 +738,16 @@ pub fn query_span(call: &ExprCall, query: &Expr) -> (usize, usize) {
         _ => query.range(),
     };
     (range.start().to_usize(), range.end().to_usize())
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_module_without_markers_has_no_helpers() {
+        let source = Source::new("from typing import Annotated\nx = 1\n", (3, 14)).unwrap();
+        assert!(index_functions(&source).is_empty());
+    }
 }

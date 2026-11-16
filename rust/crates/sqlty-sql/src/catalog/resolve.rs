@@ -49,12 +49,11 @@ impl Loader {
         BUILDS.with(|count| count.set(count.get() + 1));
         let dialect = self.dialect;
         let path = self.search_path.clone();
-        let mut user_types: FxHashMap<String, UserType> = FxHashMap::default();
-        for key in self.types.keys() {
-            if let Some(user) = self.resolve_user_type(key, &path, 0) {
-                user_types.insert(key.clone(), user);
-            }
-        }
+        let mut user_types: FxHashMap<String, UserType> = self
+            .types
+            .keys()
+            .filter_map(|key| Some((key.clone(), self.resolve_user_type(key, &path, 0)?)))
+            .collect();
         for (old, new) in &self.type_aliases {
             if let Some(user) = user_types.get(new).cloned() {
                 user_types.entry(old.clone()).or_insert(user);
@@ -518,6 +517,9 @@ fn function(
                         .and_then(|name| lookup_key(relations, path, &name).map(str::to_string))
                         .and_then(|key| match relations.get(key.as_str()) {
                             Some(Relation::Table(table)) => Some(table.columns.clone()),
+                            Some(Relation::View(columns)) => {
+                                Some(columns.iter().map(view_column).collect())
+                            }
                             _ => None,
                         });
                     match rows {
@@ -573,4 +575,22 @@ fn function(
             }
         })
         .collect()
+}
+
+/// A view's output column as a function returning the view's rows lists it.
+fn view_column(column: &crate::analyzer::Column) -> SchemaColumn {
+    SchemaColumn {
+        name: column.name.clone(),
+        ident: column.name.clone(),
+        sql_type: column.sql_type.clone().unwrap_or_default(),
+        python_type: column.python_type.clone(),
+        not_null: column.nullability == crate::analyzer::Nullability::NonNull,
+        has_default: false,
+        default: None,
+        generated: None,
+        primary_key: false,
+        allowed_values: None,
+        values: column.values.clone(),
+        invisible: false,
+    }
 }

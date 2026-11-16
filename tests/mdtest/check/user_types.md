@@ -300,3 +300,31 @@ bad = SQL[BadShape]("--sql\nSELECT id, p FROM shapes")
 # error: [unknown-type] "column `shapes.p` has type `POINT2`, which has no Python type"
 short = SQL[FlatShape]("--sql\nSELECT id, p FROM shapes")
 ```
+
+### `None | Row` and `Optional[Row]`
+
+```python
+from typing import NamedTuple, Optional, TypedDict
+from sqlty import SQL
+
+class Wrong(NamedTuple):
+    x: int
+    y: str | None
+
+class First(TypedDict):
+    id: int
+    p: None | Wrong
+
+class Wrapped(TypedDict):
+    id: int
+    p: Optional[Wrong]
+
+# error: [column-type-mismatch] "First.p.y is str but composite point2 field 'y' infers int"
+# error: [nullable-mismatch] "First.p.x is int but composite point2 field 'x' can be NULL"
+# error: [unknown-type] "column `shapes.p` has type `POINT2`, which has no Python type"
+first = SQL[First]("--sql\nSELECT id, p FROM shapes")
+# error: [column-type-mismatch] "Wrapped.p.y is str but composite point2 field 'y' infers int"
+# error: [nullable-mismatch] "Wrapped.p.x is int but composite point2 field 'x' can be NULL"
+# error: [unknown-type] "column `shapes.p` has type `POINT2`, which has no Python type"
+wrapped = SQL[Wrapped]("--sql\nSELECT id, p FROM shapes")
+```

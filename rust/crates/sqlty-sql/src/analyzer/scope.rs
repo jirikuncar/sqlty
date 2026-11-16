@@ -76,6 +76,11 @@ impl Source {
 pub(super) type Scope = Vec<Source>;
 
 pub(super) fn table_scope(factor: &TableFactor, dialect: SqlDialect) -> Scope {
+    vec![table_source(factor, dialect)]
+}
+
+/// The one source a table factor of FROM gives.
+pub(super) fn table_source(factor: &TableFactor, dialect: SqlDialect) -> Source {
     match factor {
         TableFactor::Table {
             name,
@@ -87,9 +92,9 @@ pub(super) fn table_scope(factor: &TableFactor, dialect: SqlDialect) -> Scope {
                 || object_name(name),
                 |alias| alias.name.value.to_lowercase(),
             );
-            vec![Source::named(reference, table_key(name, dialect))]
+            Source::named(reference, table_key(name, dialect))
         }
-        other => vec![opaque_source(other)],
+        other => opaque_source(other),
     }
 }
 
@@ -159,15 +164,19 @@ pub(super) fn relations(from: &[TableWithJoins]) -> std::vec::IntoIter<&TableFac
 
 /// Whether any join in `from`, nested ones included, merges columns.
 pub(super) fn any_merging_join(from: &[TableWithJoins]) -> bool {
+    let nested = |factor: &TableFactor| match factor {
+        TableFactor::NestedJoin {
+            table_with_joins,
+            alias: None,
+        } => any_merging_join(std::slice::from_ref(table_with_joins)),
+        _ => false,
+    };
     from.iter().any(|table| {
-        table.joins.iter().any(merges_columns)
-            || match &table.relation {
-                TableFactor::NestedJoin {
-                    table_with_joins,
-                    alias: None,
-                } => any_merging_join(std::slice::from_ref(table_with_joins)),
-                _ => false,
-            }
+        nested(&table.relation)
+            || table
+                .joins
+                .iter()
+                .any(|join| merges_columns(join) || nested(&join.relation))
     })
 }
 
@@ -235,11 +244,16 @@ pub(super) fn merged_columns(from: &[TableWithJoins], dialect: SqlDialect) -> Ve
     merged
 }
 
-/// Whether a join merges same-named columns (`USING`, `NATURAL`), so `*` does not list them all.
+/// Whether a join merges same-named columns (`USING`, `NATURAL`) or keeps one side (semi
+/// and anti joins), so `*` does not list every column of both.
 pub(super) fn merges_columns(join: &Join) -> bool {
+    use JoinOperator::*;
     matches!(
         join_constraint(join),
         Some(JoinConstraint::Using(_) | JoinConstraint::Natural)
+    ) || matches!(
+        join.join_operator,
+        Semi(_) | LeftSemi(_) | RightSemi(_) | Anti(_) | LeftAnti(_) | RightAnti(_)
     )
 }
 
@@ -694,10 +708,7 @@ impl<'a> Analyzer<'a> {
         reference: Option<&str>,
         scope: &Scope,
     ) -> Option<Vec<Column>> {
-        let sources = Self::star_sources(reference, scope);
-        if sources.is_empty() {
-            return None;
-        }
+        let sources = Some(Self::star_sources(reference, scope)).filter(|s| !s.is_empty())?;
         let columns = sources
             .iter()
             .map(|Source { reference, table }| {
@@ -736,10 +747,7 @@ impl<'a> Analyzer<'a> {
         reference: Option<&str>,
         scope: &Scope,
     ) -> Option<Vec<SchemaColumn>> {
-        let tables = Self::star_tables(reference, scope);
-        if tables.is_empty() {
-            return None;
-        }
+        let tables = Some(Self::star_tables(reference, scope)).filter(|t| !t.is_empty())?;
         let columns = tables
             .iter()
             .map(|table| self.schema.table(table.named()?))
@@ -756,6 +764,7 @@ impl<'a> Analyzer<'a> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use sqlparser::ast::{SetExpr, Statement};
 
@@ -848,7 +857,7 @@ mod tests {
     }
 
     #[test]
-    fn merging_joins_are_using_and_natural() {
+    fn merging_joins_are_using_natural_semi_and_anti() {
         let merging = |sql: &str| any_merging_join(&from_of(sql));
         assert!(merging("SELECT 1 FROM a JOIN b USING (id)"));
         assert!(merging("SELECT 1 FROM a NATURAL JOIN b"));
@@ -858,6 +867,10 @@ mod tests {
         assert!(!merging("SELECT 1 FROM a JOIN b ON a.id = b.id"));
         assert!(!merging("SELECT 1 FROM a, b"));
         assert!(!merging("SELECT 1 FROM a CROSS JOIN b"));
+        assert!(merging("SELECT 1 FROM a SEMI JOIN b ON a.id = b.id"));
+        assert!(merging(
+            "SELECT 1 FROM c JOIN (a JOIN b USING (id)) ON true"
+        ));
     }
 
     #[test]

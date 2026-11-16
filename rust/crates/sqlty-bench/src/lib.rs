@@ -15,6 +15,8 @@
 //! assert_eq!(source.matches("--sql").count(), 3);
 //! ```
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
+
 use std::fmt::Write;
 
 /// PostgreSQL schema of `tables` tables, each with a view, a scalar function and a
@@ -121,4 +123,28 @@ pub fn python_source(queries: usize) -> String {
         .unwrap();
     }
     out
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::{python_source, schema_sql, QUERIES};
+    use sqlty_sql::analyzer;
+
+    #[test]
+    fn every_query_reads_the_schema() {
+        let (schema, skipped) = analyzer::load_schema_with_skipped(&schema_sql(4), "postgres");
+        assert!(skipped.is_empty(), "{skipped:?}");
+        for (name, sql) in QUERIES {
+            let (columns, _) = analyzer::analyze_with_diagnostics(sql, "postgres", Some(&schema));
+            assert!(columns.is_some(), "{name}");
+        }
+    }
+
+    #[test]
+    fn the_module_holds_one_distinct_query_per_handler() {
+        let source = python_source(QUERIES.len() + 1);
+        assert_eq!(source.matches("--sql").count(), QUERIES.len() + 1);
+        assert!(source.contains(&format!("-- {}\")", QUERIES.len())));
+    }
 }

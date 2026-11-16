@@ -302,12 +302,6 @@ impl<'a> Resolver<'a> {
             .collect();
         Ty::union(resolved.into_iter().collect::<Option<Vec<Ty>>>()?)
     }
-
-    /// The same module read with other `known` types.
-    #[must_use]
-    pub fn with(self, known: Known) -> Resolver<'a> {
-        Resolver { known, ..self }
-    }
 }
 
 /// `_annotation_type`: an annotation known only as text, without its module's imports.
@@ -327,4 +321,27 @@ pub fn annotation_type(annotation: &str, version: Version) -> Option<Ty> {
         version,
     };
     resolver.resolve(&parsed.syntax().body, annotation, &NoNames)
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rarer_annotations() {
+        assert_eq!(
+            typing_generic("Set").map(|ty| ty.repr()).as_deref(),
+            Some("<class 'set'>")
+        );
+        assert_eq!(
+            typing_generic("FrozenSet").map(|ty| ty.repr()).as_deref(),
+            Some("<class 'frozenset'>")
+        );
+        let parsed = ruff_python_parser::parse_expression("a[0][int]").unwrap();
+        let annotation = &parsed.syntax().body;
+        let (unwrapped, required) = unwrap_qualifiers(annotation, &HashMap::new());
+        assert!(std::ptr::eq(unwrapped, annotation.as_ref()));
+        assert_eq!(required, None);
+    }
 }

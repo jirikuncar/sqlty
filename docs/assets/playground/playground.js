@@ -253,7 +253,6 @@ monaco.languages.registerDocumentSemanticTokensProvider("python", {
   onDidChange: refreshed.event,
   getLegend: () => ({ tokenTypes: LEGEND, tokenModifiers: [] }),
   provideDocumentSemanticTokens(model) {
-    if (model !== models.python) return null;
     const data = [];
     let line = 0;
     let column = 0;
@@ -279,7 +278,6 @@ monaco.languages.registerDocumentSemanticTokensProvider("python", {
 monaco.languages.registerCompletionItemProvider("python", {
   triggerCharacters: [" ", ".", ","],
   provideCompletionItems(model, position) {
-    if (model !== models.python) return { suggestions: [] };
     const found = ask(request("complete", model.getOffsetAt(position)));
     if (!found?.items) return { suggestions: [] };
     const range = monaco.Range.fromPositions(
@@ -302,7 +300,6 @@ monaco.languages.registerCompletionItemProvider("python", {
 
 monaco.languages.registerCodeActionProvider("python", {
   provideCodeActions(model, range, context) {
-    if (model !== models.python) return { actions: [], dispose() {} };
     const actions = context.markers.flatMap((marker) => {
       const found = current.diagnostics.find(
         (diagnostic) =>
@@ -340,7 +337,6 @@ monaco.languages.registerCodeActionProvider("python", {
 
 monaco.languages.registerHoverProvider("python", {
   provideHover(model, position) {
-    if (model !== models.python) return null;
     const found = ask(request("hover", model.getOffsetAt(position)));
     if (!found?.contents) return null;
     return {

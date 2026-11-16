@@ -99,7 +99,7 @@ fn spells_integers(sql: &str) -> bool {
 
 /// An integer spelled `0x1F`, `0o17`, `0b101` or `1_000` as the decimal it is. Outside
 /// PostgreSQL sqlparser reads `0x1F` as `X'1F'`, a binary string as in MySQL; SQLite reads
-/// an integer.
+/// an integer, of 64 bits in two's complement.
 fn integer_literal(expr: &mut Expr, sql: &str, lines: &[usize], dialect: SqlDialect) {
     let Expr::Value(ValueWithSpan { value, span }) = expr else {
         return;
@@ -114,19 +114,16 @@ fn integer_literal(expr: &mut Expr, sql: &str, lines: &[usize], dialect: SqlDial
             None => digits.retain(|c| c != '_'),
         },
         Value::HexStringLiteral(hex)
-            if matches!(dialect, SqlDialect::Postgres | SqlDialect::Sqlite)
+            if dialect == SqlDialect::Sqlite
                 && offset(sql, lines, span.start).is_some_and(|at| sql[at..].starts_with("0x")) =>
         {
             let hex = hex.replace('_', "");
             let Ok(n) = u64::from_str_radix(&hex, 16) else {
+                // Kept with its prefix, which no `X'..'` literal has, for the analyzer to report.
+                *value = Value::HexStringLiteral(format!("0x{hex}"));
                 return;
             };
-            // SQLite reads 64 bits as two's complement.
-            let digits = match dialect {
-                SqlDialect::Sqlite => n.cast_signed().to_string(),
-                _ => n.to_string(),
-            };
-            *value = Value::Number(digits, false);
+            *value = Value::Number(n.cast_signed().to_string(), false);
         }
         _ => {}
     }

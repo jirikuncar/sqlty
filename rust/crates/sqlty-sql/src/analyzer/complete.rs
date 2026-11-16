@@ -77,7 +77,7 @@ impl Candidate {
         Candidate {
             label: label.to_string(),
             kind: CandidateKind::Column,
-            detail: Some(source.to_string()),
+            detail: (!source.is_empty()).then(|| source.to_string()),
             sql_type: sql_type.map(str::to_string),
             nullable: match nullability {
                 Nullability::Nullable => Some(true),
@@ -603,6 +603,7 @@ pub(super) fn lex(text: &str) -> Option<Vec<Tok>> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::catalog::{load, Catalog};
@@ -965,5 +966,29 @@ mod tests {
             "{:?}",
             runs[2]
         );
+    }
+
+    #[test]
+    fn a_query_that_does_not_parse_completes_from_its_tokens() {
+        assert_eq!(
+            pg("SELECT | FROM user_names WHERE ("),
+            ["id:user_names", "name:user_names"]
+        );
+        assert_eq!(
+            pg("SELECT | FROM users WHERE id IN (SELECT 1 FROM orders) AND ("),
+            ["email:users", "id:users", "name:users"]
+        );
+        assert_eq!(
+            pg("SELECT | FROM public.users AS u, orders o WHERE ("),
+            [
+                "o.id:o",
+                "o.total:o",
+                "o.user_id:o",
+                "u.email:u",
+                "u.id:u",
+                "u.name:u"
+            ]
+        );
+        assert!(pg("SELECT /* c */ | FROM users WHERE 'x").is_empty());
     }
 }

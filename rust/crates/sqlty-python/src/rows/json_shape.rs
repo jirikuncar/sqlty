@@ -168,18 +168,17 @@ fn admits_none(members: &[Member], ctx: &Context<'_>) -> bool {
     })
 }
 
-fn describe(shape: &JsonShape) -> &'static str {
+/// What the query builds, or `None` when any annotation holds it.
+fn describe(shape: &JsonShape) -> Option<&'static str> {
     match shape {
-        JsonShape::Any => "any",
-        JsonShape::Never => "never",
-        JsonShape::Null => "null",
-        JsonShape::Boolean => "a boolean",
-        JsonShape::Integer => "an integer",
-        JsonShape::Number => "a number",
-        JsonShape::String => "a string",
-        JsonShape::Array(_) => "an array",
-        JsonShape::Object(_) => "an object",
-        JsonShape::Map(_) => "a map",
+        JsonShape::Any | JsonShape::Never | JsonShape::Null => None,
+        JsonShape::Boolean => Some("a boolean"),
+        JsonShape::Integer => Some("an integer"),
+        JsonShape::Number => Some("a number"),
+        JsonShape::String => Some("a string"),
+        JsonShape::Array(_) => Some("an array"),
+        JsonShape::Object(_) => Some("an object"),
+        JsonShape::Map(_) => Some("a map"),
     }
 }
 
@@ -218,9 +217,9 @@ fn check(
         ));
     }
     let shape = &value.shape;
-    if matches!(shape, JsonShape::Any | JsonShape::Never | JsonShape::Null) {
+    let Some(built) = describe(shape) else {
         return;
-    }
+    };
     let candidates: Vec<&Annotation> = members
         .iter()
         .filter_map(|member| match member {
@@ -229,16 +228,13 @@ fn check(
         })
         .collect();
     if candidates.is_empty() {
-        out.push(at(
-            path,
-            &format!("is None but the query builds {}", describe(shape)),
-        ));
+        out.push(at(path, &format!("is None but the query builds {built}")));
         return;
     }
     let mut first: Option<Vec<String>> = None;
     for member in candidates {
         let mut found = Vec::new();
-        check_member(shape, member, path, ctx, &mut found, depth);
+        check_member(shape, built, member, path, ctx, &mut found, depth);
         if found.is_empty() {
             return;
         }
@@ -247,31 +243,27 @@ fn check(
     out.extend(first.unwrap_or_default());
 }
 
-fn mismatch(shape: &JsonShape, member: &Annotation, path: &str, out: &mut Vec<String>) {
+fn mismatch(built: &str, member: &Annotation, path: &str, out: &mut Vec<String>) {
     out.push(at(
         path,
-        &format!(
-            "is {} but the query builds {}",
-            member.unparse(),
-            describe(shape)
-        ),
+        &format!("is {} but the query builds {built}", member.unparse()),
     ));
 }
 
-/// The annotation heads a JSON scalar decodes into (bool is an int, an int a float; a number
-/// is an int when integral, else a float, and `Decimal` loads it exactly).
+/// The annotation heads the JSON scalar `shape` decodes into (bool is an int, an int a float;
+/// a number is an int when integral, else a float, and `Decimal` loads it exactly).
 fn scalar_heads(shape: &JsonShape) -> &'static [&'static str] {
     match shape {
         JsonShape::Boolean => &["bool", "int", "float"],
         JsonShape::Integer => &["int", "float"],
         JsonShape::Number => &["float", "int", "Decimal"],
-        JsonShape::String => &["str"],
-        _ => &[],
+        _ => &["str"],
     }
 }
 
 fn check_member(
     shape: &JsonShape,
+    built: &str,
     member: &Annotation,
     path: &str,
     ctx: &Context<'_>,
@@ -304,7 +296,7 @@ fn check_member(
                     check(items, &part(&sub.slice), &inner, ctx, out, depth + 1);
                 }
             } else if builtin || mapping || row_type.is_some() {
-                mismatch(shape, member, path, out);
+                mismatch(built, member, path, out);
             }
         }
         JsonShape::Map(values) => {
@@ -314,7 +306,7 @@ fn check_member(
                     check(values, &parts, &inner, ctx, out, depth + 1);
                 }
             } else if builtin || list || row_type.is_some() {
-                mismatch(shape, member, path, out);
+                mismatch(built, member, path, out);
             }
         }
         JsonShape::Object(fields) => {
@@ -328,14 +320,14 @@ fn check_member(
             } else if let Some(info) = row_type {
                 check_row_type(fields, info, path, ctx, out, depth);
             } else if builtin || list {
-                mismatch(shape, member, path, out);
+                mismatch(built, member, path, out);
             }
         }
         scalar => {
             if (builtin || list || mapping || row_type.is_some())
                 && !scalar_heads(scalar).contains(&head)
             {
-                mismatch(shape, member, path, out);
+                mismatch(built, member, path, out);
             }
         }
     }
@@ -376,13 +368,10 @@ fn check_row_type(
     out: &mut Vec<String>,
     depth: usize,
 ) {
+    let aliases = Some(info.aliases.as_ref()).filter(|aliases| !aliases.is_empty());
     let inner = Context {
         defs: ctx.defs,
-        aliases: if info.aliases.is_empty() {
-            ctx.aliases
-        } else {
-            &info.aliases
-        },
+        aliases: aliases.unwrap_or(ctx.aliases),
     };
     let built: Dict<&JsonField> = fields
         .iter()
@@ -414,27 +403,56 @@ fn check_row_type(
                 &format!("is required by {} but the query may omit it", info.name),
             ));
         }
-        if !model {
-            if let Some(annotation) = info.annotations.get(key) {
-                check(&field.value, annotation, &location, &inner, out, depth + 1);
-            }
+        if let Some(annotation) = info.annotations.get(key).filter(|_| !model) {
+            check(&field.value, annotation, &location, &inner, out, depth + 1);
         }
     }
     for (key, _) in &info.fields {
         let names = info.column_names(key);
-        if info.required.contains(key)
+        let missing = info.required.contains(key)
             && !info.opaque.contains(key)
-            && !names.iter().any(|name| built.contains(name))
-        {
-            if let Some(first) = names.first() {
-                out.push(at(
-                    &join(path, first),
-                    &format!(
-                        "is required by {} but the query does not build it",
-                        info.name
-                    ),
-                ));
-            }
+            && !names.iter().any(|name| built.contains(name));
+        if let Some(first) = names.first().filter(|_| missing) {
+            out.push(at(
+                &join(path, first),
+                &format!(
+                    "is required by {} but the query does not build it",
+                    info.name
+                ),
+            ));
         }
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    fn problems(shape: &JsonShape, annotation: &str) -> Vec<String> {
+        let parsed = crate::parse::expression(annotation).unwrap();
+        let annotation = Annotation {
+            expr: *parsed.into_syntax().body,
+            source: Arc::from(annotation),
+        };
+        json_problems(shape, &annotation, &Dict::new(), &HashMap::new(), "")
+    }
+
+    #[test]
+    fn the_problems_of_an_unnamed_value_start_at_its_members() {
+        let int = JsonValue::new(JsonShape::Integer, false);
+        let object = JsonShape::Object(vec![JsonField {
+            name: "a".into(),
+            value: int.clone(),
+            optional: false,
+        }]);
+        assert_eq!(
+            problems(&JsonShape::Array(Box::new(int)), "str"),
+            ["is str but the query builds an array"]
+        );
+        assert_eq!(
+            problems(&object, "dict[str, str]"),
+            ["a is str but the query builds an integer"]
+        );
     }
 }

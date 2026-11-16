@@ -38,6 +38,7 @@ CREATE TABLE t (
     tags TEXT[] NOT NULL,
     uid UUID
 );
+CREATE TABLE b (data BYTEA NOT NULL, at TIME NOT NULL, doc JSONB);
 """
 COLUMNS = [
     "id",
@@ -322,6 +323,104 @@ CASES = {
 @pytest.mark.parametrize("source", CASES.values(), ids=CASES.keys())
 def test_cases(source: str) -> None:
     assert compare(HEAD + source) >= 1
+
+
+QUIET = {
+    "literal row": "type Row = Literal['a']\nq = SQL[Row]('--sql\\nSELECT id, name FROM t')\n",
+    "literal row inline": "q = SQL[Literal['a']]('--sql\\nSELECT id FROM t')\n",
+    "generic row": "type Row = list[int]\nq = SQL[Row]('--sql\\nSELECT id FROM t')\n",
+    "generic of an attribute": "import typing\nq = SQL[typing.List[int]]('--sql\\nSELECT id FROM t')\n",
+}
+
+
+@pytest.mark.parametrize("source", QUIET.values(), ids=QUIET.keys())
+def test_quiet_cases(source: str) -> None:
+    assert compare(HEAD + source) == 0
+
+
+OBJECT = "json_build_object('a', id, 'b', name, 'c', ratio, 'd', flag)"
+JSON = {
+    "object": OBJECT,
+    "array": "json_build_array(id, name)",
+    "map": "jsonb_object_agg(name, id)",
+    "objects": f"json_agg({OBJECT})",
+    "optional": "json_build_object('a', CASE WHEN flag THEN id END)",
+    "omitted": "CASE WHEN flag THEN json_build_object('a', 'x') ELSE json_build_object('b', 1) END",
+    "nullable items": "json_build_array(note)",
+    "deep": "json_build_array(" * 34 + "id" + ")" * 34,
+    "string": "to_json(name)",
+    "number": "to_json(ratio)",
+    "boolean": "to_json(flag)",
+    "null": "to_json(note)",
+    "any": "doc",
+}
+ANNOTATIONS = [
+    "int",
+    "str",
+    "bool",
+    "float",
+    "Decimal",
+    "Any",
+    "object",
+    "typing.Optional[str]",
+    "Optional[int]",
+    "Union[int, str]",
+    "Annotated[int, 'x']",
+    "Literal[1, None]",
+    "Literal[1]",
+    "'int | None'",
+    "'int |'",
+    "None",
+    "list[int]",
+    "list[str | None]",
+    "list[str]",
+    "list[Literal['a', None]]",
+    "list[Literal['a']]",
+    "list[Any]",
+    "list[" * 34 + "int" + "]" * 34,
+    "int | " * 34 + "str",
+    "Sequence",
+    "tuple[int, str]",
+    "dict[str, int]",
+    "dict[int, str]",
+    "dict",
+    "dict[str]",
+    "Mapping[str, str]",
+    "dict[str, list[int]]",
+    "Inner",
+    "list[Inner]",
+    "dict[str, Inner]",
+    "Open",
+    "Closed",
+    "Model",
+    "Elsewhere",
+]
+DEFS = (
+    "import typing\nfrom decimal import Decimal\nfrom typing import Any, Optional, Sequence, Union, Mapping\n"
+    "from pydantic import BaseModel\nfrom elsewhere import Elsewhere\n"
+    "class Inner(TypedDict):\n    a: str\n    b: int\n    e: int\n"
+    "class Open(TypedDict, extra_items=int):\n    a: int\n"
+    "class Closed(TypedDict, total=False):\n    b: str\n"
+    "class Model(BaseModel):\n    a: str\n"
+)
+
+
+@pytest.mark.parametrize("shape", JSON.values(), ids=JSON.keys())
+def test_json_shapes(shape: str) -> None:
+    fields = "".join(f"    f{i}: {annotation}\n" for i, annotation in enumerate(ANNOTATIONS))
+    select = ", ".join(f"{shape} AS f{i}" for i in range(len(ANNOTATIONS)))
+    query = f'q = SQL[Row]("--sql\\nSELECT {select} FROM t")\n'
+    source = f"{DEFS}class Row(TypedDict):\n{fields}{query}"
+    assert compare(HEAD + source) >= 1
+
+
+def test_json_shapes_of_a_module_without_typing_names() -> None:
+    source = (
+        "import typing\nfrom sqlty import SQL\nclass Inner(typing.TypedDict):\n    a: str\n"
+        "class Row(typing.TypedDict):\n    v: Inner\n"
+        "q = SQL[Row](\"--sql\\nSELECT json_build_object('a', id) AS v FROM t\")\n"
+    )
+    assert compare(source) == 1
 
 
 def test_bare_wrapper_with_a_module_import() -> None:

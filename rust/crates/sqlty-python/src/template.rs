@@ -210,3 +210,18 @@ fn module_template<'a>(name: &str, source: &'a str) -> Option<&'a str> {
 fn line_start(source: &str, at: usize) -> bool {
     at == 0 || source.as_bytes()[at - 1] == b'\n'
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_fields_and_comparisons() {
+        assert_eq!(split_field("x="), None);
+        assert_eq!(split_field("x = "), None);
+        assert_eq!(split_field("a == b"), Some(("a == b", "")));
+        assert_eq!(split_field("a <= b"), Some(("a <= b", "")));
+        assert_eq!(split_field("f(a=1)"), Some(("f(a=1)", "")));
+    }
+}

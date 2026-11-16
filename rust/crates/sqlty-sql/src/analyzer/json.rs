@@ -459,14 +459,13 @@ impl<'a> Analyzer<'a> {
             }
             values.push(value);
         }
-        if literal_keys {
-            return Ok(JsonShape::Object(fields));
-        }
-        let value = values
+        let map = values
             .into_iter()
             .reduce(|a, b| JsonValue::unify(&a, &b))
-            .unwrap_or_else(|| JsonValue::new(JsonShape::Never, false));
-        Ok(JsonShape::Map(Box::new(value)))
+            .filter(|_| !literal_keys);
+        Ok(map.map_or(JsonShape::Object(fields), |value| {
+            JsonShape::Map(Box::new(value))
+        }))
     }
 
     /// The JSON a SQL value converts to, and whether it can be `null`.
@@ -603,6 +602,7 @@ fn is_container(python_type: &str) -> bool {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::analyzer::{analyze_select, load_schema};
