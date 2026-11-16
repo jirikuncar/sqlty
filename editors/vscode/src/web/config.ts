@@ -9,92 +9,39 @@ export type Table = Record<string, unknown>;
 /** What a file is checked with: the merged table, and the text of its schema files. */
 export type Project = { settings: Table; schema: string } | { error: string };
 
-/** The files a directory may hold a sqlty table in, tried in this order, as `sqlty check` does. */
-const CONFIG_FILES = ["sqlty.toml", "pyproject.toml", "Cargo.toml"];
-
 /**
- * The project of the file in `directory`, as `sqlty check` finds it: the closest directory
- * with a sqlty table wins, `extend` is applied on top of the file it names, and `schema` is
- * read relative to the file that set it.
+ * The project of the file in `directory`, as `sqlty check` finds it: the engine's `project`
+ * op asks for each file it reads, applies `extend`, and gives `schema` relative to the
+ * directory of the file that holds the table.
  */
 export async function project(engine: Engine, directory: vscode.Uri): Promise<Project> {
-  try {
-    for (let current = directory; ; current = parent(current)) {
-      for (const name of CONFIG_FILES) {
-        const found = await load(engine, vscode.Uri.joinPath(current, name), false);
-        if (found !== undefined) {
-          const { table, schemas } = await extended(engine, found, current, []);
-          return { settings: table, schema: await readSchemas(schemas) };
-        }
-      }
-      if (parent(current).path === current.path) {
-        return { settings: {}, schema: "" };
-      }
+  const files: Record<string, string | null> = {};
+  for (;;) {
+    const answer = engine({ op: "project", path: directory.path, files });
+    if (answer === null || "warning" in answer) {
+      return { settings: {}, schema: "" };
     }
-  } catch (error) {
-    return { error: error instanceof Error ? error.message : String(error) };
+    if ("error" in answer) {
+      return { error: answer.error };
+    }
+    if ("need" in answer) {
+      files[answer.need] = await readText(directory.with({ path: answer.need }));
+      continue;
+    }
+    const table = answer.config as Table;
+    const base = parent(directory.with({ path: answer.file }));
+    return { settings: table, schema: await readSchemas(schemasOf(table, base)) };
   }
 }
 
 type Schemas = { base: vscode.Uri; entries: string[] };
 
-/** `table` with the files it extends applied under it; `schema` keeps the directory it is relative to. */
-async function extended(
-  engine: Engine,
-  table: Table,
-  directory: vscode.Uri,
-  chain: string[],
-): Promise<{ table: Table; schemas: Schemas | undefined }> {
-  const own = schemasOf(table, directory);
-  const extend = table.extend;
-  if (typeof extend !== "string") {
-    return { table, schemas: own };
-  }
-  const target = vscode.Uri.joinPath(directory, extend);
-  if (chain.includes(target.toString())) {
-    throw new Error(`${target.path}: extend = '${extend}' extends itself in a cycle`);
-  }
-  const found = await load(engine, target, true);
-  if (found === undefined) {
-    throw new Error(`extend = '${extend}': config file does not exist: ${target.path}`);
-  }
-  const base = await extended(engine, found, parent(target), [...chain, target.toString()]);
-  const merged: Table = { ...base.table, ...table };
-  delete merged.extend;
-  for (const key of ["rules", "types"]) {
-    if (isTable(base.table[key]) && isTable(table[key])) {
-      merged[key] = { ...base.table[key], ...table[key] };
-    }
-  }
-  return { table: merged, schemas: own ?? base.schemas };
-}
-
-/**
- * The sqlty table of `uri`, or `undefined` when there is no such file, or a `pyproject.toml`
- * or `Cargo.toml` has none. A file `extend` names (`required`) must have one.
- */
-async function load(
-  engine: Engine,
-  uri: vscode.Uri,
-  required: boolean,
-): Promise<Table | undefined> {
-  let bytes: Uint8Array;
+async function readText(uri: vscode.Uri): Promise<string | null> {
   try {
-    bytes = await vscode.workspace.fs.readFile(uri);
+    return new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
   } catch {
-    return undefined;
+    return null;
   }
-  const answer = engine({
-    op: "config",
-    source: new TextDecoder().decode(bytes),
-    path: uri.path,
-    required,
-    dialect: "",
-  });
-  if (answer !== null && "error" in answer) {
-    throw new Error(answer.error);
-  }
-  return answer === null ? undefined : (answer.config as Table);
 }
 
 function schemasOf(table: Table, base: vscode.Uri): Schemas | undefined {
@@ -119,16 +66,8 @@ async function readSchemas(schemas: Schemas | undefined): Promise<string> {
       files.set(uri.toString(), uri);
     }
   }
-  const texts = await Promise.all(
-    [...files.values()].map(async (uri) => {
-      try {
-        return new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
-      } catch {
-        return undefined;
-      }
-    }),
-  );
-  return texts.filter((text) => text !== undefined).join("\n");
+  const texts = await Promise.all([...files.values()].map(readText));
+  return texts.filter((text) => text !== null).join("\n");
 }
 
 async function expand(base: vscode.Uri, entry: string): Promise<vscode.Uri[]> {
@@ -166,8 +105,4 @@ function byPath(a: vscode.Uri, b: vscode.Uri): number {
 
 function parent(uri: vscode.Uri): vscode.Uri {
   return vscode.Uri.joinPath(uri, "..");
-}
-
-function isTable(value: unknown): value is Table {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

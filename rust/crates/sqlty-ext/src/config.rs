@@ -5,7 +5,10 @@ use pyo3::create_exception;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
+use std::path::{Path, PathBuf};
+
 use sqlty_python::config::{self, Config, LoadError};
+use sqlty_python::project::{self, FindError, Read};
 use toml::{Table, Value};
 
 create_exception!(
@@ -55,6 +58,67 @@ pub(crate) fn validate_config<'py>(
     converted(py, found)
 }
 
+/// What `std::fs` reads at `path`; a directory or an unreadable file is missing.
+fn disk(path: &Path) -> Read {
+    std::fs::read(path).map_or(Read::Missing, Read::Text)
+}
+
+fn find_error(error: FindError) -> PyErr {
+    match error {
+        FindError::Syntax(message) => ConfigSyntaxError::new_err(message),
+        error => PyValueError::new_err(error.to_string()),
+    }
+}
+
+/// `(table, skipped functions, file)` of `find_config`.
+type FoundConfig<'py> = (Bound<'py, PyDict>, Vec<String>, PathBuf);
+
+/// The nearest configuration of `directory`, an absolute path, as `(table, skipped
+/// functions, file)` (see `load_config`): `sqlty.toml`, else a `pyproject.toml` or
+/// `Cargo.toml` with a sqlty table, in `directory` or a directory above it, `extend`
+/// applied. None when no file has one.
+///
+/// Raises:
+///     ConfigSyntaxError: a `pyproject.toml` or `Cargo.toml` is not TOML
+///     ValueError: a file is invalid, or `extend` names a missing file or a cycle
+#[pyfunction]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "PyO3 extracts a PathBuf, not a Path"
+)]
+fn find_config(py: Python<'_>, directory: PathBuf) -> PyResult<Option<FoundConfig<'_>>> {
+    let found = py
+        .detach(|| project::find(&directory, &disk))
+        .map_err(find_error)?;
+    found
+        .map(|found| {
+            let (table, skipped) = converted(py, found.config)?;
+            Ok((table, skipped, found.file))
+        })
+        .transpose()
+}
+
+/// The configuration of the file at `path`, as `--config-file` names it, `extend` applied
+/// with paths relative to `base`; see `find_config`.
+///
+/// Raises:
+///     ValueError: as for `find_config`, or the file is missing or has no sqlty table
+#[pyfunction]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "PyO3 extracts a PathBuf, not a Path"
+)]
+fn config_file<'py>(
+    py: Python<'py>,
+    path: PathBuf,
+    base: PathBuf,
+) -> PyResult<(Bound<'py, PyDict>, Vec<String>)> {
+    let found = py
+        .detach(|| project::load_file(&path, &base, &disk))
+        .map_err(find_error)?;
+    converted(py, found)
+}
+
 /// The `types` entries `driver` adds in `dialect`, under the project's own.
 #[pyfunction]
 fn driver_types(driver: &str, dialect: &str) -> Vec<(String, String)> {
@@ -71,6 +135,8 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(load_config, m)?)?;
     m.add_function(wrap_pyfunction!(validate_config, m)?)?;
     m.add_function(wrap_pyfunction!(driver_types, m)?)?;
+    m.add_function(wrap_pyfunction!(find_config, m)?)?;
+    m.add_function(wrap_pyfunction!(config_file, m)?)?;
     Ok(())
 }
 

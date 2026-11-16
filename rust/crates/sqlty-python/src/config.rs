@@ -385,6 +385,19 @@ pub fn validate(mut table: Table, source: &str) -> Result<Config, InvalidConfig>
                 .into(),
         );
     }
+    if let Some((key, python)) = table
+        .get("types")
+        .and_then(Value::as_table)
+        .into_iter()
+        .flatten()
+        .filter_map(|(key, python)| Some((key, python.as_str()?)))
+        .find(|(_, python)| crate::parse::expression(python).is_none())
+    {
+        return fail(format!(
+            "[tool.sqlty.types] {key} = {} is not a Python type expression",
+            crate::unparse::repr_str(python)
+        ));
+    }
     if table
         .get("format-command")
         .is_some_and(|command| !is_strings(command))
@@ -548,6 +561,10 @@ mod tests {
         assert!(invalid("driver = \"asyncpg\"").contains("must be \"psycopg\""));
         assert!(invalid("types = { DATE = 1 }").contains("types must be a table"));
         assert!(invalid("databases = 1").contains("databases must be a table of tables"));
+        assert_eq!(
+            invalid("types = { DATE = \"list[\" }"),
+            "sqlty.toml: [tool.sqlty.types] DATE = 'list[' is not a Python type expression"
+        );
         assert!(invalid("[databases.default]").contains("not 'default'"));
         assert!(invalid("[databases.'a b']").contains("letters, digits"));
         assert_eq!(
