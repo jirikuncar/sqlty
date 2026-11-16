@@ -10,6 +10,7 @@ use std::sync::LazyLock;
 
 use crate::checker::check_source;
 use crate::edit::apply_edits;
+use crate::index::HelperIndex;
 use crate::options::Options;
 use crate::rewriter::{
     has_import, insert_imports, suppresses, type_modules, with_wrapper_imports, ImportStyle,
@@ -17,6 +18,8 @@ use crate::rewriter::{
 };
 use crate::rules::{Rule, RuleConfig};
 use crate::scan::Scan;
+use crate::suppress;
+use crate::types::symbols::Source;
 use sqlty_sql::diagnostics::NameRule;
 
 /// The rules whose diagnostics carry a fix.
@@ -45,6 +48,35 @@ fn word_regex(name: &str) -> Regex {
         .entry(name.to_string())
         .or_insert_with(|| Regex::new(&format!(r"\b{}\b", regex::escape(name))).unwrap())
         .clone()
+}
+
+/// [`fix_source`] of a module, leaving alone what its `# sqlty: ignore` comments suppress
+/// and the strings of helper calls (see [`suppress::suppressed`]). `parsed` is `source`
+/// parsed, `None` where it does not parse.
+pub fn fix_module(
+    source: &str,
+    parsed: Option<&Source>,
+    options: &Options,
+    rules: &RuleConfig,
+    helpers: Option<&HelperIndex>,
+    module: Option<&str>,
+) -> String {
+    let (ignores, typed) = match parsed {
+        Some(parsed) => (
+            suppress::ignores(parsed),
+            crate::check::sites(parsed, helpers, module, None)
+                .into_iter()
+                .filter_map(|site| site.typed)
+                .collect(),
+        ),
+        None => (suppress::unparsed_ignores(source), Vec::new()),
+    };
+    fix_source(
+        source,
+        options,
+        rules,
+        &suppress::suppressed(&ignores, typed),
+    )
 }
 
 /// `check_source` plus the edits of its diagnostics: fix `inline-sql-comment`,

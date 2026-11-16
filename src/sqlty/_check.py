@@ -542,12 +542,14 @@ def diagnostics(
     row_usage: RowUsage | None = None,
     variants: int | None = None,
     coerce: frozenset[str] = frozenset(),
+    suppress: bool = False,
 ) -> list[Diagnostic]:
-    """Every diagnostic before inline suppression: the Rust pass, then the Python passes.
+    """Every diagnostic: the Rust pass, then the Python passes.
 
     ``variants`` turns on query variants (``find_helper_calls``): each variant of a call
     is checked as a call of its own, then ``_merge_variants`` reports at the call.
-    ``coerce`` names the row types read as a Pydantic validator reads them.
+    ``coerce`` names the row types read as a Pydantic validator reads them. ``suppress``
+    drops what ``# sqlty: ignore`` comments suppress and adds their ``unused-ignore``.
     """
     own = RowUsage()
     if AST == "rust":
@@ -563,6 +565,7 @@ def diagnostics(
             module,
             variants,
             coerce,
+            suppress,
         )
     else:
         found = _diagnostics(
@@ -597,6 +600,8 @@ def diagnostics(
             None if helpers is None else helpers.rust(),
             variants,
         )
+    if suppress and AST != "rust":
+        found = apply_suppressions(parsed.ignores, found, rules)
     return found
 
 
@@ -612,6 +617,7 @@ def _rust_diagnostics(
     module: str | None,
     variants: int | None,
     coerce: frozenset[str],
+    suppress: bool,
 ) -> list[Diagnostic]:
     """The diagnostics as ``sqlty_python::check`` reports them."""
     found, redundant, needed = _module_diagnostics(
@@ -627,6 +633,7 @@ def _rust_diagnostics(
         index=None if helpers is None else helpers.rust(),
         name=parsed.module,
         variants=variants,
+        suppress=suppress,
     )
     usage.needed.update(needed)
     usage.redundant += [
@@ -677,18 +684,12 @@ def check_modules(
         version=sys.version_info[:2],
         jobs=jobs,
     )
-    checked = []
-    for (parsed, config), ((diagnostics, redundant, needed), suppressed) in zip(
-        modules, found, strict=True
-    ):
+    for diagnostics, redundant, needed in found:
         row_usage.needed.update(needed)
         row_usage.redundant += [
             (key, diag) for key, diag in zip(redundant, diagnostics, strict=True) if key is not None
         ]
-        if not suppressed:
-            diagnostics = apply_suppressions(parsed.ignores, diagnostics, config[2])
-        checked.append(diagnostics)
-    return checked
+    return [diagnostics for diagnostics, _, _ in found]
 
 
 def _compare_module(
@@ -1375,12 +1376,8 @@ def apply_suppressions(
     ignores: dict[int, Ignore],
     diagnostics: list[Diagnostic],
     rules: dict[str, str] | None,
-    marker: str = "#",
 ) -> list[Diagnostic]:
-    """Drop diagnostics suppressed by a comment on their line; add ``unused-ignore``.
-
-    ``marker`` starts a comment in the checked language: ``#``, or ``--`` in SQL.
-    """
+    """Drop diagnostics suppressed by a comment on their line; add ``unused-ignore``."""
     from sqlty._lint import RuleConfig
 
     if not ignores:
@@ -1405,7 +1402,7 @@ def apply_suppressions(
             else:
                 unused = [name for name in ignore.rules if (ignore.line, name) not in used]
             for name in unused:
-                written = f"{marker} sqlty: ignore" + ("" if name is None else f"[{name}]")
+                written = "# sqlty: ignore" + ("" if name is None else f"[{name}]")
                 kept.append(
                     {
                         "rule": "unused-ignore",
