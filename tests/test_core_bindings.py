@@ -37,8 +37,9 @@ def test_unparsable_module() -> None:
     assert _core.row_diagnostics(UNPARSABLE, version=VERSION) is None
 
 
-def test_row_diagnostics_of_a_module_without_queries() -> None:
-    assert _core.row_diagnostics("x = 1\n", version=VERSION) == ([], [], [])
+@pytest.mark.parametrize("source", ["x = 1\n", "from sqlty import SQL\n"])
+def test_row_diagnostics_of_a_module_without_queries(source: str) -> None:
+    assert _core.row_diagnostics(source, version=VERSION) == ([], [], [])
 
 
 @pytest.mark.parametrize("split", [_core.check_queries, _core.named_queries])
