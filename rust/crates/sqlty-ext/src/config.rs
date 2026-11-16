@@ -8,7 +8,7 @@ use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 use std::path::{Path, PathBuf};
 
 use sqlty_python::config::{self, Config, LoadError};
-use sqlty_python::project::{self, FindError, Read};
+use sqlty_python::project::{self, Discovery, Files, FindError, Kind, Listing, Read};
 use toml::{Table, Value};
 
 create_exception!(
@@ -58,9 +58,53 @@ pub(crate) fn validate_config<'py>(
     converted(py, found)
 }
 
-/// What `std::fs` reads at `path`; a directory or an unreadable file is missing.
-fn disk(path: &Path) -> Read {
-    std::fs::read(path).map_or(Read::Missing, Read::Text)
+/// The files `std::fs` reads: a directory or an unreadable file is missing.
+struct Disk;
+
+impl Files for Disk {
+    fn read(&self, path: &Path) -> Read {
+        std::fs::read(path).map_or(Read::Missing, Read::Text)
+    }
+
+    fn list(&self, path: &Path) -> Listing {
+        let Ok(entries) = std::fs::read_dir(path) else {
+            return Listing::Missing;
+        };
+        let entries = entries.flatten().map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let linked = entry.file_type().is_ok_and(|kind| kind.is_symlink());
+            let kind = match std::fs::metadata(entry.path()) {
+                Ok(meta) if meta.is_dir() && linked => Kind::LinkedDir,
+                Ok(meta) if meta.is_dir() => Kind::Dir,
+                Ok(meta) if meta.is_file() => Kind::File,
+                _ => Kind::Other,
+            };
+            (name, kind)
+        });
+        Listing::Entries(entries.collect())
+    }
+
+    /// `Path.resolve()`: the longest existing prefix resolved, the rest appended.
+    fn canonical(&self, path: &Path) -> PathBuf {
+        let path = project::normalized(path);
+        let mut rest = Vec::new();
+        let mut prefix = path.as_path();
+        loop {
+            if let Ok(resolved) = std::fs::canonicalize(prefix) {
+                return rest
+                    .iter()
+                    .rev()
+                    .fold(resolved, |path, name| path.join(name));
+            }
+            match (prefix.parent(), prefix.file_name()) {
+                (Some(parent), Some(name)) => {
+                    rest.push(name.to_os_string());
+                    prefix = parent;
+                }
+                _ => return path,
+            }
+        }
+    }
 }
 
 fn find_error(error: FindError) -> PyErr {
@@ -88,7 +132,7 @@ type FoundConfig<'py> = (Bound<'py, PyDict>, Vec<String>, PathBuf);
 )]
 fn find_config(py: Python<'_>, directory: PathBuf) -> PyResult<Option<FoundConfig<'_>>> {
     let found = py
-        .detach(|| project::find(&directory, &disk))
+        .detach(|| project::find(&directory, &Disk))
         .map_err(find_error)?;
     found
         .map(|found| {
@@ -114,7 +158,7 @@ fn config_file<'py>(
     base: PathBuf,
 ) -> PyResult<(Bound<'py, PyDict>, Vec<String>)> {
     let found = py
-        .detach(|| project::load_file(&path, &base, &disk))
+        .detach(|| project::load_file(&path, &base, &Disk))
         .map_err(find_error)?;
     converted(py, found)
 }
@@ -123,6 +167,82 @@ fn config_file<'py>(
 #[pyfunction]
 fn driver_types(driver: &str, dialect: &str) -> Vec<(String, String)> {
     config::driver_types(driver, dialect)
+}
+
+/// Which files `sqlty check` reads under a directory, as the configuration of each
+/// directory, `--config-file` (`fixed`, its discovery keys), `--isolated` and the exclude
+/// flags pick them; `cwd` is absolute. A configuration that is not TOML excludes nothing.
+///
+/// Raises:
+///     ValueError: a configuration file is invalid
+#[pyclass(frozen, name = "Discovery", module = "sqlty._core")]
+struct PyDiscovery(Discovery);
+
+#[pymethods]
+impl PyDiscovery {
+    #[new]
+    #[pyo3(signature = (cwd, *, isolated, fixed, exclude, extend_exclude, respect_gitignore))]
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "PyO3 extracts a PathBuf, not a Path"
+    )]
+    fn new(
+        cwd: PathBuf,
+        isolated: bool,
+        fixed: Option<&Bound<'_, PyDict>>,
+        exclude: Option<Vec<String>>,
+        extend_exclude: Vec<String>,
+        respect_gitignore: Option<bool>,
+    ) -> PyResult<Self> {
+        let mut discovery = Discovery::new(Box::new(Disk), &cwd).extend_exclude(&extend_exclude);
+        if isolated {
+            discovery = discovery.isolated();
+        }
+        if let Some(fixed) = fixed {
+            discovery = discovery.fixed(to_table(fixed)?);
+        }
+        if let Some(exclude) = exclude {
+            discovery = discovery.exclude(&exclude);
+        }
+        if let Some(respect) = respect_gitignore {
+            discovery = discovery.respect_gitignore(respect);
+        }
+        Ok(Self(discovery))
+    }
+
+    /// `(base directory, globs)` pairs excluding entries of `directory`.
+    fn exclusions(&self, py: Python<'_>, directory: &str) -> PyResult<Vec<(PathBuf, Vec<String>)>> {
+        py.detach(|| self.0.exclusions(Path::new(directory)))
+            .map_err(find_error)
+    }
+
+    /// Whether `path`, or a directory holding it up to a glob's base, is excluded.
+    fn is_excluded(&self, py: Python<'_>, path: &str) -> PyResult<bool> {
+        py.detach(|| self.0.is_excluded(Path::new(path)))
+            .map_err(find_error)
+    }
+
+    /// The `.py` files under `root`, sorted, as joined to `root`.
+    fn walk(&self, py: Python<'_>, root: &str) -> PyResult<Vec<PathBuf>> {
+        py.detach(|| self.0.walk(Path::new(root)))
+            .map_err(find_error)
+    }
+}
+
+/// The files a `schema` or `queries` key names relative to `base`, and its globs that
+/// match none; see `sqlty_python::project::schema_files`.
+#[pyfunction]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "PyO3 extracts a Vec, not a slice"
+)]
+fn schema_files(
+    py: Python<'_>,
+    entries: Vec<String>,
+    base: &str,
+) -> PyResult<(Vec<PathBuf>, Vec<String>)> {
+    py.detach(|| project::schema_files(&entries, Path::new(base), &Disk))
+        .map_err(find_error)
 }
 
 /// Add the key lists and `ConfigSyntaxError` to the module.
@@ -137,6 +257,9 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(driver_types, m)?)?;
     m.add_function(wrap_pyfunction!(find_config, m)?)?;
     m.add_function(wrap_pyfunction!(config_file, m)?)?;
+    m.add_function(wrap_pyfunction!(schema_files, m)?)?;
+    m.add_class::<PyDiscovery>()?;
+    m.add("DEFAULT_EXCLUDE", project::DEFAULT_EXCLUDE)?;
     Ok(())
 }
 

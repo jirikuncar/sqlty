@@ -30,7 +30,13 @@ use toml::{Table, Value};
 
 use crate::config::{load, Config, LoadError, CONFIG_FILES};
 
+mod glob;
+mod walk;
+
+pub use walk::{schema_files, Discovery, DEFAULT_EXCLUDE};
+
 /// What the host has of a file.
+#[derive(Clone)]
 pub enum Read {
     /// Its bytes.
     Text(Vec<u8>),
@@ -40,10 +46,43 @@ pub enum Read {
     Unread,
 }
 
+/// What a directory entry is, as `os.walk` and `Path.is_file` tell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Kind {
+    /// A file, or a link to one.
+    File,
+    /// A directory.
+    Dir,
+    /// A link to a directory: listed, never walked into.
+    LinkedDir,
+    /// Anything else, such as a broken link.
+    Other,
+}
+
+/// What the host has of a directory.
+pub enum Listing {
+    /// Its entries, by name.
+    Entries(Vec<(String, Kind)>),
+    /// No such directory.
+    Missing,
+    /// Not listed yet: the walk answers [`FindError::Need`].
+    Unread,
+}
+
 /// The files of the host, by absolute path.
 pub trait Files {
     /// The file at `path`.
     fn read(&self, path: &Path) -> Read;
+
+    /// The entries of the directory at `path`.
+    fn list(&self, _path: &Path) -> Listing {
+        Listing::Missing
+    }
+
+    /// `path` with its links resolved, as `Path.resolve` gives it.
+    fn canonical(&self, path: &Path) -> PathBuf {
+        normalized(path)
+    }
 }
 
 impl<F: Fn(&Path) -> Read> Files for F {
