@@ -18,17 +18,19 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
 
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::sync::Arc;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlty_python::checker::{query_sites, Diagnostic, SiteKind};
 use sqlty_python::config;
-use sqlty_python::fixer::fix_source;
+use sqlty_python::fixer::fix_module;
 use sqlty_python::locate::{self, Queries};
 use sqlty_python::options::Options;
 use sqlty_python::params::add_param_types;
-use sqlty_python::rewriter::{rewrite_source_with, strip_source, Suppressed};
+use sqlty_python::project::{self, FindError, Read};
+use sqlty_python::rewriter::{rewrite_source_with, strip_source};
 use sqlty_python::rules::RuleConfig;
 use sqlty_python::types::symbols::Source;
 use sqlty_python::{check, rows, suppress};
@@ -42,6 +44,7 @@ use sqlty_sql::highlight::Highlight;
 #[serde(rename_all = "lowercase")]
 enum Op {
     Config,
+    Project,
     #[serde(untagged)]
     Source(SourceOp),
 }
@@ -58,9 +61,11 @@ enum SourceOp {
 #[derive(Deserialize)]
 struct Request {
     op: Op,
+    #[serde(default)]
     source: String,
     #[serde(default)]
     schema: String,
+    #[serde(default)]
     dialect: String,
     #[serde(default)]
     offset: usize,
@@ -77,6 +82,15 @@ struct Request {
     /// Whether `config` reports a `pyproject.toml` or `Cargo.toml` without a sqlty table.
     #[serde(default)]
     required: bool,
+    /// The files `project` reads, by absolute path: the text, or `null` for no such file.
+    #[serde(default)]
+    files: HashMap<String, Option<String>>,
+    /// The directory `settings` came from, as `project` answers its `file`: with `file`, the
+    /// settings are those of `file`, its database and overrides applied.
+    #[serde(default)]
+    base: Option<String>,
+    #[serde(default)]
+    file: Option<String>,
 }
 
 /// Answer a JSON request about the Python `source`, read against `schema` in `dialect`.
@@ -93,8 +107,13 @@ struct Request {
 ///   which runs on every keystroke.
 /// - `config`: the sqlty table of `source`, the text of the file at `path`, validated as
 ///   `sqlty check` validates it, as `{"config": table}`; `null` for a `pyproject.toml` or
-///   `Cargo.toml` without one, unless `required`. A host finds and merges the files
-///   (`extend`), then passes the result as `settings`.
+///   `Cargo.toml` without one, unless `required`.
+/// - `project`: the configuration of the directory `path`, as `sqlty check` finds it from
+///   `files`: `{"config": table, "file": path}` with `extend` applied, its `schema` and
+///   `queries` relative to the directory of `file`; `null` when no file has one;
+///   `{"need": path}` for a file `files` lacks, which the host reads and asks again with;
+///   `{"warning": message}` for a `pyproject.toml` or `Cargo.toml` that is not TOML, which
+///   `sqlty check` skips. The host passes the table as `settings`.
 ///
 /// `config` is a `sqlty.toml` whose `dialect`, `driver`, `import-style`, `param-types`,
 /// `preview`, `max-query-variants`, `rules` and `types` apply; another key, or an invalid one, is an `error`, as `sqlty check` reports
@@ -115,9 +134,14 @@ pub fn run(request: &str) -> String {
                 Err(found) => error(found.to_string()),
             };
         }
+        Op::Project => return project(&request.path, &request.files).to_string(),
     };
     let settings = match &request.settings {
-        Some(table) => Ok(resolved(table)),
+        Some(table) => Ok(resolved(&routed(
+            table,
+            request.base.as_ref(),
+            request.file.as_ref(),
+        ))),
         None => settings(&request.config),
     };
     let settings = match settings {
@@ -196,7 +220,7 @@ pub fn run(request: &str) -> String {
                 .collect::<Vec<_>>(),
             "rewritten": params(rewrite_source_with(source, &options, false)),
             "stripped": strip_source(source, &options.style),
-            "fixed": params(fix_source(source, &options, &rules, &Suppressed::new())),
+            "fixed": params(fix_module(source, Source::new(source, VERSION).as_ref(), &options, &rules, None, None)),
             })
         }
         SourceOp::Complete => match locate::complete(&queries, offset, dialect, options.schema, 50)
@@ -349,7 +373,10 @@ fn checked(
         Some(module) => check::diagnostics(module, &run),
         None => check::unparsed(source, &run),
     };
-    let ignores = module.as_deref().map(suppress::ignores).unwrap_or_default();
+    let ignores = match &module {
+        Some(module) => suppress::ignores(module),
+        None => suppress::unparsed_ignores(source),
+    };
     let needed = found.needed;
     suppress::apply(&ignores, found.diagnostics, rules)
         .into_iter()
@@ -465,6 +492,48 @@ mod abi {
     #[no_mangle]
     extern "C" fn output() -> *const u8 {
         OUTPUT.with_borrow(|output| output.as_ptr())
+    }
+}
+
+/// `table` as `file` reads it, `base` the directory of its configuration.
+fn routed(
+    table: &serde_json::Map<String, Value>,
+    base: Option<&String>,
+    file: Option<&String>,
+) -> serde_json::Map<String, Value> {
+    let (Some(base), Some(file)) = (base, file) else {
+        return table.clone();
+    };
+    let Ok(project) = serde_json::from_value::<toml::Table>(Value::Object(table.clone())) else {
+        return table.clone();
+    };
+    let missing = |_: &Path| Read::Missing;
+    let found = project::route(
+        &project,
+        Path::new(base),
+        Path::new(file),
+        &missing,
+        &project::Excludes::default(),
+    );
+    match json!(project::file_table(&project, &found)) {
+        Value::Object(table) => table,
+        _ => table.clone(),
+    }
+}
+
+/// The `project` answer for `directory`, reading `files`.
+fn project(directory: &str, files: &HashMap<String, Option<String>>) -> Value {
+    let read = |path: &Path| match path.to_str().and_then(|path| files.get(path)) {
+        Some(Some(text)) => Read::Text(text.as_bytes().to_vec()),
+        Some(None) => Read::Missing,
+        None => Read::Unread,
+    };
+    match project::find(Path::new(directory), &read) {
+        Ok(Some(found)) => json!({ "config": found.config.table, "file": found.file }),
+        Ok(None) => Value::Null,
+        Err(FindError::Need(path)) => json!({ "need": path }),
+        Err(FindError::Syntax(message)) => json!({ "warning": message }),
+        Err(error) => json!({ "error": error.to_string() }),
     }
 }
 

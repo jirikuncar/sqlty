@@ -17,7 +17,7 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
-from sqlty._check import RowUsage, apply_suppressions, is_any_row
+from sqlty._check import RowUsage, is_any_row
 from sqlty._check import diagnostics as check_diagnostics
 from sqlty._core import QueryAt as _QueryAt
 from sqlty._core import (
@@ -34,6 +34,7 @@ from sqlty._core import analyze_params as _analyze_params
 from sqlty._core import analyze_select as _analyze_select
 from sqlty._core import complete_source as _complete_source
 from sqlty._core import explain_select as _explain_select
+from sqlty._core import fix_module as _fix_module
 from sqlty._core import fix_source as _fix_source
 from sqlty._core import format_source as _format_source
 from sqlty._core import highlight_source as _highlight_source
@@ -462,25 +463,7 @@ def fix_source(
         ValueError: unsupported ``import_style``, or ``rules`` names an unknown rule or severity
     """
     parsed = ParsedSource.of(source, module)
-    suppressed: dict[int, list[str] | None] = {
-        line: None if ignore.rules is None else list(ignore.rules)
-        for line, ignore in parsed.ignores.items()
-    }
-    for typed, _, _, _ in _helper_sites(parsed, helpers, module):
-        for line in range(typed[0], typed[1] + 1) if typed else ():
-            if line not in suppressed:
-                suppressed[line] = ["stale-rewrite"]
-            elif (named := suppressed[line]) is not None:
-                named.append("stale-rewrite")
-    fixed = _fix_source(
-        parsed.text,
-        dialect=dialect,
-        schema_sql=schema_sql,
-        import_style=import_style,
-        untyped=untyped,
-        rules=rules,
-        suppressed=suppressed or None,
-    )
+    fixed = _fixed(parsed, dialect, schema_sql, import_style, untyped, rules, helpers, module)
     if json_types == "typing.TypedDict" and fixed != parsed.text:
         fixed = _json_types(fixed, dialect, schema_sql, import_style)
     if param_types:
@@ -492,6 +475,56 @@ def fix_source(
             closed=closed_params,
         )
     return fixed
+
+
+def _fixed(
+    parsed: ParsedSource,
+    dialect: str,
+    schema_sql: str | Schema | None,
+    import_style: str | None,
+    untyped: bool,
+    rules: dict[str, str] | None,
+    helpers: HelperIndex | None,
+    module: str | None,
+) -> str:
+    """``fix_source`` before the JSON and parameter types."""
+    if AST != "python":
+        rust = _fix_module(
+            parsed.text,
+            version=sys.version_info[:2],
+            dialect=dialect,
+            schema_sql=schema_sql,
+            import_style=import_style,
+            untyped=untyped,
+            rules=rules,
+            index=None if helpers is None else helpers.rust(),
+            name=parsed.module,
+            module=module,
+        )
+        if AST == "rust":
+            return rust
+    suppressed: dict[int, list[str] | None] = {
+        line: None if ignore.rules is None else list(ignore.rules)
+        for line, ignore in parsed.ignores.items()
+    }
+    for typed, _, _, _ in _helper_sites(parsed, helpers, module):
+        for line in range(typed[0], typed[1] + 1) if typed else ():
+            if line not in suppressed:
+                suppressed[line] = ["stale-rewrite"]
+            elif (named := suppressed[line]) is not None:
+                named.append("stale-rewrite")
+    python = _fix_source(
+        parsed.text,
+        dialect=dialect,
+        schema_sql=schema_sql,
+        import_style=import_style,
+        untyped=untyped,
+        rules=rules,
+        suppressed=suppressed or None,
+    )
+    if AST == "compare" and parsed.facts is not None and rust != python:
+        raise AstMismatch("fix_source", rust, python, parsed.text)
+    return python
 
 
 def check_source(
@@ -585,8 +618,8 @@ def check_source(
         row_usage=row_usage or (usage := RowUsage()),
         variants=query_variants,
         coerce=frozenset(coerce_row_types),
+        suppress=True,
     )
-    diagnostics = apply_suppressions(parsed.ignores, diagnostics, rules)
     return diagnostics if row_usage else usage.filter(diagnostics)
 
 

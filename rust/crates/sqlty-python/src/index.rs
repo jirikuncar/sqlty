@@ -505,8 +505,17 @@ impl HelperIndex {
         dotted: &str,
         module: Option<&str>,
     ) -> Option<(&'a Source, &'a Expr)> {
-        let name = source.module.as_deref().or(module);
-        let (functions, modules) = imports_of(&source.entries, name);
+        self.fragment_of(&source.entries, dotted, source.module.as_deref().or(module))
+    }
+
+    /// [`Self::fragment`] for the module `module` that imports `entries`.
+    pub fn fragment_of(
+        &self,
+        entries: &[Import],
+        dotted: &str,
+        module: Option<&str>,
+    ) -> Option<(&Source, &Expr)> {
+        let (functions, modules) = imports_of(entries, module);
         match dotted.rsplit_once('.') {
             None => {
                 let (module, original) = functions.get(dotted)?;

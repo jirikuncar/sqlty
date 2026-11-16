@@ -131,10 +131,11 @@ jobs:
         env:
           SQLTY_AST: compare
 
-      - name: Run tests on the Rust syntax tree alone
-        run: uv run pytest -m "not timing and not pg" tests/mdtest tests/test_cli.py tests/test_helpers.py tests/test_psycopg.py tests/test_driver_values.py tests/test_type_extractor.py tests/test_cross_module.py
+      # The deprecated Python passes alone, until 0.8.0 removes them.
+      - name: Run tests on the Python syntax tree alone
+        run: uv run pytest -m "not timing and not pg" tests/mdtest tests/test_cli.py tests/test_helpers.py tests/test_psycopg.py tests/test_driver_values.py tests/test_type_extractor.py tests/test_cross_module.py tests/test_source.py tests/test_composed_edges.py tests/test_rust_check.py tests/test_rust_index.py tests/test_lsp.py tests/e2e/test_breaking_e2e.py
         env:
-          SQLTY_AST: rust
+          SQLTY_AST: python
 
       # Each worker gets its own database (tests/conftest.py).
       - name: Run database tests

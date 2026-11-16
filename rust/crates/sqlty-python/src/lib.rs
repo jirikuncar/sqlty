@@ -38,6 +38,7 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
 
+pub mod breaking;
 #[allow(missing_docs)]
 pub mod calls;
 #[allow(missing_docs)]
@@ -58,6 +59,7 @@ pub mod module;
 pub mod options;
 pub mod params;
 pub mod parse;
+pub mod project;
 pub mod queries;
 pub mod rewriter;
 #[allow(missing_docs)]

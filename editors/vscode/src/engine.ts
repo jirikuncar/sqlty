@@ -38,6 +38,8 @@ export async function startEngine(
       schema: found.schema,
       dialect: "postgres",
       settings: found.settings,
+      base: found.base,
+      file: document.uri.path,
     });
     if (answer !== null && "error" in answer) {
       output.error(answer.error);

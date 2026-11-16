@@ -1578,6 +1578,7 @@ dependencies = [
  "ruff_text_size",
  "sqlty-format",
  "sqlty-lsp",
+ "sqlty-project",
  "sqlty-python",
  "sqlty-sql",
  "stacker",
@@ -1610,9 +1611,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "sqlty-project"
+version = "0.6.0"
+dependencies = [
+ "regex",
+ "sqlty-format",
+ "sqlty-python",
+ "sqlty-sql",
+ "toml",
+]
+
+[[package]]
 name = "sqlty-python"
 version = "0.6.0"
 dependencies = [
+ "ignore",
  "recursive",
  "regex",
  "ruff_python_ast",
@@ -1647,6 +1660,7 @@ dependencies = [
  "sqlty-format",
  "sqlty-python",
  "sqlty-sql",
+ "toml",
 ]
 
 [[package]]

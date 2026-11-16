@@ -49,15 +49,23 @@ import re
 import sys
 import tokenize
 import typing
+import warnings
 from dataclasses import dataclass
 
 from sqlty._core import module_facts, module_ignores, module_outline
 from sqlty._psycopg import PsycopgScan
 
-AST = os.environ.get("SQLTY_AST", "python")
-"""Who checks a module: ``python`` (the ``ast`` passes), ``rust`` (``sqlty_python``, which
-parses nothing with ``ast``), or ``compare``, which runs both and raises ``AstMismatch``
-when they differ."""
+AST = os.environ.get("SQLTY_AST", "rust")
+"""Who checks a module: ``rust`` (``sqlty_python``, which parses nothing with ``ast``),
+``python`` (the ``ast`` passes, deprecated: removed in 0.8.0), or ``compare``, which runs
+both and raises ``AstMismatch`` when they differ."""
+if AST == "python":
+    warnings.warn(
+        "SQLTY_AST=python is deprecated and will be removed in sqlty 0.8.0; "
+        "the Rust engine checks by default",
+        FutureWarning,
+        stacklevel=1,
+    )
 
 
 class Facts(typing.NamedTuple):
@@ -284,16 +292,26 @@ class _Scan:
             self._note((id(node), arg.arg), _class_name(arg.annotation))
 
     def _typed(self, node: ast.Assign | ast.AnnAssign) -> None:
-        """Record ``name = Cls(...)`` and ``name: Cls`` in the current scope.
+        """Record ``name = Cls(...)``, ``name = 10``, ``name: Final = 10`` and ``name: Cls`` in the current scope.
 
         Also ``self.attr`` the same way inside a method, keyed by the class.
         """
         if isinstance(node, ast.Assign):
             targets = node.targets
-            type_name = _class_name(node.value.func) if isinstance(node.value, ast.Call) else None
+            type_name = (
+                _class_name(node.value.func)
+                if isinstance(node.value, ast.Call)
+                else literal_type(node.value)
+            )
         else:
             targets = [node.target]
-            type_name = _class_name(node.annotation)
+            final = node.annotation
+            if isinstance(final, ast.Subscript):
+                final = final.value
+            if _class_name(final) in ("Final", "typing.Final", "typing_extensions.Final"):
+                type_name = None if node.value is None else literal_type(node.value)
+            else:
+                type_name = _class_name(node.annotation)
             if type_name is None and isinstance(node.value, ast.Call):
                 type_name = _class_name(node.value.func)
         scope = self._stack[-1] if self._stack else None
@@ -335,6 +353,25 @@ class _Scan:
 
 
 _Stack = tuple[ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef, ...]
+
+
+def literal_type(node: ast.expr) -> str | None:
+    """The builtin class of a literal other than ``None``, else ``None``.
+
+    Example:
+        >>> [literal_type(ast.parse(e, mode="eval").body) for e in ("1", "-1.5", "f'{x}'", "None", "x")]
+        ['int', 'float', 'str', None, None]
+    """
+    match node:
+        case ast.Constant(value=value) if type(value) in (bool, int, float, str, bytes):
+            return type(value).__name__
+        case ast.UnaryOp(
+            op=ast.USub() | ast.UAdd(), operand=ast.Constant(value=int() | float() as value)
+        ):
+            return "float" if isinstance(value, float) else "int"
+        case ast.JoinedStr():
+            return "str"
+    return None
 
 
 def _class_name(node: ast.expr | None) -> str | None:
@@ -703,6 +740,12 @@ class ParsedSource:
                 return types[key]
         return None
 
+    def binds(self, stack: _Stack, name: str) -> bool:
+        """Whether ``name`` is a parameter of, or assigned in, the module or a function of ``stack``."""
+        types = self._scan.types
+        scopes = [*(id(s) for s in stack if not isinstance(s, ast.ClassDef)), None]
+        return any((scope, name) in types for scope in scopes)
+
     @functools.cached_property
     def typing_aliases(self) -> dict[str, str]:
         """Local names for ``typing`` / ``typing_extensions`` and their members, to originals."""
@@ -918,14 +961,19 @@ class ParsedSource:
         rust = None
         if AST != "python":
             rust = module_ignores(self.text, sys.version_info[:2])
-            if AST == "rust" and rust is not None:
+            if AST == "rust":
                 return {
                     line: Ignore(line, None if rules is None else tuple(rules), start, end)
                     for line, rules, start, end in rust
                 }
         python = self._tokenized_ignores()
-        # `tokenize` stops at a lone carriage return, which is a line break.
-        if rust is not None and "\r" not in self.text.replace("\r\n", ""):
+        # `tokenize` stops at a lone carriage return, which is a line break, and at what
+        # does not lex, where Rust reads on.
+        if (
+            rust is not None
+            and self.facts is not None
+            and "\r" not in self.text.replace("\r\n", "")
+        ):
             read = [
                 (i.line, None if i.rules is None else list(i.rules), i.start, i.end)
                 for i in python.values()
