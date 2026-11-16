@@ -1318,6 +1318,37 @@ SELECT format() AS string_format
 -- rules: string_format: sqlite.string.format / sqlite.string.format
 ```
 
+## DuckDB
+
+`rules/duckdb/catalog.inference.toml`, which `scripts/generate_duckdb_rules.py` writes,
+has its assertions in `tests/mdtest/duckdb/catalog.md`.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE t (i INTEGER NOT NULL, tm TIME NOT NULL, d DATE NOT NULL, b BOOLEAN NOT NULL, l INTEGER[] NOT NULL);
+```
+
+```toml
+[tool.sqlty]
+dialect = "duckdb"
+schema = "schema.sql"
+```
+
+```sql
+SELECT avg(i) AS avg_numbers, avg(tm) AS avg_temporal, avg(d) AS avg_date, sum(b) AS sum_integers, list_concat(l, l) AS concat FROM t
+-- rules: avg_numbers: duckdb.aggregate.avg-numbers / duckdb.aggregate.avg-numbers
+-- rules: avg_temporal: duckdb.aggregate.avg-temporal / duckdb.aggregate.avg-temporal
+-- rules: avg_date: duckdb.aggregate.avg-date / duckdb.aggregate.avg-date
+-- rules: sum_integers: duckdb.aggregate.sum-integers / duckdb.aggregate.sum-integers
+-- rules: concat: duckdb.list.concat / duckdb.list.concat
+-- columns: avg_numbers: float | None (DOUBLE)
+-- columns: avg_temporal: datetime.time | None (TIME)
+-- columns: avg_date: datetime.datetime | None (TIMESTAMP)
+-- columns: sum_integers: int | None (INT128)
+-- columns: concat: list[int] (ARRAY<INT>)
+```
+
 ## Other dialects
 
 The rules of `common/` that every dialect above overrides apply in the others, except

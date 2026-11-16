@@ -8,7 +8,11 @@ sqlty leaves untyped is not a mismatch; ``KNOWN_GAPS`` lists understood mismatch
 
 from __future__ import annotations
 
+import importlib.util
 import re
+import sys
+from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -16,6 +20,8 @@ from sqlty import core
 from tests._value_types import matches
 
 duckdb = pytest.importorskip("duckdb")
+
+ROOT = Path(__file__).resolve().parent.parent
 
 SCHEMA = """
 CREATE TABLE t (
@@ -118,3 +124,26 @@ def test_matches_duckdb(conn, query: str) -> None:
     if problems and query in KNOWN_GAPS:
         pytest.xfail(KNOWN_GAPS[query])
     assert not problems, f"{query}\n  " + "\n  ".join(problems)
+
+
+def _script(path: str) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(Path(path).stem, ROOT / path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_generated_rules_are_current() -> None:
+    """``rules/duckdb/catalog.inference.toml`` is what DuckDB gives (``make generate-duckdb-rules``)."""
+    outputs, _ = _script("scripts/generate_duckdb_rules.py").generate()
+    for output, text in outputs.items():
+        assert output.read_text() == text, "run `make generate-duckdb-rules`"
+
+
+def test_functions_match_duckdb() -> None:
+    """Every call of a DuckDB built-in that sqlty types has the type DuckDB gives it."""
+    engine_functions = _script("scripts/compat/engine_functions.py")
+    results = engine_functions.compare(engine_functions.DuckDB())
+    assert results.mismatch == []
