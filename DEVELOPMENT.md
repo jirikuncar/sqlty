@@ -217,6 +217,7 @@ rust/
     │       ├── checker.rs    # Lint checks (stale-rewrite, stale-type, SELECT *, ...)
     │       └── fixer.rs      # check --fix
     ├── sqlty-project/        # A project read from disk, as sqlty server checks it
+    ├── sqlty-cli/            # The sqlty commands, run from sqlty._cli
     ├── sqlty-wasm/           # The docs playground's engine, built by `make playground`
     └── sqlty-ext/            # PyO3 module sqlty._core (the maturin manifest)
         └── src/lib.rs        # The sqlty._core functions

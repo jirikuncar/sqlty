@@ -17,3 +17,5 @@ sqlty-python.workspace = true
 sqlty-format.workspace = true
 regex.workspace = true
 toml.workspace = true
+rayon = "1.12"
+stacker = "0.1"

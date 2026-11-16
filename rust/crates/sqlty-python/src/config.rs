@@ -471,7 +471,7 @@ fn take(document: &mut Table, path: &[&str]) -> Option<Table> {
 
 /// ` (did you mean 'x'?)` for the choice most like `name`, as Python's
 /// `difflib.get_close_matches(name, choices, n=1)` picks it, or nothing.
-fn suggest(name: &str, choices: &[&str]) -> String {
+pub fn suggest(name: &str, choices: &[&str]) -> String {
     let name: Vec<char> = name.chars().collect();
     choices
         .iter()

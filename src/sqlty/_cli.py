@@ -48,8 +48,10 @@ EXIT_ERROR = 2
 def main(argv: list[str] | None = None) -> None:
     """CLI entry point."""
     parser = build_parser()
-    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
-    args.hard_exit = argv is None
+    hard_exit = argv is None
+    argv = sys.argv[1:] if argv is None else argv
+    args = parser.parse_args(argv)
+    args.hard_exit = hard_exit
 
     if args.version:
         _cmd_version()
@@ -62,6 +64,12 @@ def main(argv: list[str] | None = None) -> None:
     from sqlty._config import ConfigError
 
     try:
+        if (code := _rust(argv)) is not None:
+            if hard_exit:
+                _hard_exit(code)
+            if code:
+                sys.exit(code)
+            return
         match args.command:
             case "rewrite":
                 _cmd_rewrite(args)
@@ -98,6 +106,17 @@ def main(argv: list[str] | None = None) -> None:
         traceback.print_exc()
         print("sqlty: internal error; please report it with the traceback above", file=sys.stderr)
         sys.exit(EXIT_ERROR)
+
+
+def _rust(argv: list[str]) -> int | None:
+    """The exit code of ``argv`` run by the Rust CLI, or ``None`` when Python runs it."""
+    from sqlty._source import AST
+
+    if AST != "rust":
+        return None
+    from sqlty._core import cli
+
+    return cli(["sqlty", *argv])
 
 
 def build_parser() -> argparse.ArgumentParser:
