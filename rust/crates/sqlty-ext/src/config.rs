@@ -216,12 +216,6 @@ impl PyDiscovery {
             .map_err(find_error)
     }
 
-    /// Whether walking `directory` skips what `.gitignore` ignores.
-    fn respects_gitignore(&self, py: Python<'_>, directory: &str) -> PyResult<bool> {
-        py.detach(|| self.0.respects_gitignore(Path::new(directory)))
-            .map_err(find_error)
-    }
-
     /// Whether `path`, or a directory holding it up to a glob's base, is excluded.
     fn is_excluded(&self, py: Python<'_>, path: &str) -> PyResult<bool> {
         py.detach(|| self.0.is_excluded(Path::new(path)))

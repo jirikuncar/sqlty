@@ -1157,10 +1157,6 @@ class ConfigSource:
         found = _discovered(self._discovery.exclusions, directory)
         return [(base, tuple(patterns)) for base, patterns in found]
 
-    def respects_gitignore(self, directory: Path) -> bool:
-        """Whether walking ``directory`` skips what ``.gitignore`` ignores."""
-        return _discovered(self._discovery.respects_gitignore, directory)
-
     def is_excluded(self, path: Path) -> bool:
         """Whether ``path`` or one of its parents up to a glob's base directory is excluded."""
         return _discovered(self._discovery.is_excluded, path)
