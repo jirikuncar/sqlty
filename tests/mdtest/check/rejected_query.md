@@ -43,6 +43,49 @@ a = SQL("--sql\nSELECT greatest(i, n), coalesce(d, ts), coalesce(d, '2020-01-01'
 b = SQL("--sql\nSELECT coalesce(i, $1), CASE WHEN b THEN NULL ELSE d END FROM t")
 ```
 
+## JSON and UUID match no other category
+
+`json`, `jsonb` and `uuid` are user-defined types (category `U`) to PostgreSQL,
+which never match a string or a number: `COALESCE types jsonb and text cannot
+be matched`. `json` and `jsonb` cast to each other, and a string literal or a
+parameter takes their type.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE d (j JSONB, js JSON, u UUID, tx TEXT, i INT, b BOOLEAN NOT NULL);
+```
+
+```python
+from sqlty import SQL
+
+# error: [rejected-query] "argument types JSONB and TEXT cannot be matched"
+a = SQL("--sql\nSELECT coalesce(j, tx) FROM d")
+# error: [rejected-query] "argument types UUID and TEXT cannot be matched"
+b = SQL("--sql\nSELECT coalesce(u, tx) FROM d")
+# error: [rejected-query] "CASE types JSONB and TEXT cannot be matched"
+c = SQL("--sql\nSELECT CASE WHEN b THEN j ELSE tx END FROM d")
+# error: [rejected-query] "argument types UUID and JSONB cannot be matched"
+e = SQL("--sql\nSELECT coalesce(u, j) FROM d")
+# error: [rejected-query] "argument types JSON and INT cannot be matched"
+f = SQL("--sql\nSELECT coalesce(js, i) FROM d")
+```
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL("--sql\nSELECT coalesce(j, js), coalesce(u, 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'), coalesce(j, '{}'), coalesce(u, $1) FROM d")
+```
+
+A rejected expression has no type:
+
+```sql
+SELECT coalesce(j, tx) AS a, CASE WHEN b THEN u ELSE tx END AS c FROM d
+-- columns: a: None (None)
+-- columns: c: None (None)
+```
+
 ## Other dialects
 
 Only PostgreSQL is judged: MySQL and SQLite convert the results.

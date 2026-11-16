@@ -184,7 +184,9 @@ impl<'a> Analyzer<'a> {
                         common
                     });
                 }
-                self.reject_unmatched("argument", &typed_args);
+                if self.reject_unmatched("argument", &typed_args) {
+                    return Ok(Typed::UNKNOWN);
+                }
                 let first = typed_args
                     .iter()
                     .find(|typed| typed.is_known())

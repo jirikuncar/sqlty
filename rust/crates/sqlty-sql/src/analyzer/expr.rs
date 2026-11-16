@@ -571,7 +571,9 @@ impl<'a> Analyzer<'a> {
         if let Some(common) = common_of(results.iter().cloned(), self.dialect) {
             return Ok(common);
         }
-        self.reject_unmatched("CASE", &results);
+        if self.reject_unmatched("CASE", &results) {
+            return Ok(Typed::UNKNOWN);
+        }
         let first = results.first().cloned().unwrap_or(Typed::UNKNOWN);
         Ok(if value_set(&first).is_some() {
             strip(first, self.dialect)
@@ -580,12 +582,14 @@ impl<'a> Analyzer<'a> {
         })
     }
 
-    /// PostgreSQL rejects `what` over `types` of different categories.
-    pub(super) fn reject_unmatched(&self, what: &str, types: &[Typed]) {
-        if let (SqlDialect::Postgres, Some((a, b))) = (self.dialect, unmatched(types)) {
-            let message = format!("{what} types {a} and {b} cannot be matched");
-            self.diag.record(NameRule::RejectedQuery, message);
-        }
+    /// PostgreSQL rejects `what` over `types` of different categories: whether it does.
+    pub(super) fn reject_unmatched(&self, what: &str, types: &[Typed]) -> bool {
+        let Some((a, b)) = unmatched(types).filter(|_| self.dialect == SqlDialect::Postgres) else {
+            return false;
+        };
+        let message = format!("{what} types {a} and {b} cannot be matched");
+        self.diag.record(NameRule::RejectedQuery, message);
+        true
     }
 
     /// A function call: a built-in by its [`Returns`] rule, else one the schema defines.
