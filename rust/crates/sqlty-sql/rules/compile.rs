@@ -7,15 +7,16 @@ use std::fmt::Write as _;
 use serde::Deserialize;
 
 /// The dialects a rule may name, as `SqlDialect` spells them in Rust.
-const DIALECTS: [(&str, &str); 4] = [
+const DIALECTS: [(&str, &str); 5] = [
     ("postgres", "SqlDialect::Postgres"),
     ("mysql", "SqlDialect::MySql"),
     ("sqlite", "SqlDialect::Sqlite"),
     ("clickhouse", "SqlDialect::ClickHouse"),
+    ("duckdb", "SqlDialect::Other(\"duckdb\")"),
 ];
 
 /// The dialects a `reference` may cite the documentation of, in the order they are shown.
-const DOCUMENTED: [&str; 3] = ["postgres", "mysql", "sqlite"];
+const DOCUMENTED: [&str; 4] = ["postgres", "mysql", "sqlite", "duckdb"];
 
 /// Canonical SQL types the analyzer gives operands, which `left` and `right` may name.
 /// `ARRAY` is any array.
@@ -192,7 +193,7 @@ const NULLABILITIES: [(&str, &str); 5] = [
 /// Result types of a function rule other than a SQL type name, as `FunctionType` spells
 /// them; `(k)` takes an argument position, `{}` in the path. `@argument-as <TYPE>` keeps the
 /// first argument's Python type and values under another SQL type.
-const FUNCTION_RESULTS: [(&str, &str); 27] = [
+const FUNCTION_RESULTS: [(&str, &str); 28] = [
     ("@any", "FunctionType::Any"),
     ("@unknown", "FunctionType::Unknown"),
     ("@code", "FunctionType::Code"),
@@ -230,6 +231,10 @@ const FUNCTION_RESULTS: [(&str, &str); 27] = [
     ("@series", "FunctionType::Returns(Returns::Series)"),
     ("@text(k)", "FunctionType::Returns(Returns::Text({}))"),
     ("@random", "FunctionType::Returns(Returns::Random)"),
+    (
+        "@date-part(k)",
+        "FunctionType::Returns(Returns::DatePart({}))",
+    ),
     ("@range(k)", "FunctionType::Returns(Returns::Range({}))"),
     (
         "@multirange(k)",
