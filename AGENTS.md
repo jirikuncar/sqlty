@@ -44,8 +44,8 @@ Tests run in parallel (pytest-xdist, `-n auto`) and in random order
 on another having run, nor on the working directory or global state another
 changes. Tests that measure wall time are marked `timing`: the default run
 leaves them out, since parallel workers slow them, and `make test` runs them
-alone afterwards. Tests marked `pg` need a PostgreSQL server (`SQLTY_PG_DSN`); each
-worker gets its own database on it (`tests/conftest.py`): `uv run pytest -m pg`.
+alone afterwards. Tests marked `pg` run when `SQLTY_PG_DSN` points to a PostgreSQL server; each
+worker gets its own database on it (`tests/conftest.py`).
 
 A test that needs a package sqlty does not depend on imports it at the top, and
 the package goes in a dependency group (`[dependency-groups]` in `pyproject.toml`),
@@ -78,7 +78,7 @@ argument's value, say), add a `@` result kind to `compile.rs` and cite the rule.
 lookup order and how to verify a `reference`. Every rule needs a `reference` to
 vendor documentation of the version the tests target, one per database
 (`reference.postgres` for PostgreSQL 17, `reference.mysql` for MySQL 8.4,
-`reference.sqlite` for SQLite 3), checked against the published page, and a one-sentence `reasoning`;
+`reference.sqlite` for SQLite 3, `reference.duckdb` for DuckDB 2.0), checked against the published page, and a one-sentence `reasoning`;
 the build fails otherwise. `sqlty check --explain` and `-- rules:` mdtest
 assertions show which rule typed a column; every rule needs one, in
 `tests/mdtest/type_inference/rule_coverage.md` if nowhere else

@@ -583,10 +583,10 @@ fn transform(
                         true => Vec::new(),
                         false => sqlty_project::skipped_strings(text, settings)?,
                     };
-                    (sqlty_project::rewritten(text, settings)?, warnings)
+                    (sqlty_project::rewritten(text, settings), warnings)
                 }
-                Transform::Strip => (sqlty_project::stripped(text, settings)?, Vec::new()),
-                Transform::Format => (sqlty_project::formatted(text, settings)?, Vec::new()),
+                Transform::Strip => (sqlty_project::stripped(text, settings), Vec::new()),
+                Transform::Format => (sqlty_project::formatted(text, settings), Vec::new()),
             })
         },
     );

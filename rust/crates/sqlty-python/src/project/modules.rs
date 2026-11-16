@@ -76,12 +76,8 @@ impl Packages {
                 .components()
                 .map(|part| part.as_os_str().to_string_lossy().into_owned())
                 .collect();
-            if let Some(last) = relative.last_mut() {
-                *last = stem_of(last);
-            }
-            if relative.last().is_some_and(|last| last == "__init__") {
-                relative.pop();
-            }
+            let last = relative.pop().map(|last| stem_of(&last));
+            relative.extend(last.filter(|last| last != "__init__"));
             let name = root
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned());
@@ -117,10 +113,7 @@ impl Packages {
             })
             .collect();
         let mut seen: Vec<&Path> = Vec::new();
-        for file in files {
-            let Some(directory) = file.parent() else {
-                continue;
-            };
+        for directory in files.iter().filter_map(|file| file.parent()) {
             if seen.contains(&directory) {
                 continue;
             }
@@ -170,10 +163,6 @@ pub fn helper_roots(
 
 /// `path` under `root`, compared as the platform compares paths.
 fn strip(path: &Path, root: &Path) -> Option<PathBuf> {
-    let fold = |path: &Path| match cfg!(windows) {
-        true => PathBuf::from(path.to_string_lossy().to_lowercase()),
-        false => path.to_path_buf(),
-    };
     let depth = fold(path)
         .strip_prefix(fold(root))
         .ok()?
@@ -181,6 +170,16 @@ fn strip(path: &Path, root: &Path) -> Option<PathBuf> {
         .count();
     let parts: Vec<_> = path.components().collect();
     (depth > 0).then(|| parts[parts.len() - depth..].iter().collect())
+}
+
+#[cfg(windows)]
+fn fold(path: &Path) -> PathBuf {
+    PathBuf::from(path.to_string_lossy().to_lowercase())
+}
+
+#[cfg(not(windows))]
+fn fold(path: &Path) -> PathBuf {
+    path.to_path_buf()
 }
 
 fn stem(path: &Path) -> String {
@@ -257,6 +256,8 @@ mod tests {
         );
         assert_eq!(names("/w/scripts/__init__.py", &["scripts"]), ["scripts"]);
         assert_eq!(names("/elsewhere/.hidden.py", &["."]), [".hidden"]);
+        assert_eq!(names("/elsewhere/run", &[]), ["run"]);
+        assert_eq!(names("/__init__.py", &[]), ["__init__"]);
     }
 
     #[test]

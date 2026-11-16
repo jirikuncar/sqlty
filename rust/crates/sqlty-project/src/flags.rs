@@ -180,24 +180,21 @@ impl Flags {
                 Err(error) => return Err(error.to_string()),
             },
         };
-        let rules = self.rules();
         for (key, value) in &self.overrides {
             if key != "rules" {
                 loaded.table.insert(key.clone(), value.clone());
             }
         }
+        let mut rules = match loaded.table.remove("rules") {
+            Some(Value::Table(own)) => own,
+            _ => Table::new(),
+        };
+        let flagged = self.rules().into_iter();
+        rules.extend(flagged.map(|(rule, severity)| (rule, Value::String(severity))));
         if !rules.is_empty() {
-            let own = loaded
+            loaded
                 .table
-                .entry("rules")
-                .or_insert_with(|| Value::Table(Table::new()));
-            if let Value::Table(own) = own {
-                own.extend(
-                    rules
-                        .into_iter()
-                        .map(|(rule, severity)| (rule, Value::String(severity))),
-                );
-            }
+                .insert("rules".to_string(), Value::Table(rules));
         }
         Ok(loaded)
     }
@@ -283,4 +280,55 @@ pub fn repr(text: &str) -> String {
     }
     out.push(quote);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn overrides(assignments: &[&str]) -> Result<Table, String> {
+        let assignments: Vec<String> = assignments.iter().map(ToString::to_string).collect();
+        parse_overrides(&assignments)
+    }
+
+    #[test]
+    fn merges_the_assignments_key_by_key() {
+        let table = overrides(&[
+            "rules.select-star = \"warn\"",
+            "rules = { unknown-column = \"ignore\" }",
+            "dialect = \"mysql\"",
+            "dialect = \"sqlite\"",
+        ])
+        .expect("parses");
+        assert_eq!(
+            table.to_string(),
+            "dialect = \"sqlite\"\n\n[rules]\nselect-star = \"warn\"\nunknown-column = \"ignore\"\n"
+        );
+    }
+
+    #[test]
+    fn reports_what_is_not_an_assignment() {
+        assert_eq!(
+            overrides(&["ci.toml"]).err().as_deref(),
+            Some(
+                "--config expects a TOML assignment such as 'dialect = \"mysql\"', got 'ci.toml'; \
+                 use --config-file for a file"
+            )
+        );
+        let error = overrides(&["dialect = mysql"]).err().unwrap_or_default();
+        assert!(
+            error.starts_with("--config 'dialect = mysql': ")
+                && error.ends_with("; quote strings, as in -c 'dialect = \"mysql\"', or use --config-file for a file"),
+            "{error}"
+        );
+        let error = overrides(&["dialet = \"mysql\""]).err().unwrap_or_default();
+        assert!(error.contains("dialect"), "{error}");
+    }
+
+    #[test]
+    fn spells_strings_as_python_does() {
+        assert_eq!(repr("it's"), "\"it's\"");
+        assert_eq!(repr("a'\"b"), "'a\\'\"b'");
+        assert_eq!(repr("\\\n\r\t\u{7}é"), "'\\\\\\n\\r\\t\\x07é'");
+    }
 }

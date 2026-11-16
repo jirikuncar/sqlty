@@ -505,8 +505,17 @@ impl HelperIndex {
         dotted: &str,
         module: Option<&str>,
     ) -> Option<(&'a Source, &'a Expr)> {
-        let name = source.module.as_deref().or(module);
-        let (functions, modules) = imports_of(&source.entries, name);
+        self.fragment_of(&source.entries, dotted, source.module.as_deref().or(module))
+    }
+
+    /// [`Self::fragment`] for the module `module` that imports `entries`.
+    pub fn fragment_of(
+        &self,
+        entries: &[Import],
+        dotted: &str,
+        module: Option<&str>,
+    ) -> Option<(&Source, &Expr)> {
+        let (functions, modules) = imports_of(entries, module);
         match dotted.rsplit_once('.') {
             None => {
                 let (module, original) = functions.get(dotted)?;
@@ -699,6 +708,22 @@ mod tests {
         let (functions, modules) = imports_of(&source.entries, None);
         assert_eq!(functions.keys().collect::<Vec<_>>(), ["e"]);
         assert_eq!(modules.keys().collect::<Vec<_>>(), ["e"]);
+    }
+
+    #[test]
+    fn a_top_level_module_imports_relative_to_the_root() {
+        let source = Source::new(
+            "from . import a\nfrom .. import b\nfrom .c import d\n",
+            (3, 14),
+        )
+        .unwrap();
+        let (_, modules) = imports_of(&source.entries, Some("app"));
+        let mut modules: Vec<_> = modules.into_iter().collect();
+        modules.sort();
+        assert_eq!(
+            modules,
+            [("a".into(), "a".into()), ("d".into(), "c.d".into())]
+        );
     }
 
     #[test]

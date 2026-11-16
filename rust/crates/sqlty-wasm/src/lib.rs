@@ -495,7 +495,6 @@ mod abi {
     }
 }
 
-/// The `project` answer for `directory`, reading `files`.
 /// `table` as `file` reads it, `base` the directory of its configuration.
 fn routed(
     table: &serde_json::Map<String, Value>,
@@ -516,12 +515,13 @@ fn routed(
         &missing,
         &project::Excludes::default(),
     );
-    match json!(project::file_table(&project, &found)) {
-        Value::Object(table) => table,
-        _ => table.clone(),
-    }
+    json!(project::file_table(&project, &found))
+        .as_object()
+        .cloned()
+        .unwrap_or_default()
 }
 
+/// The `project` answer for `directory`, reading `files`.
 fn project(directory: &str, files: &HashMap<String, Option<String>>) -> Value {
     let read = |path: &Path| match path.to_str().and_then(|path| files.get(path)) {
         Some(Some(text)) => Read::Text(text.as_bytes().to_vec()),

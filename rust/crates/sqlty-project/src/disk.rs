@@ -52,3 +52,15 @@ impl Files for Disk {
         }
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_relative_path_that_does_not_exist_stays() {
+        let missing = Path::new("no-such-dir/x.py");
+        assert_eq!(Disk.canonical(missing), missing);
+    }
+}

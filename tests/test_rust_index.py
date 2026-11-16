@@ -17,7 +17,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from sqlty import _check
+from sqlty import _check, _core
 from sqlty._helpers import HelperIndex
 from sqlty._source import ParsedSource
 from sqlty.core import check_source
@@ -354,6 +354,29 @@ REVIEWED = {
         "SQL[RA]('--sql\\nSELECT 1 AS x')\nSQL[RB2]('--sql\\nSELECT 1 AS w')\n",
         1,
     ),
+    "cyclic re-exports": (
+        {
+            "a": "from b import run\n",
+            "b": "from a import run\n",
+            "c": "def run(q: Annotated[str, SQL]): ...\n",
+        },
+        "from a import run\nrun('SELECT nope FROM t')\n",
+        0,
+    ),
+    "imported type a module lacks": (
+        {"a": "x = 1\n"},
+        "from a import Missing\nclass R(TypedDict):\n    v: Missing\nSQL[R]('--sql\\nSELECT 1 AS v')\n",
+        0,
+    ),
+    "re-exported alias": (
+        {
+            "a": "Name = str\n",
+            "b": "from a import Name\n",
+            "c": "from b import Name\ndef run(q: Annotated[str, SQL], t: type[Name]) -> Name: ...\n",
+        },
+        "from c import run\nrun('SELECT 1 AS v', str)\n",
+        1,
+    ),
 }
 
 
@@ -376,7 +399,7 @@ def test_registered_file_rust_does_not_read(tmp_path: Path) -> None:
         index = HelperIndex()
         index.register("ext.run", "sql", "row", roots=[first, second])
         # The first root holding the file ends the search: the helper takes keywords only.
-        positional, keywords, *_ = index.rust().helpers()["ext"]["run"]
+        positional, keywords, *_ = _core.index_helpers(index.rust())["ext"]["run"]
         assert (positional, keywords) == ([], ["row", "sql"])
 
 
