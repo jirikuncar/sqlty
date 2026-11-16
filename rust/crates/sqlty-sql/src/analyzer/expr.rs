@@ -266,7 +266,7 @@ impl<'a> Analyzer<'a> {
                 let returns = match self.dialect {
                     SqlDialect::MySql => Returns::Integral,
                     // SQLite returns an integer argument as it is.
-                    SqlDialect::Sqlite if typed.python.as_deref() == Some("int") => Returns::Arg(0),
+                    SqlDialect::Sqlite if python_kind(&typed) == Some("int") => Returns::Arg(0),
                     _ => Returns::Real,
                 };
                 self.function_type_of(returns, &[inner], &[Some(typed), None], scope)

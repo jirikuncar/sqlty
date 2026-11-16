@@ -1293,8 +1293,9 @@ SELECT json_object() AS json_text_non_null
 ```
 
 ```sql
-SELECT exp(1) AS math_double
+SELECT exp(1) AS math_double, subtype(1) AS scalar_subtype
 -- rules: math_double: sqlite.math.double / sqlite.math.double
+-- rules: scalar_subtype: sqlite.scalar.subtype / sqlite.scalar.subtype
 ```
 
 ```sql
