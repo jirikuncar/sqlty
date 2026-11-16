@@ -748,6 +748,7 @@ def test_check_exit_codes(tmp_path, monkeypatch, capsys) -> None:
 
 
 def test_internal_error_exits_2(tmp_path, monkeypatch, capsys) -> None:
+    import sqlty._core
     import sqlty.core
 
     def boom(*args, **kwargs):
@@ -755,6 +756,7 @@ def test_internal_error_exits_2(tmp_path, monkeypatch, capsys) -> None:
 
     (tmp_path / "q.py").write_text("x = 1\n")
     monkeypatch.setattr(sqlty.core, "strip_source", boom)
+    monkeypatch.setattr(sqlty._core, "cli", boom)
 
     code, _, err = _run(["strip", str(tmp_path / "q.py")], capsys)
 

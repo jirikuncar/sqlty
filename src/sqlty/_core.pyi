@@ -376,6 +376,10 @@ def skills() -> list[tuple[str, str]]: ...
 def serve() -> None:
     """Serve the language server on standard input and output until the client exits."""
 
+def cli(args: list[str]) -> int | None:
+    """Run ``sqlty ARGS...`` (``args[0]`` is the program); the exit code, or None for a
+    command the Python CLI still runs."""
+
 def schema_skipped_tables(schema_sql: str | Schema, *, dialect: str = "postgres") -> list[str]: ...
 def schema_skipped_objects(
     schema_sql: str | Schema, *, dialect: str = "postgres"
