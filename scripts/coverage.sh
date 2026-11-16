@@ -16,7 +16,8 @@ pytest=(uv run --no-sync pytest --cov --cov-append --cov-fail-under=0)
 for ast in compare rust; do
   SQLTY_AST=$ast "${pytest[@]}" -m "not timing and not pg" tests/mdtest tests/test_cli.py \
     tests/test_helpers.py tests/test_psycopg.py tests/test_driver_values.py \
-    tests/test_type_extractor.py tests/test_cross_module.py
+    tests/test_type_extractor.py tests/test_cross_module.py \
+    tests/e2e/test_breaking_e2e.py
 done
 if [[ -n ${SQLTY_PG_DSN:-} ]]; then
   "${pytest[@]}" -m pg -n 0
