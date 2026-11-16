@@ -13,10 +13,8 @@ Commands:
 from __future__ import annotations
 
 import codecs
-import fnmatch
 import functools
 import gc
-import glob
 import itertools
 import json
 import logging
@@ -24,7 +22,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass, replace
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn, cast
 
 if TYPE_CHECKING:
@@ -995,7 +993,7 @@ def _collect_query_files(
     found: dict[Path, None] = {}
     for directory in dict.fromkeys(directories):
         project = resolver.for_file(directory / "_")
-        for settings in [project, *(database for _, _, database in project.databases)]:
+        for settings in [project, *(database for _, database in project.databases)]:
             if not settings.queries or settings.config_dir is None:
                 continue
             for file in expand_schema(list(settings.queries), settings.config_dir):
@@ -1161,6 +1159,12 @@ class ConfigSource:
         """Whether ``path`` or one of its parents up to a glob's base directory is excluded."""
         return _discovered(self._discovery.is_excluded, path)
 
+    def route(
+        self, routing: dict[str, object], base: Path, path: Path
+    ) -> tuple[str | None, dict[str, str]]:
+        """The database ``path`` belongs to and the rules its overrides set; see ``_routing``."""
+        return self._discovery.route(routing, str(base), str(path))
+
     def walk(self, root: Path) -> list[Path]:
         """The ``.py`` files under ``root``, sorted, without excluded directories and files."""
         return _discovered(self._discovery.walk, root)
@@ -1173,53 +1177,6 @@ def _discovered[T](method: Callable[[str], T], path: Path) -> T:
         return method(str(path))
     except ValueError as exc:
         raise ConfigError(str(exc)) from None
-
-
-@functools.cache
-def _exclude_matchers(patterns: tuple[str, ...]) -> tuple[re.Pattern[str], re.Pattern[str]]:
-    """Compiled ``(name, relative path)`` matchers for exclude globs; built once per pattern set.
-
-    A glob without a slash matches a file or directory name at any depth;
-    every glob also matches the path relative to the config directory.
-    """
-    names: list[str] = []
-    paths: list[str] = []
-    for pattern in patterns:
-        pattern = pattern.strip("/")
-        if "/" not in pattern:
-            names.append(fnmatch.translate(pattern))
-        paths.append(glob.translate(pattern, recursive=True, include_hidden=True))
-    never = r"(?!)"
-    return (
-        re.compile("|".join(names) or never, re.DOTALL),
-        re.compile("|".join(paths) or never, re.DOTALL),
-    )
-
-
-def _is_excluded_entry(
-    name: str, relative_dir: PurePosixPath | None, patterns: tuple[str, ...]
-) -> bool:
-    """Whether the entry ``name`` of ``relative_dir`` matches an exclude glob.
-
-    ``relative_dir`` is the resolved parent relative to the glob's base directory,
-    or ``None`` when it lies outside it (only globs without a slash match then).
-    """
-    by_name, by_path = _exclude_matchers(patterns)
-    if by_name.match(name):
-        return True
-    return relative_dir is not None and bool(by_path.match((relative_dir / name).as_posix()))
-
-
-def _is_included(path: Path, base: Path, patterns: tuple[str, ...]) -> bool:
-    """Whether ``path`` or a directory holding it matches a glob relative to ``base``, as excludes do."""
-    resolved = path.resolve()
-    if not resolved.is_relative_to(base):
-        return False
-    relative = PurePosixPath(resolved.relative_to(base).as_posix())
-    return any(
-        _is_excluded_entry(entry.name, entry.parent, patterns)
-        for entry in [relative, *relative.parents[:-1]]
-    )
 
 
 @functools.cache
@@ -1318,23 +1275,16 @@ class Settings:
     config_dir: Path | None = None
     queries: tuple[str, ...] = ()
     query_format: str = "auto"
-    databases: tuple[tuple[tuple[str, ...], tuple[str, ...], Settings], ...] = ()
+    databases: tuple[tuple[str, Settings], ...] = ()
+    # What picks the database and overrides of a file: ``queries``, ``databases``, ``overrides``.
+    routing: dict[str, object] | None = None
 
     def names_query_file(self, path: Path) -> bool:
         """Whether ``queries`` names ``path``, as a file, a directory holding it or a glob."""
-        if path.suffix != ".sql" or not self.queries or self.config_dir is None:
-            return False
-        resolved = path.resolve()
-        base = self.config_dir.resolve()
-        if not resolved.is_relative_to(base):
-            return False
-        relative = resolved.relative_to(base).as_posix()
-        return any(
-            relative == entry.strip("/")
-            or relative.startswith(entry.strip("/") + "/")
-            or re.fullmatch(glob.translate(entry, recursive=True, include_hidden=True), relative)
-            is not None
-            for entry in self.queries
+        from sqlty import _core
+
+        return self.config_dir is not None and _core.names_query_file(
+            str(path), str(self.config_dir), list(self.queries)
         )
 
     @property
@@ -1402,25 +1352,14 @@ class SettingsResolver:
         if directory not in self._by_dir:
             self._by_dir[directory] = self._resolve(directory)
         settings = self._by_dir[directory]
-        if settings.databases and not settings.names_query_file(path):
-            assert settings.config_dir is not None
-            for include, exclude, database in settings.databases:
-                if database.names_query_file(path) or (
-                    _is_included(path, settings.config_dir, include)
-                    and not (exclude and _is_included(path, settings.config_dir, exclude))
-                ):
-                    settings = database
-                    break
-        if not settings.overrides or settings.config_dir is None:
+        if settings.routing is None or settings.config_dir is None:
             return settings
-        rules = dict(settings.rules or {})
-        for override in settings.overrides:
-            include, exclude = tuple(override["include"]), tuple(override["exclude"])
-            if (not include or _is_included(path, settings.config_dir, include)) and not (
-                exclude and _is_included(path, settings.config_dir, exclude)
-            ):
-                rules |= override["rules"]
-        return replace(settings, rules=rules | self.source.cli_rules)
+        database, rules = self.source.route(settings.routing, settings.config_dir, path)
+        if database is not None:
+            settings = dict(settings.databases)[database]
+        if not settings.overrides:
+            return settings
+        return replace(settings, rules=(settings.rules or {}) | rules | self.source.cli_rules)
 
     def _resolve(self, directory: Path) -> Settings:
 
@@ -1430,6 +1369,8 @@ class SettingsResolver:
             schema_sql = _load_schema(config["schema"], config_dir)
         settings = self._settings(config, config_dir, label, schema_sql, self._args.dialect)
         databases = []
+        if config.get("databases") or config.get("overrides"):
+            settings = replace(settings, routing=_routing(config))
         for name, database in config.get("databases", {}).items():
             merged = cast("SQLTyConfig", {**config, **database})
             merged.pop("databases")
@@ -1442,8 +1383,6 @@ class SettingsResolver:
             databases.append(
                 (
                     name,
-                    tuple(database.get("include", ())),
-                    tuple(database.get("exclude", ())),
                     self._settings(
                         merged,
                         config_dir,
@@ -1457,7 +1396,7 @@ class SettingsResolver:
             return settings
         from sqlty.core import load_schema
 
-        named = {"default": settings} | {name: db for name, _, _, db in databases}
+        named = {"default": settings} | dict(databases)
         plain = {
             name: db.schema or load_schema(None, dialect=db.dialect) for name, db in named.items()
         }
@@ -1481,10 +1420,7 @@ class SettingsResolver:
             for name, db in named.items()
         }
         return replace(
-            routed["default"],
-            databases=tuple(
-                (include, exclude, routed[name]) for name, include, exclude, _ in databases
-            ),
+            routed["default"], databases=tuple((name, routed[name]) for name, _ in databases)
         )
 
     def _settings(
@@ -1731,6 +1667,21 @@ class Project:
         checked = _checked_roots(self.paths, self.resolved.values())
         helpers_for = configured_helpers(self.index, checked)
         self.helpers = {path: helpers_for(self.settings[path]) for path in self.files}
+
+
+def _routing(config: SQLTyConfig) -> dict[str, object]:
+    """The keys of ``config`` that pick the database and overrides of a file."""
+    databases = config.get("databases", {})
+    return {
+        "queries": _paths(config.get("queries", ())),
+        "databases": {
+            name: {
+                key: database[key] for key in ("queries", "include", "exclude") if key in database
+            }
+            for name, database in databases.items()
+        },
+        "overrides": list(config.get("overrides", ())),
+    }
 
 
 def _load_schema(spec: SchemaSpec, base: Path) -> str | None:

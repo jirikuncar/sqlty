@@ -31,8 +31,11 @@ use toml::{Table, Value};
 use crate::config::{load, Config, LoadError, CONFIG_FILES};
 
 mod glob;
+mod route;
 mod walk;
 
+pub use glob::Excludes;
+pub use route::{file_table, names_query_file, route, Route};
 pub use walk::{schema_files, Discovery, DEFAULT_EXCLUDE};
 
 /// What the host has of a file.

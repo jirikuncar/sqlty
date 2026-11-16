@@ -32,7 +32,11 @@ test("the closest table wins, and a file without one is passed over", async () =
     "app/pyproject.toml": "[project]\nname = 'app'\n",
     "app/deep/.keep": "",
   });
-  assert.deepEqual(await at(root, "app/deep"), { settings: { dialect: "sqlite" }, schema: "" });
+  assert.deepEqual(await at(root, "app/deep"), {
+    settings: { dialect: "sqlite" },
+    schema: "",
+    base: root,
+  });
   assert.deepEqual(await at(tree({})), { settings: {}, schema: "" });
 });
 
@@ -50,6 +54,7 @@ test("schema reads files, directories and globs in order, once each", async () =
   assert.deepEqual(await at(root), {
     settings: { schema: ["b.sql", "dir", "g/*", "missing.sql", "b.sql"] },
     schema: "B\nY\nZ\nG1\nG2",
+    base: root,
   });
 });
 
@@ -69,6 +74,7 @@ test("extend applies a base under the table, rules and types merged, its schema 
       types: { x: "int", y: "str" },
     },
     schema: "ONE",
+    base: join(root, "app"),
   });
 });
 
