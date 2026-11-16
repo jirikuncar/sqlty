@@ -73,10 +73,8 @@ pub struct Environment {
 impl Environment {
     fn of_executable() -> Self {
         let executable = std::env::current_exe().and_then(std::fs::canonicalize);
-        match executable {
-            Ok(executable) => Self::of_scripts(executable.parent().unwrap_or(Path::new("."))),
-            Err(_) => Self::of_scripts(Path::new(".")),
-        }
+        let executable = executable.unwrap_or_default();
+        Self::of_scripts(executable.parent().unwrap_or(Path::new(".")))
     }
 
     /// The environment whose scripts directory (`bin` or `Scripts`) is `scripts`.
@@ -233,9 +231,8 @@ impl Host for Native<'_> {
     }
 
     fn write(&mut self, path: &Path, data: &[u8]) -> Result<(), String> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
+        let parent = path.parent().unwrap_or(Path::new("."));
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         std::fs::write(path, data).map_err(|error| error.to_string())
     }
 
@@ -295,11 +292,16 @@ mod tests {
         .unwrap();
         let found = Environment::of_scripts(&root.join("bin"));
         assert_eq!(found.version, (3, 14));
-        assert_eq!(found.path[..2], [root.join("bin"), site]);
+        assert_eq!(found.path[..2], [root.join("bin"), site.clone()]);
         assert_eq!(found.path.len(), 3);
         assert!(found.path[2].ends_with("src"));
+        std::fs::write(site.join("b.pth"), b"\xff").unwrap();
         std::fs::remove_file(root.join("pyvenv.cfg")).unwrap();
+        assert_eq!(Environment::of_scripts(&root.join("bin")).path.len(), 3);
         assert_eq!(Environment::of_scripts(&root.join("bin")).version, (3, 13));
         std::fs::remove_dir_all(&root).unwrap();
+        let bare = Environment::of_scripts(&root.join("bin"));
+        assert_eq!(bare.path, [root.join("bin")]);
+        assert_eq!(bare.version.0, 3);
     }
 }
