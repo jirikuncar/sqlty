@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import ast
 import collections
+import os
+import subprocess
+import sys
 import tokenize
 
 import pytest
@@ -196,3 +199,35 @@ def test_rust_reads_ignore_comments_as_tokenize_does(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(_source, "AST", "rust")
     assert ParsedSource(text).ignores == python
     assert [i.rules for i in python.values()] == [("select-star",), None]
+
+
+@pytest.mark.parametrize("ast_env", [None, "rust", "compare", "python"])
+def test_rust_checks_by_default_and_python_is_deprecated(ast_env: str | None) -> None:
+    env = {k: v for k, v in os.environ.items() if k != "SQLTY_AST"}
+    if ast_env:
+        env["SQLTY_AST"] = ast_env
+    run = subprocess.run(
+        [sys.executable, "-c", "from sqlty._source import AST; print(AST)"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert run.stdout == f"{ast_env or 'rust'}\n"
+    warned = "FutureWarning: SQLTY_AST=python is deprecated" in run.stderr
+    assert warned is (ast_env == "python")
+
+
+@pytest.mark.parametrize(
+    ("style", "wrapper"),
+    [
+        (None, "SQL"),
+        ("import sqlty", "sqlty.SQL"),
+        ("from sqlty import SQL as Q", "Q"),
+        ("import sqlty as sq", "sq.SQL"),
+        ("import os", None),
+    ],
+)
+def test_wrapper_name_of_each_import_style(style: str | None, wrapper: str | None) -> None:
+    from sqlty._source import _wrapper_name
+
+    assert _wrapper_name(style) == wrapper
