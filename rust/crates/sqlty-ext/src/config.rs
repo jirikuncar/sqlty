@@ -222,6 +222,20 @@ impl PyDiscovery {
             .map_err(find_error)
     }
 
+    /// `(database, rules)` of the file at `path` in the project of `table` (its `queries`,
+    /// `databases` and `overrides`), whose paths are relative to `base`.
+    fn route<'py>(
+        &self,
+        py: Python<'py>,
+        table: &Bound<'py, PyDict>,
+        base: &str,
+        path: &str,
+    ) -> PyResult<(Option<String>, Bound<'py, PyDict>)> {
+        let table = to_table(table)?;
+        let found = py.detach(|| self.0.route(&table, Path::new(base), Path::new(path)));
+        Ok((found.database, table_to_py(py, &found.rules)?))
+    }
+
     /// The `.py` files under `root`, sorted, as joined to `root`.
     fn walk(&self, py: Python<'_>, root: &str) -> PyResult<Vec<PathBuf>> {
         py.detach(|| self.0.walk(Path::new(root)))
@@ -245,6 +259,19 @@ fn schema_files(
         .map_err(find_error)
 }
 
+/// Whether `queries`, relative to `base`, names the `.sql` file at `path`: as the file, a
+/// directory holding it, or a glob.
+#[pyfunction]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "PyO3 extracts a Vec, not a slice"
+)]
+fn names_query_file(path: &str, base: &str, queries: Vec<String>) -> bool {
+    let path = Path::new(path);
+    let (resolved, base) = (Disk.canonical(path), Disk.canonical(Path::new(base)));
+    project::names_query_file(path, &resolved, &base, &queries)
+}
+
 /// Add the key lists and `ConfigSyntaxError` to the module.
 pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ConfigSyntaxError", m.py().get_type::<ConfigSyntaxError>())?;
@@ -258,6 +285,7 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(find_config, m)?)?;
     m.add_function(wrap_pyfunction!(config_file, m)?)?;
     m.add_function(wrap_pyfunction!(schema_files, m)?)?;
+    m.add_function(wrap_pyfunction!(names_query_file, m)?)?;
     m.add_class::<PyDiscovery>()?;
     m.add("DEFAULT_EXCLUDE", project::DEFAULT_EXCLUDE)?;
     Ok(())

@@ -1646,6 +1646,7 @@ dependencies = [
  "sqlty-format",
  "sqlty-python",
  "sqlty-sql",
+ "toml",
 ]
 
 [[package]]

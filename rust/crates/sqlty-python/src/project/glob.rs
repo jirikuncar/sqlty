@@ -1,5 +1,9 @@
 //! Shell globs as Python's `fnmatch` and `glob` read them, translated to `regex`.
 
+use std::collections::HashMap;
+use std::path::Path;
+use std::sync::{Arc, Mutex, PoisonError};
+
 use regex::Regex;
 
 /// `fnmatch.translate`: `*` any run of characters, `?` one, `[...]` a set (`[!...]`
@@ -58,6 +62,77 @@ impl Segment {
     pub fn matches(&self, name: &str) -> bool {
         (self.hidden || !name.starts_with('.')) && self.regex.is_match(name)
     }
+}
+
+/// Exclude globs, as `exclude`, `include` and `overrides` read them, compiled once per set:
+/// a glob without a slash matches a name at any depth; every glob matches the path
+/// relative to the directory of its configuration.
+#[derive(Default)]
+pub struct Excludes(Mutex<HashMap<Vec<String>, Matchers>>);
+
+/// `(name, relative path)` matchers of a set of globs.
+type Matchers = Arc<(Regex, Regex)>;
+
+impl Excludes {
+    /// Whether the entry `name` of `directory`, relative to the globs' base (`None` outside
+    /// it, where only globs without a slash match), matches one of `globs`.
+    pub fn entry(&self, name: &str, directory: Option<&str>, globs: &[String]) -> bool {
+        let compiled = self.compiled(globs);
+        let (by_name, by_path) = &*compiled;
+        by_name.is_match(name)
+            || directory.is_some_and(|directory| match directory {
+                "." => by_path.is_match(name),
+                directory => by_path.is_match(&format!("{directory}/{name}")),
+            })
+    }
+
+    /// Whether the resolved `path`, or a directory holding it under `base`, matches.
+    pub fn path(&self, path: &Path, base: &Path, globs: &[String]) -> bool {
+        let Ok(relative) = path.strip_prefix(base) else {
+            return false;
+        };
+        let parts: Vec<String> = relative
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        (0..parts.len()).any(|end| {
+            let directory = match end {
+                0 => ".".to_string(),
+                _ => parts[..end].join("/"),
+            };
+            self.entry(&parts[end], Some(&directory), globs)
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn sets(&self) -> usize {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).len()
+    }
+
+    fn compiled(&self, globs: &[String]) -> Matchers {
+        let mut cache = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        cache
+            .entry(globs.to_vec())
+            .or_insert_with(|| Arc::new(matchers(globs)))
+            .clone()
+    }
+}
+
+fn matchers(globs: &[String]) -> (Regex, Regex) {
+    let mut names = Vec::new();
+    let mut paths = Vec::new();
+    for pattern in globs {
+        let pattern = pattern.trim_matches('/');
+        if !pattern.contains('/') {
+            names.push(fnmatch(pattern));
+        }
+        paths.push(path(pattern));
+    }
+    let compile = |found: Vec<String>| match found.is_empty() {
+        true => Regex::new(NEVER).expect("a valid pattern"),
+        false => Regex::new(&format!("^(?:{})", found.join("|"))).expect("translated globs"),
+    };
+    (compile(names), compile(paths))
 }
 
 /// A class that matches nothing; `regex` has no `(?!)`.

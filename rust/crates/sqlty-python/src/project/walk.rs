@@ -6,10 +6,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
-use regex::Regex;
 use toml::{Table, Value};
 
-use super::glob::{self, Segment};
+use super::glob::{self, Excludes, Segment};
+use super::route::{self, Route};
 use super::{find, normalized, Files, FindError, Kind, Listing, Read};
 
 /// The globs `exclude` has when the configuration does not set it.
@@ -54,12 +54,12 @@ pub struct Discovery {
     extend_exclude: Vec<String>,
     respect_gitignore: Option<bool>,
     state: Mutex<State>,
+    excludes: Excludes,
 }
 
 #[derive(Default)]
 struct State {
     configs: HashMap<PathBuf, Option<(Table, PathBuf)>>,
-    matchers: HashMap<Vec<String>, (Regex, Regex)>,
     chains: HashMap<PathBuf, Option<Vec<(PathBuf, Gitignore)>>>,
 }
 
@@ -77,6 +77,7 @@ impl Discovery {
             extend_exclude: Vec::new(),
             respect_gitignore: None,
             state: Mutex::default(),
+            excludes: Excludes::default(),
         }
     }
 
@@ -212,6 +213,18 @@ impl Discovery {
             .unwrap_or(true))
     }
 
+    /// The route of the file at `path` in the project of `table`, whose paths are relative
+    /// to `base`.
+    pub fn route(&self, table: &Table, base: &Path, path: &Path) -> Route {
+        route::route(
+            table,
+            base,
+            &self.absolute(path),
+            &*self.files,
+            &self.excludes,
+        )
+    }
+
     /// Whether `path`, or a directory holding it up to a glob's base, is excluded.
     pub fn is_excluded(&self, path: &Path) -> Result<bool, FindError> {
         let resolved = self.resolved(path);
@@ -244,42 +257,14 @@ impl Discovery {
     /// Whether `path` or a directory holding it matches one of `globs` relative to `base`,
     /// as excludes match.
     pub fn matches(&self, path: &Path, base: &Path, globs: &[String]) -> bool {
-        let resolved = self.resolved(path);
-        let Ok(relative) = resolved.strip_prefix(base) else {
-            return false;
-        };
-        let parts: Vec<String> = relative
-            .components()
-            .map(|part| part.as_os_str().to_string_lossy().into_owned())
-            .collect();
-        (0..parts.len()).any(|end| {
-            let directory = match end {
-                0 => ".".to_string(),
-                _ => parts[..end].join("/"),
-            };
-            self.excluded_entry(&parts[end], Some(&directory), globs)
-        })
+        self.excludes.path(&self.resolved(path), base, globs)
     }
 
     /// Whether the entry `name` of `directory` (relative to the globs' base, `None` outside
     /// it, where only globs without a slash match) matches an exclude glob. A glob without
     /// a slash matches a name at any depth; every glob matches the relative path.
     fn excluded_entry(&self, name: &str, directory: Option<&str>, globs: &[String]) -> bool {
-        let mut state = self.state();
-        let (by_name, by_path) = state
-            .matchers
-            .entry(globs.to_vec())
-            .or_insert_with(|| matchers(globs));
-        if by_name.is_match(name) {
-            return true;
-        }
-        directory.is_some_and(|directory| {
-            let path = match directory {
-                "." => name.to_string(),
-                directory => format!("{directory}/{name}"),
-            };
-            by_path.is_match(&path)
-        })
+        self.excludes.entry(name, directory, globs)
     }
 
     /// The `.py` files under `root`, sorted, without excluded directories and files.
@@ -407,24 +392,6 @@ impl Discovery {
             .map(|spec| vec![(base.to_path_buf(), spec)])
             .unwrap_or_default())
     }
-}
-
-/// `(name, relative path)` matchers of exclude globs.
-fn matchers(globs: &[String]) -> (Regex, Regex) {
-    let mut names = Vec::new();
-    let mut paths = Vec::new();
-    for pattern in globs {
-        let pattern = pattern.trim_matches('/');
-        if !pattern.contains('/') {
-            names.push(glob::fnmatch(pattern));
-        }
-        paths.push(glob::path(pattern));
-    }
-    let compile = |found: Vec<String>| match found.is_empty() {
-        true => Regex::new("[^\\s\\S]").expect("a valid pattern"),
-        false => Regex::new(&format!("^(?:{})", found.join("|"))).expect("translated globs"),
-    };
-    (compile(names), compile(paths))
 }
 
 fn file_name(path: &Path) -> String {
@@ -690,7 +657,7 @@ mod tests {
             ["./a/g.py", "./app/b.py", "./app/keep_pb2.py"]
         );
         assert_eq!(walked(&discovery, "app"), ["app/b.py", "app/keep_pb2.py"]);
-        assert_eq!(discovery.state().matchers.len(), 1);
+        assert_eq!(discovery.excludes.sets(), 1);
         assert!(discovery.is_excluded(Path::new("a/b/f.py")).unwrap());
         assert!(!discovery.is_excluded(Path::new("a/g.py")).unwrap());
 

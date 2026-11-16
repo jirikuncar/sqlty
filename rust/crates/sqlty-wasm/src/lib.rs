@@ -85,6 +85,12 @@ struct Request {
     /// The files `project` reads, by absolute path: the text, or `null` for no such file.
     #[serde(default)]
     files: HashMap<String, Option<String>>,
+    /// The directory `settings` came from, as `project` answers its `file`: with `file`, the
+    /// settings are those of `file`, its database and overrides applied.
+    #[serde(default)]
+    base: Option<String>,
+    #[serde(default)]
+    file: Option<String>,
 }
 
 /// Answer a JSON request about the Python `source`, read against `schema` in `dialect`.
@@ -131,7 +137,11 @@ pub fn run(request: &str) -> String {
         Op::Project => return project(&request.path, &request.files).to_string(),
     };
     let settings = match &request.settings {
-        Some(table) => Ok(resolved(table)),
+        Some(table) => Ok(resolved(&routed(
+            table,
+            request.base.as_ref(),
+            request.file.as_ref(),
+        ))),
         None => settings(&request.config),
     };
     let settings = match settings {
@@ -483,6 +493,32 @@ mod abi {
 }
 
 /// The `project` answer for `directory`, reading `files`.
+/// `table` as `file` reads it, `base` the directory of its configuration.
+fn routed(
+    table: &serde_json::Map<String, Value>,
+    base: Option<&String>,
+    file: Option<&String>,
+) -> serde_json::Map<String, Value> {
+    let (Some(base), Some(file)) = (base, file) else {
+        return table.clone();
+    };
+    let Ok(project) = serde_json::from_value::<toml::Table>(Value::Object(table.clone())) else {
+        return table.clone();
+    };
+    let missing = |_: &Path| Read::Missing;
+    let found = project::route(
+        &project,
+        Path::new(base),
+        Path::new(file),
+        &missing,
+        &project::Excludes::default(),
+    );
+    match json!(project::file_table(&project, &found)) {
+        Value::Object(table) => table,
+        _ => table.clone(),
+    }
+}
+
 fn project(directory: &str, files: &HashMap<String, Option<String>>) -> Value {
     let read = |path: &Path| match path.to_str().and_then(|path| files.get(path)) {
         Some(Some(text)) => Read::Text(text.as_bytes().to_vec()),
