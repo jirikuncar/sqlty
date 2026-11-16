@@ -415,8 +415,8 @@ def run(conn: psycopg.Connection, key: str, maybe: str | None) -> None:
 ### Constants
 
 A name bound once to a literal, with or without `Final`, has the literal's type, and so
-does a constant imported from a checked module. A call result and a parameter of unknown
-type keep the placeholder nullable.
+does a constant imported from a checked module, also one bound to another constant. A
+call result and a parameter of unknown type keep the placeholder nullable.
 
 ```toml
 [[tool.sqlty.functions]]
@@ -437,6 +437,7 @@ def fetch_all[T](query: str, row: type[T], /, **params: Any) -> list[T]: ...
 
 ```python
 LIMIT = "x"
+ALIAS = LIMIT
 ```
 
 ```python
@@ -457,6 +458,7 @@ def run(key) -> None:
     fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=FINAL)
     fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=LIMIT)
     fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=limits.LIMIT)
+    fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=limits.ALIAS)
     # error: [nullable-mismatch] "Row.key is str but query column 'key' can be NULL"
     fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=input())
     # error: [nullable-mismatch] "Row.key is str but query column 'key' can be NULL"

@@ -10,7 +10,7 @@
 //! - Source: `rewrite_source`, `add_param_types`, `strip_source`, `fix_source`, `check_source`,
 //!   `wrapped_queries`, `query_sites`.
 //! - Schema: `load_schema`, `schema_skipped_tables`, `schema_skipped_objects`, `name_rules`.
-//! - Configuration: `load_config`, `validate_config` and the key lists.
+//! - Configuration: `validate_config` and the key lists.
 //!
 //! Parsed schemas are cached per `(schema text, dialect)` in a small LRU shared by all
 //! threads, because callers pass the same few schemas call after call; `load_schema`

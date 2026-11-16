@@ -272,6 +272,11 @@ fn settings_of_a_file_take_its_database_and_overrides() {
         at("/w/lite/strict/q.py")["diagnostics"][0]["severity"],
         "error"
     );
+    let untoml = ask(&json!({
+        "op": "analyze", "source": source, "schema": "CREATE TABLE t (d DATE NOT NULL);",
+        "dialect": "postgres", "settings": {"import-style": null}, "base": "/w", "file": "/w/q.py",
+    }));
+    assert_eq!(untoml["queries"][0]["row_type"], "tuple[datetime.date]");
 }
 
 #[test]

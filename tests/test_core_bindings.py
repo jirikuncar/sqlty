@@ -48,15 +48,26 @@ def test_unknown_query_format(split: Callable[..., object]) -> None:
         split("SELECT 1", query_format="bogus")
 
 
-def test_module_with_a_missing_configuration() -> None:
+CONFIG = ("postgres", None, None, None, False, [], None, None)
+CHECK = (_core.check_modules, ("x = 1\n", None, 3))
+BREAKING = (_core.breaking_modules, ("x = 1\n", None, 0, 3))
+
+
+@pytest.mark.parametrize(("check", "module"), [CHECK, BREAKING])
+def test_module_with_a_missing_configuration(
+    check: Callable[..., object], module: tuple[object, ...]
+) -> None:
     with pytest.raises(ValueError, match="no configuration 3"):
-        _core.check_modules([("x = 1\n", None, 3)], [], version=VERSION)
+        check([module], [CONFIG], version=VERSION)
 
 
-def test_modules_with_an_unknown_import_style() -> None:
-    config = ("postgres", None, None, "bogus", False, [], None, None)
+@pytest.mark.parametrize(("check", "module"), [CHECK, BREAKING])
+def test_modules_with_an_unknown_import_style(
+    check: Callable[..., object], module: tuple[object, ...]
+) -> None:
+    config = CONFIG[:3] + ("bogus",) + CONFIG[4:]
     with pytest.raises(ValueError, match="bogus"):
-        _core.check_modules([("x = 1\n", None, 0)], [config], version=VERSION)
+        check([module[:-1] + (0,)], [config], version=VERSION)
 
 
 def test_cursor_defaults() -> None:

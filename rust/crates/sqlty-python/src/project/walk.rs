@@ -560,7 +560,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     /// Files by absolute path; a directory is every prefix of one, a `None` file a link to
-    /// a directory, and `/unread` is not read yet.
+    /// a directory, `/unread`, a directory `unread` and a file `<unread>` are not read yet,
+    /// a directory `gone` is missing and a file `<binary>` is not UTF-8.
     struct Tree(BTreeMap<PathBuf, Option<&'static str>>);
 
     impl Tree {
@@ -577,6 +578,8 @@ mod tests {
     impl Files for Tree {
         fn read(&self, path: &Path) -> Read {
             match self.0.get(path) {
+                Some(Some("<unread>")) => Read::Unread,
+                Some(Some("<binary>")) => Read::Text(vec![0xff]),
                 Some(Some(text)) => Read::Text(text.as_bytes().to_vec()),
                 _ if path.starts_with("/unread") => Read::Unread,
                 _ => Read::Missing,
@@ -585,8 +588,11 @@ mod tests {
 
         fn list(&self, path: &Path) -> Listing {
             let path = &normalized(path);
-            if path.starts_with("/unread") {
+            if path.starts_with("/unread") || path.ends_with("unread") {
                 return Listing::Unread;
+            }
+            if path.ends_with("gone") {
+                return Listing::Missing;
             }
             let mut entries: Vec<(String, Kind)> = Vec::new();
             for (file, text) in &self.0 {
@@ -712,6 +718,40 @@ mod tests {
         let broken = Tree::new(&[("/x/pyproject.toml", Some("[")), ("/x/.git/a.py", Some(""))]);
         let discovery = Discovery::new(Box::new(broken), Path::new("/x"));
         assert!(discovery.is_excluded(Path::new(".git/a.py")).unwrap());
+        let lazy = Tree::new(&[
+            ("/y/.git/HEAD", Some("")),
+            ("/y/.gitignore", Some("<unread>")),
+            ("/y/a.py", Some("")),
+        ]);
+        let discovery = Discovery::new(Box::new(lazy), Path::new("/y"));
+        assert!(matches!(
+            discovery.walk(Path::new(".")),
+            Err(FindError::Need(path)) if path == Path::new("/y/.gitignore")
+        ));
+        let nested = Tree::new(&[("/z/unread/sub/a.py", Some(""))]);
+        let discovery = Discovery::new(Box::new(nested), Path::new("/z/unread/sub"));
+        assert!(matches!(
+            discovery.walk(Path::new(".")),
+            Err(FindError::Need(path)) if path == Path::new("/z/unread")
+        ));
+    }
+
+    #[test]
+    fn a_missing_root_and_an_unreadable_gitignore_are_nothing() {
+        let tree = Tree::new(&[
+            ("/w/.git/HEAD", Some("")),
+            ("/w/.gitignore", Some("<binary>")),
+            ("/w/a.py", Some("")),
+        ]);
+        let discovery = Discovery::new(Box::new(tree), Path::new("/w"));
+        assert_eq!(walked(&discovery, "."), ["./a.py"]);
+        assert_eq!(walked(&discovery, "nope"), Vec::<String>::new());
+        let gone = Tree::new(&[("/z/gone/sub/a.py", Some(""))]);
+        let discovery = Discovery::new(Box::new(gone), Path::new("/z/gone/sub"));
+        assert_eq!(walked(&discovery, "."), ["./a.py"]);
+        let all =
+            Discovery::new(Box::new(project()), Path::new("/repo")).exclude(&["/repo".to_string()]);
+        assert_eq!(walked(&all, "app"), ["app/b.py", "app/keep_pb2.py"]);
     }
 
     #[test]
@@ -771,8 +811,20 @@ mod tests {
                 "/p/db/sub/c.sql"
             ]
         );
-        let unread = Tree::new(&[]);
-        let need = schema_files(&["*.sql".to_string()], Path::new("/unread"), &unread);
-        assert!(matches!(need, Err(FindError::Need(_))));
+        assert_eq!(entries(&["/p/db/*.sql"]).0, ["/p/db/a.sql", "/p/db/b.sql"]);
+        assert_eq!(
+            entries(&["db/a.sql/*"]),
+            (vec![], vec!["db/a.sql/*".to_string()])
+        );
+        let unread = Tree::new(&[("/q/db/unread/a.sql", Some(""))]);
+        for entry in ["*.sql", "a.sql", "db"] {
+            let need = schema_files(&[entry.to_string()], Path::new("/unread"), &unread);
+            assert!(matches!(need, Err(FindError::Need(_))), "{entry}");
+        }
+        let need = schema_files(&["db".to_string()], Path::new("/q"), &unread);
+        assert!(matches!(need, Err(FindError::Need(path)) if path == Path::new("/q/db/unread")));
+        let gone = Tree::new(&[("/q/db/gone/b.sql", Some("")), ("/q/db/a.sql", Some(""))]);
+        let found = schema_files(&["db".to_string()], Path::new("/q"), &gone).unwrap();
+        assert_eq!(found, (vec![PathBuf::from("/q/db/a.sql")], vec![]));
     }
 }

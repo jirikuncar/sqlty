@@ -217,10 +217,11 @@ fn extended(
     let mut parent = extended(found, &target, &target_directory, chain, files)?;
     rebase(&mut parent.table, &target_directory, base);
     if let Some(Value::Table(databases)) = parent.table.get_mut("databases") {
-        for (_, database) in databases.iter_mut() {
-            if let Value::Table(database) = database {
-                rebase(database, &target_directory, base);
-            }
+        for database in databases
+            .iter_mut()
+            .filter_map(|(_, database)| database.as_table_mut())
+        {
+            rebase(database, &target_directory, base);
         }
     }
     let mut merged = parent.table;
@@ -352,6 +353,10 @@ mod tests {
             found("/a", &files),
             Err(FindError::Need(PathBuf::from("/a/base.toml")))
         );
+        assert!(matches!(
+            tree(&files).list(Path::new("/a")),
+            Listing::Missing
+        ));
     }
 
     #[test]
@@ -399,7 +404,7 @@ mod tests {
         let files = [
             (
                 "/w/app/sqlty.toml",
-                "extend = \"../base/sqlty.toml\"\nrules = { select-star = \"warn\" }\n\
+                "extend = \"../base/sqlty.toml\"\ndialect = \"sqlite\"\nrules = { select-star = \"warn\" }\n\
                  [databases.main]\nschema = \"own.sql\"\n",
             ),
             (
@@ -416,7 +421,7 @@ mod tests {
             .config
             .table;
         let shown: Table = toml::from_str(
-            "dialect = \"mysql\"\nschema = [\"../base/s/*.sql\"]\nqueries = [\"../base/q\"]\n\
+            "dialect = \"sqlite\"\nschema = [\"../base/s/*.sql\"]\nqueries = [\"../base/q\"]\n\
              rules = { extra-param = \"error\", select-star = \"warn\" }\n\
              [databases.main]\nschema = \"own.sql\"\ninclude = []\nexclude = []\n\
              [databases.logs]\nschema = [\"../base/logs.sql\"]\ninclude = []\nexclude = []\n",
@@ -454,6 +459,7 @@ mod tests {
     fn paths_are_spelled_as_python_spells_them() {
         assert_eq!(normalized(Path::new("/a/./b/../c/")), Path::new("/a/c"));
         assert_eq!(normalized(Path::new("../a")), Path::new("../a"));
+        assert_eq!(normalized(Path::new("./a")), Path::new("a"));
         assert_eq!(relative(Path::new("/a/b/c"), Path::new("/a/d")), "../b/c");
         assert_eq!(relative(Path::new("/a"), Path::new("/a")), ".");
     }
