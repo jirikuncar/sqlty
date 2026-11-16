@@ -5,14 +5,16 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
 
 mod disk;
+mod flags;
 mod module;
 mod settings;
 mod workspace;
 
 pub use disk::Disk;
-pub use module::{check_module, Checker};
+pub use flags::{parse_overrides, repr, Configs, Flags};
+pub use module::{check_module, formatted, rewritten, skipped_strings, stripped, Checker};
 pub use settings::{FileSettings, Function, Schemas};
-pub use workspace::Workspace;
+pub use workspace::{par_map, Completion, Options, Workspace};
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

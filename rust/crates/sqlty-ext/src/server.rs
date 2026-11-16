@@ -28,7 +28,7 @@ pub(crate) fn serve(py: Python<'_>) -> PyResult<()> {
             return Ok(Opened(Box::new(BridgeWorkspace::open(root, settings)?)));
         }
         let files = Arc::new(sqlty_project::Disk);
-        let workspace = sqlty_project::Workspace::open(root, files, version, extra.clone())?;
+        let workspace = sqlty_project::Workspace::root(root, files, version, extra.clone())?;
         Ok(Opened(Box::new(RustWorkspace(workspace))))
     };
     py.detach(|| sqlty_lsp::stdio(open).map_err(|error| error.to_string()))

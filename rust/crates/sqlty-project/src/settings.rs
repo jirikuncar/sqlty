@@ -12,6 +12,7 @@ use sqlty_python::types::stdlib::Version;
 use sqlty_sql::analyzer::{self, Databases, Schema, SchemaData, TypeOverrides};
 use toml::{Table, Value};
 
+use crate::flags::{Flags, Loaded};
 use crate::Shared;
 
 /// `max-query-variants` when `preview` is on and it is not set.
@@ -75,19 +76,24 @@ pub struct FileSettings {
 #[derive(Default)]
 pub struct Schemas {
     loaded: Mutex<HashMap<SchemaKey, Schema>>,
-    warnings: Mutex<Vec<String>>,
+    /// Every warning, and how many [`Schemas::warnings`] has returned.
+    warnings: Mutex<(Vec<String>, usize)>,
 }
 
 impl Schemas {
     /// What the schemas could not read, each once, since the last call.
     pub fn warnings(&self) -> Vec<String> {
-        std::mem::take(&mut *self.warnings.lock().unwrap_or_else(PoisonError::into_inner))
+        let mut warnings = self.warnings.lock().unwrap_or_else(PoisonError::into_inner);
+        let (all, read) = &mut *warnings;
+        let new = all[*read..].to_vec();
+        *read = all.len();
+        new
     }
 
-    fn warn(&self, warning: String) {
+    pub(crate) fn warn(&self, warning: String) {
         let mut warnings = self.warnings.lock().unwrap_or_else(PoisonError::into_inner);
-        if !warnings.contains(&warning) {
-            warnings.push(warning);
+        if !warnings.0.contains(&warning) {
+            warnings.0.push(warning);
         }
     }
 
@@ -101,7 +107,7 @@ impl Schemas {
         if let Some(found) = self.lock().get(&key) {
             return Ok(Arc::clone(found));
         }
-        let (schema, skipped) = loaded(text, dialect, types)?;
+        let (schema, skipped) = loaded_schema(text, dialect, types)?;
         if !dialect
             .parse::<sqlty_sql::Dialect>()
             .is_ok_and(sqlty_sql::Dialect::checks_names)
@@ -129,7 +135,7 @@ impl Schemas {
     }
 }
 
-fn loaded(
+fn loaded_schema(
     text: &str,
     dialect: &'static str,
     types: &[(String, String)],
@@ -147,35 +153,30 @@ pub struct Directory {
     own: Arc<FileSettings>,
     databases: Vec<(String, Arc<FileSettings>)>,
     routing: Option<(Table, PathBuf)>,
+    cli_rules: Vec<(String, String)>,
 }
 
 impl Directory {
-    /// The settings of the configuration `found` (`(table, base, label)`), or the defaults.
-    pub fn new(
-        found: Option<(Table, PathBuf, String)>,
+    /// The settings of the configuration `loaded`, with the command line's `flags`.
+    pub(crate) fn new(
+        config: Loaded,
+        flags: &Flags,
         files: &Shared,
         schemas: &Schemas,
         version: Version,
     ) -> Result<Self, String> {
-        let (table, base, label) = match found {
-            Some((table, base, label)) => (table, Some(base), label),
-            None => (Table::new(), None, "pyproject.toml".to_string()),
-        };
+        let Loaded { table, base, label } = config;
+        let load = loaded_schema;
         let read = |table: &Table| {
             schema_text(&strings(table, "schema"), base.as_deref()?, files, schemas)
         };
-        let schema_sql = read(&table);
-        let closed = base
-            .as_deref()
-            .is_some_and(|base| closed_params(base, files));
-        let mut own = settings(
-            &table,
-            &label,
-            schema_sql.as_deref(),
-            closed,
-            &base,
-            version,
-        )?;
+        let schema_sql = match &flags.schema {
+            Some(entries) => schema_text(&entries_of(entries), &flags.cwd, files, schemas),
+            None => read(&table),
+        };
+        let closed = closed_params(base.as_deref().unwrap_or(&flags.cwd), files);
+        let own_dialect = flags.dialect.as_deref();
+        let mut own = settings(&table, &label, flags, own_dialect, closed, &base, version)?;
         let databases = table
             .get("databases")
             .and_then(Value::as_table)
@@ -187,19 +188,22 @@ impl Directory {
                 .map(|text| schemas.load(text, own.dialect, &own_types(&table, own.dialect)))
                 .transpose()?;
             return Ok(Self {
-                routing: table
-                    .contains_key("overrides")
-                    .then(|| (table.clone(), base.clone().unwrap_or_default())),
+                routing: base
+                    .clone()
+                    .filter(|_| table.contains_key("overrides"))
+                    .map(|base| (table.clone(), base)),
                 own: Arc::new(own),
                 databases: Vec::new(),
+                cli_rules: flags.rules(),
             });
         }
+        let own_dialect_name = own.dialect;
         let mut named: Vec<Named> = Vec::new();
         named.push((
             analyzer::DEFAULT.to_string(),
             own,
             schema_sql.clone(),
-            own_types(&table, settings_dialect(&table)),
+            own_types(&table, own_dialect_name),
         ));
         let mut functions = Vec::new();
         for (name, database) in &databases {
@@ -210,7 +214,11 @@ impl Directory {
                 false => schema_sql.clone(),
             };
             let label = format!("{label} [tool.sqlty.databases.{name}]");
-            let settings = settings(&merged, &label, schema.as_deref(), closed, &base, version)?;
+            let dialect = flags
+                .dialect
+                .as_deref()
+                .filter(|_| !database.contains_key("dialect"));
+            let settings = settings(&merged, &label, flags, dialect, closed, &base, version)?;
             functions.extend(entries(&database, Some(name)));
             let types = own_types(&merged, settings.dialect);
             named.push((name.clone(), settings, schema, types));
@@ -227,7 +235,7 @@ impl Directory {
             .collect::<Result<_, String>>()?;
         let mut routed = Vec::new();
         for (name, mut settings, schema, types) in named {
-            let (loaded, _) = loaded(schema.as_deref().unwrap_or(""), settings.dialect, &types)?;
+            let (loaded, _) = load(schema.as_deref().unwrap_or(""), settings.dialect, &types)?;
             let others = plain
                 .iter()
                 .filter(|(other, ..)| *other != name)
@@ -246,8 +254,14 @@ impl Directory {
         Ok(Self {
             own,
             databases: routed,
-            routing: Some((table, base.unwrap_or_default())),
+            routing: base.map(|base| (table, base)),
+            cli_rules: flags.rules(),
         })
+    }
+
+    /// The settings of the project, then of each database.
+    pub(crate) fn all(&self) -> impl Iterator<Item = &Arc<FileSettings>> {
+        std::iter::once(&self.own).chain(self.databases.iter().map(|(_, settings)| settings))
     }
 
     /// The settings of the file at `path`.
@@ -264,7 +278,11 @@ impl Directory {
                     .find(|(database, _)| *database == name)
             })
             .map_or(&self.own, |(_, settings)| settings);
-        if route.rules.is_empty() {
+        if !table
+            .get("overrides")
+            .and_then(Value::as_array)
+            .is_some_and(|all| !all.is_empty())
+        {
             return Arc::clone(settings);
         }
         let mut rules = settings.rules.clone();
@@ -273,6 +291,7 @@ impl Directory {
                 Some((rule.clone(), severity.as_str()?.to_string()))
             }),
         );
+        rules.extend(self.cli_rules.iter().cloned());
         Arc::new(FileSettings {
             rules,
             ..settings.shallow()
@@ -386,37 +405,53 @@ fn strings(table: &Table, key: &str) -> Vec<String> {
 fn settings(
     table: &Table,
     label: &str,
-    _schema: Option<&str>,
+    flags: &Flags,
+    dialect_flag: Option<&str>,
     closed_params: bool,
     base: &Option<PathBuf>,
     version: Version,
 ) -> Result<FileSettings, String> {
     let text = |key: &str| table.get(key).and_then(Value::as_str);
     let flag = |key: &str| table.get(key).and_then(Value::as_bool).unwrap_or(false);
-    let untyped = match text("untyped").unwrap_or("skip") {
+    let origin = |key: &str| flags.origin(key, label);
+    let untyped = match flags
+        .untyped
+        .as_deref()
+        .or(text("untyped"))
+        .unwrap_or("skip")
+    {
         "skip" => false,
         "sentinel" => true,
-        _ => return Err(format!("{label}: untyped must be 'skip' or 'sentinel'")),
+        _ => {
+            return Err(format!(
+                "{}: untyped must be 'skip' or 'sentinel'",
+                origin("untyped")
+            ))
+        }
     };
     let json_typed_dicts = match text("json-types").unwrap_or("typing.Any") {
         "typing.Any" => false,
         "typing.TypedDict" => true,
         _ => {
             return Err(format!(
-                "{label}: json-types must be 'typing.Any' or 'typing.TypedDict'"
+                "{}: json-types must be 'typing.Any' or 'typing.TypedDict'",
+                origin("json-types")
             ))
         }
     };
     let import_style = text("import-style").map(str::to_string);
     if let Err(error) = ImportStyle::parse(import_style.as_deref()) {
         return Err(format!(
-            "{label}: {error}; use 'from sqlty import SQL [as Q]' or 'import sqlty [as sy]'"
+            "{}: {error}; use 'from sqlty import SQL [as Q]' or 'import sqlty [as sy]'",
+            origin("import-style")
         ));
     }
     let preview = flag("preview");
     let variants = table.get("max-query-variants").and_then(Value::as_integer);
     Ok(FileSettings {
-        dialect: settings_dialect(table),
+        dialect: dialect_flag
+            .and_then(|name| name.parse::<sqlty_sql::Dialect>().ok())
+            .map_or_else(|| settings_dialect(table), sqlty_sql::Dialect::name),
         schema: None,
         import_style,
         untyped,
@@ -461,6 +496,17 @@ fn schema_text(
         }
     }
     (!parts.is_empty()).then(|| parts.join("\n"))
+}
+
+/// A path or list of paths, as `schema` and `queries` hold them.
+pub(crate) fn entries_of(entries: &Value) -> Vec<String> {
+    match entries {
+        Value::Array(items) => items
+            .iter()
+            .filter_map(|item| item.as_str().map(str::to_string))
+            .collect(),
+        entry => entry.as_str().map(str::to_string).into_iter().collect(),
+    }
 }
 
 /// Whether the `requires-python` of the nearest `pyproject.toml` holding one, from
