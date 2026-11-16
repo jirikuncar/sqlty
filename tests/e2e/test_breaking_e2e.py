@@ -443,7 +443,7 @@ def test_schema_files_are_checked_forward(cli: Cli, repo: Path, schema: str) -> 
     assert lines(result)[:-1] == [
         f"{FORWARD}the queries of the working tree against the schema of ../{schema})"
     ]
-    assert result.stderr.endswith(f"sqlty: ../{schema} has no queries; skipping the backward check\n")
+    assert result.stderr == f"sqlty: ../{schema} has no queries; skipping the backward check\n"
 
 
 def test_snapshot_baselines_need_no_repository(cli: Cli, repo: Path, tmp_path: Path) -> None:
