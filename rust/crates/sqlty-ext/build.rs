@@ -1,11 +1,17 @@
 //! Embeds the Agent Skills of `skills/` at the repository root, so `sqlty skill` prints the
-//! ones of its own version wherever the wheel is installed.
+//! ones of its own version wherever the wheel is installed, and lets tests find libpython.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::{env, fs};
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=PYO3_BUILD_EXTENSION_MODULE");
+    if env::var_os("PYO3_BUILD_EXTENSION_MODULE").is_none() {
+        if let Some(lib_dir) = pyo3_build_config::get().lib_dir() {
+            println!("cargo:rustc-link-arg=-Wl,-rpath,{lib_dir}");
+        }
+    }
     let root = Path::new(&env::var("CARGO_MANIFEST_DIR").unwrap()).join("../../../skills");
     let root = root
         .canonicalize()

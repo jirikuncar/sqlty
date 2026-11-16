@@ -56,13 +56,11 @@ impl<'a> Checker<'a> {
         })
     }
 
-    /// A checker of the settings of a file.
-    pub fn of(
-        settings: &'a FileSettings,
-        helpers: Option<&'a HelperIndex>,
-    ) -> Result<Self, String> {
+    /// A checker of the settings of a file, whose rules and import style its configuration
+    /// checked.
+    pub fn of(settings: &'a FileSettings, helpers: Option<&'a HelperIndex>) -> Self {
         let rules = RuleConfig::from_overrides(Some(settings.rules.clone()))
-            .map_err(|error| error.to_string())?;
+            .expect("the configuration checks its rules");
         Self::new(
             settings.dialect,
             settings.schema.as_deref(),
@@ -73,7 +71,7 @@ impl<'a> Checker<'a> {
             &settings.coerce,
             settings.variants,
         )
-        .map_err(|error| error.to_string())
+        .expect("the settings check the import style")
     }
 }
 

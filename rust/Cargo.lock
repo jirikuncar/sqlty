@@ -1570,9 +1570,11 @@ name = "sqlty-core"
 version = "0.6.0"
 dependencies = [
  "pyo3",
+ "pyo3-build-config",
  "rayon",
  "recursive",
  "ruff_python_ast",
+ "ruff_python_parser",
  "ruff_text_size",
  "sqlty-format",
  "sqlty-lsp",

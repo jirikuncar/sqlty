@@ -22,7 +22,14 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from sqlty._core import ModuleIndex, helper_sites, module_helpers, module_index
+from sqlty._core import (
+    ModuleIndex,
+    helper_sites,
+    index_extended,
+    index_helpers,
+    module_helpers,
+    module_index,
+)
 from sqlty._params import ParamArg, arg_type, literal_params
 from sqlty._psycopg import UNCHECKED
 from sqlty._source import AST, AstMismatch, ParsedSource
@@ -359,7 +366,7 @@ class HelperIndex:
             return self._modules
         return {
             module: {name: _helper_of(name, fields) for name, fields in found.items()}
-            for module, found in self.rust().helpers().items()
+            for module, found in index_helpers(self.rust()).items()
         }
 
     def rust(self) -> ModuleIndex:
@@ -369,7 +376,7 @@ class HelperIndex:
                 parent, forked_at = self._forked or (None, 0)
                 # A fork of an index that has not changed since shares what Rust read of it.
                 if parent is not None and len(parent._steps) == forked_at:
-                    built = parent.rust().extended(self._steps[forked_at:])
+                    built = index_extended(parent.rust(), self._steps[forked_at:])
                 else:
                     built = module_index(sys.version_info[:2], self._steps)
                 self._rust = len(self._steps), built
@@ -726,6 +733,8 @@ def _imports_of(
         >>> _imports_of([("q", "q", "db", 1)], "pkg.app")
         ({'q': ('pkg.db', 'q')}, {'q': 'pkg.db.q'})
         >>> _imports_of([("q", "q", "db", 1)], None)
+        ({}, {})
+        >>> _imports_of([("q", "q", "db", 3)], "pkg.app")
         ({}, {})
     """
     functions: dict[str, tuple[str, str]] = {}

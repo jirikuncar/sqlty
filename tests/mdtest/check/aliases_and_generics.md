@@ -15,6 +15,7 @@ from sqlty import SQL
 type Pair = tuple[int, str]
 Single: TypeAlias = tuple[int]
 Plain = tuple[int, str]
+Many = tuple[int, ...]
 
 # error: [column-type-mismatch] "Pair item 1 is str but query column 'int4' infers int"
 a = SQL[Pair]("--sql\nSELECT 1::INTEGER, 2::INTEGER")
@@ -23,6 +24,8 @@ b = SQL[Pair]("--sql\nSELECT 1::INTEGER, 'x'::TEXT")
 c = SQL[Single]("--sql\nSELECT 1::INTEGER, 2::INTEGER")
 # error: [column-type-mismatch] "Plain item 0 is int but query column 'text' infers str"
 d = SQL[Plain]("--sql\nSELECT 'x'::TEXT, 'y'::TEXT")
+e = SQL[Pair]("--sql\nDELETE FROM nope")
+f = SQL[Many]("--sql\nSELECT 'x'::TEXT")
 ```
 
 ## Aliases of row classes
@@ -53,6 +56,7 @@ from typing import Generic, TypedDict, TypeVar
 from sqlty import SQL
 
 T = TypeVar("T")
+U = TypeVar("U")
 
 class Row[V](TypedDict):
     id: V
@@ -60,6 +64,13 @@ class Row[V](TypedDict):
 
 class Old(TypedDict, Generic[T]):
     id: T
+
+class Two(TypedDict, Generic[T, U]):
+    id: T
+    name: U
+
+class Flat(TypedDict):
+    id: int
 
 @dataclass
 class Box[V]:
@@ -72,6 +83,10 @@ b = SQL[Row[str]]("--sql\nSELECT 'x'::TEXT AS id, ARRAY['a']::TEXT[] AS tags")
 c = SQL[Old[int]]("--sql\nSELECT 'x'::TEXT AS id")
 # error: [column-type-mismatch] "Box[int].value is int but query column 'value' infers str"
 d = SQL[Box[int]]("--sql\nSELECT 'x'::TEXT AS value")
+# error: [column-type-mismatch] "Two[int, str].id is int but query column 'id' infers str"
+e = SQL[Two[int, str]]("--sql\nSELECT 'x'::TEXT AS id, 'y'::TEXT AS name")
+f = SQL[Row[int, str]]("--sql\nSELECT 'x'::TEXT AS id")
+g = SQL[Flat[int]]("--sql\nSELECT 'x'::TEXT AS id")
 ```
 
 ## Aliases passed to a helper

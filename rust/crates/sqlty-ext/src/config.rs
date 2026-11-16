@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use sqlty_project::Disk;
-use sqlty_python::config::{self, Config, LoadError};
+use sqlty_python::config::{self, Config};
 use sqlty_python::project::{self, Discovery, Files, FindError, Packages};
 use toml::{Table, Value};
 
@@ -20,35 +20,11 @@ create_exception!(
     "A configuration file that is not UTF-8 or not TOML."
 );
 
-/// The sqlty table of a file called `file_name`, as `(table, skipped functions)`: TOML
-/// keys, every `overrides` entry complete, incomplete `functions` entries left out and
-/// rendered in the list. `None` for a `pyproject.toml` or `Cargo.toml` without one, unless
-/// `required`.
+/// The sqlty table `table`, as `(table, skipped functions)`: TOML keys, every `overrides`
+/// entry complete, incomplete `functions` entries left out and rendered in the list.
 ///
 /// Raises:
-///     ConfigSyntaxError: the file is not UTF-8 or not TOML
-///     ValueError: an unknown key, rule or severity, a value of the wrong type, or no
-///         table in a required native file; the message starts with `source`
-#[pyfunction]
-#[pyo3(signature = (data, file_name, source, *, required))]
-pub(crate) fn load_config<'py>(
-    py: Python<'py>,
-    data: &[u8],
-    file_name: &str,
-    source: &str,
-    required: bool,
-) -> PyResult<Option<(Bound<'py, PyDict>, Vec<String>)>> {
-    match config::load(data, file_name, source, required) {
-        Ok(found) => found.map(|found| converted(py, found)).transpose(),
-        Err(LoadError::Syntax(message)) => Err(ConfigSyntaxError::new_err(message)),
-        Err(LoadError::Invalid(error)) => Err(PyValueError::new_err(error.0)),
-    }
-}
-
-/// `load_config` for a table already parsed, such as `tomllib` gives.
-///
-/// Raises:
-///     ValueError: as for `load_config`
+///     ValueError: an unknown key, rule or severity, or a value of the wrong type
 #[pyfunction]
 pub(crate) fn validate_config<'py>(
     py: Python<'py>,
@@ -71,7 +47,7 @@ fn find_error(error: FindError) -> PyErr {
 type FoundConfig<'py> = (Bound<'py, PyDict>, Vec<String>, PathBuf);
 
 /// The nearest configuration of `directory`, an absolute path, as `(table, skipped
-/// functions, file)` (see `load_config`): `sqlty.toml`, else a `pyproject.toml` or
+/// functions, file)` (see `validate_config`): `sqlty.toml`, else a `pyproject.toml` or
 /// `Cargo.toml` with a sqlty table, in `directory` or a directory above it, `extend`
 /// applied. None when no file has one.
 ///
@@ -265,7 +241,6 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("TOOL_KEYS", config::TOOL_KEYS)?;
     m.add("DISCOVERY_KEYS", config::DISCOVERY_KEYS)?;
     m.add("FUNCTION_KEYS", config::FUNCTION_KEYS)?;
-    m.add_function(wrap_pyfunction!(load_config, m)?)?;
     m.add_function(wrap_pyfunction!(validate_config, m)?)?;
     m.add_function(wrap_pyfunction!(driver_types, m)?)?;
     m.add_function(wrap_pyfunction!(find_config, m)?)?;

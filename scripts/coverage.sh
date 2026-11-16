@@ -10,7 +10,7 @@ uv run --no-sync coverage erase
 eval "$(cd rust && cargo llvm-cov show-env --sh)"
 (cd rust && cargo llvm-cov clean --workspace)
 uv run --no-sync maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
-pytest=(uv run --no-sync pytest --cov --cov-append --cov-fail-under=0)
+pytest=(uv run --no-sync pytest --cov --cov-append --cov-fail-under=0 --hypothesis-profile=coverage)
 "${pytest[@]}" -m "not timing and not pg"
 # Rust and Python readings of every checked module must agree (`SQLTY_AST`).
 subset=(tests/mdtest tests/test_cli.py tests/test_helpers.py tests/test_psycopg.py
@@ -24,7 +24,7 @@ if [[ -n ${SQLTY_PG_DSN:-} ]]; then
   "${pytest[@]}" -m pg -n 0
 fi
 "${pytest[@]}" -m timing -n 0 -p no:randomly
-(cd rust && cargo nextest run --workspace)
+(cd rust && uv run --no-sync cargo nextest run --workspace)
 
 uv run --no-sync coverage report
-(cd rust && cargo llvm-cov report --fail-under-lines 95)
+(cd rust && cargo llvm-cov report --show-missing-lines | tee /dev/stderr | awk '/^Uncovered Lines:/ { missed = 1 } END { exit missed }')

@@ -329,6 +329,7 @@ QUIET = {
     "literal row": "type Row = Literal['a']\nq = SQL[Row]('--sql\\nSELECT id, name FROM t')\n",
     "literal row inline": "q = SQL[Literal['a']]('--sql\\nSELECT id FROM t')\n",
     "generic row": "type Row = list[int]\nq = SQL[Row]('--sql\\nSELECT id FROM t')\n",
+    "generic of an attribute": "import typing\nq = SQL[typing.List[int]]('--sql\\nSELECT id FROM t')\n",
 }
 
 
