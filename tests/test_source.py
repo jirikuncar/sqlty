@@ -186,7 +186,8 @@ def test_a_source_that_does_not_parse_is_read_by_its_strings(parses, tokenized):
     source = "q = '--sql\\nSELECT 1 FROM'  # sqlty: ignore[stale-rewrite]\ndef f(:\n"
     assert [d["rule"] for d in check_source(source)] == ["unparsed-query", "unused-ignore"]
     assert not parses
-    assert len(tokenized) == 1
+    # Rust reads the comments of a source it does not parse with its lexer.
+    assert len(tokenized) == (AST != "rust")
 
 
 @pytest.mark.parametrize("ast_env", [None, "rust", "compare", "python"])

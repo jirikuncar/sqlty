@@ -29,8 +29,6 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, NamedTuple, Protocol
 
-from sqlty._source import AST
-
 if TYPE_CHECKING:
     import argparse
 
@@ -243,7 +241,7 @@ def _compare(
 ) -> list[Finding]:
     """What ``schema`` breaks in ``queries``; up to ``jobs`` processes check the files."""
     from sqlty._helpers import configured_helpers
-    from sqlty._source import ParsedSource
+    from sqlty._source import AST, ParsedSource
     from sqlty.core import HelperIndex
 
     sources: dict[Path, ParsedSource] = {}
