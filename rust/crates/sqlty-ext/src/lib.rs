@@ -902,6 +902,46 @@ fn fix_source(
     })
 }
 
+/// `fix_source` of a module, leaving alone what its `# sqlty: ignore` comments suppress and
+/// the strings of its helper calls, resolved through `index` with the dotted `name` of
+/// the module and the package `module` relative imports start from.
+#[pyfunction]
+#[pyo3(signature = (source, *, version, dialect = DialectArg::POSTGRES, schema_sql = None, import_style = None, untyped = false, rules = None, index = None, name = None, module = None))]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the keyword-only Python signature is the API"
+)]
+fn fix_module(
+    py: Python<'_>,
+    source: &str,
+    version: (u8, u8),
+    dialect: DialectArg,
+    schema_sql: Option<SchemaArg>,
+    import_style: Option<&str>,
+    untyped: bool,
+    rules: Option<HashMap<String, String>>,
+    index: Option<PyRef<'_, ModuleIndex>>,
+    name: Option<&str>,
+    module: Option<&str>,
+) -> Result<String, Error> {
+    let dialect = dialect.0;
+    let helpers = index.map(|index| Arc::clone(&index.0));
+    detach(py, || {
+        let schema = schema_for(source, schema_sql, dialect);
+        let options = Options::new(dialect, schema.as_deref(), import_style, untyped)?;
+        let rules = RuleConfig::from_overrides(rules).map_err(ConfigError::from)?;
+        let parsed = parsed_module(source, version, name, helpers.as_deref());
+        Ok(fixer::fix_module(
+            source,
+            parsed.as_deref(),
+            &options,
+            &rules,
+            helpers.as_deref(),
+            module,
+        ))
+    })
+}
+
 /// Expand SELECT * into explicit column list.
 ///
 /// Returns:
@@ -1215,7 +1255,8 @@ fn check_source(
 }
 
 /// Check the named queries of a `.sql` file: `unparsed-query` and the name rules of each
-/// statement. `query_format` is a `query-format` value (`"auto"`, `"aiosql"`, `"sqlc"`,
+/// statement, without those a `-- sqlty: ignore` comment on their line drops, with its
+/// `unused-ignore`. `query_format` is a `query-format` value (`"auto"`, `"aiosql"`, `"sqlc"`,
 /// `"pugsql"`, `"file"`); `name` is the file name without its extension, the name of a
 /// query of a file without headers.
 ///
@@ -1246,20 +1287,20 @@ fn check_queries(
         let schema = schema(schema_sql, dialect);
         let options = Options::new(dialect, schema.as_deref(), None, false)?;
         let rules = RuleConfig::from_overrides(rules).map_err(ConfigError::from)?;
-        Ok(
-            queries::check_queries(source, format, name, &options, &rules)
-                .into_iter()
-                .map(|diag| DiagnosticOut {
-                    rule: diag.rule.name(),
-                    message: diag.message,
-                    severity: diag.severity.as_str(),
-                    line: diag.line,
-                    start: diag.span.start,
-                    end: diag.span.end,
-                    fix: Vec::new(),
-                })
-                .collect(),
-        )
+        let found = queries::check_queries(source, format, name, &options, &rules);
+        let ignores = sqlty_python::suppress::sql_ignores(source);
+        Ok(sqlty_python::suppress::apply_sql(&ignores, found, &rules)
+            .into_iter()
+            .map(|diag| DiagnosticOut {
+                rule: diag.rule.name(),
+                message: diag.message,
+                severity: diag.severity.as_str(),
+                line: diag.line,
+                start: diag.span.start,
+                end: diag.span.end,
+                fix: Vec::new(),
+            })
+            .collect())
     })
 }
 
@@ -1723,11 +1764,12 @@ fn row_diagnostics(
     })
 }
 
-/// Every diagnostic of `source` before inline suppression, as `sqlty_python::check` reports
-/// them: `(diagnostics, redundant, needed)`, see `row_diagnostics`. A source that does not
+/// Every diagnostic of `source` as `sqlty_python::check` reports them: `(diagnostics,
+/// redundant, needed)`, see `row_diagnostics`; with `suppress`, without those its
+/// `# sqlty: ignore` comments drop and with their `unused-ignore`. A source that does not
 /// parse gets what its strings alone tell.
 #[pyfunction]
-#[pyo3(signature = (source, *, version, dialect = DialectArg::POSTGRES, schema_sql = None, rules = None, import_style = None, untyped = false, module = None, coerce = vec![], index = None, name = None, variants = None))]
+#[pyo3(signature = (source, *, version, dialect = DialectArg::POSTGRES, schema_sql = None, rules = None, import_style = None, untyped = false, module = None, coerce = vec![], index = None, name = None, variants = None, suppress = false))]
 #[expect(
     clippy::too_many_arguments,
     reason = "the keyword-only Python signature is the API"
@@ -1746,6 +1788,7 @@ fn module_diagnostics(
     index: Option<PyRef<'_, ModuleIndex>>,
     name: Option<&str>,
     variants: Option<usize>,
+    suppress: bool,
 ) -> Result<ModuleFound, Error> {
     let mut config = CheckConfig {
         dialect: dialect.0,
@@ -1760,7 +1803,7 @@ fn module_diagnostics(
     detach(py, || {
         let schema = config.schema();
         let checker = config.checker(schema.as_deref())?;
-        Ok(checker.check(source, version, name, module, false).0)
+        Ok(checker.check(source, version, name, module, suppress))
     })
 }
 
@@ -1843,8 +1886,7 @@ struct ModuleChecker<'a> {
 
 impl ModuleChecker<'_> {
     /// The diagnostics of `source`; with `suppress`, without those its `# sqlty: ignore`
-    /// comments drop and with their `unused-ignore`, which only a source that parses gets.
-    /// The flag tells whether they were applied.
+    /// comments drop and with their `unused-ignore`.
     fn check(
         &self,
         source: &str,
@@ -1852,7 +1894,7 @@ impl ModuleChecker<'_> {
         name: Option<&str>,
         module: Option<&str>,
         suppress: bool,
-    ) -> (ModuleFound, bool) {
+    ) -> ModuleFound {
         use sqlty_python::{check, rows};
         let helpers = self.config.index.as_deref();
         let parsed = parsed_module(source, version, name, helpers);
@@ -1885,9 +1927,11 @@ impl ModuleChecker<'_> {
             Some(parsed) => check::diagnostics(parsed, &run),
             None => check::unparsed(source, &run),
         };
-        let suppressed = suppress && parsed.is_some();
-        if let Some(parsed) = parsed.as_ref().filter(|_| suppress) {
-            let ignores = sqlty_python::suppress::ignores(parsed);
+        if suppress {
+            let ignores = match &parsed {
+                Some(parsed) => sqlty_python::suppress::ignores(parsed),
+                None => sqlty_python::suppress::unparsed_ignores(source),
+            };
             found.diagnostics =
                 sqlty_python::suppress::apply(&ignores, found.diagnostics, &self.rules);
         }
@@ -1914,14 +1958,13 @@ impl ModuleChecker<'_> {
                 (out, reported.redundant)
             })
             .unzip();
-        ((diagnostics, redundant, needed), suppressed)
+        (diagnostics, redundant, needed)
     }
 }
 
 /// `module_diagnostics` of every `(source, name, config)` of `modules`, where `config`
 /// indexes `configs` and `name` is the module's dotted name, on `jobs` threads (all
-/// cores when None). Each comes with whether its `# sqlty: ignore` comments are applied:
-/// they are wherever Rust parses the source.
+/// cores when None), with their `# sqlty: ignore` comments applied.
 #[pyfunction]
 #[pyo3(signature = (modules, configs, *, version, jobs = None))]
 fn check_modules(
@@ -1930,7 +1973,7 @@ fn check_modules(
     configs: Vec<ConfigArg<'_>>,
     version: (u8, u8),
     jobs: Option<usize>,
-) -> PyResult<Vec<(ModuleFound, bool)>> {
+) -> PyResult<Vec<ModuleFound>> {
     use rayon::prelude::*;
 
     if let Some(&(_, _, config)) = modules
@@ -2046,19 +2089,20 @@ type CallVariants = (
 type IgnoreTuple = (usize, Option<Vec<String>>, usize, usize);
 
 /// `ParsedSource.ignores` as Rust reads them: `(line, rules, start, end)` of every
-/// `# sqlty: ignore` comment. None where Rust does not read the source.
+/// `# sqlty: ignore` comment; of a source that does not parse, every one its lexer finds.
 #[pyfunction]
-fn module_ignores(py: Python<'_>, source: &str, version: (u8, u8)) -> Option<Vec<IgnoreTuple>> {
+fn module_ignores(py: Python<'_>, source: &str, version: (u8, u8)) -> Vec<IgnoreTuple> {
+    use sqlty_python::suppress;
     use sqlty_python::types::symbols::Source;
 
     detach(py, || {
-        let source = Source::new(source, version)?;
-        Some(
-            sqlty_python::suppress::ignores(&source)
-                .into_iter()
-                .map(|ignore| (ignore.line, ignore.rules, ignore.span.0, ignore.span.1))
-                .collect(),
-        )
+        match Source::new(source, version) {
+            Some(parsed) => suppress::ignores(&parsed),
+            None => suppress::unparsed_ignores(source),
+        }
+        .into_iter()
+        .map(|ignore| (ignore.line, ignore.rules, ignore.span.0, ignore.span.1))
+        .collect()
     })
 }
 
@@ -2436,6 +2480,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(rendered_compositions, m)?)?;
     m.add_function(wrap_pyfunction!(call_variants, m)?)?;
     m.add_function(wrap_pyfunction!(module_ignores, m)?)?;
+    m.add_function(wrap_pyfunction!(fix_module, m)?)?;
     m.add_function(wrap_pyfunction!(module_helpers, m)?)?;
     m.add_function(wrap_pyfunction!(add_json_types, m)?)?;
     m.add_function(wrap_pyfunction!(module_calls, m)?)?;

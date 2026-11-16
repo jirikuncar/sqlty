@@ -24,11 +24,11 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlty_python::checker::{query_sites, Diagnostic, SiteKind};
 use sqlty_python::config;
-use sqlty_python::fixer::fix_source;
+use sqlty_python::fixer::fix_module;
 use sqlty_python::locate::{self, Queries};
 use sqlty_python::options::Options;
 use sqlty_python::params::add_param_types;
-use sqlty_python::rewriter::{rewrite_source_with, strip_source, Suppressed};
+use sqlty_python::rewriter::{rewrite_source_with, strip_source};
 use sqlty_python::rules::RuleConfig;
 use sqlty_python::types::symbols::Source;
 use sqlty_python::{check, rows, suppress};
@@ -196,7 +196,7 @@ pub fn run(request: &str) -> String {
                 .collect::<Vec<_>>(),
             "rewritten": params(rewrite_source_with(source, &options, false)),
             "stripped": strip_source(source, &options.style),
-            "fixed": params(fix_source(source, &options, &rules, &Suppressed::new())),
+            "fixed": params(fix_module(source, Source::new(source, VERSION).as_ref(), &options, &rules, None, None)),
             })
         }
         SourceOp::Complete => match locate::complete(&queries, offset, dialect, options.schema, 50)
@@ -349,7 +349,10 @@ fn checked(
         Some(module) => check::diagnostics(module, &run),
         None => check::unparsed(source, &run),
     };
-    let ignores = module.as_deref().map(suppress::ignores).unwrap_or_default();
+    let ignores = match &module {
+        Some(module) => suppress::ignores(module),
+        None => suppress::unparsed_ignores(source),
+    };
     let needed = found.needed;
     suppress::apply(&ignores, found.diagnostics, rules)
         .into_iter()

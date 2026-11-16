@@ -926,14 +926,19 @@ class ParsedSource:
         rust = None
         if AST != "python":
             rust = module_ignores(self.text, sys.version_info[:2])
-            if AST == "rust" and rust is not None:
+            if AST == "rust":
                 return {
                     line: Ignore(line, None if rules is None else tuple(rules), start, end)
                     for line, rules, start, end in rust
                 }
         python = self._tokenized_ignores()
-        # `tokenize` stops at a lone carriage return, which is a line break.
-        if rust is not None and "\r" not in self.text.replace("\r\n", ""):
+        # `tokenize` stops at a lone carriage return, which is a line break, and at what
+        # does not lex, where Rust reads on.
+        if (
+            rust is not None
+            and self.facts is not None
+            and "\r" not in self.text.replace("\r\n", "")
+        ):
             read = [
                 (i.line, None if i.rules is None else list(i.rules), i.start, i.end)
                 for i in python.values()
