@@ -17,7 +17,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from sqlty import _check
+from sqlty import _check, _core
 from sqlty._helpers import HelperIndex
 from sqlty._source import ParsedSource
 from sqlty.core import check_source
@@ -376,7 +376,7 @@ def test_registered_file_rust_does_not_read(tmp_path: Path) -> None:
         index = HelperIndex()
         index.register("ext.run", "sql", "row", roots=[first, second])
         # The first root holding the file ends the search: the helper takes keywords only.
-        positional, keywords, *_ = index.rust().helpers()["ext"]["run"]
+        positional, keywords, *_ = _core.index_helpers(index.rust())["ext"]["run"]
         assert (positional, keywords) == ([], ["row", "sql"])
 
 

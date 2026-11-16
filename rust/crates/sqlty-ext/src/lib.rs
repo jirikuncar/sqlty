@@ -173,29 +173,12 @@ impl<'a, 'py> FromPyObject<'a, 'py> for SchemaArg {
 struct SchemaHandle {
     loaded: Arc<LoadedSchema>,
     text: Arc<str>,
-    dialect: &'static str,
-}
-
-#[pymethods]
-impl SchemaHandle {
     /// The dialect the schema was parsed as.
-    #[getter]
-    fn dialect(&self) -> &'static str {
-        self.dialect
-    }
-
+    #[pyo3(get)]
+    dialect: &'static str,
     /// Whether queries of this database are read without a schema: it was loaded without one.
-    #[getter]
-    fn absent(&self) -> bool {
-        self.loaded
-            .schema
-            .databases()
-            .is_some_and(|databases| databases.absent)
-    }
-
-    fn __repr__(&self) -> String {
-        format!("Schema(dialect={:?})", self.dialect)
-    }
+    #[pyo3(get)]
+    absent: bool,
 }
 
 /// Parse `schema_sql` once, for passing as `schema_sql` to the other functions.
@@ -243,7 +226,7 @@ fn load_schema(
                     Some(handle) => (
                         other,
                         handle.dialect,
-                        (!handle.absent()).then(|| handle.loaded.schema.clone()),
+                        (!handle.absent).then(|| handle.loaded.schema.clone()),
                     ),
                     None => (other, dialect, None),
                 })
@@ -260,10 +243,15 @@ fn load_schema(
             Arc::new(LoadedSchema { schema, skipped })
         }
     };
+    let absent = loaded
+        .schema
+        .databases()
+        .is_some_and(|databases| databases.absent);
     Ok(SchemaHandle {
         loaded,
         text: Arc::from(schema_sql),
         dialect,
+        absent,
     })
 }
 
@@ -1089,27 +1077,26 @@ fn module_index(py: Python<'_>, version: (u8, u8), steps: Vec<IndexStep>) -> Mod
     })
 }
 
-#[pymethods]
-impl ModuleIndex {
-    /// The helpers by module and name (`Class.method` for a method), each as
-    /// `(positional, keywords, query, row, kind, params, rest, named, configured, database)`.
-    fn helpers(&self) -> HashMap<String, HashMap<String, HelperTuple>> {
-        let helpers = |found: &sqlty_python::types::info::Dict<sqlty_python::calls::Helper>| {
-            found
-                .iter()
-                .map(|(name, helper)| (name.to_string(), helper_tuple(helper)))
-                .collect()
-        };
-        let modules = self.0.modules.iter();
-        modules
-            .map(|(module, found)| (module.clone(), helpers(found)))
+/// The helpers of `index` by module and name (`Class.method` for a method), each as
+/// `(positional, keywords, query, row, kind, params, rest, named, configured, database)`.
+#[pyfunction]
+fn index_helpers(index: &ModuleIndex) -> HashMap<String, HashMap<String, HelperTuple>> {
+    let helpers = |found: &sqlty_python::types::info::Dict<sqlty_python::calls::Helper>| {
+        found
+            .iter()
+            .map(|(name, helper)| (name.to_string(), helper_tuple(helper)))
             .collect()
-    }
+    };
+    let modules = index.0.modules.iter();
+    modules
+        .map(|(module, found)| (module.clone(), helpers(found)))
+        .collect()
+}
 
-    /// A fork of the index after `steps`, sharing what is read of the modules.
-    fn extended(&self, py: Python<'_>, steps: Vec<IndexStep>) -> ModuleIndex {
-        detach(py, || indexed(self.0.fork(), self.0.version(), steps))
-    }
+/// A fork of `index` after `steps`, sharing what is read of the modules.
+#[pyfunction]
+fn index_extended(py: Python<'_>, index: &ModuleIndex, steps: Vec<IndexStep>) -> ModuleIndex {
+    detach(py, || indexed(index.0.fork(), index.0.version(), steps))
 }
 
 /// `source` parsed as the module `name`: what the index read of it when it is the same
@@ -2163,49 +2150,40 @@ fn query_sites(
 
 /// The query under a cursor, found by `query_at`.
 #[pyclass(frozen, name = "QueryAt", module = "sqlty._core")]
-struct QueryAtHandle(locate::QueryAt);
-
-#[pymethods]
-impl QueryAtHandle {
+struct QueryAtHandle {
+    at: locate::QueryAt,
     /// The query as the analyzer reads it: the string's value, escapes decoded, from the
     /// `--sql` marker on (the whole value for a helper's query).
-    #[getter]
-    fn text(&self) -> &str {
-        &self.0.text
-    }
-
+    #[pyo3(get)]
+    text: String,
     /// The cursor's byte offset in `text`.
-    #[getter]
-    fn offset(&self) -> usize {
-        self.0.offset
-    }
-
+    #[pyo3(get)]
+    offset: usize,
     /// How `check` recognised the query: `marker`, `wrapper` or `helper`.
-    #[getter]
-    fn route(&self) -> &'static str {
-        self.0.route.name()
-    }
-
+    #[pyo3(get)]
+    route: &'static str,
     /// Byte offsets of the query's string literals in the source, prefixes and quotes included.
-    #[getter]
-    fn span(&self) -> (usize, usize) {
-        (self.0.span.start, self.0.span.end)
-    }
+    #[pyo3(get)]
+    span: (usize, usize),
+}
 
-    /// Where byte `offset` of `text` is written in the source: an offset in an escape
-    /// sequence maps to its start. `None` past the end of `text`, or in the marker.
-    fn source_offset(&self, offset: usize) -> Option<usize> {
-        self.0.source_offset(offset)
+impl QueryAtHandle {
+    fn new(at: locate::QueryAt) -> Self {
+        Self {
+            text: at.text.clone(),
+            offset: at.offset,
+            route: at.route.name(),
+            span: (at.span.start, at.span.end),
+            at,
+        }
     }
+}
 
-    fn __repr__(&self) -> String {
-        format!(
-            "QueryAt(text={:?}, offset={}, route={:?})",
-            self.0.text,
-            self.0.offset,
-            self.0.route.name()
-        )
-    }
+/// Where byte `offset` of the text of `at` is written in the source: an offset in an escape
+/// sequence maps to its start. `None` past the end of the text, or in the marker.
+#[pyfunction]
+fn query_source_offset(at: &QueryAtHandle, offset: usize) -> Option<usize> {
+    at.at.source_offset(offset)
 }
 
 /// The query `check` reads at byte `offset` of Python source, or None outside one.
@@ -2232,7 +2210,7 @@ fn query_at(
         let style = ImportStyle::parse(import_style)?;
         Ok(locate::Queries::new(source, &style, &helper_starts)
             .at(offset)
-            .map(QueryAtHandle))
+            .map(QueryAtHandle::new))
     })
 }
 
@@ -2433,6 +2411,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(module_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(check_modules, m)?)?;
     m.add_function(wrap_pyfunction!(module_index, m)?)?;
+    m.add_function(wrap_pyfunction!(index_helpers, m)?)?;
+    m.add_function(wrap_pyfunction!(index_extended, m)?)?;
     m.add_function(wrap_pyfunction!(rendered_compositions, m)?)?;
     m.add_function(wrap_pyfunction!(call_variants, m)?)?;
     m.add_function(wrap_pyfunction!(module_ignores, m)?)?;
@@ -2444,6 +2424,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;
     m.add_function(wrap_pyfunction!(query_at, m)?)?;
+    m.add_function(wrap_pyfunction!(query_source_offset, m)?)?;
     m.add_function(wrap_pyfunction!(complete_source, m)?)?;
     m.add_function(wrap_pyfunction!(highlight_source, m)?)?;
     m.add_function(wrap_pyfunction!(hover_source, m)?)?;

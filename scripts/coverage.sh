@@ -22,7 +22,7 @@ if [[ -n ${SQLTY_PG_DSN:-} ]]; then
   "${pytest[@]}" -m pg -n 0
 fi
 "${pytest[@]}" -m timing -n 0 -p no:randomly
-(cd rust && cargo nextest run --workspace)
+(cd rust && uv run --no-sync cargo nextest run --workspace)
 
 uv run --no-sync coverage report
-(cd rust && cargo llvm-cov report --show-missing-lines | tee /dev/stderr | python3 ../scripts/check_rust_coverage.py)
+(cd rust && cargo llvm-cov report --show-missing-lines | tee /dev/stderr | awk '/^Uncovered Lines:/ { missed = 1 } END { exit missed }')

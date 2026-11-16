@@ -148,17 +148,17 @@ jobs:
           tool: nextest@0.9.148
 
       - name: Run Rust unit tests
-        run: cargo nextest run --workspace --manifest-path rust/Cargo.toml
+        run: uv run cargo nextest run --workspace --manifest-path rust/Cargo.toml
 
       - name: Check coverage
         if: matrix.coverage
         run: |
           set -o pipefail
           uv run coverage report
-          cd rust && cargo llvm-cov report --show-missing-lines | tee /dev/stderr | uv run python ../scripts/check_rust_coverage.py
+          cd rust && cargo llvm-cov report --show-missing-lines | tee /dev/stderr | awk '/^Uncovered Lines:/ { missed = 1 } END { exit missed }'
 
       - name: Run Rust doctests
-        run: cargo test --doc --workspace --manifest-path rust/Cargo.toml
+        run: uv run cargo test --doc --workspace --manifest-path rust/Cargo.toml
 
   free-threaded:
     name: Threads on free-threaded Python ${{ matrix.python }}

@@ -14,11 +14,7 @@ QUERY = 'q = "--sql\\nSELECT 1"\n'
 
 def test_schema_with_a_database_without_one() -> None:
     schema = _core.load_schema("CREATE TABLE t (a INT);", databases=[("other", None)])
-    assert (schema.dialect, schema.absent, repr(schema)) == (
-        "postgres",
-        False,
-        'Schema(dialect="postgres")',
-    )
+    assert (schema.dialect, schema.absent) == ("postgres", False)
 
 
 def test_static_method_helper() -> None:
@@ -31,8 +27,8 @@ def test_static_method_helper() -> None:
     )
     index = _core.module_index(VERSION, [("add", "m", source, "m", [], None)])
     helper = ("query", None, "static", None, None, None, False, None)
-    assert index.helpers()["m"]["C.run"][2:] == helper
-    assert index.extended([]).helpers() == index.helpers()
+    assert _core.index_helpers(index)["m"]["C.run"][2:] == helper
+    assert _core.index_helpers(_core.index_extended(index, [])) == _core.index_helpers(index)
 
 
 def test_unparsable_module() -> None:
@@ -64,7 +60,9 @@ def test_modules_with_an_unknown_import_style() -> None:
 
 def test_cursor_defaults() -> None:
     found = _core.query_at(QUERY, 15)
-    assert repr(found) == 'QueryAt(text="--sql\\nSELECT 1", offset=9, route="marker")'
+    assert found is not None
+    assert (found.text, found.offset, found.route) == ("--sql\nSELECT 1", 9, "marker")
+    assert _core.query_source_offset(found, 9) == QUERY.index("ECT")
     assert _core.hover_source(QUERY, 18) is None
     assert _core.highlight_source(QUERY) == [
         (5, 10, "comment"),
