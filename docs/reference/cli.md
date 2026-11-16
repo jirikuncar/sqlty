@@ -355,7 +355,6 @@ Print `sqlty <version>` and exit. `sqlty --version` does the same.
 
 | Command | Description |
 |---------|-------------|
-| `python -m sqlty ...` | The commands above, through Python: for an install without the `sqlty` executable, such as an editable one |
 | `python -m sqlty.magic FILE` | Print the source the [magic codec](../guide/magic-codec.md) produces for `FILE` |
 
 ## Environment variables

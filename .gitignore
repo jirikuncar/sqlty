@@ -25,7 +25,6 @@ lcov.info
 
 # Rust / maturin build artifacts
 rust/target/
-sqlty._core.data/
 *.so
 *.pyd
 *.dylib

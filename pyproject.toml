@@ -53,6 +53,9 @@ Repository = "https://github.com/jirikuncar/sqlty"
 Changelog = "https://github.com/jirikuncar/sqlty/releases"
 Issues = "https://github.com/jirikuncar/sqlty/issues"
 
+[project.scripts]
+sqlty = "sqlty._cli:main"
+
 [project.entry-points."pygments.lexers"]
 sqlty = "sqlty.lexer:SQLTyLexer"
 
@@ -68,8 +71,6 @@ python-source = "src"
 module-name = "sqlty._core"
 features = ["pyo3/extension-module"]
 manifest-path = "rust/crates/sqlty-ext/Cargo.toml"
-# The `sqlty` executable is the wheel's script, as ruff's is: scripts/build_cli.sh puts it
-# in sqlty._core.data/scripts/, which maturin ships as the wheel's .data when it exists.
 # Ship the startup hook at the wheel root so it lands in site-packages and
 # registers the lazy "sqlty" codec lookup (see docs/guide/magic-codec.md).
 # The path is relative to the project root (maturin >= 1.12.1): the wheel gets

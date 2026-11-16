@@ -90,7 +90,7 @@ uv run pytest tests/mdtest/type_inference/basic_types.md -v
 (`ast`) are deprecated and removed in 0.8.0; until then `SQLTY_AST` still selects them:
 
 ```bash
-SQLTY_AST=python uv run python -m sqlty check .  # the Python passes, with a FutureWarning
+SQLTY_AST=python uv run sqlty check .    # the Python passes, with a FutureWarning
 SQLTY_AST=compare uv run pytest          # both, raising AstMismatch where they differ
 ```
 
