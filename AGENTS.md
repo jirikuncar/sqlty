@@ -78,7 +78,7 @@ argument's value, say), add a `@` result kind to `compile.rs` and cite the rule.
 lookup order and how to verify a `reference`. Every rule needs a `reference` to
 vendor documentation of the version the tests target, one per database
 (`reference.postgres` for PostgreSQL 17, `reference.mysql` for MySQL 8.4,
-`reference.sqlite` for SQLite 3), checked against the published page, and a one-sentence `reasoning`;
+`reference.sqlite` for SQLite 3, `reference.duckdb` for DuckDB 2.0), checked against the published page, and a one-sentence `reasoning`;
 the build fails otherwise. `sqlty check --explain` and `-- rules:` mdtest
 assertions show which rule typed a column; every rule needs one, in
 `tests/mdtest/type_inference/rule_coverage.md` if nowhere else

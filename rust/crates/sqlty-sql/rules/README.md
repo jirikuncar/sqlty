@@ -24,13 +24,13 @@ reasoning = "`->` on a json value gives json; a missing member gives NULL."
 |-----|----------|---------|
 | `id` | yes | Unique name, `<directory>.<topic>.<name>` |
 | `operator` or `operators` | yes | A sqlparser `BinaryOperator` variant (`LongArrow`, `Plus`, ...), `Custom:<<=` for an operator sqlparser keeps as text, or `Prefix:DoubleAt` for a sqlparser `UnaryOperator` variant; `operators` lists several that share the rule |
-| `dialects` | in a dialect directory | `postgres`, `mysql`, `sqlite`, `clickhouse`; a rule in `common/` has none and applies to every dialect |
+| `dialects` | in a dialect directory | `postgres`, `mysql`, `sqlite`, `clickhouse`, `duckdb`; a rule in `common/` has none and applies to every dialect |
 | `left`, `right` | no | SQL types the operand may have; absent means any operand |
 | `type` | yes | The result: a canonical SQL type (`TEXT`, `JSONB`, ...) or one of the results below |
 | `nullability` | no | One of the nullabilities below; `operands` by default |
 | `shadows` | no | Ids of later rules of the same tier this one takes precedence over where both match |
 | `left-parameter`, `right-parameter` | no | The SQL type (`TEXT`, `ARRAY<TEXT>`, ...) a placeholder on that side gets when the other operand matches its own `left` or `right` |
-| `reference.postgres`, `reference.mysql`, `reference.sqlite` | one at least | The documentation of that database the rule follows: product, version, section. `--explain` and hover show the configured dialect's, or all of them for a dialect none documents |
+| `reference.postgres`, `reference.mysql`, `reference.sqlite`, `reference.duckdb` | one at least | The documentation of that database the rule follows: product, version, section. `--explain` and hover show the configured dialect's, or all of them for a dialect none documents |
 | `reasoning` | yes | Why, in one sentence |
 
 Operand types are the canonical names the analyzer gives (`INT`, `BIGINT`,
@@ -148,6 +148,7 @@ argument `k`, counting from 0:
 | `@series` | `generate_series`: the common type of the bounds, small integers widened to `INT`, dates to `TIMESTAMPTZ` |
 | `@text(k)` | `TEXT`, or argument `k`'s type when it is a binary or bit string |
 | `@random` | `DOUBLE`; `random(min, max)` gives the type of the bounds |
+| `@date-part(k)` | DuckDB `date_part`: `DOUBLE` for the literal part `epoch` or `julian` at `k`, else `BIGINT` |
 
 A computed result is a variant of `Returns` (`analyzer/functions.rs`), listed in
 `FUNCTION_RESULTS` (`compile.rs`). Add one there when no SQL type fits: the rule still
@@ -186,7 +187,7 @@ own, or an unknown dialect in `extends`, fails the build.
 
 - malformed TOML or an unknown key;
 - an empty `reference` or `reasoning`, a `reference` of another dialect than
-  `postgres`, `mysql` or `sqlite`, or a duplicate `id`;
+  `postgres`, `mysql`, `sqlite` or `duckdb`, or a duplicate `id`;
 - an unknown dialect, operand type, result type or nullability;
 - an operator that is not a variant name (`rustc` then checks the variant
   exists: the generated `match` names it as `BinaryOperator::<name> { .. }`);
@@ -219,7 +220,7 @@ rule types leaves its column untyped.
    type it too. One only some of them have stays in their directories, with
    `dialects`, so the others still report `unknown-function` for it.
 2. Check the `reference` against the vendor documentation of the version the
-   tests target (PostgreSQL 17 for the fidelity tests, MySQL 8.4, SQLite 3) and
+   tests target (PostgreSQL 17 for the fidelity tests, MySQL 8.4, SQLite 3, DuckDB 2.0) and
    cite the section and table. The ISO standard is not freely available, so it
    is not cited.
 3. Delete the `match` arm the rule replaces: a behaviour lives in one place.
