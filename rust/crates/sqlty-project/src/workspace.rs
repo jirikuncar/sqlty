@@ -680,7 +680,7 @@ impl Workspace {
         let format = settings
             .query_format
             .parse::<queries::Format>()
-            .map_err(|()| format!("unknown query-format '{}'", settings.query_format))?;
+            .expect("query-format is validated");
         let checker = Checker::of(&settings, None);
         let name = path
             .file_stem()
@@ -698,7 +698,7 @@ impl Workspace {
         let format = settings
             .query_format
             .parse::<queries::Format>()
-            .map_err(|()| format!("unknown query-format '{}'", settings.query_format))?;
+            .expect("query-format is validated");
         let name = path
             .file_stem()
             .map(|stem| stem.to_string_lossy().into_owned())
@@ -821,17 +821,18 @@ fn pool() -> &'static rayon::ThreadPool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::flags::Configs;
     use sqlty_python::project::normalized;
     use std::collections::BTreeMap;
 
-    struct Tree(BTreeMap<PathBuf, &'static str>);
+    struct Tree(BTreeMap<PathBuf, &'static [u8]>);
 
     impl Files for Tree {
         fn read(&self, path: &Path) -> Read {
             self.0
                 .get(path)
-                .filter(|text| **text != "<unreadable>")
-                .map_or(Read::Missing, |text| Read::Text(text.as_bytes().to_vec()))
+                .filter(|data| **data != b"<unreadable>")
+                .map_or(Read::Missing, |data| Read::Text(data.to_vec()))
         }
 
         fn list(&self, path: &Path) -> Listing {
@@ -871,7 +872,7 @@ mod tests {
         let tree = Tree(
             files
                 .iter()
-                .map(|(path, text)| (PathBuf::from(path), *text))
+                .map(|(path, text)| (PathBuf::from(path), text.as_bytes()))
                 .collect(),
         );
         Workspace::root(Path::new("/repo"), Arc::new(tree), (3, 14), Vec::new())
@@ -1137,9 +1138,9 @@ mod tests {
         let tree = Tree(BTreeMap::from([
             (
                 PathBuf::from("/repo/pyproject.toml"),
-                "[tool.sqlty]\n[[tool.sqlty.functions]]\nimport-path = \"lib.fetch\"\nquery-param = \"query\"\n",
+                b"[tool.sqlty]\n[[tool.sqlty.functions]]\nimport-path = \"lib.fetch\"\nquery-param = \"query\"\n".as_slice(),
             ),
-            (PathBuf::from("/site/lib.py"), "def fetch(query: str) -> None: ...\n"),
+            (PathBuf::from("/site/lib.py"), b"def fetch(query: str) -> None: ...\n".as_slice()),
         ]));
         let mut workspace = Workspace::root(
             Path::new("/repo"),
@@ -1153,5 +1154,371 @@ mod tests {
             .check(Path::new("/repo/q.py"), text)
             .expect("checks");
         assert_eq!(rules(&found), ["unparsed-query"]);
+    }
+
+    fn tree(files: &[(&str, &'static [u8])]) -> Shared {
+        let tree = files
+            .iter()
+            .map(|(path, data)| (PathBuf::from(path), *data))
+            .collect();
+        Shared(Arc::new(Tree(tree)))
+    }
+
+    fn command(files: &Shared, paths: &[&str], flags: Flags) -> Result<Workspace, String> {
+        let mut discovery = Discovery::new(Box::new(files.clone()), &flags.cwd);
+        if let Some(fixed) = flags.fixed_discovery() {
+            discovery = discovery.fixed(fixed);
+        }
+        if matches!(flags.configs, Configs::Isolated) {
+            discovery = discovery.isolated();
+        }
+        let options = Options {
+            discovery,
+            flags,
+            version: (3, 14),
+            extra_roots: Vec::new(),
+            force_exclude: true,
+        };
+        let paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+        Workspace::open(&paths, files.clone(), options)
+    }
+
+    fn flags(files: &Shared, config_file: Option<&str>, assignments: &[&str]) -> Flags {
+        let assignments: Vec<String> = assignments.iter().map(ToString::to_string).collect();
+        let severities = vec![("select-star".to_string(), "error".to_string())];
+        Flags::new(
+            Path::new("/repo"),
+            config_file.map(Path::new),
+            false,
+            &assignments,
+            severities,
+            files,
+        )
+        .expect("flags")
+    }
+
+    const COMMAND: &[(&str, &[u8])] = &[
+        (
+            "/repo/pyproject.toml",
+            b"[tool.sqlty]\nschema = \"schema.sql\"\nqueries = [\"sql/*.sql\"]\nextend-exclude = [\"skip\"]\n\n[[tool.sqlty.functions]]\nimport-path = \"app.db.fetch\"\nquery-param = \"query\"\n",
+        ),
+        ("/repo/app/db.py", b"def fetch(query: str) -> None: ...\n"),
+        ("/repo/app/d.py", b"from app.db import fetch\n\nfetch(\"SELECT id FROM users\")\nq = \"--sql\\nSELEC 1\"\nr = \"--sql\\nUPDATE users SET name = NULL\"\n"),
+        ("/repo/sub/pyproject.toml", b"[tool.sqlty]\n"),
+        ("/repo/schema.sql", b"CREATE TABLE users (id INT NOT NULL, name TEXT);"),
+        ("/repo/sql/users.sql", b"-- name: by_id\nSELECT id, name FROM users WHERE id = :id;\n-- name: count\nSELECT count(*) FROM users WHERE id = $1;\n-- name: touch\nUPDATE users SET name = NULL;\n"),
+        ("/repo/sql/notes.txt", b""),
+        ("/repo/app/a.py", b"\xef\xbb\xbfq = \"--sql\\nSELECT nope FROM users\"\r\nr = \"--sql\\nSELECT *, id FROM users\"\r\nt = f\"--sql\\nSELECT {1}\"\nu = \"--sql\\nSELECT sum(id) AS total FROM users\"\n"),
+        ("/repo/app/b.py", b"from app.a import q\nx = (\n"),
+        ("/repo/app/c.py", b"<unreadable>"),
+        ("/repo/app/start.py", b"q = \"\x80\""),
+        ("/repo/app/continued.py", b"q = \"\xc3(\""),
+        ("/repo/app/ended.py", b"q = \"\xc3"),
+        ("/repo/app/notes.md", b""),
+        ("/repo/skip/s.py", b"q = \"--sql\\nSELECT nope FROM users\"\n"),
+    ];
+
+    #[test]
+    fn reads_the_paths_of_a_command_line() {
+        let files = tree(COMMAND);
+        let flags = flags(&files, None, &[]);
+        let paths = [
+            "app",
+            "pyproject.toml",
+            "sub/pyproject.toml",
+            "app/notes.md",
+            "app/a.py",
+            "skip/s.py",
+        ];
+        let mut workspace = command(&files, &paths, flags).expect("opens");
+        let read = ["app/a.py", "app/b.py", "app/d.py", "app/db.py"];
+        assert_eq!(workspace.files(), read.map(PathBuf::from));
+        let unreadable: Vec<String> = workspace
+            .unreadable()
+            .iter()
+            .map(|(path, why)| format!("{}: {why}", path.display()))
+            .collect();
+        assert_eq!(
+            unreadable,
+            [
+                "app/c.py: unreadable",
+                "app/continued.py: invalid continuation byte at byte 5",
+                "app/ended.py: unexpected end of data at byte 5",
+                "app/start.py: invalid start byte at byte 5",
+            ]
+        );
+        let text = workspace
+            .text(Path::new("app/a.py"))
+            .expect("read")
+            .to_string();
+        assert!(text.starts_with("q = ") && !text.contains('\r'), "{text:?}");
+        workspace.update(Path::new("app/a.py"), &text);
+        let found: Vec<_> = workspace
+            .check_all()
+            .expect("checks")
+            .iter()
+            .map(|found| rules(found))
+            .collect();
+        let a = vec![
+            "unknown-column",
+            "stale-rewrite",
+            "fstring-skipped",
+            "stale-rewrite",
+        ];
+        assert_eq!(found, [a, vec![], vec!["unparsed-query"], vec![]]);
+        let fixed = workspace.fix_all().expect("fixes");
+        assert!(fixed[0].contains("SQL["), "{}", fixed[0]);
+        let counts: Vec<Vec<_>> = workspace
+            .statistics_all()
+            .expect("counts")
+            .into_iter()
+            .map(|counts| {
+                counts
+                    .into_iter()
+                    .collect::<BTreeMap<_, _>>()
+                    .into_iter()
+                    .collect()
+            })
+            .collect();
+        assert_eq!(
+            counts,
+            [
+                vec![("fstring-skipped", 1), ("partially typed", 1), ("typed", 2)],
+                vec![],
+                vec![("typed", 1), ("unparsed", 1)],
+                vec![],
+            ]
+        );
+        assert_eq!(
+            workspace.query_files().expect("lists"),
+            [PathBuf::from("sql/users.sql")]
+        );
+        let explained = workspace
+            .explain(Path::new("app/a.py"), 9)
+            .expect("explains");
+        assert_eq!(
+            explained[0],
+            "  total: type and nullability by inference rule postgres.aggregate.sum-integers"
+        );
+        assert_eq!(
+            workspace
+                .explain(Path::new("app/a.py"), 0)
+                .expect("explains"),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            workspace
+                .explain(Path::new("app/z.py"), 9)
+                .expect("explains"),
+            Vec::<String>::new()
+        );
+        let queries = files.text(Path::new("/repo/sql/users.sql")).expect("text");
+        assert_eq!(
+            workspace
+                .query_types(Path::new("sql/users.sql"), &queries)
+                .expect("types"),
+            [
+                "by_id(id: int) -> tuple[int, str | None]",
+                "count($1: int) -> tuple[int]",
+                "touch() -> None",
+            ]
+        );
+        assert_eq!(
+            workspace
+                .format(
+                    Path::new("app/a.py"),
+                    "q = \"\"\"--sql\nselect id from users where id=%s\"\"\"\n"
+                )
+                .expect("formats"),
+            "q = \"\"\"--sql\nselect id from users\nwhere id = %s\"\"\"\n"
+        );
+    }
+
+    #[test]
+    fn writes_a_module_as_the_commands_do() {
+        let files = tree(COMMAND);
+        let mut workspace =
+            command(&files, &["app/b.py"], flags(&files, None, &[])).expect("opens");
+        let settings = workspace.settings(Path::new("app/b.py")).expect("settings");
+        let text = "q = \"--sql\\nSELECT id FROM users\"\nt = f\"--sql\\nSELECT {1}\"\n";
+        let rewritten = crate::rewritten(text, &settings);
+        assert!(rewritten.contains("q = SQL[tuple[int]]("), "{rewritten}");
+        assert_eq!(crate::stripped(&rewritten, &settings), text);
+        let formatted = crate::formatted(
+            "q = \"\"\"--sql\nselect 1 from t where b=%s\"\"\"\n",
+            &settings,
+        );
+        assert_eq!(
+            formatted,
+            "q = \"\"\"--sql\nselect 1 from t\nwhere b = %s\"\"\"\n"
+        );
+        let skipped = crate::skipped_strings(text, &settings).expect("checks");
+        assert_eq!(rules(&skipped), ["fstring-skipped"]);
+    }
+
+    #[test]
+    fn reports_paths_it_cannot_read() {
+        let files = tree(COMMAND);
+        let error = command(&files, &["gone.py"], flags(&files, None, &[])).err();
+        assert_eq!(error.as_deref(), Some("path does not exist: gone.py"));
+        let files = tree(&[
+            (
+                "/repo/pyproject.toml",
+                b"[tool.sqlty]\nqueries = [\"none/*.sql\"]\n",
+            ),
+            ("/repo/q.sql", b""),
+        ]);
+        let mut workspace = command(&files, &["."], flags(&files, None, &[])).expect("opens");
+        assert_eq!(
+            workspace.query_files().expect("lists"),
+            Vec::<PathBuf>::new()
+        );
+        assert_eq!(
+            workspace.warnings(),
+            ["Schema pattern matches no files: none/*.sql"]
+        );
+    }
+
+    #[test]
+    fn reads_the_configuration_the_flags_name() {
+        let files = tree(&[
+            (
+                "/repo/pyproject.toml",
+                b"[tool.sqlty]\ndialect = \"nope\"\n",
+            ),
+            (
+                "/repo/ci.toml",
+                b"dialect = \"mysql\"\nexclude = [\"gen\"]\nschema = \"schema.sql\"\n",
+            ),
+            ("/repo/schema.sql", b"CREATE TABLE t (a INT);"),
+            ("/repo/q.py", b"q = \"--sql\\nSELECT * FROM t\"\n"),
+        ]);
+        let mut flags = flags(
+            &files,
+            Some("ci.toml"),
+            &["rules.unknown-column = \"warn\"", "exclude = [\"x\"]"],
+        );
+        assert_eq!(
+            flags.take_discovery().keys().collect::<Vec<_>>(),
+            ["exclude"]
+        );
+        assert_eq!(
+            flags
+                .fixed_discovery()
+                .expect("fixed")
+                .keys()
+                .collect::<Vec<_>>(),
+            ["exclude"]
+        );
+        flags.dialect = Some("sqlite".to_string());
+        flags.schema = Some(toml::Value::Array(vec![toml::Value::String(
+            "schema.sql".to_string(),
+        )]));
+        let mut workspace = command(&files, &["schema.sql", "q.py"], flags).expect("opens");
+        assert_eq!(workspace.files(), [PathBuf::from("q.py")]);
+        assert_eq!(
+            workspace.query_files().expect("lists"),
+            Vec::<PathBuf>::new()
+        );
+        let settings = workspace.settings(Path::new("q.py")).expect("settings");
+        assert_eq!(settings.dialect, "sqlite");
+        assert_eq!(
+            settings.rules.get("unknown-column").map(String::as_str),
+            Some("warn")
+        );
+        assert_eq!(
+            settings.rules.get("select-star").map(String::as_str),
+            Some("error")
+        );
+        let isolated =
+            Flags::new(Path::new("/repo"), None, true, &[], Vec::new(), &files).expect("flags");
+        assert!(isolated.fixed_discovery().is_none());
+        let mut workspace = command(&files, &["q.py", "ci.toml"], isolated).expect("opens");
+        assert_eq!(
+            workspace
+                .settings(Path::new("q.py"))
+                .expect("settings")
+                .dialect,
+            "postgres"
+        );
+    }
+
+    #[test]
+    fn reports_flags_it_cannot_take() {
+        let files = tree(&[
+            ("/repo/sqlty.toml", b"extend = \"gone.toml\"\n"),
+            ("/repo/sub/pyproject.toml", b"[tool"),
+            ("/repo/sub/q.py", b"x = 1\n"),
+            ("/repo/dir/x.py", b""),
+        ]);
+        let new = |config: Option<&str>, assignments: &[&str], severities: &[(&str, &str)]| {
+            let assignments: Vec<String> = assignments.iter().map(ToString::to_string).collect();
+            let severities = severities
+                .iter()
+                .map(|(rule, severity)| (rule.to_string(), severity.to_string()))
+                .collect();
+            Flags::new(
+                Path::new("/repo"),
+                config.map(Path::new),
+                false,
+                &assignments,
+                severities,
+                &files,
+            )
+            .err()
+        };
+        assert_eq!(
+            new(Some("gone.toml"), &[], &[]).as_deref(),
+            Some("config file does not exist: gone.toml")
+        );
+        assert_eq!(
+            new(Some("/repo/dir"), &[], &[]).as_deref(),
+            Some("config path is not a file: /repo/dir")
+        );
+        assert_eq!(
+            new(Some("sub/pyproject.toml"), &[], &[]).map(|error| error.is_empty()),
+            Some(false)
+        );
+        assert_eq!(
+            new(None, &[], &[("select-str", "warn")]).as_deref(),
+            Some("--warn: unknown rule 'select-str' (did you mean 'select-star'?); run `sqlty rule` for the list")
+        );
+        let error = new(None, &["import-style = \"nope\""], &[]);
+        assert!(error.is_none());
+        let flags = Flags::new(
+            Path::new("/repo"),
+            None,
+            false,
+            &["import-style = \"nope\"".to_string()],
+            Vec::new(),
+            &files,
+        )
+        .expect("flags");
+        let error = command(&files, &["sub/q.py"], flags)
+            .err()
+            .unwrap_or_default();
+        assert!(error.starts_with("--config: "), "{error}");
+        let flags =
+            Flags::new(Path::new("/repo"), None, false, &[], Vec::new(), &files).expect("flags");
+        let mut workspace = command(&files, &["sub/q.py"], flags).expect("opens");
+        let warnings = workspace.warnings();
+        assert!(warnings[0].starts_with("Failed to parse "), "{warnings:?}");
+        let error = workspace
+            .settings(Path::new("dir/x.py"))
+            .err()
+            .unwrap_or_default();
+        assert!(error.contains("gone.toml"), "{error}");
+        let flags =
+            Flags::new(Path::new("/repo"), None, false, &[], Vec::new(), &files).expect("flags");
+        let error = command(&files, &["dir/x.py"], flags)
+            .err()
+            .unwrap_or_default();
+        assert!(error.contains("gone.toml"), "{error}");
+        assert!(workspace.check_all().expect("checks")[0].is_empty());
+    }
+
+    #[test]
+    fn maps_items_on_all_cores() {
+        assert_eq!(par_map(&[1, 2, 3], |item| item * 2), [2, 4, 6]);
     }
 }

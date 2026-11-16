@@ -496,12 +496,11 @@ fn schema_text(
 /// A path or list of paths, as `schema` and `queries` hold them.
 pub(crate) fn entries_of(entries: &Value) -> Vec<String> {
     match entries {
-        Value::String(entry) => vec![entry.clone()],
         Value::Array(items) => items
             .iter()
             .filter_map(|item| item.as_str().map(str::to_string))
             .collect(),
-        _ => Vec::new(),
+        entry => entry.as_str().map(str::to_string).into_iter().collect(),
     }
 }
 
