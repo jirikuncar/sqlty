@@ -131,6 +131,7 @@ ungrouped
 uninferable
 unparseable
 unreviewed
+Unlicense
 UUIDs
 uv
 Verus

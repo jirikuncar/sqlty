@@ -1,7 +1,7 @@
 """Type stubs for the Rust extension module (sqlty._core)."""
 
 import ast
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal, final
 
@@ -377,3 +377,22 @@ def validate_config(table: dict[str, Any], source: str) -> tuple[dict[str, Any],
 def driver_types(driver: str, dialect: str) -> list[tuple[str, str]]: ...
 def find_config(directory: Path) -> tuple[dict[str, Any], list[str], Path] | None: ...
 def config_file(path: Path, base: Path) -> tuple[dict[str, Any], list[str]]: ...
+def schema_files(entries: list[str], base: str) -> tuple[list[Path], list[str]]: ...
+
+DEFAULT_EXCLUDE: list[str]
+
+class Discovery:
+    def __init__(
+        self,
+        cwd: str,
+        *,
+        isolated: bool,
+        fixed: Mapping[str, object] | None,
+        exclude: list[str] | None,
+        extend_exclude: list[str],
+        respect_gitignore: bool | None,
+    ) -> None: ...
+    def exclusions(self, directory: str) -> list[tuple[Path, list[str]]]: ...
+    def respects_gitignore(self, directory: str) -> bool: ...
+    def is_excluded(self, path: str) -> bool: ...
+    def walk(self, root: str) -> list[Path]: ...

@@ -969,7 +969,7 @@ def _collect_python_files(paths: list[Path], source: ConfigSource | None = None)
             if path.suffix == ".py":
                 files.append(path)
         elif path.is_dir():
-            files.extend(_walk(path, source))
+            files.extend(source.walk(path))
         else:
             raise ConfigError(f"path does not exist: {path}")
     return list(dict.fromkeys(files))
@@ -1074,8 +1074,8 @@ class ConfigSource:
         force_exclude: bool = False,
         respect_gitignore: bool | None = None,
     ) -> None:
+        from sqlty import _core
         from sqlty._config import load_config_file, parse_overrides, validate_rule_severity
-        from sqlty._gitignore import GitIgnore
 
         self._isolated = isolated
         self._fixed = None if config_file is None else load_config_file(config_file)
@@ -1089,23 +1089,23 @@ class ConfigSource:
         extend_exclude = [*inline.pop("extend_exclude", []), *(extend_exclude or ())]
         self._overrides = inline
         self._rule_severity = validate_rule_severity(rule_severity or [])
-        self._exclude = None if exclude is None else self._relative_globs(exclude)
-        self._extend_exclude = self._relative_globs(extend_exclude)
         self.force_exclude = force_exclude
-        self._respect_gitignore = inline.pop("respect_gitignore", respect_gitignore)
-        self.gitignore = GitIgnore()
-
-    def _relative_globs(self, patterns: list[str] | tuple[str, ...]) -> tuple[str, ...]:
-        """Command-line globs relative to the current directory: ``./gen`` and ``$PWD/gen`` are ``gen``."""
-        globs: list[str] = []
-        for pattern in patterns:
-            path = Path(pattern)
-            if path.is_absolute() and path.is_relative_to(self._cwd):
-                pattern = path.relative_to(self._cwd).as_posix() or "."
-            while pattern.startswith("./"):
-                pattern = pattern[2:]
-            globs.append(pattern)
-        return tuple(globs)
+        respect_gitignore = inline.pop("respect_gitignore", respect_gitignore)
+        fixed: dict[str, object] | None = None
+        if self._fixed is not None:
+            fixed = {
+                key.replace("_", "-"): self._fixed[key]
+                for key in ("exclude", "extend_exclude", "respect_gitignore")
+                if key in self._fixed
+            }
+        self._discovery = _core.Discovery(
+            str(self._cwd),
+            isolated=isolated,
+            fixed=fixed,
+            exclude=None if exclude is None else list(exclude),
+            extend_exclude=list(extend_exclude),
+            respect_gitignore=respect_gitignore,
+        )
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> ConfigSource:
@@ -1154,51 +1154,29 @@ class ConfigSource:
 
     def exclusions(self, directory: Path) -> list[tuple[Path, tuple[str, ...]]]:
         """``(base directory, globs)`` pairs excluding entries of ``directory``; empty sets left out."""
-        from sqlty._config import DEFAULT_EXCLUDE, load_config
-
-        if self._fixed is not None:
-            config, base = self._fixed, self._cwd
-        else:
-            config, config_dir = ({}, None) if self._isolated else load_config(directory)
-            # No config: the default globs are names, so the base only matters to ``is_excluded``.
-            resolved = directory.resolve()
-            base = config_dir or (self._cwd if resolved.is_relative_to(self._cwd) else resolved)
-        if self._exclude is None:
-            rules = [
-                (base, (*config.get("exclude", DEFAULT_EXCLUDE), *config.get("extend_exclude", ())))
-            ]
-        else:
-            rules = [(self._cwd, self._exclude), (base, tuple(config.get("extend_exclude", ())))]
-        rules.append((self._cwd, self._extend_exclude))
-        return [(b, patterns) for b, patterns in rules if patterns]
+        found = _discovered(self._discovery.exclusions, directory)
+        return [(base, tuple(patterns)) for base, patterns in found]
 
     def respects_gitignore(self, directory: Path) -> bool:
         """Whether walking ``directory`` skips what ``.gitignore`` ignores."""
-        from sqlty._config import load_config
-
-        if self._respect_gitignore is not None:
-            return bool(self._respect_gitignore)
-        if self._fixed is not None:
-            config = self._fixed
-        else:
-            config = {} if self._isolated else load_config(directory)[0]
-        return config.get("respect_gitignore", True)
+        return _discovered(self._discovery.respects_gitignore, directory)
 
     def is_excluded(self, path: Path) -> bool:
         """Whether ``path`` or one of its parents up to a glob's base directory is excluded."""
-        resolved = path.resolve()
-        for base, patterns in self.exclusions(resolved.parent):
-            if not resolved.is_relative_to(base):
-                if _is_excluded_entry(resolved.name, None, patterns):
-                    return True
-                continue
-            parts = PurePosixPath(resolved.relative_to(base).as_posix()).parts
-            if any(
-                _is_excluded_entry(part, PurePosixPath(*parts[:i]), patterns)
-                for i, part in enumerate(parts)
-            ):
-                return True
-        return False
+        return _discovered(self._discovery.is_excluded, path)
+
+    def walk(self, root: Path) -> list[Path]:
+        """The ``.py`` files under ``root``, sorted, without excluded directories and files."""
+        return _discovered(self._discovery.walk, root)
+
+
+def _discovered[T](method: Callable[[str], T], path: Path) -> T:
+    from sqlty._config import ConfigError
+
+    try:
+        return method(str(path))
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from None
 
 
 @functools.cache
@@ -1246,41 +1224,6 @@ def _is_included(path: Path, base: Path, patterns: tuple[str, ...]) -> bool:
         _is_excluded_entry(entry.name, entry.parent, patterns)
         for entry in [relative, *relative.parents[:-1]]
     )
-
-
-def _excluded(name: str, rules: list[tuple[PurePosixPath | None, tuple[str, ...]]]) -> bool:
-    return any(_is_excluded_entry(name, relative, patterns) for relative, patterns in rules)
-
-
-def _walk(root: Path, source: ConfigSource) -> list[Path]:
-    """The ``.py`` files under ``root``, sorted, without excluded directories and files."""
-    found: list[Path] = []
-    for directory, dirnames, filenames in os.walk(root):
-        current = Path(directory)
-        resolved = current.resolve()
-        rules = [
-            (
-                PurePosixPath(resolved.relative_to(base).as_posix())
-                if resolved.is_relative_to(base)
-                else None,
-                patterns,
-            )
-            for base, patterns in source.exclusions(current)
-        ]
-        ignore = source.gitignore if source.respects_gitignore(current) else None
-        dirnames[:] = sorted(
-            d
-            for d in dirnames
-            if not _excluded(d, rules) and not (ignore and ignore.ignored(resolved, d, is_dir=True))
-        )
-        found.extend(
-            current / name
-            for name in sorted(filenames)
-            if name.endswith(".py")
-            and not _excluded(name, rules)
-            and not (ignore and ignore.ignored(resolved, name, is_dir=False))
-        )
-    return sorted(found)
 
 
 @functools.cache
