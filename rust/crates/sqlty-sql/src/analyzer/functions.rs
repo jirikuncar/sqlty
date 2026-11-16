@@ -11,7 +11,9 @@ use super::dialect::SqlDialect;
 use super::expr::{from_sql_type, range_element, range_kind};
 use super::inference::{function_rules, operand, FunctionRule};
 use super::literals::{strip, value_set};
-use super::operators::{common_of, mysql_date_add, numeric_rank, operand_type};
+use super::operators::{
+    common_of, is_text, mysql_date_add, mysql_date_shift, numeric_rank, operand_type,
+};
 use super::query::Analyzer;
 use super::scope::{resolve, Scope};
 use super::typed::Typed;
@@ -266,26 +268,24 @@ impl<'a> Analyzer<'a> {
                         (interval, &Typed::UNKNOWN),
                     )
                     .map_or(Typed::UNKNOWN, |ty| from_sql_type(ty, self.dialect)),
-                    Some(_) => match operand_type(&date) {
-                        Some("DATE") => sql("DATE")?,
-                        Some("DATETIME" | "TIMESTAMP" | "TIMESTAMPTZ") => sql("DATETIME")?,
-                        _ => Typed::UNKNOWN,
-                    },
+                    // `ADDDATE(date, days)`.
+                    Some(_) => mysql_date_shift(&date, true, false)
+                        .map_or(Typed::UNKNOWN, |ty| from_sql_type(ty, self.dialect)),
                     None => Typed::UNKNOWN,
                 })
             }
             Returns::TimestampAdd => {
-                let day_or_coarser = matches!(
-                    args.first(),
-                    Some(Expr::Identifier(unit)) if ["DAY", "WEEK", "MONTH", "QUARTER", "YEAR"]
-                        .iter()
-                        .any(|coarse| unit.value.eq_ignore_ascii_case(coarse))
-                );
-                match operand_type(&arg(2)?) {
-                    Some("DATE") if day_or_coarser => sql("DATE"),
-                    Some("DATE" | "DATETIME" | "TIMESTAMP") => sql("DATETIME"),
-                    _ => Ok(Typed::UNKNOWN),
-                }
+                let unit_in = |units: &[&str]| {
+                    matches!(
+                        args.first(),
+                        Some(Expr::Identifier(unit))
+                            if units.iter().any(|known| unit.value.eq_ignore_ascii_case(known))
+                    )
+                };
+                let whole_days = unit_in(&["DAY", "WEEK", "MONTH", "QUARTER", "YEAR"]);
+                let time_only = unit_in(&["HOUR", "MINUTE", "SECOND", "MICROSECOND"]);
+                Ok(mysql_date_shift(&arg(2)?, whole_days, time_only)
+                    .map_or(Typed::UNKNOWN, |ty| from_sql_type(ty, self.dialect)))
             }
             Returns::Integral => {
                 let typed = arg(0)?;
@@ -371,11 +371,11 @@ impl<'a> Analyzer<'a> {
             }))
         };
         let typed = [typed(0)?, typed(1)?];
-        let [first, second] = [0, 1].map(|i| operand(typed[i].as_ref().and_then(operand_type)));
+        let [first, second] = [0, 1].map(|i| operand(typed[i].as_ref().and_then(rule_operand)));
         let mut all = Vec::new();
         if rules.iter().any(FunctionRule::reads_all) {
             for arg in args {
-                all.push(operand(operand_type(&self.expr(arg, scope)?)));
+                all.push(operand(rule_operand(&self.expr(arg, scope)?)));
             }
         }
         let found = rules
@@ -429,6 +429,11 @@ fn str_to_date_type(format: &str) -> &'static str {
         (false, true) => "TIME",
         _ => "DATE",
     }
+}
+
+/// An argument's SQL type as function rules match it: a string literal is `TEXT`.
+fn rule_operand(typed: &Typed) -> Option<&str> {
+    operand_type(typed).or_else(|| is_text(typed).then_some("TEXT"))
 }
 
 /// The SQL type `EXTRACT(field FROM x)` gives, `None` when sqlty does not know it.

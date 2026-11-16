@@ -256,14 +256,16 @@ fn sqlite_numeric_rank(typed: &Typed) -> Option<usize> {
 }
 
 /// MySQL `date ± INTERVAL n unit` (or `INTERVAL n unit + date`): a `DATE` stays a date for
-/// day units and coarser, anything else is a `DATETIME`.
+/// day units and coarser, a `TIME` a time for time units, anything else is a `DATETIME`; a
+/// string gives a string.
 pub(super) fn mysql_date_add(
     op: &BinaryOperator,
     (left, left_typed): (&Expr, &Typed),
     (right, right_typed): (&Expr, &Typed),
 ) -> Option<&'static str> {
     use sqlparser::ast::DateTimeField::{
-        Day, Days, Month, Months, Quarter, Week, Weeks, Year, Years,
+        Day, Days, Hour, Hours, Microsecond, Microseconds, Minute, Minutes, Month, Months,
+        Quarter, Second, Seconds, Week, Weeks, Year, Years,
     };
     let (date, interval) = match (left, right) {
         (_, Expr::Interval(interval)) => (left_typed, interval),
@@ -275,9 +277,27 @@ pub(super) fn mysql_date_add(
             interval.leading_field,
             Some(Year | Years | Quarter | Month | Months | Week(_) | Weeks | Day | Days)
         );
+    let time_only = matches!(
+        interval.leading_field,
+        Some(Hour | Hours | Minute | Minutes | Second | Seconds | Microsecond | Microseconds)
+    );
+    mysql_date_shift(date, whole_days, time_only)
+}
+
+/// What MySQL's date arithmetic gives for `date` shifted by whole days (or coarser) or by
+/// time units only.
+pub(super) fn mysql_date_shift(
+    date: &Typed,
+    whole_days: bool,
+    time_only: bool,
+) -> Option<&'static str> {
+    if is_text(date) {
+        return Some("TEXT");
+    }
     match operand_type(date)? {
         "DATE" if whole_days => Some("DATE"),
-        "DATE" | "DATETIME" | "TIMESTAMP" => Some("DATETIME"),
+        "TIME" if time_only => Some("TIME"),
+        "DATE" | "DATETIME" | "TIMESTAMP" | "TIME" => Some("DATETIME"),
         _ => None,
     }
 }

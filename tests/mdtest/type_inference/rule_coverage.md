@@ -1036,9 +1036,14 @@ SELECT ST_Area(ST_GeomFromText('POLYGON((0 0,0 2,2 2,2 0,0 0))')) AS spatial_dou
 ```
 
 ```sql
+SELECT FROM_UNIXTIME(1447430881, '%Y') AS datetime_formatted
+-- rules: datetime_formatted: mysql.datetime.from-unixtime-format / mysql.datetime.from-unixtime-format
+```
+
+```sql
 SELECT
     bit_and(1) AS string_bigint,
-    round('a') AS string_argument_type,
+    round(NULL) AS string_argument_type,
     REGEXP_INSTR('dog cat dog', 'dog') AS string_bigint_2,
     BIN(12) AS string_text,
     UNHEX(NULL) AS string_varbinary,

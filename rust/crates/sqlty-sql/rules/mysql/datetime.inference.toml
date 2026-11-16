@@ -64,6 +64,16 @@ reference.mysql = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions"
 reasoning = "The manual describes each of these as returning a DATETIME value. It never returns NULL, even for NULL arguments."
 
 [[function]]
+id = "mysql.datetime.from-unixtime-format"
+function = "FROM_UNIXTIME"
+dialects = ["mysql"]
+arguments = [[], ["@text"]]
+type = "TEXT"
+nullability = "nullable"
+reference.mysql = "MySQL 8.4 Reference Manual, 14.7 Date and Time Functions (FROM_UNIXTIME(unix_timestamp, format): if format is given, the result is formatted according to the format string)"
+reasoning = "With a format, the timestamp is formatted as a string, as DATE_FORMAT does; NULL for a timestamp out of range."
+
+[[function]]
 id = "mysql.datetime.datetime-nullable"
 functions = ["TIMESTAMP", "FROM_UNIXTIME", "CONVERT_TZ"]
 dialects = ["mysql"]
