@@ -344,10 +344,21 @@ def commands(page: Page) -> None:
 
 
 def presenting(page: Page) -> None:
+    # Full screen changes after the click and the key: a late change ends the next presentation.
+    settles = (
+        "void (window.settled = new Promise((done) => {"
+        " for (const name of ['fullscreenchange', 'fullscreenerror'])"
+        " document.addEventListener(name, done, { once: true });"
+        " setTimeout(done, 2000); }))"
+    )
+    page.evaluate(settles)
     page.click("[data-present]")
     assert page.get_attribute("[data-present]", "aria-pressed") == "true"
+    page.evaluate("window.settled")
+    page.evaluate(settles)
     page.keyboard.press("Escape")
     assert page.get_attribute("[data-present]", "aria-pressed") == "false"
+    page.evaluate("window.settled")
     page.focus("[data-zoom='1']")
     page.keyboard.press("Control+Shift+F")
     assert page.get_attribute("[data-present]", "aria-pressed") == "true"
