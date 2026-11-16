@@ -196,7 +196,7 @@ check-examples:
 	@echo "Running sqlty check on examples..."
 	@for dir in $(EXAMPLE_DIRS); do \
 		echo "  -> $$dir"; \
-		uv run sqlty check $$dir/ || true; \
+		uv run python -m sqlty check $$dir/ || true; \
 	done
 	@echo "Done"
 
@@ -205,7 +205,7 @@ rewrite-examples:
 	@echo "Running sqlty rewrite on examples..."
 	@for dir in $(EXAMPLE_DIRS); do \
 		echo "  -> $$dir"; \
-		uv run sqlty rewrite $$dir/ || true; \
+		uv run python -m sqlty rewrite $$dir/ || true; \
 	done
 	@echo "Done"
 
@@ -214,6 +214,6 @@ strip-examples:
 	@echo "Running sqlty strip on examples..."
 	@for dir in $(EXAMPLE_DIRS); do \
 		echo "  -> $$dir"; \
-		uv run sqlty strip $$dir/ || true; \
+		uv run python -m sqlty strip $$dir/ || true; \
 	done
 	@echo "Done"

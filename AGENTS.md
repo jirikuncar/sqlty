@@ -430,7 +430,8 @@ rust/crates/             # Cargo workspace (root: rust/Cargo.toml)
 ├── sqlty-cli/           # the sqlty commands: rewrite, strip, format, check, rule, skill, version
 ├── sqlty-lsp/           # the language server of sqlty server; tests without Python
 ├── sqlty-wasm/          # JSON in, JSON out, for WebAssembly: the docs playground (make playground)
-└── sqlty-ext/           # lib.rs (PyO3), builds sqlty._core; server.rs runs sqlty-lsp
+└── sqlty-ext/           # lib.rs (PyO3), builds sqlty._core; server.rs runs sqlty-lsp;
+                         # main.rs is the `sqlty` executable (scripts/build_cli.sh)
 editors/vscode/          # VS Code client of sqlty server; see its README
 proofs/                  # Lean 4 model of SqlType::python, with proofs; see its README
 ```

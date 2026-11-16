@@ -117,7 +117,7 @@ Run them from a checkout:
 ```bash
 git clone https://github.com/jirikuncar/sqlty.git
 cd sqlty && uv sync --all-groups
-uv run sqlty check examples/01_quick_start/
-uv run sqlty check --schema examples/02_schema_inference/schema.sql examples/02_schema_inference/
+uv run python -m sqlty check examples/01_quick_start/
+uv run python -m sqlty check --schema examples/02_schema_inference/schema.sql examples/02_schema_inference/
 uv run python -m sqlty.magic examples/magic_codec/demo.py  # print the decoded source
 ```

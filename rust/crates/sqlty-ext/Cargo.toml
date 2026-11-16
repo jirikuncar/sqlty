@@ -15,6 +15,10 @@ workspace = true
 name = "_core"
 crate-type = ["cdylib"]
 
+[[bin]]
+name = "sqlty"
+path = "src/main.rs"
+
 [dependencies]
 pyo3 = { workspace = true, features = ["abi3t-py315"] }
 rayon = "1.12"

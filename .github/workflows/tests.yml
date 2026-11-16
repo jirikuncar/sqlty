@@ -587,7 +587,8 @@ jobs:
           uv build --out-dir dist --build-constraint "$RUNNER_TEMP/maturin-floor.txt"
 
       - name: Check sqlty_magic.pth is in the wheel root, RECORD and sdist
-        run: python3 tests/check_dist.py dist/*.whl dist/*.tar.gz
+        # The sdist has no sqlty executable: its wheel runs the commands through Python.
+        run: python3 tests/check_dist.py --without-executable dist/*.whl dist/*.tar.gz
 
       - name: Install the wheel and import a coding-sqlty module
         run: |
@@ -600,8 +601,8 @@ jobs:
 
       - name: The wheel built from the sdist prints the Agent Skills
         run: |
-          "$RUNNER_TEMP/venv/bin/sqlty" skill --list
-          "$RUNNER_TEMP/venv/bin/sqlty" skill | head -2 | grep -qx 'name: sqlty'
+          "$RUNNER_TEMP/venv/bin/python" -m sqlty skill --list
+          "$RUNNER_TEMP/venv/bin/python" -m sqlty skill | head -2 | grep -qx 'name: sqlty'
 
   vscode:
     name: VS Code extension

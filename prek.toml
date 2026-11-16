@@ -27,7 +27,7 @@ repo = "local"
 [[repos.hooks]]
 id = "sqlty-rewrite-examples"
 name = "sqlty rewrite examples"
-entry = "bash -c 'uv run sqlty rewrite -q examples/0*/'"
+entry = "bash -c 'uv run python -m sqlty rewrite -q examples/0*/'"
 language = "system"
 pass_filenames = false
 files = '^(examples|src/sqlty|rust/crates)/'
@@ -36,7 +36,7 @@ priority = 4
 [[repos.hooks]]
 id = "sqlty-check-examples"
 name = "sqlty check examples"
-entry = "bash -c 'uv run sqlty check -q examples/0*/'"
+entry = "bash -c 'uv run python -m sqlty check -q examples/0*/'"
 language = "system"
 pass_filenames = false
 files = '^(examples|src/sqlty|rust/crates)/'

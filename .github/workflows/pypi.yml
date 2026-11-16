@@ -85,6 +85,15 @@ jobs:
             3.15
             3.15t
 
+      # The `sqlty` executable ships in each wheel as its script; Linux builds it in the
+      # container (before-script-linux), so it links against the image's libc.
+      - name: Build the sqlty executable
+        if: ${{ env.SKIP != 'true' && !matrix.container }}
+        shell: bash
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal
+          RUSTUP_TOOLCHAIN=1.99.1 scripts/build_cli.sh dist
+
       - name: Build wheels
         if: env.SKIP != 'true'
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
@@ -100,6 +109,7 @@ jobs:
             ${{ github.event_name != 'pull_request' && (matrix.container && '/opt/python/cp314-cp314/bin/python /opt/python/cp314-cp314t/bin/python' || 'python3.14') || '' }}
           manylinux: ${{ matrix.manylinux || 'auto' }}
           container: ${{ matrix.container }}
+          before-script-linux: scripts/build_cli.sh dist
 
       - name: Install uv
         if: ${{ env.SKIP != 'true' && !contains(matrix.target, 'musl') }}
@@ -124,6 +134,9 @@ jobs:
             py="venv-$v/bin/python"; [ -x "$py" ] || py="venv-$v/Scripts/python.exe"
             uv pip install -q --python "$py" "$wheel"
             "$py" -c "import sys, sqlty, sqlty._core; assert sys._is_gil_enabled() != '$v'.endswith('t'); print(sqlty.__version__, sqlty.UNTYPED)"
+            # The executable runs the commands; the ones it hands to Python find the venv's.
+            "$(dirname "$py")/sqlty" version
+            "$(dirname "$py")/sqlty" breaking --help > /dev/null
           done
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -131,7 +144,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Check sqlty_magic.pth is in the wheel root and RECORD
+      - name: Check the wheel ships sqlty_magic.pth and the sqlty executable
         if: env.SKIP != 'true'
         shell: bash
         run: python tests/check_dist.py dist/*.whl
