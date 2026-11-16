@@ -849,6 +849,20 @@ def test_exclude_path_glob_outside_its_base_never_matches(tmp_path: Path, monkey
     assert ConfigSource(exclude=["gen.py"]).is_excluded(outside)
 
 
+def test_walk_skips_default_excludes_in_a_large_tree(tmp_path: Path) -> None:
+    from sqlty._cli import _collect_python_files
+
+    for d in range(5):
+        (tmp_path / f"pkg{d}").mkdir()
+        for n in range(20):
+            (tmp_path / f"pkg{d}" / f"m{n}.py").write_text("")
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "node_modules" / "x.py").write_text("")
+    files = _collect_python_files([tmp_path])
+    assert len(files) == 100
+    assert not any("node_modules" in file.parts for file in files)
+
+
 def test_exclude_globs_match_names_and_relative_paths(tmp_path: Path) -> None:
     from sqlty._cli import _collect_python_files
 
