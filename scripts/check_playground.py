@@ -45,6 +45,7 @@ def main() -> None:
         browser = playwright.chromium.launch()
         coverage = Coverage()
         page = browser.new_page()
+        no_github_api(page)
         coverage.watch(page)
         errors: list[str] = []
         page.on("pageerror", lambda error: errors.append(str(error)))
@@ -63,6 +64,16 @@ def main() -> None:
         f"playground.js never ran lines {lines} and functions {functions}"
     )
     print(f"{url}: the playground works, and every line of playground.js ran")
+
+
+def no_github_api(target: Page | BrowserContext) -> None:
+    """The theme's repository facts, which a rate-limited runner gets a 403 for."""
+    target.route(
+        "https://api.github.com/**",
+        lambda route: route.fulfill(
+            json={"tag_name": "v0", "stargazers_count": 0, "forks_count": 0}
+        ),
+    )
 
 
 def check(page: Page, url: str) -> None:
@@ -211,6 +222,7 @@ def exercise(browser: Browser, url: str, watch: Callable[[Page], None]) -> None:
     """Every control of the playground, with what each one shows."""
     context = browser.new_context(permissions=["clipboard-read", "clipboard-write"])
     context.add_init_script(INIT)
+    no_github_api(context)
     context.route(
         "**/vendor/wllama/esm/index.min.js",
         lambda route: route.fulfill(body=WLLAMA, content_type="text/javascript"),
