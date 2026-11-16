@@ -243,7 +243,7 @@ def _compare(
 ) -> list[Finding]:
     """What ``schema`` breaks in ``queries``; up to ``jobs`` processes check the files."""
     from sqlty._helpers import configured_helpers
-    from sqlty._source import AST, ParsedSource
+    from sqlty._source import ParsedSource
     from sqlty.core import HelperIndex
 
     sources: dict[Path, ParsedSource] = {}
