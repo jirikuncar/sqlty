@@ -229,3 +229,10 @@ SELECT dt AT TIME ZONE 'UTC', '2024-01-01 10:00' AT TIME ZONE 'UTC', NULL AT TIM
 -- columns: timezone: datetime.datetime (TIMESTAMP)
 -- columns: timezone: datetime.datetime | None (TIMESTAMP)
 ```
+
+A time of day becomes a `timetz`.
+
+```sql
+SELECT TIME '10:00' AT TIME ZONE 'UTC' FROM t
+-- columns: timezone: datetime.time (TIMETZ)
+```

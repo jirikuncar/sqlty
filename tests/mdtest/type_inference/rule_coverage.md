@@ -1373,7 +1373,7 @@ schema = "schema.sql"
 ```
 
 ```sql
-SELECT i / 2 AS division, 1 = 1 AS eq, 1 = 1 AND b AS both_, b AND b AS bools, NOT b AS not_bool, 'a' ~ 'a' AS regex, 0.5 AS half FROM t
+SELECT i / 2 AS division, 1 = 1 AS eq, 1 = 1 AND b AS both_, b AND b AS bools, NOT b AS not_bool, 'a' ~ 'a' AS regex, 0.5 AS half, (1 = 1) OR b AS nested, 1 AND b AS number FROM t
 -- rules: division: clickhouse.arithmetic.division / clickhouse.arithmetic.division
 -- rules: eq: common.comparison / common.comparison
 -- rules: both_: common.logical.and-or / common.logical.and-or
@@ -1381,6 +1381,8 @@ SELECT i / 2 AS division, 1 = 1 AS eq, 1 = 1 AND b AS both_, b AND b AS bools, N
 -- rules: not_bool: - / -
 -- rules: regex: common.pattern / common.pattern
 -- rules: half: - / -
+-- rules: nested: common.logical.and-or / common.logical.and-or
+-- rules: number: common.logical.and-or / common.logical.and-or
 -- columns: division: float | None (DOUBLE)
 -- columns: eq: int (UTINYINT)
 -- columns: both_: int | None (UTINYINT)
@@ -1388,6 +1390,8 @@ SELECT i / 2 AS division, 1 = 1 AS eq, 1 = 1 AND b AS both_, b AND b AS bools, N
 -- columns: not_bool: bool | None (BOOLEAN)
 -- columns: regex: int (UTINYINT)
 -- columns: half: float (None)
+-- columns: nested: int | None (UTINYINT)
+-- columns: number: int | None (UTINYINT)
 ```
 
 ## Other dialects

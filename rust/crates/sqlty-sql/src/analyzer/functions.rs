@@ -655,7 +655,9 @@ mod tests {
 
     #[test]
     fn extract_types_follow_the_dialect_and_field() {
-        use sqlparser::ast::DateTimeField::{Custom, Epoch, Julian, Nanosecond, Year};
+        use sqlparser::ast::DateTimeField::{
+            Custom, Epoch, Julian, Nanosecond, TimezoneHour, Year,
+        };
         let cases = [
             ("postgres", Year, Some("DECIMAL")),
             ("generic", Epoch, Some("DECIMAL")),
@@ -664,6 +666,7 @@ mod tests {
             ("duckdb", Custom("yearweek".into()), Some("BIGINT")),
             ("clickhouse", Year, Some("USMALLINT")),
             ("clickhouse", Nanosecond, Some("UINT")),
+            ("clickhouse", TimezoneHour, Some("INT")),
             ("clickhouse", Julian, None),
             ("snowflake", Year, None),
         ];
