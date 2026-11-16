@@ -230,7 +230,7 @@ fn typed(text: &str, changed: String, options: &Options<'_>, settings: &FileSett
 
 /// What `sqlty rewrite` warns about in `text`: the f-, t- and other strings it leaves alone,
 /// at the severities `settings` gives them.
-pub fn skipped_strings(text: &str, settings: &FileSettings) -> Result<Vec<Diagnostic>, String> {
+pub fn skipped_strings(text: &str, settings: &FileSettings) -> Vec<Diagnostic> {
     const SKIPPED: [Rule; 4] = [
         Rule::FstringSkipped,
         Rule::TstringSkipped,
@@ -249,7 +249,7 @@ pub fn skipped_strings(text: &str, settings: &FileSettings) -> Result<Vec<Diagno
         (rule.name().to_string(), severity)
     });
     let rules = RuleConfig::from_overrides(Some(severities.collect()))
-        .map_err(|error| error.to_string())?;
+        .expect("the rules and severities are known");
     let coerce = HashSet::new();
     let import_style = settings.import_style.as_deref();
     let checker = Checker::new(
@@ -262,14 +262,14 @@ pub fn skipped_strings(text: &str, settings: &FileSettings) -> Result<Vec<Diagno
         &coerce,
         None,
     )
-    .map_err(|error| error.to_string())?;
+    .expect("the settings are validated");
     let parsed = Source::new(text, settings.version).map(Arc::new);
     let found = check_module(text, parsed.as_ref(), None, &checker);
-    Ok(found
+    found
         .diagnostics
         .into_iter()
         .map(|reported| reported.diagnostic)
-        .collect())
+        .collect()
 }
 
 /// `text` as `sqlty rewrite` writes it with `settings`.

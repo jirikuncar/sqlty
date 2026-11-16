@@ -837,6 +837,9 @@ mod tests {
 
         fn list(&self, path: &Path) -> Listing {
             let path = &normalized(path);
+            if path.ends_with("unread") {
+                return Listing::Unread;
+            }
             let mut entries: Vec<(String, Kind)> = Vec::new();
             for file in self.0.keys() {
                 let Ok(rest) = file.strip_prefix(path) else {
@@ -1206,7 +1209,7 @@ mod tests {
         ("/repo/app/d.py", b"from app.db import fetch\n\nfetch(\"SELECT id FROM users\")\nq = \"--sql\\nSELEC 1\"\nr = \"--sql\\nUPDATE users SET name = NULL\"\n"),
         ("/repo/sub/pyproject.toml", b"[tool.sqlty]\n"),
         ("/repo/schema.sql", b"CREATE TABLE users (id INT NOT NULL, name TEXT);"),
-        ("/repo/sql/users.sql", b"-- name: by_id\nSELECT id, name FROM users WHERE id = :id;\n-- name: count\nSELECT count(*) FROM users WHERE id = $1;\n-- name: touch\nUPDATE users SET name = NULL;\n"),
+        ("/repo/sql/users.sql", b"-- name: by_id\nSELECT id, name FROM users WHERE id = :id;\n-- name: count\nSELECT count(*) FROM users WHERE id = $1;\n-- name: touch\nUPDATE users SET name = NULL;\n-- name: by_user\nSELECT name FROM users WHERE id = :user.id;\n"),
         ("/repo/sql/notes.txt", b""),
         ("/repo/app/a.py", b"\xef\xbb\xbfq = \"--sql\\nSELECT nope FROM users\"\r\nr = \"--sql\\nSELECT *, id FROM users\"\r\nt = f\"--sql\\nSELECT {1}\"\nu = \"--sql\\nSELECT sum(id) AS total FROM users\"\n"),
         ("/repo/app/b.py", b"from app.a import q\nx = (\n"),
@@ -1227,6 +1230,7 @@ mod tests {
             "pyproject.toml",
             "sub/pyproject.toml",
             "app/notes.md",
+            "app",
             "app/a.py",
             "skip/s.py",
         ];
@@ -1321,6 +1325,7 @@ mod tests {
                 "by_id(id: int) -> tuple[int, str | None]",
                 "count($1: int) -> tuple[int]",
                 "touch() -> None",
+                "by_user(user.id: int) -> tuple[str | None]",
             ]
         );
         assert_eq!(
@@ -1352,8 +1357,57 @@ mod tests {
             formatted,
             "q = \"\"\"--sql\nselect 1 from t\nwhere b = %s\"\"\"\n"
         );
-        let skipped = crate::skipped_strings(text, &settings).expect("checks");
+        let skipped = crate::skipped_strings(text, &settings);
         assert_eq!(rules(&skipped), ["fstring-skipped"]);
+        assert_eq!(
+            workspace.query_files().expect("lists"),
+            Vec::<PathBuf>::new()
+        );
+    }
+
+    #[test]
+    fn reports_what_the_host_has_not_read() {
+        let files = tree(&[
+            (
+                "/repo/pyproject.toml",
+                b"[tool.sqlty]\nschema = \"unread\"\n",
+            ),
+            ("/repo/unread/x.sql", b""),
+        ]);
+        let error = command(&files, &["pyproject.toml"], flags(&files, None, &[])).err();
+        assert_eq!(error.as_deref(), Some("/repo/unread: not read"));
+        let files = tree(&[
+            (
+                "/repo/pyproject.toml",
+                b"[tool.sqlty]\nqueries = \"unread\"\n",
+            ),
+            ("/repo/q.py", b""),
+        ]);
+        let mut workspace = command(&files, &["q.py"], flags(&files, None, &[])).expect("opens");
+        assert_eq!(
+            workspace.query_files().err().as_deref(),
+            Some("/repo/unread: not read")
+        );
+    }
+
+    #[test]
+    fn keeps_what_no_module_refutes() {
+        let files = tree(&[
+            (
+                "/repo/pyproject.toml",
+                b"[tool.sqlty]\nschema = \"schema.sql\"\nrules = { redundant-optional = \"warn\" }\n",
+            ),
+            ("/repo/schema.sql", b"CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);"),
+            (
+                "/repo/q.py",
+                b"from typing import TypedDict\n\nfrom sqlty import SQL\n\n\nclass User(TypedDict):\n    id: int\n    name: str | None\n\n\nq = SQL[User](\"--sql\\nSELECT id, name FROM users\")\n",
+            ),
+        ]);
+        let mut workspace = command(&files, &["q.py"], flags(&files, None, &[])).expect("opens");
+        assert_eq!(
+            rules(&workspace.check_all().expect("checks")[0]),
+            ["redundant-optional"]
+        );
     }
 
     #[test]
@@ -1388,7 +1442,7 @@ mod tests {
             ),
             (
                 "/repo/ci.toml",
-                b"dialect = \"mysql\"\nexclude = [\"gen\"]\nschema = \"schema.sql\"\n",
+                b"dialect = \"mysql\"\nexclude = [\"gen\"]\nschema = \"schema.sql\"\n[databases.logs]\ninclude = [\"logs/**\"]\n",
             ),
             ("/repo/schema.sql", b"CREATE TABLE t (a INT);"),
             ("/repo/q.py", b"q = \"--sql\\nSELECT * FROM t\"\n"),
@@ -1503,6 +1557,10 @@ mod tests {
         let mut workspace = command(&files, &["sub/q.py"], flags).expect("opens");
         let warnings = workspace.warnings();
         assert!(warnings[0].starts_with("Failed to parse "), "{warnings:?}");
+        let flags =
+            Flags::new(Path::new("/repo"), None, false, &[], Vec::new(), &files).expect("flags");
+        let listed = command(&files, &["sub/pyproject.toml"], flags).expect("opens");
+        assert_eq!(listed.files(), Vec::<PathBuf>::new());
         let error = workspace
             .settings(Path::new("dir/x.py"))
             .err()
