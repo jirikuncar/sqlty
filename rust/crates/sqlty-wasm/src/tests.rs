@@ -513,7 +513,11 @@ fn project_asks_for_each_file_it_reads() {
         .as_str()
         .unwrap()
         .contains("unknown key 'nope'"));
-    let files = json!({"/a/sqlty.toml": null, "/a/pyproject.toml": null, "/a/Cargo.toml": null});
+    let mut files =
+        json!({"/a/sqlty.toml": null, "/a/pyproject.toml": null, "/a/Cargo.toml": null});
+    for name in ["sqlty.toml", "pyproject.toml", "Cargo.toml"] {
+        files[format!("/{name}")] = Value::Null;
+    }
     assert_eq!(
         ask(&json!({"op": "project", "path": "/a", "files": files})),
         Value::Null
