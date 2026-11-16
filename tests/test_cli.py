@@ -2082,3 +2082,19 @@ def test_check_reads_no_query_file_outside_its_config(tmp_path, monkeypatch, cap
     monkeypatch.chdir(project)
 
     assert _run(["check", "--config-file", "sqlty.toml", "../users.sql"], capsys) == (0, "", "")
+
+
+def test_rust_cli_raises_what_its_streams_raise(monkeypatch) -> None:
+    from sqlty._core import cli
+
+    class Closed:
+        def write(self, text: str) -> int:
+            raise OSError("closed")
+
+        def flush(self) -> None:
+            pass
+
+    monkeypatch.setattr(sys, "stdout", Closed())
+
+    with pytest.raises(OSError, match="closed"):
+        cli(["sqlty", "rule"])

@@ -85,9 +85,8 @@ impl sqlty_cli::Host for PyHost {
     }
 
     fn write(&mut self, path: &Path, data: &[u8]) -> Result<(), String> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
+        let parent = path.parent().unwrap_or(Path::new("."));
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         std::fs::write(path, data).map_err(|error| error.to_string())
     }
 
