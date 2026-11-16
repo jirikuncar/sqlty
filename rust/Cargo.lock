@@ -1612,10 +1612,12 @@ dependencies = [
 name = "sqlty-project"
 version = "0.6.0"
 dependencies = [
+ "rayon",
  "regex",
  "sqlty-format",
  "sqlty-python",
  "sqlty-sql",
+ "stacker",
  "toml",
 ]
 
