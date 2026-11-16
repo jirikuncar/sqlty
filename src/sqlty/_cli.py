@@ -1563,28 +1563,8 @@ class Project:
         )
 
     def check_all(self, row_usage: RowUsage) -> Iterable[list[Diagnostic]]:
-        """``check`` of every file, in order. With ``SQLTY_AST=rust`` one Rust call checks
-        them on its own threads; otherwise threads call ``check``."""
-        from sqlty._check import check_modules
-        from sqlty._source import AST
-
-        if AST != "rust":
-            return _map(lambda path: self.check(path, row_usage), self.files)
-        modules = []
-        for path in self.files:
-            settings = self.settings[path]
-            config = (
-                settings.dialect,
-                settings.schema,
-                settings.rules,
-                settings.import_style,
-                settings.untyped,
-                settings.coerce_row_types,
-                self.helpers[path],
-                settings.query_variants,
-            )
-            modules.append((self.sources[path], config))
-        return check_modules(modules, row_usage, _workers())
+        """``check`` of every file, in order, on threads (the Rust CLI checks with Rust)."""
+        return _map(lambda path: self.check(path, row_usage), self.files)
 
     def fix(self, path: Path) -> str:
         from sqlty.core import fix_source

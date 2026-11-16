@@ -19,7 +19,7 @@ SQLTY_AST=compare "${pytest[@]}" -m "not timing and not pg" "${subset[@]}"
 # The deprecated Python passes alone, until 0.8.0 removes them.
 SQLTY_AST=python "${pytest[@]}" -m "not timing and not pg" "${subset[@]}" tests/test_source.py \
   tests/test_composed_edges.py tests/test_rust_check.py tests/test_rust_index.py tests/test_lsp.py \
-  tests/e2e/test_breaking_e2e.py
+  tests/e2e/test_breaking_e2e.py tests/e2e/test_cli_config_e2e.py
 if [[ -n ${SQLTY_PG_DSN:-} ]]; then
   "${pytest[@]}" -m pg -n 0
 fi
