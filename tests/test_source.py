@@ -204,3 +204,30 @@ def test_rust_checks_by_default_and_python_is_deprecated(ast_env: str | None) ->
     assert run.stdout == f"{ast_env or 'rust'}\n"
     warned = "FutureWarning: SQLTY_AST=python is deprecated" in run.stderr
     assert warned is (ast_env == "python")
+
+
+@pytest.mark.parametrize(
+    ("style", "wrapper"),
+    [
+        (None, "SQL"),
+        ("import sqlty", "sqlty.SQL"),
+        ("from sqlty import SQL as Q", "Q"),
+        ("import sqlty as sq", "sq.SQL"),
+        ("import os", None),
+    ],
+)
+def test_wrapper_name_of_each_import_style(style: str | None, wrapper: str | None) -> None:
+    from sqlty._source import _wrapper_name
+
+    assert _wrapper_name(style) == wrapper
+
+
+def test_rust_reads_ignore_comments_as_tokenize_does(monkeypatch: pytest.MonkeyPatch) -> None:
+    from sqlty import _source
+
+    text = "q = 1  # sqlty: ignore[select-star]\nr = 2  # sqlty: ignore\n"
+    monkeypatch.setattr(_source, "AST", "python")
+    python = ParsedSource(text).ignores
+    monkeypatch.setattr(_source, "AST", "rust")
+    assert ParsedSource(text).ignores == python
+    assert [i.rules for i in python.values()] == [("select-star",), None]
