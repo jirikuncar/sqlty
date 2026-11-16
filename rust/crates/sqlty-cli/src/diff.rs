@@ -229,4 +229,44 @@ mod tests {
         );
         assert_eq!(unified("q.py", "same\n", "same\n"), "");
     }
+
+    #[test]
+    fn matches_difflib_on_line_ends_moves_and_popular_lines() {
+        for (old, new, expected) in [
+            ("", "", ""),
+            (
+                "a\nb\nc\n",
+                "x\nb\nc\na\n",
+                "--- q.py\n+++ q.py\n@@ -1,3 +1,4 @@\n-a\n+x\n b\n c\n+a\n",
+            ),
+            (
+                "a\n",
+                "a\nb\n",
+                "--- q.py\n+++ q.py\n@@ -1 +1,2 @@\n a\n+b\n",
+            ),
+            (
+                "a\r\nb\rc\x0cd",
+                "a\r\nB\rc\x0cd",
+                "--- q.py\n+++ q.py\n@@ -1,4 +1,4 @@\n a\r\n-b\r+B\r c\x0c d",
+            ),
+            (
+                "a\nb\nc\na\nb\nc\n",
+                "c\nb\na\nc\nb\na\n",
+                "--- q.py\n+++ q.py\n@@ -1,6 +1,6 @@\n+c\n+b\n a\n+c\n b\n-c\n a\n-b\n-c\n",
+            ),
+        ] {
+            assert_eq!(unified("q.py", old, new), expected, "{old:?} {new:?}");
+        }
+        let old: Vec<String> = (0..250)
+            .map(|i| match i % 2 {
+                0 => "x\n".to_string(),
+                _ => format!("{i}\n"),
+            })
+            .collect();
+        let mut new = old.clone();
+        new[101] = "changed\n".to_string();
+        new.remove(201);
+        let expected = "--- q.py\n+++ q.py\n@@ -99,7 +99,7 @@\n x\n 99\n x\n-101\n+changed\n x\n 103\n x\n@@ -199,7 +199,6 @@\n x\n 199\n x\n-201\n x\n 203\n x\n";
+        assert_eq!(unified("q.py", &old.concat(), &new.concat()), expected);
+    }
 }
