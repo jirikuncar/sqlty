@@ -29,8 +29,8 @@ The fields of a `--sql` t-string are checked as well: psycopg sends each
 `{part:q}`, is not.
 
 An argument is judged only where the source states its type: a literal, a
-variable annotated or assigned a class, a call of a known class (`date(...)`,
-`UUID(...)`). An argument of unknown type is never reported, and neither is a
+variable bound to a literal, annotated or assigned a class, a constant imported
+from a checked module, a call of a known class (`date(...)`, `UUID(...)`). An argument of unknown type is never reported, and neither is a
 `str`, which the server coerces to any type. `int`, `float` and `Decimal` are
 interchangeable. On PostgreSQL a `bool` is not a number and an `int` is not a
 `boolean`, since the server has no implicit cast between them; MySQL takes

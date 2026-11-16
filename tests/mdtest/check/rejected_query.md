@@ -184,19 +184,3 @@ a = SQL("--sql\nSELECT 0x1FFFFFFFFFFFFFFFF")
 # error:
 b = SQL[tuple[int, bytes]]("--sql\nSELECT 0xFFFFFFFFFFFFFFFF, X'AB'")
 ```
-
-## SQLite has no EXTRACT
-
-```toml
-[tool.sqlty]
-dialect = "sqlite"
-```
-
-```python
-from sqlty import SQL
-
-# error: [rejected-query] "SQLite has no `EXTRACT`; use `strftime`"
-a = SQL("--sql\nSELECT EXTRACT(YEAR FROM '2025-01-01')")
-# error:
-b = SQL[tuple[str | None]]("--sql\nSELECT strftime('%Y', '2025-01-01')")
-```

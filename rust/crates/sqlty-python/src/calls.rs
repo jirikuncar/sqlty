@@ -517,9 +517,11 @@ pub fn helper_calls<'a>(
         Expr::Attribute(attr) => dotted(&attr.value).is_some(),
         _ => false,
     });
+    let constant = |dotted: &str| helpers?.fragment(source, dotted, module);
     let ctx = Context {
         imported: &source.imports,
         scan: &scan,
+        constant: Some(&constant),
     };
     let lines = Lines::new(text);
     let (annotated, marker) = marker_names(source);

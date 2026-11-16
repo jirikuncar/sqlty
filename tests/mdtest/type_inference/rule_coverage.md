@@ -1326,7 +1326,7 @@ has its assertions in `tests/mdtest/duckdb/catalog.md`.
 `schema.sql`:
 
 ```sql
-CREATE TABLE t (i INTEGER NOT NULL, tm TIME NOT NULL, d DATE NOT NULL, b BOOLEAN NOT NULL, l INTEGER[] NOT NULL);
+CREATE TABLE t (i INTEGER NOT NULL, tm TIME NOT NULL, d DATE NOT NULL, b BOOLEAN NOT NULL, l INTEGER[] NOT NULL, ts TIMESTAMP NOT NULL);
 ```
 
 ```toml
@@ -1347,6 +1347,12 @@ SELECT avg(i) AS avg_numbers, avg(tm) AS avg_temporal, avg(d) AS avg_date, sum(b
 -- columns: avg_date: datetime.datetime | None (TIMESTAMP)
 -- columns: sum_integers: int | None (INT128)
 -- columns: concat: list[int] (ARRAY<INT>)
+```
+
+```sql
+SELECT date_part('year', ts) AS year, date_part('epoch', ts) AS epoch FROM t
+-- rules: year: duckdb.datetime.date-part / duckdb.datetime.date-part
+-- rules: epoch: duckdb.datetime.date-part / duckdb.datetime.date-part
 ```
 
 ## ClickHouse

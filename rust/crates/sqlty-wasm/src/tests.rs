@@ -249,6 +249,37 @@ fn settings_resolved_by_the_host_apply_with_their_types() {
 }
 
 #[test]
+fn settings_of_a_file_take_its_database_and_overrides() {
+    let source = "q = \"--sql\\nSELECT d FROM t\"\n";
+    let settings = json!({
+        "rules": {"stale-rewrite": "warn"},
+        "databases": {"lite": {"dialect": "sqlite", "include": ["lite"]}},
+        "overrides": [{"include": ["lite/strict"], "exclude": [], "rules": {"stale-rewrite": "error"}}],
+    });
+    let at = |file: &str| {
+        ask(&json!({
+            "op": "analyze", "source": source, "schema": "CREATE TABLE t (d DATE NOT NULL);",
+            "dialect": "postgres", "settings": settings, "base": "/w", "file": file,
+        }))
+    };
+    assert_eq!(
+        at("/w/app/q.py")["queries"][0]["row_type"],
+        "tuple[datetime.date]"
+    );
+    assert_eq!(at("/w/lite/q.py")["queries"][0]["row_type"], "tuple[str]");
+    assert_eq!(at("/w/lite/q.py")["diagnostics"][0]["severity"], "warn");
+    assert_eq!(
+        at("/w/lite/strict/q.py")["diagnostics"][0]["severity"],
+        "error"
+    );
+    let untoml = ask(&json!({
+        "op": "analyze", "source": source, "schema": "CREATE TABLE t (d DATE NOT NULL);",
+        "dialect": "postgres", "settings": {"import-style": null}, "base": "/w", "file": "/w/q.py",
+    }));
+    assert_eq!(untoml["queries"][0]["row_type"], "tuple[datetime.date]");
+}
+
+#[test]
 fn a_driver_types_ranges_under_the_projects_types() {
     let source = "q = \"--sql\\nSELECT during, days FROM b\"\n";
     let answer = ask(&json!({

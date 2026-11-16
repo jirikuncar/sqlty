@@ -40,6 +40,9 @@ pub(crate) enum Returns {
     /// MySQL `STR_TO_DATE(s, format)`: a `DATE`, `TIME` or `DATETIME` by the parts the
     /// literal format at this argument reads.
     StrToDate(usize),
+    /// DuckDB `date_part(part, x)`: a `DOUBLE` for the literal part at this argument `epoch`
+    /// or `julian`, else a `BIGINT`.
+    DatePart(usize),
     /// `lower`/`upper`: the element type of a range argument, else `TEXT`.
     Bound,
     /// `AVG` and friends: `DOUBLE` for floats, `INTERVAL` for intervals, else `NUMERIC`.
@@ -208,6 +211,13 @@ impl<'a> Analyzer<'a> {
             Returns::StrToDate(i) => Ok(match args.get(i) {
                 Some(Expr::Value(value)) => match value.value.clone().into_string() {
                     Some(format) => from_sql_type(str_to_date_type(&format), self.dialect),
+                    None => Typed::UNKNOWN,
+                },
+                _ => Typed::UNKNOWN,
+            }),
+            Returns::DatePart(i) => Ok(match args.get(i) {
+                Some(Expr::Value(value)) => match value.value.clone().into_string() {
+                    Some(part) => from_sql_type(date_part_type(&part), self.dialect),
                     None => Typed::UNKNOWN,
                 },
                 _ => Typed::UNKNOWN,
@@ -449,22 +459,10 @@ pub(super) fn extract_type(dialect: SqlDialect, field: &DateTimeField) -> Option
     match dialect {
         SqlDialect::Postgres | SqlDialect::Other("generic") => Some("DECIMAL"),
         SqlDialect::MySql => Some("BIGINT"),
-        SqlDialect::Other("duckdb") => duckdb_extract_type(&name),
+        SqlDialect::Other("duckdb") => Some(date_part_type(&name)),
         SqlDialect::ClickHouse => clickhouse_extract_type(&name),
         _ => None,
     }
-}
-
-fn duckdb_extract_type(field: &str) -> Option<&'static str> {
-    Some(match field {
-        "EPOCH" | "JULIAN" => "DOUBLE",
-        "YEAR" | "YEARS" | "QUARTER" | "MONTH" | "MONTHS" | "WEEK" | "WEEKS" | "DAY" | "DAYS"
-        | "DAYOFWEEK" | "DAYOFYEAR" | "DOW" | "DOY" | "ISODOW" | "ISOYEAR" | "YEARWEEK"
-        | "HOUR" | "HOURS" | "MINUTE" | "MINUTES" | "SECOND" | "SECONDS" | "MILLISECOND"
-        | "MILLISECONDS" | "MICROSECOND" | "MICROSECONDS" | "CENTURY" | "DECADE" | "MILLENNIUM"
-        | "MILLENIUM" | "ERA" | "TIMEZONE" | "TIMEZONE_HOUR" | "TIMEZONE_MINUTE" => "BIGINT",
-        _ => return None,
-    })
 }
 
 fn clickhouse_extract_type(field: &str) -> Option<&'static str> {
@@ -479,6 +477,16 @@ fn clickhouse_extract_type(field: &str) -> Option<&'static str> {
         "CENTURY" | "MILLENNIUM" | "TIMEZONE_MINUTE" => "BIGINT",
         _ => return None,
     })
+}
+
+/// The type DuckDB extracts `part` as: "Except for julian and epoch, which return DOUBLEs,
+/// all parts are extracted as integers."
+pub(super) fn date_part_type(part: &str) -> &'static str {
+    if part.eq_ignore_ascii_case("epoch") || part.eq_ignore_ascii_case("julian") {
+        "DOUBLE"
+    } else {
+        "BIGINT"
+    }
 }
 
 /// The digits before the point of a `DECIMAL(p, s)`: `p - s`; MySQL's bare `DECIMAL` is
@@ -611,6 +619,18 @@ mod tests {
     }
 
     #[test]
+    fn date_part_of_a_field_it_cannot_read_is_unknown() {
+        for field in ["1", "txt"] {
+            let report = super::super::test_support::report(
+                &format!("SELECT date_part({field}, ts) AS c FROM t"),
+                "duckdb",
+                Some("CREATE TABLE t (ts TIMESTAMP NOT NULL, txt TEXT NOT NULL)"),
+            );
+            assert!(report.starts_with("c: ? | ? | NonNull"), "{report}");
+        }
+    }
+
+    #[test]
     fn mysql_sum_of_an_integer_is_decimal() {
         let report = super::super::test_support::report(
             "SELECT sum(i) AS total FROM t",
@@ -642,7 +662,6 @@ mod tests {
             ("mysql", Year, Some("BIGINT")),
             ("duckdb", Julian, Some("DOUBLE")),
             ("duckdb", Custom("yearweek".into()), Some("BIGINT")),
-            ("duckdb", Nanosecond, None),
             ("clickhouse", Year, Some("USMALLINT")),
             ("clickhouse", Nanosecond, Some("UINT")),
             ("clickhouse", Julian, None),

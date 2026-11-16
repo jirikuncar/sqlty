@@ -175,12 +175,13 @@ def test_a_baseline_outside_git_must_be_a_file(tmp_path: Path) -> None:
 class Server:
     """``sqlty server`` in a subprocess, spoken to as an editor does."""
 
-    def __init__(self, root: Path, *args: str) -> None:
+    def __init__(self, root: Path, *args: str, stderr: int | None = None) -> None:
         self.process = subprocess.Popen(
             [sys.executable, *(args or ("-m", "sqlty", "server"))],
             cwd=root,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
+            stderr=stderr,
         )
         self.next = 0
         self.notifications: list[dict[str, Any]] = []
@@ -360,6 +361,35 @@ def test_server_completes_and_highlights_helper_and_marked_queries(tmp_path: Pat
         assert data[:5] == [2, 5, 6, 0, 0], "SELECT of the helper string"
     finally:
         assert server.stop() == 0
+
+
+def test_server_rewrites_and_strips_a_buffer(tmp_path: Path) -> None:
+    (tmp_path / "sqlty.toml").write_text('schema = "missing.sql"\n')
+    uri = (tmp_path / "q.py").as_uri()
+    plain = 'q = "--sql\\nSELECT 1"\n'
+    server = Server(tmp_path, stderr=subprocess.PIPE)
+    try:
+        server.request("initialize", {"capabilities": {}, "rootUri": tmp_path.as_uri()})
+        server.send({"method": "initialized", "params": {}})
+
+        def action(kind: str, text: str) -> str:
+            document = {"uri": uri, "languageId": "python", "version": 1, "text": text}
+            server.send({"method": "textDocument/didOpen", "params": {"textDocument": document}})
+            server.notification("textDocument/publishDiagnostics")
+            start = {"line": 0, "character": 0}
+            here = {"textDocument": {"uri": uri}, "range": {"start": start, "end": start}}
+            only = {**here, "context": {"diagnostics": [], "only": [kind]}}
+            [found] = server.request("textDocument/codeAction", only)
+            [edit] = found["edit"]["documentChanges"][0]["edits"]
+            return str(edit["newText"])
+
+        rewritten = action("source.rewrite.sqlty", plain)
+        assert rewritten == 'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT 1")'
+        assert action("source.strip.sqlty", rewritten + "\n") == 'q = "--sql\\nSELECT 1"'
+    finally:
+        assert server.stop() == 0
+    assert server.process.stderr is not None
+    assert b"Schema file not found" in server.process.stderr.read()
 
 
 def test_completion_context_of_a_buffer(tmp_path: Path) -> None:

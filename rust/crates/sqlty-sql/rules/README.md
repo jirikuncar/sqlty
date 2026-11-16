@@ -148,6 +148,7 @@ argument `k`, counting from 0:
 | `@series` | `generate_series`: the common type of the bounds, small integers widened to `INT`, dates to `TIMESTAMPTZ` |
 | `@text(k)` | `TEXT`, or argument `k`'s type when it is a binary or bit string |
 | `@random` | `DOUBLE`; `random(min, max)` gives the type of the bounds |
+| `@date-part(k)` | DuckDB `date_part`: `DOUBLE` for the literal part `epoch` or `julian` at `k`, else `BIGINT` |
 
 A computed result is a variant of `Returns` (`analyzer/functions.rs`), listed in
 `FUNCTION_RESULTS` (`compile.rs`). Add one there when no SQL type fits: the rule still
@@ -220,7 +221,7 @@ rule types leaves its column untyped.
    type it too. One only some of them have stays in their directories, with
    `dialects`, so the others still report `unknown-function` for it.
 2. Check the `reference` against the vendor documentation of the version the
-   tests target (PostgreSQL 17 for the fidelity tests, MySQL 8.4, SQLite 3) and
+   tests target (PostgreSQL 17 for the fidelity tests, MySQL 8.4, SQLite 3, DuckDB 2.0) and
    cite the section and table. The ISO standard is not freely available, so it
    is not cited.
 3. Delete the `match` arm the rule replaces: a behaviour lives in one place.

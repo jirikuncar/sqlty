@@ -12,7 +12,7 @@ publish = false
 rust-version = "1.99"
 
 [workspace.dependencies]
-pyo3 = { version = "0.30", features = ["extension-module"] }
+pyo3 = "0.30"
 sqlparser = { version = "0.64", features = ["visitor"] }
 regex = "1"
 recursive = "0.1"
@@ -27,6 +27,7 @@ sqlty-sql = { path = "crates/sqlty-sql" }
 sqlty-python = { path = "crates/sqlty-python" }
 sqlty-lsp = { path = "crates/sqlty-lsp" }
 sqlty-format = { path = "crates/sqlty-format" }
+sqlty-project = { path = "crates/sqlty-project" }
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }

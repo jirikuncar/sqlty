@@ -66,7 +66,8 @@ jobs:
 
     env:
       SQLTY_PG_DSN: postgresql://postgres:postgres@localhost:5432/postgres
-      PYTEST_ADDOPTS: ${{ matrix.coverage && '--cov --cov-append --cov-fail-under=0' || '' }}
+      # Only explicit Hypothesis examples: coverage must not depend on what it generates.
+      PYTEST_ADDOPTS: ${{ matrix.coverage && '--cov --cov-append --cov-fail-under=0 --hypothesis-profile=coverage' || '' }}
       # Absolute, so processes forked in a test's own directory write their data here too.
       COVERAGE_FILE: ${{ github.workspace }}/.coverage
 
@@ -132,7 +133,7 @@ jobs:
 
       # The deprecated Python passes alone, until 0.8.0 removes them.
       - name: Run tests on the Python syntax tree alone
-        run: uv run pytest -m "not timing and not pg" tests/mdtest tests/test_cli.py tests/test_helpers.py tests/test_psycopg.py tests/test_driver_values.py tests/test_type_extractor.py tests/test_cross_module.py tests/test_source.py tests/test_composed_edges.py tests/test_rust_check.py tests/test_rust_index.py
+        run: uv run pytest -m "not timing and not pg" tests/mdtest tests/test_cli.py tests/test_helpers.py tests/test_psycopg.py tests/test_driver_values.py tests/test_type_extractor.py tests/test_cross_module.py tests/test_source.py tests/test_composed_edges.py tests/test_rust_check.py tests/test_rust_index.py tests/test_lsp.py tests/e2e/test_breaking_e2e.py
         env:
           SQLTY_AST: python
 
@@ -149,16 +150,17 @@ jobs:
           tool: nextest@0.9.148
 
       - name: Run Rust unit tests
-        run: cargo nextest run --workspace --manifest-path rust/Cargo.toml
+        run: uv run cargo nextest run --workspace --manifest-path rust/Cargo.toml
 
       - name: Check coverage
         if: matrix.coverage
         run: |
+          set -o pipefail
           uv run coverage report
-          cd rust && cargo llvm-cov report --show-missing-lines --fail-under-lines 95
+          cd rust && cargo llvm-cov report --show-missing-lines | tee /dev/stderr | awk '/^Uncovered Lines:/ { missed = 1 } END { exit missed }'
 
       - name: Run Rust doctests
-        run: cargo test --doc --workspace --manifest-path rust/Cargo.toml
+        run: uv run cargo test --doc --workspace --manifest-path rust/Cargo.toml
 
   free-threaded:
     name: Threads on free-threaded Python ${{ matrix.python }}

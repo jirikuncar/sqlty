@@ -356,66 +356,6 @@ reference.duckdb = "DuckDB 2.0.0 duckdb_functions(): date_diff"
 reasoning = "DuckDB describes date_diff(CAST('a' AS VARCHAR), CAST('2024-01-02 10:00:00+00' AS TIMESTAMP WITH TIME ZONE), CAST('2024-01-02 10:00:00+00' AS TIMESTAMP WITH TIME ZONE)) as BIGINT."
 
 [[function]]
-id = "duckdb.catalog.date-part"
-function = "DATE_PART"
-dialects = ["duckdb"]
-arguments = [["@text"], ["DATE"]]
-type = "DOUBLE"
-nullability = "nullable"
-reference.duckdb = "DuckDB 2.0.0 duckdb_functions(): date_part"
-reasoning = "DuckDB describes date_part(CAST('a' AS VARCHAR), CAST('2024-01-02' AS DATE)) as DOUBLE."
-
-[[function]]
-id = "duckdb.catalog.date-part-2"
-function = "DATE_PART"
-dialects = ["duckdb"]
-arguments = [["@text"], ["INTERVAL"]]
-type = "DOUBLE"
-nullability = "nullable"
-reference.duckdb = "DuckDB 2.0.0 duckdb_functions(): date_part"
-reasoning = "DuckDB describes date_part(CAST('a' AS VARCHAR), CAST('1 day' AS INTERVAL)) as DOUBLE."
-
-[[function]]
-id = "duckdb.catalog.date-part-3"
-function = "DATE_PART"
-dialects = ["duckdb"]
-arguments = [["@text"], ["TIME"]]
-type = "DOUBLE"
-nullability = "nullable"
-reference.duckdb = "DuckDB 2.0.0 duckdb_functions(): date_part"
-reasoning = "DuckDB describes date_part(CAST('a' AS VARCHAR), CAST('10:00:00' AS TIME)) as DOUBLE."
-
-[[function]]
-id = "duckdb.catalog.date-part-4"
-function = "DATE_PART"
-dialects = ["duckdb"]
-arguments = [["@text"], ["TIMETZ"]]
-type = "DOUBLE"
-nullability = "nullable"
-reference.duckdb = "DuckDB 2.0.0 duckdb_functions(): date_part"
-reasoning = "DuckDB describes date_part(CAST('a' AS VARCHAR), CAST('10:00:00+00' AS TIME WITH TIME ZONE)) as DOUBLE."
-
-[[function]]
-id = "duckdb.catalog.date-part-5"
-function = "DATE_PART"
-dialects = ["duckdb"]
-arguments = [["@text"], ["TIMESTAMP"]]
-type = "DOUBLE"
-nullability = "nullable"
-reference.duckdb = "DuckDB 2.0.0 duckdb_functions(): date_part"
-reasoning = "DuckDB describes date_part(CAST('a' AS VARCHAR), CAST('2024-01-02 10:00:00' AS TIMESTAMP)) as DOUBLE."
-
-[[function]]
-id = "duckdb.catalog.date-part-6"
-function = "DATE_PART"
-dialects = ["duckdb"]
-arguments = [["@text"], ["TIMESTAMPTZ"]]
-type = "DOUBLE"
-nullability = "nullable"
-reference.duckdb = "DuckDB 2.0.0 duckdb_functions(): date_part"
-reasoning = "DuckDB describes date_part(CAST('a' AS VARCHAR), CAST('2024-01-02 10:00:00+00' AS TIMESTAMP WITH TIME ZONE)) as DOUBLE."
-
-[[function]]
 id = "duckdb.catalog.date-sub"
 function = "DATE_SUB"
 dialects = ["duckdb"]

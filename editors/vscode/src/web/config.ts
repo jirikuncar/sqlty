@@ -6,8 +6,12 @@ export type Engine = (request: Record<string, unknown>) => any;
 /** The sqlty table of a file, as the engine's `config` op answers it. */
 export type Table = Record<string, unknown>;
 
-/** What a file is checked with: the merged table, and the text of its schema files. */
-export type Project = { settings: Table; schema: string } | { error: string };
+/**
+ * What a file is checked with: the merged table, the text of its schema files, and the
+ * directory of the file holding the table, against which the engine routes each file to
+ * its database and overrides.
+ */
+export type Project = { settings: Table; schema: string; base?: string } | { error: string };
 
 /**
  * The project of the file in `directory`, as `sqlty check` finds it: the engine's `project`
@@ -30,7 +34,7 @@ export async function project(engine: Engine, directory: vscode.Uri): Promise<Pr
     }
     const table = answer.config as Table;
     const base = parent(directory.with({ path: answer.file }));
-    return { settings: table, schema: await readSchemas(schemasOf(table, base)) };
+    return { settings: table, schema: await readSchemas(schemasOf(table, base)), base: base.path };
   }
 }
 

@@ -287,7 +287,7 @@ impl<'a> Analyzer<'a> {
                 self.function_type_of(returns, &[inner], &[Some(typed), None], scope)
             }
             Expr::Extract { .. } if self.dialect == SqlDialect::Sqlite => {
-                let message = "SQLite has no `EXTRACT`; use `strftime`".to_string();
+                let message = "SQLite has no EXTRACT; use strftime".to_string();
                 self.diag.record(NameRule::RejectedQuery, message);
                 Ok(Typed::UNKNOWN)
             }

@@ -1,7 +1,6 @@
 """Configuration loading from sqlty.toml, pyproject.toml or Cargo.toml."""
 
 import difflib
-import glob
 import logging
 import re
 import tomllib
@@ -254,33 +253,7 @@ FUNCTION_KEY_DOCS: dict[str, KeyDoc] = {
 }
 """Reference docs per key of a ``[[tool.sqlty.functions]]`` entry."""
 
-DEFAULT_EXCLUDE = (
-    ".bzr",
-    ".direnv",
-    ".eggs",
-    ".git",
-    ".git-rewrite",
-    ".hg",
-    ".ipynb_checkpoints",
-    ".mypy_cache",
-    ".nox",
-    ".pants.d",
-    ".pyenv",
-    ".pytest_cache",
-    ".pytype",
-    ".ruff_cache",
-    ".svn",
-    ".tox",
-    ".venv",
-    ".vscode",
-    "__pypackages__",
-    "_build",
-    "buck-out",
-    "dist",
-    "node_modules",
-    "site-packages",
-    "venv",
-)
+DEFAULT_EXCLUDE: tuple[str, ...] = tuple(_core.DEFAULT_EXCLUDE)
 """Directories skipped when walking a directory, unless ``exclude`` replaces them."""
 
 
@@ -429,22 +402,10 @@ def expand_schema(spec: SchemaSpec | Path, base: Path) -> list[Path]:
     does not exist, so callers report it; a glob that matches nothing is logged.
     """
     entries = [spec] if isinstance(spec, (str, Path)) else spec
-    files: dict[Path, None] = {}
-    for entry in entries:
-        path = base / entry
-        if glob.has_magic(str(entry)):
-            matches = [
-                base / m for m in sorted(glob.glob(str(entry), root_dir=base, recursive=True))
-            ]
-            found = [m for m in matches if m.is_file()]
-            if not found:
-                logging.getLogger(__name__).warning("Schema pattern matches no files: %s", entry)
-        elif path.is_dir():
-            found = sorted(p for p in path.rglob("*.sql") if p.is_file())
-        else:
-            found = [path]
-        files.update(dict.fromkeys(found))
-    return list(files)
+    files, empty = _core.schema_files([str(entry) for entry in entries], str(base))
+    for entry in empty:
+        logging.getLogger(__name__).warning("Schema pattern matches no files: %s", entry)
+    return list(dict.fromkeys(map(Path, files)))
 
 
 def load_config(project_root: Path | None = None) -> tuple[SQLTyConfig, Path | None]:

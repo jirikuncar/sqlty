@@ -30,7 +30,18 @@ use toml::{Table, Value};
 
 use crate::config::{load, Config, LoadError, CONFIG_FILES};
 
+mod glob;
+mod modules;
+mod route;
+mod walk;
+
+pub use glob::Excludes;
+pub use modules::{helper_roots, Packages};
+pub use route::{file_table, names_query_file, route, Route};
+pub use walk::{schema_files, Discovery, DEFAULT_EXCLUDE};
+
 /// What the host has of a file.
+#[derive(Clone)]
 pub enum Read {
     /// Its bytes.
     Text(Vec<u8>),
@@ -40,10 +51,43 @@ pub enum Read {
     Unread,
 }
 
+/// What a directory entry is, as `os.walk` and `Path.is_file` tell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Kind {
+    /// A file, or a link to one.
+    File,
+    /// A directory.
+    Dir,
+    /// A link to a directory: listed, never walked into.
+    LinkedDir,
+    /// Anything else, such as a broken link.
+    Other,
+}
+
+/// What the host has of a directory.
+pub enum Listing {
+    /// Its entries, by name.
+    Entries(Vec<(String, Kind)>),
+    /// No such directory.
+    Missing,
+    /// Not listed yet: the walk answers [`FindError::Need`].
+    Unread,
+}
+
 /// The files of the host, by absolute path.
 pub trait Files {
     /// The file at `path`.
     fn read(&self, path: &Path) -> Read;
+
+    /// The entries of the directory at `path`.
+    fn list(&self, _path: &Path) -> Listing {
+        Listing::Missing
+    }
+
+    /// `path` with its links resolved, as `Path.resolve` gives it.
+    fn canonical(&self, path: &Path) -> PathBuf {
+        normalized(path)
+    }
 }
 
 impl<F: Fn(&Path) -> Read> Files for F {
@@ -173,10 +217,11 @@ fn extended(
     let mut parent = extended(found, &target, &target_directory, chain, files)?;
     rebase(&mut parent.table, &target_directory, base);
     if let Some(Value::Table(databases)) = parent.table.get_mut("databases") {
-        for (_, database) in databases.iter_mut() {
-            if let Value::Table(database) = database {
-                rebase(database, &target_directory, base);
-            }
+        for database in databases
+            .iter_mut()
+            .filter_map(|(_, database)| database.as_table_mut())
+        {
+            rebase(database, &target_directory, base);
         }
     }
     let mut merged = parent.table;
@@ -308,6 +353,10 @@ mod tests {
             found("/a", &files),
             Err(FindError::Need(PathBuf::from("/a/base.toml")))
         );
+        assert!(matches!(
+            tree(&files).list(Path::new("/a")),
+            Listing::Missing
+        ));
     }
 
     #[test]
@@ -355,7 +404,7 @@ mod tests {
         let files = [
             (
                 "/w/app/sqlty.toml",
-                "extend = \"../base/sqlty.toml\"\nrules = { select-star = \"warn\" }\n\
+                "extend = \"../base/sqlty.toml\"\ndialect = \"sqlite\"\nrules = { select-star = \"warn\" }\n\
                  [databases.main]\nschema = \"own.sql\"\n",
             ),
             (
@@ -372,7 +421,7 @@ mod tests {
             .config
             .table;
         let shown: Table = toml::from_str(
-            "dialect = \"mysql\"\nschema = [\"../base/s/*.sql\"]\nqueries = [\"../base/q\"]\n\
+            "dialect = \"sqlite\"\nschema = [\"../base/s/*.sql\"]\nqueries = [\"../base/q\"]\n\
              rules = { extra-param = \"error\", select-star = \"warn\" }\n\
              [databases.main]\nschema = \"own.sql\"\ninclude = []\nexclude = []\n\
              [databases.logs]\nschema = [\"../base/logs.sql\"]\ninclude = []\nexclude = []\n",
@@ -410,6 +459,7 @@ mod tests {
     fn paths_are_spelled_as_python_spells_them() {
         assert_eq!(normalized(Path::new("/a/./b/../c/")), Path::new("/a/c"));
         assert_eq!(normalized(Path::new("../a")), Path::new("../a"));
+        assert_eq!(normalized(Path::new("./a")), Path::new("a"));
         assert_eq!(relative(Path::new("/a/b/c"), Path::new("/a/d")), "../b/c");
         assert_eq!(relative(Path::new("/a"), Path::new("/a")), ".");
     }

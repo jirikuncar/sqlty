@@ -199,36 +199,6 @@ SELECT date_diff(CAST('a' AS VARCHAR), CAST('2024-01-02 10:00:00+00' AS TIMESTAM
 ```
 
 ```sql
-SELECT date_part(CAST('a' AS VARCHAR), CAST('2024-01-02' AS DATE)) AS r
--- rules: r: duckdb.catalog.date-part / duckdb.catalog.date-part
-```
-
-```sql
-SELECT date_part(CAST('a' AS VARCHAR), CAST('1 day' AS INTERVAL)) AS r
--- rules: r: duckdb.catalog.date-part-2 / duckdb.catalog.date-part-2
-```
-
-```sql
-SELECT date_part(CAST('a' AS VARCHAR), CAST('10:00:00' AS TIME)) AS r
--- rules: r: duckdb.catalog.date-part-3 / duckdb.catalog.date-part-3
-```
-
-```sql
-SELECT date_part(CAST('a' AS VARCHAR), CAST('10:00:00+00' AS TIME WITH TIME ZONE)) AS r
--- rules: r: duckdb.catalog.date-part-4 / duckdb.catalog.date-part-4
-```
-
-```sql
-SELECT date_part(CAST('a' AS VARCHAR), CAST('2024-01-02 10:00:00' AS TIMESTAMP)) AS r
--- rules: r: duckdb.catalog.date-part-5 / duckdb.catalog.date-part-5
-```
-
-```sql
-SELECT date_part(CAST('a' AS VARCHAR), CAST('2024-01-02 10:00:00+00' AS TIMESTAMP WITH TIME ZONE)) AS r
--- rules: r: duckdb.catalog.date-part-6 / duckdb.catalog.date-part-6
-```
-
-```sql
 SELECT date_sub(CAST('a' AS VARCHAR), CAST('2024-01-02 10:00:00+00' AS TIMESTAMP WITH TIME ZONE), CAST('2024-01-02 10:00:00+00' AS TIMESTAMP WITH TIME ZONE)) AS r
 -- rules: r: duckdb.catalog.date-sub / duckdb.catalog.date-sub
 ```
