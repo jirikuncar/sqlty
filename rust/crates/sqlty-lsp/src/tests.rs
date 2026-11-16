@@ -49,6 +49,9 @@ impl Workspace for Fake {
         while text.contains("hold") && !HOLD.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(5));
         }
+        if text.contains("hang") {
+            std::thread::sleep(3 * crate::EXIT_GRACE);
+        }
         let severity = if text.contains("warned") {
             Severity::Warning
         } else {
@@ -446,6 +449,21 @@ fn a_project_that_fails_to_load_is_reported_once() {
     let rest = client.shutdown();
     assert!(
         !rest.iter().any(|method| method == "window/showMessage"),
+        "{rest:?}"
+    );
+}
+
+#[test]
+fn a_running_check_does_not_hold_up_exit() {
+    let client = Client::start(&json!({}));
+    client.open("file:///work/q.py", "hang bad\n");
+    let stopping = std::time::Instant::now();
+    let rest = client.shutdown();
+    assert!(stopping.elapsed() < 2 * crate::EXIT_GRACE);
+    assert!(
+        !rest
+            .iter()
+            .any(|method| method == "textDocument/publishDiagnostics"),
         "{rest:?}"
     );
 }

@@ -14,8 +14,9 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI32, Ordering};
-use std::sync::mpsc;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
+use std::time::Duration;
 
 use crossbeam_channel::Sender;
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
@@ -196,6 +197,9 @@ where
     Ok(())
 }
 
+/// How long a check may hold up `exit`: VS Code kills a server that is alive 2s after it.
+const EXIT_GRACE: Duration = Duration::from_secs(1);
+
 /// Serve `connection` until the client shuts it down. `open` loads the workspace of a
 /// project root with the client's settings; its error is shown to the user, and the
 /// root's files go unchecked.
@@ -222,7 +226,7 @@ where
     let shared = Shared {
         documents: Arc::default(),
         background: Arc::default(),
-        sender: connection.sender.clone(),
+        sender: Arc::new(RwLock::new(Some(connection.sender.clone()))),
         encoding,
         refresh: settings.highlighting && refresh_support(&params),
         requests: Arc::default(),
@@ -231,10 +235,14 @@ where
         highlighting: settings.highlighting,
     };
     let (jobs, queue) = mpsc::channel();
+    let (finished, done) = mpsc::channel::<()>();
     let worker = {
         let shared = shared.clone();
         let roots = roots(&params);
-        std::thread::spawn(move || worker::work(&queue, &shared, &roots, &settings, open))
+        std::thread::spawn(move || {
+            let _finished = finished;
+            worker::work(&queue, &shared, &roots, &settings, open);
+        })
     };
     for message in &connection.receiver {
         match message {
@@ -248,8 +256,12 @@ where
             Message::Response(_) => {}
         }
     }
+    shared.close();
     drop(jobs);
-    worker.join().map_err(|_| "the check worker panicked")?;
+    // A check still running is left behind: the process exits without it.
+    if done.recv_timeout(EXIT_GRACE) != Err(RecvTimeoutError::Timeout) {
+        worker.join().map_err(|_| "the check worker panicked")?;
+    }
     Ok(())
 }
 
@@ -277,7 +289,8 @@ struct Shared {
     documents: Arc<Mutex<HashMap<Uri, Document>>>,
     /// What [`Workspace::breaking`] found, by file: published while the file is not open.
     background: Arc<Mutex<HashMap<Uri, Vec<lsp_types::Diagnostic>>>>,
-    sender: Sender<Message>,
+    /// `None` once the client shut the server down: what a late check finds is dropped.
+    sender: Arc<RwLock<Option<Sender<Message>>>>,
     encoding: PositionEncodingKind,
     /// Whether the client takes `workspace/semanticTokens/refresh`.
     refresh: bool,
@@ -302,7 +315,13 @@ impl Shared {
     }
 
     fn send(&self, message: impl Into<Message>) {
-        let _ = self.sender.send(message.into());
+        if let Some(sender) = &*self.sender.read().unwrap_or_else(PoisonError::into_inner) {
+            let _ = sender.send(message.into());
+        }
+    }
+
+    fn close(&self) {
+        *self.sender.write().unwrap_or_else(PoisonError::into_inner) = None;
     }
 
     /// A message the user sees.
