@@ -1036,9 +1036,14 @@ SELECT ST_Area(ST_GeomFromText('POLYGON((0 0,0 2,2 2,2 0,0 0))')) AS spatial_dou
 ```
 
 ```sql
+SELECT FROM_UNIXTIME(1447430881, '%Y') AS datetime_formatted
+-- rules: datetime_formatted: mysql.datetime.from-unixtime-format / mysql.datetime.from-unixtime-format
+```
+
+```sql
 SELECT
     bit_and(1) AS string_bigint,
-    round('a') AS string_argument_type,
+    round(NULL) AS string_argument_type,
     REGEXP_INSTR('dog cat dog', 'dog') AS string_bigint_2,
     BIN(12) AS string_text,
     UNHEX(NULL) AS string_varbinary,
@@ -1293,8 +1298,9 @@ SELECT json_object() AS json_text_non_null
 ```
 
 ```sql
-SELECT exp(1) AS math_double
+SELECT exp(1) AS math_double, subtype(1) AS scalar_subtype
 -- rules: math_double: sqlite.math.double / sqlite.math.double
+-- rules: scalar_subtype: sqlite.scalar.subtype / sqlite.scalar.subtype
 ```
 
 ```sql
@@ -1310,6 +1316,82 @@ SELECT
 ```sql
 SELECT format() AS string_format
 -- rules: string_format: sqlite.string.format / sqlite.string.format
+```
+
+## DuckDB
+
+`rules/duckdb/catalog.inference.toml`, which `scripts/generate_duckdb_rules.py` writes,
+has its assertions in `tests/mdtest/duckdb/catalog.md`.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE t (i INTEGER NOT NULL, tm TIME NOT NULL, d DATE NOT NULL, b BOOLEAN NOT NULL, l INTEGER[] NOT NULL, ts TIMESTAMP NOT NULL);
+```
+
+```toml
+[tool.sqlty]
+dialect = "duckdb"
+schema = "schema.sql"
+```
+
+```sql
+SELECT avg(i) AS avg_numbers, avg(tm) AS avg_temporal, avg(d) AS avg_date, sum(b) AS sum_integers, list_concat(l, l) AS concat FROM t
+-- rules: avg_numbers: duckdb.aggregate.avg-numbers / duckdb.aggregate.avg-numbers
+-- rules: avg_temporal: duckdb.aggregate.avg-temporal / duckdb.aggregate.avg-temporal
+-- rules: avg_date: duckdb.aggregate.avg-date / duckdb.aggregate.avg-date
+-- rules: sum_integers: duckdb.aggregate.sum-integers / duckdb.aggregate.sum-integers
+-- rules: concat: duckdb.list.concat / duckdb.list.concat
+-- columns: avg_numbers: float | None (DOUBLE)
+-- columns: avg_temporal: datetime.time | None (TIME)
+-- columns: avg_date: datetime.datetime | None (TIMESTAMP)
+-- columns: sum_integers: int | None (INT128)
+-- columns: concat: list[int] (ARRAY<INT>)
+```
+
+```sql
+SELECT date_part('year', ts) AS year, date_part('epoch', ts) AS epoch FROM t
+-- rules: year: duckdb.datetime.date-part / duckdb.datetime.date-part
+-- rules: epoch: duckdb.datetime.date-part / duckdb.datetime.date-part
+```
+
+## ClickHouse
+
+A comparison is a `UInt8`, and so is `AND`, `OR` or `NOT` over one; over `Bool` values
+they stay `Bool`. A decimal literal is a `Float64`, and so is a division.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE t (i Int32, b Bool)
+```
+
+```toml
+[tool.sqlty]
+dialect = "clickhouse"
+schema = "schema.sql"
+```
+
+```sql
+SELECT i / 2 AS division, 1 = 1 AS eq, 1 = 1 AND b AS both_, b AND b AS bools, NOT b AS not_bool, 'a' ~ 'a' AS regex, 0.5 AS half, (1 = 1) OR b AS nested, 1 AND b AS number FROM t
+-- rules: division: clickhouse.arithmetic.division / clickhouse.arithmetic.division
+-- rules: eq: common.comparison / common.comparison
+-- rules: both_: common.logical.and-or / common.logical.and-or
+-- rules: bools: common.logical.and-or / common.logical.and-or
+-- rules: not_bool: - / -
+-- rules: regex: common.pattern / common.pattern
+-- rules: half: - / -
+-- rules: nested: common.logical.and-or / common.logical.and-or
+-- rules: number: common.logical.and-or / common.logical.and-or
+-- columns: division: float | None (DOUBLE)
+-- columns: eq: int (UTINYINT)
+-- columns: both_: int | None (UTINYINT)
+-- columns: bools: bool | None (BOOLEAN)
+-- columns: not_bool: bool | None (BOOLEAN)
+-- columns: regex: int (UTINYINT)
+-- columns: half: float (None)
+-- columns: nested: int | None (UTINYINT)
+-- columns: number: int | None (UTINYINT)
 ```
 
 ## Other dialects

@@ -162,13 +162,12 @@ impl Directory {
     ) -> Result<Self, String> {
         let Loaded { table, base, label } = config;
         let load = loaded_schema;
-        let read = |entries: &Value| match &base {
-            Some(base) => schema_text(entries, base, files, schemas),
-            None => None,
+        let read = |table: &Table| {
+            schema_text(&strings(table, "schema"), base.as_deref()?, files, schemas)
         };
         let schema_sql = match &flags.schema {
-            Some(entries) => schema_text(entries, &flags.cwd, files, schemas),
-            None => table.get("schema").and_then(read),
+            Some(entries) => schema_text(&entries_of(entries), &flags.cwd, files, schemas),
+            None => read(&table),
         };
         let closed = closed_params(base.as_deref().unwrap_or(&flags.cwd), files);
         let own_dialect = flags.dialect.as_deref();
@@ -205,9 +204,9 @@ impl Directory {
         for (name, database) in &databases {
             let database = database.as_table().cloned().unwrap_or_default();
             let merged = merged(&table, &database);
-            let schema = match database.get("schema") {
-                Some(entries) => read(entries),
-                None => schema_sql.clone(),
+            let schema = match database.contains_key("schema") {
+                true => read(&database),
+                false => schema_sql.clone(),
             };
             let label = format!("{label} [tool.sqlty.databases.{name}]");
             let dialect = flags
@@ -357,10 +356,7 @@ fn own_types(table: &Table, dialect: &str) -> Vec<(String, String)> {
         .and_then(Value::as_table)
         .into_iter()
         .flatten();
-    for (key, value) in own {
-        let Some(value) = value.as_str() else {
-            continue;
-        };
+    for (key, value) in own.filter_map(|(key, value)| Some((key, value.as_str()?))) {
         types.retain(|(known, _)| known != key);
         types.push((key.clone(), value.to_string()));
     }
@@ -477,9 +473,13 @@ fn settings(
 
 /// The schema files `entries` names relative to `base`, concatenated; `None` when none
 /// can be read.
-fn schema_text(entries: &Value, base: &Path, files: &Shared, schemas: &Schemas) -> Option<String> {
-    let entries = entries_of(entries);
-    let (found, empty) = project::schema_files(&entries, base, files).ok()?;
+fn schema_text(
+    entries: &[String],
+    base: &Path,
+    files: &Shared,
+    schemas: &Schemas,
+) -> Option<String> {
+    let (found, empty) = project::schema_files(entries, base, files).ok()?;
     for entry in empty {
         schemas.warn(format!("Schema pattern matches no files: {entry}"));
     }
@@ -496,12 +496,11 @@ fn schema_text(entries: &Value, base: &Path, files: &Shared, schemas: &Schemas) 
 /// A path or list of paths, as `schema` and `queries` hold them.
 pub(crate) fn entries_of(entries: &Value) -> Vec<String> {
     match entries {
-        Value::String(entry) => vec![entry.clone()],
         Value::Array(items) => items
             .iter()
             .filter_map(|item| item.as_str().map(str::to_string))
             .collect(),
-        _ => Vec::new(),
+        entry => entry.as_str().map(str::to_string).into_iter().collect(),
     }
 }
 

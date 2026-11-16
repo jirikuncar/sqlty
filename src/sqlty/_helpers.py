@@ -22,7 +22,14 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from sqlty._core import ModuleIndex, helper_sites, module_helpers, module_index
+from sqlty._core import (
+    ModuleIndex,
+    helper_sites,
+    index_extended,
+    index_helpers,
+    module_helpers,
+    module_index,
+)
 from sqlty._params import ParamArg, arg_type, literal_params
 from sqlty._psycopg import UNCHECKED
 from sqlty._source import AST, AstMismatch, ParsedSource
@@ -32,6 +39,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
     from sqlty._cli import Settings
+    from sqlty._params import Constant
     from sqlty._type_extractor import TypeInfo
     from sqlty._type_extractor.symbols import ModuleTypes
 
@@ -358,7 +366,7 @@ class HelperIndex:
             return self._modules
         return {
             module: {name: _helper_of(name, fields) for name, fields in found.items()}
-            for module, found in self.rust().helpers().items()
+            for module, found in index_helpers(self.rust()).items()
         }
 
     def rust(self) -> ModuleIndex:
@@ -368,7 +376,7 @@ class HelperIndex:
                 parent, forked_at = self._forked or (None, 0)
                 # A fork of an index that has not changed since shares what Rust read of it.
                 if parent is not None and len(parent._steps) == forked_at:
-                    built = parent.rust().extended(self._steps[forked_at:])
+                    built = index_extended(parent.rust(), self._steps[forked_at:])
                 else:
                     built = module_index(sys.version_info[:2], self._steps)
                 self._rust = len(self._steps), built
@@ -726,6 +734,8 @@ def _imports_of(
         ({'q': ('pkg.db', 'q')}, {'q': 'pkg.db.q'})
         >>> _imports_of([("q", "q", "db", 1)], None)
         ({}, {})
+        >>> _imports_of([("q", "q", "db", 3)], "pkg.app")
+        ({}, {})
     """
     functions: dict[str, tuple[str, str]] = {}
     modules: dict[str, str] = {}
@@ -765,7 +775,7 @@ def _argument(helper: Helper, call: ast.Call, param: str | None) -> ast.expr | N
 
 
 def _call_params(
-    helper: Helper, call: ast.Call, parsed: ParsedSource
+    helper: Helper, call: ast.Call, parsed: ParsedSource, constant: Constant
 ) -> tuple[ParamArg, ...] | None:
     """The arguments ``call`` passes for the placeholders of its query, or ``None`` when not spelled out.
 
@@ -775,11 +785,11 @@ def _call_params(
     stack = parsed.scopes_of(call)
 
     def typed(key: int | str, value: ast.expr) -> ParamArg:
-        return ParamArg(key, arg_type(value, parsed, stack))
+        return ParamArg(key, arg_type(value, parsed, stack, constant))
 
     if helper.params is not None:
         arg = _argument(helper, call, helper.params)
-        return literal_params(arg, parsed, stack)
+        return literal_params(arg, parsed, stack, constant)
     if helper.rest is not None:
         if any(isinstance(arg, ast.Starred) for arg in call.args):
             return None
@@ -922,6 +932,9 @@ def _find_helper_calls(
             source.module = module
         return helpers.fragment(source, dotted)
 
+    def constant(dotted: str) -> tuple[ParsedSource, ast.expr] | None:
+        return resolve_fragment(parsed, dotted)
+
     def forwarded(call: ast.Call, query: ast.expr) -> bool:
         """Whether ``query`` is the marked query parameter of a function around ``call``."""
         if not isinstance(query, ast.Name):
@@ -955,7 +968,7 @@ def _find_helper_calls(
                     query.value,
                     _argument(helper, node, helper.row),
                     aliases,
-                    _call_params(helper, node, parsed),
+                    _call_params(helper, node, parsed, constant),
                     node.end_lineno,
                     query_node=query,
                     configured=helper.configured,
@@ -971,7 +984,7 @@ def _find_helper_calls(
             None if text == UNCHECKED else text,
             _argument(helper, node, helper.row),
             aliases,
-            _call_params(helper, node, parsed),
+            _call_params(helper, node, parsed, constant),
             node.end_lineno,
             dynamic=text is None,
             query_node=query,
@@ -1017,7 +1030,7 @@ def _site_calls(
     functions, modules = _imports_of(facts.imports, module)
     names = set(helpers.names)
     names |= {local for local, (_, original) in functions.items() if original in names}
-    if (sites := helper_sites(parsed.text, sorted(names))) is None:
+    if (sites := helper_sites(parsed.text, sorted(names), helpers.rust(), module)) is None:
         return None  # pragma: no cover - no pattern compiles for tens of thousands of names
 
     def module_of(prefix: str) -> str:

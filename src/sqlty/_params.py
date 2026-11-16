@@ -1,7 +1,8 @@
 """Arguments passed to the parameters of a query, judged against the types the query gives them.
 
 ``arg_type`` reads the type of an argument where the source states it: a literal, a
-variable annotated or assigned a class, a call of a known class. ``mismatches`` compares a
+variable bound to a literal, annotated or assigned a class, a constant imported from a
+checked module, a call of a known class. ``mismatches`` compares a
 call's arguments with ``sqlty.core.analyze_params``; an argument of unknown type is never
 reported.
 
@@ -19,8 +20,15 @@ from __future__ import annotations
 import ast
 from typing import TYPE_CHECKING, NamedTuple
 
+from sqlty._source import literal_type
+
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from sqlty._source import ParsedSource, _Stack
+
+    # The module that defines an imported ``NAME`` or ``module.NAME``, and its value there.
+    Constant = Callable[[str], tuple[ParsedSource, ast.expr] | None]
 
 
 class ParamArg(NamedTuple):
@@ -80,37 +88,45 @@ _ACCEPTS: dict[str, frozenset[str]] = {
 }
 
 
-def arg_type(expr: ast.expr, parsed: ParsedSource, stack: _Stack) -> str | None:
+def arg_type(
+    expr: ast.expr, parsed: ParsedSource, stack: _Stack, constant: Constant | None = None
+) -> str | None:
     """The type ``expr`` has where the source says so, else ``None``.
 
     Spelled as the engine spells parameter types: ``int``, ``datetime.date``,
     ``list[int]``; ``None`` is ``"None"``. A list, tuple or set is ``list[T]`` when all its
-    items have type ``T``, else ``list``.
+    items have type ``T``, else ``list``. ``constant`` finds the value of an imported name
+    (``NAME`` or ``module.NAME``) in the module that defines it.
     """
     match expr:
         case ast.Constant(value=None):
             return "None"
-        case ast.Constant(value=value) if type(value) in (bool, int, float, str, bytes):
-            return type(value).__name__
-        case ast.UnaryOp(op=ast.USub() | ast.UAdd(), operand=ast.Constant(value=float())):
-            return "float"
-        case ast.UnaryOp(op=ast.USub() | ast.UAdd(), operand=ast.Constant(value=int())):
-            return "int"
-        case ast.JoinedStr():
-            return "str"
         case ast.List(elts=items) | ast.Tuple(elts=items) | ast.Set(elts=items):
             types = {
-                None if isinstance(item, ast.Starred) else arg_type(item, parsed, stack)
+                None if isinstance(item, ast.Starred) else arg_type(item, parsed, stack, constant)
                 for item in items
             }
             if len(types) == 1 and None not in types and "None" not in types:
                 return f"list[{types.pop()}]"
             return "list"
         case ast.Name(id=name):
-            return _class(parsed.type_of(stack, name), parsed)
+            if (found := _class(parsed.type_of(stack, name), parsed)) is None:
+                found = _imported(name, name, parsed, stack, constant)
+            return found
+        case ast.Attribute() if (dotted := _dotted(expr)) is not None:
+            return _imported(dotted, dotted.partition(".")[0], parsed, stack, constant)
         case ast.Call(func=func):
             return _class(_dotted(func), parsed)
-    return None
+    return literal_type(expr)
+
+
+def _imported(
+    dotted: str, head: str, parsed: ParsedSource, stack: _Stack, constant: Constant | None
+) -> str | None:
+    if constant is None or parsed.binds(stack, head) or (found := constant(dotted)) is None:
+        return None
+    source, value = found
+    return arg_type(value, source, ())
 
 
 def annotation_type(expr: ast.expr, parsed: ParsedSource) -> str | None:
@@ -208,20 +224,21 @@ def mismatch(
 
 
 def literal_params(
-    arg: ast.expr | None, parsed: ParsedSource, stack: _Stack
+    arg: ast.expr | None, parsed: ParsedSource, stack: _Stack, constant: Constant | None = None
 ) -> tuple[ParamArg, ...] | None:
     """The arguments a tuple or list literal, or a dict literal of string keys, passes; else ``None``."""
     if isinstance(arg, (ast.Tuple, ast.List)) and not any(
         isinstance(item, ast.Starred) for item in arg.elts
     ):
         return tuple(
-            ParamArg(i, arg_type(item, parsed, stack)) for i, item in enumerate(arg.elts, 1)
+            ParamArg(i, arg_type(item, parsed, stack, constant))
+            for i, item in enumerate(arg.elts, 1)
         )
     if isinstance(arg, ast.Dict) and all(
         isinstance(key, ast.Constant) and isinstance(key.value, str) for key in arg.keys
     ):
         return tuple(
-            ParamArg(str(key.value), arg_type(value, parsed, stack))
+            ParamArg(str(key.value), arg_type(value, parsed, stack, constant))
             for key, value in zip(arg.keys, arg.values, strict=True)
             if isinstance(key, ast.Constant)
         )

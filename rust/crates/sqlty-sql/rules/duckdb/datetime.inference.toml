@@ -1,0 +1,10 @@
+# DuckDB date and time functions.
+
+[[function]]
+id = "duckdb.datetime.date-part"
+function = "DATE_PART"
+dialects = ["duckdb"]
+type = "@date-part(0)"
+nullability = "strict"
+reference.duckdb = "DuckDB 2.0 documentation, Date Part Functions"
+reasoning = "Except for `epoch` and `julian`, which return a `DOUBLE`, every part is extracted as a `BIGINT`; a part that is not a literal leaves the result untyped."

@@ -72,6 +72,7 @@ SKIPPED = {
     "renamed view": ("postgres", "CREATE VIEW v AS SELECT 1 AS a; ALTER VIEW v RENAME TO w", [("table", "v")]),
     "virtual table outside SQLite": ("postgres", "CREATE VIRTUAL TABLE v USING fts5(a)", []),
     "R*Tree without an id": ("sqlite", "CREATE VIRTUAL TABLE r USING rtree(+)", [("table", "r")]),
+    "FTS column no table can have": ("sqlite", "CREATE VIRTUAL TABLE v USING fts5(1)", [("table", "v")]),
 }
 # fmt: on
 

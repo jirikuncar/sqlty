@@ -182,9 +182,6 @@ fn translate(pattern: &str, star: &str, any: &str) -> String {
 fn set(stuff: &[char]) -> String {
     let negated = stuff.first() == Some(&'!');
     let body = &stuff[usize::from(negated)..];
-    if body.is_empty() {
-        return if negated { ".".into() } else { NEVER.into() };
-    }
     let mut chunks: Vec<Vec<char>> = Vec::new();
     let mut start = 0;
     let mut k = 1;
@@ -212,13 +209,11 @@ fn set(stuff: &[char]) -> String {
     let mut k = chunks.len() - 1;
     while k > 0 {
         let (before, after) = (&chunks[k - 1], &chunks[k]);
-        if let (Some(&end), Some(&begin)) = (before.last(), after.first()) {
-            if end > begin {
-                let mut merged = before[..before.len() - 1].to_vec();
-                merged.extend_from_slice(&after[1..]);
-                chunks[k - 1] = merged;
-                chunks.remove(k);
-            }
+        if before.last() > after.first() {
+            let mut merged = before[..before.len() - 1].to_vec();
+            merged.extend_from_slice(&after[1..]);
+            chunks[k - 1] = merged;
+            chunks.remove(k);
         }
         k -= 1;
     }
@@ -258,6 +253,7 @@ mod tests {
         for (pattern, text, expected) in [
             ("*.py", "a.py", true),
             ("*.py", "dir/a.py", true),
+            ("a**.py", "ab.py", true),
             ("?.py", "ab.py", false),
             ("[ab].py", "b.py", true),
             ("[!ab].py", "b.py", false),
