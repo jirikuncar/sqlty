@@ -439,6 +439,7 @@ fn workspace(
     common: &Common,
     severities: Vec<(String, String)>,
     untyped: Option<String>,
+    parse: bool,
 ) -> Result<Workspace, String> {
     let files = Shared(host.files());
     let cwd = host.cwd();
@@ -514,6 +515,7 @@ fn workspace(
         version: host.python(),
         extra_roots: host.extra_roots(),
         force_exclude: common.force_exclude,
+        parse,
     };
     let workspace = Workspace::open(&paths, files, options);
     if let Ok(workspace) = &workspace {
@@ -554,7 +556,7 @@ fn transform(
     kind: Transform,
 ) -> Result<i32, String> {
     let (verb, done, participle) = kind.words();
-    let mut workspace = workspace(host, common, severities, untyped)?;
+    let mut workspace = workspace(host, common, severities, untyped, false)?;
     report_unreadable(host, &workspace);
     let files = workspace.files().to_vec();
     if files.is_empty() && workspace.unreadable().is_empty() {
@@ -703,7 +705,7 @@ fn check(
         };
         return Err(format!("--error-on-warning cannot be used with {other}"));
     }
-    let mut workspace = workspace(host, common, severities, None)?;
+    let mut workspace = workspace(host, common, severities, None, true)?;
     report_unreadable(host, &workspace);
     let query_files = workspace.query_files()?;
     warn_all(host, &workspace);
