@@ -38,6 +38,9 @@ pub(crate) enum Returns {
     /// MySQL `STR_TO_DATE(s, format)`: a `DATE`, `TIME` or `DATETIME` by the parts the
     /// literal format at this argument reads.
     StrToDate(usize),
+    /// DuckDB `date_part(part, x)`: a `DOUBLE` for the literal part at this argument `epoch`
+    /// or `julian`, else a `BIGINT`.
+    DatePart(usize),
     /// `lower`/`upper`: the element type of a range argument, else `TEXT`.
     Bound,
     /// `AVG` and friends: `DOUBLE` for floats, `INTERVAL` for intervals, else `NUMERIC`.
@@ -206,6 +209,13 @@ impl<'a> Analyzer<'a> {
             Returns::StrToDate(i) => Ok(match args.get(i) {
                 Some(Expr::Value(value)) => match value.value.clone().into_string() {
                     Some(format) => from_sql_type(str_to_date_type(&format), self.dialect),
+                    None => Typed::UNKNOWN,
+                },
+                _ => Typed::UNKNOWN,
+            }),
+            Returns::DatePart(i) => Ok(match args.get(i) {
+                Some(Expr::Value(value)) => match value.value.clone().into_string() {
+                    Some(part) => from_sql_type(date_part_type(&part), self.dialect),
                     None => Typed::UNKNOWN,
                 },
                 _ => Typed::UNKNOWN,
@@ -428,6 +438,16 @@ fn str_to_date_type(format: &str) -> &'static str {
         (true, true) => "DATETIME",
         (false, true) => "TIME",
         _ => "DATE",
+    }
+}
+
+/// The type DuckDB extracts `part` as: "Except for julian and epoch, which return DOUBLEs,
+/// all parts are extracted as integers."
+pub(super) fn date_part_type(part: &str) -> &'static str {
+    if part.eq_ignore_ascii_case("epoch") || part.eq_ignore_ascii_case("julian") {
+        "DOUBLE"
+    } else {
+        "BIGINT"
     }
 }
 
