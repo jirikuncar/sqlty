@@ -56,9 +56,8 @@ pub fn route(
     for entry in overrides.into_iter().flatten().filter_map(Value::as_table) {
         let include = strings(entry, "include");
         if (include.is_empty() || matches(&include)) && applies(entry) {
-            if let Some(rules) = entry.get("rules").and_then(Value::as_table) {
-                found.rules.extend(rules.clone());
-            }
+            let rules = entry.get("rules").and_then(Value::as_table).cloned();
+            found.rules.extend(rules.unwrap_or_default());
         }
     }
     found
@@ -85,12 +84,13 @@ pub fn file_table(table: &Table, route: &Route) -> Table {
         }
     }
     if !route.rules.is_empty() {
-        let rules = merged
-            .entry("rules")
-            .or_insert_with(|| Value::Table(Table::new()));
-        if let Value::Table(rules) = rules {
-            rules.extend(route.rules.clone());
-        }
+        let mut rules = merged
+            .get("rules")
+            .and_then(Value::as_table)
+            .cloned()
+            .unwrap_or_default();
+        rules.extend(route.rules.clone());
+        merged.insert("rules".into(), Value::Table(rules));
     }
     merged
 }
@@ -178,6 +178,8 @@ mod tests {
         let (route, table) = routed("/p/tests/keep.py");
         assert_eq!(route.rules.to_string(), "a = \"ignore\"\n");
         assert_eq!(table["rules"].to_string(), "{ a = \"ignore\" }");
+        let plain = file_table(&Table::new(), &Route::default());
+        assert!(!plain.contains_key("rules"));
     }
 
     #[test]

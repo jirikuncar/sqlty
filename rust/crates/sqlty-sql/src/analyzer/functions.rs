@@ -581,6 +581,18 @@ mod tests {
     }
 
     #[test]
+    fn date_part_of_a_field_it_cannot_read_is_unknown() {
+        for field in ["1", "txt"] {
+            let report = super::super::test_support::report(
+                &format!("SELECT date_part({field}, ts) AS c FROM t"),
+                "duckdb",
+                Some("CREATE TABLE t (ts TIMESTAMP NOT NULL, txt TEXT NOT NULL)"),
+            );
+            assert!(report.starts_with("c: ? | ? | NonNull"), "{report}");
+        }
+    }
+
+    #[test]
     fn mysql_sum_of_an_integer_is_decimal() {
         let report = super::super::test_support::report(
             "SELECT sum(i) AS total FROM t",

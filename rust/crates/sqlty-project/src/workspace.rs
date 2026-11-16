@@ -500,7 +500,7 @@ impl Workspace {
                 .map(|(path, settings, helpers)| {
                     stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
                         let module = &self.modules[path];
-                        let checker = Checker::of(settings, Some(helpers))?;
+                        let checker = Checker::of(settings, Some(helpers));
                         let name = module
                             .parsed
                             .as_ref()
@@ -545,7 +545,7 @@ impl Workspace {
                 .map(|(path, settings, helpers)| {
                     stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
                         let module = &self.modules[path];
-                        let checker = Checker::of(settings, Some(helpers))?;
+                        let checker = Checker::of(settings, Some(helpers));
                         let name = module
                             .parsed
                             .as_ref()
@@ -571,7 +571,7 @@ impl Workspace {
                 .map(|(path, settings, helpers)| {
                     stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
                         let module = &self.modules[path];
-                        let checker = Checker::of(settings, Some(helpers))?;
+                        let checker = Checker::of(settings, Some(helpers));
                         let parsed = module.parsed.as_deref();
                         let name = parsed.and_then(|parsed| parsed.module.as_deref());
                         Ok(module::statistics(&module.text, parsed, name, &checker))
@@ -648,7 +648,7 @@ impl Workspace {
         self.update(path, text);
         let helpers = self.helpers(&settings);
         let module = &self.modules[path];
-        let checker = Checker::of(&settings, Some(&helpers))?;
+        let checker = Checker::of(&settings, Some(&helpers));
         let name = module
             .parsed
             .as_ref()
@@ -681,7 +681,7 @@ impl Workspace {
             .query_format
             .parse::<queries::Format>()
             .map_err(|()| format!("unknown query-format '{}'", settings.query_format))?;
-        let checker = Checker::of(&settings, None)?;
+        let checker = Checker::of(&settings, None);
         let name = path
             .file_stem()
             .map(|stem| stem.to_string_lossy().into_owned())
@@ -742,7 +742,7 @@ impl Workspace {
         self.update(path, text);
         let helpers = self.helpers(&settings);
         let module = &self.modules[path];
-        let checker = Checker::of(&settings, Some(&helpers))?;
+        let checker = Checker::of(&settings, Some(&helpers));
         let name = module
             .parsed
             .as_ref()
@@ -761,7 +761,7 @@ impl Workspace {
         let settings = self.settings(path)?;
         Ok(module::rewrite(
             text,
-            &Checker::of(&settings, None)?,
+            &Checker::of(&settings, None),
             &settings,
         ))
     }
@@ -769,13 +769,13 @@ impl Workspace {
     /// `text` as `sqlty strip` writes it.
     pub fn strip(&mut self, path: &Path, text: &str) -> Result<String, String> {
         let settings = self.settings(path)?;
-        Ok(module::strip(text, &Checker::of(&settings, None)?))
+        Ok(module::strip(text, &Checker::of(&settings, None)))
     }
 
     /// `text` as `sqlty format` writes it.
     pub fn format(&mut self, path: &Path, text: &str) -> Result<String, String> {
         let settings = self.settings(path)?;
-        Ok(module::format(text, &Checker::of(&settings, None)?))
+        Ok(module::format(text, &Checker::of(&settings, None)))
     }
 
     /// What completion reads of the buffer [`Workspace::check`] last read for `path`.
@@ -783,7 +783,7 @@ impl Workspace {
         let settings = self.settings(path).ok()?;
         let helpers = self.helpers(&settings);
         let module = self.modules.get(path)?;
-        let checker = Checker::of(&settings, Some(&helpers)).ok()?;
+        let checker = Checker::of(&settings, Some(&helpers));
         let helper_starts = match &module.parsed {
             Some(parsed) => module::helper_starts(parsed, parsed.module.as_deref(), &checker),
             None => Vec::new(),
@@ -830,6 +830,7 @@ mod tests {
         fn read(&self, path: &Path) -> Read {
             self.0
                 .get(path)
+                .filter(|text| **text != "<unreadable>")
                 .map_or(Read::Missing, |text| Read::Text(text.as_bytes().to_vec()))
         }
 
@@ -970,7 +971,13 @@ mod tests {
         assert!(error.is_some_and(|error| error.contains("unknown dialect 'nope'")));
         let error = open(&[("/repo/pyproject.toml", "[tool.sqlty]\nuntyped = \"nope\"\n")]).err();
         assert!(error.is_some_and(|error| error.ends_with("untyped must be 'skip' or 'sentinel'")));
+        let mut excluded = opened(&[("/repo/.venv/sqlty.toml", "dialect = \"nope\"\n")]);
+        let error = excluded
+            .check(Path::new("/repo/.venv/q.py"), "x = 1\n")
+            .err();
+        assert!(error.is_some_and(|error| error.contains("unknown dialect 'nope'")));
     }
+
     #[test]
     fn routes_files_to_databases_and_overrides() {
         const CONFIG: &str = "[project]\nrequires-python = \">=3.15\"\n\n[tool.sqlty]\nschema = \"app.sql\"\n\n[tool.sqlty.databases.analytics]\ndialect = \"sqlite\"\nschema = \"analytics.sql\"\ninclude = [\"jobs/**\"]\n\n[tool.sqlty.databases.lake]\ndialect = \"duckdb\"\n\n[[tool.sqlty.overrides]]\ninclude = [\"legacy/**\"]\nrules = { unknown-column = \"ignore\" }\n";
@@ -1017,5 +1024,134 @@ mod tests {
             workspace.warnings(),
             ["Table and column names are not checked for duckdb"]
         );
+    }
+
+    #[test]
+    fn warns_once_about_what_the_schemas_do_not_read() {
+        let workspace = opened(&[
+            (
+                "/repo/pyproject.toml",
+                "[tool.sqlty]\nschema = [\"schema.sql\", \"gone.sql\", \"none/*.sql\"]\n\
+                 [tool.sqlty.databases.logs]\ntypes = { \"t.c\" = \"int\" }\n",
+            ),
+            (
+                "/repo/schema.sql",
+                "CREATE VIEW bad (a) AS SELECT id FROM (;\nCREATE TYPE mood AS ENUM ('a') FOO;",
+            ),
+        ]);
+        assert_eq!(
+            workspace.warnings(),
+            [
+                "Schema pattern matches no files: none/*.sql",
+                "Schema file not found: /repo/gone.sql",
+                "Schema view bad could not be parsed; its columns are unknown",
+                "Schema statement could not be parsed and is ignored: CREATE TYPE mood AS ENUM ('a') FOO",
+            ]
+        );
+    }
+
+    #[test]
+    fn reads_the_project_without_a_configuration() {
+        let mut workspace = opened(&[
+            ("/repo/pyproject.toml", "[tool"),
+            ("/repo/broken.py", "x = (\n"),
+            ("/repo/gone.py", "<unreadable>"),
+        ]);
+        let path = Path::new("/repo/broken.py");
+        let found = workspace
+            .check(path, "q = \"--sql\\nSELECT 1\"  # sqlty: ignore\nx = (\n")
+            .expect("checks");
+        assert_eq!(rules(&found), Vec::<&str>::new());
+        let completion = workspace.completion(path).expect("completes");
+        assert_eq!(completion.helper_starts, Vec::<usize>::new());
+        assert_eq!(completion.dialect, "postgres");
+    }
+
+    #[test]
+    fn writes_the_types_the_settings_ask_for() {
+        let mut workspace = opened(&[
+            (
+                "/repo/pyproject.toml",
+                "[tool.sqlty]\nschema = \"schema.sql\"\nuntyped = \"sentinel\"\n\
+                 json-types = \"typing.TypedDict\"\nparam-types = true\ndriver = \"psycopg\"\n\
+                 types = { \"users.id\" = \"app.UserId\" }\nrules = { sqruff = \"warn\" }\n",
+            ),
+            (
+                "/repo/schema.sql",
+                "CREATE TABLE users (id INT NOT NULL, meta JSON NOT NULL);",
+            ),
+        ]);
+        let path = Path::new("/repo/q.py");
+        let text = "q = \"--sql\\nSELECT id, json_build_object('a', 1) AS m FROM users WHERE id = %(id)s\"\n";
+        let rewritten = workspace.rewrite(path, text).expect("rewrites");
+        assert!(rewritten.contains("app.UserId"), "{rewritten}");
+        assert!(rewritten.contains("TypedDict"), "{rewritten}");
+        let found = workspace
+            .check(path, "q = \"--sql\\nselect distinct(id) from users\"\n")
+            .expect("checks");
+        assert_eq!(rules(&found), ["stale-rewrite", "sqruff"]);
+    }
+
+    #[test]
+    fn reports_invalid_settings() {
+        for (config, error) in [
+            ("json-types = \"nope\"", "json-types must be 'typing.Any' or 'typing.TypedDict'"),
+            ("import-style = \"nope\"", "Unsupported import-style: 'nope'"),
+            ("schema = \"schema.sql\"\ntypes = { \"(\" = \"int\" }", "[tool.sqlty.types]: "),
+            ("[tool.sqlty.databases.logs]\nschema = \"schema.sql\"\n[tool.sqlty.types]\n\"(\" = \"int\"", "[tool.sqlty.types]: "),
+        ] {
+            let text: &'static str = Box::leak(format!("[tool.sqlty]\n{config}\n").into_boxed_str());
+            let found = open(&[("/repo/pyproject.toml", text), ("/repo/schema.sql", "CREATE TABLE t (a INT);")]);
+            let found = found.err().unwrap_or_default();
+            assert!(found.contains(error), "{config}: {found}");
+        }
+    }
+
+    #[test]
+    fn merges_the_rules_of_databases_and_overrides() {
+        let mut workspace = opened(&[
+            (
+                "/repo/pyproject.toml",
+                "[tool.sqlty]\nrules = { select-star = \"error\" }\n\
+                 [tool.sqlty.databases.logs]\ndialect = \"sqlite\"\ninclude = [\"logs/**\"]\n\
+                 rules = { select-star = \"ignore\" }\n",
+            ),
+            (
+                "/repo/sub/pyproject.toml",
+                "[tool.sqlty]\n[[tool.sqlty.overrides]]\ninclude = [\"old/**\"]\n",
+            ),
+        ]);
+        let text = "q = \"--sql\\nSELECT * FROM t\"\n";
+        let logs = workspace
+            .check(Path::new("/repo/logs/q.py"), text)
+            .expect("checks");
+        assert_eq!(rules(&logs), Vec::<&str>::new());
+        let old = workspace
+            .check(Path::new("/repo/sub/old/q.py"), text)
+            .expect("checks");
+        assert_eq!(rules(&old), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn registers_helpers_found_on_the_extra_roots() {
+        let tree = Tree(BTreeMap::from([
+            (
+                PathBuf::from("/repo/pyproject.toml"),
+                "[tool.sqlty]\n[[tool.sqlty.functions]]\nimport-path = \"lib.fetch\"\nquery-param = \"query\"\n",
+            ),
+            (PathBuf::from("/site/lib.py"), "def fetch(query: str) -> None: ...\n"),
+        ]));
+        let mut workspace = Workspace::root(
+            Path::new("/repo"),
+            Arc::new(tree),
+            (3, 14),
+            vec![PathBuf::from("/site")],
+        )
+        .expect("opens");
+        let text = "from lib import fetch\n\nfetch(\"SELEC 1\")\n";
+        let found = workspace
+            .check(Path::new("/repo/q.py"), text)
+            .expect("checks");
+        assert_eq!(rules(&found), ["unparsed-query"]);
     }
 }
