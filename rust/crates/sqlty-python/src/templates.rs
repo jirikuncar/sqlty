@@ -41,6 +41,7 @@ pub fn of(source: &str, body: &[Stmt], imported: &HashMap<String, String>) -> Ve
     let ctx = Context {
         imported,
         scan: &scan,
+        constant: None,
     };
     let lines = Lines::new(source);
     let mut found: Vec<Template> = scan

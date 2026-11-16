@@ -4,6 +4,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
+use crate::types::symbols::Source;
 use ruff_python_ast::visitor::{walk_expr, walk_stmt, Visitor};
 use ruff_python_ast::{
     self as ast, Expr, ExprCall, ExprTString, Number, Stmt, StmtClassDef, StmtFunctionDef, UnaryOp,
@@ -192,17 +193,32 @@ impl<'a, W: FnMut(&'a ExprCall) -> bool> Visitor<'a> for Walker<'a, W> {
             Stmt::Assign(node) => {
                 let kind = match node.value.as_ref() {
                     Expr::Call(call) => class_name(Some(&call.func)),
-                    _ => None,
+                    value => literal_type(value).map(ToString::to_string),
                 };
                 let targets: Vec<&Expr> = node.targets.iter().collect();
                 self.scan.typed(&targets, &kind);
             }
             Stmt::AnnAssign(node) => {
-                let kind =
-                    class_name(Some(&node.annotation)).or_else(|| match node.value.as_deref() {
-                        Some(Expr::Call(call)) => class_name(Some(&call.func)),
-                        _ => None,
-                    });
+                let annotation = match node.annotation.as_ref() {
+                    Expr::Subscript(subscript) => subscript.value.as_ref(),
+                    annotation => annotation,
+                };
+                let final_ = matches!(
+                    class_name(Some(annotation)).as_deref(),
+                    Some("Final" | "typing.Final" | "typing_extensions.Final")
+                );
+                let kind = if final_ {
+                    node.value
+                        .as_deref()
+                        .and_then(literal_type)
+                        .map(ToString::to_string)
+                } else {
+                    class_name(Some(&node.annotation))
+                }
+                .or_else(|| match node.value.as_deref() {
+                    Some(Expr::Call(call)) => class_name(Some(&call.func)),
+                    _ => None,
+                });
                 self.scan.typed(&[&node.target], &kind);
             }
             _ => {}
@@ -227,12 +243,17 @@ impl<'a, W: FnMut(&'a ExprCall) -> bool> Visitor<'a> for Walker<'a, W> {
     }
 }
 
+/// The module that defines an imported `NAME` or `module.NAME`, and its value there.
+pub type Constant<'s> = &'s dyn Fn(&str) -> Option<(&'s Source, &'s Expr)>;
+
 /// Reads argument types in the scopes of a [`Scan`].
 pub struct Context<'a, 's> {
     /// `ParsedSource.imported_names`.
     pub imported: &'s HashMap<String, String>,
     /// The scan of the module.
     pub scan: &'s Scan<'a>,
+    /// Finds the value of an imported constant, when the checked modules are known.
+    pub constant: Option<Constant<'s>>,
 }
 
 impl Context<'_, '_> {
@@ -276,25 +297,6 @@ impl Context<'_, '_> {
     pub fn arg_type(&self, expr: &Expr, stack: &[Scope]) -> Option<String> {
         let name = match expr {
             Expr::NoneLiteral(_) => "None",
-            Expr::BooleanLiteral(_) => "bool",
-            Expr::NumberLiteral(number) => match number.value {
-                Number::Int(_) => "int",
-                Number::Float(_) => "float",
-                Number::Complex { .. } => return None,
-            },
-            Expr::StringLiteral(_) | Expr::FString(_) => "str",
-            Expr::BytesLiteral(_) => "bytes",
-            Expr::UnaryOp(unary) if matches!(unary.op, UnaryOp::UAdd | UnaryOp::USub) => {
-                match unary.operand.as_ref() {
-                    Expr::NumberLiteral(number) => match number.value {
-                        Number::Int(_) => "int",
-                        Number::Float(_) => "float",
-                        Number::Complex { .. } => return None,
-                    },
-                    Expr::BooleanLiteral(_) => "int",
-                    _ => return None,
-                }
-            }
             Expr::List(ast::ExprList { elts: items, .. })
             | Expr::Tuple(ast::ExprTuple { elts: items, .. })
             | Expr::Set(ast::ExprSet { elts: items, .. }) => {
@@ -312,11 +314,54 @@ impl Context<'_, '_> {
                 }
                 "list"
             }
-            Expr::Name(name) => return self.class(self.type_of(stack, name.id.as_str())),
+            Expr::Name(name) => {
+                let name = name.id.as_str();
+                return self
+                    .class(self.type_of(stack, name))
+                    .or_else(|| self.imported_constant(name, name, stack));
+            }
+            Expr::Attribute(_) => {
+                let dotted = dotted(expr)?;
+                let head = dotted.split('.').next().unwrap_or_default();
+                return self.imported_constant(&dotted, head, stack);
+            }
             Expr::Call(call) => return self.class(dotted(&call.func)),
-            _ => return None,
+            expr => literal_type(expr)?,
         };
         Some(name.to_string())
+    }
+
+    /// The type of the constant `dotted` imports from a checked module, unless `head` is
+    /// bound in `stack`.
+    fn imported_constant(&self, dotted: &str, head: &str, stack: &[Scope]) -> Option<String> {
+        let constant = self.constant?;
+        if self.binds(stack, head) {
+            return None;
+        }
+        let (source, value) = constant(dotted)?;
+        let scan = Scan::new(
+            if matches!(value, Expr::Name(_)) {
+                source.body()
+            } else {
+                &[]
+            },
+            |_| false,
+        );
+        Context {
+            imported: &source.imports,
+            scan: &scan,
+            constant: None,
+        }
+        .arg_type(value, &[])
+    }
+
+    /// Whether `name` is a parameter of, or assigned in, the module or a function of `stack`.
+    fn binds(&self, stack: &[Scope], name: &str) -> bool {
+        stack
+            .iter()
+            .filter(|&&scope| !self.scan.is_class(scope))
+            .chain(std::iter::once(&0))
+            .any(|&scope| self.scan.types.contains_key(&(scope, name)))
     }
 
     /// The class a variable holds in `stack`, as `ParsedSource.type_of` reads it.
@@ -342,6 +387,29 @@ impl Context<'_, '_> {
 
     fn class(&self, name: Option<String>) -> Option<String> {
         class_of(name, self.imported)
+    }
+}
+
+/// The builtin class of a literal other than `None`, as `sqlty._source.literal_type` reads it.
+fn literal_type(expr: &Expr) -> Option<&'static str> {
+    let number = |number: &ast::ExprNumberLiteral| match number.value {
+        Number::Int(_) => Some("int"),
+        Number::Float(_) => Some("float"),
+        Number::Complex { .. } => None,
+    };
+    match expr {
+        Expr::BooleanLiteral(_) => Some("bool"),
+        Expr::NumberLiteral(literal) => number(literal),
+        Expr::StringLiteral(_) | Expr::FString(_) => Some("str"),
+        Expr::BytesLiteral(_) => Some("bytes"),
+        Expr::UnaryOp(unary) if matches!(unary.op, UnaryOp::UAdd | UnaryOp::USub) => {
+            match unary.operand.as_ref() {
+                Expr::NumberLiteral(literal) => number(literal),
+                Expr::BooleanLiteral(_) => Some("int"),
+                _ => None,
+            }
+        }
+        _ => None,
     }
 }
 

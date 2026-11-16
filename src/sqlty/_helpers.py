@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
     from sqlty._cli import Settings
+    from sqlty._params import Constant
     from sqlty._type_extractor import TypeInfo
     from sqlty._type_extractor.symbols import ModuleTypes
 
@@ -289,10 +290,11 @@ def helper_roots(config_dir: Path | None, checked: Iterable[Path]) -> tuple[Path
         >>> [root.name for root in helper_roots(Path("/p"), [Path("/p/app"), Path("/q")])[:3]]
         ['src', 'p', 'app']
     """
+    from sqlty import _core
+
     project = config_dir.resolve() if config_dir is not None else None
-    own = [project / "src", project] if project is not None else []
-    inside = [root for root in checked if project is None or root.is_relative_to(project)]
-    return tuple(dict.fromkeys([*own, *inside, *(Path(entry) for entry in sys.path if entry)]))
+    extra = [Path(entry) for entry in sys.path if entry]
+    return tuple(_core.helper_roots(project, list(checked), extra))
 
 
 def configured_helpers(
@@ -764,7 +766,7 @@ def _argument(helper: Helper, call: ast.Call, param: str | None) -> ast.expr | N
 
 
 def _call_params(
-    helper: Helper, call: ast.Call, parsed: ParsedSource
+    helper: Helper, call: ast.Call, parsed: ParsedSource, constant: Constant
 ) -> tuple[ParamArg, ...] | None:
     """The arguments ``call`` passes for the placeholders of its query, or ``None`` when not spelled out.
 
@@ -774,11 +776,11 @@ def _call_params(
     stack = parsed.scopes_of(call)
 
     def typed(key: int | str, value: ast.expr) -> ParamArg:
-        return ParamArg(key, arg_type(value, parsed, stack))
+        return ParamArg(key, arg_type(value, parsed, stack, constant))
 
     if helper.params is not None:
         arg = _argument(helper, call, helper.params)
-        return literal_params(arg, parsed, stack)
+        return literal_params(arg, parsed, stack, constant)
     if helper.rest is not None:
         if any(isinstance(arg, ast.Starred) for arg in call.args):
             return None
@@ -921,6 +923,9 @@ def _find_helper_calls(
             source.module = module
         return helpers.fragment(source, dotted)
 
+    def constant(dotted: str) -> tuple[ParsedSource, ast.expr] | None:
+        return resolve_fragment(parsed, dotted)
+
     def forwarded(call: ast.Call, query: ast.expr) -> bool:
         """Whether ``query`` is the marked query parameter of a function around ``call``."""
         if not isinstance(query, ast.Name):
@@ -954,7 +959,7 @@ def _find_helper_calls(
                     query.value,
                     _argument(helper, node, helper.row),
                     aliases,
-                    _call_params(helper, node, parsed),
+                    _call_params(helper, node, parsed, constant),
                     node.end_lineno,
                     query_node=query,
                     configured=helper.configured,
@@ -970,7 +975,7 @@ def _find_helper_calls(
             None if text == UNCHECKED else text,
             _argument(helper, node, helper.row),
             aliases,
-            _call_params(helper, node, parsed),
+            _call_params(helper, node, parsed, constant),
             node.end_lineno,
             dynamic=text is None,
             query_node=query,
@@ -1016,7 +1021,7 @@ def _site_calls(
     functions, modules = _imports_of(facts.imports, module)
     names = set(helpers.names)
     names |= {local for local, (_, original) in functions.items() if original in names}
-    if (sites := helper_sites(parsed.text, sorted(names))) is None:
+    if (sites := helper_sites(parsed.text, sorted(names), helpers.rust(), module)) is None:
         return None  # pragma: no cover - no pattern compiles for tens of thousands of names
 
     def module_of(prefix: str) -> str:
