@@ -296,6 +296,8 @@ mod tests {
         assert_eq!(found.path.len(), 3);
         assert!(found.path[2].ends_with("src"));
         std::fs::write(site.join("b.pth"), b"\xff").unwrap();
+        std::fs::write(root.join("pyvenv.cfg"), "version = 3.12.1\n").unwrap();
+        assert_eq!(Environment::of_scripts(&root.join("bin")).version, (3, 12));
         std::fs::remove_file(root.join("pyvenv.cfg")).unwrap();
         assert_eq!(Environment::of_scripts(&root.join("bin")).path.len(), 3);
         assert_eq!(Environment::of_scripts(&root.join("bin")).version, (3, 13));
