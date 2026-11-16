@@ -6,9 +6,10 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use sqlty_python::config::{self, Config, LoadError};
-use sqlty_python::project::{self, Discovery, Files, FindError, Kind, Listing, Read};
+use sqlty_python::project::{self, Discovery, Files, FindError, Kind, Listing, Packages, Read};
 use toml::{Table, Value};
 
 create_exception!(
@@ -272,6 +273,39 @@ fn names_query_file(path: &str, base: &str, queries: Vec<String>) -> bool {
     project::names_query_file(path, &resolved, &base, &queries)
 }
 
+/// The packages of the disk, each directory looked at once a process.
+static PACKAGES: LazyLock<Packages> = LazyLock::new(|| Packages::new(Box::new(Disk)));
+
+/// The dotted names the resolved `path` is imported by, the likeliest first: its package
+/// path, then its path from each of `roots` (relative to `cwd`), without and with the
+/// root's name.
+#[pyfunction]
+#[expect(clippy::needless_pass_by_value, reason = "PyO3 extracts owned values")]
+fn module_names(path: PathBuf, roots: Vec<PathBuf>, cwd: PathBuf) -> Vec<String> {
+    PACKAGES.names(&path, &roots, &cwd)
+}
+
+/// The checked directories, the parents of checked files and the package roots of
+/// `files`, resolved against `cwd`, each once.
+#[pyfunction]
+#[expect(clippy::needless_pass_by_value, reason = "PyO3 extracts owned values")]
+fn checked_roots(paths: Vec<PathBuf>, files: Vec<PathBuf>, cwd: PathBuf) -> Vec<PathBuf> {
+    PACKAGES.checked_roots(&paths, &files, &cwd)
+}
+
+/// Where `[[tool.sqlty.functions]]` modules are read from: `config_dir/src`,
+/// `config_dir`, the `checked` roots inside it, then `extra`.
+#[pyfunction]
+#[pyo3(name = "helper_roots")]
+#[expect(clippy::needless_pass_by_value, reason = "PyO3 extracts owned values")]
+fn py_helper_roots(
+    config_dir: Option<PathBuf>,
+    checked: Vec<PathBuf>,
+    extra: Vec<PathBuf>,
+) -> Vec<PathBuf> {
+    project::helper_roots(config_dir.as_deref(), &checked, &extra)
+}
+
 /// Add the key lists and `ConfigSyntaxError` to the module.
 pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ConfigSyntaxError", m.py().get_type::<ConfigSyntaxError>())?;
@@ -286,6 +320,9 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(config_file, m)?)?;
     m.add_function(wrap_pyfunction!(schema_files, m)?)?;
     m.add_function(wrap_pyfunction!(names_query_file, m)?)?;
+    m.add_function(wrap_pyfunction!(module_names, m)?)?;
+    m.add_function(wrap_pyfunction!(checked_roots, m)?)?;
+    m.add_function(wrap_pyfunction!(py_helper_roots, m)?)?;
     m.add_class::<PyDiscovery>()?;
     m.add("DEFAULT_EXCLUDE", project::DEFAULT_EXCLUDE)?;
     Ok(())
