@@ -1,11 +1,8 @@
 """Configuration loading from sqlty.toml, pyproject.toml or Cargo.toml."""
 
-import ast
-import copy
 import difflib
 import glob
 import logging
-import os
 import re
 import tomllib
 from functools import lru_cache
@@ -469,50 +466,20 @@ def find_config(project_root: Path | None = None) -> tuple[SQLTyConfig, Path | N
     Walks up from ``project_root`` (cwd if None). In each directory the files are
     tried in that order, and a native file without its sqlty table is skipped (like
     ruff), so a packaging-only ``pyproject.toml`` or ``Cargo.toml`` does not hide the
-    workspace config. The closest file wins; files are never merged. A native file
-    that fails to parse is logged and yields ``({}, None)``.
+    workspace config. The closest file wins; files are never merged, except through
+    ``extend``. A native file that fails to parse is logged and yields ``({}, None)``.
     """
-    current = (project_root or Path.cwd()).resolve()
-    while current != current.parent:
-        sqlty_toml = current / "sqlty.toml"
-        if sqlty_toml.is_file():
-            config = _load_config_file_cached(sqlty_toml, sqlty_toml.stat().st_mtime_ns)
-            return _extended(copy.deepcopy(config), sqlty_toml, current), sqlty_toml
-        for name in _core.CONFIG_FILES[1:]:
-            native = current / name
-            if not native.exists():
-                continue
-            try:
-                found = _parse_native_cached(native, native.stat().st_mtime_ns)
-            except ConfigError:
-                raise
-            except (_core.ConfigSyntaxError, OSError) as e:
-                logging.getLogger(__name__).warning("Failed to parse %s", e)
-                return {}, None
-            if found is not None:
-                return _extended(copy.deepcopy(found), native, current), native
-        current = current.parent
-    return {}, None
-
-
-@lru_cache(maxsize=256)
-def _parse_native_cached(path: Path, mtime_ns: int) -> SQLTyConfig | None:
-    """Parse ``path`` once per (path, mtime_ns); an edit changes the mtime and re-parses.
-
-    The mtime is part of the key so long-running processes see edits. Failures
-    are not cached.
-    """
-    return _parse_native(path)
-
-
-@lru_cache(maxsize=256)
-def _load_config_file_cached(path: Path, mtime_ns: int) -> SQLTyConfig:
-    return _read_config_file(path)
-
-
-def _parse_native(path: Path) -> SQLTyConfig | None:
-    """The sqlty table of a ``pyproject.toml`` or ``Cargo.toml``, or None without one."""
-    return _load(path, required=False)
+    try:
+        found = _core.find_config((project_root or Path.cwd()).resolve())
+    except _core.ConfigSyntaxError as e:
+        logging.getLogger(__name__).warning("Failed to parse %s", e)
+        return {}, None
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from None
+    if found is None:
+        return {}, None
+    table, skipped, path = found
+    return _converted(table, skipped, str(path)), path
 
 
 def load_config_file(path: Path) -> SQLTyConfig:
@@ -528,72 +495,15 @@ def load_config_file(path: Path) -> SQLTyConfig:
         Traceback (most recent call last):
         sqlty._config.ConfigError: config file does not exist: missing.toml
     """
-    return _extended(_read_config_file(path), path, Path.cwd().resolve())
-
-
-def _extended(
-    config: SQLTyConfig, path: Path, base: Path, chain: tuple[Path, ...] = ()
-) -> SQLTyConfig:
-    """``config`` of ``path`` on top of the file its ``extend`` names, recursively.
-
-    ``rules``, ``types`` and ``databases`` merge key by key; any other key of ``config``
-    replaces the extended one. ``schema`` and ``queries`` of an extended file are rebased onto ``base``,
-    the directory the relative paths of ``config`` start from.
-    """
-    extend = config.pop("extend", None)
-    if extend is None:
-        return config
-    chain = (*chain, path.resolve())
-    target = (path.parent / extend).resolve()
-    if target in chain:
-        raise ConfigError(f"{path}: extend = {extend!r} extends itself in a cycle")
-    if not target.is_file():
-        raise ConfigError(f"{path}: extend = {extend!r}: config file does not exist: {target}")
-    parent = _extended(
-        copy.deepcopy(_load_config_file_cached(target, target.stat().st_mtime_ns)),
-        target,
-        target.parent,
-        chain,
-    )
-    for table in [parent, *parent.get("databases", {}).values()]:
-        for key in ("schema", "queries"):
-            if key in table:
-                spec = table[key]
-                table[key] = [
-                    os.path.relpath(target.parent / entry, base)
-                    for entry in ([spec] if isinstance(spec, str) else spec)
-                ]
-    merged = cast(SQLTyConfig, {**parent, **config})
-    for key in ("rules", "types"):
-        if key in parent and key in config:
-            merged[key] = {**parent[key], **config[key]}  # type: ignore[literal-required]
-    if "databases" in parent and "databases" in config:
-        merged["databases"] = {**parent["databases"], **config["databases"]}
-    return merged
-
-
-def _read_config_file(path: Path) -> SQLTyConfig:
     if not path.exists():
         raise ConfigError(f"config file does not exist: {path}")
     if not path.is_file():
         raise ConfigError(f"config path is not a file: {path}")
     try:
-        config = _load(path, required=True)
-    except _core.ConfigSyntaxError as exc:
-        raise ConfigError(str(exc)) from None
-    assert config is not None
-    return config
-
-
-def _load(path: Path, *, required: bool) -> SQLTyConfig | None:
-    data = path.read_bytes()
-    try:
-        found = _core.load_config(data, path.name, str(path), required=required)
-    except _core.ConfigSyntaxError:
-        raise
+        found = _core.config_file(path.resolve(), Path.cwd().resolve())
     except ValueError as exc:
         raise ConfigError(str(exc)) from None
-    return None if found is None else _converted(*found, str(path))
+    return _converted(*found, str(path))
 
 
 def parse_overrides(assignments: list[str]) -> SQLTyConfig:
@@ -668,13 +578,6 @@ def _converted(table: dict[str, Any], skipped: list[str], source: str) -> SQLTyC
         table["databases"] = {
             name: _converted(database, [], source) for name, database in table["databases"].items()
         }
-    for key, python in table.get("types", {}).items():
-        try:
-            ast.parse(python, mode="eval")
-        except SyntaxError:
-            raise ConfigError(
-                f"{source}: [tool.sqlty.types] {key} = {python!r} is not a Python type expression"
-            ) from None
     for entry in skipped:
         logging.getLogger(__name__).warning(
             "Skipping function config missing required fields: %s", entry

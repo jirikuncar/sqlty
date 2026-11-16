@@ -58,6 +58,7 @@ pub mod module;
 pub mod options;
 pub mod params;
 pub mod parse;
+pub mod project;
 pub mod queries;
 pub mod rewriter;
 #[allow(missing_docs)]
