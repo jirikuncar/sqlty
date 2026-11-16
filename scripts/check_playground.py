@@ -26,7 +26,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
-from playwright.sync_api import Browser, CDPSession, Page, sync_playwright
+from playwright.sync_api import Browser, BrowserContext, CDPSession, Page, sync_playwright
 
 SOURCE = "monaco.editor.getEditors().find((e) => e.getContainerDomNode().matches('[data-source]'))"
 MODEL = "monaco.editor.getModels().find((m) => m.getLanguageId() === '{}')"
@@ -237,6 +237,7 @@ def exercise(browser: Browser, url: str, watch: Callable[[Page], None]) -> None:
     sharing(page)
     resizing(page)
     zoomed(page, url)
+    unsupported(context, url, watch)
     asking(page, url)
     assert not errors, errors
 
@@ -497,6 +498,19 @@ def zoomed(page: Page, url: str) -> None:
     page.click("[data-present]")
     assert page.get_attribute("[data-present]", "aria-pressed") == "true"
     page.click("[data-present]")
+
+
+def unsupported(context: BrowserContext, url: str, watch: Callable[[Page], None]) -> None:
+    """A browser wllama cannot run in, here one without OPFS, gets no Ask."""
+    other = context.new_page()
+    watch(other)
+    other.add_init_script("delete StorageManager.prototype.getDirectory")
+    other.goto(url)
+    other.wait_for_selector("[data-types] code", state="attached", timeout=60_000)
+    other.wait_for_function(
+        "performance.getEntriesByType('resource').some((r) => r.name.endsWith('/ask.js'))"
+    )
+    assert not other.is_visible("[data-ask-open]")
 
 
 def asking(page: Page, url: str) -> None:
