@@ -127,6 +127,7 @@ def embedded(page: Page, url: str) -> None:
     assert not page.is_visible(".md-header")
     assert not page.is_visible("[data-example]")
     assert page.is_visible("[data-fix]")
+    assert not page.is_visible("[data-ask-open]")
     opened = page.get_attribute("[data-open]", "href")
     assert "embed" not in opened and opened.split("#")[1] == shared.split("#")[1], opened
 
@@ -499,7 +500,7 @@ def zoomed(page: Page, url: str) -> None:
 
 
 def asking(page: Page, url: str) -> None:
-    page.goto(url + "?ask")
+    page.goto(url)
     page.wait_for_selector("[data-ask-open]:not([hidden])", timeout=60_000)
     page.click("[data-ask-open]")
     page.wait_for_function("document.activeElement.matches('[data-ask-question]')")
