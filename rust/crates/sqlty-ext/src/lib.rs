@@ -2022,8 +2022,8 @@ fn check_modules(
 
 /// What a schema change breaks in each `(source, name, own, against)` of `modules`: the
 /// diagnostics it gets with the configuration `against` indexes in `configs` but not with
-/// `own`, as `breaking_source` finds them, on `jobs` threads (all cores when None). Each
-/// comes with whether its `# sqlty: ignore` comments are applied, as for `check_modules`.
+/// `own`, as `breaking_source` finds them, on `jobs` threads (all cores when None), its
+/// `# sqlty: ignore` comments applied.
 #[pyfunction]
 #[pyo3(signature = (modules, configs, *, version, jobs = None))]
 fn breaking_modules(
