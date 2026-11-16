@@ -106,6 +106,19 @@ def fix_source(
     rules: dict[str, str] | None = None,
     suppressed: dict[int, list[str] | None] | None = None,
 ) -> str: ...
+def fix_module(
+    source: str,
+    *,
+    version: tuple[int, int],
+    dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
+    import_style: str | None = None,
+    untyped: bool = False,
+    rules: dict[str, str] | None = None,
+    index: ModuleIndex | None = None,
+    name: str | None = None,
+    module: str | None = None,
+) -> str: ...
 def expand_star(
     sql: str,
     *,
@@ -227,12 +240,9 @@ def check_modules(
     jobs: int | None = None,
 ) -> list[
     tuple[
-        tuple[
-            list[Diagnostic],
-            list[tuple[str | None, str, str] | None],
-            list[tuple[str | None, str, str]],
-        ],
-        bool,
+        list[Diagnostic],
+        list[tuple[str | None, str, str] | None],
+        list[tuple[str | None, str, str]],
     ]
 ]: ...
 def module_diagnostics(
@@ -249,6 +259,7 @@ def module_diagnostics(
     index: ModuleIndex | None = None,
     name: str | None = None,
     variants: int | None = None,
+    suppress: bool = False,
 ) -> tuple[
     list[Diagnostic],
     list[tuple[str | None, str, str] | None],
@@ -302,7 +313,7 @@ def add_json_types(
 ) -> str: ...
 def module_ignores(
     source: str, version: tuple[int, int]
-) -> list[tuple[int, list[str] | None, int, int]] | None: ...
+) -> list[tuple[int, list[str] | None, int, int]]: ...
 def rendered_compositions(
     source: str, version: tuple[int, int]
 ) -> list[tuple[int, bool, str | None]] | None: ...
