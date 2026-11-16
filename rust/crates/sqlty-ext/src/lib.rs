@@ -2011,6 +2011,62 @@ fn check_modules(
     Ok(found)
 }
 
+/// What a schema change breaks in each `(source, name, own, against)` of `modules`: the
+/// diagnostics it gets with the configuration `against` indexes in `configs` but not with
+/// `own`, as `breaking_source` finds them, on `jobs` threads (all cores when None). Each
+/// comes with whether its `# sqlty: ignore` comments are applied, as for `check_modules`.
+#[pyfunction]
+#[pyo3(signature = (modules, configs, *, version, jobs = None))]
+fn breaking_modules(
+    py: Python<'_>,
+    modules: Vec<(PyBackedStr, Option<String>, usize, usize)>,
+    configs: Vec<ConfigArg<'_>>,
+    version: (u8, u8),
+    jobs: Option<usize>,
+) -> PyResult<Vec<Vec<DiagnosticOut>>> {
+    use rayon::prelude::*;
+
+    if let Some(config) = modules
+        .iter()
+        .flat_map(|&(_, _, own, against)| [own, against])
+        .find(|&config| config >= configs.len())
+    {
+        return Err(PyValueError::new_err(format!("no configuration {config}")));
+    }
+    let mut configs: Vec<CheckConfig> = configs.into_iter().map(CheckConfig::new).collect();
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(jobs.unwrap_or(0))
+        .stack_size(STACK_SEGMENT)
+        .build()
+        .expect("the check threads start");
+    let found = detach(py, || -> Result<Vec<_>, Error> {
+        let schemas: Vec<_> = configs.iter_mut().map(CheckConfig::schema).collect();
+        let checkers = configs
+            .iter()
+            .zip(&schemas)
+            .map(|(config, schema)| config.checker(schema.as_deref()))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(pool.install(|| {
+            modules
+                .into_par_iter()
+                .map(|(source, name, own, against)| {
+                    stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
+                        let name = name.as_deref();
+                        let check = |config: usize| {
+                            checkers[config].check(&source, version, name, name, true)
+                        };
+                        let ((own, ..), (against, ..)) = (check(own), check(against));
+                        let key =
+                            |found: &DiagnosticOut| (found.line, found.rule, found.message.clone());
+                        sqlty_python::breaking::breaking(&own, against, key, |found| found.rule)
+                    })
+                })
+                .collect()
+        }))
+    })?;
+    Ok(found)
+}
+
 /// Check Python source for SQL type issues.
 ///
 /// `any_calls` are the byte offsets of the `SQL[T](...)` calls whose `T` is
@@ -2476,6 +2532,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(row_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(module_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(check_modules, m)?)?;
+    m.add_function(wrap_pyfunction!(breaking_modules, m)?)?;
     m.add_function(wrap_pyfunction!(module_index, m)?)?;
     m.add_function(wrap_pyfunction!(rendered_compositions, m)?)?;
     m.add_function(wrap_pyfunction!(call_variants, m)?)?;

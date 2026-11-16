@@ -221,6 +221,13 @@ def row_diagnostics(
     ]
     | None
 ): ...
+def breaking_modules(
+    modules: Sequence[tuple[str, str | None, int, int]],
+    configs: Sequence[tuple[Any, ...]],
+    *,
+    version: tuple[int, int],
+    jobs: int | None = None,
+) -> list[list[Diagnostic]]: ...
 def check_modules(
     modules: Sequence[tuple[str, str | None, int]],
     configs: Sequence[
