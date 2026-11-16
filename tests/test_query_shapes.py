@@ -129,6 +129,7 @@ EXPRESSIONS = [
     ("postgres", "SELECT RANDOM(1.5::float8, 2.5::float8) AS x FROM f", "x: None", ["unsupported-syntax"]),
     ("postgres", "SELECT COALESCE(i, tx) AS x FROM f", "x: None", ["rejected-query"]),
     ("postgres", "SELECT COALESCE(c, tx) AS x FROM f", "x: None", ["rejected-query"]),
+    ("postgres", "SELECT COALESCE(c, vb) AS x, CASE WHEN i > 0 THEN c ELSE vb END AS y FROM f", "x: int | None, y: int | None", []),
     ("mysql", "SELECT CONCAT(tx, i) AS x FROM f", "x: str | None", []),
     ("postgres", "SELECT (SELECT 1) AS x FROM c LEFT JOIN p ON p.id = c.pid", "x: int", []),
     ("postgres", "SELECT p.name AS x FROM c LEFT JOIN p ON c.pid = c.id", "x: str | None", ["entity-mismatch"]),
