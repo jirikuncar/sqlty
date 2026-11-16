@@ -29,6 +29,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, NamedTuple, Protocol
 
+from sqlty._source import AST
+
 if TYPE_CHECKING:
     import argparse
 
