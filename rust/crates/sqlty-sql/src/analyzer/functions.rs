@@ -3,8 +3,8 @@
 use std::rc::Rc;
 
 use sqlparser::ast::{
-    BinaryOperator, Expr, FunctionArg, FunctionArgExpr, FunctionArgOperator, FunctionArguments,
-    Value,
+    BinaryOperator, DateTimeField, Expr, FunctionArg, FunctionArgExpr, FunctionArgOperator,
+    FunctionArguments, Value,
 };
 
 use super::dialect::SqlDialect;
@@ -431,6 +431,51 @@ fn str_to_date_type(format: &str) -> &'static str {
     }
 }
 
+/// The SQL type `EXTRACT(field FROM x)` gives, `None` when sqlty does not know it.
+///
+/// PostgreSQL 14+ returns `numeric` for every field (`generic` follows it); MySQL an
+/// integer; DuckDB a `BIGINT`, a `DOUBLE` for `epoch` and `julian`; ClickHouse the type of
+/// the `toYear`-style function the field reads.
+pub(super) fn extract_type(dialect: SqlDialect, field: &DateTimeField) -> Option<&'static str> {
+    let name = field
+        .to_string()
+        .trim_matches(['\'', '"'])
+        .to_ascii_uppercase();
+    match dialect {
+        SqlDialect::Postgres | SqlDialect::Other("generic") => Some("DECIMAL"),
+        SqlDialect::MySql => Some("BIGINT"),
+        SqlDialect::Other("duckdb") => duckdb_extract_type(&name),
+        SqlDialect::ClickHouse => clickhouse_extract_type(&name),
+        _ => None,
+    }
+}
+
+fn duckdb_extract_type(field: &str) -> Option<&'static str> {
+    Some(match field {
+        "EPOCH" | "JULIAN" => "DOUBLE",
+        "YEAR" | "YEARS" | "QUARTER" | "MONTH" | "MONTHS" | "WEEK" | "WEEKS" | "DAY" | "DAYS"
+        | "DAYOFWEEK" | "DAYOFYEAR" | "DOW" | "DOY" | "ISODOW" | "ISOYEAR" | "YEARWEEK"
+        | "HOUR" | "HOURS" | "MINUTE" | "MINUTES" | "SECOND" | "SECONDS" | "MILLISECOND"
+        | "MILLISECONDS" | "MICROSECOND" | "MICROSECONDS" | "CENTURY" | "DECADE" | "MILLENNIUM"
+        | "MILLENIUM" | "ERA" | "TIMEZONE" | "TIMEZONE_HOUR" | "TIMEZONE_MINUTE" => "BIGINT",
+        _ => return None,
+    })
+}
+
+fn clickhouse_extract_type(field: &str) -> Option<&'static str> {
+    Some(match field {
+        "QUARTER" | "MONTH" | "MONTHS" | "WEEK" | "WEEKS" | "DAY" | "DAYS" | "DOW" | "ISODOW"
+        | "HOUR" | "HOURS" | "MINUTE" | "MINUTES" | "SECOND" | "SECONDS" => "UTINYINT",
+        "YEAR" | "YEARS" | "DOY" | "ISOYEAR" | "DECADE" | "MILLISECOND" | "MILLISECONDS" => {
+            "USMALLINT"
+        }
+        "MICROSECOND" | "MICROSECONDS" | "NANOSECOND" | "NANOSECONDS" | "EPOCH" => "UINT",
+        "TIMEZONE_HOUR" => "INT",
+        "CENTURY" | "MILLENNIUM" | "TIMEZONE_MINUTE" => "BIGINT",
+        _ => return None,
+    })
+}
+
 /// The digits before the point of a `DECIMAL(p, s)`: `p - s`; MySQL's bare `DECIMAL` is
 /// `DECIMAL(10, 0)`.
 fn decimal_integer_digits(sql_type: &str) -> u32 {
@@ -581,6 +626,27 @@ mod tests {
             "SELECT now() AS ok, mystery() AS bad FROM t",
         ];
         insta::assert_snapshot!(reports(&queries, "postgres", Some(DDL)));
+    }
+
+    #[test]
+    fn extract_types_follow_the_dialect_and_field() {
+        use sqlparser::ast::DateTimeField::{Custom, Epoch, Julian, Nanosecond, Year};
+        let cases = [
+            ("postgres", Year, Some("DECIMAL")),
+            ("generic", Epoch, Some("DECIMAL")),
+            ("mysql", Year, Some("BIGINT")),
+            ("duckdb", Julian, Some("DOUBLE")),
+            ("duckdb", Custom("yearweek".into()), Some("BIGINT")),
+            ("duckdb", Nanosecond, None),
+            ("clickhouse", Year, Some("USMALLINT")),
+            ("clickhouse", Nanosecond, Some("UINT")),
+            ("clickhouse", Julian, None),
+            ("snowflake", Year, None),
+        ];
+        for (dialect, field, expected) in cases {
+            let found = extract_type(SqlDialect::from_name(dialect), &field);
+            assert_eq!(found, expected, "{dialect} {field}");
+        }
     }
 
     #[test]

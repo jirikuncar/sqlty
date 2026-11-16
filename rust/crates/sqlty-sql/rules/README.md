@@ -208,7 +208,8 @@ own, or an unknown dialect in `extends`, fails the build.
 
 `analyzer/operators.rs` keeps one case rules cannot express: MySQL
 `date ± INTERVAL n unit`, where the unit decides between `DATE` and `DATETIME`.
-It is typed before the rules are tried. Function results that need code are the
+It is typed before the rules are tried. `EXTRACT(field FROM x)`, whose type depends on
+the field in ClickHouse and DuckDB, is typed by `extract_type` in `analyzer/functions.rs`. Function results that need code are the
 computed `type`s above: each rule still names the functions it covers. A built-in no
 rule types leaves its column untyped.
 

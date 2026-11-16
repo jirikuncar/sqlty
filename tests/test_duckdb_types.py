@@ -71,6 +71,7 @@ QUERIES = [
     "SELECT CASE WHEN bo THEN i ELSE 0 END AS c, coalesce(n, i) AS co, nullif(i, 0) AS ni FROM t",
     "SELECT CAST(i AS VARCHAR) AS vs, CAST(v AS VARCHAR) AS vv, i::BIGINT AS ib FROM t",
     "SELECT l[1] AS first_item, st.a AS field FROM t",
+    "SELECT extract(year FROM ts) AS y, extract(epoch FROM ts) AS e, extract(day FROM dt) AS d FROM t",
 ]
 
 # Understood mismatches, by query, with the reason.

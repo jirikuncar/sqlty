@@ -11,7 +11,7 @@ use sqlparser::ast::Spanned;
 use sqlparser::tokenizer::Span;
 
 use super::dialect::SqlDialect;
-use super::functions::{arg_list, positional_args, Returns};
+use super::functions::{arg_list, extract_type, positional_args, Returns};
 use super::inference::FunctionType;
 use super::literals::{constant, python_kind, strip, value_set};
 use super::memo::{first_column, Reporting};
@@ -271,12 +271,13 @@ impl<'a> Analyzer<'a> {
                 };
                 self.function_type_of(returns, &[inner], &[Some(typed), None], scope)
             }
-            Expr::Extract { .. } if self.dialect == SqlDialect::Postgres => {
-                Ok(from_sql_type("DECIMAL", self.dialect))
+            Expr::Extract { .. } if self.dialect == SqlDialect::Sqlite => {
+                let message = "SQLite has no `EXTRACT`; use `strftime`".to_string();
+                self.diag.record(NameRule::RejectedQuery, message);
+                Ok(Typed::UNKNOWN)
             }
-            Expr::Extract { .. } if self.dialect == SqlDialect::MySql => {
-                Ok(from_sql_type("BIGINT", self.dialect))
-            }
+            Expr::Extract { field, .. } => Ok(extract_type(self.dialect, field)
+                .map_or(Typed::UNKNOWN, |sql| from_sql_type(sql, self.dialect))),
             // A character set introducer: `_binary 'a'` is a binary string, `_utf8mb4 'a'` text.
             Expr::Prefixed { prefix, .. } if self.dialect == SqlDialect::MySql => {
                 Ok(from_sql_type(
