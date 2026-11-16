@@ -1576,6 +1576,7 @@ dependencies = [
  "ruff_text_size",
  "sqlty-format",
  "sqlty-lsp",
+ "sqlty-project",
  "sqlty-python",
  "sqlty-sql",
  "stacker",
@@ -1605,6 +1606,17 @@ dependencies = [
  "sqlty-python",
  "sqlty-sql",
  "url",
+]
+
+[[package]]
+name = "sqlty-project"
+version = "0.6.0"
+dependencies = [
+ "regex",
+ "sqlty-format",
+ "sqlty-python",
+ "sqlty-sql",
+ "toml",
 ]
 
 [[package]]

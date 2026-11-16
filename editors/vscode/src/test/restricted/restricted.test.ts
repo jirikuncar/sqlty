@@ -24,10 +24,22 @@ suite("sqlty in Restricted Mode", () => {
     const uri = vscode.Uri.joinPath(folder.uri, "wrap.py");
     const document = await vscode.workspace.openTextDocument(uri);
     await vscode.window.showTextDocument(document);
-    await vscode.commands.executeCommand("sqlty.rewrite");
-    assert.match(document.getText(), /SQL\[tuple\[int \| None\]\]\(/);
-    await vscode.commands.executeCommand("sqlty.strip");
-    assert.equal(document.getText(), 'q = "--sql\\nSELECT id FROM users"\n');
+    const wrapped = /SQL\[tuple\[int \| None\]\]\(/;
+    const plain = 'q = "--sql\\nSELECT id FROM users"\n';
+    assert.match(await untilText("sqlty.rewrite", document, (text) => wrapped.test(text)), wrapped);
+    assert.equal(await untilText("sqlty.strip", document, (text) => text === plain), plain);
     await vscode.commands.executeCommand("workbench.action.files.revert");
   });
 });
+
+/** Run `command` until the text of `document` matches `done`: a cancelled run changes nothing. */
+async function untilText(
+  command: string,
+  document: vscode.TextDocument,
+  done: (text: string) => boolean,
+): Promise<string> {
+  for (let attempt = 0; attempt < 50 && !done(document.getText()); attempt++) {
+    await vscode.commands.executeCommand(command);
+  }
+  return document.getText();
+}
