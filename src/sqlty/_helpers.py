@@ -289,10 +289,11 @@ def helper_roots(config_dir: Path | None, checked: Iterable[Path]) -> tuple[Path
         >>> [root.name for root in helper_roots(Path("/p"), [Path("/p/app"), Path("/q")])[:3]]
         ['src', 'p', 'app']
     """
+    from sqlty import _core
+
     project = config_dir.resolve() if config_dir is not None else None
-    own = [project / "src", project] if project is not None else []
-    inside = [root for root in checked if project is None or root.is_relative_to(project)]
-    return tuple(dict.fromkeys([*own, *inside, *(Path(entry) for entry in sys.path if entry)]))
+    extra = [Path(entry) for entry in sys.path if entry]
+    return tuple(_core.helper_roots(project, list(checked), extra))
 
 
 def configured_helpers(

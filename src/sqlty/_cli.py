@@ -1179,35 +1179,6 @@ def _discovered[T](method: Callable[[str], T], path: Path) -> T:
         raise ConfigError(str(exc)) from None
 
 
-@functools.cache
-def _is_package(directory: Path) -> bool:
-    return (directory / "__init__.py").exists()
-
-
-@functools.cache
-def _package_path(directory: Path) -> tuple[str, ...]:
-    """Names of ``directory`` and its parents up through the ``__init__.py`` ones."""
-    if directory == directory.parent or not _is_package(directory):
-        return ()
-    return (*_package_path(directory.parent), directory.name)
-
-
-@functools.cache
-def _package_names(directory: str) -> tuple[str, ...]:
-    return _package_path(Path(directory))
-
-
-@functools.cache
-def _resolved_root(root: Path, cwd: str) -> tuple[str, str] | None:
-    """``root`` resolved against ``cwd`` as a prefix of the paths under it (case folded as
-    the platform compares paths) and its name, or ``None`` when it is not a directory."""
-    root = Path(cwd, root).resolve()
-    if not root.is_dir():
-        return None
-    prefix = os.path.normcase(os.fspath(root))
-    return prefix if prefix.endswith(os.sep) else prefix + os.sep, root.name
-
-
 def _checked_roots(paths: Iterable[Path], files: Iterable[Path]) -> list[Path]:
     """The checked directories, the parents of checked files and the package roots of ``files``.
 
@@ -1215,12 +1186,9 @@ def _checked_roots(paths: Iterable[Path], files: Iterable[Path]) -> list[Path]:
         >>> [root.name for root in _checked_roots([Path("/missing/q.py")], [])]
         ['missing']
     """
-    roots = [path if path.is_dir() else path.parent for path in paths]
-    for directory in dict.fromkeys(file.parent for file in files):
-        for _ in _package_path(directory):
-            directory = directory.parent
-        roots.append(directory)
-    return list(dict.fromkeys(root.resolve() for root in dict.fromkeys(roots)))
+    from sqlty import _core
+
+    return _core.checked_roots(list(paths), list(files), Path.cwd())
 
 
 def _module_names(path: Path, roots: list[Path]) -> list[str]:
@@ -1234,20 +1202,9 @@ def _module_names(path: Path, roots: list[Path]) -> list[str]:
         >>> _module_names(Path("missing/pkg/mod.py"), [])
         ['mod']
     """
-    text = os.fspath(path)
-    directory, name = os.path.split(text)
-    stem = os.path.splitext(name)[0]
-    parts = [*_package_names(directory), *([] if stem == "__init__" else [stem])]
-    names = [".".join(parts)]
-    folded = os.path.normcase(text)
-    cwd = os.getcwd()
-    for root in (_resolved_root(root, cwd) for root in roots):
-        if root is not None and folded.startswith(root[0]):
-            relative = os.path.splitext(text[len(root[0]) :])[0].split(os.sep)
-            if relative[-1] == "__init__":
-                relative.pop()
-            names += [".".join(relative), ".".join([root[1], *relative])]
-    return list(dict.fromkeys(name for name in names if name)) or [stem]
+    from sqlty import _core
+
+    return _core.module_names(path, roots, Path.cwd())
 
 
 @dataclass(frozen=True)
