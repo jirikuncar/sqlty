@@ -354,6 +354,29 @@ REVIEWED = {
         "SQL[RA]('--sql\\nSELECT 1 AS x')\nSQL[RB2]('--sql\\nSELECT 1 AS w')\n",
         1,
     ),
+    "cyclic re-exports": (
+        {
+            "a": "from b import run\n",
+            "b": "from a import run\n",
+            "c": "def run(q: Annotated[str, SQL]): ...\n",
+        },
+        "from a import run\nrun('SELECT nope FROM t')\n",
+        0,
+    ),
+    "imported type a module lacks": (
+        {"a": "x = 1\n"},
+        "from a import Missing\nclass R(TypedDict):\n    v: Missing\nSQL[R]('--sql\\nSELECT 1 AS v')\n",
+        0,
+    ),
+    "re-exported alias": (
+        {
+            "a": "Name = str\n",
+            "b": "from a import Name\n",
+            "c": "from b import Name\ndef run(q: Annotated[str, SQL], t: type[Name]) -> Name: ...\n",
+        },
+        "from c import run\nrun('SELECT 1 AS v', str)\n",
+        1,
+    ),
 }
 
 

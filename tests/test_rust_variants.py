@@ -341,6 +341,11 @@ CASES = {
     "def outer(z=lambda: 0):\n    def inner():\n        run(BASE + (' a' if flag else ' b'))\n",
     "nonlocal": "    nonlocal other\n    if flag:\n        other = ' a'\n    run(BASE + other)\n",
     "default": "    @run(BASE)\n    def inner(q=run(BASE)) -> run(BASE):\n        pass\n    run(BASE)\n",
+    "loops": "    import os.path\n    class K: ...\n    while flag:\n        run(BASE + (' a' if mode else ' b'))\n"
+    "    run(BASE + lit3(kind, other))\n"
+    "    if mode:\n        r = ' a' if flag else ' a'\n        run(BASE + r + pick(mode))\n    run(BASE)\n"
+    "def lit3(k: Literal['a', 'b'], j: Literal['x']):\n    return ' ' + k + j\n"
+    "def outer(z=lambda w: w):\n    def inner():\n        run(BASE + (' a' if flag else ' b'))\n",
 }
 
 

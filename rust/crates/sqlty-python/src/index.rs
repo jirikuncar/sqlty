@@ -702,6 +702,22 @@ mod tests {
     }
 
     #[test]
+    fn a_top_level_module_imports_relative_to_the_root() {
+        let source = Source::new(
+            "from . import a\nfrom .. import b\nfrom .c import d\n",
+            (3, 14),
+        )
+        .unwrap();
+        let (_, modules) = imports_of(&source.entries, Some("app"));
+        let mut modules: Vec<_> = modules.into_iter().collect();
+        modules.sort();
+        assert_eq!(
+            modules,
+            [("a".into(), "a".into()), ("d".into(), "c.d".into())]
+        );
+    }
+
+    #[test]
     fn a_fork_takes_the_sources_it_was_built_with() {
         let a = Arc::new(Source::new("x = 1\n", (3, 14)).unwrap());
         let mut builder = Builder::new((3, 14));

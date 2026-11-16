@@ -363,6 +363,7 @@ PARAMS = [
     ("SELECT 1 FROM f WHERE $1 IN (SELECT i, tx FROM f)", [(1, None, None)]),
     ("SELECT 1 FROM f WHERE ANY(f.arr) = $1", [(1, None, None)]),
     ("SELECT 1 FROM f WHERE ANY(f.arr, 1) = $1", [(1, None, None)]),
+    ("UPDATE g SET nope = $1", [(1, None, None)]),
 ]
 # fmt: on
 

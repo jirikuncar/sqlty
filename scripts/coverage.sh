@@ -10,7 +10,7 @@ uv run --no-sync coverage erase
 eval "$(cd rust && cargo llvm-cov show-env --sh)"
 (cd rust && cargo llvm-cov clean --workspace)
 uv run --no-sync maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
-pytest=(uv run --no-sync pytest --cov --cov-append --cov-fail-under=0 --hypothesis-seed=0)
+pytest=(uv run --no-sync pytest --cov --cov-append --cov-fail-under=0 --hypothesis-profile=coverage)
 "${pytest[@]}" -m "not timing and not pg"
 # Rust and Python readings of every checked module must agree (`SQLTY_AST`).
 for ast in compare rust; do

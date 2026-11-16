@@ -139,6 +139,24 @@ conn.execute(query_variable, (b"1",))
 # error:
 ```
 
+### Rebound names and rows from a variable
+
+```python
+import psycopg
+
+conn = psycopg.connect("dbname=x")
+alias = conn
+alias.execute("DELETE FROM users WHERE id = %s", (b"1",))
+QUERY = "DELETE FROM users WHERE id = %s"
+QUERY = "DELETE FROM users WHERE name = %s"
+conn.execute(QUERY, (b"1",))
+rows = [(1, b"a")]
+cur = conn.cursor()
+cur.executemany("INSERT INTO users (id, name) VALUES (%s, %s)", rows)
+# error: [param-type-mismatch] "parameter 1 expects int, got bytes"
+conn.execute("DELETE FROM users WHERE id = %s", (b"1",))
+```
+
 ### Parameters passed as `**kwargs`
 
 ```python
@@ -388,6 +406,7 @@ def run(conn: psycopg.Connection, ids: tuple[int, int]) -> None:
     execute(conn, BY_ID, ids)
     scalar(conn, BY_ID, ids)
     scalar(conn, BY_ID.bind((1,)))
+    execute(conn, BY_ID, *ids)
 ```
 
 ### Also configured as a helper

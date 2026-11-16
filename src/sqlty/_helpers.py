@@ -732,6 +732,8 @@ def _imports_of(
         ({'q': ('pkg.db', 'q')}, {'q': 'pkg.db.q'})
         >>> _imports_of([("q", "q", "db", 1)], None)
         ({}, {})
+        >>> _imports_of([("q", "q", "db", 3)], "pkg.app")
+        ({}, {})
     """
     functions: dict[str, tuple[str, str]] = {}
     modules: dict[str, str] = {}
