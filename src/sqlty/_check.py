@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from sqlty._core import ModuleIndex, Schema
 from sqlty._core import analyze_columns as _analyze_columns
+from sqlty._core import breaking_modules as _breaking_modules
 from sqlty._core import check_modules as _check_modules
 from sqlty._core import check_source as _check_source
 from sqlty._core import composite_fields as _composite_fields
@@ -653,27 +654,10 @@ def check_modules(
 ) -> list[list[Diagnostic]]:
     """``check_source`` of every module, with ``row_usage``, in one Rust call that checks
     them on ``jobs`` threads (all cores when None)."""
-    # By identity: a rules dict does not hash, and files share their settings' objects.
-    known: dict[tuple[int, ...], int] = {}
-    configs: list[ModuleConfig] = []
-    for _, config in modules:
-        if known.setdefault(tuple(map(id, config)), len(configs)) == len(configs):
-            configs.append(config)
+    configs = _Configs()
     found = _check_modules(
-        [(parsed.text, parsed.module, known[tuple(map(id, config))]) for parsed, config in modules],
-        [
-            (
-                dialect,
-                schema,
-                rules,
-                style,
-                untyped,
-                sorted(coerce),
-                None if index is None else index.rust(),
-                n,
-            )
-            for dialect, schema, rules, style, untyped, coerce, index, n in configs
-        ],
+        [(parsed.text, parsed.module, configs.index(config)) for parsed, config in modules],
+        configs.rust(),
         version=sys.version_info[:2],
         jobs=jobs,
     )
@@ -689,6 +673,56 @@ def check_modules(
             diagnostics = apply_suppressions(parsed.ignores, diagnostics, config[2])
         checked.append(diagnostics)
     return checked
+
+
+def breaking_modules(
+    modules: Sequence[tuple[ParsedSource, ModuleConfig, ModuleConfig]], jobs: int | None
+) -> list[list[Diagnostic]]:
+    """``breaking_source`` of every ``(module, own, against)``, in one Rust call that checks
+    them on ``jobs`` threads (all cores when None)."""
+    from sqlty.core import CODE_RULES
+
+    configs = _Configs()
+    found = _breaking_modules(
+        [
+            (parsed.text, parsed.module, configs.index(own), configs.index(against))
+            for parsed, own, against in modules
+        ],
+        configs.rust(),
+        version=sys.version_info[:2],
+        jobs=jobs,
+    )
+    return [
+        diagnostics
+        if suppressed
+        else [
+            d
+            for d in apply_suppressions(parsed.ignores, diagnostics, own[2])
+            if d["rule"] not in CODE_RULES
+        ]
+        for (parsed, own, _), (diagnostics, suppressed) in zip(modules, found, strict=True)
+    ]
+
+
+class _Configs:
+    """Configurations, each once, by identity: a rules dict does not hash, and files share
+    their settings' objects."""
+
+    def __init__(self) -> None:
+        self._known: dict[tuple[int, ...], int] = {}
+        self._configs: list[ModuleConfig] = []
+
+    def index(self, config: ModuleConfig) -> int:
+        found = self._known.setdefault(tuple(map(id, config)), len(self._configs))
+        if found == len(self._configs):
+            self._configs.append(config)
+        return found
+
+    def rust(self) -> list[tuple[typing.Any, ...]]:
+        return [
+            (dialect, schema, rules, style, untyped, sorted(coerce), index and index.rust(), n)
+            for dialect, schema, rules, style, untyped, coerce, index, n in self._configs
+        ]
 
 
 def _compare_module(

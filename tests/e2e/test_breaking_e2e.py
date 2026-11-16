@@ -490,6 +490,7 @@ def test_a_snapshot_that_is_not_json_is_an_error(tmp_path: Path) -> None:
 def test_an_unchanged_schema_checks_no_query(
     cli: Cli, repo: Path, against: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import sqlty._check
     import sqlty.core
     from sqlty._cli import main
 
@@ -498,6 +499,11 @@ def test_an_unchanged_schema_checks_no_query(
     checked: list[str] = []
     monkeypatch.setattr(
         sqlty.core, "breaking_source", lambda source, **_: checked.append(source.text) or []
+    )
+    monkeypatch.setattr(
+        sqlty._check,
+        "breaking_modules",
+        lambda modules, _: [checked.append(parsed.text) or [] for parsed, *_ in modules],
     )
     monkeypatch.chdir(repo)
 
