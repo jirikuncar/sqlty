@@ -153,8 +153,9 @@ jobs:
       - name: Check coverage
         if: matrix.coverage
         run: |
+          set -o pipefail
           uv run coverage report
-          cd rust && cargo llvm-cov report --show-missing-lines --fail-under-lines 95
+          cd rust && cargo llvm-cov report --show-missing-lines | tee /dev/stderr | uv run python ../scripts/check_rust_coverage.py
 
       - name: Run Rust doctests
         run: cargo test --doc --workspace --manifest-path rust/Cargo.toml

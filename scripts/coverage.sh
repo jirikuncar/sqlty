@@ -25,4 +25,4 @@ fi
 (cd rust && cargo nextest run --workspace)
 
 uv run --no-sync coverage report
-(cd rust && cargo llvm-cov report --fail-under-lines 95)
+(cd rust && cargo llvm-cov report --show-missing-lines | tee /dev/stderr | python3 ../scripts/check_rust_coverage.py)
