@@ -47,12 +47,12 @@ SOURCES = [ROOT / "tests" / "mdtest", ROOT / "docs"]
 
 # Understood mismatches, by "<dialect>:<file>:<line>" of the query, with the reason.
 KNOWN_DIFFERENCES: dict[str, str] = {
-    "mysql:tests/mdtest/mysql/functions.md:217": "MySQL predicates are `int`; sqlty types `MEMBER OF` like `IN`",
-    "mysql:tests/mdtest/mysql/functions.md:418": "MySQL predicates are `int`; sqlty types `SOUNDS LIKE` like `=`",
-    "mysql:tests/mdtest/mysql/functions.md:457": "MySQL predicates are `int`; sqlty types `XOR` like `AND`",
-    "mysql:tests/mdtest/mysql/functions.md:462": "MySQL predicates are `int`; sqlty types `XOR` like `AND`",
-    "mysql:tests/mdtest/mysql/functions.md:479": "MySQL predicates are `int`; sqlty types `XOR` like `AND`",
-    "mysql:tests/mdtest/mysql/functions.md:614": "MySQL predicates are `int`; sqlty types `!x` like `NOT x`",
+    "mysql:tests/mdtest/mysql/functions.md:237": "MySQL predicates are `int`; sqlty types `MEMBER OF` like `IN`",
+    "mysql:tests/mdtest/mysql/functions.md:438": "MySQL predicates are `int`; sqlty types `SOUNDS LIKE` like `=`",
+    "mysql:tests/mdtest/mysql/functions.md:477": "MySQL predicates are `int`; sqlty types `XOR` like `AND`",
+    "mysql:tests/mdtest/mysql/functions.md:482": "MySQL predicates are `int`; sqlty types `XOR` like `AND`",
+    "mysql:tests/mdtest/mysql/functions.md:499": "MySQL predicates are `int`; sqlty types `XOR` like `AND`",
+    "mysql:tests/mdtest/mysql/functions.md:634": "MySQL predicates are `int`; sqlty types `!x` like `NOT x`",
     "sqlite:tests/mdtest/sqlite/types.md:57": "`INT[]` has INTEGER affinity, but the JSON text ORMs store stays text",
 }
 
