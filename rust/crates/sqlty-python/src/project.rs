@@ -117,15 +117,15 @@ pub enum FindError {
 }
 
 /// The nearest configuration of `directory`, an absolute path: in it and each directory
-/// above but the root, `sqlty.toml`, then `pyproject.toml` with a `[tool.sqlty]` table, then
+/// above, `sqlty.toml`, then `pyproject.toml` with a `[tool.sqlty]` table, then
 /// `Cargo.toml` with `[package.metadata.sqlty]` or `[workspace.metadata.sqlty]`. A native
 /// file without the table is skipped, so a packaging-only `pyproject.toml` does not hide
 /// the workspace's configuration. Files are never merged, except through `extend`.
 pub fn find(directory: &Path, files: &dyn Files) -> Result<Option<Found>, FindError> {
-    let mut current = normalized(directory);
-    while let Some(parent) = current.parent().map(Path::to_path_buf) {
+    let mut current = Some(normalized(directory));
+    while let Some(directory) = current {
         for name in CONFIG_FILES {
-            let path = current.join(name);
+            let path = directory.join(name);
             let data = match files.read(&path) {
                 Read::Text(data) => data,
                 Read::Missing => continue,
@@ -140,10 +140,10 @@ pub fn find(directory: &Path, files: &dyn Files) -> Result<Option<Found>, FindEr
                 }
                 Err(error) => return Err(FindError::Invalid(error.to_string())),
             };
-            let config = extended(config, &path, &current, &mut Vec::new(), files)?;
+            let config = extended(config, &path, &directory, &mut Vec::new(), files)?;
             return Ok(Some(Found { config, file: path }));
         }
-        current = parent;
+        current = directory.parent().map(Path::to_path_buf);
     }
     Ok(None)
 }
@@ -328,8 +328,8 @@ mod tests {
         let config = found("/a/b/c/../c/./", &files).unwrap().unwrap();
         assert_eq!(config.file, Path::new("/a/sqlty.toml"));
         assert_eq!(found("/elsewhere", &files), Ok(None));
-        // The root is never read.
-        assert_eq!(found("/", &[("/sqlty.toml", "dialect = 1")]), Ok(None));
+        let root = found("/a", &[("/sqlty.toml", "dialect = \"mysql\"")]);
+        assert_eq!(root.unwrap().unwrap().file, Path::new("/sqlty.toml"));
     }
 
     #[test]
