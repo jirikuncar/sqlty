@@ -76,19 +76,24 @@ pub struct FileSettings {
 #[derive(Default)]
 pub struct Schemas {
     loaded: Mutex<HashMap<SchemaKey, Schema>>,
-    warnings: Mutex<Vec<String>>,
+    /// Every warning, and how many [`Schemas::warnings`] has returned.
+    warnings: Mutex<(Vec<String>, usize)>,
 }
 
 impl Schemas {
     /// What the schemas could not read, each once, since the last call.
     pub fn warnings(&self) -> Vec<String> {
-        std::mem::take(&mut *self.warnings.lock().unwrap_or_else(PoisonError::into_inner))
+        let mut warnings = self.warnings.lock().unwrap_or_else(PoisonError::into_inner);
+        let (all, read) = &mut *warnings;
+        let new = all[*read..].to_vec();
+        *read = all.len();
+        new
     }
 
     pub(crate) fn warn(&self, warning: String) {
         let mut warnings = self.warnings.lock().unwrap_or_else(PoisonError::into_inner);
-        if !warnings.contains(&warning) {
-            warnings.push(warning);
+        if !warnings.0.contains(&warning) {
+            warnings.0.push(warning);
         }
     }
 

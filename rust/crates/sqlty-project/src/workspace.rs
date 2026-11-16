@@ -1364,19 +1364,19 @@ mod tests {
         let files = tree(&[
             (
                 "/repo/pyproject.toml",
-                b"[tool.sqlty]\nqueries = [\"none/*.sql\"]\n",
+                b"[tool.sqlty]\nschema = \"none/*.sql\"\nqueries = [\"none/*.sql\"]\n",
             ),
             ("/repo/q.sql", b""),
+            ("/repo/sub/q.py", b""),
         ]);
         let mut workspace = command(&files, &["."], flags(&files, None, &[])).expect("opens");
+        let warning = "Schema pattern matches no files: none/*.sql";
+        assert_eq!(workspace.warnings(), [warning]);
         assert_eq!(
             workspace.query_files().expect("lists"),
             Vec::<PathBuf>::new()
         );
-        assert_eq!(
-            workspace.warnings(),
-            ["Schema pattern matches no files: none/*.sql"]
-        );
+        assert_eq!(workspace.warnings(), Vec::<String>::new());
     }
 
     #[test]
