@@ -523,3 +523,26 @@ fn project_asks_for_each_file_it_reads() {
         Value::Null
     );
 }
+
+#[test]
+fn analyze_keeps_what_ignore_comments_suppress() {
+    let source = "q = \"--sql\\nSELECT * FROM users\"  # sqlty: ignore\n";
+    let answer =
+        ask(&json!({"op": "analyze", "source": source, "schema": SCHEMA, "dialect": "postgres"}));
+    assert_eq!(answer["diagnostics"], json!([]));
+    assert_eq!(answer["fixed"], source);
+
+    // A source that does not parse is read by its strings, and its comments by the lexer.
+    let broken = "q = \"--sql\\nSELECT 1 FROM\"{}\ndef f(:\n";
+    let rules = |source: String| {
+        let answer = ask(&json!({"op": "analyze", "source": source, "dialect": "postgres"}));
+        answer["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|found| found["rule"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(rules(broken.replace("{}", "")), ["unparsed-query"]);
+    assert!(rules(broken.replace("{}", "  # sqlty: ignore")).is_empty());
+}

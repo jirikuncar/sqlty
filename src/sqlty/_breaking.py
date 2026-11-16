@@ -29,6 +29,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, NamedTuple, Protocol
 
+from sqlty._source import AST
+
 if TYPE_CHECKING:
     import argparse
 
@@ -256,11 +258,40 @@ def _compare(
         own = queries.settings(relative)
         if schema.schema_key(relative, own) != own.schema_key:
             work.append((relative, parsed, own, schema.schema(relative, own), helpers_for(own)))
+    found = _map(work, jobs) if AST != "rust" else _rust(work, jobs)
     return [
         Finding(direction, against, relative, diagnostic, parsed)
-        for (relative, parsed, *_), found in zip(work, _map(work, jobs), strict=True)
-        for diagnostic in found
+        for (relative, parsed, *_), diagnostics in zip(work, found, strict=True)
+        for diagnostic in diagnostics
     ]
+
+
+def _rust(work: list[_Work], jobs: int) -> list[list[Diagnostic]]:
+    """The diagnostics of each item of ``work``: one Rust call checks its modules on ``jobs``
+    threads, and each query file is checked here."""
+    from sqlty._check import breaking_modules
+
+    modules = [item for item in work if item[0].suffix != ".sql"]
+    configs = {}
+    for relative, _, own, against, helpers in modules:
+        config = (
+            own.dialect,
+            own.schema,
+            own.rules,
+            own.import_style,
+            own.untyped,
+            own.coerce_row_types,
+            helpers,
+            own.query_variants,
+        )
+        configs[relative] = config, (*config[:1], against, *config[2:])
+    found = iter(
+        breaking_modules(
+            [(parsed, *configs[relative]) for relative, parsed, *_ in modules],
+            jobs,
+        )
+    )
+    return [_check(item) if item[0].suffix == ".sql" else next(found) for item in work]
 
 
 _shared: list[_Work] = []

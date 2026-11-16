@@ -49,15 +49,23 @@ import re
 import sys
 import tokenize
 import typing
+import warnings
 from dataclasses import dataclass
 
 from sqlty._core import module_facts, module_ignores, module_outline
 from sqlty._psycopg import PsycopgScan
 
-AST = os.environ.get("SQLTY_AST", "python")
-"""Who checks a module: ``python`` (the ``ast`` passes), ``rust`` (``sqlty_python``, which
-parses nothing with ``ast``), or ``compare``, which runs both and raises ``AstMismatch``
-when they differ."""
+AST = os.environ.get("SQLTY_AST", "rust")
+"""Who checks a module: ``rust`` (``sqlty_python``, which parses nothing with ``ast``),
+``python`` (the ``ast`` passes, deprecated: removed in 0.8.0), or ``compare``, which runs
+both and raises ``AstMismatch`` when they differ."""
+if AST == "python":
+    warnings.warn(
+        "SQLTY_AST=python is deprecated and will be removed in sqlty 0.8.0; "
+        "the Rust engine checks by default",
+        FutureWarning,
+        stacklevel=1,
+    )
 
 
 class Facts(typing.NamedTuple):
@@ -918,14 +926,19 @@ class ParsedSource:
         rust = None
         if AST != "python":
             rust = module_ignores(self.text, sys.version_info[:2])
-            if AST == "rust" and rust is not None:
+            if AST == "rust":
                 return {
                     line: Ignore(line, None if rules is None else tuple(rules), start, end)
                     for line, rules, start, end in rust
                 }
         python = self._tokenized_ignores()
-        # `tokenize` stops at a lone carriage return, which is a line break.
-        if rust is not None and "\r" not in self.text.replace("\r\n", ""):
+        # `tokenize` stops at a lone carriage return, which is a line break, and at what
+        # does not lex, where Rust reads on.
+        if (
+            rust is not None
+            and self.facts is not None
+            and "\r" not in self.text.replace("\r\n", "")
+        ):
             read = [
                 (i.line, None if i.rules is None else list(i.rules), i.start, i.end)
                 for i in python.values()
