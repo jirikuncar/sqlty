@@ -1,0 +1,12 @@
+# ClickHouse arithmetic.
+
+[[rule]]
+id = "clickhouse.arithmetic.division"
+operator = "Divide"
+dialects = ["clickhouse"]
+left = ["@integer", "@unsigned", "FLOAT", "DOUBLE"]
+right = ["@integer", "@unsigned", "FLOAT", "DOUBLE"]
+type = "DOUBLE"
+nullability = "operands"
+reference.clickhouse = "ClickHouse documentation, Arithmetic Functions (divide: the result type is always Float64; division by zero returns inf, -inf or nan)"
+reasoning = "Dividing integers or floats gives a Float64, infinite rather than NULL for a zero divisor."

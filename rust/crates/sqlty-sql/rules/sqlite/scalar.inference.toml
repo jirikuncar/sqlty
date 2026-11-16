@@ -2,11 +2,11 @@
 
 [[function]]
 id = "sqlite.scalar.branches"
-function = "IIF"
+functions = ["IF", "IIF"]
 dialects = ["sqlite"]
 type = "@first-known(1)"
 nullability = "code"
-reference.sqlite = "SQLite documentation, Built-In Scalar SQL Functions"
+reference.sqlite = "SQLite documentation, Built-In Scalar SQL Functions (if() is an alias for iif(), since 3.48.0)"
 reasoning = "The result is one of the branches, from the second argument on, resolved to their common type. Its nullability depends on the window frame or the condition, which `analyzer/nullability.rs` reads."
 
 [[function]]
@@ -89,3 +89,12 @@ type = "TEXT"
 nullability = "non-null"
 reference.sqlite = "SQLite documentation, Built-In Scalar SQL Functions"
 reasoning = "Each of these returns text. It never returns NULL, even for NULL arguments."
+
+[[function]]
+id = "sqlite.scalar.subtype"
+function = "SUBTYPE"
+dialects = ["sqlite"]
+type = "BIGINT"
+nullability = "non-null"
+reference.sqlite = "SQLite documentation, Built-In Scalar SQL Functions (subtype(X) returns 0 for a value without a subtype)"
+reasoning = "The subtype is an integer, 0 for a NULL or a value without one."
