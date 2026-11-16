@@ -196,6 +196,21 @@ impl<'a> Analyzer<'a> {
 
     #[recursive::recursive]
     pub(super) fn expr(&self, expr: &Expr, scope: &Scope) -> Inferred<Typed> {
+        let typed = self.expr_typed(expr, scope)?;
+        // ClickHouse gives a comparison, and a logical operator over one, as a `UInt8`.
+        Ok(
+            if self.dialect == SqlDialect::ClickHouse
+                && typed.sql() == Some("BOOLEAN")
+                && clickhouse_uint8(expr)
+            {
+                from_sql_type("UTINYINT", self.dialect)
+            } else {
+                typed
+            },
+        )
+    }
+
+    fn expr_typed(&self, expr: &Expr, scope: &Scope) -> Inferred<Typed> {
         let _at = self.diag.enabled().then(|| self.diag.at(name_span(expr)));
         match expr {
             Expr::Cast { data_type, .. } => Ok(self.cast_typed(data_type)),
@@ -490,7 +505,11 @@ impl<'a> Analyzer<'a> {
                     "float"
                 })
             }
-            Value::Number(number, _) if number.contains('.') => known(decimal_type(self.dialect)),
+            // ClickHouse reads a decimal literal as a `Float64`.
+            Value::Number(number, _) if number.contains('.') => known(match self.dialect {
+                SqlDialect::ClickHouse => "float",
+                dialect => decimal_type(dialect),
+            }),
             // PostgreSQL reads an integer too big for a `bigint` as a `numeric`.
             Value::Number(number, _) => Ok(number.parse().map_or_else(
                 |_| match self.dialect {
@@ -695,6 +714,44 @@ impl<'a> Analyzer<'a> {
             }
         }
         typed
+    }
+}
+
+/// Whether ClickHouse types `expr` as a `UInt8` truth value: a comparison or predicate, or
+/// `AND`, `OR` or `NOT` over one or over a number; over `Bool` values only, they stay `Bool`.
+fn clickhouse_uint8(expr: &Expr) -> bool {
+    use BinaryOperator::{
+        And, Eq, Gt, GtEq, Lt, LtEq, NotEq, Or, PGRegexIMatch, PGRegexMatch, PGRegexNotIMatch,
+        PGRegexNotMatch, Xor,
+    };
+    match expr {
+        Expr::Nested(inner) => clickhouse_uint8(inner),
+        Expr::BinaryOp {
+            op: And | Or | Xor,
+            left,
+            right,
+        } => clickhouse_uint8(left) || clickhouse_uint8(right),
+        Expr::UnaryOp {
+            op: UnaryOperator::Not,
+            expr: inner,
+        } => clickhouse_uint8(inner),
+        Expr::BinaryOp {
+            op:
+                Eq | NotEq | Lt | LtEq | Gt | GtEq | PGRegexMatch | PGRegexIMatch | PGRegexNotMatch
+                | PGRegexNotIMatch,
+            ..
+        }
+        | Expr::In { .. }
+        | Expr::Between { .. }
+        | Expr::Like { .. }
+        | Expr::ILike { .. }
+        | Expr::IsNull(_)
+        | Expr::IsNotNull(_)
+        | Expr::IsDistinctFrom(..)
+        | Expr::IsNotDistinctFrom(..)
+        | Expr::Exists { .. } => true,
+        Expr::Value(value) => matches!(value.value, Value::Number(..)),
+        _ => false,
     }
 }
 

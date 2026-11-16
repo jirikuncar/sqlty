@@ -1349,6 +1349,41 @@ SELECT avg(i) AS avg_numbers, avg(tm) AS avg_temporal, avg(d) AS avg_date, sum(b
 -- columns: concat: list[int] (ARRAY<INT>)
 ```
 
+## ClickHouse
+
+A comparison is a `UInt8`, and so is `AND`, `OR` or `NOT` over one; over `Bool` values
+they stay `Bool`. A decimal literal is a `Float64`, and so is a division.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE t (i Int32, b Bool)
+```
+
+```toml
+[tool.sqlty]
+dialect = "clickhouse"
+schema = "schema.sql"
+```
+
+```sql
+SELECT i / 2 AS division, 1 = 1 AS eq, 1 = 1 AND b AS both_, b AND b AS bools, NOT b AS not_bool, 'a' ~ 'a' AS regex, 0.5 AS half FROM t
+-- rules: division: clickhouse.arithmetic.division / clickhouse.arithmetic.division
+-- rules: eq: common.comparison / common.comparison
+-- rules: both_: common.logical.and-or / common.logical.and-or
+-- rules: bools: common.logical.and-or / common.logical.and-or
+-- rules: not_bool: - / -
+-- rules: regex: common.pattern / common.pattern
+-- rules: half: - / -
+-- columns: division: float | None (DOUBLE)
+-- columns: eq: int (UTINYINT)
+-- columns: both_: int | None (UTINYINT)
+-- columns: bools: bool | None (BOOLEAN)
+-- columns: not_bool: bool | None (BOOLEAN)
+-- columns: regex: int (UTINYINT)
+-- columns: half: float (None)
+```
+
 ## Other dialects
 
 The rules of `common/` that every dialect above overrides apply in the others, except

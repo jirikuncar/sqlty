@@ -264,8 +264,8 @@ pub(super) fn mysql_date_add(
     (right, right_typed): (&Expr, &Typed),
 ) -> Option<&'static str> {
     use sqlparser::ast::DateTimeField::{
-        Day, Days, Hour, Hours, Microsecond, Microseconds, Minute, Minutes, Month, Months,
-        Quarter, Second, Seconds, Week, Weeks, Year, Years,
+        Day, Days, Hour, Hours, Microsecond, Microseconds, Minute, Minutes, Month, Months, Quarter,
+        Second, Seconds, Week, Weeks, Year, Years,
     };
     let (date, interval) = match (left, right) {
         (_, Expr::Interval(interval)) => (left_typed, interval),
