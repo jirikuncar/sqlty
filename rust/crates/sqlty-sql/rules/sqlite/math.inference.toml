@@ -11,7 +11,7 @@ reasoning = "The result has the type of the first argument."
 
 [[function]]
 id = "sqlite.math.double"
-functions = ["EXP", "MOD"]
+functions = ["EXP", "MOD", "ASINH", "COSH", "SINH", "TANH"]
 dialects = ["sqlite"]
 type = "DOUBLE"
 nullability = "strict"
@@ -20,7 +20,7 @@ reasoning = "Each of these returns a floating-point value."
 
 [[function]]
 id = "sqlite.math.double-nullable"
-functions = ["SQRT", "LN", "LOG", "LOG2", "LOG10", "ACOS", "ASIN", "POW", "POWER"]
+functions = ["SQRT", "LN", "LOG", "LOG2", "LOG10", "ACOS", "ASIN", "ACOSH", "ATANH", "POW", "POWER"]
 dialects = ["sqlite"]
 type = "DOUBLE"
 nullability = "nullable"
