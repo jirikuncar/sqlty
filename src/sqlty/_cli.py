@@ -1007,7 +1007,7 @@ def _collect_query_files(
     from sqlty._config import expand_schema
 
     directories = [path if path.is_dir() else path.parent for path in paths]
-    directories += [path.parent for path in python_files]
+    directories += map(Path, dict.fromkeys(os.path.dirname(path) for path in python_files))
     roots = [path.resolve() for path in paths]
     found: dict[Path, None] = {}
     for directory in dict.fromkeys(directories):
@@ -1221,9 +1221,14 @@ def _module_names(path: Path, roots: list[Path]) -> list[str]:
         >>> _module_names(Path("missing/pkg/mod.py"), [])
         ['mod']
     """
+    return _modules_names([path], roots)[0]
+
+
+def _modules_names(paths: list[Path], roots: list[Path]) -> list[list[str]]:
+    """``_module_names`` of each of ``paths``."""
     from sqlty import _core
 
-    return _core.module_names(path, roots, Path.cwd())
+    return _core.module_names(paths, roots, Path.cwd())
 
 
 @dataclass(frozen=True)
@@ -1482,7 +1487,8 @@ class Project:
         self.unreadable = [path for path, text in texts.items() if text is None]
         self.files = [path for path in files if texts[path] is not None]
         self.resolved = {path: self.resolver.resolve(path) for path in self.files}
-        self.modules = {path: _module_names(self.resolved[path], self.paths) for path in self.files}
+        resolved = [self.resolved[path] for path in self.files]
+        self.modules = dict(zip(self.files, _modules_names(resolved, self.paths), strict=True))
         self.sources = {
             path: ParsedSource(text, self._module(path))
             for path in self.files
