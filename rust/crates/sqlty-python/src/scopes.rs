@@ -4,6 +4,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
+use crate::frozen::Table;
 use crate::types::symbols::Source;
 use ruff_python_ast::visitor::{walk_expr, walk_stmt, Visitor};
 use ruff_python_ast::{
@@ -249,7 +250,7 @@ pub type Constant<'s> = &'s dyn Fn(&str) -> Option<(&'s Source, &'s Expr)>;
 /// Reads argument types in the scopes of a [`Scan`].
 pub struct Context<'a, 's> {
     /// `ParsedSource.imported_names`.
-    pub imported: &'s HashMap<String, String>,
+    pub imported: &'s Table,
     /// The scan of the module.
     pub scan: &'s Scan<'a>,
     /// Finds the value of an imported constant, when the checked modules are known.
@@ -415,7 +416,7 @@ fn literal_type(expr: &Expr) -> Option<&'static str> {
 
 /// `sqlty._params._class`: the type of an instance of the class spelled `name`, when it is
 /// a known one.
-pub fn class_of(name: Option<String>, imported: &HashMap<String, String>) -> Option<String> {
+pub fn class_of(name: Option<String>, imported: &Table) -> Option<String> {
     {
         let name = name?;
         let (head, rest) = name.split_once('.').unwrap_or((&name, ""));
@@ -487,7 +488,7 @@ pub fn dotted(expr: &Expr) -> Option<String> {
 }
 
 /// `name` with its first part replaced by what it was imported as.
-pub fn qualified(name: Option<String>, imported: &HashMap<String, String>) -> Option<String> {
+pub fn qualified(name: Option<String>, imported: &Table) -> Option<String> {
     let name = name?;
     let (head, rest) = name.split_once('.').unwrap_or((&name, ""));
     let found = imported.get(head)?;

@@ -1,6 +1,7 @@
 //! Row-type description ([`TypeInfo`]).
 
-use std::collections::{BTreeSet, HashMap};
+use crate::frozen::Table;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use ruff_python_ast::Expr;
@@ -147,7 +148,7 @@ pub struct TypeInfo {
     pub allows_extra: bool,
     pub lax: BTreeSet<String>,
     pub annotations: Dict<Annotation>,
-    pub aliases: Arc<HashMap<String, String>>,
+    pub aliases: Arc<Table>,
     pub module: Option<String>,
     pub coerced: Option<Dict<Option<Ty>>>,
     /// `T` of `class Row[T]`, or of a `Generic[T]` base.

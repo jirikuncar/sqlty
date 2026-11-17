@@ -17,6 +17,7 @@ use sqlty_sql::json::JsonShape;
 
 use crate::analyses::Analyses;
 use crate::checker::{wrapped_queries, Diagnostic};
+use crate::frozen::Table;
 use crate::options::Options;
 use crate::rules::{Rule, RuleConfig};
 use crate::scopes::{Key, Param};
@@ -617,7 +618,7 @@ fn json_diagnostics(
     annotation: Option<&Annotation>,
     column: &RowColumn,
     defs: &Dict<Arc<TypeInfo>>,
-    aliases: &HashMap<String, String>,
+    aliases: &Table,
     rules: &RuleConfig,
 ) -> Vec<Finding> {
     let (Some(shape), Some(annotation)) = (&column.json, annotation) else {
@@ -897,7 +898,7 @@ pub(crate) struct RowShape {
     is_tuple: bool,
     /// `(label, resolved type, annotation)` of each column.
     targets: Vec<(String, Option<Ty>, Annotation)>,
-    aliases: Arc<HashMap<String, String>>,
+    aliases: Arc<Table>,
 }
 
 /// `_row_shape`: what each column of the row type `text` must be; `None` when unchecked.
