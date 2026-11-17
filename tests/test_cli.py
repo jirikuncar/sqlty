@@ -748,6 +748,7 @@ def test_check_exit_codes(tmp_path, monkeypatch, capsys) -> None:
 
 
 def test_internal_error_exits_2(tmp_path, monkeypatch, capsys) -> None:
+    import sqlty._core
     import sqlty.core
 
     def boom(*args, **kwargs):
@@ -755,6 +756,7 @@ def test_internal_error_exits_2(tmp_path, monkeypatch, capsys) -> None:
 
     (tmp_path / "q.py").write_text("x = 1\n")
     monkeypatch.setattr(sqlty.core, "strip_source", boom)
+    monkeypatch.setattr(sqlty._core, "cli", boom)
 
     code, _, err = _run(["strip", str(tmp_path / "q.py")], capsys)
 
@@ -847,9 +849,8 @@ def test_exclude_path_glob_outside_its_base_never_matches(tmp_path: Path, monkey
     assert ConfigSource(exclude=["gen.py"]).is_excluded(outside)
 
 
-def test_walk_compiles_exclude_globs_once_per_pattern_set(tmp_path: Path) -> None:
-    """Guards the large-project walk: matching must not rebuild globs per file."""
-    from sqlty._cli import _collect_python_files, _exclude_matchers
+def test_walk_skips_default_excludes_in_a_large_tree(tmp_path: Path) -> None:
+    from sqlty._cli import _collect_python_files
 
     for d in range(5):
         (tmp_path / f"pkg{d}").mkdir()
@@ -857,10 +858,9 @@ def test_walk_compiles_exclude_globs_once_per_pattern_set(tmp_path: Path) -> Non
             (tmp_path / f"pkg{d}" / f"m{n}.py").write_text("")
     (tmp_path / "node_modules").mkdir()
     (tmp_path / "node_modules" / "x.py").write_text("")
-    _exclude_matchers.cache_clear()
     files = _collect_python_files([tmp_path])
     assert len(files) == 100
-    assert _exclude_matchers.cache_info().misses == 1
+    assert not any("node_modules" in file.parts for file in files)
 
 
 def test_exclude_globs_match_names_and_relative_paths(tmp_path: Path) -> None:
@@ -2082,3 +2082,19 @@ def test_check_reads_no_query_file_outside_its_config(tmp_path, monkeypatch, cap
     monkeypatch.chdir(project)
 
     assert _run(["check", "--config-file", "sqlty.toml", "../users.sql"], capsys) == (0, "", "")
+
+
+def test_rust_cli_raises_what_its_streams_raise(monkeypatch) -> None:
+    from sqlty._core import cli
+
+    class Closed:
+        def write(self, text: str) -> int:
+            raise OSError("closed")
+
+        def flush(self) -> None:
+            pass
+
+    monkeypatch.setattr(sys, "stdout", Closed())
+
+    with pytest.raises(OSError, match="closed"):
+        cli(["sqlty", "rule"])

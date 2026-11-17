@@ -411,3 +411,56 @@ def run(conn: psycopg.Connection, key: str, maybe: str | None) -> None:
     # error: [nullable-mismatch] "Row.key is str but query column 'key' can be NULL"
     conn.execute(SQL[Row]("--sql\nSELECT %(key)s::TEXT AS key FROM users"), {"key": maybe})
 ```
+
+### Constants
+
+A name bound once to a literal, with or without `Final`, has the literal's type, and so
+does a constant imported from a checked module, also one bound to another constant. A
+call result and a parameter of unknown type keep the placeholder nullable.
+
+```toml
+[[tool.sqlty.functions]]
+import-path = "db.fetch_all"
+query-param = "query"
+return-type-param = "row"
+```
+
+`db.py`:
+
+```python
+from typing import Any
+
+def fetch_all[T](query: str, row: type[T], /, **params: Any) -> list[T]: ...
+```
+
+`limits.py`:
+
+```python
+LIMIT = "x"
+ALIAS = LIMIT
+```
+
+```python
+from typing import Final, NamedTuple
+
+import limits
+from db import fetch_all
+from limits import LIMIT
+
+DEFAULT = "x"
+FINAL: Final = "x"
+
+class Row(NamedTuple):
+    key: str
+
+def run(key) -> None:
+    fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=DEFAULT)
+    fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=FINAL)
+    fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=LIMIT)
+    fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=limits.LIMIT)
+    fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=limits.ALIAS)
+    # error: [nullable-mismatch] "Row.key is str but query column 'key' can be NULL"
+    fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=input())
+    # error: [nullable-mismatch] "Row.key is str but query column 'key' can be NULL"
+    fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=key)
+```

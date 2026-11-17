@@ -44,8 +44,8 @@ Tests run in parallel (pytest-xdist, `-n auto`) and in random order
 on another having run, nor on the working directory or global state another
 changes. Tests that measure wall time are marked `timing`: the default run
 leaves them out, since parallel workers slow them, and `make test` runs them
-alone afterwards. Tests marked `pg` need a PostgreSQL server (`SQLTY_PG_DSN`); each
-worker gets its own database on it (`tests/conftest.py`): `uv run pytest -m pg`.
+alone afterwards. Tests marked `pg` run when `SQLTY_PG_DSN` points to a PostgreSQL server; each
+worker gets its own database on it (`tests/conftest.py`).
 
 A test that needs a package sqlty does not depend on imports it at the top, and
 the package goes in a dependency group (`[dependency-groups]` in `pyproject.toml`),
@@ -89,9 +89,9 @@ assertions show which rule typed a column; every rule needs one, in
 
 `skills/<name>/SKILL.md` (and its `references/`) are the Agent Skills, installed
 through the plugin manifests (`.claude-plugin/`, `.codex-plugin/`,
-`.cursor-plugin/`) or `sqlty skill --install`. `rust/crates/sqlty-ext/build.rs`
-compiles them into the extension: rebuild it after editing one, or
-`test_agent_skills_are_compiled_in` fails. A new skill gets a row in the table of
+`.cursor-plugin/`) or `sqlty skill --install`. `rust/crates/sqlty-cli/build.rs`
+compiles them, and the rule pages of `src/sqlty/rules/`, into the extension: rebuild it
+after editing one, or `test_agent_skills_are_compiled_in` fails. A new skill gets a row in the table of
 `docs/recipes/agents.md`.
 
 ## Benchmarks
@@ -419,13 +419,16 @@ src/sqlty/
 ├── _type_extractor/     # Row types (TypedDict, dataclass, ...), read from source, never imported
 ├── _lint.py             # Lint rules: severity, diagnostics, RuleConfig
 ├── _decode.py           # Magic codec decoder
-├── _cli.py              # CLI: rewrite, strip, check, server, version
-├── _lsp_bridge.py       # Workspace: what sqlty server checks a buffer with
+├── _cli.py              # CLI parser; complete, breaking, server, and every command with SQLTY_AST=python
+├── _lsp_bridge.py       # Workspace of sqlty server with a breaking baseline or SQLTY_AST=python
 └── magic.py             # Python codec registration
 rust/crates/             # Cargo workspace (root: rust/Cargo.toml)
 ├── sqlty-sql/           # analyzer/ (type inference), ddl; no PyO3
 │   └── rules/           # inference rules (*.inference.toml), compiled by build.rs; see its README
 ├── sqlty-python/        # tokens, rewriter, checker, fixer
+├── sqlty-project/       # a project read from disk: settings, helpers, checks of sqlty server
+├── sqlty-cli/           # the sqlty commands: rewrite, strip, format, check, rule, skill, version;
+│                        # main.rs is a standalone `sqlty` executable (cargo run -p sqlty-cli)
 ├── sqlty-lsp/           # the language server of sqlty server; tests without Python
 ├── sqlty-wasm/          # JSON in, JSON out, for WebAssembly: the docs playground (make playground)
 └── sqlty-ext/           # lib.rs (PyO3), builds sqlty._core; server.rs runs sqlty-lsp

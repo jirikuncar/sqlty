@@ -16,11 +16,11 @@ const DIALECTS: [(&str, &str); 5] = [
 ];
 
 /// The dialects a `reference` may cite the documentation of, in the order they are shown.
-const DOCUMENTED: [&str; 4] = ["postgres", "mysql", "sqlite", "duckdb"];
+const DOCUMENTED: [&str; 5] = ["postgres", "mysql", "sqlite", "duckdb", "clickhouse"];
 
 /// Canonical SQL types the analyzer gives operands, which `left` and `right` may name.
 /// `ARRAY` is any array.
-const SQL_TYPES: [&str; 88] = [
+const SQL_TYPES: [&str; 90] = [
     "UDECIMAL",
     "UTINYINT",
     "USMALLINT",
@@ -33,6 +33,8 @@ const SQL_TYPES: [&str; 88] = [
     "MEDIUMINT",
     "INT",
     "BIGINT",
+    "INT128",
+    "UINT128",
     "DECIMAL",
     "NUMERIC",
     "REAL",

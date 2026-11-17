@@ -1,7 +1,9 @@
-//! `sqlty server`: the language server of `sqlty-lsp`, checking with `sqlty._lsp_bridge`.
+//! `sqlty server`: the language server of `sqlty-lsp`, checking with `sqlty-project`, or
+//! with `sqlty._lsp_bridge` for a breaking baseline or `SQLTY_AST=python`.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
@@ -13,8 +15,131 @@ use crate::SchemaHandle;
 /// Serve the language server on standard input and output until the client exits.
 #[pyfunction]
 pub(crate) fn serve(py: Python<'_>) -> PyResult<()> {
-    py.detach(|| sqlty_lsp::stdio(BridgeWorkspace::open).map_err(|error| error.to_string()))
+    let sys = py.import("sys")?;
+    let info = sys.getattr("version_info")?;
+    let version = (
+        info.getattr("major")?.extract()?,
+        info.getattr("minor")?.extract()?,
+    );
+    let extra: Vec<PathBuf> = sys.getattr("path")?.extract()?;
+    let python = std::env::var("SQLTY_AST").is_ok_and(|ast| ast == "python");
+    let open = move |root: &Path, settings: &Settings| -> Result<Opened, String> {
+        if python || settings.against.is_some() {
+            return Ok(Opened(Box::new(BridgeWorkspace::open(root, settings)?)));
+        }
+        let files = Arc::new(sqlty_project::Disk);
+        let workspace = sqlty_project::Workspace::root(root, files, version, extra.clone())?;
+        Ok(Opened(Box::new(RustWorkspace(workspace))))
+    };
+    py.detach(|| sqlty_lsp::stdio(open).map_err(|error| error.to_string()))
         .map_err(PyRuntimeError::new_err)
+}
+
+/// A `sqlty_project::Workspace`; what its schemas could not read goes to standard error.
+struct RustWorkspace(sqlty_project::Workspace);
+
+impl RustWorkspace {
+    fn warned<T>(&mut self, found: T) -> T {
+        for warning in self.0.warnings() {
+            eprintln!("{warning}");
+        }
+        found
+    }
+}
+
+impl Workspace for RustWorkspace {
+    fn check(&mut self, path: &Path, text: &str) -> Result<Vec<Diagnostic>, String> {
+        let found = self.0.check(path, text);
+        let found = self.warned(found)?;
+        Ok(found.into_iter().map(diagnostic).collect())
+    }
+
+    fn fix(&mut self, path: &Path, text: &str) -> Result<String, String> {
+        let fixed = self.0.fix(path, text);
+        self.warned(fixed)
+    }
+
+    fn format(&mut self, path: &Path, text: &str) -> Result<String, String> {
+        let formatted = self.0.format(path, text);
+        self.warned(formatted)
+    }
+
+    fn rewrite(&mut self, path: &Path, text: &str) -> Result<String, String> {
+        let rewritten = self.0.rewrite(path, text);
+        self.warned(rewritten)
+    }
+
+    fn strip(&mut self, path: &Path, text: &str) -> Result<String, String> {
+        let stripped = self.0.strip(path, text);
+        self.warned(stripped)
+    }
+
+    fn completion(&mut self, path: &Path) -> Option<CompletionContext> {
+        let found = self.0.completion(path)?;
+        Some(CompletionContext {
+            schema: found.schema,
+            dialect: found.dialect.to_string(),
+            import_style: found.import_style,
+            helper_starts: found.helper_starts,
+        })
+    }
+}
+
+fn diagnostic(found: sqlty_python::checker::Diagnostic) -> Diagnostic {
+    Diagnostic {
+        rule: found.rule.name().to_string(),
+        message: found.message,
+        severity: if found.severity == sqlty_python::rules::Severity::Error {
+            Severity::Error
+        } else {
+            Severity::Warning
+        },
+        start: found.span.start,
+        end: found.span.end,
+        fix: found
+            .fix
+            .into_iter()
+            .map(|edit| Edit {
+                start: edit.range.start,
+                end: edit.range.end,
+                replacement: edit.replacement,
+            })
+            .collect(),
+        source: None,
+    }
+}
+
+/// The workspace a root opened as.
+struct Opened(Box<dyn Workspace>);
+
+impl Workspace for Opened {
+    fn check(&mut self, path: &Path, text: &str) -> Result<Vec<Diagnostic>, String> {
+        self.0.check(path, text)
+    }
+
+    fn fix(&mut self, path: &Path, text: &str) -> Result<String, String> {
+        self.0.fix(path, text)
+    }
+
+    fn format(&mut self, path: &Path, text: &str) -> Result<String, String> {
+        self.0.format(path, text)
+    }
+
+    fn rewrite(&mut self, path: &Path, text: &str) -> Result<String, String> {
+        self.0.rewrite(path, text)
+    }
+
+    fn strip(&mut self, path: &Path, text: &str) -> Result<String, String> {
+        self.0.strip(path, text)
+    }
+
+    fn breaking(&mut self) -> Result<Vec<(PathBuf, Vec<Diagnostic>)>, String> {
+        self.0.breaking()
+    }
+
+    fn completion(&mut self, path: &Path) -> Option<CompletionContext> {
+        self.0.completion(path)
+    }
 }
 
 /// A `sqlty._lsp_bridge.Workspace`.

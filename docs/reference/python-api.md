@@ -194,8 +194,8 @@ pass the handle:
 ```pycon
 >>> from sqlty.core import load_schema
 >>> schema = load_schema("CREATE TABLE users (id INTEGER NOT NULL, name TEXT);")
->>> schema
-Schema(dialect="postgres")
+>>> schema.dialect
+'postgres'
 >>> infer_type("SELECT id, name FROM users", schema_sql=schema)
 'tuple[int, str | None]'
 ```

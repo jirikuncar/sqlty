@@ -24,7 +24,15 @@ ruff_python_ast.workspace = true
 ruff_text_size.workspace = true
 sqlty-lsp.workspace = true
 sqlty-format.workspace = true
+sqlty-project.workspace = true
+sqlty-cli.workspace = true
 recursive.workspace = true
 stacker = "0.1"
 thiserror.workspace = true
 toml.workspace = true
+
+[build-dependencies]
+pyo3-build-config = "0.30"
+
+[dev-dependencies]
+ruff_python_parser.workspace = true

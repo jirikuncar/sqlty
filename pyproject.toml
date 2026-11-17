@@ -43,7 +43,6 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "pathspec>=0.12.1",
     "typing-extensions>=4.15.0; python_version < '3.15'",
 ]
 

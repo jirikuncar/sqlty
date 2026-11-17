@@ -185,6 +185,10 @@ generate-docs:
 generate-stdlib-types:
 	uv run python scripts/generate_stdlib_types.py
 
+.PHONY: generate-duckdb-rules
+generate-duckdb-rules:
+	uv run python scripts/generate_duckdb_rules.py
+
 .PHONY: docs-serve
 docs-serve: playground
 	$(ZENSICAL) serve

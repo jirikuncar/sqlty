@@ -1,7 +1,7 @@
 """Type stubs for the Rust extension module (sqlty._core)."""
 
 import ast
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal, final
 
@@ -177,7 +177,7 @@ def template_strings(
 ) -> list[tuple[int, tuple[int, int], str | None, list[str | None]]] | None: ...
 def module_outline(source: str) -> tuple[ast.Module, list[ast.ClassDef]] | None: ...
 def helper_sites(
-    source: str, names: list[str]
+    source: str, names: list[str], index: ModuleIndex | None = None, module: str | None = None
 ) -> (
     list[
         tuple[
@@ -221,6 +221,13 @@ def row_diagnostics(
     ]
     | None
 ): ...
+def breaking_modules(
+    modules: Sequence[tuple[str, str | None, int, int]],
+    configs: Sequence[tuple[Any, ...]],
+    *,
+    version: tuple[int, int],
+    jobs: int | None = None,
+) -> list[list[Diagnostic]]: ...
 def check_modules(
     modules: Sequence[tuple[str, str | None, int]],
     configs: Sequence[
@@ -280,12 +287,12 @@ type _Helper = tuple[
 ]
 
 @final
-class ModuleIndex:
-    def extended(
-        self, steps: list[tuple[str, str, str, str | None, list[Path], str | None]]
-    ) -> ModuleIndex: ...
-    def helpers(self) -> dict[str, dict[str, _Helper]]: ...
+class ModuleIndex: ...
 
+def index_extended(
+    index: ModuleIndex, steps: list[tuple[str, str, str, str | None, list[Path], str | None]]
+) -> ModuleIndex: ...
+def index_helpers(index: ModuleIndex) -> dict[str, dict[str, _Helper]]: ...
 def module_index(
     version: tuple[int, int],
     steps: list[tuple[str, str, str, str | None, list[Path], str | None]],
@@ -334,8 +341,8 @@ class QueryAt:
     def route(self) -> str: ...
     @property
     def span(self) -> tuple[int, int]: ...
-    def source_offset(self, offset: int) -> int | None: ...
 
+def query_source_offset(at: QueryAt, offset: int) -> int | None: ...
 def query_at(
     source: str, offset: int, *, import_style: str | None = None, helper_starts: list[int] = ...
 ) -> QueryAt | None: ...
@@ -369,6 +376,10 @@ def skills() -> list[tuple[str, str]]: ...
 def serve() -> None:
     """Serve the language server on standard input and output until the client exits."""
 
+def cli(args: list[str]) -> int | None:
+    """Run ``sqlty ARGS...`` (``args[0]`` is the program); the exit code, or None for a
+    command the Python CLI still runs."""
+
 def schema_skipped_tables(schema_sql: str | Schema, *, dialect: str = "postgres") -> list[str]: ...
 def schema_skipped_objects(
     schema_sql: str | Schema, *, dialect: str = "postgres"
@@ -381,10 +392,33 @@ TOOL_KEYS: tuple[str, ...]
 DISCOVERY_KEYS: tuple[str, ...]
 FUNCTION_KEYS: tuple[str, ...]
 
-def load_config(
-    data: bytes, file_name: str, source: str, *, required: bool
-) -> tuple[dict[str, Any], list[str]] | None: ...
 def validate_config(table: dict[str, Any], source: str) -> tuple[dict[str, Any], list[str]]: ...
 def driver_types(driver: str, dialect: str) -> list[tuple[str, str]]: ...
 def find_config(directory: Path) -> tuple[dict[str, Any], list[str], Path] | None: ...
 def config_file(path: Path, base: Path) -> tuple[dict[str, Any], list[str]]: ...
+def schema_files(entries: list[str], base: str) -> tuple[list[Path], list[str]]: ...
+
+DEFAULT_EXCLUDE: list[str]
+
+class Discovery:
+    def __init__(
+        self,
+        cwd: str,
+        *,
+        isolated: bool,
+        fixed: Mapping[str, object] | None,
+        exclude: list[str] | None,
+        extend_exclude: list[str],
+        respect_gitignore: bool | None,
+    ) -> None: ...
+    def exclusions(self, directory: str) -> list[tuple[Path, list[str]]]: ...
+    def is_excluded(self, path: str) -> bool: ...
+    def route(
+        self, table: Mapping[str, object], base: str, path: str
+    ) -> tuple[str | None, dict[str, str]]: ...
+    def walk(self, root: str) -> list[Path]: ...
+
+def names_query_file(path: str, base: str, queries: list[str]) -> bool: ...
+def module_names(path: Path, roots: list[Path], cwd: Path) -> list[str]: ...
+def checked_roots(paths: list[Path], files: list[Path], cwd: Path) -> list[Path]: ...
+def helper_roots(config_dir: Path | None, checked: list[Path], extra: list[Path]) -> list[Path]: ...

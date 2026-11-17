@@ -1043,3 +1043,35 @@ impl<'py> Builder<'py, '_> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use pyo3::exceptions::PySyntaxError;
+    use ruff_python_parser::{parse_unchecked, Mode, ParseOptions};
+
+    use super::*;
+
+    #[test]
+    fn an_ipython_escape_is_a_syntax_error() {
+        let source = "!ls\n";
+        let parsed = parse_unchecked(source, ParseOptions::from(Mode::Ipython))
+            .try_into_module()
+            .unwrap();
+        Python::initialize();
+        Python::attach(|py| {
+            let ast = Ast::new(py).unwrap();
+            let mut builder = Builder {
+                py,
+                ast: &ast,
+                source,
+                lines: Lines::new(source),
+                tokens: parsed.tokens(),
+                classes: Vec::new(),
+            };
+            let error = builder
+                .stmt(&parsed.syntax().body[0], 1, false)
+                .unwrap_err();
+            assert!(error.is_instance_of::<PySyntaxError>(py));
+        });
+    }
+}

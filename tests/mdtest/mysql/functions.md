@@ -86,6 +86,13 @@ SELECT NOW() AS a, CURDATE() AS b, CURTIME() AS c, DATE(happened) AS d, TIMESTAM
 -- columns: g: datetime.date | None (DATE)
 ```
 
+With a format, `FROM_UNIXTIME` formats the timestamp as a string.
+
+```sql
+SELECT FROM_UNIXTIME(id, '%Y') AS a FROM events
+-- columns: a: str | None (TEXT)
+```
+
 ```sql
 SELECT DATE_FORMAT(happened, '%Y') AS a, DAYNAME(day) AS b, YEAR(day) AS c, DATEDIFF(day, day) AS d, TIMESTAMPDIFF(DAY, day, happened) AS e FROM events
 -- columns: a: str (TEXT)
@@ -118,6 +125,19 @@ SELECT DATE_ADD(day, INTERVAL 1 DAY) AS a, DATE_SUB(day, INTERVAL 1 HOUR) AS b, 
 -- columns: c: datetime.date | None (DATE)
 -- columns: d: datetime.datetime | None (DATETIME)
 -- columns: e: datetime.datetime | None (DATETIME)
+```
+
+A time stays a time for time units, and a string gives a string.
+
+```sql
+SELECT DATE_ADD(CURTIME(), INTERVAL 1 HOUR) AS a, DATE_ADD(CURTIME(), INTERVAL 1 DAY) AS b, TIMESTAMPADD(MINUTE, 1, CURTIME()) AS c, DATE_ADD(name, INTERVAL 1 DAY) AS d, ADDDATE('2008-01-02', 31) AS e, TIMESTAMPADD(WEEK, 1, '2003-01-02') AS f, '2008-01-02' + INTERVAL 1 DAY AS g FROM events
+-- columns: a: datetime.timedelta | None (TIME)
+-- columns: b: datetime.datetime | None (DATETIME)
+-- columns: c: datetime.timedelta | None (TIME)
+-- columns: d: str | None (TEXT)
+-- columns: e: str | None (TEXT)
+-- columns: f: str | None (TEXT)
+-- columns: g: str | None (TEXT)
 ```
 
 ## Strings

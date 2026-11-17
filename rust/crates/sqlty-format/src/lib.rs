@@ -275,6 +275,11 @@ mod tests {
     }
 
     #[test]
+    fn a_query_in_a_t_string_is_not_linted() {
+        assert_eq!(lint("q = t\"--sql\\nselect distinct(a) from {t}\"\n"), []);
+    }
+
+    #[test]
     fn every_dialect_is_one_sqruff_knows() {
         for dialect in sqlty_sql::Dialect::NAMES {
             let kind =

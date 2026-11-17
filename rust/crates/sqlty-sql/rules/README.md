@@ -30,7 +30,7 @@ reasoning = "`->` on a json value gives json; a missing member gives NULL."
 | `nullability` | no | One of the nullabilities below; `operands` by default |
 | `shadows` | no | Ids of later rules of the same tier this one takes precedence over where both match |
 | `left-parameter`, `right-parameter` | no | The SQL type (`TEXT`, `ARRAY<TEXT>`, ...) a placeholder on that side gets when the other operand matches its own `left` or `right` |
-| `reference.postgres`, `reference.mysql`, `reference.sqlite`, `reference.duckdb` | one at least | The documentation of that database the rule follows: product, version, section. `--explain` and hover show the configured dialect's, or all of them for a dialect none documents |
+| `reference.postgres`, `reference.mysql`, `reference.sqlite`, `reference.duckdb`, `reference.clickhouse` | one at least | The documentation of that database the rule follows: product, version, section. `--explain` and hover show the configured dialect's, or all of them for a dialect none documents |
 | `reasoning` | yes | Why, in one sentence |
 
 Operand types are the canonical names the analyzer gives (`INT`, `BIGINT`,
@@ -187,7 +187,7 @@ own, or an unknown dialect in `extends`, fails the build.
 
 - malformed TOML or an unknown key;
 - an empty `reference` or `reasoning`, a `reference` of another dialect than
-  `postgres`, `mysql`, `sqlite` or `duckdb`, or a duplicate `id`;
+  `postgres`, `mysql`, `sqlite`, `duckdb` or `clickhouse`, or a duplicate `id`;
 - an unknown dialect, operand type, result type or nullability;
 - an operator that is not a variant name (`rustc` then checks the variant
   exists: the generated `match` names it as `BinaryOperator::<name> { .. }`);
@@ -209,7 +209,8 @@ own, or an unknown dialect in `extends`, fails the build.
 
 `analyzer/operators.rs` keeps one case rules cannot express: MySQL
 `date ± INTERVAL n unit`, where the unit decides between `DATE` and `DATETIME`.
-It is typed before the rules are tried. Function results that need code are the
+It is typed before the rules are tried. `EXTRACT(field FROM x)`, whose type depends on
+the field in ClickHouse and DuckDB, is typed by `extract_type` in `analyzer/functions.rs`. Function results that need code are the
 computed `type`s above: each rule still names the functions it covers. A built-in no
 rule types leaves its column untyped.
 
@@ -229,6 +230,14 @@ rule types leaves its column untyped.
    `test_every_inference_rule_is_asserted` fails until some assertion names it.
 5. Add an mdtest for any case none covers, and run `make test` and
    `make bench-rust`.
+
+## Generated rules
+
+`rules/duckdb/catalog.inference.toml` is written by `scripts/generate_duckdb_rules.py`
+from DuckDB's own catalog, `duckdb_functions()`, and the types DuckDB describes for a
+call of each overload; `tests/mdtest/duckdb/catalog.md` asserts its rules. A function
+a hand-written rule names is left to that rule. `tests/test_duckdb_types.py` fails when
+the file is out of date, and when DuckDB types a call of any built-in differently.
 
 ## Design notes
 

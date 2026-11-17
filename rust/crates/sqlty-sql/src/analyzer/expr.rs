@@ -1,8 +1,8 @@
 //! Expression typing.
 
 use sqlparser::ast::{
-    AccessExpr, BinaryOperator, CaseWhen, DataType, DateTimeField, Expr, Function,
-    FunctionArgumentClause, FunctionArguments, Ident, ObjectName, Subscript, UnaryOperator, Value,
+    AccessExpr, BinaryOperator, CaseWhen, DataType, Expr, Function, FunctionArgumentClause,
+    FunctionArguments, Ident, ObjectName, Subscript, UnaryOperator, Value,
 };
 
 use crate::catalog::{fold, FunctionReturn, SchemaColumn};
@@ -11,7 +11,7 @@ use sqlparser::ast::Spanned;
 use sqlparser::tokenizer::Span;
 
 use super::dialect::SqlDialect;
-use super::functions::{arg_list, date_part_type, positional_args, Returns};
+use super::functions::{arg_list, extract_type, positional_args, Returns};
 use super::inference::FunctionType;
 use super::literals::{constant, python_kind, strip, value_set};
 use super::memo::{first_column, Reporting};
@@ -196,6 +196,21 @@ impl<'a> Analyzer<'a> {
 
     #[recursive::recursive]
     pub(super) fn expr(&self, expr: &Expr, scope: &Scope) -> Inferred<Typed> {
+        let typed = self.expr_typed(expr, scope)?;
+        // ClickHouse gives a comparison, and a logical operator over one, as a `UInt8`.
+        Ok(
+            if self.dialect == SqlDialect::ClickHouse
+                && typed.sql() == Some("BOOLEAN")
+                && clickhouse_uint8(expr)
+            {
+                from_sql_type("UTINYINT", self.dialect)
+            } else {
+                typed
+            },
+        )
+    }
+
+    fn expr_typed(&self, expr: &Expr, scope: &Scope) -> Inferred<Typed> {
         let _at = self.diag.enabled().then(|| self.diag.at(name_span(expr)));
         match expr {
             Expr::Cast { data_type, .. } => Ok(self.cast_typed(data_type)),
@@ -266,41 +281,18 @@ impl<'a> Analyzer<'a> {
                 let returns = match self.dialect {
                     SqlDialect::MySql => Returns::Integral,
                     // SQLite returns an integer argument as it is.
-                    SqlDialect::Sqlite if typed.python.as_deref() == Some("int") => Returns::Arg(0),
+                    SqlDialect::Sqlite if python_kind(&typed) == Some("int") => Returns::Arg(0),
                     _ => Returns::Real,
                 };
                 self.function_type_of(returns, &[inner], &[Some(typed), None], scope)
             }
-            Expr::Extract { field, .. } => Ok(match self.dialect {
-                // Generic SQL reads PostgreSQL's rules, as for `date_part`.
-                SqlDialect::Postgres | SqlDialect::Other("generic") => {
-                    from_sql_type("DECIMAL", self.dialect)
-                }
-                SqlDialect::MySql => from_sql_type("BIGINT", self.dialect),
-                SqlDialect::Other("duckdb") => {
-                    from_sql_type(date_part_type(&field.to_string()), self.dialect)
-                }
-                // ClickHouse parses `EXTRACT(YEAR FROM x)` as `toYear(x)`, a `UInt16`; the
-                // other calendar and clock parts are `UInt8`.
-                SqlDialect::ClickHouse => match field {
-                    DateTimeField::Year => from_sql_type("USMALLINT", self.dialect),
-                    DateTimeField::Quarter
-                    | DateTimeField::Month
-                    | DateTimeField::Day
-                    | DateTimeField::Hour
-                    | DateTimeField::Minute
-                    | DateTimeField::Second => from_sql_type("UTINYINT", self.dialect),
-                    _ => Typed::UNKNOWN,
-                },
-                SqlDialect::Sqlite => {
-                    self.diag.record(
-                        NameRule::RejectedQuery,
-                        "SQLite has no EXTRACT; use strftime",
-                    );
-                    Typed::UNKNOWN
-                }
-                _ => Typed::UNKNOWN,
-            }),
+            Expr::Extract { .. } if self.dialect == SqlDialect::Sqlite => {
+                let message = "SQLite has no EXTRACT; use strftime".to_string();
+                self.diag.record(NameRule::RejectedQuery, message);
+                Ok(Typed::UNKNOWN)
+            }
+            Expr::Extract { field, .. } => Ok(extract_type(self.dialect, field)
+                .map_or(Typed::UNKNOWN, |sql| from_sql_type(sql, self.dialect))),
             // A character set introducer: `_binary 'a'` is a binary string, `_utf8mb4 'a'` text.
             Expr::Prefixed { prefix, .. } if self.dialect == SqlDialect::MySql => {
                 Ok(from_sql_type(
@@ -513,7 +505,11 @@ impl<'a> Analyzer<'a> {
                     "float"
                 })
             }
-            Value::Number(number, _) if number.contains('.') => known(decimal_type(self.dialect)),
+            // ClickHouse reads a decimal literal as a `Float64`.
+            Value::Number(number, _) if number.contains('.') => known(match self.dialect {
+                SqlDialect::ClickHouse => "float",
+                dialect => decimal_type(dialect),
+            }),
             // PostgreSQL reads an integer too big for a `bigint` as a `numeric`.
             Value::Number(number, _) => Ok(number.parse().map_or_else(
                 |_| match self.dialect {
@@ -718,6 +714,44 @@ impl<'a> Analyzer<'a> {
             }
         }
         typed
+    }
+}
+
+/// Whether ClickHouse types `expr` as a `UInt8` truth value: a comparison or predicate, or
+/// `AND`, `OR` or `NOT` over one or over a number; over `Bool` values only, they stay `Bool`.
+fn clickhouse_uint8(expr: &Expr) -> bool {
+    use BinaryOperator::{
+        And, Eq, Gt, GtEq, Lt, LtEq, NotEq, Or, PGRegexIMatch, PGRegexMatch, PGRegexNotIMatch,
+        PGRegexNotMatch, Xor,
+    };
+    match expr {
+        Expr::Nested(inner) => clickhouse_uint8(inner),
+        Expr::BinaryOp {
+            op: And | Or | Xor,
+            left,
+            right,
+        } => clickhouse_uint8(left) || clickhouse_uint8(right),
+        Expr::UnaryOp {
+            op: UnaryOperator::Not,
+            expr: inner,
+        } => clickhouse_uint8(inner),
+        Expr::BinaryOp {
+            op:
+                Eq | NotEq | Lt | LtEq | Gt | GtEq | PGRegexMatch | PGRegexIMatch | PGRegexNotMatch
+                | PGRegexNotIMatch,
+            ..
+        }
+        | Expr::In { .. }
+        | Expr::Between { .. }
+        | Expr::Like { .. }
+        | Expr::ILike { .. }
+        | Expr::IsNull(_)
+        | Expr::IsNotNull(_)
+        | Expr::IsDistinctFrom(..)
+        | Expr::IsNotDistinctFrom(..)
+        | Expr::Exists { .. } => true,
+        Expr::Value(value) => matches!(value.value, Value::Number(..)),
+        _ => false,
     }
 }
 

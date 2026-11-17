@@ -17,6 +17,7 @@ use sqlty_sql::analyzer::{self, Nullability};
 use crate::calls::{helper_calls, is_marked, Call};
 use crate::checker::{self, Diagnostic};
 use crate::index::HelperIndex;
+use crate::rewriter::ImportStyle;
 use crate::rows::Reported;
 use crate::rows::{
     alias_target, bind, row_queries, row_shape, value_diagnostics, Check, Found, RowQuery,
@@ -1192,6 +1193,24 @@ pub fn unparsed(text: &str, run: &Run<'_>) -> Found {
     }
 }
 
+/// The byte offset of each `SQL[T](...)` call of `source` whose `T` is `typing.Any`.
+pub fn any_calls(source: &Source, style: &ImportStyle) -> Vec<usize> {
+    let (text, wrapper) = (&*source.text, style.wrapper_name.as_str());
+    if !text.contains("Any") || !may_wrap(text, &style.import_line) {
+        return Vec::new();
+    }
+    module::any_calls(source.body(), &source.typing)
+        .into_iter()
+        .filter(|(_, name)| {
+            name == wrapper
+                || name
+                    .strip_suffix(wrapper)
+                    .is_some_and(|prefix| prefix.ends_with('.'))
+        })
+        .map(|(offset, _)| offset)
+        .collect()
+}
+
 /// `sqlty._check.diagnostics`: every diagnostic of `source` before inline suppression, by
 /// line.
 pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
@@ -1206,20 +1225,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
 
     let mut base = Vec::new();
     if may_need_lexing(text, wrapper) {
-        let any_calls: Vec<usize> = if text.contains("Any") && may_wrap(text, import_line) {
-            module::any_calls(source.body(), &source.typing)
-                .into_iter()
-                .filter(|(_, name)| {
-                    name == wrapper
-                        || name
-                            .strip_suffix(wrapper)
-                            .is_some_and(|prefix| prefix.ends_with('.'))
-                })
-                .map(|(offset, _)| offset)
-                .collect()
-        } else {
-            Vec::new()
-        };
+        let any_calls = any_calls(source, &options.style);
         base = checker::check_source(text, options, rules, &any_calls);
         checker::add_fix_imports(text, options, &mut base);
     }
