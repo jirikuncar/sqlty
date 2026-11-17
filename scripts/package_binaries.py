@@ -69,7 +69,7 @@ def npm(version: str, binaries: Path, out: Path) -> list[Path]:
     main = json.loads((ROOT / "npm/sqlty/package.json").read_text())
     written = []
     for target, (platform, arch) in TARGETS.items():
-        name = f"sqlty-{platform}-{arch}"
+        name = f"@sqlty/cli-{platform}-{arch}"
         executable = "sqlty.exe" if platform == "win32" else "sqlty"
         package = out / name
         (package / "bin").mkdir(parents=True)

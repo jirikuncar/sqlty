@@ -33,7 +33,7 @@ PLACES: list[tuple[str, re.Pattern[str], int]] = [
     ("docs/recipes/ci.md", PRE_COMMIT_REV, 1),
     ("skills/sqlty-ci/SKILL.md", PRE_COMMIT_REV, 1),
     # The package and the platform packages it depends on.
-    ("npm/sqlty/package.json", re.compile(rf'"(?:version|sqlty-[\w-]+)": "{VERSION}"'), 7),
+    ("npm/sqlty/package.json", re.compile(rf'"(?:version|@sqlty/cli-[\w-]+)": "{VERSION}"'), 7),
 ]
 
 

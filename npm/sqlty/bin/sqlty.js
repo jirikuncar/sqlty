@@ -4,7 +4,7 @@
 const { spawnSync } = require("node:child_process");
 const { constants } = require("node:os");
 
-const target = `sqlty-${process.platform}-${process.arch}`;
+const target = `@sqlty/cli-${process.platform}-${process.arch}`;
 const executable = process.platform === "win32" ? "sqlty.exe" : "sqlty";
 
 let binary;

@@ -242,7 +242,7 @@ def test_binary_targets_agree() -> None:
     jobs = yaml.safe_load((ROOT / ".github" / "workflows" / "pypi.yml").read_text())["jobs"]
     built = [entry["target"] for entry in jobs["build-binaries"]["strategy"]["matrix"]["include"]]
     main = json.loads((ROOT / "npm" / "sqlty" / "package.json").read_text())
-    names = [f"sqlty-{platform}-{arch}" for platform, arch in targets.values()]
+    names = [f"@sqlty/cli-{platform}-{arch}" for platform, arch in targets.values()]
 
     assert sorted(built) == sorted(targets)
     assert sorted(main["optionalDependencies"]) == sorted(names)
@@ -258,7 +258,7 @@ def test_npm_runs_the_binary_of_the_platform(tmp_path: Path) -> None:
     modules = tmp_path / "node_modules"
     packages = package_binaries.npm("1.2.3", tmp_path / "bin", modules)
     main = json.loads((modules / "sqlty" / "package.json").read_text())
-    linux = json.loads((modules / "sqlty-linux-x64" / "package.json").read_text())
+    linux = json.loads((modules / "@sqlty" / "cli-linux-x64" / "package.json").read_text())
 
     assert len(packages) == len(package_binaries.TARGETS) + 1
     assert main["version"] == "1.2.3"
@@ -271,8 +271,8 @@ def test_npm_runs_the_binary_of_the_platform(tmp_path: Path) -> None:
         .decode()
         .split()
     )
-    for package in modules.iterdir():
-        if package.name not in {"sqlty", f"sqlty-{platform}-{arch}"}:
+    for package in (modules / "@sqlty").iterdir():
+        if package.name != f"cli-{platform}-{arch}":
             shutil.rmtree(package)
     found = subprocess.run(
         [node, modules / "sqlty" / "bin" / "sqlty.js", "check", "--fix"],
@@ -280,7 +280,7 @@ def test_npm_runs_the_binary_of_the_platform(tmp_path: Path) -> None:
         text=True,
     )
     assert (found.returncode, found.stdout) == (3, "check --fix\n")
-    shutil.rmtree(modules / f"sqlty-{platform}-{arch}")
+    shutil.rmtree(modules / "@sqlty" / f"cli-{platform}-{arch}")
     found = subprocess.run(
         [node, modules / "sqlty" / "bin" / "sqlty.js"], capture_output=True, text=True
     )
