@@ -22,7 +22,7 @@ use super::hashing::ExprKey;
 use super::inference::{
     binary_rules, function_rules, typed_by_rule, FunctionNullability, RuleNullability,
 };
-use super::input::PSYCOPG;
+use super::input::{BOUND, PSYCOPG};
 use super::literals::python_kind;
 use super::memo::{first_column, Reporting};
 use super::names::{split_access, table_key};
@@ -791,6 +791,7 @@ impl<'a> Analyzer<'a> {
                 Value::Placeholder(text) if PSYCOPG.contains(&text.as_str()) => {
                     Nullability::Nullable
                 }
+                Value::Placeholder(text) if BOUND.contains(&text.as_str()) => Nullability::NonNull,
                 Value::Placeholder(_) => Nullability::Unknown,
                 _ => Nullability::NonNull,
             },

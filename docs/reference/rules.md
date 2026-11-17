@@ -746,7 +746,8 @@ unrelated keys (polymorphic ids, legacy schemas) would need suppressions.
 Default: error. A query the database rejects for a reason no other rule names:
 in PostgreSQL, a `CASE`, `COALESCE`, `GREATEST` or `LEAST` whose results are of
 different type categories (`integer` and `date`); a `SELECT *` with no `FROM`
-outside ClickHouse; a SQLite hex literal over 64 bits. Needs no schema.
+outside ClickHouse; a SQLite hex literal over 64 bits; `EXTRACT` in SQLite, which
+has none. Needs no schema.
 
 ## Rewrite rules
 

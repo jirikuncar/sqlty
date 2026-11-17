@@ -716,3 +716,17 @@ fn rarer_suggestions_highlights_and_placeholders() {
         vec![15..17]
     );
 }
+
+#[test]
+fn mysql_full_text_relevance_is_a_double() {
+    let (schema, _) = load_schema_with_skipped(
+        "CREATE TABLE t (body TEXT NOT NULL, FULLTEXT (body))",
+        "mysql",
+    );
+    let (columns, _) = analyze_with_diagnostics(
+        "SELECT MATCH(body) AGAINST('x') AS a FROM t",
+        "mysql",
+        Some(&schema),
+    );
+    assert_eq!(columns.unwrap()[0].sql_type.as_deref(), Some("DOUBLE"));
+}

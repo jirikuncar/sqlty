@@ -515,10 +515,10 @@ fn routed(
         &missing,
         &project::Excludes::default(),
     );
-    match json!(project::file_table(&project, &found)) {
-        Value::Object(table) => table,
-        _ => table.clone(),
-    }
+    json!(project::file_table(&project, &found))
+        .as_object()
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// The `project` answer for `directory`, reading `files`.

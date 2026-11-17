@@ -212,7 +212,7 @@ impl<'a> Analyzer<'a> {
                 let mut columns = columns_of(&inner)?;
                 // A column of a recursive CTE is non-null only if it is in the anchor and in
                 // the recursive term reading the rows so far: repeat until nothing changes.
-                for round in 0..=columns.len() + 1 {
+                for _ in 0..=columns.len() + 1 {
                     if !recursive {
                         break;
                     }
@@ -225,13 +225,6 @@ impl<'a> Analyzer<'a> {
                         .collect();
                     let now: Vec<Nullability> = columns.iter().map(|col| col.nullability).collect();
                     if known == now {
-                        break;
-                    }
-                    if round > columns.len() {
-                        // Not settling: no column is known to be non-null.
-                        for col in &mut columns {
-                            col.nullability = Nullability::Nullable;
-                        }
                         break;
                     }
                     inner.virtuals.insert(name.clone(), columns);

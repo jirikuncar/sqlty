@@ -1,0 +1,41 @@
+# DuckDB aggregate functions.
+
+[[function]]
+id = "duckdb.aggregate.avg-numbers"
+function = "AVG"
+dialects = ["duckdb"]
+argument = ["@numeric", "@unsigned", "INT128", "UINT128"]
+type = "DOUBLE"
+nullability = "aggregate"
+reference.duckdb = "DuckDB 2.0 documentation, Aggregate Functions (avg(arg)); duckdb_functions() lists avg(INTEGER), avg(BIGINT), avg(HUGEINT) and avg(DECIMAL) as DOUBLE"
+reasoning = "The mean of any number, an exact one too, is a double."
+
+[[function]]
+id = "duckdb.aggregate.avg-temporal"
+function = "AVG"
+dialects = ["duckdb"]
+argument = ["TIME", "TIMETZ", "TIMESTAMP", "TIMESTAMPTZ"]
+type = "@argument-type(0)"
+nullability = "aggregate"
+reference.duckdb = "DuckDB 2.0 documentation, Aggregate Functions (avg(arg)); duckdb_functions() lists avg(TIME) as TIME and avg(TIMESTAMP) as TIMESTAMP"
+reasoning = "The mean of times or timestamps is a time or timestamp of the same type."
+
+[[function]]
+id = "duckdb.aggregate.avg-date"
+function = "AVG"
+dialects = ["duckdb"]
+argument = ["DATE"]
+type = "TIMESTAMP"
+nullability = "aggregate"
+reference.duckdb = "DuckDB 2.0 documentation, Aggregate Functions (avg(arg)); avg(DATE) is described as TIMESTAMP"
+reasoning = "The mean of dates can fall between two days, so it is a timestamp."
+
+[[function]]
+id = "duckdb.aggregate.sum-integers"
+function = "SUM"
+dialects = ["duckdb"]
+argument = ["BOOLEAN", "@integer", "INT128"]
+type = "INT128"
+nullability = "aggregate"
+reference.duckdb = "DuckDB 2.0 documentation, Aggregate Functions (sum(arg)); duckdb_functions() lists sum(BOOLEAN), sum(INTEGER) and sum(BIGINT) as HUGEINT"
+reasoning = "Summing integers or booleans widens to a 128-bit integer so the sum fits."

@@ -30,3 +30,30 @@ ids = db.fetch_all("SELECT name FROM users", int)
 # error: [column-type-mismatch]
 one = Db.fetch_one("SELECT name FROM users", int)
 ```
+
+## A `self` attribute is followed, an attribute of it is not
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+class Db:
+    def fetch_all[T](self, query: Annotated[LiteralString, SQL], form: type[T], /) -> list[T]: ...
+
+class App:
+    db: Db
+
+class Service:
+    def __init__(self) -> None:
+        self.db = Db()
+        self.app = App()
+
+    def run(self) -> None:
+        # error: [column-type-mismatch]
+        self.db.fetch_all("SELECT name FROM users", int)
+        self.app.db.fetch_all("SELECT name FROM users", int)
+
+        def later() -> None:
+            # error: [column-type-mismatch]
+            self.db.fetch_all("SELECT name FROM users", int)
+```

@@ -65,6 +65,17 @@ cur.executemany("INSERT INTO users (id, name) VALUES (%s, %s)", [(1, "a"), (2, "
 cur.executemany("INSERT INTO users (id, name) VALUES (%s, %s)", [(1, "a"), (2.5, "b")])
 ```
 
+## executemany over a row it cannot read
+
+```python
+import psycopg
+
+def load(cur: psycopg.Cursor, row) -> None:
+    cur.executemany("INSERT INTO users (id, name) VALUES (%s, %s)", [row])
+    # error: [param-type-mismatch] "parameters are a single int, which psycopg rejects"
+    cur.executemany("DELETE FROM users WHERE id = %s", [1, 2])
+```
+
 ## A single value is not a sequence of parameters
 
 psycopg takes a sequence or a mapping of parameters, and raises `TypeError` for
@@ -126,6 +137,24 @@ conn.execute("DELETE FROM users WHERE id = %s", params_variable)
 conn.execute("DELETE FROM users WHERE id = %s", (*rest_args,))
 conn.execute(query_variable, (b"1",))
 # error:
+```
+
+### Rebound names and rows from a variable
+
+```python
+import psycopg
+
+conn = psycopg.connect("dbname=x")
+alias = conn
+alias.execute("DELETE FROM users WHERE id = %s", (b"1",))
+QUERY = "DELETE FROM users WHERE id = %s"
+QUERY = "DELETE FROM users WHERE name = %s"
+conn.execute(QUERY, (b"1",))
+rows = [(1, b"a")]
+cur = conn.cursor()
+cur.executemany("INSERT INTO users (id, name) VALUES (%s, %s)", rows)
+# error: [param-type-mismatch] "parameter 1 expects int, got bytes"
+conn.execute("DELETE FROM users WHERE id = %s", (b"1",))
 ```
 
 ### Parameters passed as `**kwargs`
@@ -377,6 +406,7 @@ def run(conn: psycopg.Connection, ids: tuple[int, int]) -> None:
     execute(conn, BY_ID, ids)
     scalar(conn, BY_ID, ids)
     scalar(conn, BY_ID.bind((1,)))
+    execute(conn, BY_ID, *ids)
 ```
 
 ### Also configured as a helper

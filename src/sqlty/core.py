@@ -14,12 +14,13 @@ import ast
 import sys
 from collections import Counter
 from collections.abc import Collection, Mapping
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from sqlty._check import RowUsage, is_any_row
 from sqlty._check import diagnostics as check_diagnostics
+from sqlty._core import QueryAt as _QueryAt
 from sqlty._core import (
-    QueryAt,
     Schema,
     checks_names,
     expand_star,
@@ -44,6 +45,7 @@ from sqlty._core import parse_error as _parse_error
 from sqlty._core import query_at as _query_at
 from sqlty._core import query_diagnostics as _query_diagnostics
 from sqlty._core import query_sites as _query_sites
+from sqlty._core import query_source_offset as _query_source_offset
 from sqlty._core import query_tables as _query_tables
 from sqlty._core import rewrite_source as _rewrite_source
 from sqlty._core import schema_skipped_objects as _schema_skipped_objects
@@ -721,6 +723,27 @@ def query_statistics(
     return counts
 
 
+@dataclass(frozen=True)
+class QueryAt:
+    """The query under a cursor, found by ``query_at``.
+
+    ``text`` is the query as the analyzer reads it, ``offset`` the cursor in it, ``route``
+    how ``check`` recognised it (``marker``, ``wrapper`` or ``helper``), and ``span`` the
+    byte offsets of its string literals in the source, prefixes and quotes included.
+    """
+
+    text: str
+    offset: int
+    route: str
+    span: tuple[int, int]
+    _at: _QueryAt = field(repr=False, compare=False)
+
+    def source_offset(self, offset: int) -> int | None:
+        """Where byte ``offset`` of ``text`` is written in the source; ``None`` past its end
+        or in the marker."""
+        return _query_source_offset(self._at, offset)
+
+
 def query_at(
     source: str | ParsedSource,
     offset: int,
@@ -753,7 +776,8 @@ def query_at(
     """
     parsed = ParsedSource.of(source, module)
     starts = _helper_starts(parsed, helpers, module)
-    return _query_at(parsed.text, offset, import_style=import_style, helper_starts=starts)
+    at = _query_at(parsed.text, offset, import_style=import_style, helper_starts=starts)
+    return at and QueryAt(at.text, at.offset, at.route, at.span, at)
 
 
 class Completion(NamedTuple):

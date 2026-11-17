@@ -107,8 +107,10 @@ def fetch[T](query: str, form: type[T]) -> list[T]: ...
 
 ```python
 from pkg.warehouse import fetch
+from sqlty import SQL
 
 fetch("SELECT n FROM events", tuple[int])
+fetch(SQL[tuple[int]]("SELECT n FROM events"), tuple[int])
 fetch("--sql sqlty:db=default\nSELECT id FROM users", tuple[str])
 # error: [column-type-mismatch] "tuple[str] item 0 is str but query column 'n' infers int"
 fetch("SELECT n FROM events", tuple[str])

@@ -117,7 +117,7 @@ pub fn sql_ignores(text: &str) -> Vec<Ignore> {
     for line in 1.. {
         let start = lines.start(line, text.len());
         if start == text.len() {
-            return found;
+            break;
         }
         let end = lines.start(line + 1, text.len());
         let Some(matched) = IGNORE.captures(&text.as_bytes()[start..end]) else {
@@ -294,10 +294,11 @@ mod tests {
 
     #[test]
     fn a_source_that_does_not_parse_keeps_every_comment_the_lexer_finds() {
-        let text = "x = (  # sqlty: ignore\ny = $  # sqlty: ignore[a]\nz = '# sqlty: ignore\n";
+        let text =
+            "# note\nx = (  # sqlty: ignore\ny = $  # sqlty: ignore[a]\nz = '# sqlty: ignore\n";
         assert!(Source::new(text, (3, 14)).is_none());
         let found = unparsed_ignores(text);
-        assert_eq!(lines_and_rules(&found), [(1, None), (2, Some(vec!["a"]))]);
+        assert_eq!(lines_and_rules(&found), [(2, None), (3, Some(vec!["a"]))]);
         assert_eq!(&text[found[0].span.0..found[0].span.1], "# sqlty: ignore");
         assert!(unparsed_ignores("x = (\n").is_empty());
     }

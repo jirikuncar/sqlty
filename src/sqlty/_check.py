@@ -403,8 +403,8 @@ def _bound(call: HelperCall, dialect: str) -> str | None:
 
     A bare placeholder reads as a value that may be NULL, since a caller may bind ``None``.
     Where the call passes an argument whose type excludes ``None`` (a literal, an
-    annotated variable), the placeholder is respelled as one whose nullability is not
-    judged, so the column or JSON member it fills is not reported as nullable.
+    annotated variable), the placeholder is respelled as one the engine reads as never NULL
+    (``$0``, or ``?0`` outside PostgreSQL), as it reads a literal.
     """
     return _bind(call.query, call.params, dialect)
 
@@ -441,7 +441,7 @@ def _bind(query: str | None, params: tuple[ParamArg, ...] | None, dialect: str) 
     non_null = {arg.key for arg in params if arg.type not in (None, "None")}
     if not non_null:
         return query
-    marker = "$0" if dialect.lower() in ("postgres", "postgresql") else "?"
+    marker = "$0" if dialect.lower() in ("postgres", "postgresql") else "?0"
     position = 0
 
     def respell(match: re.Match[str]) -> str:

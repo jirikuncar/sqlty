@@ -415,8 +415,8 @@ def run(conn: psycopg.Connection, key: str, maybe: str | None) -> None:
 ### Constants
 
 A name bound once to a literal, with or without `Final`, has the literal's type, and so
-does a constant imported from a checked module. A call result and a parameter of unknown
-type keep the placeholder nullable.
+does a constant imported from a checked module, also one bound to another constant. A
+call result and a parameter of unknown type keep the placeholder nullable.
 
 ```toml
 [[tool.sqlty.functions]]
@@ -437,6 +437,7 @@ def fetch_all[T](query: str, row: type[T], /, **params: Any) -> list[T]: ...
 
 ```python
 LIMIT = "x"
+ALIAS = LIMIT
 ```
 
 ```python
@@ -457,8 +458,89 @@ def run(key) -> None:
     fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=FINAL)
     fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=LIMIT)
     fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=limits.LIMIT)
+    fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=limits.ALIAS)
     # error: [nullable-mismatch] "Row.key is str but query column 'key' can be NULL"
     fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=input())
     # error: [nullable-mismatch] "Row.key is str but query column 'key' can be NULL"
     fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=key)
+```
+
+### A column an INSERT writes from a parameter
+
+A column an `INSERT` writes from a placeholder the call binds to a value that excludes
+`None` is not NULL in the rows `RETURNING` gives back, as with a literal. A `BEFORE
+INSERT` row trigger may change the row, so it keeps the column nullable.
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+
+[[tool.sqlty.functions]]
+import-path = "db.fetch_all"
+query-param = "query"
+return-type-param = "row"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE items (id integer PRIMARY KEY, owner_id integer, label text);
+CREATE TABLE logged (id integer PRIMARY KEY, owner_id integer);
+CREATE FUNCTION stamp() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;
+CREATE TRIGGER stamp BEFORE INSERT ON logged FOR EACH ROW EXECUTE FUNCTION stamp();
+```
+
+`db.py`:
+
+```python
+from typing import Any
+
+def fetch_all[T](query: str, row: type[T], /, **params: Any) -> list[T]: ...
+```
+
+```python
+from typing import NamedTuple
+
+from db import fetch_all
+
+class Row(NamedTuple):
+    id: int
+    owner_id: int
+
+def insert(owner_id: int, maybe: int | None) -> None:
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=owner_id)
+    fetch_all("INSERT INTO items (id, owner_id) SELECT 1, %(owner_id)s RETURNING id, owner_id", Row, owner_id=owner_id)
+    fetch_all(
+        "WITH i AS (INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id)"
+        " SELECT id, owner_id FROM i",
+        Row,
+        owner_id=owner_id,
+    )
+    # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=maybe)
+    # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
+    fetch_all("INSERT INTO logged (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=owner_id)
+```
+
+#### SQLite
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+```
+
+```python
+from typing import NamedTuple
+
+from db import fetch_all
+
+class Row(NamedTuple):
+    id: int
+    owner_id: int
+
+def insert(owner_id: int, maybe: int | None) -> None:
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=owner_id)
+    # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=maybe)
 ```

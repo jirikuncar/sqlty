@@ -315,6 +315,22 @@ class Usage(BaseModel):
 query = SQL[Usage]("--sql\nSELECT sum(records) AS total, active FROM usage GROUP BY active")
 ```
 
+### Other metadata stays lax, `Optional` is looked through
+
+```python
+from typing import Annotated, Optional
+from annotated_types import Gt
+from pydantic import BaseModel, StrictInt
+from sqlty import SQL
+
+class Usage(BaseModel):
+    total: Annotated[int, Gt(0)] | None
+    peak: Optional[StrictInt]
+
+# error: [column-type-mismatch] "Usage.peak is StrictInt but query column 'peak' infers decimal.Decimal"
+query = SQL[Usage]("--sql\nSELECT sum(records) AS total, sum(records) AS peak FROM usage")
+```
+
 ### `StrictInt`
 
 ```python

@@ -748,6 +748,7 @@ def test_check_exit_codes(tmp_path, monkeypatch, capsys) -> None:
 
 
 def test_internal_error_exits_2(tmp_path, monkeypatch, capsys) -> None:
+    import sqlty._core
     import sqlty.core
 
     def boom(*args, **kwargs):
@@ -755,6 +756,7 @@ def test_internal_error_exits_2(tmp_path, monkeypatch, capsys) -> None:
 
     (tmp_path / "q.py").write_text("x = 1\n")
     monkeypatch.setattr(sqlty.core, "strip_source", boom)
+    monkeypatch.setattr(sqlty._core, "cli", boom)
 
     code, _, err = _run(["strip", str(tmp_path / "q.py")], capsys)
 
@@ -2080,3 +2082,19 @@ def test_check_reads_no_query_file_outside_its_config(tmp_path, monkeypatch, cap
     monkeypatch.chdir(project)
 
     assert _run(["check", "--config-file", "sqlty.toml", "../users.sql"], capsys) == (0, "", "")
+
+
+def test_rust_cli_raises_what_its_streams_raise(monkeypatch) -> None:
+    from sqlty._core import cli
+
+    class Closed:
+        def write(self, text: str) -> int:
+            raise OSError("closed")
+
+        def flush(self) -> None:
+            pass
+
+    monkeypatch.setattr(sys, "stdout", Closed())
+
+    with pytest.raises(OSError, match="closed"):
+        cli(["sqlty", "rule"])

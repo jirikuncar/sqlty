@@ -14,11 +14,7 @@ QUERY = 'q = "--sql\\nSELECT 1"\n'
 
 def test_schema_with_a_database_without_one() -> None:
     schema = _core.load_schema("CREATE TABLE t (a INT);", databases=[("other", None)])
-    assert (schema.dialect, schema.absent, repr(schema)) == (
-        "postgres",
-        False,
-        'Schema(dialect="postgres")',
-    )
+    assert (schema.dialect, schema.absent) == ("postgres", False)
 
 
 def test_static_method_helper() -> None:
@@ -31,8 +27,8 @@ def test_static_method_helper() -> None:
     )
     index = _core.module_index(VERSION, [("add", "m", source, "m", [], None)])
     helper = ("query", None, "static", None, None, None, False, None)
-    assert index.helpers()["m"]["C.run"][2:] == helper
-    assert index.extended([]).helpers() == index.helpers()
+    assert _core.index_helpers(index)["m"]["C.run"][2:] == helper
+    assert _core.index_helpers(_core.index_extended(index, [])) == _core.index_helpers(index)
 
 
 def test_unparsable_module() -> None:
@@ -41,8 +37,9 @@ def test_unparsable_module() -> None:
     assert _core.row_diagnostics(UNPARSABLE, version=VERSION) is None
 
 
-def test_row_diagnostics_of_a_module_without_queries() -> None:
-    assert _core.row_diagnostics("x = 1\n", version=VERSION) == ([], [], [])
+@pytest.mark.parametrize("source", ["x = 1\n", "from sqlty import SQL\n"])
+def test_row_diagnostics_of_a_module_without_queries(source: str) -> None:
+    assert _core.row_diagnostics(source, version=VERSION) == ([], [], [])
 
 
 @pytest.mark.parametrize("split", [_core.check_queries, _core.named_queries])
@@ -51,20 +48,33 @@ def test_unknown_query_format(split: Callable[..., object]) -> None:
         split("SELECT 1", query_format="bogus")
 
 
-def test_module_with_a_missing_configuration() -> None:
+CONFIG = ("postgres", None, None, None, False, [], None, None)
+CHECK = (_core.check_modules, ("x = 1\n", None, 3))
+BREAKING = (_core.breaking_modules, ("x = 1\n", None, 0, 3))
+
+
+@pytest.mark.parametrize(("check", "module"), [CHECK, BREAKING])
+def test_module_with_a_missing_configuration(
+    check: Callable[..., object], module: tuple[object, ...]
+) -> None:
     with pytest.raises(ValueError, match="no configuration 3"):
-        _core.check_modules([("x = 1\n", None, 3)], [], version=VERSION)
+        check([module], [CONFIG], version=VERSION)
 
 
-def test_modules_with_an_unknown_import_style() -> None:
-    config = ("postgres", None, None, "bogus", False, [], None, None)
+@pytest.mark.parametrize(("check", "module"), [CHECK, BREAKING])
+def test_modules_with_an_unknown_import_style(
+    check: Callable[..., object], module: tuple[object, ...]
+) -> None:
+    config = CONFIG[:3] + ("bogus",) + CONFIG[4:]
     with pytest.raises(ValueError, match="bogus"):
-        _core.check_modules([("x = 1\n", None, 0)], [config], version=VERSION)
+        check([module[:-1] + (0,)], [config], version=VERSION)
 
 
 def test_cursor_defaults() -> None:
     found = _core.query_at(QUERY, 15)
-    assert repr(found) == 'QueryAt(text="--sql\\nSELECT 1", offset=9, route="marker")'
+    assert found is not None
+    assert (found.text, found.offset, found.route) == ("--sql\nSELECT 1", 9, "marker")
+    assert _core.query_source_offset(found, 9) == QUERY.index("ECT")
     assert _core.hover_source(QUERY, 18) is None
     assert _core.highlight_source(QUERY) == [
         (5, 10, "comment"),

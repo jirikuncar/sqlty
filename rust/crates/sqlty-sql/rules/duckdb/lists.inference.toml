@@ -1,0 +1,11 @@
+# DuckDB list functions.
+
+[[function]]
+id = "duckdb.list.concat"
+functions = ["CONCAT", "LIST_CONCAT", "LIST_CAT", "ARRAY_CONCAT", "ARRAY_CAT"]
+dialects = ["duckdb"]
+any-argument = ["@array"]
+type = "@first-known"
+nullability = "non-null"
+reference.duckdb = "DuckDB 2.0 documentation, List Functions (list_concat(list_1, ..., list_n): concatenates lists, NULL inputs are skipped)"
+reasoning = "Concatenating lists gives a list of their element type, and skips NULL lists."

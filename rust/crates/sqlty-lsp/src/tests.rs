@@ -26,6 +26,8 @@ static SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
 static RELEASE: AtomicBool = AtomicBool::new(false);
 /// Lets a check of a buffer holding `hold` finish.
 static HOLD: AtomicBool = AtomicBool::new(false);
+/// Whether a check of a buffer holding `hold` started.
+static HELD: AtomicBool = AtomicBool::new(false);
 
 /// Reports each `bad`; its fix writes `good` and imports it, but fails on `nofix`. With a
 /// baseline, `old.py` of its root has a breaking change, and `gone.py`, which does not
@@ -46,8 +48,14 @@ impl Workspace for Fake {
         while text.contains("slow") && !RELEASE.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(5));
         }
+        if text.contains("hold") {
+            HELD.store(true, Ordering::SeqCst);
+        }
         while text.contains("hold") && !HOLD.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(5));
+        }
+        if text.contains("hang") {
+            std::thread::sleep(3 * crate::EXIT_GRACE);
         }
         let severity = if text.contains("warned") {
             Severity::Warning
@@ -446,6 +454,21 @@ fn a_project_that_fails_to_load_is_reported_once() {
     let rest = client.shutdown();
     assert!(
         !rest.iter().any(|method| method == "window/showMessage"),
+        "{rest:?}"
+    );
+}
+
+#[test]
+fn a_running_check_does_not_hold_up_exit() {
+    let client = Client::start(&json!({}));
+    client.open("file:///work/q.py", "hang bad\n");
+    let stopping = std::time::Instant::now();
+    let rest = client.shutdown();
+    assert!(stopping.elapsed() < 2 * crate::EXIT_GRACE);
+    assert!(
+        !rest
+            .iter()
+            .any(|method| method == "textDocument/publishDiagnostics"),
         "{rest:?}"
     );
 }
@@ -1164,8 +1187,12 @@ fn breaking_changes_gone_after_a_reload_are_cleared_unless_open() {
 fn a_check_of_an_older_version_is_dropped() {
     let mut client = Client::start(&json!({}));
     client.open("file:///work/q.py", "bad hold\n");
-    std::thread::sleep(Duration::from_millis(50));
+    while !HELD.load(Ordering::SeqCst) {
+        std::thread::sleep(Duration::from_millis(5));
+    }
     client.change("file:///work/q.py", 2, "bad warned\n");
+    // Answered after the change is applied: the held check then sees version 2.
+    client.hover("file:///work/q.py", 0, 0);
     HOLD.store(true, Ordering::SeqCst);
     let published = client.notification("textDocument/publishDiagnostics");
     assert_eq!(published["version"], 2);
