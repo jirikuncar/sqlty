@@ -4,8 +4,10 @@
 //!
 //! [`diagnostics`] answers `None` for a module that needs what is not read here yet.
 
+use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, LazyLock};
 
 use regex::Regex;
@@ -25,7 +27,7 @@ use crate::rows::{
     alias_target, bind, row_queries, row_shape, value_diagnostics, Check, Found, RowQuery,
     RowShape, Settings,
 };
-use crate::rules::Rule;
+use crate::rules::{Rule, RuleConfig};
 use crate::scopes::{class_of, dotted, Key, Param};
 use crate::types::generic::is_word;
 use crate::types::info::Kind;
@@ -1162,6 +1164,43 @@ pub fn sites(
         .collect()
 }
 
+/// [`diagnostics`] of `parsed`, else [`unparsed`] of `text`; a panic becomes one
+/// `internal-error` in their place, so one module cannot stop a whole check.
+pub fn module(text: &str, parsed: Option<&Arc<Source>>, run: &Run<'_>) -> Found {
+    catch_unwind(AssertUnwindSafe(|| match parsed {
+        Some(parsed) => diagnostics(parsed, run),
+        None => unparsed(text, run),
+    }))
+    .unwrap_or_else(|payload| crashed(&*payload, run.settings.rules))
+}
+
+fn crashed(payload: &(dyn Any + Send), rules: &RuleConfig) -> Found {
+    let cause = payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("unknown cause");
+    let diagnostic = Diagnostic {
+        rule: Rule::InternalError,
+        message: format!("sqlty crashed checking this file, please report it: {cause}"),
+        severity: rules.severity(Rule::InternalError),
+        line: 1,
+        span: 0..0,
+        fix: Vec::new(),
+    };
+    Found {
+        diagnostics: rules
+            .is_enabled(Rule::InternalError)
+            .then_some(Reported {
+                diagnostic,
+                redundant: None,
+            })
+            .into_iter()
+            .collect(),
+        needed: HashSet::new(),
+    }
+}
+
 /// The diagnostics of a source that does not parse (see [`crate::parse`]): what its
 /// strings alone tell, by line.
 pub fn unparsed(text: &str, run: &Run<'_>) -> Found {
@@ -1417,6 +1456,66 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use crate::options::Options;
+
+    fn crash(text: &str, rules: &[(&str, &str)]) -> Vec<Diagnostic> {
+        let options = Options::new("postgres", None, None, false).unwrap();
+        let rules = RuleConfig::from_overrides(Some(
+            rules
+                .iter()
+                .map(|(rule, severity)| (rule.to_string(), severity.to_string()))
+                .collect(),
+        ))
+        .unwrap();
+        let coerce = HashSet::new();
+        let settings = Settings {
+            options: &options,
+            rules: &rules,
+            index: None,
+            module: None,
+            coerce: &coerce,
+        };
+        let lint = |_: &str| -> Vec<Lint> { panic!("lint {}", 1) };
+        let run = Run {
+            settings: &settings,
+            has_schema: false,
+            lint: &lint,
+            helpers: None,
+            variants: None,
+        };
+        module(text, None, &run)
+            .diagnostics
+            .into_iter()
+            .map(|reported| reported.diagnostic)
+            .collect()
+    }
+
+    #[test]
+    fn a_panic_becomes_an_internal_error() {
+        let found = crash("q = 1\n", &[("sqruff", "warn")]);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].rule, Rule::InternalError);
+        assert_eq!(found[0].severity, crate::rules::Severity::Error);
+        assert_eq!(
+            found[0].message,
+            "sqlty crashed checking this file, please report it: lint 1"
+        );
+        let ignored = [("sqruff", "warn"), ("internal-error", "ignore")];
+        assert!(crash("q = 1\n", &ignored).is_empty());
+        assert!(crash("q = 1\n", &[]).is_empty());
+    }
+
+    #[test]
+    fn a_panic_without_a_message_has_an_unknown_cause() {
+        let rules = RuleConfig::from_overrides(None).unwrap();
+        let found = crashed(&42, &rules);
+        assert!(found.diagnostics[0]
+            .diagnostic
+            .message
+            .ends_with("unknown cause"));
+        let found = crashed(&"static", &rules);
+        assert!(found.diagnostics[0].diagnostic.message.ends_with("static"));
+    }
 
     #[test]
     fn a_dict_keeps_the_first_place_and_the_last_value_of_a_key() {
