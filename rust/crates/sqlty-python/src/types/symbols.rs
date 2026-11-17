@@ -75,6 +75,16 @@ impl Source {
             .get_or_init(|| crate::index::imports_of(&self.entries, self.module.as_deref()))
     }
 
+    /// [`Self::targets`] as the module `module`, or as its own one without it.
+    pub fn targets_in(&self, module: Option<&str>) -> std::borrow::Cow<'_, crate::index::Targets> {
+        match module {
+            Some(module) if self.module.as_deref() != Some(module) => {
+                std::borrow::Cow::Owned(crate::index::imports_of(&self.entries, Some(module)))
+            }
+            _ => std::borrow::Cow::Borrowed(self.targets()),
+        }
+    }
+
     pub fn body(&self) -> &[Stmt] {
         &self.parsed.syntax().body
     }
