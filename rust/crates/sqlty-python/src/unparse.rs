@@ -7,11 +7,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::LazyLock;
 
 use regex::Regex;
+use ruff_python_ast::token::TokenKind;
 use ruff_python_ast::{
     BoolOp, CmpOp, Comprehension, ConversionFlag, Expr, FStringPartRef, InterpolatedElement,
     InterpolatedStringElement, InterpolatedStringElements, Keyword, Number, Operator, Parameter,
     Parameters, UnaryOp,
 };
+use ruff_python_parser::{lexer, Mode};
 use ruff_text_size::Ranged;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -723,73 +725,27 @@ fn field_text_as(field: &InterpolatedElement, source: &str, legacy: bool) -> Str
 
 /// The offset of the last `!` of `text` outside brackets and string literals.
 fn last_bang(text: &str) -> Option<usize> {
-    let bytes = text.as_bytes();
+    let mut tokens = lexer::lex(text, Mode::Expression);
     let (mut depth, mut found) = (0usize, None);
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'(' | b'[' | b'{' => depth += 1,
-            b')' | b']' | b'}' => depth = depth.saturating_sub(1),
-            b'!' if depth == 0 => found = Some(i),
-            b'\'' | b'"' => {
-                i = string_end(bytes, i);
-                continue;
+    loop {
+        match tokens.next_token() {
+            TokenKind::EndOfFile => return found,
+            TokenKind::Lpar
+            | TokenKind::Lsqb
+            | TokenKind::Lbrace
+            | TokenKind::FStringStart
+            | TokenKind::TStringStart => depth += 1,
+            TokenKind::Rpar
+            | TokenKind::Rsqb
+            | TokenKind::Rbrace
+            | TokenKind::FStringEnd
+            | TokenKind::TStringEnd => depth = depth.saturating_sub(1),
+            TokenKind::Exclamation | TokenKind::NotEqual if depth == 0 => {
+                found = Some(tokens.current_range().start().to_usize());
             }
             _ => {}
         }
-        i += 1;
     }
-    found
-}
-
-/// The offset past the string literal that opens at `start`, with the fields of an f- or
-/// t-string, whose quotes open strings of their own.
-fn string_end(bytes: &[u8], start: usize) -> usize {
-    let quote = bytes[start];
-    let fields = bytes[..start]
-        .iter()
-        .rev()
-        .take_while(|b| b.is_ascii_alphabetic())
-        .any(|b| matches!(b.to_ascii_lowercase(), b'f' | b't'));
-    let close: &[u8] = if bytes[start..].starts_with(&[quote; 3]) {
-        &[quote; 3]
-    } else {
-        &[quote; 1]
-    };
-    let mut i = start + close.len();
-    while i < bytes.len() && !bytes[i..].starts_with(close) {
-        i = match bytes[i] {
-            b'\\' => i + 2,
-            b'{' if fields && bytes.get(i + 1) == Some(&b'{') => i + 2,
-            b'{' if fields => field_end(bytes, i + 1),
-            _ => i + 1,
-        };
-    }
-    (i + close.len()).min(bytes.len())
-}
-
-/// The offset past the `}` of the field whose expression starts at `start`; quotes in its
-/// format spec are text.
-fn field_end(bytes: &[u8], start: usize) -> usize {
-    let (mut depth, mut spec) = (0usize, false);
-    let mut i = start;
-    while i < bytes.len() && (depth > 0 || bytes[i] != b'}') {
-        i = match bytes[i] {
-            b'{' if spec => field_end(bytes, i + 1),
-            _ if spec => i + 1,
-            b'\'' | b'"' => string_end(bytes, i),
-            byte => {
-                match byte {
-                    b':' if depth == 0 => spec = true,
-                    b'(' | b'[' | b'{' => depth += 1,
-                    b')' | b']' | b'}' => depth = depth.saturating_sub(1),
-                    _ => {}
-                }
-                i + 1
-            }
-        };
-    }
-    i + 1
 }
 
 /// `text` without its comments, as `set_ftstring_expr` drops them: a quote opens a string
