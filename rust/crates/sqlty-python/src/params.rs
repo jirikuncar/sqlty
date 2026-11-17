@@ -274,7 +274,8 @@ fn head<'a>(scan: &'a Scan) -> impl Iterator<Item = Range<usize>> + 'a {
     })
 }
 
-/// `source` with `import M` for each module of [`MODULES`] it lacks and names more often than `before`.
+/// `source` with `import M` for each module of [`MODULES`] it lacks and that the new types
+/// name: one it names more often than `before`.
 fn with_imports(before: &str, source: &str) -> String {
     let scan = Scan::new(source, "");
     let imports: Vec<(bool, String, Range<usize>)> = head(&scan)
