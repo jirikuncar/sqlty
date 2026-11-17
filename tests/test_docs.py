@@ -330,6 +330,7 @@ def test_bump_version_writes_every_place(tmp_path: Path) -> None:
         ".cursor-plugin/plugin.json": 1,
         "docs/recipes/ci.md": 1,
         "skills/sqlty-ci/SKILL.md": 1,
+        "npm/sqlty/package.json": 7,
     }
     for place in ["scripts/bump_version.py", *places]:
         (tmp_path / place).parent.mkdir(parents=True, exist_ok=True)

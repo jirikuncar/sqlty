@@ -1,6 +1,6 @@
 {
   "name": "sqlty",
-  "version": "0.0.0",
+  "version": "0.6.0",
   "description": "Type-safe raw SQL for Python: row and parameter types inferred from your SQL and schema, no ORM or database needed",
   "keywords": [
     "sql",
@@ -31,11 +31,11 @@
     "node": ">=18"
   },
   "optionalDependencies": {
-    "sqlty-darwin-arm64": "0.0.0",
-    "sqlty-darwin-x64": "0.0.0",
-    "sqlty-linux-arm64": "0.0.0",
-    "sqlty-linux-x64": "0.0.0",
-    "sqlty-win32-arm64": "0.0.0",
-    "sqlty-win32-x64": "0.0.0"
+    "sqlty-darwin-arm64": "0.6.0",
+    "sqlty-darwin-x64": "0.6.0",
+    "sqlty-linux-arm64": "0.6.0",
+    "sqlty-linux-x64": "0.6.0",
+    "sqlty-win32-arm64": "0.6.0",
+    "sqlty-win32-x64": "0.6.0"
   }
 }
