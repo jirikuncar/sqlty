@@ -795,8 +795,14 @@ mod tests {
             .named(Some("app.a"));
         let own = source.targets_in(None);
         let other = source.targets_in(Some("lib.a"));
-        assert_eq!(own.0["c"].0, "app.b");
-        assert_eq!(other.0["c"].0, "lib.b");
+        assert_eq!(
+            own.0.get("c").map(|(module, _)| module.as_str()),
+            Some("app.b")
+        );
+        assert_eq!(
+            other.0.get("c").map(|(module, _)| module.as_str()),
+            Some("lib.b")
+        );
     }
 
     #[test]

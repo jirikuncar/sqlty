@@ -1,6 +1,5 @@
 //! `_ast_type`: an annotation resolved to a type, from source alone.
 
-use crate::frozen::Table;
 use std::sync::Arc;
 
 use ruff_python_ast::{Expr, Number, Operator};
@@ -8,6 +7,7 @@ use ruff_python_ast::{Expr, Number, Operator};
 use super::pydantic::Known;
 use super::stdlib::{stdlib_class, Version};
 use super::ty::{builtins, py_strip, Class, Lit, Ty};
+use crate::frozen::Table;
 
 pub const TYPING_MODULES: [&str; 2] = ["typing", "typing_extensions"];
 pub const QUALIFIERS: [&str; 3] = ["ReadOnly", "Required", "NotRequired"];

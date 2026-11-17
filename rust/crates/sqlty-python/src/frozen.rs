@@ -63,14 +63,6 @@ impl<V> FromIterator<(String, V)> for Frozen<V> {
     }
 }
 
-impl<V> std::ops::Index<&str> for Frozen<V> {
-    type Output = V;
-
-    fn index(&self, key: &str) -> &V {
-        self.get(key).expect("no entry for the key")
-    }
-}
-
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {

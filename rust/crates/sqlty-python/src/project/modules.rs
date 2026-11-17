@@ -11,6 +11,7 @@ use super::{normalized, Files, Listing};
 pub struct Packages {
     files: Box<dyn Files + Send + Sync>,
     known: Mutex<HashMap<PathBuf, bool>>,
+    roots: Mutex<HashMap<PathBuf, Option<PathBuf>>>,
 }
 
 impl Packages {
@@ -19,6 +20,7 @@ impl Packages {
         Self {
             files,
             known: Mutex::default(),
+            roots: Mutex::default(),
         }
     }
 
@@ -36,6 +38,19 @@ impl Packages {
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<PathBuf, bool>> {
         self.known.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// `root` against `cwd`, resolved, when it is a directory; each asked once.
+    fn root(&self, root: &Path, cwd: &Path) -> Option<PathBuf> {
+        let absolute = normalized(&cwd.join(root));
+        let mut roots = self.roots.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(found) = roots.get(&absolute) {
+            return found.clone();
+        }
+        let resolved = self.files.canonical(&absolute);
+        let found = matches!(self.files.list(&resolved), Listing::Entries(_)).then_some(resolved);
+        roots.insert(absolute, found.clone());
+        found
     }
 
     /// The names of `directory` and its parents up through the packages, outermost first.
@@ -65,10 +80,9 @@ impl Packages {
         }
         let mut names = vec![parts.join(".")];
         for root in roots {
-            let root = self.files.canonical(&normalized(&cwd.join(root)));
-            if !matches!(self.files.list(&root), Listing::Entries(_)) {
+            let Some(root) = self.root(root, cwd) else {
                 continue;
-            }
+            };
             let Some(relative) = strip(path, &root) else {
                 continue;
             };
