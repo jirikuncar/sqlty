@@ -1653,7 +1653,7 @@ dependencies = [
 
 [[package]]
 name = "sqlty-bench"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "criterion",
  "sqlty-python",
@@ -1662,7 +1662,7 @@ dependencies = [
 
 [[package]]
 name = "sqlty-cli"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "clap",
  "mimalloc",
@@ -1677,7 +1677,7 @@ dependencies = [
 
 [[package]]
 name = "sqlty-core"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "pyo3",
  "pyo3-build-config",
@@ -1699,7 +1699,7 @@ dependencies = [
 
 [[package]]
 name = "sqlty-format"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "regex",
  "sqlty-python",
@@ -1710,7 +1710,7 @@ dependencies = [
 
 [[package]]
 name = "sqlty-lsp"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "crossbeam-channel",
  "lsp-server",
@@ -1723,7 +1723,7 @@ dependencies = [
 
 [[package]]
 name = "sqlty-project"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "rayon",
  "regex",
@@ -1736,7 +1736,7 @@ dependencies = [
 
 [[package]]
 name = "sqlty-python"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "ignore",
  "recursive",
@@ -1752,7 +1752,7 @@ dependencies = [
 
 [[package]]
 name = "sqlty-sql"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "insta",
  "recursive",
@@ -1766,7 +1766,7 @@ dependencies = [
 
 [[package]]
 name = "sqlty-wasm"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "serde",
  "serde_json",
