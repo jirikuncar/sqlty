@@ -7,11 +7,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::LazyLock;
 
 use regex::Regex;
+use ruff_python_ast::token::TokenKind;
 use ruff_python_ast::{
     BoolOp, CmpOp, Comprehension, ConversionFlag, Expr, FStringPartRef, InterpolatedElement,
     InterpolatedStringElement, InterpolatedStringElements, Keyword, Number, Operator, Parameter,
     Parameters, UnaryOp,
 };
+use ruff_python_parser::{lexer, Mode};
 use ruff_text_size::Ranged;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -721,34 +723,29 @@ fn field_text_as(field: &InterpolatedElement, source: &str, legacy: bool) -> Str
     }
 }
 
-/// The offset of the last `!` of `text` outside brackets and string literals.
+/// The offset of the last `!=` of `text` outside brackets and string literals.
 fn last_bang(text: &str) -> Option<usize> {
-    let bytes = text.as_bytes();
+    let mut tokens = lexer::lex(text, Mode::Expression);
     let (mut depth, mut found) = (0usize, None);
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'(' | b'[' | b'{' => depth += 1,
-            b')' | b']' | b'}' => depth = depth.saturating_sub(1),
-            b'!' if depth == 0 => found = Some(i),
-            quote @ (b'\'' | b'"') => {
-                let triple = bytes[i..].starts_with(&[quote; 3]);
-                let close: &[u8] = if triple {
-                    &[quote; 3][..]
-                } else {
-                    &[quote; 1][..]
-                };
-                i += close.len();
-                while i < bytes.len() && !bytes[i..].starts_with(close) {
-                    i += if bytes[i] == b'\\' { 2 } else { 1 };
-                }
-                i += close.len() - 1;
+    loop {
+        match tokens.next_token() {
+            TokenKind::EndOfFile => return found,
+            TokenKind::Lpar
+            | TokenKind::Lsqb
+            | TokenKind::Lbrace
+            | TokenKind::FStringStart
+            | TokenKind::TStringStart => depth += 1,
+            TokenKind::Rpar
+            | TokenKind::Rsqb
+            | TokenKind::Rbrace
+            | TokenKind::FStringEnd
+            | TokenKind::TStringEnd => depth = depth.saturating_sub(1),
+            TokenKind::NotEqual if depth == 0 => {
+                found = Some(tokens.current_range().start().to_usize());
             }
             _ => {}
         }
-        i += 1;
     }
-    found
 }
 
 /// `text` without its comments, as `set_ftstring_expr` drops them: a quote opens a string
@@ -1106,6 +1103,18 @@ mod tests {
             ("t'''{x = \\\n}'''", "x = \\", "x "),
             ("t'{a + \"x!\" !r}'", "a + \"x!\"", "a + \"x!\" "),
             ("t'{(a!=b)!=c:y}'", "(a!=b)", "(a!=b)!=c"),
+            ("t'{f'{'!'}'!=b:y}'", "f'{'!'}'", "f'{'!'}'!=b"),
+            (
+                "t'{f'{a:{b!r}>3}'!=c:y}'",
+                "f'{a:{b!r}>3}'",
+                "f'{a:{b!r}>3}'!=c",
+            ),
+            ("t'{f'{{!'!=b:y}'", "f'{{!'", "f'{{!'!=b"),
+            (
+                "t'{f'{(a)!r}\\'!'!=b:y}'",
+                "f'{(a)!r}\\'!'",
+                "f'{(a)!r}\\'!'!=b",
+            ),
             (
                 "t'''{a + '''\"'''!=b:y}'''",
                 "a + '''\"'''",
