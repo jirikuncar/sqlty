@@ -16,6 +16,7 @@ use sqlty_sql::analyzer::{self, Nullability};
 
 use crate::calls::{helper_calls, is_marked, Call};
 use crate::checker::{self, Diagnostic};
+use crate::frozen::Table;
 use crate::index::HelperIndex;
 use crate::rewriter::ImportStyle;
 use crate::rows::Reported;
@@ -422,7 +423,7 @@ fn union_members(annotation: &Expr) -> Vec<Option<&Expr>> {
 
 /// `sqlty._params.annotation_type`: the type a value annotated `expr` has, as argument
 /// types are spelled.
-fn annotation_type(expr: Option<&Expr>, imported: &HashMap<String, String>) -> Option<String> {
+fn annotation_type(expr: Option<&Expr>, imported: &Table) -> Option<String> {
     let Some(expr) = expr else {
         return Some("None".to_string());
     };
@@ -1199,7 +1200,7 @@ pub fn any_calls(source: &Source, style: &ImportStyle) -> Vec<usize> {
     if !text.contains("Any") || !may_wrap(text, &style.import_line) {
         return Vec::new();
     }
-    module::any_calls(source.body(), &source.typing)
+    module::any_calls(source.body(), &source.aliases)
         .into_iter()
         .filter(|(_, name)| {
             name == wrapper

@@ -14,6 +14,7 @@ use super::pydantic::Known;
 use super::resolve::{is_name, Found, Names, Resolver, TYPING_MODULES};
 use super::stdlib::Version;
 use super::ty::{Class, NewType, Ty};
+use crate::frozen::Table;
 use crate::module::Imports;
 use crate::scopes::Lines;
 
@@ -25,13 +26,11 @@ pub struct Source {
     pub comments: Vec<TextRange>,
     pub lines: Lines,
     /// `ParsedSource.typing_aliases`.
-    pub aliases: Arc<HashMap<String, String>>,
+    pub aliases: Arc<Table>,
     /// `ParsedSource.imported_names`.
-    pub imports: HashMap<String, String>,
+    pub imports: Table,
     /// Every import, in `ast.walk` order.
     pub entries: Vec<crate::module::Import>,
-    /// `ParsedSource.typing_aliases` as pairs, a later pair wins.
-    pub typing: Vec<(String, String)>,
     pub version: Version,
     /// `ParsedSource.module`: the dotted name, `pkg.__init__` for a package.
     pub module: Option<String>,
@@ -64,10 +63,9 @@ impl Source {
         Some(Source {
             lines: Lines::new(&text),
             text,
-            aliases: Arc::new(imports.typing.iter().cloned().collect()),
+            aliases: Arc::new(imports.typing.into_iter().collect()),
             imports: imports.imported,
             entries: imports.entries,
-            typing: imports.typing,
             module: None,
             targets: std::sync::OnceLock::new(),
             constants: std::sync::OnceLock::new(),
@@ -335,7 +333,7 @@ fn bound_names(body: &[Stmt]) -> HashMap<&str, usize> {
 const PYDANTIC_HOOKS: [&str; 2] = ["__get_pydantic_core_schema__", "__get_validators__"];
 
 /// `_plain_class`: whether a class is known by its bases alone.
-fn plain_class(node: &StmtClassDef, aliases: &HashMap<String, String>) -> bool {
+fn plain_class(node: &StmtClassDef, aliases: &Table) -> bool {
     node.decorator_list.is_empty()
         && node
             .arguments
@@ -365,7 +363,7 @@ enum Local {
 
 /// `_module_types`: the aliases, `NewType`s and plain classes of a module, by name; a name
 /// bound more than once, or a generic `type X[T] = ...`, is left out.
-fn module_types(body: &[Stmt], aliases: &HashMap<String, String>) -> HashMap<String, Local> {
+fn module_types(body: &[Stmt], aliases: &Table) -> HashMap<String, Local> {
     let mut found: HashMap<String, Local> = HashMap::new();
     for (index, stmt) in body.iter().enumerate() {
         if let Some((name, _)) = type_alias(stmt, aliases) {
@@ -387,10 +385,7 @@ fn module_types(body: &[Stmt], aliases: &HashMap<String, String>) -> HashMap<Str
 }
 
 /// `X = T` with `T` a type expression, `X: TypeAlias = T` or `type X = T`: `X` and `T`.
-fn type_alias<'a>(
-    stmt: &'a Stmt,
-    aliases: &HashMap<String, String>,
-) -> Option<(&'a str, &'a Expr)> {
+fn type_alias<'a>(stmt: &'a Stmt, aliases: &Table) -> Option<(&'a str, &'a Expr)> {
     let (target, value): (&Expr, &Expr) = match stmt {
         Stmt::Assign(node) if node.targets.len() == 1 && is_type_expr(&node.value) => {
             (&node.targets[0], &node.value)
@@ -405,10 +400,7 @@ fn type_alias<'a>(
 }
 
 /// `X = NewType("X", T)` with `T` a type expression: `X` and `T`.
-fn newtype_assignment<'a>(
-    stmt: &'a Stmt,
-    aliases: &HashMap<String, String>,
-) -> Option<(&'a str, &'a Expr)> {
+fn newtype_assignment<'a>(stmt: &'a Stmt, aliases: &Table) -> Option<(&'a str, &'a Expr)> {
     let Stmt::Assign(node) = stmt else {
         return None;
     };

@@ -50,6 +50,7 @@ pub mod config;
 pub mod drivers;
 pub mod edit;
 pub mod fixer;
+pub mod frozen;
 pub mod helpers;
 #[allow(missing_docs)]
 pub mod index;

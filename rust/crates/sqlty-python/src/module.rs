@@ -15,6 +15,7 @@ use ruff_python_ast::{ExceptHandler, Expr, Stmt, StmtImport, StmtImportFrom};
 use ruff_text_size::Ranged;
 
 use crate::drivers::{self, DriverCall};
+use crate::frozen::Table;
 
 const TYPING_MODULES: [&str; 2] = ["typing", "typing_extensions"];
 
@@ -36,7 +37,7 @@ pub struct Imports {
     /// Every alias, in `ast.walk` order.
     pub entries: Vec<Import>,
     /// `ParsedSource.imported_names`.
-    pub imported: HashMap<String, String>,
+    pub imported: Table,
     /// `ParsedSource.typing_aliases` as pairs, a later pair wins.
     pub typing: Vec<(String, String)>,
 }
@@ -47,9 +48,10 @@ impl Imports {
         let mut imports = Vec::new();
         collect_imports(body, 1, &mut imports);
         imports.sort_by_key(|(depth, _)| *depth);
+        let mut imported = HashMap::new();
         let mut found = Self {
             entries: Vec::new(),
-            imported: HashMap::new(),
+            imported: Table::default(),
             typing: Vec::new(),
         };
         for (_, stmt) in &imports {
@@ -64,8 +66,7 @@ impl Imports {
                             found.typing.push((local.clone(), original.clone()));
                         }
                         if from.level == 0 && !module_name.is_empty() {
-                            found
-                                .imported
+                            imported
                                 .entry(local.clone())
                                 .or_insert_with(|| format!("{module_name}.{original}"));
                         }
@@ -89,8 +90,7 @@ impl Imports {
                             Some(asname) => (asname.as_str(), name),
                             None => (root, root),
                         };
-                        found
-                            .imported
+                        imported
                             .entry(local.to_string())
                             .or_insert_with(|| dotted.to_string());
                         found.entries.push(Import {
@@ -103,6 +103,7 @@ impl Imports {
                 }
             }
         }
+        found.imported = imported.into();
         found
     }
 }
@@ -149,7 +150,8 @@ pub fn facts(source: &str) -> Option<Facts> {
         typing_aliases: typing,
         ..Facts::default()
     };
-    let aliases = Aliases(&found.typing_aliases);
+    let table: Table = found.typing_aliases.iter().cloned().collect();
+    let aliases = Aliases(&table);
     let mut calls = Calls {
         aliases: &aliases,
         names: Vec::new(),
@@ -174,8 +176,8 @@ pub fn facts(source: &str) -> Option<Facts> {
 }
 
 /// `(offset, callee)` of each `X[T](...)` of `body` whose `T` is `typing.Any`, by offset;
-/// `typing` is [`Imports::typing`].
-pub fn any_calls(body: &[Stmt], typing: &[(String, String)]) -> Vec<(usize, String)> {
+/// `typing` is [`Imports::typing`] as a table.
+pub fn any_calls(body: &[Stmt], typing: &Table) -> Vec<(usize, String)> {
     let aliases = Aliases(typing);
     let mut calls = Calls {
         aliases: &aliases,
@@ -237,15 +239,11 @@ fn collect_imports<'a>(body: &'a [Stmt], depth: usize, out: &mut Vec<(usize, Imp
 }
 
 /// Local names of `typing` and its members, to the originals; a later import wins.
-struct Aliases<'p>(&'p [(String, String)]);
+struct Aliases<'p>(&'p Table);
 
 impl Aliases<'_> {
     fn get(&self, name: &str) -> Option<&str> {
-        self.0
-            .iter()
-            .rev()
-            .find(|(local, _)| local == name)
-            .map(|(_, original)| original.as_str())
+        self.0.get(name).map(String::as_str)
     }
 
     /// The `typing` member `expr` names, as `_typing_name` does.

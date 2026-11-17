@@ -11,6 +11,7 @@ use regex::Regex;
 use ruff_python_ast::Expr;
 
 use crate::calls::{definitions, helper, index_functions, parameter_names, rank, Helper, Kind};
+use crate::frozen::{Frozen, Table};
 use crate::module::Import;
 use crate::types::extract::extract_type_definitions;
 use crate::types::info::{Dict, TypeInfo};
@@ -20,24 +21,21 @@ use crate::types::symbols::{Index, ModuleTypes, RowType, Source};
 use crate::types::ty::Ty;
 
 /// Local names bound to imported names `(module, name)`.
-pub type Functions = HashMap<String, (String, String)>;
+pub type Functions = Frozen<(String, String)>;
 /// What `imports_of` gives: the functions, and the modules by local name.
-pub type Targets = (Functions, HashMap<String, String>);
+pub type Targets = (Functions, Table);
 
 /// `_imports_of`: the local names `entries` bind to imported functions `(module, name)`
 /// and to modules, in the module `module`.
-pub fn imports_of(
-    entries: &[Import],
-    module: Option<&str>,
-) -> (Functions, HashMap<String, String>) {
-    let mut functions = Functions::new();
-    let mut modules = HashMap::new();
+pub fn imports_of(entries: &[Import], module: Option<&str>) -> Targets {
+    let mut functions = Vec::new();
+    let mut modules = Vec::new();
     let package = module.map_or("", |module| {
         module.rsplit_once('.').map_or("", |(package, _)| package)
     });
     for import in entries {
         let Some(base) = &import.module else {
-            modules.insert(import.local.clone(), import.original.clone());
+            modules.push((import.local.clone(), import.original.clone()));
             continue;
         };
         let mut base = base.clone();
@@ -60,21 +58,24 @@ pub fn imports_of(
             }
             base = parts.join(".");
         }
-        modules.insert(
+        modules.push((
             import.local.clone(),
             if base.is_empty() {
                 import.original.clone()
             } else {
                 format!("{base}.{}", import.original)
             },
-        );
-        functions.insert(import.local.clone(), (base, import.original.clone()));
+        ));
+        functions.push((import.local.clone(), (base, import.original.clone())));
     }
-    (functions, modules)
+    (
+        functions.into_iter().collect(),
+        modules.into_iter().collect(),
+    )
 }
 
 /// The module a dotted prefix names, through the modules `modules` binds.
-pub fn module_of(prefix: &str, modules: &HashMap<String, String>) -> String {
+pub fn module_of(prefix: &str, modules: &Table) -> String {
     let (head, rest) = prefix.split_once('.').unwrap_or((prefix, ""));
     match modules.get(head) {
         Some(module) if rest.is_empty() => module.clone(),
@@ -524,7 +525,7 @@ impl HelperIndex {
     fn constant(
         &self,
         functions: &Functions,
-        modules: &HashMap<String, String>,
+        modules: &Table,
         dotted: &str,
     ) -> Option<(&Source, &Expr)> {
         match dotted.rsplit_once('.') {
@@ -740,11 +741,10 @@ mod tests {
         )
         .unwrap();
         let (_, modules) = imports_of(&source.entries, Some("app"));
-        let mut modules: Vec<_> = modules.into_iter().collect();
-        modules.sort();
+        let modules: Vec<_> = modules.iter().collect();
         assert_eq!(
             modules,
-            [("a".into(), "a".into()), ("d".into(), "c.d".into())]
+            [(&"a".into(), &"a".into()), (&"d".into(), &"c.d".into())]
         );
     }
 
