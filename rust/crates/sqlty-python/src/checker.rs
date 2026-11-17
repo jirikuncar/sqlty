@@ -12,11 +12,11 @@
 //!   unless the wrapper call is one of `any_calls`
 
 use regex::Regex;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::LazyLock;
 
+use crate::analyses::{Analyses, Analysis};
 use crate::edit::Edit;
 use crate::options::{Dialect, Options};
 use crate::rewriter::{
@@ -27,10 +27,8 @@ use crate::rewriter::{
 use crate::rules::{Rule, RuleConfig, Severity};
 use crate::scan::Scan;
 use crate::tokens::{content, query_offset, Call};
-use sqlty_sql::analyzer::{
-    expand_star, parse, route, row_type, unknown_database, Column, Parsed, SchemaData,
-};
-use sqlty_sql::diagnostics::{NameDiagnostic, NameRule};
+use sqlty_sql::analyzer::{expand_star, parse, route, unknown_database, SchemaData};
+use sqlty_sql::diagnostics::NameRule;
 use std::ops::Range;
 
 /// `--sql SELECT ...`: a space after the marker, then the start of a SQL statement,
@@ -117,6 +115,17 @@ pub fn check_source(
     rules: &RuleConfig,
     any_calls: &[usize],
 ) -> Vec<Diagnostic> {
+    check_source_with(source, options, rules, any_calls, &Analyses::new(options))
+}
+
+/// [`check_source`], reading each query's analysis from `analyses`.
+pub(crate) fn check_source_with(
+    source: &str,
+    options: &Options,
+    rules: &RuleConfig,
+    any_calls: &[usize],
+    analyses: &Analyses<'_>,
+) -> Vec<Diagnostic> {
     let scan = Scan::new(source, &options.style.wrapper_name);
     let mut checker = Checker {
         scan: &scan,
@@ -126,7 +135,7 @@ pub fn check_source(
         diagnostics: Vec::new(),
         spelling: Spelling::of(&scan),
         imported: imported_names(&scan),
-        analyses: RefCell::default(),
+        analyses,
     };
     if options.dialect == Dialect::MySql {
         checker.mysql_markers();
@@ -208,45 +217,13 @@ struct Checker<'a> {
     /// `(binding, qualified name)` of the names the module imports.
     imported: Vec<(String, String)>,
     /// Each marked query's analysis, by its text, so no step parses a query twice.
-    analyses: RefCell<HashMap<String, Rc<Analysis>>>,
-}
-
-/// What the steps of [`check_source`] ask of one marked query.
-struct Analysis {
-    parsed: Parsed,
-    /// The result columns; `None` when the query returns no rows or does not parse.
-    columns: Option<Vec<Column>>,
-    /// Why columns are untyped.
-    diagnostics: Vec<NameDiagnostic>,
-    row_type: Option<String>,
-}
-
-#[cfg(test)]
-thread_local! {
-    static ANALYZED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    analyses: &'a Analyses<'a>,
 }
 
 impl Checker<'_> {
     /// The analysis of `query`, a [`marked_query`], computed the first time a step asks.
     fn analysis(&self, query: &str) -> Rc<Analysis> {
-        if let Some(analysis) = self.analyses.borrow().get(query) {
-            return Rc::clone(analysis);
-        }
-        #[cfg(test)]
-        ANALYZED.with(|count| count.set(count.get() + 1));
-        let (dialect, schema) = route(query, self.options.dialect.name(), self.options.schema);
-        let parsed = parse(query, dialect);
-        let (columns, diagnostics) = parsed.analyze_with_diagnostics(schema);
-        let analysis = Rc::new(Analysis {
-            row_type: columns.as_deref().and_then(row_type),
-            parsed,
-            columns,
-            diagnostics,
-        });
-        self.analyses
-            .borrow_mut()
-            .insert(query.to_string(), Rc::clone(&analysis));
-        analysis
+        self.analyses.of(query)
     }
 
     fn report(&mut self, rule: Rule, message: String, at: &At) {
@@ -1330,6 +1307,7 @@ fn admits_tuple(annotated: &str, inferred: &str) -> bool {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use crate::analyses::ANALYZED;
     use sqlty_sql::analyzer::SchemaData;
     use std::collections::HashMap;
 
