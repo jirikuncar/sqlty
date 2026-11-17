@@ -210,7 +210,7 @@ impl Workspace {
         let parsed = parse
             .then(|| {
                 stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
-                    Source::new(&text, self.version).map(|source| {
+                    Source::new(Arc::clone(&text), self.version).map(|source| {
                         let source = source.named(Some(&name));
                         source.targets();
                         Arc::new(source)
