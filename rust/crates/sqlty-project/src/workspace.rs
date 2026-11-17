@@ -204,7 +204,7 @@ impl Workspace {
         let init = path.file_name().is_some_and(|name| name == "__init__.py");
         let name = format!("{}{}", names[0], if init { ".__init__" } else { "" });
         let parsed = stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
-            Source::new(&text, self.version).map(|source| {
+            Source::new(Arc::clone(&text), self.version).map(|source| {
                 let source = source.named(Some(&name));
                 source.targets();
                 Arc::new(source)
