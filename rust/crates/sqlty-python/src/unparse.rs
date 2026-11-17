@@ -723,7 +723,7 @@ fn field_text_as(field: &InterpolatedElement, source: &str, legacy: bool) -> Str
     }
 }
 
-/// The offset of the last `!` of `text` outside brackets and string literals.
+/// The offset of the last `!=` of `text` outside brackets and string literals.
 fn last_bang(text: &str) -> Option<usize> {
     let mut tokens = lexer::lex(text, Mode::Expression);
     let (mut depth, mut found) = (0usize, None);
@@ -740,7 +740,7 @@ fn last_bang(text: &str) -> Option<usize> {
             | TokenKind::Rbrace
             | TokenKind::FStringEnd
             | TokenKind::TStringEnd => depth = depth.saturating_sub(1),
-            TokenKind::Exclamation | TokenKind::NotEqual if depth == 0 => {
+            TokenKind::NotEqual if depth == 0 => {
                 found = Some(tokens.current_range().start().to_usize());
             }
             _ => {}
