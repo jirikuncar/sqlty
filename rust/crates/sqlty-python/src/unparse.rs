@@ -731,24 +731,65 @@ fn last_bang(text: &str) -> Option<usize> {
             b'(' | b'[' | b'{' => depth += 1,
             b')' | b']' | b'}' => depth = depth.saturating_sub(1),
             b'!' if depth == 0 => found = Some(i),
-            quote @ (b'\'' | b'"') => {
-                let triple = bytes[i..].starts_with(&[quote; 3]);
-                let close: &[u8] = if triple {
-                    &[quote; 3][..]
-                } else {
-                    &[quote; 1][..]
-                };
-                i += close.len();
-                while i < bytes.len() && !bytes[i..].starts_with(close) {
-                    i += if bytes[i] == b'\\' { 2 } else { 1 };
-                }
-                i += close.len() - 1;
+            b'\'' | b'"' => {
+                i = string_end(bytes, i);
+                continue;
             }
             _ => {}
         }
         i += 1;
     }
     found
+}
+
+/// The offset past the string literal that opens at `start`, with the fields of an f- or
+/// t-string, whose quotes open strings of their own.
+fn string_end(bytes: &[u8], start: usize) -> usize {
+    let quote = bytes[start];
+    let fields = bytes[..start]
+        .iter()
+        .rev()
+        .take_while(|b| b.is_ascii_alphabetic())
+        .any(|b| matches!(b.to_ascii_lowercase(), b'f' | b't'));
+    let close: &[u8] = if bytes[start..].starts_with(&[quote; 3]) {
+        &[quote; 3]
+    } else {
+        &[quote; 1]
+    };
+    let mut i = start + close.len();
+    while i < bytes.len() && !bytes[i..].starts_with(close) {
+        i = match bytes[i] {
+            b'\\' => i + 2,
+            b'{' if fields && bytes.get(i + 1) == Some(&b'{') => i + 2,
+            b'{' if fields => field_end(bytes, i + 1),
+            _ => i + 1,
+        };
+    }
+    (i + close.len()).min(bytes.len())
+}
+
+/// The offset past the `}` of the field whose expression starts at `start`; quotes in its
+/// format spec are text.
+fn field_end(bytes: &[u8], start: usize) -> usize {
+    let (mut depth, mut spec) = (0usize, false);
+    let mut i = start;
+    while i < bytes.len() && (depth > 0 || bytes[i] != b'}') {
+        i = match bytes[i] {
+            b'{' if spec => field_end(bytes, i + 1),
+            _ if spec => i + 1,
+            b'\'' | b'"' => string_end(bytes, i),
+            byte => {
+                match byte {
+                    b':' if depth == 0 => spec = true,
+                    b'(' | b'[' | b'{' => depth += 1,
+                    b')' | b']' | b'}' => depth = depth.saturating_sub(1),
+                    _ => {}
+                }
+                i + 1
+            }
+        };
+    }
+    i + 1
 }
 
 /// `text` without its comments, as `set_ftstring_expr` drops them: a quote opens a string
@@ -1106,6 +1147,18 @@ mod tests {
             ("t'''{x = \\\n}'''", "x = \\", "x "),
             ("t'{a + \"x!\" !r}'", "a + \"x!\"", "a + \"x!\" "),
             ("t'{(a!=b)!=c:y}'", "(a!=b)", "(a!=b)!=c"),
+            ("t'{f'{'!'}'!=b:y}'", "f'{'!'}'", "f'{'!'}'!=b"),
+            (
+                "t'{f'{a:{b!r}>3}'!=c:y}'",
+                "f'{a:{b!r}>3}'",
+                "f'{a:{b!r}>3}'!=c",
+            ),
+            ("t'{f'{{!'!=b:y}'", "f'{{!'", "f'{{!'!=b"),
+            (
+                "t'{f'{(a)!r}\\'!'!=b:y}'",
+                "f'{(a)!r}\\'!'",
+                "f'{(a)!r}\\'!'!=b",
+            ),
             (
                 "t'''{a + '''\"'''!=b:y}'''",
                 "a + '''\"'''",
