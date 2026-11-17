@@ -767,6 +767,14 @@ mod tests {
             discovery.walk(Path::new(".")),
             Err(FindError::Need(path)) if path == Path::new("/z/unread")
         ));
+        let pending = Tree::new(&[("/v/sqlty.toml", Some("<unread>"))]);
+        let discovery = Discovery::new(Box::new(pending), Path::new("/v"));
+        for _ in 0..2 {
+            assert!(matches!(
+                discovery.find(Path::new("/v")),
+                Err(FindError::Need(path)) if path == Path::new("/v/sqlty.toml")
+            ));
+        }
     }
 
     #[test]
