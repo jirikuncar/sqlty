@@ -18,6 +18,10 @@ static SQL_MARKER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\A\s*--sql[^\
 /// numbered as none is, which can be NULL since a caller may bind `None`.
 pub(super) const PSYCOPG: [&str; 2] = ["$00", "?00"];
 
+/// What a placeholder its call binds to a value that excludes `None` reads as: numbered as
+/// none is, in PostgreSQL and elsewhere, and never NULL.
+pub(super) const BOUND: [&str; 2] = ["$0", "?0"];
+
 /// `sql` as sqlparser should read it: the `--sql` marker line dropped (a leading space
 /// form like `--sql SELECT 1` leaves nothing), psycopg placeholders (`%s`, `%(name)s`,
 /// `%b`, `%t`) as [`PSYCOPG`] placeholders, values of unknown type, and `%%` as `%`, and the syntax sqlparser
