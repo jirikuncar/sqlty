@@ -1,5 +1,6 @@
 //! The `sqlty` executable: the commands on the real terminal and disk, reading sources as
-//! the Python environment it is installed in would. The commands Rust does not run yet
+//! the Python environment it is installed in would, or, installed outside one (npm,
+//! Homebrew), the environment of the project it runs in. The commands Rust does not run yet
 //! (and every command with `SQLTY_AST=python`) run as `python -m sqlty` of that
 //! environment.
 
@@ -17,9 +18,22 @@ use crate::{Host, EXIT_ERROR};
 /// Run `sqlty` with the arguments of this process; the exit code.
 pub fn main() -> i32 {
     let args: Vec<OsString> = std::env::args_os().collect();
-    let environment = Environment::of_executable();
+    let executable = std::env::current_exe().and_then(std::fs::canonicalize);
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let environment = Environment::find(&executable.unwrap_or_default(), &cwd, |name| {
+        std::env::var_os(name)
+    });
     if std::env::var("SQLTY_AST").is_ok_and(|ast| ast == "python") {
         return python(&environment, &args);
+    }
+    if args.len() == 2 && args[1] == "server" {
+        return match crate::server::serve(environment.version, environment.path) {
+            Ok(()) => 0,
+            Err(error) => {
+                eprintln!("sqlty: error: {error}");
+                EXIT_ERROR
+            }
+        };
     }
     let mut host = Native {
         environment: &environment,
@@ -71,10 +85,30 @@ pub struct Environment {
 }
 
 impl Environment {
-    fn of_executable() -> Self {
-        let executable = std::env::current_exe().and_then(std::fs::canonicalize);
-        let executable = executable.unwrap_or_default();
-        Self::of_scripts(executable.parent().unwrap_or(Path::new(".")))
+    /// The environment `executable` is installed in, else the one a project in `cwd` uses,
+    /// looked for as ty does: `VIRTUAL_ENV`, a non-base Conda environment, the nearest
+    /// `.venv`, the base Conda environment, then `python3` from `PATH`.
+    pub fn find(executable: &Path, cwd: &Path, env: impl Fn(&str) -> Option<OsString>) -> Self {
+        let scripts = executable.parent().unwrap_or(Path::new("."));
+        if installed_in(scripts.parent().unwrap_or(scripts)) {
+            return Self::of_scripts(scripts);
+        }
+        let conda = env("CONDA_PREFIX").map(PathBuf::from);
+        let base = env("CONDA_DEFAULT_ENV").is_some_and(|name| name == "base");
+        let venv = || {
+            cwd.ancestors()
+                .map(|directory| directory.join(".venv"))
+                .find(|venv| venv.join("pyvenv.cfg").is_file())
+        };
+        let prefix = env("VIRTUAL_ENV")
+            .map(PathBuf::from)
+            .or_else(|| conda.clone().filter(|_| !base))
+            .or_else(venv)
+            .or(conda);
+        match prefix {
+            Some(prefix) => Self::of_scripts(&scripts_of(&prefix)),
+            None => Self::of_scripts(scripts),
+        }
     }
 
     /// The environment whose scripts directory (`bin` or `Scripts`) is `scripts`.
@@ -103,6 +137,25 @@ impl Environment {
     }
 }
 
+/// Whether `prefix` is a virtual environment, or holds this sqlty's Python package.
+fn installed_in(prefix: &Path) -> bool {
+    prefix.join("pyvenv.cfg").is_file()
+        || site_packages(prefix).is_some_and(|site| site.join(DIST_INFO).is_dir())
+}
+
+/// Where the environment at `prefix` keeps its executables.
+fn scripts_of(prefix: &Path) -> PathBuf {
+    let windows = prefix.join("Scripts");
+    if windows.is_dir() {
+        windows
+    } else {
+        prefix.join("bin")
+    }
+}
+
+/// The metadata directory of this sqlty's Python package.
+const DIST_INFO: &str = concat!("sqlty-", env!("CARGO_PKG_VERSION"), ".dist-info");
+
 /// The oldest Python sqlty supports.
 const DEFAULT_VERSION: Version = (3, 14);
 
@@ -122,10 +175,9 @@ fn site_packages(prefix: &Path) -> Option<PathBuf> {
         .collect();
     found.sort();
     found.dedup();
-    let ours = format!("sqlty-{}.dist-info", env!("CARGO_PKG_VERSION"));
     found
         .iter()
-        .find(|site| site.join(&ours).is_dir())
+        .find(|site| site.join(DIST_INFO).is_dir())
         .or(found.first())
         .cloned()
 }
@@ -305,5 +357,77 @@ mod tests {
         let bare = Environment::of_scripts(&root.join("bin"));
         assert_eq!(bare.path, [root.join("bin")]);
         assert_eq!(bare.version.0, 3);
+    }
+
+    #[test]
+    fn finds_the_environment_of_the_project_outside_one() {
+        let root = std::env::temp_dir().join(format!("sqlty-find-{}", std::process::id()));
+        let venv = |prefix: &Path, scripts: &str| {
+            std::fs::create_dir_all(prefix.join(scripts)).unwrap();
+            std::fs::write(prefix.join("pyvenv.cfg"), "version_info = 3.15.0\n").unwrap();
+            prefix.join(scripts)
+        };
+        let project = root.join("project");
+        let cwd = project.join("app/db");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let npm = root.join("node_modules/sqlty-linux-x64/bin/sqlty");
+        let installed = venv(&root.join("installed"), "bin").join("sqlty");
+        let local = venv(&project.join(".venv"), "Scripts");
+        let active = venv(&root.join("active"), "bin");
+        let conda = venv(&root.join("conda"), "bin");
+        let none = |_: &str| None;
+        let find = |executable: &Path, vars: &[(&str, &Path)]| {
+            let vars: Vec<(String, OsString)> = vars
+                .iter()
+                .map(|(name, value)| (name.to_string(), value.as_os_str().to_owned()))
+                .collect();
+            Environment::find(executable, &cwd, |name| {
+                vars.iter()
+                    .find(|(key, _)| key == name)
+                    .map(|(_, value)| value.clone())
+            })
+            .path[0]
+                .clone()
+        };
+        let base = Path::new("base");
+        assert_eq!(
+            find(&installed, &[("VIRTUAL_ENV", &root.join("active"))]),
+            root.join("installed/bin")
+        );
+        assert_eq!(
+            find(
+                &npm,
+                &[
+                    ("VIRTUAL_ENV", &root.join("active")),
+                    ("CONDA_PREFIX", &root.join("conda"))
+                ]
+            ),
+            active
+        );
+        assert_eq!(find(&npm, &[("CONDA_PREFIX", &root.join("conda"))]), conda);
+        assert_eq!(
+            find(
+                &npm,
+                &[
+                    ("CONDA_PREFIX", &root.join("conda")),
+                    ("CONDA_DEFAULT_ENV", base)
+                ]
+            ),
+            local
+        );
+        assert_eq!(Environment::find(&npm, &cwd, none).version, (3, 15));
+        std::fs::remove_dir_all(project.join(".venv")).unwrap();
+        assert_eq!(
+            find(
+                &npm,
+                &[
+                    ("CONDA_PREFIX", &root.join("conda")),
+                    ("CONDA_DEFAULT_ENV", base)
+                ]
+            ),
+            conda
+        );
+        assert_eq!(find(&npm, &[]), npm.parent().unwrap());
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }

@@ -3,11 +3,11 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use sqlty_cli::server::RustWorkspace;
 use sqlty_lsp::{CompletionContext, Diagnostic, Edit, Settings, Severity, Workspace};
 
 use crate::SchemaHandle;
@@ -27,86 +27,11 @@ pub(crate) fn serve(py: Python<'_>) -> PyResult<()> {
         if python || settings.against.is_some() {
             return Ok(Opened(Box::new(BridgeWorkspace::open(root, settings)?)));
         }
-        let files = Arc::new(sqlty_project::Disk);
-        let workspace = sqlty_project::Workspace::root(root, files, version, extra.clone())?;
-        Ok(Opened(Box::new(RustWorkspace(workspace))))
+        let workspace = RustWorkspace::root(root, version, extra.clone())?;
+        Ok(Opened(Box::new(workspace)))
     };
     py.detach(|| sqlty_lsp::stdio(open).map_err(|error| error.to_string()))
         .map_err(PyRuntimeError::new_err)
-}
-
-/// A `sqlty_project::Workspace`; what its schemas could not read goes to standard error.
-struct RustWorkspace(sqlty_project::Workspace);
-
-impl RustWorkspace {
-    fn warned<T>(&mut self, found: T) -> T {
-        for warning in self.0.warnings() {
-            eprintln!("{warning}");
-        }
-        found
-    }
-}
-
-impl Workspace for RustWorkspace {
-    fn check(&mut self, path: &Path, text: &str) -> Result<Vec<Diagnostic>, String> {
-        let found = self.0.check(path, text);
-        let found = self.warned(found)?;
-        Ok(found.into_iter().map(diagnostic).collect())
-    }
-
-    fn fix(&mut self, path: &Path, text: &str) -> Result<String, String> {
-        let fixed = self.0.fix(path, text);
-        self.warned(fixed)
-    }
-
-    fn format(&mut self, path: &Path, text: &str) -> Result<String, String> {
-        let formatted = self.0.format(path, text);
-        self.warned(formatted)
-    }
-
-    fn rewrite(&mut self, path: &Path, text: &str) -> Result<String, String> {
-        let rewritten = self.0.rewrite(path, text);
-        self.warned(rewritten)
-    }
-
-    fn strip(&mut self, path: &Path, text: &str) -> Result<String, String> {
-        let stripped = self.0.strip(path, text);
-        self.warned(stripped)
-    }
-
-    fn completion(&mut self, path: &Path) -> Option<CompletionContext> {
-        let found = self.0.completion(path)?;
-        Some(CompletionContext {
-            schema: found.schema,
-            dialect: found.dialect.to_string(),
-            import_style: found.import_style,
-            helper_starts: found.helper_starts,
-        })
-    }
-}
-
-fn diagnostic(found: sqlty_python::checker::Diagnostic) -> Diagnostic {
-    Diagnostic {
-        rule: found.rule.name().to_string(),
-        message: found.message,
-        severity: if found.severity == sqlty_python::rules::Severity::Error {
-            Severity::Error
-        } else {
-            Severity::Warning
-        },
-        start: found.span.start,
-        end: found.span.end,
-        fix: found
-            .fix
-            .into_iter()
-            .map(|edit| Edit {
-                start: edit.range.start,
-                end: edit.range.end,
-                replacement: edit.replacement,
-            })
-            .collect(),
-        source: None,
-    }
 }
 
 /// The workspace a root opened as.

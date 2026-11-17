@@ -1,0 +1,41 @@
+{
+  "name": "sqlty",
+  "version": "0.0.0",
+  "description": "Type-safe raw SQL for Python: row and parameter types inferred from your SQL and schema, no ORM or database needed",
+  "keywords": [
+    "sql",
+    "python",
+    "type-checking",
+    "linter",
+    "language-server",
+    "postgresql",
+    "sqlite",
+    "mysql"
+  ],
+  "homepage": "https://sqlty.kuncar.dev/",
+  "bugs": "https://github.com/jirikuncar/sqlty/issues",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jirikuncar/sqlty",
+    "directory": "npm/sqlty"
+  },
+  "license": "MIT",
+  "author": "Jiri Kuncar",
+  "bin": {
+    "sqlty": "bin/sqlty.js"
+  },
+  "files": [
+    "bin/sqlty.js"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "sqlty-darwin-arm64": "0.0.0",
+    "sqlty-darwin-x64": "0.0.0",
+    "sqlty-linux-arm64": "0.0.0",
+    "sqlty-linux-x64": "0.0.0",
+    "sqlty-win32-arm64": "0.0.0",
+    "sqlty-win32-x64": "0.0.0"
+  }
+}
