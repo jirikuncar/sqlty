@@ -1922,10 +1922,7 @@ impl ModuleChecker<'_> {
             helpers,
             variants: self.config.variants,
         };
-        let mut found = match &parsed {
-            Some(parsed) => check::diagnostics(parsed, &run),
-            None => check::unparsed(source, &run),
-        };
+        let mut found = check::module(source, parsed.as_ref(), &run);
         if suppress {
             let ignores = match &parsed {
                 Some(parsed) => sqlty_python::suppress::ignores(parsed),

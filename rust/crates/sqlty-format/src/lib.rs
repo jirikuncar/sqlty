@@ -38,7 +38,7 @@ use sqruff_lib::core::linter::linted_file::LintedFile;
 /// psycopg's `%s`, `%(name)s` and `%%`, the `?` of SQLite and MySQL drivers, and the `{name}`
 /// fields of `str.format` and `sql.SQL` templates, which sqruff does not read as values.
 static PLACEHOLDER: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"%(?:\([^)]*\))?[sbt]|%%|\?|\{\w*\}").unwrap());
+    LazyLock::new(|| Regex::new(r"%(?:\([^)]*\))?[sbt]|%%|\?|\{\w*\}").expect("a valid pattern"));
 
 /// `source` with every query string sqruff can lay out formatted in `dialect`.
 pub fn format_source(source: &str, dialect: &str, style: &ImportStyle) -> String {

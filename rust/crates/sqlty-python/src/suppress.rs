@@ -191,7 +191,8 @@ fn apply_marked(
     rules: &RuleConfig,
     marker: &str,
 ) -> Vec<Reported> {
-    if ignores.is_empty() {
+    let crashed = |reported: &Reported| reported.diagnostic.rule == Rule::InternalError;
+    if ignores.is_empty() || diagnostics.iter().any(crashed) {
         return diagnostics;
     }
     let mut kept = Vec::new();
@@ -273,6 +274,26 @@ mod tests {
         };
         let rules = RuleConfig::default().only(&[Rule::SelectStar]);
         assert!(apply(&ignores(&source), vec![reported], &rules).is_empty());
+    }
+
+    #[test]
+    fn a_crashed_module_reports_no_unused_ignore() {
+        let source = Source::new("q = 1  # sqlty: ignore[select-star]\n", (3, 14)).unwrap();
+        let reported = Reported {
+            diagnostic: Diagnostic {
+                rule: Rule::InternalError,
+                message: String::new(),
+                severity: crate::rules::Severity::Error,
+                line: 1,
+                span: 0..0,
+                fix: Vec::new(),
+            },
+            redundant: None,
+        };
+        let rules = RuleConfig::default().only(&[Rule::InternalError, Rule::UnusedIgnore]);
+        let kept = apply(&ignores(&source), vec![reported], &rules);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].diagnostic.rule, Rule::InternalError);
     }
 
     fn lines_and_rules(found: &[Ignore]) -> Vec<(usize, Option<Vec<&str>>)> {

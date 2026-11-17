@@ -12,7 +12,8 @@ use super::respell::respell;
 use super::tokens::{apply, tokens, Edit, Kind, Token};
 
 /// A leading `--sql` marker line: MySQL only reads `--` followed by whitespace as a comment.
-static SQL_MARKER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\A\s*--sql[^\n]*\n?").unwrap());
+static SQL_MARKER: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\A\s*--sql[^\n]*\n?").expect("a valid pattern"));
 
 /// What a psycopg placeholder (`%s`) reads as, in PostgreSQL and elsewhere: a parameter
 /// numbered as none is, which can be NULL since a caller may bind `None`.

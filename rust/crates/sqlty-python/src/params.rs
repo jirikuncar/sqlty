@@ -39,7 +39,7 @@ static GROUP: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(
         r"(?:\r?\n){{2}}{block}(?:(?:\r?\n){{2}}{block})*(?:\r?\n){{2}}"
     ))
-    .unwrap()
+    .expect("a valid pattern")
 });
 
 /// `source` without the classes generated below `# sqlty: generated` lines.
@@ -336,7 +336,7 @@ fn with_imports(source: &str) -> String {
         .filter(|module| !imported.iter().any(|name| name == module))
         .filter(|module| {
             Regex::new(&format!(r"\b{module}\."))
-                .unwrap()
+                .expect("a valid pattern")
                 .is_match(source)
         })
         .collect();

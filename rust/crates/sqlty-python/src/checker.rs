@@ -53,7 +53,7 @@ const INLINE_SQL_COMMENT: &str = concat!(
 
 /// String content starting with `INLINE_SQL_COMMENT`.
 pub(crate) static INLINE_SQL_COMMENT_CONTENT: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(&format!("^{INLINE_SQL_COMMENT}")).unwrap());
+    LazyLock::new(|| Regex::new(&format!("^{INLINE_SQL_COMMENT}")).expect("a valid pattern"));
 
 /// Plain strings opening with a `--sql` marker line, which MySQL and MariaDB reject:
 /// they read `--` as a comment only before whitespace. Each with the literal's span and
@@ -691,7 +691,7 @@ static SQL_PREFIX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?s)^(\s*(?:--sql|-- sql)(?:[ \t]+sqlty:[ \t]*db=[\w-]+)?(?:\\r\\n|\\n|\r?\n))(.*)",
     )
-    .unwrap()
+    .expect("a valid pattern")
 });
 
 const INLINE_MESSAGE: &str = r#""--sql SELECT ..." treats the query as a SQL comment; use "--sql\nSELECT ..." or run sqlty check --fix"#;

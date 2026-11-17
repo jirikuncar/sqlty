@@ -16,6 +16,10 @@
 //! ```
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
+#![expect(
+    clippy::unwrap_used,
+    reason = "bench input is generated, never user data"
+)]
 
 use std::fmt::Write;
 

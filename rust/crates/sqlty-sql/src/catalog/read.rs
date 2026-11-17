@@ -20,12 +20,14 @@ use super::names::{fold, parts};
 use super::Catalog;
 use super::TypeOverrides;
 
-pub(super) static COLLATE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r#"(?i)\s+COLLATE\s+(?:"[^"]*"|[\w.]+)"#).unwrap());
+pub(super) static COLLATE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r#"(?i)\s+COLLATE\s+(?:"[^"]*"|[\w.]+)"#).expect("a valid pattern")
+});
 
 /// The sequence options of `ADD GENERATED ... AS IDENTITY (...)`, which pg_dump writes.
-static IDENTITY_OPTIONS: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"(?i)\bAS\s+IDENTITY\s*\([^()]*\)").unwrap());
+static IDENTITY_OPTIONS: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(?i)\bAS\s+IDENTITY\s*\([^()]*\)").expect("a valid pattern")
+});
 
 /// Words of an `ALTER TABLE` that sets what inference reads besides the columns: keys,
 /// checks, `NOT NULL` and defaults.
@@ -52,11 +54,13 @@ fn statement_text(stmt: &ddl::Statement) -> String {
 /// The column list of PostgreSQL 15's `ON DELETE SET NULL | DEFAULT (cols)`, which
 /// sqlparser does not read; it names the columns the action sets, not the key.
 static FK_ACTION_COLUMNS: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"(?i)\bON\s+DELETE\s+SET\s+(NULL|DEFAULT)\s*\([^()]*\)").unwrap()
+    regex::Regex::new(r"(?i)\bON\s+DELETE\s+SET\s+(NULL|DEFAULT)\s*\([^()]*\)")
+        .expect("a valid pattern")
 });
 
-static DROP_EXPRESSION: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"(?i)\bDROP\s+EXPRESSION(?:\s+IF\s+EXISTS)?\b").unwrap());
+static DROP_EXPRESSION: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(?i)\bDROP\s+EXPRESSION(?:\s+IF\s+EXISTS)?\b").expect("a valid pattern")
+});
 
 /// Apply each statement as it is read, so a parsed statement lives only until it is
 /// applied; the ones waiting on a later definition are returned for [`Loader::run`].

@@ -2,7 +2,7 @@
 //! error names.
 
 #[path = "../rules/compile.rs"]
-#[allow(dead_code, unreachable_pub)]
+#[allow(dead_code, unreachable_pub, clippy::unwrap_used)]
 mod inference;
 
 use inference::compile;

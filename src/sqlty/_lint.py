@@ -52,6 +52,7 @@ Configuration via sqlty.toml (``[rules]``) or pyproject.toml:
     params-type-mismatch = "error"      # default
     sqruff = "ignore"                   # default
     unknown-database = "error"          # default
+    internal-error = "error"            # default
 """
 
 from __future__ import annotations
@@ -360,6 +361,12 @@ RULES: dict[str, LintRule] = {
         default_severity=Severity.WARN,
         fixable=False,
         description="# sqlty: ignore comment, or rule in one, that suppresses no diagnostic",
+    ),
+    "internal-error": LintRule(
+        name="internal-error",
+        default_severity=Severity.ERROR,
+        fixable=False,
+        description="sqlty crashed checking the file",
     ),
 }
 

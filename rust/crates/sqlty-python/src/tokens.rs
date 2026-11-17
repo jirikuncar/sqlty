@@ -305,7 +305,7 @@ pub(crate) fn string_groups(source: &str, tokens: &[Token]) -> Vec<Vec<usize>> {
     for (i, token) in tokens.iter().enumerate() {
         match token.kind {
             Kind::Str if open => {
-                let group = groups.last_mut().unwrap();
+                let group = groups.last_mut().expect("an open group");
                 let last = group[group.len() - 1];
                 if needs_brackets(source, tokens, last, i)
                     && enclosing(source, tokens, group[0], i).is_none()

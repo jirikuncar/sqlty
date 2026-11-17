@@ -706,7 +706,7 @@ impl Statement<'_> {
 }
 
 static SET_CONFIG: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?is)\bset_config\s*\(\s*'search_path'\s*,\s*'([^']*)'").unwrap()
+    Regex::new(r"(?is)\bset_config\s*\(\s*'search_path'\s*,\s*'([^']*)'").expect("a valid pattern")
 });
 
 /// A comma-separated `search_path` value such as `app, "$user", public`.
