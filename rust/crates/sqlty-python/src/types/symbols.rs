@@ -3,9 +3,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 
+use ruff_python_ast::token::TokenKind;
 use ruff_python_ast::visitor::{walk_expr, walk_stmt, Visitor};
 use ruff_python_ast::{ExceptHandler, Expr, ExprContext, ModModule, Operator, Stmt, StmtClassDef};
-use ruff_python_parser::Parsed;
+use ruff_text_size::{Ranged, TextRange};
 
 use super::extract::classify;
 use super::info::{Dict, TypeInfo};
@@ -19,7 +20,9 @@ use crate::scopes::Lines;
 /// A module read once: its tree and what its imports name.
 pub struct Source {
     pub text: Arc<str>,
-    pub parsed: Parsed<ModModule>,
+    pub syntax: ModModule,
+    /// The comments, where the text has a `sqlty:` one.
+    pub comments: Vec<TextRange>,
     pub lines: Lines,
     /// `ParsedSource.typing_aliases`.
     pub aliases: Arc<HashMap<String, String>>,
@@ -40,15 +43,27 @@ pub struct Source {
 
 impl Source {
     /// `text` parsed, or `None` where Rust does not read it (see [`crate::parse`]).
-    pub fn new(text: &str, version: Version) -> Option<Source> {
-        if crate::parse::may_nest_surrogate(text) {
+    pub fn new(text: impl Into<Arc<str>>, version: Version) -> Option<Source> {
+        let text: Arc<str> = text.into();
+        if crate::parse::may_nest_surrogate(&text) {
             return None;
         }
-        let parsed = crate::parse::module(text)?;
-        let imports = Imports::of(&parsed.syntax().body);
+        let parsed = crate::parse::module(&text)?;
+        let comments = if text.contains("sqlty:") {
+            parsed
+                .tokens()
+                .iter()
+                .filter(|token| token.kind() == TokenKind::Comment)
+                .map(Ranged::range)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let syntax = parsed.into_syntax();
+        let imports = Imports::of(&syntax.body);
         Some(Source {
-            text: Arc::from(text),
-            lines: Lines::new(text),
+            lines: Lines::new(&text),
+            text,
             aliases: Arc::new(imports.typing.iter().cloned().collect()),
             imports: imports.imported,
             entries: imports.entries,
@@ -56,7 +71,8 @@ impl Source {
             module: None,
             targets: std::sync::OnceLock::new(),
             constants: std::sync::OnceLock::new(),
-            parsed,
+            syntax,
+            comments,
             version,
         })
     }
@@ -75,8 +91,18 @@ impl Source {
             .get_or_init(|| crate::index::imports_of(&self.entries, self.module.as_deref()))
     }
 
+    /// [`Self::targets`] as the module `module`, or as its own one without it.
+    pub fn targets_in(&self, module: Option<&str>) -> std::borrow::Cow<'_, crate::index::Targets> {
+        match module {
+            Some(module) if self.module.as_deref() != Some(module) => {
+                std::borrow::Cow::Owned(crate::index::imports_of(&self.entries, Some(module)))
+            }
+            _ => std::borrow::Cow::Borrowed(self.targets()),
+        }
+    }
+
     pub fn body(&self) -> &[Stmt] {
-        &self.parsed.syntax().body
+        &self.syntax.body
     }
 
     /// The line of the node at `offset`, as `ast` numbers it.

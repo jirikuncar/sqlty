@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::index::{imports_of, module_of, HelperIndex};
+use crate::index::{module_of, HelperIndex};
 use ruff_python_ast::visitor::{walk_expr, Visitor};
 use ruff_python_ast::{Expr, ExprCall, Parameters, Stmt, StmtFunctionDef};
 use ruff_text_size::Ranged;
@@ -484,11 +484,12 @@ pub fn helper_calls<'a>(
     if own.is_empty() && !imported {
         return Vec::new();
     }
-    let (functions, modules) = if imported {
-        imports_of(&source.entries, module.or(source.module.as_deref()))
+    let targets = if imported {
+        source.targets_in(module)
     } else {
-        Default::default()
+        std::borrow::Cow::Owned(Default::default())
     };
+    let (functions, modules) = &*targets;
     let mut names: HashSet<String> = own
         .iter()
         .map(|(name, _)| name.rsplit('.').next().unwrap_or(name).to_string())
@@ -527,7 +528,7 @@ pub fn helper_calls<'a>(
     let (annotated, marker) = marker_names(source);
     let lookup = |module: &str, name: &str| helpers.and_then(|helpers| helpers.get(module, name));
     let method_of = |class: &str, name: &str| match class.rsplit_once('.') {
-        Some((prefix, class)) => lookup(&module_of(prefix, &modules), &format!("{class}.{name}")),
+        Some((prefix, class)) => lookup(&module_of(prefix, modules), &format!("{class}.{name}")),
         None => own.get(&format!("{class}.{name}")).or_else(|| {
             let (module, original) = functions.get(class)?;
             lookup(module, &format!("{original}.{name}"))
@@ -561,7 +562,7 @@ pub fn helper_calls<'a>(
             func => func.as_attribute_expr().and_then(|attr| {
                 let prefix = dotted(&attr.value).unwrap_or_default();
                 let name = attr.attr.as_str();
-                if let Some(found) = lookup(&module_of(&prefix, &modules), name) {
+                if let Some(found) = lookup(&module_of(&prefix, modules), name) {
                     Some(found)
                 } else if let Some(found) = method_of(&prefix, name) {
                     (found.kind != Kind::Instance).then_some(found)
