@@ -37,6 +37,10 @@ impl Files for Shared {
     fn canonical(&self, path: &Path) -> PathBuf {
         self.0.canonical(path)
     }
+
+    fn is_link(&self, path: &Path) -> bool {
+        self.0.is_link(path)
+    }
 }
 
 impl Shared {

@@ -3,13 +3,15 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use rayon::prelude::*;
 use sqlty_python::calls::Helper;
 use sqlty_python::checker::{self, Diagnostic, SiteKind};
 use sqlty_python::index::{helpers_of, Builder, HelperIndex, Roots};
-use sqlty_python::project::{self, helper_roots, Discovery, Files, Kind, Listing, Packages, Read};
+use sqlty_python::project::{
+    self, helper_roots, normalized, Discovery, Files, Kind, Listing, Packages, Read,
+};
 use sqlty_python::queries;
 use sqlty_python::rewriter::ImportStyle;
 use sqlty_python::suppress;
@@ -69,6 +71,7 @@ pub struct Workspace {
     unreadable: Vec<(PathBuf, String)>,
     index: Option<Arc<HelperIndex>>,
     configured: HashMap<(Vec<Function>, Option<PathBuf>), Arc<HelperIndex>>,
+    resolved: Mutex<HashMap<PathBuf, PathBuf>>,
 }
 
 /// What completion reads of a buffer.
@@ -135,6 +138,7 @@ impl Workspace {
             unreadable: Vec::new(),
             index: None,
             configured: HashMap::new(),
+            resolved: Mutex::default(),
         };
         workspace.paths = workspace.project_paths(paths)?;
         let collected = workspace.collect(force_exclude)?;
@@ -225,8 +229,20 @@ impl Workspace {
     }
 
     /// `path` with its links resolved: those of its directory, or its own when it is one.
+    /// A directory is resolved once.
     fn resolved(&self, path: &Path) -> PathBuf {
-        self.files.canonical(&self.absolute(path))
+        let absolute = normalized(&self.absolute(path));
+        let (Some(directory), Some(name)) = (absolute.parent(), absolute.file_name()) else {
+            return self.files.canonical(&absolute);
+        };
+        if self.files.is_link(&absolute) {
+            return self.files.canonical(&absolute);
+        }
+        let mut known = self.resolved.lock().unwrap_or_else(PoisonError::into_inner);
+        let directory = known
+            .entry(directory.to_path_buf())
+            .or_insert_with(|| self.files.canonical(directory));
+        directory.join(name)
     }
 
     fn kind(&self, path: &Path) -> Option<Kind> {
@@ -272,7 +288,7 @@ impl Workspace {
                     .map(Path::to_path_buf)
                     .unwrap_or_default();
                 let mut warn = |warning| self.schemas.warn(warning);
-                let loaded = self.flags.load(&directory, &self.files, &mut warn)?;
+                let loaded = self.flags.load(&directory, &self.discovery, &mut warn)?;
                 if let Some(base) = loaded.base {
                     let schema = loaded
                         .table
@@ -469,7 +485,7 @@ impl Workspace {
             let mut warn = |warning| self.schemas.warn(warning);
             let made = self
                 .flags
-                .load(&directory, &self.files, &mut warn)
+                .load(&directory, &self.discovery, &mut warn)
                 .and_then(|loaded| {
                     Directory::new(
                         loaded,
@@ -863,6 +879,10 @@ mod tests {
                 Listing::Entries(entries)
             }
         }
+
+        fn is_link(&self, path: &Path) -> bool {
+            path.ends_with("linked.py")
+        }
     }
 
     const CONFIG: &str = "[tool.sqlty]\nschema = \"schema.sql\"\n\n[[tool.sqlty.functions]]\nimport-path = \"app.db.fetch\"\nquery-param = \"query\"\n";
@@ -928,6 +948,24 @@ mod tests {
                 .helper_starts,
             [32]
         );
+    }
+
+    #[test]
+    fn a_linked_file_is_resolved_on_its_own() {
+        let workspace = opened(&[
+            ("/repo/pyproject.toml", "[tool.sqlty]\n"),
+            ("/repo/app/linked.py", "x = 1\n"),
+            ("/repo/app/plain.py", "y = 1\n"),
+        ]);
+        assert_eq!(
+            workspace.resolved(Path::new("/repo/app/linked.py")),
+            Path::new("/repo/app/linked.py")
+        );
+        assert_eq!(
+            workspace.resolved(Path::new("/repo/app/plain.py")),
+            Path::new("/repo/app/plain.py")
+        );
+        assert_eq!(workspace.resolved(Path::new("/")), Path::new("/"));
     }
 
     #[test]

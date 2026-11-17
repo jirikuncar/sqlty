@@ -18,16 +18,25 @@ impl Files for Disk {
         };
         let entries = entries.flatten().map(|entry| {
             let name = entry.file_name().to_string_lossy().into_owned();
-            let linked = entry.file_type().is_ok_and(|kind| kind.is_symlink());
-            let kind = match std::fs::metadata(entry.path()) {
-                Ok(meta) if meta.is_dir() && linked => Kind::LinkedDir,
-                Ok(meta) if meta.is_dir() => Kind::Dir,
-                Ok(meta) if meta.is_file() => Kind::File,
+            let own = entry.file_type();
+            let linked = own.as_ref().is_ok_and(std::fs::FileType::is_symlink);
+            let target = match own {
+                Ok(_) if linked => std::fs::metadata(entry.path()).map(|meta| meta.file_type()),
+                own => own,
+            };
+            let kind = match target {
+                Ok(kind) if kind.is_dir() && linked => Kind::LinkedDir,
+                Ok(kind) if kind.is_dir() => Kind::Dir,
+                Ok(kind) if kind.is_file() => Kind::File,
                 _ => Kind::Other,
             };
             (name, kind)
         });
         Listing::Entries(entries.collect())
+    }
+
+    fn is_link(&self, path: &Path) -> bool {
+        std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink())
     }
 
     /// `Path.resolve()`: the longest existing prefix resolved, the rest appended.
@@ -57,6 +66,37 @@ impl Files for Disk {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn links_are_listed_as_what_they_point_to() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!("sqlty-disk-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("dir")).unwrap();
+        std::fs::write(root.join("a.py"), "").unwrap();
+        symlink(root.join("a.py"), root.join("to-file")).unwrap();
+        symlink(root.join("dir"), root.join("to-dir")).unwrap();
+        symlink(root.join("missing"), root.join("broken")).unwrap();
+        let Listing::Entries(mut entries) = Disk.list(&root) else {
+            panic!("lists");
+        };
+        entries.sort();
+        let link = Disk.is_link(&root.join("to-file"));
+        let plain = Disk.is_link(&root.join("a.py"));
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(
+            entries,
+            [
+                ("a.py".to_string(), Kind::File),
+                ("broken".to_string(), Kind::Other),
+                ("dir".to_string(), Kind::Dir),
+                ("to-dir".to_string(), Kind::LinkedDir),
+                ("to-file".to_string(), Kind::File),
+            ]
+        );
+        assert!(link && !plain);
+    }
 
     #[test]
     fn a_relative_path_that_does_not_exist_stays() {

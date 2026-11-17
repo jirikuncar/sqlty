@@ -3,14 +3,14 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use toml::{Table, Value};
 
 use super::glob::{self, Excludes, Segment};
 use super::route::{self, Route};
-use super::{find, normalized, Files, FindError, Kind, Listing, Read};
+use super::{find_in, normalized, Files, FindError, Found, Kind, Listing, Read};
 
 /// The globs `exclude` has when the configuration does not set it.
 pub const DEFAULT_EXCLUDE: [&str; 25] = [
@@ -60,10 +60,14 @@ pub struct Discovery {
 #[derive(Default)]
 struct State {
     configs: HashMap<PathBuf, Option<(Table, PathBuf)>>,
-    chains: HashMap<PathBuf, Option<Vec<(PathBuf, Gitignore)>>>,
+    found: HashMap<PathBuf, Result<Option<Arc<Found>>, FindError>>,
+    chains: HashMap<PathBuf, Option<Chain>>,
 }
 
 type Rules = Vec<(Option<String>, Vec<String>)>;
+
+/// The `.gitignore` specs of a directory, from the work tree's root down.
+type Chain = Arc<Vec<(PathBuf, Gitignore)>>;
 
 impl Discovery {
     /// `cwd` is the absolute directory relative globs start from.
@@ -142,16 +146,37 @@ impl Discovery {
             return Ok(found.clone());
         }
         // A file that is not TOML excludes nothing; checking reports it.
-        let found = match find(&directory, &*self.files) {
+        let found = match self.find(&directory) {
             Err(FindError::Syntax(_)) => None,
             found => found?,
         };
         let found = found.map(|found| {
             let base = found.file.parent().unwrap_or(Path::new("/")).to_path_buf();
-            (found.config.table, base)
+            (found.config.table.clone(), base)
         });
         self.state().configs.insert(directory, found.clone());
         Ok(found)
+    }
+
+    /// [`find`] of the absolute normalized `directory`, each directory read once; a file
+    /// the host has not read yet is asked for again.
+    pub fn find(&self, directory: &Path) -> Result<Option<Arc<Found>>, FindError> {
+        if let Some(found) = self.state().found.get(directory) {
+            return found.clone();
+        }
+        let found = match find_in(directory, &*self.files) {
+            Ok(None) => match directory.parent() {
+                Some(parent) => self.find(parent),
+                None => Ok(None),
+            },
+            found => found.map(|found| found.map(Arc::new)),
+        };
+        if !matches!(found, Err(FindError::Need(_))) {
+            self.state()
+                .found
+                .insert(directory.to_path_buf(), found.clone());
+        }
+        found
     }
 
     /// `(base directory, globs)` pairs excluding entries of `directory`; empty sets left
@@ -339,7 +364,7 @@ impl Discovery {
         let chain = self.chain(directory)?;
         let path = directory.join(name);
         let mut verdict = false;
-        for (_, spec) in chain.iter().flatten() {
+        for (_, spec) in chain.iter().flat_map(|chain| chain.iter()) {
             let matched = spec.matched(&path, is_dir);
             if matched.is_ignore() {
                 verdict = true;
@@ -350,7 +375,7 @@ impl Discovery {
         Ok(verdict)
     }
 
-    fn chain(&self, directory: &Path) -> Result<Option<Vec<(PathBuf, Gitignore)>>, FindError> {
+    fn chain(&self, directory: &Path) -> Result<Option<Chain>, FindError> {
         if let Some(chain) = self.state().chains.get(directory) {
             return Ok(chain.clone());
         }
@@ -359,14 +384,23 @@ impl Discovery {
             Listing::Missing => false,
             Listing::Unread => return Err(FindError::Need(directory.to_path_buf())),
         };
-        let mut chain = match (in_repository, directory.parent()) {
-            (true, _) => Some(self.spec(directory, &directory.join(".git/info/exclude"))?),
+        let chain = match (in_repository, directory.parent()) {
+            (true, _) => Some(Arc::new(
+                self.spec(directory, &directory.join(".git/info/exclude"))?,
+            )),
             (false, None) => None,
             (false, Some(parent)) => self.chain(parent)?,
         };
-        if let Some(chain) = chain.as_mut() {
-            chain.extend(self.spec(directory, &directory.join(".gitignore"))?);
-        }
+        let chain = match chain {
+            Some(chain) => {
+                let own = self.spec(directory, &directory.join(".gitignore"))?;
+                Some(match own.is_empty() {
+                    true => chain,
+                    false => Arc::new(chain.iter().cloned().chain(own).collect()),
+                })
+            }
+            None => None,
+        };
         self.state()
             .chains
             .insert(directory.to_path_buf(), chain.clone());
