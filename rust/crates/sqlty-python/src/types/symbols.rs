@@ -108,7 +108,7 @@ impl Source {
         self.lines.line(offset.to_usize())
     }
 
-    /// `ParsedSource.classes`: every class definition, at any depth, in `ast.walk` order.
+    /// Every class definition, at any depth, in `ast.walk` order.
     pub fn classes(&self) -> Vec<&StmtClassDef> {
         let mut found = Vec::new();
         collect_classes(self.body(), 1, &mut found);
@@ -116,7 +116,7 @@ impl Source {
         found.into_iter().map(|(_, class)| class).collect()
     }
 
-    /// `ParsedSource.line_span`: the byte offsets of the 1-based `line` without its
+    /// The byte offsets of the 1-based `line` without its
     /// indentation and line break.
     pub fn line_span(&self, line: usize) -> (usize, usize) {
         let len = self.text.len();

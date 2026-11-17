@@ -1,4 +1,4 @@
-"""``--sql`` t-strings read in Rust (``sqlty_python::templates``) against ``ast``.
+"""``--sql`` t-strings read in Rust (``sqlty_python::templates``).
 
 Raise the number of generated examples with ``SQLTY_FUZZ_EXAMPLES``.
 """
@@ -7,27 +7,26 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-import sqlty._drivers
 from sqlty import SQLTemplate
-from sqlty._drivers import find_template_calls
-from sqlty._helpers import HelperCall
-from sqlty._source import ParsedSource
+from sqlty._core import template_strings
 
 EXAMPLES = int(os.environ.get("SQLTY_FUZZ_EXAMPLES", "300"))
+MARKER = re.compile(r"\s*--\s?sql(?:\s|$)")
 
 
-def both(text: str, monkeypatch: pytest.MonkeyPatch) -> list[HelperCall]:
-    monkeypatch.setattr(sqlty._drivers, "AST", "rust")
-    rust = find_template_calls(ParsedSource(text))
-    monkeypatch.setattr(sqlty._drivers, "AST", "python")
-    python = [call._replace(query_node=None) for call in find_template_calls(ParsedSource(text))]
-    assert rust == python, text
-    return rust
+def marked(text: str) -> list[tuple[str, list[str | None]]]:
+    """The query and parameter types of each ``--sql`` t-string whose fields all pass values."""
+    return [
+        (query, list(params))
+        for _, _, query, params in template_strings(text) or []
+        if query is not None and MARKER.match(query)
+    ]
 
 
 CASES = {
@@ -55,12 +54,9 @@ CASES = {
 
 
 @pytest.mark.parametrize(("text", "expected"), CASES.values(), ids=CASES.keys())
-def test_cases(
-    text: str, expected: list[tuple[str, list[str | None]]], monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cases(text: str, expected: list[tuple[str, list[str | None]]]) -> None:
     for newline in ("\n", "\r\n", "\r"):
-        found = both(text.replace("\n", newline), monkeypatch)
-        assert [(c.query, [p.type for p in c.params or ()]) for c in found] == expected
+        assert marked(text.replace("\n", newline)) == expected
 
 
 FIELDS = st.sampled_from(
@@ -115,8 +111,8 @@ def test_generated_modules(templates: list[tuple[str, str]], newline: str) -> No
         ast.parse(source)
     except SyntaxError:
         return
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        both(source, monkeypatch)
+    for query, params in marked(source):
+        assert query.count("%s") == len(params), source
 
 
 def test_repr_shows_the_template() -> None:

@@ -50,7 +50,6 @@ use sqlty_python::options::{ConfigError, Options};
 use sqlty_python::rules::RuleConfig;
 
 type ColumnTuple = (String, Option<String>, Option<String>);
-type FieldTuple = (String, Option<String>, Option<String>, Option<bool>);
 type NullableColumnTuple = (
     String,
     Option<String>,
@@ -476,33 +475,6 @@ fn analyze_columns(
     })
 }
 
-/// Fields of the composite type `type_name` the schema defines, as
-/// `(name, python_type, sql_type, nullable)` tuples; None when it defines no such type.
-#[pyfunction]
-#[pyo3(signature = (type_name, *, dialect = DialectArg::POSTGRES, schema_sql = None))]
-fn composite_fields(
-    type_name: &str,
-    dialect: DialectArg,
-    schema_sql: Option<SchemaArg>,
-) -> Option<Vec<FieldTuple>> {
-    let dialect = dialect.0;
-    let schema = schema(schema_sql, dialect)?;
-    let columns = analyzer::composite_columns(type_name, dialect, &schema)?;
-    Some(
-        columns
-            .into_iter()
-            .map(|col| {
-                (
-                    col.name,
-                    col.python_type,
-                    col.sql_type,
-                    nullable(col.nullability),
-                )
-            })
-            .collect(),
-    )
-}
-
 /// Parameters of a query as `(index, name, python_type, sql_type, nullable, cast)` tuples.
 ///
 /// A placeholder (`%s`, `%(name)s`, `$1`, `?`, `:name`) takes its type from its context: the
@@ -818,40 +790,6 @@ fn format_source(
     })
 }
 
-/// `(code, message, start, end, query_start)` of a [`sqlty_format::Finding`].
-type SqruffFinding = (&'static str, String, usize, usize, usize);
-
-/// What sqruff's core lint rules, less its layout rules, find in the query strings of
-/// Python source: `(code, message, start, end, query_start)`, byte offsets in `source`.
-///
-/// Raises:
-///     ValueError: unsupported import_style
-#[pyfunction]
-#[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, import_style = None))]
-fn sqruff_findings(
-    py: Python<'_>,
-    source: &str,
-    dialect: DialectArg,
-    import_style: Option<&str>,
-) -> Result<Vec<SqruffFinding>, Error> {
-    detach(py, || {
-        let style = ImportStyle::parse(import_style)?;
-        Ok(sqlty_format::lint_source(source, dialect.0, &style)
-            .into_iter()
-            .map(|found| {
-                let span = found.span;
-                (
-                    found.code,
-                    found.message,
-                    span.start,
-                    span.end,
-                    found.query_start,
-                )
-            })
-            .collect())
-    })
-}
-
 /// Apply what `sqlty check --fix` fixes; rules set to "ignore" are skipped.
 ///
 /// `suppressed` maps a line to the rules a `# sqlty: ignore` comment on it suppresses
@@ -945,27 +883,6 @@ fn expand_star(
     detach(py, || {
         analyzer::expand_star(sql, dialect, schema(schema_sql, dialect).as_deref())
     })
-}
-
-/// `(rule, message)` of `select-star` or `select-star-no-schema` for a query whose
-/// result has a `*` or `t.*`, or None.
-///
-/// Example:
-///     select_star_finding("SELECT u.* FROM users u", has_schema=True)
-///     # ("select-star", "SELECT u.* used — expand to explicit column list")
-#[pyfunction]
-#[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES, has_schema = false))]
-fn select_star_finding(
-    py: Python<'_>,
-    sql: &str,
-    dialect: DialectArg,
-    has_schema: bool,
-) -> Option<(&'static str, String)> {
-    let dialect = dialect.0;
-    detach(py, || {
-        checker::select_star_finding(sql, dialect, has_schema)
-    })
-    .map(|(rule, message)| (rule.name(), message))
 }
 
 /// A finding of `check_source`, which Python reads as a dict.
@@ -1294,36 +1211,6 @@ fn check_queries(
     })
 }
 
-/// `(name, sql, renames)`: see [`named_queries`].
-type NamedQueryOut = (String, String, Vec<(String, String)>);
-
-/// `(name, sql, renames)` of each named query of a `.sql` file: its SQL from the line after
-/// its header, with sqlc's and aiosql's placeholders rewritten to `:name`, and
-/// `(name in sql, name in the file)` of each aiosql `:obj.attr`. `name` names a query of a
-/// file without headers.
-///
-/// Example:
-///     named_queries("-- name: get-user^\nSELECT :u.id") == [("get_user", "SELECT :u_id", [("u_id", "u.id")])]
-///
-/// Raises:
-///     ValueError: unknown `query_format`
-#[pyfunction]
-#[pyo3(signature = (source, *, query_format = "auto", name = ""))]
-fn named_queries(
-    source: &str,
-    query_format: &str,
-    name: &str,
-) -> Result<Vec<NamedQueryOut>, Error> {
-    let format = query_format
-        .parse::<queries::Format>()
-        .map_err(|()| ConfigError::QueryFormat(query_format.to_string()))?;
-    Ok(queries::split(source, format, name)
-        .into_iter()
-        .map(|query| (query.name, query.sql, query.renames))
-        .collect())
-}
-
-/// What decides whether the Python passes need a syntax tree, see `sqlty_python::module`:
 #[derive(IntoPyObject)]
 enum ParamKey {
     Index(usize),
@@ -1409,22 +1296,6 @@ fn module_outline<'py>(py: Python<'py>, source: &str) -> PyResult<Option<outline
     outline::outline(py, source)
 }
 
-type PyArg = (
-    bool,
-    (usize, usize),
-    Option<String>,
-    Option<String>,
-    Option<Vec<PyParam>>,
-);
-type PySite = (
-    (usize, usize),
-    Option<String>,
-    String,
-    Vec<PyArg>,
-    Vec<(Option<String>, PyArg)>,
-    Option<String>,
-);
-
 fn py_params(params: Option<Vec<sqlty_python::scopes::Param>>) -> Option<Vec<PyParam>> {
     use sqlty_python::scopes::Key;
     params.map(|params| {
@@ -1438,47 +1309,6 @@ fn py_params(params: Option<Vec<sqlty_python::scopes::Param>>) -> Option<Vec<PyP
                 (key, p.kind)
             })
             .collect()
-    })
-}
-
-/// `(lines, prefix, name, args, keywords, receiver)` of each call in Python source that may
-/// call a helper named one of `names`, or None when Rust does not read the source; each
-/// argument is `(starred, span, text, type, params)`. With `index`, a constant imported from
-/// one of its modules has its type; `module` is the name of `source`.
-#[pyfunction]
-#[allow(clippy::needless_pass_by_value)]
-#[pyo3(signature = (source, names, index=None, module=None))]
-fn helper_sites(
-    py: Python<'_>,
-    source: &str,
-    names: Vec<String>,
-    index: Option<PyRef<'_, ModuleIndex>>,
-    module: Option<&str>,
-) -> Option<Vec<PySite>> {
-    let index = index.map(|index| Arc::clone(&index.0));
-    detach(py, || {
-        let arg = |a: sqlty_python::helpers::Arg| {
-            (a.starred, a.span, a.text, a.kind, py_params(a.params))
-        };
-        let found = sqlty_python::helpers::sites(source, &names, index.as_deref(), module)?;
-        Some(
-            found
-                .into_iter()
-                .map(|site| {
-                    (
-                        site.lines,
-                        site.prefix,
-                        site.name,
-                        site.args.into_iter().map(arg).collect(),
-                        site.keywords
-                            .into_iter()
-                            .map(|(name, value)| (name, arg(value)))
-                            .collect(),
-                        site.receiver,
-                    )
-                })
-                .collect(),
-        )
     })
 }
 
@@ -2140,8 +1970,8 @@ type CallVariants = (
 
 type IgnoreTuple = (usize, Option<Vec<String>>, usize, usize);
 
-/// `ParsedSource.ignores` as Rust reads them: `(line, rules, start, end)` of every
-/// `# sqlty: ignore` comment; of a source that does not parse, every one its lexer finds.
+/// `(line, rules, start, end)` of every `# sqlty: ignore` comment; of a source that does
+/// not parse, every one its lexer finds.
 #[pyfunction]
 fn module_ignores(py: Python<'_>, source: &str, version: (u8, u8)) -> Vec<IgnoreTuple> {
     use sqlty_python::suppress;
@@ -2203,26 +2033,6 @@ fn call_variants(
             .collect();
         found.sort();
         Some(found)
-    })
-}
-
-/// `(line, annotation, query, annotation_span)` for each `SQL[T](...)` call in Python source.
-///
-/// `query` is the `--sql` string without its prefix, or None when the call
-/// doesn't hold a one-line `--sql` string; `annotation_span` is the byte offsets of `T`.
-///
-/// Raises:
-///     ValueError: unsupported import_style
-#[pyfunction]
-#[pyo3(signature = (source, *, import_style = None))]
-fn wrapped_queries(
-    py: Python<'_>,
-    source: &str,
-    import_style: Option<&str>,
-) -> Result<Vec<checker::WrappedQuery>, Error> {
-    detach(py, || {
-        let style = ImportStyle::parse(import_style)?;
-        Ok(checker::wrapped_queries(source, &style))
     })
 }
 
@@ -2298,7 +2108,7 @@ fn query_source_offset(at: &QueryAtHandle, offset: usize) -> Option<usize> {
 /// The query `check` reads at byte `offset` of Python source, or None outside one.
 ///
 /// `helper_starts` are the byte offsets of the string literals helper calls pass as
-/// their query (`find_helper_calls`); the marker and `SQL[T](...)` routes are found here.
+/// their query; the marker and `SQL[T](...)` routes are found here.
 ///
 /// Raises:
 ///     ValueError: unsupported import_style
@@ -2488,7 +2298,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(explain_select, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_columns, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_params, m)?)?;
-    m.add_function(wrap_pyfunction!(composite_fields, m)?)?;
     m.add_function(wrap_pyfunction!(query_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(name_rules, m)?)?;
     m.add_function(wrap_pyfunction!(dialect_names, m)?)?;
@@ -2503,13 +2312,10 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(add_param_types, m)?)?;
     m.add_function(wrap_pyfunction!(strip_source, m)?)?;
     m.add_function(wrap_pyfunction!(format_source, m)?)?;
-    m.add_function(wrap_pyfunction!(sqruff_findings, m)?)?;
     m.add_function(wrap_pyfunction!(fix_source, m)?)?;
     m.add_function(wrap_pyfunction!(expand_star, m)?)?;
-    m.add_function(wrap_pyfunction!(select_star_finding, m)?)?;
     m.add_function(wrap_pyfunction!(check_source, m)?)?;
     m.add_function(wrap_pyfunction!(check_queries, m)?)?;
-    m.add_function(wrap_pyfunction!(named_queries, m)?)?;
     m.add_function(wrap_pyfunction!(module_facts, m)?)?;
     m.add_function(wrap_pyfunction!(module_outline, m)?)?;
     m.add_function(wrap_pyfunction!(template_strings, m)?)?;
@@ -2531,8 +2337,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(add_json_types, m)?)?;
     m.add_function(wrap_pyfunction!(module_calls, m)?)?;
     m.add_class::<ModuleIndex>()?;
-    m.add_function(wrap_pyfunction!(helper_sites, m)?)?;
-    m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;
     m.add_function(wrap_pyfunction!(query_at, m)?)?;
     m.add_function(wrap_pyfunction!(query_source_offset, m)?)?;

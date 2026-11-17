@@ -1,18 +1,15 @@
-"""Each source file is parsed once and tokenized only when it has a ``sqlty:`` comment."""
+"""Rust reads each source file: Python neither parses nor tokenizes it."""
 
 from __future__ import annotations
 
 import ast
 import collections
-import os
-import subprocess
-import sys
 import tokenize
 
 import pytest
 
 from sqlty._cli import main
-from sqlty._source import AST, AstMismatch, ParsedSource
+from sqlty._source import ParsedSource
 from sqlty.core import check_source
 
 SCHEMA = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);\n"
@@ -69,11 +66,11 @@ def tokenized(monkeypatch: pytest.MonkeyPatch) -> list[object]:
     return calls
 
 
-def test_check_source_parses_once(parses):
+def test_check_source_parses_nothing(parses):
     source = HELPER + USER_TYPE.replace("from pkg.db import fetch_all\n", "")
     diagnostics = check_source(source, schema_sql=SCHEMA)
     assert [d["rule"] for d in diagnostics] == []
-    assert parses[source] == (AST != "rust")
+    assert not parses
 
 
 def test_helper_calls_bound_the_work(monkeypatch):
@@ -92,10 +89,9 @@ def test_helper_calls_bound_the_work(monkeypatch):
 
     assert check_source(parsed, schema_sql=SCHEMA) == []
     assert len(unparsed) <= 3
-    assert parsed._scan.visited < 10 * 50
 
 
-def test_cli_parses_each_file_once(tmp_path, monkeypatch, parses, tokenized, capsys):
+def test_cli_parses_nothing(tmp_path, monkeypatch, parses, tokenized, capsys):
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
     (tmp_path / "schema.sql").write_text(SCHEMA)
     pkg = tmp_path / "pkg"
@@ -108,13 +104,8 @@ def test_cli_parses_each_file_once(tmp_path, monkeypatch, parses, tokenized, cap
     main(["check", "."])
     assert capsys.readouterr().out == ""
 
-    # `SQLTY_AST=rust` parses nothing with `ast`.
-    assert parses[HELPER] == (AST != "rust")
-    assert parses[USER_TYPE] == (AST != "rust")
-    # The Python index reads the imports of every module to find re-exported helpers.
-    assert parses[PLAIN] == (AST != "rust")
-    assert max(parses.values(), default=0) <= 1
-    assert len(tokenized) == (AST != "rust")
+    assert not any(parses[text] for text in files.values())
+    assert not tokenized
 
 
 def test_marker_free_file_is_neither_parsed_nor_tokenized(parses, tokenized):
@@ -134,13 +125,6 @@ def test_dashes_in_wide_comments_are_skipped_quickly(parses, tokenized):
     assert not tokenized
 
 
-@pytest.mark.parametrize(
-    "source", ['q = "-" "-sql\\nSELECT 1"', 'q = ("-"  # split\n     "-sql\\nSELECT 1")']
-)
-def test_marker_split_over_literals_and_comments_is_found(source):
-    assert ParsedSource(source).may_need_rust_check()
-
-
 def test_wrapper_without_row_type_is_not_parsed(parses):
     source = 'import os\nq = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")\n'
     assert check_source(source) == []
@@ -149,20 +133,17 @@ def test_wrapper_without_row_type_is_not_parsed(parses):
 
 def test_parsed_source_is_reused(parses):
     parsed = ParsedSource(HELPER + USER_TYPE)
-    check_source(parsed, schema_sql=SCHEMA)
-    check_source(parsed, schema_sql=SCHEMA)
-    # The check in Rust does not parse with `ast` at all.
-    assert parses[parsed.text] == (AST != "rust")
+    assert check_source(parsed, schema_sql=SCHEMA) == check_source(parsed, schema_sql=SCHEMA)
+    assert not parses
 
 
 def test_parsed_source_facts():
     parsed = ParsedSource("import typing as t\nclass A:\n    class B: ...\nf(g(1))\n")
     assert parsed.typing_aliases == {"t": "typing"}
-    assert [c.name for c in parsed.classes] == ["A", "B"]
-    assert len(parsed.calls) == 2
-    assert ParsedSource("def f(:").tree is None
-    assert ParsedSource("x = 1  # sqlty: ignore[a, b]\n").ignores[1].rules == ("a", "b")
-    assert ParsedSource("x = 1 # not it\n").ignores == {}
+    assert [c.name for c in parsed.outline_classes] == ["A", "B"]
+    assert parsed.facts is not None and parsed.facts.names == ["f", "g"]
+    assert ParsedSource("def f(:").facts is None
+    assert ParsedSource("def f(:").outline is None
 
 
 def test_what_rust_does_not_model_is_reported_unchecked():
@@ -173,13 +154,7 @@ def test_what_rust_does_not_model_is_reported_unchecked():
     )
     # `str.isdigit` digits that `int` may not read.
     source = helper + "run(sql.SQL('SELECT {٣}').format(1, 2, 3, 4), int)\n"
-    if AST == "compare":
-        with pytest.raises(AstMismatch):
-            check_source(source)
-        return
-    # psycopg reads the digit as an index, and so does the Python pass.
-    expected = [("unchecked-query", 5)] if AST == "rust" else []
-    assert [(d["rule"], d["line"]) for d in check_source(source)] == expected
+    assert [(d["rule"], d["line"]) for d in check_source(source)] == [("unchecked-query", 5)]
 
 
 def test_a_source_that_does_not_parse_is_read_by_its_strings(parses, tokenized):
@@ -187,34 +162,7 @@ def test_a_source_that_does_not_parse_is_read_by_its_strings(parses, tokenized):
     assert [d["rule"] for d in check_source(source)] == ["unparsed-query", "unused-ignore"]
     assert not parses
     # Rust reads the comments of a source it does not parse with its lexer.
-    assert len(tokenized) == (AST != "rust")
-
-
-def test_rust_reads_ignore_comments_as_tokenize_does(monkeypatch: pytest.MonkeyPatch) -> None:
-    from sqlty import _source
-
-    text = "q = 1  # sqlty: ignore[select-star]\nr = 2  # sqlty: ignore\n"
-    monkeypatch.setattr(_source, "AST", "python")
-    python = ParsedSource(text).ignores
-    monkeypatch.setattr(_source, "AST", "rust")
-    assert ParsedSource(text).ignores == python
-    assert [i.rules for i in python.values()] == [("select-star",), None]
-
-
-@pytest.mark.parametrize("ast_env", [None, "rust", "compare", "python"])
-def test_rust_checks_by_default_and_python_is_deprecated(ast_env: str | None) -> None:
-    env = {k: v for k, v in os.environ.items() if k != "SQLTY_AST"}
-    if ast_env:
-        env["SQLTY_AST"] = ast_env
-    run = subprocess.run(
-        [sys.executable, "-c", "from sqlty._source import AST; print(AST)"],
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-    assert run.stdout == f"{ast_env or 'rust'}\n"
-    warned = "FutureWarning: SQLTY_AST=python is deprecated" in run.stderr
-    assert warned is (ast_env == "python")
+    assert not tokenized
 
 
 @pytest.mark.parametrize(

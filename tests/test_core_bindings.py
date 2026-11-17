@@ -42,10 +42,9 @@ def test_row_diagnostics_of_a_module_without_queries(source: str) -> None:
     assert _core.row_diagnostics(source, version=VERSION) == ([], [], [])
 
 
-@pytest.mark.parametrize("split", [_core.check_queries, _core.named_queries])
-def test_unknown_query_format(split: Callable[..., object]) -> None:
+def test_unknown_query_format() -> None:
     with pytest.raises(ValueError, match="unknown query-format 'bogus'"):
-        split("SELECT 1", query_format="bogus")
+        _core.check_queries("SELECT 1", query_format="bogus")
 
 
 CONFIG = ("postgres", None, None, None, False, [], None, None)

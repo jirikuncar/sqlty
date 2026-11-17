@@ -1,6 +1,5 @@
 //! The calls that run a query: calls of the helpers a module defines (functions with a
-//! parameter marked `Annotated[str, SQL]`), as `sqlty._helpers.find_helper_calls` finds
-//! them, driver calls ([`crate::drivers`]) and `--sql` t-strings ([`crate::templates`]).
+//! parameter marked `Annotated[str, SQL]`), driver calls ([`crate::drivers`]) and `--sql` t-strings ([`crate::templates`]).
 
 use std::collections::HashSet;
 use std::sync::LazyLock;
@@ -460,7 +459,7 @@ fn call_params(
     None
 }
 
-/// `find_helper_calls`: the calls of the helpers `source` defines or imports from the
+/// The calls of the helpers `source` defines or imports from the
 /// modules of `helpers`, by line. A query built in a way that is not modelled (see
 /// [`compose`]) is left unchecked.
 pub fn helper_calls<'a>(

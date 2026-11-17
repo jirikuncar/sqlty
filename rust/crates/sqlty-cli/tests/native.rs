@@ -23,7 +23,6 @@ fn sqlty(root: &Path, args: &[&str], env: &[(&str, &str)]) -> (i32, String, Stri
     } = Command::new(env!("CARGO_BIN_EXE_sqlty"))
         .args(args)
         .current_dir(root)
-        .env_remove("SQLTY_AST")
         .env_remove("SQLTY_CONFIG_FILE")
         .envs(env.iter().copied())
         .output()
@@ -101,16 +100,10 @@ fn rewrites_the_files_and_runs_the_format_command() {
 #[test]
 fn hands_what_it_does_not_run_to_python() {
     let root = project("python", &[]);
-    let missing = [("PATH", "/nonexistent")];
     let error = "sqlty: cannot run python3: No such file or directory (os error 2)\n";
-    for (args, env) in [
-        (&["breaking"][..], &missing[..]),
-        (&["check"][..], &[missing[0], ("SQLTY_AST", "python")][..]),
-    ] {
-        assert_eq!(
-            sqlty(&root, args, env),
-            (2, String::new(), error.to_string())
-        );
-    }
+    assert_eq!(
+        sqlty(&root, &["breaking"], &[("PATH", "/nonexistent")]),
+        (2, String::new(), error.to_string())
+    );
     std::fs::remove_dir_all(&root).expect("removes");
 }

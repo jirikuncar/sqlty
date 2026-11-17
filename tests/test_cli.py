@@ -7,6 +7,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -111,13 +112,9 @@ def test_check_fix_writes_fixes_and_reports_the_rest(tmp_path, monkeypatch, caps
     assert "Fixed 1 file(s)" in out
 
 
-@pytest.mark.parametrize(
-    ("engine", "gil", "workers"), [("python", True, 1), ("python", False, 8), ("rust", True, 8)]
-)
-def test_workers_follow_the_engine(monkeypatch, engine, gil, workers) -> None:
-    monkeypatch.setattr("sqlty._source.AST", engine)
-    monkeypatch.setattr(sys, "_is_gil_enabled", lambda: gil)
-    monkeypatch.setattr(os, "process_cpu_count", lambda: 8)
+@pytest.mark.parametrize(("cpus", "workers"), [(8, 8), (None, 1)])
+def test_workers_are_the_processors(monkeypatch, cpus, workers) -> None:
+    monkeypatch.setattr(os, "process_cpu_count", lambda: cpus)
     assert _cli._workers() == workers
 
 
@@ -1690,11 +1687,9 @@ def test_format_command_must_be_a_list(tmp_path, monkeypatch, capsys) -> None:
     assert "format-command must be a list of strings" in err
 
 
-@pytest.mark.parametrize("ast", ["python", "rust"])
 def test_redundant_optional_reads_every_query_of_a_shared_row_type(
-    tmp_path, monkeypatch, capsys, ast
+    tmp_path, monkeypatch, capsys
 ) -> None:
-    monkeypatch.setattr("sqlty._source.AST", ast)
     (tmp_path / "pyproject.toml").write_text(
         '[tool.sqlty]\nschema = "s.sql"\n\n[tool.sqlty.rules]\nredundant-optional = "error"\n'
     )
@@ -1720,9 +1715,7 @@ def test_redundant_optional_reads_every_query_of_a_shared_row_type(
     assert "pkg/a.py:3: [redundant-optional] Coupon.owner_id" in out.replace(os.sep, "/")
 
 
-@pytest.mark.parametrize("ast", ["python", "rust"])
-def test_redundant_optional_does_not_depend_on_threads(tmp_path, monkeypatch, capsys, ast) -> None:
-    monkeypatch.setattr("sqlty._source.AST", ast)
+def test_redundant_optional_does_not_depend_on_threads(tmp_path, monkeypatch, capsys) -> None:
     (tmp_path / "pyproject.toml").write_text(
         '[tool.sqlty]\nschema = "s.sql"\n\n[tool.sqlty.rules]\nredundant-optional = "error"\n'
     )
@@ -1846,6 +1839,8 @@ def test_check_json_locates_fixes_by_character(tmp_path, monkeypatch, capsys) ->
 def test_check_sarif_output_is_valid_sarif(tmp_path, monkeypatch, capsys) -> None:
     import jsonschema
 
+    from sqlty._sarif import sarif_log
+
     (tmp_path / "q.py").write_text(
         'from sqlty import SQL\nq = ("é", SQL[tuple[int]]("--sql\\nSELECT 1.5::REAL"))\n'
     )
@@ -1883,6 +1878,10 @@ def test_check_sarif_output_is_valid_sarif(tmp_path, monkeypatch, capsys) -> Non
             ]
         }
     ]
+
+    with pytest.raises(SystemExit):
+        main(["check", "--output-format", "json", "q.py"])
+    assert sarif_log(json.loads(capsys.readouterr().out))["runs"][0]["results"] == [result]
 
     with pytest.raises(SystemExit):
         main(["check", "--output-format", "sarif", str(tmp_path / "q.py")])
@@ -2098,3 +2097,99 @@ def test_rust_cli_raises_what_its_streams_raise(monkeypatch) -> None:
 
     with pytest.raises(OSError, match="closed"):
         cli(["sqlty", "rule"])
+
+
+@pytest.mark.parametrize(
+    ("files", "argv", "message"),
+    [
+        ({}, ["--config-file", "missing.toml"], "config file does not exist"),
+        ({}, ["--config-file", "."], "config path is not a file"),
+        ({"sqlty.toml": "dialect = \n"}, ["--config-file", "sqlty.toml"], "sqlty.toml: "),
+        ({}, ["-c", "dialect"], "expects a TOML assignment"),
+        ({}, ["-c", "dialect=mysql"], "quote strings"),
+        ({}, ["--error", "select-starr"], "unknown rule 'select-starr'"),
+        ({"pyproject.toml": '[tool.sqlty]\njson-types = "x"\n'}, [], "json-types must be"),
+        (
+            {
+                "pyproject.toml": '[tool.sqlty]\nschema = "s.sql"\n[tool.sqlty.types]\n"NOT A TYPE" = "int"\n',
+                "s.sql": "",
+            },
+            [],
+            "[tool.sqlty.types]: `NOT A TYPE` is not a SQL type",
+        ),
+        ({"sub/pyproject.toml": "[tool.sqlty]\ndialet = 'mysql'\n"}, [], "did you mean 'dialect'"),
+    ],
+)
+def test_the_python_project_reports_config_errors(tmp_path, monkeypatch, files, argv, message):
+    """`breaking` and `server` read settings in Python."""
+    from sqlty._cli import Project
+
+    _tree(tmp_path, "q.py", *files)
+    for name, text in files.items():
+        (tmp_path / name).write_text(text)
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(ConfigError, match=re.escape(message)):
+        Project(build_parser().parse_args(["check", *argv, "."]))
+
+
+def test_the_python_project_reports_a_missing_path(tmp_path, monkeypatch) -> None:
+    from sqlty._cli import Project
+
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ConfigError, match="path does not exist: nonexist.py"):
+        Project(build_parser().parse_args(["check", "nonexist.py"]))
+
+
+def test_the_python_project_checks_the_project_of_its_config(tmp_path, monkeypatch) -> None:
+    from sqlty._cli import Project
+
+    _tree(tmp_path, "app/q.py", "app/pyproject.toml")
+    (tmp_path / "app" / "pyproject.toml").write_text("[tool.sqlty]\n")
+    monkeypatch.chdir(tmp_path)
+
+    project = Project(build_parser().parse_args(["check", "app/pyproject.toml"]))
+    assert project.paths == [Path("app")]
+    assert project.files == [Path("app/q.py")]
+
+
+def test_the_python_project_warns_about_its_schemas(tmp_path, monkeypatch, caplog) -> None:
+    from sqlty._cli import Project
+
+    _tree(tmp_path, "duck/q.py", "pg/q.py")
+    (tmp_path / "duck" / "pyproject.toml").write_text(
+        '[tool.sqlty]\nschema = "schema.sql"\ndialect = "duckdb"\n'
+    )
+    (tmp_path / "duck" / "schema.sql").write_text("CREATE TABLE (;\n")
+    (tmp_path / "pg" / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
+    (tmp_path / "pg" / "schema.sql").write_text(
+        "CREATE TABLE t (a INT);\n"
+        "ALTER TABLE ONLY t ADD CONSTRAINT pk PRIMARY KEY (a) WITH (fillfactor = 70);\n"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    Project(build_parser().parse_args(["check", "duck", "pg"]))
+    assert [r.getMessage() for r in caplog.records] == [
+        "Table and column names are not checked for duckdb",
+        "Schema table  could not be parsed; its columns are unknown",
+        "Schema statement could not be parsed and is ignored: "
+        "ALTER TABLE ONLY t ADD CONSTRAINT pk PRIMARY KEY (a) WITH (fillfactor = 70)",
+    ]
+
+
+def test_the_python_project_routes_the_helpers_of_a_database(tmp_path, monkeypatch) -> None:
+    from sqlty._lsp_bridge import Workspace
+
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.sqlty.databases.analytics]\nschema = "events.sql"\n'
+        "[[tool.sqlty.databases.analytics.functions]]\n"
+        'import-path = "warehouse.fetch"\nquery-param = "query"\nreturn-type-param = "form"\n'
+    )
+    (tmp_path / "events.sql").write_text("CREATE TABLE events (n INTEGER NOT NULL);")
+    (tmp_path / "warehouse.py").write_text(
+        "def fetch[T](query: str, form: type[T]) -> list[T]: ...\n"
+    )
+    text = 'from warehouse import fetch\nfetch("SELECT n FROM events", tuple[str])\n'
+
+    found = Workspace(str(tmp_path)).check(str(tmp_path / "q.py"), text)
+    assert [d["rule"] for d in found] == ["column-type-mismatch"]

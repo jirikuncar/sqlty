@@ -15,9 +15,9 @@ import uuid
 if typing.TYPE_CHECKING:
     pass
 
-from sqlty._type_extractor.info import TypeInfo
-from sqlty._type_extractor.stdlib import stdlib_class
-from sqlty._type_extractor.subtype import _QUALIFIERS, _consistent, _is_subtype, _type_repr
+from tests.type_oracle.info import TypeInfo
+from tests.type_oracle.stdlib import stdlib_class
+from tests.type_oracle.subtype import _QUALIFIERS, _consistent, _is_subtype, _type_repr
 
 _TYPING_MODULES = frozenset({"typing", "typing_extensions"})
 

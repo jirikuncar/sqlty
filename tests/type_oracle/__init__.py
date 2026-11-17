@@ -6,7 +6,7 @@ dataclass, BaseModel, Protocol) and resolves each field's annotation to a ``typi
 object (``int``, ``list[str]``, ``UserId | None``), going through:
 
 - the module's own names, ``symbols.ModuleTypes``: aliases, ``NewType``s and classes;
-- the modules of the checked paths, read from their source (``HelperIndex``);
+- the modules of the checked paths, read from their source (``resolver.Resolver``);
 - the standard library, as nominal classes built from typeshed's class graph (``stdlib``);
 - Pydantic's types, from a table of what each takes (``pydantic_types``).
 
@@ -17,7 +17,7 @@ Modules: ``info`` (``TypeInfo``), ``extract`` (``extract_type_definitions``),
 ``symbols``, ``stdlib``, ``pydantic_types`` and ``generic`` (``SQL[Row[int]]``).
 """
 
-from sqlty._type_extractor.compat import (
+from tests.type_oracle.compat import (
     admits_none,
     check_type_compatibility,
     column_literal_values,
@@ -27,9 +27,9 @@ from sqlty._type_extractor.compat import (
     is_optional,
     parse_tuple_annotation,
 )
-from sqlty._type_extractor.extract import extract_type_definitions
-from sqlty._type_extractor.generic import specialize
-from sqlty._type_extractor.info import TypeInfo
+from tests.type_oracle.extract import extract_type_definitions
+from tests.type_oracle.generic import specialize
+from tests.type_oracle.info import TypeInfo
 
 __all__ = [
     "TypeInfo",

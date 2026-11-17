@@ -1,5 +1,5 @@
 //! `TypedDict`s for JSON columns: what `json-types = "typing.TypedDict"` writes into a
-//! module (`sqlty._json_types`).
+//! module.
 //!
 //! `rewrite` types a JSON column `typing.Any`. Where the engine knows the shape of the
 //! JSON a query builds, the `typing.Any` items of a `SQL[tuple[...]]` annotation become

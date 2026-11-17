@@ -2,12 +2,14 @@
 
 Generated modules nest imports, aliases, driver bindings and calls in every block kind; the
 corpus is every Python file of the repository and every Python block of the Markdown tests.
-Raise the number of generated examples with ``SQLTY_FUZZ_EXAMPLES``.
+Driver calls are left to the driver tests. Raise the number of generated examples with
+``SQLTY_FUZZ_EXAMPLES``.
 """
 
 from __future__ import annotations
 
 import ast
+import itertools
 import os
 import re
 from pathlib import Path
@@ -16,65 +18,111 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-import sqlty._source
-from sqlty._drivers import _find_driver_calls
-from sqlty._source import Facts, ParsedSource
+from sqlty._source import ParsedSource
 
 EXAMPLES = int(os.environ.get("SQLTY_FUZZ_EXAMPLES", "300"))
 ROOT = Path(__file__).parent.parent
 WRAPPERS = ("SQL", "sqlty.SQL", "Q", "x.SQL")
 
 
-def python_facts(text: str) -> Facts:
-    parsed = ParsedSource(text)
-    assert parsed.tree is not None
-    calls = [node for node in ast.walk(parsed.tree) if isinstance(node, ast.Call)]
-    return Facts(
-        sorted({c.func.id for c in calls if isinstance(c.func, ast.Name)}),
-        sorted({c.func.attr for c in calls if isinstance(c.func, ast.Attribute)}),
-        [
-            (alias.asname or alias.name, alias.name, None, 0)
-            if isinstance(node, ast.Import)
-            else (alias.asname or alias.name, alias.name, node.module or "", node.level)
-            for node in parsed.imports
-            for alias in node.names
-        ],
-        [],
-        sorted(parsed._typing_aliases().items()),
-        [
-            (
-                call.line,
-                call.query,
-                None if call.params is None else [tuple(param) for param in call.params],
-                call.driver,
-                call.single,
-                call.query_span,
-            )
-            for call in _find_driver_calls(parsed)
-        ],
-    )
+TYPING = frozenset({"typing", "typing_extensions"})
+
+
+def imports(tree: ast.Module) -> list[ast.Import | ast.ImportFrom]:
+    return [node for node in ast.walk(tree) if isinstance(node, ast.Import | ast.ImportFrom)]
+
+
+def typing_aliases(tree: ast.Module) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for node in imports(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.module in TYPING:
+                aliases |= {a.asname or a.name: a.name for a in node.names}
+        else:
+            aliases |= {a.asname or a.name: a.name for a in node.names if a.name in TYPING}
+    return aliases
+
+
+def imported_names(tree: ast.Module) -> dict[str, str]:
+    names: dict[str, str] = {}
+    for node in imports(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.module and not node.level:
+                for a in node.names:
+                    names.setdefault(a.asname or a.name, f"{node.module}.{a.name}")
+        else:
+            for a in node.names:
+                root = a.name.partition(".")[0]
+                names.setdefault(a.asname or root, a.name if a.asname else root)
+    return names
+
+
+def is_any(node: ast.expr, aliases: dict[str, str]) -> bool:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        try:
+            node = ast.parse(node.value, mode="eval").body
+        except SyntaxError, ValueError:
+            return False
+    if (
+        isinstance(node, ast.Subscript)
+        and typing_name(node.value, aliases) == "Annotated"
+        and isinstance(node.slice, ast.Tuple)
+    ):
+        return is_any(node.slice.elts[0], aliases)
+    return typing_name(node, aliases) == "Any"
+
+
+def typing_name(node: ast.expr, aliases: dict[str, str]) -> str | None:
+    if isinstance(node, ast.Name):
+        return aliases.get(node.id)
+    if (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and aliases.get(node.value.id) in TYPING
+    ):
+        return node.attr
+    return None
+
+
+def any_calls(tree: ast.Module, text: str, wrapper: str) -> list[int]:
+    aliases = typing_aliases(tree)
+    starts = [0, *itertools.accumulate(map(len, text.encode().splitlines(keepends=True)))]
+    offsets = []
+    for call in ast.walk(tree):
+        if not isinstance(call, ast.Call) or not isinstance(call.func, ast.Subscript):
+            continue
+        if not is_any(call.func.slice, aliases):
+            continue
+        name = ast.unparse(call.func.value)
+        if name == wrapper or name.endswith(f".{wrapper}"):
+            offsets.append(starts[call.func.value.lineno - 1] + call.func.value.col_offset)
+    return sorted(offsets)
 
 
 def assert_same(text: str) -> None:
     try:
-        ast.parse(text)
+        tree = ast.parse(text)
     except SyntaxError, ValueError:
         return
     rust = ParsedSource(text).facts
     assert rust is not None, f"ruff rejects what ast parses:\n{text}"
-    python = python_facts(text)
-    assert rust.names == python.names, text
-    assert rust.attributes == python.attributes, text
-    assert rust.imports == python.imports, text
-    assert sorted(dict(rust.typing_aliases).items()) == python.typing_aliases, text
-    assert rust.driver_calls == python.driver_calls, text
-    any_calls = ParsedSource(text)
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr(sqlty._source, "AST", "rust")
-        assert ParsedSource(text).imported_names == any_calls._imported_names(), text
+    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    assert rust.names == sorted({c.func.id for c in calls if isinstance(c.func, ast.Name)}), text
+    assert rust.attributes == sorted(
+        {c.func.attr for c in calls if isinstance(c.func, ast.Attribute)}
+    ), text
+    assert rust.imports == [
+        (alias.asname or alias.name, alias.name, None, 0)
+        if isinstance(node, ast.Import)
+        else (alias.asname or alias.name, alias.name, node.module or "", node.level)
+        for node in imports(tree)
+        for alias in node.names
+    ], text
+    assert dict(rust.typing_aliases) == typing_aliases(tree), text
+    assert ParsedSource(text).imported_names == imported_names(tree), text
     for wrapper in WRAPPERS:
         found = [o for o, name in rust.any_calls if name == wrapper or name.endswith(f".{wrapper}")]
-        assert found == any_calls._any_calls(wrapper), (wrapper, text)
+        assert found == any_calls(tree, text, wrapper), (wrapper, text)
 
 
 IMPORTS = [

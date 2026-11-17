@@ -1,5 +1,5 @@
-//! `ast.unparse` of an expression: the text the Python passes compare annotations by and
-//! quote in messages. A port of CPython's `_ast_unparse.Unparser`, over the ruff tree read
+//! `ast.unparse` of an expression: the text annotations are compared by and quoted
+//! in messages. A port of CPython's `_ast_unparse.Unparser`, over the ruff tree read
 //! as `ast` reads it (adjacent literal text of an f-string merged, `{x=}` spelled out).
 
 use std::fmt::Write;

@@ -358,7 +358,7 @@ fn accepts(expected: &str) -> Option<&'static [&'static str]> {
     })
 }
 
-/// `sqlty._params.mismatch`: why a value of type `actual` can't be passed for a parameter
+/// Why a value of type `actual` can't be passed for a parameter
 /// of type `expected`.
 pub fn mismatch(
     expected: Option<&str>,
@@ -424,7 +424,7 @@ fn union_members(annotation: &Expr) -> Vec<Option<&Expr>> {
     }
 }
 
-/// `sqlty._params.annotation_type`: the type a value annotated `expr` has, as argument
+/// The type a value annotated `expr` has, as argument
 /// types are spelled.
 fn annotation_type(expr: Option<&Expr>, imported: &Table) -> Option<String> {
     let Some(expr) = expr else {

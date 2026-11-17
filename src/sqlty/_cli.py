@@ -12,14 +12,10 @@ Commands:
 
 from __future__ import annotations
 
-import codecs
 import functools
-import gc
-import itertools
 import json
 import logging
 import os
-import re
 import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -27,8 +23,7 @@ from typing import TYPE_CHECKING, NoReturn, cast
 
 if TYPE_CHECKING:
     import argparse
-    from collections import Counter
-    from collections.abc import Callable, Iterable, Iterator
+    from collections.abc import Callable, Iterable
 
     from sqlty._breaking import SchemaKey
     from sqlty._check import RowUsage
@@ -71,32 +66,18 @@ def main(argv: list[str] | None = None) -> None:
                 sys.exit(code)
             return
         match args.command:
-            case "rewrite":
-                _cmd_rewrite(args)
-            case "strip":
-                _cmd_strip(args)
-            case "format":
-                _cmd_format(args)
-            case "check":
-                _cmd_check(args)
             case "complete":
                 _cmd_complete(args)
             case "breaking":
                 from sqlty._breaking import main as breaking
 
                 breaking(args)
-            case "rule":
-                _cmd_rule(args.name)
-            case "skill":
-                _cmd_skill(args.name, args.install, args.list)
             case "server":
                 from sqlty._core import serve
 
                 # Messages own stdout: a stray print must not corrupt one.
                 sys.stdout = sys.stderr
                 serve()
-            case "version":
-                _cmd_version()
     except ConfigError as exc:
         print(f"sqlty: error: {exc}", file=sys.stderr)
         sys.exit(EXIT_ERROR)
@@ -109,11 +90,8 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def _rust(argv: list[str]) -> int | None:
-    """The exit code of ``argv`` run by the Rust CLI, or ``None`` when Python runs it."""
-    from sqlty._source import AST
-
-    if AST != "rust":
-        return None
+    """The exit code of ``argv`` run by the Rust CLI, or ``None`` for ``complete``,
+    ``breaking`` and ``server``, which Python runs."""
     from sqlty._core import cli
 
     return cli(["sqlty", *argv])
@@ -472,307 +450,25 @@ def _location(value: str) -> tuple[Path, int, int]:
 
 
 def _workers() -> int:
-    """Threads checking files at once: every processor, or one when the checks are Python
-    (``SQLTY_AST=python``) on a build with the GIL, where more threads only wait on it."""
-    from sqlty._source import AST
-
-    if AST == "python" and sys._is_gil_enabled():
-        return 1
+    """Threads checking files at once: every processor."""
     return os.process_cpu_count() or 1
 
 
-def _map[T](work: Callable[[Path], T], files: list[Path]) -> Iterator[T]:
-    """``work`` on every file, its results in the order of ``files``.
-
-    The engine releases the GIL, so threads check files at once. Whatever prints or writes
-    stays with the caller, which reads the results in order.
-    """
-    jobs = min(_workers(), len(files))
-    if jobs <= 1:
-        yield from map(work, files)
-        return
-    from concurrent.futures import ThreadPoolExecutor
-
-    # A task per file costs more than most files take; four batches a thread keep them balanced.
-    batches = itertools.batched(files, max(1, min(64, len(files) // (jobs * 4))), strict=False)
-    with ThreadPoolExecutor(max_workers=jobs) as pool:
-        for batch in pool.map(
-            lambda batch: [work(path) for path in batch], batches, buffersize=jobs
-        ):
-            yield from batch
-
-
 # --- Command implementations ---
-
-_SKIPPED_STRING_RULES = ("fstring-skipped", "tstring-skipped", "unchecked-query", "dynamic-query")
-
-
-def _cmd_rewrite(args: argparse.Namespace) -> None:
-    """Rewrite command: transform --sql strings into SQL[T](...) calls.
-
-    f- and t-strings starting with ``--sql`` are never rewritten; they are
-    reported on stderr (``fstring-skipped``, ``tstring-skipped``) unless ``-q``.
-    """
-    from sqlty._lint import RULES
-    from sqlty.core import check_source, rewrite_source
-
-    def transform(path: Path, original: str, settings: Settings) -> tuple[str, list[str]]:
-        rewritten = rewrite_source(
-            original,
-            dialect=settings.dialect,
-            schema_sql=settings.schema,
-            import_style=settings.import_style,
-            untyped=settings.untyped,
-            json_types=settings.json_types,
-            param_types=settings.param_types,
-            closed_params=settings.closed_params,
-        )
-        if args.quiet:
-            return rewritten, []
-        skipped_only = dict.fromkeys(RULES, "ignore") | {
-            rule: (settings.rules or {}).get(rule, RULES[rule].default_severity.value)
-            for rule in _SKIPPED_STRING_RULES
-        }
-        diagnostics = check_source(original, import_style=settings.import_style, rules=skipped_only)
-        return rewritten, [
-            f"{path}:{diag['line']}: [{diag['rule']}] {diag['message']}" for diag in diagnostics
-        ]
-
-    _transform_files(args, transform, "rewrite", "Rewrote", "rewritten")
-
-
-def _cmd_strip(args: argparse.Namespace) -> None:
-    """Strip command: remove SQL[T](...) wrappers."""
-    from sqlty.core import strip_source
-
-    def transform(path: Path, original: str, settings: Settings) -> tuple[str, list[str]]:
-        return strip_source(original, import_style=settings.import_style), []
-
-    _transform_files(args, transform, "strip", "Stripped", "stripped")
-
-
-def _cmd_format(args: argparse.Namespace) -> None:
-    """Format command: lay out query strings with sqruff."""
-    from sqlty.core import format_source
-
-    def transform(path: Path, original: str, settings: Settings) -> tuple[str, list[str]]:
-        return format_source(
-            original, dialect=settings.dialect, import_style=settings.import_style
-        ), []
-
-    _transform_files(args, transform, "format", "Formatted", "formatted")
-
-
-def _transform_files(
-    args: argparse.Namespace,
-    transform: Callable[[Path, str, Settings], tuple[str, list[str]]],
-    verb: str,
-    done: str,
-    participle: str,
-) -> None:
-    """Apply ``transform`` to every collected file for ``rewrite`` and ``strip``.
-
-    Writes the result back. With ``--check`` or ``--diff`` it leaves the files
-    alone and exits 1 when any would change.
-    """
-    resolver = SettingsResolver(args)
-    files = _collect_python_files(_project_paths(args.paths, resolver.source), resolver.source)
-
-    if not files and not args.quiet:
-        logger.warning("No Python files found")
-        return
-
-    texts = {path: read_source(path) for path in files}
-    unreadable = sum(text is None for text in texts.values())
-    sources = {path: text for path, text in texts.items() if text is not None}
-    settings = {path: resolver.for_file(path) for path in sources}
-    readable = list(sources)
-
-    def work(path: Path) -> tuple[str, list[str]]:
-        return transform(path, sources[path], settings[path])
-
-    changed = 0
-    for path, (result, warnings) in zip(readable, _map(work, readable), strict=True):
-        for warning in warnings:
-            print(warning, file=sys.stderr)
-        original = sources[path]
-        if result == original:
-            continue
-
-        changed += 1
-        if args.check:
-            if not args.quiet:
-                print(f"Would {verb} {path}")
-        elif args.diff:
-            _print_diff(path, original, result)
-        else:
-            write_source(path, result)
-            if verb == "rewrite":
-                _format(path, settings[path].format_command)
-            if args.verbose:
-                print(f"{done} {path}")
-
-    if args.check or args.diff:
-        if changed > 0:
-            if args.check and not args.quiet:
-                print(f"{changed} file(s) would be {participle}")
-            sys.exit(EXIT_FOUND)
-        elif args.check and not args.quiet and not unreadable:
-            print("All files up to date")
-    if unreadable:
-        sys.exit(EXIT_ERROR)
 
 
 def read_source(path: Path) -> str | None:
     """The text of the Python file ``path``, or ``None``, logged, when it is not UTF-8.
 
-    sqlty reads and writes sources as UTF-8, Python's default; a file in another
-    encoding is skipped rather than stopping the run. A byte order mark is left out and
-    line endings read as ``\n``; `write_source` restores both.
+    sqlty reads sources as UTF-8, Python's default; a file in another encoding is
+    skipped rather than stopping the run. A byte order mark is left out and line endings
+    read as ``\n``.
     """
     try:
         return path.read_text(encoding="utf-8-sig")
     except UnicodeDecodeError as exc:
         logger.error("%s: not UTF-8 (%s at byte %d); skipped", path, exc.reason, exc.start)
         return None
-
-
-def write_source(path: Path, text: str) -> None:
-    """Write ``text`` over the Python file ``path`` with its byte order mark and line endings."""
-    raw = path.read_bytes()
-    path.write_text(
-        text,
-        encoding="utf-8-sig" if raw.startswith(codecs.BOM_UTF8) else "utf-8",
-        newline="\r\n" if raw.split(b"\n", 1)[0].endswith(b"\r") else "\n",
-    )
-
-
-def _format(path: Path, command: tuple[str, ...]) -> bool:
-    """Run the configured formatter on ``path``; whether it ran and succeeded."""
-    import subprocess
-
-    if not command:
-        return False
-    try:
-        result = subprocess.run([*command, str(path)], capture_output=True, text=True, check=False)
-    except OSError as exc:
-        logger.warning("format-command %s failed on %s: %s", command[0], path, exc)
-        return False
-    if result.returncode != 0:
-        logger.warning(
-            "format-command %s failed on %s: %s", command[0], path, result.stderr.strip()
-        )
-        return False
-    return True
-
-
-def _cmd_check(args: argparse.Namespace) -> None:
-    """Check command: lint SQL type annotations."""
-    from collections import Counter
-
-    from sqlty._config import ConfigError
-    from sqlty._source import ParsedSource
-    from sqlty.core import RowUsage
-
-    if args.error_on_warning and (args.exit_zero or args.exit_zero_on_warning):
-        other = "--exit-zero" if args.exit_zero else "--exit-zero-on-warning"
-        raise ConfigError(f"--error-on-warning cannot be used with {other}")
-    # Parsed trees stay alive for cross-module lookups: collect young objects only, as mypy does.
-    gc.set_threshold(200_000, 30, 30)
-    project = Project(args)
-    files, sources, settings = project.files, project.sources, project.settings
-
-    if not files and not project.query_files and not project.unreadable and not args.quiet:
-        logger.warning("No Python files found")
-        return
-
-    total_errors = 0
-    total_warnings = 0
-    total_fixed = 0
-    statistics: Counter[str] = Counter()
-    # A row type shared by files is judged by all of its queries: report once every file is read.
-    row_usage = RowUsage()
-    reports: list[tuple[Path, Diagnostic, ParsedSource]] = []
-    types: list[str] = []
-
-    if args.fix:
-        for path, fixed in zip(files, _map(project.fix, files), strict=True):
-            if fixed == sources[path].text:
-                continue
-            write_source(path, fixed)
-            if _format(path, settings[path].format_command):
-                fixed = path.read_text(encoding="utf-8-sig")
-            sources[path] = ParsedSource(fixed, sources[path].module)
-            total_fixed += 1
-            if args.verbose:
-                # JSON and annotations own stdout; progress goes to stderr then.
-                text = args.output_format == "text"
-                print(f"Fixed {path}", file=sys.stdout if text else sys.stderr)
-
-    for path, diagnostics in zip(files, project.check_all(row_usage), strict=True):
-        reports.extend((path, diag, sources[path]) for diag in diagnostics)
-    if args.statistics:
-        statistics = sum(_map(project.statistics, files), statistics)
-    for path in project.query_files:
-        if (text := read_source(path)) is None:
-            project.unreadable.append(path)
-            continue
-        query_source = ParsedSource(text)
-        reports.extend((path, diag, query_source) for diag in project.check_queries(path, text))
-        if args.verbose and args.output_format == "text" and not args.quiet:
-            types.extend(f"{path}: {line}" for line in project.query_types(path, text))
-
-    kept = {id(diag) for diag in row_usage.filter([diag for _, diag, _ in reports])}
-    shown: list[dict[str, object]] = []
-    for path, diag, parsed in reports:
-        if id(diag) not in kept:
-            continue
-        severity = diag["severity"]
-        if severity == "error":
-            total_errors += 1
-        elif severity == "warn":
-            total_warnings += 1
-        if args.output_format in ("json", "sarif"):
-            shown.append({"file": str(path), **json_diagnostic(diag, parsed)})
-        elif args.output_format == "github":
-            print(github_annotation(path, diag))
-        elif not args.quiet:
-            print(f"{path}:{diag.get('line', '')}: [{diag['rule']}] {diag['message']}")
-            if args.explain and diag["rule"] in _EXPLAINED_RULES and "line" in diag:
-                own = settings[path]
-                for line in _explain(parsed, diag["line"], own.dialect, own.schema):
-                    print(line)
-
-    for line in types:
-        print(line)
-    if args.output_format == "json":
-        print(json.dumps(shown, indent=2))
-    elif args.output_format == "sarif":
-        from sqlty._sarif import sarif_log
-
-        print(json.dumps(sarif_log(shown), indent=2))
-    text = args.output_format == "text" and not args.quiet
-    if total_fixed and text:
-        print(f"Fixed {total_fixed} file(s)")
-    if text and (total_errors or total_warnings):
-        parts = []
-        if total_errors:
-            parts.append(f"{total_errors} error(s)")
-        if total_warnings:
-            parts.append(f"{total_warnings} warning(s)")
-        print(f"Found {', '.join(parts)}")
-    if args.statistics and text:
-        print(_format_statistics(statistics))
-
-    code = 0
-    if not args.exit_zero and (total_errors or (args.error_on_warning and total_warnings)):
-        code = EXIT_FOUND
-    elif project.unreadable:
-        code = EXIT_ERROR
-    if getattr(args, "hard_exit", False):
-        _hard_exit(code)
-    if code:
-        sys.exit(code)
 
 
 def _hard_exit(code: int) -> NoReturn:
@@ -859,102 +555,6 @@ def _cmd_complete(args: argparse.Namespace) -> None:
     elif found is not None:
         for item in found.items:
             print("\t".join([item.label, item.kind, item.detail or "", item.sql_type or ""]))
-
-
-def _cmd_skill(name: str, install: Path | None, list_skills: bool) -> None:
-    """Skill command: print one Agent Skill, list them, or write them all under ``install``."""
-    from sqlty._core import skills
-
-    files = dict(skills())
-    if install is not None:
-        for path, text in files.items():
-            target = install / path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(text, encoding="utf-8")
-            print(f"Wrote {target}")
-        return
-    names = {path.split("/")[0]: text for path, text in files.items() if path.endswith("/SKILL.md")}
-    if list_skills:
-        width = max(map(len, names))
-        for skill, text in names.items():
-            description = re.search(r"^description: (.*)$", text, re.M)
-            summary = description.group(1).split(". ")[0].rstrip(".") if description else ""
-            print(f"{skill:<{width}}  {summary}")
-        return
-    if name not in names:
-        logger.error("Unknown skill %r; run `sqlty skill --list` for the list", name)
-        sys.exit(EXIT_ERROR)
-    print(names[name], end="")
-
-
-# Diagnostics about the type of a query's rows, which `--explain` traces to inference rules.
-_EXPLAINED_RULES = frozenset(
-    {
-        "stale-type",
-        "narrow-type",
-        "column-type-mismatch",
-        "nullable-mismatch",
-        "redundant-optional",
-        "literal-mismatch",
-        "redundant-literal",
-        "json-shape-mismatch",
-    }
-)
-
-
-def _explain(
-    parsed: ParsedSource, line: int, dialect: str, schema: str | Schema | None
-) -> list[str]:
-    """The inference rules behind the columns of the query on ``line``, indented."""
-    from sqlty._core import query_sites
-    from sqlty.core import explain_select
-
-    sites = [(start, text) for start, kind, text in query_sites(parsed.text) if kind == "query"]
-    query = next((text for start, text in reversed(sites) if start <= line), None)
-    lines: list[str] = []
-    for column in (
-        explain_select(query, dialect=dialect, schema_sql=schema) if query else None
-    ) or []:
-        rules = {rule for rule in (column.type_rule, column.nullability_rule) if rule is not None}
-        for rule in sorted(rules, key=lambda rule: rule.id):
-            parts = [
-                part
-                for part, by in (
-                    ("type", column.type_rule),
-                    ("nullability", column.nullability_rule),
-                )
-                if by == rule
-            ]
-            lines.append(f"  {column.name}: {' and '.join(parts)} by inference rule {rule.id}")
-            lines.append(f"    {rule.reasoning}")
-            lines.append(f"    Reference: {rule.reference}")
-    return lines
-
-
-def _format_statistics(counts: Counter[str]) -> str:
-    """One line of query counts; skipped strings are broken down by rule."""
-    skipped = {rule: counts[rule] for rule in _SKIPPED_STRING_RULES if counts[rule]}
-    detail = ", ".join(f"{rule}: {count}" for rule, count in skipped.items())
-    return (
-        f"Queries: {counts['typed']} typed, {counts['partially typed']} partially typed, "
-        f"{counts['unparsed']} unparsed, {sum(skipped.values())} skipped"
-        + (f" ({detail})" if detail else "")
-    )
-
-
-def _cmd_rule(name: str | None) -> None:
-    """Rule command: print a rule's documentation, or the rule table."""
-    from sqlty._lint import RULES, rule_doc
-
-    if name is None:
-        width = max(map(len, RULES))
-        for rule in RULES.values():
-            print(f"{rule.name:<{width}}  {rule.default_severity.value:<5}  {rule.description}")
-        return
-    if name not in RULES:
-        logger.error("Unknown rule %r; run `sqlty rule` for the list", name)
-        sys.exit(EXIT_ERROR)
-    print(rule_doc(name), end="")
 
 
 def _cmd_version() -> None:
@@ -1503,18 +1103,6 @@ class Project:
         ]
         self._configure_helpers()
 
-    def query_types(self, path: Path, text: str) -> list[str]:
-        from sqlty._queries import query_types
-
-        settings = self.resolver.for_file(path)
-        return query_types(
-            text,
-            name=path.stem,
-            query_format=settings.query_format,
-            dialect=settings.dialect,
-            schema_sql=settings.schema,
-        )
-
     def is_query_file(self, path: Path) -> bool:
         """Whether the ``queries`` key of ``path``'s project names it, as a file, a directory
         holding it or a glob; ``path`` need not exist, as an unsaved buffer's may not."""
@@ -1568,10 +1156,6 @@ class Project:
             coerce_row_types=settings.coerce_row_types,
         )
 
-    def check_all(self, row_usage: RowUsage) -> Iterable[list[Diagnostic]]:
-        """``check`` of every file, in order, on threads (the Rust CLI checks with Rust)."""
-        return _map(lambda path: self.check(path, row_usage), self.files)
-
     def fix(self, path: Path) -> str:
         from sqlty.core import fix_source
 
@@ -1589,19 +1173,6 @@ class Project:
             helpers=self.helpers[path],
         )
 
-    def statistics(self, path: Path) -> Counter[str]:
-        from sqlty.core import query_statistics
-
-        settings = self.settings[path]
-        return query_statistics(
-            self.sources[path],
-            dialect=settings.dialect,
-            schema_sql=settings.schema,
-            import_style=settings.import_style,
-            helpers=self.helpers[path],
-            query_variants=settings.query_variants,
-        )
-
     def _module(self, path: Path) -> str:
         return self.modules[path][0] + (".__init__" if path.name == "__init__.py" else "")
 
@@ -1614,14 +1185,12 @@ class Project:
         import threading
 
         from sqlty._helpers import HelperIndex
-        from sqlty._source import AST
 
         self.index = HelperIndex()
         for path, parsed in self.sources.items():
             for name in self.modules[path]:
                 self.index.add(name, parsed)
-        if AST != "python":
-            threading.Thread(target=self.index.rust, daemon=True).start()
+        threading.Thread(target=self.index.rust, daemon=True).start()
 
     def _configure_helpers(self) -> None:
         from sqlty._helpers import configured_helpers
@@ -1657,16 +1226,3 @@ def _load_schema(spec: SchemaSpec, base: Path) -> str | None:
         else:
             logger.warning("Schema file not found: %s", path)
     return "\n".join(parts) if parts else None
-
-
-def _print_diff(path: Path, original: str, modified: str) -> None:
-    """Print unified diff between original and modified."""
-    import difflib
-
-    diff = difflib.unified_diff(
-        original.splitlines(keepends=True),
-        modified.splitlines(keepends=True),
-        fromfile=str(path),
-        tofile=str(path),
-    )
-    sys.stdout.writelines(diff)

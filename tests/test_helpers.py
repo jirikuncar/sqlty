@@ -7,8 +7,7 @@ import ast
 import pytest
 
 from sqlty._cli import main
-from sqlty._source import AST
-from sqlty.core import HelperIndex, check_source
+from sqlty.core import HelperIndex, check_source, query_statistics
 
 SCHEMA = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);\n"
 
@@ -92,6 +91,26 @@ def test_check_source_with_index():
     assert [d["rule"] for d in check_source(use, helpers=index)] == ["column-type-mismatch"]
     assert check_source(use) == []
     assert check_source(use.replace("db", "elsewhere"), helpers=index) == []
+
+
+def test_statistics_count_helper_queries():
+    index = HelperIndex()
+    index.add("db", DB)
+    use = (
+        "from db import fetch_all\n"
+        'fetch_all("SELECT id FROM users", int)\n'
+        'fetch_all("SELECT nope(", int)\n'
+        'fetch_all("DELETE FROM users", int)\n'
+        "fetch_all(QUERY, int)\n"
+        'q = f"--sql\\nSELECT {1}"\n'
+    )
+    assert query_statistics(use, schema_sql=SCHEMA, helpers=index) == {
+        "typed": 1,
+        "unparsed": 1,
+        "dynamic-query": 1,
+        "fstring-skipped": 1,
+    }
+    assert query_statistics(use, helpers=index)["partially typed"] == 1
 
 
 def test_unbindable_calls_are_skipped():
@@ -340,4 +359,4 @@ def test_compositions_use_fragments_of_other_modules(project, capsys, monkeypatc
         ("unknown.py", "unchecked-query"),
     ]
     columns = (project / "pkg" / "columns.py").read_text()
-    assert parses.count(columns) == (AST != "rust")
+    assert columns not in parses

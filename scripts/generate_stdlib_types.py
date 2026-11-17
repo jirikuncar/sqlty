@@ -1,4 +1,5 @@
-"""Write ``src/sqlty/_type_extractor/_stdlib.py``, the standard-library classes sqlty knows.
+"""Write the standard-library classes sqlty knows: ``stdlib_table.rs`` and its copy in the
+test oracle, ``tests/type_oracle/_stdlib.py``.
 
     uv run python scripts/generate_stdlib_types.py            # rewrite the table
     uv run python scripts/generate_stdlib_types.py --check    # exit 1 if it is out of date
@@ -24,10 +25,12 @@ from pathlib import Path
 
 import mypy
 
-from sqlty._type_extractor.info import PYTHON_TYPE_MAP
-
 ROOT = Path(__file__).resolve().parent.parent
-OUTPUT = ROOT / "src" / "sqlty" / "_type_extractor" / "_stdlib.py"
+sys.path.insert(0, str(ROOT))
+
+from tests.type_oracle.info import PYTHON_TYPE_MAP  # noqa: E402
+
+OUTPUT = ROOT / "tests" / "type_oracle" / "_stdlib.py"
 RUST_OUTPUT = ROOT / "rust" / "crates" / "sqlty-python" / "src" / "types" / "stdlib_table.rs"
 STDLIB = Path(mypy.__file__).parent / "typeshed" / "stdlib"
 OPEN_MODULES = frozenset(

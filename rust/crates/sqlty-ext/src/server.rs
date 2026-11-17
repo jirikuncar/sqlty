@@ -1,5 +1,5 @@
 //! `sqlty server`: the language server of `sqlty-lsp`, checking with `sqlty-project`, or
-//! with `sqlty._lsp_bridge` for a breaking baseline or `SQLTY_AST=python`.
+//! with `sqlty._lsp_bridge` for a breaking baseline.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -22,9 +22,8 @@ pub(crate) fn serve(py: Python<'_>) -> PyResult<()> {
         info.getattr("minor")?.extract()?,
     );
     let extra: Vec<PathBuf> = sys.getattr("path")?.extract()?;
-    let python = std::env::var("SQLTY_AST").is_ok_and(|ast| ast == "python");
     let open = move |root: &Path, settings: &Settings| -> Result<Opened, String> {
-        if python || settings.against.is_some() {
+        if settings.against.is_some() {
             return Ok(Opened(Box::new(BridgeWorkspace::open(root, settings)?)));
         }
         let files = Arc::new(sqlty_project::Disk);

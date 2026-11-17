@@ -1,38 +1,52 @@
-"""``sqlty_python::suppress`` reads ``# sqlty: ignore`` comments as ``ParsedSource.ignores`` does."""
+"""``sqlty_python::suppress`` reads ``# sqlty: ignore`` comments as ``tokenize`` finds them."""
 
 from __future__ import annotations
 
+import io
 import os
+import re
 import sys
+import tokenize
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from sqlty._core import module_ignores
-from sqlty._source import ParsedSource
 
 VERSION = sys.version_info[:2]
 EXAMPLES = int(os.environ.get("SQLTY_FUZZ_EXAMPLES", "300"))
 
 
+IGNORE = re.compile(r"#\s*sqlty:\s*ignore\b(?:\[([^\]]*)\])?")
+
+
+def tokenized(source: str) -> list[tuple[int, list[str] | None, int, int]]:
+    """The ignore comments of the COMMENT tokens of ``source``, with their byte offsets."""
+    starts = [0]
+    for line in source.encode().splitlines(keepends=True):
+        starts.append(starts[-1] + len(line))
+    found = []
+    for token in tokenize.generate_tokens(io.StringIO(source).readline):
+        if token.type != tokenize.COMMENT or (match := IGNORE.match(token.string)) is None:
+            continue
+        names = match.group(1)
+        rules = None if names is None else [n.strip() for n in names.split(",") if n.strip()]
+        line, column = token.start
+        start = starts[line - 1] + len(token.line[:column].encode())
+        found.append((line, rules, start, start + len(token.string.encode())))
+    return found
+
+
 def same(source: str) -> int:
     """The number of ignore comments, after checking that Rust reads the same ones."""
-    python = [
-        (
-            ignore.line,
-            None if ignore.rules is None else list(ignore.rules),
-            ignore.start,
-            ignore.end,
-        )
-        for ignore in ParsedSource(source).ignores.values()
-    ]
     rust = module_ignores(source, VERSION)
     try:
         compile(source, "<source>", "exec")
     except SyntaxError:
         # `tokenize` stops at what does not lex; Rust reads every comment the lexer finds.
         return len(rust)
+    python = tokenized(source)
     assert rust == python, source
     return len(python)
 
@@ -114,7 +128,6 @@ def test_lone_carriage_returns_are_lines_in_rust_only() -> None:
     # `tokenize` stops at a lone CR, which `ast` and ruff both take for a line break.
     source = "x = 1  # sqlty: ignore\ry = 2  # sqlty: ignore\n"
     assert [found[0] for found in module_ignores(source, VERSION) or []] == [1, 2]
-    assert list(ParsedSource(source)._tokenized_ignores()) == [1]  # noqa: SLF001
 
 
 @settings(max_examples=EXAMPLES, deadline=None)
