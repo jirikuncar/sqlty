@@ -296,49 +296,57 @@ impl Discovery {
         let mut found = Vec::new();
         let mut todo = vec![root.to_path_buf()];
         while let Some(current) = todo.pop() {
-            let resolved = self.resolved(&current);
-            let entries = match self.files.list(&self.absolute(&current)) {
-                Listing::Entries(entries) => entries,
-                Listing::Missing => continue,
-                Listing::Unread => return Err(FindError::Need(self.absolute(&current))),
-            };
-            let rules: Rules =
-                self.exclusions(&current)?
-                    .into_iter()
-                    .map(|(base, globs)| {
-                        let relative = resolved.strip_prefix(&base).ok().map(|relative| {
-                            match relative.to_string_lossy().replace('\\', "/") {
-                                relative if relative.is_empty() => ".".to_string(),
-                                relative => relative,
-                            }
-                        });
-                        (relative, globs)
-                    })
-                    .collect();
-            let respects = self.respects_gitignore(&current)?;
-            let mut directories = Vec::new();
-            for (name, kind) in entries {
-                let is_dir = matches!(kind, Kind::Dir | Kind::LinkedDir);
-                if !is_dir && !name.ends_with(".py") {
-                    continue;
-                }
-                let excluded = rules.iter().any(|(directory, globs)| {
-                    self.excluded_entry(&name, directory.as_deref(), globs)
-                });
-                if excluded || (respects && self.ignored(&resolved, &name, is_dir)?) {
-                    continue;
-                }
-                match kind {
-                    Kind::Dir => directories.push(current.join(&name)),
-                    Kind::LinkedDir => {}
-                    Kind::File | Kind::Other => found.push(current.join(&name)),
-                }
-            }
-            directories.sort();
+            let (files, directories) = self.entries(&current)?;
+            found.extend(files);
             todo.extend(directories.into_iter().rev());
         }
         found.sort();
         Ok(found)
+    }
+
+    /// The Python files and the directories, sorted, that [`Discovery::walk`] takes from
+    /// the directory `current`: a host walks the directories on its own threads.
+    pub fn entries(&self, current: &Path) -> Result<(Vec<PathBuf>, Vec<PathBuf>), FindError> {
+        let resolved = self.resolved(current);
+        let entries = match self.files.list(&self.absolute(current)) {
+            Listing::Entries(entries) => entries,
+            Listing::Missing => return Ok((Vec::new(), Vec::new())),
+            Listing::Unread => return Err(FindError::Need(self.absolute(current))),
+        };
+        let rules: Rules = self
+            .exclusions(current)?
+            .into_iter()
+            .map(|(base, globs)| {
+                let relative = resolved.strip_prefix(&base).ok().map(|relative| {
+                    match relative.to_string_lossy().replace('\\', "/") {
+                        relative if relative.is_empty() => ".".to_string(),
+                        relative => relative,
+                    }
+                });
+                (relative, globs)
+            })
+            .collect();
+        let respects = self.respects_gitignore(current)?;
+        let (mut files, mut directories) = (Vec::new(), Vec::new());
+        for (name, kind) in entries {
+            let is_dir = matches!(kind, Kind::Dir | Kind::LinkedDir);
+            if !is_dir && !name.ends_with(".py") {
+                continue;
+            }
+            let excluded = rules
+                .iter()
+                .any(|(directory, globs)| self.excluded_entry(&name, directory.as_deref(), globs));
+            if excluded || (respects && self.ignored(&resolved, &name, is_dir)?) {
+                continue;
+            }
+            match kind {
+                Kind::Dir => directories.push(current.join(&name)),
+                Kind::LinkedDir => {}
+                Kind::File | Kind::Other => files.push(current.join(&name)),
+            }
+        }
+        directories.sort();
+        Ok((files, directories))
     }
 
     fn state(&self) -> std::sync::MutexGuard<'_, State> {

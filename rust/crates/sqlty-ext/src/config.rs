@@ -216,9 +216,10 @@ fn module_names(
     cwd: PathBuf,
 ) -> Vec<Vec<String>> {
     py.detach(|| {
+        let roots = PACKAGES.roots(&roots, &cwd);
         paths
             .iter()
-            .map(|path| PACKAGES.names(path, &roots, &cwd))
+            .map(|path| PACKAGES.names(path, &roots))
             .collect()
     })
 }
