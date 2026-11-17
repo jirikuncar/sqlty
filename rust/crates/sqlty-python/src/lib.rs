@@ -38,6 +38,7 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
 
+pub(crate) mod analyses;
 pub mod breaking;
 #[allow(missing_docs)]
 pub mod calls;
