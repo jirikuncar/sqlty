@@ -53,6 +53,8 @@ pub struct Options {
     pub extra_roots: Vec<PathBuf>,
     /// `--force-exclude`: the excludes apply to the paths named too.
     pub force_exclude: bool,
+    /// Whether the modules are parsed for checks; a rewrite reads only their text.
+    pub parse: bool,
 }
 
 /// The project of the paths of a command line, or of an editor's root.
@@ -106,6 +108,7 @@ impl Workspace {
             version,
             extra_roots,
             force_exclude: false,
+            parse: true,
         };
         let mut workspace = Self::open(std::slice::from_ref(&root), files, options)?;
         workspace.settings(&root.join("__init__.py"))?;
@@ -122,6 +125,7 @@ impl Workspace {
             version,
             extra_roots,
             force_exclude,
+            parse,
         } = options;
         let mut workspace = Self {
             packages: Packages::new(Box::new(files.clone())),
@@ -153,7 +157,7 @@ impl Workspace {
         let modules: Vec<(PathBuf, Module)> = pool().install(|| {
             read.into_par_iter()
                 .map(|(path, text)| {
-                    let module = workspace.module(&path, text);
+                    let module = workspace.module(&path, text, parse);
                     (path, module)
                 })
                 .collect()
@@ -194,7 +198,7 @@ impl Workspace {
         {
             return;
         }
-        let module = self.module(path, Arc::from(text));
+        let module = self.module(path, Arc::from(text), true);
         if self.modules.insert(path.to_path_buf(), module).is_none() {
             self.order.push(path.to_path_buf());
         }
@@ -202,18 +206,22 @@ impl Workspace {
         self.configured.clear();
     }
 
-    fn module(&self, path: &Path, text: Arc<str>) -> Module {
+    fn module(&self, path: &Path, text: Arc<str>, parse: bool) -> Module {
         let resolved = self.resolved(path);
         let names = self.packages.names(&resolved, &self.paths, &self.flags.cwd);
         let init = path.file_name().is_some_and(|name| name == "__init__.py");
         let name = format!("{}{}", names[0], if init { ".__init__" } else { "" });
-        let parsed = stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
-            Source::new(&text, self.version).map(|source| {
-                let source = source.named(Some(&name));
-                source.targets();
-                Arc::new(source)
+        let parsed = parse
+            .then(|| {
+                stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
+                    Source::new(&text, self.version).map(|source| {
+                        let source = source.named(Some(&name));
+                        source.targets();
+                        Arc::new(source)
+                    })
+                })
             })
-        });
+            .flatten();
         let helpers = parsed.as_deref().map(helpers_of).unwrap_or_default();
         Module {
             text,
@@ -1219,6 +1227,7 @@ mod tests {
             version: (3, 14),
             extra_roots: Vec::new(),
             force_exclude: true,
+            parse: true,
         };
         let paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
         Workspace::open(&paths, files.clone(), options)
