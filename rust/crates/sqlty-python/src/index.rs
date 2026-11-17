@@ -334,7 +334,8 @@ impl Builder {
             Some((head, rest)) => (head, format!(".{rest}")),
             None => (name, String::new()),
         };
-        let (exports, _) = imports_of(&source.entries, source.module.as_deref().or(Some(&module)));
+        let targets = source.targets_in(source.module.as_deref().or(Some(&module)));
+        let (exports, _) = &*targets;
         let (target, original) = exports.get(head)?;
         let parts: Vec<&str> = target.split('.').collect();
         self.definition(
@@ -505,7 +506,8 @@ impl HelperIndex {
         dotted: &str,
         module: Option<&str>,
     ) -> Option<(&'a Source, &'a Expr)> {
-        self.fragment_of(&source.entries, dotted, source.module.as_deref().or(module))
+        let (functions, modules) = &*source.targets_in(source.module.as_deref().or(module));
+        self.constant(functions, modules, dotted)
     }
 
     /// [`Self::fragment`] for the module `module` that imports `entries`.
@@ -516,12 +518,21 @@ impl HelperIndex {
         module: Option<&str>,
     ) -> Option<(&Source, &Expr)> {
         let (functions, modules) = imports_of(entries, module);
+        self.constant(&functions, &modules, dotted)
+    }
+
+    fn constant(
+        &self,
+        functions: &Functions,
+        modules: &HashMap<String, String>,
+        dotted: &str,
+    ) -> Option<(&Source, &Expr)> {
         match dotted.rsplit_once('.') {
             None => {
                 let (module, original) = functions.get(dotted)?;
                 self.tree.constant(module, original, 0)
             }
-            Some((prefix, name)) => self.tree.constant(&module_of(prefix, &modules), name, 0),
+            Some((prefix, name)) => self.tree.constant(&module_of(prefix, modules), name, 0),
         }
     }
 
@@ -708,6 +719,17 @@ mod tests {
         let (functions, modules) = imports_of(&source.entries, None);
         assert_eq!(functions.keys().collect::<Vec<_>>(), ["e"]);
         assert_eq!(modules.keys().collect::<Vec<_>>(), ["e"]);
+    }
+
+    #[test]
+    fn a_source_imports_relative_to_the_module_it_is_read_as() {
+        let source = Source::new("from .b import c\n", (3, 14))
+            .unwrap()
+            .named(Some("app.a"));
+        let own = source.targets_in(None);
+        let other = source.targets_in(Some("lib.a"));
+        assert_eq!(own.0["c"].0, "app.b");
+        assert_eq!(other.0["c"].0, "lib.b");
     }
 
     #[test]

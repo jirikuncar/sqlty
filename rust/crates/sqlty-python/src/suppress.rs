@@ -7,7 +7,6 @@ use std::sync::LazyLock;
 use regex::Regex;
 use ruff_python_ast::token::TokenKind;
 use ruff_python_parser::{lexer, Mode};
-use ruff_text_size::Ranged;
 
 use crate::checker::Diagnostic;
 use crate::rows::Reported;
@@ -61,12 +60,9 @@ pub fn ignores(source: &Source) -> Vec<Ignore> {
         return Vec::new();
     }
     source
-        .parsed
-        .tokens()
+        .comments
         .iter()
-        .filter(|token| token.kind() == TokenKind::Comment)
-        .filter_map(|token| {
-            let range = token.range();
+        .filter_map(|&range| {
             Some(Ignore {
                 line: source.line(range.start()),
                 rules: rules_of(&text[range])?,
