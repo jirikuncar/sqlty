@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 
 use ruff_python_ast::visitor::{walk_expr, Visitor};
-use ruff_python_ast::{ExceptHandler, Expr, Stmt};
+use ruff_python_ast::{ExceptHandler, Expr, Stmt, StmtImport, StmtImportFrom};
 use ruff_text_size::Ranged;
 
 use crate::drivers::{self, DriverCall};
@@ -54,7 +54,7 @@ impl Imports {
         };
         for (_, stmt) in &imports {
             match stmt {
-                Stmt::ImportFrom(from) => {
+                ImportStmt::From(from) => {
                     let module_name = from.module.as_ref().map_or("", |m| m.as_str());
                     let is_typing = TYPING_MODULES.contains(&module_name);
                     for alias in &from.names {
@@ -77,7 +77,7 @@ impl Imports {
                         });
                     }
                 }
-                Stmt::Import(import) => {
+                ImportStmt::Plain(import) => {
                     for alias in &import.names {
                         let name = alias.name.as_str();
                         if TYPING_MODULES.contains(&name) {
@@ -101,7 +101,6 @@ impl Imports {
                         });
                     }
                 }
-                _ => {}
             }
         }
         found
@@ -189,11 +188,17 @@ pub fn any_calls(body: &[Stmt], typing: &[(String, String)]) -> Vec<(usize, Stri
     calls.any_calls
 }
 
+enum ImportStmt<'a> {
+    From(&'a StmtImportFrom),
+    Plain(&'a StmtImport),
+}
+
 /// Imports at any depth, with the depth `ast` gives them: one more than the node holding them.
-fn collect_imports<'a>(body: &'a [Stmt], depth: usize, out: &mut Vec<(usize, &'a Stmt)>) {
+fn collect_imports<'a>(body: &'a [Stmt], depth: usize, out: &mut Vec<(usize, ImportStmt<'a>)>) {
     for stmt in body {
         match stmt {
-            Stmt::Import(_) | Stmt::ImportFrom(_) => out.push((depth, stmt)),
+            Stmt::Import(node) => out.push((depth, ImportStmt::Plain(node))),
+            Stmt::ImportFrom(node) => out.push((depth, ImportStmt::From(node))),
             Stmt::FunctionDef(node) => collect_imports(&node.body, depth + 1, out),
             Stmt::ClassDef(node) => collect_imports(&node.body, depth + 1, out),
             Stmt::With(node) => collect_imports(&node.body, depth + 1, out),
@@ -321,6 +326,7 @@ fn callee(expr: &Expr) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 
@@ -344,6 +350,12 @@ mod tests {
     #[test]
     fn invalid_source_has_no_facts() {
         assert_eq!(facts("def ("), None);
+    }
+
+    #[test]
+    fn annotated_without_metadata_is_not_any() {
+        let found = facts("import typing\nSQL[typing.Annotated[typing.Any]](1)\n").unwrap();
+        assert_eq!(found.any_calls, []);
     }
 
     #[test]

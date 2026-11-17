@@ -10,7 +10,9 @@
 use std::collections::{HashMap, HashSet};
 
 use ruff_python_ast::visitor::{self, Visitor};
-use ruff_python_ast::{Expr, ExprContext, ExprName, Number, Operator, Parameters, Stmt};
+use ruff_python_ast::{
+    Expr, ExprContext, ExprList, ExprName, ExprTuple, Number, Operator, Parameters, Stmt,
+};
 use ruff_text_size::Ranged;
 
 use crate::scopes::dotted;
@@ -32,6 +34,7 @@ pub struct Declared<'a> {
 }
 
 impl std::fmt::Debug for Declared<'_> {
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Declared({:?})", self.query)
     }
@@ -184,12 +187,7 @@ impl<'a> Value<'a> {
         match self {
             Value::None => out.push_str("NULL"),
             Value::Bool(value) => out.push_str(if *value { "true" } else { "false" }),
-            Value::Int(Some(digits)) => {
-                if digits.starts_with('-') {
-                    out.push(' ');
-                }
-                out.push_str(digits);
-            }
+            Value::Int(Some(digits)) => out.push_str(digits),
             Value::Str(_) | Value::Declared(_) => {
                 let text = self.as_str().unwrap_or_default();
                 if text.contains('\0') {
@@ -456,9 +454,8 @@ fn sql_format<'a>(template: &str, arguments: &Arguments<'a>) -> Eval<Value<'a>> 
     let mut auto = Some(0_usize);
     for part in format_parts(template).ok_or(Stop::Error)? {
         let Some((name, spec, conversion)) = part.field else {
-            if !part.literal.is_empty() {
-                parts.push(Value::Sql(part.literal));
-            }
+            // Never empty: a part without a field holds at least one character.
+            parts.push(Value::Sql(part.literal));
             continue;
         };
         if !spec.is_empty() || conversion.is_some() {
@@ -807,10 +804,10 @@ impl<'a> Scan<'a> {
 /// `ParsedSource.constants`: the value of the one module-level assignment to `name`.
 pub fn constant<'a>(source: &'a Source, name: &str) -> Option<&'a Expr> {
     let table = source.constants.get_or_init(|| constants(source));
-    match source.body().get((*table.get(name)?)?)? {
-        Stmt::Assign(node) => Some(&node.value),
-        Stmt::AnnAssign(node) => node.value.as_deref(),
-        _ => None,
+    let stmt = source.body().get((*table.get(name)?)?)?;
+    match stmt.as_assign_stmt() {
+        Some(node) => Some(&node.value),
+        None => stmt.as_ann_assign_stmt()?.value.as_deref(),
     }
 }
 
@@ -825,13 +822,16 @@ fn constants(source: &Source) -> HashMap<String, Option<usize>> {
     for (at, stmt) in source.body().iter().enumerate() {
         match stmt {
             Stmt::Assign(node) => {
-                if node.targets.iter().all(Expr::is_name_expr) {
+                let names: Option<Vec<&str>> = node
+                    .targets
+                    .iter()
+                    .map(|target| Some(target.as_name_expr()?.id.as_str()))
+                    .collect();
+                if let Some(names) = names {
                     let mut seen: Vec<&str> = Vec::new();
-                    for target in &node.targets {
-                        if let Expr::Name(target) = target {
-                            if !seen.contains(&target.id.as_str()) {
-                                seen.push(target.id.as_str());
-                            }
+                    for name in names {
+                        if !seen.contains(&name) {
+                            seen.push(name);
                         }
                     }
                     for name in seen {
@@ -971,12 +971,8 @@ impl<'a, 'r> Run<'a, 'r> {
                 }
             }
             Expr::Attribute(_) => self.imported(node),
-            Expr::List(_) | Expr::Tuple(_) => {
-                let items = match node {
-                    Expr::List(list) => &list.elts,
-                    Expr::Tuple(tuple) => &tuple.elts,
-                    _ => return Err(Stop::Dynamic),
-                };
+            Expr::List(ExprList { elts: items, .. })
+            | Expr::Tuple(ExprTuple { elts: items, .. }) => {
                 if items.iter().any(Expr::is_starred_expr) {
                     return Err(Stop::Dynamic);
                 }
@@ -1032,25 +1028,23 @@ impl<'a, 'r> Run<'a, 'r> {
 
     fn arguments(&mut self, call: &ruff_python_ast::ExprCall) -> Eval<Arguments<'a>> {
         let arguments = &call.arguments;
-        if arguments.args.iter().any(Expr::is_starred_expr)
-            || arguments
-                .keywords
-                .iter()
-                .any(|keyword| keyword.arg.is_none())
-        {
+        let names: Option<Vec<_>> = arguments
+            .keywords
+            .iter()
+            .map(|keyword| keyword.arg.as_ref())
+            .collect();
+        let Some(names) = names.filter(|_| !arguments.args.iter().any(Expr::is_starred_expr))
+        else {
             return Err(Stop::Dynamic);
-        }
+        };
         // Python evaluates the positional arguments, then the keywords, each in order.
         let mut args = Vec::new();
         for arg in &arguments.args {
             args.push(self.value(arg)?);
         }
         let mut kwargs = Vec::new();
-        for keyword in &arguments.keywords {
-            let value = self.value(&keyword.value)?;
-            if let Some(name) = &keyword.arg {
-                kwargs.push((name.to_string(), value));
-            }
+        for (name, keyword) in names.into_iter().zip(&arguments.keywords) {
+            kwargs.push((name.to_string(), self.value(&keyword.value)?));
         }
         Ok(Arguments { args, kwargs })
     }

@@ -8,6 +8,7 @@
 
 use std::rc::Rc;
 
+use sqlparser::ast::InTarget;
 use sqlparser::ast::{
     AccessExpr, BinaryOperator, CastKind, DataType, Expr, FunctionArguments, Ident, Join,
     JoinConstraint, JoinOperator, Query, Select, SelectItem, SetExpr, Subscript, TableFactor,
@@ -16,19 +17,20 @@ use sqlparser::ast::{
 
 use super::dialect::SqlDialect;
 use super::expr::is_binary_charset;
-use super::functions::{function_name, positional_args};
+use super::functions::{arg_list, function_name, positional_args};
 use super::hashing::ExprKey;
 use super::inference::{
     binary_rules, function_rules, typed_by_rule, FunctionNullability, RuleNullability,
 };
+use super::input::PSYCOPG;
 use super::literals::python_kind;
-use super::memo::Reporting;
+use super::memo::{first_column, Reporting};
 use super::names::{split_access, table_key};
 use super::narrowing::Learned;
 use super::operators::operand_type;
 use super::query::Analyzer;
 use super::registry::{lookup, Behavior};
-use super::scope::{table_scope, Scope};
+use super::scope::{table_source, Scope};
 use crate::catalog::fold;
 use rustc_hash::FxHashSet;
 
@@ -101,6 +103,22 @@ impl Facts {
     /// Add the relations the outer joins of `from` may fill with NULLs.
     pub(super) fn join(&mut self, extended: Vec<String>) {
         Rc::make_mut(&mut self.null_extended).extend(extended);
+    }
+
+    /// How many outer joins fill the relation `reference` with NULLs.
+    pub(super) fn extensions(&self, reference: &str) -> usize {
+        self.null_extended
+            .iter()
+            .filter(|r| *r == reference)
+            .count()
+    }
+
+    /// These facts before any outer join fills a relation with NULLs.
+    pub(super) fn without_joins(&self) -> Self {
+        Self {
+            null_extended: Rc::default(),
+            ..self.clone()
+        }
     }
 
     /// Add the relations of `from` that a nullable foreign key finds, see [`Facts::matched`].
@@ -270,10 +288,7 @@ impl Analyzer<'_> {
                 .map(|(reference, _)| (reference, None))
                 .collect(),
             // The reference the scope of the SELECT gives the relation.
-            other => table_scope(other, self.dialect)
-                .into_iter()
-                .map(|source| (source.reference, Some(other)))
-                .collect(),
+            other => vec![(table_source(other, self.dialect).reference, Some(other))],
         }
     }
 
@@ -351,10 +366,11 @@ impl Analyzer<'_> {
         pairs: &[(String, String)],
         not_null: bool,
     ) -> bool {
-        let Some(columns) = self.schema.table(child) else {
-            return false;
+        let required = |name: &String| {
+            self.schema
+                .table(child)
+                .is_some_and(|columns| columns.iter().any(|c| c.name == *name && c.not_null))
         };
-        let required = |name: &String| columns.iter().any(|c| c.name == *name && c.not_null);
         self.schema.foreign_keys(child).any(|fk| {
             fk.table == parent
                 && fk.columns.len() == pairs.len()
@@ -401,10 +417,7 @@ impl Analyzer<'_> {
         let Some(parent) = self.base_table(&from.relation) else {
             return false;
         };
-        let inner = table_scope(&from.relation, self.dialect);
-        let [inner] = inner.as_slice() else {
-            return false;
-        };
+        let inner = table_source(&from.relation, self.dialect);
         let mut child = None;
         let mut pairs = Vec::new();
         for condition in conjuncts(selection) {
@@ -437,22 +450,19 @@ impl Analyzer<'_> {
             }
             pairs.push((column, referred));
         }
-        let Some((_, child)) = child else {
-            return false;
-        };
-        let Some(child) = self.schema.table_id(&child) else {
-            return false;
-        };
-        // A lookup of the outer row's own key in its table finds that row.
-        let itself = child == parent
-            && pairs.iter().all(|(column, referred)| column == referred)
-            && self.schema.unique_keys(&parent).is_some_and(|keys| {
-                keys.iter().any(|key| {
-                    key.iter()
-                        .all(|name| pairs.iter().any(|(column, _)| column == name))
-                })
-            });
-        itself || self.references(child, &parent, &pairs, false)
+        let child = child.and_then(|(_, child)| self.schema.table_id(&child));
+        child.is_some_and(|child| {
+            // A lookup of the outer row's own key in its table finds that row.
+            let itself = child == parent
+                && pairs.iter().all(|(column, referred)| column == referred)
+                && self.schema.unique_keys(&parent).is_some_and(|keys| {
+                    keys.iter().any(|key| {
+                        key.iter()
+                            .all(|name| pairs.iter().any(|(column, _)| column == name))
+                    })
+                });
+            itself || self.references(child, &parent, &pairs, false)
+        })
     }
 
     /// The catalog key of a base table in FROM: not a CTE, a view or a function.
@@ -513,8 +523,8 @@ fn always_matches(join: &Join, dialect: SqlDialect) -> bool {
         JoinOperator::Left(constraint) | JoinOperator::LeftOuter(constraint) => {
             matches!(constraint, JoinConstraint::On(on) if is_true(on))
         }
-        JoinOperator::OuterApply => true,
-        _ => false,
+        // `OUTER APPLY`, the only other outer join asked about.
+        _ => true,
     };
     unconditional
         && matches!(&join.relation, TableFactor::Derived { subquery, .. } if returns_one_row(subquery, dialect))
@@ -776,8 +786,11 @@ impl<'a> Analyzer<'a> {
             Expr::Identifier(_) | Expr::CompoundIdentifier(_) => {
                 self.column_nullability(expr, scope, facts)
             }
-            Expr::Value(value) => match value.value {
+            Expr::Value(value) => match &value.value {
                 Value::Null => Nullability::Nullable,
+                Value::Placeholder(text) if PSYCOPG.contains(&text.as_str()) => {
+                    Nullability::Nullable
+                }
                 Value::Placeholder(_) => Nullability::Unknown,
                 _ => Nullability::NonNull,
             },
@@ -813,8 +826,10 @@ impl<'a> Analyzer<'a> {
                 let of = |inner: &Expr| self.operand_nullability(inner, scope, facts);
                 any_nullable([of(inner), of(low), of(high)])
             }
-            Expr::InList {
-                expr: inner, list, ..
+            Expr::In {
+                expr: inner,
+                target: InTarget::List(list),
+                ..
             } => {
                 let of = |inner: &Expr| self.operand_nullability(inner, scope, facts);
                 any_nullable(std::iter::once(of(inner)).chain(list.iter().map(of)))
@@ -824,9 +839,9 @@ impl<'a> Analyzer<'a> {
                 timestamp,
                 time_zone,
             } => any_nullable([of(timestamp), of(time_zone)]),
-            Expr::InSubquery {
+            Expr::In {
                 expr: inner,
-                subquery,
+                target: InTarget::Subquery(subquery),
                 ..
             } => any_nullable([
                 self.operand_nullability(inner, scope, facts),
@@ -837,9 +852,9 @@ impl<'a> Analyzer<'a> {
                     _ => Nullability::Unknown,
                 },
             ]),
-            Expr::InUnnest {
+            Expr::In {
                 expr: inner,
-                array_expr,
+                target: InTarget::Unnest(array_expr),
                 ..
             } => any_nullable([
                 of(inner),
@@ -1171,12 +1186,11 @@ impl<'a> Analyzer<'a> {
 
     /// Nullability of the first column of a subquery, as its own query reads it.
     fn subquery_column(&self, query: &Query, scope: &Scope) -> Nullability {
-        match &*self.subquery_columns(query, scope, Reporting::Silent) {
-            Ok(Some(columns)) => columns
-                .first()
-                .map_or(Nullability::Unknown, |col| col.nullability),
-            _ => Nullability::Unknown,
-        }
+        let columns = self.subquery_columns(query, scope, Reporting::Silent);
+        first_column(&columns)
+            .ok()
+            .flatten()
+            .map_or(Nullability::Unknown, |col| col.nullability)
     }
 
     fn case_nullability(
@@ -1229,10 +1243,7 @@ impl<'a> Analyzer<'a> {
         }
         let info = lookup(&name);
         let args = positional_args(&func.args);
-        let all_positional = match &func.args {
-            FunctionArguments::List(list) => list.args.len() == args.len(),
-            _ => true,
-        };
+        let all_positional = arg_list(&func.args).len() == args.len();
         let of = |inner: &Expr| self.nullability(inner, scope, facts);
         let first = || args.first().map_or(Nullability::Unknown, |arg| of(arg));
         let postgres = self.dialect == SqlDialect::Postgres;
@@ -1381,6 +1392,7 @@ impl<'a> Analyzer<'a> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::analyzer::{analyze_select, load_schema};

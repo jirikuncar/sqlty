@@ -209,6 +209,59 @@ q = "--sql\nSELECT name FROM users WHERE id = %(from)s"
 # rewritten-file: q = SQL[tuple[str], QParams]("--sql\nSELECT name FROM users WHERE id = %(from)s")
 ```
 
+## Python 3.15 closes them
+
+When `requires-python` rules out Python 3.14, a generated class takes no other keys
+([PEP 728](https://peps.python.org/pep-0728/)), so a typo in a key is a type error.
+
+```toml
+[project]
+requires-python = ">=3.15"
+```
+
+```python
+by_id = "--sql\nSELECT name FROM users WHERE id = %(id)s"
+q = "--sql\nSELECT name FROM users WHERE id = %(from)s"
+# rewritten-file: import typing
+# rewritten-file: from sqlty import SQL
+# rewritten-file:
+# rewritten-file:
+# rewritten-file: # sqlty: generated
+# rewritten-file: class ByIdParams(typing.TypedDict, closed=True):
+# rewritten-file:     id: int | None
+# rewritten-file:
+# rewritten-file:
+# rewritten-file: # sqlty: generated
+# rewritten-file: QParams = typing.TypedDict('QParams', {'from': int | None}, closed=True)
+# rewritten-file:
+# rewritten-file:
+# rewritten-file: by_id = SQL[tuple[str], ByIdParams]("--sql\nSELECT name FROM users WHERE id = %(id)s")
+# rewritten-file: q = SQL[tuple[str], QParams]("--sql\nSELECT name FROM users WHERE id = %(from)s")
+```
+
+## Python 3.14 keeps them open
+
+`typing.TypedDict` takes `closed` from Python 3.15 on.
+
+```toml
+[project]
+requires-python = ">=3.14"
+```
+
+```python
+by_id = "--sql\nSELECT name FROM users WHERE id = %(id)s"
+# rewritten-file: import typing
+# rewritten-file: from sqlty import SQL
+# rewritten-file:
+# rewritten-file:
+# rewritten-file: # sqlty: generated
+# rewritten-file: class ByIdParams(typing.TypedDict):
+# rewritten-file:     id: int | None
+# rewritten-file:
+# rewritten-file:
+# rewritten-file: by_id = SQL[tuple[str], ByIdParams]("--sql\nSELECT name FROM users WHERE id = %(id)s")
+```
+
 ## Unknown and cast parameters are `typing.Any`
 
 ```python

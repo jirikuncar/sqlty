@@ -300,6 +300,7 @@ pub fn check_queries(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 
@@ -355,5 +356,32 @@ mod tests {
         let source = "SELECT 0;\n-- name: last";
         let [query] = split(source, Format::Aiosql, "stem").try_into().unwrap();
         assert!(source[query.body].is_empty());
+    }
+
+    #[test]
+    fn rarer_formats_and_checks() {
+        for name in Format::NAMES {
+            assert!(name.parse::<Format>().is_ok(), "{name}");
+        }
+        assert!("nope".parse::<Format>().is_err());
+        assert_eq!(
+            placeholders("SELECT :u.id, :u.id", Format::Aiosql).1,
+            [("u_id".to_string(), "u.id".to_string())]
+        );
+        let (schema, _) =
+            sqlty_sql::analyzer::load_schema_with_skipped("CREATE TABLE t (a INT)", "postgres");
+        let options = Options::new("postgres", Some(&schema), None, false).unwrap();
+        let rules = RuleConfig::default().only(&[Rule::UnparsedQuery]);
+        let found = check_queries(
+            "SELECT nope FROM t;\nSELECT * FROM t",
+            Format::File,
+            "q",
+            &options,
+            &rules,
+        );
+        assert!(found.is_empty(), "{found:?}");
+        let options = Options::new("postgres", None, None, false).unwrap();
+        let found = check_queries("SELEC", Format::File, "q", &options, &rules);
+        assert_eq!(found.len(), 1, "{found:?}");
     }
 }

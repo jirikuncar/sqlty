@@ -10,6 +10,7 @@
 
 use std::ops::ControlFlow;
 
+use sqlparser::ast::InTarget;
 use sqlparser::ast::Spanned;
 use sqlparser::ast::{
     BinaryOperator, Distinct, DuplicateTreatment, Expr, FunctionArguments, GroupByExpr, Ident,
@@ -280,11 +281,9 @@ impl Analyzer<'_> {
             }
             return positions(grouping);
         }
-        let aggregating = items.iter().any(|item| match item {
-            SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
-                has_aggregate(expr)
-            }
-            _ => false,
+        let aggregating = items.iter().any(|item| {
+            matches!(item, SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. }
+                if has_aggregate(expr))
         });
         if aggregating {
             return Some(Vec::new());
@@ -339,12 +338,9 @@ fn position_of(key: &Expr, items: &[SelectItem]) -> Option<usize> {
         SelectItem::ExprWithAlias { alias, expr } => {
             key_name.as_deref() == Some(alias.value.to_lowercase().as_str()) || expr == key
         }
-        SelectItem::UnnamedExpr(expr) => {
-            expr == key
-                || matches!((expr, &key_name), (Expr::CompoundIdentifier(parts), Some(name))
-                    if parts.last().is_some_and(|last| last.value.to_lowercase() == *name))
-        }
-        _ => false,
+        item => matches!(item, SelectItem::UnnamedExpr(expr) if expr == key
+            || matches!((expr, &key_name), (Expr::CompoundIdentifier(parts), Some(name))
+                if parts.last().is_some_and(|last| last.value.to_lowercase() == *name))),
     })
 }
 
@@ -628,11 +624,12 @@ fn pins(expr: &Expr, reference: &str) -> bool {
                     ControlFlow::Continue(())
                 }
                 Expr::Identifier(_) | Expr::CompoundIdentifier(_) => ControlFlow::Break(()),
-                Expr::Function(_) | Expr::Exists { .. } | Expr::InSubquery { .. }
-                    if self.depth == 0 =>
-                {
-                    ControlFlow::Break(())
-                }
+                Expr::Function(_)
+                | Expr::Exists { .. }
+                | Expr::In {
+                    target: InTarget::Subquery(_),
+                    ..
+                } if self.depth == 0 => ControlFlow::Break(()),
                 _ => ControlFlow::Continue(()),
             }
         }

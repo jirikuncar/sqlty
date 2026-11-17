@@ -28,11 +28,11 @@ def same(source: str) -> int:
         for ignore in ParsedSource(source).ignores.values()
     ]
     rust = module_ignores(source, VERSION)
-    if rust is None:
-        # Rust reads no file that does not parse; `tokenize` reads it up to the error.
-        with pytest.raises(SyntaxError):
-            compile(source, "<source>", "exec")
-        return -1
+    try:
+        compile(source, "<source>", "exec")
+    except SyntaxError:
+        # `tokenize` stops at what does not lex; Rust reads every comment the lexer finds.
+        return len(rust)
     assert rust == python, source
     return len(python)
 
@@ -57,6 +57,13 @@ CASES = [
     ("x = 1 \\\n  + 2  # sqlty: ignore\r\ny = 2  # sqlty: ignore\r\nz = 3  # sqlty: ignore", 3),
     ("x = (\n    1,  # sqlty: ignore[a]\n    2,  # sqlty: ignore[a][b]\n)\n", 2),
     ("if x:\n    pass\n# sqlty: ignore\n\x0c# sqlty: ignore[a]\n", 2),
+    # Sources that do not parse: every comment outside a string.
+    ("x = (  # sqlty: ignore\ny = 2  # sqlty: ignore[a]\n", 2),
+    ("def f(:  # sqlty: ignore\n", 1),
+    ("x = 1  # sqlty: ignore\ny = 'open  # sqlty: ignore\nz = 3  # sqlty: ignore\n", 2),
+    ('x = 1  # sqlty: ignore\ny = """open\n# sqlty: ignore\n', 1),
+    ("if x:\n        a = 1  # sqlty: ignore\n    b = 2  # sqlty: ignore\n", 2),
+    ("x = 1  # sqlty: ignore\ny = $  # sqlty: ignore\n", 2),
 ]
 
 

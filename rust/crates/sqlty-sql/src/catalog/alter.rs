@@ -19,7 +19,7 @@ impl Loader {
     /// Returns `false` when the table (or a column it changes) is not defined yet.
     pub(super) fn alter_table(&mut self, alter: &AlterTable, path: &[String]) -> bool {
         let name = parts(&alter.name, self.dialect);
-        let Some(key) = self.table_key(&name, path) else {
+        let Some((key, root)) = self.table_of(&name, path) else {
             if self.lookup(&self.relations, &name, path).is_none() {
                 return alter.if_exists;
             }
@@ -39,9 +39,6 @@ impl Loader {
             if reshapes {
                 self.taint(Taint::Relation, &name, path);
             }
-            return true;
-        };
-        let Some(Rel::Table(root)) = self.relations.get(&key) else {
             return true;
         };
         let mut root = root.clone();
@@ -72,11 +69,11 @@ impl Loader {
         }
         let mut changed = vec![(key.clone(), root)];
         if !alter.only {
-            for child in self.descendants(&key) {
-                let Some(Rel::Table(table)) = self.relations.get(&child) else {
-                    continue;
-                };
-                let mut table = table.clone();
+            let children = self.descendants(&key).into_iter().filter_map(|child| {
+                let table = self.relations.get(&child)?.table()?.clone();
+                Some((child, table))
+            });
+            for (child, mut table) in children {
                 for op in &alter.operations {
                     let _ = alter_op(&mut table, op, false, &mut None, self.dialect);
                 }
@@ -107,9 +104,9 @@ impl Loader {
                 _ => self.new_key(&new_name, path),
             };
             self.cache = None;
-            if let Some(table) = self.relations.remove(&key) {
-                self.relations.insert(new_key.clone(), table);
-            }
+            let moved = self.relations.remove(&key);
+            self.relations
+                .extend(moved.map(|table| (new_key.clone(), table)));
             for rel in self.relations.values_mut() {
                 if let Rel::Table(table) = rel {
                     for parent in &mut table.parents {
@@ -124,12 +121,15 @@ impl Loader {
     }
 
     pub(super) fn alter_type(&mut self, alter: &AlterType, path: &[String]) -> bool {
-        let Some(key) = self.lookup(&self.types, &parts(&alter.name, self.dialect), path) else {
+        let found = self
+            .lookup(&self.types, &parts(&alter.name, self.dialect), path)
+            .and_then(|key| Some((self.types.get_mut(&key)?, key)));
+        let Some((def, key)) = found else {
             return false;
         };
         self.cache = None;
-        match (&alter.operation, self.types.get_mut(&key)) {
-            (AlterTypeOperation::AddValue(add), Some(TypeDef::Enum(labels))) => {
+        match (&alter.operation, def) {
+            (AlterTypeOperation::AddValue(add), TypeDef::Enum(labels)) => {
                 let value = add.value.value.clone();
                 if !labels.contains(&value) {
                     let at = add.position.as_ref().and_then(|position| {
@@ -145,31 +145,30 @@ impl Loader {
                     labels.insert(at.unwrap_or(labels.len()), value);
                 }
             }
-            (AlterTypeOperation::RenameValue(rename), Some(TypeDef::Enum(labels))) => {
+            (AlterTypeOperation::RenameValue(rename), TypeDef::Enum(labels)) => {
                 match labels.iter_mut().find(|label| **label == rename.from.value) {
                     Some(label) => label.clone_from(&rename.to.value),
                     None => return false,
                 }
             }
-            (AlterTypeOperation::Rename(rename), Some(_)) => {
+            (AlterTypeOperation::Rename(rename), def) => {
+                let def = std::mem::replace(def, TypeDef::Unknown);
                 let schema = key.split_once('.').map_or("public", |(schema, _)| schema);
                 let new_key = format!("{schema}.{}", fold(&rename.new_name, self.dialect));
-                if let Some(def) = self.types.remove(&key) {
-                    for target in self.type_aliases.values_mut() {
-                        if *target == key {
-                            target.clone_from(&new_key);
-                        }
+                self.types.remove(&key);
+                for target in self.type_aliases.values_mut() {
+                    if *target == key {
+                        target.clone_from(&new_key);
                     }
-                    self.type_aliases.remove(&new_key);
-                    self.type_aliases.insert(key, new_key.clone());
-                    self.types.insert(new_key, def);
                 }
+                self.type_aliases.remove(&new_key);
+                self.type_aliases.insert(key, new_key.clone());
+                self.types.insert(new_key, def);
             }
-            (_, Some(def)) => {
+            (_, def) => {
                 *def = TypeDef::Unknown;
                 self.skipped.push(("type", alter.name.to_string()));
             }
-            _ => {}
         }
         true
     }
@@ -325,6 +324,7 @@ pub(super) fn alter_op(
                     table.columns[at].default = None;
                     table.columns[at].generated = None;
                 }
+                AlterColumnOperation::GenericOptions { .. } => {}
             }
         }
         AlterTableOperation::DropPrimaryKey { .. } => {
@@ -429,5 +429,64 @@ pub(super) fn changes_columns(action: &[String], mentions_type: bool) -> bool {
         "set" => word(1) == "schema",
         "of" => true,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use sqlparser::ast::Statement;
+
+    use super::*;
+    use crate::analyzer::parse_ddl;
+
+    /// A PostgreSQL loader holding `t (a INT)`, and the one statement of `sql` as
+    /// `dialect` reads it.
+    fn loader_and(sql: &str, dialect: SqlDialect) -> (Loader, Statement) {
+        let mut loader = Loader::new(SqlDialect::Postgres);
+        let Some(Statement::CreateTable(create)) =
+            parse_ddl("CREATE TABLE t (a INT)", SqlDialect::Postgres)
+                .and_then(|s| s.into_iter().next())
+        else {
+            unreachable!()
+        };
+        assert!(loader.create_table(&create, &[], &["public".to_string()]));
+        let stmt = parse_ddl(sql, dialect).unwrap().remove(0);
+        (loader, stmt)
+    }
+
+    // Only dialects whose `ALTER` the loader does not read parse these.
+    #[test]
+    fn an_operation_it_cannot_follow_leaves_the_table_unknown() {
+        let path = ["public".to_string()];
+        for (sql, dialect) in [
+            ("ALTER TABLE t SWAP WITH u", SqlDialect::Other("snowflake")),
+            ("ALTER TABLE t ADD COLUMN c", SqlDialect::Sqlite),
+        ] {
+            let (mut loader, Statement::AlterTable(alter)) = loader_and(sql, dialect) else {
+                unreachable!()
+            };
+            assert!(loader.alter_table(&alter, &path));
+            assert_eq!(loader.skipped, [("table", "t".to_string())]);
+            let Some(Rel::Table(table)) = loader.relations.get("public.t") else {
+                unreachable!()
+            };
+            assert!(table.unknown);
+        }
+    }
+
+    #[test]
+    fn an_untyped_column_is_left_out_outside_sqlite() {
+        let (mut loader, Statement::CreateTable(create)) =
+            loader_and("CREATE TABLE u (a, b INT)", SqlDialect::Sqlite)
+        else {
+            unreachable!()
+        };
+        assert!(loader.create_table(&create, &[], &["public".to_string()]));
+        let Some(Rel::Table(table)) = loader.relations.get("public.u") else {
+            unreachable!()
+        };
+        let names: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["b"]);
     }
 }

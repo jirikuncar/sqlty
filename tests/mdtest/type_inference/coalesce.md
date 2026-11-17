@@ -45,3 +45,24 @@ SELECT greatest(%(a)s, NULL, id) AS g, least(NULL, name) AS l FROM users
 SELECT coalesce(NULL, %(x)s) AS x
 -- columns: x: None (None)
 ```
+
+## A constant next to a value of unknown type
+
+A parameter or an argument of unknown type can hold any value of the common
+type, so the constants' `Literal` widens to it. `NULL` adds no value.
+
+```sql
+SELECT coalesce($1, 1) AS a, coalesce(nope(), 'n') AS b, coalesce(NULL, 1) AS c
+-- columns: a: int (None)
+-- columns: b: str (None)
+-- columns: c: typing.Literal[1] (None)
+```
+
+A psycopg placeholder is a parameter too, not a `NULL`, as PostgreSQL reads
+`PREPARE p AS SELECT coalesce($1, 1)`:
+
+```sql
+SELECT coalesce(%s, 1) AS a, coalesce(%(n)s, 'n') AS b
+-- columns: a: int (None)
+-- columns: b: str (None)
+```

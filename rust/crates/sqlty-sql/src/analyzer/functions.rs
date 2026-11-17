@@ -3,14 +3,17 @@
 use std::rc::Rc;
 
 use sqlparser::ast::{
-    BinaryOperator, Expr, FunctionArg, FunctionArgExpr, FunctionArgOperator, FunctionArguments,
+    BinaryOperator, DateTimeField, Expr, FunctionArg, FunctionArgExpr, FunctionArgOperator,
+    FunctionArguments, Value,
 };
 
 use super::dialect::SqlDialect;
 use super::expr::{from_sql_type, range_element, range_kind};
 use super::inference::{function_rules, operand, FunctionRule};
 use super::literals::{strip, value_set};
-use super::operators::{common_of, mysql_date_add, numeric_rank, operand_type};
+use super::operators::{
+    common_of, is_text, mysql_date_add, mysql_date_shift, numeric_rank, operand_type,
+};
 use super::query::Analyzer;
 use super::scope::{resolve, Scope};
 use super::typed::Typed;
@@ -37,6 +40,9 @@ pub(crate) enum Returns {
     /// MySQL `STR_TO_DATE(s, format)`: a `DATE`, `TIME` or `DATETIME` by the parts the
     /// literal format at this argument reads.
     StrToDate(usize),
+    /// DuckDB `date_part(part, x)`: a `DOUBLE` for the literal part at this argument `epoch`
+    /// or `julian`, else a `BIGINT`.
+    DatePart(usize),
     /// `lower`/`upper`: the element type of a range argument, else `TEXT`.
     Bound,
     /// `AVG` and friends: `DOUBLE` for floats, `INTERVAL` for intervals, else `NUMERIC`.
@@ -90,6 +96,14 @@ pub(super) fn function_name(func: &sqlparser::ast::Function) -> String {
         .and_then(|part| part.as_ident())
         .map(|ident| ident.value.to_uppercase())
         .unwrap_or_default()
+}
+
+/// The arguments of a call written with a list: none for `CURRENT_DATE` or `f(SELECT ...)`.
+pub(super) fn arg_list(args: &FunctionArguments) -> &[FunctionArg] {
+    match args {
+        FunctionArguments::List(list) => &list.args,
+        _ => &[],
+    }
 }
 
 /// The leading unnamed expression arguments of a call (`*` and named arguments end the list).
@@ -162,8 +176,21 @@ impl<'a> Analyzer<'a> {
                 for expr in args {
                     typed_args.push(self.expr(expr, scope)?);
                 }
+                // An argument of unknown type, a placeholder too, can hold any value of the
+                // common type.
+                let opaque = args
+                    .iter()
+                    .zip(&typed_args)
+                    .any(|(expr, typed)| !typed.is_known() && !valueless(expr));
                 if let Some(common) = common_of(typed_args.iter().cloned(), self.dialect) {
-                    return Ok(common);
+                    return Ok(if opaque {
+                        strip(common, self.dialect)
+                    } else {
+                        common
+                    });
+                }
+                if self.reject_unmatched("argument", &typed_args) {
+                    return Ok(Typed::UNKNOWN);
                 }
                 let first = typed_args
                     .iter()
@@ -184,6 +211,13 @@ impl<'a> Analyzer<'a> {
             Returns::StrToDate(i) => Ok(match args.get(i) {
                 Some(Expr::Value(value)) => match value.value.clone().into_string() {
                     Some(format) => from_sql_type(str_to_date_type(&format), self.dialect),
+                    None => Typed::UNKNOWN,
+                },
+                _ => Typed::UNKNOWN,
+            }),
+            Returns::DatePart(i) => Ok(match args.get(i) {
+                Some(Expr::Value(value)) => match value.value.clone().into_string() {
+                    Some(part) => from_sql_type(date_part_type(&part), self.dialect),
                     None => Typed::UNKNOWN,
                 },
                 _ => Typed::UNKNOWN,
@@ -244,33 +278,34 @@ impl<'a> Analyzer<'a> {
                         (interval, &Typed::UNKNOWN),
                     )
                     .map_or(Typed::UNKNOWN, |ty| from_sql_type(ty, self.dialect)),
-                    Some(_) => match operand_type(&date) {
-                        Some("DATE") => sql("DATE")?,
-                        Some("DATETIME" | "TIMESTAMP" | "TIMESTAMPTZ") => sql("DATETIME")?,
-                        _ => Typed::UNKNOWN,
-                    },
+                    // `ADDDATE(date, days)`.
+                    Some(_) => mysql_date_shift(&date, true, false)
+                        .map_or(Typed::UNKNOWN, |ty| from_sql_type(ty, self.dialect)),
                     None => Typed::UNKNOWN,
                 })
             }
             Returns::TimestampAdd => {
-                let day_or_coarser = matches!(
-                    args.first(),
-                    Some(Expr::Identifier(unit)) if ["DAY", "WEEK", "MONTH", "QUARTER", "YEAR"]
-                        .iter()
-                        .any(|coarse| unit.value.eq_ignore_ascii_case(coarse))
-                );
-                match operand_type(&arg(2)?) {
-                    Some("DATE") if day_or_coarser => sql("DATE"),
-                    Some("DATE" | "DATETIME" | "TIMESTAMP") => sql("DATETIME"),
-                    _ => Ok(Typed::UNKNOWN),
-                }
+                let unit_in = |units: &[&str]| {
+                    matches!(
+                        args.first(),
+                        Some(Expr::Identifier(unit))
+                            if units.iter().any(|known| unit.value.eq_ignore_ascii_case(known))
+                    )
+                };
+                let whole_days = unit_in(&["DAY", "WEEK", "MONTH", "QUARTER", "YEAR"]);
+                let time_only = unit_in(&["HOUR", "MINUTE", "SECOND", "MICROSECOND"]);
+                Ok(mysql_date_shift(&arg(2)?, whole_days, time_only)
+                    .map_or(Typed::UNKNOWN, |ty| from_sql_type(ty, self.dialect)))
             }
             Returns::Integral => {
                 let typed = arg(0)?;
                 let sql_type = typed.sql().unwrap_or_default();
                 match operand_type(&typed) {
                     Some("DOUBLE" | "FLOAT" | "REAL") => sql("DOUBLE"),
-                    Some("DECIMAL" | "NUMERIC") if decimal_integer_digits(sql_type) > 18 => {
+                    Some(ty)
+                        if matches!(ty, "DECIMAL" | "NUMERIC")
+                            && decimal_integer_digits(sql_type) > 18 =>
+                    {
                         Ok(strip(typed, self.dialect))
                     }
                     Some(_) => sql("BIGINT"),
@@ -346,18 +381,13 @@ impl<'a> Analyzer<'a> {
             }))
         };
         let typed = [typed(0)?, typed(1)?];
-        let [first, second] = [0, 1].map(|i| operand(typed[i].as_ref().and_then(operand_type)));
-        let all = if rules.iter().any(FunctionRule::reads_all) {
-            args.iter()
-                .map(|arg| self.expr(arg, scope))
-                .collect::<Inferred<Vec<_>>>()?
-        } else {
-            Vec::new()
-        };
-        let all: Vec<_> = all
-            .iter()
-            .map(|typed| operand(operand_type(typed)))
-            .collect();
+        let [first, second] = [0, 1].map(|i| operand(typed[i].as_ref().and_then(rule_operand)));
+        let mut all = Vec::new();
+        if rules.iter().any(FunctionRule::reads_all) {
+            for arg in args {
+                all.push(operand(rule_operand(&self.expr(arg, scope)?)));
+            }
+        }
         let found = rules
             .iter()
             .find(|rule| rule.applies(self.dialect, first, second, &all));
@@ -411,6 +441,54 @@ fn str_to_date_type(format: &str) -> &'static str {
     }
 }
 
+/// An argument's SQL type as function rules match it: a string literal is `TEXT`.
+fn rule_operand(typed: &Typed) -> Option<&str> {
+    operand_type(typed).or_else(|| is_text(typed).then_some("TEXT"))
+}
+
+/// The SQL type `EXTRACT(field FROM x)` gives, `None` when sqlty does not know it.
+///
+/// PostgreSQL 14+ returns `numeric` for every field (`generic` follows it); MySQL an
+/// integer; DuckDB a `BIGINT`, a `DOUBLE` for `epoch` and `julian`; ClickHouse the type of
+/// the `toYear`-style function the field reads.
+pub(super) fn extract_type(dialect: SqlDialect, field: &DateTimeField) -> Option<&'static str> {
+    let name = field
+        .to_string()
+        .trim_matches(['\'', '"'])
+        .to_ascii_uppercase();
+    match dialect {
+        SqlDialect::Postgres | SqlDialect::Other("generic") => Some("DECIMAL"),
+        SqlDialect::MySql => Some("BIGINT"),
+        SqlDialect::Other("duckdb") => Some(date_part_type(&name)),
+        SqlDialect::ClickHouse => clickhouse_extract_type(&name),
+        _ => None,
+    }
+}
+
+fn clickhouse_extract_type(field: &str) -> Option<&'static str> {
+    Some(match field {
+        "QUARTER" | "MONTH" | "MONTHS" | "WEEK" | "WEEKS" | "DAY" | "DAYS" | "DOW" | "ISODOW"
+        | "HOUR" | "HOURS" | "MINUTE" | "MINUTES" | "SECOND" | "SECONDS" => "UTINYINT",
+        "YEAR" | "YEARS" | "DOY" | "ISOYEAR" | "DECADE" | "MILLISECOND" | "MILLISECONDS" => {
+            "USMALLINT"
+        }
+        "MICROSECOND" | "MICROSECONDS" | "NANOSECOND" | "NANOSECONDS" | "EPOCH" => "UINT",
+        "TIMEZONE_HOUR" => "INT",
+        "CENTURY" | "MILLENNIUM" | "TIMEZONE_MINUTE" => "BIGINT",
+        _ => return None,
+    })
+}
+
+/// The type DuckDB extracts `part` as: "Except for julian and epoch, which return DOUBLEs,
+/// all parts are extracted as integers."
+pub(super) fn date_part_type(part: &str) -> &'static str {
+    if part.eq_ignore_ascii_case("epoch") || part.eq_ignore_ascii_case("julian") {
+        "DOUBLE"
+    } else {
+        "BIGINT"
+    }
+}
+
 /// The digits before the point of a `DECIMAL(p, s)`: `p - s`; MySQL's bare `DECIMAL` is
 /// `DECIMAL(10, 0)`.
 fn decimal_integer_digits(sql_type: &str) -> u32 {
@@ -425,7 +503,17 @@ fn decimal_integer_digits(sql_type: &str) -> u32 {
     }
 }
 
+/// `NULL`: no value of its own to type.
+fn valueless(expr: &Expr) -> bool {
+    match expr {
+        Expr::Nested(inner) => valueless(inner),
+        Expr::Value(value) => matches!(value.value, Value::Null),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use sqlparser::ast::Function;
 
@@ -531,6 +619,18 @@ mod tests {
     }
 
     #[test]
+    fn date_part_of_a_field_it_cannot_read_is_unknown() {
+        for field in ["1", "txt"] {
+            let report = super::super::test_support::report(
+                &format!("SELECT date_part({field}, ts) AS c FROM t"),
+                "duckdb",
+                Some("CREATE TABLE t (ts TIMESTAMP NOT NULL, txt TEXT NOT NULL)"),
+            );
+            assert!(report.starts_with("c: ? | ? | NonNull"), "{report}");
+        }
+    }
+
+    #[test]
     fn mysql_sum_of_an_integer_is_decimal() {
         let report = super::super::test_support::report(
             "SELECT sum(i) AS total FROM t",
@@ -551,6 +651,29 @@ mod tests {
             "SELECT now() AS ok, mystery() AS bad FROM t",
         ];
         insta::assert_snapshot!(reports(&queries, "postgres", Some(DDL)));
+    }
+
+    #[test]
+    fn extract_types_follow_the_dialect_and_field() {
+        use sqlparser::ast::DateTimeField::{
+            Custom, Epoch, Julian, Nanosecond, TimezoneHour, Year,
+        };
+        let cases = [
+            ("postgres", Year, Some("DECIMAL")),
+            ("generic", Epoch, Some("DECIMAL")),
+            ("mysql", Year, Some("BIGINT")),
+            ("duckdb", Julian, Some("DOUBLE")),
+            ("duckdb", Custom("yearweek".into()), Some("BIGINT")),
+            ("clickhouse", Year, Some("USMALLINT")),
+            ("clickhouse", Nanosecond, Some("UINT")),
+            ("clickhouse", TimezoneHour, Some("INT")),
+            ("clickhouse", Julian, None),
+            ("snowflake", Year, None),
+        ];
+        for (dialect, field, expected) in cases {
+            let found = extract_type(SqlDialect::from_name(dialect), &field);
+            assert_eq!(found, expected, "{dialect} {field}");
+        }
     }
 
     #[test]

@@ -2,7 +2,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "ABS(1)",
@@ -17,7 +17,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "ABS(1.5)",
@@ -32,7 +32,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "GREATEST(1, 2, 3)",
@@ -47,7 +47,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "GREATEST(1, 2.5, 3)",
@@ -62,7 +62,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "LEAST(1, 2, 3)",
@@ -77,7 +77,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "LEAST(1, 2.5, 3)",
@@ -92,7 +92,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "CURRENT_TIME()",
@@ -107,7 +107,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "LOCALTIME()",
@@ -122,7 +122,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "TIME_ADD(CAST('09:05:03' AS TIME), INTERVAL 2 HOUR)",
@@ -137,7 +137,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "TIME_SUB(CAST('09:05:03' AS TIME), INTERVAL 2 HOUR)",
@@ -152,7 +152,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "SORT_ARRAY(ARRAY(tbl.str_col))",
@@ -167,7 +167,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "SORT_ARRAY(ARRAY(tbl.double_col))",
@@ -182,7 +182,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "SORT_ARRAY(ARRAY(tbl.bigint_col))",
@@ -197,7 +197,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "tbl.bigint || tbl.str_col",
@@ -212,7 +212,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "tbl.str_col || tbl.bigint",
@@ -227,7 +227,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "ARRAY_REVERSE(['a', 'b'])",
@@ -242,7 +242,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "ARRAY_REVERSE([1, 1.5])",
@@ -257,7 +257,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "ARRAY_SLICE([1, 1.5], 1, 2)",
@@ -272,7 +272,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "FROM_BASE32(tbl.str_col)",
@@ -287,7 +287,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "FROM_BASE64(tbl.str_col)",
@@ -302,7 +302,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "ANY_VALUE(tbl.bool_col)",
@@ -317,7 +317,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "ANY_VALUE(tbl.bigint_col)",
@@ -332,7 +332,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "ANY_VALUE(tbl.date_col)",
@@ -347,7 +347,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "ANY_VALUE(tbl.str_col)",
@@ -362,7 +362,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "ANY_VALUE(tbl.array_col)",
@@ -377,7 +377,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "CURRENT_SCHEMA()",
@@ -386,13 +386,13 @@
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
   "sqlty": "str",
-  "nullable": false,
+  "nullable": true,
   "outcome": "match"
  },
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "MONTHNAME(tbl.date_col)",
@@ -407,7 +407,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "CHR(65)",
@@ -422,7 +422,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "COUNTIF(tbl.bigint_col > 1)",
@@ -437,7 +437,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "LAST_VALUE(tbl.bigint_col) OVER (ORDER BY tbl.bigint_col)",
@@ -452,7 +452,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "FIRST_VALUE(tbl.bigint_col) OVER (ORDER BY tbl.bigint_col)",
@@ -467,7 +467,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "FIRST_VALUE(tbl.str_col) OVER (ORDER BY tbl.str_col)",
@@ -482,7 +482,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "TO_BASE32(tbl.bytes_col)",
@@ -497,7 +497,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "TO_BASE64(tbl.bytes_col)",
@@ -512,7 +512,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "UNIX_SECONDS(tbl.timestamp_col)",
@@ -527,7 +527,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "STARTS_WITH(tbl.str_col, prefix)",
@@ -542,7 +542,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "ENDS_WITH(tbl.str_col, suffix)",
@@ -557,7 +557,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "ASCII('A')",
@@ -572,7 +572,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "UNICODE('bcd')",
@@ -587,7 +587,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "CEIL(tbl.double_col)",
@@ -602,7 +602,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "FLOOR(tbl.double_col)",
@@ -617,7 +617,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "LAST_DAY(tbl.timestamp_col)",
@@ -632,7 +632,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "JUSTIFY_DAYS(INTERVAL '1' DAY)",
@@ -647,7 +647,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "JUSTIFY_HOURS(INTERVAL '1' HOUR)",
@@ -662,7 +662,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "JUSTIFY_INTERVAL(INTERVAL '1' HOUR)",
@@ -677,7 +677,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "UNIX_MICROS(CAST('2008-12-25 15:30:00+00' AS TIMESTAMP))",
@@ -692,7 +692,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "UNIX_MILLIS(CAST('2008-12-25 15:30:00+00' AS TIMESTAMP))",
@@ -707,7 +707,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "KURTOSIS(tbl.double_col)",
@@ -722,7 +722,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "KURTOSIS(tbl.int_col)",
@@ -737,7 +737,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "LENGTH(tbl.str_col)",
@@ -752,7 +752,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "LENGTH(tbl.bin_col)",
@@ -767,7 +767,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "DAYNAME(tbl.date_col)",
@@ -782,7 +782,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "CBRT(tbl.int_col)",
@@ -797,7 +797,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "CBRT(tbl.double_col)",
@@ -812,7 +812,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "ISINF(tbl.float_col)",
@@ -827,7 +827,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "ISNAN(tbl.float_col)",
@@ -842,7 +842,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "CURRENT_CATALOG()",
@@ -857,7 +857,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "CURRENT_USER()",
@@ -872,7 +872,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "SESSION_USER()",
@@ -887,7 +887,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "RAND()",
@@ -902,7 +902,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "DEGREES(tbl.double_col)",
@@ -917,7 +917,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "ARRAY_CONTAINS(tbl.array_col, '1')",
@@ -932,7 +932,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "REPEAT(tbl.str_col, tbl.int_col)",
@@ -947,7 +947,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "TYPEOF(foo)",
@@ -962,7 +962,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "DEGREES(tbl.double_col)",
@@ -977,7 +977,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "DEGREES(tbl.int_col)",
@@ -992,7 +992,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "LOCALTIME",
@@ -1007,7 +1007,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "ELT(1, 'a', 'b')",
@@ -1022,7 +1022,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "DAYOFWEEK(tbl.date_col)",
@@ -1037,7 +1037,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "DAYOFMONTH(tbl.date_col)",
@@ -1052,7 +1052,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "DAYOFYEAR(tbl.date_col)",
@@ -1067,7 +1067,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "MONTH(tbl.date_col)",
@@ -1082,7 +1082,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "WEEK(tbl.date_col)",
@@ -1097,7 +1097,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "WEEK(tbl.date_col, int_col)",
@@ -1112,7 +1112,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "QUARTER(tbl.date_col)",
@@ -1127,7 +1127,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "HOUR(tbl.time_col)",
@@ -1142,7 +1142,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "SECOND(tbl.time_col)",
@@ -1157,7 +1157,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "SIN(tbl.int_col)",
@@ -1172,7 +1172,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "SIN(tbl.double_col)",
@@ -1187,7 +1187,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COS(tbl.int_col)",
@@ -1202,7 +1202,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COS(tbl.double_col)",
@@ -1217,7 +1217,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "TAN(tbl.int_col)",
@@ -1232,7 +1232,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "TAN(tbl.double_col)",
@@ -1247,7 +1247,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COT(tbl.int_col)",
@@ -1262,7 +1262,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COT(tbl.double_col)",
@@ -1277,7 +1277,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "ASIN(tbl.int_col)",
@@ -1292,7 +1292,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "ASIN(tbl.double_col)",
@@ -1307,7 +1307,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "ACOS(tbl.int_col)",
@@ -1322,7 +1322,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "ACOS(tbl.double_col)",
@@ -1337,7 +1337,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "ATAN(tbl.int_col)",
@@ -1352,7 +1352,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "ATAN(tbl.double_col)",
@@ -1367,7 +1367,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "ATAN(tbl.int_col, tbl.int_col)",
@@ -1382,7 +1382,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "ATAN(tbl.int_col, tbl.double_col)",
@@ -1397,7 +1397,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "ATAN(tbl.double_col, tbl.int_col)",
@@ -1412,7 +1412,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "ATAN(tbl.double_col, tbl.double_col)",
@@ -1427,7 +1427,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "ATAN2(tbl.int_col, tbl.int_col)",
@@ -1442,7 +1442,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "ATAN2(tbl.int_col, tbl.double_col)",
@@ -1457,7 +1457,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "ATAN2(tbl.double_col, tbl.int_col)",
@@ -1472,7 +1472,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "ATAN2(tbl.double_col, tbl.double_col)",
@@ -1487,7 +1487,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "VERSION()",
@@ -1502,7 +1502,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "CURRENT_TIMESTAMP()",
@@ -1517,7 +1517,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REPLACE(tbl.str_col, tbl.str_col, tbl.str_col)",
@@ -1532,7 +1532,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "INSERT(tbl.str_col, tbl.int_col, tbl.int_col, tbl.str_col)",
@@ -1547,7 +1547,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "HEX(tbl.str_col)",
@@ -1562,7 +1562,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "LPAD(tbl.str_col, tbl.int_col, tbl.str_col)",
@@ -1577,7 +1577,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "LPAD(tbl.bin_col, tbl.int_col, tbl.str_col)",
@@ -1592,7 +1592,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "RPAD(tbl.str_col, tbl.int_col, tbl.str_col)",
@@ -1607,7 +1607,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "RPAD(tbl.bin_col, tbl.int_col, tbl.str_col)",
@@ -1622,7 +1622,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "LEFT(tbl.str_col, tbl.int_col)",
@@ -1637,7 +1637,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "LEFT(tbl.bin_col, tbl.int_col)",
@@ -1652,7 +1652,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "LOCALTIMESTAMP",
@@ -1667,7 +1667,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "LOCALTIMESTAMP()",
@@ -1682,7 +1682,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "LOCALTIMESTAMP(3)",
@@ -1697,7 +1697,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REVERSE(tbl.str_col)",
@@ -1712,7 +1712,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REVERSE(tbl.bin_col)",
@@ -1727,7 +1727,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REVERSE(tbl.int_col)",
@@ -1742,7 +1742,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "FORMAT(tbl.double_col, tbl.int_col)",
@@ -1757,7 +1757,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "FORMAT(tbl.double_col, tbl.int_col, tbl.str_col)",
@@ -1772,7 +1772,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "MAKETIME(tbl.int_col, tbl.int_col, tbl.int_col)",
@@ -1787,7 +1787,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "MAKETIME('12', '15', '30')",
@@ -1802,7 +1802,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "MINUTE(tbl.timestamp_col)",
@@ -1817,7 +1817,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "MINUTE(tbl.str_col)",
@@ -1832,7 +1832,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "MINUTE(tbl.int_col)",
@@ -1847,7 +1847,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "RIGHT(tbl.str_col, tbl.int_col)",
@@ -1862,7 +1862,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "RIGHT(tbl.bin_col, tbl.int_col)",
@@ -1877,7 +1877,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "TRUNCATE(tbl.bigint_col, tbl.int_col)",
@@ -1892,7 +1892,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "TRUNCATE(tbl.double_col, tbl.int_col)",
@@ -1907,7 +1907,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "TRUNCATE(tbl.str_col, tbl.int_col)",
@@ -1922,7 +1922,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "CONVERT_TZ('2024-01-01 12:00:00', '+00:00', '+05:30')",
@@ -1937,7 +1937,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "UTC_DATE()",
@@ -1952,7 +1952,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "UTC_TIME()",
@@ -1967,7 +1967,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "UTC_TIME(6)",
@@ -1982,7 +1982,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "UTC_TIMESTAMP()",
@@ -1997,7 +1997,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "UTC_TIMESTAMP(6)",
@@ -2012,7 +2012,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "SUBSTRING_INDEX(tbl.str_col, '.', tbl.int_col)",
@@ -2027,7 +2027,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "UNHEX(tbl.str_col)",
@@ -2042,7 +2042,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "UNHEX(tbl.bin_col)",
@@ -2057,7 +2057,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "UNHEX(tbl.int_col)",
@@ -2072,7 +2072,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "UNHEX(tbl.bigint_col)",
@@ -2087,7 +2087,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_SUBSTR(tbl.str_col, tbl.str_col)",
@@ -2102,7 +2102,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_SUBSTR(tbl.str_col, tbl.str_col, tbl.int_col)",
@@ -2117,7 +2117,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_SUBSTR(tbl.str_col, tbl.str_col, tbl.int_col, tbl.int_col)",
@@ -2132,7 +2132,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_SUBSTR(tbl.str_col, tbl.str_col, tbl.int_col, tbl.int_col, tbl.str_col)",
@@ -2147,7 +2147,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_REPLACE(tbl.str_col, tbl.str_col, tbl.str_col)",
@@ -2162,7 +2162,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_REPLACE(tbl.str_col, tbl.str_col, tbl.str_col, tbl.int_col)",
@@ -2177,7 +2177,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_REPLACE(tbl.str_col, tbl.str_col, tbl.str_col, tbl.int_col, tbl.int_col)",
@@ -2192,7 +2192,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_REPLACE(tbl.str_col, tbl.str_col, tbl.str_col, tbl.int_col, tbl.int_col, tbl.str_col)",
@@ -2207,7 +2207,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_REPLACE(tbl.str_col, tbl.bin_col, tbl.str_col)",
@@ -2222,7 +2222,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_REPLACE(tbl.bin_col, tbl.str_col, tbl.bin_col)",
@@ -2237,7 +2237,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_REPLACE(tbl.bin_col, tbl.bin_col, tbl.str_col)",
@@ -2252,7 +2252,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_REPLACE(tbl.bin_col, tbl.bin_col, tbl.bin_col)",
@@ -2267,7 +2267,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_REPLACE(tbl.bin_col, tbl.bin_col, tbl.bin_col, tbl.int_col)",
@@ -2282,7 +2282,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_REPLACE(tbl.bin_col, tbl.bin_col, tbl.bin_col, tbl.int_col, tbl.int_col)",
@@ -2297,7 +2297,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_REPLACE(tbl.bin_col, tbl.bin_col, tbl.bin_col, tbl.int_col, tbl.int_col, tbl.str_col)",
@@ -2312,7 +2312,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_REPLACE(tbl.unknown_col, tbl.str_col, tbl.str_col)",
@@ -2327,7 +2327,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_INSTR(tbl.str_col, tbl.str_col)",
@@ -2342,7 +2342,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_INSTR(tbl.str_col, tbl.str_col, tbl.int_col)",
@@ -2357,7 +2357,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_INSTR(tbl.str_col, tbl.str_col, tbl.int_col, tbl.int_col)",
@@ -2372,7 +2372,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_INSTR(tbl.str_col, tbl.str_col, tbl.int_col, tbl.int_col, tbl.int_col)",
@@ -2387,7 +2387,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_INSTR(tbl.str_col, tbl.str_col, tbl.int_col, tbl.int_col, tbl.int_col, tbl.str_col)",
@@ -2402,7 +2402,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_INSTR(tbl.bin_col, tbl.bin_col)",
@@ -2417,7 +2417,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_INSTR(tbl.bin_col, tbl.bin_col, tbl.int_col)",
@@ -2432,7 +2432,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_INSTR(tbl.bin_col, tbl.bin_col, tbl.int_col, tbl.int_col)",
@@ -2447,7 +2447,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_INSTR(tbl.bin_col, tbl.bin_col, tbl.int_col, tbl.int_col, tbl.int_col)",
@@ -2462,7 +2462,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "REGEXP_INSTR(tbl.bin_col, tbl.bin_col, tbl.int_col, tbl.int_col, tbl.int_col, tbl.str_col)",
@@ -2477,7 +2477,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "MATCH(tbl.str_col) AGAINST ('database')",
@@ -2492,7 +2492,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "MATCH(tbl.str_col) AGAINST ('database' IN BOOLEAN MODE)",
@@ -2507,7 +2507,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "MATCH(tbl.str_col) AGAINST ('database' WITH QUERY EXPANSION)",
@@ -2522,7 +2522,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COMPRESS(CAST('test' AS TEXT))",
@@ -2537,7 +2537,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COMPRESS(CAST('test' AS MEDIUMTEXT))",
@@ -2552,7 +2552,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COMPRESS(CAST('test' AS LONGTEXT))",
@@ -2567,7 +2567,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COMPRESS(CAST('test' AS BLOB))",
@@ -2582,7 +2582,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COMPRESS(CAST('test' AS MEDIUMBLOB))",
@@ -2597,7 +2597,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COMPRESS(CAST('test' AS LONGBLOB))",
@@ -2612,7 +2612,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COMPRESS(CAST('{}' AS JSON))",
@@ -2627,7 +2627,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COMPRESS(CAST('test' AS TINYTEXT))",
@@ -2642,7 +2642,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COMPRESS(CAST('test' AS CHAR))",
@@ -2657,7 +2657,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COMPRESS(CAST('test' AS VARCHAR))",
@@ -2672,7 +2672,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COMPRESS(CAST('test' AS BINARY))",
@@ -2687,7 +2687,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COMPRESS(CAST('test' AS VARBINARY))",
@@ -2702,7 +2702,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COMPRESS(CAST('test' AS TINYBLOB))",
@@ -2717,7 +2717,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COMPRESS(CAST(1 AS INT))",
@@ -2732,7 +2732,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COMPRESS(CAST(1 AS BIGINT))",
@@ -2747,7 +2747,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COMPRESS(CAST(1.5 AS DECIMAL))",
@@ -2762,7 +2762,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COMPRESS(CAST(1.5 AS DOUBLE))",
@@ -2777,7 +2777,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COMPRESS(CAST('2024-01-01' AS DATE))",
@@ -2792,7 +2792,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COMPRESS(CAST('2024-01-01 12:00:00' AS DATETIME))",
@@ -2807,7 +2807,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COLLATION(tbl.str_col)",
@@ -2822,7 +2822,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COLLATION(tbl.bin_col)",
@@ -2837,7 +2837,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COLLATION(tbl.int_col)",
@@ -2852,7 +2852,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "COLLATION(tbl.date_col)",
@@ -2867,7 +2867,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "ST_Distance(tbl.geom_col, tbl.geom_col2)",
@@ -2876,13 +2876,13 @@
    "schema": "CREATE TABLE tbl (bin_col BLOB, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, obj_col JSON, bit_col BIT(3));"
   },
   "sqlty": "float",
-  "nullable": false,
+  "nullable": true,
   "outcome": "not-comparable"
  },
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "ST_Distance(tbl.geom_col, tbl.geom_col2, 'metre')",
@@ -2891,13 +2891,13 @@
    "schema": "CREATE TABLE tbl (bin_col BLOB, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, obj_col JSON, bit_col BIT(3));"
   },
   "sqlty": "float",
-  "nullable": false,
+  "nullable": true,
   "outcome": "not-comparable"
  },
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "BIT_AND(tbl.int_col)",
@@ -2912,7 +2912,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "BIT_AND(tbl.bin_col)",
@@ -2927,7 +2927,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "BIT_AND(tbl.int_col) OVER (ORDER BY tbl.int_col)",
@@ -2942,7 +2942,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "BIT_AND(tbl.bin_col) OVER (ORDER BY tbl.bin_col)",
@@ -2957,7 +2957,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "BIT_XOR(tbl.int_col)",
@@ -2972,7 +2972,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "BIT_XOR(tbl.bin_col)",
@@ -2987,7 +2987,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "BIT_XOR(tbl.int_col) OVER (ORDER BY tbl.int_col)",
@@ -3002,7 +3002,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "BIT_XOR(tbl.bin_col) OVER (ORDER BY tbl.bin_col)",
@@ -3017,7 +3017,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "BIT_OR(tbl.int_col)",
@@ -3032,7 +3032,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "BIT_OR(tbl.bin_col)",
@@ -3047,7 +3047,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "BIT_OR(tbl.int_col) OVER (ORDER BY tbl.int_col)",
@@ -3062,7 +3062,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "BIT_OR(tbl.bin_col) OVER (ORDER BY tbl.bin_col)",
@@ -3077,7 +3077,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "JSON_OBJECTAGG(tbl.int_col, tbl.int_col)",
@@ -3092,7 +3092,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "JSON_OBJECTAGG(tbl.varchar_col, tbl.varchar_col)",
@@ -3107,7 +3107,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "JSON_OBJECTAGG(tbl.int_col, tbl.int_col) OVER (ORDER BY tbl.int_col)",
@@ -3122,7 +3122,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "JSON_OBJECTAGG(tbl.varchar_col, tbl.varchar_col) OVER (ORDER BY tbl.varchar_col)",
@@ -3137,7 +3137,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "JSON_OBJECT(tbl.varchar_col, tbl.int_col)",
@@ -3152,7 +3152,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "JSON_OBJECT(tbl.varchar_col, tbl.varchar_col)",
@@ -3167,7 +3167,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "JSON_OBJECT(tbl.varchar_col, tbl.double_col)",
@@ -3182,7 +3182,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "JSON_OBJECT(tbl.varchar_col, tbl.json_col)",
@@ -3197,7 +3197,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "JSON_EXTRACT(tbl.json_col, '$.int_col')",
@@ -3212,7 +3212,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "JSON_EXTRACT(tbl.json_col, '$.varchar_col')",
@@ -3227,7 +3227,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "JSON_EXTRACT(tbl.json_col, '$.double_col')",
@@ -3242,7 +3242,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "JSON_EXTRACT(tbl.json_col, '$.json_col')",
@@ -3257,7 +3257,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "JSON_KEYS(tbl.json_col)",
@@ -3272,7 +3272,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "JSON_KEYS(tbl.json_col, '$.json_col')",
@@ -3287,7 +3287,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "JSON_TYPE(tbl.json_col)",
@@ -3302,7 +3302,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "JSON_TYPE(JSON_OBJECT(tbl.varchar_col, tbl.int_col))",
@@ -3317,7 +3317,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "JSON_TYPE(JSON_ARRAY(tbl.int_col, tbl.varchar_col))",
@@ -3332,7 +3332,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "JSON_ARRAY_APPEND(tbl.json_col, '$', tbl.int_col)",
@@ -3347,7 +3347,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "JSON_ARRAY_APPEND(tbl.json_col, '$', tbl.varchar_col)",
@@ -3362,7 +3362,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "JSON_ARRAY_APPEND(tbl.json_col, '$', tbl.double_col)",
@@ -3377,7 +3377,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "JSON_ARRAY_APPEND(tbl.json_col, '$', tbl.json_col)",
@@ -3392,7 +3392,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "JSON_ARRAY_INSERT(tbl.json_col, '$[0]', tbl.int_col)",
@@ -3407,7 +3407,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "JSON_REMOVE(tbl.json_col, '$.a')",
@@ -3422,7 +3422,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "JSON_SET(tbl.json_col, '$.a', tbl.int_col)",
@@ -3437,7 +3437,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "GROUPING(tbl.int_col)",
@@ -3452,7 +3452,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "GROUPING(tbl.str_col)",
@@ -3467,7 +3467,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "UUID()",
@@ -3482,7 +3482,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "CURRENT_ROLE()",
@@ -3497,7 +3497,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "LEAD(tbl.int_col) OVER (ORDER BY tbl.int_col)",
@@ -3512,7 +3512,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "LEAD(tbl.double_col) OVER (ORDER BY tbl.int_col)",
@@ -3527,7 +3527,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "LEAD(tbl.bin_col) OVER (ORDER BY tbl.int_col)",
@@ -3542,7 +3542,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "LAG(tbl.int_col) OVER (ORDER BY tbl.int_col)",
@@ -3557,7 +3557,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "LAG(tbl.str_col) OVER (ORDER BY tbl.int_col)",
@@ -3572,7 +3572,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "mysql",
    "kind": "expression",
    "sql": "LAG(tbl.date_col) OVER (ORDER BY tbl.int_col)",
@@ -3587,7 +3587,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "tbl.str_col ~ 'a'",
@@ -3602,7 +3602,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "tbl.str_col ~* 'a'",
@@ -3617,7 +3617,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "tbl.array_col @> tbl.array_col",
@@ -3632,7 +3632,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "tbl.array_col <@ tbl.array_col",
@@ -3647,7 +3647,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "tbl.array_col && tbl.array_col",
@@ -3662,7 +3662,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "tbl.obj_col ? 'a'",
@@ -3677,7 +3677,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "tbl.obj_col ?& tbl.array_col",
@@ -3692,7 +3692,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "tbl.obj_col ?| tbl.array_col",
@@ -3707,7 +3707,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "INT4RANGE(1, 2) -|- INT4RANGE(2, 3)",
@@ -3722,7 +3722,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "INT4RANGE(1, 2) &< INT4RANGE(2, 3)",
@@ -3737,7 +3737,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "INT4RANGE(1, 2) &> INT4RANGE(2, 3)",
@@ -3752,7 +3752,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "(tbl.date_col, tbl.date_col) OVERLAPS (tbl.date_col, tbl.date_col)",
@@ -3767,7 +3767,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "LEFT(tbl.str_col, tbl.int_col)",
@@ -3782,7 +3782,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "RPAD(tbl.str_col, 10, 'x')",
@@ -3797,7 +3797,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "TO_HEX(2147483647)",
@@ -3812,7 +3812,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "SPLIT_PART(tbl.str_col, '~@~', 2)",
@@ -3827,7 +3827,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "NORMALIZE(tbl.str_col)",
@@ -3842,7 +3842,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "WIDTH_BUCKET(5, 1, 10, 5)",
@@ -3857,7 +3857,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "TO_NUMBER('123.45', '999.99')",
@@ -3872,7 +3872,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "FORMAT('Hello %s, %1$s', 'World')",
@@ -3887,7 +3887,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "ENCODE(tbl.bin_col, 'base64')",
@@ -3902,7 +3902,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "RIGHT(tbl.str_col, tbl.int_col)",
@@ -3917,7 +3917,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "OVERLAY(tbl.str_col PLACING tbl.str_col FROM tbl.int_col FOR tbl.int_col)",
@@ -3932,7 +3932,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "REVERSE(tbl.str_col)",
@@ -3947,7 +3947,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "DECODE(tbl.str_col, 'base64')",
@@ -3962,7 +3962,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "MAKE_TIME(tbl.int_col, tbl.int_col, tbl.double_col)",
@@ -3977,7 +3977,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "REGEXP_REPLACE(tbl.str_col, '[0-9]+', '')",
@@ -3992,7 +3992,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "REGEXP_REPLACE(tbl.str_col, '[0-9]+', '', 'g')",
@@ -4007,7 +4007,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "REGEXP_REPLACE(tbl.str_col, '.', 'X', 3)",
@@ -4022,7 +4022,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "REGEXP_REPLACE(tbl.str_col, '.', 'X', 3, 2)",
@@ -4037,7 +4037,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "REGEXP_REPLACE(tbl.str_col, '.', 'X', 3, 2, 'i')",
@@ -4052,7 +4052,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "REGEXP_REPLACE(string => tbl.str_col, pattern => 'l', replacement => 'XX')",
@@ -4067,7 +4067,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "REGEXP_REPLACE(string => tbl.str_col, pattern => 'l', replacement => 'XX', flags => 'g')",
@@ -4082,7 +4082,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "REGEXP_REPLACE(string => tbl.str_col, pattern => 'l', replacement => 'XX', start => 1)",
@@ -4097,7 +4097,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "REGEXP_REPLACE(string => tbl.str_col, pattern => 'l', replacement => 'XX', start => 1, \"N\" => 2)",
@@ -4112,7 +4112,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "REGEXP_REPLACE(string => tbl.str_col, pattern => 'l', replacement => 'XX', start => 1, \"N\" => 2, flags => 'i')",
@@ -4127,7 +4127,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "MAKE_TIMESTAMP(tbl.int_col, tbl.int_col, tbl.int_col, tbl.int_col, tbl.int_col, tbl.double_col)",
@@ -4142,7 +4142,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "BIT_AND(tbl.int_col)",
@@ -4157,7 +4157,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "BIT_AND(tbl.bigint_col)",
@@ -4172,7 +4172,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "BIT_AND(tbl.smallint_col)",
@@ -4187,7 +4187,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "BIT_AND(tbl.bit_col)",
@@ -4202,7 +4202,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "BIT_OR(tbl.int_col)",
@@ -4217,7 +4217,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "BIT_OR(tbl.bigint_col)",
@@ -4232,7 +4232,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "BIT_OR(tbl.smallint_col)",
@@ -4247,7 +4247,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "BIT_OR(tbl.bit_col)",
@@ -4262,7 +4262,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "BIT_XOR(tbl.int_col)",
@@ -4277,7 +4277,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "BIT_XOR(tbl.bigint_col)",
@@ -4292,7 +4292,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "BIT_XOR(tbl.smallint_col)",
@@ -4307,7 +4307,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "BIT_XOR(tbl.bit_col)",
@@ -4322,7 +4322,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "LOCALTIMESTAMP",
@@ -4337,7 +4337,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "REPLACE(tbl.str_col, tbl.str_col, tbl.str_col)",
@@ -4352,7 +4352,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "RANK() OVER (ORDER BY 1)",
@@ -4367,7 +4367,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "DENSE_RANK() OVER (ORDER BY 1)",
@@ -4382,7 +4382,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "ROW_NUMBER() OVER (ORDER BY 1)",
@@ -4397,7 +4397,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "NTILE(4) OVER (ORDER BY 1)",
@@ -4412,7 +4412,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "PERCENT_RANK() OVER (ORDER BY 1)",
@@ -4427,7 +4427,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "CUME_DIST() OVER (ORDER BY 1)",
@@ -4442,7 +4442,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "postgres",
    "kind": "expression",
    "sql": "NTILE(4) OVER (ORDER BY 1)",
@@ -4457,7 +4457,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "LAG(tbl.bigint_col) OVER (ORDER BY tbl.int_col)",
@@ -4472,7 +4472,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "LAG(tbl.bigint_col, 1, tbl.double_col) OVER (ORDER BY tbl.int_col)",
@@ -4487,7 +4487,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "LAG(tbl.double_col, 1, tbl.bigint_col) OVER (ORDER BY tbl.int_col)",
@@ -4502,7 +4502,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "LEAD(tbl.bigint_col) OVER (ORDER BY tbl.int_col)",
@@ -4517,7 +4517,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "LEAD(tbl.bigint_col, 1, tbl.double_col) OVER (ORDER BY tbl.int_col)",
@@ -4532,7 +4532,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "LEAD(tbl.double_col, 1, tbl.bigint_col) OVER (ORDER BY tbl.int_col)",
@@ -4547,7 +4547,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "NTH_VALUE(tbl.str_col, 2) OVER (ORDER BY tbl.int_col)",
@@ -4562,7 +4562,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "COVAR_POP(tbl.double_col, tbl.double_col)",
@@ -4577,7 +4577,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "COVAR_POP(tbl.int_col, tbl.int_col)",
@@ -4592,7 +4592,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "COVAR_SAMP(tbl.double_col, tbl.double_col)",
@@ -4607,7 +4607,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "COVAR_SAMP(tbl.int_col, tbl.int_col)",
@@ -4622,7 +4622,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY tbl.double_col)",
@@ -4637,7 +4637,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY tbl.double_col)",
@@ -4652,7 +4652,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY tbl.int_col)",
@@ -4660,14 +4660,14 @@
    "provenance": "annotate_functions.sql: sqlglot INT",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": "int",
+  "sqlty": "float",
   "nullable": true,
   "outcome": "match"
  },
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY tbl.bigint_col)",
@@ -4675,14 +4675,14 @@
    "provenance": "annotate_functions.sql: sqlglot BIGINT",
    "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
   },
-  "sqlty": "int",
+  "sqlty": "float",
   "nullable": true,
   "outcome": "match"
  },
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "5",
@@ -4697,7 +4697,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "-5",
@@ -4712,7 +4712,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "~5",
@@ -4727,7 +4727,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "(5)",
@@ -4742,7 +4742,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "5.3",
@@ -4757,7 +4757,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "'bla'",
@@ -4772,7 +4772,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "true",
@@ -4787,7 +4787,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "not true",
@@ -4802,7 +4802,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "false",
@@ -4817,7 +4817,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "x is null",
@@ -4832,7 +4832,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "x is not null",
@@ -4847,7 +4847,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "EXISTS(SELECT 1)",
@@ -4862,7 +4862,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "ALL(SELECT 1)",
@@ -4877,7 +4877,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "ANY(SELECT 1)",
@@ -4892,7 +4892,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "null",
@@ -4907,7 +4907,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "null and false",
@@ -4922,7 +4922,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "null + 1",
@@ -4937,7 +4937,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "CASE WHEN x THEN NULL ELSE 1 END",
@@ -4952,7 +4952,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "CASE WHEN x THEN 1 ELSE NULL END",
@@ -4967,7 +4967,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "IF(true, 1, null)",
@@ -4982,7 +4982,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "IF(true, null, 1)",
@@ -4997,7 +4997,442 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "ARRAY()",
+   "expected": "list",
+   "provenance": "annotate_types.sql: sqlglot ARRAY<NULL>",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "ARRAY(ARRAY())",
+   "expected": "list[list]",
+   "provenance": "annotate_types.sql: sqlglot ARRAY<ARRAY<NULL>>",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "STRUCT(ARRAY() AS a)",
+   "expected": "dict[str, list]",
+   "provenance": "annotate_types.sql: sqlglot STRUCT<a ARRAY<NULL>>",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "ARRAY(STRUCT(ARRAY() AS a))",
+   "expected": "list[dict[str, list]]",
+   "provenance": "annotate_types.sql: sqlglot ARRAY<STRUCT<a ARRAY<NULL>>>",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "MAP(ARRAY(), ARRAY())",
+   "expected": null,
+   "provenance": "annotate_types.sql: sqlglot MAP<NULL, NULL>",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "ARRAY_AGG(ARRAY())",
+   "expected": "list[list]",
+   "provenance": "annotate_types.sql: sqlglot ARRAY<ARRAY<NULL>>",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "ARRAY(x)",
+   "expected": null,
+   "provenance": "annotate_types.sql: sqlglot UNKNOWN",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "ARRAY(ARRAY(x))",
+   "expected": null,
+   "provenance": "annotate_types.sql: sqlglot UNKNOWN",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "STRUCT(ARRAY(x) AS a)",
+   "expected": null,
+   "provenance": "annotate_types.sql: sqlglot UNKNOWN",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "ARRAY(STRUCT(ARRAY(x) AS a))",
+   "expected": null,
+   "provenance": "annotate_types.sql: sqlglot UNKNOWN",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "MAP(ARRAY(1), ARRAY(x))",
+   "expected": null,
+   "provenance": "annotate_types.sql: sqlglot UNKNOWN",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "MAP(ARRAY(x), ARRAY(1))",
+   "expected": null,
+   "provenance": "annotate_types.sql: sqlglot UNKNOWN",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "STRUCT(MAP(ARRAY(1), ARRAY(x)) AS a)",
+   "expected": null,
+   "provenance": "annotate_types.sql: sqlglot UNKNOWN",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "ARRAY_AGG(ARRAY(x))",
+   "expected": null,
+   "provenance": "annotate_types.sql: sqlglot UNKNOWN",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "COALESCE(ARRAY(), ARRAY())",
+   "expected": "list",
+   "provenance": "annotate_types.sql: sqlglot ARRAY<NULL>",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "COALESCE(ARRAY(), NULL)",
+   "expected": "list",
+   "provenance": "annotate_types.sql: sqlglot ARRAY<NULL>",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "COALESCE(ARRAY(1), ARRAY(x))",
+   "expected": null,
+   "provenance": "annotate_types.sql: sqlglot UNKNOWN",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "COALESCE(ARRAY(x), ARRAY(1))",
+   "expected": null,
+   "provenance": "annotate_types.sql: sqlglot UNKNOWN",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "not-comparable"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "COALESCE(ARRAY(1), ARRAY())",
+   "expected": "list[int]",
+   "provenance": "annotate_types.sql: sqlglot ARRAY<INT>",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "COALESCE(ARRAY(), ARRAY(1))",
+   "expected": "list[int]",
+   "provenance": "annotate_types.sql: sqlglot ARRAY<INT>",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "COALESCE(ARRAY(), ARRAY(), ARRAY(1))",
+   "expected": "list[int]",
+   "provenance": "annotate_types.sql: sqlglot ARRAY<INT>",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "COALESCE(ARRAY(1), (ARRAY()))",
+   "expected": "list[int]",
+   "provenance": "annotate_types.sql: sqlglot ARRAY<INT>",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "COALESCE(((ARRAY())), ARRAY(1))",
+   "expected": "list[int]",
+   "provenance": "annotate_types.sql: sqlglot ARRAY<INT>",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "COALESCE(IF(TRUE, ARRAY(), ARRAY()), ARRAY(1))",
+   "expected": "list[int]",
+   "provenance": "annotate_types.sql: sqlglot ARRAY<INT>",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "COALESCE(COALESCE(ARRAY(), ARRAY()), ARRAY(1))",
+   "expected": "list[int]",
+   "provenance": "annotate_types.sql: sqlglot ARRAY<INT>",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "IF(TRUE, ARRAY(), ARRAY(1))",
+   "expected": "list[int]",
+   "provenance": "annotate_types.sql: sqlglot ARRAY<INT>",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "IF(TRUE, ARRAY(1), ARRAY())",
+   "expected": "list[int]",
+   "provenance": "annotate_types.sql: sqlglot ARRAY<INT>",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "COALESCE(ARRAY(), ARRAY(STRUCT(1 AS a)))",
+   "expected": "list[dict[str, int]]",
+   "provenance": "annotate_types.sql: sqlglot ARRAY<STRUCT<a INT>>",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
+   "dialect": "generic",
+   "kind": "expression",
+   "sql": "COALESCE(ARRAY(STRUCT(1 AS a)), ARRAY())",
+   "expected": "list[dict[str, int]]",
+   "provenance": "annotate_types.sql: sqlglot ARRAY<STRUCT<a INT>>",
+   "schema": "CREATE TABLE tbl (bin_col BINARY, str_col TEXT, date_col DATE, float_col FLOAT, timestamp_col TIMESTAMP, double_col DOUBLE PRECISION, bigint_col BIGINT, smallint_col SMALLINT, int_col INT, bool_col BOOLEAN, interval_col INTERVAL, obj_col JSON, array_col TEXT[], bit_col BIT(3));"
+  },
+  "sqlty": null,
+  "nullable": null,
+  "outcome": "sqlty-gap"
+ },
+ {
+  "row": {
+   "source": "sqlglot",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "STRUCT(1 AS col)",
@@ -5012,7 +5447,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "STRUCT(1, f2)",
@@ -5027,7 +5462,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "STRUCT(1 AS col, 2.5 AS row)",
@@ -5042,7 +5477,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "STRUCT(1)",
@@ -5057,7 +5492,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "STRUCT(1 AS col, 2.5 AS row, struct(3.5 AS inner_col, 4 AS inner_row) AS nested_struct)",
@@ -5072,7 +5507,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "STRUCT(1 AS col, 2.5, ARRAY[1, 2, 3] AS nested_array, 'foo')",
@@ -5087,7 +5522,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "STRUCT(1, 2.5, 'bar')",
@@ -5102,7 +5537,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "STRUCT(1 AS \"CaseSensitive\")",
@@ -5117,7 +5552,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "CASE WHEN x THEN CAST(y AS DECIMAL(18, 2)) ELSE NULL END",
@@ -5132,7 +5567,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "CASE WHEN x THEN NULL ELSE CAST(y AS DECIMAL(18, 2)) END",
@@ -5147,7 +5582,7 @@
  {
   "row": {
    "source": "sqlglot",
-   "version": "30.23.0",
+   "version": "30.29.0",
    "dialect": "generic",
    "kind": "expression",
    "sql": "1 + (SELECT 2.5 AS c)",

@@ -266,3 +266,38 @@ JOIN orders ON o_custkey = c_custkey
 JOIN lineitem ON l_orderkey = o_orderkey
 GROUP BY c_mktsegment""")
 ```
+
+## Rarer join and key shapes
+
+```python
+from sqlty import SQL
+
+a = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM orders o JOIN payments p USING (id)")
+b = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM orders o JOIN order_items i USING (nope)")
+c = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM orders o JOIN (SELECT 1 AS id) USING (id)")
+d = SQL[tuple[int, float]]("--sql\nSELECT o.id, SUM(i.amount) FROM orders o JOIN order_items i ON (i.order_id = o.id AND i.amount > 0) GROUP BY ALL")
+e = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM orders o JOIN (SELECT order_id FROM payments GROUP BY ALL) p ON p.order_id = o.id")
+f = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM orders o JOIN (SELECT DISTINCT ON (order_id) order_id, amount FROM payments) p ON p.order_id = o.id")
+g = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM orders o JOIN (SELECT order_id FROM payments GROUP BY ROLLUP (order_id)) p ON p.order_id = o.id")
+h = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM orders o JOIN (SELECT a.order_id FROM payments a, tags b) p ON p.order_id = o.id")
+i = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM orders o JOIN (SELECT p.order_id FROM payments p GROUP BY order_id) q ON q.order_id = o.id")
+j = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM orders o JOIN (SELECT order_id FROM payments GROUP BY 'x', order_id) p ON p.order_id = o.id")
+k = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM orders o JOIN codes c ON c.code = upper('x')")
+# error: [fanout-aggregate] "SUM(o.total + (SELECT max(amount) FROM payments)) aggregates orders, whose rows repeat once per order_items row"
+l = SQL[tuple[float]]("--sql\nSELECT SUM(o.total + (SELECT max(amount) FROM payments)) FROM orders o JOIN order_items i ON i.order_id = o.id")
+m = SQL[tuple[float]]("--sql\nSELECT SUM(p.amount) FROM orders o JOIN (SELECT order_id, 1 AS amount FROM payments) p ON p.order_id = o.id")
+n = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM orders o JOIN (WITH x AS (SELECT 1) SELECT order_id FROM payments GROUP BY order_id) p ON p.order_id = o.id")
+r = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM orders o JOIN (SELECT * FROM payments) p ON p.order_id = o.id")
+s = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM orders o JOIN (SELECT order_id FROM (SELECT order_id FROM payments) z) p ON p.order_id = o.id")
+t = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM orders o JOIN (SELECT o2.id FROM orders o2 JOIN payments x ON x.order_id = o2.id) p ON p.id = o.id")
+# error: [unproven-join] "the join of orders and p matches no primary or unique key, so how often it repeats their rows is unknown"
+u = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM orders o JOIN (SELECT code FROM code_labels) p ON p.code = o.code")
+v = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM orders o JOIN (SELECT p2.id, p2.order_id FROM payments p2) p ON p.id = o.id")
+w = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM orders o JOIN (SELECT order_id AS oid FROM payments GROUP BY oid) p ON p.oid = o.id")
+x = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM orders o JOIN (SELECT DISTINCT ON (order_id) * FROM payments) p ON p.order_id = o.id")
+# error: [fanout-aggregate] "SUM(o.total) aggregates orders, whose rows repeat once per order_items row"
+y = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM (orders o JOIN order_items i ON i.order_id = o.id)")
+# error: [fanout-aggregate] "SUM(o.total) aggregates orders, whose rows repeat once per order_items row"
+z = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM customers c JOIN (orders o JOIN order_items i ON i.order_id = o.id) ON o.customer_id = c.id")
+outer = SQL[tuple[int, float]]("--sql\nSELECT o.id, (SELECT SUM(o.total + i.amount) FROM order_items i JOIN payments p ON p.id = i.order_id) FROM orders o")
+```

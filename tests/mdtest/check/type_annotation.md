@@ -274,3 +274,18 @@ counts = SQL["tuple[str]"]("--sql\nSELECT 1::INTEGER")
 class User(TypedDict):
     id: str
 ```
+
+## A single value is never a row
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+```
+
+```python
+from sqlty import SQL
+
+# error: [narrow-type] "SQL[int] should be SQL[tuple[int]]: a row is never a single value"
+count = SQL[int]("--sql\nSELECT count(*)::INTEGER FROM users")
+unknown = SQL[int]("--sql\nSELECT $1")
+```

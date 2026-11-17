@@ -72,6 +72,15 @@ pub(super) enum Rel {
     View(Vec<Column>),
 }
 
+impl Rel {
+    pub(super) fn table(&self) -> Option<&RawTable> {
+        match self {
+            Rel::Table(table) => Some(table),
+            Rel::View(_) => None,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(super) enum TypeDef {
     /// The base type, and the values a `CHECK (VALUE IN (...))` limits it to.
@@ -236,8 +245,18 @@ impl Loader {
     }
 
     pub(super) fn table_key(&self, parts: &[String], path: &[String]) -> Option<String> {
+        self.table_of(parts, path).map(|(key, _)| key)
+    }
+
+    /// The table `parts` names, and its key.
+    pub(super) fn table_of(
+        &self,
+        parts: &[String],
+        path: &[String],
+    ) -> Option<(String, &RawTable)> {
         let key = self.lookup(&self.relations, parts, path)?;
-        matches!(self.relations.get(&key), Some(Rel::Table(_))).then_some(key)
+        let table = self.relations.get(&key)?.table()?;
+        Some((key, table))
     }
 
     /// Apply every op, retrying the ones whose dependencies are missing until a pass
@@ -266,11 +285,13 @@ impl Loader {
             // statement of its kind at once, so a pass is never repeated per statement.
             let is_table = |op: &Op| matches!(op.kind, OpKind::Table(..));
             if pending.iter().any(is_table) {
-                let (tables, rest): (Vec<Op>, Vec<Op>) = pending.into_iter().partition(is_table);
-                for op in &tables {
-                    self.give_up(op);
-                }
-                pending = rest;
+                pending.retain(|op| match &op.kind {
+                    OpKind::Table(create, _) => {
+                        self.give_up(create, &op.path);
+                        false
+                    }
+                    _ => true,
+                });
             } else if pending
                 .iter()
                 .any(|op| !matches!(op.kind, OpKind::View(..)))
@@ -321,10 +342,7 @@ impl Loader {
             }
             OpKind::Taint(what, name) => !self.taint(*what, name, &path),
             OpKind::UniqueIndex(name, unique) => {
-                let Some(key) = self.table_key(name, &path) else {
-                    return false;
-                };
-                let Some(Rel::Table(table)) = self.relations.get(&key) else {
+                let Some((key, table)) = self.table_of(name, &path) else {
                     return false;
                 };
                 let mut table = table.clone();
@@ -333,10 +351,7 @@ impl Loader {
                 false
             }
             OpKind::RowTrigger(trigger) => {
-                let Some(key) = self.table_key(&trigger.table, &path) else {
-                    return false;
-                };
-                let Some(Rel::Table(table)) = self.relations.get(&key) else {
+                let Some((key, table)) = self.table_of(&trigger.table, &path) else {
                     return false;
                 };
                 let mut table = table.clone();
@@ -375,21 +390,18 @@ impl Loader {
         !blocked
     }
 
-    /// Stop waiting for what `op` needs: its target keeps an unknown shape.
-    pub(super) fn give_up(&mut self, op: &Op) {
-        let path = op.path.clone();
-        if let OpKind::Table(create, _) = &op.kind {
-            // A table built from one that never appears: it exists, shape unknown.
-            let key = self.new_key(&create.name, &path);
-            self.skipped.push(("table", create.name.to_string()));
-            self.set_relation(
-                key,
-                Some(Rel::Table(RawTable {
-                    unknown: true,
-                    ..RawTable::default()
-                })),
-            );
-        }
+    /// Stop waiting for what `create` needs: a table built from one that never appears
+    /// exists, its shape unknown.
+    pub(super) fn give_up(&mut self, create: &CreateTable, path: &[String]) {
+        let key = self.new_key(&create.name, path);
+        self.skipped.push(("table", create.name.to_string()));
+        self.set_relation(
+            key,
+            Some(Rel::Table(RawTable {
+                unknown: true,
+                ..RawTable::default()
+            })),
+        );
     }
 
     // ---- CREATE TABLE ---------------------------------------------------------------
@@ -420,10 +432,7 @@ impl Loader {
                     .map(|name| parts(name, self.dialect)),
             );
             for source in &sources {
-                let Some(parent) = self.table_key(source, path) else {
-                    return false;
-                };
-                let Some(Rel::Table(parent_table)) = self.relations.get(&parent) else {
+                let Some((parent, parent_table)) = self.table_of(source, path) else {
                     return false;
                 };
                 table.unknown |= parent_table.unknown;
@@ -442,10 +451,7 @@ impl Loader {
                 like_sources.push(parts(&like.name, self.dialect));
             }
             for source in &like_sources {
-                let Some(from) = self.table_key(source, path) else {
-                    return false;
-                };
-                let Some(Rel::Table(from_table)) = self.relations.get(&from) else {
+                let Some((_, from_table)) = self.table_of(source, path) else {
                     return false;
                 };
                 table.unknown |= from_table.unknown;
@@ -464,7 +470,7 @@ impl Loader {
         // SQLite lets a PRIMARY KEY hold NULL, except in a WITHOUT ROWID or STRICT table or
         // as the sole `INTEGER` column, which is the rowid.
         let loose_keys =
-            self.dialect == SqlDialect::Sqlite && !create.without_rowid && !create.strict;
+            self.dialect == SqlDialect::Sqlite && create.sqlite_table_options.options.is_empty();
         if loose_keys {
             for def in &create.columns {
                 let keyed = def
@@ -476,10 +482,14 @@ impl Loader {
                     .iter()
                     .any(|o| matches!(o.option, ColumnOption::NotNull));
                 let name = fold(&def.name, self.dialect);
-                if let Some(column) = table.columns.iter_mut().find(|c| c.name == name) {
-                    if keyed && !declared && !is_rowid_type(&def.data_type) {
-                        column.not_null = false;
-                    }
+                let loose = keyed && !declared && !is_rowid_type(&def.data_type);
+                if let Some(column) = table
+                    .columns
+                    .iter_mut()
+                    .find(|c| c.name == name)
+                    .filter(|_| loose)
+                {
+                    column.not_null = false;
                 }
             }
         }
@@ -595,11 +605,7 @@ impl Loader {
         let (target, columns_of) = if self.new_key(&fk.foreign_table, path) == key {
             (key.to_string(), table)
         } else {
-            let target = self.table_key(&target, path)?;
-            let Some(Rel::Table(referenced)) = self.relations.get(&target) else {
-                return None;
-            };
-            (target, referenced)
+            self.table_of(&target, path)?
         };
         let referred: Vec<String> = if fk.referred_columns.is_empty() {
             columns_of
@@ -864,82 +870,78 @@ impl Loader {
         ) {
             self.cache = None;
         }
-        match stmt {
-            Statement::Drop {
-                object_type, names, ..
-            } => {
-                for name in names {
-                    let name_parts = parts(name, self.dialect);
-                    match object_type {
-                        ObjectType::Table | ObjectType::View | ObjectType::MaterializedView => {
-                            if let Some(key) = self.lookup(&self.relations, &name_parts, path) {
-                                self.set_relation(key, None);
-                            }
-                        }
-                        ObjectType::Index => {
-                            let index = name_parts.last().cloned().unwrap_or_default();
-                            for table in self.relations.values_mut() {
-                                if let Rel::Table(table) = table {
-                                    table.unique.retain(|key| key.name.as_ref() != Some(&index));
-                                }
-                            }
-                        }
-                        ObjectType::Type => {
-                            if let Some(key) = self.lookup(&self.types, &name_parts, path) {
-                                self.types.remove(&key);
-                            }
-                        }
-                        ObjectType::Schema => {
-                            if let Some(schema) = name_parts.last() {
-                                let prefix = format!("{schema}.");
-                                self.relations.retain(|key, _| !key.starts_with(&prefix));
-                                self.types.retain(|key, _| !key.starts_with(&prefix));
-                                self.functions.retain(|key, _| !key.starts_with(&prefix));
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            Statement::DropDomain(drop) => {
-                if let Some(key) = self.lookup(&self.types, &parts(&drop.name, self.dialect), path)
-                {
-                    self.types.remove(&key);
-                }
-            }
-            Statement::DropFunction(drop) => {
-                for desc in &drop.func_desc {
-                    let Some(key) =
-                        self.lookup(&self.functions, &parts(&desc.name, self.dialect), path)
-                    else {
-                        continue;
-                    };
-                    let wanted: Option<Vec<String>> = desc.args.as_ref().map(|args| {
-                        args.iter()
-                            .filter(|a| !matches!(a.mode, Some(ArgMode::Out)))
-                            .map(|a| canonical_type(&a.data_type, self.dialect))
-                            .collect()
-                    });
-                    let dialect = self.dialect;
-                    if let Some(overloads) = self.functions.get_mut(&key) {
-                        overloads.retain(|f| match &wanted {
-                            Some(wanted) => {
-                                f.args
-                                    .iter()
-                                    .map(|dt| canonical_type(dt, dialect))
-                                    .collect::<Vec<_>>()
-                                    != *wanted
-                            }
-                            None => false,
-                        });
-                        if overloads.is_empty() {
-                            self.functions.remove(&key);
+        if let Statement::Drop {
+            object_type, names, ..
+        } = stmt
+        {
+            for name in names {
+                let name_parts = parts(name, self.dialect);
+                match object_type {
+                    ObjectType::Table | ObjectType::View | ObjectType::MaterializedView => {
+                        if let Some(key) = self.lookup(&self.relations, &name_parts, path) {
+                            self.set_relation(key, None);
                         }
                     }
-                    self.refresh_function(key);
+                    ObjectType::Index => {
+                        let index = name_parts.last().cloned().unwrap_or_default();
+                        for table in self.relations.values_mut() {
+                            if let Rel::Table(table) = table {
+                                table.unique.retain(|key| key.name.as_ref() != Some(&index));
+                            }
+                        }
+                    }
+                    ObjectType::Type => {
+                        if let Some(key) = self.lookup(&self.types, &name_parts, path) {
+                            self.types.remove(&key);
+                        }
+                    }
+                    ObjectType::Schema => {
+                        // A name of no parts, `IDENTIFIER(...)`, is the prefix `.` of no key.
+                        let schema = name_parts.last().map_or("", String::as_str);
+                        let prefix = format!("{schema}.");
+                        self.relations.retain(|key, _| !key.starts_with(&prefix));
+                        self.types.retain(|key, _| !key.starts_with(&prefix));
+                        self.functions.retain(|key, _| !key.starts_with(&prefix));
+                    }
+                    _ => {}
                 }
             }
-            _ => {}
+        }
+        if let Statement::DropDomain(drop) = stmt {
+            if let Some(key) = self.lookup(&self.types, &parts(&drop.name, self.dialect), path) {
+                self.types.remove(&key);
+            }
+        }
+        if let Statement::DropFunction(drop) = stmt {
+            for desc in &drop.func_desc {
+                let Some(key) =
+                    self.lookup(&self.functions, &parts(&desc.name, self.dialect), path)
+                else {
+                    continue;
+                };
+                let wanted: Option<Vec<String>> = desc.args.as_ref().map(|args| {
+                    args.iter()
+                        .filter(|a| !matches!(a.mode, Some(ArgMode::Out)))
+                        .map(|a| canonical_type(&a.data_type, self.dialect))
+                        .collect()
+                });
+                let dialect = self.dialect;
+                let overloads = self.functions.entry(key.clone()).or_default();
+                overloads.retain(|f| match &wanted {
+                    Some(wanted) => {
+                        f.args
+                            .iter()
+                            .map(|dt| canonical_type(dt, dialect))
+                            .collect::<Vec<_>>()
+                            != *wanted
+                    }
+                    None => false,
+                });
+                if overloads.is_empty() {
+                    self.functions.remove(&key);
+                }
+                self.refresh_function(key);
+            }
         }
     }
 

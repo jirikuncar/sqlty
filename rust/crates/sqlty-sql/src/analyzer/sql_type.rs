@@ -97,12 +97,12 @@ impl SqlType {
                     element: None,
                     size: None,
                 },
-                ArrayElemTypeDef::AngleBracket(inner) | ArrayElemTypeDef::Parenthesis(inner) => {
-                    SqlType::Array {
-                        element: Some(Box::new(of(inner))),
-                        size: None,
-                    }
-                }
+                ArrayElemTypeDef::AngleBracket(inner)
+                | ArrayElemTypeDef::Parenthesis(inner)
+                | ArrayElemTypeDef::ParenthesisNotNull(inner) => SqlType::Array {
+                    element: Some(Box::new(of(inner))),
+                    size: None,
+                },
                 ArrayElemTypeDef::SquareBracket(inner, size)
                 | ArrayElemTypeDef::Qualified(inner, size) => SqlType::Array {
                     element: Some(Box::new(of(inner))),
@@ -135,13 +135,17 @@ impl SqlType {
             DataType::Interval { .. } => SqlType::Interval,
             // ClickHouse wrappers that change the column, not its values.
             DataType::Nullable(inner) | DataType::LowCardinality(inner) => of(inner),
+            DataType::Collate(inner, _) | DataType::Zerofill(inner) => of(inner),
             DataType::Custom(name, args) => {
                 let text = name.to_string().to_uppercase();
-                custom(&text, args, dialect).unwrap_or_else(|| SqlType::Scalar(scalar(dt, dialect)))
+                let args: Vec<String> = args.iter().map(ToString::to_string).collect();
+                custom(&text, &args, dialect)
+                    .unwrap_or_else(|| SqlType::Scalar(scalar(dt, dialect)))
             }
             DataType::Table(_)
             | DataType::NamedTable { .. }
             | DataType::Nested(_)
+            | DataType::Object(_)
             | DataType::Unspecified
             | DataType::Trigger
             | DataType::AnyType => SqlType::Unmapped(scalar(dt, dialect)),
@@ -354,8 +358,8 @@ impl SqlType {
                 Some(union(members?))
             }
             SqlType::Interval => Some("datetime.timedelta".to_string()),
-            SqlType::Unmapped(_) => None,
-            SqlType::Scalar(name) => scalar_python(name, dialect),
+            // `parse` reads an unmapped name back as a scalar.
+            SqlType::Scalar(name) | SqlType::Unmapped(name) => scalar_python(name, dialect),
         }
     }
 }
@@ -603,7 +607,7 @@ fn scalar(dt: &DataType, dialect: SqlDialect) -> String {
         DataType::BigInt(None) => Some("BIGINT"),
         DataType::SmallInt(None) => Some("SMALLINT"),
         DataType::Text => Some("TEXT"),
-        DataType::Boolean | DataType::Bool => Some("BOOLEAN"),
+        DataType::Boolean => Some("BOOLEAN"),
         DataType::Uuid => Some("UUID"),
         DataType::Date => Some("DATE"),
         DataType::Bytea => Some("VARBINARY"),
@@ -699,7 +703,6 @@ fn scalar(dt: &DataType, dialect: SqlDialect) -> String {
         "NUMERIC" | "DEC" | "FIXED" => "DECIMAL",
         "CHARACTER VARYING" | "NVARCHAR" => "VARCHAR",
         "CHARACTER LARGE OBJECT" | "CHAR LARGE OBJECT" => "TEXT",
-        "BINARY LARGE OBJECT" => "VARBINARY",
         "BIT VARYING" => "VARBIT",
         "CHARACTER" | "NCHAR" => "CHAR",
         "TINYTEXT" | "MEDIUMTEXT" | "LONGTEXT" => "TEXT",
@@ -812,6 +815,7 @@ fn sqlite_affinity(name: &str) -> Option<String> {
 /// `proofs/SqlTy/Table.lean`: what [`scalar_python`] gives each name it knows, in each
 /// dialect, for the Lean model of the mapping. `SQLTY_UPDATE_PROOFS=1` rewrites it.
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod lean_table {
     use super::*;
     use std::collections::BTreeSet;

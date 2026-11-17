@@ -9,6 +9,7 @@ the number of generated examples with ``SQLTY_FUZZ_EXAMPLES``.
 from __future__ import annotations
 
 import ast
+import functools
 import sys
 
 import pytest
@@ -17,7 +18,7 @@ from hypothesis import strategies as st
 
 from sqlty._core import call_variants
 from sqlty._source import ParsedSource
-from sqlty._variants import Declared, Unchecked, query_variants
+from sqlty._variants import Declared, Unchecked, _Walk, query_variants
 from tests.test_rust_check import RULES
 from tests.test_rust_index import compare
 from tests.test_rust_types import FUZZ, parses
@@ -59,6 +60,7 @@ WORDS = ["' a'", "' b'", "'SELECT 1'", "''", "' {}'"]
 TESTS = ["flag", "not flag", "kind == 'a'", "mode", "x", "flag and mode", "q == x", "(y := flag)"]
 
 
+@functools.cache
 def values() -> st.SearchStrategy[str]:
     name = st.sampled_from(NAMES)
     word = st.sampled_from(WORDS)
@@ -128,6 +130,7 @@ def indent(lines: list[str]) -> list[str]:
     return [f"    {line}" for line in lines] or ["    pass"]
 
 
+@functools.cache
 def statements() -> st.SearchStrategy[list[str]]:
     name = st.sampled_from(NAMES[:6])
     value = values()
@@ -278,12 +281,93 @@ CASES = {
     "loop": "    q = BASE\n    for x in items:\n        q += ' x'\n    run(q)\n",
     "inside": "    q = BASE\n    try:\n        if flag:\n            q += ' f'\n        run(q)\n"
     "    finally:\n        pass\n",
+    "composed unbound": "    if flag:\n        x = ' a'\n    run(sql.SQL(x))\n    run(BASE)\n",
+    "starred": "    run(pick(*TABLE))\n    run(loop(TABLE))\n    run(BASE)\n",
+    "unpassed": "    run(deep())\n    run(pick())\n    run(BASE)\n",
+    "patterns": "    match kind:\n        case 'a' | 1:\n            q = ' one'\n        case _:\n"
+    "            q = ' rest'\n    run(BASE + q)\n    run(BASE)\n",
+    "annotations": "    run(odd(kind, mode))\n    run(BASE)\n"
+    "def odd(k: 'Literal[', j: f().Literal['a']):\n    return k + j\n",
+    "values": "    c = sql.Composed([None, True, 1, 1.5, b'x', ..., [1], sql.Identifier('t'),"
+    " sql.Placeholder('p'), sql.SQL('s')])\n    d = {'k': c, 'j': 'x'}\n"
+    "    if flag:\n        q = ' a'\n    else:\n        q = ' a'\n"
+    "    run(sql.SQL('{}{}').format(d['k'], sql.SQL(q)))\n    run(BASE)\n",
+    "dict": "    d = {'a': ' x', 'a': ' y'}\n    run(sql.SQL(', ').join(d))\n    run(d)\n"
+    "    e = {'a': ' x' if flag else ' y'}\n    run(BASE + e['a'] + TABLE[0] + str(' x'))\n"
+    "    q = SQL[int]('SELECT 1')\n    run(q.format())\n    run(SQL('SELECT 1'))\n"
+    "    run(BASE + ANNOTATED + CHAINED + AUG + slots)\n"
+    "ANNOTATED: str = ' a'\nCHAINED = OTHER = CHAINED = ' b'\nclass Klass: ...\n"
+    "slots = {}\nslots['a'] = 1\nKlass.attr: int = 1\nAUG = ' a'\nAUG += ' b'\n"
+    "import os.path, os\nfrom os import path, path\nslots.attr += 1\n",
+    "statements": "    global G\n    d = {'k': ' x'}\n    d['k'].x.append(1)\n    f().append(1)\n"
+    "    (await g()).append(1)\n    a, b = [' x', ' y']\n    [c, e] = (' x', ' y')\n"
+    "    [h, i] = [' x', ' y']\n    j, d['j'] = ' x', ' y'\n    k, l = ' x', ' y', ' z'\n"
+    "    m = n = ' m'\n    if (await flag):\n        q = ' a'\n    else:\n        q = ' b'\n"
+    "    match kind:\n        case {'a': 1, **rest}:\n            q = ' r'\n"
+    "        case [*others]:\n            q = ' o'\n        case _:\n            pass\n"
+    "    def inner(z=lambda: 0):\n        nonlocal flag\n        flag = 1\n"
+    "    run(BASE + a + c + h + j + q + m + n)\n    run(sql.SQL('{}'.format(b'x')))\n"
+    "    run(BASE)\n",
+    "flow": "    x: int\n    d = {'k': ' x'}\n    d.attr: str = ' a'\n    q = ' a'\n    q *= 2\n"
+    "    d.x += ' a'\n    if flag:\n        q = ' a'\n    else:\n        raise ValueError\n"
+    "    match other:\n        case 'a' | 'b':\n            q = ' b'\n    with lock:\n        pass\n"
+    "    try:\n        pass\n    except E:\n        pass\n    except:\n        pass\n"
+    "    await d.append(1)\n    print(1)\n    (a or b).append(1)\n"
+    "    if flag(lambda: 0):\n        q = ' c'\n    run(BASE + q)\n    run(BASE + TABLE[0])\n"
+    "    u = sql.SQL('{}'.format(b'x'))\n    run(u)\n    run(where(sql.SQL('{}'.format(b'x'))))\n"
+    "    run(sql.Composed(['a\\x00']))\n    run(pick(**kw))\n    run(deep(other))\n"
+    "    run(BASE + noret(flag) + twice() + wrapped() + lit('a', 'b'))\n"
+    "    run(DEEP)\n    run(BASE)\n"
+    "def noret(k):\n    if k:\n        return ' a'\n"
+    "def twice():\n    return ' a'\ndef twice():\n    return ' b'\n"
+    "def lit(k: Literal['a', 1], j: list['a'], z=lambda: 0):\n    return ' l'\n"
+    "class Holder:\n    def method(self, flag):\n        run(BASE + (' a' if flag else ' b'))\n"
+    "DEEP = " + "(" * 70 + "' a'" + " + ' b')" * 70 + "\n",
+    "more": "    if flag:\n        q = ' a'\n    elif mode:\n        q = ' b'\n    else:\n        q = ' c'\n"
+    "    flag = other\n    flag\n    run(BASE + q)\n    d = {'a': ' x'}\n    run(BASE + d['z'])\n"
+    "    run(BASE + twice())\n    run(BASE + wrapped())\n    run(BASE + lit())\n"
+    "    run(where(sql.SQL('{}'.format(b'x'))))\n    u = sql.SQL('{}'.format(b'x'))\n"
+    "    match u:\n        case 'a':\n            run(BASE)\n    match u:\n        case 'a':\n"
+    "            pass\n    run(BASE + q)\n    if flag:\n        z = sql.SQL('{}'.format(b'x'))\n"
+    "        run(BASE + z)\n    def inner(z=lambda: 0, y=lambda w: w):\n"
+    "        run(BASE + (' a' if flag else ' b'))\n    run(BASE)\n"
+    "def twice():\n    return ' a'\ndef twice():\n    return ' b'\n"
+    "def lit(k: Literal['a', 1], j: list['a']):\n    return k + j\n",
+    "unread": "    match U:\n        case 'a':\n            run(BASE)\n    run(pick(U))\n"
+    "    run(BASE + other())\n    run(BASE + lit2())\n    if flag:\n        z = U\n        run(BASE + z)\n"
+    "    match other:\n        case 'a':\n            q = ' a'\n        case _:\n            q = ' b'\n"
+    "    run(BASE + q)\n    match U:\n        case 'a':\n            pass\n    run(BASE)\n"
+    "U = sql.SQL('{}'.format(b'x'))\ndef lit2(k: Literal['a', 1]):\n    return k\n"
+    "def outer(z=lambda: 0):\n    def inner():\n        run(BASE + (' a' if flag else ' b'))\n",
+    "nonlocal": "    nonlocal other\n    if flag:\n        other = ' a'\n    run(BASE + other)\n",
+    "default": "    @run(BASE)\n    def inner(q=run(BASE)) -> run(BASE):\n        pass\n    run(BASE)\n",
+    "loops": "    import os.path\n    class K: ...\n    while flag:\n        run(BASE + (' a' if mode else ' b'))\n"
+    "    run(BASE + lit3(kind, other))\n"
+    "    if mode:\n        r = ' a' if flag else ' a'\n        run(BASE + r + pick(mode))\n    run(BASE)\n"
+    "def lit3(k: Literal['a', 'b'], j: Literal['x']):\n    return ' ' + k + j\n"
+    "def outer(z=lambda w: w):\n    def inner():\n        run(BASE + (' a' if flag else ' b'))\n",
 }
 
 
 @pytest.mark.parametrize("body", CASES.values(), ids=CASES.keys())
 def test_cases(body: str) -> None:
     assert same(HEAD + SIGNATURES[0] + "\n" + body) >= 1
+
+
+def test_a_module_without_psycopg() -> None:
+    assert (
+        same("from sqlty import SQL\ndef build(flag):\n    run(other(flag))\n    run('SELECT 1')\n")
+        >= 1
+    )
+
+
+def test_render_lets_an_error_outside_psycopg_through() -> None:
+    class Deep:
+        def as_string(self, context: object) -> str:
+            raise RecursionError
+
+    with pytest.raises(RecursionError):
+        _Walk(None).render(Deep())
 
 
 def test_limits() -> None:

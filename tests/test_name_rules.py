@@ -19,6 +19,7 @@ DEFAULTS = {
     "chasm-join": Severity.WARN,
     "unproven-join": Severity.IGNORE,
     "entity-mismatch": Severity.IGNORE,
+    "rejected-query": Severity.ERROR,
 }
 
 

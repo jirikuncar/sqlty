@@ -172,3 +172,33 @@ const CLAUSES: &[&str] = &[
     "LOCK",
     "OFFSET",
 ];
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use sqlparser::parser::Parser;
+
+    use super::*;
+
+    fn name(sql: &str, dialect: SqlDialect) -> String {
+        let expr = Parser::new(dialect.parser_dialect().as_ref())
+            .try_with_sql(sql)
+            .unwrap()
+            .parse_expr()
+            .unwrap();
+        text_column_name(&expr, sql, dialect)
+    }
+
+    #[test]
+    fn rarer_names_and_items() {
+        assert_eq!(name("(T.Id)", SqlDialect::Sqlite), "id");
+        assert_eq!(name("_utf8mb4'x'", SqlDialect::MySql), "x");
+        let items = |sql: &'static str| item_texts(sql, 0, SqlDialect::MySql);
+        assert_eq!(
+            items("SELECT DISTINCT a IS DISTINCT FROM b, c FROM t"),
+            Some(vec!["a IS DISTINCT FROM b", "c"])
+        );
+        assert_eq!(items("SELECT a, (b))"), Some(vec!["a", "(b)"]));
+        assert_eq!(items("SELECT a; SELECT b"), Some(vec!["a"]));
+    }
+}

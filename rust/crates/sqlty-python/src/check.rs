@@ -17,6 +17,7 @@ use sqlty_sql::analyzer::{self, Nullability};
 use crate::calls::{helper_calls, is_marked, Call};
 use crate::checker::{self, Diagnostic};
 use crate::index::HelperIndex;
+use crate::rewriter::ImportStyle;
 use crate::rows::Reported;
 use crate::rows::{
     alias_target, bind, row_queries, row_shape, value_diagnostics, Check, Found, RowQuery,
@@ -24,6 +25,7 @@ use crate::rows::{
 };
 use crate::rules::Rule;
 use crate::scopes::{class_of, dotted, Key, Param};
+use crate::types::generic::is_word;
 use crate::types::info::Kind;
 use crate::types::resolve::slice_items;
 use crate::types::symbols::Source;
@@ -57,6 +59,19 @@ pub struct Run<'a> {
 const VARIANT_LINE: usize = 1 << 30;
 /// The types a `P` of `SQL[R, P]` takes for each parameter key, as arguments are spelled.
 type Annotations = Vec<(Key, Vec<Option<String>>)>;
+
+/// A Python `dict` built from `pairs`: each key once, where it first comes, holding its
+/// last value.
+fn dict<K: PartialEq, V>(pairs: impl IntoIterator<Item = (K, V)>) -> Vec<(K, V)> {
+    let mut found: Vec<(K, V)> = Vec::new();
+    for (key, value) in pairs {
+        match found.iter_mut().find(|(known, _)| *known == key) {
+            Some(known) => known.1 = value,
+            None => found.push((key, value)),
+        }
+    }
+    found
+}
 
 /// `_fits`: whether a type checker takes a value of type `actual` for `expected`.
 fn fits(actual: Option<&str>, expected: Option<&str>) -> bool {
@@ -155,12 +170,15 @@ fn names_params(text: &str, wrapper: &str) -> bool {
     if !text.contains(&format!("{wrapper}[")) {
         return false;
     }
-    let Ok(start) = Regex::new(&format!(r"\b{}\[", regex::escape(wrapper))) else {
-        return false;
-    };
-    for found in start.find_iter(text) {
+    let opening = format!("{wrapper}[");
+    // `\b{wrapper}\[`, without compiling a pattern for every module.
+    let starts_word = wrapper.chars().next().is_some_and(is_word);
+    for (at, _) in text.match_indices(&opening) {
+        if text[..at].chars().next_back().is_some_and(is_word) == starts_word {
+            continue;
+        }
         let mut depth = 0i32;
-        for c in text[found.end()..].chars() {
+        for c in text[at + opening.len()..].chars() {
             match c {
                 ',' if depth == 0 => return true,
                 '[' | '(' => depth += 1,
@@ -597,14 +615,7 @@ impl<'a> Module<'a, '_> {
             Some(name) if named && !name.is_empty() => Key::Name(name.clone()),
             _ => Key::Index(param.index),
         };
-        let mut by_key: Vec<(Key, &analyzer::Param)> = Vec::new();
-        for param in &params {
-            let key = key_of(param);
-            match by_key.iter_mut().find(|(known, _)| *known == key) {
-                Some(known) => known.1 = param,
-                None => by_key.push((key, param)),
-            }
-        }
+        let by_key = dict(params.iter().map(|param| (key_of(param), param)));
         let find = |key: &Key| {
             by_key
                 .iter()
@@ -768,7 +779,7 @@ impl<'a> Module<'a, '_> {
         let dotted_name = dotted(declared).unwrap_or_default();
         let count = |n: usize| format!("{n} parameter{}", plural(n));
         // `(label, annotation, parameter, key)`
-        let mut pairs: Vec<(String, Option<&Expr>, &analyzer::Param, String)> = Vec::new();
+        let mut pairs: Vec<(String, &Expr, &analyzer::Param, String)> = Vec::new();
         let info = self.ctx.type_defs.get(&name);
         if dotted_name.rsplit('.').next() == Some("NoParams") && info.is_none() {
             return if params.is_empty() {
@@ -812,7 +823,7 @@ impl<'a> Module<'a, '_> {
                 let number = param.index;
                 pairs.push((
                     format!("{name} item {number}"),
-                    Some(item),
+                    item,
                     param,
                     number.to_string(),
                 ));
@@ -823,23 +834,12 @@ impl<'a> Module<'a, '_> {
                     "{name} is a TypedDict but the query takes positional parameters"
                 )];
             }
-            // Of the keys and the parameters, the last of a name stands, where its first is.
-            let mut keys: Vec<&str> = Vec::new();
-            for (key, _) in &info.fields {
-                if !keys.contains(&key.as_str()) {
-                    keys.push(key);
-                }
-            }
-            let mut by_name: Vec<(&str, &analyzer::Param)> = Vec::new();
-            for param in params {
-                let Some(name) = param.name.as_deref() else {
-                    continue;
-                };
-                match by_name.iter_mut().find(|(known, _)| *known == name) {
-                    Some(known) => known.1 = param,
-                    None => by_name.push((name, param)),
-                }
-            }
+            let keys: Vec<&str> = info.fields.iter().map(|(key, _)| key.as_str()).collect();
+            let by_name = dict(
+                params
+                    .iter()
+                    .filter_map(|param| Some((param.name.as_deref()?, param))),
+            );
             let mut found: Vec<String> = by_name
                 .iter()
                 .filter(|(key, _)| !keys.contains(key))
@@ -861,13 +861,14 @@ impl<'a> Module<'a, '_> {
             if !found.is_empty() {
                 return found;
             }
-            for key in keys {
-                let Some((_, param)) = by_name.iter().find(|(known, _)| *known == key) else {
-                    continue;
-                };
+            let in_key_order = keys.iter().filter_map(|key| {
+                let (_, param) = by_name.iter().find(|(known, _)| known == key)?;
+                Some((key, *param, &info.annotations.get(key)?.expr))
+            });
+            for (key, param, annotation) in in_key_order {
                 pairs.push((
                     format!("{name}.{key}"),
-                    info.annotations.get(key).map(|annotation| &annotation.expr),
+                    annotation,
                     param,
                     format!("'{key}'"),
                 ));
@@ -880,9 +881,6 @@ impl<'a> Module<'a, '_> {
         let postgres = dialect == "postgres" || dialect == "postgresql";
         let mut found = Vec::new();
         for (label, annotation, param, key) in pairs {
-            let Some(annotation) = annotation else {
-                continue;
-            };
             for member in union_members(annotation) {
                 let actual = annotation_type(member, &self.source.imports);
                 if actual.as_deref() != Some("None") && !(typed && !param.cast) {
@@ -954,13 +952,14 @@ impl<'a> Module<'a, '_> {
                 continue;
             };
             let mut message = format!("query does not parse: {error}");
-            if error.contains("found: {") {
-                if let Some(field) = FORMAT_FIELD.find(&query) {
-                    message.push_str(&format!(
-                        "; `{}` is a `.format()` field: fill it with `sql.SQL(...).format(...)`, or pass a value as `%s`",
-                        field.as_str()
-                    ));
-                }
+            if let Some(field) = FORMAT_FIELD
+                .find(&query)
+                .filter(|_| error.contains("found: {"))
+            {
+                message.push_str(&format!(
+                    "; `{}` is a `.format()` field: fill it with `sql.SQL(...).format(...)`, or pass a value as `%s`",
+                    field.as_str()
+                ));
             }
             self.ctx.report(Rule::UnparsedQuery, message, line, span);
         }
@@ -993,23 +992,24 @@ impl<'a> Module<'a, '_> {
                 .map(|member| annotation_type(member, &source.imports))
                 .collect()
         };
-        if let Expr::Subscript(sub) = declared {
-            if matches!(
+        let tuple = declared.as_subscript_expr().filter(|sub| {
+            matches!(
                 dotted(&sub.value).as_deref(),
                 Some("tuple" | "typing.Tuple")
-            ) {
-                let items = slice_items(&sub.slice);
-                if items.iter().any(Expr::is_ellipsis_literal_expr) {
-                    return None;
-                }
-                return Some(
-                    items
-                        .iter()
-                        .enumerate()
-                        .map(|(i, item)| (Key::Index(i + 1), types(item)))
-                        .collect(),
-                );
+            )
+        });
+        if let Some(sub) = tuple {
+            let items = slice_items(&sub.slice);
+            if items.iter().any(Expr::is_ellipsis_literal_expr) {
+                return None;
             }
+            return Some(
+                items
+                    .iter()
+                    .enumerate()
+                    .map(|(i, item)| (Key::Index(i + 1), types(item)))
+                    .collect(),
+            );
         }
         let name = unparse(declared, &source.text);
         let own = if std::ptr::eq(source, self.source) {
@@ -1193,6 +1193,24 @@ pub fn unparsed(text: &str, run: &Run<'_>) -> Found {
     }
 }
 
+/// The byte offset of each `SQL[T](...)` call of `source` whose `T` is `typing.Any`.
+pub fn any_calls(source: &Source, style: &ImportStyle) -> Vec<usize> {
+    let (text, wrapper) = (&*source.text, style.wrapper_name.as_str());
+    if !text.contains("Any") || !may_wrap(text, &style.import_line) {
+        return Vec::new();
+    }
+    module::any_calls(source.body(), &source.typing)
+        .into_iter()
+        .filter(|(_, name)| {
+            name == wrapper
+                || name
+                    .strip_suffix(wrapper)
+                    .is_some_and(|prefix| prefix.ends_with('.'))
+        })
+        .map(|(offset, _)| offset)
+        .collect()
+}
+
 /// `sqlty._check.diagnostics`: every diagnostic of `source` before inline suppression, by
 /// line.
 pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
@@ -1207,20 +1225,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
 
     let mut base = Vec::new();
     if may_need_lexing(text, wrapper) {
-        let any_calls: Vec<usize> = if text.contains("Any") && may_wrap(text, import_line) {
-            module::any_calls(source.body(), &source.typing)
-                .into_iter()
-                .filter(|(_, name)| {
-                    name == wrapper
-                        || name
-                            .strip_suffix(wrapper)
-                            .is_some_and(|prefix| prefix.ends_with('.'))
-                })
-                .map(|(offset, _)| offset)
-                .collect()
-        } else {
-            Vec::new()
-        };
+        let any_calls = any_calls(source, &options.style);
         base = checker::check_source(text, options, rules, &any_calls);
         checker::add_fix_imports(text, options, &mut base);
     }
@@ -1400,4 +1405,28 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
     out.diagnostics
         .sort_by_key(|reported| reported.diagnostic.line);
     out
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_dict_keeps_the_first_place_and_the_last_value_of_a_key() {
+        assert_eq!(dict([("a", 1), ("b", 2), ("a", 3)]), [("a", 3), ("b", 2)]);
+    }
+
+    #[test]
+    fn an_unknown_type_fits_and_a_bare_list_fits_only_a_list() {
+        assert!(fits(None, Some("int")));
+        assert!(fits(Some("list"), Some("list[int]")));
+        assert!(!fits(Some("list"), Some("int")));
+    }
+
+    #[test]
+    fn a_key_is_spelled_as_python_writes_it() {
+        assert_eq!(key_text(&Key::Index(1)), "1");
+        assert_eq!(key_text(&Key::Name("a".into())), "'a'");
+    }
 }

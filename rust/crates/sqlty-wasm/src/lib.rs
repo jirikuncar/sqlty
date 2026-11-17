@@ -15,18 +15,22 @@
 //! assert_eq!(answer["queries"][0]["row_type"], "tuple[int]");
 //! ```
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
+
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::sync::Arc;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlty_python::checker::{query_sites, Diagnostic, SiteKind};
 use sqlty_python::config;
-use sqlty_python::fixer::fix_source;
+use sqlty_python::fixer::fix_module;
 use sqlty_python::locate::{self, Queries};
 use sqlty_python::options::Options;
 use sqlty_python::params::add_param_types;
-use sqlty_python::rewriter::{rewrite_source_with, strip_source, Suppressed};
+use sqlty_python::project::{self, FindError, Read};
+use sqlty_python::rewriter::{rewrite_source_with, strip_source};
 use sqlty_python::rules::RuleConfig;
 use sqlty_python::types::symbols::Source;
 use sqlty_python::{check, rows, suppress};
@@ -39,19 +43,29 @@ use sqlty_sql::highlight::Highlight;
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum Op {
+    Config,
+    Project,
+    #[serde(untagged)]
+    Source(SourceOp),
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum SourceOp {
     Analyze,
     Complete,
     Hover,
     Format,
-    Config,
 }
 
 #[derive(Deserialize)]
 struct Request {
     op: Op,
+    #[serde(default)]
     source: String,
     #[serde(default)]
     schema: String,
+    #[serde(default)]
     dialect: String,
     #[serde(default)]
     offset: usize,
@@ -68,6 +82,15 @@ struct Request {
     /// Whether `config` reports a `pyproject.toml` or `Cargo.toml` without a sqlty table.
     #[serde(default)]
     required: bool,
+    /// The files `project` reads, by absolute path: the text, or `null` for no such file.
+    #[serde(default)]
+    files: HashMap<String, Option<String>>,
+    /// The directory `settings` came from, as `project` answers its `file`: with `file`, the
+    /// settings are those of `file`, its database and overrides applied.
+    #[serde(default)]
+    base: Option<String>,
+    #[serde(default)]
+    file: Option<String>,
 }
 
 /// Answer a JSON request about the Python `source`, read against `schema` in `dialect`.
@@ -84,8 +107,13 @@ struct Request {
 ///   which runs on every keystroke.
 /// - `config`: the sqlty table of `source`, the text of the file at `path`, validated as
 ///   `sqlty check` validates it, as `{"config": table}`; `null` for a `pyproject.toml` or
-///   `Cargo.toml` without one, unless `required`. A host finds and merges the files
-///   (`extend`), then passes the result as `settings`.
+///   `Cargo.toml` without one, unless `required`.
+/// - `project`: the configuration of the directory `path`, as `sqlty check` finds it from
+///   `files`: `{"config": table, "file": path}` with `extend` applied, its `schema` and
+///   `queries` relative to the directory of `file`; `null` when no file has one;
+///   `{"need": path}` for a file `files` lacks, which the host reads and asks again with;
+///   `{"warning": message}` for a `pyproject.toml` or `Cargo.toml` that is not TOML, which
+///   `sqlty check` skips. The host passes the table as `settings`.
 ///
 /// `config` is a `sqlty.toml` whose `dialect`, `driver`, `import-style`, `param-types`,
 /// `preview`, `max-query-variants`, `rules` and `types` apply; another key, or an invalid one, is an `error`, as `sqlty check` reports
@@ -96,16 +124,24 @@ pub fn run(request: &str) -> String {
         Ok(request) => request,
         Err(found) => return error(found.to_string()),
     };
-    if let Op::Config = request.op {
-        let path = request.path.as_str();
-        let name = path.rsplit('/').next().unwrap_or(path);
-        return match config::load(request.source.as_bytes(), name, path, request.required) {
-            Ok(found) => json!(found.map(|found| json!({ "config": found.table }))).to_string(),
-            Err(found) => error(found.to_string()),
-        };
-    }
+    let op = match request.op {
+        Op::Source(op) => op,
+        Op::Config => {
+            let path = request.path.as_str();
+            let name = path.rsplit('/').next().unwrap_or(path);
+            return match config::load(request.source.as_bytes(), name, path, request.required) {
+                Ok(found) => json!(found.map(|found| json!({ "config": found.table }))).to_string(),
+                Err(found) => error(found.to_string()),
+            };
+        }
+        Op::Project => return project(&request.path, &request.files).to_string(),
+    };
     let settings = match &request.settings {
-        Some(table) => Ok(resolved(table)),
+        Some(table) => Ok(resolved(&routed(
+            table,
+            request.base.as_ref(),
+            request.file.as_ref(),
+        ))),
         None => settings(&request.config),
     };
     let settings = match settings {
@@ -139,11 +175,11 @@ pub fn run(request: &str) -> String {
     let offset = byte_offset(source, request.offset);
     let queries = Queries::new(source, &options.style, &[]);
     let params = |source: String| match param_types {
-        true => add_param_types(&source, &options),
+        true => add_param_types(&source, &options, false),
         false => source,
     };
-    let answer = match request.op {
-        Op::Analyze => {
+    let answer = match op {
+        SourceOp::Analyze => {
             let has_schema = schema
                 .as_ref()
                 .is_some_and(|schema| !schema.databases().is_some_and(|all| all.absent));
@@ -184,10 +220,11 @@ pub fn run(request: &str) -> String {
                 .collect::<Vec<_>>(),
             "rewritten": params(rewrite_source_with(source, &options, false)),
             "stripped": strip_source(source, &options.style),
-            "fixed": params(fix_source(source, &options, &rules, &Suppressed::new())),
+            "fixed": params(fix_module(source, Source::new(source, VERSION).as_ref(), &options, &rules, None, None)),
             })
         }
-        Op::Complete => match locate::complete(&queries, offset, dialect, options.schema, 50) {
+        SourceOp::Complete => match locate::complete(&queries, offset, dialect, options.schema, 50)
+        {
             Some(found) => json!({
                 "start": utf16(found.replace.start),
                 "end": utf16(found.replace.end),
@@ -201,7 +238,7 @@ pub fn run(request: &str) -> String {
             }),
             None => Value::Null,
         },
-        Op::Hover => match locate::hover(&queries, offset, dialect, options.schema) {
+        SourceOp::Hover => match locate::hover(&queries, offset, dialect, options.schema) {
             Some(found) => json!({
                 "start": utf16(found.range.start),
                 "end": utf16(found.range.end),
@@ -209,10 +246,9 @@ pub fn run(request: &str) -> String {
             }),
             None => Value::Null,
         },
-        Op::Format => {
+        SourceOp::Format => {
             json!({ "formatted": sqlty_format::format_source(source, dialect, &options.style) })
         }
-        Op::Config => unreachable!("answered above"),
     };
     answer.to_string()
 }
@@ -285,10 +321,11 @@ fn settings(config: &str) -> Result<Settings, String> {
             READ.join(", ")
         ));
     }
-    match json!(table) {
-        Value::Object(table) => Ok(resolved(&table)),
-        _ => unreachable!("a TOML table is a JSON object"),
-    }
+    let table = table
+        .into_iter()
+        .map(|(key, value)| (key, json!(value)))
+        .collect();
+    Ok(resolved(&table))
 }
 
 /// The Python the page is read as.
@@ -336,7 +373,10 @@ fn checked(
         Some(module) => check::diagnostics(module, &run),
         None => check::unparsed(source, &run),
     };
-    let ignores = module.as_deref().map(suppress::ignores).unwrap_or_default();
+    let ignores = match &module {
+        Some(module) => suppress::ignores(module),
+        None => suppress::unparsed_ignores(source),
+    };
     let needed = found.needed;
     suppress::apply(&ignores, found.diagnostics, rules)
         .into_iter()
@@ -455,5 +495,48 @@ mod abi {
     }
 }
 
+/// `table` as `file` reads it, `base` the directory of its configuration.
+fn routed(
+    table: &serde_json::Map<String, Value>,
+    base: Option<&String>,
+    file: Option<&String>,
+) -> serde_json::Map<String, Value> {
+    let (Some(base), Some(file)) = (base, file) else {
+        return table.clone();
+    };
+    let Ok(project) = serde_json::from_value::<toml::Table>(Value::Object(table.clone())) else {
+        return table.clone();
+    };
+    let missing = |_: &Path| Read::Missing;
+    let found = project::route(
+        &project,
+        Path::new(base),
+        Path::new(file),
+        &missing,
+        &project::Excludes::default(),
+    );
+    json!(project::file_table(&project, &found))
+        .as_object()
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// The `project` answer for `directory`, reading `files`.
+fn project(directory: &str, files: &HashMap<String, Option<String>>) -> Value {
+    let read = |path: &Path| match path.to_str().and_then(|path| files.get(path)) {
+        Some(Some(text)) => Read::Text(text.as_bytes().to_vec()),
+        Some(None) => Read::Missing,
+        None => Read::Unread,
+    };
+    match project::find(Path::new(directory), &read) {
+        Ok(Some(found)) => json!({ "config": found.config.table, "file": found.file }),
+        Ok(None) => Value::Null,
+        Err(FindError::Need(path)) => json!({ "need": path }),
+        Err(FindError::Syntax(message)) => json!({ "warning": message }),
+        Err(error) => json!({ "error": error.to_string() }),
+    }
+}
+
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

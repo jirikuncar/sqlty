@@ -10,7 +10,7 @@
 //! - Source: `rewrite_source`, `add_param_types`, `strip_source`, `fix_source`, `check_source`,
 //!   `wrapped_queries`, `query_sites`.
 //! - Schema: `load_schema`, `schema_skipped_tables`, `schema_skipped_objects`, `name_rules`.
-//! - Configuration: `load_config`, `validate_config` and the key lists.
+//! - Configuration: `validate_config` and the key lists.
 //!
 //! Parsed schemas are cached per `(schema text, dialect)` in a small LRU shared by all
 //! threads, because callers pass the same few schemas call after call; `load_schema`
@@ -21,6 +21,9 @@
 //! the pieces that need no interpreter (the schema cache, `schema_for`, nullability
 //! mapping). The `#[pyfunction]`s are exercised from Python by `tests/`.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
+
+mod cli;
 mod config;
 mod outline;
 mod server;
@@ -34,7 +37,7 @@ use sqlty_python::rewriter;
 use sqlty_sql::analyzer;
 use sqlty_sql::highlight::Highlight;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -171,29 +174,12 @@ impl<'a, 'py> FromPyObject<'a, 'py> for SchemaArg {
 struct SchemaHandle {
     loaded: Arc<LoadedSchema>,
     text: Arc<str>,
-    dialect: &'static str,
-}
-
-#[pymethods]
-impl SchemaHandle {
     /// The dialect the schema was parsed as.
-    #[getter]
-    fn dialect(&self) -> &'static str {
-        self.dialect
-    }
-
+    #[pyo3(get)]
+    dialect: &'static str,
     /// Whether queries of this database are read without a schema: it was loaded without one.
-    #[getter]
-    fn absent(&self) -> bool {
-        self.loaded
-            .schema
-            .databases()
-            .is_some_and(|databases| databases.absent)
-    }
-
-    fn __repr__(&self) -> String {
-        format!("Schema(dialect={:?})", self.dialect)
-    }
+    #[pyo3(get)]
+    absent: bool,
 }
 
 /// Parse `schema_sql` once, for passing as `schema_sql` to the other functions.
@@ -241,7 +227,7 @@ fn load_schema(
                     Some(handle) => (
                         other,
                         handle.dialect,
-                        (!handle.absent()).then(|| handle.loaded.schema.clone()),
+                        (!handle.absent).then(|| handle.loaded.schema.clone()),
                     ),
                     None => (other, dialect, None),
                 })
@@ -258,10 +244,15 @@ fn load_schema(
             Arc::new(LoadedSchema { schema, skipped })
         }
     };
+    let absent = loaded
+        .schema
+        .databases()
+        .is_some_and(|databases| databases.absent);
     Ok(SchemaHandle {
         loaded,
         text: Arc::from(schema_sql),
         dialect,
+        absent,
     })
 }
 
@@ -386,12 +377,10 @@ fn detach<T: Send, F: Send + FnOnce() -> T>(py: Python<'_>, f: F) -> T {
     py.detach(|| stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, f))
 }
 
-include!(concat!(env!("OUT_DIR"), "/skills.rs"));
-
 /// The files of the Agent Skills, as `(path, text)` with paths like `sqlty/SKILL.md`.
 #[pyfunction]
 fn skills() -> Vec<(&'static str, &'static str)> {
-    SKILLS.to_vec()
+    sqlty_cli::SKILLS.to_vec()
 }
 
 /// Result columns of a query as `(name, python_type, sql_type)` tuples.
@@ -589,8 +578,8 @@ type QueryDiagnosticTuple = (
 /// end, table, column)` tuples:
 /// `unknown-table`, `unknown-column`, `ambiguous-column`, `duplicate-alias`, `unknown-function`,
 /// `unknown-type`, `unsupported-syntax`, `insert-missing-column`, `insert-value-count`,
-/// `ungrouped-column`, `fanout-aggregate`, `chasm-join`, `unproven-join` and
-/// `entity-mismatch`.
+/// `ungrouped-column`, `fanout-aggregate`, `chasm-join`, `unproven-join`, `entity-mismatch`
+/// and `rejected-query`.
 /// Tables, columns and
 /// ambiguity are only judged with a schema.
 ///
@@ -749,24 +738,25 @@ fn rewrite_source(
 /// Write the parameter type P of each SQL[R]("--sql\n...") call: SQL[R, P].
 ///
 /// Positional parameters are a tuple, named ones a TypedDict generated below a
-/// `# sqlty: generated` line after the imports.
+/// `# sqlty: generated` line after the imports, with `closed=True` when `closed`.
 ///
 /// Raises:
 ///     ValueError: unsupported import_style
 #[pyfunction]
-#[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, schema_sql = None, import_style = None))]
+#[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, schema_sql = None, import_style = None, closed = false))]
 fn add_param_types(
     py: Python<'_>,
     source: &str,
     dialect: DialectArg,
     schema_sql: Option<SchemaArg>,
     import_style: Option<&str>,
+    closed: bool,
 ) -> Result<String, Error> {
     let dialect = dialect.0;
     detach(py, || {
         let schema = schema_for(source, schema_sql, dialect);
         let options = Options::new(dialect, schema.as_deref(), import_style, false)?;
-        Ok(params::add_param_types(source, &options))
+        Ok(params::add_param_types(source, &options, closed))
     })
 }
 
@@ -895,6 +885,46 @@ fn fix_source(
             &options,
             &rules,
             &suppressed.unwrap_or_default(),
+        ))
+    })
+}
+
+/// `fix_source` of a module, leaving alone what its `# sqlty: ignore` comments suppress and
+/// the strings of its helper calls, resolved through `index` with the dotted `name` of
+/// the module and the package `module` relative imports start from.
+#[pyfunction]
+#[pyo3(signature = (source, *, version, dialect = DialectArg::POSTGRES, schema_sql = None, import_style = None, untyped = false, rules = None, index = None, name = None, module = None))]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the keyword-only Python signature is the API"
+)]
+fn fix_module(
+    py: Python<'_>,
+    source: &str,
+    version: (u8, u8),
+    dialect: DialectArg,
+    schema_sql: Option<SchemaArg>,
+    import_style: Option<&str>,
+    untyped: bool,
+    rules: Option<HashMap<String, String>>,
+    index: Option<PyRef<'_, ModuleIndex>>,
+    name: Option<&str>,
+    module: Option<&str>,
+) -> Result<String, Error> {
+    let dialect = dialect.0;
+    let helpers = index.map(|index| Arc::clone(&index.0));
+    detach(py, || {
+        let schema = schema_for(source, schema_sql, dialect);
+        let options = Options::new(dialect, schema.as_deref(), import_style, untyped)?;
+        let rules = RuleConfig::from_overrides(rules).map_err(ConfigError::from)?;
+        let parsed = parsed_module(source, version, name, helpers.as_deref());
+        Ok(fixer::fix_module(
+            source,
+            parsed.as_deref(),
+            &options,
+            &rules,
+            helpers.as_deref(),
+            module,
         ))
     })
 }
@@ -1086,27 +1116,26 @@ fn module_index(py: Python<'_>, version: (u8, u8), steps: Vec<IndexStep>) -> Mod
     })
 }
 
-#[pymethods]
-impl ModuleIndex {
-    /// The helpers by module and name (`Class.method` for a method), each as
-    /// `(positional, keywords, query, row, kind, params, rest, named, configured, database)`.
-    fn helpers(&self) -> HashMap<String, HashMap<String, HelperTuple>> {
-        let helpers = |found: &sqlty_python::types::info::Dict<sqlty_python::calls::Helper>| {
-            found
-                .iter()
-                .map(|(name, helper)| (name.to_string(), helper_tuple(helper)))
-                .collect()
-        };
-        let modules = self.0.modules.iter();
-        modules
-            .map(|(module, found)| (module.clone(), helpers(found)))
+/// The helpers of `index` by module and name (`Class.method` for a method), each as
+/// `(positional, keywords, query, row, kind, params, rest, named, configured, database)`.
+#[pyfunction]
+fn index_helpers(index: &ModuleIndex) -> HashMap<String, HashMap<String, HelperTuple>> {
+    let helpers = |found: &sqlty_python::types::info::Dict<sqlty_python::calls::Helper>| {
+        found
+            .iter()
+            .map(|(name, helper)| (name.to_string(), helper_tuple(helper)))
             .collect()
-    }
+    };
+    let modules = index.0.modules.iter();
+    modules
+        .map(|(module, found)| (module.clone(), helpers(found)))
+        .collect()
+}
 
-    /// A fork of the index after `steps`, sharing what is read of the modules.
-    fn extended(&self, py: Python<'_>, steps: Vec<IndexStep>) -> ModuleIndex {
-        detach(py, || indexed(self.0.fork(), self.0.version(), steps))
-    }
+/// A fork of `index` after `steps`, sharing what is read of the modules.
+#[pyfunction]
+fn index_extended(py: Python<'_>, index: &ModuleIndex, steps: Vec<IndexStep>) -> ModuleIndex {
+    detach(py, || indexed(index.0.fork(), index.0.version(), steps))
 }
 
 /// `source` parsed as the module `name`: what the index read of it when it is the same
@@ -1212,7 +1241,8 @@ fn check_source(
 }
 
 /// Check the named queries of a `.sql` file: `unparsed-query` and the name rules of each
-/// statement. `query_format` is a `query-format` value (`"auto"`, `"aiosql"`, `"sqlc"`,
+/// statement, without those a `-- sqlty: ignore` comment on their line drops, with its
+/// `unused-ignore`. `query_format` is a `query-format` value (`"auto"`, `"aiosql"`, `"sqlc"`,
 /// `"pugsql"`, `"file"`); `name` is the file name without its extension, the name of a
 /// query of a file without headers.
 ///
@@ -1243,20 +1273,20 @@ fn check_queries(
         let schema = schema(schema_sql, dialect);
         let options = Options::new(dialect, schema.as_deref(), None, false)?;
         let rules = RuleConfig::from_overrides(rules).map_err(ConfigError::from)?;
-        Ok(
-            queries::check_queries(source, format, name, &options, &rules)
-                .into_iter()
-                .map(|diag| DiagnosticOut {
-                    rule: diag.rule.name(),
-                    message: diag.message,
-                    severity: diag.severity.as_str(),
-                    line: diag.line,
-                    start: diag.span.start,
-                    end: diag.span.end,
-                    fix: Vec::new(),
-                })
-                .collect(),
-        )
+        let found = queries::check_queries(source, format, name, &options, &rules);
+        let ignores = sqlty_python::suppress::sql_ignores(source);
+        Ok(sqlty_python::suppress::apply_sql(&ignores, found, &rules)
+            .into_iter()
+            .map(|diag| DiagnosticOut {
+                rule: diag.rule.name(),
+                message: diag.message,
+                severity: diag.severity.as_str(),
+                line: diag.line,
+                start: diag.span.start,
+                end: diag.span.end,
+                fix: Vec::new(),
+            })
+            .collect())
     })
 }
 
@@ -1409,15 +1439,24 @@ fn py_params(params: Option<Vec<sqlty_python::scopes::Param>>) -> Option<Vec<PyP
 
 /// `(lines, prefix, name, args, keywords, receiver)` of each call in Python source that may
 /// call a helper named one of `names`, or None when Rust does not read the source; each
-/// argument is `(starred, span, text, type, params)`.
+/// argument is `(starred, span, text, type, params)`. With `index`, a constant imported from
+/// one of its modules has its type; `module` is the name of `source`.
 #[pyfunction]
 #[allow(clippy::needless_pass_by_value)]
-fn helper_sites(py: Python<'_>, source: &str, names: Vec<String>) -> Option<Vec<PySite>> {
+#[pyo3(signature = (source, names, index=None, module=None))]
+fn helper_sites(
+    py: Python<'_>,
+    source: &str,
+    names: Vec<String>,
+    index: Option<PyRef<'_, ModuleIndex>>,
+    module: Option<&str>,
+) -> Option<Vec<PySite>> {
+    let index = index.map(|index| Arc::clone(&index.0));
     detach(py, || {
         let arg = |a: sqlty_python::helpers::Arg| {
             (a.starred, a.span, a.text, a.kind, py_params(a.params))
         };
-        let found = sqlty_python::helpers::sites(source, &names)?;
+        let found = sqlty_python::helpers::sites(source, &names, index.as_deref(), module)?;
         Some(
             found
                 .into_iter()
@@ -1594,8 +1633,7 @@ fn type_relations(
                         .iter()
                         .map(|value| match compat::set_member(value) {
                             Lit::Str(text) => format!("s:{text}"),
-                            Lit::Int(digits) => format!("i:{digits}"),
-                            Lit::Bool(_) => unreachable!("a set member is not a bool"),
+                            member => format!("i:{}", member.repr()),
                         })
                         .collect();
                     format!("[{}]", values.join(", "))
@@ -1721,14 +1759,14 @@ fn row_diagnostics(
     })
 }
 
-/// Every diagnostic of `source` before inline suppression, as `sqlty_python::check` reports
-/// them: `(diagnostics, redundant, needed)`, see `row_diagnostics`. A source that does not
+/// Every diagnostic of `source` as `sqlty_python::check` reports them: `(diagnostics,
+/// redundant, needed)`, see `row_diagnostics`; with `suppress`, without those its
+/// `# sqlty: ignore` comments drop and with their `unused-ignore`. A source that does not
 /// parse gets what its strings alone tell.
 #[pyfunction]
-#[pyo3(signature = (source, *, version, dialect = DialectArg::POSTGRES, schema_sql = None, rules = None, import_style = None, untyped = false, module = None, coerce = vec![], index = None, name = None, variants = None))]
+#[pyo3(signature = (source, *, version, dialect = DialectArg::POSTGRES, schema_sql = None, rules = None, import_style = None, untyped = false, module = None, coerce = vec![], index = None, name = None, variants = None, suppress = false))]
 #[expect(
     clippy::too_many_arguments,
-    clippy::type_complexity,
     reason = "the keyword-only Python signature is the API"
 )]
 fn module_diagnostics(
@@ -1745,25 +1783,126 @@ fn module_diagnostics(
     index: Option<PyRef<'_, ModuleIndex>>,
     name: Option<&str>,
     variants: Option<usize>,
-) -> Result<(Vec<DiagnosticOut>, Vec<Option<FieldKey>>, Vec<FieldKey>), Error> {
-    use sqlty_python::{check, rows};
-    let dialect = dialect.0;
-    let helpers = index.map(|index| Arc::clone(&index.0));
-    let types = helpers.as_ref().map(|index| index.types());
+    suppress: bool,
+) -> Result<ModuleFound, Error> {
+    let mut config = CheckConfig {
+        dialect: dialect.0,
+        schema_sql,
+        rules,
+        import_style: import_style.map(str::to_string),
+        untyped,
+        coerce: coerce.into_iter().collect(),
+        index: index.map(|index| Arc::clone(&index.0)),
+        variants,
+    };
     detach(py, || {
-        let schema = schema(schema_sql, dialect);
-        let options = Options::new(dialect, schema.as_deref(), import_style, untyped)?;
-        let rules = RuleConfig::from_overrides(rules).map_err(ConfigError::from)?;
-        let parsed = parsed_module(source, version, name, helpers.as_deref());
+        let schema = config.schema();
+        let checker = config.checker(schema.as_deref())?;
+        Ok(checker.check(source, version, name, module, suppress))
+    })
+}
+
+/// `(diagnostics, redundant, needed)` of a module, see `row_diagnostics`.
+type ModuleFound = (Vec<DiagnosticOut>, Vec<Option<FieldKey>>, Vec<FieldKey>);
+
+/// A configuration of `check_modules`, as Python passes it: `(dialect, schema_sql, rules,
+/// import_style, untyped, coerce, index, variants)`, see `module_diagnostics`.
+type ConfigArg<'py> = (
+    DialectArg,
+    Option<SchemaArg>,
+    Option<HashMap<String, String>>,
+    Option<String>,
+    bool,
+    Vec<String>,
+    Option<PyRef<'py, ModuleIndex>>,
+    Option<usize>,
+);
+
+/// What `module_diagnostics` reads a module with besides its source and names.
+struct CheckConfig {
+    dialect: &'static str,
+    schema_sql: Option<SchemaArg>,
+    rules: Option<HashMap<String, String>>,
+    import_style: Option<String>,
+    untyped: bool,
+    coerce: HashSet<String>,
+    index: Option<Arc<sqlty_python::index::HelperIndex>>,
+    variants: Option<usize>,
+}
+
+impl CheckConfig {
+    fn new(arg: ConfigArg<'_>) -> Self {
+        let (dialect, schema_sql, rules, import_style, untyped, coerce, index, variants) = arg;
+        Self {
+            dialect: dialect.0,
+            schema_sql,
+            rules,
+            import_style,
+            untyped,
+            coerce: coerce.into_iter().collect(),
+            index: index.map(|index| Arc::clone(&index.0)),
+            variants,
+        }
+    }
+
+    /// The schema, read once: a second call has none.
+    fn schema(&mut self) -> Option<analyzer::Schema> {
+        schema(self.schema_sql.take(), self.dialect)
+    }
+
+    fn checker<'a>(
+        &'a self,
+        schema: Option<&'a analyzer::SchemaData>,
+    ) -> Result<ModuleChecker<'a>, Error> {
+        Ok(ModuleChecker {
+            config: self,
+            options: Options::new(
+                self.dialect,
+                schema,
+                self.import_style.as_deref(),
+                self.untyped,
+            )?,
+            rules: RuleConfig::from_overrides(self.rules.clone()).map_err(ConfigError::from)?,
+            types: self.index.as_ref().map(|index| index.types()),
+            has_schema: schema
+                .is_some_and(|schema| !schema.databases().is_some_and(|all| all.absent)),
+        })
+    }
+}
+
+/// A [`CheckConfig`] read once, for every module checked with it.
+struct ModuleChecker<'a> {
+    config: &'a CheckConfig,
+    options: Options<'a>,
+    rules: RuleConfig,
+    types: Option<Arc<dyn sqlty_python::types::symbols::Index>>,
+    has_schema: bool,
+}
+
+impl ModuleChecker<'_> {
+    /// The diagnostics of `source`; with `suppress`, without those its `# sqlty: ignore`
+    /// comments drop and with their `unused-ignore`.
+    fn check(
+        &self,
+        source: &str,
+        version: (u8, u8),
+        name: Option<&str>,
+        module: Option<&str>,
+        suppress: bool,
+    ) -> ModuleFound {
+        use sqlty_python::{check, rows};
+        let helpers = self.config.index.as_deref();
+        let parsed = parsed_module(source, version, name, helpers);
         let settings = rows::Settings {
-            options: &options,
-            rules: &rules,
-            index: types.as_ref(),
+            options: &self.options,
+            rules: &self.rules,
+            index: self.types.as_ref(),
             module,
-            coerce: &coerce.into_iter().collect(),
+            coerce: &self.config.coerce,
         };
+        let dialect = self.config.dialect;
         let lint = |text: &str| {
-            sqlty_format::lint_source(text, dialect, &options.style)
+            sqlty_format::lint_source(text, dialect, &self.options.style)
                 .into_iter()
                 .map(|found| check::Lint {
                     message: format!("{}: {}", found.code, found.message),
@@ -1774,17 +1913,23 @@ fn module_diagnostics(
         };
         let run = check::Run {
             settings: &settings,
-            has_schema: schema
-                .as_ref()
-                .is_some_and(|schema| !schema.databases().is_some_and(|all| all.absent)),
+            has_schema: self.has_schema,
             lint: &lint,
-            helpers: helpers.as_deref(),
-            variants,
+            helpers,
+            variants: self.config.variants,
         };
-        let found = match &parsed {
+        let mut found = match &parsed {
             Some(parsed) => check::diagnostics(parsed, &run),
             None => check::unparsed(source, &run),
         };
+        if suppress {
+            let ignores = match &parsed {
+                Some(parsed) => sqlty_python::suppress::ignores(parsed),
+                None => sqlty_python::suppress::unparsed_ignores(source),
+            };
+            found.diagnostics =
+                sqlty_python::suppress::apply(&ignores, found.diagnostics, &self.rules);
+        }
         let mut needed: Vec<FieldKey> = found.needed.into_iter().collect();
         needed.sort();
         let (diagnostics, redundant) = found
@@ -1808,8 +1953,113 @@ fn module_diagnostics(
                 (out, reported.redundant)
             })
             .unzip();
-        Ok((diagnostics, redundant, needed))
-    })
+        (diagnostics, redundant, needed)
+    }
+}
+
+/// `module_diagnostics` of every `(source, name, config)` of `modules`, where `config`
+/// indexes `configs` and `name` is the module's dotted name, on `jobs` threads (all
+/// cores when None), with their `# sqlty: ignore` comments applied.
+#[pyfunction]
+#[pyo3(signature = (modules, configs, *, version, jobs = None))]
+fn check_modules(
+    py: Python<'_>,
+    modules: Vec<(PyBackedStr, Option<String>, usize)>,
+    configs: Vec<ConfigArg<'_>>,
+    version: (u8, u8),
+    jobs: Option<usize>,
+) -> PyResult<Vec<ModuleFound>> {
+    use rayon::prelude::*;
+
+    if let Some(&(_, _, config)) = modules
+        .iter()
+        .find(|(_, _, config)| *config >= configs.len())
+    {
+        return Err(PyValueError::new_err(format!("no configuration {config}")));
+    }
+    let mut configs: Vec<CheckConfig> = configs.into_iter().map(CheckConfig::new).collect();
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(jobs.unwrap_or(0))
+        // Below the red zone `maybe_grow` maps a new segment for every module.
+        .stack_size(STACK_SEGMENT)
+        .build()
+        .expect("the check threads start");
+    let found = detach(py, || -> Result<Vec<_>, Error> {
+        let schemas: Vec<_> = configs.iter_mut().map(CheckConfig::schema).collect();
+        let checkers = configs
+            .iter()
+            .zip(&schemas)
+            .map(|(config, schema)| config.checker(schema.as_deref()))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(pool.install(|| {
+            modules
+                .into_par_iter()
+                .map(|(source, name, config)| {
+                    stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
+                        let name = name.as_deref();
+                        checkers[config].check(&source, version, name, name, true)
+                    })
+                })
+                .collect()
+        }))
+    })?;
+    Ok(found)
+}
+
+/// What a schema change breaks in each `(source, name, own, against)` of `modules`: the
+/// diagnostics it gets with the configuration `against` indexes in `configs` but not with
+/// `own`, as `breaking_source` finds them, on `jobs` threads (all cores when None), its
+/// `# sqlty: ignore` comments applied.
+#[pyfunction]
+#[pyo3(signature = (modules, configs, *, version, jobs = None))]
+fn breaking_modules(
+    py: Python<'_>,
+    modules: Vec<(PyBackedStr, Option<String>, usize, usize)>,
+    configs: Vec<ConfigArg<'_>>,
+    version: (u8, u8),
+    jobs: Option<usize>,
+) -> PyResult<Vec<Vec<DiagnosticOut>>> {
+    use rayon::prelude::*;
+
+    if let Some(config) = modules
+        .iter()
+        .flat_map(|&(_, _, own, against)| [own, against])
+        .find(|&config| config >= configs.len())
+    {
+        return Err(PyValueError::new_err(format!("no configuration {config}")));
+    }
+    let mut configs: Vec<CheckConfig> = configs.into_iter().map(CheckConfig::new).collect();
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(jobs.unwrap_or(0))
+        .stack_size(STACK_SEGMENT)
+        .build()
+        .expect("the check threads start");
+    let found = detach(py, || -> Result<Vec<_>, Error> {
+        let schemas: Vec<_> = configs.iter_mut().map(CheckConfig::schema).collect();
+        let checkers = configs
+            .iter()
+            .zip(&schemas)
+            .map(|(config, schema)| config.checker(schema.as_deref()))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(pool.install(|| {
+            modules
+                .into_par_iter()
+                .map(|(source, name, own, against)| {
+                    stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
+                        let name = name.as_deref();
+                        let check = |config: usize| {
+                            checkers[config].check(&source, version, name, name, true)
+                        };
+                        let ((own, ..), (against, ..)) = (check(own), check(against));
+                        let key =
+                            |found: &DiagnosticOut| (found.line, found.rule, found.message.clone());
+                        sqlty_python::breaking::breaking(&own, against, key, |found| found.rule)
+                    })
+                })
+                .collect()
+        }))
+    })?;
+    Ok(found)
 }
 
 /// Check Python source for SQL type issues.
@@ -1890,19 +2140,20 @@ type CallVariants = (
 type IgnoreTuple = (usize, Option<Vec<String>>, usize, usize);
 
 /// `ParsedSource.ignores` as Rust reads them: `(line, rules, start, end)` of every
-/// `# sqlty: ignore` comment. None where Rust does not read the source.
+/// `# sqlty: ignore` comment; of a source that does not parse, every one its lexer finds.
 #[pyfunction]
-fn module_ignores(py: Python<'_>, source: &str, version: (u8, u8)) -> Option<Vec<IgnoreTuple>> {
+fn module_ignores(py: Python<'_>, source: &str, version: (u8, u8)) -> Vec<IgnoreTuple> {
+    use sqlty_python::suppress;
     use sqlty_python::types::symbols::Source;
 
     detach(py, || {
-        let source = Source::new(source, version)?;
-        Some(
-            sqlty_python::suppress::ignores(&source)
-                .into_iter()
-                .map(|ignore| (ignore.line, ignore.rules, ignore.span.0, ignore.span.1))
-                .collect(),
-        )
+        match Source::new(source, version) {
+            Some(parsed) => suppress::ignores(&parsed),
+            None => suppress::unparsed_ignores(source),
+        }
+        .into_iter()
+        .map(|ignore| (ignore.line, ignore.rules, ignore.span.0, ignore.span.1))
+        .collect()
     })
 }
 
@@ -2007,49 +2258,40 @@ fn query_sites(
 
 /// The query under a cursor, found by `query_at`.
 #[pyclass(frozen, name = "QueryAt", module = "sqlty._core")]
-struct QueryAtHandle(locate::QueryAt);
-
-#[pymethods]
-impl QueryAtHandle {
+struct QueryAtHandle {
+    at: locate::QueryAt,
     /// The query as the analyzer reads it: the string's value, escapes decoded, from the
     /// `--sql` marker on (the whole value for a helper's query).
-    #[getter]
-    fn text(&self) -> &str {
-        &self.0.text
-    }
-
+    #[pyo3(get)]
+    text: String,
     /// The cursor's byte offset in `text`.
-    #[getter]
-    fn offset(&self) -> usize {
-        self.0.offset
-    }
-
+    #[pyo3(get)]
+    offset: usize,
     /// How `check` recognised the query: `marker`, `wrapper` or `helper`.
-    #[getter]
-    fn route(&self) -> &'static str {
-        self.0.route.name()
-    }
-
+    #[pyo3(get)]
+    route: &'static str,
     /// Byte offsets of the query's string literals in the source, prefixes and quotes included.
-    #[getter]
-    fn span(&self) -> (usize, usize) {
-        (self.0.span.start, self.0.span.end)
-    }
+    #[pyo3(get)]
+    span: (usize, usize),
+}
 
-    /// Where byte `offset` of `text` is written in the source: an offset in an escape
-    /// sequence maps to its start. `None` past the end of `text`, or in the marker.
-    fn source_offset(&self, offset: usize) -> Option<usize> {
-        self.0.source_offset(offset)
+impl QueryAtHandle {
+    fn new(at: locate::QueryAt) -> Self {
+        Self {
+            text: at.text.clone(),
+            offset: at.offset,
+            route: at.route.name(),
+            span: (at.span.start, at.span.end),
+            at,
+        }
     }
+}
 
-    fn __repr__(&self) -> String {
-        format!(
-            "QueryAt(text={:?}, offset={}, route={:?})",
-            self.0.text,
-            self.0.offset,
-            self.0.route.name()
-        )
-    }
+/// Where byte `offset` of the text of `at` is written in the source: an offset in an escape
+/// sequence maps to its start. `None` past the end of the text, or in the marker.
+#[pyfunction]
+fn query_source_offset(at: &QueryAtHandle, offset: usize) -> Option<usize> {
+    at.at.source_offset(offset)
 }
 
 /// The query `check` reads at byte `offset` of Python source, or None outside one.
@@ -2076,7 +2318,7 @@ fn query_at(
         let style = ImportStyle::parse(import_style)?;
         Ok(locate::Queries::new(source, &style, &helper_starts)
             .at(offset)
-            .map(QueryAtHandle))
+            .map(QueryAtHandle::new))
     })
 }
 
@@ -2275,10 +2517,15 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(type_relations, m)?)?;
     m.add_function(wrap_pyfunction!(row_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(module_diagnostics, m)?)?;
+    m.add_function(wrap_pyfunction!(check_modules, m)?)?;
+    m.add_function(wrap_pyfunction!(breaking_modules, m)?)?;
     m.add_function(wrap_pyfunction!(module_index, m)?)?;
+    m.add_function(wrap_pyfunction!(index_helpers, m)?)?;
+    m.add_function(wrap_pyfunction!(index_extended, m)?)?;
     m.add_function(wrap_pyfunction!(rendered_compositions, m)?)?;
     m.add_function(wrap_pyfunction!(call_variants, m)?)?;
     m.add_function(wrap_pyfunction!(module_ignores, m)?)?;
+    m.add_function(wrap_pyfunction!(fix_module, m)?)?;
     m.add_function(wrap_pyfunction!(module_helpers, m)?)?;
     m.add_function(wrap_pyfunction!(add_json_types, m)?)?;
     m.add_function(wrap_pyfunction!(module_calls, m)?)?;
@@ -2287,17 +2534,20 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(wrapped_queries, m)?)?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;
     m.add_function(wrap_pyfunction!(query_at, m)?)?;
+    m.add_function(wrap_pyfunction!(query_source_offset, m)?)?;
     m.add_function(wrap_pyfunction!(complete_source, m)?)?;
     m.add_function(wrap_pyfunction!(highlight_source, m)?)?;
     m.add_function(wrap_pyfunction!(hover_source, m)?)?;
     m.add_class::<QueryAtHandle>()?;
     m.add_function(wrap_pyfunction!(skills, m)?)?;
     m.add_function(wrap_pyfunction!(server::serve, m)?)?;
+    m.add_function(wrap_pyfunction!(cli::cli, m)?)?;
     config::register(m)?;
     Ok(())
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

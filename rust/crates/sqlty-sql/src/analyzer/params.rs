@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::ops::ControlFlow;
 use std::rc::Rc;
 
+use sqlparser::ast::InTarget;
 use sqlparser::ast::{
     visit_expressions, BinaryOperator, Expr, FromTable, FunctionArg, FunctionArgExpr,
     FunctionArguments, JoinConstraint, JoinOperator, Select, SelectItem, SetExpr, Statement,
@@ -24,6 +25,7 @@ use crate::placeholders::{self, Styles};
 
 use super::dialect::SqlDialect;
 use super::expr::{array_element, from_sql_type};
+use super::functions::arg_list;
 use super::inference::{binary_rules, operand};
 use super::input::parser_input;
 use super::literals::strip;
@@ -253,7 +255,7 @@ impl<'a> Analyzer<'a> {
                 {
                     from.extend(tables.iter().cloned());
                 }
-                let (analyzer, scope) = self.scope_or_empty(&from);
+                let (analyzer, scope) = self.scope_reading(&from);
                 let target = match &update.table.relation {
                     TableFactor::Table { name, .. } => Some(table_key(name, self.dialect)),
                     _ => None,
@@ -268,7 +270,7 @@ impl<'a> Analyzer<'a> {
                     &delete.from;
                 let mut from = tables.clone();
                 from.extend(delete.using.iter().flatten().cloned());
-                let (analyzer, scope) = self.scope_or_empty(&from);
+                let (analyzer, scope) = self.scope_reading(&from);
                 if let Some(selection) = &delete.selection {
                     analyzer.walk_params(selection, &scope, out);
                 }
@@ -280,9 +282,8 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    fn scope_or_empty(&self, from: &[TableWithJoins]) -> (Analyzer<'a>, Scope) {
-        self.scope_of(from)
-            .unwrap_or_else(|_| (self.clone(), Scope::new()))
+    fn scope_reading(&self, from: &[TableWithJoins]) -> (Analyzer<'a>, Scope) {
+        self.scope_of(from).unwrap_or_else(|never| match never {})
     }
 
     fn params_query(&self, query: &Query, out: &mut Hints) {
@@ -341,7 +342,7 @@ impl<'a> Analyzer<'a> {
     }
 
     fn params_select(&self, select: &Select, out: &mut Hints) {
-        let (analyzer, scope) = self.scope_or_empty(&select.from);
+        let (analyzer, scope) = self.scope_reading(&select.from);
         for factor in relations(&select.from) {
             match factor {
                 TableFactor::Derived { subquery, .. } => analyzer.params_query(subquery, out),
@@ -396,13 +397,12 @@ impl<'a> Analyzer<'a> {
                 .map(|ident| fold(ident, self.dialect))
                 .collect()
         };
-        match insert.source.as_deref() {
-            Some(Query {
-                body, with: None, ..
-            }) if matches!(body.as_ref(), SetExpr::Values(_)) => {
-                let SetExpr::Values(values) = body.as_ref() else {
-                    return;
-                };
+        match insert
+            .source
+            .as_deref()
+            .map(|query| (query, query.body.as_ref()))
+        {
+            Some((Query { with: None, .. }, SetExpr::Values(values))) => {
                 for row in &values.rows {
                     for (position, expr) in row.content.iter().enumerate() {
                         if let Some(column) = targets.get(position) {
@@ -412,15 +412,16 @@ impl<'a> Analyzer<'a> {
                     }
                 }
             }
-            Some(query) => {
+            Some((query, body)) => {
                 // `INSERT ... SELECT $1, $2`: a bare placeholder is stored in its column.
-                if let SetExpr::Select(select) = query.body.as_ref() {
-                    let (analyzer, select_scope) = self.scope_or_empty(&select.from);
+                if let SetExpr::Select(select) = body {
+                    let (analyzer, select_scope) = self.scope_reading(&select.from);
                     for (position, item) in select.projection.iter().enumerate() {
+                        // Past a `*`, the columns a value lands in are unknown.
                         let (SelectItem::UnnamedExpr(expr)
                         | SelectItem::ExprWithAlias { expr, .. }) = item
                         else {
-                            continue;
+                            break;
                         };
                         if let Some(column) = targets.get(position) {
                             analyzer.hint_stored(expr, &table, column, &select_scope, out);
@@ -568,6 +569,37 @@ impl<'a> Analyzer<'a> {
     }
 
     /// A parameter searched with `= ANY(%s)` is an array of what the other side is.
+    /// `expr LIKE pattern`: text, or an array of patterns for PostgreSQL's `LIKE ANY ($1)`
+    /// and `LIKE ALL($1)`; Snowflake's `LIKE ANY ($1, ...)` lists them.
+    fn hint_like(&self, expr: &Expr, pattern: &Expr, any: bool, out: &mut Hints) {
+        let patterns = match pattern {
+            Expr::Nested(inner) if any && self.dialect == SqlDialect::Postgres => Some(&**inner),
+            Expr::Nested(_) | Expr::Tuple(_) if any => None,
+            _ => any_argument(pattern),
+        };
+        let mut texts = vec![expr];
+        match (patterns, pattern) {
+            (Some(Expr::Array(array)), _) => texts.extend(&array.elem),
+            (Some(array), _) => {
+                if let Some(index) = placeholder_index(array) {
+                    let text = self.param_typed("TEXT");
+                    let typed = Typed::new(
+                        text.python.map(|python| format!("list[{python}]")),
+                        text.sql.map(|sql| format!("ARRAY<{sql}>")),
+                    );
+                    out.add(index, typed, Nullability::Unknown);
+                }
+            }
+            (None, Expr::Tuple(items)) => texts.extend(items),
+            (None, _) => texts.push(pattern),
+        }
+        for operand in texts {
+            if let Some(index) = placeholder_index(operand) {
+                out.add(index, self.param_typed("TEXT"), Nullability::Unknown);
+            }
+        }
+    }
+
     fn hint_array(&self, array: &Expr, element: &Expr, scope: &Scope, out: &mut Hints) {
         let Some(index) = placeholder_index(array) else {
             return;
@@ -645,8 +677,6 @@ impl<'a> Analyzer<'a> {
                         self.hint_pair(l, r, scope, out);
                         self.hint_pair(r, l, scope, out);
                     }
-                } else if let (Some(array), true) = (any_argument(right), is_array_search(op)) {
-                    self.hint_array(array, left, scope, out);
                 } else if let (Some(array), true) = (any_argument(left), is_array_search(op)) {
                     self.hint_array(array, right, scope, out);
                 } else {
@@ -658,6 +688,11 @@ impl<'a> Analyzer<'a> {
             }
             Expr::AnyOp { left, right, .. } | Expr::AllOp { left, right, .. } => {
                 self.hint_array(right, left, scope, out);
+                if let Expr::Array(array) = right.as_ref() {
+                    for element in &array.elem {
+                        self.hint_pair(element, left, scope, out);
+                    }
+                }
                 if let Some(index) = placeholder_index(left) {
                     if let Ok(Typed { sql: Some(sql), .. }) = self.expr(right, scope) {
                         if let Some(element) = array_element(&sql) {
@@ -714,34 +749,39 @@ impl<'a> Analyzer<'a> {
                     self.hint_pair(expr, bound, scope, out);
                 }
             }
-            Expr::InList { expr, list, .. } => {
+            Expr::In {
+                expr,
+                target: InTarget::List(list),
+                ..
+            } => {
                 for item in list {
                     self.hint_pair(item, expr, scope, out);
                     self.hint_pair(expr, item, scope, out);
                 }
             }
-            Expr::InSubquery { expr, subquery, .. } => {
+            Expr::In {
+                expr,
+                target: InTarget::Subquery(subquery),
+                ..
+            } => {
                 if let Some(index) = placeholder_index(expr) {
-                    if let Ok(Some(columns)) = self.correlated(scope).query_columns(subquery) {
-                        if let [column] = columns.as_slice() {
-                            let typed =
-                                Typed::new(column.python_type.clone(), column.sql_type.clone());
-                            if is_typed(&typed) {
-                                out.add(index, typed, Nullability::Unknown);
-                            }
+                    let columns = self.correlated(scope).query_columns(subquery);
+                    let columns = columns.unwrap_or_else(|never| match never {});
+                    if let Some([column]) = columns.as_deref() {
+                        let typed = Typed::new(column.python_type.clone(), column.sql_type.clone());
+                        if is_typed(&typed) {
+                            out.add(index, typed, Nullability::Unknown);
                         }
                     }
                 }
             }
-            Expr::Like { expr, pattern, .. }
-            | Expr::ILike { expr, pattern, .. }
-            | Expr::SimilarTo { expr, pattern, .. } => {
-                for operand in [expr, pattern] {
-                    if let Some(index) = placeholder_index(operand) {
-                        out.add(index, self.param_typed("TEXT"), Nullability::Unknown);
-                    }
-                }
+            Expr::Like {
+                expr, pattern, any, ..
             }
+            | Expr::ILike {
+                expr, pattern, any, ..
+            } => self.hint_like(expr, pattern, *any, out),
+            Expr::SimilarTo { expr, pattern, .. } => self.hint_like(expr, pattern, false, out),
             Expr::Cast { expr: inner, .. } => {
                 if let (Some(index), Ok(typed)) = (placeholder_index(inner), self.expr(expr, scope))
                 {
@@ -851,7 +891,8 @@ fn is_array_search(op: &BinaryOperator) -> bool {
     is_comparison(op)
 }
 
-/// `x` of `ANY(x)`, `SOME(x)` or `ALL(x)`.
+/// `x` of `ANY(x)`, `SOME(x)` or `ALL(x)` on the left of an operator, which sqlparser reads as a
+/// call (on the right it is an `AnyOp` or `AllOp`).
 fn any_argument(expr: &Expr) -> Option<&Expr> {
     let Expr::Function(function) = expr else {
         return None;
@@ -860,11 +901,8 @@ fn any_argument(expr: &Expr) -> Option<&Expr> {
     if !matches!(name.as_str(), "ANY" | "SOME" | "ALL") {
         return None;
     }
-    match &function.args {
-        FunctionArguments::List(list) => match list.args.as_slice() {
-            [FunctionArg::Unnamed(FunctionArgExpr::Expr(arg))] => Some(arg),
-            _ => None,
-        },
+    match arg_list(&function.args) {
+        [FunctionArg::Unnamed(FunctionArgExpr::Expr(arg))] => Some(arg),
         _ => None,
     }
 }
@@ -929,6 +967,7 @@ impl Visitor for Walker<'_, '_> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::analyzer::load_schema;
@@ -1149,5 +1188,190 @@ mod tests {
             analyze_params("SELEC 1 %s", "postgres", Some(&schema)),
             None
         );
+    }
+
+    /// Statements and expressions whose placeholders only some code reads.
+    #[test]
+    fn rarer_shapes() {
+        const MORE: &str = "CREATE TABLE things (x mytype, ip INET);
+            CREATE FUNCTION f(x mytype, y INT) RETURNS INT LANGUAGE sql AS 'SELECT 1';";
+        let found = |dialect: &str, sql: &str| -> Vec<String> {
+            let schema = load_schema(&format!("{}{MORE}", schema_for(dialect)), dialect);
+            analyze_params(sql, dialect, Some(&schema))
+                .unwrap()
+                .iter()
+                .map(|p| {
+                    let mark = match p.nullability {
+                        Nullability::NonNull => "!",
+                        Nullability::Nullable => "?",
+                        Nullability::Unknown => "",
+                    };
+                    format!("{}{mark}", p.python_type.as_deref().unwrap_or("-"))
+                })
+                .collect()
+        };
+        let inet = "ipaddress.IPv4Address | ipaddress.IPv6Address | ipaddress.IPv4Interface | ipaddress.IPv6Interface";
+        for (dialect, sql, expected) in [
+            (
+                "postgres",
+                "UPDATE things SET x = %s + INTERVAL '1 day'",
+                vec!["-"],
+            ),
+            (
+                "postgres",
+                "UPDATE users SET age = %s + INTERVAL '1 day'",
+                vec!["-"],
+            ),
+            (
+                "postgres",
+                "SELECT 1 FROM users WHERE born = $1 AND born < $1 + INTERVAL '1 day'",
+                vec!["datetime.date"],
+            ),
+            (
+                "postgres",
+                "UPDATE users SET name = $1, age = $1",
+                vec!["str!"],
+            ),
+            (
+                "mysql",
+                "UPDATE (SELECT * FROM users) u SET u.name = %s",
+                vec!["-"],
+            ),
+            ("postgres", "SET search_path = %s", vec!["-"]),
+            ("postgres", "SELECT 1 FROM nope WHERE a = %s", vec!["-"]),
+            (
+                "mysql",
+                "SELECT 1 FROM users LIMIT %s, %s",
+                vec!["int", "int"],
+            ),
+            (
+                "postgres",
+                "(SELECT 1 FROM users WHERE id = %s)",
+                vec!["int"],
+            ),
+            ("postgres", "TABLE users", vec![]),
+            (
+                "postgres",
+                "SELECT * FROM generate_series(1, stop => %s)",
+                vec!["-"],
+            ),
+            (
+                "postgres",
+                "INSERT INTO users (id) VALUES (%s, %s)",
+                vec!["int!", "-"],
+            ),
+            (
+                "postgres",
+                "INSERT INTO users SELECT *, %s FROM users",
+                vec!["-"],
+            ),
+            (
+                "postgres",
+                "INSERT INTO users (id) SELECT %s, %s",
+                vec!["int!", "-"],
+            ),
+            (
+                "postgres",
+                "INSERT INTO users (id) SELECT 1 UNION SELECT %s",
+                vec!["-"],
+            ),
+            ("postgres", "INSERT INTO users DEFAULT VALUES", vec![]),
+            ("mysql", "INSERT INTO users SET name = %s", vec!["str!"]),
+            (
+                "mysql",
+                "INSERT INTO users (id) VALUES (1) ON DUPLICATE KEY UPDATE name = %s",
+                vec!["str!"],
+            ),
+            (
+                "postgres",
+                "INSERT INTO users (id) VALUES (1) ON CONFLICT (id) DO UPDATE SET name = %s",
+                vec!["str!"],
+            ),
+            (
+                "postgres",
+                "INSERT INTO users (id) VALUES (1) ON CONFLICT DO NOTHING",
+                vec![],
+            ),
+            (
+                "postgres",
+                "UPDATE users SET (name, age) = (%s, %s)",
+                vec!["-", "-"],
+            ),
+            (
+                "postgres",
+                "UPDATE users SET nope = %s + INTERVAL '1 day'",
+                vec!["-"],
+            ),
+            (
+                "postgres",
+                "SELECT tags || %s FROM users",
+                vec!["list[str]"],
+            ),
+            (
+                "postgres",
+                "SELECT ip <<= %s, ip >>= %s, ip << %s FROM things",
+                vec![inet, inet, inet],
+            ),
+            (
+                "postgres",
+                "SELECT 1 FROM users WHERE id = SOME(%s)",
+                vec!["list[int]"],
+            ),
+            (
+                "mysql",
+                "SELECT 1 FROM users WHERE id = ANY(%s)",
+                vec!["list[int]"],
+            ),
+            (
+                "sqlite",
+                "SELECT 1 FROM users WHERE id = ANY(%s)",
+                vec!["list[int]"],
+            ),
+            (
+                "postgres",
+                "SELECT 1 FROM users WHERE %s = ANY(name)",
+                vec!["-"],
+            ),
+            (
+                "postgres",
+                "SELECT born AT TIME ZONE 'UTC' FROM users",
+                vec![],
+            ),
+            (
+                "postgres",
+                "SELECT CASE age WHEN %s THEN 1 END FROM users",
+                vec!["int"],
+            ),
+            (
+                "postgres",
+                "SELECT 1 FROM users WHERE %s IN (SELECT id, name FROM users)",
+                vec!["-"],
+            ),
+            (
+                "postgres",
+                "SELECT 1 FROM users WHERE %s IN (SELECT x FROM things)",
+                vec!["-"],
+            ),
+            ("postgres", "SELECT %s::unknowntype", vec!["-"]),
+            (
+                "postgres",
+                "SELECT SUBSTRING(%s FROM 1 FOR %s)",
+                vec!["str", "int"],
+            ),
+            (
+                "postgres",
+                "SELECT generate_series(%s::date, %s::date, %s)",
+                vec!["datetime.date", "datetime.date", "datetime.timedelta"],
+            ),
+            ("postgres", "SELECT generate_series(1, 10, %s)", vec!["int"]),
+            (
+                "postgres",
+                "SELECT generate_series(%s::timestamp, %s::timestamp, '1 day')",
+                vec!["datetime.datetime", "datetime.datetime"],
+            ),
+            ("postgres", "SELECT f(%s, %s)", vec!["-", "int"]),
+        ] {
+            assert_eq!(found(dialect, sql), expected, "{sql}");
+        }
     }
 }

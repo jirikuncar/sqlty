@@ -262,6 +262,7 @@ fn block_comment_end(bytes: &[u8], start: usize) -> usize {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

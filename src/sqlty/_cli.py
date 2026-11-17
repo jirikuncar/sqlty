@@ -13,10 +13,8 @@ Commands:
 from __future__ import annotations
 
 import codecs
-import fnmatch
 import functools
 import gc
-import glob
 import itertools
 import json
 import logging
@@ -24,8 +22,8 @@ import os
 import re
 import sys
 from dataclasses import dataclass, replace
-from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, cast
+from pathlib import Path
+from typing import TYPE_CHECKING, NoReturn, cast
 
 if TYPE_CHECKING:
     import argparse
@@ -50,7 +48,10 @@ EXIT_ERROR = 2
 def main(argv: list[str] | None = None) -> None:
     """CLI entry point."""
     parser = build_parser()
-    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    hard_exit = argv is None
+    argv = sys.argv[1:] if argv is None else argv
+    args = parser.parse_args(argv)
+    args.hard_exit = hard_exit
 
     if args.version:
         _cmd_version()
@@ -63,6 +64,12 @@ def main(argv: list[str] | None = None) -> None:
     from sqlty._config import ConfigError
 
     try:
+        if (code := _rust(argv)) is not None:
+            if hard_exit:
+                _hard_exit(code)
+            if code:
+                sys.exit(code)
+            return
         match args.command:
             case "rewrite":
                 _cmd_rewrite(args)
@@ -90,8 +97,6 @@ def main(argv: list[str] | None = None) -> None:
                 serve()
             case "version":
                 _cmd_version()
-            case _:
-                parser.print_help()
     except ConfigError as exc:
         print(f"sqlty: error: {exc}", file=sys.stderr)
         sys.exit(EXIT_ERROR)
@@ -101,6 +106,17 @@ def main(argv: list[str] | None = None) -> None:
         traceback.print_exc()
         print("sqlty: internal error; please report it with the traceback above", file=sys.stderr)
         sys.exit(EXIT_ERROR)
+
+
+def _rust(argv: list[str]) -> int | None:
+    """The exit code of ``argv`` run by the Rust CLI, or ``None`` when Python runs it."""
+    from sqlty._source import AST
+
+    if AST != "rust":
+        return None
+    from sqlty._core import cli
+
+    return cli(["sqlty", *argv])
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -296,15 +312,6 @@ def build_parser() -> argparse.ArgumentParser:
         "Actions annotations, each at its severity) or sarif (a SARIF 2.1.0 log, for GitHub "
         "code scanning)",
     )
-    breaking_parser.add_argument(
-        "-j",
-        "--jobs",
-        type=_jobs,
-        metavar="N",
-        help="Processes checking files at once; 1 checks them here, as does a platform "
-        "without fork (Windows). Output is the same in any case (default: the number of "
-        "processors)",
-    )
 
     # --- rule ---
     rule_parser = subparsers.add_parser(
@@ -451,14 +458,6 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         "types of each named query of a query file",
     )
     parser.add_argument("-q", "--quiet", action="store_true", help="Suppress non-error output")
-    parser.add_argument(
-        "-j",
-        "--jobs",
-        type=_jobs,
-        metavar="N",
-        help="Files to work on at once; 1 works on one at a time. Output is the same in any "
-        "case (default: the number of processors)",
-    )
 
 
 def _location(value: str) -> tuple[Path, int, int]:
@@ -472,21 +471,23 @@ def _location(value: str) -> tuple[Path, int, int]:
     return Path(path), int(line), int(rest)
 
 
-def _jobs(value: str) -> int:
-    import argparse
+def _workers() -> int:
+    """Threads checking files at once: every processor, or one when the checks are Python
+    (``SQLTY_AST=python``) on a build with the GIL, where more threads only wait on it."""
+    from sqlty._source import AST
 
-    if not value.isdigit() or int(value) < 1:
-        raise argparse.ArgumentTypeError(f"expected a positive integer, got {value!r}")
-    return int(value)
+    if AST == "python" and sys._is_gil_enabled():
+        return 1
+    return os.process_cpu_count() or 1
 
 
-def _map[T](args: argparse.Namespace, work: Callable[[Path], T], files: list[Path]) -> Iterator[T]:
+def _map[T](work: Callable[[Path], T], files: list[Path]) -> Iterator[T]:
     """``work`` on every file, its results in the order of ``files``.
 
     The engine releases the GIL, so threads check files at once. Whatever prints or writes
     stays with the caller, which reads the results in order.
     """
-    jobs = min(args.jobs or os.process_cpu_count() or 1, len(files))
+    jobs = min(_workers(), len(files))
     if jobs <= 1:
         yield from map(work, files)
         return
@@ -524,6 +525,7 @@ def _cmd_rewrite(args: argparse.Namespace) -> None:
             untyped=settings.untyped,
             json_types=settings.json_types,
             param_types=settings.param_types,
+            closed_params=settings.closed_params,
         )
         if args.quiet:
             return rewritten, []
@@ -590,7 +592,7 @@ def _transform_files(
         return transform(path, sources[path], settings[path])
 
     changed = 0
-    for path, (result, warnings) in zip(readable, _map(args, work, readable), strict=True):
+    for path, (result, warnings) in zip(readable, _map(work, readable), strict=True):
         for warning in warnings:
             print(warning, file=sys.stderr)
         original = sources[path]
@@ -694,7 +696,7 @@ def _cmd_check(args: argparse.Namespace) -> None:
     types: list[str] = []
 
     if args.fix:
-        for path, fixed in zip(files, _map(args, project.fix, files), strict=True):
+        for path, fixed in zip(files, _map(project.fix, files), strict=True):
             if fixed == sources[path].text:
                 continue
             write_source(path, fixed)
@@ -707,13 +709,10 @@ def _cmd_check(args: argparse.Namespace) -> None:
                 text = args.output_format == "text"
                 print(f"Fixed {path}", file=sys.stdout if text else sys.stderr)
 
-    def check(path: Path) -> tuple[list[Diagnostic], Counter[str]]:
-        diagnostics = project.check(path, row_usage)
-        return diagnostics, project.statistics(path) if args.statistics else Counter()
-
-    for path, (diagnostics, counts) in zip(files, _map(args, check, files), strict=True):
-        statistics += counts
+    for path, diagnostics in zip(files, project.check_all(row_usage), strict=True):
         reports.extend((path, diag, sources[path]) for diag in diagnostics)
+    if args.statistics:
+        statistics = sum(_map(project.statistics, files), statistics)
     for path in project.query_files:
         if (text := read_source(path)) is None:
             project.unreadable.append(path)
@@ -765,10 +764,23 @@ def _cmd_check(args: argparse.Namespace) -> None:
     if args.statistics and text:
         print(_format_statistics(statistics))
 
+    code = 0
     if not args.exit_zero and (total_errors or (args.error_on_warning and total_warnings)):
-        sys.exit(EXIT_FOUND)
-    if project.unreadable:
-        sys.exit(EXIT_ERROR)
+        code = EXIT_FOUND
+    elif project.unreadable:
+        code = EXIT_ERROR
+    if getattr(args, "hard_exit", False):
+        _hard_exit(code)
+    if code:
+        sys.exit(code)
+
+
+def _hard_exit(code: int) -> NoReturn:
+    """End the process without freeing what the run built, as mypy's ``hard_exit`` does:
+    freeing the index of a large project takes about as long as checking it."""
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)
 
 
 def json_diagnostic(diag: Diagnostic, parsed: ParsedSource) -> dict[str, object]:
@@ -974,7 +986,7 @@ def _collect_python_files(paths: list[Path], source: ConfigSource | None = None)
             if path.suffix == ".py":
                 files.append(path)
         elif path.is_dir():
-            files.extend(_walk(path, source))
+            files.extend(source.walk(path))
         else:
             raise ConfigError(f"path does not exist: {path}")
     return list(dict.fromkeys(files))
@@ -1000,7 +1012,7 @@ def _collect_query_files(
     found: dict[Path, None] = {}
     for directory in dict.fromkeys(directories):
         project = resolver.for_file(directory / "_")
-        for settings in [project, *(database for _, _, database in project.databases)]:
+        for settings in [project, *(database for _, database in project.databases)]:
             if not settings.queries or settings.config_dir is None:
                 continue
             for file in expand_schema(list(settings.queries), settings.config_dir):
@@ -1079,8 +1091,8 @@ class ConfigSource:
         force_exclude: bool = False,
         respect_gitignore: bool | None = None,
     ) -> None:
+        from sqlty import _core
         from sqlty._config import load_config_file, parse_overrides, validate_rule_severity
-        from sqlty._gitignore import GitIgnore
 
         self._isolated = isolated
         self._fixed = None if config_file is None else load_config_file(config_file)
@@ -1094,23 +1106,23 @@ class ConfigSource:
         extend_exclude = [*inline.pop("extend_exclude", []), *(extend_exclude or ())]
         self._overrides = inline
         self._rule_severity = validate_rule_severity(rule_severity or [])
-        self._exclude = None if exclude is None else self._relative_globs(exclude)
-        self._extend_exclude = self._relative_globs(extend_exclude)
         self.force_exclude = force_exclude
-        self._respect_gitignore = inline.pop("respect_gitignore", respect_gitignore)
-        self.gitignore = GitIgnore()
-
-    def _relative_globs(self, patterns: list[str] | tuple[str, ...]) -> tuple[str, ...]:
-        """Command-line globs relative to the current directory: ``./gen`` and ``$PWD/gen`` are ``gen``."""
-        globs: list[str] = []
-        for pattern in patterns:
-            path = Path(pattern)
-            if path.is_absolute() and path.is_relative_to(self._cwd):
-                pattern = path.relative_to(self._cwd).as_posix() or "."
-            while pattern.startswith("./"):
-                pattern = pattern[2:]
-            globs.append(pattern)
-        return tuple(globs)
+        respect_gitignore = inline.pop("respect_gitignore", respect_gitignore)
+        fixed: dict[str, object] | None = None
+        if self._fixed is not None:
+            fixed = {
+                key.replace("_", "-"): self._fixed[key]
+                for key in ("exclude", "extend_exclude", "respect_gitignore")
+                if key in self._fixed
+            }
+        self._discovery = _core.Discovery(
+            str(self._cwd),
+            isolated=isolated,
+            fixed=fixed,
+            exclude=None if exclude is None else list(exclude),
+            extend_exclude=list(extend_exclude),
+            respect_gitignore=respect_gitignore,
+        )
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> ConfigSource:
@@ -1159,171 +1171,31 @@ class ConfigSource:
 
     def exclusions(self, directory: Path) -> list[tuple[Path, tuple[str, ...]]]:
         """``(base directory, globs)`` pairs excluding entries of ``directory``; empty sets left out."""
-        from sqlty._config import DEFAULT_EXCLUDE, load_config
-
-        if self._fixed is not None:
-            config, base = self._fixed, self._cwd
-        else:
-            config, config_dir = ({}, None) if self._isolated else load_config(directory)
-            # No config: the default globs are names, so the base only matters to ``is_excluded``.
-            resolved = directory.resolve()
-            base = config_dir or (self._cwd if resolved.is_relative_to(self._cwd) else resolved)
-        if self._exclude is None:
-            rules = [
-                (base, (*config.get("exclude", DEFAULT_EXCLUDE), *config.get("extend_exclude", ())))
-            ]
-        else:
-            rules = [(self._cwd, self._exclude), (base, tuple(config.get("extend_exclude", ())))]
-        rules.append((self._cwd, self._extend_exclude))
-        return [(b, patterns) for b, patterns in rules if patterns]
-
-    def respects_gitignore(self, directory: Path) -> bool:
-        """Whether walking ``directory`` skips what ``.gitignore`` ignores."""
-        from sqlty._config import load_config
-
-        if self._respect_gitignore is not None:
-            return bool(self._respect_gitignore)
-        if self._fixed is not None:
-            config = self._fixed
-        else:
-            config = {} if self._isolated else load_config(directory)[0]
-        return config.get("respect_gitignore", True)
+        found = _discovered(self._discovery.exclusions, directory)
+        return [(base, tuple(patterns)) for base, patterns in found]
 
     def is_excluded(self, path: Path) -> bool:
         """Whether ``path`` or one of its parents up to a glob's base directory is excluded."""
-        resolved = path.resolve()
-        for base, patterns in self.exclusions(resolved.parent):
-            if not resolved.is_relative_to(base):
-                if _is_excluded_entry(resolved.name, None, patterns):
-                    return True
-                continue
-            parts = PurePosixPath(resolved.relative_to(base).as_posix()).parts
-            if any(
-                _is_excluded_entry(part, PurePosixPath(*parts[:i]), patterns)
-                for i, part in enumerate(parts)
-            ):
-                return True
-        return False
+        return _discovered(self._discovery.is_excluded, path)
+
+    def route(
+        self, routing: dict[str, object], base: Path, path: Path
+    ) -> tuple[str | None, dict[str, str]]:
+        """The database ``path`` belongs to and the rules its overrides set; see ``_routing``."""
+        return self._discovery.route(routing, str(base), str(path))
+
+    def walk(self, root: Path) -> list[Path]:
+        """The ``.py`` files under ``root``, sorted, without excluded directories and files."""
+        return _discovered(self._discovery.walk, root)
 
 
-@functools.cache
-def _exclude_matchers(patterns: tuple[str, ...]) -> tuple[re.Pattern[str], re.Pattern[str]]:
-    """Compiled ``(name, relative path)`` matchers for exclude globs; built once per pattern set.
+def _discovered[T](method: Callable[[str], T], path: Path) -> T:
+    from sqlty._config import ConfigError
 
-    A glob without a slash matches a file or directory name at any depth;
-    every glob also matches the path relative to the config directory.
-    """
-    names: list[str] = []
-    paths: list[str] = []
-    for pattern in patterns:
-        pattern = pattern.strip("/")
-        if "/" not in pattern:
-            names.append(fnmatch.translate(pattern))
-        paths.append(glob.translate(pattern, recursive=True, include_hidden=True))
-    never = r"(?!)"
-    return (
-        re.compile("|".join(names) or never, re.DOTALL),
-        re.compile("|".join(paths) or never, re.DOTALL),
-    )
-
-
-def _is_excluded_entry(
-    name: str, relative_dir: PurePosixPath | None, patterns: tuple[str, ...]
-) -> bool:
-    """Whether the entry ``name`` of ``relative_dir`` matches an exclude glob.
-
-    ``relative_dir`` is the resolved parent relative to the glob's base directory,
-    or ``None`` when it lies outside it (only globs without a slash match then).
-    """
-    by_name, by_path = _exclude_matchers(patterns)
-    if by_name.match(name):
-        return True
-    return relative_dir is not None and bool(by_path.match((relative_dir / name).as_posix()))
-
-
-def _is_excluded(path: Path, base: Path, patterns: tuple[str, ...]) -> bool:
-    """Whether ``path`` matches an exclude glob, relative to ``base`` (``_walk`` batches this per directory)."""
-    resolved = path.resolve()
-    if not resolved.is_relative_to(base):
-        return _is_excluded_entry(resolved.name, None, patterns)
-    relative = PurePosixPath(resolved.relative_to(base).as_posix())
-    return _is_excluded_entry(relative.name, relative.parent, patterns)
-
-
-def _is_included(path: Path, base: Path, patterns: tuple[str, ...]) -> bool:
-    """Whether ``path`` or a directory holding it matches a glob relative to ``base``, as excludes do."""
-    resolved = path.resolve()
-    if not resolved.is_relative_to(base):
-        return False
-    relative = PurePosixPath(resolved.relative_to(base).as_posix())
-    return any(
-        _is_excluded_entry(entry.name, entry.parent, patterns)
-        for entry in [relative, *relative.parents[:-1]]
-    )
-
-
-def _excluded(name: str, rules: list[tuple[PurePosixPath | None, tuple[str, ...]]]) -> bool:
-    return any(_is_excluded_entry(name, relative, patterns) for relative, patterns in rules)
-
-
-def _walk(root: Path, source: ConfigSource) -> list[Path]:
-    """The ``.py`` files under ``root``, sorted, without excluded directories and files."""
-    found: list[Path] = []
-    for directory, dirnames, filenames in os.walk(root):
-        current = Path(directory)
-        resolved = current.resolve()
-        rules = [
-            (
-                PurePosixPath(resolved.relative_to(base).as_posix())
-                if resolved.is_relative_to(base)
-                else None,
-                patterns,
-            )
-            for base, patterns in source.exclusions(current)
-        ]
-        ignore = source.gitignore if source.respects_gitignore(current) else None
-        dirnames[:] = sorted(
-            d
-            for d in dirnames
-            if not _excluded(d, rules) and not (ignore and ignore.ignored(resolved, d, is_dir=True))
-        )
-        found.extend(
-            current / name
-            for name in sorted(filenames)
-            if name.endswith(".py")
-            and not _excluded(name, rules)
-            and not (ignore and ignore.ignored(resolved, name, is_dir=False))
-        )
-    return sorted(found)
-
-
-@functools.cache
-def _is_package(directory: Path) -> bool:
-    return (directory / "__init__.py").exists()
-
-
-@functools.cache
-def _package_path(directory: Path) -> tuple[str, ...]:
-    """Names of ``directory`` and its parents up through the ``__init__.py`` ones."""
-    if directory == directory.parent or not _is_package(directory):
-        return ()
-    return (*_package_path(directory.parent), directory.name)
-
-
-@functools.cache
-def _package_names(directory: str) -> tuple[str, ...]:
-    return _package_path(Path(directory))
-
-
-@functools.cache
-def _resolved_root(root: Path) -> tuple[str, str] | None:
-    """``root`` resolved as a prefix of the paths under it (case folded as the platform
-    compares paths) and its name, or ``None`` when it is not a directory."""
-    root = root.resolve()
-    if not root.is_dir():
-        return None
-    prefix = os.path.normcase(os.fspath(root))
-    return prefix if prefix.endswith(os.sep) else prefix + os.sep, root.name
+    try:
+        return method(str(path))
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from None
 
 
 def _checked_roots(paths: Iterable[Path], files: Iterable[Path]) -> list[Path]:
@@ -1333,12 +1205,9 @@ def _checked_roots(paths: Iterable[Path], files: Iterable[Path]) -> list[Path]:
         >>> [root.name for root in _checked_roots([Path("/missing/q.py")], [])]
         ['missing']
     """
-    roots = [path if path.is_dir() else path.parent for path in paths]
-    for directory in dict.fromkeys(file.parent for file in files):
-        for _ in _package_path(directory):
-            directory = directory.parent
-        roots.append(directory)
-    return list(dict.fromkeys(root.resolve() for root in dict.fromkeys(roots)))
+    from sqlty import _core
+
+    return _core.checked_roots(list(paths), list(files), Path.cwd())
 
 
 def _module_names(path: Path, roots: list[Path]) -> list[str]:
@@ -1352,19 +1221,9 @@ def _module_names(path: Path, roots: list[Path]) -> list[str]:
         >>> _module_names(Path("missing/pkg/mod.py"), [])
         ['mod']
     """
-    text = os.fspath(path)
-    directory, name = os.path.split(text)
-    stem = os.path.splitext(name)[0]
-    parts = [*_package_names(directory), *([] if stem == "__init__" else [stem])]
-    names = [".".join(parts)]
-    folded = os.path.normcase(text)
-    for root in map(_resolved_root, roots):
-        if root is not None and folded.startswith(root[0]):
-            relative = os.path.splitext(text[len(root[0]) :])[0].split(os.sep)
-            if relative[-1] == "__init__":
-                relative.pop()
-            names += [".".join(relative), ".".join([root[1], *relative])]
-    return list(dict.fromkeys(name for name in names if name)) or [stem]
+    from sqlty import _core
+
+    return _core.module_names(path, roots, Path.cwd())
 
 
 @dataclass(frozen=True)
@@ -1379,6 +1238,7 @@ class Settings:
     untyped: bool = False
     json_types: str = "typing.Any"
     param_types: bool = True
+    closed_params: bool = False
     rules: dict[str, str] | None = None
     query_variants: int | None = None
     preview: bool = False
@@ -1391,23 +1251,16 @@ class Settings:
     config_dir: Path | None = None
     queries: tuple[str, ...] = ()
     query_format: str = "auto"
-    databases: tuple[tuple[tuple[str, ...], tuple[str, ...], Settings], ...] = ()
+    databases: tuple[tuple[str, Settings], ...] = ()
+    # What picks the database and overrides of a file: ``queries``, ``databases``, ``overrides``.
+    routing: dict[str, object] | None = None
 
     def names_query_file(self, path: Path) -> bool:
         """Whether ``queries`` names ``path``, as a file, a directory holding it or a glob."""
-        if path.suffix != ".sql" or not self.queries or self.config_dir is None:
-            return False
-        resolved = path.resolve()
-        base = self.config_dir.resolve()
-        if not resolved.is_relative_to(base):
-            return False
-        relative = resolved.relative_to(base).as_posix()
-        return any(
-            relative == entry.strip("/")
-            or relative.startswith(entry.strip("/") + "/")
-            or re.fullmatch(glob.translate(entry, recursive=True, include_hidden=True), relative)
-            is not None
-            for entry in self.queries
+        from sqlty import _core
+
+        return self.config_dir is not None and _core.names_query_file(
+            str(path), str(self.config_dir), list(self.queries)
         )
 
     @property
@@ -1475,25 +1328,14 @@ class SettingsResolver:
         if directory not in self._by_dir:
             self._by_dir[directory] = self._resolve(directory)
         settings = self._by_dir[directory]
-        if settings.databases and not settings.names_query_file(path):
-            assert settings.config_dir is not None
-            for include, exclude, database in settings.databases:
-                if database.names_query_file(path) or (
-                    _is_included(path, settings.config_dir, include)
-                    and not (exclude and _is_included(path, settings.config_dir, exclude))
-                ):
-                    settings = database
-                    break
-        if not settings.overrides or settings.config_dir is None:
+        if settings.routing is None or settings.config_dir is None:
             return settings
-        rules = dict(settings.rules or {})
-        for override in settings.overrides:
-            include, exclude = tuple(override["include"]), tuple(override["exclude"])
-            if (not include or _is_included(path, settings.config_dir, include)) and not (
-                exclude and _is_included(path, settings.config_dir, exclude)
-            ):
-                rules |= override["rules"]
-        return replace(settings, rules=rules | self.source.cli_rules)
+        database, rules = self.source.route(settings.routing, settings.config_dir, path)
+        if database is not None:
+            settings = dict(settings.databases)[database]
+        if not settings.overrides:
+            return settings
+        return replace(settings, rules=(settings.rules or {}) | rules | self.source.cli_rules)
 
     def _resolve(self, directory: Path) -> Settings:
 
@@ -1503,6 +1345,8 @@ class SettingsResolver:
             schema_sql = _load_schema(config["schema"], config_dir)
         settings = self._settings(config, config_dir, label, schema_sql, self._args.dialect)
         databases = []
+        if config.get("databases") or config.get("overrides"):
+            settings = replace(settings, routing=_routing(config))
         for name, database in config.get("databases", {}).items():
             merged = cast("SQLTyConfig", {**config, **database})
             merged.pop("databases")
@@ -1515,8 +1359,6 @@ class SettingsResolver:
             databases.append(
                 (
                     name,
-                    tuple(database.get("include", ())),
-                    tuple(database.get("exclude", ())),
                     self._settings(
                         merged,
                         config_dir,
@@ -1530,7 +1372,7 @@ class SettingsResolver:
             return settings
         from sqlty.core import load_schema
 
-        named = {"default": settings} | {name: db for name, _, _, db in databases}
+        named = {"default": settings} | dict(databases)
         plain = {
             name: db.schema or load_schema(None, dialect=db.dialect) for name, db in named.items()
         }
@@ -1554,10 +1396,7 @@ class SettingsResolver:
             for name, db in named.items()
         }
         return replace(
-            routed["default"],
-            databases=tuple(
-                (include, exclude, routed[name]) for name, include, exclude, _ in databases
-            ),
+            routed["default"], databases=tuple((name, routed[name]) for name, _ in databases)
         )
 
     def _settings(
@@ -1590,7 +1429,12 @@ class SettingsResolver:
                 f"{self.source.origin('import_style', label)}: {exc}; "
                 "use 'from sqlty import SQL [as Q]' or 'import sqlty [as sy]'"
             ) from None
-        from sqlty._config import MAX_QUERY_VARIANTS, driver_types
+        from sqlty._config import (
+            MAX_QUERY_VARIANTS,
+            driver_types,
+            requires_closed,
+            requires_python,
+        )
 
         dialect = dialect_flag or config.get("dialect", "postgres")
         types = driver_types(config.get("driver"), dialect, config.get("types"))
@@ -1603,6 +1447,7 @@ class SettingsResolver:
             untyped=untyped == "sentinel",
             json_types=json_types,
             param_types=bool(config.get("param_types", True)),
+            closed_params=requires_closed(requires_python(config_dir)),
             rules=config.get("rules"),
             query_variants=config.get("max_query_variants", MAX_QUERY_VARIANTS)
             if config.get("preview")
@@ -1643,13 +1488,14 @@ class Project:
             for path in self.files
             if (text := texts[path]) is not None
         }
+        self._fill_index()
         self.settings = {path: self.resolver.for_file(path) for path in self.files}
         self.query_files = [
             path
             for path in _collect_query_files(self.paths, self.files, self.resolver)
             if path not in self.settings
         ]
-        self._index()
+        self._configure_helpers()
 
     def query_types(self, path: Path, text: str) -> list[str]:
         from sqlty._queries import query_types
@@ -1716,6 +1562,10 @@ class Project:
             coerce_row_types=settings.coerce_row_types,
         )
 
+    def check_all(self, row_usage: RowUsage) -> Iterable[list[Diagnostic]]:
+        """``check`` of every file, in order, on threads (the Rust CLI checks with Rust)."""
+        return _map(lambda path: self.check(path, row_usage), self.files)
+
     def fix(self, path: Path) -> str:
         from sqlty.core import fix_source
 
@@ -1729,6 +1579,7 @@ class Project:
             rules=settings.rules,
             json_types=settings.json_types,
             param_types=settings.param_types,
+            closed_params=settings.closed_params,
             helpers=self.helpers[path],
         )
 
@@ -1749,15 +1600,44 @@ class Project:
         return self.modules[path][0] + (".__init__" if path.name == "__init__.py" else "")
 
     def _index(self) -> None:
-        from sqlty._helpers import HelperIndex, configured_helpers
+        self._fill_index()
+        self._configure_helpers()
+
+    def _fill_index(self) -> None:
+        """The index of the sources; Rust builds its own on a thread of its own meanwhile."""
+        import threading
+
+        from sqlty._helpers import HelperIndex
+        from sqlty._source import AST
 
         self.index = HelperIndex()
         for path, parsed in self.sources.items():
             for name in self.modules[path]:
                 self.index.add(name, parsed)
+        if AST != "python":
+            threading.Thread(target=self.index.rust, daemon=True).start()
+
+    def _configure_helpers(self) -> None:
+        from sqlty._helpers import configured_helpers
+
         checked = _checked_roots(self.paths, self.resolved.values())
         helpers_for = configured_helpers(self.index, checked)
         self.helpers = {path: helpers_for(self.settings[path]) for path in self.files}
+
+
+def _routing(config: SQLTyConfig) -> dict[str, object]:
+    """The keys of ``config`` that pick the database and overrides of a file."""
+    databases = config.get("databases", {})
+    return {
+        "queries": _paths(config.get("queries", ())),
+        "databases": {
+            name: {
+                key: database[key] for key in ("queries", "include", "exclude") if key in database
+            }
+            for name, database in databases.items()
+        },
+        "overrides": list(config.get("overrides", ())),
+    }
 
 
 def _load_schema(spec: SchemaSpec, base: Path) -> str | None:

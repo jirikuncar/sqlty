@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.5.1"
+version = "0.6.0"
 edition = "2021"
 description = "Rust engine of sqlty: SQL type inference and Python source rewriting"
 license = "MIT"
@@ -12,8 +12,8 @@ publish = false
 rust-version = "1.99"
 
 [workspace.dependencies]
-pyo3 = { version = "0.30", features = ["extension-module"] }
-sqlparser = { version = "0.63", features = ["visitor"] }
+pyo3 = "0.30"
+sqlparser = { version = "0.64", features = ["visitor"] }
 regex = "1"
 recursive = "0.1"
 rustc-hash = "2"
@@ -27,6 +27,8 @@ sqlty-sql = { path = "crates/sqlty-sql" }
 sqlty-python = { path = "crates/sqlty-python" }
 sqlty-lsp = { path = "crates/sqlty-lsp" }
 sqlty-format = { path = "crates/sqlty-format" }
+sqlty-project = { path = "crates/sqlty-project" }
+sqlty-cli = { path = "crates/sqlty-cli" }
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
@@ -52,6 +54,8 @@ unnested_or_patterns = "warn"
 
 [workspace.lints.rust]
 missing_docs = "warn"
+# Set by cargo-llvm-cov on nightly, for `#[coverage(off)]`.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage_nightly)"] }
 unused_lifetimes = "warn"
 unused_qualifications = "warn"
 

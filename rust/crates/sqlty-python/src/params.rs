@@ -52,7 +52,8 @@ pub(crate) fn strip_generated(source: &str) -> Cow<'_, str> {
     }
 }
 
-/// `source` with the parameter type of each `SQL[R]("--sql\n...")` call written.
+/// `source` with the parameter type of each `SQL[R]("--sql\n...")` call written; with
+/// `closed`, the generated `TypedDict`s take no other keys (PEP 728, Python 3.15).
 ///
 /// Example:
 ///
@@ -63,13 +64,13 @@ pub(crate) fn strip_generated(source: &str) -> Cow<'_, str> {
 /// let options = Options::new("postgres", None, None, false).unwrap();
 /// let source = "from sqlty import SQL\nq = SQL[tuple[int]](\"--sql\\nSELECT 1 LIMIT %s\")\n";
 /// assert_eq!(
-///     add_param_types(source, &options),
+///     add_param_types(source, &options, false),
 ///     "from sqlty import SQL\nq = SQL[tuple[int], tuple[int | None]](\"--sql\\nSELECT 1 LIMIT %s\")\n",
 /// );
 /// ```
-pub fn add_param_types(source: &str, options: &Options) -> String {
+pub fn add_param_types(source: &str, options: &Options, closed: bool) -> String {
     let scan = Scan::new(source, &options.style.wrapper_name);
-    let mut module = Module::of(&scan);
+    let mut module = Module::of(&scan, closed);
     let mut edits = Vec::new();
     for call in &scan.calls {
         let row_end = source[..call.annotation.end].trim_end().len();
@@ -162,15 +163,17 @@ fn target<'s>(scan: &'s Scan, call: &Range<usize>) -> Option<&'s str> {
 
 /// The top-level names of a module, its generated classes and the ones added so far.
 struct Module {
+    closed: bool,
     taken: Vec<String>,
     existing: Vec<(String, String)>,
     new: Vec<(String, String)>,
 }
 
 impl Module {
-    fn of(scan: &Scan) -> Self {
+    fn of(scan: &Scan, closed: bool) -> Self {
         let source = scan.source();
         let mut module = Module {
+            closed,
             taken: Vec::new(),
             existing: Vec::new(),
             new: Vec::new(),
@@ -197,7 +200,7 @@ impl Module {
                 1 => name.to_string(),
                 n => format!("{name}{n}"),
             };
-            let code = class(&candidate, fields);
+            let code = class(&candidate, fields, self.closed);
             let same = |found: &[(String, String)], text: &str| {
                 found
                     .iter()
@@ -432,7 +435,7 @@ fn block(text: &str) -> String {
     found
 }
 
-fn class(name: &str, fields: &[(String, String)]) -> String {
+fn class(name: &str, fields: &[(String, String)], closed: bool) -> String {
     let identifiers = fields
         .iter()
         .all(|(key, _)| is_identifier(key) && !KEYWORDS.contains(&key.as_str()));
@@ -441,16 +444,18 @@ fn class(name: &str, fields: &[(String, String)]) -> String {
             .iter()
             .map(|(key, text)| format!("    {key}: {text}\n"))
             .collect();
-        return format!("class {name}(typing.TypedDict):\n{body}");
+        let closed = if closed { ", closed=True" } else { "" };
+        return format!("class {name}(typing.TypedDict{closed}):\n{body}");
     }
     let items: Vec<String> = fields
         .iter()
         .map(|(key, text)| format!("{}: {text}", repr(key)))
         .collect();
     format!(
-        "{name} = typing.TypedDict({}, {{{}}})\n",
+        "{name} = typing.TypedDict({}, {{{}}}{})\n",
         repr(name),
-        items.join(", ")
+        items.join(", "),
+        if closed { ", closed=True" } else { "" }
     )
 }
 
@@ -490,5 +495,54 @@ fn pascal(name: &str) -> String {
     match text.starts_with(|c: char| c.is_ascii_digit()) || text.is_empty() {
         true => format!("Json{text}"),
         false => text,
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rarer_names_and_class_placement() {
+        assert_eq!(repr("it's"), "\"it's\"");
+        assert_eq!(repr("a'\"b"), "'a\\'\"b'");
+        assert_eq!(pascal("1x"), "Json1x");
+        assert_eq!(pascal("__"), "Json");
+        let scan = Scan::new("from x\n", "");
+        assert_eq!(names(scan.source(), &scan.tokens), Vec::<String>::new());
+
+        let code = "class A(typing.TypedDict):\n    a: int\n";
+        let mut module = Module {
+            taken: (1..100)
+                .map(|n| match n {
+                    1 => "A".to_string(),
+                    n => format!("A{n}"),
+                })
+                .collect(),
+            existing: Vec::new(),
+            new: Vec::new(),
+            closed: false,
+        };
+        assert_eq!(module.named_class(&[], "A"), "typing.Any");
+        module.new.push(("A".into(), code.into()));
+        assert_eq!(
+            module.with_classes("import typing"),
+            format!("import typing\n\n\n{MARKER}\n{code}\n\n")
+        );
+        let generated =
+            format!("import typing\n\n\n{MARKER}\nB = typing.TypedDict('B', {{}})\n\n\nx = 1\n");
+        assert_eq!(
+            module.with_classes(&generated),
+            format!("import typing\n\n\n{MARKER}\nB = typing.TypedDict('B', {{}})\n\n\n{MARKER}\n{code}\n\nx = 1\n")
+        );
+    }
+
+    #[test]
+    fn an_annotated_target_names_its_class() {
+        let options = Options::new("postgres", None, None, false).unwrap();
+        let source =
+            "from sqlty import SQL\nq: SQL = SQL[tuple[int]](\"--sql\\nSELECT 1 WHERE %(a)s\")\n";
+        assert!(add_param_types(source, &options, false).contains("SQL[tuple[int], QParams]"));
     }
 }

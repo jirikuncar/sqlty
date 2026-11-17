@@ -100,13 +100,13 @@ pub fn text(literal: &ExprStringLiteral, source: &str) -> String {
         return literal.value.to_str().to_string();
     }
     let normalized = format!("({})", written.replace("\r\n", "\n").replace('\r', "\n"));
-    match parse_expression(&normalized).map(|parsed| parsed.into_syntax().body) {
-        Ok(body) => match *body {
-            Expr::StringLiteral(inner) => inner.value.to_str().to_string(),
-            _ => literal.value.to_str().to_string(),
-        },
-        Err(_) => literal.value.to_str().to_string(),
-    }
+    let parsed = parse_expression(&normalized).expect("a literal of a parsed source parses");
+    let value = parsed.syntax().body.as_string_literal_expr();
+    value
+        .expect("it is the same literal")
+        .value
+        .to_str()
+        .to_string()
 }
 
 fn guarded<T: Send, E: Send>(
@@ -315,6 +315,7 @@ impl<'a> Visitor<'a> for Depth {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 
@@ -373,5 +374,21 @@ mod tests {
         ] {
             assert!(module(&source).is_none());
         }
+    }
+
+    #[test]
+    fn rarer_sources() {
+        assert!(reads_on_314("x = 1\n"));
+        assert!(!reads_on_314("lazy import x\n"));
+        assert!(!has_surrogate_escape("x = 1 \\"));
+        let nested = |levels: usize| {
+            let mut source: String = (0..levels)
+                .map(|n| format!("{}if x:\n", " ".repeat(n)))
+                .collect();
+            source.push_str(&format!("{}pass\n", " ".repeat(levels)));
+            module(&source).is_some()
+        };
+        assert!(nested(MAX_INDENT - 1));
+        assert!(!nested(MAX_INDENT));
     }
 }

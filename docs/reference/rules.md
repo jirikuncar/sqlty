@@ -50,6 +50,7 @@ stale-type = "error"
 | [`chasm-join`](#chasm-join) | Names | warn | no | Aggregating query joins one table one-to-many to two others |
 | [`unproven-join`](#unproven-join) | Names | ignore | no | Join in an aggregating query that matches no primary or unique key |
 | [`entity-mismatch`](#entity-mismatch) | Names | ignore | no | Comparison between columns holding keys of different tables |
+| [`rejected-query`](#rejected-query) | Names | error | no | Query the database rejects for a reason no other rule names |
 | [`stale-rewrite`](#stale-rewrite) | Rewrite | warn | yes | `--sql` string not wrapped in `SQL[T](...)` |
 | [`stale-type`](#stale-type) | Rewrite | warn | yes | `SQL[tuple[...]]` wider than the inferred row type |
 | [`narrow-type`](#narrow-type) | Rewrite | error | yes | `SQL[tuple[...]]` doesn't admit every row the query returns |
@@ -640,9 +641,10 @@ enabled and a schema configured, no column is left untyped without a diagnostic.
 `insert-missing-column` and `insert-value-count` check what an `INSERT` writes,
 and `ungrouped-column` what a grouped query selects. `fanout-aggregate`,
 `chasm-join` and `unproven-join` check what joins do to aggregates, and
-`entity-mismatch` what they compare. The rules for SQL the
+`entity-mismatch` what they compare; `rejected-query` reports the rest of what
+the database rejects. The rules for SQL the
 database rejects (unknown tables and columns, ambiguous columns, an `INSERT`
-missing a column or a value, an ungrouped column) are errors; those for valid SQL sqlty cannot type are warnings. The
+missing a column or a value, an ungrouped column, a rejected query) are errors; those for valid SQL sqlty cannot type are warnings. The
 [name diagnostics guide](../guide/name-diagnostics.md) shows how to change them. All but `unsupported-syntax` are only judged when a
 [schema](../guide/schema-inference.md) is configured, because without one every
 table, column, function and type is unknown. Tables, columns and ambiguity are
@@ -738,6 +740,14 @@ columns holding keys of different tables: `products.id = orders.customer_id`. A
 key column holds keys of its table, and a foreign key column those of the key it
 references, followed to the end of the chain. Off because intentional joins of
 unrelated keys (polymorphic ids, legacy schemas) would need suppressions.
+
+### rejected-query
+
+Default: error. A query the database rejects for a reason no other rule names:
+in PostgreSQL, a `CASE`, `COALESCE`, `GREATEST` or `LEAST` whose results are of
+different type categories (`integer` and `date`); a `SELECT *` with no `FROM`
+outside ClickHouse; a SQLite hex literal over 64 bits; `EXTRACT` in SQLite, which
+has none. Needs no schema.
 
 ## Rewrite rules
 

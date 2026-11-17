@@ -116,6 +116,7 @@ class Workspace:
             untyped=settings.untyped,
             json_types=settings.json_types,
             param_types=settings.param_types,
+            closed_params=settings.closed_params,
         )
 
     def strip(self, path: str, text: str) -> str:
@@ -132,4 +133,7 @@ class Workspace:
     def _text(self, path: Path) -> str:
         if (parsed := self.project.sources.get(path)) is not None:
             return parsed.text
-        return read_source(path) or ""
+        try:
+            return read_source(path) or ""
+        except FileNotFoundError:
+            return ""

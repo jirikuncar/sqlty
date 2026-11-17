@@ -127,11 +127,11 @@ def test_expressions_of_the_package() -> None:
         if path.name == "_stdlib.py":
             continue
         text = path.read_text()
+        lines = text.encode().splitlines(keepends=True)
         for node in ast.walk(ast.parse(text)):
             if isinstance(node, ast.expr) and not isinstance(node, (ast.Slice, ast.Starred)):
                 expected = ast.unparse(node)
-                written = ast.get_source_segment(text, node)
-                assert written is not None
+                written = segment(lines, node)
                 for source in (f"({written}\n)", expected):
                     try:  # the text of an f-string is not an expression
                         if ast.unparse(ast.parse(source, mode="eval").body) != expected:
@@ -142,6 +142,16 @@ def test_expressions_of_the_package() -> None:
                         assert found == expected, source
                         checked += 1
     assert checked > 50_000
+
+
+def segment(lines: list[bytes], node: ast.expr) -> str:
+    """``ast.get_source_segment`` without splitting the whole file again for every node."""
+    assert node.end_lineno is not None and node.end_col_offset is not None
+    first, last = node.lineno - 1, node.end_lineno - 1
+    if first == last:
+        return lines[first][node.col_offset : node.end_col_offset].decode()
+    middle = b"".join(lines[first + 1 : last])
+    return (lines[first][node.col_offset :] + middle + lines[last][: node.end_col_offset]).decode()
 
 
 def expected_unparse(source: str) -> str | None:
@@ -184,6 +194,46 @@ SPELLINGS = [
     "1e16",
     "9" * 4300,
     "9" * 4301,
+    "(yield from x)",
+    "(yield)",
+    "(yield x)",
+    "lambda *, a=1, b: a",
+    "f'{ {1} }'",
+    "b'\\'\"'",
+    "0O17",
+    "0B1_0",
+    "f'\\'\"\\'\\'\\'\"\"\"{x}'",
+    "f'\\'\"\\'\\'\\'\"\"\"{x}\\n'",
+    "f'{x}\\'\"\\'\\'\\'\"\"\"'",
+    "f'{x:\\'\"\\'\\'\\'\"\"\"}'",
+    "t'''{a + \"'\" # c\n}'''",
+    "t'''{x:{a # c\n}}'''",
+    "f'''{a!r # c\n}'''",
+    "f'''{a + \"'\"}\\'\\'\\'\"\"\"'''",
+    "f\"{'a'}\\'\\'\\'\\\"\\\"\\\"\"",
+    "f'''{x!r:{'\"'}}\\'\\'\\'\"\"\"'''",
+    "f'''{\"'\" + '\"'}\\'\\'\\''''",
+    "f'''{\"'\" + '\"'}\"\"\"'''",
+    "0o" + "7" * 30,
+    "0b" + "1" * 70,
+    "f'''{'\"\"\"'}\\'\\'\\''''",
+    "f'''{'\"\"\"'}\\'\\'\\'x'''",
+    "t'''{'\"\"\"'}\\'\\'\\''''",
+    "f'''{'\"\"\"' + \"\\'\\'\\'\"}'''",
+    "'a' f'{x}'",
+    "'' f'{x}'",
+    'f"{\'a\'}b\\""',
+    "f\"{x}'''\\\"\"",
+    "b'\\t'",
+    "b'\\\\'",
+    "7.120236347223045e-307",
+    "0.001",
+    "1e309",
+    "[x async for x in y]",
+    "f'{x!a}'",
+    "f'\\u2028{x}'",
+    "f'\\U000e0001{x}'",
+    'f"""{"\'\'\'" + \'"""\'}"""',
 ]
 
 

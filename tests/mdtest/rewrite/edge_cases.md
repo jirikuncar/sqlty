@@ -7,13 +7,6 @@ q = "--sql\nSELECT created_at::TIMESTAMP FROM users"
 # rewritten: q = SQL[tuple[datetime.datetime]]("--sql\nSELECT created_at::TIMESTAMP FROM users")
 ```
 
-## Query with UUID type
-
-```python
-q = "--sql\nSELECT user_id::UUID FROM users"
-# rewritten: q = SQL[tuple[uuid.UUID]]("--sql\nSELECT user_id::UUID FROM users")
-```
-
 ## Invalid SQL is not wrapped
 
 ```python

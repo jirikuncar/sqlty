@@ -111,7 +111,6 @@ tool such as pre-commit passes file names.
 | `--respect-gitignore`, `--no-respect-gitignore` | Skip the files .gitignore ignores while walking directories (default: [tool.sqlty] respect-gitignore, else true) |
 | `-v`, `--verbose` | Print each file that rewrite, strip or check --fix changes, and with check the types of each named query of a query file |
 | `-q`, `--quiet` | Suppress non-error output |
-| `-j`, `--jobs N` | Files to work on at once; 1 works on one at a time. Output is the same in any case (default: the number of processors) |
 <!-- /generated:cli-options-common -->
 
 `strip` accepts `--dialect` and `--schema` but does not use them.
@@ -137,7 +136,7 @@ sqlty rewrite [-h] [--dialect DIALECT] [--schema SCHEMA]
               [--exclude GLOB] [--extend-exclude GLOB]
               [--force-exclude]
               [--respect-gitignore | --no-respect-gitignore] [-v] [-q]
-              [-j N] [--check] [--diff] [--untyped {skip,sentinel}]
+              [--check] [--diff] [--untyped {skip,sentinel}]
               [paths ...]
 ```
 <!-- /generated:cli-usage-rewrite -->
@@ -169,7 +168,7 @@ sqlty strip [-h] [--dialect DIALECT] [--schema SCHEMA]
             [--error RULE] [--warn RULE] [--ignore RULE]
             [--exclude GLOB] [--extend-exclude GLOB] [--force-exclude]
             [--respect-gitignore | --no-respect-gitignore] [-v] [-q]
-            [-j N] [--check] [--diff]
+            [--check] [--diff]
             [paths ...]
 ```
 <!-- /generated:cli-usage-strip -->
@@ -200,7 +199,7 @@ sqlty check [-h] [--dialect DIALECT] [--schema SCHEMA]
             [--error RULE] [--warn RULE] [--ignore RULE]
             [--exclude GLOB] [--extend-exclude GLOB] [--force-exclude]
             [--respect-gitignore | --no-respect-gitignore] [-v] [-q]
-            [-j N] [--fix] [--exit-zero] [--exit-zero-on-warning]
+            [--fix] [--exit-zero] [--exit-zero-on-warning]
             [--error-on-warning] [--statistics] [--explain]
             [--output-format {text,json,github,sarif}]
             [paths ...]
@@ -266,7 +265,7 @@ sqlty complete [-h] [--dialect DIALECT] [--schema SCHEMA]
                [--exclude GLOB] [--extend-exclude GLOB]
                [--force-exclude]
                [--respect-gitignore | --no-respect-gitignore] [-v] [-q]
-               [-j N] [--json]
+               [--json]
                FILE:LINE:COL [paths ...]
 ```
 <!-- /generated:cli-usage-complete -->
@@ -296,7 +295,7 @@ Found 1 breaking change(s)
 ```text
 sqlty breaking [-h] [--against BASELINE] [--save PATH] [--head REF]
                [--direction {backward,forward,both}] [-q]
-               [--output-format {text,json,github,sarif}] [-j N]
+               [--output-format {text,json,github,sarif}]
                [paths ...]
 ```
 <!-- /generated:cli-usage-breaking -->

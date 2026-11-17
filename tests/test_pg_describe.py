@@ -290,6 +290,8 @@ class Schemas:
         for (name,) in schemas:
             self.conn.execute(f'DROP SCHEMA IF EXISTS "{name}" CASCADE')
         self.conn.execute("CREATE SCHEMA public")
+        # A schema may `SET search_path` to a schema just dropped.
+        self.conn.execute("RESET search_path")
 
 
 @pytest.fixture(scope="module")

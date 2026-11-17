@@ -7,6 +7,7 @@
 
 use std::ops::ControlFlow;
 
+use sqlparser::ast::InTarget;
 use sqlparser::ast::{
     BinaryOperator, Expr, Ident, Query, Select, SelectItem, SetExpr, Spanned, TableFactor, Visit,
     Visitor,
@@ -177,12 +178,20 @@ impl Visitor for Comparisons<'_, '_> {
                 op: BinaryOperator::Eq | BinaryOperator::NotEq,
                 right,
             } => analyzer.compare(left, right, scope),
-            Expr::InList { expr, list, .. } => {
+            Expr::In {
+                expr,
+                target: InTarget::List(list),
+                ..
+            } => {
                 for item in list {
                     analyzer.compare(expr, item, scope);
                 }
             }
-            Expr::InSubquery { expr, subquery, .. } => {
+            Expr::In {
+                expr,
+                target: InTarget::Subquery(subquery),
+                ..
+            } => {
                 analyzer.check_in_subquery(expr, subquery, scope);
             }
             _ => {}

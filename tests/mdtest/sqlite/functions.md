@@ -33,6 +33,13 @@ SELECT IIF(id > 1, name, note) AS a, IIF(id > 1, 'big', 'small') AS b, IFNULL(no
 -- columns: c: str (TEXT)
 ```
 
+`if` is an alias for `iif` since SQLite 3.48.
+
+```sql
+SELECT IF(id > 1, name, note) AS a FROM events
+-- columns: a: str | None (TEXT)
+```
+
 ## Dates and times
 
 ```sql
@@ -94,6 +101,20 @@ SELECT abs(id) AS a, round(ratio) AS b, round(id) AS c, random() AS d, sqrt(id) 
 -- columns: g: float (DOUBLE)
 -- columns: h: float (DOUBLE)
 -- columns: i: int (INT)
+```
+
+The hyperbolic functions return a real, and `NULL` outside their domain, as `acosh`
+below 1 does.
+
+```sql
+SELECT sinh(ratio) AS a, cosh(ratio) AS b, tanh(ratio) AS c, asinh(ratio) AS d, acosh(ratio) AS e, atanh(ratio) AS f, ceil(1) AS g FROM events
+-- columns: a: float (DOUBLE)
+-- columns: b: float (DOUBLE)
+-- columns: c: float (DOUBLE)
+-- columns: d: float (DOUBLE)
+-- columns: e: float | None (DOUBLE)
+-- columns: f: float | None (DOUBLE)
+-- columns: g: int (None)
 ```
 
 ## JSON
@@ -332,8 +353,7 @@ SELECT n, upper FROM (SELECT id AS n, upper(name) AS upper FROM events)
 
 ## Index hints
 
-`INDEXED BY` and `NOT INDEXED` only pick the index a query uses, so sqlty reads the
-query without them:
+`INDEXED BY` and `NOT INDEXED` only pick the index a query uses:
 
 ```sql
 SELECT e.id FROM events AS e INDEXED BY events_name JOIN events AS f NOT INDEXED ON e.id = f.id

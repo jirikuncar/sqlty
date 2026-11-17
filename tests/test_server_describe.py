@@ -8,11 +8,12 @@ schema is run on the database, and its result columns are compared with
   ``cursor.description``; the declared type of each column of a ``SELECT``, from a
   temporary view.
 - MySQL runs when ``SQLTY_MYSQL_DSN`` points to a disposable server (see
-  ``tests/test_driver_values.py``). The database ``sqlty_describe`` is dropped and
-  created again for each schema. Names come from ``cursor.description``; types and
-  nullability, from ``CREATE TEMPORARY TABLE ... AS`` the query. MySQL's nullability is
-  only reported, by ``scripts/compat/mysql_nullability.py``: the server says nullable for
-  many expressions sqlty proves non-null.
+  ``tests/test_driver_values.py``). The database ``sqlty_describe`` (one per xdist
+  worker) is dropped and created again for each schema. Names come from
+  ``cursor.description``; types and nullability, from ``CREATE TEMPORARY TABLE ... AS``
+  the query. MySQL's nullability is only reported, by
+  ``scripts/compat/mysql_nullability.py``: the server says nullable for many expressions
+  sqlty proves non-null.
 
 What is compared:
 
@@ -46,12 +47,12 @@ SOURCES = [ROOT / "tests" / "mdtest", ROOT / "docs"]
 
 # Understood mismatches, by "<dialect>:<file>:<line>" of the query, with the reason.
 KNOWN_DIFFERENCES: dict[str, str] = {
-    "mysql:tests/mdtest/mysql/functions.md:217": "MySQL predicates are `int`; sqlty types `MEMBER OF` like `IN`",
-    "mysql:tests/mdtest/mysql/functions.md:418": "MySQL predicates are `int`; sqlty types `SOUNDS LIKE` like `=`",
-    "mysql:tests/mdtest/mysql/functions.md:457": "MySQL predicates are `int`; sqlty types `XOR` like `AND`",
-    "mysql:tests/mdtest/mysql/functions.md:462": "MySQL predicates are `int`; sqlty types `XOR` like `AND`",
-    "mysql:tests/mdtest/mysql/functions.md:479": "MySQL predicates are `int`; sqlty types `XOR` like `AND`",
-    "mysql:tests/mdtest/mysql/functions.md:614": "MySQL predicates are `int`; sqlty types `!x` like `NOT x`",
+    "mysql:tests/mdtest/mysql/functions.md:237": "MySQL predicates are `int`; sqlty types `MEMBER OF` like `IN`",
+    "mysql:tests/mdtest/mysql/functions.md:438": "MySQL predicates are `int`; sqlty types `SOUNDS LIKE` like `=`",
+    "mysql:tests/mdtest/mysql/functions.md:477": "MySQL predicates are `int`; sqlty types `XOR` like `AND`",
+    "mysql:tests/mdtest/mysql/functions.md:482": "MySQL predicates are `int`; sqlty types `XOR` like `AND`",
+    "mysql:tests/mdtest/mysql/functions.md:499": "MySQL predicates are `int`; sqlty types `XOR` like `AND`",
+    "mysql:tests/mdtest/mysql/functions.md:634": "MySQL predicates are `int`; sqlty types `!x` like `NOT x`",
     "sqlite:tests/mdtest/sqlite/types.md:57": "`INT[]` has INTEGER affinity, but the JSON text ORMs store stays text",
 }
 
@@ -184,6 +185,9 @@ def test_matches_sqlite(case: Case) -> None:
     check(case, "sqlite", compare(ours, describe_sqlite(case)))
 
 
+DATABASE = "_".join(filter(None, ["sqlty_describe", os.environ.get("PYTEST_XDIST_WORKER")]))
+
+
 class MySQL:
     """A connection that loads each distinct schema once, into a fresh database."""
 
@@ -196,9 +200,9 @@ class MySQL:
         if schema_sql != self.loaded:
             self.loaded, self.rejected = schema_sql, None
             with self.conn.cursor() as cursor:
-                cursor.execute("DROP DATABASE IF EXISTS sqlty_describe")
-                cursor.execute("CREATE DATABASE sqlty_describe")
-                cursor.execute("USE sqlty_describe")
+                cursor.execute(f"DROP DATABASE IF EXISTS {DATABASE}")
+                cursor.execute(f"CREATE DATABASE {DATABASE}")
+                cursor.execute(f"USE {DATABASE}")
                 for statement in re.split(r";[ \t]*\n", schema_sql):
                     if statement.strip():
                         try:

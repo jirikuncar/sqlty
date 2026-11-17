@@ -129,6 +129,39 @@ SELECT id FROM users WHERE %s = ANY(tags)
 -- params: 1: str (TEXT)
 ```
 
+### Elements of an ARRAY
+
+```sql
+SELECT id FROM users WHERE id = ALL(ARRAY[%s, %s])
+-- params: 1: int (INT)
+-- params: 2: int (INT)
+```
+
+### LIKE ANY and LIKE ALL
+
+`LIKE ANY ($1)` and `LIKE ALL ($1)` match against an array of patterns.
+
+```sql
+SELECT id FROM users WHERE name LIKE ANY (%s) AND name ILIKE ALL ($2) AND name NOT LIKE ANY (ARRAY[$3, 'x'])
+-- params: 1: list[str] (ARRAY<TEXT>)
+-- params: 2: list[str] (ARRAY<TEXT>)
+-- params: 3: str (TEXT)
+```
+
+A pattern array built by a function is not a parameter.
+
+```sql
+SELECT id FROM users WHERE name LIKE ANY (string_to_array(%s, ','))
+-- params: 1: None (None)
+```
+
+## SIMILAR TO
+
+```sql
+SELECT id FROM users WHERE name SIMILAR TO %s
+-- params: 1: str (TEXT)
+```
+
 ## INSERT takes the target column
 
 A `NOT NULL` column makes the parameter non-null; a nullable column admits `None`.

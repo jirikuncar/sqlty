@@ -106,6 +106,7 @@ impl SchemaData {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::analyzer::{infer_type, load_schema};

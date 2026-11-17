@@ -20,6 +20,7 @@
 use std::collections::HashSet;
 use std::rc::Rc;
 
+use sqlparser::ast::InTarget;
 use sqlparser::ast::{
     BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Query, Select, SetExpr, TableFactor,
     TableWithJoins, UnaryOperator,
@@ -84,9 +85,6 @@ impl Learned {
     /// This, minus what it says about the `(reference, column)` pairs of `columns`, which
     /// an UPDATE overwrites. Expressions may read them, so none is kept.
     pub(super) fn without(mut self, columns: &[(String, String)]) -> Self {
-        if columns.is_empty() {
-            return self;
-        }
         self.columns.retain(|pair| !columns.contains(pair));
         self.null.retain(|pair| !columns.contains(pair));
         self.values.retain(|(r, c, _)| {
@@ -382,13 +380,15 @@ impl<'a> Analyzer<'a> {
             | Expr::IsNotFalse(_) => Learned::default(),
             // An empty subquery or array makes `x IN (...)` false and `x NOT IN (...)` true
             // for a NULL `x`: only `x IN (...)` being true proves `x` is there.
-            Expr::InSubquery {
+            Expr::In {
                 expr: inner,
+                target: InTarget::Subquery(_),
                 negated,
                 ..
             }
-            | Expr::InUnnest {
+            | Expr::In {
                 expr: inner,
+                target: InTarget::Unnest(_) | InTarget::Table { .. },
                 negated,
                 ..
             } => {
@@ -419,10 +419,11 @@ impl<'a> Analyzer<'a> {
                     .extend(self.column_values(right, &[left.as_ref()], scope));
                 learned
             }
-            Expr::InList {
+            Expr::In {
                 expr: inner,
-                list,
+                target: InTarget::List(list),
                 negated: false,
+                ..
             } if truth => {
                 let mut learned = self.proven(cond, scope);
                 let list: Vec<&Expr> = list.iter().collect();
@@ -431,10 +432,11 @@ impl<'a> Analyzer<'a> {
                     .extend(self.column_values(inner, &list, scope));
                 learned
             }
-            Expr::InList {
+            Expr::In {
                 expr: inner,
-                list,
+                target: InTarget::List(list),
                 negated: true,
+                ..
             } if truth => {
                 let mut learned = self.proven(cond, scope);
                 let list: Vec<&Expr> = list.iter().collect();
@@ -499,10 +501,11 @@ impl<'a> Analyzer<'a> {
                 op: BinaryOperator::Eq,
                 right,
             } => (right, vec![left]),
-            Expr::InList {
+            Expr::In {
                 expr,
-                list,
+                target: InTarget::List(list),
                 negated: false,
+                ..
             } => (expr, list.iter().collect()),
             _ => return Learned::default(),
         };
@@ -663,9 +666,17 @@ impl<'a> Analyzer<'a> {
                         .union(learned);
                 }
             },
-            Expr::InList { expr: inner, .. } => return self.proven(inner, scope),
+            Expr::In {
+                expr: inner,
+                target: InTarget::List(_),
+                ..
+            } => return self.proven(inner, scope),
             // Over an empty set they are false or true, not NULL, whatever the left side is.
-            Expr::InSubquery { .. } | Expr::InUnnest { .. } | Expr::AnyOp { .. } => return learned,
+            Expr::In {
+                target: InTarget::Subquery(_) | InTarget::Unnest(_) | InTarget::Table { .. },
+                ..
+            }
+            | Expr::AnyOp { .. } => return learned,
             Expr::Between {
                 expr: inner,
                 low,
@@ -715,6 +726,7 @@ impl<'a> Analyzer<'a> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::analyzer::{analyze_select, load_schema};

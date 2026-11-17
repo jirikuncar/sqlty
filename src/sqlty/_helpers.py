@@ -22,7 +22,14 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from sqlty._core import ModuleIndex, helper_sites, module_helpers, module_index
+from sqlty._core import (
+    ModuleIndex,
+    helper_sites,
+    index_extended,
+    index_helpers,
+    module_helpers,
+    module_index,
+)
 from sqlty._params import ParamArg, arg_type, literal_params
 from sqlty._psycopg import UNCHECKED
 from sqlty._source import AST, AstMismatch, ParsedSource
@@ -32,6 +39,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
     from sqlty._cli import Settings
+    from sqlty._params import Constant
     from sqlty._type_extractor import TypeInfo
     from sqlty._type_extractor.symbols import ModuleTypes
 
@@ -253,6 +261,8 @@ def index_functions(source: str | ParsedSource) -> dict[str, Helper]:
         >>> src = "from typing import Annotated\\nfrom sqlty import SQL\\ndef f[T](q: Annotated[str, SQL], t: type[T], /) -> T: ..."
         >>> index_functions(src)["f"]
         Helper(name='f', positional=('q', 't'), keywords=frozenset(), query='q', row='t', kind='function', params=None, rest=None, named=None, configured=False, database=None)
+        >>> index_functions("def f(q: str): ...")
+        {}
     """
     parsed = ParsedSource.of(source)
     annotated, marker = parsed.marker_names
@@ -287,10 +297,11 @@ def helper_roots(config_dir: Path | None, checked: Iterable[Path]) -> tuple[Path
         >>> [root.name for root in helper_roots(Path("/p"), [Path("/p/app"), Path("/q")])[:3]]
         ['src', 'p', 'app']
     """
+    from sqlty import _core
+
     project = config_dir.resolve() if config_dir is not None else None
-    own = [project / "src", project] if project is not None else []
-    inside = [root for root in checked if project is None or root.is_relative_to(project)]
-    return tuple(dict.fromkeys([*own, *inside, *(Path(entry) for entry in sys.path if entry)]))
+    extra = [Path(entry) for entry in sys.path if entry]
+    return tuple(_core.helper_roots(project, list(checked), extra))
 
 
 def configured_helpers(
@@ -338,7 +349,7 @@ class HelperIndex:
         self._names: frozenset[str] | None = None
         self._exports: dict[str, dict[str, tuple[str, str]]] = {}
         self._row_types: dict[str, dict[str, TypeInfo]] = {}
-        self._types: dict[tuple[str, str], Any] = {}
+        self._types: dict[tuple[str, str], tuple[Any, int]] = {}
         self._names_of: dict[str, ModuleTypes] = {}
         self._read: dict[tuple[Path, str], ParsedSource | None] = {}
         # Held while a cycle sentinel is cached, so only the thread that set it can read it.
@@ -355,7 +366,7 @@ class HelperIndex:
             return self._modules
         return {
             module: {name: _helper_of(name, fields) for name, fields in found.items()}
-            for module, found in self.rust().helpers().items()
+            for module, found in index_helpers(self.rust()).items()
         }
 
     def rust(self) -> ModuleIndex:
@@ -365,7 +376,7 @@ class HelperIndex:
                 parent, forked_at = self._forked or (None, 0)
                 # A fork of an index that has not changed since shares what Rust read of it.
                 if parent is not None and len(parent._steps) == forked_at:
-                    built = parent.rust().extended(self._steps[forked_at:])
+                    built = index_extended(parent.rust(), self._steps[forked_at:])
                 else:
                     built = module_index(sys.version_info[:2], self._steps)
                 self._rust = len(self._steps), built
@@ -573,27 +584,43 @@ class HelperIndex:
         target = _target(parsed, dotted)
         return None if target is None else self._type(*target)
 
-    def _type(self, module: str, name: str, _depth: int = 0) -> Any:
-        if _depth > 8 or (parsed := self.sources.get(module)) is None:
+    def _type(self, module: str, name: str) -> Any:
+        found = self._typed(module, name, 8)
+        return None if found is None else found[0]
+
+    def _typed(self, module: str, name: str, hops: int) -> tuple[Any, int] | None:
+        """The type ``name`` of ``module`` and the re-exports to it, or ``None`` past ``hops``.
+
+        A result past ``hops`` is not cached, and a cached one is ``None`` past them, so it
+        does not depend on which module asked first.
+        """
+        if hops < 0:
             return None
+        if (parsed := self.sources.get(module)) is None:
+            return None, 0
         from sqlty._type_extractor.ast_fields import _ast_type
         from sqlty._type_extractor.symbols import ModuleTypes
 
         with self._lock:
-            if (module, name) in self._types:
-                return self._types[module, name]
+            if (known := self._types.get((module, name))) is not None:
+                return known if known[1] <= hops else None
             # An import cycle sees the name as unknown while it is resolved.
-            self._types[module, name] = None
+            self._types[module, name] = None, 0
             if (names := self._names_of.get(module)) is None:
                 names = self._names_of[module] = ModuleTypes(parsed, self, module)
+            found: tuple[Any, int] | None = None, 0
             if name in names.local:
-                found = _ast_type(
-                    ast.Name(name), parsed.typing_aliases, names, parsed.imported_names
+                found = (
+                    _ast_type(ast.Name(name), parsed.typing_aliases, names, parsed.imported_names),
+                    0,
                 )
+            elif (target := self._reexports(module, parsed).get(name)) is not None:
+                found = self._typed(*target, hops - 1)
+                found = None if found is None else (found[0], found[1] + 1)
+            if found is None:
+                del self._types[module, name]
             else:
-                exports = self._reexports(module, parsed)
-                found = self._type(*exports[name], _depth + 1) if name in exports else None
-            self._types[module, name] = found
+                self._types[module, name] = found
             return found
 
     def _row_type(
@@ -698,7 +725,18 @@ def _import_entries(parsed: ParsedSource) -> list[tuple[str, str, str | None, in
 def _imports_of(
     entries: Iterable[tuple[str, str, str | None, int]], module: str | None
 ) -> tuple[dict[str, tuple[str, str]], dict[str, str]]:
-    """``_imports`` of ``(local, original, from-module or None, level)``, in ``ast.walk`` order."""
+    """``_imports`` of ``(local, original, from-module or None, level)``, in ``ast.walk`` order.
+
+    A relative import resolves only within a named module.
+
+    Example:
+        >>> _imports_of([("q", "q", "db", 1)], "pkg.app")
+        ({'q': ('pkg.db', 'q')}, {'q': 'pkg.db.q'})
+        >>> _imports_of([("q", "q", "db", 1)], None)
+        ({}, {})
+        >>> _imports_of([("q", "q", "db", 3)], "pkg.app")
+        ({}, {})
+    """
     functions: dict[str, tuple[str, str]] = {}
     modules: dict[str, str] = {}
     package = module.rpartition(".")[0] if module else ""
@@ -737,7 +775,7 @@ def _argument(helper: Helper, call: ast.Call, param: str | None) -> ast.expr | N
 
 
 def _call_params(
-    helper: Helper, call: ast.Call, parsed: ParsedSource
+    helper: Helper, call: ast.Call, parsed: ParsedSource, constant: Constant
 ) -> tuple[ParamArg, ...] | None:
     """The arguments ``call`` passes for the placeholders of its query, or ``None`` when not spelled out.
 
@@ -747,11 +785,11 @@ def _call_params(
     stack = parsed.scopes_of(call)
 
     def typed(key: int | str, value: ast.expr) -> ParamArg:
-        return ParamArg(key, arg_type(value, parsed, stack))
+        return ParamArg(key, arg_type(value, parsed, stack, constant))
 
     if helper.params is not None:
         arg = _argument(helper, call, helper.params)
-        return literal_params(arg, parsed, stack)
+        return literal_params(arg, parsed, stack, constant)
     if helper.rest is not None:
         if any(isinstance(arg, ast.Starred) for arg in call.args):
             return None
@@ -894,6 +932,9 @@ def _find_helper_calls(
             source.module = module
         return helpers.fragment(source, dotted)
 
+    def constant(dotted: str) -> tuple[ParsedSource, ast.expr] | None:
+        return resolve_fragment(parsed, dotted)
+
     def forwarded(call: ast.Call, query: ast.expr) -> bool:
         """Whether ``query`` is the marked query parameter of a function around ``call``."""
         if not isinstance(query, ast.Name):
@@ -927,7 +968,7 @@ def _find_helper_calls(
                     query.value,
                     _argument(helper, node, helper.row),
                     aliases,
-                    _call_params(helper, node, parsed),
+                    _call_params(helper, node, parsed, constant),
                     node.end_lineno,
                     query_node=query,
                     configured=helper.configured,
@@ -943,7 +984,7 @@ def _find_helper_calls(
             None if text == UNCHECKED else text,
             _argument(helper, node, helper.row),
             aliases,
-            _call_params(helper, node, parsed),
+            _call_params(helper, node, parsed, constant),
             node.end_lineno,
             dynamic=text is None,
             query_node=query,
@@ -989,8 +1030,8 @@ def _site_calls(
     functions, modules = _imports_of(facts.imports, module)
     names = set(helpers.names)
     names |= {local for local, (_, original) in functions.items() if original in names}
-    if (sites := helper_sites(parsed.text, sorted(names))) is None:
-        return None
+    if (sites := helper_sites(parsed.text, sorted(names), helpers.rust(), module)) is None:
+        return None  # pragma: no cover - no pattern compiles for tens of thousands of names
 
     def module_of(prefix: str) -> str:
         head, _, rest = prefix.partition(".")

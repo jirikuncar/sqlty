@@ -346,9 +346,12 @@ def _parse_config(content: str, line: int, fail: Fail) -> dict[str, Any]:
         config = tomllib.loads(content)
     except tomllib.TOMLDecodeError as e:
         raise fail(line, f"invalid TOML: {e}") from None
-    if set(config) != {"tool"} or set(config["tool"]) != {"sqlty"}:
+    tool = config.get("tool", {"sqlty": {}})
+    if not config or set(config) - {"tool", "project"} or set(tool) != {"sqlty"}:
         raise fail(line, "config must be a [tool.sqlty] table")
-    settings = config["tool"]["sqlty"]
+    if set(config.get("project", {})) - {"requires-python"}:
+        raise fail(line, "[project] takes only requires-python")
+    settings = tool["sqlty"]
     try:
         validate_tool_table(settings, "config")
     except ConfigError as e:

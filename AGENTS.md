@@ -44,8 +44,8 @@ Tests run in parallel (pytest-xdist, `-n auto`) and in random order
 on another having run, nor on the working directory or global state another
 changes. Tests that measure wall time are marked `timing`: the default run
 leaves them out, since parallel workers slow them, and `make test` runs them
-alone afterwards. Tests marked `pg` share one database server (`SQLTY_PG_DSN`), so CI
-runs them in one process: `uv run pytest -m pg -n 0`.
+alone afterwards. Tests marked `pg` run when `SQLTY_PG_DSN` points to a PostgreSQL server; each
+worker gets its own database on it (`tests/conftest.py`).
 
 A test that needs a package sqlty does not depend on imports it at the top, and
 the package goes in a dependency group (`[dependency-groups]` in `pyproject.toml`),
@@ -78,7 +78,7 @@ argument's value, say), add a `@` result kind to `compile.rs` and cite the rule.
 lookup order and how to verify a `reference`. Every rule needs a `reference` to
 vendor documentation of the version the tests target, one per database
 (`reference.postgres` for PostgreSQL 17, `reference.mysql` for MySQL 8.4,
-`reference.sqlite` for SQLite 3), checked against the published page, and a one-sentence `reasoning`;
+`reference.sqlite` for SQLite 3, `reference.duckdb` for DuckDB 2.0), checked against the published page, and a one-sentence `reasoning`;
 the build fails otherwise. `sqlty check --explain` and `-- rules:` mdtest
 assertions show which rule typed a column; every rule needs one, in
 `tests/mdtest/type_inference/rule_coverage.md` if nowhere else
@@ -89,9 +89,9 @@ assertions show which rule typed a column; every rule needs one, in
 
 `skills/<name>/SKILL.md` (and its `references/`) are the Agent Skills, installed
 through the plugin manifests (`.claude-plugin/`, `.codex-plugin/`,
-`.cursor-plugin/`) or `sqlty skill --install`. `rust/crates/sqlty-ext/build.rs`
-compiles them into the extension: rebuild it after editing one, or
-`test_agent_skills_are_compiled_in` fails. A new skill gets a row in the table of
+`.cursor-plugin/`) or `sqlty skill --install`. `rust/crates/sqlty-cli/build.rs`
+compiles them, and the rule pages of `src/sqlty/rules/`, into the extension: rebuild it
+after editing one, or `test_agent_skills_are_compiled_in` fails. A new skill gets a row in the table of
 `docs/recipes/agents.md`.
 
 ## Benchmarks
@@ -398,7 +398,7 @@ checked file names, so checking an untrusted pull request is safe. A harness kee
 | Static scan | `tests/test_no_exec.py` | A call in `src/sqlty` to `exec`, `eval`, `compile`, `__import__`, `importlib.import_module`, `get_type_hints`, `types.new_class` and the like, outside `tests/no_exec_allowlist.txt` |
 | Audit hook | `tests/_no_exec.py`, loaded for every test | At runtime, any `exec`/`eval` or import that sqlty code runs, charged to the innermost `src/sqlty` function |
 | No I/O in the engine | `rust/crates/sqlty-sql/clippy.toml` (`sqlty-python` links it), run by `cargo clippy` | A file, process, network or standard stream call in `sqlty-sql` or `sqlty-python`; a test or `build.rs` that needs one says so with `#[expect(clippy::disallowed_methods, ...)]` |
-| Integrity check | `scripts/check_no_exec_harness.py`, CI job `No-exec harness intact`, `make check-no-exec-harness` | Against the merge base: guard files edited or unloaded, allowlist lines added, mdtest assertions removed or edited (a bare `# error:` may become specific), skips or xfails added, test functions removed |
+| Integrity check | `scripts/check_no_exec_harness.py`, CI job `No-exec harness intact`, `make check-no-exec-harness` | Against the merge base: guard files edited or unloaded, allowlist lines added, mdtest assertions removed or edited (a bare `# error:` may become specific; a copy may go while a block with the same setup and code still asserts it), skips or xfails added, test functions removed |
 
 CI runs the base branch's copy of the integrity check, so a pull request can't relax it.
 The allowlist is empty: never add a line. A change to a guard file fails the check by
@@ -419,13 +419,16 @@ src/sqlty/
 ├── _type_extractor/     # Row types (TypedDict, dataclass, ...), read from source, never imported
 ├── _lint.py             # Lint rules: severity, diagnostics, RuleConfig
 ├── _decode.py           # Magic codec decoder
-├── _cli.py              # CLI: rewrite, strip, check, server, version
-├── _lsp_bridge.py       # Workspace: what sqlty server checks a buffer with
+├── _cli.py              # CLI parser; complete, breaking, server, and every command with SQLTY_AST=python
+├── _lsp_bridge.py       # Workspace of sqlty server with a breaking baseline or SQLTY_AST=python
 └── magic.py             # Python codec registration
 rust/crates/             # Cargo workspace (root: rust/Cargo.toml)
 ├── sqlty-sql/           # analyzer/ (type inference), ddl; no PyO3
 │   └── rules/           # inference rules (*.inference.toml), compiled by build.rs; see its README
 ├── sqlty-python/        # tokens, rewriter, checker, fixer
+├── sqlty-project/       # a project read from disk: settings, helpers, checks of sqlty server
+├── sqlty-cli/           # the sqlty commands: rewrite, strip, format, check, rule, skill, version;
+│                        # main.rs is a standalone `sqlty` executable (cargo run -p sqlty-cli)
 ├── sqlty-lsp/           # the language server of sqlty server; tests without Python
 ├── sqlty-wasm/          # JSON in, JSON out, for WebAssembly: the docs playground (make playground)
 └── sqlty-ext/           # lib.rs (PyO3), builds sqlty._core; server.rs runs sqlty-lsp

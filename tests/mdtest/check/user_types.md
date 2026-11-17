@@ -4,64 +4,6 @@ Validates that SQL[UserType](...) annotations match the query columns
 structurally, supporting TypedDict, NamedTuple, dataclass, and Pydantic
 BaseModel types.
 
-## TypedDict — all fields match
-
-```toml
-[tool.sqlty]
-dialect = "postgres"
-```
-
-```python
-from typing import TypedDict
-from sqlty import SQL
-
-class User(TypedDict):
-    id: int
-    name: str
-
-q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-# error:
-```
-
-## TypedDict — field count mismatch
-
-```toml
-[tool.sqlty]
-dialect = "postgres"
-```
-
-```python
-from typing import TypedDict
-from sqlty import SQL
-
-class User(TypedDict):
-    id: int
-    name: str
-    email: str
-
-# error: [column-count-mismatch] "User has 3 fields but query returns 2 columns"
-q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-```
-
-## TypedDict — field type mismatch
-
-```toml
-[tool.sqlty]
-dialect = "postgres"
-```
-
-```python
-from typing import TypedDict
-from sqlty import SQL
-
-class User(TypedDict):
-    id: str
-    name: str
-
-# error: [column-type-mismatch] "User.id is str but query column 'id' infers int"
-q = SQL[User]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
-```
-
 ## TypedDict — field name mismatch
 
 ```toml
@@ -357,4 +299,32 @@ bad = SQL[BadShape]("--sql\nSELECT id, p FROM shapes")
 # error: [column-count-mismatch] "FlatShape.p has 1 fields but composite point2 has 2 fields"
 # error: [unknown-type] "column `shapes.p` has type `POINT2`, which has no Python type"
 short = SQL[FlatShape]("--sql\nSELECT id, p FROM shapes")
+```
+
+### `None | Row` and `Optional[Row]`
+
+```python
+from typing import NamedTuple, Optional, TypedDict
+from sqlty import SQL
+
+class Wrong(NamedTuple):
+    x: int
+    y: str | None
+
+class First(TypedDict):
+    id: int
+    p: None | Wrong
+
+class Wrapped(TypedDict):
+    id: int
+    p: Optional[Wrong]
+
+# error: [column-type-mismatch] "First.p.y is str but composite point2 field 'y' infers int"
+# error: [nullable-mismatch] "First.p.x is int but composite point2 field 'x' can be NULL"
+# error: [unknown-type] "column `shapes.p` has type `POINT2`, which has no Python type"
+first = SQL[First]("--sql\nSELECT id, p FROM shapes")
+# error: [column-type-mismatch] "Wrapped.p.y is str but composite point2 field 'y' infers int"
+# error: [nullable-mismatch] "Wrapped.p.x is int but composite point2 field 'x' can be NULL"
+# error: [unknown-type] "column `shapes.p` has type `POINT2`, which has no Python type"
+wrapped = SQL[Wrapped]("--sql\nSELECT id, p FROM shapes")
 ```

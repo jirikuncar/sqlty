@@ -535,3 +535,21 @@ def keyed(flag: bool) -> list[tuple[int]]:
     # error: [dynamic-query]
     return fetch_all("SELECT id FROM foos" + {"a" if flag else "b": "c"}["a"], tuple[int])
 ```
+
+## A key that is not text is not read
+
+```python
+from db import fetch_all
+
+
+def find() -> list[tuple[int]]:
+    query = {"a": "SELECT id FROM foos"}[{}]
+    # error: [dynamic-query] "query is not a string literal, so it is not checked"
+    return fetch_all(query, tuple[int])
+
+
+def find_keyed() -> list[tuple[int]]:
+    query = {{}: "SELECT id FROM foos"}["a"]
+    # error: [dynamic-query] "query is not a string literal, so it is not checked"
+    return fetch_all(query, tuple[int])
+```

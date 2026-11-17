@@ -11,6 +11,7 @@ use regex::Regex;
 use ruff_python_ast::{Expr, ExprCall};
 use ruff_text_size::{Ranged, TextRange};
 
+use crate::index::HelperIndex;
 use crate::module::Imports;
 use crate::scopes::{dotted, Context, Lines, Node, Param, Scan, Scope};
 
@@ -49,10 +50,18 @@ pub struct Site {
 
 /// The calls of `source` that may be helper calls, or `None` when it is not read in Rust
 /// (see [`crate::parse`]).
-pub fn sites(source: &str, names: &[String]) -> Option<Vec<Site>> {
+/// With `index`, an argument naming a constant imported from one of its modules has the
+/// constant's type; `module` is the name of `source`, for relative imports.
+pub fn sites(
+    source: &str,
+    names: &[String],
+    index: Option<&HelperIndex>,
+    module: Option<&str>,
+) -> Option<Vec<Site>> {
     let parsed = crate::parse::module(source)?;
     let body = &parsed.syntax().body;
     let imports = Imports::of(body);
+    let constant = |dotted: &str| index?.fragment_of(&imports.entries, dotted, module);
     let pattern = mentions(names)?;
     let scan = Scan::new(body, |call: &ExprCall| match call.func.as_ref() {
         Expr::Name(_) => true,
@@ -62,6 +71,7 @@ pub fn sites(source: &str, names: &[String]) -> Option<Vec<Site>> {
     let ctx = Context {
         imported: &imports.imported,
         scan: &scan,
+        constant: Some(&constant),
     };
     let lines = Lines::new(source);
     let mut mentions: Vec<Option<bool>> = vec![None; scan.scopes.len()];
@@ -129,14 +139,17 @@ fn site(
     lines: &Lines,
     source: &str,
 ) -> Site {
-    let (prefix, name, receiver) = match call.func.as_ref() {
-        Expr::Name(name) => (None, name.id.to_string(), None),
-        Expr::Attribute(attr) => (
+    let (prefix, name, receiver) = match call.func.as_attribute_expr() {
+        Some(attr) => (
             dotted(&attr.value),
             attr.attr.to_string(),
             receiver_class(&attr.value, stack, ctx),
         ),
-        _ => unreachable!("only names and dotted attributes are kept"),
+        None => {
+            let name = call.func.as_name_expr();
+            let name = name.expect("only names and dotted attributes are kept");
+            (None, name.id.to_string(), None)
+        }
     };
     let arg = |expr: &Expr| Arg {
         starred: matches!(expr, Expr::Starred(_)),
@@ -208,12 +221,13 @@ pub(crate) fn receiver_class(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 
     fn names(source: &str, wanted: &[&str]) -> Vec<String> {
         let wanted: Vec<String> = wanted.iter().map(ToString::to_string).collect();
-        sites(source, &wanted)
+        sites(source, &wanted, None, None)
             .unwrap()
             .into_iter()
             .map(|site| match site.prefix {
@@ -230,6 +244,15 @@ mod tests {
     }
 
     #[test]
+    fn the_module_region_is_the_whole_source() {
+        let source = "x = 1\ny = 2\n";
+        assert_eq!(
+            region(Node::Module, &Lines::new(source), source.len()),
+            (0, source.len())
+        );
+    }
+
+    #[test]
     fn decorators_belong_to_their_function() {
         let source = "@fetch\ndef f():\n    g(1)\n";
         assert_eq!(names(source, &["fetch"]), ["g"]);
@@ -238,7 +261,7 @@ mod tests {
     #[test]
     fn receivers() {
         let source = "class Db:\n    def run(self):\n        self.q.fetch(1)\n        self.fetch(2)\n    def __init__(self):\n        self.q = Repo()\ndb: Repo = Repo()\ndb.fetch(3)\n";
-        let found = sites(source, &["fetch".to_string()]).unwrap();
+        let found = sites(source, &["fetch".to_string()], None, None).unwrap();
         let receivers: Vec<_> = found.iter().map(|s| s.receiver.as_deref()).collect();
         assert_eq!(receivers, [Some("Repo"), Some("Db"), None, Some("Repo")]);
     }

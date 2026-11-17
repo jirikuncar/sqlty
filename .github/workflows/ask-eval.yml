@@ -1,0 +1,149 @@
+name: Ask eval
+
+# The playground's ask (docs/assets/playground/ask.js) on scripts/ask_eval: on demand for the
+# models given, and monthly for the playground's models plus small instruct models published
+# since the last run, opening an issue when there are new ones. A pull request that changes
+# the ask or the eval runs a few questions on the smallest model.
+on:
+  pull_request:
+    paths:
+      - docs/assets/playground/ask.js
+      - scripts/ask_eval/**
+      - .github/workflows/ask-eval.yml
+  workflow_dispatch:
+    inputs:
+      models:
+        description: Model ids of ask.js MODELS or scripts/ask_eval/models.json, comma-separated
+        default: qwen2.5-coder-1.5b,qwen2.5-coder-0.5b
+      variant:
+        description: Prompt (ask.js VARIANTS); `model` is each model's own
+        default: model
+      phrasing:
+        description: Ask what to get (`question`) or describe the problem (`problem`)
+        type: choice
+        options: [question, problem]
+        default: question
+      new:
+        description: Also evaluate models published in the last 35 days
+        type: boolean
+        default: false
+  schedule:
+    - cron: "17 5 1 * *"
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    name: Evaluate the ask
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    permissions:
+      contents: read
+      issues: write
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DSN: postgresql://postgres:postgres@localhost:5432/postgres
+      MODELS: ${{ github.event_name == 'pull_request' && 'qwen2.5-coder-0.5b' || inputs.models || 'qwen2.5-coder-1.5b,qwen2.5-coder-0.5b' }}
+      LIMIT: ${{ github.event_name == 'pull_request' && '6' || '' }}
+      VARIANT: ${{ inputs.variant || 'model' }}
+      PHRASING: ${{ inputs.phrasing || 'question' }}
+      NEW: ${{ github.event_name == 'schedule' || inputs.new }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --target wasm32-unknown-unknown
+          rustup default 1.99.1
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: rust -> target
+          save-if: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+          python-version: "3.14"
+
+      - name: Build the playground engine and vendor wllama
+        run: make playground
+
+      - name: Pick the models
+        run: |
+          if [ "$NEW" = true ]; then
+            uv run scripts/ask_eval/new_models.py --add > new-models.json
+            new=$(jq -r 'map(.id) | join(",")' new-models.json)
+            if [ -n "$new" ]; then MODELS="$MODELS,$new"; fi
+          fi
+          { echo "MODELS=$MODELS"; echo "CACHE_KEY=${MODELS//,/-}"; } >> "$GITHUB_ENV"
+
+      - name: Cache the models
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: models
+          key: ask-eval-models-${{ env.CACHE_KEY }}
+          restore-keys: ask-eval-models-
+
+      - name: Install Chromium
+        run: uvx --python 3.13 --from playwright==1.64.1 playwright install --with-deps chromium-headless-shell
+
+      - name: Ask each model
+        run: |
+          mkdir -p runs
+          for model in ${MODELS//,/ }; do
+            uv run scripts/ask_eval/evals.py ask --model "$model" --variant "$VARIANT" --phrasing "$PHRASING" ${LIMIT:+--limit "$LIMIT"} \
+              --models models --out "runs/$model.json" || echo "::warning::$model failed"
+          done
+
+      - name: Score
+        if: always()
+        run: |
+          uv run scripts/ask_eval/evals.py score runs/*.json --markdown summary.md
+          { echo "## Ask eval"; echo; cat summary.md; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: ask-eval
+          path: |
+            runs/
+            summary.md
+            new-models.json
+          if-no-files-found: ignore
+
+      - name: Open an issue for new models
+        if: env.NEW == 'true' && hashFiles('new-models.json') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$(jq length new-models.json)" = 0 ]; then exit 0; fi
+          {
+            echo "Small instruct models published since the last ask eval, next to the playground's:"
+            echo
+            jq -r '.[] | "- [\(.repo)](https://huggingface.co/\(.repo)): \(.file), \(.bytes / 1048576 | floor) MiB, \(.license), \(.created)"' new-models.json
+            echo
+            cat summary.md
+            echo
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } > issue.md
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "Ask eval: new models $(date +%Y-%m)" --body-file issue.md

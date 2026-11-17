@@ -115,6 +115,7 @@ pub(super) fn schema_for_new(path: &[String]) -> &str {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

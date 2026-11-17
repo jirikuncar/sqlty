@@ -32,7 +32,6 @@ one: int | ? | NonNull
 lbl: str | TEXT | Nullable
 
 SELECT
-no rows
 
 SELECT FROM a
 

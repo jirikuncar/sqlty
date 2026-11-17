@@ -98,3 +98,64 @@ def test_expressions_nested_too_deep_are_not_analyzed() -> None:
     assert [(d["rule"], d["message"]) for d in core.check_source(source, schema_sql=SCHEMA)] == [
         ("unparsed-query", "query does not parse: expressions nest more than 1000 levels deep")
     ]
+
+
+MODULES = {
+    "pkg.a": "from sqlty import SQL\nfrom pkg.rows import R\n"
+    'q = SQL[R]("--sql\\nSELECT id, id AS x FROM users")  # sqlty: ignore[narrow-type]\n',
+    "pkg.rows": "from typing import TypedDict\nclass R(TypedDict):\n    id: int\n    x: int | None\n",
+    "pkg.b": 'from sqlty import SQL\nq = SQL[tuple[str]]("--sql\\nSELECT 1::INTEGER")  # sqlty: ignore\n'
+    'r = SQL[tuple[int]]("--sql\\nSELECT id FROM users")  # sqlty: ignore\n',
+    "pkg.deep": f'q = "--sql\\n{_chain(999)}"\n',
+    "pkg.broken": 'q = "--sql\\nSELECT nope FROM users"  # sqlty: ignore[unknown-column]\ndef (\n',
+}
+
+
+@pytest.mark.parametrize("jobs", [1, 3])
+def test_check_modules_reports_what_check_source_does(jobs: int) -> None:
+    from sqlty._check import RowUsage, check_modules
+    from sqlty._helpers import HelperIndex
+    from sqlty._source import ParsedSource
+
+    index = HelperIndex()
+    parsed = {name: ParsedSource(text, name) for name, text in MODULES.items()}
+    for name, source in parsed.items():
+        index.add(name, source)
+    schema = core.load_schema(SCHEMA)
+    configs = [
+        (
+            "postgres",
+            schema,
+            {"redundant-optional": "error"},
+            None,
+            False,
+            frozenset(),
+            index,
+            None,
+        ),
+        ("sqlite", schema, {"unused-ignore": "ignore"}, None, True, frozenset(), None, 4),
+    ]
+    modules = [(source, configs[n % 2]) for n, source in enumerate(parsed.values())]
+    usage, expected_usage = RowUsage(), RowUsage()
+
+    found = check_modules(modules, usage, jobs)
+
+    expected = [
+        core.check_source(
+            source,
+            dialect=dialect,
+            schema_sql=schema,
+            rules=rules,
+            untyped=untyped,
+            helpers=helpers,
+            row_usage=expected_usage,
+            query_variants=variants,
+        )
+        for source, (dialect, schema, rules, _, untyped, _, helpers, variants) in modules
+    ]
+    assert found == expected
+    assert any(found)
+    flat = [diag for diagnostics in found for diag in diagnostics]
+    assert usage.filter(flat) == expected_usage.filter(
+        [diag for diagnostics in expected for diag in diagnostics]
+    )

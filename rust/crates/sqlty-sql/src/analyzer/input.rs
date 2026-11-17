@@ -1,5 +1,5 @@
 //! What sqlparser reads of a query: the `--sql` marker line dropped, psycopg placeholders
-//! as `NULL`, and the syntax it rejects respelled. Every fix is an edit on one token stream
+//! as numbered ones, and the syntax it rejects respelled. Every fix is an edit on one token stream
 //! ([`super::tokens`]), so none lands inside a string literal, a quoted name or a comment.
 
 use std::borrow::Cow;
@@ -9,48 +9,24 @@ use regex::Regex;
 
 use super::dialect::SqlDialect;
 use super::respell::respell;
-use super::tokens::{apply, closing, tokens, Edit, Kind, Token};
+use super::tokens::{apply, tokens, Edit, Kind, Token};
 
 /// A leading `--sql` marker line: MySQL only reads `--` followed by whitespace as a comment.
 static SQL_MARKER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\A\s*--sql[^\n]*\n?").unwrap());
 
-/// PostgreSQL types sqlparser reads a `type 'string'` literal of only as a cast.
-const POSTGRES_TYPED_STRINGS: [&str; 19] = [
-    "bpchar",
-    "cidr",
-    "citext",
-    "daterange",
-    "hstore",
-    "inet",
-    "int4range",
-    "int8range",
-    "jsonpath",
-    "macaddr",
-    "macaddr8",
-    "money",
-    "name",
-    "numrange",
-    "oid",
-    "pg_lsn",
-    "tsrange",
-    "tstzrange",
-    "txid_snapshot",
-];
+/// What a psycopg placeholder (`%s`) reads as, in PostgreSQL and elsewhere: a parameter
+/// numbered as none is, which can be NULL since a caller may bind `None`.
+pub(super) const PSYCOPG: [&str; 2] = ["$00", "?00"];
 
 /// `sql` as sqlparser should read it: the `--sql` marker line dropped (a leading space
 /// form like `--sql SELECT 1` leaves nothing), psycopg placeholders (`%s`, `%(name)s`,
-/// `%b`, `%t`) as `NULL`, a value of unknown type, and `%%` as `%`, and the syntax sqlparser
+/// `%b`, `%t`) as [`PSYCOPG`] placeholders, values of unknown type, and `%%` as `%`, and the syntax sqlparser
 /// rejects respelled as the closest it reads:
 ///
 /// - ISO's `BINARY LARGE OBJECT` as `BLOB` and `T MULTISET` as the array `T[]`;
-/// - in PostgreSQL, the `WHERE` of `ON CONFLICT (...) WHERE ... DO` dropped (the partial
-///   index that arbitrates the conflict does not change the result), `OVERRIDING SYSTEM
-///   VALUE` and `OVERRIDING USER VALUE` dropped (they pick the stored value, not its
-///   type), `FOR NO KEY UPDATE`
-///   as `FOR UPDATE`, `FOR KEY SHARE` as `FOR SHARE`, `OF` keeping only its first table,
-///   and `cidr '...'` and similar literals as casts;
+/// - in PostgreSQL, `FOR NO KEY UPDATE` as `FOR UPDATE`, `FOR KEY SHARE` as `FOR SHARE`
+///   and `OF` keeping only its first table;
 /// - in PostgreSQL and MySQL, a `TABLE name` query as `SELECT * FROM name`;
-/// - in SQLite, `INDEXED BY name` and `NOT INDEXED` dropped: they only pick an index;
 /// - the rest of [`respell`].
 ///
 /// A placeholder in a string literal is left alone, as the database would read it, but
@@ -61,7 +37,7 @@ pub(super) fn parser_input(sql: &str, dialect: SqlDialect) -> Input<'_> {
     let tokens = tokens(sql, dialect);
     let mut edits = Vec::new();
     fixes(sql, &tokens, dialect, &mut edits);
-    placeholders(sql, &tokens, &mut edits);
+    placeholders(sql, &tokens, dialect, &mut edits);
     let mut respelling = Vec::new();
     respell(sql, &tokens, dialect, &mut respelling);
     let respelled = (!respelling.is_empty()).then(|| {
@@ -185,37 +161,8 @@ fn fixes(sql: &str, tokens: &[Token], dialect: SqlDialect, edits: &mut Vec<Edit>
     };
     for i in 0..tokens.len() {
         iso_type(sql, tokens, i, edits);
-        match dialect {
-            SqlDialect::Postgres => {
-                if word(i, "ON") && word(i + 1, "CONFLICT") {
-                    edits.extend(conflict_predicate(sql, tokens, i + 2));
-                } else if word(i, "FOR") {
-                    row_lock(sql, tokens, i, edits);
-                } else if word(i, "OVERRIDING")
-                    && (word(i + 1, "SYSTEM") || word(i + 1, "USER"))
-                    && word(i + 2, "VALUE")
-                {
-                    edits.push((tokens[i].start, tokens[i + 2].end, String::new()));
-                } else if POSTGRES_TYPED_STRINGS.iter().any(|ty| word(i, ty))
-                    && text(i + 1).starts_with('\'')
-                    && spaced(sql, tokens, i)
-                {
-                    let value = text(i + 1);
-                    edits.push((
-                        tokens[i].start,
-                        tokens[i + 1].end,
-                        format!("CAST({value} AS {})", text(i)),
-                    ));
-                }
-            }
-            SqlDialect::Sqlite => {
-                if word(i, "INDEXED") && word(i + 1, "BY") && is_name(text(i + 2)) {
-                    edits.push((tokens[i].start, tokens[i + 2].end, String::new()));
-                } else if word(i, "NOT") && word(i + 1, "INDEXED") {
-                    edits.push((tokens[i].start, tokens[i + 1].end, String::new()));
-                }
-            }
-            _ => {}
+        if dialect == SqlDialect::Postgres && word(i, "FOR") {
+            row_lock(sql, tokens, i, edits);
         }
         // sqlparser reads `TABLE name` only after a set operator or a `WITH`.
         let set_operator = |j: usize| {
@@ -246,17 +193,14 @@ fn iso_type(sql: &str, tokens: &[Token], i: usize, edits: &mut Vec<Edit>) {
     };
     if word(i, "BINARY") && word(i + 1, "LARGE") && word(i + 2, "OBJECT") {
         edits.push((tokens[i].start, tokens[i + 2].end, "BLOB".to_string()));
-    } else if word(i, "MULTISET") && i > 0 && spaced(sql, tokens, i - 1) {
+    } else if word(i, "MULTISET") && i > 0 && spaced(sql, &tokens[i - 1], &tokens[i]) {
         edits.push((tokens[i - 1].end, tokens[i].end, "[]".to_string()));
     }
 }
 
-/// Whether only whitespace, and some, separates token `i` from the next one.
-fn spaced(sql: &str, tokens: &[Token], i: usize) -> bool {
-    let Some(next) = tokens.get(i + 1) else {
-        return false;
-    };
-    let gap = &sql[tokens[i].end..next.start];
+/// Whether only whitespace, and some, separates `before` from `after`.
+fn spaced(sql: &str, before: &Token, after: &Token) -> bool {
+    let gap = &sql[before.end..after.start];
     !gap.is_empty() && gap.bytes().all(|b| b.is_ascii_whitespace())
 }
 
@@ -267,32 +211,6 @@ fn is_name(text: &str) -> bool {
             .bytes()
             .next()
             .is_some_and(|b| b == b'_' || b.is_ascii_alphanumeric())
-}
-
-/// The edit dropping the `WHERE <predicate>` of `ON CONFLICT (cols) WHERE <predicate> DO`,
-/// whose parenthesis is token `open`.
-fn conflict_predicate(sql: &str, tokens: &[Token], open: usize) -> Option<Edit> {
-    if tokens.get(open)?.kind != Kind::Open {
-        return None;
-    }
-    let close = closing(tokens, open)?;
-    let clause = tokens.get(close + 1)?;
-    if !sql[clause.start..clause.end].eq_ignore_ascii_case("WHERE") {
-        return None;
-    }
-    let mut depth = 0;
-    for token in &tokens[close + 2..] {
-        match token.kind {
-            Kind::Open => depth += 1,
-            Kind::Close if depth == 0 => return None,
-            Kind::Close => depth -= 1,
-            Kind::Word if depth == 0 && sql[token.start..token.end].eq_ignore_ascii_case("DO") => {
-                return Some((tokens[close].end, token.start, " ".to_string()));
-            }
-            _ => {}
-        }
-    }
-    None
 }
 
 /// PostgreSQL's row-lock clause at the `FOR` of token `i`, as sqlparser reads it: `NO KEY
@@ -340,8 +258,9 @@ fn row_lock(sql: &str, tokens: &[Token], i: usize, edits: &mut Vec<Edit>) {
     }
 }
 
-/// psycopg placeholders as `NULL` and `%%` as `%`; in a string literal, only `%%`.
-fn placeholders(sql: &str, tokens: &[Token], edits: &mut Vec<Edit>) {
+/// psycopg placeholders as [`PSYCOPG`] and `%%` as `%`; in a string literal, only `%%`.
+fn placeholders(sql: &str, tokens: &[Token], dialect: SqlDialect, edits: &mut Vec<Edit>) {
+    let placeholder = PSYCOPG[usize::from(dialect != SqlDialect::Postgres)];
     let bytes = sql.as_bytes();
     let mut quoted = tokens
         .iter()
@@ -364,7 +283,7 @@ fn placeholders(sql: &str, tokens: &[Token], edits: &mut Vec<Edit>) {
             };
             match rest.get(name) {
                 Some(b's' | b'b' | b't') if name != 2 => {
-                    edits.push((at, at + name + 2, "NULL".to_string()));
+                    edits.push((at, at + name + 2, placeholder.to_string()));
                     at + name + 2
                 }
                 _ => at + 1,

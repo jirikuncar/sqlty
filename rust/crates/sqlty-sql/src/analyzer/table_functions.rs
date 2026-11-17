@@ -12,7 +12,7 @@ use crate::catalog::FunctionReturn;
 
 use super::dialect::SqlDialect;
 use super::expr::from_sql_type;
-use super::functions::{function_name, positional_args, Returns};
+use super::functions::{arg_list, function_name, positional_args, Returns};
 use super::grouping::is_aggregate_call;
 use super::names::table_key;
 use super::nullability::{Facts, Nullability};
@@ -81,10 +81,7 @@ impl Analyzer<'_> {
     /// Whether a call returns a set of rows: a built-in set-returning function, or a
     /// function the schema declares `SETOF` or `TABLE`.
     pub(super) fn is_set_returning(&self, func: &Function) -> bool {
-        let count = match &func.args {
-            FunctionArguments::List(list) => list.args.len(),
-            _ => 0,
-        };
+        let count = arg_list(&func.args).len();
         match self
             .schema
             .function(&table_key(&func.name, self.dialect), count)

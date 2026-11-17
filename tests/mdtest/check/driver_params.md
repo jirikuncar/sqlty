@@ -43,6 +43,16 @@ with psycopg.connect("dbname=x") as conn:
     conn.execute("DELETE FROM users WHERE id = %s", params=(b"1",))
 ```
 
+### A signed float
+
+```python
+import psycopg
+
+conn = psycopg.connect("dbname=x")
+# error: [param-type-mismatch] "parameter 1 expects str, got float"
+conn.execute("DELETE FROM users WHERE name = %s", (-1.5,))
+```
+
 ## executemany checks each row
 
 ```python
@@ -53,6 +63,17 @@ cur = conn.cursor()
 cur.executemany("INSERT INTO users (id, name) VALUES (%s, %s)", [(1, "a"), (2, "b")])
 # error:
 cur.executemany("INSERT INTO users (id, name) VALUES (%s, %s)", [(1, "a"), (2.5, "b")])
+```
+
+## executemany over a row it cannot read
+
+```python
+import psycopg
+
+def load(cur: psycopg.Cursor, row) -> None:
+    cur.executemany("INSERT INTO users (id, name) VALUES (%s, %s)", [row])
+    # error: [param-type-mismatch] "parameters are a single int, which psycopg rejects"
+    cur.executemany("DELETE FROM users WHERE id = %s", [1, 2])
 ```
 
 ## A single value is not a sequence of parameters
@@ -116,6 +137,33 @@ conn.execute("DELETE FROM users WHERE id = %s", params_variable)
 conn.execute("DELETE FROM users WHERE id = %s", (*rest_args,))
 conn.execute(query_variable, (b"1",))
 # error:
+```
+
+### Rebound names and rows from a variable
+
+```python
+import psycopg
+
+conn = psycopg.connect("dbname=x")
+alias = conn
+alias.execute("DELETE FROM users WHERE id = %s", (b"1",))
+QUERY = "DELETE FROM users WHERE id = %s"
+QUERY = "DELETE FROM users WHERE name = %s"
+conn.execute(QUERY, (b"1",))
+rows = [(1, b"a")]
+cur = conn.cursor()
+cur.executemany("INSERT INTO users (id, name) VALUES (%s, %s)", rows)
+# error: [param-type-mismatch] "parameter 1 expects int, got bytes"
+conn.execute("DELETE FROM users WHERE id = %s", (b"1",))
+```
+
+### Parameters passed as `**kwargs`
+
+```python
+import psycopg
+
+conn = psycopg.connect("dbname=x")
+conn.execute("DELETE FROM users WHERE id = %s", **options)
 ```
 
 ## asyncpg
@@ -284,6 +332,21 @@ conn.execute("DELETE FROM users WHERE id = %s")
 # error:
 ```
 
+### Type parameters and a name bound through itself
+
+```python
+import psycopg
+
+def generic[T](x: T) -> None:
+    conn = psycopg.connect("dbname=x")
+    # error: [param-count-mismatch] "query has 1 parameter, the call passes 0"
+    conn.execute("DELETE FROM users WHERE id = %s")
+
+def circular():
+    cur = cur.cursor()
+    cur.execute("DELETE FROM users WHERE id = %s")
+```
+
 ## A driver method also configured as a helper
 
 Its parameters are reported once.
@@ -343,6 +406,7 @@ def run(conn: psycopg.Connection, ids: tuple[int, int]) -> None:
     execute(conn, BY_ID, ids)
     scalar(conn, BY_ID, ids)
     scalar(conn, BY_ID.bind((1,)))
+    execute(conn, BY_ID, *ids)
 ```
 
 ### Also configured as a helper

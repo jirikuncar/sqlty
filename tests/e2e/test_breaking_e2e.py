@@ -5,6 +5,7 @@ cover the baselines (git revisions, snapshots, schema files), worktree cleanup,
 directions, paths and exit codes."""
 
 import json
+import os
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -133,6 +134,36 @@ def test_a_revision_of_some_paths_reads_their_schema(
     assert lines(result)[0].startswith("app/deep/q.py:1: [unknown-column] column `handle`")
     assert lines(result)[1:] == ["Found 1 breaking change(s)"]
     assert git(repo, "worktree", "list").count("\n") == 1
+
+
+def test_git_not_installed_is_an_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from sqlty._breaking import GitError, _git
+
+    monkeypatch.setenv("PATH", str(tmp_path))
+
+    with pytest.raises(GitError, match="git is not installed"):
+        _git(tmp_path, "status")
+
+
+def test_a_file_that_is_not_utf8_is_skipped(cli: Cli, repo: Path) -> None:
+    (repo / "app" / "latin.py").write_bytes(b"x = '\\xe9'\n".replace(b"\\xe9", b"\xe9"))
+
+    result = cli(["breaking", "--against", "HEAD~1", "--direction", "forward"], {"cwd": repo})
+
+    assert result.returncode == 1, result.stderr
+    assert "latin.py: not UTF-8" in result.stderr
+
+
+def test_a_revision_whose_config_is_broken(cli: Cli, repo: Path) -> None:
+    (repo / "app" / "pyproject.toml").write_text("[tool.sqlty\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "broken")
+    git(repo, "rm", "-q", "app/pyproject.toml")
+
+    result = cli(["breaking", "--against", "HEAD", "app"], {"cwd": repo})
+
+    assert (result.returncode, result.stdout) == (0, "")
+    assert "Failed to parse" in result.stderr
 
 
 HELPER_CONFIG = """\
@@ -445,10 +476,21 @@ def test_baseline_errors(cli: Cli, repo: Path, args: list[str], message: str) ->
     assert (result.returncode, result.stderr.strip()) == (2, message)
 
 
+def test_a_snapshot_that_is_not_json_is_an_error(tmp_path: Path) -> None:
+    from sqlty._config import ConfigError
+    from sqlty._snapshot import Snapshot
+
+    (tmp_path / "broken.json").write_text("{")
+
+    with pytest.raises(ConfigError, match="broken.json is not a sqlty snapshot: Expecting"):
+        Snapshot.load(tmp_path / "broken.json", "broken", [])
+
+
 @pytest.mark.parametrize("against", ["HEAD", "../head.json", "../head.sql"])
 def test_an_unchanged_schema_checks_no_query(
     cli: Cli, repo: Path, against: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import sqlty._check
     import sqlty.core
     from sqlty._cli import main
 
@@ -457,6 +499,11 @@ def test_an_unchanged_schema_checks_no_query(
     checked: list[str] = []
     monkeypatch.setattr(
         sqlty.core, "breaking_source", lambda source, **_: checked.append(source.text) or []
+    )
+    monkeypatch.setattr(
+        sqlty._check,
+        "breaking_modules",
+        lambda modules, _: [checked.append(parsed.text) or [] for parsed, *_ in modules],
     )
     monkeypatch.chdir(repo)
 
@@ -482,7 +529,7 @@ def test_a_snapshot_without_a_schema_checks_no_query(
     main(["breaking", "--against", "../head.json", "--quiet"])
 
 
-def test_jobs_give_the_same_findings(
+def test_processes_give_the_same_findings(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from sqlty._cli import main
@@ -491,13 +538,14 @@ def test_jobs_give_the_same_findings(
         (repo / "app" / f"m{i}.py").write_text(OLD_CODE + NEW_CODE)
     monkeypatch.chdir(repo)
 
-    def findings(jobs: str) -> list[str]:
+    def findings(jobs: int) -> list[str]:
+        monkeypatch.setattr(os, "process_cpu_count", lambda: jobs)
         with pytest.raises(SystemExit):
-            main(["breaking", "--against", "HEAD~1", "-j", jobs])
+            main(["breaking", "--against", "HEAD~1"])
         return capsys.readouterr().out.splitlines()
 
-    assert findings("1") == findings("3")
-    assert findings("3")[-1] == "Found 6 breaking change(s)"
+    assert findings(1) == findings(3)
+    assert findings(3)[-1] == "Found 6 breaking change(s)"
 
 
 def test_query_files_are_compared_in_both_directions(cli: Cli, repo: Path) -> None:

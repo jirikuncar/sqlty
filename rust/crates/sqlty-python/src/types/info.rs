@@ -41,16 +41,8 @@ impl<V> Dict<V> {
         self.0.iter().map(|(k, v)| (k.as_str(), v))
     }
 
-    pub fn keys(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().map(|(k, _)| k.as_str())
-    }
-
     pub fn values(&self) -> impl Iterator<Item = &V> {
         self.0.iter().map(|(_, v)| v)
-    }
-
-    pub fn len(&self) -> usize {
-        self.0.len()
     }
 
     pub fn is_empty(&self) -> bool {

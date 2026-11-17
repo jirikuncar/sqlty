@@ -90,8 +90,8 @@ fn named(query: &str, word: &Tok, dialect: &str, schema: &SchemaData) -> Option<
             }
         }
         CandidateKind::Cte => format!("CTE `{}` of the query", candidate.label),
-        CandidateKind::Join => return None,
-        CandidateKind::Table | CandidateKind::View => {
+        // No word is a join, whose label holds its `ON`.
+        CandidateKind::Table | CandidateKind::View | CandidateKind::Join => {
             let name = match &candidate.detail {
                 Some(schema) => format!("{schema}.{}", candidate.label),
                 None => candidate.label.clone(),
@@ -101,26 +101,26 @@ fn named(query: &str, word: &Tok, dialect: &str, schema: &SchemaData) -> Option<
             } else {
                 "Table"
             };
-            let columns: Vec<Candidate> = match schema.columns_of(&name) {
-                Some(Columns::Table(columns)) => columns
-                    .iter()
-                    .map(|c| {
-                        Candidate::column(
-                            &c.ident,
-                            &name,
-                            Some(&c.sql_type),
-                            super::Nullability::declared(c.not_null),
-                        )
-                    })
-                    .collect(),
-                Some(Columns::View(columns)) => columns
-                    .iter()
-                    .map(|c| {
-                        Candidate::column(&c.name, &name, c.sql_type.as_deref(), c.nullability)
-                    })
-                    .collect(),
-                None => Vec::new(),
-            };
+            let columns: Vec<Candidate> =
+                match schema.columns_of(&name).unwrap_or(Columns::Table(&[])) {
+                    Columns::Table(columns) => columns
+                        .iter()
+                        .map(|c| {
+                            Candidate::column(
+                                &c.ident,
+                                &name,
+                                Some(&c.sql_type),
+                                super::Nullability::declared(c.not_null),
+                            )
+                        })
+                        .collect(),
+                    Columns::View(columns) => columns
+                        .iter()
+                        .map(|c| {
+                            Candidate::column(&c.name, &name, c.sql_type.as_deref(), c.nullability)
+                        })
+                        .collect(),
+                };
             listed(format!("{kind} `{name}`"), &columns, columns.len() > SHOWN)
         }
     })
@@ -185,26 +185,16 @@ fn result_column(
         (None, Some(sql)) => write!(text, ": `{sql}`"),
         (None, None) => Ok(()),
     };
-    let rules = explain_select(query, dialect, Some(schema))
-        .and_then(|rules| rules.into_iter().nth(item.index));
-    if let Some(rules) = rules {
-        if let Some(rule) = rules.type_rule {
-            let _ = write!(
-                text,
-                "\n\nTyped by `{}`: {}\n\n{}",
-                rule.id, rule.reasoning, rule.reference
-            );
-        }
-        if let Some(rule) = rules
-            .nullability_rule
-            .filter(|n| Some(n.id) != rules.type_rule.map(|t| t.id))
-        {
-            let _ = write!(
-                text,
-                "\n\nNullability by `{}`: {}\n\n{}",
-                rule.id, rule.reasoning, rule.reference
-            );
-        }
+    // Each rule decides both type and nullability.
+    let rule = explain_select(query, dialect, Some(schema))
+        .and_then(|rules| rules.into_iter().nth(item.index))
+        .and_then(|rules| rules.type_rule);
+    if let Some(rule) = rule {
+        let _ = write!(
+            text,
+            "\n\nTyped by `{}`: {}\n\n{}",
+            rule.id, rule.reasoning, rule.reference
+        );
     }
     Some(text)
 }
@@ -306,6 +296,7 @@ fn select_item(tokens: &[Tok], at: usize) -> Option<SelectItem> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::catalog::load;
@@ -423,6 +414,91 @@ mod tests {
         assert_eq!(
             contents("INSERT INTO orders (user_id) SELECT id FROM users RETURNING to|tal"),
             "Column `total` of `orders`: `INT NULL`"
+        );
+    }
+
+    fn contents_in(schema: &str, dialect: &str, sql: &str) -> String {
+        let cursor = sql.find('|').expect("a cursor");
+        let sql = sql.replacen('|', "", 1);
+        let schema = load(schema, dialect).0;
+        hover(&sql, cursor, dialect, Some(&schema)).map_or_else(String::new, |found| found.contents)
+    }
+
+    #[test]
+    fn rarer_shapes() {
+        let wide = format!(
+            "CREATE TABLE wide ({});",
+            (0..51)
+                .map(|n| format!("c{n} INT"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        let views = "CREATE TABLE t (a INT, b TEXT);
+            CREATE VIEW v AS SELECT NULL AS x, a FROM t;";
+        let found = [
+            contents_in(&wide, "postgres", "SELECT 1 FROM wi|de")
+                .lines()
+                .last()
+                .unwrap()
+                .to_string(),
+            contents_in(&wide, "postgres", "SELECT 1 FROM wide w WHERE |w.c0 = 1")
+                .lines()
+                .last()
+                .unwrap()
+                .to_string(),
+            contents_in(views, "sqlite", "SELECT 1 FROM |t"),
+            contents_in(views, "sqlite", "SELECT 1 FROM |v"),
+            contents_in(views, "sqlite", "SELECT 1 FROM v WHERE |x IS NULL"),
+            contents_in(views, "sqlite", "SELECT (zz|z) AS q FROM t"),
+            contents_in(views, "sqlite", "SELECT NULL AS |q FROM t"),
+            contents_in(
+                views,
+                "sqlite",
+                "SELECT u.a AS |q FROM t LEFT JOIN t u ON true",
+            )
+            .lines()
+            .take(3)
+            .collect::<Vec<_>>()
+            .join("|"),
+            contents_in(views, "sqlite", "UPDATE t SET |a = 1"),
+            contents_in(views, "sqlite", "SELECT DISTINCT ON ((a), b) |b FROM t"),
+            contents_in(
+                "CREATE SCHEMA s; CREATE TABLE s.t (a INT);",
+                "postgres",
+                "SELECT 1 FROM |s.t",
+            ),
+            contents_in(views, "postgres", "SELECT a::geometry AS |q FROM t"),
+            contents_in(views, "sqlite", "SELECT json_extract(b, '$') AS |q FROM t")
+                .lines()
+                .next()
+                .unwrap()
+                .to_string(),
+            contents_in(
+                "CREATE VIEW p AS SELECT $1::int AS p;",
+                "postgres",
+                "SELECT 1 FROM |p",
+            ),
+            contents_in(views, "postgres", "SELECT DISTINCT |a FROM t"),
+        ];
+        assert_eq!(
+            found,
+            [
+                "- ...",
+                "- ...",
+                "Table `t`\n- `a` `INT NULL`\n- `b` `TEXT NULL`",
+                "View `v`\n- `x`\n- `a` `INT NULL`",
+                "Column `x` of `v`",
+                "Result column `q`",
+                "Result column `q`",
+                "Result column `q`: `int | None` (`INT`)",
+                "Column `a` of `t`: `INT NULL`",
+                "Result column `b`: `str | None` (`TEXT`)",
+                "",
+                "Result column `q`: `GEOMETRY`",
+                "Result column `q`: `typing.Any`",
+                "View `public.p`\n- `p` `INT`",
+                "Result column `a`: `int | None` (`INT`)",
+            ]
         );
     }
 }

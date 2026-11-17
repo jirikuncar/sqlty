@@ -11,11 +11,13 @@ import ast
 import re
 import sys
 import typing
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, NamedTuple
 
 from sqlty._core import ModuleIndex, Schema
 from sqlty._core import analyze_columns as _analyze_columns
+from sqlty._core import breaking_modules as _breaking_modules
+from sqlty._core import check_modules as _check_modules
 from sqlty._core import check_source as _check_source
 from sqlty._core import composite_fields as _composite_fields
 from sqlty._core import module_diagnostics as _module_diagnostics
@@ -219,12 +221,6 @@ class _Check:
         self.diagnostics.append(diagnostic)
         return diagnostic
 
-    def query_span(self, call: HelperCall) -> tuple[int, int] | None:
-        """The byte offsets of the argument the query of ``call`` comes from."""
-        if call.query_span is not None:
-            return call.query_span
-        return None if call.query_node is None else self.parsed.span(call.query_node)
-
 
 def _check_unchecked_queries(ctx: _Check) -> None:
     for call in ctx.found:
@@ -234,21 +230,21 @@ def _check_unchecked_queries(ctx: _Check) -> None:
                     "dynamic-query" if call.dynamic else "unchecked-query",
                     f"query has {call.reason}, so it is not checked",
                     call.line,
-                    ctx.query_span(call),
+                    call.query_span,
                 )
             elif call.dynamic:
                 ctx.report(
                     "dynamic-query",
                     "query is not a string literal, so it is not checked",
                     call.line,
-                    ctx.query_span(call),
+                    call.query_span,
                 )
             else:
                 ctx.report(
                     "unchecked-query",
                     "psycopg query is not built from literals only, so it is not checked",
                     call.line,
-                    ctx.query_span(call),
+                    call.query_span,
                 )
 
 
@@ -268,13 +264,13 @@ def _check_params(ctx: _Check) -> None:
                 "param-type-mismatch",
                 f"parameters are a single {single}, which {driver} rejects: pass a sequence, `(value,)`",
                 line,
-                ctx.query_span(call),
+                call.query_span,
             )
     for call in [*ctx.calls, *ctx.driver_calls]:
         if call.params is not None:
             declared = _declared_annotations(ctx, call.query)
             for rule, message in _param_diagnostics(call, ctx.dialect, ctx.schema_sql, declared):
-                ctx.report(rule, message, call.line, ctx.query_span(call))
+                ctx.report(rule, message, call.line, call.query_span)
 
 
 def _declared_annotations(
@@ -338,7 +334,7 @@ def _check_select_star(ctx: _Check) -> None:
                 and not (isinstance(ctx.schema_sql, Schema) and ctx.schema_sql.absent),
             )
         ):
-            ctx.report(*found, call.line, ctx.query_span(call))
+            ctx.report(*found, call.line, call.query_span)
 
 
 def _check_unparsed(ctx: _Check) -> None:
@@ -353,7 +349,7 @@ def _check_unparsed(ctx: _Check) -> None:
             message = f"query does not parse: {error}"
             if "found: {" in error and (field := _FORMAT_FIELD.search(call.query)):
                 message += f"; `{field[0]}` is a `.format()` field: fill it with `sql.SQL(...).format(...)`, or pass a value as `%s`"
-            ctx.report("unparsed-query", message, call.line, ctx.query_span(call))
+            ctx.report("unparsed-query", message, call.line, call.query_span)
 
 
 _FORMAT_FIELD = re.compile(r"\{\w*\}")
@@ -368,7 +364,7 @@ def _check_names(ctx: _Check) -> None:
         for rule, message, *_ in _query_diagnostics(
             call.query, dialect=ctx.dialect, schema_sql=ctx.schema_sql
         ):
-            ctx.report(rule, message, call.line, ctx.query_span(call))
+            ctx.report(rule, message, call.line, call.query_span)
 
 
 def _check_structural(ctx: _Check) -> None:
@@ -421,7 +417,7 @@ def _bound_params(ctx: _Check) -> dict[tuple[int, int], tuple[ParamArg, ...]]:
     bindings = [
         (span, call.params)
         for call in ctx.driver_calls
-        if call.params and (span := ctx.query_span(call)) is not None
+        if call.params and (span := call.query_span) is not None
     ]
     for _, declared, _, span in ctx.declared:
         if (found := _annotations_of(ctx, declared, ctx.parsed)) is not None:
@@ -547,12 +543,14 @@ def diagnostics(
     row_usage: RowUsage | None = None,
     variants: int | None = None,
     coerce: frozenset[str] = frozenset(),
+    suppress: bool = False,
 ) -> list[Diagnostic]:
-    """Every diagnostic before inline suppression: the Rust pass, then the Python passes.
+    """Every diagnostic: the Rust pass, then the Python passes.
 
     ``variants`` turns on query variants (``find_helper_calls``): each variant of a call
     is checked as a call of its own, then ``_merge_variants`` reports at the call.
-    ``coerce`` names the row types read as a Pydantic validator reads them.
+    ``coerce`` names the row types read as a Pydantic validator reads them. ``suppress``
+    drops what ``# sqlty: ignore`` comments suppress and adds their ``unused-ignore``.
     """
     own = RowUsage()
     if AST == "rust":
@@ -568,6 +566,7 @@ def diagnostics(
             module,
             variants,
             coerce,
+            suppress,
         )
     else:
         found = _diagnostics(
@@ -602,6 +601,8 @@ def diagnostics(
             None if helpers is None else helpers.rust(),
             variants,
         )
+    if suppress and AST != "rust":
+        found = apply_suppressions(parsed.ignores, found, rules)
     return found
 
 
@@ -617,6 +618,7 @@ def _rust_diagnostics(
     module: str | None,
     variants: int | None,
     coerce: frozenset[str],
+    suppress: bool,
 ) -> list[Diagnostic]:
     """The diagnostics as ``sqlty_python::check`` reports them."""
     found, redundant, needed = _module_diagnostics(
@@ -632,12 +634,85 @@ def _rust_diagnostics(
         index=None if helpers is None else helpers.rust(),
         name=parsed.module,
         variants=variants,
+        suppress=suppress,
     )
     usage.needed.update(needed)
     usage.redundant += [
         (key, diag) for key, diag in zip(redundant, found, strict=True) if key is not None
     ]
     return found
+
+
+type ModuleConfig = tuple[
+    str,
+    Schema | None,
+    dict[str, str] | None,
+    str | None,
+    bool,
+    frozenset[str],
+    HelperIndex | None,
+    int | None,
+]
+"""``(dialect, schema_sql, rules, import_style, untyped, coerce, helpers, variants)``."""
+
+
+def check_modules(
+    modules: Sequence[tuple[ParsedSource, ModuleConfig]], row_usage: RowUsage, jobs: int | None
+) -> list[list[Diagnostic]]:
+    """``check_source`` of every module, with ``row_usage``, in one Rust call that checks
+    them on ``jobs`` threads (all cores when None)."""
+    configs = _Configs()
+    found = _check_modules(
+        [(parsed.text, parsed.module, configs.index(config)) for parsed, config in modules],
+        configs.rust(),
+        version=sys.version_info[:2],
+        jobs=jobs,
+    )
+    for diagnostics, redundant, needed in found:
+        row_usage.needed.update(needed)
+        row_usage.redundant += [
+            (key, diag) for key, diag in zip(redundant, diagnostics, strict=True) if key is not None
+        ]
+    return [diagnostics for diagnostics, _, _ in found]
+
+
+def breaking_modules(
+    modules: Sequence[tuple[ParsedSource, ModuleConfig, ModuleConfig]], jobs: int | None
+) -> list[list[Diagnostic]]:
+    """``breaking_source`` of every ``(module, own, against)``, in one Rust call that checks
+    them on ``jobs`` threads (all cores when None)."""
+    configs = _Configs()
+    found = _breaking_modules(
+        [
+            (parsed.text, parsed.module, configs.index(own), configs.index(against))
+            for parsed, own, against in modules
+        ],
+        configs.rust(),
+        version=sys.version_info[:2],
+        jobs=jobs,
+    )
+    return found
+
+
+class _Configs:
+    """Configurations, each once, by identity: a rules dict does not hash, and files share
+    their settings' objects."""
+
+    def __init__(self) -> None:
+        self._known: dict[tuple[int, ...], int] = {}
+        self._configs: list[ModuleConfig] = []
+
+    def index(self, config: ModuleConfig) -> int:
+        found = self._known.setdefault(tuple(map(id, config)), len(self._configs))
+        if found == len(self._configs):
+            self._configs.append(config)
+        return found
+
+    def rust(self) -> list[tuple[typing.Any, ...]]:
+        return [
+            (dialect, schema, rules, style, untyped, sorted(coerce), index and index.rust(), n)
+            for dialect, schema, rules, style, untyped, coerce, index, n in self._configs
+        ]
 
 
 def _compare_module(
@@ -794,7 +869,7 @@ def _compare_rows(
         coerce=sorted(coerce),
     )
     if rust is None:
-        return
+        return  # pragma: no cover - a surrogate escape; the outline comparison fails first
     found: list[Diagnostic] = []
     ctx = _Check(
         parsed,
@@ -961,7 +1036,12 @@ def _param_diagnostics(
 
 
 def _fits(actual: str | None, expected: str | None) -> bool:
-    """Whether a type checker takes a value of type ``actual`` for ``expected``; unknown types fit."""
+    """Whether a type checker takes a value of type ``actual`` for ``expected``; unknown types fit.
+
+    Example:
+        >>> _fits("list[int]", "list"), _fits("int", "list"), _fits(None, "str")
+        (True, False, True)
+    """
     if actual is None or expected is None or actual == expected:
         return True
     if "list" in (actual, expected):
@@ -1084,7 +1164,15 @@ def _declared_params_diagnostics(
 
 
 def _union_members(annotation: ast.expr | None) -> list[ast.expr]:
-    """The members of a ``X | Y``, ``Optional[X]`` or ``Union[X, Y]`` annotation."""
+    """The members of a ``X | Y``, ``Optional[X]`` or ``Union[X, Y]`` annotation.
+
+    Example:
+        >>> union = ast.parse("Union[int, Optional[str]]", mode="eval").body
+        >>> [ast.unparse(member) for member in _union_members(union)]
+        ['int', 'str', 'None']
+        >>> _union_members(None)
+        []
+    """
     match annotation:
         case None:
             return []
@@ -1311,12 +1399,8 @@ def apply_suppressions(
     ignores: dict[int, Ignore],
     diagnostics: list[Diagnostic],
     rules: dict[str, str] | None,
-    marker: str = "#",
 ) -> list[Diagnostic]:
-    """Drop diagnostics suppressed by a comment on their line; add ``unused-ignore``.
-
-    ``marker`` starts a comment in the checked language: ``#``, or ``--`` in SQL.
-    """
+    """Drop diagnostics suppressed by a comment on their line; add ``unused-ignore``."""
     from sqlty._lint import RuleConfig
 
     if not ignores:
@@ -1341,7 +1425,7 @@ def apply_suppressions(
             else:
                 unused = [name for name in ignore.rules if (ignore.line, name) not in used]
             for name in unused:
-                written = f"{marker} sqlty: ignore" + ("" if name is None else f"[{name}]")
+                written = "# sqlty: ignore" + ("" if name is None else f"[{name}]")
                 kept.append(
                     {
                         "rule": "unused-ignore",

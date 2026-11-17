@@ -8,6 +8,7 @@
 //! plain list of constants gives no set, and a set that would exceed [`MAX_VALUES`] is
 //! dropped in favour of the plain `str` or `int`.
 
+use sqlparser::ast::InTarget;
 use sqlparser::ast::{BinaryOperator, CastKind, Expr, Ident, Value as SqlValue, ValueWithSpan};
 
 /// The most values a derived set (a `CHECK` list, a `CASE`, a `UNION`) may hold before it
@@ -184,10 +185,11 @@ pub(crate) fn check_values(expr: &Expr, is_target: &dyn Fn(&Ident) -> bool) -> O
                 None
             }
         }
-        Expr::InList {
+        Expr::In {
             expr: column,
-            list,
+            target: InTarget::List(list),
             negated: false,
+            ..
         } if is_column(column, is_target) => list
             .iter()
             .map(constant)
@@ -259,6 +261,7 @@ pub(crate) fn constant(expr: &Expr) -> Option<Value> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use sqlparser::dialect::PostgreSqlDialect;
@@ -340,5 +343,20 @@ mod tests {
             Some(strs(&["b"]))
         );
         assert_eq!(check("status NOT IN ('a')"), None);
+    }
+
+    #[test]
+    fn rarer_values_and_checks() {
+        let values = strs(&["a\rb", "c\td", "\u{1}"]);
+        assert_eq!(parse(&render(&values).unwrap()), Some(values));
+        assert_eq!(parse("typing.Literal['a' 'b']"), None);
+        assert_eq!(check("CAST(status = 'a' AS boolean)"), Some(strs(&["a"])));
+        assert_eq!(check("'a' = t.status"), Some(strs(&["a"])));
+        assert_eq!(
+            check("status = 'a' OR (status IS NULL)"),
+            Some(strs(&["a"]))
+        );
+        assert_eq!(check("status = ANY ($1)"), None);
+        assert_eq!(check("status = -'a'"), None);
     }
 }

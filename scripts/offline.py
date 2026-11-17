@@ -4,7 +4,9 @@
 
 It caches every page and asset when it installs, and the playground (its engine and Monaco,
 most of the bytes) once a page asks for it: the playground does on its first visit, and so
-does every page of the installed app. A new build changes ``sw.js``, which replaces the cache.
+does every page of the installed app. wllama, which only the playground's ask loads, is cached
+when it is fetched. A new build changes ``sw.js``, which replaces the cache and keeps what
+was cached of these.
 """
 
 from __future__ import annotations
@@ -15,20 +17,29 @@ import sys
 from pathlib import Path
 
 PLAYGROUND = ("assets/playground/", "assets/vendor/monaco/")
+ON_USE = ("assets/vendor/wllama/", "assets/vendor/wllama-compat/")
 SKIP = ("sw.js", ".integrity", ".md", ".txt")
 
 WORKER = """\
 const CACHE = "sqlty-%(version)s";
 const SITE = %(site)s;
 const PLAYGROUND = %(playground)s;
+const ON_USE = %(on_use)s;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
-      // A build that replaces one with the playground cached keeps it cached.
+      // A build that replaces one with the playground or wllama cached keeps them cached.
       const had = await caches.match("assets/playground/sqlty_wasm.wasm");
+      const used = new Set();
+      for (const key of await caches.keys()) {
+        if (!key.startsWith("sqlty-") || key === CACHE) continue;
+        for (const request of await (await caches.open(key)).keys()) {
+          if (ON_USE.some((prefix) => request.url.startsWith(new URL(prefix, registration.scope).href))) used.add(request.url);
+        }
+      }
       const cache = await caches.open(CACHE);
-      await cache.addAll(had ? [...SITE, ...PLAYGROUND] : SITE);
+      await cache.addAll([...SITE, ...(had ? PLAYGROUND : []), ...used]);
       await self.skipWaiting();
     })(),
   );
@@ -85,13 +96,14 @@ def main() -> None:
     for path in files:
         digest.update(path.encode() + b"\0" + (site / path).read_bytes())
     playground = [url(path) for path in files if path.startswith(PLAYGROUND)]
-    rest = [url(path) for path in files if not path.startswith(PLAYGROUND)]
+    rest = [url(path) for path in files if not path.startswith(PLAYGROUND + ON_USE)]
     (site / "sw.js").write_text(
         WORKER
         % {
             "version": digest.hexdigest()[:12],
             "site": json.dumps(rest),
             "playground": json.dumps(playground),
+            "on_use": json.dumps(ON_USE),
         }
     )
     print(f"{site / 'sw.js'}: {len(rest)} files on install, {len(playground)} for the playground")

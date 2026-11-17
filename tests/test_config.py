@@ -1,4 +1,4 @@
-"""Config lookup: each pyproject.toml is parsed once per run, and edits are picked up."""
+"""Config lookup: the nearest table wins, and edits are picked up."""
 
 from __future__ import annotations
 
@@ -12,43 +12,27 @@ from sqlty import _config
 from sqlty._config import ConfigError, load_config, validate_tool_table
 
 
-def test_parses_each_pyproject_once(tmp_path, monkeypatch):
-    """A nested tree of 20 files parses each ancestor pyproject.toml once, not once per file."""
-    _config._parse_native_cached.cache_clear()
+def test_packaging_only_pyprojects_inherit_the_nearest_table(tmp_path):
+    """Every file of a nested tree of packaging-only pyproject.toml files gets the root's table."""
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\ndialect = "mysql"\n')
-    files = []
+    leaves = []
     for a in range(2):
-        for b in range(2):
-            for c in range(5):
-                leaf = tmp_path / f"a{a}" / f"b{b}" / f"c{c}"
-                leaf.mkdir(parents=True)
-                (leaf / "pyproject.toml").write_text('[project]\nname = "pkg"\n')
-                files.append(leaf / "q.py")
-    for a in range(2):
+        (tmp_path / f"a{a}").mkdir()
         (tmp_path / f"a{a}" / "pyproject.toml").write_text('[project]\nname = "pkg"\n')
-    for i in range(20):
-        files[i].write_text("")
+        for c in range(5):
+            leaf = tmp_path / f"a{a}" / f"c{c}"
+            leaf.mkdir()
+            (leaf / "pyproject.toml").write_text('[project]\nname = "pkg"\n')
+            leaves.append(leaf)
 
-    parsed: list[str] = []
-    real_parse = _config._parse_native
+    found = [load_config(leaf) for leaf in leaves]
 
-    def counting_parse(path):
-        parsed.append(str(path))
-        return real_parse(path)
-
-    monkeypatch.setattr(_config, "_parse_native", counting_parse)
-
-    results = [load_config(f.parent) for f in files]
-
-    assert all(config["dialect"] == "mysql" for config, _ in results)
-    # 1 root + 2 packaging-only dirs + 20 leaves; each is parsed exactly once.
-    assert len(parsed) == 1 + 2 + 20
-    assert len(set(parsed)) == len(parsed)
+    assert all(config["dialect"] == "mysql" for config, _ in found)
+    assert {root for _, root in found} == {tmp_path}
 
 
 def test_edited_pyproject_is_reread(tmp_path):
-    """A new mtime_ns on pyproject.toml makes the cached parse stale."""
-    _config._parse_native_cached.cache_clear()
+    """An edited pyproject.toml is read again."""
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[tool.sqlty]\ndialect = "mysql"\n')
     assert load_config(tmp_path)[0]["dialect"] == "mysql"
@@ -155,7 +139,6 @@ def test_unknown_key_in_sqlty_toml_names_the_file(tmp_path: Path) -> None:
 
 
 def test_unknown_keys_raise_config_error_naming_the_file(tmp_path):
-    _config._parse_native_cached.cache_clear()
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[tool.sqlty]\ndialect = "mysql"\nbogus = 1\n')
 
@@ -196,7 +179,6 @@ def test_unknown_keys_raise_config_error_naming_the_file(tmp_path):
     ],
 )
 def test_invalid_settings(tmp_path, toml, message):
-    _config._parse_native_cached.cache_clear()
     (tmp_path / "pyproject.toml").write_text(toml)
 
     with pytest.raises(_config.ConfigError, match=message):
@@ -204,7 +186,6 @@ def test_invalid_settings(tmp_path, toml, message):
 
 
 def test_exclude_settings_are_loaded(tmp_path):
-    _config._parse_native_cached.cache_clear()
     (tmp_path / "pyproject.toml").write_text(
         '[tool.sqlty]\nexclude = ["a"]\nextend-exclude = ["b"]\n'
     )
@@ -212,6 +193,14 @@ def test_exclude_settings_are_loaded(tmp_path):
     config, _ = load_config(tmp_path)
 
     assert (config["exclude"], config["extend_exclude"]) == (["a"], ["b"])
+
+
+def test_values_only_the_cli_checks_are_loaded_as_written(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text("[tool.sqlty]\nuntyped = [1.5, 1979-05-27]\n")
+
+    config, _ = load_config(tmp_path)
+
+    assert config["untyped"] == [1.5, "1979-05-27"]
 
 
 def test_rules_must_be_a_table() -> None:
@@ -364,3 +353,20 @@ def test_invalid_extend_is_an_error(tmp_path: Path, files: dict[str, str], messa
 
     with pytest.raises(ConfigError, match=message):
         load_config(tmp_path)
+
+
+def test_requires_python_comes_from_the_nearest_pyproject_holding_it(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text('[project]\nrequires-python = ">=3.15"\n')
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "pyproject.toml").write_text("[tool.sqlty]\nparam-types = true\n")
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "lib" / "pyproject.toml").write_text('[project]\nrequires-python = ">=3.14"\n')
+    assert _config.requires_python(tmp_path / "app") == ">=3.15"
+    assert _config.requires_python(tmp_path / "lib") == ">=3.14"
+
+
+def test_requires_python_skips_a_pyproject_it_cannot_read(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text('[project]\nrequires-python = ">=3.15"\n')
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "pyproject.toml").write_text("[project\n")
+    assert _config.requires_python(tmp_path / "app") == ">=3.15"

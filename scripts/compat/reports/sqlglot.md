@@ -1,11 +1,11 @@
-# sqlglot 30.23.0 vs sqlty
+# sqlglot 30.29.0 vs sqlty
 
 | Dialect | Kind | Match | Mismatch | sqlty gap | Not comparable |
 |---------|------|-------|----------|-----------|----------------|
-| generic | expression | 78 | 6 | 31 | 2 |
+| generic | expression | 78 | 6 | 49 | 13 |
 | mysql | expression | 97 | 0 | 0 | 78 |
 | postgres | expression | 46 | 0 | 0 | 6 |
-| **all** | | **221** | **6** | **31** | **86** |
+| **all** | | **221** | **6** | **49** | **97** |
 
 ## mismatch
 
@@ -46,6 +46,24 @@
 | generic | `SESSION_USER()` | `str` | `None` | annotate_functions.sql: sqlglot VARCHAR |
 | generic | `ARRAY_CONTAINS(tbl.array_col, '1')` | `bool` | `None` | annotate_functions.sql: sqlglot BOOLEAN |
 | generic | `ANY(SELECT 1)` | `bool` | `None` | annotate_types.sql: sqlglot bool |
+| generic | `ARRAY()` | `list` | `None` | annotate_types.sql: sqlglot ARRAY<NULL> |
+| generic | `ARRAY(ARRAY())` | `list[list]` | `None` | annotate_types.sql: sqlglot ARRAY<ARRAY<NULL>> |
+| generic | `STRUCT(ARRAY() AS a)` | `dict[str, list]` | `None` | annotate_types.sql: sqlglot STRUCT<a ARRAY<NULL>> |
+| generic | `ARRAY(STRUCT(ARRAY() AS a))` | `list[dict[str, list]]` | `None` | annotate_types.sql: sqlglot ARRAY<STRUCT<a ARRAY<NULL>>> |
+| generic | `ARRAY_AGG(ARRAY())` | `list[list]` | `None` | annotate_types.sql: sqlglot ARRAY<ARRAY<NULL>> |
+| generic | `COALESCE(ARRAY(), ARRAY())` | `list` | `None` | annotate_types.sql: sqlglot ARRAY<NULL> |
+| generic | `COALESCE(ARRAY(), NULL)` | `list` | `None` | annotate_types.sql: sqlglot ARRAY<NULL> |
+| generic | `COALESCE(ARRAY(1), ARRAY())` | `list[int]` | `None` | annotate_types.sql: sqlglot ARRAY<INT> |
+| generic | `COALESCE(ARRAY(), ARRAY(1))` | `list[int]` | `None` | annotate_types.sql: sqlglot ARRAY<INT> |
+| generic | `COALESCE(ARRAY(), ARRAY(), ARRAY(1))` | `list[int]` | `None` | annotate_types.sql: sqlglot ARRAY<INT> |
+| generic | `COALESCE(ARRAY(1), (ARRAY()))` | `list[int]` | `None` | annotate_types.sql: sqlglot ARRAY<INT> |
+| generic | `COALESCE(((ARRAY())), ARRAY(1))` | `list[int]` | `None` | annotate_types.sql: sqlglot ARRAY<INT> |
+| generic | `COALESCE(IF(TRUE, ARRAY(), ARRAY()), ARRAY(1))` | `list[int]` | `None` | annotate_types.sql: sqlglot ARRAY<INT> |
+| generic | `COALESCE(COALESCE(ARRAY(), ARRAY()), ARRAY(1))` | `list[int]` | `None` | annotate_types.sql: sqlglot ARRAY<INT> |
+| generic | `IF(TRUE, ARRAY(), ARRAY(1))` | `list[int]` | `None` | annotate_types.sql: sqlglot ARRAY<INT> |
+| generic | `IF(TRUE, ARRAY(1), ARRAY())` | `list[int]` | `None` | annotate_types.sql: sqlglot ARRAY<INT> |
+| generic | `COALESCE(ARRAY(), ARRAY(STRUCT(1 AS a)))` | `list[dict[str, int]]` | `None` | annotate_types.sql: sqlglot ARRAY<STRUCT<a INT>> |
+| generic | `COALESCE(ARRAY(STRUCT(1 AS a)), ARRAY())` | `list[dict[str, int]]` | `None` | annotate_types.sql: sqlglot ARRAY<STRUCT<a INT>> |
 | generic | `STRUCT(1 AS col)` | `dict[str, int]` | `None` | annotate_types.sql: sqlglot STRUCT<col INT> |
 | generic | `STRUCT(1 AS col, 2.5 AS row)` | `dict[str, int | float]` | `None` | annotate_types.sql: sqlglot STRUCT<col INT, row DOUBLE> |
 | generic | `STRUCT(1)` | `dict[str, int]` | `None` | annotate_types.sql: sqlglot STRUCT<INT> |

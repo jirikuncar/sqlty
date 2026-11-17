@@ -27,7 +27,7 @@ help:
 	@echo "  test-unit         - Run unit tests only (no e2e, no mdtest)"
 	@echo "  test-mdtest       - Run mdtest suite and docs tests"
 	@echo "  test-e2e          - Run end-to-end tests only"
-	@echo "  test-coverage     - Run pytest with coverage report"
+	@echo "  test-coverage     - Run every Python and Rust test with coverage and check its gates"
 	@echo "  update-mdtest     - Update mdtest assertions with actual values"
 	@echo "  bench             - Run sqlty.core benchmarks"
 	@echo "  bench-project     - Benchmark a synthetic 10k-file project"
@@ -115,8 +115,8 @@ check-no-exec-harness:  ## Fail if this branch weakened the no-exec harness (AGE
 	uv run python scripts/check_no_exec_harness.py origin/main
 
 .PHONY: test-coverage
-test-coverage:
-	uv run pytest tests/ -v --cov=sqlty --cov-report=term-missing
+test-coverage:  ## Needs a nightly toolchain with llvm-tools, cargo-llvm-cov and cargo-nextest
+	scripts/coverage.sh
 
 .PHONY: update-mdtest
 update-mdtest:
@@ -184,6 +184,10 @@ generate-docs:
 .PHONY: generate-stdlib-types
 generate-stdlib-types:
 	uv run python scripts/generate_stdlib_types.py
+
+.PHONY: generate-duckdb-rules
+generate-duckdb-rules:
+	uv run python scripts/generate_duckdb_rules.py
 
 .PHONY: docs-serve
 docs-serve: playground

@@ -8,6 +8,7 @@ of generated examples with ``SQLTY_FUZZ_EXAMPLES``.
 from __future__ import annotations
 
 import ast
+import functools
 import sys
 
 import pytest
@@ -96,6 +97,7 @@ CALLEES = [
 ]
 
 
+@functools.cache
 def wild() -> st.SearchStrategy[str]:
     """Any expression over the atoms, most of which psycopg rejects."""
 
@@ -138,6 +140,7 @@ TEXTS = [a for a in ATOMS if a.startswith("'")] + ["TABLE", "'SELECT {} FROM {}'
 SQL_CLASSES = ["sql.SQL", "SQL", "s.SQL", "psycopg.sql.SQL"]
 
 
+@functools.cache
 def expressions() -> st.SearchStrategy[str]:
     """Expressions that mostly build a composition, some with a part gone wrong."""
     text = st.recursive(
@@ -229,6 +232,118 @@ def test_cases(expression: str) -> None:
     source = HEAD + f"def build(param):\n    local = sql.SQL('t')\n    run({expression})\n"
     assert same(source) >= 1
     assert rendered_compositions(source, sys.version_info[:2])[0][2] not in (None, "unchecked")
+
+
+# Expressions psycopg renders or rejects that the generated ones reach only by chance.
+EDGES = [
+    "sql.SQL('{}').format(-1)",
+    "sql.SQL(', ').join(['a\\x00'])",
+    "sql.SQL(', ').join(['a\\\\b'])",
+    "sql.SQL(', ').join('ab')",
+    "sql.SQL(1)",
+    "sql.Placeholder('a', 1)",
+    "pg.sql.SQL('a') + psycopg.connect('a')",
+    " + ".join(["sql.SQL('a')"] * 70),
+    "sql.Composed([sql.SQL('a'), ...])",
+    "sql.Composed([sql.SQL('a'), 2j])",
+    "sql.SQL(', ').join(b'x')",
+    "sql.SQL(', ').join([sql.SQL('a')] + [sql.SQL('b')])",
+    "sql.SQL(', ').join([b'a' + b'b'])",
+    "sql.SQL(', ').join([1 + 2])",
+    "sql.SQL('{a!')",
+    "sql.SQL('{a!').format(a=1)",
+    "sql.SQL('{a!r').format(a=1)",
+    "sql.SQL('{a!rx}').format(a=1)",
+    "sql.SQL('{a!r:>3}').format(a=1)",
+    "sql.SQL('{a:{b}}').format(a=1, b=2)",
+    "sql.SQL('{a:').format(a=1)",
+    "sql.SQL('{a').format(a=1)",
+    "sql.SQL('{a{').format(a=1)",
+    "sql.SQL('a', 'b')",
+    "sql.SQL()",
+    "sql.SQL(obj='a', seq='b')",
+    "sql.Placeholder('a)')",
+    "sql.Placeholder('a', 'x')",
+    "sql.Placeholder(1)",
+    "sql.Identifier()",
+    "sql.Identifier('a', name='b')",
+    "sql.SQL('{\u0661}').format(1)",
+    "sql.SQL('{1}').format(sql.SQL('a'))",
+    "sql.SQL('{}{0}').format(sql.SQL('a'))",
+    "sql.SQL('{0}{}').format(sql.SQL('a'))",
+    "sql.SQL('{99999999999999999999999}').format(sql.SQL('a'))",
+    "sql.SQL('{0}{}'.format('a', 'b'))",
+    "sql.SQL('{}{0}'.format('a', 'b'))",
+    "sql.SQL('{\u0661}'.format('a'))",
+    "sql.SQL('{a.b}'.format(a='x'))",
+    "sql.SQL('{a[0]}'.format(a='x'))",
+    "sql.SQL('{a!r}'.format(a='x'))",
+    "sql.SQL('{a:>3}'.format(a='x'))",
+    "sql.SQL('{{}} {}'.format('a'))",
+    "sql.SQL('{} {} {} {} {}'.format(None, True, False, 1, 1.5))",
+    "sql.SQL('{}'.format(1e999))",
+    "sql.Placeholder('a', 's') + sql.Placeholder('a', 'b')",
+    "sql.SQL('{}'.format(b'x'))",
+    "sql.SQL('{}'.format())",
+    "sql.SQL('{x}'.format(y=1))",
+    "sql.SQL(', '.join(iterable=['a']))",
+    "sql.SQL(', '.join(['a'], ['b']))",
+    "sql.SQL(', '.join(sql.Composed([sql.SQL('a')])))",
+    "sql.SQL(', '.join(sql.Composed([])))",
+    "sql.SQL(', '.join([1]))",
+    "sql.SQL(', '.join(None))",
+    "sql.SQL(''.format())",
+    "sql.SQL('a'.strip())",
+    "sql.SQL(1 .format())",
+    "sql.SQL(TABLE[0])",
+    "sql.SQL(sql.SQL('a') + 'b')",
+    "sql.SQL('{}').format(*PARTS)",
+    "sql.SQL('{a}').format(**{'a': 1})",
+    "sql.Composed([*PARTS])",
+    "sql.Composed((sql.SQL('a'), Ellipsis, 2j))",
+    "sql.SQL(', ').join(sql.Composed(PARTS))",
+    "sql.SQL(', ').join(sql.SQL('ab'))",
+    "sql.SQL(', ').join(Ident('a'))",
+    "sql.SQL('{}').format(sql.SQL('a') + sql.Identifier('b') + sql.SQL('c'))",
+    "sql.SQL('{}').format(sql.Identifier('a') + 'b')",
+    "Ident('a') + Ident('b')",
+    "pq.Format.TEXT",
+    "psycopg.sql.Other('a')",
+    "sql.SQL(ANNOTATED)",
+    "sql.SQL(AUGMENTED)",
+    "sql.SQL(CHAINED)",
+    "sql.SQL(Klass)",
+    "sql.SQL(os)",
+    "sql.SQL(path)",
+    "sql.SQL(decorated)",
+    "sql.SQL(bare)",
+    "sql.SQL(slots)",
+]
+EDGE_HEAD = """\
+import os.path
+import psycopg as pg
+from os import path as path, sep
+ANNOTATED: str = "a"
+bare: int
+AUGMENTED = "a"
+AUGMENTED += "b"
+CHAINED = OTHER = CHAINED = "a"
+class Klass: ...
+slots = {}
+slots["a"] = 1
+slots.attr[0] = 1
+slots.attr.append(1)
+slots.copy()
+@decorator
+async def decorated(param): ...
+@decorator
+def plain(param): ...
+"""
+
+
+@pytest.mark.parametrize("expression", EDGES)
+def test_edges(expression: str) -> None:
+    same(HEAD + EDGE_HEAD + f"def build(param):\n    local: str = 'x'\n    run({expression})\n")
 
 
 @FUZZ
