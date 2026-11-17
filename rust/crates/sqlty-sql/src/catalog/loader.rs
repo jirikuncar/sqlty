@@ -173,6 +173,8 @@ pub(super) struct Loader {
     /// Type name -> the functions that return it: a function returning a table has its rows
     /// follow the table, so a change to a relation of that name refreshes them.
     pub(super) returned_by: FxHashMap<String, FxHashSet<String>>,
+    /// Tables some table inherits from or is a partition of; no other has descendants.
+    pub(super) inherited: FxHashSet<String>,
 }
 
 impl Loader {
@@ -191,6 +193,7 @@ impl Loader {
             type_aliases: FxHashMap::default(),
             returned_by: FxHashMap::default(),
             overrides: Arc::default(),
+            inherited: FxHashSet::default(),
         }
     }
 
@@ -210,6 +213,7 @@ impl Loader {
             skipped: self.skipped.clone(),
             overrides: Arc::clone(&self.overrides),
             returned_by: self.returned_by.clone(),
+            inherited: self.inherited.clone(),
         }
     }
 
@@ -439,6 +443,7 @@ impl Loader {
                 for column in parent_table.columns.clone() {
                     merge_column(&mut table.columns, column);
                 }
+                self.inherited.insert(parent.clone());
                 table.parents.push(parent);
             }
         }
@@ -796,6 +801,9 @@ impl Loader {
         let mut found: Vec<String> = Vec::new();
         let mut queue = vec![key.to_string()];
         while let Some(parent) = queue.pop() {
+            if !self.inherited.contains(&parent) {
+                continue;
+            }
             for (name, rel) in &self.relations {
                 if let Rel::Table(table) = rel {
                     if table.parents.contains(&parent) && !found.contains(name) {

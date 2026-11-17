@@ -80,10 +80,10 @@ pub struct SchemaColumn {
     /// `serial`, identity, generated or auto-increment column, or SQLite's rowid.
     pub has_default: bool,
     /// The `DEFAULT` an INSERT that leaves the column out writes.
-    pub default: Option<Expr>,
+    pub default: Option<Box<Expr>>,
     /// The expression a generated column is computed from, when it reads no other
     /// generated column.
-    pub generated: Option<Expr>,
+    pub generated: Option<Box<Expr>>,
     /// Part of the table's primary key, which PostgreSQL lets a grouped query select
     /// the table's other columns by.
     pub primary_key: bool,
@@ -649,6 +649,15 @@ mod tests {
         assert_eq!(cols(&c, "part"), ["k:INT", "v:TEXT"]);
         assert_eq!(cols(&c, "copy"), ["id:INT", "more:TEXT"]);
         assert!(c.table("copy").unwrap()[0].not_null);
+    }
+
+    #[test]
+    fn test_renamed_parent_still_alters_its_children() {
+        let c = pg("CREATE TABLE base (id int);
+            CREATE TABLE child (extra int) INHERITS (base);
+            ALTER TABLE base RENAME TO root;
+            ALTER TABLE root ADD COLUMN v text;");
+        assert_eq!(cols(&c, "child"), ["id:INT", "extra:INT", "v:TEXT"]);
     }
 
     #[test]
