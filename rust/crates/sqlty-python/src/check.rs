@@ -14,6 +14,7 @@ use ruff_python_ast::{Expr, ExprCall, Operator};
 use ruff_text_size::Ranged;
 use sqlty_sql::analyzer::{self, Nullability};
 
+use crate::analyses::Analyses;
 use crate::calls::{helper_calls, is_marked, Call};
 use crate::checker::{self, Diagnostic};
 use crate::frozen::Table;
@@ -920,8 +921,8 @@ impl<'a> Module<'a, '_> {
             let Some(query) = call.query.as_deref().filter(|query| !query.is_empty()) else {
                 continue;
             };
-            if let Some((rule, message)) =
-                checker::select_star_finding(query, self.dialect(), self.run.has_schema)
+            let stars = self.ctx.analyses.of(query).parsed.result_stars();
+            if let Some((rule, message)) = checker::star_finding(stars, query, self.run.has_schema)
             {
                 reports.push((rule, message, call.line, call.query_span));
             }
@@ -949,7 +950,7 @@ impl<'a> Module<'a, '_> {
             return;
         }
         for (query, line, span) in self.unread() {
-            let Some(error) = analyzer::parse_error(&query, self.dialect()) else {
+            let Some(error) = self.ctx.analyses.of(&query).parsed.error() else {
                 continue;
             };
             let mut message = format!("query does not parse: {error}");
@@ -975,11 +976,14 @@ impl<'a> Module<'a, '_> {
             return;
         }
         for (query, line, span) in self.unread() {
-            let schema = self.run.settings.options.schema;
-            let (_, found) = analyzer::analyze_with_diagnostics(&query, self.dialect(), schema);
-            for diagnostic in found {
-                self.ctx
-                    .report(Rule::Name(diagnostic.rule), diagnostic.message, line, span);
+            let analysis = self.ctx.analyses.of(&query);
+            for diagnostic in &analysis.diagnostics {
+                self.ctx.report(
+                    Rule::Name(diagnostic.rule),
+                    diagnostic.message.clone(),
+                    line,
+                    span,
+                );
             }
         }
     }
@@ -1219,6 +1223,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
         pattern(r#"(?:^|[^\w])(?:[tT][rR]?|[rR][tT])(?:'|")+[\s\x1c-\x1f]*--[\s\x1c-\x1f]?sql"#)
     });
     let settings = run.settings;
+    let analyses = Analyses::new(settings.options);
     let (options, rules) = (settings.options, settings.rules);
     let text = &*source.text;
     let wrapper = options.style.wrapper_name.as_str();
@@ -1227,7 +1232,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
     let mut base = Vec::new();
     if may_need_lexing(text, wrapper) {
         let any_calls = any_calls(source, &options.style);
-        base = checker::check_source(text, options, rules, &any_calls);
+        base = checker::check_source_with(text, options, rules, &any_calls, &analyses);
         checker::add_fix_imports(text, options, &mut base);
     }
 
@@ -1378,7 +1383,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
         .collect();
     let mut module = Module {
         run,
-        ctx: Check::new(source, settings, queries, named, &names),
+        ctx: Check::new(source, settings, queries, named, &names, analyses),
         source,
         found,
         driver_calls,
