@@ -23,6 +23,7 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
 
+mod cli;
 mod config;
 mod outline;
 mod server;
@@ -376,12 +377,10 @@ fn detach<T: Send, F: Send + FnOnce() -> T>(py: Python<'_>, f: F) -> T {
     py.detach(|| stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, f))
 }
 
-include!(concat!(env!("OUT_DIR"), "/skills.rs"));
-
 /// The files of the Agent Skills, as `(path, text)` with paths like `sqlty/SKILL.md`.
 #[pyfunction]
 fn skills() -> Vec<(&'static str, &'static str)> {
-    SKILLS.to_vec()
+    sqlty_cli::SKILLS.to_vec()
 }
 
 /// Result columns of a query as `(name, python_type, sql_type)` tuples.
@@ -2542,6 +2541,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<QueryAtHandle>()?;
     m.add_function(wrap_pyfunction!(skills, m)?)?;
     m.add_function(wrap_pyfunction!(server::serve, m)?)?;
+    m.add_function(wrap_pyfunction!(cli::cli, m)?)?;
     config::register(m)?;
     Ok(())
 }
