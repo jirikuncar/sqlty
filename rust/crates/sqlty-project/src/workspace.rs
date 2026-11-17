@@ -8,7 +8,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 use rayon::prelude::*;
 use sqlty_python::calls::Helper;
 use sqlty_python::checker::{self, Diagnostic, SiteKind};
-use sqlty_python::index::{helpers_of, Builder, HelperIndex, Roots};
+use sqlty_python::index::{
+    defines_helpers, helpers_of, Builder, HelperIndex, Module as Indexed, Roots,
+};
 use sqlty_python::project::{
     self, helper_roots, normalized, Discovery, Files, Kind, Listing, Packages, Read,
 };
@@ -37,8 +39,16 @@ struct Module {
     text: Arc<str>,
     names: Vec<String>,
     resolved: PathBuf,
-    parsed: Option<Arc<Source>>,
+    source: Arc<Indexed>,
     helpers: Dict<Helper>,
+}
+
+impl Module {
+    /// The module parsed, `None` where Rust does not read it: kept only when the index
+    /// has read it, so a checked module's tree goes with its check.
+    fn parsed(&self) -> Option<Arc<Source>> {
+        self.source.load()
+    }
 }
 
 /// How [`Workspace::open`] reads the paths.
@@ -211,23 +221,18 @@ impl Workspace {
         let names = self.packages.names(&resolved, &self.paths, &self.flags.cwd);
         let init = path.file_name().is_some_and(|name| name == "__init__.py");
         let name = format!("{}{}", names[0], if init { ".__init__" } else { "" });
-        let parsed = parse
-            .then(|| {
-                stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
-                    Source::new(Arc::clone(&text), self.version).map(|source| {
-                        let source = source.named(Some(&name));
-                        source.targets();
-                        Arc::new(source)
-                    })
-                })
-            })
-            .flatten();
-        let helpers = parsed.as_deref().map(helpers_of).unwrap_or_default();
+        let source = Arc::new(Indexed::new(Arc::clone(&text), &name, self.version));
+        // A module that may define helpers is read now; any other when it is checked or a
+        // lookup reaches it.
+        let helpers = (parse && defines_helpers(&text))
+            .then(|| source.source().map(|parsed| helpers_of(parsed)))
+            .flatten()
+            .unwrap_or_default();
         Module {
             text,
             names,
             resolved,
-            parsed,
+            source,
             helpers,
         }
     }
@@ -426,11 +431,9 @@ impl Workspace {
         let mut builder = Builder::new(self.version);
         for path in &self.order {
             let module = &self.modules[path];
-            let Some(parsed) = &module.parsed else {
-                continue;
-            };
+            let source = &module.source;
             for name in &module.names {
-                builder.add_found(name, Arc::clone(parsed), &module.helpers);
+                builder.add_found(name, Arc::clone(source), &module.helpers);
             }
         }
         let index = builder.build();
@@ -525,13 +528,11 @@ impl Workspace {
                     stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
                         let module = &self.modules[path];
                         let checker = Checker::of(settings, Some(helpers));
-                        let name = module
-                            .parsed
-                            .as_ref()
-                            .and_then(|parsed| parsed.module.clone());
+                        let parsed = module.parsed();
+                        let name = parsed.as_ref().and_then(|parsed| parsed.module.clone());
                         Ok(check_module(
                             &module.text,
-                            module.parsed.as_ref(),
+                            parsed.as_ref(),
                             name.as_deref(),
                             &checker,
                         ))
@@ -570,13 +571,11 @@ impl Workspace {
                     stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
                         let module = &self.modules[path];
                         let checker = Checker::of(settings, Some(helpers));
-                        let name = module
-                            .parsed
-                            .as_ref()
-                            .and_then(|parsed| parsed.module.clone());
+                        let parsed = module.parsed();
+                        let name = parsed.as_ref().and_then(|parsed| parsed.module.clone());
                         Ok(module::fix(
                             &module.text,
-                            module.parsed.as_deref(),
+                            parsed.as_deref(),
                             name.as_deref(),
                             &checker,
                             settings,
@@ -596,9 +595,14 @@ impl Workspace {
                     stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
                         let module = &self.modules[path];
                         let checker = Checker::of(settings, Some(helpers));
-                        let parsed = module.parsed.as_deref();
-                        let name = parsed.and_then(|parsed| parsed.module.as_deref());
-                        Ok(module::statistics(&module.text, parsed, name, &checker))
+                        let parsed = module.parsed();
+                        let name = parsed.as_ref().and_then(|parsed| parsed.module.as_deref());
+                        Ok(module::statistics(
+                            &module.text,
+                            parsed.as_deref(),
+                            name,
+                            &checker,
+                        ))
                     })
                 })
                 .collect()
@@ -673,11 +677,9 @@ impl Workspace {
         let helpers = self.helpers(&settings);
         let module = &self.modules[path];
         let checker = Checker::of(&settings, Some(&helpers));
-        let name = module
-            .parsed
-            .as_ref()
-            .and_then(|parsed| parsed.module.clone());
-        let found = check_module(text, module.parsed.as_ref(), name.as_deref(), &checker);
+        let parsed = module.parsed();
+        let name = parsed.as_ref().and_then(|parsed| parsed.module.clone());
+        let found = check_module(text, parsed.as_ref(), name.as_deref(), &checker);
         Ok(found
             .diagnostics
             .into_iter()
@@ -767,13 +769,11 @@ impl Workspace {
         let helpers = self.helpers(&settings);
         let module = &self.modules[path];
         let checker = Checker::of(&settings, Some(&helpers));
-        let name = module
-            .parsed
-            .as_ref()
-            .and_then(|parsed| parsed.module.clone());
+        let parsed = module.parsed();
+        let name = parsed.as_ref().and_then(|parsed| parsed.module.clone());
         Ok(module::fix(
             text,
-            module.parsed.as_deref(),
+            parsed.as_deref(),
             name.as_deref(),
             &checker,
             &settings,
@@ -808,7 +808,7 @@ impl Workspace {
         let helpers = self.helpers(&settings);
         let module = self.modules.get(path)?;
         let checker = Checker::of(&settings, Some(&helpers));
-        let helper_starts = match &module.parsed {
+        let helper_starts = match &module.parsed() {
             Some(parsed) => module::helper_starts(parsed, parsed.module.as_deref(), &checker),
             None => Vec::new(),
         };
