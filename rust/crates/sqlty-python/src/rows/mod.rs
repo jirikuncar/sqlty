@@ -334,7 +334,7 @@ impl<'a> Check<'a> {
 }
 
 /// `_bind`: `query` with the placeholders bound to values that are not `None` respelled
-/// as ones whose nullability is not judged.
+/// as ones the engine reads as never NULL: `$0`, or `?0` outside PostgreSQL.
 pub(crate) fn bind(query: Option<&str>, params: Option<&[Param]>, dialect: &str) -> Option<String> {
     static PLACEHOLDER: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"%%|%\((?P<name>[^)]+)\)s|%s").expect("a valid pattern"));
@@ -352,7 +352,7 @@ pub(crate) fn bind(query: Option<&str>, params: Option<&[Param]>, dialect: &str)
     let marker = if dialect == "postgres" || dialect == "postgresql" {
         "$0"
     } else {
-        "?"
+        "?0"
     };
     let mut position = 0;
     let bound = PLACEHOLDER.replace_all(query, |found: &regex::Captures<'_>| {
