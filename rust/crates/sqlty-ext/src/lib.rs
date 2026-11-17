@@ -1058,8 +1058,7 @@ fn indexed(
     steps: Vec<IndexStep>,
 ) -> ModuleIndex {
     use rayon::prelude::*;
-    use sqlty_python::index::{helpers_of, Module, Roots};
-    use sqlty_python::types::info::Dict;
+    use sqlty_python::index::{defines_helpers, helpers_of, Module, Roots};
     let mut unique: HashMap<(&str, &str), usize> = HashMap::new();
     let slots: Vec<Option<usize>> = steps
         .iter()
@@ -1076,12 +1075,11 @@ fn indexed(
     // A module that may define helpers is parsed now; any other when a lookup reaches it.
     let parse = |(text, name): (&str, &str)| {
         let module = Module::new(Arc::from(text), name, version);
-        let marked = text.contains("Annotated") && text.contains("sqlty") && text.contains("SQL");
-        let found = match marked {
-            true => helpers_of(module.source()?),
-            false => Dict::new(),
-        };
-        Some((Arc::new(module), found))
+        let found = defines_helpers(text)
+            .then(|| module.source().map(|parsed| helpers_of(parsed)))
+            .flatten()
+            .unwrap_or_default();
+        (Arc::new(module), found)
     };
     let parsed: Vec<_> = match parse_pool() {
         Some(pool) => pool.install(|| texts.into_par_iter().map(parse).collect()),
@@ -1090,9 +1088,8 @@ fn indexed(
     for ((_, first, second, third, roots, database), slot) in steps.into_iter().zip(slots) {
         match slot {
             Some(slot) => {
-                if let Some((source, found)) = &parsed[slot] {
-                    index.add_found(&first, Arc::clone(source), found);
-                }
+                let (source, found) = &parsed[slot];
+                index.add_found(&first, Arc::clone(source), found);
             }
             None => {
                 let roots = Roots {

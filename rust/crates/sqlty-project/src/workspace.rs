@@ -8,7 +8,9 @@ use std::sync::Arc;
 use rayon::prelude::*;
 use sqlty_python::calls::Helper;
 use sqlty_python::checker::{self, Diagnostic, SiteKind};
-use sqlty_python::index::{helpers_of, Builder, HelperIndex, Module as Indexed, Roots};
+use sqlty_python::index::{
+    defines_helpers, helpers_of, Builder, HelperIndex, Module as Indexed, Roots,
+};
 use sqlty_python::project::{self, helper_roots, Discovery, Files, Kind, Listing, Packages, Read};
 use sqlty_python::queries;
 use sqlty_python::rewriter::ImportStyle;
@@ -35,8 +37,7 @@ struct Module {
     text: Arc<str>,
     names: Vec<String>,
     resolved: PathBuf,
-    /// `None` for a module only read as text.
-    source: Option<Arc<Indexed>>,
+    source: Arc<Indexed>,
     helpers: Dict<Helper>,
 }
 
@@ -44,7 +45,7 @@ impl Module {
     /// The module parsed, `None` where Rust does not read it: kept only when the index
     /// has read it, so a checked module's tree goes with its check.
     fn parsed(&self) -> Option<Arc<Source>> {
-        self.source.as_ref()?.load()
+        self.source.load()
     }
 }
 
@@ -216,16 +217,13 @@ impl Workspace {
         let names = self.packages.names(&resolved, &self.paths, &self.flags.cwd);
         let init = path.file_name().is_some_and(|name| name == "__init__.py");
         let name = format!("{}{}", names[0], if init { ".__init__" } else { "" });
-        let marked = text.contains("Annotated") && text.contains("sqlty") && text.contains("SQL");
-        let source = parse.then(|| Indexed::new(Arc::clone(&text), &name, self.version));
+        let source = Arc::new(Indexed::new(Arc::clone(&text), &name, self.version));
         // A module that may define helpers is read now; any other when it is checked or a
         // lookup reaches it.
-        let helpers = match &source {
-            Some(source) if marked => source.source().map(|parsed| helpers_of(parsed)),
-            _ => None,
-        };
-        let source = source.map(Arc::new);
-        let helpers = helpers.unwrap_or_default();
+        let helpers = (parse && defines_helpers(&text))
+            .then(|| source.source().map(|parsed| helpers_of(parsed)))
+            .flatten()
+            .unwrap_or_default();
         Module {
             text,
             names,
@@ -417,9 +415,7 @@ impl Workspace {
         let mut builder = Builder::new(self.version);
         for path in &self.order {
             let module = &self.modules[path];
-            let Some(source) = &module.source else {
-                continue;
-            };
+            let source = &module.source;
             for name in &module.names {
                 builder.add_found(name, Arc::clone(source), &module.helpers);
             }

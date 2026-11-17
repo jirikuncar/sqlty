@@ -235,14 +235,15 @@ pub struct HelperIndex {
     pattern: Option<Regex>,
 }
 
-/// The helpers `source` defines, as `Builder::add` indexes them.
+/// Whether a module of `text` may define helpers; no other is read for them.
+pub fn defines_helpers(text: &str) -> bool {
+    text.contains("Annotated") && text.contains("sqlty") && text.contains("SQL")
+}
+
+/// The helpers `source` defines, as `Builder::add` indexes them; read only where
+/// [`defines_helpers`].
 pub fn helpers_of(source: &Source) -> Dict<Helper> {
-    let text = &*source.text;
-    if text.contains("Annotated") && text.contains("sqlty") && text.contains("SQL") {
-        index_functions(source)
-    } else {
-        Dict::new()
-    }
+    index_functions(source)
 }
 
 /// A pattern matching any of `names`, `None` for none.
