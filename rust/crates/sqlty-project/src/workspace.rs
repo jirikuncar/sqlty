@@ -3,13 +3,17 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use rayon::prelude::*;
 use sqlty_python::calls::Helper;
 use sqlty_python::checker::{self, Diagnostic, SiteKind};
-use sqlty_python::index::{helpers_of, Builder, HelperIndex, Roots};
-use sqlty_python::project::{self, helper_roots, Discovery, Files, Kind, Listing, Packages, Read};
+use sqlty_python::index::{
+    defines_helpers, helpers_of, Builder, HelperIndex, Module as Indexed, Roots,
+};
+use sqlty_python::project::{
+    self, helper_roots, normalized, Discovery, Files, Kind, Listing, Packages, Read,
+};
 use sqlty_python::queries;
 use sqlty_python::rewriter::ImportStyle;
 use sqlty_python::suppress;
@@ -35,8 +39,16 @@ struct Module {
     text: Arc<str>,
     names: Vec<String>,
     resolved: PathBuf,
-    parsed: Option<Arc<Source>>,
+    source: Arc<Indexed>,
     helpers: Dict<Helper>,
+}
+
+impl Module {
+    /// The module parsed, `None` where Rust does not read it: kept only when the index
+    /// has read it, so a checked module's tree goes with its check.
+    fn parsed(&self) -> Option<Arc<Source>> {
+        self.source.load()
+    }
 }
 
 /// How [`Workspace::open`] reads the paths.
@@ -71,6 +83,7 @@ pub struct Workspace {
     unreadable: Vec<(PathBuf, String)>,
     index: Option<Arc<HelperIndex>>,
     configured: HashMap<(Vec<Function>, Option<PathBuf>), Arc<HelperIndex>>,
+    resolved: Mutex<HashMap<PathBuf, PathBuf>>,
 }
 
 /// What completion reads of a buffer.
@@ -139,6 +152,7 @@ impl Workspace {
             unreadable: Vec::new(),
             index: None,
             configured: HashMap::new(),
+            resolved: Mutex::default(),
         };
         workspace.paths = workspace.project_paths(paths)?;
         let collected = workspace.collect(force_exclude)?;
@@ -207,23 +221,18 @@ impl Workspace {
         let names = self.packages.names(&resolved, &self.paths, &self.flags.cwd);
         let init = path.file_name().is_some_and(|name| name == "__init__.py");
         let name = format!("{}{}", names[0], if init { ".__init__" } else { "" });
-        let parsed = parse
-            .then(|| {
-                stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
-                    Source::new(Arc::clone(&text), self.version).map(|source| {
-                        let source = source.named(Some(&name));
-                        source.targets();
-                        Arc::new(source)
-                    })
-                })
-            })
-            .flatten();
-        let helpers = parsed.as_deref().map(helpers_of).unwrap_or_default();
+        let source = Arc::new(Indexed::new(Arc::clone(&text), &name, self.version));
+        // A module that may define helpers is read now; any other when it is checked or a
+        // lookup reaches it.
+        let helpers = (parse && defines_helpers(&text))
+            .then(|| source.source().map(|parsed| helpers_of(parsed)))
+            .flatten()
+            .unwrap_or_default();
         Module {
             text,
             names,
             resolved,
-            parsed,
+            source,
             helpers,
         }
     }
@@ -233,8 +242,20 @@ impl Workspace {
     }
 
     /// `path` with its links resolved: those of its directory, or its own when it is one.
+    /// A directory is resolved once.
     fn resolved(&self, path: &Path) -> PathBuf {
-        self.files.canonical(&self.absolute(path))
+        let absolute = normalized(&self.absolute(path));
+        let (Some(directory), Some(name)) = (absolute.parent(), absolute.file_name()) else {
+            return self.files.canonical(&absolute);
+        };
+        if self.files.is_link(&absolute) {
+            return self.files.canonical(&absolute);
+        }
+        let mut known = self.resolved.lock().unwrap_or_else(PoisonError::into_inner);
+        let directory = known
+            .entry(directory.to_path_buf())
+            .or_insert_with(|| self.files.canonical(directory));
+        directory.join(name)
     }
 
     fn kind(&self, path: &Path) -> Option<Kind> {
@@ -280,7 +301,7 @@ impl Workspace {
                     .map(Path::to_path_buf)
                     .unwrap_or_default();
                 let mut warn = |warning| self.schemas.warn(warning);
-                let loaded = self.flags.load(&directory, &self.files, &mut warn)?;
+                let loaded = self.flags.load(&directory, &self.discovery, &mut warn)?;
                 if let Some(base) = loaded.base {
                     let schema = loaded
                         .table
@@ -410,11 +431,9 @@ impl Workspace {
         let mut builder = Builder::new(self.version);
         for path in &self.order {
             let module = &self.modules[path];
-            let Some(parsed) = &module.parsed else {
-                continue;
-            };
+            let source = &module.source;
             for name in &module.names {
-                builder.add_found(name, Arc::clone(parsed), &module.helpers);
+                builder.add_found(name, Arc::clone(source), &module.helpers);
             }
         }
         let index = builder.build();
@@ -477,7 +496,7 @@ impl Workspace {
             let mut warn = |warning| self.schemas.warn(warning);
             let made = self
                 .flags
-                .load(&directory, &self.files, &mut warn)
+                .load(&directory, &self.discovery, &mut warn)
                 .and_then(|loaded| {
                     Directory::new(
                         loaded,
@@ -509,13 +528,11 @@ impl Workspace {
                     stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
                         let module = &self.modules[path];
                         let checker = Checker::of(settings, Some(helpers));
-                        let name = module
-                            .parsed
-                            .as_ref()
-                            .and_then(|parsed| parsed.module.clone());
+                        let parsed = module.parsed();
+                        let name = parsed.as_ref().and_then(|parsed| parsed.module.clone());
                         Ok(check_module(
                             &module.text,
-                            module.parsed.as_ref(),
+                            parsed.as_ref(),
                             name.as_deref(),
                             &checker,
                         ))
@@ -554,13 +571,11 @@ impl Workspace {
                     stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
                         let module = &self.modules[path];
                         let checker = Checker::of(settings, Some(helpers));
-                        let name = module
-                            .parsed
-                            .as_ref()
-                            .and_then(|parsed| parsed.module.clone());
+                        let parsed = module.parsed();
+                        let name = parsed.as_ref().and_then(|parsed| parsed.module.clone());
                         Ok(module::fix(
                             &module.text,
-                            module.parsed.as_deref(),
+                            parsed.as_deref(),
                             name.as_deref(),
                             &checker,
                             settings,
@@ -580,9 +595,14 @@ impl Workspace {
                     stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
                         let module = &self.modules[path];
                         let checker = Checker::of(settings, Some(helpers));
-                        let parsed = module.parsed.as_deref();
-                        let name = parsed.and_then(|parsed| parsed.module.as_deref());
-                        Ok(module::statistics(&module.text, parsed, name, &checker))
+                        let parsed = module.parsed();
+                        let name = parsed.as_ref().and_then(|parsed| parsed.module.as_deref());
+                        Ok(module::statistics(
+                            &module.text,
+                            parsed.as_deref(),
+                            name,
+                            &checker,
+                        ))
                     })
                 })
                 .collect()
@@ -657,11 +677,9 @@ impl Workspace {
         let helpers = self.helpers(&settings);
         let module = &self.modules[path];
         let checker = Checker::of(&settings, Some(&helpers));
-        let name = module
-            .parsed
-            .as_ref()
-            .and_then(|parsed| parsed.module.clone());
-        let found = check_module(text, module.parsed.as_ref(), name.as_deref(), &checker);
+        let parsed = module.parsed();
+        let name = parsed.as_ref().and_then(|parsed| parsed.module.clone());
+        let found = check_module(text, parsed.as_ref(), name.as_deref(), &checker);
         Ok(found
             .diagnostics
             .into_iter()
@@ -751,13 +769,11 @@ impl Workspace {
         let helpers = self.helpers(&settings);
         let module = &self.modules[path];
         let checker = Checker::of(&settings, Some(&helpers));
-        let name = module
-            .parsed
-            .as_ref()
-            .and_then(|parsed| parsed.module.clone());
+        let parsed = module.parsed();
+        let name = parsed.as_ref().and_then(|parsed| parsed.module.clone());
         Ok(module::fix(
             text,
-            module.parsed.as_deref(),
+            parsed.as_deref(),
             name.as_deref(),
             &checker,
             &settings,
@@ -792,7 +808,7 @@ impl Workspace {
         let helpers = self.helpers(&settings);
         let module = self.modules.get(path)?;
         let checker = Checker::of(&settings, Some(&helpers));
-        let helper_starts = match &module.parsed {
+        let helper_starts = match &module.parsed() {
             Some(parsed) => module::helper_starts(parsed, parsed.module.as_deref(), &checker),
             None => Vec::new(),
         };
@@ -871,6 +887,10 @@ mod tests {
                 Listing::Entries(entries)
             }
         }
+
+        fn is_link(&self, path: &Path) -> bool {
+            path.ends_with("linked.py")
+        }
     }
 
     const CONFIG: &str = "[tool.sqlty]\nschema = \"schema.sql\"\n\n[[tool.sqlty.functions]]\nimport-path = \"app.db.fetch\"\nquery-param = \"query\"\n";
@@ -936,6 +956,24 @@ mod tests {
                 .helper_starts,
             [32]
         );
+    }
+
+    #[test]
+    fn a_linked_file_is_resolved_on_its_own() {
+        let workspace = opened(&[
+            ("/repo/pyproject.toml", "[tool.sqlty]\n"),
+            ("/repo/app/linked.py", "x = 1\n"),
+            ("/repo/app/plain.py", "y = 1\n"),
+        ]);
+        assert_eq!(
+            workspace.resolved(Path::new("/repo/app/linked.py")),
+            Path::new("/repo/app/linked.py")
+        );
+        assert_eq!(
+            workspace.resolved(Path::new("/repo/app/plain.py")),
+            Path::new("/repo/app/plain.py")
+        );
+        assert_eq!(workspace.resolved(Path::new("/")), Path::new("/"));
     }
 
     #[test]

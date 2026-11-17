@@ -111,6 +111,9 @@ impl Excludes {
 
     fn compiled(&self, globs: &[String]) -> Matchers {
         let mut cache = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(found) = cache.get(globs) {
+            return Arc::clone(found);
+        }
         cache
             .entry(globs.to_vec())
             .or_insert_with(|| Arc::new(matchers(globs)))
