@@ -257,6 +257,21 @@ database. In CI, run the `Fuzz` workflow by hand (Actions, Fuzz, Run workflow);
 a failure prints the smallest schema and query Hypothesis shrank it to, which
 belongs in an mdtest next to the fix.
 
+`rust/fuzz` feeds every playground request (`analyze`, `complete`, `hover`,
+`format`) arbitrary source and schema with
+[cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz), seeded from the
+Markdown tests, with overflow checks and AddressSanitizer:
+
+```bash
+cd rust/fuzz
+python3 seed.py ../../tests/mdtest corpus/run
+cargo +nightly fuzz run -O -a run -- -dict=sql.dict -max_total_time=600
+```
+
+A crash leaves its input in `artifacts/run/`; `cargo +nightly fuzz fmt -O -a run
+<file>` prints it. The `Fuzz the engine` workflow runs it every night and
+uploads the input when it fails.
+
 ### Magic codec internals
 
 User documentation: [docs/guide/magic-codec.md](docs/guide/magic-codec.md).
