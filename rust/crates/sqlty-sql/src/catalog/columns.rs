@@ -25,9 +25,9 @@ pub(super) struct RawColumn {
     /// identity, generated or auto-increment column, or SQLite's rowid.
     pub(super) has_default: bool,
     /// The `DEFAULT` an INSERT that leaves the column out writes.
-    pub(super) default: Option<Expr>,
+    pub(super) default: Option<Box<Expr>>,
     /// The expression a generated column is computed from.
-    pub(super) generated: Option<Expr>,
+    pub(super) generated: Option<Box<Expr>>,
     /// Part of the primary key, which keeps it `NOT NULL` whatever a MySQL `MODIFY` says.
     pub(super) primary_key: bool,
     /// The values a `CHECK` constraint limits the column to, when it lists them.
@@ -164,7 +164,7 @@ pub(super) fn raw_column(column: &ColumnDef, dialect: SqlDialect) -> RawColumn {
             .options
             .iter()
             .find_map(|option| match &option.option {
-                ColumnOption::Default(expr) => Some(expr.clone()),
+                ColumnOption::Default(expr) => Some(Box::new(expr.clone())),
                 _ => None,
             }),
         generated: column
@@ -174,7 +174,7 @@ pub(super) fn raw_column(column: &ColumnDef, dialect: SqlDialect) -> RawColumn {
                 ColumnOption::Generated {
                     generation_expr: Some(expr),
                     ..
-                } => Some(expr.clone()),
+                } => Some(Box::new(expr.clone())),
                 _ => None,
             }),
         primary_key,
