@@ -243,7 +243,7 @@ jobs:
           cp "dist/bin/$TARGET/$exe" LICENSE README.md "$staging/"
           if [[ $TARGET == *windows* ]]; then
             archive=sqlty-$TARGET.zip
-            pwsh -Command "Compress-Archive -Path '$staging/*' -DestinationPath dist/archives/$archive"
+            pwsh -Command "Compress-Archive -Path '$(cygpath -m "$staging")/*' -DestinationPath dist/archives/$archive"
           else
             archive=sqlty-$TARGET.tar.gz
             tar czf "dist/archives/$archive" -C "$staging" .
