@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use sqlty_python::config;
-use sqlty_python::project::{self, Files, FindError, Listing};
+use sqlty_python::project::{self, normalized, Discovery, Files, FindError, Listing};
 use sqlty_python::rules::Rule;
 use toml::{Table, Value};
 
@@ -144,7 +144,7 @@ impl Flags {
     pub(crate) fn load(
         &self,
         directory: &Path,
-        files: &Shared,
+        discovery: &Discovery,
         warn: &mut dyn FnMut(String),
     ) -> Result<Loaded, String> {
         let mut loaded = match &self.configs {
@@ -158,11 +158,11 @@ impl Flags {
                 base: Some(self.cwd.clone()),
                 label: label.clone(),
             },
-            Configs::Nearest => match project::find(directory, files) {
+            Configs::Nearest => match discovery.find(&normalized(directory)) {
                 Ok(Some(found)) => Loaded {
                     base: found.file.parent().map(Path::to_path_buf),
                     label: found.file.display().to_string(),
-                    table: found.config.table,
+                    table: found.config.table.clone(),
                 },
                 Ok(None) => Loaded {
                     table: Table::new(),

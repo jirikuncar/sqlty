@@ -204,13 +204,23 @@ fn names_query_file(path: &str, base: &str, queries: Vec<String>) -> bool {
 /// The packages of the disk, each directory looked at once a process.
 static PACKAGES: LazyLock<Packages> = LazyLock::new(|| Packages::new(Box::new(Disk)));
 
-/// The dotted names the resolved `path` is imported by, the likeliest first: its package
-/// path, then its path from each of `roots` (relative to `cwd`), without and with the
-/// root's name.
+/// The dotted names each resolved path of `paths` is imported by, the likeliest first: its
+/// package path, then its path from each of `roots` (relative to `cwd`), without and with
+/// the root's name.
 #[pyfunction]
 #[expect(clippy::needless_pass_by_value, reason = "PyO3 extracts owned values")]
-fn module_names(path: PathBuf, roots: Vec<PathBuf>, cwd: PathBuf) -> Vec<String> {
-    PACKAGES.names(&path, &roots, &cwd)
+fn module_names(
+    py: Python<'_>,
+    paths: Vec<PathBuf>,
+    roots: Vec<PathBuf>,
+    cwd: PathBuf,
+) -> Vec<Vec<String>> {
+    py.detach(|| {
+        paths
+            .iter()
+            .map(|path| PACKAGES.names(path, &roots, &cwd))
+            .collect()
+    })
 }
 
 /// The checked directories, the parents of checked files and the package roots of
