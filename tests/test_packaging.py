@@ -7,7 +7,10 @@ the hook entries and what the ``.pth`` line does at interpreter startup.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.metadata
+import importlib.util
+import json
 import os
 import shlex
 import shutil
@@ -222,3 +225,80 @@ def test_supported_pythons_agree() -> None:
     importable = [*supported, f"{supported[-1]}t"]
     assert interpreters.split() == importable
     assert f"for v in {' '.join(importable)};" in imported
+
+
+def _package_binaries() -> Any:
+    spec = importlib.util.spec_from_file_location(
+        "package_binaries", ROOT / "scripts" / "package_binaries.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_binary_targets_agree() -> None:
+    targets = _package_binaries().TARGETS
+    jobs = yaml.safe_load((ROOT / ".github" / "workflows" / "pypi.yml").read_text())["jobs"]
+    built = [entry["target"] for entry in jobs["build-binaries"]["strategy"]["matrix"]["include"]]
+    main = json.loads((ROOT / "npm" / "sqlty" / "package.json").read_text())
+    names = [f"@sqlty/cli-{platform}-{arch}" for platform, arch in targets.values()]
+
+    assert sorted(built) == sorted(targets)
+    assert sorted(main["optionalDependencies"]) == sorted(names)
+    assert main["repository"]["url"] == "https://github.com/jirikuncar/sqlty"
+
+
+def test_npm_runs_the_binary_of_the_platform(tmp_path: Path) -> None:
+    package_binaries = _package_binaries()
+    for target, (platform, _) in package_binaries.TARGETS.items():
+        executable = tmp_path / "bin" / target / ("sqlty.exe" if platform == "win32" else "sqlty")
+        executable.parent.mkdir(parents=True)
+        executable.write_text('#!/bin/sh\necho "$@"\nexit 3\n')
+    modules = tmp_path / "node_modules"
+    packages = package_binaries.npm("1.2.3", tmp_path / "bin", modules)
+    main = json.loads((modules / "sqlty" / "package.json").read_text())
+    linux = json.loads((modules / "@sqlty" / "cli-linux-x64" / "package.json").read_text())
+
+    assert len(packages) == len(package_binaries.TARGETS) + 1
+    assert main["version"] == "1.2.3"
+    assert set(main["optionalDependencies"].values()) == {"1.2.3"}
+    assert (linux["os"], linux["cpu"], linux["files"]) == (["linux"], ["x64"], ["bin/sqlty"])
+    node = shutil.which("node")
+    assert node is not None
+    platform, arch = (
+        subprocess.check_output([node, "-p", "`${process.platform} ${process.arch}`"])
+        .decode()
+        .split()
+    )
+    for package in (modules / "@sqlty").iterdir():
+        if package.name != f"cli-{platform}-{arch}":
+            shutil.rmtree(package)
+    found = subprocess.run(
+        [node, modules / "sqlty" / "bin" / "sqlty.js", "check", "--fix"],
+        capture_output=True,
+        text=True,
+    )
+    assert (found.returncode, found.stdout) == (3, "check --fix\n")
+    shutil.rmtree(modules / "@sqlty" / f"cli-{platform}-{arch}")
+    found = subprocess.run(
+        [node, modules / "sqlty" / "bin" / "sqlty.js"], capture_output=True, text=True
+    )
+    assert found.returncode == 1
+    assert f"no prebuilt binary for {platform}-{arch}" in found.stderr
+
+
+def test_homebrew_formula_downloads_the_release(tmp_path: Path) -> None:
+    package_binaries = _package_binaries()
+    for target in package_binaries.TARGETS:
+        (tmp_path / f"sqlty-{target}.tar.gz").write_bytes(target.encode())
+    formula = package_binaries.homebrew("1.2.3", tmp_path)
+    digest = hashlib.sha256(b"aarch64-apple-darwin").hexdigest()
+
+    assert 'version "1.2.3"' in formula
+    assert (
+        f'url "https://github.com/jirikuncar/sqlty/releases/download/v1.2.3/'
+        f'sqlty-aarch64-apple-darwin.tar.gz"\n      sha256 "{digest}"'
+    ) in formula
+    assert "windows" not in formula
+    assert 'shell_output("#{bin}/sqlty version")' in formula

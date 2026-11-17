@@ -6,6 +6,7 @@
 mod diff;
 mod json;
 pub mod native;
+pub mod server;
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
