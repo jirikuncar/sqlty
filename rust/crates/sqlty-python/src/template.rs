@@ -17,7 +17,7 @@ static PSYCOPG: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?m)^[ \t]*(?:(?:import|from)[ \t]+(?:sqlty\.drivers\.)?psycopg\b|from[ \t]+sqlty\.drivers[ \t]+import\b[^\n]*\bpsycopg\b)",
     )
-    .unwrap()
+    .expect("a valid pattern")
 });
 
 /// What a `:i` field reads as, so the query still parses.

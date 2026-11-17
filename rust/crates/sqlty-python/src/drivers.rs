@@ -11,6 +11,7 @@ use ruff_python_ast::visitor::{
 use ruff_python_ast::{Comprehension, ExceptHandler, Expr, ExprCall, ExprContext, Stmt};
 use ruff_text_size::Ranged;
 
+use crate::frozen::Table;
 use crate::scopes::{dotted, is_scalar, qualified, Context, Lines, Node, Scan, Scope};
 pub use crate::scopes::{Key, Param};
 
@@ -92,7 +93,7 @@ pub fn may_hold(text: &str) -> bool {
 /// The driver calls of `body`, in source order.
 ///
 /// `imported` is `ParsedSource.imported_names` as `(local, dotted)` pairs, first binding first.
-pub fn find(source: &str, body: &[Stmt], imported: &HashMap<String, String>) -> Vec<DriverCall> {
+pub fn find(source: &str, body: &[Stmt], imported: &Table) -> Vec<DriverCall> {
     let helpers = imported.values().any(|name| {
         let dotted = format!("{name}.");
         dotted.starts_with(BUNDLED_MODULE) || BUNDLED_MODULE.starts_with(&dotted)

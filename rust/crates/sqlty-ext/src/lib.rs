@@ -1058,8 +1058,7 @@ fn indexed(
     steps: Vec<IndexStep>,
 ) -> ModuleIndex {
     use rayon::prelude::*;
-    use sqlty_python::index::{helpers_of, Roots};
-    use sqlty_python::types::symbols::Source;
+    use sqlty_python::index::{defines_helpers, helpers_of, Module, Roots};
     let mut unique: HashMap<(&str, &str), usize> = HashMap::new();
     let slots: Vec<Option<usize>> = steps
         .iter()
@@ -1073,11 +1072,14 @@ fn indexed(
     for (key, slot) in unique {
         texts[slot] = key;
     }
+    // A module that may define helpers is parsed now; any other when a lookup reaches it.
     let parse = |(text, name): (&str, &str)| {
-        let source = Source::new(text, version)?.named(Some(name));
-        source.targets();
-        let found = helpers_of(&source);
-        Some((Arc::new(source), found))
+        let module = Module::new(Arc::from(text), name, version);
+        let found = defines_helpers(text)
+            .then(|| module.source().map(|parsed| helpers_of(parsed)))
+            .flatten()
+            .unwrap_or_default();
+        (Arc::new(module), found)
     };
     let parsed: Vec<_> = match parse_pool() {
         Some(pool) => pool.install(|| texts.into_par_iter().map(parse).collect()),
@@ -1086,9 +1088,8 @@ fn indexed(
     for ((_, first, second, third, roots, database), slot) in steps.into_iter().zip(slots) {
         match slot {
             Some(slot) => {
-                if let Some((source, found)) = &parsed[slot] {
-                    index.add_found(&first, Arc::clone(source), found);
-                }
+                let (source, found) = &parsed[slot];
+                index.add_found(&first, Arc::clone(source), found);
             }
             None => {
                 let roots = Roots {
@@ -1149,8 +1150,11 @@ fn parsed_module(
     use sqlty_python::types::symbols::Source;
     let known = name.zip(index).and_then(|(name, index)| {
         let module = name.strip_suffix(".__init__").unwrap_or(name);
-        let known = index.source(module)?;
-        (known.module.as_deref() == Some(name) && *known.text == *source).then(|| Arc::clone(known))
+        let known = index.module(module)?;
+        (*known.text == *source)
+            .then(|| known.load())
+            .flatten()
+            .filter(|known| known.module.as_deref() == Some(name))
     });
     match known {
         Some(parsed) => Some(parsed),
@@ -1918,10 +1922,7 @@ impl ModuleChecker<'_> {
             helpers,
             variants: self.config.variants,
         };
-        let mut found = match &parsed {
-            Some(parsed) => check::diagnostics(parsed, &run),
-            None => check::unparsed(source, &run),
-        };
+        let mut found = check::module(source, parsed.as_ref(), &run);
         if suppress {
             let ignores = match &parsed {
                 Some(parsed) => sqlty_python::suppress::ignores(parsed),

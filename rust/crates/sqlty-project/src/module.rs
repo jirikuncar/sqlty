@@ -108,10 +108,7 @@ pub fn check_module(
         helpers: checker.helpers,
         variants: checker.variants,
     };
-    let mut found = match parsed {
-        Some(parsed) => check::diagnostics(parsed, &run),
-        None => check::unparsed(text, &run),
-    };
+    let mut found = check::module(text, parsed, &run);
     let ignores = match parsed {
         Some(parsed) => suppress::ignores(parsed),
         None => suppress::unparsed_ignores(text),

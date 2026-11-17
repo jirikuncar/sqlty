@@ -369,10 +369,7 @@ fn checked(
         variants,
     };
     let module = Source::new(source, VERSION).map(Arc::new);
-    let found = match &module {
-        Some(module) => check::diagnostics(module, &run),
-        None => check::unparsed(source, &run),
-    };
+    let found = check::module(source, module.as_ref(), &run);
     let ignores = match &module {
         Some(module) => suppress::ignores(module),
         None => suppress::unparsed_ignores(source),

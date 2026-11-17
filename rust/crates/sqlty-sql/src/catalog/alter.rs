@@ -107,11 +107,14 @@ impl Loader {
             let moved = self.relations.remove(&key);
             self.relations
                 .extend(moved.map(|table| (new_key.clone(), table)));
-            for rel in self.relations.values_mut() {
-                if let Rel::Table(table) = rel {
-                    for parent in &mut table.parents {
-                        if *parent == key {
-                            parent.clone_from(&new_key);
+            if self.inherited.contains(&key) {
+                self.inherited.insert(new_key.clone());
+                for rel in self.relations.values_mut() {
+                    if let Rel::Table(table) = rel {
+                        for parent in &mut table.parents {
+                            if *parent == key {
+                                parent.clone_from(&new_key);
+                            }
                         }
                     }
                 }
@@ -313,7 +316,7 @@ pub(super) fn alter_op(
                 }
                 AlterColumnOperation::SetDefault { value } => {
                     table.columns[at].has_default = true;
-                    table.columns[at].default = Some(value.clone());
+                    table.columns[at].default = Some(Box::new(value.clone()));
                 }
                 AlterColumnOperation::AddGenerated { .. } => {
                     table.columns[at].has_default = true;

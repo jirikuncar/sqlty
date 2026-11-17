@@ -8,12 +8,12 @@
 //! Only what is decidable is reported: `Any`, `object`, classes sqlty cannot see into
 //! (imports, Pydantic models) and annotations it cannot read accept anything.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use ruff_python_ast::{Expr, Operator};
 use sqlty_sql::json::{JsonField, JsonShape, JsonValue};
 
+use crate::frozen::Table;
 use crate::types::info::{Annotation, Dict, Kind, TypeInfo};
 use crate::types::resolve::slice_items;
 
@@ -44,7 +44,7 @@ const MAX_DEPTH: usize = 32;
 
 struct Context<'a> {
     defs: &'a Dict<Arc<TypeInfo>>,
-    aliases: &'a HashMap<String, String>,
+    aliases: &'a Table,
 }
 
 /// An alternative of an annotation: `None`, or an expression.
@@ -61,7 +61,7 @@ pub fn json_problems(
     shape: &JsonShape,
     annotation: &Annotation,
     defs: &Dict<Arc<TypeInfo>>,
-    aliases: &HashMap<String, String>,
+    aliases: &Table,
     name: &str,
 ) -> Vec<String> {
     let mut out = Vec::new();
@@ -435,7 +435,7 @@ mod tests {
             expr: *parsed.into_syntax().body,
             source: Arc::from(annotation),
         };
-        json_problems(shape, &annotation, &Dict::new(), &HashMap::new(), "")
+        json_problems(shape, &annotation, &Dict::new(), &Table::default(), "")
     }
 
     #[test]

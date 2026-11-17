@@ -5,12 +5,13 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
 
 use regex::Regex;
 use ruff_python_ast::Expr;
 
 use crate::calls::{definitions, helper, index_functions, parameter_names, rank, Helper, Kind};
+use crate::frozen::{Frozen, Table};
 use crate::module::Import;
 use crate::types::extract::extract_type_definitions;
 use crate::types::info::{Dict, TypeInfo};
@@ -20,24 +21,21 @@ use crate::types::symbols::{Index, ModuleTypes, RowType, Source};
 use crate::types::ty::Ty;
 
 /// Local names bound to imported names `(module, name)`.
-pub type Functions = HashMap<String, (String, String)>;
+pub type Functions = Frozen<(String, String)>;
 /// What `imports_of` gives: the functions, and the modules by local name.
-pub type Targets = (Functions, HashMap<String, String>);
+pub type Targets = (Functions, Table);
 
 /// `_imports_of`: the local names `entries` bind to imported functions `(module, name)`
 /// and to modules, in the module `module`.
-pub fn imports_of(
-    entries: &[Import],
-    module: Option<&str>,
-) -> (Functions, HashMap<String, String>) {
-    let mut functions = Functions::new();
-    let mut modules = HashMap::new();
+pub fn imports_of(entries: &[Import], module: Option<&str>) -> Targets {
+    let mut functions = Vec::new();
+    let mut modules = Vec::new();
     let package = module.map_or("", |module| {
         module.rsplit_once('.').map_or("", |(package, _)| package)
     });
     for import in entries {
         let Some(base) = &import.module else {
-            modules.insert(import.local.clone(), import.original.clone());
+            modules.push((import.local.clone(), import.original.clone()));
             continue;
         };
         let mut base = base.clone();
@@ -60,21 +58,24 @@ pub fn imports_of(
             }
             base = parts.join(".");
         }
-        modules.insert(
+        modules.push((
             import.local.clone(),
             if base.is_empty() {
                 import.original.clone()
             } else {
                 format!("{base}.{}", import.original)
             },
-        );
-        functions.insert(import.local.clone(), (base, import.original.clone()));
+        ));
+        functions.push((import.local.clone(), (base, import.original.clone())));
     }
-    (functions, modules)
+    (
+        functions.into_iter().collect(),
+        modules.into_iter().collect(),
+    )
 }
 
 /// The module a dotted prefix names, through the modules `modules` binds.
-pub fn module_of(prefix: &str, modules: &HashMap<String, String>) -> String {
+pub fn module_of(prefix: &str, modules: &Table) -> String {
     let (head, rest) = prefix.split_once('.').unwrap_or((prefix, ""));
     match modules.get(head) {
         Some(module) if rest.is_empty() => module.clone(),
@@ -108,11 +109,70 @@ pub struct Roots<'a> {
     pub read: &'a dyn Fn(&Path) -> Option<String>,
 }
 
+/// A module of the tree: its text, parsed when another module's lookup first reaches it.
+pub struct Module {
+    pub text: Arc<str>,
+    name: String,
+    version: Version,
+    parsed: OnceLock<Option<Arc<Source>>>,
+}
+
+impl Module {
+    /// `text` as the module `name`, not parsed yet.
+    pub fn new(text: Arc<str>, name: &str, version: Version) -> Self {
+        Module {
+            text,
+            name: name.to_string(),
+            version,
+            parsed: OnceLock::new(),
+        }
+    }
+
+    /// The module of `source`, already parsed.
+    pub fn parsed(source: Arc<Source>) -> Self {
+        Module {
+            text: Arc::clone(&source.text),
+            name: source.module.clone().unwrap_or_default(),
+            version: source.version,
+            parsed: OnceLock::from(Some(source)),
+        }
+    }
+
+    /// The module parsed and kept, `None` where Rust does not read it.
+    pub fn source(&self) -> Option<&Arc<Source>> {
+        self.parsed
+            .get_or_init(|| self.parse().map(Arc::new))
+            .as_ref()
+    }
+
+    /// The module as parsed so far, else parsed for the caller alone.
+    pub fn load(&self) -> Option<Arc<Source>> {
+        match self.parsed.get() {
+            Some(parsed) => parsed.clone(),
+            None => self.parse().map(Arc::new),
+        }
+    }
+
+    fn parse(&self) -> Option<Source> {
+        stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
+            Some(Source::new(Arc::clone(&self.text), self.version)?.named(Some(&self.name)))
+        })
+    }
+}
+
+/// The stack a parse needs left, and the stack it grows by when less is left.
+const STACK_RED_ZONE: usize = 2 << 20;
+const STACK_SEGMENT: usize = 16 << 20;
+
+/// `as`, which any import binding a name to another has.
+static AS: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r"\bas\b").expect("a valid pattern"));
+
 /// The sources of the modules of a checked tree and what is read of them, shared by an
 /// index and its forks.
 pub struct Tree {
     this: Weak<Tree>,
-    sources: HashMap<String, Arc<Source>>,
+    sources: HashMap<String, Arc<Module>>,
     exports: Mutex<HashMap<String, Arc<Functions>>>,
     row_types: Mutex<HashMap<String, Defs>>,
     types: Mutex<HashMap<(String, String), Typed>>,
@@ -175,14 +235,15 @@ pub struct HelperIndex {
     pattern: Option<Regex>,
 }
 
-/// The helpers `source` defines, as `Builder::add` indexes them.
+/// Whether a module of `text` may define helpers; no other is read for them.
+pub fn defines_helpers(text: &str) -> bool {
+    text.contains("Annotated") && text.contains("sqlty") && text.contains("SQL")
+}
+
+/// The helpers `source` defines, as `Builder::add` indexes them; read only where
+/// [`defines_helpers`].
 pub fn helpers_of(source: &Source) -> Dict<Helper> {
-    let text = &*source.text;
-    if text.contains("Annotated") && text.contains("sqlty") && text.contains("SQL") {
-        index_functions(source)
-    } else {
-        Dict::new()
-    }
+    index_functions(source)
 }
 
 /// A pattern matching any of `names`, `None` for none.
@@ -200,7 +261,7 @@ pub struct Builder {
     modules: HashMap<String, Dict<Helper>>,
     /// The tree forked from, until a module is added.
     tree: Option<Arc<Tree>>,
-    added: HashMap<String, Arc<Source>>,
+    added: HashMap<String, Arc<Module>>,
     version: Version,
     read: Arc<Mutex<Read>>,
 }
@@ -216,13 +277,13 @@ impl Builder {
         }
     }
 
-    fn sources(&self) -> &HashMap<String, Arc<Source>> {
+    fn sources(&self) -> &HashMap<String, Arc<Module>> {
         self.tree.as_ref().map_or(&self.added, |tree| &tree.sources)
     }
 
     /// Index `source` as module `module` with its helpers `found` by `helpers_of`, so that
     /// sources can be read in parallel and one source shared by the names of its module.
-    pub fn add_found(&mut self, module: &str, source: Arc<Source>, found: &Dict<Helper>) -> bool {
+    pub fn add_found(&mut self, module: &str, source: Arc<Module>, found: &Dict<Helper>) -> bool {
         if let Some(tree) = self.tree.take() {
             self.added.clone_from(&tree.sources);
         }
@@ -307,7 +368,7 @@ impl Builder {
     ) -> Option<Helper> {
         let module = parts.join(".");
         let source = match self.sources().get(&module) {
-            Some(source) => source.clone(),
+            Some(known) => known.source()?.clone(),
             None => self.module_source(parts, roots)?,
         };
         let wanted: Vec<&str> = [Some(query), row].into_iter().flatten().collect();
@@ -334,7 +395,8 @@ impl Builder {
             Some((head, rest)) => (head, format!(".{rest}")),
             None => (name, String::new()),
         };
-        let (exports, _) = imports_of(&source.entries, source.module.as_deref().or(Some(&module)));
+        let targets = source.targets_in(source.module.as_deref().or(Some(&module)));
+        let (exports, _) = &*targets;
         let (target, original) = exports.get(head)?;
         let parts: Vec<&str> = target.split('.').collect();
         self.definition(
@@ -404,13 +466,14 @@ impl Builder {
             }
             let named = alternation(&names);
             let mut renamed = Vec::new();
-            for source in self.sources().values() {
-                if named
+            // Only `import ... as ...` binds a helper to another name.
+            let aliasing = self.sources().values().filter(|known| {
+                named
                     .as_ref()
-                    .is_some_and(|named| !named.is_match(&source.text))
-                {
-                    continue;
-                }
+                    .is_none_or(|named| named.is_match(&known.text))
+                    && AS.is_match(&known.text)
+            });
+            for source in aliasing.filter_map(|known| known.load()) {
                 renamed.extend(
                     source
                         .targets()
@@ -463,8 +526,13 @@ impl HelperIndex {
     }
 
     /// The module `module` as it was added.
-    pub fn source(&self, module: &str) -> Option<&Arc<Source>> {
+    pub fn module(&self, module: &str) -> Option<&Arc<Module>> {
         self.tree.sources.get(module)
+    }
+
+    /// The module `module` parsed and kept.
+    pub fn source(&self, module: &str) -> Option<&Arc<Source>> {
+        self.module(module)?.source()
     }
 
     /// The Python version the modules are read as.
@@ -505,7 +573,8 @@ impl HelperIndex {
         dotted: &str,
         module: Option<&str>,
     ) -> Option<(&'a Source, &'a Expr)> {
-        self.fragment_of(&source.entries, dotted, source.module.as_deref().or(module))
+        let (functions, modules) = &*source.targets_in(source.module.as_deref().or(module));
+        self.constant(functions, modules, dotted)
     }
 
     /// [`Self::fragment`] for the module `module` that imports `entries`.
@@ -516,12 +585,21 @@ impl HelperIndex {
         module: Option<&str>,
     ) -> Option<(&Source, &Expr)> {
         let (functions, modules) = imports_of(entries, module);
+        self.constant(&functions, &modules, dotted)
+    }
+
+    fn constant(
+        &self,
+        functions: &Functions,
+        modules: &Table,
+        dotted: &str,
+    ) -> Option<(&Source, &Expr)> {
         match dotted.rsplit_once('.') {
             None => {
                 let (module, original) = functions.get(dotted)?;
                 self.tree.constant(module, original, 0)
             }
-            Some((prefix, name)) => self.tree.constant(&module_of(prefix, &modules), name, 0),
+            Some((prefix, name)) => self.tree.constant(&module_of(prefix, modules), name, 0),
         }
     }
 
@@ -529,7 +607,7 @@ impl HelperIndex {
     /// reads them.
     pub fn definitions(&self, source: &Source) -> Option<Defs> {
         let module = source.module.as_deref()?;
-        let known = self.tree.sources.get(module)?;
+        let known = self.tree.sources.get(module)?.source()?;
         std::ptr::eq(&**known, source).then(|| self.tree.definitions(module, known))
     }
 
@@ -544,7 +622,7 @@ impl HelperIndex {
         if depth > 8 {
             return None;
         }
-        let source = self.tree.sources.get(module)?;
+        let source = self.tree.sources.get(module)?.source()?;
         let exports = self.tree.reexports(module, source);
         let (head, rest) = match name.split_once('.') {
             Some((head, rest)) => (head, format!(".{rest}")),
@@ -570,7 +648,7 @@ impl Tree {
     /// past `hops` is not cached, and a cached one is `None` past them, so it does not depend
     /// on which module asked first.
     fn typed(&self, module: &str, name: &str, hops: usize) -> Option<Typed> {
-        let Some(source) = self.sources.get(module) else {
+        let Some(source) = self.sources.get(module).and_then(|known| known.source()) else {
             return Some((None, 0));
         };
         let key = (module.to_string(), name.to_string());
@@ -624,7 +702,7 @@ impl Tree {
         if depth > 8 {
             return None;
         }
-        let source = self.sources.get(module)?;
+        let source = self.sources.get(module)?.source()?;
         if let Some(value) = crate::compose::constant(source, name) {
             return Some((source, value));
         }
@@ -667,7 +745,7 @@ impl Tree {
         if depth > 8 {
             return None;
         }
-        let source = self.sources.get(module)?;
+        let source = self.sources.get(module)?.source()?;
         let defs = self.definitions(module, source);
         if let Some(info) = defs.get(name) {
             return Some(RowType {
@@ -711,6 +789,23 @@ mod tests {
     }
 
     #[test]
+    fn a_source_imports_relative_to_the_module_it_is_read_as() {
+        let source = Source::new("from .b import c\n", (3, 14))
+            .unwrap()
+            .named(Some("app.a"));
+        let own = source.targets_in(None);
+        let other = source.targets_in(Some("lib.a"));
+        assert_eq!(
+            own.0.get("c").map(|(module, _)| module.as_str()),
+            Some("app.b")
+        );
+        assert_eq!(
+            other.0.get("c").map(|(module, _)| module.as_str()),
+            Some("lib.b")
+        );
+    }
+
+    #[test]
     fn a_top_level_module_imports_relative_to_the_root() {
         let source = Source::new(
             "from . import a\nfrom .. import b\nfrom .c import d\n",
@@ -718,21 +813,32 @@ mod tests {
         )
         .unwrap();
         let (_, modules) = imports_of(&source.entries, Some("app"));
-        let mut modules: Vec<_> = modules.into_iter().collect();
-        modules.sort();
+        let modules: Vec<_> = modules.iter().collect();
         assert_eq!(
             modules,
-            [("a".into(), "a".into()), ("d".into(), "c.d".into())]
+            [(&"a".into(), &"a".into()), (&"d".into(), &"c.d".into())]
         );
     }
 
     #[test]
+    fn a_module_keeps_its_tree_once_a_lookup_parses_it() {
+        let module = Module::new(Arc::from("x = 1\n"), "app.a", (3, 14));
+        let loaded = module.load().unwrap();
+        assert_eq!(loaded.module.as_deref(), Some("app.a"));
+        let kept = Arc::clone(module.source().unwrap());
+        assert!(!Arc::ptr_eq(&loaded, &kept));
+        assert!(Arc::ptr_eq(&module.load().unwrap(), &kept));
+    }
+
+    #[test]
     fn a_fork_takes_the_sources_it_was_built_with() {
-        let a = Arc::new(Source::new("x = 1\n", (3, 14)).unwrap());
+        let a = Arc::new(Module::new(Arc::from("x = 1\n"), "a", (3, 14)));
         let mut builder = Builder::new((3, 14));
         builder.add_found("a", a, &Dict::new());
         let mut fork = builder.build().fork();
-        let b = Arc::new(Source::new("y = 1\n", (3, 14)).unwrap());
+        let b = Arc::new(Module::parsed(Arc::new(
+            Source::new("y = 1\n", (3, 14)).unwrap().named(Some("b")),
+        )));
         assert!(!fork.add_found("b", b, &Dict::new()));
         let index = fork.build();
         assert!(index.source("a").is_some() && index.source("b").is_some());

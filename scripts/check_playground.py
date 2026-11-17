@@ -54,10 +54,7 @@ def main() -> None:
         assert not errors, errors
         exercise(browser, url, coverage.watch)
         coverage.take()
-        script = page.evaluate(
-            "(url) => fetch(url).then((response) => response.text())",
-            f"{url}../assets/playground/playground.js",
-        )
+        script = page.request.get(f"{url}../assets/playground/playground.js").text()
         browser.close()
     lines, functions = coverage.missed(script)
     assert not lines and not functions, (
