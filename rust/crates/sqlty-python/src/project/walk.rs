@@ -165,10 +165,9 @@ impl Discovery {
             return found.clone();
         }
         let found = match find_in(directory, &*self.files) {
-            Ok(None) => match directory.parent() {
-                Some(parent) => self.find(parent),
-                None => Ok(None),
-            },
+            Ok(None) => directory
+                .parent()
+                .map_or(Ok(None), |parent| self.find(parent)),
             found => found.map(|found| found.map(Arc::new)),
         };
         if !matches!(found, Err(FindError::Need(_))) {

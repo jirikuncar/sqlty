@@ -340,6 +340,11 @@ mod tests {
     }
 
     #[test]
+    fn a_file_the_host_reads_may_be_a_link() {
+        assert!(tree(&[]).is_link(Path::new("/app/a.py")));
+    }
+
+    #[test]
     fn the_nearest_file_with_a_table_wins() {
         let files = [
             ("/a/sqlty.toml", "dialect = \"mysql\""),
