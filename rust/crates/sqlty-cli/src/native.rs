@@ -91,7 +91,7 @@ impl Environment {
     pub fn find(executable: &Path, cwd: &Path, env: impl Fn(&str) -> Option<OsString>) -> Self {
         let scripts = executable.parent().unwrap_or(Path::new("."));
         if installed_in(scripts.parent().unwrap_or(scripts)) {
-            return Self::of_scripts(scripts);
+            return Self::read(scripts, true);
         }
         let conda = env("CONDA_PREFIX").map(PathBuf::from);
         let base = env("CONDA_DEFAULT_ENV").is_some_and(|name| name == "base");
@@ -100,19 +100,27 @@ impl Environment {
                 .map(|directory| directory.join(".venv"))
                 .find(|venv| venv.join("pyvenv.cfg").is_file())
         };
-        let prefix = env("VIRTUAL_ENV")
+        // A `.venv` comes with the checkout, so its interpreter is never run to ask a version.
+        let active = env("VIRTUAL_ENV")
             .map(PathBuf::from)
-            .or_else(|| conda.clone().filter(|_| !base))
-            .or_else(venv)
-            .or(conda);
-        match prefix {
-            Some(prefix) => Self::of_scripts(&scripts_of(&prefix)),
-            None => Self::of_scripts(scripts),
+            .or_else(|| conda.clone().filter(|_| !base));
+        match (active, venv()) {
+            (Some(prefix), _) => Self::read(&scripts_of(&prefix), true),
+            (None, Some(prefix)) => Self::read(&scripts_of(&prefix), false),
+            (None, None) => Self::read(
+                &conda.map_or(scripts.to_path_buf(), |prefix| scripts_of(&prefix)),
+                true,
+            ),
         }
     }
 
     /// The environment whose scripts directory (`bin` or `Scripts`) is `scripts`.
     pub fn of_scripts(scripts: &Path) -> Self {
+        Self::read(scripts, true)
+    }
+
+    /// The environment of `scripts`; its interpreter is asked its version only when `ask`.
+    fn read(scripts: &Path, ask: bool) -> Self {
         let prefix = scripts.parent().unwrap_or(scripts);
         let interpreter = ["python", "python3", "python.exe"]
             .into_iter()
@@ -122,7 +130,7 @@ impl Environment {
         let site = site_packages(prefix);
         let version = configured_version(prefix)
             .or_else(|| site.as_deref().and_then(version_of_site))
-            .or_else(|| asked_version(&interpreter))
+            .or_else(|| ask.then(|| asked_version(&interpreter)).flatten())
             .unwrap_or(DEFAULT_VERSION);
         let mut path = vec![scripts.to_path_buf()];
         if let Some(site) = site {
@@ -416,6 +424,24 @@ mod tests {
             local
         );
         assert_eq!(Environment::find(&npm, &cwd, none).version, (3, 15));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let marker = root.join("ran");
+            let python = local.join("python");
+            std::fs::write(project.join(".venv/pyvenv.cfg"), "home = /usr\n").unwrap();
+            std::fs::write(&python, format!("#!/bin/sh\ntouch {}\n", marker.display())).unwrap();
+            std::fs::set_permissions(&python, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let found = Environment::find(&npm, &cwd, none);
+            assert_eq!(
+                (found.interpreter, found.version),
+                (python, DEFAULT_VERSION)
+            );
+            assert!(
+                !marker.exists(),
+                "ran the interpreter of the checkout's .venv"
+            );
+        }
         std::fs::remove_dir_all(project.join(".venv")).unwrap();
         assert_eq!(
             find(

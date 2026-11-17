@@ -359,11 +359,14 @@ jobs:
           version=$(sed -n '/^\[workspace.package\]/{n;s/^version = "\(.*\)"/\1/p;}' rust/Cargo.toml)
           for package in $(python3 scripts/package_binaries.py npm "$version" dist/bin dist/npm); do
             name=$(node -p "require('./$package/package.json').name")
-            if npm view "$name@$version" version >/dev/null 2>&1; then
-              echo "$name@$version is already published"
+            # A re-run skips what it published; a version someone else published stops it.
+            built=$(cd "$package" && npm pack --dry-run --json | node -p "JSON.parse(require('fs').readFileSync(0))[0].integrity")
+            published=$(npm view "$name@$version" dist.integrity 2>/dev/null || true)
+            if [ -n "$published" ]; then
+              [ "$published" = "$built" ] || { echo "::error::$name@$version on npm is not this build"; exit 1; }
               continue
             fi
-            (cd "$package" && npm publish --access public $DRY_RUN)
+            (cd "$package" && npm publish --access public ${DRY_RUN:---provenance})
           done
 
   # A run by hand prints the formula without pushing it.
