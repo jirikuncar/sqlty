@@ -30,7 +30,8 @@ pub(crate) const TYPE_MODULES: [&str; 5] = ["datetime", "uuid", "decimal", "ipad
 // Regex patterns
 // ---------------------------------------------------------------------------
 
-static CODING: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^#.*?coding[:=]").unwrap());
+static CODING: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^#.*?coding[:=]").expect("a valid pattern"));
 
 // ---------------------------------------------------------------------------
 // Import style parsing
@@ -643,7 +644,8 @@ pub(crate) fn escapes(text: &str, mut piece: impl FnMut(&str, Range<usize>)) {
     piece(rest, position(rest)..text.len());
 }
 
-static NO_PARAMS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bNoParams\b").unwrap());
+static NO_PARAMS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\bNoParams\b").expect("a valid pattern"));
 
 /// Remove sqlty and `TYPE_MODULES` imports that are no longer referenced.
 fn remove_unused_imports(source: &str, istyle: &ImportStyle) -> String {
@@ -714,7 +716,7 @@ fn unused_datetime_import(source: &str, line: &str) -> bool {
     {
         return false;
     }
-    let word = Regex::new(&format!(r"\b{}\b", regex::escape(binding))).unwrap();
+    let word = Regex::new(&format!(r"\b{}\b", regex::escape(binding))).expect("a valid pattern");
     word.find_iter(source).count() == 1
 }
 
@@ -917,7 +919,8 @@ impl Spelling {
         self.imports
             .iter()
             .filter(|(spelled, _)| {
-                let word = Regex::new(&format!(r"\b{}\b", regex::escape(spelled))).unwrap();
+                let word = Regex::new(&format!(r"\b{}\b", regex::escape(spelled)))
+                    .expect("a valid pattern");
                 wrapped.iter().any(|text| {
                     text.split_once('(')
                         .is_some_and(|(head, _)| word.is_match(head))
@@ -929,7 +932,7 @@ impl Spelling {
 }
 
 static DATETIME_TYPE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\bdatetime\.(?:datetime|date|timedelta|timezone|time)\b").unwrap()
+    Regex::new(r"\bdatetime\.(?:datetime|date|timedelta|timezone|time)\b").expect("a valid pattern")
 });
 
 fn flush(names: &mut Vec<&str>, pairs: &mut Vec<(String, String)>) {

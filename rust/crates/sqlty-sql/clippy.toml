@@ -1,3 +1,6 @@
+allow-panic-in-tests = true
+allow-unwrap-in-tests = true
+
 # The engine reads only what the host hands it: no files, processes or network.
 disallowed-methods = [
     { path = "std::fs::read", reason = "the engine does no I/O" },

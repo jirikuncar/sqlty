@@ -705,7 +705,7 @@ impl Statement<'_> {
 }
 
 static SET_CONFIG: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?is)\bset_config\s*\(\s*'search_path'\s*,\s*'([^']*)'").unwrap()
+    Regex::new(r"(?is)\bset_config\s*\(\s*'search_path'\s*,\s*'([^']*)'").expect("a valid pattern")
 });
 
 /// A comma-separated `search_path` value such as `app, "$user", public`.
@@ -757,7 +757,7 @@ pub(crate) fn split_statements(sql: &str, mysql: bool) -> Vec<Statement<'_>> {
         if is_punct(&piece, ";") {
             parts.push(Vec::new());
         } else {
-            parts.last_mut().unwrap().push(piece);
+            parts.last_mut().expect("starts with one part").push(piece);
         }
     }
     parts

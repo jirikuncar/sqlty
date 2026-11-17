@@ -20,7 +20,8 @@ use super::text_names::{line_starts, offset};
 
 /// A `?` placeholder in group 1, or a literal, quoted name, comment or `?|`/`?&` operator to skip.
 pub(super) static QMARK: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|(?s:/\*.*?\*/)|\?[|&]|(\?)"#).unwrap()
+    Regex::new(r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|(?s:/\*.*?\*/)|\?[|&]|(\?)"#)
+        .expect("a valid pattern")
 });
 
 /// MySQL column types sqlparser rejects: `ZEROFILL` (which implies `UNSIGNED`),
@@ -29,19 +30,22 @@ pub(super) static QMARK: LazyLock<Regex> = LazyLock::new(|| {
 pub(super) static MYSQL_TYPE_FIXES: LazyLock<[(Regex, &str); 4]> = LazyLock::new(|| {
     [
         (
-            Regex::new(r"(?i)\bNATIONAL\s+(?:VARCHAR|(?:CHAR|CHARACTER)\s+VARYING)\b").unwrap(),
+            Regex::new(r"(?i)\bNATIONAL\s+(?:VARCHAR|(?:CHAR|CHARACTER)\s+VARYING)\b")
+                .expect("a valid pattern"),
             "NVARCHAR",
         ),
         (
-            Regex::new(r"(?i)\bNATIONAL\s+(?:CHAR|CHARACTER)\b").unwrap(),
+            Regex::new(r"(?i)\bNATIONAL\s+(?:CHAR|CHARACTER)\b").expect("a valid pattern"),
             "NCHAR",
         ),
         (
-            Regex::new(r"(?i)(?:\s+(?:UN)?SIGNED)?\s+ZEROFILL\b(?:\s+(?:UN)?SIGNED\b)?").unwrap(),
+            Regex::new(r"(?i)(?:\s+(?:UN)?SIGNED)?\s+ZEROFILL\b(?:\s+(?:UN)?SIGNED\b)?")
+                .expect("a valid pattern"),
             " UNSIGNED",
         ),
         (
-            Regex::new(r"(?i)\b(?:INT3|MIDDLEINT)\b(\s*\(\s*\d+\s*\))?(\s+UNSIGNED\b)").unwrap(),
+            Regex::new(r"(?i)\b(?:INT3|MIDDLEINT)\b(\s*\(\s*\d+\s*\))?(\s+UNSIGNED\b)")
+                .expect("a valid pattern"),
             "MEDIUMINT$1$2",
         ),
     ]
@@ -273,7 +277,7 @@ pub(super) fn sqlite_type_names(sql: &str) -> Option<String> {
         Regex::new(&format!(
             r"(?i)([(,]\s*{name}\s+)([A-Za-z_]\w*(?:\s+[A-Za-z_]\w*)+)"
         ))
-        .unwrap()
+        .expect("a valid pattern")
     });
     let open = sql.find('(')?;
     let mut changed = false;
