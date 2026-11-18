@@ -170,7 +170,7 @@ include = ["src", "examples"]
 target-version = "py314"
 line-length = 100
 # Markdown code blocks are test data (mdtest, README) and must not be reformatted.
-extend-exclude = ["tests/typechecks", "*.md"]
+extend-exclude = ["tests/typechecks", "*.md", "rust/crates/sqlty-cli/tests/cli"]
 
 [tool.ruff.lint]
 select = [

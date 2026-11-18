@@ -28,3 +28,6 @@ toml.workspace = true
 # musl's allocator makes `check` about five times slower on all cores.
 [target.'cfg(target_env = "musl")'.dependencies]
 mimalloc.workspace = true
+
+[dev-dependencies]
+trycmd = "1.2.1"
