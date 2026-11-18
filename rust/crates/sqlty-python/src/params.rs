@@ -333,23 +333,17 @@ fn with_imports(source: &str) -> String {
         .filter(|tokens| &source[tokens[0].span.clone()] == "import")
         .flat_map(|tokens| imported_names(source, &tokens[1..], false))
         .collect();
-    let mut missing: Vec<&str> = MODULES
-        .into_iter()
-        .filter(|module| !imported.iter().any(|name| name == module))
+    let named: HashSet<&str> = NAMED
+        .find_iter(source)
+        .map(|found| found.as_str().trim_end_matches('.'))
         .collect();
-    if !missing.is_empty() {
-        let named: HashSet<&str> = NAMED
-            .find_iter(source)
-            .map(|found| found.as_str().trim_end_matches('.'))
-            .collect();
-        missing.retain(|module| named.contains(module));
-    }
-    let Some(last) = imports.last() else {
+    let missing: Vec<&str> = MODULES
+        .into_iter()
+        .filter(|module| named.contains(module) && !imported.iter().any(|name| name == module))
+        .collect();
+    let (Some(last), false) = (imports.last(), missing.is_empty()) else {
         return source.to_string();
     };
-    if missing.is_empty() {
-        return source.to_string();
-    }
     let eol = if source.contains("\r\n") {
         "\r\n"
     } else {
