@@ -100,10 +100,8 @@ pub fn highlight(sql: &str, dialect: &str) -> Vec<(Range<usize>, Highlight)> {
             _ => Some(Highlight::Operator),
         };
         after_period = token == Token::Period;
-        let Some(kind) = kind else {
-            continue;
-        };
-        let (Some(start), Some(end)) = (offsets.offset(span.start), offsets.offset(span.end))
+        let (Some(kind), Some(start), Some(end)) =
+            (kind, offsets.offset(span.start), offsets.offset(span.end))
         else {
             continue;
         };

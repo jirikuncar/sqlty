@@ -870,12 +870,13 @@ impl Loader {
 
     /// Move the relation at `from`, if any, to `to`, replacing what is there.
     pub(super) fn move_relation(&mut self, from: &str, to: String) {
-        let Some(moved) = self.relations.remove(from) else {
-            return;
-        };
-        if let Some(replaced) = self.relations.insert(to, moved) {
-            self.held = self.held.saturating_sub(replaced.width());
-        }
+        let replaced = self
+            .relations
+            .remove(from)
+            .and_then(|moved| self.relations.insert(to, moved));
+        self.held = self
+            .held
+            .saturating_sub(replaced.map_or(0, |rel| rel.width()));
     }
 
     /// `rel`, or one of unknown shape when it is wider than [`MAX_COLUMNS`] or would take

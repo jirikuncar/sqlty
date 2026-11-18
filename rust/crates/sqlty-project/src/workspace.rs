@@ -1185,6 +1185,18 @@ mod tests {
     }
 
     #[test]
+    fn reads_max_query_variants_with_preview() {
+        let mut workspace = opened(&[(
+            "/repo/pyproject.toml",
+            "[tool.sqlty]\npreview = true\nmax-query-variants = 5\n",
+        )]);
+        let settings = workspace
+            .settings(Path::new("/repo/a.py"))
+            .expect("settings");
+        assert_eq!(settings.variants, Some(5));
+    }
+
+    #[test]
     fn warns_about_a_schema_too_large_to_load() {
         let columns: Vec<String> = (0..=4096).map(|i| format!("c{i} int")).collect();
         let schema = format!("CREATE TABLE wide ({});", columns.join(", "));
