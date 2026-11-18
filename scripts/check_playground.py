@@ -165,19 +165,24 @@ def offline(page: Page, url: str) -> None:
         page.context.set_offline(False)
 
 
-# Lets a test trap the engine once, as a panic in the WebAssembly would, and records
-# `window.open` instead of opening tabs. `?refuse` makes storage and full screen refuse.
+# Lets a test panic the engine on its next check (`sqltyPanic`) and hold back the instances it
+# starts (`sqltyHeld`, counted in `sqltyStarted`), and records `window.open` instead of opening
+# tabs. `?refuse` makes storage and full screen refuse.
 INIT = """
+const stringify = JSON.stringify;
+JSON.stringify = (value, ...rest) => {
+  if (globalThis.sqltyPanic && value?.op === "analyze") {
+    globalThis.sqltyPanic = false;
+    value = { ...value, panic: "boom" };
+  }
+  return stringify(value, ...rest);
+};
 const instantiate = WebAssembly.instantiate;
 WebAssembly.instantiate = async (...args) => {
-  const { instance } = await instantiate(...args);
-  const { run } = instance.exports;
-  const trap = () => {
-    if (!globalThis.sqltyTrap) return run();
-    globalThis.sqltyTrap = false;
-    throw new WebAssembly.RuntimeError("unreachable");
-  };
-  return { instance: { exports: { ...instance.exports, run: trap } } };
+  await globalThis.sqltyHeld;
+  const instance = await instantiate(...args);
+  globalThis.sqltyStarted = (globalThis.sqltyStarted ?? 0) + 1;
+  return instance;
 };
 window.opened = [];
 window.open = (...args) => void window.opened.push(args);
@@ -306,9 +311,18 @@ def engine_errors(page: Page) -> None:
     page.evaluate(f"{config}.setValue('[')")
     page.wait_for_function("document.querySelector('[data-problems]').textContent.includes('TOML')")
     page.evaluate(f"{config}.setValue('')")
-    page.evaluate("globalThis.sqltyTrap = true")
+    page.evaluate(
+        "() => { globalThis.sqltyHeld = new Promise((release) => (globalThis.sqltyRelease = release)); }"
+    )
+    page.evaluate("globalThis.sqltyPanic = true")
     source(page, "x = 1\n")
-    assert "RuntimeError: unreachable" in page.inner_text("[data-problems]")
+    assert "please report it: boom" in page.inner_text("[data-problems]")
+    page.evaluate("globalThis.sqltyPanic = true")
+    source(page, "x = 2\n")
+    assert page.inner_text("[data-problems]") == "Error: sqlty crashed and is starting again"
+    started = page.evaluate("globalThis.sqltyStarted")
+    page.evaluate("globalThis.sqltyRelease()")
+    page.wait_for_function(f"globalThis.sqltyStarted > {started}")
     source(page, "y = 1\n")
     assert page.inner_text("[data-problems]") == "No problems."
 

@@ -3,12 +3,14 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { setTimeout } from "node:timers/promises";
 
 import { load } from "../docs/assets/playground/engine.js";
 import { decode, encode } from "../docs/assets/playground/share.js";
 import { fold, unfold } from "../docs/assets/playground/steps.js";
 
-const ask = await load(await readFile(new URL("../docs/assets/playground/sqlty_wasm.wasm", import.meta.url)));
+const wasm = await readFile(new URL("../docs/assets/playground/sqlty_wasm.wasm", import.meta.url));
+const ask = await load(wasm);
 const schema = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);";
 
 test("a query is typed against the schema", () => {
@@ -133,4 +135,24 @@ test("each step of the docs' Tour in steps is typed", async () => {
     const answer = ask({ op: "analyze", ...step });
     assert.ok(!answer.error && answer.queries.length, step.title);
   }
+});
+
+test("a panic is an internal-error, answered by a spare instance", { timeout: 10_000 }, async () => {
+  const crash = { op: "analyze", source: "q = 1", dialect: "postgres", panic: "boom" };
+  assert.deepEqual(ask(crash).diagnostics.map((d) => [d.rule, d.message]), [
+    ["internal-error", "sqlty crashed checking this file, please report it: boom"],
+  ]);
+  assert.throws(() => ask({ ...crash, op: "hover" }), /starting again/);
+  assert.throws(() => ask(crash), /starting again/);
+  for (;;) {
+    try {
+      assert.deepEqual(ask({ op: "analyze", source: "q = 1", dialect: "postgres" }).diagnostics, []);
+      break;
+    } catch (error) {
+      assert.match(error.message, /starting again/);
+      await setTimeout(10);
+    }
+  }
+  const fresh = await load(wasm);
+  assert.equal(fresh({ ...crash, op: "hover" }).error, "sqlty crashed, please report it: boom");
 });
