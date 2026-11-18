@@ -244,7 +244,7 @@ cargo test --doc --workspace --manifest-path rust/Cargo.toml
 [`trycmd`](https://docs.rs/trycmd): each `$ sqlty ...` line in a `console` block,
 its output and `? CODE` exit status. `NAME.in/` is the project a case starts
 from; with `NAME.out/`, the commands share one copy of it and each file there
-must match what they leave. Write new output into the cases with:
+must match what they leave; a case that writes files needs one. Write new output into the cases with:
 
 ```bash
 TRYCMD=overwrite uv run cargo test -p sqlty-cli --test cli --manifest-path rust/Cargo.toml
