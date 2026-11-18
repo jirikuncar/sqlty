@@ -246,6 +246,11 @@ fn settings_resolved_by_the_host_apply_with_their_types() {
         bad["error"],
         "[tool.sqlty.types]: `NOT A TYPE` is not a SQL type"
     );
+    let bad = ask(&json!({
+        "op": "analyze", "source": source, "dialect": "postgres",
+        "settings": {"rules": {"stale-rewrite": "loud"}},
+    }));
+    assert!(bad["error"].as_str().unwrap().contains("loud"), "{bad}");
 }
 
 #[test]
@@ -368,6 +373,42 @@ fn preview_checks_each_variant_of_a_query_built_in_branches() {
 #[test]
 fn a_request_that_is_not_json_is_an_error() {
     assert!(run("{").contains("\"error\""));
+}
+
+#[test]
+fn a_request_asked_to_panic_panics_with_its_message() {
+    let request = json!({"op": "analyze", "source": "", "dialect": "postgres", "panic": "boom"});
+    let payload = std::panic::catch_unwind(|| run(&request.to_string())).unwrap_err();
+    assert_eq!(payload.downcast_ref::<String>().unwrap(), "boom");
+}
+
+#[test]
+fn a_crashed_request_reports_an_internal_error_in_place_of_its_answer() {
+    let source = "q = \"--sql\\nSELECT 1\"";
+    let request = |op: &str, config: &str| {
+        let request = json!({"op": op, "source": source, "dialect": "postgres", "config": config,
+            "crashed": "boom", "panic": "again"});
+        ask(&request)
+    };
+    let message = "sqlty crashed checking this file, please report it: boom";
+    assert_eq!(
+        request("analyze", ""),
+        json!({
+            "diagnostics": [{"rule": "internal-error", "message": message, "severity": "error",
+                "line": 1, "start": 0, "end": 0, "fix": []}],
+            "queries": [],
+            "highlights": [],
+            "rewritten": source,
+            "stripped": source,
+            "fixed": source,
+        })
+    );
+    let ignored = request("analyze", "[rules]\ninternal-error = \"ignore\"");
+    assert_eq!(ignored["diagnostics"], json!([]));
+    assert_eq!(
+        request("hover", ""),
+        json!({"error": "sqlty crashed, please report it: boom"})
+    );
 }
 
 #[test]

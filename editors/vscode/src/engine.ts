@@ -238,24 +238,52 @@ function diagnostic(document: vscode.TextDocument, found: Found): vscode.Diagnos
   return diagnostic;
 }
 
-/** The engine of `rust/crates/sqlty-wasm`, as `docs/assets/playground/engine.js` loads it. */
+/**
+ * The engine of `rust/crates/sqlty-wasm`, as `docs/assets/playground/engine.js` loads it. A
+ * panic traps and leaves the instance unusable: a new one answers the request again with what
+ * it panicked with, which `analyze` reports as `internal-error`. The extension host is no
+ * browser's main thread, so it may instantiate the module synchronously.
+ */
 export async function loadEngine(extension: vscode.Uri): Promise<Engine> {
   const wasm = vscode.Uri.joinPath(extension, "dist", "sqlty_wasm.wasm");
-  const bytes = await vscode.workspace.fs.readFile(wasm);
-  const { instance } = await WebAssembly.instantiate(bytes as BufferSource);
-  const { memory, buffer, run, output } = instance.exports as {
-    memory: WebAssembly.Memory;
-    buffer: (length: number) => number;
-    run: () => number;
-    output: () => number;
+  const module = await WebAssembly.compile(
+    (await vscode.workspace.fs.readFile(wasm)) as BufferSource,
+  );
+  let exports = instantiate(module);
+  const answer: Engine = (request) => {
+    try {
+      return ask(exports, request);
+    } catch (error) {
+      const crashed = read(exports, exports.output_len()) || String(error);
+      exports = instantiate(module);
+      if ("crashed" in request) throw error;
+      return answer({ ...request, crashed });
+    }
   };
-  const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
-  return (request) => {
-    const encoded = encoder.encode(JSON.stringify(request));
-    const at = buffer(encoded.length);
-    new Uint8Array(memory.buffer, at, encoded.length).set(encoded);
-    const length = run();
-    return JSON.parse(decoder.decode(new Uint8Array(memory.buffer, output(), length)));
-  };
+  return answer;
+}
+
+type Exports = {
+  memory: WebAssembly.Memory;
+  buffer: (length: number) => number;
+  run: () => number;
+  output: () => number;
+  output_len: () => number;
+};
+
+const instantiate = (module: WebAssembly.Module) =>
+  new WebAssembly.Instance(module).exports as Exports;
+
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+function ask(exports: Exports, request: Record<string, unknown>) {
+  const encoded = encoder.encode(JSON.stringify(request));
+  const at = exports.buffer(encoded.length);
+  new Uint8Array(exports.memory.buffer, at, encoded.length).set(encoded);
+  return JSON.parse(read(exports, exports.run()));
+}
+
+function read(exports: Exports, length: number): string {
+  return decoder.decode(new Uint8Array(exports.memory.buffer, exports.output(), length));
 }

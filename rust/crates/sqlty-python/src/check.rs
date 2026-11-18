@@ -1171,15 +1171,20 @@ pub fn module(text: &str, parsed: Option<&Arc<Source>>, run: &Run<'_>) -> Found 
         Some(parsed) => diagnostics(parsed, run),
         None => unparsed(text, run),
     }))
-    .unwrap_or_else(|payload| crashed(&*payload, run.settings.rules))
+    .unwrap_or_else(|payload| crashed(cause(&*payload), run.settings.rules))
 }
 
-fn crashed(payload: &(dyn Any + Send), rules: &RuleConfig) -> Found {
-    let cause = payload
+/// The message of a panic's `payload`.
+fn cause(payload: &(dyn Any + Send)) -> &str {
+    payload
         .downcast_ref::<&str>()
         .copied()
         .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
-        .unwrap_or("unknown cause");
+        .unwrap_or("unknown cause")
+}
+
+/// The `internal-error` of a check that panicked with `cause`.
+pub fn crashed(cause: &str, rules: &RuleConfig) -> Found {
     let diagnostic = Diagnostic {
         rule: Rule::InternalError,
         message: format!("sqlty crashed checking this file, please report it: {cause}"),
@@ -1507,14 +1512,8 @@ mod tests {
 
     #[test]
     fn a_panic_without_a_message_has_an_unknown_cause() {
-        let rules = RuleConfig::from_overrides(None).unwrap();
-        let found = crashed(&42, &rules);
-        assert!(found.diagnostics[0]
-            .diagnostic
-            .message
-            .ends_with("unknown cause"));
-        let found = crashed(&"static", &rules);
-        assert!(found.diagnostics[0].diagnostic.message.ends_with("static"));
+        assert_eq!(cause(&42), "unknown cause");
+        assert_eq!(cause(&"static"), "static");
     }
 
     #[test]
