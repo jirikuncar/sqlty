@@ -29,9 +29,8 @@ pub struct Databases {
 /// The database named on the first line of `sql`, a `--` comment holding `sqlty:` and then
 /// `db=NAME`; a line break may be escaped, as in source text.
 pub fn database_name(sql: &str) -> Option<&str> {
-    static NAME: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"\A\s*--[^\n\\]*?\bsqlty:\s*db=([A-Za-z0-9_-]+)").expect("valid pattern")
-    });
+    static NAME: LazyLock<Regex> =
+        LazyLock::new(|| crate::regex(r"\A\s*--[^\n\\]*?\bsqlty:\s*db=([A-Za-z0-9_-]+)"));
     Some(NAME.captures(sql)?.get(1)?.as_str())
 }
 

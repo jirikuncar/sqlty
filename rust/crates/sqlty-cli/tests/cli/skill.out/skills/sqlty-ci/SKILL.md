@@ -1,0 +1,3 @@
+---
+name: sqlty-ci
+...

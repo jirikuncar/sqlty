@@ -645,6 +645,7 @@ impl<'a> Analyzer<'a> {
         }
         let arg = args.first().copied();
         if let Some((rule, typed)) = self.function_rule(&name, &args, scope)? {
+            #[expect(clippy::expect_used, reason = "a rule reads the arguments it types")]
             let at = |position: usize| {
                 let read: &Option<Typed> = &typed[position];
                 read.clone()

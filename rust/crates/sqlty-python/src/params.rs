@@ -10,6 +10,7 @@
 //! when its type is unknown or cast (`%s::int` takes anything).
 
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::ops::Range;
 use std::sync::LazyLock;
 
@@ -36,10 +37,9 @@ static GROUP: LazyLock<Regex> = LazyLock::new(|| {
     let block = format!(
         r"{MARKER}\r?\n(?:class [^\r\n]*:\r?\n(?:    [^\r\n]*\r?\n)+|[A-Za-z_]\w* = typing\.TypedDict\([^\r\n]*\)\r?\n)"
     );
-    Regex::new(&format!(
+    sqlty_sql::regex(&format!(
         r"(?:\r?\n){{2}}{block}(?:(?:\r?\n){{2}}{block})*(?:\r?\n){{2}}"
     ))
-    .expect("a valid pattern")
 });
 
 /// `source` without the classes generated below `# sqlty: generated` lines.
@@ -313,6 +313,8 @@ fn head<'a>(scan: &'a Scan) -> impl Iterator<Item = Range<usize>> + 'a {
 
 /// `source` with `import M` for each module of [`MODULES`] it names but lacks, in order.
 fn with_imports(source: &str) -> String {
+    static NAMED: LazyLock<Regex> =
+        LazyLock::new(|| sqlty_sql::regex(&format!(r"\b(?:{})\.", MODULES.join("|"))));
     let scan = Scan::new(source, "");
     let imports: Vec<(bool, String, Range<usize>)> = head(&scan)
         .filter(|statement| is_import(source, &scan.tokens[statement.clone()], false))
@@ -331,21 +333,17 @@ fn with_imports(source: &str) -> String {
         .filter(|tokens| &source[tokens[0].span.clone()] == "import")
         .flat_map(|tokens| imported_names(source, &tokens[1..], false))
         .collect();
+    let named: HashSet<&str> = NAMED
+        .find_iter(source)
+        .map(|found| found.as_str().trim_end_matches('.'))
+        .collect();
     let missing: Vec<&str> = MODULES
         .into_iter()
-        .filter(|module| !imported.iter().any(|name| name == module))
-        .filter(|module| {
-            Regex::new(&format!(r"\b{module}\."))
-                .expect("a valid pattern")
-                .is_match(source)
-        })
+        .filter(|module| named.contains(module) && !imported.iter().any(|name| name == module))
         .collect();
-    let Some(last) = imports.last() else {
+    let (Some(last), false) = (imports.last(), missing.is_empty()) else {
         return source.to_string();
     };
-    if missing.is_empty() {
-        return source.to_string();
-    }
     let eol = if source.contains("\r\n") {
         "\r\n"
     } else {
