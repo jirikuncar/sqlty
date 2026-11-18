@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { setImmediate } from "node:timers/promises";
 import { beforeEach, test } from "node:test";
 
-import { startEngine } from "../../engine";
+import { loadEngine, startEngine } from "../../engine";
 import {
   calls,
   CodeActionKind,
@@ -153,4 +153,18 @@ test("whole-file actions offer only the kinds asked for that change the file", a
     [],
   );
   disposable.dispose();
+});
+
+test("a panic is an internal-error, and a new instance answers the next request", async () => {
+  const engine = await loadEngine(Uri.file(resolve(".")) as never);
+  const request = { op: "analyze", source: "q = 1", dialect: "postgres" };
+  const crashed = engine({ ...request, panic: "boom" });
+  assert.deepEqual(
+    crashed.diagnostics.map((found: { rule: string; message: string }) => [
+      found.rule,
+      found.message,
+    ]),
+    [["internal-error", "sqlty crashed checking this file, please report it: boom"]],
+  );
+  assert.deepEqual(engine(request).diagnostics, []);
 });

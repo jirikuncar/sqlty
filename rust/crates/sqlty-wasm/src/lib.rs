@@ -99,7 +99,8 @@ struct Request {
     /// `internal-error`, another op as an `error`.
     #[serde(default)]
     crashed: Option<String>,
-    /// A message to panic with in place of answering, for a host to test its recovery.
+    /// A message to panic with in place of answering, for a host to test its recovery: a request
+    /// that `crashed` does not.
     #[serde(default)]
     panic: Option<String>,
 }
@@ -161,36 +162,12 @@ pub fn run(request: &str) -> String {
         Ok(settings) => settings,
         Err(found) => return error(found),
     };
-    let dialect = settings.dialect.as_deref().unwrap_or(&request.dialect);
-    let param_types = settings.param_types;
-    let overrides = match TypeOverrides::new(&settings.types, dialect) {
-        Ok(overrides) => overrides,
-        Err(found) => return error(format!("[tool.sqlty.types]: {found}")),
-    };
-    let schema = (!request.schema.trim().is_empty()).then(|| match overrides.is_empty() {
-        true => load_schema_with_skipped(&request.schema, dialect).0,
-        false => load_schema_with_overrides(&request.schema, dialect, overrides).0,
-    });
-    let options = Options::new(
-        dialect,
-        schema.as_deref(),
-        settings.import_style.as_deref(),
-        false,
-    );
-    let (options, rules) = match options
-        .and_then(|options| Ok((options, RuleConfig::from_overrides(Some(settings.rules))?)))
-    {
-        Ok(found) => found,
+    let rules = match RuleConfig::from_overrides(Some(settings.rules)) {
+        Ok(rules) => rules,
         Err(found) => return error(found.to_string()),
     };
     let source = request.source.as_str();
     let utf16 = |byte: usize| source[..byte].encode_utf16().count();
-    let offset = byte_offset(source, request.offset);
-    let queries = Queries::new(source, &options.style, &[]);
-    let params = |source: String| match param_types {
-        true => add_param_types(&source, &options, false),
-        false => source,
-    };
     if let Some(cause) = &request.crashed {
         let found = check::crashed(cause, &rules).diagnostics;
         let found: Vec<_> = found.into_iter().map(|found| found.diagnostic).collect();
@@ -211,6 +188,31 @@ pub fn run(request: &str) -> String {
         #[expect(clippy::panic, reason = "the request asks for it")]
         std::panic::panic_any(message);
     }
+    let dialect = settings.dialect.as_deref().unwrap_or(&request.dialect);
+    let param_types = settings.param_types;
+    let overrides = match TypeOverrides::new(&settings.types, dialect) {
+        Ok(overrides) => overrides,
+        Err(found) => return error(format!("[tool.sqlty.types]: {found}")),
+    };
+    let schema = (!request.schema.trim().is_empty()).then(|| match overrides.is_empty() {
+        true => load_schema_with_skipped(&request.schema, dialect).0,
+        false => load_schema_with_overrides(&request.schema, dialect, overrides).0,
+    });
+    let options = match Options::new(
+        dialect,
+        schema.as_deref(),
+        settings.import_style.as_deref(),
+        false,
+    ) {
+        Ok(options) => options,
+        Err(found) => return error(found.to_string()),
+    };
+    let offset = byte_offset(source, request.offset);
+    let queries = Queries::new(source, &options.style, &[]);
+    let params = |source: String| match param_types {
+        true => add_param_types(&source, &options, false),
+        false => source,
+    };
     let answer = match op {
         SourceOp::Analyze => {
             let has_schema = schema

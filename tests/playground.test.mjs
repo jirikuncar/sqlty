@@ -137,7 +137,7 @@ test("each step of the docs' Tour in steps is typed", async () => {
   }
 });
 
-test("a panic is an internal-error, answered by a spare instance", async () => {
+test("a panic is an internal-error, answered by a spare instance", { timeout: 10_000 }, async () => {
   const crash = { op: "analyze", source: "q = 1", dialect: "postgres", panic: "boom" };
   assert.deepEqual(ask(crash).diagnostics.map((d) => [d.rule, d.message]), [
     ["internal-error", "sqlty crashed checking this file, please report it: boom"],
