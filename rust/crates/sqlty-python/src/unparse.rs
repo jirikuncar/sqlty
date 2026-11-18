@@ -669,11 +669,9 @@ pub fn interpolation_text(field: &InterpolatedElement, source: &str) -> String {
 fn interpolation_text_as(field: &InterpolatedElement, source: &str, legacy: bool) -> String {
     let text = field_text_as(field, source, legacy);
     if legacy {
-        let text = text.trim_end();
+        // `_strip_interpolation_expr` dropped every trailing blank and `=`, debug field or not.
         return text
-            .strip_suffix('=')
-            .filter(|_| field.debug_text.is_some())
-            .map_or(text, str::trim_end)
+            .trim_end_matches(|c: char| c.is_whitespace() || c == '=')
             .to_string();
     }
     if field.debug_text.is_none() {
@@ -1137,6 +1135,7 @@ mod tests {
             ("t'''{a # c!\n!r}'''", "a", "a \n"),
             ("t'{a != f'{'#'}' != a:y}'", "a != f'{'", "a != f'{'"),
             ("t'{a != f'{'#'}':y}'", "a", "a != f'{'"),
+            ("t'''{'\\'' # !=\n!r}'''", "'\\'' # !", "'\\'' \n"),
         ] {
             let parsed = crate::parse::expression(source).unwrap();
             let e = parsed.syntax().body.as_t_string_expr().unwrap();
