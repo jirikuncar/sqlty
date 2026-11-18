@@ -1108,6 +1108,14 @@ fn docstring_end(source: &str, pos: usize) -> Option<(usize, usize)> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_word_regex_compiles_once() {
+        assert!(Arc::ptr_eq(
+            &word_regex("datetime"),
+            &word_regex("datetime")
+        ));
+    }
+
     fn rewrite_source(
         source: &str,
         dialect: &str,

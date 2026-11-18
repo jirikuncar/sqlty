@@ -269,6 +269,11 @@ mod tests {
     }
 
     #[test]
+    fn a_path_prefix_compiles_once() {
+        assert!(Arc::ptr_eq(&path_prefix("src/*"), &path_prefix("src/*")));
+    }
+
+    #[test]
     fn a_glob_past_the_regex_size_limit_compiles() {
         let long = "[!a]".repeat(20_000);
         assert!(Segment::new(&long).matches(&"b".repeat(20_000)));
