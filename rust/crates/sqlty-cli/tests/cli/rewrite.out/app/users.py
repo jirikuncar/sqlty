@@ -1,5 +1,13 @@
+import typing
 from sqlty import SQL
-by_email = SQL[tuple[int, str]]("""--sql
+
+
+# sqlty: generated
+class ByEmailParams(typing.TypedDict):
+    email: str | None
+
+
+by_email = SQL[tuple[int, str], ByEmailParams]("""--sql
 select
     id,
     email
