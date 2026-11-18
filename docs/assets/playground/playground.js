@@ -476,9 +476,9 @@ async function share() {
   const url = new URL(location.href);
   url.hash = hash;
   const fits = url.href.length <= MAX_LINK;
-  history.replaceState(null, "", fits ? url : url.pathname);
+  history.replaceState(null, "", fits ? url : url.pathname + url.search);
   unembedded();
-  linked.textContent = fits ? "" : `Too large to share as a link (${url.href.length} characters).`;
+  linked.textContent = fits ? fellBack : `Too large to share as a link (${url.href.length} characters).`;
   return fits ? url.href : null;
 }
 
@@ -641,7 +641,11 @@ const listReleases = () =>
       const all = found.includes(running) || !running ? found : [running, ...found];
       version.replaceChildren(new Option("main", "", false, !running), ...all.map((name) => new Option(name, name, false, name === running)));
     })
-    .catch((error) => (linked.textContent = `No releases listed: ${error.message}`)));
+    .catch((error) => {
+      listed = undefined;
+      linked.textContent = `No releases listed: ${error.message}`;
+    }));
+version.addEventListener("pointerenter", listReleases);
 version.addEventListener("pointerdown", listReleases);
 version.addEventListener("focus", listReleases);
 version.addEventListener("change", async () => {
@@ -824,16 +828,21 @@ function anchored(popover, button, opened) {
 }
 
 async function engine() {
-  let bytes;
+  let ask;
   if (RELEASE) {
     try {
-      bytes = await released(RELEASE);
+      const { wasm, engine } = await released(RELEASE);
+      const glue = URL.createObjectURL(new Blob([engine], { type: "text/javascript" }));
+      ask = await (await import(glue)).load(wasm);
+      URL.revokeObjectURL(glue);
     } catch (error) {
       fellBack = `sqlty ${RELEASE} did not load (${error.message}), so this is main.`;
+      const url = new URL(location.href);
+      url.searchParams.delete("version");
+      history.replaceState(null, "", url);
     }
   }
-  bytes ??= await (await fetch(new URL("sqlty_wasm.wasm", import.meta.url))).arrayBuffer();
-  const ask = await load(bytes);
+  ask ??= await load(await (await fetch(new URL("sqlty_wasm.wasm", import.meta.url))).arrayBuffer());
   return (request) => {
     try {
       return ask(request);

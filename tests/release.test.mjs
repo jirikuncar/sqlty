@@ -48,7 +48,9 @@ test("the releases, newest first, without placeholders and pre-releases", async 
 
 test("a release is the module of its tarball", async () => {
   registry({ [`${REGISTRY}/1.2.3`]: { dist: { tarball: TARBALL, integrity } }, [TARBALL]: tarball });
-  assert.deepEqual(Buffer.from(await released("1.2.3")), wasm);
+  const { wasm: found, engine } = await released("1.2.3");
+  assert.deepEqual(Buffer.from(found), wasm);
+  assert.equal(engine, readFileSync(new URL("../npm/wasm/engine.js", import.meta.url), "utf8"));
 });
 
 test("a tarball the registry does not list is refused", async () => {

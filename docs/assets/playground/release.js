@@ -1,18 +1,19 @@
 // Released engines, from the @sqlty/wasm tarballs on the npm registry, checked against the
-// integrity the registry lists. The playground runs its own build otherwise: that of main.
+// integrity the registry lists: each with its own `engine.js`, which speaks its module's
+// exports. The playground runs its own build otherwise: that of main.
 const REGISTRY = "https://registry.npmjs.org/@sqlty/wasm";
 const RELEASE = /^\d+\.\d+\.\d+$/;
 
 // The released versions, newest first.
 export async function versions() {
-  const found = await json(REGISTRY);
+  const found = await json(REGISTRY, { headers: { Accept: "application/vnd.npm.install-v1+json" } });
   return Object.values(found.versions)
     .filter(({ version, deprecated }) => RELEASE.test(version) && !deprecated)
     .map(({ version }) => version)
     .sort((a, b) => b.localeCompare(a, "en", { numeric: true }));
 }
 
-// The bytes of `sqlty_wasm.wasm` of the release `version`.
+// The `sqlty_wasm.wasm` of the release `version`, and the `engine.js` that loads it.
 export async function released(version) {
   if (!RELEASE.test(version)) throw new Error(`${version} is not a release`);
   const { dist } = await json(`${REGISTRY}/${version}`);
@@ -22,7 +23,8 @@ export async function released(version) {
   const digest = await crypto.subtle.digest("SHA-512", tarball);
   if (`sha512-${base64(digest)}` !== dist.integrity) throw new Error(`@sqlty/wasm@${version} is not the published tarball`);
   const unzipped = new Blob([tarball]).stream().pipeThrough(new DecompressionStream("gzip"));
-  return entry(new Uint8Array(await new Response(unzipped).arrayBuffer()), "package/sqlty_wasm.wasm");
+  const tar = new Uint8Array(await new Response(unzipped).arrayBuffer());
+  return { wasm: entry(tar, "package/sqlty_wasm.wasm"), engine: new TextDecoder().decode(entry(tar, "package/engine.js")) };
 }
 
 // The file `name` of a tar archive.
@@ -40,8 +42,8 @@ export function entry(tar, name) {
   throw new Error(`${name} is not in the package`);
 }
 
-async function json(url) {
-  const response = await fetch(url);
+async function json(url, init) {
+  const response = await fetch(url, init);
   if (!response.ok) throw new Error(`${url}: ${response.status}`);
   return response.json();
 }

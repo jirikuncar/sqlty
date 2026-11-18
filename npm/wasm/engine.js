@@ -12,7 +12,7 @@ export async function load(bytes) {
   let [instance, spare] = await Promise.all([start(), start()]);
   const answer = (request) => {
     if (!instance) {
-      instance = spare ?? new WebAssembly.Instance(module);
+      instance = spare ?? instantly(module);
       if (spare) {
         spare = undefined;
         start().then((fresh) => (spare = fresh));
@@ -28,6 +28,14 @@ export async function load(bytes) {
     }
   };
   return answer;
+}
+
+function instantly(module) {
+  try {
+    return new WebAssembly.Instance(module);
+  } catch {
+    throw new Error("sqlty crashed and is starting again");
+  }
 }
 
 const encoder = new TextEncoder();

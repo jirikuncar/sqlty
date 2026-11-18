@@ -146,3 +146,18 @@ test("a panic is an internal-error, answered by a spare instance or a new one", 
   assert.equal(ask(crash).diagnostics[0].rule, "internal-error");
   assert.deepEqual(ask({ op: "analyze", source: "q = 1", dialect: "postgres" }).diagnostics, []);
 });
+
+test("a panic before the spare is ready, where only asynchronous instantiation is allowed", async () => {
+  const crash = { op: "analyze", source: "q = 1", dialect: "postgres", panic: "boom" };
+  const fresh = await load(wasm);
+  const { Instance } = WebAssembly;
+  WebAssembly.Instance = function () {
+    throw new RangeError("WebAssembly.Instance is disallowed on the main thread");
+  };
+  try {
+    assert.equal(fresh(crash).diagnostics[0].rule, "internal-error");
+    assert.throws(() => fresh(crash), { message: "sqlty crashed and is starting again" });
+  } finally {
+    WebAssembly.Instance = Instance;
+  }
+});
