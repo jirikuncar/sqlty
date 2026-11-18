@@ -27,4 +27,4 @@ toml.workspace = true
 
 # musl's allocator makes `check` about five times slower on all cores.
 [target.'cfg(target_env = "musl")'.dependencies]
-mimalloc = { version = "0.1.52", default-features = false }
+mimalloc.workspace = true

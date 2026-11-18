@@ -130,6 +130,21 @@ jobs:
             "$py" -c "import sys, sqlty, sqlty._core; assert sys._is_gil_enabled() != '$v'.endswith('t'); print(sqlty.__version__, sqlty.UNTYPED)"
           done
 
+      # A musl wheel that links on the build host can still fail to load, such as
+      # mimalloc with initial-exec TLS, so it is imported in its own image.
+      - name: Import the musl wheel
+        if: ${{ env.SKIP != 'true' && contains(matrix.target, 'musl') }}
+        env:
+          IMAGE: ${{ matrix.container }}
+        run: |
+          docker run --rm -v "$PWD/dist:/dist:ro" "$IMAGE" sh -euc '
+            for py in cp314-cp314 cp315-cp315; do
+              case $py in cp314-cp314) tag=cp314-cp314 ;; *) tag=cp315-abi3.abi3t ;; esac
+              /opt/python/$py/bin/python -m venv /tmp/$py
+              /tmp/$py/bin/pip install -q /dist/sqlty-*-$tag-*.whl
+              /tmp/$py/bin/python -c "import sqlty, sqlty._core; print(sqlty.__version__, sqlty.UNTYPED)"
+            done'
+
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         if: env.SKIP != 'true'
         with:
