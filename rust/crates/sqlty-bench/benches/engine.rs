@@ -1,6 +1,8 @@
 //! Engine benchmarks: `make bench-rust` (or `cargo bench --manifest-path rust/Cargo.toml`).
 //! Complements `make bench-ci` (end-to-end CLI wall time and RSS against a budget).
 
+#![expect(clippy::expect_used, reason = "a failed setup fails the benchmark")]
+
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use sqlty_bench::{python_source, schema_sql, QUERIES};
 use sqlty_python::locate::Queries;

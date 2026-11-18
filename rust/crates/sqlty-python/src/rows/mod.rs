@@ -15,7 +15,9 @@ use ruff_python_ast::{Expr, Operator};
 use sqlty_sql::analyzer::{self, Nullability};
 use sqlty_sql::json::JsonShape;
 
+use crate::analyses::Analyses;
 use crate::checker::{wrapped_queries, Diagnostic};
+use crate::frozen::Table;
 use crate::options::Options;
 use crate::rules::{Rule, RuleConfig};
 use crate::scopes::{Key, Param};
@@ -111,6 +113,8 @@ pub(crate) struct Check<'a> {
     /// The queries whose row type is a class.
     pub(crate) user_queries: Vec<RowQuery>,
     found: Found,
+    /// The analysis of each query, shared with the module's other checks.
+    pub(crate) analyses: Analyses<'a>,
 }
 
 impl Check<'_> {
@@ -141,9 +145,9 @@ impl Check<'_> {
     }
 
     pub(crate) fn columns(&self, query: Option<&str>) -> Option<Vec<RowColumn>> {
-        let options = self.settings.options;
-        let columns = analyzer::analyze_select(query?, options.dialect.name(), options.schema);
-        let columns: Vec<RowColumn> = columns?.into_iter().map(RowColumn::from).collect();
+        let analysis = self.analyses.of(query?);
+        let columns = analysis.columns.as_ref()?;
+        let columns: Vec<RowColumn> = columns.iter().cloned().map(RowColumn::from).collect();
         (!columns.is_empty()).then_some(columns)
     }
 
@@ -197,7 +201,8 @@ pub fn check(source: &Arc<Source>, settings: &Settings<'_>) -> Found {
     if queries.is_empty() {
         return Found::default();
     }
-    let mut ctx = Check::new(source, settings, queries, Vec::new(), &[]);
+    let analyses = Analyses::new(settings.options);
+    let mut ctx = Check::new(source, settings, queries, Vec::new(), &[], analyses);
     ctx.typeddict_inheritance();
     ctx.structural(&HashMap::new());
     ctx.aliases();
@@ -221,6 +226,7 @@ impl<'a> Check<'a> {
         queries: Vec<RowQuery>,
         named: Vec<RowQuery>,
         params: &[String],
+        analyses: Analyses<'a>,
     ) -> Self {
         let wanted = !(queries.is_empty() && named.is_empty() && params.is_empty());
         let mut ctx = Check {
@@ -236,6 +242,7 @@ impl<'a> Check<'a> {
             aliased: Vec::new(),
             user_queries: Vec::new(),
             found: Found::default(),
+            analyses,
         };
         ctx.own_defs = ctx.type_defs.clone();
         let queries: Vec<RowQuery> = queries.into_iter().chain(named).collect();
@@ -334,10 +341,10 @@ impl<'a> Check<'a> {
 }
 
 /// `_bind`: `query` with the placeholders bound to values that are not `None` respelled
-/// as ones whose nullability is not judged.
+/// as ones the engine reads as never NULL: `$0`, or `?0` outside PostgreSQL.
 pub(crate) fn bind(query: Option<&str>, params: Option<&[Param]>, dialect: &str) -> Option<String> {
     static PLACEHOLDER: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"%%|%\((?P<name>[^)]+)\)s|%s").expect("a valid pattern"));
+        LazyLock::new(|| sqlty_sql::regex(r"%%|%\((?P<name>[^)]+)\)s|%s"));
     let query = query?;
     let non_null: HashSet<&Key> = params
         .unwrap_or_default()
@@ -352,7 +359,7 @@ pub(crate) fn bind(query: Option<&str>, params: Option<&[Param]>, dialect: &str)
     let marker = if dialect == "postgres" || dialect == "postgresql" {
         "$0"
     } else {
-        "?"
+        "?0"
     };
     let mut position = 0;
     let bound = PLACEHOLDER.replace_all(query, |found: &regex::Captures<'_>| {
@@ -611,7 +618,7 @@ fn json_diagnostics(
     annotation: Option<&Annotation>,
     column: &RowColumn,
     defs: &Dict<Arc<TypeInfo>>,
-    aliases: &HashMap<String, String>,
+    aliases: &Table,
     rules: &RuleConfig,
 ) -> Vec<Finding> {
     let (Some(shape), Some(annotation)) = (&column.json, annotation) else {
@@ -891,7 +898,7 @@ pub(crate) struct RowShape {
     is_tuple: bool,
     /// `(label, resolved type, annotation)` of each column.
     targets: Vec<(String, Option<Ty>, Annotation)>,
-    aliases: Arc<HashMap<String, String>>,
+    aliases: Arc<Table>,
 }
 
 /// `_row_shape`: what each column of the row type `text` must be; `None` when unchecked.

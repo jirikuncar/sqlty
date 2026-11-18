@@ -2,6 +2,12 @@
 //! `sqlty skill` and `sqlty rule` print those of their own version wherever sqlty is
 //! installed.
 
+#![expect(
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "a failing build script panics"
+)]
+
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::{env, fs};

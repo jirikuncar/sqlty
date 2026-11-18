@@ -100,12 +100,37 @@ def main(argv: list[str] | None = None) -> None:
     except ConfigError as exc:
         print(f"sqlty: error: {exc}", file=sys.stderr)
         sys.exit(EXIT_ERROR)
-    except Exception:
+    except KeyboardInterrupt, SystemExit:
+        raise
+    except BaseException as exc:  # a Rust panic is a BaseException
         import traceback
 
         traceback.print_exc()
-        print("sqlty: internal error; please report it with the traceback above", file=sys.stderr)
+        print(
+            "sqlty: internal error; please report it with the traceback above at "
+            + issue_url(f"{type(exc).__name__}: {exc}"),
+            file=sys.stderr,
+        )
         sys.exit(EXIT_ERROR)
+
+
+def issue_url(cause: str) -> str:
+    """A new-issue link prefilling the bug report form, as ``sqlty_python::report`` does."""
+    import platform
+    from urllib.parse import quote, urlencode
+
+    from sqlty import __version__
+
+    title = cause.splitlines()[0] if cause else ""
+    fields = {
+        "title": f"Crash: {title[:80]}",
+        "output": cause[:2000],
+        "version": __version__,
+        "environment": f"{platform.system()} {platform.machine()}, Python {platform.python_version()}",
+    }
+    return "https://github.com/jirikuncar/sqlty/issues/new?template=bug_report.yml&" + urlencode(
+        fields, quote_via=quote, safe=""
+    )
 
 
 def _rust(argv: list[str]) -> int | None:
@@ -1007,7 +1032,7 @@ def _collect_query_files(
     from sqlty._config import expand_schema
 
     directories = [path if path.is_dir() else path.parent for path in paths]
-    directories += [path.parent for path in python_files]
+    directories += map(Path, dict.fromkeys(os.path.dirname(path) for path in python_files))
     roots = [path.resolve() for path in paths]
     found: dict[Path, None] = {}
     for directory in dict.fromkeys(directories):
@@ -1221,9 +1246,14 @@ def _module_names(path: Path, roots: list[Path]) -> list[str]:
         >>> _module_names(Path("missing/pkg/mod.py"), [])
         ['mod']
     """
+    return _modules_names([path], roots)[0]
+
+
+def _modules_names(paths: list[Path], roots: list[Path]) -> list[list[str]]:
+    """``_module_names`` of each of ``paths``."""
     from sqlty import _core
 
-    return _core.module_names(path, roots, Path.cwd())
+    return _core.module_names(paths, roots, Path.cwd())
 
 
 @dataclass(frozen=True)
@@ -1482,7 +1512,8 @@ class Project:
         self.unreadable = [path for path, text in texts.items() if text is None]
         self.files = [path for path in files if texts[path] is not None]
         self.resolved = {path: self.resolver.resolve(path) for path in self.files}
-        self.modules = {path: _module_names(self.resolved[path], self.paths) for path in self.files}
+        resolved = [self.resolved[path] for path in self.files]
+        self.modules = dict(zip(self.files, _modules_names(resolved, self.paths), strict=True))
         self.sources = {
             path: ParsedSource(text, self._module(path))
             for path in self.files

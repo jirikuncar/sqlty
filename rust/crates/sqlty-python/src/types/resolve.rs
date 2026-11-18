@@ -1,6 +1,5 @@
 //! `_ast_type`: an annotation resolved to a type, from source alone.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use ruff_python_ast::{Expr, Number, Operator};
@@ -8,6 +7,7 @@ use ruff_python_ast::{Expr, Number, Operator};
 use super::pydantic::Known;
 use super::stdlib::{stdlib_class, Version};
 use super::ty::{builtins, py_strip, Class, Lit, Ty};
+use crate::frozen::Table;
 
 pub const TYPING_MODULES: [&str; 2] = ["typing", "typing_extensions"];
 pub const QUALIFIERS: [&str; 3] = ["ReadOnly", "Required", "NotRequired"];
@@ -52,9 +52,9 @@ impl Names for Hiding<'_> {
 #[derive(Clone, Copy)]
 pub struct Resolver<'a> {
     /// Local names of `typing` and its members, to the originals.
-    pub aliases: &'a HashMap<String, String>,
+    pub aliases: &'a Table,
     /// `ParsedSource.imported_names`; without it, qualified names are unknown.
-    pub imports: Option<&'a HashMap<String, String>>,
+    pub imports: Option<&'a Table>,
     pub known: Known,
     pub version: Version,
 }
@@ -114,12 +114,12 @@ pub fn get_name(expr: &Expr) -> Option<&str> {
 }
 
 /// `_is_name`.
-pub fn is_name(expr: &Expr, name: &str, aliases: &HashMap<String, String>) -> bool {
+pub fn is_name(expr: &Expr, name: &str, aliases: &Table) -> bool {
     get_name(expr).is_some_and(|n| aliases.get(n).map_or(n, String::as_str) == name)
 }
 
 /// `_qualname`: the dotted name `expr` spells, its first part resolved through `imports`.
-pub fn qualname(expr: &Expr, imports: Option<&HashMap<String, String>>) -> Option<String> {
+pub fn qualname(expr: &Expr, imports: Option<&Table>) -> Option<String> {
     match expr {
         Expr::Name(name) => {
             let id = name.id.as_str();
@@ -150,7 +150,7 @@ pub fn slice_items(slice: &Expr) -> &[Expr] {
 /// `NotRequired`, and whether it is `Required` (true) or `NotRequired` (false).
 pub fn unwrap_qualifiers<'e>(
     mut annotation: &'e Expr,
-    aliases: &HashMap<String, String>,
+    aliases: &Table,
 ) -> (&'e Expr, Option<bool>) {
     let mut required = None;
     while let Expr::Subscript(sub) = annotation {
@@ -306,13 +306,12 @@ impl<'a> Resolver<'a> {
 
 /// `_annotation_type`: an annotation known only as text, without its module's imports.
 pub fn annotation_type(annotation: &str, version: Version) -> Option<Ty> {
-    static GENERICS: std::sync::LazyLock<HashMap<String, String>> =
-        std::sync::LazyLock::new(|| {
-            ["List", "Dict", "Set", "FrozenSet", "Tuple"]
-                .iter()
-                .map(|name| ((*name).to_string(), (*name).to_string()))
-                .collect()
-        });
+    static GENERICS: std::sync::LazyLock<Table> = std::sync::LazyLock::new(|| {
+        ["List", "Dict", "Set", "FrozenSet", "Tuple"]
+            .iter()
+            .map(|name| ((*name).to_string(), (*name).to_string()))
+            .collect()
+    });
     let parsed = crate::parse::expression(annotation)?;
     let resolver = Resolver {
         aliases: &GENERICS,
@@ -340,7 +339,7 @@ mod tests {
         );
         let parsed = ruff_python_parser::parse_expression("a[0][int]").unwrap();
         let annotation = &parsed.syntax().body;
-        let (unwrapped, required) = unwrap_qualifiers(annotation, &HashMap::new());
+        let (unwrapped, required) = unwrap_qualifiers(annotation, &Table::default());
         assert!(std::ptr::eq(unwrapped, annotation.as_ref()));
         assert_eq!(required, None);
     }

@@ -7,7 +7,6 @@ use std::sync::LazyLock;
 use regex::Regex;
 use ruff_python_ast::token::TokenKind;
 use ruff_python_parser::{lexer, Mode};
-use ruff_text_size::Ranged;
 
 use crate::checker::Diagnostic;
 use crate::rows::Reported;
@@ -34,8 +33,7 @@ fn blank(c: char) -> bool {
 /// The ignore a comment spells, as `#\s*sqlty:\s*ignore\b(?:\[([^\]]*)\])?` matches it.
 fn rules_of(comment: &str) -> Option<Option<Vec<String>>> {
     static IGNORE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"^#[\s\x1c-\x1f]*sqlty:[\s\x1c-\x1f]*ignore(?:\[([^\]]*)\])?")
-            .expect("a valid pattern")
+        sqlty_sql::regex(r"^#[\s\x1c-\x1f]*sqlty:[\s\x1c-\x1f]*ignore(?:\[([^\]]*)\])?")
     });
     let found = IGNORE.captures(comment)?;
     let Some(names) = found.get(1) else {
@@ -61,12 +59,9 @@ pub fn ignores(source: &Source) -> Vec<Ignore> {
         return Vec::new();
     }
     source
-        .parsed
-        .tokens()
+        .comments
         .iter()
-        .filter(|token| token.kind() == TokenKind::Comment)
-        .filter_map(|token| {
-            let range = token.range();
+        .filter_map(|&range| {
             Some(Ignore {
                 line: source.line(range.start()),
                 rules: rules_of(&text[range])?,
@@ -105,6 +100,7 @@ pub fn unparsed_ignores(text: &str) -> Vec<Ignore> {
 
 /// The `-- sqlty: ignore` comments of a `.sql` file, the first of each line.
 pub fn sql_ignores(text: &str) -> Vec<Ignore> {
+    #[expect(clippy::expect_used, reason = "the pattern is written here")]
     static IGNORE: LazyLock<regex::bytes::Regex> = LazyLock::new(|| {
         regex::bytes::Regex::new(r"(?-u)--\s*sqlty:\s*ignore\b(?:\[([^\]]*)\])?")
             .expect("a valid pattern")
@@ -123,7 +119,7 @@ pub fn sql_ignores(text: &str) -> Vec<Ignore> {
         let Some(matched) = IGNORE.captures(&text.as_bytes()[start..end]) else {
             continue;
         };
-        let whole = matched.get(0).expect("the whole match");
+        let whole = matched.get_match();
         found.push(Ignore {
             line,
             rules: matched.get(1).map(|names| {
@@ -195,7 +191,8 @@ fn apply_marked(
     rules: &RuleConfig,
     marker: &str,
 ) -> Vec<Reported> {
-    if ignores.is_empty() {
+    let crashed = |reported: &Reported| reported.diagnostic.rule == Rule::InternalError;
+    if ignores.is_empty() || diagnostics.iter().any(crashed) {
         return diagnostics;
     }
     let mut kept = Vec::new();
@@ -277,6 +274,26 @@ mod tests {
         };
         let rules = RuleConfig::default().only(&[Rule::SelectStar]);
         assert!(apply(&ignores(&source), vec![reported], &rules).is_empty());
+    }
+
+    #[test]
+    fn a_crashed_module_reports_no_unused_ignore() {
+        let source = Source::new("q = 1  # sqlty: ignore[select-star]\n", (3, 14)).unwrap();
+        let reported = Reported {
+            diagnostic: Diagnostic {
+                rule: Rule::InternalError,
+                message: String::new(),
+                severity: crate::rules::Severity::Error,
+                line: 1,
+                span: 0..0,
+                fix: Vec::new(),
+            },
+            redundant: None,
+        };
+        let rules = RuleConfig::default().only(&[Rule::InternalError, Rule::UnusedIgnore]);
+        let kept = apply(&ignores(&source), vec![reported], &rules);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].diagnostic.rule, Rule::InternalError);
     }
 
     fn lines_and_rules(found: &[Ignore]) -> Vec<(usize, Option<Vec<&str>>)> {

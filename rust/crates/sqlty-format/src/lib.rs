@@ -38,7 +38,7 @@ use sqruff_lib::core::linter::linted_file::LintedFile;
 /// psycopg's `%s`, `%(name)s` and `%%`, the `?` of SQLite and MySQL drivers, and the `{name}`
 /// fields of `str.format` and `sql.SQL` templates, which sqruff does not read as values.
 static PLACEHOLDER: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"%(?:\([^)]*\))?[sbt]|%%|\?|\{\w*\}").unwrap());
+    LazyLock::new(|| sqlty_sql::regex(r"%(?:\([^)]*\))?[sbt]|%%|\?|\{\w*\}"));
 
 /// `source` with every query string sqruff can lay out formatted in `dialect`.
 pub fn format_source(source: &str, dialect: &str, style: &ImportStyle) -> String {
@@ -213,10 +213,15 @@ fn with_linter<T>(dialect: &str, rules: &'static str, f: impl FnOnce(&Linter) ->
 
 /// A linter with the sqruff `rules` setting in the sqlty `dialect`. It reads no
 /// configuration file.
+#[expect(clippy::expect_used, reason = "the raw templater is built in")]
 fn linter(dialect: &str, rules: &str) -> Linter {
     Linter::new(config(dialect, rules), None, None, false).expect("the raw templater exists")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the source is written here, in a dialect sqruff knows"
+)]
 fn config(dialect: &str, rules: &str) -> FluffConfig {
     let dialect = sqruff_dialect(dialect);
     FluffConfig::try_from_source(

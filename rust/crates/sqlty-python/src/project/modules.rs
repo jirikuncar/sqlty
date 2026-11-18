@@ -3,14 +3,14 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{PoisonError, RwLock};
 
 use super::{normalized, Files, Listing};
 
 /// What the host's files tell of packages, each directory asked once.
 pub struct Packages {
     files: Box<dyn Files + Send + Sync>,
-    known: Mutex<HashMap<PathBuf, bool>>,
+    known: RwLock<HashMap<PathBuf, bool>>,
 }
 
 impl Packages {
@@ -18,24 +18,32 @@ impl Packages {
     pub fn new(files: Box<dyn Files + Send + Sync>) -> Self {
         Self {
             files,
-            known: Mutex::default(),
+            known: RwLock::default(),
         }
     }
 
     fn is_package(&self, directory: &Path) -> bool {
-        if let Some(&known) = self.lock().get(directory) {
+        let known = self.known.read().unwrap_or_else(PoisonError::into_inner);
+        if let Some(&known) = known.get(directory) {
             return known;
         }
+        drop(known);
         let found = match self.files.list(directory) {
             Listing::Entries(entries) => entries.iter().any(|(name, _)| name == "__init__.py"),
             Listing::Missing | Listing::Unread => false,
         };
-        self.lock().insert(directory.to_path_buf(), found);
+        let mut known = self.known.write().unwrap_or_else(PoisonError::into_inner);
+        known.insert(directory.to_path_buf(), found);
         found
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<PathBuf, bool>> {
-        self.known.lock().unwrap_or_else(PoisonError::into_inner)
+    /// Each of `roots` against `cwd`, resolved, that is a directory.
+    pub fn roots(&self, roots: &[PathBuf], cwd: &Path) -> Vec<PathBuf> {
+        roots
+            .iter()
+            .map(|root| self.files.canonical(&normalized(&cwd.join(root))))
+            .filter(|root| matches!(self.files.list(root), Listing::Entries(_)))
+            .collect()
     }
 
     /// The names of `directory` and its parents up through the packages, outermost first.
@@ -54,9 +62,9 @@ impl Packages {
     }
 
     /// The dotted names the resolved `path` is imported by, the likeliest first: its package
-    /// path, then its path from each of `roots` (relative to `cwd`), without and with the
+    /// path, then its path from each of the [`roots`](Self::roots), without and with the
     /// root's name. `pkg/__init__.py` is `pkg`.
-    pub fn names(&self, path: &Path, roots: &[PathBuf], cwd: &Path) -> Vec<String> {
+    pub fn names(&self, path: &Path, roots: &[PathBuf]) -> Vec<String> {
         let directory = path.parent().unwrap_or(Path::new(""));
         let stem = stem(path);
         let mut parts = self.package_path(directory);
@@ -65,11 +73,7 @@ impl Packages {
         }
         let mut names = vec![parts.join(".")];
         for root in roots {
-            let root = self.files.canonical(&normalized(&cwd.join(root)));
-            if !matches!(self.files.list(&root), Listing::Entries(_)) {
-                continue;
-            }
-            let Some(relative) = strip(path, &root) else {
+            let Some(relative) = strip(path, root) else {
                 continue;
             };
             let mut relative: Vec<String> = relative
@@ -242,7 +246,7 @@ mod tests {
         let packages = packages();
         let names = |path: &str, roots: &[&str]| {
             let roots: Vec<PathBuf> = roots.iter().map(PathBuf::from).collect();
-            packages.names(Path::new(path), &roots, Path::new("/w"))
+            packages.names(Path::new(path), &packages.roots(&roots, Path::new("/w")))
         };
         assert_eq!(names("/w/src/pkg/sub/mod.py", &[]), ["pkg.sub.mod"]);
         assert_eq!(

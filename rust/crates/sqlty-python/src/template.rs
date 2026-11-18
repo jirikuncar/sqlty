@@ -14,10 +14,9 @@ use crate::tokens::{field_end, string_end, tokenize, Kind};
 
 /// An import of psycopg or of sqlty's psycopg helpers.
 static PSYCOPG: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
+    sqlty_sql::regex(
         r"(?m)^[ \t]*(?:(?:import|from)[ \t]+(?:sqlty\.drivers\.)?psycopg\b|from[ \t]+sqlty\.drivers[ \t]+import\b[^\n]*\bpsycopg\b)",
     )
-    .unwrap()
 });
 
 /// What a `:i` field reads as, so the query still parses.

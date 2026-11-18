@@ -1,8 +1,10 @@
 //! The inference rule compiler of `build.rs`: what it accepts, and the rule and file each
 //! error names.
 
+#![expect(clippy::expect_used, reason = "a failed setup fails the test")]
+
 #[path = "../rules/compile.rs"]
-#[allow(dead_code, unreachable_pub)]
+#[allow(dead_code, unreachable_pub, clippy::unwrap_used)]
 mod inference;
 
 use inference::compile;

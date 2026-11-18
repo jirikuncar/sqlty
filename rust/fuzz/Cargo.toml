@@ -1,0 +1,25 @@
+[package]
+name = "sqlty-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+serde_json = "1"
+sqlty-wasm = { path = "../crates/sqlty-wasm" }
+
+[[bin]]
+name = "run"
+path = "fuzz_targets/run.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+
+[profile.release]
+debug = 1

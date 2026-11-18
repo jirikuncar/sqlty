@@ -21,11 +21,11 @@ use super::Catalog;
 use super::TypeOverrides;
 
 pub(super) static COLLATE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r#"(?i)\s+COLLATE\s+(?:"[^"]*"|[\w.]+)"#).unwrap());
+    LazyLock::new(|| crate::regex(r#"(?i)\s+COLLATE\s+(?:"[^"]*"|[\w.]+)"#));
 
 /// The sequence options of `ADD GENERATED ... AS IDENTITY (...)`, which pg_dump writes.
 static IDENTITY_OPTIONS: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"(?i)\bAS\s+IDENTITY\s*\([^()]*\)").unwrap());
+    LazyLock::new(|| crate::regex(r"(?i)\bAS\s+IDENTITY\s*\([^()]*\)"));
 
 /// Words of an `ALTER TABLE` that sets what inference reads besides the columns: keys,
 /// checks, `NOT NULL` and defaults.
@@ -51,25 +51,27 @@ fn statement_text(stmt: &ddl::Statement) -> String {
 
 /// The column list of PostgreSQL 15's `ON DELETE SET NULL | DEFAULT (cols)`, which
 /// sqlparser does not read; it names the columns the action sets, not the key.
-static FK_ACTION_COLUMNS: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"(?i)\bON\s+DELETE\s+SET\s+(NULL|DEFAULT)\s*\([^()]*\)").unwrap()
-});
+static FK_ACTION_COLUMNS: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::regex(r"(?i)\bON\s+DELETE\s+SET\s+(NULL|DEFAULT)\s*\([^()]*\)"));
 
 static DROP_EXPRESSION: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"(?i)\bDROP\s+EXPRESSION(?:\s+IF\s+EXISTS)?\b").unwrap());
+    LazyLock::new(|| crate::regex(r"(?i)\bDROP\s+EXPRESSION(?:\s+IF\s+EXISTS)?\b"));
 
-pub(super) fn read_statements(
-    statements: &[ddl::Statement],
+/// Apply each statement as it is read, so a parsed statement lives only until it is
+/// applied; the ones waiting on a later definition are returned for [`Loader::run`].
+pub(super) fn read_statements<'a>(
+    statements: impl IntoIterator<Item = ddl::Statement<'a>>,
     dialect: SqlDialect,
     loader: &mut Loader,
     skipped: &mut Vec<SkippedObject>,
 ) -> Vec<Op> {
     let postgres = dialect == SqlDialect::Postgres;
     let mut path = Rc::new(vec!["public".to_string()]);
-    let mut ops = Vec::new();
+    let mut pending = Vec::new();
     let parser_dialect = dialect.parser_dialect();
     let parse_part = |text: &str| Parser::new(parser_dialect.as_ref()).try_with_sql(text).ok();
     for stmt in statements {
+        let stmt = &stmt;
         if postgres {
             if let Some(schemas) = stmt.search_path() {
                 loader.search_path = schemas.clone();
@@ -78,10 +80,13 @@ pub(super) fn read_statements(
             }
         }
         let mut push = |kind: OpKind| {
-            ops.push(Op {
+            let op = Op {
                 path: path.clone(),
                 kind,
-            });
+            };
+            if !loader.apply(&op, false) {
+                pending.push(op);
+            }
         };
         // PostgreSQL and MySQL copy a table's columns with `LIKE`.
         let reads_like = postgres || dialect == SqlDialect::MySql;
@@ -248,7 +253,7 @@ pub(super) fn read_statements(
             read_alter_or_drop(stmt, dialect, &mut push, skipped);
         }
     }
-    ops
+    pending
 }
 
 fn without_fk_action_columns(sql: &str) -> String {
@@ -368,8 +373,8 @@ pub(crate) fn load_with(
     // The built-ins are read once per process: parsing them costs more than most schemas.
     static BUILTIN: LazyLock<Loader> = LazyLock::new(|| {
         let mut loader = Loader::new(SqlDialect::Postgres);
-        let builtin = ddl::split_statements(BUILTIN_SQL, false);
-        let ops = read_statements(&builtin, SqlDialect::Postgres, &mut loader, &mut Vec::new());
+        let builtin = ddl::statements(BUILTIN_SQL, false);
+        let ops = read_statements(builtin, SqlDialect::Postgres, &mut loader, &mut Vec::new());
         loader.run(ops);
         loader.search_path = vec!["public".to_string()];
         loader
@@ -382,8 +387,8 @@ pub(crate) fn load_with(
     };
     loader.overrides = overrides;
     let mut skipped = Vec::new();
-    let statements = ddl::split_statements(schema_sql, dialect == SqlDialect::MySql);
-    let ops = read_statements(&statements, dialect, &mut loader, &mut skipped);
+    let statements = ddl::statements(schema_sql, dialect == SqlDialect::MySql);
+    let ops = read_statements(statements, dialect, &mut loader, &mut skipped);
     loader.run(ops);
     skipped.append(&mut loader.skipped);
     let mut catalog = loader.build();

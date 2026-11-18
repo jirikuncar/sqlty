@@ -304,21 +304,22 @@ pub(crate) fn string_groups(source: &str, tokens: &[Token]) -> Vec<Vec<usize>> {
     let mut open = false;
     for (i, token) in tokens.iter().enumerate() {
         match token.kind {
-            Kind::Str if open => {
-                let group = groups.last_mut().unwrap();
-                let last = group[group.len() - 1];
-                if needs_brackets(source, tokens, last, i)
-                    && enclosing(source, tokens, group[0], i).is_none()
-                {
-                    groups.push(vec![i]);
-                } else {
-                    group.push(i);
+            Kind::Str => match groups.last_mut().filter(|_| open) {
+                Some(group) => {
+                    let last = group[group.len() - 1];
+                    if needs_brackets(source, tokens, last, i)
+                        && enclosing(source, tokens, group[0], i).is_none()
+                    {
+                        groups.push(vec![i]);
+                    } else {
+                        group.push(i);
+                    }
                 }
-            }
-            Kind::Str => {
-                groups.push(vec![i]);
-                open = true;
-            }
+                None => {
+                    groups.push(vec![i]);
+                    open = true;
+                }
+            },
             Kind::Comment => {}
             _ => open = false,
         }

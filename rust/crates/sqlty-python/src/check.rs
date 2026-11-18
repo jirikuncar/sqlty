@@ -6,6 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, LazyLock};
 
 use regex::Regex;
@@ -14,8 +15,10 @@ use ruff_python_ast::{Expr, ExprCall, Operator};
 use ruff_text_size::Ranged;
 use sqlty_sql::analyzer::{self, Nullability};
 
+use crate::analyses::Analyses;
 use crate::calls::{helper_calls, is_marked, Call};
 use crate::checker::{self, Diagnostic};
+use crate::frozen::Table;
 use crate::index::HelperIndex;
 use crate::rewriter::ImportStyle;
 use crate::rows::Reported;
@@ -23,7 +26,7 @@ use crate::rows::{
     alias_target, bind, row_queries, row_shape, value_diagnostics, Check, Found, RowQuery,
     RowShape, Settings,
 };
-use crate::rules::Rule;
+use crate::rules::{Rule, RuleConfig};
 use crate::scopes::{class_of, dotted, Key, Param};
 use crate::types::generic::is_word;
 use crate::types::info::Kind;
@@ -142,16 +145,12 @@ type Span = (usize, usize);
 /// `(query, line, span of the query)` of a call.
 type Unread = (String, usize, Option<Span>);
 
-fn pattern(text: &str) -> Regex {
-    Regex::new(text).expect("a valid pattern")
-}
-
 /// `ParsedSource.may_need_rust_check`: whether the lexing pass can report anything.
 fn may_need_lexing(text: &str, wrapper: &str) -> bool {
     // A marker split over literals: quotes, prefixes, whitespace and comments between its characters.
     static MARKER: LazyLock<Regex> = LazyLock::new(|| {
         let gap = r#"(?:[\s\x1c-\x1f"'rRuU]|#[^\n]*\n)*"#;
-        pattern(&format!("(?i)-{gap}-{gap}s{gap}q{gap}l"))
+        sqlty_sql::regex(&format!("(?i)-{gap}-{gap}s{gap}q{gap}l"))
     });
     text.contains(&format!("{wrapper}[")) || text.contains("UNTYPED") || MARKER.is_match(text)
 }
@@ -422,7 +421,7 @@ fn union_members(annotation: &Expr) -> Vec<Option<&Expr>> {
 
 /// `sqlty._params.annotation_type`: the type a value annotated `expr` has, as argument
 /// types are spelled.
-fn annotation_type(expr: Option<&Expr>, imported: &HashMap<String, String>) -> Option<String> {
+fn annotation_type(expr: Option<&Expr>, imported: &Table) -> Option<String> {
     let Some(expr) = expr else {
         return Some("None".to_string());
     };
@@ -919,8 +918,8 @@ impl<'a> Module<'a, '_> {
             let Some(query) = call.query.as_deref().filter(|query| !query.is_empty()) else {
                 continue;
             };
-            if let Some((rule, message)) =
-                checker::select_star_finding(query, self.dialect(), self.run.has_schema)
+            let stars = self.ctx.analyses.of(query).parsed.result_stars();
+            if let Some((rule, message)) = checker::star_finding(stars, query, self.run.has_schema)
             {
                 reports.push((rule, message, call.line, call.query_span));
             }
@@ -943,12 +942,12 @@ impl<'a> Module<'a, '_> {
     }
 
     fn unparsed(&mut self) {
-        static FORMAT_FIELD: LazyLock<Regex> = LazyLock::new(|| pattern(r"\{\w*\}"));
+        static FORMAT_FIELD: LazyLock<Regex> = LazyLock::new(|| sqlty_sql::regex(r"\{\w*\}"));
         if !self.enabled(Rule::UnparsedQuery) {
             return;
         }
         for (query, line, span) in self.unread() {
-            let Some(error) = analyzer::parse_error(&query, self.dialect()) else {
+            let Some(error) = self.ctx.analyses.of(&query).parsed.error() else {
                 continue;
             };
             let mut message = format!("query does not parse: {error}");
@@ -974,11 +973,14 @@ impl<'a> Module<'a, '_> {
             return;
         }
         for (query, line, span) in self.unread() {
-            let schema = self.run.settings.options.schema;
-            let (_, found) = analyzer::analyze_with_diagnostics(&query, self.dialect(), schema);
-            for diagnostic in found {
-                self.ctx
-                    .report(Rule::Name(diagnostic.rule), diagnostic.message, line, span);
+            let analysis = self.ctx.analyses.of(&query);
+            for diagnostic in &analysis.diagnostics {
+                self.ctx.report(
+                    Rule::Name(diagnostic.rule),
+                    diagnostic.message.clone(),
+                    line,
+                    span,
+                );
             }
         }
     }
@@ -1157,6 +1159,42 @@ pub fn sites(
         .collect()
 }
 
+/// [`diagnostics`] of `parsed`, else [`unparsed`] of `text`; a panic becomes one
+/// `internal-error` in their place, so one module cannot stop a whole check.
+pub fn module(text: &str, parsed: Option<&Arc<Source>>, run: &Run<'_>) -> Found {
+    catch_unwind(AssertUnwindSafe(|| match parsed {
+        Some(parsed) => diagnostics(parsed, run),
+        None => unparsed(text, run),
+    }))
+    .unwrap_or_else(|payload| crashed(crate::report::cause(&*payload), run.settings.rules))
+}
+
+/// The `internal-error` of a check that panicked with `cause`.
+pub fn crashed(cause: &str, rules: &RuleConfig) -> Found {
+    let diagnostic = Diagnostic {
+        rule: Rule::InternalError,
+        message: format!(
+            "sqlty crashed checking this file: {cause}; please report it at {}",
+            crate::report::issue_url(cause)
+        ),
+        severity: rules.severity(Rule::InternalError),
+        line: 1,
+        span: 0..0,
+        fix: Vec::new(),
+    };
+    Found {
+        diagnostics: rules
+            .is_enabled(Rule::InternalError)
+            .then_some(Reported {
+                diagnostic,
+                redundant: None,
+            })
+            .into_iter()
+            .collect(),
+        needed: HashSet::new(),
+    }
+}
+
 /// The diagnostics of a source that does not parse (see [`crate::parse`]): what its
 /// strings alone tell, by line.
 pub fn unparsed(text: &str, run: &Run<'_>) -> Found {
@@ -1199,7 +1237,7 @@ pub fn any_calls(source: &Source, style: &ImportStyle) -> Vec<usize> {
     if !text.contains("Any") || !may_wrap(text, &style.import_line) {
         return Vec::new();
     }
-    module::any_calls(source.body(), &source.typing)
+    module::any_calls(source.body(), &source.aliases)
         .into_iter()
         .filter(|(_, name)| {
             name == wrapper
@@ -1215,9 +1253,12 @@ pub fn any_calls(source: &Source, style: &ImportStyle) -> Vec<usize> {
 /// line.
 pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
     static MARKED_TEMPLATE: LazyLock<Regex> = LazyLock::new(|| {
-        pattern(r#"(?:^|[^\w])(?:[tT][rR]?|[rR][tT])(?:'|")+[\s\x1c-\x1f]*--[\s\x1c-\x1f]?sql"#)
+        sqlty_sql::regex(
+            r#"(?:^|[^\w])(?:[tT][rR]?|[rR][tT])(?:'|")+[\s\x1c-\x1f]*--[\s\x1c-\x1f]?sql"#,
+        )
     });
     let settings = run.settings;
+    let analyses = Analyses::new(settings.options);
     let (options, rules) = (settings.options, settings.rules);
     let text = &*source.text;
     let wrapper = options.style.wrapper_name.as_str();
@@ -1226,7 +1267,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
     let mut base = Vec::new();
     if may_need_lexing(text, wrapper) {
         let any_calls = any_calls(source, &options.style);
-        base = checker::check_source(text, options, rules, &any_calls);
+        base = checker::check_source_with(text, options, rules, &any_calls, &analyses);
         checker::add_fix_imports(text, options, &mut base);
     }
 
@@ -1377,7 +1418,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
         .collect();
     let mut module = Module {
         run,
-        ctx: Check::new(source, settings, queries, named, &names),
+        ctx: Check::new(source, settings, queries, named, &names, analyses),
         source,
         found,
         driver_calls,
@@ -1411,6 +1452,63 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use crate::options::Options;
+
+    fn crash(text: &str, rules: &[(&str, &str)]) -> Vec<Diagnostic> {
+        let options = Options::new("postgres", None, None, false).unwrap();
+        let rules = RuleConfig::from_overrides(Some(
+            rules
+                .iter()
+                .map(|(rule, severity)| (rule.to_string(), severity.to_string()))
+                .collect(),
+        ))
+        .unwrap();
+        let coerce = HashSet::new();
+        let settings = Settings {
+            options: &options,
+            rules: &rules,
+            index: None,
+            module: None,
+            coerce: &coerce,
+        };
+        let lint = |_: &str| -> Vec<Lint> { panic!("lint {}", 1) };
+        let run = Run {
+            settings: &settings,
+            has_schema: false,
+            lint: &lint,
+            helpers: None,
+            variants: None,
+        };
+        module(text, None, &run)
+            .diagnostics
+            .into_iter()
+            .map(|reported| reported.diagnostic)
+            .collect()
+    }
+
+    #[test]
+    fn a_panic_becomes_an_internal_error() {
+        let found = crash("q = 1\n", &[("sqruff", "warn")]);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].rule, Rule::InternalError);
+        assert_eq!(found[0].severity, crate::rules::Severity::Error);
+        assert_eq!(
+            found[0].message,
+            format!(
+                "sqlty crashed checking this file: lint 1; please report it at {}",
+                crate::report::issue_url("lint 1")
+            )
+        );
+        let ignored = [("sqruff", "warn"), ("internal-error", "ignore")];
+        assert!(crash("q = 1\n", &ignored).is_empty());
+        assert!(crash("q = 1\n", &[]).is_empty());
+    }
+
+    #[test]
+    fn a_panic_without_a_message_has_an_unknown_cause() {
+        assert_eq!(crate::report::cause(&42), "unknown cause");
+        assert_eq!(crate::report::cause(&"static"), "static");
+    }
 
     #[test]
     fn a_dict_keeps_the_first_place_and_the_last_value_of_a_key() {

@@ -20,7 +20,7 @@ use super::text_names::{line_starts, offset};
 
 /// A `?` placeholder in group 1, or a literal, quoted name, comment or `?|`/`?&` operator to skip.
 pub(super) static QMARK: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|(?s:/\*.*?\*/)|\?[|&]|(\?)"#).unwrap()
+    crate::regex(r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|(?s:/\*.*?\*/)|\?[|&]|(\?)"#)
 });
 
 /// MySQL column types sqlparser rejects: `ZEROFILL` (which implies `UNSIGNED`),
@@ -29,19 +29,19 @@ pub(super) static QMARK: LazyLock<Regex> = LazyLock::new(|| {
 pub(super) static MYSQL_TYPE_FIXES: LazyLock<[(Regex, &str); 4]> = LazyLock::new(|| {
     [
         (
-            Regex::new(r"(?i)\bNATIONAL\s+(?:VARCHAR|(?:CHAR|CHARACTER)\s+VARYING)\b").unwrap(),
+            crate::regex(r"(?i)\bNATIONAL\s+(?:VARCHAR|(?:CHAR|CHARACTER)\s+VARYING)\b"),
             "NVARCHAR",
         ),
         (
-            Regex::new(r"(?i)\bNATIONAL\s+(?:CHAR|CHARACTER)\b").unwrap(),
+            crate::regex(r"(?i)\bNATIONAL\s+(?:CHAR|CHARACTER)\b"),
             "NCHAR",
         ),
         (
-            Regex::new(r"(?i)(?:\s+(?:UN)?SIGNED)?\s+ZEROFILL\b(?:\s+(?:UN)?SIGNED\b)?").unwrap(),
+            crate::regex(r"(?i)(?:\s+(?:UN)?SIGNED)?\s+ZEROFILL\b(?:\s+(?:UN)?SIGNED\b)?"),
             " UNSIGNED",
         ),
         (
-            Regex::new(r"(?i)\b(?:INT3|MIDDLEINT)\b(\s*\(\s*\d+\s*\))?(\s+UNSIGNED\b)").unwrap(),
+            crate::regex(r"(?i)\b(?:INT3|MIDDLEINT)\b(\s*\(\s*\d+\s*\))?(\s+UNSIGNED\b)"),
             "MEDIUMINT$1$2",
         ),
     ]
@@ -270,10 +270,9 @@ const SQLITE_CONSTRAINTS: [&str; 12] = [
 pub(super) fn sqlite_type_names(sql: &str) -> Option<String> {
     static COLUMN: LazyLock<Regex> = LazyLock::new(|| {
         let name = r#"(?:"[^"]*"|`[^`]*`|\[[^\]]*\]|\w+)"#;
-        Regex::new(&format!(
+        crate::regex(&format!(
             r"(?i)([(,]\s*{name}\s+)([A-Za-z_]\w*(?:\s+[A-Za-z_]\w*)+)"
         ))
-        .unwrap()
     });
     let open = sql.find('(')?;
     let mut changed = false;

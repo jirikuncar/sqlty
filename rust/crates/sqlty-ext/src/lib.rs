@@ -23,6 +23,27 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
 
+/// `sqlty check` on all cores runs about 1.15 times faster than on glibc malloc and 7 to 10
+/// times faster than on musl's, at the same peak memory.
+#[cfg(target_os = "linux")]
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+/// Commits arena memory as pages are touched. mimalloc commits whole arenas up front on
+/// Linux, which raised peak memory by 50 to 90% for no speed.
+#[cfg(target_os = "linux")]
+#[used]
+#[link_section = ".init_array"]
+static LAZY_COMMIT: extern "C" fn() = {
+    extern "C" fn lazy_commit() {
+        /// `mi_option_arena_eager_commit` in mimalloc's `mi_option_t`; the crate has no constant.
+        const ARENA_EAGER_COMMIT: libmimalloc_sys::mi_option_t = 4;
+        // SAFETY: runs when the library loads, before any allocation reserves an arena.
+        unsafe { libmimalloc_sys::mi_option_set(ARENA_EAGER_COMMIT, 0) }
+    }
+    lazy_commit
+};
+
 mod cli;
 mod config;
 mod outline;
@@ -237,8 +258,16 @@ fn load_schema(
                 absent,
                 others,
             };
+            #[expect(
+                clippy::expect_used,
+                reason = "nothing else holds a schema just loaded"
+            )]
             let LoadedSchema { schema, skipped } =
                 Arc::into_inner(loaded).expect("a schema just loaded is not shared");
+            #[expect(
+                clippy::expect_used,
+                reason = "nothing else holds a schema just loaded"
+            )]
             let schema = analyzer::SchemaData::with_databases(schema, databases)
                 .expect("a schema just loaded is not shared");
             Arc::new(LoadedSchema { schema, skipped })
@@ -355,21 +384,20 @@ fn infer_type(
 const STACK_RED_ZONE: usize = 2 << 20;
 const STACK_SEGMENT: usize = 16 << 20;
 
-/// The threads that parse the modules of an index; `None` in a forked child, where the
-/// parent's threads do not exist and handing them work would never return. Rayon's 2 MiB
-/// stacks are below the parser's and analyzer's red zones, so every parse would allocate
-/// a new stack.
+/// The threads that parse the modules of an index; `None` when they cannot start, and in a
+/// forked child, where the parent's threads do not exist and handing them work would never
+/// return. Rayon's 2 MiB stacks are below the parser's and analyzer's red zones, so every
+/// parse would allocate a new stack.
 fn parse_pool() -> Option<&'static rayon::ThreadPool> {
-    static POOL: std::sync::OnceLock<(u32, rayon::ThreadPool)> = std::sync::OnceLock::new();
+    static POOL: std::sync::OnceLock<(u32, Option<rayon::ThreadPool>)> = std::sync::OnceLock::new();
     let (pid, pool) = POOL.get_or_init(|| {
         let pool = rayon::ThreadPoolBuilder::new()
             .thread_name(|i| format!("sqlty-parse-{i}"))
             .stack_size(32 << 20)
-            .build()
-            .expect("the parse threads start");
-        (std::process::id(), pool)
+            .build();
+        (std::process::id(), pool.ok())
     });
-    (*pid == std::process::id()).then_some(pool)
+    pool.as_ref().filter(|_| *pid == std::process::id())
 }
 
 /// Runs `f` without the GIL, with at least [`STACK_RED_ZONE`] of stack.
@@ -1058,8 +1086,7 @@ fn indexed(
     steps: Vec<IndexStep>,
 ) -> ModuleIndex {
     use rayon::prelude::*;
-    use sqlty_python::index::{helpers_of, Roots};
-    use sqlty_python::types::symbols::Source;
+    use sqlty_python::index::{defines_helpers, helpers_of, Module, Roots};
     let mut unique: HashMap<(&str, &str), usize> = HashMap::new();
     let slots: Vec<Option<usize>> = steps
         .iter()
@@ -1073,11 +1100,14 @@ fn indexed(
     for (key, slot) in unique {
         texts[slot] = key;
     }
+    // A module that may define helpers is parsed now; any other when a lookup reaches it.
     let parse = |(text, name): (&str, &str)| {
-        let source = Source::new(text, version)?.named(Some(name));
-        source.targets();
-        let found = helpers_of(&source);
-        Some((Arc::new(source), found))
+        let module = Module::new(Arc::from(text), name, version);
+        let found = defines_helpers(text)
+            .then(|| module.source().map(|parsed| helpers_of(parsed)))
+            .flatten()
+            .unwrap_or_default();
+        (Arc::new(module), found)
     };
     let parsed: Vec<_> = match parse_pool() {
         Some(pool) => pool.install(|| texts.into_par_iter().map(parse).collect()),
@@ -1086,9 +1116,8 @@ fn indexed(
     for ((_, first, second, third, roots, database), slot) in steps.into_iter().zip(slots) {
         match slot {
             Some(slot) => {
-                if let Some((source, found)) = &parsed[slot] {
-                    index.add_found(&first, Arc::clone(source), found);
-                }
+                let (source, found) = &parsed[slot];
+                index.add_found(&first, Arc::clone(source), found);
             }
             None => {
                 let roots = Roots {
@@ -1149,8 +1178,11 @@ fn parsed_module(
     use sqlty_python::types::symbols::Source;
     let known = name.zip(index).and_then(|(name, index)| {
         let module = name.strip_suffix(".__init__").unwrap_or(name);
-        let known = index.source(module)?;
-        (known.module.as_deref() == Some(name) && *known.text == *source).then(|| Arc::clone(known))
+        let known = index.module(module)?;
+        (*known.text == *source)
+            .then(|| known.load())
+            .flatten()
+            .filter(|known| known.module.as_deref() == Some(name))
     });
     match known {
         Some(parsed) => Some(parsed),
@@ -1918,10 +1950,7 @@ impl ModuleChecker<'_> {
             helpers,
             variants: self.config.variants,
         };
-        let mut found = match &parsed {
-            Some(parsed) => check::diagnostics(parsed, &run),
-            None => check::unparsed(source, &run),
-        };
+        let mut found = check::module(source, parsed.as_ref(), &run);
         if suppress {
             let ignores = match &parsed {
                 Some(parsed) => sqlty_python::suppress::ignores(parsed),
@@ -1978,6 +2007,10 @@ fn check_modules(
         return Err(PyValueError::new_err(format!("no configuration {config}")));
     }
     let mut configs: Vec<CheckConfig> = configs.into_iter().map(CheckConfig::new).collect();
+    #[expect(
+        clippy::expect_used,
+        reason = "a check cannot go on without its threads"
+    )]
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(jobs.unwrap_or(0))
         // Below the red zone `maybe_grow` maps a new segment for every module.
@@ -2029,6 +2062,10 @@ fn breaking_modules(
         return Err(PyValueError::new_err(format!("no configuration {config}")));
     }
     let mut configs: Vec<CheckConfig> = configs.into_iter().map(CheckConfig::new).collect();
+    #[expect(
+        clippy::expect_used,
+        reason = "a check cannot go on without its threads"
+    )]
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(jobs.unwrap_or(0))
         .stack_size(STACK_SEGMENT)

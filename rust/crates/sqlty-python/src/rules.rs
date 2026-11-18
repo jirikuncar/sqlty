@@ -72,13 +72,15 @@ pub enum Rule {
     Sqruff,
     /// A query names a database the project does not configure.
     UnknownDatabase,
+    /// sqlty crashed checking the file; nothing else of it is reported.
+    InternalError,
     /// A rule explaining why a column is untyped.
     Name(NameRule),
 }
 
 impl Rule {
     /// Every rule.
-    pub const ALL: [Rule; 45] = [
+    pub const ALL: [Rule; 46] = [
         Rule::ColumnCountMismatch,
         Rule::ColumnTypeMismatch,
         Rule::ColumnNameMismatch,
@@ -109,6 +111,7 @@ impl Rule {
         Rule::ParamsTypeMismatch,
         Rule::Sqruff,
         Rule::UnknownDatabase,
+        Rule::InternalError,
         Rule::Name(NameRule::UnknownTable),
         Rule::Name(NameRule::UnknownColumn),
         Rule::Name(NameRule::AmbiguousColumn),
@@ -159,12 +162,13 @@ impl Rule {
             Rule::ParamsTypeMismatch => "params-type-mismatch",
             Rule::Sqruff => "sqruff",
             Rule::UnknownDatabase => "unknown-database",
+            Rule::InternalError => "internal-error",
             Rule::Name(rule) => rule.name(),
         }
     }
 
     /// Every rule, in the order `sqlty rule` lists them.
-    pub const LISTED: [Rule; 45] = [
+    pub const LISTED: [Rule; 46] = [
         Rule::ColumnCountMismatch,
         Rule::ColumnTypeMismatch,
         Rule::ColumnNameMismatch,
@@ -210,6 +214,7 @@ impl Rule {
         Rule::UnknownDatabase,
         Rule::ParamsTypeMismatch,
         Rule::UnusedIgnore,
+        Rule::InternalError,
     ];
 
     /// What the rule reports, in a line.
@@ -258,6 +263,7 @@ impl Rule {
             Rule::ParamTypeMismatch => "A call passes an argument whose type can't be the type its query parameter takes",
             Rule::Sqruff => "Finding of sqruff's core lint rules in a query",
             Rule::UnknownDatabase => "Query marker names a database the project does not configure",
+            Rule::InternalError => "sqlty crashed checking the file",
             Rule::ParamsTypeMismatch => "The parameter type `P` of `SQL[R, P]` doesn't fit the parameters of its query",
             Rule::UnusedIgnore => "# sqlty: ignore comment, or rule in one, that suppresses no diagnostic",
         }
@@ -284,6 +290,7 @@ impl Rule {
             | Rule::NarrowType
             | Rule::SelectStarNoSchema
             | Rule::UnknownDatabase
+            | Rule::InternalError
             | Rule::Name(
                 NameRule::UnknownTable
                 | NameRule::UnknownColumn

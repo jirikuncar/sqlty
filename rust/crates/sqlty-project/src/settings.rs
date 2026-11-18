@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use sqlty_python::config;
 use sqlty_python::project::{self, Discovery, Files};
+use sqlty_python::queries;
 use sqlty_python::rewriter::ImportStyle;
 use sqlty_python::types::stdlib::Version;
 use sqlty_sql::analyzer::{self, Databases, Schema, SchemaData, TypeOverrides};
@@ -65,7 +66,7 @@ pub struct FileSettings {
     /// `queries`, relative to `base`.
     pub queries: Vec<String>,
     /// `query-format`.
-    pub query_format: String,
+    pub query_format: queries::Format,
     /// The directory of the configuration, which its paths are relative to.
     pub base: Option<PathBuf>,
     /// The Python the sources are read as.
@@ -315,7 +316,7 @@ impl FileSettings {
             functions: self.functions.clone(),
             format_command: self.format_command.clone(),
             queries: self.queries.clone(),
-            query_format: self.query_format.clone(),
+            query_format: self.query_format,
             base: self.base.clone(),
             version: self.version,
         }
@@ -447,6 +448,11 @@ fn settings(
         ));
     }
     let preview = flag("preview");
+    #[expect(clippy::expect_used, reason = "the configuration checked query-format")]
+    let query_format = text("query-format")
+        .unwrap_or("auto")
+        .parse()
+        .expect("a known query-format");
     let variants = table.get("max-query-variants").and_then(Value::as_integer);
     Ok(FileSettings {
         dialect: dialect_flag
@@ -470,7 +476,7 @@ fn settings(
         functions: entries(table, None),
         format_command: strings(table, "format-command"),
         queries: strings(table, "queries"),
-        query_format: text("query-format").unwrap_or("auto").to_string(),
+        query_format,
         base: base.clone(),
         version,
     })
@@ -531,7 +537,7 @@ fn closed_params(directory: &Path, files: &Shared) -> bool {
 
 /// Whether a lower bound of `requires_python` is 3.15 or later.
 fn requires_closed(requires_python: &str) -> bool {
-    let bounds = regex::Regex::new(r"(?:>=|~=|==)\s*(\d+)\.(\d+)").expect("a valid pattern");
+    let bounds = sqlty_sql::regex(r"(?:>=|~=|==)\s*(\d+)\.(\d+)");
     let closed = bounds.captures_iter(requires_python).any(|found| {
         let (major, minor) = (found[1].parse::<u32>(), found[2].parse::<u32>());
         matches!((major, minor), (Ok(major), Ok(minor)) if (major, minor) >= (3, 15))

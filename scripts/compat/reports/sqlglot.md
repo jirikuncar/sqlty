@@ -1,4 +1,4 @@
-# sqlglot 30.29.0 vs sqlty
+# sqlglot 30.31.0 vs sqlty
 
 | Dialect | Kind | Match | Mismatch | sqlty gap | Not comparable |
 |---------|------|-------|----------|-----------|----------------|

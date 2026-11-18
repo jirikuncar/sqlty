@@ -4,7 +4,12 @@
 //! The rules become static data and one `match` on the operator, so the analyzer reads
 //! no file and parses nothing at run time. See `rules/README.md` for the format.
 
-#![expect(clippy::disallowed_methods, reason = "reads the rules at compile time")]
+#![expect(
+    clippy::disallowed_methods,
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "reads the rules at compile time, failing the build"
+)]
 
 use std::path::{Path, PathBuf};
 use std::{env, fs};

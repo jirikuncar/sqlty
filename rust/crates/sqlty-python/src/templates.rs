@@ -1,8 +1,6 @@
 //! The t-strings `sqlty._drivers.find_template_calls` reads: the query psycopg sends for each,
 //! a field that passes a value becoming `%s`, and the types of those values.
 
-use std::collections::HashMap;
-
 use ruff_python_ast::{
     ConversionFlag, Expr, ExprTString, InterpolatedStringElement, InterpolatedStringFormatSpec,
     Stmt,
@@ -10,6 +8,7 @@ use ruff_python_ast::{
 use ruff_python_parser::parse_expression;
 use ruff_text_size::Ranged;
 
+use crate::frozen::Table;
 use crate::module::Imports;
 use crate::scopes::{Context, Lines, Scan, Scope};
 
@@ -36,7 +35,7 @@ pub fn templates(source: &str) -> Option<Vec<Template>> {
 }
 
 /// Every t-string of the module `body` of `source`, in source order.
-pub fn of(source: &str, body: &[Stmt], imported: &HashMap<String, String>) -> Vec<Template> {
+pub fn of(source: &str, body: &[Stmt], imported: &Table) -> Vec<Template> {
     let scan = Scan::new(body, |_| false);
     let ctx = Context {
         imported,

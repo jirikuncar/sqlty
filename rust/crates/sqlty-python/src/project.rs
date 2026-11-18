@@ -88,6 +88,12 @@ pub trait Files {
     fn canonical(&self, path: &Path) -> PathBuf {
         normalized(path)
     }
+
+    /// Whether `path` itself may be a link, so resolving it takes more than resolving its
+    /// directory.
+    fn is_link(&self, _path: &Path) -> bool {
+        true
+    }
 }
 
 impl<F: Fn(&Path) -> Read> Files for F {
@@ -129,26 +135,35 @@ pub enum FindError {
 pub fn find(directory: &Path, files: &dyn Files) -> Result<Option<Found>, FindError> {
     let mut current = Some(normalized(directory));
     while let Some(directory) = current {
-        for name in CONFIG_FILES {
-            let path = directory.join(name);
-            let data = match files.read(&path) {
-                Read::Text(data) => data,
-                Read::Missing => continue,
-                Read::Unread => return Err(FindError::Need(path)),
-            };
-            let label = path.display().to_string();
-            let config = match load(&data, name, &label, name == CONFIG_FILES[0]) {
-                Ok(Some(config)) => config,
-                Ok(None) => continue,
-                Err(LoadError::Syntax(message)) if name != CONFIG_FILES[0] => {
-                    return Err(FindError::Syntax(message))
-                }
-                Err(error) => return Err(FindError::Invalid(error.to_string())),
-            };
-            let config = extended(config, &path, &directory, &mut Vec::new(), files)?;
-            return Ok(Some(Found { config, file: path }));
+        if let Some(found) = find_in(&directory, files)? {
+            return Ok(Some(found));
         }
         current = directory.parent().map(Path::to_path_buf);
+    }
+    Ok(None)
+}
+
+/// The configuration [`find`] takes from `directory` itself, an absolute normalized path,
+/// before it looks in the directory above.
+pub fn find_in(directory: &Path, files: &dyn Files) -> Result<Option<Found>, FindError> {
+    for name in CONFIG_FILES {
+        let path = directory.join(name);
+        let data = match files.read(&path) {
+            Read::Text(data) => data,
+            Read::Missing => continue,
+            Read::Unread => return Err(FindError::Need(path)),
+        };
+        let label = path.display().to_string();
+        let config = match load(&data, name, &label, name == CONFIG_FILES[0]) {
+            Ok(Some(config)) => config,
+            Ok(None) => continue,
+            Err(LoadError::Syntax(message)) if name != CONFIG_FILES[0] => {
+                return Err(FindError::Syntax(message))
+            }
+            Err(error) => return Err(FindError::Invalid(error.to_string())),
+        };
+        let config = extended(config, &path, directory, &mut Vec::new(), files)?;
+        return Ok(Some(Found { config, file: path }));
     }
     Ok(None)
 }
@@ -179,6 +194,7 @@ fn read_required(
         .and_then(|name| name.to_str())
         .unwrap_or("");
     match load(&data, name, &shown.display().to_string(), true) {
+        #[expect(clippy::expect_used, reason = "a required table is never None")]
         Ok(found) => Ok(found.expect("a required table")),
         Err(error) => Err(FindError::Invalid(error.to_string())),
     }
@@ -322,6 +338,11 @@ mod tests {
 
     fn found(directory: &str, files: &[(&str, &str)]) -> Result<Option<Found>, FindError> {
         find(Path::new(directory), &tree(files))
+    }
+
+    #[test]
+    fn a_file_the_host_reads_may_be_a_link() {
+        assert!(tree(&[]).is_link(Path::new("/app/a.py")));
     }
 
     #[test]

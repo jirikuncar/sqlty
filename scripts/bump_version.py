@@ -7,7 +7,8 @@
 ``rust/Cargo.toml`` (``[workspace.package]``) is the source of truth: ``pyproject.toml``
 reads it, and ``--check`` compares every other place with it. ``PLACES`` lists them, each
 with how often the version appears there. The VS Code extension takes its version from
-the release tag in CI. ``tests/test_docs.py`` runs the ``--check`` comparison.
+the release tag in CI, and ``scripts/package_binaries.py`` writes the npm platform
+packages at release. ``tests/test_docs.py`` runs the ``--check`` comparison.
 """
 
 from __future__ import annotations
@@ -31,6 +32,8 @@ PLACES: list[tuple[str, re.Pattern[str], int]] = [
     (".cursor-plugin/plugin.json", JSON_VERSION, 1),
     ("docs/recipes/ci.md", PRE_COMMIT_REV, 1),
     ("skills/sqlty-ci/SKILL.md", PRE_COMMIT_REV, 1),
+    # The package and the platform packages it depends on.
+    ("npm/sqlty/package.json", re.compile(rf'"(?:version|@sqlty/cli-[\w-]+)": "{VERSION}"'), 7),
 ]
 
 

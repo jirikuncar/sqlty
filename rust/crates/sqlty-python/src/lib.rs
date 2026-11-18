@@ -38,6 +38,7 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
 
+pub(crate) mod analyses;
 pub mod breaking;
 #[allow(missing_docs)]
 pub mod calls;
@@ -50,6 +51,7 @@ pub mod config;
 pub mod drivers;
 pub mod edit;
 pub mod fixer;
+pub mod frozen;
 pub mod helpers;
 #[allow(missing_docs)]
 pub mod index;
@@ -61,6 +63,7 @@ pub mod params;
 pub mod parse;
 pub mod project;
 pub mod queries;
+pub mod report;
 pub mod rewriter;
 #[allow(missing_docs)]
 pub mod rows;

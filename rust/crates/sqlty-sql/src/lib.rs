@@ -42,3 +42,11 @@ pub mod highlight;
 pub mod json;
 pub mod placeholders;
 pub(crate) mod values;
+
+/// A regex written in the source, with at most short names escaped into it: an invalid one
+/// is a bug.
+#[doc(hidden)]
+#[expect(clippy::expect_used, reason = "patterns are written in the source")]
+pub fn regex(pattern: &str) -> regex::Regex {
+    regex::Regex::new(pattern).expect("a valid pattern")
+}

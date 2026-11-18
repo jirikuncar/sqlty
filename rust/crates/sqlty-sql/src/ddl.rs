@@ -79,14 +79,14 @@ fn block_comment_end(bytes: &[u8], from: usize) -> usize {
     i.min(bytes.len())
 }
 
-fn scan(sql: &str, mysql: bool) -> Vec<Piece<'_>> {
+fn scan(sql: &str, mysql: bool) -> impl Iterator<Item = Piece<'_>> {
     let bytes = sql.as_bytes();
-    let mut pieces: Vec<Piece> = Vec::new();
+    let mut last: Option<Piece> = None;
     let mut i = 0;
     // Inside a MySQL executable comment (`/*!50001 CREATE VIEW ... */`), which MySQL runs.
     let mut executable = false;
-    while i < bytes.len() {
-        let b = bytes[i];
+    std::iter::from_fn(move || {
+        let b = *bytes.get(i)?;
         let (kind, end) = match b {
             b'/' if mysql && bytes[i..].starts_with(b"/*!") => {
                 executable = true;
@@ -111,8 +111,8 @@ fn scan(sql: &str, mysql: bool) -> Vec<Piece<'_>> {
             b'#' if mysql => (Kind::Comment, line_end(bytes, i)),
             b'/' if bytes.get(i + 1) == Some(&b'*') => (Kind::Comment, block_comment_end(bytes, i)),
             b'\'' => {
-                let escaped = mysql
-                    || matches!(pieces.last(), Some((Kind::Word, w)) if w.eq_ignore_ascii_case("e"));
+                let escaped =
+                    mysql || matches!(last, Some((Kind::Word, w)) if w.eq_ignore_ascii_case("e"));
                 (Kind::Quoted, quoted_end(bytes, i, b'\'', escaped))
             }
             b'"' => (Kind::Quoted, quoted_end(bytes, i, b'"', false)),
@@ -131,10 +131,11 @@ fn scan(sql: &str, mysql: bool) -> Vec<Piece<'_>> {
             _ => (Kind::Punct, i + 1),
         };
         let end = end.min(bytes.len());
-        pieces.push((kind, &sql[i..end]));
+        let piece = (kind, &sql[i..end]);
+        last = Some(piece);
         i = end;
-    }
-    pieces
+        Some(piece)
+    })
 }
 
 fn render(pieces: &[Piece]) -> String {
@@ -704,9 +705,8 @@ impl Statement<'_> {
     }
 }
 
-static SET_CONFIG: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?is)\bset_config\s*\(\s*'search_path'\s*,\s*'([^']*)'").unwrap()
-});
+static SET_CONFIG: LazyLock<Regex> =
+    LazyLock::new(|| crate::regex(r"(?is)\bset_config\s*\(\s*'search_path'\s*,\s*'([^']*)'"));
 
 /// A comma-separated `search_path` value such as `app, "$user", public`.
 fn path_list(text: &str) -> Vec<String> {
@@ -752,19 +752,22 @@ fn name_parts(pieces: &[&Piece]) -> (Vec<String>, usize) {
 /// The statements of `sql`, split on `;` outside quotes, comments and dollar-quoted
 /// bodies; `mysql` also reads backslash escapes and `#` comments.
 pub(crate) fn split_statements(sql: &str, mysql: bool) -> Vec<Statement<'_>> {
-    let mut parts: Vec<Vec<Piece>> = vec![Vec::new()];
-    for piece in scan(sql, mysql) {
-        if is_punct(&piece, ";") {
-            parts.push(Vec::new());
-        } else {
-            parts.last_mut().unwrap().push(piece);
+    statements(sql, mysql).collect()
+}
+
+/// [`split_statements`], scanning only as far as the statement it yields.
+pub(crate) fn statements(sql: &str, mysql: bool) -> impl Iterator<Item = Statement<'_>> {
+    let mut pieces = scan(sql, mysql).peekable();
+    std::iter::from_fn(move || loop {
+        pieces.peek()?;
+        let part: Vec<Piece> = pieces
+            .by_ref()
+            .take_while(|piece| !is_punct(piece, ";"))
+            .collect();
+        if part.iter().any(significant) {
+            return Some(Statement(part));
         }
-    }
-    parts
-        .into_iter()
-        .filter(|part| part.iter().any(significant))
-        .map(Statement)
-        .collect()
+    })
 }
 
 /// The byte range of each statement of `sql`, split on `;` outside quotes, comments and

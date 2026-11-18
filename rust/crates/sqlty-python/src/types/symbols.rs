@@ -3,9 +3,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 
+use ruff_python_ast::token::TokenKind;
 use ruff_python_ast::visitor::{walk_expr, walk_stmt, Visitor};
 use ruff_python_ast::{ExceptHandler, Expr, ExprContext, ModModule, Operator, Stmt, StmtClassDef};
-use ruff_python_parser::Parsed;
+use ruff_text_size::{Ranged, TextRange};
 
 use super::extract::classify;
 use super::info::{Dict, TypeInfo};
@@ -13,22 +14,23 @@ use super::pydantic::Known;
 use super::resolve::{is_name, Found, Names, Resolver, TYPING_MODULES};
 use super::stdlib::Version;
 use super::ty::{Class, NewType, Ty};
+use crate::frozen::Table;
 use crate::module::Imports;
 use crate::scopes::Lines;
 
 /// A module read once: its tree and what its imports name.
 pub struct Source {
     pub text: Arc<str>,
-    pub parsed: Parsed<ModModule>,
+    pub syntax: ModModule,
+    /// The comments, where the text has a `sqlty:` one.
+    pub comments: Vec<TextRange>,
     pub lines: Lines,
     /// `ParsedSource.typing_aliases`.
-    pub aliases: Arc<HashMap<String, String>>,
+    pub aliases: Arc<Table>,
     /// `ParsedSource.imported_names`.
-    pub imports: HashMap<String, String>,
+    pub imports: Table,
     /// Every import, in `ast.walk` order.
     pub entries: Vec<crate::module::Import>,
-    /// `ParsedSource.typing_aliases` as pairs, a later pair wins.
-    pub typing: Vec<(String, String)>,
     pub version: Version,
     /// `ParsedSource.module`: the dotted name, `pkg.__init__` for a package.
     pub module: Option<String>,
@@ -40,23 +42,35 @@ pub struct Source {
 
 impl Source {
     /// `text` parsed, or `None` where Rust does not read it (see [`crate::parse`]).
-    pub fn new(text: &str, version: Version) -> Option<Source> {
-        if crate::parse::may_nest_surrogate(text) {
+    pub fn new(text: impl Into<Arc<str>>, version: Version) -> Option<Source> {
+        let text: Arc<str> = text.into();
+        if crate::parse::may_nest_surrogate(&text) {
             return None;
         }
-        let parsed = crate::parse::module(text)?;
-        let imports = Imports::of(&parsed.syntax().body);
+        let parsed = crate::parse::module(&text)?;
+        let comments = if text.contains("sqlty:") {
+            parsed
+                .tokens()
+                .iter()
+                .filter(|token| token.kind() == TokenKind::Comment)
+                .map(Ranged::range)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let syntax = parsed.into_syntax();
+        let imports = Imports::of(&syntax.body);
         Some(Source {
-            text: Arc::from(text),
-            lines: Lines::new(text),
-            aliases: Arc::new(imports.typing.iter().cloned().collect()),
+            lines: Lines::new(&text),
+            text,
+            aliases: Arc::new(imports.typing.into_iter().collect()),
             imports: imports.imported,
             entries: imports.entries,
-            typing: imports.typing,
             module: None,
             targets: std::sync::OnceLock::new(),
             constants: std::sync::OnceLock::new(),
-            parsed,
+            syntax,
+            comments,
             version,
         })
     }
@@ -75,8 +89,18 @@ impl Source {
             .get_or_init(|| crate::index::imports_of(&self.entries, self.module.as_deref()))
     }
 
+    /// [`Self::targets`] as the module `module`, or as its own one without it.
+    pub fn targets_in(&self, module: Option<&str>) -> std::borrow::Cow<'_, crate::index::Targets> {
+        match module {
+            Some(module) if self.module.as_deref() != Some(module) => {
+                std::borrow::Cow::Owned(crate::index::imports_of(&self.entries, Some(module)))
+            }
+            _ => std::borrow::Cow::Borrowed(self.targets()),
+        }
+    }
+
     pub fn body(&self) -> &[Stmt] {
-        &self.parsed.syntax().body
+        &self.syntax.body
     }
 
     /// The line of the node at `offset`, as `ast` numbers it.
@@ -309,7 +333,7 @@ fn bound_names(body: &[Stmt]) -> HashMap<&str, usize> {
 const PYDANTIC_HOOKS: [&str; 2] = ["__get_pydantic_core_schema__", "__get_validators__"];
 
 /// `_plain_class`: whether a class is known by its bases alone.
-fn plain_class(node: &StmtClassDef, aliases: &HashMap<String, String>) -> bool {
+fn plain_class(node: &StmtClassDef, aliases: &Table) -> bool {
     node.decorator_list.is_empty()
         && node
             .arguments
@@ -339,7 +363,7 @@ enum Local {
 
 /// `_module_types`: the aliases, `NewType`s and plain classes of a module, by name; a name
 /// bound more than once, or a generic `type X[T] = ...`, is left out.
-fn module_types(body: &[Stmt], aliases: &HashMap<String, String>) -> HashMap<String, Local> {
+fn module_types(body: &[Stmt], aliases: &Table) -> HashMap<String, Local> {
     let mut found: HashMap<String, Local> = HashMap::new();
     for (index, stmt) in body.iter().enumerate() {
         if let Some((name, _)) = type_alias(stmt, aliases) {
@@ -361,10 +385,7 @@ fn module_types(body: &[Stmt], aliases: &HashMap<String, String>) -> HashMap<Str
 }
 
 /// `X = T` with `T` a type expression, `X: TypeAlias = T` or `type X = T`: `X` and `T`.
-fn type_alias<'a>(
-    stmt: &'a Stmt,
-    aliases: &HashMap<String, String>,
-) -> Option<(&'a str, &'a Expr)> {
+fn type_alias<'a>(stmt: &'a Stmt, aliases: &Table) -> Option<(&'a str, &'a Expr)> {
     let (target, value): (&Expr, &Expr) = match stmt {
         Stmt::Assign(node) if node.targets.len() == 1 && is_type_expr(&node.value) => {
             (&node.targets[0], &node.value)
@@ -379,10 +400,7 @@ fn type_alias<'a>(
 }
 
 /// `X = NewType("X", T)` with `T` a type expression: `X` and `T`.
-fn newtype_assignment<'a>(
-    stmt: &'a Stmt,
-    aliases: &HashMap<String, String>,
-) -> Option<(&'a str, &'a Expr)> {
+fn newtype_assignment<'a>(stmt: &'a Stmt, aliases: &Table) -> Option<(&'a str, &'a Expr)> {
     let Stmt::Assign(node) = stmt else {
         return None;
     };

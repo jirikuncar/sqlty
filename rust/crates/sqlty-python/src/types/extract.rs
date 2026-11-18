@@ -15,9 +15,10 @@ use super::resolve::{
 use super::stdlib::{stdlib_class, Version};
 use super::symbols::{Index, ModuleTypes, Source};
 use super::ty::{consistent, is_subclass, is_subtype, Promotions, Ty};
+use crate::frozen::Table;
 use crate::unparse::unparse;
 
-type Aliases = HashMap<String, String>;
+type Aliases = Table;
 
 /// A statement of a class body that says something of its fields.
 pub enum Item<'a> {
@@ -650,7 +651,7 @@ fn set_pydantic_names(info: &mut TypeInfo, nodes: &[&ClassNode<'_>], source: &So
         .is_some_and(|value| !matches!(value, Expr::NoneLiteral(_)));
     let mut columns: Dict<String> = Dict::new();
     let mut opaque = BTreeSet::new();
-    let no_aliases = Aliases::new();
+    let no_aliases = Aliases::default();
     for node in nodes {
         for (name, annotation, value) in node.fields() {
             if !takes_column(

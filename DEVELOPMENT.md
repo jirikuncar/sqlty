@@ -238,6 +238,21 @@ cargo nextest run --workspace --manifest-path rust/Cargo.toml
 cargo test --doc --workspace --manifest-path rust/Cargo.toml
 ```
 
+### The `sqlty` executable
+
+`rust/crates/sqlty-cli/tests/cli/*.md` run the built `sqlty` binary with
+[`trycmd`](https://docs.rs/trycmd): each `$ sqlty ...` line in a `console` block,
+its output and `? CODE` exit status. `NAME.in/` is the project a case starts
+from; with `NAME.out/`, the commands share one copy of it and each file there
+must match what they leave; a case that writes files needs one. Write new output into the cases with:
+
+```bash
+TRYCMD=overwrite uv run cargo test -p sqlty-cli --test cli --manifest-path rust/Cargo.toml
+```
+
+It updates the files already in `.out/`; add new ones by hand, where `...` matches any lines.
+Output backslashes read as `/`, so keep `\n` out of what a case prints.
+
 ### Fuzzing the analyzer
 
 `tests/test_fuzz.py` generates random schemas and queries with
@@ -256,6 +271,21 @@ The server's tables are dropped and recreated, so point it at a scratch
 database. In CI, run the `Fuzz` workflow by hand (Actions, Fuzz, Run workflow);
 a failure prints the smallest schema and query Hypothesis shrank it to, which
 belongs in an mdtest next to the fix.
+
+`rust/fuzz` feeds every playground request (`analyze`, `complete`, `hover`,
+`format`) arbitrary source and schema with
+[cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz), seeded from the
+Markdown tests, with overflow checks and AddressSanitizer:
+
+```bash
+cd rust/fuzz
+python3 seed.py ../../tests/mdtest corpus/run
+cargo +nightly fuzz run -O -a run -- -dict=sql.dict -max_total_time=600
+```
+
+A crash leaves its input in `artifacts/run/`; `cargo +nightly fuzz fmt -O -a run
+<file>` prints it. The `Fuzz the engine` workflow runs it every night and
+uploads the input when it fails.
 
 ### Magic codec internals
 

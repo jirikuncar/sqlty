@@ -38,10 +38,9 @@ static GROUP: LazyLock<Regex> = LazyLock::new(|| {
     let block = format!(
         r"{MARKER}\r?\n(?:class [^\r\n]*:\r?\n(?:    [^\r\n]*\r?\n)+|[A-Za-z_]\w* = typing\.TypedDict\([^\r\n]*\)\r?\n)"
     );
-    Regex::new(&format!(
+    sqlty_sql::regex(&format!(
         r"(?:\r?\n){{2}}{block}(?:(?:\r?\n){{2}}{block})*(?:\r?\n){{2}}"
     ))
-    .unwrap()
 });
 
 /// `source` without the classes generated below `# sqlty: generated` lines.
@@ -277,6 +276,8 @@ fn head<'a>(scan: &'a Scan) -> impl Iterator<Item = Range<usize>> + 'a {
 /// `source` with `import M` for each module of [`MODULES`] it lacks and that the new types
 /// name: one it names more often than `before`.
 fn with_imports(before: &str, source: &str) -> String {
+    static NAMED: LazyLock<Regex> =
+        LazyLock::new(|| sqlty_sql::regex(&format!(r"\b(?:{})\.", MODULES.join("|"))));
     let scan = Scan::new(source, "");
     let imports: Vec<(bool, String, Range<usize>)> = head(&scan)
         .filter(|statement| is_import(source, &scan.tokens[statement.clone()], false))
@@ -295,20 +296,20 @@ fn with_imports(before: &str, source: &str) -> String {
         .filter(|tokens| &source[tokens[0].span.clone()] == "import")
         .flat_map(|tokens| imported_names(source, &tokens[1..], false))
         .collect();
+    let uses = |text: &str, module: &str| {
+        NAMED
+            .find_iter(text)
+            .filter(|found| found.as_str().trim_end_matches('.') == module)
+            .count()
+    };
     let missing: Vec<&str> = MODULES
         .into_iter()
+        .filter(|module| uses(source, module) > uses(before, module))
         .filter(|module| !imported.iter().any(|name| name == module))
-        .filter(|module| {
-            let uses = Regex::new(&format!(r"\b{module}\.")).unwrap();
-            uses.find_iter(source).count() > uses.find_iter(before).count()
-        })
         .collect();
-    let Some(last) = imports.last() else {
+    let (Some(last), false) = (imports.last(), missing.is_empty()) else {
         return source.to_string();
     };
-    if missing.is_empty() {
-        return source.to_string();
-    }
     let eol = if source.contains("\r\n") {
         "\r\n"
     } else {

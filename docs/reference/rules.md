@@ -64,6 +64,7 @@ stale-type = "error"
 | [`param-type-mismatch`](#param-type-mismatch) | Params | error | no | Call passes an argument the query's parameter can't take |
 | [`params-type-mismatch`](#params-type-mismatch) | Params | error | no | `P` of `SQL[R, P]` doesn't fit the query's parameters |
 | [`unused-ignore`](#unused-ignore) | Suppression | warn | no | `# sqlty: ignore` comment that suppresses nothing |
+| [`internal-error`](#internal-error) | Internal | error | no | sqlty crashed checking the file |
 
 `nullable-mismatch` and `redundant-optional` check nullability; see
 [Nullability](../guide/schema-inference.md#nullability). `literal-mismatch` and
@@ -489,6 +490,20 @@ example:
 ```
 
 Fix: remove the comment, or correct the rule name.
+
+## Internal rules
+
+### internal-error
+
+Default: error. sqlty crashed checking the file, so nothing else of it is
+reported. The other files are still checked. The message names the cause:
+
+```text
+sqlty crashed checking this file: index out of bounds; please report it at https://github.com/jirikuncar/sqlty/issues/new?template=bug_report.yml&title=...
+```
+
+Fix: open the link, a bug report with the cause, version and platform filled
+in, and add the file, or the smallest part of it that still crashes.
 
 ## Query rules
 
