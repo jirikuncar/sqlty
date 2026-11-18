@@ -57,6 +57,22 @@ fn hands_what_it_does_not_run_to_python() {
     std::fs::remove_dir_all(&root).expect("removes");
 }
 
+#[test]
+fn keeps_json_output_apart_from_what_fix_reports() {
+    let config = ("pyproject.toml", "[tool.sqlty]\nschema = \"schema.sql\"\n");
+    let stale = (
+        "app/a.py",
+        "from sqlty import SQL\nq = SQL[tuple[str]](\"--sql\\nSELECT id FROM users\")\n",
+    );
+    let root = project("json", &[config, SCHEMA, stale]);
+    let args = ["check", "--fix", "-v", "--output-format", "json"];
+    assert_eq!(
+        sqlty(&root, &args, &[]),
+        (0, "[]\n".to_string(), "Fixed app/a.py\n".to_string())
+    );
+    std::fs::remove_dir_all(&root).expect("removes");
+}
+
 /// Messages of the language server until one holds `wanted`, after sending `requests`.
 fn serve(root: &Path, requests: &[String], wanted: &str) -> (Vec<String>, i32) {
     use std::io::{BufRead, BufReader, Read, Write};
@@ -116,6 +132,7 @@ fn initialize(root: &Path, options: &str) -> String {
 
 #[test]
 fn serves_the_language_server() {
+    // A schema pattern that matches nothing: the server logs the warning and goes on.
     let config = (
         "pyproject.toml",
         "[tool.sqlty]\nschema = [\"schema.sql\", \"none/*.sql\"]\n",
@@ -152,9 +169,15 @@ fn serves_the_language_server() {
         r#""id":3"#,
     );
     assert_eq!(code, 0);
-    assert!(messages
-        .last()
-        .is_some_and(|message| message.contains("sqlty: rewrite")));
+    let answer = messages.last().expect("an answer");
+    for (title, changes) in [
+        ("sqlty: fix all", true),
+        ("sqlty: rewrite", true),
+        ("sqlty: format", false),
+        ("sqlty: strip", false),
+    ] {
+        assert_eq!(answer.contains(title), changes, "{title}: {answer}");
+    }
     let baseline = r#"{"breaking":{"against":"main"}}"#;
     let (messages, code) = serve(
         &root,

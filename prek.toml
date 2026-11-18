@@ -8,9 +8,9 @@
 [[repos]]
 repo = "builtin"
 hooks = [
-  { id = "fix-byte-order-marker", exclude = '^rust/crates/sqlty-cli/tests/cli/', priority = 0 },
-  { id = "mixed-line-ending", exclude = '^rust/crates/sqlty-cli/tests/cli/', priority = 1 },
-  { id = "trailing-whitespace", exclude = '^rust/crates/sqlty-cli/tests/cli/', priority = 2 },
+  { id = "fix-byte-order-marker", exclude = '^rust/crates/sqlty-cli/tests/cli/check-fix\.(in|out)/r\.py$', priority = 0 },
+  { id = "mixed-line-ending", priority = 1 },
+  { id = "trailing-whitespace", priority = 2 },
   { id = "end-of-file-fixer", priority = 3 },
   { id = "check-yaml", priority = 10 },
   { id = "check-toml", priority = 10 },

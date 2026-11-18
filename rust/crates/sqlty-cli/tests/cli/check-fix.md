@@ -11,8 +11,8 @@ $ sqlty check --fix -v --output-format json r.py
 Fixed r.py
 []
 
-$ sqlty check --fix -c 'format-command = ["false"]' s.py
-format-command false failed on s.py: 
+$ sqlty check --fix -c 'format-command = ["sh", "-c", "echo bad layout >&2; exit 1"]' s.py
+format-command sh failed on s.py: bad layout
 Fixed 1 file(s)
 
 $ sqlty check --fix
