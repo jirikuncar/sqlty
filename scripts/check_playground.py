@@ -26,7 +26,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
-from playwright.sync_api import Browser, CDPSession, Page, sync_playwright
+from playwright.sync_api import Browser, CDPSession, Page, Route, sync_playwright
 
 SOURCE = "monaco.editor.getEditors().find((e) => e.getContainerDomNode().matches('[data-source]'))"
 MODEL = "monaco.editor.getModels().find((m) => m.getLanguageId() === '{}')"
@@ -47,10 +47,7 @@ def main() -> None:
         browser = playwright.chromium.launch()
         coverage = Coverage()
         page = browser.new_page()
-        page.route(
-            "https://api.github.com/**",
-            lambda route: route.fulfill(body=GITHUB, content_type="application/json"),
-        )
+        page.route("https://api.github.com/**", github)
         coverage.watch(page)
         errors: list[str] = []
         page.on("pageerror", lambda error: errors.append(str(error)))
@@ -72,6 +69,10 @@ def main() -> None:
         f"playground.js never ran lines {lines} and functions {functions}"
     )
     print(f"{url}: the playground works, and every line of playground.js ran")
+
+
+def github(route: Route) -> None:
+    route.fulfill(body=GITHUB, content_type="application/json")
 
 
 def check(page: Page, url: str) -> None:
@@ -224,6 +225,7 @@ def exercise(browser: Browser, url: str, watch: Callable[[Page], None]) -> None:
     """Every control of the playground, with what each one shows."""
     context = browser.new_context(permissions=["clipboard-read", "clipboard-write"])
     context.add_init_script(INIT)
+    context.route("https://api.github.com/**", github)
     context.route(
         "**/vendor/wllama/esm/index.min.js",
         lambda route: route.fulfill(body=WLLAMA, content_type="text/javascript"),
