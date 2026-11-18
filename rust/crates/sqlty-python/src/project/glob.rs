@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use regex::{Regex, RegexBuilder};
 
@@ -140,11 +140,23 @@ fn matchers(globs: &[String]) -> (Regex, Regex) {
 /// A translated glob, however long: `translate` escapes all but the classes it writes, and
 /// `fnmatch` has no size limit either.
 #[expect(clippy::expect_used, reason = "a translated glob is a valid pattern")]
-pub(crate) fn compile(pattern: &str) -> Regex {
+fn compile(pattern: &str) -> Regex {
     RegexBuilder::new(pattern)
         .size_limit(usize::MAX)
         .build()
         .expect("a translated glob")
+}
+
+/// [`path`] of `pattern` anchored at the start, compiled once per pattern.
+pub(crate) fn path_prefix(pattern: &str) -> Arc<Regex> {
+    static CACHE: LazyLock<Mutex<HashMap<String, Arc<Regex>>>> = LazyLock::new(Mutex::default);
+    let mut cache = CACHE.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(found) = cache.get(pattern) {
+        return Arc::clone(found);
+    }
+    let compiled = Arc::new(compile(&format!("^{}", path(pattern))));
+    cache.insert(pattern.to_string(), Arc::clone(&compiled));
+    compiled
 }
 
 /// A class that matches nothing; `regex` has no `(?!)`.

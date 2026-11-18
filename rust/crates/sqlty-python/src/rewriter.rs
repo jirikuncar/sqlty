@@ -12,6 +12,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use regex::Regex;
 use std::sync::LazyLock;
@@ -643,6 +644,18 @@ pub(crate) fn escapes(text: &str, mut piece: impl FnMut(&str, Range<usize>)) {
     piece(rest, position(rest)..text.len());
 }
 
+/// `\bname\b`, compiled once per name: the few import styles in use repeat call after call.
+pub(crate) fn word_regex(name: &str) -> Arc<Regex> {
+    static CACHE: LazyLock<Mutex<HashMap<String, Arc<Regex>>>> = LazyLock::new(Mutex::default);
+    let mut cache = CACHE.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(found) = cache.get(name) {
+        return Arc::clone(found);
+    }
+    let compiled = Arc::new(sqlty_sql::regex(&format!(r"\b{}\b", regex::escape(name))));
+    cache.insert(name.to_string(), Arc::clone(&compiled));
+    compiled
+}
+
 static NO_PARAMS: LazyLock<Regex> = LazyLock::new(|| sqlty_sql::regex(r"\bNoParams\b"));
 
 /// Remove sqlty and `TYPE_MODULES` imports that are no longer referenced.
@@ -714,8 +727,7 @@ fn unused_datetime_import(source: &str, line: &str) -> bool {
     {
         return false;
     }
-    let word = sqlty_sql::regex(&format!(r"\b{}\b", regex::escape(binding)));
-    word.find_iter(source).count() == 1
+    word_regex(binding).find_iter(source).count() == 1
 }
 
 /// Each line of `source` with its line ending, and whether it starts inside a string
@@ -917,7 +929,7 @@ impl Spelling {
         self.imports
             .iter()
             .filter(|(spelled, _)| {
-                let word = sqlty_sql::regex(&format!(r"\b{}\b", regex::escape(spelled)));
+                let word = word_regex(spelled);
                 wrapped.iter().any(|text| {
                     text.split_once('(')
                         .is_some_and(|(head, _)| word.is_match(head))

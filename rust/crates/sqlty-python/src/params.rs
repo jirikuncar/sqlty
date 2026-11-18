@@ -10,6 +10,7 @@
 //! when its type is unknown or cast (`%s::int` takes anything).
 
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::ops::Range;
 use std::sync::LazyLock;
 
@@ -312,6 +313,8 @@ fn head<'a>(scan: &'a Scan) -> impl Iterator<Item = Range<usize>> + 'a {
 
 /// `source` with `import M` for each module of [`MODULES`] it names but lacks, in order.
 fn with_imports(source: &str) -> String {
+    static NAMED: LazyLock<Regex> =
+        LazyLock::new(|| sqlty_sql::regex(&format!(r"\b(?:{})\.", MODULES.join("|"))));
     let scan = Scan::new(source, "");
     let imports: Vec<(bool, String, Range<usize>)> = head(&scan)
         .filter(|statement| is_import(source, &scan.tokens[statement.clone()], false))
@@ -330,11 +333,17 @@ fn with_imports(source: &str) -> String {
         .filter(|tokens| &source[tokens[0].span.clone()] == "import")
         .flat_map(|tokens| imported_names(source, &tokens[1..], false))
         .collect();
-    let missing: Vec<&str> = MODULES
+    let mut missing: Vec<&str> = MODULES
         .into_iter()
         .filter(|module| !imported.iter().any(|name| name == module))
-        .filter(|module| sqlty_sql::regex(&format!(r"\b{module}\.")).is_match(source))
         .collect();
+    if !missing.is_empty() {
+        let named: HashSet<&str> = NAMED
+            .find_iter(source)
+            .map(|found| found.as_str().trim_end_matches('.'))
+            .collect();
+        missing.retain(|module| named.contains(module));
+    }
     let Some(last) = imports.last() else {
         return source.to_string();
     };
