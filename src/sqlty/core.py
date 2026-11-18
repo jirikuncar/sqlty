@@ -268,8 +268,8 @@ def query_diagnostics(
     The rules are ``unknown-table``, ``unknown-column``, ``ambiguous-column``, ``duplicate-alias``,
     ``unknown-function``, ``unknown-type``, ``unsupported-syntax``,
     ``insert-missing-column``, ``insert-value-count``, ``ungrouped-column``,
-    ``fanout-aggregate``, ``chasm-join``, ``unproven-join``, ``entity-mismatch`` and
-    ``rejected-query``. Tables and
+    ``fanout-aggregate``, ``chasm-join``, ``unproven-join``, ``entity-mismatch``,
+    ``foreign-key-mismatch`` and ``rejected-query``. Tables and
     columns are only judged when ``schema_sql`` defines some tables. ``rules`` sets severities
     as ``[tool.sqlty.rules]`` does, and a rule set to ``"ignore"`` (by default
     ``unproven-join`` and ``entity-mismatch``) is left out, as in ``check_source``.

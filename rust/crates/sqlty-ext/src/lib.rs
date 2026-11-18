@@ -606,8 +606,8 @@ type QueryDiagnosticTuple = (
 /// end, table, column)` tuples:
 /// `unknown-table`, `unknown-column`, `ambiguous-column`, `duplicate-alias`, `unknown-function`,
 /// `unknown-type`, `unsupported-syntax`, `insert-missing-column`, `insert-value-count`,
-/// `ungrouped-column`, `fanout-aggregate`, `chasm-join`, `unproven-join`, `entity-mismatch`
-/// and `rejected-query`.
+/// `ungrouped-column`, `fanout-aggregate`, `chasm-join`, `unproven-join`, `entity-mismatch`,
+/// `foreign-key-mismatch` and `rejected-query`.
 /// Tables, columns and
 /// ambiguity are only judged with a schema.
 ///

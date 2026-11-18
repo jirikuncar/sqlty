@@ -41,13 +41,15 @@ pub enum NameRule {
     UnprovenJoin,
     /// A comparison between columns holding keys of different entities.
     EntityMismatch,
+    /// A foreign key column compared with a column it does not reference.
+    ForeignKeyMismatch,
     /// A query the database rejects for a reason no other rule names.
     RejectedQuery,
 }
 
 impl NameRule {
     /// Every rule, the one list the checker and the Python side read.
-    pub const ALL: [NameRule; 15] = [
+    pub const ALL: [NameRule; 16] = [
         NameRule::UnknownTable,
         NameRule::UnknownColumn,
         NameRule::AmbiguousColumn,
@@ -62,6 +64,7 @@ impl NameRule {
         NameRule::ChasmJoin,
         NameRule::UnprovenJoin,
         NameRule::EntityMismatch,
+        NameRule::ForeignKeyMismatch,
         NameRule::RejectedQuery,
     ];
 
@@ -82,6 +85,7 @@ impl NameRule {
             NameRule::ChasmJoin => "chasm-join",
             NameRule::UnprovenJoin => "unproven-join",
             NameRule::EntityMismatch => "entity-mismatch",
+            NameRule::ForeignKeyMismatch => "foreign-key-mismatch",
             NameRule::RejectedQuery => "rejected-query",
         }
     }
@@ -393,6 +397,7 @@ mod tests {
                 "chasm-join",
                 "unproven-join",
                 "entity-mismatch",
+                "foreign-key-mismatch",
                 "rejected-query",
             ]
         );

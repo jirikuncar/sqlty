@@ -50,6 +50,7 @@ stale-type = "error"
 | [`chasm-join`](#chasm-join) | Names | warn | no | Aggregating query joins one table one-to-many to two others |
 | [`unproven-join`](#unproven-join) | Names | ignore | no | Join in an aggregating query that matches no primary or unique key |
 | [`entity-mismatch`](#entity-mismatch) | Names | ignore | no | Comparison between columns holding keys of different tables |
+| [`foreign-key-mismatch`](#foreign-key-mismatch) | Names | warn | no | Foreign key column compared with a column it does not reference |
 | [`rejected-query`](#rejected-query) | Names | error | no | Query the database rejects for a reason no other rule names |
 | [`stale-rewrite`](#stale-rewrite) | Rewrite | warn | yes | `--sql` string not wrapped in `SQL[T](...)` |
 | [`stale-type`](#stale-type) | Rewrite | warn | yes | `SQL[tuple[...]]` wider than the inferred row type |
@@ -656,7 +657,7 @@ enabled and a schema configured, no column is left untyped without a diagnostic.
 `insert-missing-column` and `insert-value-count` check what an `INSERT` writes,
 and `ungrouped-column` what a grouped query selects. `fanout-aggregate`,
 `chasm-join` and `unproven-join` check what joins do to aggregates, and
-`entity-mismatch` what they compare; `rejected-query` reports the rest of what
+`entity-mismatch` and `foreign-key-mismatch` what they compare; `rejected-query` reports the rest of what
 the database rejects. The rules for SQL the
 database rejects (unknown tables and columns, ambiguous columns, an `INSERT`
 missing a column or a value, an ungrouped column, a rejected query) are errors; those for valid SQL sqlty cannot type are warnings. The
@@ -755,6 +756,14 @@ columns holding keys of different tables: `products.id = orders.customer_id`. A
 key column holds keys of its table, and a foreign key column those of the key it
 references, followed to the end of the chain. Off because intentional joins of
 unrelated keys (polymorphic ids, legacy schemas) would need suppressions.
+
+### foreign-key-mismatch
+
+Default: warn. A foreign key column compared in `ON`, `USING`, `WHERE`,
+`HAVING` or `IN` with a column other than the one it references, itself in
+another row, or a column referencing the same one: `products.id =
+orders.customer_id`. A composite key is compared with all its referenced
+columns, of one row.
 
 ### rejected-query
 

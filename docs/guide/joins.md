@@ -15,9 +15,10 @@ so the checks work offline, in an editor and in CI.
 | [`fanout-aggregate`](../reference/rules.md#fanout-aggregate) | warn | An aggregate over rows a one-to-many join repeats |
 | [`chasm-join`](../reference/rules.md#chasm-join) | warn | One table joined one-to-many to two others |
 | [`unproven-join`](../reference/rules.md#unproven-join) | ignore | A join in an aggregating query that matches no key |
+| [`foreign-key-mismatch`](../reference/rules.md#foreign-key-mismatch) | warn | A foreign key column compared with a column it does not reference |
 | [`entity-mismatch`](../reference/rules.md#entity-mismatch) | ignore | A comparison between keys of different tables |
 
-All four need a [schema](schema-inference.md) with keys and are judged in the
+All five need a [schema](schema-inference.md) with keys and are judged in the
 `postgres`, `mysql` and `sqlite` dialects.
 
 ## Totals a join inflates
@@ -149,10 +150,41 @@ to-one.
 
 Every id is an integer, so a join of `products.id` to `orders.customer_id`
 type-checks and returns rows: products whose id happens to match a customer's.
-`entity-mismatch` follows foreign keys to the table whose keys a column holds
-and reports a comparison between keys of different tables. It is off by
-default, since a polymorphic `owner_id` or a schema without foreign keys can
-compare unrelated keys on purpose:
+`foreign-key-mismatch` reports a foreign key column compared with a column it
+does not reference:
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL REFERENCES customers);
+```
+
+```python
+from sqlty import SQL
+
+# error: [foreign-key-mismatch] "orders.customer_id references customers.id, not products.id"
+query = SQL[tuple[str, int]]("""--sql
+SELECT p.name, o.id
+FROM orders o
+JOIN products p ON p.id = o.customer_id""")
+```
+
+The column of another row and a column referencing the same one are fine, and
+a composite key is compared with all its referenced columns, of one row.
+
+### Keys of different tables
+
+`entity-mismatch` goes further: it follows foreign keys to the table whose keys
+a column holds, and compares primary keys too. It is off by default, since a
+polymorphic `owner_id` or a schema without foreign keys can compare unrelated
+keys on purpose:
 
 ```toml
 [tool.sqlty]
@@ -173,11 +205,11 @@ CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL REFERE
 ```python
 from sqlty import SQL
 
-# error: [entity-mismatch] "products.id holds products keys, orders.customer_id holds customers keys"
+# error: [entity-mismatch] "products.id holds products keys, orders.id holds orders keys"
 query = SQL[tuple[str, int]]("""--sql
 SELECT p.name, o.id
 FROM orders o
-JOIN products p ON p.id = o.customer_id""")
+JOIN products p ON p.id = o.id""")
 ```
 
 Comparisons are read in `ON`, `USING`, `WHERE` and `HAVING`. Views, CTEs and

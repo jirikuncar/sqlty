@@ -380,11 +380,21 @@ pub(super) fn column_named<'a>(
 }
 
 pub(super) fn mark_primary_key(columns: &mut [RawColumn], expr: &Expr, dialect: SqlDialect) {
-    let named = |c: &RawColumn| matches!(expr, Expr::Identifier(i) if c.name == fold(i, dialect));
-    for column in columns.iter_mut().filter(|c| named(c)) {
+    for column in columns.iter_mut().filter(|c| is_named(c, expr, dialect)) {
         column.not_null = true;
         column.primary_key = true;
     }
+}
+
+/// A key column of a SQLite table that may hold NULL.
+pub(super) fn mark_loose_primary_key(columns: &mut [RawColumn], expr: &Expr, dialect: SqlDialect) {
+    for column in columns.iter_mut().filter(|c| is_named(c, expr, dialect)) {
+        column.primary_key = true;
+    }
+}
+
+fn is_named(column: &RawColumn, expr: &Expr, dialect: SqlDialect) -> bool {
+    matches!(expr, Expr::Identifier(i) if column.name == fold(i, dialect))
 }
 
 /// The key a `UNIQUE` constraint or index declares, when every part of it is a column.

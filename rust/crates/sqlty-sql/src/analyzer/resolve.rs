@@ -287,6 +287,25 @@ impl<'a> Analyzer<'a> {
         Some((found.reference, found.table, found.column))
     }
 
+    /// [`Self::locate_column`] of a schema table column, and whether the column is part of
+    /// a foreign key.
+    pub(super) fn locate_table_column(
+        &self,
+        expr: &Expr,
+        scope: &Scope,
+    ) -> Option<(String, String, String, bool)> {
+        let found = self.resolve_reference(expr, scope)?;
+        let ColumnRef::Schema(column) = found.found else {
+            return None;
+        };
+        Some((
+            found.reference,
+            found.table,
+            found.column,
+            column.foreign_key,
+        ))
+    }
+
     /// Whether the source says `column` of `table` can be NULL (see [`ColumnRef`]).
     pub(super) fn declared_nullability(&self, table: &str, column: &str) -> Nullability {
         match self.find_column(table, column) {

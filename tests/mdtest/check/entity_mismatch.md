@@ -6,6 +6,7 @@ schema = "schema.sql"
 
 [tool.sqlty.rules]
 entity-mismatch = "warn"
+foreign-key-mismatch = "ignore"
 stale-type = "ignore"
 narrow-type = "ignore"
 ```

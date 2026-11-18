@@ -80,7 +80,7 @@ pub enum Rule {
 
 impl Rule {
     /// Every rule.
-    pub const ALL: [Rule; 46] = [
+    pub const ALL: [Rule; 47] = [
         Rule::ColumnCountMismatch,
         Rule::ColumnTypeMismatch,
         Rule::ColumnNameMismatch,
@@ -126,6 +126,7 @@ impl Rule {
         Rule::Name(NameRule::ChasmJoin),
         Rule::Name(NameRule::UnprovenJoin),
         Rule::Name(NameRule::EntityMismatch),
+        Rule::Name(NameRule::ForeignKeyMismatch),
         Rule::Name(NameRule::RejectedQuery),
     ];
 
@@ -168,7 +169,7 @@ impl Rule {
     }
 
     /// Every rule, in the order `sqlty rule` lists them.
-    pub const LISTED: [Rule; 46] = [
+    pub const LISTED: [Rule; 47] = [
         Rule::ColumnCountMismatch,
         Rule::ColumnTypeMismatch,
         Rule::ColumnNameMismatch,
@@ -206,6 +207,7 @@ impl Rule {
         Rule::Name(NameRule::ChasmJoin),
         Rule::Name(NameRule::UnprovenJoin),
         Rule::Name(NameRule::EntityMismatch),
+        Rule::Name(NameRule::ForeignKeyMismatch),
         Rule::Name(NameRule::RejectedQuery),
         Rule::ParamCountMismatch,
         Rule::ExtraParam,
@@ -257,6 +259,7 @@ impl Rule {
             Rule::Name(NameRule::ChasmJoin) => "Aggregating query joins one table one-to-many to two others",
             Rule::Name(NameRule::UnprovenJoin) => "Join in an aggregating query that matches no primary or unique key",
             Rule::Name(NameRule::EntityMismatch) => "Comparison between columns holding keys of different tables",
+            Rule::Name(NameRule::ForeignKeyMismatch) => "Foreign key column compared with a column it does not reference",
             Rule::Name(NameRule::RejectedQuery) => "Query the database rejects for a reason no other rule names",
             Rule::ParamCountMismatch => "A call passes a different number of parameters than its query has placeholders, or misses a name",
             Rule::ExtraParam => "A call passes a key its query has no placeholder for",
@@ -319,7 +322,8 @@ impl Rule {
                 | NameRule::UnknownType
                 | NameRule::UnsupportedSyntax
                 | NameRule::FanoutAggregate
-                | NameRule::ChasmJoin,
+                | NameRule::ChasmJoin
+                | NameRule::ForeignKeyMismatch,
             ) => Severity::Warn,
             Rule::RedundantOptional
             | Rule::RedundantLiteral

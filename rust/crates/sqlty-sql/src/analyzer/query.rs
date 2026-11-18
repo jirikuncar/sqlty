@@ -375,6 +375,7 @@ impl<'a> Analyzer<'a> {
             analyzer.check_grouping(select, &scope);
             analyzer.check_fanout(select, &scope);
             analyzer.check_entities(select, &scope);
+            analyzer.check_foreign_keys(select, &scope);
         }
         analyzer.facts = analyzer.select_facts(select, &scope);
         let keyword = select.select_token.0.span.start;

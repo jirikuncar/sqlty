@@ -1,0 +1,382 @@
+# foreign-key-mismatch
+
+A column with a `FOREIGN KEY` may be compared (`=`, `<>`, `IN`, `USING`, in `ON`, `WHERE`,
+`HAVING`) only with:
+
+- the same column, of the same or another row (self-join, other alias), or
+- the column its foreign key references.
+
+The columns of a composite foreign key match pairwise and together: each column with its
+own referenced column, all of them against one row (one alias) of the referenced table.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+stale-type = "ignore"
+narrow-type = "ignore"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE orders (
+    id INTEGER PRIMARY KEY,
+    customer_id INTEGER NOT NULL REFERENCES customers (id),
+    total INTEGER NOT NULL
+);
+CREATE TABLE vip (customer_id INTEGER PRIMARY KEY REFERENCES customers);
+CREATE TABLE vip_notes (vip_id INTEGER NOT NULL REFERENCES vip (customer_id), note TEXT);
+CREATE TABLE employees (id INTEGER PRIMARY KEY, manager_id INTEGER REFERENCES employees (id));
+
+CREATE TABLE warehouses (region TEXT, code TEXT, PRIMARY KEY (region, code));
+CREATE TABLE stock (
+    region TEXT NOT NULL,
+    code TEXT NOT NULL,
+    product_id INTEGER NOT NULL REFERENCES products,
+    FOREIGN KEY (region, code) REFERENCES warehouses (region, code)
+);
+CREATE TABLE shipments (
+    id INTEGER PRIMARY KEY,
+    from_region TEXT NOT NULL,
+    from_code TEXT NOT NULL,
+    to_region TEXT NOT NULL,
+    to_code TEXT NOT NULL,
+    FOREIGN KEY (from_region, from_code) REFERENCES warehouses (region, code),
+    FOREIGN KEY (to_region, to_code) REFERENCES warehouses (region, code)
+);
+```
+
+## Single-column keys
+
+### Allowed
+
+The referenced column, either operand order; the same column of another row.
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id")
+b = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o JOIN customers c ON o.customer_id = c.id")
+c = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o, customers c WHERE c.id = o.customer_id")
+d = SQL[tuple[int]]("--sql\nSELECT a.id FROM orders a JOIN orders b ON a.customer_id = b.customer_id AND a.id <> b.id")
+e = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o WHERE o.customer_id IN (SELECT id FROM customers)")
+f = SQL[tuple[int]]("--sql\nSELECT v.customer_id FROM vip v JOIN customers c ON c.id = v.customer_id")
+g = SQL[tuple[int]]("--sql\nSELECT n.vip_id FROM vip_notes n JOIN vip v ON v.customer_id = n.vip_id")
+```
+
+Self-reference: the manager's id, another employee's manager, and the row's own id.
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int]]("--sql\nSELECT e.id FROM employees e JOIN employees m ON m.id = e.manager_id")
+b = SQL[tuple[int]]("--sql\nSELECT e.id FROM employees e JOIN employees p ON p.manager_id = e.manager_id")
+c = SQL[tuple[int]]("--sql\nSELECT e.id FROM employees e WHERE e.manager_id = e.id")
+```
+
+Two foreign keys referencing the same column (siblings):
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o JOIN vip v ON v.customer_id = o.customer_id")
+b = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o JOIN vip v USING (customer_id)")
+```
+
+### Reported
+
+```python
+from sqlty import SQL
+
+# error: [foreign-key-mismatch] "orders.customer_id references customers.id, not products.id"
+a = SQL[tuple[str]]("--sql\nSELECT p.name FROM orders o JOIN products p ON p.id = o.customer_id")
+# error: [foreign-key-mismatch] "orders.customer_id references customers.id, not products.id"
+b = SQL[tuple[str]]("--sql\nSELECT p.name FROM orders o JOIN products p ON o.customer_id = p.id")
+# error: [foreign-key-mismatch] "orders.customer_id references customers.id, not orders.id"
+c = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o WHERE o.customer_id <> o.id")
+# error: [foreign-key-mismatch] "orders.customer_id references customers.id, not orders.total"
+d = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o WHERE o.customer_id = o.total")
+# error: [foreign-key-mismatch] "orders.customer_id references customers.id, not products.id"
+e = SQL[tuple[int]]("--sql\nSELECT 1 FROM orders o JOIN products p ON p.id IN (o.customer_id, 3)")
+# error: [foreign-key-mismatch] "orders.customer_id references customers.id, not products.id"
+f = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o WHERE o.customer_id IN (SELECT id FROM products)")
+# error: [foreign-key-mismatch] "employees.manager_id references employees.id, not orders.id"
+g = SQL[tuple[int]]("--sql\nSELECT 1 FROM employees e JOIN orders o ON o.id = e.manager_id")
+# error: [foreign-key-mismatch] "orders.customer_id references customers.id, not products.id"
+h = SQL[tuple[int]]("--sql\nSELECT 1 FROM orders o JOIN products p ON NOT (o.customer_id = p.id)")
+# error: [foreign-key-mismatch] "orders.customer_id references customers.id, not products.id"
+i = SQL[tuple[int]]("--sql\nSELECT 1 FROM orders o, products p WHERE o.total > 1 OR o.customer_id = p.id")
+# error: [foreign-key-mismatch] "orders.customer_id references customers.id, not products.id"
+j = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o JOIN products p ON o.id = p.id GROUP BY o.id, o.customer_id, p.id HAVING o.customer_id = p.id")
+```
+
+Only the referenced column, not the column it references in turn:
+
+```python
+from sqlty import SQL
+
+# error: [foreign-key-mismatch] "vip_notes.vip_id references vip.customer_id, not customers.id"
+a = SQL[tuple[int]]("--sql\nSELECT n.vip_id FROM vip_notes n JOIN customers c ON c.id = n.vip_id")
+```
+
+Both sides hold a foreign key: each side is judged, the first failing one is reported.
+
+```python
+from sqlty import SQL
+
+# error: [foreign-key-mismatch] "stock.product_id references products.id, not orders.customer_id"
+a = SQL[tuple[int]]("--sql\nSELECT 1 FROM stock s JOIN orders o ON s.product_id = o.customer_id")
+```
+
+## Composite keys
+
+### Allowed
+
+Every column with its own referenced column, of one row, in any order, with `AND` and any
+other conditions; `USING`; the same key of another row.
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[str]]("--sql\nSELECT w.code FROM stock s JOIN warehouses w ON w.region = s.region AND w.code = s.code")
+b = SQL[tuple[str]]("--sql\nSELECT w.code FROM stock s JOIN warehouses w ON s.code = w.code AND s.region = w.region AND s.product_id = 3")
+c = SQL[tuple[str]]("--sql\nSELECT code FROM stock JOIN warehouses USING (region, code)")
+d = SQL[tuple[str]]("--sql\nSELECT a.code FROM stock a JOIN stock b ON a.region = b.region AND a.code = b.code")
+e = SQL[tuple[int]]("--sql\nSELECT s.id FROM shipments s JOIN warehouses w ON w.region = s.to_region AND w.code = s.to_code")
+f = SQL[tuple[int]]("--sql\nSELECT s.id FROM shipments s, warehouses w WHERE (s.from_region, s.from_code) = (w.region, w.code)")
+g = SQL[tuple[int]]("--sql\nSELECT s.id FROM shipments s WHERE (s.from_region, s.from_code) IN (SELECT region, code FROM warehouses)")
+```
+
+### Reported
+
+Columns swapped:
+
+```python
+from sqlty import SQL
+
+# error: [foreign-key-mismatch] "stock.region references warehouses.region, not warehouses.code"
+# error: [foreign-key-mismatch] "stock.code references warehouses.code, not warehouses.region"
+a = SQL[tuple[str]]("--sql\nSELECT w.code FROM stock s JOIN warehouses w ON w.code = s.region AND w.region = s.code")
+```
+
+Pairs right, rows different:
+
+```python
+from sqlty import SQL
+
+# error: [foreign-key-mismatch] "stock (region, code) references one warehouses row, compared with a.region and b.code"
+a = SQL[tuple[str]]("--sql\nSELECT a.code FROM stock s, warehouses a, warehouses b WHERE s.region = a.region AND s.code = b.code")
+```
+
+Columns of two foreign keys mixed:
+
+```python
+from sqlty import SQL
+
+# error: [foreign-key-mismatch] "shipments (from_region, from_code) and (to_region, to_code) mixed: from_region = w.region, to_code = w.code"
+a = SQL[tuple[int]]("--sql\nSELECT s.id FROM shipments s JOIN warehouses w ON w.region = s.from_region AND w.code = s.to_code")
+```
+
+Only part of the key compared:
+
+```python
+from sqlty import SQL
+
+# error: [foreign-key-mismatch] "stock (region, code) references warehouses (region, code), compared with w on region only"
+a = SQL[tuple[str]]("--sql\nSELECT w.code FROM stock s JOIN warehouses w ON w.region = s.region")
+# error: [foreign-key-mismatch] "stock (region, code) references warehouses (region, code), compared with w on region only"
+# error: [foreign-key-mismatch] "stock (region, code) references warehouses (region, code), compared with w on code only"
+b = SQL[tuple[str]]("--sql\nSELECT w.code FROM stock s JOIN warehouses w ON w.region = s.region OR w.code = s.code")
+```
+
+## Tuples with `IN`
+
+Row values pair up by position, in `IN` lists and in `IN` subqueries, `NOT IN` too.
+
+### Allowed
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int]]("--sql\nSELECT 1 FROM stock s WHERE (s.region, s.code) IN (SELECT region, code FROM warehouses)")
+b = SQL[tuple[int]]("--sql\nSELECT 1 FROM stock s WHERE (s.region, s.code) NOT IN (SELECT w.region, w.code FROM warehouses w)")
+c = SQL[tuple[int]]("--sql\nSELECT 1 FROM stock s JOIN warehouses w ON (s.region, s.code) IN ((w.region, w.code), ('eu', 'a'))")
+d = SQL[tuple[int]]("--sql\nSELECT 1 FROM stock s WHERE (s.region, s.code, s.product_id) IN (SELECT region, code, 1 FROM warehouses)")
+e = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o WHERE (o.customer_id, o.total) IN (SELECT id, 10 FROM customers)")
+f = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o WHERE (o.customer_id, o.id) IN (SELECT customer_id, id FROM orders)")
+g = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o WHERE (o.customer_id) IN (SELECT id FROM customers)")
+h = SQL[tuple[int]]("--sql\nSELECT 1 FROM stock s WHERE (s.region, s.code) IN (('eu', 'a'), ('us', 'b'))")
+i = SQL[tuple[int]]("--sql\nSELECT 1 FROM stock s, warehouses w WHERE (s.region, s.code) IN (SELECT w.region, w.code FROM products)")
+```
+
+Siblings: both keys reference `warehouses (region, code)`.
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int]]("--sql\nSELECT 1 FROM shipments s WHERE (s.from_region, s.from_code) IN (SELECT to_region, to_code FROM shipments)")
+```
+
+### Reported
+
+```python
+from sqlty import SQL
+
+# error: [foreign-key-mismatch] "stock.region references warehouses.region, not warehouses.code"
+# error: [foreign-key-mismatch] "stock.code references warehouses.code, not warehouses.region"
+a = SQL[tuple[int]]("--sql\nSELECT 1 FROM stock s WHERE (s.region, s.code) IN (SELECT code, region FROM warehouses)")
+# error: [foreign-key-mismatch] "orders.customer_id references customers.id, not products.id"
+b = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o WHERE (o.customer_id, o.total) IN (SELECT id, 10 FROM products)")
+# error: [foreign-key-mismatch] "orders.customer_id references customers.id, not products.id"
+c = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o, products p WHERE (o.id, o.customer_id) NOT IN ((1, p.id))")
+# error: [foreign-key-mismatch] "stock (region, code) references one warehouses row, compared with a.region and b.code"
+d = SQL[tuple[int]]("--sql\nSELECT 1 FROM stock s, warehouses a, warehouses b WHERE (s.region, s.code) IN ((a.region, b.code))")
+# error: [foreign-key-mismatch] "shipments (from_region, from_code) and (to_region, to_code) mixed: from_region = warehouses.region, to_code = warehouses.code"
+e = SQL[tuple[int]]("--sql\nSELECT s.id FROM shipments s WHERE (s.from_region, s.to_code) IN (SELECT region, code FROM warehouses)")
+```
+
+Only part of the key in the tuple:
+
+```python
+from sqlty import SQL
+
+# error: [foreign-key-mismatch] "stock (region, code) references warehouses (region, code), compared with warehouses on region only"
+a = SQL[tuple[int]]("--sql\nSELECT 1 FROM stock s WHERE (s.region, s.product_id) IN (SELECT region, 1 FROM warehouses)")
+```
+
+## Not judged
+
+Neither side has a foreign key, constants, parameters, CTEs and derived tables.
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int]]("--sql\nSELECT 1 FROM orders o JOIN products p ON p.id = o.id")
+b = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o WHERE o.customer_id = 3")
+c = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o WHERE o.customer_id = :customer")
+d = SQL[tuple[int]]("--sql\nWITH x AS (SELECT customer_id FROM orders) SELECT 1 FROM x JOIN products p ON p.id = x.customer_id")
+e = SQL[tuple[int]]("--sql\nSELECT 1 FROM (SELECT customer_id FROM orders) o JOIN products p ON p.id = o.customer_id")
+f = SQL[tuple[int]]("--sql\nSELECT s.id FROM shipments s WHERE s.from_region = 'eu'")
+g = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o WHERE o.customer_id IN (SELECT id FROM products UNION SELECT id FROM customers)")
+h = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o WHERE o.customer_id IN (SELECT * FROM products)")
+```
+
+Neither are row values of different lengths, which the database rejects.
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int]]("--sql\nSELECT 1 FROM stock s, warehouses w WHERE (s.region, s.code) = (w.region)")
+b = SQL[tuple[int]]("--sql\nSELECT 1 FROM stock s, warehouses w WHERE (s.region, s.code) = (w.region, w.code, 1)")
+c = SQL[tuple[int]]("--sql\nSELECT 1 FROM stock s WHERE (s.region, s.code) IN (SELECT region FROM warehouses)")
+```
+
+## Dialects
+
+Foreign keys come from the catalog, so every way a dialect declares one counts.
+
+### PostgreSQL: `ALTER TABLE`, quoted names, `NOT VALID`
+
+`schema.sql`:
+
+```sql
+CREATE TABLE "Customers" (id INTEGER PRIMARY KEY);
+CREATE TABLE products (id INTEGER PRIMARY KEY);
+CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER, product_id INTEGER);
+ALTER TABLE orders ADD CONSTRAINT orders_customer FOREIGN KEY (customer_id) REFERENCES "Customers" (id);
+ALTER TABLE orders ADD CONSTRAINT orders_product FOREIGN KEY (product_id) REFERENCES products (id) NOT VALID;
+```
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+stale-type = "ignore"
+narrow-type = "ignore"
+```
+
+A `NOT VALID` key is still declared and meant to hold, so it is judged too.
+
+```python
+from sqlty import SQL
+
+# error: [foreign-key-mismatch] "orders.customer_id references Customers.id, not products.id"
+a = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o JOIN products p ON p.id = o.customer_id")
+# error: [foreign-key-mismatch] "orders.product_id references products.id, not Customers.id"
+b = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o JOIN \"Customers\" c ON c.id = o.product_id")
+```
+
+### SQLite: `REFERENCES` without a column
+
+The primary key of the referenced table, composite included.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE warehouses (region TEXT, code TEXT, PRIMARY KEY (region, code));
+CREATE TABLE stock (region TEXT, code TEXT, FOREIGN KEY (region, code) REFERENCES warehouses);
+```
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+stale-type = "ignore"
+narrow-type = "ignore"
+```
+
+```python
+from sqlty import SQL
+
+# error: [foreign-key-mismatch] "stock.region references warehouses.region, not warehouses.code"
+# error: [foreign-key-mismatch] "stock.code references warehouses.code, not warehouses.region"
+a = SQL[tuple[str]]("--sql\nSELECT w.code FROM stock s JOIN warehouses w ON w.code = s.region AND w.region = s.code")
+```
+
+### MySQL: only InnoDB keys
+
+MySQL parses and ignores the foreign keys of other engines.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE customers (id INT PRIMARY KEY) ENGINE = InnoDB;
+CREATE TABLE products (id INT PRIMARY KEY) ENGINE = InnoDB;
+CREATE TABLE orders (id INT PRIMARY KEY, customer_id INT, FOREIGN KEY (customer_id) REFERENCES customers (id)) ENGINE = InnoDB;
+CREATE TABLE archive (id INT PRIMARY KEY, customer_id INT, FOREIGN KEY (customer_id) REFERENCES customers (id)) ENGINE = MyISAM;
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+stale-type = "ignore"
+narrow-type = "ignore"
+```
+
+```python
+from sqlty import SQL
+
+# error: [foreign-key-mismatch] "orders.customer_id references customers.id, not products.id"
+a = SQL[tuple[int]]("-- sql\nSELECT o.id FROM orders o JOIN products p ON p.id = o.customer_id")
+# error:
+b = SQL[tuple[int]]("-- sql\nSELECT a.id FROM archive a JOIN products p ON p.id = a.customer_id")
+```

@@ -87,6 +87,8 @@ pub struct SchemaColumn {
     /// Part of the table's primary key, which PostgreSQL lets a grouped query select
     /// the table's other columns by.
     pub primary_key: bool,
+    /// Part of a foreign key the table declares.
+    pub(crate) foreign_key: bool,
     /// The labels of the enum the column has, `None` for other types.
     pub allowed_values: Option<Arc<[String]>>,
     /// The values of a `Literal` `python_type`, as data.
@@ -154,6 +156,8 @@ struct TableRelation {
     /// The statements a `BEFORE` row trigger fires for.
     row_triggers: RowEvents,
     foreign_keys: Vec<ForeignKey>,
+    /// Every foreign key declared, `NOT VALID`, deferrable and `NOT ENFORCED` ones included.
+    declared_foreign_keys: Vec<ForeignKey>,
     /// Columns of each `UNIQUE` constraint or unique index.
     unique: Vec<Vec<String>>,
     row_security: bool,
@@ -355,6 +359,13 @@ impl Catalog {
         keys.iter().filter(|fk| {
             matches!(self.relations.get(fk.table.as_str()), Some(Relation::Table(target)) if !target.row_security)
         })
+    }
+
+    /// The catalog key of the table `name` and every foreign key it declares, whether or
+    /// not it holds for every row.
+    pub(crate) fn declared_foreign_keys(&self, name: &str) -> Option<(&str, &[ForeignKey])> {
+        self.table_entry(name)
+            .map(|(key, table)| (key, table.declared_foreign_keys.as_slice()))
     }
 
     /// The keys of the table `name`: its primary key, then each `UNIQUE` constraint or
