@@ -382,3 +382,15 @@ def test_edges(expression: str) -> None:
 def test_generated_compositions(source: str) -> None:
     if parses(source):
         same(source)
+
+
+def test_a_composition_reads_an_aliased_module_and_starred_arguments() -> None:
+    source = 'import psycopg.sql as s\nrun(s.SQL("SELECT 1"))\nrun(s.SQL(*parts))\n'
+    rendered = rendered_compositions(source, sys.version_info[:2])
+    assert [text for _, _, text in rendered or []] == ["SELECT 1", "unchecked"]
+
+
+def test_a_composition_needs_no_psycopg(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "psycopg", None)
+    source = 'from psycopg import sql\nrun(sql.SQL("SELECT 1"))\n'
+    assert rendered_compositions(source, sys.version_info[:2]) == [(28, True, "SELECT 1")]

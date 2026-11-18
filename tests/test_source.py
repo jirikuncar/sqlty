@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import ast
 import collections
+import sys
 import tokenize
 
 import pytest
 
 from sqlty._cli import main
+from sqlty._core import module_ignores, query_sites
 from sqlty._source import ParsedSource
 from sqlty.core import check_source
 
@@ -112,6 +114,21 @@ def test_marker_free_file_is_neither_parsed_nor_tokenized(parses, tokenized):
     assert check_source(PLAIN) == []
     assert not parses
     assert not tokenized
+
+
+@pytest.mark.parametrize(
+    "source", ['q = "-" "-sql\\nSELECT 1"', 'q = ("-"  # split\n     "-sql\\nSELECT 1")']
+)
+def test_marker_split_over_literals_and_comments_is_found(source: str) -> None:
+    assert query_sites(source) == [(1, "query", "--sql\nSELECT 1")]
+
+
+def test_rust_reads_ignore_comments_as_tokenize_does() -> None:
+    text = "q = 1  # sqlty: ignore[select-star]\nr = 2  # sqlty: ignore\n"
+    assert module_ignores(text, sys.version_info[:2]) == [
+        (1, ["select-star"], 7, 35),
+        (2, None, 43, 58),
+    ]
 
 
 def test_dashes_in_wide_comments_are_skipped_quickly(parses, tokenized):
