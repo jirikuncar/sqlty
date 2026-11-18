@@ -94,6 +94,10 @@ pub fn expression(source: &str) -> Option<Parsed<ModExpression>> {
 
 /// The value of a string literal of `source` as `ast` reads it, a newline in the source
 /// (`\r\n` or `\r`) as `\n`, where ruff keeps it as written.
+#[expect(
+    clippy::expect_used,
+    reason = "a literal of a parsed source parses alone"
+)]
 pub fn text(literal: &ExprStringLiteral, source: &str) -> String {
     let written = &source[literal.range()];
     if !written.contains('\r') {

@@ -766,10 +766,7 @@ impl Workspace {
         if !named {
             return Ok(Vec::new());
         }
-        let format = settings
-            .query_format
-            .parse::<queries::Format>()
-            .expect("query-format is validated");
+        let format = settings.query_format;
         let checker = Checker::of(&settings, None);
         let name = path
             .file_stem()
@@ -784,10 +781,7 @@ impl Workspace {
     /// `sqlty check -v` prints them.
     pub fn query_types(&mut self, path: &Path, text: &str) -> Result<Vec<String>, String> {
         let settings = self.settings(path)?;
-        let format = settings
-            .query_format
-            .parse::<queries::Format>()
-            .expect("query-format is validated");
+        let format = settings.query_format;
         let name = path
             .file_stem()
             .map(|stem| stem.to_string_lossy().into_owned())
@@ -918,6 +912,10 @@ pub fn par_map<T: Sync, R: Send>(items: &[T], work: impl Fn(&T) -> R + Sync) -> 
 }
 
 /// The threads that parse and check modules, with stacks above the analyzer's red zone.
+#[expect(
+    clippy::expect_used,
+    reason = "a check cannot go on without its threads"
+)]
 fn pool() -> &'static rayon::ThreadPool {
     static POOL: std::sync::OnceLock<rayon::ThreadPool> = std::sync::OnceLock::new();
     POOL.get_or_init(|| {

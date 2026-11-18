@@ -1,5 +1,6 @@
 allow-panic-in-tests = true
 allow-unwrap-in-tests = true
+allow-expect-in-tests = true
 
 # The engine reads only what the host hands it: no files, processes or network.
 disallowed-methods = [
