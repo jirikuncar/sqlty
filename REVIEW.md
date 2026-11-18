@@ -45,10 +45,10 @@ Style, naming and refactoring suggestions are Nit at most.
   triple-quoted f-/t-strings, deep nesting, huge files, `SQL[...]` behind
   aliases and re-exports, every dialect the code path claims to support.
 - **No panics in the engine.** No `unwrap`, `expect`, indexing or slicing that
-  input can make fail, outside tests. `check::module` wraps diagnostics in
-  `catch_unwind` and reports `internal-error`, but `Source::new` parsing is
-  outside it, and wasm32 is `panic=abort`: there a panic kills the playground and
-  VS Code web. Prefer `Option`/`Result` combinators.
+  input can make fail, outside tests. Only `check::module` (diagnostics of a
+  parsed module) turns a panic into `internal-error`; parsing, fixes, rewrite,
+  strip, completion and hover do not, and wasm32 is `panic=abort`, so there a
+  panic kills the playground and VS Code web. Prefer `Option`/`Result` combinators.
 - **Parity.** A behavior change lands in every host that runs it (`sqlty-cli`,
   `sqlty-project`, `sqlty-lsp`, `sqlty-wasm`, `editors/vscode`, the playground
   settings it reads) and, while `SQLTY_AST=python` exists, in the Python passes.
@@ -77,10 +77,11 @@ Style, naming and refactoring suggestions are Nit at most.
   copying setup.
 - 100% coverage: Python `fail_under = 100`, Rust gated on an empty
   `cargo llvm-cov report --show-missing-lines` list (nightly). Cover lines with
-  real tests, not `#[coverage(off)]` (Debug impls only) or Hypothesis luck (the
+  real tests, not `#[coverage(off)]` (test modules and Debug impls only) or Hypothesis luck (the
   coverage profile runs explicit examples only). Restructure dead branches: a `?`
   alone on a line or an unreachable `Err` arm counts as missed.
-- No `pytest.importorskip`, no new skips or xfails, no wall-time assertions outside
+- No `pytest.importorskip`, no skips or xfails beyond what AGENTS.md
+  "Running tests" allows, no wall-time assertions outside
   `-m timing`. Hypothesis strategies are built once (`functools.cache`), not per
   example.
 - Snapshots (`inline-snapshot`, `make update-mdtest`) are read, not trusted: a
@@ -103,11 +104,9 @@ Style, naming and refactoring suggestions are Nit at most.
   tables (see AGENTS.md "Completion budget").
 - **Performance claims** come with numbers from `make bench-ci`, `bench-rust` or a
   script in the PR, against the merge base, same machine, and identical output.
-- **Public surface**: new API in `sqlty.core.__all__`, `_core.pyi` and
+- **Public surface**: new API in `sqlty.core.__all__` and
   `docs/reference/python-api.md`; new config keys in `KEY_DOCS` and the playground
   and VS Code settings; generated docs current (`make generate-docs`).
-- **Git hygiene**: named paths staged, no stray target dirs (extra cargo targets go
-  under `rust/target/`), no force push, commits carry the AI trailer.
 
 ## Do not report
 

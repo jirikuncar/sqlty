@@ -40,6 +40,8 @@ bench-result.json
 # Claude Code local settings; the review skill is shared
 .claude/*
 !.claude/skills/
+.claude/skills/*
+!.claude/skills/review/
 
 # Hypothesis example database (tests/test_fuzz.py)
 .hypothesis/

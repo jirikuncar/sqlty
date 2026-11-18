@@ -11,7 +11,8 @@ author's summary of it: an agent handed a conclusion tends to confirm it.
 ## 1. Scope
 
 ```bash
-git fetch origin +refs/heads/main:refs/remotes/origin/main
+git fetch origin +refs/heads/main:refs/remotes/origin/main "+refs/heads/$branch:refs/remotes/origin/$branch"
+git switch "$branch"
 base=$(git merge-base origin/main HEAD)
 git log --oneline "$base"..HEAD
 git diff --stat "$base"
@@ -56,6 +57,5 @@ Important | Nit | Unverified  path:line  one-sentence defect
   Fix:    the smallest change, reusing existing code where possible
 ```
 
-Severity follows REVIEW.md. A finding you could not reproduce is Unverified, not
-Important. Say what you checked and found fine in one line, so the author knows the
-coverage of the review. Five Nits at most.
+Severity and limits follow REVIEW.md. Say in one line what you checked and found
+fine, so the author knows what the review covered.
