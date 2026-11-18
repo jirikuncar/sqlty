@@ -1,15 +1,15 @@
-// The docs playground's engine (docs/assets/playground/engine.js) on the WebAssembly build:
-// `make playground`, then `node --test tests/playground.test.mjs`.
+// The engine of the docs playground and @sqlty/wasm (npm/wasm/engine.js) on the WebAssembly
+// build: `make playground`, then `node --test tests/playground.test.mjs`.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
 
-import { load } from "../docs/assets/playground/engine.js";
+import { load } from "../npm/wasm/engine.js";
 import { decode, encode } from "../docs/assets/playground/share.js";
 import { fold, unfold } from "../docs/assets/playground/steps.js";
 
-const wasm = await readFile(new URL("../docs/assets/playground/sqlty_wasm.wasm", import.meta.url));
+const wasm = await readFile(new URL("../npm/wasm/sqlty_wasm.wasm", import.meta.url));
 const ask = await load(wasm);
 const schema = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);";
 

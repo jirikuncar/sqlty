@@ -69,7 +69,7 @@ struct Request {
     source: String,
     #[serde(default)]
     schema: String,
-    #[serde(default)]
+    #[serde(default = "postgres")]
     dialect: String,
     #[serde(default)]
     offset: usize,
@@ -105,7 +105,12 @@ struct Request {
     panic: Option<String>,
 }
 
-/// Answer a JSON request about the Python `source`, read against `schema` in `dialect`.
+fn postgres() -> String {
+    "postgres".to_string()
+}
+
+/// Answer a JSON request about the Python `source`, read against `schema` in `dialect`
+/// (`postgres` by default).
 ///
 /// - `analyze`: `diagnostics` (what `sqlty check` reports for a module by itself, each
 ///   with the `fix` edits of its quick fix), `queries` (row type, columns

@@ -218,7 +218,7 @@ rust/
     │       └── fixer.rs      # check --fix
     ├── sqlty-project/        # A project read from disk, as sqlty server checks it
     ├── sqlty-cli/            # The sqlty commands, run from sqlty._cli
-    ├── sqlty-wasm/           # The docs playground's engine, built by `make playground`
+    ├── sqlty-wasm/           # The engine of @sqlty/wasm (npm/wasm) and the docs playground, built by `make wasm`
     └── sqlty-ext/            # PyO3 module sqlty._core (the maturin manifest)
         └── src/lib.rs        # The sqlty._core functions
 ```

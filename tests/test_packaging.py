@@ -250,6 +250,18 @@ def test_binary_targets_agree() -> None:
     assert main["repository"]["url"] == "git+https://github.com/jirikuncar/sqlty.git"
 
 
+def test_wasm_package_ships_what_it_exports() -> None:
+    package = ROOT / "npm" / "wasm"
+    manifest = json.loads((package / "package.json").read_text())
+    exported = {target.removeprefix("./") for target in manifest["exports"].values()}
+
+    assert manifest["repository"]["url"] == "git+https://github.com/jirikuncar/sqlty.git"
+    assert exported - {"package.json"} <= set(manifest["files"])
+    assert {manifest["types"].removeprefix("./")} <= set(manifest["files"])
+    for name in set(manifest["files"]) - {"sqlty_wasm.wasm"}:
+        assert (package / name).is_file(), name
+
+
 def test_npm_runs_the_binary_of_the_platform(tmp_path: Path) -> None:
     package_binaries = _package_binaries()
     for target, (platform, _) in package_binaries.TARGETS.items():

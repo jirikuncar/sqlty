@@ -80,6 +80,12 @@ fn outside_a_query_nothing_completes() {
 }
 
 #[test]
+fn the_dialect_is_postgres_by_default() {
+    let answer = ask(&json!({"op": "analyze", "source": "q = \"--sql\\nSELECT 1::text AS n\""}));
+    assert_eq!(answer["queries"][0]["row_type"], "tuple[str]");
+}
+
+#[test]
 fn an_unknown_dialect_is_an_error() {
     let answer = ask(&json!({"op": "analyze", "source": "", "dialect": "postgress"}));
     assert!(answer["error"].as_str().unwrap().contains("postgress"));

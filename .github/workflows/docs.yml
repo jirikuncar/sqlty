@@ -6,6 +6,7 @@ on:
     paths:
       - "docs/**"
       - "examples/**"
+      - "npm/wasm/**"
       - "scripts/generate_playground_examples.py"
       - "scripts/vendor_assets.py"
       - "scripts/offline.py"
@@ -24,6 +25,7 @@ on:
     paths:
       - "docs/**"
       - "examples/**"
+      - "npm/wasm/**"
       - "scripts/generate_playground_examples.py"
       - "scripts/vendor_assets.py"
       - "scripts/offline.py"

@@ -1,5 +1,5 @@
-// The sqlty engine compiled to WebAssembly (rust/crates/sqlty-wasm), with no DOM: the
-// playground and tests/playground.test.mjs both load it.
+// The sqlty engine compiled to WebAssembly (rust/crates/sqlty-wasm), started from the bytes
+// of `sqlty_wasm.wasm`: the docs playground, the VS Code extension and `index.js` load it.
 //
 // A panic traps and leaves the instance unusable: a spare instance answers the request again
 // with what it panicked with, which `analyze` reports as `internal-error`. The browser
