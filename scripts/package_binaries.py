@@ -1,7 +1,7 @@
 """Package the native ``sqlty`` executables of a release for npm and Homebrew.
 
-    python scripts/package_binaries.py npm 0.7.0 dist/bin dist/npm
-    python scripts/package_binaries.py homebrew 0.7.0 dist/tarballs > sqlty.rb
+    python scripts/package_binaries.py npm 0.7.1 dist/bin dist/npm
+    python scripts/package_binaries.py homebrew 0.7.1 dist/tarballs > sqlty.rb
 
 ``dist/bin/<target>/`` holds the executable built for each Rust target, and
 ``dist/tarballs/`` the ``npm pack`` tarballs of the platform packages: the formula

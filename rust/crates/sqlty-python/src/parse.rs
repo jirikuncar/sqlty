@@ -54,16 +54,18 @@ const FUTURES: [&str; 9] = [
 
 /// The module `source`, when `ast.parse` reads it the same.
 pub fn module(source: &str) -> Option<Parsed<ModModule>> {
-    let parsed = guarded(source, parse_module)?;
-    if !within_limits(&parsed)
-        || has_huge_int(&parsed, source)
-        || !known_futures(&parsed.syntax().body)
-    {
-        return None;
-    }
-    let mut depth = Depth::default();
-    depth.visit_body(&parsed.syntax().body);
-    (!depth.exceeded).then_some(parsed)
+    guarded(source, |text| {
+        let parsed = parse_module(text).ok()?;
+        if !within_limits(&parsed)
+            || has_huge_int(&parsed, text)
+            || !known_futures(&parsed.syntax().body)
+        {
+            return None;
+        }
+        let mut depth = Depth::default();
+        depth.visit_body(&parsed.syntax().body);
+        (!depth.exceeded).then_some(parsed)
+    })
 }
 
 /// Whether the module `source` holds no syntax newer than Python 3.14, which has no lazy
@@ -71,8 +73,13 @@ pub fn module(source: &str) -> Option<Parsed<ModModule>> {
 pub fn reads_on_314(source: &str) -> bool {
     let options =
         ParseOptions::from(Mode::Module).with_target_version(ruff_python_ast::PythonVersion::PY314);
-    guarded(source, |text| Ok::<_, ()>(parse_unchecked(text, options)))
-        .is_some_and(|parsed| parsed.unsupported_syntax_errors().is_empty())
+    guarded(source, |text| {
+        parse_unchecked(text, options)
+            .unsupported_syntax_errors()
+            .is_empty()
+            .then_some(())
+    })
+    .is_some()
 }
 
 /// The expression `source`, when `ast.parse(source, mode="eval")` reads it the same.
@@ -83,13 +90,15 @@ pub fn expression(source: &str) -> Option<Parsed<ModExpression>> {
     {
         return None;
     }
-    let parsed = guarded(source, parse_expression)?;
-    if !within_limits(&parsed) || has_huge_int(&parsed, source) {
-        return None;
-    }
-    let mut depth = Depth::default();
-    depth.visit_expr(&parsed.syntax().body);
-    (!depth.exceeded).then_some(parsed)
+    guarded(source, |text| {
+        let parsed = parse_expression(text).ok()?;
+        if !within_limits(&parsed) || has_huge_int(&parsed, text) {
+            return None;
+        }
+        let mut depth = Depth::default();
+        depth.visit_expr(&parsed.syntax().body);
+        (!depth.exceeded).then_some(parsed)
+    })
 }
 
 /// The value of a string literal of `source` as `ast` reads it, a newline in the source
@@ -113,10 +122,9 @@ pub fn text(literal: &ExprStringLiteral, source: &str) -> String {
         .to_string()
 }
 
-fn guarded<T: Send, E: Send>(
-    source: &str,
-    parse: impl FnOnce(&str) -> Result<T, E> + Send,
-) -> Option<T> {
+/// `parse(source)` on a stack that fits it. `parse` also checks and drops what it rejects
+/// there: freeing a deep tree recurses as deep as parsing it.
+fn guarded<T: Send>(source: &str, parse: impl FnOnce(&str) -> Option<T> + Send) -> Option<T> {
     if source.len() > MAX_LEN
         || source.starts_with('\u{feff}')
         || source.contains('\0')
@@ -125,7 +133,7 @@ fn guarded<T: Send, E: Send>(
         return None;
     }
     let stack = STACK_BASE + source.len() * STACK_PER_BYTE;
-    stacker::maybe_grow(stack, stack, || parse(source)).ok()
+    stacker::maybe_grow(stack, stack, || parse(source))
 }
 
 /// Whether `source` may spell a surrogate: `\ud800` to `\udfff`, or `\U0000d800` to `\U0000dfff`.
