@@ -725,6 +725,26 @@ mod tests {
     }
 
     #[test]
+    fn a_view_past_the_limits_counts_as_it_is_held() {
+        let copies = loader::MAX_SCHEMA_COLUMNS / crate::MAX_COLUMNS + 32;
+        let mut sql = wide("big", crate::MAX_COLUMNS);
+        for i in 0..copies {
+            sql += &format!("CREATE VIEW f{i} AS SELECT * FROM big;\n");
+        }
+        sql += "CREATE VIEW limited AS SELECT * FROM big;\n";
+        for i in 0..copies {
+            sql += &format!("DROP VIEW f{i};\n");
+        }
+        // An unknown table holds no columns: renamed over the view, it frees the view's one.
+        sql += "DROP TABLE big;\n";
+        sql += &wide("e", crate::MAX_COLUMNS + 1);
+        sql += "ALTER TABLE e RENAME TO limited;";
+        let (c, skipped) = load(&sql, "sqlite");
+        assert!(skipped.contains(&("limit", "public.limited".to_string())));
+        assert!(c.table("limited").is_none() && c.find("limited").is_some());
+    }
+
+    #[test]
     fn a_table_renamed_over_another_replaces_it() {
         let c = pg("CREATE TABLE a (x int); CREATE TABLE b (y int); ALTER TABLE a RENAME TO b;");
         assert_eq!(cols(&c, "b"), ["x:INT"]);
@@ -732,9 +752,10 @@ mod tests {
     }
 
     #[test]
-    fn a_chain_written_backwards_stops_after_max_retries() {
-        // Each pass creates one more table: n passes try about n * n / 2 statements.
-        let n = 2 * (loader::MAX_RETRIES as f64).sqrt() as usize;
+    fn a_chain_written_backwards_stops_after_max_retried() {
+        // Each pass creates one more table: n passes try about n * n / 2 statements of
+        // some 30 bytes.
+        let n = 2 * (loader::MAX_RETRIED as f64 / 16.0).sqrt() as usize;
         let mut sql: String = (0..n)
             .map(|i| format!("CREATE TABLE t{i} (LIKE t{});\n", i + 1))
             .collect();

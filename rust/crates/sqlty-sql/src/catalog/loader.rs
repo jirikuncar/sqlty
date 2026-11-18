@@ -147,6 +147,8 @@ pub(super) enum Taint {
 pub(super) struct Op {
     pub(super) path: Rc<Vec<String>>,
     pub(super) kind: OpKind,
+    /// Bytes of the statement, which applying it takes time in proportion to.
+    pub(super) size: usize,
 }
 
 /// Why an `ALTER TABLE` operation did not apply.
@@ -196,8 +198,9 @@ pub(super) struct Loader {
 /// a short schema could otherwise fill memory.
 pub(super) const MAX_SCHEMA_COLUMNS: usize = 1 << 21;
 
-/// The most statements [`Loader::run`] tries again, in all passes.
-pub(super) const MAX_RETRIES: usize = 1 << 20;
+/// The most bytes of statements [`Loader::run`] tries again, in all passes, besides the
+/// schema's own length.
+pub(super) const MAX_RETRIED: usize = 1 << 24;
 
 /// The most columns the loader writes: each `ALTER` or index on a table resolves all its
 /// columns again, so a short schema could otherwise take minutes. Real ones write a few
@@ -299,7 +302,7 @@ impl Loader {
     /// Apply every op, retrying the ones whose dependencies are missing until a pass
     /// changes nothing; then give up on them, views last.
     pub(super) fn run(&mut self, mut pending: Vec<Op>) {
-        let mut retries = 0;
+        let mut retried = 0;
         loop {
             if self.exhausted() {
                 if !pending.is_empty() {
@@ -310,7 +313,7 @@ impl Loader {
             }
             let mut progress = false;
             let mut next = Vec::new();
-            retries += pending.len();
+            retried += pending.iter().map(|op| op.size).sum::<usize>();
             for op in pending {
                 if !self.exhausted() && self.apply(&op, false) {
                     progress = true;
@@ -323,8 +326,8 @@ impl Loader {
                 return;
             }
             // A pass may take one statement of a chain written backwards: past
-            // `MAX_RETRIES`, the rest count as stuck rather than take quadratic time.
-            if progress && retries <= MAX_RETRIES {
+            // `MAX_RETRIED`, the rest count as stuck rather than take quadratic time.
+            if progress && retried <= MAX_RETRIED + 2 * self.allowance {
                 continue;
             }
             // Stuck: nothing waits on anything that will appear. Give up on tables first
@@ -871,7 +874,7 @@ impl Loader {
             return;
         };
         if let Some(replaced) = self.relations.insert(to, moved) {
-            self.held -= replaced.width();
+            self.held = self.held.saturating_sub(replaced.width());
         }
     }
 
@@ -881,24 +884,21 @@ impl Loader {
         self.held = self
             .held
             .saturating_sub(self.relations.get(key).map_or(0, Rel::width));
-        if !self.too_wide(rel.width()) {
-            self.held += rel.width();
-            self.written += rel.width();
-            return rel;
-        }
-        match rel {
-            Rel::Table(_) => {
-                self.skipped.push(("limit", key.to_string()));
-                Rel::Table(RawTable {
+        let rel = if self.too_wide(rel.width()) {
+            self.skipped.push(("limit", key.to_string()));
+            match rel {
+                Rel::Table(_) => Rel::Table(RawTable {
                     unknown: true,
                     ..RawTable::default()
-                })
+                }),
+                Rel::View(_) => Rel::View(vec![Column::unknown("*")]),
             }
-            Rel::View(_) => {
-                self.skipped.push(("limit", key.to_string()));
-                Rel::View(vec![Column::unknown("*")])
-            }
-        }
+        } else {
+            rel
+        };
+        self.held += rel.width();
+        self.written += rel.width();
+        rel
     }
 
     /// Raise the limits by the columns `schema` could spell out, two bytes each as in

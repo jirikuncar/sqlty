@@ -1186,14 +1186,8 @@ mod tests {
 
     #[test]
     fn warns_about_a_schema_too_large_to_load() {
-        let columns: Vec<String> = (0..4096).map(|i| format!("c{i} int")).collect();
-        let indexes: String = (0..1024)
-            .map(|i| format!("CREATE UNIQUE INDEX i{i} ON big (c{i});\n"))
-            .collect();
-        let schema = format!(
-            "CREATE TABLE big ({});\n{indexes}CREATE TABLE later (a int);",
-            columns.join(", ")
-        );
+        let columns: Vec<String> = (0..=4096).map(|i| format!("c{i} int")).collect();
+        let schema = format!("CREATE TABLE wide ({});", columns.join(", "));
         let workspace = opened(&[
             (
                 "/repo/pyproject.toml",
@@ -1203,7 +1197,7 @@ mod tests {
         ]);
         assert_eq!(
             workspace.warnings(),
-            ["Schema is too large to load; ignored: CREATE TABLE later (a int) and later"]
+            ["Schema is too large to load; ignored: public.wide"]
         );
     }
 

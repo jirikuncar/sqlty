@@ -213,10 +213,7 @@ impl Analyzer<'_> {
                         AssignmentTarget::Tuple(columns) => columns.iter().collect(),
                     })
                     .filter_map(|column| column.0.last().and_then(|part| part.as_ident()))
-                    .map(|ident| {
-                        let key = quiet.column_key(&ident.value);
-                        (target.clone(), key)
-                    })
+                    .map(|ident| (target.clone(), fold(ident, self.dialect)))
                     .collect();
                 self.facts.with(learned.without(&set))
             }
@@ -350,7 +347,7 @@ impl Analyzer<'_> {
                         .last()
                         .and_then(|part| part.as_ident())
                         .filter(|_| non_null(quiet.nullability(&assignment.value, scope, &seen)))
-                        .map(|ident| ident.value.clone()),
+                        .map(|ident| fold(ident, self.dialect)),
                     AssignmentTarget::Tuple(_) => None,
                 })
                 .collect(),

@@ -87,6 +87,7 @@ pub(super) fn read_statements<'a>(
             let op = Op {
                 path: path.clone(),
                 kind,
+                size: stmt.size(),
             };
             if !loader.apply(&op, false) {
                 pending.push(op);

@@ -807,3 +807,17 @@ fn a_star_over_more_than_64_merging_joins_is_untyped() {
     );
     assert_eq!(infer_type(&natural(65), "postgres", Some(&schema)), None);
 }
+
+#[test]
+fn update_narrowing_folds_unquoted_set_columns() {
+    let schema = load_schema_with_skipped("CREATE TABLE t (name TEXT);", "postgres").0;
+    let infer = |sql: &str| infer_type(sql, "postgres", Some(&schema));
+    assert_eq!(
+        infer("UPDATE t SET Name = NULL WHERE name IS NOT NULL RETURNING name").as_deref(),
+        Some("tuple[str | None]")
+    );
+    assert_eq!(
+        infer("UPDATE t SET NAME = 'x' RETURNING name").as_deref(),
+        Some("tuple[str]")
+    );
+}
