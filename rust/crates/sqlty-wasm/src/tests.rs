@@ -246,6 +246,11 @@ fn settings_resolved_by_the_host_apply_with_their_types() {
         bad["error"],
         "[tool.sqlty.types]: `NOT A TYPE` is not a SQL type"
     );
+    let bad = ask(&json!({
+        "op": "analyze", "source": source, "dialect": "postgres",
+        "settings": {"rules": {"stale-rewrite": "loud"}},
+    }));
+    assert!(bad["error"].as_str().unwrap().contains("loud"), "{bad}");
 }
 
 #[test]
