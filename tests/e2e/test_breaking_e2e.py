@@ -491,15 +491,11 @@ def test_an_unchanged_schema_checks_no_query(
     cli: Cli, repo: Path, against: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import sqlty._check
-    import sqlty.core
     from sqlty._cli import main
 
     cli(["breaking", "--save", "../head.json"], {"cwd": repo})
     (repo.parent / "head.sql").write_text(NEW_SCHEMA)
     checked: list[str] = []
-    monkeypatch.setattr(
-        sqlty.core, "breaking_source", lambda source, **_: checked.append(source.text) or []
-    )
     monkeypatch.setattr(
         sqlty._check,
         "breaking_modules",
@@ -517,13 +513,13 @@ def test_an_unchanged_schema_checks_no_query(
 def test_a_snapshot_without_a_schema_checks_no_query(
     cli: Cli, repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import sqlty.core
+    import sqlty._check
     from sqlty._cli import main
 
     (repo / "pyproject.toml").write_text("[tool.sqlty]\n")
     cli(["breaking", "--save", "../head.json"], {"cwd": repo})
     (repo / "app" / "new.py").write_text(NEW_CODE)
-    monkeypatch.setattr(sqlty.core, "breaking_source", None)
+    monkeypatch.setattr(sqlty._check, "breaking_modules", lambda modules, _: modules)
     monkeypatch.chdir(repo)
 
     main(["breaking", "--against", "../head.json", "--quiet"])

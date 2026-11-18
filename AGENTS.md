@@ -417,13 +417,12 @@ They catch mistakes; review catches intent.
 src/sqlty/
 ├── __init__.py          # SQL[T] generic str subclass
 ├── core.py              # Public API over the Rust engine
-├── _check.py            # Python check passes of check_source: row types, parameters
+├── _check.py            # check_source and check over the Rust checker; module settings
 ├── _core.pyi            # Stub for sqlty._core (rust/crates/sqlty-ext/src/lib.rs)
-├── _type_extractor/     # Row types (TypedDict, dataclass, ...), read from source, never imported
 ├── _lint.py             # Lint rules: severity, diagnostics, RuleConfig
 ├── _decode.py           # Magic codec decoder
-├── _cli.py              # CLI parser; complete, breaking, server, and every command with SQLTY_AST=python
-├── _lsp_bridge.py       # Workspace of sqlty server with a breaking baseline or SQLTY_AST=python
+├── _cli.py              # CLI parser for complete, breaking and server
+├── _lsp_bridge.py       # Workspace of sqlty server with a breaking baseline
 └── magic.py             # Python codec registration
 rust/crates/             # Cargo workspace (root: rust/Cargo.toml)
 ├── sqlty-sql/           # analyzer/ (type inference), ddl; no PyO3

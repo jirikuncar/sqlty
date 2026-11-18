@@ -1,14 +1,12 @@
-"""Query variants read in Rust (``sqlty_python::variants``) against ``sqlty._variants``.
+"""Query variants read in Rust (``sqlty_python::variants``).
 
 Generated functions bind the parts of a query along ``if``, ``match``, loops and ``try``,
-call functions of the module and compose with ``psycopg.sql``; both must read the same
-variants with the same lines, or the same reason for leaving the query unchecked. Raise
-the number of generated examples with ``SQLTY_FUZZ_EXAMPLES``.
+call functions of the module and compose with ``psycopg.sql``. Raise the number of
+generated examples with ``SQLTY_FUZZ_EXAMPLES``.
 """
 
 from __future__ import annotations
 
-import ast
 import functools
 import sys
 
@@ -17,10 +15,8 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from sqlty._core import call_variants
-from sqlty._source import ParsedSource
-from sqlty._variants import Declared, Unchecked, _Walk, query_variants
 from tests.test_rust_check import RULES
-from tests.test_rust_index import compare
+from tests.test_rust_index import diagnosed
 from tests.test_rust_types import FUZZ, parses
 
 HEAD = """\
@@ -241,29 +237,10 @@ def modules(draw: st.DrawFn) -> str:
 
 
 def same(source: str, limit: int = 64) -> int:
-    """How many calls both read the variants of for ``source``; raises where they differ."""
-    rust = call_variants(source, sys.version_info[:2], limit)
-    assert rust is not None
-    parsed = ParsedSource(source)
-    python: list[tuple[int, list[tuple[str, list[int], bool]] | None, bool, str | None]] = []
-    for call in parsed.calls:
-        if not (isinstance(call.func, ast.Name) and call.args):
-            continue
-        found = query_variants(parsed, call, call.args[0], limit)
-        at = parsed.span(call.args[0])[0]
-        if isinstance(found, Unchecked):
-            python.append((at, None, found.composed, found.reason))
-        else:
-            variants = [(str(v.query), list(v.lines), isinstance(v.query, Declared)) for v in found]
-            python.append((at, variants, False, None))
-    python.sort(key=lambda found: found[0])
-    assert [at for at, *_ in rust] == [at for at, *_ in python]
-    covered = 0
-    for (at, read, *read_as), expected in zip(rust, python, strict=True):
-        if read:
-            assert (at, *read_as) == expected
-            covered += 1
-    return covered
+    """How many calls Rust reads the variants of for ``source``."""
+    found = call_variants(source, sys.version_info[:2], limit)
+    assert found is not None
+    return sum(bool(read) for _, read, *_ in found)
 
 
 CASES = {
@@ -359,15 +336,6 @@ def test_a_module_without_psycopg() -> None:
         same("from sqlty import SQL\ndef build(flag):\n    run(other(flag))\n    run('SELECT 1')\n")
         >= 1
     )
-
-
-def test_render_lets_an_error_outside_psycopg_through() -> None:
-    class Deep:
-        def as_string(self, context: object) -> str:
-            raise RecursionError
-
-    with pytest.raises(RecursionError):
-        _Walk(None).render(Deep())
 
 
 def test_limits() -> None:
@@ -530,4 +498,4 @@ def test_generated_checks(
     rules: dict[str, str] | None,
 ) -> None:
     if parses(list(modules.values())[-1]):
-        compare(modules, registered, rules=rules, variants=variants)
+        diagnosed(modules, registered, rules=rules, variants=variants)

@@ -1,5 +1,5 @@
-//! The scopes of a module and the classes its names and `self` attributes hold, as
-//! `sqlty._source._Scan` collects them, and the argument types `sqlty._params` reads from them.
+//! The scopes of a module, the classes its names and `self` attributes hold, and the
+//! argument types read from them.
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -258,8 +258,7 @@ pub struct Context<'a, 's> {
 }
 
 impl Context<'_, '_> {
-    /// The arguments a tuple or list literal, or a dict literal of string keys, passes, as
-    /// `sqlty._params.literal_params` reads them.
+    /// The arguments a tuple or list literal, or a dict literal of string keys, passes.
     pub fn literal_params(&self, arg: &Expr, stack: &[Scope]) -> Option<Vec<Param>> {
         let items = match arg {
             Expr::Tuple(tuple) => &tuple.elts,
@@ -294,7 +293,7 @@ impl Context<'_, '_> {
         )
     }
 
-    /// The type `expr` has where the source says so, as `sqlty._params.arg_type` reads it.
+    /// The type `expr` has where the source says so.
     pub fn arg_type(&self, expr: &Expr, stack: &[Scope]) -> Option<String> {
         let name = match expr {
             Expr::NoneLiteral(_) => "None",
@@ -365,7 +364,7 @@ impl Context<'_, '_> {
             .any(|&scope| self.scan.types.contains_key(&(scope, name)))
     }
 
-    /// The class a variable holds in `stack`, as `ParsedSource.type_of` reads it.
+    /// The class a variable holds in `stack`.
     pub fn type_of(&self, stack: &[Scope], name: &str) -> Option<String> {
         stack
             .iter()
@@ -391,7 +390,7 @@ impl Context<'_, '_> {
     }
 }
 
-/// The builtin class of a literal other than `None`, as `sqlty._source.literal_type` reads it.
+/// The builtin class of a literal other than `None`.
 fn literal_type(expr: &Expr) -> Option<&'static str> {
     let number = |number: &ast::ExprNumberLiteral| match number.value {
         Number::Int(_) => Some("int"),
@@ -414,7 +413,7 @@ fn literal_type(expr: &Expr) -> Option<&'static str> {
     }
 }
 
-/// `sqlty._params._class`: the type of an instance of the class spelled `name`, when it is
+/// The type of an instance of the class spelled `name`, when it is
 /// a known one.
 pub fn class_of(name: Option<String>, imported: &Table) -> Option<String> {
     {
@@ -499,7 +498,7 @@ pub fn qualified(name: Option<String>, imported: &Table) -> Option<String> {
     })
 }
 
-/// The dotted name an annotation or a called expression spells, as `_class_name` reads it.
+/// The dotted name an annotation or a called expression spells.
 fn class_name(expr: Option<&Expr>) -> Option<String> {
     match expr? {
         Expr::StringLiteral(text) => {

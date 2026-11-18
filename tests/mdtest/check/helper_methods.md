@@ -56,4 +56,8 @@ class Service:
         def later() -> None:
             # error: [column-type-mismatch]
             self.db.fetch_all("SELECT name FROM users", int)
+
+def outer(self: Service) -> None:
+    def inner() -> None:
+        self.db = Db()
 ```

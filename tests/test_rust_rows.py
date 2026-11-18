@@ -1,9 +1,7 @@
-"""Row checks in Rust (``sqlty_python::rows``) against the passes of ``sqlty._check``.
+"""Row checks in Rust (``sqlty_python::rows``).
 
-Generated modules name their row types in ``SQL[Row](...)`` calls over a small schema; both
-must report the same diagnostics, at the same places. The mdtests compare the same way when
-run with ``SQLTY_AST=compare``. Raise the number of generated examples with
-``SQLTY_FUZZ_EXAMPLES``.
+Generated modules name their row types in ``SQL[Row](...)`` calls over a small schema.
+Raise the number of generated examples with ``SQLTY_FUZZ_EXAMPLES``.
 """
 
 from __future__ import annotations
@@ -14,9 +12,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from sqlty import _check
-from sqlty._core import row_diagnostics, wrapped_queries
-from sqlty._source import ParsedSource
+from sqlty._core import row_diagnostics
 from tests.test_rust_types import CLASS_NAMES, FUZZ, IMPORTS, modules, parses
 
 SCHEMA = """
@@ -240,22 +236,14 @@ def fitted(draw: st.DrawFn) -> str:
     return "".join(out)
 
 
-def compare(
+def diagnosed(
     source: str,
     rules: dict[str, str] | None = None,
     coerce: frozenset[str] = frozenset(),
     import_style: str | None = None,
     module: str = "pkg.mod",
 ) -> int:
-    """How many diagnostics both report for ``source``; raises where they differ."""
-    found = [
-        q
-        for q in wrapped_queries(source, import_style=import_style)
-        if not q[1].startswith("tuple[")
-    ]
-    _check._compare_rows(  # noqa: SLF001
-        ParsedSource(source), found, "postgres", SCHEMA, rules, import_style, module, coerce
-    )
+    """How many diagnostics Rust reports for ``source``."""
     rust = row_diagnostics(
         source,
         version=sys.version_info[:2],
@@ -322,7 +310,7 @@ CASES = {
 
 @pytest.mark.parametrize("source", CASES.values(), ids=CASES.keys())
 def test_cases(source: str) -> None:
-    assert compare(HEAD + source) >= 1
+    assert diagnosed(HEAD + source) >= 1
 
 
 QUIET = {
@@ -335,7 +323,7 @@ QUIET = {
 
 @pytest.mark.parametrize("source", QUIET.values(), ids=QUIET.keys())
 def test_quiet_cases(source: str) -> None:
-    assert compare(HEAD + source) == 0
+    assert diagnosed(HEAD + source) == 0
 
 
 OBJECT = "json_build_object('a', id, 'b', name, 'c', ratio, 'd', flag)"
@@ -411,7 +399,7 @@ def test_json_shapes(shape: str) -> None:
     select = ", ".join(f"{shape} AS f{i}" for i in range(len(ANNOTATIONS)))
     query = f'q = SQL[Row]("--sql\\nSELECT {select} FROM t")\n'
     source = f"{DEFS}class Row(TypedDict):\n{fields}{query}"
-    assert compare(HEAD + source) >= 1
+    assert diagnosed(HEAD + source) >= 1
 
 
 def test_json_shapes_of_a_module_without_typing_names() -> None:
@@ -420,11 +408,11 @@ def test_json_shapes_of_a_module_without_typing_names() -> None:
         "class Row(typing.TypedDict):\n    v: Inner\n"
         "q = SQL[Row](\"--sql\\nSELECT json_build_object('a', id) AS v FROM t\")\n"
     )
-    assert compare(source) == 1
+    assert diagnosed(source) == 1
 
 
 def test_bare_wrapper_with_a_module_import() -> None:
-    assert compare("import sqlty\n" + HEAD + CASES["type"], import_style="import sqlty") == 1
+    assert diagnosed("import sqlty\n" + HEAD + CASES["type"], import_style="import sqlty") == 1
 
 
 def test_empty_module_name() -> None:
@@ -433,7 +421,7 @@ def test_empty_module_name() -> None:
         "class Row(TypedDict):\n    a: UserId | None\n"
         "q = SQL[Row]('--sql\\nSELECT id AS a FROM t')\n"
     )
-    assert compare(HEAD + source, {"redundant-optional": "error"}, module="") == 1
+    assert diagnosed(HEAD + source, {"redundant-optional": "error"}, module="") == 1
 
 
 @FUZZ
@@ -444,7 +432,7 @@ def test_empty_module_name() -> None:
 )
 def test_fitted_sources(source: str, rules: dict[str, str] | None, coerce: frozenset[str]) -> None:
     if parses(source):
-        compare(source, rules, coerce)
+        diagnosed(source, rules, coerce)
 
 
 @FUZZ
@@ -457,4 +445,4 @@ def test_generated_sources(
     source: str, rules: dict[str, str] | None, coerce: frozenset[str]
 ) -> None:
     if parses(source):
-        compare(source, rules, coerce)
+        diagnosed(source, rules, coerce)

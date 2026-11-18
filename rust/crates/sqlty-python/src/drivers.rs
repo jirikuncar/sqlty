@@ -1,5 +1,4 @@
-//! Driver calls that pass a query and its parameters, as `sqlty._drivers.find_driver_calls`
-//! finds them: `cursor.execute(query, params)` on a receiver the file shows is a
+//! Driver calls that pass a query and its parameters: `cursor.execute(query, params)` on a receiver the file shows is a
 //! psycopg, sqlite3, aiosqlite or asyncpg connection or cursor, and the
 //! `sqlty.drivers.psycopg` helpers.
 

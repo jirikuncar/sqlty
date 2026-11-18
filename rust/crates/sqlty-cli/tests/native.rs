@@ -25,7 +25,6 @@ fn sqlty(root: &Path, args: &[&str], env: &[(&str, &str)]) -> (i32, String, Stri
     } = Command::new(env!("CARGO_BIN_EXE_sqlty"))
         .args(args)
         .current_dir(root)
-        .env_remove("SQLTY_AST")
         .env_remove("SQLTY_CONFIG_FILE")
         .env_remove("VIRTUAL_ENV")
         .env_remove("CONDA_PREFIX")
@@ -45,17 +44,11 @@ const QUERIES: (&str, &str) = (
 #[test]
 fn hands_what_it_does_not_run_to_python() {
     let root = project("python", &[]);
-    let missing = [("PATH", "/nonexistent")];
     let error = "sqlty: cannot run python3: No such file or directory (os error 2)\n";
-    for (args, env) in [
-        (&["breaking"][..], &missing[..]),
-        (&["check"][..], &[missing[0], ("SQLTY_AST", "python")][..]),
-    ] {
-        assert_eq!(
-            sqlty(&root, args, env),
-            (2, String::new(), error.to_string())
-        );
-    }
+    assert_eq!(
+        sqlty(&root, &["breaking"], &[("PATH", "/nonexistent")]),
+        (2, String::new(), error.to_string())
+    );
     std::fs::remove_dir_all(&root).expect("removes");
 }
 
@@ -83,7 +76,6 @@ fn serve(root: &Path, requests: &[String], wanted: &str) -> (Vec<String>, i32) {
     let mut server = Command::new(env!("CARGO_BIN_EXE_sqlty"))
         .arg("server")
         .current_dir(root)
-        .env_remove("SQLTY_AST")
         .env_remove("VIRTUAL_ENV")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

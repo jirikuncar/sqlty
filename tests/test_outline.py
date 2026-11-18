@@ -1,14 +1,14 @@
 """The outline type extraction reads, built in Rust (``sqlty._core.module_outline``), against ``ast``.
 
 Each case and generated module must dump the same as ``ast.parse`` cut by ``_outline``,
-positions included, with its classes in ``ParsedSource.classes`` order; the type definitions
-read from both must be equal. Raise the number of generated examples with
-``SQLTY_FUZZ_EXAMPLES``.
+positions included, with its classes in ``ast.walk`` order. Raise the number of generated
+examples with ``SQLTY_FUZZ_EXAMPLES``.
 """
 
 from __future__ import annotations
 
 import ast
+import copy
 import os
 import pathlib
 import sys
@@ -19,11 +19,10 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 import sqlty
-import sqlty._source
 from sqlty._core import module_outline
-from sqlty._source import ParsedSource, _breadth_first, _outline, _Scan
-from sqlty._type_extractor import extract_type_definitions
-from sqlty._type_extractor.info import TypeInfo
+from sqlty._source import ParsedSource
+from tests.type_oracle import extract_type_definitions
+from tests.type_oracle.info import TypeInfo
 
 EXAMPLES = int(os.environ.get("SQLTY_FUZZ_EXAMPLES", "300"))
 
@@ -35,13 +34,40 @@ def same(text: str) -> None:
     module, classes = built
     expected = ast.dump(_outline(tree), include_attributes=True, indent=1)
     assert ast.dump(module, include_attributes=True, indent=1) == expected, text
-    scan = _Scan()
-    scan.visit(tree)
-    assert [c.lineno for c in classes] == [c.lineno for c in _breadth_first(scan.classes)]
+    walked = [node.lineno for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
+    assert [c.lineno for c in classes] == walked
 
 
-def types(text: str, mode: str, monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
-    monkeypatch.setattr(sqlty._source, "AST", mode)
+def _outline(tree: ast.Module) -> ast.Module:
+    """``tree`` with function bodies cut to the statements holding a class."""
+    tree = copy.deepcopy(tree)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            node.body = _cut(node.body)
+    return tree
+
+
+def _holds_class(node: ast.AST) -> bool:
+    return any(isinstance(n, ast.ClassDef) for n in ast.walk(node))
+
+
+def _cut(body: list[ast.stmt]) -> list[ast.stmt]:
+    kept = [stmt for stmt in body if _holds_class(stmt)]
+    for stmt in kept:
+        if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            continue
+        for name in ("body", "orelse", "finalbody"):
+            if isinstance(inner := getattr(stmt, name, None), list):
+                setattr(stmt, name, _cut(inner))
+        for name in ("handlers", "cases"):
+            if isinstance(inner := getattr(stmt, name, None), list):
+                setattr(stmt, name, [part for part in inner if _holds_class(part)])
+                for part in getattr(stmt, name):
+                    part.body = _cut(part.body)
+    return kept
+
+
+def types(text: str) -> dict[str, object]:
     found = extract_type_definitions(ParsedSource(text))
     return {name: _summary(info) for name, info in found.items()}
 
@@ -162,11 +188,10 @@ DECLINED = {
 
 
 @pytest.mark.parametrize("text", DECLINED.values(), ids=DECLINED.keys())
-def test_declined_files_have_no_types(text: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_declined_files_have_no_types(text: str) -> None:
     """Where Rust declines a file ``ast`` reads, there is no fallback: it has no types."""
     assert module_outline(text) is None
-    assert types(text, "python", monkeypatch)
-    assert types(text, "rust", monkeypatch) == {}
+    assert types(text) == {}
 
 
 def test_own_sources() -> None:
@@ -300,14 +325,11 @@ def test_generated_modules(blocks: list[list[str]], newline: str) -> None:
     except SyntaxError:
         return
     same(text)
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        assert types(text, "rust", monkeypatch) == types(text, "python", monkeypatch)
 
 
-def test_function_bodies_hold_no_names(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_function_bodies_hold_no_names() -> None:
     """A name bound only in a function body, cut from the outline, is not a module binding."""
     text = "if c:\n    def f():\n        Id = str\nId = int\nclass R(TypedDict):\n    a: Id\n"
     text = "from typing import TypedDict\n" + text
-    rust = types(text, "rust", monkeypatch)
-    assert rust == types(text, "python", monkeypatch)
-    assert typing.cast(dict[str, object], rust["R"])["field_types"] == {"a": repr(int)}
+    found = types(text)
+    assert typing.cast(dict[str, object], found["R"])["field_types"] == {"a": repr(int)}

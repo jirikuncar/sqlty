@@ -66,7 +66,7 @@ type Node<'py> = Bound<'py, PyAny>;
 /// A module and its classes.
 pub type Outline<'py> = (Node<'py>, Vec<Node<'py>>);
 
-/// The outline of `source` and its classes in `ParsedSource.classes` order, or `None` where
+/// The outline of `source` and its classes in `ast.walk` order, or `None` where
 /// `sqlty_python::parse::module` does not read it.
 pub fn outline<'py>(py: Python<'py>, source: &str) -> PyResult<Option<Outline<'py>>> {
     // `ast.parse` reads `\r\n` and `\r` as `\n`, in string values too.
