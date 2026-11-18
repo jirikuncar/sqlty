@@ -1,10 +1,12 @@
 """Package the native ``sqlty`` executables of a release for npm and Homebrew.
 
     python scripts/package_binaries.py npm 0.7.0 dist/bin dist/npm
-    python scripts/package_binaries.py homebrew 0.7.0 dist/archives > sqlty.rb
+    python scripts/package_binaries.py homebrew 0.7.0 dist/tarballs > sqlty.rb
 
 ``dist/bin/<target>/`` holds the executable built for each Rust target, and
-``dist/archives/`` the ``sqlty-<target>.tar.gz`` archives attached to the GitHub Release.
+``dist/tarballs/`` the ``npm pack`` tarballs of the platform packages: the formula
+downloads them from the npm registry, since an immutable GitHub Release takes no assets
+once it is published.
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-RELEASES = "https://github.com/jirikuncar/sqlty/releases/download"
+REGISTRY = "https://registry.npmjs.org"
 TARGETS: dict[str, tuple[str, str]] = {
     "aarch64-apple-darwin": ("darwin", "arm64"),
     "x86_64-apple-darwin": ("darwin", "x64"),
@@ -54,7 +56,7 @@ class Sqlty < Formula
   end
 
   def install
-    bin.install "sqlty"
+    bin.install "bin/sqlty"
   end
 
   test do
@@ -97,15 +99,16 @@ def npm(version: str, binaries: Path, out: Path) -> list[Path]:
     return [*written, package]
 
 
-def homebrew(version: str, archives: Path) -> str:
+def homebrew(version: str, tarballs: Path) -> str:
     """The Homebrew formula of the release ``version``."""
     stanzas = {}
-    for target, (platform, _) in TARGETS.items():
+    for target, (platform, arch) in TARGETS.items():
         if platform == "win32":
             continue
-        name = f"sqlty-{target}.tar.gz"
-        sha256 = hashlib.sha256((archives / name).read_bytes()).hexdigest()
-        url = f"{RELEASES}/v{version}/{name}"
+        name = f"cli-{platform}-{arch}"
+        tarball = tarballs / f"sqlty-{name}-{version}.tgz"
+        sha256 = hashlib.sha256(tarball.read_bytes()).hexdigest()
+        url = f"{REGISTRY}/@sqlty/{name}/-/{name}-{version}.tgz"
         stanzas[target] = f'      url "{url}"\n      sha256 "{sha256}"'
     return FORMULA.format(version=version, **stanzas)
 
@@ -119,14 +122,14 @@ def main() -> int:
     for_npm.add_argument("out", type=Path)
     for_brew = commands.add_parser("homebrew", help="print the Homebrew formula")
     for_brew.add_argument("version")
-    for_brew.add_argument("archives", type=Path)
+    for_brew.add_argument("tarballs", type=Path)
     args = parser.parse_args()
     version = args.version.removeprefix("v")
     if args.command == "npm":
         for package in npm(version, args.binaries, args.out):
             print(package)
     else:
-        sys.stdout.write(homebrew(version, args.archives))
+        sys.stdout.write(homebrew(version, args.tarballs))
     return 0
 
 

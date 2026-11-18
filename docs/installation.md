@@ -54,9 +54,8 @@ brew install jirikuncar/sqlty/sqlty # the native executable, from Homebrew
 The native executable reads your project as the Python package does. It takes the
 environment of the project from `VIRTUAL_ENV`, an active Conda environment, or the
 nearest `.venv`, and runs `complete` and `breaking` with the `sqlty` package of
-that environment. Its `sqlty server` takes no breaking baseline yet. Each
-[release](https://github.com/jirikuncar/sqlty/releases) also attaches it for
-Linux (static, x86_64 and aarch64), macOS and Windows.
+that environment. Its `sqlty server` takes no breaking baseline yet. It is built
+for Linux (static, x86_64 and aarch64), macOS and Windows.
 
 ### Optional dependencies
 
