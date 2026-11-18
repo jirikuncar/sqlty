@@ -30,6 +30,8 @@ from playwright.sync_api import Browser, CDPSession, Page, sync_playwright
 
 SOURCE = "monaco.editor.getEditors().find((e) => e.getContainerDomNode().matches('[data-source]'))"
 MODEL = "monaco.editor.getModels().find((m) => m.getLanguageId() === '{}')"
+# The theme's repository facts call the GitHub API, which rate limits shared CI runners with 403s.
+GITHUB = json.dumps({"tag_name": "v0.0.0", "stargazers_count": 0, "forks_count": 0})
 
 
 def main() -> None:
@@ -45,10 +47,20 @@ def main() -> None:
         browser = playwright.chromium.launch()
         coverage = Coverage()
         page = browser.new_page()
+        page.route(
+            "https://api.github.com/**",
+            lambda route: route.fulfill(body=GITHUB, content_type="application/json"),
+        )
         coverage.watch(page)
         errors: list[str] = []
         page.on("pageerror", lambda error: errors.append(str(error)))
-        page.on("console", lambda message: message.type == "error" and errors.append(message.text))
+        page.on(
+            "console",
+            lambda message: (
+                message.type == "error"
+                and errors.append(f"{message.text} {message.location['url']}")
+            ),
+        )
         check(page, url)
         assert not errors, errors
         exercise(browser, url, coverage.watch)
