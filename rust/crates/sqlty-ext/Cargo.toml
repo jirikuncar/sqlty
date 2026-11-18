@@ -31,6 +31,13 @@ stacker = "0.1"
 thiserror.workspace = true
 toml.workspace = true
 
+# Linux only: on macOS mimalloc v3 keeps its heap in fixed pthread slots that another
+# copy in the same process would share. The extension is dlopen()ed, and initial-exec
+# TLS fails to load on musl.
+[target.'cfg(target_os = "linux")'.dependencies]
+mimalloc = { workspace = true, features = ["local_dynamic_tls"] }
+libmimalloc-sys = { workspace = true, features = ["extended"] }
+
 [build-dependencies]
 pyo3-build-config = "0.30"
 
