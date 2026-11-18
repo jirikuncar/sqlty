@@ -181,7 +181,10 @@ pub fn run(request: &str) -> String {
                 "fixed": source,
             })
             .to_string(),
-            _ => error(format!("sqlty crashed, please report it: {cause}")),
+            _ => error(format!(
+                "sqlty crashed: {cause}; please report it at {}",
+                sqlty_python::report::issue_url(cause)
+            )),
         };
     }
     if let Some(message) = request.panic {

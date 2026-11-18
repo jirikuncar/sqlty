@@ -159,12 +159,12 @@ test("a panic is an internal-error, and a new instance answers the next request"
   const engine = await loadEngine(Uri.file(resolve(".")) as never);
   const request = { op: "analyze", source: "q = 1", dialect: "postgres" };
   const crashed = engine({ ...request, panic: "boom" });
-  assert.deepEqual(
-    crashed.diagnostics.map((found: { rule: string; message: string }) => [
-      found.rule,
-      found.message,
-    ]),
-    [["internal-error", "sqlty crashed checking this file, please report it: boom"]],
+  const [found, ...rest] = crashed.diagnostics;
+  assert.deepEqual(rest, []);
+  assert.equal(found.rule, "internal-error");
+  assert.match(
+    found.message,
+    /^sqlty crashed checking this file: boom; please report it at https:\/\/github\.com\/jirikuncar\/sqlty\/issues\/new\?template=bug_report\.yml&title=Crash%3A%20boom&output=boom&version=/,
   );
   assert.deepEqual(engine(request).diagnostics, []);
 });

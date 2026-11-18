@@ -390,7 +390,8 @@ fn a_crashed_request_reports_an_internal_error_in_place_of_its_answer() {
             "crashed": "boom", "panic": "again"});
         ask(&request)
     };
-    let message = "sqlty crashed checking this file, please report it: boom";
+    let link = sqlty_python::report::issue_url("boom");
+    let message = format!("sqlty crashed checking this file: boom; please report it at {link}");
     assert_eq!(
         request("analyze", ""),
         json!({
@@ -407,7 +408,7 @@ fn a_crashed_request_reports_an_internal_error_in_place_of_its_answer() {
     assert_eq!(ignored["diagnostics"], json!([]));
     assert_eq!(
         request("hover", ""),
-        json!({"error": "sqlty crashed, please report it: boom"})
+        json!({"error": format!("sqlty crashed: boom; please report it at {link}")})
     );
 }
 

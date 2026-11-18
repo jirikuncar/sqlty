@@ -1,4 +1,9 @@
-# sqlty
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jirikuncar/sqlty/main/docs/assets/sqlty-wordmark-dark.svg">
+    <img src="https://raw.githubusercontent.com/jirikuncar/sqlty/main/docs/assets/sqlty-wordmark-light.svg" alt="SQLTy" width="300">
+  </picture>
+</h1>
 
 Type-safe raw SQL for Python: row and parameter types inferred from your SQL and
 schema, no ORM or database needed.

@@ -246,7 +246,8 @@ def test_binary_targets_agree() -> None:
 
     assert sorted(built) == sorted(targets)
     assert sorted(main["optionalDependencies"]) == sorted(names)
-    assert main["repository"]["url"] == "https://github.com/jirikuncar/sqlty"
+    # The form npm normalizes to; trusted publishing compares it with the repository.
+    assert main["repository"]["url"] == "git+https://github.com/jirikuncar/sqlty.git"
 
 
 def test_npm_runs_the_binary_of_the_platform(tmp_path: Path) -> None:
@@ -264,6 +265,10 @@ def test_npm_runs_the_binary_of_the_platform(tmp_path: Path) -> None:
     assert main["version"] == "1.2.3"
     assert set(main["optionalDependencies"].values()) == {"1.2.3"}
     assert (linux["os"], linux["cpu"], linux["files"]) == (["linux"], ["x64"], ["bin/sqlty"])
+    readme = (modules / "@sqlty" / "cli-linux-x64" / "README.md").read_text()
+    assert "for Linux x64" in readme
+    assert "sqlty-wordmark-light.svg" in readme
+    assert "Documentation: <https://sqlty.kuncar.dev/>" in readme.splitlines()
     node = shutil.which("node")
     assert node is not None
     platform, arch = (
@@ -288,17 +293,18 @@ def test_npm_runs_the_binary_of_the_platform(tmp_path: Path) -> None:
     assert f"no prebuilt binary for {platform}-{arch}" in found.stderr
 
 
-def test_homebrew_formula_downloads_the_release(tmp_path: Path) -> None:
+def test_homebrew_formula_downloads_the_npm_packages(tmp_path: Path) -> None:
     package_binaries = _package_binaries()
-    for target in package_binaries.TARGETS:
-        (tmp_path / f"sqlty-{target}.tar.gz").write_bytes(target.encode())
+    for platform, arch in package_binaries.TARGETS.values():
+        (tmp_path / f"sqlty-cli-{platform}-{arch}-1.2.3.tgz").write_bytes(arch.encode())
     formula = package_binaries.homebrew("1.2.3", tmp_path)
-    digest = hashlib.sha256(b"aarch64-apple-darwin").hexdigest()
+    digest = hashlib.sha256(b"arm64").hexdigest()
 
     assert 'version "1.2.3"' in formula
     assert (
-        f'url "https://github.com/jirikuncar/sqlty/releases/download/v1.2.3/'
-        f'sqlty-aarch64-apple-darwin.tar.gz"\n      sha256 "{digest}"'
+        'url "https://registry.npmjs.org/@sqlty/cli-darwin-arm64/-/cli-darwin-arm64-1.2.3.tgz"'
+        f'\n      sha256 "{digest}"'
     ) in formula
-    assert "windows" not in formula
+    assert "win32" not in formula
+    assert 'bin.install "bin/sqlty"' in formula
     assert 'shell_output("#{bin}/sqlty version")' in formula

@@ -26,7 +26,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
-from playwright.sync_api import Browser, CDPSession, Page, Route, sync_playwright
+from playwright.sync_api import Browser, BrowserContext, CDPSession, Page, Route, sync_playwright
 
 SOURCE = "monaco.editor.getEditors().find((e) => e.getContainerDomNode().matches('[data-source]'))"
 MODEL = "monaco.editor.getModels().find((m) => m.getLanguageId() === '{}')"
@@ -137,6 +137,7 @@ def embedded(page: Page, url: str) -> None:
     assert not page.is_visible(".md-header")
     assert not page.is_visible("[data-example]")
     assert page.is_visible("[data-fix]")
+    assert not page.is_visible("[data-ask-open]")
     opened = page.get_attribute("[data-open]", "href")
     assert "embed" not in opened and opened.split("#")[1] == shared.split("#")[1], opened
 
@@ -252,6 +253,7 @@ def exercise(browser: Browser, url: str, watch: Callable[[Page], None]) -> None:
     sharing(page)
     resizing(page)
     zoomed(page, url)
+    unsupported(context, url, watch)
     asking(page, url)
     assert not errors, errors
 
@@ -330,7 +332,9 @@ def engine_errors(page: Page) -> None:
     )
     page.evaluate("globalThis.sqltyPanic = true")
     source(page, "x = 1\n")
-    assert "please report it: boom" in page.inner_text("[data-problems]")
+    assert "sqlty crashed checking this file: boom; please report it at https://github.com/" in (
+        page.inner_text("[data-problems]")
+    )
     page.evaluate("globalThis.sqltyPanic = true")
     source(page, "x = 2\n")
     assert page.inner_text("[data-problems]") == "Error: sqlty crashed and is starting again"
@@ -523,8 +527,21 @@ def zoomed(page: Page, url: str) -> None:
     page.click("[data-present]")
 
 
+def unsupported(context: BrowserContext, url: str, watch: Callable[[Page], None]) -> None:
+    """A browser wllama cannot run in, here one without OPFS, gets no Ask."""
+    other = context.new_page()
+    watch(other)
+    other.add_init_script("delete StorageManager.prototype.getDirectory")
+    other.goto(url)
+    other.wait_for_selector("[data-types] code", state="attached", timeout=60_000)
+    other.wait_for_function(
+        "performance.getEntriesByType('resource').some((r) => r.name.endsWith('/ask.js'))"
+    )
+    assert not other.is_visible("[data-ask-open]")
+
+
 def asking(page: Page, url: str) -> None:
-    page.goto(url + "?ask")
+    page.goto(url)
     page.wait_for_selector("[data-ask-open]:not([hidden])", timeout=60_000)
     page.click("[data-ask-open]")
     page.wait_for_function("document.activeElement.matches('[data-ask-question]')")

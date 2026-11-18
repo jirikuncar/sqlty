@@ -14,8 +14,8 @@ Nothing in the file was checked, and the crash is a bug in sqlty.
 ## Example
 
 ```text
-app.py:1: [internal-error] sqlty crashed checking this file, please report it: index out of bounds
+app.py:1: [internal-error] sqlty crashed checking this file: index out of bounds; please report it at https://github.com/jirikuncar/sqlty/issues/new?template=bug_report.yml&title=...
 ```
 
-[Report it](https://github.com/jirikuncar/sqlty/issues) with the file, or the
-smallest part of it that still crashes.
+The link opens a bug report with the cause, version and platform filled in. Add
+the file, or the smallest part of it that still crashes.

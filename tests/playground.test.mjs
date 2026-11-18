@@ -139,9 +139,10 @@ test("each step of the docs' Tour in steps is typed", async () => {
 
 test("a panic is an internal-error, answered by a spare instance", { timeout: 10_000 }, async () => {
   const crash = { op: "analyze", source: "q = 1", dialect: "postgres", panic: "boom" };
-  assert.deepEqual(ask(crash).diagnostics.map((d) => [d.rule, d.message]), [
-    ["internal-error", "sqlty crashed checking this file, please report it: boom"],
-  ]);
+  const [found, ...rest] = ask(crash).diagnostics;
+  assert.deepEqual(rest, []);
+  assert.equal(found.rule, "internal-error");
+  assert.match(found.message, /^sqlty crashed checking this file: boom; please report it at https:\/\/github\.com\/jirikuncar\/sqlty\/issues\/new\?template=bug_report\.yml&title=Crash%3A%20boom&output=boom&version=/);
   assert.throws(() => ask({ ...crash, op: "hover" }), /starting again/);
   assert.throws(() => ask(crash), /starting again/);
   for (;;) {
@@ -154,5 +155,5 @@ test("a panic is an internal-error, answered by a spare instance", { timeout: 10
     }
   }
   const fresh = await load(wasm);
-  assert.equal(fresh({ ...crash, op: "hover" }).error, "sqlty crashed, please report it: boom");
+  assert.match(fresh({ ...crash, op: "hover" }).error, /^sqlty crashed: boom; please report it at https:\/\/github\.com\/jirikuncar\/sqlty\/issues\/new\?template=bug_report\.yml&title=Crash%3A%20boom&output=boom&version=/);
 });

@@ -500,11 +500,11 @@ Default: error. sqlty crashed checking the file, so nothing else of it is
 reported. The other files are still checked. The message names the cause:
 
 ```text
-sqlty crashed checking this file, please report it: index out of bounds
+sqlty crashed checking this file: index out of bounds; please report it at https://github.com/jirikuncar/sqlty/issues/new?template=bug_report.yml&title=...
 ```
 
-Fix: [report it](https://github.com/jirikuncar/sqlty/issues) with the file,
-or the smallest part of it that still crashes.
+Fix: open the link, a bug report with the cause, version and platform filled
+in, and add the file, or the smallest part of it that still crashes.
 
 ## Query rules
 
