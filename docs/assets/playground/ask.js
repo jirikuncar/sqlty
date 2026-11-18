@@ -175,6 +175,16 @@ export async function answer({ complete, engine, schema, dialect, config, questi
   return { sql: attempts.at(-1).sql, attempts };
 }
 
+// What wllama checks before it starts (WebAssembly exception handling and SIMD, the same
+// probes), and OPFS, its only place to cache a model.
+const EXCEPTIONS = [0, 97, 115, 109, 1, 0, 0, 0, 1, 4, 1, 96, 0, 0, 3, 2, 1, 0, 10, 8, 1, 6, 0, 6, 64, 25, 11, 11];
+const SIMD = [0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11];
+
+export const supported = () =>
+  typeof WebAssembly === "object" &&
+  [EXCEPTIONS, SIMD].every((module) => WebAssembly.validate(new Uint8Array(module))) &&
+  typeof navigator.storage?.getDirectory === "function";
+
 let library;
 
 export async function wllama({

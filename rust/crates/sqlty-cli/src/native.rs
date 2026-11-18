@@ -169,16 +169,23 @@ const DEFAULT_VERSION: Version = (3, 14);
 
 /// The `site-packages` of `prefix` that holds this sqlty, else the first there is.
 fn site_packages(prefix: &Path) -> Option<PathBuf> {
-    let mut found: Vec<PathBuf> = ["Lib", "lib"]
+    // `Lib` (Windows) or `lib`, as the disk spells it: probing both names would list one
+    // directory twice where case is ignored (Windows, macOS).
+    let libs: Vec<PathBuf> = std::fs::read_dir(prefix)
         .into_iter()
-        .filter_map(|lib| std::fs::read_dir(prefix.join(lib)).ok())
+        .flatten()
+        .flatten()
+        .filter(|entry| entry.file_name().eq_ignore_ascii_case("lib"))
+        .map(|entry| entry.path())
+        .collect();
+    let mut found: Vec<PathBuf> = libs
+        .iter()
+        .filter_map(|lib| std::fs::read_dir(lib).ok())
         .flatten()
         .flatten()
         .map(|entry| entry.path().join("site-packages"))
-        .chain([
-            prefix.join("Lib").join("site-packages"),
-            prefix.join("site-packages"),
-        ])
+        .chain(libs.iter().map(|lib| lib.join("site-packages")))
+        .chain([prefix.join("site-packages")])
         .filter(|path| path.is_dir())
         .collect();
     found.sort();
@@ -365,6 +372,19 @@ mod tests {
         let bare = Environment::of_scripts(&root.join("bin"));
         assert_eq!(bare.path, [root.join("bin")]);
         assert_eq!(bare.version.0, 3);
+    }
+
+    #[test]
+    fn spells_site_packages_as_the_disk_does() {
+        let root = std::env::temp_dir().join(format!("sqlty-lib-{}", std::process::id()));
+        let windows = root.join("Lib").join("site-packages");
+        std::fs::create_dir_all(&windows).unwrap();
+        assert_eq!(site_packages(&root), Some(windows));
+        std::fs::remove_dir_all(&root).unwrap();
+        let posix = root.join("lib").join("python3.13").join("site-packages");
+        std::fs::create_dir_all(&posix).unwrap();
+        assert_eq!(site_packages(&root), Some(posix));
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

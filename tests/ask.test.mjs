@@ -15,6 +15,7 @@ import {
   modelUrl,
   problems,
   python,
+  supported,
   tables,
   wllama,
 } from "../docs/assets/playground/ask.js";
@@ -140,6 +141,18 @@ test("answer stops after its repairs, without hints unless asked", async () => {
 });
 
 const fake = (body) => `data:text/javascript,${encodeURIComponent(body)}`;
+
+test("supported needs WebAssembly exceptions and SIMD, and OPFS", (t) => {
+  const real = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  t.after(() => Object.defineProperty(globalThis, "navigator", real));
+  const browser = (storage) => Object.defineProperty(globalThis, "navigator", { value: { storage }, configurable: true });
+  browser(undefined);
+  assert.equal(supported(), false);
+  browser({ getDirectory: async () => ({}) });
+  assert.equal(supported(), true);
+  t.mock.method(WebAssembly, "validate", () => false);
+  assert.equal(supported(), false);
+});
 
 test("wllama loads its module once, and again after a failed load", async () => {
   await assert.rejects(wllama({ module: fake("throw new Error('offline')") }), /offline/);
