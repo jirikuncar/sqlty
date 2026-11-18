@@ -360,7 +360,6 @@ function refresh() {
   }
   current = answer;
   const model = models.python;
-  refreshBreaking();
   monaco.editor.setModelMarkers(
     model,
     "sqlty",
@@ -384,13 +383,19 @@ function refresh() {
   root.querySelector("[data-types]").replaceChildren(...answer.queries.map(describe));
   output.setValue(JSON.stringify(answer.diagnostics.map((found) => checked(found, model)), null, 2));
   refreshed.fire();
+  refreshBreaking(answer.diagnostics.some((found) => found.rule === "internal-error"));
 }
 
 // What schema.sql breaks in code that before.sql checks clean, as `sqlty breaking` reports it.
-function refreshBreaking() {
+// A crashed check would crash again on the spare engine, so it is not compared.
+function refreshBreaking(crashed) {
   const list = root.querySelector("[data-breaking]");
   const tab = root.querySelector('[data-tab="breaking"]');
   tab.textContent = "Breaking";
+  if (crashed) {
+    list.replaceChildren(tag("li", "sqlty crashed: see Problems."));
+    return;
+  }
   if (!models.before.getValue().trim()) {
     list.replaceChildren(tag("li", "Paste the schema before a change into before.sql to see what schema.sql breaks."));
     return;

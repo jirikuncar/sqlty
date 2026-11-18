@@ -360,6 +360,7 @@ def engine_errors(page: Page) -> None:
     assert "sqlty crashed checking this file: boom; please report it at https://github.com/" in (
         page.inner_text("[data-problems]")
     )
+    assert page.inner_text("[data-breaking]") == "sqlty crashed: see Problems."
     page.evaluate("globalThis.sqltyPanic = true")
     source(page, "x = 2\n")
     assert page.inner_text("[data-problems]") == "Error: sqlty crashed and is starting again"
