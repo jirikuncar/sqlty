@@ -345,7 +345,7 @@ fn settings(config: &str) -> Result<Settings, String> {
         .unwrap_or_default();
     if let Some(key) = table.keys().find(|key| !READ.contains(&key.as_str())) {
         return Err(format!(
-            "sqlty.toml: the playground reads only {}, not '{key}'",
+            "sqlty.toml: the WebAssembly engine reads only {}, not '{key}'",
             READ.join(", ")
         ));
     }

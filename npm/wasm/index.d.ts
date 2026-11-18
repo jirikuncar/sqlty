@@ -63,7 +63,7 @@ export type Query = {
   row_type: string | null;
   columns: {
     name: string;
-    type: string;
+    type: string | null;
     sql_type: string | null;
     type_rule: Rule | null;
     nullability_rule: Rule | null;
@@ -131,7 +131,8 @@ export interface Engine {
 
 /**
  * Starts the engine from `sqlty_wasm.wasm`: its bytes, a `Response`, or a URL to fetch (or
- * read, for a `file:` URL in Node.js). By default, the module next to this file.
+ * read, for a `file:` URL in Node.js; a relative one resolves against the page). By default,
+ * the module next to this file.
  */
 export function load(
   wasm?: BufferSource | Response | URL | string | Promise<BufferSource | Response | URL | string>,

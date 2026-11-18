@@ -140,7 +140,7 @@ fn config_errors_are_reported_as_sqlty_check_reports_them() {
         ("[rules]\nselect-star = \"loud\"", "loud"),
         (
             "schema = \"schema.sql\"",
-            "the playground reads only dialect, driver, import-style, max-query-variants, param-types, preview, rules, types, not 'schema'",
+            "the WebAssembly engine reads only dialect, driver, import-style, max-query-variants, param-types, preview, rules, types, not 'schema'",
         ),
         ("import-style = \"from x\"", "Unsupported import-style"),
         ("param-types = 1", "param-types must be true or false"),

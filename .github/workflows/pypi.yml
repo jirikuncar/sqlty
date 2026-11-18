@@ -420,6 +420,9 @@ jobs:
       # A re-run skips what it published; a version someone else published stops it.
       - name: Publish
         working-directory: wasm
+        env:
+          # Only for the package's first release: later ones publish through trusted publishing.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           version=$(node -p "require('./package.json').version")
           built=$(npm pack --dry-run --json | node -p "JSON.parse(require('fs').readFileSync(0))[0].integrity")

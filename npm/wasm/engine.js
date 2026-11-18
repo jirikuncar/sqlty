@@ -2,17 +2,21 @@
 // of `sqlty_wasm.wasm`: the docs playground, the VS Code extension and `index.js` load it.
 //
 // A panic traps and leaves the instance unusable: a spare instance answers the request again
-// with what it panicked with, which `analyze` reports as `internal-error`. The browser
-// instantiates a module this large only asynchronously, so the spare is made in advance.
+// with what it panicked with, which `analyze` reports as `internal-error`. The browser's main
+// thread instantiates a module this large only asynchronously, so the spare is made in
+// advance; until the next one is ready, another panic instantiates one synchronously where
+// the host allows it, as Node.js and the VS Code extension host do.
 export async function load(bytes) {
   const module = await WebAssembly.compile(bytes);
   const start = () => WebAssembly.instantiate(module);
   let [instance, spare] = await Promise.all([start(), start()]);
   const answer = (request) => {
     if (!instance) {
-      if (!spare) throw new Error("sqlty crashed and is starting again");
-      [instance, spare] = [spare, undefined];
-      start().then((fresh) => (spare = fresh));
+      instance = spare ?? new WebAssembly.Instance(module);
+      if (spare) {
+        spare = undefined;
+        start().then((fresh) => (spare = fresh));
+      }
     }
     try {
       return ask(instance, request);

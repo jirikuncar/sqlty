@@ -11,7 +11,7 @@ async function bytes(wasm) {
     return fs ? fs.readFile(url) : bytes(await fetch(url));
   }
   if (wasm instanceof Response) {
-    if (!wasm.ok) throw new Error(`${wasm.url}: ${wasm.status} ${wasm.statusText}`);
+    if (!wasm.ok) throw new Error(`${wasm.url || "sqlty_wasm.wasm"}: ${wasm.status} ${wasm.statusText}`);
     return wasm.arrayBuffer();
   }
   return wasm;

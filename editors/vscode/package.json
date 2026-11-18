@@ -250,7 +250,7 @@
   "scripts": {
     "build": "npm run build-node && npm run build-web",
     "build-node": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node20 --sourcemap",
-    "build-wasm": "make -C ../.. wasm && mkdir -p dist && cp ../../npm/wasm/sqlty_wasm.wasm dist/",
+    "build-wasm": "cargo build --manifest-path ../../rust/Cargo.toml --profile wasm --target wasm32-unknown-unknown -p sqlty-wasm && mkdir -p dist && cp ../../rust/target/wasm32-unknown-unknown/wasm/sqlty_wasm.wasm dist/",
     "build-web": "esbuild src/web.ts --bundle --outfile=dist/web.js --external:vscode --format=cjs --platform=browser --target=es2022 --sourcemap",
     "build-test": "esbuild src/test/*.ts --bundle --external:vscode --outdir=out/test --format=cjs --platform=node --target=node20 && esbuild src/test/restricted/*.ts --bundle --external:vscode --external:mocha --outdir=out/test/restricted --format=cjs --platform=node --target=node20",
     "check": "tsc --noEmit && oxlint --deny-warnings src && oxfmt --check src",

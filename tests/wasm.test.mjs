@@ -29,6 +29,6 @@ test("a URL to fetch", async () => {
 
 test("a failed response", async () => {
   await assert.rejects(load(new Response("", { status: 404, statusText: "Not Found" })), {
-    message: ": 404 Not Found",
+    message: "sqlty_wasm.wasm: 404 Not Found",
   });
 });

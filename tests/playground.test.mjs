@@ -3,7 +3,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { setTimeout } from "node:timers/promises";
 
 import { load } from "../npm/wasm/engine.js";
 import { decode, encode } from "../docs/assets/playground/share.js";
@@ -137,23 +136,13 @@ test("each step of the docs' Tour in steps is typed", async () => {
   }
 });
 
-test("a panic is an internal-error, answered by a spare instance", { timeout: 10_000 }, async () => {
+test("a panic is an internal-error, answered by a spare instance or a new one", () => {
   const crash = { op: "analyze", source: "q = 1", dialect: "postgres", panic: "boom" };
   const [found, ...rest] = ask(crash).diagnostics;
   assert.deepEqual(rest, []);
   assert.equal(found.rule, "internal-error");
   assert.match(found.message, /^sqlty crashed checking this file: boom; please report it at https:\/\/github\.com\/jirikuncar\/sqlty\/issues\/new\?template=bug_report\.yml&title=Crash%3A%20boom&output=boom&version=/);
-  assert.throws(() => ask({ ...crash, op: "hover" }), /starting again/);
-  assert.throws(() => ask(crash), /starting again/);
-  for (;;) {
-    try {
-      assert.deepEqual(ask({ op: "analyze", source: "q = 1", dialect: "postgres" }).diagnostics, []);
-      break;
-    } catch (error) {
-      assert.match(error.message, /starting again/);
-      await setTimeout(10);
-    }
-  }
-  const fresh = await load(wasm);
-  assert.match(fresh({ ...crash, op: "hover" }).error, /^sqlty crashed: boom; please report it at https:\/\/github\.com\/jirikuncar\/sqlty\/issues\/new\?template=bug_report\.yml&title=Crash%3A%20boom&output=boom&version=/);
+  assert.match(ask({ ...crash, op: "hover" }).error, /^sqlty crashed: boom; please report it at /);
+  assert.equal(ask(crash).diagnostics[0].rule, "internal-error");
+  assert.deepEqual(ask({ op: "analyze", source: "q = 1", dialect: "postgres" }).diagnostics, []);
 });
