@@ -15,6 +15,7 @@ use crate::catalog::fold;
 use crate::diagnostics::{Diagnostics, NameRule};
 use crate::json::JsonShape;
 use crate::values;
+use crate::MAX_COLUMNS;
 
 use super::dialect::SqlDialect;
 use super::dml::{
@@ -62,7 +63,7 @@ pub struct Column {
 }
 
 impl Column {
-    pub(super) fn unknown(name: &str) -> Self {
+    pub(crate) fn unknown(name: &str) -> Self {
         Column {
             name: name.to_string(),
             python_type: None,
@@ -378,12 +379,22 @@ impl<'a> Analyzer<'a> {
         }
         analyzer.facts = analyzer.select_facts(select, &scope);
         let keyword = select.select_token.0.span.start;
-        analyzer.projection(
+        let columns = analyzer.projection(
             &select.projection,
             &scope,
             Some(&select.from),
             Some(keyword),
-        )
+        )?;
+        if columns.len() <= MAX_COLUMNS {
+            return Ok(columns);
+        }
+        if self.diag.enabled() {
+            self.diag.record(
+                NameRule::UnsupportedSyntax,
+                format!("over {MAX_COLUMNS} result columns are not typed"),
+            );
+        }
+        Ok(vec![Column::unknown("*")])
     }
 
     /// Columns of a SELECT or set operation. Names come from the leftmost branch; each
@@ -469,6 +480,9 @@ impl<'a> Analyzer<'a> {
     fn values_columns(&self, values: &sqlparser::ast::Values) -> Inferred<Vec<Column>> {
         let (analyzer, scope) = self.scope_of(&[])?;
         let width = values.rows.first().map_or(0, |row| row.content.len());
+        if width > MAX_COLUMNS {
+            return Ok(vec![Column::unknown("*")]);
+        }
         let mut columns = Vec::with_capacity(width);
         for index in 0..width {
             let mut types = Vec::new();

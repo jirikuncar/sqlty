@@ -328,6 +328,24 @@ def test_unparseable_schema_view_is_reported(tmp_path, monkeypatch, caplog) -> N
     ]
 
 
+def test_too_large_schema_is_reported(tmp_path, monkeypatch, caplog) -> None:
+    """A schema that keeps rewriting a wide table is read up to a limit."""
+    columns = ", ".join(f"c{i} INTEGER" for i in range(4096))
+    indexes = "".join(f"CREATE UNIQUE INDEX i{i} ON big (c{i});\n" for i in range(1024))
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
+    (tmp_path / "schema.sql").write_text(
+        f"CREATE TABLE big ({columns});\n{indexes}CREATE TABLE later (id INTEGER);"
+    )
+    (tmp_path / "a.py").write_text('q = "--sql\\nSELECT 1"\n')
+    monkeypatch.chdir(tmp_path)
+
+    main(["rewrite", "a.py"])
+
+    assert [r.getMessage() for r in caplog.records if "too large" in r.getMessage()] == [
+        "Schema is too large to load; ignored: CREATE TABLE later (id INTEGER) and later"
+    ]
+
+
 def test_unparseable_schema_statement_is_reported(tmp_path, monkeypatch, caplog) -> None:
     """A statement that would set a key is named in a warning; one about storage is not."""
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')

@@ -659,6 +659,131 @@ mod tests {
         assert_eq!(cols(&c, "child"), ["id:INT", "extra:INT", "v:TEXT"]);
     }
 
+    fn wide(name: &str, width: usize) -> String {
+        let columns: Vec<String> = (0..width).map(|i| format!("c{i} int")).collect();
+        format!("CREATE TABLE {name} ({});\n", columns.join(", "))
+    }
+
+    #[test]
+    fn a_table_wider_than_max_columns_is_unknown() {
+        let sql = wide("ok", crate::MAX_COLUMNS) + &wide("wide", crate::MAX_COLUMNS + 1);
+        let (c, skipped) = load(&sql, "postgres");
+        assert_eq!(c.table("ok").map(<[_]>::len), Some(crate::MAX_COLUMNS));
+        assert!(c.table("wide").is_none() && c.find("wide").is_some());
+        assert_eq!(skipped, [("table", "public.wide".to_string())]);
+    }
+
+    #[test]
+    fn relations_past_the_schema_columns_are_unknown() {
+        // The built-in relations hold some columns too: the last copies may not fit.
+        let copies = loader::MAX_SCHEMA_COLUMNS / crate::MAX_COLUMNS;
+        let mut sql = wide("big", crate::MAX_COLUMNS) + "CREATE SCHEMA s;\n";
+        for i in 0..copies {
+            sql += &format!("CREATE TABLE s.t{i} (LIKE big);\n");
+        }
+        sql += "CREATE TABLE copy (LIKE big);\nCREATE TABLE child () INHERITS (big);\n";
+        sql += &wide("one", crate::MAX_COLUMNS);
+        sql += "CREATE VIEW v AS SELECT * FROM big;
+            DROP SCHEMA s CASCADE;
+            CREATE TABLE two (a int);
+            CREATE TABLE copy2 (LIKE big);";
+        let (c, skipped) = load(&sql, "postgres");
+        for name in ["copy", "child", "one"] {
+            assert!(c.table(name).is_none() && c.find(name).is_some(), "{name}");
+        }
+        assert!(
+            matches!(c.find("v"), Some(Relation::View(columns)) if columns.len() == 1 && columns[0].name == "*")
+        );
+        assert_eq!(cols(&c, "two"), ["a:INT"]);
+        assert_eq!(c.table("copy2").map(<[_]>::len), Some(crate::MAX_COLUMNS));
+        let (copied, rest) = skipped.split_at(skipped.len() - 4);
+        assert!(copied.iter().all(|(_, name)| name.starts_with("s.t")));
+        assert_eq!(
+            rest,
+            [
+                ("table", "copy".to_string()),
+                ("table", "child".to_string()),
+                ("table", "public.one".to_string()),
+                ("view", "public.v".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_chain_written_backwards_stops_after_max_retries() {
+        // Each pass creates one more table: n passes try about n * n / 2 statements.
+        let n = 2 * (loader::MAX_RETRIES as f64).sqrt() as usize;
+        let mut sql: String = (0..n)
+            .map(|i| format!("CREATE TABLE t{i} (LIKE t{});\n", i + 1))
+            .collect();
+        sql += &format!("CREATE TABLE t{n} (a int);");
+        let (c, skipped) = load(&sql, "postgres");
+        assert_eq!(cols(&c, &format!("t{}", n - 1)), ["a:INT"]);
+        assert!(c.table("t0").is_none() && c.find("t0").is_some());
+        assert!(skipped.contains(&("table", "t0".to_string())));
+    }
+
+    #[test]
+    fn loading_stops_after_max_written_columns() {
+        let rewrites = loader::MAX_WRITTEN / crate::MAX_COLUMNS;
+        let mut sql =
+            "CREATE TABLE waits (LIKE later);\n".to_string() + &wide("big", crate::MAX_COLUMNS);
+        for i in 0..rewrites {
+            sql += &format!(
+                "CREATE UNIQUE INDEX i{i} ON big (c{});\n",
+                i % crate::MAX_COLUMNS
+            );
+        }
+        sql += "CREATE TABLE later (a int);\nCREATE TABLE ignored (a int);";
+        let (c, skipped) = load(&sql, "postgres");
+        assert!(c.find("later").is_none() && c.find("waits").is_none());
+        assert_eq!(
+            skipped,
+            [
+                ("limit", "CREATE TABLE later (a int) and later".to_string()),
+                ("limit", "1 statements waiting on others".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn statements_waiting_on_others_stop_after_max_written_columns() {
+        let rewrites = loader::MAX_WRITTEN / crate::MAX_COLUMNS;
+        let indexes: String = (0..=rewrites)
+            .map(|i| {
+                format!(
+                    "CREATE UNIQUE INDEX i{i} ON big (c{});\n",
+                    i % crate::MAX_COLUMNS
+                )
+            })
+            .collect();
+        // Defined after the indexes on it, so they wait for it.
+        let (c, skipped) = load(&(indexes + &wide("big", crate::MAX_COLUMNS)), "postgres");
+        assert_eq!(c.table("big").map(<[_]>::len), Some(crate::MAX_COLUMNS));
+        assert_eq!(
+            skipped,
+            [("limit", "1 statements waiting on others".to_string())]
+        );
+        // Views that read a table never defined are read last, against what is there.
+        let indexes: String = (1..rewrites)
+            .map(|i| {
+                format!(
+                    "CREATE UNIQUE INDEX i{i} ON big (c{});\n",
+                    i % crate::MAX_COLUMNS
+                )
+            })
+            .collect();
+        let views = "CREATE VIEW v1 AS SELECT * FROM big, missing;
+            CREATE VIEW v2 AS SELECT * FROM big, missing;";
+        let sql = wide("big", crate::MAX_COLUMNS) + &indexes + views;
+        let (c, skipped) = load(&sql, "postgres");
+        assert!(c.find("v1").is_some() && c.find("v2").is_none());
+        assert_eq!(
+            skipped,
+            [("limit", "1 statements waiting on others".to_string())]
+        );
+    }
+
     #[test]
     fn test_unknown_like_source_leaves_unknown_shape() {
         let c = pg("CREATE TABLE copy (LIKE missing);");

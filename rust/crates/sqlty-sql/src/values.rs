@@ -8,6 +8,7 @@
 //! plain list of constants gives no set, and a set that would exceed [`MAX_VALUES`] is
 //! dropped in favour of the plain `str` or `int`.
 
+use rustc_hash::FxHashSet;
 use sqlparser::ast::InTarget;
 use sqlparser::ast::{BinaryOperator, CastKind, Expr, Ident, Value as SqlValue, ValueWithSpan};
 
@@ -18,7 +19,7 @@ pub(crate) const MAX_VALUES: usize = 32;
 const PREFIX: &str = "typing.Literal[";
 
 /// One member of a set; a set holds only one kind.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Value {
     Str(String),
     Int(i64),
@@ -125,8 +126,9 @@ pub(crate) fn base(python_type: &str) -> Option<&'static str> {
 
 /// The members of both sets, in first-seen order.
 pub(crate) fn union(mut left: Vec<Value>, right: Vec<Value>) -> Vec<Value> {
+    let mut seen: FxHashSet<Value> = left.iter().cloned().collect();
     for value in right {
-        if !left.contains(&value) {
+        if seen.insert(value.clone()) {
             left.push(value);
         }
     }
@@ -134,7 +136,17 @@ pub(crate) fn union(mut left: Vec<Value>, right: Vec<Value>) -> Vec<Value> {
 }
 
 pub(crate) fn intersect(left: Vec<Value>, right: &[Value]) -> Vec<Value> {
+    let right: FxHashSet<&Value> = right.iter().collect();
     left.into_iter().filter(|v| right.contains(v)).collect()
+}
+
+/// `left` without the values of `right`.
+pub(crate) fn difference(left: &[Value], right: &[Value]) -> Vec<Value> {
+    let right: FxHashSet<&Value> = right.iter().collect();
+    left.iter()
+        .filter(|v| !right.contains(v))
+        .cloned()
+        .collect()
 }
 
 /// The values `expr` (a `CHECK` condition) limits the column `is_target` recognizes to.
@@ -269,6 +281,15 @@ mod tests {
 
     fn strs(items: &[&str]) -> Vec<Value> {
         items.iter().map(|s| Value::Str((*s).to_string())).collect()
+    }
+
+    #[test]
+    fn set_operations_on_large_sets_take_linear_time() {
+        let many: Vec<Value> = (0..100_000).map(Value::Int).collect();
+        assert_eq!(union(many.clone(), many.clone()), many);
+        assert_eq!(intersect(many.clone(), &many), many);
+        assert!(difference(&many, &many).is_empty());
+        assert_eq!(difference(&many, &many[1..]), [Value::Int(0)]);
     }
 
     fn check(sql: &str) -> Option<Vec<Value>> {

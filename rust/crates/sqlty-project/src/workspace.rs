@@ -1185,6 +1185,29 @@ mod tests {
     }
 
     #[test]
+    fn warns_about_a_schema_too_large_to_load() {
+        let columns: Vec<String> = (0..4096).map(|i| format!("c{i} int")).collect();
+        let indexes: String = (0..1024)
+            .map(|i| format!("CREATE UNIQUE INDEX i{i} ON big (c{i});\n"))
+            .collect();
+        let schema = format!(
+            "CREATE TABLE big ({});\n{indexes}CREATE TABLE later (a int);",
+            columns.join(", ")
+        );
+        let workspace = opened(&[
+            (
+                "/repo/pyproject.toml",
+                "[tool.sqlty]\nschema = \"schema.sql\"\n",
+            ),
+            ("/repo/schema.sql", schema.leak()),
+        ]);
+        assert_eq!(
+            workspace.warnings(),
+            ["Schema is too large to load; ignored: CREATE TABLE later (a int) and later"]
+        );
+    }
+
+    #[test]
     fn reads_the_project_without_a_configuration() {
         let mut workspace = opened(&[
             ("/repo/pyproject.toml", "[tool"),

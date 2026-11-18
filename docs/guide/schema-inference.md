@@ -417,6 +417,16 @@ ignored, so the columns keep what the earlier statements gave them.
 `ALTER SCHEMA ... RENAME` are not followed. Views are analyzed against the
 tables as they are where the view is created.
 
+Limits keep a hostile or generated schema from taking minutes or all memory. A
+table, view or function result of over 4,096 columns (MySQL's maximum, above
+PostgreSQL's 1,600) has an unknown shape, and so does a query result that wide. A
+relation that would take the schema past 262,144 columns in all is left unknown,
+and a schema that keeps rewriting wide tables (each `ALTER` or index reads all the
+table's columns again) is read only up to about four million column updates:
+`sqlty check` warns `Schema is too large to load` and names the first statement it
+ignored. Tables built from tables defined further down are followed for about a
+thousand levels; deeper ones have an unknown shape.
+
 MySQL and SQLite follow `ALTER TABLE` (`ADD`, `DROP` and `RENAME COLUMN`,
 `RENAME TO`, MySQL's `MODIFY` and `CHANGE` with `FIRST` / `AFTER`) and `DROP`
 too; other dialects read `CREATE` statements only. A MySQL `MODIFY` or `CHANGE`

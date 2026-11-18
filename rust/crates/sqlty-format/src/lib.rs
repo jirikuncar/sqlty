@@ -40,6 +40,18 @@ use sqruff_lib::core::linter::linted_file::LintedFile;
 static PLACEHOLDER: LazyLock<Regex> =
     LazyLock::new(|| sqlty_sql::regex(r"%(?:\([^)]*\))?[sbt]|%%|\?|\{\w*\}"));
 
+/// The most words and symbols of a query given to sqruff, whose parser takes seconds past a
+/// few thousand.
+const MAX_TOKENS: usize = 4096;
+
+fn too_long(query: &str) -> bool {
+    let words = query
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|word| !word.is_empty())
+        .count();
+    words + query.chars().filter(char::is_ascii_punctuation).count() > MAX_TOKENS
+}
+
 /// `source` with every query string sqruff can lay out formatted in `dialect`.
 pub fn format_source(source: &str, dialect: &str, style: &ImportStyle) -> String {
     with_linter(dialect, "rules = layout", |linter| {
@@ -115,6 +127,9 @@ fn lint_with(linter: &Linter, source: &str, style: &ImportStyle) -> Vec<Finding>
         }) else {
             continue;
         };
+        if too_long(&query.text) {
+            continue;
+        }
         // Same length, so offsets in the query hold.
         let protected = PLACEHOLDER.replace_all(&query.text, |found: &regex::Captures| {
             "p".repeat(found[0].len())
@@ -153,7 +168,7 @@ fn format_query(linter: &Linter, query: &str) -> Option<String> {
     let lead = &query[..trimmed.len() - body.len()];
     let trail = &query[trimmed.len()..];
     let indent = &body[..body.len() - body.trim_start().len()];
-    if body.trim().is_empty() || indent.contains('\n') {
+    if body.trim().is_empty() || indent.contains('\n') || too_long(body) {
         return None;
     }
     let dedented = body
@@ -309,6 +324,25 @@ mod tests {
         );
         let empty = "q = \"\"\"--sql\n   \"\"\"\n";
         assert_eq!(format(empty), empty);
+    }
+
+    #[test]
+    fn a_query_past_max_tokens_is_neither_formatted_nor_linted() {
+        let style = ImportStyle::parse(None).unwrap();
+        let sum = |terms: usize| vec!["a"; terms].join("+");
+        let short = format!("q = \"\"\"--sql\nselect {}\"\"\"\n", sum(2));
+        assert_ne!(format_source(&short, "postgres", &style), short);
+        // `select`, each `a` and each `+`: one past the limit.
+        let long = format!(
+            "q = \"\"\"--sql\nselect {}\"\"\"\n",
+            sum(MAX_TOKENS / 2 + 1)
+        );
+        assert_eq!(format_source(&long, "postgres", &style), long);
+        let distinct = format!(
+            "q = \"--sql\\nselect distinct(a), {} from t\"\n",
+            sum(MAX_TOKENS / 2)
+        );
+        assert_eq!(lint(&distinct), []);
     }
 
     #[test]

@@ -72,6 +72,10 @@ pub(super) fn read_statements<'a>(
     let parse_part = |text: &str| Parser::new(parser_dialect.as_ref()).try_with_sql(text).ok();
     for stmt in statements {
         let stmt = &stmt;
+        if loader.exhausted() {
+            skipped.push(("limit", format!("{} and later", statement_text(stmt))));
+            break;
+        }
         if postgres {
             if let Some(schemas) = stmt.search_path() {
                 loader.search_path = schemas.clone();

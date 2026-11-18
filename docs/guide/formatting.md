@@ -58,6 +58,7 @@ Other strings are left alone:
 | `"--sql\nSELECT a, b FROM t"` | A single-quoted string would need `\n` escapes for every new line |
 | `"""--sql\nSELECT 'a\tb'"""` | A backslash: the text in the source is not the query |
 | `f"""--sql ..."""`, `r"""..."""`, `"a" "b"` | f-, raw and bytes strings, and literals joined across lines |
+| A query of over 4,096 words and symbols | sqruff takes seconds to lay out one that long |
 
 ```python
 q = "--sql\nselect a,b from t"

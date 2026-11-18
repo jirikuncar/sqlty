@@ -23,11 +23,12 @@ use crate::ddl::{RowEvents, RowTrigger};
 use crate::values::{self, Value};
 
 use super::columns::{
-    apply_check, column_named, is_rowid_type, mark_primary_key, merge_column, nonnull_groups,
+    apply_check, column_named, is_rowid_type, mark_primary_key, merge_columns, nonnull_groups,
     raw_column, unique_key, RawColumn,
 };
 use super::names::{fold, key_of, lookup_key, parts, schema_for_new, type_key};
 use super::{Catalog, ForeignKey, TypeOverrides, BUILTIN_SCHEMAS};
+use crate::MAX_COLUMNS;
 
 #[derive(Clone, Default, PartialEq)]
 pub(super) struct RawTable {
@@ -73,6 +74,13 @@ pub(super) enum Rel {
 }
 
 impl Rel {
+    fn width(&self) -> usize {
+        match self {
+            Rel::Table(table) => table.columns.len(),
+            Rel::View(columns) => columns.len(),
+        }
+    }
+
     pub(super) fn table(&self) -> Option<&RawTable> {
         match self {
             Rel::Table(table) => Some(table),
@@ -175,7 +183,23 @@ pub(super) struct Loader {
     pub(super) returned_by: FxHashMap<String, FxHashSet<String>>,
     /// Tables some table inherits from or is a partition of; no other has descendants.
     pub(super) inherited: FxHashSet<String>,
+    /// Columns of all relations, at most [`MAX_SCHEMA_COLUMNS`].
+    held: usize,
+    /// Columns of the relations set so far, each time one is set.
+    written: usize,
 }
+
+/// The most columns all relations hold: some 120 MB, past any real schema. A table built
+/// `LIKE` a wide one copies its columns, so a short schema could otherwise fill memory.
+pub(super) const MAX_SCHEMA_COLUMNS: usize = 1 << 18;
+
+/// The most statements [`Loader::run`] tries again, in all passes.
+pub(super) const MAX_RETRIES: usize = 1 << 20;
+
+/// The most columns the loader writes: each `ALTER` or index on a table resolves all its
+/// columns again, so a short schema could otherwise take minutes. Real ones write a few
+/// hundred thousand.
+pub(super) const MAX_WRITTEN: usize = 1 << 22;
 
 impl Loader {
     pub(super) fn new(dialect: SqlDialect) -> Self {
@@ -194,6 +218,8 @@ impl Loader {
             returned_by: FxHashMap::default(),
             overrides: Arc::default(),
             inherited: FxHashSet::default(),
+            held: 0,
+            written: 0,
         }
     }
 
@@ -214,6 +240,8 @@ impl Loader {
             overrides: Arc::clone(&self.overrides),
             returned_by: self.returned_by.clone(),
             inherited: self.inherited.clone(),
+            held: self.held,
+            written: 0,
         }
     }
 
@@ -266,11 +294,20 @@ impl Loader {
     /// Apply every op, retrying the ones whose dependencies are missing until a pass
     /// changes nothing; then give up on them, views last.
     pub(super) fn run(&mut self, mut pending: Vec<Op>) {
+        let mut retries = 0;
         loop {
+            if self.exhausted() {
+                if !pending.is_empty() {
+                    let waiting = format!("{} statements waiting on others", pending.len());
+                    self.skipped.push(("limit", waiting));
+                }
+                return;
+            }
             let mut progress = false;
             let mut next = Vec::new();
+            retries += pending.len();
             for op in pending {
-                if self.apply(&op, false) {
+                if !self.exhausted() && self.apply(&op, false) {
                     progress = true;
                 } else {
                     next.push(op);
@@ -280,7 +317,9 @@ impl Loader {
             if pending.is_empty() {
                 return;
             }
-            if progress {
+            // A pass may take one statement of a chain written backwards: past
+            // `MAX_RETRIES`, the rest count as stuck rather than take quadratic time.
+            if progress && retries <= MAX_RETRIES {
                 continue;
             }
             // Stuck: nothing waits on anything that will appear. Give up on tables first
@@ -302,12 +341,18 @@ impl Loader {
             {
                 pending.retain(|op| matches!(op.kind, OpKind::View(..)));
             } else {
-                for op in &pending {
+                pending.retain(|op| {
+                    if self.exhausted() {
+                        return true;
+                    }
                     if !self.apply(op, false) {
                         self.apply(op, true);
                     }
+                    false
+                });
+                if pending.is_empty() {
+                    return;
                 }
-                return;
             }
         }
     }
@@ -439,10 +484,12 @@ impl Loader {
                 let Some((parent, parent_table)) = self.table_of(source, path) else {
                     return false;
                 };
-                table.unknown |= parent_table.unknown;
-                for column in parent_table.columns.clone() {
-                    merge_column(&mut table.columns, column);
+                if self.too_wide(table.columns.len() + parent_table.columns.len()) {
+                    self.give_up(create, path);
+                    return true;
                 }
+                table.unknown |= parent_table.unknown;
+                merge_columns(&mut table.columns, parent_table.columns.clone());
                 self.inherited.insert(parent.clone());
                 table.parents.push(parent);
             }
@@ -459,19 +506,26 @@ impl Loader {
                 let Some((_, from_table)) = self.table_of(source, path) else {
                     return false;
                 };
-                table.unknown |= from_table.unknown;
-                for column in from_table.columns.clone() {
-                    merge_column(&mut table.columns, column);
+                if self.too_wide(table.columns.len() + from_table.columns.len()) {
+                    self.give_up(create, path);
+                    return true;
                 }
+                table.unknown |= from_table.unknown;
+                merge_columns(&mut table.columns, from_table.columns.clone());
             }
         }
         // A PostgreSQL `PARTITION OF` column without a type only adds constraints; a SQLite
         // column may have no type at all.
-        for column in &create.columns {
-            if column.data_type != DataType::Unspecified || self.dialect == SqlDialect::Sqlite {
-                merge_column(&mut table.columns, raw_column(column, self.dialect));
-            }
-        }
+        merge_columns(
+            &mut table.columns,
+            create
+                .columns
+                .iter()
+                .filter(|column| {
+                    column.data_type != DataType::Unspecified || self.dialect == SqlDialect::Sqlite
+                })
+                .map(|column| raw_column(column, self.dialect)),
+        );
         // SQLite lets a PRIMARY KEY hold NULL, except in a WITHOUT ROWID or STRICT table or
         // as the sole `INTEGER` column, which is the rowid.
         let loose_keys =
@@ -757,6 +811,7 @@ impl Loader {
     /// Set (or, with `None`, remove) one relation, keeping the resolved catalog current
     /// without building it again.
     pub(super) fn set_relation(&mut self, key: String, rel: Option<Rel>) {
+        let rel = rel.map(|rel| self.within_limits(&key, rel));
         let dialect = self.dialect;
         let resolved = self.cache.as_ref().map(|cache| {
             rel.as_ref()
@@ -764,7 +819,12 @@ impl Loader {
         });
         match rel {
             Some(rel) => self.relations.insert(key.clone(), rel),
-            None => self.relations.remove(&key),
+            None => {
+                self.held = self
+                    .held
+                    .saturating_sub(self.relations.get(&key).map_or(0, Rel::width));
+                self.relations.remove(&key)
+            }
         };
         let (Some(resolved), Some(cache)) = (resolved, self.cache.as_mut()) else {
             return;
@@ -794,6 +854,41 @@ impl Loader {
         for reader in readers {
             self.refresh_function(reader);
         }
+    }
+
+    /// `rel`, or one of unknown shape when it is wider than [`MAX_COLUMNS`] or would take
+    /// the schema past [`MAX_SCHEMA_COLUMNS`].
+    fn within_limits(&mut self, key: &str, rel: Rel) -> Rel {
+        self.held = self
+            .held
+            .saturating_sub(self.relations.get(key).map_or(0, Rel::width));
+        if !self.too_wide(rel.width()) {
+            self.held += rel.width();
+            self.written += rel.width();
+            return rel;
+        }
+        match rel {
+            Rel::Table(_) => {
+                self.skipped.push(("table", key.to_string()));
+                Rel::Table(RawTable {
+                    unknown: true,
+                    ..RawTable::default()
+                })
+            }
+            Rel::View(_) => {
+                self.skipped.push(("view", key.to_string()));
+                Rel::View(vec![Column::unknown("*")])
+            }
+        }
+    }
+
+    /// Whether the loader wrote [`MAX_WRITTEN`] columns: it reads no more statements.
+    pub(super) fn exhausted(&self) -> bool {
+        self.written > MAX_WRITTEN
+    }
+
+    fn too_wide(&self, width: usize) -> bool {
+        width > MAX_COLUMNS || self.held + width > MAX_SCHEMA_COLUMNS
     }
 
     /// Tables that inherit from or are partitions of `key`, nested ones included.
@@ -908,6 +1003,7 @@ impl Loader {
                         let schema = name_parts.last().map_or("", String::as_str);
                         let prefix = format!("{schema}.");
                         self.relations.retain(|key, _| !key.starts_with(&prefix));
+                        self.held = self.relations.values().map(Rel::width).sum();
                         self.types.retain(|key, _| !key.starts_with(&prefix));
                         self.functions.retain(|key, _| !key.starts_with(&prefix));
                     }
@@ -976,24 +1072,29 @@ impl Loader {
             })
             .collect();
         let returns = match &create.return_type {
-            Some(FunctionReturnType::DataType(DataType::Table(Some(columns)))) => RawReturn::Rows(
-                columns
-                    .iter()
-                    .map(|c| (fold(&c.name, self.dialect), c.data_type.clone()))
-                    .collect(),
-            ),
+            Some(FunctionReturnType::DataType(DataType::Table(Some(columns)))) => {
+                Some(RawReturn::Rows(
+                    columns
+                        .iter()
+                        .map(|c| (fold(&c.name, self.dialect), c.data_type.clone()))
+                        .collect(),
+                ))
+            }
             Some(FunctionReturnType::DataType(dt)) if outs.len() < 2 => {
-                RawReturn::Scalar(dt.clone())
+                Some(RawReturn::Scalar(dt.clone()))
             }
-            Some(FunctionReturnType::SetOf(dt)) => RawReturn::SetOf(dt.clone()),
-            _ if outs.len() >= 2 => RawReturn::Rows(outs),
-            _ if outs.len() == 1 => RawReturn::Scalar(outs[0].1.clone()),
-            _ => {
-                self.functions.entry(key.clone()).or_default();
-                self.unknown_functions.insert(key.clone());
-                self.refresh_function(key);
-                return;
-            }
+            Some(FunctionReturnType::SetOf(dt)) => Some(RawReturn::SetOf(dt.clone())),
+            _ if outs.len() >= 2 => Some(RawReturn::Rows(outs)),
+            _ if outs.len() == 1 => Some(RawReturn::Scalar(outs[0].1.clone())),
+            _ => None,
+        };
+        let Some(returns) = returns
+            .filter(|returns| !matches!(returns, RawReturn::Rows(c) if c.len() > MAX_COLUMNS))
+        else {
+            self.functions.entry(key.clone()).or_default();
+            self.unknown_functions.insert(key.clone());
+            self.refresh_function(key);
+            return;
         };
         let function = RawFunction {
             args: inputs.iter().map(|a| a.data_type.clone()).collect(),

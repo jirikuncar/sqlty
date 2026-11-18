@@ -58,13 +58,13 @@ pub fn highlight(sql: &str, dialect: &str) -> Vec<(Range<usize>, Highlight)> {
     let tokens = match Tokenizer::new(dialect.as_ref(), sql).tokenize_with_location() {
         Ok(tokens) => tokens,
         Err(error) => {
-            let end = offset(sql, &line_starts(sql), error.location).unwrap_or(0);
+            let end = Offsets::new(sql).offset(error.location).unwrap_or(0);
             Tokenizer::new(dialect.as_ref(), &sql[..end])
                 .tokenize_with_location()
                 .unwrap_or_default()
         }
     };
-    let lines = line_starts(sql);
+    let mut offsets = Offsets::new(sql);
     let percent = percent_placeholders(sql);
     let mut found: Vec<_> = percent
         .iter()
@@ -100,15 +100,16 @@ pub fn highlight(sql: &str, dialect: &str) -> Vec<(Range<usize>, Highlight)> {
             _ => Some(Highlight::Operator),
         };
         after_period = token == Token::Period;
-        let (Some(kind), Some(start), Some(end)) = (
-            kind,
-            offset(sql, &lines, span.start),
-            offset(sql, &lines, span.end),
-        ) else {
+        let Some(kind) = kind else {
+            continue;
+        };
+        let (Some(start), Some(end)) = (offsets.offset(span.start), offsets.offset(span.end))
+        else {
             continue;
         };
         let end = start + sql[start..end].trim_end().len();
-        if start < end && !percent.iter().any(|at| at.contains(&start)) {
+        let after = percent.partition_point(|at| at.end <= start);
+        if start < end && !percent.get(after).is_some_and(|at| at.contains(&start)) {
             found.push((start..end, kind));
         }
     }
@@ -141,24 +142,44 @@ fn is_string(token: &Token) -> bool {
     )
 }
 
-fn line_starts(sql: &str) -> Vec<usize> {
-    std::iter::once(0)
-        .chain(sql.match_indices('\n').map(|(at, _)| at + 1))
-        .collect()
+/// Byte offsets of 1-based lines and columns (in characters), read forward from the last
+/// one asked for: tokens come in order, so a long line is walked once, not once per token.
+struct Offsets<'s> {
+    sql: &'s str,
+    lines: Vec<usize>,
+    line: usize,
+    column: usize,
+    at: usize,
 }
 
-/// The byte offset of a 1-based line and column (in characters).
-fn offset(sql: &str, lines: &[usize], location: sqlparser::tokenizer::Location) -> Option<usize> {
-    let start = *lines.get(usize::try_from(location.line).ok()?.checked_sub(1)?)?;
-    let column = usize::try_from(location.column).ok()?.checked_sub(1)?;
-    let line = &sql[start..];
-    Some(
-        start
-            + line
-                .char_indices()
-                .nth(column)
-                .map_or(line.len(), |(at, _)| at),
-    )
+impl<'s> Offsets<'s> {
+    fn new(sql: &'s str) -> Self {
+        let lines = std::iter::once(0)
+            .chain(sql.match_indices('\n').map(|(at, _)| at + 1))
+            .collect();
+        Offsets {
+            sql,
+            lines,
+            line: 0,
+            column: 0,
+            at: 0,
+        }
+    }
+
+    fn offset(&mut self, location: sqlparser::tokenizer::Location) -> Option<usize> {
+        let line = usize::try_from(location.line).ok()?.checked_sub(1)?;
+        let column = usize::try_from(location.column).ok()?.checked_sub(1)?;
+        let start = *self.lines.get(line)?;
+        if line != self.line || column < self.column {
+            (self.line, self.column, self.at) = (line, 0, start);
+        }
+        let Some((ahead, _)) = self.sql[self.at..].char_indices().nth(column - self.column) else {
+            return Some(self.sql.len());
+        };
+        self.column = column;
+        self.at += ahead;
+        Some(self.at)
+    }
 }
 
 /// Sorted, for a binary search.
@@ -277,6 +298,26 @@ mod tests {
             .into_iter()
             .map(|(range, kind)| (&sql[range], kind))
             .collect()
+    }
+
+    #[test]
+    fn a_long_line_with_many_placeholders() {
+        // Each token used to count characters from its line's start and look at every
+        // placeholder: quadratic in the line's length.
+        let sql = format!(
+            "SELECT x\nFROM t WHERE a IN ({})",
+            vec!["%s"; 50_000].join(", ")
+        );
+        let found = colored(&sql, "postgres");
+        assert_eq!(found.len(), 4 + 50_000);
+        assert_eq!(
+            found[3..6],
+            [
+                ("IN", Highlight::Keyword),
+                ("%s", Highlight::Parameter),
+                ("%s", Highlight::Parameter)
+            ]
+        );
     }
 
     #[test]

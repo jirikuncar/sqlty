@@ -1,12 +1,14 @@
 //! Byte offsets of the checker against the positions of the protocol.
 
 use lsp_types::{Position, PositionEncodingKind, Range, TextEdit};
+use sqlty_python::utf16::Utf16;
 
 /// Where each line of a text starts, to turn byte offsets into positions and back.
 pub(crate) struct LineIndex<'a> {
     text: &'a str,
     starts: Vec<usize>,
     utf8: bool,
+    units: Utf16,
 }
 
 impl<'a> LineIndex<'a> {
@@ -18,17 +20,18 @@ impl<'a> LineIndex<'a> {
             text,
             starts,
             utf8: *encoding == PositionEncodingKind::UTF8,
+            units: Utf16::new(text),
         }
     }
 
     pub(crate) fn position(&self, offset: usize) -> Position {
         let offset = self.boundary(offset.min(self.text.len()));
         let line = self.starts.partition_point(|&start| start <= offset) - 1;
-        let before = &self.text[self.starts[line]..offset];
+        let start = self.starts[line];
         let character = if self.utf8 {
-            before.len()
+            offset - start
         } else {
-            before.encode_utf16().count()
+            self.units.at(offset) - self.units.at(start)
         };
         Position::new(count(line), count(character))
     }
