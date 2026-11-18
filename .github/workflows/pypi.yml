@@ -194,7 +194,7 @@ jobs:
           name: sdist
           path: dist/*.tar.gz
 
-  # The native sqlty executable (sqlty-cli), for npm, Homebrew and the GitHub Release.
+  # The native sqlty executable (sqlty-cli), for npm and Homebrew.
   # Linux builds are static (musl), so one runs on every distribution.
   build-binaries:
     name: Build binary (${{ matrix.target }})
@@ -245,25 +245,14 @@ jobs:
         if: env.SKIP != 'true'
         run: cargo build --locked --profile dist -p sqlty-cli --target "$TARGET" --manifest-path rust/Cargo.toml
 
-      - name: Archive
+      - name: Check the binary
         if: env.SKIP != 'true'
         run: |
           exe=sqlty; [[ $TARGET == *windows* ]] && exe=sqlty.exe
-          mkdir -p "dist/bin/$TARGET" dist/archives
+          mkdir -p "dist/bin/$TARGET"
           cp "rust/target/$TARGET/dist/$exe" "dist/bin/$TARGET/"
           version=$(sed -n '/^\[workspace.package\]/{n;s/^version = "\(.*\)"/\1/p;}' rust/Cargo.toml)
           test "$("dist/bin/$TARGET/$exe" version)" = "sqlty $version"
-          staging=$(mktemp -d)
-          cp "dist/bin/$TARGET/$exe" LICENSE README.md "$staging/"
-          if [[ $TARGET == *windows* ]]; then
-            archive=sqlty-$TARGET.zip
-            pwsh -Command "Compress-Archive -Path '$(cygpath -m "$staging")/*' -DestinationPath dist/archives/$archive"
-          else
-            archive=sqlty-$TARGET.tar.gz
-            tar czf "dist/archives/$archive" -C "$staging" .
-          fi
-          sha256=sha256sum; command -v sha256sum >/dev/null || sha256="shasum -a 256"
-          (cd dist/archives && $sha256 "$archive" > "$archive.sha256")
 
       - name: Upload binary
         if: env.SKIP != 'true'
@@ -311,27 +300,6 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           repository-url: https://test.pypi.org/legacy/
-
-  release-binaries:
-    name: Attach binaries to the release
-    if: github.event_name == 'release' && github.event.action == 'published'
-    needs: build-binaries
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: binary-*
-          path: dist/
-          merge-multiple: true
-
-      - name: Upload to the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name }}
-        run: gh release upload "$TAG" dist/archives/* --clobber --repo "$GITHUB_REPOSITORY"
 
   # A run by hand packs and checks every package without publishing it.
   publish-to-npm:
@@ -383,11 +351,12 @@ jobs:
             (cd "$package" && npm publish --access public ${DRY_RUN:---provenance})
           done
 
-  # A run by hand prints the formula without pushing it.
+  # The formula downloads the platform packages from npm. A run by hand prints it without
+  # pushing it.
   publish-to-homebrew:
     name: Update the Homebrew tap
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && github.event.action == 'published')
-    needs: build-binaries
+    needs: publish-to-npm
     runs-on: ubuntu-latest
     environment:
       name: homebrew
@@ -398,21 +367,30 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.1
+          package-manager-cache: false
+
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: binary-*
           path: dist/
           merge-multiple: true
 
+      # The same tarballs the npm job published (it checks their integrity on the registry).
       - name: Write the formula
         env:
           TAG: ${{ github.event.release.tag_name }}
         run: |
           version=$(sed -n '/^\[workspace.package\]/{n;s/^version = "\(.*\)"/\1/p;}' rust/Cargo.toml)
-          # The formula downloads the archives of the tag v<version>.
           [ -z "$TAG" ] || [ "$TAG" = "v$version" ]
           echo "VERSION=$version" >> "$GITHUB_ENV"
-          python3 scripts/package_binaries.py homebrew "$version" dist/archives > sqlty.rb
+          mkdir -p dist/tarballs
+          for package in $(python3 scripts/package_binaries.py npm "$version" dist/bin dist/npm); do
+            (cd "$package" && npm pack --silent --pack-destination "$GITHUB_WORKSPACE/dist/tarballs")
+          done
+          python3 scripts/package_binaries.py homebrew "$version" dist/tarballs > sqlty.rb
           cat sqlty.rb
 
       - name: Push the formula to the tap
