@@ -1762,16 +1762,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "sqlty-bench"
-version = "0.7.1"
-dependencies = [
- "criterion",
- "sqlty-python",
- "sqlty-sql",
-]
-
-[[package]]
-name = "sqlty-cli"
+name = "sqlty"
 version = "0.7.1"
 dependencies = [
  "clap",
@@ -1787,6 +1778,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sqlty-bench"
+version = "0.7.1"
+dependencies = [
+ "criterion",
+ "sqlty-python",
+ "sqlty-sql",
+]
+
+[[package]]
 name = "sqlty-core"
 version = "0.7.1"
 dependencies = [
@@ -1799,7 +1799,7 @@ dependencies = [
  "ruff_python_ast",
  "ruff_python_parser",
  "ruff_text_size",
- "sqlty-cli",
+ "sqlty",
  "sqlty-format",
  "sqlty-lsp",
  "sqlty-project",

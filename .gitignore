@@ -51,3 +51,6 @@ docs/assets/vendor/
 # Cloudflare deploys (docs-preview.yml)
 /public/
 .wrangler/
+
+# make crates
+rust/crates/sqlty-cli/embedded/

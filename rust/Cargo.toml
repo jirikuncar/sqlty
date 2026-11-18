@@ -25,12 +25,12 @@ toml = { version = "1.1", features = ["preserve_order"] }
 ruff_python_ast = "=0.0.21"
 ruff_python_parser = "=0.0.21"
 ruff_text_size = "=0.0.21"
-sqlty-sql = { path = "crates/sqlty-sql" }
-sqlty-python = { path = "crates/sqlty-python" }
-sqlty-lsp = { path = "crates/sqlty-lsp" }
-sqlty-format = { path = "crates/sqlty-format" }
-sqlty-project = { path = "crates/sqlty-project" }
-sqlty-cli = { path = "crates/sqlty-cli" }
+sqlty-sql = { path = "crates/sqlty-sql", version = "0.7.1" }
+sqlty-python = { path = "crates/sqlty-python", version = "0.7.1" }
+sqlty-lsp = { path = "crates/sqlty-lsp", version = "0.7.1" }
+sqlty-format = { path = "crates/sqlty-format", version = "0.7.1" }
+sqlty-project = { path = "crates/sqlty-project", version = "0.7.1" }
+sqlty-cli = { package = "sqlty", path = "crates/sqlty-cli", version = "0.7.1" }
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }

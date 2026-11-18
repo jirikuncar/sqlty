@@ -2,10 +2,10 @@
 name = "sqlty-project"
 version.workspace = true
 edition.workspace = true
-description.workspace = true
+description = "A project as sqlty check reads it: files, configuration and schema"
 license.workspace = true
 repository.workspace = true
-publish.workspace = true
+publish = true
 rust-version.workspace = true
 
 [lints]

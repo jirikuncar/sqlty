@@ -2,10 +2,10 @@
 name = "sqlty-lsp"
 version.workspace = true
 edition.workspace = true
-description.workspace = true
+description = "Language server of sqlty: diagnostics, quick fixes, completion and hover in SQL query strings"
 license.workspace = true
 repository.workspace = true
-publish.workspace = true
+publish = true
 rust-version.workspace = true
 
 [lints]

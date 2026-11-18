@@ -231,11 +231,16 @@ from; with `NAME.out/`, the commands share one copy of it and each file there
 must match what they leave; a case that writes files needs one. Write new output into the cases with:
 
 ```bash
-TRYCMD=overwrite uv run cargo test -p sqlty-cli --test cli --manifest-path rust/Cargo.toml
+TRYCMD=overwrite uv run cargo test -p sqlty --test cli --manifest-path rust/Cargo.toml
 ```
 
 It updates the files already in `.out/`; add new ones by hand, where `...` matches any lines.
 Output backslashes read as `/`, so keep `\n` out of what a case prints.
+
+`cargo install sqlty` builds the same executable from crates.io. `make crates` copies
+`skills/` and `src/sqlty/rules/` into the package, which cannot read outside its directory,
+and packages `sqlty-sql`, `sqlty-python`, `sqlty-format`, `sqlty-lsp`, `sqlty-project` and
+`sqlty` in dependency order; `cargo publish` with the same `-p` flags publishes them.
 
 ### Fuzzing the analyzer
 

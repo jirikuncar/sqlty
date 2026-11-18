@@ -22,11 +22,15 @@ fn main() {
     .unwrap();
 }
 
-/// `pub static NAME: &[(&str, &str)]`: the files under `dir` of the repository, by path.
+/// `pub static NAME: &[(&str, &str)]`: the files under `dir` of the repository, by path;
+/// of `embedded/`, where `make crates` copies them, in a package built outside it.
 fn embed(dir: &str, name: &str) -> String {
-    let root = Path::new(&env::var("CARGO_MANIFEST_DIR").unwrap())
-        .join("../../..")
-        .join(dir);
+    let manifest = Path::new(&env::var("CARGO_MANIFEST_DIR").unwrap()).to_path_buf();
+    let repository = manifest.join("../../..");
+    let root = match repository.join("rust/crates/sqlty-cli/build.rs").exists() {
+        true => repository.join(dir),
+        false => manifest.join("embedded").join(dir),
+    };
     let root = root
         .canonicalize()
         .unwrap_or_else(|e| panic!("{}: {e}", root.display()));

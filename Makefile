@@ -44,6 +44,9 @@ help:
 	@echo "  check-playground  - Load the built playground in Chromium, as CI does"
 	@echo "  generate-docs     - Regenerate the tables in docs/reference/{configuration,cli}.md"
 	@echo ""
+	@echo "Release:"
+	@echo "  crates            - Package and verify the crates for crates.io"
+	@echo ""
 	@echo "Examples:"
 	@echo "  check-examples    - Run sqlty check on all examples"
 	@echo "  rewrite-examples  - Run sqlty rewrite on all examples"
@@ -167,6 +170,16 @@ playground:  ## The engine as WebAssembly, and Monaco and the fonts, for the doc
 	cp rust/target/wasm32-unknown-unknown/wasm/sqlty_wasm.wasm docs/assets/playground/
 	python3 scripts/generate_playground_examples.py
 	python3 scripts/vendor_assets.py
+
+CRATES := sqlty-sql sqlty-python sqlty-format sqlty-lsp sqlty-project sqlty
+
+.PHONY: crates
+crates:  ## Package and verify the crates for crates.io; `cargo publish` with the same flags publishes them
+	rm -rf rust/crates/sqlty-cli/embedded
+	mkdir -p rust/crates/sqlty-cli/embedded/src/sqlty
+	cp -R skills rust/crates/sqlty-cli/embedded/
+	cp -R src/sqlty/rules rust/crates/sqlty-cli/embedded/src/sqlty/
+	cargo package --manifest-path rust/Cargo.toml $(CRATES:%=-p %)
 
 .PHONY: check-playground
 check-playground: docs  ## Load the built playground under /sqlty/ in Chromium (needs `playwright install chromium`)

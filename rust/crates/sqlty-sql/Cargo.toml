@@ -5,7 +5,7 @@ edition.workspace = true
 description = "SQL schema parsing and type inference for sqlty"
 license.workspace = true
 repository.workspace = true
-publish.workspace = true
+publish = true
 rust-version.workspace = true
 
 [lints]

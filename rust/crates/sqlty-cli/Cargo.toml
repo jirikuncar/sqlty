@@ -1,12 +1,20 @@
 [package]
-name = "sqlty-cli"
+name = "sqlty"
 version.workspace = true
 edition.workspace = true
-description.workspace = true
+description = "Type-safe raw SQL for Python: row and parameter types inferred from your SQL and schema, no ORM or database needed"
+readme = "../../../README.md"
+keywords = ["sql", "python", "type-checker", "linter", "lsp"]
+categories = ["command-line-utilities", "development-tools", "database"]
+homepage = "https://sqlty.kuncar.dev"
+include = ["/src", "/build.rs", "/embedded"]
 license.workspace = true
 repository.workspace = true
-publish.workspace = true
+publish = true
 rust-version.workspace = true
+
+[lib]
+name = "sqlty_cli"
 
 [[bin]]
 name = "sqlty"
