@@ -24,6 +24,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::Range;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::rc::Rc;
 use std::sync::LazyLock;
 
@@ -138,7 +139,7 @@ fn lint_with(linter: &Linter, source: &str, style: &ImportStyle) -> Vec<Finding>
             .find_iter(&query.text)
             .map(|m| m.range())
             .collect();
-        let linted = linter.lint_string(&protected, None, false).ok();
+        let linted = sqruff(linter, &protected, false);
         for violation in linted.iter().flat_map(LintedFile::violations) {
             let slice = &violation.source_slice;
             let on_placeholder = placeholders.iter().any(|placeholder| {
@@ -158,6 +159,13 @@ fn lint_with(linter: &Linter, source: &str, style: &ImportStyle) -> Vec<Finding>
         }
     }
     found
+}
+
+/// What sqruff makes of `sql`, or `None` when it fails or panics on it.
+fn sqruff(linter: &Linter, sql: &str, fix: bool) -> Option<LintedFile> {
+    catch_unwind(AssertUnwindSafe(|| linter.lint_string(sql, None, fix)))
+        .ok()?
+        .ok()
 }
 
 /// `query` laid out, at the indentation of its first line, with its surrounding whitespace
@@ -181,10 +189,7 @@ fn format_query(linter: &Linter, query: &str) -> Option<String> {
         values.push(found[0].to_string());
         format!("__sqlty_{}__", values.len() - 1)
     });
-    let fixed = linter
-        .lint_string(&protected, None, true)
-        .ok()?
-        .fix_string();
+    let fixed = sqruff(linter, &protected, true)?.fix_string();
     let mut restored = fixed.trim_end().to_string();
     for (i, value) in values.iter().enumerate() {
         let name = format!("__sqlty_{i}__");
@@ -343,6 +348,16 @@ mod tests {
             sum(MAX_TOKENS / 2)
         );
         assert_eq!(lint(&distinct), []);
+    }
+
+    #[test]
+    fn a_query_sqruff_panics_on_is_not_formatted() {
+        let style = ImportStyle::parse(None).unwrap();
+        let source = format!(
+            "q = \"\"\"--sql\nSELECT * FROM t AS x({}--c\n,)\"\"\"\n",
+            "a".repeat(80)
+        );
+        assert_eq!(format_source(&source, "postgres", &style), source);
     }
 
     #[test]
