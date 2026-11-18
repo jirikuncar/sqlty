@@ -233,7 +233,7 @@ def generate(
     pkg = root / PKG
     pkg.mkdir(parents=True, exist_ok=True)
     (root / "pyproject.toml").write_text(
-        '[tool.sqlty]\ndialect = "postgres"\nschema = "schema.sql"\n'
+        '[tool.sqlty]\ndialect = "postgres"\nschema = "schema.sql"\nparam-types = true\n'
     )
     (root / "schema.sql").write_text(schema_sql(tables, seed))
     (pkg / "__init__.py").write_text("")
