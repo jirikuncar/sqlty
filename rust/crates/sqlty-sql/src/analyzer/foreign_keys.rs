@@ -11,7 +11,7 @@ use std::ops::ControlFlow;
 
 use sqlparser::ast::{
     BinaryOperator, Expr, Ident, InTarget, Query, Select, SelectItem, SetExpr, Spanned,
-    TableFactor, Visit, Visitor,
+    TableFactor, Value, Visit, Visitor,
 };
 use sqlparser::tokenizer::Span;
 
@@ -76,8 +76,8 @@ struct Group<'s> {
     pairs: Vec<Pair<'s>>,
     /// The pairs before it come from the enclosing `AND`, judged one by one there.
     seeded: usize,
-    /// `(row, column)` of each column equal to a constant or parameter.
-    pinned: Vec<(String, String)>,
+    /// `(row, column, value)` of each column equal to a constant or parameter.
+    pinned: Vec<(String, String, String)>,
     /// `(row, column)` of each column `IS NULL`.
     nulls: Vec<(String, String)>,
     /// Split into alternatives (`OR` branches, `IN` list items), each judging the keys
@@ -97,8 +97,12 @@ impl<'s> Group<'s> {
         }
     }
 
-    fn pins(&self, row: &str, column: &str) -> bool {
-        self.pinned.iter().any(|(r, c)| r == row && c == column)
+    /// The value `column` of `row` equals, when one does.
+    fn pin(&self, row: &str, column: &str) -> Option<&str> {
+        self.pinned
+            .iter()
+            .find(|(r, c, _)| r == row && c == column)
+            .map(|(_, _, value)| value.as_str())
     }
 }
 
@@ -160,7 +164,10 @@ impl<'s> Analyzer<'s> {
             let right = self.locate(&qualified(&scope[at].reference, ident), scope, "");
             let left = scope[..at]
                 .iter()
-                .find_map(|source| self.locate(&qualified(&source.reference, ident), scope, ""));
+                .rev()
+                .map(|source| qualified(&source.reference, ident))
+                .find(|column| self.resolves(column, scope))
+                .and_then(|column| self.locate(&column, scope, ""));
             if let (Some(left), Some(right)) = (left, right) {
                 into.pairs.extend(self.pair(left, right, ident.span));
             }
@@ -219,11 +226,16 @@ impl<'s> Analyzer<'s> {
             column.table == table && column.name == name
         };
         let entity = |column: &Column| self.schema.entity(column.table, &column.name);
+        // A column of the same name that is no key, of a log or audit table say.
+        let unkeyed = |column: &Column, targets: &[(&str, &str)]| {
+            targets.is_empty() && entity(column).is_none()
+        };
         let allowed = (left.table == right.table && left.name == right.name)
             || to_left.iter().any(|&target| is(right, target))
             || to_right.iter().any(|&target| is(left, target))
             || to_left.iter().any(|target| to_right.contains(target))
-            || entity(left).is_some_and(|root| Some(root) == entity(right));
+            || entity(left).is_some_and(|root| Some(root) == entity(right))
+            || left.name == right.name && (unkeyed(left, &to_left) || unkeyed(right, &to_right));
         if allowed || to_left.is_empty() && to_right.is_empty() {
             return;
         }
@@ -423,12 +435,12 @@ impl Match<'_> {
         self.fk.columns.iter().any(null)
             || (0..self.fk.columns.len()).all(|at| {
                 self.columns.iter().any(|(i, _, _)| *i == at)
-                    || group.pins(&self.row, &self.fk.columns[at])
-                        && self
-                            .fk
-                            .referred
-                            .get(at)
-                            .is_some_and(|referred| group.pins(other, referred))
+                    || group
+                        .pin(&self.row, &self.fk.columns[at])
+                        .is_some_and(|value| {
+                            let referred = self.fk.referred.get(at);
+                            referred.and_then(|referred| group.pin(other, referred)) == Some(value)
+                        })
             })
     }
 }
@@ -467,18 +479,18 @@ impl<'s> Reader<'_, 's> {
                     expr,
                     target: InTarget::List(list),
                     ..
-                } => lists.push((expr, list, term.span())),
-                _ if self.comparison(term, group) => {}
+                } if list.len() != 1 => lists.push((expr, list, term.span())),
                 _ => {
-                    let mut nested = Nested {
+                    let read = !self.comparison(term, group);
+                    let _ = term.visit(&mut Nested {
                         reader: self,
                         queries: 0,
-                    };
-                    let _ = term.visit(&mut nested);
+                        read,
+                    });
                 }
             }
         }
-        group.split |= !branches.is_empty() || !lists.is_empty();
+        group.split |= !branches.is_empty() || lists.iter().any(|(_, list, _)| !list.is_empty());
         for branch in branches {
             let _at = self.analyzer.diag.at(branch.span());
             let mut alternative = group.alternative();
@@ -503,8 +515,12 @@ impl<'s> Reader<'_, 's> {
             Expr::In {
                 expr: left,
                 target: InTarget::List(list),
+                negated,
                 ..
-            } => self.in_list(left, list, expr.span(), group),
+            } => match list.as_slice() {
+                [item] => self.compare(left, item, !negated, expr.span(), group),
+                _ => self.in_list(left, list, expr.span(), group),
+            },
             Expr::In {
                 expr: left,
                 target: InTarget::Subquery(subquery),
@@ -546,11 +562,15 @@ impl<'s> Reader<'_, 's> {
             analyzer.locate(right, scope, ""),
         ) {
             (Some(left), Some(right)) => group.pairs.extend(analyzer.pair(left, right, span)),
-            (Some(column), None) if pin && is_value(right) => {
-                group.pinned.push((column.row, column.name));
+            (Some(column), None) => {
+                group
+                    .pinned
+                    .extend(pinned(pin, right).map(|v| (column.row, column.name, v)));
             }
-            (None, Some(column)) if pin && is_value(left) => {
-                group.pinned.push((column.row, column.name));
+            (None, Some(column)) => {
+                group
+                    .pinned
+                    .extend(pinned(pin, left).map(|v| (column.row, column.name, v)));
             }
             _ => {}
         }
@@ -581,9 +601,7 @@ impl<'s> Reader<'_, 's> {
         if outer.len() != selected.len() {
             return;
         }
-        let mut quiet = self.analyzer.correlated(self.scope);
-        quiet.diag = Diagnostics::default();
-        let Ok((analyzer, inner_scope)) = quiet.scope_of(&inner.from);
+        let (analyzer, inner_scope) = self.inner_scope(inner);
         self.subqueries += 1;
         let row = format!("{}#", self.subqueries);
         for (left, right) in outer.into_iter().zip(selected) {
@@ -597,22 +615,48 @@ impl<'s> Reader<'_, 's> {
     }
 }
 
-/// A constant or parameter.
-fn is_value(expr: &Expr) -> bool {
-    matches!(strip(expr), Expr::Value(_))
+impl<'s> Reader<'_, 's> {
+    /// An analyzer of a subquery of a condition, recording nothing, and its scope.
+    fn inner_scope(&self, select: &Select) -> (Analyzer<'s>, Scope) {
+        let mut quiet = self.analyzer.correlated(self.scope);
+        quiet.diag = Diagnostics::default();
+        let Ok(inner) = quiet.scope_of(&select.from);
+        inner
+    }
+
+    /// Judges the comparisons of a subquery of a condition in its own scope.
+    fn judge_subquery(&self, query: &Query) {
+        if let SetExpr::Select(select) = query.body.as_ref() {
+            let (mut analyzer, scope) = self.inner_scope(select);
+            analyzer.diag = self.analyzer.diag.clone();
+            analyzer.check_foreign_keys(select, &scope);
+        }
+    }
 }
 
-/// Visits a term that is no comparison, reading each comparison in it, outside subqueries,
-/// as a group of its own.
+/// The constant or parameter `expr` is, when a column `=` it holds that value.
+fn pinned(pin: bool, expr: &Expr) -> Option<String> {
+    match strip(expr) {
+        Expr::Value(value) if pin && value.value != Value::Null => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+/// Visits a term, judging each subquery in it, and when the term is no comparison
+/// (`read`), reading each comparison in it outside subqueries as a group of its own.
 struct Nested<'r, 'a, 's> {
     reader: &'r mut Reader<'a, 's>,
     queries: usize,
+    read: bool,
 }
 
 impl Visitor for Nested<'_, '_, '_> {
     type Break = ();
 
-    fn pre_visit_query(&mut self, _query: &Query) -> ControlFlow<()> {
+    fn pre_visit_query(&mut self, query: &Query) -> ControlFlow<()> {
+        if self.queries == 0 {
+            self.reader.judge_subquery(query);
+        }
         self.queries += 1;
         ControlFlow::Continue(())
     }
@@ -623,7 +667,7 @@ impl Visitor for Nested<'_, '_, '_> {
     }
 
     fn pre_visit_expr(&mut self, expr: &Expr) -> ControlFlow<()> {
-        if self.queries == 0 {
+        if self.read && self.queries == 0 {
             let mut group = Group::default();
             if self.reader.comparison(expr, &mut group) {
                 self.reader.groups.push(group);

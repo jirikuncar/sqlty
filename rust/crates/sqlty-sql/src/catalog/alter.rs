@@ -5,8 +5,8 @@
 
 use sqlparser::ast::{
     AlterColumnOperation, AlterTable, AlterTableOperation, AlterType, AlterTypeAddValuePosition,
-    AlterTypeOperation, ColumnDef, ColumnOptionDef, DataType, Ident, MySQLColumnPosition,
-    ObjectName, RenameTableNameKind, TableConstraint,
+    AlterTypeOperation, ColumnDef, ColumnOption, ColumnOptionDef, DataType, Ident,
+    MySQLColumnPosition, ObjectName, RenameTableNameKind, TableConstraint,
 };
 
 use crate::analyzer::SqlDialect;
@@ -55,9 +55,26 @@ impl Loader {
                 }
                 continue;
             }
+            let added = match op {
+                AlterTableOperation::AddColumn { column_def, .. } => {
+                    let name = fold(&column_def.name, self.dialect);
+                    (!root.columns.iter().any(|c| c.name == name)).then_some(column_def)
+                }
+                _ => None,
+            };
             if let Err(fail) = alter_op(&mut root, op, true, &mut rename, self.dialect) {
                 failed = Some(fail);
                 break;
+            }
+            if let Some(def) = added {
+                for option in &def.options {
+                    if let ColumnOption::ForeignKey(fk) = &option.option {
+                        let columns = [def.name.clone()];
+                        if let Some(fk) = self.foreign_key(fk, &columns, &key, &root, path, true) {
+                            root.foreign_keys.push(fk);
+                        }
+                    }
+                }
             }
         }
         if matches!(failed, Some(AlterFail::Missing)) {
@@ -260,6 +277,7 @@ pub(super) fn alter_op(
             };
             let old = table.columns.remove(at);
             let mut column = raw_column(&def, dialect);
+            rename_in_foreign_keys(table, &old.name, &column.name);
             column.primary_key |= old.primary_key;
             column.not_null |= old.primary_key;
             match column_position {
@@ -275,7 +293,10 @@ pub(super) fn alter_op(
             for name in column_names {
                 match position(table, name) {
                     Some(at) => {
-                        table.columns.remove(at);
+                        let name = table.columns.remove(at).name;
+                        table
+                            .foreign_keys
+                            .retain(|fk| !fk.key.columns.contains(&name));
                     }
                     None if !if_exists => missing()?,
                     None => {}
@@ -287,8 +308,10 @@ pub(super) fn alter_op(
             new_column_name,
         } => match position(table, old_column_name) {
             Some(at) => {
+                let name = fold(new_column_name, dialect);
+                let old = std::mem::replace(&mut table.columns[at].name, name.clone());
+                rename_in_foreign_keys(table, &old, &name);
                 let column = &mut table.columns[at];
-                column.name = fold(new_column_name, dialect);
                 column.ident = match new_column_name.quote_style {
                     Some(_) => new_column_name.to_string(),
                     None if dialect == SqlDialect::Postgres => column.name.clone(),
@@ -390,6 +413,17 @@ pub(super) fn alter_op(
         _ => {}
     }
     Ok(())
+}
+
+/// A column of `table` renamed in the keys it declares.
+fn rename_in_foreign_keys(table: &mut RawTable, old: &str, new: &str) {
+    for fk in &mut table.foreign_keys {
+        for column in &mut fk.key.columns {
+            if column == old {
+                *column = new.to_string();
+            }
+        }
+    }
 }
 
 /// Drop the foreign key `name`. A key declared without a name has one the database

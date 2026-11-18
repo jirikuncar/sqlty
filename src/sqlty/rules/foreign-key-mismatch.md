@@ -40,7 +40,8 @@ A foreign key column may be compared with:
 - the column it references,
 - the same column of another row, as in a self-join,
 - a column holding the same keys: one referencing the same column, or reaching it
-  through a chain of foreign keys.
+  through a chain of foreign keys,
+- a column of the same name that is no key, as in a log or audit table.
 
 The columns of a composite foreign key are compared with their referenced columns
 of one row, all of them. A key column and its referenced column equal to the same

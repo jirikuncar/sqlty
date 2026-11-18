@@ -289,6 +289,11 @@ impl<'a> Analyzer<'a> {
 
     /// [`Self::locate_column`] of a schema table column, and whether the column is part of
     /// a foreign key.
+    /// Whether `expr` reads a column of a source in `scope`, a schema table's or not.
+    pub(super) fn resolves(&self, expr: &Expr, scope: &Scope) -> bool {
+        self.resolve_reference(expr, scope).is_some()
+    }
+
     pub(super) fn locate_table_column(
         &self,
         expr: &Expr,
