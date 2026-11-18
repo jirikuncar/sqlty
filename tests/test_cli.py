@@ -325,6 +325,21 @@ def test_unparseable_schema_view_is_reported(tmp_path, monkeypatch, caplog) -> N
     ]
 
 
+def test_too_large_schema_is_reported(tmp_path, monkeypatch, caplog) -> None:
+    """A table past the column limit is named in a warning."""
+    columns = ", ".join(f"c{i} INTEGER" for i in range(4097))
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
+    (tmp_path / "schema.sql").write_text(f"CREATE TABLE wide ({columns});")
+    monkeypatch.chdir(tmp_path)
+
+    args = build_parser().parse_args(["check", str(tmp_path)])
+    SettingsResolver(args).for_file(tmp_path / "q.py")
+
+    assert [r.getMessage() for r in caplog.records if "too large" in r.getMessage()] == [
+        "Schema is too large to load; ignored: public.wide"
+    ]
+
+
 def test_unparseable_schema_statement_is_reported(tmp_path, monkeypatch, caplog) -> None:
     """A statement that would set a key is named in a warning; one about storage is not."""
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')

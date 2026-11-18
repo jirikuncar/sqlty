@@ -336,6 +336,8 @@ def schema_skipped_objects(
     their constraints first, as in :func:`schema_skipped_tables`. A ``"statement"`` is a
     statement that does not parse and would set keys, checks, ``NOT NULL``, defaults or a
     type, named by its text: an ``ALTER TABLE ... ADD CONSTRAINT`` or a ``CREATE TYPE``.
+    A ``"limit"`` is a table, view or statement left unknown because the schema is too
+    large: over 4,096 columns in a relation, or far more columns than it spells out.
 
     Example:
         >>> schema_skipped_objects("CREATE TABLE ok (id INT); CREATE VIEW v AS SELECT id FROM (")

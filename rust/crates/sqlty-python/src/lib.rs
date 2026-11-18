@@ -76,4 +76,5 @@ pub(crate) mod tokens;
 #[allow(missing_docs)]
 pub mod types;
 pub mod unparse;
+pub mod utf16;
 pub mod variants;

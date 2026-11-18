@@ -934,6 +934,8 @@ class SettingsResolver:
             for kind, name in schema_skipped_objects(schema, dialect=dialect):
                 if kind == "statement":
                     logger.warning("Schema statement could not be parsed and is ignored: %s", name)
+                elif kind == "limit":
+                    logger.warning("Schema is too large to load; ignored: %s", name)
                 else:
                     logger.warning(
                         "Schema %s %s could not be parsed; its columns are unknown", kind, name

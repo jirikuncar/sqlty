@@ -180,6 +180,11 @@ impl Statement<'_> {
         render(&self.0).trim().to_string()
     }
 
+    /// Bytes of the source the statement spans.
+    pub(crate) fn size(&self) -> usize {
+        self.0.iter().map(|piece| piece.1.len()).sum()
+    }
+
     /// Whether this is `CREATE [OR REPLACE] [TEMP | MATERIALIZED | ...] <object>`, e.g. `view`.
     pub(crate) fn creates(&self, object: &str) -> bool {
         const MODIFIERS: [&str; 8] = [
