@@ -245,7 +245,7 @@ jobs:
           node --test --experimental-test-coverage \
             --test-coverage-include='docs/assets/playground/*.js' --test-coverage-include='npm/wasm/*.js' \
             --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=92 \
-            tests/playground.test.mjs tests/ask.test.mjs tests/wasm.test.mjs
+            tests/playground.test.mjs tests/ask.test.mjs tests/wasm.test.mjs tests/release.test.mjs
 
   pg-fidelity:
     name: PostgreSQL column names, types and nullability

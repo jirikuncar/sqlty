@@ -26,6 +26,9 @@ queries as you type. It runs in your browser. The engine is compiled to
         <option value="sqlite">SQLite</option>
       </select>
     </label>
+    <label><span class="sqlty-label">Version</span>
+      <select data-version title="main runs the latest build; a release comes from npm"></select>
+    </label>
     <span class="sqlty-actions" role="toolbar" aria-label="Actions">
       <button type="button" class="sqlty-button sqlty-button--primary" data-fix>Fix all</button>
       <button type="button" class="sqlty-button sqlty-menu-button" data-commands popovertarget="sqlty-commands" aria-haspopup="menu">Commands</button>
@@ -147,6 +150,9 @@ queries as you type. It runs in your browser. The engine is compiled to
     background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
     background-position: right 0.9rem center, right 0.6rem center; background-size: 0.3rem 0.3rem; background-repeat: no-repeat;
   }
+  #sqlty-playground [data-dialect] { min-width: 7rem; }
+  #sqlty-playground [data-version] { min-width: 5.5rem; }
+  #sqlty-playground [data-example] { max-width: 9.5rem; text-overflow: ellipsis; }
   .sqlty-button { cursor: pointer; }
   .sqlty-button:hover, .sqlty-button:focus-visible, #sqlty-playground select:focus-visible, .sqlty-button[aria-pressed="true"] {
     border-color: var(--md-accent-fg-color); color: var(--md-accent-fg-color);
@@ -282,6 +288,15 @@ SQLTy as an app; in Safari, **Share** then **Add to Home Screen** (iOS) or **Fil
 **Add to Dock** (macOS). The app opens the docs, with the playground among its shortcuts,
 and keeps it ready offline from its first start. Steps from `?steps=<url>` need that URL to
 be reachable; a file opened or dropped on the page does not.
+
+## Run a release
+
+The playground runs the latest build of sqlty, that of the `main` branch. **Version** runs
+a released one instead: it loads the [`@sqlty/wasm`](recipes/embedding.md) package of that
+release from the npm registry, checks it against the checksum the registry lists, and
+keeps your session. The link then names the release, as `?version=0.8.0`, so a bug report
+can show what a release did. A release that does not load leaves the playground on `main`,
+and so does being offline.
 
 ## Open a docs example
 

@@ -1,4 +1,5 @@
 import { load } from "./engine.js";
+import { released, versions } from "./release.js";
 import { decode, encode, MAX_LINK } from "./share.js";
 import { fold, unfold } from "./steps.js";
 
@@ -47,6 +48,10 @@ const CONFIG = `# The [tool.sqlty] keys that need no files: dialect, import-styl
 [rules]
 stale-rewrite = "error"
 `;
+
+// A release of @sqlty/wasm from npm in place of the build of main, as `?version=0.8.0` asks.
+const RELEASE = new URLSearchParams(location.search).get("version");
+let fellBack = "";
 
 const root = document.getElementById("sqlty-playground");
 // A module runs once per document: coming back with instant navigation needs a full load.
@@ -114,6 +119,7 @@ const output = monaco.editor.create(root.querySelector("[data-json]"), {
   readOnly: true,
 });
 const dialect = root.querySelector("[data-dialect]");
+const version = root.querySelector("[data-version]");
 const linked = root.querySelector("[data-link-status]");
 const example = root.querySelector("[data-example]");
 const stepper = root.querySelector("[data-steps]");
@@ -622,6 +628,29 @@ const copyLink = async () => {
   linked.textContent = "Link copied.";
 };
 root.querySelector("[data-copy-link]").addEventListener("click", copyLink);
+
+const running = fellBack ? "" : (RELEASE ?? "");
+version.replaceChildren(new Option("main", "", false, !running));
+if (running) version.append(new Option(running, running, true, true));
+linked.textContent = fellBack;
+// The releases are listed when the select is first opened: most sessions never ask for one.
+let listed;
+const listReleases = () =>
+  (listed ??= versions()
+    .then((found) => {
+      const all = found.includes(running) || !running ? found : [running, ...found];
+      version.replaceChildren(new Option("main", "", false, !running), ...all.map((name) => new Option(name, name, false, name === running)));
+    })
+    .catch((error) => (linked.textContent = `No releases listed: ${error.message}`)));
+version.addEventListener("pointerdown", listReleases);
+version.addEventListener("focus", listReleases);
+version.addEventListener("change", async () => {
+  const url = new URL(location.href);
+  if (version.value) url.searchParams.set("version", version.value);
+  else url.searchParams.delete("version");
+  url.hash = await encode(session());
+  location.assign(url);
+});
 editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyP, () =>
   editor.trigger("sqlty", "editor.action.quickCommand", null),
 );
@@ -795,8 +824,15 @@ function anchored(popover, button, opened) {
 }
 
 async function engine() {
-  const url = new URL("sqlty_wasm.wasm", import.meta.url);
-  const bytes = await (await fetch(url)).arrayBuffer();
+  let bytes;
+  if (RELEASE) {
+    try {
+      bytes = await released(RELEASE);
+    } catch (error) {
+      fellBack = `sqlty ${RELEASE} did not load (${error.message}), so this is main.`;
+    }
+  }
+  bytes ??= await (await fetch(new URL("sqlty_wasm.wasm", import.meta.url))).arrayBuffer();
   const ask = await load(bytes);
   return (request) => {
     try {
