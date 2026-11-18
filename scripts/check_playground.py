@@ -244,6 +244,7 @@ def exercise(browser: Browser, url: str, watch: Callable[[Page], None]) -> None:
     page.wait_for_selector("[data-source] .monaco-editor.vs-dark")
 
     files_and_panels(page)
+    breaking(page)
     editing(page)
     engine_errors(page)
     commands(page)
@@ -266,15 +267,39 @@ def source(page: Page, text: str | None = None) -> str:
 
 
 def files_and_panels(page: Page) -> None:
-    for name, language in [("schema", "sql"), ("config", "ini"), ("python", "python")]:
+    for name, language in [
+        ("schema", "sql"),
+        ("before", "sql"),
+        ("config", "ini"),
+        ("python", "python"),
+    ]:
         page.click(f'[data-file="{name}"]')
         assert page.evaluate(f"{SOURCE}.getModel().getLanguageId()") == language
-    for name in ["types", "json", "problems"]:
+    for name in ["types", "breaking", "json", "problems"]:
         page.click(f'[data-tab="{name}"]')
         assert page.is_visible(f'[data-panel="{name}"]')
     page.click('[data-file="schema"]')
     page.click("[data-problems] li button >> nth=0")
     assert page.evaluate(f"{SOURCE}.getModel().getLanguageId()") == "python"
+
+
+def breaking(page: Page) -> None:
+    """The Tour's schema without `email` breaks its first query; an empty before.sql compares nothing."""
+    page.click('[data-file="schema"]')
+    schema = page.evaluate(f"{SOURCE}.getValue()")
+    page.evaluate(
+        f"(text) => {SOURCE}.setValue(text)",
+        schema.replace("    email TEXT\n", "").replace("NOT NULL,\n);", "NOT NULL\n);"),
+    )
+    page.click('[data-file="before"]')
+    page.evaluate(f"(text) => {SOURCE}.setValue(text)", schema)
+    page.wait_for_selector('[data-tab="breaking"]:text-matches("Breaking [(][1-9]")')
+    assert "email" in page.inner_text("[data-breaking]")
+    page.evaluate(f"{SOURCE}.setValue('')")
+    page.click('[data-file="schema"]')
+    page.evaluate(f"(text) => {SOURCE}.setValue(text)", schema)
+    page.wait_for_selector('[data-tab="breaking"]:text-is("Breaking")')
+    page.click('[data-file="python"]')
 
 
 def at(page: Page, text: str, offset: int = 0) -> None:
