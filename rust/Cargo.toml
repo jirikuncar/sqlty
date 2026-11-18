@@ -17,6 +17,8 @@ sqlparser = { version = "0.64", features = ["visitor"] }
 regex = "1"
 recursive = "0.1"
 rustc-hash = "2"
+mimalloc = { version = "0.1.52", default-features = false }
+libmimalloc-sys = { version = "0.1.49", default-features = false }
 thiserror = "2"
 insta = "1.49"
 toml = { version = "1.1", features = ["preserve_order"] }
