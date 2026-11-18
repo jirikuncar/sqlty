@@ -1,6 +1,8 @@
 ---
 name: review
 description: Review a sqlty branch or pull request for correctness and best practices, applying REVIEW.md. Use for self-review before asking a human, or when asked to review a branch, diff or PR.
+metadata:
+  internal: "true"
 ---
 
 # Review a sqlty branch

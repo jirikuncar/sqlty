@@ -145,16 +145,12 @@ type Span = (usize, usize);
 /// `(query, line, span of the query)` of a call.
 type Unread = (String, usize, Option<Span>);
 
-fn pattern(text: &str) -> Regex {
-    Regex::new(text).expect("a valid pattern")
-}
-
 /// `ParsedSource.may_need_rust_check`: whether the lexing pass can report anything.
 fn may_need_lexing(text: &str, wrapper: &str) -> bool {
     // A marker split over literals: quotes, prefixes, whitespace and comments between its characters.
     static MARKER: LazyLock<Regex> = LazyLock::new(|| {
         let gap = r#"(?:[\s\x1c-\x1f"'rRuU]|#[^\n]*\n)*"#;
-        pattern(&format!("(?i)-{gap}-{gap}s{gap}q{gap}l"))
+        sqlty_sql::regex(&format!("(?i)-{gap}-{gap}s{gap}q{gap}l"))
     });
     text.contains(&format!("{wrapper}[")) || text.contains("UNTYPED") || MARKER.is_match(text)
 }
@@ -946,7 +942,7 @@ impl<'a> Module<'a, '_> {
     }
 
     fn unparsed(&mut self) {
-        static FORMAT_FIELD: LazyLock<Regex> = LazyLock::new(|| pattern(r"\{\w*\}"));
+        static FORMAT_FIELD: LazyLock<Regex> = LazyLock::new(|| sqlty_sql::regex(r"\{\w*\}"));
         if !self.enabled(Rule::UnparsedQuery) {
             return;
         }
@@ -1257,7 +1253,9 @@ pub fn any_calls(source: &Source, style: &ImportStyle) -> Vec<usize> {
 /// line.
 pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
     static MARKED_TEMPLATE: LazyLock<Regex> = LazyLock::new(|| {
-        pattern(r#"(?:^|[^\w])(?:[tT][rR]?|[rR][tT])(?:'|")+[\s\x1c-\x1f]*--[\s\x1c-\x1f]?sql"#)
+        sqlty_sql::regex(
+            r#"(?:^|[^\w])(?:[tT][rR]?|[rR][tT])(?:'|")+[\s\x1c-\x1f]*--[\s\x1c-\x1f]?sql"#,
+        )
     });
     let settings = run.settings;
     let analyses = Analyses::new(settings.options);

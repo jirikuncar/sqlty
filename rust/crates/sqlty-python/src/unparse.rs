@@ -831,9 +831,8 @@ fn fields<'a>(elements: &'a InterpolatedStringElements, parts: &mut Vec<Part<'a>
     }
 }
 
-static UNPRINTABLE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Zl}\p{Zp}\p{Zs}]").expect("a valid pattern")
-});
+static UNPRINTABLE: LazyLock<Regex> =
+    LazyLock::new(|| sqlty_sql::regex(r"[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Zl}\p{Zp}\p{Zs}]"));
 
 /// `str.isprintable` of one character.
 fn printable(c: char) -> bool {
