@@ -1,5 +1,5 @@
 ---
-description: How to install sqlty with uv, pip, npm or Homebrew, which Python versions and platforms have wheels, how to add the coding agent skills and verify the install.
+description: How to install sqlty with uv, pip or Homebrew, which Python versions and platforms have wheels, how to add the coding agent skills and verify the install.
 ---
 
 # Installation
@@ -47,7 +47,6 @@ command without adding it, or outside Python:
 
 ```bash
 uvx sqlty check                     # the Python package, in a throwaway environment
-npx sqlty check                     # the native executable, from npm
 brew install jirikuncar/sqlty/sqlty # the native executable, from Homebrew
 ```
 
