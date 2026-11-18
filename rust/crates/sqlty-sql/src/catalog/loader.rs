@@ -183,15 +183,18 @@ pub(super) struct Loader {
     pub(super) returned_by: FxHashMap<String, FxHashSet<String>>,
     /// Tables some table inherits from or is a partition of; no other has descendants.
     pub(super) inherited: FxHashSet<String>,
-    /// Columns of all relations, at most [`MAX_SCHEMA_COLUMNS`].
+    /// Columns of all relations, at most [`MAX_SCHEMA_COLUMNS`] plus `allowance`.
     held: usize,
+    /// The columns the schema could spell out, which no limit counts.
+    allowance: usize,
     /// Columns of the relations set so far, each time one is set.
     written: usize,
 }
 
-/// The most columns all relations hold: some 120 MB, past any real schema. A table built
-/// `LIKE` a wide one copies its columns, so a short schema could otherwise fill memory.
-pub(super) const MAX_SCHEMA_COLUMNS: usize = 1 << 18;
+/// The most columns all relations hold besides the ones a schema could spell out (see
+/// [`Loader::allow`]): about 1 GB. A table built `LIKE` a wide one copies its columns, so
+/// a short schema could otherwise fill memory.
+pub(super) const MAX_SCHEMA_COLUMNS: usize = 1 << 21;
 
 /// The most statements [`Loader::run`] tries again, in all passes.
 pub(super) const MAX_RETRIES: usize = 1 << 20;
@@ -219,6 +222,7 @@ impl Loader {
             overrides: Arc::default(),
             inherited: FxHashSet::default(),
             held: 0,
+            allowance: 0,
             written: 0,
         }
     }
@@ -241,6 +245,7 @@ impl Loader {
             returned_by: self.returned_by.clone(),
             inherited: self.inherited.clone(),
             held: self.held,
+            allowance: self.allowance,
             written: 0,
         }
     }
@@ -442,8 +447,12 @@ impl Loader {
     /// Stop waiting for what `create` needs: a table built from one that never appears
     /// exists, its shape unknown.
     pub(super) fn give_up(&mut self, create: &CreateTable, path: &[String]) {
+        self.give_up_as("table", create, path);
+    }
+
+    fn give_up_as(&mut self, kind: &'static str, create: &CreateTable, path: &[String]) {
         let key = self.new_key(&create.name, path);
-        self.skipped.push(("table", create.name.to_string()));
+        self.skipped.push((kind, create.name.to_string()));
         self.set_relation(
             key,
             Some(Rel::Table(RawTable {
@@ -485,7 +494,7 @@ impl Loader {
                     return false;
                 };
                 if self.too_wide(table.columns.len() + parent_table.columns.len()) {
-                    self.give_up(create, path);
+                    self.give_up_as("limit", create, path);
                     return true;
                 }
                 table.unknown |= parent_table.unknown;
@@ -507,7 +516,7 @@ impl Loader {
                     return false;
                 };
                 if self.too_wide(table.columns.len() + from_table.columns.len()) {
-                    self.give_up(create, path);
+                    self.give_up_as("limit", create, path);
                     return true;
                 }
                 table.unknown |= from_table.unknown;
@@ -856,8 +865,18 @@ impl Loader {
         }
     }
 
+    /// Move the relation at `from`, if any, to `to`, replacing what is there.
+    pub(super) fn move_relation(&mut self, from: &str, to: String) {
+        let Some(moved) = self.relations.remove(from) else {
+            return;
+        };
+        if let Some(replaced) = self.relations.insert(to, moved) {
+            self.held -= replaced.width();
+        }
+    }
+
     /// `rel`, or one of unknown shape when it is wider than [`MAX_COLUMNS`] or would take
-    /// the schema past [`MAX_SCHEMA_COLUMNS`].
+    /// the schema past [`MAX_SCHEMA_COLUMNS`] and its allowance.
     fn within_limits(&mut self, key: &str, rel: Rel) -> Rel {
         self.held = self
             .held
@@ -869,26 +888,32 @@ impl Loader {
         }
         match rel {
             Rel::Table(_) => {
-                self.skipped.push(("table", key.to_string()));
+                self.skipped.push(("limit", key.to_string()));
                 Rel::Table(RawTable {
                     unknown: true,
                     ..RawTable::default()
                 })
             }
             Rel::View(_) => {
-                self.skipped.push(("view", key.to_string()));
+                self.skipped.push(("limit", key.to_string()));
                 Rel::View(vec![Column::unknown("*")])
             }
         }
     }
 
+    /// Raise the limits by the columns `schema` could spell out, two bytes each as in
+    /// SQLite's `a,`: those take time and memory in proportion to the schema.
+    pub(super) fn allow(&mut self, schema: &str) {
+        self.allowance += schema.len() / 2;
+    }
+
     /// Whether the loader wrote [`MAX_WRITTEN`] columns: it reads no more statements.
     pub(super) fn exhausted(&self) -> bool {
-        self.written > MAX_WRITTEN
+        self.written > MAX_WRITTEN + self.allowance
     }
 
     fn too_wide(&self, width: usize) -> bool {
-        width > MAX_COLUMNS || self.held + width > MAX_SCHEMA_COLUMNS
+        width > MAX_COLUMNS || self.held + width > MAX_SCHEMA_COLUMNS + self.allowance
     }
 
     /// Tables that inherit from or are partitions of `key`, nested ones included.

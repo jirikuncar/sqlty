@@ -419,11 +419,13 @@ tables as they are where the view is created.
 
 Limits keep a hostile or generated schema from taking minutes or all memory. A
 table, view or function result of over 4,096 columns (MySQL's maximum, above
-PostgreSQL's 1,600) has an unknown shape, and so does a query result that wide. A
-relation that would take the schema past 262,144 columns in all is left unknown,
-and a schema that keeps rewriting wide tables (each `ALTER` or index reads all the
-table's columns again) is read only up to about four million column updates:
-`sqlty check` warns `Schema is too large to load` and names the first statement it
+PostgreSQL's 1,600) has an unknown shape, and so does a query result that wide; a
+`*` over more than 64 tables joined with `USING` or `NATURAL` (SQLite's limit) is
+not expanded. Copies of columns (`LIKE`, `INHERITS`, views) may take the schema
+past what it spells out by about two million columns; a relation past that is left
+unknown. A schema that keeps rewriting wide tables (each `ALTER` or index reads all
+the table's columns again) is read only up to about four million column updates
+beyond that. `sqlty check` warns `Schema is too large to load` and names what it
 ignored. Tables built from tables defined further down are followed for about a
 thousand levels; deeper ones have an unknown shape.
 

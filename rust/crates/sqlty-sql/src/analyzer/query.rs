@@ -379,22 +379,12 @@ impl<'a> Analyzer<'a> {
         }
         analyzer.facts = analyzer.select_facts(select, &scope);
         let keyword = select.select_token.0.span.start;
-        let columns = analyzer.projection(
+        analyzer.projection(
             &select.projection,
             &scope,
             Some(&select.from),
             Some(keyword),
-        )?;
-        if columns.len() <= MAX_COLUMNS {
-            return Ok(columns);
-        }
-        if self.diag.enabled() {
-            self.diag.record(
-                NameRule::UnsupportedSyntax,
-                format!("over {MAX_COLUMNS} result columns are not typed"),
-            );
-        }
-        Ok(vec![Column::unknown("*")])
+        )
     }
 
     /// Columns of a SELECT or set operation. Names come from the leftmost branch; each
@@ -549,6 +539,9 @@ impl<'a> Analyzer<'a> {
             &self.facts
         };
         for (index, item) in items.iter().enumerate() {
+            if columns.len() > MAX_COLUMNS {
+                break;
+            }
             let (expr, name) = match item {
                 SelectItem::UnnamedExpr(Expr::CompoundFieldAccess { root, access_chain })
                     if matches!(access_chain.as_slice(),
@@ -687,6 +680,15 @@ impl<'a> Analyzer<'a> {
             if let Some(rules) = &mut rules {
                 rules.push(self.column_rules(expr, scope));
             }
+        }
+        if columns.len() > MAX_COLUMNS {
+            if self.diag.enabled() {
+                self.diag.record(
+                    NameRule::UnsupportedSyntax,
+                    format!("over {MAX_COLUMNS} result columns are not typed"),
+                );
+            }
+            return Ok(vec![Column::unknown("*")]);
         }
         if let (Some(rules), Some(explain)) = (rules, &self.explain) {
             explain.borrow_mut().insert(items.as_ptr() as usize, rules);

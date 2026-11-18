@@ -214,7 +214,7 @@ impl Analyzer<'_> {
                     })
                     .filter_map(|column| column.0.last().and_then(|part| part.as_ident()))
                     .map(|ident| {
-                        let key = quiet.column_key(&target, &ident.value, scope);
+                        let key = quiet.column_key(&ident.value);
                         (target.clone(), key)
                     })
                     .collect();
@@ -312,7 +312,7 @@ impl Analyzer<'_> {
                         let excluded = inserted
                             .iter()
                             .map(|column| {
-                                let key = quiet.column_key("excluded", column, &upsert);
+                                let key = quiet.column_key(column);
                                 ("excluded".to_string(), key)
                             })
                             .collect();
@@ -358,7 +358,7 @@ impl Analyzer<'_> {
         };
         let columns = written
             .iter()
-            .map(|column| (target.clone(), quiet.column_key(&target, column, scope)))
+            .map(|column| (target.clone(), quiet.column_key(column)))
             .collect();
         kept.with(Learned::columns(columns))
     }

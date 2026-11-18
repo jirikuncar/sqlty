@@ -773,3 +773,37 @@ fn values_and_functions_wider_than_max_columns_are_untyped() {
         None
     );
 }
+
+#[test]
+fn stars_over_wide_tables_stop_past_max_columns() {
+    let columns: Vec<String> = (0..crate::MAX_COLUMNS)
+        .map(|i| format!("c{i} int"))
+        .collect();
+    let schema = format!("CREATE TABLE big ({});", columns.join(", "));
+    let (schema, _) = load_schema_with_skipped(&schema, "postgres");
+    let message = format!("over {} result columns are not typed", crate::MAX_COLUMNS);
+    for sql in [
+        "SELECT * FROM big b0, big b1, big b2",
+        "SELECT b0.*, b1.*, b2.* FROM big b0, big b1, big b2",
+        "SELECT * FROM big b0 JOIN big b1 USING (c0) JOIN big b2 USING (c0), big b3",
+        "UPDATE big SET c0 = 1 FROM big b0, big b1 RETURNING *",
+    ] {
+        assert_eq!(infer_type(sql, "postgres", Some(&schema)), None, "{sql}");
+        let diagnostics = analyze_with_diagnostics(sql, "postgres", Some(&schema)).1;
+        assert!(diagnostics.iter().any(|d| d.message == message), "{sql}");
+    }
+}
+
+#[test]
+fn a_star_over_more_than_64_merging_joins_is_untyped() {
+    let schema = load_schema_with_skipped("CREATE TABLE t (a int NOT NULL);", "postgres").0;
+    let natural = |n: usize| {
+        let joins: String = (1..n).map(|i| format!(" NATURAL JOIN t t{i}")).collect();
+        format!("SELECT * FROM (t t0{joins})")
+    };
+    assert_eq!(
+        infer_type(&natural(64), "postgres", Some(&schema)).as_deref(),
+        Some("tuple[int]")
+    );
+    assert_eq!(infer_type(&natural(65), "postgres", Some(&schema)), None);
+}

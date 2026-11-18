@@ -390,6 +390,7 @@ pub(crate) fn load_with(
         Loader::new(dialect)
     };
     loader.overrides = overrides;
+    loader.allow(schema_sql);
     let mut skipped = Vec::new();
     let statements = ddl::statements(schema_sql, dialect == SqlDialect::MySql);
     let ops = read_statements(statements, dialect, &mut loader, &mut skipped);
