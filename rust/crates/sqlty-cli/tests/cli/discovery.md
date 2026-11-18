@@ -23,4 +23,7 @@ No Python files found
 $ sqlty check empty
 No Python files found
 
+$ sqlty rewrite empty
+No Python files found
+
 ```

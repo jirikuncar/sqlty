@@ -116,7 +116,10 @@ fn initialize(root: &Path, options: &str) -> String {
 
 #[test]
 fn serves_the_language_server() {
-    let config = ("pyproject.toml", "[tool.sqlty]\nschema = \"schema.sql\"\n");
+    let config = (
+        "pyproject.toml",
+        "[tool.sqlty]\nschema = [\"schema.sql\", \"none/*.sql\"]\n",
+    );
     let root = project("server", &[config, SCHEMA, QUERIES]);
     let root = root.canonicalize().expect("exists");
     let open = format!(
@@ -134,6 +137,24 @@ fn serves_the_language_server() {
     assert!(messages
         .last()
         .is_some_and(|message| message.contains("publishDiagnostics")));
+    let actions = format!(
+        r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/codeAction","params":{{"textDocument":{{"uri":"file://{}/app/a.py"}},"range":{{"start":{{"line":0,"character":0}},"end":{{"line":0,"character":0}}}},"context":{{"diagnostics":[],"only":["source.fixAll.sqlty","source.format.sqlty","source.rewrite.sqlty","source.strip.sqlty"]}}}}}}"#,
+        root.display()
+    );
+    let (messages, code) = serve(
+        &root,
+        &[
+            initialize(&root, "null"),
+            initialized.clone(),
+            open.clone(),
+            actions,
+        ],
+        r#""id":3"#,
+    );
+    assert_eq!(code, 0);
+    assert!(messages
+        .last()
+        .is_some_and(|message| message.contains("sqlty: rewrite")));
     let baseline = r#"{"breaking":{"against":"main"}}"#;
     let (messages, code) = serve(
         &root,

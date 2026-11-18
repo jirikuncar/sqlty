@@ -123,6 +123,10 @@ $ sqlty check --exit-zero --error-on-warning app
 ? 2
 sqlty: error: --error-on-warning cannot be used with --exit-zero
 
+$ sqlty check --exit-zero-on-warning --error-on-warning app
+? 2
+sqlty: error: --error-on-warning cannot be used with --exit-zero-on-warning
+
 $ sqlty check gone.py
 ? 2
 sqlty: error: path does not exist: gone.py
