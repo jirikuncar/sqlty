@@ -803,6 +803,12 @@ mod tests {
                 ("limit", "1 statements waiting on others".to_string()),
             ]
         );
+        // With nothing waiting, only what is left unread is named.
+        let sql = sql.replacen("CREATE TABLE waits (LIKE later);\n", "", 1);
+        assert_eq!(
+            load(&sql, "postgres").1,
+            [("limit", "CREATE TABLE later (a int) and later".to_string())]
+        );
     }
 
     #[test]
