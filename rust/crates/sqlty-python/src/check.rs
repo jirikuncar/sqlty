@@ -4,7 +4,6 @@
 //!
 //! [`diagnostics`] answers `None` for a module that needs what is not read here yet.
 
-use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -1171,11 +1170,11 @@ pub fn module(text: &str, parsed: Option<&Arc<Source>>, run: &Run<'_>) -> Found 
         Some(parsed) => diagnostics(parsed, run),
         None => unparsed(text, run),
     }))
-    .unwrap_or_else(|payload| crashed(&*payload, run.settings.rules))
+    .unwrap_or_else(|payload| crashed(crate::report::cause(&*payload), run.settings.rules))
 }
 
-fn crashed(payload: &(dyn Any + Send), rules: &RuleConfig) -> Found {
-    let cause = crate::report::cause(payload);
+/// The `internal-error` of a check that panicked with `cause`.
+pub fn crashed(cause: &str, rules: &RuleConfig) -> Found {
     let diagnostic = Diagnostic {
         rule: Rule::InternalError,
         message: format!(
@@ -1509,17 +1508,8 @@ mod tests {
 
     #[test]
     fn a_panic_without_a_message_has_an_unknown_cause() {
-        let rules = RuleConfig::from_overrides(None).unwrap();
-        let found = crashed(&42, &rules);
-        assert!(found.diagnostics[0]
-            .diagnostic
-            .message
-            .starts_with("sqlty crashed checking this file: unknown cause;"));
-        let found = crashed(&"static", &rules);
-        assert!(found.diagnostics[0]
-            .diagnostic
-            .message
-            .starts_with("sqlty crashed checking this file: static;"));
+        assert_eq!(crate::report::cause(&42), "unknown cause");
+        assert_eq!(crate::report::cause(&"static"), "static");
     }
 
     #[test]

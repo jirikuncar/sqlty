@@ -1312,5 +1312,8 @@ mod tests {
             panic!("an object");
         };
         assert_eq!(fields[1], ("level".to_string(), "none".into()));
+        let row = Json::object([("file", "/a b%.py".into())]);
+        let found = sarif_result(row).dumps();
+        assert!(found.contains(r#""uri": "file:///a%20b%25.py""#), "{found}");
     }
 }
