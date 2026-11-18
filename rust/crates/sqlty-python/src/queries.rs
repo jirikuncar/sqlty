@@ -77,23 +77,20 @@ pub struct NamedQuery {
 }
 
 /// `-- name: <name><suffix>`, aiosql's header and sqlc's, told apart by sqlc's `:kind`.
-static NAME_HEADER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?m)^[ \t]*--[ \t]*name:[ \t]*([A-Za-z_][\w-]*)([^\n]*)$").expect("valid regex")
-});
+static NAME_HEADER: LazyLock<Regex> =
+    LazyLock::new(|| sqlty_sql::regex(r"(?m)^[ \t]*--[ \t]*name:[ \t]*([A-Za-z_][\w-]*)([^\n]*)$"));
 
 /// The placeholders sqlc and aiosql read and the engine does not; strings, comments, casts
 /// and `@@variables` match first so nothing inside them is rewritten.
 static PLACEHOLDER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
+    sqlty_sql::regex(
         r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|/\*(?s:.)*?\*/|::\w+|@@\w+|\bsqlc\.n?arg\(\s*'?(?P<arg>[A-Za-z_]\w*)'?\s*\)|@(?P<at>[A-Za-z_]\w*)|:(?P<obj>[A-Za-z_]\w*)\.(?P<attr>[A-Za-z_]\w*)"#,
     )
-    .expect("valid regex")
 });
 
 /// `-- :name <name> [:kind]`, PugSQL's header.
-static PUGSQL_HEADER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?m)^[ \t]*--[ \t]*:name[ \t]+([A-Za-z_]\w*)[^\n]*$").expect("valid regex")
-});
+static PUGSQL_HEADER: LazyLock<Regex> =
+    LazyLock::new(|| sqlty_sql::regex(r"(?m)^[ \t]*--[ \t]*:name[ \t]+([A-Za-z_]\w*)[^\n]*$"));
 
 /// The named queries of `source`, a `.sql` file called `stem` (without its extension).
 ///

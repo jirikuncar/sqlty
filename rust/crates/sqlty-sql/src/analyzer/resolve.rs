@@ -448,12 +448,9 @@ impl<'a> Analyzer<'a> {
 
     /// Records the reason a column reference found no column.
     fn explain_unresolved(&self, parts: &[Ident], scope: &Scope) {
-        if !self.diag.enabled() {
+        let Some((column, qualifiers)) = parts.split_last().filter(|_| self.diag.enabled()) else {
             return;
-        }
-        let (column, qualifiers) = parts
-            .split_last()
-            .expect("a column reference names a column");
+        };
         let qualifier = qualifiers.last().map(|part| part.value.to_lowercase());
         let name = fold(column, self.dialect);
         let unqualified = qualifier.is_none();

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 
 /// `fnmatch.translate`: `*` any run of characters, `?` one, `[...]` a set (`[!...]`
 /// negated); anything else is itself. Anchored at both ends.
@@ -53,8 +53,7 @@ pub struct Segment {
 
 impl Segment {
     pub fn new(pattern: &str) -> Self {
-        let regex = Regex::new(&format!("^(?s:{})$", translate(pattern, "[^/]*", "[^/]")))
-            .expect("a translated glob");
+        let regex = compile(&format!("^(?s:{})$", translate(pattern, "[^/]*", "[^/]")));
         let hidden = pattern.starts_with('.');
         Self { regex, hidden }
     }
@@ -132,10 +131,20 @@ fn matchers(globs: &[String]) -> (Regex, Regex) {
         paths.push(path(pattern));
     }
     let compile = |found: Vec<String>| match found.is_empty() {
-        true => Regex::new(NEVER).expect("a valid pattern"),
-        false => Regex::new(&format!("^(?:{})", found.join("|"))).expect("translated globs"),
+        true => compile(NEVER),
+        false => compile(&format!("^(?:{})", found.join("|"))),
     };
     (compile(names), compile(paths))
+}
+
+/// A translated glob, however long: `translate` escapes all but the classes it writes, and
+/// `fnmatch` has no size limit either.
+#[expect(clippy::expect_used, reason = "a translated glob is a valid pattern")]
+pub(crate) fn compile(pattern: &str) -> Regex {
+    RegexBuilder::new(pattern)
+        .size_limit(usize::MAX)
+        .build()
+        .expect("a translated glob")
 }
 
 /// A class that matches nothing; `regex` has no `(?!)`.
@@ -201,13 +210,9 @@ fn set(stuff: &[char]) -> String {
         }
     }
     let rest = body[start.min(body.len())..].to_vec();
-    if rest.is_empty() {
-        chunks
-            .last_mut()
-            .expect("a chunk before a trailing '-'")
-            .push('-');
-    } else {
-        chunks.push(rest);
+    match chunks.last_mut() {
+        Some(last) if rest.is_empty() => last.push('-'),
+        _ => chunks.push(rest),
     }
     let mut k = chunks.len() - 1;
     while k > 0 {
@@ -249,6 +254,13 @@ mod tests {
 
     fn matches(pattern: &str, text: &str) -> bool {
         Regex::new(&format!("^{pattern}")).unwrap().is_match(text)
+    }
+
+    #[test]
+    fn a_glob_past_the_regex_size_limit_compiles() {
+        let long = "[!a]".repeat(20_000);
+        assert!(Segment::new(&long).matches(&"b".repeat(20_000)));
+        assert!(!Excludes::default().entry("a", None, &[long]));
     }
 
     #[test]

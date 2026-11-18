@@ -28,8 +28,7 @@ const TYPING_MODULES: [&str; 2] = ["typing", "typing_extensions"];
 /// Whether `query` opens with the `--sql` marker, which the engine reads by itself.
 pub fn is_marked(query: &str) -> bool {
     static MARKER: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"^[\s\x1c-\x1f]*--[\s\x1c-\x1f]?sql(?:[\s\x1c-\x1f]|$)")
-            .expect("a valid pattern")
+        sqlty_sql::regex(r"^[\s\x1c-\x1f]*--[\s\x1c-\x1f]?sql(?:[\s\x1c-\x1f]|$)")
     });
     MARKER.is_match(query)
 }
@@ -685,8 +684,7 @@ fn only_imported(text: &str, pattern: &Regex) -> bool {
     // `from run(...)` can end a `yield` or a `raise` written over two lines, and a line
     // that ends a string can go on with a call: only names may follow.
     static IMPORT: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"^[ \t\x0c]*(?:from[ \t]+[\w.]+[ \t]+import|import)[ \t]+[\w.,*() \t]*$")
-            .expect("a valid pattern")
+        sqlty_sql::regex(r"^[ \t\x0c]*(?:from[ \t]+[\w.]+[ \t]+import|import)[ \t]+[\w.,*() \t]*$")
     });
     pattern.find_iter(text).all(|found| {
         let start = text[..found.start()]

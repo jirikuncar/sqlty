@@ -36,10 +36,9 @@ static GROUP: LazyLock<Regex> = LazyLock::new(|| {
     let block = format!(
         r"{MARKER}\r?\n(?:class [^\r\n]*:\r?\n(?:    [^\r\n]*\r?\n)+|[A-Za-z_]\w* = typing\.TypedDict\([^\r\n]*\)\r?\n)"
     );
-    Regex::new(&format!(
+    sqlty_sql::regex(&format!(
         r"(?:\r?\n){{2}}{block}(?:(?:\r?\n){{2}}{block})*(?:\r?\n){{2}}"
     ))
-    .expect("a valid pattern")
 });
 
 /// `source` without the classes generated below `# sqlty: generated` lines.
@@ -334,11 +333,7 @@ fn with_imports(source: &str) -> String {
     let missing: Vec<&str> = MODULES
         .into_iter()
         .filter(|module| !imported.iter().any(|name| name == module))
-        .filter(|module| {
-            Regex::new(&format!(r"\b{module}\."))
-                .expect("a valid pattern")
-                .is_match(source)
-        })
+        .filter(|module| sqlty_sql::regex(&format!(r"\b{module}\.")).is_match(source))
         .collect();
     let Some(last) = imports.last() else {
         return source.to_string();

@@ -249,6 +249,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>, host: &mut dyn Host) -> Opt
             return Some(error.exit_code());
         }
     };
+    #[expect(clippy::expect_used, reason = "the matches are of the same command")]
     let cli = Cli::from_arg_matches(&matches).expect("parsed by its own command");
     let severities = matches
         .subcommand()
@@ -355,10 +356,9 @@ fn rule(host: &mut dyn Host, name: Option<&str>) -> i32 {
 
 /// A rule page with its links to other pages pointing at the documentation site.
 fn rule_doc(text: &str) -> String {
-    let link = regex::Regex::new(
+    let link = sqlty_sql::regex(
         r"\]\((?:\.\./\.\./\.\./docs/(?P<doc>[^)\s:]+)|(?P<rule>[^)\s:/]+))\.md(?P<anchor>#[^)\s]*)?\)",
-    )
-    .expect("a valid pattern");
+    );
     link.replace_all(text, |found: &regex::Captures<'_>| {
         match found.name("doc") {
             Some(doc) => {
@@ -391,7 +391,7 @@ fn skill(
         .collect();
     if list {
         let width = names.iter().map(|(name, _)| name.len()).max().unwrap_or(0);
-        let description = regex::Regex::new(r"(?m)^description: (.*)$").expect("a valid pattern");
+        let description = sqlty_sql::regex(r"(?m)^description: (.*)$");
         for (skill, text) in &names {
             let summary = description.captures(text).map_or(String::new(), |found| {
                 found[1]
@@ -562,14 +562,10 @@ fn transform(
         }
         return Ok(0);
     }
-    let settings: Vec<Arc<FileSettings>> = files
-        .iter()
-        .map(|path| {
-            workspace
-                .settings(path)
-                .expect("read as the workspace opened")
-        })
-        .collect();
+    let mut settings: Vec<Arc<FileSettings>> = Vec::with_capacity(files.len());
+    for path in &files {
+        settings.push(workspace.settings(path)?);
+    }
     let work: Vec<(&str, &FileSettings)> = files
         .iter()
         .zip(&settings)
