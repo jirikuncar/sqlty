@@ -7,14 +7,13 @@ import sys
 import pytest
 
 from sqlty._core import call_variants
-from tests.test_rust_variants import same
 
 BOTH = ["x1", "y2"]
 EVERY = ["x1", "x2", "y1", "y2"]
 
 
 def variants(test: str, between: str, header: str = "def f(n, o, xs, t):") -> list[str]:
-    """The variants of the query, which the Python and Rust passes must read alike."""
+    """The variants of the query Rust reads."""
     source = f"""\
 {header}
     if {test}:
@@ -28,7 +27,6 @@ def variants(test: str, between: str, header: str = "def f(n, o, xs, t):") -> li
         b = '2'
     run(a + b)
 """
-    assert same(source) >= 1
     (*_, call) = call_variants(source, sys.version_info[:2], 64)
     return sorted(variant[0] for variant in call[2] or ())
 

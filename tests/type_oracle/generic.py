@@ -6,9 +6,9 @@ import ast
 import copy
 import re
 
-from sqlty._type_extractor.ast_fields import _ast_type
-from sqlty._type_extractor.info import TypeInfo
-from sqlty._type_extractor.symbols import ModuleTypes
+from tests.type_oracle.ast_fields import _ast_type
+from tests.type_oracle.info import TypeInfo
+from tests.type_oracle.symbols import ModuleTypes
 
 
 def specialize(
@@ -23,11 +23,11 @@ def specialize(
 
     Example:
         >>> from sqlty._source import ParsedSource
-        >>> from sqlty._type_extractor import extract_type_definitions
+        >>> from tests.type_oracle import extract_type_definitions
         >>> parsed = ParsedSource("import datetime\\nfrom typing import TypedDict\\nclass Row[T](TypedDict):\\n    ids: list[T]")
         >>> row = extract_type_definitions(parsed)["Row"]
         >>> arg = ast.parse("datetime.date", mode="eval").body
-        >>> specialize(row, parsed.classes[0], [arg], ModuleTypes(parsed, None)).field_types
+        >>> specialize(row, parsed.outline_classes[0], [arg], ModuleTypes(parsed, None)).field_types
         {'ids': list[datetime.date]}
     """
     params = _type_params(node)

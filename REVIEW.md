@@ -51,8 +51,7 @@ Style, naming and refactoring suggestions are Nit at most.
   panic kills the playground and VS Code web. Prefer `Option`/`Result` combinators.
 - **Parity.** A behavior change lands in every host that runs it (`sqlty-cli`,
   `sqlty-project`, `sqlty-lsp`, `sqlty-wasm`, `editors/vscode`, the playground
-  settings it reads) and, while `SQLTY_AST=python` exists, in the Python passes.
-  Differences on purpose are listed in the plan, not silent.
+  settings it reads). Differences on purpose are listed in the plan, not silent.
 - **CPython parity.** `unparse` and anything that rebuilds Python text matches
   `ast.unparse`/the interpreter, including `LEGACY_FIELD_TEXT` for t-/f-string
   field text across 3.14 and 3.15. Test against the interpreter, not a hand-written

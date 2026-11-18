@@ -1,20 +1,19 @@
-"""The whole check of a module in Rust (``sqlty_python::check``) against ``sqlty._check``.
+"""The whole check of a module in Rust (``sqlty_python::check``).
 
 Generated modules define helpers and call them, run queries on driver connections, write
-``--sql`` t-strings and declare ``SQL[R, P]``; both must report the same diagnostics. The
-mdtests compare the same way when run with ``SQLTY_AST=compare``. Raise the number of
-generated examples with ``SQLTY_FUZZ_EXAMPLES``.
+``--sql`` t-strings and declare ``SQL[R, P]``. Raise the number of generated examples with
+``SQLTY_FUZZ_EXAMPLES``.
 """
 
 from __future__ import annotations
+
+import sys
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from sqlty import _check
-from sqlty._core import load_schema
-from sqlty._source import ParsedSource
+from sqlty._core import load_schema, module_diagnostics
 from tests.test_rust_rows import SCHEMA, fitted
 from tests.test_rust_types import FUZZ, parses
 
@@ -200,32 +199,25 @@ RULES = [
 ]
 
 
-def compare(
+def diagnosed(
     source: str,
     dialect: str = "postgres",
     rules: dict[str, str] | None = None,
     untyped: bool = False,
     schema: bool = True,
 ) -> int:
-    """How many diagnostics both report for ``source``, -1 where Rust leaves it to Python."""
-    parsed = ParsedSource(source)
-    usage = _check.RowUsage()
-    settings = {
-        "dialect": dialect,
-        "schema_sql": SCHEMAS[dialect] if schema else None,
-        "rules": rules,
-        "import_style": None,
-        "untyped": untyped,
-        "module": "pkg.mod",
-    }
-    found = _check._diagnostics(  # noqa: SLF001
-        parsed, helpers=None, row_usage=usage, variants=None, coerce=frozenset(), **settings
+    """How many diagnostics Rust reports for ``source``, -1 where it declines it."""
+    found = module_diagnostics(
+        source,
+        version=sys.version_info[:2],
+        dialect=dialect,
+        schema_sql=SCHEMAS[dialect] if schema else None,
+        rules=rules,
+        import_style=None,
+        untyped=untyped,
+        module="pkg.mod",
     )
-    rust = _check._module_diagnostics(  # noqa: SLF001
-        source, version=_check.sys.version_info[:2], **settings
-    )
-    _check._compare_module(parsed, found, usage, coerce=frozenset(), **settings)  # noqa: SLF001
-    return -1 if rust is None else len(found)
+    return -1 if found is None else len(found[0])
 
 
 CASES = {
@@ -248,7 +240,7 @@ CASES = {
 @pytest.mark.parametrize("call", CASES.values(), ids=CASES.keys())
 def test_cases(call: str) -> None:
     driver = "aiosqlite" if "f'" in call else "psycopg"
-    found = compare((HEAD + HELPERS[0] + SETUP + call).replace("DRIVER", driver))
+    found = diagnosed((HEAD + HELPERS[0] + SETUP + call).replace("DRIVER", driver))
     assert found >= (driver == "psycopg")  # dynamic-query is off by default
 
 
@@ -291,7 +283,7 @@ CALLS = {
 
 @pytest.mark.parametrize(("call", "count"), CALLS.values(), ids=CALLS.keys())
 def test_calls(call: str, count: int) -> None:
-    assert compare((HEAD + HELPERS[0] + SETUP + call).replace("DRIVER", "psycopg")) == count
+    assert diagnosed((HEAD + HELPERS[0] + SETUP + call).replace("DRIVER", "psycopg")) == count
 
 
 DECLARED = {
@@ -313,7 +305,7 @@ DICTS = "class Twice(TypedDict):\n    a: int\n    a: str\nclass Child(Twice):\n 
 @pytest.mark.parametrize("call", DECLARED.values(), ids=DECLARED.keys())
 def test_declared_params(call: str) -> None:
     head = HEAD.replace("DRIVER", "psycopg") + "from typing import Optional, Union\n" + DICTS
-    assert compare(head + HELPERS[0] + SETUP.replace("DRIVER", "psycopg") + call) >= 1
+    assert diagnosed(head + HELPERS[0] + SETUP.replace("DRIVER", "psycopg") + call) >= 1
 
 
 def test_sqruff_of_a_module_that_does_not_parse() -> None:
@@ -321,8 +313,8 @@ def test_sqruff_of_a_module_that_does_not_parse() -> None:
         "from sqlty import SQL\nx = (\nq = SQL[tuple[str, int]]('''--sql\n"
         "SELECT name, COUNT(*) AS n FROM users\nGROUP BY 1\nORDER BY name''')\n"
     )
-    assert compare(source, rules={"sqruff": "warn"}) == 2
-    assert compare("x = (\n", rules={"sqruff": "warn"}) == 0
+    assert diagnosed(source, rules={"sqruff": "warn"}) == 2
+    assert diagnosed("x = (\n", rules={"sqruff": "warn"}) == 0
 
 
 @FUZZ
@@ -337,11 +329,11 @@ def test_generated_calls(
     source: str, dialect: str, rules: dict[str, str] | None, untyped: bool, schema: bool
 ) -> None:
     if parses(source):
-        compare(source, dialect, rules, untyped, schema)
+        diagnosed(source, dialect, rules, untyped, schema)
 
 
 @FUZZ
 @given(fitted(), st.sampled_from(sorted(SCHEMAS)), st.booleans())
 def test_generated_rows(source: str, dialect: str, untyped: bool) -> None:
     if parses(source):
-        compare(source, dialect, None, untyped)
+        diagnosed(source, dialect, None, untyped)

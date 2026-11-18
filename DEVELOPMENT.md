@@ -83,21 +83,6 @@ uv run pytest -k "integer cast"
 uv run pytest tests/mdtest/type_inference/basic_types.md -v
 ```
 
-### The two check engines
-
-`check` reads row types, helper calls, driver calls and query variants in Rust
-(`sqlty-python`, the default, which also runs in the playground). The Python passes
-(`ast`) are deprecated and removed in 0.8.0; until then `SQLTY_AST` still selects them:
-
-```bash
-SQLTY_AST=python uv run sqlty check .    # the Python passes, with a FutureWarning
-SQLTY_AST=compare uv run pytest          # both, raising AstMismatch where they differ
-```
-
-A change to the Rust engine that the Python passes also model needs the same change
-there until they go; CI runs the Markdown tests and the CLI tests in `compare` and
-`python` mode.
-
 ### Markdown Tests (mdtest)
 
 Format, assertions and workflow: see [AGENTS.md](AGENTS.md#markdown-tests-mdtest).
@@ -186,11 +171,10 @@ uv run ruff check --fix .
 
 | Module | Purpose |
 |--------|---------|
-| `core.py` | Public API over the Rust `_core`, plus user-defined row type checks |
+| `core.py` | Public API over the Rust `_core` |
 | `_core.pyi` | Type stubs for the Rust extension module |
-| `_cli.py` | ruff-style CLI: `rewrite`, `strip`, `check`, `version` |
+| `_cli.py` | Argument parser; runs `complete`, `breaking` and `server`, the rest in Rust |
 | `_lint.py` | Lint rules and their severity (error/warn/ignore) |
-| `_type_extractor.py` | Row types (TypedDict, dataclass, ...) for structural checks |
 | `_decode.py` | Magic codec decoder (bytes -> string transformation) |
 | `magic.py` | Codec registration for Python import system |
 

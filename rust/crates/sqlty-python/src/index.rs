@@ -576,17 +576,6 @@ impl HelperIndex {
         self.constant(functions, modules, dotted)
     }
 
-    /// [`Self::fragment`] for the module `module` that imports `entries`.
-    pub fn fragment_of(
-        &self,
-        entries: &[Import],
-        dotted: &str,
-        module: Option<&str>,
-    ) -> Option<(&Source, &Expr)> {
-        let (functions, modules) = imports_of(entries, module);
-        self.constant(&functions, &modules, dotted)
-    }
-
     fn constant(
         &self,
         functions: &Functions,
