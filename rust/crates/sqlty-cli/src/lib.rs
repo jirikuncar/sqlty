@@ -10,6 +10,7 @@ pub mod server;
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
@@ -17,6 +18,7 @@ use clap::{ArgMatches, Args, CommandFactory, FromArgMatches, Parser, Subcommand,
 use sqlty_project::{FileSettings, Flags, Options, Shared, Workspace};
 use sqlty_python::checker::Diagnostic;
 use sqlty_python::project::{Discovery, Files, Read};
+use sqlty_python::report;
 use sqlty_python::rules::{Rule, Severity};
 use sqlty_python::types::stdlib::Version;
 
@@ -26,7 +28,7 @@ include!(concat!(env!("OUT_DIR"), "/embedded.rs"));
 
 /// `check` reported an error, or `--check`/`--diff` found files to change.
 pub const EXIT_FOUND: i32 = 1;
-/// Bad usage or configuration, a missing path, or a file that is not UTF-8.
+/// Bad usage or configuration, a missing path, a file that is not UTF-8, or a crash.
 pub const EXIT_ERROR: i32 = 2;
 
 const DOCS_URL: &str = "https://sqlty.kuncar.dev/";
@@ -231,14 +233,25 @@ fn dialect(name: &str) -> Result<String, String> {
 }
 
 /// Run `sqlty ARGS...` on `host`; the exit code, or `None` when the command runs in Python
-/// still (`complete`, `breaking` and `server`).
+/// still (`complete`, `breaking` and `server`). A panic is reported with a bug report link.
 pub fn run(args: impl IntoIterator<Item = OsString>, host: &mut dyn Host) -> Option<i32> {
     let args: Vec<OsString> = args.into_iter().collect();
+    catch_unwind(AssertUnwindSafe(|| dispatch(&args, &mut *host))).unwrap_or_else(|payload| {
+        let cause = report::cause(&*payload);
+        host.err(&format!(
+            "sqlty: crashed: {cause}\nThis is a bug in sqlty, please report it at {}\n",
+            report::issue_url(cause)
+        ));
+        Some(EXIT_ERROR)
+    })
+}
+
+fn dispatch(args: &[OsString], host: &mut dyn Host) -> Option<i32> {
     let first = args.get(1).and_then(|arg| arg.to_str());
     if matches!(first, Some("complete" | "breaking" | "server")) {
         return None;
     }
-    let matches = match Cli::command().try_get_matches_from(&args) {
+    let matches = match Cli::command().try_get_matches_from(args) {
         Ok(matches) => matches,
         Err(error) => {
             let text = error.render().to_string();
@@ -1128,6 +1141,7 @@ mod tests {
         }
 
         fn version(&self) -> String {
+            assert!(self.env("CRASH").is_none(), "boom");
             "0.0.0".to_string()
         }
     }
@@ -1182,6 +1196,21 @@ mod tests {
             host.err
         );
         assert_eq!(sqlty(&mut host, &["server"]), None);
+        std::fs::remove_dir_all(&host.root).expect("removes");
+    }
+
+    #[test]
+    fn a_panic_prints_a_bug_report_link() {
+        let mut host = project("crash", &[]);
+        host.env.push(("CRASH", "1"));
+        assert_eq!(sqlty(&mut host, &["version"]), Some(EXIT_ERROR));
+        assert_eq!(
+            host.err,
+            format!(
+                "sqlty: crashed: boom\nThis is a bug in sqlty, please report it at {}\n",
+                report::issue_url("boom")
+            )
+        );
         std::fs::remove_dir_all(&host.root).expect("removes");
     }
 

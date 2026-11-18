@@ -1175,14 +1175,13 @@ pub fn module(text: &str, parsed: Option<&Arc<Source>>, run: &Run<'_>) -> Found 
 }
 
 fn crashed(payload: &(dyn Any + Send), rules: &RuleConfig) -> Found {
-    let cause = payload
-        .downcast_ref::<&str>()
-        .copied()
-        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
-        .unwrap_or("unknown cause");
+    let cause = crate::report::cause(payload);
     let diagnostic = Diagnostic {
         rule: Rule::InternalError,
-        message: format!("sqlty crashed checking this file, please report it: {cause}"),
+        message: format!(
+            "sqlty crashed checking this file: {cause}; please report it at {}",
+            crate::report::issue_url(cause)
+        ),
         severity: rules.severity(Rule::InternalError),
         line: 1,
         span: 0..0,
@@ -1498,7 +1497,10 @@ mod tests {
         assert_eq!(found[0].severity, crate::rules::Severity::Error);
         assert_eq!(
             found[0].message,
-            "sqlty crashed checking this file, please report it: lint 1"
+            format!(
+                "sqlty crashed checking this file: lint 1; please report it at {}",
+                crate::report::issue_url("lint 1")
+            )
         );
         let ignored = [("sqruff", "warn"), ("internal-error", "ignore")];
         assert!(crash("q = 1\n", &ignored).is_empty());
@@ -1512,9 +1514,12 @@ mod tests {
         assert!(found.diagnostics[0]
             .diagnostic
             .message
-            .ends_with("unknown cause"));
+            .starts_with("sqlty crashed checking this file: unknown cause;"));
         let found = crashed(&"static", &rules);
-        assert!(found.diagnostics[0].diagnostic.message.ends_with("static"));
+        assert!(found.diagnostics[0]
+            .diagnostic
+            .message
+            .starts_with("sqlty crashed checking this file: static;"));
     }
 
     #[test]
