@@ -181,9 +181,9 @@ composite key is compared with all its referenced columns, of one row.
 
 ### Keys of different tables
 
-`entity-mismatch` goes further: it compares primary keys with each other too. It is off by default, since a
-polymorphic `owner_id` or a schema without foreign keys can compare unrelated
-keys on purpose:
+`entity-mismatch` goes further: it compares primary keys with each other too,
+and reports the same join. It is off by default, since a polymorphic `owner_id`
+or a schema without foreign keys can compare unrelated keys on purpose:
 
 ```toml
 [tool.sqlty]
@@ -204,11 +204,12 @@ CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL REFERE
 ```python
 from sqlty import SQL
 
-# error: [entity-mismatch] "products.id holds products keys, orders.id holds orders keys"
+# error: [entity-mismatch] "products.id holds products keys, orders.customer_id holds customers keys"
+# error: [foreign-key-mismatch] "orders.customer_id references customers.id, not products.id"
 query = SQL[tuple[str, int]]("""--sql
 SELECT p.name, o.id
 FROM orders o
-JOIN products p ON p.id = o.id""")
+JOIN products p ON p.id = o.customer_id""")
 ```
 
 Comparisons are read in `ON`, `USING`, `WHERE` and `HAVING`. Views, CTEs and

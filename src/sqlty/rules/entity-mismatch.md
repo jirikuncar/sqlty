@@ -26,11 +26,12 @@ CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL REFERE
 ```python
 from sqlty import SQL
 
-# error: [entity-mismatch] "products.id holds products keys, orders.id holds orders keys"
+# error: [entity-mismatch] "products.id holds products keys, orders.customer_id holds customers keys"
+# error: [foreign-key-mismatch] "orders.customer_id references customers.id, not products.id"
 query = SQL[tuple[str, int]]("""--sql
 SELECT p.name, o.id
 FROM orders o
-JOIN products p ON p.id = o.id""")
+JOIN products p ON p.id = o.customer_id""")
 ```
 
 A primary or unique key column holds keys of its table. A foreign key column
@@ -44,13 +45,12 @@ lists, and `IN` subqueries that select one column.
 ## Why is this bad?
 
 Every id is an integer, so the query type-checks and returns rows: products
-whose id happens to match an order's. The mistake shows up as wrong data, not
+whose id happens to match a customer's. The mistake shows up as wrong data, not
 as an error.
 
 ## How to fix
 
-Join through the table that links them:
-`JOIN order_items i ON i.order_id = o.id JOIN products p ON p.id = i.product_id`.
+Join on the key the column references: `JOIN customers c ON c.id = o.customer_id`.
 
 ## Configuration
 
@@ -66,4 +66,5 @@ entity-mismatch = "warn"
 Needs a [schema](../../../docs/guide/schema-inference.md) with primary keys and
 foreign keys. Views, CTEs and derived tables don't carry entities.
 [`foreign-key-mismatch`](foreign-key-mismatch.md), on by default, reports a
-foreign key column compared with a column it does not reference.
+foreign key column compared with a column it does not reference, as in the
+example above.
