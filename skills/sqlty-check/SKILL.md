@@ -173,8 +173,7 @@ default) lists joins no key covers.
 does not reference, such as `products.id = orders.customer_id`, or a composite
 key compared in part. Compare it with the column it references, every column
 of a composite key. `entity-mismatch` (off by default; enable with
-`entity-mismatch = "warn"`) also compares primary keys and follows chains of
-foreign keys. Suppress only a polymorphic id that is compared to several tables
+`entity-mismatch = "warn"`) also compares primary keys with each other. Suppress only a polymorphic id that is compared to several tables
 on purpose.
 
 ## Suppress a diagnostic

@@ -2,9 +2,10 @@
 //! or the one it references.
 //!
 //! `orders.customer_id REFERENCES customers (id)` may be compared with `customers.id`,
-//! with `orders.customer_id` of another row, or with a column referencing `customers.id`
-//! too. The columns of a composite key are compared with their referenced columns of one
-//! row, all of them.
+//! with `orders.customer_id` of another row, or with a column holding the same keys: one
+//! referencing `customers.id` too, or reaching it through a chain of foreign keys. The
+//! columns of a composite key are compared with their referenced columns of one row, all
+//! of them.
 
 use std::ops::ControlFlow;
 
@@ -32,7 +33,7 @@ struct Column<'s> {
     table: &'s str,
     name: String,
     /// The foreign keys its table declares.
-    keys: &'s [ForeignKey],
+    keys: Vec<&'s ForeignKey>,
 }
 
 impl Column<'_> {
@@ -62,6 +63,7 @@ struct Located {
 }
 
 /// Two columns compared, and where.
+#[derive(Clone)]
 struct Pair<'s> {
     left: Column<'s>,
     right: Column<'s>,
@@ -69,7 +71,36 @@ struct Pair<'s> {
 }
 
 /// Comparisons that hold together: the terms of one `AND`.
-type Group<'s> = Vec<Pair<'s>>;
+#[derive(Default)]
+struct Group<'s> {
+    pairs: Vec<Pair<'s>>,
+    /// The pairs before it come from the enclosing `AND`, judged one by one there.
+    seeded: usize,
+    /// `(row, column)` of each column equal to a constant or parameter.
+    pinned: Vec<(String, String)>,
+    /// `(row, column)` of each column `IS NULL`.
+    nulls: Vec<(String, String)>,
+    /// Split into alternatives (`OR` branches, `IN` list items), each judging the keys
+    /// with this group's terms.
+    split: bool,
+}
+
+impl<'s> Group<'s> {
+    /// An alternative of this group: its terms, and more.
+    fn alternative(&self) -> Group<'s> {
+        Group {
+            pairs: self.pairs.clone(),
+            seeded: self.pairs.len(),
+            pinned: self.pinned.clone(),
+            nulls: self.nulls.clone(),
+            split: false,
+        }
+    }
+
+    fn pins(&self, row: &str, column: &str) -> bool {
+        self.pinned.iter().any(|(r, c)| r == row && c == column)
+    }
+}
 
 impl<'s> Analyzer<'s> {
     /// Records `foreign-key-mismatch` for each comparison of `select` in `ON`, `USING`,
@@ -93,16 +124,20 @@ impl<'s> Analyzer<'s> {
             subqueries: 0,
             groups: Vec::new(),
         };
-        let mut all = Group::new();
+        let mut all = Group::default();
         for (using, right) in &usings {
             self.using_comparisons(using, right, scope, &mut all);
         }
-        for condition in conditions {
-            reader.conjunction(condition, &mut all);
-        }
+        let terms = conditions.into_iter().flat_map(conjuncts).collect();
+        reader.conjunction(terms, &mut all);
         reader.groups.push(all);
         for group in &reader.groups {
-            self.judge(group);
+            for pair in &group.pairs[group.seeded..] {
+                self.judge_pair(pair);
+            }
+            if !group.split {
+                self.judge_composites(group);
+            }
         }
     }
 
@@ -127,7 +162,7 @@ impl<'s> Analyzer<'s> {
                 .iter()
                 .find_map(|source| self.locate(&qualified(&source.reference, ident), scope, ""));
             if let (Some(left), Some(right)) = (left, right) {
-                into.extend(self.pair(left, right, ident.span));
+                into.pairs.extend(self.pair(left, right, ident.span));
             }
         }
     }
@@ -175,25 +210,20 @@ impl<'s> Analyzer<'s> {
         })
     }
 
-    fn judge(&self, group: &Group<'s>) {
-        for pair in group {
-            self.judge_pair(pair);
-        }
-        self.judge_composites(group);
-    }
-
     /// A foreign key column may be compared with itself, the column it references, or a
-    /// column referencing that one too.
+    /// column holding the same keys.
     fn judge_pair(&self, pair: &Pair) {
         let (left, right) = (&pair.left, &pair.right);
         let (to_left, to_right) = (left.targets(), right.targets());
         let is = |column: &Column, (table, name): (&str, &str)| {
             column.table == table && column.name == name
         };
+        let entity = |column: &Column| self.schema.entity(column.table, &column.name);
         let allowed = (left.table == right.table && left.name == right.name)
             || to_left.iter().any(|&target| is(right, target))
             || to_right.iter().any(|&target| is(left, target))
-            || to_left.iter().any(|target| to_right.contains(target));
+            || to_left.iter().any(|target| to_right.contains(target))
+            || entity(left).is_some_and(|root| Some(root) == entity(right));
         if allowed || to_left.is_empty() && to_right.is_empty() {
             return;
         }
@@ -219,12 +249,13 @@ impl<'s> Analyzer<'s> {
     }
 
     /// Each composite key of a row compared with its referenced columns: all of them, of
-    /// one row.
+    /// one row. A key column and its referenced column both equal to a constant or
+    /// parameter count as compared.
     fn judge_composites(&self, group: &Group<'s>) {
         let mut matches: Vec<Match> = Vec::new();
-        for pair in group {
+        for (index, pair) in group.pairs.iter().enumerate() {
             for (column, other) in [(&pair.left, &pair.right), (&pair.right, &pair.left)] {
-                for fk in column.keys {
+                for &fk in &column.keys {
                     let Some(at) = fk.columns.iter().position(|c| *c == column.name) else {
                         continue;
                     };
@@ -247,34 +278,28 @@ impl<'s> Analyzer<'s> {
                         });
                         matches.len() - 1
                     });
-                    matches[at_match].columns.push((at, other.clone()));
+                    matches[at_match].columns.push((at, other.clone(), index));
                 }
             }
         }
-        let mut partial = Vec::new();
-        for m in &matches {
-            let rows = m.rows();
-            if rows.len() > 1 {
-                let compared: Vec<String> = m
-                    .columns
-                    .iter()
-                    .map(|(_, other)| format!("{}.{}", other.reference, other.name))
-                    .collect();
-                let _at = self.diag.at(m.span);
-                self.diag.record(
-                    NameRule::ForeignKeyMismatch,
-                    format!(
-                        "{} {} references one {} row, compared with {}",
-                        short(m.table),
-                        list(&m.fk.columns),
-                        short(&m.fk.table),
-                        compared.join(" and ")
-                    ),
-                );
-            } else if m.covered() < m.fk.columns.len() {
-                partial.push(m);
-            }
-        }
+        let partial: Vec<&Match> = matches
+            .iter()
+            .filter(|m| !self.across_rows(m) && !m.complete(group))
+            .collect();
+        // `p.tree = n.tree` of a self-referencing key reads both ways: the other way is
+        // part of a complete match.
+        let partial: Vec<&Match> = partial
+            .into_iter()
+            .filter(|m| {
+                !matches.iter().any(|whole| {
+                    !std::ptr::eq(*m, whole)
+                        && whole.complete(group)
+                        && m.columns
+                            .iter()
+                            .all(|(_, _, index)| whole.columns.iter().any(|(_, _, i)| i == index))
+                })
+            })
+            .collect();
         let mut reported = vec![false; partial.len()];
         for (i, m) in partial.iter().enumerate() {
             if reported[i] {
@@ -296,7 +321,7 @@ impl<'s> Analyzer<'s> {
                     .iter()
                     .flat_map(|&j| {
                         let m = partial[j];
-                        m.columns.iter().map(move |(at, other)| {
+                        m.columns.iter().map(move |(at, other, _)| {
                             format!("{} = {}.{}", m.fk.columns[*at], other.reference, other.name)
                         })
                     })
@@ -318,7 +343,7 @@ impl<'s> Analyzer<'s> {
             let mut compared: Vec<&str> = m
                 .columns
                 .iter()
-                .map(|(at, _)| m.fk.columns[*at].as_str())
+                .map(|(at, _, _)| m.fk.columns[*at].as_str())
                 .collect();
             compared.sort_unstable();
             compared.dedup();
@@ -336,6 +361,30 @@ impl<'s> Analyzer<'s> {
             );
         }
     }
+
+    /// Records a composite key compared with columns of more than one row.
+    fn across_rows(&self, m: &Match) -> bool {
+        if m.rows().len() < 2 {
+            return false;
+        }
+        let compared: Vec<String> = m
+            .columns
+            .iter()
+            .map(|(_, other, _)| format!("{}.{}", other.reference, other.name))
+            .collect();
+        let _at = self.diag.at(m.span);
+        self.diag.record(
+            NameRule::ForeignKeyMismatch,
+            format!(
+                "{} {} references one {} row, compared with {}",
+                short(m.table),
+                list(&m.fk.columns),
+                short(&m.fk.table),
+                compared.join(" and ")
+            ),
+        );
+        true
+    }
 }
 
 /// The columns of a row's composite key compared with their referenced columns.
@@ -343,24 +392,44 @@ struct Match<'s> {
     row: String,
     table: &'s str,
     fk: &'s ForeignKey,
-    /// The position in the key of each column compared, and what it is compared with.
-    columns: Vec<(usize, Column<'s>)>,
+    /// The position in the key of each column compared, what it is compared with, and
+    /// the index of the pair comparing them.
+    columns: Vec<(usize, Column<'s>, usize)>,
     span: Span,
 }
 
 impl Match<'_> {
     fn rows(&self) -> Vec<&str> {
-        let mut rows: Vec<&str> = self.columns.iter().map(|(_, c)| c.row.as_str()).collect();
+        let mut rows: Vec<&str> = self
+            .columns
+            .iter()
+            .map(|(_, c, _)| c.row.as_str())
+            .collect();
         rows.sort_unstable();
         rows.dedup();
         rows
     }
 
-    fn covered(&self) -> usize {
-        let mut at: Vec<usize> = self.columns.iter().map(|(at, _)| *at).collect();
-        at.sort_unstable();
-        at.dedup();
-        at.len()
+    /// Whether every column of the key is compared, or pinned with its referenced column,
+    /// or one is NULL, so the key references no row.
+    fn complete(&self, group: &Group) -> bool {
+        let other = self.columns[0].1.row.as_str();
+        let null = |column: &String| {
+            group
+                .nulls
+                .iter()
+                .any(|(r, c)| *r == self.row && c == column)
+        };
+        self.fk.columns.iter().any(null)
+            || (0..self.fk.columns.len()).all(|at| {
+                self.columns.iter().any(|(i, _, _)| *i == at)
+                    || group.pins(&self.row, &self.fk.columns[at])
+                        && self
+                            .fk
+                            .referred
+                            .get(at)
+                            .is_some_and(|referred| group.pins(other, referred))
+            })
     }
 }
 
@@ -383,26 +452,42 @@ struct Reader<'a, 's> {
 }
 
 impl<'s> Reader<'_, 's> {
-    fn conjunction(&mut self, condition: &Expr, group: &mut Group<'s>) {
-        for term in conjuncts(condition) {
-            if let Expr::BinaryOp {
-                left,
-                op: BinaryOperator::Or,
-                right,
-            } = term
-            {
-                for branch in [left, right] {
-                    let mut alternative = Group::new();
-                    self.conjunction(branch, &mut alternative);
-                    self.groups.push(alternative);
+    /// Reads the terms of one `AND` into `group`, then each `OR` branch and `IN` list item
+    /// into an alternative of it.
+    fn conjunction(&mut self, terms: Vec<&Expr>, group: &mut Group<'s>) {
+        let (mut branches, mut lists) = (Vec::new(), Vec::new());
+        for term in terms {
+            match term {
+                Expr::BinaryOp {
+                    left,
+                    op: BinaryOperator::Or,
+                    right,
+                } => branches.extend([left, right]),
+                Expr::In {
+                    expr,
+                    target: InTarget::List(list),
+                    ..
+                } => lists.push((expr, list, term.span())),
+                _ if self.comparison(term, group) => {}
+                _ => {
+                    let mut nested = Nested {
+                        reader: self,
+                        queries: 0,
+                    };
+                    let _ = term.visit(&mut nested);
                 }
-            } else if !self.comparison(term, group) {
-                let mut nested = Nested {
-                    reader: self,
-                    queries: 0,
-                };
-                let _ = term.visit(&mut nested);
             }
+        }
+        group.split |= !branches.is_empty() || !lists.is_empty();
+        for branch in branches {
+            let _at = self.analyzer.diag.at(branch.span());
+            let mut alternative = group.alternative();
+            self.conjunction(conjuncts(branch), &mut alternative);
+            self.groups.push(alternative);
+        }
+        for (expr, list, span) in lists {
+            let _at = self.analyzer.diag.at(span);
+            self.in_list(expr, list, span, group);
         }
     }
 
@@ -412,35 +497,43 @@ impl<'s> Reader<'_, 's> {
         match expr {
             Expr::BinaryOp {
                 left,
-                op: BinaryOperator::Eq | BinaryOperator::NotEq,
+                op: op @ (BinaryOperator::Eq | BinaryOperator::NotEq),
                 right,
-            } => self.compare(left, right, expr.span(), group),
+            } => self.compare(left, right, *op == BinaryOperator::Eq, expr.span(), group),
             Expr::In {
                 expr: left,
                 target: InTarget::List(list),
                 ..
-            } => {
-                for item in list {
-                    let mut alternative = Group::new();
-                    self.compare(left, item, expr.span(), &mut alternative);
-                    self.groups.push(alternative);
-                }
-            }
+            } => self.in_list(left, list, expr.span(), group),
             Expr::In {
                 expr: left,
                 target: InTarget::Subquery(subquery),
                 ..
             } => self.subquery(left, subquery, expr.span(), group),
+            Expr::IsNull(column) => {
+                if let Some(column) = self.analyzer.locate(column, self.scope, "") {
+                    group.nulls.push((column.row, column.name));
+                }
+            }
             _ => return false,
         }
         true
     }
 
-    fn compare(&self, left: &Expr, right: &Expr, span: Span, group: &mut Group<'s>) {
+    fn in_list(&mut self, left: &Expr, list: &[Expr], span: Span, group: &Group<'s>) {
+        for item in list {
+            let mut alternative = group.alternative();
+            self.compare(left, item, false, span, &mut alternative);
+            self.groups.push(alternative);
+        }
+    }
+
+    /// Reads `left = right` (`pin`) or `left <> right` into `group`, row values by position.
+    fn compare(&self, left: &Expr, right: &Expr, pin: bool, span: Span, group: &mut Group<'s>) {
         match (strip(left), strip(right)) {
             (Expr::Tuple(lefts), Expr::Tuple(rights)) if lefts.len() == rights.len() => {
                 for (left, right) in lefts.iter().zip(rights) {
-                    self.compare(left, right, span, group);
+                    self.compare(left, right, pin, span, group);
                 }
                 return;
             }
@@ -448,11 +541,18 @@ impl<'s> Reader<'_, 's> {
             _ => {}
         }
         let (analyzer, scope) = (self.analyzer, self.scope);
-        if let (Some(left), Some(right)) = (
+        match (
             analyzer.locate(left, scope, ""),
             analyzer.locate(right, scope, ""),
         ) {
-            group.extend(analyzer.pair(left, right, span));
+            (Some(left), Some(right)) => group.pairs.extend(analyzer.pair(left, right, span)),
+            (Some(column), None) if pin && is_value(right) => {
+                group.pinned.push((column.row, column.name));
+            }
+            (None, Some(column)) if pin && is_value(left) => {
+                group.pinned.push((column.row, column.name));
+            }
+            _ => {}
         }
     }
 
@@ -491,10 +591,15 @@ impl<'s> Reader<'_, 's> {
                 self.analyzer.locate(left, self.scope, ""),
                 analyzer.locate(right, &inner_scope, &row),
             ) {
-                group.extend(self.analyzer.pair(left, right, span));
+                group.pairs.extend(self.analyzer.pair(left, right, span));
             }
         }
     }
+}
+
+/// A constant or parameter.
+fn is_value(expr: &Expr) -> bool {
+    matches!(strip(expr), Expr::Value(_))
 }
 
 /// Visits a term that is no comparison, reading each comparison in it, outside subqueries,
@@ -519,7 +624,7 @@ impl Visitor for Nested<'_, '_, '_> {
 
     fn pre_visit_expr(&mut self, expr: &Expr) -> ControlFlow<()> {
         if self.queries == 0 {
-            let mut group = Group::new();
+            let mut group = Group::default();
             if self.reader.comparison(expr, &mut group) {
                 self.reader.groups.push(group);
             }

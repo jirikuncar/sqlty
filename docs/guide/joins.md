@@ -176,13 +176,12 @@ FROM orders o
 JOIN products p ON p.id = o.customer_id""")
 ```
 
-The column of another row and a column referencing the same one are fine, and
-a composite key is compared with all its referenced columns, of one row.
+The column of another row and a column holding the same keys are fine, and a
+composite key is compared with all its referenced columns, of one row.
 
 ### Keys of different tables
 
-`entity-mismatch` goes further: it follows foreign keys to the table whose keys
-a column holds, and compares primary keys too. It is off by default, since a
+`entity-mismatch` goes further: it compares primary keys with each other too. It is off by default, since a
 polymorphic `owner_id` or a schema without foreign keys can compare unrelated
 keys on purpose:
 

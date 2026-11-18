@@ -761,7 +761,7 @@ unrelated keys (polymorphic ids, legacy schemas) would need suppressions.
 
 Default: warn. A foreign key column compared in `ON`, `USING`, `WHERE`,
 `HAVING` or `IN` with a column other than the one it references, itself in
-another row, or a column referencing the same one: `products.id =
+another row, or a column holding the same keys: `products.id =
 orders.customer_id`. A composite key is compared with all its referenced
 columns, of one row.
 

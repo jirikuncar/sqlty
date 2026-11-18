@@ -75,8 +75,8 @@ foreign keys of your schema, so no database is needed. See
 
 Yes. `foreign-key-mismatch` reports a foreign key column compared with a
 column it does not reference, such as `products.id = orders.customer_id`. Turn
-on `entity-mismatch` in `[tool.sqlty.rules]` to also compare primary keys and
-follow chains of foreign keys. It is off by default, because a polymorphic id
+on `entity-mismatch` in `[tool.sqlty.rules]` to also compare primary keys with
+each other. It is off by default, because a polymorphic id
 or a schema without foreign keys can compare unrelated keys on purpose. See
 [Joins on the wrong key](guide/joins.md#joins-on-the-wrong-key).
 

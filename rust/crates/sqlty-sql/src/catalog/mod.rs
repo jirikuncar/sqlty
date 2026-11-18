@@ -362,10 +362,17 @@ impl Catalog {
     }
 
     /// The catalog key of the table `name` and every foreign key it declares, whether or
-    /// not it holds for every row.
-    pub(crate) fn declared_foreign_keys(&self, name: &str) -> Option<(&str, &[ForeignKey])> {
-        self.table_entry(name)
-            .map(|(key, table)| (key, table.declared_foreign_keys.as_slice()))
+    /// not it holds for every row, whose referenced table still has the referenced columns.
+    pub(crate) fn declared_foreign_keys(&self, name: &str) -> Option<(&str, Vec<&ForeignKey>)> {
+        let (key, table) = self.table_entry(name)?;
+        let current = |fk: &&ForeignKey| {
+            matches!(self.relations.get(fk.table.as_str()), Some(Relation::Table(target))
+                if fk.referred.iter().all(|name| target.columns.iter().any(|c| c.name == *name)))
+        };
+        Some((
+            key,
+            table.declared_foreign_keys.iter().filter(current).collect(),
+        ))
     }
 
     /// The keys of the table `name`: its primary key, then each `UNIQUE` constraint or
