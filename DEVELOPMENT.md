@@ -238,6 +238,21 @@ cargo nextest run --workspace --manifest-path rust/Cargo.toml
 cargo test --doc --workspace --manifest-path rust/Cargo.toml
 ```
 
+### The `sqlty` executable
+
+`rust/crates/sqlty-cli/tests/cli/*.md` run the built `sqlty` binary with
+[`trycmd`](https://docs.rs/trycmd): each `$ sqlty ...` line in a `console` block,
+its output and `? CODE` exit status. `NAME.in/` is the project a case starts
+from; with `NAME.out/`, the commands share one copy of it and each file there
+must match what they leave. Write new output into the cases with:
+
+```bash
+TRYCMD=overwrite uv run cargo test -p sqlty-cli --test cli --manifest-path rust/Cargo.toml
+```
+
+It updates the files already in `.out/`; add new ones by hand, where `...` matches any lines.
+Output backslashes read as `/`, so keep `\n` out of what a case prints.
+
 ### Fuzzing the analyzer
 
 `tests/test_fuzz.py` generates random schemas and queries with

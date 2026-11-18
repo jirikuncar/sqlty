@@ -1,0 +1,5 @@
+[tool.sqlty]
+schema = ["schema.sql", "none/*.sql"]
+
+[tool.sqlty.rules]
+select-star = "warn"
