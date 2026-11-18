@@ -109,7 +109,7 @@ pub fn names_query_file(path: &Path, resolved: &Path, base: &Path, queries: &[St
         let trimmed = entry.trim_matches('/');
         relative == trimmed
             || relative.starts_with(&format!("{trimmed}/"))
-            || glob::compile(&format!("^{}", glob::path(entry))).is_match(&relative)
+            || glob::path_prefix(entry).is_match(&relative)
     })
 }
 

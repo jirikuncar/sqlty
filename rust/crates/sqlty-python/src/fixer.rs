@@ -3,18 +3,14 @@
 //! User-defined row types (`SQL[User]`) are never changed.
 
 use std::collections::{BTreeSet, HashMap};
-use std::sync::Mutex;
-
-use regex::Regex;
-use std::sync::LazyLock;
 
 use crate::checker::check_source;
 use crate::edit::apply_edits;
 use crate::index::HelperIndex;
 use crate::options::Options;
 use crate::rewriter::{
-    has_import, insert_imports, suppresses, type_modules, with_wrapper_imports, ImportStyle,
-    Spelling, Suppressed,
+    has_import, insert_imports, suppresses, type_modules, with_wrapper_imports, word_regex,
+    ImportStyle, Spelling, Suppressed,
 };
 use crate::rules::{Rule, RuleConfig};
 use crate::scan::Scan;
@@ -37,18 +33,6 @@ const FIXABLE: [Rule; 8] = [
 /// Fixing one problem can reveal another (a `"--sql SELECT"` fixed into a query is then
 /// wrapped); a pass applies every fix that does not overlap another, up to this many.
 const MAX_PASSES: usize = 8;
-
-/// `\bname\b`, compiled once per name: the few import styles in use repeat call after call.
-fn word_regex(name: &str) -> Regex {
-    static CACHE: LazyLock<Mutex<HashMap<String, Regex>>> = LazyLock::new(Mutex::default);
-    let mut cache = CACHE
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    cache
-        .entry(name.to_string())
-        .or_insert_with(|| sqlty_sql::regex(&format!(r"\b{}\b", regex::escape(name))))
-        .clone()
-}
 
 /// [`fix_source`] of a module, leaving alone what its `# sqlty: ignore` comments suppress
 /// and the strings of helper calls (see [`suppress::suppressed`]). `parsed` is `source`
