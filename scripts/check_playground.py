@@ -311,7 +311,9 @@ def engine_errors(page: Page) -> None:
     page.evaluate(f"{config}.setValue('[')")
     page.wait_for_function("document.querySelector('[data-problems]').textContent.includes('TOML')")
     page.evaluate(f"{config}.setValue('')")
-    page.evaluate("() => { globalThis.sqltyHeld = new Promise((release) => (globalThis.sqltyRelease = release)); }")
+    page.evaluate(
+        "() => { globalThis.sqltyHeld = new Promise((release) => (globalThis.sqltyRelease = release)); }"
+    )
     page.evaluate("globalThis.sqltyPanic = true")
     source(page, "x = 1\n")
     assert "please report it: boom" in page.inner_text("[data-problems]")
