@@ -26,10 +26,12 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
-from playwright.sync_api import Browser, CDPSession, Page, sync_playwright
+from playwright.sync_api import Browser, BrowserContext, CDPSession, Page, Route, sync_playwright
 
 SOURCE = "monaco.editor.getEditors().find((e) => e.getContainerDomNode().matches('[data-source]'))"
 MODEL = "monaco.editor.getModels().find((m) => m.getLanguageId() === '{}')"
+# The theme's repository facts call the GitHub API, which rate limits shared CI runners with 403s.
+GITHUB = json.dumps({"tag_name": "v0.0.0", "stargazers_count": 0, "forks_count": 0})
 
 
 def main() -> None:
@@ -45,24 +47,32 @@ def main() -> None:
         browser = playwright.chromium.launch()
         coverage = Coverage()
         page = browser.new_page()
+        page.route("https://api.github.com/**", github)
         coverage.watch(page)
         errors: list[str] = []
         page.on("pageerror", lambda error: errors.append(str(error)))
-        page.on("console", lambda message: message.type == "error" and errors.append(message.text))
+        page.on(
+            "console",
+            lambda message: (
+                message.type == "error"
+                and errors.append(f"{message.text} {message.location['url']}")
+            ),
+        )
         check(page, url)
         assert not errors, errors
         exercise(browser, url, coverage.watch)
         coverage.take()
-        script = page.evaluate(
-            "(url) => fetch(url).then((response) => response.text())",
-            f"{url}../assets/playground/playground.js",
-        )
+        script = page.request.get(f"{url}../assets/playground/playground.js").text()
         browser.close()
     lines, functions = coverage.missed(script)
     assert not lines and not functions, (
         f"playground.js never ran lines {lines} and functions {functions}"
     )
     print(f"{url}: the playground works, and every line of playground.js ran")
+
+
+def github(route: Route) -> None:
+    route.fulfill(body=GITHUB, content_type="application/json")
 
 
 def check(page: Page, url: str) -> None:
@@ -127,6 +137,7 @@ def embedded(page: Page, url: str) -> None:
     assert not page.is_visible(".md-header")
     assert not page.is_visible("[data-example]")
     assert page.is_visible("[data-fix]")
+    assert not page.is_visible("[data-ask-open]")
     opened = page.get_attribute("[data-open]", "href")
     assert "embed" not in opened and opened.split("#")[1] == shared.split("#")[1], opened
 
@@ -168,19 +179,24 @@ def offline(page: Page, url: str) -> None:
         page.context.set_offline(False)
 
 
-# Lets a test trap the engine once, as a panic in the WebAssembly would, and records
-# `window.open` instead of opening tabs. `?refuse` makes storage and full screen refuse.
+# Lets a test panic the engine on its next check (`sqltyPanic`) and hold back the instances it
+# starts (`sqltyHeld`, counted in `sqltyStarted`), and records `window.open` instead of opening
+# tabs. `?refuse` makes storage and full screen refuse.
 INIT = """
+const stringify = JSON.stringify;
+JSON.stringify = (value, ...rest) => {
+  if (globalThis.sqltyPanic && value?.op === "analyze") {
+    globalThis.sqltyPanic = false;
+    value = { ...value, panic: "boom" };
+  }
+  return stringify(value, ...rest);
+};
 const instantiate = WebAssembly.instantiate;
 WebAssembly.instantiate = async (...args) => {
-  const { instance } = await instantiate(...args);
-  const { run } = instance.exports;
-  const trap = () => {
-    if (!globalThis.sqltyTrap) return run();
-    globalThis.sqltyTrap = false;
-    throw new WebAssembly.RuntimeError("unreachable");
-  };
-  return { instance: { exports: { ...instance.exports, run: trap } } };
+  await globalThis.sqltyHeld;
+  const instance = await instantiate(...args);
+  globalThis.sqltyStarted = (globalThis.sqltyStarted ?? 0) + 1;
+  return instance;
 };
 window.opened = [];
 window.open = (...args) => void window.opened.push(args);
@@ -210,6 +226,7 @@ def exercise(browser: Browser, url: str, watch: Callable[[Page], None]) -> None:
     """Every control of the playground, with what each one shows."""
     context = browser.new_context(permissions=["clipboard-read", "clipboard-write"])
     context.add_init_script(INIT)
+    context.route("https://api.github.com/**", github)
     context.route(
         "**/vendor/wllama/esm/index.min.js",
         lambda route: route.fulfill(body=WLLAMA, content_type="text/javascript"),
@@ -236,6 +253,7 @@ def exercise(browser: Browser, url: str, watch: Callable[[Page], None]) -> None:
     sharing(page)
     resizing(page)
     zoomed(page, url)
+    unsupported(context, url, watch)
     asking(page, url)
     assert not errors, errors
 
@@ -309,9 +327,20 @@ def engine_errors(page: Page) -> None:
     page.evaluate(f"{config}.setValue('[')")
     page.wait_for_function("document.querySelector('[data-problems]').textContent.includes('TOML')")
     page.evaluate(f"{config}.setValue('')")
-    page.evaluate("globalThis.sqltyTrap = true")
+    page.evaluate(
+        "() => { globalThis.sqltyHeld = new Promise((release) => (globalThis.sqltyRelease = release)); }"
+    )
+    page.evaluate("globalThis.sqltyPanic = true")
     source(page, "x = 1\n")
-    assert "RuntimeError: unreachable" in page.inner_text("[data-problems]")
+    assert "sqlty crashed checking this file: boom; please report it at https://github.com/" in (
+        page.inner_text("[data-problems]")
+    )
+    page.evaluate("globalThis.sqltyPanic = true")
+    source(page, "x = 2\n")
+    assert page.inner_text("[data-problems]") == "Error: sqlty crashed and is starting again"
+    started = page.evaluate("globalThis.sqltyStarted")
+    page.evaluate("globalThis.sqltyRelease()")
+    page.wait_for_function(f"globalThis.sqltyStarted > {started}")
     source(page, "y = 1\n")
     assert page.inner_text("[data-problems]") == "No problems."
 
@@ -498,8 +527,21 @@ def zoomed(page: Page, url: str) -> None:
     page.click("[data-present]")
 
 
+def unsupported(context: BrowserContext, url: str, watch: Callable[[Page], None]) -> None:
+    """A browser wllama cannot run in, here one without OPFS, gets no Ask."""
+    other = context.new_page()
+    watch(other)
+    other.add_init_script("delete StorageManager.prototype.getDirectory")
+    other.goto(url)
+    other.wait_for_selector("[data-types] code", state="attached", timeout=60_000)
+    other.wait_for_function(
+        "performance.getEntriesByType('resource').some((r) => r.name.endsWith('/ask.js'))"
+    )
+    assert not other.is_visible("[data-ask-open]")
+
+
 def asking(page: Page, url: str) -> None:
-    page.goto(url + "?ask")
+    page.goto(url)
     page.wait_for_selector("[data-ask-open]:not([hidden])", timeout=60_000)
     page.click("[data-ask-open]")
     page.wait_for_function("document.activeElement.matches('[data-ask-question]')")

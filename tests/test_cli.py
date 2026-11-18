@@ -20,6 +20,7 @@ from sqlty._cli import (
     SettingsResolver,
     _collect_python_files,
     build_parser,
+    issue_url,
     main,
 )
 from sqlty._config import ConfigError
@@ -759,6 +760,54 @@ def test_internal_error_exits_2(tmp_path, monkeypatch, capsys) -> None:
 
     assert code == 2
     assert "internal error" in err
+    assert issue_url("RuntimeError: boom") in err
+
+
+def test_a_panic_is_an_internal_error(monkeypatch, capsys) -> None:
+    import sqlty._cli
+
+    class PanicException(BaseException):
+        pass
+
+    def panic(*args, **kwargs):
+        raise PanicException("boom")
+
+    monkeypatch.setattr(sqlty._cli, "_rust", panic)
+
+    code, _, err = _run(["version"], capsys)
+
+    assert code == 2
+    assert issue_url("PanicException: boom") in err
+
+
+def test_an_interrupt_is_not_an_internal_error(monkeypatch, capsys) -> None:
+    import sqlty._cli
+
+    def interrupt(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(sqlty._cli, "_rust", interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        _run(["version"], capsys)
+
+
+@pytest.mark.parametrize(
+    ("cause", "title", "output"),
+    [
+        ("boom\nmore", "Crash%3A%20boom", "boom%0Amore"),
+        ("", "Crash%3A%20", ""),
+        ("é" * 3000, "Crash%3A%20" + "%C3%A9" * 80, "%C3%A9" * 2000),
+    ],
+)
+def test_issue_url_prefills_the_bug_report_form(cause: str, title: str, output: str) -> None:
+    url = issue_url(cause)
+
+    assert url.startswith(
+        "https://github.com/jirikuncar/sqlty/issues/new?template=bug_report.yml"
+        f"&title={title}&output={output}&version="
+    )
+    assert "&environment=" in url
 
 
 def _run(argv: list[str], capsys: pytest.CaptureFixture[str]) -> tuple[int, str, str]:

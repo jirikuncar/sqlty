@@ -81,12 +81,37 @@ def main(argv: list[str] | None = None) -> None:
     except ConfigError as exc:
         print(f"sqlty: error: {exc}", file=sys.stderr)
         sys.exit(EXIT_ERROR)
-    except Exception:
+    except KeyboardInterrupt, SystemExit:
+        raise
+    except BaseException as exc:  # a Rust panic is a BaseException
         import traceback
 
         traceback.print_exc()
-        print("sqlty: internal error; please report it with the traceback above", file=sys.stderr)
+        print(
+            "sqlty: internal error; please report it with the traceback above at "
+            + issue_url(f"{type(exc).__name__}: {exc}"),
+            file=sys.stderr,
+        )
         sys.exit(EXIT_ERROR)
+
+
+def issue_url(cause: str) -> str:
+    """A new-issue link prefilling the bug report form, as ``sqlty_python::report`` does."""
+    import platform
+    from urllib.parse import quote, urlencode
+
+    from sqlty import __version__
+
+    title = cause.splitlines()[0] if cause else ""
+    fields = {
+        "title": f"Crash: {title[:80]}",
+        "output": cause[:2000],
+        "version": __version__,
+        "environment": f"{platform.system()} {platform.machine()}, Python {platform.python_version()}",
+    }
+    return "https://github.com/jirikuncar/sqlty/issues/new?template=bug_report.yml&" + urlencode(
+        fields, quote_via=quote, safe=""
+    )
 
 
 def _rust(argv: list[str]) -> int | None:

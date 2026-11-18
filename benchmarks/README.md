@@ -13,7 +13,7 @@ Four scripts; all need the release extension:
 ## The synthetic project
 
 `synth.py` writes a deterministic project (seeded) into a temp directory at run
-time; nothing is committed. `full` is 10,000 Python files, 3,000 queries and a
+time; nothing is committed. `param-types` is on. `full` is 10,000 Python files, 3,000 queries and a
 500-table schema (ALTERs, views, an enum with `ADD VALUE`, a domain, CHECK
 constraints, functions, `SET search_path`). `ci` is 8,000 files, 2,400 queries
 and 400 tables. Queries cover joins and left/right/full outer joins, CTEs

@@ -1,0 +1,12 @@
+[tool.sqlty]
+schema = "db/app.sql"
+
+[tool.sqlty.rules]
+select-star = "error"
+
+[tool.sqlty.databases.analytics]
+dialect = "sqlite"
+schema = "db/analytics.sql"
+queries = ["sql"]
+include = ["app/reports"]
+exclude = ["legacy.py"]

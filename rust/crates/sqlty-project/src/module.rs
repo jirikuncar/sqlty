@@ -59,6 +59,10 @@ impl<'a> Checker<'a> {
 
     /// A checker of the settings of a file, whose rules and import style its configuration
     /// checked.
+    #[expect(
+        clippy::expect_used,
+        reason = "the configuration checked the rules and import style"
+    )]
     pub fn of(settings: &'a FileSettings, helpers: Option<&'a HelperIndex>) -> Self {
         let rules = RuleConfig::from_overrides(Some(settings.rules.clone()))
             .expect("the configuration checks its rules");
@@ -227,6 +231,10 @@ fn typed(text: &str, changed: String, options: &Options<'_>, settings: &FileSett
 
 /// What `sqlty rewrite` warns about in `text`: the f-, t- and other strings it leaves alone,
 /// at the severities `settings` gives them.
+#[expect(
+    clippy::expect_used,
+    reason = "every rule and severity is known; the configuration checked the import style"
+)]
 pub fn skipped_strings(text: &str, settings: &FileSettings) -> Vec<Diagnostic> {
     const SKIPPED: [Rule; 4] = [
         Rule::FstringSkipped,

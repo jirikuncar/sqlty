@@ -807,6 +807,7 @@ impl<'a, 'r> Walk<'a, 'r> {
     }
 
     /// `_Walk.enter`: walk into the block of `node` holding `target`.
+    #[expect(clippy::expect_used, reason = "a block holding the target stops at it")]
     fn enter(
         &mut self,
         frame: &Frame<'a>,

@@ -165,8 +165,7 @@ const STACK_RED_ZONE: usize = 2 << 20;
 const STACK_SEGMENT: usize = 16 << 20;
 
 /// `as`, which any import binding a name to another has.
-static AS: std::sync::LazyLock<Regex> =
-    std::sync::LazyLock::new(|| Regex::new(r"\bas\b").expect("a valid pattern"));
+static AS: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| sqlty_sql::regex(r"\bas\b"));
 
 /// The sources of the modules of a checked tree and what is read of them, shared by an
 /// index and its forks.

@@ -7,11 +7,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::LazyLock;
 
 use regex::Regex;
+use ruff_python_ast::token::TokenKind;
 use ruff_python_ast::{
     BoolOp, CmpOp, Comprehension, ConversionFlag, Expr, FStringPartRef, InterpolatedElement,
     InterpolatedStringElement, InterpolatedStringElements, Keyword, Number, Operator, Parameter,
     Parameters, UnaryOp,
 };
+use ruff_python_parser::{lexer, Mode};
 use ruff_text_size::Ranged;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -667,11 +669,9 @@ pub fn interpolation_text(field: &InterpolatedElement, source: &str) -> String {
 fn interpolation_text_as(field: &InterpolatedElement, source: &str, legacy: bool) -> String {
     let text = field_text_as(field, source, legacy);
     if legacy {
-        let text = text.trim_end();
+        // `_strip_interpolation_expr` dropped every trailing blank and `=`, debug field or not.
         return text
-            .strip_suffix('=')
-            .filter(|_| field.debug_text.is_some())
-            .map_or(text, str::trim_end)
+            .trim_end_matches(|c: char| c.is_whitespace() || c == '=')
             .to_string();
     }
     if field.debug_text.is_none() {
@@ -711,44 +711,40 @@ fn field_text_as(field: &InterpolatedElement, source: &str, legacy: bool) -> Str
         text = text[..end].trim_end();
         text = text.strip_suffix('!').unwrap_or(text);
     }
-    let text = without_comments(&text.replace("\r\n", "\n").replace('\r', "\n"), legacy);
+    let text = text.replace("\r\n", "\n").replace('\r', "\n");
     // The old tokenizer ended the text at its last `!` outside comments, the `!=` before a
-    // format spec included.
+    // format spec included, and only then dropped the comments.
     let cut = legacy && field.conversion == ConversionFlag::None && field.format_spec.is_some();
-    match last_bang(&text).filter(|_| cut) {
-        Some(bang) => text[..bang].to_string(),
-        None => text,
-    }
+    let text = match last_bang(&text).filter(|_| cut) {
+        Some(bang) => &text[..bang],
+        None => &text,
+    };
+    without_comments(text, legacy)
 }
 
-/// The offset of the last `!` of `text` outside brackets and string literals.
+/// The offset of the last `!=` of `text` outside brackets and string literals.
 fn last_bang(text: &str) -> Option<usize> {
-    let bytes = text.as_bytes();
+    let mut tokens = lexer::lex(text, Mode::Expression);
     let (mut depth, mut found) = (0usize, None);
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'(' | b'[' | b'{' => depth += 1,
-            b')' | b']' | b'}' => depth = depth.saturating_sub(1),
-            b'!' if depth == 0 => found = Some(i),
-            quote @ (b'\'' | b'"') => {
-                let triple = bytes[i..].starts_with(&[quote; 3]);
-                let close: &[u8] = if triple {
-                    &[quote; 3][..]
-                } else {
-                    &[quote; 1][..]
-                };
-                i += close.len();
-                while i < bytes.len() && !bytes[i..].starts_with(close) {
-                    i += if bytes[i] == b'\\' { 2 } else { 1 };
-                }
-                i += close.len() - 1;
+    loop {
+        match tokens.next_token() {
+            TokenKind::EndOfFile => return found,
+            TokenKind::Lpar
+            | TokenKind::Lsqb
+            | TokenKind::Lbrace
+            | TokenKind::FStringStart
+            | TokenKind::TStringStart => depth += 1,
+            TokenKind::Rpar
+            | TokenKind::Rsqb
+            | TokenKind::Rbrace
+            | TokenKind::FStringEnd
+            | TokenKind::TStringEnd => depth = depth.saturating_sub(1),
+            TokenKind::NotEqual if depth == 0 => {
+                found = Some(tokens.current_range().start().to_usize());
             }
             _ => {}
         }
-        i += 1;
     }
-    found
 }
 
 /// `text` without its comments, as `set_ftstring_expr` drops them: a quote opens a string
@@ -835,9 +831,8 @@ fn fields<'a>(elements: &'a InterpolatedStringElements, parts: &mut Vec<Part<'a>
     }
 }
 
-static UNPRINTABLE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Zl}\p{Zp}\p{Zs}]").expect("a valid pattern")
-});
+static UNPRINTABLE: LazyLock<Regex> =
+    LazyLock::new(|| sqlty_sql::regex(r"[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Zl}\p{Zp}\p{Zs}]"));
 
 /// `str.isprintable` of one character.
 fn printable(c: char) -> bool {
@@ -1106,6 +1101,18 @@ mod tests {
             ("t'''{x = \\\n}'''", "x = \\", "x "),
             ("t'{a + \"x!\" !r}'", "a + \"x!\"", "a + \"x!\" "),
             ("t'{(a!=b)!=c:y}'", "(a!=b)", "(a!=b)!=c"),
+            ("t'{f'{'!'}'!=b:y}'", "f'{'!'}'", "f'{'!'}'!=b"),
+            (
+                "t'{f'{a:{b!r}>3}'!=c:y}'",
+                "f'{a:{b!r}>3}'",
+                "f'{a:{b!r}>3}'!=c",
+            ),
+            ("t'{f'{{!'!=b:y}'", "f'{{!'", "f'{{!'!=b"),
+            (
+                "t'{f'{(a)!r}\\'!'!=b:y}'",
+                "f'{(a)!r}\\'!'",
+                "f'{(a)!r}\\'!'!=b",
+            ),
             (
                 "t'''{a + '''\"'''!=b:y}'''",
                 "a + '''\"'''",
@@ -1125,6 +1132,9 @@ mod tests {
             ("t'''{a # c\n=}'''", "a", "a \n"),
             ("t'''{a!=b # c!\n:y}'''", "a", "a!=b \n"),
             ("t'''{a # c!\n!r}'''", "a", "a \n"),
+            ("t'{a != f'{'#'}' != a:y}'", "a != f'{'", "a != f'{'"),
+            ("t'{a != f'{'#'}':y}'", "a", "a != f'{'"),
+            ("t'''{'\\'' # !=\n!r}'''", "'\\'' # !", "'\\'' \n"),
         ] {
             let parsed = crate::parse::expression(source).unwrap();
             let e = parsed.syntax().body.as_t_string_expr().unwrap();

@@ -1,5 +1,5 @@
 ---
-description: How to install sqlty with uv or pip, which Python versions and platforms have wheels, how to add the coding agent skills and verify the install.
+description: How to install sqlty with uv, pip or Homebrew, which Python versions and platforms have wheels, how to add the coding agent skills and verify the install.
 ---
 
 # Installation
@@ -39,6 +39,22 @@ git clone https://github.com/jirikuncar/sqlty.git
 cd sqlty
 uv sync --all-groups
 ```
+
+### The `sqlty` command alone
+
+Your code imports `sqlty`, so it belongs in your project's dependencies. To run the
+command without adding it, or outside Python:
+
+```bash
+uvx sqlty check                     # the Python package, in a throwaway environment
+brew install jirikuncar/sqlty/sqlty # the native executable, from Homebrew
+```
+
+The native executable reads your project as the Python package does. It takes the
+environment of the project from `VIRTUAL_ENV`, an active Conda environment, or the
+nearest `.venv`, and runs `complete` and `breaking` with the `sqlty` package of
+that environment. Its `sqlty server` takes no breaking baseline yet. It is built
+for Linux (static, x86_64 and aarch64), macOS and Windows.
 
 ### Optional dependencies
 

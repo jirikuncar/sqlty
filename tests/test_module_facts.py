@@ -368,11 +368,17 @@ def test_generated_driver_calls(imports: list[str], lines: list[str], newline: s
     assert_same("\n".join([*imports, *lines, ""]).replace("\n", newline))
 
 
+# Projects of the `sqlty` executable cases, with files that are not UTF-8 on purpose.
+CLI_CASES = ROOT / "rust" / "crates" / "sqlty-cli" / "tests" / "cli"
+
+
 def _corpus() -> list[tuple[str, str]]:
     found = [
         (str(path.relative_to(ROOT)), path.read_text())
         for path in sorted(ROOT.glob("**/*.py"))
-        if ".venv" not in path.parts and "target" not in path.parts
+        if ".venv" not in path.parts
+        and "target" not in path.parts
+        and not path.is_relative_to(CLI_CASES)
     ]
     for path in sorted((ROOT / "tests" / "mdtest").glob("**/*.md")):
         for index, block in enumerate(

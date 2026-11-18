@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.6.0"
+version = "0.7.1"
 edition = "2021"
 description = "Rust engine of sqlty: SQL type inference and Python source rewriting"
 license = "MIT"
@@ -17,6 +17,8 @@ sqlparser = { version = "0.64", features = ["visitor"] }
 regex = "1"
 recursive = "0.1"
 rustc-hash = "2"
+mimalloc = { version = "0.1.52", default-features = false }
+libmimalloc-sys = { version = "0.1.49", default-features = false }
 thiserror = "2"
 insta = "1.49"
 toml = { version = "1.1", features = ["preserve_order"] }
@@ -57,6 +59,7 @@ mem_forget = "warn"
 panic = "warn"
 panic_in_result_fn = "warn"
 unwrap_used = "warn"
+expect_used = "warn"
 unnested_or_patterns = "warn"
 
 [workspace.lints.rust]

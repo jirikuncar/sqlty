@@ -236,10 +236,9 @@ impl<'a> Module<'a> {
                 r"{}\r?\n(?:class [^\r\n]*:\r?\n(?:    [^\r\n]*\r?\n)+|[A-Za-z_]\w* = typing\.TypedDict\([^\r\n]*\)\r?\n)",
                 regex::escape(MARKER)
             );
-            Regex::new(&format!(
+            sqlty_sql::regex(&format!(
                 r"(?:\r?\n){{2}}{block}(?:(?:\r?\n){{2}}{block})*(?:\r?\n){{2}}"
             ))
-            .expect("a valid pattern")
         });
         if self.new.is_empty() {
             return edited;
