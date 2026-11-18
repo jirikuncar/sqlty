@@ -46,9 +46,7 @@ fn word_regex(name: &str) -> Regex {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     cache
         .entry(name.to_string())
-        .or_insert_with(|| {
-            Regex::new(&format!(r"\b{}\b", regex::escape(name))).expect("a valid pattern")
-        })
+        .or_insert_with(|| sqlty_sql::regex(&format!(r"\b{}\b", regex::escape(name))))
         .clone()
 }
 

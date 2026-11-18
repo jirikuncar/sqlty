@@ -298,7 +298,10 @@ pub fn validate(mut table: Table, source: &str) -> Result<Config, InvalidConfig>
         else {
             return fail("[tool.sqlty] databases must be a table of tables".into());
         };
-        for (name, database) in databases.iter_mut() {
+        for (name, entry) in databases
+            .iter_mut()
+            .filter_map(|(name, database)| Some((name, database.as_table_mut()?)))
+        {
             let place = format!("[tool.sqlty.databases.{name}]");
             if name == "default"
                 || name.is_empty()
@@ -310,7 +313,6 @@ pub fn validate(mut table: Table, source: &str) -> Result<Config, InvalidConfig>
                     "{place}: a database name is letters, digits, '-' and '_', and not 'default'"
                 ));
             }
-            let entry = database.as_table_mut().expect("checked above");
             if let Some(key) = entry
                 .keys()
                 .find(|key| !DATABASE_KEYS.contains(&key.as_str()))

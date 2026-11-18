@@ -13,7 +13,7 @@ use super::scope::{relation_name, relations, table_scope, Scope};
 use super::{SchemaColumn, SchemaData};
 
 pub(super) static STAR_ITEM: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(?:(\w+)\s*\.\s*)?\*$").expect("a valid pattern"));
+    LazyLock::new(|| crate::regex(r"^(?:(\w+)\s*\.\s*)?\*$"));
 
 /// Expand SELECT * into an explicit `col::TYPE` list, keeping other projections verbatim.
 pub fn expand_star(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> Option<String> {

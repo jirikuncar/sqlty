@@ -669,11 +669,9 @@ pub fn interpolation_text(field: &InterpolatedElement, source: &str) -> String {
 fn interpolation_text_as(field: &InterpolatedElement, source: &str, legacy: bool) -> String {
     let text = field_text_as(field, source, legacy);
     if legacy {
-        let text = text.trim_end();
+        // `_strip_interpolation_expr` dropped every trailing blank and `=`, debug field or not.
         return text
-            .strip_suffix('=')
-            .filter(|_| field.debug_text.is_some())
-            .map_or(text, str::trim_end)
+            .trim_end_matches(|c: char| c.is_whitespace() || c == '=')
             .to_string();
     }
     if field.debug_text.is_none() {
@@ -713,14 +711,15 @@ fn field_text_as(field: &InterpolatedElement, source: &str, legacy: bool) -> Str
         text = text[..end].trim_end();
         text = text.strip_suffix('!').unwrap_or(text);
     }
-    let text = without_comments(&text.replace("\r\n", "\n").replace('\r', "\n"), legacy);
+    let text = text.replace("\r\n", "\n").replace('\r', "\n");
     // The old tokenizer ended the text at its last `!` outside comments, the `!=` before a
-    // format spec included.
+    // format spec included, and only then dropped the comments.
     let cut = legacy && field.conversion == ConversionFlag::None && field.format_spec.is_some();
-    match last_bang(&text).filter(|_| cut) {
-        Some(bang) => text[..bang].to_string(),
-        None => text,
-    }
+    let text = match last_bang(&text).filter(|_| cut) {
+        Some(bang) => &text[..bang],
+        None => &text,
+    };
+    without_comments(text, legacy)
 }
 
 /// The offset of the last `!=` of `text` outside brackets and string literals.
@@ -832,9 +831,8 @@ fn fields<'a>(elements: &'a InterpolatedStringElements, parts: &mut Vec<Part<'a>
     }
 }
 
-static UNPRINTABLE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Zl}\p{Zp}\p{Zs}]").expect("a valid pattern")
-});
+static UNPRINTABLE: LazyLock<Regex> =
+    LazyLock::new(|| sqlty_sql::regex(r"[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Zl}\p{Zp}\p{Zs}]"));
 
 /// `str.isprintable` of one character.
 fn printable(c: char) -> bool {
@@ -1134,6 +1132,9 @@ mod tests {
             ("t'''{a # c\n=}'''", "a", "a \n"),
             ("t'''{a!=b # c!\n:y}'''", "a", "a!=b \n"),
             ("t'''{a # c!\n!r}'''", "a", "a \n"),
+            ("t'{a != f'{'#'}' != a:y}'", "a != f'{'", "a != f'{'"),
+            ("t'{a != f'{'#'}':y}'", "a", "a != f'{'"),
+            ("t'''{'\\'' # !=\n!r}'''", "'\\'' # !", "'\\'' \n"),
         ] {
             let parsed = crate::parse::expression(source).unwrap();
             let e = parsed.syntax().body.as_t_string_expr().unwrap();

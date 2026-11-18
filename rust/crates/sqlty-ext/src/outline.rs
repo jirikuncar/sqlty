@@ -847,6 +847,10 @@ impl<'py> Builder<'py, '_> {
             }
             Expr::Compare(e) => {
                 let ops: Vec<Node<'py>> = e.ops.iter().map(|op| self.comparison(*op)).collect();
+                #[expect(
+                    clippy::expect_used,
+                    reason = "the parser gives a comparison its left operand"
+                )]
                 let (left, comparators) =
                     e.operands.split_first().expect("a comparison has operands");
                 let fields = (self.expr(left)?, ops, self.exprs(comparators)?);

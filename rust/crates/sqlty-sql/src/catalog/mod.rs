@@ -247,9 +247,8 @@ impl TypeOverrides {
     /// The modules the Python types name, to import where a row type spells one:
     /// `app.models` for `app.models.Status`.
     fn modules(&self) -> Vec<String> {
-        static DOTTED: LazyLock<regex::Regex> = LazyLock::new(|| {
-            regex::Regex::new(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+").expect("valid pattern")
-        });
+        static DOTTED: LazyLock<regex::Regex> =
+            LazyLock::new(|| crate::regex(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+"));
         let mut modules: Vec<String> = self
             .types
             .values()

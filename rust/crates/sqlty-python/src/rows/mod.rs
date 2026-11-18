@@ -344,7 +344,7 @@ impl<'a> Check<'a> {
 /// as ones the engine reads as never NULL: `$0`, or `?0` outside PostgreSQL.
 pub(crate) fn bind(query: Option<&str>, params: Option<&[Param]>, dialect: &str) -> Option<String> {
     static PLACEHOLDER: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"%%|%\((?P<name>[^)]+)\)s|%s").expect("a valid pattern"));
+        LazyLock::new(|| sqlty_sql::regex(r"%%|%\((?P<name>[^)]+)\)s|%s"));
     let query = query?;
     let non_null: HashSet<&Key> = params
         .unwrap_or_default()

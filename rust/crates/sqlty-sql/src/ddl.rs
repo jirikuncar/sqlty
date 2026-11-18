@@ -705,9 +705,8 @@ impl Statement<'_> {
     }
 }
 
-static SET_CONFIG: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?is)\bset_config\s*\(\s*'search_path'\s*,\s*'([^']*)'").expect("a valid pattern")
-});
+static SET_CONFIG: LazyLock<Regex> =
+    LazyLock::new(|| crate::regex(r"(?is)\bset_config\s*\(\s*'search_path'\s*,\s*'([^']*)'"));
 
 /// A comma-separated `search_path` value such as `app, "$user", public`.
 fn path_list(text: &str) -> Vec<String> {
