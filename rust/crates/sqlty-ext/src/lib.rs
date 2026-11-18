@@ -23,7 +23,9 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
 
-/// `sqlty check` on all cores runs about 18% faster than on glibc malloc and ten times faster than on musl's.
+/// `sqlty check` on all cores runs about 1.2 times faster than on glibc malloc and 7 to 10
+/// times faster than on musl's, for about 40 to 65 MB more peak memory.
+#[cfg(target_os = "linux")]
 #[global_allocator]
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
