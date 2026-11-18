@@ -799,13 +799,11 @@ function anchored(popover, button, opened) {
 async function engine() {
   const url = new URL("sqlty_wasm.wasm", import.meta.url);
   const bytes = await (await fetch(url)).arrayBuffer();
-  let ask = await load(bytes);
+  const ask = await load(bytes);
   return (request) => {
     try {
       return ask(request);
     } catch (error) {
-      // A trap leaves the instance unusable: start a new one for the next request.
-      load(bytes).then((fresh) => (ask = fresh));
       return { error: String(error) };
     }
   };

@@ -4,7 +4,6 @@
 //!
 //! [`diagnostics`] answers `None` for a module that needs what is not read here yet.
 
-use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -146,16 +145,12 @@ type Span = (usize, usize);
 /// `(query, line, span of the query)` of a call.
 type Unread = (String, usize, Option<Span>);
 
-fn pattern(text: &str) -> Regex {
-    Regex::new(text).expect("a valid pattern")
-}
-
 /// `ParsedSource.may_need_rust_check`: whether the lexing pass can report anything.
 fn may_need_lexing(text: &str, wrapper: &str) -> bool {
     // A marker split over literals: quotes, prefixes, whitespace and comments between its characters.
     static MARKER: LazyLock<Regex> = LazyLock::new(|| {
         let gap = r#"(?:[\s\x1c-\x1f"'rRuU]|#[^\n]*\n)*"#;
-        pattern(&format!("(?i)-{gap}-{gap}s{gap}q{gap}l"))
+        sqlty_sql::regex(&format!("(?i)-{gap}-{gap}s{gap}q{gap}l"))
     });
     text.contains(&format!("{wrapper}[")) || text.contains("UNTYPED") || MARKER.is_match(text)
 }
@@ -947,7 +942,7 @@ impl<'a> Module<'a, '_> {
     }
 
     fn unparsed(&mut self) {
-        static FORMAT_FIELD: LazyLock<Regex> = LazyLock::new(|| pattern(r"\{\w*\}"));
+        static FORMAT_FIELD: LazyLock<Regex> = LazyLock::new(|| sqlty_sql::regex(r"\{\w*\}"));
         if !self.enabled(Rule::UnparsedQuery) {
             return;
         }
@@ -1171,18 +1166,17 @@ pub fn module(text: &str, parsed: Option<&Arc<Source>>, run: &Run<'_>) -> Found 
         Some(parsed) => diagnostics(parsed, run),
         None => unparsed(text, run),
     }))
-    .unwrap_or_else(|payload| crashed(&*payload, run.settings.rules))
+    .unwrap_or_else(|payload| crashed(crate::report::cause(&*payload), run.settings.rules))
 }
 
-fn crashed(payload: &(dyn Any + Send), rules: &RuleConfig) -> Found {
-    let cause = payload
-        .downcast_ref::<&str>()
-        .copied()
-        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
-        .unwrap_or("unknown cause");
+/// The `internal-error` of a check that panicked with `cause`.
+pub fn crashed(cause: &str, rules: &RuleConfig) -> Found {
     let diagnostic = Diagnostic {
         rule: Rule::InternalError,
-        message: format!("sqlty crashed checking this file, please report it: {cause}"),
+        message: format!(
+            "sqlty crashed checking this file: {cause}; please report it at {}",
+            crate::report::issue_url(cause)
+        ),
         severity: rules.severity(Rule::InternalError),
         line: 1,
         span: 0..0,
@@ -1259,7 +1253,9 @@ pub fn any_calls(source: &Source, style: &ImportStyle) -> Vec<usize> {
 /// line.
 pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
     static MARKED_TEMPLATE: LazyLock<Regex> = LazyLock::new(|| {
-        pattern(r#"(?:^|[^\w])(?:[tT][rR]?|[rR][tT])(?:'|")+[\s\x1c-\x1f]*--[\s\x1c-\x1f]?sql"#)
+        sqlty_sql::regex(
+            r#"(?:^|[^\w])(?:[tT][rR]?|[rR][tT])(?:'|")+[\s\x1c-\x1f]*--[\s\x1c-\x1f]?sql"#,
+        )
     });
     let settings = run.settings;
     let analyses = Analyses::new(settings.options);
@@ -1498,7 +1494,10 @@ mod tests {
         assert_eq!(found[0].severity, crate::rules::Severity::Error);
         assert_eq!(
             found[0].message,
-            "sqlty crashed checking this file, please report it: lint 1"
+            format!(
+                "sqlty crashed checking this file: lint 1; please report it at {}",
+                crate::report::issue_url("lint 1")
+            )
         );
         let ignored = [("sqruff", "warn"), ("internal-error", "ignore")];
         assert!(crash("q = 1\n", &ignored).is_empty());
@@ -1507,14 +1506,8 @@ mod tests {
 
     #[test]
     fn a_panic_without_a_message_has_an_unknown_cause() {
-        let rules = RuleConfig::from_overrides(None).unwrap();
-        let found = crashed(&42, &rules);
-        assert!(found.diagnostics[0]
-            .diagnostic
-            .message
-            .ends_with("unknown cause"));
-        let found = crashed(&"static", &rules);
-        assert!(found.diagnostics[0].diagnostic.message.ends_with("static"));
+        assert_eq!(crate::report::cause(&42), "unknown cause");
+        assert_eq!(crate::report::cause(&"static"), "static");
     }
 
     #[test]

@@ -147,6 +147,10 @@ fn site(
         ),
         None => {
             let name = call.func.as_name_expr();
+            #[expect(
+                clippy::expect_used,
+                reason = "sites are calls of names and dotted attributes only"
+            )]
             let name = name.expect("only names and dotted attributes are kept");
             (None, name.id.to_string(), None)
         }

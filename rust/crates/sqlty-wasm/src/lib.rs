@@ -5,6 +5,10 @@
 //! it, returning the answer's length) and `output()` (where the answer is). Offsets are UTF-16 code units, as
 //! JavaScript strings count them.
 //!
+//! The target aborts on a panic: `run()` traps, leaving the instance unusable, and `output()`
+//! and `output_len()` give the panic's message. The host asks a new instance again, with the
+//! message as `crashed`.
+//!
 //! # Example
 //!
 //! ```
@@ -91,6 +95,14 @@ struct Request {
     base: Option<String>,
     #[serde(default)]
     file: Option<String>,
+    /// What the instance that ran this request before panicked with: `analyze` reports it as
+    /// `internal-error`, another op as an `error`.
+    #[serde(default)]
+    crashed: Option<String>,
+    /// A message to panic with in place of answering, for a host to test its recovery: a request
+    /// that `crashed` does not.
+    #[serde(default)]
+    panic: Option<String>,
 }
 
 /// Answer a JSON request about the Python `source`, read against `schema` in `dialect`.
@@ -114,6 +126,8 @@ struct Request {
 ///   `{"need": path}` for a file `files` lacks, which the host reads and asks again with;
 ///   `{"warning": message}` for a `pyproject.toml` or `Cargo.toml` that is not TOML, which
 ///   `sqlty check` skips. The host passes the table as `settings`.
+///
+/// A request that `crashed` gets the `internal-error` of `sqlty check` in place of a check.
 ///
 /// `config` is a `sqlty.toml` whose `dialect`, `driver`, `import-style`, `param-types`,
 /// `preview`, `max-query-variants`, `rules` and `types` apply; another key, or an invalid one, is an `error`, as `sqlty check` reports
@@ -148,6 +162,35 @@ pub fn run(request: &str) -> String {
         Ok(settings) => settings,
         Err(found) => return error(found),
     };
+    let rules = match RuleConfig::from_overrides(Some(settings.rules)) {
+        Ok(rules) => rules,
+        Err(found) => return error(found.to_string()),
+    };
+    let source = request.source.as_str();
+    let utf16 = |byte: usize| source[..byte].encode_utf16().count();
+    if let Some(cause) = &request.crashed {
+        let found = check::crashed(cause, &rules).diagnostics;
+        let found: Vec<_> = found.into_iter().map(|found| found.diagnostic).collect();
+        return match op {
+            SourceOp::Analyze => json!({
+                "diagnostics": reported(&found, utf16),
+                "queries": [],
+                "highlights": [],
+                "rewritten": source,
+                "stripped": source,
+                "fixed": source,
+            })
+            .to_string(),
+            _ => error(format!(
+                "sqlty crashed: {cause}; please report it at {}",
+                sqlty_python::report::issue_url(cause)
+            )),
+        };
+    }
+    if let Some(message) = request.panic {
+        #[expect(clippy::panic, reason = "the request asks for it")]
+        std::panic::panic_any(message);
+    }
     let dialect = settings.dialect.as_deref().unwrap_or(&request.dialect);
     let param_types = settings.param_types;
     let overrides = match TypeOverrides::new(&settings.types, dialect) {
@@ -158,20 +201,15 @@ pub fn run(request: &str) -> String {
         true => load_schema_with_skipped(&request.schema, dialect).0,
         false => load_schema_with_overrides(&request.schema, dialect, overrides).0,
     });
-    let options = Options::new(
+    let options = match Options::new(
         dialect,
         schema.as_deref(),
         settings.import_style.as_deref(),
         false,
-    );
-    let (options, rules) = match options
-        .and_then(|options| Ok((options, RuleConfig::from_overrides(Some(settings.rules))?)))
-    {
-        Ok(found) => found,
+    ) {
+        Ok(options) => options,
         Err(found) => return error(found.to_string()),
     };
-    let source = request.source.as_str();
-    let utf16 = |byte: usize| source[..byte].encode_utf16().count();
     let offset = byte_offset(source, request.offset);
     let queries = Queries::new(source, &options.style, &[]);
     let params = |source: String| match param_types {
@@ -192,22 +230,7 @@ pub fn run(request: &str) -> String {
                 settings.variants,
             );
             json!({
-            "diagnostics": diagnostics
-                .iter()
-                .map(|found| json!({
-                    "rule": found.rule.name(),
-                    "message": found.message,
-                    "severity": found.severity.as_str(),
-                    "line": found.line,
-                    "start": utf16(found.span.start),
-                    "end": utf16(found.span.end),
-                    "fix": found.fix.iter().map(|edit| json!({
-                        "start": utf16(edit.range.start),
-                        "end": utf16(edit.range.end),
-                        "replacement": edit.replacement,
-                    })).collect::<Vec<_>>(),
-                }))
-                .collect::<Vec<_>>(),
+            "diagnostics": reported(&diagnostics, utf16),
             "queries": query_sites(source, &options.style, &[])
                 .into_iter()
                 .filter(|(_, kind, _)| *kind == SiteKind::Query)
@@ -388,6 +411,28 @@ fn checked(
         .collect()
 }
 
+/// `diagnostics` as `analyze` answers them, `utf16` the offset of a byte.
+fn reported(diagnostics: &[Diagnostic], utf16: impl Fn(usize) -> usize) -> Vec<Value> {
+    diagnostics
+        .iter()
+        .map(|found| {
+            json!({
+                "rule": found.rule.name(),
+                "message": found.message,
+                "severity": found.severity.as_str(),
+                "line": found.line,
+                "start": utf16(found.span.start),
+                "end": utf16(found.span.end),
+                "fix": found.fix.iter().map(|edit| json!({
+                    "start": utf16(edit.range.start),
+                    "end": utf16(edit.range.end),
+                    "replacement": edit.replacement,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect()
+}
+
 /// The row type, columns and parameters of the query `sql` on `line`.
 fn described(line: usize, sql: &str, dialect: &str, options: &Options<'_>) -> Value {
     let columns = analyze_select(sql, dialect, options.schema);
@@ -459,6 +504,7 @@ fn candidate_kind(kind: CandidateKind) -> &'static str {
 #[cfg(target_arch = "wasm32")]
 mod abi {
     use std::cell::RefCell;
+    use std::sync::Once;
 
     thread_local! {
         static INPUT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
@@ -474,8 +520,21 @@ mod abi {
         })
     }
 
+    static HOOK: Once = Once::new();
+
     #[no_mangle]
     extern "C" fn run() -> usize {
+        HOOK.call_once(|| {
+            std::panic::set_hook(Box::new(|info| {
+                let cause = info.payload_as_str().unwrap_or("unknown cause");
+                OUTPUT.with(|output| {
+                    if let Ok(mut output) = output.try_borrow_mut() {
+                        *output = cause.to_string();
+                    }
+                });
+            }));
+        });
+        OUTPUT.with_borrow_mut(String::clear);
         let answer = INPUT.with_borrow(|input| match std::str::from_utf8(input) {
             Ok(request) => super::run(request),
             Err(error) => serde_json::json!({ "error": error.to_string() }).to_string(),
@@ -489,6 +548,11 @@ mod abi {
     #[no_mangle]
     extern "C" fn output() -> *const u8 {
         OUTPUT.with_borrow(|output| output.as_ptr())
+    }
+
+    #[no_mangle]
+    extern "C" fn output_len() -> usize {
+        OUTPUT.with_borrow(String::len)
     }
 }
 

@@ -19,8 +19,7 @@ pub(crate) fn is_word(c: char) -> bool {
 
 /// Whether `text` opens with a character Python's `\w` matches.
 fn opens_word(text: &str) -> bool {
-    static WORD: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"^[\p{L}\p{N}_]").expect("a valid pattern"));
+    static WORD: LazyLock<Regex> = LazyLock::new(|| sqlty_sql::regex(r"^[\p{L}\p{N}_]"));
     WORD.is_match(text)
 }
 
