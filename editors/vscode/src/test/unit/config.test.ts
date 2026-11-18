@@ -103,3 +103,16 @@ test("a pyproject.toml that is not TOML is passed over with no table, as sqlty c
   const root = tree({ "sqlty.toml": "dialect = 'mysql'\n", "app/pyproject.toml": "[tool" });
   assert.deepEqual(await at(root, "app"), { settings: {}, schema: "" });
 });
+
+test("a panic is an internal-error, and a new instance answers the next request", () => {
+  const request = { op: "analyze", source: "q = 1", dialect: "postgres" };
+  const crashed = engine({ ...request, panic: "boom" });
+  assert.deepEqual(
+    crashed.diagnostics.map((found: { rule: string; message: string }) => [
+      found.rule,
+      found.message,
+    ]),
+    [["internal-error", "sqlty crashed checking this file, please report it: boom"]],
+  );
+  assert.deepEqual(engine(request).diagnostics, []);
+});
