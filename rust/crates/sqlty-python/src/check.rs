@@ -4,7 +4,6 @@
 //!
 //! [`diagnostics`] answers `None` for a module that needs what is not read here yet.
 
-use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -1167,23 +1166,17 @@ pub fn module(text: &str, parsed: Option<&Arc<Source>>, run: &Run<'_>) -> Found 
         Some(parsed) => diagnostics(parsed, run),
         None => unparsed(text, run),
     }))
-    .unwrap_or_else(|payload| crashed(cause(&*payload), run.settings.rules))
-}
-
-/// The message of a panic's `payload`.
-fn cause(payload: &(dyn Any + Send)) -> &str {
-    payload
-        .downcast_ref::<&str>()
-        .copied()
-        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
-        .unwrap_or("unknown cause")
+    .unwrap_or_else(|payload| crashed(crate::report::cause(&*payload), run.settings.rules))
 }
 
 /// The `internal-error` of a check that panicked with `cause`.
 pub fn crashed(cause: &str, rules: &RuleConfig) -> Found {
     let diagnostic = Diagnostic {
         rule: Rule::InternalError,
-        message: format!("sqlty crashed checking this file, please report it: {cause}"),
+        message: format!(
+            "sqlty crashed checking this file: {cause}; please report it at {}",
+            crate::report::issue_url(cause)
+        ),
         severity: rules.severity(Rule::InternalError),
         line: 1,
         span: 0..0,
@@ -1501,7 +1494,10 @@ mod tests {
         assert_eq!(found[0].severity, crate::rules::Severity::Error);
         assert_eq!(
             found[0].message,
-            "sqlty crashed checking this file, please report it: lint 1"
+            format!(
+                "sqlty crashed checking this file: lint 1; please report it at {}",
+                crate::report::issue_url("lint 1")
+            )
         );
         let ignored = [("sqruff", "warn"), ("internal-error", "ignore")];
         assert!(crash("q = 1\n", &ignored).is_empty());
@@ -1510,8 +1506,8 @@ mod tests {
 
     #[test]
     fn a_panic_without_a_message_has_an_unknown_cause() {
-        assert_eq!(cause(&42), "unknown cause");
-        assert_eq!(cause(&"static"), "static");
+        assert_eq!(crate::report::cause(&42), "unknown cause");
+        assert_eq!(crate::report::cause(&"static"), "static");
     }
 
     #[test]
