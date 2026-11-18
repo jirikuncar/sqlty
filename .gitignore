@@ -37,8 +37,9 @@ docs/assets/playground/sqlty_wasm.wasm
 docs/assets/playground/examples.json
 bench-result.json
 
-# Claude Code local settings
-.claude/
+# Claude Code local settings; the review skill is shared
+.claude/*
+!.claude/skills/
 
 # Hypothesis example database (tests/test_fuzz.py)
 .hypothesis/
