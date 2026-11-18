@@ -713,14 +713,15 @@ fn field_text_as(field: &InterpolatedElement, source: &str, legacy: bool) -> Str
         text = text[..end].trim_end();
         text = text.strip_suffix('!').unwrap_or(text);
     }
-    let text = without_comments(&text.replace("\r\n", "\n").replace('\r', "\n"), legacy);
+    let text = text.replace("\r\n", "\n").replace('\r', "\n");
     // The old tokenizer ended the text at its last `!` outside comments, the `!=` before a
-    // format spec included.
+    // format spec included, and only then dropped the comments.
     let cut = legacy && field.conversion == ConversionFlag::None && field.format_spec.is_some();
-    match last_bang(&text).filter(|_| cut) {
-        Some(bang) => text[..bang].to_string(),
-        None => text,
-    }
+    let text = match last_bang(&text).filter(|_| cut) {
+        Some(bang) => &text[..bang],
+        None => &text,
+    };
+    without_comments(text, legacy)
 }
 
 /// The offset of the last `!=` of `text` outside brackets and string literals.
@@ -1134,6 +1135,8 @@ mod tests {
             ("t'''{a # c\n=}'''", "a", "a \n"),
             ("t'''{a!=b # c!\n:y}'''", "a", "a!=b \n"),
             ("t'''{a # c!\n!r}'''", "a", "a \n"),
+            ("t'{a != f'{'#'}' != a:y}'", "a != f'{'", "a != f'{'"),
+            ("t'{a != f'{'#'}':y}'", "a", "a != f'{'"),
         ] {
             let parsed = crate::parse::expression(source).unwrap();
             let e = parsed.syntax().body.as_t_string_expr().unwrap();
