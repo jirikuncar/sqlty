@@ -23,11 +23,26 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
 
-/// `sqlty check` on all cores runs about 1.2 times faster than on glibc malloc and 7 to 10
-/// times faster than on musl's, for about 40 to 65 MB more peak memory.
+/// `sqlty check` on all cores runs about 1.15 times faster than on glibc malloc and 7 to 10
+/// times faster than on musl's, at the same peak memory.
 #[cfg(target_os = "linux")]
 #[global_allocator]
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+/// Commits arena memory as pages are touched. mimalloc commits whole arenas up front on
+/// Linux, which raised peak memory by 50 to 90% for no speed.
+#[cfg(target_os = "linux")]
+#[used]
+#[link_section = ".init_array"]
+static LAZY_COMMIT: extern "C" fn() = {
+    extern "C" fn lazy_commit() {
+        /// `mi_option_arena_eager_commit` in mimalloc's `mi_option_t`; the crate has no constant.
+        const ARENA_EAGER_COMMIT: libmimalloc_sys::mi_option_t = 4;
+        // SAFETY: runs when the library loads, before any allocation reserves an arena.
+        unsafe { libmimalloc_sys::mi_option_set(ARENA_EAGER_COMMIT, 0) }
+    }
+    lazy_commit
+};
 
 mod cli;
 mod config;

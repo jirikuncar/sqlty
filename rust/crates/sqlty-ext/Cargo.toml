@@ -36,6 +36,7 @@ toml.workspace = true
 # TLS fails to load on musl.
 [target.'cfg(target_os = "linux")'.dependencies]
 mimalloc = { workspace = true, features = ["local_dynamic_tls"] }
+libmimalloc-sys = { workspace = true, features = ["extended"] }
 
 [build-dependencies]
 pyo3-build-config = "0.30"
