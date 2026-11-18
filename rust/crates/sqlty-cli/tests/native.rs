@@ -1,5 +1,7 @@
 //! The `sqlty` executable where `tests/cli` cannot follow it: into Python and the language server.
 
+#![expect(clippy::expect_used, reason = "a failed setup fails the test")]
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 

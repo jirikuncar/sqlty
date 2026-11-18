@@ -43,6 +43,7 @@ fn union(members: &[&Ty]) -> Ty {
 fn tables() -> [HashMap<String, Ty>; 3] {
     let b = builtins();
     let class = |c: &std::sync::Arc<Class>| Ty::Class(c.clone());
+    #[expect(clippy::expect_used, reason = "the bases are builtins that combine")]
     let stand_in = |name: &str, bases: &[std::sync::Arc<Class>]| {
         Ty::Class(Class::new(name, "pydantic", bases).expect("bases Python can combine"))
     };

@@ -84,6 +84,7 @@ impl Catalog {
             }
             #[cfg(test)]
             super::index::visit();
+            #[expect(clippy::expect_used, reason = "a foreign key's child is a table")]
             let table = self
                 .table_at(child)
                 .expect("a foreign key's child is a table");

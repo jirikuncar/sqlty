@@ -33,8 +33,7 @@ fn blank(c: char) -> bool {
 /// The ignore a comment spells, as `#\s*sqlty:\s*ignore\b(?:\[([^\]]*)\])?` matches it.
 fn rules_of(comment: &str) -> Option<Option<Vec<String>>> {
     static IGNORE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"^#[\s\x1c-\x1f]*sqlty:[\s\x1c-\x1f]*ignore(?:\[([^\]]*)\])?")
-            .expect("a valid pattern")
+        sqlty_sql::regex(r"^#[\s\x1c-\x1f]*sqlty:[\s\x1c-\x1f]*ignore(?:\[([^\]]*)\])?")
     });
     let found = IGNORE.captures(comment)?;
     let Some(names) = found.get(1) else {
@@ -101,6 +100,7 @@ pub fn unparsed_ignores(text: &str) -> Vec<Ignore> {
 
 /// The `-- sqlty: ignore` comments of a `.sql` file, the first of each line.
 pub fn sql_ignores(text: &str) -> Vec<Ignore> {
+    #[expect(clippy::expect_used, reason = "the pattern is written here")]
     static IGNORE: LazyLock<regex::bytes::Regex> = LazyLock::new(|| {
         regex::bytes::Regex::new(r"(?-u)--\s*sqlty:\s*ignore\b(?:\[([^\]]*)\])?")
             .expect("a valid pattern")
@@ -119,7 +119,7 @@ pub fn sql_ignores(text: &str) -> Vec<Ignore> {
         let Some(matched) = IGNORE.captures(&text.as_bytes()[start..end]) else {
             continue;
         };
-        let whole = matched.get(0).expect("the whole match");
+        let whole = matched.get_match();
         found.push(Ignore {
             line,
             rules: matched.get(1).map(|names| {
