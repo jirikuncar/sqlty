@@ -1,12 +1,11 @@
-//! What the Python passes ask of a module's syntax tree, from one parse with
-//! `ruff_python_parser`, so a file that holds none of it is never parsed by Python's `ast`.
+//! What a module imports and calls, from one parse with `ruff_python_parser`.
 //!
 //! - [`Facts::names`] / [`Facts::attributes`]: what calls name, `f(...)` / `x.f(...)`, sorted and unique.
 //! - [`Facts::imports`]: every `import` and `from ... import`, in `ast.walk` order.
 //! - [`Facts::any_calls`]: `(offset, callee)` of each `X[T](...)` whose `T` is `typing.Any`,
-//!   as `sqlty._source.ParsedSource.any_calls` finds them before matching the wrapper.
-//! - [`Facts::typing_aliases`]: `ParsedSource.typing_aliases`, a later pair wins.
-//! - [`Facts::driver_calls`]: `sqlty._drivers.find_driver_calls`, see [`crate::drivers`].
+//!   before matching the wrapper.
+//! - [`Facts::typing_aliases`]: local names of `typing` objects, a later pair wins.
+//! - [`Facts::driver_calls`]: see [`crate::drivers`].
 
 use std::collections::HashMap;
 
@@ -32,7 +31,7 @@ pub struct Import {
     pub level: u32,
 }
 
-/// The imports of a module, as the Python passes read them.
+/// The imports of a module.
 pub struct Imports {
     /// Every alias, in `ast.walk` order.
     pub entries: Vec<Import>,

@@ -93,18 +93,6 @@ class TypeInfo:
         self.module: str | None = None  # the module that defines it, when known
         self.coerced: typing.Callable[[], TypeInfo] | None = None
 
-    def field_for(self, column: str) -> str | None:
-        """The field a query column fills, by name (a Pydantic alias counts); None if none does."""
-        if self.kind == "BaseModel":
-            return self.columns.get(column)
-        return column if column in dict(self.fields) else None
-
-    def column_names(self, field: str) -> list[str]:
-        """The query column names that fill ``field``, the Pydantic alias first."""
-        if self.kind == "BaseModel":
-            return [c for c, f in self.columns.items() if f == field]
-        return [field]
-
     @property
     def keyed(self) -> bool:
         """Whether columns match keys by name (closed or ``extra_items`` TypedDict)."""

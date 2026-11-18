@@ -40,6 +40,10 @@ MODULES = sorted(
     for m in pkgutil.walk_packages(sqlty.__path__, "sqlty.")
     if not m.name.endswith("__main__") and m.name != "sqlty._core"
 )
+ORACLE = sorted(
+    m.name
+    for m in pkgutil.walk_packages([str(ROOT / "tests" / "type_oracle")], "tests.type_oracle.")
+)
 WITH_EXAMPLES = {"sqlty", "sqlty.core", "sqlty._decode"}
 
 
@@ -150,7 +154,7 @@ def test_python_api_table_lists_every_core_function() -> None:
     assert public <= set(sqlty.core.__all__)
 
 
-@pytest.mark.parametrize("name", ["sqlty", "sqlty.drivers.psycopg", *MODULES])
+@pytest.mark.parametrize("name", ["sqlty", "sqlty.drivers.psycopg", *MODULES, *ORACLE])
 def test_module_doctests(name: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """``>>>`` examples in docstrings match what the code returns."""
     monkeypatch.chdir(ROOT)

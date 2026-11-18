@@ -1,9 +1,9 @@
-"""Helper calls found from what Rust reads (``sqlty_python::helpers``) against ``ast``.
+"""Helper calls found in Rust (``sqlty_python::helpers``).
 
 The corner cases pin down how a call is resolved where a name is bound more than once or
-an import is unusual; both readings must agree on each, and the expected calls document
-the behaviour. Generated modules then mix those imports and calls in every block kind.
-Raise the number of generated examples with ``SQLTY_FUZZ_EXAMPLES``.
+an import is unusual; the expected calls document the behaviour. Generated modules then mix
+those imports and calls in every block kind. Raise the number of generated examples with
+``SQLTY_FUZZ_EXAMPLES``.
 """
 
 from __future__ import annotations
@@ -15,8 +15,9 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from sqlty._helpers import HelperIndex, _comparable, _find_helper_calls, _site_calls
+from sqlty._helpers import HelperIndex
 from sqlty._source import ParsedSource
+from sqlty.core import _helper_sites
 
 EXAMPLES = int(os.environ.get("SQLTY_FUZZ_EXAMPLES", "300"))
 HEADER = "from typing import Annotated\nfrom sqlty import SQL\n"
@@ -45,11 +46,15 @@ def index() -> HelperIndex:
 
 
 def both(text: str, index: HelperIndex, module: str = "app.use") -> list[tuple[int, str | None]]:
+    """The line and query of each helper call of ``text``: where its literal query starts."""
     parsed = ParsedSource(text)
-    rust = _find_helper_calls(ParsedSource(text), index, module, variants=None, rust=True)
-    python = _find_helper_calls(parsed, index, module, variants=None, rust=False)
-    assert list(map(_comparable, rust)) == list(map(_comparable, python)), text
-    return [(call.line, call.query) for call in python]
+    return [
+        (
+            parsed.position(start)[0] if start is not None else lines and lines[0],
+            next(iter(queries), None),
+        )
+        for lines, queries, _, start in _helper_sites(parsed, index, module)
+    ]
 
 
 CASES = {
@@ -134,7 +139,7 @@ CASES = {
     "implicit concatenation and multiline rows": (
         "from pkg.db import fetch_all\nrows = fetch_all(\n    'SELECT 1'\n    ' AS a',\n"
         "    tuple[\n        int\n    ],\n)\n",
-        [(2, "SELECT 1 AS a")],
+        [(3, "SELECT 1 AS a")],
     ),
     # `ast` reads a newline in a string as `\n`, however the file spells it.
     "triple-quoted query": (
@@ -147,7 +152,7 @@ CASES = {
     ),
     "name not passed to the method": (
         "from pkg.db import execute\nclass Repo:\n    def go(self, q):\n        execute(other)\n",
-        [(4, None)],
+        [(None, None)],
     ),
     "starred arguments of a method": (
         "from pkg.db import Db\ndb: Db = Db()\ndb.fetch('SELECT %s', *args)\n",
@@ -169,23 +174,7 @@ def test_corner_cases(text: str, expected: list[tuple[int, str]], index: HelperI
     assert both(text.replace("\n", "\r"), index) == expected
 
 
-@pytest.mark.parametrize(
-    "text",
-    [
-        "from pkg.db import execute\nq = 'SELECT 1'\nexecute(q)\n",
-        "from pkg.db import execute\nexecute(f'SELECT {1}')\n",
-        "from pkg.db import execute\nexecute('SELECT ' + x)\n",
-        "﻿from pkg.db import execute\nexecute('SELECT 1')\n",
-        "from pkg.db import execute\nexecute('SELECT 1')\nx = " + "(" * 201 + ")" * 201 + "\n",
-    ],
-    ids=["name", "f-string", "concatenation", "byte order mark", "too deep"],
-)
-def test_undecided_files_fall_back_to_ast(text: str, index: HelperIndex) -> None:
-    assert _site_calls(ParsedSource(text), index, "app.use") is None
-    both(text, index)
-
-
-def test_files_defining_helpers_use_ast(index: HelperIndex) -> None:
+def test_a_file_defining_helpers_calls_them(index: HelperIndex) -> None:
     text = DB + "fetch_all('SELECT 1', int)\n"
     assert both(text, index, "pkg.db") == [(len(text.splitlines()), "SELECT 1")]
 

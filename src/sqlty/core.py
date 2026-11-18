@@ -10,14 +10,13 @@ needs the Python runtime; those passes live in ``sqlty._check``.
 
 from __future__ import annotations
 
-import ast
 import sys
 from collections import Counter
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
-from sqlty._check import RowUsage, is_any_row
+from sqlty._check import RowUsage
 from sqlty._check import diagnostics as check_diagnostics
 from sqlty._core import QueryAt as _QueryAt
 from sqlty._core import (
@@ -35,7 +34,6 @@ from sqlty._core import analyze_select as _analyze_select
 from sqlty._core import complete_source as _complete_source
 from sqlty._core import explain_select as _explain_select
 from sqlty._core import fix_module as _fix_module
-from sqlty._core import fix_source as _fix_source
 from sqlty._core import format_source as _format_source
 from sqlty._core import highlight_source as _highlight_source
 from sqlty._core import hover_source as _hover_source
@@ -51,9 +49,9 @@ from sqlty._core import rewrite_source as _rewrite_source
 from sqlty._core import schema_skipped_objects as _schema_skipped_objects
 from sqlty._core import schema_skipped_tables as _schema_skipped_tables
 from sqlty._core import strip_source as _strip_source
-from sqlty._helpers import MARKER, HelperIndex, find_helper_calls
+from sqlty._helpers import HelperIndex
 from sqlty._lint import Diagnostic, RuleConfig
-from sqlty._source import AST, AstMismatch, ParsedSource
+from sqlty._source import ParsedSource
 
 if TYPE_CHECKING:
     pass
@@ -490,43 +488,18 @@ def _fixed(
     module: str | None,
 ) -> str:
     """``fix_source`` before the JSON and parameter types."""
-    if AST != "python":
-        rust = _fix_module(
-            parsed.text,
-            version=sys.version_info[:2],
-            dialect=dialect,
-            schema_sql=schema_sql,
-            import_style=import_style,
-            untyped=untyped,
-            rules=rules,
-            index=None if helpers is None else helpers.rust(),
-            name=parsed.module,
-            module=module,
-        )
-        if AST == "rust":
-            return rust
-    suppressed: dict[int, list[str] | None] = {
-        line: None if ignore.rules is None else list(ignore.rules)
-        for line, ignore in parsed.ignores.items()
-    }
-    for typed, _, _, _ in _helper_sites(parsed, helpers, module):
-        for line in range(typed[0], typed[1] + 1) if typed else ():
-            if line not in suppressed:
-                suppressed[line] = ["stale-rewrite"]
-            elif (named := suppressed[line]) is not None:
-                named.append("stale-rewrite")
-    python = _fix_source(
+    return _fix_module(
         parsed.text,
+        version=sys.version_info[:2],
         dialect=dialect,
         schema_sql=schema_sql,
         import_style=import_style,
         untyped=untyped,
         rules=rules,
-        suppressed=suppressed or None,
+        index=None if helpers is None else helpers.rust(),
+        name=parsed.module,
+        module=module,
     )
-    if AST == "compare" and parsed.facts is not None and rust != python:
-        raise AstMismatch("fix_source", rust, python, parsed.text)
-    return python
 
 
 def check_source(
@@ -947,24 +920,13 @@ def _json_types(
     source: str, dialect: str, schema_sql: str | Schema | None, import_style: str | None
 ) -> str:
     """``source`` with the ``typing.Any`` row items of JSON columns of known shape typed."""
-    if AST != "python":
-        rust = _add_json_types(
-            source,
-            version=sys.version_info[:2],
-            dialect=dialect,
-            schema_sql=schema_sql,
-            import_style=import_style,
-        )
-        if AST == "rust":
-            return rust
-    from sqlty._json_types import add_json_types
-
-    python = add_json_types(
-        source, dialect=dialect, schema_sql=schema_sql, import_style=import_style
+    return _add_json_types(
+        source,
+        version=sys.version_info[:2],
+        dialect=dialect,
+        schema_sql=schema_sql,
+        import_style=import_style,
     )
-    if AST == "compare" and rust != python:
-        raise AstMismatch("add_json_types", rust, python, source)
-    return python
 
 
 def _helper_starts(
@@ -986,49 +948,14 @@ def _helper_sites(
     module: str | None,
     variants: int | None = None,
 ) -> list[_Site]:
-    if AST != "python":
-        rust = _module_calls(
-            parsed.text,
-            version=sys.version_info[:2],
-            index=None if helpers is None else helpers.rust(),
-            name=parsed.module,
-            module=module,
-            variants=variants,
-        )
-        if AST == "rust":
-            return rust
-    python = _python_sites(parsed, helpers, module, variants)
-    if AST == "compare" and parsed.facts is not None and rust != python:
-        raise AstMismatch("helper_sites", rust, python, parsed.text)
-    return python
-
-
-def _python_sites(
-    parsed: ParsedSource, helpers: HelperIndex | None, module: str | None, variants: int | None
-) -> list[_Site]:
-    sites: list[_Site] = []
-    for call in find_helper_calls(parsed, helpers, module, variants=variants):
-        lines = call.typed_lines
-        queries = (
-            [] if call.query is None else [str(v.query) for v in call.variants] or [str(call.query)]
-        )
-        literal = call.query_span is not None and (
-            call.query_node is None
-            or (
-                isinstance(call.query_node, ast.Constant) and isinstance(call.query_node.value, str)
-            )
-        )
-        sites.append(
-            (
-                (lines[0], lines[-1]) if lines else None,
-                [q for q in queries if not (MARKER.match(q) and q in parsed.literals)],
-                None
-                if call.query is not None or is_any_row(call)
-                else ("dynamic-query" if call.dynamic else "unchecked-query"),
-                call.query_span[0] if literal and call.query_span is not None else None,
-            )
-        )
-    return sites
+    return _module_calls(
+        parsed.text,
+        version=sys.version_info[:2],
+        index=None if helpers is None else helpers.rust(),
+        name=parsed.module,
+        module=module,
+        variants=variants,
+    )
 
 
 def _outcome(query: str, dialect: str, schema_sql: str | Schema | None) -> str | None:
