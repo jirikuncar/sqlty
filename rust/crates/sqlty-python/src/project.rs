@@ -194,6 +194,7 @@ fn read_required(
         .and_then(|name| name.to_str())
         .unwrap_or("");
     match load(&data, name, &shown.display().to_string(), true) {
+        #[expect(clippy::expect_used, reason = "a required table is never None")]
         Ok(found) => Ok(found.expect("a required table")),
         Err(error) => Err(FindError::Invalid(error.to_string())),
     }

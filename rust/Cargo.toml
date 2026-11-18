@@ -59,6 +59,7 @@ mem_forget = "warn"
 panic = "warn"
 panic_in_result_fn = "warn"
 unwrap_used = "warn"
+expect_used = "warn"
 unnested_or_patterns = "warn"
 
 [workspace.lints.rust]

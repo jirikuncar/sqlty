@@ -258,8 +258,16 @@ fn load_schema(
                 absent,
                 others,
             };
+            #[expect(
+                clippy::expect_used,
+                reason = "nothing else holds a schema just loaded"
+            )]
             let LoadedSchema { schema, skipped } =
                 Arc::into_inner(loaded).expect("a schema just loaded is not shared");
+            #[expect(
+                clippy::expect_used,
+                reason = "nothing else holds a schema just loaded"
+            )]
             let schema = analyzer::SchemaData::with_databases(schema, databases)
                 .expect("a schema just loaded is not shared");
             Arc::new(LoadedSchema { schema, skipped })
@@ -376,21 +384,20 @@ fn infer_type(
 const STACK_RED_ZONE: usize = 2 << 20;
 const STACK_SEGMENT: usize = 16 << 20;
 
-/// The threads that parse the modules of an index; `None` in a forked child, where the
-/// parent's threads do not exist and handing them work would never return. Rayon's 2 MiB
-/// stacks are below the parser's and analyzer's red zones, so every parse would allocate
-/// a new stack.
+/// The threads that parse the modules of an index; `None` when they cannot start, and in a
+/// forked child, where the parent's threads do not exist and handing them work would never
+/// return. Rayon's 2 MiB stacks are below the parser's and analyzer's red zones, so every
+/// parse would allocate a new stack.
 fn parse_pool() -> Option<&'static rayon::ThreadPool> {
-    static POOL: std::sync::OnceLock<(u32, rayon::ThreadPool)> = std::sync::OnceLock::new();
+    static POOL: std::sync::OnceLock<(u32, Option<rayon::ThreadPool>)> = std::sync::OnceLock::new();
     let (pid, pool) = POOL.get_or_init(|| {
         let pool = rayon::ThreadPoolBuilder::new()
             .thread_name(|i| format!("sqlty-parse-{i}"))
             .stack_size(32 << 20)
-            .build()
-            .expect("the parse threads start");
-        (std::process::id(), pool)
+            .build();
+        (std::process::id(), pool.ok())
     });
-    (*pid == std::process::id()).then_some(pool)
+    pool.as_ref().filter(|_| *pid == std::process::id())
 }
 
 /// Runs `f` without the GIL, with at least [`STACK_RED_ZONE`] of stack.
@@ -2000,6 +2007,10 @@ fn check_modules(
         return Err(PyValueError::new_err(format!("no configuration {config}")));
     }
     let mut configs: Vec<CheckConfig> = configs.into_iter().map(CheckConfig::new).collect();
+    #[expect(
+        clippy::expect_used,
+        reason = "a check cannot go on without its threads"
+    )]
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(jobs.unwrap_or(0))
         // Below the red zone `maybe_grow` maps a new segment for every module.
@@ -2051,6 +2062,10 @@ fn breaking_modules(
         return Err(PyValueError::new_err(format!("no configuration {config}")));
     }
     let mut configs: Vec<CheckConfig> = configs.into_iter().map(CheckConfig::new).collect();
+    #[expect(
+        clippy::expect_used,
+        reason = "a check cannot go on without its threads"
+    )]
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(jobs.unwrap_or(0))
         .stack_size(STACK_SEGMENT)
