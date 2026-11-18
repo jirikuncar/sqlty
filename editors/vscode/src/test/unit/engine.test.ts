@@ -162,6 +162,9 @@ test("a panic is an internal-error, and a new instance answers the next request"
   const [found, ...rest] = crashed.diagnostics;
   assert.deepEqual(rest, []);
   assert.equal(found.rule, "internal-error");
-  assert.match(found.message, /^sqlty crashed checking this file: boom; please report it at https:\/\/github\.com\/jirikuncar\/sqlty\/issues\/new\?template=bug_report\.yml&title=Crash%3A%20boom&output=boom&version=/);
+  assert.match(
+    found.message,
+    /^sqlty crashed checking this file: boom; please report it at https:\/\/github\.com\/jirikuncar\/sqlty\/issues\/new\?template=bug_report\.yml&title=Crash%3A%20boom&output=boom&version=/,
+  );
   assert.deepEqual(engine(request).diagnostics, []);
 });

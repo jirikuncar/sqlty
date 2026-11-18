@@ -766,8 +766,8 @@ def test_internal_error_exits_2(tmp_path, monkeypatch, capsys) -> None:
     assert issue_url("RuntimeError: boom") in err
 
 
-def test_a_panic_is_an_internal_error(tmp_path, monkeypatch, capsys) -> None:
-    import sqlty._core
+def test_a_panic_is_an_internal_error(monkeypatch, capsys) -> None:
+    import sqlty._cli
 
     class PanicException(BaseException):
         pass
@@ -775,7 +775,7 @@ def test_a_panic_is_an_internal_error(tmp_path, monkeypatch, capsys) -> None:
     def panic(*args, **kwargs):
         raise PanicException("boom")
 
-    monkeypatch.setattr(sqlty._core, "cli", panic)
+    monkeypatch.setattr(sqlty._cli, "_rust", panic)
 
     code, _, err = _run(["version"], capsys)
 
@@ -784,12 +784,12 @@ def test_a_panic_is_an_internal_error(tmp_path, monkeypatch, capsys) -> None:
 
 
 def test_an_interrupt_is_not_an_internal_error(monkeypatch, capsys) -> None:
-    import sqlty._core
+    import sqlty._cli
 
     def interrupt(*args, **kwargs):
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(sqlty._core, "cli", interrupt)
+    monkeypatch.setattr(sqlty._cli, "_rust", interrupt)
 
     with pytest.raises(KeyboardInterrupt):
         _run(["version"], capsys)
