@@ -268,7 +268,7 @@ def test_npm_runs_the_binary_of_the_platform(tmp_path: Path) -> None:
     readme = (modules / "@sqlty" / "cli-linux-x64" / "README.md").read_text()
     assert "for Linux x64" in readme
     assert "sqlty-wordmark-light.svg" in readme
-    assert "https://sqlty.kuncar.dev/" in readme
+    assert "Documentation: <https://sqlty.kuncar.dev/>" in readme.splitlines()
     node = shutil.which("node")
     assert node is not None
     platform, arch = (
