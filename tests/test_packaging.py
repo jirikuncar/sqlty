@@ -265,6 +265,10 @@ def test_npm_runs_the_binary_of_the_platform(tmp_path: Path) -> None:
     assert main["version"] == "1.2.3"
     assert set(main["optionalDependencies"].values()) == {"1.2.3"}
     assert (linux["os"], linux["cpu"], linux["files"]) == (["linux"], ["x64"], ["bin/sqlty"])
+    readme = (modules / "@sqlty" / "cli-linux-x64" / "README.md").read_text()
+    assert "for Linux x64" in readme
+    assert "sqlty-wordmark-light.svg" in readme
+    assert "https://sqlty.kuncar.dev/" in readme
     node = shutil.which("node")
     assert node is not None
     platform, arch = (
