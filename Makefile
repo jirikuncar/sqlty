@@ -179,7 +179,7 @@ crates:  ## Package and verify the crates for crates.io; `cargo publish` with th
 	mkdir -p rust/crates/sqlty-cli/embedded/src/sqlty
 	cp -R skills rust/crates/sqlty-cli/embedded/
 	cp -R src/sqlty/rules rust/crates/sqlty-cli/embedded/src/sqlty/
-	cargo package --manifest-path rust/Cargo.toml $(CRATES:%=-p %)
+	cargo package --allow-dirty --manifest-path rust/Cargo.toml $(CRATES:%=-p %)
 
 .PHONY: check-playground
 check-playground: docs  ## Load the built playground under /sqlty/ in Chromium (needs `playwright install chromium`)

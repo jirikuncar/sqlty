@@ -240,7 +240,8 @@ Output backslashes read as `/`, so keep `\n` out of what a case prints.
 `cargo install sqlty` builds the same executable from crates.io. `make crates` copies
 `skills/` and `src/sqlty/rules/` into the package, which cannot read outside its directory,
 and packages `sqlty-sql`, `sqlty-python`, `sqlty-format`, `sqlty-lsp`, `sqlty-project` and
-`sqlty` in dependency order; `cargo publish` with the same `-p` flags publishes them.
+`sqlty` in dependency order; `cargo publish` with the same flags publishes them
+(`--allow-dirty`, as git does not track the copies).
 
 ### Fuzzing the analyzer
 
