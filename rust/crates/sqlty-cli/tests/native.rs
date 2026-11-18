@@ -1,4 +1,4 @@
-//! The `sqlty` executable on a directory of the disk.
+//! The `sqlty` executable where `tests/cli` cannot follow it: into Python and the language server.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -41,66 +41,6 @@ const QUERIES: (&str, &str) = (
 );
 
 #[test]
-fn prints_its_version() {
-    let root = project("version", &[]);
-    let version = format!("sqlty {}\n", env!("CARGO_PKG_VERSION"));
-    assert_eq!(sqlty(&root, &["version"], &[]), (0, version, String::new()));
-    std::fs::remove_dir_all(&root).expect("removes");
-}
-
-#[test]
-fn checks_the_files_of_the_disk() {
-    let config = (
-        "pyproject.toml",
-        "[tool.sqlty]\nschema = [\"schema.sql\", \"none/*.sql\"]\n",
-    );
-    let root = project("check", &[config, SCHEMA, QUERIES]);
-    std::fs::write(root.join("app/b.py"), b"\xff").expect("writes");
-    let (code, out, err) = sqlty(&root, &["check"], &[]);
-    assert_eq!(code, 1);
-    assert!(
-        out.contains("app/a.py:1: [unknown-column] column `nope` does not exist"),
-        "{out}"
-    );
-    assert!(
-        err.starts_with("Schema pattern matches no files: none/*.sql\n"),
-        "{err}"
-    );
-    let (code, _, err) = sqlty(&root, &["check", "gone.py"], &[]);
-    assert_eq!(
-        (code, err.as_str()),
-        (2, "sqlty: error: path does not exist: gone.py\n")
-    );
-    std::fs::remove_dir_all(&root).expect("removes");
-}
-
-#[test]
-fn rewrites_the_files_and_runs_the_format_command() {
-    for (command, warning) in [
-        ("true", None),
-        ("false", Some("format-command false failed on app/a.py: \n")),
-        (
-            "/nonexistent/fmt",
-            Some("format-command /nonexistent/fmt failed on app/a.py: "),
-        ),
-    ] {
-        let config =
-            format!("[tool.sqlty]\nschema = \"schema.sql\"\nformat-command = [\"{command}\"]\n");
-        let root = project("rewrite", &[("pyproject.toml", &config), SCHEMA, QUERIES]);
-        let (code, _, err) = sqlty(&root, &["rewrite", "app"], &[]);
-        assert_eq!(code, 0, "{err}");
-        assert_eq!(
-            warning.is_some_and(|warning| err.starts_with(warning)),
-            warning.is_some(),
-            "{err}"
-        );
-        let rewritten = std::fs::read_to_string(root.join("app/a.py")).expect("reads");
-        assert!(rewritten.contains("r = SQL[tuple[int]]("), "{rewritten}");
-        std::fs::remove_dir_all(&root).expect("removes");
-    }
-}
-
-#[test]
 fn hands_what_it_does_not_run_to_python() {
     let root = project("python", &[]);
     let missing = [("PATH", "/nonexistent")];
@@ -114,6 +54,22 @@ fn hands_what_it_does_not_run_to_python() {
             (2, String::new(), error.to_string())
         );
     }
+    std::fs::remove_dir_all(&root).expect("removes");
+}
+
+#[test]
+fn keeps_json_output_apart_from_what_fix_reports() {
+    let config = ("pyproject.toml", "[tool.sqlty]\nschema = \"schema.sql\"\n");
+    let stale = (
+        "app/a.py",
+        "from sqlty import SQL\nq = SQL[tuple[str]](\"--sql\\nSELECT id FROM users\")\n",
+    );
+    let root = project("json", &[config, SCHEMA, stale]);
+    let args = ["check", "--fix", "-v", "--output-format", "json"];
+    assert_eq!(
+        sqlty(&root, &args, &[]),
+        (0, "[]\n".to_string(), "Fixed app/a.py\n".to_string())
+    );
     std::fs::remove_dir_all(&root).expect("removes");
 }
 
@@ -176,7 +132,11 @@ fn initialize(root: &Path, options: &str) -> String {
 
 #[test]
 fn serves_the_language_server() {
-    let config = ("pyproject.toml", "[tool.sqlty]\nschema = \"schema.sql\"\n");
+    // A schema pattern that matches nothing: the server logs the warning and goes on.
+    let config = (
+        "pyproject.toml",
+        "[tool.sqlty]\nschema = [\"schema.sql\", \"none/*.sql\"]\n",
+    );
     let root = project("server", &[config, SCHEMA, QUERIES]);
     let root = root.canonicalize().expect("exists");
     let open = format!(
@@ -194,6 +154,30 @@ fn serves_the_language_server() {
     assert!(messages
         .last()
         .is_some_and(|message| message.contains("publishDiagnostics")));
+    let actions = format!(
+        r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/codeAction","params":{{"textDocument":{{"uri":"file://{}/app/a.py"}},"range":{{"start":{{"line":0,"character":0}},"end":{{"line":0,"character":0}}}},"context":{{"diagnostics":[],"only":["source.fixAll.sqlty","source.format.sqlty","source.rewrite.sqlty","source.strip.sqlty"]}}}}}}"#,
+        root.display()
+    );
+    let (messages, code) = serve(
+        &root,
+        &[
+            initialize(&root, "null"),
+            initialized.clone(),
+            open.clone(),
+            actions,
+        ],
+        r#""id":3"#,
+    );
+    assert_eq!(code, 0);
+    let answer = messages.last().expect("an answer");
+    for (title, changes) in [
+        ("sqlty: fix all", true),
+        ("sqlty: rewrite", true),
+        ("sqlty: format", false),
+        ("sqlty: strip", false),
+    ] {
+        assert_eq!(answer.contains(title), changes, "{title}: {answer}");
+    }
     let baseline = r#"{"breaking":{"against":"main"}}"#;
     let (messages, code) = serve(
         &root,
