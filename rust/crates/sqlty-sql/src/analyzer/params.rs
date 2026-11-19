@@ -212,7 +212,8 @@ pub(super) fn params_of(
     let analyzer = Analyzer::new(
         schema.unwrap_or_else(|| crate::catalog::empty(dialect)),
         dialect,
-    );
+    )
+    .rooted(stmt);
     let mut hints = Hints::default();
     let _ = visit_expressions(stmt, |expr| {
         if let Some(index) = placeholder_index(expr) {

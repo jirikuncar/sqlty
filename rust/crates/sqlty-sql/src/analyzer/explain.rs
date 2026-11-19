@@ -55,7 +55,8 @@ pub fn explain_select(
     let mut analyzer = Analyzer::new(
         schema.unwrap_or_else(|| crate::catalog::empty(dialect)),
         dialect,
-    );
+    )
+    .rooted(&stmt);
     let explained = Explained::default();
     analyzer.explain = Some(explained.clone());
     analyzer.source = super::api::text_source(&input.source, dialect);
