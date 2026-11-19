@@ -101,10 +101,15 @@ docs: playground  ## Build the docs site, strict via zensical.toml (output: site
 	python3 scripts/structured_data.py site
 	python3 scripts/offline.py site
 
+# binaryen's optimizer; the features are those rustc enables for wasm32-unknown-unknown.
+WASM_OPT ?= npx --yes --package binaryen@132.0.0 wasm-opt
+WASM_FEATURES = --enable-bulk-memory --enable-bulk-memory-opt --enable-nontrapping-float-to-int \
+	--enable-sign-ext --enable-mutable-globals --enable-reference-types --enable-multivalue
+
 .PHONY: wasm
-wasm:  ## The engine as WebAssembly, in the @sqlty/wasm package (needs the wasm32-unknown-unknown target)
+wasm:  ## The engine as WebAssembly, in the @sqlty/wasm package (needs the wasm32-unknown-unknown target and Node.js)
 	cargo build --manifest-path rust/Cargo.toml --profile wasm --target wasm32-unknown-unknown -p sqlty-wasm
-	cp rust/target/wasm32-unknown-unknown/wasm/sqlty_wasm.wasm npm/wasm/
+	$(WASM_OPT) -Oz $(WASM_FEATURES) rust/target/wasm32-unknown-unknown/wasm/sqlty_wasm.wasm -o npm/wasm/sqlty_wasm.wasm
 
 .PHONY: playground
 playground: wasm  ## The engine as WebAssembly, and Monaco and the fonts, for the docs playground
