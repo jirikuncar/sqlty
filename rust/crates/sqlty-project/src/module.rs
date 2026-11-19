@@ -178,12 +178,18 @@ pub fn statistics(
     let mut counts = HashMap::new();
     let mut outcomes = Vec::new();
     let outcome = |query: &str| {
-        if analyzer::parse_error(query, dialect).is_some() {
+        let (routed, routed_schema) = analyzer::route(query, dialect, schema);
+        let parsed = analyzer::parse(query, dialect);
+        if parsed.error().is_some() {
             Some("unparsed")
-        } else if !analyzer::returns_rows(query, dialect) {
+        } else if !parsed.returns_rows() {
             None
-        } else if analyzer::analyze_select(query, dialect, schema)
-            .is_some_and(|columns| columns.iter().all(|column| column.python_type.is_some()))
+        } else if (if routed == dialect {
+            parsed.columns(routed_schema)
+        } else {
+            analyzer::analyze_select(query, dialect, schema)
+        })
+        .is_some_and(|columns| columns.iter().all(|column| column.python_type.is_some()))
         {
             Some("typed")
         } else {

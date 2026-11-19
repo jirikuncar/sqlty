@@ -485,7 +485,7 @@ impl<'a> Module<'a, '_> {
     }
 
     fn params(&self, query: &str) -> Option<Vec<analyzer::Param>> {
-        analyzer::analyze_params(query, self.dialect(), self.run.settings.options.schema)
+        self.ctx.analyses.params(query)
     }
 
     /// The helper calls with a query, each with its row type as written.
@@ -1452,9 +1452,18 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use crate::analyses::{ANALYZED, PARSED};
     use crate::options::Options;
 
     fn crash(text: &str, rules: &[(&str, &str)]) -> Vec<Diagnostic> {
+        run_module(text, rules)
+            .diagnostics
+            .into_iter()
+            .map(|reported| reported.diagnostic)
+            .collect()
+    }
+
+    fn run_module(text: &str, rules: &[(&str, &str)]) -> Found {
         let options = Options::new("postgres", None, None, false).unwrap();
         let rules = RuleConfig::from_overrides(Some(
             rules
@@ -1474,16 +1483,47 @@ mod tests {
         let lint = |_: &str| -> Vec<Lint> { panic!("lint {}", 1) };
         let run = Run {
             settings: &settings,
-            has_schema: false,
+            has_schema: true,
             lint: &lint,
             helpers: None,
             variants: None,
         };
-        module(text, None, &run)
-            .diagnostics
-            .into_iter()
-            .map(|reported| reported.diagnostic)
-            .collect()
+        let source = Source::new(text, (3, 14)).map(Arc::new);
+        module(text, source.as_ref(), &run)
+    }
+
+    fn counted(text: &str) -> (usize, usize) {
+        ANALYZED.with(|count| count.set(0));
+        PARSED.with(|count| count.set(0));
+        run_module(text, &[("param-count-mismatch", "error")]);
+        (
+            ANALYZED.with(std::cell::Cell::get),
+            PARSED.with(std::cell::Cell::get),
+        )
+    }
+
+    #[test]
+    fn a_driver_call_and_a_string_share_one_parse_and_one_analysis() {
+        let text = concat!(
+            "import psycopg\n",
+            "conn = psycopg.connect('')\n",
+            "cur = conn.cursor()\n",
+            "cur.execute('--sql\\nSELECT $1::int AS x', (1,))\n",
+            "q = '--sql\\nSELECT $1::int AS x'\n",
+        );
+        assert_eq!(counted(text), (1, 1));
+    }
+
+    #[test]
+    fn a_driver_call_alone_is_parsed_once_and_not_analyzed() {
+        let text = concat!(
+            "import psycopg\n",
+            "conn = psycopg.connect('')\n",
+            "cur = conn.cursor()\n",
+            "cur.execute('SELECT $1::int AS x', (1,))\n",
+            "cur.execute('SELECT $1::int AS x', (2,))\n",
+        );
+        assert_eq!(counted(text), (0, 1));
     }
 
     #[test]
