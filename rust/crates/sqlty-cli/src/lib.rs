@@ -887,7 +887,6 @@ fn statistics(modules: &[std::collections::HashMap<&'static str, usize>]) -> Str
 fn unified_diff(path: &str, old: &str, new: &str) -> String {
     similar::TextDiff::from_lines(old, new)
         .unified_diff()
-        .missing_newline_hint(false)
         .header(path, path)
         .to_string()
 }
@@ -952,9 +951,25 @@ fn json_diagnostic(path: &Path, diag: &Diagnostic, text: &str) -> JsonDiagnostic
     }
 }
 
-/// `value` as two-space indented JSON, with a trailing newline.
+/// `value` as two-space indented ASCII JSON, with a trailing newline, so a redirected
+/// stdout in any encoding takes it.
 fn pretty(value: &impl Serialize) -> String {
-    serde_json::to_string_pretty(value).unwrap_or_default() + "\n"
+    let mut out = String::new();
+    for char in serde_json::to_string_pretty(value)
+        .unwrap_or_default()
+        .chars()
+    {
+        match char.is_ascii() {
+            true => out.push(char),
+            false => {
+                for unit in char.encode_utf16(&mut [0; 2]) {
+                    out.push_str(&format!("\\u{unit:04x}"));
+                }
+            }
+        }
+    }
+    out.push('\n');
+    out
 }
 
 fn github_annotation(path: &Path, diag: &Diagnostic) -> String {
@@ -1408,12 +1423,12 @@ mod tests {
     }
 
     #[test]
-    fn writes_sarif_uris_and_keeps_non_ascii() {
+    fn writes_sarif_uris_and_escapes_non_ascii() {
         let at = Position { line: 1, column: 1 };
         let row = |file: &str| JsonDiagnostic {
             file: file.to_string(),
             rule: "narrow-type",
-            message: "é".to_string(),
+            message: "é😀".to_string(),
             severity: "info",
             line: 1,
             start: at,
@@ -1426,17 +1441,20 @@ mod tests {
         assert!(!found.contains("fixes"), "{found}");
         let found = pretty(&[row(r"app\q.py")]);
         assert!(found.contains(r#""file": "app\\q.py""#), "{found}");
-        assert!(found.contains(r#""message": "é""#), "{found}");
+        assert!(
+            found.contains(r#""message": "\u00e9\ud83d\ude00""#),
+            "{found}"
+        );
         let found = pretty(&sarif_result(&row(r"app\q.py")));
         assert!(found.contains(r#""uri": "app/q.py""#), "{found}");
     }
 
     #[test]
-    fn diffs_without_a_newline_at_the_end() {
+    fn marks_a_missing_newline_at_the_end() {
         assert_eq!(unified_diff("q.py", "same\n", "same\n"), "");
         assert_eq!(
             unified_diff("q.py", "a\nb", "a\nc"),
-            "--- q.py\n+++ q.py\n@@ -1,2 +1,2 @@\n a\n-b\n+c\n"
+            "--- q.py\n+++ q.py\n@@ -1,2 +1,2 @@\n a\n-b\n\\ No newline at end of file\n+c\n\\ No newline at end of file\n"
         );
     }
 }
