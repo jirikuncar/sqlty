@@ -321,8 +321,7 @@ pub(crate) fn helper(
     }
 }
 
-/// The module-level functions and the methods of `source`, methods as
-/// `Class.name`.
+/// The module-level functions and the methods of `source`, methods as `Class.name`.
 pub(crate) fn definitions(source: &Source) -> Vec<(String, &StmtFunctionDef, Kind)> {
     let functions = source.body().iter().filter_map(|stmt| match stmt {
         Stmt::FunctionDef(function) => Some((function.name.to_string(), function, Kind::Function)),

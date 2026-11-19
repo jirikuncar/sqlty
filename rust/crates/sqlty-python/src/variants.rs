@@ -247,8 +247,8 @@ fn assignments(stmt: &Stmt) -> Vec<(&ExprName, &Expr)> {
     found
 }
 
-/// What the statements hold, without the bodies of nested functions,
-/// classes or comprehensions.
+/// What the statements hold, without the bodies of nested functions, classes or
+/// comprehensions.
 #[derive(Default)]
 struct Own<'a> {
     /// Assignments, and whether a loop, `try` or `with` holds them.
@@ -467,7 +467,7 @@ impl<'a> Visitor<'a> for Own<'a> {
     }
 }
 
-/// `_names`: every name `node` reads or binds, at any depth.
+/// Every name `node` reads or binds, at any depth.
 struct Names(HashSet<String>);
 
 impl<'a> Visitor<'a> for Names {

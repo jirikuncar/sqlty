@@ -519,8 +519,7 @@ fn check_aliases(ctx: &mut Check<'_>, aliased: &[(RowQuery, &Expr)]) {
     }
 }
 
-/// `nullable-mismatch` and `redundant-optional` for one field
-/// and its column.
+/// `nullable-mismatch` and `redundant-optional` for one field and its column.
 ///
 /// `label` reads `<field>` or `<row> item <i>`. A column of unknown nullability, or an
 /// annotation that can't be resolved, is never reported.
@@ -551,8 +550,7 @@ fn nullability_diagnostics(
     Vec::new()
 }
 
-/// `literal-mismatch` and `redundant-literal` for one field and its
-/// column.
+/// `literal-mismatch` and `redundant-literal` for one field and its column.
 ///
 /// Reported only when the annotation is made of `Literal` members (and `None`) and the
 /// column's values are known.
@@ -611,8 +609,7 @@ fn field_diagnostics(
     found
 }
 
-/// `json-shape-mismatch` for one field and a JSON column of known
-/// shape.
+/// `json-shape-mismatch` for one field and a JSON column of known shape.
 fn json_diagnostics(
     label: &str,
     annotation: Option<&Annotation>,
@@ -697,8 +694,7 @@ struct Structural<'a> {
 }
 
 impl Structural<'_> {
-    /// A user type against the columns of `source` (`query`, or
-    /// a composite type).
+    /// A user type against the columns of `source` (`query`, or a composite type).
     ///
     /// `TypedDict`s, dataclasses and Pydantic models match columns to fields by name, as
     /// `dict_row` and `class_row` pass them: fields with a default (`NotRequired` keys) may

@@ -504,7 +504,7 @@ impl Unparser<'_> {
         out.join(", ")
     }
 
-    /// Each value written apart, then quoted together.
+    /// An f- or t-string (`template`): each value written apart, then quoted together.
     fn interpolated(&mut self, parts: &[Part<'_>], template: bool) {
         let written: Vec<(String, bool)> = parts
             .iter()

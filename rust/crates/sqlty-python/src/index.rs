@@ -354,8 +354,7 @@ impl Builder {
         }
     }
 
-    /// The helper `name` of module `parts` defines, following the names it
-    /// re-exports.
+    /// The helper `name` of module `parts` defines, following the names it re-exports.
     fn definition(
         &self,
         parts: &[&str],

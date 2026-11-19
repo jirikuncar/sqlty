@@ -393,8 +393,8 @@ pub fn mismatch(
     problem()
 }
 
-/// `_union_members`: the members of a `X | Y`, `Optional[X]` or `Union[X, Y]` annotation;
-/// `None` stands for the `None` that `Optional` adds.
+/// The members of a `X | Y`, `Optional[X]` or `Union[X, Y]` annotation; `None` stands for
+/// the `None` that `Optional` adds.
 fn union_members(annotation: &Expr) -> Vec<Option<&Expr>> {
     match annotation {
         Expr::BinOp(op) if op.op == Operator::BitOr => {
@@ -765,8 +765,8 @@ impl<'a> Module<'a, '_> {
         }
     }
 
-    /// Why the parameter type `declared` doesn't fit
-    /// `params`: shape, count, keys, then item types.
+    /// Why the parameter type `declared` doesn't fit `params`: shape, count, keys, then item
+    /// types.
     fn declared_params_diagnostics(
         &self,
         declared: &Expr,
@@ -977,8 +977,7 @@ impl<'a> Module<'a, '_> {
         }
     }
 
-    /// `P` of a `SQL[R, P]` in `source`, as the types each parameter
-    /// key takes.
+    /// `P` of a `SQL[R, P]` in `source`, as the types each parameter key takes.
     fn annotations_of(&self, declared: &Expr, source: &Source) -> Option<Annotations> {
         let types = |annotation: &Expr| -> Vec<Option<String>> {
             union_members(annotation)
