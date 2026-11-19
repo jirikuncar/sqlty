@@ -1,4 +1,4 @@
-//! `foreign-key-mismatch`: key comparisons in random query shapes. An independent oracle
+//! `foreign-key-mismatch` and `entity-mismatch`: key comparisons in random query shapes. An independent oracle
 //! judges each comparison from the schema; the rule must report exactly what it does,
 //! wherever the comparison sits: `ON`, `WHERE`, `HAVING`, joins of every kind, `LATERAL`,
 //! subqueries, CTEs, derived tables, `UNION` branches.
@@ -121,6 +121,36 @@ fn expected(left: Column, right: Column) -> Option<String> {
     ))
 }
 
+/// What both rules report for `left` compared with `right`: `entity-mismatch` only where
+/// `foreign-key-mismatch` is silent.
+fn reports_for(left: Column, right: Column) -> Reports {
+    if let Some(message) = expected(left, right) {
+        return Reports::from([message]);
+    }
+    let (Some(a), Some(b)) = (entity(left), entity(right)) else {
+        return Reports::new();
+    };
+    if a == b {
+        return Reports::new();
+    }
+    let named = |e: Column| {
+        if a.0 == b.0 {
+            format!("{}.{}", e.0, e.1)
+        } else {
+            e.0.to_string()
+        }
+    };
+    Reports::from([format!(
+        "{}.{} holds {} keys, {}.{} holds {} keys",
+        left.0,
+        left.1,
+        named(a),
+        right.0,
+        right.1,
+        named(b)
+    )])
+}
+
 const NOISE: [&str; 4] = [
     "{x}.id > 0",
     "{y}.id IS NOT NULL",
@@ -225,7 +255,8 @@ fn found(sql: &str, dialect: &'static str) -> Result<Reports, TestCaseError> {
         "--sql"
     };
     let source = format!("q = {}\n", python::repr(&format!("{marker}\n{sql}")));
-    let diagnostics = engine::check(&source, dialect, &DIALECT_SCHEMAS[dialect], None);
+    let rules = [("entity-mismatch", "warn")];
+    let diagnostics = engine::check_with(&source, dialect, &DIALECT_SCHEMAS[dialect], None, &rules);
     prop_assert!(
         !diagnostics
             .iter()
@@ -235,7 +266,7 @@ fn found(sql: &str, dialect: &'static str) -> Result<Reports, TestCaseError> {
     );
     Ok(diagnostics
         .into_iter()
-        .filter(|(rule, _)| *rule == "foreign-key-mismatch")
+        .filter(|(rule, _)| matches!(*rule, "foreign-key-mismatch" | "entity-mismatch"))
         .map(|(_, message)| message)
         .collect())
 }
@@ -275,7 +306,7 @@ fn comparison_of_tables(d: &mut Draw<'_>) -> (String, Reports) {
         } else {
             ((tx, a), (ty, b))
         };
-        reports.extend(expected(left, right));
+        reports.extend(reports_for(left, right));
     }
     terms.extend(d.list(0, 2, |d| noise(d.pick(&NOISE), "x", "y")));
     let cond = joined(d, terms, &["AND", "OR"]);
@@ -363,7 +394,7 @@ fn compare(d: &mut Draw<'_>, visible: &[(String, &'static str)], reports: &mut R
     } else {
         ((tx, a), (ty, b))
     };
-    reports.extend(expected(left, right));
+    reports.extend(reports_for(left, right));
     fill(
         form,
         &[("a", &format!("{x}.{a}")), ("b", &format!("{y}.{b}"))],
@@ -403,7 +434,7 @@ fn join_chain(d: &mut Draw<'_>) -> (String, Reports) {
                 .iter()
                 .find(|(_, t)| columns(t).contains(&column))
                 .map_or("", |(_, t)| t);
-            reports.extend(expected((other, column), (table, column)));
+            reports.extend(reports_for((other, column), (table, column)));
             sql += &format!(" {kind} {table} {alias} USING ({column})");
         } else {
             let terms = d.list(1, 2, |d| compare(d, visible, &mut reports));

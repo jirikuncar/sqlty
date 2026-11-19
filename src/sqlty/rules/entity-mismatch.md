@@ -5,7 +5,9 @@ Default severity: **ignore**
 ## What it does
 
 Reports a comparison between two columns that hold keys of different tables.
-Turn it on in `[tool.sqlty.rules]`:
+Turn it on in `[tool.sqlty.rules]`. A comparison that
+[`foreign-key-mismatch`](foreign-key-mismatch.md) reports is reported by that rule
+only, so this example turns it off:
 
 ```toml
 [tool.sqlty]
@@ -13,6 +15,7 @@ schema = "schema.sql"
 
 [tool.sqlty.rules]
 entity-mismatch = "warn"
+foreign-key-mismatch = "ignore"
 ```
 
 `schema.sql`:
@@ -27,7 +30,6 @@ CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL REFERE
 from sqlty import SQL
 
 # error: [entity-mismatch] "products.id holds products keys, orders.customer_id holds customers keys"
-# error: [foreign-key-mismatch] "orders.customer_id references customers.id, not products.id"
 query = SQL[tuple[str, int]]("""--sql
 SELECT p.name, o.id
 FROM orders o
@@ -65,6 +67,6 @@ entity-mismatch = "warn"
 
 Needs a [schema](../../../docs/guide/schema-inference.md) with primary keys and
 foreign keys. Views, CTEs and derived tables don't carry entities.
-[`foreign-key-mismatch`](foreign-key-mismatch.md), on by default, reports a
-foreign key column compared with a column it does not reference, as in the
-example above.
+[`foreign-key-mismatch`](foreign-key-mismatch.md), on by default, reads the same
+comparisons and reports a foreign key column compared with a column it does not
+reference, as in the example above; this rule then stays silent on it.

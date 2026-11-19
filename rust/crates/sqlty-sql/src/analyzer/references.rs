@@ -42,6 +42,7 @@ impl Analyzer<'_> {
                     | NameRule::UnknownColumn
                     | NameRule::AmbiguousColumn
                     | NameRule::ForeignKeyMismatch
+                    | NameRule::EntityMismatch
             )
         });
     }

@@ -32,8 +32,22 @@ pub fn check(
     schema: &Schema,
     style: Option<&str>,
 ) -> Vec<(&'static str, String)> {
+    check_with(source, dialect, schema, style, &[])
+}
+
+/// [`check`] with the severities of `rules` changed.
+pub fn check_with(
+    source: &str,
+    dialect: &'static str,
+    schema: &Schema,
+    style: Option<&str>,
+    rules: &[(&str, &str)],
+) -> Vec<(&'static str, String)> {
     let coerce = HashSet::new();
-    let rules = RuleConfig::from_overrides(None).expect("the default rules");
+    let overrides = rules
+        .iter()
+        .map(|(rule, severity)| (rule.to_string(), severity.to_string()));
+    let rules = RuleConfig::from_overrides(Some(overrides.collect())).expect("known rules");
     let checker = Checker::new(
         dialect,
         Some(schema),
