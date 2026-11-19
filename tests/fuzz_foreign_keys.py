@@ -3,9 +3,10 @@
 An independent oracle judges each comparison from the schema; the rule must report exactly
 what it does, wherever the comparison sits: ``ON``, ``WHERE``, ``HAVING``, joins of every
 kind, ``LATERAL``, subqueries, CTEs, derived tables, ``UNION`` branches.
-``SQLTY_FUZZ_EXAMPLES`` raises the number of examples (default 100)::
+Not collected by a plain ``pytest`` run: the Fuzz workflow runs it on demand, and
+``SQLTY_FUZZ_EXAMPLES`` sets the number of examples (default 100)::
 
-    SQLTY_FUZZ_EXAMPLES=5000 uv run pytest tests/test_foreign_keys_fuzz.py -n 0 -p no:randomly
+    SQLTY_FUZZ_EXAMPLES=5000 uv run pytest tests/fuzz_foreign_keys.py -p no:randomly
 """
 
 from __future__ import annotations

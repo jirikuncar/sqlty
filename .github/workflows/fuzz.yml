@@ -1,6 +1,7 @@
 name: Fuzz
 
-# On demand: random schemas and queries through the analyzer, compared with PostgreSQL.
+# On demand: random schemas and queries through the analyzer, compared with PostgreSQL;
+# key comparisons in random query shapes, judged by an oracle (foreign-key-mismatch).
 on:
   workflow_dispatch:
     inputs:
@@ -71,3 +72,9 @@ jobs:
         env:
           SEED: ${{ inputs.seed }}
         run: uv run pytest tests/test_fuzz.py -p no:randomly -q ${SEED:+"--hypothesis-seed=$SEED"}
+
+      - name: Fuzz foreign-key-mismatch
+        if: ${{ !cancelled() }}
+        env:
+          SEED: ${{ inputs.seed }}
+        run: uv run pytest tests/fuzz_foreign_keys.py -p no:randomly -q ${SEED:+"--hypothesis-seed=$SEED"}
