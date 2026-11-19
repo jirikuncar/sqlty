@@ -93,7 +93,7 @@ untyped = "sentinel"
 ```
 
 `sqlty check` then reports each one as
-[`untyped-query`](../reference/rules.md#untyped-query) until you add casts or
+[`untyped-query`](../reference/rules/untyped-query.md) until you add casts or
 schema entries. See [Untyped queries](../guide/untyped.md).
 
 ### 3. Prefix queries, one module at a time
@@ -105,7 +105,7 @@ sqlty rewrite app/users.py
 ```
 
 `sqlty check` lists prefixed strings that are still unwrapped as
-[`stale-rewrite`](../reference/rules.md#stale-rewrite), so you can see what is
+[`stale-rewrite`](../reference/rules/stale-rewrite.md), so you can see what is
 left:
 
 ```text
@@ -123,7 +123,7 @@ with the queries whose rows are passed around the most.
 ### 5. Enforce
 
 Run `sqlty rewrite --check` and `sqlty check` in [CI](ci.md), and promote
-[`stale-type`](../reference/rules.md#stale-type) to an error once the codebase
+[`stale-type`](../reference/rules/stale-type.md) to an error once the codebase
 is clean, so annotations stay exact rather than only wide enough.
 
 ## Editing typed queries
@@ -137,7 +137,7 @@ report a stale `T`; do not strip it. See
 **`--sql` followed by a space.** `"--sql SELECT ..."` is a SQL comment: the
 query is empty to sqlty and the string is never wrapped. Use a newline.
 `sqlty check` reports it as
-[`inline-sql-comment`](../reference/rules.md#inline-sql-comment).
+[`inline-sql-comment`](../reference/rules/inline-sql-comment.md).
 
 ```python
 wrong = "--sql SELECT id::INTEGER FROM users"
@@ -158,7 +158,7 @@ values as parameters (`%s`) instead.
 `execute` no longer know `T`. Put the complete query in the literal.
 
 **Nullable columns.** A column that can be `NULL` infers `T | None`, so a row type
-field must be optional too ([`nullable-mismatch`](../reference/rules.md#nullable-mismatch)).
+field must be optional too ([`nullable-mismatch`](../reference/rules/nullable-mismatch.md)).
 Wrappers written by an earlier release are `narrow-type`: `sqlty check --fix` updates
 them. See [Nullability](../guide/schema-inference.md#nullability).
 

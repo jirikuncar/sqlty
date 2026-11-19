@@ -25,7 +25,11 @@ PRE_COMMIT_REV = re.compile(rf"rev: v{VERSION}\n")
 PLACES: list[tuple[str, re.Pattern[str], int]] = [
     ("rust/Cargo.toml", re.compile(rf'\[workspace\.package\]\nversion = "{VERSION}"'), 1),
     # Workspace members are the packages without a `source`.
-    ("rust/Cargo.lock", re.compile(rf'name = "sqlty[\w-]*"\nversion = "{VERSION}"\n(?!source)'), 9),
+    (
+        "rust/Cargo.lock",
+        re.compile(rf'name = "sqlty[\w-]*"\nversion = "{VERSION}"\n(?!source)'),
+        10,
+    ),
     (".claude-plugin/plugin.json", JSON_VERSION, 1),
     (".claude-plugin/marketplace.json", JSON_VERSION, 2),
     (".codex-plugin/plugin.json", JSON_VERSION, 1),
@@ -34,6 +38,13 @@ PLACES: list[tuple[str, re.Pattern[str], int]] = [
     ("skills/sqlty-ci/SKILL.md", PRE_COMMIT_REV, 1),
     # The package and the platform packages it depends on.
     ("npm/sqlty/package.json", re.compile(rf'"(?:version|@sqlty/cli-[\w-]+)": "{VERSION}"'), 7),
+    ("npm/wasm/package.json", JSON_VERSION, 1),
+    # The extension bundles @sqlty/wasm from npm/wasm.
+    (
+        "editors/vscode/package-lock.json",
+        re.compile(rf'"name": "@sqlty/wasm",\n\s+"version": "{VERSION}"'),
+        1,
+    ),
 ]
 
 

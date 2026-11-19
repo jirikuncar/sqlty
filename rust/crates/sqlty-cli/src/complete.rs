@@ -2,13 +2,13 @@
 
 use std::path::{Path, PathBuf};
 
+use serde_json::{json, Value};
 use sqlty_project::Shared;
 use sqlty_python::locate;
 use sqlty_python::project::Files;
 use sqlty_python::rewriter::ImportStyle;
 use sqlty_sql::analyzer::CandidateKind;
 
-use crate::json::Json;
 use crate::{position, workspace, Common, Host};
 
 /// The most names listed.
@@ -83,24 +83,28 @@ pub fn run(
     let schema = context.schema.as_deref();
     let found = locate::complete(&queries, offset, context.dialect, schema, LIMIT);
     if json {
-        let result = found.map_or(Json::Null, |found| {
-            let items = found.candidates.into_iter().map(|item| {
-                Json::object([
-                    ("label", item.label.into()),
-                    ("kind", kind(item.kind).into()),
-                    ("detail", item.detail.map_or(Json::Null, Json::from)),
-                    ("sql_type", item.sql_type.map_or(Json::Null, Json::from)),
-                    ("nullable", item.nullable.map_or(Json::Null, Json::from)),
-                ])
-            });
-            Json::object([
-                ("start", position(&text, found.replace.start)),
-                ("end", position(&text, found.replace.end)),
-                ("incomplete", found.incomplete.into()),
-                ("items", Json::Array(items.collect())),
-            ])
+        let result = found.map_or(Value::Null, |found| {
+            let items: Vec<Value> = found
+                .candidates
+                .into_iter()
+                .map(|item| {
+                    json!({
+                        "label": item.label,
+                        "kind": kind(item.kind),
+                        "detail": item.detail,
+                        "sql_type": item.sql_type,
+                        "nullable": item.nullable,
+                    })
+                })
+                .collect();
+            json!({
+                "start": position(&text, found.replace.start),
+                "end": position(&text, found.replace.end),
+                "incomplete": found.incomplete,
+                "items": items,
+            })
         });
-        host.out(&format!("{}\n", result.dumps()));
+        host.out(&format!("{result}\n"));
     } else if let Some(found) = found {
         for item in found.candidates {
             let fields = [

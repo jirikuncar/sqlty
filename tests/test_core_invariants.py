@@ -11,7 +11,6 @@ import ast
 import builtins
 import collections
 import io
-import itertools
 import random
 import re
 import time
@@ -24,6 +23,7 @@ import pytest
 
 import sqlty.core as core
 from sqlty._core import query_sites as _query_sites
+from sqlty._lint import NAME_RULES, Diagnostic
 from sqlty._source import ParsedSource
 from tests._mdtest.parser import parse
 from tests._mdtest.runner import comments, string_constants, without_generated
@@ -70,7 +70,7 @@ def test_every_inference_rule_is_asserted() -> None:
     }
     asserted = {
         rule
-        for md in [*MARKDOWN, ROOT / "README.md", *(ROOT / "src" / "sqlty" / "rules").glob("*.md")]
+        for md in [*MARKDOWN, ROOT / "README.md"]
         for line in re.findall(r"^-- rules: .*", md.read_text(), re.MULTILINE)
         for rule in line.split()
     }
@@ -243,36 +243,54 @@ def _check_outputs(source: str, options: dict) -> None:
     assert core.fix_source(fixed, **options) == fixed
 
 
+def _tail(query: str) -> str:
+    """A query past its marker line, however the marker is spelled."""
+    return _MARKER_LINE.split(query, maxsplit=1)[-1]
+
+
+_MARKER_LINE = re.compile(r"^.*--\s*sql\b.*\n", re.IGNORECASE | re.MULTILINE)
+
+
 @pytest.mark.parametrize(("source", "options"), PYTHON)
-def test_query_at_finds_what_check_reads(source: str, options: dict) -> None:
-    """Probing every string literal finds exactly the queries ``check`` reads, by marker or helper."""
+def test_completion_finds_what_check_reads(source: str, options: dict) -> None:
+    """Completing at the end of every string literal finds exactly the queries ``check`` reads,
+    by marker or helper."""
     parsed = ParsedSource(source)
     style = options["import_style"]
     tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
     templates = {token.start[0] for token in tokens if token.type == tokenize.TSTRING_START}
     expected = collections.Counter(
-        text
+        _tail(text)
         for line, kind, text in _query_sites(
             source, import_style=style, any_calls=parsed.any_calls(style)
         )
         if kind == "query" and line not in templates
     )
     expected.update(
-        query
+        _tail(query)
         for _, queries, _, start in core._helper_sites(parsed, None, None)  # noqa: SLF001
         if start is not None
         for query in queries
     )
-    lines = source.splitlines(keepends=True)
-    starts = [0, *itertools.accumulate(len(line.encode()) for line in lines)]
-    found = {}
+    found: list[str] = []
+    joined = False
     for token in tokens:
-        if token.type == tokenize.STRING:
-            (row, col), quote = token.end, 3 if token.string.endswith(('"""', "'''")) else 1
-            closing = starts[row - 1] + len(lines[row - 1][:col].encode()) - quote
-            if (at := core.query_at(source, closing, import_style=style)) is not None:
-                found[at.span] = at.text
-    assert collections.Counter(found.values()) == expected
+        if token.type in (tokenize.NL, tokenize.COMMENT):
+            continue
+        if token.type != tokenize.STRING:
+            joined = False
+            continue
+        (row, col), quote = token.end, 3 if token.string.endswith(('"""', "'''")) else 1
+        if core.complete_source(source, row, col - quote + 1, import_style=style) is None:
+            joined = False
+            continue
+        value = ast.literal_eval(token.string)
+        if joined:
+            found[-1] += value
+        else:
+            found.append(value)
+        joined = True
+    assert collections.Counter(map(_tail, found)) == expected
 
 
 @pytest.mark.parametrize(("source", "options"), PYTHON)
@@ -348,8 +366,18 @@ def test_sum_of_an_unknown_schema_column_is_untyped() -> None:
         core.ColumnInfo(name="sum", python_type=None, sql_type=None)
     ]
     assert [
-        d[:2] for d in core.query_diagnostics("SELECT SUM(nope) FROM users", schema_sql=schema)
+        (d["rule"], d["message"])
+        for d in _name_diagnostics("SELECT SUM(nope) FROM users", schema_sql=schema)
     ] == [("unknown-column", "column `nope` does not exist in `users`")]
+
+
+def _name_diagnostics(sql: str, **options: Any) -> list[Diagnostic]:
+    """What ``check_source`` reports about the names of ``sql`` as a ``--sql`` string."""
+    return [d for d in core.check_source(_marked(sql), **options) if d["rule"] in NAME_RULES]
+
+
+def _marked(sql: str) -> str:
+    return f"q = {'--sql\n' + sql!r}\n"
 
 
 QUERY_SCHEMA = (
@@ -362,43 +390,40 @@ QUERY_SCHEMA = (
 @pytest.mark.parametrize(
     ("sql", "expected"),
     [
-        ("SELECT u.nope FROM users u", [("unknown-column", "error", "u.nope", "users", "nope")]),
-        ("SELECT naïve FROM users", [("unknown-column", "error", "naïve", "users", "naïve")]),
-        ("SELECT x.id FROM users u", [("unknown-table", "error", "x.id", "x", "id")]),
-        ("SELECT id FROM missing", [("unknown-table", "error", "missing", "missing", None)]),
+        ("SELECT u.nope FROM users u", [("unknown-column", "error", "u.nope")]),
+        ("SELECT naïve FROM users", [("unknown-column", "error", "naïve")]),
+        ("SELECT x.id FROM users u", [("unknown-table", "error", "x.id")]),
+        ("SELECT id FROM missing", [("unknown-table", "error", "missing")]),
         (
             "SELECT id FROM users u JOIN orders o ON o.user_id = u.id",
-            [("ambiguous-column", "error", "id", None, "id")],
+            [("ambiguous-column", "error", "id")],
         ),
         (
             "INSERT INTO orders (id, user_id) VALUES (1, 2)",
-            [("insert-missing-column", "error", None, "orders", "status")],
+            [("insert-missing-column", "error", None)],
         ),
-        ("SELECT my_udf(id) FROM users", [("unknown-function", "warn", "my_udf", None, None)]),
+        ("SELECT my_udf(id) FROM users", [("unknown-function", "warn", "my_udf")]),
         ("SELECT u.email FROM users u JOIN orders o ON o.id = u.id", []),
     ],
 )
-def test_query_diagnostics_fields(sql: str, expected: list[tuple[object, ...]]) -> None:
-    found = core.query_diagnostics(sql, schema_sql=QUERY_SCHEMA)
-    assert [
-        (d.rule, d.severity, None if d.start is None else sql[d.start : d.end], d.table, d.column)
-        for d in found
-    ] == expected
+def test_name_diagnostics_fields(sql: str, expected: list[tuple[object, ...]]) -> None:
+    """Each underlines what it is about, or the whole query when that is not one place."""
+    source = _marked(sql).encode()
+    whole = source[source.index(b"'") : source.rindex(b"'") + 1]
+    found = _name_diagnostics(sql, schema_sql=QUERY_SCHEMA)
+    assert [(d["rule"], d["severity"], source[d["start"] : d["end"]].decode()) for d in found] == [
+        (rule, severity, text or whole.decode()) for rule, severity, text in expected
+    ]
 
 
-def test_query_diagnostics_rules() -> None:
+def test_name_diagnostics_rules() -> None:
     sql = "SELECT u.email FROM users u JOIN orders o ON o.id = u.id"
     assert [
-        (d.rule, d.severity)
-        for d in core.query_diagnostics(
-            sql, schema_sql=QUERY_SCHEMA, rules={"entity-mismatch": "warn"}
-        )
+        (d["rule"], d["severity"])
+        for d in _name_diagnostics(sql, schema_sql=QUERY_SCHEMA, rules={"entity-mismatch": "warn"})
     ] == [("entity-mismatch", "warn")]
     sql = "SELECT nope FROM users"
-    assert (
-        core.query_diagnostics(sql, schema_sql=QUERY_SCHEMA, rules={"unknown-column": "ignore"})
-        == []
-    )
+    assert _name_diagnostics(sql, schema_sql=QUERY_SCHEMA, rules={"unknown-column": "ignore"}) == []
 
 
 def test_crlf_continuation() -> None:
@@ -487,44 +512,3 @@ def test_split_marker_is_not_skipped(source: str) -> None:
 def test_unsupported_import_style_still_raises_without_markers() -> None:
     with pytest.raises(ValueError):
         core.check_source("x = 1\n", import_style="import nothing")
-
-
-@pytest.mark.parametrize(
-    ("sql", "dialect", "expected"),
-    [
-        (
-            "WITH r AS (SELECT * FROM s.a) SELECT * FROM r JOIN b ON true, generate_series(1, 2)",
-            "postgres",
-            [("a", "s", "read"), ("b", None, "read")],
-        ),
-        (
-            "UPDATE users u SET n = (SELECT count(*) FROM users) FROM orders o WHERE o.id = u.id",
-            "postgres",
-            [("users", None, "write"), ("users", None, "read"), ("orders", None, "read")],
-        ),
-        (
-            "DELETE u FROM users u JOIN orders o ON o.user_id = u.id",
-            "mysql",
-            [("users", None, "write"), ("orders", None, "read")],
-        ),
-        (
-            "MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN DELETE",
-            "postgres",
-            [("t", None, "write"), ("s", None, "read")],
-        ),
-        ("SELECT * FROM", "postgres", []),
-        (
-            "DELETE u FROM users u JOIN (SELECT 1 AS id) d ON d.id = u.id",
-            "mysql",
-            [("users", None, "write")],
-        ),
-        (
-            "INSERT INTO TABLE FUNCTION remote('x', t) (a) SELECT a FROM t",
-            "clickhouse",
-            [("t", None, "read")],
-        ),
-        ("SELECT * FROM IDENTIFIER('t')", "snowflake", []),
-    ],
-)
-def test_query_tables(sql: str, dialect: str, expected: list[tuple[str, str | None, str]]) -> None:
-    assert core.query_tables(sql, dialect=dialect) == [core.TableRef(*table) for table in expected]

@@ -537,7 +537,7 @@ The query is read with that database's `dialect`, `schema` and `types`, and
 `db=default` names the top-level one. Its `rules` stay those of the file. Everything
 after `--sql` on the marker line is a SQL comment, so the database still runs the query
 as written; under MySQL, write `-- sql sqlty:db=analytics`. A name the project does not
-configure is [`unknown-database`](rules.md#unknown-database).
+configure is [`unknown-database`](rules/unknown-database.md).
 
 ### Helpers of a database
 

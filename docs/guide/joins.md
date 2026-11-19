@@ -12,10 +12,10 @@ so the checks work offline, in an editor and in CI.
 
 | Rule | Default | Reports |
 |------|---------|---------|
-| [`fanout-aggregate`](../reference/rules.md#fanout-aggregate) | warn | An aggregate over rows a one-to-many join repeats |
-| [`chasm-join`](../reference/rules.md#chasm-join) | warn | One table joined one-to-many to two others |
-| [`unproven-join`](../reference/rules.md#unproven-join) | ignore | A join in an aggregating query that matches no key |
-| [`entity-mismatch`](../reference/rules.md#entity-mismatch) | ignore | A comparison between keys of different tables |
+| [`fanout-aggregate`](../reference/rules/fanout-aggregate.md) | warn | An aggregate over rows a one-to-many join repeats |
+| [`chasm-join`](../reference/rules/chasm-join.md) | warn | One table joined one-to-many to two others |
+| [`unproven-join`](../reference/rules/unproven-join.md) | ignore | A join in an aggregating query that matches no key |
+| [`entity-mismatch`](../reference/rules/entity-mismatch.md) | ignore | A comparison between keys of different tables |
 
 All four need a [schema](schema-inference.md) with keys and are judged in the
 `postgres`, `mysql` and `sqlite` dialects.

@@ -70,10 +70,10 @@ SELECT id, nme FROM users WHERE id = $1;
 
 ## What is checked
 
-The [name rules](../reference/rules.md#name-rules) (`unknown-table`,
+The [name rules](../reference/rules.md#rule-groups) (`unknown-table`,
 `unknown-column`, `ambiguous-column`, ...),
-[`unparsed-query`](../reference/rules.md#unparsed-query) and
-[`select-star`](../reference/rules.md#select-star), with the severities
+[`unparsed-query`](../reference/rules/unparsed-query.md) and
+[`select-star`](../reference/rules/select-star.md), with the severities
 `[tool.sqlty.rules]` and `overrides` give them. A file has no row types, so the
 rules that compare one with the query don't apply.
 

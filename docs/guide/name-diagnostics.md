@@ -12,12 +12,12 @@ can't type are warnings.
 
 | Rule | Default | Reports |
 |------|---------|---------|
-| [`unknown-table`](../reference/rules.md#unknown-table) | error | A table the schema does not define |
-| [`unknown-column`](../reference/rules.md#unknown-column) | error | A column the table does not have |
-| [`ambiguous-column`](../reference/rules.md#ambiguous-column) | error | An unqualified column in more than one table |
-| [`unknown-function`](../reference/rules.md#unknown-function) | warn | A function sqlty cannot type |
-| [`unknown-type`](../reference/rules.md#unknown-type) | warn | A cast or column type without a Python type |
-| [`unsupported-syntax`](../reference/rules.md#unsupported-syntax) | warn | A construct that parses but is not typed |
+| [`unknown-table`](../reference/rules/unknown-table.md) | error | A table the schema does not define |
+| [`unknown-column`](../reference/rules/unknown-column.md) | error | A column the table does not have |
+| [`ambiguous-column`](../reference/rules/ambiguous-column.md) | error | An unqualified column in more than one table |
+| [`unknown-function`](../reference/rules/unknown-function.md) | warn | A function sqlty cannot type |
+| [`unknown-type`](../reference/rules/unknown-type.md) | warn | A cast or column type without a Python type |
+| [`unsupported-syntax`](../reference/rules/unsupported-syntax.md) | warn | A construct that parses but is not typed |
 
 ## Change their severity
 

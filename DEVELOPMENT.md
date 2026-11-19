@@ -1,115 +1,119 @@
 # Development Guide
 
-This guide covers development setup and workflows for SQLTy.
+Setup, commands and architecture of SQLTy. Conventions for code, tests and docs
+live in [AGENTS.md](AGENTS.md); review rules in [REVIEW.md](REVIEW.md).
 
 ## Prerequisites
 
 - Python 3.14+
-- [uv](https://docs.astral.sh/uv/) - Fast Python package installer and resolver
-- [Rust toolchain](https://rustup.rs/) 1.99+ (builds the engine, `sqlty._core`, and runs the cargo hooks)
+- [uv](https://docs.astral.sh/uv/)
+- [`rustup`](https://rustup.rs/): `rust-toolchain.toml` pins the Rust version (builds the engine, `sqlty._core`, and runs the cargo hooks)
 
 ## Setup
 
-### Install Dependencies
-
 ```bash
-uv sync --all-groups
+uv sync --all-groups    # dependencies and dev tools; builds sqlty._core
+uv run maturin develop  # rebuild sqlty._core after changing rust/
+uv run prek install     # run the hooks on every commit, cargo test on every push
 ```
-
-This installs all dependencies and development tools defined in `pyproject.toml`.
-
-### Build the Rust Extension
 
 sqlty's engine is the Rust extension `sqlty._core`; nothing works without it.
-`uv sync` builds it; rebuild after changing `rust/`:
 
-```bash
-# maturin is installed by `uv sync --all-groups`
-uv run maturin develop
-```
+### Hooks
 
-### Install the Hooks
-
-```bash
-uv run prek install
-```
-
-[prek](https://prek.j178.dev) then runs the hooks of `prek.toml` on the files
-of each commit. Run them on every file with:
+Run every hook before each commit:
 
 ```bash
 uv run prek run --all-files
 ```
 
-Each hook runs when the files it depends on change, and the read-only checks
-run in parallel; [AGENTS.md](AGENTS.md#hooks) lists them.
+[prek](https://prek.j178.dev) runs the hooks of `prek.toml` on every commit, and
+`cargo test` on every push (`uv run prek run --all-files --hook-stage pre-push`
+runs only it). Each runs when the files it depends on change:
 
-## Running Tests
+| Hook | Runs when these change |
+|------|------------------------|
+| mypy and ty on `src/` | `src/`, `pyproject.toml` |
+| `sqlty rewrite` (in place), `sqlty check`, mypy and ty on `examples/` (except `magic_codec/`) | `examples/`, `src/sqlty/`, `rust/crates/` |
+| `cargo fmt --check` | Rust files |
+| `cargo clippy -D warnings`, `cargo test` (on push) | `rust/` |
+| `tsc`, `oxlint`, `oxfmt` (`npm run check`) | `editors/vscode/` |
+| ruff (lint + format), uv-lock | Python files, `pyproject.toml` |
+| rumdl | Markdown files |
+| Vale | user-facing Markdown (`docs/`, rule pages, top-level guides) |
+| `zizmor` | `.github/workflows/` |
+| file checks (whitespace, line endings, YAML/TOML/JSON syntax, ...) | any file |
 
-SQLTy has four test layers:
+Hooks that edit files run one at a time; the read-only checks run in
+parallel. CI's Lint job runs the commit hooks on all files.
 
-| Layer | Location | What it tests | Runner |
-|-------|----------|--------------|--------|
-| **Unit** | `tests/test_core_invariants.py`, `tests/generator/`, etc. | Invariants over the mdtest corpus, parser cases, stubs | `pytest` |
-| **mdtest** | `tests/mdtest/`, `docs/`, `src/sqlty/rules/`, `README.md` | Type inference, rewrite, strip, lint | `tests/_mdtest` plugin |
-| **E2E** | `tests/e2e/` | CLI, subprocess, mypy validation | `pytest` + `inline-snapshot` |
-| **Docs** | `README.md`, `docs/**/*.md` | Code examples in user docs | `tests/test_docs.py` (mdtest engine) |
+## Running tests
 
-### Make targets
-
-```bash
-make test           # Run all tests (unit + mdtest + e2e)
-make test-unit      # Unit tests only (no e2e, no mdtest)
-make test-mdtest    # Mdtest suite + docs tests
-make test-e2e       # End-to-end tests only
-make test-coverage  # All tests with coverage report
-make update-mdtest  # Update mdtest assertions with actual values
-make bench          # sqlty.core benchmarks
-```
-
-### Using pytest directly
-
-```bash
-# All tests
-uv run pytest
-
-# Specific test layer
-uv run pytest tests/mdtest/ docs/ src/sqlty/rules/ README.md -v
-uv run pytest tests/ --ignore=tests/e2e --ignore=tests/mdtest
-uv run pytest tests/e2e/ -v
-
-# Filter by test name
-uv run pytest -k "integer cast"
-uv run pytest tests/mdtest/type_inference/basic_types.md -v
-```
-
-### Markdown Tests (mdtest)
-
-Format, assertions and workflow: see [AGENTS.md](AGENTS.md#markdown-tests-mdtest).
-
-**Test directory layout:**
-
-```text
-tests/mdtest/
-  type_inference/   # basic types, datetime, uuid, dialects, schema inference
-  postgres/         # SELECT, RETURNING, CTE, JSON, aggregates, star expansion, advanced
-  rewrite/          # basic, edge cases, import injection, idempotency, multiline
-  strip/            # basic, round-trip, idempotency, import removal
-  check/            # star expansion, type annotation, user types, lint rule config
-  codec/            # basic decode, auto imports, runtime execution
-```
-
-### E2E Tests
-
-E2e tests in `tests/e2e/` use subprocess to run the sqlty CLI (no internal imports). They use `inline-snapshot` for result verification and include mypy validation.
+| Layer | Location | What it tests |
+|-------|----------|---------------|
+| **Unit** | `tests/test_*.py` | Invariants over the mdtest corpus, bindings, fuzzing, docs |
+| **mdtest** | `tests/mdtest/`, `docs/`, `README.md` | Type inference, rewrite, strip, lint ([format](AGENTS.md#markdown-tests-mdtest)) |
+| **E2E** | `tests/e2e/` | CLI in a subprocess, with `inline-snapshot` |
+| **Rust** | `rust/crates/*/` | Engine, CLI (`trycmd`), language server |
 
 ```bash
-# Run e2e tests
-uv run pytest tests/e2e/ -v
-
-# Update e2e snapshots when output changes intentionally
-uv run pytest tests/e2e/ --inline-snapshot=update
+uv run pytest                                          # all tests except timing
+uv run pytest tests/mdtest docs README.md               # mdtests
+uv run pytest tests/ --ignore=tests/e2e --ignore=tests/mdtest  # unit tests
+uv run pytest tests/e2e/ -v                            # end-to-end tests
+uv run pytest tests/e2e/ --inline-snapshot=update      # accept new e2e output
+uv run pytest -k "integer cast"                        # filter by name
+uv run pytest tests/mdtest/rewrite/basic_rewrite.md -v # one file
+uv run pytest -m timing -n 0 -p no:randomly            # the tests that measure wall time
+uv run pytest -n 0 -p no:randomly                      # one process, in file order
 ```
+
+Tests run in parallel (pytest-xdist, `-n auto`) and in random order
+(pytest-randomly; a failure prints its `--randomly-seed`). Tests that measure wall
+time are marked `timing`: the default run leaves them out, since parallel workers
+slow them. Tests marked `pg` run when `SQLTY_PG_DSN` points to a PostgreSQL server;
+each worker gets its own database on it (`tests/conftest.py`).
+
+Make targets:
+
+```bash
+make test            # all tests, then the timing tests alone
+make test-timing     # the tests that measure wall time, alone
+make test-unit       # unit tests only
+make test-mdtest     # mdtest only
+make test-e2e        # e2e only
+make update-mdtest   # fill in mdtest assertions with actual values
+make test-coverage   # every Python and Rust test with coverage, and its gates
+make check-no-exec-harness  # the CI check that guards the no-exec harness
+```
+
+### Rust tests
+
+```bash
+cargo test --workspace --manifest-path rust/Cargo.toml
+```
+
+CI runs them with [cargo-nextest](https://nexte.st/), which runs test binaries in
+parallel and reports each failure on its own, then runs the doctests that
+nextest skips:
+
+```bash
+cargo nextest run --workspace --manifest-path rust/Cargo.toml
+cargo test --doc --workspace --manifest-path rust/Cargo.toml
+```
+
+`rust/crates/sqlty-cli/tests/cli/*.md` run the built `sqlty` binary with
+[`trycmd`](https://docs.rs/trycmd): each `$ sqlty ...` line in a `console` block,
+its output and `? CODE` exit status. `NAME.in/` is the project a case starts
+from; with `NAME.out/`, the commands share one copy of it and each file there
+must match what they leave; a case that writes files needs one. Write new output into the cases with:
+
+```bash
+TRYCMD=overwrite uv run cargo test -p sqlty-cli --test cli --manifest-path rust/Cargo.toml
+```
+
+It updates the files already in `.out/`; add new ones by hand, where `...` matches any lines.
+Output backslashes read as `/`, so keep `\n` out of what a case prints.
 
 ### Tests against the databases
 
@@ -129,115 +133,7 @@ SQLTY_MYSQL_DSN=mysql://root@127.0.0.1:3306/probe uv run --with pymysql pytest t
 Each test drops the tables it loads, so point it at a scratch server. A query the
 database rejects is skipped, with the reason.
 
-## Development Workflow
-
-### Type Checking
-
-```bash
-make typecheck
-```
-
-Or directly:
-
-```bash
-uv run mypy src/sqlty
-uv run ty check src/sqlty
-```
-
-### Benchmarks and the performance budget
-
-```bash
-make bench            # sqlty.core micro-benchmarks
-make bench-project    # generated 10k-file project: CLI wall time and peak RSS
-make bench-ci         # CI size; exits 1 when over the budget in benchmarks/baseline.json
-make bench-baseline   # re-record the baseline after an intended change
-```
-
-These need a release build
-(`uv run maturin develop --release --manifest-path rust/crates/sqlty-ext/Cargo.toml`).
-The `Performance budget` CI job runs `make bench-ci`. See
-[benchmarks/README.md](benchmarks/README.md) for the metrics and the budget rules.
-
-### Code Formatting
-
-```bash
-uv run ruff format .
-uv run ruff check --fix .
-```
-
-## Architecture
-
-### Core modules
-
-| Module | Purpose |
-|--------|---------|
-| `core.py` | Public API over the Rust `_core` |
-| `_core.pyi` | Type stubs for the Rust extension module |
-| `_cli.py` | `sqlty` entry point: runs the Rust CLI and reports crashes |
-| `_lint.py` | Lint rules and their severity (error/warn/ignore) |
-| `_decode.py` | Magic codec decoder (bytes -> string transformation) |
-| `magic.py` | Codec registration for Python import system |
-
-### Rust extension (`rust/`)
-
-The engine parses SQL with
-[sqlparser-rs](https://github.com/apache/datafusion-sqlparser-rs) and is exposed
-to Python with PyO3.
-It follows [maturin's recommended mixed Python/Rust project layout](https://www.maturin.rs/project_layout.html).
-
-```text
-rust/
-├── Cargo.toml                # Workspace root: shared deps and package metadata
-└── crates/
-    ├── sqlty-sql/            # No PyO3: SQL parsing and type inference
-    │   └── src/
-    │       ├── ddl.rs        # Schema (DDL) statements
-    │       └── analyzer/     # mod.rs: parsing, dialects, schemas, SELECT * expansion
-    │                         # scope, names, expr, functions, operators, query, dml
-    ├── sqlty-python/         # Python source handling (depends on sqlty-sql)
-    │   └── src/
-    │       ├── tokens.rs     # Python tokenizer
-    │       ├── rewriter.rs   # Python source rewrite/strip, import-style
-    │       ├── checker.rs    # Lint checks (stale-rewrite, stale-type, SELECT *, ...)
-    │       └── fixer.rs      # check --fix
-    ├── sqlty-project/        # A project read from disk, as sqlty server checks it
-    ├── sqlty-cli/            # The sqlty commands, run from sqlty._cli
-    ├── sqlty-wasm/           # The docs playground's engine, built by `make playground`
-    └── sqlty-ext/            # PyO3 module sqlty._core (the maturin manifest)
-        └── src/lib.rs        # The sqlty._core functions
-```
-
-Run Rust unit tests independently:
-
-```bash
-cargo test --workspace --manifest-path rust/Cargo.toml
-```
-
-CI runs them with [cargo-nextest](https://nexte.st/), which runs test binaries in
-parallel and reports each failure on its own, then runs the doctests that
-nextest skips:
-
-```bash
-cargo nextest run --workspace --manifest-path rust/Cargo.toml
-cargo test --doc --workspace --manifest-path rust/Cargo.toml
-```
-
-### The `sqlty` executable
-
-`rust/crates/sqlty-cli/tests/cli/*.md` run the built `sqlty` binary with
-[`trycmd`](https://docs.rs/trycmd): each `$ sqlty ...` line in a `console` block,
-its output and `? CODE` exit status. `NAME.in/` is the project a case starts
-from; with `NAME.out/`, the commands share one copy of it and each file there
-must match what they leave; a case that writes files needs one. Write new output into the cases with:
-
-```bash
-TRYCMD=overwrite uv run cargo test -p sqlty-cli --test cli --manifest-path rust/Cargo.toml
-```
-
-It updates the files already in `.out/`; add new ones by hand, where `...` matches any lines.
-Output backslashes read as `/`, so keep `\n` out of what a case prints.
-
-### Fuzzing the analyzer
+### Fuzzing
 
 `tests/test_fuzz.py` generates random schemas and queries with
 [Hypothesis](https://hypothesis.readthedocs.io/) (joins, aggregates, casts,
@@ -270,6 +166,96 @@ cargo +nightly fuzz run -O -a run -- -dict=sql.dict -max_total_time=600
 A crash leaves its input in `artifacts/run/`; `cargo +nightly fuzz fmt -O -a run
 <file>` prints it. The `Fuzz the engine` workflow runs it every night and
 uploads the input when it fails.
+
+## Type checking
+
+```bash
+make typecheck                 # mypy + ty on src and examples (prek hooks)
+make typecheck-examples        # mypy + ty on each examples/ dir (runs in CI)
+uv run pytest tests/test_typecheckers.py -v  # mypy, pyright, ty on tests/typechecks/
+```
+
+## Formatting
+
+```bash
+uv run ruff format .
+uv run ruff check --fix .
+```
+
+## Benchmarks
+
+The end-to-end and CodSpeed benchmarks need a release build
+(`uv run maturin develop --release`). Published wheels use the slower `dist`
+profile (fat LTO, one codegen unit; `rust/Cargo.toml`), so `release` numbers can
+differ slightly from a shipped wheel.
+
+```bash
+make bench-ci         # CI-size project; exits 1 when over benchmarks/baseline.json
+make bench-baseline   # re-record the baseline after an intended change
+make bench-project    # full-size synthetic project (10k files): CLI wall time and peak RSS
+make bench-rust       # Criterion benches in rust/crates/sqlty-bench; extra args via ARGS=
+make bench-codspeed   # benchmarks/test_benchmarks.py, as CI's CodSpeed job measures them
+```
+
+- `bench-ci` (`benchmarks/bench_project.py`, with `tests/test_performance.py`)
+  measures CLI wall time and RSS on a synthetic project; the `Performance budget`
+  CI job runs it. [benchmarks/README.md](benchmarks/README.md) has the metrics and
+  the budget rules.
+- `bench-rust` covers catalog load (50 to 5000 tables with functions), the
+  analyzer per query kind, `check_source`/`rewrite_source` on 1k/4k queries,
+  name-index prefix lookups and `complete` at 50, 540 and 5000 tables, and
+  `query_at` in a module of 4000 queries. Use it to find where time goes and to
+  compare a branch (`ARGS="--save-baseline main"`, then `ARGS="--baseline main"`).
+- `bench-codspeed` runs each query kind of `synth.KINDS` through
+  `analyze_select`/`analyze_params`, the schema load, `rewrite_source`,
+  `check_source`, `complete_source` at 50, 540 and 5000 tables and in a module
+  of 4000 queries.
+  CI counts their instructions on every commit and reports the change on the
+  pull request.
+
+## Architecture
+
+The engine parses SQL with
+[sqlparser-rs](https://github.com/apache/datafusion-sqlparser-rs) and Python with
+ruff's parser, and is exposed to Python with PyO3, in
+[maturin's mixed Python/Rust layout](https://www.maturin.rs/project_layout.html).
+
+```text
+src/sqlty/
+├── __init__.py          # SQL[T] generic str subclass
+├── core.py              # Public API over the Rust engine
+├── _core.pyi            # Stub for sqlty._core (rust/crates/sqlty-ext/src/lib.rs)
+├── _cli.py              # `sqlty` entry point: runs the Rust CLI, reports crashes
+├── _config.py           # Configuration from sqlty.toml, pyproject.toml or Cargo.toml
+├── _check.py            # Python checks of check_source: row types, helper parameters
+├── _lint.py             # Lint rules: severity, diagnostics, RuleConfig
+├── _decode.py           # Magic codec decoder
+├── magic.py             # Magic codec registration
+├── lexer.py             # Pygments lexer coloring the SQL in Python strings
+├── drivers/psycopg.py   # Typed psycopg helpers
+└── rules/               # One page per lint rule, printed by sqlty rule NAME
+rust/
+├── Cargo.toml           # Workspace root: shared deps and package metadata
+├── fuzz/                # cargo-fuzz target over the playground requests
+└── crates/
+    ├── sqlty-sql/       # No PyO3, no I/O: analyzer/ (type inference, nullability,
+    │   │                # completion, hover), catalog/ (schemas, name index), ddl.rs
+    │   └── rules/       # Inference rules (*.inference.toml), compiled by build.rs
+    ├── sqlty-python/    # Python source: ruff parser, rewriter, checker, fixer, row types
+    ├── sqlty-format/    # sqlty format: query strings laid out by sqruff
+    ├── sqlty-project/   # A project read from disk: settings, helpers, checks
+    ├── sqlty-cli/       # Every sqlty command; main.rs is the standalone sqlty executable
+    ├── sqlty-lsp/       # The language server of sqlty server
+    ├── sqlty-wasm/      # JSON in, JSON out: @sqlty/wasm (npm/wasm) and the docs playground (make wasm)
+    ├── sqlty-ext/       # PyO3 module sqlty._core; cli.rs runs sqlty-cli
+    └── sqlty-bench/     # Criterion benchmarks (make bench-rust)
+editors/vscode/          # VS Code client of sqlty server; see its README
+tests/
+├── _mdtest/             # mdtest plugin: parser, runner over sqlty.core, --update-mdtest
+├── mdtest/              # The specification, as Markdown tests
+├── e2e/                 # CLI end-to-end tests and their fixtures
+└── type_oracle/         # Python row-type reader, the oracle for the Rust one
+```
 
 ### Magic codec internals
 
@@ -305,14 +291,7 @@ Python caches codec lookups, so registration must happen before the first
 file declaring `# coding: sqlty` is compiled. Use `sqlty._decode.decode`
 directly when you need the transformation without registering the codec.
 
-### Test modules
-
-| Module | Purpose |
-|--------|---------|
-| `tests/_mdtest/` | mdtest plugin: parser, runner over `sqlty.core`, `--update-mdtest` |
-| `tests/e2e/conftest.py` | E2E fixtures, CLI runner helpers |
-
-## Documentation Site
+## Documentation site
 
 The site at <https://sqlty.kuncar.dev/> is built from `docs/` with
 [Zensical](https://zensical.org/) (configured in `zensical.toml`). Zensical is
@@ -322,11 +301,11 @@ examples as the playground does. Build the extension first (`maturin develop`).
 The version is pinned only in the `Makefile` (`ZENSICAL`); CI runs `make docs`.
 
 ```bash
-make docs        # strict build into site/ (fails on broken links or anchors)
-make docs-serve  # live preview at http://localhost:8000/sqlty/
+make docs           # strict build into site/ (fails on broken links or anchors)
+make docs-serve     # live preview at http://localhost:8000/sqlty/
+make generate-docs  # regenerate the tables of configuration.md and cli.md
+make lint-docs      # rumdl and Vale on the docs
 ```
-
-Two hooks check the Markdown, and `make lint-docs` runs both:
 
 - [rumdl](https://github.com/rvben/rumdl) checks formatting and accessibility (heading
   order, image alt text, fenced code languages); `[tool.rumdl]` in `pyproject.toml`
@@ -342,15 +321,8 @@ touching the docs and deploys it to GitHub Pages on push to `main`. One-time
 setup: in the repository Settings > Pages, set Source to "GitHub Actions";
 otherwise the first deploy fails.
 
-## Contributing
+## Getting help
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Getting Help
-
+- **Contributing**: [CONTRIBUTING.md](CONTRIBUTING.md)
 - **Documentation**: <https://sqlty.kuncar.dev/> (sources in [docs/](docs/))
-- **Issues**: Report bugs or request features on [GitHub Issues](https://github.com/jirikuncar/sqlty/issues)
-
-## License
-
-MIT License - see [LICENSE](LICENSE) file for details.
+- **Issues**: [GitHub Issues](https://github.com/jirikuncar/sqlty/issues)

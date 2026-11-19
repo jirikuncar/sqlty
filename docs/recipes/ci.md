@@ -25,7 +25,7 @@ default_language_version:
   python: python3.14  # sqlty requires Python >= 3.14
 repos:
   - repo: https://github.com/jirikuncar/sqlty
-    rev: v0.7.1
+    rev: v0.8.0
     hooks:
       - id: sqlty-rewrite
       - id: sqlty-check
@@ -36,15 +36,15 @@ builds the hook environment with the Python it runs on unless told otherwise,
 and sqlty needs 3.14 or newer: keep `default_language_version`, or set
 `language_version` on each hook. pre-commit installs sqlty from source into that environment, which
 compiles the Rust extension, so the first run needs a Rust toolchain
-(`cargo`) and takes a few minutes. Pass options with `args`, for example
+(`cargo`) and takes a few minutes. With `rustup`, the build uses the Rust version
+pinned in sqlty's `rust-toolchain.toml` and installs it if missing. Pass options with `args`, for example
 `args: [--dialect, sqlite]`.
 
 `sqlty-check` fails the commit only for rules with severity `error`. Drift that
-can break the code, [`narrow-type`](../reference/rules.md#narrow-type), is one by
+can break the code, [`narrow-type`](../reference/rules/narrow-type.md), is one by
 default; an annotation only wider than the rows,
-[`stale-type`](../reference/rules.md#stale-type), is a warning unless you
-promote it (see [below](#fail-on-drift-and-mismatches)). The `sqlty` hook
-id is a deprecated alias of `sqlty-rewrite`: it rewrites the staged files.
+[`stale-type`](../reference/rules/stale-type.md), is a warning unless you
+promote it (see [below](#fail-on-drift-and-mismatches)).
 
 !!! note "A schema change checks the whole project"
     A changed schema or config file can break queries in files you didn't touch.
@@ -105,9 +105,9 @@ whose row type is unknown; see [Untyped queries](../guide/untyped.md).
 `sqlty check` exits with 1 only when a rule with severity `error` fires.
 By default that covers row type mismatches, names the schema doesn't have,
 `SELECT *` without a schema, and annotations that don't admit the rows
-([`narrow-type`](../reference/rules.md#narrow-type)); annotations only wider than
-the rows ([`stale-type`](../reference/rules.md#stale-type)) and unwrapped strings
-([`stale-rewrite`](../reference/rules.md#stale-rewrite)) are warnings. Promote
+([`narrow-type`](../reference/rules/narrow-type.md)); annotations only wider than
+the rows ([`stale-type`](../reference/rules/stale-type.md)) and unwrapped strings
+([`stale-rewrite`](../reference/rules/stale-rewrite.md)) are warnings. Promote
 the rules you want to enforce:
 
 ```toml
@@ -152,7 +152,7 @@ Each step catches something the others don't:
 | Step | Fails when |
 |------|------------|
 | `sqlty rewrite --check` | a `--sql` string is not wrapped yet |
-| `sqlty check` | a rule with severity `error` fires: a row type mismatch, an unknown table or column, or an annotation that doesn't admit the rows ([`narrow-type`](../reference/rules.md#narrow-type)) by default; see [Fail on drift and mismatches](#fail-on-drift-and-mismatches) |
+| `sqlty check` | a rule with severity `error` fires: a row type mismatch, an unknown table or column, or an annotation that doesn't admit the rows ([`narrow-type`](../reference/rules/narrow-type.md)) by default; see [Fail on drift and mismatches](#fail-on-drift-and-mismatches) |
 | `sqlty breaking` | the pull request's schema breaks the base branch's queries, or its queries break on the base branch's schema: a dropped column, a column made nullable |
 
 !!! note "A wider annotation is only a warning"

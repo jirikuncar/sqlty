@@ -1,6 +1,6 @@
 # Hover
 
-`core.hover_source` says what the word at a cursor in a query string is, in Markdown. A
+`sqlty server` hover says what the word at a cursor in a query string is, in Markdown. A
 string gets hover exactly when `sqlty check` checks it. The `<CURSOR>` marks where the
 cursor is; `# hover:` holds the contents, `None` for none.
 

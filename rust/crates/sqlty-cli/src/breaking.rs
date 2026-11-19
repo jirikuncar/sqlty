@@ -30,10 +30,9 @@ use sqlty_python::rules::Severity;
 use sqlty_python::types::stdlib::Version;
 use sqlty_sql::analyzer::Schema;
 
-use crate::json::Json;
 use crate::{
-    github_annotation, json_diagnostic, report_unreadable, sarif_log, warn_all, Host, OutputFormat,
-    EXIT_FOUND,
+    github_annotation, json_diagnostic, pretty, report_unreadable, sarif_log, warn_all, Breaking,
+    Host, OutputFormat, EXIT_FOUND,
 };
 
 mod snapshot;
@@ -647,28 +646,25 @@ fn report(host: &mut dyn Host, findings: &[Finding], head: &str, format: OutputF
     };
     match format {
         OutputFormat::Json | OutputFormat::Sarif => {
-            let rows = findings
+            let rows: Vec<_> = findings
                 .iter()
                 .map(|finding| {
-                    let mut fields =
+                    let mut row =
                         json_diagnostic(&finding.path, &finding.diagnostic, &finding.text);
                     if format == OutputFormat::Sarif {
-                        for (key, value) in &mut fields {
-                            if key == "message" {
-                                *value = message(finding).into();
-                            }
-                        }
+                        row.message = message(finding);
                     }
-                    fields.push(("direction".into(), finding.direction.name().into()));
-                    fields.push(("against".into(), finding.against.as_str().into()));
-                    Json::Object(fields)
+                    row.breaking = Some(Breaking {
+                        direction: finding.direction.name(),
+                        against: finding.against.clone(),
+                    });
+                    row
                 })
                 .collect();
-            let json = match format {
-                OutputFormat::Json => Json::Array(rows),
-                _ => sarif_log(&host.version(), rows),
-            };
-            host.out(&format!("{}\n", json.dumps()));
+            match format {
+                OutputFormat::Json => host.out(&pretty(&rows)),
+                _ => host.out(&pretty(&sarif_log(&host.version(), &rows))),
+            }
         }
         OutputFormat::Github => {
             for finding in findings {

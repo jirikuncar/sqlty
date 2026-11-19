@@ -34,7 +34,6 @@ HOOK_RESULTS = {
     # rewrite edits the file in place and exits 0; pre-commit fails the commit
     # because the file changed
     "sqlty-rewrite": (0, True),
-    "sqlty": (0, True),
     # check reports the unwrapped string as stale-rewrite, a warning: exit 0
     "sqlty-check": (0, False),
 }
@@ -75,11 +74,10 @@ def test_pre_commit_hook_runs(hook: dict[str, Any], staged: str, tmp_path: Path)
     assert ("from sqlty import SQL" in text) is rewritten, text
 
 
-def test_deprecated_hook_id_says_so() -> None:
-    """pre-commit prints `name` on every run but never `description`."""
-    (alias,) = (h for h in HOOKS if h["id"] == "sqlty")
-    assert "deprecated" in alias["name"]
-    assert "sqlty-rewrite" in alias["name"]
+def test_hook_ids_name_their_command() -> None:
+    """pre-commit prints `name` on every run, so it matches the id and the command run."""
+    for hook in HOOKS:
+        assert hook["id"] == hook["name"].replace(" ", "-") == hook["entry"].replace(" ", "-")
 
 
 def test_maturin_ships_magic_pth() -> None:
@@ -248,6 +246,18 @@ def test_binary_targets_agree() -> None:
     assert sorted(main["optionalDependencies"]) == sorted(names)
     # The form npm normalizes to; trusted publishing compares it with the repository.
     assert main["repository"]["url"] == "git+https://github.com/jirikuncar/sqlty.git"
+
+
+def test_wasm_package_ships_what_it_exports() -> None:
+    package = ROOT / "npm" / "wasm"
+    manifest = json.loads((package / "package.json").read_text())
+    exported = {target.removeprefix("./") for target in manifest["exports"].values()}
+
+    assert manifest["repository"]["url"] == "git+https://github.com/jirikuncar/sqlty.git"
+    assert exported - {"package.json"} <= set(manifest["files"])
+    assert {manifest["types"].removeprefix("./")} <= set(manifest["files"])
+    for name in set(manifest["files"]) - {"sqlty_wasm.wasm"}:
+        assert (package / name).is_file(), name
 
 
 def test_npm_runs_the_binary_of_the_platform(tmp_path: Path) -> None:
