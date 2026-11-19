@@ -1493,7 +1493,6 @@ mod tests {
             "DELETE FROM users WHERE id = %s LIMIT 1",
             "WITH c AS (SELECT id FROM users WHERE id = %s) SELECT * FROM c",
             "SELECT u.id FROM users u JOIN orders o ON o.user_id = u.id WHERE o.total > %s",
-            "-- database: other\nSELECT $1::int",
             "CREATE TABLE t (a INT)",
         ];
         for dialect in ["postgres", "mysql", "sqlite"] {
@@ -1508,6 +1507,33 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn parsed_params_follow_the_database_a_query_names() {
+        use crate::analyzer::{route, Databases};
+        let other = load_schema("CREATE TABLE events (n INTEGER NOT NULL)", "sqlite");
+        let schema = SchemaData::with_databases(
+            load_schema(&schema_for("postgres"), "postgres"),
+            Databases {
+                name: "default".to_string(),
+                absent: false,
+                others: vec![("other".to_string(), "sqlite", Some(other))],
+            },
+        );
+        let schema = schema.as_deref();
+        for sql in [
+            "-- sqlty: db=other\nSELECT n FROM events WHERE n = ?",
+            "-- sqlty: db=other\nSELECT $1::int",
+            "-- sqlty: db=missing\nSELECT id FROM users WHERE id = %s",
+        ] {
+            let (routed, routed_schema) = route(sql, "postgres", schema);
+            assert_eq!(
+                crate::analyzer::parse(sql, routed).params(sql, routed_schema),
+                analyze_params(sql, "postgres", schema),
+                "{sql}"
+            );
         }
     }
 }

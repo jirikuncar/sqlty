@@ -1172,6 +1172,32 @@ mod tests {
     }
 
     #[test]
+    fn queries_of_another_dialect_are_counted_and_typed() {
+        const CONFIG: &str = "[project]\nrequires-python = \">=3.15\"\n\n[tool.sqlty]\nschema = \"app.sql\"\n\n[tool.sqlty.databases.lite]\ndialect = \"sqlite\"\nschema = \"lite.sql\"\n";
+        let mut workspace = opened(&[
+            ("/repo/pyproject.toml", CONFIG),
+            ("/repo/app.sql", "CREATE TABLE users (id INT NOT NULL);"),
+            ("/repo/lite.sql", "CREATE TABLE events (n INTEGER NOT NULL);"),
+            (
+                "/repo/q.py",
+                "q = \"--sql sqlty: db=lite\\nSELECT n FROM events\"\nu = \"--sql sqlty: db=lite\\nSELECT nope FROM events\"\n",
+            ),
+        ]);
+        let counts = workspace.statistics_all().expect("counts");
+        assert_eq!(counts[0].get("typed"), Some(&1));
+        assert_eq!(counts[0].get("partially typed"), Some(&1));
+
+        let sql = "-- name: add\n-- sqlty: db=lite\nINSERT INTO events (n) VALUES (1);\n\n-- name: all\n-- sqlty: db=lite\nSELECT n FROM events;\n\n-- name: odd\n-- sqlty: db=lite\nSELECT nope FROM events;\n";
+        let listed = workspace
+            .query_types(Path::new("sql/lite.sql"), sql)
+            .expect("types");
+        assert_eq!(
+            listed,
+            ["add() -> None", "all() -> tuple[int]", "odd() -> unknown"]
+        );
+    }
+
+    #[test]
     fn warns_once_about_what_the_schemas_do_not_read() {
         let workspace = opened(&[
             (
