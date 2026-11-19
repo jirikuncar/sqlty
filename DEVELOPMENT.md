@@ -73,7 +73,7 @@ time are marked `timing`: the default run leaves them out, since parallel worker
 slow them. Tests marked `pg` run when `SQLTY_PG_DSN` points to a PostgreSQL server;
 each worker gets its own database on it (`tests/conftest.py`).
 
-Make targets (`make help` lists them all):
+Make targets:
 
 ```bash
 make test            # all tests, then the timing tests alone
