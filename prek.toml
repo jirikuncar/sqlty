@@ -96,10 +96,10 @@ priority = 10
 [[repos.hooks]]
 id = "zizmor"
 name = "zizmor (GitHub Actions security)"
-entry = "uv run zizmor --offline --quiet .github/workflows"
+entry = "uv run zizmor --offline --quiet .github/workflows .github/actions"
 language = "system"
 pass_filenames = false
-files = '^\.github/workflows/'
+files = '^\.github/(workflows|actions)/'
 priority = 10
 
 [[repos.hooks]]

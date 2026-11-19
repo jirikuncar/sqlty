@@ -63,8 +63,8 @@ check-no-exec-harness:  ## Fail if this branch weakened the no-exec harness (AGE
 	uv run python scripts/check_no_exec_harness.py origin/main
 
 .PHONY: test-coverage
-test-coverage:  ## Every Python and Rust test with coverage and its gates; needs a nightly toolchain with llvm-tools, cargo-llvm-cov and cargo-nextest
-	scripts/coverage.sh
+test-coverage:  ## Each package's own tests with coverage and its gate (PACKAGES="python sqlty-sql" for some); needs a nightly toolchain with llvm-tools and cargo-llvm-cov
+	scripts/coverage.sh $(PACKAGES)
 
 .PHONY: update-mdtest
 update-mdtest:  ## Update mdtest assertions with actual values
