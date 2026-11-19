@@ -18,6 +18,7 @@ on:
       - ".github/workflows/docs.yml"
       - "Makefile"
       - "rust/**"
+      - "rust-toolchain.toml"
       - "src/sqlty/lexer.py"
       - "pyproject.toml"
   pull_request:
@@ -36,6 +37,7 @@ on:
       - ".github/workflows/docs.yml"
       - "Makefile"
       - "rust/**"
+      - "rust-toolchain.toml"
       - "src/sqlty/lexer.py"
       - "pyproject.toml"
   workflow_dispatch:
@@ -62,9 +64,7 @@ jobs:
           version: "0.13.7"
 
       - name: Install Rust toolchain
-        run: |
-          rustup toolchain install 1.99.1 --profile minimal --target wasm32-unknown-unknown
-          rustup default 1.99.1
+        run: rustup toolchain install && rustup target add wasm32-unknown-unknown
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3

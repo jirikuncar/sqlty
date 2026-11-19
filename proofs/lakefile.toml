@@ -1,9 +1,0 @@
-name = "sqlty_proofs"
-defaultTargets = ["SqlTy", "sqlty-model"]
-
-[[lean_lib]]
-name = "SqlTy"
-
-[[lean_exe]]
-name = "sqlty-model"
-root = "Main"

@@ -24,10 +24,11 @@ def specialize(
     Example:
         >>> from sqlty._source import ParsedSource
         >>> from tests.type_oracle import extract_type_definitions
+        >>> from tests.type_oracle.outline import classes
         >>> parsed = ParsedSource("import datetime\\nfrom typing import TypedDict\\nclass Row[T](TypedDict):\\n    ids: list[T]")
         >>> row = extract_type_definitions(parsed)["Row"]
         >>> arg = ast.parse("datetime.date", mode="eval").body
-        >>> specialize(row, parsed.outline_classes[0], [arg], ModuleTypes(parsed, None)).field_types
+        >>> specialize(row, classes(parsed)[0], [arg], ModuleTypes(parsed, None)).field_types
         {'ids': list[datetime.date]}
     """
     params = _type_params(node)

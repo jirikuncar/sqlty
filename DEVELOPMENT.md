@@ -7,14 +7,14 @@ live in [AGENTS.md](AGENTS.md); review rules in [REVIEW.md](REVIEW.md).
 
 - Python 3.14+
 - [uv](https://docs.astral.sh/uv/)
-- [Rust toolchain](https://rustup.rs/) 1.99+ (builds the engine, `sqlty._core`, and runs the cargo hooks)
+- [`rustup`](https://rustup.rs/): `rust-toolchain.toml` pins the Rust version (builds the engine, `sqlty._core`, and runs the cargo hooks)
 
 ## Setup
 
 ```bash
 uv sync --all-groups    # dependencies and dev tools; builds sqlty._core
 uv run maturin develop  # rebuild sqlty._core after changing rust/
-uv run prek install     # run the hooks on every commit
+uv run prek install     # run the hooks on every commit, cargo test on every push
 ```
 
 sqlty's engine is the Rust extension `sqlty._core`; nothing works without it.
@@ -27,15 +27,16 @@ Run every hook before each commit:
 uv run prek run --all-files
 ```
 
-[prek](https://prek.j178.dev) runs the hooks of `prek.toml`. Each runs when the
-files it depends on change:
+[prek](https://prek.j178.dev) runs the hooks of `prek.toml` on every commit, and
+`cargo test` on every push (`uv run prek run --all-files --hook-stage pre-push`
+runs only it). Each runs when the files it depends on change:
 
 | Hook | Runs when these change |
 |------|------------------------|
 | mypy and ty on `src/` | `src/`, `pyproject.toml` |
 | `sqlty rewrite` (in place), `sqlty check`, mypy and ty on `examples/` (except `magic_codec/`) | `examples/`, `src/sqlty/`, `rust/crates/` |
 | `cargo fmt --check` | Rust files |
-| `cargo clippy -D warnings`, `cargo test` | `rust/` |
+| `cargo clippy -D warnings`, `cargo test` (on push) | `rust/` |
 | `tsc`, `oxlint`, `oxfmt` (`npm run check`) | `editors/vscode/` |
 | ruff (lint + format), uv-lock | Python files, `pyproject.toml` |
 | rumdl | Markdown files |
@@ -44,7 +45,7 @@ files it depends on change:
 | file checks (whitespace, line endings, YAML/TOML/JSON syntax, ...) | any file |
 
 Hooks that edit files run one at a time; the read-only checks run in
-parallel. CI's Lint job runs the same hooks on all files.
+parallel. CI's Lint job runs the commit hooks on all files.
 
 ## Running tests
 
@@ -169,8 +170,7 @@ uploads the input when it fails.
 ## Type checking
 
 ```bash
-make typecheck                 # mypy + ty on src and examples
-make typecheck-src             # mypy + ty on src/sqlty (also a prek hook)
+make typecheck                 # mypy + ty on src and examples (prek hooks)
 make typecheck-examples        # mypy + ty on each examples/ dir (runs in CI)
 uv run pytest tests/test_typecheckers.py -v  # mypy, pyright, ty on tests/typechecks/
 ```
@@ -195,8 +195,6 @@ make bench-baseline   # re-record the baseline after an intended change
 make bench-project    # full-size synthetic project (10k files): CLI wall time and peak RSS
 make bench-rust       # Criterion benches in rust/crates/sqlty-bench; extra args via ARGS=
 make bench-codspeed   # benchmarks/test_benchmarks.py, as CI's CodSpeed job measures them
-make bench            # sqlty.core micro-benchmarks
-make bench-bridge     # a check per keystroke through sqlty._lsp_bridge
 ```
 
 - `bench-ci` (`benchmarks/bench_project.py`, with `tests/test_performance.py`)
@@ -253,17 +251,12 @@ rust/
     ├── sqlty-ext/       # PyO3 module sqlty._core; server.rs runs sqlty-lsp
     └── sqlty-bench/     # Criterion benchmarks (make bench-rust)
 editors/vscode/          # VS Code client of sqlty server; see its README
-proofs/                  # Lean 4 model of SqlType::python, with proofs; see its README
 tests/
 ├── _mdtest/             # mdtest plugin: parser, runner over sqlty.core, --update-mdtest
 ├── mdtest/              # The specification, as Markdown tests
 ├── e2e/                 # CLI end-to-end tests and their fixtures
 └── type_oracle/         # Python row-type reader, the oracle for the Rust one
 ```
-
-`proofs/SqlTy/Table.lean` is generated from `scalar_python`: after changing the scalar
-mapping, run `SQLTY_UPDATE_PROOFS=1 cargo test -p sqlty-sql lean_table` and `lake build`
-in `proofs/`.
 
 ### Magic codec internals
 
