@@ -1,0 +1,42 @@
+body {
+  margin: 0;
+  font: 14px system-ui, sans-serif;
+  color: #1f2328;
+  background: #f6f8fa;
+}
+main {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr;
+  gap: 16px;
+  padding: 16px;
+}
+section {
+  min-width: 0;
+}
+section:last-child {
+  grid-column: 1 / -1;
+}
+h2 {
+  font-size: 13px;
+  margin: 0 0 6px;
+}
+.cm-editor {
+  background: #fff;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  min-height: 160px;
+}
+#types {
+  font-family: ui-monospace, monospace;
+  margin: 0;
+  padding-left: 20px;
+}
+@media (max-width: 720px) {
+  main {
+    grid-template-columns: 1fr;
+  }
+}
+.hover {
+  padding: 4px 8px;
+  font-family: ui-monospace, monospace;
+}

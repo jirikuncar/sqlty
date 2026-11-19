@@ -38,6 +38,13 @@ PLACES: list[tuple[str, re.Pattern[str], int]] = [
     ("skills/sqlty-ci/SKILL.md", PRE_COMMIT_REV, 1),
     # The package and the platform packages it depends on.
     ("npm/sqlty/package.json", re.compile(rf'"(?:version|@sqlty/cli-[\w-]+)": "{VERSION}"'), 7),
+    ("npm/wasm/package.json", JSON_VERSION, 1),
+    # The extension bundles @sqlty/wasm from npm/wasm.
+    (
+        "editors/vscode/package-lock.json",
+        re.compile(rf'"name": "@sqlty/wasm",\n\s+"version": "{VERSION}"'),
+        1,
+    ),
 ]
 
 

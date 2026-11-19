@@ -195,8 +195,6 @@ make bench-baseline   # re-record the baseline after an intended change
 make bench-project    # full-size synthetic project (10k files): CLI wall time and peak RSS
 make bench-rust       # Criterion benches in rust/crates/sqlty-bench; extra args via ARGS=
 make bench-codspeed   # benchmarks/test_benchmarks.py, as CI's CodSpeed job measures them
-make bench            # sqlty.core micro-benchmarks
-make bench-bridge     # a check per keystroke through sqlty._lsp_bridge
 ```
 
 - `bench-ci` (`benchmarks/bench_project.py`, with `tests/test_performance.py`)
@@ -249,7 +247,7 @@ rust/
     ├── sqlty-project/   # A project read from disk: settings, helpers, checks
     ├── sqlty-cli/       # The sqlty commands; main.rs is the standalone sqlty executable
     ├── sqlty-lsp/       # The language server of sqlty server
-    ├── sqlty-wasm/      # JSON in, JSON out: the docs playground (make playground)
+    ├── sqlty-wasm/      # JSON in, JSON out: @sqlty/wasm (npm/wasm) and the docs playground (make wasm)
     ├── sqlty-ext/       # PyO3 module sqlty._core; server.rs runs sqlty-lsp
     └── sqlty-bench/     # Criterion benchmarks (make bench-rust)
 editors/vscode/          # VS Code client of sqlty server; see its README
