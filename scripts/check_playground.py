@@ -15,10 +15,14 @@ host root fails here, as it would under a version prefix such as ``/latest/``. N
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 import functools
+import hashlib
 import http.server
+import io
 import json
+import tarfile
 import tempfile
 import threading
 from collections import Counter
@@ -61,6 +65,7 @@ def main() -> None:
         check(page, url)
         assert not errors, errors
         exercise(browser, url, coverage.watch)
+        releases(browser, url, coverage)
         coverage.take()
         script = page.request.get(f"{url}../assets/playground/playground.js").text()
         browser.close()
@@ -256,6 +261,101 @@ def exercise(browser: Browser, url: str, watch: Callable[[Page], None]) -> None:
     zoomed(page, url)
     unsupported(context, url, watch)
     asking(page, url)
+    assert not errors, errors
+
+
+REGISTRY = "https://registry.npmjs.org/@sqlty/wasm"
+
+
+def releases(browser: Browser, url: str, coverage: Coverage) -> None:
+    """Version lists the releases on npm, runs the one picked, and falls back to main."""
+    # Routes see no request the service worker answers.
+    context = browser.new_context(service_workers="block")
+    context.route("https://api.github.com/**", github)
+    page = context.new_page()
+    errors: list[str] = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    coverage.watch(page)
+    tarball = io.BytesIO()
+    with tarfile.open(fileobj=tarball, mode="w:gz") as tar:
+        for name in ("sqlty_wasm.wasm", "engine.js"):
+            data = page.request.get(f"{url}../assets/playground/{name}").body()
+            info = tarfile.TarInfo(f"package/{name}")
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    packed = tarball.getvalue()
+    integrity = "sha512-" + base64.b64encode(hashlib.sha512(packed).digest()).decode()
+    listing = {"down": True}
+
+    def registry(route: Route) -> None:
+        answers: dict[str, Any] = {
+            REGISTRY: {
+                "versions": {
+                    "0.0.0": {"version": "0.0.0", "deprecated": "a placeholder"},
+                    "1.2.3": {"version": "1.2.3"},
+                }
+            },
+            f"{REGISTRY}/1.2.3": {
+                "dist": {"tarball": f"{REGISTRY}/-/wasm-1.2.3.tgz", "integrity": integrity}
+            },
+        }
+        found = route.request.url
+        headers = {"access-control-allow-origin": "*"}
+        if found == f"{REGISTRY}/-/wasm-1.2.3.tgz":
+            route.fulfill(body=packed, headers=headers)
+        elif found in answers and not (found == REGISTRY and listing["down"]):
+            route.fulfill(json=answers[found], headers=headers)
+        else:
+            route.fulfill(status=404, body="", headers=headers)
+
+    context.route(f"{REGISTRY}**", registry)
+    options = "[...document.querySelectorAll('[data-version] option')].map((o) => o.value)"
+
+    page.goto(url)
+    page.wait_for_selector("[data-types] code", state="attached", timeout=60_000)
+    page.dispatch_event("[data-version]", "pointerdown")
+    page.wait_for_function(
+        "document.querySelector('[data-link-status]').textContent.startsWith('No releases listed')"
+    )
+    listing["down"] = False
+    page.dispatch_event("[data-version]", "pointerdown")
+    page.wait_for_function(f"{options}.includes('1.2.3')")
+    assert page.evaluate(options) == ["", "1.2.3"]
+
+    def pick(version: str) -> str:
+        """The page Version asks for: a 204 keeps this load, and its counts."""
+        asked: list[str] = []
+
+        def reload(route: Route) -> None:
+            if route.request.is_navigation_request():
+                asked.append(route.request.url)
+                route.fulfill(status=204)
+            else:
+                route.fallback()
+
+        def here(found: str) -> bool:
+            return found.startswith(url)
+
+        page.route(here, reload)
+        page.select_option("[data-version]", version)
+        for _ in range(100):
+            if asked:
+                break
+            page.wait_for_timeout(50)
+        page.unroute(here, reload)
+        return asked[0]
+
+    page.goto(pick("1.2.3"))
+    page.wait_for_selector("[data-types] code", state="attached", timeout=60_000)
+    assert page.url == f"{url}?version=1.2.3"
+    assert page.input_value("[data-version]") == "1.2.3"
+    assert pick("") == url
+
+    page.goto(url + "?version=9.9.9")
+    page.wait_for_selector("[data-types] code", state="attached", timeout=60_000)
+    assert "sqlty 9.9.9 did not load" in page.inner_text("[data-link-status]")
+    assert "version" not in page.url
+    assert page.input_value("[data-version]") == ""
     assert not errors, errors
 
 

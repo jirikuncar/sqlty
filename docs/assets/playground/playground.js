@@ -1,4 +1,5 @@
 import { load } from "./engine.js";
+import { released, versions } from "./release.js";
 import { decode, encode, MAX_LINK } from "./share.js";
 import { fold, unfold } from "./steps.js";
 
@@ -47,6 +48,10 @@ const CONFIG = `# The [tool.sqlty] keys that need no files: dialect, import-styl
 [rules]
 stale-rewrite = "error"
 `;
+
+// A release of @sqlty/wasm from npm in place of the build of main, as `?version=0.8.0` asks.
+const RELEASE = new URLSearchParams(location.search).get("version");
+let fellBack = "";
 
 const root = document.getElementById("sqlty-playground");
 // A module runs once per document: coming back with instant navigation needs a full load.
@@ -115,6 +120,7 @@ const output = monaco.editor.create(root.querySelector("[data-json]"), {
   readOnly: true,
 });
 const dialect = root.querySelector("[data-dialect]");
+const version = root.querySelector("[data-version]");
 const linked = root.querySelector("[data-link-status]");
 const example = root.querySelector("[data-example]");
 const stepper = root.querySelector("[data-steps]");
@@ -504,9 +510,9 @@ async function share() {
   const url = new URL(location.href);
   url.hash = hash;
   const fits = url.href.length <= MAX_LINK;
-  history.replaceState(null, "", fits ? url : url.pathname);
+  history.replaceState(null, "", fits ? url : url.pathname + url.search);
   unembedded();
-  linked.textContent = fits ? "" : `Too large to share as a link (${url.href.length} characters).`;
+  linked.textContent = fits ? fellBack : `Too large to share as a link (${url.href.length} characters).`;
   return fits ? url.href : null;
 }
 
@@ -656,6 +662,33 @@ const copyLink = async () => {
   linked.textContent = "Link copied.";
 };
 root.querySelector("[data-copy-link]").addEventListener("click", copyLink);
+
+const running = fellBack ? "" : (RELEASE ?? "");
+version.replaceChildren(new Option("main", "", false, !running));
+if (running) version.append(new Option(running, running, true, true));
+linked.textContent = fellBack;
+// The releases are listed when the select is first opened: most sessions never ask for one.
+let listed;
+const listReleases = () =>
+  (listed ??= versions()
+    .then((found) => {
+      const all = found.includes(running) || !running ? found : [running, ...found];
+      version.replaceChildren(new Option("main", "", false, !running), ...all.map((name) => new Option(name, name, false, name === running)));
+    })
+    .catch((error) => {
+      listed = undefined;
+      linked.textContent = `No releases listed: ${error.message}`;
+    }));
+version.addEventListener("pointerenter", listReleases);
+version.addEventListener("pointerdown", listReleases);
+version.addEventListener("focus", listReleases);
+version.addEventListener("change", async () => {
+  const url = new URL(location.href);
+  if (version.value) url.searchParams.set("version", version.value);
+  else url.searchParams.delete("version");
+  url.hash = await encode(session());
+  location.assign(url);
+});
 editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyP, () =>
   editor.trigger("sqlty", "editor.action.quickCommand", null),
 );
@@ -831,9 +864,21 @@ function anchored(popover, button, opened) {
 }
 
 async function engine() {
-  const url = new URL("sqlty_wasm.wasm", import.meta.url);
-  const bytes = await (await fetch(url)).arrayBuffer();
-  const ask = await load(bytes);
+  let ask;
+  if (RELEASE) {
+    try {
+      const { wasm, engine } = await released(RELEASE);
+      const glue = URL.createObjectURL(new Blob([engine], { type: "text/javascript" }));
+      ask = await (await import(glue)).load(wasm);
+      URL.revokeObjectURL(glue);
+    } catch (error) {
+      fellBack = `sqlty ${RELEASE} did not load (${error.message}), so this is main.`;
+      const url = new URL(location.href);
+      url.searchParams.delete("version");
+      history.replaceState(null, "", url);
+    }
+  }
+  ask ??= await load(await (await fetch(new URL("sqlty_wasm.wasm", import.meta.url))).arrayBuffer());
   return (request) => {
     try {
       return ask(request);
