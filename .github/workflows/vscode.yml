@@ -15,6 +15,7 @@ on:
       - editors/vscode/**
       - npm/wasm/**
       - rust/crates/sqlty-wasm/**
+      - rust-toolchain.toml
 
 permissions:
   contents: read
@@ -42,7 +43,7 @@ jobs:
           package-manager-cache: false
       # The web extension runs the engine compiled to WebAssembly.
       - name: Install Rust toolchain
-        run: rustup toolchain install 1.99.1 --profile minimal --target wasm32-unknown-unknown && rustup default 1.99.1
+        run: rustup toolchain install && rustup target add wasm32-unknown-unknown
       - run: npm ci
       - name: Take the version of the release or the run
         if: github.event_name != 'pull_request'

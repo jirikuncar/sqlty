@@ -89,7 +89,7 @@ entry = "uv run vale --output=line"
 language = "system"
 # The PyPI wrapper downloads the binary on first run: parallel batches would race on it.
 require_serial = true
-files = '^(docs/|src/sqlty/rules/|README\.md$|CONTRIBUTING\.md$|DEVELOPMENT\.md$|SECURITY\.md$|proofs/README\.md$|scripts/compat/README\.md$)'
+files = '^(docs/|src/sqlty/rules/|README\.md$|CONTRIBUTING\.md$|DEVELOPMENT\.md$|SECURITY\.md$|scripts/compat/README\.md$)'
 types = ["markdown"]
 priority = 10
 
