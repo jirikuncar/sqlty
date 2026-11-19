@@ -5,6 +5,7 @@ severity = "error"
 fixable = false
 summary = "A call passes an argument whose type can't be the type its query parameter takes"
 origin = "Python"
+reported-by = ["params"]
 +++
 
 # param-type-mismatch

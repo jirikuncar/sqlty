@@ -25,6 +25,48 @@ const SEVERITIES: [(&str, &str); 3] = [("error", "Error"), ("warn", "Warn"), ("i
 /// Where a rule is reported: by the SQL analyzer, or by the Python checks.
 const ORIGINS: [&str; 2] = ["SQL", "Python"];
 
+/// What a pass reads, with the `FactKind` variant and the documentation of each.
+const FACTS: [(&str, &str, &str); 6] = [
+    ("tokens", "Tokens", "The lexed source."),
+    ("module", "Module", "The parsed module."),
+    (
+        "helper-calls",
+        "HelperCalls",
+        "The calls of the configured helpers.",
+    ),
+    ("calls", "Calls", "Helper calls and driver calls."),
+    ("declared", "Declared", "The `SQL[R, P]` calls."),
+    (
+        "row-types",
+        "RowTypes",
+        "The row types of `SQL[Row](...)` calls.",
+    ),
+];
+
+/// The passes file: its `[[pass]]` entries, in the order the passes run.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PassFile {
+    pass: Vec<PassDef>,
+}
+
+/// One `[[pass]]` entry.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PassDef {
+    name: String,
+    facts: String,
+    pipeline: bool,
+    gated: bool,
+    doc: String,
+}
+
+struct PassInfo {
+    variant: String,
+    def: PassDef,
+    facts: &'static str,
+}
+
 /// The front matter of a rule page.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -35,6 +77,8 @@ struct Front {
     fixable: bool,
     summary: String,
     origin: String,
+    #[serde(rename = "reported-by")]
+    reported_by: Vec<String>,
 }
 
 struct Page<'a> {
@@ -46,8 +90,10 @@ struct Page<'a> {
     body: &'a str,
 }
 
-/// Rust source of the registry of `pages`, each a file name and its text.
-pub fn compile(pages: &[(String, String)]) -> Result<String, String> {
+/// Rust source of the registry of `pages`, each a file name and its text, and of the passes
+/// file `passes`.
+pub fn compile(pages: &[(String, String)], passes: &str) -> Result<String, String> {
+    let passes = parse_passes(passes).map_err(|e| format!("passes.toml: {e}"))?;
     let mut sorted: Vec<&(String, String)> = pages.iter().collect();
     sorted.sort_by(|a, b| a.0.cmp(&b.0));
     let mut parsed = Vec::with_capacity(sorted.len());
@@ -71,7 +117,56 @@ pub fn compile(pages: &[(String, String)]) -> Result<String, String> {
     }
     let mut rules: Vec<&Page> = parsed.iter().collect();
     rules.sort_by_key(|page| page.front.order);
-    Ok(generate(&rules, &parsed))
+    for page in &parsed {
+        if page.front.reported_by.is_empty() {
+            return Err(format!("{}: reported-by names no pass", page.file));
+        }
+        for name in &page.front.reported_by {
+            if !passes.iter().any(|pass| pass.def.name == *name) {
+                let names: Vec<&str> = passes.iter().map(|pass| pass.def.name.as_str()).collect();
+                return Err(format!(
+                    "{}: unknown pass {name:?} in reported-by (expected {})",
+                    page.file,
+                    names.join(", ")
+                ));
+            }
+        }
+    }
+    for pass in &passes {
+        if !parsed
+            .iter()
+            .any(|page| page.front.reported_by.contains(&pass.def.name))
+        {
+            return Err(format!(
+                "passes.toml: pass {:?} is named by no rule page",
+                pass.def.name
+            ));
+        }
+    }
+    Ok(generate(&rules, &parsed, &passes))
+}
+
+fn parse_passes(text: &str) -> Result<Vec<PassInfo>, String> {
+    let file: PassFile = toml::from_str(text).map_err(|e| e.to_string())?;
+    let mut passes: Vec<PassInfo> = Vec::with_capacity(file.pass.len());
+    for def in file.pass {
+        if passes.iter().any(|known| known.def.name == def.name) {
+            return Err(format!("duplicate pass {:?}", def.name));
+        }
+        let variant = variant(&def.name).map_err(|e| format!("pass {:?}: {e}", def.name))?;
+        let facts = lookup(
+            &FACTS.map(|(name, variant, _)| (name, variant)),
+            &def.facts,
+            "facts",
+        )
+        .map_err(|e| format!("pass {:?}: {e}", def.name))?;
+        passes.push(PassInfo {
+            variant,
+            def,
+            facts,
+        });
+    }
+    Ok(passes)
 }
 
 fn parse<'a>(file: &'a str, text: &'a str) -> Result<Page<'a>, String> {
@@ -167,7 +262,7 @@ fn arms(rules: &[&Page], value: impl Fn(&Page) -> String) -> String {
         .collect()
 }
 
-fn generate(rules: &[&Page], by_file: &[Page]) -> String {
+fn generate(rules: &[&Page], by_file: &[Page], passes: &[PassInfo]) -> String {
     let mut out = String::from("/// A lint rule, one per page of `src/sqlty/rules/`.\n#[repr(u8)]\n#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]\n");
     out.push_str("pub enum Rule {\n");
     for page in rules {
@@ -243,6 +338,18 @@ fn generate(rules: &[&Page], by_file: &[Page]) -> String {
             "    /// {doc}\n    pub fn {method}(self) -> {ty} {{\n        match self {{\n{table}        }}\n    }}\n\n"
         ));
     }
+    let reporters = arms(rules, |page| {
+        let list: Vec<String> = page
+            .front
+            .reported_by
+            .iter()
+            .map(|name| format!("Pass::{}", pass_variant(passes, name)))
+            .collect();
+        format!("&[{}]", list.join(", "))
+    });
+    out.push_str(&format!(
+        "    /// The passes that report the rule, in the order of the passes file.\n    pub fn reported_by(self) -> &'static [Pass] {{\n        match self {{\n{reporters}        }}\n    }}\n\n"
+    ));
     out.push_str("    /// The rule called `name`, if there is one.\n    pub fn parse(name: &str) -> Option<Rule> {\n        match name {\n");
     for page in rules {
         out.push_str(&format!(
@@ -256,6 +363,88 @@ fn generate(rules: &[&Page], by_file: &[Page]) -> String {
     for page in by_file {
         out.push_str(&format!("    ({:?}, {:?}),\n", page.file, page.body));
     }
-    out.push_str("];\n");
+    out.push_str("];\n\n");
+    generate_passes(&mut out, rules, passes);
     out
+}
+
+fn pass_variant<'a>(passes: &'a [PassInfo], name: &str) -> &'a str {
+    passes
+        .iter()
+        .find(|pass| pass.def.name == name)
+        .map_or("", |pass| pass.variant.as_str())
+}
+
+fn generate_passes(out: &mut String, rules: &[&Page], passes: &[PassInfo]) {
+    out.push_str("/// What a pass reads.\n#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]\npub enum FactKind {\n");
+    for (_, variant, doc) in FACTS {
+        out.push_str(&format!("    #[doc = {doc:?}]\n    {variant},\n"));
+    }
+    out.push_str("}\n\n");
+    out.push_str("/// A step that reports lint rules, one per `[[pass]]` of `passes.toml`.\n#[repr(u8)]\n#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]\npub enum Pass {\n");
+    for pass in passes {
+        out.push_str(&format!(
+            "    #[doc = {:?}]\n    {},\n",
+            pass.def.doc, pass.variant
+        ));
+    }
+    out.push_str("}\n\nimpl Pass {\n");
+    let list = |keep: &dyn Fn(&PassInfo) -> bool| -> String {
+        passes
+            .iter()
+            .filter(|pass| keep(pass))
+            .map(|pass| format!("        Pass::{},\n", pass.variant))
+            .collect()
+    };
+    out.push_str(&format!(
+        "    /// The number of passes.\n    pub const COUNT: usize = {};\n\n",
+        passes.len()
+    ));
+    out.push_str(&format!(
+        "    /// Every pass, in file order.\n    pub const ALL: [Pass; Pass::COUNT] = [\n{}    ];\n\n",
+        list(&|_| true)
+    ));
+    out.push_str(&format!(
+        "    /// The passes `check::diagnostics` runs, in the order it runs them.\n    pub const PIPELINE: &'static [Pass] = &[\n{}    ];\n\n",
+        list(&|pass| pass.def.pipeline)
+    ));
+    let pass_arms = |value: &dyn Fn(&PassInfo) -> String| -> String {
+        passes
+            .iter()
+            .map(|pass| format!("            Pass::{} => {},\n", pass.variant, value(pass)))
+            .collect()
+    };
+    let name = pass_arms(&|pass| format!("{:?}", pass.def.name));
+    let facts = pass_arms(&|pass| format!("FactKind::{}", pass.facts));
+    let gated = pass_arms(&|pass| pass.def.gated.to_string());
+    let sets = pass_arms(&|pass| {
+        let mut set = String::from("RuleSet::EMPTY");
+        for page in rules {
+            if page.front.reported_by.contains(&pass.def.name) {
+                set.push_str(&format!(".with(Rule::{})", page.variant));
+            }
+        }
+        set
+    });
+    for (doc, method, ty, table) in [
+        (
+            "The pass name, as in `passes.toml`.",
+            "name",
+            "&'static str",
+            name,
+        ),
+        ("What the pass reads.", "facts", "FactKind", facts),
+        (
+            "Whether the pass is skipped when every rule it reports is ignored.",
+            "gated",
+            "bool",
+            gated,
+        ),
+        ("The rules the pass reports.", "rules", "RuleSet", sets),
+    ] {
+        out.push_str(&format!(
+            "    /// {doc}\n    pub fn {method}(self) -> {ty} {{\n        match self {{\n{table}        }}\n    }}\n\n"
+        ));
+    }
+    out.push_str("}\n");
 }

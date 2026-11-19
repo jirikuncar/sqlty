@@ -5,6 +5,7 @@ severity = "error"
 fixable = false
 summary = "Two tables of a FROM clause are read by the same name"
 origin = "SQL"
+reported-by = ["lexer", "names", "query-files"]
 +++
 
 # duplicate-alias

@@ -5,6 +5,7 @@ severity = "warn"
 fixable = false
 summary = "Aggregating query joins one table one-to-many to two others"
 origin = "SQL"
+reported-by = ["lexer", "names", "query-files"]
 +++
 
 # chasm-join

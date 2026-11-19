@@ -5,6 +5,7 @@ severity = "ignore"
 fixable = false
 summary = "Comparison between columns holding keys of different tables"
 origin = "SQL"
+reported-by = ["lexer", "names", "query-files"]
 +++
 
 # entity-mismatch

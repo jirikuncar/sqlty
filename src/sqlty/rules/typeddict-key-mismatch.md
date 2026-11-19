@@ -5,6 +5,7 @@ severity = "error"
 fixable = false
 summary = "Query columns don't fit the fields of a TypedDict, dataclass or Pydantic model"
 origin = "Python"
+reported-by = ["structural"]
 +++
 
 # typeddict-key-mismatch

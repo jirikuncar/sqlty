@@ -5,6 +5,7 @@ severity = "ignore"
 fixable = false
 summary = "Row type field is optional but its query column cannot be NULL"
 origin = "Python"
+reported-by = ["structural", "aliases", "values"]
 +++
 
 # redundant-optional

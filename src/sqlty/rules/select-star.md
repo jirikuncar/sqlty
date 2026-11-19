@@ -5,6 +5,7 @@ severity = "warn"
 fixable = true
 summary = "SELECT * used — expand to explicit column list"
 origin = "Python"
+reported-by = ["lexer", "select-star", "query-files"]
 +++
 
 # select-star

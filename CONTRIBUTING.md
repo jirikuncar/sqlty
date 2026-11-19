@@ -64,6 +64,11 @@ It ships off only when it conflicts with an existing rule or a documented workfl
 and its rule page says which. `redundant-optional` and `redundant-literal` are off
 because they reject the widened annotations of an expand and contract migration.
 
+A rule's page names the passes that report it in `reported-by`
+(`rust/crates/sqlty-rules/passes.toml` lists them, in the order `sqlty check` runs them). A
+debug build asserts that a pass reports only rules whose page names it. A new pass is a
+`[[pass]]` entry there and an arm of `Pipeline::run` in `check.rs`.
+
 The default set changes only in a major version. Before 1.0.0, any minor version may
 change it, and the release notes list each change.
 

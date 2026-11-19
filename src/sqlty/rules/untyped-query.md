@@ -5,6 +5,7 @@ severity = "warn"
 fixable = true
 summary = "SQL[UNTYPED] query has no inferable row type; the message names why"
 origin = "Python"
+reported-by = ["lexer"]
 +++
 
 # untyped-query

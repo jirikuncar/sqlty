@@ -5,6 +5,7 @@ severity = "error"
 fixable = false
 summary = "INSERT leaves out a NOT NULL column that has no default"
 origin = "SQL"
+reported-by = ["lexer", "names", "query-files"]
 +++
 
 # insert-missing-column

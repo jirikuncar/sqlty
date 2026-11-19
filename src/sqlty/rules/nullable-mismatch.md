@@ -5,6 +5,7 @@ severity = "error"
 fixable = false
 summary = "Row type field is not optional but its query column can be NULL"
 origin = "Python"
+reported-by = ["structural", "aliases", "values"]
 +++
 
 # nullable-mismatch

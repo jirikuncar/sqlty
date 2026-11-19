@@ -5,6 +5,7 @@ severity = "error"
 fixable = false
 summary = "A call passes a different number of parameters than its query has placeholders, or misses a name"
 origin = "Python"
+reported-by = ["params"]
 +++
 
 # param-count-mismatch

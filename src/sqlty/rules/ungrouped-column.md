@@ -5,6 +5,7 @@ severity = "error"
 fixable = false
 summary = "Grouped query selects a column it neither groups by nor aggregates"
 origin = "SQL"
+reported-by = ["lexer", "names", "query-files"]
 +++
 
 # ungrouped-column

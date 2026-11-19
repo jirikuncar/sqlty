@@ -5,6 +5,7 @@ severity = "error"
 fixable = false
 summary = "INSERT gives a different number of values than the columns it writes"
 origin = "SQL"
+reported-by = ["lexer", "names", "query-files"]
 +++
 
 # insert-value-count

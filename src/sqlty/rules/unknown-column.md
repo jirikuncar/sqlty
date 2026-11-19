@@ -5,6 +5,7 @@ severity = "error"
 fixable = true
 summary = "Query reads a column that its table does not have"
 origin = "SQL"
+reported-by = ["lexer", "names", "query-files"]
 +++
 
 # unknown-column

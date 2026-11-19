@@ -5,6 +5,7 @@ severity = "ignore"
 fixable = false
 summary = "Finding of sqruff's core lint rules in a query"
 origin = "Python"
+reported-by = ["sqruff"]
 +++
 
 # sqruff

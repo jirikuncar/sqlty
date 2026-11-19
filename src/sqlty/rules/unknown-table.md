@@ -5,6 +5,7 @@ severity = "error"
 fixable = false
 summary = "Query reads a table that the schema does not define"
 origin = "SQL"
+reported-by = ["lexer", "names", "query-files"]
 +++
 
 # unknown-table

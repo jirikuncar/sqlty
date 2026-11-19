@@ -5,6 +5,7 @@ severity = "error"
 fixable = false
 summary = "sqlty crashed checking the file"
 origin = "Python"
+reported-by = ["crash"]
 +++
 
 # internal-error

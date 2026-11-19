@@ -5,6 +5,7 @@ severity = "error"
 fixable = false
 summary = "Query the database rejects for a reason no other rule names"
 origin = "SQL"
+reported-by = ["lexer", "names", "query-files"]
 +++
 
 # rejected-query

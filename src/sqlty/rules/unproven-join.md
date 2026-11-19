@@ -5,6 +5,7 @@ severity = "ignore"
 fixable = false
 summary = "Join in an aggregating query that matches no primary or unique key"
 origin = "SQL"
+reported-by = ["lexer", "names", "query-files"]
 +++
 
 # unproven-join

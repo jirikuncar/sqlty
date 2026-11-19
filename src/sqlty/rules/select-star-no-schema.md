@@ -5,6 +5,7 @@ severity = "error"
 fixable = false
 summary = "SELECT * used but no schema available to expand"
 origin = "Python"
+reported-by = ["lexer", "select-star", "query-files"]
 +++
 
 # select-star-no-schema

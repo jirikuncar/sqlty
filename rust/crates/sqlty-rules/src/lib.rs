@@ -2,6 +2,8 @@
 //!
 //! The metadata of a rule is written once, in the front matter of its page
 //! `src/sqlty/rules/<name>.md`; `build.rs` generates [`Rule`] and its tables from the pages.
+//! The passes that report the rules, and their order, are written once in `passes.toml`;
+//! `build.rs` generates [`Pass`] from it, and the `reported-by` of each page ties the two.
 
 include!(concat!(env!("OUT_DIR"), "/rules.rs"));
 
@@ -236,5 +238,84 @@ mod tests {
         ] {
             assert!(names.contains(&group));
         }
+    }
+
+    #[test]
+    fn the_pipeline_runs_in_the_order_of_the_passes_file() {
+        let names: Vec<_> = Pass::PIPELINE.iter().map(|pass| pass.name()).collect();
+        assert_eq!(
+            names,
+            [
+                "lexer",
+                "sqruff",
+                "unchecked",
+                "params",
+                "declared-params",
+                "typeddict-inheritance",
+                "select-star",
+                "unparsed",
+                "names",
+                "structural",
+                "aliases",
+                "values",
+            ]
+        );
+        let others: Vec<_> = Pass::ALL
+            .iter()
+            .filter(|pass| !Pass::PIPELINE.contains(pass))
+            .map(|pass| pass.name())
+            .collect();
+        assert_eq!(others, ["suppress", "crash", "query-files"]);
+        assert_eq!(Pass::ALL.len(), Pass::COUNT);
+    }
+
+    #[test]
+    fn a_rule_is_reported_by_the_passes_that_name_it() {
+        for rule in Rule::ALL {
+            assert!(!rule.reported_by().is_empty(), "{}", rule.name());
+            for pass in Pass::ALL {
+                assert_eq!(
+                    pass.rules().contains(rule),
+                    rule.reported_by().contains(&pass),
+                    "{} {}",
+                    pass.name(),
+                    rule.name()
+                );
+            }
+        }
+        assert_eq!(
+            Rule::UnparsedQuery.reported_by(),
+            [Pass::Lexer, Pass::Unparsed, Pass::QueryFiles]
+        );
+        assert_eq!(Rule::Sqruff.reported_by(), [Pass::Sqruff]);
+        let names = Pass::Names.rules();
+        assert!(Rule::SQL.iter().all(|rule| names.contains(*rule)));
+        assert_eq!(names.iter().count(), Rule::SQL.len());
+    }
+
+    #[test]
+    fn a_pass_describes_what_it_reads_and_whether_it_is_gated() {
+        assert_eq!(Pass::Lexer.facts(), FactKind::Tokens);
+        assert_eq!(Pass::Sqruff.facts(), FactKind::Module);
+        assert_eq!(Pass::Unchecked.facts(), FactKind::HelperCalls);
+        assert_eq!(Pass::Params.facts(), FactKind::Calls);
+        assert_eq!(Pass::DeclaredParams.facts(), FactKind::Declared);
+        assert_eq!(Pass::Structural.facts(), FactKind::RowTypes);
+        let gated: Vec<_> = Pass::ALL
+            .iter()
+            .filter(|pass| pass.gated())
+            .map(|pass| pass.name())
+            .collect();
+        assert_eq!(
+            gated,
+            [
+                "sqruff",
+                "params",
+                "declared-params",
+                "typeddict-inheritance",
+                "unparsed",
+                "names"
+            ]
+        );
     }
 }

@@ -5,6 +5,7 @@ severity = "error"
 fixable = false
 summary = "Query marker names a database the project does not configure"
 origin = "Python"
+reported-by = ["lexer", "query-files"]
 +++
 
 # unknown-database

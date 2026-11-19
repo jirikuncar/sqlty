@@ -5,6 +5,7 @@ severity = "ignore"
 fixable = false
 summary = "Row type field is a Literal that lists values its column can never take"
 origin = "Python"
+reported-by = ["lexer", "structural", "aliases", "values"]
 +++
 
 # redundant-literal

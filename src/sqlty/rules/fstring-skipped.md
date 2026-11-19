@@ -5,6 +5,7 @@ severity = "warn"
 fixable = false
 summary = "f-string with --sql prefix skipped (cannot be statically rewritten)"
 origin = "Python"
+reported-by = ["lexer"]
 +++
 
 # fstring-skipped

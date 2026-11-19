@@ -5,6 +5,7 @@ severity = "warn"
 fixable = false
 summary = "--sql query is not plain string literals (raw, bytes, an expression), so it is not checked"
 origin = "Python"
+reported-by = ["lexer", "unchecked"]
 +++
 
 # unchecked-query

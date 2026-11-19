@@ -5,6 +5,7 @@ severity = "error"
 fixable = false
 summary = "Annotated type has different number of fields than query columns"
 origin = "Python"
+reported-by = ["structural", "aliases", "values"]
 +++
 
 # column-count-mismatch

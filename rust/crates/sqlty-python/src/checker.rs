@@ -24,7 +24,7 @@ use crate::rewriter::{
     imported_names, marked_query, strip_line_break, type_modules, wrapper_imports, wraps,
     ImportStyle, Spelling,
 };
-use crate::rules::{Rule, RuleConfig, Severity, SQL_RULES};
+use crate::rules::{Pass, Rule, RuleConfig, Severity, SQL_RULES};
 use crate::scan::Scan;
 use crate::tokens::{content, query_offset, Call};
 use sqlty_sql::analyzer::{expand_star, parse, route, unknown_database, SchemaData};
@@ -230,6 +230,11 @@ impl Checker<'_> {
     }
 
     fn report_fix(&mut self, rule: Rule, message: String, at: &At, fix: Vec<Edit>) {
+        debug_assert!(
+            Pass::Lexer.rules().contains(rule),
+            "the lexer reported {}",
+            rule.name()
+        );
         if self.rules.is_enabled(rule) {
             self.diagnostics.push(Diagnostic {
                 rule,

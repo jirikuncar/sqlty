@@ -5,6 +5,7 @@ severity = "error"
 fixable = false
 summary = "The parameter type `P` of `SQL[R, P]` doesn't fit the parameters of its query"
 origin = "Python"
+reported-by = ["declared-params"]
 +++
 
 # params-type-mismatch
