@@ -46,7 +46,6 @@ static LAZY_COMMIT: extern "C" fn() = {
 
 mod cli;
 mod config;
-mod outline;
 mod server;
 
 use sqlty_python::checker;
@@ -1317,13 +1316,6 @@ fn template_strings(py: Python<'_>, source: &str) -> Option<Vec<PyTemplate>> {
     })
 }
 
-/// `ParsedSource.outline` and its classes, built in Rust (see `outline`), or None where Rust
-/// does not read `source`.
-#[pyfunction]
-fn module_outline<'py>(py: Python<'py>, source: &str) -> PyResult<Option<outline::Outline<'py>>> {
-    outline::outline(py, source)
-}
-
 fn py_params(params: Option<Vec<sqlty_python::scopes::Param>>) -> Option<Vec<PyParam>> {
     use sqlty_python::scopes::Key;
     params.map(|params| {
@@ -2353,7 +2345,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(check_source, m)?)?;
     m.add_function(wrap_pyfunction!(check_queries, m)?)?;
     m.add_function(wrap_pyfunction!(module_facts, m)?)?;
-    m.add_function(wrap_pyfunction!(module_outline, m)?)?;
     m.add_function(wrap_pyfunction!(template_strings, m)?)?;
     m.add_function(wrap_pyfunction!(unparse_expression, m)?)?;
     m.add_function(wrap_pyfunction!(type_definitions, m)?)?;
