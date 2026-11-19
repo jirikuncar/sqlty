@@ -86,8 +86,9 @@ jobs:
 
       - name: Report the size of the playground engine
         run: |
-          wasm=docs/assets/playground/sqlty_wasm.wasm
-          echo "Playground engine: $(stat -c %s "$wasm") bytes, $(gzip -9c "$wasm" | wc -c) gzipped" >> "$GITHUB_STEP_SUMMARY"
+          for wasm in docs/assets/playground/sqlty_wasm_core.wasm docs/assets/playground/sqlty_wasm.wasm; do
+            echo "$(basename "$wasm"): $(stat -c %s "$wasm") bytes, $(gzip -9c "$wasm" | wc -c) gzipped" >> "$GITHUB_STEP_SUMMARY"
+          done
 
       - name: Check the playground under /sqlty/
         run: |

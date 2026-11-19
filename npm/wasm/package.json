@@ -27,6 +27,7 @@
     ".": "./index.js",
     "./engine": "./engine.js",
     "./sqlty_wasm.wasm": "./sqlty_wasm.wasm",
+    "./sqlty_wasm_core.wasm": "./sqlty_wasm_core.wasm",
     "./package.json": "./package.json"
   },
   "types": "./index.d.ts",
@@ -35,7 +36,8 @@
     "index.d.ts",
     "engine.js",
     "engine.d.ts",
-    "sqlty_wasm.wasm"
+    "sqlty_wasm.wasm",
+    "sqlty_wasm_core.wasm"
   ],
   "sideEffects": false,
   "engines": {

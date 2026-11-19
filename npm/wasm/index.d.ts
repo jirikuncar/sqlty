@@ -41,7 +41,8 @@ export type Request =
   | ConfigRequest
   | ProjectRequest;
 
-export type Failure = { error: string };
+/** `needs: "sqruff"`: the request needs `sqlty_wasm.wasm`, not `sqlty_wasm_core.wasm`. */
+export type Failure = { error: string; needs?: "sqruff" };
 
 /** A replacement of `start` to `end`; offsets count UTF-16 code units. */
 export type Edit = { start: number; end: number; replacement: string };

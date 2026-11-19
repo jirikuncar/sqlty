@@ -646,6 +646,7 @@ for (const [button, made, title] of commands) {
     refresh();
     const model = models.python;
     const text = typeof made === "function" ? made() : current[made];
+    if (text === undefined && made === format && !ask.full) return ask.sqruff?.then(run);
     if (text === undefined || text === model.getValue()) return;
     open("python");
     editor.pushUndoStop();
@@ -878,14 +879,25 @@ async function engine() {
       history.replaceState(null, "", url);
     }
   }
-  ask ??= await load(await (await fetch(new URL("sqlty_wasm.wasm", import.meta.url))).arrayBuffer());
-  return (request) => {
+  const module = async (name) => load(await (await fetch(new URL(name, import.meta.url))).arrayBuffer());
+  // Format and the sqruff rule need the full module, a third larger than the core one: most
+  // sessions never ask for them, so it loads on the first request that does.
+  ask ??= await module("sqlty_wasm_core.wasm");
+  const answer = (request) => {
     try {
-      return ask(request);
+      const found = ask(request);
+      if (found?.needs !== "sqruff") return found;
+      answer.sqruff ??= module("sqlty_wasm.wasm").then((full) => {
+        ask = full;
+        answer.full = true;
+        refresh();
+      });
+      return { error: "Loading sqruff for format and the sqruff rule..." };
     } catch (error) {
       return { error: String(error) };
     }
   };
+  return answer;
 }
 
 function loadMonaco() {

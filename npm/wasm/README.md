@@ -30,6 +30,8 @@ answer.queries[0].row_type; // "tuple[int, str]"
 its URL, a `Response` or its bytes when a bundler moves it, such as
 `load(wasm)` after `import wasm from "@sqlty/wasm/sqlty_wasm.wasm?url"` in Vite.
 `@sqlty/wasm/engine` takes the bytes only, with no fetching or file access.
+`sqlty_wasm_core.wasm` leaves out sqruff, about a third smaller to download: it
+answers `format`, and a check with the `sqruff` rule on, with `needs: "sqruff"`.
 
 Requests are `analyze` (diagnostics with their quick fixes, row types, and what
 `sqlty rewrite`, `strip` and `check --fix` make of the source), `complete`,

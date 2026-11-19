@@ -36,6 +36,8 @@ use sqlty_python::options::Options;
 use sqlty_python::params::add_param_types;
 use sqlty_python::project::{self, FindError, Read};
 use sqlty_python::rewriter::{rewrite_source_with, strip_source};
+#[cfg(not(feature = "sqruff"))]
+use sqlty_python::rules::Rule;
 use sqlty_python::rules::RuleConfig;
 use sqlty_python::types::symbols::Source;
 use sqlty_python::{check, rows, suppress};
@@ -178,6 +180,11 @@ pub fn run(request: &str) -> String {
         Ok(rules) => rules,
         Err(found) => return error(found.to_string()),
     };
+    #[cfg(not(feature = "sqruff"))]
+    if needs_sqruff(&op, &rules) {
+        return json!({ "error": "the core module leaves out sqruff", "needs": "sqruff" })
+            .to_string();
+    }
     let source = request.source.as_str();
     let units = sqlty_python::utf16::Utf16::new(source);
     let utf16 = |byte: usize| units.at(byte);
@@ -291,9 +298,12 @@ pub fn run(request: &str) -> String {
             }),
             None => Value::Null,
         },
+        #[cfg(feature = "sqruff")]
         SourceOp::Format => {
             json!({ "formatted": sqlty_format::format_source(source, dialect, &options.style) })
         }
+        #[cfg(not(feature = "sqruff"))]
+        SourceOp::Format => Value::Null,
         SourceOp::Breaking => {
             let against = check(&options, &schema);
             options.schema = before.as_deref();
@@ -390,6 +400,10 @@ const VERSION: (u8, u8) = (3, 14);
 /// names for them, the calls of its helpers and of its drivers, less what a
 /// `# sqlty: ignore` comment suppresses. A source that does not parse gets what its
 /// strings alone tell.
+#[cfg_attr(
+    not(feature = "sqruff"),
+    expect(unused_variables, reason = "only the sqruff rule reads the dialect")
+)]
 fn checked(
     source: &str,
     dialect: &str,
@@ -406,6 +420,9 @@ fn checked(
         module: None,
         coerce: &coerce,
     };
+    #[cfg(not(feature = "sqruff"))]
+    let lint = |_: &str| Vec::new();
+    #[cfg(feature = "sqruff")]
     let lint = |text: &str| {
         sqlty_format::lint_source(text, dialect, &options.style)
             .into_iter()
@@ -441,6 +458,17 @@ fn checked(
         })
         .map(|reported| reported.diagnostic)
         .collect()
+}
+
+/// Whether `op` formats, or checks with the `sqruff` rule on: what the module built without
+/// sqruff cannot answer.
+#[cfg(not(feature = "sqruff"))]
+fn needs_sqruff(op: &SourceOp, rules: &RuleConfig) -> bool {
+    match op {
+        SourceOp::Format => true,
+        SourceOp::Analyze | SourceOp::Breaking => rules.is_enabled(Rule::Sqruff),
+        SourceOp::Complete | SourceOp::Hover => false,
+    }
 }
 
 /// `diagnostics` as `analyze` answers them, `utf16` the offset of a byte.

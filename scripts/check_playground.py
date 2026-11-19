@@ -109,8 +109,9 @@ def check(page: Page, url: str) -> None:
     page.click("[data-commands]")
     page.click("[data-format]")
     assert not page.is_visible("#sqlty-commands")
-    formatted = page.evaluate(f"{SOURCE}.getValue()")
-    assert formatted == 'q = """--sql\nselect\n    id,\n    name\nfrom users"""\n', formatted
+    # The first format loads the full module (with sqruff) in place of the core one.
+    expected = 'q = """--sql\nselect\n    id,\n    name\nfrom users"""\n'
+    page.wait_for_function(f"{SOURCE}.getValue() === {json.dumps(expected)}", timeout=60_000)
 
     page.select_option("[data-example]", label="Tour in steps")
     page.wait_for_selector("[data-steps]:not([hidden])")

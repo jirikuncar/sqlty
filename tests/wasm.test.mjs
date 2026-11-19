@@ -32,3 +32,12 @@ test("a failed response", async () => {
     message: "sqlty_wasm.wasm: 404 Not Found",
   });
 });
+
+test("the core module leaves out sqruff", async () => {
+  const core = await load(new URL("../npm/wasm/sqlty_wasm_core.wasm", import.meta.url));
+  await typed(core);
+  const needs = { error: "the core module leaves out sqruff", needs: "sqruff" };
+  assert.deepEqual(core({ ...request, op: "format" }), needs);
+  assert.deepEqual(core({ ...request, config: 'rules = { sqruff = "warn" }' }), needs);
+  assert.equal(core({ ...request, op: "complete", offset: 0 }), null);
+});

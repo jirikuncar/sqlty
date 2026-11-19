@@ -60,6 +60,17 @@ import wasm from "@sqlty/wasm/sqlty_wasm.wasm?url"; // Vite
 const sqlty = await load(wasm);
 ```
 
+`sqlty_wasm_core.wasm` is the engine without sqruff, about a third smaller to
+download. It answers `format`, and an `analyze` or `breaking` with the
+[`sqruff`](../reference/rules/sqruff.md) rule on, with `{"error": ..., "needs": "sqruff"}`:
+load `sqlty_wasm.wasm` then, as the playground does on the first such request.
+
+```js
+import core from "@sqlty/wasm/sqlty_wasm_core.wasm?url"; // Vite
+
+const sqlty = await load(core);
+```
+
 `@sqlty/wasm/engine` starts the engine from bytes alone, with no fetching or file
 access, as the VS Code extension does. A check runs on the calling thread: run the
 engine in a Web Worker to keep a page responsive on large modules.
