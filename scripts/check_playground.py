@@ -73,6 +73,7 @@ def main() -> None:
         check(page, url)
         assert not errors, errors
         exercise(browser, url, coverage.watch)
+        sqruff_on_demand(browser, url, coverage.watch)
         releases(browser, url, coverage)
         coverage.take()
         script = page.request.get(f"{url}../assets/playground/playground.js").text()
@@ -271,6 +272,30 @@ def exercise(browser: Browser, url: str, watch: Callable[[Page], None]) -> None:
     unsupported(context, url, watch)
     asking(page, url)
     assert not errors, errors
+
+
+def sqruff_on_demand(browser: Browser, url: str, watch: Callable[[Page], None]) -> None:
+    """The sqruff rule loads the full engine; a failed load says so and retries."""
+    # Routes see no request the service worker answers.
+    context = browser.new_context(service_workers="block")
+    context.route("https://api.github.com/**", github)
+    context.route("**/assets/playground/sqlty_wasm.wasm", lambda route: route.fulfill(status=404))
+    page = context.new_page()
+    errors: list[str] = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    watch(page)
+    page.goto(url)
+    page.wait_for_selector("[data-types] code", state="attached", timeout=60_000)
+
+    problems = "document.querySelector('[data-problems]').textContent"
+    page.evaluate(f"{MODEL.format('ini')}.setValue('[rules]\\nsqruff = \"warn\"\\n')")
+    page.wait_for_function(f"{problems}.includes('sqruff did not load (sqlty_wasm.wasm: 404')")
+    context.unroute("**/assets/playground/sqlty_wasm.wasm")
+    source(page, 'q = "--sql\\nselect id, ID from users"\n')
+    loaded = "(t) => t.includes('sqruff') && !t.includes('Loading') && !t.includes('did not load')"
+    page.wait_for_function(f"({loaded})({problems})", timeout=60_000)
+    assert not errors, errors
+    context.close()
 
 
 REGISTRY = "https://registry.npmjs.org/@sqlty/wasm"
