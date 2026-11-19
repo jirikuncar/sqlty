@@ -47,6 +47,8 @@ runs:
       run: |
         rustup toolchain install ${TOOLCHAIN:+"$TOOLCHAIN"} --profile minimal
         [ -z "$TOOLCHAIN" ] || rustup override set "$TOOLCHAIN"
+        # Builds outside the checkout, such as a wheel from the unpacked sdist, use the default.
+        rustup default "$(rustup show active-toolchain | cut -d' ' -f1)"
         [ -z "$COMPONENTS" ] || rustup component add $COMPONENTS
         [ -z "$TARGETS" ] || rustup target add $TARGETS
 

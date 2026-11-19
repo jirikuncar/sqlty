@@ -169,10 +169,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        run: |
-          rustup toolchain install 1.99.1 --profile minimal \
-            --target wasm32-unknown-unknown --target wasm32-wasip1
-          rustup default 1.99.1
+        run: rustup toolchain install && rustup target add wasm32-unknown-unknown wasm32-wasip1
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
