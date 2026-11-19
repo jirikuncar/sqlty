@@ -64,7 +64,6 @@ make test-mdtest    # Mdtest suite + docs tests
 make test-e2e       # End-to-end tests only
 make test-coverage  # All tests with coverage report
 make update-mdtest  # Update mdtest assertions with actual values
-make bench          # sqlty.core benchmarks
 ```
 
 ### Using pytest directly
@@ -147,7 +146,6 @@ uv run ty check src/sqlty
 ### Benchmarks and the performance budget
 
 ```bash
-make bench            # sqlty.core micro-benchmarks
 make bench-project    # generated 10k-file project: CLI wall time and peak RSS
 make bench-ci         # CI size; exits 1 when over the budget in benchmarks/baseline.json
 make bench-baseline   # re-record the baseline after an intended change

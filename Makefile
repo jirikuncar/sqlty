@@ -29,11 +29,9 @@ help:
 	@echo "  test-e2e          - Run end-to-end tests only"
 	@echo "  test-coverage     - Run every Python and Rust test with coverage and check its gates"
 	@echo "  update-mdtest     - Update mdtest assertions with actual values"
-	@echo "  bench             - Run sqlty.core benchmarks"
 	@echo "  bench-project     - Benchmark a synthetic 10k-file project"
 	@echo "  bench-ci          - CI performance budget check against benchmarks/baseline.json"
 	@echo "  bench-baseline    - Re-record the benchmark baseline"
-	@echo "  bench-bridge      - Check latency of the language server's bridge on the synthetic project"
 	@echo "  bench-codspeed    - The CodSpeed benchmarks (benchmarks/test_benchmarks.py), timed locally"
 	@echo "  bench-rust        - Criterion benchmarks of the Rust engine (rust/crates/sqlty-bench)"
 	@echo ""
@@ -124,10 +122,6 @@ update-mdtest:
 
 # --- Benchmarks ---
 
-.PHONY: bench
-bench:
-	uv run python benchmarks/bench_core.py
-
 .PHONY: bench-project
 bench-project:  ## Full-size synthetic project (10k files); needs a release build
 	uv run python benchmarks/bench_project.py --size full
@@ -139,10 +133,6 @@ bench-ci:  ## CI-size project; exits 1 when over the budget in benchmarks/baseli
 .PHONY: bench-baseline
 bench-baseline:  ## Re-record the CI-size baseline for this platform
 	uv run python benchmarks/bench_project.py --size ci --repeats 7 --update-baseline
-
-.PHONY: bench-bridge
-bench-bridge:  ## A check per keystroke through sqlty._lsp_bridge; needs a release build
-	uv run python benchmarks/bench_lsp_bridge.py
 
 .PHONY: bench-codspeed
 bench-codspeed:  ## The benchmarks CodSpeed measures in CI, timed locally; needs a release build
