@@ -8,7 +8,7 @@ in seconds:
 - ``edit``: a full-text change to diagnostics of that version, median and p95 of
   ``EDITS`` edits;
 - ``hover`` and ``completion``: request to response on a table name in a query,
-  median of ``REQUESTS``.
+  summed over ``REQUESTS``, so the total is large enough to budget.
 """
 
 from __future__ import annotations
@@ -18,23 +18,30 @@ import os
 import statistics
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any
 
 EDITS = 60
 REQUESTS = 40
+# A server that stalls is killed, so a hung benchmark fails instead of the CI job timing out.
+DEADLINE_S = 300
 
 
 class Server:
     def __init__(self, exe: str, root: Path) -> None:
+        self.stderr = tempfile.TemporaryFile()  # noqa: SIM115 (closed in stop)
         self.process = subprocess.Popen(
             [exe, "server"],
             cwd=root,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=self.stderr,
         )
+        self.watchdog = threading.Timer(DEADLINE_S, self.process.kill)
+        self.watchdog.start()
         self.next = 0
 
     def send(self, message: dict[str, Any]) -> None:
@@ -51,7 +58,9 @@ class Server:
             if name == "Content-Length":
                 length = int(value)
         if not length:
-            raise RuntimeError("sqlty server closed its output")
+            self.stderr.seek(0)
+            log = self.stderr.read().decode()[-2000:]
+            raise RuntimeError(f"sqlty server closed its output:\n{log}")
         return json.loads(self.process.stdout.read(length))
 
     def request(self, method: str, params: object) -> Any:
@@ -77,6 +86,8 @@ class Server:
         self.request("shutdown", None)
         self.send({"method": "exit"})
         _, _, usage = os.wait4(self.process.pid, 0)
+        self.watchdog.cancel()
+        self.stderr.close()
         return usage.ru_maxrss / (1024 * 1024 if sys.platform == "darwin" else 1024)
 
 
@@ -129,6 +140,6 @@ def measure(exe: str, root: Path, module: Path, table: str) -> dict[str, dict[st
         "lsp_open": {"wall_s": round(opening, 4), "rss_mb": round(rss, 1)},
         "lsp_edit": {"wall_s": round(statistics.median(edits), 4)},
         "lsp_edit_p95": {"wall_s": round(edits[int(len(edits) * 0.95) - 1], 4)},
-        "lsp_hover": {"wall_s": round(statistics.median(hover), 4)},
-        "lsp_completion": {"wall_s": round(statistics.median(completion), 4)},
+        "lsp_hover": {"wall_s": round(sum(hover), 4)},
+        "lsp_completion": {"wall_s": round(sum(completion), 4)},
     }

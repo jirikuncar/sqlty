@@ -73,6 +73,12 @@ def clone(url: str, commit: str, into: Path) -> None:
     git("checkout", "-q", "FETCH_HEAD")
 
 
+def head(root: Path) -> str:
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
 def check(exe: str, root: Path) -> dict:
     with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
         start = time.perf_counter()
@@ -132,6 +138,8 @@ def main() -> int:
         results = {}
         for name, repo in CORPUS.items():
             root = base / name
+            if root.exists() and head(root) != repo["commit"]:
+                shutil.rmtree(root)
             if not root.exists():
                 clone(repo["url"], repo["commit"], root)
             (root / "sqlty.toml").write_text(repo["config"])

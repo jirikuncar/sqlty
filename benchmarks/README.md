@@ -37,7 +37,7 @@ maximum of `--repeats` runs (RSS from `wait4` of that child).
   module of 300 queries; RSS of the server.
 - `lsp_edit`, `lsp_edit_p95`: a full-text change of that module to its diagnostics,
   median and p95 of 60 edits.
-- `lsp_hover`, `lsp_completion`: request to response on a table name, median of 40.
+- `lsp_hover`, `lsp_completion`: request to response on a table name, total of 40.
 - `schema_load`: parse the 400-500 table schema through one `analyze_select`.
 - `schema_load_unresolved_alters`: 2000 tables plus 2000 `ALTER TABLE` on tables
   that do not exist.
@@ -55,7 +55,7 @@ uv run python benchmarks/bench_project.py --size ci --exe path/to/sqlty  # a nat
 ## CI budget
 
 The `bench` job in `.github/workflows/tests.yml` builds the release extension
-and runs `make bench-ci` (about 30 s). It fails when a metric is over its budget
+and runs `make bench-ci` (about 40 s). It fails when a metric is over its budget
 in `baseline.json`:
 
 - **Times** are divided by a calibration loop (a fixed pure-Python loop, best of

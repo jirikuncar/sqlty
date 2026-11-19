@@ -16,6 +16,10 @@ on:
 permissions:
   contents: read
 
+# `uv run` must not sync: that would build the extension again, through the release profile.
+env:
+  UV_NO_SYNC: "1"
+
 jobs:
   corpus:
     name: Check real repositories
