@@ -51,12 +51,15 @@ def main() -> None:
     ):
         browser = playwright.chromium.launch()
         coverage = Coverage()
+        if args.url:
+            # Pages reports a custom domain's page_url as http://, which the browser loads as
+            # https:// (HSTS). A page of its own keeps that load's storage out of the checks.
+            resolving = browser.new_page()
+            resolving.goto(url)
+            url = resolving.url
+            resolving.context.close()
         page = browser.new_page()
         page.route("https://api.github.com/**", github)
-        if args.url:
-            # Pages reports a custom domain's page_url as http://, which redirects to https://.
-            page.goto(url)
-            url = page.url
         coverage.watch(page)
         errors: list[str] = []
         page.on("pageerror", lambda error: errors.append(str(error)))
