@@ -247,7 +247,7 @@ rust/
     ├── sqlty-project/   # A project read from disk: settings, helpers, checks
     ├── sqlty-cli/       # The sqlty commands; main.rs is the standalone sqlty executable
     ├── sqlty-lsp/       # The language server of sqlty server
-    ├── sqlty-wasm/      # JSON in, JSON out: the docs playground (make playground)
+    ├── sqlty-wasm/      # JSON in, JSON out: @sqlty/wasm (npm/wasm) and the docs playground (make wasm)
     ├── sqlty-ext/       # PyO3 module sqlty._core; server.rs runs sqlty-lsp
     └── sqlty-bench/     # Criterion benchmarks (make bench-rust)
 editors/vscode/          # VS Code client of sqlty server; see its README
