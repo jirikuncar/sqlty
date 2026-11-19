@@ -77,15 +77,17 @@ struct Bound<'a> {
     lines: Lines,
 }
 
+type Conds = Dict<(bool, Rc<HashSet<String>>)>;
+
 /// The static names bound so far on one path, and the conditions it took.
 #[derive(Clone, Default)]
 struct Path<'a> {
     env: BTreeMap<String, Bound<'a>>,
-    conds: Dict<(bool, Rc<HashSet<String>>)>,
+    conds: Conds,
 }
 
 impl<'a> Path<'a> {
-    fn kept(&self, names: &HashSet<String>) -> Dict<(bool, Rc<HashSet<String>>)> {
+    fn kept(&self, names: &HashSet<String>) -> Conds {
         let mut kept = Dict::new();
         for (key, cond) in self.conds.iter() {
             if cond.1.is_disjoint(names) {
@@ -1540,36 +1542,62 @@ impl<'a, 'r> Walk<'a, 'r> {
     }
 }
 
-/// `_dedupe`: one path per set of bindings, keeping the conditions every merged path has.
+/// `_dedupe`: the paths, merged where one set of conditions takes exactly those of both.
 fn dedupe(paths: Vec<Path<'_>>) -> Vec<Path<'_>> {
     let mut order: Vec<String> = Vec::new();
-    let mut found: HashMap<String, Path<'_>> = HashMap::new();
-    for path in paths {
+    let mut found: HashMap<String, Vec<Path<'_>>> = HashMap::new();
+    for mut path in paths {
         let key = path.key();
-        match found.get_mut(&key) {
-            None => {
-                order.push(key.clone());
-                found.insert(key, path);
-            }
-            Some(kept) => {
-                let mut conds = Dict::new();
-                for (name, cond) in kept.conds.iter() {
-                    let same = path
-                        .conds
-                        .get(name)
-                        .is_some_and(|other| other.0 == cond.0 && other.1 == cond.1);
-                    if same {
-                        conds.insert(name, cond.clone());
-                    }
-                }
-                kept.conds = conds;
-            }
+        let Some(kept) = found.get_mut(&key) else {
+            order.push(key.clone());
+            found.insert(key, vec![path]);
+            continue;
+        };
+        let mut at = kept.len();
+        while let Some((index, conds)) = kept
+            .iter()
+            .enumerate()
+            .find_map(|(index, other)| union(&other.conds, &path.conds).map(|conds| (index, conds)))
+        {
+            kept.remove(index);
+            at = at.min(index);
+            path.conds = conds;
         }
+        kept.insert(at.min(kept.len()), path);
     }
     order
         .into_iter()
         .filter_map(|key| found.remove(&key))
+        .flatten()
         .collect()
+}
+
+/// Conditions that take exactly the paths of `left` and of `right`, when some do.
+fn union(left: &Conds, right: &Conds) -> Option<Conds> {
+    let within = |inner: &Conds, outer: &Conds| {
+        inner
+            .iter()
+            .all(|(name, cond)| outer.get(name).is_some_and(|other| other == cond))
+    };
+    if within(left, right) {
+        return Some(left.clone());
+    }
+    if within(right, left) {
+        return Some(right.clone());
+    }
+    let same_names = left.iter().count() == right.iter().count()
+        && left.iter().all(|(name, _)| right.contains(name));
+    let mut differ = left
+        .iter()
+        .filter(|(name, cond)| right.get(name) != Some(*cond));
+    let (name, (_, reads)) = differ.next()?;
+    let opposite = right.get(name).is_some_and(|other| &other.1 == reads);
+    (same_names && opposite && differ.next().is_none()).then(|| {
+        left.iter()
+            .filter(|(other, _)| *other != name)
+            .map(|(other, cond)| (other, cond.clone()))
+            .collect()
+    })
 }
 
 /// `_strings`: the strings a pattern of string literals matches.
@@ -1697,4 +1725,58 @@ pub fn query_variants<'a>(
             })
             .collect(),
     ))
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    type Taken<'a> = &'a [(&'a str, bool)];
+
+    fn union_of(left: Taken, right: Taken) -> Option<Vec<(String, bool)>> {
+        let conds = |taken: Taken| -> Conds {
+            taken
+                .iter()
+                .map(|(name, outcome)| {
+                    (
+                        *name,
+                        (*outcome, Rc::new(HashSet::from([name.to_string()]))),
+                    )
+                })
+                .collect()
+        };
+        union(&conds(left), &conds(right)).map(|merged| {
+            merged
+                .iter()
+                .map(|(name, (outcome, _))| (name.to_string(), *outcome))
+                .collect()
+        })
+    }
+
+    fn some(taken: Taken) -> Option<Vec<(String, bool)>> {
+        Some(
+            taken
+                .iter()
+                .map(|(name, outcome)| (name.to_string(), *outcome))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn conditions_merge_only_when_exact() {
+        let (a, not_a, b, not_b, c) = (
+            ("a", true),
+            ("a", false),
+            ("b", true),
+            ("b", false),
+            ("c", true),
+        );
+        assert_eq!(union_of(&[not_a], &[not_a, b]), some(&[not_a]));
+        assert_eq!(union_of(&[not_a, b], &[not_a]), some(&[not_a]));
+        assert_eq!(union_of(&[b, c, not_a], &[b, not_a]), some(&[b, not_a]));
+        assert_eq!(union_of(&[not_a, b], &[not_a, not_b]), some(&[not_a]));
+        assert_eq!(union_of(&[not_a, b], &[a, not_b]), None);
+        assert_eq!(union_of(&[not_a, b, c], &[not_a, not_b]), None);
+    }
 }
