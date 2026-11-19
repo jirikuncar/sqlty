@@ -6,10 +6,10 @@
 //! that `sqlty/core.py` wraps into dataclasses.
 //!
 //! - Inference: `infer_type`, `analyze_select`, `analyze_columns`, `analyze_params`,
-//!   `expand_star`, `query_diagnostics`, `parse_error`, `returns_rows`.
+//!   `explain_select`, `expand_star`, `parse_error`, `returns_rows`.
 //! - Source: `rewrite_source`, `add_param_types`, `strip_source`, `fix_source`, `check_source`,
 //!   `wrapped_queries`, `query_sites`.
-//! - Schema: `load_schema`, `schema_skipped_tables`, `schema_skipped_objects`, `name_rules`.
+//! - Schema: `load_schema`, `schema_skipped_objects`, `name_rules`.
 //! - Configuration: `validate_config` and the key lists.
 //!
 //! Parsed schemas are cached per `(schema text, dialect)` in a small LRU shared by all
@@ -554,79 +554,12 @@ fn dialect_names() -> Vec<&'static str> {
     sqlty_sql::Dialect::NAMES.to_vec()
 }
 
-/// The rules `query_diagnostics` reports, which are off by default.
+/// The rules that judge the names a query uses.
 #[pyfunction]
 fn name_rules() -> Vec<&'static str> {
     sqlty_sql::diagnostics::NameRule::ALL
         .iter()
         .map(|rule| rule.name())
-        .collect()
-}
-
-/// `(rule, message, start, end, table, column)` of a query diagnostic: `start` and `end`
-/// are character offsets into the query, None when unknown.
-type QueryDiagnosticTuple = (
-    &'static str,
-    String,
-    Option<usize>,
-    Option<usize>,
-    Option<String>,
-    Option<String>,
-);
-
-/// Why a query has untyped columns, or names what it cannot, as `(rule, message, start,
-/// end, table, column)` tuples:
-/// `unknown-table`, `unknown-column`, `ambiguous-column`, `duplicate-alias`, `unknown-function`,
-/// `unknown-type`, `unsupported-syntax`, `insert-missing-column`, `insert-value-count`,
-/// `ungrouped-column`, `fanout-aggregate`, `chasm-join`, `unproven-join`, `entity-mismatch`
-/// and `rejected-query`.
-/// Tables, columns and
-/// ambiguity are only judged with a schema.
-///
-/// Example:
-///     query_diagnostics("SELECT nope FROM users", schema_sql="CREATE TABLE users (id INT)")
-#[pyfunction]
-#[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES, schema_sql = None))]
-fn query_diagnostics(
-    py: Python<'_>,
-    sql: &str,
-    dialect: DialectArg,
-    schema_sql: Option<SchemaArg>,
-) -> Vec<QueryDiagnosticTuple> {
-    let dialect = dialect.0;
-    let chars = |byte: usize| sql[..byte].chars().count();
-    detach(py, || {
-        analyzer::analyze_with_diagnostics(sql, dialect, schema(schema_sql, dialect).as_deref())
-            .1
-            .into_iter()
-            .map(|found| {
-                let span = found.span.map(|span| (chars(span.start), chars(span.end)));
-                (
-                    found.rule.name(),
-                    found.message,
-                    span.map(|span| span.0),
-                    span.map(|span| span.1),
-                    found.table,
-                    found.column,
-                )
-            })
-            .collect()
-    })
-}
-
-/// Names of the schema tables that could not be parsed, even without their
-/// constraints; their columns are unknown to inference.
-#[pyfunction]
-#[pyo3(signature = (schema_sql, *, dialect = DialectArg::POSTGRES))]
-fn schema_skipped_tables(
-    py: Python<'_>,
-    schema_sql: SchemaArg,
-    dialect: DialectArg,
-) -> Vec<String> {
-    let dialect = dialect.0;
-    detach(py, || skipped_objects(schema_sql, dialect, Some("table")))
-        .into_iter()
-        .map(|(_, name)| name)
         .collect()
 }
 
@@ -640,19 +573,17 @@ fn schema_skipped_objects(
     dialect: DialectArg,
 ) -> Vec<(String, String)> {
     let dialect = dialect.0;
-    detach(py, || skipped_objects(schema_sql, dialect, None))
+    detach(py, || skipped_objects(schema_sql, dialect))
 }
 
 fn skipped_objects<S: AsRef<str> + Send + Sync + 'static>(
     schema_sql: SchemaArg<S>,
     dialect: &str,
-    only: Option<&str>,
 ) -> Vec<(String, String)> {
     schema_sql
         .loaded(dialect)
         .skipped
         .iter()
-        .filter(|(kind, _)| only.is_none_or(|only| only == *kind))
         .map(|(kind, name)| ((*kind).to_string(), name.clone()))
         .collect()
 }
@@ -666,26 +597,6 @@ fn skipped_objects<S: AsRef<str> + Send + Sync + 'static>(
 fn parse_error(py: Python<'_>, sql: &str, dialect: DialectArg) -> Option<String> {
     let dialect = dialect.0;
     detach(py, || analyzer::parse_error(sql, dialect))
-}
-
-/// The tables a query names, in source order, as `(name, schema, access)` tuples: `access`
-/// is "read" or "write" (the target of an INSERT, UPDATE, DELETE or MERGE). CTEs, derived
-/// tables and table functions are left out; empty when the query does not parse.
-#[pyfunction]
-#[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES))]
-fn query_tables(
-    py: Python<'_>,
-    sql: &str,
-    dialect: DialectArg,
-) -> Vec<(String, Option<String>, &'static str)> {
-    let dialect = dialect.0;
-    detach(py, || analyzer::query_tables(sql, dialect))
-        .into_iter()
-        .map(|table| {
-            let access = if table.write { "write" } else { "read" };
-            (table.name, table.schema, access)
-        })
-        .collect()
 }
 
 /// Whether `dialect` checks a schema's tables and columns against queries.
@@ -2103,72 +2014,6 @@ fn query_sites(
     })
 }
 
-/// The query under a cursor, found by `query_at`.
-#[pyclass(frozen, name = "QueryAt", module = "sqlty._core")]
-struct QueryAtHandle {
-    at: locate::QueryAt,
-    /// The query as the analyzer reads it: the string's value, escapes decoded, from the
-    /// `--sql` marker on (the whole value for a helper's query).
-    #[pyo3(get)]
-    text: String,
-    /// The cursor's byte offset in `text`.
-    #[pyo3(get)]
-    offset: usize,
-    /// How `check` recognised the query: `marker`, `wrapper` or `helper`.
-    #[pyo3(get)]
-    route: &'static str,
-    /// Byte offsets of the query's string literals in the source, prefixes and quotes included.
-    #[pyo3(get)]
-    span: (usize, usize),
-}
-
-impl QueryAtHandle {
-    fn new(at: locate::QueryAt) -> Self {
-        Self {
-            text: at.text.clone(),
-            offset: at.offset,
-            route: at.route.name(),
-            span: (at.span.start, at.span.end),
-            at,
-        }
-    }
-}
-
-/// Where byte `offset` of the text of `at` is written in the source: an offset in an escape
-/// sequence maps to its start. `None` past the end of the text, or in the marker.
-#[pyfunction]
-fn query_source_offset(at: &QueryAtHandle, offset: usize) -> Option<usize> {
-    at.at.source_offset(offset)
-}
-
-/// The query `check` reads at byte `offset` of Python source, or None outside one.
-///
-/// `helper_starts` are the byte offsets of the string literals helper calls pass as
-/// their query; the marker and `SQL[T](...)` routes are found here.
-///
-/// Raises:
-///     ValueError: unsupported import_style
-#[pyfunction]
-#[pyo3(signature = (source, offset, *, import_style = None, helper_starts = vec![]))]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "PyO3 extracts a Vec, not a slice"
-)]
-fn query_at(
-    py: Python<'_>,
-    source: &str,
-    offset: usize,
-    import_style: Option<&str>,
-    helper_starts: Vec<usize>,
-) -> Result<Option<QueryAtHandle>, Error> {
-    detach(py, || {
-        let style = ImportStyle::parse(import_style)?;
-        Ok(locate::Queries::new(source, &style, &helper_starts)
-            .at(offset)
-            .map(QueryAtHandle::new))
-    })
-}
-
 /// A completion: `(label, kind, detail, sql_type, nullable)`.
 type CandidateOut = (
     String,
@@ -2187,7 +2032,8 @@ type CompletionsOut = (usize, usize, bool, Vec<CandidateOut>);
 /// before the cursor. Each candidate is `(label, kind, detail, sql_type, nullable)`:
 /// `kind` is `table`, `view`, `cte` or `column`, `detail` the schema of a relation or the
 /// alias of a column. At most `limit`; `incomplete` when there were more.
-/// `helper_starts` is as for `query_at`.
+/// `helper_starts` are the byte offsets of the string literals helper calls pass as their
+/// query; the marker and `SQL[T](...)` routes are found here.
 ///
 /// Raises:
 ///     ValueError: unsupported import_style
@@ -2245,7 +2091,7 @@ fn complete_source(
 
 /// What the word at byte `offset` of Python source is: `(start, end, contents)`, the bytes of
 /// the word and Markdown, or None outside a query `check` reads or on a word that names
-/// nothing. `helper_starts` is as for `query_at`.
+/// nothing. `helper_starts` is as for `complete_source`.
 ///
 /// Raises:
 ///     ValueError: unsupported import_style
@@ -2276,7 +2122,7 @@ fn hover_source(
 
 /// What to color in the queries `check` reads in Python source: `(start, end, kind)` byte
 /// ranges in order, `kind` one of `keyword`, `string`, `number`, `comment`, `operator`
-/// and `parameter`. `helper_starts` is as for `query_at`.
+/// and `parameter`. `helper_starts` is as for `complete_source`.
 ///
 /// Raises:
 ///     ValueError: unsupported import_style
@@ -2334,15 +2180,12 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(explain_select, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_columns, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_params, m)?)?;
-    m.add_function(wrap_pyfunction!(query_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(name_rules, m)?)?;
     m.add_function(wrap_pyfunction!(dialect_names, m)?)?;
     m.add_function(wrap_pyfunction!(python_types, m)?)?;
-    m.add_function(wrap_pyfunction!(schema_skipped_tables, m)?)?;
     m.add_function(wrap_pyfunction!(schema_skipped_objects, m)?)?;
     m.add_function(wrap_pyfunction!(parse_error, m)?)?;
     m.add_function(wrap_pyfunction!(checks_names, m)?)?;
-    m.add_function(wrap_pyfunction!(query_tables, m)?)?;
     m.add_function(wrap_pyfunction!(returns_rows, m)?)?;
     m.add_function(wrap_pyfunction!(rewrite_source, m)?)?;
     m.add_function(wrap_pyfunction!(add_param_types, m)?)?;
@@ -2374,12 +2217,9 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(module_calls, m)?)?;
     m.add_class::<ModuleIndex>()?;
     m.add_function(wrap_pyfunction!(query_sites, m)?)?;
-    m.add_function(wrap_pyfunction!(query_at, m)?)?;
-    m.add_function(wrap_pyfunction!(query_source_offset, m)?)?;
     m.add_function(wrap_pyfunction!(complete_source, m)?)?;
     m.add_function(wrap_pyfunction!(highlight_source, m)?)?;
     m.add_function(wrap_pyfunction!(hover_source, m)?)?;
-    m.add_class::<QueryAtHandle>()?;
     m.add_function(wrap_pyfunction!(skills, m)?)?;
     m.add_function(wrap_pyfunction!(server::serve, m)?)?;
     m.add_function(wrap_pyfunction!(cli::cli, m)?)?;
@@ -2489,15 +2329,12 @@ mod tests {
     #[test]
     fn skipped_objects_lists_what_the_schema_could_not_parse() {
         let sql = "CREATE TABLE sqlty_ext_ok (x INT); CREATE TABLE sqlty_ext_bad (x INT,;";
-        let all = skipped_objects(SchemaArg::Text(sql), "postgres", None);
+        let all = skipped_objects(SchemaArg::Text(sql), "postgres");
         assert!(
             all.iter().all(|(_, name)| name != "sqlty_ext_ok"),
             "a parsed table is not skipped: {all:?}"
         );
-        let tables = skipped_objects(SchemaArg::Text(sql), "postgres", Some("table"));
-        let views = skipped_objects(SchemaArg::Text(sql), "postgres", Some("view"));
-        assert!(views.is_empty());
-        assert_eq!(tables, all);
+        assert!(all.iter().all(|(kind, _)| kind == "table"), "{all:?}");
     }
 
     #[test]

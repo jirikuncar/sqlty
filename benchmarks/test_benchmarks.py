@@ -93,6 +93,7 @@ def test_complete_source(benchmark: BenchmarkFixture, operation: str, tables: in
 MODULE = "\n".join(f'q{n} = "--sql\\nSELECT id FROM app.t{n % 50:04d}"' for n in range(4000))
 
 
-def test_query_at_in_a_large_module(benchmark: BenchmarkFixture) -> None:
-    offset = MODULE.rindex("SELECT") + 7
-    assert benchmark(core.query_at, MODULE, offset) is not None
+def test_completion_in_a_large_module(benchmark: BenchmarkFixture) -> None:
+    line = MODULE.count("\n") + 1
+    column = len(MODULE.rsplit("\n", 1)[-1])
+    assert benchmark(core.complete_source, MODULE, line, column) is not None
