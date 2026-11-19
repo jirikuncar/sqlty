@@ -101,10 +101,14 @@ docs: playground  ## Build the docs site, strict via zensical.toml (output: site
 	python3 scripts/structured_data.py site
 	python3 scripts/offline.py site
 
-.PHONY: playground
-playground:  ## The engine as WebAssembly, and Monaco and the fonts, for the docs playground (needs the wasm32-unknown-unknown target)
+.PHONY: wasm
+wasm:  ## The engine as WebAssembly, in the @sqlty/wasm package (needs the wasm32-unknown-unknown target)
 	cargo build --manifest-path rust/Cargo.toml --profile wasm --target wasm32-unknown-unknown -p sqlty-wasm
-	cp rust/target/wasm32-unknown-unknown/wasm/sqlty_wasm.wasm docs/assets/playground/
+	cp rust/target/wasm32-unknown-unknown/wasm/sqlty_wasm.wasm npm/wasm/
+
+.PHONY: playground
+playground: wasm  ## The engine as WebAssembly, and Monaco and the fonts, for the docs playground
+	cp npm/wasm/sqlty_wasm.wasm npm/wasm/engine.js docs/assets/playground/
 	python3 scripts/generate_playground_examples.py
 	python3 scripts/vendor_assets.py
 

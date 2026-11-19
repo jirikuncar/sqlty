@@ -13,6 +13,7 @@ on:
     paths:
       - .github/workflows/vscode.yml
       - editors/vscode/**
+      - npm/wasm/**
       - rust/crates/sqlty-wasm/**
       - rust-toolchain.toml
 
