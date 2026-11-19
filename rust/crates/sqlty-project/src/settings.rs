@@ -138,6 +138,10 @@ impl Schemas {
     }
 }
 
+/// Schemas below this size are read on the calling thread: handing their statements to the
+/// pool costs more memory than the parallel parsing saves time.
+const PARALLEL_MIN_BYTES: usize = 1 << 20;
+
 fn loaded_schema(
     text: &str,
     dialect: &'static str,
@@ -145,6 +149,11 @@ fn loaded_schema(
 ) -> Result<(Schema, Vec<analyzer::SkippedObject>), String> {
     let overrides = TypeOverrides::new(types, dialect)
         .map_err(|error| format!("[tool.sqlty.types]: {error}"))?;
+    if text.len() < PARALLEL_MIN_BYTES {
+        return Ok(analyzer::load_schema_with_overrides(
+            text, dialect, overrides,
+        ));
+    }
     let run = |batches: &mut [analyzer::StatementBatch<'_>]| {
         pool().install(|| {
             batches.par_iter_mut().for_each(|batch| {

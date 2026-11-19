@@ -280,25 +280,57 @@ pub fn read_serially(batches: &mut [StatementBatch<'_>]) {
     }
 }
 
-/// Read the statements in windows, apply what each yields in statement order, and drop the
-/// window before the next; the ones waiting on a later definition are returned for
-/// [`Loader::run`].
+/// Apply what a statement was read to, in statement order.
+fn apply_read(
+    read: Read,
+    loader: &mut Loader,
+    path: &mut Rc<Vec<String>>,
+    pending: &mut Vec<Op>,
+    skipped: &mut Vec<SkippedObject>,
+) {
+    if let Some(schemas) = read.search_path {
+        loader.search_path = schemas.clone();
+        *path = Rc::new(schemas);
+    }
+    for kind in read.ops {
+        let op = Op {
+            path: path.clone(),
+            kind,
+        };
+        if !loader.apply(&op, false) {
+            pending.push(op);
+        }
+    }
+    skipped.extend(read.skipped);
+}
+
+/// Read the statements and apply what each yields in statement order; the ones waiting on a
+/// later definition are returned for [`Loader::run`]. Without a `run`, each statement is read
+/// and dropped before the next; with one, the statements are read in windows through it and a
+/// window is dropped before the next.
 pub(super) fn read_statements<'a>(
     statements: impl IntoIterator<Item = ddl::Statement<'a>>,
     dialect: SqlDialect,
     loader: &mut Loader,
     skipped: &mut Vec<SkippedObject>,
-    run: BatchRunner<'_>,
+    run: Option<BatchRunner<'_>>,
 ) -> Vec<Op> {
     let mut path = Rc::new(vec!["public".to_string()]);
     let mut pending = Vec::new();
     let mut statements = statements.into_iter();
+    let Some(run) = run else {
+        for stmt in statements {
+            let read = read_statement(&stmt, dialect);
+            apply_read(read, loader, &mut path, &mut pending, skipped);
+        }
+        return pending;
+    };
     loop {
         let window: Vec<_> = statements.by_ref().take(WINDOW).collect();
         if window.is_empty() {
             break;
         }
-        let reads = if window.len() <= BATCH {
+        let reads: Vec<Read> = if window.len() <= BATCH {
             window
                 .iter()
                 .map(|stmt| read_statement(stmt, dialect))
@@ -318,26 +350,10 @@ pub(super) fn read_statements<'a>(
                 });
             }
             run(&mut batches);
-            batches
-                .into_iter()
-                .flat_map(|batch| batch.read)
-                .collect::<Vec<_>>()
+            batches.into_iter().flat_map(|batch| batch.read).collect()
         };
         for read in reads {
-            if let Some(schemas) = read.search_path {
-                loader.search_path = schemas.clone();
-                path = Rc::new(schemas);
-            }
-            for kind in read.ops {
-                let op = Op {
-                    path: path.clone(),
-                    kind,
-                };
-                if !loader.apply(&op, false) {
-                    pending.push(op);
-                }
-            }
-            skipped.extend(read.skipped);
+            apply_read(read, loader, &mut path, &mut pending, skipped);
         }
     }
     pending
@@ -448,16 +464,16 @@ pub(super) const BUILTIN_SQL: &str = concat!(
 /// relations, `search_path` and functions; it, MySQL and SQLite follow `ALTER` and `DROP`.
 /// Other dialects read `CREATE TABLE`, `VIEW`, `DOMAIN` and `TYPE` only.
 pub(crate) fn load(schema_sql: &str, dialect: &str) -> (Catalog, Vec<SkippedObject>) {
-    load_with(schema_sql, dialect, Arc::default(), &read_serially)
+    load_with(schema_sql, dialect, Arc::default(), None)
 }
 
 /// [`load`], with the Python types the project sets for SQL types and columns, and the
-/// runner that reads the statements.
+/// runner that reads the statements in windows, if any.
 pub(crate) fn load_with(
     schema_sql: &str,
     dialect: &str,
     overrides: Arc<TypeOverrides>,
-    run: BatchRunner<'_>,
+    run: Option<BatchRunner<'_>>,
 ) -> (Catalog, Vec<SkippedObject>) {
     // The built-ins are read once per process: parsing them costs more than most schemas.
     static BUILTIN: LazyLock<Loader> = LazyLock::new(|| {
@@ -468,7 +484,7 @@ pub(crate) fn load_with(
             SqlDialect::Postgres,
             &mut loader,
             &mut Vec::new(),
-            &read_serially,
+            None,
         );
         loader.run(ops);
         loader.search_path = vec!["public".to_string()];
@@ -561,7 +577,7 @@ mod tests {
     use std::thread;
 
     use super::*;
-    use crate::analyzer::{analyze_select, load_schema_in_batches};
+    use crate::analyzer::{analyze_select, load_schema_in_batches, load_schema_with_overrides};
 
     fn assert_send<T: Send>() {}
 
@@ -602,8 +618,11 @@ mod tests {
     }
 
     /// Every probe's columns and the skipped list, as one comparable value.
-    fn load_and_probe(sql: &str, run: BatchRunner<'_>) -> String {
-        let (schema, skipped) = load_schema_in_batches(sql, "postgres", Default::default(), run);
+    fn load_and_probe(sql: &str, run: Option<BatchRunner<'_>>) -> String {
+        let (schema, skipped) = match run {
+            Some(run) => load_schema_in_batches(sql, "postgres", Default::default(), run),
+            None => load_schema_with_overrides(sql, "postgres", Default::default()),
+        };
         let mut seen = format!("{skipped:?}\n");
         let names = ["first", "last_t", "edge_t"]
             .map(String::from)
@@ -642,15 +661,19 @@ mod tests {
     fn every_runner_loads_the_same_catalog_across_window_boundaries() {
         for count in [0, 1, 2, 16, 17, 255, 256, 257, 513, 700] {
             let sql = schema(count);
-            let serial = load_and_probe(&sql, &read_serially);
-            assert_eq!(serial, load_and_probe(&sql, &reversed), "{count} reversed");
-            assert_eq!(serial, load_and_probe(&sql, &threaded), "{count} threaded");
+            let streamed = load_and_probe(&sql, None);
+            let serial = load_and_probe(&sql, Some(&read_serially));
+            assert_eq!(streamed, serial, "{count} serial");
+            let reverse = load_and_probe(&sql, Some(&reversed));
+            assert_eq!(streamed, reverse, "{count} reversed");
+            let threads = load_and_probe(&sql, Some(&threaded));
+            assert_eq!(streamed, threads, "{count} threaded");
         }
     }
 
     #[test]
     fn the_mixed_schema_exercises_what_the_runners_must_agree_on() {
-        let seen = load_and_probe(&schema(700), &read_serially);
+        let seen = load_and_probe(&schema(700), None);
         assert!(seen.contains("(\"table\", \"broken0\")"));
         assert!(seen.contains("SELECT * FROM first: Some(["));
         assert!(seen.contains("SELECT * FROM sch1.edge_t: Some(["));

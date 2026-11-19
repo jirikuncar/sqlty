@@ -6,7 +6,7 @@ use sqlparser::ast::Statement;
 use sqlparser::parser::Parser;
 use sqlparser::tokenizer::{Location, Span};
 
-use crate::catalog::{read_serially, BatchRunner};
+use crate::catalog::BatchRunner;
 use crate::diagnostics::{Diagnostics, NameDiagnostic};
 
 use super::dialect::SqlDialect;
@@ -36,7 +36,9 @@ pub fn load_schema_with_overrides(
     dialect: &str,
     overrides: crate::catalog::TypeOverrides,
 ) -> (Schema, Vec<SkippedObject>) {
-    load_schema_in_batches(schema_sql, dialect, overrides, &read_serially)
+    let (catalog, skipped) =
+        crate::catalog::load_with(schema_sql, dialect, Arc::new(overrides), None);
+    (Arc::new(catalog), skipped)
 }
 
 /// [`load_schema_with_overrides`], reading the statements through `run`: it is handed the
@@ -66,7 +68,7 @@ pub fn load_schema_in_batches(
     run: BatchRunner<'_>,
 ) -> (Schema, Vec<SkippedObject>) {
     let (catalog, skipped) =
-        crate::catalog::load_with(schema_sql, dialect, Arc::new(overrides), run);
+        crate::catalog::load_with(schema_sql, dialect, Arc::new(overrides), Some(run));
     (Arc::new(catalog), skipped)
 }
 

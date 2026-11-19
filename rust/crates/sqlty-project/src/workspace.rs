@@ -1723,8 +1723,14 @@ mod tests {
     #[test]
     fn two_directories_share_a_schema_read_in_parallel_while_modules_are_parsed() {
         let schema: String = (0..64)
-            .map(|i| format!("CREATE TABLE t{i} (id INT NOT NULL);\n"))
+            .map(|i| {
+                format!(
+                    "-- {}\nCREATE TABLE t{i} (id INT NOT NULL);\n",
+                    "x".repeat(17_000)
+                )
+            })
             .collect();
+        assert!(schema.len() > 1 << 20);
         let query: &'static str = "q = \"--sql\\nSELECT nope FROM t63\"\n";
         let mut tree: Vec<(String, &'static str)> = vec![
             (

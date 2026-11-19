@@ -55,7 +55,7 @@ mod text_names;
 mod tokens;
 mod typed;
 
-pub use crate::catalog::{BatchRunner, StatementBatch};
+pub use crate::catalog::{read_serially, BatchRunner, StatementBatch};
 #[cfg(test)]
 pub(crate) use api::load_schema;
 pub use api::{
