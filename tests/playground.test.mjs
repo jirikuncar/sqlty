@@ -125,6 +125,18 @@ test("a step keeps the files of the step before that it leaves out", () => {
   assert.deepEqual(fold([first, second]).steps[1], { title: "Two", source: "b", panel: "types" });
 });
 
+test("breaking reports what the new schema breaks in code the old one checks clean", () => {
+  const source = 'q = "--sql\\nSELECT id FROM users"\nr = "--sql\\nSELECT nme FROM users"';
+  const after = "CREATE TABLE users (uid INTEGER PRIMARY KEY, name TEXT NOT NULL);";
+  const answer = ask({ op: "breaking", source, schema: after, before: schema, dialect: "postgres" });
+  assert.deepEqual(answer.diagnostics.map((d) => [d.line, d.rule]), [[1, "unknown-column"]]);
+});
+
+test("a step keeps the schema before a change", () => {
+  const [first, second] = unfold({ steps: [{ before: "b", panel: "breaking", file: "before" }, { source: "c" }] });
+  assert.deepEqual([first.before, first.panel, first.file, second.before], ["b", "breaking", "before", "b"]);
+});
+
 test("a deck without steps is an error", () => {
   assert.throws(() => unfold({ steps: [] }), /steps/);
   assert.throws(() => unfold({ steps: [{ source: 1 }] }), /Step 1/);

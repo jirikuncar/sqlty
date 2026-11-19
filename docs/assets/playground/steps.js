@@ -1,16 +1,16 @@
 // Steps: a list of playground sessions to walk through, each one built on the one before.
 // No DOM, so tests/playground.test.mjs runs it too.
 
-const FIELDS = ["source", "schema", "dialect", "config"];
-const PANELS = ["problems", "types", "json", "notes"];
-const FILES = ["python", "schema", "config"];
+const FIELDS = ["source", "schema", "before", "dialect", "config"];
+const PANELS = ["problems", "types", "breaking", "json", "notes"];
+const FILES = ["python", "schema", "before", "config"];
 
 // The steps of a deck as full sessions: a step that leaves a file out keeps the one before.
 export function unfold(deck) {
   if (!deck || !Array.isArray(deck.steps) || !deck.steps.length) {
     throw new Error("A deck needs a non-empty `steps` list.");
   }
-  let previous = { source: "", schema: "", dialect: "postgres", config: "" };
+  let previous = { source: "", schema: "", before: "", dialect: "postgres", config: "" };
   return deck.steps.map((step, index) => {
     if (!step || typeof step !== "object") throw new Error(`Step ${index + 1} is not an object.`);
     const full = { ...previous };
