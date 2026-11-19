@@ -58,6 +58,9 @@ def issue_url(cause: str) -> str:
 def _hard_exit(code: int) -> NoReturn:
     """End the process without freeing what the run built, as mypy's ``hard_exit`` does:
     freeing the index of a large project takes about as long as checking it."""
+    from sqlty._core import write_profile
+
     sys.stdout.flush()
     sys.stderr.flush()
+    write_profile()
     os._exit(code)

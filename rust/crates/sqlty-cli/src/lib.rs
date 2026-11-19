@@ -326,6 +326,7 @@ fn show_settings(path: &Path, settings: &FileSettings) -> String {
     let untyped = if settings.untyped { "sentinel" } else { "skip" };
     lines.push(format!("untyped = {}", quote(untyped)));
     lines.push(format!("param-types = {}", settings.param_types));
+    lines.push(format!("closed-params = {}", settings.closed_params));
     lines.push(format!("rules = {}", table(rules)));
     lines.push(format!("types = {}", table(types)));
     lines.push(format!("coerce-row-types = {}", list(coerce)));
@@ -1001,7 +1002,7 @@ fn check(
         warnings += usize::from(diag.severity == Severity::Warn);
         match args.output_format {
             OutputFormat::Json | OutputFormat::Sarif => {
-                shown.push(json_diagnostic(path, diag, text));
+                shown.push(Json::Object(json_diagnostic(path, diag, text)));
             }
             OutputFormat::Github => host.out(&format!("{}\n", github_annotation(path, diag))),
             OutputFormat::Text if !common.quiet => {
@@ -1114,7 +1115,7 @@ fn position(text: &str, offset: usize) -> Json {
     Json::object([("line", line.into()), ("column", column.into())])
 }
 
-fn json_diagnostic(path: &Path, diag: &Diagnostic, text: &str) -> Json {
+fn json_diagnostic(path: &Path, diag: &Diagnostic, text: &str) -> Vec<(String, Json)> {
     let fix = diag
         .fix
         .iter()
@@ -1126,7 +1127,7 @@ fn json_diagnostic(path: &Path, diag: &Diagnostic, text: &str) -> Json {
             ])
         })
         .collect();
-    Json::object([
+    [
         ("file", path.display().to_string().into()),
         ("rule", diag.rule.name().into()),
         ("message", diag.message.as_str().into()),
@@ -1135,7 +1136,10 @@ fn json_diagnostic(path: &Path, diag: &Diagnostic, text: &str) -> Json {
         ("start", position(text, diag.span.start)),
         ("end", position(text, diag.span.end)),
         ("fix", Json::Array(fix)),
-    ])
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_string(), value))
+    .collect()
 }
 
 fn github_annotation(path: &Path, diag: &Diagnostic) -> String {

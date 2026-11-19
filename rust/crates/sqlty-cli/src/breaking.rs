@@ -93,11 +93,11 @@ impl Direction {
         }
     }
 
+    /// The name of a finding's direction: backward or forward, never both.
     fn name(self) -> &'static str {
         match self {
-            Self::Backward => "backward",
             Self::Forward => "forward",
-            Self::Both => "both",
+            _ => "backward",
         }
     }
 
@@ -256,9 +256,7 @@ impl<W: BorrowMut<Workspace>> Queries for Revision<W> {
         }
         let disk = Shared(Arc::new(sqlty_project::Disk));
         for path in workspace.query_files()? {
-            let Some(text) = disk.text(&self.root.join(&path)) else {
-                continue;
-            };
+            let text = disk.text(&self.root.join(&path)).unwrap_or_default();
             found.push(File {
                 relative: relative(&self.root, &path),
                 text: Arc::from(text.replace("\r\n", "\n")),
@@ -390,7 +388,8 @@ pub fn baselines(
     }
     if path.is_dir() {
         let mut snapshots: Vec<PathBuf> = std::fs::read_dir(&path)
-            .map_err(|error| format!("{against}: {error}"))?
+            .into_iter()
+            .flatten()
             .filter_map(|entry| Some(entry.ok()?.path()))
             .filter(|file| file.is_file() && file.extension().is_some_and(|ext| ext == "json"))
             .collect();
@@ -407,8 +406,8 @@ pub fn baselines(
         }
     }
     let disk = Shared(Arc::new(sqlty_project::Disk));
-    let (found, _) = project::schema_files(&[against.to_string()], cwd, &disk)
-        .map_err(|error| error.to_string())?;
+    // The disk reads every directory, so it never needs one read first.
+    let (found, _) = project::schema_files(&[against.to_string()], cwd, &disk).unwrap_or_default();
     let texts: Vec<String> = found.iter().filter_map(|file| disk.text(file)).collect();
     if texts.is_empty() {
         return Err(format!("{against} has no schema .sql files"));
@@ -651,20 +650,18 @@ fn report(host: &mut dyn Host, findings: &[Finding], head: &str, format: OutputF
             let rows = findings
                 .iter()
                 .map(|finding| {
-                    let mut row =
+                    let mut fields =
                         json_diagnostic(&finding.path, &finding.diagnostic, &finding.text);
-                    if let Json::Object(fields) = &mut row {
-                        if format == OutputFormat::Sarif {
-                            for (key, value) in fields.iter_mut() {
-                                if key == "message" {
-                                    *value = message(finding).into();
-                                }
+                    if format == OutputFormat::Sarif {
+                        for (key, value) in &mut fields {
+                            if key == "message" {
+                                *value = message(finding).into();
                             }
                         }
-                        fields.push(("direction".into(), finding.direction.name().into()));
-                        fields.push(("against".into(), finding.against.as_str().into()));
                     }
-                    row
+                    fields.push(("direction".into(), finding.direction.name().into()));
+                    fields.push(("against".into(), finding.against.as_str().into()));
+                    Json::Object(fields)
                 })
                 .collect();
             let json = match format {
@@ -735,18 +732,14 @@ impl Worktree {
             ],
         )?;
         static ADDED: AtomicUsize = AtomicUsize::new(0);
-        let directory = loop {
-            let directory = std::env::temp_dir().join(format!(
-                "sqlty-breaking-{}-{}",
-                std::process::id(),
-                ADDED.fetch_add(1, Ordering::Relaxed)
-            ));
-            match std::fs::create_dir(&directory) {
-                Ok(()) => break directory,
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-                Err(error) => return Err(error.to_string()),
-            }
-        };
+        let directory = std::env::temp_dir().join(format!(
+            "sqlty-breaking-{}-{}",
+            std::process::id(),
+            ADDED.fetch_add(1, Ordering::Relaxed)
+        ));
+        // A process of the same id left it behind.
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
         // Named like the repository, so its files have the module names they have there.
         let name = root.file_name().unwrap_or_default();
         let mut worktree = Self {
@@ -768,8 +761,8 @@ impl Worktree {
             ],
         )?;
         self::checkout(&worktree.checkout, paths)?;
-        worktree.checkout = std::fs::canonicalize(&worktree.checkout)
-            .map_err(|error| format!("{checkout}: {error}"))?;
+        worktree.checkout =
+            std::fs::canonicalize(&worktree.checkout).unwrap_or(worktree.checkout.clone());
         Ok(worktree)
     }
 }
@@ -824,12 +817,14 @@ fn checkout(checkout: &Path, paths: &[PathBuf]) -> Result<(), String> {
     let disk = sqlty_project::Disk;
     let base = std::fs::canonicalize(checkout).unwrap_or_else(|_| checkout.to_path_buf());
     let mut needed = Vec::new();
-    for directory in configs {
-        let found = match project::find(&base.join(directory), &disk) {
-            Ok(Some(found)) => found,
-            Ok(None) => continue,
-            Err(_) => return full(checkout),
-        };
+    let found = configs
+        .iter()
+        .map(|directory| project::find(&base.join(directory), &disk))
+        .collect::<Result<Vec<_>, _>>();
+    let Ok(found) = found else {
+        return full(checkout);
+    };
+    for found in found.into_iter().flatten() {
         let table = &found.config.table;
         let entries: Vec<String> = ["schema", "queries"]
             .iter()
@@ -911,26 +906,28 @@ fn restore(checkout: &Path, names: &[PathBuf], listed: &[PathBuf]) -> Result<(),
         .filter(|name| listed.contains(name) || directories.contains(name.as_path()))
         .map(|name| name.to_string_lossy().replace('\\', "/"))
         .collect();
-    if present.is_empty() {
-        return Ok(());
+    if !present.is_empty() {
+        let mut args: Vec<String> = ["checkout", "--quiet", "HEAD", "--"]
+            .map(str::to_string)
+            .to_vec();
+        args.extend(present.iter().map(|name| format!(":(literal){name}")));
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        git(checkout, &args)?;
     }
-    let mut args: Vec<String> = ["checkout", "--quiet", "HEAD", "--"]
-        .map(str::to_string)
-        .to_vec();
-    args.extend(present.iter().map(|name| format!(":(literal){name}")));
-    let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    git(checkout, &args).map(|_| ())
+    Ok(())
+}
+
+fn spawn_error(error: &std::io::Error) -> String {
+    match error.kind() {
+        std::io::ErrorKind::NotFound => "git is not installed".to_string(),
+        _ => format!("git: {error}"),
+    }
 }
 
 /// The standard output of `git ARGS...` in `cwd`, trimmed.
 fn git(cwd: &Path, args: &[&str]) -> Result<String, String> {
-    let output = match Command::new("git").args(args).current_dir(cwd).output() {
-        Ok(output) => output,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Err("git is not installed".to_string())
-        }
-        Err(error) => return Err(format!("git: {error}")),
-    };
+    let output = Command::new("git").args(args).current_dir(cwd).output();
+    let output = output.map_err(|error| spawn_error(&error))?;
     if !output.status.success() {
         if args.starts_with(&["rev-parse", "--verify"]) {
             let reference = args[args.len() - 1].trim_end_matches("^{commit}");
@@ -940,10 +937,10 @@ fn git(cwd: &Path, args: &[&str]) -> Result<String, String> {
             ));
         }
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(match stderr.is_empty() {
-            true => format!("git {} failed", args.join(" ")),
-            false => stderr,
-        });
+        let failed = format!("git {} failed", args.join(" "));
+        return Err(Some(stderr)
+            .filter(|stderr| !stderr.is_empty())
+            .unwrap_or(failed));
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
@@ -1048,6 +1045,104 @@ mod tests {
     }
 
     #[test]
+    fn a_snapshot_keeps_the_settings_of_its_files() {
+        let config = (
+            "pyproject.toml",
+            "[tool.sqlty]\nschema = \"schema.sql\"\n[tool.sqlty.rules]\nselect-star = \"ignore\"\n\
+             [tool.sqlty.types]\nTEXT = \"str\"\n[[tool.sqlty.functions]]\n\
+             import-path = \"app.db.fetch\"\nquery-param = \"sql\"\n",
+        );
+        let helper = (
+            "app/db.py",
+            "from typing import Annotated\nfrom sqlty import SQL\n\
+             def run(q: Annotated[str, SQL]): ...\ndef fetch(sql): ...\n",
+        );
+        let code = (
+            "app/q.py",
+            "from app.db import fetch, run\nrun(\"SELECT handle FROM users\")\n\
+             fetch(\"SELECT handle FROM users\")\n",
+        );
+        let root = project(
+            "settings",
+            &[config, ("schema.sql", NEW_SCHEMA), helper, code],
+        );
+        let mut saved = snapshot(&root);
+        std::fs::write(root.join("schema.sql"), OLD_SCHEMA).expect("writes");
+        let mut head = open(&root);
+        let findings = compare(Direction::Backward, "v", &mut saved, &mut head, (3, 14));
+        let lines: Vec<usize> = findings
+            .expect("compares")
+            .into_iter()
+            .map(|finding| finding.diagnostic.line)
+            .collect();
+        assert_eq!(lines, [2, 3]);
+        let files = saved.files().expect("reads");
+        let file = files
+            .iter()
+            .find(|file| file.relative == Path::new("app/q.py"));
+        let settings = &file.expect("saved").settings;
+        assert_eq!(
+            settings.rules.get("select-star").map(String::as_str),
+            Some("ignore")
+        );
+        assert_eq!(settings.types, [("TEXT".to_string(), "str".to_string())]);
+        std::fs::remove_dir_all(&root).expect("removes");
+    }
+
+    #[test]
+    fn names_each_query_format() {
+        use sqlty_python::queries::Format;
+        let names = [
+            Format::Auto,
+            Format::Aiosql,
+            Format::Sqlc,
+            Format::Pugsql,
+            Format::File,
+        ]
+        .map(snapshot::format_name);
+        assert_eq!(names, ["auto", "aiosql", "sqlc", "pugsql", "file"]);
+    }
+
+    #[test]
+    fn rejects_a_snapshot_of_another_shape() {
+        let root = project("shapes", &[("s.json", "")]);
+        let path = root.join("s.json");
+        let file = r#""files":{"a.py":{"settings":9}}"#;
+        for (body, why) in [
+            (r#""schemas":{}"#, "invalid schemas"),
+            (
+                r#""schemas":[{"sql":"","dialect":"nope"}]"#,
+                "invalid dialect",
+            ),
+            (r#""schemas":[],"settings":{}"#, "invalid settings"),
+            (
+                r#""schemas":[],"settings":[{"dialect":"postgres","schema":3}]"#,
+                "invalid schema index",
+            ),
+            (
+                r#""schemas":[],"settings":[{"dialect":"postgres","rules":{"nope":"error"}}]"#,
+                "nope",
+            ),
+            (
+                r#""schemas":[],"settings":[],"directories":[]"#,
+                "invalid directories",
+            ),
+            (
+                &format!(r#""schemas":[],"settings":[],"directories":{{}},{file}"#),
+                "invalid settings index",
+            ),
+        ] {
+            std::fs::write(&path, format!(r#"{{"sqlty":1,{body}}}"#)).expect("writes");
+            let error = Snapshot::load(&path, &path, "s", &[PathBuf::from(".")], (3, 14)).err();
+            assert!(
+                error.as_ref().is_some_and(|error| error.contains(why)),
+                "{body}: {error:?}"
+            );
+        }
+        std::fs::remove_dir_all(&root).expect("removes");
+    }
+
+    #[test]
     fn spells_paths_relative_to_a_base() {
         let relative = |path: &str, base: &str| relative_to(Path::new(path), Path::new(base));
         assert_eq!(relative("/r/db/s.sql", "/r"), PathBuf::from("db/s.sql"));
@@ -1055,6 +1150,17 @@ mod tests {
         assert_eq!(relative("/x/s.sql", "/r/a"), PathBuf::from("../../x/s.sql"));
         let above: Vec<&Path> = parents(Path::new("a/b")).collect();
         assert_eq!(above, [Path::new("a"), Path::new(".")]);
+    }
+
+    #[test]
+    fn restores_nothing_without_git_when_nothing_is_listed() {
+        assert_eq!(restore(Path::new("/nonexistent"), &[], &[]), Ok(()));
+    }
+
+    #[test]
+    fn names_why_git_did_not_start() {
+        let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        assert_eq!(spawn_error(&denied), "git: permission denied");
     }
 
     #[test]

@@ -76,9 +76,7 @@ pub fn run(
         .cloned()
         .ok_or_else(|| format!("{}: not a Python file sqlty reads", path.display()))?;
     let text = workspace.text(&path).unwrap_or("").to_string();
-    let Some(context) = workspace.completion(&path) else {
-        return Err(format!("{}: not a Python file sqlty reads", path.display()));
-    };
+    let context = workspace.completion(&path).ok_or("no completion context")?;
     let style = ImportStyle::parse(context.import_style.as_deref()).map_err(|e| e.to_string())?;
     let queries = locate::Queries::new(&text, &style, &context.helper_starts);
     let offset = offset(&text, location.line, location.column);
@@ -157,6 +155,18 @@ mod tests {
         for wrong in ["app.py:12", ":1:2", "app.py:a:2", "app.py:1:+2"] {
             assert!(location(wrong).is_err(), "{wrong}");
         }
+    }
+
+    #[test]
+    fn names_each_kind() {
+        let kinds = [
+            CandidateKind::Table,
+            CandidateKind::View,
+            CandidateKind::Cte,
+            CandidateKind::Column,
+            CandidateKind::Join,
+        ];
+        assert_eq!(kinds.map(kind), ["table", "view", "cte", "column", "join"]);
     }
 
     #[test]

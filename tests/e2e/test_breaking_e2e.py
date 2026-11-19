@@ -484,6 +484,15 @@ def test_a_snapshot_that_is_not_json_is_an_error(cli: Cli, tmp_path: Path) -> No
     assert result.stderr.startswith("sqlty: error: broken.json is not a sqlty snapshot: EOF")
 
 
+def test_a_path_outside_the_repository_is_an_error(cli: Cli, repo: Path, tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    found = cli(["breaking", "--against", "HEAD~1", str(outside)], {"cwd": repo})
+
+    assert (found.returncode, f"{outside} is not in" in found.stderr) == (2, True)
+
+
 def test_threads_give_the_same_findings(cli: Cli, repo: Path) -> None:
     for i in range(4):
         (repo / "app" / f"m{i}.py").write_text(OLD_CODE + NEW_CODE)

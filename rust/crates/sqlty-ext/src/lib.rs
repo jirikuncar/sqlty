@@ -2321,6 +2321,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(skills, m)?)?;
     m.add_function(wrap_pyfunction!(cli::cli, m)?)?;
     m.add_function(wrap_pyfunction!(cli::cli_reference, m)?)?;
+    m.add_function(wrap_pyfunction!(cli::write_profile, m)?)?;
     config::register(m)?;
     Ok(())
 }

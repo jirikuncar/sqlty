@@ -37,6 +37,7 @@ dialect = "postgres"
 schema = true
 untyped = "skip"
 param-types = true
+closed-params = false
 rules = { "unknown-column" = "ignore" }
 ...
 

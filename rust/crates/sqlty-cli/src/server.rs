@@ -262,14 +262,15 @@ impl Baseline {
                 &mut head,
                 self.version,
             )?;
-            for finding in findings {
-                let inside = match self.prefix == Path::new(".") {
-                    true => &finding.path,
-                    false => match finding.path.strip_prefix(&self.prefix) {
-                        Ok(inside) => inside,
-                        Err(_) => continue,
-                    },
-                };
+            let prefix = (self.prefix != Path::new(".")).then_some(self.prefix.as_path());
+            let inside = |path: &Path| match prefix {
+                Some(prefix) => path.strip_prefix(prefix).ok().map(Path::to_path_buf),
+                None => Some(path.to_path_buf()),
+            };
+            let findings = findings
+                .into_iter()
+                .filter_map(|finding| Some((inside(&finding.path)?, finding)));
+            for (inside, finding) in findings {
                 let path = self.root.join(inside);
                 self.backward.entry(path).or_default().push(finding);
             }

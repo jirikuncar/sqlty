@@ -534,6 +534,24 @@ def test_complete_lists_the_names_at_a_cursor(tmp_path, monkeypatch, capsys) -> 
     assert (code, err) == (2, "sqlty: error: notes.txt: not a Python file sqlty reads\n")
 
 
+def test_complete_lists_tables_and_joins(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
+    (tmp_path / "schema.sql").write_text(
+        "CREATE TABLE t (id INTEGER);\nCREATE TABLE u (id INTEGER, t_id INTEGER REFERENCES t(id));\n"
+    )
+    (tmp_path / "q.py").write_text('q = "--sql\\nSELECT 1 FROM t JOIN "\n')
+    monkeypatch.chdir(tmp_path)
+
+    _, out, _ = _run(["complete", "q.py:1:34", "."], capsys)
+
+    assert out.splitlines()[:3] == [
+        "u ON u.t_id = t.id\tjoin\tpublic\t",
+        "t\ttable\tpublic\t",
+        "u\ttable\tpublic\t",
+    ]
+    assert _run(["complete", "q.py:1:1"], capsys) == (0, "", "")
+
+
 def _run(argv: list[str], capsys) -> tuple[int, str, str]:
     """Run ``main`` and return (exit code, stdout, stderr)."""
     code = 0
@@ -1065,6 +1083,39 @@ def test_config_file_replaces_discovery(tmp_path, monkeypatch, name, content) ->
     assert _settings(Path("pkg/q.py"), "--config-file", str(config))["dialect"] == "postgres"
 
 
+def test_config_file_extends_a_chain(tmp_path, monkeypatch) -> None:
+    (tmp_path / "base.toml").write_text('dialect = "sqlite"\n[rules]\nselect-star = "ignore"\n')
+    (tmp_path / "mid.toml").write_text('extend = "base.toml"\nimport-style = "import sqlty"\n')
+    (tmp_path / "sqlty.toml").write_text('extend = "mid.toml"\n')
+    monkeypatch.chdir(tmp_path)
+
+    found = _settings(tmp_path / "pkg" / "q.py", "--config-file", "sqlty.toml")
+
+    assert (found["dialect"], found["import-style"]) == ("sqlite", "import sqlty")
+    assert found["rules"] == {"select-star": "ignore"}
+
+
+def test_requires_python_comes_from_the_nearest_pyproject_holding_it(tmp_path) -> None:
+    (tmp_path / "pyproject.toml").write_text('[project]\nrequires-python = ">=3.15"\n')
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "pyproject.toml").write_text("[tool.sqlty]\nparam-types = true\n")
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "lib" / "pyproject.toml").write_text('[project]\nrequires-python = ">=3.14"\n')
+
+    assert _settings(tmp_path / "app" / "q.py")["closed-params"]
+    assert not _settings(tmp_path / "lib" / "q.py")["closed-params"]
+
+
+def test_requires_python_skips_a_pyproject_without_it(tmp_path, monkeypatch) -> None:
+    """Without a config, the search starts at the current directory."""
+    (tmp_path / "pyproject.toml").write_text('[project]\nrequires-python = ">=3.15"\n')
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "pyproject.toml").write_text('[project]\nname = "app"\n')
+    monkeypatch.chdir(tmp_path / "app")
+
+    assert _settings(tmp_path / "app" / "q.py")["closed-params"]
+
+
 @pytest.mark.parametrize(
     ("name", "content", "message"),
     [
@@ -1127,6 +1178,23 @@ def test_inline_config_overrides(tmp_path, monkeypatch, capsys) -> None:
     (tmp_path / "q.py").write_text('q = "--sql\\nSELECT id FROM users"\n')
     main(["rewrite", *flags, "."])
     assert 'SQL[tuple[int]]("--sql' in (tmp_path / "q.py").read_text()
+
+
+def test_show_settings_prints_what_a_file_is_checked_with(tmp_path, monkeypatch) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.sqlty]\nimport-style = "import sqlty"\ncoerce-row-types = ["app.Row"]\n'
+        'queries = ["sql"]\n[tool.sqlty.types]\nDATE = "datetime.date"\n'
+        '[[tool.sqlty.functions]]\nimport-path = "db.fetch"\nquery-param = "sql"\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    settings = _settings(Path("q.py"))
+
+    assert settings["import-style"] == "import sqlty"
+    assert settings["types"] == {"DATE": "datetime.date"}
+    assert settings["functions"] == ["db.fetch"]
+    assert (settings["coerce-row-types"], settings["queries"]) == (["app.Row"], ["sql"])
+    assert settings["base"] == str(tmp_path)
 
 
 def test_inline_config_works_with_isolated(tmp_path, monkeypatch) -> None:

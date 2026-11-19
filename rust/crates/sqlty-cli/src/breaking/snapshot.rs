@@ -115,9 +115,8 @@ pub fn save<W: std::borrow::BorrowMut<Workspace>>(
         "directories": by_directory,
         "files": files,
     });
-    serde_json::to_string_pretty(&data)
-        .map(|text| text + "\n")
-        .map_err(|error| error.to_string())
+    // A `Value` always serializes: its keys are strings.
+    Ok(serde_json::to_string_pretty(&data).unwrap_or_default() + "\n")
 }
 
 fn index(items: &mut Vec<Value>, item: Value) -> usize {
@@ -146,7 +145,7 @@ fn posix(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
-fn format_name(format: Format) -> &'static str {
+pub(crate) fn format_name(format: Format) -> &'static str {
     match format {
         Format::Auto => "auto",
         Format::Aiosql => "aiosql",
@@ -323,11 +322,10 @@ impl Snapshot {
                 .iter()
                 .position(|(text, ..)| Arc::ptr_eq(text, sql));
         }
-        let nearest = super::parents(relative)
-            .map(posix)
-            .find(|directory| self.directories.contains_key(directory))
-            .unwrap_or_else(|| ".".to_string());
-        self.directories.get(&nearest).copied().flatten()
+        super::parents(relative)
+            .find_map(|directory| self.directories.get(&posix(directory)))
+            .copied()
+            .flatten()
     }
 }
 

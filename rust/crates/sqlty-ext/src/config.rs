@@ -70,27 +70,6 @@ fn find_config(py: Python<'_>, directory: PathBuf) -> PyResult<Option<FoundConfi
         .transpose()
 }
 
-/// The configuration of the file at `path`, as `--config-file` names it, `extend` applied
-/// with paths relative to `base`; see `find_config`.
-///
-/// Raises:
-///     ValueError: as for `find_config`, or the file is missing or has no sqlty table
-#[pyfunction]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "PyO3 extracts a PathBuf, not a Path"
-)]
-fn config_file<'py>(
-    py: Python<'py>,
-    path: PathBuf,
-    base: PathBuf,
-) -> PyResult<(Bound<'py, PyDict>, Vec<String>)> {
-    let found = py
-        .detach(|| project::load_file(&path, &base, &Disk))
-        .map_err(find_error)?;
-    converted(py, found)
-}
-
 /// The `types` entries `driver` adds in `dialect`, under the project's own.
 #[pyfunction]
 fn driver_types(driver: &str, dialect: &str) -> Vec<(String, String)> {
@@ -106,7 +85,6 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(validate_config, m)?)?;
     m.add_function(wrap_pyfunction!(driver_types, m)?)?;
     m.add_function(wrap_pyfunction!(find_config, m)?)?;
-    m.add_function(wrap_pyfunction!(config_file, m)?)?;
     m.add("DEFAULT_EXCLUDE", project::DEFAULT_EXCLUDE)?;
     Ok(())
 }

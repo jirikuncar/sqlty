@@ -336,6 +336,9 @@ def skills() -> list[tuple[str, str]]: ...
 def cli(args: list[str]) -> int:
     """Run ``sqlty ARGS...`` (``args[0]`` is the program); the exit code."""
 
+def write_profile() -> None:
+    """Write the coverage profile of an instrumented build; ``os._exit`` skips it."""
+
 def cli_reference() -> list[tuple[str, str, list[tuple[str, str]]]]:
     """``(name, usage, [(option, help)])`` of the root and each command of ``sqlty``."""
 
@@ -353,6 +356,5 @@ FUNCTION_KEYS: tuple[str, ...]
 def validate_config(table: dict[str, Any], source: str) -> tuple[dict[str, Any], list[str]]: ...
 def driver_types(driver: str, dialect: str) -> list[tuple[str, str]]: ...
 def find_config(directory: Path) -> tuple[dict[str, Any], list[str], Path] | None: ...
-def config_file(path: Path, base: Path) -> tuple[dict[str, Any], list[str]]: ...
 
 DEFAULT_EXCLUDE: list[str]

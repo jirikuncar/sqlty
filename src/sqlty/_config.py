@@ -2,8 +2,6 @@
 
 import logging
 import re
-import tomllib
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -36,28 +34,6 @@ def requires_closed(requires_python: str | None) -> bool:
         [True, True, False, False, False]
     """
     return any((int(a), int(b)) >= (3, 15) for a, b in _LOWER_BOUND.findall(requires_python or ""))
-
-
-def requires_python(directory: Path | None) -> str | None:
-    """``[project] requires-python`` of the nearest ``pyproject.toml`` holding it, from ``directory`` up."""
-    current = (directory or Path.cwd()).resolve()
-    for folder in (current, *current.parents):
-        pyproject = folder / "pyproject.toml"
-        if pyproject.is_file():
-            found = _requires_python_cached(pyproject, pyproject.stat().st_mtime_ns)
-            if found is not None:
-                return found
-    return None
-
-
-@lru_cache(maxsize=256)
-def _requires_python_cached(path: Path, mtime_ns: int) -> str | None:
-    try:
-        found = tomllib.loads(path.read_text(encoding="utf-8")).get("project", {})
-    except OSError, UnicodeDecodeError, tomllib.TOMLDecodeError:
-        return None
-    value = found.get("requires-python") if isinstance(found, dict) else None
-    return value if isinstance(value, str) else None
 
 
 def driver_types(
@@ -308,30 +284,6 @@ def find_config(project_root: Path | None = None) -> tuple[Config, Path | None]:
         return {}, None
     table, skipped, path = found
     return _converted(table, skipped, str(path)), path
-
-
-def load_config_file(path: Path) -> Config:
-    """Load the configuration of a file named by ``--config``.
-
-    A file named ``pyproject.toml`` must have a ``[tool.sqlty]`` table and one named
-    ``Cargo.toml`` a ``[package.metadata.sqlty]`` or ``[workspace.metadata.sqlty]``
-    table; any other file, such as ``sqlty.toml``, holds the same keys at the top level. Raises ``ConfigError`` when
-    the file is missing, is not TOML, lacks its table or has an invalid key.
-
-    Example:
-        >>> load_config_file(Path("missing.toml"))  # doctest: +ELLIPSIS
-        Traceback (most recent call last):
-        sqlty._config.ConfigError: config file does not exist: missing.toml
-    """
-    if not path.exists():
-        raise ConfigError(f"config file does not exist: {path}")
-    if not path.is_file():
-        raise ConfigError(f"config path is not a file: {path}")
-    try:
-        found = _core.config_file(path.resolve(), Path.cwd().resolve())
-    except ValueError as exc:
-        raise ConfigError(str(exc)) from None
-    return _converted(*found, str(path))
 
 
 def _parse_table(tool_config: dict[str, Any], source: str) -> Config:
