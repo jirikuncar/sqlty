@@ -4,6 +4,10 @@ Use `uv` for all Python commands. Setup, test and build commands and the
 architecture live in [DEVELOPMENT.md](DEVELOPMENT.md).
 
 - `SQL[T]` is a `str` subclass. It works anywhere a string works.
+- Run `uv run prek run --all-files` before every commit and fix every error it
+  reports; [DEVELOPMENT.md](DEVELOPMENT.md#hooks) lists the hooks.
+- Never force-push, in any variant: resolve a rejected push without rewriting
+  remote history.
 - Every new feature gets an mdtest (see [Markdown tests](#markdown-tests-mdtest)).
 - Review rules for pull requests live in [REVIEW.md](REVIEW.md). Before handing a
   branch over, have a separate agent review it with the
@@ -80,17 +84,6 @@ and 5000 tables.
 | Unqualified column | O(sum of the widths of the tables in scope) | entry counts, Criterion and CodSpeed |
 | Index build | O(N log N + F log F) per schema load, two pointers per name and three words per foreign key | `index_shares_the_catalog_keys`, `bench-ci` `schema_load_5000` RSS |
 | Per keystroke | never O(N), never waiting behind a check | `completion_is_answered_while_a_check_runs` (`sqlty-lsp`) |
-
-## Git safety
-
-**Never force-push.** Do not use `git push --force`, `git push --force-with-lease`,
-or any other force-push variant. If a push is rejected, investigate and resolve
-the conflict without rewriting remote history. No exceptions.
-
-## Hooks
-
-Run `uv run prek run --all-files` before every commit and fix every error it
-reports; [DEVELOPMENT.md](DEVELOPMENT.md#hooks) lists the hooks.
 
 ## The `--sql\n` convention
 
@@ -235,8 +228,6 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 
 `uv run pytest 'tests/mdtest/check/user_types.md::TypedDict - field type mismatch'`
 reruns one test; failures print this command.
-
-- Tests must use `--sql\n` (not `--sql ` with space) — space makes the line a SQL comment.
 
 ## Documentation philosophy
 
