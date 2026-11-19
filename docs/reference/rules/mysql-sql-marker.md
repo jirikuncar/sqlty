@@ -3,7 +3,7 @@ order: 130
 group: "query"
 severity: "warn"
 fixable: true
-summary: "--sql marker with dialect = \"mysql\", which MySQL rejects; use \"-- sql\""
+summary: "--sql marker with the MySQL dialect, which MySQL rejects; run sqlty check --fix"
 origin: "Python"
 ---
 

@@ -32,7 +32,7 @@ stale-type = "error"
 | [`redundant-literal`](rules/redundant-literal.md) | Row type | ignore | no | Row type field is a Literal that lists values its column never takes |
 | [`select-star`](rules/select-star.md) | Query | warn | yes | SELECT * that sqlty check --fix expands to a column list |
 | [`select-star-no-schema`](rules/select-star-no-schema.md) | Query | error | no | SELECT * with no schema to expand it |
-| [`mysql-sql-marker`](rules/mysql-sql-marker.md) | Query | warn | yes | --sql marker with dialect = "mysql", which MySQL rejects; use "-- sql" |
+| [`mysql-sql-marker`](rules/mysql-sql-marker.md) | Query | warn | yes | --sql marker with the MySQL dialect, which MySQL rejects; run sqlty check --fix |
 | [`inline-sql-comment`](rules/inline-sql-comment.md) | Query | warn | yes | "--sql SELECT ..." is a SQL comment; use "--sql\nSELECT ..." or run sqlty check --fix |
 | [`unparsed-query`](rules/unparsed-query.md) | Query | warn | no | Query that does not parse, so sqlty cannot check it |
 | [`sqruff`](rules/sqruff.md) | Query | ignore | no | Finding of sqruff's core lint rules in a query |
