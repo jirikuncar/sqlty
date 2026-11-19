@@ -53,7 +53,7 @@ the Python packages sqlty depends on at runtime:
 | [mypy](https://github.com/python/mypy), [ty](https://github.com/astral-sh/ty), [Pyright](https://github.com/microsoft/pyright) | Type checking sqlty, and checking `SQL[T]` with each | MIT |
 | [prek](https://prek.j178.dev) | Git hooks | MIT |
 | [pytest](https://github.com/pytest-dev/pytest), [pytest-cov](https://github.com/pytest-dev/pytest-cov), [pytest-randomly](https://github.com/pytest-dev/pytest-randomly) | The test suite | MIT |
-| [Hypothesis](https://hypothesis.readthedocs.io) | Fuzzing the analyzer and the Lean model | MPL-2.0 |
+| [Hypothesis](https://hypothesis.readthedocs.io) | Fuzzing the analyzer | MPL-2.0 |
 | [inline-snapshot](https://github.com/15r10nk/inline-snapshot) | Python snapshot tests | MIT |
 | [insta](https://insta.rs) | Rust snapshot tests | Apache-2.0 |
 | [Criterion.rs](https://github.com/bheisler/criterion.rs) | Engine benchmarks | MIT or Apache-2.0 |
@@ -61,7 +61,6 @@ the Python packages sqlty depends on at runtime:
 | [DuckDB](https://duckdb.org) | Checking DuckDB's value types | MIT |
 | [Pydantic](https://docs.pydantic.dev) | Checking the table of Pydantic types against Pydantic | MIT |
 | [PyYAML](https://github.com/yaml/pyyaml) | Reading hook and workflow files in tests | MIT |
-| [Lean 4](https://lean-lang.org), [elan](https://github.com/leanprover/elan) | Proofs about the type mapping | Apache-2.0; elan MIT or Apache-2.0 |
 | [Zensical](https://zensical.org) | This documentation site | MIT |
 
 ## Ideas and specifications
@@ -121,16 +120,3 @@ install each one in a separate environment.
 | [Pony ORM](https://github.com/ponyorm/pony) | Attribute types | Apache-2.0 |
 | [SQLObject](https://github.com/sqlobject/sqlobject) | Column types | LGPL |
 | [Synapse](https://github.com/element-hq/synapse) | Running sqlty on a large project's schema and queries | AGPL-3.0 |
-
-## Formal verification
-
-The [Lean model](https://github.com/jirikuncar/sqlty/tree/main/proofs) was chosen after reviewing
-these approaches:
-
-- [Aeneas](https://github.com/AeneasVerif/aeneas) and
-  [hax](https://github.com/cryspen/hax): extracting Rust to a proof assistant.
-- [Verus](https://github.com/verus-lang/verus),
-  [Creusot](https://github.com/creusot-rs/creusot) and
-  [Prusti](https://github.com/viperproject/prusti-dev): proofs written as
-  annotations in Rust.
-- [Surveying the Rust Verification Landscape](https://arxiv.org/abs/2410.01981).

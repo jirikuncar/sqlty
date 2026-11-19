@@ -27,7 +27,6 @@ config
 Config
 Conroy
 CPython
-Creusot
 CTEs
 Danilchenko
 dataclass
@@ -47,7 +46,6 @@ formatter
 Giacomo
 github
 glibc
-hax
 insta
 isort
 Jiri
@@ -80,7 +78,6 @@ PEPs
 prek
 preprocessor
 Prisma
-Prusti
 psycopg
 Pydantic
 pyformat
@@ -134,7 +131,6 @@ unreviewed
 Unlicense
 UUIDs
 uv
-Verus
 virality
 Yesql
 Zapatos
