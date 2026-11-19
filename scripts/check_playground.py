@@ -295,7 +295,6 @@ def sqruff_on_demand(browser: Browser, url: str, watch: Callable[[Page], None]) 
     loaded = "(t) => t.includes('sqruff') && !t.includes('Loading') && !t.includes('did not load')"
     page.wait_for_function(f"({loaded})({problems})", timeout=60_000)
     assert not errors, errors
-    context.close()
 
 
 REGISTRY = "https://registry.npmjs.org/@sqlty/wasm"
