@@ -1,5 +1,5 @@
 ---
-order: 320
+order: 260
 group: "names"
 severity: "error"
 fixable: false

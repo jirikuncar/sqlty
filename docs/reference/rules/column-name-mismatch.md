@@ -3,7 +3,7 @@ order: 30
 group: "row-type"
 severity: "warn"
 fixable: false
-summary: "`NamedTuple` field name differs from its column name"
+summary: "NamedTuple field name differs from its column name"
 origin: "Python"
 ---
 

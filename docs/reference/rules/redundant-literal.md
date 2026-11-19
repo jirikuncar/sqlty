@@ -3,7 +3,7 @@ order: 100
 group: "row-type"
 severity: "ignore"
 fixable: false
-summary: "Row type field is a `Literal` that lists values its column never takes"
+summary: "Row type field is a Literal that lists values its column never takes"
 origin: "Python"
 ---
 

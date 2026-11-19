@@ -1,5 +1,5 @@
 ---
-order: 230
+order: 150
 group: "query"
 severity: "warn"
 fixable: false

@@ -1,9 +1,9 @@
 ---
-order: 270
+order: 210
 group: "names"
 severity: "error"
 fixable: false
-summary: "Two tables of a `FROM` clause read by the same name"
+summary: "Two tables of a FROM clause read by the same name"
 origin: "SQL"
 ---
 

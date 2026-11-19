@@ -1,9 +1,9 @@
 ---
-order: 130
+order: 330
 group: "rewrite"
 severity: "warn"
 fixable: true
-summary: "`--sql` string not wrapped in `SQL[T](...)`"
+summary: "--sql string not wrapped in SQL[T]"
 origin: "Python"
 ---
 

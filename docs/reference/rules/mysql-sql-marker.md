@@ -1,9 +1,9 @@
 ---
-order: 160
+order: 130
 group: "query"
 severity: "warn"
 fixable: true
-summary: "`--sql` marker with `dialect = \"mysql\"`, which MySQL rejects"
+summary: "--sql marker with dialect = \"mysql\", which MySQL rejects; use \"-- sql\""
 origin: "Python"
 ---
 

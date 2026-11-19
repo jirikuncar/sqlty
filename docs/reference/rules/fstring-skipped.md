@@ -1,9 +1,9 @@
 ---
-order: 180
+order: 360
 group: "rewrite"
 severity: "warn"
 fixable: false
-summary: "f-string with `--sql` cannot be rewritten"
+summary: "f-string with --sql cannot be rewritten"
 origin: "Python"
 ---
 

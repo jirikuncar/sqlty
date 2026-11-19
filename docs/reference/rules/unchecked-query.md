@@ -1,9 +1,9 @@
 ---
-order: 200
+order: 380
 group: "rewrite"
 severity: "warn"
 fixable: false
-summary: "`--sql` query that is not plain string literals"
+summary: "--sql query that is not plain string literals"
 origin: "Python"
 ---
 

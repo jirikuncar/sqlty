@@ -3,7 +3,7 @@ order: 120
 group: "query"
 severity: "error"
 fixable: false
-summary: "`SELECT *` with no schema to expand it"
+summary: "SELECT * with no schema to expand it"
 origin: "Python"
 ---
 

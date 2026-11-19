@@ -1,9 +1,9 @@
 ---
-order: 150
+order: 350
 group: "rewrite"
 severity: "error"
 fixable: true
-summary: "`SQL[tuple[...]]` doesn't admit every row the query returns"
+summary: "SQL[tuple[...]] doesn't admit every row the query returns"
 origin: "Python"
 ---
 

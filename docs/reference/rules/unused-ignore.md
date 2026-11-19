@@ -3,7 +3,7 @@ order: 450
 group: "suppression"
 severity: "warn"
 fixable: false
-summary: "`# sqlty: ignore` comment that suppresses nothing"
+summary: "# sqlty: ignore comment that suppresses nothing"
 origin: "Python"
 ---
 

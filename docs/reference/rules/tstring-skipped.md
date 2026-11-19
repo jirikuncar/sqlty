@@ -1,9 +1,9 @@
 ---
-order: 190
+order: 370
 group: "rewrite"
 severity: "warn"
 fixable: false
-summary: "t-string with `--sql` and a field that changes the SQL"
+summary: "t-string with --sql and a field that changes the SQL"
 origin: "Python"
 ---
 

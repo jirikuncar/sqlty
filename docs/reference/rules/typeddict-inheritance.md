@@ -3,7 +3,7 @@ order: 50
 group: "row-type"
 severity: "error"
 fixable: false
-summary: "TypedDict subclass breaks a closed or `extra_items` base (PEP 728)"
+summary: "TypedDict subclass breaks a closed or extra_items base (PEP 728)"
 origin: "Python"
 ---
 

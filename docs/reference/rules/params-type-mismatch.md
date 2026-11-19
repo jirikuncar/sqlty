@@ -3,7 +3,7 @@ order: 440
 group: "params"
 severity: "error"
 fixable: false
-summary: "`P` of `SQL[R, P]` doesn't fit the query's parameters"
+summary: "P of SQL[R, P] doesn't fit the query's parameters"
 origin: "Python"
 ---
 

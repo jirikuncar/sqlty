@@ -1,5 +1,5 @@
 ---
-order: 300
+order: 240
 group: "names"
 severity: "warn"
 fixable: false

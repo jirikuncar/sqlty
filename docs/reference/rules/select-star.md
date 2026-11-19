@@ -3,7 +3,7 @@ order: 110
 group: "query"
 severity: "warn"
 fixable: true
-summary: "`SELECT *`"
+summary: "SELECT * that sqlty check --fix expands to a column list"
 origin: "Python"
 ---
 

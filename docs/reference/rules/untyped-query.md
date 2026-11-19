@@ -1,9 +1,9 @@
 ---
-order: 220
+order: 400
 group: "rewrite"
 severity: "warn"
 fixable: true
-summary: "`SQL[UNTYPED]` query"
+summary: "SQL[UNTYPED] query"
 origin: "Python"
 ---
 
