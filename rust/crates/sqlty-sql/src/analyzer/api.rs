@@ -311,7 +311,8 @@ impl Parsed {
         let mut analyzer = Analyzer::new(
             schema.unwrap_or_else(|| crate::catalog::empty(self.dialect)),
             self.dialect,
-        );
+        )
+        .rooted(stmt);
         analyzer.diag = Diagnostics::collecting();
         analyzer.source = text_source(&self.input.source, self.dialect);
         let Ok(columns) = analyzer.statement_columns(stmt);
@@ -325,10 +326,11 @@ impl Parsed {
     /// The columns the analyzer finds in scope of the completion placeholder; `None` when
     /// the query does not parse or the analyzer never reaches it.
     pub(super) fn probe(&self, schema: &SchemaData) -> Option<Vec<super::Candidate>> {
-        let mut analyzer = Analyzer::new(schema, self.dialect);
+        let stmt = self.first()?;
+        let mut analyzer = Analyzer::new(schema, self.dialect).rooted(stmt);
         analyzer.diag = Diagnostics::collecting();
         analyzer.source = text_source(&self.input.source, self.dialect);
-        let _ = analyzer.statement_columns(self.first()?);
+        let _ = analyzer.statement_columns(stmt);
         analyzer.diag.probed()
     }
 

@@ -23,6 +23,7 @@ use super::dml::{
 use super::explain::Explained;
 use super::expr::is_field_star;
 use super::literals::strip;
+use super::memo::Stable;
 use super::names::{alias_name, column_name, object_name};
 use super::nullability::{Facts, Nullability};
 use super::operators::{common_of, common_type};
@@ -124,6 +125,9 @@ pub(super) struct Analyzer<'a> {
     pub(super) explain: Option<Explained>,
     /// The SQL as parsed, for MySQL and SQLite, which name a column by its expression's text.
     pub(super) source: Option<Rc<str>>,
+    /// The statement being analyzed, whose subqueries the memo finds by address.
+    pub(super) root: Option<&'a Statement>,
+    pub(super) stable: Rc<Stable>,
 }
 
 impl<'a> Analyzer<'a> {
@@ -138,6 +142,8 @@ impl<'a> Analyzer<'a> {
             facts: Facts::default(),
             explain: None,
             source: None,
+            root: None,
+            stable: Rc::default(),
         }
     }
 
