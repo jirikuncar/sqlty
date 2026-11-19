@@ -57,70 +57,61 @@ static FK_ACTION_COLUMNS: LazyLock<regex::Regex> =
 static DROP_EXPRESSION: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::regex(r"(?i)\bDROP\s+EXPRESSION(?:\s+IF\s+EXISTS)?\b"));
 
-/// Apply each statement as it is read, so a parsed statement lives only until it is
-/// applied; the ones waiting on a later definition are returned for [`Loader::run`].
-pub(super) fn read_statements<'a>(
-    statements: impl IntoIterator<Item = ddl::Statement<'a>>,
-    dialect: SqlDialect,
-    loader: &mut Loader,
-    skipped: &mut Vec<SkippedObject>,
-) -> Vec<Op> {
+/// What one statement contributes to the catalog, before it meets the loader's state.
+#[derive(Default)]
+struct Read {
+    search_path: Option<Vec<String>>,
+    ops: Vec<OpKind>,
+    skipped: Vec<SkippedObject>,
+}
+
+/// Parse one statement; it depends on the statement and the dialect only.
+fn read_statement(stmt: &ddl::Statement<'_>, dialect: SqlDialect) -> Read {
     let postgres = dialect == SqlDialect::Postgres;
-    let mut path = Rc::new(vec!["public".to_string()]);
-    let mut pending = Vec::new();
     let parser_dialect = dialect.parser_dialect();
     let parse_part = |text: &str| Parser::new(parser_dialect.as_ref()).try_with_sql(text).ok();
-    for stmt in statements {
-        let stmt = &stmt;
-        if postgres {
-            if let Some(schemas) = stmt.search_path() {
-                loader.search_path = schemas.clone();
-                path = Rc::new(schemas);
-                continue;
-            }
+    let mut read = Read::default();
+    if postgres {
+        if let Some(schemas) = stmt.search_path() {
+            read.search_path = Some(schemas);
+            return read;
         }
-        let mut push = |kind: OpKind| {
-            let op = Op {
-                path: path.clone(),
-                kind,
-            };
-            if !loader.apply(&op, false) {
-                pending.push(op);
-            }
+    }
+    let mut push = |kind: OpKind| read.ops.push(kind);
+    // PostgreSQL and MySQL copy a table's columns with `LIKE`.
+    let reads_like = postgres || dialect == SqlDialect::MySql;
+    if let Some((name, module, args)) = (dialect == SqlDialect::Sqlite)
+        .then(|| stmt.virtual_table())
+        .flatten()
+    {
+        match virtual_table(&name, &module, &args) {
+            Some(create) => push(OpKind::Table(Box::new(create), Vec::new())),
+            None => read.skipped.push(("table", name)),
+        }
+    } else if stmt.is_create_table() {
+        let (likes, text) = match reads_like.then(|| stmt.without_like()).flatten() {
+            Some((text, likes)) => (likes, Some(text)),
+            None => (Vec::new(), None),
         };
-        // PostgreSQL and MySQL copy a table's columns with `LIKE`.
-        let reads_like = postgres || dialect == SqlDialect::MySql;
-        if let Some((name, module, args)) = (dialect == SqlDialect::Sqlite)
-            .then(|| stmt.virtual_table())
-            .flatten()
-        {
-            match virtual_table(&name, &module, &args) {
-                Some(create) => push(OpKind::Table(Box::new(create), Vec::new())),
-                None => skipped.push(("table", name)),
-            }
-        } else if stmt.is_create_table() {
-            let (likes, text) = match reads_like.then(|| stmt.without_like()).flatten() {
-                Some((text, likes)) => (likes, Some(text)),
-                None => (Vec::new(), None),
-            };
-            let parsed = match &text {
-                None => parse_ddl(&stmt.sql(), dialect)
-                    .or_else(|| parse_ddl(&without_fk_action_columns(&stmt.sql()), dialect))
-                    .or_else(|| parse_ddl(&stmt.without_constraints()?, dialect))
-                    .or_else(|| {
-                        let text = stmt.without_partitioning()?;
-                        parse_ddl(&text, dialect).or_else(|| {
-                            let reduced = ddl::split_statements(&text, !postgres);
-                            parse_ddl(&reduced.first()?.without_constraints()?, dialect)
-                        })
-                    }),
-                Some(text) => parse_ddl(text, dialect).or_else(|| {
-                    let reduced = ddl::split_statements(text, false);
-                    parse_ddl(&reduced.first()?.without_constraints()?, dialect)
+        let parsed = match &text {
+            None => parse_ddl(&stmt.sql(), dialect)
+                .or_else(|| parse_ddl(&without_fk_action_columns(&stmt.sql()), dialect))
+                .or_else(|| parse_ddl(&stmt.without_constraints()?, dialect))
+                .or_else(|| {
+                    let text = stmt.without_partitioning()?;
+                    parse_ddl(&text, dialect).or_else(|| {
+                        let reduced = ddl::split_statements(&text, !postgres);
+                        parse_ddl(&reduced.first()?.without_constraints()?, dialect)
+                    })
                 }),
-            };
-            // `CREATE TABLE ... AS query` without columns reads like a view of the query.
-            let parsed = parsed
+            Some(text) => parse_ddl(text, dialect).or_else(|| {
+                let reduced = ddl::split_statements(text, false);
+                parse_ddl(&reduced.first()?.without_constraints()?, dialect)
+            }),
+        };
+        // `CREATE TABLE ... AS query` without columns reads like a view of the query.
+        let parsed =
+            parsed
                 .and_then(|stmts| stmts.into_iter().next())
                 .and_then(|stmt| match stmt {
                     Statement::CreateTable(create)
@@ -139,118 +130,214 @@ pub(super) fn read_statements<'a>(
                     }
                     stmt => Some(stmt),
                 });
-            match parsed {
-                Some(Statement::CreateView(view)) => push(OpKind::View(Box::new(view), true)),
-                Some(Statement::CreateTable(create))
-                    if !create.columns.is_empty()
-                        || postgres
-                        || create.like.is_some()
-                        || !likes.is_empty() =>
-                {
-                    push(OpKind::Table(Box::new(create), likes));
-                }
-                Some(_) => {}
-                None => skipped.push(("table", stmt.table_name())),
-            }
-        } else if stmt.creates("domain") {
-            let parsed = stmt.domain().and_then(|(name, base)| {
-                let name = parse_part(&name)?.parse_object_name(false).ok()?;
-                let base = parse_part(&base)?.parse_data_type().ok()?;
-                Some((name, base))
-            });
-            if let Some((name, base)) = parsed {
-                let mut checked = None;
-                // A collation may equate strings, so the listed values do not bound them.
-                let checks = if stmt.has_word("collate") {
-                    Vec::new()
-                } else {
-                    stmt.domain_checks()
-                };
-                for text in checks {
-                    let found = parse_part(&text)
-                        .and_then(|mut parser| parser.parse_expr().ok())
-                        .and_then(|expr| {
-                            values::check_values(&expr, &|ident| {
-                                ident.value.eq_ignore_ascii_case("value")
-                            })
-                        });
-                    add_values(&mut checked, found);
-                }
-                push(OpKind::Domain(name, base, checked));
-            }
-        } else if stmt.creates("type") {
-            let parsed = parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next());
-            if parsed.is_none() {
-                skipped.push(("statement", statement_text(stmt)));
-            }
-            if let Some(Statement::CreateType {
-                name,
-                representation: Some(representation),
-            }) = parsed
+        match parsed {
+            Some(Statement::CreateView(view)) => push(OpKind::View(Box::new(view), true)),
+            Some(Statement::CreateTable(create))
+                if !create.columns.is_empty()
+                    || postgres
+                    || create.like.is_some()
+                    || !likes.is_empty() =>
             {
-                let def = match representation {
-                    UserDefinedTypeRepresentation::Enum { labels } => {
-                        TypeDef::Enum(labels.into_iter().map(|label| label.value).collect())
-                    }
-                    UserDefinedTypeRepresentation::Composite { attributes } => TypeDef::Composite(
-                        attributes
-                            .into_iter()
-                            .map(|attr| (fold(&attr.name, dialect), attr.data_type))
-                            .collect(),
-                    ),
-                    _ => continue,
-                };
-                push(OpKind::Type(name, def));
+                push(OpKind::Table(Box::new(create), likes));
             }
-        } else if stmt.creates("view") {
-            let parsed = parse_ddl(&stmt.sql(), dialect)
-                .or_else(|| parse_ddl(&stmt.without_check_option()?, dialect));
-            match parsed.and_then(|stmts| stmts.into_iter().next()) {
-                Some(Statement::CreateView(view)) => push(OpKind::View(Box::new(view), false)),
-                _ => {
-                    skipped.push(("view", stmt.view_name()));
-                    if postgres {
-                        push(OpKind::Taint(
-                            Taint::Relation,
-                            stmt.name_parts_after("view"),
-                        ));
-                    }
-                }
+            Some(_) => {}
+            None => read.skipped.push(("table", stmt.table_name())),
+        }
+    } else if stmt.creates("domain") {
+        let parsed = stmt.domain().and_then(|(name, base)| {
+            let name = parse_part(&name)?.parse_object_name(false).ok()?;
+            let base = parse_part(&base)?.parse_data_type().ok()?;
+            Some((name, base))
+        });
+        if let Some((name, base)) = parsed {
+            let mut checked = None;
+            // A collation may equate strings, so the listed values do not bound them.
+            let checks = if stmt.has_word("collate") {
+                Vec::new()
+            } else {
+                stmt.domain_checks()
+            };
+            for text in checks {
+                let found = parse_part(&text)
+                    .and_then(|mut parser| parser.parse_expr().ok())
+                    .and_then(|expr| {
+                        values::check_values(&expr, &|ident| {
+                            ident.value.eq_ignore_ascii_case("value")
+                        })
+                    });
+                add_values(&mut checked, found);
             }
-        } else if postgres && stmt.creates("function") {
-            let parsed = parse_ddl(&stmt.sql(), dialect)
-                .or_else(|| parse_function_without_hints(&stmt.sql()));
-            match parsed.and_then(|stmts| stmts.into_iter().next()) {
-                Some(Statement::CreateFunction(create)) => push(OpKind::Function(Box::new(create))),
-                _ => push(OpKind::Taint(
-                    Taint::Function,
-                    stmt.name_parts_after("function"),
-                )),
-            }
-        } else if stmt.creates("index") {
-            if let Some(Statement::CreateIndex(index)) =
-                parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next())
-            {
-                let name = index
-                    .name
-                    .as_ref()
-                    .and_then(|name| name.0.last()?.as_ident());
-                let key = unique_key(name, &index.columns, dialect);
-                if let (true, None, Some(key)) = (index.unique, &index.predicate, key) {
-                    push(OpKind::UniqueIndex(parts(&index.table_name, dialect), key));
-                }
-            }
-        } else if let Some(trigger) = stmt
-            .before_row_trigger()
-            .filter(|_| matches!(dialect, SqlDialect::Postgres | SqlDialect::MySql))
+            push(OpKind::Domain(name, base, checked));
+        }
+    } else if stmt.creates("type") {
+        let parsed = parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next());
+        if parsed.is_none() {
+            read.skipped.push(("statement", statement_text(stmt)));
+        }
+        if let Some(Statement::CreateType {
+            name,
+            representation: Some(representation),
+        }) = parsed
         {
-            // A SQLite trigger cannot change the row it fires for.
-            push(OpKind::RowTrigger(trigger));
-        } else if matches!(
-            dialect,
-            SqlDialect::Postgres | SqlDialect::MySql | SqlDialect::Sqlite
-        ) {
-            read_alter_or_drop(stmt, dialect, &mut push, skipped);
+            let def = match representation {
+                UserDefinedTypeRepresentation::Enum { labels } => {
+                    TypeDef::Enum(labels.into_iter().map(|label| label.value).collect())
+                }
+                UserDefinedTypeRepresentation::Composite { attributes } => TypeDef::Composite(
+                    attributes
+                        .into_iter()
+                        .map(|attr| (fold(&attr.name, dialect), attr.data_type))
+                        .collect(),
+                ),
+                _ => return read,
+            };
+            push(OpKind::Type(name, def));
+        }
+    } else if stmt.creates("view") {
+        let parsed = parse_ddl(&stmt.sql(), dialect)
+            .or_else(|| parse_ddl(&stmt.without_check_option()?, dialect));
+        match parsed.and_then(|stmts| stmts.into_iter().next()) {
+            Some(Statement::CreateView(view)) => push(OpKind::View(Box::new(view), false)),
+            _ => {
+                read.skipped.push(("view", stmt.view_name()));
+                if postgres {
+                    push(OpKind::Taint(
+                        Taint::Relation,
+                        stmt.name_parts_after("view"),
+                    ));
+                }
+            }
+        }
+    } else if postgres && stmt.creates("function") {
+        let parsed =
+            parse_ddl(&stmt.sql(), dialect).or_else(|| parse_function_without_hints(&stmt.sql()));
+        match parsed.and_then(|stmts| stmts.into_iter().next()) {
+            Some(Statement::CreateFunction(create)) => push(OpKind::Function(Box::new(create))),
+            _ => push(OpKind::Taint(
+                Taint::Function,
+                stmt.name_parts_after("function"),
+            )),
+        }
+    } else if stmt.creates("index") {
+        if let Some(Statement::CreateIndex(index)) =
+            parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next())
+        {
+            let name = index
+                .name
+                .as_ref()
+                .and_then(|name| name.0.last()?.as_ident());
+            let key = unique_key(name, &index.columns, dialect);
+            if let (true, None, Some(key)) = (index.unique, &index.predicate, key) {
+                push(OpKind::UniqueIndex(parts(&index.table_name, dialect), key));
+            }
+        }
+    } else if let Some(trigger) = stmt
+        .before_row_trigger()
+        .filter(|_| matches!(dialect, SqlDialect::Postgres | SqlDialect::MySql))
+    {
+        // A SQLite trigger cannot change the row it fires for.
+        push(OpKind::RowTrigger(trigger));
+    } else if matches!(
+        dialect,
+        SqlDialect::Postgres | SqlDialect::MySql | SqlDialect::Sqlite
+    ) {
+        read_alter_or_drop(stmt, dialect, &mut push, &mut read.skipped);
+    }
+    read
+}
+
+/// Statements read together by one runner task.
+const BATCH: usize = 16;
+/// Statements parsed before the next ones are taken, which bounds the parsed statements alive.
+const WINDOW: usize = 256;
+
+/// A run of consecutive statements, read apart from the loader so a runner may read
+/// batches on other threads.
+pub struct StatementBatch<'a> {
+    statements: Vec<ddl::Statement<'a>>,
+    dialect: SqlDialect,
+    read: Vec<Read>,
+}
+
+impl StatementBatch<'_> {
+    /// Parse the statements of the batch.
+    pub fn read(&mut self) {
+        self.read = self
+            .statements
+            .iter()
+            .map(|stmt| read_statement(stmt, self.dialect))
+            .collect();
+    }
+}
+
+/// Reads every batch of a window, in any order and on any thread.
+pub type BatchRunner<'r> = &'r (dyn Fn(&mut [StatementBatch<'_>]) + Sync);
+
+/// A [`BatchRunner`] that reads the batches one after another.
+pub fn read_serially(batches: &mut [StatementBatch<'_>]) {
+    for batch in batches {
+        batch.read();
+    }
+}
+
+/// Read the statements in windows, apply what each yields in statement order, and drop the
+/// window before the next; the ones waiting on a later definition are returned for
+/// [`Loader::run`].
+pub(super) fn read_statements<'a>(
+    statements: impl IntoIterator<Item = ddl::Statement<'a>>,
+    dialect: SqlDialect,
+    loader: &mut Loader,
+    skipped: &mut Vec<SkippedObject>,
+    run: BatchRunner<'_>,
+) -> Vec<Op> {
+    let mut path = Rc::new(vec!["public".to_string()]);
+    let mut pending = Vec::new();
+    let mut statements = statements.into_iter();
+    loop {
+        let window: Vec<_> = statements.by_ref().take(WINDOW).collect();
+        if window.is_empty() {
+            break;
+        }
+        let reads = if window.len() <= BATCH {
+            window
+                .iter()
+                .map(|stmt| read_statement(stmt, dialect))
+                .collect()
+        } else {
+            let mut batches = Vec::new();
+            let mut rest = window.into_iter();
+            loop {
+                let statements: Vec<_> = rest.by_ref().take(BATCH).collect();
+                if statements.is_empty() {
+                    break;
+                }
+                batches.push(StatementBatch {
+                    statements,
+                    dialect,
+                    read: Vec::new(),
+                });
+            }
+            run(&mut batches);
+            batches
+                .into_iter()
+                .flat_map(|batch| batch.read)
+                .collect::<Vec<_>>()
+        };
+        for read in reads {
+            if let Some(schemas) = read.search_path {
+                loader.search_path = schemas.clone();
+                path = Rc::new(schemas);
+            }
+            for kind in read.ops {
+                let op = Op {
+                    path: path.clone(),
+                    kind,
+                };
+                if !loader.apply(&op, false) {
+                    pending.push(op);
+                }
+            }
+            skipped.extend(read.skipped);
         }
     }
     pending
@@ -361,20 +448,28 @@ pub(super) const BUILTIN_SQL: &str = concat!(
 /// relations, `search_path` and functions; it, MySQL and SQLite follow `ALTER` and `DROP`.
 /// Other dialects read `CREATE TABLE`, `VIEW`, `DOMAIN` and `TYPE` only.
 pub(crate) fn load(schema_sql: &str, dialect: &str) -> (Catalog, Vec<SkippedObject>) {
-    load_with(schema_sql, dialect, Arc::default())
+    load_with(schema_sql, dialect, Arc::default(), &read_serially)
 }
 
-/// [`load`], with the Python types the project sets for SQL types and columns.
+/// [`load`], with the Python types the project sets for SQL types and columns, and the
+/// runner that reads the statements.
 pub(crate) fn load_with(
     schema_sql: &str,
     dialect: &str,
     overrides: Arc<TypeOverrides>,
+    run: BatchRunner<'_>,
 ) -> (Catalog, Vec<SkippedObject>) {
     // The built-ins are read once per process: parsing them costs more than most schemas.
     static BUILTIN: LazyLock<Loader> = LazyLock::new(|| {
         let mut loader = Loader::new(SqlDialect::Postgres);
         let builtin = ddl::statements(BUILTIN_SQL, false);
-        let ops = read_statements(builtin, SqlDialect::Postgres, &mut loader, &mut Vec::new());
+        let ops = read_statements(
+            builtin,
+            SqlDialect::Postgres,
+            &mut loader,
+            &mut Vec::new(),
+            &read_serially,
+        );
         loader.run(ops);
         loader.search_path = vec!["public".to_string()];
         loader
@@ -388,7 +483,7 @@ pub(crate) fn load_with(
     loader.overrides = overrides;
     let mut skipped = Vec::new();
     let statements = ddl::statements(schema_sql, dialect == SqlDialect::MySql);
-    let ops = read_statements(statements, dialect, &mut loader, &mut skipped);
+    let ops = read_statements(statements, dialect, &mut loader, &mut skipped, run);
     loader.run(ops);
     skipped.append(&mut loader.skipped);
     let mut catalog = loader.build();
@@ -458,4 +553,109 @@ fn virtual_table(name: &str, module: &str, args: &[Vec<String>]) -> Option<Creat
         }
     }
     Some(create)
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::thread;
+
+    use super::*;
+    use crate::analyzer::{analyze_select, load_schema_in_batches};
+
+    fn assert_send<T: Send>() {}
+
+    /// `count` statements mixing every kind the reader handles, with a forward reference
+    /// that spans the whole schema and a `search_path` change at a window boundary.
+    fn schema(count: usize) -> String {
+        let mut statements: Vec<String> = (0..count)
+            .map(|i| {
+                let group = i / 12;
+                match i % 12 {
+                    0 => format!("CREATE TABLE t{group} (id int PRIMARY KEY, name text);"),
+                    1 => format!("SET search_path = sch{}, public;", group % 3),
+                    2 => format!("CREATE VIEW v{group} AS SELECT id FROM t{group};"),
+                    3 => format!("CREATE DOMAIN d{group} AS int CHECK (VALUE > 0);"),
+                    4 => format!("CREATE TYPE e{group} AS ENUM ('a', 'b');"),
+                    5 => format!("CREATE TYPE c{group} AS (x int, y text);"),
+                    6 => format!(
+                        "CREATE FUNCTION f{group}() RETURNS int LANGUAGE sql AS 'SELECT 1';"
+                    ),
+                    7 => format!("ALTER TABLE t{group} ADD COLUMN extra int;"),
+                    8 if group % 2 == 0 => format!("DROP TABLE t{group};"),
+                    8 => format!("ALTER TABLE t{group} ALTER COLUMN extra SET NOT NULL;"),
+                    9 => format!("CREATE TABLE broken{group} (id int,, );"),
+                    10 => format!("CREATE VIEW fv{group} AS SELECT id FROM late{group};"),
+                    _ => format!("CREATE TABLE late{group} (id int);"),
+                }
+            })
+            .collect();
+        if count > 1 {
+            statements[0] = "CREATE VIEW first AS SELECT id FROM last_t;".to_string();
+            statements[count - 1] = "CREATE TABLE last_t (id int);".to_string();
+        }
+        if count > 256 {
+            statements[255] = "SET search_path = sch1, public;".to_string();
+            statements[256] = "CREATE TABLE edge_t (id int);".to_string();
+        }
+        statements.join("\n")
+    }
+
+    /// Every probe's columns and the skipped list, as one comparable value.
+    fn load_and_probe(sql: &str, run: BatchRunner<'_>) -> String {
+        let (schema, skipped) = load_schema_in_batches(sql, "postgres", Default::default(), run);
+        let mut seen = format!("{skipped:?}\n");
+        let names = ["first", "last_t", "edge_t"]
+            .map(String::from)
+            .into_iter()
+            .chain((0..50).flat_map(|g| ["t", "v", "fv", "late"].map(|kind| format!("{kind}{g}"))));
+        for name in names {
+            for prefix in ["", "public.", "sch0.", "sch1.", "sch2."] {
+                let probe = format!("SELECT * FROM {prefix}{name}");
+                let columns = analyze_select(&probe, "postgres", Some(&schema));
+                seen.push_str(&format!("{probe}: {columns:?}\n"));
+            }
+        }
+        seen
+    }
+
+    fn reversed(batches: &mut [StatementBatch<'_>]) {
+        for batch in batches.iter_mut().rev() {
+            batch.read();
+        }
+    }
+
+    fn threaded(batches: &mut [StatementBatch<'_>]) {
+        thread::scope(|scope| {
+            for batch in batches.iter_mut() {
+                scope.spawn(|| batch.read());
+            }
+        });
+    }
+
+    #[test]
+    fn a_batch_can_be_read_on_another_thread() {
+        assert_send::<StatementBatch<'static>>();
+    }
+
+    #[test]
+    fn every_runner_loads_the_same_catalog_across_window_boundaries() {
+        for count in [0, 1, 2, 16, 17, 255, 256, 257, 513, 700] {
+            let sql = schema(count);
+            let serial = load_and_probe(&sql, &read_serially);
+            assert_eq!(serial, load_and_probe(&sql, &reversed), "{count} reversed");
+            assert_eq!(serial, load_and_probe(&sql, &threaded), "{count} threaded");
+        }
+    }
+
+    #[test]
+    fn the_mixed_schema_exercises_what_the_runners_must_agree_on() {
+        let seen = load_and_probe(&schema(700), &read_serially);
+        assert!(seen.contains("(\"table\", \"broken0\")"));
+        assert!(seen.contains("SELECT * FROM first: Some(["));
+        assert!(seen.contains("SELECT * FROM sch1.edge_t: Some(["));
+        assert!(seen.contains("SELECT * FROM v1: Some(["));
+        assert!(seen.contains("SELECT * FROM sch1.t2: Some([Column { name: \"id\""));
+        assert!(seen.contains("SELECT * FROM sch2.t2: Some([Column { name: \"*\""));
+    }
 }
