@@ -6,7 +6,7 @@ This guide covers development setup and workflows for SQLTy.
 
 - Python 3.14+
 - [uv](https://docs.astral.sh/uv/) - Fast Python package installer and resolver
-- [rustup](https://rustup.rs/): `rust-toolchain.toml` pins the Rust version (builds the engine, `sqlty._core`, and runs the cargo hooks)
+- [`rustup`](https://rustup.rs/): `rust-toolchain.toml` pins the Rust version (builds the engine, `sqlty._core`, and runs the cargo hooks)
 
 ## Setup
 
