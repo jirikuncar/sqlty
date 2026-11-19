@@ -224,11 +224,13 @@ impl Drop for Busy {
     }
 }
 
+type Receivers = HashMap<String, HashMap<String, (String, String)>>;
+
 /// The helpers and sources of the modules of a checked tree, by module name.
 pub struct HelperIndex {
     pub modules: HashMap<String, Dict<Helper>>,
-    /// `(receiver, method)` to the `(module, name)` of a helper registered with `receivers`.
-    receivers: HashMap<(String, String), (String, String)>,
+    /// Method, then receiver, to the `(module, name)` of a helper registered with `receivers`.
+    receivers: Receivers,
     tree: Arc<Tree>,
     version: Version,
     read: Arc<Mutex<Read>>,
@@ -260,7 +262,7 @@ fn alternation(names: &HashSet<String>) -> Option<Regex> {
 /// An index being filled.
 pub struct Builder {
     modules: HashMap<String, Dict<Helper>>,
-    receivers: HashMap<(String, String), (String, String)>,
+    receivers: Receivers,
     /// The tree forked from, until a module is added.
     tree: Option<Arc<Tree>>,
     added: HashMap<String, Arc<Module>>,
@@ -367,14 +369,15 @@ impl Builder {
         }
     }
 
-    /// Calls of the method `name` of `module` on each of `receivers` call that helper.
+    /// Calls of the method `name` of `module` on each of `receivers` call that helper, unless
+    /// an earlier entry claimed the receiver.
     fn point(&mut self, receivers: &[String], module: &str, name: &str) {
         let method = name.rsplit('.').next().unwrap_or(name);
+        let by_receiver = self.receivers.entry(method.to_string()).or_default();
         for receiver in receivers {
-            self.receivers.insert(
-                (receiver.clone(), method.to_string()),
-                (module.to_string(), name.to_string()),
-            );
+            by_receiver
+                .entry(receiver.clone())
+                .or_insert_with(|| (module.to_string(), name.to_string()));
         }
     }
 
@@ -585,9 +588,7 @@ impl HelperIndex {
 
     /// The helper registered for calls of `method` on a receiver named `receiver`.
     pub fn by_receiver(&self, receiver: &str, method: &str) -> Option<&Helper> {
-        let (module, name) = self
-            .receivers
-            .get(&(receiver.to_string(), method.to_string()))?;
+        let (module, name) = self.receivers.get(method)?.get(receiver)?;
         self.get(module, name)
     }
 

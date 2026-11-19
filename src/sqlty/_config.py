@@ -254,8 +254,9 @@ FUNCTION_KEY_DOCS: dict[str, KeyDoc] = {
         "array of strings",
         "none",
         "`check`",
-        'Names a method is also called on whatever their type: `["db"]` matches `db.one(...)` '
-        "and `self.db.one(...)`. Without a definition to read, the query is the first argument",
+        'Names a method is also called on when sqlty cannot type them: `["db"]` matches '
+        "`db.one(...)` and `self.db.one(...)`. The first entry naming a receiver wins. Without "
+        "a definition to read, the query is the first argument",
     ),
 }
 """Reference docs per key of a ``[[tool.sqlty.functions]]`` entry."""
@@ -331,7 +332,7 @@ class FunctionConfigComplete(TypedDict, total=False):
     import_path: str  # Full import path, e.g. "module.function_name" (required)
     query_param: str  # Parameter holding the SQL query (required)
     return_type_param: str  # Parameter holding the row type (optional)
-    receivers: list[str]  # Names the method is called on, whatever their type (optional)
+    receivers: list[str]  # Untyped receiver names the method is called on (optional)
 
 
 class SQLTyConfig(TypedDict, total=False):

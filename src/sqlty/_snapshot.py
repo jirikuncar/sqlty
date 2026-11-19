@@ -146,6 +146,7 @@ class Snapshot:
             import_style=entry["import_style"],
             untyped=entry["untyped"],
             rules=entry["rules"],
+            # Snapshots written before `receivers` hold three items.
             functions=tuple(
                 (f[0], f[1], f[2], tuple(f[3]) if len(f) > 3 else ()) for f in entry["functions"]
             ),

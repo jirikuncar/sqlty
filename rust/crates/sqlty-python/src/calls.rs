@@ -564,10 +564,10 @@ pub fn helper_calls<'a>(
                     Some(found)
                 } else if let Some(found) = method_of(&prefix, name) {
                     (found.kind != Kind::Instance).then_some(found)
-                } else if let Some(found) = receiver_class(&attr.value, stack, &ctx)
-                    .and_then(|class| method_of(&class, name))
+                } else if let Some(class) = receiver_class(&attr.value, stack, &ctx)
+                    .filter(|class| !matches!(class.rsplit('.').next(), Some("Any" | "object")))
                 {
-                    Some(found)
+                    method_of(&class, name)
                 } else {
                     let receiver = prefix.rsplit('.').next().unwrap_or(&prefix);
                     helpers.and_then(|helpers| helpers.by_receiver(receiver, name))

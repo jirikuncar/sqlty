@@ -187,7 +187,9 @@ async def save(db: store.Db) -> None:
 
 A method called on an attribute or name sqlty cannot type, such as
 `self.db.one(...)` with `db` set at runtime, is found by the receiver's name:
-`receivers` lists the names it is called on, whatever their type.
+`receivers` lists the names it is called on. A receiver of a known class other
+than `Any` or `object` calls that class's method, and the first entry naming a
+receiver wins.
 
 ```toml
 [[tool.sqlty.functions]]
