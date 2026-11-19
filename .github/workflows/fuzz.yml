@@ -59,7 +59,7 @@ jobs:
           python-version: "3.14"
 
       - name: Install Rust toolchain
-        run: rustup toolchain install 1.99.1 --profile minimal && rustup default 1.99.1
+        run: rustup toolchain install
 
       - name: Install the dependencies
         run: uv sync --all-groups --no-group duckdb --no-install-project

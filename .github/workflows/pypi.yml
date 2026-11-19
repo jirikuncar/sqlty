@@ -94,8 +94,6 @@ jobs:
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: ${{ matrix.target }}
-          # Host builds otherwise use the runner image's rustc, which can lag the MSRV.
-          rust-toolchain: 1.99.1
           # --find-interpreter would skip 3.14 under abi3t-py315; the 3.15 build covers 3.15t and later.
           # A pull request builds the abi3t wheel only.
           args: >-
@@ -233,9 +231,7 @@ jobs:
 
       - name: Install Rust toolchain
         if: env.SKIP != 'true'
-        run: |
-          rustup toolchain install 1.99.1 --profile minimal --target "$TARGET"
-          rustup default 1.99.1
+        run: rustup toolchain install && rustup target add "$TARGET"
 
       - name: Install musl-tools
         if: ${{ env.SKIP != 'true' && contains(matrix.target, 'musl') }}

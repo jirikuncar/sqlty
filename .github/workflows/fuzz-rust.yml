@@ -20,6 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
+    env:
+      RUSTUP_TOOLCHAIN: nightly-2026-11-01
+
     defaults:
       run:
         working-directory: rust/fuzz
@@ -31,9 +34,7 @@ jobs:
 
       # cargo-fuzz needs nightly for -Zsanitizer; the coverage job pins the same one.
       - name: Install Rust toolchain
-        run: |
-          rustup toolchain install nightly-2026-11-01 --profile minimal
-          rustup default nightly-2026-11-01
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
 
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz@0.13.2 --locked
