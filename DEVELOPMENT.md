@@ -7,7 +7,7 @@ live in [AGENTS.md](AGENTS.md); review rules in [REVIEW.md](REVIEW.md).
 
 - Python 3.14+
 - [uv](https://docs.astral.sh/uv/)
-- [Rust toolchain](https://rustup.rs/) 1.99+ (builds the engine, `sqlty._core`, and runs the cargo hooks)
+- [`rustup`](https://rustup.rs/): `rust-toolchain.toml` pins the Rust version (builds the engine, `sqlty._core`, and runs the cargo hooks)
 
 ## Setup
 
@@ -253,17 +253,12 @@ rust/
     ├── sqlty-ext/       # PyO3 module sqlty._core; server.rs runs sqlty-lsp
     └── sqlty-bench/     # Criterion benchmarks (make bench-rust)
 editors/vscode/          # VS Code client of sqlty server; see its README
-proofs/                  # Lean 4 model of SqlType::python, with proofs; see its README
 tests/
 ├── _mdtest/             # mdtest plugin: parser, runner over sqlty.core, --update-mdtest
 ├── mdtest/              # The specification, as Markdown tests
 ├── e2e/                 # CLI end-to-end tests and their fixtures
 └── type_oracle/         # Python row-type reader, the oracle for the Rust one
 ```
-
-`proofs/SqlTy/Table.lean` is generated from `scalar_python`: after changing the scalar
-mapping, run `SQLTY_UPDATE_PROOFS=1 cargo test -p sqlty-sql lean_table` and `lake build`
-in `proofs/`.
 
 ### Magic codec internals
 
