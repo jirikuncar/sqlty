@@ -56,7 +56,9 @@ class MDTestFile(pytest.File):
             raise self.CollectError(str(e)) from None
         update = self.config.getoption("--update-mdtest")
         updater = Updater(self.path) if update else None
-        for section in sections:
+        from .runner import owns
+
+        for section in filter(owns, sections):
             yield MDTestItem.from_parent(self, name=section.name, section=section, updater=updater)
 
 

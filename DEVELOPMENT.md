@@ -52,18 +52,17 @@ parallel. CI's Lint job runs the commit hooks on all files.
 | Layer | Location | What it tests |
 |-------|----------|---------------|
 | **Unit** | `tests/test_*.py` | Invariants over the mdtest corpus, bindings, fuzzing, docs |
-| **mdtest** | `tests/mdtest/`, `docs/`, `README.md` | Type inference, rewrite, strip, lint ([format](AGENTS.md#markdown-tests-mdtest)) |
+| **mdtest** | `tests/mdtest/`, `docs/`, `README.md`, `skills/` | Type inference, rewrite, strip, lint ([format](AGENTS.md#markdown-tests-mdtest)), run by each crate's `tests/mdtest.rs` |
 | **E2E** | `tests/e2e/` | CLI in a subprocess, with `inline-snapshot` |
 | **Rust** | `rust/crates/*/` | Engine, CLI (`trycmd`), language server |
 
 ```bash
 uv run pytest                                          # all tests except timing
-uv run pytest tests/mdtest docs README.md               # mdtests
+make test-mdtest                                       # mdtests
 uv run pytest tests/ --ignore=tests/e2e --ignore=tests/mdtest  # unit tests
 uv run pytest tests/e2e/ -v                            # end-to-end tests
 uv run pytest tests/e2e/ --inline-snapshot=update      # accept new e2e output
 uv run pytest -k "integer cast"                        # filter by name
-uv run pytest tests/mdtest/rewrite/basic_rewrite.md -v # one file
 uv run pytest -m timing -n 0 -p no:randomly            # the tests that measure wall time
 uv run pytest -n 0 -p no:randomly                      # one process, in file order
 ```
@@ -273,7 +272,7 @@ rust/
     └── sqlty-bench/     # Criterion benchmarks (make bench-rust)
 editors/vscode/          # VS Code client of sqlty server; see its README
 tests/
-├── _mdtest/             # mdtest plugin: parser, runner over sqlty.core, --update-mdtest
+├── _mdtest/             # mdtest plugin: parser, the codec's `# decoded:`, --update-mdtest
 ├── mdtest/              # The specification, as Markdown tests
 ├── e2e/                 # CLI end-to-end tests and their fixtures
 └── type_oracle/         # Python row-type reader, the oracle for the Rust one

@@ -17,6 +17,8 @@ spec.loader.exec_module(ci_changes)
 
 CRATES = sorted(p.name for p in (ROOT / "rust" / "crates").iterdir() if p.is_dir())
 EVERYTHING = {*CRATES, *ci_changes.PACKAGES}
+# The crates whose tests run the mdtest suite.
+MDTEST = {"sqlty-sql", "sqlty-python", "sqlty-format"}
 
 
 def hit(*changed: str) -> set[str]:
@@ -25,19 +27,22 @@ def hit(*changed: str) -> set[str]:
 
 # fmt: off
 @pytest.mark.parametrize(("changed", "expected"), [
-    (["README.md"], {"python"}),
+    (["README.md"], {"python", *MDTEST}),
+    (["docs/guide/x.md"], {"python", *MDTEST}),
+    (["rust/mdtest/harness.rs"], MDTEST),
     (["plans/2026-11-19-x.md", ".github/workflows/docs.yml"], set()),
     (["CONTRIBUTING.md"], {"python"}),
-    (["skills/sqlty/SKILL.md"], {"sqlty-cli", "sqlty-ext", "python", "engine", "vscode"}),
+    (["skills/sqlty/SKILL.md"], {"sqlty-cli", "sqlty-ext", "python", "engine", "vscode", *MDTEST}),
     (["npm/wasm/engine.js"], {"playground", "vscode"}),
     (["editors/vscode/src/extension.ts"], {"vscode"}),
     (["src/sqlty/__init__.py"], {"python", "engine", "vscode"}),
     (["rust/crates/sqlty-wasm/src/lib.rs"], {"sqlty-wasm", "vscode", "playground"}),
     (["rust/crates/sqlty-cli/src/lib.rs"], {"sqlty-cli", "sqlty-ext", "python", "engine", "vscode"}),
-    (["rust/crates/sqlty-sql/src/lib.rs"], EVERYTHING),
+    (["rust/crates/sqlty-sql/src/lib.rs"], EVERYTHING - {"sqlty-rules"}),
     (["rust/Cargo.lock"], EVERYTHING),
     (["somewhere/new.txt"], EVERYTHING),
-    (["editors/vscode/syntaxes/sqlty.tmLanguage.json"], EVERYTHING),
+    (["editors/vscode/syntaxes/sqlty.tmLanguage.json"], EVERYTHING - {"sqlty-rules"}),
+    (["docs/reference/rules/narrow-type.md"], EVERYTHING),
 ])
 # fmt: on
 def test_a_change_runs_its_packages_and_their_dependents(

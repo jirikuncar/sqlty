@@ -84,9 +84,14 @@ PACKAGES: dict[str, tuple[list[str], list[str]]] = {
 
 # Files outside a crate's directory that its build or tests read.
 CRATE_PATHS = {
-    "sqlty-cli": ["skills/**", "src/sqlty/rules/**"],
+    "sqlty-cli": ["skills/**", "docs/reference/rules/**"],
+    "sqlty-rules": ["docs/reference/rules/**"],
     "sqlty-sql": ["editors/vscode/syntaxes/**"],
 }
+
+# Files only a crate's tests read: a change runs those tests, not the crates that use it.
+MDTEST = ["rust/mdtest/**", "tests/mdtest/**", "docs/*.md", "README.md", "skills/**"]
+TEST_DATA = {"sqlty-sql": MDTEST, "sqlty-python": MDTEST, "sqlty-format": MDTEST}
 
 # A change here runs every package.
 EVERYTHING = [
@@ -151,9 +156,13 @@ def owners(path: str, crates: set[str]) -> set[str] | None:
         return {parts[2]}
     found = {name for name, (paths, _) in PACKAGES.items() if matches(path, paths)}
     found |= {name for name, paths in CRATE_PATHS.items() if matches(path, paths)}
-    if found or matches(path, IGNORED):
+    if found or matches(path, IGNORED) or data(path):
         return found
     return None
+
+
+def data(path: str) -> set[str]:
+    return {name for name, paths in TEST_DATA.items() if matches(path, paths)}
 
 
 def affected(changed: list[str] | None) -> dict[str, bool]:
@@ -171,6 +180,7 @@ def affected(changed: list[str] | None) -> dict[str, bool]:
         hit |= found
     while grown := {name for name, deps in graph.items() if deps & hit} - hit:
         hit |= grown
+    hit |= {name for path in changed for name in data(path)}
     return {name: name in hit for name in sorted(everything)}
 
 

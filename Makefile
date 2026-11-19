@@ -51,8 +51,9 @@ test-unit:  ## Unit tests only (no e2e, no mdtest)
 	uv run pytest tests/ --ignore=tests/e2e --ignore=tests/mdtest -q
 
 .PHONY: test-mdtest
-test-mdtest:  ## mdtests and docs tests
-	uv run pytest tests/mdtest/ docs/ README.md -v
+test-mdtest:  ## mdtests: each crate's assertions, then the codec's in pytest
+	cd rust && cargo test -p sqlty-sql -p sqlty-python -p sqlty-format --test mdtest
+	uv run pytest tests/mdtest/ docs/ README.md skills/ -q
 
 .PHONY: test-e2e
 test-e2e:  ## End-to-end tests only
@@ -68,7 +69,8 @@ test-coverage:  ## Each package's own tests with coverage and its gate (PACKAGES
 
 .PHONY: update-mdtest
 update-mdtest:  ## Update mdtest assertions with actual values
-	uv run pytest tests/mdtest/ docs/ README.md tests/test_docs.py --update-mdtest -v
+	cd rust && MDTEST_UPDATE=1 cargo test -p sqlty-sql -p sqlty-python -p sqlty-format --test mdtest
+	uv run pytest tests/mdtest/ docs/ README.md skills/ tests/test_docs.py --update-mdtest -v
 
 # --- Benchmarks ---
 

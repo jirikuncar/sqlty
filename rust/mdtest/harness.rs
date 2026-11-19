@@ -64,7 +64,9 @@ pub fn run(runner: &dyn Runner) {
     );
 }
 
-fn run_file(runner: &dyn Runner, root: &Path, path: &Path, update: bool) -> Vec<String> {
+/// The failures of the file at `path`, reported relative to `root`; with `update`, none: the
+/// actual values are written instead.
+pub fn run_file(runner: &dyn Runner, root: &Path, path: &Path, update: bool) -> Vec<String> {
     let text = std::fs::read_to_string(path).unwrap();
     let relative = path.strip_prefix(root).unwrap_or(path);
     let mut updater = update.then(|| Updater::new(path));

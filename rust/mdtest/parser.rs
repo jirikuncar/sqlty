@@ -365,13 +365,7 @@ fn merge(base: &mut toml::Table, over: toml::Table) {
 /// Every Markdown file the suite reads: `mdtest_paths` of `pyproject.toml`.
 pub fn files(root: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
-    for entry in [
-        "tests/mdtest",
-        "docs",
-        "src/sqlty/rules",
-        "README.md",
-        "skills",
-    ] {
+    for entry in ["tests/mdtest", "docs", "README.md", "skills"] {
         walk(&root.join(entry), &mut found);
     }
     found.sort();
