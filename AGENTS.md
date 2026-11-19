@@ -12,7 +12,7 @@ make update-mdtest                 # update mdtest assertions
 make generate-docs                 # regenerate reference tables (configuration.md, cli.md)
 make lint-docs                     # rumdl (Markdown) and Vale (prose) on the docs
 make typecheck                     # mypy + ty on src and examples
-uv run prek run --all-files        # all hooks (run before every commit)
+uv run prek run --all-files        # commit hooks (run before every commit)
 ```
 
 - `SQL[T]` is a `str` subclass. It works anywhere a string works.
@@ -153,7 +153,7 @@ uv run prek run --all-files
 
 [prek](https://prek.j178.dev) runs the hooks of `prek.toml`; `uv run prek install`
 runs them on every commit, and `cargo test` on every push (`uv run prek run
---all-files --hook-stage pre-push` runs it too). Each runs when the files it
+--all-files --hook-stage pre-push` runs only it). Each runs when the files it
 depends on change:
 
 | Hook | Runs when these change |

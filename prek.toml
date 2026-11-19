@@ -7,14 +7,15 @@
 # cargo test runs on push only: CI runs it in the test jobs, not in Lint.
 
 default_install_hook_types = ["pre-commit", "pre-push"]
+default_stages = ["pre-commit"]
 
 [[repos]]
 repo = "builtin"
 hooks = [
   { id = "fix-byte-order-marker", exclude = '^rust/crates/sqlty-cli/tests/cli/check-fix\.(in|out)/r\.py$', priority = 0 },
   { id = "mixed-line-ending", priority = 1 },
-  { id = "trailing-whitespace", priority = 2 },
-  { id = "end-of-file-fixer", priority = 3 },
+  { id = "trailing-whitespace", stages = ["pre-commit"], priority = 2 },
+  { id = "end-of-file-fixer", stages = ["pre-commit"], priority = 3 },
   { id = "check-yaml", priority = 10 },
   { id = "check-toml", priority = 10 },
   { id = "check-json", priority = 10 },
