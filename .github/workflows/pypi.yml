@@ -13,6 +13,7 @@ on:
       - rust/Cargo.lock
       - rust/Cargo.toml
       - rust/crates/**
+      - rust-toolchain.toml
       - scripts/package_binaries.py
   pull_request:
     paths:
@@ -22,6 +23,7 @@ on:
       - rust/Cargo.lock
       - rust/Cargo.toml
       - rust/crates/**
+      - rust-toolchain.toml
       - scripts/package_binaries.py
 
 permissions:
