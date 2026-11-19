@@ -18,6 +18,7 @@ on:
       - ".github/workflows/docs.yml"
       - "Makefile"
       - "rust/**"
+      - "rust-toolchain.toml"
       - "src/sqlty/lexer.py"
       - "pyproject.toml"
   pull_request:
@@ -36,6 +37,7 @@ on:
       - ".github/workflows/docs.yml"
       - "Makefile"
       - "rust/**"
+      - "rust-toolchain.toml"
       - "src/sqlty/lexer.py"
       - "pyproject.toml"
   workflow_dispatch:
