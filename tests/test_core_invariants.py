@@ -244,8 +244,11 @@ def _check_outputs(source: str, options: dict) -> None:
 
 
 def _tail(query: str) -> str:
-    """The end of a query, past the line of a marker however it is spelled."""
-    return query.split("\n", 1)[-1][-20:]
+    """A query past its marker line, however the marker is spelled."""
+    return _MARKER_LINE.split(query, maxsplit=1)[-1]
+
+
+_MARKER_LINE = re.compile(r"^.*--\s*sql\b.*\n", re.IGNORECASE | re.MULTILINE)
 
 
 @pytest.mark.parametrize(("source", "options"), PYTHON)

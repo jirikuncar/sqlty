@@ -1109,7 +1109,7 @@ impl<'a> Module<'a, '_> {
     }
 }
 
-/// A helper call as `fix_source`, `query_statistics` and the highlights read it.
+/// A helper call as `fix_source`, `sqlty check --statistics` and the highlights read it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Site {
     /// The first and last line of a call whose strings need no `SQL[T]`.
