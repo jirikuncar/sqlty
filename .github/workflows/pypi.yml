@@ -563,8 +563,14 @@ jobs:
           elif [ -n "$PYTHONS" ]; then
             uv python install $PYTHONS
             # A bare 3.15 can resolve to the free-threaded build.
-            pythons=$(for v in $PYTHONS; do req=$v; [[ $v == *t ]] || req=$v+gil; uv python find --system "$req"; done)
-            uv run --no-project --python 3.14 scripts/verify_release.py pypi "$version" $pythons
+            pythons=()
+            for v in $PYTHONS; do
+              req=$v; [[ $v == *t ]] || req=$v+gil
+              # A plain assignment fails the step when the interpreter is missing.
+              python=$(uv python find --system "$req")
+              pythons+=("$python")
+            done
+            uv run --no-project --python 3.14 scripts/verify_release.py pypi "$version" "${pythons[@]}"
           else
             uv run --no-project --python 3.14 scripts/verify_release.py "$SOURCE" "$version"
           fi

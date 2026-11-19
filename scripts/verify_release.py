@@ -29,10 +29,10 @@ ATTEMPTS = 10
 QUERY = 'q = "--sql\\nSELECT 1::INTEGER AS one"\n'
 REWRITTEN = 'q = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER AS one")'
 IMPORT = """
-import sys, sysconfig, sqlty, sqlty._core
+import sys, sqlty, sqlty._core
 assert sqlty.__version__ == sys.argv[1], sqlty.__version__
 # A free-threaded build must keep the GIL off with sqlty imported.
-assert sys._is_gil_enabled() != bool(sysconfig.get_config_var("Py_GIL_DISABLED"))
+assert sys._is_gil_enabled() != ("free-threading build" in sys.version), sys.version
 print(sys.version, "sqlty", sqlty.__version__)
 """
 WASM = """
@@ -56,7 +56,9 @@ def shown(args: tuple[str | Path, ...]) -> str:
 
 def run(*args: str | Path, cwd: Path | None = None) -> str:
     print("$", shown(args), flush=True)
-    done = subprocess.run([str(arg) for arg in args], cwd=cwd, capture_output=True, text=True)
+    done = subprocess.run(
+        [str(arg) for arg in args], cwd=cwd, capture_output=True, encoding="utf-8", errors="replace"
+    )
     if done.returncode:
         sys.exit(f"exit {done.returncode}\n{done.stdout}{done.stderr}")
     return done.stdout
@@ -66,7 +68,13 @@ def install(*args: str | Path, cwd: Path | None = None) -> None:
     """Run an install until the registry serves the release."""
     for attempt in range(1, ATTEMPTS + 1):
         print("$", shown(args), flush=True)
-        done = subprocess.run([str(arg) for arg in args], cwd=cwd, capture_output=True, text=True)
+        done = subprocess.run(
+            [str(arg) for arg in args],
+            cwd=cwd,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+        )
         if not done.returncode:
             return
         print(f"attempt {attempt}/{ATTEMPTS}: exit {done.returncode}\n{done.stderr}", flush=True)
@@ -133,7 +141,8 @@ def homebrew(version: str, work: Path) -> None:
     # Recent Homebrew loads the formulae of a third-party tap only once it is trusted.
     if subprocess.run([brew, "trust", "--help"], capture_output=True).returncode == 0:
         run(brew, "trust", TAP)
-    run(brew, "install", f"{TAP}/sqlty")
+    # The formula downloads its tarball from npm, whose CDN can lag the upload.
+    install(brew, "install", f"{TAP}/sqlty")
     run(brew, "test", f"{TAP}/sqlty")
     smoke(Path(run(brew, "--prefix").strip()) / "bin" / "sqlty", version, work)
 
