@@ -52,13 +52,13 @@ parallel. CI's Lint job runs the commit hooks on all files.
 | Layer | Location | What it tests |
 |-------|----------|---------------|
 | **Unit** | `tests/test_*.py` | Invariants over the mdtest corpus, bindings, fuzzing, docs |
-| **mdtest** | `tests/mdtest/`, `docs/`, `src/sqlty/rules/`, `README.md` | Type inference, rewrite, strip, lint ([format](AGENTS.md#markdown-tests-mdtest)) |
+| **mdtest** | `tests/mdtest/`, `docs/`, `README.md` | Type inference, rewrite, strip, lint ([format](AGENTS.md#markdown-tests-mdtest)) |
 | **E2E** | `tests/e2e/` | CLI in a subprocess, with `inline-snapshot` |
 | **Rust** | `rust/crates/*/` | Engine, CLI (`trycmd`), language server |
 
 ```bash
 uv run pytest                                          # all tests except timing
-uv run pytest tests/mdtest docs src/sqlty/rules README.md  # mdtests
+uv run pytest tests/mdtest docs README.md               # mdtests
 uv run pytest tests/ --ignore=tests/e2e --ignore=tests/mdtest  # unit tests
 uv run pytest tests/e2e/ -v                            # end-to-end tests
 uv run pytest tests/e2e/ --inline-snapshot=update      # accept new e2e output
@@ -228,7 +228,8 @@ make bench-codspeed   # benchmarks/test_benchmarks.py, as CI's CodSpeed job meas
   compare a branch (`ARGS="--save-baseline main"`, then `ARGS="--baseline main"`).
 - `bench-codspeed` runs each query kind of `synth.KINDS` through
   `analyze_select`/`analyze_params`, the schema load, `rewrite_source`,
-  `check_source`, `complete_source` at 50, 540 and 5000 tables and `query_at`.
+  `check_source`, `complete_source` at 50, 540 and 5000 tables and in a module
+  of 4000 queries.
   CI counts their instructions on every commit and reports the change on the
   pull request.
 

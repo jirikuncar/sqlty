@@ -27,7 +27,7 @@ def sarif_log(rows: Sequence[Mapping[str, Any]]) -> dict[str, object]:
         {
             "id": rule.name,
             "shortDescription": {"text": rule.description},
-            "helpUri": f"{DOCS_URL}reference/rules/#{rule.name}",
+            "helpUri": f"{DOCS_URL}reference/rules/{rule.name}/",
             "defaultConfiguration": {"level": _LEVELS[rule.default_severity.value]},
         }
         for rule in RULES.values()

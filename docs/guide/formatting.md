@@ -78,7 +78,7 @@ editor can run it on save next to your Python formatter. See
 
 ## Lint
 
-The [`sqruff`](../reference/rules.md#sqruff) rule reports what sqruff's core
+The [`sqruff`](../reference/rules/sqruff.md) rule reports what sqruff's core
 lint rules, all but layout, find in your queries. It is off by default:
 
 ```toml

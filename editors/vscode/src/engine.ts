@@ -235,7 +235,7 @@ function diagnostic(document: vscode.TextDocument, found: Found): vscode.Diagnos
   diagnostic.source = "sqlty";
   diagnostic.code = {
     value: found.rule,
-    target: vscode.Uri.parse(`https://sqlty.kuncar.dev/reference/rules/#${found.rule}`),
+    target: vscode.Uri.parse(`https://sqlty.kuncar.dev/reference/rules/${found.rule}/`),
   };
   return diagnostic;
 }

@@ -109,6 +109,7 @@ markdown_description = "SQLTy type-checks SQL in Python: it infers row and param
   { "reference/configuration.md" = "Every `[tool.sqlty]` setting" },
   { "reference/cli.md" = "Every `sqlty` command and flag" },
   { "reference/types.md" = "How each SQL type maps to a Python type, per dialect" },
+  "reference/rules/*.md",
 ]
 "Getting started" = [
   "index.md",

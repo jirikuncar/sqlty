@@ -22,6 +22,7 @@ import hashlib
 import http.server
 import io
 import json
+import re
 import tarfile
 import tempfile
 import threading
@@ -50,6 +51,13 @@ def main() -> None:
     ):
         browser = playwright.chromium.launch()
         coverage = Coverage()
+        if args.url:
+            # Pages reports a custom domain's page_url as http://, which the browser loads as
+            # https:// (HSTS). A page of its own keeps that load's storage out of the checks.
+            resolving = browser.new_page()
+            resolving.goto(url)
+            url = resolving.url
+            resolving.context.close()
         page = browser.new_page()
         page.route("https://api.github.com/**", github)
         coverage.watch(page)
@@ -438,8 +446,9 @@ def editing(page: Page) -> None:
     page.evaluate(f"{SOURCE}.getAction('sqlty.explainRule').run()")
     at(page, "stale = SQL", len("stale = SQL["))
     page.evaluate(f"{SOURCE}.getAction('sqlty.explainRule').run()")
-    opened = page.evaluate("window.opened.map(([url]) => new URL(url).hash)")
-    assert opened[0] == "" and opened[1].startswith("#"), opened
+    opened = page.evaluate("window.opened.map(([url]) => new URL(url).pathname)")
+    assert opened[0].endswith("/reference/rules/"), opened
+    assert re.search(r"/reference/rules/[a-z-]+/$", opened[1]), opened
 
     at(page, "SELECT")
     page.keyboard.press("Control+Shift+P")

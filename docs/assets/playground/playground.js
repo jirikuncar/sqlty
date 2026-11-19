@@ -424,7 +424,7 @@ function listed(list, diagnostics, empty) {
       item.dataset.severity = found.severity;
       const at = model.getPositionAt(found.start);
       const rule = Object.assign(document.createElement("a"), {
-        href: new URL(`../reference/rules/#${found.rule}`, location.href).href,
+        href: new URL(`../reference/rules/${found.rule}/`, location.href).href,
         textContent: found.rule,
         title: `The ${found.rule} rule`,
       });
@@ -701,7 +701,7 @@ editor.addAction({
     const model = editor.getModel();
     const offset = model.getOffsetAt(editor.getPosition());
     const found = model === models.python && current.diagnostics.find((d) => d.start <= offset && offset <= d.end);
-    window.open(new URL(`../reference/rules/${found ? `#${found.rule}` : ""}`, location.href).href, "_blank", "noopener");
+    window.open(new URL(`../reference/rules/${found ? `${found.rule}/` : ""}`, location.href).href, "_blank", "noopener");
   },
 });
 window.addEventListener("hashchange", async () => {

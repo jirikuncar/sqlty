@@ -140,7 +140,7 @@ test("explain rule offers the rules here first, and opens the page picked", asyn
       ["All rules", false],
     ],
   );
-  assert.deepEqual(calls.at(-1), ["openExternal", `${RULES}#extra-param`]);
+  assert.deepEqual(calls.at(-1), ["openExternal", `${RULES}extra-param/`]);
 
   window.activeTextEditor = undefined;
   ui.quickPick = (items) => (items as unknown[]).at(-1);

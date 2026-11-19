@@ -52,7 +52,7 @@ test-unit:  ## Unit tests only (no e2e, no mdtest)
 
 .PHONY: test-mdtest
 test-mdtest:  ## mdtests and docs tests
-	uv run pytest tests/mdtest/ docs/ src/sqlty/rules/ README.md -v
+	uv run pytest tests/mdtest/ docs/ README.md -v
 
 .PHONY: test-e2e
 test-e2e:  ## End-to-end tests only
@@ -68,7 +68,7 @@ test-coverage:  ## Each package's own tests with coverage and its gate (PACKAGES
 
 .PHONY: update-mdtest
 update-mdtest:  ## Update mdtest assertions with actual values
-	uv run pytest tests/mdtest/ docs/ src/sqlty/rules/ README.md tests/test_docs.py --update-mdtest -v
+	uv run pytest tests/mdtest/ docs/ README.md tests/test_docs.py --update-mdtest -v
 
 # --- Benchmarks ---
 

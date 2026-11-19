@@ -1,6 +1,5 @@
-//! Embeds the Agent Skills of `skills/` and the rule pages of `src/sqlty/rules/`, so
-//! `sqlty skill` and `sqlty rule` print those of their own version wherever sqlty is
-//! installed.
+//! Embeds the Agent Skills of `skills/`, so `sqlty skill` prints those of its own version
+//! wherever sqlty is installed.
 
 #![expect(
     clippy::panic,
@@ -13,11 +12,9 @@ use std::path::{Path, PathBuf};
 use std::{env, fs};
 
 fn main() {
-    let mut out = embed("skills", "SKILLS");
-    out.push_str(&embed("src/sqlty/rules", "RULE_PAGES"));
     fs::write(
         Path::new(&env::var("OUT_DIR").unwrap()).join("embedded.rs"),
-        out,
+        embed("skills", "SKILLS"),
     )
     .unwrap();
 }
