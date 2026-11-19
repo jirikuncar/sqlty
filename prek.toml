@@ -4,6 +4,9 @@
 # file at once. The read-only checks share priority 10 and run in parallel.
 # One config for the whole repository: prek runs the projects of a workspace one
 # after another, so a rust/ project would stop cargo from overlapping with mypy.
+# cargo test runs on push only: CI runs it in the test jobs, not in Lint.
+
+default_install_hook_types = ["pre-commit", "pre-push"]
 
 [[repos]]
 repo = "builtin"
@@ -123,6 +126,7 @@ entry = "cargo test --workspace --manifest-path rust/Cargo.toml -q"
 language = "system"
 pass_filenames = false
 files = '^rust/'
+stages = ["pre-push"]
 priority = 10
 
 [[repos.hooks]]

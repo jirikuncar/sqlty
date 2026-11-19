@@ -35,7 +35,7 @@ uv run prek install
 ```
 
 [prek](https://prek.j178.dev) then runs the hooks of `prek.toml` on the files
-of each commit. Run them on every file with:
+of each commit, and `cargo test` before each push. Run them on every file with:
 
 ```bash
 uv run prek run --all-files
