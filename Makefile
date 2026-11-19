@@ -6,8 +6,8 @@ EXAMPLE_DIRS := $(shell find examples -mindepth 1 -maxdepth 1 -type d ! -name ".
 ZENSICAL := uv run --no-sync --with zensical==0.1.0 zensical
 
 .PHONY: help
-help:  ## This list
-	@awk -F':.*## ' '/^# --- /{gsub(/# --- | ---/, ""); printf "\n%s:\n", $$0} /^[a-z-]+:.*## /{printf "  %-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+help:
+	@awk -F':.*## ' '/^# --- /{gsub(/# --- | ---/, ""); printf "\n%s:\n", $$0} /^[a-z0-9-]+:.*## /{printf "  %-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 # --- Development ---
 
