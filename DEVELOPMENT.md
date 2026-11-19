@@ -239,22 +239,32 @@ Output backslashes read as `/`, so keep `\n` out of what a case prints.
 
 ### Fuzzing the analyzer
 
-`tests/test_fuzz.py` generates random schemas and queries with
-[Hypothesis](https://hypothesis.readthedocs.io/) (joins, aggregates, casts,
-`COALESCE`, `CASE`, `UNION ALL`, `WHERE ... IS NOT NULL`) and checks that every
-query analyzes with one column per select item and survives `rewrite` and
-`strip`. With a PostgreSQL server it also prepares each query and compares
-column names and types, and runs it over rows full of NULLs to catch a column
-typed as non-null that is not. It is skipped unless `SQLTY_FUZZ` is set:
+`rust/fuzz/tests/properties` holds property tests built with
+[`proptest`](https://docs.rs/proptest), each against an oracle of its own:
+
+- `analyzer`: random schemas and queries (joins, aggregates, casts, `COALESCE`,
+  `CASE`, `UNION ALL`, `WHERE ... IS NOT NULL`) analyze with one column per select
+  item and survive `rewrite` and `strip`. With `SQLTY_PG_DSN`, the server prepares
+  each query and must agree on column names and types, and running it over rows
+  full of NULLs catches a column typed as non-null that is not.
+- `params`: placeholders and call diagnostics against SQLite's binding, and
+  `rewrite` with parameter types against Python running the rewritten code.
+- `foreign_keys`: `foreign-key-mismatch` in every query shape against a model of
+  the rule page.
+- `variants`: generated functions run by a model for every input against the
+  query variants sqlty reads.
 
 ```bash
-SQLTY_FUZZ=1 SQLTY_FUZZ_EXAMPLES=2000 SQLTY_PG_DSN=postgresql:///scratch uv run pytest tests/test_fuzz.py -p no:randomly
+SQLTY_FUZZ_EXAMPLES=2000 SQLTY_PG_DSN=postgresql:///scratch SQLTY_FUZZ_PYTHON=.venv/bin/python \
+  cargo test --release --manifest-path rust/fuzz/Cargo.toml --test properties
 ```
 
 The server's tables are dropped and recreated, so point it at a scratch
-database. In CI, run the `Fuzz` workflow by hand (Actions, Fuzz, Run workflow);
-a failure prints the smallest schema and query Hypothesis shrank it to, which
-belongs in an mdtest next to the fix.
+database. `SQLTY_FUZZ_PYTHON` must import this checkout's `sqlty` dependencies;
+`SQLTY_FUZZ_STATS=1` prints the cases each property ran. In CI, run the `Fuzz`
+workflow by hand (Actions, Fuzz, Run workflow); a failure prints the case it
+shrank to and the `PROPTEST_RNG_SEED` that replays it. The case belongs in an
+mdtest next to the fix.
 
 `rust/fuzz` feeds every playground request (`analyze`, `complete`, `hover`,
 `format`) arbitrary source and schema with
