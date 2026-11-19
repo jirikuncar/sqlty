@@ -134,23 +134,6 @@ psycopg does: write `'a%%'` for a literal `%` in a string.
     MariaDB read `--` as a comment only before whitespace. Use `-- sql`
     instead; see [`mysql-sql-marker`](rules.md#mysql-sql-marker).
 
-## Changes from the sqlglot backend
-
-Earlier versions also shipped a pure-Python backend built on
-[sqlglot](https://sqlglot.com). Removing it changed:
-
-- Unaliased calls to functions sqlty can't type are named after the function
-  (`NULLIF(a, b)` is `nullif`, not an empty name) in `column-name-mismatch`
-  and `typeddict-key-mismatch`.
-- The magic codec adds imports after the module header, as `sqlty rewrite`
-  does, instead of placing them with isort, and turns `# coding: sqlty` into
-  `# coding: utf-8` in the decoded text.
-- Dialects other than PostgreSQL, MySQL and SQLite follow sqlparser-rs rather
-  than sqlglot.
-- An unsupported `import-style` is an error instead of falling back to
-  `from sqlty import SQL`.
-- `SQLTY_LIB` is gone.
-
 ## Benchmarks
 
 Median time per call from `benchmarks/bench_core.py` (500 iterations after

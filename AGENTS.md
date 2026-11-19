@@ -1,19 +1,7 @@
 # AGENTS.md — Development conventions for AI agents and contributors
 
-Use `uv` for all Python commands. Use editor capabilities (e.g. VSCode) to run and debug tests.
-
-## Quick reference
-
-```bash
-uv sync --all-groups               # install
-uv run pytest                      # all tests
-make test-mdtest                   # mdtest only
-make update-mdtest                 # update mdtest assertions
-make generate-docs                 # regenerate reference tables (configuration.md, cli.md)
-make lint-docs                     # rumdl (Markdown) and Vale (prose) on the docs
-make typecheck                     # mypy + ty on src and examples
-uv run prek run --all-files        # all hooks (run before every commit)
-```
+Use `uv` for all Python commands. Setup, test and build commands and the
+architecture live in [DEVELOPMENT.md](DEVELOPMENT.md).
 
 - `SQL[T]` is a `str` subclass. It works anywhere a string works.
 - Every new feature gets an mdtest (see [Markdown tests](#markdown-tests-mdtest)).
@@ -29,26 +17,11 @@ Follow the [AI-assisted contributions](CONTRIBUTING.md#ai-assisted-contributions
 policy: end every commit message with a `Co-Authored-By:` trailer naming the
 agent, and say in the pull request description which agent was used and for what.
 
-## Running tests
+## Writing tests
 
-```bash
-uv run pytest                              # all tests (577+)
-uv run pytest tests/mdtest docs src/sqlty/rules README.md  # mdtests only
-uv run pytest tests/ --ignore=tests/e2e --ignore=tests/mdtest  # unit tests only
-uv run pytest tests/e2e/ -v               # end-to-end tests
-uv run pytest -k "integer cast"           # filter by name
-uv run pytest tests/mdtest/rewrite/basic_rewrite.md -v  # single file
-uv run pytest -m timing -n 0 -p no:randomly  # the tests that measure wall time
-uv run pytest -n 0 -p no:randomly          # one process, in file order
-```
-
-Tests run in parallel (pytest-xdist, `-n auto`) and in random order
-(pytest-randomly; a failure prints its `--randomly-seed`). A test must not depend
-on another having run, nor on the working directory or global state another
-changes. Tests that measure wall time are marked `timing`: the default run
-leaves them out, since parallel workers slow them, and `make test` runs them
-alone afterwards. Tests marked `pg` run when `SQLTY_PG_DSN` points to a PostgreSQL server; each
-worker gets its own database on it (`tests/conftest.py`).
+Tests run in parallel and in random order. A test must not depend on another
+having run, nor on the working directory or global state another changes.
+A test that measures wall time is marked `timing`.
 
 A test that needs a package sqlty does not depend on imports it at the top, and
 the package goes in a dependency group (`[dependency-groups]` in `pyproject.toml`),
@@ -57,18 +30,6 @@ missing package would skip the test silently, and `No-exec harness intact` fails
 any new skip. Skip only on what CI does not provide everywhere: a server
 (`SQLTY_PG_DSN`), a package installed for one job (`--with pymysql`) or with no
 wheel for every Python (`duckdb`).
-
-Make targets:
-
-```bash
-make test            # all tests, then the timing tests alone
-make test-timing     # the tests that measure wall time, alone
-make test-mdtest     # mdtest only
-make test-unit       # unit tests only
-make test-e2e        # e2e only
-make update-mdtest   # auto-update assertion comments in .md files
-make typecheck       # mypy + ty on src and examples
-```
 
 ## Inference rules
 
@@ -97,28 +58,7 @@ compiles them, and the rule pages of `src/sqlty/rules/`, into the extension: reb
 after editing one, or `test_agent_skills_are_compiled_in` fails. A new skill gets a row in the table of
 `docs/recipes/agents.md`.
 
-## Benchmarks
-
-Three layers, all in the Makefile:
-
-- `make bench-ci` (`benchmarks/bench_project.py`, with `tests/test_performance.py`)
-  is end-to-end: CLI wall time and RSS on a synthetic project, gated by
-  `benchmarks/baseline.json`. Needs a release build (`maturin develop --release`). Published wheels use
-  the slower `dist` profile (fat LTO, one codegen unit; `rust/Cargo.toml`), so `release` numbers can
-  differ slightly from a shipped wheel.
-- `make bench-rust` runs Criterion benches in `rust/crates/sqlty-bench`: catalog
-  load (50 to 5000 tables with functions), analyzer per query kind,
-  `check_source`/`rewrite_source` on 1k/4k queries, name-index prefix lookups and
-  `complete` at 50, 540 and 5000 tables, and `query_at` in a module of 4000 queries.
-  Use it to find where time goes and to compare a branch
-  (`ARGS="--save-baseline main"`, then `ARGS="--baseline main"`).
-- `make bench-codspeed` runs `benchmarks/test_benchmarks.py` with pytest-codspeed: each
-  query kind of `synth.KINDS` through `analyze_select`/`analyze_params`, the schema
-  load, `rewrite_source`, `check_source`, `complete_source` at 50, 540 and 5000
-  tables and in a module of 4000 queries. CI's CodSpeed job counts their instructions on every commit
-  and reports the change on the pull request.
-
-### Completion budget
+## Completion budget
 
 Completion runs on every keystroke against schemas of 500+ tables, so no per-keystroke
 operation may grow with the number of tables N. Tests count the catalog entries a
@@ -145,28 +85,8 @@ the conflict without rewriting remote history. No exceptions.
 
 ## Hooks
 
-**Always run the hooks before every commit:**
-
-```bash
-uv run prek run --all-files
-```
-
-[prek](https://prek.j178.dev) runs the hooks of `prek.toml`; `uv run prek install`
-runs them on every commit. Each runs when the files it depends on change:
-
-| Hook | Runs when these change |
-|------|------------------------|
-| mypy and ty on `src/` | `src/`, `pyproject.toml` |
-| `sqlty rewrite` (in place), `sqlty check`, mypy and ty on `examples/` (except `magic_codec/`) | `examples/`, `src/sqlty/`, `rust/crates/` |
-| `cargo fmt --check` | Rust files |
-| `cargo clippy -D warnings`, `cargo test` | `rust/` |
-| `tsc`, oxlint, oxfmt (`npm run check`) | `editors/vscode/` |
-| ruff (lint + format), uv-lock | Python files, `pyproject.toml` |
-| file checks (whitespace, line endings, YAML/TOML/JSON syntax, ...) | any file |
-
-Hooks that edit files run one at a time; the read-only checks run in
-parallel. CI's Lint job runs the same hooks on all files. Fix all errors before
-creating a commit.
+Run `uv run prek run --all-files` before every commit and fix every error it
+reports; [DEVELOPMENT.md](DEVELOPMENT.md#hooks) lists the hooks.
 
 ## The `--sql\n` convention
 
@@ -214,12 +134,15 @@ User-visible behavior belongs in `docs/guide/` too; edge cases only in
 | Feature area | Directory | Example file |
 |-------------|-----------|-------------|
 | Type inference | `tests/mdtest/type_inference/` | `basic_types.md` |
-| SQL dialects | `tests/mdtest/postgres/`, `mysql/`, `sqlite/` | `select.md` |
+| SQL dialects | `tests/mdtest/postgres/`, `mysql/`, `sqlite/`, `duckdb/` | `select.md` |
+| Query shapes across dialects | `tests/mdtest/corpus/` | `outer_joins.md` |
 | Nullability | `tests/mdtest/nullability/` | `inference.md` |
 | Rewriting | `tests/mdtest/rewrite/` | `basic_rewrite.md` |
 | Stripping | `tests/mdtest/strip/` | `basic_strip.md` |
+| Formatting | `tests/mdtest/format/` | `format.md` |
 | Lint rules | `tests/mdtest/check/` | `type_annotation.md` |
 | Magic codec | `tests/mdtest/codec/` | `basic_codec.md` |
+| `.sql` query files | `tests/mdtest/queries/` | `named_queries.md` |
 | Completion | `tests/mdtest/completion/` | `completion.md` |
 | Hover | `tests/mdtest/hover/` | `hover.md` |
 | Highlighting | `tests/mdtest/highlighting/` | `highlighting.md` |
@@ -354,15 +277,8 @@ sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
 ## Type checker support
 
 `src/sqlty/` and the examples must pass both **mypy** (strict) and **ty**
-with zero errors. `SQL[T]` usage is additionally checked with mypy, pyright
-and ty by `tests/test_typecheckers.py`.
-
-```bash
-make typecheck                 # mypy + ty on src and examples
-make typecheck-src             # mypy + ty on src/sqlty (also a prek hook)
-make typecheck-examples        # mypy + ty on each examples/ dir (runs in CI)
-uv run pytest tests/test_typecheckers.py -v  # mypy, pyright, ty on tests/typechecks/
-```
+with zero errors (`make typecheck`). `SQL[T]` usage is additionally checked with mypy,
+pyright and ty by `tests/test_typecheckers.py`.
 
 `examples/magic_codec/` is excluded: its `# coding: sqlty` header is
 decoded at import time, which type checkers cannot do.
@@ -410,34 +326,3 @@ design and needs a maintainer to merge it.
 Audit hooks are not a sandbox: code can bypass them
 ([`sys.addaudithook`](https://docs.python.org/3/library/sys.html#sys.addaudithook)).
 They catch mistakes; review catches intent.
-
-## Architecture overview
-
-```text
-src/sqlty/
-├── __init__.py          # SQL[T] generic str subclass
-├── core.py              # Public API over the Rust engine
-├── _check.py            # check_source and check over the Rust checker; module settings
-├── _core.pyi            # Stub for sqlty._core (rust/crates/sqlty-ext/src/lib.rs)
-├── _lint.py             # Lint rules: severity, diagnostics, RuleConfig
-├── _decode.py           # Magic codec decoder
-├── _cli.py              # CLI parser for complete, breaking and server
-├── _lsp_bridge.py       # Workspace of sqlty server with a breaking baseline
-└── magic.py             # Python codec registration
-rust/crates/             # Cargo workspace (root: rust/Cargo.toml)
-├── sqlty-sql/           # analyzer/ (type inference), ddl; no PyO3
-│   └── rules/           # inference rules (*.inference.toml), compiled by build.rs; see its README
-├── sqlty-python/        # tokens, rewriter, checker, fixer
-├── sqlty-project/       # a project read from disk: settings, helpers, checks of sqlty server
-├── sqlty-cli/           # the sqlty commands: rewrite, strip, format, check, rule, skill, version;
-│                        # main.rs is a standalone `sqlty` executable (cargo run -p sqlty-cli)
-├── sqlty-lsp/           # the language server of sqlty server; tests without Python
-├── sqlty-wasm/          # JSON in, JSON out, for WebAssembly: the docs playground (make playground)
-└── sqlty-ext/           # lib.rs (PyO3), builds sqlty._core; server.rs runs sqlty-lsp
-editors/vscode/          # VS Code client of sqlty server; see its README
-proofs/                  # Lean 4 model of SqlType::python, with proofs; see its README
-```
-
-`proofs/SqlTy/Table.lean` is generated from `scalar_python`: after changing the scalar
-mapping, run `SQLTY_UPDATE_PROOFS=1 cargo test -p sqlty-sql lean_table` and `lake build`
-in `proofs/`.
