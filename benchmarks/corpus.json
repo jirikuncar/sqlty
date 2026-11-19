@@ -1,0 +1,18 @@
+{
+  "django": {
+    "commit": "03b95b8fbab990ebbe399a4676e4ad581fe9acfd",
+    "rules": {}
+  },
+  "goalert": {
+    "commit": "5ed6155988586be91209df15d5cacb6ef8008330",
+    "rules": {
+      "select-star": 16,
+      "unknown-function": 4,
+      "unparsed-query": 5
+    }
+  },
+  "liberapay": {
+    "commit": "cf2592f8fd158be38b525cf259ff875b33d5ac12",
+    "rules": {}
+  }
+}

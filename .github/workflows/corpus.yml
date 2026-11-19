@@ -1,0 +1,55 @@
+name: Real repositories
+
+# `sqlty check` on the pinned repositories of benchmarks/corpus.py: weekly, on demand,
+# and on pull requests that change the corpus. The job summary shows wall time, peak RSS
+# and the diagnostic counts that moved against benchmarks/corpus.json.
+on:
+  pull_request:
+    paths:
+      - "benchmarks/corpus.py"
+      - "benchmarks/corpus.json"
+      - ".github/workflows/corpus.yml"
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  corpus:
+    name: Check real repositories
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: ${{ github.job }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+          python-version: "3.15"
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal && rustup default 1.99.1
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: rust -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install the dependencies
+        run: uv sync --group dev --no-install-project
+
+      - name: Build the release extension
+        run: uv run maturin develop --release --manifest-path rust/crates/sqlty-ext/Cargo.toml
+
+      - name: Check the repositories
+        run: uv run python benchmarks/corpus.py --summary "$GITHUB_STEP_SUMMARY"

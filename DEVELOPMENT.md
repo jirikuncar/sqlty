@@ -195,6 +195,7 @@ make bench-baseline   # re-record the baseline after an intended change
 make bench-project    # full-size synthetic project (10k files): CLI wall time and peak RSS
 make bench-rust       # Criterion benches in rust/crates/sqlty-bench; extra args via ARGS=
 make bench-codspeed   # benchmarks/test_benchmarks.py, as CI's CodSpeed job measures them
+make bench-corpus    # sqlty check on pinned real repositories (benchmarks/corpus.py)
 ```
 
 - `bench-ci` (`benchmarks/bench_project.py`, with `tests/test_performance.py`)
