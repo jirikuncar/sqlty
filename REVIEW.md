@@ -28,7 +28,8 @@ Style, naming and refactoring suggestions are Nit at most.
 
 - New features and behavior changes have an mdtest in `tests/mdtest/`;
   user-visible behavior is also documented in `docs/`.
-- New lint rules have a page in `src/sqlty/rules/` and a row in
+- New lint rules have a page in `src/sqlty/rules/` with its front matter (the only place
+  its name, severity, group and summary are written) and a row in
   `docs/reference/rules.md`.
 - A new lint rule is on by default, per [Lint rule defaults](CONTRIBUTING.md#lint-rule-defaults);
   one that ships off names on its rule page the rule or workflow it conflicts with.

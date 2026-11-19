@@ -36,7 +36,8 @@ builds the hook environment with the Python it runs on unless told otherwise,
 and sqlty needs 3.14 or newer: keep `default_language_version`, or set
 `language_version` on each hook. pre-commit installs sqlty from source into that environment, which
 compiles the Rust extension, so the first run needs a Rust toolchain
-(`cargo`) and takes a few minutes. Pass options with `args`, for example
+(`cargo`) and takes a few minutes. With `rustup`, the build uses the Rust version
+pinned in sqlty's `rust-toolchain.toml` and installs it if missing. Pass options with `args`, for example
 `args: [--dialect, sqlite]`.
 
 `sqlty-check` fails the commit only for rules with severity `error`. Drift that

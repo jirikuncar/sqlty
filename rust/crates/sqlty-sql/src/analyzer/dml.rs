@@ -15,7 +15,7 @@ use super::query::Analyzer;
 use super::scope::{table_scope, Scope, Source, Table};
 use crate::catalog::fold;
 use crate::ddl::RowEvents;
-use crate::diagnostics::{Diagnostics, NameRule};
+use crate::diagnostics::{Diagnostics, Rule};
 
 pub(super) fn statement_returns_rows(stmt: &Statement) -> bool {
     match stmt {
@@ -537,7 +537,7 @@ impl Analyzer<'_> {
 
     fn record_value_count(&self, table: &ObjectName, width: usize, count: usize) {
         self.diag.record(
-            NameRule::InsertValueCount,
+            Rule::InsertValueCount,
             format!(
                 "INSERT into `{}` gives {width} value{} for {count} column{}",
                 object_name(table),
@@ -559,7 +559,7 @@ impl Analyzer<'_> {
         for column in known {
             if column.not_null && !column.has_default && !set.contains(&column.name) {
                 self.diag.record_about(
-                    NameRule::InsertMissingColumn,
+                    Rule::InsertMissingColumn,
                     format!(
                         "INSERT into `{}` leaves out `{}`, which is NOT NULL and has no default",
                         object_name(table),
@@ -588,7 +588,7 @@ impl Analyzer<'_> {
             let name = fold(ident, self.dialect);
             if !known.iter().any(|c| c.name == name) {
                 self.diag.record_about(
-                    NameRule::UnknownColumn,
+                    Rule::UnknownColumn,
                     format!(
                         "column `{}` does not exist in `{}`",
                         ident.value,
