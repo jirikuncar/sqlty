@@ -21,9 +21,7 @@ use ruff_python_ast::visitor::{walk_expr, walk_interpolated_string_element, walk
 use ruff_python_ast::{
     Expr, ExprStringLiteral, InterpolatedStringElement, ModExpression, ModModule, Stmt,
 };
-use ruff_python_parser::{
-    parse_expression, parse_module, Parsed,
-};
+use ruff_python_parser::{parse_expression, parse_module, Parsed};
 use ruff_text_size::Ranged;
 
 const STACK_PER_BYTE: usize = if cfg!(debug_assertions) {
