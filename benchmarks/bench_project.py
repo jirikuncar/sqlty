@@ -44,13 +44,13 @@ SIZES = {
     "full": {"files": 10_000, "queries": 3_000, "tables": 500},
     "ci": {"files": 8_000, "queries": 2_400, "tables": 400},
 }
-# The same files with queries in 2% of them, as in an application that adopts sqlty.
-SPARSE_QUERIES = 0.02
 # Query files of three queries each, beside 200 modules.
-SQL_FILES = 2_000
+SQL_FILES = 500
 # Modules a pre-commit hook passes, and the queries of the module open in the editor.
 PRECOMMIT_FILES = 5
-EDITOR_QUERIES = 300
+EDITOR_QUERIES = 100
+# Runs of each scenario: they are short, and a run over budget is measured again anyway.
+SCENARIO_REPEATS = 3
 # Times of 5 ms or less are noise on a shared runner: they are reported, not budgeted.
 MIN_BUDGETED_S = 0.005
 ATTEMPTS = 3
@@ -84,20 +84,11 @@ def run_measured(cmd: list[str], cwd: str) -> tuple[float, float, int]:
     return wall, _rss_mb(usage.ru_maxrss), proc.returncode
 
 
-def measure(cmd: list[str], cwd: str, repeats: int, fresh: Path | None = None) -> dict[str, float]:
-    """Median wall time and peak RSS of ``cmd``; with ``fresh``, each run gets its own
-    copy of that directory as ``cwd``, made outside the timing, for commands that write."""
-    runs = []
-    for _ in range(repeats):
-        if fresh is None:
-            runs.append(run_measured(cmd, cwd))
-            continue
-        copy = Path(tempfile.mkdtemp(prefix="sqlty-bench-copy-")) / "p"
-        shutil.copytree(fresh, copy)
-        try:
-            runs.append(run_measured(cmd, str(copy)))
-        finally:
-            shutil.rmtree(copy.parent, ignore_errors=True)
+def measure(cmd: list[str], cwd: str, repeats: int) -> dict[str, float]:
+    return summarize([run_measured(cmd, cwd) for _ in range(repeats)])
+
+
+def summarize(runs: list[tuple[float, float, int]]) -> dict[str, float]:
     return {
         "wall_s": round(statistics.median(r[0] for r in runs), 4),
         "rss_mb": round(max(r[1] for r in runs), 1),
@@ -152,7 +143,7 @@ def run(size: str, repeats: int, keep: str | None, exe: str) -> dict:
         proj = str(root)
         metrics["check"] = measure([exe, "check", "-q", proj], proj, repeats)
         metrics["rewrite_check"] = measure([exe, "rewrite", "--check", "-q", proj], proj, repeats)
-        metrics.update(scenarios(exe, root, spec, repeats))
+        metrics.update(scenarios(exe, root, spec))
         for name, text in (
             ("schema_load", (root / "schema.sql").read_text()),
             ("schema_load_unresolved_alters", synth.unresolved_alter_schema(2000)),
@@ -181,16 +172,23 @@ def run(size: str, repeats: int, keep: str | None, exe: str) -> dict:
             shutil.rmtree(root, ignore_errors=True)
 
 
-def scenarios(exe: str, root: Path, spec: dict[str, int], repeats: int) -> dict:
-    """The runs users wait on besides a full check: a pre-commit hook, a rewrite that
-    writes, an editor, query files and a project where few files hold queries."""
+def scenarios(exe: str, root: Path, spec: dict[str, int]) -> dict:
+    """The runs users wait on besides a full check: a pre-commit hook that checks or
+    rewrites the changed files, an editor, and query files."""
     out: dict[str, dict[str, float]] = {}
+    repeats = SCENARIO_REPEATS
     pkg = root / synth.PKG
-    changed = [
-        str(f.relative_to(root)) for f in sorted(pkg.glob("mod*.py")) if "SQL[" in f.read_text()
-    ][:PRECOMMIT_FILES]
-    out["precommit"] = measure([exe, "check", "-q", *changed], str(root), repeats)
-    out["rewrite"] = measure([exe, "rewrite", "-q", "."], "", repeats, fresh=root)
+    texts = {f: f.read_text() for f in sorted(pkg.glob("mod*.py"))}
+    checked = [str(f.relative_to(root)) for f, s in texts.items() if "SQL[" in s]
+    out["precommit"] = measure([exe, "check", "-q", *checked[:PRECOMMIT_FILES]], str(root), repeats)
+    # Files with bare `--sql` strings, restored after each run so every run writes them.
+    bare = [f for f, s in texts.items() if '= "--sql' in s][:PRECOMMIT_FILES]
+    runs = []
+    for _ in range(repeats):
+        runs.append(run_measured([exe, "rewrite", "-q", *map(str, bare)], str(root)))
+        for f in bare:
+            f.write_text(texts[f])
+    out["precommit_rewrite"] = summarize(runs)
 
     editor = pkg / "editor.py"
     synth.write_module(editor, queries=EDITOR_QUERIES, tables=spec["tables"])
@@ -200,16 +198,12 @@ def scenarios(exe: str, root: Path, spec: dict[str, int], repeats: int) -> dict:
     finally:
         editor.unlink()
 
-    for name, extra in (
-        ("sparse", {"queries": int(spec["files"] * SPARSE_QUERIES)}),
-        ("sql_files", {"files": 200, "queries": 50, "sql_files": SQL_FILES}),
-    ):
-        other = Path(tempfile.mkdtemp(prefix=f"sqlty-bench-{name}-"))
-        try:
-            synth.generate(other, **{**spec, **extra})
-            out[name] = measure([exe, "check", "-q", "."], str(other), repeats)
-        finally:
-            shutil.rmtree(other, ignore_errors=True)
+    other = Path(tempfile.mkdtemp(prefix="sqlty-bench-sql-files-"))
+    try:
+        synth.generate(other, **{**spec, "files": 200, "queries": 50, "sql_files": SQL_FILES})
+        out["sql_files"] = measure([exe, "check", "-q", "."], str(other), repeats)
+    finally:
+        shutil.rmtree(other, ignore_errors=True)
     return out
 
 

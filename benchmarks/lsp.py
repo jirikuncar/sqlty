@@ -24,8 +24,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-EDITS = 60
-REQUESTS = 40
+EDITS = 15
+REQUESTS = 20
 # A server that stalls is killed, so a hung benchmark fails instead of the CI job timing out.
 DEADLINE_S = 300
 

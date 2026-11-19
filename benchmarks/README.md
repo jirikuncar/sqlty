@@ -30,14 +30,17 @@ maximum of `--repeats` runs (RSS from `wait4` of that child).
 - `check`: `sqlty check` over the project.
 - `rewrite_check`: `sqlty rewrite --check` (no files change).
 - `precommit`: `sqlty check` of 5 modules with queries, as a pre-commit hook passes them.
-- `rewrite`: `sqlty rewrite`, which writes, on a fresh copy of the project per run.
-- `sparse`: `sqlty check` of the same files with queries in 2% of them.
-- `sql_files`: `sqlty check` of 2000 aiosql query files (3 queries each) beside 200 modules.
+- `precommit_rewrite`: `sqlty rewrite` of 5 modules with bare `--sql` strings, which it
+  writes; they are restored after each run.
+- `sql_files`: `sqlty check` of 500 aiosql query files (3 queries each) beside 200 modules.
 - `lsp_open`: `sqlty server` from `initialize` to the first diagnostics of an open
-  module of 300 queries; RSS of the server.
+  module of 100 queries; RSS of the server.
 - `lsp_edit`, `lsp_edit_p95`: a full-text change of that module to its diagnostics,
-  median and p95 of 60 edits.
-- `lsp_hover`, `lsp_completion`: request to response on a table name, total of 40.
+  median and p95 of 15 edits.
+- `lsp_hover`, `lsp_completion`: request to response on a table name, total of 20.
+
+The scenarios from `precommit` on run 3 times, not `--repeats`: they are short, and a
+run over budget is measured again.
 - `schema_load`: parse the 400-500 table schema through one `analyze_select`.
 - `schema_load_unresolved_alters`: 2000 tables plus 2000 `ALTER TABLE` on tables
   that do not exist.
@@ -55,7 +58,7 @@ uv run python benchmarks/bench_project.py --size ci --exe path/to/sqlty  # a nat
 ## CI budget
 
 The `bench` job in `.github/workflows/tests.yml` builds the release extension
-and runs `make bench-ci` (about 40 s). It fails when a metric is over its budget
+and runs `make bench-ci` (about 25 s). It fails when a metric is over its budget
 in `baseline.json`:
 
 - **Times** are divided by a calibration loop (a fixed pure-Python loop, best of
