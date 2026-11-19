@@ -1182,16 +1182,9 @@ pub fn unparsed(text: &str, run: &Run<'_>) -> Found {
 
 /// The byte offset of each `SQL[T](...)` call of `source` whose `T` is `typing.Any`.
 pub fn any_calls(source: &Source, style: &ImportStyle) -> Vec<usize> {
-    if !may_have_any_calls(&source.text, style) {
-        return Vec::new();
-    }
-    named_as_wrapper(
-        module::any_calls(source.body(), &source.aliases),
-        &style.wrapper_name,
-    )
+    any_calls_in(&ModuleFacts::new(source), style)
 }
 
-/// [`any_calls`] over a walk of the module that other checks share.
 fn any_calls_in(facts: &ModuleFacts<'_>, style: &ImportStyle) -> Vec<usize> {
     let source = facts.source;
     if !may_have_any_calls(&source.text, style) {

@@ -174,21 +174,6 @@ pub fn facts(source: &str) -> Option<Facts> {
     Some(found)
 }
 
-/// `(offset, callee)` of each `X[T](...)` of `body` whose `T` is `typing.Any`, by offset;
-/// `typing` is [`Imports::typing`] as a table.
-pub fn any_calls(body: &[Stmt], typing: &Table) -> Vec<(usize, String)> {
-    let aliases = Aliases(typing);
-    let mut calls = Calls {
-        aliases: &aliases,
-        names: Vec::new(),
-        attributes: Vec::new(),
-        any_calls: Vec::new(),
-    };
-    calls.visit_body(body);
-    calls.any_calls.sort_unstable();
-    calls.any_calls
-}
-
 enum ImportStmt<'a> {
     From(&'a StmtImportFrom),
     Plain(&'a StmtImport),
@@ -311,7 +296,7 @@ fn any_call(call: &ExprCall, aliases: &Aliases<'_>) -> Option<(usize, String)> {
         .then(|| (sub.value.start().to_usize(), callee(&sub.value)))
 }
 
-/// [`any_calls`] over calls already collected, by offset.
+/// `(offset, callee)` of each `X[T](...)` among `calls` whose `T` is `typing.Any`, by offset.
 pub(crate) fn any_calls_among<'a>(
     calls: impl Iterator<Item = &'a ExprCall>,
     typing: &Table,

@@ -459,18 +459,6 @@ fn call_params(
     None
 }
 
-/// The calls of the helpers `source` defines or imports from the
-/// modules of `helpers`, by line. A query built in a way that is not modelled (see
-/// [`compose`]) is left unchecked.
-pub fn helper_calls<'a>(
-    source: &'a Source,
-    helpers: Option<&'a HelperIndex>,
-    module: Option<&str>,
-    variants: Option<usize>,
-) -> Vec<Call<'a>> {
-    helper_calls_in(&ModuleFacts::new(source), helpers, module, variants)
-}
-
 /// Whether a call of a helper can look like this: a name or a dotted attribute called.
 fn wanted(call: &ExprCall) -> bool {
     match call.func.as_ref() {
@@ -480,7 +468,9 @@ fn wanted(call: &ExprCall) -> bool {
     }
 }
 
-/// [`helper_calls`] over a walk of the module that other checks share.
+/// The calls of the helpers the module defines or imports from the
+/// modules of `helpers`, by line. A query built in a way that is not modelled (see
+/// [`compose`]) is left unchecked.
 pub fn helper_calls_in<'a>(
     facts: &ModuleFacts<'a>,
     helpers: Option<&'a HelperIndex>,
