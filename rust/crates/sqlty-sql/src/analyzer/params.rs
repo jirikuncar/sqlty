@@ -1413,16 +1413,18 @@ mod tests {
 
     #[test]
     fn a_numbered_query_is_not_parsed_again() {
-        let parsed = crate::analyzer::parse("SELECT $1::int, $2", "postgres");
+        let sql = "SELECT $1::int, $2";
+        let parsed = crate::analyzer::parse(sql, "postgres");
         let mut found = None;
-        assert_eq!(parses(|| found = parsed.params(None)), 0);
+        assert_eq!(parses(|| found = parsed.params(sql, None)), 0);
         let found = found.unwrap_or_default();
         assert_eq!(found.len(), 2);
         assert_eq!(found[0].python_type.as_deref(), Some("int"));
-        let parsed = crate::analyzer::parse("SELECT data ? 'a' FROM t", "postgres");
-        assert_eq!(parses(|| drop(parsed.params(None))), 0);
+        let sql = "SELECT data ? 'a' FROM t";
+        let parsed = crate::analyzer::parse(sql, "postgres");
+        assert_eq!(parses(|| drop(parsed.params(sql, None))), 0);
         let parsed = crate::analyzer::parse("SELECT 1", "sqlite");
-        assert_eq!(parses(|| drop(parsed.params(None))), 0);
+        assert_eq!(parses(|| drop(parsed.params("SELECT 1", None))), 0);
     }
 
     #[test]
@@ -1438,7 +1440,7 @@ mod tests {
             ("sqlite", "SELECT @name"),
         ] {
             let parsed = crate::analyzer::parse(sql, dialect);
-            let count = parses(|| drop(parsed.params(None)));
+            let count = parses(|| drop(parsed.params(sql, None)));
             assert!(count >= 1, "{dialect}: {sql}");
         }
     }
@@ -1500,7 +1502,7 @@ mod tests {
                 let parsed = crate::analyzer::parse(sql, dialect);
                 for schema in [None, Some(&*schema)] {
                     assert_eq!(
-                        parsed.params(schema),
+                        parsed.params(sql, schema),
                         analyze_params(sql, dialect, schema),
                         "{dialect}: {sql}"
                     );
