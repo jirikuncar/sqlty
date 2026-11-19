@@ -56,8 +56,8 @@ Untrusted:
 Parsing limits already in place: Python files over 256 KiB or nested deeper
 than `MAX_DEPTH` are skipped (`parse.rs`), SQL nesting is capped by
 sqlparser's recursion limit, catalogs by `MAX_COLUMNS` and the loader budgets,
-and formatting by `MAX_TOKENS`. A panic in the native engine is reported as
-`internal-error`, not an abort.
+and formatting by `MAX_TOKENS`. A panic during `sqlty check` is reported as
+`internal-error`; elsewhere it is a crash.
 
 ## Severity
 

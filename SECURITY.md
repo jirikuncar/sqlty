@@ -15,7 +15,7 @@ Do not open a public issue. Report it privately through
 Include the affected version and channel, a minimal reproduction and the
 impact you expect. [THREAT_MODEL.md](THREAT_MODEL.md) lists what is in scope
 and how severity is rated. Crashes, stalls and slow inputs are bugs, not
-vulnerabilities: open an issue (sqlty prints a link to a prefilled one).
+vulnerabilities, unless they show memory corruption: open an issue (sqlty prints a link to a prefilled one).
 
 You can expect an answer within 7 days, and a fix or a plan within 30 days of
 a confirmed report. The advisory is published within 90 days, or as soon as
@@ -37,10 +37,11 @@ the fix is released. It credits the reporter unless you ask otherwise.
    pull request into `main`; put the version bump
    (`uv run python scripts/bump_version.py X.Y.Z`) in the same pull request.
    Keep the commit message neutral: it is public on merge.
-4. **Release.** Merge from the advisory page, then publish the GitHub Release
-   right away. It runs the PyPI, npm, Homebrew and VS Code workflows; check
-   that each one published.
+4. **Release.** Merge from the advisory page, then follow the release steps in
+   [CONTRIBUTING.md](CONTRIBUTING.md#releases) without waiting: the TestPyPI
+   run, then a GitHub Release tagged `vX.Y.Z` (not a prerelease, which VS Code
+   skips). Check that PyPI, npm, Homebrew and both VS Code registries got it.
 5. **Disclose.** Set the patched version in the advisory and publish it. GitHub
-   adds it to the GitHub Advisory Database, and Dependabot alerts dependants
-   on PyPI and npm. Mention the advisory in the release notes, since Homebrew
-   and VS Code users get no alert.
+   reviews it, adds it to the GitHub Advisory Database and may alert
+   dependants on PyPI and npm through Dependabot. Mention the advisory in the
+   release notes, since Homebrew and VS Code users get no alert.
