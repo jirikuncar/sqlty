@@ -1,16 +1,11 @@
-"""The Python checks of ``check_source``: row types (TypedDict, NamedTuple, dataclass,
-Pydantic, tuples) and helper call parameters against the query columns.
-
-``check_source`` in ``sqlty.core`` runs the engine's checks, then these passes over one
-``_Check`` context, then the inline suppressions.
-"""
+"""The Rust checks behind ``check_source``, ``sqlty check`` and ``sqlty breaking``, and the
+``redundant-optional`` reports they settle across modules."""
 
 from __future__ import annotations
 
 import sys
 import typing
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
 
 from sqlty._core import Schema
 from sqlty._core import breaking_modules as _breaking_modules
@@ -19,9 +14,6 @@ from sqlty._core import module_diagnostics as _module_diagnostics
 from sqlty._helpers import HelperIndex
 from sqlty._lint import Diagnostic
 from sqlty._source import ParsedSource
-
-if TYPE_CHECKING:
-    pass
 
 
 class RowUsage:
@@ -51,54 +43,18 @@ def diagnostics(
     untyped: bool,
     helpers: HelperIndex | None,
     module: str | None,
-    row_usage: RowUsage | None = None,
+    row_usage: RowUsage,
     variants: int | None = None,
     coerce: frozenset[str] = frozenset(),
     suppress: bool = False,
 ) -> list[Diagnostic]:
-    """Every diagnostic of ``sqlty_python::check``.
+    """Every diagnostic of ``sqlty_python::check``, recording in ``row_usage`` what it needs.
 
-    ``variants`` turns on query variants (``find_helper_calls``): each variant of a call
-    is checked as a call of its own, then ``_merge_variants`` reports at the call.
+    ``variants`` turns on query variants: each variant of a call is checked as a call of
+    its own and reported at the call.
     ``coerce`` names the row types read as a Pydantic validator reads them. ``suppress``
     drops what ``# sqlty: ignore`` comments suppress and adds their ``unused-ignore``.
     """
-    own = RowUsage()
-    found = _rust_diagnostics(
-        parsed,
-        own,
-        dialect,
-        schema_sql,
-        rules,
-        import_style,
-        untyped,
-        helpers,
-        module,
-        variants,
-        coerce,
-        suppress,
-    )
-    if row_usage is not None:
-        row_usage.needed |= own.needed
-        row_usage.redundant += own.redundant
-    return found
-
-
-def _rust_diagnostics(
-    parsed: ParsedSource,
-    usage: RowUsage,
-    dialect: str,
-    schema_sql: str | Schema | None,
-    rules: dict[str, str] | None,
-    import_style: str | None,
-    untyped: bool,
-    helpers: HelperIndex | None,
-    module: str | None,
-    variants: int | None,
-    coerce: frozenset[str],
-    suppress: bool,
-) -> list[Diagnostic]:
-    """The diagnostics as ``sqlty_python::check`` reports them."""
     found, redundant, needed = _module_diagnostics(
         parsed.text,
         version=sys.version_info[:2],
@@ -114,8 +70,8 @@ def _rust_diagnostics(
         variants=variants,
         suppress=suppress,
     )
-    usage.needed.update(needed)
-    usage.redundant += [
+    row_usage.needed.update(needed)
+    row_usage.redundant += [
         (key, diag) for key, diag in zip(redundant, found, strict=True) if key is not None
     ]
     return found
@@ -160,7 +116,7 @@ def breaking_modules(
     """``breaking_source`` of every ``(module, own, against)``, in one Rust call that checks
     them on ``jobs`` threads (all cores when None)."""
     configs = _Configs()
-    found = _breaking_modules(
+    return _breaking_modules(
         [
             (parsed.text, parsed.module, configs.index(own), configs.index(against))
             for parsed, own, against in modules
@@ -169,7 +125,6 @@ def breaking_modules(
         version=sys.version_info[:2],
         jobs=jobs,
     )
-    return found
 
 
 class _Configs:
