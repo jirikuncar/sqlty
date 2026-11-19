@@ -936,9 +936,6 @@ aiosqlite = [
 bench = [
     { name = "pytest-codspeed" },
 ]
-cli = [
-    { name = "rich" },
-]
 dev = [
     { name = "inline-snapshot" },
     { name = "jsonschema" },
@@ -979,7 +976,6 @@ provides-extras = ["psycopg"]
 [package.metadata.requires-dev]
 aiosqlite = [{ name = "aiosqlite", specifier = ">=0.22.1" }]
 bench = [{ name = "pytest-codspeed", specifier = ">=5.0.3" }]
-cli = [{ name = "rich", specifier = ">=15.0.0" }]
 dev = [
     { name = "inline-snapshot", specifier = ">=0.15.0" },
     { name = "jsonschema", specifier = ">=4.26.0" },
