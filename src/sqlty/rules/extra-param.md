@@ -1,3 +1,12 @@
++++
+order = 400
+group = "params"
+severity = "warn"
+fixable = false
+summary = "A call passes a key its query has no placeholder for"
+origin = "python"
++++
+
 # extra-param
 
 Default severity: **warn**
