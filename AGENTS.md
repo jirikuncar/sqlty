@@ -71,7 +71,7 @@ and 5000 tables.
 
 | Operation | Allowed cost | Guarded by |
 |-----------|--------------|------------|
-| Locate the query (`query_at`) | O(log S) per request, O(file) once per buffer version | Criterion `query_at`, CodSpeed `test_query_at_in_a_large_module` |
+| Locate the query (`query_at`) | O(log S) per request, O(file) once per buffer version | Criterion `query_at`, CodSpeed `test_completion_in_a_large_module` |
 | Table prefix | O(log N + k), k capped | entry counts, Criterion and CodSpeed at 50/540/5000 tables |
 | Tables linked after `JOIN` | O(K + log F + k) per table in scope, for its K foreign keys and the F of the schema | entry counts |
 | `alias.` columns | O(1) + O(width of that table) | entry counts, Criterion and CodSpeed |
@@ -204,8 +204,8 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 | `-- inferred:` | in the `sql` block | `core.infer_type()` |
 | `-- expanded:` | in the `sql` block | `core.expand_star()` |
 | `-- columns:` | in the `sql` block | `core.analyze_select()`: `name: type (SQL_TYPE)` per line |
-| `-- json:` | in the `sql` block | `core.json_shapes()`: `name: shape` per JSON column of known shape |
-| `-- rules:` | in the `sql` block | `core.explain_select()`: `name: type-rule-id / nullability-rule-id` per column, `-` for none |
+| `-- json:` | in the `sql` block | `_core.analyze_columns()` (`tests/_json_shapes.py`): `name: shape` per JSON column of known shape |
+| `-- rules:` | in the `sql` block | `_core.explain_select()`: `name: type-rule-id / nullability-rule-id` per column, `-` for none |
 | `-- params:` | in the `sql` block | `core.analyze_params()`: `number-or-name: type (SQL_TYPE)` per parameter, then ` NULL` or ` NOT NULL` when known |
 | `# rewritten:` | `python`, whole code | `core.rewrite_source()` without imports |
 | `# rewritten-file:` | `python`, whole code | `core.rewrite_source()` |
@@ -213,7 +213,7 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 | `# fixed:` | `python`, whole code | `core.fix_source()` (`sqlty check --fix`) |
 | `# decoded:` | `python`, whole code | magic codec `decode()` without imports or the `# coding:` line |
 | `# completions:` | `python`, at its `<CURSOR>` | `core.complete_source()`: `label kind detail` per item, the first ten then `...`; `None` for none |
-| `# hover:` | `python`, at its `<CURSOR>` | `core.hover_source()`: the Markdown contents; `None` for none |
+| `# hover:` | `python`, at its `<CURSOR>` | `_core.hover_source()`: the Markdown contents; `None` for none |
 | `# highlighted:` | `python`, whole code | `core.highlight_source()`: `kind text` per colored token, a line each; `None` for none |
 | `# error: [rule] "message"` | end of its line, or on the line above | `core.check_source()` |
 

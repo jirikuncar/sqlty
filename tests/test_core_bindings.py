@@ -70,10 +70,7 @@ def test_modules_with_an_unknown_import_style(
 
 
 def test_cursor_defaults() -> None:
-    found = _core.query_at(QUERY, 15)
-    assert found is not None
-    assert (found.text, found.offset, found.route) == ("--sql\nSELECT 1", 9, "marker")
-    assert _core.query_source_offset(found, 9) == QUERY.index("ECT")
+    assert _core.complete_source(QUERY, 15) == (15, 15, False, [])
     assert _core.hover_source(QUERY, 18) is None
     assert _core.highlight_source(QUERY) == [
         (5, 10, "comment"),
