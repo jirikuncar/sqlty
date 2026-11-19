@@ -305,6 +305,11 @@ pub(super) struct Virtuals {
 }
 
 impl Virtuals {
+    /// Whether `other` holds these very tables and keys, not equal copies.
+    pub(super) fn same(&self, other: &Virtuals) -> bool {
+        Rc::ptr_eq(&self.tables, &other.tables) && Rc::ptr_eq(&self.keys, &other.keys)
+    }
+
     pub(super) fn get(&self, table: &str) -> Option<&[Column]> {
         self.tables.get(table).map(|columns| &**columns)
     }

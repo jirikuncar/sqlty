@@ -19,7 +19,7 @@ use std::ops::ControlFlow;
 use std::rc::Rc;
 
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
-use sqlparser::ast::{Query, Statement, Visit, Visitor};
+use sqlparser::ast::{Expr, Query, Statement, Visit, Visitor};
 
 use super::nullability::Facts;
 use super::query::Analyzer;
@@ -64,6 +64,19 @@ impl Entry {
 #[derive(Default)]
 pub(super) struct Stable {
     queries: OnceCell<FxHashSet<usize>>,
+    /// The expressions, built the first time a call asks for one.
+    exprs: OnceCell<FxHashSet<usize>>,
+}
+
+struct ExprAddresses(FxHashSet<usize>);
+
+impl Visitor for ExprAddresses {
+    type Break = ();
+
+    fn pre_visit_expr(&mut self, expr: &Expr) -> ControlFlow<()> {
+        self.0.insert(std::ptr::from_ref(expr) as usize);
+        ControlFlow::Continue(())
+    }
 }
 
 struct Addresses(FxHashSet<usize>);
@@ -204,6 +217,19 @@ impl<'a> Analyzer<'a> {
         });
         let addr = std::ptr::from_ref(query) as usize;
         queries.contains(&addr).then_some(addr)
+    }
+
+    /// The address of `expr` when it is a node of the statement this analyzer is rooted at; a
+    /// temporary the analyzer built is not.
+    pub(super) fn stable_expr(&self, expr: &Expr) -> Option<usize> {
+        let root = self.root?;
+        let exprs = self.stable.exprs.get_or_init(|| {
+            let mut addresses = ExprAddresses(FxHashSet::default());
+            let _ = root.visit(&mut addresses);
+            addresses.0
+        });
+        let addr = std::ptr::from_ref(expr) as usize;
+        exprs.contains(&addr).then_some(addr)
     }
 
     /// The analyzer, rooted at `stmt`: the subqueries inside it are memoized by address.

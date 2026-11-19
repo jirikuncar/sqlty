@@ -1,5 +1,6 @@
 //! Queries, set operations and projections: the output columns of a statement.
 
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -16,6 +17,7 @@ use crate::diagnostics::{Diagnostics, Rule};
 use crate::json::JsonShape;
 use crate::values;
 
+use super::calls::Frame;
 use super::dialect::SqlDialect;
 use super::dml::{
     dml_scope, joined_tables, merge_source, returning, selects_into, unmatched_sources,
@@ -128,6 +130,8 @@ pub(super) struct Analyzer<'a> {
     /// The statement being analyzed, whose subqueries the memo finds by address.
     pub(super) root: Option<&'a Statement>,
     pub(super) stable: Rc<Stable>,
+    /// What the item being projected found out about its calls, shared with every clone.
+    pub(super) calls: Rc<RefCell<Option<Frame>>>,
 }
 
 impl<'a> Analyzer<'a> {
@@ -144,6 +148,7 @@ impl<'a> Analyzer<'a> {
             source: None,
             root: None,
             stable: Rc::default(),
+            calls: Rc::default(),
         }
     }
 
@@ -628,6 +633,7 @@ impl<'a> Analyzer<'a> {
                     continue;
                 }
             };
+            let _frame = self.enter_frame(scope);
             let explained = self.diag.explained();
             let mut typed = self.expr(expr, scope)?;
             // A bare integer column (`SELECT 1`) stays `int`; only strings are spelled as
