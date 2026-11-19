@@ -9,6 +9,8 @@ architecture live in [DEVELOPMENT.md](DEVELOPMENT.md).
   branch over, have a separate agent review it with the
   [`review` skill](.claude/skills/review/SKILL.md), given the branch name only.
   `.claude/skills/` is for contributors and not shipped, unlike `skills/`.
+- [THREAT_MODEL.md](THREAT_MODEL.md) lists the trust boundaries a change must
+  keep: no execution of analyzed code, generated code, files written.
 - Plans live in `plans/`, named `YYYY-MM-DD-<slug>.md` after the day they were written.
   Delete a plan once it has shipped; move what is left to `plans/2026-02-13-future.md`
   or an issue.
