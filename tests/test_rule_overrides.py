@@ -30,5 +30,6 @@ def test_valid_overrides_still_apply() -> None:
 
 
 def test_an_override_leaves_the_other_rules_at_their_defaults() -> None:
-    [diagnostic] = core.check_source(SOURCE, rules={"stale-type": "ignore"})
+    [diagnostic] = core.check_source(SOURCE, rules={"stale-type": "error"})
+    assert diagnostic["rule"] == "stale-rewrite"
     assert diagnostic["severity"] == RULES["stale-rewrite"].default_severity.value
