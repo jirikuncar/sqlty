@@ -12,7 +12,7 @@ use sqlparser::ast::{
 use sqlparser::tokenizer::Location;
 
 use crate::catalog::fold;
-use crate::diagnostics::{Diagnostics, NameRule};
+use crate::diagnostics::{Diagnostics, Rule};
 use crate::json::JsonShape;
 use crate::values;
 
@@ -401,7 +401,7 @@ impl<'a> Analyzer<'a> {
                 other => {
                     if self.diag.enabled() {
                         self.diag.record(
-                            NameRule::UnsupportedSyntax,
+                            Rule::UnsupportedSyntax,
                             format!("{} is not typed", set_expr_kind(other)),
                         );
                     }
@@ -439,7 +439,7 @@ impl<'a> Analyzer<'a> {
         for (column, common) in columns.iter_mut().zip(types) {
             if common.is_none() && self.diag.enabled() {
                 self.diag.record(
-                    NameRule::UnsupportedSyntax,
+                    Rule::UnsupportedSyntax,
                     format!(
                         "set operation branches disagree on the type of column `{}`",
                         column.name
@@ -592,7 +592,7 @@ impl<'a> Analyzer<'a> {
                         )
                     {
                         self.diag.record(
-                            NameRule::RejectedQuery,
+                            Rule::RejectedQuery,
                             "`SELECT *` with no FROM selects no columns",
                         );
                     }
@@ -613,10 +613,8 @@ impl<'a> Analyzer<'a> {
                     continue;
                 }
                 SelectItem::QualifiedWildcard(SelectItemQualifiedWildcardKind::Expr(_), _) => {
-                    self.diag.record(
-                        NameRule::UnsupportedSyntax,
-                        "`<expression>.*` is not expanded",
-                    );
+                    self.diag
+                        .record(Rule::UnsupportedSyntax, "`<expression>.*` is not expanded");
                     columns.push(Column::unknown("*"));
                     if let Some(rules) = &mut rules {
                         rules.push((None, None));
@@ -638,7 +636,7 @@ impl<'a> Analyzer<'a> {
             if !known && self.diag.enabled() && self.diag.explained() == explained && !is_wild(expr)
             {
                 self.diag.record(
-                    NameRule::UnsupportedSyntax,
+                    Rule::UnsupportedSyntax,
                     format!("expression `{}` is not typed", shorten(&expr.to_string())),
                 );
             }
