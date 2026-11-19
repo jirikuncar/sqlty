@@ -95,6 +95,12 @@ fn outside_a_query_nothing_completes() {
 }
 
 #[test]
+fn the_dialect_is_postgres_by_default() {
+    let answer = ask(&json!({"op": "analyze", "source": "q = \"--sql\\nSELECT 1::text AS n\""}));
+    assert_eq!(answer["queries"][0]["row_type"], "tuple[str]");
+}
+
+#[test]
 fn an_unknown_dialect_is_an_error() {
     let answer = ask(&json!({"op": "analyze", "source": "", "dialect": "postgress"}));
     assert!(answer["error"].as_str().unwrap().contains("postgress"));
@@ -155,7 +161,7 @@ fn config_errors_are_reported_as_sqlty_check_reports_them() {
         ("[rules]\nselect-star = \"loud\"", "loud"),
         (
             "schema = \"schema.sql\"",
-            "the playground reads only dialect, driver, import-style, max-query-variants, param-types, preview, rules, types, not 'schema'",
+            "the WebAssembly engine reads only dialect, driver, import-style, max-query-variants, param-types, preview, rules, types, not 'schema'",
         ),
         ("import-style = \"from x\"", "Unsupported import-style"),
         ("param-types = 1", "param-types must be true or false"),
@@ -613,4 +619,33 @@ fn analyze_keeps_what_ignore_comments_suppress() {
     };
     assert_eq!(rules(broken.replace("{}", "")), ["unparsed-query"]);
     assert!(rules(broken.replace("{}", "  # sqlty: ignore")).is_empty());
+}
+
+#[test]
+fn breaking_reports_what_the_schema_change_adds() {
+    let source = "a = \"--sql\\nSELECT email FROM users\"\nb = SQL[tuple[str | None]](\"--sql\\nSELECT name FROM users\")\nc = \"--sql\\nSELECT nme FROM users\"\n";
+    let after = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);";
+    let answer = ask(&json!({
+        "op": "breaking", "source": source, "schema": after, "before": SCHEMA, "dialect": "postgres",
+    }));
+    let found: Vec<_> = answer["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|found| {
+            (
+                found["line"].as_u64().unwrap(),
+                found["rule"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(found, [(1, "unknown-column")]);
+}
+
+#[test]
+fn breaking_without_a_before_schema_reports_every_schema_error() {
+    let source = "q = \"--sql\\nSELECT nme FROM users\"\n";
+    let answer =
+        ask(&json!({"op": "breaking", "source": source, "schema": SCHEMA, "dialect": "postgres"}));
+    assert_eq!(answer["diagnostics"][0]["rule"], "unknown-column");
 }

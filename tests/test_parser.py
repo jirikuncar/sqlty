@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 import sqlty.core as core
-from sqlty.core import json_shapes
+from tests._json_shapes import json_shapes
 
 
 class TestParser:

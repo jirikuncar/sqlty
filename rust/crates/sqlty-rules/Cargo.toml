@@ -1,0 +1,21 @@
+[package]
+name = "sqlty-rules"
+version.workspace = true
+edition.workspace = true
+description = "The lint rule registry of sqlty, generated from the rule pages"
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[build-dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "1.1"
+
+[dev-dependencies]
+# For `tests/registry_compiler.rs`, which tests the build script's compiler.
+serde = { version = "1", features = ["derive"] }
+toml = "1.1"

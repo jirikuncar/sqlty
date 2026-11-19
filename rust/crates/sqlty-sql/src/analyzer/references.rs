@@ -10,7 +10,7 @@ use sqlparser::ast::{AccessExpr, Expr, FunctionArg, FunctionArguments, Query, Vi
 use super::memo::Reporting;
 use super::query::Analyzer;
 use super::scope::Scope;
-use crate::diagnostics::NameRule;
+use crate::diagnostics::Rule;
 
 impl Analyzer<'_> {
     /// Resolves every column `expr` reads in `scope`, recording only `unknown-column`,
@@ -38,11 +38,11 @@ impl Analyzer<'_> {
         self.diag.retain_since(mark, |rule| {
             matches!(
                 rule,
-                NameRule::UnknownTable
-                    | NameRule::UnknownColumn
-                    | NameRule::AmbiguousColumn
-                    | NameRule::ForeignKeyMismatch
-                    | NameRule::EntityMismatch
+                Rule::UnknownTable
+                    | Rule::UnknownColumn
+                    | Rule::AmbiguousColumn
+                    | Rule::ForeignKeyMismatch
+                    | Rule::EntityMismatch
             )
         });
     }

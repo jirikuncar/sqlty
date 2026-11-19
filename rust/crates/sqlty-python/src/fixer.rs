@@ -16,7 +16,6 @@ use crate::rules::{Rule, RuleConfig};
 use crate::scan::Scan;
 use crate::suppress;
 use crate::types::symbols::Source;
-use sqlty_sql::diagnostics::NameRule;
 
 /// The rules whose diagnostics carry a fix.
 const FIXABLE: [Rule; 8] = [
@@ -27,7 +26,7 @@ const FIXABLE: [Rule; 8] = [
     Rule::StaleType,
     Rule::NarrowType,
     Rule::UntypedQuery,
-    Rule::Name(NameRule::UnknownColumn),
+    Rule::UnknownColumn,
 ];
 
 /// Fixing one problem can reveal another (a `"--sql SELECT"` fixed into a query is then

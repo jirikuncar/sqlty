@@ -22,7 +22,7 @@ use super::fanout::{conjuncts, join_conditions, strip};
 use super::query::Analyzer;
 use super::scope::{relation_name, Scope};
 use crate::catalog::ForeignKey;
-use crate::diagnostics::{Diagnostics, NameRule};
+use crate::diagnostics::{Diagnostics, Rule};
 
 /// A schema table column a comparison reads.
 #[derive(Clone)]
@@ -282,7 +282,7 @@ impl<'s> Analyzer<'s> {
             .collect();
         let _at = self.diag.at(pair.span);
         self.diag.record(
-            NameRule::ForeignKeyMismatch,
+            Rule::ForeignKeyMismatch,
             format!(
                 "{} references {}, not {}",
                 column.qualified(),
@@ -373,7 +373,7 @@ impl<'s> Analyzer<'s> {
                     })
                     .collect();
                 self.diag.record(
-                    NameRule::ForeignKeyMismatch,
+                    Rule::ForeignKeyMismatch,
                     format!(
                         "{} {} mixed: {}",
                         short(m.table),
@@ -394,7 +394,7 @@ impl<'s> Analyzer<'s> {
             compared.sort_unstable();
             compared.dedup();
             self.diag.record(
-                NameRule::ForeignKeyMismatch,
+                Rule::ForeignKeyMismatch,
                 format!(
                     "{} {} references {} {}, compared with {} on {} only",
                     short(m.table),
@@ -420,7 +420,7 @@ impl<'s> Analyzer<'s> {
             .collect();
         let _at = self.diag.at(m.span);
         self.diag.record(
-            NameRule::ForeignKeyMismatch,
+            Rule::ForeignKeyMismatch,
             format!(
                 "{} {} references one {} row, compared with {}",
                 short(m.table),

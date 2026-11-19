@@ -6,7 +6,7 @@
 //! are integers, and returns plausible rows.
 
 use super::query::Analyzer;
-use crate::diagnostics::NameRule;
+use crate::diagnostics::Rule;
 
 impl Analyzer<'_> {
     /// The key `column` of `table` holds, when it is a key or references one.
@@ -42,11 +42,10 @@ impl Analyzer<'_> {
             named(b)
         );
         if keys {
-            let by = NameRule::ForeignKeyMismatch;
             self.diag
-                .record_shadowed(NameRule::EntityMismatch, message, by);
+                .record_shadowed(Rule::EntityMismatch, message, Rule::ForeignKeyMismatch);
         } else {
-            self.diag.record(NameRule::EntityMismatch, message);
+            self.diag.record(Rule::EntityMismatch, message);
         }
     }
 }

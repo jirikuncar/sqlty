@@ -409,6 +409,59 @@ fn rules(sql: &str) -> Vec<&'static str> {
     diagnose(sql).into_iter().map(|(rule, _)| rule).collect()
 }
 
+/// `(rule, table, column)` of each diagnostic of a query against a users/orders schema.
+fn subjects(sql: &str) -> Vec<(&'static str, Option<String>, Option<String>)> {
+    let schema = Some(load_schema(
+        "CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT NOT NULL);\
+         CREATE TABLE orders (id BIGINT PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users (id),\
+         status TEXT NOT NULL)",
+        "postgres",
+    ));
+    analyze_with_diagnostics(sql, "postgres", schema.as_deref())
+        .1
+        .into_iter()
+        .map(|found| (found.rule.name(), found.table, found.column))
+        .collect()
+}
+
+#[test]
+fn test_name_diagnostic_subjects() {
+    let some = |name: &str| Some(name.to_string());
+    let cases = [
+        (
+            "SELECT u.nope FROM users u",
+            vec![("unknown-column", some("users"), some("nope"))],
+        ),
+        (
+            "SELECT naïve FROM users",
+            vec![("unknown-column", some("users"), some("naïve"))],
+        ),
+        (
+            "SELECT x.id FROM users u",
+            vec![("unknown-table", some("x"), some("id"))],
+        ),
+        (
+            "SELECT id FROM missing",
+            vec![("unknown-table", some("missing"), None)],
+        ),
+        (
+            "SELECT id FROM users u JOIN orders o ON o.user_id = u.id",
+            vec![("ambiguous-column", None, some("id"))],
+        ),
+        (
+            "INSERT INTO orders (id, user_id) VALUES (1, 2)",
+            vec![("insert-missing-column", some("orders"), some("status"))],
+        ),
+        (
+            "SELECT my_udf(id) FROM users",
+            vec![("unknown-function", None, None)],
+        ),
+    ];
+    for (sql, expected) in cases {
+        assert_eq!(subjects(sql), expected, "{sql}");
+    }
+}
+
 #[test]
 fn test_name_diagnostics() {
     assert_eq!(rules("SELECT nope FROM a"), ["unknown-column"]);

@@ -32,7 +32,7 @@ execute("DELETE FROM users", (1,))
 ## A query without parameters takes no keys
 
 psycopg and sqlite3 ignore a mapping when the query has no placeholders, so
-[`extra-param`](../../../src/sqlty/rules/extra-param.md) warns. An empty one
+[`extra-param`](../../../docs/reference/rules/extra-param.md) warns. An empty one
 passes nothing.
 
 ```python

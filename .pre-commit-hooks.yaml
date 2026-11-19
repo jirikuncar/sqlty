@@ -17,13 +17,3 @@
   entry: sqlty check
   language: python
   types_or: [python, sql, toml]
-
-# Deprecated alias of sqlty-rewrite, kept so existing configs using `id: sqlty` work.
-# It used to generate stubs; it now rewrites the staged files in place.
-- id: sqlty
-  name: sqlty rewrite (deprecated id 'sqlty', use sqlty-rewrite)
-  description: Deprecated alias of sqlty-rewrite (rewrites files in place; no longer generates stubs)
-  entry: sqlty rewrite
-  language: python
-  types_or: [python, sql, toml]
-  require_serial: true
