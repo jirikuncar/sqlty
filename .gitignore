@@ -54,3 +54,4 @@ docs/assets/vendor/
 # Cloudflare deploys (docs-preview.yml)
 /public/
 .wrangler/
+evals/results/

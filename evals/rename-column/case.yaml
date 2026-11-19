@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: rename-column
+tags: [sqlty-breaking]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

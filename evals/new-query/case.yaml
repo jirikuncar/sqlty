@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: new-query
+tags: [sqlty, sqlty-rewrite]
+runs: 3
+context:
+  scaffold_script: scaffold.sh
