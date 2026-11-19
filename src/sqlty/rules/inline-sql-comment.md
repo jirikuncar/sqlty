@@ -1,3 +1,12 @@
++++
+order = 170
+group = "query"
+severity = "warn"
+fixable = true
+summary = "--sql followed by space makes entire query a SQL comment; use \"--sql\\nSELECT ...\" or run sqlty check --fix"
+origin = "Python"
++++
+
 # inline-sql-comment
 
 Default severity: **warn**

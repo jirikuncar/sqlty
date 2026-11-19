@@ -144,3 +144,4 @@ rassumfrassum
 sarif
 sqruff
 Pygments
+(?i)extra_items
