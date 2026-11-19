@@ -51,9 +51,9 @@ python_package() {
     fi
     "${pytest[@]}" -m timing -n 0 -p no:randomly
     (cd rust && uv run --no-sync cargo "${tests[@]}" -p sqlty-core)
+    uv run --no-sync coverage report
+    gate sqlty-ext
   )
-  uv run --no-sync coverage report
-  gate sqlty-ext
 }
 
 crate() {
