@@ -40,7 +40,8 @@ TypeScript or Rust host can depend on, with no change to Python behavior.
 
 The analyzer renders Python strings directly (`SqlType::python`, `scalar_python`). The
 Python string is also the analyzer's working type: about 190 places build one, and
-operator typing reads them back (`operators.rs` splits `int | float` to decide whether a sum is numeric).
+operator typing reads them back (`operators.rs` splits `int | float` to decide whether a
+sum is numeric).
 
 Most of the IR exists already: every column carries its canonical SQL type
 (`Column::sql_type`), which `SqlType::parse` reads into arrays, rows, structs and maps,
