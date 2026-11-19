@@ -1,3 +1,12 @@
++++
+order = 310
+group = "names"
+severity = "error"
+fixable = false
+summary = "INSERT leaves out a NOT NULL column that has no default"
+origin = "sql"
++++
+
 # insert-missing-column
 
 Default severity: **error**

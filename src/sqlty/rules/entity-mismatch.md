@@ -1,3 +1,12 @@
++++
+order = 370
+group = "names"
+severity = "ignore"
+fixable = false
+summary = "Comparison between columns holding keys of different tables"
+origin = "sql"
++++
+
 # entity-mismatch
 
 Default severity: **ignore**

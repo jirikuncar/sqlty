@@ -1,3 +1,12 @@
++++
+order = 280
+group = "names"
+severity = "warn"
+fixable = false
+summary = "Function result is untyped because sqlty does not know the function"
+origin = "sql"
++++
+
 # unknown-function
 
 Default severity: **warn**

@@ -1,3 +1,12 @@
++++
+order = 30
+group = "row-type"
+severity = "warn"
+fixable = false
+summary = "Annotated NamedTuple field name doesn't match query column alias"
+origin = "python"
++++
+
 # column-name-mismatch
 
 Default severity: **warn**

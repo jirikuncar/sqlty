@@ -1,3 +1,12 @@
++++
+order = 40
+group = "row-type"
+severity = "error"
+fixable = false
+summary = "Query columns don't fit the fields of a TypedDict, dataclass or Pydantic model"
+origin = "python"
++++
+
 # typeddict-key-mismatch
 
 Default severity: **error**

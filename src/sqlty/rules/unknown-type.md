@@ -1,3 +1,12 @@
++++
+order = 290
+group = "names"
+severity = "warn"
+fixable = false
+summary = "Cast or column type has no Python type"
+origin = "sql"
++++
+
 # unknown-type
 
 Default severity: **warn**
