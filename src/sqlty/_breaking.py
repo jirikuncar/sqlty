@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     _Work = tuple[Path, ParsedSource, Settings, Schema | None, HelperIndex]
 
 Direction = Literal["backward", "forward", "both"]
+Kind = Literal["backward", "forward", "migration"]
 SchemaKey = tuple[str | None, str, tuple[tuple[str, str], ...]]
 
 
@@ -143,7 +144,7 @@ class SchemaFiles:
 
 @dataclass(frozen=True)
 class Finding:
-    direction: Literal["backward", "forward"]
+    direction: Kind
     against: str
     path: Path
     diagnostic: Diagnostic
@@ -180,6 +181,7 @@ def run(args: argparse.Namespace) -> list[Finding]:
                 findings += _compare(
                     "forward", baseline.label, queries=head, schema=baseline, jobs=jobs
                 )
+            findings += _migrations(head, baseline)
         return findings
 
 
@@ -202,7 +204,9 @@ def report(
     head = head or "the working tree"
 
     def message(finding: Finding) -> str:
-        if finding.direction == "backward":
+        if finding.direction == "migration":
+            title = f"a statement {head} runs that {finding.against} does not have"
+        elif finding.direction == "backward":
             title = f"the queries of {finding.against} against the schema of {head}"
         else:
             title = f"the queries of {head} against the schema of {finding.against}"
@@ -262,6 +266,35 @@ def _compare(
         for (relative, parsed, *_), diagnostics in zip(work, found, strict=True)
         for diagnostic in diagnostics
     ]
+
+
+def _migrations(head: Revision, baseline: Schemas) -> list[Finding]:
+    """What the statements of the PostgreSQL schema files of ``head`` that ``baseline`` does
+    not have lock, for each schema the checked files use."""
+    from sqlty import _core
+    from sqlty._source import ParsedSource
+
+    findings: list[Finding] = []
+    seen: set[tuple[object, ...]] = set()
+    checked = [f.relative_to(head.root) for f in head.files] + [p / "_" for p in head.paths]
+    for relative in checked:
+        own = head.settings(relative)
+        against = baseline.schema_key(relative, own)[0]
+        if own.dialect != "postgres" or against is None or against == own.schema_sql:
+            continue
+        key = (own.schema_files, against, *sorted((own.rules or {}).items()))
+        if key in seen:
+            continue
+        seen.add(key)
+        texts = [path.read_text(encoding="utf-8") for path in own.schema_files]
+        found = _core.check_migrations(against, texts, rules=own.rules)
+        for path, text, diagnostics in zip(own.schema_files, texts, found, strict=True):
+            shown = Path(os.path.relpath(path, head.root))
+            findings += [
+                Finding("migration", baseline.label, shown, d, ParsedSource(text))
+                for d in diagnostics
+            ]
+    return findings
 
 
 def _rust(work: list[_Work], jobs: int) -> list[list[Diagnostic]]:

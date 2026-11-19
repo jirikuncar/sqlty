@@ -863,6 +863,8 @@ class Settings:
     dialect: str = "postgres"
     schema: Schema | None = None
     schema_sql: str | None = None
+    # The files ``schema_sql`` was read from, in order: the migrations ``sqlty breaking`` checks.
+    schema_files: tuple[Path, ...] = ()
     types: dict[str, str] | None = None
     import_style: str | None = None
     untyped: bool = False
@@ -913,7 +915,9 @@ class SettingsResolver:
         self._args = args
         self.source = ConfigSource.from_args(args)
         schema = args.schema or self.source.schema
-        self._schema_sql = _load_schema(schema, Path.cwd()) if schema else None
+        self._schema_sql, self._schema_files = (
+            _load_schema_files(schema, Path.cwd()) if schema else (None, ())
+        )
         self._by_dir: dict[Path, Settings] = {}
         self._resolved: dict[Path, Path] = {}
         self._schemas: dict[tuple[str, str, tuple[tuple[str, str], ...]], Schema] = {}
@@ -972,10 +976,11 @@ class SettingsResolver:
     def _resolve(self, directory: Path) -> Settings:
 
         config, config_dir, label = self.source.load(directory)
-        schema_sql = self._schema_sql
+        schema_sql, schema_files = self._schema_sql, self._schema_files
         if schema_sql is None and "schema" in config and config_dir is not None:
-            schema_sql = _load_schema(config["schema"], config_dir)
+            schema_sql, schema_files = _load_schema_files(config["schema"], config_dir)
         settings = self._settings(config, config_dir, label, schema_sql, self._args.dialect)
+        settings = replace(settings, schema_files=schema_files)
         databases = []
         if config.get("databases") or config.get("overrides"):
             settings = replace(settings, routing=_routing(config))
@@ -985,18 +990,21 @@ class SettingsResolver:
             for key in ("rules", "types"):
                 if key in config and key in database:
                     merged[key] = {**config[key], **database[key]}
-            own_schema = schema_sql
+            own_schema, own_files = schema_sql, schema_files
             if "schema" in database and config_dir is not None:
-                own_schema = _load_schema(database["schema"], config_dir)
+                own_schema, own_files = _load_schema_files(database["schema"], config_dir)
             databases.append(
                 (
                     name,
-                    self._settings(
-                        merged,
-                        config_dir,
-                        f"{label} [tool.sqlty.databases.{name}]",
-                        own_schema,
-                        None if "dialect" in database else self._args.dialect,
+                    replace(
+                        self._settings(
+                            merged,
+                            config_dir,
+                            f"{label} [tool.sqlty.databases.{name}]",
+                            own_schema,
+                            None if "dialect" in database else self._args.dialect,
+                        ),
+                        schema_files=own_files,
                     ),
                 )
             )
@@ -1244,12 +1252,20 @@ def _routing(config: SQLTyConfig) -> dict[str, object]:
 
 def _load_schema(spec: SchemaSpec, base: Path) -> str | None:
     """Concatenate the schema files named by ``spec``; None if none can be read."""
+    return _load_schema_files(spec, base)[0]
+
+
+def _load_schema_files(spec: SchemaSpec, base: Path) -> tuple[str | None, tuple[Path, ...]]:
+    """The schema files named by ``spec``, concatenated (None if none can be read), and the
+    files that were read."""
     from sqlty._config import expand_schema
 
     parts: list[str] = []
+    files: list[Path] = []
     for path in expand_schema(spec, base):
         if path.is_file():
             parts.append(path.read_text(encoding="utf-8"))
+            files.append(path)
         else:
             logger.warning("Schema file not found: %s", path)
-    return "\n".join(parts) if parts else None
+    return ("\n".join(parts) if parts else None), tuple(files)

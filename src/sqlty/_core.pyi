@@ -125,6 +125,12 @@ def check_queries(
     query_format: str = "auto",
     name: str = "",
 ) -> list[Diagnostic]: ...
+def check_migrations(
+    baseline: str,
+    files: list[str],
+    *,
+    rules: dict[str, str] | None = None,
+) -> list[list[Diagnostic]]: ...
 def module_facts(
     source: str,
 ) -> (

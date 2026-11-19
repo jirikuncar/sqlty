@@ -18,6 +18,7 @@
 //! - [`params`]: [`params::add_param_types`] writes the `P` of `SQL[R, P]`.
 //! - [`module`]: [`module::facts`] reads what a module imports and calls.
 //! - [`queries`]: [`queries::check_queries`] checks the named queries of a `.sql` file.
+//! - [`migrations`]: [`migrations::check_migrations`] checks what new migration statements lock.
 //!
 //! The tokenizer and scanner are crate-internal.
 //!
@@ -56,6 +57,7 @@ pub mod helpers;
 pub mod index;
 pub mod json_types;
 pub mod locate;
+pub mod migrations;
 pub mod module;
 pub mod options;
 pub mod params;
