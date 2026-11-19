@@ -1517,15 +1517,16 @@ mod tests {
     }
 
     #[test]
-    fn a_driver_call_alone_is_parsed_once_and_not_analyzed() {
+    fn a_driver_call_alone_is_neither_analyzed_nor_parsed_as_written() {
         let text = concat!(
             "import psycopg\n",
             "conn = psycopg.connect('')\n",
             "cur = conn.cursor()\n",
             "cur.execute('SELECT $1::int AS x', (1,))\n",
             "cur.execute('SELECT $1::int AS x', (2,))\n",
+            "cur.execute('SELECT %s::int AS y', (3,))\n",
         );
-        assert_eq!(counted(text), (0, 1));
+        assert_eq!(counted(text), (0, 0));
     }
 
     #[test]

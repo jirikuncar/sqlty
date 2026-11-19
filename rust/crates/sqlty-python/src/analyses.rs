@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use sqlty_sql::analyzer::SchemaData;
-use sqlty_sql::analyzer::{parse, route, row_type, Column, Param, Parsed};
+use sqlty_sql::analyzer::{analyze_params, parse, route, row_type, Column, Param, Parsed};
 use sqlty_sql::diagnostics::NameDiagnostic;
 
 use crate::options::Options;
@@ -86,10 +86,9 @@ impl<'a> Analyses<'a> {
             }
             slot.and_then(|s| s.analysis.clone())
         };
-        let (dialect, schema) = self.routed(query);
         let params = match analyzed {
-            Some(analysis) => analysis.parsed.params(query, schema),
-            None => self.parse(query, dialect).params(query, schema),
+            Some(analysis) => analysis.parsed.params(query, self.routed(query).1),
+            None => analyze_params(query, self.options.dialect.name(), self.options.schema),
         };
         self.known
             .borrow_mut()
