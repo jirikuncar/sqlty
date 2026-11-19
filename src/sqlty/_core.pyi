@@ -1,6 +1,5 @@
 """Type stubs for the Rust extension module (sqlty._core)."""
 
-import ast
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal, final
@@ -160,7 +159,6 @@ def module_facts(
 def template_strings(
     source: str,
 ) -> list[tuple[int, tuple[int, int], str | None, list[str | None]]] | None: ...
-def module_outline(source: str) -> tuple[ast.Module, list[ast.ClassDef]] | None: ...
 
 _SiteArg = tuple[
     bool, tuple[int, int], str | None, str | None, list[tuple[int | str, str | None]] | None
