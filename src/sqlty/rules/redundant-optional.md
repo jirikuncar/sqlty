@@ -1,3 +1,12 @@
++++
+order = 80
+group = "row-type"
+severity = "ignore"
+fixable = false
+summary = "Row type field is optional but its query column cannot be NULL"
+origin = "Python"
++++
+
 # redundant-optional
 
 Default severity: **ignore**

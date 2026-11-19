@@ -10,7 +10,7 @@ use std::rc::Rc;
 use sqlparser::ast::{Expr, Ident, TableFactor, TableWithJoins};
 
 use crate::catalog::fold;
-use crate::diagnostics::{NameDiagnostic, NameRule};
+use crate::diagnostics::{NameDiagnostic, Rule};
 
 use super::dialect::SqlDialect;
 use super::literals::value_set;
@@ -114,7 +114,7 @@ impl<'a> Analyzer<'a> {
         }
         if self.judges_names() {
             self.diag.record_about(
-                NameRule::UnknownTable,
+                Rule::UnknownTable,
                 format!("table `{table}` is not defined in the schema"),
                 Some(table),
                 None,
@@ -159,7 +159,7 @@ impl<'a> Analyzer<'a> {
             if clash {
                 let _at = self.diag.at(ident.span);
                 self.diag.record(
-                    NameRule::DuplicateAlias,
+                    Rule::DuplicateAlias,
                     format!("table name `{}` is specified more than once", ident.value),
                 );
             }
@@ -338,11 +338,11 @@ impl<'a> Analyzer<'a> {
                 if typed.python.is_none() && self.diag.enabled() {
                     match (origin, &typed.sql) {
                         (Origin::Schema(column), sql_type) => self.diag.record(
-                            NameRule::UnknownType,
+                            Rule::UnknownType,
                             untyped_column_message(&column, sql_type.as_deref().unwrap_or("")),
                         ),
                         (Origin::View(column), _) => self.diag.record(
-                            NameRule::UnsupportedSyntax,
+                            Rule::UnsupportedSyntax,
                             format!("view column `{column}` is not typed by the view's query"),
                         ),
                         // Typed in the CTE or subquery that defines it; reported there.
@@ -434,7 +434,7 @@ impl<'a> Analyzer<'a> {
         references.dedup();
         if references.len() > 1 {
             self.diag.record_about(
-                NameRule::AmbiguousColumn,
+                Rule::AmbiguousColumn,
                 format!(
                     "column reference `{}` is ambiguous: {} all have it",
                     ident.value,
@@ -493,7 +493,7 @@ impl<'a> Analyzer<'a> {
             .find_map(|source| source.table.opaque_description());
         if let Some(description) = opaque {
             return self.diag.record(
-                NameRule::UnsupportedSyntax,
+                Rule::UnsupportedSyntax,
                 format!(
                     "column `{}` may come from {description}, which sqlty does not read the columns of",
                     column.value,
@@ -519,7 +519,7 @@ impl<'a> Analyzer<'a> {
                     return self.diag.explain_silently();
                 }
                 return self.diag.record_about(
-                    NameRule::UnknownTable,
+                    Rule::UnknownTable,
                     format!("`{qualifier}` is not a table or alias in the FROM clause"),
                     Some(qualifier),
                     Some(&column.value),
@@ -573,7 +573,7 @@ impl<'a> Analyzer<'a> {
             _ => None,
         };
         self.diag.push(NameDiagnostic {
-            rule: NameRule::UnknownColumn,
+            rule: Rule::UnknownColumn,
             message,
             span: None,
             replacement: replacement.flatten(),
@@ -675,7 +675,7 @@ impl<'a> Analyzer<'a> {
                     .filter(|c| c.python_type.is_none() && !c.is_unknown_star())
                 {
                     self.diag.record(
-                        NameRule::UnsupportedSyntax,
+                        Rule::UnsupportedSyntax,
                         format!(
                             "view column `{table}.{}` is not typed by the view's query",
                             col.name
@@ -687,7 +687,7 @@ impl<'a> Analyzer<'a> {
                 for col in self.schema.table(table).unwrap_or_default() {
                     if col.typed(self.dialect).python.is_none() {
                         self.diag.record(
-                            NameRule::UnknownType,
+                            Rule::UnknownType,
                             untyped_column_message(&format!("{table}.{}", col.name), &col.sql_type),
                         );
                     }
@@ -712,7 +712,7 @@ impl<'a> Analyzer<'a> {
             return self.diag.explain_silently();
         }
         self.diag.record(
-            NameRule::UnsupportedSyntax,
+            Rule::UnsupportedSyntax,
             format!(
                 "`*` reads view `{}`, whose columns are not typed",
                 views.join("`, `")
@@ -729,7 +729,7 @@ impl<'a> Analyzer<'a> {
         let tables = Self::star_tables(reference.as_deref(), scope);
         if let Some(description) = tables.iter().find_map(Table::opaque_description) {
             return self.diag.record(
-                NameRule::UnsupportedSyntax,
+                Rule::UnsupportedSyntax,
                 format!("`*` reads {description}, which sqlty does not read the columns of"),
             );
         }
@@ -739,7 +739,7 @@ impl<'a> Analyzer<'a> {
         if let Some(reference) = &reference {
             if !scope.iter().any(|source| source.reference == *reference) {
                 return self.diag.record_about(
-                    NameRule::UnknownTable,
+                    Rule::UnknownTable,
                     format!("`{reference}` in `{reference}.*` is not a table or alias in the FROM clause"),
                     Some(reference),
                     None,
@@ -760,7 +760,7 @@ impl<'a> Analyzer<'a> {
             return self.explain_view_star(reference.as_deref(), scope);
         }
         self.diag.record(
-            NameRule::UnsupportedSyntax,
+            Rule::UnsupportedSyntax,
             "`*` could not be expanded into columns",
         );
     }

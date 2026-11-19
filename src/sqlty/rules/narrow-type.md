@@ -1,3 +1,12 @@
++++
+order = 150
+group = "rewrite"
+severity = "error"
+fixable = true
+summary = "SQL[tuple[...]] doesn't admit every row the query returns"
+origin = "Python"
++++
+
 # narrow-type
 
 Default severity: **error**

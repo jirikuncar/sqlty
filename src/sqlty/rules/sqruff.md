@@ -1,3 +1,12 @@
++++
+order = 420
+group = "query"
+severity = "ignore"
+fixable = false
+summary = "Finding of sqruff's core lint rules in a query"
+origin = "Python"
++++
+
 # sqruff
 
 Default severity: **ignore**
