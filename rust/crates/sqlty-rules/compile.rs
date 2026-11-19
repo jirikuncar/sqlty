@@ -1,4 +1,4 @@
-//! The rule page compiler: `src/sqlty/rules/*.md` to Rust source. `build.rs` runs it;
+//! The rule page compiler: `docs/reference/rules/*.md` to Rust source. `build.rs` runs it;
 //! `tests/registry_compiler.rs` tests it.
 
 use std::collections::BTreeMap;
@@ -79,8 +79,8 @@ fn parse<'a>(file: &'a str, text: &'a str) -> Result<Page<'a>, String> {
         .strip_suffix(".md")
         .ok_or("a rule page must be a .md file")?;
     let variant = variant(stem)?;
-    let (toml, body) = split(text)?;
-    let front: Front = toml::from_str(toml).map_err(|e| format!("front matter: {e}"))?;
+    let (front, body) = split(text)?;
+    let front: Front = toml::from_str(&as_toml(front)).map_err(|e| format!("front matter: {e}"))?;
     let group = lookup(&GROUPS, &front.group, "group")?;
     let severity = lookup(&SEVERITIES, &front.severity, "severity")?;
     if !ORIGINS.contains(&front.origin.as_str()) {
@@ -115,14 +115,14 @@ fn parse<'a>(file: &'a str, text: &'a str) -> Result<Page<'a>, String> {
     })
 }
 
-/// The front matter between `+++` lines, and the page after it and one blank line.
+/// The front matter between `---` lines, and the page after it and one blank line.
 fn split(text: &str) -> Result<(&str, &str), String> {
     let rest = text
-        .strip_prefix("+++\n")
-        .ok_or("missing front matter: the page must start with a `+++` line")?;
+        .strip_prefix("---\n")
+        .ok_or("missing front matter: the page must start with a `---` line")?;
     let mut offset = 0;
     for line in rest.split_inclusive('\n') {
-        if line.trim_end_matches('\n') == "+++" {
+        if line.trim_end_matches('\n') == "---" {
             let body = rest[offset + line.len()..]
                 .strip_prefix('\n')
                 .ok_or("front matter must be followed by a blank line")?;
@@ -130,7 +130,16 @@ fn split(text: &str) -> Result<(&str, &str), String> {
         }
         offset += line.len();
     }
-    Err("unterminated front matter: no closing `+++` line".to_string())
+    Err("unterminated front matter: no closing `---` line".to_string())
+}
+
+/// The front matter is YAML for the docs site, written as `key: value` lines whose values
+/// are TOML too: quoted strings, integers and booleans.
+fn as_toml(front: &str) -> String {
+    front
+        .lines()
+        .map(|line| line.replacen(": ", " = ", 1) + "\n")
+        .collect()
 }
 
 fn lookup(table: &[(&str, &'static str)], key: &str, what: &str) -> Result<&'static str, String> {
@@ -168,7 +177,7 @@ fn arms(rules: &[&Page], value: impl Fn(&Page) -> String) -> String {
 }
 
 fn generate(rules: &[&Page], by_file: &[Page]) -> String {
-    let mut out = String::from("/// A lint rule, one per page of `src/sqlty/rules/`.\n#[repr(u8)]\n#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]\n");
+    let mut out = String::from("/// A lint rule, one per page of `docs/reference/rules/`.\n#[repr(u8)]\n#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]\n");
     out.push_str("pub enum Rule {\n");
     for page in rules {
         out.push_str(&format!(

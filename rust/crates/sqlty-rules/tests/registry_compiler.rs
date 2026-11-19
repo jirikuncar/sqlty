@@ -8,14 +8,14 @@ mod compile;
 
 use compile::compile;
 
-const PAGE: &str = "+++
-order = 10
-group = \"names\"
-severity = \"warn\"
-fixable = false
-summary = \"Two \\\"tables\\\" meet\"
-origin = \"SQL\"
-+++
+const PAGE: &str = "---
+order: 10
+group: \"names\"
+severity: \"warn\"
+fixable: false
+summary: \"Two \\\"tables\\\" meet\"
+origin: \"SQL\"
+---
 
 # chasm-join
 
@@ -50,15 +50,15 @@ fn a_page_becomes_a_variant_and_its_tables() {
     assert!(code.contains("Rule::ChasmJoin => Group::Names,"));
     assert!(code.contains("\"chasm-join\" => Some(Rule::ChasmJoin),"));
     assert!(code.contains("(\"chasm-join.md\", \"# chasm-join\\n"));
-    assert!(!code.contains("+++"));
+    assert!(!code.contains("order: 10"));
 }
 
 #[test]
 fn rules_are_listed_by_order_and_pages_by_file_name() {
     let second = PAGE
-        .replace("order = 10", "order = 5")
+        .replace("order: 10", "order: 5")
         .replace("chasm-join", "a-rule");
-    let second = second.replace("origin = \"SQL\"", "origin = \"Python\"");
+    let second = second.replace("origin: \"SQL\"", "origin: \"Python\"");
     let code =
         compile(&[page("chasm-join.md", PAGE), page("a-rule.md", &second)]).expect("compiles");
     assert!(code.find("ARule,").expect("listed") < code.find("ChasmJoin,").expect("listed"));
@@ -81,7 +81,7 @@ fn a_page_needs_front_matter() {
 
 #[test]
 fn front_matter_must_end() {
-    let message = error("+++\norder = 10\n");
+    let message = error("---\norder: 10\n");
     assert!(
         message.starts_with("chasm-join.md: unterminated front matter"),
         "{message}"
@@ -90,7 +90,7 @@ fn front_matter_must_end() {
 
 #[test]
 fn front_matter_needs_a_blank_line_after_it() {
-    let message = error(&PAGE.replace("+++\n\n#", "+++\n#"));
+    let message = error(&PAGE.replace("---\n\n#", "---\n#"));
     assert_eq!(
         message,
         "chasm-join.md: front matter must be followed by a blank line"
@@ -99,7 +99,7 @@ fn front_matter_needs_a_blank_line_after_it() {
 
 #[test]
 fn an_unknown_key_is_an_error() {
-    let message = error(&PAGE.replace("order = 10", "order = 10\nname = \"x\""));
+    let message = error(&PAGE.replace("order: 10", "order: 10\nname: \"x\""));
     assert!(
         message.starts_with("chasm-join.md: front matter"),
         "{message}"
@@ -125,7 +125,7 @@ fn group_severity_and_origin_are_checked() {
         message.starts_with("chasm-join.md: unknown group \"nothing\" (expected row-type, query"),
         "{message}"
     );
-    let message = error(&PAGE.replace("severity = \"warn\"", "severity = \"loud\""));
+    let message = error(&PAGE.replace("severity: \"warn\"", "severity: \"loud\""));
     assert_eq!(
         message,
         "chasm-join.md: unknown severity \"loud\" (expected error, warn, ignore)"
@@ -139,7 +139,7 @@ fn group_severity_and_origin_are_checked() {
 
 #[test]
 fn the_summary_must_say_something() {
-    let message = error(&PAGE.replace("summary = \"Two \\\"tables\\\" meet\"", "summary = \" \""));
+    let message = error(&PAGE.replace("summary: \"Two \\\"tables\\\" meet\"", "summary: \" \""));
     assert_eq!(message, "chasm-join.md: the summary is empty");
 }
 
@@ -196,7 +196,7 @@ fn at_most_sixty_four_rules() {
             );
             let text = PAGE
                 .replace("chasm-join", &name)
-                .replace("order = 10", &format!("order = {i}"));
+                .replace("order: 10", &format!("order: {i}"));
             (format!("{name}.md"), text)
         })
         .collect();

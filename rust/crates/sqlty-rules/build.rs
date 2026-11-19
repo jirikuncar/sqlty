@@ -1,4 +1,4 @@
-//! Compiles the rule pages `src/sqlty/rules/*.md` of the repository into
+//! Compiles the rule pages `docs/reference/rules/*.md` of the repository into
 //! `$OUT_DIR/rules.rs`, which `src/lib.rs` includes: the `Rule` enum and its tables.
 //!
 //! A page's front matter is the only place a rule's metadata is written.
@@ -16,8 +16,8 @@ use std::{env, fs};
 mod compile;
 
 fn main() {
-    let dir =
-        PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../../../src/sqlty/rules");
+    let dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+        .join("../../../docs/reference/rules");
     println!("cargo:rerun-if-changed={}", dir.display());
     let mut pages = Vec::new();
     for entry in fs::read_dir(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {

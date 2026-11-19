@@ -227,7 +227,7 @@ Queries: 1 typed, 1 partially typed, 1 unparsed, 1 skipped (fstring-skipped: 1)
 A query is typed when every column of its row type is known, and partially
 typed when some column's type is not (`SELECT *` with no schema, an unknown
 column). Unparsed queries are those the parser rejects, whether or not
-[`unparsed-query`](rules.md#unparsed-query) is enabled. Skipped strings are
+[`unparsed-query`](rules/unparsed-query.md) is enabled. Skipped strings are
 f-, t- and raw strings, and other `--sql` strings that are not plain literals,
 counted by the rule that reports them. Queries that return no rows are not
 counted.

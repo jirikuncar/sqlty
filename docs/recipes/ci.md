@@ -41,9 +41,9 @@ pinned in sqlty's `rust-toolchain.toml` and installs it if missing. Pass options
 `args: [--dialect, sqlite]`.
 
 `sqlty-check` fails the commit only for rules with severity `error`. Drift that
-can break the code, [`narrow-type`](../reference/rules.md#narrow-type), is one by
+can break the code, [`narrow-type`](../reference/rules/narrow-type.md), is one by
 default; an annotation only wider than the rows,
-[`stale-type`](../reference/rules.md#stale-type), is a warning unless you
+[`stale-type`](../reference/rules/stale-type.md), is a warning unless you
 promote it (see [below](#fail-on-drift-and-mismatches)).
 
 !!! note "A schema change checks the whole project"
@@ -105,9 +105,9 @@ whose row type is unknown; see [Untyped queries](../guide/untyped.md).
 `sqlty check` exits with 1 only when a rule with severity `error` fires.
 By default that covers row type mismatches, names the schema doesn't have,
 `SELECT *` without a schema, and annotations that don't admit the rows
-([`narrow-type`](../reference/rules.md#narrow-type)); annotations only wider than
-the rows ([`stale-type`](../reference/rules.md#stale-type)) and unwrapped strings
-([`stale-rewrite`](../reference/rules.md#stale-rewrite)) are warnings. Promote
+([`narrow-type`](../reference/rules/narrow-type.md)); annotations only wider than
+the rows ([`stale-type`](../reference/rules/stale-type.md)) and unwrapped strings
+([`stale-rewrite`](../reference/rules/stale-rewrite.md)) are warnings. Promote
 the rules you want to enforce:
 
 ```toml
@@ -152,7 +152,7 @@ Each step catches something the others don't:
 | Step | Fails when |
 |------|------------|
 | `sqlty rewrite --check` | a `--sql` string is not wrapped yet |
-| `sqlty check` | a rule with severity `error` fires: a row type mismatch, an unknown table or column, or an annotation that doesn't admit the rows ([`narrow-type`](../reference/rules.md#narrow-type)) by default; see [Fail on drift and mismatches](#fail-on-drift-and-mismatches) |
+| `sqlty check` | a rule with severity `error` fires: a row type mismatch, an unknown table or column, or an annotation that doesn't admit the rows ([`narrow-type`](../reference/rules/narrow-type.md)) by default; see [Fail on drift and mismatches](#fail-on-drift-and-mismatches) |
 | `sqlty breaking` | the pull request's schema breaks the base branch's queries, or its queries break on the base branch's schema: a dropped column, a column made nullable |
 
 !!! note "A wider annotation is only a warning"

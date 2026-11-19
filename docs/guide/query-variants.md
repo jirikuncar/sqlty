@@ -37,7 +37,7 @@ def users(named: bool) -> list[tuple[int, str]]:
 ```
 
 Without `preview`, the query is not a string literal, so `check` skips it as
-[`dynamic-query`](../reference/rules.md#dynamic-query), which is off by default. With it,
+[`dynamic-query`](../reference/rules/dynamic-query.md), which is off by default. With it,
 `check` reads both queries and checks each against `tuple[int, str]`. The one ending in
 `WHERE TRUE` returns users without a name, which `str` does not admit.
 

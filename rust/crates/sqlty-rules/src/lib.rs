@@ -1,7 +1,7 @@
 //! The lint rules of sqlty: their names, severities, groups and the rule set type.
 //!
 //! The metadata of a rule is written once, in the front matter of its page
-//! `src/sqlty/rules/<name>.md`; `build.rs` generates [`Rule`] and its tables from the pages.
+//! `docs/reference/rules/<name>.md`; `build.rs` generates [`Rule`] and its tables from the pages.
 
 include!(concat!(env!("OUT_DIR"), "/rules.rs"));
 
@@ -197,7 +197,7 @@ mod tests {
                 .expect("a page");
             assert!(text.starts_with(&format!("# {}\n", rule.name())));
         }
-        assert!(PAGES.iter().all(|(_, text)| !text.starts_with("+++")));
+        assert!(PAGES.iter().all(|(_, text)| !text.starts_with("---")));
     }
 
     #[test]
