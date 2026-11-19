@@ -19,6 +19,7 @@ import contextlib
 import functools
 import http.server
 import json
+import re
 import tempfile
 import threading
 from collections import Counter
@@ -338,8 +339,9 @@ def editing(page: Page) -> None:
     page.evaluate(f"{SOURCE}.getAction('sqlty.explainRule').run()")
     at(page, "stale = SQL", len("stale = SQL["))
     page.evaluate(f"{SOURCE}.getAction('sqlty.explainRule').run()")
-    opened = page.evaluate("window.opened.map(([url]) => new URL(url).hash)")
-    assert opened[0] == "" and opened[1].startswith("#"), opened
+    opened = page.evaluate("window.opened.map(([url]) => new URL(url).pathname)")
+    assert opened[0].endswith("/reference/rules/"), opened
+    assert re.search(r"/reference/rules/[a-z-]+/$", opened[1]), opened
 
     at(page, "SELECT")
     page.keyboard.press("Control+Shift+P")
