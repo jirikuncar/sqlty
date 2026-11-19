@@ -6,9 +6,9 @@ architecture live in [DEVELOPMENT.md](DEVELOPMENT.md).
 - `SQL[T]` is a `str` subclass. It works anywhere a string works.
 - Run `uv run prek run --all-files` before every commit and fix every error it
   reports; [DEVELOPMENT.md](DEVELOPMENT.md#hooks) lists the hooks.
-- Never force-push, in any variant: resolve a rejected push without rewriting
+- Never force-push, `--force-with-lease` included: resolve a rejected push without rewriting
   remote history.
-- Every new feature gets an mdtest (see [Markdown tests](#markdown-tests-mdtest)).
+- Every change gets an mdtest: see [Markdown tests](#markdown-tests-mdtest).
 - Review rules for pull requests live in [REVIEW.md](REVIEW.md). Before handing a
   branch over, have a separate agent review it with the
   [`review` skill](.claude/skills/review/SKILL.md), given the branch name only.
@@ -260,7 +260,6 @@ sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
 
 ### README and docs
 
-- README.md and `docs/` are mdtest files; their assertions run with the suite.
 - `tests/test_core_invariants.py` checks idempotency and round trips over every
   mdtest code block: new mdtests extend it automatically.
 - `docs/reference/configuration.md` and `cli.md` hold tables between `<!-- generated:NAME -->`
