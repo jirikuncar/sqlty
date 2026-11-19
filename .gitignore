@@ -39,8 +39,9 @@ npm/wasm/sqlty_wasm.wasm
 docs/assets/playground/examples.json
 bench-result.json
 
-# Claude Code local settings; the review skill is shared
+# Claude Code local settings; the instructions and the review skill are shared
 .claude/*
+!.claude/CLAUDE.md
 !.claude/skills/
 .claude/skills/*
 !.claude/skills/review/
