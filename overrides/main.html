@@ -69,7 +69,7 @@
     // Links from before each rule had its own page: #rule-name to rule-name/.
     addEventListener("DOMContentLoaded", () => {
       const id = decodeURIComponent(location.hash.slice(1));
-      if (/^[a-z-]+$/.test(id) && !document.getElementById(id)) location.replace(`${id}/`);
+      if (/^[a-z-]+$/.test(id) && document.querySelector(`a[href$="rules/${id}/"]`)) location.replace(`${id}/`);
     });
   </script>
   {% endif %}
