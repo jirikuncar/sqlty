@@ -1,7 +1,7 @@
 """Latency of the language server's bridge: one check per keystroke on a large project.
 
-Stage 2 of ``plans/2026-10-28-vscode-extension.md``. Generates the project of
-``bench_project.py``, loads it into ``sqlty._lsp_bridge.Workspace`` and reports, in ms:
+Generates the project of ``bench_project.py``, loads it into
+``sqlty._lsp_bridge.Workspace`` and reports, in ms:
 
 - ``load``: reading the project, its config, schema and helpers, once per server start;
 - ``check``: a check of a changed buffer, for a generated module and for a large one;
