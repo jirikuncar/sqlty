@@ -7,7 +7,7 @@ live in [AGENTS.md](AGENTS.md); review rules in [REVIEW.md](REVIEW.md).
 
 - Python 3.14+
 - [uv](https://docs.astral.sh/uv/)
-- [Rust toolchain](https://rustup.rs/) 1.99+ (builds the engine, `sqlty._core`, and runs the cargo hooks)
+- [`rustup`](https://rustup.rs/): `rust-toolchain.toml` pins the Rust version (builds the engine, `sqlty._core`, and runs the cargo hooks)
 
 ## Setup
 
