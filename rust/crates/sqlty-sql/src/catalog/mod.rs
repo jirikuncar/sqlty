@@ -45,6 +45,7 @@ pub use index::{Columns, NameRef, RelationKind, RelationRef};
 pub use joins::Join;
 pub(crate) use names::fold;
 pub(crate) use read::{load, load_with};
+pub use read::{read_serially, BatchRunner, StatementBatch};
 
 use rustc_hash::FxHashMap;
 use std::sync::{Arc, LazyLock};

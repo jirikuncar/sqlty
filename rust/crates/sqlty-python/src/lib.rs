@@ -49,6 +49,7 @@ pub mod compose;
 pub mod config;
 pub mod drivers;
 pub mod edit;
+pub mod facts;
 pub mod fixer;
 pub mod frozen;
 pub mod helpers;

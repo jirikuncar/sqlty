@@ -28,8 +28,8 @@ use crate::settings::{Directory, FileSettings, Function, Schemas};
 use crate::Shared;
 
 /// The stack the analyzer's recursion keeps free, and the stack it grows by.
-const STACK_RED_ZONE: usize = 2 << 20;
-const STACK_SEGMENT: usize = 16 << 20;
+pub(crate) const STACK_RED_ZONE: usize = 2 << 20;
+pub(crate) const STACK_SEGMENT: usize = 16 << 20;
 
 /// The settings each configuration (label, base, table) gives its directories.
 type Configured = Vec<(
@@ -532,14 +532,22 @@ impl Workspace {
     fn load_directory(&self, directory: &Path) -> Result<Arc<Directory>, String> {
         let mut warn = |warning| self.schemas.warn(warning);
         let loaded = self.flags.load(directory, &self.discovery, &mut warn)?;
-        let mut configs = self.configs.lock().unwrap_or_else(PoisonError::into_inner);
         let key = (
             loaded.label.clone(),
             loaded.base.clone(),
             loaded.table.clone(),
         );
-        if let Some((_, made)) = configs.iter().find(|(known, _)| *known == key) {
-            return made.clone();
+        // The lock is not held while the schemas load: that waits on the pool's threads,
+        // which may run a job that needs the lock.
+        let known = self
+            .configs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .find(|(known, _)| *known == key)
+            .map(|(_, made)| made.clone());
+        if let Some(made) = known {
+            return made;
         }
         let made = Directory::new(
             loaded,
@@ -549,7 +557,10 @@ impl Workspace {
             self.version,
         )
         .map(Arc::new);
-        configs.push((key, made.clone()));
+        self.configs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((key, made.clone()));
         made
     }
 
@@ -927,7 +938,7 @@ pub fn par_map<T: Sync, R: Send>(items: &[T], work: impl Fn(&T) -> R + Sync) -> 
     clippy::expect_used,
     reason = "a check cannot go on without its threads"
 )]
-fn pool() -> &'static rayon::ThreadPool {
+pub(crate) fn pool() -> &'static rayon::ThreadPool {
     static POOL: std::sync::OnceLock<rayon::ThreadPool> = std::sync::OnceLock::new();
     POOL.get_or_init(|| {
         rayon::ThreadPoolBuilder::new()
@@ -1744,6 +1755,44 @@ mod tests {
             .unwrap_or_default();
         assert!(error.contains("gone.toml"), "{error}");
         assert!(workspace.check_all().expect("checks")[0].is_empty());
+    }
+
+    #[test]
+    fn two_directories_share_a_schema_read_in_parallel_while_modules_are_parsed() {
+        let schema: String = (0..64)
+            .map(|i| {
+                format!(
+                    "-- {}\nCREATE TABLE t{i} (id INT NOT NULL);\n",
+                    "x".repeat(17_000)
+                )
+            })
+            .collect();
+        assert!(schema.len() > 1 << 20);
+        let query: &'static str = "q = \"--sql\\nSELECT nope FROM t63\"\n";
+        let mut tree: Vec<(String, &'static str)> = vec![
+            (
+                "/repo/pyproject.toml".to_string(),
+                "[tool.sqlty]\nschema = \"schema.sql\"\n",
+            ),
+            (
+                "/repo/schema.sql".to_string(),
+                Box::leak(schema.into_boxed_str()),
+            ),
+        ];
+        for directory in ["a", "b"] {
+            for module in 0..40 {
+                tree.push((format!("/repo/{directory}/m{module}.py"), query));
+            }
+        }
+        let files: Vec<(&str, &'static str)> = tree
+            .iter()
+            .map(|(path, text)| (path.as_str(), *text))
+            .collect();
+        let mut workspace = opened(&files);
+        let found = workspace.check_all().expect("checks");
+        assert_eq!(found.len(), 80);
+        assert!(found.iter().all(|found| rules(found) == ["unknown-column"]));
+        assert_eq!(workspace.warnings(), Vec::<String>::new());
     }
 
     #[test]

@@ -16,7 +16,7 @@ use sqlparser::ast::{
 use super::fanout::{join_conditions, strip};
 use super::query::Analyzer;
 use super::scope::{relation_name, Scope};
-use crate::diagnostics::{Diagnostics, NameRule};
+use crate::diagnostics::{Diagnostics, Rule};
 
 impl Analyzer<'_> {
     /// Records `entity-mismatch` for each comparison of `select` between columns of
@@ -85,7 +85,7 @@ impl Analyzer<'_> {
             }
         };
         self.diag.record(
-            NameRule::EntityMismatch,
+            Rule::EntityMismatch,
             format!(
                 "{} holds {} keys, {} holds {} keys",
                 a.column,

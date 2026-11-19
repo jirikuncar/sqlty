@@ -9,7 +9,7 @@
 //!   `expand_star`, `query_diagnostics`, `parse_error`, `returns_rows`.
 //! - Source: `rewrite_source`, `add_param_types`, `strip_source`, `fix_source`, `check_source`,
 //!   `wrapped_queries`, `query_sites`.
-//! - Schema: `load_schema`, `schema_skipped_tables`, `schema_skipped_objects`, `name_rules`.
+//! - Schema: `load_schema`, `schema_skipped_tables`, `schema_skipped_objects`, `name_rules`, `rules`.
 //! - Configuration: `validate_config` and the key lists.
 //!
 //! Parsed schemas are cached per `(schema text, dialect)` in a small LRU shared by all
@@ -68,7 +68,7 @@ use pyo3::pybacked::PyBackedStr;
 
 use rewriter::ImportStyle;
 use sqlty_python::options::{ConfigError, Options};
-use sqlty_python::rules::RuleConfig;
+use sqlty_python::rules::{Rule, RuleConfig};
 
 type ColumnTuple = (String, Option<String>, Option<String>);
 type NullableColumnTuple = (
@@ -557,9 +557,24 @@ fn dialect_names() -> Vec<&'static str> {
 /// The rules `query_diagnostics` reports, which are off by default.
 #[pyfunction]
 fn name_rules() -> Vec<&'static str> {
-    sqlty_sql::diagnostics::NameRule::ALL
+    Rule::SQL.iter().map(|rule| rule.name()).collect()
+}
+
+/// `(name, default severity, fixable, summary, group)` of every lint rule, in the order
+/// `sqlty rule` lists them.
+#[pyfunction]
+fn rules() -> Vec<(&'static str, &'static str, bool, &'static str, &'static str)> {
+    Rule::ALL
         .iter()
-        .map(|rule| rule.name())
+        .map(|rule| {
+            (
+                rule.name(),
+                rule.default_severity().as_str(),
+                rule.fixable(),
+                rule.summary(),
+                rule.group().name(),
+            )
+        })
         .collect()
 }
 
@@ -1136,7 +1151,7 @@ fn module_calls(
         sqlty_python::check::sites(&parsed, helpers.as_deref(), module, variants)
             .into_iter()
             .map(|site| {
-                let unchecked = site.unchecked.map(sqlty_python::rules::Rule::name);
+                let unchecked = site.unchecked.map(Rule::name);
                 (site.typed, site.queries, unchecked, site.start)
             })
             .collect()
@@ -2042,16 +2057,15 @@ fn call_variants(
 
     detach(py, || {
         let source = Source::new(source, version)?;
-        let scan = Scan::new(source.body(), |call| {
-            call.func.is_name_expr() && !call.arguments.args.is_empty()
-        });
+        let scan = Scan::new(source.body());
         let mut found: Vec<CallVariants> = scan
             .calls
             .iter()
-            .map(|(call, stack)| {
+            .filter(|(call, _)| call.func.is_name_expr() && !call.arguments.args.is_empty())
+            .map(|&(call, scope)| {
                 let query: &Expr = &call.arguments.args[0];
                 let at = sqlty_python::calls::query_span(call, query).0;
-                let stack: Vec<_> = stack.iter().map(|scope| scan.scopes[*scope]).collect();
+                let stack: Vec<_> = scan.stack(scope).iter().map(|s| scan.scopes[*s]).collect();
                 match query_variants(&source, &stack, call.range(), query, limit, None) {
                     None => (at, false, None, false, None),
                     Some(Found::Unchecked { composed, reason }) => {
@@ -2336,6 +2350,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(analyze_params, m)?)?;
     m.add_function(wrap_pyfunction!(query_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(name_rules, m)?)?;
+    m.add_function(wrap_pyfunction!(rules, m)?)?;
     m.add_function(wrap_pyfunction!(dialect_names, m)?)?;
     m.add_function(wrap_pyfunction!(python_types, m)?)?;
     m.add_function(wrap_pyfunction!(schema_skipped_tables, m)?)?;

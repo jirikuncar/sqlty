@@ -25,7 +25,7 @@ use super::names::table_key;
 use super::query::{Analyzer, Column};
 use super::scope::{join_constraint, Scope};
 use crate::catalog::fold;
-use crate::diagnostics::NameRule;
+use crate::diagnostics::Rule;
 
 /// Aggregates whose result changes when an input row is repeated.
 const DUPLICATE_SENSITIVE: [&str; 10] = [
@@ -126,7 +126,7 @@ impl Analyzer<'_> {
             }
             let _at = self.diag.at(aggregate.span);
             self.diag.record(
-                NameRule::FanoutAggregate,
+                Rule::FanoutAggregate,
                 format!(
                     "{} aggregates {}, whose rows repeat once per {} row",
                     aggregate.text, graph.names[node], graph.names[by]
@@ -135,7 +135,7 @@ impl Analyzer<'_> {
         }
         if let Some((from, a, b)) = graph.chasm() {
             self.diag.record(
-                NameRule::ChasmJoin,
+                Rule::ChasmJoin,
                 format!(
                     "{} joins {} and {} one-to-many, so each row of one repeats once per row of the other",
                     graph.names[from], graph.names[a], graph.names[b]
@@ -146,7 +146,7 @@ impl Analyzer<'_> {
             for b in a + 1..graph.keys.len() {
                 if !graph.one(a, b) && !graph.one(b, a) && graph.linked(a, b) {
                     self.diag.record(
-                        NameRule::UnprovenJoin,
+                        Rule::UnprovenJoin,
                         format!(
                             "the join of {} and {} matches no primary or unique key, so how often it repeats their rows is unknown",
                             graph.names[a], graph.names[b]

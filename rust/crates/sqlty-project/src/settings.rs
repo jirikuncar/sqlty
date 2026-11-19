@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
+use rayon::prelude::*;
 use sqlty_python::config;
 use sqlty_python::project::{self, Discovery, Files};
 use sqlty_python::queries;
@@ -14,6 +15,7 @@ use sqlty_sql::analyzer::{self, Databases, Schema, SchemaData, TypeOverrides};
 use toml::{Table, Value};
 
 use crate::flags::{Flags, Loaded};
+use crate::workspace::{pool, STACK_RED_ZONE, STACK_SEGMENT};
 use crate::Shared;
 
 /// `max-query-variants` when `preview` is on and it is not set.
@@ -136,6 +138,10 @@ impl Schemas {
     }
 }
 
+/// Schemas below this size are read on the calling thread: handing their statements to the
+/// pool costs more memory than the parallel parsing saves time.
+const PARALLEL_MIN_BYTES: usize = 1 << 20;
+
 fn loaded_schema(
     text: &str,
     dialect: &'static str,
@@ -143,10 +149,21 @@ fn loaded_schema(
 ) -> Result<(Schema, Vec<analyzer::SkippedObject>), String> {
     let overrides = TypeOverrides::new(types, dialect)
         .map_err(|error| format!("[tool.sqlty.types]: {error}"))?;
-    Ok(match overrides.is_empty() {
-        true => analyzer::load_schema_with_skipped(text, dialect),
-        false => analyzer::load_schema_with_overrides(text, dialect, overrides),
-    })
+    if text.len() < PARALLEL_MIN_BYTES {
+        return Ok(analyzer::load_schema_with_overrides(
+            text, dialect, overrides,
+        ));
+    }
+    let run = |batches: &mut [analyzer::StatementBatch<'_>]| {
+        pool().install(|| {
+            batches.par_iter_mut().for_each(|batch| {
+                stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || batch.read());
+            });
+        });
+    };
+    Ok(analyzer::load_schema_in_batches(
+        text, dialect, overrides, &run,
+    ))
 }
 
 /// The settings of the files of one directory: its project's, and those of each database.
