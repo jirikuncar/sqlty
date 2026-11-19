@@ -53,6 +53,10 @@ def main() -> None:
         coverage = Coverage()
         page = browser.new_page()
         page.route("https://api.github.com/**", github)
+        if args.url:
+            # Pages reports a custom domain's page_url as http://, which redirects to https://.
+            page.goto(url)
+            url = page.url
         coverage.watch(page)
         errors: list[str] = []
         page.on("pageerror", lambda error: errors.append(str(error)))
