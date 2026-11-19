@@ -14,7 +14,8 @@
 //!
 //! The engine reads `:name` and `$1`. sqlc's `@name`, `sqlc.arg(name)` and `sqlc.narg(name)`,
 //! and aiosql's `:obj.attr`, are rewritten to `:name` and `:obj_attr` in [`NamedQuery::sql`],
-//! padded with spaces so a diagnostic's span stays where it is in the file.
+//! and sqlc's `sqlc.embed(t)` to the row of `t`, padded with spaces so a diagnostic's span
+//! stays where it is in the file.
 
 use std::ops::Range;
 use std::str::FromStr;
@@ -83,7 +84,7 @@ static NAME_HEADER: LazyLock<Regex> =
 /// and `@@variables` match first so nothing inside them is rewritten.
 static PLACEHOLDER: LazyLock<Regex> = LazyLock::new(|| {
     sqlty_sql::regex(
-        r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|/\*(?s:.)*?\*/|::\w+|@@\w+|\bsqlc\.n?arg\(\s*'?(?P<arg>[A-Za-z_]\w*)'?\s*\)|@(?P<at>[A-Za-z_]\w*)|:(?P<obj>[A-Za-z_]\w*)\.(?P<attr>[A-Za-z_]\w*)"#,
+        r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|/\*(?s:.)*?\*/|::\w+|@@\w+|\bsqlc\.n?arg\(\s*'?(?P<arg>[A-Za-z_]\w*)'?\s*\)|\bsqlc\.embed\(\s*(?P<embed>[A-Za-z_]\w*)\s*\)|@(?P<at>[A-Za-z_]\w*)|:(?P<obj>[A-Za-z_]\w*)\.(?P<attr>[A-Za-z_]\w*)"#,
     )
 });
 
@@ -171,27 +172,34 @@ pub fn placeholders(sql: &str, format: Format) -> (String, Vec<(String, String)>
     let mut last = 0;
     for found in PLACEHOLDER.captures_iter(sql) {
         let whole = found.get(0).map_or(0..0, |m| m.range());
-        let name = match (
+        let (prefix, name) = match (
             format,
             found.name("arg").or(found.name("at")),
             found.name("obj"),
             found.name("attr"),
         ) {
-            (Format::Sqlc, Some(name), _, _) => name.as_str().to_string(),
+            (Format::Sqlc, Some(name), _, _) => (":", name.as_str().to_string()),
+            (Format::Sqlc, None, None, None) if found.name("embed").is_some() => (
+                "",
+                found.name("embed").map_or("", |m| m.as_str()).to_string(),
+            ),
             (Format::Aiosql, None, Some(obj), Some(attr)) => {
                 let name = format!("{}_{}", obj.as_str(), attr.as_str());
                 let original = format!("{}.{}", obj.as_str(), attr.as_str());
                 if !renames.iter().any(|(renamed, _)| *renamed == name) {
                     renames.push((name.clone(), original));
                 }
-                name
+                (":", name)
             }
             _ => continue,
         };
         out.push_str(&sql[last..whole.start]);
-        out.push(':');
+        out.push_str(prefix);
         out.push_str(&name);
-        out.extend(std::iter::repeat_n(' ', whole.len() - name.len() - 1));
+        out.extend(std::iter::repeat_n(
+            ' ',
+            whole.len() - name.len() - prefix.len(),
+        ));
         last = whole.end;
     }
     out.push_str(&sql[last..]);
@@ -337,6 +345,10 @@ mod tests {
         assert_eq!(
             placeholders(sql, Format::Sqlc).0,
             "SELECT '@a', :u.x, x::pg.t, @@v -- @b\nWHERE :n               = :name"
+        );
+        assert_eq!(
+            placeholders("SELECT sqlc.embed(u), u.id FROM users u", Format::Sqlc).0,
+            "SELECT u            , u.id FROM users u"
         );
         assert_eq!(
             placeholders(sql, Format::Aiosql).0,
