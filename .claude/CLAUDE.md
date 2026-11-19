@@ -1,3 +1,3 @@
 # Claude Code instructions
 
-@AGENTS.md
+@../AGENTS.md
