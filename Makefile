@@ -72,10 +72,6 @@ update-mdtest:  ## Update mdtest assertions with actual values
 
 # --- Benchmarks ---
 
-.PHONY: bench
-bench:  ## sqlty.core benchmarks
-	uv run python benchmarks/bench_core.py
-
 .PHONY: bench-project
 bench-project:  ## Full-size synthetic project (10k files); needs a release build
 	uv run python benchmarks/bench_project.py --size full
@@ -87,10 +83,6 @@ bench-ci:  ## CI-size project; exits 1 when over the budget in benchmarks/baseli
 .PHONY: bench-baseline
 bench-baseline:  ## Re-record the CI-size baseline for this platform
 	uv run python benchmarks/bench_project.py --size ci --repeats 7 --update-baseline
-
-.PHONY: bench-bridge
-bench-bridge:  ## A check per keystroke through sqlty._lsp_bridge; needs a release build
-	uv run python benchmarks/bench_lsp_bridge.py
 
 .PHONY: bench-codspeed
 bench-codspeed:  ## The benchmarks CodSpeed measures in CI, timed locally; needs a release build
