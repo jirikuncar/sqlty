@@ -22,7 +22,8 @@ uv run prek run --all-files        # all hooks (run before every commit)
   [`review` skill](.claude/skills/review/SKILL.md), given the branch name only.
   `.claude/skills/` is for contributors and not shipped, unlike `skills/`.
 - Plans live in `plans/`, named `YYYY-MM-DD-<slug>.md` after the day they were written.
-  Delete a plan once it has shipped; git and the merged pull requests keep it.
+  Delete a plan once it has shipped; move what is left to `plans/2026-02-13-future.md`
+  or an issue.
 
 ## AI disclosure
 

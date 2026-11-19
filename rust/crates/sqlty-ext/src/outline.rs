@@ -3,8 +3,8 @@
 //! Function bodies keep only the statements that hold a class definition, at any depth;
 //! everything else is kept whole. Nodes carry the positions `ast.parse` gives them, so
 //! `ast.dump(..., include_attributes=True)` of the outline equals that of `ast.parse` cut
-//! the same way (`sqlty._source._outline`), except where `sqlty_python::parse`
-//! declines the source.
+//! the same way (`_outline` in `tests/test_outline.py`), except where
+//! `sqlty_python::parse` declines the source.
 
 use std::borrow::Cow;
 
