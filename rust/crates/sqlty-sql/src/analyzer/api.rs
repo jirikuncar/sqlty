@@ -6,6 +6,7 @@ use sqlparser::ast::Statement;
 use sqlparser::parser::Parser;
 use sqlparser::tokenizer::{Location, Span};
 
+use crate::catalog::BatchRunner;
 use crate::diagnostics::{Diagnostics, NameDiagnostic};
 
 use super::dialect::SqlDialect;
@@ -35,7 +36,39 @@ pub fn load_schema_with_overrides(
     dialect: &str,
     overrides: crate::catalog::TypeOverrides,
 ) -> (Schema, Vec<SkippedObject>) {
-    let (catalog, skipped) = crate::catalog::load_with(schema_sql, dialect, Arc::new(overrides));
+    let (catalog, skipped) =
+        crate::catalog::load_with(schema_sql, dialect, Arc::new(overrides), None);
+    (Arc::new(catalog), skipped)
+}
+
+/// [`load_schema_with_overrides`], reading the statements through `run`: it is handed the
+/// batches of a window of statements and must call [`StatementBatch::read`] on each, in any
+/// order and on any thread. The catalog is the same whichever runner reads the batches.
+///
+/// ```
+/// use sqlty_sql::analyzer::{load_schema_in_batches, StatementBatch};
+///
+/// let run = |batches: &mut [StatementBatch<'_>]| {
+///     for batch in batches {
+///         batch.read();
+///     }
+/// };
+/// let (_schema, skipped) = load_schema_in_batches(
+///     "CREATE TABLE t (id int);",
+///     "postgres",
+///     Default::default(),
+///     &run,
+/// );
+/// assert!(skipped.is_empty());
+/// ```
+pub fn load_schema_in_batches(
+    schema_sql: &str,
+    dialect: &str,
+    overrides: crate::catalog::TypeOverrides,
+    run: BatchRunner<'_>,
+) -> (Schema, Vec<SkippedObject>) {
+    let (catalog, skipped) =
+        crate::catalog::load_with(schema_sql, dialect, Arc::new(overrides), Some(run));
     (Arc::new(catalog), skipped)
 }
 
