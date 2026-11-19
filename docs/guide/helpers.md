@@ -183,6 +183,29 @@ async def save(db: store.Db) -> None:
     await db.execute("--sql\nINSERT INTO users (id, name) VALUES (%s, %s)", (1,))
 ```
 
+### Receivers without a type
+
+A method called on an attribute or name sqlty cannot type, such as
+`self.db.one(...)` with `db` set at runtime, is found by the receiver's name:
+`receivers` lists the names it is called on, whatever their type.
+
+```toml
+[[tool.sqlty.functions]]
+import-path = "postgres.Postgres.one"
+query-param = "sql"
+receivers = ["db", "cursor"]
+```
+
+```python
+class Participant:
+    def name(self) -> str:
+        # error: [unknown-column] "column `nme` does not exist in `users`; did you mean `name`?"
+        return self.db.one("SELECT nme FROM users WHERE id = %s", (self.id,))
+```
+
+Without a definition of `postgres.Postgres.one` to read, as when the library is
+not installed where sqlty looks, the query is the first argument.
+
 ### Query strings of registered helpers
 
 `stale-rewrite` doesn't report a `--sql` string passed to a registered helper,

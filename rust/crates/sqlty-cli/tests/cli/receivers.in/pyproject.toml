@@ -1,0 +1,7 @@
+[tool.sqlty]
+schema = "schema.sql"
+
+[[tool.sqlty.functions]]
+import-path = "postgres.Postgres.one"
+query-param = "sql"
+receivers = ["db", "cursor"]

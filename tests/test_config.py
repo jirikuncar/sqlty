@@ -176,6 +176,10 @@ def test_unknown_keys_raise_config_error_naming_the_file(tmp_path):
             "[[tool.sqlty.functions]]\nimport-path = 1\nquery-param = 'q'\n",
             "functions]] import-path must be a string",
         ),
+        (
+            "[[tool.sqlty.functions]]\nimport-path = 'a.b'\nquery-param = 'q'\nreceivers = 'db'\n",
+            "functions]] receivers must be an array of strings",
+        ),
     ],
 )
 def test_invalid_settings(tmp_path, toml, message):

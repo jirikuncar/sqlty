@@ -843,7 +843,7 @@ struct DiagnosticOut {
 
 /// The modules of the checked paths as `sqlty_python::index` reads them, built from the
 /// steps that filled a `sqlty._helpers.HelperIndex`: `("add", module, text, name)` and
-/// `("register", import path, query parameter, row parameter, roots, database)`.
+/// `("register", import path, query parameter, row parameter, roots, database, receivers)`.
 #[pyclass(frozen, name = "ModuleIndex", module = "sqlty._core")]
 struct ModuleIndex(Arc<sqlty_python::index::HelperIndex>);
 
@@ -854,6 +854,7 @@ type IndexStep = (
     Option<String>,
     Vec<std::path::PathBuf>,
     Option<String>,
+    Vec<String>,
 );
 
 type HelperTuple = (
@@ -944,7 +945,9 @@ fn indexed(
         Some(pool) => pool.install(|| texts.into_par_iter().map(parse).collect()),
         None => texts.into_iter().map(parse).collect(),
     };
-    for ((_, first, second, third, roots, database), slot) in steps.into_iter().zip(slots) {
+    for ((_, first, second, third, roots, database, receivers), slot) in
+        steps.into_iter().zip(slots)
+    {
         match slot {
             Some(slot) => {
                 let (source, found) = &parsed[slot];
@@ -961,6 +964,7 @@ fn indexed(
                     third.as_deref(),
                     roots,
                     database.as_deref(),
+                    &receivers,
                 );
             }
         }

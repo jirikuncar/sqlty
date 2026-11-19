@@ -873,9 +873,10 @@ class Settings:
     query_variants: int | None = None
     preview: bool = False
     coerce_row_types: frozenset[str] = frozenset()
-    functions: tuple[tuple[str, str, str | None], ...] = ()
-    # The functions each named database lists, read against it in any file.
-    database_functions: tuple[tuple[str, str, str | None, str], ...] = ()
+    # (import path, query parameter, row parameter, receivers)
+    functions: tuple[tuple[str, str, str | None, tuple[str, ...]], ...] = ()
+    # The functions each named database lists, read against it in any file, then its name.
+    database_functions: tuple[tuple[str, str, str | None, tuple[str, ...], str], ...] = ()
     format_command: tuple[str, ...] = ()
     overrides: tuple[RuleOverride, ...] = ()
     config_dir: Path | None = None
@@ -1009,7 +1010,13 @@ class SettingsResolver:
             name: db.schema or load_schema(None, dialect=db.dialect) for name, db in named.items()
         }
         database_functions = tuple(
-            (f["import_path"], f["query_param"], f.get("return_type_param"), name)
+            (
+                f["import_path"],
+                f["query_param"],
+                f.get("return_type_param"),
+                tuple(f.get("receivers", ())),
+                name,
+            )
             for name, database in config["databases"].items()
             for f in database.get("functions", [])
         )
@@ -1087,7 +1094,12 @@ class SettingsResolver:
             preview=bool(config.get("preview")),
             coerce_row_types=frozenset(config.get("coerce_row_types", ())),
             functions=tuple(
-                (f["import_path"], f["query_param"], f.get("return_type_param"))
+                (
+                    f["import_path"],
+                    f["query_param"],
+                    f.get("return_type_param"),
+                    tuple(f.get("receivers", ())),
+                )
                 for f in config.get("functions", [])
             ),
             format_command=tuple(config.get("format_command", ())),

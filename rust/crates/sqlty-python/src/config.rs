@@ -88,7 +88,12 @@ pub fn driver_types(driver: &str, dialect: &str) -> Vec<(String, String)> {
 pub const DISCOVERY_KEYS: [&str; 3] = ["exclude", "extend-exclude", "respect-gitignore"];
 
 /// Keys of a `[[tool.sqlty.functions]]` entry.
-pub const FUNCTION_KEYS: [&str; 3] = ["import-path", "query-param", "return-type-param"];
+pub const FUNCTION_KEYS: [&str; 4] = [
+    "import-path",
+    "query-param",
+    "return-type-param",
+    "receivers",
+];
 
 /// Keys of a `[[tool.sqlty.overrides]]` entry.
 pub const OVERRIDE_KEYS: [&str; 3] = ["include", "exclude", "rules"];
@@ -362,7 +367,16 @@ pub fn validate(mut table: Table, source: &str) -> Result<Config, InvalidConfig>
                         FUNCTION_KEYS.join(", ")
                     ));
                 }
-                if !value.is_str() {
+                if key == "receivers" {
+                    let names = value
+                        .as_array()
+                        .filter(|items| items.iter().all(Value::is_str));
+                    if names.is_none() {
+                        return fail(
+                            "[[tool.sqlty.functions]] receivers must be an array of strings".into(),
+                        );
+                    }
+                } else if !value.is_str() {
                     return fail(format!("[[tool.sqlty.functions]] {key} must be a string"));
                 }
             }

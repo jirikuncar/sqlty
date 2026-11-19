@@ -265,7 +265,11 @@ class Run:
             index.add(module.removesuffix(".__init__"), core.ParsedSource(text, module))
         for f, database in functions:
             index.register(
-                f["import-path"], f["query-param"], f.get("return-type-param"), database=database
+                f["import-path"],
+                f["query-param"],
+                f.get("return-type-param"),
+                database=database,
+                receivers=f.get("receivers", ()),
             )
         return index
 

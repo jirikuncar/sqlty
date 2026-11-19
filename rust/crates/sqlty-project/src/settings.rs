@@ -35,6 +35,9 @@ pub struct Function {
     pub row: Option<String>,
     /// The database a `[tool.sqlty.databases.NAME]` entry reads its queries against.
     pub database: Option<String>,
+    /// Names of the method's receivers, `db` matching `db.one(...)` and `self.db.one(...)`
+    /// whatever their type.
+    pub receivers: Vec<String>,
 }
 
 /// What a file is checked with.
@@ -387,6 +390,7 @@ fn entries(table: &Table, database: Option<&str>) -> Vec<Function> {
                     .and_then(Value::as_str)
                     .map(str::to_string),
                 database: database.map(str::to_string),
+                receivers: strings(entry, "receivers"),
             })
         })
         .collect()

@@ -507,6 +507,7 @@ impl Workspace {
                 row,
                 roots,
                 function.database.as_deref(),
+                &function.receivers,
             );
         }
         let forked = forked.build();

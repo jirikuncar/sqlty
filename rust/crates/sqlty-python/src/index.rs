@@ -227,6 +227,8 @@ impl Drop for Busy {
 /// The helpers and sources of the modules of a checked tree, by module name.
 pub struct HelperIndex {
     pub modules: HashMap<String, Dict<Helper>>,
+    /// `(receiver, method)` to the `(module, name)` of a helper registered with `receivers`.
+    receivers: HashMap<(String, String), (String, String)>,
     tree: Arc<Tree>,
     version: Version,
     read: Arc<Mutex<Read>>,
@@ -258,6 +260,7 @@ fn alternation(names: &HashSet<String>) -> Option<Regex> {
 /// An index being filled.
 pub struct Builder {
     modules: HashMap<String, Dict<Helper>>,
+    receivers: HashMap<(String, String), (String, String)>,
     /// The tree forked from, until a module is added.
     tree: Option<Arc<Tree>>,
     added: HashMap<String, Arc<Module>>,
@@ -269,6 +272,7 @@ impl Builder {
     pub fn new(version: Version) -> Self {
         Builder {
             modules: HashMap::new(),
+            receivers: HashMap::new(),
             tree: None,
             added: HashMap::new(),
             version,
@@ -300,7 +304,8 @@ impl Builder {
     /// `HelperIndex.register`: `import_path` (`pkg.mod.func` or `pkg.mod.Class.method`) as
     /// a helper taking its query as `query` and its row type as `row`, see
     /// `[[tool.sqlty.functions]]`. Its definition is read from an indexed module, or from
-    /// the first of `roots` holding it.
+    /// the first of `roots` holding it. A method is also called on any of `receivers`,
+    /// whatever their type; without a definition, its query is then the first argument.
     pub fn register(
         &mut self,
         import_path: &str,
@@ -308,6 +313,7 @@ impl Builder {
         row: Option<&str>,
         roots: Roots<'_>,
         database: Option<&str>,
+        receivers: &[String],
     ) {
         let parts: Vec<&str> = import_path.split('.').collect();
         for i in (1..parts.len()).rev() {
@@ -317,6 +323,7 @@ impl Builder {
             };
             found.configured = true;
             found.database = database.map(str::to_string);
+            self.point(receivers, &parts[..i].join("."), &name);
             self.modules
                 .entry(parts[..i].join("."))
                 .or_default()
@@ -333,9 +340,15 @@ impl Builder {
             if parts.len() > back {
                 let i = parts.len() - back;
                 let name = parts[i..].join(".");
+                self.point(receivers, &parts[..i].join("."), &name);
+                let positional = if receivers.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![query.to_string()]
+                };
                 let found = Helper {
                     name: name.clone(),
-                    positional: Vec::new(),
+                    positional,
                     keywords: keywords.clone(),
                     query: query.to_string(),
                     row: row.map(str::to_string),
@@ -351,6 +364,17 @@ impl Builder {
                     .or_default()
                     .insert(&name, found);
             }
+        }
+    }
+
+    /// Calls of the method `name` of `module` on each of `receivers` call that helper.
+    fn point(&mut self, receivers: &[String], module: &str, name: &str) {
+        let method = name.rsplit('.').next().unwrap_or(name);
+        for receiver in receivers {
+            self.receivers.insert(
+                (receiver.clone(), method.to_string()),
+                (module.to_string(), name.to_string()),
+            );
         }
     }
 
@@ -503,6 +527,7 @@ impl Builder {
         });
         Arc::new(HelperIndex {
             modules: self.modules,
+            receivers: self.receivers,
             tree,
             version: self.version,
             read: self.read,
@@ -517,6 +542,7 @@ impl HelperIndex {
     pub fn fork(&self) -> Builder {
         Builder {
             modules: self.modules.clone(),
+            receivers: self.receivers.clone(),
             tree: Some(self.tree.clone()),
             added: HashMap::new(),
             version: self.version,
@@ -555,6 +581,14 @@ impl HelperIndex {
     /// The types and row types of the modules.
     pub fn types(&self) -> Arc<dyn Index> {
         self.tree.clone()
+    }
+
+    /// The helper registered for calls of `method` on a receiver named `receiver`.
+    pub fn by_receiver(&self, receiver: &str, method: &str) -> Option<&Helper> {
+        let (module, name) = self
+            .receivers
+            .get(&(receiver.to_string(), method.to_string()))?;
+        self.get(module, name)
     }
 
     /// `HelperIndex.get`: the helper `name` (maybe `Class.method`) of `module`, following

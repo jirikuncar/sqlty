@@ -354,6 +354,7 @@ query-param = "query"
 | `import-path` | yes | Module path and function name, for example `"app.db.sql"`; a method is `"pkg.db.Db.fetch_all"`. A package that re-exports it, `pkg.Db.fetch_all`, works too. Use `"__main__.sql"` or the file name for a script run directly |
 | `query-param` | yes | Name of the parameter that holds the query |
 | `return-type-param` | no | Parameter whose argument, such as `return_tp=int`, is the row type of that call instead of an inferred one; `check` compares it with the query columns |
+| `receivers` | no | Names a method is also called on whatever their type: `["db"]` matches `db.one(...)` and `self.db.one(...)`. Without a definition to read, the query is the first argument |
 <!-- /generated:config-function-keys -->
 
 Entries without `import-path` or `query-param` are skipped with a warning.

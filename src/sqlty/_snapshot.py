@@ -34,7 +34,7 @@ class SettingsEntry(TypedDict):
     import_style: str | None
     untyped: bool
     rules: dict[str, str] | None
-    functions: list[tuple[str, str, str | None]]
+    functions: list[tuple[str, str, str | None, tuple[str, ...]]]
     query_format: NotRequired[str]
 
 
@@ -146,7 +146,9 @@ class Snapshot:
             import_style=entry["import_style"],
             untyped=entry["untyped"],
             rules=entry["rules"],
-            functions=tuple((f[0], f[1], f[2]) for f in entry["functions"]),
+            functions=tuple(
+                (f[0], f[1], f[2], tuple(f[3]) if len(f) > 3 else ()) for f in entry["functions"]
+            ),
             query_format=entry.get("query_format", "auto"),
         )
 

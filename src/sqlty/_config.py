@@ -250,6 +250,13 @@ FUNCTION_KEY_DOCS: dict[str, KeyDoc] = {
         "Parameter whose argument, such as `return_tp=int`, is the row type of that call "
         "instead of an inferred one; `check` compares it with the query columns",
     ),
+    "receivers": KeyDoc(
+        "array of strings",
+        "none",
+        "`check`",
+        'Names a method is also called on whatever their type: `["db"]` matches `db.one(...)` '
+        "and `self.db.one(...)`. Without a definition to read, the query is the first argument",
+    ),
 }
 """Reference docs per key of a ``[[tool.sqlty.functions]]`` entry."""
 
@@ -317,12 +324,14 @@ class FunctionConfigComplete(TypedDict, total=False):
     """A ``[[tool.sqlty.functions]]`` entry: a helper whose string argument is a query.
 
     In TOML the keys are ``import-path`` and ``query-param`` (required) and
-    ``return-type-param`` (optional); here they are the snake_case fields below.
+    ``return-type-param`` and ``receivers`` (optional); here they are the snake_case fields
+    below.
     """
 
     import_path: str  # Full import path, e.g. "module.function_name" (required)
     query_param: str  # Parameter holding the SQL query (required)
     return_type_param: str  # Parameter holding the row type (optional)
+    receivers: list[str]  # Names the method is called on, whatever their type (optional)
 
 
 class SQLTyConfig(TypedDict, total=False):

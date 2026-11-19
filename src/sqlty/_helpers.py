@@ -99,10 +99,12 @@ def configured_helpers(
         if (forked := forks.get(key)) is None:
             forks[key] = forked = index.fork()
             roots = helper_roots(settings.config_dir, checked)
-            for import_path, query, row in settings.functions:
-                forked.register(import_path, query, row, roots=roots)
-            for import_path, query, row, database in settings.database_functions:
-                forked.register(import_path, query, row, roots=roots, database=database)
+            for import_path, query, row, receivers in settings.functions:
+                forked.register(import_path, query, row, roots=roots, receivers=receivers)
+            for import_path, query, row, receivers, database in settings.database_functions:
+                forked.register(
+                    import_path, query, row, roots=roots, database=database, receivers=receivers
+                )
         return forked
 
     return helpers_for
@@ -122,7 +124,9 @@ class HelperIndex:
     def __init__(self) -> None:
         self._lock = threading.RLock()
         # How the index was filled, to build it again in Rust.
-        self._steps: list[tuple[str, str, str, str | None, list[Path], str | None]] = []
+        self._steps: list[
+            tuple[str, str, str, str | None, list[Path], str | None, Sequence[str]]
+        ] = []
         self._rust: tuple[int, ModuleIndex] | None = None
         self._forked: tuple[HelperIndex, int] | None = None
 
@@ -160,7 +164,7 @@ class HelperIndex:
         parsed = ParsedSource.of(source)
         if parsed.module is None:
             parsed.module = module
-        self._steps.append(("add", module, parsed.text, parsed.module, [], None))
+        self._steps.append(("add", module, parsed.text, parsed.module, [], None, ()))
         return parsed.may_define_helpers and bool(module_helpers(parsed.text, sys.version_info[:2]))
 
     def register(
@@ -171,6 +175,7 @@ class HelperIndex:
         *,
         roots: Sequence[Path] = (),
         database: str | None = None,
+        receivers: Sequence[str] = (),
     ) -> None:
         """Register ``import_path`` (``pkg.mod.func`` or ``pkg.mod.Class.method``) as a helper.
 
@@ -178,7 +183,9 @@ class HelperIndex:
         positional parameters are read from its definition in ``pkg.mod``, indexed or else
         read (never imported) from ``pkg/mod.py`` or ``pkg/mod/__init__.py`` under the first
         of ``roots`` holding it, following names ``pkg.mod`` re-exports (``from .core import
-        Connection``); otherwise ``query`` and ``row`` can only be passed by keyword. Of
+        Connection``); otherwise ``query`` and ``row`` can only be passed by keyword, or
+        ``query`` first for a method called on one of ``receivers``, names it is called on
+        whatever their type (``self.db.one(...)``). Of
         ``@overload`` definitions, the first naming both is used unless the implementation
         names them.
 
@@ -188,4 +195,6 @@ class HelperIndex:
             >>> index.modules["db"]["run"].keywords == {"sql", "form"}
             True
         """
-        self._steps.append(("register", import_path, query, row, list(roots), database))
+        self._steps.append(
+            ("register", import_path, query, row, list(roots), database, tuple(receivers))
+        )
