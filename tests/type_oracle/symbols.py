@@ -7,10 +7,10 @@ import contextlib
 import typing
 
 from sqlty._source import ParsedSource
-from sqlty._type_extractor.ast_fields import _ast_type, _module_types
+from tests.type_oracle.ast_fields import _ast_type, _module_types
 
 if typing.TYPE_CHECKING:
-    from sqlty._helpers import HelperIndex
+    from tests.type_oracle.resolver import Resolver
 
 
 class ModuleTypes:
@@ -22,10 +22,9 @@ class ModuleTypes:
     ``int`` column doesn't fit an ``Email`` one; with a base that is unknown, it is unknown.
 
     Example:
-        >>> from sqlty._helpers import HelperIndex
-        >>> from sqlty._type_extractor.ast_fields import _ast_type
-        >>> index = HelperIndex()
-        >>> _ = index.add("ids", "from typing import NewType\\nUserId = NewType('UserId', int)")
+        >>> from tests.type_oracle.ast_fields import _ast_type
+        >>> from tests.type_oracle.resolver import Resolver
+        >>> index = Resolver({"ids": ParsedSource("from typing import NewType\\nUserId = NewType('UserId', int)", "ids")})
         >>> app = ParsedSource("import ids\\nfrom ids import UserId\\nMaybe = UserId | None")
         >>> names = ModuleTypes(app, index)
         >>> _ast_type(ast.Name("Maybe"), {}, names), _ast_type(ast.parse("ids.UserId").body[0].value, {}, names)
@@ -33,7 +32,7 @@ class ModuleTypes:
     """
 
     def __init__(
-        self, parsed: ParsedSource, helpers: HelperIndex | None, module: str | None = None
+        self, parsed: ParsedSource, helpers: Resolver | None, module: str | None = None
     ) -> None:
         self.parsed = parsed
         self.helpers = helpers

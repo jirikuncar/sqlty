@@ -30,7 +30,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
-from playwright.sync_api import Browser, CDPSession, Page, Route, sync_playwright
+from playwright.sync_api import Browser, BrowserContext, CDPSession, Page, Route, sync_playwright
 
 SOURCE = "monaco.editor.getEditors().find((e) => e.getContainerDomNode().matches('[data-source]'))"
 MODEL = "monaco.editor.getModels().find((m) => m.getLanguageId() === '{}')"
@@ -142,6 +142,7 @@ def embedded(page: Page, url: str) -> None:
     assert not page.is_visible(".md-header")
     assert not page.is_visible("[data-example]")
     assert page.is_visible("[data-fix]")
+    assert not page.is_visible("[data-ask-open]")
     opened = page.get_attribute("[data-open]", "href")
     assert "embed" not in opened and opened.split("#")[1] == shared.split("#")[1], opened
 
@@ -248,6 +249,7 @@ def exercise(browser: Browser, url: str, watch: Callable[[Page], None]) -> None:
     page.wait_for_selector("[data-source] .monaco-editor.vs-dark")
 
     files_and_panels(page)
+    breaking(page)
     editing(page)
     engine_errors(page)
     commands(page)
@@ -257,6 +259,7 @@ def exercise(browser: Browser, url: str, watch: Callable[[Page], None]) -> None:
     sharing(page)
     resizing(page)
     zoomed(page, url)
+    unsupported(context, url, watch)
     asking(page, url)
     assert not errors, errors
 
@@ -364,15 +367,39 @@ def source(page: Page, text: str | None = None) -> str:
 
 
 def files_and_panels(page: Page) -> None:
-    for name, language in [("schema", "sql"), ("config", "ini"), ("python", "python")]:
+    for name, language in [
+        ("schema", "sql"),
+        ("before", "sql"),
+        ("config", "ini"),
+        ("python", "python"),
+    ]:
         page.click(f'[data-file="{name}"]')
         assert page.evaluate(f"{SOURCE}.getModel().getLanguageId()") == language
-    for name in ["types", "json", "problems"]:
+    for name in ["types", "breaking", "json", "problems"]:
         page.click(f'[data-tab="{name}"]')
         assert page.is_visible(f'[data-panel="{name}"]')
     page.click('[data-file="schema"]')
     page.click("[data-problems] li button >> nth=0")
     assert page.evaluate(f"{SOURCE}.getModel().getLanguageId()") == "python"
+
+
+def breaking(page: Page) -> None:
+    """The Tour's schema without `email` breaks its first query; an empty before.sql compares nothing."""
+    page.click('[data-file="schema"]')
+    schema = page.evaluate(f"{SOURCE}.getValue()")
+    page.evaluate(
+        f"(text) => {SOURCE}.setValue(text)",
+        schema.replace("    email TEXT\n", "").replace("NOT NULL,\n);", "NOT NULL\n);"),
+    )
+    page.click('[data-file="before"]')
+    page.evaluate(f"(text) => {SOURCE}.setValue(text)", schema)
+    page.wait_for_selector('[data-tab="breaking"]:text-matches("Breaking [(][1-9]")')
+    assert "email" in page.inner_text("[data-breaking]")
+    page.evaluate(f"{SOURCE}.setValue('')")
+    page.click('[data-file="schema"]')
+    page.evaluate(f"(text) => {SOURCE}.setValue(text)", schema)
+    page.wait_for_selector('[data-tab="breaking"]:text-is("Breaking")')
+    page.click('[data-file="python"]')
 
 
 def at(page: Page, text: str, offset: int = 0) -> None:
@@ -433,6 +460,7 @@ def engine_errors(page: Page) -> None:
     assert "sqlty crashed checking this file: boom; please report it at https://github.com/" in (
         page.inner_text("[data-problems]")
     )
+    assert page.inner_text("[data-breaking]") == "sqlty crashed: see Problems."
     page.evaluate("globalThis.sqltyPanic = true")
     source(page, "x = 2\n")
     assert page.inner_text("[data-problems]") == "Error: sqlty crashed and is starting again"
@@ -625,8 +653,21 @@ def zoomed(page: Page, url: str) -> None:
     page.click("[data-present]")
 
 
+def unsupported(context: BrowserContext, url: str, watch: Callable[[Page], None]) -> None:
+    """A browser wllama cannot run in, here one without OPFS, gets no Ask."""
+    other = context.new_page()
+    watch(other)
+    other.add_init_script("delete StorageManager.prototype.getDirectory")
+    other.goto(url)
+    other.wait_for_selector("[data-types] code", state="attached", timeout=60_000)
+    other.wait_for_function(
+        "performance.getEntriesByType('resource').some((r) => r.name.endsWith('/ask.js'))"
+    )
+    assert not other.is_visible("[data-ask-open]")
+
+
 def asking(page: Page, url: str) -> None:
-    page.goto(url + "?ask")
+    page.goto(url)
     page.wait_for_selector("[data-ask-open]:not([hidden])", timeout=60_000)
     page.click("[data-ask-open]")
     page.wait_for_function("document.activeElement.matches('[data-ask-question]')")

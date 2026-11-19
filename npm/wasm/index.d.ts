@@ -22,6 +22,8 @@ export type FormatRequest = Source & { op: "format" };
 /** `offset` counts UTF-16 code units, as JavaScript strings do. */
 export type CompleteRequest = Source & { op: "complete"; offset: number };
 export type HoverRequest = Source & { op: "hover"; offset: number };
+/** The diagnostics `source` gets against `schema` but not against `before`, as `sqlty breaking` reports. */
+export type BreakingRequest = Source & { op: "breaking"; before: string };
 /** Validates the sqlty table of the file `path` holding `source`. */
 export type ConfigRequest = { op: "config"; source: string; path: string; required?: boolean };
 /** Finds the configuration of the directory `path` as `sqlty check` does, reading `files` (`null`: no such file). */
@@ -35,6 +37,7 @@ export type Request =
   | FormatRequest
   | CompleteRequest
   | HoverRequest
+  | BreakingRequest
   | ConfigRequest
   | ProjectRequest;
 
@@ -114,6 +117,7 @@ export type Answer =
   | { formatted: string }
   | Completions
   | Hover
+  | { diagnostics: Diagnostic[] }
   | { config: Settings }
   | ProjectAnswer
   | null;
@@ -124,6 +128,7 @@ export interface Engine {
   (request: FormatRequest): { formatted: string } | Failure;
   (request: CompleteRequest): Completions | null | Failure;
   (request: HoverRequest): Hover | null | Failure;
+  (request: BreakingRequest): { diagnostics: Diagnostic[] } | Failure;
   (request: ConfigRequest): { config: Settings } | null | Failure;
   (request: ProjectRequest): ProjectAnswer | Failure;
   (request: Request): Answer | Failure;

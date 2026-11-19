@@ -51,8 +51,7 @@ Style, naming and refactoring suggestions are Nit at most.
   panic kills the playground and VS Code web. Prefer `Option`/`Result` combinators.
 - **Parity.** A behavior change lands in every host that runs it (`sqlty-cli`,
   `sqlty-project`, `sqlty-lsp`, `sqlty-wasm`, `editors/vscode`, the playground
-  settings it reads) and, while `SQLTY_AST=python` exists, in the Python passes.
-  Differences on purpose are listed in the plan, not silent.
+  settings it reads). Differences on purpose are listed in the plan, not silent.
 - **CPython parity.** `unparse` and anything that rebuilds Python text matches
   `ast.unparse`/the interpreter, including `LEGACY_FIELD_TEXT` for t-/f-string
   field text across 3.14 and 3.15. Test against the interpreter, not a hand-written
@@ -81,7 +80,7 @@ Style, naming and refactoring suggestions are Nit at most.
   coverage profile runs explicit examples only). Restructure dead branches: a `?`
   alone on a line or an unreachable `Err` arm counts as missed.
 - No `pytest.importorskip`, no skips or xfails beyond what AGENTS.md
-  "Running tests" allows, no wall-time assertions outside
+  "Writing tests" allows, no wall-time assertions outside
   `-m timing`. Hypothesis strategies are built once (`functools.cache`), not per
   example.
 - Snapshots (`inline-snapshot`, `make update-mdtest`) are read, not trusted: a

@@ -126,18 +126,6 @@ jobs:
       - name: Run tests
         run: uv run pytest
 
-      # Rust and Python readings of every checked module must agree (`SQLTY_AST`).
-      - name: Run tests comparing the Rust and Python syntax trees
-        run: uv run pytest -m "not timing and not pg" tests/mdtest tests/test_cli.py tests/test_helpers.py tests/test_psycopg.py tests/test_driver_values.py tests/test_type_extractor.py tests/test_cross_module.py
-        env:
-          SQLTY_AST: compare
-
-      # The deprecated Python passes alone, until 0.8.0 removes them.
-      - name: Run tests on the Python syntax tree alone
-        run: uv run pytest -m "not timing and not pg" tests/mdtest tests/test_cli.py tests/test_helpers.py tests/test_psycopg.py tests/test_driver_values.py tests/test_type_extractor.py tests/test_cross_module.py tests/test_source.py tests/test_composed_edges.py tests/test_rust_check.py tests/test_rust_index.py tests/test_lsp.py tests/e2e/test_breaking_e2e.py tests/e2e/test_cli_config_e2e.py
-        env:
-          SQLTY_AST: python
-
       - name: Run timing tests
         run: uv run pytest -m timing -n 0 -p no:randomly
 

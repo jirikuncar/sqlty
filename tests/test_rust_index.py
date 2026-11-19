@@ -1,9 +1,8 @@
-"""The check of a module against the other modules of a tree, in Rust and in Python.
+"""The check of a module against the other modules of a tree, in Rust.
 
 Generated packages define helpers, row types and aliases, re-export them, import each
-other in cycles and register configured functions; a module using them must get the same
-diagnostics from ``sqlty_python`` with its ``index`` as from ``sqlty._check`` with a
-``HelperIndex``. Raise the number of generated examples with ``SQLTY_FUZZ_EXAMPLES``.
+other in cycles and register configured functions; a module using them is checked with
+their ``index``. Raise the number of generated examples with ``SQLTY_FUZZ_EXAMPLES``.
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from sqlty import _check, _core
+from sqlty import _core
 from sqlty._helpers import HelperIndex
 from sqlty._source import ParsedSource
 from sqlty.core import check_source
@@ -214,14 +213,14 @@ def trees(draw: st.DrawFn) -> tuple[dict[str, str], list[tuple[str, str, str | N
     return modules, draw(st.lists(st.sampled_from(REGISTER), max_size=3, unique=True))
 
 
-def compare(
+def diagnosed(
     modules: dict[str, str],
     registered: list[tuple[str, str, str | None, str | None]],
     dialect: str = "postgres",
     rules: dict[str, str] | None = None,
     variants: int | None = None,
 ) -> int:
-    """How many diagnostics both report for the last of ``modules``, -1 where Rust declines."""
+    """How many diagnostics Rust reports for the last of ``modules``, -1 where it declines it."""
     index = HelperIndex()
     for name, source in modules.items():
         index.add(name.removesuffix(".__init__"), ParsedSource(source, name))
@@ -230,32 +229,20 @@ def compare(
         for path, query, row, database in registered:
             index.register(path, query, row, database=database)
     name, source = list(modules.items())[-1]
-    parsed = ParsedSource(source, name)
-    usage = _check.RowUsage()
-    settings = {
-        "dialect": dialect,
-        "schema_sql": SCHEMAS[dialect],
-        "rules": rules,
-        "import_style": None,
-        "untyped": False,
-        "module": name,
-        "variants": variants,
-    }
-    found = _check._diagnostics(  # noqa: SLF001
-        parsed, helpers=index, row_usage=usage, coerce=frozenset(), **settings
+    found = _core.module_diagnostics(
+        source,
+        version=sys.version_info[:2],
+        dialect=dialect,
+        schema_sql=SCHEMAS[dialect],
+        rules=rules,
+        import_style=None,
+        untyped=False,
+        module=name,
+        index=index.rust(),
+        name=name,
+        variants=variants,
     )
-    rust = index.rust()
-    assert rust is not None
-    declined = (
-        _check._module_diagnostics(  # noqa: SLF001
-            source, version=sys.version_info[:2], index=rust, name=name, **settings
-        )
-        is None
-    )
-    _check._compare_module(  # noqa: SLF001
-        parsed, found, usage, coerce=frozenset(), index=rust, **settings
-    )
-    return -1 if declined else len(found)
+    return -1 if found is None else len(found[0])
 
 
 APP = HEAD + "{imports}\nclass Service:\n    def use(self, repo: Db):\n        {call}\n"
@@ -280,7 +267,7 @@ TREE = {
 @pytest.mark.parametrize("case", CASES.values(), ids=CASES.keys())
 def test_cases(case: tuple[str, str]) -> None:
     app = APP.format(imports=case[0], call=case[1])
-    assert compare({**TREE, "pkg.app": app}, [REGISTER[0]]) >= 1
+    assert diagnosed({**TREE, "pkg.app": app}, [REGISTER[0]]) >= 1
 
 
 @FUZZ
@@ -292,7 +279,7 @@ def test_generated_trees(
 ) -> None:
     modules, registered = tree
     if all(map(parses, modules.values())):
-        compare(modules, registered, dialect, rules)
+        diagnosed(modules, registered, dialect, rules)
 
 
 REVIEWED = {
@@ -385,7 +372,7 @@ def test_reviewed(case: tuple[dict[str, str], str, int]) -> None:
     modules, app, expected = case
     tree = {name: HEAD + source for name, source in modules.items()}
     rules = {"dynamic-query": "warn", "nullable-mismatch": "ignore"}
-    assert compare({**tree, "app": HEAD + app}, [], rules=rules) == expected
+    assert diagnosed({**tree, "app": HEAD + app}, [], rules=rules) == expected
 
 
 def test_registered_file_rust_does_not_read(tmp_path: Path) -> None:
@@ -424,7 +411,7 @@ def test_one_index_on_two_threads() -> None:
     settings = {"version": sys.version_info[:2], "schema_sql": SCHEMAS["postgres"]}
 
     def check(index: object, app: str) -> int:
-        found = _check._module_diagnostics(app, index=index, name="app", module="app", **settings)  # noqa: SLF001
+        found = _core.module_diagnostics(app, index=index, name="app", module="app", **settings)
         assert found is not None
         return len(found[0])
 

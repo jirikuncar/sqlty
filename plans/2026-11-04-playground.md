@@ -4,7 +4,7 @@
 > [#899](https://github.com/jirikuncar/sqlty/pull/899), [#900](https://github.com/jirikuncar/sqlty/pull/900),
 > [#901](https://github.com/jirikuncar/sqlty/pull/901) and [#902](https://github.com/jirikuncar/sqlty/pull/902);
 > `param-types` in `sqlty.toml` and `examples/06_param_types/` in [#917](https://github.com/jirikuncar/sqlty/pull/917). Stage 5 (breaking
-> changes) waits for the comparison of `_breaking.py` to move to Rust.
+> changes): a `breaking` op and a `before.sql` tab, on the Rust comparison of `sqlty_python::breaking`.
 
 Tracks [#893](https://github.com/jirikuncar/sqlty/issues/893): what keeps the Playground page
 from being the place to reproduce a bug or show a feature. Every stage keeps the page static:

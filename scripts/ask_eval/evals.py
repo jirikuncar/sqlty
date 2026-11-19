@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["pydantic-evals>=2.67", "psycopg[binary]", "playwright==1.64.1", "logfire"]
+# dependencies = ["pydantic-evals>=2.67", "psycopg[binary]", "playwright==1.64.1", "logfire", "rich"]
 # ///
 """Evaluate the playground's ask on questions.json with pydantic-evals.
 

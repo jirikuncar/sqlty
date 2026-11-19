@@ -19,10 +19,11 @@ test("a query is typed against the schema", () => {
 });
 
 test("a request larger than the memory the module starts with", () => {
-  const columns = Array.from({ length: 20000 }, () => "name").join(", ");
+  const alias = "x".repeat(1000);
+  const columns = Array.from({ length: 4096 }, (_, i) => `name AS ${alias}${i}`).join(", ");
   const source = `q = "--sql\\nSELECT ${columns} FROM users"`;
   const answer = ask({ op: "analyze", source, schema, dialect: "sqlite" });
-  assert.equal(answer.queries[0].columns.length, 20000);
+  assert.equal(answer.queries[0].columns.length, 4096);
 });
 
 test("a row type, a helper call and an ignore comment are checked", () => {
@@ -121,6 +122,18 @@ test("a step keeps the files of the step before that it leaves out", () => {
   assert.deepEqual([second.title, second.source, second.schema, second.panel], ["Two", "b", "s", "types"]);
   assert.deepEqual(unfold(fold([first, second])), [first, second]);
   assert.deepEqual(fold([first, second]).steps[1], { title: "Two", source: "b", panel: "types" });
+});
+
+test("breaking reports what the new schema breaks in code the old one checks clean", () => {
+  const source = 'q = "--sql\\nSELECT id FROM users"\nr = "--sql\\nSELECT nme FROM users"';
+  const after = "CREATE TABLE users (uid INTEGER PRIMARY KEY, name TEXT NOT NULL);";
+  const answer = ask({ op: "breaking", source, schema: after, before: schema, dialect: "postgres" });
+  assert.deepEqual(answer.diagnostics.map((d) => [d.line, d.rule]), [[1, "unknown-column"]]);
+});
+
+test("a step keeps the schema before a change", () => {
+  const [first, second] = unfold({ steps: [{ before: "b", panel: "breaking", file: "before" }, { source: "c" }] });
+  assert.deepEqual([first.before, first.panel, first.file, second.before], ["b", "breaking", "before", "b"]);
 });
 
 test("a deck without steps is an error", () => {

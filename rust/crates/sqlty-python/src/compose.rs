@@ -1,5 +1,5 @@
-//! `psycopg.sql` compositions built only from literals, rendered as `sqlty._psycopg` does
-//! with the real classes: the expression is evaluated on a model of `SQL`, `Identifier`,
+//! `psycopg.sql` compositions built only from literals, rendered as psycopg renders them
+//! with `as_string(None)`: the expression is evaluated on a model of `SQL`, `Identifier`,
 //! `Literal`, `Placeholder` and `Composed`, of `str.format` and `str.join`. No user code
 //! runs.
 //!
@@ -22,7 +22,7 @@ const CLASSES: [&str; 5] = ["SQL", "Identifier", "Literal", "Placeholder", "Comp
 const MUTATORS: [&str; 8] = [
     "append", "extend", "insert", "pop", "remove", "clear", "sort", "reverse",
 ];
-/// `sqlty._psycopg.UNCHECKED`: what `render` gives for a composition with a dynamic part.
+/// What `render` gives for a composition with a dynamic part.
 pub const UNCHECKED: &str = "unchecked";
 
 /// The query of a `SQL[R]("...")` call, with the `P` of `SQL[R, P]` and its source.
@@ -687,7 +687,7 @@ impl<'a> Collect<'a, '_> {
 }
 
 impl<'a> Scan<'a> {
-    /// `ParsedSource.psycopg`: bindings are collected only when the text names `psycopg`.
+    /// Bindings are collected only when the text names `psycopg`.
     pub fn new(source: &'a Source) -> Self {
         let mut table = HashMap::new();
         for import in &source.entries {

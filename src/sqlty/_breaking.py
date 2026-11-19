@@ -29,8 +29,6 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, NamedTuple, Protocol
 
-from sqlty._source import AST
-
 if TYPE_CHECKING:
     import argparse
 
@@ -258,7 +256,7 @@ def _compare(
         own = queries.settings(relative)
         if schema.schema_key(relative, own) != own.schema_key:
             work.append((relative, parsed, own, schema.schema(relative, own), helpers_for(own)))
-    found = _map(work, jobs) if AST != "rust" else _rust(work, jobs)
+    found = _rust(work, jobs)
     return [
         Finding(direction, against, relative, diagnostic, parsed)
         for (relative, parsed, *_), diagnostics in zip(work, found, strict=True)
@@ -294,62 +292,18 @@ def _rust(work: list[_Work], jobs: int) -> list[list[Diagnostic]]:
     return [_check(item) if item[0].suffix == ".sql" else next(found) for item in work]
 
 
-_shared: list[_Work] = []
-
-
-def _map(work: list[_Work], jobs: int) -> list[list[Diagnostic]]:
-    """The diagnostics of each item of ``work``, checked by forked processes that inherit it.
-
-    The checks are mostly Python, so threads would wait on the GIL. Without ``fork`` (Windows),
-    or for one job, they run here.
-    """
-    import multiprocessing
-    from concurrent.futures import ProcessPoolExecutor
-
-    jobs = min(jobs, len(work))
-    if jobs <= 1 or "fork" not in multiprocessing.get_all_start_methods():
-        return [_check(item) for item in work]
-    _shared[:] = work
-    try:
-        context = multiprocessing.get_context("fork")
-        size = max(1, min(64, len(work) // (jobs * 4)))
-        chunks = [range(i, min(i + size, len(work))) for i in range(0, len(work), size)]
-        with ProcessPoolExecutor(jobs, mp_context=context) as pool:
-            return [found for chunk in pool.map(_check_shared, chunks) for found in chunk]
-    finally:
-        _shared.clear()
-
-
-def _check_shared(chunk: range) -> list[list[Diagnostic]]:
-    return [_check(_shared[i]) for i in chunk]
-
-
 def _check(item: _Work) -> list[Diagnostic]:
     from sqlty._queries import breaking_query_file
-    from sqlty.core import breaking_source
 
-    relative, parsed, own, against, helpers = item
-    if relative.suffix == ".sql":
-        return breaking_query_file(
-            parsed.text,
-            name=relative.stem,
-            query_format=own.query_format,
-            dialect=own.dialect,
-            schema_sql=own.schema,
-            against_sql=against,
-            rules=own.rules,
-        )
-    return breaking_source(
-        parsed,
+    relative, parsed, own, against, _ = item
+    return breaking_query_file(
+        parsed.text,
+        name=relative.stem,
+        query_format=own.query_format,
+        dialect=own.dialect,
         schema_sql=own.schema,
         against_sql=against,
-        dialect=own.dialect,
         rules=own.rules,
-        import_style=own.import_style,
-        untyped=own.untyped,
-        query_variants=own.query_variants,
-        helpers=helpers,
-        coerce_row_types=own.coerce_row_types,
     )
 
 

@@ -43,6 +43,10 @@ pub mod json;
 pub mod placeholders;
 pub(crate) mod values;
 
+/// The most columns a table or a result has: MySQL's limit, above PostgreSQL's 1600 and
+/// SQLite's default 2000. A wider one is left untyped rather than analyzed in quadratic time.
+pub(crate) const MAX_COLUMNS: usize = 4096;
+
 /// A regex written in the source, with at most short names escaped into it: an invalid one
 /// is a bug.
 #[doc(hidden)]

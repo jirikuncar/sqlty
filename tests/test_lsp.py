@@ -8,6 +8,7 @@ import pytest
 
 from sqlty._config import ConfigError
 from sqlty._lsp_bridge import Workspace
+from sqlty.core import format_source
 
 if TYPE_CHECKING:
     from sqlty._breaking import Direction
@@ -48,6 +49,8 @@ def test_buffers_are_rewritten_and_stripped_with_project_settings(tmp_path: Path
 
     assert rewritten.splitlines()[-1] == 'q = sqlty.SQL[tuple[int]]("--sql\\nSELECT id FROM users")'
     assert workspace.strip(q, rewritten) == plain
+    assert workspace.format(q, plain) == format_source(plain, import_style="import sqlty")
+    assert workspace.breaking() == {}
 
 
 OLD_SCHEMA = "CREATE TABLE users (id INTEGER, bio TEXT);\n"
@@ -222,14 +225,28 @@ class Server:
         return self.process.wait(timeout=10)
 
 
-def test_server_checks_and_fixes_a_buffer(tmp_path: Path) -> None:
+# A baseline sends a workspace through Python; one equal to the schema reports nothing more.
+BASELINES = pytest.mark.parametrize("baseline", [None, "baseline.sql"])
+
+
+def initialize(root: Path, baseline: str | None) -> dict[str, Any]:
+    params: dict[str, Any] = {"capabilities": {}, "rootUri": root.as_uri()}
+    if baseline is not None:
+        schema = root / "schema.sql"
+        (root / baseline).write_text(schema.read_text() if schema.exists() else "")
+        params["initializationOptions"] = {"breaking": {"against": str(root / baseline)}}
+    return params
+
+
+@BASELINES
+def test_server_checks_and_fixes_a_buffer(tmp_path: Path, baseline: str | None) -> None:
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
     (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER, score REAL);\n")
     uri = (tmp_path / "q.py").as_uri()
     text = 'from sqlty import SQL\n\nq = SQL[tuple[int]]("--sql\\nSELECT score FROM users")\n'
     server = Server(tmp_path)
     try:
-        server.request("initialize", {"capabilities": {}, "rootUri": tmp_path.as_uri()})
+        server.request("initialize", initialize(tmp_path, baseline))
         server.send({"method": "initialized", "params": {}})
         document = {"uri": uri, "languageId": "python", "version": 1, "text": text}
         server.send({"method": "textDocument/didOpen", "params": {"textDocument": document}})
@@ -260,13 +277,14 @@ def test_server_checks_and_fixes_a_buffer(tmp_path: Path) -> None:
         assert server.stop() == 0
 
 
-def test_server_formats_the_query_strings_of_a_buffer(tmp_path: Path) -> None:
+@BASELINES
+def test_server_formats_the_query_strings_of_a_buffer(tmp_path: Path, baseline: str | None) -> None:
     (tmp_path / "sqlty.toml").write_text('dialect = "sqlite"\n')
     uri = (tmp_path / "q.py").as_uri()
     text = 'q = """--sql\nselect id,name from users where id=?"""\n'
     server = Server(tmp_path)
     try:
-        server.request("initialize", {"capabilities": {}, "rootUri": tmp_path.as_uri()})
+        server.request("initialize", initialize(tmp_path, baseline))
         server.send({"method": "initialized", "params": {}})
         document = {"uri": uri, "languageId": "python", "version": 1, "text": text}
         server.send({"method": "textDocument/didOpen", "params": {"textDocument": document}})
@@ -286,7 +304,8 @@ def test_server_formats_the_query_strings_of_a_buffer(tmp_path: Path) -> None:
         assert server.stop() == 0
 
 
-def test_server_checks_the_query_files_of_a_project(tmp_path: Path) -> None:
+@BASELINES
+def test_server_checks_the_query_files_of_a_project(tmp_path: Path, baseline: str | None) -> None:
     (tmp_path / "sqlty.toml").write_text('schema = "schema.sql"\nqueries = "sql/"\n')
     (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER, email TEXT);\n")
     (tmp_path / "sql").mkdir()
@@ -294,7 +313,7 @@ def test_server_checks_the_query_files_of_a_project(tmp_path: Path) -> None:
     text = "-- name: by-email^\nSELECT id, emial FROM users WHERE email = :email;\n"
     server = Server(tmp_path)
     try:
-        server.request("initialize", {"capabilities": {}, "rootUri": tmp_path.as_uri()})
+        server.request("initialize", initialize(tmp_path, baseline))
         server.send({"method": "initialized", "params": {}})
         for uri in (queries, other):
             document = {"uri": uri, "languageId": "sql", "version": 1, "text": text}
@@ -317,7 +336,10 @@ def test_server_checks_the_query_files_of_a_project(tmp_path: Path) -> None:
         assert server.stop() == 0
 
 
-def test_server_completes_and_highlights_helper_and_marked_queries(tmp_path: Path) -> None:
+@BASELINES
+def test_server_completes_and_highlights_helper_and_marked_queries(
+    tmp_path: Path, baseline: str | None
+) -> None:
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
     (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL, name TEXT);\n")
     (tmp_path / "db.py").write_text(HELPER)
@@ -325,7 +347,7 @@ def test_server_completes_and_highlights_helper_and_marked_queries(tmp_path: Pat
     text = 'from db import run\n\nrun("SELECT u. FROM users u")\nq = "--sql\\nSELECT * FROM us"\n'
     server = Server(tmp_path)
     try:
-        init = server.request("initialize", {"capabilities": {}, "rootUri": tmp_path.as_uri()})
+        init = server.request("initialize", initialize(tmp_path, baseline))
         assert init["capabilities"]["completionProvider"]["triggerCharacters"] == ["."]
         server.send({"method": "initialized", "params": {}})
         document = {"uri": uri, "languageId": "python", "version": 1, "text": text}
@@ -363,13 +385,14 @@ def test_server_completes_and_highlights_helper_and_marked_queries(tmp_path: Pat
         assert server.stop() == 0
 
 
-def test_server_rewrites_and_strips_a_buffer(tmp_path: Path) -> None:
+@BASELINES
+def test_server_rewrites_and_strips_a_buffer(tmp_path: Path, baseline: str | None) -> None:
     (tmp_path / "sqlty.toml").write_text('schema = "missing.sql"\n')
     uri = (tmp_path / "q.py").as_uri()
     plain = 'q = "--sql\\nSELECT 1"\n'
     server = Server(tmp_path, stderr=subprocess.PIPE)
     try:
-        server.request("initialize", {"capabilities": {}, "rootUri": tmp_path.as_uri()})
+        server.request("initialize", initialize(tmp_path, baseline))
         server.send({"method": "initialized", "params": {}})
 
         def action(kind: str, text: str) -> str:
@@ -407,12 +430,13 @@ def test_completion_context_of_a_buffer(tmp_path: Path) -> None:
     }
 
 
-def test_server_shows_why_a_project_does_not_load(tmp_path: Path) -> None:
+@BASELINES
+def test_server_shows_why_a_project_does_not_load(tmp_path: Path, baseline: str | None) -> None:
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nuntyped = "nope"\n')
     (tmp_path / "q.py").write_text("x = 1\n")
     server = Server(tmp_path)
     try:
-        server.request("initialize", {"capabilities": {}, "rootUri": tmp_path.as_uri()})
+        server.request("initialize", initialize(tmp_path, baseline))
         server.send({"method": "initialized", "params": {}})
         document = {
             "uri": (tmp_path / "q.py").as_uri(),

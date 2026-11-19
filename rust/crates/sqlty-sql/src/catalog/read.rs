@@ -72,6 +72,10 @@ pub(super) fn read_statements<'a>(
     let parse_part = |text: &str| Parser::new(parser_dialect.as_ref()).try_with_sql(text).ok();
     for stmt in statements {
         let stmt = &stmt;
+        if loader.exhausted() {
+            skipped.push(("limit", format!("{} and later", statement_text(stmt))));
+            break;
+        }
         if postgres {
             if let Some(schemas) = stmt.search_path() {
                 loader.search_path = schemas.clone();
@@ -83,6 +87,7 @@ pub(super) fn read_statements<'a>(
             let op = Op {
                 path: path.clone(),
                 kind,
+                size: stmt.size(),
             };
             if !loader.apply(&op, false) {
                 pending.push(op);
@@ -386,6 +391,7 @@ pub(crate) fn load_with(
         Loader::new(dialect)
     };
     loader.overrides = overrides;
+    loader.allow(schema_sql);
     let mut skipped = Vec::new();
     let statements = ddl::statements(schema_sql, dialect == SqlDialect::MySql);
     let ops = read_statements(statements, dialect, &mut loader, &mut skipped);

@@ -1,4 +1,4 @@
-"""Unit tests for _type_extractor module."""
+"""Unit tests of the Python row-type reader, the oracle of ``test_rust_types``."""
 
 import ast
 import datetime
@@ -12,16 +12,16 @@ from pathlib import Path
 import pytest
 
 from sqlty._config import ConfigError, validate_tool_table
-from sqlty._type_extractor import (
+from sqlty.core import check_source
+from tests.type_oracle import (
     TypeInfo,
     check_type_compatibility,
     extract_type_definitions,
     field_accepts,
     parse_tuple_annotation,
 )
-from sqlty._type_extractor.ast_fields import _newtype_assignments
-from sqlty._type_extractor.subtype import _consistent, _erase, _is_subtype
-from sqlty.core import check_source
+from tests.type_oracle.ast_fields import _newtype_assignments
+from tests.type_oracle.subtype import _consistent, _erase, _is_subtype
 
 TYPING = "typing" if sys.version_info >= (3, 15) else "typing_extensions"
 
@@ -571,11 +571,10 @@ class Loosens(Scores, extra_items=str):
 
 def test_a_coerced_row_keeps_the_fields_of_a_base_in_another_module():
     from sqlty._source import ParsedSource
-    from sqlty.core import HelperIndex
+    from tests.type_oracle.resolver import Resolver
 
-    index = HelperIndex()
     remote = "from dataclasses import dataclass\n@dataclass\nclass Remote:\n    total: int\n"
-    index.add("remote", ParsedSource(remote, "remote"))
+    index = Resolver({"remote": ParsedSource(remote, "remote")})
     source = (
         "from dataclasses import dataclass\nfrom remote import Remote\n"
         "@dataclass\nclass Derived(Remote):\n    label: str\n"
@@ -838,7 +837,7 @@ q = SQL[User]("--sql\\nSELECT 1::INTEGER AS id")
 def test_every_inferred_python_type_is_checked():
     """A Python type the Rust engine infers but the row-type checks don't know is never checked."""
     from sqlty._core import python_types
-    from sqlty._type_extractor.info import PYTHON_TYPE_MAP
+    from tests.type_oracle.info import PYTHON_TYPE_MAP
 
     scalars = {name for name in python_types() if "[" not in name}
     assert scalars - PYTHON_TYPE_MAP.keys() == set()

@@ -1,4 +1,4 @@
-//! The t-strings `sqlty._drivers.find_template_calls` reads: the query psycopg sends for each,
+//! The `--sql` t-strings of a module: the query psycopg sends for each,
 //! a field that passes a value becoming `%s`, and the types of those values.
 
 use ruff_python_ast::{
@@ -22,7 +22,7 @@ pub struct Template {
     /// The query, `%` doubled and each field `%s`; `None` when a field does not pass a value
     /// (a conversion, or a format spec other than `s`, `b` or `t`).
     pub query: Option<String>,
-    /// The type of the value of each field, as `sqlty._params.arg_type` reads it.
+    /// The type of the value of each field.
     pub params: Vec<Option<String>>,
 }
 

@@ -63,6 +63,7 @@ queries as you type. It runs in your browser. The engine is compiled to
   <div class="sqlty-tabs" role="tablist" aria-label="Files">
     <button type="button" role="tab" aria-selected="true" data-file="python">queries.py</button>
     <button type="button" role="tab" aria-selected="false" data-file="schema">schema.sql</button>
+    <button type="button" role="tab" aria-selected="false" data-file="before">before.sql</button>
     <button type="button" role="tab" aria-selected="false" data-file="config">sqlty.toml</button>
   </div>
   <div class="sqlty-editor" role="tabpanel" aria-label="Editor" data-source></div>
@@ -71,12 +72,14 @@ queries as you type. It runs in your browser. The engine is compiled to
     <button type="button" role="tab" aria-selected="false" data-tab="notes" hidden>Notes</button>
     <button type="button" role="tab" aria-selected="true" data-tab="problems">Problems</button>
     <button type="button" role="tab" aria-selected="false" data-tab="types">Types</button>
+    <button type="button" role="tab" aria-selected="false" data-tab="breaking">Breaking</button>
     <button type="button" role="tab" aria-selected="false" data-tab="json">JSON</button>
   </div>
   <div class="sqlty-console" role="tabpanel" aria-label="Output">
     <div data-panel="notes" data-notes hidden></div>
     <ul data-panel="problems" data-problems><li>Loading the engine...</li></ul>
     <ul data-panel="types" data-types hidden></ul>
+    <ul data-panel="breaking" data-breaking hidden></ul>
     <div data-panel="json" data-json hidden></div>
   </div>
 </div>
@@ -188,11 +191,11 @@ queries as you type. It runs in your browser. The engine is compiled to
   #sqlty-playground .sqlty-console li { margin-left: 0; }
   #sqlty-playground .sqlty-console li ul { margin: 0.2rem 0 0.4rem 1rem; list-style: none; }
   #sqlty-playground .sqlty-console li { line-height: 1.45; margin-bottom: 0.35em; }
-  .sqlty-console [data-problems] li[data-severity] { display: grid; grid-template-columns: 1.2em 1fr auto; column-gap: 0.5em; align-items: baseline; }
-  .sqlty-console [data-problems] a { white-space: nowrap; font-size: 0.85em; color: var(--md-default-fg-color--light); }
-  .sqlty-console [data-problems] a:hover { color: var(--md-accent-fg-color); }
-  .sqlty-console [data-problems] button { font: inherit; color: inherit; text-align: left; padding: 0; background: none; border: 0; cursor: pointer; }
-  .sqlty-console [data-problems] button:hover { color: var(--md-accent-fg-color); }
+  .sqlty-console :is([data-problems], [data-breaking]) li[data-severity] { display: grid; grid-template-columns: 1.2em 1fr auto; column-gap: 0.5em; align-items: baseline; }
+  .sqlty-console :is([data-problems], [data-breaking]) a { white-space: nowrap; font-size: 0.85em; color: var(--md-default-fg-color--light); }
+  .sqlty-console :is([data-problems], [data-breaking]) a:hover { color: var(--md-accent-fg-color); }
+  .sqlty-console :is([data-problems], [data-breaking]) button { font: inherit; color: inherit; text-align: left; padding: 0; background: none; border: 0; cursor: pointer; }
+  .sqlty-console :is([data-problems], [data-breaking]) button:hover { color: var(--md-accent-fg-color); }
   .sqlty-console code { font-size: 0.92em; padding: 0 0.1em; word-break: normal; overflow-wrap: anywhere; }
   .sqlty-console .sqlty-at { font-family: var(--md-code-font-family); font-size: 0.85em; color: var(--md-default-fg-color--light); }
   #sqlty-playground [data-types] > li { margin-bottom: 0.8em; }
@@ -223,8 +226,8 @@ queries as you type. It runs in your browser. The engine is compiled to
     .sqlty-wide { display: none; }
     .sqlty-narrow { display: inline; }
     .sqlty-steps { gap: 0.3rem; margin-bottom: 0.3rem; }
-    .sqlty-console [data-problems] li[data-severity] { grid-template-columns: 1.2em 1fr; }
-    .sqlty-console [data-problems] a { grid-column: 2; }
+    .sqlty-console :is([data-problems], [data-breaking]) li[data-severity] { grid-template-columns: 1.2em 1fr; }
+    .sqlty-console :is([data-problems], [data-breaking]) a { grid-column: 2; }
     .sqlty-columns { margin-left: 0.6em; column-gap: 0.8em; }
     .sqlty-tabs [role="tab"] { padding: 0.3rem 0.55rem; font-size: 0.62rem; }
   }
@@ -238,6 +241,7 @@ The file tabs above the editor switch between the files `sqlty check` reads:
 |---|---|---|
 | `queries.py` | The Python source: diagnostics under the code with their quick fixes, SQL highlighted in query strings, completion and hover in queries | [`sqlty server`](recipes/vscode.md) |
 | `schema.sql` | The `CREATE TABLE` statements the queries are typed against | [`schema`](reference/configuration.md#schema) |
+| `before.sql` | The schema before a change to `schema.sql`, empty until you paste one | [`sqlty breaking --against`](guide/breaking-changes.md) |
 | `sqlty.toml` | The `dialect`, `driver`, `import-style`, `param-types`, `preview`, `max-query-variants`, `rules` and `types` of [`[tool.sqlty]`](reference/configuration.md); its `dialect` wins over the select | `sqlty.toml` or `pyproject.toml` |
 
 The console below the editor shows what sqlty makes of them:
@@ -247,6 +251,7 @@ The console below the editor shows what sqlty makes of them:
 | Notes | What a step says about itself, when [steps](#walk-through-steps) are open | |
 | Problems | What `sqlty check` reports; click one to go to its line, or its rule to read about it | [`sqlty check`](reference/cli.md) |
 | Types | The row type, columns and parameters of each query, and the inference rule behind a column's type or nullability | `sqlty check --explain` |
+| Breaking | What `schema.sql` breaks in code that `before.sql` checks clean: the problems it adds, without those of the code itself (`stale-rewrite`, `unused-ignore`) or of a row type wider than the new rows | [`sqlty breaking`](guide/breaking-changes.md) |
 | JSON | The problems as `sqlty check` prints them for scripts, with the edits of their fixes | [`sqlty check --output-format json`](reference/cli.md) |
 
 ## Examples
@@ -307,7 +312,7 @@ a setting that reads files, has no link.
 
 ## Share a session
 
-The page keeps the Python source, the schema, the dialect and `sqlty.toml` in its
+The page keeps the Python source, both schemas, the dialect and `sqlty.toml` in its
 URL, compressed, as you type. **Copy link** puts that URL on the clipboard: paste it
 in a bug report and whoever opens it sees what you see. Nothing is sent to a server,
 as the session lives in the part of the URL after `#`.
@@ -360,9 +365,9 @@ steps are part of the session, so **Copy link** shares them while they fit in a 
 | Key | What it sets | When it is left out |
 |---|---|---|
 | `title` | The name of the step in the bar | `Step N` |
-| `source`, `schema`, `config`, `dialect` | The files and dialect, as a [session](#share-a-session) holds them | The one of the step before |
-| `panel` | The console tab it opens: `notes`, `problems`, `types` or `json` | The tab open before, or **Problems** if that was **Notes** and the step has none |
-| `file` | The file tab it opens: `python`, `schema` or `config` | The file open before |
+| `source`, `schema`, `before`, `config`, `dialect` | The files and dialect, as a [session](#share-a-session) holds them | The one of the step before |
+| `panel` | The console tab it opens: `notes`, `problems`, `types`, `breaking` or `json` | The tab open before, or **Problems** if that was **Notes** and the step has none |
+| `file` | The file tab it opens: `python`, `schema`, `before` or `config` | The file open before |
 | `notes` | Text for the **Notes** tab; a blank line starts a paragraph | No **Notes** tab |
 
 ## Present

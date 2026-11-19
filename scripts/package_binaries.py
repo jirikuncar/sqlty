@@ -29,6 +29,7 @@ TARGETS: dict[str, tuple[str, str]] = {
     "x86_64-pc-windows-msvc": ("win32", "x64"),
 }
 """Rust target: the ``process.platform`` and ``process.arch`` of Node.js it runs on."""
+SYSTEMS = {"darwin": "macOS", "linux": "Linux", "win32": "Windows"}
 
 FORMULA = """\
 class Sqlty < Formula
@@ -89,6 +90,9 @@ def npm(version: str, binaries: Path, out: Path) -> list[Path]:
             "files": [f"bin/{executable}"],
         }
         (package / "package.json").write_text(json.dumps(manifest, indent=2) + "\n")
+        readme = (ROOT / "npm/cli/README.md").read_text()
+        (package / "README.md").write_text(readme.replace("SYSTEM", f"{SYSTEMS[platform]} {arch}"))
+        shutil.copy2(ROOT / "LICENSE", package / "LICENSE")
         main["optionalDependencies"][name] = version
         written.append(package)
     package = out / "sqlty"

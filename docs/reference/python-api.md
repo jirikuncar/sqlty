@@ -297,7 +297,7 @@ Hover(start=41, end=43, contents='Column `id` of `users`: `INT NOT NULL`')
 | `breaking_source(source, *, schema_sql, against_sql, dialect="postgres", rules=None, import_style=None)` | The diagnostics `source` gets against `against_sql` but not against `schema_sql`, as `sqlty breaking` reports them |
 | `query_statistics(source, *, dialect="postgres", schema_sql=None, import_style=None)` | A `Counter` of `typed`, `partially typed` and `unparsed` queries and skipped strings by rule, as `sqlty check --statistics` counts them |
 | `schema_skipped_tables(schema_sql, *, dialect="postgres")` | Names of schema tables that do not parse, so their columns are unknown |
-| `schema_skipped_objects(schema_sql, *, dialect="postgres")` | `(kind, name)` of schema tables, views and key or type statements that do not parse |
+| `schema_skipped_objects(schema_sql, *, dialect="postgres")` | `(kind, name)` of schema tables, views and key or type statements that do not parse or pass the size limits |
 | `query_at(source, offset, *, import_style=None, helpers=None, module=None)` | The `QueryAt` (`text`, `offset`, `route`, `span`, `source_offset(n)`) at byte `offset`, or `None` outside a checked query |
 | `complete_source(source, line, column, *, dialect="postgres", schema_sql=None, import_style=None, helpers=None, module=None, limit=200)` | `Completions(start, end, incomplete, items)` of `Completion(label, kind, detail, sql_type, nullable)` at the cursor, or `None` outside a checked query |
 | `hover_source(source, line, column, *, dialect="postgres", schema_sql=None, import_style=None, helpers=None, module=None)` | `Hover(start, end, contents)`: what the word at the cursor is, in Markdown, or `None` |

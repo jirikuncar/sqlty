@@ -27,6 +27,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
+use sqlty_python::breaking::breaking;
 use sqlty_python::checker::{query_sites, Diagnostic, SiteKind};
 use sqlty_python::config;
 use sqlty_python::fixer::fix_module;
@@ -40,7 +41,7 @@ use sqlty_python::types::symbols::Source;
 use sqlty_python::{check, rows, suppress};
 use sqlty_sql::analyzer::{
     analyze_params, analyze_select, explain_select, load_schema_with_overrides,
-    load_schema_with_skipped, row_type, CandidateKind, Nullability, RuleRef, TypeOverrides,
+    load_schema_with_skipped, row_type, CandidateKind, Nullability, RuleRef, Schema, TypeOverrides,
 };
 use sqlty_sql::highlight::Highlight;
 
@@ -60,6 +61,7 @@ enum SourceOp {
     Complete,
     Hover,
     Format,
+    Breaking,
 }
 
 #[derive(Deserialize)]
@@ -69,6 +71,9 @@ struct Request {
     source: String,
     #[serde(default)]
     schema: String,
+    /// The schema before a change to `schema`, for `breaking`.
+    #[serde(default)]
+    before: String,
     #[serde(default = "postgres")]
     dialect: String,
     #[serde(default)]
@@ -122,6 +127,8 @@ fn postgres() -> String {
 /// - `hover`: what the word at `offset` is, in Markdown; `null` when nothing.
 /// - `format`: `formatted`, what `sqlty format` makes of the source. Not part of `analyze`,
 ///   which runs on every keystroke.
+/// - `breaking`: `diagnostics` the source gets against `schema` but not against `before`,
+///   as `sqlty breaking` reports what a schema change breaks.
 /// - `config`: the sqlty table of `source`, the text of the file at `path`, validated as
 ///   `sqlty check` validates it, as `{"config": table}`; `null` for a `pyproject.toml` or
 ///   `Cargo.toml` without one, unless `required`.
@@ -172,7 +179,8 @@ pub fn run(request: &str) -> String {
         Err(found) => return error(found.to_string()),
     };
     let source = request.source.as_str();
-    let utf16 = |byte: usize| source[..byte].encode_utf16().count();
+    let units = sqlty_python::utf16::Utf16::new(source);
+    let utf16 = |byte: usize| units.at(byte);
     if let Some(cause) = &request.crashed {
         let found = check::crashed(cause, &rules).diagnostics;
         let found: Vec<_> = found.into_iter().map(|found| found.diagnostic).collect();
@@ -202,11 +210,17 @@ pub fn run(request: &str) -> String {
         Ok(overrides) => overrides,
         Err(found) => return error(format!("[tool.sqlty.types]: {found}")),
     };
-    let schema = (!request.schema.trim().is_empty()).then(|| match overrides.is_empty() {
-        true => load_schema_with_skipped(&request.schema, dialect).0,
-        false => load_schema_with_overrides(&request.schema, dialect, overrides).0,
-    });
-    let options = match Options::new(
+    let load = |text: &str| {
+        (!text.trim().is_empty()).then(|| match overrides.is_empty() {
+            true => load_schema_with_skipped(text, dialect).0,
+            false => load_schema_with_overrides(text, dialect, overrides.clone()).0,
+        })
+    };
+    let schema = load(&request.schema);
+    let before = matches!(op, SourceOp::Breaking)
+        .then(|| load(&request.before))
+        .flatten();
+    let mut options = match Options::new(
         dialect,
         schema.as_deref(),
         settings.import_style.as_deref(),
@@ -214,6 +228,19 @@ pub fn run(request: &str) -> String {
     ) {
         Ok(options) => options,
         Err(found) => return error(found.to_string()),
+    };
+    let check = |options: &Options<'_>, schema: &Option<Schema>| {
+        let has_schema = schema
+            .as_ref()
+            .is_some_and(|schema| !schema.databases().is_some_and(|all| all.absent));
+        checked(
+            source,
+            dialect,
+            options,
+            &rules,
+            has_schema,
+            settings.variants,
+        )
     };
     let offset = byte_offset(source, request.offset);
     let queries = Queries::new(source, &options.style, &[]);
@@ -223,17 +250,7 @@ pub fn run(request: &str) -> String {
     };
     let answer = match op {
         SourceOp::Analyze => {
-            let has_schema = schema
-                .as_ref()
-                .is_some_and(|schema| !schema.databases().is_some_and(|all| all.absent));
-            let diagnostics = checked(
-                source,
-                dialect,
-                &options,
-                &rules,
-                has_schema,
-                settings.variants,
-            );
+            let diagnostics = check(&options, &schema);
             json!({
             "diagnostics": reported(&diagnostics, utf16),
             "queries": query_sites(source, &options.style, &[])
@@ -277,6 +294,14 @@ pub fn run(request: &str) -> String {
         SourceOp::Format => {
             json!({ "formatted": sqlty_format::format_source(source, dialect, &options.style) })
         }
+        SourceOp::Breaking => {
+            let against = check(&options, &schema);
+            options.schema = before.as_deref();
+            let own = check(&options, &before);
+            let key = |found: &Diagnostic| (found.line, found.rule.name(), found.message.clone());
+            let found = breaking(&own, against, key, |found| found.rule.name());
+            json!({ "diagnostics": reported(&found, utf16) })
+        }
     };
     answer.to_string()
 }
@@ -312,10 +337,12 @@ fn resolved(table: &serde_json::Map<String, Value>) -> Settings {
     Settings {
         dialect,
         import_style: text("import-style"),
-        param_types: table.get("param-types") == Some(&Value::Bool(true)),
+        param_types: table.get("param-types") != Some(&Value::Bool(false)),
         variants: (table.get("preview") == Some(&Value::Bool(true))).then(|| {
             let most = table.get("max-query-variants").and_then(Value::as_u64);
-            most.map_or(MAX_QUERY_VARIANTS, |most| most as usize)
+            most.map_or(MAX_QUERY_VARIANTS, |most| {
+                usize::try_from(most).unwrap_or(usize::MAX)
+            })
         }),
         rules: pairs("rules").into_iter().collect(),
         types,

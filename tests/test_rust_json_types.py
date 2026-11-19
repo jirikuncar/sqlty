@@ -1,4 +1,4 @@
-"""``sqlty_python::json_types`` writes the ``TypedDict``s ``sqlty._json_types`` writes."""
+"""``sqlty_python::json_types``: the ``TypedDict``s of JSON columns, written once."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from sqlty._core import add_json_types as rust_json_types
-from sqlty._json_types import add_json_types
 
 VERSION = sys.version_info[:2]
 EXAMPLES = int(os.environ.get("SQLTY_FUZZ_EXAMPLES", "200"))
@@ -18,12 +17,12 @@ SCHEMA = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, tags JSONB, bor
 
 
 def same(source: str, **options: str) -> str:
-    """What both write for ``source``, and for their own output again."""
-    python = add_json_types(source, schema_sql=SCHEMA, **options)
-    assert rust_json_types(source, version=VERSION, schema_sql=SCHEMA, **options) == python, source
-    again = add_json_types(python, schema_sql=SCHEMA, **options)
-    assert rust_json_types(python, version=VERSION, schema_sql=SCHEMA, **options) == again, python
-    return python
+    """What Rust writes for ``source``, which it leaves as it is when written again."""
+    written = rust_json_types(source, version=VERSION, schema_sql=SCHEMA, **options)
+    assert rust_json_types(written, version=VERSION, schema_sql=SCHEMA, **options) == written, (
+        written
+    )
+    return written
 
 
 def query(sql: str, row: str = "tuple[typing.Any]", wrapper: str = "SQL") -> str:
@@ -100,8 +99,6 @@ def test_classes_are_named_in_source_order() -> None:
     source = f"import typing\nfrom sqlty import SQL\ndef f():\n    return {inner}\nq = {outer}\n"
     written = rust_json_types(source, version=VERSION)
     assert "return SQL[tuple[Doc]]" in written and "q = SQL[tuple[Doc2]]" in written
-    # `ast.walk` reaches the module-level query first.
-    assert "q = SQL[tuple[Doc]]" in add_json_types(source)
 
 
 KEY = st.sampled_from(["n", "id", "a b", "class", "é", "Item", "x1", "1x", "", "_", "match"])
@@ -134,8 +131,6 @@ ALIAS = st.sampled_from(["doc", "Doc", "order_lines", "x", "1", "a b", "é", "cl
 @st.composite
 def modules(draw: st.DrawFn) -> str:
     lines = ["import typing", "from sqlty import SQL"]
-    # `ast.walk` reads the calls breadth first and Rust in source order, which names the
-    # classes alike only when the queries are equally deep.
     shape = draw(st.sampled_from(["{}", "def f():\n    return {}", "{}  # é", "é = [{}]"]))
     bare = draw(st.booleans())
     for _ in range(draw(st.integers(1, 3))):

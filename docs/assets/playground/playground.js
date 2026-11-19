@@ -107,6 +107,7 @@ const options = {
 const models = {
   python: monaco.editor.createModel(SOURCE, "python"),
   schema: monaco.editor.createModel(SCHEMA, "sql"),
+  before: monaco.editor.createModel("", "sql"),
   config: monaco.editor.createModel(CONFIG, "ini"),
 };
 const editor = monaco.editor.create(root.querySelector("[data-source]"), { ...options, model: models.python });
@@ -154,6 +155,7 @@ function request(op, offset = 0) {
     offset,
     source: models.python.getValue(),
     schema: models.schema.getValue(),
+    before: models.before.getValue(),
     dialect: dialect.value,
     config: models.config.getValue(),
   };
@@ -382,8 +384,42 @@ function refresh() {
       };
     }),
   );
-  problems.replaceChildren(
-    ...answer.diagnostics.map((found) => {
+  listed(problems, answer.diagnostics, "No problems.");
+  root.querySelector('[data-tab="problems"]').textContent = `Problems (${answer.diagnostics.length})`;
+  root.querySelector("[data-types]").replaceChildren(...answer.queries.map(describe));
+  output.setValue(JSON.stringify(answer.diagnostics.map((found) => checked(found, model)), null, 2));
+  refreshed.fire();
+  refreshBreaking(answer.diagnostics.some((found) => found.rule === "internal-error"));
+}
+
+// What schema.sql breaks in code that before.sql checks clean, as `sqlty breaking` reports it.
+// A crashed check would crash again on the spare engine, so it is not compared.
+function refreshBreaking(crashed) {
+  const list = root.querySelector("[data-breaking]");
+  const tab = root.querySelector('[data-tab="breaking"]');
+  tab.textContent = "Breaking";
+  if (crashed) {
+    list.replaceChildren(tag("li", "sqlty crashed: see Problems."));
+    return;
+  }
+  if (!models.before.getValue().trim()) {
+    list.replaceChildren(tag("li", "Paste the schema before a change into before.sql to see what schema.sql breaks."));
+    return;
+  }
+  const answer = ask(request("breaking"));
+  if (answer.error) {
+    list.textContent = answer.error;
+    return;
+  }
+  listed(list, answer.diagnostics, "Nothing breaks.");
+  tab.textContent = `Breaking (${answer.diagnostics.length})`;
+}
+
+// `diagnostics` as items of `list` that go to their line, or `empty` when there are none.
+function listed(list, diagnostics, empty) {
+  const model = models.python;
+  list.replaceChildren(
+    ...diagnostics.map((found) => {
       const item = document.createElement("li");
       item.dataset.severity = found.severity;
       const at = model.getPositionAt(found.start);
@@ -404,11 +440,7 @@ function refresh() {
       return item;
     }),
   );
-  if (!answer.diagnostics.length) problems.replaceChildren(Object.assign(document.createElement("li"), { textContent: "No problems." }));
-  root.querySelector('[data-tab="problems"]').textContent = `Problems (${answer.diagnostics.length})`;
-  root.querySelector("[data-types]").replaceChildren(...answer.queries.map(describe));
-  output.setValue(JSON.stringify(answer.diagnostics.map((found) => checked(found, model)), null, 2));
-  refreshed.fire();
+  if (!diagnostics.length) list.replaceChildren(tag("li", empty));
 }
 
 // A diagnostic as `sqlty check --output-format json` prints it.
@@ -433,6 +465,7 @@ function session() {
   const edited = {
     source: models.python.getValue(),
     schema: models.schema.getValue(),
+    ...(models.before.getValue() && { before: models.before.getValue() }),
     dialect: dialect.value,
     config: models.config.getValue(),
   };
@@ -440,7 +473,8 @@ function session() {
 }
 
 function restore(saved) {
-  for (const [model, value] of [[models.python, saved.source], [models.schema, saved.schema], [models.config, saved.config]]) {
+  const pairs = [[models.python, saved.source], [models.schema, saved.schema], [models.before, saved.before ?? ""], [models.config, saved.config]];
+  for (const [model, value] of pairs) {
     if (typeof value === "string") replace(model, value);
   }
   if ([...dialect.options].some((option) => option.value === saved.dialect)) dialect.value = saved.dialect;
@@ -717,11 +751,13 @@ function resizable(handle, panel) {
   });
 }
 
-if (new URLSearchParams(location.search).has("ask")) asking(root.querySelector("[data-ask]"), root.querySelector("[data-ask-open]"));
+if (!new URLSearchParams(location.search).has("embed")) asking(root.querySelector("[data-ask]"), root.querySelector("[data-ask-open]"));
 
-// Natural language to SQL with a model that runs in the page (ask.js), behind `?ask`.
+// Natural language to SQL with a model that runs in the page (ask.js). Nothing downloads until
+// the first question: then the chosen model, whose size the picker shows, cached for later.
 async function asking(form, opener) {
   const llm = await import("./ask.js");
+  if (!llm.supported()) return;
   const question = form.querySelector("[data-ask-question]");
   const picked = form.querySelector("[data-ask-model]");
   const status = form.querySelector("[data-ask-status]");

@@ -24,6 +24,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::Range;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::rc::Rc;
 use std::sync::LazyLock;
 
@@ -39,6 +40,18 @@ use sqruff_lib::core::linter::linted_file::LintedFile;
 /// fields of `str.format` and `sql.SQL` templates, which sqruff does not read as values.
 static PLACEHOLDER: LazyLock<Regex> =
     LazyLock::new(|| sqlty_sql::regex(r"%(?:\([^)]*\))?[sbt]|%%|\?|\{\w*\}"));
+
+/// The most words and symbols of a query given to sqruff, whose parser takes seconds past a
+/// few thousand.
+const MAX_TOKENS: usize = 4096;
+
+fn too_long(query: &str) -> bool {
+    let words = query
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|word| !word.is_empty())
+        .count();
+    words + query.chars().filter(char::is_ascii_punctuation).count() > MAX_TOKENS
+}
 
 /// `source` with every query string sqruff can lay out formatted in `dialect`.
 pub fn format_source(source: &str, dialect: &str, style: &ImportStyle) -> String {
@@ -115,6 +128,9 @@ fn lint_with(linter: &Linter, source: &str, style: &ImportStyle) -> Vec<Finding>
         }) else {
             continue;
         };
+        if too_long(&query.text) {
+            continue;
+        }
         // Same length, so offsets in the query hold.
         let protected = PLACEHOLDER.replace_all(&query.text, |found: &regex::Captures| {
             "p".repeat(found[0].len())
@@ -123,7 +139,7 @@ fn lint_with(linter: &Linter, source: &str, style: &ImportStyle) -> Vec<Finding>
             .find_iter(&query.text)
             .map(|m| m.range())
             .collect();
-        let linted = linter.lint_string(&protected, None, false).ok();
+        let linted = sqruff(linter, &protected, false);
         for violation in linted.iter().flat_map(LintedFile::violations) {
             let slice = &violation.source_slice;
             let on_placeholder = placeholders.iter().any(|placeholder| {
@@ -145,6 +161,13 @@ fn lint_with(linter: &Linter, source: &str, style: &ImportStyle) -> Vec<Finding>
     found
 }
 
+/// What sqruff makes of `sql`, or `None` when it fails or panics on it.
+fn sqruff(linter: &Linter, sql: &str, fix: bool) -> Option<LintedFile> {
+    catch_unwind(AssertUnwindSafe(|| linter.lint_string(sql, None, fix)))
+        .ok()?
+        .ok()
+}
+
 /// `query` laid out, at the indentation of its first line, with its surrounding whitespace
 /// kept; `None` when sqruff changes more than whitespace.
 fn format_query(linter: &Linter, query: &str) -> Option<String> {
@@ -153,7 +176,7 @@ fn format_query(linter: &Linter, query: &str) -> Option<String> {
     let lead = &query[..trimmed.len() - body.len()];
     let trail = &query[trimmed.len()..];
     let indent = &body[..body.len() - body.trim_start().len()];
-    if body.trim().is_empty() || indent.contains('\n') {
+    if body.trim().is_empty() || indent.contains('\n') || too_long(body) {
         return None;
     }
     let dedented = body
@@ -166,10 +189,7 @@ fn format_query(linter: &Linter, query: &str) -> Option<String> {
         values.push(found[0].to_string());
         format!("__sqlty_{}__", values.len() - 1)
     });
-    let fixed = linter
-        .lint_string(&protected, None, true)
-        .ok()?
-        .fix_string();
+    let fixed = sqruff(linter, &protected, true)?.fix_string();
     let mut restored = fixed.trim_end().to_string();
     for (i, value) in values.iter().enumerate() {
         let name = format!("__sqlty_{i}__");
@@ -309,6 +329,35 @@ mod tests {
         );
         let empty = "q = \"\"\"--sql\n   \"\"\"\n";
         assert_eq!(format(empty), empty);
+    }
+
+    #[test]
+    fn a_query_past_max_tokens_is_neither_formatted_nor_linted() {
+        let style = ImportStyle::parse(None).unwrap();
+        let sum = |terms: usize| vec!["a"; terms].join("+");
+        let short = format!("q = \"\"\"--sql\nselect {}\"\"\"\n", sum(2));
+        assert_ne!(format_source(&short, "postgres", &style), short);
+        // `select`, each `a` and each `+`: one past the limit.
+        let long = format!(
+            "q = \"\"\"--sql\nselect {}\"\"\"\n",
+            sum(MAX_TOKENS / 2 + 1)
+        );
+        assert_eq!(format_source(&long, "postgres", &style), long);
+        let distinct = format!(
+            "q = \"--sql\\nselect distinct(a), {} from t\"\n",
+            sum(MAX_TOKENS / 2)
+        );
+        assert_eq!(lint(&distinct), []);
+    }
+
+    #[test]
+    fn a_query_sqruff_panics_on_is_not_formatted() {
+        let style = ImportStyle::parse(None).unwrap();
+        let source = format!(
+            "q = \"\"\"--sql\nSELECT * FROM t AS x({}--c\n,)\"\"\"\n",
+            "a".repeat(80)
+        );
+        assert_eq!(format_source(&source, "postgres", &style), source);
     }
 
     #[test]
