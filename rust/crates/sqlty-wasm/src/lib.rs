@@ -39,8 +39,8 @@ use sqlty_python::rules::RuleConfig;
 use sqlty_python::types::symbols::Source;
 use sqlty_python::{check, rows, suppress};
 use sqlty_sql::analyzer::{
-    analyze_params, analyze_select, explain_select, load_schema_with_overrides,
-    load_schema_with_skipped, row_type, CandidateKind, Nullability, RuleRef, TypeOverrides,
+    explain_select, load_schema_with_overrides, load_schema_with_skipped, parse, route, row_type,
+    CandidateKind, Nullability, RuleRef, TypeOverrides,
 };
 use sqlty_sql::highlight::Highlight;
 
@@ -435,8 +435,10 @@ fn reported(diagnostics: &[Diagnostic], utf16: impl Fn(usize) -> usize) -> Vec<V
 
 /// The row type, columns and parameters of the query `sql` on `line`.
 fn described(line: usize, sql: &str, dialect: &str, options: &Options<'_>) -> Value {
-    let columns = analyze_select(sql, dialect, options.schema);
-    let params = analyze_params(sql, dialect, options.schema).unwrap_or_default();
+    let (routed, schema) = route(sql, dialect, options.schema);
+    let parsed = parse(sql, routed);
+    let columns = parsed.columns(schema);
+    let params = parsed.params(schema).unwrap_or_default();
     let explained = explain_select(sql, dialect, options.schema).unwrap_or_default();
     let rule = |rule: Option<RuleRef>| {
         rule.map(

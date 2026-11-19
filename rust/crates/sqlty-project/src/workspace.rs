@@ -791,10 +791,21 @@ impl Workspace {
             .into_iter()
             .map(|query| {
                 let sql = &query.sql;
-                let row = analyzer::infer_type(sql, dialect, schema).or_else(|| {
-                    analyzer::returns_rows(sql, dialect).then(|| "unknown".to_string())
-                });
-                let mut params = analyzer::analyze_params(sql, dialect, schema).unwrap_or_default();
+                let (routed, routed_schema) = analyzer::route(sql, dialect, schema);
+                let parsed = analyzer::parse(sql, routed);
+                let row = parsed
+                    .columns(routed_schema)
+                    .as_deref()
+                    .and_then(analyzer::row_type)
+                    .or_else(|| {
+                        let rows = if routed == dialect {
+                            parsed.returns_rows()
+                        } else {
+                            analyzer::returns_rows(sql, dialect)
+                        };
+                        rows.then(|| "unknown".to_string())
+                    });
+                let mut params = parsed.params(routed_schema).unwrap_or_default();
                 params.sort_by_key(|param| param.index);
                 let listed: Vec<String> = params
                     .iter()

@@ -21,7 +21,7 @@ use sqlparser::ast::{
 };
 
 use crate::catalog::fold;
-use crate::placeholders::{self, Styles};
+use crate::placeholders::{self, Rewritten, Styles};
 
 use super::dialect::SqlDialect;
 use super::expr::{array_element, from_sql_type};
@@ -157,7 +157,22 @@ impl Hints {
 /// (SQLAlchemy's `text()`), `@name` and `$name` in SQLite.
 pub fn analyze_params(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> Option<Vec<Param>> {
     let (dialect, schema) = super::route(sql, dialect, schema);
-    let dialect = SqlDialect::from_name(dialect);
+    params_of(sql, SqlDialect::from_name(dialect), schema, None)
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static PARSED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// [`analyze_params`] of `sql` as routed; `parsed` is the first statement of `sql` as
+/// written, which is used instead of parsing when no placeholder needs rewriting.
+pub(super) fn params_of(
+    sql: &str,
+    dialect: SqlDialect,
+    schema: Option<&SchemaData>,
+    parsed: Option<&Statement>,
+) -> Option<Vec<Param>> {
     let styles = Styles {
         question_marks: dialect != SqlDialect::Postgres,
         colon_names: matches!(dialect, SqlDialect::Sqlite | SqlDialect::Postgres),
@@ -165,32 +180,47 @@ pub fn analyze_params(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> 
         dollar_numbers: dialect == SqlDialect::Postgres,
         backslash_escapes: dialect == SqlDialect::MySql,
     };
-    let read = |styles| {
-        let rewritten = placeholders::rewrite(sql, styles);
+    let rewritten = placeholders::rewrite(sql, styles);
+    let read = |rewritten: Rewritten| {
+        #[cfg(test)]
+        PARSED.with(|count| count.set(count.get() + 1));
         let input = parser_input(&rewritten.text, dialect);
         let stmt = parse(input.text(), dialect)?.into_iter().next()?;
         Some((stmt, rewritten.names))
     };
-    let (stmt, names) = read(styles).or_else(|| {
-        (dialect == SqlDialect::Postgres && sql.contains('?')).then(|| {
-            read(Styles {
-                question_marks: true,
-                ..styles
-            })
-        })?
-    })?;
+    let (owned, names);
+    let stmt = match parsed.filter(|_| rewritten.text == sql) {
+        Some(stmt) => {
+            names = rewritten.names;
+            stmt
+        }
+        None => {
+            (owned, names) = read(rewritten).or_else(|| {
+                (dialect == SqlDialect::Postgres && sql.contains('?')).then(|| {
+                    read(placeholders::rewrite(
+                        sql,
+                        Styles {
+                            question_marks: true,
+                            ..styles
+                        },
+                    ))
+                })?
+            })?;
+            &owned
+        }
+    };
     let analyzer = Analyzer::new(
         schema.unwrap_or_else(|| crate::catalog::empty(dialect)),
         dialect,
     );
     let mut hints = Hints::default();
-    let _ = visit_expressions(&stmt, |expr| {
+    let _ = visit_expressions(stmt, |expr| {
         if let Some(index) = placeholder_index(expr) {
             hints.0.entry(index).or_default();
         }
         ControlFlow::<()>::Continue(())
     });
-    analyzer.statement_params(&stmt, &mut hints);
+    analyzer.statement_params(stmt, &mut hints);
     let count = names
         .len()
         .max(hints.0.keys().next_back().copied().unwrap_or(0));
@@ -1372,6 +1402,110 @@ mod tests {
             ("postgres", "SELECT f(%s, %s)", vec!["-", "int"]),
         ] {
             assert_eq!(found(dialect, sql), expected, "{sql}");
+        }
+    }
+
+    fn parses(f: impl FnOnce()) -> usize {
+        PARSED.with(|count| count.set(0));
+        f();
+        PARSED.with(std::cell::Cell::get)
+    }
+
+    #[test]
+    fn a_numbered_query_is_not_parsed_again() {
+        let parsed = crate::analyzer::parse("SELECT $1::int, $2", "postgres");
+        let mut found = None;
+        assert_eq!(parses(|| found = parsed.params(None)), 0);
+        let found = found.unwrap_or_default();
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].python_type.as_deref(), Some("int"));
+        let parsed = crate::analyzer::parse("SELECT data ? 'a' FROM t", "postgres");
+        assert_eq!(parses(|| drop(parsed.params(None))), 0);
+        let parsed = crate::analyzer::parse("SELECT 1", "sqlite");
+        assert_eq!(parses(|| drop(parsed.params(None))), 0);
+    }
+
+    #[test]
+    fn a_rewritten_query_is_parsed_for_its_parameters() {
+        for (dialect, sql) in [
+            ("postgres", "SELECT %s::int"),
+            ("postgres", "SELECT %(name)s::int"),
+            ("postgres", "SELECT :name"),
+            ("postgres", "SELECT data ? 'a' FROM t WHERE x = ?"),
+            ("mysql", "SELECT ?"),
+            ("sqlite", "SELECT ?"),
+            ("sqlite", "SELECT :name"),
+            ("sqlite", "SELECT @name"),
+        ] {
+            let parsed = crate::analyzer::parse(sql, dialect);
+            let count = parses(|| drop(parsed.params(None)));
+            assert!(count >= 1, "{dialect}: {sql}");
+        }
+    }
+
+    #[test]
+    fn free_function_parses_as_before() {
+        assert_eq!(
+            parses(|| drop(analyze_params("SELECT $1", "postgres", None))),
+            1
+        );
+        assert_eq!(
+            parses(|| drop(analyze_params("SELEC $1", "postgres", None))),
+            1
+        );
+        assert_eq!(
+            parses(|| drop(analyze_params("SELEC ?", "postgres", None))),
+            2
+        );
+    }
+
+    #[test]
+    fn parsed_params_equal_analyze_params() {
+        const QUERIES: &[&str] = &[
+            "",
+            "SELEC 1 %s",
+            "SELECT 1",
+            "SELECT $1",
+            "SELECT $2::int, $1",
+            "SELECT %s::int",
+            "SELECT %(a)s, %(b)s, %(a)s",
+            "SELECT * FROM users WHERE id = %s",
+            "SELECT * FROM users WHERE id = $1 AND name = $2",
+            "SELECT * FROM users WHERE name = :name AND age > @age",
+            "SELECT * FROM users WHERE id = ?",
+            "SELECT * FROM users WHERE id IN (%s, %s)",
+            "SELECT * FROM users WHERE tags @> %s",
+            "SELECT * FROM users WHERE data ? 'a'",
+            "SELECT * FROM users WHERE data ? 'a' AND id = ?",
+            "SELECT * FROM users LIMIT %s OFFSET %s",
+            "SELECT * FROM users WHERE born + INTERVAL '1 day' > %s",
+            "SELECT %s + INTERVAL '1 day'",
+            "SELECT SUBSTRING(%s FROM 1 FOR %s)",
+            "SELECT generate_series(1, 10, %s)",
+            "SELECT f(%s, %s)",
+            "SELECT 1 FROM users WHERE %s IN (SELECT x FROM things)",
+            "INSERT INTO users (id, name) VALUES (%s, %s)",
+            "INSERT INTO users (id, name) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET name = $3",
+            "UPDATE users SET name = %s WHERE id = %s",
+            "UPDATE users SET name = :n WHERE id = :i",
+            "DELETE FROM users WHERE id = %s LIMIT 1",
+            "WITH c AS (SELECT id FROM users WHERE id = %s) SELECT * FROM c",
+            "SELECT u.id FROM users u JOIN orders o ON o.user_id = u.id WHERE o.total > %s",
+            "-- database: other\nSELECT $1::int",
+            "CREATE TABLE t (a INT)",
+        ];
+        for dialect in ["postgres", "mysql", "sqlite"] {
+            let schema = load_schema(&schema_for(dialect), dialect);
+            for sql in QUERIES {
+                let parsed = crate::analyzer::parse(sql, dialect);
+                for schema in [None, Some(&*schema)] {
+                    assert_eq!(
+                        parsed.params(schema),
+                        analyze_params(sql, dialect, schema),
+                        "{dialect}: {sql}"
+                    );
+                }
+            }
         }
     }
 }
