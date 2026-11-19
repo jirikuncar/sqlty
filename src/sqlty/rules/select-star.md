@@ -4,7 +4,7 @@ group = "query"
 severity = "warn"
 fixable = true
 summary = "SELECT * used — expand to explicit column list"
-origin = "python"
+origin = "Python"
 +++
 
 # select-star

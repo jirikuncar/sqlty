@@ -4,7 +4,7 @@ group = "query"
 severity = "error"
 fixable = false
 summary = "Query marker names a database the project does not configure"
-origin = "python"
+origin = "Python"
 +++
 
 # unknown-database

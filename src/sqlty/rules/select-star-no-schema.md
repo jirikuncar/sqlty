@@ -4,7 +4,7 @@ group = "query"
 severity = "error"
 fixable = false
 summary = "SELECT * used but no schema available to expand"
-origin = "python"
+origin = "Python"
 +++
 
 # select-star-no-schema

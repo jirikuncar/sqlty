@@ -4,7 +4,7 @@ group = "suppression"
 severity = "warn"
 fixable = false
 summary = "# sqlty: ignore comment, or rule in one, that suppresses no diagnostic"
-origin = "python"
+origin = "Python"
 +++
 
 # unused-ignore

@@ -4,7 +4,7 @@ group = "rewrite"
 severity = "warn"
 fixable = false
 summary = "f-string with --sql prefix skipped (cannot be statically rewritten)"
-origin = "python"
+origin = "Python"
 +++
 
 # fstring-skipped

@@ -4,7 +4,7 @@ group = "row-type"
 severity = "error"
 fixable = false
 summary = "Row type field is a Literal that does not cover the values its column can take"
-origin = "python"
+origin = "Python"
 +++
 
 # literal-mismatch

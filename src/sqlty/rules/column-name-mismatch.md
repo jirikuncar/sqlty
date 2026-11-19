@@ -4,7 +4,7 @@ group = "row-type"
 severity = "warn"
 fixable = false
 summary = "Annotated NamedTuple field name doesn't match query column alias"
-origin = "python"
+origin = "Python"
 +++
 
 # column-name-mismatch

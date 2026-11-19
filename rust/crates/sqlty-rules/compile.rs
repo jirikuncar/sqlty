@@ -23,7 +23,7 @@ const GROUPS: [(&str, &str); 7] = [
 const SEVERITIES: [(&str, &str); 3] = [("error", "Error"), ("warn", "Warn"), ("ignore", "Ignore")];
 
 /// Where a rule is reported: by the SQL analyzer, or by the Python checks.
-const ORIGINS: [&str; 2] = ["sql", "python"];
+const ORIGINS: [&str; 2] = ["SQL", "Python"];
 
 /// The front matter of a rule page.
 #[derive(Deserialize)]
@@ -85,7 +85,7 @@ fn parse<'a>(file: &'a str, text: &'a str) -> Result<Page<'a>, String> {
     let severity = lookup(&SEVERITIES, &front.severity, "severity")?;
     if !ORIGINS.contains(&front.origin.as_str()) {
         return Err(format!(
-            "unknown origin {:?} (expected sql or python)",
+            "unknown origin {:?} (expected SQL or Python)",
             front.origin
         ));
     }
@@ -123,8 +123,10 @@ fn split(text: &str) -> Result<(&str, &str), String> {
     let mut offset = 0;
     for line in rest.split_inclusive('\n') {
         if line.trim_end_matches('\n') == "+++" {
-            let body = &rest[offset + line.len()..];
-            return Ok((&rest[..offset], body.strip_prefix('\n').unwrap_or(body)));
+            let body = rest[offset + line.len()..]
+                .strip_prefix('\n')
+                .ok_or("front matter must be followed by a blank line")?;
+            return Ok((&rest[..offset], body));
         }
         offset += line.len();
     }
@@ -192,7 +194,7 @@ fn generate(rules: &[&Page], by_file: &[Page]) -> String {
     ));
     out.push_str(&format!(
         "    /// The rules the SQL analyzer reports, in the order of [`Rule::ALL`].\n    pub const SQL: &'static [Rule] = &[\n{}    ];\n\n",
-        list(&|page| page.front.origin == "sql")
+        list(&|page| page.front.origin == "SQL")
     ));
     let methods = [
         (
@@ -235,7 +237,7 @@ fn generate(rules: &[&Page], by_file: &[Page]) -> String {
             "default_severity" => arms(rules, |page| format!("Severity::{}", page.severity)),
             "fixable" => arms(rules, |page| page.front.fixable.to_string()),
             "group" => arms(rules, |page| format!("Group::{}", page.group)),
-            _ => arms(rules, |page| (page.front.origin == "sql").to_string()),
+            _ => arms(rules, |page| (page.front.origin == "SQL").to_string()),
         };
         out.push_str(&format!(
             "    /// {doc}\n    pub fn {method}(self) -> {ty} {{\n        match self {{\n{table}        }}\n    }}\n\n"

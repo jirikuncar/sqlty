@@ -4,7 +4,7 @@ group = "row-type"
 severity = "ignore"
 fixable = false
 summary = "Row type field is optional but its query column cannot be NULL"
-origin = "python"
+origin = "Python"
 +++
 
 # redundant-optional

@@ -4,7 +4,7 @@ group = "names"
 severity = "error"
 fixable = false
 summary = "INSERT gives a different number of values than the columns it writes"
-origin = "sql"
+origin = "SQL"
 +++
 
 # insert-value-count

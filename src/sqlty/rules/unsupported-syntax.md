@@ -4,7 +4,7 @@ group = "names"
 severity = "warn"
 fixable = false
 summary = "Query parses, but a construct in it is not typed, so the row type is not trusted"
-origin = "sql"
+origin = "SQL"
 +++
 
 # unsupported-syntax

@@ -4,7 +4,7 @@ group = "rewrite"
 severity = "warn"
 fixable = true
 summary = "Source has --sql strings that aren't wrapped in SQL[T]"
-origin = "python"
+origin = "Python"
 +++
 
 # stale-rewrite

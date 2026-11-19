@@ -4,7 +4,7 @@ group = "row-type"
 severity = "error"
 fixable = false
 summary = "Row type field is not optional but its query column can be NULL"
-origin = "python"
+origin = "Python"
 +++
 
 # nullable-mismatch

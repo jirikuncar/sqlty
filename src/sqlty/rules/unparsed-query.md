@@ -4,7 +4,7 @@ group = "query"
 severity = "warn"
 fixable = false
 summary = "--sql query, SQL[T] query or Annotated helper query that does not parse"
-origin = "python"
+origin = "Python"
 +++
 
 # unparsed-query

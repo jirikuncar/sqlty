@@ -4,7 +4,7 @@ group = "rewrite"
 severity = "warn"
 fixable = true
 summary = "SQL[tuple[...]] is wider than the rows the query returns (drift)"
-origin = "python"
+origin = "Python"
 +++
 
 # stale-type

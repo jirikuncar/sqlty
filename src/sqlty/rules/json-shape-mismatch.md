@@ -4,7 +4,7 @@ group = "row-type"
 severity = "error"
 fixable = false
 summary = "Row type field cannot hold the JSON a query column builds"
-origin = "python"
+origin = "Python"
 +++
 
 # json-shape-mismatch

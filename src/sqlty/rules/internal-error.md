@@ -4,7 +4,7 @@ group = "internal"
 severity = "error"
 fixable = false
 summary = "sqlty crashed checking the file"
-origin = "python"
+origin = "Python"
 +++
 
 # internal-error

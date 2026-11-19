@@ -4,7 +4,7 @@ group = "names"
 severity = "error"
 fixable = false
 summary = "Grouped query selects a column it neither groups by nor aggregates"
-origin = "sql"
+origin = "SQL"
 +++
 
 # ungrouped-column
