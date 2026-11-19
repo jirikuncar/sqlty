@@ -239,8 +239,11 @@ jobs:
         if: ${{ env.SKIP != 'true' && contains(matrix.target, 'musl') }}
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
+      # Static, not static-pie: no relocations to ship or apply at start, and no ASLR.
       - name: Build
         if: env.SKIP != 'true'
+        env:
+          RUSTFLAGS: ${{ contains(matrix.target, 'musl') && '-C relocation-model=static' || '' }}
         run: cargo build --locked --profile dist -p sqlty-cli --target "$TARGET" --manifest-path rust/Cargo.toml
 
       - name: Check the binary
