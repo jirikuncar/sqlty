@@ -3,7 +3,7 @@ order: 160
 group: "query"
 severity: "warn"
 fixable: true
-summary: "MySQL rejects the \"--sql\" marker; use \"-- sql\""
+summary: "`--sql` marker with `dialect = \"mysql\"`, which MySQL rejects"
 origin: "Python"
 ---
 

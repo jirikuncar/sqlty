@@ -3,7 +3,7 @@ order: 190
 group: "rewrite"
 severity: "warn"
 fixable: false
-summary: "t-string with --sql prefix skipped (a field changes the SQL in a way sqlty cannot follow)"
+summary: "t-string with `--sql` and a field that changes the SQL"
 origin: "Python"
 ---
 

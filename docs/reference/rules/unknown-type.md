@@ -3,7 +3,7 @@ order: 290
 group: "names"
 severity: "warn"
 fixable: false
-summary: "Cast or column type has no Python type"
+summary: "Cast or column type without a Python type"
 origin: "SQL"
 ---
 

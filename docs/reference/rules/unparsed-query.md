@@ -3,7 +3,7 @@ order: 230
 group: "query"
 severity: "warn"
 fixable: false
-summary: "--sql query, SQL[T] query or Annotated helper query that does not parse"
+summary: "Query that does not parse, so sqlty cannot check it"
 origin: "Python"
 ---
 

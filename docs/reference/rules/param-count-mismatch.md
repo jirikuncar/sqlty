@@ -3,7 +3,7 @@ order: 390
 group: "params"
 severity: "error"
 fixable: false
-summary: "A call passes a different number of parameters than its query has placeholders, or misses a name"
+summary: "Call passes a different number of parameters than its query has"
 origin: "Python"
 ---
 

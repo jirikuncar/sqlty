@@ -3,7 +3,7 @@ order: 440
 group: "params"
 severity: "error"
 fixable: false
-summary: "The parameter type `P` of `SQL[R, P]` doesn't fit the parameters of its query"
+summary: "`P` of `SQL[R, P]` doesn't fit the query's parameters"
 origin: "Python"
 ---
 

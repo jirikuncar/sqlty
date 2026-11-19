@@ -3,7 +3,7 @@ order: 410
 group: "params"
 severity: "error"
 fixable: false
-summary: "A call passes an argument whose type can't be the type its query parameter takes"
+summary: "Call passes an argument the query's parameter can't take"
 origin: "Python"
 ---
 

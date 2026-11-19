@@ -3,7 +3,7 @@ order: 10
 group: "row-type"
 severity: "error"
 fixable: false
-summary: "Annotated type has different number of fields than query columns"
+summary: "Row type has a different number of fields than the query has columns"
 origin: "Python"
 ---
 

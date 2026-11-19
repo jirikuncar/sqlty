@@ -3,7 +3,7 @@ order: 400
 group: "params"
 severity: "warn"
 fixable: false
-summary: "A call passes a key its query has no placeholder for"
+summary: "Call passes a key its query has no placeholder for"
 origin: "Python"
 ---
 

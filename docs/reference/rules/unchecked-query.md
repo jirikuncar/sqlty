@@ -3,7 +3,7 @@ order: 200
 group: "rewrite"
 severity: "warn"
 fixable: false
-summary: "--sql query is not plain string literals (raw, bytes, an expression), so it is not checked"
+summary: "`--sql` query that is not plain string literals"
 origin: "Python"
 ---
 

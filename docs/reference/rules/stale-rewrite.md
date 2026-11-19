@@ -3,7 +3,7 @@ order: 130
 group: "rewrite"
 severity: "warn"
 fixable: true
-summary: "Source has --sql strings that aren't wrapped in SQL[T]"
+summary: "`--sql` string not wrapped in `SQL[T](...)`"
 origin: "Python"
 ---
 

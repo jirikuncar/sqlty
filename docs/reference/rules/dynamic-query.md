@@ -3,7 +3,7 @@ order: 210
 group: "rewrite"
 severity: "ignore"
 fixable: false
-summary: "helper query that is not a string literal (a variable, a call), so it is not checked"
+summary: "Helper query that is not a string literal"
 origin: "Python"
 ---
 

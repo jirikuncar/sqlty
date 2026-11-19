@@ -3,7 +3,7 @@ order: 140
 group: "rewrite"
 severity: "warn"
 fixable: true
-summary: "SQL[tuple[...]] is wider than the rows the query returns (drift)"
+summary: "`SQL[tuple[...]]` wider than the inferred row type"
 origin: "Python"
 ---
 

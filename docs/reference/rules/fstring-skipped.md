@@ -3,7 +3,7 @@ order: 180
 group: "rewrite"
 severity: "warn"
 fixable: false
-summary: "f-string with --sql prefix skipped (cannot be statically rewritten)"
+summary: "f-string with `--sql` cannot be rewritten"
 origin: "Python"
 ---
 

@@ -3,7 +3,7 @@ order: 300
 group: "names"
 severity: "warn"
 fixable: false
-summary: "Query parses, but a construct in it is not typed, so the row type is not trusted"
+summary: "Construct that parses but is not typed"
 origin: "SQL"
 ---
 

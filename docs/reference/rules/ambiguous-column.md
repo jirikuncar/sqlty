@@ -3,7 +3,7 @@ order: 260
 group: "names"
 severity: "error"
 fixable: false
-summary: "Unqualified column exists in more than one table of the query"
+summary: "Unqualified column more than one table has"
 origin: "SQL"
 ---
 

@@ -3,7 +3,7 @@ order: 250
 group: "names"
 severity: "error"
 fixable: true
-summary: "Query reads a column that its table does not have"
+summary: "Column the table does not have"
 origin: "SQL"
 ---
 

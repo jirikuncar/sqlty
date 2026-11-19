@@ -305,7 +305,7 @@ The version is pinned only in the `Makefile` (`ZENSICAL`); CI runs `make docs`.
 ```bash
 make docs           # strict build into site/ (fails on broken links or anchors)
 make docs-serve     # live preview at http://localhost:8000/sqlty/
-make generate-docs  # regenerate the tables of configuration.md and cli.md
+make generate-docs  # regenerate the tables of configuration.md, cli.md and rules.md
 make lint-docs      # rumdl and Vale on the docs
 ```
 
