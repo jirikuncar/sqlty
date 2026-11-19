@@ -435,9 +435,4 @@ rust/crates/             # Cargo workspace (root: rust/Cargo.toml)
 ├── sqlty-wasm/          # JSON in, JSON out, for WebAssembly: the docs playground (make playground)
 └── sqlty-ext/           # lib.rs (PyO3), builds sqlty._core; server.rs runs sqlty-lsp
 editors/vscode/          # VS Code client of sqlty server; see its README
-proofs/                  # Lean 4 model of SqlType::python, with proofs; see its README
 ```
-
-`proofs/SqlTy/Table.lean` is generated from `scalar_python`: after changing the scalar
-mapping, run `SQLTY_UPDATE_PROOFS=1 cargo test -p sqlty-sql lean_table` and `lake build`
-in `proofs/`.
