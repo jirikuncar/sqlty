@@ -784,9 +784,10 @@ class Coverage:
 
 
 def count(ranges: list[dict[str, int]], at: int) -> int:
-    """How often the innermost range around offset `at` ran."""
+    """How often the innermost range around offset `at` ran: a take after the first lists only
+    the functions that ran since."""
     holding = [r for r in ranges if r["startOffset"] <= at < r["endOffset"]]
-    return min(holding, key=lambda r: r["endOffset"] - r["startOffset"])["count"]
+    return min(holding, key=lambda r: r["endOffset"] - r["startOffset"])["count"] if holding else 0
 
 
 @contextlib.contextmanager
