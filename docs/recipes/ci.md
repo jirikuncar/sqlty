@@ -44,8 +44,7 @@ pinned in sqlty's `rust-toolchain.toml` and installs it if missing. Pass options
 can break the code, [`narrow-type`](../reference/rules.md#narrow-type), is one by
 default; an annotation only wider than the rows,
 [`stale-type`](../reference/rules.md#stale-type), is a warning unless you
-promote it (see [below](#fail-on-drift-and-mismatches)). The `sqlty` hook
-id is a deprecated alias of `sqlty-rewrite`: it rewrites the staged files.
+promote it (see [below](#fail-on-drift-and-mismatches)).
 
 !!! note "A schema change checks the whole project"
     A changed schema or config file can break queries in files you didn't touch.
