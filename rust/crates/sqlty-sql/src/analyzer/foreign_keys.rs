@@ -480,12 +480,11 @@ impl<'s> Reader<'_, 's> {
                     target: InTarget::List(list),
                     ..
                 } if list.len() != 1 => lists.push((expr, list, term.span())),
+                _ if self.comparison(term, group) => {}
                 _ => {
-                    let read = !self.comparison(term, group);
                     let _ = term.visit(&mut Nested {
                         reader: self,
                         queries: 0,
-                        read,
                     });
                 }
             }
@@ -601,7 +600,9 @@ impl<'s> Reader<'_, 's> {
         if outer.len() != selected.len() {
             return;
         }
-        let (analyzer, inner_scope) = self.inner_scope(inner);
+        let mut quiet = self.analyzer.correlated(self.scope);
+        quiet.diag = Diagnostics::default();
+        let Ok((analyzer, inner_scope)) = quiet.scope_of(&inner.from);
         self.subqueries += 1;
         let row = format!("{}#", self.subqueries);
         for (left, right) in outer.into_iter().zip(selected) {
@@ -615,25 +616,6 @@ impl<'s> Reader<'_, 's> {
     }
 }
 
-impl<'s> Reader<'_, 's> {
-    /// An analyzer of a subquery of a condition, recording nothing, and its scope.
-    fn inner_scope(&self, select: &Select) -> (Analyzer<'s>, Scope) {
-        let mut quiet = self.analyzer.correlated(self.scope);
-        quiet.diag = Diagnostics::default();
-        let Ok(inner) = quiet.scope_of(&select.from);
-        inner
-    }
-
-    /// Judges the comparisons of a subquery of a condition in its own scope.
-    fn judge_subquery(&self, query: &Query) {
-        if let SetExpr::Select(select) = query.body.as_ref() {
-            let (mut analyzer, scope) = self.inner_scope(select);
-            analyzer.diag = self.analyzer.diag.clone();
-            analyzer.check_foreign_keys(select, &scope);
-        }
-    }
-}
-
 /// The constant or parameter `expr` is, when a column `=` it holds that value.
 fn pinned(pin: bool, expr: &Expr) -> Option<String> {
     match strip(expr) {
@@ -642,21 +624,17 @@ fn pinned(pin: bool, expr: &Expr) -> Option<String> {
     }
 }
 
-/// Visits a term, judging each subquery in it, and when the term is no comparison
-/// (`read`), reading each comparison in it outside subqueries as a group of its own.
+/// Visits a term that is no comparison, reading each comparison in it, outside subqueries,
+/// as a group of its own. Subqueries are judged where their columns are read.
 struct Nested<'r, 'a, 's> {
     reader: &'r mut Reader<'a, 's>,
     queries: usize,
-    read: bool,
 }
 
 impl Visitor for Nested<'_, '_, '_> {
     type Break = ();
 
-    fn pre_visit_query(&mut self, query: &Query) -> ControlFlow<()> {
-        if self.queries == 0 {
-            self.reader.judge_subquery(query);
-        }
+    fn pre_visit_query(&mut self, _query: &Query) -> ControlFlow<()> {
         self.queries += 1;
         ControlFlow::Continue(())
     }
@@ -667,7 +645,7 @@ impl Visitor for Nested<'_, '_, '_> {
     }
 
     fn pre_visit_expr(&mut self, expr: &Expr) -> ControlFlow<()> {
-        if self.read && self.queries == 0 {
+        if self.queries == 0 {
             let mut group = Group::default();
             if self.reader.comparison(expr, &mut group) {
                 self.reader.groups.push(group);

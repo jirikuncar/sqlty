@@ -153,6 +153,10 @@ from sqlty import SQL
 a = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o WHERE EXISTS (SELECT 1 FROM products p WHERE p.id = o.customer_id)")
 # error: [foreign-key-mismatch] "orders.customer_id references customers.id, not products.id"
 b = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o WHERE o.id IN (SELECT o2.id FROM orders o2 JOIN products p ON p.id = o2.customer_id)")
+# error: [foreign-key-mismatch] "orders.customer_id references customers.id, not products.id"
+c = SQL[tuple[int]]("--sql\nSELECT 1 WHERE EXISTS (WITH c AS (SELECT 1 FROM orders o JOIN products p ON p.id = o.customer_id) SELECT 1 FROM c)")
+# error: [foreign-key-mismatch] "orders.customer_id references customers.id, not products.id"
+d = SQL[tuple[int]]("--sql\nSELECT 1 WHERE 1 IN (SELECT 2 UNION SELECT 1 FROM orders o JOIN products p ON p.id = o.customer_id)")
 ```
 
 ### A namesake that is no key
