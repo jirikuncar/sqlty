@@ -38,10 +38,6 @@ maximum of `--repeats` runs (RSS from `wait4` of that child).
 - `lsp_edit`, `lsp_edit_p95`: a full-text change of that module to its diagnostics,
   median and p95 of 15 edits.
 - `lsp_hover`, `lsp_completion`: request to response on a table name, total of 20.
-
-The scenarios from `precommit` on run 3 times, not `--repeats`: they are short, and a
-run over budget is measured again.
-
 - `schema_load`: parse the 400-500 table schema through one `analyze_select`.
 - `schema_load_unresolved_alters`: 2000 tables plus 2000 `ALTER TABLE` on tables
   that do not exist.
@@ -49,6 +45,9 @@ run over budget is measured again.
   survive. Its RSS bounds the catalog and its name index.
 - `micro_us`: microseconds per `analyze_select` / `analyze_params` call for each
   query kind, schema cached.
+
+The scenarios from `precommit` on run 3 times, not `--repeats`: they are short, and a
+run over budget is measured again.
 
 ```bash
 make bench-project                                              # full size, JSON on stdout
