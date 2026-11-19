@@ -1,7 +1,7 @@
 """Benchmarks of the engine through ``sqlty.core``, measured by CodSpeed on every commit.
 
 Each query kind of ``synth.KINDS`` is analyzed against the 400-table schema of the CI
-budget, loaded once. The schema load, ``rewrite_source`` and ``check_source`` on a
+budget, loaded once. The schema load, ``rewrite_source``, ``strip_source`` and ``check_source`` on a
 module of every kind are measured too.
 
 Build the extension in release mode first, then run them as plain pytest:
@@ -45,6 +45,10 @@ def test_load_schema(benchmark: BenchmarkFixture) -> None:
 
 def test_rewrite_source(benchmark: BenchmarkFixture) -> None:
     assert benchmark(core.rewrite_source, SOURCE, schema_sql=SCHEMA) == REWRITTEN
+
+
+def test_strip_source(benchmark: BenchmarkFixture) -> None:
+    assert benchmark(core.strip_source, REWRITTEN) == SOURCE
 
 
 def test_check_source(benchmark: BenchmarkFixture) -> None:

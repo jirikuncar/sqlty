@@ -1,6 +1,6 @@
 # Benchmarks
 
-Two scripts; all need the release extension:
+Two scripts; both need the release extension:
 `uv run maturin develop --release --manifest-path rust/crates/sqlty-ext/Cargo.toml`.
 
 | Script | What it measures | Make target |
