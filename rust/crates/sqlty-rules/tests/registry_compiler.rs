@@ -54,6 +54,15 @@ fn a_page_becomes_a_variant_and_its_tables() {
 }
 
 #[test]
+fn a_page_with_crlf_lines_compiles_as_with_lf() {
+    let crlf = compile(&[page("chasm-join.md", &PAGE.replace('\n', "\r\n"))]).expect("compiles");
+    assert_eq!(
+        crlf,
+        compile(&[page("chasm-join.md", PAGE)]).expect("compiles")
+    );
+}
+
+#[test]
 fn rules_are_listed_by_order_and_pages_by_file_name() {
     let second = PAGE
         .replace("order: 10", "order: 5")
