@@ -48,6 +48,11 @@ struct Page<'a> {
 
 /// Rust source of the registry of `pages`, each a file name and its text.
 pub fn compile(pages: &[(String, String)]) -> Result<String, String> {
+    // A Windows checkout ends lines with CRLF.
+    let pages: Vec<(String, String)> = pages
+        .iter()
+        .map(|(file, text)| (file.clone(), text.replace("\r\n", "\n")))
+        .collect();
     let mut sorted: Vec<&(String, String)> = pages.iter().collect();
     sorted.sort_by(|a, b| a.0.cmp(&b.0));
     let mut parsed = Vec::with_capacity(sorted.len());
