@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.7.1"
+version = "0.8.0"
 edition = "2021"
 description = "Rust engine of sqlty: SQL type inference and Python source rewriting"
 license = "MIT"
@@ -25,6 +25,7 @@ toml = { version = "1.1", features = ["preserve_order"] }
 ruff_python_ast = "=0.0.21"
 ruff_python_parser = "=0.0.21"
 ruff_text_size = "=0.0.21"
+sqlty-rules = { path = "crates/sqlty-rules" }
 sqlty-sql = { path = "crates/sqlty-sql" }
 sqlty-python = { path = "crates/sqlty-python" }
 sqlty-lsp = { path = "crates/sqlty-lsp" }

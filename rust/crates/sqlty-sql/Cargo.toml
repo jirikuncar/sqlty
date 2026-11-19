@@ -16,6 +16,7 @@ sqlparser.workspace = true
 recursive.workspace = true
 regex.workspace = true
 rustc-hash.workspace = true
+sqlty-rules.workspace = true
 thiserror.workspace = true
 
 [build-dependencies]

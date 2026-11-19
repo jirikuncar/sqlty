@@ -1,0 +1,44 @@
+{
+  "name": "@sqlty/wasm",
+  "version": "0.8.0",
+  "description": "The sqlty engine as WebAssembly: type-check, complete and fix the SQL in Python source from a browser, an editor or Node.js",
+  "keywords": [
+    "sql",
+    "python",
+    "type-checking",
+    "linter",
+    "webassembly",
+    "wasm",
+    "postgresql",
+    "sqlite",
+    "mysql"
+  ],
+  "homepage": "https://sqlty.kuncar.dev/recipes/embedding/",
+  "bugs": "https://github.com/jirikuncar/sqlty/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jirikuncar/sqlty.git",
+    "directory": "npm/wasm"
+  },
+  "license": "MIT",
+  "author": "Jiri Kuncar",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./engine": "./engine.js",
+    "./sqlty_wasm.wasm": "./sqlty_wasm.wasm",
+    "./package.json": "./package.json"
+  },
+  "types": "./index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "engine.js",
+    "engine.d.ts",
+    "sqlty_wasm.wasm"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20.16"
+  }
+}

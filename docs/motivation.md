@@ -68,10 +68,10 @@ server reports.
 | Parameters | typed from where they sit, checked at call sites; `SQL[R, P]` with [`param-types`](reference/configuration.md#param-types) | declared; the type checker checks `*args` |
 | Rows seen by the type checker | `T` through the [psycopg helpers](guide/psycopg.md); asyncpg's `Record` stays `Any` | `list[T]`, `T \| None`, `R1` |
 | Row types | `TypedDict`, `NamedTuple`, dataclass, Pydantic, `Protocol` | `tuple`, `NamedTuple` |
-| Column names | [`column-name-mismatch`](reference/rules.md#column-name-mismatch) | `NameMismatchError` for a `NamedTuple` |
+| Column names | [`column-name-mismatch`](reference/rules/column-name-mismatch.md) | `NameMismatchError` for a `NamedTuple` |
 | Enums | a `Literal` of the values; a `StrEnum` field is accepted without comparing its values | `StrEnum` values compared with `pg_enum` |
 | JSON | `Any`, with [JSON shapes](guide/json-shapes.md) | `JsonType`, decoded with `json` or orjson |
-| Ranges, geometric types | [`unknown-type`](reference/rules.md#unknown-type), and `str` | `asyncpg.Range[T]`, `asyncpg.Point` and the like |
+| Ranges, geometric types | [`unknown-type`](reference/rules/unknown-type.md), and `str` | `asyncpg.Range[T]`, `asyncpg.Point` and the like |
 | t-strings | `{value}` is a parameter | `{1}` is the ordinal of `$1` |
 | SQL built at run time | not checked | `unsafe_sql` takes any `str`, checked when it runs |
 

@@ -115,7 +115,7 @@ async function explainRule(host: Host): Promise<void> {
   });
   if (picked !== undefined) {
     await vscode.env.openExternal(
-      vscode.Uri.parse(picked === all ? RULES : `${RULES}#${picked.label}`),
+      vscode.Uri.parse(picked === all ? RULES : `${RULES}${picked.label}/`),
     );
   }
 }

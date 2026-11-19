@@ -86,15 +86,7 @@ A column gets the rules of its outermost operator or function call. A column
 reference, a cast, a literal or a set operation has none. A rule shared by
 several databases cites the documentation of each; only the configured
 dialect's is printed, and every one for a dialect none of them documents, such
-as `generic`. From Python,
-`sqlty.core.explain_select` returns the same rules:
-
-```pycon
->>> from sqlty.core import explain_select
->>> [column] = explain_select("SELECT SUM(qty) AS total FROM orders", schema_sql="CREATE TABLE orders (qty SMALLINT NOT NULL)")
->>> column.type_rule.id, column.nullability_rule.id
-('postgres.aggregate.sum-integers', 'postgres.aggregate.sum-integers')
-```
+as `generic`.
 
 The analyzer records the rules only when asked to, so `check` without
 `--explain` pays nothing for them. To add or change a rule, see
@@ -104,7 +96,7 @@ The analyzer records the rules only when asked to, so `check` without
 
 A call to a built-in function is typed by the function's rules in the query's
 dialect; an unknown function leaves its column untyped (see
-[`unknown-function`](rules.md#unknown-function)). PostgreSQL follows its
+[`unknown-function`](rules/unknown-function.md)). PostgreSQL follows its
 "Functions and Operators" chapter. MySQL and SQLite type these:
 
 | Group | MySQL | SQLite |
@@ -140,32 +132,4 @@ psycopg does: write `'a%%'` for a literal `%` in a string.
 !!! warning "MySQL servers reject the `--sql` marker"
     The marker line is part of the string the driver sends, and MySQL and
     MariaDB read `--` as a comment only before whitespace. Use `-- sql`
-    instead; see [`mysql-sql-marker`](rules.md#mysql-sql-marker).
-
-## Benchmarks
-
-Median time per call from `benchmarks/bench_core.py` (500 iterations after
-warm-up, release build), on a 4-core Linux x86_64 machine:
-
-| Operation | Time |
-|-----------|-----:|
-| `infer_type`, 1 column | 5 µs |
-| `infer_type`, 4 columns | 12 µs |
-| `infer_type`, 10 columns with JOINs | 50 µs |
-| `infer_type` with a schema | 43 µs |
-| `expand_star` with a schema | 42 µs |
-| `rewrite_source`, 1 query | 105 µs |
-| `rewrite_source`, 3 queries | 122 µs |
-| `rewrite_source`, 20 queries | 343 µs |
-| `strip_source`, 1 query | 135 µs |
-| `strip_source`, 20 queries | 134 µs |
-| `check_source`, 4 queries | 754 µs |
-
-Whole-file operations carry a fixed cost per call for compiling their
-patterns. Numbers vary between machines and runs. A debug build from plain
-`maturin develop` is much slower, so build in release mode first:
-
-```bash
-uv run maturin develop --release
-uv run python benchmarks/bench_core.py
-```
+    instead; see [`mysql-sql-marker`](rules/mysql-sql-marker.md).
