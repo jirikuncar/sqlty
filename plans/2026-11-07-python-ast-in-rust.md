@@ -95,6 +95,8 @@ Slowest first, each measured on the 10,000-file synthetic project.
    reaches `ast.parse` (it defines helpers). `check -j 1`, median of 3: 3.95 s to 3.20 s on
    the full project, 5.00 s to 3.58 s when every file calls a psycopg helper; output is
    identical. Building the outline costs about 18 µs a file, against 26 µs for `ast.parse`.
+   Since 2026-11-19 only the test oracle reads an outline: `tests/type_oracle/outline.py`
+   cuts `ast.parse`, and `outline.rs` is gone.
 5. Compositions and query variants.
 
 ## The check in Rust
@@ -211,7 +213,7 @@ decides in milestones 1 to 3, and from milestone 4 the file has no types or t-st
 | `from __future__ import braces` / unknown feature at the top | `SyntaxError` | accepts | defers; also for `barry_as_FLUFL` |
 | `'\ud800'` | keeps the surrogate | U+FFFD | defers on any `\uD8xx`-`\uDFxx` escape |
 | A file over 256 KiB | reads | reads, on a stack sized by length | declines: no types or t-string calls |
-| `\r\n` or `\r` inside a string (triple-quoted, CRLF file) | `\n` | kept as written | reads the literal again with `\n` (`parse::text`); the outline normalizes the file first |
+| `\r\n` or `\r` inside a string (triple-quoted, CRLF file) | `\n` | kept as written | reads the literal again with `\n` (`parse::text`) |
 | Python 3.15 syntax (`lazy import`, `[*x for x in y]`) | accepts | accepts (lazy imports are imports) | reads |
 | `ｅｘｅｃｕｔｅ(...)` (NFKC) | `execute` | `execute` | same tree; the text gates on raw text skip it in both |
 
@@ -234,7 +236,7 @@ type aliases (`_bound_names`), and t-string calls come in source order, not `ast
 
 - WebAssembly size with the parser in `sqlty-wasm`; it gains every AST check. On wasm32
   `stacker` allocates the parse stack on the heap, so the per-byte stack needs a lower cap.
-- Each file is parsed by ruff up to four times (facts, outline, t-strings, helper sites); one
+- Each file is parsed by ruff up to three times (facts, t-strings, helper sites); one
   parse kept between the calls would save about 10 µs a call.
 - The surrogate escapes and the 256 KiB limit cost a file its types in `rust` mode: decoding
   string escapes in Rust, and a stack sized by nesting rather than length, would lift both.
