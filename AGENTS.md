@@ -10,6 +10,8 @@ architecture live in [DEVELOPMENT.md](DEVELOPMENT.md).
   [`review` skill](.claude/skills/review/SKILL.md), given the branch name only.
   `.claude/skills/` is for contributors and not shipped, unlike `skills/`.
 - Plans live in `plans/`, named `YYYY-MM-DD-<slug>.md` after the day they were written.
+  Delete a plan once it has shipped; move what is left to `plans/2026-02-13-future.md`
+  or an issue.
 
 ## AI disclosure
 
