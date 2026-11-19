@@ -1,6 +1,6 @@
 # Query variants from branches
 
-> **Status:** stage 1 implemented behind `preview = true` (`src/sqlty/_variants.py`).
+> **Status:** stage 1 implemented behind `preview = true` (`rust/crates/sqlty-python/src/variants.rs`).
 > Acceptance spec: `tests/mdtest/check/query_variants.md`.
 
 ## Problem
