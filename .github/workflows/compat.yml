@@ -8,6 +8,7 @@ on:
     paths:
       - "scripts/compat/**"
       - ".github/workflows/compat.yml"
+      - ".github/actions/setup/**"
   schedule:
     - cron: "0 6 * * 1"
   workflow_dispatch:

@@ -10,6 +10,7 @@ on:
       - docs/assets/playground/ask.js
       - scripts/ask_eval/**
       - .github/workflows/ask-eval.yml
+      - .github/actions/setup/**
   workflow_dispatch:
     inputs:
       models:
