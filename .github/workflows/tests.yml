@@ -110,8 +110,9 @@ jobs:
       - name: Run the tests and check coverage
         run: scripts/coverage.sh "$CRATE"
 
+      # On the toolchain of rust-toolchain.toml.
       - name: Run the doctests
-        run: cargo test --doc -p "$PACKAGE" --manifest-path rust/Cargo.toml
+        run: env -u RUSTUP_TOOLCHAIN cargo test --doc -p "$PACKAGE" --manifest-path rust/Cargo.toml
 
   test:
     name: Test Python ${{ matrix.python-version }}

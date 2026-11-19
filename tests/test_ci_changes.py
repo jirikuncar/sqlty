@@ -26,7 +26,10 @@ def hit(*changed: str) -> set[str]:
 # fmt: off
 @pytest.mark.parametrize(("changed", "expected"), [
     (["README.md"], {"python"}),
-    (["CONTRIBUTING.md", "plans/2026-11-19-x.md", ".github/workflows/docs.yml"], set()),
+    (["plans/2026-11-19-x.md", ".github/workflows/docs.yml"], set()),
+    (["CONTRIBUTING.md"], {"python"}),
+    (["skills/sqlty/SKILL.md"], {"sqlty-cli", "sqlty-ext", "python", "engine", "vscode"}),
+    (["npm/wasm/engine.js"], {"playground", "vscode"}),
     (["editors/vscode/src/extension.ts"], {"vscode"}),
     (["src/sqlty/__init__.py"], {"python", "engine", "vscode"}),
     (["rust/crates/sqlty-wasm/src/lib.rs"], {"sqlty-wasm", "vscode", "playground"}),
@@ -34,6 +37,7 @@ def hit(*changed: str) -> set[str]:
     (["rust/crates/sqlty-sql/src/lib.rs"], EVERYTHING),
     (["rust/Cargo.lock"], EVERYTHING),
     (["somewhere/new.txt"], EVERYTHING),
+    (["editors/vscode/syntaxes/sqlty.tmLanguage.json"], EVERYTHING),
 ])
 # fmt: on
 def test_a_change_runs_its_packages_and_their_dependents(

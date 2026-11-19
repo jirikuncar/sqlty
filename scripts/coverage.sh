@@ -10,7 +10,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export RUSTUP_TOOLCHAIN=${RUSTUP_TOOLCHAIN:-nightly}
 crates=$(ls rust/crates)
-(($#)) || set -- python $crates
+# The extension crate is gated with the Python package.
+(($#)) || set -- python $(grep -vx sqlty-ext <<<"$crates")
 runner=test tests=(test)
 if cargo nextest --version >/dev/null 2>&1; then runner=nextest tests=(nextest run); fi
 

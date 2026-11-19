@@ -34,7 +34,9 @@ PACKAGES: dict[str, tuple[list[str], list[str]]] = {
             "examples/**",
             "scripts/**",
             "benchmarks/**",
-            "README.md",
+            # The links of the guides at the root are checked.
+            "*.md",
+            ".github/*.md",
             "LICENSE",
             "Makefile",
             "pyproject.toml",
@@ -55,6 +57,8 @@ PACKAGES: dict[str, tuple[list[str], list[str]]] = {
             "src/**",
             "tests/**",
             "benchmarks/**",
+            # The package job checks that the sdist carries them.
+            "skills/**",
             "pyproject.toml",
             "uv.lock",
             ".github/workflows/pypi.yml",
@@ -62,11 +66,26 @@ PACKAGES: dict[str, tuple[list[str], list[str]]] = {
         ["sqlty-ext"],
     ),
     # The desktop test runs the sqlty of the virtual environment.
-    "vscode": (["editors/vscode/**", "src/sqlty/**"], ["sqlty-wasm", "sqlty-ext"]),
+    "vscode": (["editors/vscode/**", "src/sqlty/**", "npm/wasm/**"], ["sqlty-wasm", "sqlty-ext"]),
+    # The engine on WebAssembly: the docs playground and @sqlty/wasm, checking each example.
     "playground": (
-        ["docs/assets/playground/**", "tests/playground.test.mjs", "tests/ask.test.mjs"],
+        [
+            "docs/assets/playground/**",
+            "npm/wasm/**",
+            "tests/*.test.mjs",
+            "examples/**",
+            "scripts/generate_playground_examples.py",
+            "scripts/vendor_assets.py",
+            "Makefile",
+        ],
         ["sqlty-wasm", "sqlty-lsp"],
     ),
+}
+
+# Files outside a crate's directory that its build or tests read.
+CRATE_PATHS = {
+    "sqlty-cli": ["skills/**", "src/sqlty/rules/**"],
+    "sqlty-sql": ["editors/vscode/syntaxes/**"],
 }
 
 # A change here runs every package.
@@ -74,6 +93,8 @@ EVERYTHING = [
     ".github/workflows/tests.yml",
     ".github/actions/**",
     "scripts/ci_changes.py",
+    "scripts/coverage.sh",
+    "scripts/coverage-floors.txt",
     "rust/Cargo.toml",
     "rust/Cargo.lock",
     "rust/clippy.toml",
@@ -82,7 +103,6 @@ EVERYTHING = [
 
 # Tested by nothing in tests.yml: other workflows own these, or nothing does.
 IGNORED = [
-    "*.md",
     "plans/**",
     ".claude/**",
     ".github/**",
@@ -115,7 +135,11 @@ def workspace() -> dict[str, tuple[str, set[str]]]:
 
 
 def matches(path: str, patterns: list[str]) -> bool:
-    return any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
+    """Whether `path` matches a pattern; one without a `/` matches files at the root only."""
+    return any(
+        fnmatch.fnmatchcase(path, pattern) and ("/" in pattern or "/" not in path)
+        for pattern in patterns
+    )
 
 
 def owners(path: str, crates: set[str]) -> set[str] | None:
@@ -126,6 +150,7 @@ def owners(path: str, crates: set[str]) -> set[str] | None:
     if parts[:2] == ["rust", "crates"] and len(parts) > 3 and parts[2] in crates:
         return {parts[2]}
     found = {name for name, (paths, _) in PACKAGES.items() if matches(path, paths)}
+    found |= {name for name, paths in CRATE_PATHS.items() if matches(path, paths)}
     if found or matches(path, IGNORED):
         return found
     return None
@@ -150,7 +175,7 @@ def affected(changed: list[str] | None) -> dict[str, bool]:
 
 
 def changed_files(base: str) -> list[str]:
-    diff = ["git", "diff", "--name-only", f"{base}...HEAD"]
+    diff = ["git", "diff", "--name-only", "--no-renames", f"{base}...HEAD"]
     return subprocess.run(diff, cwd=ROOT, check=True, capture_output=True, text=True).stdout.split()
 
 

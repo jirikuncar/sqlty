@@ -4,7 +4,8 @@ on:
   release:
     types: [published]
   workflow_dispatch:
-  # Every input of a wheel or binary but the README, so a release finds main's build of it.
+  # Every input of a wheel or binary, so a release finds main's build of it; the README
+  # too goes into the wheel, but waits for the release's version bump to be built.
   push:
     branches: [main]
     paths:
