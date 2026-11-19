@@ -168,14 +168,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        run: rustup toolchain install && rustup target add wasm32-unknown-unknown wasm32-wasip1
-
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: $/.github/actions/setup
         with:
-          workspaces: rust -> target
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          targets: wasm32-unknown-unknown wasm32-wasip1
 
       - name: Build for wasm32-unknown-unknown
         run: cargo build --manifest-path rust/Cargo.toml --target wasm32-unknown-unknown -p sqlty-sql -p sqlty-python
