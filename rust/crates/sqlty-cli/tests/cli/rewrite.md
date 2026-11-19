@@ -12,11 +12,19 @@ $ sqlty rewrite --diff
 app/users.py:3: [fstring-skipped] f-string with --sql prefix skipped (f-strings cannot be statically rewritten)
 --- app/users.py
 +++ app/users.py
-@@ -1,4 +1,5 @@
+@@ -1,4 +1,13 @@
 -by_email = """--sql
 -select id, email from users where email = %(email)s"""
++import typing
 +from sqlty import SQL
-+by_email = SQL[tuple[int, str]]("""--sql
++
++
++# sqlty: generated
++class ByEmailParams(typing.TypedDict):
++    email: str | None
++
++
++by_email = SQL[tuple[int, str], ByEmailParams]("""--sql
 +select id, email from users where email = %(email)s""")
  dynamic = f"""--sql
  select {column} from users"""
@@ -26,16 +34,17 @@ app/users.py:3: [fstring-skipped] f-string with --sql prefix skipped (f-strings 
 Rewrote app/users.py
 
 $ sqlty check
-app/users.py:4: [fstring-skipped] f-string with --sql prefix skipped (f-strings cannot be statically rewritten)
+app/users.py:12: [fstring-skipped] f-string with --sql prefix skipped (f-strings cannot be statically rewritten)
 Found 1 warning(s)
 
 $ sqlty format --diff app
 ? 1
 --- app/users.py
 +++ app/users.py
-@@ -1,5 +1,9 @@
- from sqlty import SQL
- by_email = SQL[tuple[int, str]]("""--sql
+@@ -8,6 +8,10 @@
+[..]
+[..]
+ by_email = SQL[tuple[int, str], ByEmailParams]("""--sql
 -select id, email from users where email = %(email)s""")
 +select
 +    id,
@@ -50,9 +59,17 @@ $ sqlty strip --diff
 ? 1
 --- app/users.py
 +++ app/users.py
-@@ -1,9 +1,8 @@
+@@ -1,17 +1,8 @@
+-import typing
 -from sqlty import SQL
--by_email = SQL[tuple[int, str]]("""--sql
+-
+-
+-# sqlty: generated
+-class ByEmailParams(typing.TypedDict):
+-    email: str | None
+-
+-
+-by_email = SQL[tuple[int, str], ByEmailParams]("""--sql
 +by_email = """--sql
  select
      id,
@@ -74,7 +91,7 @@ app/users.py:7: [fstring-skipped] f-string with --sql prefix skipped (f-strings 
 format-command /nonexistent/fmt failed on app/users.py: No such file or directory (os error 2)
 
 $ sqlty rewrite --check
-app/users.py:8: [fstring-skipped] f-string with --sql prefix skipped (f-strings cannot be statically rewritten)
+app/users.py:16: [fstring-skipped] f-string with --sql prefix skipped (f-strings cannot be statically rewritten)
 All files up to date
 
 ```

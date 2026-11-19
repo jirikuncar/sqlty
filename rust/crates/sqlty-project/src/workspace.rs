@@ -1236,7 +1236,7 @@ mod tests {
             (
                 "/repo/pyproject.toml",
                 "[tool.sqlty]\nschema = \"schema.sql\"\nuntyped = \"sentinel\"\n\
-                 json-types = \"typing.TypedDict\"\nparam-types = true\ndriver = \"psycopg\"\n\
+                 json-types = \"typing.TypedDict\"\ndriver = \"psycopg\"\n\
                  types = { \"users.id\" = \"app.UserId\" }\nrules = { sqruff = \"warn\" }\n",
             ),
             (
@@ -1253,6 +1253,19 @@ mod tests {
             .check(path, "q = \"--sql\\nselect distinct(id) from users\"\n")
             .expect("checks");
         assert_eq!(rules(&found), ["stale-rewrite", "sqruff"]);
+    }
+
+    #[test]
+    fn writes_no_parameter_types_when_turned_off() {
+        let mut workspace = opened(&[(
+            "/repo/pyproject.toml",
+            "[tool.sqlty]\nparam-types = false\n",
+        )]);
+        let text = "q = \"--sql\\nSELECT 1::INTEGER WHERE 1 = %s\"\n";
+        let rewritten = workspace
+            .rewrite(Path::new("/repo/q.py"), text)
+            .expect("rewrites");
+        assert!(rewritten.contains("SQL[tuple[int]]("), "{rewritten}");
     }
 
     #[test]
