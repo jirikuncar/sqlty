@@ -4,6 +4,7 @@
 # cargo-nextest; the `pg` tests run when SQLTY_PG_DSN is set.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+export RUSTUP_TOOLCHAIN=${RUSTUP_TOOLCHAIN:-nightly}
 
 export COVERAGE_FILE=$PWD/.coverage
 uv run --no-sync coverage erase

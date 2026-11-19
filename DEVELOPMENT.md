@@ -7,7 +7,7 @@ live in [AGENTS.md](AGENTS.md); review rules in [REVIEW.md](REVIEW.md).
 
 - Python 3.14+
 - [uv](https://docs.astral.sh/uv/)
-- [Rust toolchain](https://rustup.rs/) 1.99+ (builds the engine, `sqlty._core`, and runs the cargo hooks)
+- [`rustup`](https://rustup.rs/): `rust-toolchain.toml` pins the Rust version (builds the engine, `sqlty._core`, and runs the cargo hooks)
 
 ## Setup
 
@@ -52,13 +52,13 @@ parallel. CI's Lint job runs the commit hooks on all files.
 | Layer | Location | What it tests |
 |-------|----------|---------------|
 | **Unit** | `tests/test_*.py` | Invariants over the mdtest corpus, bindings, fuzzing, docs |
-| **mdtest** | `tests/mdtest/`, `docs/`, `src/sqlty/rules/`, `README.md` | Type inference, rewrite, strip, lint ([format](AGENTS.md#markdown-tests-mdtest)) |
+| **mdtest** | `tests/mdtest/`, `docs/`, `README.md` | Type inference, rewrite, strip, lint ([format](AGENTS.md#markdown-tests-mdtest)) |
 | **E2E** | `tests/e2e/` | CLI in a subprocess, with `inline-snapshot` |
 | **Rust** | `rust/crates/*/` | Engine, CLI (`trycmd`), language server |
 
 ```bash
 uv run pytest                                          # all tests except timing
-uv run pytest tests/mdtest docs src/sqlty/rules README.md  # mdtests
+uv run pytest tests/mdtest docs README.md               # mdtests
 uv run pytest tests/ --ignore=tests/e2e --ignore=tests/mdtest  # unit tests
 uv run pytest tests/e2e/ -v                            # end-to-end tests
 uv run pytest tests/e2e/ --inline-snapshot=update      # accept new e2e output
@@ -195,8 +195,6 @@ make bench-baseline   # re-record the baseline after an intended change
 make bench-project    # full-size synthetic project (10k files): CLI wall time and peak RSS
 make bench-rust       # Criterion benches in rust/crates/sqlty-bench; extra args via ARGS=
 make bench-codspeed   # benchmarks/test_benchmarks.py, as CI's CodSpeed job measures them
-make bench            # sqlty.core micro-benchmarks
-make bench-bridge     # a check per keystroke through sqlty._lsp_bridge
 ```
 
 - `bench-ci` (`benchmarks/bench_project.py`, with `tests/test_performance.py`)
@@ -210,7 +208,8 @@ make bench-bridge     # a check per keystroke through sqlty._lsp_bridge
   compare a branch (`ARGS="--save-baseline main"`, then `ARGS="--baseline main"`).
 - `bench-codspeed` runs each query kind of `synth.KINDS` through
   `analyze_select`/`analyze_params`, the schema load, `rewrite_source`,
-  `check_source`, `complete_source` at 50, 540 and 5000 tables and `query_at`.
+  `check_source`, `complete_source` at 50, 540 and 5000 tables and in a module
+  of 4000 queries.
   CI counts their instructions on every commit and reports the change on the
   pull request.
 
@@ -249,21 +248,16 @@ rust/
     ├── sqlty-project/   # A project read from disk: settings, helpers, checks
     ├── sqlty-cli/       # The sqlty commands; main.rs is the standalone sqlty executable
     ├── sqlty-lsp/       # The language server of sqlty server
-    ├── sqlty-wasm/      # JSON in, JSON out: the docs playground (make playground)
+    ├── sqlty-wasm/      # JSON in, JSON out: @sqlty/wasm (npm/wasm) and the docs playground (make wasm)
     ├── sqlty-ext/       # PyO3 module sqlty._core; server.rs runs sqlty-lsp
     └── sqlty-bench/     # Criterion benchmarks (make bench-rust)
 editors/vscode/          # VS Code client of sqlty server; see its README
-proofs/                  # Lean 4 model of SqlType::python, with proofs; see its README
 tests/
 ├── _mdtest/             # mdtest plugin: parser, runner over sqlty.core, --update-mdtest
 ├── mdtest/              # The specification, as Markdown tests
 ├── e2e/                 # CLI end-to-end tests and their fixtures
 └── type_oracle/         # Python row-type reader, the oracle for the Rust one
 ```
-
-`proofs/SqlTy/Table.lean` is generated from `scalar_python`: after changing the scalar
-mapping, run `SQLTY_UPDATE_PROOFS=1 cargo test -p sqlty-sql lean_table` and `lake build`
-in `proofs/`.
 
 ### Magic codec internals
 

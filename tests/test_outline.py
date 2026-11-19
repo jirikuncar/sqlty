@@ -1,14 +1,13 @@
-"""The outline type extraction reads, built in Rust (``sqlty._core.module_outline``), against ``ast``.
+"""The outline the type oracle reads (``tests.type_oracle.outline``), against Rust's row types.
 
-Each case and generated module must dump the same as ``ast.parse`` cut by ``_outline``,
-positions included, with its classes in ``ast.walk`` order. Raise the number of generated
-examples with ``SQLTY_FUZZ_EXAMPLES``.
+Each case and generated module must give the same row types in Rust as in the oracle, and
+the outline must keep every class ``ast.parse`` finds, in ``ast.walk`` order. Raise the
+number of generated examples with ``SQLTY_FUZZ_EXAMPLES``.
 """
 
 from __future__ import annotations
 
 import ast
-import copy
 import os
 import pathlib
 import sys
@@ -19,52 +18,22 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 import sqlty
-from sqlty._core import module_outline
+from sqlty._core import type_definitions
 from sqlty._source import ParsedSource
+from tests.test_rust_types import VERSION, python_definitions
 from tests.type_oracle import extract_type_definitions
 from tests.type_oracle.info import TypeInfo
+from tests.type_oracle.outline import outline
 
 EXAMPLES = int(os.environ.get("SQLTY_FUZZ_EXAMPLES", "300"))
 
 
 def same(text: str) -> None:
-    tree = ast.parse(text)
-    built = module_outline(text)
-    assert built is not None, text
-    module, classes = built
-    expected = ast.dump(_outline(tree), include_attributes=True, indent=1)
-    assert ast.dump(module, include_attributes=True, indent=1) == expected, text
-    walked = [node.lineno for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
-    assert [c.lineno for c in classes] == walked
-
-
-def _outline(tree: ast.Module) -> ast.Module:
-    """``tree`` with function bodies cut to the statements holding a class."""
-    tree = copy.deepcopy(tree)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            node.body = _cut(node.body)
-    return tree
-
-
-def _holds_class(node: ast.AST) -> bool:
-    return any(isinstance(n, ast.ClassDef) for n in ast.walk(node))
-
-
-def _cut(body: list[ast.stmt]) -> list[ast.stmt]:
-    kept = [stmt for stmt in body if _holds_class(stmt)]
-    for stmt in kept:
-        if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-            continue
-        for name in ("body", "orelse", "finalbody"):
-            if isinstance(inner := getattr(stmt, name, None), list):
-                setattr(stmt, name, _cut(inner))
-        for name in ("handlers", "cases"):
-            if isinstance(inner := getattr(stmt, name, None), list):
-                setattr(stmt, name, [part for part in inner if _holds_class(part)])
-                for part in getattr(stmt, name):
-                    part.body = _cut(part.body)
-    return kept
+    walked = [node.lineno for node in ast.walk(ast.parse(text)) if isinstance(node, ast.ClassDef)]
+    found = outline(ParsedSource(text))
+    assert found is not None, text
+    assert [c.lineno for c in found[1]] == walked, text
+    assert type_definitions(text, "m", VERSION) == python_definitions(text, "m"), text
 
 
 def types(text: str) -> dict[str, object]:
@@ -174,7 +143,7 @@ def test_syntax_new_in_315(text: str) -> None:
     else:
         with pytest.raises(SyntaxError):
             ast.parse(text)
-        assert module_outline(text) is None
+        assert outline(ParsedSource(text)) is None
 
 
 DECLINED = {
@@ -190,8 +159,9 @@ DECLINED = {
 @pytest.mark.parametrize("text", DECLINED.values(), ids=DECLINED.keys())
 def test_declined_files_have_no_types(text: str) -> None:
     """Where Rust declines a file ``ast`` reads, there is no fallback: it has no types."""
-    assert module_outline(text) is None
+    assert outline(ParsedSource(text)) is None
     assert types(text) == {}
+    assert type_definitions(text, "m", VERSION) is None
 
 
 def test_own_sources() -> None:

@@ -23,7 +23,7 @@ pub(crate) fn diagnostic(diagnostic: &Diagnostic, index: &LineIndex<'_>) -> lsp_
             Severity::Warning => DiagnosticSeverity::WARNING,
         }),
         code: Some(NumberOrString::String(diagnostic.rule.clone())),
-        code_description: Uri::from_str(&format!("{RULES}#{}", diagnostic.rule))
+        code_description: Uri::from_str(&format!("{RULES}{}/", diagnostic.rule))
             .ok()
             .map(|href| CodeDescription { href }),
         source: Some(

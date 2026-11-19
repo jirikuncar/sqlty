@@ -95,6 +95,12 @@ fn outside_a_query_nothing_completes() {
 }
 
 #[test]
+fn the_dialect_is_postgres_by_default() {
+    let answer = ask(&json!({"op": "analyze", "source": "q = \"--sql\\nSELECT 1::text AS n\""}));
+    assert_eq!(answer["queries"][0]["row_type"], "tuple[str]");
+}
+
+#[test]
 fn an_unknown_dialect_is_an_error() {
     let answer = ask(&json!({"op": "analyze", "source": "", "dialect": "postgress"}));
     assert!(answer["error"].as_str().unwrap().contains("postgress"));
@@ -155,7 +161,7 @@ fn config_errors_are_reported_as_sqlty_check_reports_them() {
         ("[rules]\nselect-star = \"loud\"", "loud"),
         (
             "schema = \"schema.sql\"",
-            "the playground reads only dialect, driver, import-style, max-query-variants, param-types, preview, rules, types, not 'schema'",
+            "the WebAssembly engine reads only dialect, driver, import-style, max-query-variants, param-types, preview, rules, types, not 'schema'",
         ),
         ("import-style = \"from x\"", "Unsupported import-style"),
         ("param-types = 1", "param-types must be true or false"),

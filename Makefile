@@ -52,7 +52,7 @@ test-unit:  ## Unit tests only (no e2e, no mdtest)
 
 .PHONY: test-mdtest
 test-mdtest:  ## mdtests and docs tests
-	uv run pytest tests/mdtest/ docs/ src/sqlty/rules/ README.md -v
+	uv run pytest tests/mdtest/ docs/ README.md -v
 
 .PHONY: test-e2e
 test-e2e:  ## End-to-end tests only
@@ -68,13 +68,9 @@ test-coverage:  ## Every Python and Rust test with coverage and its gates; needs
 
 .PHONY: update-mdtest
 update-mdtest:  ## Update mdtest assertions with actual values
-	uv run pytest tests/mdtest/ docs/ src/sqlty/rules/ README.md tests/test_docs.py --update-mdtest -v
+	uv run pytest tests/mdtest/ docs/ README.md tests/test_docs.py --update-mdtest -v
 
 # --- Benchmarks ---
-
-.PHONY: bench
-bench:  ## sqlty.core benchmarks
-	uv run python benchmarks/bench_core.py
 
 .PHONY: bench-project
 bench-project:  ## Full-size synthetic project (10k files); needs a release build
@@ -87,10 +83,6 @@ bench-ci:  ## CI-size project; exits 1 when over the budget in benchmarks/baseli
 .PHONY: bench-baseline
 bench-baseline:  ## Re-record the CI-size baseline for this platform
 	uv run python benchmarks/bench_project.py --size ci --repeats 7 --update-baseline
-
-.PHONY: bench-bridge
-bench-bridge:  ## A check per keystroke through sqlty._lsp_bridge; needs a release build
-	uv run python benchmarks/bench_lsp_bridge.py
 
 .PHONY: bench-codspeed
 bench-codspeed:  ## The benchmarks CodSpeed measures in CI, timed locally; needs a release build
@@ -109,10 +101,14 @@ docs: playground  ## Build the docs site, strict via zensical.toml (output: site
 	python3 scripts/structured_data.py site
 	python3 scripts/offline.py site
 
-.PHONY: playground
-playground:  ## The engine as WebAssembly, and Monaco and the fonts, for the docs playground (needs the wasm32-unknown-unknown target)
+.PHONY: wasm
+wasm:  ## The engine as WebAssembly, in the @sqlty/wasm package (needs the wasm32-unknown-unknown target)
 	cargo build --manifest-path rust/Cargo.toml --profile wasm --target wasm32-unknown-unknown -p sqlty-wasm
-	cp rust/target/wasm32-unknown-unknown/wasm/sqlty_wasm.wasm docs/assets/playground/
+	cp rust/target/wasm32-unknown-unknown/wasm/sqlty_wasm.wasm npm/wasm/
+
+.PHONY: playground
+playground: wasm  ## The engine as WebAssembly, and Monaco and the fonts, for the docs playground
+	cp npm/wasm/sqlty_wasm.wasm npm/wasm/engine.js docs/assets/playground/
 	python3 scripts/generate_playground_examples.py
 	python3 scripts/vendor_assets.py
 
