@@ -545,13 +545,6 @@ fn python_types() -> Vec<&'static str> {
     analyzer::python_types().into_iter().collect()
 }
 
-/// Every dialect name the other functions accept (besides the aliases `postgresql` and
-/// `tsql`).
-#[pyfunction]
-fn dialect_names() -> Vec<&'static str> {
-    sqlty_sql::Dialect::NAMES.to_vec()
-}
-
 /// The rules that judge the names a query uses.
 #[pyfunction]
 fn name_rules() -> Vec<&'static str> {
@@ -2117,7 +2110,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(analyze_params, m)?)?;
     m.add_function(wrap_pyfunction!(name_rules, m)?)?;
     m.add_function(wrap_pyfunction!(rules, m)?)?;
-    m.add_function(wrap_pyfunction!(dialect_names, m)?)?;
     m.add_function(wrap_pyfunction!(python_types, m)?)?;
     m.add_function(wrap_pyfunction!(schema_skipped_objects, m)?)?;
     m.add_function(wrap_pyfunction!(checks_names, m)?)?;

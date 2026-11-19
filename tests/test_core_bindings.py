@@ -11,6 +11,14 @@ UNPARSABLE = "x = (\n"
 QUERY = 'q = "--sql\\nSELECT 1"\n'
 
 
+@pytest.mark.parametrize(
+    ("dialect", "checks"),
+    [("postgres", True), ("SQLite", True), ("duckdb", False)],
+)
+def test_checks_names(dialect: str, checks: bool) -> None:
+    assert _core.checks_names(dialect) is checks
+
+
 def test_schema_with_a_database_without_one() -> None:
     schema = _core.load_schema("CREATE TABLE t (a INT);", databases=[("other", None)])
     assert (schema.dialect, schema.absent) == ("postgres", False)
