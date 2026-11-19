@@ -121,9 +121,13 @@ def test_generated_expressions(source: str) -> None:
 
 
 def test_expressions_of_the_package() -> None:
-    """Every expression of sqlty's own source, as written and as unparsed."""
+    """Every expression of sqlty's own source and scripts, as written and as unparsed."""
     checked = 0
-    for path in sorted((ROOT / "src" / "sqlty").rglob("*.py")):
+    for path in sorted(
+        path
+        for folder in ("src/sqlty", "scripts", "benchmarks")
+        for path in (ROOT / folder).rglob("*.py")
+    ):
         if path.name == "_stdlib.py":
             continue
         text = path.read_text()
@@ -134,14 +138,17 @@ def test_expressions_of_the_package() -> None:
                 written = segment(lines, node)
                 for source in (f"({written}\n)", expected):
                     try:  # the text of an f-string is not an expression
-                        if ast.unparse(ast.parse(source, mode="eval").body) != expected:
+                        with warnings.catch_warnings():  # a regex unparsed out of its raw string
+                            warnings.simplefilter("ignore", SyntaxWarning)
+                            tree = ast.parse(source, mode="eval")
+                        if ast.unparse(tree.body) != expected:
                             continue
                     except SyntaxError:
                         continue
                     if (found := unparse_expression(source)) is not None:
                         assert found == expected, source
                         checked += 1
-    assert checked > 20_000
+    assert checked > 20_000, checked
 
 
 def segment(lines: list[bytes], node: ast.expr) -> str:
