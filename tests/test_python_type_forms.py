@@ -58,6 +58,7 @@ SCALARS = (
     "JSONB",
     "INET",
     "CIDR",
+    "RECORD",
 )
 
 # fmt: off
@@ -93,6 +94,7 @@ def test_nested_types_are_well_formed(data: st.DataObject) -> None:
         assert _well_formed(python_type), f"{dialect}: {spelling} is {python_type}"
 
 
+@cache
 def _types(dialect: str) -> st.SearchStrategy[str]:
     scalar = st.sampled_from(_scalars(dialect))
     if dialect == "postgres":
