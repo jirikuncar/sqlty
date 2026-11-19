@@ -5,6 +5,7 @@ cover the baselines (git revisions, snapshots, schema files), worktree cleanup,
 directions, paths and exit codes."""
 
 import json
+import os
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -483,15 +484,16 @@ def test_a_snapshot_that_is_not_json_is_an_error(cli: Cli, tmp_path: Path) -> No
     assert result.stderr.startswith("sqlty: error: broken.json is not a sqlty snapshot: EOF")
 
 
-def test_runs_give_the_same_findings(cli: Cli, repo: Path) -> None:
+def test_threads_give_the_same_findings(cli: Cli, repo: Path) -> None:
     for i in range(4):
         (repo / "app" / f"m{i}.py").write_text(OLD_CODE + NEW_CODE)
 
-    def findings() -> list[str]:
-        return lines(cli(["breaking", "--against", "HEAD~1"], {"cwd": repo}))
+    def findings(threads: str) -> list[str]:
+        env = {**os.environ, "RAYON_NUM_THREADS": threads}
+        return lines(cli(["breaking", "--against", "HEAD~1"], {"cwd": repo, "env": env}))
 
-    assert findings() == findings()
-    assert findings()[-1] == "Found 6 breaking change(s)"
+    assert findings("1") == findings("3")
+    assert findings("1")[-1] == "Found 6 breaking change(s)"
 
 
 def test_query_files_are_compared_in_both_directions(cli: Cli, repo: Path) -> None:

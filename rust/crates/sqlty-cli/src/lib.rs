@@ -288,7 +288,7 @@ enum OutputFormat {
 
 /// `check --show-settings`: what `path` is checked with, as TOML.
 fn show_settings(path: &Path, settings: &FileSettings) -> String {
-    let quote = |text: &str| Json::from(text).dumps();
+    let quote = |text: &str| toml::Value::String(text.to_string()).to_string();
     let list = |items: Vec<String>| format!("[{}]", items.join(", "));
     let table = |pairs: Vec<(&String, &String)>| {
         let pairs: Vec<String> = pairs

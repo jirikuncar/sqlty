@@ -23,6 +23,12 @@ pub(crate) fn cli(py: Python<'_>, args: Vec<OsString>) -> PyResult<i32> {
         error: None,
     };
     let code = py.detach(|| sqlty_cli::run(args, &mut host));
+    // `sqlty._cli` ends the process with `os._exit`, before the profile would be written.
+    #[cfg(coverage_nightly)]
+    // SAFETY: the profiling runtime of `-Cinstrument-coverage` defines it.
+    unsafe {
+        __llvm_profile_write_file();
+    }
     match host.error {
         Some(error) => Err(error),
         None => Ok(code),
@@ -39,6 +45,11 @@ pub(crate) fn cli_reference() -> Vec<Reference> {
         .into_iter()
         .map(|command| (command.name, command.usage, command.options))
         .collect()
+}
+
+#[cfg(coverage_nightly)]
+unsafe extern "C" {
+    fn __llvm_profile_write_file() -> i32;
 }
 
 struct PyHost {

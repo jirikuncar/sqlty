@@ -250,6 +250,19 @@ def test_the_baseline_is_checked_backward_once(repo: Path) -> None:
     ]
 
 
+def test_a_workspace_through_a_symlink(repo: Path, tmp_path: Path) -> None:
+    """Backward findings are keyed by the paths the editor names, not their targets."""
+    link = tmp_path / "link"
+    link.symlink_to(repo / "app")
+    server = Server(repo)
+    try:
+        server.start(link, {"breaking": {"against": "HEAD"}})
+        found = sourced(server.check(link / "old.py", OLD_CODE), "backward")
+    finally:
+        assert server.stop() == 0
+    assert [d["code"] for d in found] == ["unknown-column"]
+
+
 def test_a_baseline_file_deleted_from_the_workspace(repo: Path) -> None:
     """Its backward findings stand at the top of its buffer, as for an edited one."""
     (repo / "app" / "old.py").unlink()

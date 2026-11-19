@@ -735,12 +735,18 @@ impl Worktree {
             ],
         )?;
         static ADDED: AtomicUsize = AtomicUsize::new(0);
-        let directory = std::env::temp_dir().join(format!(
-            "sqlty-breaking-{}-{}",
-            std::process::id(),
-            ADDED.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+        let directory = loop {
+            let directory = std::env::temp_dir().join(format!(
+                "sqlty-breaking-{}-{}",
+                std::process::id(),
+                ADDED.fetch_add(1, Ordering::Relaxed)
+            ));
+            match std::fs::create_dir(&directory) {
+                Ok(()) => break directory,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error.to_string()),
+            }
+        };
         // Named like the repository, so its files have the module names they have there.
         let name = root.file_name().unwrap_or_default();
         let mut worktree = Self {

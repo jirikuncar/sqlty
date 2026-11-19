@@ -147,10 +147,11 @@ impl Baseline {
         version: Version,
         extra_roots: &[PathBuf],
     ) -> Result<Self, String> {
-        let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-        let repository = match breaking::repository(&root) {
+        // Findings are keyed by the editor's paths, which may run through a symlink.
+        let canonical = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        let repository = match breaking::repository(&canonical) {
             Ok(repository) => repository,
-            Err(_) if root.join(against).exists() => root.clone(),
+            Err(_) if canonical.join(against).exists() => canonical.clone(),
             Err(_) => {
                 return Err(format!(
                     "sqlty.breaking.against: {against} does not exist, and {} is in no git \
@@ -159,16 +160,22 @@ impl Baseline {
                 ))
             }
         };
-        let prefix = match root.strip_prefix(&repository) {
+        let prefix = match canonical.strip_prefix(&repository) {
             Ok(prefix) if !prefix.as_os_str().is_empty() => prefix.to_path_buf(),
             _ => PathBuf::from("."),
         };
         let paths = [prefix.clone()];
-        let baselines =
-            breaking::baselines(against, &root, &repository, &paths, version, extra_roots)
-                .map_err(|error| format!("sqlty.breaking.against: {error}"))?;
+        let baselines = breaking::baselines(
+            against,
+            &canonical,
+            &repository,
+            &paths,
+            version,
+            extra_roots,
+        )
+        .map_err(|error| format!("sqlty.breaking.against: {error}"))?;
         Ok(Self {
-            root,
+            root: root.to_path_buf(),
             repository,
             prefix,
             direction,

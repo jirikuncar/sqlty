@@ -336,6 +336,9 @@ def skills() -> list[tuple[str, str]]: ...
 def cli(args: list[str]) -> int:
     """Run ``sqlty ARGS...`` (``args[0]`` is the program); the exit code."""
 
+def cli_reference() -> list[tuple[str, str, list[tuple[str, str]]]]:
+    """``(name, usage, [(option, help)])`` of the root and each command of ``sqlty``."""
+
 def schema_skipped_tables(schema_sql: str | Schema, *, dialect: str = "postgres") -> list[str]: ...
 def schema_skipped_objects(
     schema_sql: str | Schema, *, dialect: str = "postgres"

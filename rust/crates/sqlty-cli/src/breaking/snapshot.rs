@@ -28,6 +28,8 @@ pub struct Snapshot {
     schemas: Vec<(Arc<str>, &'static str, super::Types)>,
     directories: HashMap<String, Option<usize>>,
     files: Vec<File>,
+    /// The index in `files` of each relative path.
+    paths: HashMap<PathBuf, usize>,
     loaded: HashMap<usize, Schema>,
     index: Option<Arc<HelperIndex>>,
     version: Version,
@@ -185,6 +187,7 @@ impl Snapshot {
             schemas: Vec::new(),
             directories: HashMap::new(),
             files: Vec::new(),
+            paths: HashMap::new(),
             loaded: HashMap::new(),
             index: None,
             version,
@@ -287,6 +290,9 @@ impl Snapshot {
                 .flatten()
                 .filter_map(|name| name.as_str().map(str::to_string))
                 .collect();
+            snapshot
+                .paths
+                .insert(relative.clone(), snapshot.files.len());
             snapshot.files.push(File {
                 relative,
                 text: Arc::from(text_of(file, "source").unwrap_or("")),
@@ -310,7 +316,7 @@ impl Snapshot {
 
     /// The schema index of the file `relative`, or of its nearest directory.
     fn schema_index(&self, relative: &Path) -> Option<usize> {
-        if let Some(file) = self.files.iter().find(|file| file.relative == relative) {
+        if let Some(file) = self.paths.get(relative).map(|&at| &self.files[at]) {
             let sql = file.settings.schema_sql.as_ref()?;
             return self
                 .schemas

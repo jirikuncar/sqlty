@@ -26,4 +26,20 @@ No Python files found
 $ sqlty rewrite empty
 No Python files found
 
+$ sqlty check --show-files . generated
+app/q.py
+generated/q.py
+
+$ sqlty check --show-settings --ignore unknown-column app
+# app/q.py
+...
+dialect = "postgres"
+schema = true
+untyped = "skip"
+param-types = true
+rules = { "unknown-column" = "ignore" }
+...
+
+$ sqlty check --show-settings empty
+
 ```
