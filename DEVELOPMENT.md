@@ -227,7 +227,7 @@ src/sqlty/
 ├── _core.pyi            # Stub for sqlty._core (rust/crates/sqlty-ext/src/lib.rs)
 ├── _cli.py              # CLI parser; runs complete, breaking and server, the rest in Rust
 ├── _config.py           # Configuration from sqlty.toml, pyproject.toml or Cargo.toml
-├── _check.py            # Calls the Rust checks for check_source, check and breaking
+├── _check.py            # Calls the Rust checks for check_source and breaking
 ├── _lint.py             # Lint rules: severity, diagnostics, RuleConfig
 ├── _breaking.py         # sqlty breaking; _snapshot.py writes and reads its snapshots
 ├── _lsp_bridge.py       # Language server workspace with a breaking baseline
