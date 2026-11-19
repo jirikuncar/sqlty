@@ -354,7 +354,7 @@ impl Builder {
         }
     }
 
-    /// `_definition`: the helper `name` of module `parts` defines, following the names it
+    /// The helper `name` of module `parts` defines, following the names it
     /// re-exports.
     fn definition(
         &self,
@@ -408,7 +408,7 @@ impl Builder {
         )
     }
 
-    /// `_module_source`: module `parts` read from the first of `roots` holding it.
+    /// Module `parts` read from the first of `roots` holding it.
     fn module_source(&self, parts: &[&str], roots: Roots<'_>) -> Option<Arc<Source>> {
         let module = parts.join(".");
         let (last, package) = parts.split_last()?;

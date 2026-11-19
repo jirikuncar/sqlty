@@ -171,7 +171,7 @@ impl Source {
         aliases
     }
 
-    /// `_typing_name`: the `typing` member `expr` names, if any.
+    /// The `typing` member `expr` names, if any.
     pub fn typing_name<'e>(&'e self, expr: &'e Expr) -> Option<&'e str> {
         match expr {
             Expr::Name(name) => self.aliases.get(name.id.as_str()).map(String::as_str),

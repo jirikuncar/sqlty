@@ -76,7 +76,7 @@ fn dict<K: PartialEq, V>(pairs: impl IntoIterator<Item = (K, V)>) -> Vec<(K, V)>
     found
 }
 
-/// `_fits`: whether a type checker takes a value of type `actual` for `expected`.
+/// Whether a type checker takes a value of type `actual` for `expected`.
 fn fits(actual: Option<&str>, expected: Option<&str>) -> bool {
     let (Some(actual), Some(expected)) = (actual, expected) else {
         return true;
@@ -93,7 +93,7 @@ fn fits(actual: Option<&str>, expected: Option<&str>) -> bool {
     )
 }
 
-/// `_merge_variants`: the diagnostics of variants reported at their call. One every
+/// The diagnostics of variants reported at their call. One every
 /// variant of a call has is reported once; any other names the lines that select the
 /// first variant having it.
 fn merge_variants(diagnostics: Vec<Reported>, calls: &[Call<'_>]) -> Vec<Reported> {
@@ -164,7 +164,7 @@ pub(crate) fn may_wrap(text: &str, import_line: &str) -> bool {
     text.contains(name)
 }
 
-/// `_names_params`: whether `text` subscripts `wrapper` with two arguments.
+/// Whether `text` subscripts `wrapper` with two arguments.
 fn names_params(text: &str, wrapper: &str) -> bool {
     if !text.contains(&format!("{wrapper}[")) {
         return false;
@@ -247,7 +247,7 @@ impl<'a> DeclaredCalls<'a, '_> {
     }
 }
 
-/// `_declared_params`: each `SQL[R, P]("...")` call, in source order.
+/// Each `SQL[R, P]("...")` call, in source order.
 fn declared_params<'a>(source: &'a Source, wrapper: &str, import_line: &str) -> Vec<Declared<'a>> {
     if !may_wrap(&source.text, import_line) || !names_params(&source.text, wrapper) {
         return Vec::new();
@@ -589,7 +589,7 @@ impl<'a> Module<'a, '_> {
         }
     }
 
-    /// `_param_diagnostics`: the arguments a call passes for the placeholders of its query.
+    /// The arguments a call passes for the placeholders of its query.
     fn param_diagnostics(
         &self,
         call: &Call<'_>,
@@ -765,7 +765,7 @@ impl<'a> Module<'a, '_> {
         }
     }
 
-    /// `_declared_params_diagnostics`: why the parameter type `declared` doesn't fit
+    /// Why the parameter type `declared` doesn't fit
     /// `params`: shape, count, keys, then item types.
     fn declared_params_diagnostics(
         &self,
@@ -977,7 +977,7 @@ impl<'a> Module<'a, '_> {
         }
     }
 
-    /// `_annotations_of`: `P` of a `SQL[R, P]` in `source`, as the types each parameter
+    /// `P` of a `SQL[R, P]` in `source`, as the types each parameter
     /// key takes.
     fn annotations_of(&self, declared: &Expr, source: &Source) -> Option<Annotations> {
         let types = |annotation: &Expr| -> Vec<Option<String>> {
@@ -1024,7 +1024,7 @@ impl<'a> Module<'a, '_> {
         })
     }
 
-    /// `_bound_params`: the arguments a `SQL[R](...)` query is bound to, by the span of `R`.
+    /// The arguments a `SQL[R](...)` query is bound to, by the span of `R`.
     fn bound_params(&self) -> HashMap<(usize, usize), Vec<Param>> {
         let mut bindings: Vec<((usize, usize), Vec<Param>)> = self
             .driver_calls

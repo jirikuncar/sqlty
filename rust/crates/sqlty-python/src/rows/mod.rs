@@ -340,7 +340,7 @@ impl<'a> Check<'a> {
     }
 }
 
-/// `_bind`: `query` with the placeholders bound to values that are not `None` respelled
+/// `query` with the placeholders bound to values that are not `None` respelled
 /// as ones the engine reads as never NULL: `$0`, or `?0` outside PostgreSQL.
 pub(crate) fn bind(query: Option<&str>, params: Option<&[Param]>, dialect: &str) -> Option<String> {
     static PLACEHOLDER: LazyLock<Regex> =
@@ -382,7 +382,7 @@ pub(crate) fn bind(query: Option<&str>, params: Option<&[Param]>, dialect: &str)
     Some(bound.into_owned())
 }
 
-/// `_alias_target`: what the alias `name` stands for, through aliases of aliases.
+/// What the alias `name` stands for, through aliases of aliases.
 pub(crate) fn alias_target<'a>(
     name: &str,
     aliases: &HashMap<&str, &'a Expr>,
@@ -519,7 +519,7 @@ fn check_aliases(ctx: &mut Check<'_>, aliased: &[(RowQuery, &Expr)]) {
     }
 }
 
-/// `_nullability_diagnostics`: `nullable-mismatch` and `redundant-optional` for one field
+/// `nullable-mismatch` and `redundant-optional` for one field
 /// and its column.
 ///
 /// `label` reads `<field>` or `<row> item <i>`. A column of unknown nullability, or an
@@ -551,7 +551,7 @@ fn nullability_diagnostics(
     Vec::new()
 }
 
-/// `_literal_diagnostics`: `literal-mismatch` and `redundant-literal` for one field and its
+/// `literal-mismatch` and `redundant-literal` for one field and its
 /// column.
 ///
 /// Reported only when the annotation is made of `Literal` members (and `None`) and the
@@ -598,7 +598,7 @@ fn literal_diagnostics(
     Vec::new()
 }
 
-/// `_field_diagnostics`: nullability and value-set diagnostics for one field and its column.
+/// Nullability and value-set diagnostics for one field and its column.
 fn field_diagnostics(
     label: &str,
     declared: Option<&Ty>,
@@ -611,7 +611,7 @@ fn field_diagnostics(
     found
 }
 
-/// `_json_diagnostics`: `json-shape-mismatch` for one field and a JSON column of known
+/// `json-shape-mismatch` for one field and a JSON column of known
 /// shape.
 fn json_diagnostics(
     label: &str,
@@ -642,7 +642,7 @@ fn json_diagnostics(
     )]
 }
 
-/// `_row_type_of`: the row type an annotation names, through `X | None` and `Optional[X]`.
+/// The row type an annotation names, through `X | None` and `Optional[X]`.
 fn row_type_of<'d>(
     annotation: Option<&Annotation>,
     defs: &'d Dict<Arc<TypeInfo>>,
@@ -697,7 +697,7 @@ struct Structural<'a> {
 }
 
 impl Structural<'_> {
-    /// `_structural_diagnostics`: a user type against the columns of `source` (`query`, or
+    /// A user type against the columns of `source` (`query`, or
     /// a composite type).
     ///
     /// `TypedDict`s, dataclasses and Pydantic models match columns to fields by name, as
@@ -901,7 +901,7 @@ pub(crate) struct RowShape {
     aliases: Arc<Table>,
 }
 
-/// `_row_shape`: what each column of the row type `text` must be; `None` when unchecked.
+/// What each column of the row type `text` must be; `None` when unchecked.
 ///
 /// A scalar type takes one column, `tuple[A, B]` one column per item. Other row types (an
 /// unknown class, `dict`, `tuple[int, ...]`) are not checked.
@@ -969,7 +969,7 @@ pub(crate) fn row_shape(row: &Expr, text: &str, source: &Source) -> Option<RowSh
     })
 }
 
-/// `_value_diagnostics`: a tuple or scalar row type against the query columns.
+/// A tuple or scalar row type against the query columns.
 pub(crate) fn value_diagnostics(
     shape: Option<&RowShape>,
     columns: &[RowColumn],
