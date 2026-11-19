@@ -334,22 +334,22 @@ fn version(host: &mut dyn Host) -> Result<i32, String> {
 
 fn rule(host: &mut dyn Host, name: Option<&str>) -> i32 {
     let Some(name) = name else {
-        let width = Rule::LISTED
+        let width = Rule::ALL
             .iter()
             .map(|rule| rule.name().len())
             .max()
             .unwrap_or(0);
-        for rule in Rule::LISTED {
+        for rule in Rule::ALL {
             let severity = rule.default_severity().as_str();
             host.out(&format!(
                 "{:<width$}  {severity:<5}  {}\n",
                 rule.name(),
-                rule.description()
+                rule.summary()
             ));
         }
         return 0;
     };
-    let page = RULE_PAGES
+    let page = sqlty_rules::PAGES
         .iter()
         .find(|(path, _)| *path == format!("{name}.md"));
     match page.filter(|_| Rule::parse(name).is_some()) {
@@ -961,14 +961,14 @@ fn level(severity: &str) -> &'static str {
 
 /// The rows of `--output-format json` as one SARIF 2.1.0 run.
 fn sarif_log(version: &str, rows: Vec<Json>) -> Json {
-    let rules = Rule::LISTED
+    let rules = Rule::ALL
         .iter()
         .map(|rule| {
             Json::object([
                 ("id", rule.name().into()),
                 (
                     "shortDescription",
-                    Json::object([("text", rule.description().into())]),
+                    Json::object([("text", rule.summary().into())]),
                 ),
                 (
                     "helpUri",
