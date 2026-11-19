@@ -169,8 +169,7 @@ uploads the input when it fails.
 ## Type checking
 
 ```bash
-make typecheck                 # mypy + ty on src and examples
-make typecheck-src             # mypy + ty on src/sqlty (also a prek hook)
+make typecheck                 # mypy + ty on src and examples (prek hooks)
 make typecheck-examples        # mypy + ty on each examples/ dir (runs in CI)
 uv run pytest tests/test_typecheckers.py -v  # mypy, pyright, ty on tests/typechecks/
 ```
