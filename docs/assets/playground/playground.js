@@ -668,15 +668,15 @@ version.replaceChildren(new Option("main", "", false, !running));
 if (running) version.append(new Option(running, running, true, true));
 linked.textContent = fellBack;
 // The releases are listed when the select is first opened: most sessions never ask for one.
-let listed;
+let releases;
 const listReleases = () =>
-  (listed ??= versions()
+  (releases ??= versions()
     .then((found) => {
       const all = found.includes(running) || !running ? found : [running, ...found];
       version.replaceChildren(new Option("main", "", false, !running), ...all.map((name) => new Option(name, name, false, name === running)));
     })
     .catch((error) => {
-      listed = undefined;
+      releases = undefined;
       linked.textContent = `No releases listed: ${error.message}`;
     }));
 version.addEventListener("pointerenter", listReleases);
