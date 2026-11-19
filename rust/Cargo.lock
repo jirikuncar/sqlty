@@ -1778,6 +1778,7 @@ dependencies = [
  "mimalloc",
  "rayon",
  "regex",
+ "serde_json",
  "sqlty-lsp",
  "sqlty-project",
  "sqlty-python",

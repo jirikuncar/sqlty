@@ -5,12 +5,11 @@ use pyo3::create_exception;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
-use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
+use std::path::PathBuf;
 
 use sqlty_project::Disk;
 use sqlty_python::config::{self, Config};
-use sqlty_python::project::{self, Discovery, Files, FindError, Packages};
+use sqlty_python::project::{self, FindError};
 use toml::{Table, Value};
 
 create_exception!(
@@ -98,157 +97,9 @@ fn driver_types(driver: &str, dialect: &str) -> Vec<(String, String)> {
     config::driver_types(driver, dialect)
 }
 
-/// Which files `sqlty check` reads under a directory, as the configuration of each
-/// directory, `--config-file` (`fixed`, its discovery keys), `--isolated` and the exclude
-/// flags pick them; `cwd` is absolute. A configuration that is not TOML excludes nothing.
-///
-/// Raises:
-///     ValueError: a configuration file is invalid
-#[pyclass(frozen, name = "Discovery", module = "sqlty._core")]
-struct PyDiscovery(Discovery);
-
-#[pymethods]
-impl PyDiscovery {
-    #[new]
-    #[pyo3(signature = (cwd, *, isolated, fixed, exclude, extend_exclude, respect_gitignore))]
-    #[expect(
-        clippy::needless_pass_by_value,
-        reason = "PyO3 extracts a PathBuf, not a Path"
-    )]
-    fn new(
-        cwd: PathBuf,
-        isolated: bool,
-        fixed: Option<&Bound<'_, PyDict>>,
-        exclude: Option<Vec<String>>,
-        extend_exclude: Vec<String>,
-        respect_gitignore: Option<bool>,
-    ) -> PyResult<Self> {
-        let mut discovery = Discovery::new(Box::new(Disk), &cwd).extend_exclude(&extend_exclude);
-        if isolated {
-            discovery = discovery.isolated();
-        }
-        if let Some(fixed) = fixed {
-            discovery = discovery.fixed(to_table(fixed)?);
-        }
-        if let Some(exclude) = exclude {
-            discovery = discovery.exclude(&exclude);
-        }
-        if let Some(respect) = respect_gitignore {
-            discovery = discovery.respect_gitignore(respect);
-        }
-        Ok(Self(discovery))
-    }
-
-    /// `(base directory, globs)` pairs excluding entries of `directory`.
-    fn exclusions(&self, py: Python<'_>, directory: &str) -> PyResult<Vec<(PathBuf, Vec<String>)>> {
-        py.detach(|| self.0.exclusions(Path::new(directory)))
-            .map_err(find_error)
-    }
-
-    /// Whether `path`, or a directory holding it up to a glob's base, is excluded.
-    fn is_excluded(&self, py: Python<'_>, path: &str) -> PyResult<bool> {
-        py.detach(|| self.0.is_excluded(Path::new(path)))
-            .map_err(find_error)
-    }
-
-    /// `(database, rules)` of the file at `path` in the project of `table` (its `queries`,
-    /// `databases` and `overrides`), whose paths are relative to `base`.
-    fn route<'py>(
-        &self,
-        py: Python<'py>,
-        table: &Bound<'py, PyDict>,
-        base: &str,
-        path: &str,
-    ) -> PyResult<(Option<String>, Bound<'py, PyDict>)> {
-        let table = to_table(table)?;
-        let found = py.detach(|| self.0.route(&table, Path::new(base), Path::new(path)));
-        Ok((found.database, table_to_py(py, &found.rules)?))
-    }
-
-    /// The `.py` files under `root`, sorted, as joined to `root`.
-    fn walk(&self, py: Python<'_>, root: &str) -> PyResult<Vec<PathBuf>> {
-        py.detach(|| self.0.walk(Path::new(root)))
-            .map_err(find_error)
-    }
-}
-
-/// The files a `schema` or `queries` key names relative to `base`, and its globs that
-/// match none; see `sqlty_python::project::schema_files`.
-#[pyfunction]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "PyO3 extracts a Vec, not a slice"
-)]
-fn schema_files(
-    py: Python<'_>,
-    entries: Vec<String>,
-    base: &str,
-) -> PyResult<(Vec<PathBuf>, Vec<String>)> {
-    py.detach(|| project::schema_files(&entries, Path::new(base), &Disk))
-        .map_err(find_error)
-}
-
-/// Whether `queries`, relative to `base`, names the `.sql` file at `path`: as the file, a
-/// directory holding it, or a glob.
-#[pyfunction]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "PyO3 extracts a Vec, not a slice"
-)]
-fn names_query_file(path: &str, base: &str, queries: Vec<String>) -> bool {
-    let path = Path::new(path);
-    let (resolved, base) = (Disk.canonical(path), Disk.canonical(Path::new(base)));
-    project::names_query_file(path, &resolved, &base, &queries)
-}
-
-/// The packages of the disk, each directory looked at once a process.
-static PACKAGES: LazyLock<Packages> = LazyLock::new(|| Packages::new(Box::new(Disk)));
-
-/// The dotted names each resolved path of `paths` is imported by, the likeliest first: its
-/// package path, then its path from each of `roots` (relative to `cwd`), without and with
-/// the root's name.
-#[pyfunction]
-#[expect(clippy::needless_pass_by_value, reason = "PyO3 extracts owned values")]
-fn module_names(
-    py: Python<'_>,
-    paths: Vec<PathBuf>,
-    roots: Vec<PathBuf>,
-    cwd: PathBuf,
-) -> Vec<Vec<String>> {
-    py.detach(|| {
-        let roots = PACKAGES.roots(&roots, &cwd);
-        paths
-            .iter()
-            .map(|path| PACKAGES.names(path, &roots))
-            .collect()
-    })
-}
-
-/// The checked directories, the parents of checked files and the package roots of
-/// `files`, resolved against `cwd`, each once.
-#[pyfunction]
-#[expect(clippy::needless_pass_by_value, reason = "PyO3 extracts owned values")]
-fn checked_roots(paths: Vec<PathBuf>, files: Vec<PathBuf>, cwd: PathBuf) -> Vec<PathBuf> {
-    PACKAGES.checked_roots(&paths, &files, &cwd)
-}
-
-/// Where `[[tool.sqlty.functions]]` modules are read from: `config_dir/src`,
-/// `config_dir`, the `checked` roots inside it, then `extra`.
-#[pyfunction]
-#[pyo3(name = "helper_roots")]
-#[expect(clippy::needless_pass_by_value, reason = "PyO3 extracts owned values")]
-fn py_helper_roots(
-    config_dir: Option<PathBuf>,
-    checked: Vec<PathBuf>,
-    extra: Vec<PathBuf>,
-) -> Vec<PathBuf> {
-    project::helper_roots(config_dir.as_deref(), &checked, &extra)
-}
-
 /// Add the key lists and `ConfigSyntaxError` to the module.
 pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ConfigSyntaxError", m.py().get_type::<ConfigSyntaxError>())?;
-    m.add("CONFIG_FILES", config::CONFIG_FILES)?;
     m.add("TOOL_KEYS", config::TOOL_KEYS)?;
     m.add("DISCOVERY_KEYS", config::DISCOVERY_KEYS)?;
     m.add("FUNCTION_KEYS", config::FUNCTION_KEYS)?;
@@ -256,12 +107,6 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(driver_types, m)?)?;
     m.add_function(wrap_pyfunction!(find_config, m)?)?;
     m.add_function(wrap_pyfunction!(config_file, m)?)?;
-    m.add_function(wrap_pyfunction!(schema_files, m)?)?;
-    m.add_function(wrap_pyfunction!(names_query_file, m)?)?;
-    m.add_function(wrap_pyfunction!(module_names, m)?)?;
-    m.add_function(wrap_pyfunction!(checked_roots, m)?)?;
-    m.add_function(wrap_pyfunction!(py_helper_roots, m)?)?;
-    m.add_class::<PyDiscovery>()?;
     m.add("DEFAULT_EXCLUDE", project::DEFAULT_EXCLUDE)?;
     Ok(())
 }

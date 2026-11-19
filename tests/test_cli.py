@@ -4,28 +4,21 @@ from __future__ import annotations
 
 import codecs
 import contextlib
+import io
 import json
 import logging
 import os
 import re
 import shutil
+import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
 
-from sqlty import _cli
-from sqlty._cli import (
-    ConfigSource,
-    SettingsResolver,
-    _collect_python_files,
-    build_parser,
-    issue_url,
-    main,
-)
-from sqlty._config import ConfigError
+from sqlty._cli import issue_url, main
 from sqlty._lint import RULES
-from sqlty.core import infer_type
 
 
 def test_cli_rewrite_untyped(tmp_path, monkeypatch):
@@ -76,11 +69,9 @@ def test_each_file_uses_its_nearest_config(tmp_path, monkeypatch, capsys) -> Non
 @pytest.mark.parametrize(("flag", "expected"), [(None, "mysql"), ("postgres", "postgres")])
 def test_dialect_flag_overrides_config(tmp_path, flag, expected) -> None:
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\ndialect = "mysql"\n')
-    args = build_parser().parse_args(
-        ["check", *(["--dialect", flag] if flag else []), str(tmp_path)]
-    )
+    flags = ["--dialect", flag] if flag else []
 
-    assert SettingsResolver(args).for_file(tmp_path / "q.py").dialect == expected
+    assert _settings(tmp_path / "q.py", *flags)["dialect"] == expected
 
 
 def test_check_fix_writes_fixes_and_reports_the_rest(tmp_path, monkeypatch, capsys) -> None:
@@ -113,10 +104,13 @@ def test_check_fix_writes_fixes_and_reports_the_rest(tmp_path, monkeypatch, caps
     assert "Fixed 1 file(s)" in out
 
 
-@pytest.mark.parametrize(("cpus", "workers"), [(8, 8), (None, 1)])
-def test_workers_are_the_processors(monkeypatch, cpus, workers) -> None:
-    monkeypatch.setattr(os, "process_cpu_count", lambda: cpus)
-    assert _cli._workers() == workers
+@pytest.mark.parametrize("threads", ["1", "3"])
+def test_runs_on_any_number_of_threads(tmp_path, threads) -> None:
+    (tmp_path / "q.py").write_text('q = "--sql\\nSELECT 1"\n')
+
+    code, out, _ = _threaded(["rewrite", "--check", "q.py"], threads, tmp_path)
+
+    assert (code, out) == (1, "Would rewrite q.py\n1 file(s) would be rewritten\n")
 
 
 @pytest.mark.parametrize(
@@ -150,31 +144,33 @@ def test_threads_do_not_change_the_output(tmp_path, monkeypatch, capsys, command
     files = {path: path.read_text() for path in tmp_path.iterdir()}
 
     outputs = []
-    for jobs in (1, 4):
-        monkeypatch.setattr(_cli, "_workers", lambda jobs=jobs: jobs)
+    for threads in ("1", "4"):
         for path, text in files.items():
             path.write_text(text)
-        outputs.append((_run([*command, "."], capsys), sorted(p.read_text() for p in files)))
+        found = _threaded([*command, "."], threads, tmp_path)
+        outputs.append((found, sorted(p.read_text() for p in files)))
 
     assert outputs[0] == outputs[1]
     (_, out, err), written = outputs[0]
     assert out or err or written != sorted(files.values())
 
 
-def test_invalid_untyped_config_is_an_error(tmp_path) -> None:
-    (tmp_path / "pyproject.toml").write_text("[tool.sqlty]\nuntyped = true\n")
-    args = build_parser().parse_args(["check", str(tmp_path)])
+def test_invalid_untyped_config_is_an_error(tmp_path, capsys) -> None:
+    _project(tmp_path, "untyped = true\n")
 
-    with pytest.raises(ConfigError, match="untyped must be 'skip' or 'sentinel'"):
-        SettingsResolver(args).for_file(tmp_path / "q.py")
+    code, _, err = _run(["check", "--show-settings", str(tmp_path)], capsys)
+
+    assert code == 2
+    assert "untyped must be 'skip' or 'sentinel'" in err
 
 
-def test_invalid_import_style_config_is_an_error(tmp_path) -> None:
-    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nimport-style = "from x import SQL"\n')
-    args = build_parser().parse_args(["check", str(tmp_path)])
+def test_invalid_import_style_config_is_an_error(tmp_path, capsys) -> None:
+    _project(tmp_path, 'import-style = "from x import SQL"\n')
 
-    with pytest.raises(ConfigError, match="Unsupported import-style: 'from x import SQL'"):
-        SettingsResolver(args).for_file(tmp_path / "q.py")
+    code, _, err = _run(["check", "--show-settings", str(tmp_path)], capsys)
+
+    assert code == 2
+    assert "Unsupported import-style: 'from x import SQL'" in err
 
 
 F_SKIPPED = "q.py:2: [fstring-skipped] f-string with --sql prefix skipped (f-strings cannot be statically rewritten)"
@@ -332,8 +328,7 @@ def test_too_large_schema_is_reported(tmp_path, monkeypatch, caplog) -> None:
     (tmp_path / "schema.sql").write_text(f"CREATE TABLE wide ({columns});")
     monkeypatch.chdir(tmp_path)
 
-    args = build_parser().parse_args(["check", str(tmp_path)])
-    SettingsResolver(args).for_file(tmp_path / "q.py")
+    _settings(tmp_path / "q.py")
 
     assert [r.getMessage() for r in caplog.records if "too large" in r.getMessage()] == [
         "Schema is too large to load; ignored: public.wide"
@@ -548,6 +543,37 @@ def _run(argv: list[str], capsys) -> tuple[int, str, str]:
         code = exc.code if isinstance(exc.code, int) else 1
     captured = capsys.readouterr()
     return code, captured.out, captured.err
+
+
+def _out(*argv: str) -> str:
+    with contextlib.redirect_stdout(io.StringIO()) as out:
+        main(list(argv))
+    return out.getvalue()
+
+
+def _files(*argv: str) -> list[str]:
+    """The files ``check`` reads, as ``--show-files`` prints them."""
+    return [Path(line).as_posix() for line in _out("check", "--show-files", *argv).splitlines()]
+
+
+def _settings(path: Path, *flags: str) -> dict:
+    """The settings of ``path``, as ``--show-settings`` prints them."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch()
+    return tomllib.loads(_out("check", "--show-settings", *flags, str(path)))
+
+
+def _threaded(argv: list[str], threads: str, cwd: Path) -> tuple[int, str, str]:
+    """Run ``sqlty`` in a new process on ``threads`` threads: (exit code, stdout, stderr)."""
+    env = {**os.environ, "RAYON_NUM_THREADS": threads}
+    found = subprocess.run(
+        [sys.executable, "-m", "sqlty", *argv], cwd=cwd, env=env, capture_output=True, text=True
+    )
+    return found.returncode, found.stdout, found.stderr
+
+
+_UNWRAPPED = 'q = "--sql\\nSELECT 1"\n'
+_WRAPPED = 'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT 1")\n'
 
 
 def _project(tmp_path, config: str) -> None:
@@ -779,7 +805,7 @@ def test_internal_error_exits_2(tmp_path, monkeypatch, capsys) -> None:
 
 
 def test_a_panic_is_an_internal_error(monkeypatch, capsys) -> None:
-    import sqlty._cli
+    from sqlty import _core
 
     class PanicException(BaseException):
         pass
@@ -787,7 +813,7 @@ def test_a_panic_is_an_internal_error(monkeypatch, capsys) -> None:
     def panic(*args, **kwargs):
         raise PanicException("boom")
 
-    monkeypatch.setattr(sqlty._cli, "_rust", panic)
+    monkeypatch.setattr(_core, "cli", panic)
 
     code, _, err = _run(["version"], capsys)
 
@@ -796,12 +822,12 @@ def test_a_panic_is_an_internal_error(monkeypatch, capsys) -> None:
 
 
 def test_an_interrupt_is_not_an_internal_error(monkeypatch, capsys) -> None:
-    import sqlty._cli
+    from sqlty import _core
 
     def interrupt(*args, **kwargs):
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(sqlty._cli, "_rust", interrupt)
+    monkeypatch.setattr(_core, "cli", interrupt)
 
     with pytest.raises(KeyboardInterrupt):
         _run(["version"], capsys)
@@ -845,7 +871,7 @@ def test_version_flag_and_command(capsys: pytest.CaptureFixture[str]) -> None:
 def test_no_command_prints_help(capsys: pytest.CaptureFixture[str]) -> None:
     code, out, _ = _run([], capsys)
     assert code == 0
-    assert "usage: sqlty" in out
+    assert "Usage: sqlty" in out
 
 
 def test_rule_command(capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture) -> None:
@@ -902,31 +928,29 @@ def test_verbose_names_each_changed_file(
 
 
 def test_exclude_path_glob_outside_its_base_never_matches(tmp_path: Path, monkeypatch) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-    monkeypatch.chdir(project)
-    outside = tmp_path / "other" / "gen.py"
-    assert not ConfigSource(exclude=["other/gen.py", "*/gen.py"]).is_excluded(outside)
-    assert ConfigSource(exclude=["gen.py"]).is_excluded(outside)
+    _tree(tmp_path, "project/q.py", "other/gen.py")
+    monkeypatch.chdir(tmp_path / "project")
+    outside = "../other/gen.py"
+
+    def shown(*excludes: str) -> list[str]:
+        flags = [f"--exclude={glob}" for glob in excludes]
+        return _files("--force-exclude", *flags, outside)
+
+    assert shown("other/gen.py", "*/gen.py") == [outside]
+    assert shown("gen.py") == []
 
 
-def test_walk_skips_default_excludes_in_a_large_tree(tmp_path: Path) -> None:
-    from sqlty._cli import _collect_python_files
+def test_walk_skips_default_excludes_in_a_large_tree(tmp_path: Path, monkeypatch) -> None:
+    _tree(tmp_path, "node_modules/x.py", *(f"pkg{d}/m{n}.py" for d in range(5) for n in range(20)))
+    monkeypatch.chdir(tmp_path)
 
-    for d in range(5):
-        (tmp_path / f"pkg{d}").mkdir()
-        for n in range(20):
-            (tmp_path / f"pkg{d}" / f"m{n}.py").write_text("")
-    (tmp_path / "node_modules").mkdir()
-    (tmp_path / "node_modules" / "x.py").write_text("")
-    files = _collect_python_files([tmp_path])
+    files = _files(".")
+
     assert len(files) == 100
-    assert not any("node_modules" in file.parts for file in files)
+    assert not any("node_modules" in file for file in files)
 
 
-def test_exclude_globs_match_names_and_relative_paths(tmp_path: Path) -> None:
-    from sqlty._cli import _collect_python_files
-
+def test_exclude_globs_match_names_and_relative_paths(tmp_path: Path, monkeypatch) -> None:
     (tmp_path / "pyproject.toml").write_text(
         '[tool.sqlty]\nexclude = ["gen_*.py", "build/**", "a/b"]\n'
     )
@@ -934,8 +958,9 @@ def test_exclude_globs_match_names_and_relative_paths(tmp_path: Path) -> None:
         path = tmp_path / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("")
-    found = {p.relative_to(tmp_path).as_posix() for p in _collect_python_files([tmp_path])}
-    assert found == {"keep.py", "a/d.py"}
+    monkeypatch.chdir(tmp_path)
+
+    assert set(_files(".")) == {"keep.py", "a/d.py"}
 
 
 def _tree(root: Path, *paths: str) -> None:
@@ -957,37 +982,31 @@ def _tree(root: Path, *paths: str) -> None:
         (["--exclude", "gen", "--extend-exclude", "node_modules"], {"keep.py", "legacy/old.py"}),
     ],
 )
-def test_exclude_flags(tmp_path: Path, monkeypatch, command, flags, expected) -> None:
+def test_exclude_flags(tmp_path: Path, monkeypatch, capsys, command, flags, expected) -> None:
     """``--exclude`` replaces the config and default excludes; ``--extend-exclude`` adds to them."""
-    from sqlty._cli import _collect_python_files
-
-    _tree(tmp_path, "keep.py", "legacy/old.py", "gen/x.py", "node_modules/m.py", "sub/build/b.py")
+    files = ("keep.py", "legacy/old.py", "gen/x.py", "node_modules/m.py", "sub/build/b.py")
+    _tree(tmp_path, *files)
+    for name in files:
+        (tmp_path / name).write_text(_UNWRAPPED if command != "strip" else _WRAPPED)
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nextend-exclude = ["build"]\n')
     monkeypatch.chdir(tmp_path)
-    args = build_parser().parse_args([command, *flags, "."])
 
-    files = _collect_python_files(args.paths, SettingsResolver(args).source)
+    argv = [command, *flags, "."] if command == "check" else [command, "--check", *flags, "."]
+    _, out, _ = _run(argv, capsys)
 
-    assert {p.as_posix() for p in files} == expected
+    found = re.findall(r"^(?:Would \w+ )?(\S+?\.py)\b", out, re.MULTILINE)
+    assert {Path(path).as_posix() for path in found} == expected
 
 
 def test_cli_exclude_globs_are_relative_to_the_current_directory(tmp_path, monkeypatch) -> None:
-    from sqlty._cli import _collect_python_files
-
     _tree(tmp_path, "app/gen/a.py", "app/pyproject.toml", "app/b.py")
     (tmp_path / "app" / "pyproject.toml").write_text("[tool.sqlty]\n")
     monkeypatch.chdir(tmp_path)
     for glob in ("app/gen", "./app/gen", str(tmp_path.resolve() / "app" / "gen")):
-        args = build_parser().parse_args(["check", "--extend-exclude", glob, "app"])
-
-        files = _collect_python_files(args.paths, SettingsResolver(args).source)
-
-        assert [p.as_posix() for p in files] == ["app/b.py"], glob
+        assert _files("--extend-exclude", glob, "app") == ["app/b.py"], glob
 
 
 def test_isolated_ignores_every_config(tmp_path, monkeypatch, capsys) -> None:
-    from sqlty._cli import _collect_python_files
-
     (tmp_path / "pyproject.toml").write_text(
         '[tool.sqlty]\ndialect = "mysql"\nexclude = ["gen"]\n'
         '[tool.sqlty.rules]\nselect-star-no-schema = "ignore"\n'
@@ -1004,10 +1023,8 @@ def test_isolated_ignores_every_config(tmp_path, monkeypatch, capsys) -> None:
         ([], "mysql", {".venv/v.py", "q.py"}),
         (["--isolated"], "postgres", {"gen/g.py", "q.py"}),
     ):
-        args = build_parser().parse_args(["check", *flags, "."])
-        resolver = SettingsResolver(args)
-        assert resolver.for_file(tmp_path / "q.py").dialect == dialect
-        assert {p.as_posix() for p in _collect_python_files(args.paths, resolver.source)} == files
+        assert _settings(Path("q.py"), *flags)["dialect"] == dialect
+        assert set(_files(*flags, ".")) == files
 
 
 def test_isolated_skips_an_invalid_config(tmp_path, monkeypatch, capsys) -> None:
@@ -1045,8 +1062,7 @@ def test_config_file_replaces_discovery(tmp_path, monkeypatch, name, content) ->
     assert (project / "pkg" / "q.py").read_text() == (
         'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT id FROM users")\n'
     )
-    args = build_parser().parse_args(["check", "--config-file", str(config), "pkg"])
-    assert SettingsResolver(args).for_file(project / "pkg" / "q.py").dialect == "postgres"
+    assert _settings(Path("pkg/q.py"), "--config-file", str(config))["dialect"] == "postgres"
 
 
 @pytest.mark.parametrize(
@@ -1081,10 +1097,10 @@ def test_config_file_errors(tmp_path, monkeypatch, capsys, name, content, messag
 def test_config_and_isolated_are_exclusive(capsys) -> None:
     code, _, err = _run(["check", "--config-file", "x.toml", "--isolated"], capsys)
     assert code == 2
-    assert "not allowed with argument" in err
+    assert "cannot be used with" in err
 
 
-def test_inline_config_overrides(tmp_path, monkeypatch) -> None:
+def test_inline_config_overrides(tmp_path, monkeypatch, capsys) -> None:
     """``-c`` applies on top of the discovered config; rule tables merge key by key."""
     _tree(tmp_path, "db/schema.sql", "gen/g.py", "q.py")
     (tmp_path / "db" / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL);")
@@ -1092,52 +1108,39 @@ def test_inline_config_overrides(tmp_path, monkeypatch) -> None:
         '[tool.sqlty]\ndialect = "mysql"\n[tool.sqlty.rules]\nselect-star = "error"\n'
     )
     monkeypatch.chdir(tmp_path)
-    args = build_parser().parse_args(
-        [
-            "check",
-            "-c",
-            'dialect = "sqlite"',
-            "--config",
-            'rules.stale-type = "ignore"',
-            "-c",
-            'schema = "db/schema.sql"',
-            "-c",
-            'extend-exclude = ["gen"]',
-            ".",
-        ]
-    )
-    resolver = SettingsResolver(args)
-    settings = resolver.for_file(tmp_path / "q.py")
+    flags = [
+        "-c",
+        'dialect = "sqlite"',
+        "--config",
+        'rules.stale-type = "ignore"',
+        "-c",
+        'schema = "db/schema.sql"',
+        "-c",
+        'extend-exclude = ["gen"]',
+    ]
+    settings = _settings(Path("q.py"), *flags)
 
-    assert settings.dialect == "sqlite"
-    assert settings.rules == {"select-star": "error", "stale-type": "ignore"}
-    assert settings.schema is not None and settings.schema.dialect == "sqlite"
-    assert (
-        infer_type("SELECT * FROM users", dialect="sqlite", schema_sql=settings.schema)
-        == "tuple[int]"
-    )
-    from sqlty._cli import _collect_python_files
-
-    assert _collect_python_files(args.paths, resolver.source) == [Path("q.py")]
+    assert settings["dialect"] == "sqlite"
+    assert settings["rules"] == {"select-star": "error", "stale-type": "ignore"}
+    assert settings["schema"]
+    assert _files(*flags, ".") == ["q.py"]
+    (tmp_path / "q.py").write_text('q = "--sql\\nSELECT id FROM users"\n')
+    main(["rewrite", *flags, "."])
+    assert 'SQL[tuple[int]]("--sql' in (tmp_path / "q.py").read_text()
 
 
 def test_inline_config_works_with_isolated(tmp_path, monkeypatch) -> None:
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nimport-style = "import sqlty"\n')
     monkeypatch.chdir(tmp_path)
-    args = build_parser().parse_args(["check", "--isolated", "-c", 'dialect = "mysql"', "."])
+    settings = _settings(Path("q.py"), "--isolated", "-c", 'dialect = "mysql"')
 
-    settings = SettingsResolver(args).for_file(tmp_path / "q.py")
-
-    assert (settings.dialect, settings.import_style) == ("mysql", None)
+    assert (settings["dialect"], "import-style" in settings) == ("mysql", False)
 
 
 def test_inline_config_exclude(tmp_path, monkeypatch) -> None:
     _tree(tmp_path, "gen/g.py", "q.py")
     monkeypatch.chdir(tmp_path)
-    args = build_parser().parse_args(["check", "-c", 'exclude = ["gen"]', "."])
-    from sqlty._cli import _collect_python_files
-
-    assert _collect_python_files(args.paths, SettingsResolver(args).source) == [Path("q.py")]
+    assert _files("-c", 'exclude = ["gen"]', ".") == ["q.py"]
 
 
 @pytest.mark.parametrize(
@@ -1192,19 +1195,15 @@ def test_exit_zero(tmp_path, monkeypatch, capsys) -> None:
 
 @pytest.mark.parametrize("force", [False, True])
 def test_force_exclude_applies_to_named_paths(tmp_path, monkeypatch, force) -> None:
-    from sqlty._cli import _collect_python_files
-
     _tree(tmp_path, "legacy/old.py", "gen_a.py", "keep.py", "sub/dist/d.py")
     (tmp_path / "pyproject.toml").write_text(
         '[tool.sqlty]\nextend-exclude = ["legacy", "gen_*.py"]\n'
     )
     monkeypatch.chdir(tmp_path)
     named = ["legacy/old.py", "gen_a.py", "keep.py", "legacy", "sub/dist/d.py"]
-    args = build_parser().parse_args(
-        ["check", *(["--force-exclude"] if force else []), "--extend-exclude", "keep.py", *named]
-    )
+    flags = ["--force-exclude"] if force else []
 
-    files = {p.as_posix() for p in _collect_python_files(args.paths, SettingsResolver(args).source)}
+    files = set(_files(*flags, "--extend-exclude", "keep.py", *named))
 
     assert files == (set() if force else {"legacy/old.py", "gen_a.py", "keep.py", "sub/dist/d.py"})
 
@@ -1215,8 +1214,7 @@ def test_config_file_from_environment(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("SQLTY_CONFIG_FILE", "sqlty.toml")
 
     def dialect(*flags: str) -> str:
-        args = build_parser().parse_args(["check", *flags, "."])
-        return SettingsResolver(args).for_file(tmp_path / "q.py").dialect
+        return _settings(Path("q.py"), *flags)["dialect"]
 
     assert dialect() == "sqlite"
     assert dialect("--isolated") == "postgres"
@@ -1245,23 +1243,11 @@ def test_warning_exit_flags(tmp_path, monkeypatch, capsys, flags, code) -> None:
 
 
 def test_force_exclude_checks_parents_without_config(tmp_path, monkeypatch) -> None:
-    from sqlty._cli import _collect_python_files
-
     _tree(tmp_path, ".venv/lib/a.py", "lib/b.py")
     monkeypatch.chdir(tmp_path)
     for flags in ([], ["--isolated"]):
-        args = build_parser().parse_args(
-            [
-                "check",
-                "--force-exclude",
-                *flags,
-                "--extend-exclude",
-                "lib",
-                ".venv/lib/a.py",
-                "lib/b.py",
-            ]
-        )
-        assert _collect_python_files(args.paths, SettingsResolver(args).source) == []
+        named = [".venv/lib/a.py", "lib/b.py"]
+        assert _files("--force-exclude", *flags, "--extend-exclude", "lib", *named) == []
 
 
 @pytest.mark.parametrize(
@@ -1347,12 +1333,10 @@ def test_a_symlink_out_of_the_project_matches_no_glob(tmp_path, monkeypatch) -> 
     link.symlink_to(outside / "test_x.py")
     query.symlink_to(outside / "x.sql")
     monkeypatch.chdir(project)
-    resolver = SettingsResolver(build_parser().parse_args(["check", "."]))
 
-    assert resolver.for_file(project / "tests" / "test_q.py").rules == {"narrow-type": "ignore"}
-    assert resolver.for_file(link).rules == {"narrow-type": "error"}
-    assert not resolver.for_file(query).names_query_file(query)
-    assert resolver.resolve(link) == (outside / "test_x.py").resolve()
+    assert _settings(Path("tests/test_q.py"))["rules"] == {"narrow-type": "ignore"}
+    assert "narrow-type" not in _settings(Path("tests/test_link.py"))["rules"]
+    assert "tests/link.sql" not in _files(".")
 
 
 def test_overrides_apply_to_check_fix(tmp_path, monkeypatch, capsys) -> None:
@@ -1536,20 +1520,20 @@ return-type-param = "form"
 
 
 def test_the_server_checks_a_buffer_against_its_database(tmp_path) -> None:
-    from sqlty._lsp_bridge import Workspace
+    from tests.test_lsp import Server, rules
 
     _databases_project(tmp_path)
-    workspace = Workspace(str(tmp_path))
-
-    found = workspace.check(
-        str(tmp_path / "app/reports/new.py"), 'q = "--sql\\nSELECT nope FROM events"\n'
-    )
-    assert workspace.completion(str(tmp_path / "app/reports/new.py"))["dialect"] == "sqlite"
-    assert [d["rule"] for d in found] == ["unknown-column"]
-    assert (
-        workspace.check(str(tmp_path / "sql/new.sql"), "-- name: q\nSELECT kind FROM events;\n")
-        == []
-    )
+    server = Server(tmp_path)
+    try:
+        server.start(tmp_path)
+        found = server.check(
+            tmp_path / "app/reports/new.py", 'q = "--sql\\nSELECT nope FROM events"\n'
+        )
+        queries = server.check(tmp_path / "sql/new.sql", "-- name: q\nSELECT kind FROM events;\n")
+    finally:
+        assert server.stop() == 0
+    assert rules(found) == ["unknown-column"]
+    assert queries == []
 
 
 @pytest.mark.parametrize(
@@ -1603,12 +1587,7 @@ def _gitignore_project(tmp_path: Path, config: str = "") -> set[str]:
 
 
 def _walked(tmp_path: Path, *flags: str, root: str = ".") -> set[str]:
-    args = build_parser().parse_args(["check", *flags, root])
-    source = ConfigSource.from_args(args)
-    return {
-        p.resolve().relative_to(tmp_path).as_posix()
-        for p in _collect_python_files(args.paths, source)
-    }
+    return {(tmp_path / p).resolve().relative_to(tmp_path).as_posix() for p in _files(*flags, root)}
 
 
 def test_walk_skips_what_git_ignores(tmp_path, monkeypatch) -> None:
@@ -1804,10 +1783,7 @@ def test_redundant_optional_does_not_depend_on_threads(tmp_path, monkeypatch, ca
     )
     monkeypatch.chdir(tmp_path)
 
-    outputs = set()
-    for jobs in [1] + [4] * 10:
-        monkeypatch.setattr(_cli, "_workers", lambda jobs=jobs: jobs)
-        outputs.add(_run(["check", "app"], capsys)[1])
+    outputs = {_threaded(["check", "app"], threads, tmp_path)[1] for threads in ["1"] + ["4"] * 5}
 
     assert [line for out in outputs for line in out.splitlines() if "redundant" in line] == [
         f"app{os.sep}q1.py:4: [redundant-optional] S.x is int | None but query column 'x' is never NULL"
@@ -1903,8 +1879,6 @@ def test_check_json_locates_fixes_by_character(tmp_path, monkeypatch, capsys) ->
 def test_check_sarif_output_is_valid_sarif(tmp_path, monkeypatch, capsys) -> None:
     import jsonschema
 
-    from sqlty._sarif import sarif_log
-
     (tmp_path / "q.py").write_text(
         'from sqlty import SQL\nq = ("é", SQL[tuple[int]]("--sql\\nSELECT 1.5::REAL"))\n'
     )
@@ -1942,10 +1916,6 @@ def test_check_sarif_output_is_valid_sarif(tmp_path, monkeypatch, capsys) -> Non
             ]
         }
     ]
-
-    with pytest.raises(SystemExit):
-        main(["check", "--output-format", "json", "q.py"])
-    assert sarif_log(json.loads(capsys.readouterr().out))["runs"][0]["results"] == [result]
 
     with pytest.raises(SystemExit):
         main(["check", "--output-format", "sarif", str(tmp_path / "q.py")])
@@ -2184,42 +2154,36 @@ def test_rust_cli_raises_what_its_streams_raise(monkeypatch) -> None:
         ({"sub/pyproject.toml": "[tool.sqlty]\ndialet = 'mysql'\n"}, [], "did you mean 'dialect'"),
     ],
 )
-def test_the_python_project_reports_config_errors(tmp_path, monkeypatch, files, argv, message):
-    """`breaking` and `server` read settings in Python."""
-    from sqlty._cli import Project
-
+def test_show_files_reports_config_errors(tmp_path, monkeypatch, capsys, files, argv, message):
     _tree(tmp_path, "q.py", *files)
     for name, text in files.items():
         (tmp_path / name).write_text(text)
     monkeypatch.chdir(tmp_path)
 
-    with pytest.raises(ConfigError, match=re.escape(message)):
-        Project(build_parser().parse_args(["check", *argv, "."]))
+    code, _, err = _run(["check", "--show-files", *argv, "."], capsys)
+
+    assert code == 2
+    assert message in err
 
 
-def test_the_python_project_reports_a_missing_path(tmp_path, monkeypatch) -> None:
-    from sqlty._cli import Project
-
+def test_breaking_reports_a_missing_path(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "old.sql").write_text("")
     monkeypatch.chdir(tmp_path)
-    with pytest.raises(ConfigError, match="path does not exist: nonexist.py"):
-        Project(build_parser().parse_args(["check", "nonexist.py"]))
+
+    code, _, err = _run(["breaking", "--against", "old.sql", "nonexist.py"], capsys)
+
+    assert (code, "path does not exist: nonexist.py" in err) == (2, True)
 
 
-def test_the_python_project_checks_the_project_of_its_config(tmp_path, monkeypatch) -> None:
-    from sqlty._cli import Project
-
+def test_show_files_checks_the_project_of_its_config(tmp_path, monkeypatch) -> None:
     _tree(tmp_path, "app/q.py", "app/pyproject.toml")
     (tmp_path / "app" / "pyproject.toml").write_text("[tool.sqlty]\n")
     monkeypatch.chdir(tmp_path)
 
-    project = Project(build_parser().parse_args(["check", "app/pyproject.toml"]))
-    assert project.paths == [Path("app")]
-    assert project.files == [Path("app/q.py")]
+    assert _files("app/pyproject.toml") == ["app/q.py"]
 
 
-def test_the_python_project_warns_about_its_schemas(tmp_path, monkeypatch, caplog) -> None:
-    from sqlty._cli import Project
-
+def test_breaking_warns_about_its_schemas(tmp_path, monkeypatch, caplog) -> None:
     _tree(tmp_path, "duck/q.py", "pg/q.py")
     (tmp_path / "duck" / "pyproject.toml").write_text(
         '[tool.sqlty]\nschema = "schema.sql"\ndialect = "duckdb"\n'
@@ -2232,7 +2196,8 @@ def test_the_python_project_warns_about_its_schemas(tmp_path, monkeypatch, caplo
     )
     monkeypatch.chdir(tmp_path)
 
-    Project(build_parser().parse_args(["check", "duck", "pg"]))
+    (tmp_path / "old.sql").write_text("")
+    main(["breaking", "--against", "old.sql", "duck", "pg"])
     assert [r.getMessage() for r in caplog.records] == [
         "Table and column names are not checked for duckdb",
         "Schema table  could not be parsed; its columns are unknown",
@@ -2241,8 +2206,8 @@ def test_the_python_project_warns_about_its_schemas(tmp_path, monkeypatch, caplo
     ]
 
 
-def test_the_python_project_routes_the_helpers_of_a_database(tmp_path, monkeypatch) -> None:
-    from sqlty._lsp_bridge import Workspace
+def test_the_server_routes_the_helpers_of_a_database(tmp_path) -> None:
+    from tests.test_lsp import Server, rules
 
     (tmp_path / "pyproject.toml").write_text(
         '[tool.sqlty.databases.analytics]\nschema = "events.sql"\n'
@@ -2254,6 +2219,10 @@ def test_the_python_project_routes_the_helpers_of_a_database(tmp_path, monkeypat
         "def fetch[T](query: str, form: type[T]) -> list[T]: ...\n"
     )
     text = 'from warehouse import fetch\nfetch("SELECT n FROM events", tuple[str])\n'
-
-    found = Workspace(str(tmp_path)).check(str(tmp_path / "q.py"), text)
-    assert [d["rule"] for d in found] == ["column-type-mismatch"]
+    server = Server(tmp_path)
+    try:
+        server.start(tmp_path)
+        found = server.check(tmp_path / "q.py", text)
+    finally:
+        assert server.stop() == 0
+    assert rules(found) == ["column-type-mismatch"]

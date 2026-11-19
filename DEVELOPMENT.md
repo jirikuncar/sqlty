@@ -173,7 +173,7 @@ uv run ruff check --fix .
 |--------|---------|
 | `core.py` | Public API over the Rust `_core` |
 | `_core.pyi` | Type stubs for the Rust extension module |
-| `_cli.py` | Argument parser; runs `complete`, `breaking` and `server`, the rest in Rust |
+| `_cli.py` | `sqlty` entry point: runs the Rust CLI and reports crashes |
 | `_lint.py` | Lint rules and their severity (error/warn/ignore) |
 | `_decode.py` | Magic codec decoder (bytes -> string transformation) |
 | `magic.py` | Codec registration for Python import system |

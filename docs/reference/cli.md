@@ -6,8 +6,7 @@ description: "Reference for the sqlty command line: rewrite, strip, format, chec
 
 <!-- generated:cli-usage -->
 ```text
-sqlty [-h] [--version]
-      {rewrite,strip,format,check,complete,breaking,rule,skill,server,version} ...
+sqlty [COMMAND]
 ```
 <!-- /generated:cli-usage -->
 
@@ -95,22 +94,22 @@ tool such as pre-commit passes file names.
 <!-- generated:cli-options-common -->
 | Option | Description |
 |--------|-------------|
-| `-h`, `--help` | show this help message and exit |
-| `paths ...` | Files or directories (default: .); each file uses its nearest sqlty.toml, pyproject.toml or Cargo.toml. A project's config or schema file stands for the whole project |
-| `--dialect DIALECT` | SQL dialect: postgres, mysql, sqlite, or another sqlparser dialect such as duckdb (default: [tool.sqlty] dialect, else postgres) |
-| `--schema SCHEMA` | Schema .sql file, directory or glob for every path; repeat for several (default: [tool.sqlty] schema per project) |
-| `--config-file PATH` | Use this file for every path instead of the nearest config file: [tool.sqlty] of a pyproject.toml, [package.metadata.sqlty] or [workspace.metadata.sqlty] of a Cargo.toml, or top-level keys of another file such as sqlty.toml; its relative paths are relative to the current directory. Env: SQLTY_CONFIG_FILE |
+| `PATHS ...` | Files or directories (default: .); each file uses its nearest sqlty.toml, pyproject.toml or Cargo.toml. A project's config or schema file stands for the whole project |
+| `--dialect DIALECT` | SQL dialect: postgres, mysql, sqlite, or another sqlparser dialect such as duckdb. Default: [tool.sqlty] dialect, else postgres |
+| `--schema SCHEMA` | Schema .sql file, directory or glob for every path; repeat for several. Default: [tool.sqlty] schema per project |
+| `--config-file PATH` | Use this file for every path instead of the nearest config file. Env: SQLTY_CONFIG_FILE. The file is [tool.sqlty] of a pyproject.toml, [package.metadata.sqlty] or [workspace.metadata.sqlty] of a Cargo.toml, or top-level keys of another file such as sqlty.toml; its relative paths are relative to the current directory |
 | `--isolated` | Ignore every configuration file; use the defaults and command-line flags |
-| `-c`, `--config KEY=VALUE` | Override a configuration key with a TOML assignment, for example `-c 'dialect = "mysql"'` or `-c 'rules.select-star = "ignore"'`; repeat for several. Paths are relative to the current directory |
+| `-c, --config KEY=VALUE` | Override a configuration key with a TOML assignment; repeat for several. For example `-c 'dialect = "mysql"'` or `-c 'rules.select-star = "ignore"'`. Paths are relative to the current directory |
 | `--error RULE` | Treat RULE as severity error; repeat for several, the last flag for a rule wins |
 | `--warn RULE` | Treat RULE as severity warn; repeat for several, the last flag for a rule wins |
 | `--ignore RULE` | Treat RULE as severity ignore; repeat for several, the last flag for a rule wins |
-| `--exclude GLOB` | Skip this glob while walking directories, replacing [tool.sqlty] exclude and the default excludes; repeat for several. Relative to the current directory |
-| `--extend-exclude GLOB` | Skip this glob in addition to the other excludes; repeat for several. Relative to the current directory |
+| `--exclude GLOB` | Skip this glob while walking directories, replacing the other excludes. It replaces [tool.sqlty] exclude and the default excludes; repeat for several. Relative to the current directory |
+| `--extend-exclude GLOB` | Skip this glob in addition to the other excludes. Repeat for several. Relative to the current directory |
 | `--force-exclude` | Apply the excludes to files and directories named on the command line too |
-| `--respect-gitignore`, `--no-respect-gitignore` | Skip the files .gitignore ignores while walking directories (default: [tool.sqlty] respect-gitignore, else true) |
-| `-v`, `--verbose` | Print each file that rewrite, strip or check --fix changes, and with check the types of each named query of a query file |
-| `-q`, `--quiet` | Suppress non-error output |
+| `--respect-gitignore` | Skip the files .gitignore ignores while walking directories. Default: [tool.sqlty] respect-gitignore, else true |
+| `--no-respect-gitignore` | Walk the files .gitignore ignores too |
+| `-v, --verbose` | Print each file that rewrite, strip or check --fix changes. With check, also the types of each named query of a query file |
+| `-q, --quiet` | Suppress non-error output |
 <!-- /generated:cli-options-common -->
 
 `strip` accepts `--dialect` and `--schema` but does not use them.
@@ -130,21 +129,14 @@ never change the exit code.
 
 <!-- generated:cli-usage-rewrite -->
 ```text
-sqlty rewrite [-h] [--dialect DIALECT] [--schema SCHEMA]
-              [--config-file PATH | --isolated] [-c KEY=VALUE]
-              [--error RULE] [--warn RULE] [--ignore RULE]
-              [--exclude GLOB] [--extend-exclude GLOB]
-              [--force-exclude]
-              [--respect-gitignore | --no-respect-gitignore] [-v] [-q]
-              [--check] [--diff] [--untyped {skip,sentinel}]
-              [paths ...]
+sqlty rewrite [OPTIONS] [PATHS]...
 ```
 <!-- /generated:cli-usage-rewrite -->
 
 <!-- generated:cli-options-rewrite -->
 | Option | Description |
 |--------|-------------|
-| `--check` | Do not modify files; print `Would rewrite <file>` and exit 1 if any file needs rewriting |
+| `--check` | Do not modify files; print what would change and exit 1 if any file would |
 | `--diff` | Print a unified diff instead of modifying files; exit 1 if any file would change |
 | `--untyped {skip,sentinel}` | Row-returning queries of unknown row type: leave unwrapped (skip, default) or wrap as `SQL[UNTYPED](...)` (sentinel). Config: untyped in [tool.sqlty] |
 <!-- /generated:cli-options-rewrite -->
@@ -163,20 +155,14 @@ which `check` still checks.
 
 <!-- generated:cli-usage-strip -->
 ```text
-sqlty strip [-h] [--dialect DIALECT] [--schema SCHEMA]
-            [--config-file PATH | --isolated] [-c KEY=VALUE]
-            [--error RULE] [--warn RULE] [--ignore RULE]
-            [--exclude GLOB] [--extend-exclude GLOB] [--force-exclude]
-            [--respect-gitignore | --no-respect-gitignore] [-v] [-q]
-            [--check] [--diff]
-            [paths ...]
+sqlty strip [OPTIONS] [PATHS]...
 ```
 <!-- /generated:cli-usage-strip -->
 
 <!-- generated:cli-options-strip -->
 | Option | Description |
 |--------|-------------|
-| `--check` | Do not modify files; print `Would strip <file>` and exit 1 if any file would change |
+| `--check` | Do not modify files; print what would change and exit 1 if any file would |
 | `--diff` | Print a unified diff instead of modifying files; exit 1 if any file would change |
 <!-- /generated:cli-options-strip -->
 
@@ -194,15 +180,7 @@ Found 1 error(s)
 
 <!-- generated:cli-usage-check -->
 ```text
-sqlty check [-h] [--dialect DIALECT] [--schema SCHEMA]
-            [--config-file PATH | --isolated] [-c KEY=VALUE]
-            [--error RULE] [--warn RULE] [--ignore RULE]
-            [--exclude GLOB] [--extend-exclude GLOB] [--force-exclude]
-            [--respect-gitignore | --no-respect-gitignore] [-v] [-q]
-            [--fix] [--exit-zero] [--exit-zero-on-warning]
-            [--error-on-warning] [--statistics] [--explain]
-            [--output-format {text,json,github,sarif}]
-            [paths ...]
+sqlty check [OPTIONS] [PATHS]...
 ```
 <!-- /generated:cli-usage-check -->
 
@@ -211,11 +189,13 @@ sqlty check [-h] [--dialect DIALECT] [--schema SCHEMA]
 |--------|-------------|
 | `--fix` | Apply the fixable rules (see `sqlty rule`), write the files, then report what remains |
 | `--exit-zero` | Exit 0 even when an error-severity diagnostic is reported |
-| `--exit-zero-on-warning` | Exit 0 when no diagnostic has severity error (the default); cannot be combined with --error-on-warning |
-| `--error-on-warning` | Exit 1 when any diagnostic has severity warn; cannot be combined with --exit-zero or --exit-zero-on-warning |
+| `--exit-zero-on-warning` | Exit 0 when no diagnostic has severity error (the default). Cannot be combined with --error-on-warning |
+| `--error-on-warning` | Exit 1 when any diagnostic has severity warn. Cannot be combined with --exit-zero or --exit-zero-on-warning |
 | `--statistics` | After the summary, print how many queries were typed, partially typed, unparsed and skipped |
-| `--explain` | Under a type diagnostic, print the inference rule (id, reference, reasoning) behind each column's type and nullability |
-| `--output-format {text,json,github,sarif}` | How diagnostics are printed: text (file:line: [rule] message, the default), json (an array of objects with file, line, rule, severity, message, the start and end of what it underlines, and the fix edits), github (GitHub Actions annotations) or sarif (a SARIF 2.1.0 log, for GitHub code scanning). Summaries, --statistics and --explain are text only |
+| `--explain` | Under a type diagnostic, print the inference rule behind each column's type. The rule's id, reference and reasoning, for the type and the nullability |
+| `--output-format {text,json,github,sarif}` | How diagnostics are printed. text: file:line: [rule] message (the default); json: an array of objects with file, line, rule, severity, message, the start and end of what it underlines, and the fix edits; github: GitHub Actions annotations; sarif: a SARIF 2.1.0 log, for GitHub code scanning. Summaries, --statistics and --explain are text only |
+| `--show-files` | Print the files sqlty would check, and exit |
+| `--show-settings` | Print the settings of the first file sqlty would check, and exit |
 <!-- /generated:cli-options-check -->
 
 With `--statistics`, the last line counts the queries of the checked files:
@@ -259,14 +239,7 @@ Outside a checked query nothing is printed, and `--json` prints `null`.
 
 <!-- generated:cli-usage-complete -->
 ```text
-sqlty complete [-h] [--dialect DIALECT] [--schema SCHEMA]
-               [--config-file PATH | --isolated] [-c KEY=VALUE]
-               [--error RULE] [--warn RULE] [--ignore RULE]
-               [--exclude GLOB] [--extend-exclude GLOB]
-               [--force-exclude]
-               [--respect-gitignore | --no-respect-gitignore] [-v] [-q]
-               [--json]
-               FILE:LINE:COL [paths ...]
+sqlty complete [OPTIONS] <FILE:LINE:COL> [PATHS]...
 ```
 <!-- /generated:cli-usage-complete -->
 
@@ -293,10 +266,7 @@ Found 1 breaking change(s)
 
 <!-- generated:cli-usage-breaking -->
 ```text
-sqlty breaking [-h] [--against BASELINE] [--save PATH] [--head REF]
-               [--direction {backward,forward,both}] [-q]
-               [--output-format {text,json,github,sarif}]
-               [paths ...]
+sqlty breaking [OPTIONS] [PATHS]...
 ```
 <!-- /generated:cli-usage-breaking -->
 
@@ -319,7 +289,7 @@ Print a rule's documentation, or list every rule with its default severity.
 
 <!-- generated:cli-usage-rule -->
 ```text
-sqlty rule [-h] [name]
+sqlty rule [NAME]
 ```
 <!-- /generated:cli-usage-rule -->
 
@@ -335,14 +305,14 @@ sqlty skill --install .claude/skills
 
 <!-- generated:cli-usage-skill -->
 ```text
-sqlty skill [-h] [--install DIR | --list] [name]
+sqlty skill [OPTIONS] [NAME]
 ```
 <!-- /generated:cli-usage-skill -->
 
 <!-- generated:cli-options-skill -->
 | Option | Description |
 |--------|-------------|
-| `name` | Skill to print (default: sqlty) |
+| `NAME` | Skill to print (default: sqlty) |
 | `--install DIR` | Write every skill to DIR/NAME/ instead of printing one |
 | `--list` | List the skills and what each is for |
 <!-- /generated:cli-options-skill -->

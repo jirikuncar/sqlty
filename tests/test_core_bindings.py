@@ -1,7 +1,6 @@
 """Edges of the ``sqlty._core`` bindings no other test reaches."""
 
 import sys
-from collections.abc import Callable
 
 import pytest
 
@@ -48,25 +47,18 @@ def test_unknown_query_format() -> None:
 
 
 CONFIG = ("postgres", None, None, None, False, [], None, None)
-CHECK = (_core.check_modules, ("x = 1\n", None, 3))
-BREAKING = (_core.breaking_modules, ("x = 1\n", None, 0, 3))
+MODULE = ("x = 1\n", None, 3)
 
 
-@pytest.mark.parametrize(("check", "module"), [CHECK, BREAKING])
-def test_module_with_a_missing_configuration(
-    check: Callable[..., object], module: tuple[object, ...]
-) -> None:
+def test_module_with_a_missing_configuration() -> None:
     with pytest.raises(ValueError, match="no configuration 3"):
-        check([module], [CONFIG], version=VERSION)
+        _core.check_modules([MODULE], [CONFIG], version=VERSION)
 
 
-@pytest.mark.parametrize(("check", "module"), [CHECK, BREAKING])
-def test_modules_with_an_unknown_import_style(
-    check: Callable[..., object], module: tuple[object, ...]
-) -> None:
+def test_modules_with_an_unknown_import_style() -> None:
     config = CONFIG[:3] + ("bogus",) + CONFIG[4:]
     with pytest.raises(ValueError, match="bogus"):
-        check([module[:-1] + (0,)], [config], version=VERSION)
+        _core.check_modules([MODULE[:-1] + (0,)], [config], version=VERSION)
 
 
 def test_cursor_defaults() -> None:

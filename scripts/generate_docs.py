@@ -6,14 +6,13 @@
 Only the text between ``<!-- generated:NAME -->`` and ``<!-- /generated:NAME -->``
 is owned by this script; everything else in the pages is hand-written. The
 sources are ``KEY_DOCS`` / ``FUNCTION_KEY_DOCS`` / ``DEFAULT_EXCLUDE`` in
-``sqlty._config`` and the argparse parser from ``sqlty._cli.build_parser``.
+``sqlty._config`` and the clap commands of ``sqlty-cli`` (``sqlty._core.cli_reference``).
 ``tests/test_docs.py`` runs the ``--check`` comparison.
 """
 
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import sys
 from pathlib import Path
@@ -76,55 +75,33 @@ def config_blocks() -> dict[str, str]:
     }
 
 
-def _subparsers(parser: argparse.ArgumentParser) -> dict[str, argparse.ArgumentParser]:
-    for action in parser._actions:
-        if isinstance(action, argparse._SubParsersAction):
-            return dict(action.choices)
-    raise AssertionError("no subcommands")
+def _usage(usage: str) -> str:
+    return f"```text\n{usage}\n```\n"
 
 
-def _usage(parser: argparse.ArgumentParser) -> str:
-    # Continuation lines are indented to the end of "usage: "; drop that prefix.
-    lines = parser.format_usage().rstrip("\n").split("\n")
-    lines = [lines[0].removeprefix("usage: "), *(line[len("usage: ") :] for line in lines[1:])]
-    return "```text\n" + "\n".join(lines) + "\n```\n"
-
-
-def _invocation(parser: argparse.ArgumentParser, action: argparse.Action) -> str:
-    text = parser._get_formatter()._format_action_invocation(action).replace(", ", "`, `")
-    return f"`{text} ...`" if action.nargs == "*" and not action.option_strings else f"`{text}`"
-
-
-def _options(parser: argparse.ArgumentParser, skip: set[str]) -> str:
-    rows = [
-        (_invocation(parser, a), a.help or "")
-        for a in parser._actions
-        if a.dest not in skip and a.help
-    ]
-    return _table(("Option", "Description"), rows)
+def _help(text: str) -> str:
+    return text.replace("\n\n", ". ").replace("\n", " ")
 
 
 def cli_blocks() -> dict[str, str]:
-    from sqlty._cli import build_parser
+    from sqlty._core import cli_reference
 
-    # Wrapped usage depends on the terminal width.
-    os.environ["COLUMNS"] = "80"
-    parser = build_parser()
-    commands = _subparsers(parser)
-    blocks = {"cli-usage": _usage(parser)}
-    shared = set.intersection(*({a.dest for a in commands[c]._actions} for c in COMMANDS[:3]))
+    commands = {
+        name: (usage, {o: h for o, h in options if o != "-h, --help"})
+        for name, usage, options in cli_reference()
+    }
+    shared = set.intersection(*(set(commands[c][1]) for c in COMMANDS[:3]))
+    blocks = {"cli-usage": _usage(commands["sqlty"][0])}
+    rewrite = commands["rewrite"][1]
     blocks["cli-options-common"] = _table(
-        ("Option", "Description"),
-        [
-            (_invocation(commands["rewrite"], a), a.help or "")
-            for a in commands["rewrite"]._actions
-            if a.dest in shared
-        ],
+        ("Option", "Description"), [(f"`{o}`", _help(rewrite[o])) for o in rewrite if o in shared]
     )
     for name in COMMANDS:
-        blocks[f"cli-usage-{name}"] = _usage(commands[name])
+        usage, options = commands[name]
+        blocks[f"cli-usage-{name}"] = _usage(usage)
+        rows = [(f"`{o}`", _help(h)) for o, h in options.items() if o not in shared and h]
         if name != "rule":
-            blocks[f"cli-options-{name}"] = _options(commands[name], skip=shared)
+            blocks[f"cli-options-{name}"] = _table(("Option", "Description"), rows)
     return blocks
 
 

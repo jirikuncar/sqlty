@@ -342,8 +342,8 @@ sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
 - `tests/test_core_invariants.py` checks idempotency and round trips over every
   mdtest code block: new mdtests extend it automatically.
 - `docs/reference/configuration.md` and `cli.md` hold tables between `<!-- generated:NAME -->`
-  markers, rendered by `scripts/generate_docs.py` from `KEY_DOCS` in `_config.py` and the argparse
-  parser. Edit those, then run `make generate-docs`; `test_generated_reference_is_current` fails on drift.
+  markers, rendered by `scripts/generate_docs.py` from `KEY_DOCS` in `_config.py` and the clap
+  commands of `sqlty-cli`. Edit those, then run `make generate-docs`; `test_generated_reference_is_current` fails on drift.
 - `tests/test_docs.py` checks that the rules table in `docs/reference/rules.md`
   matches `RULES`, that every rule has a page in `src/sqlty/rules/`, that
   relative links resolve, that `examples/` need no rewrite, and runs the
@@ -421,19 +421,18 @@ src/sqlty/
 ├── _core.pyi            # Stub for sqlty._core (rust/crates/sqlty-ext/src/lib.rs)
 ├── _lint.py             # Lint rules: severity, diagnostics, RuleConfig
 ├── _decode.py           # Magic codec decoder
-├── _cli.py              # CLI parser for complete, breaking and server
-├── _lsp_bridge.py       # Workspace of sqlty server with a breaking baseline
+├── _cli.py              # `sqlty` entry point: runs the Rust CLI, reports crashes
 └── magic.py             # Python codec registration
 rust/crates/             # Cargo workspace (root: rust/Cargo.toml)
 ├── sqlty-sql/           # analyzer/ (type inference), ddl; no PyO3
 │   └── rules/           # inference rules (*.inference.toml), compiled by build.rs; see its README
 ├── sqlty-python/        # tokens, rewriter, checker, fixer
 ├── sqlty-project/       # a project read from disk: settings, helpers, checks of sqlty server
-├── sqlty-cli/           # the sqlty commands: rewrite, strip, format, check, rule, skill, version;
+├── sqlty-cli/           # every sqlty command, the language server and breaking included;
 │                        # main.rs is a standalone `sqlty` executable (cargo run -p sqlty-cli)
 ├── sqlty-lsp/           # the language server of sqlty server; tests without Python
 ├── sqlty-wasm/          # JSON in, JSON out, for WebAssembly: the docs playground (make playground)
-└── sqlty-ext/           # lib.rs (PyO3), builds sqlty._core; server.rs runs sqlty-lsp
+└── sqlty-ext/           # lib.rs (PyO3), builds sqlty._core; cli.rs runs sqlty-cli
 editors/vscode/          # VS Code client of sqlty server; see its README
 proofs/                  # Lean 4 model of SqlType::python, with proofs; see its README
 ```

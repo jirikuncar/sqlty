@@ -13,7 +13,6 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from sqlty._core import Schema
-from sqlty._core import breaking_modules as _breaking_modules
 from sqlty._core import check_modules as _check_modules
 from sqlty._core import module_diagnostics as _module_diagnostics
 from sqlty._helpers import HelperIndex
@@ -152,24 +151,6 @@ def check_modules(
             (key, diag) for key, diag in zip(redundant, diagnostics, strict=True) if key is not None
         ]
     return [diagnostics for diagnostics, _, _ in found]
-
-
-def breaking_modules(
-    modules: Sequence[tuple[ParsedSource, ModuleConfig, ModuleConfig]], jobs: int | None
-) -> list[list[Diagnostic]]:
-    """``breaking_source`` of every ``(module, own, against)``, in one Rust call that checks
-    them on ``jobs`` threads (all cores when None)."""
-    configs = _Configs()
-    found = _breaking_modules(
-        [
-            (parsed.text, parsed.module, configs.index(own), configs.index(against))
-            for parsed, own, against in modules
-        ],
-        configs.rust(),
-        version=sys.version_info[:2],
-        jobs=jobs,
-    )
-    return found
 
 
 class _Configs:
