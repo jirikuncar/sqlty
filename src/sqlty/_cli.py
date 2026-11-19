@@ -18,6 +18,10 @@ def main(argv: list[str] | None = None) -> None:
     args = sys.argv[1:] if argv is None else argv
     try:
         code = cli(["sqlty", *args])
+        sys.stdout.flush()
+    except BrokenPipeError:
+        _discard_stdout()
+        code = 1
     except KeyboardInterrupt, SystemExit:
         raise
     except BaseException as exc:  # a Rust panic is a BaseException
@@ -53,6 +57,13 @@ def issue_url(cause: str) -> str:
     return "https://github.com/jirikuncar/sqlty/issues/new?template=bug_report.yml&" + urlencode(
         fields, quote_via=quote, safe=""
     )
+
+
+def _discard_stdout() -> None:
+    """Send what is left of stdout to the null device once its reader is gone, as the
+    ``signal`` docs advise, so the interpreter does not fail flushing it at exit."""
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull, sys.stdout.fileno())
 
 
 def _hard_exit(code: int) -> NoReturn:

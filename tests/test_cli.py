@@ -822,6 +822,24 @@ def test_internal_error_exits_2(tmp_path, monkeypatch, capsys) -> None:
     assert issue_url("RuntimeError: boom") in err
 
 
+@pytest.mark.parametrize("files", [1, 5000])
+def test_a_closed_pipe_is_not_an_internal_error(tmp_path, files) -> None:
+    """``sqlty ... | head``: the reader leaves before the first write or before the flush."""
+    for n in range(files):
+        (tmp_path / f"q{n}.py").touch()
+    read, write = os.pipe()
+    os.close(read)
+    with os.fdopen(write, "w") as stdout:
+        found = subprocess.run(
+            [sys.executable, "-m", "sqlty", "check", "--show-files", str(tmp_path)],
+            stdout=stdout,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+    assert (found.returncode, found.stderr) == (1, "")
+
+
 def test_a_panic_is_an_internal_error(monkeypatch, capsys) -> None:
     from sqlty import _core
 
