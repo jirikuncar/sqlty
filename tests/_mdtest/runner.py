@@ -10,7 +10,10 @@ import tokenize
 from functools import cached_property
 
 import sqlty.core as core
+from sqlty import _core
 from sqlty._config import MAX_QUERY_VARIANTS, driver_types, requires_closed
+from sqlty._source import ParsedSource
+from tests._json_shapes import json_shapes
 
 from .parser import Assertion, Kind, Section, Unit
 from .updater import Updater
@@ -106,18 +109,18 @@ class Run:
                     return "None"
                 return "\n".join(f"{c.name}: {c.python_type} ({c.sql_type})" for c in columns)
             case "json":
-                shapes = core.json_shapes(text, dialect=self.dialect, schema_sql=self.schema_sql)
+                shapes = json_shapes(text, dialect=self.dialect, schema_sql=self.schema_sql)
                 return "\n".join(f"{name}: {shape}" for name, shape in shapes) or "None"
             case "rules":
-                explained = core.explain_select(
+                explained = _core.explain_select(
                     text, dialect=self.dialect, schema_sql=self.schema_sql
                 )
                 if explained is None:
                     return "None"
                 return "\n".join(
-                    f"{c.name}: {c.type_rule.id if c.type_rule else '-'}"
-                    f" / {c.nullability_rule.id if c.nullability_rule else '-'}"
-                    for c in explained
+                    f"{name}: {type_rule[0] if type_rule else '-'}"
+                    f" / {nullability_rule[0] if nullability_rule else '-'}"
+                    for name, type_rule, nullability_rule in explained
                 )
             case "params":
                 params = core.analyze_params(text, dialect=self.dialect, schema_sql=self.schema_sql)
@@ -178,15 +181,16 @@ class Run:
             case "hover":
                 if unit.cursor is None:
                     raise AssertionError("`# hover:` needs a <CURSOR> in the code")
-                hovered = core.hover_source(
+                parsed = ParsedSource(text)
+                hovered = _core.hover_source(
                     text,
-                    *unit.cursor,
+                    parsed.offset(*unit.cursor),
                     dialect=self.dialect,
                     schema_sql=self.schema_sql,
                     import_style=self.import_style,
-                    helpers=self._helpers,
+                    helper_starts=core._helper_starts(parsed, self._helpers),  # noqa: SLF001
                 )
-                return "None" if hovered is None else hovered.contents
+                return "None" if hovered is None else hovered[2]
             case "highlighted":
                 found = core.highlight_source(
                     text,

@@ -86,15 +86,7 @@ A column gets the rules of its outermost operator or function call. A column
 reference, a cast, a literal or a set operation has none. A rule shared by
 several databases cites the documentation of each; only the configured
 dialect's is printed, and every one for a dialect none of them documents, such
-as `generic`. From Python,
-`sqlty.core.explain_select` returns the same rules:
-
-```pycon
->>> from sqlty.core import explain_select
->>> [column] = explain_select("SELECT SUM(qty) AS total FROM orders", schema_sql="CREATE TABLE orders (qty SMALLINT NOT NULL)")
->>> column.type_rule.id, column.nullability_rule.id
-('postgres.aggregate.sum-integers', 'postgres.aggregate.sum-integers')
-```
+as `generic`.
 
 The analyzer records the rules only when asked to, so `check` without
 `--explain` pays nothing for them. To add or change a rule, see

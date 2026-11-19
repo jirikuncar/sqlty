@@ -147,8 +147,7 @@ SELECT jsonb_build_object('id', id, 'note', note) FROM lines
 ```
 
 `note?` may be missing: only one branch builds it, so a `TypedDict` must declare it
-`NotRequired`. `core.json_shapes()` returns the shapes of a query's columns; `-- json:` in
-the examples above is that function.
+`NotRequired`. `-- json:` in the examples above is the shape sqlty reads for each column.
 
 ## What is not checked
 
