@@ -1,7 +1,8 @@
 # Query variants from branches
 
 > **Status:** stage 1 implemented behind `preview = true` (`rust/crates/sqlty-python/src/variants.rs`).
-> Acceptance spec: `tests/mdtest/check/query_variants.md`.
+> Acceptance spec: `tests/mdtest/check/query_variants.md`. The design below is the original
+> Python one; the implementation is `variants.rs` and `compose.rs` in `sqlty-python`.
 
 ## Problem
 
@@ -144,7 +145,7 @@ What keeps an implementation honest, in order of strength:
    reviewed commit that updates the digest.
 2. **No collateral edits.** No existing mdtest assertion, `benchmarks/baseline.json`
    entry or rule default changes. Reviewer check:
-   `git diff origin/main --stat -- tests/mdtest docs src/sqlty/rules benchmarks/baseline.json`
+   `git diff origin/main --stat -- tests/mdtest docs benchmarks/baseline.json`
    lists only the spec file and the doc pages of phase 6.
 3. **Differential oracle** (`tests/test_query_variants_fuzz.py`, Hypothesis, run with
    `SQLTY_FUZZ=1` like `tests/test_fuzz.py`): generate functions from a grammar of
