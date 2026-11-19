@@ -796,20 +796,24 @@ fn imports_of(source: &str, tokens: &[Token]) -> Vec<(Option<String>, String, St
             .map_or("", |t: &Token| &source[t.span.clone()])
     };
     let mut found = Vec::new();
+    let mut logical = 0;
     for i in 0..tokens.len() {
-        let start = tokens[i].span.start;
+        if i > 0 && tokens[i - 1].kind == Kind::Newline {
+            logical = i;
+        }
+        let (from, names_at) = match text(i) {
+            "from" if text(i + 2) == "import" => (Some(text(i + 1).to_string()), i + 3),
+            "import" => (None, i + 1),
+            _ => continue,
+        };
         // The logical line up to the token: a compound header may span physical lines.
-        let first = tokens[..i]
-            .iter()
-            .rposition(|t| t.kind == Kind::Newline)
-            .map_or(0, |n| n + 1);
-        let first = (first..i)
+        let first = (logical..i)
             .find(|&j| tokens[j].kind != Kind::Comment)
             .unwrap_or(i);
         let line_start = source[..tokens[first].span.start]
             .rfind('\n')
             .map_or(0, |n| n + 1);
-        let line = &source[line_start..start];
+        let line = &source[line_start..tokens[i].span.start];
         let statement = match text(i.wrapping_sub(1)) {
             "" | "\n" | "\r\n" => true,
             ";" => !is_compound(line),
@@ -818,11 +822,6 @@ fn imports_of(source: &str, tokens: &[Token]) -> Vec<(Option<String>, String, St
         if !statement || line.starts_with([' ', '\t']) {
             continue;
         }
-        let (from, names_at) = match text(i) {
-            "from" if text(i + 2) == "import" => (Some(text(i + 1).to_string()), i + 3),
-            "import" => (None, i + 1),
-            _ => continue,
-        };
         let mut pairs = Vec::new();
         let mut names = Vec::new();
         for token in &tokens[names_at..] {
@@ -1276,6 +1275,19 @@ q = SQL[tuple[int]]("--sql\nSELECT 1::INTEGER")"#;
             .map(|(n, b)| (n.to_string(), b.to_string()))
             .collect();
         assert_eq!(sqlty_imports(&Scan::new(source, "SQL")), expected);
+    }
+
+    #[test]
+    fn test_imports_after_a_long_line() {
+        // Each token used to scan back to its line's start: quadratic in the line's length.
+        let long = ["1"; 50_000].join("+");
+        let source =
+            format!("x = {long}\nfrom sqlty import SQL\nx = {long}; from sqlty import A\n");
+        let names = |name: &str| (name.to_string(), name.to_string());
+        assert_eq!(
+            sqlty_imports(&Scan::new(&source, "SQL")),
+            [names("SQL"), names("A")]
+        );
     }
 
     #[test]

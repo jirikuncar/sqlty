@@ -122,6 +122,7 @@ impl Schemas {
                 "statement" => {
                     format!("Schema statement could not be parsed and is ignored: {name}")
                 }
+                "limit" => format!("Schema is too large to load; ignored: {name}"),
                 kind => {
                     format!("Schema {kind} {name} could not be parsed; its columns are unknown")
                 }
@@ -474,7 +475,11 @@ fn settings(
             .flatten()
             .filter_map(|(rule, severity)| Some((rule.clone(), severity.as_str()?.to_string())))
             .collect(),
-        variants: preview.then(|| variants.map_or(MAX_QUERY_VARIANTS, |most| most.max(1) as usize)),
+        variants: preview.then(|| {
+            variants.map_or(MAX_QUERY_VARIANTS, |most| {
+                usize::try_from(most.max(1)).unwrap_or(usize::MAX)
+            })
+        }),
         coerce: strings(table, "coerce-row-types").into_iter().collect(),
         functions: entries(table, None),
         format_command: strings(table, "format-command"),

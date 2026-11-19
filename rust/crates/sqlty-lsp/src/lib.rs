@@ -2,8 +2,8 @@
 //! hover and SQL highlighting for Python files, and the diagnostics of `.sql` query files.
 //!
 //! The protocol runs on the thread that calls [`run`]. Checks run on one worker thread that
-//! owns a [`Workspace`] per project root: the Python passes hold the GIL, so two checks could
-//! not overlap anyway. The worker checks the newest text of each buffer and publishes the
+//! owns a [`Workspace`] per project root: a breaking baseline is checked in Python, which
+//! holds the GIL, so two checks could not overlap anyway. The worker checks the newest text of each buffer and publishes the
 //! result only while that text is current. Completion is answered on the protocol thread
 //! from what the buffer's last check left (see [`CompletionContext`]), never behind a check;
 //! so are hover and semantic tokens.

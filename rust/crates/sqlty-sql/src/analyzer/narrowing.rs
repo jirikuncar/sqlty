@@ -531,8 +531,8 @@ impl<'a> Analyzer<'a> {
         else {
             return Vec::new();
         };
-        let kept = known.iter().filter(|v| !excluded.contains(v)).cloned();
-        vec![(reference, name, kept.collect())]
+        let kept = crate::values::difference(&known, &excluded);
+        vec![(reference, name, kept)]
     }
 
     /// `column = constant` or `column IN (constants)`: the values the column keeps. Only

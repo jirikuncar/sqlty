@@ -11,9 +11,9 @@ import typing
 from sqlty._source import ParsedSource
 
 if typing.TYPE_CHECKING:
-    from sqlty._helpers import HelperIndex
+    from tests.type_oracle.resolver import Resolver
 
-from sqlty._type_extractor.ast_fields import (
+from tests.type_oracle.ast_fields import (
     _IMPORTED_TYPES,
     _ast_annotations,
     _ast_key_types,
@@ -32,15 +32,15 @@ from sqlty._type_extractor.ast_fields import (
     _set_openness,
     _set_pydantic_names,
 )
-from sqlty._type_extractor.info import TypeInfo
-from sqlty._type_extractor.pydantic_types import pydantic_names
-from sqlty._type_extractor.stdlib import stdlib_class
-from sqlty._type_extractor.symbols import ModuleTypes
+from tests.type_oracle.info import TypeInfo
+from tests.type_oracle.pydantic_types import pydantic_names
+from tests.type_oracle.stdlib import stdlib_class
+from tests.type_oracle.symbols import ModuleTypes
 
 
 def extract_type_definitions(
     source: str | ParsedSource,
-    helpers: HelperIndex | None = None,
+    helpers: Resolver | None = None,
     module: str | None = None,
 ) -> dict[str, TypeInfo]:
     """Extract type definitions from Python source code.
@@ -53,7 +53,7 @@ def extract_type_definitions(
     - ``Protocol`` classes, whose attributes a row must have
 
     Field types are read from the AST; nothing is imported or executed. Names imported
-    from modules of ``helpers`` (a ``HelperIndex``) are read from those modules' source,
+    from modules of ``helpers`` (a ``Resolver``) are read from those modules' source,
     standard-library classes from typeshed's class graph (see ``stdlib``) and Pydantic's
     types from a table (see ``pydantic_types``); any other imported name is unknown.
     ``module`` is the name of ``source``, for relative imports.

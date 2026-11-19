@@ -35,6 +35,21 @@ fn analyze_types_each_query_and_its_parameters() {
 }
 
 #[test]
+fn analyze_highlights_a_long_line_in_utf16_units() {
+    // Each offset used to be counted from the start of the source: quadratic in its length.
+    let source = format!(
+        "é = \"--sql\\nSELECT 'ü', {}\"\n",
+        vec!["1"; 50_000].join(", ")
+    );
+    let answer =
+        ask(&json!({"op": "analyze", "source": source, "schema": SCHEMA, "dialect": "postgres"}));
+    let highlights = answer["highlights"].as_array().unwrap();
+    assert_eq!(highlights.len(), 3 + 50_000);
+    assert_eq!(highlights[2], json!([19, 22, "string"]));
+    assert_eq!(highlights[3], json!([24, 25, "number"]));
+}
+
+#[test]
 fn analyze_reports_diagnostics_in_utf16_units() {
     let source = "é = SQL[tuple[str]](\"--sql\\nSELECT nme FROM users\")\n";
     let answer =

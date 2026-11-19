@@ -119,8 +119,9 @@ impl SchemaColumn {
     }
 }
 
-/// `(kind, name)` of a schema table or view that could not be parsed, or `("statement",
-/// text)` of a statement that does not parse and would set keys, `NOT NULL`, defaults or a type.
+/// `(kind, name)` of a schema table or view that could not be parsed, `("statement", text)`
+/// of a statement that does not parse and would set keys, `NOT NULL`, defaults or a type, or
+/// `("limit", name)` of what the schema's size limits leave unknown.
 pub type SkippedObject = (&'static str, String);
 
 /// The analyzer's internal results; nothing fails inference, a type is unknown instead.

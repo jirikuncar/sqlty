@@ -8,9 +8,9 @@ import typing
 if typing.TYPE_CHECKING:
     pass
 
-from sqlty._type_extractor.ast_fields import _annotation_type, _split_type_args
-from sqlty._type_extractor.info import TypeInfo, _column_type
-from sqlty._type_extractor.subtype import (
+from tests.type_oracle.ast_fields import _annotation_type, _split_type_args
+from tests.type_oracle.info import TypeInfo, _column_type
+from tests.type_oracle.subtype import (
     _LAX_FROM,
     _PROMOTED_FROM,
     _erase,
@@ -41,7 +41,7 @@ def check_type_compatibility(
         True if types are compatible, False if they mismatch.
 
     Example:
-        >>> from sqlty._type_extractor import extract_type_definitions
+        >>> from tests.type_oracle import extract_type_definitions
         >>> src = "import typing as t, not_installed\\nclass Row(t.NamedTuple):\\n id: int | t.Any\\n flag: bool"
         >>> info = extract_type_definitions(src)["Row"]
         >>> check_type_compatibility(info, "id", "str"), check_type_compatibility(info, "flag", "int")
@@ -191,7 +191,7 @@ def field_type(user_type: TypeInfo, column_name: str) -> typing.Any:
     unknown or its annotation can't be resolved.
 
     Example:
-        >>> from sqlty._type_extractor import extract_type_definitions
+        >>> from tests.type_oracle import extract_type_definitions
         >>> row = extract_type_definitions("from typing import TypedDict\\nclass R(TypedDict):\\n    a: int")["R"]
         >>> row
         TypeInfo('R', fields=[('a', 'int')], kind='TypedDict')

@@ -53,12 +53,6 @@ def analyze_params(
     dialect: str = "postgres",
     schema_sql: str | Schema | None = None,
 ) -> list[tuple[int, str | None, str | None, str | None, bool | None, bool, str | None]] | None: ...
-def composite_fields(
-    type_name: str,
-    *,
-    dialect: str = "postgres",
-    schema_sql: str | Schema | None = None,
-) -> list[tuple[str, str | None, str | None, bool | None]] | None: ...
 def query_diagnostics(
     sql: str,
     *,
@@ -93,9 +87,6 @@ def add_param_types(
 ) -> str: ...
 def strip_source(source: str, *, import_style: str | None = None) -> str: ...
 def format_source(source: str, *, dialect: str = ..., import_style: str | None = None) -> str: ...
-def sqruff_findings(
-    source: str, *, dialect: str = ..., import_style: str | None = None
-) -> list[tuple[str, str, int, int, int]]: ...
 def fix_source(
     source: str,
     *,
@@ -125,9 +116,6 @@ def expand_star(
     dialect: str = "postgres",
     schema_sql: str | Schema | None = None,
 ) -> str | None: ...
-def select_star_finding(
-    sql: str, *, dialect: str = "postgres", has_schema: bool = False
-) -> tuple[str, str] | None: ...
 def check_source(
     source: str,
     *,
@@ -147,9 +135,6 @@ def check_queries(
     query_format: str = "auto",
     name: str = "",
 ) -> list[Diagnostic]: ...
-def named_queries(
-    source: str, *, query_format: str = "auto", name: str = ""
-) -> list[tuple[str, str, list[tuple[str, str]]]]: ...
 def module_facts(
     source: str,
 ) -> (
@@ -176,21 +161,6 @@ def template_strings(
     source: str,
 ) -> list[tuple[int, tuple[int, int], str | None, list[str | None]]] | None: ...
 def module_outline(source: str) -> tuple[ast.Module, list[ast.ClassDef]] | None: ...
-def helper_sites(
-    source: str, names: list[str], index: ModuleIndex | None = None, module: str | None = None
-) -> (
-    list[
-        tuple[
-            tuple[int, int],
-            str | None,
-            str,
-            list[_SiteArg],
-            list[tuple[str | None, _SiteArg]],
-            str | None,
-        ]
-    ]
-    | None
-): ...
 
 _SiteArg = tuple[
     bool, tuple[int, int], str | None, str | None, list[tuple[int | str, str | None]] | None
@@ -324,9 +294,6 @@ def module_ignores(
 def rendered_compositions(
     source: str, version: tuple[int, int]
 ) -> list[tuple[int, bool, str | None]] | None: ...
-def wrapped_queries(
-    source: str, *, import_style: str | None = None
-) -> list[tuple[int, str, str | None, tuple[int, int]]]: ...
 def query_sites(
     source: str, *, import_style: str | None = None, any_calls: list[int] = ...
 ) -> list[tuple[int, str, str]]: ...

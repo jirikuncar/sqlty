@@ -212,6 +212,9 @@ pub fn analyze_params(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> 
     )
 }
 
+/// The most parameters a query can bind: PostgreSQL's wire protocol counts them in 16 bits.
+const MAX_PARAMS: usize = u16::MAX as usize;
+
 /// The number of a `$N` placeholder, looking through parentheses.
 fn placeholder_index(expr: &Expr) -> Option<usize> {
     match expr {
@@ -220,7 +223,7 @@ fn placeholder_index(expr: &Expr) -> Option<usize> {
                 .strip_prefix(['$', '?'])?
                 .parse()
                 .ok()
-                .filter(|n| *n > 0),
+                .filter(|n| (1..=MAX_PARAMS).contains(n)),
             _ => None,
         },
         Expr::Nested(inner) => placeholder_index(inner),
@@ -1188,6 +1191,16 @@ mod tests {
             analyze_params("SELEC 1 %s", "postgres", Some(&schema)),
             None
         );
+    }
+
+    #[test]
+    fn placeholder_numbers_past_max_params_are_not_parameters() {
+        assert_eq!(
+            params("SELECT ?65535 = id FROM users", "sqlite").len(),
+            65535
+        );
+        assert!(params("SELECT ?99999999999 = id FROM users", "sqlite").is_empty());
+        assert!(pg("SELECT $65536").is_empty());
     }
 
     /// Statements and expressions whose placeholders only some code reads.
