@@ -41,6 +41,7 @@ maximum of `--repeats` runs (RSS from `wait4` of that child).
 
 The scenarios from `precommit` on run 3 times, not `--repeats`: they are short, and a
 run over budget is measured again.
+
 - `schema_load`: parse the 400-500 table schema through one `analyze_select`.
 - `schema_load_unresolved_alters`: 2000 tables plus 2000 `ALTER TABLE` on tables
   that do not exist.
