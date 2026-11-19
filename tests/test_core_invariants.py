@@ -70,7 +70,7 @@ def test_every_inference_rule_is_asserted() -> None:
     }
     asserted = {
         rule
-        for md in [*MARKDOWN, ROOT / "README.md", *(ROOT / "src" / "sqlty" / "rules").glob("*.md")]
+        for md in [*MARKDOWN, ROOT / "README.md"]
         for line in re.findall(r"^-- rules: .*", md.read_text(), re.MULTILINE)
         for rule in line.split()
     }

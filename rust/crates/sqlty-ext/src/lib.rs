@@ -9,7 +9,7 @@
 //!   `explain_select`, `expand_star`, `returns_rows`.
 //! - Source: `rewrite_source`, `add_param_types`, `strip_source`, `fix_source`, `check_source`,
 //!   `wrapped_queries`, `query_sites`.
-//! - Schema: `load_schema`, `schema_skipped_objects`, `name_rules`.
+//! - Schema: `load_schema`, `schema_skipped_objects`, `name_rules`, `rules`.
 //! - Configuration: `validate_config` and the key lists.
 //!
 //! Parsed schemas are cached per `(schema text, dialect)` in a small LRU shared by all
@@ -46,7 +46,6 @@ static LAZY_COMMIT: extern "C" fn() = {
 
 mod cli;
 mod config;
-mod outline;
 mod server;
 
 use sqlty_python::checker;
@@ -68,7 +67,7 @@ use pyo3::pybacked::PyBackedStr;
 
 use rewriter::ImportStyle;
 use sqlty_python::options::{ConfigError, Options};
-use sqlty_python::rules::RuleConfig;
+use sqlty_python::rules::{Rule, RuleConfig};
 
 type ColumnTuple = (String, Option<String>, Option<String>);
 type NullableColumnTuple = (
@@ -557,9 +556,24 @@ fn dialect_names() -> Vec<&'static str> {
 /// The rules that judge the names a query uses.
 #[pyfunction]
 fn name_rules() -> Vec<&'static str> {
-    sqlty_sql::diagnostics::NameRule::ALL
+    Rule::SQL.iter().map(|rule| rule.name()).collect()
+}
+
+/// `(name, default severity, fixable, summary, group)` of every lint rule, in the order
+/// `sqlty rule` lists them.
+#[pyfunction]
+fn rules() -> Vec<(&'static str, &'static str, bool, &'static str, &'static str)> {
+    Rule::ALL
         .iter()
-        .map(|rule| rule.name())
+        .map(|rule| {
+            (
+                rule.name(),
+                rule.default_severity().as_str(),
+                rule.fixable(),
+                rule.summary(),
+                rule.group().name(),
+            )
+        })
         .collect()
 }
 
@@ -1036,7 +1050,7 @@ fn module_calls(
         sqlty_python::check::sites(&parsed, helpers.as_deref(), module, variants)
             .into_iter()
             .map(|site| {
-                let unchecked = site.unchecked.map(sqlty_python::rules::Rule::name);
+                let unchecked = site.unchecked.map(Rule::name);
                 (site.typed, site.queries, unchecked, site.start)
             })
             .collect()
@@ -1215,13 +1229,6 @@ fn template_strings(py: Python<'_>, source: &str) -> Option<Vec<PyTemplate>> {
                 .collect(),
         )
     })
-}
-
-/// `ParsedSource.outline` and its classes, built in Rust (see `outline`), or None where Rust
-/// does not read `source`.
-#[pyfunction]
-fn module_outline<'py>(py: Python<'py>, source: &str) -> PyResult<Option<outline::Outline<'py>>> {
-    outline::outline(py, source)
 }
 
 fn py_params(params: Option<Vec<sqlty_python::scopes::Param>>) -> Option<Vec<PyParam>> {
@@ -2170,6 +2177,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(analyze_columns, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_params, m)?)?;
     m.add_function(wrap_pyfunction!(name_rules, m)?)?;
+    m.add_function(wrap_pyfunction!(rules, m)?)?;
     m.add_function(wrap_pyfunction!(dialect_names, m)?)?;
     m.add_function(wrap_pyfunction!(python_types, m)?)?;
     m.add_function(wrap_pyfunction!(schema_skipped_objects, m)?)?;
@@ -2184,7 +2192,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(check_source, m)?)?;
     m.add_function(wrap_pyfunction!(check_queries, m)?)?;
     m.add_function(wrap_pyfunction!(module_facts, m)?)?;
-    m.add_function(wrap_pyfunction!(module_outline, m)?)?;
     m.add_function(wrap_pyfunction!(template_strings, m)?)?;
     m.add_function(wrap_pyfunction!(unparse_expression, m)?)?;
     m.add_function(wrap_pyfunction!(type_definitions, m)?)?;

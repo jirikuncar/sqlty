@@ -10,6 +10,8 @@ architecture live in [DEVELOPMENT.md](DEVELOPMENT.md).
   [`review` skill](.claude/skills/review/SKILL.md), given the branch name only.
   `.claude/skills/` is for contributors and not shipped, unlike `skills/`.
 - Plans live in `plans/`, named `YYYY-MM-DD-<slug>.md` after the day they were written.
+  Delete a plan once it has shipped; move what is left to `plans/2026-02-13-future.md`
+  or an issue.
 
 ## AI disclosure
 
@@ -54,8 +56,8 @@ assertions show which rule typed a column; every rule needs one, in
 `skills/<name>/SKILL.md` (and its `references/`) are the Agent Skills, installed
 through the plugin manifests (`.claude-plugin/`, `.codex-plugin/`,
 `.cursor-plugin/`) or `sqlty skill --install`. `rust/crates/sqlty-cli/build.rs`
-compiles them, and the rule pages of `src/sqlty/rules/`, into the extension: rebuild it
-after editing one, or `test_agent_skills_are_compiled_in` fails. A new skill gets a row in the table of
+compiles them into the extension: rebuild it after editing one, or
+`test_agent_skills_are_compiled_in` fails. A new skill gets a row in the table of
 `docs/recipes/agents.md`.
 
 ## Completion budget
@@ -123,13 +125,17 @@ Every new feature, bug fix, or behavior change **must** have an mdtest. The
 format follows [ty's mdtest](https://github.com/astral-sh/ruff/blob/main/crates/ty_test/README.md);
 the plugin is `tests/_mdtest/`, and `mdtest_paths` in `pyproject.toml` lists
 the collected files: `tests/mdtest/` (specification), `docs/` and `README.md`
-(user docs, also the Zensical site), `src/sqlty/rules/` (one page per lint rule, printed by
-`sqlty rule NAME`). Every test runs through `sqlty.core`.
+(user docs, also the Zensical site; `docs/reference/rules/` has one page per lint rule, also
+printed by `sqlty rule NAME`). Every test runs through `sqlty.core`.
 
 ### Where to add tests
 
 User-visible behavior belongs in `docs/guide/` too; edge cases only in
-`tests/mdtest/`. A new lint rule needs `src/sqlty/rules/<name>.md`.
+`tests/mdtest/`. A new lint rule is its page `docs/reference/rules/<name>.md`, with the front matter
+(`order`, `group`, `severity`, `fixable`, `summary`, `origin`) that is the only place its metadata
+is written, its row in the table of `docs/reference/rules.md`, and its check code. The
+`sqlty-rules` crate generates `Rule` and the Python `RULES` from the pages, and `build.rs` fails
+on a page that breaks the format.
 
 | Feature area | Directory | Example file |
 |-------------|-----------|-------------|
@@ -261,14 +267,14 @@ sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
 
 ### README and docs
 
-- README.md, `docs/` and `src/sqlty/rules/` are mdtest files; their assertions run with the suite.
+- README.md and `docs/` are mdtest files; their assertions run with the suite.
 - `tests/test_core_invariants.py` checks idempotency and round trips over every
   mdtest code block: new mdtests extend it automatically.
 - `docs/reference/configuration.md` and `cli.md` hold tables between `<!-- generated:NAME -->`
   markers, rendered by `scripts/generate_docs.py` from `KEY_DOCS` in `_config.py` and the argparse
   parser. Edit those, then run `make generate-docs`; `test_generated_reference_is_current` fails on drift.
 - `tests/test_docs.py` checks that the rules table in `docs/reference/rules.md`
-  matches `RULES`, that every rule has a page in `src/sqlty/rules/`, that
+  matches `RULES`, that every rule has a page in `docs/reference/rules/`, that
   relative links resolve, that `examples/` need no rewrite, and runs the
   `>>>` examples in `docs/reference/python-api.md`.
 - Focus on **motivated examples** — show the problem first, then the solution.

@@ -147,7 +147,7 @@ function diagnostic(found: Found): vscode.Diagnostic {
   created.source = "sqlty";
   created.code = {
     value: found.rule,
-    target: vscode.Uri.parse(`https://sqlty.kuncar.dev/reference/rules/#${found.rule}`),
+    target: vscode.Uri.parse(`https://sqlty.kuncar.dev/reference/rules/${found.rule}/`),
   };
   return created;
 }
