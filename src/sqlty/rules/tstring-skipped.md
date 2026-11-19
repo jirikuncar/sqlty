@@ -5,6 +5,7 @@ severity = "warn"
 fixable = false
 summary = "t-string with --sql prefix skipped (a field changes the SQL in a way sqlty cannot follow)"
 origin = "Python"
+reported-by = ["lexer"]
 +++
 
 # tstring-skipped

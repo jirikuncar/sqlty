@@ -5,6 +5,7 @@ severity = "warn"
 fixable = false
 summary = "Annotated NamedTuple field name doesn't match query column alias"
 origin = "Python"
+reported-by = ["structural"]
 +++
 
 # column-name-mismatch

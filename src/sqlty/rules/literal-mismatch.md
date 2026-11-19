@@ -5,6 +5,7 @@ severity = "error"
 fixable = false
 summary = "Row type field is a Literal that does not cover the values its column can take"
 origin = "Python"
+reported-by = ["lexer", "structural", "aliases", "values"]
 +++
 
 # literal-mismatch

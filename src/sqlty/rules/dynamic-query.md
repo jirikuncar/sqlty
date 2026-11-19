@@ -5,6 +5,7 @@ severity = "ignore"
 fixable = false
 summary = "helper query that is not a string literal (a variable, a call), so it is not checked"
 origin = "Python"
+reported-by = ["unchecked"]
 +++
 
 # dynamic-query

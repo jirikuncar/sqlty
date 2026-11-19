@@ -5,6 +5,7 @@ severity = "warn"
 fixable = true
 summary = "Source has --sql strings that aren't wrapped in SQL[T]"
 origin = "Python"
+reported-by = ["lexer"]
 +++
 
 # stale-rewrite

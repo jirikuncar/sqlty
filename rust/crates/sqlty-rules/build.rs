@@ -29,7 +29,11 @@ fn main() {
             pages.push((name, text));
         }
     }
-    let code = compile::compile(&pages).unwrap_or_else(|e| panic!("rule pages: {e}"));
+    let passes_file = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("passes.toml");
+    println!("cargo:rerun-if-changed={}", passes_file.display());
+    let passes = fs::read_to_string(&passes_file)
+        .unwrap_or_else(|e| panic!("{}: {e}", passes_file.display()));
+    let code = compile::compile(&pages, &passes).unwrap_or_else(|e| panic!("rule pages: {e}"));
     fs::write(
         PathBuf::from(env::var("OUT_DIR").unwrap()).join("rules.rs"),
         code,

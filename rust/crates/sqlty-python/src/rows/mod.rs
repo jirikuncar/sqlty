@@ -19,7 +19,7 @@ use crate::analyses::Analyses;
 use crate::checker::{wrapped_queries, Diagnostic};
 use crate::frozen::Table;
 use crate::options::Options;
-use crate::rules::{Rule, RuleConfig};
+use crate::rules::{Pass, Rule, RuleConfig};
 use crate::scopes::{Key, Param};
 use crate::types::compat::{
     accepts, check_type_compatibility, column_literal_values, declared_literal_values, field_type,
@@ -114,7 +114,9 @@ pub(crate) struct Check<'a> {
     pub(crate) user_queries: Vec<RowQuery>,
     found: Found,
     /// The analysis of each query, shared with the module's other checks.
-    pub(crate) analyses: Analyses<'a>,
+    pub(crate) analyses: &'a Analyses<'a>,
+    /// The pass reporting; the driver sets it before each pass.
+    pub(crate) pass: Pass,
 }
 
 impl Check<'_> {
@@ -126,6 +128,12 @@ impl Check<'_> {
         line: usize,
         span: Option<(usize, usize)>,
     ) -> Option<&mut Reported> {
+        debug_assert!(
+            self.pass.rules().contains(rule),
+            "pass {} reported {}",
+            self.pass.name(),
+            rule.name()
+        );
         if !self.settings.rules.is_enabled(rule) {
             return None;
         }
@@ -202,9 +210,14 @@ pub fn check(source: &Arc<Source>, settings: &Settings<'_>) -> Found {
         return Found::default();
     }
     let analyses = Analyses::new(settings.options);
-    let mut ctx = Check::new(source, settings, queries, Vec::new(), &[], analyses);
-    ctx.typeddict_inheritance();
+    let mut ctx = Check::new(source, settings, queries, Vec::new(), &[], &analyses);
+    ctx.pass = Pass::TypeddictInheritance;
+    if settings.rules.runs(ctx.pass) {
+        ctx.typeddict_inheritance();
+    }
+    ctx.pass = Pass::Structural;
     ctx.structural(&HashMap::new());
+    ctx.pass = Pass::Aliases;
     ctx.aliases();
     ctx.finish()
 }
@@ -226,7 +239,7 @@ impl<'a> Check<'a> {
         queries: Vec<RowQuery>,
         named: Vec<RowQuery>,
         params: &[String],
-        analyses: Analyses<'a>,
+        analyses: &'a Analyses<'a>,
     ) -> Self {
         let wanted = !(queries.is_empty() && named.is_empty() && params.is_empty());
         let mut ctx = Check {
@@ -243,6 +256,7 @@ impl<'a> Check<'a> {
             user_queries: Vec::new(),
             found: Found::default(),
             analyses,
+            pass: Pass::Lexer,
         };
         ctx.own_defs = ctx.type_defs.clone();
         let queries: Vec<RowQuery> = queries.into_iter().chain(named).collect();
@@ -401,9 +415,6 @@ pub(crate) fn alias_target<'a>(
 }
 
 fn check_typeddict_inheritance(ctx: &mut Check<'_>, user_queries: &[RowQuery]) {
-    if !ctx.settings.rules.is_enabled(Rule::TypeddictInheritance) {
-        return;
-    }
     // The named types and their same-source TypedDict bases, bases first, each once.
     fn visit<'d>(
         name: &'d str,

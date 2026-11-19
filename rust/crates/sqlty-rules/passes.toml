@@ -1,0 +1,113 @@
+# The passes that report lint rules, in the order `check::diagnostics` runs them.
+#
+# `facts` is what a pass reads: tokens (the lexed source), module (the parsed module),
+# helper-calls (calls of configured helpers), calls (those and driver calls), declared
+# (`SQL[R, P]` calls) or row-types (the row types of `SQL[Row](...)` calls).
+# A pass with `pipeline = false` reports from elsewhere. A `gated` pass is skipped when
+# every rule a page lists it for is ignored; its code must do nothing in that case.
+# The rules a pass reports are the pages that name it in `reported-by`.
+
+[[pass]]
+name = "lexer"
+facts = "tokens"
+pipeline = true
+gated = false
+doc = "Reads the strings of the source: markers, wrapped calls, skipped strings, names, annotations."
+
+[[pass]]
+name = "sqruff"
+facts = "module"
+pipeline = true
+gated = true
+doc = "Runs the SQL linter over the queries."
+
+[[pass]]
+name = "unchecked"
+facts = "helper-calls"
+pipeline = true
+gated = false
+doc = "Helper calls whose query is not a literal."
+
+[[pass]]
+name = "params"
+facts = "calls"
+pipeline = true
+gated = true
+doc = "The arguments of a driver or template call against the parameters of its query."
+
+[[pass]]
+name = "declared-params"
+facts = "declared"
+pipeline = true
+gated = true
+doc = "The `P` of `SQL[R, P]` against the parameters of its query."
+
+[[pass]]
+name = "typeddict-inheritance"
+facts = "row-types"
+pipeline = true
+gated = true
+doc = "TypedDict row types whose bases cannot be combined."
+
+[[pass]]
+name = "select-star"
+facts = "helper-calls"
+pipeline = true
+gated = false
+doc = "Helper-call queries that select `*`."
+
+[[pass]]
+name = "unparsed"
+facts = "helper-calls"
+pipeline = true
+gated = true
+doc = "Helper-call queries that do not parse."
+
+[[pass]]
+name = "names"
+facts = "helper-calls"
+pipeline = true
+gated = true
+doc = "The SQL name rules of helper-call queries."
+
+[[pass]]
+name = "structural"
+facts = "row-types"
+pipeline = true
+gated = false
+doc = "Class row types against the columns of their queries."
+
+[[pass]]
+name = "aliases"
+facts = "row-types"
+pipeline = true
+gated = false
+doc = "Row types written as an alias of a tuple or scalar type."
+
+[[pass]]
+name = "values"
+facts = "row-types"
+pipeline = true
+gated = false
+doc = "Row types of helper calls written as a tuple or scalar type."
+
+[[pass]]
+name = "suppress"
+facts = "tokens"
+pipeline = false
+gated = false
+doc = "Reports `# sqlty: ignore` comments that suppress nothing, after the other passes."
+
+[[pass]]
+name = "crash"
+facts = "module"
+pipeline = false
+gated = false
+doc = "Reports a panic of the other passes as an internal error."
+
+[[pass]]
+name = "query-files"
+facts = "tokens"
+pipeline = false
+gated = false
+doc = "Checks the queries of `.sql` files, which no Python pass reads."

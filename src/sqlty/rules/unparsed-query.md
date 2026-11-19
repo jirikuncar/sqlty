@@ -5,6 +5,7 @@ severity = "warn"
 fixable = false
 summary = "--sql query, SQL[T] query or Annotated helper query that does not parse"
 origin = "Python"
+reported-by = ["lexer", "unparsed", "query-files"]
 +++
 
 # unparsed-query

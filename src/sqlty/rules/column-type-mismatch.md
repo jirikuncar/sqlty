@@ -5,6 +5,7 @@ severity = "error"
 fixable = false
 summary = "Annotated type field has incompatible type with query column"
 origin = "Python"
+reported-by = ["structural", "aliases", "values"]
 +++
 
 # column-type-mismatch

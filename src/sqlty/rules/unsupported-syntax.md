@@ -5,6 +5,7 @@ severity = "warn"
 fixable = false
 summary = "Query parses, but a construct in it is not typed, so the row type is not trusted"
 origin = "SQL"
+reported-by = ["lexer", "names", "query-files"]
 +++
 
 # unsupported-syntax

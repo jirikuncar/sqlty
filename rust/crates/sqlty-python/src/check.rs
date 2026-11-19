@@ -26,7 +26,7 @@ use crate::rows::{
     alias_target, bind, row_queries, row_shape, value_diagnostics, Check, Found, RowQuery,
     RowShape, Settings,
 };
-use crate::rules::{Rule, RuleConfig, SQL_RULES};
+use crate::rules::{Pass, Rule, RuleConfig};
 use crate::scopes::{class_of, dotted, Key, Param};
 use crate::types::generic::is_word;
 use crate::types::info::Kind;
@@ -487,12 +487,6 @@ impl<'a> Module<'a, '_> {
     }
 
     fn check_params(&mut self) {
-        if !(self.enabled(Rule::ParamTypeMismatch)
-            || self.enabled(Rule::ParamCountMismatch)
-            || self.enabled(Rule::ExtraParam))
-        {
-            return;
-        }
         let mut reports = Vec::new();
         if self.enabled(Rule::ParamTypeMismatch) {
             let mut singles: Vec<(usize, &str, &str, Option<Span>)> = Vec::new();
@@ -694,9 +688,6 @@ impl<'a> Module<'a, '_> {
 
     /// `SQL[R, P]` calls whose `P` doesn't fit the parameters of their query.
     fn declared_params(&mut self) {
-        if !self.enabled(Rule::ParamsTypeMismatch) {
-            return;
-        }
         let mut reports = Vec::new();
         for call in &self.declared {
             let Some(params) = self.params(&call.query) else {
@@ -891,9 +882,6 @@ impl<'a> Module<'a, '_> {
 
     fn unparsed(&mut self) {
         static FORMAT_FIELD: LazyLock<Regex> = LazyLock::new(|| sqlty_sql::regex(r"\{\w*\}"));
-        if !self.enabled(Rule::UnparsedQuery) {
-            return;
-        }
         for (query, line, span) in self.unread() {
             let Some(error) = self.ctx.analyses.of(&query).parsed.error() else {
                 continue;
@@ -913,9 +901,6 @@ impl<'a> Module<'a, '_> {
     }
 
     fn names(&mut self) {
-        if !self.run.settings.rules.enabled().intersects(SQL_RULES) {
-            return;
-        }
         for (query, line, span) in self.unread() {
             let analysis = self.ctx.analyses.of(&query);
             for diagnostic in &analysis.diagnostics {
@@ -1212,88 +1197,82 @@ fn named_as_wrapper(calls: Vec<(usize, String)>, wrapper: &str) -> Vec<usize> {
         .collect()
 }
 
-/// `sqlty._check.diagnostics`: every diagnostic of `source` before inline suppression, by
-/// line.
-pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
+/// The calls of a database driver (`cursor.execute(...)` and the like) in `source`.
+fn driver_calls<'a>(text: &str, source: &'a Source, facts: &ModuleFacts<'a>) -> Vec<Call<'a>> {
+    if !drivers::may_hold(text) {
+        return Vec::new();
+    }
+    drivers::find_in(text, source.body(), &source.imports, facts.scan())
+        .into_iter()
+        .map(|call| Call {
+            line: call.line,
+            query: Some(call.query),
+            row: None,
+            params: call.params,
+            end_line: None,
+            driver: Some(call.driver),
+            single: call.single,
+            dynamic: false,
+            reason: None,
+            variants: Vec::new(),
+            declared: None,
+            configured: false,
+            query_span: Some(call.query_span),
+            literal: false,
+        })
+        .collect()
+}
+
+/// The marked t-strings of `source`, each as a call of psycopg.
+fn template_calls<'a>(text: &str, source: &Source, facts: &ModuleFacts<'a>) -> Vec<Call<'a>> {
     static MARKED_TEMPLATE: LazyLock<Regex> = LazyLock::new(|| {
         sqlty_sql::regex(
             r#"(?:^|[^\w])(?:[tT][rR]?|[rR][tT])(?:'|")+[\s\x1c-\x1f]*--[\s\x1c-\x1f]?sql"#,
         )
     });
-    let settings = run.settings;
-    let analyses = Analyses::new(settings.options);
-    let (options, rules) = (settings.options, settings.rules);
-    let facts = ModuleFacts::new(source);
-    let text = &*source.text;
-    let wrapper = options.style.wrapper_name.as_str();
-    let import_line = options.style.import_line.as_str();
+    if !MARKED_TEMPLATE.is_match(text) {
+        return Vec::new();
+    }
+    let mut calls = Vec::new();
+    for template in templates::of_in(text, &source.imports, facts.scan()) {
+        let Some(query) = template.query.filter(|query| is_marked(query)) else {
+            continue;
+        };
+        let params = template.params.into_iter().enumerate();
+        calls.push(Call {
+            line: template.line,
+            query: Some(query),
+            row: None,
+            params: Some(
+                params
+                    .map(|(i, kind)| Param {
+                        key: Key::Index(i + 1),
+                        kind,
+                    })
+                    .collect(),
+            ),
+            end_line: None,
+            driver: Some("psycopg"),
+            single: None,
+            dynamic: false,
+            reason: None,
+            variants: Vec::new(),
+            declared: None,
+            configured: false,
+            query_span: Some(template.span),
+            literal: false,
+        });
+    }
+    calls
+}
 
-    let mut base = Vec::new();
-    if may_need_lexing(text, wrapper) {
-        let any_calls = any_calls_in(&facts, &options.style);
-        base = checker::check_source_with(text, options, rules, &any_calls, &analyses);
-        checker::add_fix_imports(text, options, &mut base);
-    }
-
-    let mut found = helper_calls_in(&facts, run.helpers, run.settings.module, run.variants);
-    let mut driver_calls: Vec<Call<'_>> = Vec::new();
-    if drivers::may_hold(text) {
-        for call in drivers::find_in(text, source.body(), &source.imports, facts.scan()) {
-            driver_calls.push(Call {
-                line: call.line,
-                query: Some(call.query),
-                row: None,
-                params: call.params,
-                end_line: None,
-                driver: Some(call.driver),
-                single: call.single,
-                dynamic: false,
-                reason: None,
-                variants: Vec::new(),
-                declared: None,
-                configured: false,
-                query_span: Some(call.query_span),
-                literal: false,
-            });
-        }
-    }
-    if MARKED_TEMPLATE.is_match(text) {
-        for template in templates::of_in(text, &source.imports, facts.scan()) {
-            let Some(query) = template.query.filter(|query| is_marked(query)) else {
-                continue;
-            };
-            let params = template.params.into_iter().enumerate();
-            driver_calls.push(Call {
-                line: template.line,
-                query: Some(query),
-                row: None,
-                params: Some(
-                    params
-                        .map(|(i, kind)| Param {
-                            key: Key::Index(i + 1),
-                            kind,
-                        })
-                        .collect(),
-                ),
-                end_line: None,
-                driver: Some("psycopg"),
-                single: None,
-                dynamic: false,
-                reason: None,
-                variants: Vec::new(),
-                declared: None,
-                configured: false,
-                query_span: Some(template.span),
-                literal: false,
-            });
-        }
-    }
-    // A driver call also configured as a helper has its parameters checked once, as the driver's.
+/// A driver call also configured as a helper has its parameters checked once, as the driver's.
+fn drop_params_checked_by_driver(found: &mut [Call<'_>], driver_calls: &[Call<'_>]) {
     let by_driver: HashSet<(usize, usize)> = driver_calls
         .iter()
         .filter_map(|call| call.query_span)
         .collect();
-    for call in &mut found {
+    for call in found {
         if call
             .query_span
             .is_some_and(|span| by_driver.contains(&span))
@@ -1301,9 +1280,17 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
             call.params = None;
         }
     }
-    let typed: HashSet<usize> = found.iter().flat_map(Call::typed_lines).collect();
-    // Each variant of a call built in branches is checked as a call of its own.
-    let (branched, mut found): (Vec<Call<'_>>, Vec<Call<'_>>) =
+}
+
+/// The lines of the calls whose strings need no `SQL[T]`.
+fn typed_lines(found: &[Call<'_>]) -> HashSet<usize> {
+    found.iter().flat_map(Call::typed_lines).collect()
+}
+
+/// The calls built in branches, and `found` with each variant of them as a call of its own:
+/// variant `i` is on line `VARIANT_LINE + i`.
+fn expand_variants<'a>(found: Vec<Call<'a>>) -> (Vec<Call<'a>>, Vec<Call<'a>>) {
+    let (branched, mut found): (Vec<Call<'a>>, Vec<Call<'a>>) =
         found.into_iter().partition(|call| call.variants.len() > 1);
     let variants = branched.iter().flat_map(|call| {
         call.variants.iter().map(move |variant| Call {
@@ -1313,7 +1300,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
             ..call.clone()
         })
     });
-    let variants: Vec<Call<'_>> = variants
+    let variants: Vec<Call<'a>> = variants
         .enumerate()
         .map(|(index, call)| Call {
             line: VARIANT_LINE + index,
@@ -1321,41 +1308,168 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
         })
         .collect();
     found.extend(variants);
+    (branched, found)
+}
+
+/// A `stale-rewrite` on a line of a typed call is not one: the call is wrapped already.
+fn drop_stale_rewrite_on_typed_lines(base: &mut Vec<Diagnostic>, typed: &HashSet<usize>) {
     base.retain(|diagnostic| {
         !(diagnostic.rule == Rule::StaleRewrite && typed.contains(&diagnostic.line))
     });
-    if rules.is_enabled(Rule::Sqruff) {
-        let severity = rules.severity(Rule::Sqruff);
-        base.extend((run.lint)(text).into_iter().map(|lint| Diagnostic {
-            rule: Rule::Sqruff,
-            message: lint.message,
-            severity,
-            line: source.lines.line(lint.query_start),
-            span: lint.span,
-            fix: Vec::new(),
-        }));
+}
+
+/// What the passes of [`diagnostics`] work on.
+struct Pipeline<'a, 'r: 'a> {
+    run: &'r Run<'r>,
+    source: &'a Arc<Source>,
+    facts: &'r ModuleFacts<'a>,
+    analyses: &'a Analyses<'a>,
+    /// What the passes before the call passes found.
+    base: Vec<Diagnostic>,
+    /// Whether the transformations of the facts are made.
+    transformed: bool,
+    /// The lines of typed calls.
+    typed: HashSet<usize>,
+    /// The calls built in branches, whose variants are checked as calls of their own.
+    branched: Vec<Call<'a>>,
+    /// The helper calls and driver calls, until the first pass that reads them.
+    calls: Option<(Vec<Call<'a>>, Vec<Call<'a>>)>,
+    /// The call facts, unless the module has no query to check.
+    module: Option<Module<'a, 'r>>,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The passes [`Pipeline::run`] was entered for.
+    static ENTERED: std::cell::RefCell<Vec<Pass>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+impl<'a, 'r: 'a> Pipeline<'a, 'r> {
+    /// Run `pass`: the one place that says what each pass does.
+    fn run(&mut self, pass: Pass) {
+        #[cfg(test)]
+        ENTERED.with(|entered| entered.borrow_mut().push(pass));
+        match pass {
+            Pass::Lexer => self.lexer(),
+            Pass::Sqruff => self.sqruff(),
+            Pass::Unchecked => self.with_module(pass, Module::unchecked_queries),
+            Pass::Params => self.with_module(pass, Module::check_params),
+            Pass::DeclaredParams => self.with_module(pass, Module::declared_params),
+            Pass::TypeddictInheritance => {
+                self.with_module(pass, |module| module.ctx.typeddict_inheritance());
+            }
+            Pass::SelectStar => self.with_module(pass, Module::select_star),
+            Pass::Unparsed => self.with_module(pass, Module::unparsed),
+            Pass::Names => self.with_module(pass, Module::names),
+            Pass::Structural => self.with_module(pass, |module| {
+                let bound = module.bound_params();
+                module.ctx.structural(&bound);
+            }),
+            Pass::Aliases => self.with_module(pass, |module| module.ctx.aliases()),
+            Pass::Values => self.with_module(pass, Module::values),
+            Pass::Suppress | Pass::Crash | Pass::QueryFiles => {}
+        }
     }
+
+    /// The calls of the module, transformed: made once, after the lexer is done with its own
+    /// memory.
+    fn transform(&mut self) {
+        if std::mem::replace(&mut self.transformed, true) {
+            return;
+        }
+        let (run, facts) = (self.run, self.facts);
+        let source = facts.source;
+        let text = &*source.text;
+        let mut found = helper_calls_in(facts, run.helpers, run.settings.module, run.variants);
+        let mut driver_calls = driver_calls(text, source, facts);
+        driver_calls.extend(template_calls(text, source, facts));
+        drop_params_checked_by_driver(&mut found, &driver_calls);
+        self.typed = typed_lines(&found);
+        let (branched, found) = expand_variants(found);
+        self.branched = branched;
+        self.calls = Some((found, driver_calls));
+    }
+
+    /// The call facts, made when the first pass asks.
+    fn module(&mut self) -> Option<&mut Module<'a, 'r>> {
+        self.transform();
+        if let Some((found, driver_calls)) = self.calls.take() {
+            self.module = call_facts(
+                self.run,
+                self.source,
+                self.facts,
+                self.analyses,
+                found,
+                driver_calls,
+            );
+        }
+        self.module.as_mut()
+    }
+
+    fn with_module(&mut self, pass: Pass, run: impl FnOnce(&mut Module<'a, 'r>)) {
+        if let Some(module) = self.module() {
+            module.ctx.pass = pass;
+            run(module);
+        }
+    }
+
+    fn lexer(&mut self) {
+        let settings = self.run.settings;
+        let (options, rules) = (settings.options, settings.rules);
+        let text = &*self.facts.source.text;
+        if may_need_lexing(text, options.style.wrapper_name.as_str()) {
+            let any_calls = any_calls_in(self.facts, &options.style);
+            self.base = checker::check_source_with(text, options, rules, &any_calls, self.analyses);
+            checker::add_fix_imports(text, options, &mut self.base);
+        }
+        self.transform();
+        drop_stale_rewrite_on_typed_lines(&mut self.base, &self.typed);
+    }
+
+    fn sqruff(&mut self) {
+        let source = self.facts.source;
+        let rules = self.run.settings.rules;
+        let severity = rules.severity(Rule::Sqruff);
+        self.base.extend(
+            (self.run.lint)(&source.text)
+                .into_iter()
+                .map(|lint| Diagnostic {
+                    rule: Rule::Sqruff,
+                    message: lint.message,
+                    severity,
+                    line: source.lines.line(lint.query_start),
+                    span: lint.span,
+                    fix: Vec::new(),
+                }),
+        );
+    }
+}
+
+/// The call facts of `source` for the passes that check queries, `None` when it holds no
+/// query, call or declared parameter to check.
+fn call_facts<'a, 'r: 'a>(
+    run: &'r Run<'r>,
+    source: &'a Arc<Source>,
+    facts: &'r ModuleFacts<'a>,
+    analyses: &'a Analyses<'a>,
+    found: Vec<Call<'a>>,
+    driver_calls: Vec<Call<'a>>,
+) -> Option<Module<'a, 'r>> {
+    let settings = run.settings;
+    let text = &*source.text;
+    let wrapper = settings.options.style.wrapper_name.as_str();
+    let import_line = settings.options.style.import_line.as_str();
     let queries: Vec<RowQuery> = if may_wrap(text, import_line) {
         row_queries(source, settings)
     } else {
         Vec::new()
     };
-    let declared = declared_params(&facts, wrapper, import_line);
-    let mut out = Found {
-        diagnostics: base
-            .into_iter()
-            .map(|diagnostic| Reported {
-                diagnostic,
-                redundant: None,
-            })
-            .collect(),
-        needed: HashSet::new(),
-    };
+    let declared = declared_params(facts, wrapper, import_line);
     if queries.is_empty() && found.is_empty() && driver_calls.is_empty() && declared.is_empty() {
-        return out;
+        return None;
     }
 
-    let dialect = options.dialect.name();
+    let dialect = settings.options.dialect.name();
     let rows: Vec<Option<String>> = found
         .iter()
         .filter(|call| call.query.is_some())
@@ -1380,28 +1494,70 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
         .filter(|call| matches!(call.params, Expr::Name(_) | Expr::Attribute(_)))
         .map(|call| unparse(call.params, text))
         .collect();
-    let mut module = Module {
+    Some(Module {
         run,
         ctx: Check::new(source, settings, queries, named, &names, analyses),
         source,
-        facts: &facts,
+        facts,
         found,
         driver_calls,
         declared,
         rows,
         literals: None,
+    })
+}
+
+/// `sqlty._check.diagnostics`: every diagnostic of `source` before inline suppression, by
+/// line: the facts of the module, the named transformations of them, then the passes of
+/// [`Pass::PIPELINE`].
+pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
+    pipeline(source, run, Pass::PIPELINE, true)
+}
+
+/// [`diagnostics`] over `passes`; with `gated` false, the passes that rules switch off run
+/// all the same.
+fn pipeline(source: &Arc<Source>, run: &Run<'_>, passes: &[Pass], gated: bool) -> Found {
+    let settings = run.settings;
+    let analyses = Analyses::new(settings.options);
+    let facts = ModuleFacts::new(source);
+    let mut pipeline = Pipeline {
+        run,
+        source,
+        facts: &facts,
+        analyses: &analyses,
+        base: Vec::new(),
+        transformed: false,
+        typed: HashSet::new(),
+        branched: Vec::new(),
+        calls: None,
+        module: None,
     };
-    module.unchecked_queries();
-    module.check_params();
-    module.declared_params();
-    module.ctx.typeddict_inheritance();
-    module.select_star();
-    module.unparsed();
-    module.names();
-    let bound = module.bound_params();
-    module.ctx.structural(&bound);
-    module.ctx.aliases();
-    module.values();
+    for &pass in passes {
+        if gated && !settings.rules.runs(pass) {
+            continue;
+        }
+        pipeline.run(pass);
+    }
+    pipeline.module();
+    let Pipeline {
+        base,
+        branched,
+        module,
+        ..
+    } = pipeline;
+    let mut out = Found {
+        diagnostics: base
+            .into_iter()
+            .map(|diagnostic| Reported {
+                diagnostic,
+                redundant: None,
+            })
+            .collect(),
+        needed: HashSet::new(),
+    };
+    let Some(module) = module else {
+        return out;
+    };
     let passes = module.ctx.finish();
     out.diagnostics.extend(passes.diagnostics);
     if !branched.is_empty() {
@@ -1578,5 +1734,284 @@ mod tests {
     fn a_key_is_spelled_as_python_writes_it() {
         assert_eq!(key_text(&Key::Index(1)), "1");
         assert_eq!(key_text(&Key::Name("a".into())), "'a'");
+    }
+
+    const MIXED: &str = concat!(
+        "import psycopg\n",
+        "from sqlty import SQL\n",
+        "conn = psycopg.connect('')\n",
+        "cur = conn.cursor()\n",
+        "cur.execute('--sql\\nSELECT $1::int AS x', (1, 2))\n",
+        "cur.execute('--sql\\nSELECT $1::int AS x', ('a',))\n",
+        "a = SQL[tuple[int]]('--sql\\nSELECT 1 AS x, 2 AS y')\n",
+        "b = SQL[tuple[int, int]]('--sql\\nSELECT * FROM nowhere')\n",
+        "c = '--sql\\nSELECT FROM'\n",
+        "d = SQL[tuple[int]]('--sql\\nSELECT $1::int, nosuch(1)')\n",
+    );
+
+    /// The diagnostics of `text`, and the passes and lint calls it took.
+    fn piped(
+        text: &str,
+        rules: &[(&str, &str)],
+        passes: &[Pass],
+        gated: bool,
+    ) -> (Vec<(Rule, usize, String)>, Vec<Pass>, usize) {
+        let options = Options::new("postgres", None, None, false).unwrap();
+        let rules = RuleConfig::from_overrides(Some(
+            rules
+                .iter()
+                .map(|(rule, severity)| (rule.to_string(), severity.to_string()))
+                .collect(),
+        ))
+        .unwrap();
+        let coerce = HashSet::new();
+        let settings = Settings {
+            options: &options,
+            rules: &rules,
+            index: None,
+            module: None,
+            coerce: &coerce,
+        };
+        let linted = std::cell::Cell::new(0);
+        let lint = |_: &str| -> Vec<Lint> {
+            linted.set(linted.get() + 1);
+            Vec::new()
+        };
+        let run = Run {
+            settings: &settings,
+            has_schema: false,
+            lint: &lint,
+            helpers: None,
+            variants: None,
+        };
+        let source = Arc::new(Source::new(text, (3, 14)).unwrap());
+        ENTERED.with(|entered| entered.borrow_mut().clear());
+        let found = pipeline(&source, &run, passes, gated);
+        let found = found
+            .diagnostics
+            .into_iter()
+            .map(|reported| {
+                let diagnostic = reported.diagnostic;
+                (diagnostic.rule, diagnostic.line, diagnostic.message)
+            })
+            .collect();
+        (
+            found,
+            ENTERED.with(|entered| entered.borrow().clone()),
+            linted.get(),
+        )
+    }
+
+    #[test]
+    fn the_passes_run_in_the_order_of_the_table() {
+        let (found, entered, linted) = piped(MIXED, &[("sqruff", "warn")], Pass::PIPELINE, true);
+        assert_eq!(entered, Pass::PIPELINE);
+        assert_eq!(linted, 1);
+        assert!(!found.is_empty());
+        let (_, entered, linted) = piped(MIXED, &[], Pass::PIPELINE, true);
+        assert_eq!(linted, 0);
+        let expected: Vec<Pass> = Pass::PIPELINE
+            .iter()
+            .copied()
+            .filter(|pass| *pass != Pass::Sqruff)
+            .collect();
+        assert_eq!(entered, expected);
+    }
+
+    #[test]
+    fn a_pass_without_a_pipeline_place_reports_nothing_itself() {
+        let (found, entered, _) = piped(MIXED, &[], &Pass::ALL, true);
+        assert_eq!(entered.len(), Pass::ALL.len() - 1);
+        assert_eq!(found, piped(MIXED, &[], Pass::PIPELINE, true).0);
+    }
+
+    #[test]
+    fn a_gated_pass_is_not_entered_when_its_rules_are_ignored() {
+        let mut gated = 0;
+        for pass in Pass::ALL.into_iter().filter(|pass| pass.gated()) {
+            gated += 1;
+            let mut rules: Vec<(&str, &str)> = pass
+                .rules()
+                .iter()
+                .map(|rule| (rule.name(), "ignore"))
+                .collect();
+            rules.push(("sqruff", "warn"));
+            if pass == Pass::Sqruff {
+                rules.pop();
+                rules.push(("sqruff", "ignore"));
+            }
+            let (found, entered, linted) = piped(MIXED, &rules, Pass::PIPELINE, true);
+            assert!(!entered.contains(&pass), "{}", pass.name());
+            assert_eq!(linted, usize::from(pass != Pass::Sqruff));
+            let (all, entered, _) = piped(MIXED, &rules, Pass::PIPELINE, false);
+            assert!(entered.contains(&pass), "{}", pass.name());
+            if pass != Pass::Sqruff {
+                assert_eq!(found, all, "{}", pass.name());
+            }
+        }
+        assert_eq!(gated, 6);
+    }
+
+    #[test]
+    fn the_ungated_pipeline_reports_what_the_gated_one_does() {
+        for rules in [
+            &[][..],
+            &[
+                ("param-type-mismatch", "ignore"),
+                ("param-count-mismatch", "ignore"),
+            ],
+            &[("unparsed-query", "ignore"), ("unknown-function", "ignore")],
+        ] {
+            let gated = piped(MIXED, rules, Pass::PIPELINE, true).0;
+            assert_eq!(gated, piped(MIXED, rules, Pass::PIPELINE, false).0);
+        }
+    }
+
+    fn facts_of(text: &str) -> Source {
+        Source::new(text, (3, 14)).unwrap()
+    }
+
+    const DRIVER: &str = concat!(
+        "import psycopg\n",
+        "conn = psycopg.connect('')\n",
+        "cur = conn.cursor()\n",
+        "cur.execute('SELECT %s::int AS x', (1,))\n",
+    );
+
+    #[test]
+    fn driver_calls_are_the_calls_of_a_driver() {
+        let source = facts_of(DRIVER);
+        let facts = ModuleFacts::new(&source);
+        let calls = driver_calls(DRIVER, &source, &facts);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].driver, Some("psycopg"));
+        assert_eq!(calls[0].line, 4);
+        assert!(calls[0].query_span.is_some());
+        let plain = facts_of("x = 1\n");
+        assert!(driver_calls("x = 1\n", &plain, &ModuleFacts::new(&plain)).is_empty());
+    }
+
+    #[test]
+    fn template_calls_are_the_marked_t_strings() {
+        let text = "t = t'--sql\\nSELECT {1}'\nu = t'SELECT {1}'\n";
+        let source = facts_of(text);
+        let facts = ModuleFacts::new(&source);
+        let calls = template_calls(text, &source, &facts);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].driver, Some("psycopg"));
+        assert_eq!(calls[0].line, 1);
+        assert_eq!(calls[0].params.as_ref().map(Vec::len), Some(1));
+        let plain = facts_of("x = 1\n");
+        assert!(template_calls("x = 1\n", &plain, &ModuleFacts::new(&plain)).is_empty());
+    }
+
+    fn call(line: usize, span: Option<(usize, usize)>) -> Call<'static> {
+        Call {
+            line,
+            query: Some("SELECT 1".to_string()),
+            row: None,
+            params: Some(Vec::new()),
+            end_line: Some(line + 2),
+            driver: None,
+            single: None,
+            dynamic: false,
+            reason: None,
+            variants: Vec::new(),
+            declared: None,
+            configured: true,
+            query_span: span,
+            literal: false,
+        }
+    }
+
+    #[test]
+    fn a_driver_call_keeps_the_parameters_of_a_helper_call_it_is() {
+        let mut found = vec![call(1, Some((5, 9))), call(2, Some((6, 9))), call(3, None)];
+        let drivers = [call(1, Some((5, 9)))];
+        drop_params_checked_by_driver(&mut found, &drivers);
+        let params: Vec<bool> = found.iter().map(|call| call.params.is_some()).collect();
+        assert_eq!(params, [false, true, true]);
+    }
+
+    #[test]
+    fn the_typed_lines_are_those_of_configured_calls() {
+        let mut plain = call(10, None);
+        plain.configured = false;
+        let found = [call(3, None), plain];
+        assert_eq!(typed_lines(&found), HashSet::from([3, 4, 5]));
+    }
+
+    fn variant(query: &str, lines: Vec<usize>) -> crate::variants::Variant<'static> {
+        crate::variants::Variant {
+            query: query.to_string(),
+            declared: None,
+            lines,
+        }
+    }
+
+    fn reported(rule: Rule, line: usize, message: &str) -> Reported {
+        Reported {
+            diagnostic: Diagnostic {
+                rule,
+                message: message.to_string(),
+                severity: crate::rules::Severity::Warn,
+                line,
+                span: 0..0,
+                fix: Vec::new(),
+            },
+            redundant: None,
+        }
+    }
+
+    #[test]
+    fn a_branched_call_is_two_calls_and_one_report() {
+        let mut branched = call(7, None);
+        branched.variants = vec![variant("SELECT 1", vec![2]), variant("SELECT 2", vec![4])];
+        let (branched, found) = expand_variants(vec![call(1, None), branched]);
+        assert_eq!(branched.len(), 1);
+        let lines: Vec<usize> = found.iter().map(|call| call.line).collect();
+        assert_eq!(lines, [1, VARIANT_LINE, VARIANT_LINE + 1]);
+        let queries: Vec<Option<&str>> = found.iter().map(|call| call.query.as_deref()).collect();
+        assert_eq!(
+            queries,
+            [Some("SELECT 1"), Some("SELECT 1"), Some("SELECT 2")]
+        );
+        assert!(found.iter().all(|call| call.variants.is_empty()));
+        let merged = merge_variants(
+            vec![
+                reported(Rule::UnknownTable, VARIANT_LINE, "same"),
+                reported(Rule::UnknownTable, VARIANT_LINE + 1, "same"),
+                reported(Rule::UnknownColumn, VARIANT_LINE + 1, "only second"),
+                reported(Rule::SelectStar, 1, "elsewhere"),
+            ],
+            &branched,
+        );
+        let merged: Vec<(usize, &str)> = merged
+            .iter()
+            .map(|one| (one.diagnostic.line, one.diagnostic.message.as_str()))
+            .collect();
+        assert_eq!(
+            merged,
+            [
+                (1, "elsewhere"),
+                (7, "same"),
+                (7, "only second (variant: line 4)"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_stale_rewrite_on_a_typed_line_is_dropped() {
+        let mut base: Vec<Diagnostic> = [
+            reported(Rule::StaleRewrite, 3, "on a typed line"),
+            reported(Rule::StaleRewrite, 9, "elsewhere"),
+            reported(Rule::SelectStar, 3, "another rule"),
+        ]
+        .into_iter()
+        .map(|one| one.diagnostic)
+        .collect();
+        drop_stale_rewrite_on_typed_lines(&mut base, &HashSet::from([3]));
+        let kept: Vec<&str> = base.iter().map(|one| one.message.as_str()).collect();
+        assert_eq!(kept, ["elsewhere", "another rule"]);
     }
 }

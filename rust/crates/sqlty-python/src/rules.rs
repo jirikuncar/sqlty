@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-pub use sqlty_rules::{Group, Rule, RuleSet, Severity};
+pub use sqlty_rules::{FactKind, Group, Pass, Rule, RuleSet, Severity};
 
 /// The rules the SQL analyzer reports.
 pub const SQL_RULES: RuleSet = {
@@ -111,6 +111,11 @@ impl RuleConfig {
         self.enabled
     }
 
+    /// Whether `pass` runs: it is not gated, or one of the rules it reports is on.
+    pub fn runs(&self, pass: Pass) -> bool {
+        !pass.gated() || self.enabled.intersects(pass.rules())
+    }
+
     /// This configuration with every rule but `rules` ignored.
     pub(crate) fn only(&self, rules: &[Rule]) -> RuleConfig {
         let mut config = self.clone();
@@ -181,5 +186,26 @@ mod tests {
             error.to_string(),
             "unknown severity for rule stale-type: loud (expected error, warn or ignore)"
         );
+    }
+
+    #[test]
+    fn a_gated_pass_runs_while_one_of_its_rules_is_on() {
+        let off = |rules: &[Rule]| {
+            let names = rules
+                .iter()
+                .map(|rule| (rule.name().to_string(), "ignore".to_string()));
+            RuleConfig::from_overrides(Some(names.collect())).unwrap()
+        };
+        let all = RuleConfig::default();
+        assert!(all.runs(Pass::Params));
+        let one = off(&[Rule::ParamTypeMismatch, Rule::ExtraParam]);
+        assert!(one.runs(Pass::Params));
+        let none = off(&[
+            Rule::ParamTypeMismatch,
+            Rule::ExtraParam,
+            Rule::ParamCountMismatch,
+        ]);
+        assert!(!none.runs(Pass::Params));
+        assert!(none.runs(Pass::Lexer) && none.runs(Pass::Structural));
     }
 }

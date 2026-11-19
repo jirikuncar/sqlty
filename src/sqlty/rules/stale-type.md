@@ -5,6 +5,7 @@ severity = "warn"
 fixable = true
 summary = "SQL[tuple[...]] is wider than the rows the query returns (drift)"
 origin = "Python"
+reported-by = ["lexer"]
 +++
 
 # stale-type

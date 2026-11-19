@@ -6,7 +6,35 @@
 #[allow(dead_code, unreachable_pub)]
 mod compile;
 
-use compile::compile;
+const PASSES: &str = "[[pass]]
+name = \"lexer\"
+facts = \"tokens\"
+pipeline = true
+gated = false
+doc = \"Reads strings.\"
+
+[[pass]]
+name = \"names\"
+facts = \"helper-calls\"
+pipeline = true
+gated = true
+doc = \"Names.\"
+
+[[pass]]
+name = \"suppress\"
+facts = \"tokens\"
+pipeline = false
+gated = false
+doc = \"Suppression.\"
+";
+
+fn compile(pages: &[(String, String)]) -> Result<String, String> {
+    compile::compile(pages, PASSES)
+}
+
+fn compile_passes(passes: &str) -> Result<String, String> {
+    compile::compile(&[page("chasm-join.md", PAGE)], passes)
+}
 
 const PAGE: &str = "+++
 order = 10
@@ -15,6 +43,7 @@ severity = \"warn\"
 fixable = false
 summary = \"Two \\\"tables\\\" meet\"
 origin = \"SQL\"
+reported-by = [\"lexer\", \"names\", \"suppress\"]
 +++
 
 # chasm-join
@@ -203,4 +232,87 @@ fn at_most_sixty_four_rules() {
     assert!(compile(&pages[..64]).is_ok());
     let message = compile(&pages).expect_err("too many");
     assert_eq!(message, "65 rule pages, but a RuleSet holds at most 64");
+}
+
+#[test]
+fn passes_become_an_enum_and_its_tables() {
+    let code = compile(&[page("chasm-join.md", PAGE)]).expect("compiles");
+    assert!(code.contains("pub enum Pass {\n    #[doc = \"Reads strings.\"]\n    Lexer,"));
+    assert!(code.contains("pub const COUNT: usize = 3;"));
+    assert!(code.contains(
+        "pub const ALL: [Pass; Pass::COUNT] = [\n        Pass::Lexer,\n        Pass::Names,\n        Pass::Suppress,\n    ];"
+    ));
+    assert!(code.contains(
+        "pub const PIPELINE: &'static [Pass] = &[\n        Pass::Lexer,\n        Pass::Names,\n    ];"
+    ));
+    assert!(code.contains("Pass::Names => \"names\","));
+    assert!(code.contains("Pass::Names => FactKind::HelperCalls,"));
+    assert!(code.contains("Pass::Lexer => false,"));
+    assert!(code.contains("Pass::Names => true,"));
+    assert!(code.contains("Pass::Names => RuleSet::EMPTY.with(Rule::ChasmJoin),"));
+    assert!(code.contains("Rule::ChasmJoin => &[Pass::Lexer, Pass::Names, Pass::Suppress],"));
+}
+
+#[test]
+fn a_page_must_name_a_known_pass() {
+    let message = error(&PAGE.replace("\"names\", ", "\"nothing\", "));
+    assert_eq!(
+        message,
+        "chasm-join.md: unknown pass \"nothing\" in reported-by (expected lexer, names, suppress)"
+    );
+}
+
+#[test]
+fn a_rule_needs_a_reporter() {
+    let message = error(&PAGE.replace("[\"lexer\", \"names\", \"suppress\"]", "[]"));
+    assert_eq!(message, "chasm-join.md: reported-by names no pass");
+    let message = error(&PAGE.replace("reported-by = [\"lexer\", \"names\", \"suppress\"]\n", ""));
+    assert!(message.contains("missing field `reported-by`"), "{message}");
+}
+
+#[test]
+fn a_pass_needs_a_rule() {
+    let message = error(&PAGE.replace("\"names\", ", ""));
+    assert_eq!(
+        message,
+        "passes.toml: pass \"names\" is named by no rule page"
+    );
+}
+
+#[test]
+fn a_pass_is_declared_once() {
+    let message = compile_passes(&format!(
+        "{PASSES}{}",
+        &PASSES[..PASSES.find("\n\n").unwrap_or(0)]
+    ))
+    .expect_err("a duplicate");
+    assert_eq!(message, "passes.toml: duplicate pass \"lexer\"");
+}
+
+#[test]
+fn the_facts_of_a_pass_are_checked() {
+    let message = compile_passes(&PASSES.replace("\"tokens\"", "\"bytes\"")).expect_err("facts");
+    assert!(
+        message.starts_with(
+            "passes.toml: pass \"lexer\": unknown facts \"bytes\" (expected tokens, module"
+        ),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_pass_name_is_kebab_case() {
+    let message = compile_passes(&PASSES.replace("\"lexer\"", "\"Lexer\"")).expect_err("name");
+    assert!(message.contains("kebab-case"), "{message}");
+}
+
+#[test]
+fn an_unknown_key_of_the_passes_file_is_an_error() {
+    let message =
+        compile_passes(&PASSES.replace("pipeline = true\n", "pipeline = true\nspeed = 1\n"))
+            .expect_err("a key");
+    assert!(message.starts_with("passes.toml: "), "{message}");
+    assert!(message.contains("unknown field `speed`"), "{message}");
+    let message = compile_passes("pass = []\nextra = 1\n").expect_err("a key");
+    assert!(message.contains("unknown field `extra`"), "{message}");
 }

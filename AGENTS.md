@@ -210,10 +210,15 @@ the collected files: `tests/mdtest/` (specification), `docs/` and `README.md`
 
 User-visible behavior belongs in `docs/guide/` too; edge cases only in
 `tests/mdtest/`. A new lint rule is its page `src/sqlty/rules/<name>.md`, with the front matter
-(`order`, `group`, `severity`, `fixable`, `summary`, `origin`) that is the only place its metadata
-is written, its row in the table of `docs/reference/rules.md`, and its check code. The
+(`order`, `group`, `severity`, `fixable`, `summary`, `origin`, `reported-by`) that is the only
+place its metadata is written, `reported-by` naming the passes of
+`rust/crates/sqlty-rules/passes.toml` that report it (a debug build asserts it; the build fails
+for a rule without a reporter or a pass no rule names), its row in the table of `docs/reference/rules.md`, and its check code. The
 `sqlty-rules` crate generates `Rule` and the Python `RULES` from the pages, and `build.rs` fails
-on a page that breaks the format.
+on a page that breaks the format. `check::diagnostics` runs the passes of that file in its order
+(`Pass::PIPELINE`); a new pass is a `[[pass]]` entry plus an arm of `Pipeline::run`, and `gated = true`
+only when its code does nothing once every rule it reports is off. Each rule is asserted by an mdtest
+(`tests/test_rule_hits.py`).
 
 | Feature area | Directory | Example file |
 |-------------|-----------|-------------|
