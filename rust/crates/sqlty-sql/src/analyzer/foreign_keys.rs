@@ -6,6 +6,8 @@
 //! referencing `customers.id` too, or reaching it through a chain of foreign keys. The
 //! columns of a composite key are compared with their referenced columns of one row, all
 //! of them.
+//!
+//! The comparisons read here are judged by `entity-mismatch` too (see `entities.rs`).
 
 use std::ops::ControlFlow;
 
@@ -15,6 +17,7 @@ use sqlparser::ast::{
 };
 use sqlparser::tokenizer::Span;
 
+use super::entities::Side;
 use super::fanout::{conjuncts, join_conditions, strip};
 use super::query::Analyzer;
 use super::scope::{relation_name, Scope};
@@ -70,10 +73,18 @@ struct Pair<'s> {
     span: Span,
 }
 
+/// A comparison of two schema table columns: the foreign keys and the entities it reads.
+#[derive(Clone)]
+struct Compared<'s> {
+    keys: Option<Pair<'s>>,
+    entities: Option<(Side, Side)>,
+    span: Span,
+}
+
 /// Comparisons that hold together: the terms of one `AND`.
 #[derive(Default)]
 struct Group<'s> {
-    pairs: Vec<Pair<'s>>,
+    pairs: Vec<Compared<'s>>,
     /// The pairs before it come from the enclosing `AND`, judged one by one there.
     seeded: usize,
     /// `(row, column, value)` of each column equal to a constant or parameter.
@@ -107,11 +118,12 @@ impl<'s> Group<'s> {
 }
 
 impl<'s> Analyzer<'s> {
-    /// Records `foreign-key-mismatch` for each comparison of `select` in `ON`, `USING`,
-    /// `WHERE` and `HAVING` between a foreign key column and a column it does not
-    /// reference, and for each composite key compared with its referenced columns only in
-    /// part or across rows.
-    pub(super) fn check_foreign_keys(&self, select: &Select, scope: &Scope) {
+    /// Records, for the comparisons of `select` in `ON`, `USING`, `WHERE` and `HAVING`,
+    /// `foreign-key-mismatch` for a foreign key column compared with a column it does not
+    /// reference and for a composite key compared only in part or across rows, and
+    /// `entity-mismatch` for columns holding keys of different entities, shown only where
+    /// `foreign-key-mismatch` does not report that comparison.
+    pub(super) fn check_comparisons(&self, select: &Select, scope: &Scope) {
         if !self.diag.enabled() || !self.judges_names() {
             return;
         }
@@ -136,8 +148,15 @@ impl<'s> Analyzer<'s> {
         reader.conjunction(terms, &mut all);
         reader.groups.push(all);
         for group in &reader.groups {
-            for pair in &group.pairs[group.seeded..] {
-                self.judge_pair(pair);
+            for compared in &group.pairs[group.seeded..] {
+                let keys = compared
+                    .keys
+                    .as_ref()
+                    .is_some_and(|pair| self.judge_pair(pair));
+                if let Some((a, b)) = &compared.entities {
+                    let _at = self.diag.at(compared.span);
+                    self.report_entities(a, b, keys);
+                }
             }
             if !group.split {
                 self.judge_composites(group);
@@ -169,7 +188,7 @@ impl<'s> Analyzer<'s> {
                 .find(|column| self.resolves(column, scope))
                 .and_then(|column| self.locate(&column, scope, ""));
             if let (Some(left), Some(right)) = (left, right) {
-                into.pairs.extend(self.pair(left, right, ident.span));
+                into.pairs.extend(self.compared(left, right, ident.span));
             }
         }
     }
@@ -192,6 +211,19 @@ impl<'s> Analyzer<'s> {
             table,
             name,
             foreign_key,
+        })
+    }
+
+    /// `left` compared with `right`, when either holds keys.
+    fn compared(&self, left: Located, right: Located, span: Span) -> Option<Compared<'s>> {
+        let entities = self
+            .entity_side(&left.table, &left.name)
+            .zip(self.entity_side(&right.table, &right.name));
+        let keys = self.pair(left, right, span);
+        (keys.is_some() || entities.is_some()).then_some(Compared {
+            keys,
+            entities,
+            span,
         })
     }
 
@@ -218,8 +250,8 @@ impl<'s> Analyzer<'s> {
     }
 
     /// A foreign key column may be compared with itself, the column it references, or a
-    /// column holding the same keys.
-    fn judge_pair(&self, pair: &Pair) {
+    /// column holding the same keys. Returns whether it reports the pair.
+    fn judge_pair(&self, pair: &Pair) -> bool {
         let (left, right) = (&pair.left, &pair.right);
         let (to_left, to_right) = (left.targets(), right.targets());
         let is = |column: &Column, (table, name): (&str, &str)| {
@@ -237,7 +269,7 @@ impl<'s> Analyzer<'s> {
             || entity(left).is_some_and(|root| Some(root) == entity(right))
             || left.name == right.name && (unkeyed(left, &to_left) || unkeyed(right, &to_right));
         if allowed || to_left.is_empty() && to_right.is_empty() {
-            return;
+            return false;
         }
         let (column, targets, other) = if to_left.is_empty() {
             (right, to_right, left)
@@ -258,6 +290,7 @@ impl<'s> Analyzer<'s> {
                 other.qualified()
             ),
         );
+        true
     }
 
     /// Each composite key of a row compared with its referenced columns: all of them, of
@@ -265,7 +298,8 @@ impl<'s> Analyzer<'s> {
     /// parameter count as compared.
     fn judge_composites(&self, group: &Group<'s>) {
         let mut matches: Vec<Match> = Vec::new();
-        for (index, pair) in group.pairs.iter().enumerate() {
+        let pairs = group.pairs.iter().enumerate();
+        for (index, pair) in pairs.filter_map(|(i, c)| Some((i, c.keys.as_ref()?))) {
             for (column, other) in [(&pair.left, &pair.right), (&pair.right, &pair.left)] {
                 for &fk in &column.keys {
                     let Some(at) = fk.columns.iter().position(|c| *c == column.name) else {
@@ -498,7 +532,7 @@ impl<'s> Reader<'_, 's> {
         }
         for (expr, list, span) in lists {
             let _at = self.analyzer.diag.at(span);
-            self.in_list(expr, list, span, group);
+            self.in_list(expr, list, group);
         }
     }
 
@@ -518,7 +552,7 @@ impl<'s> Reader<'_, 's> {
                 ..
             } => match list.as_slice() {
                 [item] => self.compare(left, item, !negated, expr.span(), group),
-                _ => self.in_list(left, list, expr.span(), group),
+                _ => self.in_list(left, list, group),
             },
             Expr::In {
                 expr: left,
@@ -535,9 +569,10 @@ impl<'s> Reader<'_, 's> {
         true
     }
 
-    fn in_list(&mut self, left: &Expr, list: &[Expr], span: Span, group: &Group<'s>) {
+    fn in_list(&mut self, left: &Expr, list: &[Expr], group: &Group<'s>) {
         for item in list {
             let mut alternative = group.alternative();
+            let span = left.span().union(&item.span());
             self.compare(left, item, false, span, &mut alternative);
             self.groups.push(alternative);
         }
@@ -560,7 +595,7 @@ impl<'s> Reader<'_, 's> {
             analyzer.locate(left, scope, ""),
             analyzer.locate(right, scope, ""),
         ) {
-            (Some(left), Some(right)) => group.pairs.extend(analyzer.pair(left, right, span)),
+            (Some(left), Some(right)) => group.pairs.extend(analyzer.compared(left, right, span)),
             (Some(column), None) => {
                 group
                     .pinned
@@ -610,7 +645,9 @@ impl<'s> Reader<'_, 's> {
                 self.analyzer.locate(left, self.scope, ""),
                 analyzer.locate(right, &inner_scope, &row),
             ) {
-                group.pairs.extend(self.analyzer.pair(left, right, span));
+                group
+                    .pairs
+                    .extend(self.analyzer.compared(left, right, span));
             }
         }
     }

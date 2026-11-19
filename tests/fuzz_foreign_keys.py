@@ -1,4 +1,5 @@
-"""Property-based tests of ``foreign-key-mismatch``: key comparisons in random query shapes.
+"""Property-based tests of ``foreign-key-mismatch`` and ``entity-mismatch``: key comparisons
+in random query shapes.
 
 An independent oracle judges each comparison from the schema; the rule must report exactly
 what it does, wherever the comparison sits: ``ON``, ``WHERE``, ``HAVING``, joins of every
@@ -96,6 +97,20 @@ def expected(left: Column, right: Column) -> str | None:
     return f"{key[0]}.{key[1]} references {target[0]}.{target[1]}, not {other[0]}.{other[1]}"
 
 
+def judged(left: Column, right: Column) -> set[str]:
+    """What both rules report for ``left`` compared with ``right``: ``entity-mismatch`` only
+    where ``foreign-key-mismatch`` is silent."""
+    if message := expected(left, right):
+        return {message}
+    a, b = entity(left), entity(right)
+    if a is None or b is None or a == b:
+        return set()
+    named = (lambda e: f"{e[0]}.{e[1]}") if a[0] == b[0] else (lambda e: e[0])
+    return {
+        f"{left[0]}.{left[1]} holds {named(a)} keys, {right[0]}.{right[1]} holds {named(b)} keys"
+    }
+
+
 NOISE = ["{x}.id > 0", "{y}.id IS NOT NULL", "1 = 1", "{x}.id IN (1, 2)"]
 # Each form, and whether its left operand is ``b``.
 FORMS = [
@@ -177,9 +192,11 @@ def supported(sql: str, dialect: str) -> bool:
 def found(sql: str, dialect: str = "postgres") -> set[str]:
     marker = "-- sql" if dialect == "mysql" else "--sql"
     source = f"q = {(marker + chr(10) + sql)!r}\n"
-    diagnostics = core.check_source(source, dialect=dialect, schema_sql=SCHEMA)
+    rules = {"entity-mismatch": "warn"}
+    diagnostics = core.check_source(source, dialect=dialect, schema_sql=SCHEMA, rules=rules)
     assert not [d for d in diagnostics if d["rule"] == "internal-error"], sql
-    return {d["message"] for d in diagnostics if d["rule"] == "foreign-key-mismatch"}
+    keys = ("foreign-key-mismatch", "entity-mismatch")
+    return {d["message"] for d in diagnostics if d["rule"] in keys}
 
 
 @st.composite
@@ -201,8 +218,7 @@ def comparison_of_tables(draw: st.DrawFn) -> tuple[str, set[str]]:
         left, right = (ty, b), (tx, a)
         if not swapped:
             left, right = right, left
-        if message := expected(left, right):
-            reports.add(message)
+        reports |= judged(left, right)
     terms += [n.format(x="x", y="y") for n in draw(st.lists(st.sampled_from(NOISE), max_size=2))]
     cond = joined(draw, terms, ["AND", "OR"])
     # A derived table hides the keys of its table: nothing is judged.
@@ -268,8 +284,7 @@ def join_chain(draw: st.DrawFn) -> tuple[str, set[str]]:
         a, b = draw(st.sampled_from(COLUMNS[tx])), draw(st.sampled_from(COLUMNS[ty]))
         form, swapped = draw(st.sampled_from(FORMS))
         left, right = ((ty, b), (tx, a)) if swapped else ((tx, a), (ty, b))
-        if message := expected(left, right):
-            reports.add(message)
+        reports.update(judged(left, right))
         return form.format(a=f"{x}.{a}", b=f"{y}.{b}")
 
     sql = f"SELECT 1 FROM {sources[0][1]} {sources[0][0]}"
@@ -287,8 +302,7 @@ def join_chain(draw: st.DrawFn) -> tuple[str, set[str]]:
         elif shared and draw(st.booleans()):
             column = draw(st.sampled_from(shared))
             other = next(t for _, t in sources[:i] if column in COLUMNS[t])
-            if message := expected((other, column), (table, column)):
-                reports.add(message)
+            reports.update(judged((other, column), (table, column)))
             sql += f" {kind} {table} {alias} USING ({column})"
         else:
             terms = [compare(visible) for _ in range(draw(st.integers(1, 2)))]

@@ -603,6 +603,7 @@ impl<'a> Analyzer<'a> {
             replacement: replacement.flatten(),
             table: table.map(str::to_string),
             column: Some(column.value.clone()),
+            shadowed_by: None,
         });
     }
 

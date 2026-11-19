@@ -450,7 +450,14 @@ impl Checker<'_> {
             return;
         }
         let source = self.scan.source();
-        for found in &self.analysis(query).diagnostics {
+        let analysis = self.analysis(query);
+        for found in &analysis.diagnostics {
+            if found
+                .shadowed_by
+                .is_some_and(|rule| self.rules.is_enabled(Rule::Name(rule)))
+            {
+                continue;
+            }
             let name = found.span.as_ref().and_then(|span| {
                 let start = query_offset(source, literals, span.start, false)?;
                 Some(start..query_offset(source, literals, span.end, true)?)
