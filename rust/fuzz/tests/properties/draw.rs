@@ -36,11 +36,9 @@ impl Draw<'_> {
 
     /// `low` to `high` distinct items of `items`, in random order.
     pub fn subset<T: Clone>(&mut self, items: &[T], low: usize, high: usize) -> Vec<T> {
-        let mut left: Vec<T> = items.to_vec();
-        let count = self.int(low, high.min(items.len()));
-        (0..count)
-            .map(|_| left.remove(self.int(0, left.len() - 1)))
-            .collect()
+        let mut items = self.shuffle(items.to_vec());
+        items.truncate(self.int(low, high));
+        items
     }
 
     pub fn shuffle<T>(&mut self, mut items: Vec<T>) -> Vec<T> {
@@ -51,56 +49,53 @@ impl Draw<'_> {
     }
 }
 
-/// How many cases each property runs: `SQLTY_FUZZ_EXAMPLES`, 100 by default.
-fn examples() -> u32 {
-    match std::env::var("SQLTY_FUZZ_EXAMPLES")
-        .unwrap_or_default()
-        .as_str()
-    {
-        "" => 100,
-        n => n.parse().expect("SQLTY_FUZZ_EXAMPLES is a number"),
-    }
+fn env(name: &str) -> Option<u64> {
+    let value = std::env::var(name).ok().filter(|value| !value.is_empty())?;
+    Some(
+        value
+            .parse()
+            .unwrap_or_else(|_| panic!("{name} is a number")),
+    )
 }
 
-/// The seed of the run: `PROPTEST_RNG_SEED`, else a new one.
-fn seed() -> u64 {
-    match std::env::var("PROPTEST_RNG_SEED")
-        .unwrap_or_default()
-        .as_str()
-    {
-        "" => std::time::SystemTime::UNIX_EPOCH
-            .elapsed()
-            .map_or(0, |time| time.as_nanos() as u64),
-        seed => seed.parse().expect("PROPTEST_RNG_SEED is a number"),
-    }
-}
-
-/// Run `property` on `examples()` cases built by `case`; a failure is shrunk and printed with
-/// its case and the seed that replays it.
-///
-/// The cases run on a thread with a 64 MiB stack, as the CLI parses: the parsers recurse.
+/// Run `property` on `SQLTY_FUZZ_EXAMPLES` (100) distinct cases built by `case`, seeded by
+/// `PROPTEST_RNG_SEED`, on a thread with a 64 MiB stack as the parsers recurse. A failure is
+/// shrunk and printed with its case and seed.
 pub fn check<T: Debug>(
     case: impl Fn(&mut Draw<'_>) -> T + Send,
     property: impl Fn(T) -> Result<(), TestCaseError> + Send,
 ) {
     let name = std::thread::current().name().unwrap_or("?").to_string();
     std::thread::scope(|scope| {
-        let runner = std::thread::Builder::new().name(name).stack_size(64 << 20);
-        let cases = runner
+        let thread = std::thread::Builder::new().name(name).stack_size(64 << 20);
+        if let Err(panic) = thread
             .spawn_scoped(scope, || run(case, property))
-            .expect("a thread");
-        if let Err(panic) = cases.join() {
+            .expect("a thread")
+            .join()
+        {
             std::panic::resume_unwind(panic);
         }
     });
+}
+
+#[derive(Default)]
+struct Seen {
+    passed: HashSet<String>,
+    duplicates: usize,
+    rejected: usize,
+    failed: bool,
 }
 
 fn run<T: Debug>(
     case: impl Fn(&mut Draw<'_>) -> T,
     property: impl Fn(T) -> Result<(), TestCaseError>,
 ) {
-    let seed = seed();
-    let cases = examples();
+    let seed = env("PROPTEST_RNG_SEED").unwrap_or_else(|| {
+        std::time::UNIX_EPOCH
+            .elapsed()
+            .map_or(0, |t| t.as_nanos() as u64)
+    });
+    let cases = env("SQLTY_FUZZ_EXAMPLES").unwrap_or(100) as u32;
     let config = Config {
         cases,
         rng_seed: RngSeed::Fixed(seed),
@@ -110,21 +105,19 @@ fn run<T: Debug>(
         max_global_rejects: cases.saturating_mul(20),
         ..Config::default()
     };
-    let mut runner = TestRunner::new(config);
-    let bytes = proptest::collection::vec(any::<u8>(), 0..1024);
     let seen = RefCell::new(Seen::default());
     let started = Instant::now();
-    let result = runner.run(&bytes, |bytes| {
+    let bytes = proptest::collection::vec(any::<u8>(), 0..1024);
+    let result = TestRunner::new(config).run(&bytes, |bytes| {
         let case = case(&mut Draw(Unstructured::new(&bytes)));
         let shown = format!("{case:#?}");
+        let mut seen = seen.borrow_mut();
         // Like Hypothesis, run each case once; shrinking may revisit them.
-        if !seen.borrow().failed && seen.borrow().passed.contains(&shown) {
-            seen.borrow_mut().duplicates += 1;
+        if !seen.failed && seen.passed.contains(&shown) {
+            seen.duplicates += 1;
             return Err(TestCaseError::reject("seen"));
         }
-        let outcome = property(case);
-        let mut seen = seen.borrow_mut();
-        match outcome {
+        match property(case) {
             Ok(()) => {
                 seen.passed.insert(shown);
                 Ok(())
@@ -139,29 +132,22 @@ fn run<T: Debug>(
             }
         }
     });
-    let seen = seen.into_inner();
-    if std::env::var_os("SQLTY_FUZZ_STATS").is_some() {
-        let name = std::thread::current().name().unwrap_or("?").to_string();
-        eprintln!(
-            "stats {name}: {} distinct passed, {} duplicates, {} rejected, {:.2}s",
-            seen.passed.len(),
-            seen.duplicates,
-            seen.rejected,
-            started.elapsed().as_secs_f64()
-        );
-    }
+    let Seen {
+        passed,
+        duplicates,
+        rejected,
+        failed,
+    } = seen.into_inner();
+    let name = std::thread::current().name().unwrap_or("?").to_string();
+    let seconds = started.elapsed().as_secs_f64();
+    eprintln!(
+        "{name}: {} distinct cases, {duplicates} duplicates, {rejected} rejected, {seconds:.2}s",
+        passed.len()
+    );
     match result {
+        Err(TestError::Abort(_)) if !failed && duplicates > rejected => {}
         Err(TestError::Fail(reason, _)) => panic!("{reason}\nreplay with PROPTEST_RNG_SEED={seed}"),
-        Err(TestError::Abort(_)) if !seen.failed && seen.duplicates > seen.rejected => {}
         Err(error) => panic!("{error}\nreplay with PROPTEST_RNG_SEED={seed}"),
         Ok(()) => {}
     }
-}
-
-#[derive(Default)]
-struct Seen {
-    passed: HashSet<String>,
-    duplicates: usize,
-    rejected: usize,
-    failed: bool,
 }

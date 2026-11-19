@@ -54,18 +54,13 @@ fn binds(sql: &str, keys: &Names) -> bool {
     let conn = rusqlite::Connection::open_in_memory().expect("an in-memory database");
     conn.execute_batch(SCHEMA).expect("the schema");
     let mut statement = conn.prepare(sql).expect("the query prepares");
-    for index in 1..=statement.parameter_count() {
-        match statement
+    let bound = (1..=statement.parameter_count()).all(|index| {
+        statement
             .parameter_name(index)
-            .map(|name| name[1..].to_string())
-        {
-            Some(name) if keys.contains(&name) => {
-                statement.raw_bind_parameter(index, 1).expect("binds")
-            }
-            _ => return false,
-        }
-    }
-    let ran = statement.raw_query().next().is_ok();
+            .is_some_and(|name| keys.contains(&name[1..]))
+            && statement.raw_bind_parameter(index, 1).is_ok()
+    });
+    let ran = bound && statement.raw_query().next().is_ok();
     ran
 }
 
@@ -107,7 +102,7 @@ fn call_diagnostics_match_the_driver() {
             .join(", ");
         let source = format!(
             "import sqlite3\n\nconn = sqlite3.connect('db')\nconn.execute({}, {{{mapping}}})\n",
-            python::repr(&sql)
+            python::literal(&sql)
         );
         let found = engine::check(&source, "sqlite", &SQLITE_SCHEMA, None);
         let message = |rule: &str| {
@@ -174,7 +169,7 @@ fn param_types_rewrite_runs_and_strips() {
         let assignments = queries
             .iter()
             .enumerate()
-            .map(|(i, sql)| format!("q{i} = {}", python::repr(&format!("--sql\n{sql}"))));
+            .map(|(i, sql)| format!("q{i} = {}", python::literal(&format!("--sql\n{sql}"))));
         let lines: Vec<String> = above
             .iter()
             .map(ToString::to_string)

@@ -36,7 +36,6 @@ jobs:
       SQLTY_PG_DSN: postgresql://postgres:postgres@localhost:5432/postgres
       SQLTY_FUZZ_EXAMPLES: ${{ inputs.examples }}
       SQLTY_FUZZ_PYTHON: ${{ github.workspace }}/.venv/bin/python
-      SQLTY_FUZZ_STATS: "1"
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

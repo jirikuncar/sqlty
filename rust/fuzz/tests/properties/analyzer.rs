@@ -5,35 +5,24 @@
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
-use postgres::types::{FromSql, Type};
+use postgres::SimpleQueryMessage;
 use proptest::prelude::*;
-use ruff_python_ast::visitor::{walk_expr, Visitor};
-use ruff_python_ast::{Expr, ExprAttribute, ExprName};
+use regex::Regex;
 use sqlty_sql::analyzer::{self, Column};
 
 use crate::draw::{check, Draw};
 use crate::engine;
 
 /// Column types, and a literal of each for COALESCE and VALUES.
+#[rustfmt::skip]
 const TYPES: [(&str, &str); 18] = [
-    ("BIGINT", "2::BIGINT"),
-    ("BOOLEAN", "TRUE"),
-    ("BYTEA", "'\\x00'::BYTEA"),
-    ("DATE", "DATE '2024-01-01'"),
-    ("DOUBLE PRECISION", "2.5::DOUBLE PRECISION"),
-    ("INTEGER", "1"),
-    ("INTEGER[]", "ARRAY[1]"),
-    ("INTERVAL", "INTERVAL '1 day'"),
-    ("JSONB", "'{}'::JSONB"),
-    ("NUMERIC(10, 2)", "1.5"),
-    ("REAL", "1.5::REAL"),
-    ("SMALLINT", "3::SMALLINT"),
-    ("TEXT", "'a'"),
-    ("TEXT[]", "ARRAY['a']"),
-    ("TIMESTAMP", "TIMESTAMP '2024-01-01 00:00:00'"),
-    ("TIMESTAMPTZ", "now()"),
-    ("UUID", "gen_random_uuid()"),
-    ("VARCHAR(20)", "'b'::VARCHAR(20)"),
+    ("BIGINT", "2::BIGINT"), ("BOOLEAN", "TRUE"), ("BYTEA", "'\\x00'::BYTEA"),
+    ("DATE", "DATE '2024-01-01'"), ("DOUBLE PRECISION", "2.5::DOUBLE PRECISION"),
+    ("INTEGER", "1"), ("INTEGER[]", "ARRAY[1]"), ("INTERVAL", "INTERVAL '1 day'"),
+    ("JSONB", "'{}'::JSONB"), ("NUMERIC(10, 2)", "1.5"), ("REAL", "1.5::REAL"),
+    ("SMALLINT", "3::SMALLINT"), ("TEXT", "'a'"), ("TEXT[]", "ARRAY['a']"),
+    ("TIMESTAMP", "TIMESTAMP '2024-01-01 00:00:00'"), ("TIMESTAMPTZ", "now()"),
+    ("UUID", "gen_random_uuid()"), ("VARCHAR(20)", "'b'::VARCHAR(20)"),
 ];
 const NUMERIC: [&str; 6] = [
     "INTEGER",
@@ -53,40 +42,8 @@ fn literal(kind: &str) -> &'static str {
         .map_or("NULL", |(_, value)| value)
 }
 
-#[derive(Debug, Clone)]
-struct Col {
-    name: String,
-    kind: &'static str,
-    not_null: bool,
-}
-
-#[derive(Debug)]
-struct Table {
-    name: String,
-    columns: Vec<Col>,
-}
-
-impl Table {
-    fn ddl(&self) -> String {
-        let columns: Vec<String> = self
-            .columns
-            .iter()
-            .map(|c| {
-                format!(
-                    "{} {}{}",
-                    c.name,
-                    c.kind,
-                    if c.not_null { " NOT NULL" } else { "" }
-                )
-            })
-            .collect();
-        format!(
-            "CREATE TABLE {} (id INTEGER PRIMARY KEY, {});",
-            self.name,
-            columns.join(", ")
-        )
-    }
-}
+/// `(name, columns)`, each column `(name, type, not null)`.
+type Table = (String, Vec<(String, &'static str, bool)>);
 
 #[derive(Debug)]
 struct Case {
@@ -95,81 +52,82 @@ struct Case {
     items: usize,
 }
 
+fn ddl((name, columns): &Table) -> String {
+    let columns: Vec<String> = columns
+        .iter()
+        .map(|(c, kind, not_null)| {
+            format!("{c} {kind}{}", if *not_null { " NOT NULL" } else { "" })
+        })
+        .collect();
+    format!(
+        "CREATE TABLE {name} (id INTEGER PRIMARY KEY, {});",
+        columns.join(", ")
+    )
+}
+
 impl Case {
     fn schema(&self) -> String {
-        self.tables
-            .iter()
-            .map(Table::ddl)
-            .collect::<Vec<_>>()
-            .join("\n")
+        self.tables.iter().map(ddl).collect::<Vec<_>>().join("\n")
     }
 }
 
-fn tables(d: &mut Draw<'_>) -> Vec<Table> {
-    (0..d.int(1, 2))
-        .map(|i| Table {
-            name: format!("t{i}"),
-            columns: (0..d.int(1, 4))
-                .map(|j| Col {
-                    name: format!("c{j}"),
-                    kind: d.pick(&TYPES).0,
-                    not_null: d.bool(),
-                })
-                .collect(),
-        })
-        .collect()
-}
-
-fn expression(d: &mut Draw<'_>, columns: &[(&str, Col)], aggregate: bool) -> String {
-    let (alias, column) = d.pick(columns);
-    let reference = format!("{alias}.{}", column.name);
-    let kind = column.kind;
-    let mut choices = vec!["column", "cast_text", "coalesce", "is_null", "case"];
-    if NUMERIC.contains(&kind) {
-        choices.extend(["arith", "abs"]);
+fn expression(d: &mut Draw<'_>, columns: &[(&str, String, &str)], aggregate: bool) -> String {
+    let (alias, name, kind) = d.pick(columns);
+    let column = format!("{alias}.{name}");
+    let mut choices = if aggregate {
+        vec!["count", "count_star"]
+    } else {
+        vec!["column", "cast_text", "coalesce", "is_null", "case"]
+    };
+    let (numeric, text) = (NUMERIC.contains(&kind), TEXT.contains(&kind));
+    match aggregate {
+        false if numeric => choices.extend(["arith", "abs"]),
+        false if text => choices.extend(["lower", "concat"]),
+        true if numeric || text || TEMPORAL.contains(&kind) => choices.extend(["max", "min"]),
+        _ => {}
     }
-    if TEXT.contains(&kind) {
-        choices.extend(["lower", "concat"]);
-    }
-    if aggregate {
-        choices = vec!["count", "count_star"];
-        if NUMERIC.contains(&kind) || TEXT.contains(&kind) || TEMPORAL.contains(&kind) {
-            choices.extend(["max", "min"]);
-        }
-        if NUMERIC.contains(&kind) {
-            choices.extend(["sum", "avg"]);
-        }
+    if aggregate && numeric {
+        choices.extend(["sum", "avg"]);
     }
     match d.pick(&choices) {
-        "column" => reference,
-        "cast_text" => format!("{reference}::TEXT"),
-        "coalesce" => format!("COALESCE({reference}, {})", literal(kind)),
-        "is_null" => format!("{reference} IS NULL"),
-        "case" => format!("CASE WHEN {reference} IS NOT NULL THEN {reference} END"),
-        "arith" => format!("{reference} + 1"),
-        "abs" => format!("abs({reference})"),
-        "lower" => format!("lower({reference})"),
-        "concat" => format!("{reference} || 'x'"),
-        "count" => format!("count({reference})"),
+        "column" => column,
+        "cast_text" => format!("{column}::TEXT"),
+        "coalesce" => format!("COALESCE({column}, {})", literal(kind)),
+        "is_null" => format!("{column} IS NULL"),
+        "case" => format!("CASE WHEN {column} IS NOT NULL THEN {column} END"),
+        "arith" => format!("{column} + 1"),
+        "concat" => format!("{column} || 'x'"),
         "count_star" => "count(*)".into(),
-        name => format!("{name}({reference})"),
+        function => format!("{function}({column})"),
     }
 }
 
 fn cases(d: &mut Draw<'_>) -> Case {
-    let tables = tables(d);
-    let mut sources = vec![("a", &tables[0])];
-    let mut from = format!("{} a", tables[0].name);
-    if let Some(right) = tables.get(1) {
-        match d.pick(&["JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL JOIN", ","]) {
-            "," => from += &format!(", {} b", right.name),
-            join => from += &format!(" {join} {} b ON b.id = a.id", right.name),
-        }
-        sources.push(("b", right));
+    let tables: Vec<Table> = (0..d.int(1, 2))
+        .map(|i| {
+            (
+                format!("t{i}"),
+                (0..d.int(1, 4))
+                    .map(|j| (format!("c{j}"), d.pick(&TYPES).0, d.bool()))
+                    .collect(),
+            )
+        })
+        .collect();
+    let mut from = format!("{} a", tables[0].0);
+    if let Some((right, _)) = tables.get(1) {
+        from += &match d.pick(&["JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL JOIN", ","]) {
+            "," => format!(", {right} b"),
+            join => format!(" {join} {right} b ON b.id = a.id"),
+        };
     }
-    let columns: Vec<(&str, Col)> = sources
+    let columns: Vec<(&str, String, &str)> = tables
         .iter()
-        .flat_map(|(alias, table)| table.columns.iter().map(|column| (*alias, column.clone())))
+        .zip(["a", "b"])
+        .flat_map(|((_, columns), alias)| {
+            columns
+                .iter()
+                .map(move |(name, kind, _)| (alias, name.clone(), *kind))
+        })
         .collect();
     let aggregate = d.bool();
     let items = d.list(1, 4, |d| expression(d, &columns, aggregate));
@@ -180,33 +138,34 @@ fn cases(d: &mut Draw<'_>) -> Case {
         .collect();
     let mut query = format!("SELECT {} FROM {from}", select.join(", "));
     if d.bool() {
-        let (alias, column) = d.pick(&columns);
-        query += &format!(" WHERE {alias}.{} IS NOT NULL", column.name);
+        let (alias, name, _) = d.pick(&columns);
+        query += &format!(" WHERE {alias}.{name} IS NOT NULL");
     }
     if d.bool() && !aggregate {
         query = format!("{query} UNION ALL {query}");
     }
-    let items = items.len();
     Case {
         tables,
         query,
-        items,
+        items: items.len(),
     }
+}
+
+fn analyzed(case: &Case) -> Result<(analyzer::Schema, Vec<Column>), TestCaseError> {
+    let schema = engine::schema(&case.schema(), "postgres");
+    let columns = engine::analyze_select(&case.query, "postgres", Some(&schema));
+    prop_assert!(columns.is_some(), "not analyzed");
+    Ok((schema, columns.unwrap_or_default()))
 }
 
 #[test]
 fn queries_analyze_with_one_column_per_item() {
     check(cases, |case| {
-        let schema = engine::schema(&case.schema(), "postgres");
-        let columns = engine::analyze_select(&case.query, "postgres", Some(&schema));
-        prop_assert!(columns.is_some(), "not analyzed");
-        let names: Vec<String> = columns
-            .unwrap_or_default()
-            .into_iter()
-            .map(|c| c.name)
-            .collect();
-        let wanted: Vec<String> = (0..case.items).map(|i| format!("x{i}")).collect();
-        prop_assert_eq!(names, wanted);
+        let names: Vec<String> = analyzed(&case)?.1.into_iter().map(|c| c.name).collect();
+        prop_assert_eq!(
+            names,
+            (0..case.items).map(|i| format!("x{i}")).collect::<Vec<_>>()
+        );
         Ok(())
     });
 }
@@ -219,8 +178,9 @@ fn rewrite_and_strip_round_trip() {
         let rewritten = engine::rewrite(&source, &schema, None);
         prop_assert_eq!(&engine::strip(&rewritten, None), &source);
         prop_assert_eq!(&engine::rewrite(&rewritten, &schema, None), &rewritten);
-        let stale: Vec<_> = engine::check(&rewritten, "postgres", &schema, None)
-            .into_iter()
+        let found = engine::check(&rewritten, "postgres", &schema, None);
+        let stale: Vec<_> = found
+            .iter()
             .filter(|(rule, _)| matches!(*rule, "stale-type" | "narrow-type"))
             .collect();
         prop_assert!(stale.is_empty(), "{:?}\n{}", stale, rewritten);
@@ -229,49 +189,25 @@ fn rewrite_and_strip_round_trip() {
 }
 
 /// sqlty SQL type -> `pg_type.typname`.
+#[rustfmt::skip]
 const SQL_TO_PG: [(&str, &str); 29] = [
-    ("SMALLINT", "int2"),
-    ("INT", "int4"),
-    ("INTEGER", "int4"),
-    ("BIGINT", "int8"),
-    ("DECIMAL", "numeric"),
-    ("NUMERIC", "numeric"),
-    ("FLOAT", "float4"),
-    ("REAL", "float4"),
-    ("DOUBLE", "float8"),
-    ("TEXT", "text"),
-    ("VARCHAR", "varchar"),
-    ("CHAR", "bpchar"),
-    ("BOOLEAN", "bool"),
-    ("DATE", "date"),
-    ("TIME", "time"),
-    ("TIMETZ", "timetz"),
-    ("TIMESTAMP", "timestamp"),
-    ("TIMESTAMPTZ", "timestamptz"),
-    ("INTERVAL", "interval"),
-    ("UUID", "uuid"),
-    ("JSON", "json"),
-    ("JSONB", "jsonb"),
-    ("BYTEA", "bytea"),
-    ("VARBINARY", "bytea"),
-    ("INET", "inet"),
-    ("CIDR", "cidr"),
-    ("MACADDR", "macaddr"),
-    ("MONEY", "money"),
-    ("VOID", "void"),
+    ("SMALLINT", "int2"), ("INT", "int4"), ("INTEGER", "int4"), ("BIGINT", "int8"),
+    ("DECIMAL", "numeric"), ("NUMERIC", "numeric"), ("FLOAT", "float4"), ("REAL", "float4"),
+    ("DOUBLE", "float8"), ("TEXT", "text"), ("VARCHAR", "varchar"), ("CHAR", "bpchar"),
+    ("BOOLEAN", "bool"), ("DATE", "date"), ("TIME", "time"), ("TIMETZ", "timetz"),
+    ("TIMESTAMP", "timestamp"), ("TIMESTAMPTZ", "timestamptz"), ("INTERVAL", "interval"),
+    ("UUID", "uuid"), ("JSON", "json"), ("JSONB", "jsonb"), ("BYTEA", "bytea"),
+    ("VARBINARY", "bytea"), ("INET", "inet"), ("CIDR", "cidr"), ("MACADDR", "macaddr"),
+    ("MONEY", "money"), ("VOID", "void"),
 ];
 
 /// Python type -> server types a column typed only by it (a literal) may have.
+#[rustfmt::skip]
 const PYTHON_TO_PG: [(&str, &[&str]); 9] = [
-    ("int", &["int2", "int4", "int8"]),
-    ("str", &["text", "varchar", "bpchar", "unknown", "name"]),
-    ("bool", &["bool"]),
-    ("float", &["float4", "float8"]),
-    ("decimal.Decimal", &["numeric"]),
-    ("datetime.date", &["date"]),
-    ("datetime.datetime", &["timestamp", "timestamptz"]),
-    ("datetime.time", &["time", "timetz"]),
-    ("datetime.timedelta", &["interval"]),
+    ("int", &["int2", "int4", "int8"]), ("str", &["text", "varchar", "bpchar", "unknown", "name"]),
+    ("bool", &["bool"]), ("float", &["float4", "float8"]), ("decimal.Decimal", &["numeric"]),
+    ("datetime.date", &["date"]), ("datetime.datetime", &["timestamp", "timestamptz"]),
+    ("datetime.time", &["time", "timetz"]), ("datetime.timedelta", &["interval"]),
 ];
 
 /// `DECIMAL(10, 2)` -> `numeric`, `ARRAY<INT>` and `ARRAY<ARRAY<INT>>` -> `int4[]`.
@@ -291,7 +227,7 @@ fn normalise(sql_type: &str) -> String {
     SQL_TO_PG
         .iter()
         .find(|(name, _)| *name == base)
-        .map_or_else(|| base.to_lowercase(), |(_, pg)| (*pg).to_string())
+        .map_or_else(|| base.to_lowercase(), |(_, pg)| (*pg).into())
 }
 
 /// Why sqlty's column differs from the server's, or `None` when they agree.
@@ -317,55 +253,25 @@ fn compare(ours: &Column, name: &str, server_type: &str, server_kind: &str) -> O
         .then(|| format!("column {name:?}: type {python_type}, server says {server_type}"))
 }
 
-/// Any value, read only for whether it is NULL.
-struct Null(bool);
-
-impl<'a> FromSql<'a> for Null {
-    fn from_sql(_: &Type, _: &'a [u8]) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
-        Ok(Self(false))
-    }
-
-    fn from_sql_null(_: &Type) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
-        Ok(Self(true))
-    }
-
-    fn accepts(_: &Type) -> bool {
-        true
-    }
-}
-
-struct Server {
-    client: postgres::Client,
-    /// `oid -> (name, kind)`; an array's name is its element's with `[]`.
-    types: HashMap<u32, (String, String)>,
-}
+/// The client, and `oid -> (name, kind)` of every type; an array's is its element's with `[]`.
+type Server = (postgres::Client, HashMap<u32, (String, String)>);
 
 static SERVER: LazyLock<Option<Mutex<Server>>> = LazyLock::new(|| {
     let dsn = std::env::var("SQLTY_PG_DSN").ok()?;
     let mut client =
         postgres::Client::connect(&dsn, postgres::NoTls).expect("connects to SQLTY_PG_DSN");
-    let rows = client
+    let types = client
         .query(
-            "SELECT oid, typname::text, typtype::text, typelem, typcategory::text FROM pg_type",
+            "SELECT t.oid, coalesce(e.typname || '[]', t.typname::text), coalesce(e.typtype, t.typtype)::text
+             FROM pg_type t LEFT JOIN pg_type e ON t.typcategory = 'A' AND e.oid = t.typelem",
             &[],
         )
         .expect("reads pg_type");
-    let by_oid: HashMap<u32, (String, String, u32, String)> = rows
+    let types = types
         .iter()
-        .map(|row| (row.get(0), (row.get(1), row.get(2), row.get(3), row.get(4))))
+        .map(|row| (row.get(0), (row.get(1), row.get(2))))
         .collect();
-    let types = by_oid
-        .iter()
-        .map(
-            |(oid, (name, kind, elem, category))| match by_oid.get(elem) {
-                Some((element, element_kind, _, _)) if category == "A" => {
-                    (*oid, (format!("{element}[]"), element_kind.clone()))
-                }
-                _ => (*oid, (name.clone(), kind.clone())),
-            },
-        )
-        .collect();
-    Some(Mutex::new(Server { client, types }))
+    Some(Mutex::new((client, types)))
 });
 
 /// The server prepares each query and runs it over 0 to 2 rows whose nullable columns are
@@ -373,60 +279,57 @@ static SERVER: LazyLock<Option<Mutex<Server>>> = LazyLock::new(|| {
 #[test]
 fn server_agrees() {
     let Some(server) = SERVER.as_ref() else {
-        eprintln!("server_agrees: set SQLTY_PG_DSN to compare with a server");
-        return;
+        return eprintln!("server_agrees: set SQLTY_PG_DSN to compare with a server");
     };
     check(
         |d| (cases(d), d.int(0, 2)),
         |(case, rows)| {
-            let schema = engine::schema(&case.schema(), "postgres");
-            let ours = engine::analyze_select(&case.query, "postgres", Some(&schema));
-            prop_assert!(ours.is_some(), "not analyzed");
-            let ours = ours.unwrap_or_default();
-            let mut server = server
+            let ours = analyzed(&case)?.1;
+            let (client, types) = &mut *server
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let Server { client, types } = &mut *server;
-            for table in &case.tables {
-                let mut load = format!(
-                    "DROP TABLE IF EXISTS {} CASCADE; {}",
-                    table.name,
-                    table.ddl()
-                );
-                for i in 0..rows {
-                    let values: Vec<&str> = table
-                        .columns
-                        .iter()
-                        .map(|c| if c.not_null { literal(c.kind) } else { "NULL" })
-                        .collect();
-                    load += &format!(
-                        "INSERT INTO {} VALUES ({i}, {});",
-                        table.name,
-                        values.join(", ")
-                    );
-                }
-                client.batch_execute(&load).expect("loads the tables");
+            for (name, columns) in &case.tables {
+                let values: Vec<&str> = columns
+                    .iter()
+                    .map(|(_, kind, not_null)| if *not_null { literal(kind) } else { "NULL" })
+                    .collect();
+                let rows: String = (0..rows)
+                    .map(|i| format!("INSERT INTO {name} VALUES ({i}, {});", values.join(", ")))
+                    .collect();
+                let table = ddl(&(name.clone(), columns.clone()));
+                client
+                    .batch_execute(&format!(
+                        "DROP TABLE IF EXISTS {name} CASCADE; {table} {rows}"
+                    ))
+                    .expect("loads the tables");
             }
             // A combination the server rejects (say `max` of an array) says nothing about sqlty.
-            let Ok(statement) = client.prepare(&case.query) else {
+            let (Ok(statement), Ok(results)) = (
+                client.prepare(&case.query),
+                client.simple_query(&case.query),
+            ) else {
                 return Err(TestCaseError::reject("the server rejects the query"));
             };
-            let Ok(rows) = client.query(&statement, &[]) else {
-                return Err(TestCaseError::reject("the server fails the query"));
-            };
-            let mut problems = Vec::new();
             prop_assert_eq!(ours.len(), statement.columns().len());
-            for (column, described) in ours.iter().zip(statement.columns()) {
-                let (server_type, kind) = types
-                    .get(&described.type_().oid())
-                    .cloned()
-                    .unwrap_or_else(|| (format!("oid {}", described.type_().oid()), "b".into()));
-                problems.extend(compare(column, described.name(), &server_type, &kind));
-            }
-            for row in &rows {
+            let mut problems: Vec<String> = ours
+                .iter()
+                .zip(statement.columns())
+                .filter_map(|(column, described)| {
+                    let oid = described.type_().oid();
+                    let (server_type, kind) = types
+                        .get(&oid)
+                        .cloned()
+                        .unwrap_or_else(|| (format!("oid {oid}"), "b".into()));
+                    compare(column, described.name(), &server_type, &kind)
+                })
+                .collect();
+            for result in &results {
+                let SimpleQueryMessage::Row(row) = result else {
+                    continue;
+                };
                 for (i, column) in ours.iter().enumerate() {
                     let python_type = column.display_type().unwrap_or_else(|| "typing.Any".into());
-                    if row.get::<_, Null>(i).0
+                    if row.get(i).is_none()
                         && !python_type.ends_with(" | None")
                         && python_type != "typing.Any"
                     {
@@ -450,109 +353,25 @@ fn server_agrees() {
 }
 
 /// Type names by the grammar sqlparser reads, with and without parameters.
-const SCALAR_TYPES: [&str; 58] = [
-    "INT",
-    "INTEGER",
-    "SMALLINT",
-    "BIGINT",
-    "REAL",
-    "FLOAT",
-    "FLOAT(8)",
-    "DOUBLE PRECISION",
-    "NUMERIC",
-    "NUMERIC(10)",
-    "NUMERIC(10, 2)",
-    "DECIMAL(5, 1)",
-    "DEC",
-    "DECFLOAT",
-    "CHAR",
-    "CHAR(3)",
-    "CHARACTER VARYING(9)",
-    "VARCHAR(20)",
-    "NVARCHAR(4)",
-    "TEXT",
-    "CLOB",
-    "CHARACTER LARGE OBJECT",
-    "BINARY LARGE OBJECT",
-    "BLOB",
-    "BYTEA",
-    "BINARY(4)",
-    "VARBINARY(8)",
-    "BOOLEAN",
-    "BOOL",
-    "DATE",
-    "TIME",
-    "TIME(3)",
-    "TIME WITH TIME ZONE",
-    "TIMESTAMP",
-    "TIMESTAMP(6) WITH TIME ZONE",
-    "TIMESTAMP WITHOUT TIME ZONE",
-    "TIMESTAMPTZ",
-    "INTERVAL",
-    "INTERVAL DAY TO SECOND",
-    "INTERVAL YEAR TO MONTH",
-    "INTERVAL HOUR",
-    "JSON",
-    "JSONB",
-    "UUID",
-    "BIT(3)",
-    "BIT VARYING(5)",
-    "VARBIT",
-    "INET",
-    "CIDR",
-    "MACADDR",
-    "MONEY",
-    "XML",
-    "INT4RANGE",
-    "TSTZRANGE",
-    "POINT",
-    "OID",
-    "REGCLASS",
-    "TSVECTOR",
-];
-const DIALECT_TYPES: [(&str, &[&str]); 4] = [
-    (
-        "duckdb",
-        &[
-            "HUGEINT",
-            "UBIGINT",
-            "UTINYINT",
-            "STRUCT(a INT, b VARCHAR)",
-            "MAP(VARCHAR, INT)",
-            "UNION(n INT, s VARCHAR)",
-        ],
-    ),
-    (
-        "mysql",
-        &[
-            "SIGNED",
-            "UNSIGNED",
-            "INT UNSIGNED",
-            "YEAR",
-            "DATETIME",
-            "DATETIME(6)",
-            "TINYTEXT",
-            "MEDIUMBLOB",
-            "ENUM('a', 'b')",
-            "SET('a', 'b')",
-            "TINYINT(1)",
-        ],
-    ),
-    ("postgres", &[]),
-    (
-        "sqlite",
-        &[
-            "UNSIGNED_BIG_INT",
-            "NATIVE_CHARACTER",
-            "VARYING_CHARACTER",
-            "ANY",
-            "WIDGET",
-        ],
-    ),
+const SCALAR_TYPES: &str = "INT|INTEGER|SMALLINT|BIGINT|REAL|FLOAT|FLOAT(8)|DOUBLE PRECISION|NUMERIC|NUMERIC(10)\
+    |NUMERIC(10, 2)|DECIMAL(5, 1)|DEC|DECFLOAT|CHAR|CHAR(3)|CHARACTER VARYING(9)|VARCHAR(20)|NVARCHAR(4)|TEXT|CLOB\
+    |CHARACTER LARGE OBJECT|BINARY LARGE OBJECT|BLOB|BYTEA|BINARY(4)|VARBINARY(8)|BOOLEAN|BOOL|DATE|TIME|TIME(3)\
+    |TIME WITH TIME ZONE|TIMESTAMP|TIMESTAMP(6) WITH TIME ZONE|TIMESTAMP WITHOUT TIME ZONE|TIMESTAMPTZ|INTERVAL\
+    |INTERVAL DAY TO SECOND|INTERVAL YEAR TO MONTH|INTERVAL HOUR|JSON|JSONB|UUID|BIT(3)|BIT VARYING(5)|VARBIT|INET\
+    |CIDR|MACADDR|MONEY|XML|INT4RANGE|TSTZRANGE|POINT|OID|REGCLASS|TSVECTOR";
+#[rustfmt::skip]
+const DIALECT_TYPES: [(&str, &str); 4] = [
+    ("duckdb", "HUGEINT|UBIGINT|UTINYINT|STRUCT(a INT, b VARCHAR)|MAP(VARCHAR, INT)|UNION(n INT, s VARCHAR)"),
+    ("mysql", "SIGNED|UNSIGNED|INT UNSIGNED|YEAR|DATETIME|DATETIME(6)|TINYTEXT|MEDIUMBLOB|ENUM('a', 'b')|SET('a', 'b')|TINYINT(1)"),
+    ("postgres", ""),
+    ("sqlite", "UNSIGNED_BIG_INT|NATIVE_CHARACTER|VARYING_CHARACTER|ANY|WIDGET"),
 ];
 
-fn type_name(d: &mut Draw<'_>, own: &[&str]) -> String {
-    let scalars: Vec<&str> = SCALAR_TYPES.iter().chain(own).copied().collect();
+fn type_name(d: &mut Draw<'_>, own: &str) -> String {
+    let scalars: Vec<&str> = SCALAR_TYPES
+        .split('|')
+        .chain(own.split('|').filter(|t| !t.is_empty()))
+        .collect();
     let mut name = d.pick(&scalars).to_string();
     for _ in 0..d.int(0, 2) {
         name = match d.pick(&["[]", "[3]", " ARRAY", " MULTISET", "row"]) {
@@ -563,27 +382,9 @@ fn type_name(d: &mut Draw<'_>, own: &[&str]) -> String {
     name
 }
 
-/// The dotted names a type expression uses: `typing.Any`, `list`, ...
-fn dotted(expr: &Expr) -> String {
-    match expr {
-        Expr::Attribute(ExprAttribute { value, attr, .. }) => format!("{}.{attr}", dotted(value)),
-        Expr::Name(ExprName { id, .. }) => id.to_string(),
-        _ => "?".into(),
-    }
-}
-
-#[derive(Default)]
-struct Names(Vec<String>);
-
-impl Visitor<'_> for Names {
-    fn visit_expr(&mut self, expr: &Expr) {
-        match expr {
-            Expr::Attribute(_) => self.0.push(dotted(expr)),
-            Expr::Name(ExprName { id, .. }) => self.0.push(id.to_string()),
-            _ => walk_expr(self, expr),
-        }
-    }
-}
+/// String literals, and the dotted names a type expression uses: `typing.Any`, `list`, ...
+static TOKENS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"'[^']*'|"[^"]*"|[A-Za-z_][\w.]*"#).expect("a regex"));
 
 #[test]
 fn type_names_map_to_valid_python_types() {
@@ -609,22 +410,18 @@ fn type_names_map_to_valid_python_types() {
             let Some(python_type) = columns.unwrap_or_default().remove(0).display_type() else {
                 return Ok(());
             };
-            let parsed = ruff_python_parser::parse_expression(&python_type);
+            let parses = ruff_python_parser::parse_expression(&python_type).is_ok();
             prop_assert!(
-                parsed.is_ok(),
+                parses,
                 "{}: {} -> {} does not parse",
                 dialect,
                 name,
                 python_type
             );
-            let mut names = Names::default();
-            if let Ok(parsed) = parsed {
-                names.visit_expr(parsed.expr());
-            }
-            let unknown: Vec<String> = names
-                .0
-                .into_iter()
-                .filter(|name| !allowed.contains(&name.as_str()))
+            let unknown: Vec<&str> = TOKENS
+                .find_iter(&python_type)
+                .map(|token| token.as_str())
+                .filter(|token| !token.starts_with(['\'', '"']) && !allowed.contains(token))
                 .collect();
             prop_assert!(
                 unknown.is_empty(),
