@@ -724,14 +724,11 @@ impl<'a> Analyzer<'a> {
         self.narrow_select(select, scope, &facts)
     }
 
-    /// The identity narrowing knows column `name` of the relation `reference` by: what
-    /// [`Self::locate_column`] resolves a reference to it to, so that a condition on the
-    /// column and a read of it agree whatever the folding of identifiers.
-    pub(super) fn column_key(&self, reference: &str, name: &str, scope: &Scope) -> String {
-        let quoted = |text: &str| Ident::with_quote('"', text);
-        let expr = Expr::CompoundIdentifier(vec![quoted(reference), quoted(name)]);
-        self.locate_column(&expr, scope)
-            .map_or_else(|| name.to_string(), |(_, _, column)| column)
+    /// The identity narrowing knows column `name` by: what [`Self::locate_column`] resolves
+    /// a quoted reference to it to, so that a condition on the column and a read of it agree
+    /// whatever the folding of identifiers.
+    pub(super) fn column_key(&self, name: &str) -> String {
+        fold(&Ident::with_quote('"', name), self.dialect)
     }
 
     /// Whether `expr` can be NULL under `facts`.

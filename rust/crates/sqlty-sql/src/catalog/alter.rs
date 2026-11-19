@@ -104,9 +104,7 @@ impl Loader {
                 _ => self.new_key(&new_name, path),
             };
             self.cache = None;
-            let moved = self.relations.remove(&key);
-            self.relations
-                .extend(moved.map(|table| (new_key.clone(), table)));
+            self.move_relation(&key, new_key.clone());
             if self.inherited.contains(&key) {
                 self.inherited.insert(new_key.clone());
                 for rel in self.relations.values_mut() {

@@ -1,8 +1,7 @@
 //! The `sqlty` executable: the commands on the real terminal and disk, reading sources as
 //! the Python environment it is installed in would, or, installed outside one (npm,
 //! Homebrew), the environment of the project it runs in. The commands Rust does not run yet
-//! (and every command with `SQLTY_AST=python`) run as `python -m sqlty` of that
-//! environment.
+//! run as `python -m sqlty` of that environment.
 
 use std::ffi::OsString;
 use std::io::Write;
@@ -23,9 +22,6 @@ pub fn main() -> i32 {
     let environment = Environment::find(&executable.unwrap_or_default(), &cwd, |name| {
         std::env::var_os(name)
     });
-    if std::env::var("SQLTY_AST").is_ok_and(|ast| ast == "python") {
-        return python(&environment, &args);
-    }
     if args.len() == 2 && args[1] == "server" {
         return match crate::server::serve(environment.version, environment.path) {
             Ok(()) => 0,

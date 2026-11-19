@@ -1,8 +1,9 @@
 """``psycopg.sql`` compositions rendered in Rust (``sqlty_python::compose``) and by psycopg.
 
-``sqlty._psycopg`` builds a composition with the real ``psycopg.sql`` classes; the Rust
-model must render the same SQL, or say it does not cover the expression. Raise the number
-of generated examples with ``SQLTY_FUZZ_EXAMPLES``.
+Each ``run(...)`` argument is also evaluated with the real ``psycopg.sql`` classes against
+the module constants; where both render, the SQL must match. Rust renders every
+``sql.Literal(...)`` as ``NULL``, so those are left out. Raise the number of generated
+examples with ``SQLTY_FUZZ_EXAMPLES``.
 """
 
 from __future__ import annotations
@@ -14,9 +15,9 @@ import sys
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from psycopg import sql
 
 from sqlty._core import rendered_compositions
-from sqlty._source import ParsedSource
 from tests.test_rust_types import FUZZ, parses
 
 HEAD = """\
@@ -198,20 +199,50 @@ def modules(draw: st.DrawFn) -> str:
     )
 
 
-def same(source: str) -> int:
-    """How many compositions both render for ``source``; raises where they differ."""
+def psycopg(expression: str, scope: dict[str, object]) -> object:
+    """``expression`` rendered by psycopg, or the reason it is not."""
+    try:
+        return eval(expression, dict(scope)).as_string(None)  # noqa: S307
+    except Exception as error:  # noqa: BLE001
+        return type(error)
+
+
+@functools.cache
+def constants() -> dict[str, object]:
+    scope: dict[str, object] = {}
+    exec(HEAD, scope)  # noqa: S102
+    return scope
+
+
+def same(source: str, **scope: object) -> int:
+    """How many compositions Rust renders as psycopg does; raises where they differ."""
     rust = rendered_compositions(source, sys.version_info[:2])
     assert rust is not None
-    parsed = ParsedSource(source)
-    python = sorted(
-        (parsed.span(call.args[0])[0], parsed.psycopg.render(call.args[0]))
-        for call in parsed.calls
-        if isinstance(call.func, ast.Name) and call.args
+    data = source.encode()
+    runs = sorted(
+        (len(source[: offset(source, arg)].encode()), ast.get_source_segment(source, arg) or "")
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "run"
+        and (arg := node.args[0] if node.args else None) is not None
     )
-    assert [at for at, _, _ in rust] == [at for at, _ in python]
-    covered = [(at, text) for at, read, text in rust if read]
-    assert covered == [found for found, (_, read, _) in zip(python, rust, strict=True) if read]
-    return len(covered)
+    rendered = {at: text for at, read, text in rust if read and text not in (None, "unchecked")}
+    checked = 0
+    for at, expression in runs:
+        assert data[at:].startswith(expression.encode())
+        expected = psycopg(expression, {**constants(), **scope})
+        if at in rendered and isinstance(expected, str) and "Literal" not in expression:
+            assert rendered[at] == expected, expression
+            checked += 1
+    return checked
+
+
+def offset(source: str, node: ast.expr) -> int:
+    lines = source.splitlines(keepends=True)
+    return sum(map(len, lines[: node.lineno - 1])) + len(
+        lines[node.lineno - 1].encode()[: node.col_offset].decode()
+    )
 
 
 CASES = {
@@ -230,7 +261,7 @@ CASES = {
 @pytest.mark.parametrize("expression", CASES.values(), ids=CASES.keys())
 def test_cases(expression: str) -> None:
     source = HEAD + f"def build(param):\n    local = sql.SQL('t')\n    run({expression})\n"
-    assert same(source) >= 1
+    assert same(source, local=sql.SQL("t")) == (expression != CASES["literal"])
     assert rendered_compositions(source, sys.version_info[:2])[0][2] not in (None, "unchecked")
 
 
@@ -351,3 +382,15 @@ def test_edges(expression: str) -> None:
 def test_generated_compositions(source: str) -> None:
     if parses(source):
         same(source)
+
+
+def test_a_composition_reads_an_aliased_module_and_starred_arguments() -> None:
+    source = 'import psycopg.sql as s\nrun(s.SQL("SELECT 1"))\nrun(s.SQL(*parts))\n'
+    rendered = rendered_compositions(source, sys.version_info[:2])
+    assert [text for _, _, text in rendered or []] == ["SELECT 1", "unchecked"]
+
+
+def test_a_composition_needs_no_psycopg(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "psycopg", None)
+    source = 'from psycopg import sql\nrun(sql.SQL("SELECT 1"))\n'
+    assert rendered_compositions(source, sys.version_info[:2]) == [(28, True, "SELECT 1")]

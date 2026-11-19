@@ -6,7 +6,6 @@ Database tests run when ``SQLTY_PG_DSN`` points to a PostgreSQL server.
 from __future__ import annotations
 
 import os
-import sys
 from dataclasses import dataclass
 from typing import Any, Literal, NamedTuple, Protocol, TypedDict
 
@@ -185,40 +184,24 @@ def test_execute_template(conn: Any) -> None:
     assert scalar(conn, SQLTemplate[tuple[int]](t"--sql\nSELECT {n}::INTEGER")) == 41
 
 
-def test_a_composition_reads_an_aliased_module_and_starred_arguments() -> None:
-    from sqlty._source import ParsedSource
-
-    parsed = ParsedSource('import psycopg.sql as s\nQ = s.SQL("SELECT 1")\nR = s.SQL(*parts)\n')
-    assert [parsed.psycopg.render(call) for call in parsed.calls] == ["SELECT 1", "unchecked"]
-
-
-def test_a_composition_needs_psycopg(monkeypatch: pytest.MonkeyPatch) -> None:
-    from sqlty._psycopg import Unrenderable
-    from sqlty._source import ParsedSource
-
-    parsed = ParsedSource('from psycopg import sql\nQ = sql.SQL("SELECT 1")\n')
-    monkeypatch.setitem(sys.modules, "psycopg", None)
-    assert parsed.psycopg.render(parsed.calls[0]) is None
-    with pytest.raises(Unrenderable):
-        parsed.psycopg.compose(parsed.calls[0], lambda name: None)
+COMPOSING = (
+    "from typing import Annotated\nfrom psycopg import sql\nfrom sqlty import SQL\nimport cols\n"
+    "def run(q: Annotated[sql.Composable, SQL]) -> None: ...\n"
+)
 
 
 def test_a_composition_reading_another_module_needs_a_helper_index() -> None:
-    from sqlty._helpers import find_helper_calls
+    from sqlty.core import ParsedSource, _helper_sites
 
-    source = (
-        "from typing import Annotated\nfrom psycopg import sql\nfrom sqlty import SQL\nimport cols\n"
-        "def run(q: Annotated[sql.Composable, SQL]) -> None: ...\n"
-        'run(sql.SQL("SELECT {} FROM t").format(cols.COLS))\n'
-    )
-    assert [(c.line, c.query) for c in find_helper_calls(source)] == [(6, None)]
+    source = COMPOSING + 'run(sql.SQL("SELECT {} FROM t").format(cols.COLS))\n'
+    assert _helper_sites(ParsedSource(source), None, None) == [(None, [], "unchecked-query", None)]
 
 
 def test_a_composition_nested_too_deep_is_unchecked() -> None:
-    from sqlty._source import ParsedSource
+    from sqlty.core import ParsedSource, _helper_sites
 
     composed = 'sql.SQL("x")'
     for _ in range(65):
         composed = f'sql.SQL("{{}}").format({composed})'
-    parsed = ParsedSource(f"from psycopg import sql\nQ = {composed}\n")
-    assert parsed.psycopg.render(parsed.calls[0]) == "unchecked"
+    source = COMPOSING + f"run({composed})\n"
+    assert _helper_sites(ParsedSource(source), None, None) == [(None, [], "unchecked-query", None)]

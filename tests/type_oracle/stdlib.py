@@ -5,8 +5,8 @@ from __future__ import annotations
 import functools
 import sys
 
-from sqlty._type_extractor._stdlib import CLASSES, ENUMS, MODULES
-from sqlty._type_extractor.info import PYTHON_TYPE_MAP
+from tests.type_oracle._stdlib import CLASSES, ENUMS, MODULES
+from tests.type_oracle.info import PYTHON_TYPE_MAP
 
 
 @functools.cache

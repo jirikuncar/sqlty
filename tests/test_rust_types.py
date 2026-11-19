@@ -1,4 +1,4 @@
-"""Row types read in Rust (``sqlty_python::types``) against ``sqlty._type_extractor``.
+"""Row types read in Rust (``sqlty_python::types``) against ``tests.type_oracle``.
 
 Every module of the test suite and its docs, and generated ones, must give the same row
 types, field for field, and the same answers on how their field types relate. Raise the
@@ -21,7 +21,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from sqlty._core import type_definitions, type_relations
-from sqlty._type_extractor import (
+from tests.type_oracle import (
     admits_none,
     check_type_compatibility,
     column_literal_values,
@@ -32,8 +32,8 @@ from sqlty._type_extractor import (
     is_optional,
     parse_tuple_annotation,
 )
-from sqlty._type_extractor.info import PYTHON_TYPE_MAP
-from sqlty._type_extractor.subtype import (
+from tests.type_oracle.info import PYTHON_TYPE_MAP
+from tests.type_oracle.subtype import (
     _LAX_FROM,
     _consistent,
     _erase,

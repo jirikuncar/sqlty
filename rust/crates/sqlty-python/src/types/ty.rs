@@ -1,4 +1,4 @@
-//! Resolved types: the `typing` objects the Python passes build, as values.
+//! Resolved types: the `typing` objects an annotation names, as values.
 //!
 //! A [`Class`] is nominal, with the method resolution order and instance layout CPython
 //! gives it, so a stand-in built from bases Python cannot combine is unknown here too.

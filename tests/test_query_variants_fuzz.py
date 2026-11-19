@@ -15,18 +15,17 @@ those queries (precision).
 
 from __future__ import annotations
 
-import ast
 import contextlib
 import itertools
 import os
+import sys
 import textwrap
 
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from sqlty._source import ParsedSource
-from sqlty._variants import Unchecked, query_variants
+from sqlty._core import call_variants
 
 pytestmark = pytest.mark.skipif(not os.environ.get("SQLTY_FUZZ"), reason="set SQLTY_FUZZ=1 to fuzz")
 
@@ -111,20 +110,22 @@ def _concrete(source: str) -> set[str]:
     return found
 
 
-def _static(source: str) -> set[str] | Unchecked:
-    parsed = ParsedSource(source)
-    call = next(c for c in parsed.calls if isinstance(c.func, ast.Name) and c.func.id == "run")
-    found = query_variants(parsed, call, call.args[0], limit=10**6)
-    return found if isinstance(found, Unchecked) else {variant.query for variant in found}
+def _static(source: str) -> tuple[set[str] | None, str | None]:
+    """The variants of the query passed to ``run``, or None and why it is unchecked."""
+    at = len(source[: source.rindex("run(") + 4].encode())
+    found = call_variants(source, sys.version_info[:2], 10**6)
+    assert found is not None
+    (variants, reason) = next((read, why) for start, _, read, _, why in found if start == at)
+    return (None if variants is None else {query for query, _, _ in variants}), reason
 
 
 def _compare(source: str, precise: bool) -> None:
     concrete = _concrete(source)
-    static = _static(source)
+    static, reason = _static(source)
     listing = textwrap.indent(source, "  ")
-    if isinstance(static, Unchecked) and not concrete and static.reason is None:
+    if static is None and not concrete and reason is None:
         return  # `run` is never reached
-    assert not isinstance(static, Unchecked), f"static code read as unchecked:\n{listing}"
+    assert static is not None, f"static code read as unchecked:\n{listing}"
     assert concrete <= static, f"missed {sorted(concrete - static)}:\n{listing}"
     if precise:
         assert static == concrete, f"infeasible {sorted(static - concrete)}:\n{listing}"

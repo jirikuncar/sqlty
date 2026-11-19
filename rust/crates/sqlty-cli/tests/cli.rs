@@ -6,7 +6,6 @@ fn cli() {
     trycmd::TestCases::new()
         .register_bin("sqlty", std::path::Path::new(env!("CARGO_BIN_EXE_sqlty")))
         .env("VIRTUAL_ENV", venv)
-        .env("SQLTY_AST", "rust")
         .env("SQLTY_CONFIG_FILE", "")
         .insert_var("[VERSION]", env!("CARGO_PKG_VERSION"))
         .expect("a new variable")

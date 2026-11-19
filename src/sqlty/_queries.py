@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from sqlty._core import Schema, analyze_params, infer_type, returns_rows
+from sqlty._core import Schema
 from sqlty._core import check_queries as _check_queries
-from sqlty._core import named_queries as _named_queries
 from sqlty._lint import Diagnostic
 
 
@@ -31,39 +30,6 @@ def check_query_file(
         query_format=query_format,
         name=name,
     )
-
-
-def query_types(
-    source: str,
-    *,
-    name: str = "",
-    query_format: str = "auto",
-    dialect: str = "postgres",
-    schema_sql: str | Schema | None = None,
-) -> list[str]:
-    """``name(params) -> row`` for each named query of a ``.sql`` file, as ``sqlty check -v``
-    prints them: the parameters by name or number, ``None`` for a query without rows and
-    ``unknown`` for one whose columns are not all typed. A query of several statements is
-    typed by its first. sqlc's ``@name`` and ``sqlc.arg(name)`` are ``name``, and aiosql's
-    ``:obj.attr`` is ``obj.attr``.
-
-    Example:
-        >>> query_types("-- name: by-id^\\nSELECT id FROM users WHERE id = :id", schema_sql="CREATE TABLE users (id INT NOT NULL)")
-        ['by_id(id: int) -> tuple[int]']
-    """
-    found = []
-    for query, body, renames in _named_queries(source, query_format=query_format, name=name):
-        row = infer_type(body, dialect=dialect, schema_sql=schema_sql)
-        if row is None and returns_rows(body, dialect=dialect):
-            row = "unknown"
-        params = analyze_params(body, dialect=dialect, schema_sql=schema_sql) or []
-        spelled = dict(renames)
-        listed = ", ".join(
-            f"{spelled.get(p[1], p[1]) if p[1] else f'${p[0]}'}: {p[2] or 'Any'}"
-            for p in sorted(params, key=lambda p: p[0])
-        )
-        found.append(f"{query}({listed}) -> {row}")
-    return found
 
 
 def breaking_query_file(

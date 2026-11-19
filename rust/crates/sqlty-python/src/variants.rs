@@ -1,4 +1,4 @@
-//! The queries a function builds along its paths, as `sqlty._variants` reads them: the
+//! The queries a function builds along its paths: the
 //! walk forks at `if`, `match` and conditional expressions, drops the paths that return
 //! or raise, and evaluates the query on each path.
 

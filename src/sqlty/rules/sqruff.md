@@ -27,7 +27,8 @@ ORDER BY name""")
 Every query sqlty checks is linted, whatever its string looks like: escape
 sequences are read, and the underline lands on the source they are written in.
 Placeholders (`%s`, `%(name)s`, `?`) are read as names, and a finding on one is
-dropped.
+dropped. A query of over 4,096 words and symbols is not linted: sqruff takes
+seconds on one that long.
 
 ## Why is this bad?
 

@@ -20,10 +20,11 @@ test("a query is typed against the schema", () => {
 });
 
 test("a request larger than the memory the module starts with", () => {
-  const columns = Array.from({ length: 20000 }, () => "name").join(", ");
+  const alias = "x".repeat(1000);
+  const columns = Array.from({ length: 4096 }, (_, i) => `name AS ${alias}${i}`).join(", ");
   const source = `q = "--sql\\nSELECT ${columns} FROM users"`;
   const answer = ask({ op: "analyze", source, schema, dialect: "sqlite" });
-  assert.equal(answer.queries[0].columns.length, 20000);
+  assert.equal(answer.queries[0].columns.length, 4096);
 });
 
 test("a row type, a helper call and an ignore comment are checked", () => {
