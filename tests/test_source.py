@@ -13,6 +13,7 @@ from sqlty._cli import main
 from sqlty._core import module_ignores, query_sites
 from sqlty._source import ParsedSource
 from sqlty.core import check_source
+from tests.type_oracle.outline import classes, outline
 
 SCHEMA = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);\n"
 
@@ -157,10 +158,10 @@ def test_parsed_source_is_reused(parses):
 def test_parsed_source_facts():
     parsed = ParsedSource("import typing as t\nclass A:\n    class B: ...\nf(g(1))\n")
     assert parsed.typing_aliases == {"t": "typing"}
-    assert [c.name for c in parsed.outline_classes] == ["A", "B"]
+    assert [c.name for c in classes(parsed)] == ["A", "B"]
     assert parsed.facts is not None and parsed.facts.names == ["f", "g"]
     assert ParsedSource("def f(:").facts is None
-    assert ParsedSource("def f(:").outline is None
+    assert outline(ParsedSource("def f(:")) is None
 
 
 def test_what_rust_does_not_model_is_reported_unchecked():

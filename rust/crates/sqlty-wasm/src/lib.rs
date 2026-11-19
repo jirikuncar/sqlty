@@ -74,7 +74,7 @@ struct Request {
     /// The schema before a change to `schema`, for `breaking`.
     #[serde(default)]
     before: String,
-    #[serde(default)]
+    #[serde(default = "postgres")]
     dialect: String,
     #[serde(default)]
     offset: usize,
@@ -110,7 +110,12 @@ struct Request {
     panic: Option<String>,
 }
 
-/// Answer a JSON request about the Python `source`, read against `schema` in `dialect`.
+fn postgres() -> String {
+    "postgres".to_string()
+}
+
+/// Answer a JSON request about the Python `source`, read against `schema` in `dialect`
+/// (`postgres` by default).
 ///
 /// - `analyze`: `diagnostics` (what `sqlty check` reports for a module by itself, each
 ///   with the `fix` edits of its quick fix), `queries` (row type, columns
@@ -367,7 +372,7 @@ fn settings(config: &str) -> Result<Settings, String> {
         .unwrap_or_default();
     if let Some(key) = table.keys().find(|key| !READ.contains(&key.as_str())) {
         return Err(format!(
-            "sqlty.toml: the playground reads only {}, not '{key}'",
+            "sqlty.toml: the WebAssembly engine reads only {}, not '{key}'",
             READ.join(", ")
         ));
     }

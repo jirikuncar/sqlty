@@ -80,7 +80,7 @@ Style, naming and refactoring suggestions are Nit at most.
   coverage profile runs explicit examples only). Restructure dead branches: a `?`
   alone on a line or an unreachable `Err` arm counts as missed.
 - No `pytest.importorskip`, no skips or xfails beyond what AGENTS.md
-  "Running tests" allows, no wall-time assertions outside
+  "Writing tests" allows, no wall-time assertions outside
   `-m timing`. Hypothesis strategies are built once (`functools.cache`), not per
   example.
 - Snapshots (`inline-snapshot`, `make update-mdtest`) are read, not trusted: a

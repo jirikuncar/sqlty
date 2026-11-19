@@ -3,7 +3,6 @@
 Usage:
     parsed = ParsedSource(text, module="pkg.mod")
     parsed.facts            # imports, typing aliases and calls; None when Rust declines the text
-    parsed.outline          # ast.Module of what type extraction reads, built in Rust
     parsed.typing_aliases   # local names of typing members: {'t': 'typing', 'A': 'Any'}
     parsed.imported_names   # absolute imports, local name to dotted name: {'D': 'decimal.Decimal'}
 
@@ -13,21 +12,20 @@ wrapped with ``ParsedSource.of``. Build one per file and reuse it.
 
 Example:
     >>> parsed = ParsedSource("import typing as t\\nclass A: ...\\nf(A)")
-    >>> parsed.typing_aliases, [c.name for c in parsed.outline_classes]
-    ({'t': 'typing'}, ['A'])
+    >>> parsed.typing_aliases
+    {'t': 'typing'}
     >>> ParsedSource("x = 1").may_define_helpers
     False
 """
 
 from __future__ import annotations
 
-import ast
 import bisect
 import functools
 import itertools
 import typing
 
-from sqlty._core import module_facts, module_outline
+from sqlty._core import module_facts
 
 
 class Facts(typing.NamedTuple):
@@ -77,22 +75,6 @@ class ParsedSource:
     def of(cls, source: str | ParsedSource, module: str | None = None) -> ParsedSource:
         """``source`` itself when it is already parsed, else a new ``ParsedSource``."""
         return source if isinstance(source, ParsedSource) else cls(source, module)
-
-    @functools.cached_property
-    def _outlined(self) -> tuple[ast.Module, list[ast.ClassDef]] | None:
-        return module_outline(self.text)
-
-    @property
-    def outline(self) -> ast.Module | None:
-        """What type extraction reads: the module with function bodies cut to the statements
-        holding a class, built in Rust. ``None`` when the text is not valid Python, or Rust
-        declines it."""
-        return None if self._outlined is None else self._outlined[0]
-
-    @property
-    def outline_classes(self) -> list[ast.ClassDef]:
-        """The class definitions of ``outline``, in ``ast.walk`` order."""
-        return [] if self._outlined is None else self._outlined[1]
 
     def position(self, offset: int) -> tuple[int, int]:
         """The 1-based line and column of the byte ``offset``; the column counts characters.

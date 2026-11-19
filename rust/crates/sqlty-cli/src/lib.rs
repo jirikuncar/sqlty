@@ -3,26 +3,22 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
 
-mod diff;
-mod json;
 pub mod native;
 pub mod server;
 
-use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use clap::{ArgMatches, Args, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
+use serde::Serialize;
 use sqlty_project::{FileSettings, Flags, Options, Shared, Workspace};
 use sqlty_python::checker::Diagnostic;
 use sqlty_python::project::{Discovery, Files, Read};
 use sqlty_python::report;
 use sqlty_python::rules::{Rule, Severity};
 use sqlty_python::types::stdlib::Version;
-
-use json::Json;
 
 include!(concat!(env!("OUT_DIR"), "/embedded.rs"));
 
@@ -617,7 +613,7 @@ fn transform(
             }
         } else if change.diff {
             let path = path.display().to_string();
-            host.out(&diff::unified(&path, original, &result));
+            host.out(&unified_diff(&path, original, &result));
         } else {
             write_source(host, path, &result)?;
             if kind == Transform::Rewrite {
@@ -810,10 +806,8 @@ fn check(
         host.out(&format!("{line}\n"));
     }
     match args.output_format {
-        OutputFormat::Json => host.out(&format!("{}\n", Json::Array(shown).dumps())),
-        OutputFormat::Sarif => {
-            host.out(&format!("{}\n", sarif_log(&host.version(), shown).dumps()));
-        }
+        OutputFormat::Json => host.out(&pretty(&shown)),
+        OutputFormat::Sarif => host.out(&pretty(&sarif_log(&host.version(), &shown))),
         OutputFormat::Text | OutputFormat::Github => {}
     }
     let text = text_output && !common.quiet;
@@ -887,8 +881,16 @@ fn statistics(modules: &[std::collections::HashMap<&'static str, usize>]) -> Str
     line
 }
 
+/// The unified diff of `old` and `new`, both named `path`, with three lines of context.
+fn unified_diff(path: &str, old: &str, new: &str) -> String {
+    similar::TextDiff::from_lines(old, new)
+        .unified_diff()
+        .header(path, path)
+        .to_string()
+}
+
 /// The 1-based line and column (in characters) of the byte `offset` of `text`.
-fn position(text: &str, offset: usize) -> Json {
+fn position(text: &str, offset: usize) -> Position {
     let offset = offset.min(text.len());
     let before = &text.as_bytes()[..offset];
     let line = before.iter().filter(|byte| **byte == b'\n').count() + 1;
@@ -897,31 +899,75 @@ fn position(text: &str, offset: usize) -> Json {
         .rposition(|byte| *byte == b'\n')
         .map_or(0, |at| at + 1);
     let column = String::from_utf8_lossy(&before[start..]).chars().count() + 1;
-    Json::object([("line", line.into()), ("column", column.into())])
+    Position { line, column }
 }
 
-fn json_diagnostic(path: &Path, diag: &Diagnostic, text: &str) -> Json {
-    let fix = diag
-        .fix
-        .iter()
-        .map(|edit| {
-            Json::object([
-                ("start", position(text, edit.range.start)),
-                ("end", position(text, edit.range.end)),
-                ("replacement", edit.replacement.as_str().into()),
-            ])
-        })
-        .collect();
-    Json::object([
-        ("file", path.display().to_string().into()),
-        ("rule", diag.rule.name().into()),
-        ("message", diag.message.as_str().into()),
-        ("severity", diag.severity.as_str().into()),
-        ("line", diag.line.into()),
-        ("start", position(text, diag.span.start)),
-        ("end", position(text, diag.span.end)),
-        ("fix", Json::Array(fix)),
-    ])
+#[derive(Clone, Copy, Serialize)]
+struct Position {
+    line: usize,
+    column: usize,
+}
+
+#[derive(Serialize)]
+struct JsonEdit {
+    start: Position,
+    end: Position,
+    replacement: String,
+}
+
+/// A row of `--output-format json`.
+#[derive(Serialize)]
+struct JsonDiagnostic {
+    file: String,
+    rule: &'static str,
+    message: String,
+    severity: &'static str,
+    line: usize,
+    start: Position,
+    end: Position,
+    fix: Vec<JsonEdit>,
+}
+
+fn json_diagnostic(path: &Path, diag: &Diagnostic, text: &str) -> JsonDiagnostic {
+    JsonDiagnostic {
+        file: path.display().to_string(),
+        rule: diag.rule.name(),
+        message: diag.message.clone(),
+        severity: diag.severity.as_str(),
+        line: diag.line,
+        start: position(text, diag.span.start),
+        end: position(text, diag.span.end),
+        fix: diag
+            .fix
+            .iter()
+            .map(|edit| JsonEdit {
+                start: position(text, edit.range.start),
+                end: position(text, edit.range.end),
+                replacement: edit.replacement.clone(),
+            })
+            .collect(),
+    }
+}
+
+/// `value` as two-space indented ASCII JSON, with a trailing newline, so a redirected
+/// stdout in any encoding takes it.
+fn pretty(value: &impl Serialize) -> String {
+    let mut out = String::new();
+    for char in serde_json::to_string_pretty(value)
+        .unwrap_or_default()
+        .chars()
+    {
+        match char.is_ascii() {
+            true => out.push(char),
+            false => {
+                for unit in char.encode_utf16(&mut [0; 2]) {
+                    out.push_str(&format!("\\u{unit:04x}"));
+                }
+            }
+        }
+    }
+    out.push('\n');
+    out
 }
 
 fn github_annotation(path: &Path, diag: &Diagnostic) -> String {
@@ -958,121 +1004,197 @@ fn level(severity: &str) -> &'static str {
 }
 
 /// The rows of `--output-format json` as one SARIF 2.1.0 run.
-fn sarif_log(version: &str, rows: Vec<Json>) -> Json {
+fn sarif_log<'a>(version: &'a str, rows: &'a [JsonDiagnostic]) -> SarifLog<'a> {
     let rules = Rule::LISTED
         .iter()
-        .map(|rule| {
-            Json::object([
-                ("id", rule.name().into()),
-                (
-                    "shortDescription",
-                    Json::object([("text", rule.description().into())]),
-                ),
-                (
-                    "helpUri",
-                    format!("{DOCS_URL}reference/rules/{}/", rule.name()).into(),
-                ),
-                (
-                    "defaultConfiguration",
-                    Json::object([("level", level(rule.default_severity().as_str()).into())]),
-                ),
-            ])
+        .map(|rule| SarifRule {
+            id: rule.name(),
+            short_description: Text {
+                text: rule.description().to_string(),
+            },
+            help_uri: format!("{DOCS_URL}reference/rules/{}/", rule.name()),
+            default_configuration: Level {
+                level: level(rule.default_severity().as_str()),
+            },
         })
         .collect();
-    let driver = Json::object([
-        ("name", "sqlty".into()),
-        ("version", version.into()),
-        ("informationUri", DOCS_URL.into()),
-        ("rules", Json::Array(rules)),
-    ]);
-    let results = rows.into_iter().map(sarif_result).collect();
-    let run = Json::object([
-        ("tool", Json::object([("driver", driver)])),
-        ("columnKind", "unicodeCodePoints".into()),
-        ("results", Json::Array(results)),
-    ]);
-    Json::object([
-        (
-            "$schema",
-            "https://json.schemastore.org/sarif-2.1.0.json".into(),
-        ),
-        ("version", "2.1.0".into()),
-        ("runs", Json::Array(vec![run])),
-    ])
+    SarifLog {
+        schema: "https://json.schemastore.org/sarif-2.1.0.json",
+        version: "2.1.0",
+        runs: [SarifRun {
+            tool: Tool {
+                driver: Driver {
+                    name: "sqlty",
+                    version,
+                    information_uri: DOCS_URL,
+                    rules,
+                },
+            },
+            column_kind: "unicodeCodePoints",
+            results: rows.iter().map(sarif_result).collect(),
+        }],
+    }
 }
 
-fn sarif_result(row: Json) -> Json {
-    let Json::Object(fields) = row else {
-        return Json::Null;
-    };
-    let fields: BTreeMap<String, Json> = fields.into_iter().collect();
-    let get = |key: &str| fields.get(key).cloned().unwrap_or(Json::Null);
-    let text = |key: &str| match fields.get(key) {
-        Some(Json::Str(text)) => text.clone(),
-        _ => String::new(),
-    };
-    let at = |position: &Json, key: &str| match position {
-        Json::Object(fields) => fields
-            .iter()
-            .find(|(name, _)| name == key)
-            .map_or(Json::Null, |(_, value)| value.clone()),
-        _ => Json::Null,
-    };
-    let region = |start: &Json, end: &Json| {
-        Json::object([
-            ("startLine", at(start, "line")),
-            ("startColumn", at(start, "column")),
-            ("endLine", at(end, "line")),
-            ("endColumn", at(end, "column")),
-        ])
-    };
-    let file = text("file");
-    let uri = match Path::new(&file).is_absolute() {
-        true => format!("file://{}", file.replace('%', "%25").replace(' ', "%20")),
-        false => file.replace('\\', "/"),
-    };
-    let artifact = Json::object([("uri", uri.into())]);
-    let location = Json::object([
-        ("artifactLocation", artifact.clone()),
-        ("region", region(&get("start"), &get("end"))),
-    ]);
-    let mut result = vec![
-        ("ruleId".to_string(), get("rule")),
-        ("level".to_string(), level(&text("severity")).into()),
-        (
-            "message".to_string(),
-            Json::object([("text", get("message"))]),
+fn sarif_result(row: &JsonDiagnostic) -> SarifResult {
+    let uri = match Path::new(&row.file).is_absolute() {
+        true => format!(
+            "file://{}",
+            row.file.replace('%', "%25").replace(' ', "%20")
         ),
-        (
-            "locations".to_string(),
-            Json::Array(vec![Json::object([("physicalLocation", location)])]),
-        ),
-    ];
-    if let Some(Json::Array(fix)) = fields
-        .get("fix")
-        .filter(|fix| **fix != Json::Array(Vec::new()))
-    {
-        let replacements = fix
-            .iter()
-            .map(|edit| {
-                let get = |key: &str| at(edit, key);
-                Json::object([
-                    ("deletedRegion", region(&get("start"), &get("end"))),
-                    (
-                        "insertedContent",
-                        Json::object([("text", get("replacement"))]),
-                    ),
-                ])
-            })
-            .collect();
-        let change = Json::object([
-            ("artifactLocation", artifact),
-            ("replacements", Json::Array(replacements)),
-        ]);
-        let changes = Json::object([("artifactChanges", Json::Array(vec![change]))]);
-        result.push(("fixes".to_string(), Json::Array(vec![changes])));
+        false => row.file.replace('\\', "/"),
+    };
+    let artifact = || Artifact { uri: uri.clone() };
+    let fixes = match row.fix.is_empty() {
+        true => Vec::new(),
+        false => vec![SarifFix {
+            artifact_changes: [ArtifactChange {
+                artifact_location: artifact(),
+                replacements: row
+                    .fix
+                    .iter()
+                    .map(|edit| Replacement {
+                        deleted_region: Region::new(edit.start, edit.end),
+                        inserted_content: Text {
+                            text: edit.replacement.clone(),
+                        },
+                    })
+                    .collect(),
+            }],
+        }],
+    };
+    SarifResult {
+        rule_id: row.rule,
+        level: level(row.severity),
+        message: Text {
+            text: row.message.clone(),
+        },
+        locations: [Location {
+            physical_location: PhysicalLocation {
+                artifact_location: artifact(),
+                region: Region::new(row.start, row.end),
+            },
+        }],
+        fixes,
     }
-    Json::Object(result)
+}
+
+#[derive(Serialize)]
+struct SarifLog<'a> {
+    #[serde(rename = "$schema")]
+    schema: &'static str,
+    version: &'static str,
+    runs: [SarifRun<'a>; 1],
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SarifRun<'a> {
+    tool: Tool<'a>,
+    column_kind: &'static str,
+    results: Vec<SarifResult>,
+}
+
+#[derive(Serialize)]
+struct Tool<'a> {
+    driver: Driver<'a>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Driver<'a> {
+    name: &'static str,
+    version: &'a str,
+    information_uri: &'static str,
+    rules: Vec<SarifRule>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SarifRule {
+    id: &'static str,
+    short_description: Text,
+    help_uri: String,
+    default_configuration: Level,
+}
+
+#[derive(Serialize)]
+struct Level {
+    level: &'static str,
+}
+
+#[derive(Serialize)]
+struct Text {
+    text: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SarifResult {
+    rule_id: &'static str,
+    level: &'static str,
+    message: Text,
+    locations: [Location; 1],
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    fixes: Vec<SarifFix>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Location {
+    physical_location: PhysicalLocation,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PhysicalLocation {
+    artifact_location: Artifact,
+    region: Region,
+}
+
+#[derive(Serialize)]
+struct Artifact {
+    uri: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Region {
+    start_line: usize,
+    start_column: usize,
+    end_line: usize,
+    end_column: usize,
+}
+
+impl Region {
+    fn new(start: Position, end: Position) -> Self {
+        Self {
+            start_line: start.line,
+            start_column: start.column,
+            end_line: end.line,
+            end_column: end.column,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SarifFix {
+    artifact_changes: [ArtifactChange; 1],
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ArtifactChange {
+    artifact_location: Artifact,
+    replacements: Vec<Replacement>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Replacement {
+    deleted_region: Region,
+    inserted_content: Text,
 }
 
 #[cfg(test)]
@@ -1301,15 +1423,38 @@ mod tests {
     }
 
     #[test]
-    fn writes_sarif_of_any_row() {
-        assert_eq!(sarif_result(Json::Null), Json::Null);
-        let row = Json::object([("file", Json::Null), ("start", Json::Null)]);
-        let Json::Object(fields) = sarif_result(row) else {
-            panic!("an object");
+    fn writes_sarif_uris_and_escapes_non_ascii() {
+        let at = Position { line: 1, column: 1 };
+        let row = |file: &str| JsonDiagnostic {
+            file: file.to_string(),
+            rule: "narrow-type",
+            message: "é😀".to_string(),
+            severity: "info",
+            line: 1,
+            start: at,
+            end: at,
+            fix: Vec::new(),
         };
-        assert_eq!(fields[1], ("level".to_string(), "none".into()));
-        let row = Json::object([("file", "/a b%.py".into())]);
-        let found = sarif_result(row).dumps();
+        let found = pretty(&sarif_result(&row("/a b%.py")));
         assert!(found.contains(r#""uri": "file:///a%20b%25.py""#), "{found}");
+        assert!(found.contains(r#""level": "none""#), "{found}");
+        assert!(!found.contains("fixes"), "{found}");
+        let found = pretty(&[row(r"app\q.py")]);
+        assert!(found.contains(r#""file": "app\\q.py""#), "{found}");
+        assert!(
+            found.contains(r#""message": "\u00e9\ud83d\ude00""#),
+            "{found}"
+        );
+        let found = pretty(&sarif_result(&row(r"app\q.py")));
+        assert!(found.contains(r#""uri": "app/q.py""#), "{found}");
+    }
+
+    #[test]
+    fn marks_a_missing_newline_at_the_end() {
+        assert_eq!(unified_diff("q.py", "same\n", "same\n"), "");
+        assert_eq!(
+            unified_diff("q.py", "a\nb", "a\nc"),
+            "--- q.py\n+++ q.py\n@@ -1,2 +1,2 @@\n a\n-b\n\\ No newline at end of file\n+c\n\\ No newline at end of file\n"
+        );
     }
 }

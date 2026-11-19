@@ -4,14 +4,18 @@
 # file at once. The read-only checks share priority 10 and run in parallel.
 # One config for the whole repository: prek runs the projects of a workspace one
 # after another, so a rust/ project would stop cargo from overlapping with mypy.
+# cargo test runs on push only: CI runs it in the test jobs, not in Lint.
+
+default_install_hook_types = ["pre-commit", "pre-push"]
+default_stages = ["pre-commit"]
 
 [[repos]]
 repo = "builtin"
 hooks = [
   { id = "fix-byte-order-marker", exclude = '^rust/crates/sqlty-cli/tests/cli/check-fix\.(in|out)/r\.py$', priority = 0 },
   { id = "mixed-line-ending", priority = 1 },
-  { id = "trailing-whitespace", priority = 2 },
-  { id = "end-of-file-fixer", priority = 3 },
+  { id = "trailing-whitespace", stages = ["pre-commit"], priority = 2 },
+  { id = "end-of-file-fixer", stages = ["pre-commit"], priority = 3 },
   { id = "check-yaml", priority = 10 },
   { id = "check-toml", priority = 10 },
   { id = "check-json", priority = 10 },
@@ -85,7 +89,7 @@ entry = "uv run vale --output=line"
 language = "system"
 # The PyPI wrapper downloads the binary on first run: parallel batches would race on it.
 require_serial = true
-files = '^(docs/|README\.md$|CONTRIBUTING\.md$|DEVELOPMENT\.md$|SECURITY\.md$|proofs/README\.md$|scripts/compat/README\.md$)'
+files = '^(docs/|README\.md$|CONTRIBUTING\.md$|DEVELOPMENT\.md$|SECURITY\.md$|scripts/compat/README\.md$)'
 types = ["markdown"]
 priority = 10
 
@@ -123,6 +127,7 @@ entry = "cargo test --workspace --manifest-path rust/Cargo.toml -q"
 language = "system"
 pass_filenames = false
 files = '^rust/'
+stages = ["pre-push"]
 priority = 10
 
 [[repos.hooks]]
