@@ -1,3 +1,12 @@
+---
+order: 430
+group: "query"
+severity: "error"
+fixable: false
+summary: "Query marker names a database the project does not configure"
+origin: "Python"
+---
+
 # unknown-database
 
 Default severity: **error**

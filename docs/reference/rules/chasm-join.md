@@ -1,3 +1,12 @@
+---
+order: 350
+group: "names"
+severity: "warn"
+fixable: false
+summary: "Aggregating query joins one table one-to-many to two others"
+origin: "SQL"
+---
+
 # chasm-join
 
 Default severity: **warn**

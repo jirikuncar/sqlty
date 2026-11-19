@@ -1,3 +1,12 @@
+---
+order: 160
+group: "query"
+severity: "warn"
+fixable: true
+summary: "MySQL rejects the \"--sql\" marker; use \"-- sql\""
+origin: "Python"
+---
+
 # mysql-sql-marker
 
 Default severity: **warn**

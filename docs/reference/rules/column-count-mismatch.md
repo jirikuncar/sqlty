@@ -1,3 +1,12 @@
+---
+order: 10
+group: "row-type"
+severity: "error"
+fixable: false
+summary: "Annotated type has different number of fields than query columns"
+origin: "Python"
+---
+
 # column-count-mismatch
 
 Default severity: **error**

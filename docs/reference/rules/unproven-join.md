@@ -1,3 +1,12 @@
+---
+order: 360
+group: "names"
+severity: "ignore"
+fixable: false
+summary: "Join in an aggregating query that matches no primary or unique key"
+origin: "SQL"
+---
+
 # unproven-join
 
 Default severity: **ignore**

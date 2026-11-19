@@ -1,3 +1,12 @@
+---
+order: 60
+group: "row-type"
+severity: "error"
+fixable: false
+summary: "Row type field is not optional but its query column can be NULL"
+origin: "Python"
+---
+
 # nullable-mismatch
 
 Default severity: **error**

@@ -1,3 +1,12 @@
+---
+order: 460
+group: "internal"
+severity: "error"
+fixable: false
+summary: "sqlty crashed checking the file"
+origin: "Python"
+---
+
 # internal-error
 
 Default severity: **error**

@@ -1,3 +1,12 @@
+---
+order: 20
+group: "row-type"
+severity: "error"
+fixable: false
+summary: "Annotated type field has incompatible type with query column"
+origin: "Python"
+---
+
 # column-type-mismatch
 
 Default severity: **error**

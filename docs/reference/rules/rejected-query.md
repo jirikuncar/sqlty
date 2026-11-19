@@ -1,3 +1,12 @@
+---
+order: 380
+group: "names"
+severity: "error"
+fixable: false
+summary: "Query the database rejects for a reason no other rule names"
+origin: "SQL"
+---
+
 # rejected-query
 
 Default severity: **error**

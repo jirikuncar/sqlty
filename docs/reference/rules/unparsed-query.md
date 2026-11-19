@@ -1,3 +1,12 @@
+---
+order: 230
+group: "query"
+severity: "warn"
+fixable: false
+summary: "--sql query, SQL[T] query or Annotated helper query that does not parse"
+origin: "Python"
+---
+
 # unparsed-query
 
 Default severity: **warn**

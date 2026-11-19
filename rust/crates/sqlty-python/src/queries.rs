@@ -22,11 +22,10 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 use sqlty_sql::analyzer::{database_name, parse, route_named, statement_ranges, unknown_named};
-use sqlty_sql::diagnostics::NameRule;
 
 use crate::checker::{star_finding, unparsed_message, Diagnostic};
 use crate::options::Options;
-use crate::rules::{Rule, RuleConfig};
+use crate::rules::{Rule, RuleConfig, SQL_RULES};
 
 /// How a `.sql` file names its queries (`query-format`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -262,9 +261,7 @@ pub fn check_queries(
             header..end.min(source.len()),
         );
     }
-    let names = NameRule::ALL
-        .iter()
-        .any(|&rule| rules.is_enabled(Rule::Name(rule)));
+    let names = rules.enabled().intersects(SQL_RULES);
     for query in split(source, format, stem) {
         let body = query.sql.as_str();
         for statement in statement_ranges(body, dialect) {
@@ -288,7 +285,7 @@ pub fn check_queries(
                 let span = diagnostic.span.map_or(at.clone(), |span| {
                     at.start + span.start..at.start + span.end
                 });
-                report(Rule::Name(diagnostic.rule), diagnostic.message, span);
+                report(diagnostic.rule, diagnostic.message, span);
             }
         }
     }

@@ -1,3 +1,12 @@
+---
+order: 110
+group: "query"
+severity: "warn"
+fixable: true
+summary: "SELECT * used — expand to explicit column list"
+origin: "Python"
+---
+
 # select-star
 
 Default severity: **warn**

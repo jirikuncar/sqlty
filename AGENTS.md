@@ -56,8 +56,8 @@ assertions show which rule typed a column; every rule needs one, in
 `skills/<name>/SKILL.md` (and its `references/`) are the Agent Skills, installed
 through the plugin manifests (`.claude-plugin/`, `.codex-plugin/`,
 `.cursor-plugin/`) or `sqlty skill --install`. `rust/crates/sqlty-cli/build.rs`
-compiles them, and the rule pages of `docs/reference/rules/`, into the extension: rebuild it
-after editing one, or `test_agent_skills_are_compiled_in` fails. A new skill gets a row in the table of
+compiles them into the extension: rebuild it after editing one, or
+`test_agent_skills_are_compiled_in` fails. A new skill gets a row in the table of
 `docs/recipes/agents.md`.
 
 ## Completion budget
@@ -131,7 +131,11 @@ printed by `sqlty rule NAME`). Every test runs through `sqlty.core`.
 ### Where to add tests
 
 User-visible behavior belongs in `docs/guide/` too; edge cases only in
-`tests/mdtest/`. A new lint rule needs `docs/reference/rules/<name>.md`.
+`tests/mdtest/`. A new lint rule is its page `docs/reference/rules/<name>.md`, with the front matter
+(`order`, `group`, `severity`, `fixable`, `summary`, `origin`) that is the only place its metadata
+is written, its row in the table of `docs/reference/rules.md`, and its check code. The
+`sqlty-rules` crate generates `Rule` and the Python `RULES` from the pages, and `build.rs` fails
+on a page that breaks the format.
 
 | Feature area | Directory | Example file |
 |-------------|-----------|-------------|

@@ -51,10 +51,11 @@ def test_rules_table() -> None:
     """The table in ``docs/reference/rules.md`` lists every rule with its defaults."""
     text = (ROOT / "docs" / "reference" / "rules.md").read_text()
     rows = re.findall(
-        r"^\| \[`([\w-]+)`\]\(rules/\1\.md\) \| [\w ]+ \| (\w+) \| (\w+) \|", text, re.M
+        r"^\| \[`([\w-]+)`\]\(rules/\1\.md\) \| ([\w ]+) \| (\w+) \| (\w+) \|", text, re.M
     )
     assert sorted(rows) == sorted(
-        (r.name, r.default_severity.value, "yes" if r.fixable else "no") for r in RULES.values()
+        (r.name, r.group, r.default_severity.value, "yes" if r.fixable else "no")
+        for r in RULES.values()
     )
 
 
@@ -195,14 +196,28 @@ def test_pygments_lexer_colors_sql_in_query_strings() -> None:
 
 
 def test_rule_docs() -> None:
+    import yaml
+
     assert {p.stem for p in RULE_DOCS.glob("*.md")} == set(RULES)
+    orders: list[int] = []
     for rule in RULES.values():
-        head = (RULE_DOCS / f"{rule.name}.md").read_text().splitlines()[:3]
-        assert head == [
+        text = (RULE_DOCS / f"{rule.name}.md").read_text()
+        _, front, page = text.split("---\n", 2)
+        meta = yaml.safe_load(front)
+        assert meta["severity"] == rule.default_severity.value
+        assert (meta["fixable"], meta["group"], meta["summary"]) == (
+            rule.fixable,
+            rule.group.lower().replace(" ", "-"),
+            rule.description,
+        )
+        orders.append(meta["order"])
+        assert page.splitlines()[:4] == [
+            "",
             f"# {rule.name}",
             "",
             f"Default severity: **{rule.default_severity.value}**",
         ]
+    assert orders == sorted(set(orders))
 
 
 @pytest.mark.parametrize("example", EXAMPLES, ids=[p.name for p in EXAMPLES])
@@ -329,7 +344,7 @@ def test_bump_version_writes_every_place(tmp_path: Path) -> None:
     """`bump_version.py X` changes the version lines of every place and no other line."""
     places = {
         "rust/Cargo.toml": 1,
-        "rust/Cargo.lock": 9,
+        "rust/Cargo.lock": 10,
         ".claude-plugin/plugin.json": 1,
         ".claude-plugin/marketplace.json": 2,
         ".codex-plugin/plugin.json": 1,

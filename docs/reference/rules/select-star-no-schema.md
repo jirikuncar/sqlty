@@ -1,3 +1,12 @@
+---
+order: 120
+group: "query"
+severity: "error"
+fixable: false
+summary: "SELECT * used but no schema available to expand"
+origin: "Python"
+---
+
 # select-star-no-schema
 
 Default severity: **error**

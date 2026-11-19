@@ -1,3 +1,12 @@
+---
+order: 440
+group: "params"
+severity: "error"
+fixable: false
+summary: "The parameter type `P` of `SQL[R, P]` doesn't fit the parameters of its query"
+origin: "Python"
+---
+
 # params-type-mismatch
 
 Default severity: **error**
