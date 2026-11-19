@@ -682,7 +682,7 @@ impl<'a> Analyzer<'a> {
         if columns.len() > MAX_COLUMNS {
             if self.diag.enabled() {
                 self.diag.record(
-                    NameRule::UnsupportedSyntax,
+                    Rule::UnsupportedSyntax,
                     format!("over {MAX_COLUMNS} result columns are not typed"),
                 );
             }
