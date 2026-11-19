@@ -1,7 +1,6 @@
 name: Fuzz
 
-# On demand: random schemas and queries through the analyzer, compared with PostgreSQL;
-# key comparisons in random query shapes, judged by an oracle (foreign-key-mismatch).
+# On demand: the Python property tests, the analyzer compared with PostgreSQL among them.
 on:
   workflow_dispatch:
     inputs:
@@ -68,13 +67,12 @@ jobs:
       - name: Build Rust extension
         run: uv run maturin develop --release --manifest-path rust/crates/sqlty-ext/Cargo.toml
 
+      # Every Python property test in one run: the analyzer against PostgreSQL, query
+      # variants, parameters and foreign-key-mismatch.
       - name: Fuzz
         env:
           SEED: ${{ inputs.seed }}
-        run: uv run pytest tests/test_fuzz.py -p no:randomly -q ${SEED:+"--hypothesis-seed=$SEED"}
-
-      - name: Fuzz foreign-key-mismatch
-        if: ${{ !cancelled() }}
-        env:
-          SEED: ${{ inputs.seed }}
-        run: uv run pytest tests/fuzz_foreign_keys.py -p no:randomly -q ${SEED:+"--hypothesis-seed=$SEED"}
+        run: >-
+          uv run pytest -p no:randomly -q ${SEED:+"--hypothesis-seed=$SEED"}
+          tests/test_fuzz.py tests/test_query_variants_fuzz.py tests/test_params_fuzz.py
+          tests/fuzz_foreign_keys.py
