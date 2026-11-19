@@ -278,6 +278,7 @@ pub(super) fn alter_op(
             rename_in_foreign_keys(table, &old.name, &column.name);
             column.primary_key |= old.primary_key;
             column.not_null |= old.primary_key;
+            column.key_position = old.key_position;
             match column_position {
                 None => table.columns.insert(at, column),
                 Some(_) => place(table, column, column_position.as_ref())?,
@@ -360,8 +361,13 @@ pub(super) fn alter_op(
             constraint: TableConstraint::PrimaryKey(pk),
             ..
         } => {
-            for index_column in &pk.columns {
-                mark_primary_key(&mut table.columns, &index_column.column.expr, dialect);
+            for (position, index_column) in pk.columns.iter().enumerate() {
+                mark_primary_key(
+                    &mut table.columns,
+                    &index_column.column.expr,
+                    dialect,
+                    position,
+                );
             }
         }
         AlterTableOperation::AddConstraint {

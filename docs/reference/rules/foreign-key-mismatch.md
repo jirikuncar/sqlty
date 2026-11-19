@@ -90,4 +90,4 @@ declared key counts, `NOT VALID` and `NOT ENFORCED` ones included; MySQL tables 
 an engine other than InnoDB have none. A key whose referenced table or column was
 renamed by `ALTER TABLE` is not judged. Columns of views, CTEs and derived tables
 are not judged. [`entity-mismatch`](entity-mismatch.md) also compares primary keys with each
-other; both may report the same comparison.
+other; a comparison this rule reports, it leaves out.
