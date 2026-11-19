@@ -100,3 +100,12 @@ FROM users
 SELECT id::INTEGER, name::TEXT FROM users WHERE id = :user_id AND active = :active
 -- inferred: tuple[int, str]
 ```
+
+## Postfix ISNULL and NOTNULL
+
+`x ISNULL` is `x IS NULL`, and `x NOTNULL` is `x IS NOT NULL`.
+
+```sql
+SELECT (name ISNULL)::BOOLEAN, (name NOTNULL)::BOOLEAN, (tags::TEXT[] ISNULL)::BOOLEAN FROM users WHERE (email ISNULL OR id = 1)
+-- inferred: tuple[bool, bool, bool]
+```
