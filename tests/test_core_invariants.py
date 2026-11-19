@@ -47,7 +47,7 @@ def _corpus(kind: str) -> list[Any]:
                 "import_style": settings.get("import-style"),
                 "untyped": settings.get("untyped") == "sentinel",
                 "json_types": settings.get("json-types", "typing.Any"),
-                "param_types": settings.get("param-types", False),
+                "param_types": settings.get("param-types", True),
             }
             units = [u for u in section.units if u.lang == kind]
             for i, unit in enumerate(units):

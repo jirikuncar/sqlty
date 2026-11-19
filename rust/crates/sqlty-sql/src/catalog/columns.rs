@@ -8,6 +8,8 @@ use sqlparser::ast::{
     GeneratedAs, Ident, IndexColumn, ObjectName,
 };
 
+use rustc_hash::FxHashMap;
+
 use crate::analyzer::SqlDialect;
 use crate::values::{self, Value};
 
@@ -344,20 +346,30 @@ pub(super) fn narrowed(
     }
 }
 
-/// Add `column`, or replace the same-named one in place (inherited columns merge).
-pub(super) fn merge_column(columns: &mut Vec<RawColumn>, column: RawColumn) {
-    match columns.iter_mut().find(|c| c.name == column.name) {
-        Some(existing) => {
-            let not_null = existing.not_null || column.not_null;
-            let collated = existing.collated || column.collated;
-            let mut checked = existing.values.take();
-            add_values(&mut checked, column.values.clone());
-            *existing = column;
-            existing.not_null = not_null;
-            existing.values = checked;
-            existing.collated |= collated;
-        }
-        None => columns.push(column),
+/// Add each of `added`, or replace the same-named one in place (inherited columns merge).
+pub(super) fn merge_columns(
+    columns: &mut Vec<RawColumn>,
+    added: impl IntoIterator<Item = RawColumn>,
+) {
+    let mut at: FxHashMap<String, usize> = FxHashMap::default();
+    for (i, column) in columns.iter().enumerate() {
+        at.entry(column.name.clone()).or_insert(i);
+    }
+    for column in added {
+        let Some(&i) = at.get(&column.name) else {
+            at.insert(column.name.clone(), columns.len());
+            columns.push(column);
+            continue;
+        };
+        let existing = &mut columns[i];
+        let not_null = existing.not_null || column.not_null;
+        let collated = existing.collated || column.collated;
+        let mut checked = existing.values.take();
+        add_values(&mut checked, column.values.clone());
+        *existing = column;
+        existing.not_null = not_null;
+        existing.values = checked;
+        existing.collated |= collated;
     }
 }
 
@@ -431,9 +443,13 @@ mod tests {
             unreachable!()
         };
         let mut columns = Vec::new();
-        for column in &create.columns {
-            merge_column(&mut columns, raw_column(column, dialect));
-        }
+        merge_columns(
+            &mut columns,
+            create
+                .columns
+                .iter()
+                .map(|column| raw_column(column, dialect)),
+        );
         for constraint in &create.constraints {
             match constraint {
                 TableConstraint::Check(check) => apply_check(&mut columns, &check.expr, dialect),

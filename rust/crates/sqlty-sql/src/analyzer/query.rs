@@ -15,6 +15,7 @@ use crate::catalog::fold;
 use crate::diagnostics::{Diagnostics, NameRule};
 use crate::json::JsonShape;
 use crate::values;
+use crate::MAX_COLUMNS;
 
 use super::dialect::SqlDialect;
 use super::dml::{
@@ -62,7 +63,7 @@ pub struct Column {
 }
 
 impl Column {
-    pub(super) fn unknown(name: &str) -> Self {
+    pub(crate) fn unknown(name: &str) -> Self {
         Column {
             name: name.to_string(),
             python_type: None,
@@ -470,6 +471,9 @@ impl<'a> Analyzer<'a> {
     fn values_columns(&self, values: &sqlparser::ast::Values) -> Inferred<Vec<Column>> {
         let (analyzer, scope) = self.scope_of(&[])?;
         let width = values.rows.first().map_or(0, |row| row.content.len());
+        if width > MAX_COLUMNS {
+            return Ok(vec![Column::unknown("*")]);
+        }
         let mut columns = Vec::with_capacity(width);
         for index in 0..width {
             let mut types = Vec::new();
@@ -536,6 +540,9 @@ impl<'a> Analyzer<'a> {
             &self.facts
         };
         for (index, item) in items.iter().enumerate() {
+            if columns.len() > MAX_COLUMNS {
+                break;
+            }
             let (expr, name) = match item {
                 SelectItem::UnnamedExpr(Expr::CompoundFieldAccess { root, access_chain })
                     if matches!(access_chain.as_slice(),
@@ -674,6 +681,15 @@ impl<'a> Analyzer<'a> {
             if let Some(rules) = &mut rules {
                 rules.push(self.column_rules(expr, scope));
             }
+        }
+        if columns.len() > MAX_COLUMNS {
+            if self.diag.enabled() {
+                self.diag.record(
+                    NameRule::UnsupportedSyntax,
+                    format!("over {MAX_COLUMNS} result columns are not typed"),
+                );
+            }
+            return Ok(vec![Column::unknown("*")]);
         }
         if let (Some(rules), Some(explain)) = (rules, &self.explain) {
             explain.borrow_mut().insert(items.as_ptr() as usize, rules);

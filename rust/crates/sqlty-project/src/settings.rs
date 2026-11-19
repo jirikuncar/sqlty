@@ -49,7 +49,7 @@ pub struct FileSettings {
     pub untyped: bool,
     /// `json-types = "typing.TypedDict"`.
     pub json_typed_dicts: bool,
-    /// `param-types`.
+    /// `param-types`, on unless set to `false`.
     pub param_types: bool,
     /// Whether `requires-python` rules out every Python before 3.15.
     pub closed_params: bool,
@@ -122,6 +122,7 @@ impl Schemas {
                 "statement" => {
                     format!("Schema statement could not be parsed and is ignored: {name}")
                 }
+                "limit" => format!("Schema is too large to load; ignored: {name}"),
                 kind => {
                     format!("Schema {kind} {name} could not be parsed; its columns are unknown")
                 }
@@ -462,7 +463,10 @@ fn settings(
         import_style,
         untyped,
         json_typed_dicts,
-        param_types: flag("param-types"),
+        param_types: table
+            .get("param-types")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
         closed_params,
         rules: table
             .get("rules")
@@ -471,7 +475,11 @@ fn settings(
             .flatten()
             .filter_map(|(rule, severity)| Some((rule.clone(), severity.as_str()?.to_string())))
             .collect(),
-        variants: preview.then(|| variants.map_or(MAX_QUERY_VARIANTS, |most| most.max(1) as usize)),
+        variants: preview.then(|| {
+            variants.map_or(MAX_QUERY_VARIANTS, |most| {
+                usize::try_from(most.max(1)).unwrap_or(usize::MAX)
+            })
+        }),
         coerce: strings(table, "coerce-row-types").into_iter().collect(),
         functions: entries(table, None),
         format_command: strings(table, "format-command"),

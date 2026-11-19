@@ -28,10 +28,25 @@ fn analyze_types_each_query_and_its_parameters() {
     );
     assert_eq!(
         answer["rewritten"],
-        "from sqlty import SQL\nq = SQL[tuple[int, str | None]](\"--sql\\nSELECT id, email FROM users WHERE name = %s\")\n"
+        "from sqlty import SQL\nq = SQL[tuple[int, str | None], tuple[str | None]](\"--sql\\nSELECT id, email FROM users WHERE name = %s\")\n"
     );
     assert_eq!(answer["highlights"][0], json!([5, 10, "comment"]));
     assert_eq!(answer["highlights"][1], json!([12, 18, "keyword"]));
+}
+
+#[test]
+fn analyze_highlights_a_long_line_in_utf16_units() {
+    // Each offset used to be counted from the start of the source: quadratic in its length.
+    let source = format!(
+        "é = \"--sql\\nSELECT 'ü', {}\"\n",
+        vec!["1"; 50_000].join(", ")
+    );
+    let answer =
+        ask(&json!({"op": "analyze", "source": source, "schema": SCHEMA, "dialect": "postgres"}));
+    let highlights = answer["highlights"].as_array().unwrap();
+    assert_eq!(highlights.len(), 3 + 50_000);
+    assert_eq!(highlights[2], json!([19, 22, "string"]));
+    assert_eq!(highlights[3], json!([24, 25, "number"]));
 }
 
 #[test]
@@ -112,7 +127,6 @@ fn param_types_are_written_by_rewrite_and_fix_all() {
     let source = "q = \"--sql\\nSELECT name FROM users WHERE id = %(id)s\"\n";
     let answer = ask(&json!({
         "op": "analyze", "source": source, "schema": SCHEMA, "dialect": "postgres",
-        "config": "param-types = true",
     }));
     let expected = "import typing\nfrom sqlty import SQL\n\n\n# sqlty: generated\n\
         class QParams(typing.TypedDict):\n    id: int | None\n\n\n\
@@ -122,6 +136,13 @@ fn param_types_are_written_by_rewrite_and_fix_all() {
     let answer =
         ask(&json!({"op": "analyze", "source": expected, "schema": SCHEMA, "dialect": "postgres"}));
     assert_eq!(answer["stripped"], source);
+    let answer = ask(&json!({
+        "op": "analyze", "source": source, "schema": SCHEMA, "dialect": "postgres",
+        "config": "param-types = false",
+    }));
+    let expected =
+        "from sqlty import SQL\nq = SQL[tuple[str]](\"--sql\\nSELECT name FROM users WHERE id = %(id)s\")\n";
+    assert_eq!(answer["rewritten"], expected);
 }
 
 #[test]

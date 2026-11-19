@@ -867,7 +867,7 @@ class Settings:
     import_style: str | None = None
     untyped: bool = False
     json_types: str = "typing.Any"
-    param_types: bool = False
+    param_types: bool = True
     closed_params: bool = False
     rules: dict[str, str] | None = None
     query_variants: int | None = None
@@ -934,6 +934,8 @@ class SettingsResolver:
             for kind, name in schema_skipped_objects(schema, dialect=dialect):
                 if kind == "statement":
                     logger.warning("Schema statement could not be parsed and is ignored: %s", name)
+                elif kind == "limit":
+                    logger.warning("Schema is too large to load; ignored: %s", name)
                 else:
                     logger.warning(
                         "Schema %s %s could not be parsed; its columns are unknown", kind, name
@@ -1076,7 +1078,7 @@ class SettingsResolver:
             import_style=import_style,
             untyped=untyped == "sentinel",
             json_types=json_types,
-            param_types=bool(config.get("param_types")),
+            param_types=bool(config.get("param_types", True)),
             closed_params=requires_closed(requires_python(config_dir)),
             rules=config.get("rules"),
             query_variants=config.get("max_query_variants", MAX_QUERY_VARIANTS)

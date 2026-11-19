@@ -88,3 +88,41 @@ q = "--sql\nSELECT x, y FROM pairs"
 # fixed: from sqlty import UNTYPED
 # fixed: q = SQL[UNTYPED]("--sql\nSELECT x, y FROM pairs")
 ```
+
+## Results over 4,096 columns are untyped
+
+A result wider than MySQL's 4,096-column limit is not typed, however it is
+built: here each CTE joins the one before to itself, doubling its width.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+[tool.sqlty.rules]
+select-star = "ignore"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE unused (id INTEGER);
+```
+
+```python
+# error: [unsupported-syntax] "over 4096 result columns are not typed"
+# error: [untyped-query] "SQL[UNTYPED] has no inferable row type"
+q = SQL[UNTYPED]("""--sql
+WITH c0 AS (SELECT 1 AS a, 2 AS b),
+c1 AS (SELECT * FROM c0 x JOIN c0 y USING (a)),
+c2 AS (SELECT * FROM c1 x JOIN c1 y USING (a)),
+c3 AS (SELECT * FROM c2 x JOIN c2 y USING (a)),
+c4 AS (SELECT * FROM c3 x JOIN c3 y USING (a)),
+c5 AS (SELECT * FROM c4 x JOIN c4 y USING (a)),
+c6 AS (SELECT * FROM c5 x JOIN c5 y USING (a)),
+c7 AS (SELECT * FROM c6 x JOIN c6 y USING (a)),
+c8 AS (SELECT * FROM c7 x JOIN c7 y USING (a)),
+c9 AS (SELECT * FROM c8 x JOIN c8 y USING (a)),
+c10 AS (SELECT * FROM c9 x JOIN c9 y USING (a)),
+c11 AS (SELECT * FROM c10 x JOIN c10 y USING (a)),
+c12 AS (SELECT * FROM c11 x JOIN c11 y USING (a))
+SELECT * FROM c12""")
+```

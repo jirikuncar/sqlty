@@ -213,10 +213,7 @@ impl Analyzer<'_> {
                         AssignmentTarget::Tuple(columns) => columns.iter().collect(),
                     })
                     .filter_map(|column| column.0.last().and_then(|part| part.as_ident()))
-                    .map(|ident| {
-                        let key = quiet.column_key(&target, &ident.value, scope);
-                        (target.clone(), key)
-                    })
+                    .map(|ident| (target.clone(), fold(ident, self.dialect)))
                     .collect();
                 self.facts.with(learned.without(&set))
             }
@@ -312,7 +309,7 @@ impl Analyzer<'_> {
                         let excluded = inserted
                             .iter()
                             .map(|column| {
-                                let key = quiet.column_key("excluded", column, &upsert);
+                                let key = quiet.column_key(column);
                                 ("excluded".to_string(), key)
                             })
                             .collect();
@@ -350,7 +347,7 @@ impl Analyzer<'_> {
                         .last()
                         .and_then(|part| part.as_ident())
                         .filter(|_| non_null(quiet.nullability(&assignment.value, scope, &seen)))
-                        .map(|ident| ident.value.clone()),
+                        .map(|ident| fold(ident, self.dialect)),
                     AssignmentTarget::Tuple(_) => None,
                 })
                 .collect(),
@@ -358,7 +355,7 @@ impl Analyzer<'_> {
         };
         let columns = written
             .iter()
-            .map(|column| (target.clone(), quiet.column_key(&target, column, scope)))
+            .map(|column| (target.clone(), quiet.column_key(column)))
             .collect();
         kept.with(Learned::columns(columns))
     }

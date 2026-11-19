@@ -167,7 +167,8 @@ pub fn run(request: &str) -> String {
         Err(found) => return error(found.to_string()),
     };
     let source = request.source.as_str();
-    let utf16 = |byte: usize| source[..byte].encode_utf16().count();
+    let units = sqlty_python::utf16::Utf16::new(source);
+    let utf16 = |byte: usize| units.at(byte);
     if let Some(cause) = &request.crashed {
         let found = check::crashed(cause, &rules).diagnostics;
         let found: Vec<_> = found.into_iter().map(|found| found.diagnostic).collect();
@@ -307,10 +308,12 @@ fn resolved(table: &serde_json::Map<String, Value>) -> Settings {
     Settings {
         dialect,
         import_style: text("import-style"),
-        param_types: table.get("param-types") == Some(&Value::Bool(true)),
+        param_types: table.get("param-types") != Some(&Value::Bool(false)),
         variants: (table.get("preview") == Some(&Value::Bool(true))).then(|| {
             let most = table.get("max-query-variants").and_then(Value::as_u64);
-            most.map_or(MAX_QUERY_VARIANTS, |most| most as usize)
+            most.map_or(MAX_QUERY_VARIANTS, |most| {
+                usize::try_from(most).unwrap_or(usize::MAX)
+            })
         }),
         rules: pairs("rules").into_iter().collect(),
         types,

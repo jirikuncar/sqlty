@@ -1,8 +1,8 @@
 """Example: typed parameters.
 
-With ``param-types = true`` in pyproject.toml, ``sqlty rewrite`` writes the type of
-the parameters of each query next to its rows, ``SQL[R, P]``: a ``tuple`` for
-positional parameters, a generated ``TypedDict`` for named ones.
+``sqlty rewrite`` writes the type of the parameters of each query next to its
+rows, ``SQL[R, P]``: a ``tuple`` for positional parameters, a generated
+``TypedDict`` for named ones.
 
 Run ``sqlty strip .`` to reverse.
 """

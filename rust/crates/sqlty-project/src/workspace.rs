@@ -1185,6 +1185,35 @@ mod tests {
     }
 
     #[test]
+    fn reads_max_query_variants_with_preview() {
+        let mut workspace = opened(&[(
+            "/repo/pyproject.toml",
+            "[tool.sqlty]\npreview = true\nmax-query-variants = 5\n",
+        )]);
+        let settings = workspace
+            .settings(Path::new("/repo/a.py"))
+            .expect("settings");
+        assert_eq!(settings.variants, Some(5));
+    }
+
+    #[test]
+    fn warns_about_a_schema_too_large_to_load() {
+        let columns: Vec<String> = (0..=4096).map(|i| format!("c{i} int")).collect();
+        let schema = format!("CREATE TABLE wide ({});", columns.join(", "));
+        let workspace = opened(&[
+            (
+                "/repo/pyproject.toml",
+                "[tool.sqlty]\nschema = \"schema.sql\"\n",
+            ),
+            ("/repo/schema.sql", schema.leak()),
+        ]);
+        assert_eq!(
+            workspace.warnings(),
+            ["Schema is too large to load; ignored: public.wide"]
+        );
+    }
+
+    #[test]
     fn reads_the_project_without_a_configuration() {
         let mut workspace = opened(&[
             ("/repo/pyproject.toml", "[tool"),
@@ -1207,7 +1236,7 @@ mod tests {
             (
                 "/repo/pyproject.toml",
                 "[tool.sqlty]\nschema = \"schema.sql\"\nuntyped = \"sentinel\"\n\
-                 json-types = \"typing.TypedDict\"\nparam-types = true\ndriver = \"psycopg\"\n\
+                 json-types = \"typing.TypedDict\"\ndriver = \"psycopg\"\n\
                  types = { \"users.id\" = \"app.UserId\" }\nrules = { sqruff = \"warn\" }\n",
             ),
             (
@@ -1224,6 +1253,19 @@ mod tests {
             .check(path, "q = \"--sql\\nselect distinct(id) from users\"\n")
             .expect("checks");
         assert_eq!(rules(&found), ["stale-rewrite", "sqruff"]);
+    }
+
+    #[test]
+    fn writes_no_parameter_types_when_turned_off() {
+        let mut workspace = opened(&[(
+            "/repo/pyproject.toml",
+            "[tool.sqlty]\nparam-types = false\n",
+        )]);
+        let text = "q = \"--sql\\nSELECT 1::INTEGER WHERE 1 = %s\"\n";
+        let rewritten = workspace
+            .rewrite(Path::new("/repo/q.py"), text)
+            .expect("rewrites");
+        assert!(rewritten.contains("SQL[tuple[int]]("), "{rewritten}");
     }
 
     #[test]

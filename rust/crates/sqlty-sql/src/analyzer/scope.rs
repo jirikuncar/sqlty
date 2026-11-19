@@ -9,6 +9,7 @@ use sqlparser::ast::{
 };
 
 use crate::catalog::{fold, FunctionReturn};
+use crate::MAX_COLUMNS;
 use sqlparser::ast::Spanned;
 use sqlparser::tokenizer::Span;
 
@@ -702,43 +703,45 @@ impl<'a> Analyzer<'a> {
             .collect()
     }
 
-    /// Expand `*` (all scope tables) or `t.*` from the sources, or `None` if unknown.
+    /// Expand `*` (all scope tables) or `t.*` from the sources, or `None` if unknown. Past
+    /// [`MAX_COLUMNS`], the rest are left out.
     pub(super) fn star_columns(
         &self,
         reference: Option<&str>,
         scope: &Scope,
     ) -> Option<Vec<Column>> {
         let sources = Some(Self::star_sources(reference, scope)).filter(|s| !s.is_empty())?;
-        let columns = sources
-            .iter()
-            .map(|Source { reference, table }| {
-                let table = table.named()?;
-                let mut columns = self
-                    .virtual_columns(table)
-                    .map(<[Column]>::to_vec)
-                    .or_else(|| {
-                        self.schema.table(table).map(|columns| {
-                            columns
-                                .iter()
-                                .filter(|col| !col.invisible)
-                                .map(|col| {
-                                    Column::from_typed(
-                                        col.output_name(),
-                                        col.typed(self.dialect),
-                                        Nullability::declared(col.not_null),
-                                    )
-                                })
-                                .collect()
-                        })
-                    })?;
-                for column in &mut columns {
-                    let key = self.column_key(reference, &column.name, scope);
-                    column.nullability = self.facts.column(reference, &key, column.nullability);
-                }
-                Some(columns)
-            })
-            .collect::<Option<Vec<Vec<Column>>>>()?;
-        Some(columns.into_iter().flatten().collect())
+        let mut star = Vec::new();
+        for Source { reference, table } in &sources {
+            if star.len() > MAX_COLUMNS {
+                break;
+            }
+            let table = table.named()?;
+            let mut columns = self
+                .virtual_columns(table)
+                .map(<[Column]>::to_vec)
+                .or_else(|| {
+                    self.schema.table(table).map(|columns| {
+                        columns
+                            .iter()
+                            .filter(|col| !col.invisible)
+                            .map(|col| {
+                                Column::from_typed(
+                                    col.output_name(),
+                                    col.typed(self.dialect),
+                                    Nullability::declared(col.not_null),
+                                )
+                            })
+                            .collect()
+                    })
+                })?;
+            for column in &mut columns {
+                let key = self.column_key(&column.name);
+                column.nullability = self.facts.column(reference, &key, column.nullability);
+            }
+            star.append(&mut columns);
+        }
+        Some(star)
     }
 
     /// Expand `*` or `t.*` into schema columns, as `SELECT *` rewriting writes them.
