@@ -99,7 +99,6 @@ dev = [
     "pytest-xdist>=3.8.0",
     "types-pygments>=2.19",
 ]
-cli = ["rich>=15.0.0"]
 # Only the DuckDB type tests need it, and it has no wheel for every Python.
 duckdb = ["duckdb>=1.4.0"]
 psycopg = ["psycopg>=3.2.12"]
