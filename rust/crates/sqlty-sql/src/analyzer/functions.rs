@@ -7,6 +7,7 @@ use sqlparser::ast::{
     FunctionArguments, Value,
 };
 
+use super::calls::Cached;
 use super::dialect::SqlDialect;
 use super::expr::{from_sql_type, range_element, range_kind};
 use super::inference::{function_rules, operand, FunctionRule};
@@ -84,6 +85,12 @@ pub(crate) enum Returns {
 }
 
 use Returns::{Arg, Elem};
+
+#[cfg(test)]
+thread_local! {
+    /// How many times a call's rule was evaluated, not read back from a frame.
+    pub(super) static EVALUATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 /// The types of the first two arguments of a call, where a function rule read them.
 pub(super) type RuleArguments = [Option<Typed>; 2];
@@ -367,6 +374,39 @@ impl<'a> Analyzer<'a> {
         args: &[&Expr],
         scope: &Scope,
     ) -> Inferred<Option<(&'static FunctionRule, RuleArguments)>> {
+        let key = self
+            .frame_matches(scope)
+            .then(|| args.first().and_then(|arg| self.stable_expr(arg)))
+            .flatten();
+        let Some(key) = key else {
+            return self.evaluate_rule(name, args, scope);
+        };
+        if let Some(cached) = self.cached_rule(key, name, args.len()) {
+            return Ok(cached.found);
+        }
+        let events = self.diag.events();
+        let found = self.evaluate_rule(name, args, scope)?;
+        if self.diag.events() == events {
+            self.keep_rule(
+                key,
+                Cached {
+                    name: name.to_string(),
+                    args: args.len(),
+                    found: found.clone(),
+                },
+            );
+        }
+        Ok(found)
+    }
+
+    fn evaluate_rule(
+        &self,
+        name: &str,
+        args: &[&Expr],
+        scope: &Scope,
+    ) -> Inferred<Option<(&'static FunctionRule, RuleArguments)>> {
+        #[cfg(test)]
+        EVALUATIONS.with(|count| count.set(count.get() + 1));
         let rules = function_rules(name);
         if rules.is_empty() {
             return Ok(None);

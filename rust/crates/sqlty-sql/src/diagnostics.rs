@@ -41,6 +41,8 @@ struct Inner {
     at: Vec<Span>,
     /// Untyped results accounted for so far, recorded or deliberately silent.
     explained: usize,
+    /// Changes made to what is recorded or counted, so a caller can tell nothing happened.
+    events: u64,
     /// The columns the completion placeholder could name, once the analyzer reaches it.
     probe: Option<Vec<crate::analyzer::Candidate>>,
 }
@@ -68,6 +70,7 @@ impl Diagnostics {
     pub(crate) fn probe(&self, candidates: impl FnOnce() -> Vec<crate::analyzer::Candidate>) {
         let mut inner = self.0.borrow_mut();
         if inner.enabled && inner.probe.is_none() {
+            inner.events += 1;
             inner.probe = Some(candidates());
         }
     }
@@ -107,6 +110,7 @@ impl Diagnostics {
             return;
         }
         inner.explained += 1;
+        inner.events += 1;
         let known = |(found, _): &(NameDiagnostic, Span)| {
             found.rule == item.rule && found.message == item.message
         };
@@ -133,6 +137,7 @@ impl Diagnostics {
         let mut inner = self.0.borrow_mut();
         if inner.enabled {
             inner.explained += 1;
+            inner.events += 1;
         }
     }
 
@@ -141,6 +146,7 @@ impl Diagnostics {
         let mut inner = self.0.borrow_mut();
         if inner.enabled {
             inner.explained += count;
+            inner.events += 1;
         }
     }
 
@@ -148,6 +154,17 @@ impl Diagnostics {
     /// that went untyped means nothing explains it.
     pub(crate) fn explained(&self) -> usize {
         self.0.borrow().explained
+    }
+
+    /// How many changes were made to what is recorded or counted; equal before and after a
+    /// call means it recorded, rewound and explained nothing.
+    pub(crate) fn events(&self) -> u64 {
+        self.0.borrow().events
+    }
+
+    /// Whether `other` is this very sink, not just another that collects.
+    pub(crate) fn same(&self, other: &Diagnostics) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
     }
 
     /// Where the list stands, to [`Diagnostics::rewind`] to.
@@ -162,12 +179,14 @@ impl Diagnostics {
         let mut inner = self.0.borrow_mut();
         inner.items.truncate(items);
         inner.explained = explained;
+        inner.events += 1;
     }
 
     /// Drop what was recorded after `mark` under a rule `keep` rejects.
     pub(crate) fn retain_since(&self, (items, _): (usize, usize), keep: impl Fn(Rule) -> bool) {
         let mut inner = self.0.borrow_mut();
         let mut index = 0;
+        inner.events += 1;
         inner.items.retain(|(item, _)| {
             index += 1;
             index <= items || keep(item.rule)
@@ -265,6 +284,51 @@ mod tests {
         diag.rewind(mark);
         assert_eq!(diag.items(), [found(Rule::UnknownType, "kept")]);
         assert_eq!(diag.explained(), 1);
+    }
+
+    #[test]
+    fn events_count_every_change_to_what_is_recorded() {
+        let diag = Diagnostics::collecting();
+        let mut seen = diag.events();
+        let mut changed = |diag: &Diagnostics| {
+            let now = diag.events();
+            let moved = now > seen;
+            seen = now;
+            moved
+        };
+        diag.record(Rule::UnknownType, "a");
+        assert!(changed(&diag));
+        diag.record(Rule::UnknownType, "a");
+        assert!(changed(&diag), "a duplicate is still counted");
+        diag.explain_silently();
+        assert!(changed(&diag));
+        diag.add_explained(2);
+        assert!(changed(&diag));
+        let mark = diag.mark();
+        assert!(!changed(&diag), "a mark changes nothing");
+        diag.rewind(mark);
+        assert!(changed(&diag));
+        diag.retain_since(mark, |_| true);
+        assert!(changed(&diag));
+        diag.probe(Vec::new);
+        assert!(changed(&diag));
+        diag.probe(Vec::new);
+        assert!(!changed(&diag), "the first probe wins");
+        let _ = diag.at(Span::empty());
+        assert!(!changed(&diag), "a span is no event");
+        let quiet = Diagnostics::default();
+        quiet.record(Rule::UnknownType, "a");
+        quiet.explain_silently();
+        quiet.add_explained(1);
+        quiet.probe(Vec::new);
+        assert_eq!(quiet.events(), 0);
+    }
+
+    #[test]
+    fn same_is_identity_of_the_sink() {
+        let diag = Diagnostics::collecting();
+        assert!(diag.same(&diag.clone()));
+        assert!(!diag.same(&Diagnostics::collecting()));
     }
 
     #[test]
