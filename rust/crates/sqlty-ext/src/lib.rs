@@ -6,7 +6,7 @@
 //! that `sqlty/core.py` wraps into dataclasses.
 //!
 //! - Inference: `infer_type`, `analyze_select`, `analyze_columns`, `analyze_params`,
-//!   `explain_select`, `expand_star`, `parse_error`, `returns_rows`.
+//!   `explain_select`, `expand_star`, `returns_rows`.
 //! - Source: `rewrite_source`, `add_param_types`, `strip_source`, `fix_source`, `check_source`,
 //!   `wrapped_queries`, `query_sites`.
 //! - Schema: `load_schema`, `schema_skipped_objects`, `name_rules`.
@@ -586,17 +586,6 @@ fn skipped_objects<S: AsRef<str> + Send + Sync + 'static>(
         .iter()
         .map(|(kind, name)| ((*kind).to_string(), name.clone()))
         .collect()
-}
-
-/// Why a query does not parse, as sqlparser words it; None when it parses (or is empty).
-///
-/// Example:
-///     parse_error("SELECT id FROM", dialect="postgres")  # "Expected: ..., found: EOF ..."
-#[pyfunction]
-#[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES))]
-fn parse_error(py: Python<'_>, sql: &str, dialect: DialectArg) -> Option<String> {
-    let dialect = dialect.0;
-    detach(py, || analyzer::parse_error(sql, dialect))
 }
 
 /// Whether `dialect` checks a schema's tables and columns against queries.
@@ -2184,7 +2173,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(dialect_names, m)?)?;
     m.add_function(wrap_pyfunction!(python_types, m)?)?;
     m.add_function(wrap_pyfunction!(schema_skipped_objects, m)?)?;
-    m.add_function(wrap_pyfunction!(parse_error, m)?)?;
     m.add_function(wrap_pyfunction!(checks_names, m)?)?;
     m.add_function(wrap_pyfunction!(returns_rows, m)?)?;
     m.add_function(wrap_pyfunction!(rewrite_source, m)?)?;
