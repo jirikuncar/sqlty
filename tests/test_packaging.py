@@ -256,7 +256,7 @@ def test_wasm_package_ships_what_it_exports() -> None:
     assert manifest["repository"]["url"] == "git+https://github.com/jirikuncar/sqlty.git"
     assert exported - {"package.json"} <= set(manifest["files"])
     assert {manifest["types"].removeprefix("./")} <= set(manifest["files"])
-    for name in set(manifest["files"]) - {"sqlty_wasm.wasm"}:
+    for name in set(manifest["files"]) - {"sqlty_wasm.wasm", "sqlty_wasm_core.wasm"}:
         assert (package / name).is_file(), name
 
 

@@ -181,9 +181,8 @@ pub fn run(request: &str) -> String {
         Err(found) => return error(found.to_string()),
     };
     #[cfg(not(feature = "sqruff"))]
-    if needs_sqruff(&op, &rules) {
-        return json!({ "error": "the core module leaves out sqruff", "needs": "sqruff" })
-            .to_string();
+    if matches!(op, SourceOp::Analyze | SourceOp::Breaking) && rules.is_enabled(Rule::Sqruff) {
+        return needs_sqruff().to_string();
     }
     let source = request.source.as_str();
     let units = sqlty_python::utf16::Utf16::new(source);
@@ -303,7 +302,7 @@ pub fn run(request: &str) -> String {
             json!({ "formatted": sqlty_format::format_source(source, dialect, &options.style) })
         }
         #[cfg(not(feature = "sqruff"))]
-        SourceOp::Format => Value::Null,
+        SourceOp::Format => needs_sqruff(),
         SourceOp::Breaking => {
             let against = check(&options, &schema);
             options.schema = before.as_deref();
@@ -460,15 +459,11 @@ fn checked(
         .collect()
 }
 
-/// Whether `op` formats, or checks with the `sqruff` rule on: what the module built without
-/// sqruff cannot answer.
+/// The answer of the module built without sqruff to a format, or a check with the `sqruff`
+/// rule on.
 #[cfg(not(feature = "sqruff"))]
-fn needs_sqruff(op: &SourceOp, rules: &RuleConfig) -> bool {
-    match op {
-        SourceOp::Format => true,
-        SourceOp::Analyze | SourceOp::Breaking => rules.is_enabled(Rule::Sqruff),
-        SourceOp::Complete | SourceOp::Hover => false,
-    }
+fn needs_sqruff() -> Value {
+    json!({ "error": "the core module leaves out sqruff", "needs": "sqruff" })
 }
 
 /// `diagnostics` as `analyze` answers them, `utf16` the offset of a byte.

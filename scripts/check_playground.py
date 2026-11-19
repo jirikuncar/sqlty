@@ -179,7 +179,7 @@ def offline(page: Page, url: str) -> None:
     """The service worker of ``scripts/offline.py`` keeps the docs and the playground offline."""
     page.goto(url)
     page.wait_for_function("navigator.serviceWorker.controller !== null", timeout=60_000)
-    cached = "caches.match(new URL('../assets/playground/sqlty_wasm.wasm', location.href))"
+    cached = "caches.match(new URL('../assets/playground/sqlty_wasm_core.wasm', location.href))"
     page.wait_for_function(f"{cached}.then(Boolean)", polling=500, timeout=60_000)
     page.context.set_offline(True)
     try:

@@ -879,19 +879,35 @@ async function engine() {
       history.replaceState(null, "", url);
     }
   }
-  const module = async (name) => load(await (await fetch(new URL(name, import.meta.url))).arrayBuffer());
-  // Format and the sqruff rule need the full module, a third larger than the core one: most
+  const module = async (name) => {
+    const response = await fetch(new URL(name, import.meta.url));
+    if (!response.ok) throw new Error(`${name}: ${response.status} ${response.statusText}`);
+    return load(await response.arrayBuffer());
+  };
+  // Format and the sqruff rule need the full module, 44% larger than the core one: most
   // sessions never ask for them, so it loads on the first request that does.
   ask ??= await module("sqlty_wasm_core.wasm");
   const answer = (request) => {
     try {
       const found = ask(request);
       if (found?.needs !== "sqruff") return found;
-      answer.sqruff ??= module("sqlty_wasm.wasm").then((full) => {
-        ask = full;
-        answer.full = true;
-        refresh();
-      });
+      if (answer.failed) {
+        const failed = answer.failed;
+        answer.failed = undefined;
+        return { error: `sqruff did not load (${failed}); try again.` };
+      }
+      answer.sqruff ??= module("sqlty_wasm.wasm").then(
+        (full) => {
+          ask = full;
+          answer.full = true;
+          refresh();
+        },
+        (error) => {
+          answer.sqruff = undefined;
+          answer.failed = error.message;
+          refresh();
+        },
+      );
       return { error: "Loading sqruff for format and the sqruff rule..." };
     } catch (error) {
       return { error: String(error) };

@@ -195,6 +195,7 @@ fn analyze_gives_quick_fixes_and_what_fix_and_strip_make() {
 }
 
 #[test]
+#[cfg(feature = "sqruff")]
 fn format_lays_out_the_query_strings_in_the_configured_dialect() {
     let source = "q = \"\"\"--sql\nselect id,name from users where id=?\"\"\"\n";
     let answer = ask(
@@ -447,6 +448,7 @@ fn hover_outside_a_query_is_null() {
 }
 
 #[test]
+#[cfg(feature = "sqruff")]
 fn sqruff_findings_are_reported_when_enabled() {
     let source = "q = SQL[tuple[int]](\"--sql\\nSELECT id FROM users WHERE name = NULL\")\n";
     let answer = ask(&json!({
@@ -648,4 +650,23 @@ fn breaking_without_a_before_schema_reports_every_schema_error() {
     let answer =
         ask(&json!({"op": "breaking", "source": source, "schema": SCHEMA, "dialect": "postgres"}));
     assert_eq!(answer["diagnostics"][0]["rule"], "unknown-column");
+}
+
+#[test]
+#[cfg(not(feature = "sqruff"))]
+fn the_core_module_answers_what_needs_sqruff_with_needs() {
+    let needs = json!({ "error": "the core module leaves out sqruff", "needs": "sqruff" });
+    let source = "q = \"--sql\\nSELECT 1\"\n";
+    assert_eq!(ask(&json!({"op": "format", "source": source})), needs);
+    let on = "[rules]\nsqruff = \"warn\"\n";
+    for op in ["analyze", "breaking"] {
+        assert_eq!(
+            ask(&json!({"op": op, "source": source, "config": on})),
+            needs
+        );
+    }
+    assert_eq!(
+        ask(&json!({"op": "hover", "source": source, "config": on})),
+        Value::Null
+    );
 }
