@@ -33,6 +33,7 @@ from tests.type_oracle.ast_fields import (
     _set_pydantic_names,
 )
 from tests.type_oracle.info import TypeInfo
+from tests.type_oracle.outline import outline
 from tests.type_oracle.pydantic_types import pydantic_names
 from tests.type_oracle.stdlib import stdlib_class
 from tests.type_oracle.symbols import ModuleTypes
@@ -67,8 +68,9 @@ def extract_type_definitions(
         Dictionary mapping type name to TypeInfo.
     """
     parsed = ParsedSource.of(source)
-    if (tree := parsed.outline) is None:
+    if (outlined := outline(parsed)) is None:
         return {}
+    tree, classes = outlined
 
     aliases = parsed.typing_aliases
     imports = parsed.imported_names
@@ -80,7 +82,6 @@ def extract_type_definitions(
     typeddict_nodes: dict[str, ast.ClassDef] = {}
     model_nodes: dict[str, ast.ClassDef] = {}
     dataclass_nodes: dict[str, ast.ClassDef] = {}
-    classes = parsed.outline_classes
     if functional := _functional_classes(tree, aliases):
         classes = sorted([*classes, *functional], key=lambda node: node.lineno)
     imported_bases: dict[str, TypeInfo] = {}

@@ -22,7 +22,7 @@ use ruff_python_ast::{
     Expr, ExprStringLiteral, InterpolatedStringElement, ModExpression, ModModule, Stmt,
 };
 use ruff_python_parser::{
-    parse_expression, parse_module, parse_unchecked, Mode, ParseOptions, Parsed,
+    parse_expression, parse_module, Parsed,
 };
 use ruff_text_size::Ranged;
 
@@ -66,20 +66,6 @@ pub fn module(source: &str) -> Option<Parsed<ModModule>> {
         depth.visit_body(&parsed.syntax().body);
         (!depth.exceeded).then_some(parsed)
     })
-}
-
-/// Whether the module `source` holds no syntax newer than Python 3.14, which has no lazy
-/// imports and no unpacking in comprehensions.
-pub fn reads_on_314(source: &str) -> bool {
-    let options =
-        ParseOptions::from(Mode::Module).with_target_version(ruff_python_ast::PythonVersion::PY314);
-    guarded(source, |text| {
-        parse_unchecked(text, options)
-            .unsupported_syntax_errors()
-            .is_empty()
-            .then_some(())
-    })
-    .is_some()
 }
 
 /// The expression `source`, when `ast.parse(source, mode="eval")` reads it the same.
@@ -390,8 +376,6 @@ mod tests {
 
     #[test]
     fn rarer_sources() {
-        assert!(reads_on_314("x = 1\n"));
-        assert!(!reads_on_314("lazy import x\n"));
         assert!(!has_surrogate_escape("x = 1 \\"));
         let nested = |levels: usize| {
             let mut source: String = (0..levels)
