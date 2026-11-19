@@ -36,17 +36,21 @@ pub fn templates(source: &str) -> Option<Vec<Template>> {
 
 /// Every t-string of the module `body` of `source`, in source order.
 pub fn of(source: &str, body: &[Stmt], imported: &Table) -> Vec<Template> {
-    let scan = Scan::new(body, |_| false);
+    of_in(source, imported, &Scan::new(body))
+}
+
+/// [`of`] over a walk of the module that other checks share.
+pub fn of_in(source: &str, imported: &Table, scan: &Scan<'_>) -> Vec<Template> {
     let ctx = Context {
         imported,
-        scan: &scan,
+        scan,
         constant: None,
     };
     let lines = Lines::new(source);
     let mut found: Vec<Template> = scan
         .templates
         .iter()
-        .map(|(template, stack)| read(template, stack, &ctx, &lines, source))
+        .map(|&(template, scope)| read(template, scan.stack(scope), &ctx, &lines, source))
         .collect();
     found.sort_by_key(|template| template.span);
     found
