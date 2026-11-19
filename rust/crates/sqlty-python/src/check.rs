@@ -1456,14 +1456,14 @@ mod tests {
     use crate::options::Options;
 
     fn crash(text: &str, rules: &[(&str, &str)]) -> Vec<Diagnostic> {
-        run_module(text, rules)
+        run_module(text, rules, false)
             .diagnostics
             .into_iter()
             .map(|reported| reported.diagnostic)
             .collect()
     }
 
-    fn run_module(text: &str, rules: &[(&str, &str)]) -> Found {
+    fn run_module(text: &str, rules: &[(&str, &str)], parsed: bool) -> Found {
         let options = Options::new("postgres", None, None, false).unwrap();
         let rules = RuleConfig::from_overrides(Some(
             rules
@@ -1483,19 +1483,21 @@ mod tests {
         let lint = |_: &str| -> Vec<Lint> { panic!("lint {}", 1) };
         let run = Run {
             settings: &settings,
-            has_schema: true,
+            has_schema: parsed,
             lint: &lint,
             helpers: None,
             variants: None,
         };
-        let source = Source::new(text, (3, 14)).map(Arc::new);
+        let source = parsed
+            .then(|| Source::new(text, (3, 14)).map(Arc::new))
+            .flatten();
         module(text, source.as_ref(), &run)
     }
 
     fn counted(text: &str) -> (usize, usize) {
         ANALYZED.with(|count| count.set(0));
         PARSED.with(|count| count.set(0));
-        run_module(text, &[("param-count-mismatch", "error")]);
+        run_module(text, &[("param-count-mismatch", "error")], true);
         (
             ANALYZED.with(std::cell::Cell::get),
             PARSED.with(std::cell::Cell::get),

@@ -465,7 +465,7 @@ fn described(line: usize, sql: &str, dialect: &str, options: &Options<'_>) -> Va
     let (routed, schema) = route(sql, dialect, options.schema);
     let parsed = parse(sql, routed);
     let columns = parsed.columns(schema);
-    let params = parsed.params(schema).unwrap_or_default();
+    let params = parsed.params(sql, schema).unwrap_or_default();
     let explained = explain_select(sql, dialect, options.schema).unwrap_or_default();
     let rule = |rule: Option<RuleRef>| {
         rule.map(

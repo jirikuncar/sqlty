@@ -14,7 +14,7 @@ use super::expr::from_sql_type;
 use super::input::{parser_input, Input};
 use super::names::alias_name;
 use super::params::{params_of, Param};
-use super::preprocess::{parse_input_as_written, too_deep, MAX_DEPTH};
+use super::preprocess::{parse_input_as_written, parse_query, too_deep, MAX_DEPTH};
 use super::query::{Analyzer, Column};
 use super::star_expand::statement_stars;
 use super::{Schema, SchemaData, SkippedObject, ANY};
@@ -183,7 +183,6 @@ pub fn parse(sql: &str, dialect: &str) -> Parsed {
     let input = parser_input(sql, dialect).into_owned();
     let (stmts, as_written) = parse_input_as_written(input.text(), dialect);
     Parsed {
-        sql: sql.into(),
         input,
         stmts,
         dialect,
@@ -193,8 +192,6 @@ pub fn parse(sql: &str, dialect: &str) -> Parsed {
 
 /// A query as [`parse`] read it.
 pub struct Parsed {
-    /// The text given to [`parse`].
-    sql: Box<str>,
     /// The query sqlparser read, from [`parser_input`].
     input: Input<'static>,
     stmts: Option<Vec<Statement>>,
@@ -254,20 +251,20 @@ impl Parsed {
         self.analyze_with_diagnostics(schema).0
     }
 
-    /// [`analyze_params`](super::analyze_params) of the query, against `schema` as
-    /// [`route`](super::route) chose it. The tree is shared when the query has no
+    /// [`analyze_params`](super::analyze_params) of `sql`, the text given to [`parse`],
+    /// against `schema` as [`route`](super::route) chose it. The tree is shared when the query has no
     /// placeholder that needs rewriting (`$1` and none), else the rewritten text is parsed.
     ///
     /// ```
     /// use sqlty_sql::analyzer::parse;
     ///
-    /// let params = parse("SELECT %s::int", "postgres").params(None).unwrap();
+    /// let params = parse("SELECT %s::int", "postgres").params("SELECT %s::int", None).unwrap();
     /// assert_eq!(params[0].python_type.as_deref(), Some("int"));
-    /// assert!(parse("SELEC", "postgres").params(None).is_none());
+    /// assert!(parse("SELEC", "postgres").params("SELEC", None).is_none());
     /// ```
-    pub fn params(&self, schema: Option<&SchemaData>) -> Option<Vec<Param>> {
+    pub fn params(&self, sql: &str, schema: Option<&SchemaData>) -> Option<Vec<Param>> {
         let shared = if self.as_written { self.first() } else { None };
-        params_of(&self.sql, self.dialect, schema, shared)
+        params_of(sql, self.dialect, schema, shared)
     }
 
     /// [`analyze_with_diagnostics`] of the query.
@@ -354,7 +351,10 @@ impl Parsed {
 ///
 /// Empty SQL, DDL, DML without RETURNING and transaction control return no rows.
 pub fn returns_rows(sql: &str, dialect: &str) -> bool {
-    parse(sql, dialect).returns_rows()
+    match parse_query(sql, SqlDialect::from_name(dialect)) {
+        None => true,
+        Some(stmts) => stmts.first().is_some_and(statement_returns_rows),
+    }
 }
 
 /// The SQL as parsed, `input` from [`parser_input`], in the dialects that name a column by
@@ -368,7 +368,7 @@ mod tests {
     use super::*;
 
     fn rows(sql: &str, dialect: &str) -> bool {
-        match super::super::preprocess::parse_query(sql, SqlDialect::from_name(dialect)) {
+        match parse_query(sql, SqlDialect::from_name(dialect)) {
             None => true,
             Some(stmts) => stmts.first().is_some_and(statement_returns_rows),
         }

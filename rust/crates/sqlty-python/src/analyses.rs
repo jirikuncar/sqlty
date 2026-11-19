@@ -20,17 +20,11 @@ pub(crate) struct Analysis {
     pub(crate) row_type: Option<String>,
 }
 
-/// A query's parse, and what has been asked of it so far.
-struct Slot {
-    parsed: Rc<Parsed>,
-    analysis: Option<Rc<Analysis>>,
-    params: Option<Option<Vec<Param>>>,
-}
-
 /// The analyses of a module's queries, by their text, each computed on first ask.
 pub(crate) struct Analyses<'a> {
     options: &'a Options<'a>,
-    known: RefCell<HashMap<String, Slot>>,
+    known: RefCell<HashMap<String, Rc<Analysis>>>,
+    params: RefCell<HashMap<String, Option<Vec<Param>>>>,
 }
 
 #[cfg(test)]
@@ -44,49 +38,46 @@ impl<'a> Analyses<'a> {
         Self {
             options,
             known: RefCell::default(),
+            params: RefCell::default(),
         }
     }
 
     pub(crate) fn of(&self, query: &str) -> Rc<Analysis> {
-        let parsed = self.parsed(query);
-        if let Some(analysis) = self
-            .known
-            .borrow()
-            .get(query)
-            .and_then(|slot| slot.analysis.as_ref())
-        {
+        if let Some(analysis) = self.known.borrow().get(query) {
             return Rc::clone(analysis);
         }
         #[cfg(test)]
         ANALYZED.with(|count| count.set(count.get() + 1));
-        let (columns, diagnostics) = parsed.analyze_with_diagnostics(self.routed(query).1);
+        let (dialect, schema) = self.routed(query);
+        let parsed = Rc::new(self.parse(query, dialect));
+        let (columns, diagnostics) = parsed.analyze_with_diagnostics(schema);
         let analysis = Rc::new(Analysis {
             row_type: columns.as_deref().and_then(row_type),
             parsed,
             columns,
             diagnostics,
         });
-        if let Some(slot) = self.known.borrow_mut().get_mut(query) {
-            slot.analysis = Some(Rc::clone(&analysis));
-        }
+        self.known
+            .borrow_mut()
+            .insert(query.to_string(), Rc::clone(&analysis));
         analysis
     }
 
-    /// The parameters of `query`, found once; the query is not analyzed for its columns.
+    /// The parameters of `query`, found once and not kept with a parse of their own: the
+    /// tree of an analyzed query is reused, any other is dropped after use.
     pub(crate) fn params(&self, query: &str) -> Option<Vec<Param>> {
-        let parsed = self.parsed(query);
-        if let Some(params) = self
-            .known
-            .borrow()
-            .get(query)
-            .and_then(|slot| slot.params.as_ref())
-        {
+        if let Some(params) = self.params.borrow().get(query) {
             return params.clone();
         }
-        let params = parsed.params(self.routed(query).1);
-        if let Some(slot) = self.known.borrow_mut().get_mut(query) {
-            slot.params = Some(params.clone());
-        }
+        let (dialect, schema) = self.routed(query);
+        let analyzed = self.known.borrow().get(query).map(Rc::clone);
+        let params = match analyzed {
+            Some(analysis) => analysis.parsed.params(query, schema),
+            None => self.parse(query, dialect).params(query, schema),
+        };
+        self.params
+            .borrow_mut()
+            .insert(query.to_string(), params.clone());
         params
     }
 
@@ -94,21 +85,9 @@ impl<'a> Analyses<'a> {
         route(query, self.options.dialect.name(), self.options.schema)
     }
 
-    fn parsed(&self, query: &str) -> Rc<Parsed> {
-        if let Some(slot) = self.known.borrow().get(query) {
-            return Rc::clone(&slot.parsed);
-        }
+    fn parse(&self, query: &str, dialect: &str) -> Parsed {
         #[cfg(test)]
         PARSED.with(|count| count.set(count.get() + 1));
-        let parsed = Rc::new(parse(query, self.routed(query).0));
-        self.known.borrow_mut().insert(
-            query.to_string(),
-            Slot {
-                parsed: Rc::clone(&parsed),
-                analysis: None,
-                params: None,
-            },
-        );
-        parsed
+        parse(query, dialect)
     }
 }

@@ -805,7 +805,7 @@ impl Workspace {
                         };
                         rows.then(|| "unknown".to_string())
                     });
-                let mut params = parsed.params(routed_schema).unwrap_or_default();
+                let mut params = parsed.params(sql, routed_schema).unwrap_or_default();
                 params.sort_by_key(|param| param.index);
                 let listed: Vec<String> = params
                     .iter()
