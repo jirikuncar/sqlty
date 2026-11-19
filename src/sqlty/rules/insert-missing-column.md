@@ -4,7 +4,7 @@ group = "names"
 severity = "error"
 fixable = false
 summary = "INSERT leaves out a NOT NULL column that has no default"
-origin = "sql"
+origin = "SQL"
 +++
 
 # insert-missing-column

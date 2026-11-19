@@ -4,7 +4,7 @@ group = "names"
 severity = "error"
 fixable = true
 summary = "Query reads a column that its table does not have"
-origin = "sql"
+origin = "SQL"
 +++
 
 # unknown-column

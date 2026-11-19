@@ -14,7 +14,7 @@ group = \"names\"
 severity = \"warn\"
 fixable = false
 summary = \"Two \\\"tables\\\" meet\"
-origin = \"sql\"
+origin = \"SQL\"
 +++
 
 # chasm-join
@@ -58,7 +58,7 @@ fn rules_are_listed_by_order_and_pages_by_file_name() {
     let second = PAGE
         .replace("order = 10", "order = 5")
         .replace("chasm-join", "a-rule");
-    let second = second.replace("origin = \"sql\"", "origin = \"python\"");
+    let second = second.replace("origin = \"SQL\"", "origin = \"Python\"");
     let code =
         compile(&[page("chasm-join.md", PAGE), page("a-rule.md", &second)]).expect("compiles");
     assert!(code.find("ARule,").expect("listed") < code.find("ChasmJoin,").expect("listed"));
@@ -85,6 +85,15 @@ fn front_matter_must_end() {
     assert!(
         message.starts_with("chasm-join.md: unterminated front matter"),
         "{message}"
+    );
+}
+
+#[test]
+fn front_matter_needs_a_blank_line_after_it() {
+    let message = error(&PAGE.replace("+++\n\n#", "+++\n#"));
+    assert_eq!(
+        message,
+        "chasm-join.md: front matter must be followed by a blank line"
     );
 }
 
@@ -121,10 +130,10 @@ fn group_severity_and_origin_are_checked() {
         message,
         "chasm-join.md: unknown severity \"loud\" (expected error, warn, ignore)"
     );
-    let message = error(&PAGE.replace("\"sql\"", "\"rust\""));
+    let message = error(&PAGE.replace("\"SQL\"", "\"rust\""));
     assert_eq!(
         message,
-        "chasm-join.md: unknown origin \"rust\" (expected sql or python)"
+        "chasm-join.md: unknown origin \"rust\" (expected SQL or Python)"
     );
 }
 

@@ -4,7 +4,7 @@ group = "names"
 severity = "error"
 fixable = false
 summary = "Query reads a table that the schema does not define"
-origin = "sql"
+origin = "SQL"
 +++
 
 # unknown-table

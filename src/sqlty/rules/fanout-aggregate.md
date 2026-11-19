@@ -4,7 +4,7 @@ group = "names"
 severity = "warn"
 fixable = false
 summary = "Aggregate over rows a one-to-many join repeats"
-origin = "sql"
+origin = "SQL"
 +++
 
 # fanout-aggregate

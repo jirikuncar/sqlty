@@ -4,7 +4,7 @@ group = "query"
 severity = "warn"
 fixable = true
 summary = "MySQL rejects the \"--sql\" marker; use \"-- sql\""
-origin = "python"
+origin = "Python"
 +++
 
 # mysql-sql-marker

@@ -4,7 +4,7 @@ group = "names"
 severity = "ignore"
 fixable = false
 summary = "Comparison between columns holding keys of different tables"
-origin = "sql"
+origin = "SQL"
 +++
 
 # entity-mismatch

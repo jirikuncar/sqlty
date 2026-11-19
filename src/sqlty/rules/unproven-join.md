@@ -4,7 +4,7 @@ group = "names"
 severity = "ignore"
 fixable = false
 summary = "Join in an aggregating query that matches no primary or unique key"
-origin = "sql"
+origin = "SQL"
 +++
 
 # unproven-join

@@ -4,7 +4,7 @@ group = "row-type"
 severity = "error"
 fixable = false
 summary = "Annotated type field has incompatible type with query column"
-origin = "python"
+origin = "Python"
 +++
 
 # column-type-mismatch

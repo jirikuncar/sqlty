@@ -4,7 +4,7 @@ group = "names"
 severity = "error"
 fixable = false
 summary = "Query the database rejects for a reason no other rule names"
-origin = "sql"
+origin = "SQL"
 +++
 
 # rejected-query

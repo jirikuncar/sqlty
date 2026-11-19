@@ -4,7 +4,7 @@ group = "params"
 severity = "error"
 fixable = false
 summary = "A call passes an argument whose type can't be the type its query parameter takes"
-origin = "python"
+origin = "Python"
 +++
 
 # param-type-mismatch

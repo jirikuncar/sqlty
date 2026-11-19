@@ -4,7 +4,7 @@ group = "rewrite"
 severity = "error"
 fixable = true
 summary = "SQL[tuple[...]] doesn't admit every row the query returns"
-origin = "python"
+origin = "Python"
 +++
 
 # narrow-type

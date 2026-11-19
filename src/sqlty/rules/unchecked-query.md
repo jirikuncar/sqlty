@@ -4,7 +4,7 @@ group = "rewrite"
 severity = "warn"
 fixable = false
 summary = "--sql query is not plain string literals (raw, bytes, an expression), so it is not checked"
-origin = "python"
+origin = "Python"
 +++
 
 # unchecked-query

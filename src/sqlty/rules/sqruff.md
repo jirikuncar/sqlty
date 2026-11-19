@@ -4,7 +4,7 @@ group = "query"
 severity = "ignore"
 fixable = false
 summary = "Finding of sqruff's core lint rules in a query"
-origin = "python"
+origin = "Python"
 +++
 
 # sqruff

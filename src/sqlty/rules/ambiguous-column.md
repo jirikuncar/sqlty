@@ -4,7 +4,7 @@ group = "names"
 severity = "error"
 fixable = false
 summary = "Unqualified column exists in more than one table of the query"
-origin = "sql"
+origin = "SQL"
 +++
 
 # ambiguous-column

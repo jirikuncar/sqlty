@@ -4,7 +4,7 @@ group = "rewrite"
 severity = "warn"
 fixable = true
 summary = "SQL[UNTYPED] query has no inferable row type; the message names why"
-origin = "python"
+origin = "Python"
 +++
 
 # untyped-query
