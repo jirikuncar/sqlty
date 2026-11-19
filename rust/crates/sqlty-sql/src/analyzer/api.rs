@@ -367,13 +367,6 @@ pub(super) fn text_source(input: &str, dialect: SqlDialect) -> Option<std::rc::R
 mod tests {
     use super::*;
 
-    fn rows(sql: &str, dialect: &str) -> bool {
-        match parse_query(sql, SqlDialect::from_name(dialect)) {
-            None => true,
-            Some(stmts) => stmts.first().is_some_and(statement_returns_rows),
-        }
-    }
-
     #[test]
     fn parsed_returns_rows_as_the_free_function_did() {
         for sql in [
@@ -391,14 +384,17 @@ mod tests {
             for dialect in ["postgres", "mysql", "sqlite"] {
                 assert_eq!(
                     parse(sql, dialect).returns_rows(),
-                    rows(sql, dialect),
+                    returns_rows(sql, dialect),
                     "{sql}"
                 );
-                assert_eq!(returns_rows(sql, dialect), rows(sql, dialect), "{sql}");
             }
         }
-        assert!(!returns_rows("", "postgres"));
+        assert!(returns_rows("DELETE FROM t RETURNING *", "postgres"));
         assert!(returns_rows("SELEC 1", "postgres"));
+        assert!(!returns_rows("INSERT INTO t VALUES (1)", "postgres"));
+        assert!(!returns_rows("CREATE TABLE t (a INT)", "postgres"));
+        assert!(!returns_rows("BEGIN", "postgres"));
+        assert!(!returns_rows("", "postgres"));
     }
 
     #[test]
