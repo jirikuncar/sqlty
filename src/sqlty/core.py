@@ -359,7 +359,7 @@ def rewrite_source(
     untyped: bool = False,
     keep_lines: bool = False,
     json_types: str = "typing.Any",
-    param_types: bool = False,
+    param_types: bool = True,
     closed_params: bool = False,
 ) -> str:
     r"""Wrap each ``--sql`` string in ``SQL[T](...)``, ``T`` the row type it infers.
@@ -445,7 +445,7 @@ def fix_source(
     json_types: str = "typing.Any",
     helpers: HelperIndex | None = None,
     module: str | None = None,
-    param_types: bool = False,
+    param_types: bool = True,
     closed_params: bool = False,
 ) -> str:
     """Apply what ``sqlty check --fix`` fixes; rules set to ``"ignore"`` are skipped.

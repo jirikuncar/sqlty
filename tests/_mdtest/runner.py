@@ -53,7 +53,7 @@ class Run:
         self.import_style: str | None = settings.get("import-style")
         self.untyped: bool = settings.get("untyped") == "sentinel"
         self.json_types: str = settings.get("json-types", "typing.Any")
-        self.param_types: bool = settings.get("param-types", False)
+        self.param_types: bool = settings.get("param-types", True)
         self.closed_params = requires_closed(
             section.config.get("project", {}).get("requires-python")
         )

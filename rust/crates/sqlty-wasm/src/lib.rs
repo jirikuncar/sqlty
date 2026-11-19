@@ -332,7 +332,7 @@ fn resolved(table: &serde_json::Map<String, Value>) -> Settings {
     Settings {
         dialect,
         import_style: text("import-style"),
-        param_types: table.get("param-types") == Some(&Value::Bool(true)),
+        param_types: table.get("param-types") != Some(&Value::Bool(false)),
         variants: (table.get("preview") == Some(&Value::Bool(true))).then(|| {
             let most = table.get("max-query-variants").and_then(Value::as_u64);
             most.map_or(MAX_QUERY_VARIANTS, |most| {

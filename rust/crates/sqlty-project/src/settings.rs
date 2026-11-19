@@ -49,7 +49,7 @@ pub struct FileSettings {
     pub untyped: bool,
     /// `json-types = "typing.TypedDict"`.
     pub json_typed_dicts: bool,
-    /// `param-types`.
+    /// `param-types`, on unless set to `false`.
     pub param_types: bool,
     /// Whether `requires-python` rules out every Python before 3.15.
     pub closed_params: bool,
@@ -463,7 +463,10 @@ fn settings(
         import_style,
         untyped,
         json_typed_dicts,
-        param_types: flag("param-types"),
+        param_types: table
+            .get("param-types")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
         closed_params,
         rules: table
             .get("rules")

@@ -185,13 +185,12 @@ async def main() -> None:
 
 `SQL[R, P]` types the parameters of a query as `P`, next to its rows `R`. Your
 type checker then checks the values you pass, without running `sqlty check`.
-Turn on [`param-types`](../reference/configuration.md#param-types) and
-`sqlty rewrite` writes `P`:
+`sqlty rewrite` writes `P`; turn it off with
+[`param-types = false`](../reference/configuration.md#param-types).
 
 ```toml
 [tool.sqlty]
 schema = "schema.sql"
-param-types = true
 ```
 
 ```python
@@ -201,7 +200,6 @@ count = "--sql\nSELECT count(*) FROM users"
 # rewritten-file: import datetime
 # rewritten-file: import typing
 # rewritten-file: from sqlty import SQL
-# rewritten-file: from sqlty import NoParams
 # rewritten-file:
 # rewritten-file:
 # rewritten-file: # sqlty: generated
@@ -211,7 +209,7 @@ count = "--sql\nSELECT count(*) FROM users"
 # rewritten-file:
 # rewritten-file: by_id = SQL[tuple[str], ByIdParams]("--sql\nSELECT name FROM users WHERE id = %(id)s")
 # rewritten-file: by_name = SQL[tuple[int, datetime.date | None], tuple[str | None, int | None]]("--sql\nSELECT id, born FROM users WHERE name = %s AND age > %s")
-# rewritten-file: count = SQL[tuple[int], NoParams]("--sql\nSELECT count(*) FROM users")
+# rewritten-file: count = SQL[tuple[int]]("--sql\nSELECT count(*) FROM users")
 ```
 
 - Positional parameters are a `tuple`, one item per placeholder.
@@ -219,7 +217,8 @@ count = "--sql\nSELECT count(*) FROM users"
   imports below a `# sqlty: generated` line. `sqlty strip` removes it. When
   `requires-python` rules out Python 3.14, it is `closed=True`
   ([PEP 728](https://peps.python.org/pep-0728/)), so an extra key is a type error.
-- A query without parameters takes `NoParams`: `()`, `{}` or nothing, and no key.
+- A query without parameters keeps `SQL[R]`. Write `NoParams` yourself to
+  accept only `()`, `{}` or nothing.
 - A parameter is `T | None` unless a `NOT NULL` column stores it, and
   `typing.Any` when its type is unknown or cast (`%s::int` takes anything).
 
@@ -246,7 +245,7 @@ the other way around.
     `P` says what the query needs, not everything psycopg accepts. A type
     checker rejects a list for a `tuple`, text for another type (the server
     would convert it), and a `dict[str, Any]` or extra keys for a `TypedDict`.
-    That is why `param-types` is off by default.
+    Set `param-types = false` to keep `SQL[R]`.
 
 ### `bind`
 
