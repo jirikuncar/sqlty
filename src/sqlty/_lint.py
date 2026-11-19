@@ -423,29 +423,3 @@ class RuleConfig:
 
 
 DOCS_URL = "https://sqlty.kuncar.dev/"
-"""The documentation site, which ``rule_doc`` links to."""
-
-
-def rule_doc(name: str) -> str:
-    """Markdown documentation of a rule, shipped as ``sqlty/rules/<name>.md``, its links
-    to other pages pointing at the documentation site: the repository's relative paths
-    mean nothing in a user's terminal.
-
-    Example:
-        >>> rule_doc("stale-type").splitlines()[0]
-        '# stale-type'
-        >>> "](https://sqlty.kuncar.dev/guide/schema-inference/)" in rule_doc("insert-missing-column")
-        True
-    """
-    import re
-    from importlib.resources import files
-
-    text = (files("sqlty") / "rules" / f"{name}.md").read_text(encoding="utf-8")
-
-    def absolute(match: re.Match[str]) -> str:
-        if (doc := match["doc"]) is not None:
-            return f"]({DOCS_URL}{doc}/{match['anchor'] or ''})"
-        return f"]({DOCS_URL}reference/rules/#{match['rule']})"
-
-    link = r"\]\((?:\.\./\.\./\.\./docs/(?P<doc>[^)\s:]+)|(?P<rule>[^)\s:/]+))\.md(?P<anchor>#[^)\s]*)?\)"
-    return re.sub(link, absolute, text)

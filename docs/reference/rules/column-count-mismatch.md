@@ -6,7 +6,8 @@ Default severity: **error**
 
 Checks that a user-defined row type (`TypedDict`, `NamedTuple`, dataclass,
 Pydantic model) has as many fields as the query returns columns. A TypedDict, dataclass or
-Pydantic model may omit fields with a default (`NotRequired` keys).
+Pydantic model may omit fields with a default (`NotRequired` keys). Checked before
+field types and names.
 
 ## Why is this bad?
 
@@ -48,4 +49,4 @@ class Item(TypedDict, extra_items=object):
 q = SQL[Item]("--sql\nSELECT id::INTEGER, name::TEXT, owner_id::INTEGER FROM items")
 ```
 
-See [Closed TypedDicts](../../../docs/guide/row-types.md#closed-typeddicts).
+See [Closed TypedDicts](../../guide/row-types.md#closed-typeddicts).

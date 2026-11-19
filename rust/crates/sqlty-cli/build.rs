@@ -1,4 +1,4 @@
-//! Embeds the Agent Skills of `skills/` and the rule pages of `src/sqlty/rules/`, so
+//! Embeds the Agent Skills of `skills/` and the rule pages of `docs/reference/rules/`, so
 //! `sqlty skill` and `sqlty rule` print those of their own version wherever sqlty is
 //! installed.
 
@@ -14,7 +14,7 @@ use std::{env, fs};
 
 fn main() {
     let mut out = embed("skills", "SKILLS");
-    out.push_str(&embed("src/sqlty/rules", "RULE_PAGES"));
+    out.push_str(&embed("docs/reference/rules", "RULE_PAGES"));
     fs::write(
         Path::new(&env::var("OUT_DIR").unwrap()).join("embedded.rs"),
         out,

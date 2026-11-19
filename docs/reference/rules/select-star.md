@@ -74,5 +74,6 @@ Queries with escapes or quotes inside the string, queries split over several
 concatenated strings, and a bare `*` over a `USING` or `NATURAL` join (which
 merges columns), a subquery or a quoted alias, are left for you to edit, as are
 stars in `RETURNING` and in CTEs. `select-star` is
-still reported for them. Stars in [`.sql` query files](../../../docs/guide/sql-files.md)
+still reported for them. A `*` over a subquery or CTE is typed from its columns; a
+`*` over a `USING` or `NATURAL` join gets no inferred type, so its annotation is kept. Stars in [`.sql` query files](../../guide/sql-files.md)
 are reported too, but not fixed.

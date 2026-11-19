@@ -104,7 +104,7 @@ test-unit:
 
 .PHONY: test-mdtest
 test-mdtest:
-	uv run pytest tests/mdtest/ docs/ src/sqlty/rules/ README.md -v
+	uv run pytest tests/mdtest/ docs/ README.md -v
 
 .PHONY: test-e2e
 test-e2e:
@@ -120,7 +120,7 @@ test-coverage:  ## Needs a nightly toolchain with llvm-tools, cargo-llvm-cov and
 
 .PHONY: update-mdtest
 update-mdtest:
-	uv run pytest tests/mdtest/ docs/ src/sqlty/rules/ README.md tests/test_docs.py --update-mdtest -v
+	uv run pytest tests/mdtest/ docs/ README.md tests/test_docs.py --update-mdtest -v
 
 # --- Benchmarks ---
 

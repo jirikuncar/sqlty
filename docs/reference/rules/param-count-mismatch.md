@@ -5,7 +5,7 @@ Default severity: **error**
 ## What it does
 
 Compares the arguments a call passes with the placeholders of its query. It
-applies to calls of a [marked helper](../../../docs/guide/helpers.md) whose parameters are
+applies to calls of a [marked helper](../../guide/helpers.md) whose parameters are
 spelled out (a `params` argument holding a tuple, list or dict literal,
 `*args`, or `**params`), and reports:
 

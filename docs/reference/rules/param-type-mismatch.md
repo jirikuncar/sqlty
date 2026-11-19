@@ -7,7 +7,7 @@ Default severity: **error**
 Checks the arguments a call passes for its query's placeholders against the
 type each placeholder takes from its context: the column it is compared with
 or stored in, a cast, `LIMIT`, an `IN` list, `= ANY(%s)` (a list). It applies
-to calls of a [marked helper](../../../docs/guide/helpers.md) whose parameters are spelled
+to calls of a [marked helper](../../guide/helpers.md) whose parameters are spelled
 out: a `params` argument holding a tuple, list or dict literal, `*args`, or
 `**params`.
 
@@ -75,6 +75,8 @@ execute("SELECT name FROM users WHERE id = %s", (date(2000, 1, 1),))
 execute("INSERT INTO users (id, name) VALUES (%s, %s)", (1, None))
 # error: [param-type-mismatch] "parameter 'id' expects int, got bytes"
 execute("DELETE FROM users WHERE id = %(id)s", {"id": b"1"})
+# error: [param-type-mismatch] "parameter 1 expects int, got bytes"
+execute("SELECT name FROM users LIMIT %s", (b"1",))
 ```
 
 ## Fix

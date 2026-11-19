@@ -104,7 +104,7 @@ The analyzer records the rules only when asked to, so `check` without
 
 A call to a built-in function is typed by the function's rules in the query's
 dialect; an unknown function leaves its column untyped (see
-[`unknown-function`](rules.md#unknown-function)). PostgreSQL follows its
+[`unknown-function`](rules/unknown-function.md)). PostgreSQL follows its
 "Functions and Operators" chapter. MySQL and SQLite type these:
 
 | Group | MySQL | SQLite |
@@ -140,7 +140,7 @@ psycopg does: write `'a%%'` for a literal `%` in a string.
 !!! warning "MySQL servers reject the `--sql` marker"
     The marker line is part of the string the driver sends, and MySQL and
     MariaDB read `--` as a comment only before whitespace. Use `-- sql`
-    instead; see [`mysql-sql-marker`](rules.md#mysql-sql-marker).
+    instead; see [`mysql-sql-marker`](rules/mysql-sql-marker.md).
 
 ## Changes from the sqlglot backend
 

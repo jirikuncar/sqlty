@@ -72,5 +72,5 @@ also a [`fanout-aggregate`](fanout-aggregate.md).
 chasm-join = "error"
 ```
 
-Needs a [schema](../../../docs/guide/schema-inference.md) with primary or
+Needs a [schema](../../guide/schema-inference.md) with primary or
 unique keys, read as `fanout-aggregate` reads them.

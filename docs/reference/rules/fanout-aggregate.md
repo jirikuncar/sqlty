@@ -99,5 +99,5 @@ declares. Make it fail CI:
 fanout-aggregate = "error"
 ```
 
-Needs a [schema](../../../docs/guide/schema-inference.md) with primary or
+Needs a [schema](../../guide/schema-inference.md) with primary or
 unique keys. Judged in the `postgres`, `mysql` and `sqlite` dialects.

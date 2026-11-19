@@ -367,19 +367,17 @@ fn rule(host: &mut dyn Host, name: Option<&str>) -> i32 {
     }
 }
 
-/// A rule page with its links to other pages pointing at the documentation site.
+/// A rule page of `docs/reference/rules/` with its links to other pages pointing at the
+/// documentation site.
 fn rule_doc(text: &str) -> String {
-    let link = sqlty_sql::regex(
-        r"\]\((?:\.\./\.\./\.\./docs/(?P<doc>[^)\s:]+)|(?P<rule>[^)\s:/]+))\.md(?P<anchor>#[^)\s]*)?\)",
-    );
+    let link =
+        sqlty_sql::regex(r"\]\((?P<up>(?:\.\./)*)(?P<page>[^)\s:]+)\.md(?P<anchor>#[^)\s]*)?\)");
     link.replace_all(text, |found: &regex::Captures<'_>| {
-        match found.name("doc") {
-            Some(doc) => {
-                let anchor = found.name("anchor").map_or("", |anchor| anchor.as_str());
-                format!("]({DOCS_URL}{}/{anchor})", doc.as_str())
-            }
-            None => format!("]({DOCS_URL}reference/rules/#{})", &found["rule"]),
-        }
+        let mut dir = vec!["reference", "rules"];
+        dir.truncate(dir.len().saturating_sub(found["up"].len() / 3));
+        dir.push(&found["page"]);
+        let anchor = found.name("anchor").map_or("", |anchor| anchor.as_str());
+        format!("]({DOCS_URL}{}/{anchor})", dir.join("/"))
     })
     .into_owned()
 }
@@ -972,7 +970,7 @@ fn sarif_log(version: &str, rows: Vec<Json>) -> Json {
                 ),
                 (
                     "helpUri",
-                    format!("{DOCS_URL}reference/rules/#{}", rule.name()).into(),
+                    format!("{DOCS_URL}reference/rules/{}/", rule.name()).into(),
                 ),
                 (
                     "defaultConfiguration",
@@ -1294,8 +1292,10 @@ mod tests {
         let written = std::fs::read_to_string(host.root.join("new.py")).expect("reads");
         assert_eq!(written, "x = 1\n");
         assert_eq!(
-            rule_doc("see [stale-type](stale-type.md)"),
-            format!("see [stale-type]({DOCS_URL}reference/rules/#stale-type)")
+            rule_doc("[a](stale-type.md) [b](../rules.md#rule-groups) [c](../../guide/untyped.md#x)"),
+            format!(
+                "[a]({DOCS_URL}reference/rules/stale-type/) [b]({DOCS_URL}reference/rules/#rule-groups) [c]({DOCS_URL}guide/untyped/#x)"
+            )
         );
         std::fs::remove_dir_all(&host.root).expect("removes");
     }

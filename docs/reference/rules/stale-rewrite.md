@@ -4,7 +4,9 @@ Default severity: **warn**
 
 ## What it does
 
-Flags `--sql` strings that `sqlty rewrite` would wrap.
+Flags `--sql` strings that `sqlty rewrite` would wrap. The marker may follow
+whitespace or a line break, as in a triple-quoted string that opens on its own
+line, and implicitly concatenated strings are one query.
 
 ## Why is this bad?
 
@@ -28,9 +30,11 @@ q = "--sql\nSELECT id::INTEGER FROM users"
 # fixed: q = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 ```
 
-Strings rewrite can't type (DDL, DML without `RETURNING`, invalid SQL) are
-not flagged; see [untyped queries](../../../docs/guide/untyped.md) to wrap
-them anyway.
+Strings rewrite can't type (DDL, DML without `RETURNING`, invalid SQL, or any
+query without inferable columns in `skip` mode) are not flagged; see
+[untyped queries](../../guide/untyped.md) to wrap them anyway. Neither are the
+`"--sql SELECT"` form and strings that are not plain literals (f-, t-, raw or
+bytes strings, alone or in a concatenation).
 
 ## Untyped `SQL(...)` calls
 

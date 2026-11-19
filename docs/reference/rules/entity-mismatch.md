@@ -62,5 +62,5 @@ code would need suppressions. Enable it per project:
 entity-mismatch = "warn"
 ```
 
-Needs a [schema](../../../docs/guide/schema-inference.md) with primary keys and
+Needs a [schema](../../guide/schema-inference.md) with primary keys and
 foreign keys. Views, CTEs and derived tables don't carry entities.

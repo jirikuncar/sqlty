@@ -53,6 +53,6 @@ An error by default: the database rejects such SQL. Lower or turn it off:
 insert-value-count = "warn"
 ```
 
-Needs a [schema](../../../docs/guide/schema-inference.md) and is judged in the
+Needs a [schema](../../guide/schema-inference.md) and is judged in the
 `postgres`, `mysql` and `sqlite` dialects. A query source whose columns sqlty
 can't count, such as `SELECT *` over a table it doesn't know, is not checked.

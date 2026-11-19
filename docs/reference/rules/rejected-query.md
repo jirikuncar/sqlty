@@ -5,8 +5,9 @@ Default severity: **error**
 ## What it does
 
 Reports a query the database rejects for a reason no other rule names: a
-`CASE` or `COALESCE` whose results have no common type, a `SELECT *` with no
-`FROM`, a SQLite hex literal that does not fit 64 bits, and `EXTRACT` in SQLite.
+`CASE`, `COALESCE`, `GREATEST` or `LEAST` whose results have no common type, a
+`SELECT *` with no `FROM`, a SQLite hex literal that does not fit 64 bits, and
+`EXTRACT` in SQLite.
 
 ```toml
 [tool.sqlty]

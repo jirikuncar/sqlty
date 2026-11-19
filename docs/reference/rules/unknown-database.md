@@ -5,7 +5,7 @@ Default severity: **error**
 ## What it does
 
 Flags a query whose marker names a database the project does not configure under
-[`databases`](../../../docs/reference/configuration.md#databases).
+[`databases`](../../reference/configuration.md#databases).
 
 ## Why is this bad?
 

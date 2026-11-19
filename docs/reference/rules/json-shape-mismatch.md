@@ -23,7 +23,7 @@ schema = "schema.sql"
 `schema.sql`:
 
 ```sql
-CREATE TABLE orders (id INTEGER PRIMARY KEY);
+CREATE TABLE orders (id INTEGER PRIMARY KEY, total NUMERIC(10, 2) NOT NULL);
 CREATE TABLE lines (id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, sku TEXT NOT NULL, qty INTEGER NOT NULL);
 ```
 
@@ -47,6 +47,27 @@ class Order(TypedDict):
 q = SQL[Order]("""--sql
 SELECT o.id, (SELECT coalesce(jsonb_agg(jsonb_build_object('sku', l.sku, 'qty', l.qty)), '[]') FROM lines l WHERE l.order_id = o.id) AS lines
 FROM orders o""")
+```
+
+A `NUMERIC` column builds a number:
+
+```python
+from typing import TypedDict
+
+from sqlty import SQL
+
+
+class Doc(TypedDict):
+    id: int
+    total: str
+
+
+class Order(TypedDict):
+    doc: Doc
+
+
+# error: [json-shape-mismatch] "Order.doc is Doc but query column 'doc' builds JSON that does not fit: doc.total is str but the query builds a number"
+q = SQL[Order]("--sql\nSELECT jsonb_build_object('id', id, 'total', total) AS doc FROM orders")
 ```
 
 ## Why is this bad?

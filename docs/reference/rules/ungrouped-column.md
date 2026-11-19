@@ -64,7 +64,7 @@ An error by default: the database rejects such SQL. Lower or turn it off:
 ungrouped-column = "warn"
 ```
 
-Needs a [schema](../../../docs/guide/schema-inference.md): only columns of
+Needs a [schema](../../guide/schema-inference.md): only columns of
 schema tables are judged. Judged in the `postgres` dialect; MySQL's
 `ONLY_FULL_GROUP_BY` follows more dependencies (unique keys, equalities in
 `WHERE`) and is not modelled.

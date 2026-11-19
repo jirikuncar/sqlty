@@ -65,7 +65,7 @@ rows = fetch_all("SELECT id, name FROM users", tuple[int, int])
 ```
 
 A `--sql` string passed with a row type is typed by it, so
-[`stale-rewrite`](../reference/rules.md#stale-rewrite) doesn't ask to wrap it in
+[`stale-rewrite`](../reference/rules/stale-rewrite.md) doesn't ask to wrap it in
 `SQL[T]`, and `sqlty check --fix` leaves it as it is. Without a row type it is
 still reported:
 

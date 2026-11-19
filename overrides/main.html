@@ -64,6 +64,15 @@
     }
   </script>
   {% endif %}
+  {% if page.url == "reference/rules/" %}
+  <script>
+    // Links from before each rule had its own page: #rule-name to rule-name/.
+    addEventListener("DOMContentLoaded", () => {
+      const id = decodeURIComponent(location.hash.slice(1));
+      if (/^[a-z-]+$/.test(id) && !document.getElementById(id)) location.replace(`${id}/`);
+    });
+  </script>
+  {% endif %}
   {% if page.url == "recipes/vscode/" %}
   <script type="application/ld+json">
     {

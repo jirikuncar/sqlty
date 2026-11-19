@@ -17,7 +17,7 @@ call passes:
 A `str` and a cast parameter take anything, and `typing.Any`, an unknown type or
 an annotation `P` can't be read from are never reported. With
 `dialect = "sqlite"` only `None` is checked. A `P` that
-[`param-types`](../../../docs/reference/configuration.md#param-types) writes
+[`param-types`](../../reference/configuration.md#param-types) writes
 always fits.
 
 ## Why is this bad?

@@ -48,7 +48,7 @@ These look like bugs but follow the drivers:
 | SQLite `BOOLEAN`, and comparisons | `int` | SQLite stores booleans as the integers 0 and 1 |
 | MySQL `TIME` | `datetime.timedelta` | A MySQL `TIME` is a duration, up to 838 hours either way |
 | `BIT(n)` | `str`; `bytes` in `mysql` | psycopg loads a bit string as its text, MySQL drivers as bytes |
-| `JSON`, `JSONB` | `typing.Any` | Any JSON value can be stored. psycopg returns it parsed, PyMySQL and `sqlite3` as text; `Any` admits both, so code that decodes it keeps its [`json-shape-mismatch`](rules.md#json-shape-mismatch) checks |
+| `JSON`, `JSONB` | `typing.Any` | Any JSON value can be stored. psycopg returns it parsed, PyMySQL and `sqlite3` as text; `Any` admits both, so code that decodes it keeps its [`json-shape-mismatch`](rules/json-shape-mismatch.md) checks |
 | SQLite `UUID` | `str` | SQLite has no UUID storage class: `sqlite3` returns the stored text |
 | SQLite `ARRAY`, `T[]`, `T ARRAY`, `ARRAY_T` | `str` | SQLite has no array type: ORMs store a list as JSON text, which `sqlite3` returns. [`ARRAY = "list"`](configuration.md#types) types the decoded list |
 | SQLite `NUMERIC` affinity (`NUMERIC`, `DECIMAL`, unknown names) | `float` | `sqlite3` returns an integral value as `int`, which a type checker accepts for `float`; precision beyond a double is lost on storage, not by sqlty |
@@ -60,7 +60,7 @@ These look like bugs but follow the drivers:
 | `INET` | `ipaddress.IPv4Address \| ipaddress.IPv6Address \| ipaddress.IPv4Interface \| ipaddress.IPv6Interface` | psycopg loads an address with a prefix (`1.2.3.4/24`) as an interface |
 | `MONEY`, `XML`, `reg*`, `xid`, `tsvector` | `str` | psycopg loads them as text |
 | `INTERVAL` with a year or month part | `datetime.timedelta` | psycopg counts a year as 365 days and a month as 30 |
-| Ranges, multiranges | unknown; with [`driver = "psycopg"`](configuration.md#driver), psycopg's `Range` and `Multirange` | psycopg loads them as its own classes, which the mapping does not name unless you opt in; [`unknown-type`](rules.md#unknown-type) names them |
+| Ranges, multiranges | unknown; with [`driver = "psycopg"`](configuration.md#driver), psycopg's `Range` and `Multirange` | psycopg loads them as its own classes, which the mapping does not name unless you opt in; [`unknown-type`](rules/unknown-type.md) names them |
 | PostgreSQL geometric types (`point`, `box`, ...) | `str` | psycopg has no loader for them and returns their text |
 | `DATE 'infinity'`, MySQL `'0000-00-00'` | the column's type | Values outside Python's range: psycopg raises `DataError` for `infinity` (asyncpg and psycopg2 return `date.max`), PyMySQL returns a zero date as `str`, mysqlclient as `None` |
 | DuckDB `T[3]` | `tuple[T, ...]` | The DuckDB client returns a fixed-size `ARRAY` as a tuple, a `LIST` (`T[]`) as a list |

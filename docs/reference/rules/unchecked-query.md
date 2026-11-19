@@ -11,7 +11,7 @@ argument that holds anything besides string literals. `SQL[Any](...)`, with
 composition passed to a helper whose row type is `Any`.
 
 A psycopg composition passed to a helper is flagged too when a part is not a literal.
-With [`preview`](../../../docs/guide/query-variants.md), one built from names bound in
+With [`preview`](../../guide/query-variants.md), one built from names bound in
 branches is checked along every path instead, unless it has more variants than
 `max-query-variants`.
 

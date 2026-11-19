@@ -19,7 +19,7 @@ field is read when it passes a value:
 imports `psycopg` or `sqlty.drivers.psycopg`. Any other field, such as a
 conversion (`{value!r}`) or another format spec, is skipped. A t-string whose
 fields are all read is rewritten as `SQLTemplate[T](t"...")` and checked; see
-[t-strings](../../../docs/guide/writing-queries.md#t-strings).
+[t-strings](../../guide/writing-queries.md#t-strings).
 
 ## Why is this bad?
 
@@ -66,3 +66,5 @@ user_id = 1
 # error: [tstring-skipped] "t-string with --sql prefix skipped (the field {user_id!r} changes the SQL)"
 q = t"--sql\nSELECT id::INTEGER FROM users WHERE id = {user_id!r}"
 ```
+
+A concatenation that holds a t-string anywhere is reported the same way.

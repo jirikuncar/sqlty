@@ -32,7 +32,7 @@ users = "--sql\nSELECT id::INTEGER FROM users"
 # rewritten-file: users = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
 ```
 
-[`untyped-query`](../reference/rules.md#untyped-query) reports each `SQL[UNTYPED]`
+[`untyped-query`](../reference/rules/untyped-query.md) reports each `SQL[UNTYPED]`
 with what could not be typed: the unknown function or expression, or the untyped
 columns. `check --statistics` counts the partially typed queries the default mode
 leaves unwrapped.
@@ -58,13 +58,13 @@ deleted = "--sql\nDELETE FROM users RETURNING id::INTEGER"
 ```
 
 `sqlty check` reports nothing for them:
-[`stale-rewrite`](../reference/rules.md#stale-rewrite) covers only strings
+[`stale-rewrite`](../reference/rules/stale-rewrite.md) covers only strings
 that `rewrite` would wrap.
 
 ## The `untyped-query` rule
 
 `sqlty check` reports every `SQL[UNTYPED]` query as
-[`untyped-query`](../reference/rules.md#untyped-query) (warning by default).
+[`untyped-query`](../reference/rules/untyped-query.md) (warning by default).
 Once casts or a schema make the type known, the message names it:
 
 ```python

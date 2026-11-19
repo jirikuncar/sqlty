@@ -58,6 +58,6 @@ An error by default: the database rejects such SQL. Lower or turn it off:
 insert-missing-column = "warn"
 ```
 
-Needs a [schema](../../../docs/guide/schema-inference.md), and is judged in the
+Needs a [schema](../../guide/schema-inference.md), and is judged in the
 `postgres`, `mysql` and `sqlite` dialects. An `INSERT` without a column list
 from a query whose columns sqlty can't count is not checked.

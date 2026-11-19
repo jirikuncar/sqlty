@@ -75,8 +75,12 @@ manifest-path = "rust/crates/sqlty-ext/Cargo.toml"
 # registers the lazy "sqlty" codec lookup (see docs/guide/magic-codec.md).
 # The path is relative to the project root (maturin >= 1.12.1): the wheel gets
 # it at the root (python-source prefix stripped), the sdist at src/.
-# The Agent Skills are compiled into the extension, so only the sdist needs them.
-include = ["src/sqlty_magic.pth", { path = "skills/**/*", format = "sdist" }]
+# The Agent Skills and rule pages are compiled into the extension, so only the sdist needs them.
+include = [
+    "src/sqlty_magic.pth",
+    { path = "skills/**/*", format = "sdist" },
+    { path = "docs/reference/rules/*.md", format = "sdist" },
+]
 
 [dependency-groups]
 dev = [
@@ -116,8 +120,8 @@ bench = [
 # In parallel and in random order; `make test-timing` runs the `timing` tests alone.
 addopts = ["-p", "tests._mdtest.plugin", "-p", "tests._no_exec", "--cov-report=term-missing", "--cov-report=html", "-v", "-n", "auto", "-m", "not timing"]
 pythonpath = ["."]
-testpaths = ["tests", "docs", "src/sqlty/rules", "README.md"]
-mdtest_paths = ["tests/mdtest", "docs", "src/sqlty/rules", "README.md", "skills"]
+testpaths = ["tests", "docs", "README.md"]
+mdtest_paths = ["tests/mdtest", "docs", "README.md", "skills"]
 markers = [
     "e2e: end-to-end tests (subprocess + inline-snapshot)",
     "slow: slow tests that can be skipped with -m 'not slow'",

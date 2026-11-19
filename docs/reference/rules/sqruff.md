@@ -51,7 +51,7 @@ project:
 sqruff = "warn"
 ```
 
-sqruff's layout rules are left out: [`sqlty format`](../../../docs/guide/formatting.md)
+sqruff's layout rules are left out: [`sqlty format`](../../guide/formatting.md)
 lays out queries. sqruff reads no configuration file here, so the rules are the
 same on every machine. `# sqlty: ignore[sqruff]` on the line a query's string
 starts silences all its findings.

@@ -8,7 +8,7 @@ Reports a call to a helper (a function with an `Annotated[..., SQL]` query param
 whose query is not a string literal: a variable, a constant, a call that returns the
 query, or a concatenation. A psycopg composition is `unchecked-query` instead, and a
 helper's own query parameter forwarded to another helper is not reported: the calls of
-the outer helper are checked. With [`preview`](../../../docs/guide/query-variants.md), a
+the outer helper are checked. With [`preview`](../../guide/query-variants.md), a
 query built from literals is checked instead, along every path that builds it; a query
 with more variants than `max-query-variants` is reported here, with their count.
 

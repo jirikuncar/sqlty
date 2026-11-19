@@ -5,7 +5,8 @@ Default severity: **error**
 ## What it does
 
 Checks each field type of a user-defined row type against the type inferred
-for the matching query column.
+for the matching query column, and each extra column against a TypedDict's
+`extra_items` type.
 
 ## Why is this bad?
 
@@ -54,8 +55,9 @@ q = SQL[Row]("--sql\nSELECT id::INTEGER, total::INTEGER, active::INTEGER FROM or
 ```
 
 A `NewType` field is accepted wherever its supertype is, and a parametrised
-generic such as `list[str]` for a column that infers `list` (array element
-types are inferred but not compared):
+generic such as `list[str]` or `dict[str, int]` for a column that infers `list`
+or `dict` (element types are not compared; a JSON column infers `Any`, which
+any field accepts):
 
 ```python
 from typing import NamedTuple, NewType

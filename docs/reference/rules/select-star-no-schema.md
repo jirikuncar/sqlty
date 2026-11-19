@@ -20,5 +20,5 @@ from sqlty import SQL
 q = SQL[tuple[str]]("--sql\nSELECT * FROM users")
 ```
 
-Configure a [schema](../../../docs/guide/schema-inference.md) or list the
+Configure a [schema](../../guide/schema-inference.md) or list the
 columns with casts. The annotation is not compared with an inferred type, and `check --fix` does not change it.

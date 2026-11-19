@@ -21,7 +21,8 @@ q = "--sql SELECT id::INTEGER FROM users"
 ```
 
 Use `"--sql\nSELECT ..."`. Only a statement after the space is reported
-(`SELECT` with a column, `DELETE FROM`, `UPDATE t SET`, `CREATE TABLE`, ...),
-so text such as `"--sql flag enables it"` is not. `sqlty check --fix` makes
-the change when the string is a plain literal (not raw, f- or t-) that this
-rule reports.
+(`SELECT` with a column, `WITH ... AS (`, `INSERT INTO`, `UPDATE t SET`,
+`DELETE FROM`, `VALUES (`, DDL such as `CREATE TABLE`, `TRUNCATE`, `MERGE INTO`
+or `EXPLAIN`), so text such as `"--sql flag enables it"` is not. `sqlty check
+--fix` makes the change when the string is a plain literal (not raw, f- or t-)
+that this rule reports; `sqlty rewrite` never changes string contents.

@@ -31,7 +31,7 @@ from sqlty._lint import RULES
 from sqlty.core import check_source, rewrite_source
 
 ROOT = Path(__file__).resolve().parent.parent
-RULE_DOCS = ROOT / "src" / "sqlty" / "rules"
+RULE_DOCS = ROOT / "docs" / "reference" / "rules"
 EXAMPLES = sorted(p for p in (ROOT / "examples").glob("0*") if p.is_dir())
 # __main__ runs the CLI on import; _core is compiled and has no docstrings.
 # drivers/ is a namespace package, which walk_packages skips.
@@ -50,7 +50,9 @@ WITH_EXAMPLES = {"sqlty", "sqlty.core", "sqlty._decode"}
 def test_rules_table() -> None:
     """The table in ``docs/reference/rules.md`` lists every rule with its defaults."""
     text = (ROOT / "docs" / "reference" / "rules.md").read_text()
-    rows = re.findall(r"^\| \[`([\w-]+)`\]\(#[\w-]+\) \| [\w ]+ \| (\w+) \| (\w+) \|", text, re.M)
+    rows = re.findall(
+        r"^\| \[`([\w-]+)`\]\(rules/\1\.md\) \| [\w ]+ \| (\w+) \| (\w+) \|", text, re.M
+    )
     assert sorted(rows) == sorted(
         (r.name, r.default_severity.value, "yes" if r.fixable else "no") for r in RULES.values()
     )
@@ -96,7 +98,7 @@ def test_playground_links_hold_their_example(page: Path) -> None:
 
 def test_playground_link_of_a_rule_example() -> None:
     links = _script("playground_links")
-    text = (ROOT / "src" / "sqlty" / "rules" / "sqruff.md").read_text()
+    text = (RULE_DOCS / "sqruff.md").read_text()
     session = links.examples(text)[0]
     assert session["config"] == '[rules]\nsqruff = "warn"\n'
     assert session["source"].startswith("from sqlty import SQL\n\nquery = SQL[tuple[str, int]]")
@@ -222,7 +224,7 @@ def test_examples_are_rewritten(example: Path) -> None:
 
 MARKDOWN = sorted(
     {*ROOT.glob("*.md"), *ROOT.glob(".github/*.md"), *ROOT.glob("skills/*/SKILL.md")}
-    | {*ROOT.glob("docs/**/*.md"), *RULE_DOCS.glob("*.md"), *ROOT.glob("examples/*/README.md")}
+    | {*ROOT.glob("docs/**/*.md"), *ROOT.glob("examples/*/README.md")}
 )
 
 
@@ -364,16 +366,15 @@ def test_bump_version_writes_every_place(tmp_path: Path) -> None:
     assert drifted.stderr == "docs/recipes/ci.md: disagrees with rust/Cargo.toml\n"
 
 
-def test_rule_docs_link_to_the_site() -> None:
+def test_rule_docs_link_to_the_site(capsys: pytest.CaptureFixture[str]) -> None:
     """`sqlty rule` prints the rule pages with links a terminal user can open."""
-    from sqlty._lint import DOCS_URL, RULES, rule_doc
+    from sqlty._core import cli
+    from sqlty._lint import DOCS_URL
 
     for name in RULES:
-        for target in re.findall(r"\]\(([^)\s]+)\)", rule_doc(name)):
+        assert cli(["sqlty", "rule", name]) == 0
+        for target in re.findall(r"\]\(([^)\s]+)\)", capsys.readouterr().out):
             assert not target.endswith(".md") and ".md#" not in target, (name, target)
             if target.startswith(DOCS_URL):
-                page, _, anchor = target.removeprefix(DOCS_URL).partition("#")
-                if page == "reference/rules/":
-                    assert anchor in RULES, (name, target)
-                else:
-                    assert (ROOT / "docs" / f"{page.rstrip('/')}.md").exists(), (name, target)
+                page = target.removeprefix(DOCS_URL).partition("#")[0].rstrip("/")
+                assert (ROOT / "docs" / f"{page}.md").exists(), (name, target)

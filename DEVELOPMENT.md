@@ -51,7 +51,7 @@ SQLTy has four test layers:
 | Layer | Location | What it tests | Runner |
 |-------|----------|--------------|--------|
 | **Unit** | `tests/test_core_invariants.py`, `tests/generator/`, etc. | Invariants over the mdtest corpus, parser cases, stubs | `pytest` |
-| **mdtest** | `tests/mdtest/`, `docs/`, `src/sqlty/rules/`, `README.md` | Type inference, rewrite, strip, lint | `tests/_mdtest` plugin |
+| **mdtest** | `tests/mdtest/`, `docs/`, `README.md` | Type inference, rewrite, strip, lint | `tests/_mdtest` plugin |
 | **E2E** | `tests/e2e/` | CLI, subprocess, mypy validation | `pytest` + `inline-snapshot` |
 | **Docs** | `README.md`, `docs/**/*.md` | Code examples in user docs | `tests/test_docs.py` (mdtest engine) |
 
@@ -74,7 +74,7 @@ make bench          # sqlty.core benchmarks
 uv run pytest
 
 # Specific test layer
-uv run pytest tests/mdtest/ docs/ src/sqlty/rules/ README.md -v
+uv run pytest tests/mdtest/ docs/ README.md -v
 uv run pytest tests/ --ignore=tests/e2e --ignore=tests/mdtest
 uv run pytest tests/e2e/ -v
 
