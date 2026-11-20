@@ -65,7 +65,9 @@ CORPUS = {
 
 def clone(url: str, commit: str, into: Path) -> None:
     def git(*args: str) -> None:
-        subprocess.run(["git", *args], cwd=into, check=True, capture_output=True)
+        done = subprocess.run(["git", *args], cwd=into, capture_output=True, text=True)
+        if done.returncode:
+            raise RuntimeError(f"git {' '.join(args)}: {done.stderr.strip()}")
 
     into.mkdir(parents=True)
     git("init", "-q")
