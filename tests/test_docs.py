@@ -71,6 +71,17 @@ def test_generated_reference_is_current() -> None:
     assert not stale, f"run `make generate-docs`: {stale} out of date"
 
 
+def test_cli_reference_lists_every_command_and_option() -> None:
+    from sqlty._core import cli_reference
+
+    page = (ROOT / "docs" / "reference" / "cli.md").read_text()
+    for name, usage, options in cli_reference():
+        assert name == "sqlty" or f"## `sqlty {name}`" in page, name
+        assert f"```text\n{usage}\n```" in page, usage
+        for option, _ in options:
+            assert f"| `{option}` |" in page, (name, option)
+
+
 def _script(name: str) -> Any:
     spec = importlib.util.spec_from_file_location(name, ROOT / "scripts" / f"{name}.py")
     assert spec is not None and spec.loader is not None

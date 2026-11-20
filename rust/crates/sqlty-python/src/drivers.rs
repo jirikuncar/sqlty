@@ -79,7 +79,7 @@ pub struct DriverCall {
     pub query_span: (usize, usize),
 }
 
-/// Whether `text` can hold a driver call at all, as the Python pass decides before parsing.
+/// Whether `text` can hold a driver call at all, checked before parsing.
 pub fn may_hold(text: &str) -> bool {
     ["psycopg", "sqlite3", "aiosqlite", "asyncpg"]
         .iter()
