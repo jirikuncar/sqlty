@@ -98,7 +98,7 @@ KINDS: list[tuple[str, str, list[tuple[str, str]] | None, str | None]] = [
     ),
     (
         "subquery",
-        "SELECT id, name FROM {t} WHERE id IN (SELECT parent_id FROM {t} WHERE parent_id IS NOT NULL)",
+        "SELECT id, name FROM {p} WHERE id IN (SELECT parent_id FROM {t} WHERE parent_id IS NOT NULL)",
         [("id", "int"), ("name", "str")],
         None,
     ),

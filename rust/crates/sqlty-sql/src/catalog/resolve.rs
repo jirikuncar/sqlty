@@ -379,6 +379,7 @@ impl<'a> Resolver<'a> {
             default: None,
             generated: None,
             primary_key: false,
+            foreign_key: false,
             allowed_values: resolved.allowed_values.cloned(),
             invisible: false,
         }
@@ -395,6 +396,10 @@ impl<'a> Resolver<'a> {
                     .map(|c| {
                         let mut column = SchemaColumn {
                             primary_key: c.primary_key,
+                            foreign_key: table
+                                .foreign_keys
+                                .iter()
+                                .any(|fk| fk.key.columns.contains(&c.name)),
                             invisible: c.invisible,
                             default: c.default.clone(),
                             generated: c
@@ -442,6 +447,7 @@ impl<'a> Resolver<'a> {
                     .filter(|fk| fk.immediate && fk.validated)
                     .map(|fk| fk.key.clone())
                     .collect(),
+                declared_foreign_keys: table.foreign_keys.iter().map(|fk| fk.key.clone()).collect(),
                 // A key naming a dropped or renamed column no longer holds.
                 unique: table
                     .unique
@@ -589,6 +595,7 @@ fn view_column(column: &crate::analyzer::Column) -> SchemaColumn {
         default: None,
         generated: None,
         primary_key: false,
+        foreign_key: false,
         allowed_values: None,
         values: column.values.clone(),
         invisible: false,

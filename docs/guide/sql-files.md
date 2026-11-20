@@ -68,6 +68,15 @@ Placeholders inside strings and comments are left alone.
 SELECT id, nme FROM users WHERE id = $1;
 ```
 
+sqlc's [`sqlc.embed(t)`](https://docs.sqlc.dev/en/latest/howto/embedding.html) is the
+row of the table or alias `t` of the `FROM` clause:
+
+```sql
+-- name: GetUserTeam :one
+-- error: [unknown-table] "`tm` in `sqlc.embed(tm)` is not a table or alias in the FROM clause"
+SELECT sqlc.embed(u), sqlc.embed(tm) FROM users u WHERE u.id = $1;
+```
+
 ## What is checked
 
 The [name rules](../reference/rules.md#rule-groups) (`unknown-table`,
