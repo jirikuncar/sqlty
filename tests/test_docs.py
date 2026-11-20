@@ -28,7 +28,7 @@ from pygments.lexers import get_lexer_by_name
 import sqlty
 from sqlty._config import load_config
 from sqlty._lint import RULES
-from sqlty.core import check_source, rewrite_source
+from sqlty.core import Settings, check_source, rewrite_source
 
 ROOT = Path(__file__).resolve().parent.parent
 RULE_DOCS = ROOT / "docs" / "reference" / "rules"
@@ -101,10 +101,12 @@ def test_playground_links_hold_their_example(page: Path) -> None:
         settings = tomllib.loads(session["config"])
         check_source(
             session["source"],
-            dialect=session["dialect"],
-            schema_sql=session["schema"] or None,
-            rules=settings.get("rules"),
-            import_style=settings.get("import-style"),
+            Settings(
+                dialect=session["dialect"],
+                schema_sql=session["schema"] or None,
+                rules=settings.get("rules"),
+                import_style=settings.get("import-style"),
+            ),
         )
 
 
@@ -114,7 +116,7 @@ def test_playground_link_of_a_rule_example() -> None:
     session = links.examples(text)[0]
     assert session["config"] == '[rules]\nsqruff = "warn"\n'
     assert session["source"].startswith("from sqlty import SQL\n\nquery = SQL[tuple[str, int]]")
-    found = check_source(session["source"], rules={"sqruff": "warn"})
+    found = check_source(session["source"], Settings(rules={"sqruff": "warn"}))
     assert [d["rule"] for d in found] == ["sqruff"]
     html = '<div class="language-python highlight"><pre><code>q</code></pre></div>'
     linked = links.link(html, [None, session], "../")
@@ -236,15 +238,15 @@ def test_examples_are_rewritten(example: Path) -> None:
     """Each example is current under its own ``[tool.sqlty]``."""
     config, config_dir = load_config(example)
     schema = config.get("schema")
-    options = {
-        "dialect": config.get("dialect", "postgres"),
-        "schema_sql": (config_dir / schema).read_text() if config_dir and schema else None,
-        "import_style": config.get("import_style"),
-    }
+    settings = Settings(
+        dialect=config.get("dialect", "postgres"),
+        schema_sql=(config_dir / schema).read_text() if config_dir and schema else None,
+        import_style=config.get("import_style"),
+    )
     for path in sorted(example.glob("*.py")):
         source = path.read_text()
-        assert rewrite_source(source, **options) == source, f"{path}: run sqlty rewrite"
-        stale = [d for d in check_source(source, **options) if str(d["rule"]).startswith("stale-")]
+        assert rewrite_source(source, settings) == source, f"{path}: run sqlty rewrite"
+        stale = [d for d in check_source(source, settings) if str(d["rule"]).startswith("stale-")]
         assert not stale, f"{path}: {stale}"
 
 
