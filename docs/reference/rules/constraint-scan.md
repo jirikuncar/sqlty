@@ -15,8 +15,8 @@ Default severity: **warn**
 
 Reports a new statement that makes PostgreSQL check every existing row while it
 holds a lock that blocks writes: a `FOREIGN KEY` or `CHECK` constraint added
-without `NOT VALID`, and `SET NOT NULL` on a column without a validated
-`CHECK (column IS NOT NULL)`.
+without `NOT VALID`, an `EXCLUDE` constraint, which has no `NOT VALID`, and
+`SET NOT NULL` on a column without a validated `CHECK (column IS NOT NULL)`.
 
 `against.sql`:
 

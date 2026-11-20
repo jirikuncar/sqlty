@@ -71,3 +71,26 @@ INSERT INTO users_archive SELECT * FROM users;
 -- error: [missing-concurrently] "`CREATE INDEX` blocks writes to `users_archive`"
 CREATE INDEX users_archive_email ON users_archive (email);
 ```
+
+## TRUNCATE CASCADE of a table no foreign key references
+
+```sql migration
+SET lock_timeout = '1s';
+-- error:
+TRUNCATE users CASCADE;
+```
+
+## A new enum value in a column list that doesn't name its type
+
+```sql migration
+BEGIN;
+SET LOCAL lock_timeout = '1s';
+CREATE TYPE mood AS ENUM ('ok');
+ALTER TABLE users ADD COLUMN mood mood;
+COMMIT;
+BEGIN;
+ALTER TYPE mood ADD VALUE 'meh';
+-- error:
+UPDATE "users" SET email = 'meh' WHERE id = 1;
+COMMIT;
+```

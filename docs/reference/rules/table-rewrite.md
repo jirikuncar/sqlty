@@ -17,7 +17,7 @@ Reports a new statement that rewrites a table that already has rows:
 `ADD COLUMN` with a volatile default (`gen_random_uuid()`, `random()`,
 `clock_timestamp()`, `nextval()`...), a `serial` type, an identity column or a
 stored generated column; `ALTER COLUMN ... TYPE` to a type that needs a rewrite;
-`VACUUM FULL` and `CLUSTER`.
+`SET LOGGED`, `SET UNLOGGED` and `SET TABLESPACE`; `VACUUM FULL` and `CLUSTER`.
 
 `against.sql`:
 

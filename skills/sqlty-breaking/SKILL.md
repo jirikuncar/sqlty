@@ -62,6 +62,10 @@ migrations/0042_index.sql:2: [missing-concurrently] `CREATE INDEX` blocks writes
 | `table-rewrite` | add the column without a volatile default and backfill; change a type through a new column |
 | `add-required-column` | add the column nullable or with a constant `DEFAULT` |
 | `missing-lock-timeout` | start the migration with `SET lock_timeout = '2s';` |
+| `truncate-cascade` | name every table to empty: `TRUNCATE a, b;` |
+| `enum-value-in-transaction` | `COMMIT` after `ALTER TYPE ... ADD VALUE`, then use the value |
+| `concurrent-index-if-not-exists` | `DROP INDEX CONCURRENTLY IF EXISTS`, then `CREATE INDEX CONCURRENTLY` without `IF NOT EXISTS` |
+| `disable-trigger-all` | `DISABLE TRIGGER USER` or name the triggers |
 
 ## A dropped column
 
