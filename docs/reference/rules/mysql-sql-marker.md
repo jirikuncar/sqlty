@@ -1,9 +1,9 @@
 ---
-order: 160
+order: 130
 group: "query"
 severity: "warn"
 fixable: true
-summary: "MySQL rejects the \"--sql\" marker; use \"-- sql\""
+summary: "--sql marker with the MySQL dialect, which MySQL rejects; run sqlty check --fix"
 origin: "Python"
 ---
 
