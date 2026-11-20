@@ -18,8 +18,9 @@ holds a lock that blocks writes: a `FOREIGN KEY` or `CHECK` constraint added
 without `NOT VALID`, an `EXCLUDE` constraint, which has no `NOT VALID`,
 `SET NOT NULL` on a column without a validated `CHECK (column IS NOT NULL)`,
 `ATTACH PARTITION` of a table without a validated `CHECK` on the partition key
-and a `NOT NULL` key, and a new partition of a table that has a default
-partition, which PostgreSQL scans for rows of the new one.
+(more than `IS NOT NULL`) and a `NOT NULL` key, always for a hash or expression
+key, and a new partition of a table whose default partition has no such `CHECK`,
+which PostgreSQL scans for rows of the new one.
 
 `against.sql`:
 
