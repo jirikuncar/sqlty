@@ -634,16 +634,18 @@ impl Model {
             .windows(2)
             .any(|pair| matches!(pair[0].as_str(), "::" | "as") && pair[1] == short);
         let positional = match parse(stmt) {
-            Some((Statement::Insert(insert), _)) if insert.columns.is_empty() => {
-                match &insert.table {
-                    TableObject::TableName(table) => {
-                        let table = key(table);
-                        self.types
-                            .keys()
-                            .any(|column| column.0 == table && typed(column))
-                    }
-                    _ => false,
-                }
+            Some((
+                Statement::Insert(Insert {
+                    table: TableObject::TableName(table),
+                    columns,
+                    ..
+                }),
+                _,
+            )) if columns.is_empty() => {
+                let table = key(&table);
+                self.types
+                    .keys()
+                    .any(|column| column.0 == table && typed(column))
             }
             _ => false,
         };
@@ -869,14 +871,13 @@ impl Model {
         let short = table.rsplit('.').next().unwrap_or(table);
         let keyed = |column: &Expr| match column {
             Expr::Identifier(column) => self.keys.contains(&(table.to_string(), name(column))),
-            Expr::CompoundIdentifier(parts) => match parts.as_slice() {
-                [.., qualifier, column] => {
-                    let qualifier = name(qualifier);
-                    (qualifier == short || target.alias.as_ref() == Some(&qualifier))
-                        && self.keys.contains(&(table.to_string(), name(column)))
-                }
-                _ => false,
-            },
+            Expr::CompoundIdentifier(parts) => {
+                let mut parts = parts.iter().rev().map(name);
+                let (column, qualifier) = (parts.next(), parts.next());
+                qualifier.is_some_and(|qualifier| {
+                    qualifier == short || target.alias.as_ref() == Some(&qualifier)
+                }) && column.is_some_and(|column| self.keys.contains(&(table.to_string(), column)))
+            }
             _ => false,
         };
         let literal = |value: &Expr| matches!(value, Expr::Value(_));
@@ -2239,7 +2240,8 @@ mod tests {
             CREATE TABLE bounded (at date NOT NULL, price int, CHECK (at >= '2026-10-01'));
             CREATE TABLE nullable (at date, CHECK (at >= '2026-10-01'));
             CREATE TABLE proven (at date CHECK (at IS NOT NULL), CHECK (at >= '2026-10-01'));
-            CREATE TABLE bare (at date);";
+            CREATE TABLE bare (at date);
+            CREATE TABLE keyed (at date, PRIMARY KEY (at), CHECK (at >= '2026-10-01'));";
         let bounds = "FOR VALUES FROM ('2026-10-01') TO ('2026-11-01')";
         let validated = "ALTER TABLE open ADD CONSTRAINT b CHECK (at >= '2026-10-01') NOT VALID;
             ALTER TABLE open VALIDATE CONSTRAINT b;";
@@ -2254,6 +2256,8 @@ mod tests {
                 &[Rule::ConstraintScan],
             ),
             ("", "proven", &[]),
+            ("ALTER TABLE keyed DROP CONSTRAINT gone;", "keyed", &[]),
+            ("ALTER TABLE bare DROP CONSTRAINT gone;", "bare", &[Rule::ConstraintScan]),
             (
                 "ALTER TABLE bare ADD CONSTRAINT nn CHECK (at IS NOT NULL) NOT VALID; ALTER TABLE bare VALIDATE CONSTRAINT nn;",
                 "bare",
@@ -2523,6 +2527,28 @@ mod tests {
             let found = rules(against, &migration);
             let found: Vec<_> = found.into_iter().filter(|rule| *rule == DropPrimaryKey).collect();
             assert_eq!(found, expected, "{migration}");
+        }
+    }
+
+    #[test]
+    fn only_single_column_keys_bound_a_backfill() {
+        use Rule::*;
+        let baseline = format!("{USERS} CREATE TABLE pairs (a int, b int, PRIMARY KEY (a, b));");
+        let indexes = "CREATE UNIQUE INDEX CONCURRENTLY users_team_email ON users (team_id, email);
+            CREATE UNIQUE INDEX CONCURRENTLY users_lower_email ON users (lower(email));";
+        for (migration, expected) in [
+            (
+                "BEGIN; ALTER TABLE users ADD COLUMN a int; ALTER TABLE teams ADD COLUMN b int; ALTER TABLE pairs ADD COLUMN c int; COMMIT;",
+                &[MultiTableLock][..],
+            ),
+            ("UPDATE pairs SET b = 1 WHERE a = 1", &[UnbatchedBackfill]),
+            (&format!("{indexes} UPDATE users SET bio = '' WHERE team_id = 1"), &[UnbatchedBackfill]),
+            (&format!("{indexes} UPDATE users SET bio = '' WHERE lower(email) = 'x'"), &[UnbatchedBackfill]),
+            ("UPDATE users SET bio = '' WHERE (id BETWEEN 1 AND 9)", &[]),
+            ("UPDATE (SELECT * FROM users) AS u SET bio = ''", &[]),
+        ] {
+            let migration = format!("SET lock_timeout = '1s'; {migration}");
+            assert_eq!(rules(&baseline, &migration), expected, "{migration}");
         }
     }
 
