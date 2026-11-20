@@ -15,8 +15,9 @@ use std::ops::{ControlFlow, Range};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use sqlparser::ast::{
-    AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, DataType,
-    DetachPartitionMode, Expr, ObjectName, ObjectType, Statement, TableConstraint,
+    AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, CopySource, DataType,
+    DetachPartitionMode, Expr, Insert, ObjectName, ObjectType, SetExpr, Statement, TableConstraint,
+    TableObject,
 };
 
 use crate::analyzer::{parse_ddl, SqlDialect};
@@ -69,8 +70,8 @@ pub fn check(baseline: &str, files: &[&str]) -> Vec<Vec<Finding>> {
     let mut model = Model::default();
     for stmt in ddl::statements(baseline, false) {
         *model.applied.entry(stmt.normalized()).or_default() += 1;
-        if let Some(parsed) = model.parse_if_shaping(&stmt) {
-            model.apply(&parsed);
+        if let Some((parsed, likes)) = model.parse_if_shaping(&stmt) {
+            model.apply(&parsed, &likes);
         }
     }
     files.iter().map(|sql| model.file(sql)).collect()
@@ -120,8 +121,7 @@ impl Model {
                 }
                 _ => true,
             };
-            let parsed = parse_ddl(&stmt.sql(), SqlDialect::Postgres)
-                .and_then(|stmts| stmts.into_iter().next());
+            let (parsed, likes) = parse(&stmt).unzip();
             if new {
                 let mut report = |rule: Rule, message: String| {
                     found.push(Finding {
@@ -152,15 +152,18 @@ impl Model {
                     self.created.insert(created);
                 }
             }
+            if let Some(filled) = parsed.as_ref().and_then(filled) {
+                self.created.remove(&filled);
+            }
             if let Some(parsed) = &parsed {
-                self.apply(parsed);
+                self.apply(parsed, &likes.unwrap_or_default());
             }
         }
         found
     }
 
     /// The statement parsed, when it can change a column type or a `NOT NULL` check.
-    fn parse_if_shaping(&self, stmt: &Raw) -> Option<Statement> {
+    fn parse_if_shaping(&self, stmt: &Raw) -> Option<(Statement, Vec<String>)> {
         let tokens = stmt.tokens();
         let shaping = match tokens.as_slice() {
             [create, ..] if create.eq_ignore_ascii_case("create") => stmt.is_create_table(),
@@ -172,17 +175,23 @@ impl Model {
         if !shaping {
             return None;
         }
-        parse_ddl(&stmt.sql(), SqlDialect::Postgres)?
-            .into_iter()
-            .next()
+        parse(stmt)
     }
 
-    /// Record the columns and checks `stmt` defines.
-    fn apply(&mut self, stmt: &Statement) {
+    /// Record the columns and checks `stmt` defines, with those of the tables it copies with
+    /// `LIKE`.
+    fn apply(&mut self, stmt: &Statement, likes: &[String]) {
         match stmt {
             Statement::CreateTable(create) => {
                 let table = key(&create.name);
                 self.tables.insert(table.clone());
+                let copied: Vec<_> = self
+                    .types
+                    .iter()
+                    .filter(|((source, _), _)| likes.contains(source))
+                    .map(|((_, column), ty)| ((table.clone(), column.clone()), ty.clone()))
+                    .collect();
+                self.types.extend(copied);
                 for column in &create.columns {
                     self.types.insert(
                         (table.clone(), name(&column.name)),
@@ -656,12 +665,49 @@ fn is_dump(sql: &str) -> bool {
         .any(|line| line == "-- PostgreSQL database dump")
 }
 
-/// The table, materialized view or index `stmt` creates.
+/// `stmt` parsed, with the tables a `CREATE TABLE` copies with `LIKE`, whose `INCLUDING`
+/// options sqlparser does not read.
+fn parse(stmt: &Raw) -> Option<(Statement, Vec<String>)> {
+    let (sql, likes) = stmt
+        .is_create_table()
+        .then(|| stmt.without_like())
+        .flatten()
+        .unwrap_or_else(|| (stmt.sql(), Vec::new()));
+    let parsed = parse_ddl(&sql, SqlDialect::Postgres)?.into_iter().next()?;
+    let likes = likes
+        .into_iter()
+        .map(|parts| match parts.as_slice() {
+            [schema, rest @ ..] if schema == "public" && !rest.is_empty() => rest.join("."),
+            _ => parts.join("."),
+        })
+        .collect();
+    Some((parsed, likes))
+}
+
+/// The empty table, materialized view or index `stmt` creates.
 fn created(stmt: &Statement) -> Option<String> {
     match stmt {
-        Statement::CreateTable(create) => Some(key(&create.name)),
+        Statement::CreateTable(create) if create.query.is_none() => Some(key(&create.name)),
         Statement::CreateView(view) if view.materialized => Some(key(&view.name)),
         Statement::CreateIndex(index) => index.name.as_ref().map(key),
+        _ => None,
+    }
+}
+
+/// The table `stmt` copies rows into from a query or a file: `INSERT ... VALUES` adds only the
+/// rows it lists.
+fn filled(stmt: &Statement) -> Option<String> {
+    match stmt {
+        Statement::Insert(Insert {
+            table: TableObject::TableName(table),
+            source: Some(source),
+            ..
+        }) if !matches!(*source.body, SetExpr::Values(_)) => Some(key(table)),
+        Statement::Copy {
+            source: CopySource::Table { table_name, .. },
+            to: false,
+            ..
+        } => Some(key(table_name)),
         _ => None,
     }
 }
@@ -841,6 +887,62 @@ mod tests {
         assert_eq!(rules(USERS, migration), []);
         let quoted = r#"CREATE TABLE "T" (id int); CLUSTER "T"; CLUSTER t;"#;
         assert_eq!(rules(USERS, quoted), [Rule::TableRewrite]);
+    }
+
+    #[test]
+    fn a_table_copied_with_like_is_new() {
+        for like in [
+            "LIKE users",
+            "LIKE public.users INCLUDING DEFAULTS INCLUDING CONSTRAINTS",
+            "LIKE users INCLUDING ALL, extra int",
+            "LIKE users EXCLUDING INDEXES",
+        ] {
+            let migration = format!(
+                "CREATE TABLE t ({like});
+                CREATE INDEX t_bio ON t (bio);
+                ALTER TABLE t ALTER COLUMN bio SET NOT NULL;"
+            );
+            assert_eq!(rules(USERS, &migration), [], "{like}");
+        }
+    }
+
+    #[test]
+    fn a_table_copies_the_column_types_of_its_like_source() {
+        let migration = "CREATE TABLE t (LIKE users INCLUDING ALL);
+            INSERT INTO t SELECT * FROM users;
+            SET lock_timeout = '1s';
+            ALTER TABLE t ALTER COLUMN email TYPE varchar(200);
+            ALTER TABLE t ALTER COLUMN email TYPE varchar(50);";
+        assert_eq!(rules(USERS, migration), [Rule::TableRewrite]);
+    }
+
+    #[test]
+    fn rows_copied_into_a_new_table_end_its_exemption() {
+        use Rule::*;
+        for (fill, expected) in [
+            (
+                "INSERT INTO t SELECT * FROM users",
+                &[MissingConcurrently][..],
+            ),
+            (
+                "INSERT INTO public.t (id) SELECT id FROM users",
+                &[MissingConcurrently],
+            ),
+            ("COPY t FROM '/tmp/t.csv'", &[MissingConcurrently]),
+            ("INSERT INTO t VALUES (1), (2)", &[]),
+            ("COPY t TO '/tmp/t.csv'", &[]),
+            ("INSERT INTO users SELECT * FROM users", &[]),
+        ] {
+            let migration = format!(
+                "SET lock_timeout = '1s';
+                CREATE TABLE t (id int);
+                {fill};
+                CREATE INDEX t_id ON t (id);"
+            );
+            assert_eq!(rules(USERS, &migration), expected, "{fill}");
+        }
+        let created_as = "CREATE TABLE t AS SELECT id FROM users; CREATE INDEX t_id ON t (id);";
+        assert_eq!(rules(USERS, created_as), [MissingConcurrently]);
     }
 
     #[test]

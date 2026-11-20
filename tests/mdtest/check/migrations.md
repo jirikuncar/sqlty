@@ -53,3 +53,21 @@ CREATE INDEX users_email ON public.users USING btree (email);
 -- error:
 ALTER TABLE ONLY public.users ADD CONSTRAINT users_team FOREIGN KEY (team_id) REFERENCES public.users(id);
 ```
+
+## A table copied with `LIKE` is new
+
+```sql migration
+-- error:
+CREATE TABLE users_archive (LIKE users INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
+CREATE INDEX users_archive_email ON users_archive (email);
+```
+
+## Rows copied into a new table
+
+```sql migration
+SET lock_timeout = '1s';
+CREATE TABLE users_archive (LIKE users INCLUDING ALL);
+INSERT INTO users_archive SELECT * FROM users;
+-- error: [missing-concurrently] "`CREATE INDEX` blocks writes to `users_archive`"
+CREATE INDEX users_archive_email ON users_archive (email);
+```
