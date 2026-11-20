@@ -206,9 +206,9 @@ pub(super) const MAX_SCHEMA_COLUMNS: usize = 1 << 21;
 /// schema's own length.
 pub(super) const MAX_RETRIED: usize = 1 << 24;
 
-/// The most columns the loader writes: each `ALTER` or index on a table resolves all its
-/// columns again, so a short schema could otherwise take minutes. Real ones write a few
-/// hundred thousand.
+/// The most columns the loader writes, counting a table's width for each `ALTER` or index
+/// on it: the statements that copy the table could otherwise take a short schema minutes.
+/// Real ones write a few hundred thousand.
 pub(super) const MAX_WRITTEN: usize = 1 << 22;
 
 impl Loader {
