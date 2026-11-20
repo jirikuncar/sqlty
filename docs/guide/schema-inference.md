@@ -452,10 +452,10 @@ The [magic codec](magic-codec.md) never uses a schema.
 The Python type of each SQL type, per dialect, is listed in
 [Type mapping](../reference/types.md).
 
-The dialect decides how queries and the schema are parsed. Choose
-`postgres` (default), `sqlite` or `mysql` with `dialect` in `[tool.sqlty]` or
-`--dialect` on the command line, which overrides `pyproject.toml`. Other
-[dialects](../reference/engine.md#dialects) can be set in `pyproject.toml`.
+The dialect decides how queries and the schema are parsed: `postgres` (default),
+`sqlite`, `mysql`, or another [dialect](../reference/engine.md#dialects) on a
+best-effort basis. Set it with `dialect` in `[tool.sqlty]` or `--dialect` on the
+command line, which overrides `pyproject.toml`.
 
 ### SQLite
 
