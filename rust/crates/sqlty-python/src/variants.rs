@@ -531,7 +531,7 @@ struct Module<'a> {
     frame: Rc<Frame<'a>>,
 }
 
-/// `_Frame`: a function (or the module) whose bindings a walk follows.
+/// A function (or the module) whose bindings a walk follows.
 struct Frame<'a> {
     source: &'a Source,
     body: &'a [Stmt],
@@ -678,7 +678,7 @@ enum Operand<'a, 'n> {
     Name(&'n str),
 }
 
-/// `_Walk`: paths through function bodies, and the values of expressions along them.
+/// Paths through function bodies, and the values of expressions along them.
 struct Walk<'a, 'r> {
     resolve: Option<Resolver<'a, 'r>>,
     composed: bool,
