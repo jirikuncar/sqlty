@@ -3,7 +3,19 @@
 import pytest
 
 from sqlty import _core
-from sqlty.core import json_shapes
+from sqlty._lint import NAME_RULES
+from sqlty.core import check_source
+from tests._json_shapes import json_shapes
+
+ALL_NAME_RULES = dict.fromkeys(NAME_RULES, "warn")
+
+
+def _name_rules(sql: str, dialect: str, schema: str) -> list[str]:
+    """The name rules ``check`` reports on ``sql``, every one of them turned on."""
+    source = f"q = {'--sql\n' + sql!r}\n"
+    found = check_source(source, dialect=dialect, schema_sql=schema, rules=ALL_NAME_RULES)
+    return [d["rule"] for d in found if d["rule"] in NAME_RULES]
+
 
 SCHEMA = "CREATE TABLE t (a INT NOT NULL, b TEXT); CREATE VIEW v AS SELECT * FROM nope;"
 # fmt: off
@@ -51,8 +63,7 @@ def test_shapes(dialect: str, sql: str, columns: str, rules: list[str]) -> None:
     found = _core.analyze_select(sql, dialect=dialect, schema_sql=SCHEMA)
     assert found is not None
     assert ", ".join(f"{name}: {python}" for name, python, _ in found) == columns
-    diagnostics = _core.query_diagnostics(sql, dialect=dialect, schema_sql=SCHEMA)
-    assert [rule for rule, *_ in diagnostics] == rules
+    assert _name_rules(sql, dialect, SCHEMA) == rules
 
 
 @pytest.mark.parametrize(
@@ -132,7 +143,7 @@ EXPRESSIONS = [
     ("postgres", "SELECT COALESCE(c, vb) AS x, CASE WHEN i > 0 THEN c ELSE vb END AS y FROM f", "x: int | None, y: int | None", []),
     ("mysql", "SELECT CONCAT(tx, i) AS x FROM f", "x: str | None", []),
     ("postgres", "SELECT (SELECT 1) AS x FROM c LEFT JOIN p ON p.id = c.pid", "x: int", []),
-    ("postgres", "SELECT p.name AS x FROM c LEFT JOIN p ON c.pid = c.id", "x: str | None", ["foreign-key-mismatch", "entity-mismatch"]),
+    ("postgres", "SELECT p.name AS x FROM c LEFT JOIN p ON c.pid = c.id", "x: str | None", ["foreign-key-mismatch"]),
     ("postgres", "SELECT (SELECT DISTINCT p.name FROM p WHERE p.id = c.pid) AS x FROM c", "x: str | None", []),
     ("postgres", "WITH w AS (SELECT * FROM p) SELECT (SELECT w.name FROM w WHERE w.id = c.pid) AS x FROM c", "x: str | None", []),
     ("postgres", "SELECT (SELECT p.name FROM p WHERE p.id = p.id) AS x FROM c", "x: str | None", []),
@@ -291,8 +302,7 @@ def test_expressions(dialect: str, sql: str, columns: str, rules: list[str]) -> 
     found = _core.analyze_select(sql, dialect=dialect, schema_sql=schema)
     assert found is not None
     assert ", ".join(f"{name}: {python}" for name, python, _ in found) == columns
-    diagnostics = _core.query_diagnostics(sql, dialect=dialect, schema_sql=schema)
-    assert [rule for rule, *_ in diagnostics] == rules
+    assert _name_rules(sql, dialect, schema) == rules
 
 
 STATEMENT_SCHEMAS = {
@@ -330,8 +340,7 @@ def test_statements(dialect: str, sql: str, columns: str | None, rules: list[str
     schema = STATEMENT_SCHEMAS[dialect]
     found = _core.analyze_select(sql, dialect=dialect, schema_sql=schema)
     assert (found and ", ".join(f"{name}: {python}" for name, python, _ in found)) == columns
-    diagnostics = _core.query_diagnostics(sql, dialect=dialect, schema_sql=schema)
-    assert [rule for rule, *_ in diagnostics] == rules
+    assert _name_rules(sql, dialect, schema) == rules
 
 
 PARAMS_SCHEMA = (

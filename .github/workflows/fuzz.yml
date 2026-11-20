@@ -57,7 +57,7 @@ jobs:
         run: uv sync --no-install-project --no-dev --extra psycopg
 
       - name: Install Rust toolchain
-        run: rustup toolchain install 1.99.1 --profile minimal && rustup default 1.99.1
+        run: rustup toolchain install
 
       - name: Build the property tests
         run: cargo test --release --manifest-path rust/fuzz/Cargo.toml --test properties --no-run

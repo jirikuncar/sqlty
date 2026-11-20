@@ -253,6 +253,33 @@ from sqlty import SQL
 a = SQL[tuple[str]]("--sql\nSELECT w.code FROM stock s JOIN warehouses w ON w.code = s.code AND w.region IN ('eu') AND s.region IN ('eu')")
 ```
 
+Equal through other columns, constants or parameters, as a tenant compared with a
+third table's is; `IS NOT DISTINCT FROM` reads as `=`, and a cast column as itself:
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[str]]("--sql\nSELECT w.code FROM stock s JOIN stock t ON t.region = s.region JOIN warehouses w ON w.region = t.region AND w.code = s.code")
+b = SQL[tuple[str]]("--sql\nSELECT w.code FROM stock s JOIN warehouses w ON w.code = s.code AND w.region = :r WHERE :r = s.region")
+c = SQL[tuple[str]]("--sql\nSELECT w.code FROM stock s JOIN warehouses w ON w.region IS NOT DISTINCT FROM s.region AND w.code = s.code")
+d = SQL[tuple[str]]("--sql\nSELECT w.code FROM stock s JOIN warehouses w ON w.region::text = s.region AND w.code = s.code::text")
+e = SQL[tuple[str]]("--sql\nSELECT s.code FROM stock s WHERE s.code IN (SELECT w.code FROM warehouses w WHERE w.region = s.region)")
+f = SQL[tuple[str]]("--sql\nSELECT s.code FROM stock s WHERE s.code IN (SELECT w.code FROM warehouses w WHERE w.region IS NOT DISTINCT FROM s.region)")
+g = SQL[tuple[str]]("--sql\nSELECT s.code FROM stock s WHERE s.region = 'eu' AND s.code IN (SELECT code FROM warehouses WHERE 'eu' = region)")
+```
+
+A term read as no comparison that relates both rows may compare the rest of the key:
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[str]]("--sql\nSELECT w.code FROM stock s JOIN warehouses w ON w.region = s.region AND lower(w.code) = lower(s.code)")
+b = SQL[tuple[str]]("--sql\nSELECT w.code FROM stock s JOIN warehouses w ON w.region = s.region AND COALESCE(w.code = s.code, false)")
+c = SQL[tuple[str]]("--sql\nSELECT w.code FROM stock s JOIN warehouses w ON CASE WHEN s.code = w.code THEN w.region = s.region END")
+```
+
 ### Reported
 
 Columns swapped:
@@ -314,6 +341,15 @@ b = SQL[tuple[str]]("--sql\nSELECT w.code FROM stock s JOIN warehouses w ON w.co
 c = SQL[tuple[str]]("--sql\nSELECT w.code FROM stock s JOIN warehouses w ON w.code = s.code AND w.region = NULL AND s.region = NULL")
 ```
 
+A correlated subquery compares the rest of the key only when it selects it for `IN`:
+
+```python
+from sqlty import SQL
+
+# error: [foreign-key-mismatch] "stock (region, code) references warehouses (region, code), compared with w on region only"
+a = SQL[tuple[int]]("--sql\nSELECT 1 FROM stock s WHERE EXISTS (SELECT 1 FROM warehouses w WHERE w.region = s.region)")
+```
+
 ### A self-referencing composite key
 
 `schema.sql`:
@@ -335,6 +371,54 @@ from sqlty import SQL
 
 # error: [foreign-key-mismatch] "nodes (tree, parent_id) references nodes (tree, id), compared with p on parent_id only"
 a = SQL[tuple[int]]("--sql\nSELECT 1 FROM nodes n JOIN nodes p ON p.id = n.parent_id")
+```
+
+## Keys sharing a tenant column
+
+Every key of a multi-tenant schema starts with the tenant. `t.tenant_id = u.tenant_id`
+compares that part of each key, and a complete key compared elsewhere ties the rows.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (tenant_id INTEGER, id INTEGER, PRIMARY KEY (tenant_id, id));
+CREATE TABLE projects (
+    tenant_id INTEGER, id INTEGER, owner_id INTEGER,
+    PRIMARY KEY (tenant_id, id),
+    FOREIGN KEY (tenant_id, owner_id) REFERENCES users (tenant_id, id)
+);
+CREATE TABLE tasks (
+    tenant_id INTEGER, id INTEGER, project_id INTEGER, assignee_id INTEGER,
+    PRIMARY KEY (tenant_id, id),
+    FOREIGN KEY (tenant_id, project_id) REFERENCES projects (tenant_id, id),
+    FOREIGN KEY (tenant_id, assignee_id) REFERENCES users (tenant_id, id)
+);
+```
+
+### Allowed
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int]]("--sql\nSELECT t.id FROM tasks t JOIN projects p ON p.tenant_id = t.tenant_id AND p.id = t.project_id JOIN users u ON u.tenant_id = p.tenant_id AND u.id = p.owner_id")
+b = SQL[tuple[int]]("--sql\nSELECT t.id FROM tasks t JOIN projects p ON p.tenant_id = t.tenant_id AND p.id = t.project_id JOIN users u ON u.tenant_id = t.tenant_id AND u.id = p.owner_id")
+c = SQL[tuple[int]]("--sql\nSELECT t.id FROM tasks t WHERE t.assignee_id IN (SELECT u.id FROM users u WHERE u.tenant_id = t.tenant_id)")
+d = SQL[tuple[int]]("--sql\nSELECT t.id FROM tasks t WHERE t.tenant_id = $1 AND t.assignee_id IN (SELECT id FROM users WHERE tenant_id = $1)")
+e = SQL[tuple[int]]("--sql\nSELECT t.id FROM tasks t JOIN projects p ON p.tenant_id = t.tenant_id AND t.assignee_id = p.owner_id")
+```
+
+### Reported
+
+The rest of the key against no row, or a `?` written twice, which binds two parameters:
+
+```python
+from sqlty import SQL
+
+# error: [foreign-key-mismatch] "tasks (tenant_id, assignee_id) references users (tenant_id, id), compared with u on assignee_id only"
+a = SQL[tuple[int]]("--sql\nSELECT t.id FROM tasks t JOIN users u ON u.id = t.assignee_id")
+# error: [foreign-key-mismatch] "tasks (tenant_id, assignee_id) references users (tenant_id, id), compared with users on assignee_id only"
+b = SQL[tuple[int]]("--sql\nSELECT t.id FROM tasks t WHERE t.tenant_id = ? AND t.assignee_id IN (SELECT id FROM users WHERE tenant_id = ?)")
 ```
 
 ## Tuples with `IN`
@@ -554,6 +638,33 @@ from sqlty import SQL
 
 # error: [foreign-key-mismatch] "stock (region, code) references warehouses (region, code), compared with w on region only"
 a = SQL[tuple[str]]("--sql\nSELECT w.code FROM stock s JOIN warehouses w ON w.region = s.region WHERE s.rowid IN ()")
+```
+
+#### Key declared out of column order
+
+The columns of the key pair in the order the primary key lists them, not the order of
+the table's columns.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE warehouses (region TEXT, code TEXT, PRIMARY KEY (code, region));
+CREATE TABLE stock (code TEXT, region TEXT, FOREIGN KEY (code, region) REFERENCES warehouses);
+```
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[str]]("--sql\nSELECT w.code FROM stock s JOIN warehouses w ON w.code = s.code AND w.region = s.region")
+```
+
+```python
+from sqlty import SQL
+
+# error: [foreign-key-mismatch] "stock.code references warehouses.code, not warehouses.region"
+# error: [foreign-key-mismatch] "stock.region references warehouses.region, not warehouses.code"
+a = SQL[tuple[str]]("--sql\nSELECT w.code FROM stock s JOIN warehouses w ON w.region = s.code AND w.code = s.region")
 ```
 
 ### MySQL: only InnoDB keys

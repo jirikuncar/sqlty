@@ -1763,7 +1763,7 @@ dependencies = [
 
 [[package]]
 name = "sqlty-bench"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "criterion",
  "sqlty-python",
@@ -1772,15 +1772,19 @@ dependencies = [
 
 [[package]]
 name = "sqlty-cli"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "clap",
  "mimalloc",
  "rayon",
  "regex",
+ "serde",
+ "serde_json",
+ "similar 3.2.1",
  "sqlty-lsp",
  "sqlty-project",
  "sqlty-python",
+ "sqlty-rules",
  "sqlty-sql",
  "toml",
  "trycmd",
@@ -1788,7 +1792,7 @@ dependencies = [
 
 [[package]]
 name = "sqlty-core"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "libmimalloc-sys",
  "mimalloc",
@@ -1812,7 +1816,7 @@ dependencies = [
 
 [[package]]
 name = "sqlty-format"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "regex",
  "sqlty-python",
@@ -1823,7 +1827,7 @@ dependencies = [
 
 [[package]]
 name = "sqlty-lsp"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "crossbeam-channel",
  "lsp-server",
@@ -1836,7 +1840,7 @@ dependencies = [
 
 [[package]]
 name = "sqlty-project"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "rayon",
  "regex",
@@ -1849,7 +1853,7 @@ dependencies = [
 
 [[package]]
 name = "sqlty-python"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "ignore",
  "recursive",
@@ -1857,6 +1861,7 @@ dependencies = [
  "ruff_python_ast",
  "ruff_python_parser",
  "ruff_text_size",
+ "sqlty-rules",
  "sqlty-sql",
  "stacker",
  "thiserror",
@@ -1864,8 +1869,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sqlty-rules"
+version = "0.8.0"
+dependencies = [
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "sqlty-sql"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "insta",
  "recursive",
@@ -1873,13 +1886,14 @@ dependencies = [
  "rustc-hash",
  "serde",
  "sqlparser",
+ "sqlty-rules",
  "thiserror",
  "toml",
 ]
 
 [[package]]
 name = "sqlty-wasm"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "serde",
  "serde_json",

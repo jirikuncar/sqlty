@@ -88,7 +88,7 @@ execute("SELECT id FROM users WHERE id = %s AND age > %s", (1, b"1"))
 execute("SELECT id FROM users WHERE id = %s AND age > %s", (1,))
 ```
 
-[`param-type-mismatch`](../reference/rules.md#param-type-mismatch) judges an
+[`param-type-mismatch`](../reference/rules/param-type-mismatch.md) judges an
 argument only where its type is stated: a literal, a variable annotated or
 assigned a class, a call of a known class. An argument of unknown type is
 never reported. Text (`str`) is accepted everywhere because the server coerces
@@ -112,8 +112,8 @@ def register(name: str, born: date, age: int | None, other) -> None:
 ```
 
 Named placeholders match a dict literal or keyword arguments.
-[`param-count-mismatch`](../reference/rules.md#param-count-mismatch) reports
-names the call does not pass, an error. [`extra-param`](../reference/rules.md#extra-param)
+[`param-count-mismatch`](../reference/rules/param-count-mismatch.md) reports
+names the call does not pass, an error. [`extra-param`](../reference/rules/extra-param.md)
 reports keys the query does not use, a warning since the drivers ignore them;
 `extra-param = "error"` in `[tool.sqlty.rules]` fails the check on them:
 
@@ -224,7 +224,7 @@ count = "--sql\nSELECT count(*) FROM users"
 
 `rewrite` writes `P` for every `SQL[R]` call that has none, and keeps a `P`
 you wrote. `sqlty check` compares a `P` you wrote with the query
-([`params-type-mismatch`](../reference/rules.md#params-type-mismatch)), and
+([`params-type-mismatch`](../reference/rules/params-type-mismatch.md)), and
 `R` as for any query. Its fixes rewrite `R` and keep `P`.
 
 ```python

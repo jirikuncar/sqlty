@@ -1920,7 +1920,7 @@ def test_check_sarif_output_is_valid_sarif(tmp_path, monkeypatch, capsys) -> Non
     [run] = log["runs"]
     rules = {rule["id"]: rule for rule in run["tool"]["driver"]["rules"]}
     assert (
-        rules["narrow-type"]["helpUri"] == "https://sqlty.kuncar.dev/reference/rules/#narrow-type"
+        rules["narrow-type"]["helpUri"] == "https://sqlty.kuncar.dev/reference/rules/narrow-type/"
     )
     assert rules["narrow-type"]["defaultConfiguration"] == {"level": "error"}
     region = {"startLine": 2, "startColumn": 15, "endLine": 2, "endColumn": 25}

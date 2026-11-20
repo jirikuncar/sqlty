@@ -1,15 +1,14 @@
-// The docs playground's engine (docs/assets/playground/engine.js) on the WebAssembly build:
-// `make playground`, then `node --test tests/playground.test.mjs`.
+// The engine of the docs playground and @sqlty/wasm (npm/wasm/engine.js) on the WebAssembly
+// build: `make playground`, then `node --test tests/playground.test.mjs`.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { setTimeout } from "node:timers/promises";
 
-import { load } from "../docs/assets/playground/engine.js";
+import { load } from "../npm/wasm/engine.js";
 import { decode, encode } from "../docs/assets/playground/share.js";
 import { fold, unfold } from "../docs/assets/playground/steps.js";
 
-const wasm = await readFile(new URL("../docs/assets/playground/sqlty_wasm.wasm", import.meta.url));
+const wasm = await readFile(new URL("../npm/wasm/sqlty_wasm.wasm", import.meta.url));
 const ask = await load(wasm);
 const schema = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);";
 
@@ -125,6 +124,18 @@ test("a step keeps the files of the step before that it leaves out", () => {
   assert.deepEqual(fold([first, second]).steps[1], { title: "Two", source: "b", panel: "types" });
 });
 
+test("breaking reports what the new schema breaks in code the old one checks clean", () => {
+  const source = 'q = "--sql\\nSELECT id FROM users"\nr = "--sql\\nSELECT nme FROM users"';
+  const after = "CREATE TABLE users (uid INTEGER PRIMARY KEY, name TEXT NOT NULL);";
+  const answer = ask({ op: "breaking", source, schema: after, before: schema, dialect: "postgres" });
+  assert.deepEqual(answer.diagnostics.map((d) => [d.line, d.rule]), [[1, "unknown-column"]]);
+});
+
+test("a step keeps the schema before a change", () => {
+  const [first, second] = unfold({ steps: [{ before: "b", panel: "breaking", file: "before" }, { source: "c" }] });
+  assert.deepEqual([first.before, first.panel, first.file, second.before], ["b", "breaking", "before", "b"]);
+});
+
 test("a deck without steps is an error", () => {
   assert.throws(() => unfold({ steps: [] }), /steps/);
   assert.throws(() => unfold({ steps: [{ source: 1 }] }), /Step 1/);
@@ -138,23 +149,28 @@ test("each step of the docs' Tour in steps is typed", async () => {
   }
 });
 
-test("a panic is an internal-error, answered by a spare instance", { timeout: 10_000 }, async () => {
+test("a panic is an internal-error, answered by a spare instance or a new one", () => {
   const crash = { op: "analyze", source: "q = 1", dialect: "postgres", panic: "boom" };
   const [found, ...rest] = ask(crash).diagnostics;
   assert.deepEqual(rest, []);
   assert.equal(found.rule, "internal-error");
   assert.match(found.message, /^sqlty crashed checking this file: boom; please report it at https:\/\/github\.com\/jirikuncar\/sqlty\/issues\/new\?template=bug_report\.yml&title=Crash%3A%20boom&output=boom&version=/);
-  assert.throws(() => ask({ ...crash, op: "hover" }), /starting again/);
-  assert.throws(() => ask(crash), /starting again/);
-  for (;;) {
-    try {
-      assert.deepEqual(ask({ op: "analyze", source: "q = 1", dialect: "postgres" }).diagnostics, []);
-      break;
-    } catch (error) {
-      assert.match(error.message, /starting again/);
-      await setTimeout(10);
-    }
-  }
+  assert.match(ask({ ...crash, op: "hover" }).error, /^sqlty crashed: boom; please report it at /);
+  assert.equal(ask(crash).diagnostics[0].rule, "internal-error");
+  assert.deepEqual(ask({ op: "analyze", source: "q = 1", dialect: "postgres" }).diagnostics, []);
+});
+
+test("a panic before the spare is ready, where only asynchronous instantiation is allowed", async () => {
+  const crash = { op: "analyze", source: "q = 1", dialect: "postgres", panic: "boom" };
   const fresh = await load(wasm);
-  assert.match(fresh({ ...crash, op: "hover" }).error, /^sqlty crashed: boom; please report it at https:\/\/github\.com\/jirikuncar\/sqlty\/issues\/new\?template=bug_report\.yml&title=Crash%3A%20boom&output=boom&version=/);
+  const { Instance } = WebAssembly;
+  WebAssembly.Instance = function () {
+    throw new RangeError("WebAssembly.Instance is disallowed on the main thread");
+  };
+  try {
+    assert.equal(fresh(crash).diagnostics[0].rule, "internal-error");
+    assert.throws(() => fresh(crash), { message: "sqlty crashed and is starting again" });
+  } finally {
+    WebAssembly.Instance = Instance;
+  }
 });

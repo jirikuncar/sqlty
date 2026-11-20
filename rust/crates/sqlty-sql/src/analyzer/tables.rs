@@ -237,6 +237,27 @@ mod tests {
                 &["users write", "users read"],
             ),
             ("SELECT * FROM", "postgres", &[]),
+            (
+                "WITH r AS (SELECT * FROM s.a) SELECT * FROM r JOIN b ON true, generate_series(1, 2)",
+                "postgres",
+                &["s.a read", "b read"],
+            ),
+            (
+                "UPDATE users u SET n = (SELECT count(*) FROM users) FROM orders o WHERE o.id = u.id",
+                "postgres",
+                &["users write", "users read", "orders read"],
+            ),
+            (
+                "DELETE u FROM users u JOIN (SELECT 1 AS id) d ON d.id = u.id",
+                "mysql",
+                &["users write"],
+            ),
+            (
+                "INSERT INTO TABLE FUNCTION remote('x', t) (a) SELECT a FROM t",
+                "clickhouse",
+                &["t read"],
+            ),
+            ("SELECT * FROM IDENTIFIER('t')", "snowflake", &[]),
         ];
         for (sql, dialect, expected) in cases {
             assert_eq!(tables(sql, dialect), *expected, "{sql}");

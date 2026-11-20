@@ -26,7 +26,7 @@ use crate::rows::{
     alias_target, bind, row_queries, row_shape, value_diagnostics, Check, Found, RowQuery,
     RowShape, Settings,
 };
-use crate::rules::{Rule, RuleConfig};
+use crate::rules::{Rule, RuleConfig, SQL_RULES};
 use crate::scopes::{class_of, dotted, Key, Param};
 use crate::types::generic::is_word;
 use crate::types::info::Kind;
@@ -965,22 +965,17 @@ impl<'a> Module<'a, '_> {
     }
 
     fn names(&mut self) {
-        use sqlty_sql::diagnostics::NameRule;
-        if !NameRule::ALL
-            .iter()
-            .any(|rule| self.enabled(Rule::Name(*rule)))
-        {
+        if !self.run.settings.rules.enabled().intersects(SQL_RULES) {
             return;
         }
         for (query, line, span) in self.unread() {
             let analysis = self.ctx.analyses.of(&query);
             for diagnostic in &analysis.diagnostics {
-                self.ctx.report(
-                    Rule::Name(diagnostic.rule),
-                    diagnostic.message.clone(),
-                    line,
-                    span,
-                );
+                if !self.run.settings.rules.shows(diagnostic) {
+                    continue;
+                }
+                self.ctx
+                    .report(diagnostic.rule, diagnostic.message.clone(), line, span);
             }
         }
     }
@@ -1109,7 +1104,7 @@ impl<'a> Module<'a, '_> {
     }
 }
 
-/// A helper call as `fix_source`, `query_statistics` and the highlights read it.
+/// A helper call as `fix_source`, `sqlty check --statistics` and the highlights read it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Site {
     /// The first and last line of a call whose strings need no `SQL[T]`.

@@ -125,3 +125,15 @@ b = SQL[tuple[str]]("--sql\nSELECT p.name FROM customers c JOIN products p ON p.
 # error: [entity-mismatch] "products.id holds products keys, customers.id holds customers keys"
 c = SQL[tuple[int]]("--sql\nSELECT 1 FROM orders o, customers c, products p WHERE p.id IN (o.customer_id, c.id)")
 ```
+
+A query passed to a helper too:
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def run(query: Annotated[LiteralString, SQL], /) -> None: ...
+
+# error: [foreign-key-mismatch] "orders.customer_id references customers.id, not products.id"
+run("SELECT p.name FROM orders o JOIN products p ON p.id = o.customer_id")
+```

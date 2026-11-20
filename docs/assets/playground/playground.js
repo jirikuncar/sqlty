@@ -1,4 +1,5 @@
 import { load } from "./engine.js";
+import { released, versions } from "./release.js";
 import { decode, encode, MAX_LINK } from "./share.js";
 import { fold, unfold } from "./steps.js";
 
@@ -47,6 +48,10 @@ const CONFIG = `# The [tool.sqlty] keys that need no files: dialect, import-styl
 [rules]
 stale-rewrite = "error"
 `;
+
+// A release of @sqlty/wasm from npm in place of the build of main, as `?version=0.8.0` asks.
+const RELEASE = new URLSearchParams(location.search).get("version");
+let fellBack = "";
 
 const root = document.getElementById("sqlty-playground");
 // A module runs once per document: coming back with instant navigation needs a full load.
@@ -102,6 +107,7 @@ const options = {
 const models = {
   python: monaco.editor.createModel(SOURCE, "python"),
   schema: monaco.editor.createModel(SCHEMA, "sql"),
+  before: monaco.editor.createModel("", "sql"),
   config: monaco.editor.createModel(CONFIG, "ini"),
 };
 const editor = monaco.editor.create(root.querySelector("[data-source]"), { ...options, model: models.python });
@@ -114,6 +120,7 @@ const output = monaco.editor.create(root.querySelector("[data-json]"), {
   readOnly: true,
 });
 const dialect = root.querySelector("[data-dialect]");
+const version = root.querySelector("[data-version]");
 const linked = root.querySelector("[data-link-status]");
 const example = root.querySelector("[data-example]");
 const stepper = root.querySelector("[data-steps]");
@@ -148,6 +155,7 @@ function request(op, offset = 0) {
     offset,
     source: models.python.getValue(),
     schema: models.schema.getValue(),
+    before: models.before.getValue(),
     dialect: dialect.value,
     config: models.config.getValue(),
   };
@@ -376,13 +384,47 @@ function refresh() {
       };
     }),
   );
-  problems.replaceChildren(
-    ...answer.diagnostics.map((found) => {
+  listed(problems, answer.diagnostics, "No problems.");
+  root.querySelector('[data-tab="problems"]').textContent = `Problems (${answer.diagnostics.length})`;
+  root.querySelector("[data-types]").replaceChildren(...answer.queries.map(describe));
+  output.setValue(JSON.stringify(answer.diagnostics.map((found) => checked(found, model)), null, 2));
+  refreshed.fire();
+  refreshBreaking(answer.diagnostics.some((found) => found.rule === "internal-error"));
+}
+
+// What schema.sql breaks in code that before.sql checks clean, as `sqlty breaking` reports it.
+// A crashed check would crash again on the spare engine, so it is not compared.
+function refreshBreaking(crashed) {
+  const list = root.querySelector("[data-breaking]");
+  const tab = root.querySelector('[data-tab="breaking"]');
+  tab.textContent = "Breaking";
+  if (crashed) {
+    list.replaceChildren(tag("li", "sqlty crashed: see Problems."));
+    return;
+  }
+  if (!models.before.getValue().trim()) {
+    list.replaceChildren(tag("li", "Paste the schema before a change into before.sql to see what schema.sql breaks."));
+    return;
+  }
+  const answer = ask(request("breaking"));
+  if (answer.error) {
+    list.textContent = answer.error;
+    return;
+  }
+  listed(list, answer.diagnostics, "Nothing breaks.");
+  tab.textContent = `Breaking (${answer.diagnostics.length})`;
+}
+
+// `diagnostics` as items of `list` that go to their line, or `empty` when there are none.
+function listed(list, diagnostics, empty) {
+  const model = models.python;
+  list.replaceChildren(
+    ...diagnostics.map((found) => {
       const item = document.createElement("li");
       item.dataset.severity = found.severity;
       const at = model.getPositionAt(found.start);
       const rule = Object.assign(document.createElement("a"), {
-        href: new URL(`../reference/rules/#${found.rule}`, location.href).href,
+        href: new URL(`../reference/rules/${found.rule}/`, location.href).href,
         textContent: found.rule,
         title: `The ${found.rule} rule`,
       });
@@ -398,11 +440,7 @@ function refresh() {
       return item;
     }),
   );
-  if (!answer.diagnostics.length) problems.replaceChildren(Object.assign(document.createElement("li"), { textContent: "No problems." }));
-  root.querySelector('[data-tab="problems"]').textContent = `Problems (${answer.diagnostics.length})`;
-  root.querySelector("[data-types]").replaceChildren(...answer.queries.map(describe));
-  output.setValue(JSON.stringify(answer.diagnostics.map((found) => checked(found, model)), null, 2));
-  refreshed.fire();
+  if (!diagnostics.length) list.replaceChildren(tag("li", empty));
 }
 
 // A diagnostic as `sqlty check --output-format json` prints it.
@@ -427,6 +465,7 @@ function session() {
   const edited = {
     source: models.python.getValue(),
     schema: models.schema.getValue(),
+    ...(models.before.getValue() && { before: models.before.getValue() }),
     dialect: dialect.value,
     config: models.config.getValue(),
   };
@@ -434,7 +473,8 @@ function session() {
 }
 
 function restore(saved) {
-  for (const [model, value] of [[models.python, saved.source], [models.schema, saved.schema], [models.config, saved.config]]) {
+  const pairs = [[models.python, saved.source], [models.schema, saved.schema], [models.before, saved.before ?? ""], [models.config, saved.config]];
+  for (const [model, value] of pairs) {
     if (typeof value === "string") replace(model, value);
   }
   if ([...dialect.options].some((option) => option.value === saved.dialect)) dialect.value = saved.dialect;
@@ -470,9 +510,9 @@ async function share() {
   const url = new URL(location.href);
   url.hash = hash;
   const fits = url.href.length <= MAX_LINK;
-  history.replaceState(null, "", fits ? url : url.pathname);
+  history.replaceState(null, "", fits ? url : url.pathname + url.search);
   unembedded();
-  linked.textContent = fits ? "" : `Too large to share as a link (${url.href.length} characters).`;
+  linked.textContent = fits ? fellBack : `Too large to share as a link (${url.href.length} characters).`;
   return fits ? url.href : null;
 }
 
@@ -622,6 +662,33 @@ const copyLink = async () => {
   linked.textContent = "Link copied.";
 };
 root.querySelector("[data-copy-link]").addEventListener("click", copyLink);
+
+const running = fellBack ? "" : (RELEASE ?? "");
+version.replaceChildren(new Option("main", "", false, !running));
+if (running) version.append(new Option(running, running, true, true));
+linked.textContent = fellBack;
+// The releases are listed when the select is first opened: most sessions never ask for one.
+let releases;
+const listReleases = () =>
+  (releases ??= versions()
+    .then((found) => {
+      const all = found.includes(running) || !running ? found : [running, ...found];
+      version.replaceChildren(new Option("main", "", false, !running), ...all.map((name) => new Option(name, name, false, name === running)));
+    })
+    .catch((error) => {
+      releases = undefined;
+      linked.textContent = `No releases listed: ${error.message}`;
+    }));
+version.addEventListener("pointerenter", listReleases);
+version.addEventListener("pointerdown", listReleases);
+version.addEventListener("focus", listReleases);
+version.addEventListener("change", async () => {
+  const url = new URL(location.href);
+  if (version.value) url.searchParams.set("version", version.value);
+  else url.searchParams.delete("version");
+  url.hash = await encode(session());
+  location.assign(url);
+});
 editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyP, () =>
   editor.trigger("sqlty", "editor.action.quickCommand", null),
 );
@@ -634,7 +701,7 @@ editor.addAction({
     const model = editor.getModel();
     const offset = model.getOffsetAt(editor.getPosition());
     const found = model === models.python && current.diagnostics.find((d) => d.start <= offset && offset <= d.end);
-    window.open(new URL(`../reference/rules/${found ? `#${found.rule}` : ""}`, location.href).href, "_blank", "noopener");
+    window.open(new URL(`../reference/rules/${found ? `${found.rule}/` : ""}`, location.href).href, "_blank", "noopener");
   },
 });
 window.addEventListener("hashchange", async () => {
@@ -797,9 +864,21 @@ function anchored(popover, button, opened) {
 }
 
 async function engine() {
-  const url = new URL("sqlty_wasm.wasm", import.meta.url);
-  const bytes = await (await fetch(url)).arrayBuffer();
-  const ask = await load(bytes);
+  let ask;
+  if (RELEASE) {
+    try {
+      const { wasm, engine } = await released(RELEASE);
+      const glue = URL.createObjectURL(new Blob([engine], { type: "text/javascript" }));
+      ask = await (await import(glue)).load(wasm);
+      URL.revokeObjectURL(glue);
+    } catch (error) {
+      fellBack = `sqlty ${RELEASE} did not load (${error.message}), so this is main.`;
+      const url = new URL(location.href);
+      url.searchParams.delete("version");
+      history.replaceState(null, "", url);
+    }
+  }
+  ask ??= await load(await (await fetch(new URL("sqlty_wasm.wasm", import.meta.url))).arrayBuffer());
   return (request) => {
     try {
       return ask(request);

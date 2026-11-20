@@ -9,8 +9,8 @@ description: "When sqlty helps: catch schema drift in CI, type raw SQL without a
 A column is renamed or retyped in a migration, and a query three modules away
 still expects the old shape. With the schema dump in the repository,
 `sqlty check` re-infers every query on each run and reports annotations that
-no longer match: [`narrow-type`](reference/rules.md#narrow-type) and
-[`stale-type`](reference/rules.md#stale-type) for `SQL[tuple[...]]`, and count, type and name mismatches for
+no longer match: [`narrow-type`](reference/rules/narrow-type.md) and
+[`stale-type`](reference/rules/stale-type.md) for `SQL[tuple[...]]`, and count, type and name mismatches for
 [row types](guide/row-types.md).
 
 Start with [Schema inference](guide/schema-inference.md), then

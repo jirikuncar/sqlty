@@ -38,7 +38,7 @@ SARIF log for [GitHub code scanning](../recipes/ci.md#github-code-scanning).
 Only what the other schema breaks: a diagnostic a query already gets against its
 own schema is not repeated. The rules and severities are the ones `sqlty check`
 uses. By default `unknown-table`, `unknown-column`, `ambiguous-column` and
-[`insert-missing-column`](../reference/rules.md#insert-missing-column) are errors,
+[`insert-missing-column`](../reference/rules/insert-missing-column.md) are errors,
 and `unknown-function` and `unknown-type` warnings, so a name that no longer
 resolves is reported wherever the query reads it: the select list, `WHERE`,
 `JOIN ... ON`, and what `INSERT`, `UPDATE` and `DELETE` write. A rule you set to
@@ -193,8 +193,8 @@ emails = SQL[tuple[str]]("--sql\nSELECT email FROM users")
 
 ### Rules about the code
 
-[`stale-rewrite`](../reference/rules.md#stale-rewrite) and
-[`unused-ignore`](../reference/rules.md#unused-ignore) judge the code, not the
+[`stale-rewrite`](../reference/rules/stale-rewrite.md) and
+[`unused-ignore`](../reference/rules/unused-ignore.md) judge the code, not the
 schema change, so they are not reported. Below, the old schema can type the marked
 string and leaves the suppression unused, and neither is a breaking change.
 
@@ -220,7 +220,7 @@ bios = "--sql\nSELECT bio FROM users"  # sqlty: ignore[unknown-column]
 Code annotated `str | None` for a column the new schema makes nullable reads the
 `str` rows of the old schema too. An annotation wider than the other schema's rows
 is not reported, though `sqlty check` against the old schema would report it as
-[`stale-type`](../reference/rules.md#stale-type).
+[`stale-type`](../reference/rules/stale-type.md).
 
 `schema.sql`:
 
@@ -302,7 +302,7 @@ The order matters:
   annotated `str | None` reads the rows of both schemas, so ship it first. Against
   the old schema, `stale-type` says the annotation could be `str`: suppress it on
   that line until the schema changes, then remove the suppression, which
-  [`unused-ignore`](../reference/rules.md#unused-ignore) reminds you of. `sqlty breaking`
+  [`unused-ignore`](../reference/rules/unused-ignore.md) reminds you of. `sqlty breaking`
   doesn't report an annotation wider than the other schema's rows.
 - **Schema before the code that uses it.** Code that writes `display_name` in the
   same pull request that adds it fails the forward check: the new code runs against
@@ -310,7 +310,7 @@ The order matters:
   deploy, `--direction backward` checks only that mix and accepts them together.
 - **Contract the code before the schema.** An `INSERT` that leaves out a column
   which is still `NOT NULL` fails at runtime. Turn on
-  [`insert-missing-column`](../reference/rules.md#insert-missing-column) so
+  [`insert-missing-column`](../reference/rules/insert-missing-column.md) so
   `sqlty check` reports it against the pull request's own schema.
 
 [Migration](../recipes/migration.md#schema-changes-in-ci) shows how to run
