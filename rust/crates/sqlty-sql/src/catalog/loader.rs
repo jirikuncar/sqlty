@@ -719,8 +719,8 @@ impl Loader {
         }
     }
 
-    /// Point the foreign keys that name a table defined after them (`pg_dump` and
-    /// `mysqldump` order tables by name) at it, and drop those whose table never is.
+    /// Point the foreign keys that name a table defined after them (`mysqldump` orders
+    /// tables by name) at it, and drop those whose table never is.
     pub(super) fn resolve_foreign_keys(&mut self) {
         let mut found = Vec::new();
         for (key, rel) in &self.relations {

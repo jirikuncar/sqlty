@@ -509,8 +509,9 @@ c = SQL[tuple[int]]("--sql\nSELECT 1 FROM stock s WHERE (s.region, s.code) IN (S
 
 ## Tables defined later
 
-A key may reference a table created further down, as `pg_dump` and `mysqldump`, which
-order tables by name, write it; in a column, a table constraint, `ALTER TABLE` or a cycle.
+A key may reference a table created further down: in a column, a table constraint,
+`ALTER TABLE` or a cycle. Schema files kept in name order do so, and so do `mysqldump`
+(behind `FOREIGN_KEY_CHECKS = 0`) and SQLite, which checks keys only when rows change.
 
 `schema.sql`:
 
@@ -545,6 +546,36 @@ b = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o JOIN products p ON p.id = 
 c = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o JOIN customers c ON c.id = o.product_id")
 # error: [foreign-key-mismatch] "customers.last_order_id references orders.id, not products.id"
 d = SQL[tuple[int]]("--sql\nSELECT c.id FROM customers c JOIN products p ON p.id = c.last_order_id")
+```
+
+### MySQL: a dump in name order
+
+`schema.sql`:
+
+```sql
+SET FOREIGN_KEY_CHECKS = 0;
+CREATE TABLE orders (id INT PRIMARY KEY, customer_id INT, FOREIGN KEY (customer_id) REFERENCES customers (id)) ENGINE = InnoDB;
+CREATE TABLE customers (id INT PRIMARY KEY) ENGINE = InnoDB;
+CREATE TABLE products (id INT PRIMARY KEY) ENGINE = InnoDB;
+SET FOREIGN_KEY_CHECKS = 1;
+```
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+stale-type = "ignore"
+narrow-type = "ignore"
+```
+
+```python
+from sqlty import SQL
+
+a = SQL[tuple[int]]("-- sql\nSELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id")
+# error: [foreign-key-mismatch] "orders.customer_id references customers.id, not products.id"
+b = SQL[tuple[int]]("-- sql\nSELECT o.id FROM orders o JOIN products p ON p.id = o.customer_id")
 ```
 
 ## Renamed tables and columns
