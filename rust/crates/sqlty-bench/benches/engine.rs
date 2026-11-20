@@ -126,8 +126,8 @@ fn query_at(c: &mut Criterion) {
 
 /// `sqlty check` of a module holding one query, as `sqlty rewrite` typed it, against a
 /// 500-table schema loaded once: the parse of the module, the query's analysis and every
-/// rule: what AGENTS.md "Check budget" bounds. `bench-ci` budgets the typical queries
-/// (`ONE_QUERY` in `benchmarks/bench_project.py`).
+/// rule: what AGENTS.md "Check budget" bounds. `bench-ci` measures the typical queries
+/// (`benchmarks/one_query.sql`) too, as `one_query_us`.
 fn one_query(c: &mut Criterion) {
     let (schema, skipped) = analyzer::load_schema_with_skipped(&one_query_schema(500), "postgres");
     assert!(skipped.is_empty(), "{skipped:?}");

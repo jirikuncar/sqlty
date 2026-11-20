@@ -151,36 +151,32 @@ pub fn one_query_schema(tables: usize) -> String {
     out
 }
 
+/// `benchmarks/one_query.sql`: the typical queries `bench-ci` budgets too.
+const TYPICAL: &str = include_str!("../../../../benchmarks/one_query.sql");
+
+/// The queries of [`TYPICAL`] by name, each on one line.
+pub fn typical_queries() -> impl Iterator<Item = (&'static str, String)> {
+    TYPICAL
+        .split("-- name: ")
+        .skip(1)
+        .filter_map(|block| block.split_once('\n'))
+        .map(|(name, sql)| {
+            (
+                name.trim(),
+                sql.split_whitespace().collect::<Vec<_>>().join(" "),
+            )
+        })
+}
+
 /// One query each, by `group/name`, against [`one_query_schema`] of at least 65 tables:
 /// typical queries, then sweeps of one dimension each (joins, selected columns, `IN` list
 /// items, `GROUP BY` keys).
 #[must_use]
 pub fn one_query_cases() -> Vec<(String, String)> {
     let wide = |n: usize| (0..n).map(|i| format!("c{i:03}")).collect::<Vec<_>>();
-    let mut cases: Vec<(String, String)> = [
-        (
-            "point_select",
-            "SELECT id, name, status, created_at FROM app.t0042 WHERE id = $1",
-        ),
-        (
-            "join_3",
-            "SELECT a.id, b.name, c.score FROM app.t0002 a JOIN app.t0001 b ON a.parent_id = b.id \
-             JOIN app.t0000 c ON b.parent_id = c.id WHERE a.status = $1",
-        ),
-        (
-            "insert_params",
-            "INSERT INTO app.t0042 (id, parent_id, name, score, tags, payload) \
-             VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, created_at",
-        ),
-        (
-            "aggregate",
-            "SELECT status, count(*) AS n, sum(score) AS total, max(created_at) AS last \
-             FROM app.t0042 WHERE score > $1 GROUP BY status HAVING count(*) > 1",
-        ),
-    ]
-    .into_iter()
-    .map(|(name, sql)| (format!("typical/{name}"), sql.to_string()))
-    .collect();
+    let mut cases: Vec<(String, String)> = typical_queries()
+        .map(|(name, sql)| (format!("typical/{name}"), sql))
+        .collect();
     for joins in [1, 4, 16, 64] {
         let chain: String = (1..=joins)
             .map(|i| format!(" JOIN app.t{i:04} j{i} ON j{i}.parent_id = j{}.id", i - 1))
@@ -249,6 +245,7 @@ mod tests {
         assert!(skipped.is_empty(), "{skipped:?}");
         let cases = one_query_cases();
         assert_eq!(cases.len(), 16);
+        assert_eq!(cases[3].0, "typical/aggregate");
         for (name, sql) in &cases {
             let (columns, diagnostics) =
                 analyzer::analyze_with_diagnostics(sql, "postgres", Some(&schema));

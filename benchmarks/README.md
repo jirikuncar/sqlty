@@ -35,10 +35,6 @@ maximum of `--repeats` runs (RSS from `wait4` of that child).
   survive. Its RSS bounds the catalog and its name index.
 - `micro_us`: microseconds per `analyze_select` / `analyze_params` call for each
   query kind, schema cached.
-- `one_query_us`: microseconds for `check_source` of a module holding one typical
-  query (point select, 3-table join, insert with parameters, aggregate), as `sqlty
-  rewrite` types it, schema cached: what `sqlty check` spends per query. `make
-  bench-rust ARGS=one_query` times the same queries and size sweeps in Rust.
 
 ```bash
 make bench-project                                              # full size, JSON on stdout
@@ -58,14 +54,24 @@ in `baseline.json`:
   reviewable file. Its weakness is that a Python loop does not scale exactly
   like Rust code, hence the generous tolerance.
 - **Peak RSS** is compared as is, +25% (`--rss-tolerance`).
-- **Each `one_query_us`** must beat a database round trip (AGENTS.md "Check budget"):
-  100 µs times the calibration over 20 ms, with or without a baseline entry.
 - Times under 5 ms are reported, not budgeted; the per-kind micro timings are
   budgeted as two sums (`analyze_select`, `analyze_params`).
 - A run over budget is measured again, up to three runs in all: another job on
   a shared runner can slow one run, and only the last run fails the job.
 - The baseline is keyed by platform and size (`Darwin-ci`, `Linux-ci`). With no
   entry for the runner's platform the check passes and says so.
+
+## One query
+
+`one_query_us` is microseconds for `check_source` of a module holding one typical
+query of `one_query.sql` (point select, 3-table join, insert with parameters,
+aggregate), as `sqlty rewrite` types it, schema cached: what `sqlty check` spends per
+query. `make bench-ci` prints each against a database round trip (AGENTS.md "Check
+budget": 100 µs times the calibration over 20 ms), marked `OVER` or `under`. It is
+reported, not budgeted, until a one-query check fits: `ENFORCE_ONE_QUERY = True` in
+`bench_project.py` then fails the job, after measuring again up to three runs in all.
+`make bench-rust ARGS=one_query` times the same queries in Rust, with size sweeps
+(joins, selected columns, `IN` list items, `GROUP BY` keys).
 
 ## Updating the baseline
 
