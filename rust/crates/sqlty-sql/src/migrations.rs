@@ -89,6 +89,8 @@ struct Model {
     applied: FxHashMap<String, usize>,
     /// Tables, materialized views and indexes created by new statements: empty and unused.
     created: FxHashSet<String>,
+    /// The table of each index a new statement created.
+    index_tables: FxHashMap<String, String>,
     /// The tables the baseline and earlier statements create.
     tables: FxHashSet<String>,
     /// The declared type of each column.
@@ -198,6 +200,11 @@ impl Model {
                 {
                     let value = format!("'{}'", add.value.value.replace('\'', "''"));
                     session.added_values.push((value, name.clone()));
+                }
+                if let Some(Statement::CreateIndex(index)) = &parsed {
+                    if let Some(name) = &index.name {
+                        self.index_tables.insert(key(name), key(&index.table_name));
+                    }
                 }
                 let created = parsed.as_ref().and_then(created);
                 if let Some(created) = created.filter(|c| !self.tables.contains(c)) {
@@ -535,6 +542,19 @@ impl Model {
         }
     }
 
+    /// Whether the `TABLE t` or `INDEX i` a `REINDEX` names was created by a new statement.
+    fn is_new_target(&self, tokens: &[&str]) -> bool {
+        let name = token_name(tokens.get(1..).unwrap_or_default(), &["concurrently"], &[]);
+        match tokens.first().map(|kind| kind.to_lowercase()).as_deref() {
+            Some("table") => self.created.contains(&name),
+            Some("index") => self
+                .index_tables
+                .get(&name)
+                .is_some_and(|table| self.created.contains(table)),
+            _ => false,
+        }
+    }
+
     fn is_new(&self, name: &ObjectName) -> bool {
         self.created.contains(&key(name))
     }
@@ -563,7 +583,7 @@ impl Model {
                 }
                 Judged {
                     concurrently: index.concurrently,
-                    strong_lock: waits,
+                    ..Judged::strong_unless(!waits)
                 }
             }
             Statement::Drop {
@@ -595,7 +615,7 @@ impl Model {
                 }
                 Judged {
                     concurrently: refresh.concurrently,
-                    strong_lock: waits,
+                    ..Judged::strong_unless(!waits)
                 }
             }
             Statement::Vacuum(vacuum) if vacuum.full => {
@@ -603,10 +623,7 @@ impl Model {
                 if rewrites {
                     report(Rule::TableRewrite, rewrite_command_message("VACUUM FULL"));
                 }
-                Judged {
-                    concurrently: false,
-                    strong_lock: rewrites,
-                }
+                Judged::strong_unless(!rewrites)
             }
             Statement::Lock(_) => Judged::strong(),
             Statement::CreateTable(create) => {
@@ -802,7 +819,9 @@ impl Model {
         match words.as_slice() {
             ["drop", "index", ..] if concurrently => Judged::concurrently(true),
             ["reindex", ..] => {
-                let waits = !concurrently;
+                let original = stmt.tokens();
+                let (_, rest) = split_options(&original[1..]);
+                let waits = !concurrently && !self.is_new_target(rest);
                 if waits {
                     report(
                         Rule::MissingConcurrently,
@@ -811,19 +830,38 @@ impl Model {
                 }
                 Judged {
                     concurrently,
-                    strong_lock: waits,
+                    ..Judged::strong_unless(!waits)
                 }
             }
             ["cluster", ..] => {
-                let table = token_name(&stmt.tokens()[1..], &["verbose"], &["using"]);
-                let rewrites = !self.created.contains(&table);
+                let rewrites = !self.created.contains(&cluster_table(&stmt.tokens()[1..]));
                 if rewrites {
                     report(Rule::TableRewrite, rewrite_command_message("CLUSTER"));
                 }
-                Judged {
-                    concurrently: false,
-                    strong_lock: rewrites,
+                Judged::strong_unless(!rewrites)
+            }
+            ["vacuum", ..] => {
+                let original = stmt.tokens();
+                let (options, rest) = split_options(&original[1..]);
+                let legacy = rest.iter().take_while(|t| is_vacuum_word(t)).count();
+                let full = rest[..legacy]
+                    .iter()
+                    .any(|t| t.eq_ignore_ascii_case("full"))
+                    || options.iter().enumerate().any(|(at, option)| {
+                        option.eq_ignore_ascii_case("full")
+                            && !options.get(at + 1).is_some_and(|value| {
+                                ["false", "off", "0"]
+                                    .iter()
+                                    .any(|v| value.eq_ignore_ascii_case(v))
+                            })
+                    });
+                let tables = vacuum_tables(&rest[legacy..]);
+                let rewrites = full
+                    && !(!tables.is_empty() && tables.iter().all(|t| self.created.contains(t)));
+                if rewrites {
+                    report(Rule::TableRewrite, rewrite_command_message("VACUUM FULL"));
                 }
+                Judged::strong_unless(!rewrites)
             }
             ["alter", "table", rest @ ..]
                 if rest.windows(2).any(|pair| pair == ["set", "tablespace"])
@@ -1215,6 +1253,47 @@ fn token_name(tokens: &[&str], skip: &[&str], ends: &[&str]) -> String {
     }
 }
 
+/// `tokens` after a leading parenthesised option list, and the options inside it.
+fn split_options<'a>(tokens: &'a [&'a str]) -> (&'a [&'a str], &'a [&'a str]) {
+    match (tokens.first(), tokens.iter().position(|t| *t == ")")) {
+        (Some(&"("), Some(close)) => (&tokens[1..close], &tokens[close + 1..]),
+        _ => (&[], tokens),
+    }
+}
+
+fn is_vacuum_word(token: &str) -> bool {
+    ["full", "freeze", "verbose", "analyze", "analyse"]
+        .iter()
+        .any(|word| token.eq_ignore_ascii_case(word))
+}
+
+/// The folded tables of a `VACUUM` list, without their column lists.
+fn vacuum_tables(tokens: &[&str]) -> Vec<String> {
+    let (mut names, mut current, mut depth) = (Vec::new(), Vec::new(), 0_usize);
+    for token in tokens {
+        match *token {
+            "(" => depth += 1,
+            ")" => depth = depth.saturating_sub(1),
+            "," if depth == 0 => names.push(token_name(&std::mem::take(&mut current), &[], &[])),
+            _ if depth == 0 => current.push(*token),
+            _ => {}
+        }
+    }
+    if !current.is_empty() {
+        names.push(token_name(&current, &[], &[]));
+    }
+    names
+}
+
+/// The table a `CLUSTER` names: `CLUSTER [(options)] t [USING i]`, or `CLUSTER i ON t`.
+fn cluster_table(tokens: &[&str]) -> String {
+    let (_, rest) = split_options(tokens);
+    match rest.iter().position(|t| t.eq_ignore_ascii_case("on")) {
+        Some(on) => token_name(&rest[on + 1..], &[], &[]),
+        None => token_name(rest, &["verbose"], &["using"]),
+    }
+}
+
 /// `token` as PostgreSQL folds an identifier: quoted keeps its case.
 fn fold_token(token: &str) -> String {
     match token.strip_prefix('"') {
@@ -1469,8 +1548,11 @@ mod tests {
             );
             assert_eq!(rules(USERS, &migration), expected, "{fill}");
         }
-        let created_as = "SET lock_timeout = '1s'; CREATE TABLE t AS SELECT id FROM users; CREATE INDEX t_id ON t (id);";
-        assert_eq!(rules(USERS, created_as), [MissingConcurrently]);
+        let created_as = "CREATE TABLE t AS SELECT id FROM users; CREATE INDEX t_id ON t (id);";
+        assert_eq!(
+            rules(USERS, created_as),
+            [MissingConcurrently, MissingLockTimeout]
+        );
         let no_data = created_as.replace(" FROM users", " FROM users WITH NO DATA");
         assert_eq!(rules(USERS, &no_data), []);
     }
@@ -1516,6 +1598,58 @@ mod tests {
             "REINDEX TABLE CONCURRENTLY users",
             "REFRESH MATERIALIZED VIEW CONCURRENTLY mv",
             "CREATE TABLE t (id int); CREATE INDEX t_id ON t (id); CLUSTER t; VACUUM FULL t",
+            "CREATE TABLE t (id int); REINDEX TABLE t",
+            "CREATE TABLE t (id int); CREATE INDEX t_id ON t (id); REINDEX INDEX t_id",
+            "CREATE TABLE t (id int); REINDEX (VERBOSE) TABLE t",
+            "CREATE TABLE t (id int); CLUSTER (VERBOSE) t",
+            "CREATE TABLE t (id int); CREATE INDEX i ON t (id); CLUSTER i ON t",
+            "CREATE TABLE t (id int); CLUSTER VERBOSE t USING t_pkey",
+            "CREATE TABLE t (id int); VACUUM (FULL) t",
+            "CREATE TABLE t (id int); VACUUM (FULL, ANALYZE) public.t (id)",
+            "CREATE TABLE t (id int); VACUUM FULL t, t",
+        ] {
+            assert_eq!(rules(&baseline, sql), [], "{sql}");
+        }
+        for sql in [
+            "REINDEX (VERBOSE) TABLE users",
+            "REINDEX INDEX users_pkey",
+            "CREATE INDEX users_email ON users (email); REINDEX INDEX users_email",
+            "CLUSTER (VERBOSE) users",
+            "CLUSTER users_pkey ON users",
+            "CLUSTER",
+        ] {
+            let rule = if sql.contains("CLUSTER") {
+                Rule::TableRewrite
+            } else {
+                Rule::MissingConcurrently
+            };
+            assert_eq!(
+                rules(&baseline, sql).last(),
+                Some(&Rule::MissingLockTimeout),
+                "{sql}"
+            );
+            assert!(rules(&baseline, sql).contains(&rule), "{sql}");
+        }
+        for sql in [
+            "VACUUM (FULL) users",
+            "VACUUM (FULL, ANALYZE) users",
+            "VACUUM (FULL true) users (id)",
+            "VACUUM FULL users, mv",
+            "VACUUM FULL ANALYZE users",
+            "CREATE TABLE t (id int); VACUUM FULL t, users",
+            "VACUUM FULL",
+        ] {
+            assert_eq!(
+                rules(&baseline, sql),
+                [Rule::TableRewrite, Rule::MissingLockTimeout],
+                "{sql}"
+            );
+        }
+        for sql in [
+            "VACUUM users",
+            "VACUUM (FULL false) users",
+            "VACUUM (ANALYZE) users",
+            "VACUUM",
         ] {
             assert_eq!(rules(&baseline, sql), [], "{sql}");
         }

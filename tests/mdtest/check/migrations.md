@@ -87,6 +87,12 @@ VACUUM FULL users;
 CLUSTER users;
 ```
 
+```sql migration
+-- error: [table-rewrite]
+-- error: [missing-lock-timeout]
+VACUUM (FULL, ANALYZE) users;
+```
+
 One file reports the timeout once:
 
 ```sql migration
@@ -108,6 +114,12 @@ CREATE TABLE t (id INT);
 CREATE INDEX t_id ON t (id);
 CLUSTER t;
 VACUUM FULL t;
+REINDEX TABLE t;
+CREATE INDEX t_id_2 ON t (id);
+REINDEX (VERBOSE) INDEX t_id_2;
+CLUSTER (VERBOSE) t;
+CLUSTER t_id ON t;
+VACUUM (FULL, ANALYZE) t;
 ```
 
 ## A pg_dump schema
