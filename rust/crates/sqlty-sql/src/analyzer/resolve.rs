@@ -187,8 +187,7 @@ impl<'a> Analyzer<'a> {
                     local: self.virtuals.contains_key(table),
                 });
         }
-        let columns = self.schema.table(table)?;
-        match columns.iter().find(|col| col.name == column) {
+        match self.schema.column(table, column)? {
             Some(col) => Some(ColumnRef::Schema(col)),
             None => self.system_column(column).map(ColumnRef::System),
         }
