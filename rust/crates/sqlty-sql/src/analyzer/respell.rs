@@ -1,6 +1,6 @@
 //! PostgreSQL, MySQL and SQLite syntax sqlparser does not read, respelled as the closest syntax
-//! it does and typed the same: a window frame's `EXCLUDE` in PostgreSQL and SQLite, SQLite's
-//! postfix `ISNULL`, MySQL's `!x`, infix `MOD`, `SOUNDS LIKE`, `INTERVAL(n, n1, ...)`, `LOCK IN
+//! it does and typed the same: a window frame's `EXCLUDE` and postfix `ISNULL` in PostgreSQL
+//! and SQLite, MySQL's `!x`, infix `MOD`, `SOUNDS LIKE`, `INTERVAL(n, n1, ...)`, `LOCK IN
 //! SHARE MODE`, its `CHAR(n USING charset)` and the comma-separated tables of its `UPDATE`, and
 //! `BETWEEN SYMMETRIC`, `AT LOCAL`, `COLLATION FOR`, `substring(x similar p escape e)`, the
 //! SQL/JSON clauses after a path, `json_array(SELECT ...)`, the XML functions' keywords and the
@@ -79,7 +79,7 @@ pub(super) fn respell(sql: &str, tokens: &[Token], dialect: SqlDialect, edits: &
             && symbol(i + 2, "*")
         {
             edits.push((tokens[i + 2].start, tokens[i + 2].end, "\"*\"".to_string()));
-        } else if dialect == SqlDialect::Sqlite
+        } else if matches!(dialect, SqlDialect::Sqlite | SqlDialect::Postgres)
             && word(i, "ISNULL")
             && !is(i + 1, Kind::Open)
             && i > 0
@@ -281,8 +281,9 @@ fn do_block(sql: &str, tokens: &[Token], i: usize) -> Option<(usize, usize, Stri
 
 /// Whether `token` can end an operand, so a `MOD` after it is MySQL's infix operator.
 fn ends_operand(sql: &str, token: &Token) -> bool {
-    const KEYWORDS: [&str; 19] = [
+    const KEYWORDS: [&str; 20] = [
         "SELECT",
+        "AS",
         "WHERE",
         "AND",
         "OR",
@@ -306,7 +307,7 @@ fn ends_operand(sql: &str, token: &Token) -> bool {
     match token.kind {
         Kind::Close => true,
         Kind::Word => !KEYWORDS.iter().any(|k| text.eq_ignore_ascii_case(k)),
-        Kind::Other => text.starts_with(['\'', '"', '`']),
+        Kind::Other => text.starts_with(['\'', '"', '`']) || text == "]",
         Kind::Open | Kind::Comma => false,
     }
 }
