@@ -249,6 +249,9 @@ pub trait Index: Send + Sync {
     fn type_of(&self, source: &Source, dotted: &str) -> Option<Ty>;
     /// The row type `NAME` or `module.NAME` that `source` imports from a checked module.
     fn row_type(&self, source: &Source, dotted: &str) -> Option<RowType>;
+    /// The type the alias `NAME` or `module.NAME` that `source` imports from a checked
+    /// module declares, with the source it is an expression of.
+    fn type_alias(&self, source: &Source, dotted: &str) -> Option<(&Source, &Expr)>;
 }
 
 /// A row type of another module, with the row types of that module, which its nested types
@@ -385,7 +388,7 @@ fn module_types(body: &[Stmt], aliases: &Table) -> HashMap<String, Local> {
 }
 
 /// `X = T` with `T` a type expression, `X: TypeAlias = T` or `type X = T`: `X` and `T`.
-fn type_alias<'a>(stmt: &'a Stmt, aliases: &Table) -> Option<(&'a str, &'a Expr)> {
+pub(crate) fn type_alias<'a>(stmt: &'a Stmt, aliases: &Table) -> Option<(&'a str, &'a Expr)> {
     let (target, value): (&Expr, &Expr) = match stmt {
         Stmt::Assign(node) if node.targets.len() == 1 && is_type_expr(&node.value) => {
             (&node.targets[0], &node.value)

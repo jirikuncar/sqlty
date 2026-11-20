@@ -772,14 +772,25 @@ impl<'a> Module<'a, '_> {
         declared: &Expr,
         params: &[analyzer::Param],
     ) -> Vec<String> {
-        let text = &self.source.text;
-        let name = unparse(declared, text);
+        let name = unparse(declared, &self.source.text);
+        let (declared, source) = self.unaliased(declared, self.source);
+        let text = &source.text;
         let named = !params.is_empty() && params.iter().all(|p| p.name.is_some());
         let dotted_name = dotted(declared).unwrap_or_default();
         let count = |n: usize| format!("{n} parameter{}", plural(n));
         // `(label, annotation, parameter, key)`
         let mut pairs: Vec<(String, &Expr, &analyzer::Param, String)> = Vec::new();
-        let info = self.ctx.type_defs.get(&name);
+        let defs;
+        let info = if std::ptr::eq(source, self.source) {
+            self.ctx.type_defs.get(&unparse(declared, text))
+        } else {
+            defs = self
+                .run
+                .helpers
+                .and_then(|helpers| helpers.definitions(source));
+            defs.as_ref()
+                .and_then(|defs| defs.get(&unparse(declared, text)))
+        };
         if dotted_name.rsplit('.').next() == Some("NoParams") && info.is_none() {
             return if params.is_empty() {
                 Vec::new()
@@ -881,7 +892,7 @@ impl<'a> Module<'a, '_> {
         let mut found = Vec::new();
         for (label, annotation, param, key) in pairs {
             for member in union_members(annotation) {
-                let actual = annotation_type(member, &self.source.imports);
+                let actual = annotation_type(member, &source.imports);
                 if actual.as_deref() != Some("None") && !(typed && !param.cast) {
                     continue;
                 }
@@ -980,8 +991,31 @@ impl<'a> Module<'a, '_> {
         }
     }
 
+    /// `declared` of `source` as the type its aliases declare, with the source that spells it.
+    fn unaliased<'s>(
+        &'s self,
+        mut declared: &'s Expr,
+        mut source: &'s Source,
+    ) -> (&'s Expr, &'s Source) {
+        for _ in 0..8 {
+            let local = declared
+                .as_name_expr()
+                .and_then(|name| crate::compose::type_alias(source, &name.id));
+            let found = local.map(|value| (source, value)).or_else(|| {
+                let index = self.run.settings.index?;
+                index.type_alias(source, &dotted(declared)?)
+            });
+            let Some((at, value)) = found else {
+                break;
+            };
+            (declared, source) = (value, at);
+        }
+        (declared, source)
+    }
+
     /// `P` of a `SQL[R, P]` in `source`, as the types each parameter key takes.
     fn annotations_of(&self, declared: &Expr, source: &Source) -> Option<Annotations> {
+        let (declared, source) = self.unaliased(declared, source);
         let types = |annotation: &Expr| -> Vec<Option<String>> {
             union_members(annotation)
                 .into_iter()
