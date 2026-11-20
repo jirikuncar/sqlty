@@ -531,6 +531,46 @@ struct Module<'a> {
     marker: HashSet<String>,
     /// The frame reading the module-level constants.
     frame: Rc<Frame<'a>>,
+    /// The branch tests whose text appears more than once: only a path that meets one
+    /// again has to remember which way it went.
+    retested: HashSet<Rc<str>>,
+}
+
+/// The text of every `if`, `elif` and conditional expression test, by count.
+#[derive(Default)]
+struct Tests<'a> {
+    text: &'a str,
+    counts: HashMap<Rc<str>, usize>,
+}
+
+impl<'a> Visitor<'a> for Tests<'a> {
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        if let Stmt::If(node) = stmt {
+            self.count(&node.test);
+            for clause in &node.elif_else_clauses {
+                if let Some(test) = &clause.test {
+                    self.count(test);
+                }
+            }
+        }
+        visitor::walk_stmt(self, stmt);
+    }
+
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        if let Expr::If(node) = expr {
+            self.count(&node.test);
+        }
+        visitor::walk_expr(self, expr);
+    }
+}
+
+impl Tests<'_> {
+    fn count(&mut self, test: &Expr) {
+        *self
+            .counts
+            .entry(Rc::from(unparse(test, self.text)))
+            .or_default() += 1;
+    }
 }
 
 /// A function (or the module) whose bindings a walk follows.
@@ -699,7 +739,17 @@ impl<'a, 'r> Walk<'a, 'r> {
             return found.clone();
         }
         let frame = Frame::new(source, Follow::Constants, &[], &[]);
+        let mut tests = Tests {
+            text: &source.text,
+            ..Tests::default()
+        };
+        tests.visit_body(&source.syntax.body);
         let module = Rc::new(Module {
+            retested: tests
+                .counts
+                .into_iter()
+                .filter_map(|(key, count)| (count > 1).then_some(key))
+                .collect(),
             scan: compose::Scan::new(source),
             marker: crate::calls::marker_names(source).1,
             frame: Rc::new(frame.unwrap_or(Frame {
@@ -747,7 +797,7 @@ impl<'a, 'r> Walk<'a, 'r> {
         paths: &[Path<'a>],
         test: &'a Expr,
         outcome: bool,
-        source: &Source,
+        source: &'a Source,
     ) -> Vec<Path<'a>> {
         let Condition {
             key,
@@ -756,6 +806,9 @@ impl<'a, 'r> Walk<'a, 'r> {
         } = self.condition(test, source);
         if let Some(bound) = rebinds {
             return paths.iter().map(|path| path.forget(&bound)).collect();
+        }
+        if !self.module(source).retested.contains(&key) {
+            return paths.to_vec();
         }
         paths
             .iter()
@@ -1585,16 +1638,19 @@ fn union(left: &Conds, right: &Conds) -> Option<Conds> {
     if within(right, left) {
         return Some(right.clone());
     }
-    let same_names = left.iter().count() == right.iter().count()
-        && left.iter().all(|(name, _)| right.contains(name));
-    let mut differ = left
+    let differ: Vec<_> = left
         .iter()
-        .filter(|(name, cond)| right.get(name) != Some(*cond));
-    let (name, (_, reads)) = differ.next()?;
+        .filter(|(name, cond)| right.get(name) != Some(*cond))
+        .collect();
+    let [(name, (_, reads))] = differ.as_slice() else {
+        return None;
+    };
+    let same_names = left.iter().count() == right.iter().count()
+        && left.iter().all(|(other, _)| right.contains(other));
     let opposite = right.get(name).is_some_and(|other| &other.1 == reads);
-    (same_names && opposite && differ.next().is_none()).then(|| {
+    (same_names && opposite).then(|| {
         left.iter()
-            .filter(|(other, _)| *other != name)
+            .filter(|(other, _)| other != name)
             .map(|(other, cond)| (other, cond.clone()))
             .collect()
     })
