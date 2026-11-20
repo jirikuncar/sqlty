@@ -1,6 +1,6 @@
 """The name rules the engine reports are registered, on by default."""
 
-from sqlty._lint import NAME_RULES, RULES, RuleConfig, Severity
+from sqlty._lint import NAME_RULES, RULES, Severity
 
 # SQL the database rejects is an error; SQL sqlty can't type is a warning. unproven-join
 # is off, as a schema without keys would report every join, and entity-mismatch is opt-in.
@@ -19,11 +19,10 @@ DEFAULTS = {
     "chasm-join": Severity.WARN,
     "unproven-join": Severity.IGNORE,
     "entity-mismatch": Severity.IGNORE,
+    "foreign-key-mismatch": Severity.WARN,
     "rejected-query": Severity.ERROR,
 }
 
 
 def test_name_rules_are_registered_and_on_by_default() -> None:
-    config = RuleConfig()
-    assert {name: config.severity(name) for name in NAME_RULES} == DEFAULTS
-    assert all(name in RULES for name in NAME_RULES)
+    assert {name: RULES[name].default_severity for name in NAME_RULES} == DEFAULTS

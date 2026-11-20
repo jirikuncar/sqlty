@@ -46,7 +46,7 @@ Untrusted:
 | Codec opt-in | `src/sqlty_magic.pth`, `src/sqlty/magic.py` | the codec acting on a file without `# coding: sqlty`, or with `SQLTY_NO_MAGIC` set |
 | Parsers and inference | `sqlty-sql`, `sqlty-format`, `parse.rs`, `scan.rs`, `queries.rs`, `compose.rs`, `variants.rs` | a crash, a stack overflow, super-linear time or unbounded memory from a small input |
 | Files read and written | `sqlty-project`, `config.rs`, `src/sqlty/_config.py` | `rewrite`, `strip`, `format` or `--fix` writing outside the given paths or through a symlink; reading a file sqlty was not configured to read |
-| `sqlty breaking` | `src/sqlty/_breaking.py`, `breaking.rs` | a ref, path or file name becoming a git option or a pathspec other than a literal path |
+| `sqlty breaking` | `breaking.rs` | a ref, path or file name becoming a git option or a pathspec other than a literal path |
 | Language server | `sqlty-lsp`, `sqlty-cli/src/server.rs`, `sqlty-ext/src/server.rs` | a document crashing or stalling the server; a URI that reads or writes outside the workspace |
 | Playground | `docs/assets/playground/`, `sqlty-wasm` | script injection from a share link or a deck; a link loading a deck, engine or model from another origin |
 | VS Code extension | `editors/vscode/src/` | running a binary or interpreter from the workspace (`sqlty.path`, `sqlty.interpreter`) before the workspace is trusted |

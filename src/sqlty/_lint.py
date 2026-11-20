@@ -80,36 +80,4 @@ class Diagnostic(TypedDict):
     fix: list[tuple[int, int, str]]
 
 
-class RuleConfig:
-    """Resolved rule configuration — maps rule names to effective severities.
-
-    Merges defaults with user overrides from [tool.sqlty.rules].
-    """
-
-    def __init__(self, overrides: dict[str, str] | None = None) -> None:
-        self._severities: dict[str, Severity] = {}
-
-        # Start with defaults
-        for name, rule in RULES.items():
-            self._severities[name] = rule.default_severity
-
-        # Apply user overrides
-        if overrides:
-            for name, severity_str in overrides.items():
-                if name not in RULES:
-                    continue  # ignore unknown rules
-                try:
-                    self._severities[name] = Severity(severity_str)
-                except ValueError:
-                    continue  # ignore invalid severity values
-
-    def severity(self, rule_name: str) -> Severity:
-        """Get the effective severity for a rule."""
-        return self._severities.get(rule_name, Severity.WARN)
-
-    def is_enabled(self, rule_name: str) -> bool:
-        """Check if a rule is enabled (not ignored)."""
-        return self.severity(rule_name) != Severity.IGNORE
-
-
 DOCS_URL = "https://sqlty.kuncar.dev/"

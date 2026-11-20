@@ -46,10 +46,11 @@ Style, naming and refactoring suggestions are Nit at most.
   triple-quoted f-/t-strings, deep nesting, huge files, `SQL[...]` behind
   aliases and re-exports, every dialect the code path claims to support.
 - **No panics in the engine.** No `unwrap`, `expect`, indexing or slicing that
-  input can make fail, outside tests. Only `check::module` (diagnostics of a
-  parsed module) turns a panic into `internal-error`; parsing, fixes, rewrite,
-  strip, completion and hover do not, and wasm32 is `panic=abort`, so there a
-  panic kills the playground and VS Code web. Prefer `Option`/`Result` combinators.
+  input can make fail, outside tests. The CLI reports any panic as a crash; elsewhere
+  only `check::module` catches one, as `internal-error`. In `sqlty server` a panic in
+  completion or hover ends the server and one in its worker stops checking; wasm32
+  (`panic=abort`) traps, so the playground and VS Code web restart the engine. Prefer
+  `Option`/`Result` combinators.
 - **Parity.** A behavior change lands in every host that runs it (`sqlty-cli`,
   `sqlty-project`, `sqlty-lsp`, `sqlty-wasm`, `editors/vscode`, the playground
   settings it reads). Differences on purpose are listed in the plan, not silent.

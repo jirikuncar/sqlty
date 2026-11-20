@@ -6,6 +6,7 @@ schema = "schema.sql"
 
 [tool.sqlty.rules]
 entity-mismatch = "warn"
+foreign-key-mismatch = "ignore"
 stale-type = "ignore"
 narrow-type = "ignore"
 ```
@@ -82,4 +83,57 @@ a = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o WHERE o.total = o.id")
 b = SQL[tuple[int]]("--sql\nSELECT o.id FROM orders o WHERE o.customer_id = 3")
 c = SQL[tuple[int]]("--sql\nWITH orders AS (SELECT 1 AS id) SELECT 1 FROM orders o JOIN products p ON p.id = o.id")
 d = SQL[tuple[int]]("--sql\nSELECT 1 FROM (SELECT customer_id AS id FROM orders) o JOIN products p ON p.id = o.id")
+```
+
+## In subqueries of conditions
+
+Read by the same reader as `foreign-key-mismatch`: a subquery with a CTE or a set
+operation is judged too.
+
+```python
+from sqlty import SQL
+
+# error: [entity-mismatch] "products.id holds products keys, orders.customer_id holds customers keys"
+a = SQL[tuple[int]]("--sql\nSELECT 1 WHERE EXISTS (WITH c AS (SELECT 1 FROM orders o JOIN products p ON p.id = o.customer_id) SELECT 1 FROM c)")
+# error: [entity-mismatch] "products.id holds products keys, customers.id holds customers keys"
+b = SQL[tuple[int]]("--sql\nSELECT 1 WHERE 1 IN (SELECT 2 UNION SELECT 1 FROM customers c JOIN products p ON p.id = c.id)")
+```
+
+## With `foreign-key-mismatch` on
+
+A comparison both rules report is reported by `foreign-key-mismatch` only.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+entity-mismatch = "warn"
+foreign-key-mismatch = "warn"
+stale-type = "ignore"
+narrow-type = "ignore"
+```
+
+```python
+from sqlty import SQL
+
+# error: [foreign-key-mismatch] "orders.customer_id references customers.id, not products.id"
+a = SQL[tuple[str]]("--sql\nSELECT p.name FROM orders o JOIN products p ON p.id = o.customer_id")
+# error: [entity-mismatch] "products.id holds products keys, customers.id holds customers keys"
+b = SQL[tuple[str]]("--sql\nSELECT p.name FROM customers c JOIN products p ON p.id = c.id")
+# error: [foreign-key-mismatch] "orders.customer_id references customers.id, not products.id"
+# error: [entity-mismatch] "products.id holds products keys, customers.id holds customers keys"
+c = SQL[tuple[int]]("--sql\nSELECT 1 FROM orders o, customers c, products p WHERE p.id IN (o.customer_id, c.id)")
+```
+
+A query passed to a helper too:
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def run(query: Annotated[LiteralString, SQL], /) -> None: ...
+
+# error: [foreign-key-mismatch] "orders.customer_id references customers.id, not products.id"
+run("SELECT p.name FROM orders o JOIN products p ON p.id = o.customer_id")
 ```
