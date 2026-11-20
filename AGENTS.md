@@ -9,6 +9,8 @@ architecture live in [DEVELOPMENT.md](DEVELOPMENT.md).
   branch over, have a separate agent review it with the
   [`review` skill](.claude/skills/review/SKILL.md), given the branch name only.
   `.claude/skills/` is for contributors and not shipped, unlike `skills/`.
+- [THREAT_MODEL.md](THREAT_MODEL.md) lists the trust boundaries a change must
+  keep: no execution of analyzed code, generated code, files written.
 - Plans live in `plans/`, named `YYYY-MM-DD-<slug>.md` after the day they were written.
   Delete a plan once it has shipped; move what is left to `plans/2026-02-13-future.md`
   or an issue.
@@ -271,8 +273,8 @@ sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
 - `tests/test_core_invariants.py` checks idempotency and round trips over every
   mdtest code block: new mdtests extend it automatically.
 - `docs/reference/configuration.md` and `cli.md` hold tables between `<!-- generated:NAME -->`
-  markers, rendered by `scripts/generate_docs.py` from `KEY_DOCS` in `_config.py` and the argparse
-  parser. Edit those, then run `make generate-docs`; `test_generated_reference_is_current` fails on drift.
+  markers, rendered by `scripts/generate_docs.py` from `KEY_DOCS` in `_config.py` and the clap
+  commands of `sqlty-cli`. Edit those, then run `make generate-docs`; `test_generated_reference_is_current` fails on drift.
 - `tests/test_docs.py` checks that the rules table in `docs/reference/rules.md`
   matches `RULES`, that every rule has a page in `docs/reference/rules/`, that
   relative links resolve, that `examples/` need no rewrite, and runs the

@@ -28,8 +28,7 @@ the issue it fixes. Flag files that should not be in the diff (build output,
 ## 2. Read
 
 Read each changed function whole, with its callers and the other hosts of the same
-behavior (`sqlty-cli`, `sqlty-project`, `sqlty-lsp`, `sqlty-wasm`, `editors/vscode`,
-the Python passes). A diff hides the code it did not touch but should have.
+behavior (`sqlty-cli`, `sqlty-project`, `sqlty-lsp`, `sqlty-wasm`, `editors/vscode`). A diff hides the code it did not touch but should have.
 
 ## 3. Try to break it
 
