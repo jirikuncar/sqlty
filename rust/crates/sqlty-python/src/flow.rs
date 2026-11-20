@@ -1,6 +1,7 @@
 //! Which bindings of a name reach a use, and what an `isinstance` test on the way says of
-//! it: one structured walk of the statements of a function (or of the module), made for
-//! the name and the use asked about.
+//! it: one structured walk of the statements of a function (or of the module) for each
+//! name, which reads only the statements that bind or test the name, and answers for any
+//! number of uses.
 //!
 //! The walk follows the statements as they run: a binding replaces what the name held,
 //! the branches of an `if`, `try` or `match` are walked apart and merged, a loop body
@@ -11,6 +12,8 @@
 
 use ruff_python_ast::{self as ast, BoolOp, Expr, Stmt, UnaryOp};
 use ruff_text_size::Ranged;
+use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::scopes::{Binding, Origin};
 
@@ -23,73 +26,191 @@ pub struct Reach<'a> {
     pub narrowed: Option<&'a Expr>,
 }
 
-/// What `name` holds at offset `at` of `body`, the statements of the scope whose
-/// bindings of the name are `bindings` (see [`crate::scopes::Scan::bindings`]). `None`
-/// when `at` is not in `body`: a decorator or a default.
-pub fn reaching<'a>(
+/// What a name holds at every place of a scope: one walk of its statements, asked about
+/// any number of uses.
+pub struct Flow<'a> {
+    shape: Rc<Shape<'a>>,
+    bindings: Vec<Binding<'a>>,
+    /// Where the statements start and end.
+    range: (u32, u32),
+    /// The places a use can be in, in the order written: a plain statement, or the part
+    /// of a compound one before its first block.
+    places: Vec<Place<'a>>,
+}
+
+/// What the statements of a scope are whatever the name: one walk of them all, so that
+/// the walk for a name reads only the statements that bind or test it.
+#[derive(Default)]
+pub struct Shape<'a> {
+    /// The first statement of a block that does not run on to the next, by the start of
+    /// the block: where it starts.
+    stops: HashMap<u32, u32>,
+    /// Where the statements nest too deep to follow.
+    deep: Option<u32>,
+    /// Where each name is the subject of an `isinstance` test, in order.
+    tests: HashMap<&'a str, Vec<u32>>,
+    /// What follows such a statement in its block, in order: it is not reached.
+    dead: Vec<(u32, u32)>,
+}
+
+impl<'a> Shape<'a> {
+    /// The shape of `body`, the statements of a scope.
+    pub fn new(body: &'a [Stmt]) -> Self {
+        let mut walk = Walk {
+            bindings: &[],
+            name: "",
+            places: Vec::new(),
+            quiet: true,
+            closing: 0,
+            looped: None,
+            deep: false,
+            marks: Vec::new(),
+            shape: None,
+            found: Some(Shape::default()),
+        };
+        walk.block(body, State::default(), 0);
+        let mut shape = walk.found.unwrap_or_default();
+        for tests in shape.tests.values_mut() {
+            tests.sort_unstable();
+            tests.dedup();
+        }
+        shape.dead.sort_unstable();
+        shape.dead.dedup();
+        shape
+    }
+
+    /// Whether offset `at` is not reached, or nested too deep to follow.
+    fn unreached(&self, at: u32) -> bool {
+        let after = self.dead.partition_point(|&(start, _)| start <= at);
+        let dead = after.checked_sub(1).map(|last| self.dead[last]);
+        dead.is_some_and(|(_, end)| at < end) || self.deep.is_some_and(|deep| at >= deep)
+    }
+}
+
+/// A plain statement or the head of a compound one, and what the name holds before it;
+/// or statements that neither bind nor test the name, which holds the same in all of them.
+struct Place<'a> {
+    start: u32,
+    end: u32,
+    before: State<'a>,
+    /// The head of a `while`, read again after each turn: where its body ends.
+    turns: Option<u32>,
+    /// The outermost loop around it.
+    looped: Option<(u32, u32)>,
+}
+
+impl<'a> Flow<'a> {
+    /// The flow of `name` through `body`, the statements of the scope whose bindings of
+    /// the name are `bindings` (see [`crate::scopes::Scan::bindings`]) and whose shape is
+    /// `shape`.
+    pub fn new(
+        body: &'a [Stmt],
+        shape: Rc<Shape<'a>>,
+        bindings: Vec<Binding<'a>>,
+        name: &str,
+    ) -> Option<Self> {
+        let (first, last) = (body.first()?, body.last()?);
+        // The statements read: those a binding or a test of the name is in.
+        let mut marks: Vec<u32> = bindings.iter().map(|binding| binding.site).collect();
+        marks.extend(shape.tests.get(name).into_iter().flatten());
+        marks.sort_unstable();
+        let mut walk = Walk {
+            bindings: &bindings,
+            name,
+            places: Vec::new(),
+            quiet: false,
+            closing: 0,
+            looped: None,
+            deep: false,
+            marks,
+            shape: Some(&shape),
+            found: None,
+        };
+        // What is bound before the body: the parameters.
+        let start = apply(
+            &bindings,
+            State::default(),
+            0,
+            first.start().to_u32(),
+            u32::MAX,
+        );
+        walk.block(body, start, 0);
+        let places = walk.places;
+        Some(Flow {
+            shape,
+            bindings,
+            range: (first.start().to_u32(), last.end().to_u32()),
+            places,
+        })
+    }
+
+    fn place(&self, at: u32) -> Option<&Place<'a>> {
+        let after = self.places.partition_point(|place| place.start <= at);
+        let place = self.places.get(after.checked_sub(1)?)?;
+        (at < place.end).then_some(place)
+    }
+
+    /// What the name holds at offset `at`. `None` when `at` is not in the statements: a
+    /// decorator or a default.
+    pub fn at(&self, at: u32) -> Option<Reach<'a>> {
+        if at < self.range.0 || at >= self.range.1 {
+            return None;
+        }
+        work(1);
+        // A place the walk did not reach is dead code, or nested too deep to follow.
+        let reached = self.place(at).filter(|_| !self.shape.unreached(at));
+        let state = reached.map_or_else(State::default, |place| {
+            let bindings = &self.bindings;
+            let state = apply(bindings, place.before.clone(), place.start, place.end, at);
+            match place.turns {
+                Some(end) => any(bindings, state, place.start, end),
+                None => state,
+            }
+        });
+        if state.lost || state.twice {
+            return Some(Reach {
+                origins: vec![(Origin::Unknown, at)],
+                narrowed: None,
+            });
+        }
+        Some(Reach {
+            origins: state
+                .live
+                .iter()
+                .map(|&index| (self.bindings[index].origin, self.bindings[index].site))
+                .collect(),
+            narrowed: state.narrowed,
+        })
+    }
+
+    /// The outermost `for` or `while` around offset `at`, as its start and end.
+    pub fn loop_around(&self, at: u32) -> Option<(u32, u32)> {
+        self.place(at)?.looped
+    }
+
+    /// Whether a binding takes effect after `start`, or is written in `start..end`.
+    pub fn binds_after(&self, start: u32, within: Option<(u32, u32)>) -> bool {
+        work(1);
+        let bindings = &self.bindings;
+        let before = bindings.partition_point(|binding| binding.site < start);
+        let pending = before
+            .checked_sub(1)
+            .is_some_and(|last| bindings[last].effect > start);
+        before < bindings.len()
+            || pending
+            || within.is_some_and(|(from, to)| !written(bindings, from, to).is_empty())
+    }
+}
+
+/// What `name` holds at offset `at` of `body`: [`Flow::at`] for one use.
+#[cfg(test)]
+fn reaching<'a>(
     body: &'a [Stmt],
     bindings: &[Binding<'a>],
     name: &str,
     at: u32,
 ) -> Option<Reach<'a>> {
-    let (first, last) = (body.first()?, body.last()?);
-    if at < first.start().to_u32() || at >= last.end().to_u32() {
-        return None;
-    }
-    let walk = Walk { bindings, name, at };
-    // What is bound before the body: the parameters.
-    let start = walk.apply(State::default(), 0, first.start().to_u32(), u32::MAX);
-    let state = match walk.block(body, start, 0) {
-        Out::Found(state) => state,
-        Out::Next(_) | Out::Stop => State::default(),
-    };
-    if state.lost || state.twice {
-        return Some(Reach {
-            origins: vec![(Origin::Unknown, at)],
-            narrowed: None,
-        });
-    }
-    Some(Reach {
-        origins: state
-            .live
-            .iter()
-            .map(|&index| (bindings[index].origin, bindings[index].site))
-            .collect(),
-        narrowed: state.narrowed,
-    })
-}
-
-/// The outermost `for` or `while` of `body` around offset `at`, as its start and end.
-pub fn loop_around(body: &[Stmt], at: u32) -> Option<(u32, u32)> {
-    let index = body.partition_point(|stmt| stmt.end().to_u32() <= at);
-    let stmt = body.get(index).filter(|stmt| stmt.start().to_u32() <= at)?;
-    let inner = |blocks: &[&[Stmt]]| blocks.iter().find_map(|block| loop_around(block, at));
-    match stmt {
-        Stmt::For(_) | Stmt::While(_) => Some((stmt.start().to_u32(), stmt.end().to_u32())),
-        Stmt::If(node) => {
-            let clauses = node.elif_else_clauses.iter().map(|clause| &*clause.body);
-            let blocks: Vec<&[Stmt]> = std::iter::once(&*node.body).chain(clauses).collect();
-            inner(&blocks)
-        }
-        Stmt::With(node) => inner(&[&node.body]),
-        Stmt::Try(node) => {
-            let handlers = node.handlers.iter().map(|handler| {
-                let ast::ExceptHandler::ExceptHandler(handler) = handler;
-                &*handler.body
-            });
-            let rest = [&*node.orelse, &*node.finalbody];
-            let blocks: Vec<&[Stmt]> = std::iter::once(&*node.body)
-                .chain(handlers)
-                .chain(rest)
-                .collect();
-            inner(&blocks)
-        }
-        Stmt::Match(node) => {
-            let blocks: Vec<&[Stmt]> = node.cases.iter().map(|case| &*case.body).collect();
-            inner(&blocks)
-        }
-        _ => None,
-    }
+    Flow::new(body, Rc::new(Shape::new(body)), bindings.to_vec(), name)?.at(at)
 }
 
 /// The most bindings followed at once: a name more branches than this bind is unknown.
@@ -184,8 +305,6 @@ fn work(steps: usize) {
 
 /// How a statement or a block ends.
 enum Out<'a> {
-    /// The use is in it: what the name holds there.
-    Found(State<'a>),
     /// It runs on to the next statement.
     Next(State<'a>),
     /// It does not: `return`, `raise`, `continue`, `break`.
@@ -206,166 +325,224 @@ fn merged<'a>(outs: Vec<Out<'a>>) -> Out<'a> {
     found.map_or(Out::Stop, Out::Next)
 }
 
-/// How deep statements nest before the walk gives up on the use.
+/// How deep statements nest before the walk gives up on what follows.
 const MAX_DEPTH: u8 = 64;
+
+/// How many `finally` blocks around one another are walked twice, once for the uses in
+/// them and once for what follows them.
+const MAX_CLOSING: u8 = 3;
+
+/// The bindings written in `start..end`, by index: they are in the order written.
+fn written(bindings: &[Binding<'_>], start: u32, end: u32) -> std::ops::Range<usize> {
+    let from = bindings.partition_point(|binding| binding.site < start);
+    let to = bindings.partition_point(|binding| binding.site < end);
+    from..to.max(from)
+}
+
+/// `state` after the bindings written in `start..end` that are in effect by `limit`.
+fn apply<'a>(
+    bindings: &[Binding<'_>],
+    state: State<'a>,
+    start: u32,
+    end: u32,
+    limit: u32,
+) -> State<'a> {
+    // A binding is in effect no sooner than it is written. Those written by `limit` and
+    // not yet in effect are the assignments `limit` is in the value of: more of them
+    // than are followed leave the name unknown, so that no use reads every binding.
+    let written = written(bindings, start, end.min(limit.saturating_add(1)));
+    for (pending, index) in written.rev().enumerate() {
+        work(1);
+        if bindings[index].effect <= limit {
+            return State {
+                live: vec![index],
+                ..State::default()
+            };
+        }
+        if pending >= MAX_LIVE {
+            return State {
+                lost: true,
+                ..State::default()
+            };
+        }
+    }
+    state
+}
+
+/// `state` or any binding written in `start..end`: what a loop body or an exception
+/// handler starts from.
+fn any<'a>(bindings: &[Binding<'_>], mut state: State<'a>, start: u32, end: u32) -> State<'a> {
+    let written = written(bindings, start, end);
+    if written.is_empty() {
+        return state;
+    }
+    let entered = State {
+        live: written.take(MAX_LIVE + 1).collect(),
+        ..State::default()
+    };
+    state.narrowed = None;
+    state.twice = false;
+    state.merge(&entered)
+}
 
 struct Walk<'s, 'a> {
     bindings: &'s [Binding<'a>],
     name: &'s str,
-    at: u32,
+    places: Vec<Place<'a>>,
+    /// A second walk of a `finally`, for what follows it: its places are known.
+    quiet: bool,
+    /// The `finally` blocks around the statement.
+    closing: u8,
+    /// The outermost loop around the statement.
+    looped: Option<(u32, u32)>,
+    /// Statements nested too deep were met: what follows is not placed.
+    deep: bool,
+    /// Where the name is bound or tested, in order.
+    marks: Vec<u32>,
+    /// The shape of the scope, for the walk of a name: the statements between two marks
+    /// are not read.
+    shape: Option<&'s Shape<'a>>,
+    /// The shape being found, for the walk of no name.
+    found: Option<Shape<'a>>,
 }
 
 impl<'a> Walk<'_, 'a> {
-    fn within(&self, start: u32, end: u32) -> bool {
-        start <= self.at && self.at < end
+    fn apply(&self, state: State<'a>, start: u32, end: u32) -> State<'a> {
+        apply(self.bindings, state, start, end, u32::MAX)
     }
 
-    /// The bindings written in `start..end`, by index: they are in the order written.
-    fn written(&self, start: u32, end: u32) -> std::ops::Range<usize> {
-        let from = self
-            .bindings
-            .partition_point(|binding| binding.site < start);
-        let to = self.bindings.partition_point(|binding| binding.site < end);
-        from..to.max(from)
+    fn any(&self, state: State<'a>, start: u32, end: u32) -> State<'a> {
+        any(self.bindings, state, start, end)
     }
 
-    /// `state` after the bindings written in `start..end` that are in effect by `limit`.
-    fn apply(&self, state: State<'a>, start: u32, end: u32, limit: u32) -> State<'a> {
-        let last = self
-            .written(start, end)
-            .rev()
-            .find(|&index| self.bindings[index].effect <= limit);
-        match last {
-            Some(index) => State {
-                live: vec![index],
-                ..State::default()
-            },
-            None => state,
+    /// Records that a use in `start..end` reads the name as `before` leaves it.
+    fn place(&mut self, start: u32, end: u32, before: &State<'a>, turns: Option<u32>) {
+        if !self.quiet && !self.deep && start < end {
+            work(1 + before.live.len());
+            self.places.push(Place {
+                start,
+                end,
+                before: before.clone(),
+                turns,
+                looped: self.looped,
+            });
         }
-    }
-
-    /// `state` or any binding written in `start..end`: what a loop body or an exception
-    /// handler starts from.
-    fn any(&self, mut state: State<'a>, start: u32, end: u32) -> State<'a> {
-        let written = self.written(start, end);
-        if written.is_empty() {
-            return state;
-        }
-        let entered = State {
-            live: written.take(MAX_LIVE + 1).collect(),
-            ..State::default()
-        };
-        state.narrowed = None;
-        state.twice = false;
-        state.merge(&entered)
     }
 
     /// What `test` says of the name when it holds and when it does not; nothing when the
     /// test itself binds the name (`isinstance(x, C) and (x := y)`).
-    fn tested(&self, test: &'a Expr) -> (Option<&'a Expr>, Option<&'a Expr>) {
-        let written = self.written(test.start().to_u32(), test.end().to_u32());
+    fn tested(&mut self, test: &'a Expr) -> (Option<&'a Expr>, Option<&'a Expr>) {
+        if let Some(found) = &mut self.found {
+            let mut names = Vec::new();
+            subjects(test, &mut names);
+            for name in names {
+                let tests = found.tests.entry(name).or_default();
+                tests.push(test.start().to_u32());
+            }
+        }
+        let written = written(self.bindings, test.start().to_u32(), test.end().to_u32());
         match written.is_empty() {
             true => narrowing(test, self.name),
             false => (None, None),
         }
     }
 
-    /// The part of a compound statement before its first block: `state` after it, and
-    /// whether the use is there.
-    fn header(&self, state: State<'a>, start: u32, body: &[Stmt]) -> (State<'a>, bool) {
+    /// The part of a compound statement before its first block: `state` after it.
+    fn header(&mut self, state: State<'a>, start: u32, body: &[Stmt]) -> State<'a> {
         let end = body.first().map_or(start, |first| first.start().to_u32());
-        let inside = self.within(start, end);
-        let limit = if inside { self.at } else { u32::MAX };
-        (self.apply(state, start, end, limit), inside)
+        self.place(start, end, &state, None);
+        self.apply(state, start, end)
     }
 
-    /// Where the walk of `body` can start: at the last plain statement before the use
-    /// that binds the name, as what the name held before it does not matter. A function
-    /// that binds a name thousands of times is then not walked from its top for each
-    /// use. A `return` skipped this way is not seen: a use in the dead code after it is
-    /// then followed, which reports nothing a live one would not.
-    fn last_assignment(&self, body: &[Stmt]) -> usize {
-        let holding = body.partition_point(|stmt| stmt.end().to_u32() <= self.at);
-        let Some(before) = body.get(holding).map(|stmt| stmt.start().to_u32()) else {
-            return 0;
-        };
-        let written = self
-            .bindings
-            .partition_point(|binding| binding.site < before);
-        let Some(last) = written.checked_sub(1).map(|last| self.bindings[last].site) else {
-            return 0;
-        };
-        let binding = body.partition_point(|stmt| stmt.end().to_u32() <= last);
-        let plain = body.get(binding).is_some_and(|stmt| {
-            stmt.start().to_u32() <= last
-                && !matches!(
-                    stmt,
-                    Stmt::If(_)
-                        | Stmt::While(_)
-                        | Stmt::For(_)
-                        | Stmt::With(_)
-                        | Stmt::Try(_)
-                        | Stmt::Match(_)
-                )
-        });
-        if plain {
-            binding
-        } else {
-            0
+    /// The statement of `body` from `index` on that holds the next mark; `body.len()`
+    /// for none.
+    fn marked(&self, body: &[Stmt], index: usize) -> usize {
+        let from = body[index].start().to_u32();
+        let next = self.marks.partition_point(|&mark| mark < from);
+        match self.marks.get(next) {
+            Some(&mark) => body.partition_point(|stmt| stmt.end().to_u32() <= mark),
+            None => body.len(),
         }
     }
 
-    fn block(&self, body: &'a [Stmt], mut state: State<'a>, depth: u8) -> Out<'a> {
+    /// Statements `start..end` of the block that starts at `block`, which neither bind
+    /// nor test the name: it holds `state` in all of them. `false` when one of them does
+    /// not run on to the next.
+    fn unmarked(
+        &mut self,
+        shape: &Shape<'a>,
+        block: u32,
+        state: &State<'a>,
+        run: (u32, u32),
+    ) -> bool {
+        work(1);
+        let (start, end) = run;
+        // What a statement that stops leaves unreached is in the shape, for every name.
+        self.place(start, end, state, None);
+        if shape.deep.is_some_and(|deep| (start..end).contains(&deep)) {
+            self.deep = true;
+            return false;
+        }
+        let stops = shape.stops.get(&block);
+        !stops.is_some_and(|stop| (start..end).contains(stop))
+    }
+
+    fn block(&mut self, body: &'a [Stmt], mut state: State<'a>, depth: u8) -> Out<'a> {
+        let Some(first) = body.first() else {
+            return Out::Next(state);
+        };
+        let block = first.start().to_u32();
         if depth > MAX_DEPTH {
-            return Out::Found(State::default());
+            self.deep = true;
+            if let Some(found) = &mut self.found {
+                found.deep.get_or_insert(block);
+            }
+            return Out::Stop;
         }
-        let from = self.last_assignment(body);
-        for (index, stmt) in body.iter().enumerate().skip(from) {
-            match self.stmt(stmt, state, depth) {
-                Out::Found(found) => return Out::Found(found),
-                Out::Next(next) => state = next,
-                Out::Stop => {
-                    // What follows in the block is not reached.
-                    let rest = &body[index + 1..];
-                    let dead = rest.first().zip(rest.last()).is_some_and(|(first, last)| {
-                        self.within(first.start().to_u32(), last.end().to_u32())
-                    });
-                    return if dead {
-                        Out::Found(State::default())
-                    } else {
-                        Out::Stop
-                    };
+        let mut index = 0;
+        while let Some(stmt) = body.get(index) {
+            if let Some(shape) = self.shape {
+                let next = self.marked(body, index);
+                if next > index {
+                    let run = (stmt.start().to_u32(), body[next - 1].end().to_u32());
+                    if !self.unmarked(shape, block, &state, run) {
+                        return Out::Stop;
+                    }
+                    index = next;
+                    continue;
                 }
             }
+            match self.stmt(stmt, state, depth) {
+                Out::Next(next) => state = next,
+                // What follows in the block is not reached, and not placed.
+                Out::Stop => {
+                    if let Some(found) = &mut self.found {
+                        found.stops.insert(block, stmt.start().to_u32());
+                        let rest = body.last().map_or(0, |last| last.end().to_u32());
+                        found.dead.push((stmt.end().to_u32(), rest));
+                    }
+                    return Out::Stop;
+                }
+            }
+            index += 1;
         }
         Out::Next(state)
     }
 
-    fn stmt(&self, stmt: &'a Stmt, state: State<'a>, depth: u8) -> Out<'a> {
+    fn stmt(&mut self, stmt: &'a Stmt, state: State<'a>, depth: u8) -> Out<'a> {
         work(1);
         let (start, end) = (stmt.start().to_u32(), stmt.end().to_u32());
         match stmt {
             Stmt::If(node) => {
-                let (state, inside) = self.header(state, start, &node.body);
-                if inside {
-                    return Out::Found(state);
-                }
+                let state = self.header(state, start, &node.body);
                 let (yes, no) = self.tested(&node.test);
-                let mut outs = Vec::new();
-                match self.block(&node.body, state.clone().narrow(yes), depth + 1) {
-                    Out::Found(found) => return Out::Found(found),
-                    out => outs.push(out),
-                }
+                let mut outs = vec![self.block(&node.body, state.clone().narrow(yes), depth + 1)];
                 let mut rest = state.narrow(no);
                 let mut closed = false;
                 for clause in &node.elif_else_clauses {
                     let branch = match &clause.test {
                         Some(test) => {
-                            let (after, inside) =
-                                self.header(rest, clause.start().to_u32(), &clause.body);
-                            if inside {
-                                return Out::Found(after);
-                            }
+                            let after = self.header(rest, clause.start().to_u32(), &clause.body);
                             let (yes, no) = self.tested(test);
                             rest = after.clone().narrow(no);
                             after.narrow(yes)
@@ -375,10 +552,7 @@ impl<'a> Walk<'_, 'a> {
                             rest.clone()
                         }
                     };
-                    match self.block(&clause.body, branch, depth + 1) {
-                        Out::Found(found) => return Out::Found(found),
-                        out => outs.push(out),
-                    }
+                    outs.push(self.block(&clause.body, branch, depth + 1));
                 }
                 if !closed {
                     outs.push(Out::Next(rest));
@@ -387,107 +561,87 @@ impl<'a> Walk<'_, 'a> {
             }
             Stmt::While(ast::StmtWhile { body, orelse, .. })
             | Stmt::For(ast::StmtFor { body, orelse, .. }) => {
-                // The iterable of a `for` is read once, before its target is bound.
-                let (bound, inside) = self.header(state.clone(), start, body);
-                if inside && matches!(stmt, Stmt::For(_)) {
-                    return Out::Found(bound);
-                }
+                let head = body.first().map_or(start, |first| first.start().to_u32());
                 let body_end = body.last().map_or(end, |last| last.end().to_u32());
+                let outer = self.looped;
+                self.looped = outer.or(Some((start, end)));
+                // The iterable of a `for` is read once, before its target is bound; the
+                // test of a `while` again after each turn.
+                let turns = matches!(stmt, Stmt::While(_)).then_some(body_end);
+                self.place(start, head, &state, turns);
+                let bound = self.apply(state.clone(), start, head);
                 let entry = self.any(bound, start, body_end);
-                if inside {
-                    return Out::Found(entry);
-                }
                 let after = match self.block(body, entry.clone(), depth + 1) {
-                    Out::Found(found) => return Out::Found(found),
                     Out::Next(ran) => state.merge(&entry).merge(&ran),
                     Out::Stop => state.merge(&entry),
                 };
-                self.block(orelse, after, depth + 1)
+                let out = self.block(orelse, after, depth + 1);
+                self.looped = outer;
+                out
             }
             Stmt::With(node) => {
-                let (state, inside) = self.header(state, start, &node.body);
-                if inside {
-                    return Out::Found(state);
-                }
+                let state = self.header(state, start, &node.body);
                 self.block(&node.body, state, depth + 1)
             }
             Stmt::Try(node) => {
                 let body_end = node.body.last().map_or(start, |last| last.end().to_u32());
                 // An exception can leave the body after any of its bindings.
                 let raised = self.any(state.clone(), start, body_end);
-                let ran = match self.block(&node.body, state, depth + 1) {
-                    Out::Found(found) => return Out::Found(found),
-                    out => out,
-                };
+                let ran = self.block(&node.body, state, depth + 1);
                 let mut outs = Vec::new();
                 for handler in &node.handlers {
                     let ast::ExceptHandler::ExceptHandler(handler) = handler;
-                    let (caught, inside) =
+                    let caught =
                         self.header(raised.clone(), handler.start().to_u32(), &handler.body);
-                    if inside {
-                        return Out::Found(caught);
-                    }
-                    match self.block(&handler.body, caught, depth + 1) {
-                        Out::Found(found) => return Out::Found(found),
-                        out => outs.push(out),
-                    }
+                    outs.push(self.block(&handler.body, caught, depth + 1));
                 }
                 outs.push(match ran {
-                    Out::Next(ran) => match self.block(&node.orelse, ran, depth + 1) {
-                        Out::Found(found) => return Out::Found(found),
-                        out => out,
-                    },
-                    out => out,
+                    Out::Next(ran) => self.block(&node.orelse, ran, depth + 1),
+                    Out::Stop => Out::Stop,
                 });
                 let Some(first) = node.finalbody.first() else {
                     return merged(outs);
                 };
-                // `finally` runs however the rest ended.
+                // `finally` runs however the rest ended: a use in it reads any binding
+                // of the statement, what follows it reads what ran to its end.
                 let closing = self.any(raised, start, first.start().to_u32());
-                match merged(outs) {
-                    Out::Next(state) => {
-                        let state = if self.within(first.start().to_u32(), end) {
-                            closing
-                        } else {
-                            state
-                        };
-                        self.block(&node.finalbody, state, depth + 1)
-                    }
-                    _ => match self.block(&node.finalbody, closing, depth + 1) {
-                        Out::Found(found) => Out::Found(found),
-                        _ => Out::Stop,
-                    },
+                let Out::Next(ended) = merged(outs) else {
+                    self.block(&node.finalbody, closing, depth + 1);
+                    return Out::Stop;
+                };
+                if self.quiet {
+                    return self.block(&node.finalbody, ended, depth + 1);
                 }
+                self.closing += 1;
+                let closed = self.block(&node.finalbody, closing, depth + 1);
+                let out = match self.closing > MAX_CLOSING {
+                    // Too many around one another to walk each twice: what follows
+                    // reads any binding too.
+                    true => closed,
+                    false => {
+                        self.quiet = true;
+                        let out = self.block(&node.finalbody, ended, depth + 1);
+                        self.quiet = false;
+                        out
+                    }
+                };
+                self.closing -= 1;
+                out
             }
             Stmt::Match(node) => {
                 let first = node.cases.first().map_or(end, |case| case.start().to_u32());
-                let inside = self.within(start, first);
-                let limit = if inside { self.at } else { u32::MAX };
-                let state = self.apply(state, start, first, limit);
-                if inside {
-                    return Out::Found(state);
-                }
+                self.place(start, first, &state, None);
+                let state = self.apply(state, start, first);
                 let mut outs = vec![Out::Next(state.clone())];
                 for case in &node.cases {
-                    let (captured, inside) =
-                        self.header(state.clone(), case.start().to_u32(), &case.body);
-                    if inside {
-                        return Out::Found(captured);
-                    }
-                    match self.block(&case.body, captured, depth + 1) {
-                        Out::Found(found) => return Out::Found(found),
-                        out => outs.push(out),
-                    }
+                    let captured = self.header(state.clone(), case.start().to_u32(), &case.body);
+                    outs.push(self.block(&case.body, captured, depth + 1));
                 }
                 merged(outs)
             }
             _ => {
-                let inside = self.within(start, end);
-                let limit = if inside { self.at } else { u32::MAX };
-                let state = self.apply(state, start, end, limit);
-                if inside {
-                    return Out::Found(state);
-                }
+                self.place(start, end, &state, None);
+                let state = self.apply(state, start, end);
                 match stmt {
                     Stmt::Return(_) | Stmt::Raise(_) | Stmt::Continue(_) | Stmt::Break(_) => {
                         Out::Stop
@@ -535,6 +689,20 @@ fn narrowing<'a>(test: &'a Expr, name: &str) -> (Option<&'a Expr>, Option<&'a Ex
     }
 }
 
+/// The names `test` may say the class of: the subjects [`narrowing`] reads.
+fn subjects<'a>(test: &'a Expr, names: &mut Vec<&'a str>) {
+    match test {
+        Expr::Call(call) => {
+            if let [Expr::Name(subject), _] = &*call.arguments.args {
+                names.push(subject.id.as_str());
+            }
+        }
+        Expr::UnaryOp(unary) => subjects(&unary.operand, names),
+        Expr::BoolOp(both) => both.values.iter().for_each(|value| subjects(value, names)),
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -555,10 +723,16 @@ mod tests {
         };
         let bindings = scan.bindings(scope, name).unwrap_or(&[]);
         let needle = format!("{name}.use()");
+        let shape = Rc::new(Shape::new(&function.body));
+        let flow = Flow::new(&function.body, shape, bindings.to_vec(), name).expect("a body");
         text.match_indices(&needle)
             .map(|(at, _)| {
                 let at = u32::try_from(at).unwrap();
-                let reach = reaching(&function.body, bindings, name, at).expect("in the body");
+                // As the resolver asks of a use in a lambda or a generator expression.
+                if let Some(start) = scan.deferred(scope, at) {
+                    let _ = flow.binds_after(start, flow.loop_around(at));
+                }
+                let reach = flow.at(at).expect("in the body");
                 let mut lines: Vec<String> = reach
                     .origins
                     .iter()
@@ -714,22 +888,105 @@ mod tests {
     }
 
     #[test]
-    fn the_walk_of_a_use_does_not_grow_with_the_bindings_before_it() {
-        // Twice the statements, each use walked: four times the work at most, whether
-        // the name is bound in every statement or under a condition.
+    fn a_scope_is_walked_once_whatever_the_number_of_uses() {
+        // Twice the statements and twice the uses: twice the work, whether the name is
+        // bound in every statement or under a condition.
         let plain =
             |count: usize| "def f(x):\n".to_string() + &"    x = a\n    x.use()\n".repeat(count);
         let branched = |count: usize| {
             "def f(x, c):\n".to_string() + &"    if c:\n        x = a\n    x.use()\n".repeat(count)
         };
-        assert!(
-            cost(&plain(400)) <= 4 * 400,
-            "a plain assignment restarts the walk"
-        );
-        assert!(cost(&plain(800)) <= 2 * cost(&plain(400)) + 16);
-        let (small, large) = (cost(&branched(200)), cost(&branched(400)));
-        assert!(large <= 5 * small, "{small} then {large}");
-        assert!(small <= 200 * 200 * (2 + 2 * MAX_LIVE), "{small}");
+        let (small, large) = (cost(&plain(400)), cost(&plain(800)));
+        assert!(small <= 11 * 400, "{small}");
+        assert!(large <= 2 * small + 16, "{small} then {large}");
+        // More branches than are followed bind the name: each place keeps MAX_LIVE at most.
+        // The first MAX_LIVE branches cost less than the rest, hence the margin.
+        let (small, large) = (cost(&branched(1500)), cost(&branched(3000)));
+        assert!(large <= 2 * small + small / 10, "{small} then {large}");
+        assert!(large <= 3000 * (10 + 4 * MAX_LIVE), "{large}");
+    }
+
+    #[test]
+    fn a_use_reads_a_bounded_number_of_bindings() {
+        // Twice the uses in a lambda in a loop, each after a binding: twice the work.
+        let later = |count: usize| {
+            "def f(x, xs):\n    for x in xs:\n".to_string()
+                + &"        x = a\n        g(lambda: x.use())\n".repeat(count)
+        };
+        let (small, large) = (cost(&later(1500)), cost(&later(3000)));
+        assert!(small <= 12 * 1500, "{small}");
+        assert!(large <= 2 * small + 16, "{small} then {large}");
+        // One statement that binds the name before every use, and one whose value holds
+        // every use: a use reads the bindings around it, not all of the statement.
+        let walrus = |count: usize| {
+            format!(
+                "def f(x):\n    y = ({})\n",
+                "(x := a), x.use(), ".repeat(count)
+            )
+        };
+        let (small, large) = (cost(&walrus(1500)), cost(&walrus(3000)));
+        assert!(small <= 6 * 1500, "{small}");
+        assert!(large <= 2 * small + 16, "{small} then {large}");
+        let chained = |count: usize| {
+            format!(
+                "def f(x):\n    {}({})\n",
+                "x = ".repeat(count),
+                "x.use(), ".repeat(count)
+            )
+        };
+        let (small, large) = (cost(&chained(1500)), cost(&chained(3000)));
+        assert!(large <= 2 * small + 16, "{small} then {large}");
+        assert!(large <= 3000 * (4 + MAX_LIVE), "{large}");
+        let unknown = held(&chained(MAX_LIVE + 2), "x");
+        assert_eq!(unknown[0], "2", "the use itself stands for the unknown");
+    }
+
+    #[test]
+    fn a_name_is_walked_through_the_statements_that_bind_or_test_it() {
+        // Twice the names, each bound and used once among the statements of the others:
+        // twice the work for them all, not four times.
+        let all = |count: usize| {
+            let mut text = "def f(c):\n".to_string();
+            for at in 0..count {
+                text.push_str(&format!("    if c:\n        x{at} = a\n    x{at}.use()\n"));
+            }
+            WORK.with(|work| work.set(0));
+            let source = Source::new(text.as_str(), (3, 14)).expect("parses");
+            let scan = Scan::new(source.body(), |_| false);
+            let Node::Function(function) = scan.scopes[1] else {
+                panic!("a function")
+            };
+            let shape = Rc::new(Shape::new(&function.body));
+            for at in 0..count {
+                let name = format!("x{at}");
+                let bindings = scan.bindings(1, &name).expect("bound").to_vec();
+                let flow = Flow::new(&function.body, Rc::clone(&shape), bindings, &name);
+                let used = text.find(&format!("{name}.use()")).expect("used");
+                let reach = flow.expect("a body").at(u32::try_from(used).unwrap());
+                assert_eq!(reach.expect("in the body").origins.len(), 1);
+            }
+            WORK.with(std::cell::Cell::get)
+        };
+        let (small, large) = (all(400), all(800));
+        assert!(small <= 16 * 400, "{small}");
+        assert!(large <= 2 * small + 16, "{small} then {large}");
+    }
+
+    #[test]
+    fn a_finally_in_a_finally_is_not_walked_twice_at_every_depth() {
+        let nested = |depth: usize| {
+            let mut text = "def f(x):\n".to_string();
+            for level in 0..depth {
+                let indent = "    ".repeat(level + 1);
+                text.push_str(&format!(
+                    "{indent}try:\n{indent}    x = a\n{indent}finally:\n"
+                ));
+            }
+            text.push_str(&format!("{}x.use()\n", "    ".repeat(depth + 1)));
+            text
+        };
+        let (small, large) = (cost(&nested(10)), cost(&nested(20)));
+        assert!(large <= 4 * small, "{small} then {large}");
     }
 
     #[test]

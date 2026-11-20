@@ -228,29 +228,32 @@ impl Modules {
             named.extend(mention.find_iter(text).map(|found| found.as_str()));
         }
         let of = |module: &str| module.split('.').next().unwrap_or(module).to_string();
-        let mut read: HashSet<&str> = HashSet::new();
-        // Each pass reads the stubs of the packages the pass before named.
-        while named.len() < all {
-            let fresh: Vec<&String> = self
-                .stubs
-                .keys()
-                .filter(|module| named.contains(of(module).as_str()))
-                .filter(|module| read.insert(module.as_str()))
-                .collect();
-            let known = named.len();
-            for module in fresh {
-                if let Some(stub) = self.stub(module) {
-                    for found in mention.find_iter(&stub.text) {
-                        // The match is a name of `packages`: borrow it from there.
-                        let at = self
-                            .packages
-                            .binary_search_by(|name| name.as_str().cmp(found.as_str()));
-                        named.extend(at.ok().map(|at| self.packages[at].as_str()));
+        // Each stub is read once, when its package is first named: the work grows with
+        // the stubs read, not with the stubs times the packages.
+        let mut stubs: HashMap<&str, Vec<&str>> = HashMap::new();
+        for module in self.stubs.keys() {
+            let package = module.split('.').next().unwrap_or(module);
+            stubs.entry(package).or_default().push(module);
+        }
+        let mut fresh: Vec<&str> = named.iter().copied().collect();
+        while let Some(package) = fresh.pop() {
+            if named.len() == all {
+                break;
+            }
+            for module in stubs.get(package).into_iter().flatten() {
+                let Some(stub) = self.stub(module) else {
+                    continue;
+                };
+                for found in mention.find_iter(&stub.text) {
+                    // The match is a name of `packages`: borrow it from there.
+                    let at = self
+                        .packages
+                        .binary_search_by(|name| name.as_str().cmp(found.as_str()));
+                    let Ok(at) = at else { continue };
+                    if named.insert(self.packages[at].as_str()) {
+                        fresh.push(self.packages[at].as_str());
                     }
                 }
-            }
-            if named.len() == known {
-                break;
             }
         }
         let mut modules: Vec<&str> = self

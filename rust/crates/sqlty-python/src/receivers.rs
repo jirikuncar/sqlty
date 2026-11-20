@@ -159,6 +159,22 @@ pub enum Ann {
     Unknown,
 }
 
+/// What is asked of bindings: a name of a scope of the checked module read in no order,
+/// a name at the top of a module, the attribute a class declares, read on another, or a
+/// name where some of its bindings reach.
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum Asked {
+    Local(Scope, String),
+    Global(String, String),
+    Member(Class, String, Class),
+    /// A name of a scope where the bindings written at these places reach, under the
+    /// `isinstance` test written at that one.
+    Reached(Scope, String, Vec<u32>, Option<u32>),
+}
+
+/// The flow of each name through each scope; `None` for a scope without statements.
+type Flows<'s> = HashMap<(Scope, String), Option<Rc<flow::Flow<'s>>>>;
+
 /// What a name or attribute is bound to, as far as a receiver reads it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Val {
@@ -425,13 +441,13 @@ fn in_class(val: Val, scan: &Scan<'_>, scope: Scope, target: &str) -> Val {
 /// own value and annotation are read before it.
 fn class_binds(scan: &Scan<'_>, scope: Scope, name: &str, target: Option<&str>) -> bool {
     let head = name.split('.').next().unwrap_or(name);
-    let bound = scan.bindings(scope, head).map_or(0, |bindings| {
+    scan.bindings(scope, head).is_some_and(|bindings| {
         bindings
             .iter()
             .filter(|binding| !matches!(binding.origin, Origin::Declared(_, None)))
-            .count()
-    });
-    bound > usize::from(target == Some(head))
+            .nth(usize::from(target == Some(head)))
+            .is_some()
+    })
 }
 
 /// Whether `annotation` names something the body of the class `scope` binds.
@@ -631,6 +647,12 @@ pub struct Resolver<'s, 'a> {
     local: OnceCell<Arc<Facts>>,
     read: RefCell<HashMap<String, Option<Arc<Facts>>>>,
     orders: RefCell<HashMap<Class, Option<Rc<Vec<Class>>>>>,
+    /// What each name holds through the statements of a scope, walked once.
+    flows: RefCell<Flows<'s>>,
+    /// The shape of the statements of a scope, whatever the name: walked once.
+    shapes: RefCell<HashMap<Scope, Rc<flow::Shape<'s>>>>,
+    /// What the bindings of a name or attribute, read in no order, give it: asked once.
+    agreed: RefCell<HashMap<Asked, Option<Value>>>,
     fuel: Cell<u32>,
 }
 
@@ -657,6 +679,9 @@ impl<'s, 'a> Resolver<'s, 'a> {
             local: OnceCell::new(),
             read: RefCell::default(),
             orders: RefCell::default(),
+            flows: RefCell::default(),
+            shapes: RefCell::default(),
+            agreed: RefCell::default(),
             fuel: Cell::new(0),
         }
     }
@@ -743,6 +768,20 @@ impl<'s, 'a> Resolver<'s, 'a> {
         found
     }
 
+    /// What `asked` is, worked out once with a budget of its own, so that the answer
+    /// does not depend on who asks first. A question that asks itself has no answer.
+    fn once(&self, asked: Asked, answer: impl FnOnce() -> Option<Value>) -> Option<Value> {
+        if let Some(known) = self.agreed.borrow().get(&asked) {
+            return known.clone();
+        }
+        self.agreed.borrow_mut().insert(asked.clone(), None);
+        let left = self.fuel.replace(FUEL);
+        let found = answer();
+        self.fuel.set(left);
+        self.agreed.borrow_mut().insert(asked, found.clone());
+        found
+    }
+
     /// Whether another step may be taken at `depth`.
     fn step(&self, depth: u8) -> Option<()> {
         let left = self.fuel.get().checked_sub(1)?;
@@ -754,7 +793,7 @@ impl<'s, 'a> Resolver<'s, 'a> {
     fn eval(&self, val: &Val, env: Env<'_>, depth: u8) -> Option<Value> {
         self.step(depth)?;
         match val {
-            Val::Name(name) => match self.local_name(name, env, depth + 1) {
+            Val::Name(name) => match self.local_name(name, env) {
                 Some(bound) => bound,
                 None => self.global(env.module, name, depth + 1),
             },
@@ -805,10 +844,15 @@ impl<'s, 'a> Resolver<'s, 'a> {
             return self.eval(stated, Env { at: None, ..env }, depth);
         }
         let mut found: Option<Value> = None;
+        let mut last: Option<&Val> = None;
         for (val, at) in bound {
-            if matches!(val, Val::None) {
+            // The same value read at no place gives what it gave: a name bound to it
+            // any number of times costs one reading.
+            let again = at.is_none() && last == Some(val);
+            if matches!(val, Val::None) || again {
                 continue;
             }
+            last = Some(val);
             let value = self.eval(val, Env { at: *at, ..env }, depth)?;
             if found.as_ref().is_some_and(|known| *known != value) {
                 return None;
@@ -827,7 +871,7 @@ impl<'s, 'a> Resolver<'s, 'a> {
     /// What `name` is bound to by a scope around the expression; `None` when none of them
     /// binds it, or when it is a name of the module read from a function: then it is what
     /// the module binds it to, in no order.
-    fn local_name(&self, name: &str, env: Env<'_>, depth: u8) -> Option<Option<Value>> {
+    fn local_name(&self, name: &str, env: Env<'_>) -> Option<Option<Value>> {
         if env.module != self.module {
             return None;
         }
@@ -872,29 +916,22 @@ impl<'s, 'a> Resolver<'s, 'a> {
             let Some(bindings) = bindings else {
                 continue;
             };
-            // A lambda or a generator runs later, as a nested function does.
-            let at = env
-                .at
-                .filter(|&at| scope == innermost && !self.later(scope, body, bindings, at));
-            let hidden: Vec<Binding<'a>>;
-            let hides = |binding: &Binding<'_>| hidden_by_class(self.scan, scope, binding);
-            let bindings = match bindings.iter().any(hides) {
-                true => {
-                    hidden = bindings
-                        .iter()
-                        .map(|binding| match hides(binding) {
-                            true => Binding {
-                                origin: Origin::Unknown,
-                                ..*binding
-                            },
-                            false => *binding,
-                        })
-                        .collect();
-                    &hidden[..]
+            // Only a parameter is hidden, and a parameter is the first binding of its name.
+            let hidden = bindings
+                .first()
+                .is_some_and(|first| hidden_by_class(self.scan, scope, first));
+            // Read once for the scope, not at every use: both readers below keep theirs.
+            let seen = || -> Vec<Binding<'s>> {
+                let mut seen = bindings.to_vec();
+                if let (true, Some(first)) = (hidden, seen.first_mut()) {
+                    first.origin = Origin::Unknown;
                 }
-                false => bindings,
+                seen
             };
-            let reach = at.and_then(|at| flow::reaching(body, bindings, name, at));
+            let reach = env
+                .at
+                .filter(|_| scope == innermost)
+                .and_then(|at| self.held(scope, name, body, &seen, at));
             let this = class.map(|(class, _)| Class::new(self.module, class.name.as_str()));
             let env = Env {
                 stack: &env.stack[..=i],
@@ -902,39 +939,61 @@ impl<'s, 'a> Resolver<'s, 'a> {
                 ..env
             };
             return Some(match reach {
-                Some(reach) => self.reached(name, &reach, false, env, depth),
-                None => {
-                    let bound: Vec<_> = bindings
+                Some(reach) => self.reached(name, &reach, false, env),
+                None => self.once(Asked::Local(scope, name.to_string()), || {
+                    let bound: Vec<_> = seen()
                         .iter()
                         .map(|binding| bound(binding.origin, name, false, self.named))
                         .collect();
-                    self.agreed(&bound, true, env, depth)
-                }
+                    self.agreed(&bound, true, env, 0)
+                }),
             });
         }
         if env.stack.iter().any(|&scope| !self.scan.is_class(scope)) {
             return None;
         }
         let bindings = self.scan.bindings(0, name)?;
-        let body = self.source.body();
-        let at = env.at.filter(|&at| !self.later(0, body, bindings, at))?;
-        let reach = flow::reaching(body, bindings, name, at)?;
+        let reach = self.held(0, name, self.source.body(), &|| bindings.to_vec(), env.at?)?;
         let env = Env { stack: &[], ..env };
-        Some(self.reached(name, &reach, true, env, depth))
+        Some(self.reached(name, &reach, true, env))
     }
 
-    /// Whether the use at `at` is in a lambda or a generator of `scope` that may run after
-    /// the name is bound again: a binding of the scope takes effect after that code starts, or is in
-    /// a loop around it. Otherwise it reads what the name holds where it is written.
-    fn later(&self, scope: Scope, body: &[Stmt], bindings: &[Binding<'_>], at: u32) -> bool {
-        let Some(start) = self.scan.deferred(scope, at) else {
-            return false;
-        };
-        let looped = flow::loop_around(body, at);
-        bindings.iter().any(|binding| {
-            binding.effect > start
-                || looped.is_some_and(|(from, to)| from <= binding.site && binding.site < to)
-        })
+    /// What `name` holds at `at` in `body`, the statements of `scope`, followed in the
+    /// order they run: the scope is walked once for the name, whatever the number of
+    /// uses. `None` for a use that is not in the statements, and for one in a lambda or
+    /// a generator that may run after the name is bound again: a binding of the scope
+    /// takes effect after that code starts, or is in a loop around it. Every binding of
+    /// the scope then counts, as for a nested function.
+    fn held(
+        &self,
+        scope: Scope,
+        name: &str,
+        body: &'s [Stmt],
+        bindings: &dyn Fn() -> Vec<Binding<'s>>,
+        at: u32,
+    ) -> Option<flow::Reach<'s>> {
+        let key = (scope, name.to_string());
+        let known = self.flows.borrow().get(&key).cloned();
+        let flow = match known {
+            Some(flow) => flow,
+            None => {
+                let shape = self.shapes.borrow().get(&scope).cloned();
+                let shape = shape.unwrap_or_else(|| {
+                    let shape = Rc::new(flow::Shape::new(body));
+                    self.shapes.borrow_mut().insert(scope, Rc::clone(&shape));
+                    shape
+                });
+                let flow = flow::Flow::new(body, shape, bindings(), name).map(Rc::new);
+                self.flows.borrow_mut().insert(key, flow.clone());
+                flow
+            }
+        }?;
+        if let Some(start) = self.scan.deferred(scope, at) {
+            if flow.binds_after(start, flow.loop_around(at)) {
+                return None;
+            }
+        }
+        flow.at(at)
     }
 
     /// What `name` holds where the bindings `reach` are in effect. An `isinstance` test
@@ -943,6 +1002,25 @@ impl<'s, 'a> Resolver<'s, 'a> {
     /// class; a subclass of the class stays what it is. A name known to be of an
     /// unrelated class would be of both, which is not followed.
     fn reached(
+        &self,
+        name: &str,
+        reach: &flow::Reach<'_>,
+        top: bool,
+        env: Env<'_>,
+    ) -> Option<Value> {
+        // The uses the same bindings reach, under the same test, hold the same.
+        let unknown = matches!(reach.origins[..], [(Origin::Unknown, _)]);
+        if unknown && reach.narrowed.is_none() {
+            return None;
+        }
+        let scope = env.stack.last().copied().unwrap_or(0);
+        let sites = reach.origins.iter().map(|(_, site)| *site).collect();
+        let test = reach.narrowed.map(|test| test.start().to_u32());
+        let asked = Asked::Reached(scope, name.to_string(), sites, test);
+        self.once(asked, || self.reached_now(name, reach, top, env, 0))
+    }
+
+    fn reached_now(
         &self,
         name: &str,
         reach: &flow::Reach<'_>,
@@ -1011,7 +1089,10 @@ impl<'s, 'a> Resolver<'s, 'a> {
         let Some(facts) = self.facts(module) else {
             return Some(Value::Unresolved(Class::new(module, name)));
         };
-        self.decl(facts.names.get(name)?, Env::top(module), depth + 1)
+        let bound = facts.names.get(name)?;
+        self.once(Asked::Global(module.to_string(), name.to_string()), || {
+            self.decl(bound, Env::top(module), 0)
+        })
     }
 
     /// What `from target import original as local` binds in `module`.
@@ -1077,7 +1158,8 @@ impl<'s, 'a> Resolver<'s, 'a> {
                         ..Env::top(&owner.module)
                     };
                     if let Some(bound) = found.attrs.get(attr) {
-                        return self.decl(bound, env, depth + 1);
+                        let asked = Asked::Member(owner.clone(), attr.to_string(), class.clone());
+                        return self.once(asked, || self.decl(bound, env, 0));
                     }
                     if let Some(method) = found.methods.get(attr) {
                         if method.property {
@@ -1244,6 +1326,10 @@ impl<'s, 'a> Resolver<'s, 'a> {
         else {
             return Some(vec![class.clone()]);
         };
+        // Each base is in the order, which holds no more classes than are followed.
+        if known.bases.len() > MAX_ORDER {
+            return None;
+        }
         let mut direct: Vec<Class> = Vec::new();
         let mut orders: Vec<Vec<Class>> = Vec::new();
         for base in &known.bases {
@@ -1264,12 +1350,22 @@ impl<'s, 'a> Resolver<'s, 'a> {
             direct.push(base);
             orders.push(order);
         }
-        orders.push(direct);
         let mut merged = vec![class.clone()];
-        merged.extend(c3_merge(orders)?);
-        Some(merged)
+        match orders.len() {
+            // One base: the class, then the order of the base, with nothing to merge.
+            1 => merged.extend(orders.pop()?),
+            _ => {
+                orders.push(direct);
+                merged.extend(c3_merge(orders)?);
+            }
+        }
+        // The class, and as many as a merge holds when it ends.
+        (merged.len() <= MAX_ORDER + 2).then_some(merged)
     }
 }
+
+/// The classes a method resolution order may hold: a longer one is not followed.
+const MAX_ORDER: usize = 256;
 
 /// The C3 merge of the orders of the bases and of the list of the bases: each time, the
 /// first head that is in the tail of no order. `None` when no head qualifies.
@@ -1280,7 +1376,7 @@ fn c3_merge(mut orders: Vec<Vec<Class>>) -> Option<Vec<Class>> {
         if orders.is_empty() {
             return Some(merged);
         }
-        if merged.len() > 256 {
+        if merged.len() > MAX_ORDER {
             return None;
         }
         let head = orders
@@ -1371,6 +1467,24 @@ mod tests {
             "a class in a class or function is not modelled"
         );
         assert_eq!(found.classes["C"].attrs["Inner"], [Val::Unknown]);
+    }
+
+    #[test]
+    fn the_names_of_a_class_are_read_without_those_of_the_others() {
+        // Twice the classes: twice the names read, not four times.
+        let read = |count: usize| {
+            let text: String = (0..count)
+                .map(|at| {
+                    format!("class C{at}:\n    x = 1\n    def m(self):\n        self.y = 1\n")
+                })
+                .collect();
+            crate::scopes::READ.with(|read| read.set(0));
+            assert_eq!(facts(&text).classes.len(), count);
+            crate::scopes::READ.with(Cell::get)
+        };
+        let (small, large) = (read(200), read(400));
+        assert!(small <= 8 * 200, "{small}");
+        assert!(large <= 2 * small + 16, "{small} then {large}");
     }
 
     #[test]

@@ -78,6 +78,10 @@ pub struct Scan<'a> {
     /// The lambdas and generator expressions of a scope: code that runs when it is
     /// called or iterated, not where it is written.
     deferred: HashMap<Scope, Vec<TextRange>>,
+    /// The names each scope binds and the attributes the methods of each class bind, in
+    /// order: reading those of one scope does not read those of every other.
+    names: HashMap<Scope, Vec<&'a str>>,
+    fields: HashMap<Scope, Vec<&'a str>>,
     /// The names a function declares `global` or `nonlocal`.
     foreign: HashSet<(Scope, &'a str)>,
     /// The calls kept, with their scopes.
@@ -123,6 +127,42 @@ pub struct Binding<'a> {
     pub effect: u32,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The names read by this thread when the names of a scope were asked for, for the
+    /// tests of cost.
+    pub(crate) static READ: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Counts a name read in tests; nothing otherwise.
+#[cfg_attr(
+    not(test),
+    expect(clippy::missing_const_for_fn, reason = "it counts in tests")
+)]
+fn read() {
+    #[cfg(test)]
+    READ.with(|read| read.set(read.get() + 1));
+}
+
+/// Keeps the ranges no other one contains, by start: expressions nest or lie apart, so
+/// [`around`] finds the one around an offset without reading them all.
+fn outermost(ranges: &mut Vec<TextRange>) {
+    ranges.sort_by_key(|range| (range.start(), std::cmp::Reverse(range.end())));
+    let mut end = TextSize::new(0);
+    ranges.retain(|range| {
+        let outer = range.end() > end;
+        end = end.max(range.end());
+        outer
+    });
+}
+
+/// Where the range of `ranges` around offset `at` starts (see [`outermost`]).
+fn around(ranges: &[TextRange], at: u32) -> Option<u32> {
+    let after = ranges.partition_point(|range| range.start().to_u32() <= at);
+    let range = ranges.get(after.checked_sub(1)?)?;
+    (at < range.end().to_u32()).then(|| range.start().to_u32())
+}
+
 impl<'a> Scan<'a> {
     /// Walks `body`, keeping the calls `want` accepts.
     pub fn new(body: &'a [Stmt], want: impl FnMut(&'a ExprCall) -> bool) -> Self {
@@ -135,6 +175,8 @@ impl<'a> Scan<'a> {
                 attributes: HashMap::new(),
                 shadows: HashMap::new(),
                 deferred: HashMap::new(),
+                names: HashMap::new(),
+                fields: HashMap::new(),
                 foreign: HashSet::new(),
                 calls: Vec::new(),
                 templates: Vec::new(),
@@ -146,6 +188,16 @@ impl<'a> Scan<'a> {
         for bindings in scan.bound.values_mut() {
             bindings.sort_by_key(|binding| binding.site);
         }
+        for &(scope, name) in scan.bound.keys() {
+            scan.names.entry(scope).or_default().push(name);
+        }
+        for &(scope, name) in scan.attributes.keys() {
+            scan.fields.entry(scope).or_default().push(name);
+        }
+        let listed = scan.names.values_mut().chain(scan.fields.values_mut());
+        listed.for_each(|names| names.sort_unstable());
+        scan.shadows.values_mut().for_each(outermost);
+        scan.deferred.values_mut().for_each(outermost);
         scan
     }
 
@@ -182,10 +234,12 @@ impl<'a> Scan<'a> {
 
     /// The names `scope` binds, each with its bindings.
     pub fn bound_in(&self, scope: Scope) -> impl Iterator<Item = (&'a str, &[Binding<'a>])> {
-        self.bound
-            .iter()
-            .filter(move |((owner, _), _)| *owner == scope)
-            .map(|((_, name), bindings)| (*name, bindings.as_slice()))
+        let names = self.names.get(&scope).map_or(&[][..], Vec::as_slice);
+        names.iter().filter_map(move |&name| {
+            read();
+            let bindings = self.bound.get(&(scope, name))?;
+            Some((name, bindings.as_slice()))
+        })
     }
 
     /// The attributes the methods of the class `scope` bind on their first parameter, each
@@ -194,31 +248,26 @@ impl<'a> Scan<'a> {
         &self,
         scope: Scope,
     ) -> impl Iterator<Item = (&'a str, &[(Origin<'a>, Scope)])> {
-        self.attributes
-            .iter()
-            .filter(move |((owner, _), _)| *owner == scope)
-            .map(|((_, name), bound)| (*name, bound.as_slice()))
+        let names = self.fields.get(&scope).map_or(&[][..], Vec::as_slice);
+        names.iter().filter_map(move |&name| {
+            read();
+            let bound = self.attributes.get(&(scope, name))?;
+            Some((name, bound.as_slice()))
+        })
     }
 
     /// Whether `at` is inside a comprehension or a lambda of `scope` that binds `name`.
     pub fn shadowed(&self, scope: Scope, name: &str, at: u32) -> bool {
-        self.shadows.get(&(scope, name)).is_some_and(|ranges| {
-            ranges
-                .iter()
-                .any(|range| range.start().to_u32() <= at && at < range.end().to_u32())
-        })
+        self.shadows
+            .get(&(scope, name))
+            .is_some_and(|ranges| around(ranges, at).is_some())
     }
 
     /// Where the outermost lambda or generator expression of `scope` around `at` starts.
     /// It runs later: a binding the scope makes from there on may be in effect by then,
     /// as for a nested `def`.
     pub fn deferred(&self, scope: Scope, at: u32) -> Option<u32> {
-        self.deferred
-            .get(&scope)?
-            .iter()
-            .filter(|range| range.start().to_u32() <= at && at < range.end().to_u32())
-            .map(|range| range.start().to_u32())
-            .min()
+        around(self.deferred.get(&scope)?, at)
     }
 
     fn scope(&self) -> Scope {
