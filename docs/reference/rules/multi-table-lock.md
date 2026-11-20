@@ -16,8 +16,9 @@ Default severity: **warn**
 Reports the first new statement of a transaction that locks a second table that
 has rows against writes (`SHARE` or a stronger lock: most `ALTER TABLE` forms,
 a foreign key on both tables, `CREATE INDEX` without `CONCURRENTLY`, `TRUNCATE`,
-`DROP TABLE`, `LOCK TABLE`), while the transaction still holds the first. Once
-per transaction.
+`DROP TABLE`, `LOCK TABLE`), while an earlier statement of the transaction
+still holds the first. One statement that locks several tables, which it needs
+at once, is not reported. Once per transaction.
 
 `against.sql`:
 
@@ -44,9 +45,8 @@ them, and the more tables, the likelier a deadlock with the application.
 
 ## How to fix
 
-Change one table per transaction. Ignore the rule on a statement that needs
-both tables at once, such as `TRUNCATE` of tables linked by a foreign key or
-renames that swap two tables:
+Change one table per transaction. Ignore the rule where the statements must
+commit together, such as renames that swap two tables:
 
 ```sql migration
 SET lock_timeout = '2s';

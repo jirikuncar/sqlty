@@ -161,3 +161,21 @@ ALTER TABLE events ATTACH PARTITION events_09 FOR VALUES FROM ('2026-09-01') TO 
 UPDATE events_09 SET at = at WHERE at BETWEEN '2026-09-01' AND '2026-09-02';
 COMMIT;
 ```
+
+## A pinned key in one branch of OR bounds nothing
+
+```sql migration
+SET lock_timeout = '1s';
+-- error: [unbatched-backfill]
+UPDATE users SET email = '' WHERE id = 1 OR email IS NULL;
+```
+
+## A statement that needs two tables at once
+
+```sql migration
+BEGIN;
+SET LOCAL lock_timeout = '1s';
+-- error:
+LOCK TABLE users, events;
+COMMIT;
+```

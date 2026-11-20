@@ -18,8 +18,7 @@ use sqlparser::ast::{
     visit_expressions, AlterColumnOperation, AlterTableOperation, AlterType, AlterTypeOperation,
     BinaryOperator, CascadeOption, CheckConstraint, ColumnDef, ColumnOption, CopySource, DataType,
     Delete, DetachPartitionMode, Expr, ForValues, FromTable, InTarget, Insert, LockTableMode,
-    Merge, ObjectName, ObjectType, Query, SetExpr, Statement, TableConstraint, TableFactor,
-    TableObject,
+    Merge, ObjectName, ObjectType, SetExpr, Statement, TableConstraint, TableFactor, TableObject,
 };
 
 use crate::analyzer::{parse_ddl, SqlDialect};
@@ -196,14 +195,15 @@ impl Model {
                     );
                 }
                 if session.transaction {
+                    let held = session.locked.len();
                     let locked = parsed.as_ref().map(|parsed| self.write_locked(parsed));
                     for table in locked.unwrap_or_default() {
                         if !session.locked.contains(&table) {
                             session.locked.push(table);
                         }
                     }
-                    if let [held @ .., last] = session.locked.as_slice() {
-                        if !held.is_empty() && !session.reported_tables {
+                    if let (held @ [_, ..], [last, ..]) = session.locked.split_at(held) {
+                        if !session.reported_tables {
                             session.reported_tables = true;
                             report(
                                 Rule::MultiTableLock,
@@ -215,12 +215,13 @@ impl Model {
                         }
                     }
                 }
-                if let Some((table, selection)) = parsed
+                if let Some((target, selection)) = parsed
                     .as_ref()
                     .and_then(backfilled)
-                    .filter(|(table, _)| !self.created.contains(table))
+                    .filter(|(target, _)| !self.created.contains(&target.table))
                 {
-                    if !selection.is_some_and(|selection| self.batched(&table, selection)) {
+                    let table = target.table.clone();
+                    if !selection.is_some_and(|selection| self.batched(&target, selection)) {
                         report(
                             Rule::UnbatchedBackfill,
                             format!(
@@ -361,10 +362,8 @@ impl Model {
             }
             Statement::CreateIndex(index) if index.unique && index.predicate.is_none() => {
                 if let [column] = index.columns.as_slice() {
-                    self.keys.insert((
-                        key(&index.table_name),
-                        column.column.expr.to_string().to_lowercase(),
-                    ));
+                    self.keys
+                        .insert((key(&index.table_name), column_name(&column.column.expr)));
                 }
             }
             Statement::Drop {
@@ -538,25 +537,31 @@ impl Model {
             _ => return,
         };
         if let [column] = columns.as_slice() {
-            self.keys.insert((
-                table.to_string(),
-                column.column.expr.to_string().to_lowercase(),
-            ));
+            self.keys
+                .insert((table.to_string(), column_name(&column.column.expr)));
         }
     }
 
     /// Whether `selection` changes rows a few at a time: it pins a key column to listed values,
     /// takes a range with `BETWEEN`, or picks the rows with a `LIMIT` subquery.
-    fn batched(&self, table: &str, selection: &Expr) -> bool {
+    fn batched(&self, target: &Backfill, selection: &Expr) -> bool {
+        let table = target.table.as_str();
+        let short = table.rsplit('.').next().unwrap_or(table);
         let keyed = |column: &Expr| match column {
             Expr::Identifier(column) => self.keys.contains(&(table.to_string(), name(column))),
-            Expr::CompoundIdentifier(parts) => parts
-                .last()
-                .is_some_and(|column| self.keys.contains(&(table.to_string(), name(column)))),
+            Expr::CompoundIdentifier(parts) => match parts.as_slice() {
+                [.., qualifier, column] => {
+                    let qualifier = name(qualifier);
+                    (qualifier == short || target.alias.as_ref() == Some(&qualifier))
+                        && self.keys.contains(&(table.to_string(), name(column)))
+                }
+                _ => false,
+            },
             _ => false,
         };
         let literal = |value: &Expr| matches!(value, Expr::Value(_));
-        let pins = |expr: &Expr| match expr {
+        conjuncts(selection).any(|expr| match expr {
+            Expr::Between { negated: false, .. } => true,
             Expr::BinaryOp {
                 left,
                 op: BinaryOperator::Eq,
@@ -568,23 +573,13 @@ impl Model {
                 negated: false,
                 ..
             } => keyed(expr) && list.iter().all(literal),
-            _ => false,
-        };
-        let limited = |query: &Query| query.limit_clause.is_some();
-        visit_expressions(selection, |expr| match expr {
-            Expr::Between { negated: false, .. } => ControlFlow::Break(()),
-            Expr::Subquery(query)
-            | Expr::Exists {
-                subquery: query, ..
-            } if limited(query) => ControlFlow::Break(()),
             Expr::In {
                 target: InTarget::Subquery(query),
+                negated: false,
                 ..
-            } if limited(query) => ControlFlow::Break(()),
-            _ if conjuncts(expr).any(pins) => ControlFlow::Break(()),
-            _ => ControlFlow::Continue(()),
+            } => query.limit_clause.is_some(),
+            _ => false,
         })
-        .is_break()
     }
 
     /// The tables with rows that `stmt` locks against writes: `SHARE` or a stronger lock.
@@ -600,18 +595,13 @@ impl Model {
                             tables.push(key(partition));
                             tables.extend(self.defaults.get(&table).cloned());
                         }
-                        AlterTableOperation::AddConstraint {
-                            constraint: TableConstraint::ForeignKey(foreign),
-                            ..
-                        } => {
-                            tables.push(table.clone());
-                            tables.push(key(&foreign.foreign_table));
-                        }
                         _ => tables.push(table.clone()),
                     }
                 }
+                tables.extend(referenced_tables(stmt));
                 tables
             }
+            Statement::CreateTable(_) => referenced_tables(stmt),
             Statement::Truncate(truncate) => truncate
                 .table_names
                 .iter()
@@ -1289,15 +1279,32 @@ fn rewrite_command_message(command: &str) -> String {
 
 /// Whether `op` takes a lock weaker than `SHARE`, which lets writes go on.
 fn keeps_writes(op: &AlterTableOperation) -> bool {
-    matches!(
-        op,
-        AlterTableOperation::ValidateConstraint { .. }
-            | AlterTableOperation::SetOptionsParens { .. }
-            | AlterTableOperation::DetachPartitionOf {
-                mode: Some(DetachPartitionMode::Concurrently),
-                ..
-            }
-    )
+    match op {
+        AlterTableOperation::SetOptionsParens { options } => options.iter().all(|option| {
+            let option = option.to_string().to_lowercase();
+            let parameter = option.split('=').next().unwrap_or_default().trim();
+            parameter == "fillfactor"
+                || parameter == "parallel_workers"
+                || parameter.starts_with("autovacuum_")
+                || parameter.starts_with("toast")
+        }),
+        _ => matches!(
+            op,
+            AlterTableOperation::ValidateConstraint { .. }
+                | AlterTableOperation::DetachPartitionOf {
+                    mode: Some(DetachPartitionMode::Concurrently),
+                    ..
+                }
+        ),
+    }
+}
+
+/// The column `expr` names, folded; any other expression as its lowercased text.
+fn column_name(expr: &Expr) -> String {
+    match expr {
+        Expr::Identifier(ident) => name(ident),
+        _ => expr.to_string().to_lowercase(),
+    }
 }
 
 /// Whether a `LOCK TABLE` in `mode` blocks writes; without a mode it takes `ACCESS EXCLUSIVE`.
@@ -1326,8 +1333,14 @@ fn conjuncts(expr: &Expr) -> Box<dyn Iterator<Item = &Expr> + '_> {
     }
 }
 
+/// The table an `UPDATE` or `DELETE` changes rows of, and its alias.
+struct Backfill {
+    table: String,
+    alias: Option<String>,
+}
+
 /// The table an `UPDATE` or `DELETE` changes rows of, with its `WHERE` clause.
-fn backfilled(stmt: &Statement) -> Option<(String, Option<&Expr>)> {
+fn backfilled(stmt: &Statement) -> Option<(Backfill, Option<&Expr>)> {
     let (relation, selection) = match stmt {
         Statement::Query(query) => {
             return match &*query.body {
@@ -1344,7 +1357,15 @@ fn backfilled(stmt: &Statement) -> Option<(String, Option<&Expr>)> {
         _ => return None,
     };
     match relation {
-        TableFactor::Table { name, .. } => Some((key(name), selection.as_ref())),
+        TableFactor::Table {
+            name: table, alias, ..
+        } => {
+            let target = Backfill {
+                table: key(table),
+                alias: alias.as_ref().map(|alias| name(&alias.name)),
+            };
+            Some((target, selection.as_ref()))
+        }
         _ => None,
     }
 }
@@ -1917,6 +1938,10 @@ mod tests {
             ("ALTER TABLE users ADD COLUMN a int; ALTER TABLE teams ADD COLUMN b int;", &[]),
             (
                 "BEGIN; LOCK TABLE users, teams; COMMIT;",
+                &[],
+            ),
+            (
+                "BEGIN; LOCK TABLE users; LOCK TABLE teams; COMMIT;",
                 &[MultiTableLock],
             ),
             (
@@ -1968,6 +1993,30 @@ mod tests {
             ),
             (
                 "BEGIN; ALTER TABLE users ADD FOREIGN KEY (team_id) REFERENCES teams (id) NOT VALID; COMMIT;",
+                &[],
+            ),
+            (
+                "BEGIN; ALTER TABLE users ADD COLUMN t2 BIGINT REFERENCES teams (id); UPDATE teams SET id = 1 WHERE id BETWEEN 1 AND 2; COMMIT;",
+                &[LockedBackfill],
+            ),
+            (
+                "BEGIN; CREATE TABLE child (id int, team_id BIGINT REFERENCES teams (id)); ALTER TABLE users ADD COLUMN z int; COMMIT;",
+                &[MultiTableLock],
+            ),
+            ("UPDATE users SET bio = '' WHERE id = 1 OR bio IS NULL", &[UnbatchedBackfill]),
+            ("DELETE FROM users WHERE NOT (id BETWEEN 1 AND 10)", &[UnbatchedBackfill]),
+            (
+                "DELETE FROM users WHERE EXISTS (SELECT 1 FROM teams WHERE teams.id = users.team_id LIMIT 1)",
+                &[UnbatchedBackfill],
+            ),
+            (
+                "UPDATE users u SET bio = '' FROM teams t WHERE t.id = 1 AND u.team_id = t.id",
+                &[UnbatchedBackfill],
+            ),
+            ("UPDATE users u SET bio = '' WHERE u.id = 1", &[]),
+            ("ALTER TABLE users SET (user_catalog_table = true)", &[]),
+            (
+                "BEGIN; ALTER TABLE users SET (user_catalog_table = true); ALTER TABLE teams ADD COLUMN q int; COMMIT;",
                 &[MultiTableLock],
             ),
             (
