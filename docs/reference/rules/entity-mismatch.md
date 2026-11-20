@@ -14,7 +14,9 @@ Default severity: **ignore**
 ## What it does
 
 Reports a comparison between two columns that hold keys of different tables.
-Turn it on in `[tool.sqlty.rules]`:
+Turn it on in `[tool.sqlty.rules]`. A comparison that
+[`foreign-key-mismatch`](foreign-key-mismatch.md) reports is reported by that rule
+only, so this example turns it off:
 
 ```toml
 [tool.sqlty]
@@ -22,6 +24,7 @@ schema = "schema.sql"
 
 [tool.sqlty.rules]
 entity-mismatch = "warn"
+foreign-key-mismatch = "ignore"
 ```
 
 `schema.sql`:
@@ -73,3 +76,6 @@ entity-mismatch = "warn"
 
 Needs a [schema](../../guide/schema-inference.md) with primary keys and
 foreign keys. Views, CTEs and derived tables don't carry entities.
+[`foreign-key-mismatch`](foreign-key-mismatch.md), on by default, reads the same
+comparisons and reports a foreign key column compared with a column it does not
+reference, as in the example above; this rule then stays silent on it.

@@ -38,7 +38,11 @@ impl Analyzer<'_> {
         self.diag.retain_since(mark, |rule| {
             matches!(
                 rule,
-                Rule::UnknownTable | Rule::UnknownColumn | Rule::AmbiguousColumn
+                Rule::UnknownTable
+                    | Rule::UnknownColumn
+                    | Rule::AmbiguousColumn
+                    | Rule::ForeignKeyMismatch
+                    | Rule::EntityMismatch
             )
         });
     }

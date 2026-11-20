@@ -17,6 +17,7 @@ mod entities;
 mod explain;
 mod expr;
 mod fanout;
+mod foreign_keys;
 mod functions;
 mod grouping;
 mod hashing;

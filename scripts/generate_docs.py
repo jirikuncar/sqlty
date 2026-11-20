@@ -6,22 +6,33 @@
 Only the text between ``<!-- generated:NAME -->`` and ``<!-- /generated:NAME -->``
 is owned by this script; everything else in the pages is hand-written. The
 sources are ``KEY_DOCS`` / ``FUNCTION_KEY_DOCS`` / ``DEFAULT_EXCLUDE`` in
-``sqlty._config``, the argparse parser from ``sqlty._cli.build_parser`` and the rule
-pages' front matter (``sqlty._lint.RULES``).
+``sqlty._config``, the clap commands of ``sqlty-cli`` (``sqlty._core.cli_reference``) and
+the rule pages' front matter (``sqlty._lint.RULES``).
 ``tests/test_docs.py`` runs the ``--check`` comparison.
 """
 
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 REFERENCE = ROOT / "docs" / "reference"
-COMMANDS = ("rewrite", "strip", "check", "complete", "breaking", "rule", "skill")
+COMMANDS = (
+    "rewrite",
+    "strip",
+    "format",
+    "check",
+    "complete",
+    "breaking",
+    "rule",
+    "skill",
+    "server",
+    "version",
+)
 BLOCK = re.compile(
     r"(?P<open><!-- generated:(?P<name>[\w-]+) -->\n)(?P<body>.*?)(?P<close><!-- /generated:(?P=name) -->)",
     re.S,
@@ -77,56 +88,50 @@ def config_blocks() -> dict[str, str]:
     }
 
 
-def _subparsers(parser: argparse.ArgumentParser) -> dict[str, argparse.ArgumentParser]:
-    for action in parser._actions:
-        if isinstance(action, argparse._SubParsersAction):
-            return dict(action.choices)
-    raise AssertionError("no subcommands")
+def _usage(usage: str) -> str:
+    return f"```text\n{usage}\n```\n"
 
 
-def _usage(parser: argparse.ArgumentParser) -> str:
-    # Continuation lines are indented to the end of "usage: "; drop that prefix.
-    lines = parser.format_usage().rstrip("\n").split("\n")
-    lines = [lines[0].removeprefix("usage: "), *(line[len("usage: ") :] for line in lines[1:])]
-    return "```text\n" + "\n".join(lines) + "\n```\n"
-
-
-def _invocation(parser: argparse.ArgumentParser, action: argparse.Action) -> str:
-    text = parser._get_formatter()._format_action_invocation(action).replace(", ", "`, `")
-    return f"`{text} ...`" if action.nargs == "*" and not action.option_strings else f"`{text}`"
-
-
-def _options(parser: argparse.ArgumentParser, skip: set[str]) -> str:
-    rows = [
-        (_invocation(parser, a), a.help or "")
-        for a in parser._actions
-        if a.dest not in skip and a.help
-    ]
-    return _table(("Option", "Description"), rows)
+def _help(text: str) -> str:
+    return text.replace("\n\n", ". ").replace("\n", " ")
 
 
 def cli_blocks() -> dict[str, str]:
-    from sqlty._cli import build_parser
+    """Every option of every command: the ones ``rewrite``, ``strip`` and ``check`` share
+    in one table, listed once for each command that takes them all."""
+    from sqlty._core import cli_reference
 
-    # Wrapped usage depends on the terminal width.
-    os.environ["COLUMNS"] = "80"
-    parser = build_parser()
-    commands = _subparsers(parser)
-    blocks = {"cli-usage": _usage(parser)}
-    shared = set.intersection(*({a.dest for a in commands[c]._actions} for c in COMMANDS[:3]))
-    blocks["cli-options-common"] = _table(
-        ("Option", "Description"),
-        [
-            (_invocation(commands["rewrite"], a), a.help or "")
-            for a in commands["rewrite"]._actions
-            if a.dest in shared
-        ],
-    )
+    commands = {name: (usage, dict(options)) for name, usage, options in cli_reference()}
+    shared = set.intersection(*(set(commands[c][1]) for c in ("rewrite", "strip", "check")))
+    usage, root = commands["sqlty"]
+    rewrite = commands["rewrite"][1]
+    blocks = {
+        "cli-usage": _usage(usage),
+        "cli-options": _options(root.items()),
+        "cli-options-common": _options((o, h) for o, h in rewrite.items() if o in shared),
+        "cli-common-commands": _and(
+            [f"`{name}`" for name in COMMANDS if shared <= set(commands[name][1])]
+        )
+        + " accept:\n",
+    }
     for name in COMMANDS:
-        blocks[f"cli-usage-{name}"] = _usage(commands[name])
-        if name != "rule":
-            blocks[f"cli-options-{name}"] = _options(commands[name], skip=shared)
+        usage, options = commands[name]
+        own = (
+            options.items()
+            if not shared <= set(options)
+            else ((o, h) for o, h in options.items() if o not in shared)
+        )
+        blocks[f"cli-usage-{name}"] = _usage(usage)
+        blocks[f"cli-options-{name}"] = _options(own)
     return blocks
+
+
+def _and(items: list[str]) -> str:
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def _options(options: Iterable[tuple[str, str]]) -> str:
+    return _table(("Option", "Description"), [(f"`{o}`", _help(h)) for o, h in options])
 
 
 def rules_blocks() -> dict[str, str]:

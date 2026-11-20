@@ -73,11 +73,11 @@ foreign keys of your schema, so no database is needed. See
 
 ## Can sqlty catch a join on the wrong key?
 
-Yes, once you turn on `entity-mismatch` in `[tool.sqlty.rules]`. It follows
-foreign keys to the table whose keys each column holds, and reports a
-comparison such as `products.id = orders.customer_id`. It is off by default,
-because a polymorphic id or a schema without foreign keys can compare
-unrelated keys on purpose. See
+Yes. `foreign-key-mismatch` reports a foreign key column compared with a
+column it does not reference, such as `products.id = orders.customer_id`. Turn
+on `entity-mismatch` in `[tool.sqlty.rules]` to also compare primary keys with
+each other. It is off by default, because a polymorphic id
+or a schema without foreign keys can compare unrelated keys on purpose. See
 [Joins on the wrong key](guide/joins.md#joins-on-the-wrong-key).
 
 ## Is sqlty a semantic layer?

@@ -4,7 +4,11 @@ Use `uv` for all Python commands. Setup, test and build commands and the
 architecture live in [DEVELOPMENT.md](DEVELOPMENT.md).
 
 - `SQL[T]` is a `str` subclass. It works anywhere a string works.
-- Every new feature gets an mdtest (see [Markdown tests](#markdown-tests-mdtest)).
+- Run `uv run prek run --all-files` before every commit and fix every error it
+  reports; [DEVELOPMENT.md](DEVELOPMENT.md#hooks) lists the hooks.
+- Never force-push, `--force-with-lease` included: resolve a rejected push without rewriting
+  remote history.
+- Every change gets an mdtest: see [Markdown tests](#markdown-tests-mdtest).
 - Review rules for pull requests live in [REVIEW.md](REVIEW.md). Before handing a
   branch over, have a separate agent review it with the
   [`review` skill](.claude/skills/review/SKILL.md), given the branch name only.
@@ -80,17 +84,6 @@ and 5000 tables.
 | Unqualified column | O(sum of the widths of the tables in scope) | entry counts, Criterion and CodSpeed |
 | Index build | O(N log N + F log F) per schema load, two pointers per name and three words per foreign key | `index_shares_the_catalog_keys`, `bench-ci` `schema_load_5000` RSS |
 | Per keystroke | never O(N), never waiting behind a check | `completion_is_answered_while_a_check_runs` (`sqlty-lsp`) |
-
-## Git safety
-
-**Never force-push.** Do not use `git push --force`, `git push --force-with-lease`,
-or any other force-push variant. If a push is rejected, investigate and resolve
-the conflict without rewriting remote history. No exceptions.
-
-## Hooks
-
-Run `uv run prek run --all-files` before every commit and fix every error it
-reports; [DEVELOPMENT.md](DEVELOPMENT.md#hooks) lists the hooks.
 
 ## The `--sql\n` convention
 
@@ -236,8 +229,6 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 `uv run pytest 'tests/mdtest/check/user_types.md::TypedDict - field type mismatch'`
 reruns one test; failures print this command.
 
-- Tests must use `--sql\n` (not `--sql ` with space) — space makes the line a SQL comment.
-
 ## Documentation philosophy
 
 ### Docstrings
@@ -269,13 +260,12 @@ sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
 
 ### README and docs
 
-- README.md and `docs/` are mdtest files; their assertions run with the suite.
 - `tests/test_core_invariants.py` checks idempotency and round trips over every
   mdtest code block: new mdtests extend it automatically.
 - `docs/reference/configuration.md`, `cli.md` and `rules.md` hold tables between
   `<!-- generated:NAME -->` markers, rendered by `scripts/generate_docs.py` from `KEY_DOCS` in
-  `_config.py`, the argparse parser and the rule pages. Edit those, then run `make generate-docs`;
-  `test_generated_reference_is_current` fails on drift.
+  `_config.py`, the clap commands of `sqlty-cli` and the rule pages. Edit those, then run
+  `make generate-docs`; `test_generated_reference_is_current` fails on drift.
 - `tests/test_docs.py` checks that every rule has a page in `docs/reference/rules/`, that
   relative links resolve, that `examples/` need no rewrite, and runs the
   `>>>` examples in `docs/reference/python-api.md`.

@@ -46,7 +46,7 @@ bench-result.json
 .claude/skills/*
 !.claude/skills/review/
 
-# Hypothesis example database (tests/test_fuzz.py)
+# Hypothesis example database
 .hypothesis/
 *.snap.new
 docs/assets/vendor/
