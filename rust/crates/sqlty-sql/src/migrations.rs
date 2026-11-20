@@ -2522,6 +2522,20 @@ mod tests {
             ),
             ("BEGIN; ALTER TABLE a DROP CONSTRAINT a_pkey;", &[DropPrimaryKey]),
             ("CREATE TABLE e (id int PRIMARY KEY); ALTER TABLE e DROP CONSTRAINT e_pkey", &[]),
+            ("BEGIN; ALTER TABLE a DROP CONSTRAINT a_pkey; ALTER TABLE b RENAME TO bb; COMMIT;", &[DropPrimaryKey]),
+            ("CREATE UNIQUE INDEX ON a (id); ALTER TABLE a DROP CONSTRAINT a_pkey", &[DropPrimaryKey]),
+            ("ALTER TABLE a REPLICA IDENTITY USING INDEX a_u; ALTER TABLE a DROP COLUMN id", &[]),
+            ("ALTER TABLE a REPLICA IDENTITY FULL; ALTER TABLE a RENAME TO z; ALTER TABLE z DROP CONSTRAINT a_pkey", &[]),
+            ("ALTER TABLE a REPLICA IDENTITY USING INDEX a_pkey; ALTER TABLE a DROP COLUMN id", &[DropPrimaryKey]),
+            ("ALTER TABLE a REPLICA IDENTITY FULL; ALTER TABLE a DROP COLUMN id", &[]),
+            ("ALTER INDEX a_u RENAME TO a_v; ALTER TABLE a REPLICA IDENTITY USING INDEX a_v; DROP INDEX a_v", &[DropPrimaryKey]),
+            ("ALTER TABLE a REPLICA IDENTITY USING INDEX a_u; ALTER INDEX a_u RENAME TO a_v; DROP INDEX a_v", &[DropPrimaryKey]),
+            ("ALTER TABLE s1.t REPLICA IDENTITY USING INDEX t_u; ALTER INDEX a_u RENAME TO a_v", &[]),
+            ("ALTER TABLE a REPLICA IDENTITY FULL; ALTER TABLE a REPLICA IDENTITY NOTHING", &[DropPrimaryKey]),
+            ("ALTER TABLE a REPLICA IDENTITY NOTHING; ALTER TABLE a REPLICA IDENTITY NOTHING", &[DropPrimaryKey]),
+            ("ALTER TABLE a REPLICA IDENTITY FULL", &[]),
+            ("ALTER TABLE a RENAME TO s.z; ALTER TABLE s.z DROP CONSTRAINT a_pkey", &[DropPrimaryKey]),
+            (&format!("ALTER TABLE \"{0}é\" DROP CONSTRAINT \"{0}_pkey\"", "a".repeat(57)), &[DropPrimaryKey]),
         ] {
             let migration = format!("SET lock_timeout = '1s'; {migration}");
             let found = rules(against, &migration);
