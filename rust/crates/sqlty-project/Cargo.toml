@@ -19,3 +19,29 @@ regex.workspace = true
 toml.workspace = true
 rayon = "1.12"
 stacker = "0.1"
+
+# Prototype of option C of plans/2026-11-20-typed-receivers.md: ty's semantic model finds
+# the method a helper call resolves to. Same ruff release as the workspace pins.
+ty_python_semantic = { version = "=0.0.21", optional = true }
+ty_python_core = { version = "=0.0.21", optional = true }
+ty_module_resolver = { version = "=0.0.21", optional = true }
+ty_site_packages = { version = "=0.0.21", optional = true }
+ty_vendored = { version = "=0.0.21", optional = true }
+ruff_db = { version = "=0.0.21", optional = true, default-features = false, features = ["os"] }
+ruff_python_ast = { workspace = true, optional = true }
+ruff_text_size = { workspace = true, optional = true }
+salsa = { version = "0.28.5", optional = true, default-features = false, features = ["macros", "salsa_unstable", "inventory", "compact_str", "ordermap"] }
+
+[features]
+ty-receivers = [
+    "sqlty-python/ty-receivers",
+    "dep:ty_python_semantic",
+    "dep:ty_python_core",
+    "dep:ty_module_resolver",
+    "dep:ty_site_packages",
+    "dep:ty_vendored",
+    "dep:ruff_db",
+    "dep:ruff_python_ast",
+    "dep:ruff_text_size",
+    "dep:salsa",
+]

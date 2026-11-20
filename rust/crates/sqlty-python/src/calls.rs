@@ -537,6 +537,8 @@ pub fn helper_calls<'a>(
     let resolve = |from: &Source, dotted: &str| {
         helpers.and_then(|helpers| helpers.fragment(from, dotted, module))
     };
+    #[cfg(feature = "ty-receivers")]
+    let typed = std::cell::OnceCell::<crate::helpers::typed::Resolved>::new();
     let mut calls = Vec::new();
     for (call, stack) in &scan.calls {
         if let Some(&scope) = stack.last() {
@@ -564,8 +566,32 @@ pub fn helper_calls<'a>(
                 } else if let Some(found) = method_of(&prefix, name) {
                     (found.kind != Kind::Instance).then_some(found)
                 } else {
-                    receiver_class(&attr.value, stack, &ctx)
-                        .and_then(|class| method_of(&class, name))
+                    let found = receiver_class(&attr.value, stack, &ctx)
+                        .and_then(|class| method_of(&class, name));
+                    #[cfg(feature = "ty-receivers")]
+                    let found = found.or_else(|| {
+                        if !names.iter().any(|known| known == name) {
+                            return None;
+                        }
+                        let resolved = typed.get_or_init(|| {
+                            crate::helpers::typed::resolve(text, &|name| {
+                                names
+                                    .binary_search_by(|known| known.as_str().cmp(name))
+                                    .is_ok()
+                            })
+                        });
+                        let range = attr.range();
+                        let definitions =
+                            resolved.get(&(range.start().to_u32(), range.end().to_u32()))?;
+                        let mut helpers = definitions
+                            .iter()
+                            .map(|(module, qualified)| lookup(module, qualified));
+                        let first = helpers.next()??;
+                        helpers
+                            .all(|other| other.is_some_and(|other| std::ptr::eq(other, first)))
+                            .then_some(first)
+                    });
+                    found
                 }
             }),
         };

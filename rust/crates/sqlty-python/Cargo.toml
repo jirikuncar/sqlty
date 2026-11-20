@@ -23,3 +23,8 @@ regex.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 ignore = { version = "0.4", default-features = false }
+
+[features]
+# Prototype (plans/2026-11-20-typed-receivers.md, option C): a host may install a resolver
+# that gives the method a call resolves to; `sqlty-project` installs one built on ty.
+ty-receivers = []

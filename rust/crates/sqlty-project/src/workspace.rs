@@ -596,12 +596,12 @@ impl Workspace {
                         let checker = Checker::of(settings, Some(helpers));
                         let parsed = module.parsed();
                         let name = parsed.as_ref().and_then(|parsed| parsed.module.clone());
-                        Ok(check_module(
-                            &module.text,
-                            parsed.as_ref(),
-                            name.as_deref(),
-                            &checker,
-                        ))
+                        let check = || {
+                            check_module(&module.text, parsed.as_ref(), name.as_deref(), &checker)
+                        };
+                        #[cfg(feature = "ty-receivers")]
+                        let check = || crate::ty::with_file(path, check);
+                        Ok(check())
                     })
                 })
                 .collect::<Result<_, String>>()
@@ -663,12 +663,11 @@ impl Workspace {
                         let checker = Checker::of(settings, Some(helpers));
                         let parsed = module.parsed();
                         let name = parsed.as_ref().and_then(|parsed| parsed.module.as_deref());
-                        Ok(module::statistics(
-                            &module.text,
-                            parsed.as_deref(),
-                            name,
-                            &checker,
-                        ))
+                        let count =
+                            || module::statistics(&module.text, parsed.as_deref(), name, &checker);
+                        #[cfg(feature = "ty-receivers")]
+                        let count = || crate::ty::with_file(path, count);
+                        Ok(count())
                     })
                 })
                 .collect()

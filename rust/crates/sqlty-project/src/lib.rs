@@ -8,6 +8,8 @@ mod disk;
 mod flags;
 mod module;
 mod settings;
+#[cfg(feature = "ty-receivers")]
+pub mod ty;
 mod workspace;
 
 pub use disk::Disk;

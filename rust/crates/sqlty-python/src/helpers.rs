@@ -50,6 +50,37 @@ pub(crate) fn region(node: Node<'_>, lines: &Lines, len: usize) -> (usize, usize
     (lines.start(first, len), lines.start(last + 1, len))
 }
 
+/// The methods calls resolve to, as a type checker a host embeds finds them.
+#[cfg(feature = "ty-receivers")]
+pub mod typed {
+    use std::collections::HashMap;
+    use std::sync::OnceLock;
+
+    /// The definitions of the callee at a byte range: each a module and the qualified name
+    /// in it (`("postgres", "Postgres.one")`). A union receiver gives several.
+    pub type Resolved = HashMap<(u32, u32), Vec<(String, String)>>;
+
+    /// Resolves the method calls of the module being checked, whose text is given, that
+    /// call an attribute whose name the predicate accepts.
+    pub type Resolver = dyn Fn(&str, &dyn Fn(&str) -> bool) -> Resolved + Send + Sync;
+
+    static RESOLVER: OnceLock<Box<Resolver>> = OnceLock::new();
+
+    /// Makes `resolver` what helper calls ask for receivers they cannot type; the first
+    /// one installed stays.
+    pub fn install(resolver: Box<Resolver>) {
+        let _ = RESOLVER.set(resolver);
+    }
+
+    /// What the installed resolver finds in `text`, nothing when none is installed.
+    pub(crate) fn resolve(text: &str, wanted: &dyn Fn(&str) -> bool) -> Resolved {
+        RESOLVER
+            .get()
+            .map(|resolver| resolver(text, wanted))
+            .unwrap_or_default()
+    }
+}
+
 /// The class of `self`, or of a variable or `self` attribute with an evident type.
 pub(crate) fn receiver_class(
     receiver: &Expr,

@@ -720,6 +720,36 @@ fn workspace(
         force_exclude: common.force_exclude,
         parse,
     };
+    #[cfg(feature = "ty-receivers")]
+    if parse && std::env::var_os("SQLTY_TY").is_none_or(|value| value != "0") {
+        let cwd = options.flags.cwd.clone();
+        let split = |name: &str| -> Vec<PathBuf> {
+            std::env::var_os(name)
+                .map(|value| std::env::split_paths(&value).collect())
+                .unwrap_or_default()
+        };
+        let mut extra = split("SQLTY_TY_EXTRA_PATHS");
+        extra.push(cwd.join("typings"));
+        let mut site_packages = split("SQLTY_TY_SITE_PACKAGES");
+        site_packages.extend(
+            options
+                .extra_roots
+                .iter()
+                .filter(|root| root.ends_with("site-packages"))
+                .cloned(),
+        );
+        if std::env::var_os("SQLTY_TY_STATS").is_some_and(|value| value == "2") {
+            sqlty_project::ty::trace_receivers();
+        }
+        sqlty_project::ty::install(
+            &cwd,
+            &sqlty_project::ty::Paths {
+                roots: vec![cwd.clone(), cwd.join("src")],
+                extra,
+                site_packages,
+            },
+        );
+    }
     let workspace = Workspace::open(&paths, files, options);
     if let Ok(workspace) = &workspace {
         warn_all(host, workspace);
@@ -1039,6 +1069,10 @@ fn check(
     }
     if args.statistics && text {
         host.out(&format!("{}\n", statistics(&workspace.statistics_all()?)));
+        #[cfg(feature = "ty-receivers")]
+        if std::env::var_os("SQLTY_TY_STATS").is_some() {
+            host.out(&format!("{}\n", sqlty_project::ty::report()));
+        }
     }
     Ok(
         if !args.exit_zero && (errors > 0 || (args.error_on_warning && warnings > 0)) {
