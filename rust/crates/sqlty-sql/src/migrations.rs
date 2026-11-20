@@ -16,9 +16,9 @@ use std::ops::{ControlFlow, Range};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sqlparser::ast::{
     AlterColumnOperation, AlterTableOperation, AlterType, AlterTypeOperation, CascadeOption,
-    CheckConstraint, ColumnDef, ColumnOption, CopySource, DataType, DetachPartitionMode, Expr,
-    ForValues, Insert, Merge, ObjectName, ObjectType, SetExpr, Statement, TableConstraint,
-    TableFactor, TableObject,
+    CheckConstraint, ColumnDef, ColumnOption, CopySource, DataType, Delete, DetachPartitionMode,
+    Expr, ForValues, FromTable, Insert, Merge, ObjectName, ObjectType, SetExpr, Statement,
+    TableConstraint, TableFactor, TableObject,
 };
 
 use crate::analyzer::{parse_ddl, SqlDialect};
@@ -120,6 +120,10 @@ struct Session {
     /// The enum values `ALTER TYPE ... ADD VALUE` added in the open transaction, as string
     /// literals, with their type.
     added_values: Vec<(String, ObjectName)>,
+    /// The tables with rows that the open transaction locks against writes, in order.
+    locked: Vec<String>,
+    reported_tables: bool,
+    reported_backfill: bool,
 }
 
 impl Model {
@@ -180,6 +184,51 @@ impl Model {
                         Rule::MissingLockTimeout,
                         "takes a lock that blocks writes without `SET lock_timeout` first: while it waits for the lock, the queries it blocks wait behind it".to_string(),
                     );
+                }
+                if judged.strong_lock && session.transaction {
+                    for table in parsed.as_ref().map(locked_tables).unwrap_or_default() {
+                        if !session.locked.contains(&table) {
+                            session.locked.push(table);
+                        }
+                    }
+                    if let [held @ .., last] = session.locked.as_slice() {
+                        if !held.is_empty() && !session.reported_tables {
+                            session.reported_tables = true;
+                            report(
+                                Rule::MultiTableLock,
+                                format!(
+                                    "locks `{last}` while this transaction still holds `{}`: queries of any of them now wait for all of them, until `COMMIT`; change one table per transaction",
+                                    held.join("`, `")
+                                ),
+                            );
+                        }
+                    }
+                }
+                if let Some(table) = parsed
+                    .as_ref()
+                    .and_then(backfilled)
+                    .filter(|table| !self.created.contains(table))
+                {
+                    if !["limit", "between"]
+                        .iter()
+                        .any(|word| tokens.iter().any(|t| t == word))
+                    {
+                        report(
+                            Rule::UnbatchedBackfill,
+                            format!(
+                                "changes every matching row of `{table}` in one statement: it holds their row locks and grows the WAL until it ends; change them in batches by key, `WHERE id IN (SELECT id ... LIMIT 5000)`"
+                            ),
+                        );
+                    }
+                    if session.locked.contains(&table) && !session.reported_backfill {
+                        session.reported_backfill = true;
+                        report(
+                            Rule::LockedBackfill,
+                            format!(
+                                "an earlier statement of this transaction locks `{table}` against writes, so they wait for the whole backfill: `COMMIT` the schema change first"
+                            ),
+                        );
+                    }
                 }
                 if let Some(Statement::AlterType(AlterType {
                     name,
@@ -757,6 +806,8 @@ impl Session {
             ["commit" | "end" | "rollback" | "abort", ..] => {
                 (self.transaction, self.local_timeout) = (false, false);
                 self.added_values.clear();
+                self.locked.clear();
+                (self.reported_tables, self.reported_backfill) = (false, false);
             }
             ["reset", "lock_timeout" | "all"] => {
                 (self.lock_timeout, self.local_timeout) = (false, false);
@@ -1030,6 +1081,41 @@ fn rewrite_command_message(command: &str) -> String {
     format!(
         "`{command}` rewrites the table under an ACCESS EXCLUSIVE lock, blocking reads and writes until it finishes: rebuild it online with pg_repack or pg_squeeze, outside migrations"
     )
+}
+
+/// The tables `stmt` locks when it takes a lock that blocks writes.
+fn locked_tables(stmt: &Statement) -> Vec<String> {
+    match stmt {
+        Statement::AlterTable(alter) => vec![key(&alter.name)],
+        Statement::Truncate(truncate) => truncate
+            .table_names
+            .iter()
+            .map(|target| key(&target.name))
+            .collect(),
+        Statement::Lock(lock) => lock.tables.iter().map(|target| key(&target.name)).collect(),
+        Statement::Drop {
+            object_type: ObjectType::Table,
+            names,
+            ..
+        } => names.iter().map(key).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The table an `UPDATE` or `DELETE` changes rows of.
+fn backfilled(stmt: &Statement) -> Option<String> {
+    let relation = match stmt {
+        Statement::Update(update) => &update.table.relation,
+        Statement::Delete(Delete {
+            from: FromTable::WithFromKeyword(from) | FromTable::WithoutKeyword(from),
+            ..
+        }) => &from.first()?.relation,
+        _ => return None,
+    };
+    match relation {
+        TableFactor::Table { name, .. } => Some(key(name)),
+        _ => None,
+    }
 }
 
 /// The tables on either side of the foreign keys `stmt` adds.
@@ -1389,8 +1475,15 @@ mod tests {
             )
         };
         let used = "UPDATE orders SET state = 'It''s' WHERE id = 1";
+        let enum_findings = |migration: &str| -> Vec<Finding> {
+            check(&baseline, &[migration])
+                .remove(0)
+                .into_iter()
+                .filter(|finding| finding.rule == Rule::EnumValueInTransaction)
+                .collect()
+        };
         assert_eq!(
-            check(&baseline, &[&migration("", used)])[0],
+            enum_findings(&migration("", used)),
             [Finding {
                 rule: Rule::EnumValueInTransaction,
                 message: "'It''s' was added to `status` in this transaction: PostgreSQL refuses a new enum value until the transaction that added it commits, so `COMMIT` after `ADD VALUE`".to_string(),
@@ -1398,7 +1491,7 @@ mod tests {
             }]
         );
         let reported =
-            |between: &str, using: &str| !rules(&baseline, &migration(between, using)).is_empty();
+            |between: &str, using: &str| !enum_findings(&migration(between, using)).is_empty();
         assert!(reported("", "SELECT 'It''s'::status"));
         assert!(reported("", "UPDATE elsewhere SET state = 'It''s'"));
         assert!(reported(
@@ -1413,7 +1506,7 @@ mod tests {
             "ALTER TYPE status ADD VALUE 'y' AFTER 'It''s'"
         ));
         let outside = "ALTER TYPE status ADD VALUE 'x'; UPDATE orders SET state = 'x';";
-        assert_eq!(rules(&baseline, outside), []);
+        assert_eq!(enum_findings(outside), []);
     }
 
     #[test]
@@ -1517,6 +1610,54 @@ mod tests {
         ] {
             let migration = format!("SET lock_timeout = '1s'; {migration};");
             assert_eq!(rules(baseline, &migration), expected, "{migration}");
+        }
+    }
+
+    #[test]
+    fn a_transaction_holds_its_locks_until_it_ends() {
+        use Rule::*;
+        for (migration, expected) in [
+            (
+                "BEGIN; ALTER TABLE users ADD COLUMN a int; ALTER TABLE teams ADD COLUMN b int; ALTER TABLE users ADD COLUMN c int; COMMIT;",
+                &[MultiTableLock][..],
+            ),
+            (
+                "BEGIN; ALTER TABLE users ADD COLUMN a int; COMMIT; BEGIN; ALTER TABLE teams ADD COLUMN b int; COMMIT;",
+                &[],
+            ),
+            ("ALTER TABLE users ADD COLUMN a int; ALTER TABLE teams ADD COLUMN b int;", &[]),
+            (
+                "BEGIN; LOCK TABLE users, teams; COMMIT;",
+                &[MultiTableLock],
+            ),
+            (
+                "BEGIN; TRUNCATE users; DROP TABLE teams; COMMIT;",
+                &[MultiTableLock],
+            ),
+            (
+                "BEGIN; CREATE TABLE t (id int); ALTER TABLE t ADD COLUMN a int; ALTER TABLE users ADD COLUMN a int; COMMIT;",
+                &[],
+            ),
+            (
+                "BEGIN; ALTER TABLE users ADD COLUMN a int; UPDATE users SET a = 1 WHERE id IN (SELECT id FROM users LIMIT 100); COMMIT;",
+                &[LockedBackfill],
+            ),
+            (
+                "BEGIN; ALTER TABLE users ADD COLUMN a int; DELETE FROM users WHERE id BETWEEN 1 AND 100; COMMIT;",
+                &[LockedBackfill],
+            ),
+            (
+                "BEGIN; ALTER TABLE teams ADD COLUMN a int; UPDATE users SET bio = '' WHERE id BETWEEN 1 AND 9; COMMIT;",
+                &[],
+            ),
+            ("UPDATE users SET bio = ''", &[UnbatchedBackfill]),
+            ("DELETE FROM users WHERE bio IS NULL", &[UnbatchedBackfill]),
+            ("UPDATE users SET bio = '' WHERE id BETWEEN 1 AND 9", &[]),
+            ("CREATE TABLE t (id int); UPDATE t SET id = 1; DELETE FROM t", &[]),
+            ("UPDATE users AS u SET bio = t.id::text FROM teams t", &[UnbatchedBackfill]),
+        ] {
+            let migration = format!("SET lock_timeout = '1s'; {migration}");
+            assert_eq!(rules(USERS, &migration), expected, "{migration}");
         }
     }
 
