@@ -255,3 +255,16 @@ ALTER TABLE users ADD COLUMN team BIGINT;
 ALTER TABLE users DROP CONSTRAINT users_team_id_fkey;
 COMMIT;
 ```
+
+### Not once the foreign key is gone
+
+```sql migration
+SET lock_timeout = '1s';
+ALTER TABLE users RENAME TO members;
+ALTER TABLE members DROP CONSTRAINT users_team_id_fkey;
+BEGIN;
+ALTER TABLE teams ADD COLUMN name TEXT;
+-- error: [truncate-cascade]
+TRUNCATE teams CASCADE;
+COMMIT;
+```

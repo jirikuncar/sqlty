@@ -160,9 +160,10 @@ struct Session {
     /// Set by `SET LOCAL`, until the transaction ends.
     local_timeout: bool,
     reported_timeout: bool,
-    /// The enum values `ALTER TYPE ... ADD VALUE` added in the open transaction, as string
-    /// literals, with their type.
-    added_values: Vec<(String, ObjectName)>,
+    /// The enum values `ALTER TYPE ... ADD VALUE` added in the open transaction, by string
+    /// literal, with the order they were added in and their type.
+    added_values: FxHashMap<String, Vec<(usize, ObjectName)>>,
+    added: usize,
     /// The tables with rows that the open transaction locks against writes, in order.
     locked: Vec<String>,
     locking: FxHashSet<String>,
@@ -216,12 +217,17 @@ impl Model {
                     Some(parsed) => self.judge(parsed, &mut report),
                     None => self.judge_tokens(&stmt, &tokens, &mut report),
                 };
-                if let Some(used) = session
-                    .added_values
-                    .iter()
-                    .position(|(value, ty)| self.uses_value(&stmt, value, ty))
-                {
-                    let (value, ty) = session.added_values.remove(used);
+                let used = stmt
+                    .tokens()
+                    .into_iter()
+                    .filter_map(|value| Some((value, session.added_values.get(value)?)))
+                    .flat_map(|(value, added)| added.iter().map(move |(at, ty)| (*at, value, ty)))
+                    .filter(|(_, value, ty)| self.uses_value(&stmt, value, ty))
+                    .min_by_key(|(at, ..)| *at)
+                    .map(|(at, value, ty)| (at, value.to_string(), ty.clone()));
+                if let Some((at, value, ty)) = used {
+                    let added = session.added_values.entry(value.clone()).or_default();
+                    added.retain(|(added, _)| *added != at);
                     report(
                         Rule::EnumValueInTransaction,
                         format!(
@@ -324,7 +330,9 @@ impl Model {
                 })) = parsed.as_ref().filter(|_| session.transaction)
                 {
                     let value = format!("'{}'", add.value.value.replace('\'', "''"));
-                    session.added_values.push((value, name.clone()));
+                    session.added += 1;
+                    let added = (session.added, name.clone());
+                    session.added_values.entry(value).or_default().push(added);
                 }
                 let created = parsed.as_ref().and_then(created);
                 if let Some(created) = created.filter(|c| !self.tables.contains(c)) {
@@ -505,7 +513,10 @@ impl Model {
                     !dropped.contains(parent) && !dropped.contains(default)
                 });
                 for table in &dropped {
-                    self.foreign_keys.remove(table);
+                    self.retain_foreign_keys(table, |_| false);
+                    for referrer in self.referrers.remove(table).into_iter().flatten() {
+                        self.retain_foreign_keys(&referrer, |fk| fk.referenced != *table);
+                    }
                 }
             }
             _ => {}
@@ -523,6 +534,42 @@ impl Model {
                 .insert(owner.clone());
             self.referenced.insert(fk.referenced.clone());
             self.foreign_keys.entry(owner.clone()).or_default().push(fk);
+        }
+    }
+
+    /// Keeps the foreign keys of `table` that `keep` accepts, and the tables they reference
+    /// in step.
+    fn retain_foreign_keys(&mut self, table: &str, keep: impl Fn(&ForeignKey) -> bool) {
+        let Some(fks) = self.foreign_keys.get_mut(table) else {
+            return;
+        };
+        let dropped: Vec<ForeignKey> = fks.extract_if(.., |fk| !keep(fk)).collect();
+        for fk in dropped {
+            if !fks.iter().any(|kept| kept.referenced == fk.referenced) {
+                let referrers = self.referrers.entry(fk.referenced).or_default();
+                referrers.remove(table);
+            }
+        }
+    }
+
+    /// Moves the foreign keys from and to table `old` to its new name.
+    fn rename_foreign_keys(&mut self, old: &str, new: &str) {
+        if let Some(referrers) = self.referrers.remove(old) {
+            for referrer in &referrers {
+                let fks = self.foreign_keys.get_mut(referrer).into_iter().flatten();
+                for fk in fks.filter(|fk| fk.referenced == old) {
+                    fk.referenced = new.to_string();
+                }
+            }
+            self.referrers.insert(new.to_string(), referrers);
+        }
+        if let Some(fks) = self.foreign_keys.remove(old) {
+            for fk in &fks {
+                let referrers = self.referrers.entry(fk.referenced.clone()).or_default();
+                referrers.remove(old);
+                referrers.insert(new.to_string());
+            }
+            self.foreign_keys.insert(new.to_string(), fks);
         }
     }
 
@@ -581,9 +628,9 @@ impl Model {
             }
             AlterTableOperation::DropColumn { column_names, .. } => {
                 let dropped = column_names.iter().map(name).collect::<Vec<_>>();
-                if let Some(fks) = self.foreign_keys.get_mut(table) {
-                    fks.retain(|fk| !fk.columns.iter().any(|column| dropped.contains(column)));
-                }
+                self.retain_foreign_keys(table, |fk| {
+                    !fk.columns.iter().any(|column| dropped.contains(column))
+                });
                 let keyed = self
                     .primary_keys
                     .get(table)
@@ -612,6 +659,7 @@ impl Model {
                 if let Some(identity) = self.forget_identity(table) {
                     self.set_identity(&renamed, identity);
                 }
+                self.rename_foreign_keys(table, &renamed);
             }
             AlterTableOperation::AttachPartitionOf {
                 partition,
@@ -621,9 +669,7 @@ impl Model {
             }
             AlterTableOperation::DropConstraint { name: dropped, .. } => {
                 let dropped = name(dropped);
-                if let Some(fks) = self.foreign_keys.get_mut(table) {
-                    fks.retain(|fk| fk.name != dropped);
-                }
+                self.retain_foreign_keys(table, |fk| fk.name != dropped);
                 self.drop_index(&qualify(table, &dropped));
                 if let Some(checks) = self.checks.get_mut(table) {
                     checks.retain(|check| check.name.as_ref() != Some(&dropped));
@@ -2845,11 +2891,30 @@ mod tests {
             ("ALTER TABLE users ADD COLUMN a int; CLUSTER teams USING teams_pkey", true),
             ("ALTER TABLE users ADD COLUMN a int; REINDEX INDEX users_email; CLUSTER", false),
             ("CREATE TABLE t (id int); ALTER TABLE users ADD COLUMN a int; REINDEX TABLE t", false),
+            ("ALTER TABLE members DROP CONSTRAINT members_team_id_fkey; COMMIT; BEGIN; ALTER TABLE teams ADD COLUMN q int; TRUNCATE teams CASCADE", false),
+            ("DROP TABLE members; COMMIT; BEGIN; ALTER TABLE teams ADD COLUMN q int; TRUNCATE teams CASCADE", false),
+            ("ALTER TABLE members DROP COLUMN team_id; COMMIT; BEGIN; ALTER TABLE teams ADD COLUMN q int; DROP TABLE teams CASCADE", false),
+            ("DROP TABLE teams CASCADE; COMMIT; BEGIN; ALTER TABLE members ADD COLUMN q int; ALTER TABLE members DROP COLUMN team_id", false),
+            ("ALTER TABLE members RENAME TO m2; COMMIT; BEGIN; ALTER TABLE m2 ADD COLUMN q int; ALTER TABLE m2 DROP CONSTRAINT members_team_id_fkey", true),
+            ("ALTER TABLE teams RENAME TO squads; COMMIT; BEGIN; ALTER TABLE squads ADD COLUMN q int; TRUNCATE squads CASCADE", true),
+            ("ALTER TABLE teams RENAME TO squads; COMMIT; BEGIN; ALTER TABLE members DROP COLUMN team_id; ALTER TABLE squads ADD COLUMN q int", false),
         ] {
             let migration = format!("SET lock_timeout = '1s'; BEGIN; {statements}; COMMIT;");
             let found = rules(&baseline, &migration);
             assert_eq!(found.contains(&Rule::MultiTableLock), reported, "{migration}: {found:?}");
         }
+    }
+
+    #[test]
+    fn a_second_foreign_key_to_a_table_keeps_referencing_it() {
+        let baseline = "CREATE TABLE teams (id BIGINT PRIMARY KEY);
+            CREATE TABLE pairs (a BIGINT REFERENCES teams (id), b BIGINT REFERENCES teams (id));";
+        let migration = "SET lock_timeout = '1s'; ALTER TABLE pairs DROP COLUMN a;
+            BEGIN; ALTER TABLE teams ADD COLUMN q int; TRUNCATE teams CASCADE; COMMIT;";
+        assert_eq!(
+            rules(baseline, migration),
+            [Rule::TruncateCascade, Rule::MultiTableLock]
+        );
     }
 
     #[test]
