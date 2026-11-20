@@ -1,6 +1,7 @@
 //! The scopes of a module, the classes its names and `self` attributes hold, and the
 //! argument types read from them.
 
+use std::cell::OnceCell;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
@@ -72,6 +73,9 @@ pub struct Scan<'a> {
     pub calls: Vec<(&'a ExprCall, Vec<Scope>)>,
     /// Every t-string, with its scopes.
     pub templates: Vec<(&'a ExprTString, Vec<Scope>)>,
+    body: &'a [Stmt],
+    /// [`crate::compose::constants`] of `body`, once asked.
+    constants: OnceCell<HashMap<String, Option<usize>>>,
 }
 
 impl<'a> Scan<'a> {
@@ -85,6 +89,8 @@ impl<'a> Scan<'a> {
                 attributes: HashMap::new(),
                 calls: Vec::new(),
                 templates: Vec::new(),
+                body,
+                constants: OnceCell::new(),
             },
             want,
         };
@@ -95,6 +101,14 @@ impl<'a> Scan<'a> {
     /// Whether `scope` is a class.
     pub fn is_class(&self, scope: Scope) -> bool {
         matches!(self.scopes[scope], Node::Class(_))
+    }
+
+    /// The value of the one module-level assignment to `name`.
+    fn constant(&self, name: &str) -> Option<&'a Expr> {
+        let table = self
+            .constants
+            .get_or_init(|| crate::compose::constants(self.body));
+        crate::compose::value(self.body, table, name)
     }
 }
 
@@ -244,20 +258,21 @@ impl<'a, W: FnMut(&'a ExprCall) -> bool> Visitor<'a> for Walker<'a, W> {
     }
 }
 
-/// The module that defines an imported `NAME` or `module.NAME`, and its value there.
-pub type Constant<'s> = &'s dyn Fn(&str) -> Option<(&'s Source, &'s Expr)>;
+/// The module that defines `NAME` or `module.NAME` imported by a module, this one for `None`,
+/// and its value there.
+pub type Constant<'s> = &'s dyn Fn(Option<&Source>, &str) -> Option<(&'s Source, &'s Expr)>;
 
 /// Reads argument types in the scopes of a [`Scan`].
-pub struct Context<'a, 's> {
+pub struct Context<'a, 's, 'c> {
     /// `ParsedSource.imported_names`.
     pub imported: &'s Table,
     /// The scan of the module.
     pub scan: &'s Scan<'a>,
     /// Finds the value of an imported constant, when the checked modules are known.
-    pub constant: Option<Constant<'s>>,
+    pub constant: Option<Constant<'c>>,
 }
 
-impl Context<'_, '_> {
+impl Context<'_, '_, '_> {
     /// The arguments a tuple or list literal, or a dict literal of string keys, passes.
     pub fn literal_params(&self, arg: &Expr, stack: &[Scope]) -> Option<Vec<Param>> {
         let items = match arg {
@@ -338,7 +353,7 @@ impl Context<'_, '_> {
         if self.binds(stack, head) {
             return None;
         }
-        let (source, value) = constant(dotted)?;
+        let (source, value) = constant(None, dotted)?;
         let scan = Scan::new(
             if matches!(value, Expr::Name(_)) {
                 source.body()
@@ -385,9 +400,60 @@ impl Context<'_, '_> {
         self.scan.attributes.get(&(*class, name)).cloned().flatten()
     }
 
+    /// The class an instance of `name` has; a `NewType` has that of its supertype.
     fn class(&self, name: Option<String>) -> Option<String> {
-        class_of(name, self.imported)
+        self.named(None, &name?, 0)
     }
+
+    /// The class of `name` spelled in `from`, this module for `None`.
+    fn named(&self, from: Option<&Source>, name: &str, depth: usize) -> Option<String> {
+        let imported = from.map_or(self.imported, |source| &source.imports);
+        if let Some(found) = class_of(Some(name.to_string()), imported) {
+            return Some(found);
+        }
+        if depth > 8 {
+            return None;
+        }
+        let local = match from {
+            None => self.scan.constant(name),
+            Some(source) => crate::compose::constant(source, name),
+        };
+        let (from, value) = match local {
+            Some(value) => (from, value),
+            None => {
+                let head = name.split('.').next().unwrap_or_default();
+                imported.get(head)?;
+                let (source, value) = (self.constant?)(from, name)?;
+                (Some(source), value)
+            }
+        };
+        let (func, supertype) = newtype(value)?;
+        let imported = from.map_or(self.imported, |source| &source.imports);
+        is_newtype(func, imported)
+            .then(|| self.named(from, &class_name(Some(supertype))?, depth + 1))
+            .flatten()
+    }
+}
+
+/// The called name and the supertype of `value` when it is `NewType("name", T)`.
+fn newtype(value: &Expr) -> Option<(&Expr, &Expr)> {
+    let Expr::Call(call) = value else {
+        return None;
+    };
+    match &*call.arguments.args {
+        [Expr::StringLiteral(_), supertype] if call.arguments.keywords.is_empty() => {
+            Some((&call.func, supertype))
+        }
+        _ => None,
+    }
+}
+
+/// Whether `func` names `typing.NewType`.
+fn is_newtype(func: &Expr, imported: &Table) -> bool {
+    matches!(
+        qualified(dotted(func), imported).as_deref(),
+        Some("typing.NewType" | "typing_extensions.NewType")
+    )
 }
 
 /// The builtin class of a literal other than `None`.

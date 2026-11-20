@@ -414,7 +414,7 @@ fn call_params(
     helper: &Helper,
     call: &ExprCall,
     stack: &[Scope],
-    ctx: &Context<'_, '_>,
+    ctx: &Context<'_, '_, '_>,
 ) -> Option<Vec<Param>> {
     if helper.params.is_some() {
         let arg = argument(helper, call, helper.params.as_deref())?;
@@ -515,7 +515,9 @@ pub fn helper_calls<'a>(
         Expr::Attribute(attr) => dotted(&attr.value).is_some(),
         _ => false,
     });
-    let constant = |dotted: &str| helpers?.fragment(source, dotted, module);
+    let constant = |from: Option<&Source>, dotted: &str| {
+        helpers?.fragment(from.unwrap_or(source), dotted, module)
+    };
     let ctx = Context {
         imported: &source.imports,
         scan: &scan,

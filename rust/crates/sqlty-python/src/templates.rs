@@ -10,7 +10,7 @@ use ruff_text_size::Ranged;
 
 use crate::frozen::Table;
 use crate::module::Imports;
-use crate::scopes::{Context, Lines, Scan, Scope};
+use crate::scopes::{Constant, Context, Lines, Scan, Scope};
 
 /// A t-string.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,16 +31,22 @@ pub struct Template {
 pub fn templates(source: &str) -> Option<Vec<Template>> {
     let parsed = crate::parse::module(source)?;
     let body = &parsed.syntax().body;
-    Some(of(source, body, &Imports::of(body).imported))
+    Some(of(source, body, &Imports::of(body).imported, None))
 }
 
 /// Every t-string of the module `body` of `source`, in source order.
-pub fn of(source: &str, body: &[Stmt], imported: &Table) -> Vec<Template> {
+/// `constant` finds what the module imports from checked modules, when they are known.
+pub fn of(
+    source: &str,
+    body: &[Stmt],
+    imported: &Table,
+    constant: Option<Constant<'_>>,
+) -> Vec<Template> {
     let scan = Scan::new(body, |_| false);
     let ctx = Context {
         imported,
         scan: &scan,
-        constant: None,
+        constant,
     };
     let lines = Lines::new(source);
     let mut found: Vec<Template> = scan
@@ -55,7 +61,7 @@ pub fn of(source: &str, body: &[Stmt], imported: &Table) -> Vec<Template> {
 fn read(
     template: &ExprTString,
     stack: &[Scope],
-    ctx: &Context<'_, '_>,
+    ctx: &Context<'_, '_, '_>,
     lines: &Lines,
     source: &str,
 ) -> Template {

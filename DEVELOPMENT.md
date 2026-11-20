@@ -149,6 +149,8 @@ database rejects is skipped, with the reason.
   the rule page.
 - `variants`: generated functions run by a model for every input against the
   query variants sqlty reads.
+- `newtypes`: chains of `NewType` arguments across modules, spelled every way
+  `typing` allows, bind a query as their supertype does; Python resolves each.
 
 ```bash
 SQLTY_FUZZ_EXAMPLES=2000 SQLTY_PG_DSN=postgresql:///scratch SQLTY_FUZZ_PYTHON=.venv/bin/python \

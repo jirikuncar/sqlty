@@ -803,8 +803,17 @@ impl<'a> Scan<'a> {
 
 /// `ParsedSource.constants`: the value of the one module-level assignment to `name`.
 pub fn constant<'a>(source: &'a Source, name: &str) -> Option<&'a Expr> {
-    let table = source.constants.get_or_init(|| constants(source));
-    let stmt = source.body().get((*table.get(name)?)?)?;
+    let table = source.constants.get_or_init(|| constants(source.body()));
+    value(source.body(), table, name)
+}
+
+/// The value `table`, the [`constants`] of `body`, gives `name`.
+pub(crate) fn value<'a>(
+    body: &'a [Stmt],
+    table: &HashMap<String, Option<usize>>,
+    name: &str,
+) -> Option<&'a Expr> {
+    let stmt = body.get((*table.get(name)?)?)?;
     match stmt.as_assign_stmt() {
         Some(node) => Some(&node.value),
         None => stmt.as_ann_assign_stmt()?.value.as_deref(),
@@ -812,14 +821,14 @@ pub fn constant<'a>(source: &'a Source, name: &str) -> Option<&'a Expr> {
 }
 
 /// Module-level names to the statement that gives each its one value.
-fn constants(source: &Source) -> HashMap<String, Option<usize>> {
+pub(crate) fn constants(body: &[Stmt]) -> HashMap<String, Option<usize>> {
     fn bind(found: &mut HashMap<String, Option<usize>>, name: &str, value: Option<usize>) {
         // A name bound again has no single value.
         let value = value.filter(|_| !found.contains_key(name));
         found.insert(name.to_string(), value);
     }
     let mut found = HashMap::new();
-    for (at, stmt) in source.body().iter().enumerate() {
+    for (at, stmt) in body.iter().enumerate() {
         match stmt {
             Stmt::Assign(node) => {
                 let names: Option<Vec<&str>> = node

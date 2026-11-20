@@ -54,7 +54,7 @@ pub(crate) fn region(node: Node<'_>, lines: &Lines, len: usize) -> (usize, usize
 pub(crate) fn receiver_class(
     receiver: &Expr,
     stack: &[Scope],
-    ctx: &Context<'_, '_>,
+    ctx: &Context<'_, '_, '_>,
 ) -> Option<String> {
     let base = match receiver {
         Expr::Attribute(attr) => attr.value.as_ref(),

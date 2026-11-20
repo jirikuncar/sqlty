@@ -11,7 +11,7 @@ use ruff_python_ast::{Comprehension, ExceptHandler, Expr, ExprCall, ExprContext,
 use ruff_text_size::Ranged;
 
 use crate::frozen::Table;
-use crate::scopes::{dotted, is_scalar, qualified, Context, Lines, Node, Scan, Scope};
+use crate::scopes::{dotted, is_scalar, qualified, Constant, Context, Lines, Node, Scan, Scope};
 pub use crate::scopes::{Key, Param};
 
 const CONNECTIONS: [(&str, &str); 13] = [
@@ -92,7 +92,13 @@ pub fn may_hold(text: &str) -> bool {
 /// The driver calls of `body`, in source order.
 ///
 /// `imported` is `ParsedSource.imported_names` as `(local, dotted)` pairs, first binding first.
-pub fn find(source: &str, body: &[Stmt], imported: &Table) -> Vec<DriverCall> {
+/// `constant` finds what the module imports from checked modules, when they are known.
+pub fn find(
+    source: &str,
+    body: &[Stmt],
+    imported: &Table,
+    constant: Option<Constant<'_>>,
+) -> Vec<DriverCall> {
     let helpers = imported.values().any(|name| {
         let dotted = format!("{name}.");
         dotted.starts_with(BUNDLED_MODULE) || BUNDLED_MODULE.starts_with(&dotted)
@@ -108,7 +114,7 @@ pub fn find(source: &str, body: &[Stmt], imported: &Table) -> Vec<DriverCall> {
         ctx: Context {
             imported,
             scan: &scan,
-            constant: None,
+            constant,
         },
         body,
         bindings: HashMap::new(),
@@ -127,8 +133,8 @@ pub fn find(source: &str, body: &[Stmt], imported: &Table) -> Vec<DriverCall> {
 
 type Binding<'a> = (Option<&'a Expr>, Option<&'a Expr>);
 
-struct Finder<'a, 's> {
-    ctx: Context<'a, 's>,
+struct Finder<'a, 's, 'c> {
+    ctx: Context<'a, 's, 'c>,
     body: &'a [Stmt],
     bindings: HashMap<Scope, HashMap<&'a str, Vec<Binding<'a>>>>,
     resolving: HashSet<(Scope, String)>,
@@ -137,7 +143,7 @@ struct Finder<'a, 's> {
     found: Vec<DriverCall>,
 }
 
-impl<'a> Finder<'a, '_> {
+impl<'a> Finder<'a, '_, '_> {
     fn call(&mut self, call: &'a ExprCall, stack: &[Scope]) {
         let chain: Vec<Scope> = std::iter::once(0)
             .chain(

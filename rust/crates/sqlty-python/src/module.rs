@@ -169,7 +169,7 @@ pub fn facts(source: &str) -> Option<Facts> {
     found.attributes = attributes;
     found.any_calls = any_calls;
     if drivers::may_hold(source) {
-        found.driver_calls = drivers::find(source, &module.body, &imported);
+        found.driver_calls = drivers::find(source, &module.body, &imported, None);
     }
     Some(found)
 }

@@ -131,8 +131,8 @@ What makes a column nullable or not:
 - **Parameters.** A placeholder echoed into a column (`SELECT %(key)s::text`) can be NULL,
   since a caller may bind `None`. In a call to a [marked helper](helpers.md) whose argument
   for it has a known type other than `None` (a literal, a name bound to one, an annotated
-  variable, a constant imported from a checked module), it is not:
-  the column, or the JSON member it fills, follows the argument. Where the argument is
+  variable, a constant imported from a checked module, a `NewType` of a known type), it
+  is not: the column, or the JSON member it fills, follows the argument. Where the argument is
   `None`, optional or of unknown type, and in `SQL[T]` strings, it stays nullable.
 
 [`nullable-mismatch`](../reference/rules/nullable-mismatch.md) reports a row type field
