@@ -1,9 +1,9 @@
 ---
-order: 260
+order: 200
 group: "names"
 severity: "error"
 fixable: false
-summary: "Unqualified column exists in more than one table of the query"
+summary: "Unqualified column that more than one table of the query has"
 origin: "SQL"
 ---
 

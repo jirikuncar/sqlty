@@ -1,5 +1,5 @@
 ---
-order: 150
+order: 350
 group: "rewrite"
 severity: "error"
 fixable: true
