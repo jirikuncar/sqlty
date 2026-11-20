@@ -6,9 +6,8 @@
   "goalert": {
     "commit": "5ed6155988586be91209df15d5cacb6ef8008330",
     "rules": {
-      "select-star": 16,
-      "unknown-function": 4,
-      "unparsed-query": 5
+      "foreign-key-mismatch": 1,
+      "select-star": 16
     }
   },
   "liberapay": {

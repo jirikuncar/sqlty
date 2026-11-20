@@ -109,8 +109,12 @@ def summary(results: dict, expected: dict) -> str:
         "|---|--:|--:|--:|---|",
     ]
     for name, r in results.items():
+        if "error" in r:
+            lines.append(f"| {name} | | | | failed: {r['error']} |")
+            continue
         old = expected.get(name, {}).get("rules", {})
-        changed = [
+        changed = [] if expected.get(name, {}).get("commit") == r["commit"] else ["new commit"]
+        changed += [
             f"`{rule}` {old.get(rule, 0)} → {r['rules'].get(rule, 0)}"
             for rule in sorted({*old, *r["rules"]})
             if old.get(rule, 0) != r["rules"].get(rule, 0)
@@ -143,7 +147,10 @@ def main() -> int:
             if not root.exists():
                 clone(repo["url"], repo["commit"], root)
             (root / "sqlty.toml").write_text(repo["config"])
-            results[name] = {"commit": repo["commit"], **check(args.exe, root)}
+            try:
+                results[name] = {"commit": repo["commit"], **check(args.exe, root)}
+            except (RuntimeError, subprocess.CalledProcessError) as error:
+                results[name] = {"commit": repo["commit"], "error": str(error)}
     finally:
         if not args.keep:
             shutil.rmtree(base, ignore_errors=True)
@@ -155,10 +162,11 @@ def main() -> int:
     if args.summary:
         with open(args.summary, "a") as f:
             f.write("## sqlty check on real repositories\n\n" + table)
-    if args.update:
+    failed = [name for name, r in results.items() if "error" in r]
+    if args.update and not failed:
         counts = {n: {"commit": r["commit"], "rules": r["rules"]} for n, r in results.items()}
         EXPECTED.write_text(json.dumps(counts, indent=2) + "\n")
-    return 0
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

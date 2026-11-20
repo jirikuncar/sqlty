@@ -58,7 +58,7 @@ uv run python benchmarks/bench_project.py --size ci --exe path/to/sqlty  # a nat
 ## CI budget
 
 The `bench` job in `.github/workflows/tests.yml` builds the release extension
-and runs `make bench-ci` (about 25 s). It fails when a metric is over its budget
+and runs `make bench-ci` (about 15 s). It fails when a metric is over its budget
 in `baseline.json`:
 
 - **Times** are divided by a calibration loop (a fixed pure-Python loop, best of

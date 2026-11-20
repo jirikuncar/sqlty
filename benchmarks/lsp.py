@@ -14,6 +14,7 @@ in seconds:
 from __future__ import annotations
 
 import json
+import math
 import os
 import statistics
 import subprocess
@@ -41,6 +42,7 @@ class Server:
             stderr=self.stderr,
         )
         self.watchdog = threading.Timer(DEADLINE_S, self.process.kill)
+        self.watchdog.daemon = True
         self.watchdog.start()
         self.next = 0
 
@@ -99,10 +101,18 @@ def _position(text: str, needle: str) -> dict[str, int]:
 
 def measure(exe: str, root: Path, module: Path, table: str) -> dict[str, dict[str, float]]:
     """Open ``module`` in a server for ``root``, edit it and query a ``FROM table`` in it."""
+    server = Server(exe, root)
+    try:
+        return _measure(server, root, module, table)
+    finally:
+        server.watchdog.cancel()
+        server.process.kill()
+
+
+def _measure(server: Server, root: Path, module: Path, table: str) -> dict[str, dict[str, float]]:
     text = module.read_text()
     uri = module.as_uri()
     doc = {"textDocument": {"uri": uri}}
-    server = Server(exe, root)
     start = time.perf_counter()
     server.request("initialize", {"capabilities": {}, "rootUri": root.as_uri()})
     server.send({"method": "initialized", "params": {}})
@@ -139,7 +149,7 @@ def measure(exe: str, root: Path, module: Path, table: str) -> dict[str, dict[st
     return {
         "lsp_open": {"wall_s": round(opening, 4), "rss_mb": round(rss, 1)},
         "lsp_edit": {"wall_s": round(statistics.median(edits), 4)},
-        "lsp_edit_p95": {"wall_s": round(edits[int(len(edits) * 0.95) - 1], 4)},
+        "lsp_edit_p95": {"wall_s": round(edits[math.ceil(len(edits) * 0.95) - 1], 4)},
         "lsp_hover": {"wall_s": round(sum(hover), 4)},
         "lsp_completion": {"wall_s": round(sum(completion), 4)},
     }

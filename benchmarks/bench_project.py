@@ -227,6 +227,8 @@ def compare(result: dict, baseline: dict, time_tol: float, rss_tol: float) -> li
     """Human-readable lines for the metrics over budget (empty when within budget)."""
     new, old = flatten(result), flatten(baseline)
     failures = []
+    for name in sorted(new.keys() - old.keys()):
+        print(f"{name}: not in the baseline, not budgeted", file=sys.stderr)
     for name, (kind, base) in sorted(old.items()):
         if name not in new:
             continue
