@@ -16,9 +16,9 @@ use std::ops::{ControlFlow, Range};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sqlparser::ast::{
     AlterColumnOperation, AlterTableOperation, AlterType, AlterTypeOperation, CascadeOption,
-    CheckConstraint, ColumnDef, ColumnOption, CopySource, DataType, DetachPartitionMode, Expr,
-    ForValues, Insert, Merge, ObjectName, ObjectType, SetExpr, Statement, TableConstraint,
-    TableFactor, TableObject,
+    CharacterLength, CheckConstraint, ColumnDef, ColumnOption, CopySource, DataType,
+    DetachPartitionMode, ExactNumberInfo, Expr, ForValues, Insert, Merge, ObjectName, ObjectType,
+    SetExpr, Statement, TableConstraint, TableFactor, TableObject,
 };
 
 use crate::analyzer::{parse_ddl, SqlDialect};
@@ -963,24 +963,22 @@ fn keeps_storage(old: &DataType, new: &DataType) -> bool {
         return true;
     }
     match (Storage::of(old), Storage::of(new)) {
-        (Some(Storage::Varchar(old)), Some(Storage::Varchar(new))) => match (old, new) {
-            (_, None) => true,
-            (Some(old), Some(new)) => new >= old,
-            (None, Some(_)) => false,
-        },
-        (Some(Storage::Varbit(old)), Some(Storage::Varbit(new))) => match (old, new) {
-            (_, None) => true,
-            (Some(old), Some(new)) => new >= old,
-            (None, Some(_)) => false,
-        },
-        (Some(Storage::Numeric(old)), Some(Storage::Numeric(new))) => match (old, new) {
-            (_, None) => true,
-            (Some((p, s)), Some((q, t))) => s == t && q >= p,
-            (None, Some(_)) => false,
-        },
+        (Some(Storage::Varchar(old)), Some(Storage::Varchar(new)))
+        | (Some(Storage::Varbit(old)), Some(Storage::Varbit(new))) => {
+            widens(old, new, |old, new| new >= old)
+        }
+        (Some(Storage::Numeric(old)), Some(Storage::Numeric(new))) => {
+            widens(old, new, |(p, s), (q, t)| s == t && q >= p)
+        }
         (Some(Storage::Cidr), Some(Storage::Inet)) => true,
         _ => false,
     }
+}
+
+/// Whether the type modifier `new` admits every value `old` does, by `admits`; no modifier
+/// admits all.
+fn widens<T>(old: Option<T>, new: Option<T>, admits: impl FnOnce(T, T) -> bool) -> bool {
+    new.is_none_or(|new| old.is_some_and(|old| admits(old, new)))
 }
 
 /// The types `keeps_storage` compares; `text` is a `varchar` without a length.
@@ -994,30 +992,30 @@ enum Storage {
 
 impl Storage {
     fn of(ty: &DataType) -> Option<Storage> {
-        let text = ty.to_string().to_lowercase();
-        let (base, args) = match text.split_once('(') {
-            Some((base, args)) => (base.trim(), Some(args.trim_end_matches(')'))),
-            None => (text.trim(), None),
-        };
-        let numbers: Option<Vec<u64>> = match args {
-            Some(args) => Some(
-                args.split(',')
-                    .map(|n| n.trim().parse().ok())
-                    .collect::<Option<_>>()?,
-            ),
-            None => None,
-        };
-        Some(match (base, numbers.as_deref()) {
-            ("text", None) => Storage::Varchar(None),
-            ("varchar" | "character varying", None) => Storage::Varchar(None),
-            ("varchar" | "character varying", Some([n])) => Storage::Varchar(Some(*n)),
-            ("varbit" | "bit varying", None) => Storage::Varbit(None),
-            ("varbit" | "bit varying", Some([n])) => Storage::Varbit(Some(*n)),
-            ("numeric" | "decimal", None) => Storage::Numeric(None),
-            ("numeric" | "decimal", Some([p])) => Storage::Numeric(Some((*p, 0))),
-            ("numeric" | "decimal", Some([p, s])) => Storage::Numeric(Some((*p, *s))),
-            ("cidr", None) => Storage::Cidr,
-            ("inet", None) => Storage::Inet,
+        Some(match ty {
+            DataType::Text => Storage::Varchar(None),
+            DataType::Varchar(length) | DataType::CharacterVarying(length) => {
+                Storage::Varchar(match length {
+                    None => None,
+                    Some(CharacterLength::IntegerLength { length, unit: None }) => Some(*length),
+                    Some(_) => return None,
+                })
+            }
+            DataType::VarBit(length) | DataType::BitVarying(length) => Storage::Varbit(*length),
+            DataType::Numeric(info) | DataType::Decimal(info) => Storage::Numeric(match *info {
+                ExactNumberInfo::None => None,
+                ExactNumberInfo::Precision(p) => Some((p, 0)),
+                ExactNumberInfo::PrecisionAndScale(p, s) => Some((p, u64::try_from(s).ok()?)),
+            }),
+            // `cidr`, `inet` and `text()`.
+            DataType::Custom(name, modifiers) if modifiers.is_empty() => {
+                match name.to_string().to_lowercase().as_str() {
+                    "text" => Storage::Varchar(None),
+                    "cidr" => Storage::Cidr,
+                    "inet" => Storage::Inet,
+                    _ => return None,
+                }
+            }
             _ => return None,
         })
     }
@@ -1284,8 +1282,11 @@ mod tests {
             ("ALTER TABLE users ALTER COLUMN bio SET NOT NULL", &[ConstraintScan]),
             ("ALTER TABLE users ALTER COLUMN bio DROP NOT NULL", &[]),
             ("ALTER TABLE users ALTER COLUMN email TYPE text", &[]),
+            ("ALTER TABLE users ALTER COLUMN email TYPE text()", &[]),
             ("ALTER TABLE users ALTER COLUMN email TYPE varchar(200)", &[]),
             ("ALTER TABLE users ALTER COLUMN email TYPE varchar(50)", &[TableRewrite]),
+            ("ALTER TABLE users ALTER COLUMN email TYPE varchar(MAX)", &[TableRewrite]),
+            ("ALTER TABLE users ALTER COLUMN email TYPE varchar(200 CHARACTERS)", &[TableRewrite]),
             ("ALTER TABLE users ALTER COLUMN bio TYPE varchar", &[]),
             ("ALTER TABLE users ALTER COLUMN bio TYPE varchar(10)", &[TableRewrite]),
             ("ALTER TABLE users ALTER COLUMN score TYPE numeric(7, 2)", &[]),
@@ -1295,6 +1296,8 @@ mod tests {
             ("ALTER TABLE users ALTER COLUMN whole TYPE numeric(9, 2)", &[TableRewrite]),
             ("ALTER TABLE users ALTER COLUMN free TYPE numeric(9)", &[TableRewrite]),
             ("ALTER TABLE users ALTER COLUMN net TYPE inet", &[]),
+            ("ALTER TABLE users ALTER COLUMN net TYPE macaddr", &[TableRewrite]),
+            ("ALTER TABLE users ALTER COLUMN net TYPE \"inet\"", &[TableRewrite]),
             ("ALTER TABLE users ALTER COLUMN bits TYPE varbit(8)", &[]),
             ("ALTER TABLE users ALTER COLUMN bits TYPE bit varying", &[]),
             ("ALTER TABLE users ALTER COLUMN bits TYPE varbit(2)", &[TableRewrite]),
