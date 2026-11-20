@@ -15,7 +15,7 @@ use sqlty_python::index::HelperIndex;
 use sqlty_python::queries::Format;
 use sqlty_python::rules::RuleConfig;
 use sqlty_python::types::stdlib::Version;
-use sqlty_sql::analyzer::Schema;
+use sqlty_sql::analyzer::{self, Schema};
 
 use super::{configured, index_of, Against, File, Queries, Revision, Schemas};
 
@@ -389,10 +389,7 @@ impl Queries for Snapshot {
 impl Schemas for Snapshot {
     fn against(&mut self, relative: &Path, own: &FileSettings) -> Result<Against, String> {
         let Some(index) = self.schema_index(relative) else {
-            return Ok(Against {
-                key: (None, own.dialect, own.types.clone()),
-                schema: None,
-            });
+            return Ok(Against::none(own));
         };
         let schema = self.schema(index)?;
         let (sql, dialect, types) = &self.schemas[index];
@@ -400,5 +397,18 @@ impl Schemas for Snapshot {
             key: (Some(Arc::clone(sql)), dialect, types.clone()),
             schema: Some(schema),
         })
+    }
+    /// A snapshot records schemas by file and directory only, so the project's own is the
+    /// one of its directory and a named database has none.
+    fn database(
+        &mut self,
+        directory: &Path,
+        name: &str,
+        own: &FileSettings,
+    ) -> Result<Against, String> {
+        match name == analyzer::DEFAULT {
+            true => self.against(&directory.join("_"), own),
+            false => Ok(Against::none(own)),
+        }
     }
 }

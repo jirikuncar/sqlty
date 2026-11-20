@@ -288,6 +288,18 @@ writes for them, such as `alembic upgrade head --sql > db/schema.sql`. A
 `pg_dump` schema is not judged: it describes the result, not how to get there.
 The statements are judged in every `--direction`.
 
+Every `schema` of the configuration is judged, each entry of
+`[tool.sqlty.databases]` included, and a migration takes the severities of
+`rules` with the `overrides` its own path matches:
+
+```toml ignore
+[[tool.sqlty.overrides]]
+include = ["migrations/**"]
+
+[tool.sqlty.overrides.rules]
+missing-concurrently = "error"
+```
+
 ## Baselines without git history
 
 ```bash

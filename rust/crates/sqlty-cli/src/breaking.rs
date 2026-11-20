@@ -15,7 +15,7 @@
 //! no queries and so is only checked forward.
 
 use std::borrow::BorrowMut;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -26,9 +26,9 @@ use sqlty_project::{Checker, FileSettings, Flags, Options, Shared, Workspace};
 use sqlty_python::checker::Diagnostic;
 use sqlty_python::index::{defines_helpers, helpers_of, Builder, HelperIndex, Module, Roots};
 use sqlty_python::project::{self, Discovery};
-use sqlty_python::rules::Severity;
+use sqlty_python::rules::{RuleConfig, Severity};
 use sqlty_python::types::stdlib::Version;
-use sqlty_sql::analyzer::Schema;
+use sqlty_sql::analyzer::{self, Schema};
 
 use crate::{
     github_annotation, json_diagnostic, pretty, report_unreadable, sarif_log, warn_all, Breaking,
@@ -166,6 +166,14 @@ impl Against {
         }
     }
 
+    /// No schema: what a baseline without the database gives.
+    fn none(own: &FileSettings) -> Self {
+        Self {
+            key: (None, own.dialect, own.types.clone()),
+            schema: None,
+        }
+    }
+
     /// `own` with this schema, `None` when it is `own`'s.
     fn settings(self, own: &FileSettings) -> Option<FileSettings> {
         if self.key == key_of(own) {
@@ -193,6 +201,14 @@ pub trait Queries {
 pub trait Schemas {
     /// The schema of the file `relative`, checked with `own`.
     fn against(&mut self, relative: &Path, own: &FileSettings) -> Result<Against, String>;
+    /// The schema of the database `name` of the configuration of `directory`, for a
+    /// database no file of the head is checked against.
+    fn database(
+        &mut self,
+        directory: &Path,
+        name: &str,
+        own: &FileSettings,
+    ) -> Result<Against, String>;
 }
 
 /// A checkout of the project at one revision, read as `sqlty check` reads it.
@@ -282,6 +298,17 @@ impl<W: BorrowMut<Workspace>> Schemas for Revision<W> {
         let settings = self.workspace.borrow_mut().settings(&path)?;
         Ok(Against::of(&settings))
     }
+
+    fn database(
+        &mut self,
+        directory: &Path,
+        name: &str,
+        own: &FileSettings,
+    ) -> Result<Against, String> {
+        let path = self.root.join(directory).join("_");
+        let found = self.workspace.borrow_mut().database(&path, name)?;
+        Ok(found.map_or_else(|| Against::none(own), |settings| Against::of(&settings)))
+    }
 }
 
 /// A schema without queries, such as a dump or migrations: a baseline only forward.
@@ -305,6 +332,15 @@ impl Schemas for SchemaFiles {
             key: (Some(Arc::clone(&self.sql)), own.dialect, own.types.clone()),
             schema: Some(schema),
         })
+    }
+
+    fn database(
+        &mut self,
+        _directory: &Path,
+        _name: &str,
+        own: &FileSettings,
+    ) -> Result<Against, String> {
+        self.against(Path::new(""), own)
     }
 }
 
@@ -485,56 +521,105 @@ pub fn compare(
         .collect())
 }
 
-/// What the new statements of the PostgreSQL schema files of `head` lock, against the
-/// schema `schemas` gives each of its files and `paths`.
-fn migrations(
-    against: &str,
-    paths: &[PathBuf],
-    head: &mut Revision<Workspace>,
-    schemas: &mut dyn Schemas,
-) -> Result<Vec<Finding>, String> {
-    let mut checked: Vec<(PathBuf, Arc<FileSettings>)> = head
-        .files()?
+/// The migrations of one database of the head, in the order they run.
+struct Migrations {
+    /// A path the baseline is asked for: a file of the head checked against this schema,
+    /// or `_` in `directory` for the project's own. `None`: ask by database name.
+    probe: Option<PathBuf>,
+    directory: PathBuf,
+    database: String,
+    settings: Arc<FileSettings>,
+    /// For each file: its shown path, text and rules.
+    files: Vec<(PathBuf, Arc<str>, RuleConfig)>,
+}
+
+/// The PostgreSQL schemas of the head, each set of schema files once, read once.
+fn migration_sets(head: &mut Revision<Workspace>) -> Result<Vec<Migrations>, String> {
+    let sources: Vec<_> = head
+        .workspace
+        .schema_sources()?
         .into_iter()
-        .map(|file| (file.relative, file.settings))
+        .filter(|source| source.settings.dialect == "postgres")
         .collect();
+    if sources.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut paths = head.workspace.files().to_vec();
+    paths.extend(head.workspace.query_files()?);
+    let mut routed = Vec::new();
     for path in paths {
-        let relative = path.join("_");
-        let settings = head.workspace.settings(&head.root.join(&relative))?;
-        checked.push((relative, settings));
+        let schema = head.workspace.settings(&path)?.schema_sql.clone();
+        routed.push((relative(&head.root, &path), schema));
     }
     let disk = Shared(Arc::new(sqlty_project::Disk));
-    let mut seen = BTreeSet::new();
+    let mut seen = HashSet::new();
+    let mut sets = Vec::new();
+    for source in sources {
+        let files = &source.settings.schema_files;
+        let shown: Vec<PathBuf> = files.iter().map(|path| project::normalized(path)).collect();
+        if !seen.insert(shown.clone()) {
+            continue;
+        }
+        let probe = routed
+            .iter()
+            .find(|(_, schema)| match (schema, &source.settings.schema_sql) {
+                (Some(schema), Some(own)) => Arc::ptr_eq(schema, own),
+                _ => false,
+            })
+            .map(|(path, _)| path.clone())
+            .or_else(|| (source.database == analyzer::DEFAULT).then(|| source.directory.join("_")));
+        let checked = files.iter().zip(&shown).zip(&source.files);
+        sets.push(Migrations {
+            probe,
+            directory: source.directory.clone(),
+            database: source.database.clone(),
+            settings: Arc::clone(&source.settings),
+            files: checked
+                .map(|((path, shown), settings)| {
+                    let text = disk.text(path).unwrap_or_default();
+                    let rules = Checker::of(settings, None).rules;
+                    (relative_to(shown, &head.root), Arc::from(text), rules)
+                })
+                .collect(),
+        });
+    }
+    Ok(sets)
+}
+
+/// What the new statements of the migrations `sets` lock, against the schema `schemas`
+/// gives each of their databases.
+fn migrations(
+    against: &str,
+    sets: &[Migrations],
+    schemas: &mut dyn Schemas,
+) -> Result<Vec<Finding>, String> {
     let mut findings = Vec::new();
-    for (relative, own) in checked {
-        let baseline = schemas.against(&relative, &own)?.key.0;
-        let Some(baseline) = baseline
-            .filter(|sql| own.dialect == "postgres" && Some(sql) != own.schema_sql.as_ref())
+    for set in sets {
+        let own = &set.settings;
+        let other = match &set.probe {
+            Some(probe) => schemas.against(probe, own)?,
+            None => schemas.database(&set.directory, &set.database, own)?,
+        };
+        let Some(baseline) = other
+            .key
+            .0
+            .filter(|sql| Some(sql) != own.schema_sql.as_ref())
         else {
             continue;
         };
-        let mut rules: Vec<_> = own.rules.iter().collect();
-        rules.sort();
-        let key = format!("{:?}", (&own.schema_files, &baseline, rules));
-        if !seen.insert(key) {
-            continue;
-        }
-        let texts: Vec<String> = own
-            .schema_files
+        let checked: Vec<(&str, &RuleConfig)> = set
+            .files
             .iter()
-            .map(|path| disk.text(path).unwrap_or_default())
+            .map(|(_, text, rules)| (&**text, rules))
             .collect();
-        let sources: Vec<&str> = texts.iter().map(String::as_str).collect();
-        let rules = Checker::of(&own, None).rules;
-        let found = sqlty_python::migrations::check_migrations(&baseline, &sources, &rules);
-        for ((path, text), found) in own.schema_files.iter().zip(texts.iter()).zip(found) {
-            let text: Arc<str> = Arc::from(text.as_str());
+        let found = sqlty_python::migrations::check_migrations_with(&baseline, &checked);
+        for ((path, text, _), found) in set.files.iter().zip(found) {
             findings.extend(found.into_iter().map(|diagnostic| Finding {
                 direction: Direction::Migration,
                 against: against.to_string(),
-                path: relative_to(path, &head.root),
+                path: path.clone(),
                 diagnostic,
-                text: Arc::clone(&text),
+                text: Arc::clone(text),
             }));
         }
     }
@@ -640,6 +725,7 @@ pub fn run(host: &mut dyn Host, args: &Args) -> Result<i32, String> {
         let data = snapshot::save(&mut head)?;
         host.write(&cwd.join(save), data.as_bytes())?;
     }
+    let sets = migration_sets(&mut head)?;
     let mut findings = Vec::new();
     for baseline in &mut baselines {
         let label = baseline.label().to_string();
@@ -667,7 +753,7 @@ pub fn run(host: &mut dyn Host, args: &Args) -> Result<i32, String> {
                 version,
             )?);
         }
-        findings.extend(migrations(&label, &paths, &mut head, baseline.schemas())?);
+        findings.extend(migrations(&label, &sets, baseline.schemas())?);
     }
     warn_all(host, &head.workspace);
     for baseline in &baselines {
@@ -1147,6 +1233,110 @@ mod tests {
             Some("ignore")
         );
         assert_eq!(settings.types, [("TEXT".to_string(), "str".to_string())]);
+        std::fs::remove_dir_all(&root).expect("removes");
+    }
+
+    const USERS: &str = "CREATE TABLE users (id INT, bio TEXT);\n";
+    const EVENTS: &str = "CREATE TABLE events (id INT, at TIMESTAMP);\n";
+    const INDEX: &str = "SET lock_timeout = '1s';\nCREATE INDEX events_at ON events (at);\n";
+    const DATABASES: &str = "[tool.sqlty]\nschema = \"migrations/\"\n\
+        [tool.sqlty.databases.events]\nschema = \"events/\"\ninclude = [\"events/**\"]\n";
+
+    fn judged(findings: Vec<Finding>) -> Vec<(PathBuf, &'static str)> {
+        let rules = |finding: Finding| (finding.path, finding.diagnostic.rule.name());
+        findings.into_iter().map(rules).collect()
+    }
+
+    #[test]
+    fn a_snapshot_judges_the_migrations_of_databases_it_recorded() {
+        let root = project(
+            "recorded",
+            &[
+                ("pyproject.toml", DATABASES),
+                ("migrations/0001.sql", USERS),
+                ("events/0001.sql", EVENTS),
+                ("events/q.py", "x = 1\n"),
+                ("app/q.py", "x = 1\n"),
+            ],
+        );
+        let mut saved = snapshot(&root);
+        std::fs::write(root.join("events/0002.sql"), INDEX).expect("writes");
+        let mut head = open(&root);
+        let sets = migration_sets(&mut head).expect("reads");
+        let probes: Vec<_> = sets.iter().map(|set| set.probe.as_deref()).collect();
+        assert_eq!(
+            probes,
+            [Some(Path::new("app/q.py")), Some(Path::new("events/q.py"))]
+        );
+        let found = judged(migrations("s", &sets, &mut saved).expect("judges"));
+        assert_eq!(
+            found,
+            [(PathBuf::from("events/0002.sql"), "missing-concurrently")]
+        );
+        let own = &sets[0].settings;
+        let key = |against: Against| against.key.0;
+        let default = saved.database(Path::new("."), "default", own);
+        assert!(key(default.expect("reads")).is_some());
+        assert!(key(saved
+            .database(Path::new("."), "events", own)
+            .expect("reads"))
+        .is_none());
+        std::fs::remove_dir_all(&root).expect("removes");
+    }
+
+    #[test]
+    fn a_database_the_baseline_lacks_has_no_migrations_to_judge() {
+        let root = project(
+            "lacks",
+            &[
+                ("pyproject.toml", DATABASES),
+                ("migrations/0001.sql", USERS),
+                ("events/0001.sql", EVENTS),
+            ],
+        );
+        let old = project(
+            "lacks-old",
+            &[
+                ("pyproject.toml", "[tool.sqlty]\nschema = \"migrations/\"\n"),
+                ("migrations/0001.sql", USERS),
+            ],
+        );
+        std::fs::write(root.join("events/0002.sql"), INDEX).expect("writes");
+        let mut head = open(&root);
+        let mut baseline = open(&old);
+        let sets = migration_sets(&mut head).expect("reads");
+        assert_eq!(sets[1].probe, None);
+        let own = &sets[1].settings;
+        let against = baseline.database(Path::new("."), "events", own);
+        assert!(against.expect("reads").key.0.is_none());
+        assert!(migrations("old", &sets, &mut baseline)
+            .expect("judges")
+            .is_empty());
+        for directory in [root, old] {
+            std::fs::remove_dir_all(directory).expect("removes");
+        }
+    }
+
+    #[test]
+    fn migrations_are_read_once_for_every_baseline() {
+        let root = project(
+            "once",
+            &[
+                ("pyproject.toml", DATABASES),
+                ("migrations/0001.sql", USERS),
+                ("events/0001.sql", EVENTS),
+                ("events/0002.sql", INDEX),
+            ],
+        );
+        let mut head = open(&root);
+        let sets = migration_sets(&mut head).expect("reads");
+        let mut first = schema_files(&format!("{USERS}{EVENTS}"));
+        let mut second = schema_files(&format!("{EVENTS}{USERS}"));
+        let found =
+            |schemas: &mut SchemaFiles| judged(migrations("b", &sets, schemas).expect("ok"));
+        let expected = [(PathBuf::from("events/0002.sql"), "missing-concurrently")];
+        assert_eq!(found(&mut first), expected);
+        assert_eq!(found(&mut second), expected);
         std::fs::remove_dir_all(&root).expect("removes");
     }
 

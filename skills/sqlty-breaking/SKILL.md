@@ -67,6 +67,10 @@ migrations/0042_index.sql:2: [missing-concurrently] `CREATE INDEX` blocks writes
 | `concurrent-index-if-not-exists` | `DROP INDEX CONCURRENTLY IF EXISTS`, then `CREATE INDEX CONCURRENTLY` without `IF NOT EXISTS` |
 | `disable-trigger-all` | `DISABLE TRIGGER USER` or name the triggers |
 
+Every `schema` of the configuration is judged, each `[tool.sqlty.databases]` entry
+included, with the severities of `rules` and of the `[[tool.sqlty.overrides]]` that
+match the migration's path (`include = ["migrations/**"]`).
+
 ## A dropped column
 
 Below, the code was written for `schema.sql`, and `against.sql` is the schema
