@@ -89,6 +89,8 @@ struct Model {
     types: FxHashMap<(String, String), DataType>,
     /// The tables on either side of a foreign key.
     referencing: FxHashSet<String>,
+    /// The tables a foreign key references.
+    referenced: FxHashSet<String>,
     /// The `CHECK (column IS NOT NULL)` constraints of each table: name, column, validated.
     not_null: FxHashMap<String, Vec<(Option<String>, String, bool)>>,
 }
@@ -142,7 +144,7 @@ impl Model {
                 if let Some(used) = session
                     .added_values
                     .iter()
-                    .position(|(value, ty)| self.uses_value(&stmt, &tokens, value, ty))
+                    .position(|(value, ty)| self.uses_value(&stmt, value, ty))
                 {
                     let (value, ty) = session.added_values.remove(used);
                     report(
@@ -234,6 +236,7 @@ impl Model {
             _ => {}
         }
         self.referencing.extend(foreign_keys(stmt));
+        self.referenced.extend(referenced_tables(stmt));
     }
 
     fn apply_op(&mut self, table: &str, op: &AlterTableOperation) {
@@ -277,17 +280,44 @@ impl Model {
 
     /// Whether `stmt` puts the new enum `value` of `ty` to use: it casts to `ty`, names a
     /// column of type `ty`, or names no table whose columns are known.
-    fn uses_value(&self, stmt: &Raw, words: &[String], value: &str, ty: &ObjectName) -> bool {
-        if !stmt.tokens().contains(&value) || words.starts_with(&["alter".into(), "type".into()]) {
+    fn uses_value(&self, stmt: &Raw, value: &str, ty: &ObjectName) -> bool {
+        let tokens = stmt.tokens();
+        if !tokens.contains(&value)
+            || tokens
+                .iter()
+                .take(2)
+                .map(|t| t.to_lowercase())
+                .eq(["alter", "type"])
+        {
             return false;
         }
+        let words: Vec<String> = tokens.iter().map(|token| fold_token(token)).collect();
         let ty = key(ty);
+        let short = ty.rsplit('.').next().unwrap_or(&ty);
         let typed = |column: &(String, String)| {
-            self.types
-                .get(column)
-                .is_some_and(|declared| declared.to_string().to_lowercase() == ty)
+            self.types.get(column).is_some_and(|declared| {
+                let declared = declared.to_string().to_lowercase();
+                declared == ty || declared == short
+            })
         };
-        words.contains(&ty)
+        let cast = words
+            .windows(2)
+            .any(|pair| matches!(pair[0].as_str(), "::" | "as") && pair[1] == short);
+        let positional = match parse(stmt) {
+            Some((Statement::Insert(insert), _)) if insert.columns.is_empty() => {
+                match &insert.table {
+                    TableObject::TableName(table) => {
+                        let table = key(table);
+                        self.types
+                            .keys()
+                            .any(|column| column.0 == table && typed(column))
+                    }
+                    _ => false,
+                }
+            }
+            _ => false,
+        };
+        cast || positional
             || words.iter().all(|word| !self.tables.contains(word))
             || self
                 .types
@@ -364,7 +394,7 @@ impl Model {
                     .all(|target| self.is_new(&target.name));
                 let referenced = truncate.table_names.iter().any(|target| {
                     let table = key(&target.name);
-                    self.referencing.contains(&table) || !self.tables.contains(&table)
+                    self.referenced.contains(&table) || !self.tables.contains(&table)
                 });
                 if !created && referenced && truncate.cascade == Some(CascadeOption::Cascade) {
                     let names: Vec<String> = truncate
@@ -535,7 +565,7 @@ impl Model {
                 Judged::concurrently(concurrently)
             }
             ["cluster", ..] => {
-                let table = token_name(&stmt.tokens()[1..], &["verbose"], "using");
+                let table = token_name(&stmt.tokens()[1..], &["verbose"], &["using"]);
                 if !self.created.contains(&table) {
                     report(Rule::TableRewrite, rewrite_command_message("CLUSTER"));
                 }
@@ -546,7 +576,8 @@ impl Model {
                     && !rest.starts_with(&["all", "in"]) =>
             {
                 let skip = ["if", "exists", "only"];
-                let table = token_name(&stmt.tokens()[2..], &skip, "set");
+                let ends = ["set", "add", "alter", "drop", "rename", "owner", ","];
+                let table = token_name(&stmt.tokens()[2..], &skip, &ends);
                 let created = self.created.contains(&table);
                 if !created {
                     report(
@@ -854,14 +885,23 @@ fn rewrite_command_message(command: &str) -> String {
 
 /// The tables on either side of the foreign keys `stmt` adds.
 fn foreign_keys(stmt: &Statement) -> Vec<String> {
-    let (table, columns, constraints): (_, Vec<&ColumnDef>, Vec<&TableConstraint>) = match stmt {
+    let mut tables = referenced_tables(stmt);
+    match stmt {
+        Statement::CreateTable(create) if !tables.is_empty() => tables.push(key(&create.name)),
+        Statement::AlterTable(alter) if !tables.is_empty() => tables.push(key(&alter.name)),
+        _ => {}
+    }
+    tables
+}
+
+/// The tables the foreign keys `stmt` adds reference.
+fn referenced_tables(stmt: &Statement) -> Vec<String> {
+    let (columns, constraints): (Vec<&ColumnDef>, Vec<&TableConstraint>) = match stmt {
         Statement::CreateTable(create) => (
-            &create.name,
             create.columns.iter().collect(),
             create.constraints.iter().collect(),
         ),
         Statement::AlterTable(alter) => (
-            &alter.name,
             alter
                 .operations
                 .iter()
@@ -882,7 +922,7 @@ fn foreign_keys(stmt: &Statement) -> Vec<String> {
         _ => return Vec::new(),
     };
     let inline = columns.into_iter().flat_map(|column| &column.options);
-    let referenced: Vec<String> = inline
+    inline
         .filter_map(|option| match &option.option {
             ColumnOption::ForeignKey(fk) => Some(key(&fk.foreign_table)),
             _ => None,
@@ -895,30 +935,29 @@ fn foreign_keys(stmt: &Statement) -> Vec<String> {
                     _ => None,
                 }),
         )
-        .collect();
-    if referenced.is_empty() {
-        return referenced;
-    }
-    let mut tables = referenced;
-    tables.push(key(table));
-    tables
+        .collect()
 }
 
 /// The table name in `tokens` after the leading `skip` words and before `end`, folded and
 /// without the `public` schema.
-fn token_name(tokens: &[&str], skip: &[&str], end: &str) -> String {
+fn token_name(tokens: &[&str], skip: &[&str], ends: &[&str]) -> String {
     let table: String = tokens
         .iter()
         .skip_while(|t| skip.iter().any(|word| t.eq_ignore_ascii_case(word)))
-        .take_while(|t| !t.eq_ignore_ascii_case(end))
-        .map(|t| match t.strip_prefix('"') {
-            Some(quoted) => quoted.trim_end_matches('"').to_string(),
-            None => t.to_lowercase(),
-        })
+        .take_while(|t| !ends.iter().any(|end| t.eq_ignore_ascii_case(end)))
+        .map(|t| fold_token(t))
         .collect();
     match table.strip_prefix("public.") {
         Some(rest) => rest.to_string(),
         None => table,
+    }
+}
+
+/// `token` as PostgreSQL folds an identifier: quoted keeps its case.
+fn fold_token(token: &str) -> String {
+    match token.strip_prefix('"') {
+        Some(quoted) => quoted.trim_end_matches('"').to_string(),
+        None => token.to_lowercase(),
     }
 }
 
@@ -1212,6 +1251,14 @@ mod tests {
         let reported =
             |between: &str, using: &str| !rules(&baseline, &migration(between, using)).is_empty();
         assert!(reported("", "SELECT 'It''s'::status"));
+        assert!(reported("", "SELECT CAST('It''s' AS status)"));
+        assert!(reported("", "INSERT INTO orders VALUES (1, 'It''s', NULL)"));
+        assert!(reported("", "INSERT INTO orders SELECT 1, 'It''s'"));
+        assert!(!reported("", "UPDATE \"orders\" SET note = 'It''s'"));
+        assert!(!reported(
+            "",
+            "INSERT INTO orders (id, note) VALUES (1, 'It''s')"
+        ));
         assert!(reported("", "UPDATE elsewhere SET state = 'It''s'"));
         assert!(reported(
             "SAVEPOINT s; ROLLBACK TO SAVEPOINT s; RELEASE s;",
@@ -1243,8 +1290,13 @@ mod tests {
             ("ALTER TABLE teams DISABLE TRIGGER ALL", &[]),
             ("TRUNCATE tags CASCADE", &[Rule::TruncateCascade]),
             ("TRUNCATE teams CASCADE", &[]),
+            ("TRUNCATE posts CASCADE", &[]),
             (
                 "ALTER TABLE teams ADD COLUMN owner BIGINT REFERENCES users (id); TRUNCATE teams CASCADE",
+                &[],
+            ),
+            (
+                "ALTER TABLE users ADD COLUMN team BIGINT REFERENCES teams (id); TRUNCATE teams CASCADE",
                 &[Rule::TruncateCascade],
             ),
         ] {
