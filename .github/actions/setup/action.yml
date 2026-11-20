@@ -1,0 +1,60 @@
+name: Set up uv and Rust
+description: uv with a per-job cache, the pinned Rust toolchain and a cached rust/target.
+
+inputs:
+  python-version:
+    description: Python for uv; empty keeps the runner's.
+    default: ""
+  cache-suffix:
+    description: Jobs that install different dependency groups keep separate uv caches.
+    default: ${{ github.job }}
+  rust-cache-key:
+    description: Extra key for jobs whose builds differ by Python version.
+    default: ""
+  toolchain:
+    description: Overrides rust-toolchain.toml.
+    default: ""
+  components:
+    description: Extra rustup components, space separated.
+    default: ""
+  targets:
+    description: Extra rustup targets, space separated.
+    default: ""
+  save-cache:
+    description: Pull requests restore main's caches; only main writes them.
+    default: ${{ github.ref == 'refs/heads/main' }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        version: "0.13.7"
+        enable-cache: true
+        # Built wheels (duckdb has none for 3.15) are kept with the lock.
+        cache-dependency-glob: uv.lock
+        cache-suffix: ${{ inputs.cache-suffix }}
+        save-cache: ${{ inputs.save-cache }}
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install Rust toolchain
+      shell: bash
+      env:
+        TOOLCHAIN: ${{ inputs.toolchain }}
+        COMPONENTS: ${{ inputs.components }}
+        TARGETS: ${{ inputs.targets }}
+      run: |
+        rustup toolchain install ${TOOLCHAIN:+"$TOOLCHAIN"} --profile minimal
+        [ -z "$TOOLCHAIN" ] || rustup override set "$TOOLCHAIN"
+        # Builds outside the checkout, such as a wheel from the unpacked sdist, use the default.
+        rustup default "$(rustup show active-toolchain | cut -d' ' -f1)"
+        [ -z "$COMPONENTS" ] || rustup component add $COMPONENTS
+        [ -z "$TARGETS" ] || rustup target add $TARGETS
+
+    - name: Cache Rust build artifacts
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        workspaces: rust -> target
+        key: ${{ inputs.rust-cache-key }}
+        save-if: ${{ inputs.save-cache }}

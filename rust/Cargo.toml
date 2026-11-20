@@ -79,6 +79,11 @@ lto = "fat"
 codegen-units = 1
 strip = true
 
+# Grammar builders that run once per dialect; at opt-level 3 their inlined closures are
+# half of the binary's code.
+[profile.dist.package.sqruff-lib-dialects]
+opt-level = "z"
+
 # The docs playground's engine (`make playground`): a third of the bytes of `dist` to
 # download, for about 1.6 times its analysis time, still well under a keystroke.
 [profile.wasm]

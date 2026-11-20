@@ -23,8 +23,8 @@ use crate::ddl::{RowEvents, RowTrigger};
 use crate::values::{self, Value};
 
 use super::columns::{
-    apply_check, column_named, is_rowid_type, mark_primary_key, merge_columns, nonnull_groups,
-    raw_column, unique_key, RawColumn,
+    apply_check, column_named, is_rowid_type, mark_loose_primary_key, mark_primary_key,
+    merge_columns, nonnull_groups, raw_column, unique_key, RawColumn,
 };
 use super::names::{fold, key_of, lookup_key, parts, schema_for_new, type_key};
 use super::{Catalog, ForeignKey, TypeOverrides, BUILTIN_SCHEMAS};
@@ -595,14 +595,20 @@ impl Loader {
                         && column_named(&table.columns, &pk.columns[0].column.expr, self.dialect)
                             .is_some_and(|c| is_rowid_type(&c.ty)))
                 {
-                    // Still unique: SQLite's NULLs are distinct, as a UNIQUE column's.
-                    table
-                        .unique
-                        .extend(unique_key(pk.name.as_ref(), &pk.columns, self.dialect));
+                    // Still the key, as a sole column's: SQLite's NULLs are distinct.
+                    for (position, index_column) in pk.columns.iter().enumerate() {
+                        mark_loose_primary_key(
+                            &mut table.columns,
+                            &index_column.column.expr,
+                            self.dialect,
+                            position,
+                        );
+                    }
                     continue;
                 }
-                for index_column in &pk.columns {
-                    mark_primary_key(&mut table.columns, &index_column.column.expr, self.dialect);
+                for (position, index_column) in pk.columns.iter().enumerate() {
+                    let expr = &index_column.column.expr;
+                    mark_primary_key(&mut table.columns, expr, self.dialect, position);
                 }
             }
         }
@@ -679,12 +685,13 @@ impl Loader {
             self.table_of(&target, path)?
         };
         let referred: Vec<String> = if fk.referred_columns.is_empty() {
-            columns_of
+            let mut key: Vec<_> = columns_of
                 .columns
                 .iter()
-                .filter(|column| column.primary_key)
-                .map(|column| column.name.clone())
-                .collect()
+                .filter(|c| c.primary_key)
+                .collect();
+            key.sort_by_key(|column| column.key_position);
+            key.into_iter().map(|column| column.name.clone()).collect()
         } else {
             fk.referred_columns
                 .iter()

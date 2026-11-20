@@ -32,6 +32,8 @@ pub(super) struct RawColumn {
     pub(super) generated: Option<Box<Expr>>,
     /// Part of the primary key, which keeps it `NOT NULL` whatever a MySQL `MODIFY` says.
     pub(super) primary_key: bool,
+    /// Where it stands in the primary key, which a `REFERENCES` without columns follows.
+    pub(super) key_position: usize,
     /// The values a `CHECK` constraint limits the column to, when it lists them.
     pub(super) values: Option<Vec<Value>>,
     /// Compared with a collation that may equate different strings (`NOCASE`, `_ci`):
@@ -180,6 +182,7 @@ pub(super) fn raw_column(column: &ColumnDef, dialect: SqlDialect) -> RawColumn {
                 _ => None,
             }),
         primary_key,
+        key_position: 0,
         values,
         collated,
         invisible: column
@@ -391,12 +394,34 @@ pub(super) fn column_named<'a>(
     columns.iter().find(|c| c.name == name)
 }
 
-pub(super) fn mark_primary_key(columns: &mut [RawColumn], expr: &Expr, dialect: SqlDialect) {
-    let named = |c: &RawColumn| matches!(expr, Expr::Identifier(i) if c.name == fold(i, dialect));
-    for column in columns.iter_mut().filter(|c| named(c)) {
+pub(super) fn mark_primary_key(
+    columns: &mut [RawColumn],
+    expr: &Expr,
+    dialect: SqlDialect,
+    position: usize,
+) {
+    for column in columns.iter_mut().filter(|c| is_named(c, expr, dialect)) {
         column.not_null = true;
         column.primary_key = true;
+        column.key_position = position;
     }
+}
+
+/// A key column of a SQLite table that may hold NULL.
+pub(super) fn mark_loose_primary_key(
+    columns: &mut [RawColumn],
+    expr: &Expr,
+    dialect: SqlDialect,
+    position: usize,
+) {
+    for column in columns.iter_mut().filter(|c| is_named(c, expr, dialect)) {
+        column.primary_key = true;
+        column.key_position = position;
+    }
+}
+
+fn is_named(column: &RawColumn, expr: &Expr, dialect: SqlDialect) -> bool {
+    matches!(expr, Expr::Identifier(i) if column.name == fold(i, dialect))
 }
 
 /// The key a `UNIQUE` constraint or index declares, when every part of it is a column.
@@ -444,8 +469,13 @@ mod tests {
             match constraint {
                 TableConstraint::Check(check) => apply_check(&mut columns, &check.expr, dialect),
                 TableConstraint::PrimaryKey(pk) => {
-                    for index_column in &pk.columns {
-                        mark_primary_key(&mut columns, &index_column.column.expr, dialect);
+                    for (position, index_column) in pk.columns.iter().enumerate() {
+                        mark_primary_key(
+                            &mut columns,
+                            &index_column.column.expr,
+                            dialect,
+                            position,
+                        );
                     }
                 }
                 _ => {}
