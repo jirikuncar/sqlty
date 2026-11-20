@@ -37,7 +37,7 @@ pub struct Source {
     /// What the imports bind, for `module`: functions and modules by local name.
     pub(crate) targets: std::sync::OnceLock<crate::index::Targets>,
     /// See [`crate::compose::constant`].
-    pub(crate) constants: std::sync::OnceLock<HashMap<String, Option<usize>>>,
+    pub(crate) constants: std::sync::OnceLock<HashMap<String, crate::compose::Binding>>,
 }
 
 impl Source {

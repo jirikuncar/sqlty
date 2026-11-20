@@ -65,6 +65,8 @@ struct Case {
     links: usize,
     /// The link bound a second time, to the same supertype.
     rebound: Option<usize>,
+    /// The module binds what it imports from `ids` again, to another supertype.
+    shadowed: bool,
     dotted: bool,
     call: bool,
     /// A psycopg call rather than the configured helper.
@@ -83,6 +85,7 @@ fn case(d: &mut Draw<'_>) -> Case {
         in_ids: d.int(0, links),
         links,
         rebound,
+        shadowed: d.int(0, 3) == 0,
         dotted: d.bool(),
         call: d.bool(),
         driver: d.bool(),
@@ -139,6 +142,21 @@ impl Case {
             (_, true) => "import ids".to_string(),
             (n, false) => format!("from ids import N{}", n - 1),
         };
+        let other = BASES[(BASES
+            .iter()
+            .position(|base| *base == self.base)
+            .unwrap_or(0)
+            + 1)
+            % BASES.len()];
+        let shadow = match (self.shadowed, self.in_ids, self.dotted) {
+            (false, _, _) | (_, 0, _) => String::new(),
+            (true, n, true) => format!("class ids:\n    N{} = {other}\n", n - 1),
+            (true, n, false) => format!(
+                "N{0} = {1}(\"N{0}\", {other})\n",
+                n - 1,
+                SPELLINGS[self.app].1
+            ),
+        };
         let (parameter, argument) = match (annotation, self.call) {
             (Some(annotation), false) => (format!("v: {annotation}"), "v".to_string()),
             (Some(annotation), true) => ("raw".to_string(), format!("{annotation}(raw)")),
@@ -156,11 +174,16 @@ impl Case {
         format!(
             "{}\n{IMPORTS}\nfrom typing import NamedTuple\n\nimport psycopg\n\n\
              from db import fetch_all\nfrom sqlty import SQL\n{import}\n\n\
-             {}\n\nclass Row(NamedTuple):\n    v: {class}\n\n\
+             {shadow}{}\n\nclass Row(NamedTuple):\n    v: {class}\n\n\
              def run(conn: psycopg.Connection, {parameter}) -> None:\n    {call}\n",
             SPELLINGS[self.app].0,
             self.links(self.in_ids..self.links, self.app),
         )
+    }
+
+    /// Whether the module binds an imported name again.
+    fn shadows(&self) -> bool {
+        self.shadowed && self.in_ids > 0
     }
 
     /// Whether every link is made with `typing.NewType`.
@@ -192,12 +215,15 @@ impl Case {
 }
 
 /// A `NewType` argument binds the query as its supertype does; one sqlty does not resolve is
-/// read as an argument of unknown type, never as one of another type.
+/// read as an argument of unknown type, never as one of another type, and so is one the
+/// module imports and then binds again.
 #[test]
 fn newtype_arguments_bind_as_their_supertype() {
     check(case, |case| {
-        if let Err(error) = python::run(&case.oracle()) {
-            return Err(TestCaseError::fail(format!("{error}\n{}", case.oracle())));
+        if !case.shadows() {
+            if let Err(error) = python::run(&case.oracle()) {
+                return Err(TestCaseError::fail(format!("{error}\n{}", case.oracle())));
+            }
         }
         let files = [
             ("pyproject.toml", CONFIG.to_string()),
@@ -214,7 +240,7 @@ fn newtype_arguments_bind_as_their_supertype() {
             <[_; 3]>::try_from(engine::check_project(&files, "app.py", &texts))
                 .expect("three checks");
         let shown = format!("{}\n{newtype:#?}\n{supertype:#?}\n{unknown:#?}", texts[0]);
-        if !case.real() {
+        if !case.real() || case.shadows() {
             prop_assert_eq!(&newtype, &unknown, "{}", shown);
         } else if case.rebound.is_none() {
             prop_assert_eq!(&newtype, &supertype, "{}", shown);

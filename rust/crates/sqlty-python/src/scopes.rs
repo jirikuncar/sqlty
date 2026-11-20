@@ -75,7 +75,7 @@ pub struct Scan<'a> {
     pub templates: Vec<(&'a ExprTString, Vec<Scope>)>,
     body: &'a [Stmt],
     /// [`crate::compose::constants`] of `body`, once asked.
-    constants: OnceCell<HashMap<String, Option<usize>>>,
+    constants: OnceCell<HashMap<String, crate::compose::Binding>>,
 }
 
 impl<'a> Scan<'a> {
@@ -103,12 +103,19 @@ impl<'a> Scan<'a> {
         matches!(self.scopes[scope], Node::Class(_))
     }
 
+    fn bindings(&self) -> &HashMap<String, crate::compose::Binding> {
+        self.constants
+            .get_or_init(|| crate::compose::constants(self.body))
+    }
+
     /// The value of the one module-level assignment to `name`.
     fn constant(&self, name: &str) -> Option<&'a Expr> {
-        let table = self
-            .constants
-            .get_or_init(|| crate::compose::constants(self.body));
-        crate::compose::value(self.body, table, name)
+        crate::compose::value(self.body, self.bindings(), name)
+    }
+
+    /// Whether the module binds `name` other than by importing it.
+    fn rebinds(&self, name: &str) -> bool {
+        crate::compose::rebound(self.bindings(), name)
     }
 }
 
@@ -354,6 +361,9 @@ impl Context<'_, '_, '_> {
             return None;
         }
         let (source, value) = constant(None, dotted)?;
+        if let Expr::Call(call) = value {
+            return self.named(Some(source), &self::dotted(&call.func)?, 0);
+        }
         let scan = Scan::new(
             if matches!(value, Expr::Name(_)) {
                 source.body()
@@ -422,6 +432,13 @@ impl Context<'_, '_, '_> {
             Some(value) => (from, value),
             None => {
                 let head = name.split('.').next().unwrap_or_default();
+                let rebound = match from {
+                    None => self.scan.rebinds(head),
+                    Some(source) => crate::compose::rebinds(source, head),
+                };
+                if rebound {
+                    return None;
+                }
                 imported.get(head)?;
                 let (source, value) = (self.constant?)(from, name)?;
                 (Some(source), value)

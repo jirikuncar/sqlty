@@ -803,17 +803,44 @@ impl<'a> Scan<'a> {
 
 /// `ParsedSource.constants`: the value of the one module-level assignment to `name`.
 pub fn constant<'a>(source: &'a Source, name: &str) -> Option<&'a Expr> {
-    let table = source.constants.get_or_init(|| constants(source.body()));
-    value(source.body(), table, name)
+    value(source.body(), bindings(source), name)
+}
+
+/// Whether `source` binds `name` at module level other than by importing it.
+pub(crate) fn rebinds(source: &Source, name: &str) -> bool {
+    rebound(bindings(source), name)
+}
+
+fn bindings(source: &Source) -> &HashMap<String, Binding> {
+    source.constants.get_or_init(|| constants(source.body()))
+}
+
+/// How a module binds a name at module level.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Binding {
+    /// By one assignment, the statement at this index.
+    Value(usize),
+    /// Only by imports.
+    Import,
+    /// Otherwise, or more than once.
+    Other,
+}
+
+/// Whether `table`, the [`constants`] of a module, binds `name` other than by importing it.
+pub(crate) fn rebound(table: &HashMap<String, Binding>, name: &str) -> bool {
+    matches!(table.get(name), Some(Binding::Value(_) | Binding::Other))
 }
 
 /// The value `table`, the [`constants`] of `body`, gives `name`.
 pub(crate) fn value<'a>(
     body: &'a [Stmt],
-    table: &HashMap<String, Option<usize>>,
+    table: &HashMap<String, Binding>,
     name: &str,
 ) -> Option<&'a Expr> {
-    let stmt = body.get((*table.get(name)?)?)?;
+    let Some(Binding::Value(at)) = table.get(name) else {
+        return None;
+    };
+    let stmt = body.get(*at)?;
     match stmt.as_assign_stmt() {
         Some(node) => Some(&node.value),
         None => stmt.as_ann_assign_stmt()?.value.as_deref(),
@@ -821,11 +848,15 @@ pub(crate) fn value<'a>(
 }
 
 /// Module-level names to the statement that gives each its one value.
-pub(crate) fn constants(body: &[Stmt]) -> HashMap<String, Option<usize>> {
-    fn bind(found: &mut HashMap<String, Option<usize>>, name: &str, value: Option<usize>) {
+pub(crate) fn constants(body: &[Stmt]) -> HashMap<String, Binding> {
+    fn bind(found: &mut HashMap<String, Binding>, name: &str, binding: Binding) {
         // A name bound again has no single value.
-        let value = value.filter(|_| !found.contains_key(name));
-        found.insert(name.to_string(), value);
+        let binding = match found.get(name) {
+            None => binding,
+            Some(Binding::Import) if binding == Binding::Import => binding,
+            Some(_) => Binding::Other,
+        };
+        found.insert(name.to_string(), binding);
     }
     let mut found = HashMap::new();
     for (at, stmt) in body.iter().enumerate() {
@@ -844,7 +875,7 @@ pub(crate) fn constants(body: &[Stmt]) -> HashMap<String, Option<usize>> {
                         }
                     }
                     for name in seen {
-                        bind(&mut found, name, Some(at));
+                        bind(&mut found, name, Binding::Value(at));
                     }
                 }
             }
@@ -853,17 +884,19 @@ pub(crate) fn constants(body: &[Stmt]) -> HashMap<String, Option<usize>> {
                     bind(
                         &mut found,
                         target.id.as_str(),
-                        node.value.as_ref().map(|_| at),
+                        node.value
+                            .as_ref()
+                            .map_or(Binding::Other, |_| Binding::Value(at)),
                     );
                 }
             }
             Stmt::AugAssign(node) => {
                 if let Expr::Name(target) = node.target.as_ref() {
-                    bind(&mut found, target.id.as_str(), None);
+                    bind(&mut found, target.id.as_str(), Binding::Other);
                 }
             }
-            Stmt::FunctionDef(node) => bind(&mut found, node.name.as_str(), None),
-            Stmt::ClassDef(node) => bind(&mut found, node.name.as_str(), None),
+            Stmt::FunctionDef(node) => bind(&mut found, node.name.as_str(), Binding::Other),
+            Stmt::ClassDef(node) => bind(&mut found, node.name.as_str(), Binding::Other),
             Stmt::Import(node) => {
                 let mut seen: Vec<&str> = Vec::new();
                 for alias in &node.names {
@@ -874,7 +907,7 @@ pub(crate) fn constants(body: &[Stmt]) -> HashMap<String, Option<usize>> {
                     }
                 }
                 for name in seen {
-                    bind(&mut found, name, None);
+                    bind(&mut found, name, Binding::Import);
                 }
             }
             Stmt::ImportFrom(node) => {
@@ -887,7 +920,7 @@ pub(crate) fn constants(body: &[Stmt]) -> HashMap<String, Option<usize>> {
                     }
                 }
                 for name in seen {
-                    bind(&mut found, name, None);
+                    bind(&mut found, name, Binding::Import);
                 }
             }
             _ => {}
