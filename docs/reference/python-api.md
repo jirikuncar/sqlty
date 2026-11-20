@@ -203,9 +203,7 @@ The functions that read a whole Python file take a `Settings`, the
 Its fields and defaults are those of the table: `dialect="postgres"`, `schema_sql=None`,
 `rules=None`, `import_style=None`, `untyped=False`, `helpers=None`,
 `query_variants=None`, `coerce_row_types=()`, `json_types="typing.Any"`,
-`param_types=True` and `closed_params=False`. Each function reads the fields it needs.
-The source is a string, or a `ParsedSource(text, module)` whose dotted `module` name
-resolves the file's relative imports:
+`param_types=True` and `closed_params=False`. Each function reads the fields it needs:
 
 ```pycon
 >>> import dataclasses
@@ -214,6 +212,10 @@ resolves the file's relative imports:
 >>> dataclasses.replace(settings, dialect="mysql").rules
 {'select-star': 'error'}
 ```
+
+`check_source`, `fix_source`, `breaking_source`, `complete_source` and `highlight_source`
+also take a `ParsedSource(text, module)`, whose dotted `module` name resolves the file's
+relative imports.
 
 `check_source` returns what `sqlty check` reports. Each diagnostic carries the
 UTF-8 byte offsets of what it is about, `start` to `end`, and the edits of
@@ -273,12 +275,12 @@ b'na'
 | `checks_names(dialect)` | Whether the dialect checks a schema's tables and columns against queries: `postgres`, `mysql` and `sqlite` do |
 | `returns_rows(sql, *, dialect="postgres")` | Whether the statement yields rows (unparseable SQL counts) |
 | `expand_star(sql, *, dialect="postgres", schema_sql=None)` | Query with `*` replaced by cast columns, or `None` |
-| `rewrite_source(source, settings=DEFAULT, *, keep_lines=False)` | Rewritten source; `json_types="typing.TypedDict"` generates `TypedDict`s for JSON columns |
-| `format_source(source, settings=DEFAULT)` | Source with the query strings laid out by sqruff; only whitespace changes |
-| `strip_source(source, settings=DEFAULT)` | Stripped source, without generated `TypedDict`s |
-| `fix_source(source, settings=DEFAULT)` | Source with `sqlty check --fix` applied |
-| `check_source(source, settings=DEFAULT, *, row_usage=None)` | List of diagnostics: `Diagnostic` dicts (`sqlty._lint.Diagnostic`, a `TypedDict`) with `rule`, `message`, `severity`, `line`, `start`, `end`, `fix`. `settings.helpers` is a `HelperIndex` of the project's modules (`index.add(module, source)`), so calls to their [helpers](../guide/helpers.md) are checked. With a `RowUsage` passed to the call of every module, `redundant-optional` is kept until `row_usage.filter(diagnostics)`, called once all are checked, drops the reports some checked query refutes |
+| `rewrite_source(source, settings=Settings(), *, keep_lines=False)` | Rewritten source; `json_types="typing.TypedDict"` generates `TypedDict`s for JSON columns |
+| `format_source(source, settings=Settings())` | Source with the query strings laid out by sqruff; only whitespace changes |
+| `strip_source(source, settings=Settings())` | Stripped source, without generated `TypedDict`s |
+| `fix_source(source, settings=Settings())` | Source with `sqlty check --fix` applied |
+| `check_source(source, settings=Settings(), *, row_usage=None)` | List of diagnostics: `Diagnostic` dicts (`sqlty._lint.Diagnostic`, a `TypedDict`) with `rule`, `message`, `severity`, `line`, `start`, `end`, `fix`. `settings.helpers` is a `HelperIndex` of the project's modules (`index.add(module, source)`), so calls to their [helpers](../guide/helpers.md) are checked. With a `RowUsage` passed to the call of every module, `redundant-optional` is kept until `row_usage.filter(diagnostics)`, called once all are checked, drops the reports some checked query refutes |
 | `breaking_source(source, settings, *, against_sql)` | The diagnostics `source` gets against `against_sql` but not against `settings.schema_sql`, as `sqlty breaking` reports them |
 | `schema_skipped_objects(schema_sql, *, dialect="postgres")` | `(kind, name)` of schema tables, views and key or type statements that do not parse or pass the size limits |
-| `complete_source(source, line, column, settings=DEFAULT, *, limit=200)` | `Completions(start, end, incomplete, items)` of `Completion(label, kind, detail, sql_type, nullable)` at the cursor, or `None` outside a checked query |
-| `highlight_source(source, settings=DEFAULT)` | `Highlight(start, end, kind)` per SQL token of the checked queries, `kind` one of `keyword`, `string`, `number`, `comment`, `operator`, `parameter` |
+| `complete_source(source, line, column, settings=Settings(), *, limit=200)` | `Completions(start, end, incomplete, items)` of `Completion(label, kind, detail, sql_type, nullable)` at the cursor, or `None` outside a checked query |
+| `highlight_source(source, settings=Settings())` | `Highlight(start, end, kind)` per SQL token of the checked queries, `kind` one of `keyword`, `string`, `number`, `comment`, `operator`, `parameter` |

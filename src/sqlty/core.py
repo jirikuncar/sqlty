@@ -351,13 +351,13 @@ def check_source(
     across files, pass one ``RowUsage`` to every call and drop what its ``filter`` drops
     once all files are checked.
 
-    ``query_variants`` (the ``preview`` key, up to ``max-query-variants``) checks a query
+    ``settings.query_variants`` (the ``preview`` key, up to ``max-query-variants``) checks a query
     a helper call builds from names bound in branches once per variant: each path through
     ``if``, ``match`` and conditional expressions gives one. A diagnostic of some variants
     only names the lines that select one: ``(variant: line 11)``. A call with more variants
     is ``dynamic-query`` (``unchecked-query`` for a psycopg composition).
 
-    ``coerce_row_types`` (the ``coerce-row-types`` key) names the ``TypedDict``,
+    ``settings.coerce_row_types`` (the ``coerce-row-types`` key) names the ``TypedDict``,
     ``NamedTuple`` and dataclass rows the code validates with Pydantic, such as through a
     ``TypeAdapter``, as ``module.Name``: their fields take what a ``BaseModel`` field takes.
 
