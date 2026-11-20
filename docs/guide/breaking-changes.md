@@ -290,7 +290,12 @@ The statements are judged in every `--direction`.
 
 Every `schema` of the configuration is judged, each entry of
 `[tool.sqlty.databases]` included, and a migration takes the severities of
-`rules` with the `overrides` its own path matches:
+`rules` with the `overrides` its own path matches. A schema that several
+configurations name is judged once, at the strictest severity of each rule among
+them. The `include` globs are relative to the directory of the configuration
+that names them, so `../migrations/**` matches nothing: put the override in the
+configuration whose `schema` names the migrations, or match the path from there.
+For example:
 
 ```toml ignore
 [[tool.sqlty.overrides]]
@@ -299,6 +304,9 @@ include = ["migrations/**"]
 [tool.sqlty.overrides.rules]
 missing-concurrently = "error"
 ```
+
+A snapshot baseline records the schema of each file it checked, so it judges a
+named database only when a file is routed to it.
 
 ## Baselines without git history
 

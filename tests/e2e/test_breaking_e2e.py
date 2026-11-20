@@ -658,3 +658,25 @@ def test_schemas_shared_by_two_configurations_are_judged_once(cli: Cli, migratio
     result = cli(["breaking", "--against", "HEAD"], {"cwd": migrations})
 
     assert [line.split(":")[0] for line in lines(result)[:-1]] == ["migrations/0002_index.sql"]
+
+
+@pytest.mark.parametrize("strict", ["app", "jobs"])
+def test_a_shared_schema_is_judged_at_the_strictest_severity(
+    cli: Cli, migrations: Path, strict: str
+) -> None:
+    config = '[tool.sqlty]\nschema = "../migrations/"\n'
+    configure(migrations, "app", config)
+    (migrations / "jobs").mkdir()
+    (migrations / "jobs" / "j.py").write_text(OLD_CODE)
+    for name in ("app", "jobs"):
+        rules = '[tool.sqlty.rules]\nmissing-concurrently = "error"\n' if name == strict else ""
+        (migrations / name / "pyproject.toml").write_text(config + rules)
+    git(migrations, "add", "app", "jobs")
+    git(migrations, "commit", "-q", "-m", "jobs")
+
+    result = cli(["breaking", "--against", "HEAD", "--output-format", "json"], {"cwd": migrations})
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert [(row["rule"], row["severity"]) for row in json.loads(result.stdout)] == [
+        ("missing-concurrently", "error")
+    ]

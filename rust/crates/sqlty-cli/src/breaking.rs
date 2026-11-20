@@ -15,7 +15,8 @@
 //! no queries and so is only checked forward.
 
 use std::borrow::BorrowMut;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::cell::OnceCell;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -529,11 +530,15 @@ struct Migrations {
     directory: PathBuf,
     database: String,
     settings: Arc<FileSettings>,
-    /// For each file: its shown path, text and rules.
-    files: Vec<(PathBuf, Arc<str>, RuleConfig)>,
+    /// For each file: its shown path, where it is read from and the strictest rules of
+    /// the configurations that name it.
+    files: Vec<(PathBuf, PathBuf, RuleConfig)>,
+    /// The texts, read when a baseline first differs.
+    texts: OnceCell<Vec<Arc<str>>>,
 }
 
-/// The PostgreSQL schemas of the head, each set of schema files once, read once.
+/// The PostgreSQL schemas of the head, each list of schema files once, with the strictest
+/// rules of the configurations that name it.
 fn migration_sets(head: &mut Revision<Workspace>) -> Result<Vec<Migrations>, String> {
     let sources: Vec<_> = head
         .workspace
@@ -551,13 +556,19 @@ fn migration_sets(head: &mut Revision<Workspace>) -> Result<Vec<Migrations>, Str
         let schema = head.workspace.settings(&path)?.schema_sql.clone();
         routed.push((relative(&head.root, &path), schema));
     }
-    let disk = Shared(Arc::new(sqlty_project::Disk));
-    let mut seen = HashSet::new();
-    let mut sets = Vec::new();
+    let mut seen: HashMap<Vec<PathBuf>, usize> = HashMap::new();
+    let mut sets: Vec<Migrations> = Vec::new();
     for source in sources {
         let files = &source.settings.schema_files;
         let shown: Vec<PathBuf> = files.iter().map(|path| project::normalized(path)).collect();
-        if !seen.insert(shown.clone()) {
+        let rules = source
+            .files
+            .iter()
+            .map(|settings| Checker::of(settings, None).rules);
+        if let Some(&at) = seen.get(&shown) {
+            for ((_, _, known), rules) in sets[at].files.iter_mut().zip(rules) {
+                *known = known.strictest(&rules);
+            }
             continue;
         }
         let probe = routed
@@ -568,19 +579,18 @@ fn migration_sets(head: &mut Revision<Workspace>) -> Result<Vec<Migrations>, Str
             })
             .map(|(path, _)| path.clone())
             .or_else(|| (source.database == analyzer::DEFAULT).then(|| source.directory.join("_")));
-        let checked = files.iter().zip(&shown).zip(&source.files);
+        let checked = files.iter().zip(&shown).zip(rules);
+        let files = checked
+            .map(|((path, shown), rules)| (relative_to(shown, &head.root), path.clone(), rules))
+            .collect();
+        seen.insert(shown, sets.len());
         sets.push(Migrations {
             probe,
             directory: source.directory.clone(),
             database: source.database.clone(),
             settings: Arc::clone(&source.settings),
-            files: checked
-                .map(|((path, shown), settings)| {
-                    let text = disk.text(path).unwrap_or_default();
-                    let rules = Checker::of(settings, None).rules;
-                    (relative_to(shown, &head.root), Arc::from(text), rules)
-                })
-                .collect(),
+            files,
+            texts: OnceCell::new(),
         });
     }
     Ok(sets)
@@ -593,6 +603,7 @@ fn migrations(
     sets: &[Migrations],
     schemas: &mut dyn Schemas,
 ) -> Result<Vec<Finding>, String> {
+    let disk = Shared(Arc::new(sqlty_project::Disk));
     let mut findings = Vec::new();
     for set in sets {
         let own = &set.settings;
@@ -607,13 +618,19 @@ fn migrations(
         else {
             continue;
         };
-        let checked: Vec<(&str, &RuleConfig)> = set
-            .files
+        let texts = set.texts.get_or_init(|| {
+            let read = |(_, path, _): &(PathBuf, PathBuf, RuleConfig)| {
+                Arc::from(disk.text(path).unwrap_or_default())
+            };
+            set.files.iter().map(read).collect()
+        });
+        let checked: Vec<(&str, &RuleConfig)> = texts
             .iter()
-            .map(|(_, text, rules)| (&**text, rules))
+            .zip(&set.files)
+            .map(|(text, (_, _, rules))| (&**text, rules))
             .collect();
         let found = sqlty_python::migrations::check_migrations_with(&baseline, &checked);
-        for ((path, text, _), found) in set.files.iter().zip(found) {
+        for (((path, ..), text), found) in set.files.iter().zip(texts).zip(found) {
             findings.extend(found.into_iter().map(|diagnostic| Finding {
                 direction: Direction::Migration,
                 against: against.to_string(),
@@ -1318,25 +1335,25 @@ mod tests {
     }
 
     #[test]
-    fn migrations_are_read_once_for_every_baseline() {
+    fn migrations_are_read_when_a_baseline_first_differs_and_once() {
         let root = project(
             "once",
             &[
-                ("pyproject.toml", DATABASES),
-                ("migrations/0001.sql", USERS),
-                ("events/0001.sql", EVENTS),
-                ("events/0002.sql", INDEX),
+                ("pyproject.toml", "[tool.sqlty]\nschema = \"migrations/\"\n"),
+                ("migrations/0001.sql", EVENTS),
+                ("migrations/0002.sql", INDEX),
             ],
         );
         let mut head = open(&root);
         let sets = migration_sets(&mut head).expect("reads");
-        let mut first = schema_files(&format!("{USERS}{EVENTS}"));
-        let mut second = schema_files(&format!("{EVENTS}{USERS}"));
-        let found =
-            |schemas: &mut SchemaFiles| judged(migrations("b", &sets, schemas).expect("ok"));
-        let expected = [(PathBuf::from("events/0002.sql"), "missing-concurrently")];
-        assert_eq!(found(&mut first), expected);
-        assert_eq!(found(&mut second), expected);
+        let same = sets[0].settings.schema_sql.clone().expect("a schema");
+        let found = |sql: &str| judged(migrations("b", &sets, &mut schema_files(sql)).expect("ok"));
+        assert_eq!(found(&same), []);
+        assert!(sets[0].texts.get().is_none());
+        let expected = [(PathBuf::from("migrations/0002.sql"), "missing-concurrently")];
+        assert_eq!(found(EVENTS), expected);
+        assert!(sets[0].texts.get().is_some());
+        assert_eq!(found(&format!("{EVENTS}{USERS}")), expected);
         std::fs::remove_dir_all(&root).expect("removes");
     }
 

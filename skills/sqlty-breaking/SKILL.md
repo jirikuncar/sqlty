@@ -69,7 +69,10 @@ migrations/0042_index.sql:2: [missing-concurrently] `CREATE INDEX` blocks writes
 
 Every `schema` of the configuration is judged, each `[tool.sqlty.databases]` entry
 included, with the severities of `rules` and of the `[[tool.sqlty.overrides]]` that
-match the migration's path (`include = ["migrations/**"]`).
+match the migration's path (`include = ["migrations/**"]`, relative to the
+configuration's directory). A schema several configurations name is judged once, at the
+strictest severity. A snapshot baseline judges a named database only when a file is
+routed to it.
 
 ## A dropped column
 
