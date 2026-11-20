@@ -16,7 +16,6 @@ use sqlty_python::project::{
 };
 use sqlty_python::queries;
 use sqlty_python::rewriter::ImportStyle;
-use sqlty_python::suppress;
 use sqlty_python::types::info::Dict;
 use sqlty_python::types::stdlib::Version;
 use sqlty_python::types::symbols::Source;
@@ -215,6 +214,11 @@ impl Workspace {
     /// The text of a read file.
     pub fn text(&self, path: &Path) -> Option<&str> {
         self.modules.get(path).map(|module| &*module.text)
+    }
+
+    /// The module names a read file is imported by, the first its own.
+    pub fn names(&self, path: &Path) -> Option<&[String]> {
+        self.modules.get(path).map(|module| &*module.names)
     }
 
     /// What the schemas and configurations could not read since the last call.
@@ -470,7 +474,7 @@ impl Workspace {
     }
 
     /// The index with the `functions` of `settings` registered.
-    fn helpers(&mut self, settings: &FileSettings) -> Arc<HelperIndex> {
+    pub fn helpers(&mut self, settings: &FileSettings) -> Arc<HelperIndex> {
         let index = self.index();
         if settings.functions.is_empty() {
             return index;
@@ -766,15 +770,11 @@ impl Workspace {
         if !named {
             return Ok(Vec::new());
         }
-        let format = settings.query_format;
-        let checker = Checker::of(&settings, None);
         let name = path
             .file_stem()
             .map(|stem| stem.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let found = queries::check_queries(text, format, &name, &checker.options, &checker.rules);
-        let ignores = suppress::sql_ignores(text);
-        Ok(suppress::apply_sql(&ignores, found, &checker.rules))
+        Ok(module::check_queries(text, &name, &settings))
     }
 
     /// `name(params) -> row` of each named query of the `.sql` file `path`, as
@@ -1114,8 +1114,13 @@ mod tests {
     fn reports_an_invalid_config() {
         let error = open(&[("/repo/pyproject.toml", "[tool.sqlty]\ndialect = \"nope\"\n")]).err();
         assert!(error.is_some_and(|error| error.contains("unknown dialect 'nope'")));
-        let error = open(&[("/repo/pyproject.toml", "[tool.sqlty]\nuntyped = \"nope\"\n")]).err();
-        assert!(error.is_some_and(|error| error.ends_with("untyped must be 'skip' or 'sentinel'")));
+        for config in [
+            "[tool.sqlty]\nuntyped = \"nope\"\n",
+            "[tool.sqlty]\nuntyped = true\n",
+        ] {
+            let error = open(&[("/repo/pyproject.toml", config)]).err();
+            assert!(error.is_some_and(|error| error.ends_with("must be 'skip' or 'sentinel'")));
+        }
         let mut excluded = opened(&[("/repo/.venv/sqlty.toml", "dialect = \"nope\"\n")]);
         let error = excluded
             .check(Path::new("/repo/.venv/q.py"), "x = 1\n")

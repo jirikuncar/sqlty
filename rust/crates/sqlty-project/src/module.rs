@@ -11,7 +11,7 @@ use sqlty_python::options::Options;
 use sqlty_python::rows::{self, Found};
 use sqlty_python::rules::{Rule, RuleConfig};
 use sqlty_python::types::symbols::{Index, Source};
-use sqlty_python::{fixer, json_types, params, rewriter, suppress};
+use sqlty_python::{fixer, json_types, params, queries, rewriter, suppress};
 use sqlty_sql::analyzer::{self, SchemaData};
 
 use crate::settings::FileSettings;
@@ -119,6 +119,57 @@ pub fn check_module(
     };
     found.diagnostics = suppress::apply(&ignores, found.diagnostics, &checker.rules);
     found
+}
+
+/// What `against` breaks in `text`: the diagnostics it gets with `against` but not with
+/// `own`, as `sqlty breaking` reports them.
+pub fn breaking(
+    text: &str,
+    parsed: Option<&Arc<Source>>,
+    module: Option<&str>,
+    own: &Checker<'_>,
+    against: &Checker<'_>,
+) -> Vec<Diagnostic> {
+    let check = |checker| {
+        check_module(text, parsed, module, checker)
+            .diagnostics
+            .into_iter()
+            .map(|reported| reported.diagnostic)
+            .collect::<Vec<_>>()
+    };
+    let key = |found: &Diagnostic| (found.line, found.rule, found.message.clone());
+    sqlty_python::breaking::breaking(&check(own), check(against), key, |found| found.rule.name())
+}
+
+/// The diagnostics of the `.sql` file of named queries `text`, called `name`, without what
+/// its `-- sqlty: ignore` comments drop.
+pub fn check_queries(text: &str, name: &str, settings: &FileSettings) -> Vec<Diagnostic> {
+    let checker = Checker::of(settings, None);
+    let found = queries::check_queries(
+        text,
+        settings.query_format,
+        name,
+        &checker.options,
+        &checker.rules,
+    );
+    let ignores = suppress::sql_ignores(text);
+    suppress::apply_sql(&ignores, found, &checker.rules)
+}
+
+/// What `against` breaks in the `.sql` file of named queries `text`, as [`breaking`].
+pub fn breaking_queries(
+    text: &str,
+    name: &str,
+    own: &FileSettings,
+    against: &FileSettings,
+) -> Vec<Diagnostic> {
+    let key = |found: &Diagnostic| (found.line, found.rule, found.message.clone());
+    sqlty_python::breaking::breaking(
+        &check_queries(text, name, own),
+        check_queries(text, name, against),
+        key,
+        |found| found.rule.name(),
+    )
 }
 
 /// `text` as `sqlty check --fix` writes it.
