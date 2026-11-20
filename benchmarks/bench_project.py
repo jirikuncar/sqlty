@@ -183,6 +183,8 @@ def scenarios(exe: str, root: Path, spec: dict[str, int]) -> dict:
     out["precommit"] = measure([exe, "check", "-q", *checked[:PRECOMMIT_FILES]], str(root), repeats)
     # Files with bare `--sql` strings, restored after each run so every run writes them.
     bare = [f for f, s in texts.items() if '= "--sql' in s][:PRECOMMIT_FILES]
+    # Without paths, check and rewrite would run on the whole project.
+    assert checked and bare
     runs = []
     for _ in range(repeats):
         runs.append(run_measured([exe, "rewrite", "-q", *map(str, bare)], str(root)))

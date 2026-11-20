@@ -72,6 +72,8 @@ in `baseline.json`:
   budgeted as two sums (`analyze_select`, `analyze_params`).
 - A run over budget is measured again, up to three runs in all: another job on
   a shared runner can slow one run, and only the last run fails the job.
+- A metric missing from the baseline is reported, not budgeted, and named on
+  stderr: record the baseline again (below) after adding one.
 - The baseline is keyed by platform and size (`Darwin-ci`, `Linux-ci`). With no
   entry for the runner's platform the check passes and says so.
 

@@ -8,7 +8,7 @@ in seconds:
 - ``edit``: a full-text change to diagnostics of that version, median and p95 of
   ``EDITS`` edits;
 - ``hover`` and ``completion``: request to response on a table name in a query,
-  summed over ``REQUESTS``, so the total is large enough to budget.
+  summed over ``REQUESTS`` of each, so the total is large enough to budget.
 """
 
 from __future__ import annotations
@@ -25,8 +25,9 @@ import time
 from pathlib import Path
 from typing import Any
 
-EDITS = 15
-REQUESTS = 20
+EDITS = 20
+# Hover answers in about 0.5 ms: enough requests to stay above the 5 ms budget floor.
+REQUESTS = {"textDocument/hover": 100, "textDocument/completion": 20}
 # A server that stalls is killed, so a hung benchmark fails instead of the CI job timing out.
 DEADLINE_S = 300
 
@@ -138,7 +139,7 @@ def _measure(server: Server, root: Path, module: Path, table: str) -> dict[str, 
     position["character"] += len("FROM t")
     hover, completion = [], []
     for times, method in ((hover, "textDocument/hover"), (completion, "textDocument/completion")):
-        for _ in range(REQUESTS):
+        for _ in range(REQUESTS[method]):
             t = time.perf_counter()
             result = server.request(method, {**doc, "position": position})
             times.append(time.perf_counter() - t)

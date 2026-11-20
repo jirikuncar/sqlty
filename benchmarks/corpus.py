@@ -75,7 +75,7 @@ def clone(url: str, commit: str, into: Path) -> None:
 
 def head(root: Path) -> str:
     return subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True
+        ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True
     ).stdout.strip()
 
 
@@ -142,12 +142,12 @@ def main() -> int:
         results = {}
         for name, repo in CORPUS.items():
             root = base / name
-            if root.exists() and head(root) != repo["commit"]:
-                shutil.rmtree(root)
-            if not root.exists():
-                clone(repo["url"], repo["commit"], root)
-            (root / "sqlty.toml").write_text(repo["config"])
             try:
+                if root.exists() and head(root) != repo["commit"]:
+                    shutil.rmtree(root)
+                if not root.exists():
+                    clone(repo["url"], repo["commit"], root)
+                (root / "sqlty.toml").write_text(repo["config"])
                 results[name] = {"commit": repo["commit"], **check(args.exe, root)}
             except (RuntimeError, subprocess.CalledProcessError) as error:
                 results[name] = {"commit": repo["commit"], "error": str(error)}
