@@ -12,7 +12,7 @@ use sqlparser::ast::{
 use crate::analyzer::SqlDialect;
 
 use super::columns::{apply_check, mark_primary_key, nonnull_groups, raw_column, unique_key};
-use super::loader::{AlterFail, Loader, RawTable, Rel, Taint, TypeDef};
+use super::loader::{AlterFail, Loader, RawTable, Rel, Taint, TypeDef, LARGE_ENUM};
 use super::names::{fold, parts};
 
 impl Loader {
@@ -146,10 +146,21 @@ impl Loader {
             return false;
         };
         self.cache = None;
+        if !matches!(alter.operation, AlterTypeOperation::AddValue(_)) {
+            self.enum_labels.clear();
+        }
         match (&alter.operation, def) {
             (AlterTypeOperation::AddValue(add), TypeDef::Enum(labels)) => {
                 let value = add.value.value.clone();
-                if !labels.contains(&value) {
+                let new = if labels.len() > LARGE_ENUM {
+                    self.enum_labels
+                        .entry(key)
+                        .or_insert_with(|| labels.iter().cloned().collect())
+                        .insert(value.clone())
+                } else {
+                    !labels.contains(&value)
+                };
+                if new {
                     let at = add.position.as_ref().and_then(|position| {
                         let (anchor, after) = match position {
                             AlterTypeAddValuePosition::Before(anchor) => (anchor, 0),
@@ -494,6 +505,44 @@ mod tests {
         assert!(loader.create_table(&create, &[], &["public".to_string()]));
         let stmt = parse_ddl(sql, dialect).unwrap().remove(0);
         (loader, stmt)
+    }
+
+    /// A large enum is indexed, so `ADD VALUE` does not scan its labels; the index
+    /// follows the labels through every kind of change.
+    #[test]
+    fn adding_values_to_a_large_enum_uses_its_index() {
+        let path = ["public".to_string()];
+        let mut loader = Loader::new(SqlDialect::Postgres);
+        let labels = (0..=LARGE_ENUM).map(|i| format!("l{i}")).collect();
+        loader
+            .types
+            .insert("public.e".to_string(), TypeDef::Enum(labels));
+        let alter = |loader: &mut Loader, sql: &str| {
+            let Some(Statement::AlterType(alter)) =
+                parse_ddl(sql, SqlDialect::Postgres).and_then(|stmts| stmts.into_iter().next())
+            else {
+                unreachable!()
+            };
+            assert!(loader.alter_type(&alter, &path));
+        };
+        let labels = |loader: &Loader| match &loader.types["public.e"] {
+            TypeDef::Enum(labels) => labels.clone(),
+            _ => unreachable!(),
+        };
+        alter(&mut loader, "ALTER TYPE e ADD VALUE 'x'");
+        alter(&mut loader, "ALTER TYPE e ADD VALUE 'x'");
+        alter(&mut loader, "ALTER TYPE e ADD VALUE 'l3'");
+        alter(&mut loader, "ALTER TYPE e ADD VALUE 'y' BEFORE 'l0'");
+        alter(&mut loader, "ALTER TYPE e ADD VALUE 'z' AFTER 'l1'");
+        assert_eq!(loader.enum_labels["public.e"].len(), LARGE_ENUM + 4);
+        let after = labels(&loader);
+        assert_eq!(after.len(), LARGE_ENUM + 4);
+        assert_eq!(&after[..4], ["y", "l0", "l1", "z"]);
+        assert_eq!(after.last().map(String::as_str), Some("x"));
+        alter(&mut loader, "ALTER TYPE e RENAME VALUE 'x' TO 'w'");
+        assert!(loader.enum_labels.is_empty());
+        alter(&mut loader, "ALTER TYPE e ADD VALUE 'x'");
+        assert_eq!(labels(&loader).len(), LARGE_ENUM + 5);
     }
 
     // Only dialects whose `ALTER` the loader does not read parse these.

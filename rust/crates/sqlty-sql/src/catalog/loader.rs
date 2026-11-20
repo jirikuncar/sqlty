@@ -164,6 +164,9 @@ pub(super) struct Loader {
     pub(super) postgres: bool,
     pub(super) relations: FxHashMap<String, Rel>,
     pub(super) types: FxHashMap<String, TypeDef>,
+    /// The labels of enums past [`LARGE_ENUM`] labels, so `ADD VALUE` finds a duplicate
+    /// without a scan. Cleared by any statement that creates, drops or taints a type.
+    pub(super) enum_labels: FxHashMap<String, FxHashSet<String>>,
     pub(super) functions: FxHashMap<String, Vec<RawFunction>>,
     /// Functions whose latest definition could not be read.
     pub(super) unknown_functions: FxHashSet<String>,
@@ -198,6 +201,9 @@ pub(super) struct Loader {
 /// a short schema could otherwise fill memory.
 pub(super) const MAX_SCHEMA_COLUMNS: usize = 1 << 21;
 
+/// Enums with more labels than this are indexed for `ADD VALUE` (see [`Loader::enum_labels`]).
+pub(super) const LARGE_ENUM: usize = 64;
+
 /// The most bytes of statements [`Loader::run`] tries again, in all passes, besides the
 /// schema's own length.
 pub(super) const MAX_RETRIED: usize = 1 << 24;
@@ -214,6 +220,7 @@ impl Loader {
             postgres: dialect == SqlDialect::Postgres,
             relations: FxHashMap::default(),
             types: FxHashMap::default(),
+            enum_labels: FxHashMap::default(),
             functions: FxHashMap::default(),
             unknown_functions: FxHashSet::default(),
             search_path: vec!["public".to_string()],
@@ -237,6 +244,7 @@ impl Loader {
             postgres: self.postgres,
             relations: self.relations.clone(),
             types: self.types.clone(),
+            enum_labels: FxHashMap::default(),
             functions: self.functions.clone(),
             unknown_functions: self.unknown_functions.clone(),
             search_path: self.search_path.clone(),
@@ -369,6 +377,12 @@ impl Loader {
     /// whatever it reads.
     pub(super) fn apply(&mut self, op: &Op, force: bool) -> bool {
         let path = op.path.clone();
+        if matches!(
+            op.kind,
+            OpKind::Type(..) | OpKind::Domain(..) | OpKind::Drop(_) | OpKind::Taint(..)
+        ) {
+            self.enum_labels.clear();
+        }
         let blocked = match &op.kind {
             OpKind::Table(create, likes) => !self.create_table(create, likes, &path),
             OpKind::View(view, table) => !self.create_view(view, *table, &path, force),
