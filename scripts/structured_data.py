@@ -107,7 +107,12 @@ def squash(text: str) -> str:
 
 
 def git(*args: str) -> str:
-    return subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True).stdout
+    try:
+        return subprocess.run(
+            ["git", "-C", str(ROOT), *args], capture_output=True, text=True
+        ).stdout
+    except OSError:
+        return ""
 
 
 def modified() -> dict[str, str]:
