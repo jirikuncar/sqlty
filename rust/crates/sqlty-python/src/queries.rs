@@ -322,10 +322,9 @@ pub fn check_queries(
             }
             for diagnostic in parsed.analyze_with_diagnostics(schema).1 {
                 let mut message = diagnostic.message;
-                let embed = embeds.iter().find(|(star, _)| match diagnostic.span {
-                    Some(ref span) => star.contains(&(statement.start + span.start)),
-                    None => message.contains(&format!("`{}`", &body[(*star).clone()])),
-                });
+                let embed = embeds
+                    .iter()
+                    .find(|(star, _)| message.contains(&format!("`{}`", &body[star.clone()])));
                 let span = match (embed, diagnostic.span) {
                     (Some((star, table)), _) => {
                         let written =
