@@ -1,11 +1,12 @@
 # Benchmarks
 
-Two scripts; both need the release extension:
+The scripts other than `ab.py` (which builds its own native binaries) need the release extension:
 `uv run maturin develop --release --manifest-path rust/crates/sqlty-ext/Cargo.toml`.
 
 | Script | What it measures | Make target |
 |--------|------------------|-------------|
 | `bench_project.py` | A generated large project: CLI wall time and peak RSS | `make bench-project`, `make bench-ci`, `make bench-baseline` |
+| `ab.py` | `sqlty check` of a base ref vs the working tree, interleaved: CPU, wall, RSS, output identity, CPU per query across scales | `make bench-ab` |
 | `test_benchmarks.py` | Each query kind, the schema load, `rewrite_source`, `check_source`, and completion at 50, 540 and 5000 tables, through CodSpeed | `make bench-codspeed` |
 
 ## The synthetic project
