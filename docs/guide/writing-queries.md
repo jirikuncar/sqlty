@@ -20,7 +20,7 @@ query = "--sql\nSELECT id::INTEGER, name::TEXT FROM users"
 `--sql` is a SQL line comment, so the database ignores it. A space instead of
 the newline turns the whole query into that comment: sqlty sees an empty
 query and leaves the string alone (`sqlty check` reports
-[`inline-sql-comment`](../reference/rules.md#inline-sql-comment)):
+[`inline-sql-comment`](../reference/rules/inline-sql-comment.md)):
 
 ```python
 query = "--sql SELECT id::INTEGER FROM users"
@@ -39,7 +39,7 @@ servers reject `--sql`. Use `-- sql` there: it is a comment in every dialect,
 and sqlty reads it as the marker when only blanks or a `--` comment follow it
 on its line (`"-- sql SELECT ..."` is an ordinary comment and left alone). With
 `dialect = "mysql"`, `sqlty check` reports `--sql` in plain string literals as
-[`mysql-sql-marker`](../reference/rules.md#mysql-sql-marker) and `--fix`
+[`mysql-sql-marker`](../reference/rules/mysql-sql-marker.md) and `--fix`
 changes it.
 
 ```toml
@@ -176,7 +176,7 @@ query = f"--sql\nSELECT {column}::INTEGER FROM users"
 ```
 
 `sqlty check` and `sqlty rewrite` report such strings as
-[`fstring-skipped`](../reference/rules.md#fstring-skipped). Pass values as query
+[`fstring-skipped`](../reference/rules/fstring-skipped.md). Pass values as query
 parameters instead of interpolating them, and keep the query a plain literal.
 
 ## t-strings
@@ -199,7 +199,7 @@ template in `.template`: pass that to psycopg, or pass the query to the
 `sqlty check` checks it like `SQL[T]`: `narrow-type` and `stale-type`, and the
 row type checks of a named row type. Each field's value is a parameter, so it is
 checked against its placeholder like a driver call's
-([`param-type-mismatch`](../reference/rules.md#param-type-mismatch)).
+([`param-type-mismatch`](../reference/rules/param-type-mismatch.md)).
 
 ### Format specs
 
@@ -242,7 +242,7 @@ insert = t"--sql\nINSERT INTO {table:i} (name) VALUES ({user_id:l})"
 Any other field, such as a conversion (`{value!r}`), an identifier the result
 columns may depend on, or a snippet sqlty can't find, changes the text of the
 SQL in a way sqlty can't follow. Such a template is left alone and reported as
-[`tstring-skipped`](../reference/rules.md#tstring-skipped), which names the
+[`tstring-skipped`](../reference/rules/tstring-skipped.md), which names the
 field.
 
 ## Type mapping
@@ -314,10 +314,10 @@ it.
 ### Edit in place
 
 Change the SQL inside the wrapper and run `sqlty check`. It reports
-[`narrow-type`](../reference/rules.md#narrow-type) when a `SQL[tuple[...]]` no
+[`narrow-type`](../reference/rules/narrow-type.md) when a `SQL[tuple[...]]` no
 longer admits the rows of the query,
-[`stale-type`](../reference/rules.md#stale-type) when it is only wider than them, and the
-[row type rules](../reference/rules.md#row-type-rules) when a named
+[`stale-type`](../reference/rules/stale-type.md) when it is only wider than them, and the
+[row type rules](../reference/rules.md#rule-groups) when a named
 [row type](row-types.md) no longer fits:
 
 ```python

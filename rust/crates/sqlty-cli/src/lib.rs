@@ -3,26 +3,24 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
 
-mod diff;
-mod json;
+mod breaking;
+mod complete;
 pub mod native;
 pub mod server;
 
-use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use clap::{ArgMatches, Args, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
+use serde::Serialize;
 use sqlty_project::{FileSettings, Flags, Options, Shared, Workspace};
 use sqlty_python::checker::Diagnostic;
 use sqlty_python::project::{Discovery, Files, Read};
 use sqlty_python::report;
 use sqlty_python::rules::{Rule, Severity};
 use sqlty_python::types::stdlib::Version;
-
-use json::Json;
 
 include!(concat!(env!("OUT_DIR"), "/embedded.rs"));
 
@@ -109,6 +107,23 @@ enum Command {
         #[command(flatten)]
         check: CheckArgs,
     },
+    /// List the table and column names that complete at FILE:LINE:COL in a query string
+    /// (sqlty complete app.py:12:30), for scripts and agents
+    Complete {
+        /// The cursor: a Python file, a 1-based line and a 1-based column in characters
+        #[arg(value_name = "FILE:LINE:COL", value_parser = complete::location)]
+        location: complete::Location,
+        #[command(flatten)]
+        common: Common,
+        /// Print a JSON object with the start and end the completion replaces, whether the
+        /// list is incomplete, and the items with their label, kind, detail, SQL type and
+        /// nullability, instead of one item per line
+        #[arg(long)]
+        json: bool,
+    },
+    /// Check the queries and schema of two revisions across, as during a rolling deploy:
+    /// sqlty breaking --against origin/main
+    Breaking(breaking::Args),
     /// Explain a lint rule (sqlty rule stale-type), or list all rules
     Rule {
         /// Rule name, for example select-star
@@ -126,28 +141,43 @@ enum Command {
         #[arg(long)]
         list: bool,
     },
+    /// Run the language server on stdin and stdout, for editors (diagnostics and fixes as
+    /// you type)
+    Server,
     /// Print version and exit
     Version,
 }
 
 #[derive(Args)]
 struct Common {
-    /// Files or directories (default: .)
-    #[arg(default_value = ".")]
+    /// Files or directories (default: .); each file uses its nearest sqlty.toml,
+    /// pyproject.toml or Cargo.toml. A project's config or schema file stands for the whole
+    /// project
     paths: Vec<PathBuf>,
     /// SQL dialect: postgres, mysql, sqlite, or another sqlparser dialect such as duckdb
+    ///
+    /// Default: [tool.sqlty] dialect, else postgres
     #[arg(long, value_name = "DIALECT", value_parser = dialect)]
     dialect: Option<String>,
     /// Schema .sql file, directory or glob for every path; repeat for several
+    ///
+    /// Default: [tool.sqlty] schema per project
     #[arg(long)]
     schema: Vec<String>,
     /// Use this file for every path instead of the nearest config file. Env: SQLTY_CONFIG_FILE
+    ///
+    /// The file is [tool.sqlty] of a pyproject.toml, [package.metadata.sqlty] or
+    /// [workspace.metadata.sqlty] of a Cargo.toml, or top-level keys of another file such
+    /// as sqlty.toml; its relative paths are relative to the current directory
     #[arg(long, value_name = "PATH", conflicts_with = "isolated")]
     config_file: Option<PathBuf>,
     /// Ignore every configuration file; use the defaults and command-line flags
     #[arg(long)]
     isolated: bool,
     /// Override a configuration key with a TOML assignment; repeat for several
+    ///
+    /// For example `-c 'dialect = "mysql"'` or `-c 'rules.select-star = "ignore"'`. Paths
+    /// are relative to the current directory
     #[arg(short = 'c', long = "config", value_name = "KEY=VALUE")]
     config: Vec<String>,
     /// Treat RULE as severity error; repeat for several, the last flag for a rule wins
@@ -160,21 +190,30 @@ struct Common {
     #[arg(long, value_name = "RULE")]
     ignore: Vec<String>,
     /// Skip this glob while walking directories, replacing the other excludes
+    ///
+    /// It replaces [tool.sqlty] exclude and the default excludes; repeat for several.
+    /// Relative to the current directory
     #[arg(long, value_name = "GLOB")]
     exclude: Option<Vec<String>>,
     /// Skip this glob in addition to the other excludes
+    ///
+    /// Repeat for several. Relative to the current directory
     #[arg(long, value_name = "GLOB")]
     extend_exclude: Vec<String>,
     /// Apply the excludes to files and directories named on the command line too
     #[arg(long)]
     force_exclude: bool,
     /// Skip the files .gitignore ignores while walking directories
+    ///
+    /// Default: [tool.sqlty] respect-gitignore, else true
     #[arg(long, overrides_with = "no_respect_gitignore")]
     respect_gitignore: bool,
     /// Walk the files .gitignore ignores too
     #[arg(long, overrides_with = "respect_gitignore")]
     no_respect_gitignore: bool,
     /// Print each file that rewrite, strip or check --fix changes
+    ///
+    /// With check, also the types of each named query of a query file
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
     /// Suppress non-error output
@@ -194,16 +233,20 @@ struct Change {
 
 #[derive(Args)]
 struct CheckArgs {
-    /// Apply the fixable rules, write the files, then report what remains
+    /// Apply the fixable rules (see `sqlty rule`), write the files, then report what remains
     #[arg(long)]
     fix: bool,
     /// Exit 0 even when an error-severity diagnostic is reported
     #[arg(long)]
     exit_zero: bool,
     /// Exit 0 when no diagnostic has severity error (the default)
+    ///
+    /// Cannot be combined with --error-on-warning
     #[arg(long)]
     exit_zero_on_warning: bool,
     /// Exit 1 when any diagnostic has severity warn
+    ///
+    /// Cannot be combined with --exit-zero or --exit-zero-on-warning
     #[arg(long)]
     error_on_warning: bool,
     /// After the summary, print how many queries were typed, partially typed, unparsed
@@ -211,11 +254,24 @@ struct CheckArgs {
     #[arg(long)]
     statistics: bool,
     /// Under a type diagnostic, print the inference rule behind each column's type
+    ///
+    /// The rule's id, reference and reasoning, for the type and the nullability
     #[arg(long)]
     explain: bool,
     /// How diagnostics are printed
+    ///
+    /// text: file:line: [rule] message (the default); json: an array of objects with file,
+    /// line, rule, severity, message, the start and end of what it underlines, and the fix
+    /// edits; github: GitHub Actions annotations; sarif: a SARIF 2.1.0 log, for GitHub code
+    /// scanning. Summaries, --statistics and --explain are text only
     #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
     output_format: OutputFormat,
+    /// Print the files sqlty would check, and exit
+    #[arg(long, conflicts_with = "show_settings")]
+    show_files: bool,
+    /// Print the settings of the first file sqlty would check, and exit
+    #[arg(long)]
+    show_settings: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -226,15 +282,148 @@ enum OutputFormat {
     Sarif,
 }
 
-fn dialect(name: &str) -> Result<String, String> {
-    name.parse::<sqlty_sql::Dialect>()
-        .map(|_| name.to_lowercase())
-        .map_err(|error| error.to_string())
+/// `check --show-settings`: what `path` is checked with, as TOML.
+fn show_settings(path: &Path, settings: &FileSettings) -> String {
+    let quote = |text: &str| toml::Value::String(text.to_string()).to_string();
+    let list = |items: Vec<String>| format!("[{}]", items.join(", "));
+    let table = |pairs: Vec<(&String, &String)>| {
+        let pairs: Vec<String> = pairs
+            .into_iter()
+            .map(|(key, value)| format!("{} = {}", quote(key), quote(value)))
+            .collect();
+        match pairs.is_empty() {
+            true => "{}".to_string(),
+            false => format!("{{ {} }}", pairs.join(", ")),
+        }
+    };
+    let mut rules: Vec<_> = settings.rules.iter().collect();
+    rules.sort();
+    let types = settings
+        .types
+        .iter()
+        .map(|(key, value)| (key, value))
+        .collect();
+    let mut coerce: Vec<String> = settings.coerce.iter().map(|name| quote(name)).collect();
+    coerce.sort();
+    let functions = settings
+        .functions
+        .iter()
+        .map(|function| quote(&function.import_path))
+        .collect();
+    let mut lines = vec![format!("# {}", path.display())];
+    if let Some(base) = &settings.base {
+        lines.push(format!("base = {}", quote(&base.display().to_string())));
+    }
+    lines.push(format!("dialect = {}", quote(settings.dialect)));
+    lines.push(format!("schema = {}", settings.schema.is_some()));
+    if let Some(style) = &settings.import_style {
+        lines.push(format!("import-style = {}", quote(style)));
+    }
+    let untyped = if settings.untyped { "sentinel" } else { "skip" };
+    lines.push(format!("untyped = {}", quote(untyped)));
+    lines.push(format!("param-types = {}", settings.param_types));
+    lines.push(format!("closed-params = {}", settings.closed_params));
+    lines.push(format!("rules = {}", table(rules)));
+    lines.push(format!("types = {}", table(types)));
+    lines.push(format!("coerce-row-types = {}", list(coerce)));
+    lines.push(format!("functions = {}", list(functions)));
+    let queries = settings.queries.iter().map(|glob| quote(glob)).collect();
+    lines.push(format!("queries = {}", list(queries)));
+    format!("{}\n", lines.join("\n"))
 }
 
-/// Run `sqlty ARGS...` on `host`; the exit code, or `None` when the command runs in Python
-/// still (`complete`, `breaking` and `server`). A panic is reported with a bug report link.
-pub fn run(args: impl IntoIterator<Item = OsString>, host: &mut dyn Host) -> Option<i32> {
+fn dialect(name: &str) -> Result<String, String> {
+    use sqlty_sql::Dialect;
+    match name.parse::<Dialect>() {
+        Ok(_) => Ok(name.to_lowercase()),
+        Err(_) => Err(format!(
+            "unknown dialect '{name}'{}; expected one of: {}",
+            sqlty_python::config::suggest(name, &Dialect::NAMES),
+            Dialect::NAMES.join(", ")
+        )),
+    }
+}
+
+/// One command of [`reference`]: its name (`sqlty` for the root), usage and options.
+pub struct Reference {
+    /// `sqlty`, or the name of a command.
+    pub name: String,
+    /// The usage line, without `Usage: `.
+    pub usage: String,
+    /// `(invocation, help)` of each option and positional argument.
+    pub options: Vec<(String, String)>,
+}
+
+/// The root and each command of `sqlty`, for `docs/reference/cli.md`.
+pub fn reference() -> Vec<Reference> {
+    let mut root = Cli::command().term_width(80);
+    root.build();
+    let mut commands = vec![&root];
+    commands.extend(
+        root.get_subcommands()
+            .filter(|command| command.get_name() != "help"),
+    );
+    commands
+        .into_iter()
+        .map(|command| Reference {
+            name: command.get_name().to_string(),
+            usage: command
+                .clone()
+                .render_usage()
+                .to_string()
+                .trim_start_matches("Usage: ")
+                .to_string(),
+            options: command
+                .get_arguments()
+                .filter(|arg| !arg.is_hide_set())
+                .map(|arg| {
+                    let help = arg.get_long_help().or(arg.get_help());
+                    (
+                        invocation(arg),
+                        help.map(ToString::to_string).unwrap_or_default(),
+                    )
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+/// `-c, --config KEY=VALUE`, `--untyped {skip,sentinel}` or `paths ...`.
+fn invocation(arg: &clap::Arg) -> String {
+    let possible: Vec<String> = arg
+        .get_possible_values()
+        .iter()
+        .map(|value| value.get_name().to_string())
+        .collect();
+    let value = match (possible.is_empty(), arg.get_value_names()) {
+        (false, _) => format!("{{{}}}", possible.join(",")),
+        (true, Some(names)) => names
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(" "),
+        (true, None) if arg.is_positional() => arg.get_id().to_string(),
+        (true, None) => arg.get_id().as_str().to_uppercase(),
+    };
+    if arg.is_positional() {
+        let many = matches!(arg.get_action(), clap::ArgAction::Append);
+        return if many { format!("{value} ...") } else { value };
+    }
+    let mut names: Vec<String> = arg
+        .get_short()
+        .map(|short| format!("-{short}"))
+        .into_iter()
+        .collect();
+    names.extend(arg.get_long().map(|long| format!("--{long}")));
+    let names = names.join(", ");
+    match arg.get_action().takes_values() {
+        true => format!("{names} {value}"),
+        false => names,
+    }
+}
+
+/// Run `sqlty ARGS...` on `host`; the exit code. A panic is reported with a bug report link.
+pub fn run(args: impl IntoIterator<Item = OsString>, host: &mut dyn Host) -> i32 {
     let args: Vec<OsString> = args.into_iter().collect();
     catch_unwind(AssertUnwindSafe(|| dispatch(&args, &mut *host))).unwrap_or_else(|payload| {
         let cause = report::cause(&*payload);
@@ -242,15 +431,11 @@ pub fn run(args: impl IntoIterator<Item = OsString>, host: &mut dyn Host) -> Opt
             "sqlty: crashed: {cause}\nThis is a bug in sqlty, please report it at {}\n",
             report::issue_url(cause)
         ));
-        Some(EXIT_ERROR)
+        EXIT_ERROR
     })
 }
 
-fn dispatch(args: &[OsString], host: &mut dyn Host) -> Option<i32> {
-    let first = args.get(1).and_then(|arg| arg.to_str());
-    if matches!(first, Some("complete" | "breaking" | "server")) {
-        return None;
-    }
+fn dispatch(args: &[OsString], host: &mut dyn Host) -> i32 {
     let matches = match Cli::command().try_get_matches_from(args) {
         Ok(matches) => matches,
         Err(error) => {
@@ -259,7 +444,7 @@ fn dispatch(args: &[OsString], host: &mut dyn Host) -> Option<i32> {
                 true => host.err(&text),
                 false => host.out(&text),
             }
-            return Some(error.exit_code());
+            return error.exit_code();
         }
     };
     #[expect(clippy::expect_used, reason = "the matches are of the same command")]
@@ -300,11 +485,18 @@ fn dispatch(args: &[OsString], host: &mut dyn Host) -> Option<i32> {
             transform(host, &common, &change, severities, None, Transform::Format)
         }
         Some(Command::Check { common, check }) => self::check(host, &common, &check, severities),
+        Some(Command::Complete {
+            location,
+            common,
+            json,
+        }) => complete::run(host, &location, common, severities, json),
+        Some(Command::Breaking(args)) => breaking::run(host, &args),
+        Some(Command::Server) => server::serve(host.python(), host.extra_roots()).map(|()| 0),
     };
-    Some(result.unwrap_or_else(|error| {
+    result.unwrap_or_else(|error| {
         host.err(&format!("sqlty: error: {error}\n"));
         EXIT_ERROR
-    }))
+    })
 }
 
 /// `--error/--warn/--ignore` in command-line order.
@@ -334,22 +526,22 @@ fn version(host: &mut dyn Host) -> Result<i32, String> {
 
 fn rule(host: &mut dyn Host, name: Option<&str>) -> i32 {
     let Some(name) = name else {
-        let width = Rule::LISTED
+        let width = Rule::ALL
             .iter()
             .map(|rule| rule.name().len())
             .max()
             .unwrap_or(0);
-        for rule in Rule::LISTED {
+        for rule in Rule::ALL {
             let severity = rule.default_severity().as_str();
             host.out(&format!(
                 "{:<width$}  {severity:<5}  {}\n",
                 rule.name(),
-                rule.description()
+                rule.summary()
             ));
         }
         return 0;
     };
-    let page = RULE_PAGES
+    let page = sqlty_rules::PAGES
         .iter()
         .find(|(path, _)| *path == format!("{name}.md"));
     match page.filter(|_| Rule::parse(name).is_some()) {
@@ -367,19 +559,17 @@ fn rule(host: &mut dyn Host, name: Option<&str>) -> i32 {
     }
 }
 
-/// A rule page with its links to other pages pointing at the documentation site.
+/// A rule page of `docs/reference/rules/` with its links to other pages pointing at the
+/// documentation site.
 fn rule_doc(text: &str) -> String {
-    let link = sqlty_sql::regex(
-        r"\]\((?:\.\./\.\./\.\./docs/(?P<doc>[^)\s:]+)|(?P<rule>[^)\s:/]+))\.md(?P<anchor>#[^)\s]*)?\)",
-    );
+    let link =
+        sqlty_sql::regex(r"\]\((?P<up>(?:\.\./)*)(?P<page>[^)\s:]+)\.md(?P<anchor>#[^)\s]*)?\)");
     link.replace_all(text, |found: &regex::Captures<'_>| {
-        match found.name("doc") {
-            Some(doc) => {
-                let anchor = found.name("anchor").map_or("", |anchor| anchor.as_str());
-                format!("]({DOCS_URL}{}/{anchor})", doc.as_str())
-            }
-            None => format!("]({DOCS_URL}reference/rules/#{})", &found["rule"]),
-        }
+        let mut dir = vec!["reference", "rules"];
+        dir.truncate(dir.len().saturating_sub(found["up"].len() / 3));
+        dir.push(&found["page"]);
+        let anchor = found.name("anchor").map_or("", |anchor| anchor.as_str());
+        format!("]({DOCS_URL}{}/{anchor})", dir.join("/"))
     })
     .into_owned()
 }
@@ -518,7 +708,10 @@ fn workspace(
     if let Some(respect) = respect {
         discovery = discovery.respect_gitignore(respect);
     }
-    let paths: Vec<PathBuf> = common.paths.iter().map(|path| pure(path)).collect();
+    let mut paths: Vec<PathBuf> = common.paths.iter().map(|path| pure(path)).collect();
+    if paths.is_empty() {
+        paths.push(PathBuf::from("."));
+    }
     let options = Options {
         flags,
         discovery,
@@ -619,7 +812,7 @@ fn transform(
             }
         } else if change.diff {
             let path = path.display().to_string();
-            host.out(&diff::unified(&path, original, &result));
+            host.out(&unified_diff(&path, original, &result));
         } else {
             write_source(host, path, &result)?;
             if kind == Transform::Rewrite {
@@ -717,6 +910,20 @@ fn check(
     let query_files = workspace.query_files()?;
     warn_all(host, &workspace);
     let files = workspace.files().to_vec();
+    if args.show_files || args.show_settings {
+        let mut shown: Vec<&PathBuf> = files.iter().chain(&query_files).collect();
+        shown.sort();
+        if args.show_files {
+            for path in shown {
+                host.out(&format!("{}\n", path.display()));
+            }
+        } else if let Some(path) = shown.first() {
+            let settings = workspace.settings(path)?;
+            host.out(&show_settings(path, &settings));
+            warn_all(host, &workspace);
+        }
+        return Ok(0);
+    }
     let mut unreadable = !workspace.unreadable().is_empty();
     if files.is_empty() && query_files.is_empty() && !unreadable {
         if !common.quiet {
@@ -812,10 +1019,8 @@ fn check(
         host.out(&format!("{line}\n"));
     }
     match args.output_format {
-        OutputFormat::Json => host.out(&format!("{}\n", Json::Array(shown).dumps())),
-        OutputFormat::Sarif => {
-            host.out(&format!("{}\n", sarif_log(&host.version(), shown).dumps()));
-        }
+        OutputFormat::Json => host.out(&pretty(&shown)),
+        OutputFormat::Sarif => host.out(&pretty(&sarif_log(&host.version(), &shown))),
         OutputFormat::Text | OutputFormat::Github => {}
     }
     let text = text_output && !common.quiet;
@@ -889,8 +1094,16 @@ fn statistics(modules: &[std::collections::HashMap<&'static str, usize>]) -> Str
     line
 }
 
+/// The unified diff of `old` and `new`, both named `path`, with three lines of context.
+fn unified_diff(path: &str, old: &str, new: &str) -> String {
+    similar::TextDiff::from_lines(old, new)
+        .unified_diff()
+        .header(path, path)
+        .to_string()
+}
+
 /// The 1-based line and column (in characters) of the byte `offset` of `text`.
-fn position(text: &str, offset: usize) -> Json {
+fn position(text: &str, offset: usize) -> Position {
     let offset = offset.min(text.len());
     let before = &text.as_bytes()[..offset];
     let line = before.iter().filter(|byte| **byte == b'\n').count() + 1;
@@ -899,31 +1112,85 @@ fn position(text: &str, offset: usize) -> Json {
         .rposition(|byte| *byte == b'\n')
         .map_or(0, |at| at + 1);
     let column = String::from_utf8_lossy(&before[start..]).chars().count() + 1;
-    Json::object([("line", line.into()), ("column", column.into())])
+    Position { line, column }
 }
 
-fn json_diagnostic(path: &Path, diag: &Diagnostic, text: &str) -> Json {
-    let fix = diag
-        .fix
-        .iter()
-        .map(|edit| {
-            Json::object([
-                ("start", position(text, edit.range.start)),
-                ("end", position(text, edit.range.end)),
-                ("replacement", edit.replacement.as_str().into()),
-            ])
-        })
-        .collect();
-    Json::object([
-        ("file", path.display().to_string().into()),
-        ("rule", diag.rule.name().into()),
-        ("message", diag.message.as_str().into()),
-        ("severity", diag.severity.as_str().into()),
-        ("line", diag.line.into()),
-        ("start", position(text, diag.span.start)),
-        ("end", position(text, diag.span.end)),
-        ("fix", Json::Array(fix)),
-    ])
+#[derive(Clone, Copy, Serialize)]
+struct Position {
+    line: usize,
+    column: usize,
+}
+
+#[derive(Serialize)]
+struct JsonEdit {
+    start: Position,
+    end: Position,
+    replacement: String,
+}
+
+/// A row of `--output-format json`.
+#[derive(Serialize)]
+struct JsonDiagnostic {
+    file: String,
+    rule: &'static str,
+    message: String,
+    severity: &'static str,
+    line: usize,
+    start: Position,
+    end: Position,
+    fix: Vec<JsonEdit>,
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    breaking: Option<Breaking>,
+}
+
+/// Which check of `sqlty breaking` found a row.
+#[derive(Clone, Serialize)]
+struct Breaking {
+    direction: &'static str,
+    against: String,
+}
+
+fn json_diagnostic(path: &Path, diag: &Diagnostic, text: &str) -> JsonDiagnostic {
+    JsonDiagnostic {
+        file: path.display().to_string(),
+        rule: diag.rule.name(),
+        message: diag.message.clone(),
+        severity: diag.severity.as_str(),
+        line: diag.line,
+        start: position(text, diag.span.start),
+        end: position(text, diag.span.end),
+        fix: diag
+            .fix
+            .iter()
+            .map(|edit| JsonEdit {
+                start: position(text, edit.range.start),
+                end: position(text, edit.range.end),
+                replacement: edit.replacement.clone(),
+            })
+            .collect(),
+        breaking: None,
+    }
+}
+
+/// `value` as two-space indented ASCII JSON, with a trailing newline, so a redirected
+/// stdout in any encoding takes it.
+fn pretty(value: &impl Serialize) -> String {
+    let mut out = String::new();
+    for char in serde_json::to_string_pretty(value)
+        .unwrap_or_default()
+        .chars()
+    {
+        match char.is_ascii() {
+            true => out.push(char),
+            false => {
+                for unit in char.encode_utf16(&mut [0; 2]) {
+                    out.push_str(&format!("\\u{unit:04x}"));
+                }
+            }
+        }
+    }
+    out.push('\n');
+    out
 }
 
 fn github_annotation(path: &Path, diag: &Diagnostic) -> String {
@@ -960,121 +1227,200 @@ fn level(severity: &str) -> &'static str {
 }
 
 /// The rows of `--output-format json` as one SARIF 2.1.0 run.
-fn sarif_log(version: &str, rows: Vec<Json>) -> Json {
-    let rules = Rule::LISTED
+fn sarif_log<'a>(version: &'a str, rows: &'a [JsonDiagnostic]) -> SarifLog<'a> {
+    let rules = Rule::ALL
         .iter()
-        .map(|rule| {
-            Json::object([
-                ("id", rule.name().into()),
-                (
-                    "shortDescription",
-                    Json::object([("text", rule.description().into())]),
-                ),
-                (
-                    "helpUri",
-                    format!("{DOCS_URL}reference/rules/#{}", rule.name()).into(),
-                ),
-                (
-                    "defaultConfiguration",
-                    Json::object([("level", level(rule.default_severity().as_str()).into())]),
-                ),
-            ])
+        .map(|rule| SarifRule {
+            id: rule.name(),
+            short_description: Text {
+                text: rule.summary().to_string(),
+            },
+            help_uri: format!("{DOCS_URL}reference/rules/{}/", rule.name()),
+            default_configuration: Level {
+                level: level(rule.default_severity().as_str()),
+            },
         })
         .collect();
-    let driver = Json::object([
-        ("name", "sqlty".into()),
-        ("version", version.into()),
-        ("informationUri", DOCS_URL.into()),
-        ("rules", Json::Array(rules)),
-    ]);
-    let results = rows.into_iter().map(sarif_result).collect();
-    let run = Json::object([
-        ("tool", Json::object([("driver", driver)])),
-        ("columnKind", "unicodeCodePoints".into()),
-        ("results", Json::Array(results)),
-    ]);
-    Json::object([
-        (
-            "$schema",
-            "https://json.schemastore.org/sarif-2.1.0.json".into(),
-        ),
-        ("version", "2.1.0".into()),
-        ("runs", Json::Array(vec![run])),
-    ])
+    SarifLog {
+        schema: "https://json.schemastore.org/sarif-2.1.0.json",
+        version: "2.1.0",
+        runs: [SarifRun {
+            tool: Tool {
+                driver: Driver {
+                    name: "sqlty",
+                    version,
+                    information_uri: DOCS_URL,
+                    rules,
+                },
+            },
+            column_kind: "unicodeCodePoints",
+            results: rows.iter().map(sarif_result).collect(),
+        }],
+    }
 }
 
-fn sarif_result(row: Json) -> Json {
-    let Json::Object(fields) = row else {
-        return Json::Null;
-    };
-    let fields: BTreeMap<String, Json> = fields.into_iter().collect();
-    let get = |key: &str| fields.get(key).cloned().unwrap_or(Json::Null);
-    let text = |key: &str| match fields.get(key) {
-        Some(Json::Str(text)) => text.clone(),
-        _ => String::new(),
-    };
-    let at = |position: &Json, key: &str| match position {
-        Json::Object(fields) => fields
-            .iter()
-            .find(|(name, _)| name == key)
-            .map_or(Json::Null, |(_, value)| value.clone()),
-        _ => Json::Null,
-    };
-    let region = |start: &Json, end: &Json| {
-        Json::object([
-            ("startLine", at(start, "line")),
-            ("startColumn", at(start, "column")),
-            ("endLine", at(end, "line")),
-            ("endColumn", at(end, "column")),
-        ])
-    };
-    let file = text("file");
-    let uri = match Path::new(&file).is_absolute() {
-        true => format!("file://{}", file.replace('%', "%25").replace(' ', "%20")),
-        false => file.replace('\\', "/"),
-    };
-    let artifact = Json::object([("uri", uri.into())]);
-    let location = Json::object([
-        ("artifactLocation", artifact.clone()),
-        ("region", region(&get("start"), &get("end"))),
-    ]);
-    let mut result = vec![
-        ("ruleId".to_string(), get("rule")),
-        ("level".to_string(), level(&text("severity")).into()),
-        (
-            "message".to_string(),
-            Json::object([("text", get("message"))]),
+fn sarif_result(row: &JsonDiagnostic) -> SarifResult {
+    let uri = match Path::new(&row.file).is_absolute() {
+        true => format!(
+            "file://{}",
+            row.file.replace('%', "%25").replace(' ', "%20")
         ),
-        (
-            "locations".to_string(),
-            Json::Array(vec![Json::object([("physicalLocation", location)])]),
-        ),
-    ];
-    if let Some(Json::Array(fix)) = fields
-        .get("fix")
-        .filter(|fix| **fix != Json::Array(Vec::new()))
-    {
-        let replacements = fix
-            .iter()
-            .map(|edit| {
-                let get = |key: &str| at(edit, key);
-                Json::object([
-                    ("deletedRegion", region(&get("start"), &get("end"))),
-                    (
-                        "insertedContent",
-                        Json::object([("text", get("replacement"))]),
-                    ),
-                ])
-            })
-            .collect();
-        let change = Json::object([
-            ("artifactLocation", artifact),
-            ("replacements", Json::Array(replacements)),
-        ]);
-        let changes = Json::object([("artifactChanges", Json::Array(vec![change]))]);
-        result.push(("fixes".to_string(), Json::Array(vec![changes])));
+        false => row.file.replace('\\', "/"),
+    };
+    let artifact = || Artifact { uri: uri.clone() };
+    let fixes = match row.fix.is_empty() {
+        true => Vec::new(),
+        false => vec![SarifFix {
+            artifact_changes: [ArtifactChange {
+                artifact_location: artifact(),
+                replacements: row
+                    .fix
+                    .iter()
+                    .map(|edit| Replacement {
+                        deleted_region: Region::new(edit.start, edit.end),
+                        inserted_content: Text {
+                            text: edit.replacement.clone(),
+                        },
+                    })
+                    .collect(),
+            }],
+        }],
+    };
+    SarifResult {
+        rule_id: row.rule,
+        level: level(row.severity),
+        message: Text {
+            text: row.message.clone(),
+        },
+        locations: [Location {
+            physical_location: PhysicalLocation {
+                artifact_location: artifact(),
+                region: Region::new(row.start, row.end),
+            },
+        }],
+        fixes,
+        properties: row.breaking.clone(),
     }
-    Json::Object(result)
+}
+
+#[derive(Serialize)]
+struct SarifLog<'a> {
+    #[serde(rename = "$schema")]
+    schema: &'static str,
+    version: &'static str,
+    runs: [SarifRun<'a>; 1],
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SarifRun<'a> {
+    tool: Tool<'a>,
+    column_kind: &'static str,
+    results: Vec<SarifResult>,
+}
+
+#[derive(Serialize)]
+struct Tool<'a> {
+    driver: Driver<'a>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Driver<'a> {
+    name: &'static str,
+    version: &'a str,
+    information_uri: &'static str,
+    rules: Vec<SarifRule>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SarifRule {
+    id: &'static str,
+    short_description: Text,
+    help_uri: String,
+    default_configuration: Level,
+}
+
+#[derive(Serialize)]
+struct Level {
+    level: &'static str,
+}
+
+#[derive(Serialize)]
+struct Text {
+    text: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SarifResult {
+    rule_id: &'static str,
+    level: &'static str,
+    message: Text,
+    locations: [Location; 1],
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    fixes: Vec<SarifFix>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    properties: Option<Breaking>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Location {
+    physical_location: PhysicalLocation,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PhysicalLocation {
+    artifact_location: Artifact,
+    region: Region,
+}
+
+#[derive(Serialize)]
+struct Artifact {
+    uri: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Region {
+    start_line: usize,
+    start_column: usize,
+    end_line: usize,
+    end_column: usize,
+}
+
+impl Region {
+    fn new(start: Position, end: Position) -> Self {
+        Self {
+            start_line: start.line,
+            start_column: start.column,
+            end_line: end.line,
+            end_column: end.column,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SarifFix {
+    artifact_changes: [ArtifactChange; 1],
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ArtifactChange {
+    artifact_location: Artifact,
+    replacements: Vec<Replacement>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Replacement {
+    deleted_region: Region,
+    inserted_content: Text,
 }
 
 #[cfg(test)]
@@ -1159,7 +1505,7 @@ mod tests {
         }
     }
 
-    fn sqlty(host: &mut Fake, args: &[&str]) -> Option<i32> {
+    fn sqlty(host: &mut Fake, args: &[&str]) -> i32 {
         let args = std::iter::once("sqlty").chain(args.iter().copied());
         run(args.map(OsString::from), host)
     }
@@ -1177,21 +1523,26 @@ mod tests {
     #[test]
     fn prints_usage_and_what_clap_rejects() {
         let mut host = project("usage", &[]);
-        assert_eq!(sqlty(&mut host, &[]), Some(0));
+        assert_eq!(sqlty(&mut host, &[]), 0);
         assert!(
             host.out.starts_with("Type-safe SQL queries for Python."),
             "{}",
             host.out
         );
-        assert_eq!(sqlty(&mut host, &["--help"]), Some(0));
-        assert_eq!(sqlty(&mut host, &["check", "--dialect", "nope"]), Some(2));
+        assert_eq!(sqlty(&mut host, &["--help"]), 0);
+        assert_eq!(sqlty(&mut host, &["check", "--dialect", "nope"]), 2);
         assert!(
             host.err
                 .contains("invalid value 'nope' for '--dialect <DIALECT>'"),
             "{}",
             host.err
         );
-        assert_eq!(sqlty(&mut host, &["server"]), None);
+        assert_eq!(sqlty(&mut host, &["complete", "q.py:1"]), 2);
+        assert!(
+            host.err.contains("expected FILE:LINE:COL, got 'q.py:1'"),
+            "{}",
+            host.err
+        );
         std::fs::remove_dir_all(&host.root).expect("removes");
     }
 
@@ -1199,7 +1550,7 @@ mod tests {
     fn a_panic_prints_a_bug_report_link() {
         let mut host = project("crash", &[]);
         host.env.push(("CRASH", "1"));
-        assert_eq!(sqlty(&mut host, &["version"]), Some(EXIT_ERROR));
+        assert_eq!(sqlty(&mut host, &["version"]), EXIT_ERROR);
         assert_eq!(
             host.err,
             format!(
@@ -1234,12 +1585,7 @@ mod tests {
             (&["check", "-c", "extend-exclude = [\"gen.py\"]"][..], 0),
         ] {
             host.err.clear();
-            assert_eq!(
-                sqlty(&mut host, args),
-                Some(found),
-                "{args:?}: {}",
-                host.err
-            );
+            assert_eq!(sqlty(&mut host, args), found, "{args:?}: {}", host.err);
         }
         std::fs::remove_dir_all(&host.root).expect("removes");
     }
@@ -1251,10 +1597,7 @@ mod tests {
             "from sqlty import SQL\nq = SQL[tuple[int | None]](\"--sql\\nSELECT id FROM users\")\n",
         );
         let mut host = project("formats", &[CONFIG, SCHEMA, fixable]);
-        assert_eq!(
-            sqlty(&mut host, &["check", "--output-format", "github"]),
-            Some(0)
-        );
+        assert_eq!(sqlty(&mut host, &["check", "--output-format", "github"]), 0);
         assert!(
             host.out.starts_with("::warning file=app/q.py,"),
             "{}",
@@ -1263,10 +1606,7 @@ mod tests {
         std::fs::remove_dir_all(&host.root).expect("removes");
         let unknown = ("app/q.py", "q = \"--sql\\nSELECT nope FROM users\"\n");
         let mut host = project("sarif", &[CONFIG, SCHEMA, unknown]);
-        assert_eq!(
-            sqlty(&mut host, &["check", "--output-format", "sarif"]),
-            Some(1)
-        );
+        assert_eq!(sqlty(&mut host, &["check", "--output-format", "sarif"]), 1);
         assert!(
             host.out.contains("\"ruleId\": \"unknown-column\""),
             "{}",
@@ -1279,10 +1619,7 @@ mod tests {
     #[test]
     fn checks_what_would_change_quietly() {
         let mut host = project("quiet", &[CONFIG, SCHEMA, QUERY]);
-        assert_eq!(
-            sqlty(&mut host, &["rewrite", "--check", "--quiet"]),
-            Some(1)
-        );
+        assert_eq!(sqlty(&mut host, &["rewrite", "--check", "--quiet"]), 1);
         assert_eq!((host.out.as_str(), host.err.as_str()), ("", ""));
         std::fs::remove_dir_all(&host.root).expect("removes");
     }
@@ -1294,22 +1631,48 @@ mod tests {
         let written = std::fs::read_to_string(host.root.join("new.py")).expect("reads");
         assert_eq!(written, "x = 1\n");
         assert_eq!(
-            rule_doc("see [stale-type](stale-type.md)"),
-            format!("see [stale-type]({DOCS_URL}reference/rules/#stale-type)")
+            rule_doc("[a](stale-type.md) [b](../rules.md#rule-groups) [c](../../guide/untyped.md#x)"),
+            format!(
+                "[a]({DOCS_URL}reference/rules/stale-type/) [b]({DOCS_URL}reference/rules/#rule-groups) [c]({DOCS_URL}guide/untyped/#x)"
+            )
         );
         std::fs::remove_dir_all(&host.root).expect("removes");
     }
 
     #[test]
-    fn writes_sarif_of_any_row() {
-        assert_eq!(sarif_result(Json::Null), Json::Null);
-        let row = Json::object([("file", Json::Null), ("start", Json::Null)]);
-        let Json::Object(fields) = sarif_result(row) else {
-            panic!("an object");
+    fn writes_sarif_uris_and_escapes_non_ascii() {
+        let at = Position { line: 1, column: 1 };
+        let row = |file: &str| JsonDiagnostic {
+            file: file.to_string(),
+            rule: "narrow-type",
+            message: "é😀".to_string(),
+            severity: "info",
+            line: 1,
+            start: at,
+            end: at,
+            fix: Vec::new(),
+            breaking: None,
         };
-        assert_eq!(fields[1], ("level".to_string(), "none".into()));
-        let row = Json::object([("file", "/a b%.py".into())]);
-        let found = sarif_result(row).dumps();
+        let found = pretty(&sarif_result(&row("/a b%.py")));
         assert!(found.contains(r#""uri": "file:///a%20b%25.py""#), "{found}");
+        assert!(found.contains(r#""level": "none""#), "{found}");
+        assert!(!found.contains("fixes"), "{found}");
+        let found = pretty(&[row(r"app\q.py")]);
+        assert!(found.contains(r#""file": "app\\q.py""#), "{found}");
+        assert!(
+            found.contains(r#""message": "\u00e9\ud83d\ude00""#),
+            "{found}"
+        );
+        let found = pretty(&sarif_result(&row(r"app\q.py")));
+        assert!(found.contains(r#""uri": "app/q.py""#), "{found}");
+    }
+
+    #[test]
+    fn marks_a_missing_newline_at_the_end() {
+        assert_eq!(unified_diff("q.py", "same\n", "same\n"), "");
+        assert_eq!(
+            unified_diff("q.py", "a\nb", "a\nc"),
+            "--- q.py\n+++ q.py\n@@ -1,2 +1,2 @@\n a\n-b\n\\ No newline at end of file\n+c\n\\ No newline at end of file\n"
+        );
     }
 }

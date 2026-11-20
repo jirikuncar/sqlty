@@ -115,7 +115,7 @@ FROM orders o LEFT JOIN lines l ON l.order_id = o.id
 GROUP BY o.id""")
 ```
 
-[`json-shape-mismatch`](../reference/rules.md#json-shape-mismatch) reports every place the
+[`json-shape-mismatch`](../reference/rules/json-shape-mismatch.md) reports every place the
 annotation cannot hold what the query builds, with the path to it (`lines[].qty`). The
 nested `Line` can be a `TypedDict`; `list[...]`, `dict[str, ...]` and unions with `None` are
 followed too.
@@ -147,8 +147,7 @@ SELECT jsonb_build_object('id', id, 'note', note) FROM lines
 ```
 
 `note?` may be missing: only one branch builds it, so a `TypedDict` must declare it
-`NotRequired`. `core.json_shapes()` returns the shapes of a query's columns; `-- json:` in
-the examples above is that function.
+`NotRequired`. `-- json:` in the examples above is the shape sqlty reads for each column.
 
 ## What is not checked
 

@@ -7,7 +7,7 @@ import ast
 import pytest
 
 from sqlty._cli import main
-from sqlty.core import HelperIndex, check_source, query_statistics
+from sqlty.core import HelperIndex, check_source
 
 SCHEMA = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);\n"
 
@@ -93,24 +93,23 @@ def test_check_source_with_index():
     assert check_source(use.replace("db", "elsewhere"), helpers=index) == []
 
 
-def test_statistics_count_helper_queries():
-    index = HelperIndex()
-    index.add("db", DB)
-    use = (
-        "from db import fetch_all\n"
+def test_statistics_count_helper_queries(project, capsys):
+    (project / "use.py").write_text(
+        "from pkg.db import fetch_all\n"
         'fetch_all("SELECT id FROM users", int)\n'
         'fetch_all("SELECT nope(", int)\n'
         'fetch_all("DELETE FROM users", int)\n'
         "fetch_all(QUERY, int)\n"
         'q = f"--sql\\nSELECT {1}"\n'
     )
-    assert query_statistics(use, schema_sql=SCHEMA, helpers=index) == {
-        "typed": 1,
-        "unparsed": 1,
-        "dynamic-query": 1,
-        "fstring-skipped": 1,
-    }
-    assert query_statistics(use, helpers=index)["partially typed"] == 1
+    main(["check", "--statistics", "."])
+    assert capsys.readouterr().out.splitlines()[-1] == (
+        "Queries: 1 typed, 0 partially typed, 1 unparsed, 2 skipped"
+        " (fstring-skipped: 1, dynamic-query: 1)"
+    )
+    (project / "pyproject.toml").write_text("[tool.sqlty]\n")
+    main(["check", "--statistics", "."])
+    assert "1 partially typed" in capsys.readouterr().out.splitlines()[-1]
 
 
 def test_unbindable_calls_are_skipped():

@@ -1,15 +1,14 @@
-// The docs playground's engine (docs/assets/playground/engine.js) on the WebAssembly build:
-// `make playground`, then `node --test tests/playground.test.mjs`.
+// The engine of the docs playground and @sqlty/wasm (npm/wasm/engine.js) on the WebAssembly
+// build: `make playground`, then `node --test tests/playground.test.mjs`.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { setTimeout } from "node:timers/promises";
 
-import { load } from "../docs/assets/playground/engine.js";
+import { load } from "../npm/wasm/engine.js";
 import { decode, encode } from "../docs/assets/playground/share.js";
 import { fold, unfold } from "../docs/assets/playground/steps.js";
 
-const wasm = await readFile(new URL("../docs/assets/playground/sqlty_wasm.wasm", import.meta.url));
+const wasm = await readFile(new URL("../npm/wasm/sqlty_wasm.wasm", import.meta.url));
 const ask = await load(wasm);
 const schema = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);";
 
@@ -150,23 +149,28 @@ test("each step of the docs' Tour in steps is typed", async () => {
   }
 });
 
-test("a panic is an internal-error, answered by a spare instance", { timeout: 10_000 }, async () => {
+test("a panic is an internal-error, answered by a spare instance or a new one", () => {
   const crash = { op: "analyze", source: "q = 1", dialect: "postgres", panic: "boom" };
   const [found, ...rest] = ask(crash).diagnostics;
   assert.deepEqual(rest, []);
   assert.equal(found.rule, "internal-error");
   assert.match(found.message, /^sqlty crashed checking this file: boom; please report it at https:\/\/github\.com\/jirikuncar\/sqlty\/issues\/new\?template=bug_report\.yml&title=Crash%3A%20boom&output=boom&version=/);
-  assert.throws(() => ask({ ...crash, op: "hover" }), /starting again/);
-  assert.throws(() => ask(crash), /starting again/);
-  for (;;) {
-    try {
-      assert.deepEqual(ask({ op: "analyze", source: "q = 1", dialect: "postgres" }).diagnostics, []);
-      break;
-    } catch (error) {
-      assert.match(error.message, /starting again/);
-      await setTimeout(10);
-    }
-  }
+  assert.match(ask({ ...crash, op: "hover" }).error, /^sqlty crashed: boom; please report it at /);
+  assert.equal(ask(crash).diagnostics[0].rule, "internal-error");
+  assert.deepEqual(ask({ op: "analyze", source: "q = 1", dialect: "postgres" }).diagnostics, []);
+});
+
+test("a panic before the spare is ready, where only asynchronous instantiation is allowed", async () => {
+  const crash = { op: "analyze", source: "q = 1", dialect: "postgres", panic: "boom" };
   const fresh = await load(wasm);
-  assert.match(fresh({ ...crash, op: "hover" }).error, /^sqlty crashed: boom; please report it at https:\/\/github\.com\/jirikuncar\/sqlty\/issues\/new\?template=bug_report\.yml&title=Crash%3A%20boom&output=boom&version=/);
+  const { Instance } = WebAssembly;
+  WebAssembly.Instance = function () {
+    throw new RangeError("WebAssembly.Instance is disallowed on the main thread");
+  };
+  try {
+    assert.equal(fresh(crash).diagnostics[0].rule, "internal-error");
+    assert.throws(() => fresh(crash), { message: "sqlty crashed and is starting again" });
+  } finally {
+    WebAssembly.Instance = Instance;
+  }
 });

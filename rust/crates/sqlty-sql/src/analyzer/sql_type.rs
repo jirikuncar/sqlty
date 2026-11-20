@@ -812,23 +812,19 @@ fn sqlite_affinity(name: &str) -> Option<String> {
     )
 }
 
-/// `proofs/SqlTy/Table.lean`: what [`scalar_python`] gives each name it knows, in each
-/// dialect, for the Lean model of the mapping. `SQLTY_UPDATE_PROOFS=1` rewrites it.
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-mod lean_table {
+mod scalar_python_types {
     use super::*;
-    use std::collections::BTreeSet;
-    use std::fmt::Write;
 
-    const DIALECTS: [(&str, SqlDialect); 7] = [
-        ("postgres", SqlDialect::Postgres),
-        ("mysql", SqlDialect::MySql),
-        ("sqlite", SqlDialect::Sqlite),
-        ("clickhouse", SqlDialect::ClickHouse),
-        ("duckdb", SqlDialect::Other("duckdb")),
-        ("oracle", SqlDialect::Other("oracle")),
-        ("generic", SqlDialect::Other("generic")),
+    const DIALECTS: [SqlDialect; 7] = [
+        SqlDialect::Postgres,
+        SqlDialect::MySql,
+        SqlDialect::Sqlite,
+        SqlDialect::ClickHouse,
+        SqlDialect::Other("duckdb"),
+        SqlDialect::Other("oracle"),
+        SqlDialect::Other("generic"),
     ];
 
     /// The names `scalar_python` matches before `SQL_TO_PYTHON_TYPE`.
@@ -865,68 +861,93 @@ mod lean_table {
         "JSON",
     ];
 
-    /// `python` as a Lean `PyType` term; `?` for a form the table doesn't need.
-    fn term(python: &str) -> String {
+    const STDLIB: [&str; 18] = [
+        "int",
+        "float",
+        "str",
+        "bytes",
+        "bool",
+        "decimal.Decimal",
+        "datetime.date",
+        "datetime.time",
+        "datetime.datetime",
+        "datetime.timedelta",
+        "uuid.UUID",
+        "ipaddress.IPv4Address",
+        "ipaddress.IPv6Address",
+        "ipaddress.IPv4Interface",
+        "ipaddress.IPv6Interface",
+        "ipaddress.IPv4Network",
+        "ipaddress.IPv6Network",
+        "typing.Any",
+    ];
+
+    /// Standard library classes, `tuple[T, ...]`, and unions of distinct members.
+    fn well_formed(python: &str) -> bool {
         let members = top_level_members(python);
         if members.len() > 1 {
-            let members: Vec<String> = members.iter().map(|m| term(m)).collect();
-            return format!("(.union [{}])", members.join(", "));
+            let distinct: std::collections::BTreeSet<_> = members.iter().collect();
+            return distinct.len() == members.len() && members.iter().all(|m| well_formed(m));
         }
-        if let Some(item) = python
+        python
             .strip_prefix("tuple[")
             .and_then(|rest| rest.strip_suffix(", ...]"))
-        {
-            return format!("(.tupleOf {})", term(item));
-        }
-        if python.contains(['[', ',']) {
-            return "?".to_string();
-        }
-        format!("(.name {python:?})")
+            .map_or_else(|| STDLIB.contains(&python), well_formed)
     }
 
-    #[test]
-    #[expect(clippy::disallowed_methods, reason = "test reads files")]
-    fn lean_scalar_table_is_current() {
-        let names: BTreeSet<&str> = SQL_TO_PYTHON_TYPE
+    fn names() -> impl Iterator<Item = &'static str> {
+        SQL_TO_PYTHON_TYPE
             .keys()
             .copied()
             .chain(MATCHED)
             .chain(UNMAPPED_BUILTINS)
-            .collect();
-        let mut table = String::from(
-            "-- Generated from `scalar_python` in rust/crates/sqlty-sql/src/analyzer/sql_type.rs\n\
-             -- by `SQLTY_UPDATE_PROOFS=1 cargo test -p sqlty-sql lean_table`; do not edit.\n\
-             import SqlTy.Dialect\nimport SqlTy.Python\n\nnamespace SqlTy\n\n\
-             /-- What each dialect's driver loads a known scalar type as; none when it has\n\
-             no Python type. -/\n\
-             def scalarTable : List (Dialect × String × Option PyType) := [\n",
-        );
-        for (lean, dialect) in DIALECTS {
-            for name in &names {
-                let python = scalar_python(name, dialect).map_or_else(
-                    || "none".to_string(),
-                    |python| format!("some {}", term(&python)),
-                );
-                writeln!(table, "  (.{lean}, {name:?}, {python}),").unwrap();
+    }
+
+    #[test]
+    fn every_scalar_type_is_well_formed() {
+        for dialect in DIALECTS {
+            for name in names() {
+                if let Some(python) = scalar_python(name, dialect) {
+                    assert!(well_formed(&python), "{dialect:?} {name}: {python}");
+                }
             }
         }
-        table.truncate(table.len() - 2);
-        table.push_str("\n]\n\nend SqlTy\n");
-        let path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../proofs/SqlTy/Table.lean"
-        );
-        if std::env::var_os("SQLTY_UPDATE_PROOFS").is_some() {
-            std::fs::write(path, &table).unwrap();
+        let python = |dialect, name| scalar_python(name, dialect).unwrap_or_default();
+        for dialect in DIALECTS {
+            for name in [
+                "SMALLINT",
+                "INT",
+                "BIGINT",
+                "TINYINT",
+                "MEDIUMINT",
+                "SERIAL",
+                "BIGSERIAL",
+                "UBIGINT",
+                "INT128",
+                "UINT256",
+            ] {
+                assert_eq!(python(dialect, name), "int", "{dialect:?} {name}");
+            }
+            let decimal = match dialect {
+                SqlDialect::Sqlite | SqlDialect::Other("oracle") => "float",
+                _ => DECIMAL,
+            };
+            for name in ["DECIMAL", "UDECIMAL", "BIGDECIMAL", "DECFLOAT"] {
+                assert_eq!(python(dialect, name), decimal, "{dialect:?} {name}");
+            }
+            if dialect != SqlDialect::Sqlite {
+                assert_eq!(python(dialect, "DATE"), "datetime.date");
+                assert_eq!(python(dialect, "TIMESTAMP"), "datetime.datetime");
+                assert_eq!(python(dialect, "TIMESTAMPTZ"), "datetime.datetime");
+            }
+            assert_eq!(
+                SqlType::Interval.python(dialect).as_deref(),
+                Some("datetime.timedelta")
+            );
         }
-        let current = std::fs::read_to_string(path).unwrap_or_default();
-        assert!(
-            !table.contains("?"),
-            "a Python type the Lean table can't spell"
-        );
-        assert!(
-            current == table,
-            "proofs/SqlTy/Table.lean is stale: run `SQLTY_UPDATE_PROOFS=1 cargo test -p sqlty-sql lean_table`"
-        );
+        for name in ["DATE", "TIME", "TIMESTAMP", "DATETIME"] {
+            assert_eq!(python(SqlDialect::Sqlite, name), "str");
+        }
+        assert_eq!(python(SqlDialect::MySql, "TIME"), "datetime.timedelta");
     }
 }

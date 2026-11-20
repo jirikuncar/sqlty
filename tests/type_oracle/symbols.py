@@ -8,6 +8,7 @@ import typing
 
 from sqlty._source import ParsedSource
 from tests.type_oracle.ast_fields import _ast_type, _module_types
+from tests.type_oracle.outline import outline
 
 if typing.TYPE_CHECKING:
     from tests.type_oracle.resolver import Resolver
@@ -37,8 +38,8 @@ class ModuleTypes:
         self.parsed = parsed
         self.helpers = helpers
         self.module = module or "__main__"
-        tree = parsed.outline
-        self.local = {} if tree is None else _module_types(tree, parsed.typing_aliases)
+        found = outline(parsed)
+        self.local = {} if found is None else _module_types(found[0], parsed.typing_aliases)
         self._newtypes: dict[str, typing.Any] = {}
         self._imported: dict[str, typing.Any] = {}
 

@@ -1,19 +1,7 @@
 # AGENTS.md — Development conventions for AI agents and contributors
 
-Use `uv` for all Python commands. Use editor capabilities (e.g. VSCode) to run and debug tests.
-
-## Quick reference
-
-```bash
-uv sync --all-groups               # install
-uv run pytest                      # all tests
-make test-mdtest                   # mdtest only
-make update-mdtest                 # update mdtest assertions
-make generate-docs                 # regenerate reference tables (configuration.md, cli.md)
-make lint-docs                     # rumdl (Markdown) and Vale (prose) on the docs
-make typecheck                     # mypy + ty on src and examples
-uv run prek run --all-files        # all hooks (run before every commit)
-```
+Use `uv` for all Python commands. Setup, test and build commands and the
+architecture live in [DEVELOPMENT.md](DEVELOPMENT.md).
 
 - `SQL[T]` is a `str` subclass. It works anywhere a string works.
 - Every new feature gets an mdtest (see [Markdown tests](#markdown-tests-mdtest)).
@@ -21,7 +9,11 @@ uv run prek run --all-files        # all hooks (run before every commit)
   branch over, have a separate agent review it with the
   [`review` skill](.claude/skills/review/SKILL.md), given the branch name only.
   `.claude/skills/` is for contributors and not shipped, unlike `skills/`.
+- [THREAT_MODEL.md](THREAT_MODEL.md) lists the trust boundaries a change must
+  keep: no execution of analyzed code, generated code, files written.
 - Plans live in `plans/`, named `YYYY-MM-DD-<slug>.md` after the day they were written.
+  Delete a plan once it has shipped; move what is left to `plans/2026-02-13-future.md`
+  or an issue.
 
 ## AI disclosure
 
@@ -29,26 +21,11 @@ Follow the [AI-assisted contributions](CONTRIBUTING.md#ai-assisted-contributions
 policy: end every commit message with a `Co-Authored-By:` trailer naming the
 agent, and say in the pull request description which agent was used and for what.
 
-## Running tests
+## Writing tests
 
-```bash
-uv run pytest                              # all tests (577+)
-uv run pytest tests/mdtest docs src/sqlty/rules README.md  # mdtests only
-uv run pytest tests/ --ignore=tests/e2e --ignore=tests/mdtest  # unit tests only
-uv run pytest tests/e2e/ -v               # end-to-end tests
-uv run pytest -k "integer cast"           # filter by name
-uv run pytest tests/mdtest/rewrite/basic_rewrite.md -v  # single file
-uv run pytest -m timing -n 0 -p no:randomly  # the tests that measure wall time
-uv run pytest -n 0 -p no:randomly          # one process, in file order
-```
-
-Tests run in parallel (pytest-xdist, `-n auto`) and in random order
-(pytest-randomly; a failure prints its `--randomly-seed`). A test must not depend
-on another having run, nor on the working directory or global state another
-changes. Tests that measure wall time are marked `timing`: the default run
-leaves them out, since parallel workers slow them, and `make test` runs them
-alone afterwards. Tests marked `pg` run when `SQLTY_PG_DSN` points to a PostgreSQL server; each
-worker gets its own database on it (`tests/conftest.py`).
+Tests run in parallel and in random order. A test must not depend on another
+having run, nor on the working directory or global state another changes.
+A test that measures wall time is marked `timing`.
 
 A test that needs a package sqlty does not depend on imports it at the top, and
 the package goes in a dependency group (`[dependency-groups]` in `pyproject.toml`),
@@ -57,18 +34,6 @@ missing package would skip the test silently, and `No-exec harness intact` fails
 any new skip. Skip only on what CI does not provide everywhere: a server
 (`SQLTY_PG_DSN`), a package installed for one job (`--with pymysql`) or with no
 wheel for every Python (`duckdb`).
-
-Make targets:
-
-```bash
-make test            # all tests, then the timing tests alone
-make test-timing     # the tests that measure wall time, alone
-make test-mdtest     # mdtest only
-make test-unit       # unit tests only
-make test-e2e        # e2e only
-make update-mdtest   # auto-update assertion comments in .md files
-make typecheck       # mypy + ty on src and examples
-```
 
 ## Inference rules
 
@@ -93,32 +58,11 @@ assertions show which rule typed a column; every rule needs one, in
 `skills/<name>/SKILL.md` (and its `references/`) are the Agent Skills, installed
 through the plugin manifests (`.claude-plugin/`, `.codex-plugin/`,
 `.cursor-plugin/`) or `sqlty skill --install`. `rust/crates/sqlty-cli/build.rs`
-compiles them, and the rule pages of `src/sqlty/rules/`, into the extension: rebuild it
-after editing one, or `test_agent_skills_are_compiled_in` fails. A new skill gets a row in the table of
+compiles them into the extension: rebuild it after editing one, or
+`test_agent_skills_are_compiled_in` fails. A new skill gets a row in the table of
 `docs/recipes/agents.md`.
 
-## Benchmarks
-
-Three layers, all in the Makefile:
-
-- `make bench-ci` (`benchmarks/bench_project.py`, with `tests/test_performance.py`)
-  is end-to-end: CLI wall time and RSS on a synthetic project, gated by
-  `benchmarks/baseline.json`. Needs a release build (`maturin develop --release`). Published wheels use
-  the slower `dist` profile (fat LTO, one codegen unit; `rust/Cargo.toml`), so `release` numbers can
-  differ slightly from a shipped wheel.
-- `make bench-rust` runs Criterion benches in `rust/crates/sqlty-bench`: catalog
-  load (50 to 5000 tables with functions), analyzer per query kind,
-  `check_source`/`rewrite_source` on 1k/4k queries, name-index prefix lookups and
-  `complete` at 50, 540 and 5000 tables, and `query_at` in a module of 4000 queries.
-  Use it to find where time goes and to compare a branch
-  (`ARGS="--save-baseline main"`, then `ARGS="--baseline main"`).
-- `make bench-codspeed` runs `benchmarks/test_benchmarks.py` with pytest-codspeed: each
-  query kind of `synth.KINDS` through `analyze_select`/`analyze_params`, the schema
-  load, `rewrite_source`, `check_source`, `complete_source` at 50, 540 and 5000
-  tables and `query_at`. CI's CodSpeed job counts their instructions on every commit
-  and reports the change on the pull request.
-
-### Completion budget
+## Completion budget
 
 Completion runs on every keystroke against schemas of 500+ tables, so no per-keystroke
 operation may grow with the number of tables N. Tests count the catalog entries a
@@ -129,7 +73,7 @@ and 5000 tables.
 
 | Operation | Allowed cost | Guarded by |
 |-----------|--------------|------------|
-| Locate the query (`query_at`) | O(log S) per request, O(file) once per buffer version | Criterion `query_at`, CodSpeed `test_query_at_in_a_large_module` |
+| Locate the query (`query_at`) | O(log S) per request, O(file) once per buffer version | Criterion `query_at`, CodSpeed `test_completion_in_a_large_module` |
 | Table prefix | O(log N + k), k capped | entry counts, Criterion and CodSpeed at 50/540/5000 tables |
 | Tables linked after `JOIN` | O(K + log F + k) per table in scope, for its K foreign keys and the F of the schema | entry counts |
 | `alias.` columns | O(1) + O(width of that table) | entry counts, Criterion and CodSpeed |
@@ -145,28 +89,8 @@ the conflict without rewriting remote history. No exceptions.
 
 ## Hooks
 
-**Always run the hooks before every commit:**
-
-```bash
-uv run prek run --all-files
-```
-
-[prek](https://prek.j178.dev) runs the hooks of `prek.toml`; `uv run prek install`
-runs them on every commit. Each runs when the files it depends on change:
-
-| Hook | Runs when these change |
-|------|------------------------|
-| mypy and ty on `src/` | `src/`, `pyproject.toml` |
-| `sqlty rewrite` (in place), `sqlty check`, mypy and ty on `examples/` (except `magic_codec/`) | `examples/`, `src/sqlty/`, `rust/crates/` |
-| `cargo fmt --check` | Rust files |
-| `cargo clippy -D warnings`, `cargo test` | `rust/` |
-| `tsc`, oxlint, oxfmt (`npm run check`) | `editors/vscode/` |
-| ruff (lint + format), uv-lock | Python files, `pyproject.toml` |
-| file checks (whitespace, line endings, YAML/TOML/JSON syntax, ...) | any file |
-
-Hooks that edit files run one at a time; the read-only checks run in
-parallel. CI's Lint job runs the same hooks on all files. Fix all errors before
-creating a commit.
+Run `uv run prek run --all-files` before every commit and fix every error it
+reports; [DEVELOPMENT.md](DEVELOPMENT.md#hooks) lists the hooks.
 
 ## The `--sql\n` convention
 
@@ -203,23 +127,30 @@ Every new feature, bug fix, or behavior change **must** have an mdtest. The
 format follows [ty's mdtest](https://github.com/astral-sh/ruff/blob/main/crates/ty_test/README.md);
 the plugin is `tests/_mdtest/`, and `mdtest_paths` in `pyproject.toml` lists
 the collected files: `tests/mdtest/` (specification), `docs/` and `README.md`
-(user docs, also the Zensical site), `src/sqlty/rules/` (one page per lint rule, printed by
-`sqlty rule NAME`). Every test runs through `sqlty.core`.
+(user docs, also the Zensical site; `docs/reference/rules/` has one page per lint rule, also
+printed by `sqlty rule NAME`). Every test runs through `sqlty.core`.
 
 ### Where to add tests
 
 User-visible behavior belongs in `docs/guide/` too; edge cases only in
-`tests/mdtest/`. A new lint rule needs `src/sqlty/rules/<name>.md`.
+`tests/mdtest/`. A new lint rule is its page `docs/reference/rules/<name>.md`, with the front matter
+(`order`, `group`, `severity`, `fixable`, `summary`, `origin`) that is the only place its metadata
+is written, its row in the table of `docs/reference/rules.md`, and its check code. The
+`sqlty-rules` crate generates `Rule` and the Python `RULES` from the pages, and `build.rs` fails
+on a page that breaks the format.
 
 | Feature area | Directory | Example file |
 |-------------|-----------|-------------|
 | Type inference | `tests/mdtest/type_inference/` | `basic_types.md` |
-| SQL dialects | `tests/mdtest/postgres/`, `mysql/`, `sqlite/` | `select.md` |
+| SQL dialects | `tests/mdtest/postgres/`, `mysql/`, `sqlite/`, `duckdb/` | `select.md` |
+| Query shapes across dialects | `tests/mdtest/corpus/` | `outer_joins.md` |
 | Nullability | `tests/mdtest/nullability/` | `inference.md` |
 | Rewriting | `tests/mdtest/rewrite/` | `basic_rewrite.md` |
 | Stripping | `tests/mdtest/strip/` | `basic_strip.md` |
+| Formatting | `tests/mdtest/format/` | `format.md` |
 | Lint rules | `tests/mdtest/check/` | `type_annotation.md` |
 | Magic codec | `tests/mdtest/codec/` | `basic_codec.md` |
+| `.sql` query files | `tests/mdtest/queries/` | `named_queries.md` |
 | Completion | `tests/mdtest/completion/` | `completion.md` |
 | Hover | `tests/mdtest/hover/` | `hover.md` |
 | Highlighting | `tests/mdtest/highlighting/` | `highlighting.md` |
@@ -275,8 +206,8 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 | `-- inferred:` | in the `sql` block | `core.infer_type()` |
 | `-- expanded:` | in the `sql` block | `core.expand_star()` |
 | `-- columns:` | in the `sql` block | `core.analyze_select()`: `name: type (SQL_TYPE)` per line |
-| `-- json:` | in the `sql` block | `core.json_shapes()`: `name: shape` per JSON column of known shape |
-| `-- rules:` | in the `sql` block | `core.explain_select()`: `name: type-rule-id / nullability-rule-id` per column, `-` for none |
+| `-- json:` | in the `sql` block | `_core.analyze_columns()` (`tests/_json_shapes.py`): `name: shape` per JSON column of known shape |
+| `-- rules:` | in the `sql` block | `_core.explain_select()`: `name: type-rule-id / nullability-rule-id` per column, `-` for none |
 | `-- params:` | in the `sql` block | `core.analyze_params()`: `number-or-name: type (SQL_TYPE)` per parameter, then ` NULL` or ` NOT NULL` when known |
 | `# rewritten:` | `python`, whole code | `core.rewrite_source()` without imports |
 | `# rewritten-file:` | `python`, whole code | `core.rewrite_source()` |
@@ -284,7 +215,7 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 | `# fixed:` | `python`, whole code | `core.fix_source()` (`sqlty check --fix`) |
 | `# decoded:` | `python`, whole code | magic codec `decode()` without imports or the `# coding:` line |
 | `# completions:` | `python`, at its `<CURSOR>` | `core.complete_source()`: `label kind detail` per item, the first ten then `...`; `None` for none |
-| `# hover:` | `python`, at its `<CURSOR>` | `core.hover_source()`: the Markdown contents; `None` for none |
+| `# hover:` | `python`, at its `<CURSOR>` | `_core.hover_source()`: the Markdown contents; `None` for none |
 | `# highlighted:` | `python`, whole code | `core.highlight_source()`: `kind text` per colored token, a line each; `None` for none |
 | `# error: [rule] "message"` | end of its line, or on the line above | `core.check_source()` |
 
@@ -338,14 +269,14 @@ sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
 
 ### README and docs
 
-- README.md, `docs/` and `src/sqlty/rules/` are mdtest files; their assertions run with the suite.
+- README.md and `docs/` are mdtest files; their assertions run with the suite.
 - `tests/test_core_invariants.py` checks idempotency and round trips over every
   mdtest code block: new mdtests extend it automatically.
 - `docs/reference/configuration.md` and `cli.md` hold tables between `<!-- generated:NAME -->`
-  markers, rendered by `scripts/generate_docs.py` from `KEY_DOCS` in `_config.py` and the argparse
-  parser. Edit those, then run `make generate-docs`; `test_generated_reference_is_current` fails on drift.
+  markers, rendered by `scripts/generate_docs.py` from `KEY_DOCS` in `_config.py` and the clap
+  commands of `sqlty-cli`. Edit those, then run `make generate-docs`; `test_generated_reference_is_current` fails on drift.
 - `tests/test_docs.py` checks that the rules table in `docs/reference/rules.md`
-  matches `RULES`, that every rule has a page in `src/sqlty/rules/`, that
+  matches `RULES`, that every rule has a page in `docs/reference/rules/`, that
   relative links resolve, that `examples/` need no rewrite, and runs the
   `>>>` examples in `docs/reference/python-api.md`.
 - Focus on **motivated examples** — show the problem first, then the solution.
@@ -354,15 +285,8 @@ sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
 ## Type checker support
 
 `src/sqlty/` and the examples must pass both **mypy** (strict) and **ty**
-with zero errors. `SQL[T]` usage is additionally checked with mypy, pyright
-and ty by `tests/test_typecheckers.py`.
-
-```bash
-make typecheck                 # mypy + ty on src and examples
-make typecheck-src             # mypy + ty on src/sqlty (also a prek hook)
-make typecheck-examples        # mypy + ty on each examples/ dir (runs in CI)
-uv run pytest tests/test_typecheckers.py -v  # mypy, pyright, ty on tests/typechecks/
-```
+with zero errors (`make typecheck`). `SQL[T]` usage is additionally checked with mypy,
+pyright and ty by `tests/test_typecheckers.py`.
 
 `examples/magic_codec/` is excluded: its `# coding: sqlty` header is
 decoded at import time, which type checkers cannot do.
@@ -410,34 +334,3 @@ design and needs a maintainer to merge it.
 Audit hooks are not a sandbox: code can bypass them
 ([`sys.addaudithook`](https://docs.python.org/3/library/sys.html#sys.addaudithook)).
 They catch mistakes; review catches intent.
-
-## Architecture overview
-
-```text
-src/sqlty/
-├── __init__.py          # SQL[T] generic str subclass
-├── core.py              # Public API over the Rust engine
-├── _check.py            # check_source and check over the Rust checker; module settings
-├── _core.pyi            # Stub for sqlty._core (rust/crates/sqlty-ext/src/lib.rs)
-├── _lint.py             # Lint rules: severity, diagnostics, RuleConfig
-├── _decode.py           # Magic codec decoder
-├── _cli.py              # CLI parser for complete, breaking and server
-├── _lsp_bridge.py       # Workspace of sqlty server with a breaking baseline
-└── magic.py             # Python codec registration
-rust/crates/             # Cargo workspace (root: rust/Cargo.toml)
-├── sqlty-sql/           # analyzer/ (type inference), ddl; no PyO3
-│   └── rules/           # inference rules (*.inference.toml), compiled by build.rs; see its README
-├── sqlty-python/        # tokens, rewriter, checker, fixer
-├── sqlty-project/       # a project read from disk: settings, helpers, checks of sqlty server
-├── sqlty-cli/           # the sqlty commands: rewrite, strip, format, check, rule, skill, version;
-│                        # main.rs is a standalone `sqlty` executable (cargo run -p sqlty-cli)
-├── sqlty-lsp/           # the language server of sqlty server; tests without Python
-├── sqlty-wasm/          # JSON in, JSON out, for WebAssembly: the docs playground (make playground)
-└── sqlty-ext/           # lib.rs (PyO3), builds sqlty._core; server.rs runs sqlty-lsp
-editors/vscode/          # VS Code client of sqlty server; see its README
-proofs/                  # Lean 4 model of SqlType::python, with proofs; see its README
-```
-
-`proofs/SqlTy/Table.lean` is generated from `scalar_python`: after changing the scalar
-mapping, run `SQLTY_UPDATE_PROOFS=1 cargo test -p sqlty-sql lean_table` and `lake build`
-in `proofs/`.

@@ -24,11 +24,10 @@ use crate::rewriter::{
     imported_names, marked_query, strip_line_break, type_modules, wrapper_imports, wraps,
     ImportStyle, Spelling,
 };
-use crate::rules::{Rule, RuleConfig, Severity};
+use crate::rules::{Rule, RuleConfig, Severity, SQL_RULES};
 use crate::scan::Scan;
 use crate::tokens::{content, query_offset, Call};
 use sqlty_sql::analyzer::{expand_star, parse, route, unknown_database, SchemaData};
-use sqlty_sql::diagnostics::NameRule;
 use std::ops::Range;
 
 /// `--sql SELECT ...`: a space after the marker, then the start of a SQL statement,
@@ -443,14 +442,16 @@ impl Checker<'_> {
     /// Why a query has untyped columns (the `name` rules), at the name when the query
     /// knows where it is written in the `literals`, else at the query.
     fn name_diagnostics(&mut self, query: &str, at: &At, literals: &[Range<usize>]) {
-        let enabled = NameRule::ALL
-            .iter()
-            .any(|&rule| self.rules.is_enabled(Rule::Name(rule)));
+        let enabled = self.rules.enabled().intersects(SQL_RULES);
         if !enabled {
             return;
         }
         let source = self.scan.source();
-        for found in &self.analysis(query).diagnostics {
+        let analysis = self.analysis(query);
+        for found in &analysis.diagnostics {
+            if !self.rules.shows(found) {
+                continue;
+            }
             let name = found.span.as_ref().and_then(|span| {
                 let start = query_offset(source, literals, span.start, false)?;
                 Some(start..query_offset(source, literals, span.end, true)?)
@@ -477,7 +478,7 @@ impl Checker<'_> {
                 })
                 .map(|(replacement, (_, name))| Edit::new(name.span.clone(), replacement.clone()));
             self.report_fix(
-                Rule::Name(found.rule),
+                found.rule,
                 found.message.clone(),
                 name.as_ref().unwrap_or(at),
                 fix.into_iter().collect(),
@@ -516,11 +517,9 @@ impl Checker<'_> {
         let analysis = self.analysis(query);
         if let Some(diagnostic) = analysis.diagnostics.first() {
             let hint = match diagnostic.rule {
-                NameRule::UnknownFunction => {
-                    "; cast its result, or declare the function in the schema"
-                }
-                NameRule::UnknownType => "; declare the type in the schema",
-                NameRule::UnsupportedSyntax => "; cast it to a type",
+                Rule::UnknownFunction => "; cast its result, or declare the function in the schema",
+                Rule::UnknownType => "; declare the type in the schema",
+                Rule::UnsupportedSyntax => "; cast it to a type",
                 _ => "",
             };
             return format!("{}{hint}", diagnostic.message);
@@ -1358,10 +1357,7 @@ mod tests {
             &[],
         );
         let rules: Vec<Rule> = diags.iter().map(|d| d.rule).collect();
-        assert!(
-            rules.contains(&Rule::Name(NameRule::UnknownColumn)),
-            "{rules:?}"
-        );
+        assert!(rules.contains(&Rule::UnknownColumn), "{rules:?}");
         assert!(rules.contains(&Rule::SelectStar), "{rules:?}");
         assert!(rules.contains(&Rule::NarrowType), "{rules:?}");
         assert!(rules.contains(&Rule::UnparsedQuery), "{rules:?}");
@@ -1729,7 +1725,7 @@ mod tests {
             &[],
         );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].rule, Rule::Name(NameRule::UnknownColumn));
+        assert_eq!(diags[0].rule, Rule::UnknownColumn);
         assert_eq!(diags[0].severity, Severity::Error);
     }
 

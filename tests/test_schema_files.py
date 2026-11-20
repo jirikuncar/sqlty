@@ -2,8 +2,7 @@
 
 from pathlib import Path
 
-from sqlty._cli import _load_schema
-from sqlty._config import expand_schema
+from sqlty._cli import main
 
 
 def _tree(tmp_path: Path) -> None:
@@ -15,30 +14,35 @@ def _tree(tmp_path: Path) -> None:
     (tmp_path / "extra.sql").write_text("CREATE TABLE e (id INTEGER NOT NULL);")
 
 
-def test_directory_is_recursive_and_sorted(tmp_path: Path) -> None:
+def _rewritten(tmp_path: Path, monkeypatch, query: str, *schema: str) -> str:
+    source = tmp_path / "q.py"
+    source.write_text(f'q = "--sql\\n{query}"\n')
+    monkeypatch.chdir(tmp_path)
+    main(["rewrite", *(f"--schema={entry}" for entry in schema), "q.py"])
+    return source.read_text()
+
+
+def test_directory_is_recursive(tmp_path: Path, monkeypatch) -> None:
     _tree(tmp_path)
-    names = [p.relative_to(tmp_path).as_posix() for p in expand_schema("tables", tmp_path)]
-    assert names == ["tables/a.sql", "tables/b.sql", "tables/nested/c.sql"]
+    found = _rewritten(tmp_path, monkeypatch, "SELECT a.id, b.id, c.id FROM a, b, c", "tables")
+    assert "SQL[tuple[int, int, int]]" in found
 
 
-def test_glob_and_order_of_entries(tmp_path: Path) -> None:
+def test_glob_matches_only_its_files(tmp_path: Path, monkeypatch) -> None:
     _tree(tmp_path)
-    files = expand_schema(["extra.sql", "tables/*.sql", "extra.sql"], tmp_path)
-    assert [p.name for p in files] == ["extra.sql", "a.sql", "b.sql"]
-    assert [p.name for p in expand_schema("**/c.sql", tmp_path)] == ["c.sql"]
+    found = _rewritten(tmp_path, monkeypatch, "SELECT c.id FROM c", "extra.sql", "tables/*.sql")
+    assert "SQL[" not in found
+    found = _rewritten(tmp_path, monkeypatch, "SELECT c.id FROM c", "**/c.sql")
+    assert "SQL[tuple[int]]" in found
 
 
-def test_load_schema_joins_files(tmp_path: Path) -> None:
+def test_missing_schema_files_load_nothing(tmp_path: Path, monkeypatch, caplog) -> None:
     _tree(tmp_path)
-    sql = _load_schema(["tables/a.sql", "extra.sql"], tmp_path)
-    assert sql == "CREATE TABLE a (id INTEGER NOT NULL);\nCREATE TABLE e (id INTEGER NOT NULL);"
-    assert _load_schema("missing.sql", tmp_path) is None
-    assert _load_schema("nothing/*.sql", tmp_path) is None
+    for missing in ("missing.sql", "nothing/*.sql"):
+        assert "SQL[" not in _rewritten(tmp_path, monkeypatch, "SELECT a.id FROM a", missing)
 
 
 def test_cli_schema_repeatable_and_pyproject_list(tmp_path: Path, monkeypatch) -> None:
-    from sqlty._cli import main
-
     _tree(tmp_path)
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = ["tables", "extra.sql"]\n')
     src = tmp_path / "q.py"

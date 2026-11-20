@@ -6,7 +6,7 @@ use sqlparser::ast::{
 };
 
 use crate::catalog::{fold, FunctionReturn, SchemaColumn};
-use crate::diagnostics::NameRule;
+use crate::diagnostics::Rule;
 use sqlparser::ast::Spanned;
 use sqlparser::tokenizer::Span;
 
@@ -288,7 +288,7 @@ impl<'a> Analyzer<'a> {
             }
             Expr::Extract { .. } if self.dialect == SqlDialect::Sqlite => {
                 let message = "SQLite has no EXTRACT; use strftime".to_string();
-                self.diag.record(NameRule::RejectedQuery, message);
+                self.diag.record(Rule::RejectedQuery, message);
                 Ok(Typed::UNKNOWN)
             }
             Expr::Extract { field, .. } => Ok(extract_type(self.dialect, field)
@@ -418,7 +418,7 @@ impl<'a> Analyzer<'a> {
                 self.diag.explain_silently();
             } else {
                 self.diag.record(
-                    NameRule::UnknownType,
+                    Rule::UnknownType,
                     format!("type `{data_type}` has no Python type"),
                 );
             }
@@ -473,7 +473,7 @@ impl<'a> Analyzer<'a> {
                         Ok(typed) => typed,
                         Err(message) => {
                             self.diag.rewind(mark);
-                            self.diag.record(NameRule::UnknownColumn, message);
+                            self.diag.record(Rule::UnknownColumn, message);
                             return Ok(Typed::UNKNOWN);
                         }
                     }
@@ -525,7 +525,7 @@ impl<'a> Analyzer<'a> {
             }
             Value::HexStringLiteral(hex) if hex.starts_with("0x") => {
                 let message = format!("hex literal too big: {hex}");
-                self.diag.record(NameRule::RejectedQuery, message);
+                self.diag.record(Rule::RejectedQuery, message);
                 Ok(Typed::UNKNOWN)
             }
             // `X'41'` and `B'101'` are bit strings in PostgreSQL, binary strings elsewhere.
@@ -608,7 +608,7 @@ impl<'a> Analyzer<'a> {
             return false;
         };
         let message = format!("{what} types {a} and {b} cannot be matched");
-        self.diag.record(NameRule::RejectedQuery, message);
+        self.diag.record(Rule::RejectedQuery, message);
         true
     }
 
@@ -706,7 +706,7 @@ impl<'a> Analyzer<'a> {
                 self.diag.explain_silently();
             } else {
                 self.diag.record(
-                    NameRule::UnknownFunction,
+                    Rule::UnknownFunction,
                     format!(
                         "function `{}` is not known to sqlty, so its result is untyped",
                         self.display_name(&func.name)

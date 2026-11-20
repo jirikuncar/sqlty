@@ -367,11 +367,10 @@ ALLOWED = set(_python_types()) | {"list", "dict", "tuple", "typing.Literal", "No
     st.sampled_from(sorted(DIALECT_TYPES)).flatmap(lambda d: st.tuples(st.just(d), type_names(d)))
 )
 def test_type_names_map_to_valid_python_types(case: tuple[str, str]) -> None:
-    from sqlty._core import parse_error
-
     dialect, name = case
     query = f"SELECT CAST(x AS {name}) AS c"
-    if parse_error(query, dialect=dialect) is not None:
+    checked = core.check_source(f"q = {'--sql\n' + query!r}", dialect=dialect)
+    if any(d["rule"] == "unparsed-query" for d in checked):
         return
     columns = core.analyze_select(query, dialect=dialect)
     assert columns is not None, f"{dialect}: {query} parses but is not analyzed"

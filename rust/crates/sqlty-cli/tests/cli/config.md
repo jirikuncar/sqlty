@@ -24,7 +24,7 @@ Found 1 error(s)
 
 $ sqlty check --dialect nosuch q.py
 ? 2
-error: invalid value 'nosuch' for '--dialect <DIALECT>': unknown dialect "nosuch"; expected one of: postgres, mysql, sqlite, clickhouse, generic, ansi, bigquery, databricks, duckdb, hive, mssql, oracle, redshift, snowflake, spark, sparksql, teradata
+error: invalid value 'nosuch' for '--dialect <DIALECT>': unknown dialect 'nosuch'; expected one of: postgres, mysql, sqlite, clickhouse, generic, ansi, bigquery, databricks, duckdb, hive, mssql, oracle, redshift, snowflake, spark, sparksql, teradata
 
 For more information, try '--help'.
 

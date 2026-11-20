@@ -20,7 +20,7 @@ use super::query::Analyzer;
 use super::registry::lookup;
 use super::scope::{any_merging_join, Scope, Source};
 use crate::catalog::{fold, SchemaColumn};
-use crate::diagnostics::NameRule;
+use crate::diagnostics::Rule;
 
 impl Analyzer<'_> {
     /// Records `ungrouped-column` for each select item column of a grouped `select`
@@ -149,7 +149,7 @@ impl Analyzer<'_> {
             .filter(|reference| !reference.is_empty())
             .unwrap_or("unnamed_subquery");
         self.diag.record(
-            NameRule::UngroupedColumn,
+            Rule::UngroupedColumn,
             format!(
                 "column `{reference}.{column}` must appear in GROUP BY or be used in an aggregate function"
             ),
