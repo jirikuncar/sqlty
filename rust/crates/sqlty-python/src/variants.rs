@@ -205,7 +205,7 @@ impl<'a> Node<'a> {
     }
 }
 
-/// `_assignments`: the names a plain assignment binds, with the value each takes.
+/// The names a plain assignment binds, with the value each takes.
 fn assignments(stmt: &Stmt) -> Vec<(&ExprName, &Expr)> {
     let mut found = Vec::new();
     match stmt {
@@ -247,8 +247,8 @@ fn assignments(stmt: &Stmt) -> Vec<(&ExprName, &Expr)> {
     found
 }
 
-/// `_own_nodes`: what the statements hold, without the bodies of nested functions,
-/// classes or comprehensions.
+/// What the statements hold, without the bodies of nested functions, classes or
+/// comprehensions.
 #[derive(Default)]
 struct Own<'a> {
     /// Assignments, and whether a loop, `try` or `with` holds them.
@@ -467,7 +467,7 @@ impl<'a> Visitor<'a> for Own<'a> {
     }
 }
 
-/// `_names`: every name `node` reads or binds, at any depth.
+/// Every name `node` reads or binds, at any depth.
 struct Names(HashSet<String>);
 
 impl<'a> Visitor<'a> for Names {
@@ -531,7 +531,7 @@ struct Module<'a> {
     frame: Rc<Frame<'a>>,
 }
 
-/// `_Frame`: a function (or the module) whose bindings a walk follows.
+/// A function (or the module) whose bindings a walk follows.
 struct Frame<'a> {
     source: &'a Source,
     body: &'a [Stmt],
@@ -637,7 +637,7 @@ impl<'a> Frame<'a> {
     }
 }
 
-/// `_literal_members`: the strings of a `Literal[...]` annotation.
+/// The strings of a `Literal[...]` annotation.
 fn literal_members(annotation: Option<&Expr>, source: &str) -> Option<Vec<String>> {
     fn members(annotation: &Expr, source: &str) -> Option<Vec<String>> {
         let Expr::Subscript(subscript) = annotation else {
@@ -678,7 +678,7 @@ enum Operand<'a, 'n> {
     Name(&'n str),
 }
 
-/// `_Walk`: paths through function bodies, and the values of expressions along them.
+/// Paths through function bodies, and the values of expressions along them.
 struct Walk<'a, 'r> {
     resolve: Option<Resolver<'a, 'r>>,
     composed: bool,
@@ -739,7 +739,7 @@ impl<'a, 'r> Walk<'a, 'r> {
             .clone()
     }
 
-    /// `_assume`: the paths that can take `outcome` of `test`.
+    /// The paths that can take `outcome` of `test`.
     fn assume(
         &mut self,
         paths: &[Path<'a>],
@@ -1540,7 +1540,7 @@ impl<'a, 'r> Walk<'a, 'r> {
     }
 }
 
-/// `_dedupe`: one path per set of bindings, keeping the conditions every merged path has.
+/// One path per set of bindings, keeping the conditions every merged path has.
 fn dedupe(paths: Vec<Path<'_>>) -> Vec<Path<'_>> {
     let mut order: Vec<String> = Vec::new();
     let mut found: HashMap<String, Path<'_>> = HashMap::new();
@@ -1572,7 +1572,7 @@ fn dedupe(paths: Vec<Path<'_>>) -> Vec<Path<'_>> {
         .collect()
 }
 
-/// `_strings`: the strings a pattern of string literals matches.
+/// The strings a pattern of string literals matches.
 fn strings(pattern: &Pattern, source: &str) -> Option<HashSet<String>> {
     match pattern {
         Pattern::MatchValue(node) => match node.value.as_ref() {
