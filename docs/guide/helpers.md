@@ -197,6 +197,33 @@ disk. With an editor that does, as VS Code does, it keeps the stubs and librarie
 read, and reads one again when the editor saves it or reports the change. With one that
 does not, it reads them again on every edit.
 
+### Differences from a type checker
+
+sqlty reads declarations to find which helper a call reaches, not to check types, and
+skips a call rather than guess. For a receiver it follows, it names the class
+[ty](https://docs.astral.sh/ty/) reveals. It follows less than ty does:
+
+| Code | ty | sqlty |
+|------|----|-------|
+| The result of an unannotated function, `x = make()` | the inferred return type | skipped: no function body is read for what it returns |
+| `db = Db() if ready else None`, `a or b`, a subscript, an unpacked tuple | the inferred type | skipped |
+| A name two reaching bindings give different classes | the union, and the method of each | skipped |
+| `Db | Other`, `Union[Db, Other]` | the method of each member | skipped; `Db | None` is `Db` |
+| `isinstance(x, Db)` on a name of an unrelated class, of a union or of a type variable | the intersection | skipped |
+| `isinstance(x, (A, B))`, `type(x) is Db`, `match` class patterns, `TypeGuard` | narrowed | not narrowed |
+| A generic class, `Box[Db]().item` | `Db` | `Box` is followed, its type arguments are not |
+| A class defined in a function or in another class | followed | skipped |
+| A name a comprehension, a `lambda`, `global` or `nonlocal` binds | followed | skipped |
+| `self.db` assigned from a local variable of `__init__` | the inferred type | skipped; a parameter with an annotation is followed |
+| A class whose bases have no consistent order, or a base that is not found | an error, `Unknown` | skipped unless the class itself declares the method |
+| A module-level name read in a function | every binding of the module | every binding of the module must agree; an annotation states the class |
+| More than 64 bindings of a name reaching a call | followed | skipped |
+
+It follows one thing a type checker does not: a name imported from a module that is
+not found is known by the path it is imported by, so a helper registered as
+`lib.Db.fetch` in [`functions`](#helpers-you-cannot-annotate) is found on `db: Db`
+after `from lib import Db` without `lib` being installed.
+
 ## Helpers you cannot annotate
 
 A helper whose signature you cannot edit (a library, generated code) is
