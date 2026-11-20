@@ -310,6 +310,10 @@ impl Virtuals {
         self.tables.get(table).map(|columns| &**columns)
     }
 
+    pub(super) fn shared(&self, table: &str) -> Option<Rc<[Column]>> {
+        self.tables.get(table).cloned()
+    }
+
     pub(super) fn contains_key(&self, table: &str) -> bool {
         self.tables.contains_key(table)
     }

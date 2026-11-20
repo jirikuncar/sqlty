@@ -5,8 +5,10 @@
 //! ambiguous column, a source the analyzer does not read. Names are only judged when a
 //! schema is configured; without one every table and column is unknown.
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
+use rustc_hash::FxHashMap;
 use sqlparser::ast::{Expr, Ident, TableFactor, TableWithJoins};
 
 use crate::catalog::fold;
@@ -36,6 +38,93 @@ pub(super) enum Origin {
 /// Sources a name can resolve to: the FROM clause, then enclosing queries (correlation).
 fn sources<'s>(scope: &'s Scope, outer: &'s Scope) -> impl Iterator<Item = &'s Source> {
     scope.iter().chain(outer.iter())
+}
+
+/// Tables at most this wide are scanned: comparing their names costs less than hashing.
+const SCANNED: usize = 32;
+/// Lookups that scan a wide table before its index is built.
+const SCANS: u32 = 4;
+
+#[cfg(test)]
+thread_local! {
+    /// How many column names lookups compared or indexed on this thread.
+    static COMPARED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn compare(columns: usize) {
+    COMPARED.with(|count| count.set(count.get() + columns));
+}
+
+/// How many column names the lookups of `run` compare or index.
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub(super) fn compared(run: impl FnOnce()) -> usize {
+    COMPARED.with(|count| count.set(0));
+    run();
+    COMPARED.with(std::cell::Cell::get)
+}
+
+/// Column positions by name of the wide tables a statement looks up more than a few times,
+/// so reading many columns of one costs O(1) each instead of O(width).
+///
+/// Keyed by the address of the column list. Schema lists outlive the analyzer, and the
+/// list of a CTE or derived table is kept alive here, so an address is never reused.
+#[derive(Clone, Default)]
+pub(super) struct ColumnIndex(Rc<RefCell<FxHashMap<usize, Positions>>>);
+
+enum Positions {
+    Scanned(u32),
+    Built {
+        _columns: Option<Rc<[Column]>>,
+        by_name: FxHashMap<Box<str>, usize>,
+    },
+}
+
+impl ColumnIndex {
+    /// The first of `columns` that `same` accepts; `key` is the name `same` compares to
+    /// the column looked up, and `keep` the shared list `columns` borrows from, if any.
+    fn find<'c, T>(
+        &self,
+        columns: &'c [T],
+        column: &str,
+        same: impl Fn(&T) -> bool,
+        key: impl Fn(&T) -> String,
+        keep: impl FnOnce() -> Option<Rc<[Column]>>,
+    ) -> Option<&'c T> {
+        if columns.len() > SCANNED {
+            let mut index = self.0.borrow_mut();
+            let positions = index
+                .entry(columns.as_ptr() as usize)
+                .or_insert(Positions::Scanned(0));
+            match positions {
+                Positions::Scanned(scans) if *scans < SCANS => *scans += 1,
+                Positions::Scanned(_) => {
+                    #[cfg(test)]
+                    compare(columns.len());
+                    let mut by_name = FxHashMap::default();
+                    for (at, col) in columns.iter().enumerate() {
+                        // The first of duplicate names wins, as in a scan.
+                        by_name.entry(key(col).into_boxed_str()).or_insert(at);
+                    }
+                    *positions = Positions::Built {
+                        _columns: keep(),
+                        by_name,
+                    };
+                }
+                Positions::Built { .. } => {}
+            }
+            if let Positions::Built { by_name, .. } = positions {
+                return by_name.get(column).and_then(|&at| columns.get(at));
+            }
+        }
+        columns.iter().find(|col| {
+            #[cfg(test)]
+            compare(1);
+            same(col)
+        })
+    }
 }
 
 /// A column found in one source, borrowed from where it is declared.
@@ -179,16 +268,32 @@ impl<'a> Analyzer<'a> {
     /// A column of one source, when it has it.
     fn find_column(&self, table: &str, column: &str) -> Option<ColumnRef<'_>> {
         if let Some(columns) = self.virtual_columns(table) {
-            return columns
-                .iter()
-                .find(|col| self.same_column(&col.name, column))
+            return self
+                .columns
+                .find(
+                    columns,
+                    column,
+                    |col| self.same_column(&col.name, column),
+                    |col| match self.dialect {
+                        SqlDialect::Postgres => col.name.clone(),
+                        _ => col.name.to_lowercase(),
+                    },
+                    || self.virtuals.shared(table),
+                )
                 .map(|column| ColumnRef::Virtual {
                     column,
                     local: self.virtuals.contains_key(table),
                 });
         }
         let columns = self.schema.table(table)?;
-        match columns.iter().find(|col| col.name == column) {
+        let found = self.columns.find(
+            columns,
+            column,
+            |col| col.name == column,
+            |col| col.name.clone(),
+            || None,
+        );
+        match found {
             Some(col) => Some(ColumnRef::Schema(col)),
             None => self.system_column(column).map(ColumnRef::System),
         }
@@ -808,7 +913,7 @@ fn untyped_column_message(column: &str, sql_type: &str) -> String {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::super::test_support::reports;
+    use super::super::test_support::{report, reports};
     use super::*;
 
     #[test]
@@ -822,6 +927,62 @@ mod tests {
                        total NUMERIC(10, 2), note TEXT NOT NULL); \
                        CREATE VIEW user_names AS SELECT id, name FROM users; \
                        CREATE TABLE \"Case\" (\"Mixed\" INT NOT NULL, plain INT)";
+
+    /// Reading every column of a wide table, a CTE of it or a derived table compares
+    /// O(width) names in all, not O(width) per reference: doubling the width at most
+    /// doubles the count.
+    #[test]
+    fn column_lookups_do_not_scan_wide_tables() {
+        let counts: Vec<usize> = [100, 200, 400]
+            .into_iter()
+            .map(|width| {
+                let names = |prefix: &str| {
+                    (0..width)
+                        .map(|i| format!("{prefix}{i}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
+                let ddl = format!(
+                    "CREATE TABLE w ({} integer)",
+                    names("c").replace(',', " integer,")
+                );
+                let queries = [
+                    (
+                        format!("SELECT {0}, count(*) FROM w GROUP BY {0}", names("c")),
+                        "postgres",
+                    ),
+                    (
+                        format!("WITH v AS (SELECT * FROM w) SELECT {} FROM v", names("c")),
+                        "postgres",
+                    ),
+                    (
+                        format!("SELECT {} FROM (SELECT * FROM w) AS s", names("s.C")),
+                        "sqlite",
+                    ),
+                ];
+                compared(|| {
+                    for (sql, dialect) in &queries {
+                        let out = report(sql, dialect, Some(&ddl));
+                        assert!(!out.contains('[') && !out.contains('?'), "{out}");
+                    }
+                })
+            })
+            .collect();
+        assert!(counts[2] <= 2 * counts[1] + 100, "{counts:?}");
+        assert!(counts[2] <= 20 * 400, "{counts:?}");
+    }
+
+    /// A wide CTE with two columns of one name reads the first, as a scan of a narrow one does.
+    #[test]
+    fn indexed_lookups_find_the_first_of_duplicate_names() {
+        let sql = |width: usize| {
+            let columns: String = (0..width).map(|i| format!(", {i} AS c{i}")).collect();
+            format!("WITH v AS (SELECT 'a' AS x, 1 AS x{columns}) SELECT x, x, x, x, x, x FROM v")
+        };
+        let narrow = report(&sql(0), "postgres", None);
+        assert!(narrow.starts_with("x: typing.Literal['a']"), "{narrow}");
+        assert_eq!(report(&sql(40), "postgres", None), narrow);
+    }
 
     #[test]
     fn unqualified_names_resolve_to_the_first_source_that_has_them() {

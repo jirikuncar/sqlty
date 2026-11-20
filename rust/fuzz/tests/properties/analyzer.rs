@@ -170,6 +170,27 @@ fn queries_analyze_with_one_column_per_item() {
     });
 }
 
+/// Tables wide enough for the analyzer to look their columns up by name analyze as the
+/// narrow ones it scans.
+#[test]
+fn wide_tables_analyze_as_narrow_ones() {
+    check(cases, |case| {
+        let narrow = analyzed(&case)?.1;
+        let pad = |range: std::ops::Range<usize>| range.map(|k| (format!("p{k}"), "TEXT", false));
+        let tables = case
+            .tables
+            .iter()
+            .map(|(name, columns)| {
+                let columns = pad(0..20).chain(columns.iter().cloned()).chain(pad(20..40));
+                (name.clone(), columns.collect())
+            })
+            .collect();
+        let wide = analyzed(&Case { tables, ..case })?.1;
+        prop_assert_eq!(wide, narrow);
+        Ok(())
+    });
+}
+
 #[test]
 fn rewrite_and_strip_round_trip() {
     check(cases, |case| {

@@ -27,6 +27,7 @@ use super::literals::strip;
 use super::names::{alias_name, column_name, object_name};
 use super::nullability::{Facts, Nullability};
 use super::operators::{common_of, common_type};
+use super::resolve::ColumnIndex;
 use super::scope::{any_merging_join, Scope, Table, Virtuals};
 use super::text_names::{item_texts, line_starts, offset, returning_start, text_column_name};
 use super::typed::Typed;
@@ -125,6 +126,8 @@ pub(super) struct Analyzer<'a> {
     pub(super) explain: Option<Explained>,
     /// The SQL as parsed, for MySQL and SQLite, which name a column by its expression's text.
     pub(super) source: Option<Rc<str>>,
+    /// Column positions of the wide tables the statement reads, shared with its subqueries.
+    pub(super) columns: ColumnIndex,
 }
 
 impl<'a> Analyzer<'a> {
@@ -139,6 +142,7 @@ impl<'a> Analyzer<'a> {
             facts: Facts::default(),
             explain: None,
             source: None,
+            columns: ColumnIndex::default(),
         }
     }
 
@@ -291,6 +295,7 @@ impl<'a> Analyzer<'a> {
         let (mut analyzer, scope) = quiet.scope_of(&select.from)?;
         analyzer.diag = self.diag.clone();
         let aliases = aliases(select);
+        let sorted = sorted_aliases(select);
         // A bare name in ORDER BY reads a result column first, aliased or not.
         let names_output = |key: &Expr| match key {
             Expr::Identifier(ident) => select.projection.iter().any(|item| match item {
@@ -306,7 +311,7 @@ impl<'a> Analyzer<'a> {
         };
         for key in keys
             .iter()
-            .filter(|key| !names_result_column(key, select) && !names_output(key))
+            .filter(|key| !names_result_column(key, &sorted) && !names_output(key))
         {
             analyzer.check_references_besides(key, &scope, self.aliases_in_keys(&aliases));
         }
@@ -343,6 +348,7 @@ impl<'a> Analyzer<'a> {
                 GroupByExpr::Expressions(keys, _) => keys.as_slice(),
                 GroupByExpr::All(_) => &[],
             };
+            let sorted = sorted_aliases(select);
             let keys = grouping
                 .iter()
                 .flat_map(|key| match key {
@@ -352,7 +358,7 @@ impl<'a> Analyzer<'a> {
                     Expr::Tuple(exprs) => exprs.iter().collect(),
                     key => vec![key],
                 })
-                .filter(|key| !names_result_column(key, select));
+                .filter(|key| !names_result_column(key, &sorted));
             let aliases = aliases(select);
             let in_keys = self.aliases_in_keys(&aliases);
             let in_where = if self.dialect == SqlDialect::Sqlite {
@@ -875,17 +881,27 @@ fn aliases(select: &Select) -> Vec<&str> {
         .collect()
 }
 
-/// Whether `key` is a result column of `select` by position (`ORDER BY 1`) or by name
-/// (`ORDER BY total` for `sum(x) AS total`), which `GROUP BY` and `ORDER BY` accept.
-fn names_result_column(key: &Expr, select: &Select) -> bool {
+/// [`aliases`] sorted ignoring ASCII case, for [`names_result_column`].
+fn sorted_aliases(select: &Select) -> Vec<&str> {
+    let mut aliases = aliases(select);
+    aliases.sort_unstable_by(|a, b| ignoring_case(a, b));
+    aliases
+}
+
+fn ignoring_case(a: &str, b: &str) -> std::cmp::Ordering {
+    let lower = |byte: u8| byte.to_ascii_lowercase();
+    a.bytes().map(lower).cmp(b.bytes().map(lower))
+}
+
+/// Whether `key` is a result column of a select by position (`ORDER BY 1`) or by one of
+/// its `sorted` aliases (`ORDER BY total` for `sum(x) AS total`), which `GROUP BY` and
+/// `ORDER BY` accept.
+fn names_result_column(key: &Expr, sorted: &[&str]) -> bool {
     match key {
         Expr::Value(value) => matches!(value.value, Value::Number(..)),
-        Expr::Identifier(ident) => select.projection.iter().any(|item| match item {
-            SelectItem::ExprWithAlias { alias, .. } => {
-                alias.value.eq_ignore_ascii_case(&ident.value)
-            }
-            _ => false,
-        }),
+        Expr::Identifier(ident) => sorted
+            .binary_search_by(|alias| ignoring_case(alias, &ident.value))
+            .is_ok(),
         _ => false,
     }
 }
