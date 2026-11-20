@@ -4,12 +4,18 @@
 #![expect(clippy::expect_used, reason = "a failed setup fails the benchmark")]
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use sqlty_bench::{python_source, schema_sql, QUERIES};
+use sqlty_bench::{
+    one_query_cases, one_query_module, one_query_schema, python_source, schema_sql, QUERIES,
+};
+use sqlty_project::{check_module, Checker};
 use sqlty_python::locate::Queries;
 use sqlty_python::rewriter::ImportStyle;
+use sqlty_python::types::symbols::Source;
 use sqlty_python::{checker, options::Options, rewriter, rules::RuleConfig};
 use sqlty_sql::analyzer;
+use std::collections::HashSet;
 use std::hint::black_box;
+use std::sync::Arc;
 
 fn catalog_load(c: &mut Criterion) {
     let mut group = c.benchmark_group("catalog_load");
@@ -118,12 +124,52 @@ fn query_at(c: &mut Criterion) {
     group.finish();
 }
 
+/// `sqlty check` of a module holding one query, as `sqlty rewrite` typed it, against a
+/// 500-table schema loaded once: the parse of the module, the query's analysis and every
+/// rule: what AGENTS.md "Check budget" bounds. `bench-ci` budgets the typical queries
+/// (`ONE_QUERY` in `benchmarks/bench_project.py`).
+fn one_query(c: &mut Criterion) {
+    let (schema, skipped) = analyzer::load_schema_with_skipped(&one_query_schema(500), "postgres");
+    assert!(skipped.is_empty(), "{skipped:?}");
+    let coerce = HashSet::new();
+    let checker = Checker::new(
+        "postgres",
+        Some(&schema),
+        None,
+        false,
+        RuleConfig::default(),
+        None,
+        &coerce,
+        None,
+    )
+    .expect("valid settings");
+    let check = |module: &str| {
+        let parsed = Source::new(module, (3, 14)).map(Arc::new);
+        check_module(module, parsed.as_ref(), None, &checker)
+    };
+    let mut group = c.benchmark_group("one_query");
+    for (name, sql) in one_query_cases() {
+        let module =
+            rewriter::rewrite_source_with(&one_query_module(&sql), &checker.options, false);
+        assert!(module.contains("SQL["), "{name} is typed: {module}");
+        let found = check(&module);
+        assert!(
+            found.diagnostics.is_empty(),
+            "{name}: {:?}",
+            found.diagnostics
+        );
+        group.bench_function(name, |b| b.iter(|| check(black_box(&module))));
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     catalog_load,
     analyze,
     python_source_passes,
     name_index,
-    query_at
+    query_at,
+    one_query
 );
 criterion_main!(benches);

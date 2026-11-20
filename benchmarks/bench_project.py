@@ -19,6 +19,8 @@ slow or fast runner moves the baseline and the result together. A time metric fa
 when its normalised value exceeds the baseline by ``--time-tolerance`` (default 50%),
 peak RSS when it exceeds the baseline by ``--rss-tolerance`` (default 25%). A run over
 budget is measured again, up to three runs in all, and fails only when the last one is too.
+With ``--compare`` it also fails when checking one typical query takes longer than a database
+round trip (``ROUND_TRIP_US``, scaled by the calibration loop), baseline or not.
 """
 
 from __future__ import annotations
@@ -46,6 +48,21 @@ SIZES = {
 # Times of 5 ms or less are noise on a shared runner: they are reported, not budgeted.
 MIN_BUDGETED_S = 0.005
 ATTEMPTS = 3
+# A check must beat a database round trip: PostgreSQL over a Unix socket, about 100 us on a
+# machine whose calibration loop takes 20 ms (AGENTS.md "Check budget"). A slower runner gets
+# a proportionally larger budget.
+ROUND_TRIP_US = 100
+ROUND_TRIP_CALIBRATION_S = 0.02
+# The typical queries of the Criterion group `one_query` (rust/crates/sqlty-bench).
+ONE_QUERY = {
+    "point_select": "SELECT id, name, status, created_at FROM app.t0042 WHERE id = $1",
+    "join_3": "SELECT a.id, b.name, c.score FROM app.t0002 a JOIN app.t0001 b ON a.parent_id = b.id"
+    " JOIN app.t0000 c ON b.parent_id = c.id WHERE a.status = $1",
+    "insert_params": "INSERT INTO app.t0042 (id, parent_id, name, score, tags, payload)"
+    " VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, created_at",
+    "aggregate": "SELECT status, count(*) AS n, sum(score) AS total, max(created_at) AS last"
+    " FROM app.t0042 WHERE score > $1 GROUP BY status HAVING count(*) > 1",
+}
 
 
 def calibrate() -> float:
@@ -121,6 +138,27 @@ def micro(tables: int, rounds: int = 200) -> dict[str, float]:
     return out
 
 
+def one_query(tables: int, rounds: int = 200) -> dict[str, float]:
+    """Microseconds for ``check_source`` of a module holding one query of ``ONE_QUERY``, as
+    ``sqlty rewrite`` types it, schema loaded once: what ``sqlty check`` spends per query."""
+    from sqlty import core
+
+    settings = core.Settings(schema_sql=core.load_schema(synth.schema_sql(tables)))
+    out: dict[str, float] = {}
+    for name, sql in ONE_QUERY.items():
+        module = core.rewrite_source(f'q = "--sql\\n{sql}"\n', settings)
+        if "SQL[" not in module or (found := core.check_source(module, settings)):
+            raise SystemExit(f"one_query.{name} is not a typed query without diagnostics: {found}")
+        best = float("inf")
+        for _ in range(5):
+            t = time.perf_counter()
+            for _ in range(rounds):
+                core.check_source(module, settings)
+            best = min(best, (time.perf_counter() - t) / rounds)
+        out[name] = round(best * 1e6, 1)
+    return out
+
+
 def run(size: str, repeats: int, keep: str | None) -> dict:
     spec = SIZES[size]
     exe = shutil.which("sqlty") or str(Path(sys.executable).parent / "sqlty")
@@ -155,6 +193,7 @@ def run(size: str, repeats: int, keep: str | None) -> dict:
             "calibration_s": round(calibrate(), 5),
             "metrics": metrics,
             "micro_us": micro(spec["tables"]),
+            "one_query_us": one_query(spec["tables"]),
         }
     finally:
         if not keep:
@@ -192,6 +231,24 @@ def compare(result: dict, baseline: dict, time_tol: float, rss_tol: float) -> li
     return failures
 
 
+def over_round_trip(result: dict) -> list[str]:
+    """Lines for the ``one_query_us`` checks slower than a database round trip."""
+    limit = ROUND_TRIP_US * result["calibration_s"] / ROUND_TRIP_CALIBRATION_S
+    return [
+        f"one_query.{name}: {us:.1f} us > round trip {limit:.1f} us"
+        for name, us in sorted(result["one_query_us"].items())
+        if us > limit
+    ]
+
+
+def failed(result: dict, baseline: dict | None, args: argparse.Namespace) -> list[str]:
+    """The budgets ``result`` is over: the baseline's, when there is one, and the round trip."""
+    failures = []
+    if baseline is not None:
+        failures = compare(result, baseline, args.time_tolerance, args.rss_tolerance)
+    return failures + over_round_trip(result)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -222,8 +279,8 @@ def main() -> int:
     path = Path(args.baseline)
     baselines = json.loads(path.read_text()) if path.exists() else {}
     failures = []
-    if args.compare and key in baselines:
-        failures = compare(result, baselines[key], args.time_tolerance, args.rss_tolerance)
+    if args.compare:
+        failures = failed(result, baselines.get(key), args)
         # Another job on a shared runner can slow one run: measure again before failing.
         for attempt in range(2, ATTEMPTS + 1):
             if not failures:
@@ -235,7 +292,7 @@ def main() -> int:
                 file=sys.stderr,
             )
             result = run(args.size, args.repeats, args.keep)
-            failures = compare(result, baselines[key], args.time_tolerance, args.rss_tolerance)
+            failures = failed(result, baselines.get(key), args)
     text = json.dumps(result, indent=2)
     print(text)
     if args.out:
@@ -248,15 +305,14 @@ def main() -> int:
     if args.compare:
         if key not in baselines:
             print(
-                f"no baseline for {key} in {path}: nothing to compare. "
+                f"no baseline for {key} in {path}: only the round trip is budgeted. "
                 "Commit this run's JSON (make bench-baseline) to enable the budget.",
                 file=sys.stderr,
             )
-            return 0
         if failures:
             print("performance budget exceeded:", *failures, sep="\n  ", file=sys.stderr)
             return 1
-        print(f"within budget versus baseline {key}", file=sys.stderr)
+        print("within budget", file=sys.stderr)
     return 0
 
 

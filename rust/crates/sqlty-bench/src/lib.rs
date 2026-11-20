@@ -129,10 +129,100 @@ pub fn python_source(queries: usize) -> String {
     out
 }
 
+/// Columns of `app.wide`, the table of [`one_query_schema`] that the column and
+/// `GROUP BY` sweeps read.
+pub const WIDE_COLUMNS: usize = 256;
+
+/// [`schema_sql`] of `tables` tables plus `app.wide`, of [`WIDE_COLUMNS`] columns.
+///
+/// # Panics
+///
+/// Never: writing to a `String` cannot fail.
+#[must_use]
+pub fn one_query_schema(tables: usize) -> String {
+    let mut out = schema_sql(tables);
+    let columns: Vec<String> = (0..WIDE_COLUMNS)
+        .map(|i| match i % 2 {
+            0 => format!("c{i:03} integer NOT NULL"),
+            _ => format!("c{i:03} text"),
+        })
+        .collect();
+    writeln!(out, "CREATE TABLE app.wide ({});", columns.join(", ")).unwrap();
+    out
+}
+
+/// One query each, by `group/name`, against [`one_query_schema`] of at least 65 tables:
+/// typical queries, then sweeps of one dimension each (joins, selected columns, `IN` list
+/// items, `GROUP BY` keys).
+#[must_use]
+pub fn one_query_cases() -> Vec<(String, String)> {
+    let wide = |n: usize| (0..n).map(|i| format!("c{i:03}")).collect::<Vec<_>>();
+    let mut cases: Vec<(String, String)> = [
+        (
+            "point_select",
+            "SELECT id, name, status, created_at FROM app.t0042 WHERE id = $1",
+        ),
+        (
+            "join_3",
+            "SELECT a.id, b.name, c.score FROM app.t0002 a JOIN app.t0001 b ON a.parent_id = b.id \
+             JOIN app.t0000 c ON b.parent_id = c.id WHERE a.status = $1",
+        ),
+        (
+            "insert_params",
+            "INSERT INTO app.t0042 (id, parent_id, name, score, tags, payload) \
+             VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, created_at",
+        ),
+        (
+            "aggregate",
+            "SELECT status, count(*) AS n, sum(score) AS total, max(created_at) AS last \
+             FROM app.t0042 WHERE score > $1 GROUP BY status HAVING count(*) > 1",
+        ),
+    ]
+    .into_iter()
+    .map(|(name, sql)| (format!("typical/{name}"), sql.to_string()))
+    .collect();
+    for joins in [1, 4, 16, 64] {
+        let chain: String = (1..=joins)
+            .map(|i| format!(" JOIN app.t{i:04} j{i} ON j{i}.parent_id = j{}.id", i - 1))
+            .collect();
+        let sql = format!("SELECT j0.id, j{joins}.name FROM app.t0000 j0{chain} WHERE j0.id = $1");
+        cases.push((format!("joins/{joins}"), sql));
+    }
+    for columns in [4, 32, WIDE_COLUMNS] {
+        let sql = format!(
+            "SELECT {} FROM app.wide WHERE c000 = $1",
+            wide(columns).join(", ")
+        );
+        cases.push((format!("columns/{columns}"), sql));
+    }
+    for items in [10, 1_000] {
+        let list: Vec<String> = (0..items).map(|i| i.to_string()).collect();
+        let sql = format!(
+            "SELECT id, name FROM app.t0042 WHERE id IN ({})",
+            list.join(", ")
+        );
+        cases.push((format!("in_list/{items}"), sql));
+    }
+    for keys in [4, 32, WIDE_COLUMNS] {
+        let list = wide(keys).join(", ");
+        let sql = format!("SELECT {list}, count(*) AS n FROM app.wide GROUP BY {list}");
+        cases.push((format!("group_by/{keys}"), sql));
+    }
+    cases
+}
+
+/// A Python module holding `sql` as its one `--sql` string, as `sqlty rewrite` reads it.
+#[must_use]
+pub fn one_query_module(sql: &str) -> String {
+    format!("q = \"--sql\\n{sql}\"\n")
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::{python_source, schema_sql, QUERIES};
+    use super::{
+        one_query_cases, one_query_module, one_query_schema, python_source, schema_sql, QUERIES,
+    };
     use sqlty_sql::analyzer;
 
     #[test]
@@ -150,5 +240,25 @@ mod tests {
         let source = python_source(QUERIES.len() + 1);
         assert_eq!(source.matches("--sql").count(), QUERIES.len() + 1);
         assert!(source.contains(&format!("-- {}\")", QUERIES.len())));
+    }
+
+    #[test]
+    fn every_one_query_case_is_typed_without_diagnostics() {
+        let (schema, skipped) =
+            analyzer::load_schema_with_skipped(&one_query_schema(65), "postgres");
+        assert!(skipped.is_empty(), "{skipped:?}");
+        let cases = one_query_cases();
+        assert_eq!(cases.len(), 16);
+        for (name, sql) in &cases {
+            let (columns, diagnostics) =
+                analyzer::analyze_with_diagnostics(sql, "postgres", Some(&schema));
+            assert!(diagnostics.is_empty(), "{name}: {diagnostics:?}");
+            let columns = columns.unwrap();
+            assert!(
+                columns.iter().all(|column| column.python_type.is_some()),
+                "{name}"
+            );
+            assert!(one_query_module(sql).starts_with("q = \"--sql\\n"));
+        }
     }
 }
