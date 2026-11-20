@@ -132,6 +132,17 @@ def micro(tables: int, rounds: int = 200) -> dict[str, float]:
     return out
 
 
+def commit_then_migrate(root: Path) -> str:
+    """Commit the project, then add a migration to its schema; the project's path."""
+    git = ["git", "-c", "user.name=bench", "-c", "user.email=bench@example.com"]
+    shutil.rmtree(root / ".git", ignore_errors=True)  # a kept project, measured again
+    for args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "baseline"]):
+        subprocess.run([*git, *args], cwd=root, check=True)
+    with (root / "schema.sql").open("a") as schema:
+        schema.write(synth.MIGRATION)
+    return str(root)
+
+
 def run(size: str, repeats: int, keep: str | None, exe: str) -> dict:
     spec = SIZES[size]
     root = Path(keep) if keep else Path(tempfile.mkdtemp(prefix="sqlty-bench-"))
@@ -154,6 +165,9 @@ def run(size: str, repeats: int, keep: str | None, exe: str) -> dict:
             sp.write_text(text)
             m = measure([sys.executable, __file__, "--worker-schema", str(sp)], proj, repeats)
             metrics[name] = m
+        metrics["breaking"] = measure(
+            [exe, "breaking", "-q", "--against", "HEAD"], commit_then_migrate(root), min(repeats, 3)
+        )
         return {
             "meta": {
                 "size": size,
