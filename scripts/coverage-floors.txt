@@ -2,3 +2,4 @@
 # Lower a floor whenever its tests cover more, until the line can go.
 sqlty-python 892
 sqlty-sql 59
+sqlty-project 42

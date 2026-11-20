@@ -107,3 +107,22 @@ def test_completion_of_unnamed_and_unknown_relations(sql: str, labels: list[str]
     )
     assert found is not None
     assert [label for label, *_ in found[3]] == labels
+
+
+def test_join_completion_and_hover() -> None:
+    schema = "CREATE TABLE a (id INT PRIMARY KEY); CREATE TABLE b (a_id INT REFERENCES a (id));"
+    source = 'q = "--sql\\nSELECT 1 FROM a JOIN "\n'
+    found = _core.complete_source(source, len(source) - 2, schema_sql=schema)
+    assert found is not None
+    assert "join" in {kind for _, kind, *_ in found[3]}
+    source = 'q = "--sql\\nSELECT id FROM a"\n'
+    hovered = _core.hover_source(source, source.index("id"), schema_sql=schema)
+    assert hovered is not None
+    assert "id" in hovered[2]
+
+
+def test_check_migrations() -> None:
+    found = _core.check_migrations("CREATE TABLE t (a INT);", ["DROP TABLE t;"])
+    assert [diag["rule"] for diag in found[0]] == ["missing-lock-timeout"]
+    with pytest.raises(ValueError, match="unknown rule"):
+        _core.check_migrations("", [], rules={"nope": "warn"})
