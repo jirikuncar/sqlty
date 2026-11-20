@@ -1106,31 +1106,58 @@ fn unified_diff(path: &str, old: &str, new: &str) -> String {
         .to_string()
 }
 
-/// The line starts of a text, so that a position costs a binary search and its own line.
+/// Bytes between two counts of characters in [`Lines`].
+const BLOCK: usize = 256;
+
+/// The line starts of a text and its characters counted every [`BLOCK`] bytes, so that a
+/// position costs a binary search and at most one block.
 struct Lines<'a> {
     text: &'a str,
     starts: Vec<usize>,
+    /// The characters before each block.
+    chars: Vec<usize>,
 }
 
 impl<'a> Lines<'a> {
     fn new(text: &'a str) -> Self {
-        let breaks = text.bytes().enumerate().filter(|&(_, byte)| byte == b'\n');
+        let bytes = text.as_bytes();
+        let breaks = line_starts(bytes);
+        let mut chars = Vec::with_capacity(bytes.len() / BLOCK + 1);
+        let mut count = 0;
+        for block in bytes.chunks(BLOCK) {
+            chars.push(count);
+            count += char_starts(block);
+        }
+        chars.push(count);
         Lines {
             text,
-            starts: std::iter::once(0)
-                .chain(breaks.map(|(at, _)| at + 1))
-                .collect(),
+            starts: std::iter::once(0).chain(breaks).collect(),
+            chars,
         }
     }
 
-    /// The 1-based line and column (in characters) of the byte `offset`.
+    /// The 1-based line and column (in characters) of the byte `offset`; a column inside a
+    /// character counts that character.
     fn position(&self, offset: usize) -> Position {
         let offset = offset.min(self.text.len());
         let line = self.starts.partition_point(|&start| start <= offset);
-        let before = &self.text.as_bytes()[self.starts[line - 1]..offset];
-        let column = String::from_utf8_lossy(before).chars().count() + 1;
+        let column = self.chars_before(offset) - self.chars_before(self.starts[line - 1]) + 1;
         Position { line, column }
     }
+
+    fn chars_before(&self, offset: usize) -> usize {
+        let block = offset / BLOCK;
+        self.chars[block] + char_starts(&self.text.as_bytes()[block * BLOCK..offset])
+    }
+}
+
+fn line_starts(bytes: &[u8]) -> impl Iterator<Item = usize> + '_ {
+    (1..=bytes.len()).filter(|&at| bytes[at - 1] == b'\n')
+}
+
+/// The UTF-8 bytes that start a character.
+fn char_starts(bytes: &[u8]) -> usize {
+    bytes.iter().filter(|&&byte| byte & 0xC0 != 0x80).count()
 }
 
 #[derive(Clone, Copy, Serialize)]
@@ -1448,7 +1475,8 @@ mod tests {
 
     #[test]
     fn a_position_counts_lines_and_characters_before_the_offset() {
-        let text = "ab\n\u{e9}t\u{1f600}\n\nx";
+        let text = "ab\n\u{e9}t\u{1f600}\n\nx".repeat(40) + &"\u{e9}".repeat(300);
+        let text = text.as_str();
         let lines = Lines::new(text);
         for offset in 0..=text.len() + 1 {
             let before = &text.as_bytes()[..offset.min(text.len())];
