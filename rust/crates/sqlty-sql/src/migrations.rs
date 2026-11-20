@@ -17,9 +17,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use sqlparser::ast::{
     visit_expressions, AlterColumnOperation, AlterIndexOperation, AlterTable, AlterTableOperation,
     AlterType, AlterTypeOperation, BinaryOperator, CascadeOption, CheckConstraint, ColumnDef,
-    ColumnOption, CopySource, DataType, Delete, DetachPartitionMode, Expr, ForValues, FromTable,
-    InTarget, Insert, LockTableMode, Merge, ObjectName, ObjectType, RenameTableNameKind,
-    ReplicaIdentity, SetExpr, Statement, TableConstraint, TableFactor, TableObject,
+    ColumnOption, CopySource, DataType, Delete, DetachPartitionMode, Expr, ForValues,
+    ForeignKeyConstraint, FromTable, Ident, InTarget, Insert, LockTableMode, Merge, ObjectName,
+    ObjectType, RenameTableNameKind, ReplicaIdentity, SetExpr, Statement, TableConstraint,
+    TableFactor, TableObject,
 };
 
 use crate::analyzer::{parse_ddl, SqlDialect};
@@ -93,6 +94,10 @@ struct Model {
     referencing: FxHashSet<String>,
     /// The tables a foreign key references.
     referenced: FxHashSet<String>,
+    /// The tables with a foreign key to each table.
+    referrers: FxHashMap<String, FxHashSet<String>>,
+    /// The foreign keys of each table.
+    foreign_keys: FxHashMap<String, Vec<ForeignKey>>,
     /// The `CHECK` constraints of each table.
     checks: FxHashMap<String, Vec<Check>>,
     /// The columns declared `NOT NULL`, by table.
@@ -118,6 +123,12 @@ struct Model {
     identity_tables: FxHashMap<String, String>,
     /// The columns of each unique index, by schema-qualified name.
     unique_indexes: FxHashMap<String, Vec<String>>,
+}
+
+struct ForeignKey {
+    name: String,
+    columns: Vec<String>,
+    referenced: String,
 }
 
 struct PrimaryKey {
@@ -233,8 +244,11 @@ impl Model {
                 }
                 if session.transaction {
                     let held = session.locked.len();
-                    let locked = parsed.as_ref().map(|parsed| self.write_locked(parsed));
-                    for table in locked.unwrap_or_default() {
+                    let locked = match &parsed {
+                        Some(parsed) => self.write_locked(parsed),
+                        None => self.tokens_locked(&stmt),
+                    };
+                    for table in locked {
                         if session.locking.insert(table.clone()) {
                             session.locked.push(table);
                         }
@@ -488,11 +502,26 @@ impl Model {
                 self.defaults.retain(|parent, default| {
                     !dropped.contains(parent) && !dropped.contains(default)
                 });
+                for table in &dropped {
+                    self.foreign_keys.remove(table);
+                }
             }
             _ => {}
         }
         self.referencing.extend(foreign_keys(stmt));
-        self.referenced.extend(referenced_tables(stmt));
+        let owner = match stmt {
+            Statement::CreateTable(create) => key(&create.name),
+            Statement::AlterTable(alter) => key(&alter.name),
+            _ => return,
+        };
+        for fk in added_foreign_keys(stmt) {
+            self.referrers
+                .entry(fk.referenced.clone())
+                .or_default()
+                .insert(owner.clone());
+            self.referenced.insert(fk.referenced.clone());
+            self.foreign_keys.entry(owner.clone()).or_default().push(fk);
+        }
     }
 
     fn apply_op(&mut self, table: &str, op: &AlterTableOperation) {
@@ -550,6 +579,9 @@ impl Model {
             }
             AlterTableOperation::DropColumn { column_names, .. } => {
                 let dropped = column_names.iter().map(name).collect::<Vec<_>>();
+                if let Some(fks) = self.foreign_keys.get_mut(table) {
+                    fks.retain(|fk| !fk.columns.iter().any(|column| dropped.contains(column)));
+                }
                 let keyed = self
                     .primary_keys
                     .get(table)
@@ -587,6 +619,9 @@ impl Model {
             }
             AlterTableOperation::DropConstraint { name: dropped, .. } => {
                 let dropped = name(dropped);
+                if let Some(fks) = self.foreign_keys.get_mut(table) {
+                    fks.retain(|fk| fk.name != dropped);
+                }
                 self.drop_index(&qualify(table, &dropped));
                 if let Some(checks) = self.checks.get_mut(table) {
                     checks.retain(|check| check.name.as_ref() != Some(&dropped));
@@ -966,29 +1001,107 @@ impl Model {
                         }
                         _ => tables.push(table.clone()),
                     }
+                    tables.extend(self.dropped_references(&table, op));
                 }
                 tables.extend(referenced_tables(stmt));
                 tables
             }
-            Statement::CreateTable(_) => referenced_tables(stmt),
-            Statement::Truncate(truncate) => truncate
-                .table_names
-                .iter()
-                .map(|target| key(&target.name))
-                .collect(),
+            Statement::CreateTable(create) => {
+                let mut tables = referenced_tables(stmt);
+                if let Some(parent) = &create.partition_of {
+                    tables.extend(self.defaults.get(&key(parent)).cloned());
+                }
+                tables
+            }
+            Statement::Truncate(truncate) => {
+                let mut tables: Vec<String> = truncate
+                    .table_names
+                    .iter()
+                    .map(|target| key(&target.name))
+                    .collect();
+                if truncate.cascade == Some(CascadeOption::Cascade) {
+                    let mut seen: FxHashSet<String> = tables.iter().cloned().collect();
+                    let mut at = 0;
+                    while let Some(table) = tables.get(at) {
+                        let referrers = self.referrers.get(table).into_iter().flatten();
+                        let new: Vec<_> = referrers
+                            .filter(|t| seen.insert((*t).clone()))
+                            .cloned()
+                            .collect();
+                        tables.extend(new);
+                        at += 1;
+                    }
+                }
+                tables
+            }
             Statement::Lock(lock) if blocks_writes(lock.lock_mode.as_ref()) => {
                 lock.tables.iter().map(|target| key(&target.name)).collect()
             }
             Statement::Drop {
                 object_type: ObjectType::Table,
                 names,
+                cascade,
                 ..
-            } => names.iter().map(key).collect(),
+            } => {
+                let dropped: Vec<String> = names.iter().map(key).collect();
+                let referenced = dropped
+                    .iter()
+                    .filter_map(|table| self.foreign_keys.get(table))
+                    .flatten()
+                    .map(|fk| fk.referenced.clone());
+                let referrers = dropped
+                    .iter()
+                    .filter(|_| *cascade)
+                    .filter_map(|table| self.referrers.get(table))
+                    .flatten()
+                    .cloned();
+                let mut tables: Vec<String> = referenced.chain(referrers).collect();
+                tables.extend(dropped);
+                tables
+            }
             Statement::CreateIndex(index) if !index.concurrently => vec![key(&index.table_name)],
             _ => Vec::new(),
         };
         tables.retain(|table| !self.created.contains(table));
         tables
+    }
+
+    /// The tables the foreign keys that `op` drops from `table` reference: dropping one locks
+    /// them too.
+    fn dropped_references(&self, table: &str, op: &AlterTableOperation) -> Vec<String> {
+        let fks = self.foreign_keys.get(table).into_iter().flatten();
+        let dropped = |fk: &&ForeignKey| match op {
+            AlterTableOperation::DropColumn { column_names, .. } => column_names
+                .iter()
+                .any(|column| fk.columns.contains(&name(column))),
+            AlterTableOperation::DropConstraint { name: dropped, .. } => fk.name == name(dropped),
+            _ => false,
+        };
+        fks.filter(dropped)
+            .map(|fk| fk.referenced.clone())
+            .collect()
+    }
+
+    /// The table a statement sqlparser does not read locks against writes: `REINDEX TABLE`
+    /// and `CLUSTER`.
+    fn tokens_locked(&self, stmt: &Raw) -> Vec<String> {
+        let tokens = stmt.tokens();
+        let is =
+            |at: usize, word: &str| tokens.get(at).is_some_and(|t| t.eq_ignore_ascii_case(word));
+        let table = if is(0, "reindex") && !stmt.has_word("concurrently") {
+            tokens
+                .iter()
+                .position(|token| token.eq_ignore_ascii_case("table"))
+                .map(|at| token_name(&tokens[at + 1..], &[], &[]))
+        } else if is(0, "cluster") && tokens.len() > 1 {
+            Some(token_name(&tokens[1..], &["verbose"], &["using"]))
+        } else {
+            None
+        };
+        table
+            .into_iter()
+            .filter(|table| !self.created.contains(table))
+            .collect()
     }
 
     fn require_key(&mut self, table: &str, constraint: &TableConstraint) {
@@ -1324,7 +1437,11 @@ impl Model {
         match words.as_slice() {
             ["drop", "index", ..] if concurrently => Judged::concurrently(true),
             ["reindex", ..] => {
-                if !concurrently {
+                let target = words
+                    .iter()
+                    .position(|word| matches!(*word, "index" | "table"))
+                    .map(|kind| token_name(&stmt.tokens()[kind + 1..], &["concurrently"], &[]));
+                if !concurrently && !target.is_some_and(|target| self.created.contains(&target)) {
                     report(
                         Rule::MissingConcurrently,
                         "`REINDEX` blocks writes to the table, and reads that use the index, until it finishes: reindex `CONCURRENTLY`".to_string(),
@@ -1756,6 +1873,26 @@ fn foreign_keys(stmt: &Statement) -> Vec<String> {
 
 /// The tables the foreign keys `stmt` adds reference.
 fn referenced_tables(stmt: &Statement) -> Vec<String> {
+    added_foreign_keys(stmt)
+        .into_iter()
+        .map(|fk| fk.referenced)
+        .collect()
+}
+
+/// The foreign keys `stmt` adds, named as PostgreSQL names them when it names none.
+fn added_foreign_keys(stmt: &Statement) -> Vec<ForeignKey> {
+    let owner = match stmt {
+        Statement::CreateTable(create) => key(&create.name),
+        Statement::AlterTable(alter) => key(&alter.name),
+        _ => String::new(),
+    };
+    let short = owner.rsplit('.').next().unwrap_or(&owner).to_string();
+    let foreign_key =
+        |name: Option<&Ident>, columns: Vec<String>, fk: &ForeignKeyConstraint| ForeignKey {
+            name: name.map_or_else(|| format!("{short}_{}_fkey", columns.join("_")), self::name),
+            columns,
+            referenced: key(&fk.foreign_table),
+        };
     let (columns, constraints): (Vec<&ColumnDef>, Vec<&TableConstraint>) = match stmt {
         Statement::CreateTable(create) => (
             create.columns.iter().collect(),
@@ -1781,17 +1918,27 @@ fn referenced_tables(stmt: &Statement) -> Vec<String> {
         ),
         _ => return Vec::new(),
     };
-    let inline = columns.into_iter().flat_map(|column| &column.options);
+    let inline = columns
+        .into_iter()
+        .flat_map(|column| column.options.iter().map(move |option| (column, option)));
     inline
-        .filter_map(|option| match &option.option {
-            ColumnOption::ForeignKey(fk) => Some(key(&fk.foreign_table)),
+        .filter_map(|(column, option)| match &option.option {
+            ColumnOption::ForeignKey(fk) => Some(foreign_key(
+                option.name.as_ref().or(fk.name.as_ref()),
+                vec![name(&column.name)],
+                fk,
+            )),
             _ => None,
         })
         .chain(
             constraints
                 .into_iter()
                 .filter_map(|constraint| match constraint {
-                    TableConstraint::ForeignKey(fk) => Some(key(&fk.foreign_table)),
+                    TableConstraint::ForeignKey(fk) => Some(foreign_key(
+                        fk.name.as_ref(),
+                        fk.columns.iter().map(name).collect(),
+                        fk,
+                    )),
                     _ => None,
                 }),
         )
@@ -1937,7 +2084,7 @@ fn last_name(object: &ObjectName) -> String {
     key.rsplit('.').next().unwrap_or(&key).to_string()
 }
 
-fn name(ident: &sqlparser::ast::Ident) -> String {
+fn name(ident: &Ident) -> String {
     fold(ident, SqlDialect::Postgres)
 }
 
@@ -1980,6 +2127,8 @@ mod tests {
             ("DROP INDEX CONCURRENTLY IF EXISTS public.users_email", &[]),
             ("REINDEX INDEX users_email", &[MissingConcurrently]),
             ("REINDEX (VERBOSE) TABLE CONCURRENTLY users", &[]),
+            ("CREATE TABLE t (id int); CREATE INDEX t_id ON t (id); REINDEX TABLE t; REINDEX INDEX \"t_id\"", &[]),
+            ("REINDEX SCHEMA public", &[MissingConcurrently]),
             ("CLUSTER users USING users_email", &[TableRewrite]),
             ("CLUSTER VERBOSE public.users", &[TableRewrite]),
             ("CLUSTER", &[TableRewrite]),
@@ -2606,6 +2755,39 @@ mod tests {
             let found = rules(against, &migration);
             let found: Vec<_> = found.into_iter().filter(|rule| *rule == DropPrimaryKey).collect();
             assert_eq!(found, expected, "{migration}");
+        }
+    }
+
+    #[test]
+    fn implicit_locks_count_toward_multi_table_lock() {
+        let baseline = format!(
+            "{USERS} CREATE TABLE members (id BIGINT PRIMARY KEY, team_id BIGINT REFERENCES teams (id),
+                user_id BIGINT, CONSTRAINT members_user FOREIGN KEY (user_id) REFERENCES users (id));
+            CREATE TABLE ev (at date) PARTITION BY RANGE (at);
+            CREATE TABLE ev_d PARTITION OF ev DEFAULT;"
+        );
+        for (statements, reported) in [
+            ("TRUNCATE teams CASCADE; ALTER TABLE members ADD COLUMN x int", false),
+            ("TRUNCATE teams; ALTER TABLE members ADD COLUMN x int", true),
+            ("ALTER TABLE members DROP COLUMN team_id; ALTER TABLE teams ADD COLUMN x int", false),
+            ("ALTER TABLE members DROP COLUMN id; ALTER TABLE teams ADD COLUMN x int", true),
+            ("ALTER TABLE members DROP CONSTRAINT members_user; ALTER TABLE users ADD COLUMN x int", false),
+            ("ALTER TABLE members DROP CONSTRAINT members_team_id_fkey; ALTER TABLE teams ADD COLUMN x int", false),
+            ("ALTER TABLE members DROP COLUMN user_id; COMMIT; BEGIN; ALTER TABLE members DROP CONSTRAINT members_user; ALTER TABLE users ADD COLUMN x int", true),
+            ("ALTER TABLE members DROP CONSTRAINT members_team_id_fkey; COMMIT; BEGIN; ALTER TABLE members DROP COLUMN team_id; ALTER TABLE teams ADD COLUMN x int", true),
+            ("DROP TABLE members; COMMIT; BEGIN; ALTER TABLE users ADD COLUMN a int; DROP TABLE members; ALTER TABLE teams ADD COLUMN x int", true),
+            ("DROP TABLE members; ALTER TABLE teams ADD COLUMN x int", false),
+            ("DROP TABLE teams CASCADE; ALTER TABLE members ADD COLUMN x int", false),
+            ("DROP TABLE teams; ALTER TABLE members ADD COLUMN x int", true),
+            ("CREATE TABLE ev_1 PARTITION OF ev FOR VALUES FROM ('2020-01-01') TO ('2021-01-01'); ALTER TABLE ev_d ADD COLUMN x int", false),
+            ("ALTER TABLE users ADD COLUMN a int; REINDEX TABLE teams", true),
+            ("ALTER TABLE users ADD COLUMN a int; CLUSTER teams USING teams_pkey", true),
+            ("ALTER TABLE users ADD COLUMN a int; REINDEX INDEX users_email; CLUSTER", false),
+            ("CREATE TABLE t (id int); ALTER TABLE users ADD COLUMN a int; REINDEX TABLE t", false),
+        ] {
+            let migration = format!("SET lock_timeout = '1s'; BEGIN; {statements}; COMMIT;");
+            let found = rules(&baseline, &migration);
+            assert_eq!(found.contains(&Rule::MultiTableLock), reported, "{migration}: {found:?}");
         }
     }
 

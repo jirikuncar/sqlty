@@ -132,6 +132,15 @@ UPDATE users feeling SET email = 'meh' WHERE feeling.id = 1;
 COMMIT;
 ```
 
+## Reindexing a table the migration creates
+
+```sql migration
+SET lock_timeout = '1s';
+CREATE TABLE drafts (id BIGINT PRIMARY KEY);
+-- error:
+REINDEX TABLE drafts;
+```
+
 ## A NOT NULL check alone does not bound a partition
 
 ```sql migration
@@ -208,5 +217,28 @@ BEGIN;
 SET LOCAL lock_timeout = '1s';
 -- error:
 LOCK TABLE users, events;
+COMMIT;
+```
+
+## Dropping a foreign key locks the table it references
+
+`against.sql`:
+
+```sql
+CREATE TABLE teams (id BIGINT PRIMARY KEY);
+CREATE TABLE users (id BIGINT PRIMARY KEY, team_id BIGINT REFERENCES teams (id));
+```
+
+```sql migration
+SET lock_timeout = '1s';
+BEGIN;
+ALTER TABLE teams ADD COLUMN name TEXT;
+-- error: [multi-table-lock] "locks `users` while this transaction still holds `teams`"
+ALTER TABLE users DROP COLUMN team_id;
+COMMIT;
+BEGIN;
+ALTER TABLE users ADD COLUMN team BIGINT;
+-- error:
+ALTER TABLE users DROP CONSTRAINT users_team_id_fkey;
 COMMIT;
 ```
