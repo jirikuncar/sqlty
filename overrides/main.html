@@ -1,4 +1,15 @@
 {% extends "base.html" %}
+{% set home = page.is_homepage or page.url in ["", "./", "index.html"] %}
+{% set rule = page.meta.summary if page.meta and page.meta.summary and page.url[:16] == "reference/rules/" else none %}
+{% set heading = page.meta.title if page.meta and page.meta.title else page.title | striptags %}
+{% set title = config.site_name ~ ": type-safe raw SQL for Python" if home else (heading ~ " rule" if rule else heading) ~ " - " ~ config.site_name %}
+{% set description = page.meta.description if page.meta and page.meta.description else (heading ~ ": " ~ rule ~ ". " ~ {"error": "A sqlty check rule that reports an error by default.", "warn": "A sqlty check rule that warns by default.", "ignore": "A sqlty check rule, off by default."}[page.meta.severity] if rule else config.site_description) %}
+{% block site_meta %}
+  {{ super() | replace('content="' ~ (config.site_description | e) ~ '"', 'content="' ~ (description | e) ~ '"') }}
+{% endblock %}
+{% block htmltitle %}
+  <title>{{ title }}</title>
+{% endblock %}
 {% block fonts %}
   <link rel="preload" href="{{ 'assets/vendor/inter/files/inter-latin-wght-normal.woff2' | url }}" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="{{ 'assets/vendor/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2' | url }}" as="font" type="font/woff2" crossorigin>
@@ -6,9 +17,6 @@
   <style>:root{--md-text-font:"Inter Variable";--md-code-font:"JetBrains Mono Variable"}</style>
 {% endblock %}
 {% block extrahead %}
-  {% set home = page.is_homepage or page.url in ["", "./", "index.html"] %}
-  {% set title = config.site_name if home else (page.meta.title if page.meta and page.meta.title else page.title | striptags) ~ " - " ~ config.site_name %}
-  {% set description = page.meta.description if page.meta and page.meta.description else config.site_description %}
   {% set image = config.site_url ~ "assets/social.png" %}
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="{{ config.site_name }}">
@@ -60,6 +68,14 @@
       "license": "https://opensource.org/license/mit",
       "isAccessibleForFree": true,
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "keywords": "type-safe SQL, raw SQL, SQL type checker, SQL linter, Python typing, mypy, Pyright, ty, psycopg, PostgreSQL, SQLite, MySQL",
+      "programmingLanguage": ["Python", "Rust"],
+      "author": {
+        "@type": "Person",
+        "name": "Jiri Kuncar",
+        "url": "https://github.com/jirikuncar",
+        "contactPoint": { "@type": "ContactPoint", "contactType": "training", "email": "sqlty@kuncar.dev" }
+      },
       "sameAs": [{{ config.repo_url | tojson }}, "https://pypi.org/project/sqlty/"]
     }
   </script>
