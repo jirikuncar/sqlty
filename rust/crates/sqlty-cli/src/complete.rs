@@ -9,7 +9,7 @@ use sqlty_python::project::Files;
 use sqlty_python::rewriter::ImportStyle;
 use sqlty_sql::analyzer::CandidateKind;
 
-use crate::{position, workspace, Common, Host};
+use crate::{workspace, Common, Host, Lines};
 
 /// The most names listed.
 const LIMIT: usize = 200;
@@ -98,8 +98,8 @@ pub fn run(
                 })
                 .collect();
             json!({
-                "start": position(&text, found.replace.start),
-                "end": position(&text, found.replace.end),
+                "start": Lines::new(&text).position(found.replace.start),
+                "end": Lines::new(&text).position(found.replace.end),
                 "incomplete": found.incomplete,
                 "items": items,
             })
