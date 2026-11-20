@@ -1,6 +1,6 @@
 """Type stubs for the Rust extension module (sqlty._core)."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, final
 
@@ -54,7 +54,6 @@ def analyze_params(
 ) -> list[tuple[int, str | None, str | None, str | None, bool | None, bool, str | None]] | None: ...
 def name_rules() -> list[str]: ...
 def rules() -> list[tuple[str, str, bool, str, str]]: ...
-def dialect_names() -> list[str]: ...
 def python_types() -> list[str]: ...
 def checks_names(dialect: str) -> bool: ...
 def returns_rows(sql: str, *, dialect: str = "postgres") -> bool: ...
@@ -180,13 +179,6 @@ def row_diagnostics(
     ]
     | None
 ): ...
-def breaking_modules(
-    modules: Sequence[tuple[str, str | None, int, int]],
-    configs: Sequence[tuple[Any, ...]],
-    *,
-    version: tuple[int, int],
-    jobs: int | None = None,
-) -> list[list[Diagnostic]]: ...
 def check_modules(
     modules: Sequence[tuple[str, str | None, int]],
     configs: Sequence[
@@ -313,12 +305,14 @@ def highlight_source(
     helper_starts: list[int] = ...,
 ) -> list[tuple[int, int, str]]: ...
 def skills() -> list[tuple[str, str]]: ...
-def serve() -> None:
-    """Serve the language server on standard input and output until the client exits."""
+def cli(args: list[str]) -> int:
+    """Run ``sqlty ARGS...`` (``args[0]`` is the program); the exit code."""
 
-def cli(args: list[str]) -> int | None:
-    """Run ``sqlty ARGS...`` (``args[0]`` is the program); the exit code, or None for a
-    command the Python CLI still runs."""
+def write_profile() -> None:
+    """Write the coverage profile of an instrumented build; ``os._exit`` skips it."""
+
+def cli_reference() -> list[tuple[str, str, list[tuple[str, str]]]]:
+    """``(name, usage, [(option, help)])`` of the root and each command of ``sqlty``."""
 
 def schema_skipped_objects(
     schema_sql: str | Schema, *, dialect: str = "postgres"
@@ -326,7 +320,6 @@ def schema_skipped_objects(
 
 class ConfigSyntaxError(ValueError): ...
 
-CONFIG_FILES: tuple[str, str, str]
 TOOL_KEYS: tuple[str, ...]
 DISCOVERY_KEYS: tuple[str, ...]
 FUNCTION_KEYS: tuple[str, ...]
@@ -334,30 +327,5 @@ FUNCTION_KEYS: tuple[str, ...]
 def validate_config(table: dict[str, Any], source: str) -> tuple[dict[str, Any], list[str]]: ...
 def driver_types(driver: str, dialect: str) -> list[tuple[str, str]]: ...
 def find_config(directory: Path) -> tuple[dict[str, Any], list[str], Path] | None: ...
-def config_file(path: Path, base: Path) -> tuple[dict[str, Any], list[str]]: ...
-def schema_files(entries: list[str], base: str) -> tuple[list[Path], list[str]]: ...
 
 DEFAULT_EXCLUDE: list[str]
-
-class Discovery:
-    def __init__(
-        self,
-        cwd: str,
-        *,
-        isolated: bool,
-        fixed: Mapping[str, object] | None,
-        exclude: list[str] | None,
-        extend_exclude: list[str],
-        respect_gitignore: bool | None,
-    ) -> None: ...
-    def exclusions(self, directory: str) -> list[tuple[Path, list[str]]]: ...
-    def is_excluded(self, path: str) -> bool: ...
-    def route(
-        self, table: Mapping[str, object], base: str, path: str
-    ) -> tuple[str | None, dict[str, str]]: ...
-    def walk(self, root: str) -> list[Path]: ...
-
-def names_query_file(path: str, base: str, queries: list[str]) -> bool: ...
-def module_names(paths: list[Path], roots: list[Path], cwd: Path) -> list[list[str]]: ...
-def checked_roots(paths: list[Path], files: list[Path], cwd: Path) -> list[Path]: ...
-def helper_roots(config_dir: Path | None, checked: list[Path], extra: list[Path]) -> list[Path]: ...
