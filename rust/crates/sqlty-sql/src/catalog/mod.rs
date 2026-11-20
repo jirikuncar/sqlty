@@ -1010,6 +1010,31 @@ mod tests {
     }
 
     #[test]
+    fn foreign_keys_reach_tables_defined_later() {
+        let c = pg("SET search_path = app; \
+             CREATE TABLE a (b_id int REFERENCES b, c_id int REFERENCES c (code), gone int REFERENCES gone); \
+             CREATE TABLE app.b (id int PRIMARY KEY); \
+             CREATE TABLE app.c (code text UNIQUE);");
+        let keys: Vec<_> = c
+            .foreign_keys("app.a")
+            .map(|fk| {
+                (
+                    fk.columns.join(","),
+                    fk.table.as_str(),
+                    fk.referred.join(","),
+                )
+            })
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                ("b_id".to_string(), "app.b", "id".to_string()),
+                ("c_id".to_string(), "app.c", "code".to_string()),
+            ]
+        );
+    }
+
+    #[test]
     fn test_other_dialects_ignore_postgres_statements() {
         let (c, _) = load(
             "CREATE TABLE db.t (a INT); ALTER TABLE t ADD COLUMN b INT; DROP TABLE t;",
