@@ -548,12 +548,10 @@ impl<'a> Analyzer<'a> {
         }
         // Columns of a source that is itself unknown are explained where it is declared.
         let unreadable = candidates.iter().any(|source| {
-            source.table.named().is_none_or(|table| {
-                !self.knows_table(table)
-                    || self
-                        .virtual_columns(table)
-                        .is_some_and(|columns| columns.iter().any(Column::is_unknown_star))
-            })
+            source
+                .table
+                .named()
+                .is_none_or(|table| !self.knows_table(table) || self.has_unknown_star(table))
         });
         if unreadable {
             return self.diag.explain_silently();
@@ -774,10 +772,11 @@ impl<'a> Analyzer<'a> {
         {
             return self.diag.explain_silently();
         }
-        if tables.iter().filter_map(Table::named).any(|table| {
-            self.virtual_columns(table)
-                .is_some_and(|columns| columns.iter().any(Column::is_unknown_star))
-        }) {
+        if tables
+            .iter()
+            .filter_map(Table::named)
+            .any(|table| self.has_unknown_star(table))
+        {
             return self.explain_view_star(reference.as_deref(), scope);
         }
         self.diag.record(

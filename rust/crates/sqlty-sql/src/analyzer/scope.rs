@@ -403,16 +403,36 @@ impl<'a> Analyzer<'a> {
     /// matches it; `None` when `table` is not one.
     pub(super) fn virtual_column(&self, table: &str, column: &str) -> Option<Option<&Column>> {
         let columns = self.virtual_columns(table)?;
-        let index = match self.virtuals.names.get(table) {
-            Some(index) => Some(Rc::clone(index)),
-            None if self.virtuals.contains_key(table) => None,
-            None => self.view_index(table, columns),
-        };
+        let index = self.name_index(table, columns);
         let same = |name: &str| self.same_column(name, column);
         Some(match index {
             Some(index) => index.find(columns, column, same),
             None => columns.iter().find(|col| same(&col.name)),
         })
+    }
+
+    /// Whether [`Self::virtual_columns`] of `table` hold a `*` the analyzer could not read.
+    pub(super) fn has_unknown_star(&self, table: &str) -> bool {
+        let Some(columns) = self.virtual_columns(table) else {
+            return false;
+        };
+        match self.name_index(table, columns) {
+            Some(index) => index.0.get("*").is_some_and(|stars| {
+                stars
+                    .iter()
+                    .any(|&at| columns[at as usize].is_unknown_star())
+            }),
+            None => columns.iter().any(Column::is_unknown_star),
+        }
+    }
+
+    /// The index of `columns`, the virtual columns of `table`, when it is wide.
+    fn name_index(&self, table: &str, columns: &[Column]) -> Option<Rc<NameIndex>> {
+        match self.virtuals.names.get(table) {
+            Some(index) => Some(Rc::clone(index)),
+            None if self.virtuals.contains_key(table) => None,
+            None => self.view_index(table, columns),
+        }
     }
 
     fn view_index(&self, view: &str, columns: &[Column]) -> Option<Rc<NameIndex>> {
