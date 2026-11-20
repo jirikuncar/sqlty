@@ -8,8 +8,13 @@
 //!
 //! Lock levels and rewrites follow the PostgreSQL 17 documentation of
 //! [`ALTER TABLE`](https://www.postgresql.org/docs/17/sql-altertable.html),
-//! [`CREATE INDEX`](https://www.postgresql.org/docs/17/sql-createindex.html) and
-//! [explicit locking](https://www.postgresql.org/docs/17/explicit-locking.html).
+//! [`CREATE INDEX`](https://www.postgresql.org/docs/17/sql-createindex.html),
+//! [`REINDEX`](https://www.postgresql.org/docs/17/sql-reindex.html),
+//! [`CLUSTER`](https://www.postgresql.org/docs/17/sql-cluster.html),
+//! [`VACUUM`](https://www.postgresql.org/docs/17/sql-vacuum.html),
+//! [`REFRESH MATERIALIZED VIEW`](https://www.postgresql.org/docs/17/sql-refreshmaterializedview.html)
+//! and [explicit locking](https://www.postgresql.org/docs/17/explicit-locking.html): the
+//! table lock of `CREATE INDEX` is SHARE, and the others ACCESS EXCLUSIVE.
 
 use std::ops::{ControlFlow, Range};
 
@@ -546,7 +551,8 @@ impl Model {
                         ),
                     );
                 }
-                if !index.concurrently && !self.is_new(&index.table_name) {
+                let waits = !index.concurrently && !self.is_new(&index.table_name);
+                if waits {
                     report(
                         Rule::MissingConcurrently,
                         format!(
@@ -555,7 +561,10 @@ impl Model {
                         ),
                     );
                 }
-                Judged::concurrently(index.concurrently)
+                Judged {
+                    concurrently: index.concurrently,
+                    strong_lock: waits,
+                }
             }
             Statement::Drop {
                 object_type: ObjectType::Index,
@@ -574,7 +583,8 @@ impl Model {
                 ..
             } => Judged::strong_unless(names.iter().all(|name| self.is_new(name))),
             Statement::RefreshMaterializedView(refresh) => {
-                if !refresh.concurrently && !self.is_new(&refresh.name) {
+                let waits = !refresh.concurrently && !self.is_new(&refresh.name);
+                if waits {
                     report(
                         Rule::MissingConcurrently,
                         format!(
@@ -583,13 +593,20 @@ impl Model {
                         ),
                     );
                 }
-                Judged::concurrently(refresh.concurrently)
+                Judged {
+                    concurrently: refresh.concurrently,
+                    strong_lock: waits,
+                }
             }
             Statement::Vacuum(vacuum) if vacuum.full => {
-                if !vacuum.table_name.as_ref().is_some_and(|t| self.is_new(t)) {
+                let rewrites = !vacuum.table_name.as_ref().is_some_and(|t| self.is_new(t));
+                if rewrites {
                     report(Rule::TableRewrite, rewrite_command_message("VACUUM FULL"));
                 }
-                Judged::default()
+                Judged {
+                    concurrently: false,
+                    strong_lock: rewrites,
+                }
             }
             Statement::Lock(_) => Judged::strong(),
             Statement::CreateTable(create) => {
@@ -785,20 +802,28 @@ impl Model {
         match words.as_slice() {
             ["drop", "index", ..] if concurrently => Judged::concurrently(true),
             ["reindex", ..] => {
-                if !concurrently {
+                let waits = !concurrently;
+                if waits {
                     report(
                         Rule::MissingConcurrently,
                         "`REINDEX` blocks writes to the table, and reads that use the index, until it finishes: reindex `CONCURRENTLY`".to_string(),
                     );
                 }
-                Judged::concurrently(concurrently)
+                Judged {
+                    concurrently,
+                    strong_lock: waits,
+                }
             }
             ["cluster", ..] => {
                 let table = token_name(&stmt.tokens()[1..], &["verbose"], &["using"]);
-                if !self.created.contains(&table) {
+                let rewrites = !self.created.contains(&table);
+                if rewrites {
                     report(Rule::TableRewrite, rewrite_command_message("CLUSTER"));
                 }
-                Judged::default()
+                Judged {
+                    concurrently: false,
+                    strong_lock: rewrites,
+                }
             }
             ["alter", "table", rest @ ..]
                 if rest.windows(2).any(|pair| pair == ["set", "tablespace"])
@@ -852,7 +877,7 @@ impl Session {
 }
 
 /// What a statement does to the session: whether it runs `CONCURRENTLY`, and whether it
-/// takes an ACCESS EXCLUSIVE lock on a table that has rows.
+/// waits for a lock that blocks writes, SHARE or stronger, on a table that has rows.
 #[derive(Default)]
 struct Judged {
     concurrently: bool,
@@ -1356,7 +1381,10 @@ mod tests {
     fn statements_of_the_baseline_are_not_judged() {
         let baseline = format!("BEGIN;\n{USERS}\nCREATE INDEX users_bio ON users (bio);\nCOMMIT;");
         let layout = "CREATE  INDEX users_bio\n  ON users (bio); -- moved\nCREATE INDEX users_bio ON users (bio);";
-        assert_eq!(rules(&baseline, layout), [Rule::MissingConcurrently]);
+        assert_eq!(
+            rules(&baseline, layout),
+            [Rule::MissingConcurrently, Rule::MissingLockTimeout]
+        );
         assert_eq!(check(&baseline, &[]), Vec::<Vec<Finding>>::new());
     }
 
@@ -1375,7 +1403,10 @@ mod tests {
             REFRESH MATERIALIZED VIEW mv;";
         assert_eq!(rules(USERS, migration), []);
         let quoted = r#"CREATE TABLE "T" (id int); CLUSTER "T"; CLUSTER t;"#;
-        assert_eq!(rules(USERS, quoted), [Rule::TableRewrite]);
+        assert_eq!(
+            rules(USERS, quoted),
+            [Rule::TableRewrite, Rule::MissingLockTimeout]
+        );
     }
 
     #[test]
@@ -1438,7 +1469,7 @@ mod tests {
             );
             assert_eq!(rules(USERS, &migration), expected, "{fill}");
         }
-        let created_as = "CREATE TABLE t AS SELECT id FROM users; CREATE INDEX t_id ON t (id);";
+        let created_as = "SET lock_timeout = '1s'; CREATE TABLE t AS SELECT id FROM users; CREATE INDEX t_id ON t (id);";
         assert_eq!(rules(USERS, created_as), [MissingConcurrently]);
         let no_data = created_as.replace(" FROM users", " FROM users WITH NO DATA");
         assert_eq!(rules(USERS, &no_data), []);
@@ -1457,6 +1488,47 @@ mod tests {
     #[test]
     fn truncate_takes_a_strong_lock() {
         assert_eq!(rules(USERS, "TRUNCATE users"), [Rule::MissingLockTimeout]);
+    }
+
+    #[test]
+    fn builds_and_rewrites_wait_for_a_lock_that_blocks_writes() {
+        let baseline = format!("{USERS}\nCREATE MATERIALIZED VIEW mv AS SELECT 1;");
+        for (sql, rule) in [
+            (
+                "CREATE INDEX users_bio ON users (bio)",
+                Rule::MissingConcurrently,
+            ),
+            ("REINDEX TABLE users", Rule::MissingConcurrently),
+            ("REFRESH MATERIALIZED VIEW mv", Rule::MissingConcurrently),
+            ("VACUUM FULL users", Rule::TableRewrite),
+            ("CLUSTER users", Rule::TableRewrite),
+        ] {
+            assert_eq!(
+                rules(&baseline, sql),
+                [rule, Rule::MissingLockTimeout],
+                "{sql}"
+            );
+            let set = format!("SET lock_timeout = '1s'; {sql}");
+            assert_eq!(rules(&baseline, &set), [rule], "{sql}");
+        }
+        for sql in [
+            "CREATE INDEX CONCURRENTLY users_bio ON users (bio)",
+            "REINDEX TABLE CONCURRENTLY users",
+            "REFRESH MATERIALIZED VIEW CONCURRENTLY mv",
+            "CREATE TABLE t (id int); CREATE INDEX t_id ON t (id); CLUSTER t; VACUUM FULL t",
+        ] {
+            assert_eq!(rules(&baseline, sql), [], "{sql}");
+        }
+        let twice = "CREATE INDEX users_bio ON users (bio); REINDEX TABLE users; CLUSTER users";
+        assert_eq!(
+            rules(&baseline, twice),
+            [
+                Rule::MissingConcurrently,
+                Rule::MissingLockTimeout,
+                Rule::MissingConcurrently,
+                Rule::TableRewrite
+            ]
+        );
     }
 
     #[test]

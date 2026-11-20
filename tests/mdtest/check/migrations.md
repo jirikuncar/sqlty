@@ -42,6 +42,74 @@ COMMIT;
 ALTER TABLE users ADD COLUMN about TEXT;
 ```
 
+## An index build waits for its lock
+
+`against.sql`:
+
+```sql
+CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT, team_id BIGINT);
+CREATE MATERIALIZED VIEW user_emails AS SELECT email FROM users;
+```
+
+```sql migration
+-- error: [missing-concurrently]
+-- error: [missing-lock-timeout]
+CREATE INDEX users_email ON users (email);
+```
+
+```sql migration
+SET lock_timeout = '1s';
+-- error: [missing-concurrently]
+CREATE INDEX users_email ON users (email);
+```
+
+```sql migration
+-- error: [missing-concurrently]
+-- error: [missing-lock-timeout]
+REINDEX TABLE users;
+```
+
+```sql migration
+-- error: [missing-concurrently]
+-- error: [missing-lock-timeout]
+REFRESH MATERIALIZED VIEW user_emails;
+```
+
+```sql migration
+-- error: [table-rewrite]
+-- error: [missing-lock-timeout]
+VACUUM FULL users;
+```
+
+```sql migration
+-- error: [table-rewrite]
+-- error: [missing-lock-timeout]
+CLUSTER users;
+```
+
+One file reports the timeout once:
+
+```sql migration
+-- error: [missing-concurrently]
+-- error: [missing-lock-timeout]
+CREATE INDEX users_email ON users (email);
+-- error: [table-rewrite]
+CLUSTER users;
+```
+
+The concurrent forms and the tables the migration created wait for nothing:
+
+```sql migration
+-- error:
+CREATE INDEX CONCURRENTLY users_email ON users (email);
+REINDEX TABLE CONCURRENTLY users;
+REFRESH MATERIALIZED VIEW CONCURRENTLY user_emails;
+CREATE TABLE t (id INT);
+CREATE INDEX t_id ON t (id);
+CLUSTER t;
+VACUUM FULL t;
+```
+
 ## A pg_dump schema
 
 ```sql migration
