@@ -16,8 +16,9 @@ use std::ops::{ControlFlow, Range};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sqlparser::ast::{
     AlterColumnOperation, AlterTableOperation, AlterType, AlterTypeOperation, CascadeOption,
-    ColumnDef, ColumnOption, CopySource, DataType, DetachPartitionMode, Expr, Insert, Merge,
-    ObjectName, ObjectType, SetExpr, Statement, TableConstraint, TableFactor, TableObject,
+    CheckConstraint, ColumnDef, ColumnOption, CopySource, DataType, DetachPartitionMode, Expr,
+    ForValues, Insert, Merge, ObjectName, ObjectType, SetExpr, Statement, TableConstraint,
+    TableFactor, TableObject,
 };
 
 use crate::analyzer::{parse_ddl, SqlDialect};
@@ -91,8 +92,26 @@ struct Model {
     referencing: FxHashSet<String>,
     /// The tables a foreign key references.
     referenced: FxHashSet<String>,
-    /// The `CHECK (column IS NOT NULL)` constraints of each table: name, column, validated.
-    not_null: FxHashMap<String, Vec<(Option<String>, String, bool)>>,
+    /// The `CHECK` constraints of each table.
+    checks: FxHashMap<String, Vec<Check>>,
+    /// The columns declared `NOT NULL`, by table.
+    required: FxHashSet<(String, String)>,
+    /// The columns of each partitioned table's partition key.
+    partition_keys: FxHashMap<String, Vec<String>>,
+    /// The default partition of each partitioned table.
+    defaults: FxHashMap<String, String>,
+    /// The partitioned tables whose partitions no `CHECK` can prove: hash partitioning or an
+    /// expression in the key.
+    unprovable: FxHashSet<String>,
+}
+
+struct Check {
+    name: Option<String>,
+    /// The column of a `CHECK (column IS NOT NULL)`.
+    not_null: Option<String>,
+    /// The lowercased words of its expression.
+    words: Vec<String>,
+    valid: bool,
 }
 
 /// What the statements of one file so far have set.
@@ -225,6 +244,52 @@ impl Model {
                         (table.clone(), name(&column.name)),
                         column.data_type.clone(),
                     );
+                    self.require(&table, column);
+                }
+                for constraint in &create.constraints {
+                    self.require_key(&table, constraint);
+                }
+                if let Some(by) = &create.partition_by {
+                    let by = by.to_string();
+                    let parts = by
+                        .split_once('(')
+                        .and_then(|(_, rest)| rest.rsplit_once(')'))
+                        .map_or("", |(parts, _)| parts);
+                    let keys: Vec<String> = parts
+                        .split(',')
+                        .map(|part| fold_token(part.trim()))
+                        .collect();
+                    let plain = keys.iter().all(|key| {
+                        create
+                            .columns
+                            .iter()
+                            .any(|column| name(&column.name) == *key)
+                    });
+                    if !plain || by.to_lowercase().starts_with("hash") {
+                        self.unprovable.insert(table.clone());
+                    }
+                    self.partition_keys.insert(table.clone(), keys);
+                }
+                if let (Some(parent), Some(ForValues::Default)) =
+                    (&create.partition_of, &create.for_values)
+                {
+                    self.defaults.insert(key(parent), table.clone());
+                }
+                let inline = create.columns.iter().flat_map(|column| &column.options);
+                let checks =
+                    inline
+                        .filter_map(|option| match &option.option {
+                            ColumnOption::Check(check) => Some(check),
+                            _ => None,
+                        })
+                        .chain(create.constraints.iter().filter_map(
+                            |constraint| match constraint {
+                                TableConstraint::Check(check) => Some(check),
+                                _ => None,
+                            },
+                        ));
+                for check in checks {
+                    self.add_check(&table, check, true);
                 }
             }
             Statement::AlterTable(alter) => {
@@ -232,6 +297,16 @@ impl Model {
                 for op in &alter.operations {
                     self.apply_op(&table, op);
                 }
+            }
+            Statement::Drop {
+                object_type: ObjectType::Table,
+                names,
+                ..
+            } => {
+                let dropped: Vec<String> = names.iter().map(key).collect();
+                self.defaults.retain(|parent, default| {
+                    !dropped.contains(parent) && !dropped.contains(default)
+                });
             }
             _ => {}
         }
@@ -246,6 +321,42 @@ impl Model {
                     (table.to_string(), name(&column_def.name)),
                     column_def.data_type.clone(),
                 );
+                self.require(table, column_def);
+            }
+            AlterTableOperation::AlterColumn {
+                column_name,
+                op: AlterColumnOperation::SetNotNull,
+            } => {
+                self.required.insert((table.to_string(), name(column_name)));
+            }
+            AlterTableOperation::AlterColumn {
+                column_name,
+                op: AlterColumnOperation::DropNotNull,
+            } => {
+                self.required
+                    .remove(&(table.to_string(), name(column_name)));
+            }
+            AlterTableOperation::DetachPartitionOf { partition, .. } => {
+                if self.defaults.get(table) == Some(&key(partition)) {
+                    self.defaults.remove(table);
+                }
+            }
+            AlterTableOperation::AddConstraint { constraint, .. }
+                if matches!(constraint, TableConstraint::PrimaryKey(_)) =>
+            {
+                self.require_key(table, constraint);
+            }
+            AlterTableOperation::AttachPartitionOf {
+                partition,
+                for_values: ForValues::Default,
+            } => {
+                self.defaults.insert(table.to_string(), key(partition));
+            }
+            AlterTableOperation::DropConstraint { name: dropped, .. } => {
+                let dropped = name(dropped);
+                if let Some(checks) = self.checks.get_mut(table) {
+                    checks.retain(|check| check.name.as_ref() != Some(&dropped));
+                }
             }
             AlterTableOperation::AlterColumn {
                 column_name,
@@ -257,20 +368,12 @@ impl Model {
             AlterTableOperation::AddConstraint {
                 constraint: TableConstraint::Check(check),
                 not_valid,
-            } => {
-                if let Some(column) = is_not_null(&check.expr) {
-                    self.not_null.entry(table.to_string()).or_default().push((
-                        check.name.as_ref().map(name),
-                        column,
-                        !not_valid,
-                    ));
-                }
-            }
+            } => self.add_check(table, check, !not_valid),
             AlterTableOperation::ValidateConstraint { name: validated } => {
                 let validated = name(validated);
-                for check in self.not_null.entry(table.to_string()).or_default() {
-                    if check.0.as_ref() == Some(&validated) {
-                        check.2 = true;
+                for check in self.checks.entry(table.to_string()).or_default() {
+                    if check.name.as_ref() == Some(&validated) {
+                        check.valid = true;
                     }
                 }
             }
@@ -325,6 +428,106 @@ impl Model {
                 .types
                 .keys()
                 .any(|column| typed(column) && words.contains(&column.1))
+    }
+
+    fn add_check(&mut self, table: &str, check: &CheckConstraint, valid: bool) {
+        self.checks
+            .entry(table.to_string())
+            .or_default()
+            .push(Check {
+                name: check.name.as_ref().map(name),
+                not_null: is_not_null(&check.expr),
+                words: words(&check.expr.to_string()),
+                valid,
+            });
+    }
+
+    fn require(&mut self, table: &str, column: &ColumnDef) {
+        let required = column.options.iter().any(|option| {
+            matches!(
+                option.option,
+                ColumnOption::NotNull | ColumnOption::PrimaryKey(_)
+            )
+        });
+        if required {
+            self.required
+                .insert((table.to_string(), name(&column.name)));
+        }
+    }
+
+    fn require_key(&mut self, table: &str, constraint: &TableConstraint) {
+        if let TableConstraint::PrimaryKey(key) = constraint {
+            for column in &key.columns {
+                for word in words(&column.column.expr.to_string()) {
+                    self.required.insert((table.to_string(), word));
+                }
+            }
+        }
+    }
+
+    /// Whether `column` of `table` can hold no NULL.
+    fn is_required(&self, table: &str, column: &str) -> bool {
+        self.required
+            .contains(&(table.to_string(), column.to_string()))
+            || self.checks.get(table).is_some_and(|checks| {
+                checks
+                    .iter()
+                    .any(|check| check.valid && check.not_null.as_deref() == Some(column))
+            })
+    }
+
+    /// Whether a validated `CHECK` of `partition` may prove that its rows fit a partition of
+    /// `parent`: it names a partition key column, and every key column is `NOT NULL`. Without
+    /// a known key, a `NOT NULL` column it names.
+    fn proves_bounds(&self, partition: &str, parent: &str) -> bool {
+        let keys = self
+            .partition_keys
+            .get(parent)
+            .filter(|keys| !keys.is_empty());
+        self.bounds_checks(partition, parent)
+            .any(|check| match keys {
+                Some(keys) => keys.iter().all(|key| self.is_required(partition, key)),
+                None => check
+                    .words
+                    .iter()
+                    .any(|word| self.is_required(partition, word)),
+            })
+    }
+
+    /// The validated checks of `table` that may bound the partition key of `parent`: they
+    /// name a key column and are more than `IS NOT NULL`.
+    fn bounds_checks<'a>(&'a self, table: &str, parent: &str) -> impl Iterator<Item = &'a Check> {
+        let keys = self
+            .partition_keys
+            .get(parent)
+            .filter(|keys| !keys.is_empty());
+        let provable = !self.unprovable.contains(parent);
+        self.checks
+            .get(table)
+            .into_iter()
+            .flatten()
+            .filter(move |check| provable && check.valid && check.not_null.is_none())
+            .filter(move |check| {
+                keys.is_none_or(|keys| {
+                    keys.iter()
+                        .any(|key| check.words.contains(&key.to_lowercase()))
+                })
+            })
+    }
+
+    /// Report the scan of `parent`'s default partition that a new partition of it makes.
+    fn default_scan(&self, parent: &str, report: &mut impl FnMut(Rule, String)) {
+        let Some(default) = self.defaults.get(parent) else {
+            return;
+        };
+        if !self.created.contains(default) && self.bounds_checks(default, parent).next().is_none() {
+            report(
+                Rule::ConstraintScan,
+                format!(
+                    "a new partition of `{parent}` scans its default partition `{default}` for rows that belong to the new one, under an ACCESS EXCLUSIVE lock on it: move those rows out and add a validated `CHECK` to `{default}` that excludes the new bounds first"
+                ),
+            );
+        }
     }
 
     fn is_new(&self, name: &ObjectName) -> bool {
@@ -389,6 +592,14 @@ impl Model {
                 Judged::default()
             }
             Statement::Lock(_) => Judged::strong(),
+            Statement::CreateTable(create) => {
+                if let (Some(parent), Some(bounds)) = (&create.partition_of, &create.for_values) {
+                    if *bounds != ForValues::Default {
+                        self.default_scan(&key(parent), report);
+                    }
+                }
+                Judged::default()
+            }
             Statement::Truncate(truncate) => {
                 let created = truncate
                     .table_names
@@ -460,10 +671,10 @@ impl Model {
                 op: AlterColumnOperation::SetNotNull,
             } => {
                 let column = name(column_name);
-                let checked = self.not_null.get(table).is_some_and(|checks| {
+                let checked = self.checks.get(table).is_some_and(|checks| {
                     checks
                         .iter()
-                        .any(|(_, checked, valid)| *valid && *checked == column)
+                        .any(|check| check.valid && check.not_null.as_ref() == Some(&column))
                 });
                 if !checked {
                     report(
@@ -486,6 +697,22 @@ impl Model {
                             "changing `{column_name}` to {data_type} rewrites `{written}` and its indexes under an ACCESS EXCLUSIVE lock: add a new column, backfill it and switch over"
                         ),
                     );
+                }
+            }
+            AlterTableOperation::AttachPartitionOf {
+                partition,
+                for_values,
+            } => {
+                if !self.is_new(partition) && !self.proves_bounds(&key(partition), table) {
+                    report(
+                        Rule::ConstraintScan,
+                        format!(
+                            "`ATTACH PARTITION` scans `{partition}` for rows outside its bounds under an ACCESS EXCLUSIVE lock on it: `SET NOT NULL` on the partition key, add a `CHECK` that matches the bounds `NOT VALID` and `VALIDATE` it, then attach"
+                        ),
+                    );
+                }
+                if *for_values != ForValues::Default {
+                    self.default_scan(table, report);
                 }
             }
             AlterTableOperation::DetachPartitionOf { mode, .. } => {
@@ -940,6 +1167,14 @@ fn referenced_tables(stmt: &Statement) -> Vec<String> {
         .collect()
 }
 
+/// The lowercased words of `text`.
+fn words(text: &str) -> Vec<String> {
+    text.split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|word| !word.is_empty())
+        .map(str::to_lowercase)
+        .collect()
+}
+
 /// The table name in `tokens` after the leading `skip` words and before `end`, folded and
 /// without the `public` schema.
 fn token_name(tokens: &[&str], skip: &[&str], ends: &[&str]) -> String {
@@ -1320,6 +1555,109 @@ mod tests {
             ),
         ] {
             assert_eq!(one(migration), expected, "{migration}");
+        }
+    }
+
+    #[test]
+    fn attaching_a_partition_scans_it_without_a_validated_check() {
+        let baseline = "CREATE TABLE events (at date, price int) PARTITION BY RANGE (at);
+            CREATE TABLE open (at date, price int CHECK (price > 0));
+            CREATE TABLE bounded (at date NOT NULL, price int, CHECK (at >= '2026-10-01'));
+            CREATE TABLE nullable (at date, CHECK (at >= '2026-10-01'));
+            CREATE TABLE proven (at date CHECK (at IS NOT NULL), CHECK (at >= '2026-10-01'));
+            CREATE TABLE bare (at date);
+            CREATE TABLE keyed (at date, PRIMARY KEY (at), CHECK (at >= '2026-10-01'));";
+        let bounds = "FOR VALUES FROM ('2026-10-01') TO ('2026-11-01')";
+        let validated = "ALTER TABLE open ADD CONSTRAINT b CHECK (at >= '2026-10-01') NOT VALID;
+            ALTER TABLE open VALIDATE CONSTRAINT b;";
+        for (setup, table, expected) in [
+            ("", "open", &[Rule::ConstraintScan][..]),
+            ("", "bounded", &[]),
+            ("", "nullable", &[Rule::ConstraintScan]),
+            (validated, "open", &[Rule::ConstraintScan]),
+            (
+                &format!("{validated} ALTER TABLE open ALTER COLUMN at SET NOT NULL;"),
+                "open",
+                &[Rule::ConstraintScan],
+            ),
+            ("", "proven", &[]),
+            ("ALTER TABLE keyed DROP CONSTRAINT gone;", "keyed", &[]),
+            ("ALTER TABLE bare DROP CONSTRAINT gone;", "bare", &[Rule::ConstraintScan]),
+            (
+                "ALTER TABLE bare ADD CONSTRAINT nn CHECK (at IS NOT NULL) NOT VALID; ALTER TABLE bare VALIDATE CONSTRAINT nn;",
+                "bare",
+                &[Rule::ConstraintScan],
+            ),
+            ("ALTER TABLE bounded ALTER COLUMN at DROP NOT NULL;", "bounded", &[Rule::ConstraintScan]),
+            ("CREATE TABLE fresh (at date);", "fresh", &[]),
+            (
+                "CREATE TABLE fresh (LIKE open); INSERT INTO fresh SELECT * FROM open;",
+                "fresh",
+                &[Rule::ConstraintScan],
+            ),
+        ] {
+            let migration = format!(
+                "SET lock_timeout = '1s';\n{setup}\nALTER TABLE events ATTACH PARTITION {table} {bounds};"
+            );
+            assert_eq!(rules(baseline, &migration), expected, "{setup} {table}");
+        }
+        let named = "SET lock_timeout = '1s';
+            ALTER TABLE bounded DROP CONSTRAINT b;
+            ALTER TABLE events ATTACH PARTITION bounded FOR VALUES FROM ('2026-10-01') TO ('2026-11-01');";
+        let named_baseline = baseline.replace(
+            "CHECK (at >= '2026-10-01'));",
+            "CONSTRAINT b CHECK (at >= '2026-10-01'));",
+        );
+        assert_eq!(rules(&named_baseline, named), [Rule::ConstraintScan]);
+        let unknown_key = "SET lock_timeout = '1s';
+            ALTER TABLE logs ATTACH PARTITION bounded FOR VALUES FROM ('2026-10-01') TO ('2026-11-01');";
+        assert_eq!(rules(baseline, unknown_key), []);
+    }
+
+    #[test]
+    fn a_new_partition_scans_the_default_partition() {
+        let baseline = "CREATE TABLE events (at date NOT NULL) PARTITION BY RANGE (at);
+            CREATE TABLE events_rest PARTITION OF events DEFAULT;
+            CREATE TABLE logs (at date NOT NULL) PARTITION BY RANGE (at);
+            CREATE TABLE logs_rest (at date NOT NULL);
+            ALTER TABLE logs ATTACH PARTITION logs_rest DEFAULT;";
+        for (migration, expected) in [
+            ("CREATE TABLE events_10 PARTITION OF events FOR VALUES FROM ('2026-10-01') TO ('2026-11-01')", &[Rule::ConstraintScan][..]),
+            ("CREATE TABLE logs_10 (at date NOT NULL); ALTER TABLE logs ATTACH PARTITION logs_10 FOR VALUES FROM ('2026-10-01') TO ('2026-11-01')", &[Rule::ConstraintScan]),
+            ("CREATE TABLE events_other PARTITION OF events DEFAULT", &[]),
+            (
+                "ALTER TABLE events_rest ADD CONSTRAINT x CHECK (NOT (at >= '2026-10-01' AND at < '2026-11-01')); CREATE TABLE events_10 PARTITION OF events FOR VALUES FROM ('2026-10-01') TO ('2026-11-01')",
+                &[Rule::ConstraintScan],
+            ),
+            (
+                "DROP TABLE events_rest; CREATE TABLE events_10 PARTITION OF events FOR VALUES FROM ('2026-10-01') TO ('2026-11-01')",
+                &[],
+            ),
+            (
+                "ALTER TABLE logs DETACH PARTITION logs_rest; CREATE TABLE logs_10 PARTITION OF logs FOR VALUES FROM ('2026-10-01') TO ('2026-11-01')",
+                &[Rule::MissingConcurrently],
+            ),
+        ] {
+            let migration = format!("SET lock_timeout = '1s'; {migration};");
+            assert_eq!(rules(baseline, &migration), expected, "{migration}");
+        }
+    }
+
+    #[test]
+    fn hash_and_expression_keys_are_never_proven() {
+        let baseline = "CREATE TABLE h (id int) PARTITION BY HASH (id);
+            CREATE TABLE h0 (id int NOT NULL, CHECK (id > 0));
+            CREATE TABLE e (name text) PARTITION BY RANGE (lower(name));
+            CREATE TABLE e0 (name text NOT NULL, CHECK (lower(name) >= 'a'));
+            CREATE TABLE q (\"At\" date) PARTITION BY RANGE (\"At\");
+            CREATE TABLE q0 (\"At\" date NOT NULL, CHECK (\"At\" >= '2026-10-01'));";
+        for (migration, expected) in [
+            ("ALTER TABLE h ATTACH PARTITION h0 FOR VALUES WITH (MODULUS 4, REMAINDER 0)", &[Rule::ConstraintScan][..]),
+            ("ALTER TABLE e ATTACH PARTITION e0 FOR VALUES FROM ('a') TO ('m')", &[Rule::ConstraintScan]),
+            ("ALTER TABLE q ATTACH PARTITION q0 FOR VALUES FROM ('2026-10-01') TO ('2026-11-01')", &[]),
+        ] {
+            let migration = format!("SET lock_timeout = '1s'; {migration};");
+            assert_eq!(rules(baseline, &migration), expected, "{migration}");
         }
     }
 
