@@ -217,6 +217,24 @@ INSERT INTO users (name, age) SELECT %s, %s EXCEPT SELECT %s, %s
 -- params: 4: None (None)
 ```
 
+`UNION BY NAME` matches the sides by name, not position:
+
+```sql
+INSERT INTO users (name, age) SELECT %s AS name, %s AS age UNION BY NAME SELECT %s AS age, %s AS name
+-- params: 1: str (TEXT) NOT NULL
+-- params: 2: int (INT) NULL
+-- params: 3: None (None)
+-- params: 4: None (None)
+```
+
+In a row, the values are typed one after another, each by its column and then by its
+expression:
+
+```sql
+INSERT INTO users (id, name) VALUES ($1 + 1, $1)
+-- params: 1: int (None) NOT NULL
+```
+
 A parenthesized query or one with a `WITH` clause is stored as well:
 
 ```sql
@@ -266,7 +284,7 @@ UPDATE users SET (name, age) = (SELECT %s, %s) WHERE id = %s
 ```
 
 ```sql
-UPDATE users SET (age) = (%s), (name, born) = ROW(%s, %s)
+UPDATE users SET (age) = ROW(%s), (name, born) = ROW(%s, %s)
 -- params: 1: int (INT) NULL
 -- params: 2: str (TEXT) NOT NULL
 -- params: 3: datetime.date (DATE) NULL

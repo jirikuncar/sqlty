@@ -13,7 +13,7 @@ use sqlparser::ast::InTarget;
 use sqlparser::ast::{
     visit_expressions, BinaryOperator, Expr, FromTable, FunctionArg, FunctionArgExpr,
     FunctionArguments, JoinConstraint, JoinOperator, Select, SelectItem, SetExpr, SetOperator,
-    Statement, TableFactor, TableObject, TableWithJoins, Value,
+    SetQuantifier, Statement, TableFactor, TableObject, TableWithJoins, Value,
 };
 use sqlparser::ast::{
     Assignment, AssignmentTarget, Function, Insert, LimitClause, ObjectName, OnConflictAction,
@@ -133,6 +133,15 @@ impl Hints {
         if hint.typed.python.is_none() {
             hint.untyped = Some(untyped);
         }
+    }
+
+    /// PostgreSQL resolves the parameter as text where nothing types it first.
+    fn add_untyped_text(&mut self, index: usize) {
+        self.0
+            .entry(index)
+            .or_default()
+            .untyped
+            .get_or_insert("TEXT");
     }
 
     fn add(&mut self, index: usize, mut typed: Typed, nullability: Nullability) {
@@ -400,9 +409,25 @@ impl<'a> Analyzer<'a> {
                 .map(|ident| fold(ident, self.dialect))
                 .collect()
         };
-        if let Some(source) = &insert.source {
-            self.hint_rows(&source.body, &table, &targets, out);
-            self.params_query(source, out);
+        if let Some(source) = insert.source.as_deref() {
+            match (&source.with, source.body.as_ref()) {
+                (None, SetExpr::Values(values)) => {
+                    for row in &values.rows {
+                        for (position, expr) in row.content.iter().enumerate() {
+                            if let Some(column) = targets.get(position) {
+                                self.hint_stored(expr, &table, column, &Scope::new(), out);
+                            }
+                            self.walk_params(expr, &Scope::new(), out);
+                        }
+                    }
+                }
+                (with, body) => {
+                    // PostgreSQL resolves `WITH ... VALUES ($1)` as text before it sees the target.
+                    let text = with.is_some() && matches!(body, SetExpr::Values(_));
+                    self.hint_rows(body, &table, &targets, text, out);
+                    self.params_query(source, out);
+                }
+            }
         }
         self.params_assignments(&insert.assignments, Some(&table), &scope, out);
         match &insert.on {
@@ -457,7 +482,7 @@ impl<'a> Analyzer<'a> {
                                 }
                             }
                             Expr::Subquery(query) => {
-                                self.hint_rows(&query.body, table, &targets, out);
+                                self.hint_rows(&query.body, table, &targets, true, out);
                             }
                             Expr::Function(row)
                                 if object_name(&row.name).eq_ignore_ascii_case("row") =>
@@ -468,11 +493,7 @@ impl<'a> Analyzer<'a> {
                                     self.hint_stored(value, table, column, scope, out);
                                 }
                             }
-                            value => {
-                                if let [column] = targets.as_slice() {
-                                    self.hint_stored(value, table, column, scope, out);
-                                }
-                            }
+                            _ => {}
                         }
                     }
                 }
@@ -483,13 +504,24 @@ impl<'a> Analyzer<'a> {
 
     /// The rows `body` gives are stored in the `targets` columns of the schema `table`, by
     /// position: a bare placeholder takes its column's type and nullability. Past a `*`, the
-    /// columns a value lands in are unknown.
-    fn hint_rows(&self, body: &SetExpr, table: &str, targets: &[String], out: &mut Hints) {
+    /// columns a value lands in are unknown. `text`: PostgreSQL resolves an untyped placeholder
+    /// here as text before it sees the target, as in a set operation or a sub-SELECT.
+    fn hint_rows(
+        &self,
+        body: &SetExpr,
+        table: &str,
+        targets: &[String],
+        text: bool,
+        out: &mut Hints,
+    ) {
         match body {
             SetExpr::Values(values) => {
                 for row in &values.rows {
                     for (expr, column) in row.content.iter().zip(targets) {
                         self.hint_stored(expr, table, column, &Scope::new(), out);
+                        if text {
+                            self.hint_untyped_text(expr, table, column, out);
+                        }
                     }
                 }
             }
@@ -502,19 +534,52 @@ impl<'a> Analyzer<'a> {
                         break;
                     };
                     analyzer.hint_stored(expr, table, column, &scope, out);
+                    if text {
+                        analyzer.hint_untyped_text(expr, table, column, out);
+                    }
                 }
             }
-            // Only `UNION` stores the rows of both sides.
+            // Only `UNION` stores the rows of both sides, and `BY NAME` matches them by name.
             SetExpr::SetOperation {
-                op, left, right, ..
+                op,
+                set_quantifier,
+                left,
+                right,
             } => {
-                self.hint_rows(left, table, targets, out);
-                if *op == SetOperator::Union {
-                    self.hint_rows(right, table, targets, out);
+                self.hint_rows(left, table, targets, true, out);
+                let by_name = matches!(
+                    set_quantifier,
+                    SetQuantifier::ByName
+                        | SetQuantifier::AllByName
+                        | SetQuantifier::DistinctByName
+                );
+                if *op == SetOperator::Union && !by_name {
+                    self.hint_rows(right, table, targets, true, out);
                 }
             }
-            SetExpr::Query(query) => self.hint_rows(&query.body, table, targets, out),
+            SetExpr::Query(query) => self.hint_rows(&query.body, table, targets, text, out),
             _ => {}
+        }
+    }
+
+    /// A bare placeholder stored in a column PostgreSQL can't assign text to is text to a
+    /// driver that sends it untyped (asyncpg).
+    fn hint_untyped_text(&self, value: &Expr, table: &str, column: &str, out: &mut Hints) {
+        if self.dialect != SqlDialect::Postgres {
+            return;
+        }
+        let Some(index) = placeholder_index(value) else {
+            return;
+        };
+        if let Some(col) = self
+            .schema
+            .table(table)
+            .and_then(|columns| columns.iter().find(|col| col.name == column))
+        {
+            let typed = col.typed(self.dialect);
+            if is_typed(&typed) && !is_text(&typed) {
+                out.add_untyped_text(index);
+            }
         }
     }
 
@@ -1353,6 +1418,12 @@ mod tests {
                 "UPDATE users SET (name, age) = (%s, %s)",
                 vec!["str!", "int?"],
             ),
+            (
+                "postgres",
+                "UPDATE users SET (name, age) = f(%s)",
+                vec!["-"],
+            ),
+            ("postgres", "INSERT INTO users (id) TABLE users", vec![]),
             (
                 "postgres",
                 "UPDATE users SET nope = %s + INTERVAL '1 day'",
