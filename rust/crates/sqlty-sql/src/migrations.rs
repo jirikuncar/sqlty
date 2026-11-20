@@ -15,9 +15,9 @@ use std::ops::{ControlFlow, Range};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use sqlparser::ast::{
-    AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, CopySource, DataType,
-    DetachPartitionMode, Expr, Insert, Merge, ObjectName, ObjectType, SetExpr, Statement,
-    TableConstraint, TableFactor, TableObject,
+    AlterColumnOperation, AlterTableOperation, AlterType, AlterTypeOperation, CascadeOption,
+    ColumnDef, ColumnOption, CopySource, DataType, DetachPartitionMode, Expr, Insert, Merge,
+    ObjectName, ObjectType, SetExpr, Statement, TableConstraint, TableFactor, TableObject,
 };
 
 use crate::analyzer::{parse_ddl, SqlDialect};
@@ -99,6 +99,9 @@ struct Session {
     /// Set by `SET LOCAL`, until the transaction ends.
     local_timeout: bool,
     reported_timeout: bool,
+    /// The enum values `ALTER TYPE ... ADD VALUE` added in the open transaction, as string
+    /// literals, with their type.
+    added_values: Vec<(String, String)>,
 }
 
 impl Model {
@@ -134,6 +137,19 @@ impl Model {
                     Some(parsed) => self.judge(parsed, &mut report),
                     None => self.judge_tokens(&stmt, &tokens, &mut report),
                 };
+                if let Some(used) = session
+                    .added_values
+                    .iter()
+                    .position(|(value, _)| tokens.contains(&value.to_lowercase()))
+                {
+                    let (value, ty) = session.added_values.remove(used);
+                    report(
+                        Rule::EnumValueInTransaction,
+                        format!(
+                            "{value} was added to `{ty}` in this transaction: PostgreSQL refuses a new enum value until the transaction that added it commits, so `COMMIT` after `ADD VALUE`"
+                        ),
+                    );
+                }
                 if judged.concurrently && session.transaction {
                     report(
                         Rule::ConcurrentlyInTransaction,
@@ -146,6 +162,14 @@ impl Model {
                         Rule::MissingLockTimeout,
                         "takes a lock that blocks writes without `SET lock_timeout` first: while it waits for the lock, the queries it blocks wait behind it".to_string(),
                     );
+                }
+                if let Some(Statement::AlterType(AlterType {
+                    name,
+                    operation: AlterTypeOperation::AddValue(add),
+                })) = parsed.as_ref().filter(|_| session.transaction)
+                {
+                    let value = format!("'{}'", add.value.value.replace('\'', "''"));
+                    session.added_values.push((value, name.to_string()));
                 }
                 let created = parsed.as_ref().and_then(created);
                 if let Some(created) = created.filter(|c| !self.tables.contains(c)) {
@@ -255,6 +279,15 @@ impl Model {
     fn judge(&self, stmt: &Statement, report: &mut impl FnMut(Rule, String)) -> Judged {
         match stmt {
             Statement::CreateIndex(index) => {
+                if index.concurrently && index.if_not_exists && !self.is_new(&index.table_name) {
+                    report(
+                        Rule::ConcurrentIndexIfNotExists,
+                        format!(
+                            "a failed `CREATE INDEX CONCURRENTLY` leaves an invalid index on `{}`, and `IF NOT EXISTS` then skips building it again: `DROP INDEX CONCURRENTLY IF EXISTS` first and create it without `IF NOT EXISTS`",
+                            index.table_name
+                        ),
+                    );
+                }
                 if !index.concurrently && !self.is_new(&index.table_name) {
                     report(
                         Rule::MissingConcurrently,
@@ -301,6 +334,27 @@ impl Model {
                 Judged::default()
             }
             Statement::Lock(_) => Judged::strong(),
+            Statement::Truncate(truncate) => {
+                let created = truncate
+                    .table_names
+                    .iter()
+                    .all(|target| self.is_new(&target.name));
+                if !created && truncate.cascade == Some(CascadeOption::Cascade) {
+                    let names: Vec<String> = truncate
+                        .table_names
+                        .iter()
+                        .map(|target| format!("`{}`", target.name))
+                        .collect();
+                    report(
+                        Rule::TruncateCascade,
+                        format!(
+                            "`TRUNCATE ... CASCADE` also empties every table with a foreign key to {}, and the tables that reference those: truncate the tables by name",
+                            names.join(", ")
+                        ),
+                    );
+                }
+                Judged::strong_unless(created)
+            }
             Statement::AlterTable(alter) => {
                 if self.is_new(&alter.name) {
                     return Judged::default();
@@ -400,8 +454,34 @@ impl Model {
                 TableConstraint::Unique(_) | TableConstraint::PrimaryKey(_) => {
                     report(Rule::MissingConcurrently, unique_message(written));
                 }
+                TableConstraint::Exclude(_) => {
+                    report(
+                        Rule::ConstraintScan,
+                        format!(
+                            "the exclusion constraint builds its index over every row of `{written}` under an ACCESS EXCLUSIVE lock, and PostgreSQL has no `NOT VALID` or `CONCURRENTLY` for it: add it while the table is small"
+                        ),
+                    );
+                }
                 _ => {}
             },
+            AlterTableOperation::SetLogged | AlterTableOperation::SetUnlogged => {
+                report(
+                    Rule::TableRewrite,
+                    format!(
+                        "`{op}` rewrites `{written}` under an ACCESS EXCLUSIVE lock: create the table that way, or copy the rows into a new one"
+                    ),
+                );
+            }
+            AlterTableOperation::DisableTrigger { name }
+                if name.value.eq_ignore_ascii_case("all") =>
+            {
+                report(
+                    Rule::DisableTriggerAll,
+                    format!(
+                        "`DISABLE TRIGGER ALL` also turns off the foreign key checks of `{written}`: rows written meanwhile are never checked; disable `USER` triggers or name them"
+                    ),
+                );
+            }
             _ => {}
         }
     }
@@ -427,20 +507,25 @@ impl Model {
                 Judged::concurrently(concurrently)
             }
             ["cluster", ..] => {
-                let table: String = stmt.tokens()[1..]
-                    .iter()
-                    .skip_while(|t| t.eq_ignore_ascii_case("verbose"))
-                    .take_while(|t| !t.eq_ignore_ascii_case("using"))
-                    .map(|t| match t.strip_prefix('"') {
-                        Some(quoted) => quoted.trim_end_matches('"').to_string(),
-                        None => t.to_lowercase(),
-                    })
-                    .collect();
-                let table = table.strip_prefix("public.").unwrap_or(&table);
-                if !self.created.contains(table) {
+                let table = token_name(&stmt.tokens()[1..], &["verbose"], "using");
+                if !self.created.contains(&table) {
                     report(Rule::TableRewrite, rewrite_command_message("CLUSTER"));
                 }
                 Judged::default()
+            }
+            ["alter", "table", .., "set", "tablespace", _] => {
+                let skip = ["if", "exists", "only"];
+                let table = token_name(&stmt.tokens()[2..], &skip, "set");
+                let created = self.created.contains(&table);
+                if !created {
+                    report(
+                        Rule::TableRewrite,
+                        format!(
+                            "`SET TABLESPACE` copies `{table}` under an ACCESS EXCLUSIVE lock, blocking reads and writes until it finishes: move it online with pg_repack, outside migrations"
+                        ),
+                    );
+                }
+                Judged::strong_unless(created)
             }
             _ => Judged::default(),
         }
@@ -459,6 +544,7 @@ impl Session {
             ["begin", ..] | ["start", "transaction", ..] => self.transaction = true,
             ["commit" | "end" | "rollback" | "abort", ..] => {
                 (self.transaction, self.local_timeout) = (false, false);
+                self.added_values.clear();
             }
             ["reset", "lock_timeout" | "all"] => {
                 (self.lock_timeout, self.local_timeout) = (false, false);
@@ -734,6 +820,24 @@ fn rewrite_command_message(command: &str) -> String {
     )
 }
 
+/// The table name in `tokens` after the leading `skip` words and before `end`, folded and
+/// without the `public` schema.
+fn token_name(tokens: &[&str], skip: &[&str], end: &str) -> String {
+    let table: String = tokens
+        .iter()
+        .skip_while(|t| skip.iter().any(|word| t.eq_ignore_ascii_case(word)))
+        .take_while(|t| !t.eq_ignore_ascii_case(end))
+        .map(|t| match t.strip_prefix('"') {
+            Some(quoted) => quoted.trim_end_matches('"').to_string(),
+            None => t.to_lowercase(),
+        })
+        .collect();
+    match table.strip_prefix("public.") {
+        Some(rest) => rest.to_string(),
+        None => table,
+    }
+}
+
 /// `name` as PostgreSQL folds it, without the `public` schema.
 fn key(name: &ObjectName) -> String {
     let parts: Vec<String> = name
@@ -849,6 +953,18 @@ mod tests {
             ("ALTER TABLE events DETACH PARTITION events_2020", &[MissingConcurrently]),
             ("ALTER TABLE events DETACH PARTITION events_2020 CONCURRENTLY", &[]),
             ("ALTER TABLE users RENAME COLUMN bio TO about", &[]),
+            ("ALTER TABLE users SET LOGGED", &[TableRewrite]),
+            ("ALTER TABLE users SET UNLOGGED", &[TableRewrite]),
+            ("ALTER TABLE users SET TABLESPACE fast", &[TableRewrite]),
+            ("ALTER TABLE IF EXISTS ONLY public.users SET TABLESPACE fast", &[TableRewrite]),
+            ("ALTER TABLE users ADD CONSTRAINT no_overlap EXCLUDE USING gist (team_id WITH =)", &[ConstraintScan]),
+            ("ALTER TABLE users DISABLE TRIGGER ALL", &[DisableTriggerAll]),
+            ("ALTER TABLE users DISABLE TRIGGER USER", &[]),
+            ("ALTER TABLE users DISABLE TRIGGER audit", &[]),
+            ("CREATE INDEX CONCURRENTLY IF NOT EXISTS users_bio ON users (bio)", &[ConcurrentIndexIfNotExists]),
+            ("CREATE INDEX IF NOT EXISTS users_bio ON users (bio)", &[MissingConcurrently]),
+            ("TRUNCATE users CASCADE", &[TruncateCascade]),
+            ("TRUNCATE TABLE users, teams", &[]),
             ("LOCK TABLE users", &[]),
             ("DROP TABLE users", &[]),
             ("SELECT 1", &[]),
@@ -964,6 +1080,47 @@ mod tests {
         assert_eq!(rules(USERS, created_as), [MissingConcurrently]);
         let no_data = created_as.replace(" FROM users", " FROM users WITH NO DATA");
         assert_eq!(rules(USERS, &no_data), []);
+    }
+
+    #[test]
+    fn new_tables_are_exempt_from_the_command_rules() {
+        let migration = "CREATE TABLE t (id int);
+            ALTER TABLE t SET TABLESPACE fast;
+            ALTER TABLE t DISABLE TRIGGER ALL;
+            CREATE INDEX CONCURRENTLY IF NOT EXISTS t_id ON t (id);
+            TRUNCATE t CASCADE;";
+        assert_eq!(rules(USERS, migration), []);
+    }
+
+    #[test]
+    fn truncate_takes_a_strong_lock() {
+        assert_eq!(rules(USERS, "TRUNCATE users"), [Rule::MissingLockTimeout]);
+    }
+
+    #[test]
+    fn an_enum_value_is_used_only_after_its_transaction_commits() {
+        let migration = |between: &str| {
+            format!(
+                "SET lock_timeout = '1s';
+                BEGIN;
+                ALTER TYPE status ADD VALUE IF NOT EXISTS 'It''s';
+                {between}
+                UPDATE users SET bio = 'It''s' WHERE id = 1;
+                UPDATE users SET bio = 'It''s' WHERE id = 2;
+                COMMIT;"
+            )
+        };
+        assert_eq!(
+            check(USERS, &[&migration("")])[0],
+            [Finding {
+                rule: Rule::EnumValueInTransaction,
+                message: "'It''s' was added to `status` in this transaction: PostgreSQL refuses a new enum value until the transaction that added it commits, so `COMMIT` after `ADD VALUE`".to_string(),
+                span: 148..191,
+            }]
+        );
+        assert_eq!(rules(USERS, &migration("COMMIT; BEGIN;")), []);
+        let outside = "ALTER TYPE status ADD VALUE 'x'; UPDATE users SET bio = 'x';";
+        assert_eq!(rules(USERS, outside), []);
     }
 
     #[test]

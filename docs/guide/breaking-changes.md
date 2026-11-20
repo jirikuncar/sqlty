@@ -259,6 +259,10 @@ are copied into it: `INSERT ... SELECT`, `COPY ... FROM`, `MERGE` or
 | [`table-rewrite`](../reference/rules/table-rewrite.md) | a statement that rewrites the table |
 | [`add-required-column`](../reference/rules/add-required-column.md) | a `NOT NULL` column without a default |
 | [`missing-lock-timeout`](../reference/rules/missing-lock-timeout.md) | a lock that blocks writes taken before `SET lock_timeout` |
+| [`truncate-cascade`](../reference/rules/truncate-cascade.md) | `TRUNCATE ... CASCADE` |
+| [`enum-value-in-transaction`](../reference/rules/enum-value-in-transaction.md) | an enum value used in the transaction that added it |
+| [`concurrent-index-if-not-exists`](../reference/rules/concurrent-index-if-not-exists.md) | `CREATE INDEX CONCURRENTLY IF NOT EXISTS` |
+| [`disable-trigger-all`](../reference/rules/disable-trigger-all.md) | `DISABLE TRIGGER ALL` |
 
 `against.sql`:
 
