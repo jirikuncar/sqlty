@@ -562,9 +562,21 @@ pub(crate) fn index_of(files: &[File], version: Version) -> Arc<HelperIndex> {
     builder.build()
 }
 
-/// `index` with the `functions` of `settings` registered, found among its modules only.
-pub(crate) fn configured(index: &HelperIndex, settings: &FileSettings) -> Arc<HelperIndex> {
+/// A stub as a snapshot keeps it: the module it describes, the name it is read as, its text.
+pub(crate) type StubText = (String, String, Arc<str>);
+
+/// `index` with `stubs` read and the `functions` of `settings` registered, found among
+/// its modules and the stubs only.
+pub(crate) fn configured(
+    index: &HelperIndex,
+    settings: &FileSettings,
+    stubs: &[StubText],
+) -> Arc<HelperIndex> {
     let mut forked = index.fork();
+    for (module, read_as, text) in stubs {
+        let stub = Module::new(Arc::clone(text), read_as, index.version());
+        forked.add_stub(module, Arc::new(stub));
+    }
     for function in &settings.functions {
         forked.register(
             &function.import_path,

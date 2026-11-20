@@ -635,6 +635,37 @@ impl HelperIndex {
         self.outside.is_some()
     }
 
+    /// The stubs the index reads helpers from, each as the module it describes, the name
+    /// it is read as and its text: what [`Builder::add_stub`] takes to index them again,
+    /// as a snapshot of the checked files does.
+    pub fn stubs(&self) -> Vec<(String, String, Arc<str>)> {
+        let entry = |module: &str, stub: &Module| {
+            (
+                module.to_string(),
+                stub.name().to_string(),
+                Arc::clone(&stub.text),
+            )
+        };
+        let mut found: Vec<_> = self
+            .stubs
+            .iter()
+            .map(|(module, stub)| entry(module, stub))
+            .collect();
+        if let Some(outside) = &self.outside {
+            let texts = self.tree.sources.values().map(|module| &*module.text);
+            for module in outside.named(texts) {
+                if let Some(stub) = outside
+                    .stub(module)
+                    .filter(|_| !self.stubs.contains_key(module))
+                {
+                    found.push(entry(module, &stub));
+                }
+            }
+        }
+        found.sort();
+        found
+    }
+
     /// What the module `module` declares, for [`crate::receivers`]. `None` for a module
     /// that is not found or not read.
     pub fn facts(&self, module: &str) -> Option<Arc<Facts>> {

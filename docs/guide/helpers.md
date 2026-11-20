@@ -188,6 +188,10 @@ package, so a directory of stubs for libraries the project does not use costs no
 from the project directory, the roots of the checked packages and `sys.path`:
 `lib-stubs` before `lib`, a `.pyi` before the `.py` beside it.
 
+A marked parameter makes a helper in a checked file or a stub only. A library's own
+`.py` file gives the classes of receivers, and a helper only for a function that
+`[[tool.sqlty.functions]]` names.
+
 The language server asks the editor to report the `.py` and `.pyi` files that change on
 disk. With an editor that does, as VS Code does, it keeps the stubs and libraries it has
 read, and reads one again when the editor saves it or reports the change. With one that

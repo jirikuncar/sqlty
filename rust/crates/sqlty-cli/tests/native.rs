@@ -209,3 +209,41 @@ fn reports_a_server_without_a_client() {
     assert!(err.starts_with("sqlty: error: "), "{err}");
     std::fs::remove_dir_all(&root).expect("removes");
 }
+
+#[test]
+fn a_snapshot_keeps_the_stubs_its_queries_were_found_with() {
+    let config = ("pyproject.toml", "[tool.sqlty]\nschema = \"schema.sql\"\n");
+    let schema = (
+        "schema.sql",
+        "CREATE TABLE users (id INT NOT NULL, bio TEXT);",
+    );
+    let stub = (
+        "typings/lib/__init__.pyi",
+        "from typing import Annotated, LiteralString\nfrom sqlty import SQL\nclass Db:\n    def one(self, sql: Annotated[LiteralString, SQL]): ...\n",
+    );
+    let unused = ("typings/unused/__init__.pyi", "class Unused: ...\n");
+    let query = (
+        "app/a.py",
+        "from lib import Db\ndef run(db: Db) -> None:\n    db.one(\"SELECT bio FROM users\")\n",
+    );
+    let root = project("snapshot-stubs", &[config, schema, stub, unused, query]);
+    let env = [("PATH", "/nonexistent")];
+    let (code, out, err) = sqlty(&root, &["breaking", "--save", "base.json"], &env);
+    assert_eq!(code, 0, "{out}{err}");
+    let saved = std::fs::read_to_string(root.join("base.json")).expect("saved");
+    assert!(saved.contains("\"lib.__init__\""), "{saved}");
+    assert!(
+        !saved.contains("Unused"),
+        "a stub no file names is not kept"
+    );
+    // The stub is gone and the column dropped: the snapshot still finds the query.
+    std::fs::remove_dir_all(root.join("typings")).expect("removes");
+    std::fs::write(root.join("schema.sql"), SCHEMA.1).expect("writes");
+    let (code, out, err) = sqlty(&root, &["breaking", "--against", "base.json"], &env);
+    assert_eq!(code, 1, "{out}{err}");
+    assert!(
+        out.contains("column `bio` does not exist in `users`"),
+        "{out}{err}"
+    );
+    std::fs::remove_dir_all(&root).expect("removes");
+}

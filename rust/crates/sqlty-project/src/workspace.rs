@@ -1702,6 +1702,10 @@ mod tests {
             0,
             "listed only"
         );
+        let settings = workspace.settings(Path::new("/repo/app.py")).unwrap();
+        let kept = workspace.helpers(&settings).stubs();
+        let modules: Vec<&str> = kept.iter().map(|(module, _, _)| module.as_str()).collect();
+        assert_eq!(modules, ["lib"], "what a snapshot keeps");
     }
 
     #[test]
