@@ -96,13 +96,20 @@ SELECT * FROM users;
 by hand.
 
 `-- sqlty: ignore` and `-- sqlty: ignore[rule]` silence the diagnostics of their
-line, and `unused-ignore` reports one that silences nothing:
+line, or of the next line when the comment is alone on its line, and
+`unused-ignore` reports one that silences nothing:
 
 ```sql
 -- name: legacy
 -- error:
 SELECT id, nickname FROM users; -- sqlty: ignore[unknown-column]
+
+-- name: legacy_above
+-- sqlty: ignore[unknown-column]
+SELECT id, nickname FROM users;
 ```
+
+A blank line between the comment and the line below ends it.
 
 `--output-format json`, `github` and `sarif` report them like any other
 diagnostic, with the line and column in the `.sql` file.

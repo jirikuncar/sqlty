@@ -1,7 +1,7 @@
 //! `# sqlty: ignore` comments, and the diagnostics they suppress; `-- sqlty: ignore` in
 //! `.sql` files.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -18,8 +18,11 @@ use crate::types::symbols::Source;
 /// A `# sqlty: ignore` or `# sqlty: ignore[rule, ...]` comment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ignore {
-    /// The 1-based line it is on, whose diagnostics it suppresses.
+    /// The 1-based line it is on.
     pub line: usize,
+    /// The line whose diagnostics it suppresses: `line`, or for a `--` comment alone on its
+    /// line the next one that is not a comment.
+    pub covers: usize,
     /// The rules it names; `None` suppresses every rule.
     pub rules: Option<Vec<String>>,
     /// The byte offsets of the comment.
@@ -62,8 +65,10 @@ pub fn ignores(source: &Source) -> Vec<Ignore> {
         .comments
         .iter()
         .filter_map(|&range| {
+            let line = source.line(range.start());
             Some(Ignore {
-                line: source.line(range.start()),
+                line,
+                covers: line,
                 rules: rules_of(&text[range])?,
                 span: (range.start().to_usize(), range.end().to_usize()),
             })
@@ -86,8 +91,10 @@ pub fn unparsed_ignores(text: &str) -> Vec<Ignore> {
             TokenKind::Comment => {
                 let range = tokens.current_range();
                 if let Some(rules) = rules_of(&text[range]) {
+                    let line = lines.line(range.start().to_usize());
                     found.push(Ignore {
-                        line: lines.line(range.start().to_usize()),
+                        line,
+                        covers: line,
                         rules,
                         span: (range.start().to_usize(), range.end().to_usize()),
                     });
@@ -98,7 +105,9 @@ pub fn unparsed_ignores(text: &str) -> Vec<Ignore> {
     }
 }
 
-/// The `-- sqlty: ignore` comments of a `.sql` file, the first of each line.
+/// The `-- sqlty: ignore` comments of a `.sql` file, the first of each line. One alone on its
+/// line covers the next line that is not a `--` comment; a blank line or the end of the file
+/// first leaves it covering its own line, where it suppresses nothing.
 pub fn sql_ignores(text: &str) -> Vec<Ignore> {
     #[expect(clippy::expect_used, reason = "the pattern is written here")]
     static IGNORE: LazyLock<regex::bytes::Regex> = LazyLock::new(|| {
@@ -109,29 +118,44 @@ pub fn sql_ignores(text: &str) -> Vec<Ignore> {
         return Vec::new();
     }
     let lines = Lines::new(text);
-    let mut found = Vec::new();
+    let mut found: Vec<Ignore> = Vec::new();
+    let mut waiting: Vec<usize> = Vec::new();
     for line in 1.. {
         let start = lines.start(line, text.len());
         if start == text.len() {
             break;
         }
         let end = lines.start(line + 1, text.len());
-        let Some(matched) = IGNORE.captures(&text.as_bytes()[start..end]) else {
-            continue;
-        };
-        let whole = matched.get_match();
-        found.push(Ignore {
-            line,
-            rules: matched.get(1).map(|names| {
-                String::from_utf8_lossy(names.as_bytes())
-                    .split(',')
-                    .map(|name| name.trim_matches(blank))
-                    .filter(|name| !name.is_empty())
-                    .map(str::to_string)
-                    .collect()
-            }),
-            span: (start + whole.start(), start + whole.end()),
-        });
+        let row = &text.as_bytes()[start..end];
+        if let Some(matched) = IGNORE.captures(row) {
+            let whole = matched.get_match();
+            let alone = row[..whole.start()].iter().all(u8::is_ascii_whitespace);
+            found.push(Ignore {
+                line,
+                covers: line,
+                rules: matched.get(1).map(|names| {
+                    String::from_utf8_lossy(names.as_bytes())
+                        .split(',')
+                        .map(|name| name.trim_matches(blank))
+                        .filter(|name| !name.is_empty())
+                        .map(str::to_string)
+                        .collect()
+                }),
+                span: (start + whole.start(), start + whole.end()),
+            });
+            if alone {
+                waiting.push(found.len() - 1);
+                continue;
+            }
+        }
+        let row = row.trim_ascii_start();
+        if row.is_empty() {
+            waiting.clear();
+        } else if !row.starts_with(b"--") {
+            for index in waiting.drain(..) {
+                found[index].covers = line;
+            }
+        }
     }
     found
 }
@@ -160,7 +184,7 @@ pub fn suppressed(
     found
 }
 
-/// `apply_suppressions`: `diagnostics` without those a comment on their line suppresses,
+/// `apply_suppressions`: `diagnostics` without those a comment covering their line suppresses,
 /// then an `unused-ignore` for each comment, or rule of one, that suppresses nothing.
 pub fn apply(ignores: &[Ignore], diagnostics: Vec<Reported>, rules: &RuleConfig) -> Vec<Reported> {
     apply_marked(ignores, diagnostics, rules, "#")
@@ -195,26 +219,30 @@ fn apply_marked(
     if ignores.is_empty() || diagnostics.iter().any(crashed) {
         return diagnostics;
     }
+    let mut covering: HashMap<usize, Vec<&Ignore>> = HashMap::new();
+    for ignore in ignores {
+        covering.entry(ignore.covers).or_default().push(ignore);
+    }
     let mut kept = Vec::new();
     let mut used: HashSet<(usize, Option<&str>)> = HashSet::new();
     for reported in diagnostics {
-        let diagnostic = &reported.diagnostic;
-        let rule = diagnostic.rule.name();
-        let ignore = ignores.iter().find(|ignore| ignore.line == diagnostic.line);
-        match ignore {
-            Some(Ignore {
-                line, rules: None, ..
-            }) => {
-                used.insert((*line, None));
+        let rule = reported.diagnostic.rule.name();
+        let found = covering
+            .get(&reported.diagnostic.line)
+            .into_iter()
+            .flatten()
+            .find_map(|ignore| match &ignore.rules {
+                None => Some((ignore.line, None)),
+                Some(names) => names
+                    .iter()
+                    .any(|name| name == rule)
+                    .then_some((ignore.line, Some(rule))),
+            });
+        match found {
+            Some(key) => {
+                used.insert(key);
             }
-            Some(Ignore {
-                line,
-                rules: Some(names),
-                ..
-            }) if names.iter().any(|name| name == rule) => {
-                used.insert((*line, Some(rule)));
-            }
-            _ => kept.push(reported),
+            None => kept.push(reported),
         }
     }
     if rules.is_enabled(Rule::UnusedIgnore) {
@@ -323,7 +351,7 @@ mod tests {
     #[test]
     fn sql_comments_suppress_on_their_line() {
         let text =
-            "-- name: a\nSELECT 1; -- sqlty: ignore[x, y ]\r\n--sqlty:ignore\r-- sqlty: ignored\n";
+            "-- name: a\nSELECT 1; -- sqlty: ignore[x, y ]\r\n--sqlty:ignore\r-- sqlty: ignored\nSELECT 2;\n";
         let found = sql_ignores(text);
         assert_eq!(
             lines_and_rules(&found),
@@ -341,7 +369,7 @@ mod tests {
             fix: Vec::new(),
         };
         let rules = RuleConfig::default().only(&[Rule::SelectStar, Rule::UnusedIgnore]);
-        let kept = apply_sql(&found, vec![diagnostic(Rule::SelectStar, 3)], &rules);
+        let kept = apply_sql(&found, vec![diagnostic(Rule::SelectStar, 5)], &rules);
         let messages: Vec<_> = kept.iter().map(|found| found.message.as_str()).collect();
         assert_eq!(
             messages,
@@ -352,16 +380,80 @@ mod tests {
         );
     }
 
+    fn covers(text: &str) -> Vec<(usize, usize)> {
+        sql_ignores(text)
+            .iter()
+            .map(|ignore| (ignore.line, ignore.covers))
+            .collect()
+    }
+
+    #[test]
+    fn a_sql_comment_alone_on_its_line_covers_the_next_statement() {
+        assert_eq!(covers("-- sqlty: ignore\nSELECT 1;\n"), [(1, 2)]);
+        assert_eq!(
+            covers("-- sqlty: ignore[a]\n-- sqlty: ignore[b]\nSELECT 1;\n"),
+            [(1, 3), (2, 3)]
+        );
+        assert_eq!(
+            covers("-- sqlty: ignore\n-- name: q\n-- error: x\nSELECT 1;"),
+            [(1, 4)]
+        );
+        assert_eq!(covers("-- sqlty: ignore\n\nSELECT 1;\n"), [(1, 1)]);
+        assert_eq!(covers("-- sqlty: ignore\n  \t\nSELECT 1;\n"), [(1, 1)]);
+        assert_eq!(covers("SELECT 1;\n-- sqlty: ignore\n"), [(2, 2)]);
+        assert_eq!(covers("SELECT 1;\n-- sqlty: ignore\n-- note"), [(2, 2)]);
+        assert_eq!(covers("-- sqlty: ignore\r\nSELECT 1;\r\n"), [(1, 2)]);
+        assert_eq!(covers("\t-- sqlty: ignore\n\tSELECT 1;\n"), [(1, 2)]);
+        assert_eq!(
+            covers("SELECT 'é\u{1F600}'; -- sqlty: ignore\nSELECT 1;"),
+            [(1, 1)]
+        );
+        assert_eq!(covers("  -- sqlty: ignore\r\n\tSELECT 1;"), [(1, 2)]);
+        assert_eq!(covers("SELECT 1; -- sqlty: ignore\nSELECT 2;"), [(1, 1)]);
+        assert_eq!(
+            covers("-- sqlty: ignore[a]\nSELECT 1; -- sqlty: ignore[b]\n"),
+            [(1, 2), (2, 2)]
+        );
+        assert_eq!(
+            covers("-- sqlty: ignore\nSELECT 1;\n-- sqlty: ignore\n\nSELECT 2;"),
+            [(1, 2), (3, 3)]
+        );
+        let many = "-- sqlty: ignore\n".repeat(1000) + "SELECT 1;";
+        assert!(covers(&many).iter().all(|&(_, covered)| covered == 1001));
+    }
+
+    #[test]
+    fn a_second_comment_for_one_statement_is_unused() {
+        let text =
+            "-- sqlty: ignore[select-star]\nSELECT * FROM t; -- sqlty: ignore[select-star]\n";
+        let diagnostic = Diagnostic {
+            rule: Rule::SelectStar,
+            message: String::new(),
+            severity: crate::rules::Severity::Error,
+            line: 2,
+            span: 0..1,
+            fix: Vec::new(),
+        };
+        let rules = RuleConfig::default().only(&[Rule::SelectStar, Rule::UnusedIgnore]);
+        let kept = apply_sql(&sql_ignores(text), vec![diagnostic], &rules);
+        let [unused] = kept.as_slice() else {
+            panic!("{kept:?}");
+        };
+        assert_eq!((unused.rule, unused.line), (Rule::UnusedIgnore, 2));
+    }
+
     #[test]
     fn fixes_skip_suppressed_lines_and_the_strings_of_helper_calls() {
         let ignores = [
             Ignore {
                 line: 1,
+                covers: 1,
                 rules: None,
                 span: (0, 1),
             },
             Ignore {
                 line: 2,
+                covers: 2,
                 rules: Some(vec!["select-star".to_string()]),
                 span: (0, 1),
             },

@@ -66,4 +66,4 @@ in the `postgres` dialect, on the statements of the
 not have. A statement uses the value when the literal casts to the type, or the
 statement names a column of the type or no table the schema knows; the label is
 compared case-sensitively. `-- sqlty: ignore[enum-value-in-transaction]` on the
-first line of a statement drops it.
+first line of a statement, or alone on the line above it, drops it.

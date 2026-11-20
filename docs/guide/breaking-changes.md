@@ -277,6 +277,13 @@ ALTER TABLE users ADD COLUMN token UUID DEFAULT gen_random_uuid(); -- sqlty: ign
 CREATE INDEX users_email ON users (email);
 ```
 
+A comment alone on the line above a statement drops its findings too:
+
+```sql migration
+-- sqlty: ignore[missing-lock-timeout]
+ALTER TABLE users ADD COLUMN token UUID DEFAULT gen_random_uuid(); -- sqlty: ignore[table-rewrite]
+```
+
 The findings name the migration and the baseline:
 
 ```text

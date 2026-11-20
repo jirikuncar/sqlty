@@ -5,8 +5,8 @@ use crate::rules::{Rule, RuleConfig};
 use crate::suppress::{apply_sql, sql_ignores};
 
 /// The diagnostics of each of `files`, PostgreSQL migrations in the order they run, for the
-/// statements `baseline` does not have. `-- sqlty: ignore[rule]` on a statement's first line
-/// drops its diagnostic.
+/// statements `baseline` does not have. `-- sqlty: ignore[rule]` on a statement's first line,
+/// or alone on the line above it, drops its diagnostic.
 pub fn check_migrations(
     baseline: &str,
     files: &[&str],
@@ -89,5 +89,11 @@ mod tests {
             &rules(&[("unused-ignore", "error")]),
         );
         assert!(found.len() == 1 && found[0].is_empty(), "{found:?}");
+        let above = "SET lock_timeout = '1s';\n-- sqlty: ignore[missing-concurrently]\nCREATE INDEX i ON users (bio);";
+        let found = check_migrations(BASELINE, &[above], &rules(&[]));
+        assert!(found[0].is_empty(), "{found:?}");
+        let apart = above.replace("]\nCREATE", "]\n\nCREATE");
+        let found = check_migrations(BASELINE, &[&apart], &rules(&[]));
+        assert_eq!(found[0].len(), 1, "{found:?}");
     }
 }
