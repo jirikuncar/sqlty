@@ -107,6 +107,8 @@ struct Model {
     primary_keys: FxHashMap<String, PrimaryKey>,
     /// The replica identity of each table that set one other than its primary key.
     identities: FxHashMap<String, Identity>,
+    /// The columns of each unique index, by schema-qualified name.
+    unique_indexes: FxHashMap<String, Vec<String>>,
 }
 
 struct PrimaryKey {
@@ -116,6 +118,7 @@ struct PrimaryKey {
 
 enum Identity {
     Full,
+    /// The schema-qualified name of the index.
     Index(String),
     Nothing,
 }
@@ -179,6 +182,7 @@ impl Model {
                 _ => true,
             };
             let (parsed, likes) = parse(&stmt).unzip();
+            let dropped = dropped_indexes(parsed.as_ref(), &tokens);
             if new {
                 let mut report = |rule: Rule, message: String| {
                     found.push(Finding {
@@ -266,11 +270,11 @@ impl Model {
                         .dropped_keys
                         .retain(|(dropped, _)| *dropped != table || !restores_identity(alter));
                 }
-                if let Some(table) = parsed
+                let lost = parsed
                     .as_ref()
                     .and_then(|parsed| self.loses_identity(parsed))
-                    .filter(|table| !self.created.contains(table))
-                {
+                    .or_else(|| dropped.iter().find_map(|index| self.identity_of(index)));
+                if let Some(table) = lost.filter(|table| !self.created.contains(table)) {
                     let finding = Finding {
                         rule: Rule::DropPrimaryKey,
                         message: format!(
@@ -305,7 +309,22 @@ impl Model {
                     self.created.remove(&filled);
                 }
             }
+            for index in &dropped {
+                self.drop_index(index);
+            }
             if let Some(parsed) = &parsed {
+                if let Statement::AlterTable(alter) = parsed {
+                    for op in &alter.operations {
+                        if let AlterTableOperation::RenameTable { table_name } = op {
+                            let renamed = renamed_table(&key(&alter.name), table_name);
+                            for (table, _) in &mut session.dropped_keys {
+                                if *table == key(&alter.name) {
+                                    table.clone_from(&renamed);
+                                }
+                            }
+                        }
+                    }
+                }
                 self.apply(parsed, &likes.unwrap_or_default());
             }
         }
@@ -318,9 +337,15 @@ impl Model {
     fn parse_if_shaping(&self, stmt: &Raw) -> Option<(Statement, Vec<String>)> {
         let tokens = stmt.tokens();
         let shaping = match tokens.as_slice() {
+            [create, unique, ..]
+                if create.eq_ignore_ascii_case("create")
+                    && unique.eq_ignore_ascii_case("unique") =>
+            {
+                true
+            }
             [create, ..] if create.eq_ignore_ascii_case("create") => stmt.is_create_table(),
-            [alter, table, ..] => {
-                alter.eq_ignore_ascii_case("alter") && table.eq_ignore_ascii_case("table")
+            [alter, index, ..] if alter.eq_ignore_ascii_case("alter") => {
+                index.eq_ignore_ascii_case("table") || index.eq_ignore_ascii_case("index")
             }
             _ => false,
         };
@@ -363,11 +388,7 @@ impl Model {
                         .any(|option| matches!(option.option, ColumnOption::PrimaryKey(_)))
                 });
                 if let Some(column) = inline_key {
-                    let key = PrimaryKey {
-                        name: default_key_name(&table),
-                        columns: vec![name(&column.name)],
-                    };
-                    self.primary_keys.insert(table.clone(), key);
+                    self.record_column_key(&table, column);
                 }
                 if let Some(by) = &create.partition_by {
                     let columns: Vec<String> = create
@@ -415,17 +436,21 @@ impl Model {
             Statement::AlterIndex {
                 name: index,
                 operation: AlterIndexOperation::RenameIndex { index_name },
-            } => self.rename_index(&last_name(index), &last_name(index_name)),
-            Statement::Drop {
-                object_type: ObjectType::Index,
-                names,
-                ..
             } => {
-                for index in names {
-                    self.drop_index(&last_name(index));
-                }
+                let old = key(index);
+                let new = qualify(&old, &last_name(index_name));
+                self.rename_index(&old, &new);
             }
             Statement::CreateIndex(index) if index.unique && index.predicate.is_none() => {
+                if let Some(index_name) = &index.name {
+                    let columns = index
+                        .columns
+                        .iter()
+                        .flat_map(|column| words(&column.column.expr.to_string()))
+                        .collect();
+                    let qualified = qualify(&key(&index.table_name), &last_name(index_name));
+                    self.unique_indexes.insert(qualified, columns);
+                }
                 if let [column] = index.columns.as_slice() {
                     self.keys.insert((
                         key(&index.table_name),
@@ -446,6 +471,9 @@ impl Model {
                     column_def.data_type.clone(),
                 );
                 self.require(table, column_def);
+                if is_key_column(column_def) {
+                    self.record_column_key(table, column_def);
+                }
             }
             AlterTableOperation::AlterColumn {
                 column_name,
@@ -467,7 +495,7 @@ impl Model {
             AlterTableOperation::ReplicaIdentity { identity } => {
                 let identity = match identity {
                     ReplicaIdentity::Full => Identity::Full,
-                    ReplicaIdentity::Index(index) => Identity::Index(name(index)),
+                    ReplicaIdentity::Index(index) => Identity::Index(qualify(table, &name(index))),
                     ReplicaIdentity::Nothing => Identity::Nothing,
                     ReplicaIdentity::Default => {
                         self.identities.remove(table);
@@ -485,19 +513,21 @@ impl Model {
                 if keyed {
                     self.primary_keys.remove(table);
                 }
+                if let Some(Identity::Index(index)) = self.identities.get(table) {
+                    let columns = self.index_columns(table, index).unwrap_or_default();
+                    if columns.iter().any(|column| dropped.contains(column)) {
+                        self.identities.insert(table.to_string(), Identity::Nothing);
+                    }
+                }
             }
             AlterTableOperation::RenameConstraint { old_name, new_name } => {
-                self.rename_index(&name(old_name), &name(new_name));
+                self.rename_index(
+                    &qualify(table, &name(old_name)),
+                    &qualify(table, &name(new_name)),
+                );
             }
             AlterTableOperation::RenameTable { table_name } => {
-                let (RenameTableNameKind::As(renamed) | RenameTableNameKind::To(renamed)) =
-                    table_name;
-                let renamed = match table.rsplit_once('.') {
-                    Some((schema, _)) if renamed.0.len() == 1 => {
-                        format!("{schema}.{}", key(renamed))
-                    }
-                    _ => key(renamed),
-                };
+                let renamed = renamed_table(table, table_name);
                 if let Some(primary_key) = self.primary_keys.remove(table) {
                     self.primary_keys.insert(renamed.clone(), primary_key);
                 }
@@ -513,7 +543,7 @@ impl Model {
             }
             AlterTableOperation::DropConstraint { name: dropped, .. } => {
                 let dropped = name(dropped);
-                self.drop_index(&dropped);
+                self.drop_index(&qualify(table, &dropped));
                 if let Some(checks) = self.checks.get_mut(table) {
                     checks.retain(|check| check.name.as_ref() != Some(&dropped));
                 }
@@ -575,31 +605,64 @@ impl Model {
 
     fn record_primary_key(&mut self, table: &str, constraint: &TableConstraint) {
         let key = match constraint {
-            TableConstraint::PrimaryKey(key) => key
-                .name
-                .as_ref()
-                .map_or_else(|| default_key_name(table), name),
-            TableConstraint::PrimaryKeyUsingIndex(key) => {
-                name(key.name.as_ref().unwrap_or(&key.index_name))
-            }
+            TableConstraint::PrimaryKey(key) => PrimaryKey {
+                name: key
+                    .name
+                    .as_ref()
+                    .map_or_else(|| default_key_name(table), name),
+                columns: key
+                    .columns
+                    .iter()
+                    .flat_map(|column| words(&column.column.expr.to_string()))
+                    .collect(),
+            },
+            TableConstraint::PrimaryKeyUsingIndex(key) => PrimaryKey {
+                name: name(key.name.as_ref().unwrap_or(&key.index_name)),
+                columns: self
+                    .unique_indexes
+                    .get(&qualify(table, &name(&key.index_name)))
+                    .cloned()
+                    .unwrap_or_default(),
+            },
             _ => return,
         };
-        let columns = match constraint {
-            TableConstraint::PrimaryKey(key) => key
-                .columns
-                .iter()
-                .flat_map(|column| words(&column.column.expr.to_string()))
-                .collect(),
-            _ => Vec::new(),
-        };
-        let key = PrimaryKey { name: key, columns };
         self.primary_keys.insert(table.to_string(), key);
     }
 
-    /// Forget the primary key or replica identity index named `index`: a replica identity
-    /// index that is dropped leaves the table with none.
+    /// Record the primary key `column` declares.
+    fn record_column_key(&mut self, table: &str, column: &ColumnDef) {
+        let named = column
+            .options
+            .iter()
+            .find_map(|option| match option.option {
+                ColumnOption::PrimaryKey(_) => Some(option.name.as_ref()),
+                _ => None,
+            });
+        let key = PrimaryKey {
+            name: named
+                .flatten()
+                .map_or_else(|| default_key_name(table), name),
+            columns: vec![name(&column.name)],
+        };
+        self.primary_keys.insert(table.to_string(), key);
+    }
+
+    /// The columns of the unique index `index` of `table`, its primary key's included.
+    fn index_columns(&self, table: &str, index: &str) -> Option<Vec<String>> {
+        self.unique_indexes.get(index).cloned().or_else(|| {
+            self.primary_keys
+                .get(table)
+                .filter(|key| qualify(table, &key.name) == index)
+                .map(|key| key.columns.clone())
+        })
+    }
+
+    /// Forget the primary key, unique index or replica identity index named `index`, schema
+    /// qualified: a replica identity index that is dropped leaves the table with none.
     fn drop_index(&mut self, index: &str) {
-        self.primary_keys.retain(|_, key| key.name != index);
+        self.primary_keys
+            .retain(|table, key| qualify(table, &key.name) != index);
+        self.unique_indexes.remove(index);
         for identity in self.identities.values_mut() {
             if matches!(identity, Identity::Index(name) if name == index) {
                 *identity = Identity::Nothing;
@@ -607,12 +670,17 @@ impl Model {
         }
     }
 
-    /// Follow a renamed constraint or index: a primary key and its index share their name.
+    /// Follow a renamed constraint or index, schema qualified: a primary key and its index
+    /// share their name.
     fn rename_index(&mut self, old: &str, new: &str) {
-        for key in self.primary_keys.values_mut() {
-            if key.name == old {
-                key.name = new.to_string();
+        let renamed = new.rsplit('.').next().unwrap_or(new);
+        for (table, key) in &mut self.primary_keys {
+            if qualify(table, &key.name) == old {
+                key.name = renamed.to_string();
             }
+        }
+        if let Some(columns) = self.unique_indexes.remove(old) {
+            self.unique_indexes.insert(new.to_string(), columns);
         }
         for identity in self.identities.values_mut() {
             if let Identity::Index(name) = identity {
@@ -640,7 +708,7 @@ impl Model {
             AlterTableOperation::DropConstraint { name: dropped, .. } => {
                 let dropped = name(dropped);
                 match identity {
-                    Some(Identity::Index(index)) => *index == dropped,
+                    Some(Identity::Index(index)) => *index == qualify(table, &dropped),
                     Some(_) => false,
                     None => match self.primary_keys.get(table) {
                         Some(key) => key.name == dropped,
@@ -649,48 +717,51 @@ impl Model {
                 }
             }
             AlterTableOperation::DropColumn { column_names, .. } => {
-                identity.is_none()
-                    && self.primary_keys.get(table).is_some_and(|key| {
-                        column_names
-                            .iter()
-                            .any(|column| key.columns.contains(&name(column)))
-                    })
+                let columns = match identity {
+                    Some(Identity::Index(index)) => self.index_columns(table, index),
+                    Some(_) => None,
+                    None => self.primary_keys.get(table).map(|key| key.columns.clone()),
+                };
+                let columns = columns.unwrap_or_default();
+                column_names
+                    .iter()
+                    .any(|column| columns.contains(&name(column)))
             }
-            AlterTableOperation::ReplicaIdentity {
-                identity: ReplicaIdentity::Nothing,
-            } => self.has_identity(table),
+            AlterTableOperation::ReplicaIdentity { identity: set } => match set {
+                ReplicaIdentity::Nothing => self.has_identity(table),
+                ReplicaIdentity::Default => {
+                    identity.is_some()
+                        && !self.primary_keys.contains_key(table)
+                        && self.tables.contains(table)
+                }
+                _ => false,
+            },
             _ => false,
         }
     }
 
     /// The table `stmt` leaves without a replica identity.
     fn loses_identity(&self, stmt: &Statement) -> Option<String> {
-        match stmt {
-            Statement::AlterTable(alter) => {
-                let table = key(&alter.name);
-                let mut lost = false;
-                for op in &alter.operations {
-                    if restores_identity_op(op) {
-                        lost = false;
-                    } else if self.removes_identity(&table, op) {
-                        lost = true;
-                    }
-                }
-                lost.then_some(table)
+        let Statement::AlterTable(alter) = stmt else {
+            return None;
+        };
+        let table = key(&alter.name);
+        let mut lost = false;
+        for op in &alter.operations {
+            if restores_identity_op(op) {
+                lost = false;
+            } else if self.removes_identity(&table, op) {
+                lost = true;
             }
-            Statement::Drop {
-                object_type: ObjectType::Index,
-                names,
-                ..
-            } => names.iter().find_map(|index| {
-                let index = last_name(index);
-                self.identities.iter().find_map(|(table, identity)| {
-                    matches!(identity, Identity::Index(name) if *name == index)
-                        .then(|| table.clone())
-                })
-            }),
-            _ => None,
         }
+        lost.then_some(table)
+    }
+
+    /// The table whose replica identity is the index `index`, schema qualified.
+    fn identity_of(&self, index: &str) -> Option<String> {
+        self.identities.iter().find_map(|(table, identity)| {
+            matches!(identity, Identity::Index(name) if name == index).then(|| table.clone())
+        })
     }
 
     fn require(&mut self, table: &str, column: &ColumnDef) {
@@ -1571,6 +1642,59 @@ fn foreign_keys(stmt: &Statement) -> Vec<String> {
     tables
 }
 
+fn is_key_column(column: &ColumnDef) -> bool {
+    column
+        .options
+        .iter()
+        .any(|option| matches!(option.option, ColumnOption::PrimaryKey(_)))
+}
+
+/// `name` in the schema of `table`: indexes and constraints live in their table's schema.
+fn qualify(table: &str, name: &str) -> String {
+    match table.rsplit_once('.') {
+        Some((schema, _)) => format!("{schema}.{name}"),
+        None => name.to_string(),
+    }
+}
+
+/// The new name of `table` after `RENAME TO`, which keeps its schema.
+fn renamed_table(table: &str, renamed: &RenameTableNameKind) -> String {
+    let (RenameTableNameKind::As(renamed) | RenameTableNameKind::To(renamed)) = renamed;
+    match renamed.0.as_slice() {
+        [_] => qualify(table, &key(renamed)),
+        _ => key(renamed),
+    }
+}
+
+/// The schema-qualified indexes a `DROP INDEX` drops; sqlparser does not read it with
+/// `CONCURRENTLY`.
+fn dropped_indexes(parsed: Option<&Statement>, tokens: &[String]) -> Vec<String> {
+    match parsed {
+        Some(Statement::Drop {
+            object_type: ObjectType::Index,
+            names,
+            ..
+        }) => names.iter().map(key).collect(),
+        Some(_) => Vec::new(),
+        None => match tokens {
+            [drop, index, rest @ ..] if drop == "drop" && index == "index" => {
+                let names: String = rest
+                    .iter()
+                    .skip_while(|token| matches!(token.as_str(), "concurrently" | "if" | "exists"))
+                    .take_while(|token| !matches!(token.as_str(), "cascade" | "restrict" | ";"))
+                    .map(|token| token.trim_matches('"'))
+                    .collect();
+                names
+                    .split(',')
+                    .filter(|name| !name.is_empty())
+                    .map(|name| name.strip_prefix("public.").unwrap_or(name).to_string())
+                    .collect()
+            }
+            _ => Vec::new(),
+        },
+    }
+}
+
 /// The name PostgreSQL gives the primary key of `table` when it names none, cut to fit the
 /// 63 bytes of an identifier.
 fn default_key_name(table: &str) -> String {
@@ -1589,6 +1713,7 @@ fn restores_identity(alter: &AlterTable) -> bool {
 
 fn restores_identity_op(op: &AlterTableOperation) -> bool {
     match op {
+        AlterTableOperation::AddColumn { column_def, .. } => is_key_column(column_def),
         AlterTableOperation::AddConstraint {
             constraint: TableConstraint::PrimaryKey(_) | TableConstraint::PrimaryKeyUsingIndex(_),
             ..
@@ -2137,7 +2262,13 @@ mod tests {
         let against = "CREATE TABLE a (id int PRIMARY KEY, u int NOT NULL UNIQUE);
             CREATE TABLE b (id int, CONSTRAINT b_key PRIMARY KEY (id));
             CREATE TABLE c (id int);
-            CREATE TABLE s.d (id int PRIMARY KEY);";
+            CREATE TABLE s.d (id int PRIMARY KEY);
+            CREATE UNIQUE INDEX a_u ON a (u);
+            CREATE TABLE n (id int CONSTRAINT n_named PRIMARY KEY);
+            CREATE TABLE s1.t (id int PRIMARY KEY, u int NOT NULL);
+            CREATE UNIQUE INDEX t_u ON s1.t (u);
+            CREATE TABLE s2.t (id int PRIMARY KEY, u int NOT NULL);
+            CREATE UNIQUE INDEX t_u ON s2.t (u);";
         for (migration, expected) in [
             ("ALTER TABLE a DROP CONSTRAINT a_pkey", &[DropPrimaryKey][..]),
             ("ALTER TABLE b DROP CONSTRAINT b_key", &[DropPrimaryKey]),
@@ -2167,6 +2298,30 @@ mod tests {
             ("ALTER TABLE c DROP CONSTRAINT c_pkey", &[]),
             ("ALTER TABLE c REPLICA IDENTITY NOTHING", &[]),
             ("ALTER TABLE unknown DROP CONSTRAINT unknown_pkey", &[DropPrimaryKey]),
+            ("ALTER TABLE n DROP CONSTRAINT n_named", &[DropPrimaryKey]),
+            ("ALTER TABLE n DROP CONSTRAINT n_pkey", &[]),
+            (
+                "BEGIN; ALTER TABLE a DROP CONSTRAINT a_pkey; ALTER TABLE a ADD COLUMN nid bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY; COMMIT;",
+                &[],
+            ),
+            ("ALTER TABLE a DROP CONSTRAINT a_pkey, ADD COLUMN nid bigint PRIMARY KEY", &[]),
+            ("ALTER TABLE c ADD COLUMN id bigint PRIMARY KEY; ALTER TABLE c DROP CONSTRAINT c_pkey", &[DropPrimaryKey]),
+            ("ALTER TABLE a REPLICA IDENTITY USING INDEX a_u; DROP INDEX CONCURRENTLY a_u", &[DropPrimaryKey]),
+            ("ALTER TABLE a REPLICA IDENTITY USING INDEX a_u; ALTER TABLE a DROP COLUMN u", &[DropPrimaryKey]),
+            (
+                "ALTER TABLE a DROP CONSTRAINT a_pkey, ADD PRIMARY KEY USING INDEX a_u; ALTER TABLE a DROP COLUMN u",
+                &[DropPrimaryKey],
+            ),
+            (
+                "ALTER TABLE a REPLICA IDENTITY FULL; ALTER TABLE a DROP CONSTRAINT a_pkey; ALTER TABLE a REPLICA IDENTITY DEFAULT",
+                &[DropPrimaryKey],
+            ),
+            ("ALTER TABLE s1.t REPLICA IDENTITY USING INDEX t_u; DROP INDEX s2.t_u", &[]),
+            ("ALTER TABLE s1.t REPLICA IDENTITY USING INDEX t_u; DROP INDEX s1.t_u", &[DropPrimaryKey]),
+            (
+                "BEGIN; ALTER TABLE a DROP CONSTRAINT a_pkey; ALTER TABLE a RENAME TO z; ALTER TABLE z ADD PRIMARY KEY (u); COMMIT;",
+                &[],
+            ),
             (
                 "ALTER TABLE tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt DROP CONSTRAINT tttttttttttttttttttttttttttttttttttttttttttttttttttttttttt_pkey",
                 &[DropPrimaryKey],
