@@ -926,6 +926,166 @@ def run() -> None:
 # error:
 ```
 
+### A lambda and a generator run later
+
+The body runs when it is called or iterated, so the name is whatever the function
+binds it to by then, as in a nested `def`. ty: `DB | object`.
+
+```python
+from pkg.db import DB
+
+def run() -> None:
+    db = DB()
+    later = lambda: db.one("SELECT name FROM users", int)
+    each = (db.one("SELECT name FROM users", int) for _ in range(2))
+    db = object()
+    later()
+    list(each)
+
+def top() -> None:
+    db = DB()
+    later = lambda: db.one("SELECT name FROM users", int)
+    db = object()
+
+def looped(items: list[int]) -> None:
+    for item in items:
+        db = object()
+        db = DB()
+        later = lambda: db.one("SELECT name FROM users", int)
+
+def wrapped() -> None:
+    db = DB()
+    db = wrap(lambda: db.one("SELECT name FROM users", int))
+
+# error:
+```
+
+At the top of a module too:
+
+```python
+from pkg.db import DB
+
+db = DB()
+later = lambda: db.one("SELECT name FROM users", int)
+db = object()
+
+# error:
+```
+
+One whose bindings agree is checked, and a list comprehension runs where it is written:
+
+```python
+from pkg.db import DB
+
+def run() -> None:
+    db = DB()
+    # error: [column-type-mismatch]
+    later = lambda: db.one("SELECT name FROM users", int)
+
+def now() -> None:
+    db = DB()
+    # error: [column-type-mismatch]
+    found = [db.one("SELECT name FROM users", int) for _ in range(2)]
+    db = object()
+```
+
+So is one the function does not bind the name after, which keeps what a test says of it:
+
+```python
+from pkg.db import DB
+
+def run(x: object) -> None:
+    if isinstance(x, DB):
+        # error: [column-type-mismatch]
+        later = lambda: x.one("SELECT name FROM users", int)
+        # error: [column-type-mismatch]
+        every = all(x.one("SELECT name FROM users", int) for _ in range(2))
+```
+
+### A name the class body binds
+
+An attribute's value and annotation are read in the body of the class, where `DB` is
+what the body binds it to. ty: `object`.
+
+```python
+from pkg.db import DB
+
+class Aliased:
+    DB = object
+    db = DB()
+
+class Annotated:
+    DB = object
+    db: DB
+
+class Nested:
+    class DB:
+        def one(self, query, form): ...
+
+    db = DB()
+
+    def make(self) -> DB: ...
+
+class Parameters:
+    DB = object
+
+    def __init__(self, db: DB) -> None:
+        self.db = db
+
+    def run(self, other: DB) -> None:
+        other.one("SELECT name FROM users", int)
+
+def run(a: Aliased, b: Annotated, c: Nested, d: Parameters) -> None:
+    a.db.one("SELECT name FROM users", int)
+    b.db.one("SELECT name FROM users", int)
+    c.db.one("SELECT name FROM users", int)
+    c.make().one("SELECT name FROM users", int)
+    d.db.one("SELECT name FROM users", int)
+
+# error:
+```
+
+An annotation alone declares the attribute and binds nothing, so the names beside it
+are still the module's:
+
+```python
+from pkg import db
+from pkg.db import DB
+
+class Site:
+    db: db.DB
+    DB: DB
+    other: DB
+
+class Valued:
+    DB: DB = DB()
+
+def run(site: Site, valued: Valued) -> None:
+    # error: [column-type-mismatch]
+    site.db.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch]
+    site.DB.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch]
+    site.other.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch]
+    valued.DB.one("SELECT name FROM users", int)
+```
+
+A name the body binds once, to the module's name, is the module's:
+
+```python
+from pkg.db import DB
+
+shared = DB()
+
+class Holder:
+    shared = shared
+
+def run(holder: Holder) -> None:
+    # error: [column-type-mismatch]
+    holder.shared.one("SELECT name FROM users", int)
+```
+
 ### `del`, a loop variable and a conditional value
 
 ```python

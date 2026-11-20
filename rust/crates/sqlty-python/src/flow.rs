@@ -59,6 +59,39 @@ pub fn reaching<'a>(
     })
 }
 
+/// The outermost `for` or `while` of `body` around offset `at`, as its start and end.
+pub fn loop_around(body: &[Stmt], at: u32) -> Option<(u32, u32)> {
+    let index = body.partition_point(|stmt| stmt.end().to_u32() <= at);
+    let stmt = body.get(index).filter(|stmt| stmt.start().to_u32() <= at)?;
+    let inner = |blocks: &[&[Stmt]]| blocks.iter().find_map(|block| loop_around(block, at));
+    match stmt {
+        Stmt::For(_) | Stmt::While(_) => Some((stmt.start().to_u32(), stmt.end().to_u32())),
+        Stmt::If(node) => {
+            let clauses = node.elif_else_clauses.iter().map(|clause| &*clause.body);
+            let blocks: Vec<&[Stmt]> = std::iter::once(&*node.body).chain(clauses).collect();
+            inner(&blocks)
+        }
+        Stmt::With(node) => inner(&[&node.body]),
+        Stmt::Try(node) => {
+            let handlers = node.handlers.iter().map(|handler| {
+                let ast::ExceptHandler::ExceptHandler(handler) = handler;
+                &*handler.body
+            });
+            let rest = [&*node.orelse, &*node.finalbody];
+            let blocks: Vec<&[Stmt]> = std::iter::once(&*node.body)
+                .chain(handlers)
+                .chain(rest)
+                .collect();
+            inner(&blocks)
+        }
+        Stmt::Match(node) => {
+            let blocks: Vec<&[Stmt]> = node.cases.iter().map(|case| &*case.body).collect();
+            inner(&blocks)
+        }
+        _ => None,
+    }
+}
+
 /// The most bindings followed at once: a name more branches than this bind is unknown.
 const MAX_LIVE: usize = 64;
 

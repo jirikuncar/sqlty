@@ -75,6 +75,9 @@ pub struct Scan<'a> {
     attributes: HashMap<(Scope, &'a str), Vec<(Origin<'a>, Scope)>>,
     /// Where a comprehension or a lambda in a scope binds a name of its own.
     shadows: HashMap<(Scope, &'a str), Vec<TextRange>>,
+    /// The lambdas and generator expressions of a scope: code that runs when it is
+    /// called or iterated, not where it is written.
+    deferred: HashMap<Scope, Vec<TextRange>>,
     /// The names a function declares `global` or `nonlocal`.
     foreign: HashSet<(Scope, &'a str)>,
     /// The calls kept, with their scopes.
@@ -131,6 +134,7 @@ impl<'a> Scan<'a> {
                 bound: HashMap::new(),
                 attributes: HashMap::new(),
                 shadows: HashMap::new(),
+                deferred: HashMap::new(),
                 foreign: HashSet::new(),
                 calls: Vec::new(),
                 templates: Vec::new(),
@@ -203,6 +207,18 @@ impl<'a> Scan<'a> {
                 .iter()
                 .any(|range| range.start().to_u32() <= at && at < range.end().to_u32())
         })
+    }
+
+    /// Where the outermost lambda or generator expression of `scope` around `at` starts.
+    /// It runs later: a binding the scope makes from there on may be in effect by then,
+    /// as for a nested `def`.
+    pub fn deferred(&self, scope: Scope, at: u32) -> Option<u32> {
+        self.deferred
+            .get(&scope)?
+            .iter()
+            .filter(|range| range.start().to_u32() <= at && at < range.end().to_u32())
+            .map(|range| range.start().to_u32())
+            .min()
     }
 
     fn scope(&self) -> Scope {
@@ -457,6 +473,12 @@ impl<'a, W: FnMut(&'a ExprCall) -> bool> Visitor<'a> for Walker<'a, W> {
             }
             Expr::Named(named) => self.scan.bind(&named.target, Origin::Unknown, named.end()),
             Expr::Lambda(lambda) => {
+                let scope = self.scan.scope();
+                self.scan
+                    .deferred
+                    .entry(scope)
+                    .or_default()
+                    .push(lambda.range());
                 for parameter in lambda.parameters.iter().flat_map(|found| found.iter()) {
                     let scope = self.scan.scope();
                     self.scan
@@ -469,6 +491,14 @@ impl<'a, W: FnMut(&'a ExprCall) -> bool> Visitor<'a> for Walker<'a, W> {
             Expr::ListComp(ast::ExprListComp { generators, .. })
             | Expr::SetComp(ast::ExprSetComp { generators, .. })
             | Expr::Generator(ast::ExprGenerator { generators, .. }) => {
+                if expr.is_generator_expr() {
+                    let scope = self.scan.scope();
+                    self.scan
+                        .deferred
+                        .entry(scope)
+                        .or_default()
+                        .push(expr.range());
+                }
                 for generator in generators {
                     self.scan.shadow(&generator.target, expr.range());
                 }

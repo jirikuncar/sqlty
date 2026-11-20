@@ -21,7 +21,7 @@ use crate::calls::{method_kind, Helper, Kind};
 use crate::flow;
 use crate::index::{imports_of, HelperIndex};
 use crate::module::Import;
-use crate::scopes::{dotted, Node, Origin, Scan, Scope};
+use crate::scopes::{dotted, Binding, Node, Origin, Scan, Scope};
 use crate::types::info::Dict;
 use crate::types::symbols::Source;
 
@@ -389,6 +389,79 @@ fn receiver_name(function: &StmtFunctionDef) -> Option<&str> {
         .filter(|_| method_kind(function) != Kind::Static)
 }
 
+/// `val` as the body of the class `scope` writes it: a name the body binds itself (an
+/// alias, a nested class, another attribute) is not the module's, and is not followed.
+/// `target = target`, bound once, reads the module's name: the body has not bound it yet.
+fn in_class(val: Val, scan: &Scan<'_>, scope: Scope, target: &str) -> Val {
+    let aim = Some(target);
+    let own = |name: &str| class_binds(scan, scope, name, aim);
+    match val {
+        Val::Name(name) if own(&name) => Val::Unknown,
+        Val::Attr(base, attr) => match in_class(*base, scan, scope, target) {
+            Val::Unknown => Val::Unknown,
+            base => Val::Attr(Box::new(base), attr),
+        },
+        Val::Call(callee, cast) => match in_class(*callee, scan, scope, target) {
+            Val::Unknown => Val::Unknown,
+            callee => {
+                let cast = cast.map(|cast| match names_bound(&cast, scan, scope, aim) {
+                    true => Ann::Unknown,
+                    false => cast,
+                });
+                Val::Call(Box::new(callee), cast)
+            }
+        },
+        Val::Entered(entered, is_async) => match in_class(*entered, scan, scope, target) {
+            Val::Unknown => Val::Unknown,
+            entered => Val::Entered(Box::new(entered), is_async),
+        },
+        Val::Declared(declared) if names_bound(&declared, scan, scope, aim) => Val::Unknown,
+        other => other,
+    }
+}
+
+/// Whether the body of the class `scope` binds the head of `name` when it runs: `x: T`
+/// alone declares and binds nothing. The one binding of `target` does not count, as its
+/// own value and annotation are read before it.
+fn class_binds(scan: &Scan<'_>, scope: Scope, name: &str, target: Option<&str>) -> bool {
+    let head = name.split('.').next().unwrap_or(name);
+    let bound = scan.bindings(scope, head).map_or(0, |bindings| {
+        bindings
+            .iter()
+            .filter(|binding| !matches!(binding.origin, Origin::Declared(_, None)))
+            .count()
+    });
+    bound > usize::from(target == Some(head))
+}
+
+/// Whether `annotation` names something the body of the class `scope` binds.
+fn names_bound(annotation: &Ann, scan: &Scan<'_>, scope: Scope, target: Option<&str>) -> bool {
+    let own = |name: &str| class_binds(scan, scope, name, target);
+    let inner = |annotation: &Ann| names_bound(annotation, scan, scope, target);
+    match annotation {
+        Ann::Name(name) => own(name),
+        Ann::Generic(head, arguments) => own(head) || arguments.iter().any(inner),
+        Ann::Union(members) => members.iter().any(inner),
+        Ann::None | Ann::Unknown => false,
+    }
+}
+
+/// Whether `binding` is a parameter of the method `scope` whose annotation names
+/// something the body of its class binds: the annotation is read there, not in the module.
+fn hidden_by_class(scan: &Scan<'_>, scope: Scope, binding: &Binding<'_>) -> bool {
+    let (Node::Function(function), Origin::Declared(declared, None)) =
+        (scan.scopes[scope], binding.origin)
+    else {
+        return false;
+    };
+    let class = scan.parents[scope];
+    let parameter = function
+        .body
+        .first()
+        .is_none_or(|first| binding.site < first.start().to_u32());
+    parameter && scan.is_class(class) && names_bound(&annotation(declared, 0), scan, class, None)
+}
+
 /// `val` as the method `scope` of the module `module` writes it: its first parameter is
 /// the receiver, a parameter it never binds again its annotation, a name it imports
 /// what it imports, any other name it binds unknown.
@@ -396,6 +469,7 @@ fn inside(val: Val, scan: &Scan<'_>, scope: Scope, this: &str, module: Option<&s
     match val {
         Val::Name(name) if name == this => Val::This,
         Val::Name(name) => match scan.bindings(scope, &name) {
+            Some([only]) if hidden_by_class(scan, scope, only) => Val::Unknown,
             Some([only]) => match only.origin {
                 Origin::Declared(declared, _) => Val::Declared(annotation(declared, 0)),
                 Origin::Import(stmt, alias) => imported(stmt, alias, &name, module),
@@ -442,7 +516,10 @@ fn class_facts(
                 Origin::Function(function) => {
                     define(&mut facts.methods, function, method_kind(function));
                 }
-                origin => vals.push(bound(origin, name, false, module).0),
+                origin => {
+                    let val = bound(origin, name, false, module).0;
+                    vals.push(in_class(val, scan, scope, name));
+                }
             }
         }
         if !vals.is_empty() {
@@ -451,6 +528,12 @@ fn class_facts(
                 vals.push(Val::Unknown);
             }
             facts.attrs.insert(name.to_string(), vals);
+        }
+    }
+    // An annotation is read where the method is defined: in the body of the class.
+    for method in facts.methods.values_mut() {
+        if names_bound(&method.returns, scan, scope, None) {
+            method.returns = Ann::Unknown;
         }
     }
     for (name, written) in scan.attributes_of(scope) {
@@ -789,7 +872,28 @@ impl<'s, 'a> Resolver<'s, 'a> {
             let Some(bindings) = bindings else {
                 continue;
             };
-            let at = env.at.filter(|_| scope == innermost);
+            // A lambda or a generator runs later, as a nested function does.
+            let at = env
+                .at
+                .filter(|&at| scope == innermost && !self.later(scope, body, bindings, at));
+            let hidden: Vec<Binding<'a>>;
+            let hides = |binding: &Binding<'_>| hidden_by_class(self.scan, scope, binding);
+            let bindings = match bindings.iter().any(hides) {
+                true => {
+                    hidden = bindings
+                        .iter()
+                        .map(|binding| match hides(binding) {
+                            true => Binding {
+                                origin: Origin::Unknown,
+                                ..*binding
+                            },
+                            false => *binding,
+                        })
+                        .collect();
+                    &hidden[..]
+                }
+                false => bindings,
+            };
             let reach = at.and_then(|at| flow::reaching(body, bindings, name, at));
             let this = class.map(|(class, _)| Class::new(self.module, class.name.as_str()));
             let env = Env {
@@ -812,9 +916,25 @@ impl<'s, 'a> Resolver<'s, 'a> {
             return None;
         }
         let bindings = self.scan.bindings(0, name)?;
-        let reach = flow::reaching(self.source.body(), bindings, name, env.at?)?;
+        let body = self.source.body();
+        let at = env.at.filter(|&at| !self.later(0, body, bindings, at))?;
+        let reach = flow::reaching(body, bindings, name, at)?;
         let env = Env { stack: &[], ..env };
         Some(self.reached(name, &reach, true, env, depth))
+    }
+
+    /// Whether the use at `at` is in a lambda or a generator of `scope` that may run after
+    /// the name is bound again: a binding of the scope takes effect after that code starts, or is in
+    /// a loop around it. Otherwise it reads what the name holds where it is written.
+    fn later(&self, scope: Scope, body: &[Stmt], bindings: &[Binding<'_>], at: u32) -> bool {
+        let Some(start) = self.scan.deferred(scope, at) else {
+            return false;
+        };
+        let looped = flow::loop_around(body, at);
+        bindings.iter().any(|binding| {
+            binding.effect > start
+                || looped.is_some_and(|(from, to)| from <= binding.site && binding.site < to)
+        })
     }
 
     /// What `name` holds where the bindings `reach` are in effect. An `isinstance` test
