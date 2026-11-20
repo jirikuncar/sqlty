@@ -147,7 +147,7 @@ impl Loader {
         };
         self.cache = None;
         if !matches!(alter.operation, AlterTypeOperation::AddValue(_)) {
-            self.enum_labels.clear();
+            self.enum_labels.remove(&key);
         }
         match (&alter.operation, def) {
             (AlterTypeOperation::AddValue(add), TypeDef::Enum(labels)) => {
@@ -543,6 +543,30 @@ mod tests {
         assert!(loader.enum_labels.is_empty());
         alter(&mut loader, "ALTER TYPE e ADD VALUE 'x'");
         assert_eq!(labels(&loader).len(), LARGE_ENUM + 5);
+
+        // Only a statement that writes the type forgets its index.
+        let drop = |loader: &mut Loader, sql: &str| {
+            let stmt = parse_ddl(sql, SqlDialect::Postgres).unwrap().remove(0);
+            loader.drop_objects(&stmt, &path);
+        };
+        let saved = labels(&loader);
+        let indexed = |loader: &mut Loader| {
+            let def = TypeDef::Enum(saved.clone());
+            loader.types.insert("public.e".to_string(), def);
+            alter(loader, "ALTER TYPE e ADD VALUE IF NOT EXISTS 'x'");
+            assert!(loader.enum_labels.contains_key("public.e"));
+        };
+        drop(&mut loader, "DROP INDEX ix");
+        drop(&mut loader, "DROP SCHEMA s");
+        drop(&mut loader, "DROP DOMAIN d");
+        assert!(loader.enum_labels.contains_key("public.e"));
+        for sql in ["DROP TYPE e", "DROP DOMAIN e", "DROP SCHEMA public"] {
+            drop(&mut loader, sql);
+            assert!(loader.enum_labels.is_empty(), "{sql}");
+            indexed(&mut loader);
+        }
+        assert!(loader.taint(Taint::Type, &["e".to_string()], &path));
+        assert!(loader.enum_labels.is_empty());
     }
 
     // Only dialects whose `ALTER` the loader does not read parse these.

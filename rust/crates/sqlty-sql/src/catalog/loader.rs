@@ -165,7 +165,7 @@ pub(super) struct Loader {
     pub(super) relations: FxHashMap<String, Rel>,
     pub(super) types: FxHashMap<String, TypeDef>,
     /// The labels of enums past [`LARGE_ENUM`] labels, so `ADD VALUE` finds a duplicate
-    /// without a scan. Cleared by any statement that creates, drops or taints a type.
+    /// without a scan. Every writer of a type forgets its entry.
     pub(super) enum_labels: FxHashMap<String, FxHashSet<String>>,
     pub(super) functions: FxHashMap<String, Vec<RawFunction>>,
     /// Functions whose latest definition could not be read.
@@ -377,12 +377,6 @@ impl Loader {
     /// whatever it reads.
     pub(super) fn apply(&mut self, op: &Op, force: bool) -> bool {
         let path = op.path.clone();
-        if matches!(
-            op.kind,
-            OpKind::Type(..) | OpKind::Domain(..) | OpKind::Drop(_) | OpKind::Taint(..)
-        ) {
-            self.enum_labels.clear();
-        }
         let blocked = match &op.kind {
             OpKind::Table(create, likes) => !self.create_table(create, likes, &path),
             OpKind::View(view, table) => !self.create_view(view, *table, &path, force),
@@ -390,6 +384,7 @@ impl Loader {
                 self.cache = None;
                 let key = self.new_key(name, &path);
                 self.type_aliases.remove(&key);
+                self.enum_labels.remove(&key);
                 self.types
                     .insert(key, TypeDef::Domain(base.clone(), values.clone()));
                 false
@@ -398,6 +393,7 @@ impl Loader {
                 self.cache = None;
                 let key = self.new_key(name, &path);
                 self.type_aliases.remove(&key);
+                self.enum_labels.remove(&key);
                 self.types.insert(key, def.clone());
                 false
             }
@@ -985,6 +981,7 @@ impl Loader {
                 Some(key) => {
                     self.cache = None;
                     self.skipped.push(("type", name.join(".")));
+                    self.enum_labels.remove(&key);
                     self.types.insert(key, TypeDef::Unknown);
                     true
                 }
@@ -1042,6 +1039,7 @@ impl Loader {
                     }
                     ObjectType::Type => {
                         if let Some(key) = self.lookup(&self.types, &name_parts, path) {
+                            self.enum_labels.remove(&key);
                             self.types.remove(&key);
                         }
                     }
@@ -1052,6 +1050,7 @@ impl Loader {
                         self.relations.retain(|key, _| !key.starts_with(&prefix));
                         self.held = self.relations.values().map(Rel::width).sum();
                         self.types.retain(|key, _| !key.starts_with(&prefix));
+                        self.enum_labels.retain(|key, _| !key.starts_with(&prefix));
                         self.functions.retain(|key, _| !key.starts_with(&prefix));
                     }
                     _ => {}
@@ -1060,6 +1059,7 @@ impl Loader {
         }
         if let Statement::DropDomain(drop) = stmt {
             if let Some(key) = self.lookup(&self.types, &parts(&drop.name, self.dialect), path) {
+                self.enum_labels.remove(&key);
                 self.types.remove(&key);
             }
         }
