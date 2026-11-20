@@ -299,7 +299,7 @@ impl<'a> Finder<'a, '_> {
             .line(offset)
     }
 
-    /// The query and parameters of a call to a `sqlty.drivers.psycopg` helper, as `_bundled` reads them.
+    /// The query and parameters of a call to a `sqlty.drivers.psycopg` helper.
     fn bundled(&self, call: &'a ExprCall) -> Option<Vec<(&'a Expr, Option<&'a Expr>)>> {
         let name = qualified(dotted(&call.func), self.ctx.imported)?;
         let scalar = match name.strip_prefix(BUNDLED_MODULE)? {
