@@ -65,7 +65,7 @@ pub enum Value<'a> {
 /// Why an expression has no value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stop {
-    /// `_Dynamic`: a part is not a literal.
+    /// A part is not a literal.
     Dynamic,
     /// An exception Python raises and the passes catch: `TypeError`, `ValueError`.
     Error,
@@ -893,7 +893,7 @@ pub type Resolver<'a, 'r> = &'r dyn Fn(&Source, &str) -> Option<(&'a Source, &'a
 /// `lookup(name)`: the value of a name on the path a walk follows.
 pub type Lookup<'a, 'r> = &'r dyn Fn(&ExprName) -> Eval<Value<'a>>;
 
-/// `_Run`: one evaluation of an expression.
+/// One evaluation of an expression.
 pub struct Run<'a, 'r> {
     scan: &'r Scan<'a>,
     resolve: Option<Resolver<'a, 'r>>,

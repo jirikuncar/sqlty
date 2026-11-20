@@ -9,10 +9,9 @@ use pyo3::prelude::*;
 use sqlty_python::project::Files;
 use sqlty_python::types::stdlib::Version;
 
-/// Run `sqlty ARGS...` (`args[0]` is the program); the exit code, or None for a command
-/// the Python CLI still runs.
+/// Run `sqlty ARGS...` (`args[0]` is the program); the exit code.
 #[pyfunction]
-pub(crate) fn cli(py: Python<'_>, args: Vec<OsString>) -> PyResult<Option<i32>> {
+pub(crate) fn cli(py: Python<'_>, args: Vec<OsString>) -> PyResult<i32> {
     let sys = py.import("sys")?;
     let info = sys.getattr("version_info")?;
     let mut host = PyHost {
@@ -28,6 +27,33 @@ pub(crate) fn cli(py: Python<'_>, args: Vec<OsString>) -> PyResult<Option<i32>> 
         Some(error) => Err(error),
         None => Ok(code),
     }
+}
+
+/// `(name, usage, [(option, help)])` of a command.
+type Reference = (String, String, Vec<(String, String)>);
+
+/// The root and each command of `sqlty`.
+#[pyfunction]
+pub(crate) fn cli_reference() -> Vec<Reference> {
+    sqlty_cli::reference()
+        .into_iter()
+        .map(|command| (command.name, command.usage, command.options))
+        .collect()
+}
+
+/// Write the coverage profile of an instrumented build, which `os._exit` would skip.
+#[pyfunction]
+pub(crate) fn write_profile() {
+    #[cfg(coverage_nightly)]
+    // SAFETY: the profiling runtime of `-Cinstrument-coverage` defines it.
+    unsafe {
+        __llvm_profile_write_file();
+    }
+}
+
+#[cfg(coverage_nightly)]
+unsafe extern "C" {
+    fn __llvm_profile_write_file() -> i32;
 }
 
 struct PyHost {

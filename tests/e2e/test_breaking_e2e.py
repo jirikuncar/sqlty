@@ -136,13 +136,12 @@ def test_a_revision_of_some_paths_reads_their_schema(
     assert git(repo, "worktree", "list").count("\n") == 1
 
 
-def test_git_not_installed_is_an_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from sqlty._breaking import GitError, _git
+def test_git_not_installed_is_an_error(cli: Cli, tmp_path: Path) -> None:
+    result = cli(
+        ["breaking", "--against", "HEAD"], {"cwd": tmp_path, "env": {"PATH": str(tmp_path)}}
+    )
 
-    monkeypatch.setenv("PATH", str(tmp_path))
-
-    with pytest.raises(GitError, match="git is not installed"):
-        _git(tmp_path, "status")
+    assert (result.returncode, result.stderr) == (2, "sqlty: error: git is not installed\n")
 
 
 def test_a_file_that_is_not_utf8_is_skipped(cli: Cli, repo: Path) -> None:
@@ -476,72 +475,34 @@ def test_baseline_errors(cli: Cli, repo: Path, args: list[str], message: str) ->
     assert (result.returncode, result.stderr.strip()) == (2, message)
 
 
-def test_a_snapshot_that_is_not_json_is_an_error(tmp_path: Path) -> None:
-    from sqlty._config import ConfigError
-    from sqlty._snapshot import Snapshot
-
+def test_a_snapshot_that_is_not_json_is_an_error(cli: Cli, tmp_path: Path) -> None:
     (tmp_path / "broken.json").write_text("{")
 
-    with pytest.raises(ConfigError, match="broken.json is not a sqlty snapshot: Expecting"):
-        Snapshot.load(tmp_path / "broken.json", "broken", [])
+    result = cli(["breaking", "--against", "broken.json"], {"cwd": tmp_path})
+
+    assert result.returncode == 2
+    assert result.stderr.startswith("sqlty: error: broken.json is not a sqlty snapshot: EOF")
 
 
-@pytest.mark.parametrize("against", ["HEAD", "../head.json", "../head.sql"])
-def test_an_unchanged_schema_checks_no_query(
-    cli: Cli, repo: Path, against: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import sqlty._check
-    from sqlty._cli import main
+def test_a_path_outside_the_repository_is_an_error(cli: Cli, repo: Path, tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
 
-    cli(["breaking", "--save", "../head.json"], {"cwd": repo})
-    (repo.parent / "head.sql").write_text(NEW_SCHEMA)
-    checked: list[str] = []
-    monkeypatch.setattr(
-        sqlty._check,
-        "breaking_modules",
-        lambda modules, _: [checked.append(parsed.text) or [] for parsed, *_ in modules],
-    )
-    monkeypatch.chdir(repo)
+    found = cli(["breaking", "--against", "HEAD~1", str(outside)], {"cwd": repo})
 
-    main(["breaking", "--against", against, "--quiet"])
-    assert checked == []
-    (repo / "schema.sql").write_text(OLD_SCHEMA)
-    main(["breaking", "--against", against, "--direction", "forward", "--quiet"])
-    assert checked == [NEW_CODE]
+    assert (found.returncode, f"{outside} is not in" in found.stderr) == (2, True)
 
 
-def test_a_snapshot_without_a_schema_checks_no_query(
-    cli: Cli, repo: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import sqlty._check
-    from sqlty._cli import main
-
-    (repo / "pyproject.toml").write_text("[tool.sqlty]\n")
-    cli(["breaking", "--save", "../head.json"], {"cwd": repo})
-    (repo / "app" / "new.py").write_text(NEW_CODE)
-    monkeypatch.setattr(sqlty._check, "breaking_modules", lambda modules, _: modules)
-    monkeypatch.chdir(repo)
-
-    main(["breaking", "--against", "../head.json", "--quiet"])
-
-
-def test_processes_give_the_same_findings(
-    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    from sqlty._cli import main
-
+def test_threads_give_the_same_findings(cli: Cli, repo: Path) -> None:
     for i in range(4):
         (repo / "app" / f"m{i}.py").write_text(OLD_CODE + NEW_CODE)
-    monkeypatch.chdir(repo)
 
-    def findings(jobs: int) -> list[str]:
-        monkeypatch.setattr(os, "process_cpu_count", lambda: jobs)
-        with pytest.raises(SystemExit):
-            main(["breaking", "--against", "HEAD~1"])
-        return capsys.readouterr().out.splitlines()
+    def findings(threads: str) -> list[str]:
+        env = {**os.environ, "RAYON_NUM_THREADS": threads}
+        return lines(cli(["breaking", "--against", "HEAD~1"], {"cwd": repo, "env": env}))
 
-    assert findings(1) == findings(3)
-    assert findings(3)[-1] == "Found 6 breaking change(s)"
+    assert findings("1") == findings("3")
+    assert findings("1")[-1] == "Found 6 breaking change(s)"
 
 
 def test_query_files_are_compared_in_both_directions(cli: Cli, repo: Path) -> None:
