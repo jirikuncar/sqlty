@@ -7,13 +7,13 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
 
 use regex::Regex;
-use ruff_python_ast::Expr;
+use ruff_python_ast::{Expr, StmtFunctionDef};
 
 use crate::calls::{definitions, helper, index_functions, parameter_names, rank, Helper, Kind};
 use crate::frozen::{Frozen, Table};
 use crate::module::Import;
 use crate::modules::Modules;
-use crate::receivers::Facts;
+use crate::receivers::{Facts, Val};
 use crate::types::extract::extract_type_definitions;
 use crate::types::info::{Dict, TypeInfo};
 use crate::types::pydantic::Known;
@@ -106,7 +106,13 @@ pub struct Module {
     version: Version,
     parsed: OnceLock<Option<Arc<Source>>>,
     facts: OnceLock<Option<Arc<Facts>>>,
+    defined: OnceLock<Defined>,
 }
+
+/// The functions and methods of a module by name (`Class.method`), in the order
+/// [`definitions`] gives them, each without its body: what a registered helper is read
+/// from, kept so that each registration does not read the module again.
+type Defined = HashMap<String, Vec<(StmtFunctionDef, Kind)>>;
 
 impl Module {
     /// `text` as the module `name`, not parsed yet.
@@ -117,6 +123,7 @@ impl Module {
             version,
             parsed: OnceLock::new(),
             facts: OnceLock::new(),
+            defined: OnceLock::new(),
         }
     }
 
@@ -128,6 +135,7 @@ impl Module {
             version,
             parsed: OnceLock::from(None),
             facts: OnceLock::from(None),
+            defined: OnceLock::new(),
         }
     }
 
@@ -139,6 +147,7 @@ impl Module {
             version: source.version,
             parsed: OnceLock::from(Some(source)),
             facts: OnceLock::new(),
+            defined: OnceLock::new(),
         }
     }
 
@@ -162,6 +171,32 @@ impl Module {
     /// walked the module gives what its walk found.
     pub fn facts_or(&self, read: impl FnOnce() -> Option<Facts>) -> Option<&Arc<Facts>> {
         self.facts.get_or_init(|| read().map(Arc::new)).as_ref()
+    }
+
+    /// The definitions of the module by name, read once.
+    fn defined(&self) -> &Defined {
+        self.defined.get_or_init(|| {
+            let mut defined = Defined::new();
+            for (name, function, kind) in self
+                .source()
+                .into_iter()
+                .flat_map(|source| definitions(source))
+            {
+                let signature = StmtFunctionDef {
+                    body: Vec::new().into(),
+                    node_index: function.node_index.clone(),
+                    range: function.range,
+                    is_async: function.is_async,
+                    decorator_list: function.decorator_list.clone(),
+                    name: function.name.clone(),
+                    type_params: function.type_params.clone(),
+                    parameters: function.parameters.clone(),
+                    returns: function.returns.clone(),
+                };
+                defined.entry(name).or_default().push((signature, kind));
+            }
+            defined
+        })
     }
 
     /// The name the module is read as: `pkg.__init__` for a package.
@@ -259,6 +294,9 @@ pub struct HelperIndex {
     outside: Option<Arc<Modules>>,
     names: HashSet<String>,
     pattern: Option<Regex>,
+    /// The classes `[[tool.sqlty.functions]]` registers a method of, by path, and what
+    /// each path starts with (`lib`, `lib.Outer`, `lib.Outer.Inner`).
+    registered: HashSet<String>,
 }
 
 /// Whether a module of `text` may define helpers; no other is read for them.
@@ -475,8 +513,7 @@ impl Builder {
             if ended.get() {
                 return None;
             }
-            let source = known.source()?;
-            let found = self.defined_in(source, &module, name, query, row, depth);
+            let found = self.defined_in(known, &module, name, query, row, depth);
             let bound = known
                 .facts()
                 .is_some_and(|facts| facts.names.contains_key(head));
@@ -501,26 +538,29 @@ impl Builder {
     /// The helper `name` as `source`, the module `module`, defines or re-exports it.
     fn defined_in(
         &self,
-        source: &Source,
+        known: &Module,
         module: &str,
         name: &str,
         query: &str,
         row: Option<&str>,
         depth: usize,
     ) -> Option<(Helper, Option<(String, String)>)> {
+        let source = known.source()?;
         let wanted: Vec<&str> = [Some(query), row].into_iter().flatten().collect();
-        let found = definitions(source)
+        let found = known
+            .defined()
+            .get(name)
             .into_iter()
-            .filter(|(known, _, _)| known == name)
-            .min_by_key(|(_, function, _)| {
+            .flatten()
+            .min_by_key(|(function, _)| {
                 let names = parameter_names(function);
                 rank(function, wanted.iter().all(|name| names.contains(*name)))
             });
-        if let Some((_, function, kind)) = found {
+        if let Some((function, kind)) = found {
             let found = helper(
                 name.to_string(),
                 function,
-                kind,
+                *kind,
                 query.to_string(),
                 row.map(str::to_string),
             );
@@ -536,7 +576,21 @@ impl Builder {
         };
         let targets = source.targets_in(source.module.as_deref().or(Some(module)));
         let (exports, _) = &*targets;
-        let (target, original) = exports.get(head)?;
+        let Some((target, original)) = exports.get(head) else {
+            // `Db = Other`: the class is read where it is defined, and the helper is
+            // attached to it, so that its parameters are known.
+            let facts = known.facts()?;
+            let [Val::Name(alias)] = facts.names.get(head)?.as_slice() else {
+                return None;
+            };
+            // A name bound more than once may not be the class the assignment read.
+            let once = facts.names.get(alias).is_some_and(|bound| bound.len() == 1);
+            let aliased = format!("{alias}{rest}");
+            let (found, defined) = (once && alias != head)
+                .then(|| self.defined_in(known, module, &aliased, query, row, depth + 1))
+                .flatten()?;
+            return Some((found, defined.or(Some((module.to_string(), aliased)))));
+        };
         let parts: Vec<&str> = target.split('.').collect();
         self.definition(&parts, &format!("{original}{rest}"), query, row, depth + 1)
     }
@@ -594,7 +648,20 @@ impl Builder {
                 reading: Mutex::default(),
             })
         });
+        let mut registered = HashSet::new();
+        for (module, helpers) in &self.modules {
+            for (name, _) in helpers.iter().filter(|(_, helper)| helper.configured) {
+                let Some((class, _)) = name.rsplit_once('.') else {
+                    continue;
+                };
+                let path = format!("{module}.{class}");
+                let ends = path.match_indices('.').map(|(at, _)| at);
+                registered.extend(ends.map(|at| path[..at].to_string()));
+                registered.insert(path);
+            }
+        }
         Arc::new(HelperIndex {
+            registered,
             modules: self.modules,
             tree,
             version: self.version,
@@ -705,14 +772,10 @@ impl HelperIndex {
         self.tree.clone()
     }
 
-    /// Whether `[[tool.sqlty.functions]]` registers a method of `module.class`.
+    /// Whether `[[tool.sqlty.functions]]` registers a method of `module.class`, or of a
+    /// class in it (`module.class.Inner`).
     pub fn registers(&self, module: &str, class: &str) -> bool {
-        self.modules.get(module).is_some_and(|found| {
-            found.iter().any(|(name, helper)| {
-                let method = name.strip_prefix(class);
-                helper.configured && method.is_some_and(|rest| rest.starts_with('.'))
-            })
-        })
+        !self.registered.is_empty() && self.registered.contains(&format!("{module}.{class}"))
     }
 
     /// `HelperIndex.get`: the helper `name` (maybe `Class.method`) of `module`, following
@@ -921,6 +984,33 @@ impl Index for Tree {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn registering_reads_the_definitions_of_a_module_once() {
+        // Twice the registered methods of twice the classes: twice the definitions read.
+        let read = |count: usize| {
+            let text: String = (0..count)
+                .map(|at| format!("class C{at}:\n    def get(self, sql): ...\n"))
+                .collect();
+            let module = Arc::new(Module::new(Arc::from(text), "lib", (3, 14)));
+            let mut builder = Builder::new((3, 14));
+            builder.add_found("lib", module, &Dict::new());
+            crate::calls::READ.with(|read| read.set(0));
+            for at in 0..count {
+                builder.register(&format!("lib.C{at}.get"), "sql", None, None);
+            }
+            let index = builder.build();
+            let found = index
+                .get("lib", &format!("C{}.get", count - 1))
+                .expect("read");
+            assert_eq!(found.positional, ["sql"]);
+            assert!(index.registers("lib", "C0") && !index.registers("lib", "C"));
+            crate::calls::READ.with(Cell::get)
+        };
+        let (small, large) = (read(100), read(200));
+        assert!(small <= 2 * 100, "{small}");
+        assert!(large <= 2 * small, "{small} then {large}");
+    }
 
     #[test]
     fn a_module_without_a_name_has_no_relative_imports() {

@@ -338,7 +338,16 @@ pub(crate) fn definitions(source: &Source) -> Vec<(String, &StmtFunctionDef, Kin
             _ => None,
         })
     });
-    functions.chain(methods).collect()
+    let found: Vec<_> = functions.chain(methods).collect();
+    #[cfg(test)]
+    READ.with(|read| read.set(read.get() + found.len()));
+    found
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The definitions [`definitions`] gave this thread, for the tests of cost.
+    pub(crate) static READ: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// The sort key among definitions of one name: complete first, then not `@overload`.

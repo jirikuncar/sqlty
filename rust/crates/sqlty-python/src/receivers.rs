@@ -1195,7 +1195,22 @@ impl<'s, 'a> Resolver<'s, 'a> {
                 &format!("{}.{}", path.module, path.name),
                 attr,
             ))),
-            Value::Instance(class) | Value::Type(class) => {
+            Value::Type(class) => {
+                // A class in a class is not modelled: a method registered on it is
+                // found by its path.
+                let read = self.member_of(class, attr, depth);
+                let outer = format!("{}.{}", class.module, class.name);
+                self.or_registered(&outer, attr, read)
+            }
+            Value::Instance(class) => self.member_of(class, attr, depth),
+            Value::Function { .. } | Value::Manager(_) => None,
+        }
+    }
+
+    /// The attribute `attr` of the class `class` or of an instance of it.
+    fn member_of(&self, class: &Class, attr: &str, depth: u8) -> Option<Value> {
+        {
+            {
                 for owner in self.order(class)?.iter() {
                     // A base that is not read may declare the attribute.
                     let facts = self.facts(&owner.module)?;
@@ -1222,7 +1237,6 @@ impl<'s, 'a> Resolver<'s, 'a> {
                 }
                 None
             }
-            Value::Function { .. } | Value::Manager(_) => None,
         }
     }
 

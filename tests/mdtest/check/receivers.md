@@ -1487,6 +1487,171 @@ def run(db: Db, other: lazy.Db) -> None:
     other.fetch(sql="SELECT nope FROM users")
 ```
 
+### A class in a class
+
+A class defined in another class is not followed, so a method registered on it is found
+by its path, on a class that is read and on one that is not.
+
+```toml
+[[tool.sqlty.functions]]
+import-path = "nested.Outer.Inner.fetch"
+query-param = "sql"
+
+[[tool.sqlty.functions]]
+import-path = "ext.Outer.Inner.fetch"
+query-param = "sql"
+```
+
+`nested.py`:
+
+```python
+class Outer:
+    class Inner:
+        def fetch(self, sql): ...
+```
+
+```python
+import ext
+import nested
+from nested import Outer
+
+def run(one: Outer.Inner, two: nested.Outer.Inner, three: ext.Outer.Inner) -> None:
+    # error: [unknown-column]
+    one.fetch(sql="SELECT nope FROM users")
+    # error: [unknown-column]
+    two.fetch(sql="SELECT nope FROM users")
+    # error: [unknown-column]
+    three.fetch(sql="SELECT nope FROM users")
+```
+
+### A name assigned the class
+
+`Db = Other` names the class `Other`: the method registered as `aliased.Db.fetch` is the
+one `Other` defines, with its parameters, so the query is found by position too.
+
+```toml
+[[tool.sqlty.functions]]
+import-path = "aliased.Db.fetch"
+query-param = "sql"
+```
+
+`aliased.py`:
+
+```python
+class Other:
+    def fetch(self, sql: str) -> None: ...
+
+Db = Other
+```
+
+```python
+from aliased import Db, Other
+
+def run(db: Db, other: Other) -> None:
+    # error: [unknown-column]
+    db.fetch("SELECT nope FROM users")
+    # error: [unknown-column]
+    other.fetch("SELECT nope FROM users")
+```
+
+### A name assigned a class of a name bound twice
+
+A name bound twice is not read for the parameters: the query is found by name only, and
+the second class of that name is not the registered one.
+
+```toml
+[[tool.sqlty.functions]]
+import-path = "rebound.Db.fetch"
+query-param = "sql"
+```
+
+`rebound.py`:
+
+```python
+class Other:
+    def fetch(self, sql: str) -> None: ...
+
+Db = Other
+
+class Other:
+    def fetch(self, first: str, sql: str) -> None: ...
+```
+
+```python
+from rebound import Db
+
+def run(db: Db) -> None:
+    # error: [unknown-column]
+    db.fetch(sql="SELECT nope FROM users")
+```
+
+```python
+from rebound import Db, Other
+
+def run(db: Db, other: Other) -> None:
+    db.fetch("SELECT nope FROM users")
+    other.fetch("first", "SELECT nope FROM users")
+
+# error:
+```
+
+### A name assigned a name assigned the class
+
+It is followed as a name assigned the class is.
+
+```toml
+[[tool.sqlty.functions]]
+import-path = "chained.Db.fetch"
+query-param = "sql"
+```
+
+`chained.py`:
+
+```python
+class Other:
+    def fetch(self, sql: str) -> None: ...
+
+Mid = Other
+Db = Mid
+```
+
+```python
+from chained import Db
+
+def run(db: Db) -> None:
+    # error: [unknown-column]
+    db.fetch("SELECT nope FROM users")
+```
+
+### An attribute of a class assigned another class
+
+```toml
+[[tool.sqlty.functions]]
+import-path = "shadow.Outer.Inner.fetch"
+query-param = "sql"
+```
+
+`shadow.py`:
+
+```python
+class Real:
+    def fetch(self, sql): ...
+
+class Outer:
+    Inner = Real
+```
+
+```python
+import shadow
+from shadow import Outer
+
+def run(one: Outer.Inner, two: shadow.Outer.Inner) -> None:
+    # error: [unknown-column]
+    one.fetch(sql="SELECT nope FROM users")
+    # error: [unknown-column]
+    two.fetch(sql="SELECT nope FROM users")
+```
+
 ### A name that is not registered stays unknown
 
 ```python
