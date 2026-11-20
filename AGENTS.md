@@ -4,11 +4,17 @@ Use `uv` for all Python commands. Setup, test and build commands and the
 architecture live in [DEVELOPMENT.md](DEVELOPMENT.md).
 
 - `SQL[T]` is a `str` subclass. It works anywhere a string works.
-- Every new feature gets an mdtest (see [Markdown tests](#markdown-tests-mdtest)).
+- Run `uv run prek run --all-files` before every commit and fix every error it
+  reports; [DEVELOPMENT.md](DEVELOPMENT.md#hooks) lists the hooks.
+- Never force-push, `--force-with-lease` included: resolve a rejected push without rewriting
+  remote history.
+- Every change gets an mdtest: see [Markdown tests](#markdown-tests-mdtest).
 - Review rules for pull requests live in [REVIEW.md](REVIEW.md). Before handing a
   branch over, have a separate agent review it with the
   [`review` skill](.claude/skills/review/SKILL.md), given the branch name only.
   `.claude/skills/` is for contributors and not shipped, unlike `skills/`.
+- [THREAT_MODEL.md](THREAT_MODEL.md) lists the trust boundaries a change must
+  keep: no execution of analyzed code, generated code, files written.
 - Plans live in `plans/`, named `YYYY-MM-DD-<slug>.md` after the day they were written.
   Delete a plan once it has shipped; move what is left to `plans/2026-02-13-future.md`
   or an issue.
@@ -79,17 +85,6 @@ and 5000 tables.
 | Index build | O(N log N + F log F) per schema load, two pointers per name and three words per foreign key | `index_shares_the_catalog_keys`, `bench-ci` `schema_load_5000` RSS |
 | Per keystroke | never O(N), never waiting behind a check | `completion_is_answered_while_a_check_runs` (`sqlty-lsp`) |
 
-## Git safety
-
-**Never force-push.** Do not use `git push --force`, `git push --force-with-lease`,
-or any other force-push variant. If a push is rejected, investigate and resolve
-the conflict without rewriting remote history. No exceptions.
-
-## Hooks
-
-Run `uv run prek run --all-files` before every commit and fix every error it
-reports; [DEVELOPMENT.md](DEVELOPMENT.md#hooks) lists the hooks.
-
 ## The `--sql\n` convention
 
 **Always use `--sql\n` (newline escape) after the `--sql` prefix, not a space.**
@@ -133,9 +128,9 @@ printed by `sqlty rule NAME`). Every test runs through `sqlty.core`.
 User-visible behavior belongs in `docs/guide/` too; edge cases only in
 `tests/mdtest/`. A new lint rule is its page `docs/reference/rules/<name>.md`, with the front matter
 (`order`, `group`, `severity`, `fixable`, `summary`, `origin`) that is the only place its metadata
-is written, its row in the table of `docs/reference/rules.md`, and its check code. The
-`sqlty-rules` crate generates `Rule` and the Python `RULES` from the pages, and `build.rs` fails
-on a page that breaks the format.
+is written, and its check code. The `sqlty-rules` crate generates `Rule` and the Python `RULES`
+from the pages, and `build.rs` fails on a page that breaks the format; `make generate-docs` adds
+its row to the table of `docs/reference/rules.md`.
 
 | Feature area | Directory | Example file |
 |-------------|-----------|-------------|
@@ -170,6 +165,9 @@ on a page that breaks the format.
 - An `` `against.sql`: `` file makes `# error:` assert what `sqlty breaking`
   reports (`core.breaking_source()`): the diagnostics that are new when the code
   is checked against that schema instead of its own.
+  In a ```` ```sql migration ```` block, `-- error:` asserts what the migration
+  rules report for the block's statements that `against.sql` does not have
+  (`_core.check_migrations()`).
 
 ````markdown
 ## Schema-based TypedDict mismatch
@@ -234,8 +232,6 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 `uv run pytest 'tests/mdtest/check/user_types.md::TypedDict - field type mismatch'`
 reruns one test; failures print this command.
 
-- Tests must use `--sql\n` (not `--sql ` with space) — space makes the line a SQL comment.
-
 ## Documentation philosophy
 
 ### Docstrings
@@ -267,14 +263,13 @@ sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
 
 ### README and docs
 
-- README.md and `docs/` are mdtest files; their assertions run with the suite.
 - `tests/test_core_invariants.py` checks idempotency and round trips over every
   mdtest code block: new mdtests extend it automatically.
-- `docs/reference/configuration.md` and `cli.md` hold tables between `<!-- generated:NAME -->`
-  markers, rendered by `scripts/generate_docs.py` from `KEY_DOCS` in `_config.py` and the argparse
-  parser. Edit those, then run `make generate-docs`; `test_generated_reference_is_current` fails on drift.
-- `tests/test_docs.py` checks that the rules table in `docs/reference/rules.md`
-  matches `RULES`, that every rule has a page in `docs/reference/rules/`, that
+- `docs/reference/configuration.md`, `cli.md` and `rules.md` hold tables between
+  `<!-- generated:NAME -->` markers, rendered by `scripts/generate_docs.py` from `KEY_DOCS` in
+  `_config.py`, the clap commands of `sqlty-cli` and the rule pages. Edit those, then run
+  `make generate-docs`; `test_generated_reference_is_current` fails on drift.
+- `tests/test_docs.py` checks that every rule has a page in `docs/reference/rules/`, that
   relative links resolve, that `examples/` need no rewrite, and runs the
   `>>>` examples in `docs/reference/python-api.md`.
 - Focus on **motivated examples** — show the problem first, then the solution.

@@ -99,7 +99,7 @@ A directory with more than one file reads the first of `sqlty.toml`,
 <!-- generated:config-keys -->
 | Key | Type | Default | Used by | Summary |
 |-----|------|---------|---------|---------|
-| [`dialect`](#dialect) | `"postgres"`, `"sqlite"`, `"mysql"` | `"postgres"` | `rewrite`, `check` | SQL dialect of queries and schema |
+| [`dialect`](#dialect) | `"postgres"`, `"sqlite"`, `"mysql"`, ... | `"postgres"` | `rewrite`, `check` | SQL dialect of queries and schema |
 | [`driver`](#driver) | `"psycopg"` | none | `rewrite`, `check` | Driver whose own classes type the columns the default mapping leaves untyped: PostgreSQL ranges |
 | [`schema`](#schema) | string or list of strings | none | `rewrite`, `check` | Schema `.sql` files, directories or globs, relative to the configuration file |
 | [`queries`](#queries) | string or list of strings | none | `check` | `.sql` files of named queries (aiosql, sqlc, PugSQL), directories or globs, relative to the configuration file |
@@ -127,7 +127,7 @@ A directory with more than one file reads the first of `sqlty.toml`,
 
 SQL dialect for queries and the schema: `"postgres"` (default), `"sqlite"`,
 `"mysql"`, or another [dialect](engine.md#dialects) sqlparser-rs knows. CLI:
-`--dialect` (the first three only), which overrides this key. See
+`--dialect`, which overrides this key. See
 [Dialects](../guide/schema-inference.md#dialects).
 
 ## `driver`

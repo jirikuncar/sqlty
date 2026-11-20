@@ -1,9 +1,9 @@
 ---
-order: 320
+order: 260
 group: "names"
 severity: "error"
 fixable: false
-summary: "INSERT gives a different number of values than the columns it writes"
+summary: "INSERT that gives a different number of values than the columns it writes"
 origin: "SQL"
 ---
 

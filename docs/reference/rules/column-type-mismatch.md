@@ -3,7 +3,7 @@ order: 20
 group: "row-type"
 severity: "error"
 fixable: false
-summary: "Annotated type field has incompatible type with query column"
+summary: "Row type field can't hold its column's values"
 origin: "Python"
 ---
 

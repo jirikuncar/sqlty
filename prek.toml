@@ -89,17 +89,17 @@ entry = "uv run vale --output=line"
 language = "system"
 # The PyPI wrapper downloads the binary on first run: parallel batches would race on it.
 require_serial = true
-files = '^(docs/|README\.md$|CONTRIBUTING\.md$|DEVELOPMENT\.md$|SECURITY\.md$|scripts/compat/README\.md$)'
+files = '^(docs/|README\.md$|CONTRIBUTING\.md$|DEVELOPMENT\.md$|SECURITY\.md$|THREAT_MODEL\.md$|scripts/compat/README\.md$)'
 types = ["markdown"]
 priority = 10
 
 [[repos.hooks]]
 id = "zizmor"
 name = "zizmor (GitHub Actions security)"
-entry = "uv run zizmor --offline --quiet .github/workflows"
+entry = "uv run zizmor --offline --quiet .github/workflows .github/actions"
 language = "system"
 pass_filenames = false
-files = '^\.github/workflows/'
+files = '^\.github/(workflows|actions)/'
 priority = 10
 
 [[repos.hooks]]

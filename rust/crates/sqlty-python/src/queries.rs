@@ -14,7 +14,8 @@
 //!
 //! The engine reads `:name` and `$1`. sqlc's `@name`, `sqlc.arg(name)` and `sqlc.narg(name)`,
 //! and aiosql's `:obj.attr`, are rewritten to `:name` and `:obj_attr` in [`NamedQuery::sql`],
-//! padded with spaces so a diagnostic's span stays where it is in the file.
+//! and sqlc's `sqlc.embed(t)` to the row of `t`, padded with spaces so a diagnostic's span
+//! stays where it is in the file.
 
 use std::ops::Range;
 use std::str::FromStr;
@@ -73,7 +74,17 @@ pub struct NamedQuery {
     pub sql: String,
     /// `(name in sql, name in the file)` of each rewritten aiosql `:obj.attr`.
     pub renames: Vec<(String, String)>,
+    /// Each sqlc `sqlc.embed(t)`, rewritten to `t.*`: `(range of t.* in sql, range of t in
+    /// the body)`.
+    pub embeds: Vec<(Range<usize>, Range<usize>)>,
 }
+
+/// The rewritten SQL of a named query, its aiosql renames and its sqlc embeds.
+pub type Rewritten = (
+    String,
+    Vec<(String, String)>,
+    Vec<(Range<usize>, Range<usize>)>,
+);
 
 /// `-- name: <name><suffix>`, aiosql's header and sqlc's, told apart by sqlc's `:kind`.
 static NAME_HEADER: LazyLock<Regex> =
@@ -83,7 +94,7 @@ static NAME_HEADER: LazyLock<Regex> =
 /// and `@@variables` match first so nothing inside them is rewritten.
 static PLACEHOLDER: LazyLock<Regex> = LazyLock::new(|| {
     sqlty_sql::regex(
-        r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|/\*(?s:.)*?\*/|::\w+|@@\w+|\bsqlc\.n?arg\(\s*'?(?P<arg>[A-Za-z_]\w*)'?\s*\)|@(?P<at>[A-Za-z_]\w*)|:(?P<obj>[A-Za-z_]\w*)\.(?P<attr>[A-Za-z_]\w*)"#,
+        r#"'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|/\*(?s:.)*?\*/|::\w+|@@\w+|\bsqlc\.n?arg\(\s*'?(?P<arg>[A-Za-z_]\w*)'?\s*\)|\bsqlc\.embed\(\s*(?P<embed>[A-Za-z_]\w*)\s*\)|@(?P<at>[A-Za-z_]\w*)|:(?P<obj>[A-Za-z_]\w*)\.(?P<attr>[A-Za-z_]\w*)"#,
     )
 });
 
@@ -134,6 +145,7 @@ pub fn split(source: &str, format: Format, stem: &str) -> Vec<NamedQuery> {
                 body: 0..source.len(),
                 sql: source.to_string(),
                 renames: Vec::new(),
+                embeds: Vec::new(),
             }]
         }
     };
@@ -143,59 +155,72 @@ pub fn split(source: &str, format: Format, stem: &str) -> Vec<NamedQuery> {
         .map(|(i, (header, name))| {
             let end = headers.get(i + 1).map_or(source.len(), |next| next.0.start);
             let body = (header.end + 1).min(end)..end;
-            let (sql, renames) = placeholders(&source[body.clone()], format);
+            let (sql, renames, embeds) = placeholders(&source[body.clone()], format);
             NamedQuery {
                 name: name.clone(),
                 body,
                 sql,
                 renames,
+                embeds,
             }
         })
         .collect()
 }
 
-/// `sql` with sqlc's or aiosql's placeholders rewritten to `:name`, each padded to its length,
-/// and the aiosql renames.
+/// `sql` with sqlc's or aiosql's placeholders rewritten to `:name` and `sqlc.embed(t)` to
+/// `t.*`, each padded to its length, with the aiosql renames and the embeds.
 ///
 /// ```
 /// use sqlty_python::queries::{placeholders, Format};
 ///
-/// let (sql, _) = placeholders("id = sqlc.arg(id) AND name = @name", Format::Sqlc);
+/// let (sql, ..) = placeholders("id = sqlc.arg(id) AND name = @name", Format::Sqlc);
 /// assert_eq!(sql, "id = :id          AND name = :name");
-/// let (sql, renames) = placeholders("email = :user.email", Format::Aiosql);
+/// let (sql, renames, _) = placeholders("email = :user.email", Format::Aiosql);
 /// assert_eq!((sql.as_str(), renames), ("email = :user_email", vec![("user_email".into(), "user.email".into())]));
 /// ```
-pub fn placeholders(sql: &str, format: Format) -> (String, Vec<(String, String)>) {
+pub fn placeholders(sql: &str, format: Format) -> Rewritten {
     let mut out = String::with_capacity(sql.len());
     let mut renames: Vec<(String, String)> = Vec::new();
+    let mut embeds = Vec::new();
     let mut last = 0;
     for found in PLACEHOLDER.captures_iter(sql) {
         let whole = found.get(0).map_or(0..0, |m| m.range());
-        let name = match (
+        let (prefix, name) = match (
             format,
             found.name("arg").or(found.name("at")),
             found.name("obj"),
             found.name("attr"),
         ) {
-            (Format::Sqlc, Some(name), _, _) => name.as_str().to_string(),
+            (Format::Sqlc, Some(name), _, _) => (":", name.as_str().to_string()),
+            (Format::Sqlc, None, None, None) => match found.name("embed") {
+                Some(table) => {
+                    let start = out.len() + whole.start - last;
+                    embeds.push((start..start + table.len() + 2, table.range()));
+                    ("", format!("{}.*", table.as_str()))
+                }
+                None => continue,
+            },
             (Format::Aiosql, None, Some(obj), Some(attr)) => {
                 let name = format!("{}_{}", obj.as_str(), attr.as_str());
                 let original = format!("{}.{}", obj.as_str(), attr.as_str());
                 if !renames.iter().any(|(renamed, _)| *renamed == name) {
                     renames.push((name.clone(), original));
                 }
-                name
+                (":", name)
             }
             _ => continue,
         };
         out.push_str(&sql[last..whole.start]);
-        out.push(':');
+        out.push_str(prefix);
         out.push_str(&name);
-        out.extend(std::iter::repeat_n(' ', whole.len() - name.len() - 1));
+        out.extend(std::iter::repeat_n(
+            ' ',
+            whole.len() - name.len() - prefix.len(),
+        ));
         last = whole.end;
     }
     out.push_str(&sql[last..]);
-    (out, renames)
+    (out, renames, embeds)
 }
 
 /// The format of the first header of `source`; `file` when it has none.
@@ -271,21 +296,49 @@ pub fn check_queries(
                 report(Rule::UnparsedQuery, unparsed_message(&error), at);
                 continue;
             }
-            if let Some((rule, message)) = star_finding(
-                parsed.result_stars(),
-                &body[statement.clone()],
-                schema.is_some(),
-            ) {
+            let embeds: Vec<_> = query
+                .embeds
+                .iter()
+                .filter(|(star, _)| statement.contains(&star.start))
+                .collect();
+            // An embed is sqlc's struct of the table, not a star to expand.
+            let stars = if embeds.is_empty() {
+                parsed.result_stars()
+            } else {
+                let mut text = body[statement.clone()].to_string();
+                for (star, _) in &embeds {
+                    let at = star.start - statement.start..star.end - statement.start;
+                    text.replace_range(at.clone(), &format!("{:<1$}", "1", at.len()));
+                }
+                parse(&text, dialect).result_stars()
+            };
+            if let Some((rule, message)) =
+                star_finding(stars, &body[statement.clone()], schema.is_some())
+            {
                 report(rule, message, at.clone());
             }
             if !names {
                 continue;
             }
             for diagnostic in parsed.analyze_with_diagnostics(schema).1 {
-                let span = diagnostic.span.map_or(at.clone(), |span| {
-                    at.start + span.start..at.start + span.end
-                });
-                report(diagnostic.rule, diagnostic.message, span);
+                let mut message = diagnostic.message;
+                let embed = embeds
+                    .iter()
+                    .find(|(star, _)| message.contains(&format!("`{}`", &body[star.clone()])));
+                let span = match (embed, diagnostic.span) {
+                    (Some((star, table)), _) => {
+                        let written =
+                            &source[query.body.start + table.start..query.body.start + table.end];
+                        message = message.replace(
+                            &format!("`{}`", &body[star.clone()]),
+                            &format!("`sqlc.embed({written})`"),
+                        );
+                        query.body.start + table.start..query.body.start + table.end
+                    }
+                    (None, Some(span)) => at.start + span.start..at.start + span.end,
+                    (None, None) => at.clone(),
+                };
+                report(diagnostic.rule, message, span);
             }
         }
     }
@@ -337,6 +390,14 @@ mod tests {
         assert_eq!(
             placeholders(sql, Format::Sqlc).0,
             "SELECT '@a', :u.x, x::pg.t, @@v -- @b\nWHERE :n               = :name"
+        );
+        assert_eq!(
+            placeholders("SELECT sqlc.embed( u ), u.id FROM users u", Format::Sqlc),
+            (
+                "SELECT u.*            , u.id FROM users u".to_string(),
+                Vec::new(),
+                vec![(7..10, 19..20)]
+            )
         );
         assert_eq!(
             placeholders(sql, Format::Aiosql).0,

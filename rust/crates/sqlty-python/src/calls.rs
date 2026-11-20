@@ -123,7 +123,7 @@ pub(crate) fn marker_names(source: &Source) -> (HashSet<String>, HashSet<String>
     (annotated, marker)
 }
 
-/// `_expr`: the annotation, a quoted one parsed.
+/// The annotation, a quoted one parsed.
 fn with_annotation<T>(annotation: Option<&Expr>, read: impl FnOnce(&Expr) -> T) -> Option<T> {
     match annotation? {
         Expr::StringLiteral(text) => {
@@ -160,7 +160,7 @@ impl<'a> Visitor<'a> for Marked<'_> {
     }
 }
 
-/// `_is_marked`: whether an annotation is `Annotated[..., SQL]`, at any depth.
+/// Whether an annotation is `Annotated[..., SQL]`, at any depth.
 fn annotation_is_marked(
     annotation: Option<&Expr>,
     annotated: &HashSet<String>,
@@ -219,7 +219,7 @@ fn named_parameters(parameters: &Parameters) -> impl Iterator<Item = &ruff_pytho
         .map(|parameter| &parameter.parameter)
 }
 
-/// `_row_param`: the first parameter annotated `type[T]` with `T` in the return type.
+/// The first parameter annotated `type[T]` with `T` in the return type.
 fn row_param(function: &StmtFunctionDef) -> Option<String> {
     let returned: HashSet<String> = with_annotation(function.returns.as_deref(), |returns| {
         let mut names = Names(HashSet::new());
@@ -248,7 +248,7 @@ fn decorators(function: &StmtFunctionDef) -> impl Iterator<Item = Option<String>
         .map(|decorator| dotted(&decorator.expression))
 }
 
-/// `_kind`: how a method is called, by its decorators.
+/// How a method is called, by its decorators.
 fn method_kind(function: &StmtFunctionDef) -> Kind {
     let names: Vec<Option<String>> = decorators(function).collect();
     let has = |name: &str| names.iter().any(|found| found.as_deref() == Some(name));
@@ -261,7 +261,7 @@ fn method_kind(function: &StmtFunctionDef) -> Kind {
     }
 }
 
-/// `_helper`: the helper `function` defines, its query parameter being `query`.
+/// The helper `function` defines, its query parameter being `query`.
 pub(crate) fn helper(
     name: String,
     function: &StmtFunctionDef,
@@ -321,8 +321,7 @@ pub(crate) fn helper(
     }
 }
 
-/// `_definitions`: the module-level functions and the methods of `source`, methods as
-/// `Class.name`.
+/// The module-level functions and the methods of `source`, methods as `Class.name`.
 pub(crate) fn definitions(source: &Source) -> Vec<(String, &StmtFunctionDef, Kind)> {
     let functions = source.body().iter().filter_map(|stmt| match stmt {
         Stmt::FunctionDef(function) => Some((function.name.to_string(), function, Kind::Function)),
@@ -341,14 +340,14 @@ pub(crate) fn definitions(source: &Source) -> Vec<(String, &StmtFunctionDef, Kin
     functions.chain(methods).collect()
 }
 
-/// `_rank`: the sort key among definitions of one name: complete first, then not `@overload`.
+/// The sort key among definitions of one name: complete first, then not `@overload`.
 pub(crate) fn rank(function: &StmtFunctionDef, complete: bool) -> (bool, bool) {
     let overload = decorators(function)
         .any(|decorator| decorator.is_some_and(|name| name.rsplit('.').next() == Some("overload")));
     (!complete, overload)
 }
 
-/// `_parameters`: the names of the parameters a call can name.
+/// The names of the parameters a call can name.
 pub(crate) fn parameter_names(function: &StmtFunctionDef) -> HashSet<String> {
     named_parameters(&function.parameters)
         .map(|parameter| parameter.name.to_string())
@@ -388,7 +387,7 @@ pub fn index_functions(source: &Source) -> Dict<Helper> {
     out
 }
 
-/// `_argument`: the argument of `call` bound to `param`.
+/// The argument of `call` bound to `param`.
 fn argument<'a>(helper: &Helper, call: &'a ExprCall, param: Option<&str>) -> Option<&'a Expr> {
     let param = param?;
     if helper.keywords.contains(param) {
@@ -410,7 +409,7 @@ fn argument<'a>(helper: &Helper, call: &'a ExprCall, param: Option<&str>) -> Opt
     args.get(index)
 }
 
-/// `_call_params`: the arguments `call` passes for the placeholders of its query.
+/// The arguments `call` passes for the placeholders of its query.
 fn call_params(
     helper: &Helper,
     call: &ExprCall,

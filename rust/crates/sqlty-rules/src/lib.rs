@@ -50,6 +50,8 @@ pub enum Group {
     Rewrite,
     /// Checks of the parameters of a query.
     Params,
+    /// What a migration locks, as `sqlty breaking` reports it.
+    Migration,
     /// Rules about `# sqlty: ignore` comments.
     Suppression,
     /// Failures of sqlty itself.
@@ -65,6 +67,7 @@ impl Group {
             Group::Names => "Names",
             Group::Rewrite => "Rewrite",
             Group::Params => "Params",
+            Group::Migration => "Migration",
             Group::Suppression => "Suppression",
             Group::Internal => "Internal",
         }
@@ -209,7 +212,7 @@ mod tests {
         assert!(Rule::SelectStar.fixable());
         assert!(!Rule::SelectStar.is_sql());
         assert!(Rule::SQL.iter().all(|rule| rule.is_sql()));
-        assert_eq!(Rule::SQL.len(), 15);
+        assert_eq!(Rule::SQL.len(), 16);
         assert!(Rule::ALL.iter().all(|rule| !rule.summary().is_empty()));
     }
 
@@ -231,6 +234,7 @@ mod tests {
             "Names",
             "Rewrite",
             "Params",
+            "Migration",
             "Suppression",
             "Internal",
         ] {
