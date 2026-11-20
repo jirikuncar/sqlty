@@ -93,4 +93,26 @@ SET lock_timeout = '1s';
 ALTER TABLE events ATTACH PARTITION events_rest DEFAULT;
 -- error: [constraint-scan] "a new partition of `events` scans its default partition `events_rest`"
 CREATE TABLE events_10 PARTITION OF events FOR VALUES FROM ('2026-10-01') TO ('2026-11-01');
+
+## TRUNCATE CASCADE of a table no foreign key references
+
+```sql migration
+SET lock_timeout = '1s';
+-- error:
+TRUNCATE users CASCADE;
+```
+
+## A new enum value in a column list that doesn't name its type
+
+```sql migration
+BEGIN;
+SET LOCAL lock_timeout = '1s';
+CREATE TYPE mood AS ENUM ('ok');
+ALTER TABLE users ADD COLUMN mood mood;
+COMMIT;
+BEGIN;
+ALTER TYPE mood ADD VALUE 'meh';
+-- error:
+UPDATE "users" SET email = 'meh' WHERE id = 1;
+COMMIT;
 ```
