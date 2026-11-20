@@ -237,8 +237,8 @@ src/sqlty/
 ├── _core.pyi            # Stub for sqlty._core (rust/crates/sqlty-ext/src/lib.rs)
 ├── _cli.py              # `sqlty` entry point: runs the Rust CLI, reports crashes
 ├── _config.py           # Configuration from sqlty.toml, pyproject.toml or Cargo.toml
-├── _check.py            # Calls the Rust checks for check_source and breaking
-├── _lint.py             # Lint rules: severity, diagnostics, RuleConfig
+├── _check.py            # Calls the Rust checks for check_source
+├── _lint.py             # Lint rules and the Diagnostic type
 ├── _decode.py           # Magic codec decoder
 ├── magic.py             # Magic codec registration
 ├── lexer.py             # Pygments lexer coloring the SQL in Python strings
