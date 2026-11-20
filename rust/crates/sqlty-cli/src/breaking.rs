@@ -148,8 +148,8 @@ pub type Types = Vec<(String, String)>;
 type Key = (Option<Arc<str>>, &'static str, Types);
 
 fn key_of(settings: &FileSettings) -> Key {
-    let (sql, dialect, types) = settings.schema_key();
-    (sql.map(Arc::from), dialect, types.to_vec())
+    let (_, dialect, types) = settings.schema_key();
+    (settings.schema_sql.clone(), dialect, types.to_vec())
 }
 
 /// The schema another revision gives a file.
@@ -504,19 +504,22 @@ fn migrations(
         checked.push((relative, settings));
     }
     let disk = Shared(Arc::new(sqlty_project::Disk));
-    let mut seen = BTreeSet::new();
+    // Few configurations, and one shares its texts: equal `Arc`s compare by pointer.
+    let mut seen: Vec<(Arc<FileSettings>, Arc<str>)> = Vec::new();
     let mut findings = Vec::new();
     for (relative, own) in checked {
         let baseline = schemas.against(&relative, &own)?.key.0;
-        let Some(baseline) = baseline
-            .filter(|sql| own.dialect == "postgres" && Some(sql) != own.schema_sql.as_ref())
-        else {
+        let Some(baseline) = baseline.filter(|_| own.dialect == "postgres") else {
             continue;
         };
-        let mut rules: Vec<_> = own.rules.iter().collect();
-        rules.sort();
-        let key = format!("{:?}", (&own.schema_files, &baseline, rules));
-        if !seen.insert(key) {
+        let judged = |(other, sql): &(Arc<FileSettings>, Arc<str>)| {
+            other.schema_files == own.schema_files && other.rules == own.rules && *sql == baseline
+        };
+        if seen.iter().any(judged) {
+            continue;
+        }
+        seen.push((Arc::clone(&own), Arc::clone(&baseline)));
+        if Some(&baseline) == own.schema_sql.as_ref() {
             continue;
         }
         let texts: Vec<String> = own
@@ -1045,6 +1048,18 @@ mod tests {
             sql: Arc::from(sql),
             loaded: HashMap::new(),
         }
+    }
+
+    #[test]
+    fn a_schema_key_shares_the_schema_text() {
+        let config = ("pyproject.toml", "[tool.sqlty]\nschema = \"schema.sql\"\n");
+        let root = project("shared", &[config, ("schema.sql", NEW_SCHEMA)]);
+        let settings = open(&root).workspace.settings(&root.join("q.py"));
+        let settings = settings.expect("reads");
+        let text = settings.schema_sql.as_ref().expect("a schema");
+        let key = key_of(&settings).0.expect("a schema");
+        assert!(Arc::ptr_eq(&key, text));
+        std::fs::remove_dir_all(&root).expect("removes");
     }
 
     #[test]
