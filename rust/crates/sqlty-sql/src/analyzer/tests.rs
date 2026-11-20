@@ -761,6 +761,7 @@ fn rarer_suggestions_highlights_and_placeholders() {
     );
     for sql in [
         "UPDATE t SET (a, b) = (1, 2)",
+        "WITH x AS (SELECT 1) UPDATE t SET (a, b) = (1, 2)",
         "INSERT INTO t SET (a, b) = (1, 2)",
         "INSERT INTO t (a) VALUES (1) ON DUPLICATE KEY UPDATE (a, b) = (1, 2)",
     ] {

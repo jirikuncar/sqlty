@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 use regex::{Captures, Regex};
 use sqlparser::ast::{
     visit_expressions, visit_expressions_mut, Assignment, AssignmentTarget, BinaryOperator,
-    DataType, Expr, Function, FunctionArguments, ObjectName, OnInsert, Statement, Value,
+    DataType, Expr, Function, FunctionArguments, ObjectName, OnInsert, SetExpr, Statement, Value,
     ValueWithSpan, Visit, Visitor,
 };
 use sqlparser::keywords::Keyword;
@@ -442,6 +442,8 @@ fn assigns_tuple(stmt: &Statement) -> bool {
             tuple(&insert.assignments)
                 || matches!(&insert.on, Some(OnInsert::DuplicateKeyUpdate(on)) if tuple(on))
         }
+        Statement::Query(query) => matches!(query.body.as_ref(),
+            SetExpr::Update(inner) | SetExpr::Insert(inner) if assigns_tuple(inner)),
         _ => false,
     }
 }

@@ -117,5 +117,7 @@ a = "-- sql\nUPDATE users SET (id, name) = (1, 'a')"
 b = "-- sql\nINSERT INTO users SET (id, name) = (1, 'a')"
 # error: [unparsed-query] "query does not parse: unsupported in this dialect"
 c = "-- sql\nINSERT INTO users (id) VALUES (1) ON DUPLICATE KEY UPDATE (id, name) = (2, 'b')"
-d = "-- sql\nINSERT INTO users SET id = 1, name = 'a' ON DUPLICATE KEY UPDATE name = 'b'"
+# error: [unparsed-query] "query does not parse: unsupported in this dialect"
+d = "-- sql\nWITH x AS (SELECT 1) UPDATE users SET (id, name) = (1, 'a')"
+e = "-- sql\nINSERT INTO users SET id = 1, name = 'a' ON DUPLICATE KEY UPDATE name = 'b'"
 ```
