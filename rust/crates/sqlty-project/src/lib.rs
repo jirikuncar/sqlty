@@ -44,6 +44,10 @@ impl Files for Shared {
     fn is_link(&self, path: &Path) -> bool {
         self.0.is_link(path)
     }
+
+    fn size(&self, path: &Path) -> Option<u64> {
+        self.0.size(path)
+    }
 }
 
 impl Shared {

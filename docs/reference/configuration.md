@@ -369,7 +369,7 @@ A method whose query parameter a stub marks `Annotated[LiteralString, SQL]` is a
 The directories are read in order: the first that describes a module gives its stub.
 `lib-stubs/` describes `lib` too, and a package is taken before a module of its name.
 Only the stubs of the packages a checked file or another such stub names are read, and
-at most 4096 stubs of a directory are listed.
+at most 4096 stubs of a directory are listed, with a warning when it holds more.
 
 ```toml
 [tool.sqlty]

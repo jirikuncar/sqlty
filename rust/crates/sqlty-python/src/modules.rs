@@ -119,11 +119,6 @@ impl Modules {
         &self.roots
     }
 
-    /// Whether `stub-paths` holds no stub.
-    pub fn has_no_stubs(&self) -> bool {
-        self.stubs.is_empty()
-    }
-
     /// The stub of `module`, read when first asked for.
     pub fn stub(&self, module: &str) -> Option<Arc<Module>> {
         let stub = self.stubs.get(module)?;

@@ -89,6 +89,12 @@ pub trait Files {
         normalized(path)
     }
 
+    /// The size of the file at `path` in bytes, when it is known without reading it: a
+    /// library module larger than is parsed is then never read.
+    fn size(&self, _path: &Path) -> Option<u64> {
+        None
+    }
+
     /// Whether `path` itself may be a link, so resolving it takes more than resolving its
     /// directory.
     fn is_link(&self, _path: &Path) -> bool {

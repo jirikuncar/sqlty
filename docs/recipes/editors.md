@@ -149,6 +149,11 @@ init_options = {
 | `hover.enable` | `true` | Say what a word of a query string is: a column's type, a table's columns, a result column's inference rule |
 | `highlighting.enable` | `true` | Send the SQL of checked strings as semantic tokens |
 
+The server reads the [stubs and libraries](../guide/helpers.md#stubs-for-untyped-libraries) of helpers again on
+every edit, unless the client reports the `.py` and `.pyi` files that change on disk
+(`workspace/didChangeWatchedFiles`), as the VS Code extension does: it then reads one
+again only when it changes, if it lies under a workspace folder.
+
 ## Vim
 
 With [vim-lsp](https://github.com/prabirshrestha/vim-lsp):

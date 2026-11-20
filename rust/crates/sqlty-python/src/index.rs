@@ -630,6 +630,11 @@ impl HelperIndex {
         )
     }
 
+    /// Whether the index reads modules outside the checked tree.
+    pub fn reads_outside(&self) -> bool {
+        self.outside.is_some()
+    }
+
     /// What the module `module` declares, for [`crate::receivers`]. `None` for a module
     /// that is not found or not read.
     pub fn facts(&self, module: &str) -> Option<Arc<Facts>> {

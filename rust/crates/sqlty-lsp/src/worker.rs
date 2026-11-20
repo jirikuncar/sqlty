@@ -25,6 +25,7 @@ pub(crate) fn work<W, F>(
         roots,
         settings,
         loaded: HashMap::new(),
+        watched: false,
     };
     while let Ok(first) = queue.recv() {
         // Jobs that arrived during the last check: the last edit of a buffer is checked once.
@@ -32,6 +33,19 @@ pub(crate) fn work<W, F>(
         for job in std::iter::once(first).chain(queue.try_iter()) {
             match job {
                 Job::Reload => workspaces.reload(shared),
+                Job::Changed(paths, watched) => {
+                    if watched {
+                        workspaces.watched();
+                    }
+                    if workspaces.changed(&paths) {
+                        let open: Vec<Uri> = shared.documents().keys().cloned().collect();
+                        for uri in open {
+                            if !checks.contains(&uri) {
+                                checks.push(uri);
+                            }
+                        }
+                    }
+                }
                 Job::Source(id, uri, kinds) => {
                     let actions: Vec<_> = kinds
                         .into_iter()
@@ -58,6 +72,8 @@ struct Workspaces<'a, W, F> {
     settings: &'a Settings,
     /// By project root; an error is shown once, when the root is first loaded.
     loaded: HashMap<PathBuf, Result<W, String>>,
+    /// Whether the client's watcher has reported a Python file: see [`Workspace::watched`].
+    watched: bool,
 }
 
 impl<W, F> Workspaces<'_, W, F>
@@ -84,9 +100,36 @@ where
         let mut loaded = (self.open)(&root, self.settings);
         match &mut loaded {
             Err(message) => shared.message(MessageType::ERROR, format!("sqlty: {message}")),
-            Ok(workspace) => publish_breaking(workspace, shared),
+            Ok(workspace) => {
+                if self.watched {
+                    workspace.watched(self.roots);
+                }
+                publish_breaking(workspace, shared);
+            }
         }
         self.loaded.insert(root, loaded);
+    }
+
+    /// The client's watcher reports the Python files written: every workspace, loaded now
+    /// or later, is told.
+    fn watched(&mut self) {
+        if !self.watched {
+            self.watched = true;
+            for workspace in self.loaded.values_mut().flatten() {
+                workspace.watched(self.roots);
+            }
+        }
+    }
+
+    /// Whether a loaded workspace read one of `paths`, which were written on disk.
+    fn changed(&mut self, paths: &[PathBuf]) -> bool {
+        let mut read = false;
+        for workspace in self.loaded.values_mut().flatten() {
+            for path in paths {
+                read |= workspace.changed(path);
+            }
+        }
+        read
     }
 
     /// Open every loaded workspace again: its settings or schema changed.

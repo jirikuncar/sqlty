@@ -32,12 +32,16 @@ static HELD: AtomicBool = AtomicBool::new(false);
 /// Reports each `bad`; its fix writes `good` and imports it, but fails on `nofix`. With a
 /// baseline, `old.py` of its root has a breaking change, and `gone.py`, which does not
 /// exist; the baseline `broken` fails and `once` has none after the first load. Completes with [`SCHEMA`] and the table `gen{N}`
-/// of its `N`th load; the strings `run(` is called with are helper queries.
+/// of its `N`th load; the strings `run(` is called with are helper queries. Reads
+/// `lib.pyi`, which says `bad` is fine once it is written, and reports `unwatched` until
+/// the client watches the Python files.
 struct Fake {
     root: PathBuf,
     settings: Settings,
     generation: usize,
     checked: String,
+    stubbed: bool,
+    watched: bool,
 }
 
 impl Workspace for Fake {
@@ -63,8 +67,11 @@ impl Workspace for Fake {
             Severity::Error
         };
         self.checked = text.to_string();
+        let unwatched = text.match_indices("unwatched").filter(|_| !self.watched);
         Ok(text
             .match_indices("bad")
+            .filter(|_| !self.stubbed)
+            .chain(unwatched)
             .map(|(at, _)| Diagnostic {
                 rule: "stale-type".to_string(),
                 message: "bad should be good".to_string(),
@@ -86,6 +93,15 @@ impl Workspace for Fake {
                 source: None,
             })
             .collect())
+    }
+
+    fn watched(&mut self, folders: &[PathBuf]) {
+        self.watched = folders.iter().any(|folder| folder.ends_with("work"));
+    }
+
+    fn changed(&mut self, path: &Path) -> bool {
+        self.stubbed |= path.ends_with("lib.pyi");
+        path.ends_with("lib.pyi")
     }
 
     fn fix(&mut self, _: &Path, text: &str) -> Result<String, String> {
@@ -188,6 +204,8 @@ impl Client {
                         settings: settings.clone(),
                         generation: count.load(Ordering::SeqCst),
                         checked: String::new(),
+                        stubbed: false,
+                        watched: false,
                     })
                 }
             })
@@ -500,6 +518,78 @@ fn saving_the_config_reloads_the_project() {
         assert_eq!(client.opened.load(Ordering::SeqCst), 2, "{name}");
         client.shutdown();
     }
+}
+
+#[test]
+fn a_stub_or_library_written_on_disk_is_read_again() {
+    let saved = |uri: &str| {
+        (
+            "textDocument/didSave",
+            json!({"textDocument": {"uri": uri}}),
+        )
+    };
+    let watched = |uri: &str| {
+        let changes =
+            json!([{"uri": "file:///work/notes.txt", "type": 2}, {"uri": uri, "type": 2}]);
+        (
+            "workspace/didChangeWatchedFiles",
+            json!({"changes": changes}),
+        )
+    };
+    for (method, params) in [
+        saved("file:///work/typings/lib.pyi"),
+        watched("file:///work/typings/lib.pyi"),
+    ] {
+        let mut client = Client::start(&json!({}));
+        client.open("file:///work/q.py", "bad\n");
+        let found = client.notification("textDocument/publishDiagnostics");
+        assert_eq!(found["diagnostics"].as_array().map(Vec::len), Some(1));
+        // A file no check read, and one that is not Python, check nothing again.
+        let (other, params_of_other) = watched("file:///work/other.py");
+        client.notify(other, params_of_other);
+        client.notify(method, params);
+        let found = client.notification("textDocument/publishDiagnostics");
+        assert_eq!(found["diagnostics"], json!([]), "{method}");
+        assert_eq!(client.opened.load(Ordering::SeqCst), 1, "not loaded again");
+        client.shutdown();
+    }
+}
+
+#[test]
+fn a_watcher_that_reports_python_files_is_told_to_every_workspace() {
+    let mut client = Client::start(&json!({}));
+    let count = |found: &Value| found["diagnostics"].as_array().map(Vec::len);
+    let published =
+        |client: &mut Client| count(&client.notification("textDocument/publishDiagnostics"));
+    client.open("file:///work/q.py", "unwatched\n");
+    assert_eq!(published(&mut client), Some(1));
+    // A save is no watcher, and neither is one that reports a directory.
+    client.notify(
+        "textDocument/didSave",
+        json!({"textDocument": {"uri": "file:///work/typings/lib.pyi"}}),
+    );
+    assert_eq!(published(&mut client), Some(1));
+    let watched = |uri: &str| json!({"changes": [{"uri": uri, "type": 3}]});
+    client.notify(
+        "workspace/didChangeWatchedFiles",
+        watched("file:///work/typings"),
+    );
+    client.change("file:///work/q.py", 2, "unwatched \n");
+    assert_eq!(published(&mut client), Some(1));
+    client.notify(
+        "workspace/didChangeWatchedFiles",
+        watched("file:///work/other.py"),
+    );
+    client.change("file:///work/q.py", 3, "unwatched\n");
+    assert_eq!(published(&mut client), Some(0));
+    // The project loaded again is told too.
+    client.notify(
+        "textDocument/didSave",
+        json!({"textDocument": {"uri": "file:///work/pyproject.toml"}}),
+    );
+    assert_eq!(published(&mut client), Some(0));
+    assert_eq!(client.opened.load(Ordering::SeqCst), 2);
+    client.shutdown();
 }
 
 #[test]

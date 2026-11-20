@@ -35,6 +35,10 @@ impl Files for Disk {
         Listing::Entries(entries.collect())
     }
 
+    fn size(&self, path: &Path) -> Option<u64> {
+        std::fs::metadata(path).ok().map(|meta| meta.len())
+    }
+
     fn is_link(&self, path: &Path) -> bool {
         std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink())
     }

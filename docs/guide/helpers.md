@@ -188,6 +188,11 @@ package, so a directory of stubs for libraries the project does not use costs no
 from the project directory, the roots of the checked packages and `sys.path`:
 `lib-stubs` before `lib`, a `.pyi` before the `.py` beside it.
 
+The language server reads the stubs and libraries again on every edit. With an editor
+that reports the `.py` and `.pyi` files changed on disk, as VS Code does, it keeps what
+it has read under the workspace folders, and reads a file again when the editor saves
+it or reports the change.
+
 ## Helpers you cannot annotate
 
 A helper whose signature you cannot edit (a library, generated code) is

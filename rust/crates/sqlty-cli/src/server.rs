@@ -73,6 +73,14 @@ impl Workspace for RustWorkspace {
         Ok(found)
     }
 
+    fn changed(&mut self, path: &Path) -> bool {
+        self.workspace.changed(path)
+    }
+
+    fn watched(&mut self, folders: &[PathBuf]) {
+        self.workspace.watched(folders);
+    }
+
     fn fix(&mut self, path: &Path, text: &str) -> Result<String, String> {
         let fixed = self.workspace.fix(path, text);
         self.warned(fixed)

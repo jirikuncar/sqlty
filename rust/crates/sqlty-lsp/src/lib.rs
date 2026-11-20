@@ -139,6 +139,15 @@ pub trait Workspace {
     fn completion(&mut self, _path: &Path) -> Option<CompletionContext> {
         None
     }
+    /// The Python file, stub or directory `path` was written, created or removed on disk.
+    /// `true` when a check read it, so that the open buffers are checked again.
+    fn changed(&mut self, _path: &Path) -> bool {
+        false
+    }
+    /// The client watches the Python files and stubs under `folders`, and reports each
+    /// one written with [`Workspace::changed`]. A check cannot rely on what it read
+    /// before of the files elsewhere.
+    fn watched(&mut self, _folders: &[PathBuf]) {}
 }
 
 /// What the client configures, from the `initializationOptions` of `initialize`:
@@ -271,6 +280,9 @@ enum Job {
     /// The whole-file actions asked for: [`FIX_ALL`], [`FORMAT`], [`REWRITE`] or [`STRIP`].
     Source(lsp_server::RequestId, Uri, Vec<&'static str>),
     Reload,
+    /// Python files, stubs and directories written on disk, which a check may have read,
+    /// and whether the client's watcher reported them: it then reports every one.
+    Changed(Vec<PathBuf>, bool),
 }
 
 struct Document {
@@ -423,6 +435,8 @@ impl Shared {
                 };
                 if is_config(&params.text_document.uri) {
                     self.reload(jobs);
+                } else {
+                    changed(&[params.text_document.uri], false, jobs);
                 }
             }
             DidChangeWatchedFiles::METHOD => {
@@ -433,6 +447,9 @@ impl Shared {
                 };
                 if params.changes.iter().any(|change| is_config(&change.uri)) {
                     self.reload(jobs);
+                } else {
+                    let uris: Vec<Uri> = params.changes.into_iter().map(|c| c.uri).collect();
+                    changed(&uris, true, jobs);
                 }
             }
             _ => {}
@@ -621,6 +638,26 @@ fn roots(params: &InitializeParams) -> Vec<PathBuf> {
 }
 
 /// Whether a change to `uri` changes the settings or the schema of its project.
+/// Tell the worker which of `uris` are Python files, stubs or directories: a check reads
+/// the stubs and libraries its file names, and keeps them until one is written. `watcher`
+/// says the client's file watcher reported them, which a Python file among them shows to
+/// cover Python files.
+fn changed(uris: &[Uri], watcher: bool, jobs: &mpsc::Sender<Job>) {
+    let python = |path: &Path| {
+        path.extension()
+            .is_some_and(|kind| kind == "py" || kind == "pyi")
+    };
+    let paths: Vec<PathBuf> = uris
+        .iter()
+        .filter_map(uri::to_path)
+        .filter(|path| path.extension().is_none() || python(path))
+        .collect();
+    if !paths.is_empty() {
+        let watched = watcher && paths.iter().any(|path| python(path));
+        let _ = jobs.send(Job::Changed(paths, watched));
+    }
+}
+
 fn is_config(uri: &Uri) -> bool {
     let path = uri.path().as_str();
     ["/pyproject.toml", "/sqlty.toml", "/Cargo.toml", ".sql"]
