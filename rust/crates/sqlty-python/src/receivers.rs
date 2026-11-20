@@ -632,10 +632,20 @@ impl<'s, 'a> Resolver<'s, 'a> {
 
     fn facts(&self, module: &str) -> Option<Arc<Facts>> {
         if module == self.module {
-            return Some(Arc::clone(
-                self.local
-                    .get_or_init(|| Arc::new(Facts::from_scan(self.scan, self.named))),
-            ));
+            return Some(Arc::clone(self.local.get_or_init(|| {
+                // The module the index holds is this one when its text is: what the walk
+                // found is kept with it, for the modules that import it.
+                let read = || Facts::from_scan(self.scan, self.named);
+                let kept = self
+                    .helpers
+                    .and_then(|helpers| helpers.module(self.module))
+                    .filter(|kept| {
+                        Arc::ptr_eq(&kept.text, &self.source.text)
+                            && Some(kept.name()) == self.named
+                    })
+                    .and_then(|kept| kept.facts_or(|| Some(read())).cloned());
+                kept.unwrap_or_else(|| Arc::new(read()))
+            })));
         }
         if KNOWN.contains(&module) || module.is_empty() || module == NOWHERE {
             return None;
@@ -1168,6 +1178,7 @@ fn c3_merge(mut orders: Vec<Vec<Class>>) -> Option<Vec<Class>> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

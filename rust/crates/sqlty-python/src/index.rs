@@ -4,7 +4,6 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
 
 use regex::Regex;
@@ -13,6 +12,7 @@ use ruff_python_ast::Expr;
 use crate::calls::{definitions, helper, index_functions, parameter_names, rank, Helper, Kind};
 use crate::frozen::{Frozen, Table};
 use crate::module::Import;
+use crate::modules::Modules;
 use crate::receivers::Facts;
 use crate::types::extract::extract_type_definitions;
 use crate::types::info::{Dict, TypeInfo};
@@ -99,34 +99,13 @@ type Typed = (Option<Ty>, usize);
 
 /// The row types of a module, by name.
 pub type Defs = Arc<Dict<Arc<TypeInfo>>>;
-/// The module files read for `register`, by path and module name.
-type Read = HashMap<(PathBuf, String), Option<Arc<Source>>>;
-
-/// Where `register` reads the modules that are not indexed: the roots to look under and
-/// how to read the text of a file, as the engine does no I/O.
-#[derive(Clone, Copy)]
-pub struct Roots<'a> {
-    pub paths: &'a [PathBuf],
-    pub read: &'a dyn Fn(&Path) -> Option<String>,
-}
-
-/// How an index reads the text of a file.
-pub type ReadFile = Arc<dyn Fn(&Path) -> Option<String> + Send + Sync>;
-
-/// Where an index reads the classes of the modules that are not checked: the roots to look
-/// under, in order, a `.pyi` before the `.py` beside it.
-#[derive(Clone)]
-pub struct Outside {
-    pub paths: Vec<PathBuf>,
-    pub read: ReadFile,
-}
-
 /// A module of the tree: its text, parsed when another module's lookup first reaches it.
 pub struct Module {
     pub text: Arc<str>,
     name: String,
     version: Version,
     parsed: OnceLock<Option<Arc<Source>>>,
+    facts: OnceLock<Option<Arc<Facts>>>,
 }
 
 impl Module {
@@ -137,6 +116,18 @@ impl Module {
             name: name.to_string(),
             version,
             parsed: OnceLock::new(),
+            facts: OnceLock::new(),
+        }
+    }
+
+    /// The module `name` whose file is not read: nothing is known of it.
+    pub fn unread(name: &str, version: Version) -> Self {
+        Module {
+            text: Arc::from(""),
+            name: name.to_string(),
+            version,
+            parsed: OnceLock::from(None),
+            facts: OnceLock::from(None),
         }
     }
 
@@ -147,6 +138,7 @@ impl Module {
             name: source.module.clone().unwrap_or_default(),
             version: source.version,
             parsed: OnceLock::from(Some(source)),
+            facts: OnceLock::new(),
         }
     }
 
@@ -155,6 +147,26 @@ impl Module {
         self.parsed
             .get_or_init(|| self.parse().map(Arc::new))
             .as_ref()
+    }
+
+    /// What the module declares, for [`crate::receivers`]: read once and kept with the
+    /// module, for every index that holds it.
+    pub fn facts(&self) -> Option<&Arc<Facts>> {
+        self.facts_or(|| {
+            let source = self.source()?;
+            Some(Facts::of(source, Some(&self.name)))
+        })
+    }
+
+    /// [`Module::facts`], read by `read` when they are not kept yet: a caller that has
+    /// walked the module gives what its walk found.
+    pub fn facts_or(&self, read: impl FnOnce() -> Option<Facts>) -> Option<&Arc<Facts>> {
+        self.facts.get_or_init(|| read().map(Arc::new)).as_ref()
+    }
+
+    /// The name the module is read as: `pkg.__init__` for a package.
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     /// The module as parsed so far, else parsed for the caller alone.
@@ -241,12 +253,10 @@ pub struct HelperIndex {
     pub modules: HashMap<String, Dict<Helper>>,
     tree: Arc<Tree>,
     version: Version,
-    read: Arc<Mutex<Read>>,
-    /// The stub modules, which are read before any other module of their name.
+    /// The stubs the host gave the text of, read before any other module of their name.
     stubs: Arc<HashMap<String, Arc<Module>>>,
-    outside: Option<Outside>,
-    /// What each module declares, for [`crate::receivers`]; `None` for one that is not found.
-    facts: Mutex<HashMap<String, Option<Arc<Facts>>>>,
+    /// The stubs of `stub-paths` and the libraries under the roots.
+    outside: Option<Arc<Modules>>,
     names: HashSet<String>,
     pattern: Option<Regex>,
 }
@@ -279,9 +289,26 @@ pub struct Builder {
     tree: Option<Arc<Tree>>,
     added: HashMap<String, Arc<Module>>,
     version: Version,
-    read: Arc<Mutex<Read>>,
     stubs: Arc<HashMap<String, Arc<Module>>>,
-    outside: Option<Outside>,
+    outside: Option<Arc<Modules>>,
+}
+
+/// The module `module`: its stub, else the checked module `sources` holds, else the
+/// library under a root. Every lookup of a module by name goes through here, so a helper
+/// that is registered, the class of a receiver and a helper a stub marks are read from
+/// the same file.
+fn resolve(
+    stubs: &HashMap<String, Arc<Module>>,
+    outside: Option<&Modules>,
+    sources: &HashMap<String, Arc<Module>>,
+    module: &str,
+) -> Option<Arc<Module>> {
+    stubs
+        .get(module)
+        .cloned()
+        .or_else(|| outside?.stub(module))
+        .or_else(|| sources.get(module).cloned())
+        .or_else(|| outside?.library(module))
 }
 
 impl Builder {
@@ -291,7 +318,6 @@ impl Builder {
             tree: None,
             added: HashMap::new(),
             version,
-            read: Arc::default(),
             stubs: Arc::default(),
             outside: None,
         }
@@ -315,9 +341,23 @@ impl Builder {
         Arc::make_mut(&mut self.stubs).insert(module.to_string(), source);
     }
 
-    /// Read the classes of the modules that are not indexed from `outside`.
-    pub fn outside(&mut self, outside: Outside) {
+    /// Read the modules that are not indexed from `outside`: a stub of its `stub-paths`
+    /// before the indexed module of that name, a library under its roots after. The
+    /// helpers its stubs mark are indexed, for the packages some indexed module names.
+    pub fn outside(&mut self, outside: Arc<Modules>) {
+        let marked = outside.marked(self.sources().values().map(|module| &*module.text));
+        for (module, helpers) in marked {
+            let known = self.modules.entry(module).or_default();
+            for (name, helper) in helpers.iter() {
+                known.insert(name, helper.clone());
+            }
+        }
         self.outside = Some(outside);
+    }
+
+    /// The roots the modules that are not indexed are read from.
+    pub fn roots(&self) -> Option<&[std::path::PathBuf]> {
+        self.outside.as_deref().map(Modules::roots)
     }
 
     fn sources(&self) -> &HashMap<String, Arc<Module>> {
@@ -343,21 +383,19 @@ impl Builder {
 
     /// `HelperIndex.register`: `import_path` (`pkg.mod.func` or `pkg.mod.Class.method`) as
     /// a helper taking its query as `query` and its row type as `row`, see
-    /// `[[tool.sqlty.functions]]`. Its definition is read from an indexed module, or from
-    /// the first of `roots` holding it.
+    /// `[[tool.sqlty.functions]]`. Its definition is read from its stub, an indexed module
+    /// or a library ([`Builder::outside`]).
     pub fn register(
         &mut self,
         import_path: &str,
         query: &str,
         row: Option<&str>,
-        roots: Roots<'_>,
         database: Option<&str>,
     ) {
         let parts: Vec<&str> = import_path.split('.').collect();
         for i in (1..parts.len()).rev() {
             let name = parts[i..].join(".");
-            let Some((mut found, defined_in)) =
-                self.definition(&parts[..i], &name, query, row, roots, 0)
+            let Some((mut found, defined_in)) = self.definition(&parts[..i], &name, query, row, 0)
             else {
                 continue;
             };
@@ -410,26 +448,68 @@ impl Builder {
     }
 
     /// The helper `name` of module `parts` defines, following the names it re-exports.
+    /// A place that holds the module without binding the name at all (a stub that
+    /// describes part of a library, one that does not parse) leaves it to the next: the
+    /// stub, the indexed module, then the files of the library.
     fn definition(
         &self,
         parts: &[&str],
         name: &str,
         query: &str,
         row: Option<&str>,
-        roots: Roots<'_>,
         depth: usize,
     ) -> Option<(Helper, Option<(String, String)>)> {
         let module = parts.join(".");
-        let known = self
-            .stubs
-            .get(&module)
-            .or_else(|| self.sources().get(&module));
-        let source = match known {
-            Some(known) => known.source()?.clone(),
-            None => self.module_source(parts, roots)?,
+        let outside = self.outside.as_deref();
+        let first = [
+            self.stubs.get(&module).cloned(),
+            outside.and_then(|outside| outside.stub(&module)),
+            self.sources().get(&module).cloned(),
+        ];
+        // A place that binds the head of the name without the helper (a class whose
+        // method is inherited, say) ends the search: another file's parameters could
+        // contradict the class the receivers are typed by.
+        let head = name.split('.').next().unwrap_or(name);
+        let ended = Cell::new(false);
+        let defined = |known: &Arc<Module>| {
+            if ended.get() {
+                return None;
+            }
+            let source = known.source()?;
+            let found = self.defined_in(source, &module, name, query, row, depth);
+            let bound = known
+                .facts()
+                .is_some_and(|facts| facts.names.contains_key(head));
+            ended.set(found.is_none() && bound);
+            found
         };
+        if let Some(found) = first.iter().flatten().find_map(defined) {
+            return Some(found);
+        }
+        // The library file every lookup reads is kept; the others are read for this.
+        let outside = outside?;
+        if let Some(found) = outside.library(&module).as_ref().and_then(defined) {
+            return Some(found);
+        }
+        if ended.get() {
+            return None;
+        }
+        let others = outside.libraries(&module);
+        others.iter().skip(1).find_map(defined)
+    }
+
+    /// The helper `name` as `source`, the module `module`, defines or re-exports it.
+    fn defined_in(
+        &self,
+        source: &Source,
+        module: &str,
+        name: &str,
+        query: &str,
+        row: Option<&str>,
+        depth: usize,
+    ) -> Option<(Helper, Option<(String, String)>)> {
         let wanted: Vec<&str> = [Some(query), row].into_iter().flatten().collect();
-        let found = definitions(&source)
+        let found = definitions(source)
             .into_iter()
             .filter(|(known, _, _)| known == name)
             .min_by_key(|(_, function, _)| {
@@ -444,7 +524,8 @@ impl Builder {
                 query.to_string(),
                 row.map(str::to_string),
             );
-            return Some((found, (depth > 0).then(|| (module, name.to_string()))));
+            let defined = (depth > 0).then(|| (module.to_string(), name.to_string()));
+            return Some((found, defined));
         }
         if depth > 8 {
             return None;
@@ -453,58 +534,11 @@ impl Builder {
             Some((head, rest)) => (head, format!(".{rest}")),
             None => (name, String::new()),
         };
-        let targets = source.targets_in(source.module.as_deref().or(Some(&module)));
+        let targets = source.targets_in(source.module.as_deref().or(Some(module)));
         let (exports, _) = &*targets;
         let (target, original) = exports.get(head)?;
         let parts: Vec<&str> = target.split('.').collect();
-        self.definition(
-            &parts,
-            &format!("{original}{rest}"),
-            query,
-            row,
-            roots,
-            depth + 1,
-        )
-    }
-
-    /// Module `parts` read from the first of `roots` holding it.
-    fn module_source(&self, parts: &[&str], roots: Roots<'_>) -> Option<Arc<Source>> {
-        let module = parts.join(".");
-        let (last, package) = parts.split_last()?;
-        for root in roots.paths {
-            let mut file: PathBuf = root.clone();
-            file.extend(package);
-            file.push(format!("{last}.py"));
-            let mut init: PathBuf = root.clone();
-            init.extend(parts);
-            init.push("__init__.py");
-            for (path, name) in [(file, module.clone()), (init, format!("{module}.__init__"))] {
-                let key = (path, name);
-                let known = lock(&self.read).get(&key).cloned();
-                let source = match known {
-                    Some(source) => source,
-                    None => {
-                        let source = match (roots.read)(&key.0) {
-                            None => None,
-                            Some(text) => {
-                                let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
-                                let Some(source) = Source::new(text, self.version) else {
-                                    // The first root holding the file ends the search.
-                                    return None;
-                                };
-                                Some(Arc::new(source.named(Some(&key.1))))
-                            }
-                        };
-                        lock(&self.read).insert(key, source.clone());
-                        source
-                    }
-                };
-                if source.is_some() {
-                    return source;
-                }
-            }
-        }
-        None
+        self.definition(&parts, &format!("{original}{rest}"), query, row, depth + 1)
     }
 
     /// The index, to check modules against.
@@ -564,10 +598,8 @@ impl Builder {
             modules: self.modules,
             tree,
             version: self.version,
-            read: self.read,
             stubs: self.stubs,
             outside: self.outside,
-            facts: Mutex::default(),
             names,
             pattern,
         })
@@ -582,66 +614,26 @@ impl HelperIndex {
             tree: Some(self.tree.clone()),
             added: HashMap::new(),
             version: self.version,
-            read: self.read.clone(),
             stubs: self.stubs.clone(),
             outside: self.outside.clone(),
         }
     }
 
-    /// What the module `module` declares, for [`crate::receivers`]: read from its stub,
-    /// else from the checked module, else from the first root outside holding it. `None`
-    /// for a module that is not found or not read.
-    pub fn facts(&self, module: &str) -> Option<Arc<Facts>> {
-        if let Some(known) = lock(&self.facts).get(module) {
-            return known.clone();
-        }
-        let known = self
-            .stubs
-            .get(module)
-            .or_else(|| self.tree.sources.get(module));
-        let source = match known {
-            Some(known) => known.source().cloned(),
-            None => self.outside_source(module),
-        };
-        let facts = source.map(|source| {
-            let name = source.module.as_deref().or(Some(module));
-            Arc::new(Facts::of(&source, name))
-        });
-        lock(&self.facts).insert(module.to_string(), facts.clone());
-        facts
+    /// The module `module`, wherever it is read from: its stub, the checked tree, a
+    /// library. `None` for a module that is not found.
+    pub fn resolve(&self, module: &str) -> Option<Arc<Module>> {
+        resolve(
+            &self.stubs,
+            self.outside.as_deref(),
+            &self.tree.sources,
+            module,
+        )
     }
 
-    /// The module `module` read from the roots outside the checked tree.
-    fn outside_source(&self, module: &str) -> Option<Arc<Source>> {
-        let outside = self.outside.as_ref()?;
-        let parts: Vec<&str> = module.split('.').collect();
-        let (last, package) = parts.split_last()?;
-        if parts
-            .iter()
-            .any(|part| part.is_empty() || !part.chars().all(crate::types::generic::is_word))
-        {
-            return None;
-        }
-        for root in &outside.paths {
-            let mut directory: PathBuf = root.clone();
-            directory.extend(package);
-            for suffix in ["pyi", "py"] {
-                let file = directory.join(format!("{last}.{suffix}"));
-                let init = directory.join(last).join(format!("__init__.{suffix}"));
-                for (path, name) in [
-                    (file, module.to_string()),
-                    (init, format!("{module}.__init__")),
-                ] {
-                    let Some(text) = (outside.read)(&path) else {
-                        continue;
-                    };
-                    let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
-                    // The first root holding the module ends the search.
-                    return Module::new(Arc::from(text), &name, self.version).load();
-                }
-            }
-        }
-        None
+    /// What the module `module` declares, for [`crate::receivers`]. `None` for a module
+    /// that is not found or not read.
+    pub fn facts(&self, module: &str) -> Option<Arc<Facts>> {
+        self.resolve(module)?.facts().cloned()
     }
 
     /// The module `module` as it was added.

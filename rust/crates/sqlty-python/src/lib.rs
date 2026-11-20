@@ -60,6 +60,7 @@ pub mod json_types;
 pub mod locate;
 pub mod migrations;
 pub mod module;
+pub mod modules;
 pub mod options;
 pub mod params;
 pub mod parse;

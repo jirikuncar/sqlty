@@ -24,7 +24,7 @@ use std::sync::Arc;
 use clap::ValueEnum;
 use sqlty_project::{Checker, FileSettings, Flags, Options, Shared, Workspace};
 use sqlty_python::checker::Diagnostic;
-use sqlty_python::index::{defines_helpers, helpers_of, Builder, HelperIndex, Module, Roots};
+use sqlty_python::index::{defines_helpers, helpers_of, Builder, HelperIndex, Module};
 use sqlty_python::project::{self, Discovery};
 use sqlty_python::rules::Severity;
 use sqlty_python::types::stdlib::Version;
@@ -565,17 +565,11 @@ pub(crate) fn index_of(files: &[File], version: Version) -> Arc<HelperIndex> {
 /// `index` with the `functions` of `settings` registered, found among its modules only.
 pub(crate) fn configured(index: &HelperIndex, settings: &FileSettings) -> Arc<HelperIndex> {
     let mut forked = index.fork();
-    let read = |_: &Path| None;
     for function in &settings.functions {
-        let roots = Roots {
-            paths: &[],
-            read: &read,
-        };
         forked.register(
             &function.import_path,
             &function.query,
             function.row.as_deref(),
-            roots,
             function.database.as_deref(),
         );
     }

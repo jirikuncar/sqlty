@@ -135,6 +135,20 @@ class HelperIndex:
         name = module.removesuffix(".__init__")
         self._steps.append(("stub", name, source, module, [], None))
 
+    def outside(self, roots: Sequence[Path]) -> None:
+        """Read the modules that are not indexed from ``roots``, as ``sqlty check`` does.
+
+        The class of a helper method's receiver may be defined in a library: its module is
+        read (never imported) from the first of ``roots`` holding it, ``pkg-stubs`` before
+        ``pkg``, a ``.pyi`` before the ``.py`` beside it. ``sqlty check`` passes the project
+        directory, the roots of the checked packages and ``sys.path``.
+
+        Example:
+            >>> index = HelperIndex()
+            >>> index.outside([Path("src")])
+        """
+        self._steps.append(("outside", "", "", None, list(roots), None))
+
     def register(
         self,
         import_path: str,
@@ -148,8 +162,8 @@ class HelperIndex:
 
         Used for ``[[tool.sqlty.functions]]``: the function needs no marked parameter. Its
         positional parameters are read from its definition in ``pkg.mod``, indexed or else
-        read (never imported) from ``pkg/mod.py`` or ``pkg/mod/__init__.py`` under the first
-        of ``roots`` holding it, following names ``pkg.mod`` re-exports (``from .core import
+        read (never imported) from the first of ``roots`` holding it (``pkg-stubs`` before
+        ``pkg``, a ``.pyi`` before a ``.py``, a package before a module), following names ``pkg.mod`` re-exports (``from .core import
         Connection``); otherwise ``query`` and ``row`` can only be passed by keyword. Of
         ``@overload`` definitions, the first naming both is used unless the implementation
         names them.

@@ -740,7 +740,8 @@ mod tests {
     /// The paths the checks of `text` read outside an index whose only helper is the
     /// method `Db.one` of the module `db`.
     fn read_for(text: &str) -> usize {
-        use crate::index::{Builder, Module, Outside};
+        use crate::index::{Builder, Module};
+        use crate::modules::{File, Modules};
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
 
@@ -751,13 +752,12 @@ mod tests {
         builder.add_found("db", db, &found);
         let read = Arc::new(AtomicUsize::new(0));
         let counted = Arc::clone(&read);
-        builder.outside(Outside {
-            paths: vec![std::path::PathBuf::from("/root")],
-            read: Arc::new(move |_| {
-                counted.fetch_add(1, Ordering::Relaxed);
-                None
-            }),
+        let roots = vec![std::path::PathBuf::from("/root")];
+        let reader = Arc::new(move |_: &std::path::Path| {
+            counted.fetch_add(1, Ordering::Relaxed);
+            File::Missing
         });
+        builder.outside(Arc::new(Modules::new((3, 14), Vec::new(), roots, reader)));
         let index = builder.build();
         let source = Source::new(text, (3, 14)).unwrap().named(Some("app"));
         let calls = helper_calls(&source, Some(&index), Some("app"), None);

@@ -8,9 +8,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use rayon::prelude::*;
 use sqlty_python::calls::Helper;
 use sqlty_python::checker::{self, Diagnostic, SiteKind};
-use sqlty_python::index::{
-    defines_helpers, helpers_of, Builder, HelperIndex, Module as Indexed, Outside, Roots,
-};
+use sqlty_python::index::{defines_helpers, helpers_of, Builder, HelperIndex, Module as Indexed};
+use sqlty_python::modules::{File as Found, Modules, ReadFile, Stub};
 use sqlty_python::project::{
     self, helper_roots, normalized, Discovery, Files, FindError, Kind, Listing, Packages, Read,
 };
@@ -476,8 +475,8 @@ impl Workspace {
         index
     }
 
-    /// The index with the `functions` of `settings` registered and the stubs of its
-    /// `stub-paths` read.
+    /// The index with the `functions` of `settings` registered, the helpers the stubs of
+    /// its `stub-paths` mark, and the libraries a receiver's class is read from.
     pub fn helpers(&mut self, settings: &FileSettings) -> Arc<HelperIndex> {
         let index = self.index();
         let key = (
@@ -488,6 +487,26 @@ impl Workspace {
         if let Some(found) = self.configured.get(&key) {
             return Arc::clone(found);
         }
+        let mut forked = index.fork();
+        forked.outside(self.outside(settings));
+        for function in &settings.functions {
+            forked.register(
+                &function.import_path,
+                &function.query,
+                function.row.as_deref(),
+                function.database.as_deref(),
+            );
+        }
+        let forked = forked.build();
+        self.configured.insert(key, Arc::clone(&forked));
+        forked
+    }
+
+    /// The modules outside the checked tree, for the files `settings` configure: the
+    /// stubs under its `stub-paths`, listed now and read when a lookup reaches one, and the
+    /// libraries under the project directory, the roots of the checked packages and the
+    /// host's `sys.path`.
+    fn outside(&mut self, settings: &FileSettings) -> Arc<Modules> {
         let resolved: Vec<PathBuf> = self
             .order
             .iter()
@@ -501,46 +520,23 @@ impl Workspace {
             .as_deref()
             .map(|base| self.files.canonical(base));
         let roots = helper_roots(base.as_deref(), &checked, &self.extra_roots);
-        let files = self.files.clone();
-        let read = move |path: &Path| files.text(path);
-        let mut forked = index.fork();
         let project = base.unwrap_or_else(|| self.files.canonical(&self.flags.cwd));
-        for directory in &settings.stub_paths {
-            let mut found = Vec::new();
-            stubs_under(
-                &self.files,
-                &project.join(directory),
-                &mut Vec::new(),
-                &mut found,
-            );
-            for (module, name, path) in found {
-                if let Some(text) = self.files.text(&path) {
-                    let stub = Indexed::new(Arc::from(text), &name, self.version);
-                    forked.add_stub(&module, Arc::new(stub));
-                }
-            }
+        let directories: Vec<PathBuf> = settings
+            .stub_paths
+            .iter()
+            .map(|directory| project.join(directory))
+            .collect();
+        let mut stubs = Vec::new();
+        for directory in &directories {
+            let listed = stubs.len();
+            stubs_under(&self.files, directory, &mut Vec::new(), listed, &mut stubs);
         }
-        forked.outside(Outside {
-            paths: roots.clone(),
-            read: Arc::new(read.clone()),
+        let files = self.files.clone();
+        let read: ReadFile = Arc::new(move |path: &Path| match files.read(path) {
+            Read::Text(data) => String::from_utf8(data).map_or(Found::Unread, Found::Text),
+            Read::Missing | Read::Unread => Found::Missing,
         });
-        for function in &settings.functions {
-            let roots = Roots {
-                paths: &roots,
-                read: &read,
-            };
-            let row = function.row.as_deref();
-            forked.register(
-                &function.import_path,
-                &function.query,
-                row,
-                roots,
-                function.database.as_deref(),
-            );
-        }
-        let forked = forked.build();
-        self.configured.insert(key, Arc::clone(&forked));
-        forked
+        Arc::new(Modules::new(self.version, stubs, roots, read))
     }
 
     fn directory(&mut self, path: &Path) -> Result<Arc<Directory>, String> {
@@ -957,18 +953,23 @@ const MAX_STUB_DEPTH: usize = 16;
 
 /// The `.pyi` files under `directory`, each as the module it describes, the name it is
 /// read as (`pkg.__init__` for a package) and its path; `pkg-stubs` describes `pkg`.
+/// Directories come before files, so that of `lib/__init__.pyi` and `lib.pyi` the package
+/// is listed first, and `lib-stubs` before `lib`. Nothing is read: `found` holds
+/// `listed` stubs of other directories.
 fn stubs_under(
     files: &Shared,
     directory: &Path,
     package: &mut Vec<String>,
-    found: &mut Vec<(String, String, PathBuf)>,
+    listed: usize,
+    found: &mut Vec<Stub>,
 ) {
     let Listing::Entries(mut entries) = files.list(directory) else {
         return;
     };
-    entries.sort();
+    entries
+        .sort_by_key(|(name, kind)| (*kind == Kind::File, !name.ends_with("-stubs"), name.clone()));
     for (name, kind) in entries {
-        if found.len() >= MAX_STUBS {
+        if found.len() - listed >= MAX_STUBS {
             return;
         }
         let path = directory.join(&name);
@@ -982,15 +983,19 @@ fn stubs_under(
             if stem == "__init__" {
                 parts.pop();
             }
-            found.push((parts.join("."), read_as, path));
+            found.push(Stub {
+                module: parts.join("."),
+                read_as,
+                path,
+            });
         } else if kind == Kind::Dir && package.len() < MAX_STUB_DEPTH {
             let part = match package.is_empty() {
                 true => name.strip_suffix("-stubs").unwrap_or(&name),
                 false => &name,
             };
-            if part.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            if !part.is_empty() && part.chars().all(|c| c.is_alphanumeric() || c == '_') {
                 package.push(part.to_string());
-                stubs_under(files, &path, package, found);
+                stubs_under(files, &path, package, listed, found);
                 package.pop();
             }
         }
@@ -1405,6 +1410,100 @@ mod tests {
             .check(Path::new("/repo/q.py"), text)
             .expect("checks");
         assert_eq!(rules(&found), ["unparsed-query"]);
+    }
+
+    /// Files that tell which of them were read.
+    struct Counted(Tree, Arc<Mutex<Vec<PathBuf>>>);
+
+    impl Files for Counted {
+        fn read(&self, path: &Path) -> Read {
+            let found = self.0.read(path);
+            if matches!(found, Read::Text(_)) {
+                self.1.lock().unwrap().push(path.to_path_buf());
+            }
+            found
+        }
+
+        fn list(&self, path: &Path) -> Listing {
+            self.0.list(path)
+        }
+    }
+
+    const STUB: &str = "from typing import Annotated, LiteralString\nfrom sqlty import SQL\nclass Db:\n    def one(self, sql: Annotated[LiteralString, SQL], form: type, /): ...\n";
+    const PLAIN: &str = "class Db:\n    def one(self, sql, form): ...\n";
+    const CALL: &str =
+        "from lib import Db\ndef run(db: Db) -> None:\n    db.one(\"SELECT nope FROM users\", int)\n";
+
+    /// A project whose `typings` hold a stub of `lib` and one of `unused`, with `more`
+    /// files, and the paths it has read.
+    fn stubbed(more: &[(&str, &'static str)]) -> (Workspace, Arc<Mutex<Vec<PathBuf>>>) {
+        let mut files = vec![
+            (
+                "/repo/pyproject.toml",
+                "[tool.sqlty]\nschema = \"schema.sql\"\n",
+            ),
+            ("/repo/schema.sql", "CREATE TABLE users (id INT NOT NULL);"),
+            ("/repo/typings/lib/__init__.pyi", STUB),
+            ("/repo/typings/unused/__init__.pyi", STUB),
+            ("/repo/app.py", CALL),
+        ];
+        files.extend_from_slice(more);
+        let tree = Tree(
+            files
+                .iter()
+                .map(|(path, text)| (PathBuf::from(path), text.as_bytes()))
+                .collect(),
+        );
+        let read = Arc::new(Mutex::new(Vec::new()));
+        let files = Arc::new(Counted(tree, Arc::clone(&read)));
+        let workspace =
+            Workspace::root(Path::new("/repo"), files, (3, 14), Vec::new()).expect("opens");
+        (workspace, read)
+    }
+
+    fn reads(read: &Mutex<Vec<PathBuf>>, suffix: &str) -> usize {
+        let read = read.lock().unwrap();
+        read.iter().filter(|path| path.ends_with(suffix)).count()
+    }
+
+    #[test]
+    fn a_stub_marks_the_helpers_of_the_library_a_checked_file_names() {
+        let (mut workspace, read) = stubbed(&[]);
+        let found = workspace
+            .check(Path::new("/repo/app.py"), CALL)
+            .expect("checks");
+        assert_eq!(rules(&found), ["unknown-column"]);
+        assert_eq!(reads(&read, "typings/lib/__init__.pyi"), 1);
+        assert_eq!(
+            reads(&read, "typings/unused/__init__.pyi"),
+            0,
+            "listed only"
+        );
+    }
+
+    #[test]
+    fn the_first_stub_path_wins_and_a_package_beats_a_module() {
+        let (mut workspace, _) = stubbed(&[
+            (
+                "/repo/pyproject.toml",
+                "[tool.sqlty]\nschema = \"schema.sql\"\nstub-paths = [\"first\", \"typings\"]\n",
+            ),
+            ("/repo/first/lib.pyi", PLAIN),
+            ("/repo/first/both.pyi", PLAIN),
+            ("/repo/first/both/__init__.pyi", STUB),
+            ("/repo/first/named-stubs/__init__.pyi", STUB),
+            ("/repo/first/named/__init__.pyi", PLAIN),
+            ("/repo/first/__init__.pyi", STUB),
+            ("/repo/use.py", "import both, named, lib\n"),
+        ]);
+        let settings = workspace.settings(Path::new("/repo/app.py")).unwrap();
+        let index = workspace.helpers(&settings);
+        assert!(
+            index.get("lib", "Db.one").is_none(),
+            "first/lib.pyi hides typings/lib"
+        );
+        assert!(index.get("both", "Db.one").is_some());
+        assert!(index.get("named", "Db.one").is_some());
     }
 
     fn tree(files: &[(&str, &'static [u8])]) -> Shared {

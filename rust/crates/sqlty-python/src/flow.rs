@@ -503,6 +503,7 @@ fn narrowing<'a>(test: &'a Expr, name: &str) -> (Option<&'a Expr>, Option<&'a Ex
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::scopes::{Node, Scan};

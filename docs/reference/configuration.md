@@ -366,6 +366,10 @@ libraries the project calls. `typings/lib/__init__.pyi` describes `lib`, and is 
 before `lib` itself to find the
 [class of a helper method's receiver](../guide/helpers.md#stubs-for-untyped-libraries).
 A method whose query parameter a stub marks `Annotated[LiteralString, SQL]` is a helper.
+The directories are read in order: the first that describes a module gives its stub.
+`lib-stubs/` describes `lib` too, and a package is taken before a module of its name.
+Only the stubs of the packages a checked file or another such stub names are read, and
+at most 4096 stubs of a directory are listed.
 
 ```toml
 [tool.sqlty]

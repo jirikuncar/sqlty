@@ -246,11 +246,38 @@ class Run:
         )
         return {"import datetime", "import typing", "import uuid", style, *extra}
 
+    def _stubs(self) -> dict[str, str]:
+        """The labelled ``.pyi`` files under ``stub-paths``, by the name each is read as.
+
+        As ``sqlty check`` lists them: the first directory of ``stub-paths`` holding a module
+        gives its stub, ``lib-stubs`` describes ``lib``, and ``lib/__init__.pyi`` is taken
+        before ``lib.pyi``. A ``.pyi`` under no directory of ``stub-paths`` is not read.
+        """
+        found: dict[str, str] = {}
+        described: set[str] = set()
+        for directory in self.section.settings.get("stub-paths", ["typings"]):
+            prefix = directory.rstrip("/") + "/"
+            under = {
+                path.removeprefix(prefix).removesuffix(".pyi"): text
+                for path, text in self.section.files.items()
+                if path.endswith(".pyi") and path.startswith(prefix)
+            }
+            # A package before the module of its name.
+            for relative in sorted(under, key=lambda name: (not name.endswith("/__init__"), name)):
+                top, _, rest = relative.partition("/")
+                name = ".".join([top.removesuffix("-stubs"), *rest.split("/")] if rest else [top])
+                module = name.removesuffix(".__init__")
+                if module not in described:
+                    described.add(module)
+                    found[name] = under[relative]
+        return found
+
     @cached_property
     def _helpers(self) -> core.HelperIndex | None:
         """Labelled ``.py`` files as modules (``pkg/db.py`` is ``pkg.db``), plus ``functions``.
 
-        A labelled ``.pyi`` is a stub of ``stub-paths`` (``typings/lib/__init__.pyi`` is ``lib``).
+        A labelled ``.pyi`` under a directory of ``stub-paths`` is a stub
+        (``typings/lib/__init__.pyi`` is ``lib``).
         """
         modules = {
             path.removesuffix(".py").replace("/", "."): text
@@ -261,11 +288,7 @@ class Run:
         functions = [(f, None) for f in self.section.settings.get("functions", [])] + [
             (f, name) for name, database in databases.items() for f in database.get("functions", [])
         ]
-        stubs = {
-            path.removesuffix(".pyi").removeprefix("typings/").replace("/", "."): text
-            for path, text in self.section.files.items()
-            if path.endswith(".pyi")
-        }
+        stubs = self._stubs()
         if not modules and not functions and not stubs:
             return None
         index = core.HelperIndex()

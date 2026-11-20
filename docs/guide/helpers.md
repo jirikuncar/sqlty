@@ -181,6 +181,13 @@ class Participant(Model):
             cursor.one("SELECT name FROM users", int)
 ```
 
+The directories of `stub-paths` are read in order and the first that describes a module
+gives its stub; `lib-stubs/` describes `lib`, and `lib/__init__.pyi` is taken before
+`lib.pyi`. A stub is read when a checked file, or a stub that is read, names its
+package, so a directory of stubs for libraries the project does not use costs nothing. A library without a stub is read
+from the project directory, the roots of the checked packages and `sys.path`:
+`lib-stubs` before `lib`, a `.pyi` before the `.py` beside it.
+
 ## Helpers you cannot annotate
 
 A helper whose signature you cannot edit (a library, generated code) is

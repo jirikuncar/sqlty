@@ -835,7 +835,8 @@ struct DiagnosticOut {
 
 /// The modules of the checked paths as `sqlty_python::index` reads them, built from the
 /// steps that filled a `sqlty._helpers.HelperIndex`: `("add", module, text, name)` and
-/// `("register", import path, query parameter, row parameter, roots, database)`.
+/// `("register", import path, query parameter, row parameter, roots, database)`,
+/// `("stub", module, text, name)` and `("outside", "", "", None, roots)`.
 #[pyclass(frozen, name = "ModuleIndex", module = "sqlty._core")]
 struct ModuleIndex(Arc<sqlty_python::index::HelperIndex>);
 
@@ -909,7 +910,8 @@ fn indexed(
     steps: Vec<IndexStep>,
 ) -> ModuleIndex {
     use rayon::prelude::*;
-    use sqlty_python::index::{defines_helpers, helpers_of, Module, Roots};
+    use sqlty_python::index::{defines_helpers, helpers_of, Module};
+    use sqlty_python::modules::Modules;
     let mut unique: HashMap<(&str, &str), usize> = HashMap::new();
     let slots: Vec<Option<usize>> = steps
         .iter()
@@ -948,22 +950,35 @@ fn indexed(
                 let module = Module::new(Arc::from(second.as_str()), name, version);
                 index.add_stub(&first, Arc::new(module));
             }
+            // The roots the modules that are not indexed are read from: the libraries a
+            // helper is registered in or a receiver's class is defined in.
             None => {
-                let roots = Roots {
-                    paths: &roots,
-                    read: &|path| std::fs::read_to_string(path).ok(),
-                };
-                index.register(
-                    &first,
-                    &second,
-                    third.as_deref(),
-                    roots,
-                    database.as_deref(),
-                );
+                if !roots.is_empty() && index.roots() != Some(roots.as_slice()) {
+                    let outside = Modules::new(version, Vec::new(), roots, Arc::new(read_module));
+                    index.outside(Arc::new(outside));
+                }
+                if kind == "register" {
+                    index.register(&first, &second, third.as_deref(), database.as_deref());
+                }
             }
         }
     }
     ModuleIndex(index.build())
+}
+
+/// The module at `path`, outside the checked tree; its size is asked before it is read.
+fn read_module(path: &std::path::Path) -> sqlty_python::modules::File {
+    use sqlty_python::modules::File;
+    let Ok(found) = std::fs::metadata(path) else {
+        return File::Missing;
+    };
+    if !found.is_file() {
+        return File::Missing;
+    }
+    if found.len() > sqlty_python::parse::MAX_LEN as u64 {
+        return File::Unread;
+    }
+    std::fs::read_to_string(path).map_or(File::Unread, File::Text)
 }
 
 /// The helpers, types and row types of a tree, filled as `HelperIndex` is.

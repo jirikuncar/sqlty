@@ -1137,3 +1137,98 @@ def run(db: Postgres, other: DB) -> None:
     db.one("SELECT name FROM users", int)
     other.one("SELECT name FROM users", int)
 ```
+
+### A stub that names the stub of another library
+
+A framework's stub declares an attribute of a class of a driver's stub. The checked code
+names the framework only: the driver's stub is read because the framework's names it.
+
+`typings/framework/__init__.pyi`:
+
+```python
+from lib import Postgres
+
+class Site:
+    db: Postgres
+
+def connect() -> Postgres: ...
+```
+
+```python
+from framework import Site, connect
+
+def run(site: Site) -> None:
+    # error: [column-type-mismatch]
+    site.db.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch]
+    connect().one("SELECT name FROM users", int)
+```
+
+## `stub-paths`
+
+The directories are read in order: the first that describes a module gives its stub.
+`first-stubs` describes `first`, and a package is taken before a module of its name. A
+`.pyi` under no directory of `stub-paths` is not read.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+stub-paths = ["stubs", "more"]
+```
+
+`stubs/first-stubs/__init__.pyi`:
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+class Db:
+    def one[T](self, sql: Annotated[LiteralString, SQL], form: type[T]) -> T | None: ...
+```
+
+`more/first/__init__.pyi`:
+
+```python
+class Db:
+    def one(self, sql, form): ...
+```
+
+`stubs/both/__init__.pyi`:
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+class Db:
+    def one[T](self, sql: Annotated[LiteralString, SQL], form: type[T]) -> T | None: ...
+```
+
+`stubs/both.pyi`:
+
+```python
+class Db:
+    def one(self, sql, form): ...
+```
+
+`typings/third/__init__.pyi`:
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+class Db:
+    def one[T](self, sql: Annotated[LiteralString, SQL], form: type[T]) -> T | None: ...
+```
+
+```python
+from first import Db
+from both import Db as Both
+from third import Db as Third
+
+def run(db: Db, both: Both, third: Third) -> None:
+    # error: [column-type-mismatch]
+    db.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch]
+    both.one("SELECT name FROM users", int)
+    third.one("SELECT name FROM users", int)
+```
