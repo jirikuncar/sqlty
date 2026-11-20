@@ -12,8 +12,8 @@ use std::rc::Rc;
 use sqlparser::ast::InTarget;
 use sqlparser::ast::{
     visit_expressions, BinaryOperator, Expr, FromTable, FunctionArg, FunctionArgExpr,
-    FunctionArguments, JoinConstraint, JoinOperator, Select, SelectItem, SetExpr, Statement,
-    TableFactor, TableObject, TableWithJoins, Value,
+    FunctionArguments, JoinConstraint, JoinOperator, Select, SelectItem, SetExpr, SetOperator,
+    Statement, TableFactor, TableObject, TableWithJoins, Value,
 };
 use sqlparser::ast::{
     Assignment, AssignmentTarget, Function, Insert, LimitClause, ObjectName, OnConflictAction,
@@ -25,7 +25,7 @@ use crate::placeholders::{self, Styles};
 
 use super::dialect::SqlDialect;
 use super::expr::{array_element, from_sql_type};
-use super::functions::arg_list;
+use super::functions::{arg_list, positional_args};
 use super::inference::{binary_rules, operand};
 use super::input::parser_input;
 use super::literals::strip;
@@ -400,40 +400,9 @@ impl<'a> Analyzer<'a> {
                 .map(|ident| fold(ident, self.dialect))
                 .collect()
         };
-        match insert
-            .source
-            .as_deref()
-            .map(|query| (query, query.body.as_ref()))
-        {
-            Some((Query { with: None, .. }, SetExpr::Values(values))) => {
-                for row in &values.rows {
-                    for (position, expr) in row.content.iter().enumerate() {
-                        if let Some(column) = targets.get(position) {
-                            self.hint_stored(expr, &table, column, &Scope::new(), out);
-                        }
-                        self.walk_params(expr, &Scope::new(), out);
-                    }
-                }
-            }
-            Some((query, body)) => {
-                // `INSERT ... SELECT $1, $2`: a bare placeholder is stored in its column.
-                if let SetExpr::Select(select) = body {
-                    let (analyzer, select_scope) = self.scope_reading(&select.from);
-                    for (position, item) in select.projection.iter().enumerate() {
-                        // Past a `*`, the columns a value lands in are unknown.
-                        let (SelectItem::UnnamedExpr(expr)
-                        | SelectItem::ExprWithAlias { expr, .. }) = item
-                        else {
-                            break;
-                        };
-                        if let Some(column) = targets.get(position) {
-                            analyzer.hint_stored(expr, &table, column, &select_scope, out);
-                        }
-                    }
-                }
-                self.params_query(query, out);
-            }
-            None => {}
+        if let Some(source) = &insert.source {
+            self.hint_rows(&source.body, &table, &targets, out);
+            self.params_query(source, out);
         }
         self.params_assignments(&insert.assignments, Some(&table), &scope, out);
         match &insert.on {
@@ -461,17 +430,91 @@ impl<'a> Analyzer<'a> {
         out: &mut Hints,
     ) {
         for assignment in assignments {
-            let column = match &assignment.target {
-                AssignmentTarget::ColumnName(name) => {
-                    name.0.last().and_then(|part| part.as_ident())
+            if let Some(table) = table {
+                match &assignment.target {
+                    AssignmentTarget::ColumnName(name) => {
+                        if let Some(column) = name.0.last().and_then(|part| part.as_ident()) {
+                            let column = fold(column, self.dialect);
+                            self.hint_stored(&assignment.value, table, &column, scope, out);
+                        }
+                    }
+                    // `SET (a, b) = ($1, $2)` or `= (SELECT $1, $2)`.
+                    AssignmentTarget::Tuple(names) => {
+                        // A name that is not an identifier keeps its position and types nothing.
+                        let targets: Vec<String> = names
+                            .iter()
+                            .map(|name| {
+                                name.0
+                                    .last()
+                                    .and_then(|part| part.as_ident())
+                                    .map_or_else(String::new, |ident| fold(ident, self.dialect))
+                            })
+                            .collect();
+                        match &assignment.value {
+                            Expr::Tuple(values) => {
+                                for (value, column) in values.iter().zip(&targets) {
+                                    self.hint_stored(value, table, column, scope, out);
+                                }
+                            }
+                            Expr::Subquery(query) => {
+                                self.hint_rows(&query.body, table, &targets, out);
+                            }
+                            Expr::Function(row)
+                                if object_name(&row.name).eq_ignore_ascii_case("row") =>
+                            {
+                                for (value, column) in
+                                    positional_args(&row.args).into_iter().zip(&targets)
+                                {
+                                    self.hint_stored(value, table, column, scope, out);
+                                }
+                            }
+                            value => {
+                                if let [column] = targets.as_slice() {
+                                    self.hint_stored(value, table, column, scope, out);
+                                }
+                            }
+                        }
+                    }
                 }
-                AssignmentTarget::Tuple(_) => None,
-            };
-            if let (Some(table), Some(column)) = (table, column) {
-                let column = fold(column, self.dialect);
-                self.hint_stored(&assignment.value, table, &column, scope, out);
             }
             self.walk_params(&assignment.value, scope, out);
+        }
+    }
+
+    /// The rows `body` gives are stored in the `targets` columns of the schema `table`, by
+    /// position: a bare placeholder takes its column's type and nullability. Past a `*`, the
+    /// columns a value lands in are unknown.
+    fn hint_rows(&self, body: &SetExpr, table: &str, targets: &[String], out: &mut Hints) {
+        match body {
+            SetExpr::Values(values) => {
+                for row in &values.rows {
+                    for (expr, column) in row.content.iter().zip(targets) {
+                        self.hint_stored(expr, table, column, &Scope::new(), out);
+                    }
+                }
+            }
+            SetExpr::Select(select) => {
+                let (analyzer, scope) = self.scope_reading(&select.from);
+                for (item, column) in select.projection.iter().zip(targets) {
+                    let (SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. }) =
+                        item
+                    else {
+                        break;
+                    };
+                    analyzer.hint_stored(expr, table, column, &scope, out);
+                }
+            }
+            // Only `UNION` stores the rows of both sides.
+            SetExpr::SetOperation {
+                op, left, right, ..
+            } => {
+                self.hint_rows(left, table, targets, out);
+                if *op == SetOperator::Union {
+                    self.hint_rows(right, table, targets, out);
+                }
+            }
+            SetExpr::Query(query) => self.hint_rows(&query.body, table, targets, out),
+            _ => {}
         }
     }
 
@@ -1286,7 +1329,7 @@ mod tests {
             (
                 "postgres",
                 "INSERT INTO users (id) SELECT 1 UNION SELECT %s",
-                vec!["-"],
+                vec!["int!"],
             ),
             ("postgres", "INSERT INTO users DEFAULT VALUES", vec![]),
             ("mysql", "INSERT INTO users SET name = %s", vec!["str!"]),
@@ -1308,7 +1351,7 @@ mod tests {
             (
                 "postgres",
                 "UPDATE users SET (name, age) = (%s, %s)",
-                vec!["-", "-"],
+                vec!["str!", "int?"],
             ),
             (
                 "postgres",
