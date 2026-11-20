@@ -100,6 +100,10 @@ SELECT sqlc.embed(email) FROM users;
 -- name: GetAlias :one
 -- error: [unknown-table] "`uu` in `sqlc.embed(uu)`"
 SELECT sqlc.embed( uu ) FROM users u;
+
+-- name: GetName :one
+-- error[23:26]: [unknown-column] "column `nme` does not exist in `u`"
+SELECT sqlc.embed(u), u.nme FROM users u;
 ```
 
 ## PugSQL
