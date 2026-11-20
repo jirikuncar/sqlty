@@ -549,14 +549,13 @@ impl Model {
         let short = table.rsplit('.').next().unwrap_or(table);
         let keyed = |column: &Expr| match column {
             Expr::Identifier(column) => self.keys.contains(&(table.to_string(), name(column))),
-            Expr::CompoundIdentifier(parts) => match parts.as_slice() {
-                [.., qualifier, column] => {
-                    let qualifier = name(qualifier);
-                    (qualifier == short || target.alias.as_ref() == Some(&qualifier))
-                        && self.keys.contains(&(table.to_string(), name(column)))
-                }
-                _ => false,
-            },
+            Expr::CompoundIdentifier(parts) => {
+                let mut parts = parts.iter().rev().map(name);
+                let (column, qualifier) = (parts.next(), parts.next());
+                qualifier.is_some_and(|qualifier| {
+                    qualifier == short || target.alias.as_ref() == Some(&qualifier)
+                }) && column.is_some_and(|column| self.keys.contains(&(table.to_string(), column)))
+            }
             _ => false,
         };
         let literal = |value: &Expr| matches!(value, Expr::Value(_));
@@ -2030,6 +2029,30 @@ mod tests {
         ] {
             let migration = format!("SET lock_timeout = '1s'; {migration}");
             assert_eq!(rules(USERS, &migration), expected, "{migration}");
+        }
+    }
+
+    #[test]
+    fn only_single_column_keys_bound_a_backfill() {
+        use Rule::*;
+        let baseline = format!(
+            "{USERS} CREATE TABLE pairs (a int, b int, PRIMARY KEY (a, b));
+            CREATE UNIQUE INDEX users_team_email ON users (team_id, email);
+            CREATE UNIQUE INDEX users_lower_email ON users (lower(email));"
+        );
+        for (migration, expected) in [
+            (
+                "BEGIN; ALTER TABLE users ADD COLUMN a int; ALTER TABLE teams ADD COLUMN b int; ALTER TABLE pairs ADD COLUMN c int; COMMIT;",
+                &[MultiTableLock][..],
+            ),
+            ("UPDATE pairs SET b = 1 WHERE a = 1", &[UnbatchedBackfill]),
+            ("UPDATE users SET bio = '' WHERE team_id = 1", &[UnbatchedBackfill]),
+            ("UPDATE users SET bio = '' WHERE lower(email) = 'x'", &[UnbatchedBackfill]),
+            ("UPDATE users SET bio = '' WHERE (id BETWEEN 1 AND 9)", &[]),
+            ("UPDATE (SELECT * FROM users) AS u SET bio = ''", &[]),
+        ] {
+            let migration = format!("SET lock_timeout = '1s'; {migration}");
+            assert_eq!(rules(&baseline, &migration), expected, "{migration}");
         }
     }
 
