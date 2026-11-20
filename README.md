@@ -177,6 +177,11 @@ Not a fit for ORMs, SQL built at runtime, or runtime validation;
 [Why SQLTy?](https://sqlty.kuncar.dev/motivation/) compares it with
 sqlc, sqlx, PgTyped and others.
 
+## Training
+
+Team training on typed raw SQL, from the first `sqlty rewrite` to typed queries
+checked in CI: [sqlty@kuncar.dev](mailto:sqlty@kuncar.dev?subject=SQLTy%20training).
+
 ## About
 
 The engine is Rust ([sqlparser-rs](https://github.com/apache/datafusion-sqlparser-rs)
