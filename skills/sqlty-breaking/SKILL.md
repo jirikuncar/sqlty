@@ -45,6 +45,24 @@ Only what the other schema breaks is reported: a diagnostic a query already gets
 against its own schema is not repeated, and neither is `stale-rewrite` or
 `unused-ignore`.
 
+## Migrations that lock tables
+
+With the `postgres` dialect, each schema statement the baseline doesn't have is
+judged too, as a migration that runs on tables with rows:
+
+```text
+migrations/0042_index.sql:2: [missing-concurrently] `CREATE INDEX` blocks writes to `users` until the index is built: create it `CONCURRENTLY` (migration: a statement the working tree runs that origin/main does not have)
+```
+
+| Rule | Fix |
+|------|-----|
+| `missing-concurrently` | `CREATE INDEX CONCURRENTLY`, `DROP INDEX CONCURRENTLY`; `UNIQUE` via `CREATE UNIQUE INDEX CONCURRENTLY` then `ADD CONSTRAINT ... USING INDEX` |
+| `concurrently-in-transaction` | move the statement out of `BEGIN` ... `COMMIT` (Django `atomic = False`, Alembic `autocommit_block()`) |
+| `constraint-scan` | add the constraint `NOT VALID`, then `VALIDATE CONSTRAINT`; for `SET NOT NULL`, validate a `CHECK (col IS NOT NULL)` first |
+| `table-rewrite` | add the column without a volatile default and backfill; change a type through a new column |
+| `add-required-column` | add the column nullable or with a constant `DEFAULT` |
+| `missing-lock-timeout` | start the migration with `SET lock_timeout = '2s';` |
+
 ## A dropped column
 
 Below, the code was written for `schema.sql`, and `against.sql` is the schema

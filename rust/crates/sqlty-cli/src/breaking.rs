@@ -80,6 +80,9 @@ pub enum Direction {
     Forward,
     /// Both.
     Both,
+    /// The new statements of the migrations of the head, whatever the direction.
+    #[value(skip)]
+    Migration,
 }
 
 impl Direction {
@@ -92,10 +95,11 @@ impl Direction {
         }
     }
 
-    /// The name of a finding's direction: backward or forward, never both.
+    /// The name of a finding's direction: backward, forward or migration, never both.
     fn name(self) -> &'static str {
         match self {
             Self::Forward => "forward",
+            Self::Migration => "migration",
             _ => "backward",
         }
     }
@@ -111,7 +115,7 @@ impl Direction {
 
 /// What a schema change breaks in one file.
 pub struct Finding {
-    /// [`Direction::Backward`] or [`Direction::Forward`].
+    /// [`Direction::Backward`], [`Direction::Forward`] or [`Direction::Migration`].
     pub direction: Direction,
     /// The label of the baseline.
     pub against: String,
@@ -481,6 +485,62 @@ pub fn compare(
         .collect())
 }
 
+/// What the new statements of the PostgreSQL schema files of `head` lock, against the
+/// schema `schemas` gives each of its files and `paths`.
+fn migrations(
+    against: &str,
+    paths: &[PathBuf],
+    head: &mut Revision<Workspace>,
+    schemas: &mut dyn Schemas,
+) -> Result<Vec<Finding>, String> {
+    let mut checked: Vec<(PathBuf, Arc<FileSettings>)> = head
+        .files()?
+        .into_iter()
+        .map(|file| (file.relative, file.settings))
+        .collect();
+    for path in paths {
+        let relative = path.join("_");
+        let settings = head.workspace.settings(&head.root.join(&relative))?;
+        checked.push((relative, settings));
+    }
+    let disk = Shared(Arc::new(sqlty_project::Disk));
+    let mut seen = BTreeSet::new();
+    let mut findings = Vec::new();
+    for (relative, own) in checked {
+        let baseline = schemas.against(&relative, &own)?.key.0;
+        let Some(baseline) = baseline
+            .filter(|sql| own.dialect == "postgres" && Some(sql) != own.schema_sql.as_ref())
+        else {
+            continue;
+        };
+        let mut rules: Vec<_> = own.rules.iter().collect();
+        rules.sort();
+        let key = format!("{:?}", (&own.schema_files, &baseline, rules));
+        if !seen.insert(key) {
+            continue;
+        }
+        let texts: Vec<String> = own
+            .schema_files
+            .iter()
+            .map(|path| disk.text(path).unwrap_or_default())
+            .collect();
+        let sources: Vec<&str> = texts.iter().map(String::as_str).collect();
+        let rules = Checker::of(&own, None).rules;
+        let found = sqlty_python::migrations::check_migrations(&baseline, &sources, &rules);
+        for ((path, text), found) in own.schema_files.iter().zip(texts.iter()).zip(found) {
+            let text: Arc<str> = Arc::from(text.as_str());
+            findings.extend(found.into_iter().map(|diagnostic| Finding {
+                direction: Direction::Migration,
+                against: against.to_string(),
+                path: relative_to(path, &head.root),
+                diagnostic,
+                text: Arc::clone(&text),
+            }));
+        }
+    }
+    Ok(findings)
+}
+
 /// The helpers of `files`, with the `functions` of `settings` found among them.
 pub(crate) fn index_of(files: &[File], version: Version) -> Arc<HelperIndex> {
     let mut builder = Builder::new(version);
@@ -607,6 +667,7 @@ pub fn run(host: &mut dyn Host, args: &Args) -> Result<i32, String> {
                 version,
             )?);
         }
+        findings.extend(migrations(&label, &paths, &mut head, baseline.schemas())?);
     }
     warn_all(host, &head.workspace);
     for baseline in &baselines {
@@ -631,6 +692,10 @@ fn report(host: &mut dyn Host, findings: &[Finding], head: &str, format: OutputF
         let title = match finding.direction {
             Direction::Backward => format!(
                 "the queries of {} against the schema of {head}",
+                finding.against
+            ),
+            Direction::Migration => format!(
+                "a statement {head} runs that {} does not have",
                 finding.against
             ),
             _ => format!(

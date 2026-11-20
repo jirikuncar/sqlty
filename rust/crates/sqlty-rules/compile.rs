@@ -9,12 +9,13 @@ use serde::Deserialize;
 const MAX_RULES: usize = 64;
 
 /// The groups a rule may name, with the `Group` variant of each.
-const GROUPS: [(&str, &str); 7] = [
+const GROUPS: [(&str, &str); 8] = [
     ("row-type", "RowType"),
     ("query", "Query"),
     ("names", "Names"),
     ("rewrite", "Rewrite"),
     ("params", "Params"),
+    ("migration", "Migration"),
     ("suppression", "Suppression"),
     ("internal", "Internal"),
 ];
@@ -22,8 +23,9 @@ const GROUPS: [(&str, &str); 7] = [
 /// The severities a rule may name, with the `Severity` variant of each.
 const SEVERITIES: [(&str, &str); 3] = [("error", "Error"), ("warn", "Warn"), ("ignore", "Ignore")];
 
-/// Where a rule is reported: by the SQL analyzer, or by the Python checks.
-const ORIGINS: [&str; 2] = ["SQL", "Python"];
+/// Where a rule is reported: by the SQL analyzer, the Python checks, or the migration checks
+/// of `sqlty breaking`.
+const ORIGINS: [&str; 3] = ["SQL", "Python", "Migration"];
 
 /// The front matter of a rule page.
 #[derive(Deserialize)]
@@ -90,7 +92,7 @@ fn parse<'a>(file: &'a str, text: &'a str) -> Result<Page<'a>, String> {
     let severity = lookup(&SEVERITIES, &front.severity, "severity")?;
     if !ORIGINS.contains(&front.origin.as_str()) {
         return Err(format!(
-            "unknown origin {:?} (expected SQL or Python)",
+            "unknown origin {:?} (expected SQL, Python or Migration)",
             front.origin
         ));
     }

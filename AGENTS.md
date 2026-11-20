@@ -165,6 +165,9 @@ its row to the table of `docs/reference/rules.md`.
 - An `` `against.sql`: `` file makes `# error:` assert what `sqlty breaking`
   reports (`core.breaking_source()`): the diagnostics that are new when the code
   is checked against that schema instead of its own.
+  In a ```` ```sql migration ```` block, `-- error:` asserts what the migration
+  rules report for the block's statements that `against.sql` does not have
+  (`_core.check_migrations()`).
 
 ````markdown
 ## Schema-based TypedDict mismatch
