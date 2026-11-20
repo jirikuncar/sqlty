@@ -19,7 +19,7 @@ use crate::Shared;
 /// `max-query-variants` when `preview` is on and it is not set.
 pub const MAX_QUERY_VARIANTS: usize = 64;
 
-type SchemaKey = (String, &'static str, Vec<(String, String)>);
+type LoadKey = (String, &'static str, Vec<(String, String)>);
 
 /// A database: its name, settings, schema text and `types`.
 type Named = (String, FileSettings, Option<String>, Vec<(String, String)>);
@@ -38,11 +38,16 @@ pub struct Function {
 }
 
 /// What a file is checked with.
+#[derive(Clone)]
 pub struct FileSettings {
     /// The SQL dialect.
     pub dialect: &'static str,
     /// The schema, with the other databases of the project.
     pub schema: Option<Schema>,
+    /// The SQL `schema` was loaded from.
+    pub schema_sql: Option<Arc<str>>,
+    /// `types`, with those of `driver`, sorted.
+    pub types: Vec<(String, String)>,
     /// `import-style`.
     pub import_style: Option<String>,
     /// `untyped = "sentinel"`.
@@ -76,7 +81,7 @@ pub struct FileSettings {
 /// The schemas of a run, each loaded once, and what could not be read of them.
 #[derive(Default)]
 pub struct Schemas {
-    loaded: Mutex<HashMap<SchemaKey, Schema>>,
+    loaded: Mutex<HashMap<LoadKey, Schema>>,
     /// Every warning, and how many [`Schemas::warnings`] has returned.
     warnings: Mutex<(Vec<String>, usize)>,
 }
@@ -132,7 +137,7 @@ impl Schemas {
         Ok(schema)
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<SchemaKey, Schema>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<LoadKey, Schema>> {
         self.loaded.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
@@ -185,10 +190,12 @@ impl Directory {
             .cloned()
             .unwrap_or_default();
         if databases.is_empty() {
+            own.types = sorted(own_types(&table, own.dialect));
             own.schema = schema_sql
                 .as_deref()
-                .map(|text| schemas.load(text, own.dialect, &own_types(&table, own.dialect)))
+                .map(|text| schemas.load(text, own.dialect, &own.types))
                 .transpose()?;
+            own.schema_sql = schema_sql.map(Arc::from);
             return Ok(Self {
                 routing: base
                     .clone()
@@ -249,6 +256,8 @@ impl Directory {
                 others,
             };
             settings.schema = SchemaData::with_databases(loaded, databases);
+            settings.schema_sql = schema.map(Arc::from);
+            settings.types = sorted(types);
             settings.functions.extend(functions.iter().cloned());
             routed.push((name, Arc::new(settings)));
         }
@@ -296,32 +305,33 @@ impl Directory {
         rules.extend(self.cli_rules.iter().cloned());
         Arc::new(FileSettings {
             rules,
-            ..settings.shallow()
+            ..(**settings).clone()
         })
     }
 }
 
+/// What a schema is loaded from: two settings with one key check queries alike.
+pub type SchemaKey<'a> = (Option<&'a str>, &'static str, &'a [(String, String)]);
+
 impl FileSettings {
-    fn shallow(&self) -> Self {
-        Self {
-            dialect: self.dialect,
-            schema: self.schema.clone(),
-            import_style: self.import_style.clone(),
-            untyped: self.untyped,
-            json_typed_dicts: self.json_typed_dicts,
-            param_types: self.param_types,
-            closed_params: self.closed_params,
-            rules: self.rules.clone(),
-            variants: self.variants,
-            coerce: self.coerce.clone(),
-            functions: self.functions.clone(),
-            format_command: self.format_command.clone(),
-            queries: self.queries.clone(),
-            query_format: self.query_format,
-            base: self.base.clone(),
-            version: self.version,
-        }
+    /// What [`FileSettings::schema`] is loaded from.
+    pub fn schema_key(&self) -> SchemaKey<'_> {
+        (self.schema_sql.as_deref(), self.dialect, &self.types)
     }
+}
+
+fn sorted(mut types: Vec<(String, String)>) -> Vec<(String, String)> {
+    types.sort();
+    types
+}
+
+/// The schema `text` defines in `dialect`, with the column types `types` overrides.
+pub fn load_schema(
+    text: &str,
+    dialect: &'static str,
+    types: &[(String, String)],
+) -> Result<Schema, String> {
+    loaded_schema(text, dialect, types).map(|(schema, _)| schema)
 }
 
 /// `table` with the keys of `database` on top, `rules` and `types` merged.
@@ -414,12 +424,13 @@ fn settings(
     version: Version,
 ) -> Result<FileSettings, String> {
     let text = |key: &str| table.get(key).and_then(Value::as_str);
+    let choice = |key: &str| table.get(key).map(|value| value.as_str().unwrap_or(""));
     let flag = |key: &str| table.get(key).and_then(Value::as_bool).unwrap_or(false);
     let origin = |key: &str| flags.origin(key, label);
     let untyped = match flags
         .untyped
         .as_deref()
-        .or(text("untyped"))
+        .or(choice("untyped"))
         .unwrap_or("skip")
     {
         "skip" => false,
@@ -431,7 +442,7 @@ fn settings(
             ))
         }
     };
-    let json_typed_dicts = match text("json-types").unwrap_or("typing.Any") {
+    let json_typed_dicts = match choice("json-types").unwrap_or("typing.Any") {
         "typing.Any" => false,
         "typing.TypedDict" => true,
         _ => {
@@ -460,6 +471,8 @@ fn settings(
             .and_then(|name| name.parse::<sqlty_sql::Dialect>().ok())
             .map_or_else(|| settings_dialect(table), sqlty_sql::Dialect::name),
         schema: None,
+        schema_sql: None,
+        types: Vec::new(),
         import_style,
         untyped,
         json_typed_dicts,
