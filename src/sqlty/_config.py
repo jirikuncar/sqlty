@@ -68,7 +68,7 @@ class KeyDoc(NamedTuple):
 
 KEY_DOCS: dict[str, KeyDoc] = {
     "dialect": KeyDoc(
-        '`"postgres"`, `"sqlite"`, `"mysql"`',
+        '`"postgres"`, `"sqlite"`, `"mysql"`, ...',
         '`"postgres"`',
         "`rewrite`, `check`",
         "SQL dialect of queries and schema",
