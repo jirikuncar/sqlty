@@ -293,8 +293,8 @@ Every `schema` of the configuration is judged, each entry of
 `rules` with the `overrides` its own path matches. A schema that several
 configurations name is judged once, at the strictest severity of each rule among
 them. The `include` globs are relative to the directory of the configuration
-that names them, so `../migrations/**` matches nothing: put the override in the
-configuration whose `schema` names the migrations, or match the path from there.
+that names them, so no glob matches migrations outside that directory: for those,
+set `rules` in the configuration, or use an override without `include`.
 For example:
 
 ```toml ignore
