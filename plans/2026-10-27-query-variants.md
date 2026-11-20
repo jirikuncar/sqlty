@@ -2,7 +2,8 @@
 
 > **Status:** stage 1 implemented behind `preview = true` (`rust/crates/sqlty-python/src/variants.rs`).
 > Acceptance spec: `tests/mdtest/check/query_variants.md`. The design below is the original
-> Python one; the implementation is `variants.rs` and `compose.rs` in `sqlty-python`.
+> Python one; the implementation is `variants.rs` and `compose.rs` in `sqlty-python`, and the
+> differential oracle is `rust/fuzz/tests/properties/variants.rs`.
 
 ## Problem
 
