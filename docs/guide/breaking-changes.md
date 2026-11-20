@@ -247,7 +247,9 @@ A migration that is compatible with both revisions can still take a table down
 while it runs. With the `postgres` dialect, `sqlty breaking` also judges each
 statement of the schema files that the baseline does not have, in the order the
 files are read: what it locks on a table that already has rows, and what fails.
-A table the new statements create is empty, so it is not reported.
+A table the new statements create is empty, so it is not reported until rows
+are copied into it: `INSERT ... SELECT`, `COPY ... FROM`, `MERGE` or
+`CREATE TABLE ... AS` without `WITH NO DATA`.
 
 | Rule | Reports |
 |------|---------|

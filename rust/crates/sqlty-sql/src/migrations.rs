@@ -16,8 +16,8 @@ use std::ops::{ControlFlow, Range};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sqlparser::ast::{
     AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, CopySource, DataType,
-    DetachPartitionMode, Expr, Insert, ObjectName, ObjectType, SetExpr, Statement, TableConstraint,
-    TableObject,
+    DetachPartitionMode, Expr, Insert, Merge, ObjectName, ObjectType, SetExpr, Statement,
+    TableConstraint, TableFactor, TableObject,
 };
 
 use crate::analyzer::{parse_ddl, SqlDialect};
@@ -674,20 +674,18 @@ fn parse(stmt: &Raw) -> Option<(Statement, Vec<String>)> {
         .flatten()
         .unwrap_or_else(|| (stmt.sql(), Vec::new()));
     let parsed = parse_ddl(&sql, SqlDialect::Postgres)?.into_iter().next()?;
-    let likes = likes
-        .into_iter()
-        .map(|parts| match parts.as_slice() {
-            [schema, rest @ ..] if schema == "public" && !rest.is_empty() => rest.join("."),
-            _ => parts.join("."),
-        })
-        .collect();
+    let likes = likes.iter().map(|parts| unqualified(parts)).collect();
     Some((parsed, likes))
 }
 
 /// The empty table, materialized view or index `stmt` creates.
 fn created(stmt: &Statement) -> Option<String> {
     match stmt {
-        Statement::CreateTable(create) if create.query.is_none() => Some(key(&create.name)),
+        Statement::CreateTable(create)
+            if create.query.is_none() || create.with_data.is_some_and(|with| !with.data) =>
+        {
+            Some(key(&create.name))
+        }
         Statement::CreateView(view) if view.materialized => Some(key(&view.name)),
         Statement::CreateIndex(index) => index.name.as_ref().map(key),
         _ => None,
@@ -698,6 +696,14 @@ fn created(stmt: &Statement) -> Option<String> {
 /// rows it lists.
 fn filled(stmt: &Statement) -> Option<String> {
     match stmt {
+        Statement::Query(query) => match &*query.body {
+            SetExpr::Insert(insert) => filled(insert),
+            _ => None,
+        },
+        Statement::Merge(Merge {
+            table: TableFactor::Table { name, .. },
+            ..
+        }) => Some(key(name)),
         Statement::Insert(Insert {
             table: TableObject::TableName(table),
             source: Some(source),
@@ -736,7 +742,12 @@ fn key(name: &ObjectName) -> String {
         .filter_map(|part| part.as_ident())
         .map(|ident| fold(ident, SqlDialect::Postgres))
         .collect();
-    match parts.as_slice() {
+    unqualified(&parts)
+}
+
+/// The folded name `parts` joined, without the `public` schema.
+fn unqualified(parts: &[String]) -> String {
+    match parts {
         [schema, rest @ ..] if schema == "public" && !rest.is_empty() => rest.join("."),
         _ => parts.join("."),
     }
@@ -932,6 +943,14 @@ mod tests {
             ("INSERT INTO t VALUES (1), (2)", &[]),
             ("COPY t TO '/tmp/t.csv'", &[]),
             ("INSERT INTO users SELECT * FROM users", &[]),
+            (
+                "WITH s AS (SELECT id FROM users) INSERT INTO t SELECT id FROM s",
+                &[MissingConcurrently],
+            ),
+            (
+                "MERGE INTO t USING users u ON t.id = u.id WHEN NOT MATCHED THEN INSERT VALUES (u.id)",
+                &[MissingConcurrently],
+            ),
         ] {
             let migration = format!(
                 "SET lock_timeout = '1s';
@@ -943,6 +962,8 @@ mod tests {
         }
         let created_as = "CREATE TABLE t AS SELECT id FROM users; CREATE INDEX t_id ON t (id);";
         assert_eq!(rules(USERS, created_as), [MissingConcurrently]);
+        let no_data = created_as.replace(" FROM users", " FROM users WITH NO DATA");
+        assert_eq!(rules(USERS, &no_data), []);
     }
 
     #[test]
