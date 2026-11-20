@@ -378,6 +378,27 @@ struct Walker<'a, W> {
     want: W,
 }
 
+/// The name of a type parameter.
+pub fn type_parameter(param: &ast::TypeParam) -> &ast::Identifier {
+    match param {
+        ast::TypeParam::TypeVar(param) => &param.name,
+        ast::TypeParam::ParamSpec(param) => &param.name,
+        ast::TypeParam::TypeVarTuple(param) => &param.name,
+    }
+}
+
+impl<'a, W> Walker<'a, W> {
+    /// Binds the type parameters of a `def` or a `class` (`def f[T](x: T)`) in its scope:
+    /// a name so bound is a type variable, not what the module binds it to.
+    fn bind_type_params(&mut self, type_params: Option<&'a ast::TypeParams>) {
+        for param in type_params.into_iter().flat_map(|params| params.iter()) {
+            let name = type_parameter(param);
+            self.scan
+                .bind_name(name.as_str(), Origin::Unknown, name.start(), name.start());
+        }
+    }
+}
+
 impl<'a, W: FnMut(&'a ExprCall) -> bool> Visitor<'a> for Walker<'a, W> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
         match stmt {
@@ -390,6 +411,7 @@ impl<'a, W: FnMut(&'a ExprCall) -> bool> Visitor<'a> for Walker<'a, W> {
                 );
                 let scope = self.scan.enter(Node::Function(node));
                 self.scan.stack.push(scope);
+                self.bind_type_params(node.type_params.as_deref());
                 for parameter in &*node.parameters {
                     let origin = match parameter.annotation() {
                         _ if parameter.is_variadic() => Origin::Unknown,
@@ -413,6 +435,7 @@ impl<'a, W: FnMut(&'a ExprCall) -> bool> Visitor<'a> for Walker<'a, W> {
                 );
                 let scope = self.scan.enter(Node::Class(node));
                 self.scan.stack.push(scope);
+                self.bind_type_params(node.type_params.as_deref());
                 walk_stmt(self, stmt);
                 self.scan.stack.pop();
                 return;

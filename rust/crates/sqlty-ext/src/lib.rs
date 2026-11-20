@@ -978,7 +978,17 @@ fn read_module(path: &std::path::Path) -> sqlty_python::modules::File {
     if found.len() > sqlty_python::parse::MAX_LEN as u64 {
         return File::Unread;
     }
-    std::fs::read_to_string(path).map_or(File::Unread, File::Text)
+    match std::fs::read_to_string(path) {
+        Ok(text) => File::Text(text),
+        // A stub that is not text is no stub: the module is looked for on.
+        Err(error)
+            if error.kind() == std::io::ErrorKind::InvalidData
+                && path.extension().is_some_and(|extension| extension == "pyi") =>
+        {
+            File::Missing
+        }
+        Err(_) => File::Unread,
+    }
 }
 
 /// The helpers, types and row types of a tree, filled as `HelperIndex` is.

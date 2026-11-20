@@ -200,14 +200,16 @@ does not, it reads them again on every edit.
 ### Differences from a type checker
 
 sqlty reads declarations to find which helper a call reaches, not to check types, and
-skips a call rather than guess. For a receiver it follows, it names the class
-[ty](https://docs.astral.sh/ty/) reveals. It follows less than ty does:
+skips a call rather than guess. The cases in `tests/mdtest/check/receivers.md` each name
+what [ty](https://docs.astral.sh/ty/) reveals for the receiver; nothing checks that the
+two agree on other code. It follows less than ty does:
 
 | Code | ty | sqlty |
 |------|----|-------|
 | The result of an unannotated function, `x = make()` | the inferred return type | skipped: no function body is read for what it returns |
 | `db = Db() if ready else None`, `a or b`, a subscript, an unpacked tuple | the inferred type | skipped |
 | A name two reaching bindings give different classes | the union, and the method of each | skipped |
+| `try: from lib import Db` / `except ImportError: from lib2 import Db` | the union, and the method of each | skipped: the two imports are different classes |
 | `Db | Other`, `Union[Db, Other]` | the method of each member | skipped; `Db | None` is `Db` |
 | `isinstance(x, Db)` on a name of an unrelated class, of a union or of a type variable | the intersection | skipped |
 | `isinstance(x, (A, B))`, `type(x) is Db`, `match` class patterns, `TypeGuard` | narrowed | not narrowed |

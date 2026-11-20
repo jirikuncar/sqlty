@@ -705,6 +705,16 @@ impl HelperIndex {
         self.tree.clone()
     }
 
+    /// Whether `[[tool.sqlty.functions]]` registers a method of `module.class`.
+    pub fn registers(&self, module: &str, class: &str) -> bool {
+        self.modules.get(module).is_some_and(|found| {
+            found.iter().any(|(name, helper)| {
+                let method = name.strip_prefix(class);
+                helper.configured && method.is_some_and(|rest| rest.starts_with('.'))
+            })
+        })
+    }
+
     /// `HelperIndex.get`: the helper `name` (maybe `Class.method`) of `module`, following
     /// the names the module re-exports.
     pub fn get(&self, module: &str, name: &str) -> Option<&Helper> {

@@ -272,6 +272,30 @@ def test_outside_reads_the_class_of_a_receiver_from_roots(tmp_path):
     assert len(check_source(use.format("plain"), Settings(helpers=read))) == 1
 
 
+def test_a_module_that_is_not_text_ends_the_search_of_the_roots(tmp_path):
+    """A file that cannot be read is the module: the next root is not asked for it."""
+    for name in ("first", "second"):
+        (tmp_path / name).mkdir()
+    (tmp_path / "second" / "lib.py").write_text(
+        "class Db:\n    def get(self, sql): ...\nclass Site:\n    db: Db\n"
+    )
+    use = "from lib import Site\ndef run(site: Site) -> None:\n    site.db.get('SELECT 1 +')\n"
+    roots = [tmp_path / "first", tmp_path / "second"]
+    found = HelperIndex()
+    found.register("lib.Db.get", "sql", roots=roots)
+    assert len(check_source(use, Settings(helpers=found))) == 1
+    # A stub that is not text is no stub: the module is looked for on.
+    (tmp_path / "first" / "lib.pyi").write_bytes(b"\xff\xfe")
+    skipped = HelperIndex()
+    skipped.register("lib.Db.get", "sql", roots=roots)
+    assert len(check_source(use, Settings(helpers=skipped))) == 1
+    (tmp_path / "first" / "lib.pyi").unlink()
+    (tmp_path / "first" / "lib.py").write_bytes(b"\xff\xfe")
+    hidden = HelperIndex()
+    hidden.register("lib.Db.get", "sql", roots=roots)
+    assert check_source(use, Settings(helpers=hidden)) == []
+
+
 def test_register_reads_past_a_stub_that_lacks_the_helper(tmp_path):
     """A stub describing part of a library leaves the rest to the library."""
     for name in ("part", "part-stubs", "bad", "typings"):

@@ -706,12 +706,22 @@ impl Workspace {
                 .unwrap_or_else(PoisonError::into_inner)
                 .insert(path.to_path_buf());
             // A module too large to parse is not read at all.
-            let large = |size| size > sqlty_python::parse::MAX_LEN as u64;
-            if files.size(path).is_some_and(large) {
+            let size = files.size(path);
+            if size.is_some_and(|size| size > sqlty_python::parse::MAX_LEN as u64) {
                 return Found::Unread;
             }
+            // A file that is there and cannot be read ends the search as one that is
+            // not text does, in every host: the module is there, and nothing is known
+            // of it. A stub that is not text is no stub: the module is looked for on.
+            let stub = path.extension().is_some_and(|extension| extension == "pyi");
             match files.read(path) {
-                Read::Text(data) => String::from_utf8(data).map_or(Found::Unread, Found::Text),
+                Read::Text(data) => match String::from_utf8(data) {
+                    Ok(text) => Found::Text(text),
+                    Err(_) if stub => Found::Missing,
+                    Err(_) => Found::Unread,
+                },
+                Read::Missing if size.is_some() => Found::Unread,
+                // A host that has not fetched the file yet may have it later.
                 Read::Missing | Read::Unread => Found::Missing,
             }
         });
@@ -2058,6 +2068,24 @@ mod tests {
             .is_some_and(|found| found.source().is_none()));
         assert_eq!(reads(&read, "vendor/big.py"), 0);
         assert_eq!(reads(&read, "vendor/small.py"), 1);
+    }
+
+    #[test]
+    fn a_library_that_cannot_be_read_is_there_and_unknown() {
+        // As the Python host reads it: the file ends the search for the module.
+        let (mut workspace, _) = stubbed(&[
+            ("/repo/vendor/gone.py", "<unreadable>"),
+            (
+                "/repo/pyproject.toml",
+                "[tool.sqlty]\nschema = \"schema.sql\"\nexclude = [\"vendor\"]\n",
+            ),
+        ]);
+        let settings = workspace.settings(Path::new("/repo/app.py")).unwrap();
+        let index = workspace.helpers(&settings);
+        assert!(index
+            .resolve("vendor.gone")
+            .is_some_and(|found| found.source().is_none()));
+        assert!(index.resolve("vendor.missing").is_none());
     }
 
     #[test]

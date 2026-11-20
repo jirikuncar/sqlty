@@ -36,7 +36,8 @@ impl Files for Disk {
     }
 
     fn size(&self, path: &Path) -> Option<u64> {
-        std::fs::metadata(path).ok().map(|meta| meta.len())
+        let found = std::fs::metadata(path).ok()?;
+        found.is_file().then_some(found.len())
     }
 
     fn is_link(&self, path: &Path) -> bool {

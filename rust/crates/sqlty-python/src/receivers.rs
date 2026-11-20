@@ -450,6 +450,12 @@ fn class_binds(scan: &Scan<'_>, scope: Scope, name: &str, target: Option<&str>) 
     })
 }
 
+/// Whether `name` is a type parameter of `class` (`class Box[T]`).
+fn type_parameter(class: &StmtClassDef, name: &str) -> bool {
+    let mut params = class.type_params.iter().flat_map(|params| params.iter());
+    params.any(|param| crate::scopes::type_parameter(param).as_str() == name)
+}
+
 /// Whether `annotation` names something the body of the class `scope` binds.
 fn names_bound(annotation: &Ann, scan: &Scan<'_>, scope: Scope, target: Option<&str>) -> bool {
     let own = |name: &str| class_binds(scan, scope, name, target);
@@ -892,6 +898,9 @@ impl<'s, 'a> Resolver<'s, 'a> {
             let body: &[Stmt] = match node {
                 Node::Function(function) => &function.body,
                 Node::Class(class) if scope == innermost => &class.body,
+                // A type parameter of a class is seen in its methods, unlike the names
+                // its body binds.
+                Node::Class(class) if type_parameter(class, name) => return Some(None),
                 Node::Class(_) | Node::Module => continue,
             };
             let bindings = self.scan.bindings(scope, name);
@@ -1095,8 +1104,45 @@ impl<'s, 'a> Resolver<'s, 'a> {
         })
     }
 
+    /// `found`, what the name `name` of the module `module` was read to be, unless a
+    /// method of `module.name` is registered and the name was not read to be that class:
+    /// the module gets it from a C extension, a star import, `__getattr__` or an import
+    /// with a fallback. It is then known by its path, as when the module is not found,
+    /// so that what is registered applies to it.
+    fn or_registered(&self, module: &str, name: &str, found: Option<Value>) -> Option<Value> {
+        let registers = |module: &str, name: &str| {
+            self.helpers
+                .is_some_and(|helpers| helpers.registers(module, name))
+        };
+        let read = match &found {
+            Some(Value::Type(class)) => {
+                (class.module == module && class.name == name)
+                    || registers(&class.module, &class.name)
+            }
+            Some(Value::Unresolved(class)) => class.module == module && class.name == name,
+            None => false,
+            Some(_) => true,
+        };
+        match read || !registers(module, name) {
+            true => found,
+            false => Some(Value::Unresolved(Class::new(module, name))),
+        }
+    }
+
     /// What `from target import original as local` binds in `module`.
     fn imported(
+        &self,
+        module: &str,
+        target: &str,
+        original: &str,
+        local: &str,
+        depth: u8,
+    ) -> Option<Value> {
+        let found = self.imported_as_read(module, target, original, local, depth);
+        self.or_registered(target, original, found)
+    }
+
+    fn imported_as_read(
         &self,
         module: &str,
         target: &str,
@@ -1131,7 +1177,8 @@ impl<'s, 'a> Resolver<'s, 'a> {
                     .as_ref()
                     .is_some_and(|facts| facts.names.contains_key(attr))
                 {
-                    return self.global(module, attr, depth + 1);
+                    let read = self.global(module, attr, depth + 1);
+                    return self.or_registered(module, attr, read);
                 }
                 // A package does not have to import its submodule for `import a.b` to
                 // bind it.
@@ -1141,7 +1188,7 @@ impl<'s, 'a> Resolver<'s, 'a> {
                 } else if found.is_none() {
                     self.global(module, attr, depth + 1)
                 } else {
-                    None
+                    self.or_registered(module, attr, None)
                 }
             }
             Value::Unresolved(path) => Some(Value::Unresolved(Class::new(

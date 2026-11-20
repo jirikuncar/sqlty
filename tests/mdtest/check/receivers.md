@@ -1222,6 +1222,78 @@ def ended(rows, db: DB) -> None:
     db.one("SELECT name FROM users", int)
 ```
 
+### An import with a fallback
+
+The two imports bind the name to different classes, so the call is skipped, even when
+both classes have the helper. ty: `<class 'DB'> | <class 'Postgres'>` for `Client`, and
+`Postgres` for `db`, as `DB` is a subclass of it.
+
+```python
+try:
+    from pkg.db import DB as Client
+except ImportError:
+    from pkg.db import Postgres as Client
+
+def run(db: Client) -> None:
+    db.one("SELECT name FROM users", int)
+
+# error:
+```
+
+The same class from both is that class.
+
+```python
+try:
+    from pkg.db import DB as Client
+except ImportError:
+    from pkg.db import DB as Client
+
+def run(db: Client) -> None:
+    # error: [column-type-mismatch]
+    db.one("SELECT name FROM users", int)
+```
+
+### A type parameter
+
+A type parameter of a function or of a class is a name of its own, not the class the
+module binds the name to. ty: `DB@run`, `DB@Box`, then `DB`.
+
+```python
+from pkg.db import DB
+
+def run[DB](db: DB) -> None:
+    db.one("SELECT name FROM users", int)
+
+class Box[DB]:
+    item: DB
+
+    def first(self, db: DB) -> None:
+        db.one("SELECT name FROM users", int)
+
+    def second(self) -> None:
+        self.item.one("SELECT name FROM users", int)
+
+def plain(db: DB) -> None:
+    # error: [column-type-mismatch]
+    db.one("SELECT name FROM users", int)
+```
+
+A type parameter of a class is seen in its methods, and in the functions in them.
+
+```python
+from pkg.db import DB, make_untyped
+
+class Box[DB]:
+    def first(self) -> None:
+        db: DB = make_untyped()
+        db.one("SELECT name FROM users", int)
+
+        def inner(other: DB) -> None:
+            other.one("SELECT name FROM users", int)
+
+# error:
+```
+
 ## A diamond follows the method resolution order
 
 `Both` inherits `one` from `Right`: Python looks in `Left`, `Right`, then `Base`. ty:
@@ -1308,6 +1380,122 @@ class Website:
 def run(website: Website) -> None:
     # error: [column-type-mismatch]
     website.db.one(sql="SELECT name FROM users", form=int)
+```
+
+## A registered method of a class its module gets from elsewhere
+
+A library that is found may still not say what its class is: it takes it from a C
+extension, by a star import, by an import with a fallback or by `__getattr__`. A method
+registered as `module.Class.method` is then found on the class by that path, as when the
+library is not found at all.
+
+```toml
+[[tool.sqlty.functions]]
+import-path = "ext.Db.fetch"
+query-param = "sql"
+
+[[tool.sqlty.functions]]
+import-path = "star.Db.fetch"
+query-param = "sql"
+
+[[tool.sqlty.functions]]
+import-path = "either.Db.fetch"
+query-param = "sql"
+
+[[tool.sqlty.functions]]
+import-path = "lazy.Db.fetch"
+query-param = "sql"
+```
+
+`ext/__init__.py`:
+
+```python
+from ext._impl import Db
+```
+
+`star/__init__.py`:
+
+```python
+from star.core import *
+```
+
+`star/core.py`:
+
+```python
+class Db:
+    def fetch(self, sql): ...
+```
+
+`either/__init__.py`:
+
+```python
+try:
+    from either._fast import Db
+except ImportError:
+    from either._slow import Db
+```
+
+`either/_slow.py`:
+
+```python
+class Db:
+    def fetch(self, sql): ...
+```
+
+`lazy/__init__.py`:
+
+```python
+def __getattr__(name): ...
+```
+
+### Re-exported from a module that is not found
+
+```python
+import ext
+from ext import Db
+
+def run(db: Db, other: ext.Db) -> None:
+    # error: [unknown-column]
+    db.fetch(sql="SELECT nope FROM users")
+    # error: [unknown-column]
+    other.fetch(sql="SELECT nope FROM users")
+```
+
+### A star import
+
+```python
+import star
+from star import Db
+
+def run(db: Db, other: star.Db) -> None:
+    # error: [unknown-column]
+    db.fetch(sql="SELECT nope FROM users")
+    # error: [unknown-column]
+    other.fetch(sql="SELECT nope FROM users")
+```
+
+### An import with a fallback, and `__getattr__`
+
+```python
+import lazy
+from either import Db
+
+def run(db: Db, other: lazy.Db) -> None:
+    # error: [unknown-column]
+    db.fetch(sql="SELECT nope FROM users")
+    # error: [unknown-column]
+    other.fetch(sql="SELECT nope FROM users")
+```
+
+### A name that is not registered stays unknown
+
+```python
+from ext import Other
+
+def run(db: Other) -> None:
+    db.fetch(sql="SELECT nope FROM users")
+
+# error:
 ```
 
 ## Stubs
