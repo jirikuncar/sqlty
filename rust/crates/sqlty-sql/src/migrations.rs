@@ -793,15 +793,16 @@ impl Model {
                     .iter()
                     .any(|column| columns.contains(&name(column)))
             }
-            AlterTableOperation::ReplicaIdentity { identity: set } => match set {
-                ReplicaIdentity::Nothing => self.has_identity(table),
-                ReplicaIdentity::Default => {
-                    identity.is_some()
-                        && !self.primary_keys.contains_key(table)
-                        && self.tables.contains(table)
-                }
-                _ => false,
-            },
+            AlterTableOperation::ReplicaIdentity {
+                identity: ReplicaIdentity::Nothing,
+            } => self.has_identity(table),
+            AlterTableOperation::ReplicaIdentity {
+                identity: ReplicaIdentity::Default,
+            } => {
+                identity.is_some()
+                    && !self.primary_keys.contains_key(table)
+                    && self.tables.contains(table)
+            }
             _ => false,
         }
     }
@@ -2534,6 +2535,7 @@ mod tests {
             ("ALTER TABLE a REPLICA IDENTITY FULL; ALTER TABLE a REPLICA IDENTITY NOTHING", &[DropPrimaryKey]),
             ("ALTER TABLE a REPLICA IDENTITY NOTHING; ALTER TABLE a REPLICA IDENTITY NOTHING", &[DropPrimaryKey]),
             ("ALTER TABLE a REPLICA IDENTITY FULL", &[]),
+            ("ALTER TABLE a REPLICA IDENTITY FULL; ALTER INDEX a_u RENAME TO a_v", &[]),
             ("ALTER TABLE a RENAME TO s.z; ALTER TABLE s.z DROP CONSTRAINT a_pkey", &[DropPrimaryKey]),
             (&format!("ALTER TABLE \"{0}é\" DROP CONSTRAINT \"{0}_pkey\"", "a".repeat(57)), &[DropPrimaryKey]),
         ] {
