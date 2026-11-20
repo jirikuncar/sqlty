@@ -240,6 +240,14 @@ fn placeholder_index(expr: &Expr) -> Option<usize> {
     }
 }
 
+/// The column an assignment stores in; empty, and so matching none, when it is no identifier.
+fn target_column(name: &ObjectName, dialect: SqlDialect) -> String {
+    name.0
+        .last()
+        .and_then(|part| part.as_ident())
+        .map_or_else(String::new, |ident| fold(ident, dialect))
+}
+
 fn is_typed(typed: &Typed) -> bool {
     typed.python.is_some()
 }
@@ -458,22 +466,14 @@ impl<'a> Analyzer<'a> {
             if let Some(table) = table {
                 match &assignment.target {
                     AssignmentTarget::ColumnName(name) => {
-                        if let Some(column) = name.0.last().and_then(|part| part.as_ident()) {
-                            let column = fold(column, self.dialect);
-                            self.hint_stored(&assignment.value, table, &column, scope, out);
-                        }
+                        let column = target_column(name, self.dialect);
+                        self.hint_stored(&assignment.value, table, &column, scope, out);
                     }
                     // `SET (a, b) = ($1, $2)` or `= (SELECT $1, $2)`.
                     AssignmentTarget::Tuple(names) => {
-                        // A name that is not an identifier keeps its position and types nothing.
                         let targets: Vec<String> = names
                             .iter()
-                            .map(|name| {
-                                name.0
-                                    .last()
-                                    .and_then(|part| part.as_ident())
-                                    .map_or_else(String::new, |ident| fold(ident, self.dialect))
-                            })
+                            .map(|name| target_column(name, self.dialect))
                             .collect();
                         match &assignment.value {
                             Expr::Tuple(values) => {
@@ -1423,7 +1423,17 @@ mod tests {
                 "UPDATE users SET (name, age) = f(%s)",
                 vec!["-"],
             ),
-            ("postgres", "INSERT INTO users (id) TABLE users", vec![]),
+            (
+                "postgres",
+                "INSERT INTO users (id) SELECT %s UNION TABLE users",
+                vec!["int!"],
+            ),
+            // Only PostgreSQL and MySQL queries read `TABLE name` as `SELECT * FROM name`.
+            (
+                "sqlite",
+                "INSERT INTO users (id) SELECT ? UNION TABLE users",
+                vec!["int!"],
+            ),
             (
                 "postgres",
                 "UPDATE users SET nope = %s + INTERVAL '1 day'",

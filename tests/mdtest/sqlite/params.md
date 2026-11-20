@@ -68,6 +68,13 @@ UPDATE users SET (name, age) = (?, ?) WHERE id = ?
 -- params: 3: int (INT)
 ```
 
+```sql
+UPDATE users SET (name, age) = (SELECT ?, ?) WHERE id = ?
+-- params: 1: str (TEXT) NOT NULL
+-- params: 2: int (INT) NULL
+-- params: 3: int (INT)
+```
+
 ## Placeholders in literals and comments are text
 
 ```sql

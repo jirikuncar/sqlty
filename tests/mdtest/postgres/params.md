@@ -249,6 +249,19 @@ INSERT INTO users (name, age) WITH n AS (SELECT 1) VALUES (%s, %s)
 -- params: 2: int (INT) NULL
 ```
 
+```sql
+INSERT INTO users (name, age) (VALUES (%s, %s))
+-- params: 1: str (TEXT) NOT NULL
+-- params: 2: int (INT) NULL
+```
+
+`TABLE` stores rows without placeholders:
+
+```sql
+INSERT INTO users (name) SELECT %s UNION TABLE users
+-- params: 1: str (TEXT) NOT NULL
+```
+
 ## UPDATE and DELETE
 
 ```sql
@@ -288,6 +301,14 @@ UPDATE users SET (age) = ROW(%s), (name, born) = ROW(%s, %s)
 -- params: 1: int (INT) NULL
 -- params: 2: str (TEXT) NOT NULL
 -- params: 3: datetime.date (DATE) NULL
+```
+
+A column the schema doesn't have types nothing:
+
+```sql
+UPDATE users SET (nope, age) = (SELECT %s, %s)
+-- params: 1: None (None)
+-- params: 2: int (INT) NULL
 ```
 
 ### A COALESCE fallback
