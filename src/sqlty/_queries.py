@@ -16,7 +16,7 @@ def check_query_file(
     schema_sql: str | Schema | None = None,
     rules: dict[str, str] | None = None,
 ) -> list[Diagnostic]:
-    """``sqlty check`` of a ``.sql`` file of named queries; ``-- sqlty: ignore[rule]`` silences a line.
+    """``sqlty check`` of a ``.sql`` file of named queries; ``-- sqlty: ignore[rule]`` silences its line, or the next when alone on its own.
 
     Example:
         >>> [d["message"] for d in check_query_file("-- name: one^\\nSELECT nope FROM users", schema_sql="CREATE TABLE users (id INT)")]

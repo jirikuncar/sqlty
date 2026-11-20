@@ -1148,7 +1148,7 @@ fn check_queries(
 /// What the new statements of PostgreSQL migrations lock, as `sqlty breaking` reports it:
 /// each of `files`, in the order the migrations run, is checked for the statements
 /// `baseline` (the schema of the `--against` revision) does not have, without those a
-/// `-- sqlty: ignore` comment on their first line drops.
+/// `-- sqlty: ignore` comment on their first line, or alone on the line above, drops.
 ///
 /// Example:
 ///     check_migrations("CREATE TABLE users (id INT)", ["CREATE INDEX i ON users (id)"])
