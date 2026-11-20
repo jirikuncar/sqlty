@@ -29,9 +29,7 @@ from sqlty._core import (
 from sqlty._source import ParsedSource
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Sequence
-
-    from sqlty._cli import Settings
+    from collections.abc import Sequence
 
 
 @dataclass(frozen=True)
@@ -64,48 +62,6 @@ def _helper_of(name: str, fields: tuple[Any, ...]) -> Helper:
     """The ``Helper`` of what Rust reads of one (``ModuleIndex.helpers``)."""
     positional, keywords, *rest = fields
     return Helper(name, tuple(positional), frozenset(keywords), *rest)
-
-
-def helper_roots(config_dir: Path | None, checked: Iterable[Path]) -> tuple[Path, ...]:
-    """Directories a ``[[tool.sqlty.functions]]`` module is read from, the likeliest first.
-
-    ``config_dir/src``, ``config_dir``, the resolved ``checked`` roots inside it, then
-    sqlty's own ``sys.path``.
-
-    Example:
-        >>> [root.name for root in helper_roots(Path("/p"), [Path("/p/app"), Path("/q")])[:3]]
-        ['src', 'p', 'app']
-    """
-    from sqlty import _core
-
-    project = config_dir.resolve() if config_dir is not None else None
-    extra = [Path(entry) for entry in sys.path if entry]
-    return tuple(_core.helper_roots(project, list(checked), extra))
-
-
-def configured_helpers(
-    index: HelperIndex, checked: Sequence[Path]
-) -> Callable[[Settings], HelperIndex]:
-    """``index`` with the ``[[tool.sqlty.functions]]`` of a file's settings, one fork per project.
-
-    ``checked`` are the checked directories and package roots, passed to `helper_roots`.
-    """
-    forks: dict[tuple[object, object, Path | None], HelperIndex] = {}
-
-    def helpers_for(settings: Settings) -> HelperIndex:
-        if not settings.functions and not settings.database_functions:
-            return index
-        key = settings.functions, settings.database_functions, settings.config_dir
-        if (forked := forks.get(key)) is None:
-            forks[key] = forked = index.fork()
-            roots = helper_roots(settings.config_dir, checked)
-            for import_path, query, row in settings.functions:
-                forked.register(import_path, query, row, roots=roots)
-            for import_path, query, row, database in settings.database_functions:
-                forked.register(import_path, query, row, roots=roots, database=database)
-        return forked
-
-    return helpers_for
 
 
 class HelperIndex:

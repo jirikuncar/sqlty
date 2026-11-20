@@ -1,7 +1,6 @@
 //! The `sqlty` executable: the commands on the real terminal and disk, reading sources as
 //! the Python environment it is installed in would, or, installed outside one (npm,
-//! Homebrew), the environment of the project it runs in. The commands Rust does not run yet
-//! run as `python -m sqlty` of that environment.
+//! Homebrew), the environment of the project it runs in.
 
 use std::ffi::OsString;
 use std::io::Write;
@@ -12,7 +11,7 @@ use std::sync::Arc;
 use sqlty_python::project::Files;
 use sqlty_python::types::stdlib::Version;
 
-use crate::{Host, EXIT_ERROR};
+use crate::Host;
 
 /// Run `sqlty` with the arguments of this process; the exit code.
 pub fn main() -> i32 {
@@ -22,49 +21,12 @@ pub fn main() -> i32 {
     let environment = Environment::find(&executable.unwrap_or_default(), &cwd, |name| {
         std::env::var_os(name)
     });
-    if args.len() == 2 && args[1] == "server" {
-        return match crate::server::serve(environment.version, environment.path) {
-            Ok(()) => 0,
-            Err(error) => {
-                eprintln!("sqlty: error: {error}");
-                EXIT_ERROR
-            }
-        };
-    }
     let mut host = Native {
         environment: &environment,
     };
-    let code = crate::run(args.clone(), &mut host);
+    let code = crate::run(args, &mut host);
     let _ = std::io::stdout().flush();
-    code.unwrap_or_else(|| python(&environment, &args))
-}
-
-/// `python -m sqlty ARGS...` of `environment`, in place of this process where the platform
-/// allows.
-fn python(environment: &Environment, args: &[OsString]) -> i32 {
-    let mut command = Command::new(&environment.interpreter);
-    command.args(["-m", "sqlty"]).args(args.iter().skip(1));
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        let error = command.exec();
-        eprintln!(
-            "sqlty: cannot run {}: {error}",
-            environment.interpreter.display()
-        );
-        EXIT_ERROR
-    }
-    #[cfg(not(unix))]
-    match command.status() {
-        Ok(status) => status.code().unwrap_or(EXIT_ERROR),
-        Err(error) => {
-            eprintln!(
-                "sqlty: cannot run {}: {error}",
-                environment.interpreter.display()
-            );
-            EXIT_ERROR
-        }
-    }
+    code
 }
 
 /// The Python environment `sqlty` is installed in: what its `sys.path` and `sys.version_info`

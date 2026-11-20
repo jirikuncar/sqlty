@@ -971,6 +971,9 @@ impl<'a> Module<'a, '_> {
         for (query, line, span) in self.unread() {
             let analysis = self.ctx.analyses.of(&query);
             for diagnostic in &analysis.diagnostics {
+                if !self.run.settings.rules.shows(diagnostic) {
+                    continue;
+                }
                 self.ctx
                     .report(diagnostic.rule, diagnostic.message.clone(), line, span);
             }

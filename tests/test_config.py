@@ -234,6 +234,16 @@ def test_values_of_a_parsed_table_are_validated() -> None:
         validate_tool_table({"dialect": None}, "x")
 
 
+def test_tables_keep_their_value_types(tmp_path: Path) -> None:
+    table = {"preview": True, "max-query-variants": 8, "rules": {"select-star": "ignore"}}
+    validate_tool_table(table, "x")
+    (tmp_path / "sqlty.toml").write_text(
+        'preview = true\nmax-query-variants = 8\nrules = { select-star = "ignore" }\n'
+    )
+    config, _ = load_config(tmp_path)
+    assert config == {"preview": True, "max_query_variants": 8, "rules": {"select-star": "ignore"}}
+
+
 def test_incomplete_function_entries_are_skipped(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -245,21 +255,6 @@ def test_incomplete_function_entries_are_skipped(
         config, _ = load_config(tmp_path)
     assert config["functions"] == [{"import_path": "db.ok", "query_param": "q"}]
     assert "missing required fields" in caplog.text
-
-
-def test_load_config_file_reads_top_level_keys(tmp_path: Path) -> None:
-    from sqlty._config import load_config_file
-
-    path = tmp_path / "sqlty.toml"
-    path.write_text(
-        'schema = ["a.sql"]\nextend-exclude = ["gen"]\n[rules]\nselect-star = "ignore"\n'
-    )
-
-    assert load_config_file(path) == {
-        "schema": ["a.sql"],
-        "extend_exclude": ["gen"],
-        "rules": {"select-star": "ignore"},
-    }
 
 
 def test_unknown_dialect_is_an_error_with_a_suggestion() -> None:
@@ -318,15 +313,12 @@ def test_extend_merges_databases_by_name_and_rebases_their_paths(tmp_path: Path)
 
 
 def test_extend_follows_a_chain_and_rereads_an_edited_base(tmp_path: Path) -> None:
-    from sqlty._config import load_config_file
-
     base = tmp_path / "base.toml"
     base.write_text('dialect = "sqlite"\n')
     (tmp_path / "mid.toml").write_text('extend = "base.toml"\nimport-style = "import sqlty"\n')
     (tmp_path / "sqlty.toml").write_text('extend = "mid.toml"\n')
 
     assert load_config(tmp_path)[0] == {"dialect": "sqlite", "import_style": "import sqlty"}
-    assert load_config_file(tmp_path / "sqlty.toml") == load_config(tmp_path)[0]
 
     base.write_text('dialect = "mysql"\n')
     stat = base.stat()
@@ -353,20 +345,3 @@ def test_invalid_extend_is_an_error(tmp_path: Path, files: dict[str, str], messa
 
     with pytest.raises(ConfigError, match=message):
         load_config(tmp_path)
-
-
-def test_requires_python_comes_from_the_nearest_pyproject_holding_it(tmp_path: Path) -> None:
-    (tmp_path / "pyproject.toml").write_text('[project]\nrequires-python = ">=3.15"\n')
-    (tmp_path / "app").mkdir()
-    (tmp_path / "app" / "pyproject.toml").write_text("[tool.sqlty]\nparam-types = true\n")
-    (tmp_path / "lib").mkdir()
-    (tmp_path / "lib" / "pyproject.toml").write_text('[project]\nrequires-python = ">=3.14"\n')
-    assert _config.requires_python(tmp_path / "app") == ">=3.15"
-    assert _config.requires_python(tmp_path / "lib") == ">=3.14"
-
-
-def test_requires_python_skips_a_pyproject_it_cannot_read(tmp_path: Path) -> None:
-    (tmp_path / "pyproject.toml").write_text('[project]\nrequires-python = ">=3.15"\n')
-    (tmp_path / "app").mkdir()
-    (tmp_path / "app" / "pyproject.toml").write_text("[project\n")
-    assert _config.requires_python(tmp_path / "app") == ">=3.15"

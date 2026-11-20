@@ -4,7 +4,7 @@ Runnable project for [joins and aggregates](../../docs/guide/joins.md). `schema.
 
 ```bash
 cd examples/07_joins
-sqlty check .   # fanout-aggregate, chasm-join and entity-mismatch warnings
+sqlty check .   # fanout-aggregate, chasm-join, foreign-key-mismatch and entity-mismatch warnings
 ```
 
 CI keeps it current: `tests/test_docs.py` fails if a query needs rewriting
