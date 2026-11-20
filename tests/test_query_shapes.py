@@ -4,7 +4,7 @@ import pytest
 
 from sqlty import _core
 from sqlty._lint import NAME_RULES
-from sqlty.core import check_source
+from sqlty.core import Settings, check_source
 from tests._json_shapes import json_shapes
 
 ALL_NAME_RULES = dict.fromkeys(NAME_RULES, "warn")
@@ -13,7 +13,7 @@ ALL_NAME_RULES = dict.fromkeys(NAME_RULES, "warn")
 def _name_rules(sql: str, dialect: str, schema: str) -> list[str]:
     """The name rules ``check`` reports on ``sql``, every one of them turned on."""
     source = f"q = {'--sql\n' + sql!r}\n"
-    found = check_source(source, dialect=dialect, schema_sql=schema, rules=ALL_NAME_RULES)
+    found = check_source(source, Settings(dialect=dialect, schema_sql=schema, rules=ALL_NAME_RULES))
     return [d["rule"] for d in found if d["rule"] in NAME_RULES]
 
 

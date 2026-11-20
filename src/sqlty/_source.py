@@ -72,9 +72,9 @@ class ParsedSource:
         self.module = module
 
     @classmethod
-    def of(cls, source: str | ParsedSource, module: str | None = None) -> ParsedSource:
+    def of(cls, source: str | ParsedSource) -> ParsedSource:
         """``source`` itself when it is already parsed, else a new ``ParsedSource``."""
-        return source if isinstance(source, ParsedSource) else cls(source, module)
+        return source if isinstance(source, ParsedSource) else cls(source)
 
     def position(self, offset: int) -> tuple[int, int]:
         """The 1-based line and column of the byte ``offset``; the column counts characters.
