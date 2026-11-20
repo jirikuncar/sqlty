@@ -52,10 +52,6 @@ def test_strip_source(benchmark: BenchmarkFixture) -> None:
     assert benchmark(core.strip_source, REWRITTEN) == SOURCE
 
 
-def test_strip_source(benchmark: BenchmarkFixture) -> None:
-    assert benchmark(core.strip_source, REWRITTEN) == SOURCE
-
-
 def test_check_source(benchmark: BenchmarkFixture) -> None:
     assert benchmark(core.check_source, REWRITTEN, SETTINGS) == []
 
