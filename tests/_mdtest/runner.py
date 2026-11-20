@@ -281,7 +281,11 @@ class Run:
 
     def _check(self, assertions: list[Assertion], unit: Unit) -> list[str]:
         code = unit.code
-        if unit.lang == "sql":
+        if unit.migration:
+            [found] = _core.check_migrations(
+                self.section.files.get("against.sql", ""), [code.text], rules=self.rules
+            )
+        elif unit.lang == "sql":
             from sqlty._queries import breaking_query_file, check_query_file
 
             query_format = self.section.settings.get("query-format", "auto")

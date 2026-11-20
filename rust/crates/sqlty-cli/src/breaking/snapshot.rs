@@ -243,6 +243,7 @@ impl Snapshot {
                 dialect: dialect(entry)?,
                 schema: schema.map(|at| snapshot.schema(at)).transpose()?,
                 schema_sql,
+                schema_files: Vec::new(),
                 types,
                 import_style: text_of(entry, "import_style").map(str::to_string),
                 untyped: entry.get("untyped").and_then(Value::as_bool) == Some(true),

@@ -3,7 +3,7 @@ order: 70
 group: "row-type"
 severity: "error"
 fixable: false
-summary: "Row type field cannot hold the JSON a query column builds"
+summary: "Row type field can't hold the JSON its column builds"
 origin: "Python"
 ---
 

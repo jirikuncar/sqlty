@@ -1,4 +1,4 @@
-"""Render the reference tables of ``docs/reference/{configuration,cli}.md``.
+"""Render the reference tables of ``docs/reference/{configuration,cli,rules}.md``.
 
     uv run python scripts/generate_docs.py            # rewrite the generated blocks
     uv run python scripts/generate_docs.py --check    # exit 1 if a page is out of date
@@ -6,7 +6,8 @@
 Only the text between ``<!-- generated:NAME -->`` and ``<!-- /generated:NAME -->``
 is owned by this script; everything else in the pages is hand-written. The
 sources are ``KEY_DOCS`` / ``FUNCTION_KEY_DOCS`` / ``DEFAULT_EXCLUDE`` in
-``sqlty._config`` and the clap commands of ``sqlty-cli`` (``sqlty._core.cli_reference``).
+``sqlty._config``, the clap commands of ``sqlty-cli`` (``sqlty._core.cli_reference``) and
+the rule pages' front matter (``sqlty._lint.RULES``).
 ``tests/test_docs.py`` runs the ``--check`` comparison.
 """
 
@@ -133,7 +134,27 @@ def _options(options: Iterable[tuple[str, str]]) -> str:
     return _table(("Option", "Description"), [(f"`{o}`", _help(h)) for o, h in options])
 
 
-PAGES = {"configuration.md": config_blocks, "cli.md": cli_blocks}
+def rules_blocks() -> dict[str, str]:
+    from sqlty._lint import RULES
+
+    return {
+        "rules": _table(
+            ("Rule", "Group", "Default", "Fixable", "Reports"),
+            [
+                (
+                    f"[`{r.name}`](rules/{r.name}.md)",
+                    r.group,
+                    r.default_severity.value,
+                    "yes" if r.fixable else "no",
+                    r.description,
+                )
+                for r in RULES.values()
+            ],
+        )
+    }
+
+
+PAGES = {"configuration.md": config_blocks, "cli.md": cli_blocks, "rules.md": rules_blocks}
 
 
 def render(text: str, blocks: dict[str, str], page: str) -> str:

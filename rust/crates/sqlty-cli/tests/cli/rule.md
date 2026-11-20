@@ -2,7 +2,7 @@
 
 ````console
 $ sqlty rule
-column-count-mismatch   error  [..]
+column-count-mismatch        error  [..]
 ...
 $ sqlty rule chasm-join
 # chasm-join

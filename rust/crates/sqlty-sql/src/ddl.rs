@@ -336,6 +336,43 @@ impl Statement<'_> {
             .collect()
     }
 
+    /// The statement without comments, its tokens joined by one space and its words in
+    /// lowercase: two spellings of a statement that differ only in layout or in the case of
+    /// keywords and unquoted names have the same text.
+    pub(crate) fn normalized(&self) -> String {
+        let word = |t: &str| t.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+        let tokens: Vec<String> = self
+            .tokens()
+            .into_iter()
+            .map(|t| {
+                if word(t) {
+                    t.to_ascii_lowercase()
+                } else {
+                    t.to_string()
+                }
+            })
+            .collect();
+        tokens.join(" ")
+    }
+
+    /// The tokens of the statement as written, without space and comments.
+    pub(crate) fn tokens(&self) -> Vec<&str> {
+        self.0
+            .iter()
+            .filter(|p| significant(p))
+            .map(|p| p.1)
+            .collect()
+    }
+
+    /// The byte range of the statement in `sql`, which it was split from, without the space
+    /// and comments around it.
+    pub(crate) fn range_in(&self, sql: &str) -> Option<std::ops::Range<usize>> {
+        let at = |piece: &Piece| piece.1.as_ptr() as usize - sql.as_ptr() as usize;
+        let first = self.0.iter().find(|p| significant(p))?;
+        let last = self.0.iter().rfind(|p| significant(p))?;
+        Some(at(first)..at(last) + last.1.len())
+    }
+
     /// Whether the lowercase `word` appears outside quotes and comments.
     pub(crate) fn has_word(&self, word: &str) -> bool {
         self.0.iter().any(|p| is_word(p, word))
@@ -778,14 +815,9 @@ pub(crate) fn statements(sql: &str, mysql: bool) -> impl Iterator<Item = Stateme
 /// The byte range of each statement of `sql`, split on `;` outside quotes, comments and
 /// dollar-quoted bodies; leading and trailing space and comments are left out.
 pub(crate) fn statement_ranges(sql: &str, mysql: bool) -> Vec<std::ops::Range<usize>> {
-    let at = |piece: &Piece| piece.1.as_ptr() as usize - sql.as_ptr() as usize;
     split_statements(sql, mysql)
         .iter()
-        .filter_map(|stmt| {
-            let first = stmt.0.iter().find(|p| significant(p))?;
-            let last = stmt.0.iter().rfind(|p| significant(p))?;
-            Some(at(first)..at(last) + last.1.len())
-        })
+        .filter_map(|stmt| stmt.range_in(sql))
         .collect()
 }
 

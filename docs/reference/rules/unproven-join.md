@@ -1,5 +1,5 @@
 ---
-order: 360
+order: 300
 group: "names"
 severity: "ignore"
 fixable: false

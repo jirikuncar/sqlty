@@ -1,9 +1,9 @@
 ---
-order: 280
+order: 220
 group: "names"
 severity: "warn"
 fixable: false
-summary: "Function result is untyped because sqlty does not know the function"
+summary: "Function whose result sqlty cannot type"
 origin: "SQL"
 ---
 
