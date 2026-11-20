@@ -10,6 +10,13 @@ sqlty [COMMAND]
 ```
 <!-- /generated:cli-usage -->
 
+<!-- generated:cli-options -->
+| Option | Description |
+|--------|-------------|
+| `--version` | Print version and exit |
+| `-h, --help` | Print help |
+<!-- /generated:cli-options -->
+
 ```bash
 sqlty rewrite .   # "--sql\n..." -> SQL[T]("--sql\n...")
 sqlty check .     # lint row types, drift, SELECT *
@@ -89,7 +96,9 @@ tool such as pre-commit passes file names.
 
 ## Common options
 
-`rewrite`, `strip` and `check` accept:
+<!-- generated:cli-common-commands -->
+`rewrite`, `strip`, `format`, `check` and `complete` accept:
+<!-- /generated:cli-common-commands -->
 
 <!-- generated:cli-options-common -->
 | Option | Description |
@@ -110,6 +119,7 @@ tool such as pre-commit passes file names.
 | `--no-respect-gitignore` | Walk the files .gitignore ignores too |
 | `-v, --verbose` | Print each file that rewrite, strip or check --fix changes. With check, also the types of each named query of a query file |
 | `-q, --quiet` | Suppress non-error output |
+| `-h, --help` | Print help (see a summary with '-h') |
 <!-- /generated:cli-options-common -->
 
 `strip` accepts `--dialect` and `--schema` but does not use them.
@@ -165,6 +175,26 @@ sqlty strip [OPTIONS] [PATHS]...
 | `--check` | Do not modify files; print what would change and exit 1 if any file would |
 | `--diff` | Print a unified diff instead of modifying files; exit 1 if any file would change |
 <!-- /generated:cli-options-strip -->
+
+Exit code: see [Exit codes](#exit-codes); 1 with `--check` or `--diff` when files would change.
+
+## `sqlty format`
+
+Lay out each `--sql` query string with [sqruff](https://github.com/quarylabs/sqruff),
+as one plain triple-quoted literal per query. See [Formatting](../guide/formatting.md).
+
+<!-- generated:cli-usage-format -->
+```text
+sqlty format [OPTIONS] [PATHS]...
+```
+<!-- /generated:cli-usage-format -->
+
+<!-- generated:cli-options-format -->
+| Option | Description |
+|--------|-------------|
+| `--check` | Do not modify files; print what would change and exit 1 if any file would |
+| `--diff` | Print a unified diff instead of modifying files; exit 1 if any file would change |
+<!-- /generated:cli-options-format -->
 
 Exit code: see [Exit codes](#exit-codes); 1 with `--check` or `--diff` when files would change.
 
@@ -273,11 +303,14 @@ sqlty breaking [OPTIONS] [PATHS]...
 <!-- generated:cli-options-breaking -->
 | Option | Description |
 |--------|-------------|
+| `PATHS ...` | Files or directories to check, in both revisions (default: current directory) |
 | `--against BASELINE` | The baseline: a revision (a branch, tag, SHA or HEAD~1), a snapshot written by --save, a directory of snapshots (each checked), or a schema .sql file or directory (forward only, as it has no queries) |
 | `--save PATH` | Write a snapshot of --head (its settings, schema and Python files) to PATH, a baseline for a later --against |
 | `--head REF` | The new revision (default: the working tree, uncommitted changes included) |
 | `--direction {backward,forward,both}` | backward: queries of --against on the schema of --head (migrate first); forward: queries of --head on the schema of --against (deploy first) |
+| `-q, --quiet` | Print nothing; only the exit code tells |
 | `--output-format {text,json,github,sarif}` | How findings are printed: text (the default), json (an array of objects with file, line, rule, severity, message, direction and against), github (GitHub Actions annotations, each at its severity) or sarif (a SARIF 2.1.0 log, for GitHub code scanning) |
+| `-h, --help` | Print help (see a summary with '-h') |
 <!-- /generated:cli-options-breaking -->
 
 Exit code: 1 when a change breaks either direction with an `error` diagnostic, 2 for an unknown revision or
@@ -292,6 +325,13 @@ Print a rule's documentation, or list every rule with its default severity.
 sqlty rule [NAME]
 ```
 <!-- /generated:cli-usage-rule -->
+
+<!-- generated:cli-options-rule -->
+| Option | Description |
+|--------|-------------|
+| `NAME` | Rule name, for example select-star |
+| `-h, --help` | Print help |
+<!-- /generated:cli-options-rule -->
 
 ## `sqlty skill`
 
@@ -315,11 +355,41 @@ sqlty skill [OPTIONS] [NAME]
 | `NAME` | Skill to print (default: sqlty) |
 | `--install DIR` | Write every skill to DIR/NAME/ instead of printing one |
 | `--list` | List the skills and what each is for |
+| `-h, --help` | Print help |
 <!-- /generated:cli-options-skill -->
+
+## `sqlty server`
+
+Run the language server on standard input and output, for editors: diagnostics,
+fixes, completion and hover as you type. See [Editors](../recipes/editors.md).
+
+<!-- generated:cli-usage-server -->
+```text
+sqlty server
+```
+<!-- /generated:cli-usage-server -->
+
+<!-- generated:cli-options-server -->
+| Option | Description |
+|--------|-------------|
+| `-h, --help` | Print help |
+<!-- /generated:cli-options-server -->
 
 ## `sqlty version`
 
 Print `sqlty <version>` and exit. `sqlty --version` does the same.
+
+<!-- generated:cli-usage-version -->
+```text
+sqlty version
+```
+<!-- /generated:cli-usage-version -->
+
+<!-- generated:cli-options-version -->
+| Option | Description |
+|--------|-------------|
+| `-h, --help` | Print help |
+<!-- /generated:cli-options-version -->
 
 ## Other entry points
 

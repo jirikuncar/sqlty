@@ -15,11 +15,23 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 REFERENCE = ROOT / "docs" / "reference"
-COMMANDS = ("rewrite", "strip", "check", "complete", "breaking", "rule", "skill")
+COMMANDS = (
+    "rewrite",
+    "strip",
+    "format",
+    "check",
+    "complete",
+    "breaking",
+    "rule",
+    "skill",
+    "server",
+    "version",
+)
 BLOCK = re.compile(
     r"(?P<open><!-- generated:(?P<name>[\w-]+) -->\n)(?P<body>.*?)(?P<close><!-- /generated:(?P=name) -->)",
     re.S,
@@ -84,25 +96,41 @@ def _help(text: str) -> str:
 
 
 def cli_blocks() -> dict[str, str]:
+    """Every option of every command: the ones ``rewrite``, ``strip`` and ``check`` share
+    in one table, listed once for each command that takes them all."""
     from sqlty._core import cli_reference
 
-    commands = {
-        name: (usage, {o: h for o, h in options if o != "-h, --help"})
-        for name, usage, options in cli_reference()
-    }
-    shared = set.intersection(*(set(commands[c][1]) for c in COMMANDS[:3]))
-    blocks = {"cli-usage": _usage(commands["sqlty"][0])}
+    commands = {name: (usage, dict(options)) for name, usage, options in cli_reference()}
+    shared = set.intersection(*(set(commands[c][1]) for c in ("rewrite", "strip", "check")))
+    usage, root = commands["sqlty"]
     rewrite = commands["rewrite"][1]
-    blocks["cli-options-common"] = _table(
-        ("Option", "Description"), [(f"`{o}`", _help(rewrite[o])) for o in rewrite if o in shared]
-    )
+    blocks = {
+        "cli-usage": _usage(usage),
+        "cli-options": _options(root.items()),
+        "cli-options-common": _options((o, h) for o, h in rewrite.items() if o in shared),
+        "cli-common-commands": _and(
+            [f"`{name}`" for name in COMMANDS if shared <= set(commands[name][1])]
+        )
+        + " accept:\n",
+    }
     for name in COMMANDS:
         usage, options = commands[name]
+        own = (
+            options.items()
+            if not shared <= set(options)
+            else ((o, h) for o, h in options.items() if o not in shared)
+        )
         blocks[f"cli-usage-{name}"] = _usage(usage)
-        rows = [(f"`{o}`", _help(h)) for o, h in options.items() if o not in shared and h]
-        if name != "rule":
-            blocks[f"cli-options-{name}"] = _table(("Option", "Description"), rows)
+        blocks[f"cli-options-{name}"] = _options(own)
     return blocks
+
+
+def _and(items: list[str]) -> str:
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def _options(options: Iterable[tuple[str, str]]) -> str:
+    return _table(("Option", "Description"), [(f"`{o}`", _help(h)) for o, h in options])
 
 
 PAGES = {"configuration.md": config_blocks, "cli.md": cli_blocks}
