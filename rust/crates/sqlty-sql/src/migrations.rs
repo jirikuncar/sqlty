@@ -16,8 +16,9 @@ use std::ops::{ControlFlow, Range};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sqlparser::ast::{
     AlterColumnOperation, AlterTableOperation, AlterType, AlterTypeOperation, CascadeOption,
-    ColumnDef, ColumnOption, CopySource, DataType, DetachPartitionMode, Expr, Insert, Merge,
-    ObjectName, ObjectType, SetExpr, Statement, TableConstraint, TableFactor, TableObject,
+    CheckConstraint, ColumnDef, ColumnOption, CopySource, DataType, DetachPartitionMode, Expr,
+    Insert, Merge, ObjectName, ObjectType, SetExpr, Statement, TableConstraint, TableFactor,
+    TableObject,
 };
 
 use crate::analyzer::{parse_ddl, SqlDialect};
@@ -89,8 +90,15 @@ struct Model {
     types: FxHashMap<(String, String), DataType>,
     /// The tables on either side of a foreign key.
     referencing: FxHashSet<String>,
-    /// The `CHECK (column IS NOT NULL)` constraints of each table: name, column, validated.
-    not_null: FxHashMap<String, Vec<(Option<String>, String, bool)>>,
+    /// The `CHECK` constraints of each table.
+    checks: FxHashMap<String, Vec<Check>>,
+}
+
+struct Check {
+    name: Option<String>,
+    /// The column of a `CHECK (column IS NOT NULL)`.
+    not_null: Option<String>,
+    valid: bool,
 }
 
 /// What the statements of one file so far have set.
@@ -224,6 +232,22 @@ impl Model {
                         column.data_type.clone(),
                     );
                 }
+                let inline = create.columns.iter().flat_map(|column| &column.options);
+                let checks =
+                    inline
+                        .filter_map(|option| match &option.option {
+                            ColumnOption::Check(check) => Some(check),
+                            _ => None,
+                        })
+                        .chain(create.constraints.iter().filter_map(
+                            |constraint| match constraint {
+                                TableConstraint::Check(check) => Some(check),
+                                _ => None,
+                            },
+                        ));
+                for check in checks {
+                    self.add_check(&table, check, true);
+                }
             }
             Statement::AlterTable(alter) => {
                 let table = key(&alter.name);
@@ -254,20 +278,12 @@ impl Model {
             AlterTableOperation::AddConstraint {
                 constraint: TableConstraint::Check(check),
                 not_valid,
-            } => {
-                if let Some(column) = is_not_null(&check.expr) {
-                    self.not_null.entry(table.to_string()).or_default().push((
-                        check.name.as_ref().map(name),
-                        column,
-                        !not_valid,
-                    ));
-                }
-            }
+            } => self.add_check(table, check, !not_valid),
             AlterTableOperation::ValidateConstraint { name: validated } => {
                 let validated = name(validated);
-                for check in self.not_null.entry(table.to_string()).or_default() {
-                    if check.0.as_ref() == Some(&validated) {
-                        check.2 = true;
+                for check in self.checks.entry(table.to_string()).or_default() {
+                    if check.name.as_ref() == Some(&validated) {
+                        check.valid = true;
                     }
                 }
             }
@@ -293,6 +309,17 @@ impl Model {
                 .types
                 .keys()
                 .any(|column| typed(column) && words.contains(&column.1))
+    }
+
+    fn add_check(&mut self, table: &str, check: &CheckConstraint, valid: bool) {
+        self.checks
+            .entry(table.to_string())
+            .or_default()
+            .push(Check {
+                name: check.name.as_ref().map(name),
+                not_null: is_not_null(&check.expr),
+                valid,
+            });
     }
 
     fn is_new(&self, name: &ObjectName) -> bool {
@@ -428,10 +455,10 @@ impl Model {
                 op: AlterColumnOperation::SetNotNull,
             } => {
                 let column = name(column_name);
-                let checked = self.not_null.get(table).is_some_and(|checks| {
+                let checked = self.checks.get(table).is_some_and(|checks| {
                     checks
                         .iter()
-                        .any(|(_, checked, valid)| *valid && *checked == column)
+                        .any(|check| check.valid && check.not_null.as_ref() == Some(&column))
                 });
                 if !checked {
                     report(
@@ -452,6 +479,20 @@ impl Model {
                         Rule::TableRewrite,
                         format!(
                             "changing `{column_name}` to {data_type} rewrites `{written}` and its indexes under an ACCESS EXCLUSIVE lock: add a new column, backfill it and switch over"
+                        ),
+                    );
+                }
+            }
+            AlterTableOperation::AttachPartitionOf { partition, .. } => {
+                let checked = self
+                    .checks
+                    .get(&key(partition))
+                    .is_some_and(|checks| checks.iter().any(|check| check.valid));
+                if !checked && !self.is_new(partition) {
+                    report(
+                        Rule::ConstraintScan,
+                        format!(
+                            "`ATTACH PARTITION` scans `{partition}` for rows outside its bounds under an ACCESS EXCLUSIVE lock on it: add a `CHECK` that matches the bounds `NOT VALID`, `VALIDATE` it, then attach"
                         ),
                     );
                 }
@@ -1266,6 +1307,48 @@ mod tests {
             ),
         ] {
             assert_eq!(one(migration), expected, "{migration}");
+        }
+    }
+
+    #[test]
+    fn attaching_a_partition_scans_it_without_a_validated_check() {
+        let baseline = "CREATE TABLE events (at date) PARTITION BY RANGE (at);
+            CREATE TABLE events_09 (at date);
+            CREATE TABLE events_10 (at date CHECK (at >= '2026-10-01'));";
+        let attach = |table: &str| {
+            format!(
+                "ALTER TABLE events ATTACH PARTITION {table} FOR VALUES FROM ('2026-01-01') TO ('2027-01-01');"
+            )
+        };
+        let timeout = "SET lock_timeout = '1s';";
+        for (setup, table, expected) in [
+            ("", "events_09", &[Rule::ConstraintScan][..]),
+            ("", "events_10", &[]),
+            (
+                "ALTER TABLE events_09 ADD CONSTRAINT b CHECK (at >= '2026-09-01') NOT VALID;",
+                "events_09",
+                &[Rule::ConstraintScan],
+            ),
+            (
+                "ALTER TABLE events_09 ADD CONSTRAINT b CHECK (at >= '2026-09-01') NOT VALID;
+                ALTER TABLE events_09 VALIDATE CONSTRAINT b;",
+                "events_09",
+                &[],
+            ),
+            ("CREATE TABLE events_11 (at date);", "events_11", &[]),
+            (
+                "CREATE TABLE events_11 (LIKE events_09); INSERT INTO events_11 SELECT * FROM events_09;",
+                "events_11",
+                &[Rule::ConstraintScan],
+            ),
+            (
+                "CREATE TABLE events_11 (at date, CONSTRAINT b CHECK (at IS NOT NULL));",
+                "events_11",
+                &[],
+            ),
+        ] {
+            let migration = format!("{timeout}\n{setup}\n{}", attach(table));
+            assert_eq!(rules(baseline, &migration), expected, "{setup}");
         }
     }
 
