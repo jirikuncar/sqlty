@@ -116,3 +116,13 @@ ALTER TYPE mood ADD VALUE 'meh';
 UPDATE "users" SET email = 'meh' WHERE id = 1;
 COMMIT;
 ```
+
+## A NOT NULL check alone does not bound a partition
+
+```sql migration
+SET lock_timeout = '1s';
+ALTER TABLE events_11 ADD CONSTRAINT events_11_at CHECK (at IS NOT NULL) NOT VALID;
+ALTER TABLE events_11 VALIDATE CONSTRAINT events_11_at;
+-- error: [constraint-scan] "`ATTACH PARTITION` scans `events_11`"
+ALTER TABLE events ATTACH PARTITION events_11 FOR VALUES FROM ('2026-11-01') TO ('2026-12-01');
+```
