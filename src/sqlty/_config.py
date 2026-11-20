@@ -1,7 +1,6 @@
 """Configuration loading from sqlty.toml, pyproject.toml or Cargo.toml."""
 
 import logging
-import re
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -17,39 +16,6 @@ DISCOVERY_KEYS = _core.DISCOVERY_KEYS
 """``[tool.sqlty]`` keys that pick the files to process."""
 
 FUNCTION_KEYS = _core.FUNCTION_KEYS
-
-MAX_QUERY_VARIANTS = 64
-"""Default of ``max-query-variants``."""
-
-
-_LOWER_BOUND = re.compile(r"(?:>=|~=|==)\s*(\d+)\.(\d+)")
-
-
-def requires_closed(requires_python: str | None) -> bool:
-    """Whether ``requires-python`` rules out every Python before 3.15, which reads
-    ``TypedDict(closed=True)`` (PEP 728).
-
-    Example:
-        >>> [requires_closed(r) for r in (">=3.15", "~=3.16", ">=3.14", ">3.14", None)]
-        [True, True, False, False, False]
-    """
-    return any((int(a), int(b)) >= (3, 15) for a, b in _LOWER_BOUND.findall(requires_python or ""))
-
-
-def driver_types(
-    driver: str | None, dialect: str, types: dict[str, str] | None
-) -> dict[str, str] | None:
-    """``types`` with the defaults of ``driver`` under them, for a PostgreSQL project.
-
-    Example:
-        >>> driver_types("psycopg", "postgres", {"DATE": "str"})["INT4RANGE"]
-        'psycopg.types.range.Range[int]'
-        >>> driver_types("psycopg", "sqlite", None) is None
-        True
-    """
-    if driver is None or dialect != "postgres":
-        return types
-    return dict(_core.driver_types(driver, dialect)) | (types or {})
 
 
 class KeyDoc(NamedTuple):
@@ -237,20 +203,6 @@ class ConfigError(Exception):
     """A user error in configuration or command-line paths; the CLI prints it and exits 2."""
 
 
-def validate_tool_table(table: dict[str, Any], source: str) -> None:
-    """Raise ``ConfigError`` for an unknown key, rule or severity in a ``[tool.sqlty]`` table.
-
-    ``source`` names the file in the message. Shared by the CLI and the mdtest runner.
-
-    Example:
-        >>> validate_tool_table({"dialect": "mysql"}, "pyproject.toml")
-        >>> validate_tool_table({"import_style": "x"}, "pyproject.toml")  # doctest: +ELLIPSIS
-        Traceback (most recent call last):
-        sqlty._config.ConfigError: pyproject.toml: unknown key 'import_style' in [tool.sqlty] (did you mean 'import-style'?); ...
-    """
-    _parse_table(table, source)
-
-
 def load_config(project_root: Path | None = None) -> tuple[Config, Path | None]:
     """Load the nearest configuration above ``project_root``; see ``find_config``.
 
@@ -284,15 +236,6 @@ def find_config(project_root: Path | None = None) -> tuple[Config, Path | None]:
         return {}, None
     table, skipped, path = found
     return _converted(table, skipped, str(path)), path
-
-
-def _parse_table(tool_config: dict[str, Any], source: str) -> Config:
-    """Validate a ``[tool.sqlty]`` table and convert it to ``Config``."""
-    try:
-        found = _core.validate_config(tool_config, source)
-    except ValueError as exc:
-        raise ConfigError(str(exc)) from None
-    return _converted(*found, source)
 
 
 def _converted(table: dict[str, Any], skipped: list[str], source: str) -> Config:
