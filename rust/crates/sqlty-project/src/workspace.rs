@@ -295,7 +295,29 @@ impl Workspace {
     /// found there. Those found elsewhere are still read again by every edit.
     pub fn watched(&mut self, folders: &[PathBuf]) {
         let resolved = folders.iter().map(|folder| self.files.canonical(folder));
-        self.watched = Some(folders.iter().cloned().chain(resolved).collect());
+        let watched = Some(folders.iter().cloned().chain(resolved).collect());
+        if self.watched != watched {
+            // What was written before the client watched is not reported: read it again.
+            self.stubs.clear();
+            self.outside.clear();
+            self.configured.clear();
+            self.watched = watched;
+        }
+    }
+
+    /// The directories the stubs and libraries read so far were looked for in: the
+    /// `stub-paths` directories, and the roots a path was asked for under, found or
+    /// not. A client may watch them.
+    pub fn searched(&self) -> Vec<PathBuf> {
+        let mut searched: Vec<PathBuf> = self.stubs.keys().flatten().cloned().collect();
+        for ((roots, stubs), outside) in &self.outside {
+            let asked = outside.asked.lock().unwrap_or_else(PoisonError::into_inner);
+            let under = |root: &&PathBuf| asked.iter().any(|asked| asked.starts_with(root));
+            searched.extend(roots.iter().filter(under).chain(stubs).cloned());
+        }
+        searched.sort();
+        searched.dedup();
+        searched
     }
 
     /// The file or directory at `path` was written, created or removed on disk: the stubs
@@ -1811,8 +1833,9 @@ mod tests {
         assert_eq!(rules(&workspace.check(app, &edited).unwrap()), [""; 0]);
         // With one, only what it reports is read again.
         workspace.watched(&[PathBuf::from("/repo")]);
-        files.write(stub, Some(STUB));
         assert_eq!(rules(&workspace.check(app, CALL).unwrap()), [""; 0]);
+        files.write(stub, Some(STUB));
+        assert_eq!(rules(&workspace.check(app, &edited).unwrap()), [""; 0]);
         assert!(workspace.changed(Path::new(stub)));
         assert_eq!(
             rules(&workspace.check(app, CALL).unwrap()),
@@ -1856,6 +1879,70 @@ mod tests {
         files.write("/repo/vendor/db.py", Some("def fetch(other, sql): ...\n"));
         let edited = format!("{FETCH}\n");
         assert_eq!(rules(&workspace.check(app, &edited).unwrap()), [""; 0]);
+    }
+
+    #[test]
+    fn what_was_written_before_the_client_watched_is_read_again() {
+        let (mut workspace, files) = written(&[]);
+        let (app, stub) = (Path::new(APP), "/repo/typings/lib/__init__.pyi");
+        let folders = [PathBuf::from("/repo")];
+        assert_eq!(
+            rules(&workspace.check(app, CALL).unwrap()),
+            ["unknown-column"]
+        );
+        files.write(stub, Some(PLAIN));
+        workspace.watched(&folders);
+        assert_eq!(rules(&workspace.check(app, CALL).unwrap()), [""; 0]);
+        // The same folders again tell nothing new.
+        files.write(stub, Some(STUB));
+        workspace.watched(&folders);
+        assert_eq!(rules(&workspace.check(app, CALL).unwrap()), [""; 0]);
+        workspace.watched(&[PathBuf::from("/repo"), PathBuf::from("/site")]);
+        assert_eq!(
+            rules(&workspace.check(app, CALL).unwrap()),
+            ["unknown-column"]
+        );
+    }
+
+    #[test]
+    fn a_root_nothing_was_asked_for_under_is_not_searched() {
+        let files: Vec<(&str, &'static str)> = vec![
+            ("/repo/pyproject.toml", VENDOR),
+            ("/repo/schema.sql", "CREATE TABLE users (id INT NOT NULL);"),
+            ("/repo/vendor/db.py", "def fetch(sql): ...\n"),
+            ("/repo/app.py", FETCH),
+        ];
+        let tree = Tree(
+            files
+                .iter()
+                .map(|(path, text)| (PathBuf::from(path), text.as_bytes()))
+                .collect(),
+        );
+        let files: Arc<dyn Files + Send + Sync> = Arc::new(tree);
+        let roots = vec![PathBuf::from("/site"), PathBuf::from("/bin")];
+        let mut workspace =
+            Workspace::root(Path::new("/repo"), files, (3, 14), roots).expect("opens");
+        let found = workspace.check(Path::new(APP), FETCH).unwrap();
+        assert_eq!(rules(&found), ["unknown-column"]);
+        let searched = workspace.searched();
+        assert!(searched.contains(&PathBuf::from("/repo")), "{searched:?}");
+        let outside = |path: &&PathBuf| !path.starts_with("/repo");
+        assert_eq!(searched.iter().filter(outside).count(), 0, "{searched:?}");
+        let missing = "import nowhere\nnowhere.db.fetch(\"SELECT 1\")\n";
+        workspace
+            .check(Path::new(APP), &format!("{FETCH}{missing}"))
+            .unwrap();
+        let searched = workspace.searched();
+        assert!(searched.contains(&PathBuf::from("/site")), "{searched:?}");
+    }
+
+    #[test]
+    fn the_directories_searched_are_the_stub_paths_and_the_roots_asked() {
+        let (mut workspace, _) = written(&[]);
+        assert!(workspace.searched().is_empty(), "nothing is read yet");
+        workspace.check(Path::new(APP), CALL).unwrap();
+        let expected = ["/repo", "/repo/typings"].map(PathBuf::from);
+        assert_eq!(workspace.searched(), expected);
     }
 
     #[test]

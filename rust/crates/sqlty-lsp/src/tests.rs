@@ -34,14 +34,15 @@ static HELD: AtomicBool = AtomicBool::new(false);
 /// exist; the baseline `broken` fails and `once` has none after the first load. Completes with [`SCHEMA`] and the table `gen{N}`
 /// of its `N`th load; the strings `run(` is called with are helper queries. Reads
 /// `lib.pyi`, which says `bad` is fine once it is written, and reports `unwatched` until
-/// the client watches the Python files.
+/// the client watches the Python files of its folders, and `outside` until it watches
+/// `/site`, where it looks for libraries.
 struct Fake {
     root: PathBuf,
     settings: Settings,
     generation: usize,
     checked: String,
     stubbed: bool,
-    watched: bool,
+    watched: Vec<PathBuf>,
 }
 
 impl Workspace for Fake {
@@ -67,7 +68,10 @@ impl Workspace for Fake {
             Severity::Error
         };
         self.checked = text.to_string();
-        let unwatched = text.match_indices("unwatched").filter(|_| !self.watched);
+        let watches = |folder: &str| self.watched.iter().any(|watched| watched.ends_with(folder));
+        let unwatched = text.match_indices("unwatched").filter(|_| !watches("work"));
+        let outside = text.match_indices("outside").filter(|_| !watches("site"));
+        let unwatched = unwatched.chain(outside);
         Ok(text
             .match_indices("bad")
             .filter(|_| !self.stubbed)
@@ -96,7 +100,11 @@ impl Workspace for Fake {
     }
 
     fn watched(&mut self, folders: &[PathBuf]) {
-        self.watched = folders.iter().any(|folder| folder.ends_with("work"));
+        self.watched = folders.to_vec();
+    }
+
+    fn searched(&mut self) -> Vec<PathBuf> {
+        vec![self.root.join("typings"), PathBuf::from("/site")]
     }
 
     fn changed(&mut self, path: &Path) -> bool {
@@ -205,7 +213,7 @@ impl Client {
                         generation: count.load(Ordering::SeqCst),
                         checked: String::new(),
                         stubbed: false,
-                        watched: false,
+                        watched: Vec::new(),
                     })
                 }
             })
@@ -589,6 +597,102 @@ fn a_watcher_that_reports_python_files_is_told_to_every_workspace() {
     );
     assert_eq!(published(&mut client), Some(0));
     assert_eq!(client.opened.load(Ordering::SeqCst), 2);
+    client.shutdown();
+}
+
+impl Client {
+    /// The watchers of the next registration the server asks for, answered with `taken`.
+    fn registration(&mut self, taken: bool) -> Value {
+        loop {
+            match self.receive() {
+                Message::Request(asked) if asked.method == "client/registerCapability" => {
+                    let answer = match taken {
+                        true => Response::new_ok(asked.id, Value::Null),
+                        false => Response::new_err(asked.id, -32601, "no".to_string()),
+                    };
+                    self.connection.sender.send(answer.into()).unwrap();
+                    let registration = &asked.params["registrations"][0];
+                    assert_eq!(registration["method"], "workspace/didChangeWatchedFiles");
+                    return registration["registerOptions"]["watchers"].clone();
+                }
+                Message::Notification(notification) => self.pending.push(notification),
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+    }
+}
+
+fn watching(relative: bool) -> Value {
+    let watched = json!({"dynamicRegistration": true, "relativePatternSupport": relative});
+    json!({"workspace": {"didChangeWatchedFiles": watched}})
+}
+
+#[test]
+fn a_client_that_can_is_asked_to_watch_the_files_a_check_reads() {
+    let mut client = Client::start(&watching(true));
+    let count = |found: &Value| found["diagnostics"].as_array().map(Vec::len);
+    let watchers = client.registration(true);
+    let globs: Vec<&str> = watchers
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|watcher| watcher["globPattern"].as_str())
+        .collect();
+    assert!(
+        globs.contains(&"**/*.pyi") && globs.contains(&"**/*.py"),
+        "{globs:?}"
+    );
+    let created: Vec<&Value> = watchers
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|watcher| watcher["kind"] == 5)
+        .collect();
+    assert_eq!(created.len(), 1, "a directory created or deleted");
+    assert_eq!(created[0]["globPattern"], "**");
+    assert!(
+        globs.contains(&"**/pyproject.toml") && globs.contains(&"**/*.sql"),
+        "{globs:?}"
+    );
+    // The folders are watched; where the check looked outside them is asked for next.
+    client.open("file:///work/q.py", "unwatched outside\n");
+    let found = client.notification("textDocument/publishDiagnostics");
+    assert_eq!(count(&found), Some(1));
+    assert_eq!(found["diagnostics"][0]["range"]["start"]["character"], 10);
+    let watchers = client.registration(true);
+    let files = json!({"baseUri": "file:///site", "pattern": "**/*.{py,pyi}"});
+    let paths = json!({"baseUri": "file:///site", "pattern": "**"});
+    let expected = json!([{"globPattern": files}, {"globPattern": paths, "kind": 5}]);
+    assert_eq!(watchers, expected, "not the stubs in the folder");
+    client.change("file:///work/q.py", 2, "unwatched outside \n");
+    let found = client.notification("textDocument/publishDiagnostics");
+    assert_eq!(count(&found), Some(0));
+    // Asked once.
+    client.change("file:///work/q.py", 3, "outside\n");
+    client.notification("textDocument/publishDiagnostics");
+    assert!(client.shutdown().is_empty());
+}
+
+#[test]
+fn a_watcher_the_client_refuses_or_cannot_place_is_not_relied_on() {
+    let count = |found: &Value| found["diagnostics"].as_array().map(Vec::len);
+    let mut client = Client::start(&watching(true));
+    client.registration(false);
+    client.open("file:///work/q.py", "unwatched\n");
+    let found = client.notification("textDocument/publishDiagnostics");
+    assert_eq!(count(&found), Some(1));
+    client.registration(false);
+    client.shutdown();
+    // Without relative patterns, only the folders are asked for.
+    let mut client = Client::start(&watching(false));
+    client.registration(true);
+    client.open("file:///work/q.py", "unwatched outside\n");
+    let found = client.notification("textDocument/publishDiagnostics");
+    assert_eq!(count(&found), Some(1));
+    client.change("file:///work/q.py", 2, "unwatched outside \n");
+    let found = client.notification("textDocument/publishDiagnostics");
+    assert_eq!(count(&found), Some(1));
+    assert!(client.asked.is_empty());
     client.shutdown();
 }
 

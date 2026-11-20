@@ -122,7 +122,7 @@ async function start(): Promise<void> {
     outputChannel: output,
     synchronize: {
       fileEvents: vscode.workspace.createFileSystemWatcher(
-        "**/{pyproject.toml,sqlty.toml,Cargo.toml,*.sql,*.py,*.pyi}",
+        "**/{pyproject.toml,sqlty.toml,Cargo.toml,*.sql}",
       ),
     },
   };

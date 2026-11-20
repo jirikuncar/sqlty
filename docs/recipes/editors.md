@@ -149,10 +149,13 @@ init_options = {
 | `hover.enable` | `true` | Say what a word of a query string is: a column's type, a table's columns, a result column's inference rule |
 | `highlighting.enable` | `true` | Send the SQL of checked strings as semantic tokens |
 
-The server reads the [stubs and libraries](../guide/helpers.md#stubs-for-untyped-libraries) of helpers again on
-every edit, unless the client reports the `.py` and `.pyi` files that change on disk
-(`workspace/didChangeWatchedFiles`), as the VS Code extension does: it then reads one
-again only when it changes, if it lies under a workspace folder.
+The server asks a client that can watch files (`workspace/didChangeWatchedFiles` with
+`dynamicRegistration`) to report the settings, schemas, `.py` and `.pyi` files that change
+on disk, and with `relativePatternSupport` also those of the `stub-paths` directories and
+`sys.path` entries outside the workspace folders. It then reads the
+[stubs and libraries](../guide/helpers.md#stubs-for-untyped-libraries) of helpers again
+only when one changes. Without a watcher it reads them again on every edit, and reloads
+the settings and schema when the editor saves one of their files.
 
 ## Vim
 

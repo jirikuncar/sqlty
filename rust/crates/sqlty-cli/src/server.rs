@@ -77,6 +77,10 @@ impl Workspace for RustWorkspace {
         self.workspace.changed(path)
     }
 
+    fn searched(&mut self) -> Vec<PathBuf> {
+        self.workspace.searched()
+    }
+
     fn watched(&mut self, folders: &[PathBuf]) {
         self.workspace.watched(folders);
     }

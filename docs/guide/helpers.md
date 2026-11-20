@@ -188,10 +188,10 @@ package, so a directory of stubs for libraries the project does not use costs no
 from the project directory, the roots of the checked packages and `sys.path`:
 `lib-stubs` before `lib`, a `.pyi` before the `.py` beside it.
 
-The language server reads the stubs and libraries again on every edit. With an editor
-that reports the `.py` and `.pyi` files changed on disk, as VS Code does, it keeps what
-it has read under the workspace folders, and reads a file again when the editor saves
-it or reports the change.
+The language server asks the editor to report the `.py` and `.pyi` files that change on
+disk. With an editor that does, as VS Code does, it keeps the stubs and libraries it has
+read, and reads one again when the editor saves it or reports the change. With one that
+does not, it reads them again on every edit.
 
 ## Helpers you cannot annotate
 

@@ -22,11 +22,12 @@ use crossbeam_channel::Sender;
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
 use lsp_types::notification::{
     DidChangeTextDocument, DidChangeWatchedFiles, DidCloseTextDocument, DidOpenTextDocument,
-    DidSaveTextDocument, LogMessage, Notification as _, PublishDiagnostics, ShowMessage,
+    DidSaveTextDocument, Initialized, LogMessage, Notification as _, PublishDiagnostics,
+    ShowMessage,
 };
 use lsp_types::request::{
-    CodeActionRequest, Completion, HoverRequest, Request as _, ResolveCompletionItem,
-    SemanticTokensFullRequest, SemanticTokensRefresh,
+    CodeActionRequest, Completion, HoverRequest, RegisterCapability, Request as _,
+    ResolveCompletionItem, SemanticTokensFullRequest, SemanticTokensRefresh,
 };
 use lsp_types::{
     CodeActionKind, CodeActionOptions, CodeActionParams, CodeActionProviderCapability,
@@ -148,6 +149,11 @@ pub trait Workspace {
     /// one written with [`Workspace::changed`]. A check cannot rely on what it read
     /// before of the files elsewhere.
     fn watched(&mut self, _folders: &[PathBuf]) {}
+    /// The directories the checks so far looked for stubs and libraries in. Those
+    /// outside the client's folders are watched when the client can.
+    fn searched(&mut self) -> Vec<PathBuf> {
+        Vec::new()
+    }
 }
 
 /// What the client configures, from the `initializationOptions` of `initialize`:
@@ -238,6 +244,8 @@ where
         sender: Arc::new(RwLock::new(Some(connection.sender.clone()))),
         encoding,
         refresh: settings.highlighting && refresh_support(&params),
+        watchers: watchers(&params),
+        watching: Arc::default(),
         requests: Arc::default(),
         completion: settings.completion,
         hover: settings.hover,
@@ -262,7 +270,7 @@ where
                 shared.request(request, &jobs);
             }
             Message::Notification(notification) => shared.notify(notification, &jobs),
-            Message::Response(_) => {}
+            Message::Response(response) => shared.answered(&response, &jobs),
         }
     }
     shared.close();
@@ -283,6 +291,8 @@ enum Job {
     /// Python files, stubs and directories written on disk, which a check may have read,
     /// and whether the client's watcher reported them: it then reports every one.
     Changed(Vec<PathBuf>, bool),
+    /// The client watches the Python files of its folders, and of these directories.
+    Watched(Vec<PathBuf>),
 }
 
 struct Document {
@@ -306,6 +316,11 @@ struct Shared {
     encoding: PositionEncodingKind,
     /// Whether the client takes `workspace/semanticTokens/refresh`.
     refresh: bool,
+    /// Whether the client lets a server register file watchers, and ones of
+    /// directories outside its folders.
+    watchers: (bool, bool),
+    /// The directories of the registrations the client has not answered, by request.
+    watching: Arc<Mutex<HashMap<String, Vec<PathBuf>>>>,
     /// The id of the last request to the client.
     requests: Arc<AtomicI32>,
     completion: bool,
@@ -367,6 +382,66 @@ impl Shared {
         }
     }
 
+    /// Ask the client to report the files of a project that change on disk: the Python
+    /// files, stubs, settings and schemas of its folders when `directories` is empty,
+    /// else the Python files and stubs of those directories outside them. A client that
+    /// cannot is not asked, and every edit then reads the stubs and libraries again.
+    fn watch(&self, directories: Vec<PathBuf>) {
+        let (dynamic, relative) = self.watchers;
+        if !dynamic || (!directories.is_empty() && !relative) {
+            return;
+        }
+        // A pattern of files does not match a directory, which is removed or renamed
+        // as one: every path created or deleted (kinds 1 and 4) is reported too.
+        let watchers: Vec<serde_json::Value> = match directories.is_empty() {
+            true => WATCHED
+                .iter()
+                .map(|pattern| serde_json::json!({"globPattern": pattern}))
+                .chain([serde_json::json!({"globPattern": "**", "kind": 5})])
+                .collect(),
+            false => directories
+                .iter()
+                .filter_map(|directory| uri::from_path(directory))
+                .flat_map(|base| {
+                    let files = serde_json::json!({"baseUri": base, "pattern": "**/*.{py,pyi}"});
+                    let paths = serde_json::json!({"baseUri": base, "pattern": "**"});
+                    [
+                        serde_json::json!({"globPattern": files}),
+                        serde_json::json!({"globPattern": paths, "kind": 5}),
+                    ]
+                })
+                .collect(),
+        };
+        let id = format!("sqlty-{}", self.requests.fetch_add(1, Ordering::Relaxed));
+        let registration = serde_json::json!({
+            "id": id,
+            "method": DidChangeWatchedFiles::METHOD,
+            "registerOptions": {"watchers": watchers},
+        });
+        self.watching
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(id.clone(), directories);
+        self.send(Request::new(
+            id.into(),
+            RegisterCapability::METHOD.to_string(),
+            serde_json::json!({"registrations": [registration]}),
+        ));
+    }
+
+    /// The client answered a request: a registration it took is a watcher to rely on.
+    fn answered(&self, response: &Response, jobs: &mpsc::Sender<Job>) {
+        let id = response.id.to_string();
+        let asked = self
+            .watching
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(id.trim_matches('"'));
+        if let (Some(directories), Ok(_)) = (asked, &response.response_result) {
+            let _ = jobs.send(Job::Watched(directories));
+        }
+    }
+
     fn publish(&self, uri: Uri, diagnostics: Vec<lsp_types::Diagnostic>, version: Option<i32>) {
         self.send(Notification::new(
             PublishDiagnostics::METHOD.to_string(),
@@ -377,6 +452,7 @@ impl Shared {
     fn notify(&self, notification: Notification, jobs: &mpsc::Sender<Job>) {
         let params = notification.params;
         match notification.method.as_str() {
+            Initialized::METHOD => self.watch(Vec::new()),
             DidOpenTextDocument::METHOD => {
                 let Ok(params) =
                     serde_json::from_value::<lsp_types::DidOpenTextDocumentParams>(params)
@@ -620,6 +696,30 @@ fn refresh_support(params: &InitializeParams) -> bool {
         .and_then(|workspace| workspace.semantic_tokens.as_ref())
         .and_then(|tokens| tokens.refresh_support)
         .unwrap_or(false)
+}
+
+/// What the client is asked to watch in its folders: the files [`is_config`] names, and
+/// the Python files and stubs a check reads.
+const WATCHED: [&str; 6] = [
+    "**/pyproject.toml",
+    "**/sqlty.toml",
+    "**/Cargo.toml",
+    "**/*.sql",
+    "**/*.py",
+    "**/*.pyi",
+];
+
+/// Whether the client lets a server register file watchers, and ones with a pattern
+/// relative to a directory outside its folders.
+fn watchers(params: &InitializeParams) -> (bool, bool) {
+    let watched = params
+        .capabilities
+        .workspace
+        .as_ref()
+        .and_then(|workspace| workspace.did_change_watched_files.as_ref());
+    let dynamic = watched.and_then(|watched| watched.dynamic_registration) == Some(true);
+    let relative = watched.and_then(|watched| watched.relative_pattern_support) == Some(true);
+    (dynamic, dynamic && relative)
 }
 
 /// The workspace folders, else the root of the client; a file outside them all is its
