@@ -1,4 +1,4 @@
 # Lines of a crate its own tests never run; a crate not listed must run every line.
 # Lower a floor whenever its tests cover more, until the line can go.
 sqlty-python 892
-sqlty-sql 155
+sqlty-sql 59

@@ -12,6 +12,9 @@ CREATE TABLE tags (order_id INTEGER, label TEXT);
 CREATE TABLE docs (id INTEGER PRIMARY KEY, body JSONB NOT NULL CHECK (jsonb_typeof(body) = 'object'), meta JSON);
 CREATE TABLE shapes (id INTEGER PRIMARY KEY, area CIRCLE);
 CREATE FUNCTION order_count() RETURNS INT LANGUAGE sql AS 'SELECT 1';
+CREATE TABLE pairs (a INTEGER REFERENCES orders, b INTEGER REFERENCES customers, PRIMARY KEY (a, b));
+CREATE FUNCTION tag_count(x INT, y nope) RETURNS INT LANGUAGE sql AS 'SELECT 1';
+CREATE FUNCTION all_orders() RETURNS SETOF orders LANGUAGE sql AS 'SELECT * FROM orders';
 CREATE VIEW lost AS SELECT * FROM nowhere;
 CREATE VIEW order_totals AS SELECT order_id, SUM(amount) AS total, unknown_fn(order_id) AS doc FROM order_items GROUP BY order_id;
 ";
@@ -146,6 +149,37 @@ const CASES: &[Case] = &[
     ("mysql", "SELECT * FROM JSON_TABLE('[]', '$[*]' COLUMNS (n FOR ORDINALITY, NESTED PATH '$.a' COLUMNS (x INT PATH '$'))) AS j", &["[unsupported-syntax] `*` reads table expression `JSON_TABLE('[]', '$[*]' COLUMNS(n FOR ORDINALITY, NESTED PATH '$.a' COLUMNS (x INT PATH '$'))) AS j`, which sqlty does not read the columns of"]),
     ("postgres", "SELECT * FROM json_array_elements('[1]'), json_each('{}'), jsonb_populate_record(NULL, '{}')", &["[unsupported-syntax] `*` reads table function jsonb_populate_record, which sqlty does not read the columns of"]),
     ("postgres", "SELECT * FROM order_count(), order_count() AS c", &[]),
+    ("postgres", "SELECT 1 FROM orders o WHERE o.customer_id IN (SELECT id FROM payments UNION SELECT 1)", &[]),
+    ("postgres", "SELECT 1 FROM orders o WHERE o.customer_id IN (SELECT o2.id FROM orders o2)", &[]),
+    ("postgres", "SELECT g.*, COUNT(*) FROM generate_series(1, 2) g GROUP BY 1", &["[ungrouped-column] column `g.g` must appear in GROUP BY or be used in an aggregate function"]),
+    ("postgres", "WITH c AS (SELECT id FROM orders) SELECT c.*, COUNT(*) FROM c GROUP BY id", &[]),
+    ("postgres", "SELECT row_to_json(o) FROM orders o GROUP BY o.id", &[]),
+    ("postgres", "SELECT row_to_json(o) FROM orders o GROUP BY o.note", &["[ungrouped-column] column `o.*` must appear in GROUP BY or be used in an aggregate function"]),
+    ("postgres", "SELECT o.id, (SELECT o.note FROM customers c LIMIT 1) FROM orders o GROUP BY o.id", &[]),
+    ("bigquery", "SELECT STRUCT(1 AS a).*, COUNT(*) FROM orders GROUP BY id", &["[unsupported-syntax] `<expression>.*` is not expanded"]),
+    ("generic", "TABLE orders UNION TABLE orders", &[]),
+    ("generic", "SELECT 1 UNION VALUES (2)", &["[unsupported-syntax] a VALUES list is not typed"]),
+    ("postgres", "SELECT * FROM orders o JOIN pairs q ON o.id = q.a JOIN pairs p ON p.a = q.b", &["[entity-mismatch] pairs.a holds orders keys, pairs.b holds customers keys"]),
+    ("postgres", "SELECT 1 FROM orders o WHERE o.id IN (SELECT p.id FROM payments p) AND o.id IN (SELECT id, order_id FROM payments)", &["[entity-mismatch] orders.id holds orders keys, payments.id holds payments keys"]),
+    ("databricks", "SELECT stack(1, 2, 3) AS (a, b) FROM orders GROUP BY id", &["[unknown-function] function `stack` is not known to sqlty, so its result is untyped"]),
+    ("postgres", "SELECT *, COUNT(*) FROM unnest(ARRAY[1]) GROUP BY 1", &["[ungrouped-column] column `unnest.unnest` must appear in GROUP BY or be used in an aggregate function"]),
+    ("postgres", "SELECT (SELECT c.name FROM customers c WHERE c.id = o.id GROUP BY c.id) FROM orders o", &["[entity-mismatch] customers.id holds customers keys, orders.id holds orders keys"]),
+    ("postgres", "SELECT * FROM orders JOIN customers USING (nope)", &["[unsupported-syntax] `*` could not be expanded into columns"]),
+    ("postgres", "SELECT o.nope FROM orders o, customers o", &["[duplicate-alias] table name `o` is specified more than once"]),
+    ("mysql", "SELECT custumer_ID FROM orders", &["[unknown-column] column `custumer_ID` does not exist in `orders`; did you mean `customer_id`?"]),
+    ("postgres", "SELECT z.* FROM orders o", &["[unknown-table] `z` in `z.*` is not a table or alias in the FROM clause"]),
+    ("postgres", "SELECT * FROM information_schema.tables", &[]),
+    ("postgres", "SELECT * FROM orders, LATERAL generate_series(1, id) g", &[]),
+    ("generic", "SELECT * FROM (VALUES (1)) v", &["[unsupported-syntax] a VALUES list is not typed"]),
+    ("postgres", "SELECT 0o9, 0x1_2", &[]),
+    ("generic", "WITH RECURSIVE r AS (TABLE orders UNION ALL SELECT * FROM r) SELECT * FROM r", &["[unsupported-syntax] a TABLE query is not typed"]),
+    ("duckdb", "SELECT id FROM orders ORDER BY ALL", &[]),
+    ("postgres", "SELECT 1 UNION (WITH c AS (SELECT 2) SELECT * FROM c)", &[]),
+    ("postgres", "SELECT l.* FROM lost l", &["[unsupported-syntax] `*` reads view `lost`, whose columns are not typed"]),
+    ("generic", "SELECT 1 UNION TABLE orders", &["[unsupported-syntax] a TABLE query is not typed"]),
+    ("sqlite", "SELECT * FROM generate_series(1, 3)", &["[unsupported-syntax] `*` reads table function generate_series, which sqlty does not read the columns of"]),
+    ("duckdb", "SELECT * FROM range(3)", &["[unsupported-syntax] `*` reads table function range, which sqlty does not read the columns of"]),
+    ("postgres", "SELECT all_orders()", &[]),
 ];
 
 /// `(dialect, query, columns as "name: python (SQL)")`, against `SCHEMA`.
@@ -199,6 +233,26 @@ const COLUMNS: &[Case] = &[
     ("mysql", "SELECT id + INTERVAL 1 DAY AS a, ADDDATE(1, 2) AS b, TIMESTAMPADD(DAY, 1, 5) AS c, id <=> 1 AS d, CASE WHEN true THEN TRUE ELSE 1 END AS e, IF(true, POINT(1, 2), 1) AS f, IF(true, CAST(1 AS UNSIGNED), CAST(2 AS UNSIGNED)) AS g, IF(true, 1, CAST(1 AS UNSIGNED)) AS h, IF(true, CAST(1 AS UNSIGNED), 1) AS i, IF(true, 1, 2) AS j FROM orders", &["a: None (None)", "b: None (None)", "c: None (None)", "d: bool (BOOLEAN)", "e: bool (None)", "f: bytes (POINT)", "g: int (UBIGINT)", "h: int (UBIGINT)", "i: int (UBIGINT)", "j: typing.Literal[1, 2] (None)"]),
     ("postgres", "SELECT -note AS a, note ~ 'a' AS b, @ id AS c FROM orders", &["a: str | None (TEXT)", "b: bool | None (BOOLEAN)", "c: int (INT)"]),
     ("sqlite", "SELECT CASE WHEN id THEN 1 ELSE 'a' END AS a, CASE WHEN id THEN 1 ELSE 1.5 END AS b FROM orders", &["a: int | str (None)", "b: float (DOUBLE)"]),
+    ("snowflake", "SELECT CAST(NULL AS ARRAY) AS a", &["a: list | None (ARRAY)"]),
+    ("postgres", "SELECT 0xFFFFFFFFFFFFFFFFFFFF AS a", &["a: decimal.Decimal (None)"]),
+    ("sqlite", "SELECT 0xFFFFFFFFFFFFFFFFFFFF AS a", &["a: None (None)"]),
+    ("mysql", "SELECT ADDDATE(CURRENT_DATE) AS a, CEIL(NULL) AS b, IF(true, 1 = 1, 2) AS c, IF(true, id, CAST(1 AS UNSIGNED)) AS d, IF(true, CAST(1 AS UNSIGNED), CAST(id AS UNSIGNED)) AS e, IF(true, id, CAST(1 AS SIGNED)) AS f FROM orders", &["a: None (None)", "b: None (None)", "c: int (INT)", "d: decimal.Decimal (DECIMAL)", "e: int (UBIGINT)", "f: int (BIGINT)"]),
+    ("postgres", "SELECT SUBSTRING(B'1010' FROM 1 FOR 2) AS a, ~ note AS b, note @@ 'a' AS c, id / (2) AS d, id / '2' AS e, 1 = ANY((ARRAY[1])) AS f, 1 = ANY((SELECT ARRAY[id] FROM orders)) AS g FROM orders", &["a: str (BIT)", "b: str | None (TEXT)", "c: bool | None (BOOLEAN)", "d: int (INT)", "e: None (None)", "f: bool (BOOLEAN)", "g: bool (BOOLEAN)"]),
+    ("sqlite", "SELECT CASE WHEN id THEN CASE WHEN id THEN 1 ELSE 'a' END ELSE 'b' END AS a FROM orders", &["a: int | str (None)"]),
+    ("postgres", "SELECT (SELECT x.id FROM (SELECT id FROM customers) x WHERE x.id = o.customer_id) AS a, (SELECT c.name FROM customers c WHERE c.id = public.o.customer_id) AS b FROM orders o", &["a: int | None (INT)", "b: str | None (TEXT)"]),
+    ("postgres", "SELECT CASE WHEN NULL IS DISTINCT FROM note THEN note END AS a, CASE WHEN (note = 'a') THEN 1 WHEN 'b' = note THEN 2 ELSE 3 END AS b FROM orders", &["a: str | None (TEXT)", "b: typing.Literal[1, 2, 3] (None)"]),
+    ("postgres", "SELECT o.note AS a FROM orders o WHERE EXISTS (SELECT 1 UNION SELECT 2) AND EXISTS (SELECT 1 FROM customers c WHERE c.id = o.customer_id AND o.note = 'x')", &["a: str (TEXT)"]),
+    ("postgres", "SELECT jsonb_build_array(1) -> 'k' AS a, to_jsonb(c) AS b FROM orders o LEFT JOIN customers c ON c.id = o.customer_id WHERE (c IS NOT NULL AND (o IS NOT NULL)) AND z.* IS NOT NULL", &["a: typing.Any (JSONB)", "b: typing.Any (JSONB) {\"object\":[{\"name\":\"id\",\"value\":{\"shape\":\"integer\",\"nullable\":false},\"optional\":false},{\"name\":\"email\",\"value\":{\"shape\":\"string\",\"nullable\":true},\"optional\":false},{\"name\":\"name\",\"value\":{\"shape\":\"string\",\"nullable\":false},\"optional\":false}]}"]),
+    ("databricks", "SELECT stack(1, 2, 3) AS (a, b), 1 AS (c)", &["a: None (None)", "c: int (None)"]),
+    ("mssql", "SELECT x.c FROM orders o OUTER APPLY (SELECT COUNT(*) AS c FROM payments) x", &["c: int (BIGINT)"]),
+    ("postgres", "SELECT 1 AS a UNION (SELECT 2 ORDER BY 1)", &["a: int (None)"]),
+    ("mysql", "SELECT CASE WHEN true THEN 'a' ELSE CURRENT_DATE END AS a, COALESCE('a', CURRENT_DATE) AS b, id / (2) AS c, id / 'x' AS d FROM orders", &["a: str (TEXT)", "b: str (TEXT)", "c: decimal.Decimal (DECIMAL)", "d: float | None (DOUBLE)"]),
+    ("postgres", "SELECT TRIM(B'1010') AS a, OVERLAY(B'1010' PLACING B'1' FROM 1) AS b, - 'a'::date AS c, note ^@ 'a' AS d, id <-> 1 AS e, CASE WHEN note = 'a' AND note = 'b' THEN 1 END AS f FROM orders", &["a: str (BIT)", "b: str (BIT)", "c: datetime.date (DATE)", "d: bool | None (BOOLEAN)", "e: None (None)", "f: typing.Literal[1] | None (None)"]),
+    ("postgres", "SELECT CASE WHEN (c IS NOT NULL AND o IS NOT NULL) THEN to_jsonb(c) END AS a, jsonb_agg(c) FILTER (WHERE (c IS NOT NULL AND z.* IS NOT NULL)) AS b, to_jsonb(x) AS d FROM orders o LEFT JOIN customers c ON c.id = o.customer_id, pg_class x GROUP BY o.id", &["a: typing.Any (JSONB) {\"object\":[{\"name\":\"id\",\"value\":{\"shape\":\"integer\",\"nullable\":false},\"optional\":false},{\"name\":\"email\",\"value\":{\"shape\":\"string\",\"nullable\":true},\"optional\":false},{\"name\":\"name\",\"value\":{\"shape\":\"string\",\"nullable\":false},\"optional\":false}]}", "b: typing.Any (JSONB) {\"array\":{\"shape\":{\"object\":[{\"name\":\"id\",\"value\":{\"shape\":\"integer\",\"nullable\":false},\"optional\":false},{\"name\":\"email\",\"value\":{\"shape\":\"string\",\"nullable\":true},\"optional\":false},{\"name\":\"name\",\"value\":{\"shape\":\"string\",\"nullable\":false},\"optional\":false}]},\"nullable\":false}}", "d: typing.Any (JSONB) {\"object\":[{\"name\":\"oid\",\"value\":{\"shape\":\"integer\",\"nullable\":false},\"optional\":false},{\"name\":\"relname\",\"value\":{\"shape\":\"string\",\"nullable\":false},\"optional\":false},{\"name\":\"relnamespace\",\"value\":{\"shape\":\"integer\",\"nullable\":false},\"optional\":false},{\"name\":\"reltype\",\"value\":{\"shape\":\"integer\",\"nullable\":false},\"optional\":false},{\"name\":\"reloftype\",\"value\":{\"shape\":\"integer\",\"nullable\":false},\"optional\":false},{\"name\":\"relowner\",\"value\":{\"shape\":\"integer\",\"nullable\":false},\"optional\":false},{\"name\":\"relam\",\"value\":{\"shape\":\"integer\",\"nullable\":false},\"optional\":false},{\"name\":\"relfilenode\",\"value\":{\"shape\":\"integer\",\"nullable\":false},\"optional\":false},{\"name\":\"reltablespace\",\"value\":{\"shape\":\"integer\",\"nullable\":false},\"optional\":false},{\"name\":\"relpages\",\"value\":{\"shape\":\"integer\",\"nullable\":false},\"optional\":false},{\"name\":\"reltuples\",\"value\":{\"shape\":\"number\",\"nullable\":false},\"optional\":false},{\"name\":\"relallvisible\",\"value\":{\"shape\":\"integer\",\"nullable\":false},\"optional\":false},{\"name\":\"reltoastrelid\",\"value\":{\"shape\":\"integer\",\"nullable\":false},\"optional\":false},{\"name\":\"relhasindex\",\"value\":{\"shape\":\"boolean\",\"nullable\":false},\"optional\":false},{\"name\":\"relisshared\",\"value\":{\"shape\":\"boolean\",\"nullable\":false},\"optional\":false},{\"name\":\"relpersistence\",\"value\":{\"shape\":\"string\",\"nullable\":false},\"optional\":false},{\"name\":\"relkind\",\"value\":{\"shape\":\"string\",\"nullable\":false},\"optional\":false},{\"name\":\"relnatts\",\"value\":{\"shape\":\"integer\",\"nullable\":false},\"optional\":false},{\"name\":\"relchecks\",\"value\":{\"shape\":\"integer\",\"nullable\":false},\"optional\":false},{\"name\":\"relhasrules\",\"value\":{\"shape\":\"boolean\",\"nullable\":false},\"optional\":false},{\"name\":\"relhastriggers\",\"value\":{\"shape\":\"boolean\",\"nullable\":false},\"optional\":false},{\"name\":\"relhassubclass\",\"value\":{\"shape\":\"boolean\",\"nullable\":false},\"optional\":false},{\"name\":\"relrowsecurity\",\"value\":{\"shape\":\"boolean\",\"nullable\":false},\"optional\":false},{\"name\":\"relforcerowsecurity\",\"value\":{\"shape\":\"boolean\",\"nullable\":false},\"optional\":false},{\"name\":\"relispopulated\",\"value\":{\"shape\":\"boolean\",\"nullable\":false},\"optional\":false},{\"name\":\"relreplident\",\"value\":{\"shape\":\"string\",\"nullable\":false},\"optional\":false},{\"name\":\"relispartition\",\"value\":{\"shape\":\"boolean\",\"nullable\":false},\"optional\":false},{\"name\":\"relrewrite\",\"value\":{\"shape\":\"integer\",\"nullable\":false},\"optional\":false},{\"name\":\"relfrozenxid\",\"value\":{\"shape\":\"string\",\"nullable\":false},\"optional\":false},{\"name\":\"relminmxid\",\"value\":{\"shape\":\"string\",\"nullable\":false},\"optional\":false},{\"name\":\"relacl\",\"value\":{\"shape\":{\"array\":{\"shape\":\"string\",\"nullable\":false}},\"nullable\":true},\"optional\":false},{\"name\":\"reloptions\",\"value\":{\"shape\":{\"array\":{\"shape\":\"string\",\"nullable\":false}},\"nullable\":true},\"optional\":false},{\"name\":\"relpartbound\",\"value\":{\"shape\":\"string\",\"nullable\":true},\"optional\":false}]}"]),
+    ("postgres", "WITH s AS (SELECT CASE WHEN id = 1 THEN 'a' ELSE 'b' END AS k, note FROM orders) SELECT k FROM s WHERE note = 'x'", &["k: typing.Literal['a', 'b'] (None)"]),
+    ("sqlite", "INSERT INTO orders (id, customer_id) VALUES (1, 2) ON CONFLICT DO NOTHING RETURNING *", &["id: int (INT)", "customer_id: int (INT)", "note: str | None (TEXT)"]),
+    ("mysql", "INSERT INTO orders (id, customer_id) VALUES (1, 2) ON DUPLICATE KEY UPDATE note = 'x' RETURNING *", &["id: int (INT)", "customer_id: int (INT)", "note: str | None (TEXT)"]),
+    ("mysql", "SELECT 1.5, N'x', \"dq\", 'sq'", &["1.5: decimal.Decimal (None)", "x: str (None)", "dq: str (None)", "sq: typing.Literal['sq'] (None)"]),
 ];
 
 /// `(dialect, schema, columns of SELECT * FROM t, then each skipped object)`.
@@ -258,6 +312,24 @@ const SCHEMAS: &[Case] = &[
     ("postgres", "CREATE TABLE t (id INT); CREATE TABLE u (id INT); DROP TABLE u RESTRICT CASCADE weird; DROP MATERIALIZED VIEW IF EXISTS m WITH x; DROP TYPE x WEIRD; DROP DOMAIN d WEIRD", &["id: int | None (INT)", "skipped table u"]),
     ("sqlite", "CREATE VIRTUAL TABLE t USING rtree(id, x0 weird(, x1)", &["*: None (None)", "skipped table t USING rtree"]),
     ("sqlite", "CREATE VIRTUAL TABLE t USING rtree(id)", &["id: int (INT)"]),
+    ("snowflake", "CREATE TABLE u (a ARRAY, b INT); CREATE VIEW t AS SELECT a, b FROM u", &["a: list | None (ARRAY)", "b: int | None (INT)"]),
+    ("generic", "CREATE VIEW t AS VALUES (1)", &["*: None (None)"]),
+    ("mysql", "CREATE TABLE u (a TINYINT UNSIGNED, b INT UNSIGNED); CREATE VIEW t AS SELECT IF(true, a, b) AS c FROM u", &["c: int | None (UINT)"]),
+    ("mysql", "CREATE TABLE t2 ENGINE = InnoDB; CREATE VIEW v AS SELECT FROM WHERE; CREATE TABLE t (id INT); CREATE INDEX i ON t (id)", &["id: int | None (INT)", "skipped view v"]),
+    ("postgres", "CREATE TABLE t (id INT); ALTER FUNCTION nope RENAME TO g; ALTER TABLE nope ADD CONSTRAINT c CHECK (true)", &["id: int | None (INT)", "skipped function nope"]),
+    ("mysql", "CREATE TABLE t (id INT NOT NULL); CREATE TABLE z (id INT); CREATE TRIGGER tr BEFORE INSERT ON t FOR EACH ROW SET NEW.id = 1; DROP TRIGGER tr", &["id: int (INT)"]),
+    ("postgres", "CREATE TABLE p (id INT); CREATE TABLE o (k INT); CREATE TABLE a () INHERITS (p); CREATE TABLE t () INHERITS (p, a); CREATE TABLE b () INHERITS (o); ALTER TABLE p RENAME TO q; ALTER TABLE q ADD COLUMN z INT", &["id: int | None (INT)", "z: int | None (INT)"]),
+    ("postgres", "CREATE TABLE u (id INT PRIMARY KEY); CREATE TABLE t (id INT, x INT); CREATE VIEW v AS SELECT 1 AS n; CREATE UNIQUE INDEX i ON t (id); DROP INDEX i; ALTER TABLE t ADD CONSTRAINT f FOREIGN KEY (x) REFERENCES u (id), DROP COLUMN IF EXISTS nope, ALTER COLUMN nope SET DEFAULT 1", &["id: int | None (INT)", "x: int | None (INT)"]),
+    ("postgres", "CREATE TYPE mood AS ENUM ('a'); CREATE TYPE other AS ENUM ('o'); ALTER TYPE mood RENAME TO m2; ALTER TYPE other RENAME TO o2; CREATE TYPE mood AS ENUM ('b'); CREATE TYPE pair AS (a INT); ALTER TYPE pair RENAME TO p2; CREATE TYPE pair AS (b TEXT); CREATE TABLE t (a mood, b m2, c pair, d p2)", &["a: typing.Literal['b'] | None (MOOD)", "b: typing.Literal['a'] | None (M2)", "c: None (PAIR)", "d: None (P2)"]),
+    ("sqlite", "CREATE TABLE t (id INTEGER, x TEXT, PRIMARY KEY (id COLLATE nocase))", &["id: int | None (INT)", "x: str | None (TEXT)"]),
+    ("sqlite", "CREATE VIRTUAL TABLE t USING fts5", &[]),
+    ("duckdb", "CREATE TABLE t (a STRUCT(x INT, y INT))", &["a: dict[str, int] | None (STRUCT(x INT, y INT))"]),
+    ("postgres", "CREATE TABLE c AS SELECT 1 AS n; ALTER TABLE c ADD CONSTRAINT k CHECK (n > 0); CREATE TABLE t (id INT); ALTER TABLE t ADD CONSTRAINT f FOREIGN KEY (id) REFERENCES nowhere (id)", &["id: int | None (INT)"]),
+    ("postgres", "CREATE TABLE p (id INT); CREATE VIEW v AS SELECT 1 AS n; CREATE TABLE t () INHERITS (p); ALTER TABLE p RENAME TO q", &["id: int | None (INT)"]),
+    ("postgres", "CREATE TYPE mood AS ENUM ('a'); ALTER TYPE mood RENAME TO m2; DROP TYPE m2; CREATE TABLE t (a mood)", &["a: None (MOOD)"]),
+    ("sqlite", "CREATE TABLE u (a INT); CREATE TABLE t (id INTEGER, x TEXT, PRIMARY KEY (nope)); CREATE TABLE z (id INTEGER, x TEXT, PRIMARY KEY (id, x))", &["id: int | None (INT)", "x: str | None (TEXT)"]),
+    ("postgres", "CREATE TABLE t AS SELECT 1 AS n, 'a' AS s", &["n: int | None (None)", "s: str | None (TEXT)"]),
+    ("postgres", "CREATE TABLE u (id INT); CREATE VIEW t AS SELECT id FROM u; DROP TABLE u", &["id: int | None (INT)"]),
 ];
 
 /// `(dialect, query, parameters as "index name: python (SQL) nullability")`, against `SCHEMA`.
@@ -278,6 +350,15 @@ const PARAMS: &[Case] = &[
     ("postgres", "DELETE FROM orders WHERE id = %s", &["1: int (INT) Unknown"]),
     ("mysql", "DELETE FROM orders WHERE id = ? LIMIT ?", &["1: int (INT) Unknown", "2: int (BIGINT) Unknown"]),
     ("postgres", "WITH x AS (UPDATE orders SET note = %s RETURNING id) SELECT * FROM x", &["1: str (TEXT) Nullable"]),
+    ("postgres", "SELECT $1::int + $1::text", &["1: int (INT) Unknown cast"]),
+    ("mysql", "DELETE FROM orders LIMIT ?", &["1: int (BIGINT) Unknown"]),
+    ("postgres", "SELECT %s UNION TABLE orders", &["1: None (None) Unknown"]),
+    ("clickhouse", "INSERT INTO FUNCTION remote('h', 'db.t') VALUES (?)", &["1: None (None) Unknown"]),
+    ("snowflake", "SELECT 1 FROM tags WHERE label LIKE ANY (?, ?) AND label LIKE ANY ('a', ?)", &["1: str (TEXT) Unknown", "2: str (TEXT) Unknown", "3: str (TEXT) Unknown"]),
+    ("postgres", "SELECT 1 FROM orders WHERE ANY(%s) = NULL", &["1: None (None) Unknown"]),
+    ("postgres", "SELECT 1 FROM orders WHERE %s = ANY(note)", &["1: None (None) Unknown"]),
+    ("postgres", "SELECT 1 FROM orders WHERE ANY(%s, %s) = id", &["1: None (None) Unknown", "2: None (None) Unknown"]),
+    ("postgres", "SELECT COALESCE(note, %s, 'x'), tag_count(%s, %s), tag_count(1, 2) FROM orders", &["1: str (TEXT) Nullable", "2: int (INT) Unknown", "3: None (None) Unknown"]),
 ];
 
 /// `(dialect, query, columns as "name: type rule, nullability rule")`, against `SCHEMA`.
@@ -292,6 +373,8 @@ const EXPLAINED: &[Case] = &[
     ("postgres", "SELECT * FROM orders o, customers c", &["id: -, -", "customer_id: -, -", "note: -, -", "id: -, -", "email: -, -", "name: -, -"]),
     ("bigquery", "SELECT STRUCT(2 AS b).*", &["*: -, -"]),
     ("postgres", "DELETE FROM orders", &[]),
+    ("postgres", "SELECT unknown_fn(1), lower('a')", &["unknown_fn: -, -", "lower: postgres.string.bound, postgres.string.bound"]),
+    ("postgres", "SELECT id FROM orders ORDER BY id", &["id: -, -"]),
 ];
 
 fn schema(dialect: &str) -> Schema {

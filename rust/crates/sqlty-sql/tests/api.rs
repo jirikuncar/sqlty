@@ -92,6 +92,10 @@ fn result_stars_list_the_stars_that_shape_rows() {
         stars("UPDATE t SET a = 1 RETURNING t.*"),
         Some(vec!["RETURNING t.*".to_string()])
     );
+    assert_eq!(
+        stars("WITH c AS (SELECT 1) DELETE FROM t RETURNING *"),
+        Some(vec!["RETURNING *".to_string()])
+    );
     assert_eq!(stars("VALUES (1)"), Some(vec![]));
     assert_eq!(stars("CREATE TABLE t (a INT)"), Some(vec![]));
     assert_eq!(stars("SELEC"), None);
@@ -115,6 +119,10 @@ fn expand_star_spells_out_the_columns() {
         None
     );
     assert_eq!(expand("WITH c AS (SELECT 1 AS z) SELECT * FROM t, c"), None);
+    assert_eq!(
+        expand("SELECT u.* FROM generate_series(1, 2) g, u"),
+        Some("SELECT u.a::INT FROM generate_series(1, 2) g, u".to_string())
+    );
     assert_eq!(expand("DELETE FROM t"), None);
     assert_eq!(
         analyzer::expand_star("SELECT * FROM t", "postgres", None),
@@ -135,4 +143,27 @@ fn too_many_columns_are_not_typed() {
     assert_eq!(names, ["*"]);
     let messages: Vec<String> = found.into_iter().map(|d| d.message).collect();
     assert_eq!(messages, ["over 4096 result columns are not typed"]);
+    let columns = analyzer::analyze_select(&sql, "postgres", None).unwrap_or_default();
+    assert_eq!(columns.len(), 1);
+}
+
+#[test]
+fn completions_qualify_columns_of_several_relations() {
+    let schema = analyzer::load_schema_with_skipped(
+        "CREATE TABLE t (a INT NOT NULL); CREATE TABLE u (b TEXT); CREATE VIEW v AS SELECT a FROM t",
+        "postgres",
+    )
+    .0;
+    let labels = |query: &str| -> Vec<String> {
+        let cursor = query.find('|').unwrap_or_default();
+        let query = query.replacen('|', "", 1);
+        analyzer::complete(&query, cursor, "postgres", Some(&schema), 10)
+            .candidates
+            .into_iter()
+            .filter(|c| c.detail.is_some())
+            .map(|c| c.label)
+            .collect()
+    };
+    assert_eq!(labels("SELECT | FROM t, u"), ["t.a", "u.b"]);
+    assert_eq!(labels("SELECT | FROM v, nope WHERE ("), ["a"]);
 }
