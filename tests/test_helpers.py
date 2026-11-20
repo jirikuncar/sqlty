@@ -219,6 +219,7 @@ def test_configured_functions(project, capsys):
     assert sorted(rules(capsys.readouterr().out)) == [
         ("instance.py", "column-type-mismatch"),
         ("library.py", "column-type-mismatch"),
+        ("method.py", "column-type-mismatch"),
         ("positional.py", "column-type-mismatch"),
     ]
 

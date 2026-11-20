@@ -119,6 +119,22 @@ class HelperIndex:
         self._steps.append(("add", module, parsed.text, parsed.module, [], None))
         return parsed.may_define_helpers and bool(module_helpers(parsed.text, sys.version_info[:2]))
 
+    def add_stub(self, module: str, source: str) -> None:
+        """Index the stub ``source`` (a ``.pyi`` of ``stub-paths``) as module ``module``.
+
+        Its classes are read before those of the module itself, and a function or method
+        whose query parameter it marks ``Annotated[LiteralString, SQL]`` is a helper.
+
+        Example:
+            >>> index = HelperIndex()
+            >>> stub = "from typing import Annotated\\nfrom sqlty import SQL\\nclass Db:\\n    def run(self, q: Annotated[str, SQL]): ...\\n"
+            >>> index.add_stub("lib", stub)
+            >>> sorted(index.modules["lib"])
+            ['Db.run']
+        """
+        name = module.removesuffix(".__init__")
+        self._steps.append(("stub", name, source, module, [], None))
+
     def register(
         self,
         import_path: str,

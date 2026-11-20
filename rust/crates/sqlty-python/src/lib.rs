@@ -62,6 +62,8 @@ pub mod params;
 pub mod parse;
 pub mod project;
 pub mod queries;
+#[allow(missing_docs)]
+pub mod receivers;
 pub mod report;
 pub mod rewriter;
 #[allow(missing_docs)]

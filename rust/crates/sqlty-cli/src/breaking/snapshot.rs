@@ -253,6 +253,7 @@ impl Snapshot {
                 variants: None,
                 coerce: HashSet::new(),
                 functions,
+                stub_paths: Vec::new(),
                 format_command: Vec::new(),
                 queries: Vec::new(),
                 query_format: text_of(entry, "query_format")

@@ -104,11 +104,17 @@ ids = fetch_all("SELECT name FROM users", int)
 ## Methods
 
 Methods are marked the same way. `self` and `cls` are not counted when the
-arguments are bound. A call is checked when the receiver is evident: the class
-(`Db.fetch_one(...)`, for static and class methods), `self` inside the class,
-a variable assigned `Db(...)` or annotated `db: Db` in the same scope (or the
-module), and `self.db` when the class body annotates it or `__init__` assigns
-`Db(...)`. Other receivers, and inherited methods, are skipped.
+arguments are bound. A call is checked when the class of its receiver is declared,
+the way a type checker reads it: an annotation (`db: Db`, a parameter, `self.db: Db`),
+an instance assigned (`db = Db(...)`), an attribute the class or one of its bases
+declares (`website.db`, `self.app.db`), the return annotation of a call (`make()`,
+`Self`, `typing.cast`), and `with ... as` through `__enter__` or a `@contextmanager`
+function annotated `Iterator[T]`. `T | None` is read as `T`. A subclass has the helper
+methods of its bases unless it defines the method itself. Classes of other modules are
+read from their source, never imported.
+
+What no declaration states is skipped: an unannotated parameter, the result of an
+unannotated function, an attribute set from outside the class.
 
 ```python
 from typing import Annotated, LiteralString
@@ -125,6 +131,45 @@ db = Db()
 ids = db.fetch_all("SELECT name FROM users", int)
 # error: [column-type-mismatch]
 one = Db.fetch_one("SELECT name FROM users", int)
+```
+
+### Stubs for untyped libraries
+
+A library without annotations declares nothing. Describe it with a stub, a `.pyi`
+file under `typings/` (or the directories of `stub-paths`), as for pyright and ty:
+the stub is read before the library. A method whose query parameter the stub marks
+is a helper, with no `[[tool.sqlty.functions]]` entry.
+
+`typings/lib/__init__.pyi`:
+
+```python
+from typing import Annotated, Any, ClassVar, LiteralString
+from sqlty import SQL
+
+class Cursor:
+    def one[T](self, sql: Annotated[LiteralString, SQL], form: type[T]) -> T | None: ...
+
+class Transaction:
+    def __enter__(self) -> Cursor: ...
+
+class Postgres:
+    def one[T](self, sql: Annotated[LiteralString, SQL], form: type[T]) -> T | None: ...
+    def get_cursor(self) -> Transaction: ...
+
+class Model:
+    db: ClassVar[Postgres]
+```
+
+```python
+from lib import Model
+
+class Participant(Model):
+    def name(self) -> None:
+        # error: [column-type-mismatch]
+        self.db.one("SELECT name FROM users", int)
+        with self.db.get_cursor() as cursor:
+            # error: [column-type-mismatch]
+            cursor.one("SELECT name FROM users", int)
 ```
 
 ## Helpers you cannot annotate

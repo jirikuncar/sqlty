@@ -10,6 +10,7 @@ use ruff_python_ast::visitor::{walk_expr, walk_stmt, Visitor};
 use ruff_python_ast::{
     self as ast, Expr, ExprCall, ExprTString, Number, Stmt, StmtClassDef, StmtFunctionDef, UnaryOp,
 };
+use ruff_text_size::{Ranged, TextSize};
 
 const BUILTINS: [&str; 5] = ["int", "str", "float", "bool", "bytes"];
 const SEQUENCES: [&str; 4] = ["list", "tuple", "set", "frozenset"];
@@ -68,6 +69,11 @@ pub struct Scan<'a> {
     stack: Vec<Scope>,
     types: HashMap<(Scope, &'a str), Option<String>>,
     attributes: HashMap<(Scope, &'a str), Option<String>>,
+    /// What each name of a function is bound to, for [`crate::receivers`].
+    bound: HashMap<(Scope, &'a str), Vec<Binding<'a>>>,
+    /// The end of the block being walked, and the outermost loop of the function around it.
+    until: u32,
+    looped: Option<(u32, u32)>,
     /// The calls kept, with their scopes.
     pub calls: Vec<(&'a ExprCall, Vec<Scope>)>,
     /// Every t-string, with its scopes.
@@ -83,6 +89,9 @@ impl<'a> Scan<'a> {
                 stack: Vec::new(),
                 types: HashMap::new(),
                 attributes: HashMap::new(),
+                bound: HashMap::new(),
+                until: 0,
+                looped: None,
                 calls: Vec::new(),
                 templates: Vec::new(),
             },
@@ -96,6 +105,94 @@ impl<'a> Scan<'a> {
     pub fn is_class(&self, scope: Scope) -> bool {
         matches!(self.scopes[scope], Node::Class(_))
     }
+
+    /// What `name` can hold in the function `scope` at offset `at` (anywhere without one):
+    /// the last binding every path to `at` runs through, the bindings since, and those of
+    /// a loop around `at`. `None` when the scope does not bind it.
+    pub fn bound(&self, scope: Scope, name: &str, at: Option<u32>) -> Option<Vec<Origin<'a>>> {
+        let all = self.bound.get(&(scope, name))?;
+        let origins = |kept: &mut dyn Iterator<Item = &Binding<'a>>| {
+            Some(kept.map(|binding| binding.origin).collect())
+        };
+        // A declaration holds for the whole scope.
+        let mut declared = all
+            .iter()
+            .filter(|binding| matches!(binding.origin, Origin::Declared(_)));
+        if declared.clone().next().is_some() {
+            return origins(&mut declared);
+        }
+        let Some(at) = at else {
+            return origins(&mut all.iter());
+        };
+        let last = all
+            .iter()
+            .filter(|binding| binding.at <= at && at < binding.until)
+            .map(|binding| binding.at)
+            .max();
+        origins(&mut all.iter().filter(|binding| {
+            if binding.at <= at {
+                last.is_none_or(|last| binding.at >= last)
+            } else {
+                binding
+                    .looped
+                    .is_some_and(|(start, end)| start <= at && at < end)
+            }
+        }))
+    }
+
+    /// Records a binding of `target`, in effect from `at`, in the innermost scope when that
+    /// is a function.
+    fn bind(&mut self, target: &'a Expr, origin: Origin<'a>, at: TextSize) {
+        let Some(&scope) = self.stack.last() else {
+            return;
+        };
+        if self.is_class(scope) {
+            return;
+        }
+        match target {
+            Expr::Name(name) => {
+                let binding = Binding {
+                    origin,
+                    at: at.to_u32(),
+                    until: self.until,
+                    looped: self.looped,
+                };
+                self.bound
+                    .entry((scope, name.id.as_str()))
+                    .or_default()
+                    .push(binding);
+            }
+            Expr::Tuple(ast::ExprTuple { elts, .. }) | Expr::List(ast::ExprList { elts, .. }) => {
+                for item in elts {
+                    self.bind(item, Origin::Unknown, at);
+                }
+            }
+            Expr::Starred(starred) => self.bind(&starred.value, Origin::Unknown, at),
+            _ => {}
+        }
+    }
+}
+
+/// Where a name of a function gets its value.
+#[derive(Clone, Copy)]
+pub enum Origin<'a> {
+    /// `name: T`, a parameter or a variable: the annotation.
+    Declared(&'a Expr),
+    /// `name = value`.
+    Value(&'a Expr),
+    /// `with value as name`, `async with` when true.
+    Entered(&'a Expr, bool),
+    /// A parameter without annotation, a loop variable, an unpacked value.
+    Unknown,
+}
+
+/// A binding of a name: in effect from `at`, on every path through its block, which ends
+/// at `until`; `looped` is the outermost loop of its function around it.
+struct Binding<'a> {
+    origin: Origin<'a>,
+    at: u32,
+    until: u32,
+    looped: Option<(u32, u32)>,
 }
 
 /// Remembers the class a name holds; `None` once it is ambiguous, as `_Scan._note` does.
@@ -178,8 +275,27 @@ impl<'a, W: FnMut(&'a ExprCall) -> bool> Visitor<'a> for Walker<'a, W> {
                         kind,
                     );
                 }
+                for parameter in parameters {
+                    let origin = parameter
+                        .annotation()
+                        .filter(|_| !parameter.is_variadic())
+                        .map_or(Origin::Unknown, Origin::Declared);
+                    let binding = Binding {
+                        origin,
+                        at: node.start().to_u32(),
+                        until: node.end().to_u32(),
+                        looped: None,
+                    };
+                    self.scan
+                        .bound
+                        .entry((scope, parameter.name().as_str()))
+                        .or_default()
+                        .push(binding);
+                }
                 self.scan.stack.push(scope);
+                let looped = self.scan.looped.take();
                 walk_stmt(self, stmt);
+                self.scan.looped = looped;
                 self.scan.stack.pop();
                 return;
             }
@@ -198,6 +314,10 @@ impl<'a, W: FnMut(&'a ExprCall) -> bool> Visitor<'a> for Walker<'a, W> {
                 };
                 let targets: Vec<&Expr> = node.targets.iter().collect();
                 self.scan.typed(&targets, &kind);
+                for target in targets {
+                    self.scan
+                        .bind(target, Origin::Value(&node.value), node.end());
+                }
             }
             Stmt::AnnAssign(node) => {
                 let annotation = match node.annotation.as_ref() {
@@ -221,10 +341,51 @@ impl<'a, W: FnMut(&'a ExprCall) -> bool> Visitor<'a> for Walker<'a, W> {
                     _ => None,
                 });
                 self.scan.typed(&[&node.target], &kind);
+                let origin = match &node.value {
+                    Some(value) if final_ && std::ptr::eq(annotation, node.annotation.as_ref()) => {
+                        Origin::Value(value)
+                    }
+                    _ => Origin::Declared(&node.annotation),
+                };
+                self.scan.bind(&node.target, origin, node.end());
             }
+            Stmt::With(node) => {
+                for item in &node.items {
+                    if let Some(target) = &item.optional_vars {
+                        self.scan.bind(
+                            target,
+                            Origin::Entered(&item.context_expr, node.is_async),
+                            item.context_expr.end(),
+                        );
+                    }
+                }
+            }
+            Stmt::AugAssign(node) => self.scan.bind(&node.target, Origin::Unknown, node.end()),
             _ => {}
         }
+        let looped = matches!(stmt, Stmt::For(_) | Stmt::While(_)) && self.scan.looped.is_none();
+        if looped {
+            self.scan.looped = Some((stmt.start().to_u32(), stmt.end().to_u32()));
+        }
+        if let Stmt::For(node) = stmt {
+            self.scan
+                .bind(&node.target, Origin::Unknown, node.target.end());
+        }
         walk_stmt(self, stmt);
+        if looped {
+            self.scan.looped = None;
+        }
+    }
+
+    fn visit_body(&mut self, body: &'a [Stmt]) {
+        let until = self.scan.until;
+        if let Some(last) = body.last() {
+            self.scan.until = last.end().to_u32();
+        }
+        for stmt in body {
+            self.visit_stmt(stmt);
+        }
+        self.scan.until = until;
     }
 
     #[recursive::recursive]

@@ -310,7 +310,7 @@ REVIEWED = {
         {},
         "class Db\u093e:\n    def run(self, q: Annotated[str, SQL]): ...\n"
         "def f(db: 'Db\u093e', ok: 'Db\u093e '):\n    db.run('SELECT nope FROM t')\n",
-        0,
+        1,
     ),
     "from on its own line": (
         {"a": "def run(q: Annotated[str, SQL]): ...\n"},

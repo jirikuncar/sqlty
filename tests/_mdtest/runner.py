@@ -248,7 +248,10 @@ class Run:
 
     @cached_property
     def _helpers(self) -> core.HelperIndex | None:
-        """Labelled ``.py`` files as modules (``pkg/db.py`` is ``pkg.db``), plus ``functions``."""
+        """Labelled ``.py`` files as modules (``pkg/db.py`` is ``pkg.db``), plus ``functions``.
+
+        A labelled ``.pyi`` is a stub of ``stub-paths`` (``typings/lib/__init__.pyi`` is ``lib``).
+        """
         modules = {
             path.removesuffix(".py").replace("/", "."): text
             for path, text in self.section.files.items()
@@ -258,9 +261,16 @@ class Run:
         functions = [(f, None) for f in self.section.settings.get("functions", [])] + [
             (f, name) for name, database in databases.items() for f in database.get("functions", [])
         ]
-        if not modules and not functions:
+        stubs = {
+            path.removesuffix(".pyi").removeprefix("typings/").replace("/", "."): text
+            for path, text in self.section.files.items()
+            if path.endswith(".pyi")
+        }
+        if not modules and not functions and not stubs:
             return None
         index = core.HelperIndex()
+        for module, text in stubs.items():
+            index.add_stub(module, text)
         for module, text in modules.items():
             index.add(module.removesuffix(".__init__"), core.ParsedSource(text, module))
         for f, database in functions:

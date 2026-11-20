@@ -30,7 +30,7 @@ use sqlty_sql::Dialect;
 pub const CONFIG_FILES: [&str; 3] = ["sqlty.toml", "pyproject.toml", "Cargo.toml"];
 
 /// Keys of `[tool.sqlty]` that are not file discovery; see also [`DISCOVERY_KEYS`].
-pub const TOOL_KEYS: [&str; 19] = [
+pub const TOOL_KEYS: [&str; 20] = [
     "dialect",
     "driver",
     "schema",
@@ -46,6 +46,7 @@ pub const TOOL_KEYS: [&str; 19] = [
     "max-query-variants",
     "coerce-row-types",
     "functions",
+    "stub-paths",
     "types",
     "format-command",
     "extend",
@@ -416,6 +417,14 @@ pub fn validate(mut table: Table, source: &str) -> Result<Config, InvalidConfig>
         return fail(
             "[tool.sqlty] coerce-row-types must be a list of row type names, such as [\"app.rows.User\"]"
                 .into(),
+        );
+    }
+    if table
+        .get("stub-paths")
+        .is_some_and(|paths| !is_strings(paths))
+    {
+        return fail(
+            "[tool.sqlty] stub-paths must be a list of directories, such as [\"typings\"]".into(),
         );
     }
     for key in ["exclude", "extend-exclude"] {

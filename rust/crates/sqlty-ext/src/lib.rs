@@ -936,11 +936,17 @@ fn indexed(
         Some(pool) => pool.install(|| texts.into_par_iter().map(parse).collect()),
         None => texts.into_iter().map(parse).collect(),
     };
-    for ((_, first, second, third, roots, database), slot) in steps.into_iter().zip(slots) {
+    for ((kind, first, second, third, roots, database), slot) in steps.into_iter().zip(slots) {
         match slot {
             Some(slot) => {
                 let (source, found) = &parsed[slot];
                 index.add_found(&first, Arc::clone(source), found);
+            }
+            // A `.pyi` of `stub-paths`: the module, its text and the name it is read as.
+            None if kind == "stub" => {
+                let name = third.as_deref().unwrap_or(&first);
+                let module = Module::new(Arc::from(second.as_str()), name, version);
+                index.add_stub(&first, Arc::new(module));
             }
             None => {
                 let roots = Roots {

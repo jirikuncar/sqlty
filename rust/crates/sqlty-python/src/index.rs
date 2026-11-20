@@ -13,6 +13,7 @@ use ruff_python_ast::Expr;
 use crate::calls::{definitions, helper, index_functions, parameter_names, rank, Helper, Kind};
 use crate::frozen::{Frozen, Table};
 use crate::module::Import;
+use crate::receivers::Facts;
 use crate::types::extract::extract_type_definitions;
 use crate::types::info::{Dict, TypeInfo};
 use crate::types::pydantic::Known;
@@ -107,6 +108,17 @@ type Read = HashMap<(PathBuf, String), Option<Arc<Source>>>;
 pub struct Roots<'a> {
     pub paths: &'a [PathBuf],
     pub read: &'a dyn Fn(&Path) -> Option<String>,
+}
+
+/// How an index reads the text of a file.
+pub type ReadFile = Arc<dyn Fn(&Path) -> Option<String> + Send + Sync>;
+
+/// Where an index reads the classes of the modules that are not checked: the roots to look
+/// under, in order, a `.pyi` before the `.py` beside it.
+#[derive(Clone)]
+pub struct Outside {
+    pub paths: Vec<PathBuf>,
+    pub read: ReadFile,
 }
 
 /// A module of the tree: its text, parsed when another module's lookup first reaches it.
@@ -230,6 +242,11 @@ pub struct HelperIndex {
     tree: Arc<Tree>,
     version: Version,
     read: Arc<Mutex<Read>>,
+    /// The stub modules, which are read before any other module of their name.
+    stubs: Arc<HashMap<String, Arc<Module>>>,
+    outside: Option<Outside>,
+    /// What each module declares, for [`crate::receivers`]; `None` for one that is not found.
+    facts: Mutex<HashMap<String, Option<Arc<Facts>>>>,
     names: HashSet<String>,
     pattern: Option<Regex>,
 }
@@ -263,6 +280,8 @@ pub struct Builder {
     added: HashMap<String, Arc<Module>>,
     version: Version,
     read: Arc<Mutex<Read>>,
+    stubs: Arc<HashMap<String, Arc<Module>>>,
+    outside: Option<Outside>,
 }
 
 impl Builder {
@@ -273,7 +292,32 @@ impl Builder {
             added: HashMap::new(),
             version,
             read: Arc::default(),
+            stubs: Arc::default(),
+            outside: None,
         }
+    }
+
+    /// Index the stub `source` (a `.pyi`) as module `module`: its classes are read before
+    /// those of any other module of that name, and the methods and functions it marks
+    /// `Annotated[LiteralString, SQL]` are helpers, as if `[[tool.sqlty.functions]]`
+    /// named them.
+    pub fn add_stub(&mut self, module: &str, source: Arc<Module>) {
+        if defines_helpers(&source.text) {
+            if let Some(parsed) = source.source() {
+                let known = self.modules.entry(module.to_string()).or_default();
+                for (name, helper) in helpers_of(parsed).iter() {
+                    let mut helper = helper.clone();
+                    helper.configured = true;
+                    known.insert(name, helper);
+                }
+            }
+        }
+        Arc::make_mut(&mut self.stubs).insert(module.to_string(), source);
+    }
+
+    /// Read the classes of the modules that are not indexed from `outside`.
+    pub fn outside(&mut self, outside: Outside) {
+        self.outside = Some(outside);
     }
 
     fn sources(&self) -> &HashMap<String, Arc<Module>> {
@@ -312,11 +356,22 @@ impl Builder {
         let parts: Vec<&str> = import_path.split('.').collect();
         for i in (1..parts.len()).rev() {
             let name = parts[i..].join(".");
-            let Some(mut found) = self.definition(&parts[..i], &name, query, row, roots, 0) else {
+            let Some((mut found, defined_in)) =
+                self.definition(&parts[..i], &name, query, row, roots, 0)
+            else {
                 continue;
             };
             found.configured = true;
             found.database = database.map(str::to_string);
+            // A receiver's class is known by the module that defines it.
+            if let Some((module, defined)) = defined_in.filter(|_| name.contains('.')) {
+                let mut found = found.clone();
+                found.name.clone_from(&defined);
+                self.modules
+                    .entry(module)
+                    .or_default()
+                    .insert(&defined, found);
+            }
             self.modules
                 .entry(parts[..i].join("."))
                 .or_default()
@@ -363,9 +418,13 @@ impl Builder {
         row: Option<&str>,
         roots: Roots<'_>,
         depth: usize,
-    ) -> Option<Helper> {
+    ) -> Option<(Helper, Option<(String, String)>)> {
         let module = parts.join(".");
-        let source = match self.sources().get(&module) {
+        let known = self
+            .stubs
+            .get(&module)
+            .or_else(|| self.sources().get(&module));
+        let source = match known {
             Some(known) => known.source()?.clone(),
             None => self.module_source(parts, roots)?,
         };
@@ -378,13 +437,14 @@ impl Builder {
                 rank(function, wanted.iter().all(|name| names.contains(*name)))
             });
         if let Some((_, function, kind)) = found {
-            return Some(helper(
+            let found = helper(
                 name.to_string(),
                 function,
                 kind,
                 query.to_string(),
                 row.map(str::to_string),
-            ));
+            );
+            return Some((found, (depth > 0).then(|| (module, name.to_string()))));
         }
         if depth > 8 {
             return None;
@@ -505,6 +565,9 @@ impl Builder {
             tree,
             version: self.version,
             read: self.read,
+            stubs: self.stubs,
+            outside: self.outside,
+            facts: Mutex::default(),
             names,
             pattern,
         })
@@ -520,7 +583,65 @@ impl HelperIndex {
             added: HashMap::new(),
             version: self.version,
             read: self.read.clone(),
+            stubs: self.stubs.clone(),
+            outside: self.outside.clone(),
         }
+    }
+
+    /// What the module `module` declares, for [`crate::receivers`]: read from its stub,
+    /// else from the checked module, else from the first root outside holding it. `None`
+    /// for a module that is not found or not read.
+    pub fn facts(&self, module: &str) -> Option<Arc<Facts>> {
+        if let Some(known) = lock(&self.facts).get(module) {
+            return known.clone();
+        }
+        let known = self
+            .stubs
+            .get(module)
+            .or_else(|| self.tree.sources.get(module));
+        let source = match known {
+            Some(known) => known.source().cloned(),
+            None => self.outside_source(module),
+        };
+        let facts = source.map(|source| {
+            let name = source.module.as_deref().or(Some(module));
+            Arc::new(Facts::of(&source, &source.targets_in(name)))
+        });
+        lock(&self.facts).insert(module.to_string(), facts.clone());
+        facts
+    }
+
+    /// The module `module` read from the roots outside the checked tree.
+    fn outside_source(&self, module: &str) -> Option<Arc<Source>> {
+        let outside = self.outside.as_ref()?;
+        let parts: Vec<&str> = module.split('.').collect();
+        let (last, package) = parts.split_last()?;
+        if parts
+            .iter()
+            .any(|part| part.is_empty() || !part.chars().all(crate::types::generic::is_word))
+        {
+            return None;
+        }
+        for root in &outside.paths {
+            let mut directory: PathBuf = root.clone();
+            directory.extend(package);
+            for suffix in ["pyi", "py"] {
+                let file = directory.join(format!("{last}.{suffix}"));
+                let init = directory.join(last).join(format!("__init__.{suffix}"));
+                for (path, name) in [
+                    (file, module.to_string()),
+                    (init, format!("{module}.__init__")),
+                ] {
+                    let Some(text) = (outside.read)(&path) else {
+                        continue;
+                    };
+                    let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+                    // The first root holding the module ends the search.
+                    return Module::new(Arc::from(text), &name, self.version).load();
+                }
+            }
+        }
+        None
     }
 
     /// The module `module` as it was added.

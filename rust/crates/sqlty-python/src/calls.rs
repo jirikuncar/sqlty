@@ -12,7 +12,8 @@ use ruff_python_ast::{Expr, ExprCall, Parameters, Stmt, StmtFunctionDef};
 use ruff_text_size::Ranged;
 
 use crate::compose::{self, Declared, Rendered};
-use crate::helpers::{mentions, receiver_class, region};
+use crate::helpers::{mentions, region};
+use crate::receivers::Resolver;
 use crate::scopes::{dotted, Context, Key, Lines, Node, Param, Scan, Scope};
 use crate::types::info::Dict;
 use crate::types::symbols::Source;
@@ -249,7 +250,7 @@ fn decorators(function: &StmtFunctionDef) -> impl Iterator<Item = Option<String>
 }
 
 /// How a method is called, by its decorators.
-fn method_kind(function: &StmtFunctionDef) -> Kind {
+pub(crate) fn method_kind(function: &StmtFunctionDef) -> Kind {
     let names: Vec<Option<String>> = decorators(function).collect();
     let has = |name: &str| names.iter().any(|found| found.as_deref() == Some(name));
     if has("staticmethod") {
@@ -481,11 +482,7 @@ pub fn helper_calls<'a>(
     if own.is_empty() && !imported {
         return Vec::new();
     }
-    let targets = if imported {
-        source.targets_in(module)
-    } else {
-        std::borrow::Cow::Owned(Default::default())
-    };
+    let targets = source.targets_in(module);
     let (functions, modules) = &*targets;
     let mut names: HashSet<String> = own
         .iter()
@@ -510,10 +507,8 @@ pub fn helper_calls<'a>(
     {
         return Vec::new();
     }
-    let scan = Scan::new(source.body(), |call: &ExprCall| match call.func.as_ref() {
-        Expr::Name(_) => true,
-        Expr::Attribute(attr) => dotted(&attr.value).is_some(),
-        _ => false,
+    let scan = Scan::new(source.body(), |call: &ExprCall| {
+        matches!(call.func.as_ref(), Expr::Name(_) | Expr::Attribute(_))
     });
     let constant = |dotted: &str| helpers?.fragment(source, dotted, module);
     let ctx = Context {
@@ -524,13 +519,7 @@ pub fn helper_calls<'a>(
     let lines = Lines::new(text);
     let (annotated, marker) = marker_names(source);
     let lookup = |module: &str, name: &str| helpers.and_then(|helpers| helpers.get(module, name));
-    let method_of = |class: &str, name: &str| match class.rsplit_once('.') {
-        Some((prefix, class)) => lookup(&module_of(prefix, modules), &format!("{class}.{name}")),
-        None => own.get(&format!("{class}.{name}")).or_else(|| {
-            let (module, original) = functions.get(class)?;
-            lookup(module, &format!("{original}.{name}"))
-        }),
-    };
+    let receivers = Resolver::new(source, module, &targets, helpers, &own, &scan);
     let mut wanted: Vec<Option<bool>> = vec![None; scan.scopes.len()];
     let composed = text.contains("psycopg");
     let mut psycopg: Option<compose::Scan<'a>> = None;
@@ -557,16 +546,10 @@ pub fn helper_calls<'a>(
             }),
             // The scan keeps only calls of names and attributes.
             func => func.as_attribute_expr().and_then(|attr| {
-                let prefix = dotted(&attr.value).unwrap_or_default();
                 let name = attr.attr.as_str();
-                if let Some(found) = lookup(&module_of(&prefix, modules), name) {
-                    Some(found)
-                } else if let Some(found) = method_of(&prefix, name) {
-                    (found.kind != Kind::Instance).then_some(found)
-                } else {
-                    receiver_class(&attr.value, stack, &ctx)
-                        .and_then(|class| method_of(&class, name))
-                }
+                let function = dotted(&attr.value)
+                    .and_then(|prefix| lookup(&module_of(&prefix, modules), name));
+                function.or_else(|| receivers.method(&attr.value, name, stack))
             }),
         };
         let Some(helper) = helper else {

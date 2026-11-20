@@ -9,7 +9,7 @@ use rayon::prelude::*;
 use sqlty_python::calls::Helper;
 use sqlty_python::checker::{self, Diagnostic, SiteKind};
 use sqlty_python::index::{
-    defines_helpers, helpers_of, Builder, HelperIndex, Module as Indexed, Roots,
+    defines_helpers, helpers_of, Builder, HelperIndex, Module as Indexed, Outside, Roots,
 };
 use sqlty_python::project::{
     self, helper_roots, normalized, Discovery, Files, FindError, Kind, Listing, Packages, Read,
@@ -56,6 +56,9 @@ impl Module {
     }
 }
 
+/// What a configured index is built from: `functions`, the project directory, `stub-paths`.
+type IndexKey = (Vec<Function>, Option<PathBuf>, Vec<String>);
+
 /// How [`Workspace::open`] reads the paths.
 pub struct Options {
     /// The command line's settings over the configuration files.
@@ -88,7 +91,7 @@ pub struct Workspace {
     modules: HashMap<PathBuf, Module>,
     unreadable: Vec<(PathBuf, String)>,
     index: Option<Arc<HelperIndex>>,
-    configured: HashMap<(Vec<Function>, Option<PathBuf>), Arc<HelperIndex>>,
+    configured: HashMap<IndexKey, Arc<HelperIndex>>,
     resolved: Mutex<HashMap<PathBuf, PathBuf>>,
     configs: Mutex<Configured>,
 }
@@ -473,13 +476,15 @@ impl Workspace {
         index
     }
 
-    /// The index with the `functions` of `settings` registered.
+    /// The index with the `functions` of `settings` registered and the stubs of its
+    /// `stub-paths` read.
     pub fn helpers(&mut self, settings: &FileSettings) -> Arc<HelperIndex> {
         let index = self.index();
-        if settings.functions.is_empty() {
-            return index;
-        }
-        let key = (settings.functions.clone(), settings.base.clone());
+        let key = (
+            settings.functions.clone(),
+            settings.base.clone(),
+            settings.stub_paths.clone(),
+        );
         if let Some(found) = self.configured.get(&key) {
             return Arc::clone(found);
         }
@@ -499,6 +504,26 @@ impl Workspace {
         let files = self.files.clone();
         let read = move |path: &Path| files.text(path);
         let mut forked = index.fork();
+        let project = base.unwrap_or_else(|| self.files.canonical(&self.flags.cwd));
+        for directory in &settings.stub_paths {
+            let mut found = Vec::new();
+            stubs_under(
+                &self.files,
+                &project.join(directory),
+                &mut Vec::new(),
+                &mut found,
+            );
+            for (module, name, path) in found {
+                if let Some(text) = self.files.text(&path) {
+                    let stub = Indexed::new(Arc::from(text), &name, self.version);
+                    forked.add_stub(&module, Arc::new(stub));
+                }
+            }
+        }
+        forked.outside(Outside {
+            paths: roots.clone(),
+            read: Arc::new(read.clone()),
+        });
         for function in &settings.functions {
             let roots = Roots {
                 paths: &roots,
@@ -926,6 +951,52 @@ fn pool() -> &'static rayon::ThreadPool {
             .expect("the check threads start")
     })
 }
+/// The most stubs one `stub-paths` directory gives, and how deep its packages nest.
+const MAX_STUBS: usize = 4096;
+const MAX_STUB_DEPTH: usize = 16;
+
+/// The `.pyi` files under `directory`, each as the module it describes, the name it is
+/// read as (`pkg.__init__` for a package) and its path; `pkg-stubs` describes `pkg`.
+fn stubs_under(
+    files: &Shared,
+    directory: &Path,
+    package: &mut Vec<String>,
+    found: &mut Vec<(String, String, PathBuf)>,
+) {
+    let Listing::Entries(mut entries) = files.list(directory) else {
+        return;
+    };
+    entries.sort();
+    for (name, kind) in entries {
+        if found.len() >= MAX_STUBS {
+            return;
+        }
+        let path = directory.join(&name);
+        if let Some(stem) = name.strip_suffix(".pyi").filter(|_| kind == Kind::File) {
+            if package.is_empty() && stem == "__init__" {
+                continue;
+            }
+            let mut parts = package.clone();
+            parts.push(stem.to_string());
+            let read_as = parts.join(".");
+            if stem == "__init__" {
+                parts.pop();
+            }
+            found.push((parts.join("."), read_as, path));
+        } else if kind == Kind::Dir && package.len() < MAX_STUB_DEPTH {
+            let part = match package.is_empty() {
+                true => name.strip_suffix("-stubs").unwrap_or(&name),
+                false => &name,
+            };
+            if part.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                package.push(part.to_string());
+                stubs_under(files, &path, package, found);
+                package.pop();
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -157,6 +157,12 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "`check`",
         "Helper functions whose string argument is a query",
     ),
+    "stub-paths": KeyDoc(
+        "list of strings",
+        '`["typings"]`',
+        "`check`",
+        "Directories of `.pyi` stubs, read before the modules they describe to find the class of a helper method's receiver",
+    ),
     "types": KeyDoc(
         "table of SQL type or `table.column` = Python type",
         "`{}`",
