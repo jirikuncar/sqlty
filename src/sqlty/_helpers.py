@@ -8,7 +8,7 @@ appears in the return annotation.
 Usage:
     index = HelperIndex()
     index.add("pkg.queries", source_of_pkg_queries)
-    check_source(source, helpers=index, module="pkg.app")
+    check_source(ParsedSource(source, "pkg.app"), Settings(helpers=index))
 """
 
 from __future__ import annotations

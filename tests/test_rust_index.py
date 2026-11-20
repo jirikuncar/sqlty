@@ -19,7 +19,7 @@ from hypothesis import strategies as st
 from sqlty import _core
 from sqlty._helpers import HelperIndex
 from sqlty._source import ParsedSource
-from sqlty.core import check_source
+from sqlty.core import Settings, check_source
 from tests.test_rust_check import QUERIES, RULES, SCHEMAS, arguments
 from tests.test_rust_types import FUZZ, parses
 
@@ -394,10 +394,10 @@ def test_names_follow_a_module_added_later() -> None:
     index = HelperIndex()
     index.add("db", ParsedSource(HEAD + DB[1], "db"))
     app = ParsedSource("from alias import zap\nzap('SELECT nope FROM t')\n", "app")
-    settings = {"schema_sql": SCHEMAS["postgres"], "helpers": index, "module": "app"}
-    assert check_source(app, **settings) == []
+    settings = Settings(schema_sql=SCHEMAS["postgres"], helpers=index)
+    assert check_source(app, settings) == []
     index.add("alias", ParsedSource("from db import run as zap\n", "alias"))
-    assert [d["rule"] for d in check_source(app, **settings)] == ["unknown-column"]
+    assert [d["rule"] for d in check_source(app, settings)] == ["unknown-column"]
 
 
 def test_one_index_on_two_threads() -> None:

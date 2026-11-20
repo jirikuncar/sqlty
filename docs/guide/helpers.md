@@ -353,7 +353,7 @@ Pass the directory that holds the helper together with the code that calls it
 `__init__` (`from .db import fetch_all`) is found through the package too:
 `from pkg import fetch_all` reaches it.
 
-From Python, `sqlty.core.check_source(source, helpers=index, module="pkg.app")`
+From Python, `sqlty.core.check_source(ParsedSource(source, "pkg.app"), Settings(helpers=index))`
 takes a `sqlty.core.HelperIndex` filled with `index.add("pkg.db", db_source)`.
 
 `sqlty rewrite` and `sqlty strip` never touch these calls.

@@ -7,7 +7,7 @@ import ast
 import pytest
 
 from sqlty._cli import main
-from sqlty.core import HelperIndex, check_source
+from sqlty.core import HelperIndex, Settings, check_source
 
 SCHEMA = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);\n"
 
@@ -88,9 +88,11 @@ def test_check_source_with_index():
     assert index.add("db", DB)
     assert not index.add("other", "x = 1\n")
     use = 'from db import fetch_all\nids = fetch_all("SELECT 1::TEXT", int)\n'
-    assert [d["rule"] for d in check_source(use, helpers=index)] == ["column-type-mismatch"]
+    assert [d["rule"] for d in check_source(use, Settings(helpers=index))] == [
+        "column-type-mismatch"
+    ]
     assert check_source(use) == []
-    assert check_source(use.replace("db", "elsewhere"), helpers=index) == []
+    assert check_source(use.replace("db", "elsewhere"), Settings(helpers=index)) == []
 
 
 def test_statistics_count_helper_queries(project, capsys):
@@ -125,9 +127,11 @@ def test_unbindable_calls_are_skipped():
 
 def test_ignore_comment_suppresses_helper_diagnostics() -> None:
     call = 'fetch_all("SELECT name FROM users", int)'
-    assert check_source(DB + call + "\n", schema_sql=SCHEMA)
+    assert check_source(DB + call + "\n", Settings(schema_sql=SCHEMA))
     assert (
-        check_source(DB + call + "  # sqlty: ignore[column-type-mismatch]\n", schema_sql=SCHEMA)
+        check_source(
+            DB + call + "  # sqlty: ignore[column-type-mismatch]\n", Settings(schema_sql=SCHEMA)
+        )
         == []
     )
 
@@ -256,16 +260,16 @@ def test_outside_reads_the_class_of_a_receiver_from_roots(tmp_path):
     index = HelperIndex()
     index.register("lib.Db.get", "sql", roots=[tmp_path])
     for module, found in (("lib", 1), ("plain", 1), ("big", 0), ("missing", 0)):
-        assert len(check_source(use.format(module), helpers=index)) == found, module
+        assert len(check_source(use.format(module), Settings(helpers=index))) == found, module
     # Without roots the library is not read: `Site` is known by its path only.
     unread = HelperIndex()
     unread.register("lib.Db.get", "sql")
-    assert check_source(use.format("lib"), helpers=unread) == []
+    assert check_source(use.format("lib"), Settings(helpers=unread)) == []
     # `outside` gives the roots to what is registered after it.
     read = HelperIndex()
     read.outside([tmp_path])
     read.register("lib.Db.get", "sql")
-    assert len(check_source(use.format("plain"), helpers=read)) == 1
+    assert len(check_source(use.format("plain"), Settings(helpers=read))) == 1
 
 
 def test_register_reads_past_a_stub_that_lacks_the_helper(tmp_path):
