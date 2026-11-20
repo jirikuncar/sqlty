@@ -34,4 +34,21 @@ app/q.py:1: [unknown-column] column `nope` does not exist in `users`
 Found 1 error(s)
 Queries: 0 typed, 1 partially typed, 0 unparsed, 0 skipped
 
+$ sqlty check --show-files . generated
+app/q.py
+generated/q.py
+
+$ sqlty check --show-settings --ignore unknown-column app
+# app/q.py
+...
+dialect = "postgres"
+schema = true
+untyped = "skip"
+param-types = true
+closed-params = false
+rules = { "unknown-column" = "ignore" }
+...
+
+$ sqlty check --show-settings empty
+
 ```

@@ -2,17 +2,13 @@
 
 Usage:
     from sqlty.core import infer_type, rewrite_source, strip_source, check_source
-
-``check_source`` adds the checks of user-defined row types (TypedDict,
-NamedTuple, dataclass, Pydantic) on top of the engine's, since resolving them
-needs the Python runtime; those passes live in ``sqlty._check``.
 """
 
 from __future__ import annotations
 
 import sys
 from collections.abc import Collection, Mapping
-from typing import TYPE_CHECKING, NamedTuple
+from typing import NamedTuple
 
 from sqlty._check import RowUsage
 from sqlty._check import diagnostics as check_diagnostics
@@ -39,9 +35,6 @@ from sqlty._core import strip_source as _strip_source
 from sqlty._helpers import HelperIndex
 from sqlty._lint import Diagnostic
 from sqlty._source import ParsedSource
-
-if TYPE_CHECKING:
-    pass
 
 
 def load_schema(

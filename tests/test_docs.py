@@ -60,7 +60,7 @@ def test_rules_table() -> None:
 
 
 def test_generated_reference_is_current() -> None:
-    """The tables in ``configuration.md`` and ``cli.md`` match the code (``make generate-docs``)."""
+    """The generated tables of ``docs/reference`` match the code (``make generate-docs``)."""
     spec = importlib.util.spec_from_file_location(
         "generate_docs", ROOT / "scripts" / "generate_docs.py"
     )
@@ -69,6 +69,17 @@ def test_generated_reference_is_current() -> None:
     spec.loader.exec_module(module)
     stale = [p.name for p in module.generate(check=True)]
     assert not stale, f"run `make generate-docs`: {stale} out of date"
+
+
+def test_cli_reference_lists_every_command_and_option() -> None:
+    from sqlty._core import cli_reference
+
+    page = (ROOT / "docs" / "reference" / "cli.md").read_text()
+    for name, usage, options in cli_reference():
+        assert name == "sqlty" or f"## `sqlty {name}`" in page, name
+        assert f"```text\n{usage}\n```" in page, usage
+        for option, _ in options:
+            assert f"| `{option}` |" in page, (name, option)
 
 
 def _script(name: str) -> Any:

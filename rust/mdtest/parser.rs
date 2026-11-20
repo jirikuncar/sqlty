@@ -55,6 +55,8 @@ pub struct Unit {
     /// `(Markdown line, text)`, assertion comments removed.
     pub lines: Vec<(usize, String)>,
     pub assertions: Vec<Assertion>,
+    /// A ```` ```sql migration ```` block: a migration run on top of `against.sql`.
+    pub migration: bool,
 }
 
 impl Unit {
@@ -186,7 +188,15 @@ pub fn parse(path: &Path, text: &str) -> Vec<Section> {
                 .unwrap_or_else(|| panic!("{}:{}: unclosed code block", path.display(), i + 1));
             if indent.is_empty() && !info.split_whitespace().any(|word| word == "ignore") {
                 let section = &mut sections[*stack.last().unwrap()];
-                add_block(section, lang, label.take(), &lines[i + 1..end], i + 2);
+                let migration = info.split_whitespace().any(|word| word == "migration");
+                add_block(
+                    section,
+                    lang,
+                    label.take(),
+                    &lines[i + 1..end],
+                    i + 2,
+                    migration,
+                );
             }
             label = None;
             i = end + 1;
@@ -235,6 +245,7 @@ fn add_block(
     label: Option<String>,
     body: &[&str],
     start: usize,
+    migration: bool,
 ) {
     if let Some(label) = label {
         section.files.insert(label, body.join("\n"));
@@ -244,7 +255,7 @@ fn add_block(
     } else if lang == "python" || lang == "py" {
         add_python(section, body, start);
     } else if lang == "sql" {
-        add_sql(section, body, start);
+        add_sql(section, body, start, migration);
     }
 }
 
@@ -304,10 +315,11 @@ fn add_python(section: &mut Section, body: &[&str], start: usize) {
         lang: "python",
         lines: all,
         assertions,
+        migration: false,
     });
 }
 
-fn add_sql(section: &mut Section, body: &[&str], start: usize) {
+fn add_sql(section: &mut Section, body: &[&str], start: usize, migration: bool) {
     let mut lines = Vec::new();
     let mut assertions: Vec<Assertion> = Vec::new();
     let mut pending: Vec<usize> = Vec::new();
@@ -334,6 +346,7 @@ fn add_sql(section: &mut Section, body: &[&str], start: usize) {
             lang: "sql",
             lines,
             assertions,
+            migration,
         });
     }
 }

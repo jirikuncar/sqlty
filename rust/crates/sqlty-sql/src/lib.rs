@@ -40,6 +40,7 @@ pub(crate) mod ddl;
 pub mod diagnostics;
 pub mod highlight;
 pub mod json;
+pub mod migrations;
 pub mod placeholders;
 pub(crate) mod values;
 

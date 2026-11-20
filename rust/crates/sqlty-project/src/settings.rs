@@ -19,10 +19,22 @@ use crate::Shared;
 /// `max-query-variants` when `preview` is on and it is not set.
 pub const MAX_QUERY_VARIANTS: usize = 64;
 
-type SchemaKey = (String, &'static str, Vec<(String, String)>);
+type LoadKey = (String, &'static str, Vec<(String, String)>);
 
 /// A database: its name, settings, schema text and `types`.
-type Named = (String, FileSettings, Option<String>, Vec<(String, String)>);
+type Named = (
+    String,
+    FileSettings,
+    Option<SchemaText>,
+    Vec<(String, String)>,
+);
+
+/// The schema files a configuration names, read: their paths and their text, joined.
+#[derive(Clone)]
+struct SchemaText {
+    text: String,
+    files: Vec<PathBuf>,
+}
 
 /// A `[[tool.sqlty.functions]]` entry.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -38,11 +50,18 @@ pub struct Function {
 }
 
 /// What a file is checked with.
+#[derive(Clone)]
 pub struct FileSettings {
     /// The SQL dialect.
     pub dialect: &'static str,
     /// The schema, with the other databases of the project.
     pub schema: Option<Schema>,
+    /// The SQL `schema` was loaded from.
+    pub schema_sql: Option<Arc<str>>,
+    /// The files `schema_sql` was read from, in order.
+    pub schema_files: Vec<PathBuf>,
+    /// `types`, with those of `driver`, sorted.
+    pub types: Vec<(String, String)>,
     /// `import-style`.
     pub import_style: Option<String>,
     /// `untyped = "sentinel"`.
@@ -76,7 +95,7 @@ pub struct FileSettings {
 /// The schemas of a run, each loaded once, and what could not be read of them.
 #[derive(Default)]
 pub struct Schemas {
-    loaded: Mutex<HashMap<SchemaKey, Schema>>,
+    loaded: Mutex<HashMap<LoadKey, Schema>>,
     /// Every warning, and how many [`Schemas::warnings`] has returned.
     warnings: Mutex<(Vec<String>, usize)>,
 }
@@ -132,7 +151,7 @@ impl Schemas {
         Ok(schema)
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<SchemaKey, Schema>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<LoadKey, Schema>> {
         self.loaded.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
@@ -185,10 +204,15 @@ impl Directory {
             .cloned()
             .unwrap_or_default();
         if databases.is_empty() {
+            own.types = sorted(own_types(&table, own.dialect));
             own.schema = schema_sql
-                .as_deref()
-                .map(|text| schemas.load(text, own.dialect, &own_types(&table, own.dialect)))
+                .as_ref()
+                .map(|schema| schemas.load(&schema.text, own.dialect, &own.types))
                 .transpose()?;
+            if let Some(SchemaText { text, files }) = schema_sql {
+                own.schema_sql = Some(Arc::from(text));
+                own.schema_files = files;
+            }
             return Ok(Self {
                 routing: base
                     .clone()
@@ -229,15 +253,16 @@ impl Directory {
             .iter()
             .map(|(name, settings, schema, types)| {
                 let schema = schema
-                    .as_deref()
-                    .map(|text| schemas.load(text, settings.dialect, types))
+                    .as_ref()
+                    .map(|schema| schemas.load(&schema.text, settings.dialect, types))
                     .transpose()?;
                 Ok((name.clone(), settings.dialect, schema))
             })
             .collect::<Result<_, String>>()?;
         let mut routed = Vec::new();
         for (name, mut settings, schema, types) in named {
-            let (loaded, _) = load(schema.as_deref().unwrap_or(""), settings.dialect, &types)?;
+            let text = schema.as_ref().map_or("", |schema| schema.text.as_str());
+            let (loaded, _) = load(text, settings.dialect, &types)?;
             let others = plain
                 .iter()
                 .filter(|(other, ..)| *other != name)
@@ -249,6 +274,11 @@ impl Directory {
                 others,
             };
             settings.schema = SchemaData::with_databases(loaded, databases);
+            if let Some(SchemaText { text, files }) = schema {
+                settings.schema_sql = Some(Arc::from(text));
+                settings.schema_files = files;
+            }
+            settings.types = sorted(types);
             settings.functions.extend(functions.iter().cloned());
             routed.push((name, Arc::new(settings)));
         }
@@ -296,32 +326,33 @@ impl Directory {
         rules.extend(self.cli_rules.iter().cloned());
         Arc::new(FileSettings {
             rules,
-            ..settings.shallow()
+            ..(**settings).clone()
         })
     }
 }
 
+/// What a schema is loaded from: two settings with one key check queries alike.
+pub type SchemaKey<'a> = (Option<&'a str>, &'static str, &'a [(String, String)]);
+
 impl FileSettings {
-    fn shallow(&self) -> Self {
-        Self {
-            dialect: self.dialect,
-            schema: self.schema.clone(),
-            import_style: self.import_style.clone(),
-            untyped: self.untyped,
-            json_typed_dicts: self.json_typed_dicts,
-            param_types: self.param_types,
-            closed_params: self.closed_params,
-            rules: self.rules.clone(),
-            variants: self.variants,
-            coerce: self.coerce.clone(),
-            functions: self.functions.clone(),
-            format_command: self.format_command.clone(),
-            queries: self.queries.clone(),
-            query_format: self.query_format,
-            base: self.base.clone(),
-            version: self.version,
-        }
+    /// What [`FileSettings::schema`] is loaded from.
+    pub fn schema_key(&self) -> SchemaKey<'_> {
+        (self.schema_sql.as_deref(), self.dialect, &self.types)
     }
+}
+
+fn sorted(mut types: Vec<(String, String)>) -> Vec<(String, String)> {
+    types.sort();
+    types
+}
+
+/// The schema `text` defines in `dialect`, with the column types `types` overrides.
+pub fn load_schema(
+    text: &str,
+    dialect: &'static str,
+    types: &[(String, String)],
+) -> Result<Schema, String> {
+    loaded_schema(text, dialect, types).map(|(schema, _)| schema)
 }
 
 /// `table` with the keys of `database` on top, `rules` and `types` merged.
@@ -414,12 +445,13 @@ fn settings(
     version: Version,
 ) -> Result<FileSettings, String> {
     let text = |key: &str| table.get(key).and_then(Value::as_str);
+    let choice = |key: &str| table.get(key).map(|value| value.as_str().unwrap_or(""));
     let flag = |key: &str| table.get(key).and_then(Value::as_bool).unwrap_or(false);
     let origin = |key: &str| flags.origin(key, label);
     let untyped = match flags
         .untyped
         .as_deref()
-        .or(text("untyped"))
+        .or(choice("untyped"))
         .unwrap_or("skip")
     {
         "skip" => false,
@@ -431,7 +463,7 @@ fn settings(
             ))
         }
     };
-    let json_typed_dicts = match text("json-types").unwrap_or("typing.Any") {
+    let json_typed_dicts = match choice("json-types").unwrap_or("typing.Any") {
         "typing.Any" => false,
         "typing.TypedDict" => true,
         _ => {
@@ -460,6 +492,9 @@ fn settings(
             .and_then(|name| name.parse::<sqlty_sql::Dialect>().ok())
             .map_or_else(|| settings_dialect(table), sqlty_sql::Dialect::name),
         schema: None,
+        schema_sql: None,
+        schema_files: Vec::new(),
+        types: Vec::new(),
         import_style,
         untyped,
         json_typed_dicts,
@@ -490,26 +525,31 @@ fn settings(
     })
 }
 
-/// The schema files `entries` names relative to `base`, concatenated; `None` when none
-/// can be read.
+/// The schema files `entries` names relative to `base`, read; `None` when none can be.
 fn schema_text(
     entries: &[String],
     base: &Path,
     files: &Shared,
     schemas: &Schemas,
-) -> Option<String> {
+) -> Option<SchemaText> {
     let (found, empty) = project::schema_files(entries, base, files).ok()?;
     for entry in empty {
         schemas.warn(format!("Schema pattern matches no files: {entry}"));
     }
-    let mut parts = Vec::new();
+    let (mut parts, mut read) = (Vec::new(), Vec::new());
     for path in found {
         match files.text(&path) {
-            Some(text) => parts.push(text),
+            Some(text) => {
+                parts.push(text);
+                read.push(path);
+            }
             None => schemas.warn(format!("Schema file not found: {}", path.display())),
         }
     }
-    (!parts.is_empty()).then(|| parts.join("\n"))
+    (!parts.is_empty()).then(|| SchemaText {
+        text: parts.join("\n"),
+        files: read,
+    })
 }
 
 /// A path or list of paths, as `schema` and `queries` hold them.

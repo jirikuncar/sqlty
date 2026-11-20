@@ -75,6 +75,13 @@ impl harness::Runner for Python {
         let text = unit.text();
         let own = run.schema.as_ref();
         let found = match (&run.against, unit.lang) {
+            _ if unit.migration => {
+                let baseline = section.files.get("against.sql").map_or("", String::as_str);
+                sqlty_python::migrations::check_migrations(baseline, &[&text], &run.rules)
+                    .into_iter()
+                    .flatten()
+                    .collect()
+            }
             (None, "sql") => run.queries(&text, own)?,
             (None, _) => run.check(&text, own)?,
             // `sqlty breaking`: what the other schema adds.

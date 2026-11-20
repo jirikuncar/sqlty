@@ -123,7 +123,7 @@ lint-docs:  ## rumdl and Vale on the Markdown (the prek hooks)
 	uv run prek run --all-files rumdl vale
 
 .PHONY: generate-docs
-generate-docs:  ## Regenerate the tables in docs/reference/{configuration,cli}.md
+generate-docs:  ## Regenerate the tables in docs/reference/{configuration,cli,rules}.md
 	uv run python scripts/generate_docs.py
 
 .PHONY: generate-stdlib-types

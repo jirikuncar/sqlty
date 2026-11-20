@@ -83,6 +83,29 @@ SELECT id FROM users WHERE email = sqlc.arg(user_email) AND name = @user_name;
 SELECT id FROM users WHERE name = sqlc.narg('name') OR '@x' = name;
 ```
 
+### Embed
+
+`sqlc.embed(t)` names a table or alias of the `FROM` clause, not a column, and is not a
+`SELECT *`:
+
+```sql
+-- name: GetBlogAuthor :one
+-- error:
+SELECT sqlc.embed(b), sqlc.embed(u), b.id FROM blogs b JOIN users u ON u.id = b.author_id WHERE b.id = $1;
+
+-- name: GetEmail :one
+-- error[19:24]: [unknown-table] "`email` in `sqlc.embed(email)` is not a table or alias in the FROM clause"
+SELECT sqlc.embed(email) FROM users;
+
+-- name: GetAlias :one
+-- error: [unknown-table] "`uu` in `sqlc.embed(uu)`"
+SELECT sqlc.embed( uu ) FROM users u;
+
+-- name: GetName :one
+-- error[23:26]: [unknown-column] "column `nme` does not exist in `u`"
+SELECT sqlc.embed(u), u.nme FROM users u;
+```
+
 ## PugSQL
 
 ```sql
