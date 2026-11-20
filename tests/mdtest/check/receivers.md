@@ -1138,6 +1138,90 @@ def run(ready: bool) -> None:
 # error:
 ```
 
+### A `break` goes past the `else` of its loop
+
+The `else` of a loop runs when the loop ends without a `break`: what follows the loop is
+reached through the `else` and from each `break`. ty: `Unknown | DB` for the first two
+functions, `object` for the third.
+
+```python
+from pkg.db import DB
+
+def run(rows, make) -> None:
+    db = make()
+    for row in rows:
+        if row:
+            break
+    else:
+        db = DB()
+    db.one("SELECT name FROM users", int)
+
+def poll(rows, make) -> None:
+    db = make()
+    while rows:
+        if rows.pop():
+            break
+    else:
+        db = DB()
+    db.one("SELECT name FROM users", int)
+
+def tested(rows, db: object) -> None:
+    for row in rows:
+        if row:
+            break
+    else:
+        assert isinstance(db, DB)
+    db.one("SELECT name FROM users", int)
+
+# error:
+```
+
+An `else` that returns leaves the `break` as the one way on. ty: `DB`.
+
+```python
+from pkg.db import DB
+
+def run(rows, db: DB) -> None:
+    for row in rows:
+        if row:
+            break
+    else:
+        return
+    # error: [column-type-mismatch]
+    db.one("SELECT name FROM users", int)
+
+def poll(rows, db: DB) -> None:
+    while True:
+        if rows:
+            break
+    else:
+        raise LookupError
+    # error: [column-type-mismatch]
+    db.one("SELECT name FROM users", int)
+```
+
+A loop without a `break` goes on through its `else` only. ty: `DB`, then nothing follows.
+
+```python
+from pkg.db import DB
+
+def run(rows, make) -> None:
+    db = make()
+    for row in rows:
+        pass
+    else:
+        db = DB()
+    # error: [column-type-mismatch]
+    db.one("SELECT name FROM users", int)
+
+def ended(rows, db: DB) -> None:
+    for row in rows:
+        continue
+    else:
+        return
+    db.one("SELECT name FROM users", int)
+```
+
 ## A diamond follows the method resolution order
 
 `Both` inherits `one` from `Right`: Python looks in `Left`, `Right`, then `Base`. ty:

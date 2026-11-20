@@ -12,7 +12,7 @@
 
 use ruff_python_ast::{self as ast, BoolOp, Expr, Stmt, UnaryOp};
 use ruff_text_size::Ranged;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::scopes::{Binding, Origin};
@@ -51,6 +51,9 @@ pub struct Shape<'a> {
     tests: HashMap<&'a str, Vec<u32>>,
     /// What follows such a statement in its block, in order: it is not reached.
     dead: Vec<(u32, u32)>,
+    /// The loops a `break` leaves, by their start: their `else` is then not the only
+    /// way to what follows them.
+    breaks: HashSet<u32>,
 }
 
 impl<'a> Shape<'a> {
@@ -65,6 +68,7 @@ impl<'a> Shape<'a> {
             looped: None,
             deep: false,
             marks: Vec::new(),
+            loops: Vec::new(),
             shape: None,
             found: Some(Shape::default()),
         };
@@ -123,6 +127,7 @@ impl<'a> Flow<'a> {
             looped: None,
             deep: false,
             marks,
+            loops: Vec::new(),
             shape: Some(&shape),
             found: None,
         };
@@ -399,6 +404,8 @@ struct Walk<'s, 'a> {
     deep: bool,
     /// Where the name is bound or tested, in order.
     marks: Vec<u32>,
+    /// The loops around the statement, by their start, for the walk of no name.
+    loops: Vec<u32>,
     /// The shape of the scope, for the walk of a name: the statements between two marks
     /// are not read.
     shape: Option<&'s Shape<'a>>,
@@ -571,13 +578,29 @@ impl<'a> Walk<'_, 'a> {
                 self.place(start, head, &state, turns);
                 let bound = self.apply(state.clone(), start, head);
                 let entry = self.any(bound, start, body_end);
-                let after = match self.block(body, entry.clone(), depth + 1) {
-                    Out::Next(ran) => state.merge(&entry).merge(&ran),
-                    Out::Stop => state.merge(&entry),
+                self.loops.push(start);
+                let ran = self.block(body, entry.clone(), depth + 1);
+                self.loops.pop();
+                // What a `break` leaves the loop with: any binding of the loop, and no
+                // test, as the breaks are not followed one by one.
+                let left = state.merge(&entry);
+                let after = match ran {
+                    Out::Next(ran) => left.clone().merge(&ran),
+                    Out::Stop => left.clone(),
                 };
-                let out = self.block(orelse, after, depth + 1);
                 self.looped = outer;
-                out
+                let shape = self.found.as_ref().or(self.shape);
+                let broken = shape.is_some_and(|shape| shape.breaks.contains(&start));
+                // The `else` runs when the loop ends without a `break`; a `break` goes
+                // past it.
+                match (orelse.is_empty(), broken) {
+                    (true, _) => Out::Next(after),
+                    (false, false) => self.block(orelse, after, depth + 1),
+                    (false, true) => {
+                        let ended = self.block(orelse, after, depth + 1);
+                        merged(vec![ended, Out::Next(left)])
+                    }
+                }
             }
             Stmt::With(node) => {
                 let state = self.header(state, start, &node.body);
@@ -642,6 +665,11 @@ impl<'a> Walk<'_, 'a> {
             _ => {
                 self.place(start, end, &state, None);
                 let state = self.apply(state, start, end);
+                if let (Stmt::Break(_), Some(found), Some(&around)) =
+                    (stmt, &mut self.found, self.loops.last())
+                {
+                    found.breaks.insert(around);
+                }
                 match stmt {
                     Stmt::Return(_) | Stmt::Raise(_) | Stmt::Continue(_) | Stmt::Break(_) => {
                         Out::Stop
@@ -764,6 +792,20 @@ mod tests {
         assert_eq!(held(text, "x"), ["1 4", "1 4"]);
         let text = "def f(xs):\n    for x in xs:\n        x.use()\n    x.use()\n";
         assert_eq!(held(text, "x"), ["2", "2"]);
+    }
+
+    #[test]
+    fn a_break_goes_past_the_else_of_its_loop() {
+        let text = "def f(x, xs):\n    for i in xs:\n        if i:\n            break\n    else:\n        x = a\n    x.use()\n";
+        assert_eq!(held(text, "x"), ["1 6"]);
+        // The `else` ends the function: what follows is reached from the `break`.
+        let text = "def f(x, xs):\n    while xs:\n        if x:\n            break\n    else:\n        return\n    x.use()\n";
+        assert_eq!(held(text, "x"), ["1"]);
+        // A `break` of a loop in the loop leaves that one only.
+        let text = "def f(x, xs):\n    for i in xs:\n        for j in i:\n            break\n    else:\n        return\n    x.use()\n";
+        assert_eq!(held(text, "x"), [""]);
+        let text = "def f(x, xs):\n    for i in xs:\n        if i:\n            break\n    else:\n        assert isinstance(x, C)\n    x.use()\n";
+        assert_eq!(held(text, "x"), ["1"]);
     }
 
     #[test]
