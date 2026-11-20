@@ -67,6 +67,8 @@ const ON_TABLE: &[&str] = &[
     "REINDEX TABLE {t}",
     "CLUSTER {t}",
     "VACUUM FULL {t}",
+    "VACUUM {t}",
+    "VACUUM (ANALYZE) {t}",
     "LOCK TABLE {t}",
     "LOCK TABLE {t} IN SHARE MODE",
     "TRUNCATE {t}",
@@ -329,7 +331,7 @@ fn run_on_server(client: &mut postgres::Client, statements: &[String]) -> Ran {
 }
 
 /// With `SQLTY_PG_DSN`, PostgreSQL runs each migration: `concurrently-in-transaction` fires
-/// exactly when it refuses a `CONCURRENTLY` statement in a transaction, `enum-value-in-transaction` whenever it
+/// exactly when it refuses a `CONCURRENTLY` or `VACUUM` statement in a transaction, `enum-value-in-transaction` whenever it
 /// refuses a new enum value, and `multi-table-lock` exactly when a transaction holds write
 /// locks on two tables with rows.
 #[test]
@@ -362,7 +364,7 @@ fn server_agrees_on_migrations() {
             let error = ran.error.as_deref();
             prop_assert_eq!(
                 found.contains(&Rule::ConcurrentlyInTransaction),
-                error == Some("25001") && statements[ran.statements - 1].contains("CONCURRENTLY"),
+                error == Some("25001"),
                 "{:?} {:?} in\n{}",
                 error,
                 found,

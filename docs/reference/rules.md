@@ -66,7 +66,7 @@ stale-type = "error"
 | [`param-type-mismatch`](rules/param-type-mismatch.md) | Params | error | no | Call passes an argument the query's parameter can't take |
 | [`params-type-mismatch`](rules/params-type-mismatch.md) | Params | error | no | P of SQL[R, P] doesn't fit the query's parameters |
 | [`missing-concurrently`](rules/missing-concurrently.md) | Migration | warn | no | Migration builds or drops an index without CONCURRENTLY |
-| [`concurrently-in-transaction`](rules/concurrently-in-transaction.md) | Migration | error | no | Migration runs CONCURRENTLY inside a transaction block |
+| [`concurrently-in-transaction`](rules/concurrently-in-transaction.md) | Migration | error | no | Migration runs CONCURRENTLY or VACUUM inside a transaction block |
 | [`constraint-scan`](rules/constraint-scan.md) | Migration | warn | no | Migration checks every row of a table while it blocks writes |
 | [`table-rewrite`](rules/table-rewrite.md) | Migration | warn | no | Migration rewrites a table under an ACCESS EXCLUSIVE lock |
 | [`add-required-column`](rules/add-required-column.md) | Migration | error | no | Migration adds a NOT NULL column without a default to a table |

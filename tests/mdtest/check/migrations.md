@@ -42,6 +42,19 @@ COMMIT;
 ALTER TABLE users ADD COLUMN about TEXT;
 ```
 
+## Vacuuming in and out of a transaction
+
+```sql migration
+SET lock_timeout = '1s';
+-- error:
+VACUUM ANALYZE users;
+BEGIN;
+-- error: [concurrently-in-transaction] "PostgreSQL refuses `VACUUM` inside a transaction block"
+-- error: [table-rewrite] "`VACUUM FULL` rewrites the table"
+VACUUM (FULL, VERBOSE) users;
+COMMIT;
+```
+
 ## A pg_dump schema
 
 ```sql migration

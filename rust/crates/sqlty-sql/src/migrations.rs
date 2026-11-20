@@ -229,10 +229,12 @@ impl Model {
                         ),
                     );
                 }
-                if judged.concurrently && session.transaction {
+                if let Some(command) = judged.refused.filter(|_| session.transaction) {
                     report(
                         Rule::ConcurrentlyInTransaction,
-                        "PostgreSQL refuses `CONCURRENTLY` inside a transaction block: run it in a migration without one".to_string(),
+                        format!(
+                            "PostgreSQL refuses `{command}` inside a transaction block: run it in a migration without one"
+                        ),
                     );
                 }
                 if judged.strong_lock && !session.has_timeout() && !session.reported_timeout {
@@ -1234,11 +1236,11 @@ impl Model {
                 }
                 Judged::concurrently(refresh.concurrently)
             }
-            Statement::Vacuum(vacuum) if vacuum.full => {
-                if !vacuum.table_name.as_ref().is_some_and(|t| self.is_new(t)) {
+            Statement::Vacuum(vacuum) => {
+                if vacuum.full && !vacuum.table_name.as_ref().is_some_and(|t| self.is_new(t)) {
                     report(Rule::TableRewrite, rewrite_command_message("VACUUM FULL"));
                 }
-                Judged::default()
+                Judged::refused("VACUUM")
             }
             Statement::Lock(lock) => Judged::strong_unless(
                 !blocks_writes(lock.lock_mode.as_ref())
@@ -1296,7 +1298,7 @@ impl Model {
                     )
                 });
                 Judged {
-                    concurrently,
+                    refused: concurrently.then_some("CONCURRENTLY"),
                     strong_lock: !validates && !concurrently,
                 }
             }
@@ -1449,6 +1451,36 @@ impl Model {
                 }
                 Judged::concurrently(concurrently)
             }
+            ["vacuum", rest @ ..] => {
+                let (options, tables) = match rest {
+                    ["(", options @ ..] => {
+                        let end = options
+                            .iter()
+                            .position(|word| *word == ")")
+                            .unwrap_or(options.len());
+                        (&options[..end], options.get(end + 1..).unwrap_or_default())
+                    }
+                    _ => {
+                        let keywords = ["full", "freeze", "verbose", "analyze", "analyse"];
+                        rest.split_at(
+                            rest.iter()
+                                .take_while(|word| keywords.contains(word))
+                                .count(),
+                        )
+                    }
+                };
+                let full = options.iter().enumerate().any(|(at, word)| {
+                    *word == "full"
+                        && !matches!(options.get(at + 1), Some(&("false" | "off" | "0")))
+                });
+                let names = vacuumed(&stmt.tokens()[words.len() - tables.len()..]);
+                if full
+                    && (names.is_empty() || !names.iter().all(|name| self.created.contains(name)))
+                {
+                    report(Rule::TableRewrite, rewrite_command_message("VACUUM FULL"));
+                }
+                Judged::refused("VACUUM")
+            }
             ["cluster", ..] => {
                 let table = token_name(&stmt.tokens()[1..], &["verbose"], &["using"]);
                 if !self.created.contains(&table) {
@@ -1510,25 +1542,32 @@ impl Session {
     }
 }
 
-/// What a statement does to the session: whether it runs `CONCURRENTLY`, and whether it
-/// takes an ACCESS EXCLUSIVE lock on a table that has rows.
+/// What a statement does to the session: the command PostgreSQL refuses inside a
+/// transaction block, and whether it takes an ACCESS EXCLUSIVE lock on a table that has rows.
 #[derive(Default)]
 struct Judged {
-    concurrently: bool,
+    refused: Option<&'static str>,
     strong_lock: bool,
 }
 
 impl Judged {
+    fn refused(command: &'static str) -> Self {
+        Judged {
+            refused: Some(command),
+            strong_lock: false,
+        }
+    }
+
     fn concurrently(concurrently: bool) -> Self {
         Judged {
-            concurrently,
+            refused: concurrently.then_some("CONCURRENTLY"),
             strong_lock: false,
         }
     }
 
     fn strong_unless(exempt: bool) -> Self {
         Judged {
-            concurrently: false,
+            refused: None,
             strong_lock: !exempt,
         }
     }
@@ -1836,7 +1875,7 @@ fn backfilled(stmt: &Statement) -> Option<(Backfill, Option<&Expr>)> {
             return match &*query.body {
                 SetExpr::Update(stmt) | SetExpr::Delete(stmt) => backfilled(stmt),
                 _ => None,
-            }
+            };
         }
         Statement::Update(update) => (&update.table.relation, &update.selection),
         Statement::Delete(Delete {
@@ -2051,6 +2090,21 @@ fn token_name(tokens: &[&str], skip: &[&str], ends: &[&str]) -> String {
     }
 }
 
+/// The tables a `VACUUM` names after its options, without their column lists.
+fn vacuumed(tokens: &[&str]) -> Vec<String> {
+    let mut depth = 0;
+    tokens
+        .split(|token| {
+            depth += usize::from(*token == "(");
+            depth = depth.saturating_sub(usize::from(*token == ")"));
+            *token == "," && depth == 0
+        })
+        .filter_map(|name| name.split(|token| *token == "(").next())
+        .map(|name| token_name(name, &[], &[]))
+        .filter(|name| !name.is_empty())
+        .collect()
+}
+
 /// `token` as PostgreSQL folds an identifier: quoted keeps its case.
 fn fold_token(token: &str) -> String {
     match token.strip_prefix('"') {
@@ -2135,6 +2189,13 @@ mod tests {
             ("VACUUM FULL users", &[TableRewrite]),
             ("VACUUM FULL", &[TableRewrite]),
             ("VACUUM users", &[]),
+            ("VACUUM (FULL, ANALYZE) users", &[TableRewrite]),
+            ("VACUUM (FULL false) users", &[]),
+            ("VACUUM (VERBOSE", &[]),
+            ("VACUUM FULL ANALYZE public.users (bio), events", &[TableRewrite]),
+            ("VACUUM VERBOSE users)", &[]),
+            ("CREATE TABLE t (id int); VACUUM (FULL) t (id), \"t\"", &[]),
+            ("CREATE TABLE t (id int); VACUUM FULL VERBOSE t, users", &[TableRewrite]),
             ("REFRESH MATERIALIZED VIEW mv", &[MissingConcurrently]),
             ("REFRESH MATERIALIZED VIEW CONCURRENTLY mv", &[]),
             ("ALTER TABLE users ADD COLUMN x uuid DEFAULT gen_random_uuid()", &[TableRewrite]),
@@ -2867,10 +2928,15 @@ mod tests {
             START TRANSACTION;
             ALTER TABLE events DETACH PARTITION p CONCURRENTLY;
             REINDEX INDEX CONCURRENTLY a;
-            ROLLBACK;";
+            ROLLBACK;
+            BEGIN;
+            VACUUM users;
+            VACUUM ANALYZE users;
+            COMMIT;
+            VACUUM (ANALYZE) users;";
         assert_eq!(
             rules(USERS, migration),
-            [Rule::ConcurrentlyInTransaction; 4]
+            [Rule::ConcurrentlyInTransaction; 6]
         );
     }
 
