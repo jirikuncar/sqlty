@@ -178,14 +178,11 @@ impl<'a> Analyzer<'a> {
 
     /// A column of one source, when it has it.
     fn find_column(&self, table: &str, column: &str) -> Option<ColumnRef<'_>> {
-        if let Some(columns) = self.virtual_columns(table) {
-            return columns
-                .iter()
-                .find(|col| self.same_column(&col.name, column))
-                .map(|column| ColumnRef::Virtual {
-                    column,
-                    local: self.virtuals.contains_key(table),
-                });
+        if let Some(found) = self.virtual_column(table, column) {
+            return found.map(|column| ColumnRef::Virtual {
+                column,
+                local: self.virtuals.contains_key(table),
+            });
         }
         match self.schema.column(table, column)? {
             Some(col) => Some(ColumnRef::Schema(col)),
