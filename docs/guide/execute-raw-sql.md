@@ -12,7 +12,7 @@ name shows up only when the query runs.
 
 sqlty reads the query and your schema, and gives each query a row type. This page
 shows how to perform raw SQL queries with each common driver so that the rows are
-typed and the parameters checked, without a database.
+typed and the SQL checked against the schema, without a database.
 
 All examples use this schema:
 
@@ -54,15 +54,19 @@ text can change what the query does (SQL injection), and sqlty skips f-strings
 because their SQL isn't known until run time. Every driver takes the values
 separately, in its own placeholder style:
 
-| Driver | Placeholders | Parameters |
-|--------|--------------|------------|
-| `sqlite3`, aiosqlite | `?`, `:name` | a tuple, or a dict for `:name` |
-| psycopg 3, psycopg2 | `%s`, `%(name)s` | a tuple, or a dict for `%(name)s` |
-| asyncpg | `$1`, `$2` | positional arguments after the query |
-| SQLAlchemy `text()` | `:name` | a dict |
-| Django `connection.cursor()` | `%s` | a list or tuple |
+| Driver | Placeholders | Parameters | Calls checked |
+|--------|--------------|------------|---------------|
+| `sqlite3`, aiosqlite | `?`, `:name` | a tuple, or a dict for `:name` | yes |
+| psycopg 3 | `%s`, `%(name)s` | a tuple, or a dict for `%(name)s` | yes |
+| psycopg2 | `%s`, `%(name)s` | a tuple, or a dict for `%(name)s` | no |
+| asyncpg | `$1`, `$2` | positional arguments after the query | yes |
+| SQLAlchemy `text()` | `:name` | a dict | no |
+| Django `connection.cursor()` | `%s` | a list or tuple | no |
 
 A single value still goes in a sequence: `(user_id,)`, not `(user_id)`.
+`sqlty check` compares the parameters a call passes with the query where the
+driver is checked: see [Driver calls](parameters.md#driver-calls). Elsewhere it
+checks the SQL and the row type.
 
 ## sqlite3
 
@@ -158,9 +162,9 @@ dialect = "sqlite"
 import aiosqlite
 
 
-async def emails(db: aiosqlite.Connection) -> None:
-    # error: [unknown-column] "column `mail` does not exist in `users`; did you mean `email`?"
-    await db.execute_fetchall("--sql\nSELECT mail FROM users")
+async def rename(db: aiosqlite.Connection, name: str) -> None:
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+    await db.execute("UPDATE users SET name = ? WHERE id = ?", (name,))
 ```
 
 ## SQLAlchemy `text()`
@@ -196,7 +200,8 @@ annotate.
 ## Django
 
 Django runs raw SQL through `connection.cursor()`, with `%s` placeholders for
-every database backend. Mark the query and set `dialect` to your database:
+every database backend. Mark the query and set `dialect` to your database (on
+MySQL, write the marker as `-- sql`, see [Writing queries](writing-queries.md)):
 
 ```python
 from django.db import connection

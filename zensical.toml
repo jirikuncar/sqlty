@@ -20,8 +20,8 @@ nav = [
     { "FAQ" = "faq.md" },
   ] },
   { "Guide" = [
-    { "Execute raw SQL" = "guide/execute-raw-sql.md" },
     { "Writing queries" = "guide/writing-queries.md" },
+    { "Execute raw SQL" = "guide/execute-raw-sql.md" },
     { "Schema inference" = "guide/schema-inference.md" },
     { "Name diagnostics" = "guide/name-diagnostics.md" },
     { "Joins and aggregates" = "guide/joins.md" },
