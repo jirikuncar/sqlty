@@ -1291,6 +1291,7 @@ mod tests {
             ("ALTER TABLE users ALTER COLUMN bio TYPE varchar(10)", &[TableRewrite]),
             ("ALTER TABLE users ALTER COLUMN score TYPE numeric(7, 2)", &[]),
             ("ALTER TABLE users ALTER COLUMN score TYPE numeric(7, 3)", &[TableRewrite]),
+            ("ALTER TABLE users ALTER COLUMN score TYPE numeric(7, -2)", &[TableRewrite]),
             ("ALTER TABLE users ALTER COLUMN score TYPE numeric", &[]),
             ("ALTER TABLE users ALTER COLUMN whole TYPE numeric(9)", &[]),
             ("ALTER TABLE users ALTER COLUMN whole TYPE numeric(9, 2)", &[TableRewrite]),
