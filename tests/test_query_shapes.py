@@ -143,7 +143,7 @@ EXPRESSIONS = [
     ("postgres", "SELECT COALESCE(c, vb) AS x, CASE WHEN i > 0 THEN c ELSE vb END AS y FROM f", "x: int | None, y: int | None", []),
     ("mysql", "SELECT CONCAT(tx, i) AS x FROM f", "x: str | None", []),
     ("postgres", "SELECT (SELECT 1) AS x FROM c LEFT JOIN p ON p.id = c.pid", "x: int", []),
-    ("postgres", "SELECT p.name AS x FROM c LEFT JOIN p ON c.pid = c.id", "x: str | None", ["entity-mismatch"]),
+    ("postgres", "SELECT p.name AS x FROM c LEFT JOIN p ON c.pid = c.id", "x: str | None", ["foreign-key-mismatch"]),
     ("postgres", "SELECT (SELECT DISTINCT p.name FROM p WHERE p.id = c.pid) AS x FROM c", "x: str | None", []),
     ("postgres", "WITH w AS (SELECT * FROM p) SELECT (SELECT w.name FROM w WHERE w.id = c.pid) AS x FROM c", "x: str | None", []),
     ("postgres", "SELECT (SELECT p.name FROM p WHERE p.id = p.id) AS x FROM c", "x: str | None", []),

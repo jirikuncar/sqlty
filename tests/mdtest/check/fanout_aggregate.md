@@ -299,5 +299,6 @@ x = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM orders o JOIN (SELECT DIS
 y = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM (orders o JOIN order_items i ON i.order_id = o.id)")
 # error: [fanout-aggregate] "SUM(o.total) aggregates orders, whose rows repeat once per order_items row"
 z = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM customers c JOIN (orders o JOIN order_items i ON i.order_id = o.id) ON o.customer_id = c.id")
+# error: [foreign-key-mismatch] "order_items.order_id references orders.id, not payments.id"
 outer = SQL[tuple[int, float]]("--sql\nSELECT o.id, (SELECT SUM(o.total + i.amount) FROM order_items i JOIN payments p ON p.id = i.order_id) FROM orders o")
 ```

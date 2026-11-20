@@ -1067,6 +1067,7 @@ mod tests {
             ("f'{a!r:>{w}} {b=}'", "f'{a!r:>{w}} b={b!r}'"),
             ("b'a\\x00\\''", "b\"a\\x00'\""),
             ("'a\\n\\u00e9\\x7f'", "'a\\né\\x7f'"),
+            ("'\\r\\t\\\\'", "'\\r\\t\\\\'"),
         ] {
             assert_eq!(round(source), expected, "{source}");
         }

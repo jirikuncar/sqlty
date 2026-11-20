@@ -12,8 +12,11 @@ mod workspace;
 
 pub use disk::Disk;
 pub use flags::{parse_overrides, repr, Configs, Flags};
-pub use module::{check_module, formatted, rewritten, skipped_strings, stripped, Checker};
-pub use settings::{FileSettings, Function, Schemas};
+pub use module::{
+    breaking, breaking_queries, check_module, check_queries, formatted, rewritten, skipped_strings,
+    stripped, Checker,
+};
+pub use settings::{load_schema, FileSettings, Function, SchemaKey, Schemas};
 pub use workspace::{par_map, Completion, Options, Workspace};
 
 use std::path::{Path, PathBuf};

@@ -3,6 +3,8 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
 
+mod breaking;
+mod complete;
 pub mod native;
 pub mod server;
 
@@ -105,6 +107,23 @@ enum Command {
         #[command(flatten)]
         check: CheckArgs,
     },
+    /// List the table and column names that complete at FILE:LINE:COL in a query string
+    /// (sqlty complete app.py:12:30), for scripts and agents
+    Complete {
+        /// The cursor: a Python file, a 1-based line and a 1-based column in characters
+        #[arg(value_name = "FILE:LINE:COL", value_parser = complete::location)]
+        location: complete::Location,
+        #[command(flatten)]
+        common: Common,
+        /// Print a JSON object with the start and end the completion replaces, whether the
+        /// list is incomplete, and the items with their label, kind, detail, SQL type and
+        /// nullability, instead of one item per line
+        #[arg(long)]
+        json: bool,
+    },
+    /// Check the queries and schema of two revisions across, as during a rolling deploy:
+    /// sqlty breaking --against origin/main
+    Breaking(breaking::Args),
     /// Explain a lint rule (sqlty rule stale-type), or list all rules
     Rule {
         /// Rule name, for example select-star
@@ -122,28 +141,43 @@ enum Command {
         #[arg(long)]
         list: bool,
     },
+    /// Run the language server on stdin and stdout, for editors (diagnostics and fixes as
+    /// you type)
+    Server,
     /// Print version and exit
     Version,
 }
 
 #[derive(Args)]
 struct Common {
-    /// Files or directories (default: .)
-    #[arg(default_value = ".")]
+    /// Files or directories (default: .); each file uses its nearest sqlty.toml,
+    /// pyproject.toml or Cargo.toml. A project's config or schema file stands for the whole
+    /// project
     paths: Vec<PathBuf>,
     /// SQL dialect: postgres, mysql, sqlite, or another sqlparser dialect such as duckdb
+    ///
+    /// Default: [tool.sqlty] dialect, else postgres
     #[arg(long, value_name = "DIALECT", value_parser = dialect)]
     dialect: Option<String>,
     /// Schema .sql file, directory or glob for every path; repeat for several
+    ///
+    /// Default: [tool.sqlty] schema per project
     #[arg(long)]
     schema: Vec<String>,
     /// Use this file for every path instead of the nearest config file. Env: SQLTY_CONFIG_FILE
+    ///
+    /// The file is [tool.sqlty] of a pyproject.toml, [package.metadata.sqlty] or
+    /// [workspace.metadata.sqlty] of a Cargo.toml, or top-level keys of another file such
+    /// as sqlty.toml; its relative paths are relative to the current directory
     #[arg(long, value_name = "PATH", conflicts_with = "isolated")]
     config_file: Option<PathBuf>,
     /// Ignore every configuration file; use the defaults and command-line flags
     #[arg(long)]
     isolated: bool,
     /// Override a configuration key with a TOML assignment; repeat for several
+    ///
+    /// For example `-c 'dialect = "mysql"'` or `-c 'rules.select-star = "ignore"'`. Paths
+    /// are relative to the current directory
     #[arg(short = 'c', long = "config", value_name = "KEY=VALUE")]
     config: Vec<String>,
     /// Treat RULE as severity error; repeat for several, the last flag for a rule wins
@@ -156,21 +190,30 @@ struct Common {
     #[arg(long, value_name = "RULE")]
     ignore: Vec<String>,
     /// Skip this glob while walking directories, replacing the other excludes
+    ///
+    /// It replaces [tool.sqlty] exclude and the default excludes; repeat for several.
+    /// Relative to the current directory
     #[arg(long, value_name = "GLOB")]
     exclude: Option<Vec<String>>,
     /// Skip this glob in addition to the other excludes
+    ///
+    /// Repeat for several. Relative to the current directory
     #[arg(long, value_name = "GLOB")]
     extend_exclude: Vec<String>,
     /// Apply the excludes to files and directories named on the command line too
     #[arg(long)]
     force_exclude: bool,
     /// Skip the files .gitignore ignores while walking directories
+    ///
+    /// Default: [tool.sqlty] respect-gitignore, else true
     #[arg(long, overrides_with = "no_respect_gitignore")]
     respect_gitignore: bool,
     /// Walk the files .gitignore ignores too
     #[arg(long, overrides_with = "respect_gitignore")]
     no_respect_gitignore: bool,
     /// Print each file that rewrite, strip or check --fix changes
+    ///
+    /// With check, also the types of each named query of a query file
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
     /// Suppress non-error output
@@ -190,16 +233,20 @@ struct Change {
 
 #[derive(Args)]
 struct CheckArgs {
-    /// Apply the fixable rules, write the files, then report what remains
+    /// Apply the fixable rules (see `sqlty rule`), write the files, then report what remains
     #[arg(long)]
     fix: bool,
     /// Exit 0 even when an error-severity diagnostic is reported
     #[arg(long)]
     exit_zero: bool,
     /// Exit 0 when no diagnostic has severity error (the default)
+    ///
+    /// Cannot be combined with --error-on-warning
     #[arg(long)]
     exit_zero_on_warning: bool,
     /// Exit 1 when any diagnostic has severity warn
+    ///
+    /// Cannot be combined with --exit-zero or --exit-zero-on-warning
     #[arg(long)]
     error_on_warning: bool,
     /// After the summary, print how many queries were typed, partially typed, unparsed
@@ -207,11 +254,24 @@ struct CheckArgs {
     #[arg(long)]
     statistics: bool,
     /// Under a type diagnostic, print the inference rule behind each column's type
+    ///
+    /// The rule's id, reference and reasoning, for the type and the nullability
     #[arg(long)]
     explain: bool,
     /// How diagnostics are printed
+    ///
+    /// text: file:line: [rule] message (the default); json: an array of objects with file,
+    /// line, rule, severity, message, the start and end of what it underlines, and the fix
+    /// edits; github: GitHub Actions annotations; sarif: a SARIF 2.1.0 log, for GitHub code
+    /// scanning. Summaries, --statistics and --explain are text only
     #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
     output_format: OutputFormat,
+    /// Print the files sqlty would check, and exit
+    #[arg(long, conflicts_with = "show_settings")]
+    show_files: bool,
+    /// Print the settings of the first file sqlty would check, and exit
+    #[arg(long)]
+    show_settings: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -222,15 +282,148 @@ enum OutputFormat {
     Sarif,
 }
 
-fn dialect(name: &str) -> Result<String, String> {
-    name.parse::<sqlty_sql::Dialect>()
-        .map(|_| name.to_lowercase())
-        .map_err(|error| error.to_string())
+/// `check --show-settings`: what `path` is checked with, as TOML.
+fn show_settings(path: &Path, settings: &FileSettings) -> String {
+    let quote = |text: &str| toml::Value::String(text.to_string()).to_string();
+    let list = |items: Vec<String>| format!("[{}]", items.join(", "));
+    let table = |pairs: Vec<(&String, &String)>| {
+        let pairs: Vec<String> = pairs
+            .into_iter()
+            .map(|(key, value)| format!("{} = {}", quote(key), quote(value)))
+            .collect();
+        match pairs.is_empty() {
+            true => "{}".to_string(),
+            false => format!("{{ {} }}", pairs.join(", ")),
+        }
+    };
+    let mut rules: Vec<_> = settings.rules.iter().collect();
+    rules.sort();
+    let types = settings
+        .types
+        .iter()
+        .map(|(key, value)| (key, value))
+        .collect();
+    let mut coerce: Vec<String> = settings.coerce.iter().map(|name| quote(name)).collect();
+    coerce.sort();
+    let functions = settings
+        .functions
+        .iter()
+        .map(|function| quote(&function.import_path))
+        .collect();
+    let mut lines = vec![format!("# {}", path.display())];
+    if let Some(base) = &settings.base {
+        lines.push(format!("base = {}", quote(&base.display().to_string())));
+    }
+    lines.push(format!("dialect = {}", quote(settings.dialect)));
+    lines.push(format!("schema = {}", settings.schema.is_some()));
+    if let Some(style) = &settings.import_style {
+        lines.push(format!("import-style = {}", quote(style)));
+    }
+    let untyped = if settings.untyped { "sentinel" } else { "skip" };
+    lines.push(format!("untyped = {}", quote(untyped)));
+    lines.push(format!("param-types = {}", settings.param_types));
+    lines.push(format!("closed-params = {}", settings.closed_params));
+    lines.push(format!("rules = {}", table(rules)));
+    lines.push(format!("types = {}", table(types)));
+    lines.push(format!("coerce-row-types = {}", list(coerce)));
+    lines.push(format!("functions = {}", list(functions)));
+    let queries = settings.queries.iter().map(|glob| quote(glob)).collect();
+    lines.push(format!("queries = {}", list(queries)));
+    format!("{}\n", lines.join("\n"))
 }
 
-/// Run `sqlty ARGS...` on `host`; the exit code, or `None` when the command runs in Python
-/// still (`complete`, `breaking` and `server`). A panic is reported with a bug report link.
-pub fn run(args: impl IntoIterator<Item = OsString>, host: &mut dyn Host) -> Option<i32> {
+fn dialect(name: &str) -> Result<String, String> {
+    use sqlty_sql::Dialect;
+    match name.parse::<Dialect>() {
+        Ok(_) => Ok(name.to_lowercase()),
+        Err(_) => Err(format!(
+            "unknown dialect '{name}'{}; expected one of: {}",
+            sqlty_python::config::suggest(name, &Dialect::NAMES),
+            Dialect::NAMES.join(", ")
+        )),
+    }
+}
+
+/// One command of [`reference`]: its name (`sqlty` for the root), usage and options.
+pub struct Reference {
+    /// `sqlty`, or the name of a command.
+    pub name: String,
+    /// The usage line, without `Usage: `.
+    pub usage: String,
+    /// `(invocation, help)` of each option and positional argument.
+    pub options: Vec<(String, String)>,
+}
+
+/// The root and each command of `sqlty`, for `docs/reference/cli.md`.
+pub fn reference() -> Vec<Reference> {
+    let mut root = Cli::command().term_width(80);
+    root.build();
+    let mut commands = vec![&root];
+    commands.extend(
+        root.get_subcommands()
+            .filter(|command| command.get_name() != "help"),
+    );
+    commands
+        .into_iter()
+        .map(|command| Reference {
+            name: command.get_name().to_string(),
+            usage: command
+                .clone()
+                .render_usage()
+                .to_string()
+                .trim_start_matches("Usage: ")
+                .to_string(),
+            options: command
+                .get_arguments()
+                .filter(|arg| !arg.is_hide_set())
+                .map(|arg| {
+                    let help = arg.get_long_help().or(arg.get_help());
+                    (
+                        invocation(arg),
+                        help.map(ToString::to_string).unwrap_or_default(),
+                    )
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+/// `-c, --config KEY=VALUE`, `--untyped {skip,sentinel}` or `paths ...`.
+fn invocation(arg: &clap::Arg) -> String {
+    let possible: Vec<String> = arg
+        .get_possible_values()
+        .iter()
+        .map(|value| value.get_name().to_string())
+        .collect();
+    let value = match (possible.is_empty(), arg.get_value_names()) {
+        (false, _) => format!("{{{}}}", possible.join(",")),
+        (true, Some(names)) => names
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(" "),
+        (true, None) if arg.is_positional() => arg.get_id().to_string(),
+        (true, None) => arg.get_id().as_str().to_uppercase(),
+    };
+    if arg.is_positional() {
+        let many = matches!(arg.get_action(), clap::ArgAction::Append);
+        return if many { format!("{value} ...") } else { value };
+    }
+    let mut names: Vec<String> = arg
+        .get_short()
+        .map(|short| format!("-{short}"))
+        .into_iter()
+        .collect();
+    names.extend(arg.get_long().map(|long| format!("--{long}")));
+    let names = names.join(", ");
+    match arg.get_action().takes_values() {
+        true => format!("{names} {value}"),
+        false => names,
+    }
+}
+
+/// Run `sqlty ARGS...` on `host`; the exit code. A panic is reported with a bug report link.
+pub fn run(args: impl IntoIterator<Item = OsString>, host: &mut dyn Host) -> i32 {
     let args: Vec<OsString> = args.into_iter().collect();
     catch_unwind(AssertUnwindSafe(|| dispatch(&args, &mut *host))).unwrap_or_else(|payload| {
         let cause = report::cause(&*payload);
@@ -238,15 +431,11 @@ pub fn run(args: impl IntoIterator<Item = OsString>, host: &mut dyn Host) -> Opt
             "sqlty: crashed: {cause}\nThis is a bug in sqlty, please report it at {}\n",
             report::issue_url(cause)
         ));
-        Some(EXIT_ERROR)
+        EXIT_ERROR
     })
 }
 
-fn dispatch(args: &[OsString], host: &mut dyn Host) -> Option<i32> {
-    let first = args.get(1).and_then(|arg| arg.to_str());
-    if matches!(first, Some("complete" | "breaking" | "server")) {
-        return None;
-    }
+fn dispatch(args: &[OsString], host: &mut dyn Host) -> i32 {
     let matches = match Cli::command().try_get_matches_from(args) {
         Ok(matches) => matches,
         Err(error) => {
@@ -255,7 +444,7 @@ fn dispatch(args: &[OsString], host: &mut dyn Host) -> Option<i32> {
                 true => host.err(&text),
                 false => host.out(&text),
             }
-            return Some(error.exit_code());
+            return error.exit_code();
         }
     };
     #[expect(clippy::expect_used, reason = "the matches are of the same command")]
@@ -296,11 +485,18 @@ fn dispatch(args: &[OsString], host: &mut dyn Host) -> Option<i32> {
             transform(host, &common, &change, severities, None, Transform::Format)
         }
         Some(Command::Check { common, check }) => self::check(host, &common, &check, severities),
+        Some(Command::Complete {
+            location,
+            common,
+            json,
+        }) => complete::run(host, &location, common, severities, json),
+        Some(Command::Breaking(args)) => breaking::run(host, &args),
+        Some(Command::Server) => server::serve(host.python(), host.extra_roots()).map(|()| 0),
     };
-    Some(result.unwrap_or_else(|error| {
+    result.unwrap_or_else(|error| {
         host.err(&format!("sqlty: error: {error}\n"));
         EXIT_ERROR
-    }))
+    })
 }
 
 /// `--error/--warn/--ignore` in command-line order.
@@ -512,7 +708,10 @@ fn workspace(
     if let Some(respect) = respect {
         discovery = discovery.respect_gitignore(respect);
     }
-    let paths: Vec<PathBuf> = common.paths.iter().map(|path| pure(path)).collect();
+    let mut paths: Vec<PathBuf> = common.paths.iter().map(|path| pure(path)).collect();
+    if paths.is_empty() {
+        paths.push(PathBuf::from("."));
+    }
     let options = Options {
         flags,
         discovery,
@@ -711,6 +910,20 @@ fn check(
     let query_files = workspace.query_files()?;
     warn_all(host, &workspace);
     let files = workspace.files().to_vec();
+    if args.show_files || args.show_settings {
+        let mut shown: Vec<&PathBuf> = files.iter().chain(&query_files).collect();
+        shown.sort();
+        if args.show_files {
+            for path in shown {
+                host.out(&format!("{}\n", path.display()));
+            }
+        } else if let Some(path) = shown.first() {
+            let settings = workspace.settings(path)?;
+            host.out(&show_settings(path, &settings));
+            warn_all(host, &workspace);
+        }
+        return Ok(0);
+    }
     let mut unreadable = !workspace.unreadable().is_empty();
     if files.is_empty() && query_files.is_empty() && !unreadable {
         if !common.quiet {
@@ -926,6 +1139,15 @@ struct JsonDiagnostic {
     start: Position,
     end: Position,
     fix: Vec<JsonEdit>,
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    breaking: Option<Breaking>,
+}
+
+/// Which check of `sqlty breaking` found a row.
+#[derive(Clone, Serialize)]
+struct Breaking {
+    direction: &'static str,
+    against: String,
 }
 
 fn json_diagnostic(path: &Path, diag: &Diagnostic, text: &str) -> JsonDiagnostic {
@@ -946,6 +1168,7 @@ fn json_diagnostic(path: &Path, diag: &Diagnostic, text: &str) -> JsonDiagnostic
                 replacement: edit.replacement.clone(),
             })
             .collect(),
+        breaking: None,
     }
 }
 
@@ -1076,6 +1299,7 @@ fn sarif_result(row: &JsonDiagnostic) -> SarifResult {
             },
         }],
         fixes,
+        properties: row.breaking.clone(),
     }
 }
 
@@ -1137,6 +1361,8 @@ struct SarifResult {
     locations: [Location; 1],
     #[serde(skip_serializing_if = "Vec::is_empty")]
     fixes: Vec<SarifFix>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    properties: Option<Breaking>,
 }
 
 #[derive(Serialize)]
@@ -1279,7 +1505,7 @@ mod tests {
         }
     }
 
-    fn sqlty(host: &mut Fake, args: &[&str]) -> Option<i32> {
+    fn sqlty(host: &mut Fake, args: &[&str]) -> i32 {
         let args = std::iter::once("sqlty").chain(args.iter().copied());
         run(args.map(OsString::from), host)
     }
@@ -1297,21 +1523,26 @@ mod tests {
     #[test]
     fn prints_usage_and_what_clap_rejects() {
         let mut host = project("usage", &[]);
-        assert_eq!(sqlty(&mut host, &[]), Some(0));
+        assert_eq!(sqlty(&mut host, &[]), 0);
         assert!(
             host.out.starts_with("Type-safe SQL queries for Python."),
             "{}",
             host.out
         );
-        assert_eq!(sqlty(&mut host, &["--help"]), Some(0));
-        assert_eq!(sqlty(&mut host, &["check", "--dialect", "nope"]), Some(2));
+        assert_eq!(sqlty(&mut host, &["--help"]), 0);
+        assert_eq!(sqlty(&mut host, &["check", "--dialect", "nope"]), 2);
         assert!(
             host.err
                 .contains("invalid value 'nope' for '--dialect <DIALECT>'"),
             "{}",
             host.err
         );
-        assert_eq!(sqlty(&mut host, &["server"]), None);
+        assert_eq!(sqlty(&mut host, &["complete", "q.py:1"]), 2);
+        assert!(
+            host.err.contains("expected FILE:LINE:COL, got 'q.py:1'"),
+            "{}",
+            host.err
+        );
         std::fs::remove_dir_all(&host.root).expect("removes");
     }
 
@@ -1319,7 +1550,7 @@ mod tests {
     fn a_panic_prints_a_bug_report_link() {
         let mut host = project("crash", &[]);
         host.env.push(("CRASH", "1"));
-        assert_eq!(sqlty(&mut host, &["version"]), Some(EXIT_ERROR));
+        assert_eq!(sqlty(&mut host, &["version"]), EXIT_ERROR);
         assert_eq!(
             host.err,
             format!(
@@ -1354,12 +1585,7 @@ mod tests {
             (&["check", "-c", "extend-exclude = [\"gen.py\"]"][..], 0),
         ] {
             host.err.clear();
-            assert_eq!(
-                sqlty(&mut host, args),
-                Some(found),
-                "{args:?}: {}",
-                host.err
-            );
+            assert_eq!(sqlty(&mut host, args), found, "{args:?}: {}", host.err);
         }
         std::fs::remove_dir_all(&host.root).expect("removes");
     }
@@ -1371,10 +1597,7 @@ mod tests {
             "from sqlty import SQL\nq = SQL[tuple[int | None]](\"--sql\\nSELECT id FROM users\")\n",
         );
         let mut host = project("formats", &[CONFIG, SCHEMA, fixable]);
-        assert_eq!(
-            sqlty(&mut host, &["check", "--output-format", "github"]),
-            Some(0)
-        );
+        assert_eq!(sqlty(&mut host, &["check", "--output-format", "github"]), 0);
         assert!(
             host.out.starts_with("::warning file=app/q.py,"),
             "{}",
@@ -1383,10 +1606,7 @@ mod tests {
         std::fs::remove_dir_all(&host.root).expect("removes");
         let unknown = ("app/q.py", "q = \"--sql\\nSELECT nope FROM users\"\n");
         let mut host = project("sarif", &[CONFIG, SCHEMA, unknown]);
-        assert_eq!(
-            sqlty(&mut host, &["check", "--output-format", "sarif"]),
-            Some(1)
-        );
+        assert_eq!(sqlty(&mut host, &["check", "--output-format", "sarif"]), 1);
         assert!(
             host.out.contains("\"ruleId\": \"unknown-column\""),
             "{}",
@@ -1399,10 +1619,7 @@ mod tests {
     #[test]
     fn checks_what_would_change_quietly() {
         let mut host = project("quiet", &[CONFIG, SCHEMA, QUERY]);
-        assert_eq!(
-            sqlty(&mut host, &["rewrite", "--check", "--quiet"]),
-            Some(1)
-        );
+        assert_eq!(sqlty(&mut host, &["rewrite", "--check", "--quiet"]), 1);
         assert_eq!((host.out.as_str(), host.err.as_str()), ("", ""));
         std::fs::remove_dir_all(&host.root).expect("removes");
     }
@@ -1434,6 +1651,7 @@ mod tests {
             start: at,
             end: at,
             fix: Vec::new(),
+            breaking: None,
         };
         let found = pretty(&sarif_result(&row("/a b%.py")));
         assert!(found.contains(r#""uri": "file:///a%20b%25.py""#), "{found}");

@@ -46,7 +46,6 @@ static LAZY_COMMIT: extern "C" fn() = {
 
 mod cli;
 mod config;
-mod server;
 
 use sqlty_python::checker;
 use sqlty_python::fixer;
@@ -544,13 +543,6 @@ fn analyze_params(
 #[pyfunction]
 fn python_types() -> Vec<&'static str> {
     analyzer::python_types().into_iter().collect()
-}
-
-/// Every dialect name the other functions accept (besides the aliases `postgresql` and
-/// `tsql`).
-#[pyfunction]
-fn dialect_names() -> Vec<&'static str> {
-    sqlty_sql::Dialect::NAMES.to_vec()
 }
 
 /// The rules that judge the names a query uses.
@@ -1826,66 +1818,6 @@ fn check_modules(
     Ok(found)
 }
 
-/// What a schema change breaks in each `(source, name, own, against)` of `modules`: the
-/// diagnostics it gets with the configuration `against` indexes in `configs` but not with
-/// `own`, as `breaking_source` finds them, on `jobs` threads (all cores when None), its
-/// `# sqlty: ignore` comments applied.
-#[pyfunction]
-#[pyo3(signature = (modules, configs, *, version, jobs = None))]
-fn breaking_modules(
-    py: Python<'_>,
-    modules: Vec<(PyBackedStr, Option<String>, usize, usize)>,
-    configs: Vec<ConfigArg<'_>>,
-    version: (u8, u8),
-    jobs: Option<usize>,
-) -> PyResult<Vec<Vec<DiagnosticOut>>> {
-    use rayon::prelude::*;
-
-    if let Some(config) = modules
-        .iter()
-        .flat_map(|&(_, _, own, against)| [own, against])
-        .find(|&config| config >= configs.len())
-    {
-        return Err(PyValueError::new_err(format!("no configuration {config}")));
-    }
-    let mut configs: Vec<CheckConfig> = configs.into_iter().map(CheckConfig::new).collect();
-    #[expect(
-        clippy::expect_used,
-        reason = "a check cannot go on without its threads"
-    )]
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(jobs.unwrap_or(0))
-        .stack_size(STACK_SEGMENT)
-        .build()
-        .expect("the check threads start");
-    let found = detach(py, || -> Result<Vec<_>, Error> {
-        let schemas: Vec<_> = configs.iter_mut().map(CheckConfig::schema).collect();
-        let checkers = configs
-            .iter()
-            .zip(&schemas)
-            .map(|(config, schema)| config.checker(schema.as_deref()))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(pool.install(|| {
-            modules
-                .into_par_iter()
-                .map(|(source, name, own, against)| {
-                    stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
-                        let name = name.as_deref();
-                        let check = |config: usize| {
-                            checkers[config].check(&source, version, name, name, true)
-                        };
-                        let ((own, ..), (against, ..)) = (check(own), check(against));
-                        let key =
-                            |found: &DiagnosticOut| (found.line, found.rule, found.message.clone());
-                        sqlty_python::breaking::breaking(&own, against, key, |found| found.rule)
-                    })
-                })
-                .collect()
-        }))
-    })?;
-    Ok(found)
-}
-
 /// Check Python source for SQL type issues.
 ///
 /// `any_calls` are the byte offsets of the `SQL[T](...)` calls whose `T` is
@@ -2228,7 +2160,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(analyze_params, m)?)?;
     m.add_function(wrap_pyfunction!(name_rules, m)?)?;
     m.add_function(wrap_pyfunction!(rules, m)?)?;
-    m.add_function(wrap_pyfunction!(dialect_names, m)?)?;
     m.add_function(wrap_pyfunction!(python_types, m)?)?;
     m.add_function(wrap_pyfunction!(schema_skipped_objects, m)?)?;
     m.add_function(wrap_pyfunction!(checks_names, m)?)?;
@@ -2250,7 +2181,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(row_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(module_diagnostics, m)?)?;
     m.add_function(wrap_pyfunction!(check_modules, m)?)?;
-    m.add_function(wrap_pyfunction!(breaking_modules, m)?)?;
     m.add_function(wrap_pyfunction!(module_index, m)?)?;
     m.add_function(wrap_pyfunction!(index_helpers, m)?)?;
     m.add_function(wrap_pyfunction!(index_extended, m)?)?;
@@ -2267,8 +2197,9 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(highlight_source, m)?)?;
     m.add_function(wrap_pyfunction!(hover_source, m)?)?;
     m.add_function(wrap_pyfunction!(skills, m)?)?;
-    m.add_function(wrap_pyfunction!(server::serve, m)?)?;
     m.add_function(wrap_pyfunction!(cli::cli, m)?)?;
+    m.add_function(wrap_pyfunction!(cli::cli_reference, m)?)?;
+    m.add_function(wrap_pyfunction!(cli::write_profile, m)?)?;
     config::register(m)?;
     Ok(())
 }
