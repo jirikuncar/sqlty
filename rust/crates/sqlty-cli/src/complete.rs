@@ -97,9 +97,10 @@ pub fn run(
                     })
                 })
                 .collect();
+            let lines = Lines::new(&text);
             json!({
-                "start": Lines::new(&text).position(found.replace.start),
-                "end": Lines::new(&text).position(found.replace.end),
+                "start": lines.position(found.replace.start),
+                "end": lines.position(found.replace.end),
                 "incomplete": found.incomplete,
                 "items": items,
             })

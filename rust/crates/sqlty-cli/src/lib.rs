@@ -1106,7 +1106,6 @@ fn unified_diff(path: &str, old: &str, new: &str) -> String {
         .to_string()
 }
 
-/// The 1-based line and column (in characters) of the byte `offset` of `text`.
 /// The line starts of a text, so that a position costs a binary search and its own line.
 struct Lines<'a> {
     text: &'a str,
@@ -1124,6 +1123,7 @@ impl<'a> Lines<'a> {
         }
     }
 
+    /// The 1-based line and column (in characters) of the byte `offset`.
     fn position(&self, offset: usize) -> Position {
         let offset = offset.min(self.text.len());
         let line = self.starts.partition_point(|&start| start <= offset);

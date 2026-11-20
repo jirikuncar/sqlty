@@ -484,22 +484,14 @@ impl<'a> Analyzer<'a> {
         let Some(index) = self.shifted_placeholder(value, scope) else {
             return;
         };
-        if let Some(col) = self
-            .schema
-            .table(table)
-            .and_then(|columns| columns.iter().find(|col| col.name == column))
-        {
+        if let Some(col) = self.schema.column(table, column).flatten() {
             out.add_shifted(index, col.typed(self.dialect));
         }
     }
 
     /// Parameter `index` is stored in `column` of the schema `table`.
     fn hint_column(&self, table: &str, column: &str, index: usize, out: &mut Hints) {
-        let Some(col) = self
-            .schema
-            .table(table)
-            .and_then(|columns| columns.iter().find(|col| col.name == column))
-        else {
+        let Some(col) = self.schema.column(table, column).flatten() else {
             return;
         };
         out.add(
