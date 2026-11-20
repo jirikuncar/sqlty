@@ -60,7 +60,7 @@ def test_rules_table() -> None:
 
 
 def test_generated_reference_is_current() -> None:
-    """The tables in ``configuration.md`` and ``cli.md`` match the code (``make generate-docs``)."""
+    """The generated tables of ``docs/reference`` match the code (``make generate-docs``)."""
     spec = importlib.util.spec_from_file_location(
         "generate_docs", ROOT / "scripts" / "generate_docs.py"
     )

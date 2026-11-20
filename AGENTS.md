@@ -128,9 +128,9 @@ printed by `sqlty rule NAME`). Every test runs through `sqlty.core`.
 User-visible behavior belongs in `docs/guide/` too; edge cases only in
 `tests/mdtest/`. A new lint rule is its page `docs/reference/rules/<name>.md`, with the front matter
 (`order`, `group`, `severity`, `fixable`, `summary`, `origin`) that is the only place its metadata
-is written, its row in the table of `docs/reference/rules.md`, and its check code. The
-`sqlty-rules` crate generates `Rule` and the Python `RULES` from the pages, and `build.rs` fails
-on a page that breaks the format.
+is written, and its check code. The `sqlty-rules` crate generates `Rule` and the Python `RULES`
+from the pages, and `build.rs` fails on a page that breaks the format; `make generate-docs` adds
+its row to the table of `docs/reference/rules.md`.
 
 | Feature area | Directory | Example file |
 |-------------|-----------|-------------|
@@ -165,6 +165,9 @@ on a page that breaks the format.
 - An `` `against.sql`: `` file makes `# error:` assert what `sqlty breaking`
   reports (`core.breaking_source()`): the diagnostics that are new when the code
   is checked against that schema instead of its own.
+  In a ```` ```sql migration ```` block, `-- error:` asserts what the migration
+  rules report for the block's statements that `against.sql` does not have
+  (`_core.check_migrations()`).
 
 ````markdown
 ## Schema-based TypedDict mismatch
@@ -262,11 +265,11 @@ sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
 
 - `tests/test_core_invariants.py` checks idempotency and round trips over every
   mdtest code block: new mdtests extend it automatically.
-- `docs/reference/configuration.md` and `cli.md` hold tables between `<!-- generated:NAME -->`
-  markers, rendered by `scripts/generate_docs.py` from `KEY_DOCS` in `_config.py` and the clap
-  commands of `sqlty-cli`. Edit those, then run `make generate-docs`; `test_generated_reference_is_current` fails on drift.
-- `tests/test_docs.py` checks that the rules table in `docs/reference/rules.md`
-  matches `RULES`, that every rule has a page in `docs/reference/rules/`, that
+- `docs/reference/configuration.md`, `cli.md` and `rules.md` hold tables between
+  `<!-- generated:NAME -->` markers, rendered by `scripts/generate_docs.py` from `KEY_DOCS` in
+  `_config.py`, the clap commands of `sqlty-cli` and the rule pages. Edit those, then run
+  `make generate-docs`; `test_generated_reference_is_current` fails on drift.
+- `tests/test_docs.py` checks that every rule has a page in `docs/reference/rules/`, that
   relative links resolve, that `examples/` need no rewrite, and runs the
   `>>>` examples in `docs/reference/python-api.md`.
 - Focus on **motivated examples** — show the problem first, then the solution.

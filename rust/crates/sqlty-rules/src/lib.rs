@@ -50,6 +50,8 @@ pub enum Group {
     Rewrite,
     /// Checks of the parameters of a query.
     Params,
+    /// What a migration locks, as `sqlty breaking` reports it.
+    Migration,
     /// Rules about `# sqlty: ignore` comments.
     Suppression,
     /// Failures of sqlty itself.
@@ -65,6 +67,7 @@ impl Group {
             Group::Names => "Names",
             Group::Rewrite => "Rewrite",
             Group::Params => "Params",
+            Group::Migration => "Migration",
             Group::Suppression => "Suppression",
             Group::Internal => "Internal",
         }
@@ -231,6 +234,7 @@ mod tests {
             "Names",
             "Rewrite",
             "Params",
+            "Migration",
             "Suppression",
             "Internal",
         ] {

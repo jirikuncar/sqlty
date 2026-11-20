@@ -241,6 +241,53 @@ from sqlty import SQL
 emails = SQL[tuple[str | None]]("--sql\nSELECT email FROM users")
 ```
 
+## Migrations that lock tables
+
+A migration that is compatible with both revisions can still take a table down
+while it runs. With the `postgres` dialect, `sqlty breaking` also judges each
+statement of the schema files that the baseline does not have, in the order the
+files are read: what it locks on a table that already has rows, and what fails.
+A table the new statements create is empty, so it is not reported until rows
+are copied into it: `INSERT ... SELECT`, `COPY ... FROM`, `MERGE` or
+`CREATE TABLE ... AS` without `WITH NO DATA`.
+
+| Rule | Reports |
+|------|---------|
+| [`missing-concurrently`](../reference/rules/missing-concurrently.md) | an index built or dropped without `CONCURRENTLY` |
+| [`concurrently-in-transaction`](../reference/rules/concurrently-in-transaction.md) | `CONCURRENTLY` between `BEGIN` and `COMMIT` |
+| [`constraint-scan`](../reference/rules/constraint-scan.md) | a constraint, `SET NOT NULL` or a new partition that checks every row while it blocks writes |
+| [`table-rewrite`](../reference/rules/table-rewrite.md) | a statement that rewrites the table |
+| [`add-required-column`](../reference/rules/add-required-column.md) | a `NOT NULL` column without a default |
+| [`missing-lock-timeout`](../reference/rules/missing-lock-timeout.md) | a lock that blocks writes taken before `SET lock_timeout` |
+| [`truncate-cascade`](../reference/rules/truncate-cascade.md) | `TRUNCATE ... CASCADE` |
+| [`enum-value-in-transaction`](../reference/rules/enum-value-in-transaction.md) | an enum value used in the transaction that added it |
+| [`concurrent-index-if-not-exists`](../reference/rules/concurrent-index-if-not-exists.md) | `CREATE INDEX CONCURRENTLY IF NOT EXISTS` |
+| [`disable-trigger-all`](../reference/rules/disable-trigger-all.md) | `DISABLE TRIGGER ALL` |
+
+`against.sql`:
+
+```sql
+CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT NOT NULL);
+```
+
+```sql migration
+-- error: [missing-lock-timeout] "takes a lock that blocks writes without `SET lock_timeout` first"
+ALTER TABLE users ADD COLUMN token UUID DEFAULT gen_random_uuid(); -- sqlty: ignore[table-rewrite]
+-- error: [missing-concurrently] "`CREATE INDEX` blocks writes to `users` until the index is built"
+CREATE INDEX users_email ON users (email);
+```
+
+The findings name the migration and the baseline:
+
+```text
+migrations/0042_index.sql:2: [missing-concurrently] `CREATE INDEX` blocks writes to `users` until the index is built: create it `CONCURRENTLY` (migration: a statement the working tree runs that origin/main does not have)
+```
+
+The schema files are the migrations themselves, or the SQL a migration tool
+writes for them, such as `alembic upgrade head --sql > db/schema.sql`. A
+`pg_dump` schema is not judged: it describes the result, not how to get there.
+The statements are judged in every `--direction`.
+
 ## Baselines without git history
 
 ```bash
