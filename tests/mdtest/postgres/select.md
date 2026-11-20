@@ -109,3 +109,10 @@ SELECT id::INTEGER, name::TEXT FROM users WHERE id = :user_id AND active = :acti
 SELECT (name ISNULL)::BOOLEAN, (name NOTNULL)::BOOLEAN, (tags::TEXT[] ISNULL)::BOOLEAN FROM users WHERE (email ISNULL OR id = 1)
 -- inferred: tuple[bool, bool, bool]
 ```
+
+`isnull` after `AS` is a column alias.
+
+```sql
+SELECT (name IS NULL)::BOOLEAN AS isnull FROM users
+-- inferred: tuple[bool]
+```

@@ -281,8 +281,9 @@ fn do_block(sql: &str, tokens: &[Token], i: usize) -> Option<(usize, usize, Stri
 
 /// Whether `token` can end an operand, so a `MOD` after it is MySQL's infix operator.
 fn ends_operand(sql: &str, token: &Token) -> bool {
-    const KEYWORDS: [&str; 19] = [
+    const KEYWORDS: [&str; 20] = [
         "SELECT",
+        "AS",
         "WHERE",
         "AND",
         "OR",
