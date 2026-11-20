@@ -265,7 +265,7 @@ are copied into it: `INSERT ... SELECT`, `COPY ... FROM`, `MERGE` or
 | [`disable-trigger-all`](../reference/rules/disable-trigger-all.md) | `DISABLE TRIGGER ALL` |
 | [`multi-table-lock`](../reference/rules/multi-table-lock.md) | a transaction that locks several tables against writes |
 | [`locked-backfill`](../reference/rules/locked-backfill.md) | an `UPDATE` or `DELETE` of a table its transaction locked |
-| [`unbatched-backfill`](../reference/rules/unbatched-backfill.md) | an `UPDATE` or `DELETE` without `LIMIT` or `BETWEEN` |
+| [`unbatched-backfill`](../reference/rules/unbatched-backfill.md) | an `UPDATE` or `DELETE` whose `WHERE` does not bound its rows |
 
 `against.sql`:
 

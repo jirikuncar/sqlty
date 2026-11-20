@@ -34,9 +34,9 @@ COMMIT;
 
 ## Why is this bad?
 
-`ALTER TABLE` takes an `ACCESS EXCLUSIVE` lock, and the transaction keeps it
-until `COMMIT`: every read and write of the table waits for the backfill,
-however it is batched.
+Most forms of `ALTER TABLE` take an `ACCESS EXCLUSIVE` lock, and the
+transaction keeps it until `COMMIT`: every read and write of the table waits
+for the backfill, however it is batched.
 
 ## How to fix
 

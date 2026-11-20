@@ -94,3 +94,38 @@ ALTER TABLE events ATTACH PARTITION events_rest DEFAULT;
 -- error: [constraint-scan] "a new partition of `events` scans its default partition `events_rest`"
 CREATE TABLE events_10 PARTITION OF events FOR VALUES FROM ('2026-10-01') TO ('2026-11-01');
 ```
+
+## Rows pinned by key are not a backfill
+
+```sql migration
+SET lock_timeout = '1s';
+-- error:
+UPDATE users SET email = 'a@example.com' WHERE id = 1;
+DELETE FROM users WHERE id IN (2, 3);
+```
+
+## Locks that let writes go on
+
+```sql migration
+BEGIN;
+SET LOCAL lock_timeout = '1s';
+-- error:
+LOCK TABLE users IN ACCESS SHARE MODE;
+ALTER TABLE events SET (fillfactor = 70);
+CREATE TEMP TABLE ids (id BIGINT);
+INSERT INTO ids SELECT id FROM users;
+UPDATE ids SET id = id + 1;
+COMMIT;
+```
+
+## Attaching a partition locks the partition
+
+```sql migration
+BEGIN;
+SET LOCAL lock_timeout = '1s';
+-- error: [constraint-scan] "`ATTACH PARTITION` scans `events_09`"
+ALTER TABLE events ATTACH PARTITION events_09 FOR VALUES FROM ('2026-09-01') TO ('2026-10-01');
+-- error: [locked-backfill] "locks `events_09` against writes"
+UPDATE events_09 SET at = at WHERE at BETWEEN '2026-09-01' AND '2026-09-02';
+COMMIT;
+```

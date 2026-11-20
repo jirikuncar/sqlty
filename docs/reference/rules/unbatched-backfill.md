@@ -13,8 +13,10 @@ Default severity: **warn**
 
 ## What it does
 
-Reports a new `UPDATE` or `DELETE` of a table that has rows without `LIMIT`
-or `BETWEEN`, which a batched backfill uses to bound each statement.
+Reports a new `UPDATE` or `DELETE` of a table that has rows whose `WHERE`
+clause does not bound the rows it changes: with a `LIMIT` subquery, a
+`BETWEEN` range, or a key column compared to listed values (`id = 1`,
+`id IN (1, 2)`), as a single-row fix or a migration tool's version table does.
 
 `against.sql`:
 
