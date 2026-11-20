@@ -5,7 +5,6 @@ import time
 import pytest
 
 from sqlty import _core, core
-from sqlty._cli import main
 
 pytestmark = pytest.mark.timing
 
@@ -80,9 +79,12 @@ def _check_seconds(root, monkeypatch, count: int, key: str, files: dict[str, str
     for i in range(count):
         (project / files["dir"] / f"{i:05}.sql").write_text(files["text"].format(i=i))
     monkeypatch.chdir(project)
-    start = time.perf_counter()
-    main(["check", "-q", "."])
-    return time.perf_counter() - start
+    best = float("inf")
+    for _ in range(2):
+        start = time.perf_counter()
+        assert _core.cli(["sqlty", "check", "-q", "."]) == 0
+        best = min(best, time.perf_counter() - start)
+    return best
 
 
 @pytest.mark.parametrize(
@@ -96,4 +98,4 @@ def test_many_schema_or_query_files_scale_linearly(tmp_path, monkeypatch, key, f
     # 8x the files must cost well under the 64x a pairwise comparison of the paths would
     small = _check_seconds(tmp_path, monkeypatch, 1000, key, files)
     large = _check_seconds(tmp_path, monkeypatch, 8000, key, files)
-    assert large < 24 * small + 0.05
+    assert large < 12 * small + 0.05
