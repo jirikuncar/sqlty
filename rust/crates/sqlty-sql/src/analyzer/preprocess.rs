@@ -442,8 +442,9 @@ fn assigns_tuple(stmt: &Statement) -> bool {
             tuple(&insert.assignments)
                 || matches!(&insert.on, Some(OnInsert::DuplicateKeyUpdate(on)) if tuple(on))
         }
-        Statement::Query(query) => matches!(query.body.as_ref(),
-            SetExpr::Update(inner) | SetExpr::Insert(inner) if assigns_tuple(inner)),
+        Statement::Query(query) => {
+            matches!(query.body.as_ref(), SetExpr::Update(inner) if assigns_tuple(inner))
+        }
         _ => false,
     }
 }
