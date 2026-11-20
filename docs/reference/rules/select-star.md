@@ -3,7 +3,7 @@ order: 110
 group: "query"
 severity: "warn"
 fixable: true
-summary: "SELECT * used — expand to explicit column list"
+summary: "SELECT * that sqlty check --fix expands to a column list"
 origin: "Python"
 ---
 

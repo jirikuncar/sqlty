@@ -12,6 +12,23 @@ libfuzzer-sys = "0.4"
 serde_json = "1"
 sqlty-wasm = { path = "../crates/sqlty-wasm" }
 
+[dev-dependencies]
+arbitrary = "1"
+postgres = "0.19"
+proptest = "1.12"
+regex = "1"
+ruff_python_ast = "=0.0.21"
+ruff_python_parser = "=0.0.21"
+ruff_text_size = "=0.0.21"
+rusqlite = { version = "0.43", features = ["bundled"] }
+sqlty-project = { path = "../crates/sqlty-project" }
+sqlty-python = { path = "../crates/sqlty-python" }
+sqlty-sql = { path = "../crates/sqlty-sql" }
+
+[[test]]
+name = "properties"
+path = "tests/properties/main.rs"
+
 [[bin]]
 name = "run"
 path = "fuzz_targets/run.rs"
