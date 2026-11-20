@@ -93,6 +93,38 @@ SET lock_timeout = '1s';
 ALTER TABLE events ATTACH PARTITION events_rest DEFAULT;
 -- error: [constraint-scan] "a new partition of `events` scans its default partition `events_rest`"
 CREATE TABLE events_10 PARTITION OF events FOR VALUES FROM ('2026-10-01') TO ('2026-11-01');
+
+## TRUNCATE CASCADE of a table no foreign key references
+
+```sql migration
+SET lock_timeout = '1s';
+-- error:
+TRUNCATE users CASCADE;
+```
+
+## A new enum value in a column list that doesn't name its type
+
+```sql migration
+BEGIN;
+SET LOCAL lock_timeout = '1s';
+CREATE TYPE mood AS ENUM ('ok');
+ALTER TABLE users ADD COLUMN mood mood;
+COMMIT;
+BEGIN;
+ALTER TYPE mood ADD VALUE 'meh';
+-- error:
+UPDATE "users" SET email = 'meh' WHERE id = 1;
+COMMIT;
+```
+
+## A NOT NULL check alone does not bound a partition
+
+```sql migration
+SET lock_timeout = '1s';
+ALTER TABLE events_11 ADD CONSTRAINT events_11_at CHECK (at IS NOT NULL) NOT VALID;
+ALTER TABLE events_11 VALIDATE CONSTRAINT events_11_at;
+-- error: [constraint-scan] "`ATTACH PARTITION` scans `events_11`"
+ALTER TABLE events ATTACH PARTITION events_11 FOR VALUES FROM ('2026-11-01') TO ('2026-12-01');
 ```
 
 ## Rows pinned by key are not a backfill
@@ -144,4 +176,22 @@ ALTER TABLE users DROP CONSTRAINT users_pkey, REPLICA IDENTITY FULL;
 SET lock_timeout = '1s';
 -- error: [drop-primary-key] "`users` is left without a replica identity"
 ALTER TABLE users DROP COLUMN id;
+```
+
+## A pinned key in one branch of OR bounds nothing
+
+```sql migration
+SET lock_timeout = '1s';
+-- error: [unbatched-backfill]
+UPDATE users SET email = '' WHERE id = 1 OR email IS NULL;
+```
+
+## A statement that needs two tables at once
+
+```sql migration
+BEGIN;
+SET LOCAL lock_timeout = '1s';
+-- error:
+LOCK TABLE users, events;
+COMMIT;
 ```
