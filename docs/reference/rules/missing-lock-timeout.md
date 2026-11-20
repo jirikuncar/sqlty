@@ -15,7 +15,7 @@ Default severity: **warn**
 
 Reports the first new statement of a migration file that takes a lock that
 blocks writes to a table that has rows (`ALTER TABLE`, `DROP TABLE`,
-`DROP INDEX`, `LOCK TABLE`) before the file sets `lock_timeout`. Once per file.
+`DROP INDEX`, `LOCK TABLE`, `TRUNCATE`) before the file sets `lock_timeout`. Once per file.
 
 `against.sql`:
 

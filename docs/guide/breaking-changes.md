@@ -255,10 +255,14 @@ are copied into it: `INSERT ... SELECT`, `COPY ... FROM`, `MERGE` or
 |------|---------|
 | [`missing-concurrently`](../reference/rules/missing-concurrently.md) | an index built or dropped without `CONCURRENTLY` |
 | [`concurrently-in-transaction`](../reference/rules/concurrently-in-transaction.md) | `CONCURRENTLY` between `BEGIN` and `COMMIT` |
-| [`constraint-scan`](../reference/rules/constraint-scan.md) | a constraint or `SET NOT NULL` that checks every row while it blocks writes |
+| [`constraint-scan`](../reference/rules/constraint-scan.md) | a constraint, `SET NOT NULL` or a new partition that checks every row while it blocks writes |
 | [`table-rewrite`](../reference/rules/table-rewrite.md) | a statement that rewrites the table |
 | [`add-required-column`](../reference/rules/add-required-column.md) | a `NOT NULL` column without a default |
 | [`missing-lock-timeout`](../reference/rules/missing-lock-timeout.md) | a lock that blocks writes taken before `SET lock_timeout` |
+| [`truncate-cascade`](../reference/rules/truncate-cascade.md) | `TRUNCATE ... CASCADE` |
+| [`enum-value-in-transaction`](../reference/rules/enum-value-in-transaction.md) | an enum value used in the transaction that added it |
+| [`concurrent-index-if-not-exists`](../reference/rules/concurrent-index-if-not-exists.md) | `CREATE INDEX CONCURRENTLY IF NOT EXISTS` |
+| [`disable-trigger-all`](../reference/rules/disable-trigger-all.md) | `DISABLE TRIGGER ALL` |
 
 `against.sql`:
 

@@ -15,9 +15,10 @@ use std::ops::{ControlFlow, Range};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use sqlparser::ast::{
-    AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, CopySource, DataType,
-    DetachPartitionMode, Expr, Insert, Merge, ObjectName, ObjectType, SetExpr, Statement,
-    TableConstraint, TableFactor, TableObject,
+    AlterColumnOperation, AlterTableOperation, AlterType, AlterTypeOperation, CascadeOption,
+    CheckConstraint, ColumnDef, ColumnOption, CopySource, DataType, DetachPartitionMode, Expr,
+    ForValues, Insert, Merge, ObjectName, ObjectType, SetExpr, Statement, TableConstraint,
+    TableFactor, TableObject,
 };
 
 use crate::analyzer::{parse_ddl, SqlDialect};
@@ -87,8 +88,30 @@ struct Model {
     tables: FxHashSet<String>,
     /// The declared type of each column.
     types: FxHashMap<(String, String), DataType>,
-    /// The `CHECK (column IS NOT NULL)` constraints of each table: name, column, validated.
-    not_null: FxHashMap<String, Vec<(Option<String>, String, bool)>>,
+    /// The tables on either side of a foreign key.
+    referencing: FxHashSet<String>,
+    /// The tables a foreign key references.
+    referenced: FxHashSet<String>,
+    /// The `CHECK` constraints of each table.
+    checks: FxHashMap<String, Vec<Check>>,
+    /// The columns declared `NOT NULL`, by table.
+    required: FxHashSet<(String, String)>,
+    /// The columns of each partitioned table's partition key.
+    partition_keys: FxHashMap<String, Vec<String>>,
+    /// The default partition of each partitioned table.
+    defaults: FxHashMap<String, String>,
+    /// The partitioned tables whose partitions no `CHECK` can prove: hash partitioning or an
+    /// expression in the key.
+    unprovable: FxHashSet<String>,
+}
+
+struct Check {
+    name: Option<String>,
+    /// The column of a `CHECK (column IS NOT NULL)`.
+    not_null: Option<String>,
+    /// The lowercased words of its expression.
+    words: Vec<String>,
+    valid: bool,
 }
 
 /// What the statements of one file so far have set.
@@ -99,6 +122,9 @@ struct Session {
     /// Set by `SET LOCAL`, until the transaction ends.
     local_timeout: bool,
     reported_timeout: bool,
+    /// The enum values `ALTER TYPE ... ADD VALUE` added in the open transaction, as string
+    /// literals, with their type.
+    added_values: Vec<(String, ObjectName)>,
 }
 
 impl Model {
@@ -134,6 +160,19 @@ impl Model {
                     Some(parsed) => self.judge(parsed, &mut report),
                     None => self.judge_tokens(&stmt, &tokens, &mut report),
                 };
+                if let Some(used) = session
+                    .added_values
+                    .iter()
+                    .position(|(value, ty)| self.uses_value(&stmt, value, ty))
+                {
+                    let (value, ty) = session.added_values.remove(used);
+                    report(
+                        Rule::EnumValueInTransaction,
+                        format!(
+                            "{value} was added to `{ty}` in this transaction: PostgreSQL refuses a new enum value until the transaction that added it commits, so `COMMIT` after `ADD VALUE`"
+                        ),
+                    );
+                }
                 if judged.concurrently && session.transaction {
                     report(
                         Rule::ConcurrentlyInTransaction,
@@ -146,6 +185,14 @@ impl Model {
                         Rule::MissingLockTimeout,
                         "takes a lock that blocks writes without `SET lock_timeout` first: while it waits for the lock, the queries it blocks wait behind it".to_string(),
                     );
+                }
+                if let Some(Statement::AlterType(AlterType {
+                    name,
+                    operation: AlterTypeOperation::AddValue(add),
+                })) = parsed.as_ref().filter(|_| session.transaction)
+                {
+                    let value = format!("'{}'", add.value.value.replace('\'', "''"));
+                    session.added_values.push((value, name.clone()));
                 }
                 let created = parsed.as_ref().and_then(created);
                 if let Some(created) = created.filter(|c| !self.tables.contains(c)) {
@@ -197,6 +244,52 @@ impl Model {
                         (table.clone(), name(&column.name)),
                         column.data_type.clone(),
                     );
+                    self.require(&table, column);
+                }
+                for constraint in &create.constraints {
+                    self.require_key(&table, constraint);
+                }
+                if let Some(by) = &create.partition_by {
+                    let by = by.to_string();
+                    let parts = by
+                        .split_once('(')
+                        .and_then(|(_, rest)| rest.rsplit_once(')'))
+                        .map_or("", |(parts, _)| parts);
+                    let keys: Vec<String> = parts
+                        .split(',')
+                        .map(|part| fold_token(part.trim()))
+                        .collect();
+                    let plain = keys.iter().all(|key| {
+                        create
+                            .columns
+                            .iter()
+                            .any(|column| name(&column.name) == *key)
+                    });
+                    if !plain || by.to_lowercase().starts_with("hash") {
+                        self.unprovable.insert(table.clone());
+                    }
+                    self.partition_keys.insert(table.clone(), keys);
+                }
+                if let (Some(parent), Some(ForValues::Default)) =
+                    (&create.partition_of, &create.for_values)
+                {
+                    self.defaults.insert(key(parent), table.clone());
+                }
+                let inline = create.columns.iter().flat_map(|column| &column.options);
+                let checks =
+                    inline
+                        .filter_map(|option| match &option.option {
+                            ColumnOption::Check(check) => Some(check),
+                            _ => None,
+                        })
+                        .chain(create.constraints.iter().filter_map(
+                            |constraint| match constraint {
+                                TableConstraint::Check(check) => Some(check),
+                                _ => None,
+                            },
+                        ));
+                for check in checks {
+                    self.add_check(&table, check, true);
                 }
             }
             Statement::AlterTable(alter) => {
@@ -205,8 +298,20 @@ impl Model {
                     self.apply_op(&table, op);
                 }
             }
+            Statement::Drop {
+                object_type: ObjectType::Table,
+                names,
+                ..
+            } => {
+                let dropped: Vec<String> = names.iter().map(key).collect();
+                self.defaults.retain(|parent, default| {
+                    !dropped.contains(parent) && !dropped.contains(default)
+                });
+            }
             _ => {}
         }
+        self.referencing.extend(foreign_keys(stmt));
+        self.referenced.extend(referenced_tables(stmt));
     }
 
     fn apply_op(&mut self, table: &str, op: &AlterTableOperation) {
@@ -216,6 +321,42 @@ impl Model {
                     (table.to_string(), name(&column_def.name)),
                     column_def.data_type.clone(),
                 );
+                self.require(table, column_def);
+            }
+            AlterTableOperation::AlterColumn {
+                column_name,
+                op: AlterColumnOperation::SetNotNull,
+            } => {
+                self.required.insert((table.to_string(), name(column_name)));
+            }
+            AlterTableOperation::AlterColumn {
+                column_name,
+                op: AlterColumnOperation::DropNotNull,
+            } => {
+                self.required
+                    .remove(&(table.to_string(), name(column_name)));
+            }
+            AlterTableOperation::DetachPartitionOf { partition, .. } => {
+                if self.defaults.get(table) == Some(&key(partition)) {
+                    self.defaults.remove(table);
+                }
+            }
+            AlterTableOperation::AddConstraint { constraint, .. }
+                if matches!(constraint, TableConstraint::PrimaryKey(_)) =>
+            {
+                self.require_key(table, constraint);
+            }
+            AlterTableOperation::AttachPartitionOf {
+                partition,
+                for_values: ForValues::Default,
+            } => {
+                self.defaults.insert(table.to_string(), key(partition));
+            }
+            AlterTableOperation::DropConstraint { name: dropped, .. } => {
+                let dropped = name(dropped);
+                if let Some(checks) = self.checks.get_mut(table) {
+                    checks.retain(|check| check.name.as_ref() != Some(&dropped));
+                }
             }
             AlterTableOperation::AlterColumn {
                 column_name,
@@ -227,24 +368,165 @@ impl Model {
             AlterTableOperation::AddConstraint {
                 constraint: TableConstraint::Check(check),
                 not_valid,
-            } => {
-                if let Some(column) = is_not_null(&check.expr) {
-                    self.not_null.entry(table.to_string()).or_default().push((
-                        check.name.as_ref().map(name),
-                        column,
-                        !not_valid,
-                    ));
-                }
-            }
+            } => self.add_check(table, check, !not_valid),
             AlterTableOperation::ValidateConstraint { name: validated } => {
                 let validated = name(validated);
-                for check in self.not_null.entry(table.to_string()).or_default() {
-                    if check.0.as_ref() == Some(&validated) {
-                        check.2 = true;
+                for check in self.checks.entry(table.to_string()).or_default() {
+                    if check.name.as_ref() == Some(&validated) {
+                        check.valid = true;
                     }
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Whether `stmt` puts the new enum `value` of `ty` to use: it casts to `ty`, names a
+    /// column of type `ty`, or names no table whose columns are known.
+    fn uses_value(&self, stmt: &Raw, value: &str, ty: &ObjectName) -> bool {
+        let tokens = stmt.tokens();
+        if !tokens.contains(&value)
+            || tokens
+                .iter()
+                .take(2)
+                .map(|t| t.to_lowercase())
+                .eq(["alter", "type"])
+        {
+            return false;
+        }
+        let words: Vec<String> = tokens.iter().map(|token| fold_token(token)).collect();
+        let ty = key(ty);
+        let short = ty.rsplit('.').next().unwrap_or(&ty);
+        let typed = |column: &(String, String)| {
+            self.types.get(column).is_some_and(|declared| {
+                let declared = declared.to_string().to_lowercase();
+                declared == ty || declared == short
+            })
+        };
+        let cast = words
+            .windows(2)
+            .any(|pair| matches!(pair[0].as_str(), "::" | "as") && pair[1] == short);
+        let positional = match parse(stmt) {
+            Some((
+                Statement::Insert(Insert {
+                    table: TableObject::TableName(table),
+                    columns,
+                    ..
+                }),
+                _,
+            )) if columns.is_empty() => {
+                let table = key(&table);
+                self.types
+                    .keys()
+                    .any(|column| column.0 == table && typed(column))
+            }
+            _ => false,
+        };
+        cast || positional
+            || words.iter().all(|word| !self.tables.contains(word))
+            || self
+                .types
+                .keys()
+                .any(|column| typed(column) && words.contains(&column.1))
+    }
+
+    fn add_check(&mut self, table: &str, check: &CheckConstraint, valid: bool) {
+        self.checks
+            .entry(table.to_string())
+            .or_default()
+            .push(Check {
+                name: check.name.as_ref().map(name),
+                not_null: is_not_null(&check.expr),
+                words: words(&check.expr.to_string()),
+                valid,
+            });
+    }
+
+    fn require(&mut self, table: &str, column: &ColumnDef) {
+        let required = column.options.iter().any(|option| {
+            matches!(
+                option.option,
+                ColumnOption::NotNull | ColumnOption::PrimaryKey(_)
+            )
+        });
+        if required {
+            self.required
+                .insert((table.to_string(), name(&column.name)));
+        }
+    }
+
+    fn require_key(&mut self, table: &str, constraint: &TableConstraint) {
+        if let TableConstraint::PrimaryKey(key) = constraint {
+            for column in &key.columns {
+                for word in words(&column.column.expr.to_string()) {
+                    self.required.insert((table.to_string(), word));
+                }
+            }
+        }
+    }
+
+    /// Whether `column` of `table` can hold no NULL.
+    fn is_required(&self, table: &str, column: &str) -> bool {
+        self.required
+            .contains(&(table.to_string(), column.to_string()))
+            || self.checks.get(table).is_some_and(|checks| {
+                checks
+                    .iter()
+                    .any(|check| check.valid && check.not_null.as_deref() == Some(column))
+            })
+    }
+
+    /// Whether a validated `CHECK` of `partition` may prove that its rows fit a partition of
+    /// `parent`: it names a partition key column, and every key column is `NOT NULL`. Without
+    /// a known key, a `NOT NULL` column it names.
+    fn proves_bounds(&self, partition: &str, parent: &str) -> bool {
+        let keys = self
+            .partition_keys
+            .get(parent)
+            .filter(|keys| !keys.is_empty());
+        self.bounds_checks(partition, parent)
+            .any(|check| match keys {
+                Some(keys) => keys.iter().all(|key| self.is_required(partition, key)),
+                None => check
+                    .words
+                    .iter()
+                    .any(|word| self.is_required(partition, word)),
+            })
+    }
+
+    /// The validated checks of `table` that may bound the partition key of `parent`: they
+    /// name a key column and are more than `IS NOT NULL`.
+    fn bounds_checks<'a>(&'a self, table: &str, parent: &str) -> impl Iterator<Item = &'a Check> {
+        let keys = self
+            .partition_keys
+            .get(parent)
+            .filter(|keys| !keys.is_empty());
+        let provable = !self.unprovable.contains(parent);
+        self.checks
+            .get(table)
+            .into_iter()
+            .flatten()
+            .filter(move |check| provable && check.valid && check.not_null.is_none())
+            .filter(move |check| {
+                keys.is_none_or(|keys| {
+                    keys.iter()
+                        .any(|key| check.words.contains(&key.to_lowercase()))
+                })
+            })
+    }
+
+    /// Report the scan of `parent`'s default partition that a new partition of it makes.
+    fn default_scan(&self, parent: &str, report: &mut impl FnMut(Rule, String)) {
+        let Some(default) = self.defaults.get(parent) else {
+            return;
+        };
+        if !self.created.contains(default) && self.bounds_checks(default, parent).next().is_none() {
+            report(
+                Rule::ConstraintScan,
+                format!(
+                    "a new partition of `{parent}` scans its default partition `{default}` for rows that belong to the new one, under an ACCESS EXCLUSIVE lock on it: move those rows out and add a validated `CHECK` to `{default}` that excludes the new bounds first"
+                ),
+            );
         }
     }
 
@@ -255,6 +537,15 @@ impl Model {
     fn judge(&self, stmt: &Statement, report: &mut impl FnMut(Rule, String)) -> Judged {
         match stmt {
             Statement::CreateIndex(index) => {
+                if index.concurrently && index.if_not_exists && !self.is_new(&index.table_name) {
+                    report(
+                        Rule::ConcurrentIndexIfNotExists,
+                        format!(
+                            "a failed `CREATE INDEX CONCURRENTLY` leaves an invalid index on `{}`, and `IF NOT EXISTS` then skips building it again: `DROP INDEX CONCURRENTLY IF EXISTS` first and create it without `IF NOT EXISTS`",
+                            index.table_name
+                        ),
+                    );
+                }
                 if !index.concurrently && !self.is_new(&index.table_name) {
                     report(
                         Rule::MissingConcurrently,
@@ -301,6 +592,39 @@ impl Model {
                 Judged::default()
             }
             Statement::Lock(_) => Judged::strong(),
+            Statement::CreateTable(create) => {
+                if let (Some(parent), Some(bounds)) = (&create.partition_of, &create.for_values) {
+                    if *bounds != ForValues::Default {
+                        self.default_scan(&key(parent), report);
+                    }
+                }
+                Judged::default()
+            }
+            Statement::Truncate(truncate) => {
+                let created = truncate
+                    .table_names
+                    .iter()
+                    .all(|target| self.is_new(&target.name));
+                let referenced = truncate.table_names.iter().any(|target| {
+                    let table = key(&target.name);
+                    self.referenced.contains(&table) || !self.tables.contains(&table)
+                });
+                if !created && referenced && truncate.cascade == Some(CascadeOption::Cascade) {
+                    let names: Vec<String> = truncate
+                        .table_names
+                        .iter()
+                        .map(|target| format!("`{}`", target.name))
+                        .collect();
+                    report(
+                        Rule::TruncateCascade,
+                        format!(
+                            "`TRUNCATE ... CASCADE` also empties every table with a foreign key to {}, and the tables that reference those: truncate the tables by name",
+                            names.join(", ")
+                        ),
+                    );
+                }
+                Judged::strong_unless(created)
+            }
             Statement::AlterTable(alter) => {
                 if self.is_new(&alter.name) {
                     return Judged::default();
@@ -347,10 +671,10 @@ impl Model {
                 op: AlterColumnOperation::SetNotNull,
             } => {
                 let column = name(column_name);
-                let checked = self.not_null.get(table).is_some_and(|checks| {
+                let checked = self.checks.get(table).is_some_and(|checks| {
                     checks
                         .iter()
-                        .any(|(_, checked, valid)| *valid && *checked == column)
+                        .any(|check| check.valid && check.not_null.as_ref() == Some(&column))
                 });
                 if !checked {
                     report(
@@ -373,6 +697,22 @@ impl Model {
                             "changing `{column_name}` to {data_type} rewrites `{written}` and its indexes under an ACCESS EXCLUSIVE lock: add a new column, backfill it and switch over"
                         ),
                     );
+                }
+            }
+            AlterTableOperation::AttachPartitionOf {
+                partition,
+                for_values,
+            } => {
+                if !self.is_new(partition) && !self.proves_bounds(&key(partition), table) {
+                    report(
+                        Rule::ConstraintScan,
+                        format!(
+                            "`ATTACH PARTITION` scans `{partition}` for rows outside its bounds under an ACCESS EXCLUSIVE lock on it: `SET NOT NULL` on the partition key, add a `CHECK` that matches the bounds `NOT VALID` and `VALIDATE` it, then attach"
+                        ),
+                    );
+                }
+                if *for_values != ForValues::Default {
+                    self.default_scan(table, report);
                 }
             }
             AlterTableOperation::DetachPartitionOf { mode, .. } => {
@@ -400,8 +740,35 @@ impl Model {
                 TableConstraint::Unique(_) | TableConstraint::PrimaryKey(_) => {
                     report(Rule::MissingConcurrently, unique_message(written));
                 }
+                TableConstraint::Exclude(_) => {
+                    report(
+                        Rule::ConstraintScan,
+                        format!(
+                            "the exclusion constraint builds its index over every row of `{written}` under an ACCESS EXCLUSIVE lock, and PostgreSQL has no `NOT VALID` or `CONCURRENTLY` for it: add it while the table is small"
+                        ),
+                    );
+                }
                 _ => {}
             },
+            AlterTableOperation::SetLogged | AlterTableOperation::SetUnlogged => {
+                report(
+                    Rule::TableRewrite,
+                    format!(
+                        "`{op}` rewrites `{written}` under an ACCESS EXCLUSIVE lock: create the table that way, or copy the rows into a new one"
+                    ),
+                );
+            }
+            AlterTableOperation::DisableTrigger { name }
+                if name.value.eq_ignore_ascii_case("all")
+                    && (self.referencing.contains(table) || !self.tables.contains(table)) =>
+            {
+                report(
+                    Rule::DisableTriggerAll,
+                    format!(
+                        "`DISABLE TRIGGER ALL` also turns off the foreign key checks of `{written}`: rows written meanwhile are never checked; disable `USER` triggers or name them"
+                    ),
+                );
+            }
             _ => {}
         }
     }
@@ -427,20 +794,29 @@ impl Model {
                 Judged::concurrently(concurrently)
             }
             ["cluster", ..] => {
-                let table: String = stmt.tokens()[1..]
-                    .iter()
-                    .skip_while(|t| t.eq_ignore_ascii_case("verbose"))
-                    .take_while(|t| !t.eq_ignore_ascii_case("using"))
-                    .map(|t| match t.strip_prefix('"') {
-                        Some(quoted) => quoted.trim_end_matches('"').to_string(),
-                        None => t.to_lowercase(),
-                    })
-                    .collect();
-                let table = table.strip_prefix("public.").unwrap_or(&table);
-                if !self.created.contains(table) {
+                let table = token_name(&stmt.tokens()[1..], &["verbose"], &["using"]);
+                if !self.created.contains(&table) {
                     report(Rule::TableRewrite, rewrite_command_message("CLUSTER"));
                 }
                 Judged::default()
+            }
+            ["alter", "table", rest @ ..]
+                if rest.windows(2).any(|pair| pair == ["set", "tablespace"])
+                    && !rest.starts_with(&["all", "in"]) =>
+            {
+                let skip = ["if", "exists", "only"];
+                let ends = ["set", "add", "alter", "drop", "rename", "owner", ","];
+                let table = token_name(&stmt.tokens()[2..], &skip, &ends);
+                let created = self.created.contains(&table);
+                if !created {
+                    report(
+                        Rule::TableRewrite,
+                        format!(
+                            "`SET TABLESPACE` copies `{table}` under an ACCESS EXCLUSIVE lock, blocking reads and writes until it finishes: move it online with pg_repack, outside migrations"
+                        ),
+                    );
+                }
+                Judged::strong_unless(created)
             }
             _ => Judged::default(),
         }
@@ -457,8 +833,10 @@ impl Session {
         let words: Vec<&str> = tokens.iter().map(String::as_str).collect();
         match words.as_slice() {
             ["begin", ..] | ["start", "transaction", ..] => self.transaction = true,
+            ["rollback", "to", ..] | ["release" | "savepoint", ..] => {}
             ["commit" | "end" | "rollback" | "abort", ..] => {
                 (self.transaction, self.local_timeout) = (false, false);
+                self.added_values.clear();
             }
             ["reset", "lock_timeout" | "all"] => {
                 (self.lock_timeout, self.local_timeout) = (false, false);
@@ -734,6 +1112,92 @@ fn rewrite_command_message(command: &str) -> String {
     )
 }
 
+/// The tables on either side of the foreign keys `stmt` adds.
+fn foreign_keys(stmt: &Statement) -> Vec<String> {
+    let mut tables = referenced_tables(stmt);
+    match stmt {
+        Statement::CreateTable(create) if !tables.is_empty() => tables.push(key(&create.name)),
+        Statement::AlterTable(alter) if !tables.is_empty() => tables.push(key(&alter.name)),
+        _ => {}
+    }
+    tables
+}
+
+/// The tables the foreign keys `stmt` adds reference.
+fn referenced_tables(stmt: &Statement) -> Vec<String> {
+    let (columns, constraints): (Vec<&ColumnDef>, Vec<&TableConstraint>) = match stmt {
+        Statement::CreateTable(create) => (
+            create.columns.iter().collect(),
+            create.constraints.iter().collect(),
+        ),
+        Statement::AlterTable(alter) => (
+            alter
+                .operations
+                .iter()
+                .filter_map(|op| match op {
+                    AlterTableOperation::AddColumn { column_def, .. } => Some(column_def),
+                    _ => None,
+                })
+                .collect(),
+            alter
+                .operations
+                .iter()
+                .filter_map(|op| match op {
+                    AlterTableOperation::AddConstraint { constraint, .. } => Some(constraint),
+                    _ => None,
+                })
+                .collect(),
+        ),
+        _ => return Vec::new(),
+    };
+    let inline = columns.into_iter().flat_map(|column| &column.options);
+    inline
+        .filter_map(|option| match &option.option {
+            ColumnOption::ForeignKey(fk) => Some(key(&fk.foreign_table)),
+            _ => None,
+        })
+        .chain(
+            constraints
+                .into_iter()
+                .filter_map(|constraint| match constraint {
+                    TableConstraint::ForeignKey(fk) => Some(key(&fk.foreign_table)),
+                    _ => None,
+                }),
+        )
+        .collect()
+}
+
+/// The lowercased words of `text`.
+fn words(text: &str) -> Vec<String> {
+    text.split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|word| !word.is_empty())
+        .map(str::to_lowercase)
+        .collect()
+}
+
+/// The table name in `tokens` after the leading `skip` words and before `end`, folded and
+/// without the `public` schema.
+fn token_name(tokens: &[&str], skip: &[&str], ends: &[&str]) -> String {
+    let table: String = tokens
+        .iter()
+        .skip_while(|t| skip.iter().any(|word| t.eq_ignore_ascii_case(word)))
+        .take_while(|t| !ends.iter().any(|end| t.eq_ignore_ascii_case(end)))
+        .map(|t| fold_token(t))
+        .collect();
+    match table.strip_prefix("public.") {
+        Some(rest) => rest.to_string(),
+        None => table,
+    }
+}
+
+/// `token` as PostgreSQL folds an identifier: quoted keeps its case.
+fn fold_token(token: &str) -> String {
+    match token.strip_prefix('"') {
+        Some(quoted) => quoted.trim_end_matches('"').to_string(),
+        None => token.to_lowercase(),
+    }
+}
+
 /// `name` as PostgreSQL folds it, without the `public` schema.
 fn key(name: &ObjectName) -> String {
     let parts: Vec<String> = name
@@ -849,6 +1313,20 @@ mod tests {
             ("ALTER TABLE events DETACH PARTITION events_2020", &[MissingConcurrently]),
             ("ALTER TABLE events DETACH PARTITION events_2020 CONCURRENTLY", &[]),
             ("ALTER TABLE users RENAME COLUMN bio TO about", &[]),
+            ("ALTER TABLE users SET LOGGED", &[TableRewrite]),
+            ("ALTER TABLE users SET UNLOGGED", &[TableRewrite]),
+            ("ALTER TABLE users SET TABLESPACE fast", &[TableRewrite]),
+            ("ALTER TABLE IF EXISTS ONLY public.users SET TABLESPACE fast", &[TableRewrite]),
+            ("ALTER TABLE users ADD CONSTRAINT no_overlap EXCLUDE USING gist (team_id WITH =)", &[ConstraintScan]),
+            ("ALTER TABLE users DISABLE TRIGGER ALL", &[]),
+            ("ALTER TABLE orders DISABLE TRIGGER ALL", &[DisableTriggerAll]),
+            ("ALTER TABLE users DISABLE TRIGGER USER", &[]),
+            ("ALTER TABLE users DISABLE TRIGGER audit", &[]),
+            ("CREATE INDEX CONCURRENTLY IF NOT EXISTS users_bio ON users (bio)", &[ConcurrentIndexIfNotExists]),
+            ("CREATE INDEX IF NOT EXISTS users_bio ON users (bio)", &[MissingConcurrently]),
+            ("TRUNCATE users CASCADE", &[]),
+            ("TRUNCATE orders CASCADE", &[TruncateCascade]),
+            ("TRUNCATE TABLE users, teams", &[]),
             ("LOCK TABLE users", &[]),
             ("DROP TABLE users", &[]),
             ("SELECT 1", &[]),
@@ -964,6 +1442,223 @@ mod tests {
         assert_eq!(rules(USERS, created_as), [MissingConcurrently]);
         let no_data = created_as.replace(" FROM users", " FROM users WITH NO DATA");
         assert_eq!(rules(USERS, &no_data), []);
+    }
+
+    #[test]
+    fn new_tables_are_exempt_from_the_command_rules() {
+        let migration = "CREATE TABLE t (id int);
+            ALTER TABLE t SET TABLESPACE fast;
+            ALTER TABLE t DISABLE TRIGGER ALL;
+            CREATE INDEX CONCURRENTLY IF NOT EXISTS t_id ON t (id);
+            TRUNCATE t CASCADE;";
+        assert_eq!(rules(USERS, migration), []);
+    }
+
+    #[test]
+    fn truncate_takes_a_strong_lock() {
+        assert_eq!(rules(USERS, "TRUNCATE users"), [Rule::MissingLockTimeout]);
+    }
+
+    #[test]
+    fn an_enum_value_is_used_only_after_its_transaction_commits() {
+        let baseline = format!(
+            "{USERS}\nCREATE TYPE status AS ENUM ('new');
+            CREATE TABLE orders (id BIGINT, state status, note TEXT);"
+        );
+        let migration = |between: &str, using: &str| {
+            format!(
+                "SET lock_timeout = '1s';
+                BEGIN;
+                ALTER TYPE status ADD VALUE IF NOT EXISTS 'It''s';
+                {between}
+                {using};
+                {using};
+                COMMIT;"
+            )
+        };
+        let used = "UPDATE orders SET state = 'It''s' WHERE id = 1";
+        assert_eq!(
+            check(&baseline, &[&migration("", used)])[0],
+            [Finding {
+                rule: Rule::EnumValueInTransaction,
+                message: "'It''s' was added to `status` in this transaction: PostgreSQL refuses a new enum value until the transaction that added it commits, so `COMMIT` after `ADD VALUE`".to_string(),
+                span: 148..194,
+            }]
+        );
+        let reported =
+            |between: &str, using: &str| !rules(&baseline, &migration(between, using)).is_empty();
+        assert!(reported("", "SELECT 'It''s'::status"));
+        assert!(reported("", "SELECT CAST('It''s' AS status)"));
+        assert!(reported("", "INSERT INTO orders VALUES (1, 'It''s', NULL)"));
+        assert!(reported("", "INSERT INTO orders SELECT 1, 'It''s'"));
+        assert!(!reported("", "UPDATE \"orders\" SET note = 'It''s'"));
+        assert!(!reported(
+            "",
+            "INSERT INTO orders (id, note) VALUES (1, 'It''s')"
+        ));
+        assert!(reported("", "UPDATE elsewhere SET state = 'It''s'"));
+        assert!(reported(
+            "SAVEPOINT s; ROLLBACK TO SAVEPOINT s; RELEASE s;",
+            used
+        ));
+        assert!(!reported("COMMIT; BEGIN;", used));
+        assert!(!reported("", "UPDATE orders SET note = 'It''s'"));
+        assert!(!reported("", "UPDATE orders SET state = 'it''s'"));
+        assert!(!reported(
+            "",
+            "ALTER TYPE status ADD VALUE 'y' AFTER 'It''s'"
+        ));
+        let outside = "ALTER TYPE status ADD VALUE 'x'; UPDATE orders SET state = 'x';";
+        assert_eq!(rules(&baseline, outside), []);
+    }
+
+    #[test]
+    fn foreign_keys_decide_what_trigger_and_cascade_reach() {
+        let baseline = format!(
+            "{USERS}\nCREATE TABLE posts (id BIGINT, user_id BIGINT REFERENCES users (id));
+            CREATE TABLE tags (id BIGINT);
+            CREATE TABLE notes (id BIGINT);
+            ALTER TABLE notes ADD CONSTRAINT fk FOREIGN KEY (id) REFERENCES tags (id) NOT VALID;"
+        );
+        for (migration, expected) in [
+            ("ALTER TABLE posts DISABLE TRIGGER ALL", &[Rule::DisableTriggerAll][..]),
+            ("ALTER TABLE users DISABLE TRIGGER ALL", &[Rule::DisableTriggerAll]),
+            ("ALTER TABLE notes DISABLE TRIGGER ALL", &[Rule::DisableTriggerAll]),
+            ("ALTER TABLE teams DISABLE TRIGGER ALL", &[]),
+            ("TRUNCATE tags CASCADE", &[Rule::TruncateCascade]),
+            ("TRUNCATE teams CASCADE", &[]),
+            ("TRUNCATE posts CASCADE", &[]),
+            (
+                "ALTER TABLE teams ADD COLUMN owner BIGINT REFERENCES users (id); TRUNCATE teams CASCADE",
+                &[],
+            ),
+            (
+                "ALTER TABLE users ADD COLUMN team BIGINT REFERENCES teams (id); TRUNCATE teams CASCADE",
+                &[Rule::TruncateCascade],
+            ),
+        ] {
+            let migration = format!("SET lock_timeout = '1s'; {migration};");
+            assert_eq!(rules(&baseline, &migration), expected, "{migration}");
+        }
+    }
+
+    #[test]
+    fn set_tablespace_names_one_table() {
+        for (migration, expected) in [
+            (
+                "ALTER TABLE users SET TABLESPACE fast NOWAIT",
+                &[Rule::TableRewrite][..],
+            ),
+            (
+                "ALTER TABLE ALL IN TABLESPACE pg_default SET TABLESPACE fast",
+                &[],
+            ),
+        ] {
+            assert_eq!(one(migration), expected, "{migration}");
+        }
+    }
+
+    #[test]
+    fn attaching_a_partition_scans_it_without_a_validated_check() {
+        let baseline = "CREATE TABLE events (at date, price int) PARTITION BY RANGE (at);
+            CREATE TABLE open (at date, price int CHECK (price > 0));
+            CREATE TABLE bounded (at date NOT NULL, price int, CHECK (at >= '2026-10-01'));
+            CREATE TABLE nullable (at date, CHECK (at >= '2026-10-01'));
+            CREATE TABLE proven (at date CHECK (at IS NOT NULL), CHECK (at >= '2026-10-01'));
+            CREATE TABLE bare (at date);
+            CREATE TABLE keyed (at date, PRIMARY KEY (at), CHECK (at >= '2026-10-01'));";
+        let bounds = "FOR VALUES FROM ('2026-10-01') TO ('2026-11-01')";
+        let validated = "ALTER TABLE open ADD CONSTRAINT b CHECK (at >= '2026-10-01') NOT VALID;
+            ALTER TABLE open VALIDATE CONSTRAINT b;";
+        for (setup, table, expected) in [
+            ("", "open", &[Rule::ConstraintScan][..]),
+            ("", "bounded", &[]),
+            ("", "nullable", &[Rule::ConstraintScan]),
+            (validated, "open", &[Rule::ConstraintScan]),
+            (
+                &format!("{validated} ALTER TABLE open ALTER COLUMN at SET NOT NULL;"),
+                "open",
+                &[Rule::ConstraintScan],
+            ),
+            ("", "proven", &[]),
+            ("ALTER TABLE keyed DROP CONSTRAINT gone;", "keyed", &[]),
+            ("ALTER TABLE bare DROP CONSTRAINT gone;", "bare", &[Rule::ConstraintScan]),
+            (
+                "ALTER TABLE bare ADD CONSTRAINT nn CHECK (at IS NOT NULL) NOT VALID; ALTER TABLE bare VALIDATE CONSTRAINT nn;",
+                "bare",
+                &[Rule::ConstraintScan],
+            ),
+            ("ALTER TABLE bounded ALTER COLUMN at DROP NOT NULL;", "bounded", &[Rule::ConstraintScan]),
+            ("CREATE TABLE fresh (at date);", "fresh", &[]),
+            (
+                "CREATE TABLE fresh (LIKE open); INSERT INTO fresh SELECT * FROM open;",
+                "fresh",
+                &[Rule::ConstraintScan],
+            ),
+        ] {
+            let migration = format!(
+                "SET lock_timeout = '1s';\n{setup}\nALTER TABLE events ATTACH PARTITION {table} {bounds};"
+            );
+            assert_eq!(rules(baseline, &migration), expected, "{setup} {table}");
+        }
+        let named = "SET lock_timeout = '1s';
+            ALTER TABLE bounded DROP CONSTRAINT b;
+            ALTER TABLE events ATTACH PARTITION bounded FOR VALUES FROM ('2026-10-01') TO ('2026-11-01');";
+        let named_baseline = baseline.replace(
+            "CHECK (at >= '2026-10-01'));",
+            "CONSTRAINT b CHECK (at >= '2026-10-01'));",
+        );
+        assert_eq!(rules(&named_baseline, named), [Rule::ConstraintScan]);
+        let unknown_key = "SET lock_timeout = '1s';
+            ALTER TABLE logs ATTACH PARTITION bounded FOR VALUES FROM ('2026-10-01') TO ('2026-11-01');";
+        assert_eq!(rules(baseline, unknown_key), []);
+    }
+
+    #[test]
+    fn a_new_partition_scans_the_default_partition() {
+        let baseline = "CREATE TABLE events (at date NOT NULL) PARTITION BY RANGE (at);
+            CREATE TABLE events_rest PARTITION OF events DEFAULT;
+            CREATE TABLE logs (at date NOT NULL) PARTITION BY RANGE (at);
+            CREATE TABLE logs_rest (at date NOT NULL);
+            ALTER TABLE logs ATTACH PARTITION logs_rest DEFAULT;";
+        for (migration, expected) in [
+            ("CREATE TABLE events_10 PARTITION OF events FOR VALUES FROM ('2026-10-01') TO ('2026-11-01')", &[Rule::ConstraintScan][..]),
+            ("CREATE TABLE logs_10 (at date NOT NULL); ALTER TABLE logs ATTACH PARTITION logs_10 FOR VALUES FROM ('2026-10-01') TO ('2026-11-01')", &[Rule::ConstraintScan]),
+            ("CREATE TABLE events_other PARTITION OF events DEFAULT", &[]),
+            (
+                "ALTER TABLE events_rest ADD CONSTRAINT x CHECK (NOT (at >= '2026-10-01' AND at < '2026-11-01')); CREATE TABLE events_10 PARTITION OF events FOR VALUES FROM ('2026-10-01') TO ('2026-11-01')",
+                &[Rule::ConstraintScan],
+            ),
+            (
+                "DROP TABLE events_rest; CREATE TABLE events_10 PARTITION OF events FOR VALUES FROM ('2026-10-01') TO ('2026-11-01')",
+                &[],
+            ),
+            (
+                "ALTER TABLE logs DETACH PARTITION logs_rest; CREATE TABLE logs_10 PARTITION OF logs FOR VALUES FROM ('2026-10-01') TO ('2026-11-01')",
+                &[Rule::MissingConcurrently],
+            ),
+        ] {
+            let migration = format!("SET lock_timeout = '1s'; {migration};");
+            assert_eq!(rules(baseline, &migration), expected, "{migration}");
+        }
+    }
+
+    #[test]
+    fn hash_and_expression_keys_are_never_proven() {
+        let baseline = "CREATE TABLE h (id int) PARTITION BY HASH (id);
+            CREATE TABLE h0 (id int NOT NULL, CHECK (id > 0));
+            CREATE TABLE e (name text) PARTITION BY RANGE (lower(name));
+            CREATE TABLE e0 (name text NOT NULL, CHECK (lower(name) >= 'a'));
+            CREATE TABLE q (\"At\" date) PARTITION BY RANGE (\"At\");
+            CREATE TABLE q0 (\"At\" date NOT NULL, CHECK (\"At\" >= '2026-10-01'));";
+        for (migration, expected) in [
+            ("ALTER TABLE h ATTACH PARTITION h0 FOR VALUES WITH (MODULUS 4, REMAINDER 0)", &[Rule::ConstraintScan][..]),
+            ("ALTER TABLE e ATTACH PARTITION e0 FOR VALUES FROM ('a') TO ('m')", &[Rule::ConstraintScan]),
+            ("ALTER TABLE q ATTACH PARTITION q0 FOR VALUES FROM ('2026-10-01') TO ('2026-11-01')", &[]),
+        ] {
+            let migration = format!("SET lock_timeout = '1s'; {migration};");
+            assert_eq!(rules(baseline, &migration), expected, "{migration}");
+        }
     }
 
     #[test]
