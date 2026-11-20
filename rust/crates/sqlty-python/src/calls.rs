@@ -497,6 +497,8 @@ pub fn helper_calls<'a>(
             .collect();
         names.extend(renamed);
     }
+    // The receiver of a call is worked out only for a method some helper is named by.
+    let methods = names.clone();
     let mut names: Vec<String> = names.into_iter().collect();
     names.sort();
     // No pattern holds too many names: every scope is read.
@@ -549,7 +551,11 @@ pub fn helper_calls<'a>(
                 let name = attr.attr.as_str();
                 let function = dotted(&attr.value)
                     .and_then(|prefix| lookup(&module_of(&prefix, modules), name));
-                function.or_else(|| receivers.method(&attr.value, name, stack))
+                function.or_else(|| {
+                    methods
+                        .contains(name)
+                        .then(|| receivers.method(&attr.value, name, stack))?
+                })
             }),
         };
         let Some(helper) = helper else {
@@ -729,5 +735,43 @@ mod tests {
     fn a_module_without_markers_has_no_helpers() {
         let source = Source::new("from typing import Annotated\nx = 1\n", (3, 14)).unwrap();
         assert!(index_functions(&source).is_empty());
+    }
+
+    /// The paths the checks of `text` read outside an index whose only helper is the
+    /// method `Db.one` of the module `db`.
+    fn read_for(text: &str) -> usize {
+        use crate::index::{Builder, Module, Outside};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let helper = "from typing import Annotated, LiteralString\nfrom sqlty import SQL\nclass Db:\n    def one(self, query: Annotated[LiteralString, SQL]): ...\n";
+        let db = Arc::new(Module::new(Arc::from(helper), "db", (3, 14)));
+        let found = index_functions(db.source().unwrap());
+        let mut builder = Builder::new((3, 14));
+        builder.add_found("db", db, &found);
+        let read = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&read);
+        builder.outside(Outside {
+            paths: vec![std::path::PathBuf::from("/root")],
+            read: Arc::new(move |_| {
+                counted.fetch_add(1, Ordering::Relaxed);
+                None
+            }),
+        });
+        let index = builder.build();
+        let source = Source::new(text, (3, 14)).unwrap().named(Some("app"));
+        let calls = helper_calls(&source, Some(&index), Some("app"), None);
+        assert!(calls.is_empty(), "no call of a helper");
+        read.load(Ordering::Relaxed)
+    }
+
+    #[test]
+    fn a_receiver_is_worked_out_only_for_a_method_a_helper_is_named_by() {
+        // The scope names a helper (`one`), so its calls are read: only the receiver
+        // of `.one(...)` is looked for, never those of the calls around it.
+        let around = "import lib, other\ndef run(one):\n    lib.config.load('a')\n    other.thing().close()\n";
+        assert_eq!(read_for(around), 0);
+        let called = format!("{around}    lib.config.one('SELECT 1')\n");
+        assert!(read_for(&called) > 0, "`lib` is looked for under the root");
     }
 }
