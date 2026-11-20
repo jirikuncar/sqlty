@@ -1,25 +1,68 @@
 //! The class of a call's receiver, read from declarations the way a type checker reads
 //! them: annotations, `x = Cls(...)`, attributes declared on a class or its bases, return
-//! annotations, `with ... as`. Nothing is inferred from a function body, nothing is
-//! imported or run; what no declaration states is unknown and the call is skipped.
+//! annotations, `with ... as`, `isinstance`. Nothing is inferred from a function body,
+//! nothing is imported or run; what no declaration states is unknown and the call is
+//! skipped.
 //!
-//! [`Facts`] is what one module declares, owned so that the index keeps it per module;
-//! [`Resolver`] evaluates the receiver of a call of the checked module against them.
+//! [`Facts`] is what one module declares, owned so that the index keeps it per module.
+//! [`Resolver`] evaluates the receiver of a call of the checked module against them: a
+//! name is what the bindings that reach the call give it ([`crate::flow`]), an attribute
+//! what the class of its base or one of that class's bases declares.
 
 use std::cell::{Cell, OnceCell, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 
-use ruff_python_ast::{Expr, Operator, Stmt, StmtClassDef, StmtFunctionDef};
+use ruff_python_ast::{Alias, Expr, Operator, Stmt, StmtClassDef, StmtFunctionDef};
 use ruff_text_size::Ranged;
 
 use crate::calls::{method_kind, Helper, Kind};
-use crate::index::{HelperIndex, Targets};
+use crate::flow;
+use crate::index::{imports_of, HelperIndex};
+use crate::module::Import;
 use crate::scopes::{dotted, Node, Origin, Scan, Scope};
 use crate::types::info::Dict;
 use crate::types::symbols::Source;
 
-/// Modules whose names are read by name, never from their source.
+/// What a name of a module that is read by name, never from its source, means to a
+/// receiver.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Form {
+    /// `cast(T, value)`.
+    Cast,
+    /// `Self`.
+    Receiver,
+    /// `Wrapper[T]` that is `T`: `Optional`, `ClassVar`, `Final`, `Annotated`, ...
+    Transparent,
+    /// `Union[A, B]`.
+    Union,
+    /// `Type[T]`.
+    TypeOf,
+    /// `Manager[T]` whose `with` gives `T`.
+    Manager,
+}
+
+/// The special forms, by module and name; `typing` stands for `typing_extensions` too.
+const FORMS: [(&str, &str, Form); 16] = [
+    ("typing", "cast", Form::Cast),
+    ("typing", "Self", Form::Receiver),
+    ("typing", "Optional", Form::Transparent),
+    ("typing", "ClassVar", Form::Transparent),
+    ("typing", "Final", Form::Transparent),
+    ("typing", "Annotated", Form::Transparent),
+    ("typing", "Required", Form::Transparent),
+    ("typing", "NotRequired", Form::Transparent),
+    ("typing", "ReadOnly", Form::Transparent),
+    ("typing", "Union", Form::Union),
+    ("typing", "Type", Form::TypeOf),
+    ("typing", "ContextManager", Form::Manager),
+    ("typing", "AsyncContextManager", Form::Manager),
+    ("contextlib", "AbstractContextManager", Form::Manager),
+    ("contextlib", "AbstractAsyncContextManager", Form::Manager),
+    ("contextlib", "_GeneratorContextManager", Form::Manager),
+];
+/// Modules whose names are read by name: every other name of theirs is unknown.
 const KNOWN: [&str; 7] = [
     "typing",
     "typing_extensions",
@@ -28,25 +71,6 @@ const KNOWN: [&str; 7] = [
     "builtins",
     "abc",
     "sqlty",
-];
-const TYPING: [&str; 2] = ["typing", "typing_extensions"];
-/// `Wrapper[T]` that is `T` to a receiver.
-const TRANSPARENT: [&str; 7] = [
-    "Optional",
-    "ClassVar",
-    "Final",
-    "Annotated",
-    "Required",
-    "NotRequired",
-    "ReadOnly",
-];
-/// `Manager[T]` whose `with` gives `T`.
-const MANAGERS: [&str; 5] = [
-    "ContextManager",
-    "AsyncContextManager",
-    "AbstractContextManager",
-    "AbstractAsyncContextManager",
-    "_GeneratorContextManager",
 ];
 /// What a `@contextmanager` function is annotated to return, `T` being what it yields.
 const YIELDING: [&str; 6] = [
@@ -60,6 +84,8 @@ const YIELDING: [&str; 6] = [
 /// How deep an evaluation nests, and how many steps one receiver may take.
 const DEPTH: u8 = 40;
 const FUEL: u32 = 2000;
+/// The module of the class that stands for a base that is not known.
+const NOWHERE: &str = "\0";
 
 /// A class: the module that defines it and its name there. A class of a module that is not
 /// read keeps the module and name it is imported by.
@@ -69,6 +95,31 @@ pub struct Class {
     pub name: String,
 }
 
+impl Class {
+    fn new(module: &str, name: &str) -> Self {
+        Class {
+            module: module.to_string(),
+            name: name.to_string(),
+        }
+    }
+
+    /// What the name means when its module is one read by name; `Err` for a name of such
+    /// a module that means nothing here.
+    fn form(&self) -> Option<Result<Form, ()>> {
+        let module = match self.module.as_str() {
+            "typing_extensions" => "typing",
+            module => module,
+        };
+        KNOWN.contains(&module).then(|| {
+            FORMS
+                .iter()
+                .find(|(owner, name, _)| *owner == module && *name == self.name)
+                .map(|(_, _, form)| *form)
+                .ok_or(())
+        })
+    }
+}
+
 /// What an expression evaluates to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
@@ -76,6 +127,10 @@ pub enum Value {
     Instance(Class),
     /// The class itself.
     Type(Class),
+    /// A name of a module that is not read: a class, a function or a module, known by
+    /// the path it is imported by. It is called and annotated with as a class would be,
+    /// so that a helper registered by that path is found.
+    Unresolved(Class),
     /// A function of `module`, or the method `name` of its class `class` bound to `receiver`.
     Function {
         module: String,
@@ -104,7 +159,7 @@ pub enum Ann {
     Unknown,
 }
 
-/// The expression a name or attribute is assigned, as far as a receiver reads it.
+/// What a name or attribute is bound to, as far as a receiver reads it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Val {
     Name(String),
@@ -117,6 +172,18 @@ pub enum Val {
     Declared(Ann),
     /// `with value as`, `async with` when true.
     Entered(Box<Val>, bool),
+    /// The class of this name, defined at the top of the module.
+    Class(String),
+    /// The function of this name, defined at the top of the module.
+    Function(String),
+    /// `from module import original as local`, the module named in full.
+    From {
+        module: String,
+        original: String,
+        local: String,
+    },
+    /// A module, as `import` binds it.
+    Module(String),
     None,
     Unknown,
 }
@@ -140,13 +207,13 @@ pub struct ClassFacts {
     pub methods: HashMap<String, Method>,
 }
 
-/// What a module declares.
+/// What a module declares at its top: every binding of every name, its classes and its
+/// functions. Classes defined in a function or in another class are not modelled.
 #[derive(Debug, Default)]
 pub struct Facts {
     pub classes: HashMap<String, ClassFacts>,
     pub functions: HashMap<String, Method>,
     pub names: HashMap<String, Vec<Val>>,
-    targets: Targets,
 }
 
 fn annotation(expr: &Expr, depth: u8) -> Ann {
@@ -216,52 +283,54 @@ fn value(expr: &Expr, depth: u8) -> Val {
     }
 }
 
-/// The value an [`Origin`] binds, and where it is written.
-fn origin(origin: Origin<'_>) -> (Val, Option<u32>) {
+/// What the import `alias` of `stmt` binds `name` to, in the module `module`.
+fn imported(stmt: &Stmt, alias: &Alias, name: &str, module: Option<&str>) -> Val {
+    let entry = match stmt {
+        Stmt::ImportFrom(from) => Import {
+            local: name.to_string(),
+            original: alias.name.to_string(),
+            module: Some(
+                from.module
+                    .as_ref()
+                    .map_or(String::new(), ToString::to_string),
+            ),
+            level: from.level,
+        },
+        _ => Import {
+            local: alias.asname.as_ref().unwrap_or(&alias.name).to_string(),
+            original: alias.name.to_string(),
+            module: None,
+            level: 0,
+        },
+    };
+    let (functions, modules) = imports_of(&[entry], module);
+    if let Some((module, original)) = functions.get(name) {
+        return Val::From {
+            module: module.clone(),
+            original: original.clone(),
+            local: name.to_string(),
+        };
+    }
+    // `import a.b` binds `a`.
+    Val::Module(modules.get(name).map_or(name, String::as_str).to_string())
+}
+
+/// What a binding of `name` gives it in the module `module`, and where the expression to
+/// evaluate is written. A class and a function are followed at the top of a module only:
+/// in a function they hide the name.
+fn bound(origin: Origin<'_>, name: &str, top: bool, module: Option<&str>) -> (Val, Option<u32>) {
     match origin {
-        Origin::Declared(expr) => (Val::Declared(annotation(expr, 0)), None),
+        Origin::Declared(declared, _) => (Val::Declared(annotation(declared, 0)), None),
         Origin::Value(expr) => (value(expr, 0), Some(expr.start().to_u32())),
         Origin::Entered(expr, is_async) => (
             Val::Entered(Box::new(value(expr, 0)), is_async),
             Some(expr.start().to_u32()),
         ),
-        Origin::Unknown => (Val::Unknown, None),
-    }
-}
-
-/// The statements of `body` and of the blocks in it, not those of its functions and classes.
-fn flat<'a>(body: &'a [Stmt], depth: u8, visit: &mut dyn FnMut(&'a Stmt)) {
-    if depth > 32 {
-        return;
-    }
-    for stmt in body {
-        visit(stmt);
-        match stmt {
-            Stmt::If(node) => {
-                flat(&node.body, depth + 1, visit);
-                for clause in &node.elif_else_clauses {
-                    flat(&clause.body, depth + 1, visit);
-                }
-            }
-            Stmt::Try(node) => {
-                flat(&node.body, depth + 1, visit);
-                for handler in &node.handlers {
-                    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
-                    flat(&handler.body, depth + 1, visit);
-                }
-                flat(&node.orelse, depth + 1, visit);
-                flat(&node.finalbody, depth + 1, visit);
-            }
-            Stmt::With(node) => flat(&node.body, depth + 1, visit),
-            Stmt::For(node) => {
-                flat(&node.body, depth + 1, visit);
-                flat(&node.orelse, depth + 1, visit);
-            }
-            Stmt::While(node) => {
-                flat(&node.body, depth + 1, visit);
-                flat(&node.orelse, depth + 1, visit);
-            }
-            _ => {}
+        Origin::Class(_) if top => (Val::Class(name.to_string()), None),
+        Origin::Function(_) if top => (Val::Function(name.to_string()), None),
+        Origin::Import(stmt, alias) => (imported(stmt, alias, name, module), None),
+        Origin::Class(_) | Origin::Function(_) | Origin::Parameter | Origin::Unknown => {
+            (Val::Unknown, None)
         }
     }
 }
@@ -308,66 +377,53 @@ fn define(methods: &mut HashMap<String, Method>, function: &StmtFunctionDef, kin
     }
 }
 
-/// The names of the plain assignment targets of `stmt`, with what each is bound to.
-fn assigned<'a>(stmt: &'a Stmt, bind: &mut dyn FnMut(&'a Expr, Val)) {
-    match stmt {
-        Stmt::Assign(node) => {
-            for target in &node.targets {
-                bind(target, value(&node.value, 0));
-            }
-        }
-        Stmt::AnnAssign(node) => {
-            let declared = annotation(&node.annotation, 0);
-            let bare_final =
-                matches!(&declared, Ann::Name(name) if name.rsplit('.').next() == Some("Final"));
-            let bound = match &node.value {
-                Some(value_) if bare_final => value(value_, 0),
-                _ => Val::Declared(declared),
-            };
-            bind(&node.target, bound);
-        }
-        Stmt::With(node) => {
-            for item in &node.items {
-                if let Some(target) = &item.optional_vars {
-                    bind(
-                        target,
-                        Val::Entered(Box::new(value(&item.context_expr, 0)), node.is_async),
-                    );
-                }
-            }
-        }
-        Stmt::For(node) => bind(&node.target, Val::Unknown),
-        Stmt::AugAssign(node) => bind(&node.target, Val::Unknown),
-        _ => {}
-    }
+/// The first parameter of a method that has a receiver.
+fn receiver_name(function: &StmtFunctionDef) -> Option<&str> {
+    let parameters = &function.parameters;
+    parameters
+        .posonlyargs
+        .iter()
+        .chain(&parameters.args)
+        .next()
+        .map(|first| first.parameter.name.as_str())
+        .filter(|_| method_kind(function) != Kind::Static)
 }
 
-/// `val` as a method with the parameters `params` and the local names `locals` writes it:
-/// its first parameter is the receiver, an annotated parameter its annotation.
-fn inside(
-    val: Val,
-    this: &str,
-    params: &HashMap<&str, Option<&Expr>>,
-    locals: &HashSet<&str>,
-) -> Val {
+/// `val` as the method `scope` of the module `module` writes it: its first parameter is
+/// the receiver, a parameter it never binds again its annotation, a name it imports
+/// what it imports, any other name it binds unknown.
+fn inside(val: Val, scan: &Scan<'_>, scope: Scope, this: &str, module: Option<&str>) -> Val {
     match val {
         Val::Name(name) if name == this => Val::This,
-        Val::Name(name) => match params.get(name.as_str()) {
-            Some(Some(declared)) => Val::Declared(annotation(declared, 0)),
-            Some(None) => Val::Unknown,
-            None if locals.contains(name.as_str()) => Val::Unknown,
+        Val::Name(name) => match scan.bindings(scope, &name) {
+            Some([only]) => match only.origin {
+                Origin::Declared(declared, _) => Val::Declared(annotation(declared, 0)),
+                Origin::Import(stmt, alias) => imported(stmt, alias, &name, module),
+                _ => Val::Unknown,
+            },
+            Some(_) => Val::Unknown,
             None => Val::Name(name),
         },
-        Val::Attr(base, attr) => Val::Attr(Box::new(inside(*base, this, params, locals)), attr),
-        Val::Call(callee, cast) => Val::Call(Box::new(inside(*callee, this, params, locals)), cast),
-        Val::Entered(entered, is_async) => {
-            Val::Entered(Box::new(inside(*entered, this, params, locals)), is_async)
+        Val::Attr(base, attr) => {
+            Val::Attr(Box::new(inside(*base, scan, scope, this, module)), attr)
         }
+        Val::Call(callee, cast) => {
+            Val::Call(Box::new(inside(*callee, scan, scope, this, module)), cast)
+        }
+        Val::Entered(entered, is_async) => Val::Entered(
+            Box::new(inside(*entered, scan, scope, this, module)),
+            is_async,
+        ),
         other => other,
     }
 }
 
-fn class_facts(class: &StmtClassDef) -> ClassFacts {
+fn class_facts(
+    class: &StmtClassDef,
+    scope: Scope,
+    scan: &Scan<'_>,
+    module: Option<&str>,
+) -> ClassFacts {
     let mut facts = ClassFacts {
         bases: class
             .bases()
@@ -379,136 +435,86 @@ fn class_facts(class: &StmtClassDef) -> ClassFacts {
             .collect(),
         ..ClassFacts::default()
     };
-    let mut methods = Vec::new();
-    flat(&class.body, 0, &mut |stmt| match stmt {
-        Stmt::FunctionDef(function) => methods.push(function),
-        stmt => assigned(stmt, &mut |target, bound| {
-            if let Expr::Name(name) = target {
-                facts
-                    .attrs
-                    .entry(name.id.to_string())
-                    .or_default()
-                    .push(bound);
+    for (name, bindings) in scan.bound_in(scope) {
+        let mut vals = Vec::new();
+        for binding in bindings {
+            match binding.origin {
+                Origin::Function(function) => {
+                    define(&mut facts.methods, function, method_kind(function));
+                }
+                origin => vals.push(bound(origin, name, false, module).0),
             }
-        }),
-    });
-    for function in methods {
-        let kind = method_kind(function);
-        define(&mut facts.methods, function, kind);
-        let parameters = &function.parameters;
-        let Some(this) = parameters
-            .posonlyargs
-            .iter()
-            .chain(&parameters.args)
-            .next()
-            .map(|first| first.parameter.name.as_str())
-            .filter(|_| kind != Kind::Static)
-        else {
-            continue;
-        };
-        if !function_mentions_attribute(function, this) {
-            continue;
         }
-        let params: HashMap<&str, Option<&Expr>> = parameters
-            .iter()
-            .map(|parameter| {
-                let declared = parameter.annotation().filter(|_| !parameter.is_variadic());
-                (parameter.name().as_str(), declared)
-            })
-            .collect();
-        let mut locals = HashSet::new();
-        let mut written = Vec::new();
-        flat(&function.body, 0, &mut |stmt| {
-            assigned(stmt, &mut |target, bound| match target {
-                Expr::Name(name) => {
-                    locals.insert(name.id.as_str());
-                }
-                Expr::Attribute(attr) => {
-                    if matches!(attr.value.as_ref(), Expr::Name(base) if base.id.as_str() == this) {
-                        written.push((attr.attr.to_string(), bound));
-                    }
-                }
-                Expr::Tuple(tuple) => {
-                    for item in &tuple.elts {
-                        if let Expr::Name(name) = item {
-                            locals.insert(name.id.as_str());
-                        }
-                    }
-                }
-                _ => {}
-            });
-        });
-        for (attr, bound) in written {
-            facts
-                .attrs
-                .entry(attr)
-                .or_default()
-                .push(inside(bound, this, &params, &locals));
+        if !vals.is_empty() {
+            // A name that is a method too is neither.
+            if facts.methods.contains_key(name) {
+                vals.push(Val::Unknown);
+            }
+            facts.attrs.insert(name.to_string(), vals);
+        }
+    }
+    for (name, written) in scan.attributes_of(scope) {
+        for (origin, method) in written {
+            let Node::Function(function) = scan.scopes[*method] else {
+                continue;
+            };
+            let Some(this) = receiver_name(function) else {
+                continue;
+            };
+            let written = bound(*origin, name, false, module).0;
+            let val = inside(written, scan, *method, this, module);
+            facts.attrs.entry(name.to_string()).or_default().push(val);
         }
     }
     facts
 }
 
-/// Whether the body of `function` may assign an attribute of `this`: its statements are
-/// read only then.
-fn function_mentions_attribute(function: &StmtFunctionDef, this: &str) -> bool {
-    let mut found = false;
-    flat(&function.body, 0, &mut |stmt| {
-        let targets: &[Expr] = match stmt {
-            Stmt::Assign(node) => &node.targets,
-            Stmt::AnnAssign(node) => std::slice::from_ref(&*node.target),
-            _ => &[],
-        };
-        found = found
-            || targets.iter().any(|target| {
-                matches!(target, Expr::Attribute(attr)
-                    if matches!(attr.value.as_ref(), Expr::Name(base) if base.id.as_str() == this))
-            });
-    });
-    found
-}
-
 impl Facts {
-    /// What `source` declares, its imports being `targets`.
-    pub fn of(source: &Source, targets: &Targets) -> Facts {
-        let mut facts = Facts {
-            targets: targets.clone(),
-            ..Facts::default()
-        };
-        flat(source.body(), 0, &mut |stmt| match stmt {
-            Stmt::FunctionDef(function) => define(&mut facts.functions, function, Kind::Function),
-            stmt => assigned(stmt, &mut |target, bound| {
-                if let Expr::Name(name) = target {
-                    facts
-                        .names
-                        .entry(name.id.to_string())
-                        .or_default()
-                        .push(bound);
+    /// What `source` declares as the module `module`.
+    pub fn of(source: &Source, module: Option<&str>) -> Facts {
+        let scan = Scan::new(source.body(), |_| false);
+        Self::from_scan(&scan, module)
+    }
+
+    /// What the module `scan` walked declares, its relative imports read as those of
+    /// `module`.
+    pub fn from_scan(scan: &Scan<'_>, module: Option<&str>) -> Facts {
+        let mut facts = Facts::default();
+        for (name, bindings) in scan.bound_in(0) {
+            let mut vals = Vec::new();
+            let mut classes = 0;
+            for binding in bindings {
+                match binding.origin {
+                    Origin::Function(function) => {
+                        define(&mut facts.functions, function, Kind::Function);
+                    }
+                    Origin::Class(_) => classes += 1,
+                    _ => {}
                 }
-            }),
-        });
-        // The outermost class of a name is the one other modules import.
-        for class in source.classes() {
-            if !facts.classes.contains_key(class.name.as_str()) {
-                facts
-                    .classes
-                    .insert(class.name.to_string(), class_facts(class));
+                vals.push(bound(binding.origin, name, true, module).0);
+            }
+            // Two classes of one name: which one a use means is not followed.
+            if classes > 1 {
+                vals.push(Val::Unknown);
+            }
+            facts.names.insert(name.to_string(), vals);
+        }
+        for (scope, node) in scan.scopes.iter().enumerate() {
+            if let (Node::Class(class), 0) = (node, scan.parents[scope]) {
+                if !facts.classes.contains_key(class.name.as_str()) {
+                    facts.classes.insert(
+                        class.name.to_string(),
+                        class_facts(class, scope, scan, module),
+                    );
+                }
             }
         }
         facts
     }
-
-    /// Whether the module binds `name` itself or imports it.
-    fn has(&self, name: &str) -> bool {
-        self.classes.contains_key(name)
-            || self.functions.contains_key(name)
-            || self.names.contains_key(name)
-            || self.targets.0.get(name).is_some()
-    }
 }
 
 /// Where an expression is evaluated: the module, the class `Self` and a method's first
-/// parameter stand for, and for the checked module the scopes around it and the offset.
+/// parameter stand for, and for the checked module the scopes around it and its offset.
 #[derive(Clone, Copy)]
 struct Env<'e> {
     module: &'e str,
@@ -517,60 +523,71 @@ struct Env<'e> {
     at: Option<u32>,
 }
 
+impl<'e> Env<'e> {
+    /// The top of `module`, where the order of its statements is not followed.
+    fn top(module: &'e str) -> Self {
+        Env {
+            module,
+            this: None,
+            stack: &[],
+            at: None,
+        }
+    }
+}
+
 /// Evaluates the receivers of the calls of one checked module.
 pub struct Resolver<'s, 'a> {
     /// The name of the checked module, empty without one.
     module: &'s str,
+    /// The name its relative imports are read by.
+    named: Option<&'s str>,
     source: &'s Source,
-    targets: &'s Targets,
     helpers: Option<&'s HelperIndex>,
     own: &'s Dict<Helper>,
     scan: &'s Scan<'a>,
     local: OnceCell<Arc<Facts>>,
     read: RefCell<HashMap<String, Option<Arc<Facts>>>>,
+    orders: RefCell<HashMap<Class, Option<Rc<Vec<Class>>>>>,
     fuel: Cell<u32>,
 }
 
 impl<'s, 'a> Resolver<'s, 'a> {
-    /// A resolver for `source`, the module `module` whose imports are `targets` and whose
-    /// own helpers are `own`.
+    /// A resolver for `source`, the module `module` whose own helpers are `own`, walked
+    /// by `scan`.
     pub fn new(
         source: &'s Source,
         module: Option<&'s str>,
-        targets: &'s Targets,
         helpers: Option<&'s HelperIndex>,
         own: &'s Dict<Helper>,
         scan: &'s Scan<'a>,
     ) -> Self {
+        let named = module.or(source.module.as_deref());
         Resolver {
-            module: module.unwrap_or(""),
+            module: module.map_or("", |module| {
+                module.strip_suffix(".__init__").unwrap_or(module)
+            }),
+            named,
             source,
-            targets,
             helpers,
             own,
             scan,
             local: OnceCell::new(),
             read: RefCell::default(),
+            orders: RefCell::default(),
             fuel: Cell::new(0),
         }
     }
 
     /// The helper that `receiver.name(...)` calls in the scopes `stack`: the method `name`
-    /// of the class of `receiver`, or of the first of its bases that defines it.
+    /// of the class of `receiver`, or of the first class of its method resolution order
+    /// that defines it.
     pub fn method(&self, receiver: &Expr, name: &str, stack: &[Scope]) -> Option<&'s Helper> {
-        self.fuel.set(FUEL);
-        let env = Env {
-            module: self.module,
-            this: None,
-            stack,
-            at: Some(receiver.start().to_u32()),
-        };
-        let (class, on_class) = match self.eval(&value(receiver, 0), env, 0)? {
+        let (class, on_class) = match self.value_of(receiver, stack)? {
             Value::Instance(class) => (class, false),
-            Value::Type(class) => (class, true),
+            Value::Type(class) | Value::Unresolved(class) => (class, true),
             _ => return None,
         };
-        for base in self.mro(&class) {
+        for base in self.order(&class)?.iter() {
             let key = format!("{}.{name}", base.name);
             let own = (base.module == self.module)
                 .then(|| self.own.get(&key))
@@ -582,13 +599,11 @@ impl<'s, 'a> Resolver<'s, 'a> {
             if let Some(found) = found {
                 return (!on_class || found.kind != Kind::Instance).then_some(found);
             }
-            // A class that defines the method itself hides the helper of its bases.
-            let overrides = self.facts(&base.module).is_some_and(|facts| {
-                facts.classes.get(&base.name).is_some_and(|class| {
-                    class.methods.contains_key(name) || class.attrs.contains_key(name)
-                })
-            });
-            if overrides {
+            // A base that is not read may define the method, and a class that defines it
+            // itself hides the helper of its bases.
+            let facts = self.facts(&base.module)?;
+            let known = facts.classes.get(&base.name)?;
+            if known.methods.contains_key(name) || known.attrs.contains_key(name) {
                 return None;
             }
         }
@@ -596,8 +611,15 @@ impl<'s, 'a> Resolver<'s, 'a> {
     }
 
     /// The class an expression of the scopes `stack` holds an instance of, as
-    /// `module.Class`; for tests and `--explain`.
+    /// `module.Class`.
     pub fn class_of(&self, receiver: &Expr, stack: &[Scope]) -> Option<String> {
+        match self.value_of(receiver, stack)? {
+            Value::Instance(class) => Some(format!("{}.{}", class.module, class.name)),
+            _ => None,
+        }
+    }
+
+    fn value_of(&self, receiver: &Expr, stack: &[Scope]) -> Option<Value> {
         self.fuel.set(FUEL);
         let env = Env {
             module: self.module,
@@ -605,20 +627,17 @@ impl<'s, 'a> Resolver<'s, 'a> {
             stack,
             at: Some(receiver.start().to_u32()),
         };
-        match self.eval(&value(receiver, 0), env, 0)? {
-            Value::Instance(class) => Some(format!("{}.{}", class.module, class.name)),
-            _ => None,
-        }
+        self.eval(&value(receiver, 0), env, 0)
     }
 
     fn facts(&self, module: &str) -> Option<Arc<Facts>> {
         if module == self.module {
             return Some(Arc::clone(
                 self.local
-                    .get_or_init(|| Arc::new(Facts::of(self.source, self.targets))),
+                    .get_or_init(|| Arc::new(Facts::from_scan(self.scan, self.named))),
             ));
         }
-        if KNOWN.contains(&module) || module.is_empty() {
+        if KNOWN.contains(&module) || module.is_empty() || module == NOWHERE {
             return None;
         }
         if let Some(known) = self.read.borrow().get(module) {
@@ -660,29 +679,44 @@ impl<'s, 'a> Resolver<'s, 'a> {
                 let entered = self.eval(entered, env, depth + 1)?;
                 self.enter(&entered, *is_async, depth + 1)
             }
+            Val::Class(name) => Some(Value::Type(Class::new(env.module, name))),
+            Val::Function(name) => Some(Value::Function {
+                module: env.module.to_string(),
+                class: None,
+                name: name.clone(),
+                receiver: None,
+            }),
+            Val::From {
+                module,
+                original,
+                local,
+            } => self.imported(env.module, module, original, local, depth + 1),
+            Val::Module(module) => Some(Value::Module(module.clone())),
             Val::None | Val::Unknown => None,
         }
     }
 
-    /// The one value every binding of `bound` gives, `None` ones aside (`T | None` is `T`).
-    fn agreed(&self, bound: &[(Val, Option<u32>)], env: Env<'_>, depth: u8) -> Option<Value> {
-        // A declaration states the type whatever is assigned.
-        if let Some((declared, _)) = bound
+    /// The one value every binding of `bound` gives, `None` ones aside (`T | None` is
+    /// `T`). With `declared`, a declaration states the type whatever else is assigned.
+    fn agreed(
+        &self,
+        bound: &[(Val, Option<u32>)],
+        declared: bool,
+        env: Env<'_>,
+        depth: u8,
+    ) -> Option<Value> {
+        let stated = bound
             .iter()
-            .find(|(val, _)| matches!(val, Val::Declared(_)))
-        {
-            return self.eval(declared, env, depth);
+            .find(|(val, _)| declared && matches!(val, Val::Declared(_)));
+        if let Some((stated, _)) = stated {
+            return self.eval(stated, Env { at: None, ..env }, depth);
         }
         let mut found: Option<Value> = None;
         for (val, at) in bound {
             if matches!(val, Val::None) {
                 continue;
             }
-            let env = Env {
-                at: at.or(env.at),
-                ..env
-            };
-            let value = self.eval(val, env, depth)?;
+            let value = self.eval(val, Env { at: *at, ..env }, depth)?;
             if found.as_ref().is_some_and(|known| *known != value) {
                 return None;
             }
@@ -691,125 +725,189 @@ impl<'s, 'a> Resolver<'s, 'a> {
         found
     }
 
+    /// What the bindings of a name or attribute, read in no order, give it.
     fn decl(&self, bound: &[Val], env: Env<'_>, depth: u8) -> Option<Value> {
         let bound: Vec<(Val, Option<u32>)> = bound.iter().map(|val| (val.clone(), None)).collect();
-        self.agreed(&bound, env, depth)
+        self.agreed(&bound, true, env, depth)
     }
 
-    /// What `name` is bound to by a function around the expression, `None` when none of
-    /// them binds it: then it is a name of the module.
+    /// What `name` is bound to by a scope around the expression; `None` when none of them
+    /// binds it, or when it is a name of the module read from a function: then it is what
+    /// the module binds it to, in no order.
     fn local_name(&self, name: &str, env: Env<'_>, depth: u8) -> Option<Option<Value>> {
         if env.module != self.module {
             return None;
         }
+        if let Some(at) = env.at {
+            let around = env.stack.iter().chain(std::iter::once(&0));
+            if around
+                .into_iter()
+                .any(|&scope| self.scan.shadowed(scope, name, at))
+            {
+                return Some(None);
+            }
+        }
+        // The innermost scope runs its statements in order; a scope around it has run
+        // any of them by the time a function in it is called.
+        let innermost = env.stack.last().copied().unwrap_or(0);
         for (i, &scope) in env.stack.iter().enumerate().rev() {
-            let Node::Function(function) = self.scan.scopes[scope] else {
-                continue;
+            let node = self.scan.scopes[scope];
+            let body: &[Stmt] = match node {
+                Node::Function(function) => &function.body,
+                Node::Class(class) if scope == innermost => &class.body,
+                Node::Class(_) | Node::Module => continue,
             };
-            let class =
-                i.checked_sub(1)
-                    .and_then(|outer| match self.scan.scopes[env.stack[outer]] {
-                        Node::Class(class) => Some(class),
-                        _ => None,
-                    });
-            if let Some(class) = class {
-                let parameters = &function.parameters;
-                let first = parameters.posonlyargs.iter().chain(&parameters.args).next();
-                let kind = method_kind(function);
-                if kind != Kind::Static
-                    && first.is_some_and(|first| first.parameter.name.as_str() == name)
-                {
-                    let class = Class {
-                        module: self.module.to_string(),
-                        name: class.name.to_string(),
-                    };
-                    let on_class = kind == Kind::Class
+            let bindings = self.scan.bindings(scope, name);
+            let outer = i.checked_sub(1).map(|outer| env.stack[outer]);
+            let class = outer.and_then(|outer| match self.scan.scopes[outer] {
+                Node::Class(class) => Some((class, self.scan.parents[outer] == 0)),
+                _ => None,
+            });
+            if let (Node::Function(function), Some((class, top))) = (node, class) {
+                let rebound = bindings.is_some_and(|bindings| bindings.len() > 1);
+                if receiver_name(function) == Some(name) && !rebound {
+                    // A class in a function or in another class is not modelled.
+                    let class = Class::new(self.module, class.name.as_str());
+                    let on_class = method_kind(function) == Kind::Class
                         || matches!(function.name.as_str(), "__new__" | "__init_subclass__");
-                    return Some(Some(if on_class {
-                        Value::Type(class)
-                    } else {
-                        Value::Instance(class)
+                    return Some(top.then_some(match on_class {
+                        true => Value::Type(class),
+                        false => Value::Instance(class),
                     }));
                 }
             }
-            // A name of an enclosing function can be rebound before the inner one runs.
-            let at = env.at.filter(|_| i + 1 == env.stack.len());
-            if let Some(origins) = self.scan.bound(scope, name, at) {
-                let bound: Vec<(Val, Option<u32>)> = origins.into_iter().map(origin).collect();
-                let this = class.map(|class| Class {
-                    module: self.module.to_string(),
-                    name: class.name.to_string(),
-                });
-                let env = Env {
-                    stack: &env.stack[..=i],
-                    this: this.as_ref(),
-                    ..env
-                };
-                return Some(self.agreed(&bound, env, depth));
-            }
+            let Some(bindings) = bindings else {
+                continue;
+            };
+            let at = env.at.filter(|_| scope == innermost);
+            let reach = at.and_then(|at| flow::reaching(body, bindings, name, at));
+            let this = class.map(|(class, _)| Class::new(self.module, class.name.as_str()));
+            let env = Env {
+                stack: &env.stack[..=i],
+                this: this.as_ref(),
+                ..env
+            };
+            return Some(match reach {
+                Some(reach) => self.reached(name, &reach, false, env, depth),
+                None => {
+                    let bound: Vec<_> = bindings
+                        .iter()
+                        .map(|binding| bound(binding.origin, name, false, self.named))
+                        .collect();
+                    self.agreed(&bound, true, env, depth)
+                }
+            });
         }
-        None
+        if env.stack.iter().any(|&scope| !self.scan.is_class(scope)) {
+            return None;
+        }
+        let bindings = self.scan.bindings(0, name)?;
+        let reach = flow::reaching(self.source.body(), bindings, name, env.at?)?;
+        let env = Env { stack: &[], ..env };
+        Some(self.reached(name, &reach, true, env, depth))
     }
 
-    /// What `name` is at the top of `module`. A module that is not read gives the class
-    /// `module.name`, so that a helper registered by that path is still found.
+    /// What `name` holds where the bindings `reach` are in effect. An `isinstance` test
+    /// states the class of a name nothing else is known of (no annotation, `object`,
+    /// `Any`, a value that is not followed), and of one known to be of a base of that
+    /// class; a subclass of the class stays what it is. A name known to be of an
+    /// unrelated class would be of both, which is not followed.
+    fn reached(
+        &self,
+        name: &str,
+        reach: &flow::Reach<'_>,
+        top: bool,
+        env: Env<'_>,
+        depth: u8,
+    ) -> Option<Value> {
+        let bound: Vec<_> = reach
+            .origins
+            .iter()
+            .map(|(origin, _)| bound(*origin, name, top, self.named))
+            .collect();
+        let rebound = |scope: &Scope| self.scan.bindings(*scope, "isinstance").is_some();
+        let tested = reach
+            .narrowed
+            .filter(|_| !env.stack.iter().chain(std::iter::once(&0)).any(rebound));
+        let Some(tested) = tested else {
+            return self.agreed(&bound, false, env, depth);
+        };
+        let at = Some(tested.start().to_u32());
+        let class = self.eval(&value(tested, 0), Env { at, ..env }, depth)?;
+        let (Value::Type(class) | Value::Unresolved(class)) = class else {
+            return None;
+        };
+        let mut held: Option<Class> = None;
+        let mut unknown = false;
+        for (val, at) in &bound {
+            // An annotation that is not followed may still state a class (an alias of
+            // a union, a type variable): only `object` and `Any` state none.
+            let spelled = match val {
+                Val::Declared(Ann::Name(name)) => {
+                    name != "object" && name.rsplit('.').next() != Some("Any")
+                }
+                Val::Declared(_) => true,
+                _ => false,
+            };
+            match self.eval(val, Env { at: *at, ..env }, depth) {
+                Some(Value::Instance(known)) => {
+                    if held.as_ref().is_some_and(|held| *held != known) {
+                        return None;
+                    }
+                    held = Some(known);
+                }
+                None if !spelled && !matches!(val, Val::None) => unknown = true,
+                _ => return None,
+            }
+        }
+        let held = match held {
+            Some(_) if unknown => return None,
+            Some(held) => held,
+            None => return Some(Value::Instance(class)),
+        };
+        if self.order(&held)?.contains(&class) {
+            return Some(Value::Instance(held));
+        }
+        self.order(&class)?
+            .contains(&held)
+            .then_some(Value::Instance(class))
+    }
+
+    /// What `name` is at the top of `module`, whatever the order of its statements. A
+    /// module that is not read gives the name by its path.
     #[recursive::recursive]
     fn global(&self, module: &str, name: &str, depth: u8) -> Option<Value> {
         self.step(depth)?;
         let Some(facts) = self.facts(module) else {
-            return Some(Value::Type(Class {
-                module: module.to_string(),
-                name: name.to_string(),
-            }));
+            return Some(Value::Unresolved(Class::new(module, name)));
         };
-        if facts.classes.contains_key(name) {
-            return Some(Value::Type(Class {
-                module: module.to_string(),
-                name: name.to_string(),
-            }));
+        self.decl(facts.names.get(name)?, Env::top(module), depth + 1)
+    }
+
+    /// What `from target import original as local` binds in `module`.
+    fn imported(
+        &self,
+        module: &str,
+        target: &str,
+        original: &str,
+        local: &str,
+        depth: u8,
+    ) -> Option<Value> {
+        // `from . import db` in a package names its submodule, not itself.
+        let itself = target == module && original == local;
+        match self.facts(target) {
+            Some(found) if !itself && found.names.contains_key(original) => {
+                self.global(target, original, depth + 1)
+            }
+            Some(_) => {
+                let submodule = format!("{target}.{original}");
+                self.facts(&submodule)
+                    .is_some()
+                    .then_some(Value::Module(submodule))
+            }
+            // A package that is not read: its submodules are not looked for.
+            None => self.global(target, original, depth + 1),
         }
-        if facts.functions.contains_key(name) {
-            return Some(Value::Function {
-                module: module.to_string(),
-                class: None,
-                name: name.to_string(),
-                receiver: None,
-            });
-        }
-        let env = Env {
-            module,
-            this: None,
-            stack: &[],
-            at: None,
-        };
-        if let Some(bound) = facts.names.get(name) {
-            return self.decl(bound, env, depth + 1);
-        }
-        let (functions, modules) = &facts.targets;
-        if let Some((target, original)) = functions.get(name) {
-            // `from . import db` in a package names its submodule, not itself.
-            let itself = target == module && original == name;
-            return match self.facts(target) {
-                Some(found) if !itself && found.has(original) => {
-                    self.global(target, original, depth + 1)
-                }
-                Some(_) => {
-                    let submodule = format!("{target}.{original}");
-                    self.facts(&submodule)
-                        .is_some()
-                        .then_some(Value::Module(submodule))
-                }
-                // A package that is not read: its submodules are not looked for.
-                None => self.global(target, original, depth + 1),
-            };
-        }
-        if let Some(target) = modules.get(name) {
-            return Some(Value::Module(target.clone()));
-        }
-        // `import a.b` binds `a`.
-        let prefix = format!("{name}.");
-        let package = modules.keys().any(|local| local.starts_with(&prefix));
-        package.then(|| Value::Module(name.to_string()))
     }
 
     #[recursive::recursive]
@@ -818,7 +916,10 @@ impl<'s, 'a> Resolver<'s, 'a> {
         match base {
             Value::Module(module) => {
                 let found = self.facts(module);
-                if found.as_ref().is_some_and(|facts| facts.has(attr)) {
+                if found
+                    .as_ref()
+                    .is_some_and(|facts| facts.names.contains_key(attr))
+                {
                     return self.global(module, attr, depth + 1);
                 }
                 // A package does not have to import its submodule for `import a.b` to
@@ -832,24 +933,18 @@ impl<'s, 'a> Resolver<'s, 'a> {
                     None
                 }
             }
+            Value::Unresolved(path) => Some(Value::Unresolved(Class::new(
+                &format!("{}.{}", path.module, path.name),
+                attr,
+            ))),
             Value::Instance(class) | Value::Type(class) => {
-                if self.facts(&class.module).is_none() {
-                    // A name of a module that is not read may be a module or a class.
-                    return matches!(base, Value::Type(_)).then(|| {
-                        Value::Type(Class {
-                            module: format!("{}.{}", class.module, class.name),
-                            name: attr.to_string(),
-                        })
-                    });
-                }
-                for owner in self.mro(class) {
+                for owner in self.order(class)?.iter() {
+                    // A base that is not read may declare the attribute.
                     let facts = self.facts(&owner.module)?;
                     let found = facts.classes.get(&owner.name)?;
                     let env = Env {
-                        module: &owner.module,
                         this: Some(class),
-                        stack: &[],
-                        at: None,
+                        ..Env::top(&owner.module)
                     };
                     if let Some(bound) = found.attrs.get(attr) {
                         return self.decl(bound, env, depth + 1);
@@ -875,10 +970,11 @@ impl<'s, 'a> Resolver<'s, 'a> {
     fn call(&self, callee: &Value, cast: Option<&Ann>, env: Env<'_>, depth: u8) -> Option<Value> {
         self.step(depth)?;
         match callee {
-            Value::Type(class) if TYPING.contains(&class.module.as_str()) => {
-                (class.name == "cast").then_some(())?;
-                self.declared(cast?, env, depth + 1)
-            }
+            Value::Unresolved(path) => match path.form() {
+                Some(Ok(Form::Cast)) => self.declared(cast?, env, depth + 1),
+                Some(_) => None,
+                None => Some(Value::Instance(path.clone())),
+            },
             Value::Type(class) => Some(Value::Instance(class.clone())),
             Value::Function {
                 module,
@@ -892,10 +988,8 @@ impl<'s, 'a> Resolver<'s, 'a> {
                     None => facts.functions.get(name)?,
                 };
                 let env = Env {
-                    module,
                     this: receiver.as_ref(),
-                    stack: &[],
-                    at: None,
+                    ..Env::top(module)
                 };
                 if method.manager {
                     let Ann::Generic(head, args) = &method.returns else {
@@ -920,13 +1014,7 @@ impl<'s, 'a> Resolver<'s, 'a> {
             Value::Instance(_) => {
                 let name = if is_async { "__aenter__" } else { "__enter__" };
                 let method = self.member(entered, name, depth + 1)?;
-                let env = Env {
-                    module: self.module,
-                    this: None,
-                    stack: &[],
-                    at: None,
-                };
-                self.call(&method, None, env, depth + 1)
+                self.call(&method, None, Env::top(self.module), depth + 1)
             }
             _ => None,
         }
@@ -942,15 +1030,20 @@ impl<'s, 'a> Resolver<'s, 'a> {
             for part in parts {
                 val = Val::Attr(Box::new(val), part.to_string());
             }
-            self.eval(&val, env, depth + 1)
+            self.eval(&val, Env { at: None, ..env }, depth + 1)
+        };
+        let type_of = |of: &Ann| match self.declared(of, env, depth + 1)? {
+            Value::Instance(class) => Some(Value::Type(class)),
+            _ => None,
         };
         match declared {
             Ann::Name(name) => match named(name)? {
-                Value::Type(class) if TYPING.contains(&class.module.as_str()) => {
-                    (class.name == "Self").then_some(())?;
-                    env.this.cloned().map(Value::Instance)
-                }
                 Value::Type(class) => Some(Value::Instance(class)),
+                Value::Unresolved(path) => match path.form() {
+                    Some(Ok(Form::Receiver)) => env.this.cloned().map(Value::Instance),
+                    Some(_) => None,
+                    None => Some(Value::Instance(path)),
+                },
                 _ => None,
             },
             Ann::Union(members) => {
@@ -968,75 +1061,253 @@ impl<'s, 'a> Resolver<'s, 'a> {
                 found
             }
             Ann::Generic(head, args) => {
-                if head == "type" {
-                    return match self.declared(args.first()?, env, depth + 1)? {
-                        Value::Instance(class) => Some(Value::Type(class)),
-                        _ => None,
-                    };
-                }
-                let Value::Type(class) = named(head)? else {
-                    return None;
+                let head = match named(head) {
+                    Some(head) => head,
+                    None if head == "type" => return type_of(args.first()?),
+                    None => return None,
                 };
-                let name = class.name.as_str();
-                if TYPING.contains(&class.module.as_str()) {
-                    return if TRANSPARENT.contains(&name) {
-                        self.declared(args.first()?, env, depth + 1)
-                    } else if name == "Union" {
-                        self.declared(&Ann::Union(args.clone()), env, depth + 1)
-                    } else if name == "Type" {
-                        match self.declared(args.first()?, env, depth + 1)? {
-                            Value::Instance(class) => Some(Value::Type(class)),
-                            _ => None,
+                match head {
+                    // The arguments of a generic class are not followed.
+                    Value::Type(class) => Some(Value::Instance(class)),
+                    Value::Unresolved(path) => match path.form() {
+                        Some(Ok(Form::Transparent)) => self.declared(args.first()?, env, depth + 1),
+                        Some(Ok(Form::Union)) => {
+                            self.declared(&Ann::Union(args.clone()), env, depth + 1)
                         }
-                    } else if MANAGERS.contains(&name) {
-                        let inner = self.declared(args.first()?, env, depth + 1)?;
-                        Some(Value::Manager(Box::new(inner)))
-                    } else {
-                        None
-                    };
+                        Some(Ok(Form::TypeOf)) => type_of(args.first()?),
+                        Some(Ok(Form::Manager)) => {
+                            let inner = self.declared(args.first()?, env, depth + 1)?;
+                            Some(Value::Manager(Box::new(inner)))
+                        }
+                        Some(_) => None,
+                        None => Some(Value::Instance(path)),
+                    },
+                    _ => None,
                 }
-                if class.module == "contextlib" && MANAGERS.contains(&name) {
-                    let inner = self.declared(args.first()?, env, depth + 1)?;
-                    return Some(Value::Manager(Box::new(inner)));
-                }
-                Some(Value::Instance(class))
             }
             Ann::None | Ann::Unknown => None,
         }
     }
 
-    /// `class` and its bases, each before its own bases and once: the order methods are
-    /// looked up in when no class is inherited twice.
-    fn mro(&self, class: &Class) -> Vec<Class> {
-        let mut order = vec![class.clone()];
-        let mut next = 0;
-        // Depth first: the bases of a class go right after it.
-        let mut pending: Vec<Class> = Vec::new();
-        while next < order.len() && order.len() < 64 {
-            let current = order[next].clone();
-            next += 1;
-            let Some(facts) = self.facts(&current.module) else {
-                continue;
-            };
-            let Some(found) = facts.classes.get(&current.name) else {
-                continue;
-            };
-            let env = Env {
-                module: &current.module,
-                this: None,
-                stack: &[],
-                at: None,
-            };
-            pending.clear();
-            for base in &found.bases {
-                if let Some(Value::Type(base)) = self.eval(base, env, 1) {
-                    if !order.contains(&base) && !pending.contains(&base) {
-                        pending.push(base);
-                    }
-                }
-            }
-            order.splice(next..next, pending.drain(..));
+    /// The method resolution order of `class`: itself, then its bases as Python's C3
+    /// linearization orders them. A base that is not known stands in it as a class of
+    /// no module, which no lookup goes past. `None` when the bases have no consistent
+    /// order, or inherit from each other in a cycle.
+    fn order(&self, class: &Class) -> Option<Rc<Vec<Class>>> {
+        if let Some(known) = self.orders.borrow().get(class) {
+            return known.clone();
         }
+        // A class met again while its own order is worked out inherits from itself.
+        self.orders.borrow_mut().insert(class.clone(), None);
+        let order = self.linearized(class).map(Rc::new);
+        self.orders
+            .borrow_mut()
+            .insert(class.clone(), order.clone());
         order
+    }
+
+    fn linearized(&self, class: &Class) -> Option<Vec<Class>> {
+        let facts = self.facts(&class.module);
+        let Some(known) = facts
+            .as_ref()
+            .and_then(|facts| facts.classes.get(&class.name))
+        else {
+            return Some(vec![class.clone()]);
+        };
+        let mut direct: Vec<Class> = Vec::new();
+        let mut orders: Vec<Vec<Class>> = Vec::new();
+        for base in &known.bases {
+            let (base, order) = match self.eval(base, Env::top(&class.module), 1) {
+                Some(Value::Type(base)) => {
+                    let order = self.order(&base)?;
+                    (base, (*order).clone())
+                }
+                Some(Value::Unresolved(base)) => (base.clone(), vec![base]),
+                _ => {
+                    let unknown = Class::new(NOWHERE, "");
+                    (unknown.clone(), vec![unknown])
+                }
+            };
+            if direct.contains(&base) {
+                return None;
+            }
+            direct.push(base);
+            orders.push(order);
+        }
+        orders.push(direct);
+        let mut merged = vec![class.clone()];
+        merged.extend(c3_merge(orders)?);
+        Some(merged)
+    }
+}
+
+/// The C3 merge of the orders of the bases and of the list of the bases: each time, the
+/// first head that is in the tail of no order. `None` when no head qualifies.
+fn c3_merge(mut orders: Vec<Vec<Class>>) -> Option<Vec<Class>> {
+    let mut merged = Vec::new();
+    loop {
+        orders.retain(|order| !order.is_empty());
+        if orders.is_empty() {
+            return Some(merged);
+        }
+        if merged.len() > 256 {
+            return None;
+        }
+        let head = orders
+            .iter()
+            .map(|order| &order[0])
+            .find(|head| orders.iter().all(|order| !order[1..].contains(head)))?;
+        let head = head.clone();
+        for order in &mut orders {
+            if order[0] == head {
+                order.remove(0);
+            }
+        }
+        merged.push(head);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn class(name: &str) -> Class {
+        Class::new("m", name)
+    }
+
+    fn order(orders: &[&[&str]]) -> Option<Vec<String>> {
+        let orders = orders
+            .iter()
+            .map(|order| order.iter().map(|name| class(name)).collect())
+            .collect();
+        c3_merge(orders).map(|merged| merged.into_iter().map(|class| class.name).collect())
+    }
+
+    #[test]
+    fn a_diamond_is_ordered_as_python_orders_it() {
+        // class D(B, C), B(A), C(A): the orders of the bases, then the bases.
+        let merged = order(&[&["B", "A"], &["C", "A"], &["B", "C"]]);
+        assert_eq!(merged.unwrap(), ["B", "C", "A"]);
+    }
+
+    #[test]
+    fn bases_in_no_consistent_order_have_no_order() {
+        // class X(A, B), class Y(B, A), class Z(X, Y): TypeError in Python.
+        assert_eq!(
+            order(&[&["X", "A", "B"], &["Y", "B", "A"], &["X", "Y"]]),
+            None
+        );
+        // class W(A, B) where B(A): A is before its subclass.
+        assert_eq!(order(&[&["A"], &["B", "A"], &["A", "B"]]), None);
+    }
+
+    fn facts(text: &str) -> Facts {
+        let source = Source::new(text, (3, 14)).expect("parses");
+        Facts::of(&source, Some("pkg.m"))
+    }
+
+    #[test]
+    fn every_binding_of_a_module_name_is_kept() {
+        let found = facts(
+            "import os\nfrom .db import Db as D\nclass C: ...\ndef f() -> C: ...\nx: C = f()\nx = None\nfor y in z: ...\n",
+        );
+        assert_eq!(found.names["os"], [Val::Module("os".to_string())]);
+        let imported = Val::From {
+            module: "pkg.db".to_string(),
+            original: "Db".to_string(),
+            local: "D".to_string(),
+        };
+        assert_eq!(found.names["D"], [imported]);
+        assert_eq!(found.names["C"], [Val::Class("C".to_string())]);
+        assert_eq!(found.names["f"], [Val::Function("f".to_string())]);
+        let declared = Val::Declared(Ann::Name("C".to_string()));
+        assert_eq!(found.names["x"], [declared, Val::None]);
+        assert_eq!(found.names["y"], [Val::Unknown]);
+        assert_eq!(found.functions["f"].returns, Ann::Name("C".to_string()));
+    }
+
+    #[test]
+    fn a_name_bound_in_a_function_or_class_is_not_a_module_name() {
+        let found = facts("def f():\n    import os\n    class Local: ...\n    x = 1\nclass C:\n    class Inner: ...\n");
+        let mut names: Vec<&String> = found.names.keys().collect();
+        names.sort();
+        assert_eq!(names, ["C", "f"]);
+        let mut classes: Vec<&String> = found.classes.keys().collect();
+        classes.sort();
+        assert_eq!(
+            classes,
+            ["C"],
+            "a class in a class or function is not modelled"
+        );
+        assert_eq!(found.classes["C"].attrs["Inner"], [Val::Unknown]);
+    }
+
+    #[test]
+    fn a_self_attribute_is_what_its_method_binds_it_to() {
+        let found = facts(
+            "class C:\n    kind: K\n    def __init__(self, db: Db, other):\n        self.db = db\n        self.other = other\n        self.made = make()\n        local = make()\n        self.local = local\n        self.me = self\n    def one(self): ...\n    one = None\n",
+        );
+        let attrs = &found.classes["C"].attrs;
+        assert_eq!(attrs["kind"], [Val::Declared(Ann::Name("K".to_string()))]);
+        assert_eq!(attrs["db"], [Val::Declared(Ann::Name("Db".to_string()))]);
+        assert_eq!(
+            attrs["other"],
+            [Val::Unknown],
+            "a parameter without annotation"
+        );
+        let made = Val::Call(Box::new(Val::Name("make".to_string())), None);
+        assert_eq!(attrs["made"], [made]);
+        assert_eq!(attrs["local"], [Val::Unknown], "a local is not followed");
+        assert_eq!(attrs["me"], [Val::This]);
+        assert_eq!(
+            attrs["one"],
+            [Val::None, Val::Unknown],
+            "a method and an attribute"
+        );
+    }
+
+    #[test]
+    fn an_import_binds_the_first_part_of_a_dotted_module() {
+        let found =
+            facts("import a.b\nimport a.c as c\nfrom . import sibling\nfrom .. import up\n");
+        assert_eq!(found.names["a"], [Val::Module("a".to_string())]);
+        assert_eq!(found.names["c"], [Val::Module("a.c".to_string())]);
+        let from = |module: &str, name: &str| Val::From {
+            module: module.to_string(),
+            original: name.to_string(),
+            local: name.to_string(),
+        };
+        assert_eq!(found.names["sibling"], [from("pkg", "sibling")]);
+        assert_eq!(found.names["up"], [from("", "up")]);
+    }
+
+    #[test]
+    fn an_import_in_a_method_is_what_its_attribute_holds() {
+        let found = facts(
+            "class C:\n    def __init__(self):\n        from .db import Db\n        import lib\n        self.db = Db()\n        self.lib = lib\n",
+        );
+        let imported = Val::From {
+            module: "pkg.db".to_string(),
+            original: "Db".to_string(),
+            local: "Db".to_string(),
+        };
+        let attrs = &found.classes["C"].attrs;
+        assert_eq!(attrs["db"], [Val::Call(Box::new(imported), None)]);
+        assert_eq!(attrs["lib"], [Val::Module("lib".to_string())]);
+    }
+
+    #[test]
+    fn two_classes_of_one_name_are_unknown() {
+        let found = facts("class C: ...\nclass C: ...\n");
+        assert!(found.names["C"].contains(&Val::Unknown));
+    }
+
+    #[test]
+    fn a_special_form_is_one_by_its_module() {
+        assert_eq!(Class::new("typing", "cast").form(), Some(Ok(Form::Cast)));
+        let extensions = Class::new("typing_extensions", "Self");
+        assert_eq!(extensions.form(), Some(Ok(Form::Receiver)));
+        assert_eq!(Class::new("typing", "Any").form(), Some(Err(())));
+        assert_eq!(Class::new("lib", "cast").form(), None);
     }
 }

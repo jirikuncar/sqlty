@@ -335,16 +335,707 @@ def run(quiet: Quiet, loud: Loud) -> None:
     loud.one("SELECT name FROM users", int)
 ```
 
-## `isinstance` does not narrow yet
+## `isinstance` narrows
 
-ty: `DB`. sqlty skips the call.
+ty: `DB`.
 
 ```python
 from pkg.db import DB
 
 def run(x: object) -> None:
     if isinstance(x, DB):
+        # error: [column-type-mismatch]
         x.one("SELECT name FROM users", int)
+```
+
+### In the branch only
+
+The `else` branch and what follows the `if` hold what the name held before.
+
+```python
+from pkg.db import DB
+
+def run(x: object) -> None:
+    if isinstance(x, DB):
+        pass
+    else:
+        x.one("SELECT name FROM users", int)
+    x.one("SELECT name FROM users", int)
+
+# error:
+```
+
+### After an early `return` or `raise`
+
+ty: `DB` for both.
+
+```python
+from pkg.db import DB
+
+def returned(x: object) -> None:
+    if not isinstance(x, DB):
+        return
+    # error: [column-type-mismatch]
+    x.one("SELECT name FROM users", int)
+
+def raised(x: object) -> None:
+    if not isinstance(x, DB):
+        raise TypeError(x)
+    # error: [column-type-mismatch]
+    x.one("SELECT name FROM users", int)
+```
+
+### `assert`
+
+```python
+from pkg.db import DB
+
+def run(x: object) -> None:
+    assert isinstance(x, DB)
+    # error: [column-type-mismatch]
+    x.one("SELECT name FROM users", int)
+```
+
+### `and`
+
+```python
+from pkg.db import DB
+
+def run(x: object, ready: bool) -> None:
+    if ready and isinstance(x, DB):
+        # error: [column-type-mismatch]
+        x.one("SELECT name FROM users", int)
+```
+
+### A subclass stays what it is
+
+ty: `Quiet`, whose `one` is not a helper.
+
+```python
+from pkg.db import DB
+
+class Quiet(DB):
+    def one(self, query, form):
+        return None
+
+def run(x: Quiet) -> None:
+    if isinstance(x, DB):
+        x.one("SELECT name FROM users", int)
+
+# error:
+```
+
+### A binding after the test ends it
+
+```python
+from pkg.db import DB
+
+def run(x: object, other: object) -> None:
+    if isinstance(x, DB):
+        x = other
+        x.one("SELECT name FROM users", int)
+
+# error:
+```
+
+### A class that is known
+
+The test narrows a base class to its subclass, and leaves a subclass what it is. A name
+known to be of an unrelated class would be of both classes, and a union of all its
+members: neither is followed. ty: `DB`, `Cursor & DB`, `(DB & Cursor) | DB`.
+
+```python
+from pkg.db import DB, Cursor, Postgres
+
+def narrowed(x: Postgres) -> None:
+    if isinstance(x, DB):
+        # error: [column-type-mismatch]
+        x.one("SELECT name FROM users", int)
+
+def unrelated(x: Cursor) -> None:
+    if isinstance(x, DB):
+        x.one("SELECT name FROM users", int)
+
+def union(x: Cursor | DB) -> None:
+    if isinstance(x, Postgres):
+        x.one("SELECT name FROM users", int)
+
+def either(ready: bool, other) -> None:
+    x = DB() if ready else other
+    y = other
+    if ready:
+        y = Cursor()
+    if isinstance(y, DB):
+        y.one("SELECT name FROM users", int)
+```
+
+### A name tested twice, an annotation that is not followed
+
+A second test of a name already narrowed states both classes. An annotation sqlty does
+not follow (an alias of a union, a type variable) may state a class too, so only a name
+without one, or annotated `object` or `Any`, takes the class of the test. ty: `DB`,
+`DB`, `(Cursor & DB) | DB`, `T & DB`.
+
+```python
+from typing import Any
+from pkg.db import DB, Cursor, Postgres
+
+Either = Cursor | DB
+
+def twice(x: object) -> None:
+    if isinstance(x, Postgres):
+        if isinstance(x, DB):
+            x.one("SELECT name FROM users", int)
+
+def then(x: object) -> None:
+    assert isinstance(x, Postgres)
+    if not isinstance(x, DB):
+        return
+    x.one("SELECT name FROM users", int)
+
+def alias(x: Either) -> None:
+    if isinstance(x, DB):
+        x.one("SELECT name FROM users", int)
+
+def variable[T: Cursor](x: T) -> None:
+    if isinstance(x, DB):
+        x.one("SELECT name FROM users", int)
+
+def anything(x: Any, y) -> None:
+    if isinstance(x, DB):
+        # error: [column-type-mismatch]
+        x.one("SELECT name FROM users", int)
+    if isinstance(y, DB):
+        # error: [column-type-mismatch]
+        y.one("SELECT name FROM users", int)
+```
+
+### Many branches
+
+Every branch that reaches the call counts, here ten that agree. A name more than 64
+bindings reach at once is not followed.
+
+```python
+from pkg.db import DB, make_untyped
+
+def run(kind: int) -> None:
+    if kind == 1:
+        db = DB()
+    elif kind == 2:
+        db = DB()
+    elif kind == 3:
+        db = DB()
+    elif kind == 4:
+        db = DB()
+    elif kind == 5:
+        db = DB()
+    elif kind == 6:
+        db = DB()
+    elif kind == 7:
+        db = DB()
+    elif kind == 8:
+        db = DB()
+    elif kind == 9:
+        db = DB()
+    elif kind == 10:
+        db = DB()
+    else:
+        db = DB()
+    # error: [column-type-mismatch]
+    db.one("SELECT name FROM users", int)
+    if kind == 11:
+        db = make_untyped()
+    db.one("SELECT name FROM users", int)
+```
+
+### Two tests, a binding in the test, another `isinstance`
+
+```python
+from pkg.db import DB, Postgres
+
+def both(x: object) -> None:
+    if isinstance(x, Postgres) and isinstance(x, DB):
+        x.one("SELECT name FROM users", int)
+
+def bound_in_the_test(x: object, other: object) -> None:
+    if isinstance(x, DB) and (x := other):
+        x.one("SELECT name FROM users", int)
+
+def another(x: object, isinstance) -> None:
+    if isinstance(x, DB):
+        x.one("SELECT name FROM users", int)
+
+# error:
+```
+
+### `elif`, loops, `try` and `match`
+
+```python
+from pkg.db import DB, Cursor
+
+def chained(x: object) -> None:
+    if isinstance(x, Cursor):
+        pass
+    elif isinstance(x, DB):
+        # error: [column-type-mismatch]
+        x.one("SELECT name FROM users", int)
+    else:
+        x.one("SELECT name FROM users", int)
+
+def looped(things: list[object]) -> None:
+    for x in things:
+        if not isinstance(x, DB):
+            continue
+        # error: [column-type-mismatch]
+        x.one("SELECT name FROM users", int)
+    while things:
+        x = things.pop()
+        if not isinstance(x, DB):
+            break
+        # error: [column-type-mismatch]
+        x.one("SELECT name FROM users", int)
+    else:
+        x.one("SELECT name FROM users", int)
+
+def tried(x: object, other: object) -> None:
+    assert isinstance(x, DB)
+    try:
+        x = other
+    except ValueError:
+        x.one("SELECT name FROM users", int)
+    finally:
+        x.one("SELECT name FROM users", int)
+    x.one("SELECT name FROM users", int)
+
+def kept(x: object) -> None:
+    assert isinstance(x, DB)
+    try:
+        pass
+    except ValueError:
+        # error: [column-type-mismatch]
+        x.one("SELECT name FROM users", int)
+    else:
+        # error: [column-type-mismatch]
+        x.one("SELECT name FROM users", int)
+    finally:
+        # error: [column-type-mismatch]
+        x.one("SELECT name FROM users", int)
+
+def matched(x: object, command: object) -> None:
+    assert isinstance(x, DB)
+    match command:
+        case "one":
+            # error: [column-type-mismatch]
+            x.one("SELECT name FROM users", int)
+        case [x]:
+            x.one("SELECT name FROM users", int)
+    x.one("SELECT name FROM users", int)
+```
+
+### At the top of a module and in a class body
+
+The statements of a module and of a class body run in order too. A function reads a
+name of its module whenever it is called, so every binding of the module counts there.
+
+```python
+from pkg.db import DB, make_untyped
+
+db = make_untyped()
+db.one("SELECT name FROM users", int)
+if isinstance(db, DB):
+    # error: [column-type-mismatch]
+    db.one("SELECT name FROM users", int)
+db = DB()
+# error: [column-type-mismatch]
+db.one("SELECT name FROM users", int)
+
+def later() -> None:
+    db.one("SELECT name FROM users", int)
+
+class Report:
+    source = make_untyped()
+    source.one("SELECT name FROM users", int)
+    source = DB()
+    # error: [column-type-mismatch]
+    source.one("SELECT name FROM users", int)
+```
+
+### What follows a `return` is not reached
+
+```python
+from pkg.db import DB
+
+def run(db: DB) -> None:
+    return
+    db.one("SELECT name FROM users", int)
+
+# error:
+```
+
+### A tuple of classes and `or` are not followed
+
+ty: `DB | Cursor`, and `object`.
+
+```python
+from pkg.db import DB, Cursor
+
+def run(x: object, ready: bool) -> None:
+    if isinstance(x, (DB, Cursor)):
+        x.one("SELECT name FROM users", int)
+    if ready or isinstance(x, DB):
+        x.one("SELECT name FROM users", int)
+
+# error:
+```
+
+## Every binding counts
+
+A name is followed only when every binding that reaches the call states its class. A
+form that binds a name without stating one makes it unknown: the call is skipped, never
+checked against what the name held before or what the module binds it to.
+
+### An assignment expression
+
+```python
+from pkg.db import DB
+
+def run(db: DB, other) -> None:
+    if (db := other):
+        db.one("SELECT name FROM users", int)
+
+# error:
+```
+
+### A comprehension variable
+
+```python
+from pkg.db import DB
+
+db = DB()
+
+def run(others) -> None:
+    [db.one("SELECT name FROM users", int) for db in others]
+    {db: db.one("SELECT name FROM users", int) for db in others}
+    list(db.one("SELECT name FROM users", int) for db in others)
+
+# error:
+```
+
+### `except ... as`
+
+```python
+from pkg.db import DB
+
+def run(db: DB) -> None:
+    try:
+        pass
+    except Exception as db:
+        db.one("SELECT name FROM users", int)
+
+# error:
+```
+
+### An import in a function
+
+An import binds its name in the function it is written in, and is followed there: the
+name is what the function imports, not what the module binds it to.
+
+```python
+from pkg.db import DB
+
+db = DB()
+
+def run() -> None:
+    import other as db
+    db.one("SELECT name FROM users", int)
+
+def run_from() -> None:
+    from other import thing as db
+    db.one("SELECT name FROM users", int)
+
+# error:
+```
+
+```python
+import other as DB
+
+def run() -> None:
+    from pkg.db import DB
+    db = DB()
+    # error: [column-type-mismatch]
+    db.one("SELECT name FROM users", int)
+
+def qualified() -> None:
+    import pkg.db
+    # error: [column-type-mismatch]
+    pkg.db.DB().one("SELECT name FROM users", int)
+
+class Holder:
+    def __init__(self) -> None:
+        from pkg.db import DB as Local
+        self.db = Local()
+
+    def run(self) -> None:
+        # error: [column-type-mismatch]
+        self.db.one("SELECT name FROM users", int)
+```
+
+### `global` at the top of a module
+
+It changes nothing there.
+
+```python
+from pkg.db import DB
+
+global db
+db = DB()
+# error: [column-type-mismatch]
+db.one("SELECT name FROM users", int)
+```
+
+### `nonlocal`
+
+```python
+from pkg.db import DB
+
+def run(other) -> None:
+    db = DB()
+
+    def swap() -> None:
+        nonlocal db
+        db = other
+
+    swap()
+    db.one("SELECT name FROM users", int)
+
+# error:
+```
+
+### `global` in another function
+
+```python
+from pkg.db import DB
+
+db = DB()
+
+def swap(other) -> None:
+    global db
+    db = other
+
+def run() -> None:
+    db.one("SELECT name FROM users", int)
+
+# error:
+```
+
+### `match ... as`
+
+```python
+from pkg.db import DB
+
+def run(db: DB, other) -> None:
+    match other:
+        case [db]:
+            db.one("SELECT name FROM users", int)
+        case {"db": _, **db}:
+            db.one("SELECT name FROM users", int)
+        case object() as db:
+            db.one("SELECT name FROM users", int)
+
+# error:
+```
+
+### A lambda parameter
+
+```python
+from pkg.db import DB
+
+db = DB()
+
+run = lambda db: db.one("SELECT name FROM users", int)
+
+# error:
+```
+
+### A class in a function
+
+The class is another one than the helper's, whatever its name.
+
+```python
+from pkg.db import DB
+
+def run() -> None:
+    class DB:
+        def one(self, query, form): ...
+
+    db = DB()
+    db.one("SELECT name FROM users", int)
+
+# error:
+```
+
+### A function in a function
+
+```python
+from pkg.db import make
+
+def run() -> None:
+    def make():
+        return object()
+
+    make().one("SELECT name FROM users", int)
+
+# error:
+```
+
+### A parameter assigned again
+
+ty: `object`.
+
+```python
+from pkg.db import DB
+
+def run(db: DB) -> None:
+    db = object()
+    db.one("SELECT name FROM users", int)
+
+# error:
+```
+
+### A class in a class
+
+`Outer.DB` is another class than `DB`.
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+class DB:
+    def one(self, query: Annotated[LiteralString, SQL], form: type, /): ...
+
+class Outer:
+    class DB:
+        def one(self, query, form): ...
+
+        def run(self) -> None:
+            self.one("SELECT name FROM users", int)
+
+def run() -> None:
+    Outer.DB().one("SELECT name FROM users", int)
+
+# error:
+```
+
+### `del`, a loop variable and a conditional value
+
+```python
+from pkg.db import DB
+
+def deleted(db: DB) -> None:
+    del db
+    db.one("SELECT name FROM users", int)
+
+def looped(db: DB, others) -> None:
+    for db in others:
+        db.one("SELECT name FROM users", int)
+
+def either(ready: bool) -> None:
+    db = DB() if ready else None
+    db.one("SELECT name FROM users", int)
+
+# error:
+```
+
+### A branch that does not reach the call
+
+A branch that returns binds nothing the call sees. ty: `DB`.
+
+```python
+from pkg.db import DB
+
+def run(db: DB, other) -> None:
+    if other:
+        db = other
+        return
+    # error: [column-type-mismatch]
+    db.one("SELECT name FROM users", int)
+```
+
+### Branches that disagree
+
+ty: `DB | Cursor`.
+
+```python
+from pkg.db import DB, Cursor
+
+def run(ready: bool) -> None:
+    if ready:
+        db = DB()
+    else:
+        db = Cursor()
+    db.one("SELECT name FROM users", int)
+
+# error:
+```
+
+## A diamond follows the method resolution order
+
+`Both` inherits `one` from `Right`: Python looks in `Left`, `Right`, then `Base`. ty:
+`bound method Both.one` of `Right`.
+
+```python
+from pkg.db import DB
+
+class Left(DB):
+    pass
+
+class Right(DB):
+    def one(self, query, form):
+        return None
+
+class Both(Left, Right):
+    pass
+
+def run(both: Both) -> None:
+    both.one("SELECT name FROM users", int)
+
+# error:
+```
+
+### The helper of the first base
+
+```python
+from pkg.db import DB
+
+class Left(DB):
+    pass
+
+class Right(DB):
+    pass
+
+class Both(Left, Right):
+    pass
+
+def run(both: Both) -> None:
+    # error: [column-type-mismatch]
+    both.one("SELECT name FROM users", int)
+```
+
+### Bases in no consistent order
+
+Python raises `TypeError` for the class; the call is skipped.
+
+```python
+from pkg.db import DB
+
+class Left(DB):
+    pass
+
+class Wrong(DB, Left):
+    pass
+
+def run(wrong: Wrong) -> None:
+    wrong.one("SELECT name FROM users", int)
 
 # error:
 ```

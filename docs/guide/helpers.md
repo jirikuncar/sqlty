@@ -110,11 +110,20 @@ an instance assigned (`db = Db(...)`), an attribute the class or one of its base
 declares (`website.db`, `self.app.db`), the return annotation of a call (`make()`,
 `Self`, `typing.cast`), and `with ... as` through `__enter__` or a `@contextmanager`
 function annotated `Iterator[T]`. `T | None` is read as `T`. A subclass has the helper
-methods of its bases unless it defines the method itself. Classes of other modules are
-read from their source, never imported.
+methods of its bases, in Python's method resolution order, unless it or a base before
+the helper's class defines the method itself. Classes of other modules are read from
+their source, never imported.
+
+A name is followed through the statements of its function in order: it is what the
+bindings that reach the call give it, and a branch that ends in `return` or `raise` does
+not reach what follows. `isinstance(x, Db)` states the class of a name nothing else is
+known of, or known to be of a base of `Db`: in the branch it guards, after an `assert`,
+and after an `if not isinstance(x, Db):` that returns or raises.
 
 What no declaration states is skipped: an unannotated parameter, the result of an
-unannotated function, an attribute set from outside the class.
+unannotated function, an attribute set from outside the class. So is a name that some
+binding reaching the call leaves unknown, or that two of them give different classes,
+or that more than 64 bindings reach at once.
 
 ```python
 from typing import Annotated, LiteralString

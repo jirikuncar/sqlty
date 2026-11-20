@@ -51,6 +51,7 @@ pub mod config;
 pub mod drivers;
 pub mod edit;
 pub mod fixer;
+pub(crate) mod flow;
 pub mod frozen;
 pub mod helpers;
 #[allow(missing_docs)]

@@ -519,7 +519,7 @@ pub fn helper_calls<'a>(
     let lines = Lines::new(text);
     let (annotated, marker) = marker_names(source);
     let lookup = |module: &str, name: &str| helpers.and_then(|helpers| helpers.get(module, name));
-    let receivers = Resolver::new(source, module, &targets, helpers, &own, &scan);
+    let receivers = Resolver::new(source, module, helpers, &own, &scan);
     let mut wanted: Vec<Option<bool>> = vec![None; scan.scopes.len()];
     let composed = text.contains("psycopg");
     let mut psycopg: Option<compose::Scan<'a>> = None;

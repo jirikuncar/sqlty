@@ -465,6 +465,47 @@ def run(key) -> None:
     fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=key)
 ```
 
+#### A name bound in other ways
+
+What an argument holds is read from the assignments, annotations and parameters of its
+name. A `+=`, a loop over other values, a `del` or an import of the same name says
+nothing of its type, and is not counted.
+
+```python
+from typing import NamedTuple
+
+from db import fetch_all
+
+class Row(NamedTuple):
+    key: str
+
+def added() -> None:
+    key = "a"
+    key += "b"
+    fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=key)
+
+def looped(parts) -> None:
+    key = "a"
+    for key in parts:
+        fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=key)
+
+def deleted() -> None:
+    key = "a"
+    fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=key)
+    del key
+
+def imported() -> None:
+    key = "a"
+    fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=key)
+    from db import key
+
+def twice() -> None:
+    key = "a"
+    key = 1
+    # error: [nullable-mismatch] "Row.key is str but query column 'key' can be NULL"
+    fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=key)
+```
+
 ### A column an INSERT writes from a parameter
 
 A column an `INSERT` writes from a placeholder the call binds to a value that excludes

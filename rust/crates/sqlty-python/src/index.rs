@@ -605,7 +605,7 @@ impl HelperIndex {
         };
         let facts = source.map(|source| {
             let name = source.module.as_deref().or(Some(module));
-            Arc::new(Facts::of(&source, &source.targets_in(name)))
+            Arc::new(Facts::of(&source, name))
         });
         lock(&self.facts).insert(module.to_string(), facts.clone());
         facts
