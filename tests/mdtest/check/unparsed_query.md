@@ -99,3 +99,23 @@ dialect = "sqlite"
 # error: [unparsed-query] "query does not parse: unsupported in this dialect"
 q = "--sql\nSELECT id INTO backup FROM users"
 ```
+
+## Tuple assignments in MySQL
+
+MySQL assigns one column at a time: `UPDATE`, `INSERT ... SET` and `ON DUPLICATE KEY UPDATE`
+take `col = value` only, where sqlparser also reads `(a, b) = (...)`.
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+```
+
+```python
+# error: [unparsed-query] "query does not parse: unsupported in this dialect"
+a = "-- sql\nUPDATE users SET (id, name) = (1, 'a')"
+# error: [unparsed-query] "query does not parse: unsupported in this dialect"
+b = "-- sql\nINSERT INTO users SET (id, name) = (1, 'a')"
+# error: [unparsed-query] "query does not parse: unsupported in this dialect"
+c = "-- sql\nINSERT INTO users (id) VALUES (1) ON DUPLICATE KEY UPDATE (id, name) = (2, 'b')"
+d = "-- sql\nINSERT INTO users SET id = 1, name = 'a' ON DUPLICATE KEY UPDATE name = 'b'"
+```

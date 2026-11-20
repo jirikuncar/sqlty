@@ -6,8 +6,9 @@ use std::sync::LazyLock;
 
 use regex::{Captures, Regex};
 use sqlparser::ast::{
-    visit_expressions, visit_expressions_mut, BinaryOperator, DataType, Expr, Function,
-    FunctionArguments, ObjectName, Statement, Value, ValueWithSpan, Visit, Visitor,
+    visit_expressions, visit_expressions_mut, Assignment, AssignmentTarget, BinaryOperator,
+    DataType, Expr, Function, FunctionArguments, ObjectName, OnInsert, Statement, Value,
+    ValueWithSpan, Visit, Visitor,
 };
 use sqlparser::keywords::Keyword;
 use sqlparser::parser::Parser;
@@ -394,7 +395,8 @@ pub(super) fn too_deep(stmts: &[Statement]) -> bool {
 
 /// Whether `stmts` use what sqlparser accepts but the dialect does not:
 /// `CAST(x AS <not a type>)`, which sqlparser re-reads as a call to a function
-/// named `CAST`, and MySQL-only types such as `SET('a')` in other dialects.
+/// named `CAST`, MySQL-only types such as `SET('a')` in other dialects, and a MySQL
+/// assignment to a tuple of columns (`SET (a, b) = ...`).
 pub(super) fn reject_unsupported(stmts: &[Statement], dialect: SqlDialect) -> bool {
     let foreign = |dt: &DataType| {
         dialect != SqlDialect::MySql
@@ -422,7 +424,26 @@ pub(super) fn reject_unsupported(stmts: &[Statement], dialect: SqlDialect) -> bo
                 if create.columns.iter().any(|col| foreign(&col.data_type)))
             || matches!(stmt, Statement::Query(query)
                 if dialect == SqlDialect::Sqlite && selects_into(&query.body))
+            || dialect == SqlDialect::MySql && assigns_tuple(stmt)
     })
+}
+
+/// Whether `stmt` assigns to a tuple of columns, which MySQL's `UPDATE`, `INSERT ... SET`
+/// and `ON DUPLICATE KEY UPDATE` lack: each takes `col = value` only.
+fn assigns_tuple(stmt: &Statement) -> bool {
+    let tuple = |assignments: &[Assignment]| {
+        assignments
+            .iter()
+            .any(|a| matches!(a.target, AssignmentTarget::Tuple(_)))
+    };
+    match stmt {
+        Statement::Update(update) => tuple(&update.assignments),
+        Statement::Insert(insert) => {
+            tuple(&insert.assignments)
+                || matches!(&insert.on, Some(OnInsert::DuplicateKeyUpdate(on)) if tuple(on))
+        }
+        _ => false,
+    }
 }
 
 pub(super) fn parse_first(sql: &str, dialect: SqlDialect) -> Option<Statement> {
