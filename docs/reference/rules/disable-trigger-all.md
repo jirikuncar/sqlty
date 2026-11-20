@@ -13,7 +13,8 @@ Default severity: **warn**
 
 ## What it does
 
-Reports a new `ALTER TABLE ... DISABLE TRIGGER ALL` on a table that has rows.
+Reports a new `ALTER TABLE ... DISABLE TRIGGER ALL` on a table that has rows
+and a foreign key, to or from it, or that the schema does not define.
 
 `against.sql`:
 
@@ -33,7 +34,9 @@ ALTER TABLE orders ENABLE TRIGGER ALL;
 
 `ALL` includes the [internal triggers that enforce foreign keys](https://www.postgresql.org/docs/17/sql-altertable.html#SQL-ALTERTABLE-DESC-DISABLE-ENABLE-TRIGGER).
 Every row written while they are off, by the migration or by the application,
-skips the check, and enabling them again does not check those rows.
+skips the check, and enabling them again does not check those rows. Only a
+superuser may disable them, so a migration that runs as another role fails
+instead.
 
 ## How to fix
 

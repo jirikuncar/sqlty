@@ -13,7 +13,8 @@ Default severity: **warn**
 
 ## What it does
 
-Reports a new `TRUNCATE ... CASCADE` of a table that has rows.
+Reports a new `TRUNCATE ... CASCADE` of a table that has rows and is referenced
+by a foreign key, or that the schema does not define.
 
 `against.sql`:
 

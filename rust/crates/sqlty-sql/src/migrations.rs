@@ -87,6 +87,8 @@ struct Model {
     tables: FxHashSet<String>,
     /// The declared type of each column.
     types: FxHashMap<(String, String), DataType>,
+    /// The tables on either side of a foreign key.
+    referencing: FxHashSet<String>,
     /// The `CHECK (column IS NOT NULL)` constraints of each table: name, column, validated.
     not_null: FxHashMap<String, Vec<(Option<String>, String, bool)>>,
 }
@@ -101,7 +103,7 @@ struct Session {
     reported_timeout: bool,
     /// The enum values `ALTER TYPE ... ADD VALUE` added in the open transaction, as string
     /// literals, with their type.
-    added_values: Vec<(String, String)>,
+    added_values: Vec<(String, ObjectName)>,
 }
 
 impl Model {
@@ -140,7 +142,7 @@ impl Model {
                 if let Some(used) = session
                     .added_values
                     .iter()
-                    .position(|(value, _)| tokens.contains(&value.to_lowercase()))
+                    .position(|(value, ty)| self.uses_value(&stmt, &tokens, value, ty))
                 {
                     let (value, ty) = session.added_values.remove(used);
                     report(
@@ -169,7 +171,7 @@ impl Model {
                 })) = parsed.as_ref().filter(|_| session.transaction)
                 {
                     let value = format!("'{}'", add.value.value.replace('\'', "''"));
-                    session.added_values.push((value, name.to_string()));
+                    session.added_values.push((value, name.clone()));
                 }
                 let created = parsed.as_ref().and_then(created);
                 if let Some(created) = created.filter(|c| !self.tables.contains(c)) {
@@ -231,6 +233,7 @@ impl Model {
             }
             _ => {}
         }
+        self.referencing.extend(foreign_keys(stmt));
     }
 
     fn apply_op(&mut self, table: &str, op: &AlterTableOperation) {
@@ -270,6 +273,26 @@ impl Model {
             }
             _ => {}
         }
+    }
+
+    /// Whether `stmt` puts the new enum `value` of `ty` to use: it casts to `ty`, names a
+    /// column of type `ty`, or names no table whose columns are known.
+    fn uses_value(&self, stmt: &Raw, words: &[String], value: &str, ty: &ObjectName) -> bool {
+        if !stmt.tokens().contains(&value) || words.starts_with(&["alter".into(), "type".into()]) {
+            return false;
+        }
+        let ty = key(ty);
+        let typed = |column: &(String, String)| {
+            self.types
+                .get(column)
+                .is_some_and(|declared| declared.to_string().to_lowercase() == ty)
+        };
+        words.contains(&ty)
+            || words.iter().all(|word| !self.tables.contains(word))
+            || self
+                .types
+                .keys()
+                .any(|column| typed(column) && words.contains(&column.1))
     }
 
     fn is_new(&self, name: &ObjectName) -> bool {
@@ -339,7 +362,11 @@ impl Model {
                     .table_names
                     .iter()
                     .all(|target| self.is_new(&target.name));
-                if !created && truncate.cascade == Some(CascadeOption::Cascade) {
+                let referenced = truncate.table_names.iter().any(|target| {
+                    let table = key(&target.name);
+                    self.referencing.contains(&table) || !self.tables.contains(&table)
+                });
+                if !created && referenced && truncate.cascade == Some(CascadeOption::Cascade) {
                     let names: Vec<String> = truncate
                         .table_names
                         .iter()
@@ -473,7 +500,8 @@ impl Model {
                 );
             }
             AlterTableOperation::DisableTrigger { name }
-                if name.value.eq_ignore_ascii_case("all") =>
+                if name.value.eq_ignore_ascii_case("all")
+                    && (self.referencing.contains(table) || !self.tables.contains(table)) =>
             {
                 report(
                     Rule::DisableTriggerAll,
@@ -513,7 +541,10 @@ impl Model {
                 }
                 Judged::default()
             }
-            ["alter", "table", .., "set", "tablespace", _] => {
+            ["alter", "table", rest @ ..]
+                if rest.windows(2).any(|pair| pair == ["set", "tablespace"])
+                    && !rest.starts_with(&["all", "in"]) =>
+            {
                 let skip = ["if", "exists", "only"];
                 let table = token_name(&stmt.tokens()[2..], &skip, "set");
                 let created = self.created.contains(&table);
@@ -542,6 +573,7 @@ impl Session {
         let words: Vec<&str> = tokens.iter().map(String::as_str).collect();
         match words.as_slice() {
             ["begin", ..] | ["start", "transaction", ..] => self.transaction = true,
+            ["rollback", "to", ..] | ["release" | "savepoint", ..] => {}
             ["commit" | "end" | "rollback" | "abort", ..] => {
                 (self.transaction, self.local_timeout) = (false, false);
                 self.added_values.clear();
@@ -820,6 +852,58 @@ fn rewrite_command_message(command: &str) -> String {
     )
 }
 
+/// The tables on either side of the foreign keys `stmt` adds.
+fn foreign_keys(stmt: &Statement) -> Vec<String> {
+    let (table, columns, constraints): (_, Vec<&ColumnDef>, Vec<&TableConstraint>) = match stmt {
+        Statement::CreateTable(create) => (
+            &create.name,
+            create.columns.iter().collect(),
+            create.constraints.iter().collect(),
+        ),
+        Statement::AlterTable(alter) => (
+            &alter.name,
+            alter
+                .operations
+                .iter()
+                .filter_map(|op| match op {
+                    AlterTableOperation::AddColumn { column_def, .. } => Some(column_def),
+                    _ => None,
+                })
+                .collect(),
+            alter
+                .operations
+                .iter()
+                .filter_map(|op| match op {
+                    AlterTableOperation::AddConstraint { constraint, .. } => Some(constraint),
+                    _ => None,
+                })
+                .collect(),
+        ),
+        _ => return Vec::new(),
+    };
+    let inline = columns.into_iter().flat_map(|column| &column.options);
+    let referenced: Vec<String> = inline
+        .filter_map(|option| match &option.option {
+            ColumnOption::ForeignKey(fk) => Some(key(&fk.foreign_table)),
+            _ => None,
+        })
+        .chain(
+            constraints
+                .into_iter()
+                .filter_map(|constraint| match constraint {
+                    TableConstraint::ForeignKey(fk) => Some(key(&fk.foreign_table)),
+                    _ => None,
+                }),
+        )
+        .collect();
+    if referenced.is_empty() {
+        return referenced;
+    }
+    let mut tables = referenced;
+    tables.push(key(table));
+    tables
+}
+
 /// The table name in `tokens` after the leading `skip` words and before `end`, folded and
 /// without the `public` schema.
 fn token_name(tokens: &[&str], skip: &[&str], end: &str) -> String {
@@ -958,12 +1042,14 @@ mod tests {
             ("ALTER TABLE users SET TABLESPACE fast", &[TableRewrite]),
             ("ALTER TABLE IF EXISTS ONLY public.users SET TABLESPACE fast", &[TableRewrite]),
             ("ALTER TABLE users ADD CONSTRAINT no_overlap EXCLUDE USING gist (team_id WITH =)", &[ConstraintScan]),
-            ("ALTER TABLE users DISABLE TRIGGER ALL", &[DisableTriggerAll]),
+            ("ALTER TABLE users DISABLE TRIGGER ALL", &[]),
+            ("ALTER TABLE orders DISABLE TRIGGER ALL", &[DisableTriggerAll]),
             ("ALTER TABLE users DISABLE TRIGGER USER", &[]),
             ("ALTER TABLE users DISABLE TRIGGER audit", &[]),
             ("CREATE INDEX CONCURRENTLY IF NOT EXISTS users_bio ON users (bio)", &[ConcurrentIndexIfNotExists]),
             ("CREATE INDEX IF NOT EXISTS users_bio ON users (bio)", &[MissingConcurrently]),
-            ("TRUNCATE users CASCADE", &[TruncateCascade]),
+            ("TRUNCATE users CASCADE", &[]),
+            ("TRUNCATE orders CASCADE", &[TruncateCascade]),
             ("TRUNCATE TABLE users, teams", &[]),
             ("LOCK TABLE users", &[]),
             ("DROP TABLE users", &[]),
@@ -1099,28 +1185,88 @@ mod tests {
 
     #[test]
     fn an_enum_value_is_used_only_after_its_transaction_commits() {
-        let migration = |between: &str| {
+        let baseline = format!(
+            "{USERS}\nCREATE TYPE status AS ENUM ('new');
+            CREATE TABLE orders (id BIGINT, state status, note TEXT);"
+        );
+        let migration = |between: &str, using: &str| {
             format!(
                 "SET lock_timeout = '1s';
                 BEGIN;
                 ALTER TYPE status ADD VALUE IF NOT EXISTS 'It''s';
                 {between}
-                UPDATE users SET bio = 'It''s' WHERE id = 1;
-                UPDATE users SET bio = 'It''s' WHERE id = 2;
+                {using};
+                {using};
                 COMMIT;"
             )
         };
+        let used = "UPDATE orders SET state = 'It''s' WHERE id = 1";
         assert_eq!(
-            check(USERS, &[&migration("")])[0],
+            check(&baseline, &[&migration("", used)])[0],
             [Finding {
                 rule: Rule::EnumValueInTransaction,
                 message: "'It''s' was added to `status` in this transaction: PostgreSQL refuses a new enum value until the transaction that added it commits, so `COMMIT` after `ADD VALUE`".to_string(),
-                span: 148..191,
+                span: 148..194,
             }]
         );
-        assert_eq!(rules(USERS, &migration("COMMIT; BEGIN;")), []);
-        let outside = "ALTER TYPE status ADD VALUE 'x'; UPDATE users SET bio = 'x';";
-        assert_eq!(rules(USERS, outside), []);
+        let reported =
+            |between: &str, using: &str| !rules(&baseline, &migration(between, using)).is_empty();
+        assert!(reported("", "SELECT 'It''s'::status"));
+        assert!(reported("", "UPDATE elsewhere SET state = 'It''s'"));
+        assert!(reported(
+            "SAVEPOINT s; ROLLBACK TO SAVEPOINT s; RELEASE s;",
+            used
+        ));
+        assert!(!reported("COMMIT; BEGIN;", used));
+        assert!(!reported("", "UPDATE orders SET note = 'It''s'"));
+        assert!(!reported("", "UPDATE orders SET state = 'it''s'"));
+        assert!(!reported(
+            "",
+            "ALTER TYPE status ADD VALUE 'y' AFTER 'It''s'"
+        ));
+        let outside = "ALTER TYPE status ADD VALUE 'x'; UPDATE orders SET state = 'x';";
+        assert_eq!(rules(&baseline, outside), []);
+    }
+
+    #[test]
+    fn foreign_keys_decide_what_trigger_and_cascade_reach() {
+        let baseline = format!(
+            "{USERS}\nCREATE TABLE posts (id BIGINT, user_id BIGINT REFERENCES users (id));
+            CREATE TABLE tags (id BIGINT);
+            CREATE TABLE notes (id BIGINT);
+            ALTER TABLE notes ADD CONSTRAINT fk FOREIGN KEY (id) REFERENCES tags (id) NOT VALID;"
+        );
+        for (migration, expected) in [
+            ("ALTER TABLE posts DISABLE TRIGGER ALL", &[Rule::DisableTriggerAll][..]),
+            ("ALTER TABLE users DISABLE TRIGGER ALL", &[Rule::DisableTriggerAll]),
+            ("ALTER TABLE notes DISABLE TRIGGER ALL", &[Rule::DisableTriggerAll]),
+            ("ALTER TABLE teams DISABLE TRIGGER ALL", &[]),
+            ("TRUNCATE tags CASCADE", &[Rule::TruncateCascade]),
+            ("TRUNCATE teams CASCADE", &[]),
+            (
+                "ALTER TABLE teams ADD COLUMN owner BIGINT REFERENCES users (id); TRUNCATE teams CASCADE",
+                &[Rule::TruncateCascade],
+            ),
+        ] {
+            let migration = format!("SET lock_timeout = '1s'; {migration};");
+            assert_eq!(rules(&baseline, &migration), expected, "{migration}");
+        }
+    }
+
+    #[test]
+    fn set_tablespace_names_one_table() {
+        for (migration, expected) in [
+            (
+                "ALTER TABLE users SET TABLESPACE fast NOWAIT",
+                &[Rule::TableRewrite][..],
+            ),
+            (
+                "ALTER TABLE ALL IN TABLESPACE pg_default SET TABLESPACE fast",
+                &[],
+            ),
+        ] {
+            assert_eq!(one(migration), expected, "{migration}");
+        }
     }
 
     #[test]

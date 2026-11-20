@@ -13,7 +13,7 @@ Default severity: **error**
 
 ## What it does
 
-Reports a new statement that uses an enum value which
+Reports the first new statement that uses an enum value which
 `ALTER TYPE ... ADD VALUE` added earlier in the same transaction.
 
 `against.sql`:
@@ -34,7 +34,7 @@ COMMIT;
 
 ## Why is this bad?
 
-PostgreSQL adds the value, but [refuses to use it](https://www.postgresql.org/docs/17/sql-altertype.html#SQL-ALTERTYPE-NOTES)
+PostgreSQL adds the value, but [refuses to use it](https://www.postgresql.org/docs/17/sql-altertype.html)
 until the transaction that added it commits: the statement fails with
 `unsafe use of new value`, and the migration rolls back.
 
@@ -63,5 +63,7 @@ enum-value-in-transaction = "warn"
 Judged by [`sqlty breaking`](../../guide/breaking-changes.md#migrations-that-lock-tables)
 in the `postgres` dialect, on the statements of the
 [schema](../../guide/schema-inference.md) files that the `--against` baseline does
-not have. A table created earlier in the migrations is new and empty, so it is not
-reported until rows are copied into it. `-- sqlty: ignore[enum-value-in-transaction]` on the first line of a statement drops it.
+not have. A statement uses the value when the literal casts to the type, or the
+statement names a column of the type or no table the schema knows; the label is
+compared case-sensitively. `-- sqlty: ignore[enum-value-in-transaction]` on the
+first line of a statement drops it.
