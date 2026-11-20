@@ -304,16 +304,18 @@ impl Model {
             .windows(2)
             .any(|pair| matches!(pair[0].as_str(), "::" | "as") && pair[1] == short);
         let positional = match parse(stmt) {
-            Some((Statement::Insert(insert), _)) if insert.columns.is_empty() => {
-                match &insert.table {
-                    TableObject::TableName(table) => {
-                        let table = key(table);
-                        self.types
-                            .keys()
-                            .any(|column| column.0 == table && typed(column))
-                    }
-                    _ => false,
-                }
+            Some((
+                Statement::Insert(Insert {
+                    table: TableObject::TableName(table),
+                    columns,
+                    ..
+                }),
+                _,
+            )) if columns.is_empty() => {
+                let table = key(&table);
+                self.types
+                    .keys()
+                    .any(|column| column.0 == table && typed(column))
             }
             _ => false,
         };
