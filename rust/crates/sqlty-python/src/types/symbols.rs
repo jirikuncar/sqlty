@@ -38,6 +38,8 @@ pub struct Source {
     pub(crate) targets: std::sync::OnceLock<crate::index::Targets>,
     /// See [`crate::compose::constant`].
     pub(crate) constants: std::sync::OnceLock<HashMap<String, Option<usize>>>,
+    /// The class each module-level name holds, read once for every module importing it.
+    pub(crate) classes: std::sync::OnceLock<HashMap<String, Option<String>>>,
 }
 
 impl Source {
@@ -69,6 +71,7 @@ impl Source {
             module: None,
             targets: std::sync::OnceLock::new(),
             constants: std::sync::OnceLock::new(),
+            classes: std::sync::OnceLock::new(),
             syntax,
             comments,
             version,

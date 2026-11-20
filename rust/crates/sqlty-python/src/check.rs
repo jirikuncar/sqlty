@@ -1486,6 +1486,47 @@ mod tests {
     }
 
     #[test]
+    fn a_module_defining_imported_constants_is_walked_once_for_all_importers() {
+        let consts = Source::new("X = Z\nY = Z\nZ = b'1'\n", (3, 14)).unwrap();
+        let mut builder = crate::index::Builder::new((3, 14));
+        let consts = Arc::new(crate::index::Module::parsed(Arc::new(
+            consts.named(Some("consts")),
+        )));
+        builder.add_found("consts", consts, &crate::types::info::Dict::new());
+        let index = builder.build();
+        let text = "from typing import Annotated\nfrom sqlty import SQL\n\
+                    from consts import X, Y\n\
+                    def q(sql: Annotated[str, SQL], params: tuple[object, ...]): ...\n\
+                    q('--sql\\nSELECT %s::int', (X,))\n\
+                    q('--sql\\nSELECT %s::int', (Y,))\n\
+                    q('--sql\\nSELECT %s::int', (X,))\n";
+        let options = Options::new("postgres", None, None, false).unwrap();
+        let rules = RuleConfig::from_overrides(None).unwrap();
+        let coerce = HashSet::new();
+        let settings = Settings {
+            options: &options,
+            rules: &rules,
+            index: None,
+            module: Some("m"),
+            coerce: &coerce,
+        };
+        let lint = |_: &str| -> Vec<Lint> { Vec::new() };
+        let run = Run {
+            settings: &settings,
+            has_schema: false,
+            lint: &lint,
+            helpers: Some(&index),
+            variants: None,
+        };
+        crate::scopes::WALKS.with(|count| count.set(0));
+        for module in ["m", "n"] {
+            let source = Arc::new(Source::new(text, (3, 14)).unwrap().named(Some(module)));
+            assert_eq!(diagnostics(&source, &run).diagnostics.len(), 3);
+        }
+        assert_eq!(crate::scopes::WALKS.with(std::cell::Cell::get), 3);
+    }
+
+    #[test]
     fn a_module_the_prefilters_reject_is_not_walked() {
         assert_eq!(walks("x = 1\nprint(x)\n"), 0);
     }
