@@ -1145,6 +1145,56 @@ fn check_queries(
     })
 }
 
+/// What the new statements of PostgreSQL migrations lock, as `sqlty breaking` reports it:
+/// each of `files`, in the order the migrations run, is checked for the statements
+/// `baseline` (the schema of the `--against` revision) does not have, without those a
+/// `-- sqlty: ignore` comment on their first line drops.
+///
+/// Example:
+///     check_migrations("CREATE TABLE users (id INT)", ["CREATE INDEX i ON users (id)"])
+///
+/// Returns:
+///     The diagnostic dicts of `check_source` for each file, without fixes.
+///
+/// Raises:
+///     ValueError: `rules` names an unknown rule or severity
+#[pyfunction]
+#[pyo3(signature = (baseline, files, *, rules = None))]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "PyO3 extracts a Vec, not a slice"
+)]
+fn check_migrations(
+    py: Python<'_>,
+    baseline: &str,
+    files: Vec<String>,
+    rules: Option<HashMap<String, String>>,
+) -> Result<Vec<Vec<DiagnosticOut>>, Error> {
+    detach(py, || {
+        let rules = RuleConfig::from_overrides(rules).map_err(ConfigError::from)?;
+        let files: Vec<&str> = files.iter().map(String::as_str).collect();
+        Ok(
+            sqlty_python::migrations::check_migrations(baseline, &files, &rules)
+                .into_iter()
+                .map(|found| {
+                    found
+                        .into_iter()
+                        .map(|diag| DiagnosticOut {
+                            rule: diag.rule.name(),
+                            message: diag.message,
+                            severity: diag.severity.as_str(),
+                            line: diag.line,
+                            start: diag.span.start,
+                            end: diag.span.end,
+                            fix: Vec::new(),
+                        })
+                        .collect()
+                })
+                .collect(),
+        )
+    })
+}
+
 #[derive(IntoPyObject)]
 enum ParamKey {
     Index(usize),
@@ -2121,6 +2171,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(expand_star, m)?)?;
     m.add_function(wrap_pyfunction!(check_source, m)?)?;
     m.add_function(wrap_pyfunction!(check_queries, m)?)?;
+    m.add_function(wrap_pyfunction!(check_migrations, m)?)?;
     m.add_function(wrap_pyfunction!(module_facts, m)?)?;
     m.add_function(wrap_pyfunction!(template_strings, m)?)?;
     m.add_function(wrap_pyfunction!(unparse_expression, m)?)?;

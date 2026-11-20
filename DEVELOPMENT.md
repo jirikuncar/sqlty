@@ -237,7 +237,6 @@ src/sqlty/
 ├── _core.pyi            # Stub for sqlty._core (rust/crates/sqlty-ext/src/lib.rs)
 ├── _cli.py              # `sqlty` entry point: runs the Rust CLI, reports crashes
 ├── _config.py           # Configuration from sqlty.toml, pyproject.toml or Cargo.toml
-├── _check.py            # Calls the Rust checks for check_source
 ├── _lint.py             # Lint rules and the Diagnostic type
 ├── _decode.py           # Magic codec decoder
 ├── magic.py             # Magic codec registration
@@ -313,7 +312,7 @@ The version is pinned only in the `Makefile` (`ZENSICAL`); CI runs `make docs`.
 ```bash
 make docs           # strict build into site/ (fails on broken links or anchors)
 make docs-serve     # live preview at http://localhost:8000/sqlty/
-make generate-docs  # regenerate the tables of configuration.md and cli.md
+make generate-docs  # regenerate the tables of configuration.md, cli.md and rules.md
 make lint-docs      # rumdl and Vale on the docs
 ```
 

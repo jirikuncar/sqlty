@@ -1,4 +1,4 @@
-//! Every diagnostic of a module before inline suppression, as `sqlty._check.diagnostics`
+//! Every diagnostic of a module before inline suppression, as `sqlty.core.check_source`
 //! reports them: the lexing pass of [`crate::checker`], then the calls that run a query
 //! ([`crate::calls`]) against their parameters, names and row types ([`crate::rows`]).
 //!
@@ -1207,7 +1207,7 @@ fn named_as_wrapper(calls: Vec<(usize, String)>, wrapper: &str) -> Vec<usize> {
         .collect()
 }
 
-/// `sqlty._check.diagnostics`: every diagnostic of `source` before inline suppression, by
+/// `sqlty.core.check_source`: every diagnostic of `source` before inline suppression, by
 /// line.
 pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
     static MARKED_TEMPLATE: LazyLock<Regex> = LazyLock::new(|| {
