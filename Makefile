@@ -52,7 +52,7 @@ test-unit:  ## Unit tests only (no e2e, no mdtest)
 
 .PHONY: test-mdtest
 test-mdtest:  ## mdtests and docs tests
-	uv run pytest tests/mdtest/ docs/ src/sqlty/rules/ README.md -v
+	uv run pytest tests/mdtest/ docs/ README.md -v
 
 .PHONY: test-e2e
 test-e2e:  ## End-to-end tests only
@@ -68,7 +68,7 @@ test-coverage:  ## Every Python and Rust test with coverage and its gates; needs
 
 .PHONY: update-mdtest
 update-mdtest:  ## Update mdtest assertions with actual values
-	uv run pytest tests/mdtest/ docs/ src/sqlty/rules/ README.md tests/test_docs.py --update-mdtest -v
+	uv run pytest tests/mdtest/ docs/ README.md tests/test_docs.py --update-mdtest -v
 
 # --- Benchmarks ---
 
@@ -105,10 +105,14 @@ docs: playground  ## Build the docs site, strict via zensical.toml (output: site
 	python3 scripts/structured_data.py site
 	python3 scripts/offline.py site
 
-.PHONY: playground
-playground:  ## The engine as WebAssembly, and Monaco and the fonts, for the docs playground (needs the wasm32-unknown-unknown target)
+.PHONY: wasm
+wasm:  ## The engine as WebAssembly, in the @sqlty/wasm package (needs the wasm32-unknown-unknown target)
 	cargo build --manifest-path rust/Cargo.toml --profile wasm --target wasm32-unknown-unknown -p sqlty-wasm
-	cp rust/target/wasm32-unknown-unknown/wasm/sqlty_wasm.wasm docs/assets/playground/
+	cp rust/target/wasm32-unknown-unknown/wasm/sqlty_wasm.wasm npm/wasm/
+
+.PHONY: playground
+playground: wasm  ## The engine as WebAssembly, and Monaco and the fonts, for the docs playground
+	cp npm/wasm/sqlty_wasm.wasm npm/wasm/engine.js docs/assets/playground/
 	python3 scripts/generate_playground_examples.py
 	python3 scripts/vendor_assets.py
 
@@ -121,7 +125,7 @@ lint-docs:  ## rumdl and Vale on the Markdown (the prek hooks)
 	uv run prek run --all-files rumdl vale
 
 .PHONY: generate-docs
-generate-docs:  ## Regenerate the tables in docs/reference/{configuration,cli}.md
+generate-docs:  ## Regenerate the tables in docs/reference/{configuration,cli,rules}.md
 	uv run python scripts/generate_docs.py
 
 .PHONY: generate-stdlib-types

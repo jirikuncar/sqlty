@@ -1,0 +1,109 @@
+---
+order: 80
+group: "row-type"
+severity: "ignore"
+fixable: false
+summary: "Row type field is optional but its column cannot be NULL"
+origin: "Python"
+---
+
+# redundant-optional
+
+Default severity: **ignore**
+
+## What it does
+
+Reports a field of a user-defined row type (or an item of a helper's `tuple[...]` row
+type) annotated `T | None` or `Optional[T]` while its query column cannot be NULL. This is
+the strict side of `nullable-mismatch`: that rule finds missing `| None`, this one finds
+extra.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+
+[tool.sqlty.rules]
+redundant-optional = "warn"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+```
+
+```python
+from typing import TypedDict
+
+from sqlty import SQL
+
+
+class User(TypedDict):
+    id: int
+    name: str | None
+
+
+# error: [redundant-optional] "User.name is str | None but query column 'name' is never NULL"
+q = SQL[User]("--sql\nSELECT id, name FROM users")
+```
+
+A row type shared by several queries is judged by all of them: a field is reported only
+when no query that loads the type can return NULL for it. `sqlty check` gathers the queries
+of every checked file before it reports.
+
+```python
+from typing import TypedDict
+
+from sqlty import SQL
+
+
+class Owned(TypedDict):
+    id: int
+    name: str | None
+
+
+named = SQL[Owned]("--sql\nSELECT id, name FROM users")
+maybe = SQL[Owned]("--sql\nSELECT u.id, o.name FROM users u LEFT JOIN users o ON o.id = u.id + 1")
+# error:
+```
+
+## Why is this bad?
+
+Callers handle a `None` that never arrives, and the annotation hides which columns are
+really optional.
+
+## How to fix
+
+Drop the `| None`, or accept it: a wider annotation is correct, just looser than needed.
+
+```python
+from typing import TypedDict
+
+from sqlty import SQL
+
+
+class User(TypedDict):
+    id: int
+    name: str
+
+
+q = SQL[User]("--sql\nSELECT id, name FROM users")
+# error:
+```
+
+## Configuration
+
+Off by default, because it conflicts with a documented workflow: an
+[expand and contract](../../guide/breaking-changes.md#expand-and-contract)
+migration widens an annotation to `T | None` before the schema relaxes the column, and
+`T | None` on a non-null column is correct, only loose. Enable it:
+
+```toml
+[tool.sqlty.rules]
+redundant-optional = "warn"
+```
+
+Only columns sqlty knows cannot be NULL are judged: a schema column with `NOT NULL` /
+`PRIMARY KEY`, a `COUNT`, a literal. A column of unknown nullability (a cast with no
+schema, an unknown function) is never reported. `Any` and `object` fields are not
+optional annotations and are not reported.

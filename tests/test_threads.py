@@ -95,9 +95,10 @@ def test_expressions_nested_too_deep_are_not_analyzed() -> None:
     sql = _chain(1001)
     assert core.analyze_select(sql, schema_sql=SCHEMA) is None
     source = f'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\n{sql}")\n'
-    assert [(d["rule"], d["message"]) for d in core.check_source(source, schema_sql=SCHEMA)] == [
-        ("unparsed-query", "query does not parse: expressions nest more than 1000 levels deep")
-    ]
+    assert [
+        (d["rule"], d["message"])
+        for d in core.check_source(source, core.Settings(schema_sql=SCHEMA))
+    ] == [("unparsed-query", "query does not parse: expressions nest more than 1000 levels deep")]
 
 
 MODULES = {
@@ -113,9 +114,9 @@ MODULES = {
 
 @pytest.mark.parametrize("jobs", [1, 3])
 def test_check_modules_reports_what_check_source_does(jobs: int) -> None:
-    from sqlty._check import RowUsage, check_modules
     from sqlty._helpers import HelperIndex
     from sqlty._source import ParsedSource
+    from sqlty.core import RowUsage
 
     index = HelperIndex()
     parsed = {name: ParsedSource(text, name) for name, text in MODULES.items()}
@@ -138,18 +139,37 @@ def test_check_modules_reports_what_check_source_does(jobs: int) -> None:
     modules = [(source, configs[n % 2]) for n, source in enumerate(parsed.values())]
     usage, expected_usage = RowUsage(), RowUsage()
 
-    found = check_modules(modules, usage, jobs)
+    results = _core.check_modules(
+        [(source.text, source.module, n % 2) for n, source in enumerate(parsed.values())],
+        [
+            (dialect, schema, rules, style, untyped, sorted(coerce), helpers and helpers.rust(), n)
+            for dialect, schema, rules, style, untyped, coerce, helpers, n in configs
+        ],
+        version=sys.version_info[:2],
+        jobs=jobs,
+    )
+    for *_, needed in results:
+        usage.needed.update(needed)
+    usage.redundant = [
+        (key, diag)
+        for diagnostics, redundant, _ in results
+        for key, diag in zip(redundant, diagnostics, strict=True)
+        if key is not None
+    ]
+    found = [diagnostics for diagnostics, _, _ in results]
 
     expected = [
         core.check_source(
             source,
-            dialect=dialect,
-            schema_sql=schema,
-            rules=rules,
-            untyped=untyped,
-            helpers=helpers,
+            core.Settings(
+                dialect=dialect,
+                schema_sql=schema,
+                rules=rules,
+                untyped=untyped,
+                helpers=helpers,
+                query_variants=variants,
+            ),
             row_usage=expected_usage,
-            query_variants=variants,
         )
         for source, (dialect, schema, rules, _, untyped, _, helpers, variants) in modules
     ]

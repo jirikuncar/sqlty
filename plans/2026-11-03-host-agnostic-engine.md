@@ -38,10 +38,10 @@ TypeScript or Rust host can depend on, with no change to Python behavior.
 
 ## Stage 2
 
-The analyzer renders Python strings directly (`SqlType::python`, `scalar_python`), and
-`proofs/SqlTy/Table.lean` is generated from `scalar_python`. The Python string is also
-the analyzer's working type: about 190 places build one, and operator typing reads them
-back (`operators.rs` splits `int | float` to decide whether a sum is numeric).
+The analyzer renders Python strings directly (`SqlType::python`, `scalar_python`). The
+Python string is also the analyzer's working type: about 190 places build one, and
+operator typing reads them back (`operators.rs` splits `int | float` to decide whether a
+sum is numeric).
 
 Most of the IR exists already: every column carries its canonical SQL type
 (`Column::sql_type`), which `SqlType::parse` reads into arrays, rows, structs and maps,
@@ -54,7 +54,7 @@ change to how the analyzer types operators.
 
 ## Stage 4
 
-`src/sqlty/_check.py` compares inferred columns with the row type the extractor read
+`check_source` (`src/sqlty/core.py`) compares inferred columns with the row type the extractor read
 (TypedDict, dataclass, ...). The comparison is host-neutral once the host hands over
 field names, types and optionality; the extraction stays in each host.
 

@@ -8,51 +8,11 @@ Rules use kebab-case names and have three severity levels:
 Configuration via sqlty.toml (``[rules]``) or pyproject.toml:
 
     [tool.sqlty.rules]
-    column-count-mismatch = "error"     # default
-    column-type-mismatch = "error"      # default
-    column-name-mismatch = "warn"       # default
-    nullable-mismatch = "error"         # default
-    json-shape-mismatch = "error"       # default
-    redundant-optional = "ignore"       # default
-    literal-mismatch = "error"          # default
-    redundant-literal = "ignore"        # default
-    typeddict-key-mismatch = "error"    # default
-    typeddict-inheritance = "error"     # default
-    select-star = "warn"                # default
-    select-star-no-schema = "error"     # default
-    stale-rewrite = "warn"              # default
-    stale-type = "warn"                 # default
-    narrow-type = "error"               # default
-    inline-sql-comment = "warn"         # default
-    fstring-skipped = "warn"            # default
-    tstring-skipped = "warn"            # default
-    unchecked-query = "warn"            # default
-    dynamic-query = "ignore"            # default
-    untyped-query = "warn"              # default
-    unparsed-query = "warn"             # default
-    unknown-table = "error"             # default
-    unknown-column = "error"            # default
-    ambiguous-column = "error"          # default
-    duplicate-alias = "error"           # default
-    unknown-function = "warn"           # default
-    unknown-type = "warn"               # default
-    unsupported-syntax = "warn"         # default
-    insert-missing-column = "error"     # default
-    insert-value-count = "error"        # default
-    ungrouped-column = "error"          # default
-    fanout-aggregate = "warn"           # default
-    chasm-join = "warn"                 # default
-    unproven-join = "ignore"            # default
-    entity-mismatch = "ignore"          # default
-    rejected-query = "error"            # default
-    unused-ignore = "warn"              # default
-    param-count-mismatch = "error"      # default
-    extra-param = "warn"                # default
-    param-type-mismatch = "error"       # default
-    params-type-mismatch = "error"      # default
-    sqruff = "ignore"                   # default
-    unknown-database = "error"          # default
-    internal-error = "error"            # default
+    column-name-mismatch = "error"
+    redundant-optional = "warn"
+
+A rule's name, default severity, group and summary are written once, in the front matter
+of its page ``docs/reference/rules/<name>.md``; the engine reads them from there (``_core.rules``).
 """
 
 from __future__ import annotations
@@ -61,7 +21,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TypedDict
 
-from sqlty._core import name_rules
+from sqlty._core import name_rules, rules
 
 
 class Severity(Enum):
@@ -80,6 +40,7 @@ class LintRule:
     default_severity: Severity
     fixable: bool
     description: str
+    group: str
 
 
 # Rules that explain why a column is untyped, as the engine lists them; the entries in
@@ -89,285 +50,14 @@ NAME_RULES: tuple[str, ...] = tuple(name_rules())
 # --- Rule definitions ---
 
 RULES: dict[str, LintRule] = {
-    "column-count-mismatch": LintRule(
-        name="column-count-mismatch",
-        default_severity=Severity.ERROR,
-        fixable=False,
-        description="Annotated type has different number of fields than query columns",
-    ),
-    "column-type-mismatch": LintRule(
-        name="column-type-mismatch",
-        default_severity=Severity.ERROR,
-        fixable=False,
-        description="Annotated type field has incompatible type with query column",
-    ),
-    "column-name-mismatch": LintRule(
-        name="column-name-mismatch",
-        default_severity=Severity.WARN,
-        fixable=False,
-        description="Annotated NamedTuple field name doesn't match query column alias",
-    ),
-    "typeddict-key-mismatch": LintRule(
-        name="typeddict-key-mismatch",
-        default_severity=Severity.ERROR,
-        fixable=False,
-        description="Query columns don't fit the fields of a TypedDict, dataclass or Pydantic model",
-    ),
-    "typeddict-inheritance": LintRule(
-        name="typeddict-inheritance",
-        default_severity=Severity.ERROR,
-        fixable=False,
-        description=(
-            "TypedDict subclass changes openness or adds keys a closed or extra_items base "
-            "forbids (PEP 728)"
-        ),
-    ),
-    "nullable-mismatch": LintRule(
-        name="nullable-mismatch",
-        default_severity=Severity.ERROR,
-        fixable=False,
-        description="Row type field is not optional but its query column can be NULL",
-    ),
-    "json-shape-mismatch": LintRule(
-        name="json-shape-mismatch",
-        default_severity=Severity.ERROR,
-        fixable=False,
-        description="Row type field cannot hold the JSON a query column builds",
-    ),
-    "redundant-optional": LintRule(
-        name="redundant-optional",
-        default_severity=Severity.IGNORE,
-        fixable=False,
-        description="Row type field is optional but its query column cannot be NULL",
-    ),
-    "literal-mismatch": LintRule(
-        name="literal-mismatch",
-        default_severity=Severity.ERROR,
-        fixable=False,
-        description="Row type field is a Literal that does not cover the values its column can take",
-    ),
-    "redundant-literal": LintRule(
-        name="redundant-literal",
-        default_severity=Severity.IGNORE,
-        fixable=False,
-        description="Row type field is a Literal that lists values its column can never take",
-    ),
-    "select-star": LintRule(
-        name="select-star",
-        default_severity=Severity.WARN,
-        fixable=True,
-        description="SELECT * used — expand to explicit column list",
-    ),
-    "select-star-no-schema": LintRule(
-        name="select-star-no-schema",
-        default_severity=Severity.ERROR,
-        fixable=False,
-        description="SELECT * used but no schema available to expand",
-    ),
-    "stale-rewrite": LintRule(
-        name="stale-rewrite",
-        default_severity=Severity.WARN,
-        fixable=True,
-        description="Source has --sql strings that aren't wrapped in SQL[T]",
-    ),
-    "stale-type": LintRule(
-        name="stale-type",
-        default_severity=Severity.WARN,
-        fixable=True,
-        description="SQL[tuple[...]] is wider than the rows the query returns (drift)",
-    ),
-    "narrow-type": LintRule(
-        name="narrow-type",
-        default_severity=Severity.ERROR,
-        fixable=True,
-        description="SQL[tuple[...]] doesn't admit every row the query returns",
-    ),
-    "mysql-sql-marker": LintRule(
-        name="mysql-sql-marker",
-        default_severity=Severity.WARN,
-        fixable=True,
-        description='MySQL rejects the "--sql" marker; use "-- sql"',
-    ),
-    "inline-sql-comment": LintRule(
-        name="inline-sql-comment",
-        default_severity=Severity.WARN,
-        fixable=True,
-        description='--sql followed by space makes entire query a SQL comment; use "--sql\\nSELECT ..." or run sqlty check --fix',
-    ),
-    "fstring-skipped": LintRule(
-        name="fstring-skipped",
-        default_severity=Severity.WARN,
-        fixable=False,
-        description="f-string with --sql prefix skipped (cannot be statically rewritten)",
-    ),
-    "tstring-skipped": LintRule(
-        name="tstring-skipped",
-        default_severity=Severity.WARN,
-        fixable=False,
-        description="t-string with --sql prefix skipped (a field changes the SQL in a way sqlty cannot follow)",
-    ),
-    "unchecked-query": LintRule(
-        name="unchecked-query",
-        default_severity=Severity.WARN,
-        fixable=False,
-        description="--sql query is not plain string literals (raw, bytes, an expression), so it is not checked",
-    ),
-    "dynamic-query": LintRule(
-        name="dynamic-query",
-        default_severity=Severity.IGNORE,
-        fixable=False,
-        description="helper query that is not a string literal (a variable, a call), so it is not checked",
-    ),
-    "untyped-query": LintRule(
-        name="untyped-query",
-        default_severity=Severity.WARN,
-        fixable=True,
-        description="SQL[UNTYPED] query has no inferable row type; the message names why",
-    ),
-    "unparsed-query": LintRule(
-        name="unparsed-query",
-        default_severity=Severity.WARN,
-        fixable=False,
-        description="--sql query, SQL[T] query or Annotated helper query that does not parse",
-    ),
-    "unknown-table": LintRule(
-        name="unknown-table",
-        default_severity=Severity.ERROR,
-        fixable=False,
-        description="Query reads a table that the schema does not define",
-    ),
-    "unknown-column": LintRule(
-        name="unknown-column",
-        default_severity=Severity.ERROR,
-        fixable=True,
-        description="Query reads a column that its table does not have",
-    ),
-    "ambiguous-column": LintRule(
-        name="ambiguous-column",
-        default_severity=Severity.ERROR,
-        fixable=False,
-        description="Unqualified column exists in more than one table of the query",
-    ),
-    "duplicate-alias": LintRule(
-        name="duplicate-alias",
-        default_severity=Severity.ERROR,
-        fixable=False,
-        description="Two tables of a FROM clause are read by the same name",
-    ),
-    "unknown-function": LintRule(
-        name="unknown-function",
-        default_severity=Severity.WARN,
-        fixable=False,
-        description="Function result is untyped because sqlty does not know the function",
-    ),
-    "unknown-type": LintRule(
-        name="unknown-type",
-        default_severity=Severity.WARN,
-        fixable=False,
-        description="Cast or column type has no Python type",
-    ),
-    "unsupported-syntax": LintRule(
-        name="unsupported-syntax",
-        default_severity=Severity.WARN,
-        fixable=False,
-        description="Query parses, but a construct in it is not typed, so the row type is not trusted",
-    ),
-    "insert-missing-column": LintRule(
-        name="insert-missing-column",
-        default_severity=Severity.ERROR,
-        fixable=False,
-        description="INSERT leaves out a NOT NULL column that has no default",
-    ),
-    "insert-value-count": LintRule(
-        name="insert-value-count",
-        default_severity=Severity.ERROR,
-        fixable=False,
-        description="INSERT gives a different number of values than the columns it writes",
-    ),
-    "ungrouped-column": LintRule(
-        name="ungrouped-column",
-        default_severity=Severity.ERROR,
-        fixable=False,
-        description="Grouped query selects a column it neither groups by nor aggregates",
-    ),
-    "fanout-aggregate": LintRule(
-        name="fanout-aggregate",
-        default_severity=Severity.WARN,
-        fixable=False,
-        description="Aggregate over rows a one-to-many join repeats",
-    ),
-    "chasm-join": LintRule(
-        name="chasm-join",
-        default_severity=Severity.WARN,
-        fixable=False,
-        description="Aggregating query joins one table one-to-many to two others",
-    ),
-    "unproven-join": LintRule(
-        name="unproven-join",
-        default_severity=Severity.IGNORE,
-        fixable=False,
-        description="Join in an aggregating query that matches no primary or unique key",
-    ),
-    "entity-mismatch": LintRule(
-        name="entity-mismatch",
-        default_severity=Severity.IGNORE,
-        fixable=False,
-        description="Comparison between columns holding keys of different tables",
-    ),
-    "rejected-query": LintRule(
-        name="rejected-query",
-        default_severity=Severity.ERROR,
-        fixable=False,
-        description="Query the database rejects for a reason no other rule names",
-    ),
-    "param-count-mismatch": LintRule(
-        name="param-count-mismatch",
-        default_severity=Severity.ERROR,
-        fixable=False,
-        description="A call passes a different number of parameters than its query has placeholders, or misses a name",
-    ),
-    "extra-param": LintRule(
-        name="extra-param",
-        default_severity=Severity.WARN,
-        fixable=False,
-        description="A call passes a key its query has no placeholder for",
-    ),
-    "param-type-mismatch": LintRule(
-        name="param-type-mismatch",
-        default_severity=Severity.ERROR,
-        fixable=False,
-        description="A call passes an argument whose type can't be the type its query parameter takes",
-    ),
-    "sqruff": LintRule(
-        name="sqruff",
-        default_severity=Severity.IGNORE,
-        fixable=False,
-        description="Finding of sqruff's core lint rules in a query",
-    ),
-    "unknown-database": LintRule(
-        name="unknown-database",
-        default_severity=Severity.ERROR,
-        fixable=False,
-        description="Query marker names a database the project does not configure",
-    ),
-    "params-type-mismatch": LintRule(
-        name="params-type-mismatch",
-        default_severity=Severity.ERROR,
-        fixable=False,
-        description="The parameter type `P` of `SQL[R, P]` doesn't fit the parameters of its query",
-    ),
-    "unused-ignore": LintRule(
-        name="unused-ignore",
-        default_severity=Severity.WARN,
-        fixable=False,
-        description="# sqlty: ignore comment, or rule in one, that suppresses no diagnostic",
-    ),
-    "internal-error": LintRule(
-        name="internal-error",
-        default_severity=Severity.ERROR,
-        fixable=False,
-        description="sqlty crashed checking the file",
-    ),
+    name: LintRule(
+        name=name,
+        default_severity=Severity(severity),
+        fixable=fixable,
+        description=summary,
+        group=group,
+    )
+    for name, severity, fixable, summary, group in rules()
 }
 
 
@@ -390,62 +80,4 @@ class Diagnostic(TypedDict):
     fix: list[tuple[int, int, str]]
 
 
-class RuleConfig:
-    """Resolved rule configuration — maps rule names to effective severities.
-
-    Merges defaults with user overrides from [tool.sqlty.rules].
-    """
-
-    def __init__(self, overrides: dict[str, str] | None = None) -> None:
-        self._severities: dict[str, Severity] = {}
-
-        # Start with defaults
-        for name, rule in RULES.items():
-            self._severities[name] = rule.default_severity
-
-        # Apply user overrides
-        if overrides:
-            for name, severity_str in overrides.items():
-                if name not in RULES:
-                    continue  # ignore unknown rules
-                try:
-                    self._severities[name] = Severity(severity_str)
-                except ValueError:
-                    continue  # ignore invalid severity values
-
-    def severity(self, rule_name: str) -> Severity:
-        """Get the effective severity for a rule."""
-        return self._severities.get(rule_name, Severity.WARN)
-
-    def is_enabled(self, rule_name: str) -> bool:
-        """Check if a rule is enabled (not ignored)."""
-        return self.severity(rule_name) != Severity.IGNORE
-
-
 DOCS_URL = "https://sqlty.kuncar.dev/"
-"""The documentation site, which ``rule_doc`` links to."""
-
-
-def rule_doc(name: str) -> str:
-    """Markdown documentation of a rule, shipped as ``sqlty/rules/<name>.md``, its links
-    to other pages pointing at the documentation site: the repository's relative paths
-    mean nothing in a user's terminal.
-
-    Example:
-        >>> rule_doc("stale-type").splitlines()[0]
-        '# stale-type'
-        >>> "](https://sqlty.kuncar.dev/guide/schema-inference/)" in rule_doc("insert-missing-column")
-        True
-    """
-    import re
-    from importlib.resources import files
-
-    text = (files("sqlty") / "rules" / f"{name}.md").read_text(encoding="utf-8")
-
-    def absolute(match: re.Match[str]) -> str:
-        if (doc := match["doc"]) is not None:
-            return f"]({DOCS_URL}{doc}/{match['anchor'] or ''})"
-        return f"]({DOCS_URL}reference/rules/#{match['rule']})"
-
-    link = r"\]\((?:\.\./\.\./\.\./docs/(?P<doc>[^)\s:]+)|(?P<rule>[^)\s:/]+))\.md(?P<anchor>#[^)\s]*)?\)"
-    return re.sub(link, absolute, text)

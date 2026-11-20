@@ -504,7 +504,7 @@ impl Unparser<'_> {
         out.join(", ")
     }
 
-    /// `_write_ftstring`: each value written apart, then quoted together.
+    /// An f- or t-string (`template`): each value written apart, then quoted together.
     fn interpolated(&mut self, parts: &[Part<'_>], template: bool) {
         let written: Vec<(String, bool)> = parts
             .iter()
@@ -861,7 +861,7 @@ fn unicode_escape(c: char, out: &mut String) {
     }
 }
 
-/// `_str_literal_helper`: the escaped text and the quotes that can hold it.
+/// The escaped text and the quotes that can hold it.
 fn str_literal<'q>(text: &str, quotes: &[&'q str]) -> (String, Vec<&'q str>) {
     let mut escaped = String::with_capacity(text.len());
     for c in text.chars() {
@@ -1067,6 +1067,7 @@ mod tests {
             ("f'{a!r:>{w}} {b=}'", "f'{a!r:>{w}} b={b!r}'"),
             ("b'a\\x00\\''", "b\"a\\x00'\""),
             ("'a\\n\\u00e9\\x7f'", "'a\\né\\x7f'"),
+            ("'\\r\\t\\\\'", "'\\r\\t\\\\'"),
         ] {
             assert_eq!(round(source), expected, "{source}");
         }

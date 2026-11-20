@@ -1,4 +1,4 @@
-//! The `sqlty` executable where `tests/cli` cannot follow it: into Python and the language server.
+//! The `sqlty` executable where `tests/cli` cannot follow it: without git, and the language server.
 
 #![expect(clippy::expect_used, reason = "a failed setup fails the test")]
 
@@ -42,12 +42,28 @@ const QUERIES: (&str, &str) = (
 );
 
 #[test]
-fn hands_what_it_does_not_run_to_python() {
-    let root = project("python", &[]);
-    let error = "sqlty: cannot run python3: No such file or directory (os error 2)\n";
+fn checks_against_a_schema_file_without_git() {
+    let config = ("pyproject.toml", "[tool.sqlty]\nschema = \"schema.sql\"\n");
+    let schema = (
+        "schema.sql",
+        "CREATE TABLE users (id INT NOT NULL, bio TEXT);",
+    );
+    let old = ("old.sql", "CREATE TABLE users (id INT NOT NULL);");
+    let query = ("app/a.py", "q = \"--sql\\nSELECT bio FROM users\"\n");
+    let root = project("breaking", &[config, schema, old, query]);
+    let (code, out, err) = sqlty(
+        &root,
+        &["breaking", "--against", "old.sql"],
+        &[("PATH", "/nonexistent")],
+    );
+    assert_eq!(code, 1, "{out}{err}");
+    assert!(
+        out.contains("column `bio` does not exist in `users`"),
+        "{out}"
+    );
     assert_eq!(
-        sqlty(&root, &["breaking"], &[("PATH", "/nonexistent")]),
-        (2, String::new(), error.to_string())
+        err,
+        "sqlty: old.sql has no queries; skipping the backward check\n"
     );
     std::fs::remove_dir_all(&root).expect("removes");
 }
@@ -176,7 +192,7 @@ fn serves_the_language_server() {
     let (messages, code) = serve(
         &root,
         &[initialize(&root, baseline), initialized, open],
-        "sqlty.breaking.against needs",
+        "sqlty.breaking.against: main does not exist",
     );
     assert_eq!(code, 0);
     assert!(messages

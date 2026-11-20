@@ -47,13 +47,13 @@ def index() -> HelperIndex:
 
 def both(text: str, index: HelperIndex, module: str = "app.use") -> list[tuple[int, str | None]]:
     """The line and query of each helper call of ``text``: where its literal query starts."""
-    parsed = ParsedSource(text)
+    parsed = ParsedSource(text, module)
     return [
         (
             parsed.position(start)[0] if start is not None else lines and lines[0],
             next(iter(queries), None),
         )
-        for lines, queries, _, start in _helper_sites(parsed, index, module)
+        for lines, queries, _, start in _helper_sites(parsed, index)
     ]
 
 

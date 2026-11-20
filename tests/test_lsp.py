@@ -1,17 +1,13 @@
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 import pytest
 
-from sqlty._config import ConfigError
-from sqlty._lsp_bridge import Workspace
-from sqlty.core import format_source
-
-if TYPE_CHECKING:
-    from sqlty._breaking import Direction
+from sqlty.core import Settings, format_source
 
 HELPER = """\
 from typing import Annotated
@@ -20,37 +16,6 @@ from sqlty import SQL
 def run(query: Annotated[str, SQL]) -> None: ...
 """
 CALL = 'from db import run\n\nrun("SELECT nope FROM users")\n'
-
-
-def test_buffers_replace_their_files(tmp_path: Path) -> None:
-    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
-    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER);\n")
-    (tmp_path / "db.py").write_text("")
-    workspace = Workspace(str(tmp_path))
-    db, q = str(tmp_path / "db.py"), str(tmp_path / "q.py")
-
-    assert workspace.check(q, CALL) == []
-    workspace.check(db, HELPER)
-    assert [d["rule"] for d in workspace.check(q, CALL)] == ["unknown-column"]
-    workspace.check(db, HELPER.replace("query: Annotated[str, SQL]", "query: str"))
-    assert workspace.check(q, CALL) == []
-
-
-def test_buffers_are_rewritten_and_stripped_with_project_settings(tmp_path: Path) -> None:
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.sqlty]\nschema = "schema.sql"\nimport-style = "import sqlty"\n'
-    )
-    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL);\n")
-    workspace = Workspace(str(tmp_path))
-    q = str(tmp_path / "q.py")
-    plain = 'q = "--sql\\nSELECT id FROM users"\n'
-
-    rewritten = workspace.rewrite(q, plain)
-
-    assert rewritten.splitlines()[-1] == 'q = sqlty.SQL[tuple[int]]("--sql\\nSELECT id FROM users")'
-    assert workspace.strip(q, rewritten) == plain
-    assert workspace.format(q, plain) == format_source(plain, import_style="import sqlty")
-    assert workspace.breaking() == {}
 
 
 OLD_SCHEMA = "CREATE TABLE users (id INTEGER, bio TEXT);\n"
@@ -81,100 +46,6 @@ def repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def test_buffers_are_checked_forward_against_the_baseline(repo: Path) -> None:
-    workspace = Workspace(str(repo / "app"), against="HEAD")
-    new = str(repo / "app" / "new.py")
-    found = [d for d in workspace.check(new, NEW_CODE) if d.get("source")]
-    assert [(d["rule"], d["message"], d["fix"]) for d in found] == [
-        (
-            "unknown-column",
-            "column `handle` does not exist in `users` (with the schema of HEAD)",
-            [],
-        )
-    ]
-    assert found[0].get("source") == "sqlty breaking (forward)"
-
-
-def test_the_baseline_is_checked_backward_once(repo: Path) -> None:
-    workspace = Workspace(str(repo / "app"), against="HEAD")
-    old = repo / "app" / "old.py"
-    [(path, [finding])] = workspace.breaking().items()
-    assert path == str(old)
-    assert finding["message"] == "column `bio` does not exist in `users` (in the code of HEAD)"
-    assert finding.get("source") == "sqlty breaking (backward)"
-    assert OLD_CODE[finding["start"] : finding["end"]] == "bio"
-
-    def backward(text: str) -> list[tuple[str, int]]:
-        found = workspace.check(str(old), text)
-        return [
-            (d["message"], d["start"])
-            for d in found
-            if d.get("source") == "sqlty breaking (backward)"
-        ]
-
-    assert backward(OLD_CODE) == [(finding["message"], finding["start"])]
-    edited = "# edited\n" + OLD_CODE
-    assert backward(edited) == [
-        ("column `bio` does not exist in `users` (in the code of HEAD, line 1)", 0)
-    ]
-
-
-def test_a_baseline_file_deleted_from_the_workspace(repo: Path) -> None:
-    """Its backward findings stand at the top of the file, as for an edited one."""
-    (repo / "app" / "old.py").unlink()
-    workspace = Workspace(str(repo / "app"), against="HEAD")
-
-    [(path, [finding])] = workspace.breaking().items()
-
-    assert path == str(repo / "app" / "old.py")
-    assert (finding["start"], finding["end"]) == (0, 0)
-    assert finding["message"].endswith("(in the code of HEAD, line 1)")
-
-
-def test_a_schema_file_baseline_outside_a_repository(tmp_path: Path) -> None:
-    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
-    (tmp_path / "schema.sql").write_text(NEW_SCHEMA)
-    (tmp_path / "old.sql").write_text(OLD_SCHEMA)
-    workspace = Workspace(str(tmp_path), against="old.sql")
-
-    assert workspace.breaking() == {}
-    found = workspace.check(str(tmp_path / "q.py"), NEW_CODE)
-    assert [d["message"] for d in found if d.get("source")] == [
-        "column `handle` does not exist in `users` (with the schema of old.sql)"
-    ]
-
-
-@pytest.mark.parametrize("direction", ["forward", "backward"])
-def test_one_direction(repo: Path, direction: Direction) -> None:
-    workspace = Workspace(str(repo), against="HEAD", direction=direction)
-    found = workspace.check(str(repo / "app" / "new.py"), NEW_CODE)
-    forward = [d for d in found if d.get("source") == "sqlty breaking (forward)"]
-    assert (len(forward), len(workspace.breaking())) == (
-        (1, 0) if direction == "forward" else (0, 1)
-    )
-
-
-def test_an_unchanged_schema_is_not_checked_again(
-    repo: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import sqlty.core
-
-    (repo / "schema.sql").write_text(OLD_SCHEMA)
-    workspace = Workspace(str(repo / "app"), against="HEAD")
-    monkeypatch.setattr(sqlty.core, "breaking_source", None)
-    found = workspace.check(str(repo / "app" / "new.py"), NEW_CODE)
-    assert [d["rule"] for d in found] == ["unknown-column"]
-    assert workspace.breaking() == {}
-
-
-def test_a_baseline_outside_git_must_be_a_file(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match="main does not exist, and .* is in no git repository"):
-        Workspace(str(tmp_path), against="main")
-    with pytest.raises(ConfigError, match="unknown revision 'nope'"):
-        git(tmp_path, "init", "-q")
-        Workspace(str(tmp_path), against="nope")
-
-
 class Server:
     """``sqlty server`` in a subprocess, spoken to as an editor does."""
 
@@ -188,6 +59,7 @@ class Server:
         )
         self.next = 0
         self.notifications: list[dict[str, Any]] = []
+        self.versions: dict[str, int] = {}
 
     def send(self, message: dict[str, Any]) -> None:
         body = json.dumps({"jsonrpc": "2.0", **message}).encode()
@@ -219,6 +91,46 @@ class Server:
         self.notifications.remove(found[0])
         return found[0]["params"]
 
+    def start(self, root: Path, options: dict[str, Any] | None = None) -> None:
+        params: dict[str, Any] = {"capabilities": {}, "rootUri": root.as_uri()}
+        if options is not None:
+            params["initializationOptions"] = options
+        self.request("initialize", params)
+        self.send({"method": "initialized", "params": {}})
+
+    def check(self, path: Path, text: str) -> list[dict[str, Any]]:
+        """The diagnostics published for the buffer ``text`` of ``path``."""
+        uri = path.as_uri()
+        version = self.versions[uri] = self.versions.get(uri, 0) + 1
+        if version == 1:
+            document = {"uri": uri, "languageId": "python", "version": 1, "text": text}
+            self.send({"method": "textDocument/didOpen", "params": {"textDocument": document}})
+        else:
+            change = {
+                "textDocument": {"uri": uri, "version": version},
+                "contentChanges": [{"text": text}],
+            }
+            self.send({"method": "textDocument/didChange", "params": change})
+        while True:
+            for n in self.notifications:
+                params = n.get("params", {})
+                if (
+                    n["method"] == "textDocument/publishDiagnostics"
+                    and params["uri"] == uri
+                    and params.get("version") == version
+                ):
+                    self.notifications.remove(n)
+                    return cast(list[dict[str, Any]], params["diagnostics"])
+            self.notifications.append(self.receive())
+
+    def published(self) -> dict[str, list[dict[str, Any]]]:
+        """The diagnostics published so far for files that are not open, by URI."""
+        return {
+            n["params"]["uri"]: n["params"]["diagnostics"]
+            for n in self.notifications
+            if n["method"] == "textDocument/publishDiagnostics" and "version" not in n["params"]
+        }
+
     def stop(self) -> int:
         self.request("shutdown", None)
         self.send({"method": "exit"})
@@ -236,6 +148,225 @@ def initialize(root: Path, baseline: str | None) -> dict[str, Any]:
         (root / baseline).write_text(schema.read_text() if schema.exists() else "")
         params["initializationOptions"] = {"breaking": {"against": str(root / baseline)}}
     return params
+
+
+def rules(found: list[dict[str, Any]]) -> list[str]:
+    return [d["code"] for d in found]
+
+
+def sourced(found: list[dict[str, Any]], source: str) -> list[dict[str, Any]]:
+    return [d for d in found if d.get("source") == f"sqlty breaking ({source})"]
+
+
+def test_buffers_replace_their_files(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
+    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER);\n")
+    (tmp_path / "db.py").write_text("")
+    server = Server(tmp_path)
+    try:
+        server.start(tmp_path)
+        db, q = tmp_path / "db.py", tmp_path / "q.py"
+
+        assert server.check(q, CALL) == []
+        server.check(db, HELPER)
+        assert rules(server.check(q, CALL + "\n")) == ["unknown-column"]
+        server.check(db, HELPER.replace("query: Annotated[str, SQL]", "query: str"))
+        assert server.check(q, CALL) == []
+    finally:
+        assert server.stop() == 0
+
+
+def code_action(server: Server, path: Path, kind: str) -> list[str]:
+    start = {"line": 0, "character": 0}
+    actions = server.request(
+        "textDocument/codeAction",
+        {
+            "textDocument": {"uri": path.as_uri()},
+            "range": {"start": start, "end": start},
+            "context": {"diagnostics": [], "only": [kind]},
+        },
+    )
+    return [
+        edit["newText"]
+        for action in actions
+        for edit in action["edit"]["documentChanges"][0]["edits"]
+    ]
+
+
+def test_buffers_are_rewritten_and_stripped_with_project_settings(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.sqlty]\nschema = "schema.sql"\nimport-style = "import sqlty"\n'
+    )
+    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER NOT NULL);\n")
+    q = tmp_path / "q.py"
+    plain = 'q = """--sql\nselect id,id from users where id=1"""\n'
+    server = Server(tmp_path)
+    try:
+        server.start(tmp_path)
+        server.check(q, plain)
+
+        [rewritten] = code_action(server, q, "source.rewrite.sqlty")
+        [formatted] = code_action(server, q, "source.format.sqlty")
+    finally:
+        assert server.stop() == 0
+    assert rewritten.startswith("import sqlty\n")
+    assert 'sqlty.SQL[tuple[int, int]]("""--sql' in rewritten
+    assert formatted in format_source(plain, Settings(import_style="import sqlty"))
+    assert server.published() == {}
+
+
+def test_buffers_are_checked_forward_against_the_baseline(repo: Path) -> None:
+    server = Server(repo)
+    try:
+        server.start(repo / "app", {"breaking": {"against": "HEAD"}})
+        found = sourced(server.check(repo / "app" / "new.py", NEW_CODE), "forward")
+    finally:
+        assert server.stop() == 0
+    assert [(d["code"], d["message"]) for d in found] == [
+        ("unknown-column", "column `handle` does not exist in `users` (with the schema of HEAD)")
+    ]
+
+
+def test_the_baseline_is_checked_backward_once(repo: Path) -> None:
+    old = repo / "app" / "old.py"
+    server = Server(repo)
+    try:
+        server.start(repo / "app", {"breaking": {"against": "HEAD"}})
+        same = sourced(server.check(old, OLD_CODE), "backward")
+        edited = sourced(server.check(old, "# edited\n" + OLD_CODE), "backward")
+    finally:
+        assert server.stop() == 0
+    assert [(d["message"], d["range"]["start"]) for d in same] == [
+        (
+            "column `bio` does not exist in `users` (in the code of HEAD)",
+            {"line": 0, "character": OLD_CODE.index(" bio ") + 1},
+        )
+    ]
+    assert [(d["message"], d["range"]["start"]) for d in edited] == [
+        (
+            "column `bio` does not exist in `users` (in the code of HEAD, line 1)",
+            {"line": 0, "character": 0},
+        )
+    ]
+
+
+def test_a_workspace_through_a_symlink(repo: Path, tmp_path: Path) -> None:
+    """Backward findings are keyed by the paths the editor names, not their targets."""
+    link = tmp_path / "link"
+    link.symlink_to(repo / "app")
+    server = Server(repo)
+    try:
+        server.start(link, {"breaking": {"against": "HEAD"}})
+        found = sourced(server.check(link / "old.py", OLD_CODE), "backward")
+    finally:
+        assert server.stop() == 0
+    assert [d["code"] for d in found] == ["unknown-column"]
+
+
+def test_a_baseline_file_deleted_from_the_workspace(repo: Path) -> None:
+    """Its backward findings stand at the top of its buffer, as for an edited one."""
+    (repo / "app" / "old.py").unlink()
+    server = Server(repo)
+    try:
+        server.start(repo / "app", {"breaking": {"against": "HEAD"}})
+        [finding] = sourced(server.check(repo / "app" / "old.py", ""), "backward")
+    finally:
+        assert server.stop() == 0
+    assert finding["range"]["start"] == {"line": 0, "character": 0}
+    assert finding["message"].endswith("(in the code of HEAD, line 1)")
+
+
+def test_a_schema_file_baseline_outside_a_repository(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
+    (tmp_path / "schema.sql").write_text(NEW_SCHEMA)
+    (tmp_path / "old.sql").write_text(OLD_SCHEMA)
+    server = Server(tmp_path)
+    try:
+        server.start(tmp_path, {"breaking": {"against": "old.sql"}})
+        found = server.check(tmp_path / "q.py", NEW_CODE)
+    finally:
+        assert server.stop() == 0
+    assert [d["message"] for d in sourced(found, "forward")] == [
+        "column `handle` does not exist in `users` (with the schema of old.sql)"
+    ]
+    assert server.published() == {}
+
+
+@pytest.mark.parametrize("direction", ["forward", "backward"])
+def test_one_direction(repo: Path, direction: str) -> None:
+    server = Server(repo)
+    try:
+        server.start(repo, {"breaking": {"against": "HEAD", "direction": direction}})
+        found = server.check(repo / "app" / "new.py", NEW_CODE)
+    finally:
+        assert server.stop() == 0
+    forward = sourced(found, "forward")
+    assert (len(forward), len(server.published())) == ((1, 0) if direction == "forward" else (0, 1))
+
+
+def test_an_unchanged_schema_is_not_checked_again(repo: Path) -> None:
+    (repo / "schema.sql").write_text(OLD_SCHEMA)
+    server = Server(repo)
+    try:
+        server.start(repo / "app", {"breaking": {"against": "HEAD"}})
+        found = server.check(repo / "app" / "new.py", NEW_CODE)
+    finally:
+        assert server.stop() == 0
+    assert [(d["code"], d.get("source")) for d in found] == [("unknown-column", "sqlty")]
+    assert server.published() == {}
+
+
+@pytest.mark.parametrize(
+    ("against", "message"),
+    [
+        ("main", "main does not exist, and .* is in no git repository"),
+        ("nope", "unknown revision 'nope'"),
+    ],
+)
+def test_a_baseline_outside_git_must_be_a_file(tmp_path: Path, against: str, message: str) -> None:
+    if against == "nope":
+        git(tmp_path, "init", "-q")
+    (tmp_path / "pyproject.toml").write_text("[tool.sqlty]\n")
+    server = Server(tmp_path)
+    try:
+        server.start(tmp_path, {"breaking": {"against": against}})
+        server.send(
+            {
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": (tmp_path / "q.py").as_uri(),
+                        "languageId": "python",
+                        "version": 1,
+                        "text": "x = 1\n",
+                    }
+                },
+            }
+        )
+        shown = server.notification("window/showMessage")
+    finally:
+        assert server.stop() == 0
+    assert re.search(f"sqlty.breaking.against: {message}", shown["message"]), shown
+
+
+def test_completion_context_of_a_buffer(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\ndialect = "sqlite"\nschema = "s.sql"\n')
+    (tmp_path / "s.sql").write_text("CREATE TABLE users (id INTEGER);\n")
+    (tmp_path / "db.py").write_text(HELPER)
+    q = tmp_path / "q.py"
+    text = 'from db import run\n\nrun("SELECT  FROM users")\nrun(query)\n'
+    server = Server(tmp_path)
+    try:
+        server.start(tmp_path)
+        server.check(q, text)
+        found = server.request(
+            "textDocument/completion",
+            {"textDocument": {"uri": q.as_uri()}, "position": {"line": 2, "character": 12}},
+        )
+    finally:
+        assert server.stop() == 0
+    items = found["items"] if isinstance(found, dict) else found
+    assert "id" in [item["label"] for item in items]
 
 
 @BASELINES
@@ -415,21 +546,6 @@ def test_server_rewrites_and_strips_a_buffer(tmp_path: Path, baseline: str | Non
     assert b"Schema file not found" in server.process.stderr.read()
 
 
-def test_completion_context_of_a_buffer(tmp_path: Path) -> None:
-    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\ndialect = "sqlite"\n')
-    (tmp_path / "db.py").write_text(HELPER)
-    workspace = Workspace(str(tmp_path))
-    text = 'from db import run\n\nrun("SELECT 1")\nrun(query)\n'
-    workspace.check(str(tmp_path / "q.py"), text)
-    context = workspace.completion(str(tmp_path / "q.py"))
-    assert context == {
-        "schema": None,
-        "dialect": "sqlite",
-        "import_style": None,
-        "helper_starts": [text.index('"SELECT')],
-    }
-
-
 @BASELINES
 def test_server_shows_why_a_project_does_not_load(tmp_path: Path, baseline: str | None) -> None:
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nuntyped = "nope"\n')
@@ -448,68 +564,6 @@ def test_server_shows_why_a_project_does_not_load(tmp_path: Path, baseline: str 
         shown = server.notification("window/showMessage")
         assert shown["message"].startswith("sqlty: ")
         assert "untyped must be 'skip' or 'sentinel'" in shown["message"]
-    finally:
-        assert server.stop() == 0
-
-
-FAILING = """\
-import sqlty._lsp_bridge as bridge
-from sqlty._core import serve
-
-class Failing(bridge.Workspace):
-    def __init__(self, root, against=None, direction="both"):
-        super().__init__(root)
-
-    def check(self, path, text):
-        raise RuntimeError("check failed")
-
-    def breaking(self):
-        raise RuntimeError("baseline failed")
-
-bridge.Workspace = Failing
-serve()
-"""
-
-
-def test_server_logs_what_the_workspace_raises(tmp_path: Path) -> None:
-    server = Server(tmp_path, "-c", FAILING)
-    try:
-        options = {"breaking": {"against": "HEAD"}}
-        server.request(
-            "initialize",
-            {"capabilities": {}, "rootUri": tmp_path.as_uri(), "initializationOptions": options},
-        )
-        server.send({"method": "initialized", "params": {}})
-        uri = (tmp_path / "q.py").as_uri()
-        text = 'q = "--sql\\nSELECT 1"\n'
-        document = {"uri": uri, "languageId": "python", "version": 1, "text": text}
-        server.send({"method": "textDocument/didOpen", "params": {"textDocument": document}})
-        logged = ""
-        while "check failed" not in logged or "baseline failed" not in logged:
-            logged += server.notification("window/logMessage")["message"]
-        assert "Traceback" in logged
-        start = {"line": 0, "character": 0}
-        new_texts = {
-            kind: [
-                edit["newText"]
-                for action in server.request(
-                    "textDocument/codeAction",
-                    {
-                        "textDocument": {"uri": uri},
-                        "range": {"start": start, "end": start},
-                        "context": {"diagnostics": [], "only": [kind]},
-                    },
-                )
-                for edit in action["edit"]["documentChanges"][0]["edits"]
-            ]
-            for kind in ("source.rewrite.sqlty", "source.strip.sqlty")
-        }
-        assert new_texts == {
-            "source.rewrite.sqlty": [
-                'from sqlty import SQL\nq = SQL[tuple[int]]("--sql\\nSELECT 1")'
-            ],
-            "source.strip.sqlty": [],
-        }
     finally:
         assert server.stop() == 0
 

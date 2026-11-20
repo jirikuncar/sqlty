@@ -7,7 +7,7 @@ live in [AGENTS.md](AGENTS.md); review rules in [REVIEW.md](REVIEW.md).
 
 - Python 3.14+
 - [uv](https://docs.astral.sh/uv/)
-- [Rust toolchain](https://rustup.rs/) 1.99+ (builds the engine, `sqlty._core`, and runs the cargo hooks)
+- [`rustup`](https://rustup.rs/): `rust-toolchain.toml` pins the Rust version (builds the engine, `sqlty._core`, and runs the cargo hooks)
 
 ## Setup
 
@@ -52,13 +52,13 @@ parallel. CI's Lint job runs the commit hooks on all files.
 | Layer | Location | What it tests |
 |-------|----------|---------------|
 | **Unit** | `tests/test_*.py` | Invariants over the mdtest corpus, bindings, fuzzing, docs |
-| **mdtest** | `tests/mdtest/`, `docs/`, `src/sqlty/rules/`, `README.md` | Type inference, rewrite, strip, lint ([format](AGENTS.md#markdown-tests-mdtest)) |
+| **mdtest** | `tests/mdtest/`, `docs/`, `README.md` | Type inference, rewrite, strip, lint ([format](AGENTS.md#markdown-tests-mdtest)) |
 | **E2E** | `tests/e2e/` | CLI in a subprocess, with `inline-snapshot` |
 | **Rust** | `rust/crates/*/` | Engine, CLI (`trycmd`), language server |
 
 ```bash
 uv run pytest                                          # all tests except timing
-uv run pytest tests/mdtest docs src/sqlty/rules README.md  # mdtests
+uv run pytest tests/mdtest docs README.md               # mdtests
 uv run pytest tests/ --ignore=tests/e2e --ignore=tests/mdtest  # unit tests
 uv run pytest tests/e2e/ -v                            # end-to-end tests
 uv run pytest tests/e2e/ --inline-snapshot=update      # accept new e2e output
@@ -135,22 +135,32 @@ database rejects is skipped, with the reason.
 
 ### Fuzzing
 
-`tests/test_fuzz.py` generates random schemas and queries with
-[Hypothesis](https://hypothesis.readthedocs.io/) (joins, aggregates, casts,
-`COALESCE`, `CASE`, `UNION ALL`, `WHERE ... IS NOT NULL`) and checks that every
-query analyzes with one column per select item and survives `rewrite` and
-`strip`. With a PostgreSQL server it also prepares each query and compares
-column names and types, and runs it over rows full of NULLs to catch a column
-typed as non-null that is not. It is skipped unless `SQLTY_FUZZ` is set:
+`rust/fuzz/tests/properties` holds property tests built with
+[`proptest`](https://docs.rs/proptest), each against an oracle of its own:
+
+- `analyzer`: random schemas and queries (joins, aggregates, casts, `COALESCE`,
+  `CASE`, `UNION ALL`, `WHERE ... IS NOT NULL`) analyze with one column per select
+  item and survive `rewrite` and `strip`. With `SQLTY_PG_DSN`, the server prepares
+  each query and must agree on column names and types, and running it over rows
+  full of NULLs catches a column typed as non-null that is not.
+- `params`: placeholders and call diagnostics against SQLite's binding, and
+  `rewrite` with parameter types against Python running the rewritten code.
+- `foreign_keys`: `foreign-key-mismatch` in every query shape against a model of
+  the rule page.
+- `variants`: generated functions run by a model for every input against the
+  query variants sqlty reads.
 
 ```bash
-SQLTY_FUZZ=1 SQLTY_FUZZ_EXAMPLES=2000 SQLTY_PG_DSN=postgresql:///scratch uv run pytest tests/test_fuzz.py -p no:randomly
+SQLTY_FUZZ_EXAMPLES=2000 SQLTY_PG_DSN=postgresql:///scratch SQLTY_FUZZ_PYTHON=.venv/bin/python \
+  cargo test --release --manifest-path rust/fuzz/Cargo.toml --test properties
 ```
 
 The server's tables are dropped and recreated, so point it at a scratch
-database. In CI, run the `Fuzz` workflow by hand (Actions, Fuzz, Run workflow);
-a failure prints the smallest schema and query Hypothesis shrank it to, which
-belongs in an mdtest next to the fix.
+database. `SQLTY_FUZZ_PYTHON` must import this checkout's `sqlty` dependencies;
+each property prints how many distinct cases it ran (`--nocapture`). In CI, run the `Fuzz`
+workflow by hand (Actions, Fuzz, Run workflow); a failure prints the case it
+shrank to and the `PROPTEST_RNG_SEED` that replays it. The case belongs in an
+mdtest next to the fix.
 
 `rust/fuzz` feeds every playground request (`analyze`, `complete`, `hover`,
 `format`) arbitrary source and schema with
@@ -209,7 +219,8 @@ make bench-corpus     # sqlty check on pinned real repositories (benchmarks/corp
   compare a branch (`ARGS="--save-baseline main"`, then `ARGS="--baseline main"`).
 - `bench-codspeed` runs each query kind of `synth.KINDS` through
   `analyze_select`/`analyze_params`, the schema load, `rewrite_source`,
-  `check_source`, `complete_source` at 50, 540 and 5000 tables and `query_at`.
+  `check_source`, `complete_source` at 50, 540 and 5000 tables and in a module
+  of 4000 queries.
   CI counts their instructions on every commit and reports the change on the
   pull request.
 
@@ -225,17 +236,13 @@ src/sqlty/
 ├── __init__.py          # SQL[T] generic str subclass
 ├── core.py              # Public API over the Rust engine
 ├── _core.pyi            # Stub for sqlty._core (rust/crates/sqlty-ext/src/lib.rs)
-├── _cli.py              # CLI parser; runs complete, breaking and server, the rest in Rust
+├── _cli.py              # `sqlty` entry point: runs the Rust CLI, reports crashes
 ├── _config.py           # Configuration from sqlty.toml, pyproject.toml or Cargo.toml
-├── _check.py            # Python checks of check_source: row types, helper parameters
-├── _lint.py             # Lint rules: severity, diagnostics, RuleConfig
-├── _breaking.py         # sqlty breaking; _snapshot.py writes and reads its snapshots
-├── _lsp_bridge.py       # Language server workspace with a breaking baseline
+├── _lint.py             # Lint rules and the Diagnostic type
 ├── _decode.py           # Magic codec decoder
 ├── magic.py             # Magic codec registration
 ├── lexer.py             # Pygments lexer coloring the SQL in Python strings
-├── drivers/psycopg.py   # Typed psycopg helpers
-└── rules/               # One page per lint rule, printed by sqlty rule NAME
+└── drivers/psycopg.py   # Typed psycopg helpers
 rust/
 ├── Cargo.toml           # Workspace root: shared deps and package metadata
 ├── fuzz/                # cargo-fuzz target over the playground requests
@@ -243,26 +250,22 @@ rust/
     ├── sqlty-sql/       # No PyO3, no I/O: analyzer/ (type inference, nullability,
     │   │                # completion, hover), catalog/ (schemas, name index), ddl.rs
     │   └── rules/       # Inference rules (*.inference.toml), compiled by build.rs
+    ├── sqlty-rules/     # Lint rule registry, generated from docs/reference/rules/*.md
     ├── sqlty-python/    # Python source: ruff parser, rewriter, checker, fixer, row types
     ├── sqlty-format/    # sqlty format: query strings laid out by sqruff
     ├── sqlty-project/   # A project read from disk: settings, helpers, checks
-    ├── sqlty-cli/       # The sqlty commands; main.rs is the standalone sqlty executable
+    ├── sqlty-cli/       # Every sqlty command; main.rs is the standalone sqlty executable
     ├── sqlty-lsp/       # The language server of sqlty server
-    ├── sqlty-wasm/      # JSON in, JSON out: the docs playground (make playground)
-    ├── sqlty-ext/       # PyO3 module sqlty._core; server.rs runs sqlty-lsp
+    ├── sqlty-wasm/      # JSON in, JSON out: @sqlty/wasm (npm/wasm) and the docs playground (make wasm)
+    ├── sqlty-ext/       # PyO3 module sqlty._core; cli.rs runs sqlty-cli
     └── sqlty-bench/     # Criterion benchmarks (make bench-rust)
 editors/vscode/          # VS Code client of sqlty server; see its README
-proofs/                  # Lean 4 model of SqlType::python, with proofs; see its README
 tests/
 ├── _mdtest/             # mdtest plugin: parser, runner over sqlty.core, --update-mdtest
 ├── mdtest/              # The specification, as Markdown tests
 ├── e2e/                 # CLI end-to-end tests and their fixtures
 └── type_oracle/         # Python row-type reader, the oracle for the Rust one
 ```
-
-`proofs/SqlTy/Table.lean` is generated from `scalar_python`: after changing the scalar
-mapping, run `SQLTY_UPDATE_PROOFS=1 cargo test -p sqlty-sql lean_table` and `lake build`
-in `proofs/`.
 
 ### Magic codec internals
 
@@ -310,7 +313,7 @@ The version is pinned only in the `Makefile` (`ZENSICAL`); CI runs `make docs`.
 ```bash
 make docs           # strict build into site/ (fails on broken links or anchors)
 make docs-serve     # live preview at http://localhost:8000/sqlty/
-make generate-docs  # regenerate the tables of configuration.md and cli.md
+make generate-docs  # regenerate the tables of configuration.md, cli.md and rules.md
 make lint-docs      # rumdl and Vale on the docs
 ```
 

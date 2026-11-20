@@ -64,13 +64,13 @@ declared with in `SELECT *`, and SQLite also for a column named in the select
 list, while PostgreSQL folds an unquoted name to lower case.
 
 1. Field count
-   ([`column-count-mismatch`](../reference/rules.md#column-count-mismatch),
+   ([`column-count-mismatch`](../reference/rules/column-count-mismatch.md),
    error), counting only required fields as the minimum.
 2. Field types
-   ([`column-type-mismatch`](../reference/rules.md#column-type-mismatch),
+   ([`column-type-mismatch`](../reference/rules/column-type-mismatch.md),
    error).
 3. Columns without a field and required fields without a column
-   ([`typeddict-key-mismatch`](../reference/rules.md#typeddict-key-mismatch),
+   ([`typeddict-key-mismatch`](../reference/rules/typeddict-key-mismatch.md),
    error).
 
 A field with a default, and a `NotRequired` key, may be missing from the
@@ -122,13 +122,13 @@ a = SQL[Typed]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
 `NamedTuple` fields are matched by position, in this order:
 
 1. Field count
-   ([`column-count-mismatch`](../reference/rules.md#column-count-mismatch),
+   ([`column-count-mismatch`](../reference/rules/column-count-mismatch.md),
    error).
 2. Field types
-   ([`column-type-mismatch`](../reference/rules.md#column-type-mismatch),
+   ([`column-type-mismatch`](../reference/rules/column-type-mismatch.md),
    error).
 3. Field names against column names or aliases
-   ([`column-name-mismatch`](../reference/rules.md#column-name-mismatch),
+   ([`column-name-mismatch`](../reference/rules/column-name-mismatch.md),
    warning).
 
 ```python
@@ -234,8 +234,8 @@ pydantic. Standard-library classes come from the class graph of
 [typeshed](https://github.com/python/typeshed), the stubs type checkers read, and
 [Pydantic types](#pydantic-types) from a table, so a module with import-time side
 effects is not triggered by `sqlty check`. From Python, pass a `HelperIndex`
-filled with the modules (`index.add("pkg.ids", source)`) and the `module` name of
-the checked source as `check_source(..., helpers=index, module=...)`.
+filled with the modules (`index.add("pkg.ids", source)`) and the checked source with
+its module name: `check_source(ParsedSource(source, "pkg.app"), Settings(helpers=index))`.
 
 ### Classes
 
@@ -580,7 +580,7 @@ Open and closed TypedDicts ([PEP 728](https://peps.python.org/pep-0728/):
 `closed=True`, `extra_items=Never`, or a subclass of either) are both matched
 by key; `closed=True` states the intent, and `extra_items=T` (below) is what
 admits extra columns. Undeclared columns and missing required keys are
-[`typeddict-key-mismatch`](../reference/rules.md#typeddict-key-mismatch)
+[`typeddict-key-mismatch`](../reference/rules/typeddict-key-mismatch.md)
 errors:
 
 ```python
@@ -616,7 +616,7 @@ ratio = SQL[Metrics]("--sql\nSELECT day::TEXT, ratio::FLOAT FROM stats")
 ## TypedDict inheritance
 
 Subclasses must respect a base's openness (PEP 728). Violations are
-[`typeddict-inheritance`](../reference/rules.md#typeddict-inheritance) errors
+[`typeddict-inheritance`](../reference/rules/typeddict-inheritance.md) errors
 on the subclass:
 
 - A closed base admits no new keys, no `extra_items` and no `closed=False`.
@@ -706,9 +706,9 @@ operations such as `query + " LIMIT 1"` do not: `row_form` raises
 
 A column that can be NULL infers `T | None` (see
 [Nullability](schema-inference.md#nullability)). A field that is not optional is
-[`nullable-mismatch`](../reference/rules.md#nullable-mismatch), an error by default. A field
+[`nullable-mismatch`](../reference/rules/nullable-mismatch.md), an error by default. A field
 annotated `T | None` is accepted for a column that cannot be NULL: only
-[`redundant-optional`](../reference/rules.md#redundant-optional), off by default, reports
+[`redundant-optional`](../reference/rules/redundant-optional.md), off by default, reports
 that.
 
 ## Literal columns
@@ -716,9 +716,9 @@ that.
 A column with known values (an enum, a `CHECK (col IN (...))`, a `CASE` over constants; see
 [Literal values](schema-inference.md#literal-values)) infers a `typing.Literal`. A field
 annotated `str` or `int` takes it. A field annotated with a `Literal` must list every value:
-a missing one is [`literal-mismatch`](../reference/rules.md#literal-mismatch), an error by
+a missing one is [`literal-mismatch`](../reference/rules/literal-mismatch.md), an error by
 default. Values the `Literal` lists that the column never takes are
-[`redundant-literal`](../reference/rules.md#redundant-literal), off by default, because one
+[`redundant-literal`](../reference/rules/redundant-literal.md), off by default, because one
 alias often serves several queries that each return some of its values.
 
 ## Limitations

@@ -68,12 +68,21 @@ Placeholders inside strings and comments are left alone.
 SELECT id, nme FROM users WHERE id = $1;
 ```
 
+sqlc's [`sqlc.embed(t)`](https://docs.sqlc.dev/en/latest/howto/embedding.html) is the
+row of the table or alias `t` of the `FROM` clause:
+
+```sql
+-- name: GetUserTeam :one
+-- error: [unknown-table] "`tm` in `sqlc.embed(tm)` is not a table or alias in the FROM clause"
+SELECT sqlc.embed(u), sqlc.embed(tm) FROM users u WHERE u.id = $1;
+```
+
 ## What is checked
 
-The [name rules](../reference/rules.md#name-rules) (`unknown-table`,
+The [name rules](../reference/rules.md#rule-groups) (`unknown-table`,
 `unknown-column`, `ambiguous-column`, ...),
-[`unparsed-query`](../reference/rules.md#unparsed-query) and
-[`select-star`](../reference/rules.md#select-star), with the severities
+[`unparsed-query`](../reference/rules/unparsed-query.md) and
+[`select-star`](../reference/rules/select-star.md), with the severities
 `[tool.sqlty.rules]` and `overrides` give them. A file has no row types, so the
 rules that compare one with the query don't apply.
 

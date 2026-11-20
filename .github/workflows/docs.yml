@@ -6,6 +6,7 @@ on:
     paths:
       - "docs/**"
       - "examples/**"
+      - "npm/wasm/**"
       - "scripts/generate_playground_examples.py"
       - "scripts/vendor_assets.py"
       - "scripts/offline.py"
@@ -16,14 +17,17 @@ on:
       - "overrides/**"
       - "zensical.toml"
       - ".github/workflows/docs.yml"
+      - ".github/actions/setup/**"
       - "Makefile"
       - "rust/**"
+      - "rust-toolchain.toml"
       - "src/sqlty/lexer.py"
       - "pyproject.toml"
   pull_request:
     paths:
       - "docs/**"
       - "examples/**"
+      - "npm/wasm/**"
       - "scripts/generate_playground_examples.py"
       - "scripts/vendor_assets.py"
       - "scripts/offline.py"
@@ -34,8 +38,10 @@ on:
       - "overrides/**"
       - "zensical.toml"
       - ".github/workflows/docs.yml"
+      - ".github/actions/setup/**"
       - "Makefile"
       - "rust/**"
+      - "rust-toolchain.toml"
       - "src/sqlty/lexer.py"
       - "pyproject.toml"
   workflow_dispatch:
@@ -56,21 +62,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: $/.github/actions/setup
         with:
-          version: "0.13.7"
-
-      - name: Install Rust toolchain
-        run: |
-          rustup toolchain install 1.99.1 --profile minimal --target wasm32-unknown-unknown
-          rustup default 1.99.1
-
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: rust -> target
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          targets: wasm32-unknown-unknown
 
       # sqlty's Pygments lexer colors the SQL in the Python examples.
       - name: Install sqlty

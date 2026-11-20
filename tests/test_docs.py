@@ -28,10 +28,10 @@ from pygments.lexers import get_lexer_by_name
 import sqlty
 from sqlty._config import load_config
 from sqlty._lint import RULES
-from sqlty.core import check_source, rewrite_source
+from sqlty.core import Settings, check_source, rewrite_source
 
 ROOT = Path(__file__).resolve().parent.parent
-RULE_DOCS = ROOT / "src" / "sqlty" / "rules"
+RULE_DOCS = ROOT / "docs" / "reference" / "rules"
 EXAMPLES = sorted(p for p in (ROOT / "examples").glob("0*") if p.is_dir())
 # __main__ runs the CLI on import; _core is compiled and has no docstrings.
 # drivers/ is a namespace package, which walk_packages skips.
@@ -50,14 +50,17 @@ WITH_EXAMPLES = {"sqlty", "sqlty.core", "sqlty._decode"}
 def test_rules_table() -> None:
     """The table in ``docs/reference/rules.md`` lists every rule with its defaults."""
     text = (ROOT / "docs" / "reference" / "rules.md").read_text()
-    rows = re.findall(r"^\| \[`([\w-]+)`\]\(#[\w-]+\) \| [\w ]+ \| (\w+) \| (\w+) \|", text, re.M)
+    rows = re.findall(
+        r"^\| \[`([\w-]+)`\]\(rules/\1\.md\) \| ([\w ]+) \| (\w+) \| (\w+) \|", text, re.M
+    )
     assert sorted(rows) == sorted(
-        (r.name, r.default_severity.value, "yes" if r.fixable else "no") for r in RULES.values()
+        (r.name, r.group, r.default_severity.value, "yes" if r.fixable else "no")
+        for r in RULES.values()
     )
 
 
 def test_generated_reference_is_current() -> None:
-    """The tables in ``configuration.md`` and ``cli.md`` match the code (``make generate-docs``)."""
+    """The generated tables of ``docs/reference`` match the code (``make generate-docs``)."""
     spec = importlib.util.spec_from_file_location(
         "generate_docs", ROOT / "scripts" / "generate_docs.py"
     )
@@ -66,6 +69,17 @@ def test_generated_reference_is_current() -> None:
     spec.loader.exec_module(module)
     stale = [p.name for p in module.generate(check=True)]
     assert not stale, f"run `make generate-docs`: {stale} out of date"
+
+
+def test_cli_reference_lists_every_command_and_option() -> None:
+    from sqlty._core import cli_reference
+
+    page = (ROOT / "docs" / "reference" / "cli.md").read_text()
+    for name, usage, options in cli_reference():
+        assert name == "sqlty" or f"## `sqlty {name}`" in page, name
+        assert f"```text\n{usage}\n```" in page, usage
+        for option, _ in options:
+            assert f"| `{option}` |" in page, (name, option)
 
 
 def _script(name: str) -> Any:
@@ -87,20 +101,22 @@ def test_playground_links_hold_their_example(page: Path) -> None:
         settings = tomllib.loads(session["config"])
         check_source(
             session["source"],
-            dialect=session["dialect"],
-            schema_sql=session["schema"] or None,
-            rules=settings.get("rules"),
-            import_style=settings.get("import-style"),
+            Settings(
+                dialect=session["dialect"],
+                schema_sql=session["schema"] or None,
+                rules=settings.get("rules"),
+                import_style=settings.get("import-style"),
+            ),
         )
 
 
 def test_playground_link_of_a_rule_example() -> None:
     links = _script("playground_links")
-    text = (ROOT / "src" / "sqlty" / "rules" / "sqruff.md").read_text()
+    text = (RULE_DOCS / "sqruff.md").read_text()
     session = links.examples(text)[0]
     assert session["config"] == '[rules]\nsqruff = "warn"\n'
     assert session["source"].startswith("from sqlty import SQL\n\nquery = SQL[tuple[str, int]]")
-    found = check_source(session["source"], rules={"sqruff": "warn"})
+    found = check_source(session["source"], Settings(rules={"sqruff": "warn"}))
     assert [d["rule"] for d in found] == ["sqruff"]
     html = '<div class="language-python highlight"><pre><code>q</code></pre></div>'
     linked = links.link(html, [None, session], "../")
@@ -193,14 +209,28 @@ def test_pygments_lexer_colors_sql_in_query_strings() -> None:
 
 
 def test_rule_docs() -> None:
+    import yaml
+
     assert {p.stem for p in RULE_DOCS.glob("*.md")} == set(RULES)
+    orders: list[int] = []
     for rule in RULES.values():
-        head = (RULE_DOCS / f"{rule.name}.md").read_text().splitlines()[:3]
-        assert head == [
+        text = (RULE_DOCS / f"{rule.name}.md").read_text()
+        _, front, page = text.split("---\n", 2)
+        meta = yaml.safe_load(front)
+        assert meta["severity"] == rule.default_severity.value
+        assert (meta["fixable"], meta["group"], meta["summary"]) == (
+            rule.fixable,
+            rule.group.lower().replace(" ", "-"),
+            rule.description,
+        )
+        orders.append(meta["order"])
+        assert page.splitlines()[:4] == [
+            "",
             f"# {rule.name}",
             "",
             f"Default severity: **{rule.default_severity.value}**",
         ]
+    assert orders == sorted(set(orders))
 
 
 @pytest.mark.parametrize("example", EXAMPLES, ids=[p.name for p in EXAMPLES])
@@ -208,21 +238,21 @@ def test_examples_are_rewritten(example: Path) -> None:
     """Each example is current under its own ``[tool.sqlty]``."""
     config, config_dir = load_config(example)
     schema = config.get("schema")
-    options = {
-        "dialect": config.get("dialect", "postgres"),
-        "schema_sql": (config_dir / schema).read_text() if config_dir and schema else None,
-        "import_style": config.get("import_style"),
-    }
+    settings = Settings(
+        dialect=config.get("dialect", "postgres"),
+        schema_sql=(config_dir / schema).read_text() if config_dir and schema else None,
+        import_style=config.get("import_style"),
+    )
     for path in sorted(example.glob("*.py")):
         source = path.read_text()
-        assert rewrite_source(source, **options) == source, f"{path}: run sqlty rewrite"
-        stale = [d for d in check_source(source, **options) if str(d["rule"]).startswith("stale-")]
+        assert rewrite_source(source, settings) == source, f"{path}: run sqlty rewrite"
+        stale = [d for d in check_source(source, settings) if str(d["rule"]).startswith("stale-")]
         assert not stale, f"{path}: {stale}"
 
 
 MARKDOWN = sorted(
     {*ROOT.glob("*.md"), *ROOT.glob(".github/*.md"), *ROOT.glob("skills/*/SKILL.md")}
-    | {*ROOT.glob("docs/**/*.md"), *RULE_DOCS.glob("*.md"), *ROOT.glob("examples/*/README.md")}
+    | {*ROOT.glob("docs/**/*.md"), *ROOT.glob("examples/*/README.md")}
 )
 
 
@@ -327,7 +357,7 @@ def test_bump_version_writes_every_place(tmp_path: Path) -> None:
     """`bump_version.py X` changes the version lines of every place and no other line."""
     places = {
         "rust/Cargo.toml": 1,
-        "rust/Cargo.lock": 9,
+        "rust/Cargo.lock": 10,
         ".claude-plugin/plugin.json": 1,
         ".claude-plugin/marketplace.json": 2,
         ".codex-plugin/plugin.json": 1,
@@ -335,6 +365,8 @@ def test_bump_version_writes_every_place(tmp_path: Path) -> None:
         "docs/recipes/ci.md": 1,
         "skills/sqlty-ci/SKILL.md": 1,
         "npm/sqlty/package.json": 7,
+        "npm/wasm/package.json": 1,
+        "editors/vscode/package-lock.json": 1,
     }
     for place in ["scripts/bump_version.py", *places]:
         (tmp_path / place).parent.mkdir(parents=True, exist_ok=True)
@@ -364,16 +396,15 @@ def test_bump_version_writes_every_place(tmp_path: Path) -> None:
     assert drifted.stderr == "docs/recipes/ci.md: disagrees with rust/Cargo.toml\n"
 
 
-def test_rule_docs_link_to_the_site() -> None:
+def test_rule_docs_link_to_the_site(capsys: pytest.CaptureFixture[str]) -> None:
     """`sqlty rule` prints the rule pages with links a terminal user can open."""
-    from sqlty._lint import DOCS_URL, RULES, rule_doc
+    from sqlty._core import cli
+    from sqlty._lint import DOCS_URL
 
     for name in RULES:
-        for target in re.findall(r"\]\(([^)\s]+)\)", rule_doc(name)):
+        assert cli(["sqlty", "rule", name]) == 0
+        for target in re.findall(r"\]\(([^)\s]+)\)", capsys.readouterr().out):
             assert not target.endswith(".md") and ".md#" not in target, (name, target)
             if target.startswith(DOCS_URL):
-                page, _, anchor = target.removeprefix(DOCS_URL).partition("#")
-                if page == "reference/rules/":
-                    assert anchor in RULES, (name, target)
-                else:
-                    assert (ROOT / "docs" / f"{page.rstrip('/')}.md").exists(), (name, target)
+                page = target.removeprefix(DOCS_URL).partition("#")[0].rstrip("/")
+                assert (ROOT / "docs" / f"{page}.md").exists(), (name, target)

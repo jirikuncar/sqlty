@@ -2,24 +2,17 @@
 
 Usage:
     from sqlty.core import infer_type, rewrite_source, strip_source, check_source
-
-``check_source`` adds the checks of user-defined row types (TypedDict,
-NamedTuple, dataclass, Pydantic) on top of the engine's, since resolving them
-needs the Python runtime; those passes live in ``sqlty._check``.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import sys
-from collections import Counter
 from collections.abc import Collection, Mapping
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, NamedTuple
+from typing import NamedTuple
 
-from sqlty._check import RowUsage
-from sqlty._check import diagnostics as check_diagnostics
-from sqlty._core import QueryAt as _QueryAt
 from sqlty._core import (
+    ModuleIndex,
     Schema,
     checks_names,
     expand_star,
@@ -28,33 +21,21 @@ from sqlty._core import (
 )
 from sqlty._core import add_json_types as _add_json_types
 from sqlty._core import add_param_types as _add_param_types
-from sqlty._core import analyze_columns as _analyze_columns
 from sqlty._core import analyze_params as _analyze_params
 from sqlty._core import analyze_select as _analyze_select
 from sqlty._core import complete_source as _complete_source
-from sqlty._core import explain_select as _explain_select
 from sqlty._core import fix_module as _fix_module
 from sqlty._core import format_source as _format_source
 from sqlty._core import highlight_source as _highlight_source
-from sqlty._core import hover_source as _hover_source
 from sqlty._core import load_schema as _load_schema
 from sqlty._core import module_calls as _module_calls
-from sqlty._core import parse_error as _parse_error
-from sqlty._core import query_at as _query_at
-from sqlty._core import query_diagnostics as _query_diagnostics
-from sqlty._core import query_sites as _query_sites
-from sqlty._core import query_source_offset as _query_source_offset
-from sqlty._core import query_tables as _query_tables
+from sqlty._core import module_diagnostics as _module_diagnostics
 from sqlty._core import rewrite_source as _rewrite_source
 from sqlty._core import schema_skipped_objects as _schema_skipped_objects
-from sqlty._core import schema_skipped_tables as _schema_skipped_tables
 from sqlty._core import strip_source as _strip_source
 from sqlty._helpers import HelperIndex
-from sqlty._lint import Diagnostic, RuleConfig
+from sqlty._lint import Diagnostic
 from sqlty._source import ParsedSource
-
-if TYPE_CHECKING:
-    pass
 
 
 def load_schema(
@@ -97,6 +78,55 @@ def load_schema(
     )
 
 
+class RowUsage:
+    """Which fields of the row types a run checks some query needs ``| None`` for.
+
+    ``redundant-optional`` is a question about a row type, not a query: a field is
+    redundant only when no query that loads the type can return NULL for it.
+    """
+
+    def __init__(self) -> None:
+        self.needed: set[tuple[str | None, str, str]] = set()
+        self.redundant: list[tuple[tuple[str | None, str, str], Diagnostic]] = []
+
+    def filter(self, diagnostics: list[Diagnostic]) -> list[Diagnostic]:
+        """``diagnostics`` without the ``redundant-optional`` reports another query refutes."""
+        refuted = {id(diag) for key, diag in self.redundant if key in self.needed}
+        return [diag for diag in diagnostics if id(diag) not in refuted]
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True, slots=True)
+class Settings:
+    """What a project's ``[tool.sqlty]`` table sets, for the ``*_source`` functions.
+
+    ``rules`` maps a rule to its severity, as ``[tool.sqlty.rules]``; ``helpers`` indexes
+    the project's modules, so calls to their helpers are checked (``HelperIndex``).
+    ``query_variants`` is ``max-query-variants`` when ``preview`` is on, else ``None``.
+    ``json_types``, ``param_types`` and ``closed_params`` shape what ``rewrite_source`` and
+    ``fix_source`` write.
+
+    Example:
+        >>> settings = Settings(dialect="sqlite", rules={"select-star": "error"})
+        >>> dataclasses.replace(settings, dialect="mysql").rules
+        {'select-star': 'error'}
+    """
+
+    dialect: str = "postgres"
+    schema_sql: str | Schema | None = None
+    rules: Mapping[str, str] | None = None
+    import_style: str | None = None
+    untyped: bool = False
+    helpers: HelperIndex | None = None
+    query_variants: int | None = None
+    coerce_row_types: Collection[str] = ()
+    json_types: str = "typing.Any"
+    param_types: bool = True
+    closed_params: bool = False
+
+
+DEFAULT = Settings()
+
+
 class ColumnInfo(NamedTuple):
     """A result column; types are ``None`` when unknown."""
 
@@ -121,74 +151,6 @@ def analyze_select(
     """
     columns = _analyze_select(sql, dialect=dialect, schema_sql=schema_sql)
     return None if columns is None else [ColumnInfo(*column) for column in columns]
-
-
-def json_shapes(
-    sql: str, *, dialect: str = "postgres", schema_sql: str | Schema | None = None
-) -> list[tuple[str, str]]:
-    """The shape of the JSON each column builds, as ``(column, shape)`` pairs.
-
-    Only PostgreSQL columns built with ``jsonb_build_object()``, ``jsonb_agg()``,
-    ``to_jsonb()``, ``->`` and the like have one. The column's Python type stays ``Any``;
-    ``json-shape-mismatch`` checks the shape against the row type.
-
-    Example:
-        >>> json_shapes("SELECT jsonb_build_object('id', 1, 'name', 'x') AS doc")
-        [('doc', '{id: integer, name: string}')]
-        >>> json_shapes("SELECT coalesce(jsonb_agg(1), '[]') AS xs")
-        [('xs', '[integer]')]
-    """
-    from sqlty._json_shape import render
-
-    columns = _analyze_columns(sql, dialect=dialect, schema_sql=schema_sql)
-    return [(c[0], render(c[4])) for c in columns or [] if c[4] is not None]
-
-
-class InferenceRule(NamedTuple):
-    """An inference rule of the engine: ``rust/crates/sqlty-sql/rules/``."""
-
-    id: str
-    reference: str
-    reasoning: str
-
-
-class ColumnRules(NamedTuple):
-    """The inference rules behind a result column's type and nullability."""
-
-    name: str
-    type_rule: InferenceRule | None
-    nullability_rule: InferenceRule | None
-
-
-def explain_select(
-    sql: str, *, dialect: str = "postgres", schema_sql: str | Schema | None = None
-) -> list[ColumnRules] | None:
-    """The inference rules behind each column of ``analyze_select``, or ``None`` when the
-    query returns no rows or doesn't parse.
-
-    A column gets the rules of its outermost operator or function call; a column
-    reference, a cast or a set operation has none. ``sqlty check --explain`` prints them.
-
-    Example:
-        >>> [rules] = explain_select("SELECT 1::SMALLINT + 1::SMALLINT AS total")
-        >>> rules.type_rule.id
-        'common.arithmetic.numbers'
-        >>> explain_select("SELECT 1::INTEGER AS one")
-        [ColumnRules(name='one', type_rule=None, nullability_rule=None)]
-        >>> explain_select("SELEC 1") is None
-        True
-    """
-    columns = _explain_select(sql, dialect=dialect, schema_sql=schema_sql)
-    if columns is None:
-        return None
-    return [
-        ColumnRules(
-            name,
-            InferenceRule(*type_rule) if type_rule else None,
-            InferenceRule(*nullability_rule) if nullability_rule else None,
-        )
-        for name, type_rule, nullability_rule in columns
-    ]
 
 
 class ParamInfo(NamedTuple):
@@ -235,105 +197,13 @@ def analyze_params(
     return None if params is None else [ParamInfo(*param) for param in params]
 
 
-class QueryDiagnostic(NamedTuple):
-    """A diagnostic of a query: what ``query_diagnostics`` returns.
-
-    ``start`` and ``end`` are character offsets into the query, ``None`` when unknown.
-    ``table`` is the table it is about: an unknown table or qualifier as written, or the
-    schema table (``s.orders`` when the query qualifies it) an unknown column was looked up
-    in. ``column`` is an unknown, ambiguous or left-out column. Each is ``None`` when the
-    diagnostic is not about one, or about several.
-    """
-
-    rule: str
-    message: str
-    severity: str
-    start: int | None
-    end: int | None
-    table: str | None
-    column: str | None
-
-
-def query_diagnostics(
-    sql: str,
-    *,
-    dialect: str = "postgres",
-    schema_sql: str | Schema | None = None,
-    rules: dict[str, str] | None = None,
-) -> list[QueryDiagnostic]:
-    """Why a query has untyped columns, or names what it cannot, as ``QueryDiagnostic`` tuples.
-
-    The rules are ``unknown-table``, ``unknown-column``, ``ambiguous-column``, ``duplicate-alias``,
-    ``unknown-function``, ``unknown-type``, ``unsupported-syntax``,
-    ``insert-missing-column``, ``insert-value-count``, ``ungrouped-column``,
-    ``fanout-aggregate``, ``chasm-join``, ``unproven-join``, ``entity-mismatch`` and
-    ``rejected-query``. Tables and
-    columns are only judged when ``schema_sql`` defines some tables. ``rules`` sets severities
-    as ``[tool.sqlty.rules]`` does, and a rule set to ``"ignore"`` (by default
-    ``unproven-join`` and ``entity-mismatch``) is left out, as in ``check_source``.
-
-    Example:
-        >>> schema = "CREATE TABLE users (id INT)"
-        >>> query_diagnostics("SELECT nope FROM users", schema_sql=schema)
-        [QueryDiagnostic(rule='unknown-column', message='column `nope` does not exist in `users`', severity='error', start=7, end=11, table='users', column='nope')]
-        >>> [d.rule for d in query_diagnostics("SELECT u.id FROM users u JOIN users v ON v.id = u.id", schema_sql=schema)]
-        []
-    """
-    config = RuleConfig(rules)
-    return [
-        QueryDiagnostic(rule, message, config.severity(rule).value, start, end, table, column)
-        for rule, message, start, end, table, column in _query_diagnostics(
-            sql, dialect=dialect, schema_sql=schema_sql
-        )
-        if config.is_enabled(rule)
-    ]
-
-
-class TableRef(NamedTuple):
-    """A table a query names: what ``query_tables`` returns."""
-
-    name: str
-    schema: str | None
-    access: Literal["read", "write"]
-
-
-def query_tables(sql: str, *, dialect: str = "postgres") -> list[TableRef]:
-    """The tables ``sql`` reads and writes, in source order, each once per access.
-
-    ``name`` and ``schema`` are as the query writes them; ``schema`` is ``None`` for an
-    unqualified name. ``access`` is ``"write"`` for the target of an ``INSERT``,
-    ``UPDATE``, ``DELETE`` or ``MERGE``, else ``"read"``. CTEs, derived tables and table
-    functions are not tables. Needs no schema; empty when the query does not parse.
-
-    Example:
-        >>> query_tables("INSERT INTO audit.log (id) SELECT id FROM users WHERE id IN (SELECT user_id FROM orders)")
-        [TableRef(name='log', schema='audit', access='write'), TableRef(name='users', schema=None, access='read'), TableRef(name='orders', schema=None, access='read')]
-        >>> query_tables("WITH recent AS (SELECT * FROM orders) SELECT * FROM recent, generate_series(1, 3)")
-        [TableRef(name='orders', schema=None, access='read')]
-    """
-    return [TableRef(*table) for table in _query_tables(sql, dialect=dialect)]
-
-
-def schema_skipped_tables(schema_sql: str | Schema, *, dialect: str = "postgres") -> list[str]:
-    """Names of schema tables that can't be parsed, so their columns are unknown.
-
-    A table is retried without its constraints and ``CHECK`` / ``REFERENCES``
-    clauses first; only tables that still fail are listed.
-
-    Example:
-        >>> schema_skipped_tables("CREATE TABLE ok (id INT); CREATE TABLE bad (id INT DEFAULT %s)")
-        ['bad']
-    """
-    return _schema_skipped_tables(schema_sql, dialect=dialect)
-
-
 def schema_skipped_objects(
     schema_sql: str | Schema, *, dialect: str = "postgres"
 ) -> list[tuple[str, str]]:
     """``(kind, name)`` of schema tables and views that can't be parsed, so their columns are unknown.
 
     ``kind`` is ``"table"`` or ``"view"``. Unparseable tables are retried without
-    their constraints first, as in :func:`schema_skipped_tables`. A ``"statement"`` is a
+    their constraints and ``CHECK`` / ``REFERENCES`` clauses first. A ``"statement"`` is a
     statement that does not parse and would set keys, checks, ``NOT NULL``, defaults or a
     type, named by its text: an ``ALTER TABLE ... ADD CONSTRAINT`` or a ``CREATE TYPE``.
     A ``"limit"`` is a table, view or statement left unknown because the schema is too
@@ -350,18 +220,7 @@ def schema_skipped_objects(
     return _schema_skipped_objects(schema_sql, dialect=dialect)
 
 
-def rewrite_source(
-    source: str,
-    *,
-    dialect: str = "postgres",
-    schema_sql: str | Schema | None = None,
-    import_style: str | None = None,
-    untyped: bool = False,
-    keep_lines: bool = False,
-    json_types: str = "typing.Any",
-    param_types: bool = True,
-    closed_params: bool = False,
-) -> str:
+def rewrite_source(source: str, settings: Settings = DEFAULT, *, keep_lines: bool = False) -> str:
     r"""Wrap each ``--sql`` string in ``SQL[T](...)``, ``T`` the row type it infers.
 
     With ``json_types="typing.TypedDict"``, a JSON column of known shape gets a generated
@@ -379,26 +238,16 @@ def rewrite_source(
     """
     rewritten = _rewrite_source(
         source,
-        dialect=dialect,
-        schema_sql=schema_sql,
-        import_style=import_style,
-        untyped=untyped,
+        dialect=settings.dialect,
+        schema_sql=settings.schema_sql,
+        import_style=settings.import_style,
+        untyped=settings.untyped,
         keep_lines=keep_lines,
     )
-    if json_types == "typing.TypedDict" and rewritten != source:
-        rewritten = _json_types(rewritten, dialect, schema_sql, import_style)
-    if param_types:
-        rewritten = _add_param_types(
-            rewritten,
-            dialect=dialect,
-            schema_sql=schema_sql,
-            import_style=import_style,
-            closed=closed_params,
-        )
-    return rewritten
+    return _typed(rewritten, source, settings)
 
 
-def strip_source(source: str, *, import_style: str | None = None) -> str:
+def strip_source(source: str, settings: Settings = DEFAULT) -> str:
     r"""Unwrap ``SQL[T](...)`` back to the string, and drop the ``TypedDict``s rewrite generated.
 
     Example:
@@ -408,12 +257,10 @@ def strip_source(source: str, *, import_style: str | None = None) -> str:
     Raises:
         ValueError: unsupported ``import_style``
     """
-    return _strip_source(source, import_style=import_style)
+    return _strip_source(source, import_style=settings.import_style)
 
 
-def format_source(
-    source: str, *, dialect: str = "postgres", import_style: str | None = None
-) -> str:
+def format_source(source: str, settings: Settings = DEFAULT) -> str:
     r"""Lay out the query strings ``sqlty check`` reads with `sqruff <https://github.com/quarylabs/sqruff>`_.
 
     Only a query in one plain triple-quoted literal without a backslash is formatted, and
@@ -431,23 +278,10 @@ def format_source(
     Raises:
         ValueError: unsupported ``import_style``
     """
-    return _format_source(source, dialect=dialect, import_style=import_style)
+    return _format_source(source, dialect=settings.dialect, import_style=settings.import_style)
 
 
-def fix_source(
-    source: str | ParsedSource,
-    *,
-    dialect: str = "postgres",
-    schema_sql: str | Schema | None = None,
-    import_style: str | None = None,
-    untyped: bool = False,
-    rules: dict[str, str] | None = None,
-    json_types: str = "typing.Any",
-    helpers: HelperIndex | None = None,
-    module: str | None = None,
-    param_types: bool = True,
-    closed_params: bool = False,
-) -> str:
+def fix_source(source: str | ParsedSource, settings: Settings = DEFAULT) -> str:
     """Apply what ``sqlty check --fix`` fixes; rules set to ``"ignore"`` are skipped.
 
     A fix for a rule is not applied to a query whose reported line carries
@@ -462,59 +296,24 @@ def fix_source(
     Raises:
         ValueError: unsupported ``import_style``, or ``rules`` names an unknown rule or severity
     """
-    parsed = ParsedSource.of(source, module)
-    fixed = _fixed(parsed, dialect, schema_sql, import_style, untyped, rules, helpers, module)
-    if json_types == "typing.TypedDict" and fixed != parsed.text:
-        fixed = _json_types(fixed, dialect, schema_sql, import_style)
-    if param_types:
-        fixed = _add_param_types(
-            fixed,
-            dialect=dialect,
-            schema_sql=schema_sql,
-            import_style=import_style,
-            closed=closed_params,
-        )
-    return fixed
-
-
-def _fixed(
-    parsed: ParsedSource,
-    dialect: str,
-    schema_sql: str | Schema | None,
-    import_style: str | None,
-    untyped: bool,
-    rules: dict[str, str] | None,
-    helpers: HelperIndex | None,
-    module: str | None,
-) -> str:
-    """``fix_source`` before the JSON and parameter types."""
-    return _fix_module(
+    parsed = ParsedSource.of(source)
+    fixed = _fix_module(
         parsed.text,
         version=sys.version_info[:2],
-        dialect=dialect,
-        schema_sql=schema_sql,
-        import_style=import_style,
-        untyped=untyped,
-        rules=rules,
-        index=None if helpers is None else helpers.rust(),
+        dialect=settings.dialect,
+        schema_sql=settings.schema_sql,
+        import_style=settings.import_style,
+        untyped=settings.untyped,
+        rules=_rules(settings),
+        index=_index(settings),
         name=parsed.module,
-        module=module,
+        module=parsed.module,
     )
+    return _typed(fixed, parsed.text, settings)
 
 
 def check_source(
-    source: str | ParsedSource,
-    *,
-    dialect: str = "postgres",
-    schema_sql: str | Schema | None = None,
-    rules: dict[str, str] | None = None,
-    import_style: str | None = None,
-    untyped: bool = False,
-    helpers: HelperIndex | None = None,
-    module: str | None = None,
-    row_usage: RowUsage | None = None,
-    query_variants: int | None = None,
-    coerce_row_types: Collection[str] = (),
+    source: str | ParsedSource, settings: Settings = DEFAULT, *, row_usage: RowUsage | None = None
 ) -> list[Diagnostic]:
     """Check Python source for SQL type issues.
 
@@ -528,9 +327,9 @@ def check_source(
     A string literal passed to a parameter annotated
     ``Annotated[LiteralString, SQL]`` is a query too, checked against the row
     type passed to the ``type[T]`` parameter of the same helper. Helpers
-    defined in ``source`` count; for those of other modules pass ``helpers``
-    (a ``HelperIndex``) and the ``module`` name of ``source``, which resolves
-    relative imports. The same index resolves row type fields annotated with a
+    defined in ``source`` count; for those of other modules set ``helpers``
+    (a ``HelperIndex``) and pass a ``ParsedSource`` naming the module of ``source``,
+    which resolves relative imports. The same index resolves row type fields annotated with a
     type imported from another module of the index (``NewType``, ``Literal``
     and ``type`` aliases, ``X = int``, classes), read from its source and never imported.
     Row types are read from source only: nothing of the checked code is imported or run.
@@ -545,20 +344,20 @@ def check_source(
 
     ``source`` may be a ``ParsedSource``: the file is then parsed and walked at
     most once for all of these checks, and not at all when it holds no query.
-    Build one per file when checking many (see ``sqlty._source``).
+    Build one per file when checking many.
 
     ``redundant-optional`` reports a row type field only when no query that loads the
     type can return NULL for it. Within ``source`` that is settled here; to settle it
     across files, pass one ``RowUsage`` to every call and drop what its ``filter`` drops
     once all files are checked.
 
-    ``query_variants`` (the ``preview`` key, up to ``max-query-variants``) checks a query
+    ``settings.query_variants`` (the ``preview`` key, up to ``max-query-variants``) checks a query
     a helper call builds from names bound in branches once per variant: each path through
     ``if``, ``match`` and conditional expressions gives one. A diagnostic of some variants
     only names the lines that select one: ``(variant: line 11)``. A call with more variants
     is ``dynamic-query`` (``unchecked-query`` for a psycopg composition).
 
-    ``coerce_row_types`` (the ``coerce-row-types`` key) names the ``TypedDict``,
+    ``settings.coerce_row_types`` (the ``coerce-row-types`` key) names the ``TypedDict``,
     ``NamedTuple`` and dataclass rows the code validates with Pydantic, such as through a
     ``TypeAdapter``, as ``module.Name``: their fields take what a ``BaseModel`` field takes.
 
@@ -580,43 +379,38 @@ def check_source(
     Raises:
         ValueError: unsupported ``import_style``, or ``rules`` names an unknown rule or severity
     """
-    parsed = ParsedSource.of(source, module)
-    diagnostics = check_diagnostics(
-        parsed,
-        dialect=dialect,
-        schema_sql=schema_sql,
-        rules=rules,
-        import_style=import_style,
-        untyped=untyped,
-        helpers=helpers,
-        module=module or parsed.module,
-        row_usage=row_usage or (usage := RowUsage()),
-        variants=query_variants,
-        coerce=frozenset(coerce_row_types),
+    parsed = ParsedSource.of(source)
+    found, redundant, needed = _module_diagnostics(
+        parsed.text,
+        version=sys.version_info[:2],
+        dialect=settings.dialect,
+        schema_sql=settings.schema_sql,
+        rules=_rules(settings),
+        import_style=settings.import_style,
+        untyped=settings.untyped,
+        module=parsed.module,
+        coerce=sorted(settings.coerce_row_types),
+        index=_index(settings),
+        name=parsed.module,
+        variants=settings.query_variants,
         suppress=True,
     )
-    return diagnostics if row_usage else usage.filter(diagnostics)
+    usage = row_usage or RowUsage()
+    usage.needed.update(needed)
+    usage.redundant += [
+        (key, d) for key, d in zip(redundant, found, strict=True) if key is not None
+    ]
+    return found if row_usage else usage.filter(found)
 
 
 CODE_RULES = ("stale-rewrite", "unused-ignore")
 
 
 def breaking_source(
-    source: str | ParsedSource,
-    *,
-    schema_sql: str | Schema | None,
-    against_sql: str | Schema | None,
-    dialect: str = "postgres",
-    rules: dict[str, str] | None = None,
-    import_style: str | None = None,
-    untyped: bool = False,
-    helpers: HelperIndex | None = None,
-    module: str | None = None,
-    query_variants: int | None = None,
-    coerce_row_types: Collection[str] = (),
+    source: str | ParsedSource, settings: Settings, *, against_sql: str | Schema | None
 ) -> list[Diagnostic]:
     """The diagnostics ``source`` gets against ``against_sql`` but not against its own
-    ``schema_sql``: what a schema change breaks, as ``sqlty breaking`` reports it.
+    ``settings.schema_sql``: what a schema change breaks, as ``sqlty breaking`` reports it.
 
     Both checks apply ``rules`` as ``check_source`` does, so with the default severities a
     dropped or renamed table or column, and a new ``NOT NULL`` column an ``INSERT``
@@ -626,133 +420,22 @@ def breaking_source(
     is not reported. Nor are ``CODE_RULES``, which judge the code rather than the schema.
 
     Example:
-        >>> old = "CREATE TABLE users (id INT NOT NULL, bio TEXT)"
+        >>> old = Settings(schema_sql="CREATE TABLE users (id INT NOT NULL, bio TEXT)")
         >>> new = "CREATE TABLE users (id INT NOT NULL)"
-        >>> [d["message"] for d in breaking_source('q = "--sql\\\\nSELECT bio FROM users"', schema_sql=old, against_sql=new)]
+        >>> [d["message"] for d in breaking_source('q = "--sql\\\\nSELECT bio FROM users"', old, against_sql=new)]
         ['column `bio` does not exist in `users`']
     """
-    parsed = ParsedSource.of(source, module)
-
-    def check(schema: str | Schema | None) -> list[Diagnostic]:
-        return check_source(
-            parsed,
-            dialect=dialect,
-            schema_sql=schema,
-            rules=rules,
-            import_style=import_style,
-            untyped=untyped,
-            helpers=helpers,
-            module=module,
-            query_variants=query_variants,
-            coerce_row_types=coerce_row_types,
-        )
-
-    own = {(d.get("line"), d["rule"], d["message"]) for d in check(schema_sql)}
+    parsed = ParsedSource.of(source)
+    own = {(d.get("line"), d["rule"], d["message"]) for d in check_source(parsed, settings)}
+    against = dataclasses.replace(settings, schema_sql=against_sql)
     return [
         d
-        for d in check(against_sql)
+        for d in check_source(parsed, against)
         if (d.get("line"), d["rule"], d["message"]) not in own
         and d["rule"] not in CODE_RULES
         # An annotation wider than the rows still reads them.
         and d["rule"] not in {"stale-type", "redundant-optional", "redundant-literal"}
     ]
-
-
-def query_statistics(
-    source: str | ParsedSource,
-    *,
-    dialect: str = "postgres",
-    schema_sql: str | Schema | None = None,
-    import_style: str | None = None,
-    helpers: HelperIndex | None = None,
-    module: str | None = None,
-    query_variants: int | None = None,
-) -> Counter[str]:
-    """How the queries of ``source`` fare, as ``sqlty check --statistics`` counts them.
-
-    Counts ``typed`` queries, ``partially typed`` ones (a column's type is
-    unknown), ``unparsed`` ones, and skipped strings by rule
-    (``fstring-skipped``, ``tstring-skipped``, ``unchecked-query``, ``dynamic-query``). Queries
-    that return no rows are not counted. Each variant of a query built in branches
-    (``query_variants``, as in ``check_source``) counts as a query.
-
-    Example:
-        >>> query_statistics('q = SQL[tuple[int]]("--sql\\\\nSELECT id::INTEGER FROM users")')
-        Counter({'typed': 1})
-    """
-    parsed = ParsedSource.of(source, module)
-    counts: Counter[str] = Counter()
-    for _, kind, text in _query_sites(
-        parsed.text, import_style=import_style, any_calls=parsed.any_calls(import_style)
-    ):
-        if kind != "query":
-            counts[kind] += 1
-        elif outcome := _outcome(text, dialect, schema_sql):
-            counts[outcome] += 1
-    for _, queries, unchecked, _ in _helper_sites(parsed, helpers, module, query_variants):
-        if unchecked is not None:
-            counts[unchecked] += 1
-        for query in queries:
-            if outcome := _outcome(query, dialect, schema_sql):
-                counts[outcome] += 1
-    return counts
-
-
-@dataclass(frozen=True)
-class QueryAt:
-    """The query under a cursor, found by ``query_at``.
-
-    ``text`` is the query as the analyzer reads it, ``offset`` the cursor in it, ``route``
-    how ``check`` recognised it (``marker``, ``wrapper`` or ``helper``), and ``span`` the
-    byte offsets of its string literals in the source, prefixes and quotes included.
-    """
-
-    text: str
-    offset: int
-    route: str
-    span: tuple[int, int]
-    _at: _QueryAt = field(repr=False, compare=False)
-
-    def source_offset(self, offset: int) -> int | None:
-        """Where byte ``offset`` of ``text`` is written in the source; ``None`` past its end
-        or in the marker."""
-        return _query_source_offset(self._at, offset)
-
-
-def query_at(
-    source: str | ParsedSource,
-    offset: int,
-    *,
-    import_style: str | None = None,
-    helpers: HelperIndex | None = None,
-    module: str | None = None,
-) -> QueryAt | None:
-    r"""The query ``sqlty check`` reads at byte ``offset`` of ``source``, or ``None`` outside one.
-
-    A string is a query exactly when ``check_source`` checks it: a ``--sql`` marked string,
-    the argument of ``SQL[T](...)``, or a string literal passed to a helper's query
-    parameter (``helpers`` and ``module`` as for ``check_source``). An f-string, a variable
-    or a call to anything else is not. The cursor counts as in the query anywhere between
-    the quotes, both ends included, after the marker.
-
-    ``offset`` counts UTF-8 bytes. The result's ``text`` is the query as the analyzer reads
-    it (escapes decoded, the marker spelled ``--sql``), ``offset`` the cursor in it, and
-    ``source_offset(n)`` maps a byte of ``text`` back to the source.
-
-    Example:
-        >>> source = 'q = "--sql\\nSELECT id FROM users"'
-        >>> at = query_at(source, source.index("id"))
-        >>> at.text, at.offset, at.route
-        ('--sql\nSELECT id FROM users', 13, 'marker')
-        >>> at.source_offset(at.offset) == source.index("id")
-        True
-        >>> query_at(source, 0) is None
-        True
-    """
-    parsed = ParsedSource.of(source, module)
-    starts = _helper_starts(parsed, helpers, module)
-    at = _query_at(parsed.text, offset, import_style=import_style, helper_starts=starts)
-    return at and QueryAt(at.text, at.offset, at.route, at.span, at)
 
 
 class Completion(NamedTuple):
@@ -783,18 +466,16 @@ def complete_source(
     source: str | ParsedSource,
     line: int,
     column: int,
+    settings: Settings = DEFAULT,
     *,
-    dialect: str = "postgres",
-    schema_sql: str | Schema | None = None,
-    import_style: str | None = None,
-    helpers: HelperIndex | None = None,
-    module: str | None = None,
     limit: int = 200,
 ) -> Completions | None:
     r"""The table and column names that complete at 1-based ``line`` and ``column`` of ``source``.
 
     ``column`` counts characters, as ``sqlty check --output-format json`` does. The cursor
-    must be in a query ``check`` reads (see ``query_at``); elsewhere the result is ``None``.
+    must be in a query ``check`` reads: a ``--sql`` marked string, the argument of
+    ``SQL[T](...)``, or a string literal passed to a helper's query parameter (``helpers``
+    and the module of ``source`` as for ``check_source``); elsewhere the result is ``None``.
     In a query, ``items`` lists the relations (after ``FROM``, ``JOIN``, ``UPDATE``,
     ``INTO``) or the columns of the relations in scope (after ``alias.`` and in
     ``SELECT``, ``WHERE``, ``ON``, ...) whose name starts with the word before the cursor,
@@ -802,76 +483,28 @@ def complete_source(
     are the byte offsets of that word, which a completion replaces.
 
     Example:
-        >>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT)"
+        >>> settings = Settings(schema_sql="CREATE TABLE users (id INTEGER NOT NULL, name TEXT)")
         >>> source = 'q = "--sql\\nSELECT u. FROM users u"'
-        >>> found = complete_source(source, 1, source.index("u.") + 3, schema_sql=schema)
+        >>> found = complete_source(source, 1, source.index("u.") + 3, settings)
         >>> [(c.label, c.kind, c.sql_type, c.nullable) for c in found.items]
         [('id', 'column', 'INT', False), ('name', 'column', 'TEXT', True)]
-        >>> complete_source(source, 1, 1, schema_sql=schema) is None
+        >>> complete_source(source, 1, 1, settings) is None
         True
     """
-    parsed = ParsedSource.of(source, module)
+    parsed = ParsedSource.of(source)
     found = _complete_source(
         parsed.text,
         parsed.offset(line, column),
-        dialect=dialect,
-        schema_sql=schema_sql,
-        import_style=import_style,
-        helper_starts=_helper_starts(parsed, helpers, module),
+        dialect=settings.dialect,
+        schema_sql=settings.schema_sql,
+        import_style=settings.import_style,
+        helper_starts=_helper_starts(parsed, settings),
         limit=limit,
     )
     if found is None:
         return None
     start, end, incomplete, items = found
     return Completions(start, end, incomplete, [Completion(*item) for item in items])
-
-
-class Hover(NamedTuple):
-    """What a word of a query is: ``contents`` in Markdown, for the bytes ``start`` to ``end``."""
-
-    start: int
-    end: int
-    contents: str
-
-
-def hover_source(
-    source: str | ParsedSource,
-    line: int,
-    column: int,
-    *,
-    dialect: str = "postgres",
-    schema_sql: str | Schema | None = None,
-    import_style: str | None = None,
-    helpers: HelperIndex | None = None,
-    module: str | None = None,
-) -> Hover | None:
-    r"""What the word at 1-based ``line`` and ``column`` of a query string is.
-
-    ``column`` counts characters, as in ``complete_source``. A word at the top level of a
-    select item shows its result column: the Python and SQL types and the inference rules
-    behind them. Any other name shows the column, table, view or CTE it names, and a word
-    before ``.`` the columns of that relation. ``None`` outside a query ``check`` reads or
-    on a word that names nothing. ``sqlty server`` answers ``textDocument/hover`` with it.
-
-    Example:
-        >>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT)"
-        >>> source = 'q = "--sql\\nSELECT name FROM users WHERE id = 1"'
-        >>> found = hover_source(source, 1, source.index("id =") + 1, schema_sql=schema)
-        >>> found.contents
-        'Column `id` of `users`: `INT NOT NULL`'
-        >>> source.encode()[found.start : found.end]
-        b'id'
-    """
-    parsed = ParsedSource.of(source, module)
-    found = _hover_source(
-        parsed.text,
-        parsed.offset(line, column),
-        dialect=dialect,
-        schema_sql=schema_sql,
-        import_style=import_style,
-        helper_starts=_helper_starts(parsed, helpers, module),
-    )
-    return None if found is None else Hover(*found)
 
 
 class Highlight(NamedTuple):
@@ -886,17 +519,10 @@ class Highlight(NamedTuple):
     kind: str
 
 
-def highlight_source(
-    source: str | ParsedSource,
-    *,
-    dialect: str = "postgres",
-    import_style: str | None = None,
-    helpers: HelperIndex | None = None,
-    module: str | None = None,
-) -> list[Highlight]:
+def highlight_source(source: str | ParsedSource, settings: Settings = DEFAULT) -> list[Highlight]:
     r"""The SQL tokens to color in the strings ``sqlty check`` reads, in order.
 
-    The strings are those of ``query_at``; every other string stays a Python string. Names
+    The strings are those of ``complete_source``; every other string stays a Python string. Names
     are not colored: a word is a keyword only when it is a reserved word or a clause, so
     ``name`` and ``status`` stay names. A token written across string literals or escape
     sequences gets one range per piece. ``sqlty server`` sends these as semantic tokens.
@@ -906,34 +532,50 @@ def highlight_source(
         >>> [(source[h.start : h.end], h.kind) for h in highlight_source(source)]
         [('--sql', 'comment'), ('SELECT', 'keyword'), ('1', 'number')]
     """
-    parsed = ParsedSource.of(source, module)
+    parsed = ParsedSource.of(source)
     found = _highlight_source(
         parsed.text,
-        dialect=dialect,
-        import_style=import_style,
-        helper_starts=_helper_starts(parsed, helpers, module),
+        dialect=settings.dialect,
+        import_style=settings.import_style,
+        helper_starts=_helper_starts(parsed, settings),
     )
     return [Highlight(*item) for item in found]
 
 
-def _json_types(
-    source: str, dialect: str, schema_sql: str | Schema | None, import_style: str | None
-) -> str:
-    """``source`` with the ``typing.Any`` row items of JSON columns of known shape typed."""
-    return _add_json_types(
-        source,
-        version=sys.version_info[:2],
-        dialect=dialect,
-        schema_sql=schema_sql,
-        import_style=import_style,
-    )
+def _rules(settings: Settings) -> dict[str, str] | None:
+    return None if settings.rules is None else dict(settings.rules)
 
 
-def _helper_starts(
-    parsed: ParsedSource, helpers: HelperIndex | None = None, module: str | None = None
-) -> list[int]:
+def _index(settings: Settings) -> ModuleIndex | None:
+    return None if settings.helpers is None else settings.helpers.rust()
+
+
+def _typed(source: str, original: str, settings: Settings) -> str:
+    """``source`` with the JSON and parameter types ``settings`` asks for."""
+    if settings.json_types == "typing.TypedDict" and source != original:
+        source = _add_json_types(
+            source,
+            version=sys.version_info[:2],
+            dialect=settings.dialect,
+            schema_sql=settings.schema_sql,
+            import_style=settings.import_style,
+        )
+    if settings.param_types:
+        source = _add_param_types(
+            source,
+            dialect=settings.dialect,
+            schema_sql=settings.schema_sql,
+            import_style=settings.import_style,
+            closed=settings.closed_params,
+        )
+    return source
+
+
+def _helper_starts(parsed: ParsedSource, settings: Settings) -> list[int]:
     """The byte offsets of the string literals helper calls pass as their query."""
-    return [start for _, _, _, start in _helper_sites(parsed, helpers, module) if start is not None]
+    return [
+        start for _, _, _, start in _helper_sites(parsed, settings.helpers) if start is not None
+    ]
 
 
 type _Site = tuple[tuple[int, int] | None, list[str], str | None, int | None]
@@ -942,45 +584,26 @@ it can run that the lexer does not read by their marker, the rule of a call that
 checked, and the byte offset of the string literal it passes as its query."""
 
 
-def _helper_sites(
-    parsed: ParsedSource,
-    helpers: HelperIndex | None,
-    module: str | None,
-    variants: int | None = None,
-) -> list[_Site]:
+def _helper_sites(parsed: ParsedSource, helpers: HelperIndex | None) -> list[_Site]:
     return _module_calls(
         parsed.text,
         version=sys.version_info[:2],
         index=None if helpers is None else helpers.rust(),
         name=parsed.module,
-        module=module,
-        variants=variants,
+        module=parsed.module,
     )
-
-
-def _outcome(query: str, dialect: str, schema_sql: str | Schema | None) -> str | None:
-    """``typed``, ``partially typed`` or ``unparsed``; ``None`` when ``query`` returns no rows."""
-    if _parse_error(query, dialect=dialect) is not None:
-        return "unparsed"
-    if not returns_rows(query, dialect=dialect):
-        return None
-    columns = analyze_select(query, dialect=dialect, schema_sql=schema_sql)
-    if columns is not None and all(column.python_type is not None for column in columns):
-        return "typed"
-    return "partially typed"
 
 
 __all__ = [
     "ColumnInfo",
     "HelperIndex",
-    "QueryAt",
+    "ParsedSource",
     "Schema",
-    "TableRef",
+    "Settings",
     "RowUsage",
     "Completion",
     "Completions",
     "Highlight",
-    "Hover",
     "analyze_params",
     "analyze_select",
     "breaking_source",
@@ -988,22 +611,13 @@ __all__ = [
     "checks_names",
     "complete_source",
     "expand_star",
-    "explain_select",
     "fix_source",
     "format_source",
     "highlight_source",
-    "hover_source",
     "infer_type",
-    "json_shapes",
     "load_schema",
-    "query_at",
-    "QueryDiagnostic",
-    "query_diagnostics",
-    "query_tables",
-    "query_statistics",
     "returns_rows",
     "rewrite_source",
     "schema_skipped_objects",
-    "schema_skipped_tables",
     "strip_source",
 ]

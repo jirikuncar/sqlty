@@ -129,12 +129,10 @@ from sqlty.core import (
     check_source,
     complete_source,
     expand_star,
-    explain_select,
     fix_source,
     highlight_source,
     infer_type,
     load_schema,
-    query_at,
     returns_rows,
     rewrite_source,
     strip_source,
@@ -200,6 +198,25 @@ pass the handle:
 'tuple[int, str | None]'
 ```
 
+The functions that read a whole Python file take a `Settings`, the
+[`[tool.sqlty]`](configuration.md) table of the project, as their second argument.
+Its fields and defaults are those of the table: `dialect="postgres"`, `schema_sql=None`,
+`rules=None`, `import_style=None`, `untyped=False`, `helpers=None`,
+`query_variants=None`, `coerce_row_types=()`, `json_types="typing.Any"`,
+`param_types=True` and `closed_params=False`. Each function reads the fields it needs:
+
+```pycon
+>>> import dataclasses
+>>> from sqlty.core import Settings
+>>> settings = Settings(dialect="sqlite", rules={"select-star": "error"})
+>>> dataclasses.replace(settings, dialect="mysql").rules
+{'select-star': 'error'}
+```
+
+`check_source`, `fix_source`, `breaking_source`, `complete_source` and `highlight_source`
+also take a `ParsedSource(text, module)`, whose dotted `module` name resolves the file's
+relative imports.
+
 `check_source` returns what `sqlty check` reports. Each diagnostic carries the
 UTF-8 byte offsets of what it is about, `start` to `end`, and the edits of
 `sqlty check --fix` as `(start, end, replacement)`. Editors use them to underline
@@ -221,49 +238,22 @@ b'tuple[int]'
     Slice `source.encode()`, not `source`: the two differ once a line holds a
     character outside ASCII.
 
-`query_at` returns the query under a cursor, for editor features such as
-completion. A string is a query exactly when `check_source` checks it: a
-`--sql` marked string, the argument of `SQL[T](...)`, or a string literal passed
-to a [helper](../guide/helpers.md). `text` is the query as the analyzer reads
-it, `offset` the cursor in it, and `source_offset` maps a byte of `text` back
-to the source:
-
-```pycon
->>> from sqlty.core import query_at
->>> source = 'q = "--sql\\nSELECT name FROM users"'
->>> at = query_at(source, source.index("name"))
->>> at.text, at.offset, at.route
-('--sql\nSELECT name FROM users', 13, 'marker')
->>> at.source_offset(at.offset) == source.index("name")
-True
->>> query_at('q = f"--sql\\nSELECT {x}"', 15) is None
-True
-```
-
 `complete_source` lists the table and column names that complete at a 1-based
 line and column (in characters) of a query string, with the bytes they replace.
+A string is a query exactly when `check_source` checks it: a `--sql` marked string,
+the argument of `SQL[T](...)`, or a string literal passed to a
+[helper](../guide/helpers.md).
 `sqlty complete FILE:LINE:COL` prints the same for scripts and agents:
 
 ```pycon
->>> from sqlty.core import complete_source
->>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT)"
+>>> from sqlty.core import Settings, complete_source
+>>> settings = Settings(schema_sql="CREATE TABLE users (id INTEGER NOT NULL, name TEXT)")
 >>> source = 'q = "--sql\\nSELECT u.na FROM users u"'
->>> found = complete_source(source, 1, source.index(".na") + 4, schema_sql=schema)
+>>> found = complete_source(source, 1, source.index(".na") + 4, settings)
 >>> found.items
 [Completion(label='name', kind='column', detail='u', sql_type='TEXT', nullable=True)]
 >>> source.encode()[found.start : found.end]
 b'na'
-```
-
-`hover_source` says what the word at a 1-based line and column of a query string is, in
-Markdown. `sqlty server` answers hover with it:
-
-```pycon
->>> from sqlty.core import hover_source
->>> schema = "CREATE TABLE users (id INTEGER NOT NULL, name TEXT)"
->>> source = 'q = "--sql\\nSELECT name FROM users WHERE id = 1"'
->>> hover_source(source, 1, source.index("id =") + 1, schema_sql=schema)
-Hover(start=41, end=43, contents='Column `id` of `users`: `INT NOT NULL`')
 ```
 
 `highlight_source` lists the SQL tokens to color in those same strings, as byte ranges.
@@ -281,24 +271,16 @@ Hover(start=41, end=43, contents='Column `id` of `users`: `INT NOT NULL`')
 | `load_schema(schema_sql, *, dialect="postgres", types=None)` | A parsed `Schema`, for any `schema_sql` argument; `types` is [`[tool.sqlty.types]`](configuration.md#types) |
 | `infer_type(sql, *, dialect="postgres", schema_sql=None)` | Row type as a string, or `None` |
 | `analyze_select(sql, *, dialect="postgres", schema_sql=None)` | Result columns as `ColumnInfo(name, python_type, sql_type)`, or `None` |
-| `explain_select(sql, *, dialect="postgres", schema_sql=None)` | Per column, `ColumnRules(name, type_rule, nullability_rule)`: the [inference rules](engine.md#inference-rules) (`InferenceRule(id, reference, reasoning)`) behind it, or `None` |
-| `json_shapes(sql, *, dialect="postgres", schema_sql=None)` | `(column, shape)` pairs for columns that build JSON of a known shape |
 | `analyze_params(sql, *, dialect="postgres", schema_sql=None)` | Query parameters as `ParamInfo(number, name, python_type, sql_type, nullable, cast, untyped_sql_type)`, or `None` |
 | `checks_names(dialect)` | Whether the dialect checks a schema's tables and columns against queries: `postgres`, `mysql` and `sqlite` do |
-| `query_diagnostics(sql, *, dialect="postgres", schema_sql=None, rules=None)` | Why columns are untyped or names are wrong, as `QueryDiagnostic(rule, message, severity, start, end, table, column)`; `rules` as in `check_source`, `"ignore"` rules left out; tables and columns are only judged when `schema_sql` defines tables |
-| `query_tables(sql, *, dialect="postgres")` | The tables a query names, in source order, as `TableRef(name, schema, access)`; `access` is `"write"` for the target of an `INSERT`, `UPDATE`, `DELETE` or `MERGE`, else `"read"`; CTEs, derived tables and table functions are left out |
 | `returns_rows(sql, *, dialect="postgres")` | Whether the statement yields rows (unparseable SQL counts) |
 | `expand_star(sql, *, dialect="postgres", schema_sql=None)` | Query with `*` replaced by cast columns, or `None` |
-| `rewrite_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False, json_types="typing.Any")` | Rewritten source; `json_types="typing.TypedDict"` generates `TypedDict`s for JSON columns |
-| `format_source(source, *, dialect="postgres", import_style=None)` | Source with the query strings laid out by sqruff; only whitespace changes |
-| `strip_source(source, *, import_style=None)` | Stripped source, without generated `TypedDict`s |
-| `fix_source(source, *, dialect="postgres", schema_sql=None, import_style=None, untyped=False, rules=None, json_types="typing.Any")` | Source with `sqlty check --fix` applied |
-| `check_source(source, *, dialect="postgres", schema_sql=None, rules=None, import_style=None)` | List of diagnostics: `Diagnostic` dicts (`sqlty._lint.Diagnostic`, a `TypedDict`) with `rule`, `message`, `severity`, `line`, `start`, `end`, `fix` |
-| `breaking_source(source, *, schema_sql, against_sql, dialect="postgres", rules=None, import_style=None)` | The diagnostics `source` gets against `against_sql` but not against `schema_sql`, as `sqlty breaking` reports them |
-| `query_statistics(source, *, dialect="postgres", schema_sql=None, import_style=None)` | A `Counter` of `typed`, `partially typed` and `unparsed` queries and skipped strings by rule, as `sqlty check --statistics` counts them |
-| `schema_skipped_tables(schema_sql, *, dialect="postgres")` | Names of schema tables that do not parse, so their columns are unknown |
+| `rewrite_source(source, settings=Settings(), *, keep_lines=False)` | Rewritten source; `json_types="typing.TypedDict"` generates `TypedDict`s for JSON columns |
+| `format_source(source, settings=Settings())` | Source with the query strings laid out by sqruff; only whitespace changes |
+| `strip_source(source, settings=Settings())` | Stripped source, without generated `TypedDict`s |
+| `fix_source(source, settings=Settings())` | Source with `sqlty check --fix` applied |
+| `check_source(source, settings=Settings(), *, row_usage=None)` | List of diagnostics: `Diagnostic` dicts (`sqlty._lint.Diagnostic`, a `TypedDict`) with `rule`, `message`, `severity`, `line`, `start`, `end`, `fix`. `settings.helpers` is a `HelperIndex` of the project's modules (`index.add(module, source)`), so calls to their [helpers](../guide/helpers.md) are checked. With a `RowUsage` passed to the call of every module, `redundant-optional` is kept until `row_usage.filter(diagnostics)`, called once all are checked, drops the reports some checked query refutes |
+| `breaking_source(source, settings, *, against_sql)` | The diagnostics `source` gets against `against_sql` but not against `settings.schema_sql`, as `sqlty breaking` reports them |
 | `schema_skipped_objects(schema_sql, *, dialect="postgres")` | `(kind, name)` of schema tables, views and key or type statements that do not parse or pass the size limits |
-| `query_at(source, offset, *, import_style=None, helpers=None, module=None)` | The `QueryAt` (`text`, `offset`, `route`, `span`, `source_offset(n)`) at byte `offset`, or `None` outside a checked query |
-| `complete_source(source, line, column, *, dialect="postgres", schema_sql=None, import_style=None, helpers=None, module=None, limit=200)` | `Completions(start, end, incomplete, items)` of `Completion(label, kind, detail, sql_type, nullable)` at the cursor, or `None` outside a checked query |
-| `hover_source(source, line, column, *, dialect="postgres", schema_sql=None, import_style=None, helpers=None, module=None)` | `Hover(start, end, contents)`: what the word at the cursor is, in Markdown, or `None` |
-| `highlight_source(source, *, dialect="postgres", import_style=None, helpers=None, module=None)` | `Highlight(start, end, kind)` per SQL token of the checked queries, `kind` one of `keyword`, `string`, `number`, `comment`, `operator`, `parameter` |
+| `complete_source(source, line, column, settings=Settings(), *, limit=200)` | `Completions(start, end, incomplete, items)` of `Completion(label, kind, detail, sql_type, nullable)` at the cursor, or `None` outside a checked query |
+| `highlight_source(source, settings=Settings())` | `Highlight(start, end, kind)` per SQL token of the checked queries, `kind` one of `keyword`, `string`, `number`, `comment`, `operator`, `parameter` |

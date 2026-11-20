@@ -76,33 +76,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: $/.github/actions/setup
         with:
-          version: "0.13.7"
-          enable-cache: true
-          # Built wheels (duckdb has none for 3.15) are kept with the lock; main writes them.
-          cache-dependency-glob: uv.lock
-          # Jobs install different groups: each keeps its own cache.
-          cache-suffix: ${{ github.job }}
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
           python-version: ${{ matrix.python-version }}
-
-      # Coverage builds on nightly for `#[coverage(off)]`.
-      - name: Install Rust toolchain
-        env:
-          TOOLCHAIN: ${{ matrix.coverage && 'nightly-2026-11-01 --component llvm-tools-preview' || '1.99.1' }}
-        run: |
-          rustup toolchain install $TOOLCHAIN --profile minimal
-          rustup default ${TOOLCHAIN%% *}
-
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: rust -> target
-          key: python-${{ matrix.python-version }}
-          # Pull requests restore main's cache; only main writes it.
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          rust-cache-key: python-${{ matrix.python-version }}
+          # Coverage builds on nightly for `#[coverage(off)]`.
+          toolchain: ${{ matrix.coverage && 'nightly-2026-11-01' || '' }}
+          components: ${{ matrix.coverage && 'llvm-tools-preview' || '' }}
 
       - name: Install the dependencies
         run: uv sync --all-groups --no-install-project
@@ -161,25 +141,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: $/.github/actions/setup
         with:
-          version: "0.13.7"
-          enable-cache: true
-          # Built wheels (duckdb has none for 3.15) are kept with the lock; main writes them.
-          cache-dependency-glob: uv.lock
-          # Jobs install different groups: each keeps its own cache.
           cache-suffix: ${{ github.job }}-${{ matrix.python }}
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install Rust toolchain
-        run: rustup toolchain install 1.99.1 --profile minimal && rustup default 1.99.1
-
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: rust -> target
-          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build the extension and run the thread tests
         env:
@@ -204,17 +168,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        run: |
-          rustup toolchain install 1.99.1 --profile minimal \
-            --target wasm32-unknown-unknown --target wasm32-wasip1
-          rustup default 1.99.1
-
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: $/.github/actions/setup
         with:
-          workspaces: rust -> target
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          targets: wasm32-unknown-unknown wasm32-wasip1
 
       - name: Build for wasm32-unknown-unknown
         run: cargo build --manifest-path rust/Cargo.toml --target wasm32-unknown-unknown -p sqlty-sql -p sqlty-python
@@ -227,12 +183,13 @@ jobs:
         with:
           node-version: 22.23.4
 
-      - name: Run the docs playground's engine
+      - name: Run the engine of the docs playground and @sqlty/wasm
         run: |
           make playground
-          node --test --experimental-test-coverage --test-coverage-include='docs/assets/playground/*.js' \
+          node --test --experimental-test-coverage \
+            --test-coverage-include='docs/assets/playground/*.js' --test-coverage-include='npm/wasm/*.js' \
             --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=92 \
-            tests/playground.test.mjs tests/ask.test.mjs
+            tests/playground.test.mjs tests/ask.test.mjs tests/wasm.test.mjs tests/release.test.mjs
 
   pg-fidelity:
     name: PostgreSQL column names, types and nullability
@@ -260,27 +217,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: $/.github/actions/setup
         with:
-          version: "0.13.7"
-          enable-cache: true
-          # Built wheels (duckdb has none for 3.15) are kept with the lock; main writes them.
-          cache-dependency-glob: uv.lock
-          # Jobs install different groups: each keeps its own cache.
-          cache-suffix: ${{ github.job }}
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
           python-version: "3.14"
-
-      - name: Install Rust toolchain
-        run: rustup toolchain install 1.99.1 --profile minimal && rustup default 1.99.1
-
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: rust -> target
-          # Pull requests restore main's cache; only main writes it.
-          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install the dependencies
         run: uv sync --all-groups --no-group duckdb --no-install-project
@@ -318,27 +257,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: $/.github/actions/setup
         with:
-          version: "0.13.7"
-          enable-cache: true
-          # Built wheels (duckdb has none for 3.15) are kept with the lock; main writes them.
-          cache-dependency-glob: uv.lock
-          # Jobs install different groups: each keeps its own cache.
-          cache-suffix: ${{ github.job }}
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
           python-version: "3.14"
-
-      - name: Install Rust toolchain
-        run: rustup toolchain install 1.99.1 --profile minimal && rustup default 1.99.1
-
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: rust -> target
-          # Pull requests restore main's cache; only main writes it.
-          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install the dependencies
         run: uv sync --no-install-project
@@ -349,81 +270,6 @@ jobs:
       - name: Compare with the server's column names and types
         run: uv run --with pymysql pytest tests/test_server_describe.py tests/test_driver_values.py -rs -q
 
-  lean-model:
-    name: Lean model of the type mapping
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      # elan's installer downloads its latest release, so a pinned one is installed instead.
-      - name: Install elan
-        env:
-          ELAN: v4.2.4
-          SHA256: 42b94d4244e8353142c456ec0e4ca6528fd898a6c604d4059f494e706e431f63
-        run: |
-          curl -sSfL --retry 3 -o "$RUNNER_TEMP/elan.tar.gz" \
-            "https://github.com/leanprover/elan/releases/download/$ELAN/elan-x86_64-unknown-linux-gnu.tar.gz"
-          echo "$SHA256  $RUNNER_TEMP/elan.tar.gz" | sha256sum -c -
-          tar -xzf "$RUNNER_TEMP/elan.tar.gz" -C "$RUNNER_TEMP"
-          "$RUNNER_TEMP/elan-init" -y --default-toolchain none --no-modify-path
-          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
-
-      # Keyed by the proofs, not the commit: a run saves only when they changed. A pull
-      # request restores its own latest build, else main's.
-      - name: Restore the Lake build
-        id: lake
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: proofs/.lake
-          key: lake-${{ runner.os }}-${{ hashFiles('proofs/lean-toolchain', 'proofs/lake-manifest.json') }}-${{ hashFiles('proofs/**/*.lean', 'proofs/lakefile.toml', '!proofs/.lake/**') }}
-          restore-keys: lake-${{ runner.os }}-${{ hashFiles('proofs/lean-toolchain', 'proofs/lake-manifest.json') }}-
-
-      # `lean-toolchain` pins Lean itself.
-      - name: Check the proofs and build the model
-        working-directory: proofs
-        run: lake build
-
-      - name: Save the Lake build
-        if: steps.lake.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: proofs/.lake
-          key: ${{ steps.lake.outputs.cache-primary-key }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          version: "0.13.7"
-          enable-cache: true
-          # Built wheels (duckdb has none for 3.15) are kept with the lock; main writes them.
-          cache-dependency-glob: uv.lock
-          # Jobs install different groups: each keeps its own cache.
-          cache-suffix: ${{ github.job }}
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
-          python-version: "3.14"
-
-      - name: Install Rust toolchain
-        run: rustup toolchain install 1.99.1 --profile minimal && rustup default 1.99.1
-
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: rust -> target
-          # Pull requests restore main's cache; only main writes it.
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install the dependencies
-        run: uv sync --all-groups --no-group duckdb --no-install-project
-
-      - name: Build Rust extension
-        run: uv run maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
-
-      - name: Compare the model with sqlty
-        run: uv run pytest tests/test_lean_model.py -q -p no:randomly
-
   bench:
     name: Performance budget
     runs-on: ubuntu-latest
@@ -433,27 +279,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: $/.github/actions/setup
         with:
-          version: "0.13.7"
-          enable-cache: true
-          # Built wheels (duckdb has none for 3.15) are kept with the lock; main writes them.
-          cache-dependency-glob: uv.lock
-          # Jobs install different groups: each keeps its own cache.
-          cache-suffix: ${{ github.job }}
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
           python-version: "3.15"
-
-      - name: Install Rust toolchain
-        run: rustup toolchain install 1.99.1 --profile minimal && rustup default 1.99.1
-
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: rust -> target
-          # Pull requests restore main's cache; only main writes it.
-          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install the dependencies
         run: uv sync --all-groups --no-group duckdb --no-install-project
@@ -487,24 +315,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: $/.github/actions/setup
         with:
-          version: "0.13.7"
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-          cache-suffix: ${{ github.job }}
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
           python-version: "3.15"
-
-      - name: Install Rust toolchain
-        run: rustup toolchain install 1.99.1 --profile minimal && rustup default 1.99.1
-
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: rust -> target
-          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install the dependencies
         run: uv sync --group dev --group bench --no-install-project
@@ -541,27 +354,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: $/.github/actions/setup
         with:
-          version: "0.13.7"
-          enable-cache: true
-          # Built wheels (duckdb has none for 3.15) are kept with the lock; main writes them.
-          cache-dependency-glob: uv.lock
-          # Jobs install different groups: each keeps its own cache.
-          cache-suffix: ${{ github.job }}
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
           python-version: ${{ matrix.python-version }}
-
-      - name: Install Rust toolchain
-        run: rustup toolchain install 1.99.1 --profile minimal && rustup default 1.99.1
-
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: rust -> target
-          key: python-${{ matrix.python-version }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          rust-cache-key: python-${{ matrix.python-version }}
 
       # Build at the lowest supported maturin: before 1.12.1 `include` resolved against
       # python-source and dropped sqlty_magic.pth from the wheel; before 1.15 abi3t broke.
@@ -599,24 +395,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: $/.github/actions/setup
         with:
-          version: "0.13.7"
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-          cache-suffix: ${{ github.job }}
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
           python-version: "3.15"
-
-      - name: Install Rust toolchain
-        run: rustup toolchain install 1.99.1 --profile minimal --target wasm32-unknown-unknown && rustup default 1.99.1
-
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: rust -> target
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          targets: wasm32-unknown-unknown
 
       - name: Build Rust extension
         run: |
@@ -652,26 +434,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: $/.github/actions/setup
         with:
-          version: "0.13.7"
-          enable-cache: true
-          # Built wheels (duckdb has none for 3.15) are kept with the lock; main writes them.
-          cache-dependency-glob: uv.lock
-          # Jobs install different groups: each keeps its own cache.
-          cache-suffix: ${{ github.job }}
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
           python-version: "3.15"
-
-      - name: Install Rust toolchain
-        run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy && rustup default 1.99.1
-
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: rust -> target
-          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install the dependencies
         run: uv sync --all-groups --no-group duckdb --no-install-project

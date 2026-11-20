@@ -68,7 +68,7 @@ CASES: list[tuple[str, str | None]] = [
 
 
 def _reported(source: str) -> list[str]:
-    diagnostics = core.check_source(source, dialect="sqlite", schema_sql=SCHEMA)
+    diagnostics = core.check_source(source, core.Settings(dialect="sqlite", schema_sql=SCHEMA))
 
     return [d["rule"] for d in diagnostics if d["rule"].startswith("param-")]
 

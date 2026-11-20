@@ -53,9 +53,9 @@ query = "--sql\nSELECT id::TEXT, name FROM users"
 ```
 
 `sqlty check` warns about `SELECT *` even when it can be typed
-([`select-star`](../reference/rules.md#select-star)): the row type changes
+([`select-star`](../reference/rules/select-star.md)): the row type changes
 whenever the table does. Without a schema, `SELECT *` is an error
-([`select-star-no-schema`](../reference/rules.md#select-star-no-schema)).
+([`select-star-no-schema`](../reference/rules/select-star-no-schema.md)).
 
 `email` above has no `NOT NULL`, so it is `str | None`; see [Nullability](#nullability).
 
@@ -135,9 +135,9 @@ What makes a column nullable or not:
   the column, or the JSON member it fills, follows the argument. Where the argument is
   `None`, optional or of unknown type, and in `SQL[T]` strings, it stays nullable.
 
-[`nullable-mismatch`](../reference/rules.md#nullable-mismatch) reports a row type field
+[`nullable-mismatch`](../reference/rules/nullable-mismatch.md) reports a row type field
 that is not optional for a nullable column;
-[`redundant-optional`](../reference/rules.md#redundant-optional) (off by default) reports
+[`redundant-optional`](../reference/rules/redundant-optional.md) (off by default) reports
 the opposite. See [Row types](row-types.md#nullable-columns).
 
 ### Upgrading
@@ -211,8 +211,8 @@ type unknown.
 A field annotated `str` (or `int`) still accepts such a column, and `sqlty check` does
 not call that annotation stale. A field annotated with a `Literal` is compared with the
 values (also for an item of a `SQL[tuple[...]]` wrapper, where `Literal` annotations are
-compared as sets, so quotes and order do not matter): [`literal-mismatch`](../reference/rules.md#literal-mismatch) (an error) reports
-values the `Literal` misses, and [`redundant-literal`](../reference/rules.md#redundant-literal)
+compared as sets, so quotes and order do not matter): [`literal-mismatch`](../reference/rules/literal-mismatch.md) (an error) reports
+values the `Literal` misses, and [`redundant-literal`](../reference/rules/redundant-literal.md)
 (off by default) values it lists that the column never takes. See
 [Row types](row-types.md#literal-columns).
 
@@ -452,10 +452,10 @@ The [magic codec](magic-codec.md) never uses a schema.
 The Python type of each SQL type, per dialect, is listed in
 [Type mapping](../reference/types.md).
 
-The dialect decides how queries and the schema are parsed. Choose
-`postgres` (default), `sqlite` or `mysql` with `dialect` in `[tool.sqlty]` or
-`--dialect` on the command line, which overrides `pyproject.toml`. Other
-[dialects](../reference/engine.md#dialects) can be set in `pyproject.toml`.
+The dialect decides how queries and the schema are parsed: `postgres` (default),
+`sqlite`, `mysql`, or another [dialect](../reference/engine.md#dialects) on a
+best-effort basis. Set it with `dialect` in `[tool.sqlty]` or `--dialect` on the
+command line, which overrides `pyproject.toml`.
 
 ### SQLite
 
@@ -566,7 +566,7 @@ casts = "-- sql\nSELECT CAST(total AS SIGNED), CAST(id AS CHAR) FROM orders"
     and mysqlclient send it to the server unchanged. MySQL and MariaDB read
     `--` as a comment only when whitespace follows it, so `--sql\nSELECT ...`
     fails at runtime with a syntax error (1064). Write `-- sql\nSELECT ...`:
-    `sqlty check` reports [`mysql-sql-marker`](../reference/rules.md#mysql-sql-marker)
+    `sqlty check` reports [`mysql-sql-marker`](../reference/rules/mysql-sql-marker.md)
     and `sqlty check --fix` changes it. Placeholders (`%s`, `%(name)s`) are
     inferred in every dialect; see [Engine](../reference/engine.md#placeholders).
 

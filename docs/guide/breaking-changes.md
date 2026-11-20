@@ -38,7 +38,7 @@ SARIF log for [GitHub code scanning](../recipes/ci.md#github-code-scanning).
 Only what the other schema breaks: a diagnostic a query already gets against its
 own schema is not repeated. The rules and severities are the ones `sqlty check`
 uses. By default `unknown-table`, `unknown-column`, `ambiguous-column` and
-[`insert-missing-column`](../reference/rules.md#insert-missing-column) are errors,
+[`insert-missing-column`](../reference/rules/insert-missing-column.md) are errors,
 and `unknown-function` and `unknown-type` warnings, so a name that no longer
 resolves is reported wherever the query reads it: the select list, `WHERE`,
 `JOIN ... ON`, and what `INSERT`, `UPDATE` and `DELETE` write. A rule you set to
@@ -193,8 +193,8 @@ emails = SQL[tuple[str]]("--sql\nSELECT email FROM users")
 
 ### Rules about the code
 
-[`stale-rewrite`](../reference/rules.md#stale-rewrite) and
-[`unused-ignore`](../reference/rules.md#unused-ignore) judge the code, not the
+[`stale-rewrite`](../reference/rules/stale-rewrite.md) and
+[`unused-ignore`](../reference/rules/unused-ignore.md) judge the code, not the
 schema change, so they are not reported. Below, the old schema can type the marked
 string and leaves the suppression unused, and neither is a breaking change.
 
@@ -220,7 +220,7 @@ bios = "--sql\nSELECT bio FROM users"  # sqlty: ignore[unknown-column]
 Code annotated `str | None` for a column the new schema makes nullable reads the
 `str` rows of the old schema too. An annotation wider than the other schema's rows
 is not reported, though `sqlty check` against the old schema would report it as
-[`stale-type`](../reference/rules.md#stale-type).
+[`stale-type`](../reference/rules/stale-type.md).
 
 `schema.sql`:
 
@@ -240,6 +240,53 @@ from sqlty import SQL
 # error:
 emails = SQL[tuple[str | None]]("--sql\nSELECT email FROM users")
 ```
+
+## Migrations that lock tables
+
+A migration that is compatible with both revisions can still take a table down
+while it runs. With the `postgres` dialect, `sqlty breaking` also judges each
+statement of the schema files that the baseline does not have, in the order the
+files are read: what it locks on a table that already has rows, and what fails.
+A table the new statements create is empty, so it is not reported until rows
+are copied into it: `INSERT ... SELECT`, `COPY ... FROM`, `MERGE` or
+`CREATE TABLE ... AS` without `WITH NO DATA`.
+
+| Rule | Reports |
+|------|---------|
+| [`missing-concurrently`](../reference/rules/missing-concurrently.md) | an index built or dropped without `CONCURRENTLY` |
+| [`concurrently-in-transaction`](../reference/rules/concurrently-in-transaction.md) | `CONCURRENTLY` between `BEGIN` and `COMMIT` |
+| [`constraint-scan`](../reference/rules/constraint-scan.md) | a constraint, `SET NOT NULL` or a new partition that checks every row while it blocks writes |
+| [`table-rewrite`](../reference/rules/table-rewrite.md) | a statement that rewrites the table |
+| [`add-required-column`](../reference/rules/add-required-column.md) | a `NOT NULL` column without a default |
+| [`missing-lock-timeout`](../reference/rules/missing-lock-timeout.md) | a lock that blocks writes taken before `SET lock_timeout` |
+| [`truncate-cascade`](../reference/rules/truncate-cascade.md) | `TRUNCATE ... CASCADE` |
+| [`enum-value-in-transaction`](../reference/rules/enum-value-in-transaction.md) | an enum value used in the transaction that added it |
+| [`concurrent-index-if-not-exists`](../reference/rules/concurrent-index-if-not-exists.md) | `CREATE INDEX CONCURRENTLY IF NOT EXISTS` |
+| [`disable-trigger-all`](../reference/rules/disable-trigger-all.md) | `DISABLE TRIGGER ALL` |
+
+`against.sql`:
+
+```sql
+CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT NOT NULL);
+```
+
+```sql migration
+-- error: [missing-lock-timeout] "takes a lock that blocks writes without `SET lock_timeout` first"
+ALTER TABLE users ADD COLUMN token UUID DEFAULT gen_random_uuid(); -- sqlty: ignore[table-rewrite]
+-- error: [missing-concurrently] "`CREATE INDEX` blocks writes to `users` until the index is built"
+CREATE INDEX users_email ON users (email);
+```
+
+The findings name the migration and the baseline:
+
+```text
+migrations/0042_index.sql:2: [missing-concurrently] `CREATE INDEX` blocks writes to `users` until the index is built: create it `CONCURRENTLY` (migration: a statement the working tree runs that origin/main does not have)
+```
+
+The schema files are the migrations themselves, or the SQL a migration tool
+writes for them, such as `alembic upgrade head --sql > db/schema.sql`. A
+`pg_dump` schema is not judged: it describes the result, not how to get there.
+The statements are judged in every `--direction`.
 
 ## Baselines without git history
 
@@ -302,7 +349,7 @@ The order matters:
   annotated `str | None` reads the rows of both schemas, so ship it first. Against
   the old schema, `stale-type` says the annotation could be `str`: suppress it on
   that line until the schema changes, then remove the suppression, which
-  [`unused-ignore`](../reference/rules.md#unused-ignore) reminds you of. `sqlty breaking`
+  [`unused-ignore`](../reference/rules/unused-ignore.md) reminds you of. `sqlty breaking`
   doesn't report an annotation wider than the other schema's rows.
 - **Schema before the code that uses it.** Code that writes `display_name` in the
   same pull request that adds it fails the forward check: the new code runs against
@@ -310,7 +357,7 @@ The order matters:
   deploy, `--direction backward` checks only that mix and accepts them together.
 - **Contract the code before the schema.** An `INSERT` that leaves out a column
   which is still `NOT NULL` fails at runtime. Turn on
-  [`insert-missing-column`](../reference/rules.md#insert-missing-column) so
+  [`insert-missing-column`](../reference/rules/insert-missing-column.md) so
   `sqlty check` reports it against the pull request's own schema.
 
 [Migration](../recipes/migration.md#schema-changes-in-ci) shows how to run

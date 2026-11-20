@@ -258,7 +258,7 @@ legacy = f"--sql\nSELECT {column} FROM users"  # SQL, {column} as Python
 
 !!! note "A highlighted f-string is still not checked"
     `sqlty check` checks t-strings (`SQLTemplate[T]`), but it skips f-strings and reports
-    them as [`fstring-skipped`](../reference/rules.md#fstring-skipped).
+    them as [`fstring-skipped`](../reference/rules/fstring-skipped.md).
 
 In a triple-quoted string, the marker may also sit on the first line that is not blank:
 

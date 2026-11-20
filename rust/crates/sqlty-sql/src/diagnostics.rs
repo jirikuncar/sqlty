@@ -10,88 +10,13 @@ use std::rc::Rc;
 
 use sqlparser::tokenizer::Span;
 
-/// The lint rule a diagnostic belongs to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum NameRule {
-    /// A table the schema does not define.
-    UnknownTable,
-    /// A column the table does not have.
-    UnknownColumn,
-    /// An unqualified column more than one table has.
-    AmbiguousColumn,
-    /// Two FROM items read by the same name.
-    DuplicateAlias,
-    /// A function whose result sqlty cannot type.
-    UnknownFunction,
-    /// A cast or column type without a Python type.
-    UnknownType,
-    /// A construct that parses but is not typed.
-    UnsupportedSyntax,
-    /// An INSERT that leaves out a `NOT NULL` column without a default.
-    InsertMissingColumn,
-    /// An INSERT whose rows have a different number of values than the columns it writes.
-    InsertValueCount,
-    /// A column a grouped query selects without grouping by it or aggregating it.
-    UngroupedColumn,
-    /// An aggregate over rows a one-to-many join repeats.
-    FanoutAggregate,
-    /// An aggregating query joining one table one-to-many to two others.
-    ChasmJoin,
-    /// A join whose conditions match no primary or unique key.
-    UnprovenJoin,
-    /// A comparison between columns holding keys of different entities.
-    EntityMismatch,
-    /// A query the database rejects for a reason no other rule names.
-    RejectedQuery,
-}
-
-impl NameRule {
-    /// Every rule, the one list the checker and the Python side read.
-    pub const ALL: [NameRule; 15] = [
-        NameRule::UnknownTable,
-        NameRule::UnknownColumn,
-        NameRule::AmbiguousColumn,
-        NameRule::DuplicateAlias,
-        NameRule::UnknownFunction,
-        NameRule::UnknownType,
-        NameRule::UnsupportedSyntax,
-        NameRule::InsertMissingColumn,
-        NameRule::InsertValueCount,
-        NameRule::UngroupedColumn,
-        NameRule::FanoutAggregate,
-        NameRule::ChasmJoin,
-        NameRule::UnprovenJoin,
-        NameRule::EntityMismatch,
-        NameRule::RejectedQuery,
-    ];
-
-    /// The kebab-case rule name, as in `[tool.sqlty.rules]`.
-    pub fn name(self) -> &'static str {
-        match self {
-            NameRule::UnknownTable => "unknown-table",
-            NameRule::UnknownColumn => "unknown-column",
-            NameRule::AmbiguousColumn => "ambiguous-column",
-            NameRule::DuplicateAlias => "duplicate-alias",
-            NameRule::UnknownFunction => "unknown-function",
-            NameRule::UnknownType => "unknown-type",
-            NameRule::UnsupportedSyntax => "unsupported-syntax",
-            NameRule::InsertMissingColumn => "insert-missing-column",
-            NameRule::InsertValueCount => "insert-value-count",
-            NameRule::UngroupedColumn => "ungrouped-column",
-            NameRule::FanoutAggregate => "fanout-aggregate",
-            NameRule::ChasmJoin => "chasm-join",
-            NameRule::UnprovenJoin => "unproven-join",
-            NameRule::EntityMismatch => "entity-mismatch",
-            NameRule::RejectedQuery => "rejected-query",
-        }
-    }
-}
+pub use sqlty_rules::Rule;
 
 /// One reason a table, column, function, type or construct is not typed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NameDiagnostic {
     /// The rule the diagnostic belongs to.
-    pub rule: NameRule,
+    pub rule: Rule,
     /// What could not be resolved and why, for the user.
     pub message: String,
     /// The bytes of the query it is about, when the analyzer knows where that is written:
@@ -104,6 +29,8 @@ pub struct NameDiagnostic {
     pub table: Option<String>,
     /// The column it is about: an unknown or ambiguous column, as the query spells it.
     pub column: Option<String>,
+    /// A rule reporting the same mistake: where it is on, this diagnostic is not shown.
+    pub shadowed_by: Option<Rule>,
 }
 
 #[derive(Default)]
@@ -153,25 +80,30 @@ impl Diagnostics {
     }
 
     /// Record a diagnostic (once per rule and message) at the node being analyzed.
-    pub(crate) fn record(&self, rule: NameRule, message: impl Into<String>) {
+    pub(crate) fn record(&self, rule: Rule, message: impl Into<String>) {
         self.record_about(rule, message, None, None);
     }
 
     /// [`Diagnostics::record`] naming the table and column it is about.
     pub(crate) fn record_about(
         &self,
-        rule: NameRule,
+        rule: Rule,
         message: impl Into<String>,
         table: Option<&str>,
         column: Option<&str>,
     ) {
         self.push(NameDiagnostic {
-            rule,
-            message: message.into(),
-            span: None,
-            replacement: None,
             table: table.map(str::to_string),
             column: column.map(str::to_string),
+            ..found(rule, message.into())
+        });
+    }
+
+    /// [`Diagnostics::record`], not shown where the rule `by` is on.
+    pub(crate) fn record_shadowed(&self, rule: Rule, message: impl Into<String>, by: Rule) {
+        self.push(NameDiagnostic {
+            shadowed_by: Some(by),
+            ..found(rule, message.into())
         });
     }
 
@@ -240,7 +172,7 @@ impl Diagnostics {
     }
 
     /// Drop what was recorded after `mark` under a rule `keep` rejects.
-    pub(crate) fn retain_since(&self, (items, _): (usize, usize), keep: impl Fn(NameRule) -> bool) {
+    pub(crate) fn retain_since(&self, (items, _): (usize, usize), keep: impl Fn(Rule) -> bool) {
         let mut inner = self.0.borrow_mut();
         let mut index = 0;
         inner.items.retain(|(item, _)| {
@@ -271,45 +203,48 @@ impl Drop for At {
     }
 }
 
+/// A diagnostic of `rule` saying `message`, about no name.
+fn found(rule: Rule, message: String) -> NameDiagnostic {
+    NameDiagnostic {
+        rule,
+        message,
+        span: None,
+        replacement: None,
+        table: None,
+        column: None,
+        shadowed_by: None,
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 
-    fn found(rule: NameRule, message: &str) -> NameDiagnostic {
-        NameDiagnostic {
-            rule,
-            message: message.to_string(),
-            span: None,
-            replacement: None,
-            table: None,
-            column: None,
-        }
+    fn found(rule: Rule, message: &str) -> NameDiagnostic {
+        super::found(rule, message.to_string())
     }
 
     #[test]
     fn identical_diagnostics_are_recorded_once() {
         let diag = Diagnostics::collecting();
-        diag.record(NameRule::UnknownTable, "unknown table t");
-        diag.record(NameRule::UnknownTable, "unknown table t");
-        assert_eq!(
-            diag.items(),
-            [found(NameRule::UnknownTable, "unknown table t")]
-        );
+        diag.record(Rule::UnknownTable, "unknown table t");
+        diag.record(Rule::UnknownTable, "unknown table t");
+        assert_eq!(diag.items(), [found(Rule::UnknownTable, "unknown table t")]);
     }
 
     #[test]
     fn same_message_under_another_rule_or_another_message_is_kept() {
         let diag = Diagnostics::collecting();
-        diag.record(NameRule::UnknownTable, "x");
-        diag.record(NameRule::UnknownColumn, "x");
-        diag.record(NameRule::UnknownTable, "y");
+        diag.record(Rule::UnknownTable, "x");
+        diag.record(Rule::UnknownColumn, "x");
+        diag.record(Rule::UnknownTable, "y");
         assert_eq!(
             diag.items(),
             [
-                found(NameRule::UnknownTable, "x"),
-                found(NameRule::UnknownColumn, "x"),
-                found(NameRule::UnknownTable, "y"),
+                found(Rule::UnknownTable, "x"),
+                found(Rule::UnknownColumn, "x"),
+                found(Rule::UnknownTable, "y"),
             ]
         );
     }
@@ -317,17 +252,17 @@ mod tests {
     #[test]
     fn items_keep_the_order_of_recording() {
         let diag = Diagnostics::collecting();
-        diag.record(NameRule::UnknownType, "b");
-        diag.record(NameRule::UnknownFunction, "a");
+        diag.record(Rule::UnknownType, "b");
+        diag.record(Rule::UnknownFunction, "a");
         let rules: Vec<_> = diag.items().into_iter().map(|d| d.rule).collect();
-        assert_eq!(rules, [NameRule::UnknownType, NameRule::UnknownFunction]);
+        assert_eq!(rules, [Rule::UnknownType, Rule::UnknownFunction]);
     }
 
     #[test]
     fn default_sink_is_disabled_and_collects_nothing() {
         let diag = Diagnostics::default();
         assert!(!diag.enabled());
-        diag.record(NameRule::UnknownTable, "t");
+        diag.record(Rule::UnknownTable, "t");
         diag.explain_silently();
         assert!(diag.items().is_empty());
         assert_eq!(diag.explained(), 0);
@@ -336,12 +271,12 @@ mod tests {
     #[test]
     fn rewind_drops_what_was_recorded_after_the_mark() {
         let diag = Diagnostics::collecting();
-        diag.record(NameRule::UnknownType, "kept");
+        diag.record(Rule::UnknownType, "kept");
         let mark = diag.mark();
-        diag.record(NameRule::UnknownType, "dropped");
+        diag.record(Rule::UnknownType, "dropped");
         diag.explain_silently();
         diag.rewind(mark);
-        assert_eq!(diag.items(), [found(NameRule::UnknownType, "kept")]);
+        assert_eq!(diag.items(), [found(Rule::UnknownType, "kept")]);
         assert_eq!(diag.explained(), 1);
     }
 
@@ -354,9 +289,9 @@ mod tests {
     fn explained_counts_recorded_duplicates_and_silent_results() {
         let diag = Diagnostics::collecting();
         assert_eq!(diag.explained(), 0);
-        diag.record(NameRule::UnknownColumn, "c");
+        diag.record(Rule::UnknownColumn, "c");
         assert_eq!(diag.explained(), 1);
-        diag.record(NameRule::UnknownColumn, "c");
+        diag.record(Rule::UnknownColumn, "c");
         assert_eq!(diag.explained(), 2, "a duplicate still explains a result");
         diag.explain_silently();
         assert_eq!(diag.explained(), 3);
@@ -367,15 +302,15 @@ mod tests {
     fn clones_record_into_the_same_list() {
         let diag = Diagnostics::collecting();
         let inner = diag.clone();
-        inner.record(NameRule::AmbiguousColumn, "id");
+        inner.record(Rule::AmbiguousColumn, "id");
         inner.explain_silently();
-        assert_eq!(diag.items(), [found(NameRule::AmbiguousColumn, "id")]);
+        assert_eq!(diag.items(), [found(Rule::AmbiguousColumn, "id")]);
         assert_eq!(diag.explained(), 2);
     }
 
     #[test]
-    fn all_lists_every_rule_with_its_name() {
-        let names: Vec<_> = NameRule::ALL.iter().map(|rule| rule.name()).collect();
+    fn sql_rules_list_every_name() {
+        let names: Vec<_> = Rule::SQL.iter().map(|rule| rule.name()).collect();
         assert_eq!(
             names,
             [
@@ -393,6 +328,7 @@ mod tests {
                 "chasm-join",
                 "unproven-join",
                 "entity-mismatch",
+                "foreign-key-mismatch",
                 "rejected-query",
             ]
         );
