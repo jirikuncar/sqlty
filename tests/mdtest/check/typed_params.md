@@ -262,6 +262,14 @@ type Born = tuple[int]
 Keyed = ById
 ```
 
+`pkg/reexported.py`:
+
+```python
+from pkg.aliases import ById
+
+Reexported = ById
+```
+
 ```python
 import datetime
 from typing import TypeAlias
@@ -269,6 +277,7 @@ from typing import TypeAlias
 from sqlty import SQL
 from pkg import aliases
 from pkg.aliases import Born, Keyed
+from pkg.reexported import Reexported
 
 T = tuple[str | None, datetime.date]
 Pair: TypeAlias = T
@@ -286,9 +295,13 @@ t = SQL[tuple[int], Born]("--sql\nSELECT id FROM users WHERE born = %s")
 u = SQL[tuple[int], aliases.Born]("--sql\nSELECT id FROM users WHERE born = %s")
 # error: [params-type-mismatch] "Keyed is a TypedDict but the query takes positional parameters"
 v = SQL[tuple[str], Keyed]("--sql\nSELECT name FROM users WHERE id = %s")
+# error: [params-type-mismatch] "Reexported is a TypedDict but the query takes positional parameters"
+w = SQL[tuple[str], Reexported]("--sql\nSELECT name FROM users WHERE id = %s")
 ```
 
 ### A name bound twice is not an alias
+
+Nor is one a function or class binds where `P` is spelled.
 
 ```python
 from sqlty import SQL
@@ -296,7 +309,20 @@ from sqlty import SQL
 T = tuple[int]
 T = tuple[int, int]
 
+Pair = tuple[int, int]
+if T:
+    Pair = tuple[int]
+
+Wide = tuple[int, int]
+
+
+def run() -> None:
+    Wide = tuple[int]
+    w = SQL[tuple[str], Wide]("--sql\nSELECT name FROM users WHERE id = %s")
+
+
 q = SQL[tuple[str], T]("--sql\nSELECT name FROM users WHERE id = %s")
+p = SQL[tuple[str], Pair]("--sql\nSELECT name FROM users WHERE id = %s")
 # error:
 ```
 

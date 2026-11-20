@@ -10,8 +10,8 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, LazyLock};
 
 use regex::Regex;
-use ruff_python_ast::visitor::{walk_expr, Visitor};
-use ruff_python_ast::{Expr, ExprCall, Operator};
+use ruff_python_ast::visitor::{walk_expr, walk_stmt, Visitor};
+use ruff_python_ast::{Expr, ExprCall, Operator, Stmt};
 use ruff_text_size::Ranged;
 use sqlty_sql::analyzer::{self, Nullability};
 
@@ -29,9 +29,9 @@ use crate::rows::{
 use crate::rules::{Rule, RuleConfig, SQL_RULES};
 use crate::scopes::{class_of, dotted, Key, Param};
 use crate::types::generic::is_word;
-use crate::types::info::Kind;
+use crate::types::info::{Dict, Kind, TypeInfo};
 use crate::types::resolve::slice_items;
-use crate::types::symbols::Source;
+use crate::types::symbols::{bound_names, Source};
 use crate::unparse::unparse;
 use crate::{drivers, module, templates};
 
@@ -58,6 +58,8 @@ pub struct Run<'a> {
     pub variants: Option<usize>,
 }
 
+/// How many aliases `P` is followed through.
+const MAX_ALIAS_HOPS: usize = 8;
 /// Where the variants of calls are checked: variant `i` is on line `VARIANT_LINE + i`.
 const VARIANT_LINE: usize = 1 << 30;
 /// The types a `P` of `SQL[R, P]` takes for each parameter key, as arguments are spelled.
@@ -201,15 +203,39 @@ struct Declared<'a> {
     query: String,
     /// The byte offsets of the call.
     span: (usize, usize),
+    /// Whether a function or class around the call binds the name `params` is.
+    shadowed: bool,
 }
 
 struct DeclaredCalls<'a, 's> {
     source: &'a Source,
     wrapper: &'s str,
     found: Vec<Declared<'a>>,
+    /// The names each function or class around the walk binds, innermost last.
+    scopes: Vec<HashSet<&'a str>>,
 }
 
 impl<'a> Visitor<'a> for DeclaredCalls<'a, '_> {
+    #[recursive::recursive]
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        let bound: Option<HashSet<&str>> = match stmt {
+            Stmt::FunctionDef(node) => Some(
+                bound_names(&node.body)
+                    .into_keys()
+                    .chain(node.parameters.iter().map(|param| param.name().as_str()))
+                    .collect(),
+            ),
+            Stmt::ClassDef(node) => Some(bound_names(&node.body).into_keys().collect()),
+            _ => None,
+        };
+        let scoped = bound.is_some();
+        self.scopes.extend(bound);
+        walk_stmt(self, stmt);
+        if scoped {
+            self.scopes.pop();
+        }
+    }
+
     #[recursive::recursive]
     fn visit_expr(&mut self, expr: &'a Expr) {
         if let Expr::Call(call) = expr {
@@ -238,11 +264,17 @@ impl<'a> DeclaredCalls<'a, '_> {
         let Some(Expr::StringLiteral(query)) = call.arguments.args.first() else {
             return None;
         };
+        let shadowed = params.as_name_expr().is_some_and(|name| {
+            self.scopes
+                .iter()
+                .any(|scope| scope.contains(name.id.as_str()))
+        });
         Some(Declared {
             line: self.source.line(call.start()),
             params,
             query: crate::parse::text(query, &self.source.text),
             span: (call.start().to_usize(), call.end().to_usize()),
+            shadowed,
         })
     }
 }
@@ -256,6 +288,7 @@ fn declared_params<'a>(source: &'a Source, wrapper: &str, import_line: &str) -> 
         source,
         wrapper,
         found: Vec::new(),
+        scopes: Vec::new(),
     };
     calls.visit_body(source.body());
     calls.found.sort_by_key(|call| call.span);
@@ -573,10 +606,9 @@ impl<'a> Module<'a, '_> {
         let calls = self.calls().map(|(call, _)| call).chain(&self.driver_calls);
         for call in calls {
             if let (Some(query), Some(params)) = (&call.query, &call.params) {
-                let declared = call
-                    .declared
-                    .as_ref()
-                    .and_then(|declared| self.annotations_of(declared.params?, declared.source));
+                let declared = call.declared.as_ref().and_then(|declared| {
+                    self.annotations_of(declared.params?, declared.source, false)
+                });
                 for (rule, message) in
                     self.param_diagnostics(call, query, params, declared.as_ref())
                 {
@@ -755,7 +787,7 @@ impl<'a> Module<'a, '_> {
                 continue;
             };
             let span = (call.params.start().to_usize(), call.params.end().to_usize());
-            for message in self.declared_params_diagnostics(call.params, &params) {
+            for message in self.declared_params_diagnostics(call.params, call.shadowed, &params) {
                 reports.push((message, call.line, span));
             }
         }
@@ -770,27 +802,23 @@ impl<'a> Module<'a, '_> {
     fn declared_params_diagnostics(
         &self,
         declared: &Expr,
+        shadowed: bool,
         params: &[analyzer::Param],
     ) -> Vec<String> {
         let name = unparse(declared, &self.source.text);
-        let (declared, source) = self.unaliased(declared, self.source);
+        let (declared, source) = if shadowed {
+            (declared, self.source)
+        } else {
+            self.unaliased(declared, self.source)
+        };
         let text = &source.text;
         let named = !params.is_empty() && params.iter().all(|p| p.name.is_some());
         let dotted_name = dotted(declared).unwrap_or_default();
         let count = |n: usize| format!("{n} parameter{}", plural(n));
         // `(label, annotation, parameter, key)`
         let mut pairs: Vec<(String, &Expr, &analyzer::Param, String)> = Vec::new();
-        let defs;
-        let info = if std::ptr::eq(source, self.source) {
-            self.ctx.type_defs.get(&unparse(declared, text))
-        } else {
-            defs = self
-                .run
-                .helpers
-                .and_then(|helpers| helpers.definitions(source));
-            defs.as_ref()
-                .and_then(|defs| defs.get(&unparse(declared, text)))
-        };
+        let info = self.row_type_in(&unparse(declared, text), source, &self.ctx.type_defs);
+        let info = info.as_ref();
         if dotted_name.rsplit('.').next() == Some("NoParams") && info.is_none() {
             return if params.is_empty() {
                 Vec::new()
@@ -991,16 +1019,36 @@ impl<'a> Module<'a, '_> {
         }
     }
 
+    /// The row type `name` of `source`: one of `defs` where `source` is this module, or of
+    /// the module `source` is, else one it imports.
+    fn row_type_in(
+        &self,
+        name: &str,
+        source: &Source,
+        defs: &Dict<Arc<TypeInfo>>,
+    ) -> Option<Arc<TypeInfo>> {
+        let own = if std::ptr::eq(source, self.source) {
+            defs.get(name).cloned()
+        } else {
+            let defs = self
+                .run
+                .helpers
+                .and_then(|helpers| helpers.definitions(source));
+            defs.and_then(|defs| defs.get(name).cloned())
+        };
+        own.or_else(|| Some(self.run.settings.index?.row_type(source, name)?.info))
+    }
+
     /// `declared` of `source` as the type its aliases declare, with the source that spells it.
     fn unaliased<'s>(
         &'s self,
         mut declared: &'s Expr,
         mut source: &'s Source,
     ) -> (&'s Expr, &'s Source) {
-        for _ in 0..8 {
+        for _ in 0..MAX_ALIAS_HOPS {
             let local = declared
                 .as_name_expr()
-                .and_then(|name| crate::compose::type_alias(source, &name.id));
+                .and_then(|name| source.type_alias(&name.id));
             let found = local.map(|value| (source, value)).or_else(|| {
                 let index = self.run.settings.index?;
                 index.type_alias(source, &dotted(declared)?)
@@ -1014,8 +1062,17 @@ impl<'a> Module<'a, '_> {
     }
 
     /// `P` of a `SQL[R, P]` in `source`, as the types each parameter key takes.
-    fn annotations_of(&self, declared: &Expr, source: &Source) -> Option<Annotations> {
-        let (declared, source) = self.unaliased(declared, source);
+    fn annotations_of(
+        &self,
+        declared: &Expr,
+        source: &Source,
+        shadowed: bool,
+    ) -> Option<Annotations> {
+        let (declared, source) = if shadowed {
+            (declared, source)
+        } else {
+            self.unaliased(declared, source)
+        };
         let types = |annotation: &Expr| -> Vec<Option<String>> {
             union_members(annotation)
                 .into_iter()
@@ -1042,16 +1099,7 @@ impl<'a> Module<'a, '_> {
             );
         }
         let name = unparse(declared, &source.text);
-        let own = if std::ptr::eq(source, self.source) {
-            self.ctx.own_defs.get(&name).cloned()
-        } else {
-            let defs = self.run.helpers?.definitions(source)?;
-            defs.get(&name).cloned()
-        };
-        let info = own.or_else(|| {
-            let index = self.run.settings.index?;
-            Some(index.row_type(source, &name)?.info)
-        })?;
+        let info = self.row_type_in(&name, source, &self.ctx.own_defs)?;
         (info.kind == Kind::TypedDict).then(|| {
             info.annotations
                 .iter()
@@ -1071,7 +1119,8 @@ impl<'a> Module<'a, '_> {
             })
             .collect();
         for call in &self.declared {
-            let Some(annotations) = self.annotations_of(call.params, self.source) else {
+            let Some(annotations) = self.annotations_of(call.params, self.source, call.shadowed)
+            else {
                 continue;
             };
             let params = annotations

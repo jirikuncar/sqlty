@@ -811,14 +811,6 @@ pub fn constant<'a>(source: &'a Source, name: &str) -> Option<&'a Expr> {
     }
 }
 
-/// The type a module-level alias of `source` declares: `name = T`, `name: TypeAlias = T`
-/// or `type name = T`, bound once.
-pub fn type_alias<'a>(source: &'a Source, name: &str) -> Option<&'a Expr> {
-    let table = source.constants.get_or_init(|| constants(source));
-    let stmt = source.body().get((*table.get(name)?)?)?;
-    crate::types::symbols::type_alias(stmt, &source.aliases).map(|(_, value)| value)
-}
-
 /// Module-level names to the statement that gives each its one value.
 fn constants(source: &Source) -> HashMap<String, Option<usize>> {
     fn bind(found: &mut HashMap<String, Option<usize>>, name: &str, value: Option<usize>) {
@@ -859,11 +851,6 @@ fn constants(source: &Source) -> HashMap<String, Option<usize>> {
             Stmt::AugAssign(node) => {
                 if let Expr::Name(target) = node.target.as_ref() {
                     bind(&mut found, target.id.as_str(), None);
-                }
-            }
-            Stmt::TypeAlias(node) => {
-                if let Expr::Name(target) = node.name.as_ref() {
-                    bind(&mut found, target.id.as_str(), Some(at));
                 }
             }
             Stmt::FunctionDef(node) => bind(&mut found, node.name.as_str(), None),

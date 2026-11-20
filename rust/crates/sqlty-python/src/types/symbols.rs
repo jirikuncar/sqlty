@@ -38,6 +38,8 @@ pub struct Source {
     pub(crate) targets: std::sync::OnceLock<crate::index::Targets>,
     /// See [`crate::compose::constant`].
     pub(crate) constants: std::sync::OnceLock<HashMap<String, Option<usize>>>,
+    /// See [`Source::type_alias`].
+    locals: std::sync::OnceLock<HashMap<String, Local>>,
 }
 
 impl Source {
@@ -69,6 +71,7 @@ impl Source {
             module: None,
             targets: std::sync::OnceLock::new(),
             constants: std::sync::OnceLock::new(),
+            locals: std::sync::OnceLock::new(),
             syntax,
             comments,
             version,
@@ -169,6 +172,18 @@ impl Source {
             }
         }
         aliases
+    }
+
+    /// The type the module-level alias `name` declares: `name = T`, `name: TypeAlias = T` or
+    /// `type name = T`, where nothing else binds `name`.
+    pub fn type_alias(&self, name: &str) -> Option<&Expr> {
+        let locals = self
+            .locals
+            .get_or_init(|| module_types(self.body(), &self.aliases));
+        let Local::Alias(at) = *locals.get(name)? else {
+            return None;
+        };
+        type_alias(self.body().get(at)?, &self.aliases).map(|(_, value)| value)
     }
 
     /// The `typing` member `expr` names, if any.
@@ -305,7 +320,7 @@ impl<'a> Visitor<'a> for Bound<'a> {
     }
 }
 
-fn bound_names(body: &[Stmt]) -> HashMap<&str, usize> {
+pub(crate) fn bound_names(body: &[Stmt]) -> HashMap<&str, usize> {
     let mut bound = Bound {
         counts: HashMap::new(),
     };
@@ -388,7 +403,7 @@ fn module_types(body: &[Stmt], aliases: &Table) -> HashMap<String, Local> {
 }
 
 /// `X = T` with `T` a type expression, `X: TypeAlias = T` or `type X = T`: `X` and `T`.
-pub(crate) fn type_alias<'a>(stmt: &'a Stmt, aliases: &Table) -> Option<(&'a str, &'a Expr)> {
+fn type_alias<'a>(stmt: &'a Stmt, aliases: &Table) -> Option<(&'a str, &'a Expr)> {
     let (target, value): (&Expr, &Expr) = match stmt {
         Stmt::Assign(node) if node.targets.len() == 1 && is_type_expr(&node.value) => {
             (&node.targets[0], &node.value)
@@ -441,7 +456,10 @@ pub struct ModuleTypes {
 
 impl ModuleTypes {
     pub fn new(source: Arc<Source>, index: Option<&Arc<dyn Index>>, module: Option<&str>) -> Self {
-        let local = module_types(source.body(), &source.aliases);
+        let local = source
+            .locals
+            .get_or_init(|| module_types(source.body(), &source.aliases))
+            .clone();
         ModuleTypes {
             source,
             index: index.map(Arc::downgrade),

@@ -770,7 +770,7 @@ impl Index for Tree {
 
     fn type_alias(&self, source: &Source, dotted: &str) -> Option<(&Source, &Expr)> {
         let (module, name) = target(source, dotted)?;
-        self.value(&module, &name, crate::compose::type_alias, 0)
+        self.value(&module, &name, Source::type_alias, 0)
     }
 }
 
