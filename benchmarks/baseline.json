@@ -74,13 +74,13 @@
     }
   },
   "Linux-ci": {
-    "calibration_s": 0.01759,
+    "calibration_s": 0.02469,
     "meta": {
       "files": 8000,
-      "generate_s": 0.3,
+      "generate_s": 0.24,
       "machine": "x86_64",
       "platform": "Linux",
-      "python": "3.15.1",
+      "python": "3.15.2",
       "queries": 2400,
       "size": "ci",
       "tables": 400
@@ -88,63 +88,63 @@
     "metrics": {
       "check": {
         "exit": 1,
-        "rss_mb": 232.6,
-        "wall_s": 2.0534
+        "rss_mb": 86.1,
+        "wall_s": 0.3155
       },
       "rewrite_check": {
         "exit": 1,
-        "rss_mb": 78.2,
-        "wall_s": 0.31
+        "rss_mb": 79.9,
+        "wall_s": 0.2047
       },
       "schema_load": {
         "exit": 0,
-        "rss_mb": 62.8,
-        "wall_s": 0.0946
+        "rss_mb": 66.5,
+        "wall_s": 0.124
       },
       "schema_load_5000": {
         "exit": 0,
-        "rss_mb": 343.2,
-        "wall_s": 0.7348
+        "rss_mb": 129.8,
+        "wall_s": 0.6692
       },
       "schema_load_unresolved_alters": {
         "exit": 0,
-        "rss_mb": 66.6,
-        "wall_s": 0.0863
+        "rss_mb": 62.8,
+        "wall_s": 0.1103
       }
     },
     "micro_us": {
-      "analyze_params.aggregate": 17.0,
-      "analyze_params.array_param": 11.0,
-      "analyze_params.cte": 26.9,
-      "analyze_params.full_join": 15.2,
-      "analyze_params.function": 12.2,
-      "analyze_params.join": 19.9,
-      "analyze_params.json": 23.1,
-      "analyze_params.lateral": 25.9,
-      "analyze_params.left_join": 15.6,
+      "analyze_params.aggregate": 18.9,
+      "analyze_params.array_param": 11.3,
+      "analyze_params.cte": 32.6,
+      "analyze_params.full_join": 16.3,
+      "analyze_params.function": 12.3,
+      "analyze_params.join": 21.8,
+      "analyze_params.json": 26.1,
+      "analyze_params.lateral": 30.3,
+      "analyze_params.left_join": 17.2,
       "analyze_params.literal": 10.5,
-      "analyze_params.named_params": 13.0,
-      "analyze_params.params": 13.6,
-      "analyze_params.recursive_cte": 31.8,
-      "analyze_params.right_join": 15.1,
-      "analyze_params.subquery": 15.2,
-      "analyze_params.view": 10.5,
-      "analyze_select.aggregate": 24.3,
-      "analyze_select.array_param": 13.0,
-      "analyze_select.cte": 30.8,
-      "analyze_select.full_join": 19.0,
-      "analyze_select.function": 14.9,
-      "analyze_select.join": 27.6,
-      "analyze_select.json": 33.0,
-      "analyze_select.lateral": 29.7,
-      "analyze_select.left_join": 20.9,
-      "analyze_select.literal": 17.5,
-      "analyze_select.named_params": 16.2,
-      "analyze_select.params": 18.4,
-      "analyze_select.recursive_cte": 39.2,
-      "analyze_select.right_join": 19.6,
-      "analyze_select.subquery": 24.3,
-      "analyze_select.view": 14.8
+      "analyze_params.named_params": 14.9,
+      "analyze_params.params": 15.5,
+      "analyze_params.recursive_cte": 39.2,
+      "analyze_params.right_join": 16.0,
+      "analyze_params.subquery": 16.8,
+      "analyze_params.view": 10.3,
+      "analyze_select.aggregate": 30.8,
+      "analyze_select.array_param": 15.6,
+      "analyze_select.cte": 43.3,
+      "analyze_select.full_join": 25.6,
+      "analyze_select.function": 17.1,
+      "analyze_select.join": 39.5,
+      "analyze_select.json": 50.0,
+      "analyze_select.lateral": 40.7,
+      "analyze_select.left_join": 29.9,
+      "analyze_select.literal": 21.1,
+      "analyze_select.named_params": 21.0,
+      "analyze_select.params": 24.2,
+      "analyze_select.recursive_cte": 56.4,
+      "analyze_select.right_join": 26.2,
+      "analyze_select.subquery": 34.3,
+      "analyze_select.view": 18.0
     }
   }
 }

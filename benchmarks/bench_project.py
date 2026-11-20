@@ -27,6 +27,7 @@ import argparse
 import json
 import os
 import platform
+import re
 import shutil
 import statistics
 import subprocess
@@ -46,6 +47,13 @@ SIZES = {
 # Times of 5 ms or less are noise on a shared runner: they are reported, not budgeted.
 MIN_BUDGETED_S = 0.005
 ATTEMPTS = 3
+# A check must beat the database round trip that types the same query: PostgreSQL Parse and
+# Describe over a Unix socket, about 100 us on a machine whose calibration loop takes 20 ms
+# (AGENTS.md "Check budget"). A slower runner gets a proportionally larger budget.
+ROUND_TRIP_US = 100
+ROUND_TRIP_CALIBRATION_S = 0.02
+# The string literals synth.py writes queries as.
+QUERY = re.compile(r'"(?:--sql\\n)?(?:SELECT|WITH) ')
 
 
 def calibrate() -> float:
@@ -121,6 +129,24 @@ def micro(tables: int, rounds: int = 200) -> dict[str, float]:
     return out
 
 
+def file_us(root: Path, schema: str) -> list[float]:
+    """Microseconds per query of ``check_source`` on each file with queries, schema cached."""
+    from sqlty import core
+
+    settings = core.Settings(schema_sql=schema)
+    out = []
+    for path in sorted(root.rglob("*.py")):
+        source = path.read_text()
+        if queries := len(QUERY.findall(source)):
+            best = float("inf")
+            for _ in range(3):
+                t = time.perf_counter()
+                core.check_source(source, settings)
+                best = min(best, time.perf_counter() - t)
+            out.append(best * 1e6 / queries)
+    return out
+
+
 def run(size: str, repeats: int, keep: str | None) -> dict:
     spec = SIZES[size]
     exe = shutil.which("sqlty") or str(Path(sys.executable).parent / "sqlty")
@@ -133,6 +159,12 @@ def run(size: str, repeats: int, keep: str | None) -> dict:
         proj = str(root)
         metrics["check"] = measure([exe, "check", "-q", proj], proj, repeats)
         metrics["rewrite_check"] = measure([exe, "rewrite", "--check", "-q", proj], proj, repeats)
+        empty = root / "empty"
+        empty.mkdir()
+        for name in ("pyproject.toml", "schema.sql"):
+            shutil.copy(root / name, empty / name)
+        metrics["check_empty"] = measure([exe, "check", "-q", str(empty)], str(empty), repeats)
+        per_file = sorted(file_us(root, (root / "schema.sql").read_text()))
         for name, text in (
             ("schema_load", (root / "schema.sql").read_text()),
             ("schema_load_unresolved_alters", synth.unresolved_alter_schema(2000)),
@@ -155,6 +187,13 @@ def run(size: str, repeats: int, keep: str | None) -> dict:
             "calibration_s": round(calibrate(), 5),
             "metrics": metrics,
             "micro_us": micro(spec["tables"]),
+            "file_us_per_query": {
+                "median": round(statistics.median(per_file), 1),
+                "p99": round(per_file[int(len(per_file) * 0.99)], 1),
+                "max": round(per_file[-1], 1),
+                "over_round_trip": sum(us > ROUND_TRIP_US for us in per_file),
+                "files": len(per_file),
+            },
         }
     finally:
         if not keep:
@@ -192,6 +231,26 @@ def compare(result: dict, baseline: dict, time_tol: float, rss_tol: float) -> li
     return failures
 
 
+def round_trip(result: dict) -> list[str]:
+    """Lines for the checks slower than a database round trip (empty when none is)."""
+    limit = ROUND_TRIP_US * result["calibration_s"] / ROUND_TRIP_CALIBRATION_S
+    micro_us = result["micro_us"]
+    per_query = {
+        f"query.{kind}": micro_us[f"analyze_select.{kind}"] + micro_us[f"analyze_params.{kind}"]
+        for kind in (
+            name.split(".", 1)[1] for name in micro_us if name.startswith("analyze_select.")
+        )
+    }
+    m = result["metrics"]
+    check_s = m["check"]["wall_s"] - m["check_empty"]["wall_s"]
+    per_query["check.per_query"] = check_s * 1e6 / result["meta"]["queries"]
+    return [
+        f"{name}: {us:.0f} us > round trip {limit:.0f} us"
+        for name, us in sorted(per_query.items())
+        if us > limit
+    ]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -221,9 +280,16 @@ def main() -> int:
     key = f"{result['meta']['platform']}-{args.size}"
     path = Path(args.baseline)
     baselines = json.loads(path.read_text()) if path.exists() else {}
+
+    def over(result: dict) -> list[str]:
+        failures = round_trip(result)
+        if key in baselines:
+            failures += compare(result, baselines[key], args.time_tolerance, args.rss_tolerance)
+        return failures
+
     failures = []
-    if args.compare and key in baselines:
-        failures = compare(result, baselines[key], args.time_tolerance, args.rss_tolerance)
+    if args.compare:
+        failures = over(result)
         # Another job on a shared runner can slow one run: measure again before failing.
         for attempt in range(2, ATTEMPTS + 1):
             if not failures:
@@ -235,7 +301,7 @@ def main() -> int:
                 file=sys.stderr,
             )
             result = run(args.size, args.repeats, args.keep)
-            failures = compare(result, baselines[key], args.time_tolerance, args.rss_tolerance)
+            failures = over(result)
     text = json.dumps(result, indent=2)
     print(text)
     if args.out:
@@ -246,17 +312,17 @@ def main() -> int:
         print(f"baseline {key} written to {path}", file=sys.stderr)
         return 0
     if args.compare:
-        if key not in baselines:
-            print(
-                f"no baseline for {key} in {path}: nothing to compare. "
-                "Commit this run's JSON (make bench-baseline) to enable the budget.",
-                file=sys.stderr,
-            )
-            return 0
         if failures:
             print("performance budget exceeded:", *failures, sep="\n  ", file=sys.stderr)
             return 1
-        print(f"within budget versus baseline {key}", file=sys.stderr)
+        if key not in baselines:
+            print(
+                f"no baseline for {key} in {path}: checked the round trip budget only. "
+                "Commit this run's JSON (make bench-baseline) to enable the rest.",
+                file=sys.stderr,
+            )
+        else:
+            print(f"within budget versus baseline {key}", file=sys.stderr)
     return 0
 
 
