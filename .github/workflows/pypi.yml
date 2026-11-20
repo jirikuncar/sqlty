@@ -367,9 +367,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        run: |
-          rustup toolchain install 1.99.1 --profile minimal --target wasm32-unknown-unknown
-          rustup default 1.99.1
+        run: rustup toolchain install && rustup target add wasm32-unknown-unknown
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
