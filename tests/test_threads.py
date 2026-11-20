@@ -113,7 +113,7 @@ MODULES = {
 
 @pytest.mark.parametrize("jobs", [1, 3])
 def test_check_modules_reports_what_check_source_does(jobs: int) -> None:
-    from sqlty._check import RowUsage, check_modules
+    from sqlty._check import RowUsage
     from sqlty._helpers import HelperIndex
     from sqlty._source import ParsedSource
 
@@ -138,7 +138,24 @@ def test_check_modules_reports_what_check_source_does(jobs: int) -> None:
     modules = [(source, configs[n % 2]) for n, source in enumerate(parsed.values())]
     usage, expected_usage = RowUsage(), RowUsage()
 
-    found = check_modules(modules, usage, jobs)
+    results = _core.check_modules(
+        [(source.text, source.module, n % 2) for n, source in enumerate(parsed.values())],
+        [
+            (dialect, schema, rules, style, untyped, sorted(coerce), helpers and helpers.rust(), n)
+            for dialect, schema, rules, style, untyped, coerce, helpers, n in configs
+        ],
+        version=sys.version_info[:2],
+        jobs=jobs,
+    )
+    for *_, needed in results:
+        usage.needed.update(needed)
+    usage.redundant = [
+        (key, diag)
+        for diagnostics, redundant, _ in results
+        for key, diag in zip(redundant, diagnostics, strict=True)
+        if key is not None
+    ]
+    found = [diagnostics for diagnostics, _, _ in results]
 
     expected = [
         core.check_source(

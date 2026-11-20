@@ -111,6 +111,12 @@ impl RuleConfig {
         self.enabled
     }
 
+    /// Whether a diagnostic of the SQL analyzer is shown: not where a rule reporting the
+    /// same mistake is on.
+    pub(crate) fn shows(&self, found: &sqlty_sql::diagnostics::NameDiagnostic) -> bool {
+        !found.shadowed_by.is_some_and(|rule| self.is_enabled(rule))
+    }
+
     /// This configuration with every rule but `rules` ignored.
     pub(crate) fn only(&self, rules: &[Rule]) -> RuleConfig {
         let mut config = self.clone();

@@ -1,6 +1,6 @@
 ---
 name: sqlty-check
-description: Run sqlty check and act on its diagnostics, name the row type of a query, and check query parameters, including the typed parameters of SQL[R, P]. Use when sqlty check reports a diagnostic such as [unknown-column] or [narrow-type], when replacing SQL[tuple[...]] with a TypedDict, dataclass, NamedTuple or pydantic model, when a column may be NULL, when a call passes the wrong parameters, when a join inflates a SUM, AVG or COUNT ([fanout-aggregate], [chasm-join]) or compares keys of different tables ([entity-mismatch]), when suppressing a diagnostic with a sqlty ignore comment, or when changing a rule's severity in [tool.sqlty.rules].
+description: Run sqlty check and act on its diagnostics, name the row type of a query, and check query parameters, including the typed parameters of SQL[R, P]. Use when sqlty check reports a diagnostic such as [unknown-column] or [narrow-type], when replacing SQL[tuple[...]] with a TypedDict, dataclass, NamedTuple or pydantic model, when a column may be NULL, when a call passes the wrong parameters, when a join inflates a SUM, AVG or COUNT ([fanout-aggregate], [chasm-join]) or compares a foreign key with a column it does not reference or keys of different tables ([foreign-key-mismatch], [entity-mismatch]), when suppressing a diagnostic with a sqlty ignore comment, or when changing a rule's severity in [tool.sqlty.rules].
 ---
 
 # sqlty check
@@ -169,10 +169,12 @@ A key the data has but the schema doesn't declare is unknown to sqlty: declare
 it (`UNIQUE`, a unique index) instead of suppressing. `unproven-join` (off by
 default) lists joins no key covers.
 
-`entity-mismatch` (off by default; enable with `entity-mismatch = "warn"`)
-reports a comparison such as `products.id = orders.customer_id`. Join on the
-key the foreign key references; suppress only a polymorphic id that is
-compared to several tables on purpose.
+`foreign-key-mismatch` reports a foreign key column compared with a column it
+does not reference, such as `products.id = orders.customer_id`, or a composite
+key compared in part. Compare it with the column it references, every column
+of a composite key. `entity-mismatch` (off by default; enable with
+`entity-mismatch = "warn"`) also compares primary keys with each other. Suppress only a polymorphic id that is compared to several tables
+on purpose.
 
 ## Suppress a diagnostic
 

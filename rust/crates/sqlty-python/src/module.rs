@@ -245,7 +245,7 @@ impl Aliases<'_> {
         self.0.get(name).map(String::as_str)
     }
 
-    /// The `typing` member `expr` names, as `_typing_name` does.
+    /// The `typing` member `expr` names.
     fn member<'e>(&'e self, expr: &'e Expr) -> Option<&'e str> {
         match expr {
             Expr::Name(name) => self.get(name.id.as_str()),
