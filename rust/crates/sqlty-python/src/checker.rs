@@ -20,9 +20,8 @@ use crate::analyses::{Analyses, Analysis};
 use crate::edit::Edit;
 use crate::options::{Dialect, Options};
 use crate::rewriter::{
-    after_marker, decode_escapes, ends_marker_line, extract_string_content, import_edit,
-    imported_names, marked_query, strip_line_break, type_modules, wrapper_imports, wraps,
-    ImportStyle, Spelling,
+    after_marker, ends_marker_line, extract_string_content, import_edit, imported_names,
+    marked_query, type_modules, wrapper_imports, wraps, ImportStyle, Spelling,
 };
 use crate::rules::{Rule, RuleConfig, Severity, SQL_RULES};
 use crate::scan::Scan;
@@ -114,26 +113,26 @@ pub fn check_source(
     rules: &RuleConfig,
     any_calls: &[usize],
 ) -> Vec<Diagnostic> {
-    check_source_with(source, options, rules, any_calls, &Analyses::new(options))
+    let scan = Scan::new(source, &options.style.wrapper_name);
+    check_source_with(&scan, options, rules, any_calls, &Analyses::new(options))
 }
 
-/// [`check_source`], reading each query's analysis from `analyses`.
+/// [`check_source`] of a scanned source, reading each query's analysis from `analyses`.
 pub(crate) fn check_source_with(
-    source: &str,
+    scan: &Scan<'_>,
     options: &Options,
     rules: &RuleConfig,
     any_calls: &[usize],
     analyses: &Analyses<'_>,
 ) -> Vec<Diagnostic> {
-    let scan = Scan::new(source, &options.style.wrapper_name);
     let mut checker = Checker {
-        scan: &scan,
+        scan,
         options,
         rules,
         any_calls: sorted(any_calls),
         diagnostics: Vec::new(),
-        spelling: Spelling::of(&scan),
-        imported: imported_names(&scan),
+        spelling: Spelling::of(scan),
+        imported: imported_names(scan),
         analyses,
     };
     if options.dialect == Dialect::MySql {
@@ -840,18 +839,16 @@ fn holds_start(starts: &[usize], span: &Range<usize>) -> bool {
 pub type WrappedQuery = (usize, String, Option<String>, (usize, usize));
 
 /// `(line, annotation, query, annotation_span)` for each `{wrapper}[T](...)` call; `query`
-/// is the string without its marker, `None` unless the call holds a marked string literal,
-/// and `annotation_span` holds the byte offsets of `T`.
-pub fn wrapped_queries(source: &str, style: &ImportStyle) -> Vec<WrappedQuery> {
-    let scan = Scan::new(source, &style.wrapper_name);
+/// is the [`marked_query`] the module's other checks analyze, `None` unless the call holds
+/// a marked string literal, and `annotation_span` holds the byte offsets of `T`.
+pub(crate) fn wrapped_queries(scan: &Scan<'_>) -> Vec<WrappedQuery> {
+    let source = scan.source();
     scan.calls
         .iter()
         .map(|call| {
-            let query = call.content(source).and_then(|content| {
-                let decoded = decode_escapes(&content);
-                let rest = after_marker(&decoded)?;
-                Some(strip_line_break(rest).unwrap_or(rest).trim().to_string())
-            });
+            let query = call
+                .content(source)
+                .and_then(|content| marked_query(&content));
             (
                 scan.lines.line_at(call.span.start),
                 call.row_type(source).to_string(),
@@ -1856,15 +1853,15 @@ r = SQL[T](
 s = SQL[T]("plain")
 "#;
         let queries: Vec<(usize, Option<String>)> =
-            wrapped_queries(source, &ImportStyle::default())
+            wrapped_queries(&Scan::new(source, &ImportStyle::default().wrapper_name))
                 .into_iter()
                 .map(|(line, _, query, _)| (line, query))
                 .collect();
         assert_eq!(
             queries,
             vec![
-                (1, Some("SELECT 1".to_string())),
-                (3, Some("SELECT 2".to_string())),
+                (1, Some("--sql\nSELECT 1".to_string())),
+                (3, Some("--sql\nSELECT 2".to_string())),
                 (6, None),
             ]
         );

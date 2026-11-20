@@ -27,6 +27,7 @@ use crate::rows::{
     RowShape, Settings,
 };
 use crate::rules::{Rule, RuleConfig, SQL_RULES};
+use crate::scan::Scan;
 use crate::scopes::{class_of, dotted, Key, Param};
 use crate::types::generic::is_word;
 use crate::types::info::Kind;
@@ -1257,11 +1258,13 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
     let text = &*source.text;
     let wrapper = options.style.wrapper_name.as_str();
     let import_line = options.style.import_line.as_str();
+    let scan = std::cell::OnceCell::new();
+    let scanned = || scan.get_or_init(|| Scan::new(text, wrapper));
 
     let mut base = Vec::new();
     if may_need_lexing(text, wrapper) {
         let any_calls = any_calls(source, &options.style);
-        base = checker::check_source_with(text, options, rules, &any_calls, &analyses);
+        base = checker::check_source_with(scanned(), options, rules, &any_calls, &analyses);
         checker::add_fix_imports(text, options, &mut base);
     }
 
@@ -1366,7 +1369,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
         }));
     }
     let queries: Vec<RowQuery> = if may_wrap(text, import_line) {
-        row_queries(source, settings)
+        row_queries(scanned())
     } else {
         Vec::new()
     };
@@ -1496,6 +1499,44 @@ mod tests {
         let ignored = [("sqruff", "warn"), ("internal-error", "ignore")];
         assert!(crash("q = 1\n", &ignored).is_empty());
         assert!(crash("q = 1\n", &[]).is_empty());
+    }
+
+    #[test]
+    fn a_query_with_a_row_class_is_analyzed_once() {
+        use crate::analyses::ANALYZED;
+        let (schema, _) = analyzer::load_schema_with_skipped(
+            "CREATE TABLE users (id INTEGER NOT NULL, name TEXT);",
+            "postgres",
+        );
+        let options = Options::new("postgres", Some(&schema), None, false).unwrap();
+        let (rules, coerce) = (RuleConfig::default(), HashSet::new());
+        let settings = Settings {
+            options: &options,
+            rules: &rules,
+            index: None,
+            module: None,
+            coerce: &coerce,
+        };
+        let lint = |_: &str| -> Vec<Lint> { Vec::new() };
+        let run = Run {
+            settings: &settings,
+            has_schema: true,
+            lint: &lint,
+            helpers: None,
+            variants: None,
+        };
+        let text = concat!(
+            "from typing import TypedDict\n",
+            "from sqlty import SQL\n",
+            "class User(TypedDict):\n",
+            "    id: str\n",
+            "q = SQL[User](\"--sql\\nSELECT id FROM users\")\n",
+        );
+        let source = Arc::new(Source::new(text, (3, 14)).unwrap());
+        ANALYZED.with(|count| count.set(0));
+        let found = module(text, Some(&source), &run).diagnostics;
+        assert_eq!(found[0].diagnostic.rule, Rule::ColumnTypeMismatch);
+        assert_eq!(ANALYZED.with(std::cell::Cell::get), 1);
     }
 
     #[test]
