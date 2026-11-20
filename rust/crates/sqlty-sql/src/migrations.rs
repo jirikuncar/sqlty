@@ -2040,19 +2040,17 @@ mod tests {
     #[test]
     fn only_single_column_keys_bound_a_backfill() {
         use Rule::*;
-        let baseline = format!(
-            "{USERS} CREATE TABLE pairs (a int, b int, PRIMARY KEY (a, b));
-            CREATE UNIQUE INDEX users_team_email ON users (team_id, email);
-            CREATE UNIQUE INDEX users_lower_email ON users (lower(email));"
-        );
+        let baseline = format!("{USERS} CREATE TABLE pairs (a int, b int, PRIMARY KEY (a, b));");
+        let indexes = "CREATE UNIQUE INDEX CONCURRENTLY users_team_email ON users (team_id, email);
+            CREATE UNIQUE INDEX CONCURRENTLY users_lower_email ON users (lower(email));";
         for (migration, expected) in [
             (
                 "BEGIN; ALTER TABLE users ADD COLUMN a int; ALTER TABLE teams ADD COLUMN b int; ALTER TABLE pairs ADD COLUMN c int; COMMIT;",
                 &[MultiTableLock][..],
             ),
             ("UPDATE pairs SET b = 1 WHERE a = 1", &[UnbatchedBackfill]),
-            ("UPDATE users SET bio = '' WHERE team_id = 1", &[UnbatchedBackfill]),
-            ("UPDATE users SET bio = '' WHERE lower(email) = 'x'", &[UnbatchedBackfill]),
+            (&format!("{indexes} UPDATE users SET bio = '' WHERE team_id = 1"), &[UnbatchedBackfill]),
+            (&format!("{indexes} UPDATE users SET bio = '' WHERE lower(email) = 'x'"), &[UnbatchedBackfill]),
             ("UPDATE users SET bio = '' WHERE (id BETWEEN 1 AND 9)", &[]),
             ("UPDATE (SELECT * FROM users) AS u SET bio = ''", &[]),
         ] {
