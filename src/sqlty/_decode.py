@@ -54,11 +54,10 @@ def decode(b: Buffer, errors: str = "strict") -> tuple[str, int]:
     """Decode UTF-8 ``b``, wrapping ``--sql`` strings; returns ``(text, length)``."""
     source, length = utf_8_codec.decode(b, errors)
     try:
-        from sqlty.core import rewrite_source
+        from sqlty.core import Settings, rewrite_source
 
-        decoded = rewrite_source(
-            source, import_style=_import_style(), keep_lines=True, param_types=False
-        )
+        settings = Settings(import_style=_import_style(), param_types=False)
+        decoded = rewrite_source(source, settings, keep_lines=True)
         return _CODING.sub(r"\1utf-8", decoded, count=1), length
     except Exception:
         return source, length
