@@ -117,6 +117,21 @@ UPDATE "users" SET email = 'meh' WHERE id = 1;
 COMMIT;
 ```
 
+## A new enum value in a column of another table
+
+```sql migration
+BEGIN;
+SET LOCAL lock_timeout = '1s';
+CREATE TYPE feeling AS ENUM ('ok');
+CREATE TABLE feelings (feeling feeling);
+COMMIT;
+BEGIN;
+ALTER TYPE feeling ADD VALUE 'meh';
+-- error:
+UPDATE users feeling SET email = 'meh' WHERE feeling.id = 1;
+COMMIT;
+```
+
 ## A NOT NULL check alone does not bound a partition
 
 ```sql migration

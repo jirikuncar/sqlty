@@ -16,6 +16,7 @@ pub fn check_migrations(
         .into_iter()
         .zip(files)
         .map(|(found, sql)| {
+            let newlines: Vec<usize> = sql.match_indices('\n').map(|(at, _)| at).collect();
             let found = found
                 .into_iter()
                 .filter(|finding| rules.is_enabled(finding.rule))
@@ -23,7 +24,7 @@ pub fn check_migrations(
                     rule: finding.rule,
                     message: finding.message,
                     severity: rules.severity(finding.rule),
-                    line: sql[..finding.span.start].matches('\n').count() + 1,
+                    line: newlines.partition_point(|&at| at < finding.span.start) + 1,
                     span: finding.span,
                     fix: Vec::new(),
                 })

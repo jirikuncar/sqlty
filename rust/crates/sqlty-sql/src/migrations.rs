@@ -87,8 +87,8 @@ struct Model {
     created: FxHashSet<String>,
     /// The tables the baseline and earlier statements create.
     tables: FxHashSet<String>,
-    /// The declared type of each column.
-    types: FxHashMap<(String, String), DataType>,
+    /// The declared type of each column, by table.
+    types: FxHashMap<String, FxHashMap<String, DataType>>,
     /// The tables on either side of a foreign key.
     referencing: FxHashSet<String>,
     /// The tables a foreign key references.
@@ -110,8 +110,12 @@ struct Model {
     unprovable: FxHashSet<String>,
     /// The primary key of each table.
     primary_keys: FxHashMap<String, PrimaryKey>,
+    /// The table of each primary key, by its schema-qualified name.
+    key_tables: FxHashMap<String, String>,
     /// The replica identity of each table that set one other than its primary key.
     identities: FxHashMap<String, Identity>,
+    /// The table whose replica identity each index is, by its schema-qualified name.
+    identity_tables: FxHashMap<String, String>,
     /// The columns of each unique index, by schema-qualified name.
     unique_indexes: FxHashMap<String, Vec<String>>,
 }
@@ -150,6 +154,7 @@ struct Session {
     added_values: Vec<(String, ObjectName)>,
     /// The tables with rows that the open transaction locks against writes, in order.
     locked: Vec<String>,
+    locking: FxHashSet<String>,
     reported_tables: bool,
     reported_backfill: bool,
     /// Primary keys the open transaction dropped and has not replaced yet, by table.
@@ -230,7 +235,7 @@ impl Model {
                     let held = session.locked.len();
                     let locked = parsed.as_ref().map(|parsed| self.write_locked(parsed));
                     for table in locked.unwrap_or_default() {
-                        if !session.locked.contains(&table) {
+                        if session.locking.insert(table.clone()) {
                             session.locked.push(table);
                         }
                     }
@@ -261,7 +266,7 @@ impl Model {
                             ),
                         );
                     }
-                    if session.locked.contains(&table) && !session.reported_backfill {
+                    if session.locking.contains(&table) && !session.reported_backfill {
                         session.reported_backfill = true;
                         report(
                             Rule::LockedBackfill,
@@ -272,10 +277,12 @@ impl Model {
                     }
                 }
                 if let Some(Statement::AlterTable(alter)) = &parsed {
-                    let table = key(&alter.name);
-                    session
-                        .dropped_keys
-                        .retain(|(dropped, _)| *dropped != table || !restores_identity(alter));
+                    if restores_identity(alter) {
+                        let table = key(&alter.name);
+                        session
+                            .dropped_keys
+                            .retain(|(dropped, _)| *dropped != table);
+                    }
                 }
                 let lost = parsed
                     .as_ref()
@@ -369,18 +376,18 @@ impl Model {
             Statement::CreateTable(create) => {
                 let table = key(&create.name);
                 self.tables.insert(table.clone());
-                let copied: Vec<_> = self
-                    .types
+                let copied: FxHashMap<_, _> = likes
                     .iter()
-                    .filter(|((source, _), _)| likes.contains(source))
-                    .map(|((_, column), ty)| ((table.clone(), column.clone()), ty.clone()))
+                    .filter_map(|source| self.types.get(source))
+                    .flatten()
+                    .map(|(column, ty)| (column.clone(), ty.clone()))
                     .collect();
-                self.types.extend(copied);
+                let columns = self.types.entry(table.clone()).or_default();
+                columns.extend(copied);
                 for column in &create.columns {
-                    self.types.insert(
-                        (table.clone(), name(&column.name)),
-                        column.data_type.clone(),
-                    );
+                    columns.insert(name(&column.name), column.data_type.clone());
+                }
+                for column in &create.columns {
                     self.require(&table, column);
                 }
                 for constraint in &create.constraints {
@@ -491,10 +498,10 @@ impl Model {
     fn apply_op(&mut self, table: &str, op: &AlterTableOperation) {
         match op {
             AlterTableOperation::AddColumn { column_def, .. } => {
-                self.types.insert(
-                    (table.to_string(), name(&column_def.name)),
-                    column_def.data_type.clone(),
-                );
+                self.types
+                    .entry(table.to_string())
+                    .or_default()
+                    .insert(name(&column_def.name), column_def.data_type.clone());
                 self.require(table, column_def);
                 if is_key_column(column_def) {
                     self.record_column_key(table, column_def);
@@ -535,11 +542,11 @@ impl Model {
                     ReplicaIdentity::Index(index) => Identity::Index(qualify(table, &name(index))),
                     ReplicaIdentity::Nothing => Identity::Nothing,
                     ReplicaIdentity::Default => {
-                        self.identities.remove(table);
+                        self.forget_identity(table);
                         return;
                     }
                 };
-                self.identities.insert(table.to_string(), identity);
+                self.set_identity(table, identity);
             }
             AlterTableOperation::DropColumn { column_names, .. } => {
                 let dropped = column_names.iter().map(name).collect::<Vec<_>>();
@@ -548,12 +555,12 @@ impl Model {
                     .get(table)
                     .is_some_and(|key| key.columns.iter().any(|column| dropped.contains(column)));
                 if keyed {
-                    self.primary_keys.remove(table);
+                    self.forget_primary_key(table);
                 }
                 if let Some(Identity::Index(index)) = self.identities.get(table) {
                     let columns = self.index_columns(table, index).unwrap_or_default();
                     if columns.iter().any(|column| dropped.contains(column)) {
-                        self.identities.insert(table.to_string(), Identity::Nothing);
+                        self.set_identity(table, Identity::Nothing);
                     }
                 }
             }
@@ -565,11 +572,11 @@ impl Model {
             }
             AlterTableOperation::RenameTable { table_name } => {
                 let renamed = renamed_table(table, table_name);
-                if let Some(primary_key) = self.primary_keys.remove(table) {
-                    self.primary_keys.insert(renamed.clone(), primary_key);
+                if let Some(primary_key) = self.forget_primary_key(table) {
+                    self.set_primary_key(&renamed, primary_key);
                 }
-                if let Some(identity) = self.identities.remove(table) {
-                    self.identities.insert(renamed, identity);
+                if let Some(identity) = self.forget_identity(table) {
+                    self.set_identity(&renamed, identity);
                 }
             }
             AlterTableOperation::AttachPartitionOf {
@@ -590,7 +597,9 @@ impl Model {
                 op: AlterColumnOperation::SetDataType { data_type, .. },
             } => {
                 self.types
-                    .insert((table.to_string(), name(column_name)), data_type.clone());
+                    .entry(table.to_string())
+                    .or_default()
+                    .insert(name(column_name), data_type.clone());
             }
             AlterTableOperation::AddConstraint {
                 constraint: TableConstraint::Check(check),
@@ -609,7 +618,7 @@ impl Model {
     }
 
     /// Whether `stmt` puts the new enum `value` of `ty` to use: it casts to `ty`, names a
-    /// column of type `ty`, or names no table whose columns are known.
+    /// column of type `ty` of a table it names, or names no table whose columns are known.
     fn uses_value(&self, stmt: &Raw, value: &str, ty: &ObjectName) -> bool {
         let tokens = stmt.tokens();
         if !tokens.contains(&value)
@@ -624,12 +633,11 @@ impl Model {
         let words: Vec<String> = tokens.iter().map(|token| fold_token(token)).collect();
         let ty = key(ty);
         let short = ty.rsplit('.').next().unwrap_or(&ty);
-        let typed = |column: &(String, String)| {
-            self.types.get(column).is_some_and(|declared| {
-                let declared = declared.to_string().to_lowercase();
-                declared == ty || declared == short
-            })
+        let typed = |declared: &DataType| {
+            let declared = declared.to_string().to_lowercase();
+            declared == ty || declared == short
         };
+        let columns_of = |table: &str| self.types.get(table).into_iter().flatten();
         let cast = words
             .windows(2)
             .any(|pair| matches!(pair[0].as_str(), "::" | "as") && pair[1] == short);
@@ -642,19 +650,20 @@ impl Model {
                 }),
                 _,
             )) if columns.is_empty() => {
-                let table = key(&table);
-                self.types
-                    .keys()
-                    .any(|column| column.0 == table && typed(column))
+                columns_of(&key(&table)).any(|(_, declared)| typed(declared))
             }
             _ => false,
         };
+        let named: FxHashSet<&String> = words
+            .iter()
+            .filter(|word| self.tables.contains(*word))
+            .collect();
+        let said: FxHashSet<&String> = words.iter().collect();
         cast || positional
-            || words.iter().all(|word| !self.tables.contains(word))
-            || self
-                .types
-                .keys()
-                .any(|column| typed(column) && words.contains(&column.1))
+            || named.is_empty()
+            || named.iter().any(|table| {
+                columns_of(table).any(|(column, declared)| said.contains(column) && typed(declared))
+            })
     }
 
     fn add_check(&mut self, table: &str, check: &CheckConstraint, valid: bool) {
@@ -692,7 +701,7 @@ impl Model {
             },
             _ => return,
         };
-        self.primary_keys.insert(table.to_string(), key);
+        self.set_primary_key(table, key);
     }
 
     /// Record the primary key `column` declares.
@@ -710,7 +719,50 @@ impl Model {
                 .map_or_else(|| default_key_name(table), name),
             columns: vec![name(&column.name)],
         };
+        self.set_primary_key(table, key);
+    }
+
+    fn set_primary_key(&mut self, table: &str, key: PrimaryKey) {
+        self.forget_primary_key(table);
+        self.key_tables
+            .insert(qualify(table, &key.name), table.to_string());
         self.primary_keys.insert(table.to_string(), key);
+    }
+
+    fn forget_primary_key(&mut self, table: &str) -> Option<PrimaryKey> {
+        let key = self.primary_keys.remove(table)?;
+        let name = qualify(table, &key.name);
+        if self
+            .key_tables
+            .get(&name)
+            .is_some_and(|owner| owner == table)
+        {
+            self.key_tables.remove(&name);
+        }
+        Some(key)
+    }
+
+    fn set_identity(&mut self, table: &str, identity: Identity) {
+        self.forget_identity(table);
+        if let Identity::Index(index) = &identity {
+            self.identity_tables
+                .insert(index.clone(), table.to_string());
+        }
+        self.identities.insert(table.to_string(), identity);
+    }
+
+    fn forget_identity(&mut self, table: &str) -> Option<Identity> {
+        let identity = self.identities.remove(table)?;
+        if let Identity::Index(index) = &identity {
+            if self
+                .identity_tables
+                .get(index)
+                .is_some_and(|owner| owner == table)
+            {
+                self.identity_tables.remove(index);
+            }
+        }
+        Some(identity)
     }
 
     /// The columns of the unique index `index` of `table`, its primary key's included.
@@ -726,13 +778,12 @@ impl Model {
     /// Forget the primary key, unique index or replica identity index named `index`, schema
     /// qualified: a replica identity index that is dropped leaves the table with none.
     fn drop_index(&mut self, index: &str) {
-        self.primary_keys
-            .retain(|table, key| qualify(table, &key.name) != index);
+        if let Some(table) = self.key_tables.get(index).cloned() {
+            self.forget_primary_key(&table);
+        }
         self.unique_indexes.remove(index);
-        for identity in self.identities.values_mut() {
-            if matches!(identity, Identity::Index(name) if name == index) {
-                *identity = Identity::Nothing;
-            }
+        if let Some(table) = self.identity_tables.get(index).cloned() {
+            self.set_identity(&table, Identity::Nothing);
         }
     }
 
@@ -740,20 +791,18 @@ impl Model {
     /// share their name.
     fn rename_index(&mut self, old: &str, new: &str) {
         let renamed = new.rsplit('.').next().unwrap_or(new);
-        for (table, key) in &mut self.primary_keys {
-            if qualify(table, &key.name) == old {
-                key.name = renamed.to_string();
-            }
+        let owner = self.key_tables.get(old).cloned();
+        if let Some((table, mut key)) =
+            owner.and_then(|table| Some((table.clone(), self.forget_primary_key(&table)?)))
+        {
+            key.name = renamed.to_string();
+            self.set_primary_key(&table, key);
         }
         if let Some(columns) = self.unique_indexes.remove(old) {
             self.unique_indexes.insert(new.to_string(), columns);
         }
-        for identity in self.identities.values_mut() {
-            if let Identity::Index(name) = identity {
-                if name == old {
-                    *name = new.to_string();
-                }
-            }
+        if let Some(table) = self.identity_tables.get(old).cloned() {
+            self.set_identity(&table, Identity::Index(new.to_string()));
         }
     }
 
@@ -826,9 +875,7 @@ impl Model {
 
     /// The table whose replica identity is the index `index`, schema qualified.
     fn identity_of(&self, index: &str) -> Option<String> {
-        self.identities.iter().find_map(|(table, identity)| {
-            matches!(identity, Identity::Index(name) if name == index).then(|| table.clone())
-        })
+        self.identity_tables.get(index).cloned()
     }
 
     fn require(&mut self, table: &str, column: &ColumnDef) {
@@ -1178,7 +1225,10 @@ impl Model {
                 column_name,
                 op: AlterColumnOperation::SetDataType { data_type, .. },
             } => {
-                let old = self.types.get(&(table.to_string(), name(column_name)));
+                let old = self
+                    .types
+                    .get(table)
+                    .and_then(|columns| columns.get(&name(column_name)));
                 if !old.is_some_and(|old| keeps_storage(old, data_type)) {
                     report(
                         Rule::TableRewrite,
@@ -1327,6 +1377,7 @@ impl Session {
                 (self.transaction, self.local_timeout) = (false, false);
                 self.added_values.clear();
                 self.locked.clear();
+                self.locking.clear();
                 (self.reported_tables, self.reported_backfill) = (false, false);
             }
             ["reset", "lock_timeout" | "all"] => {
@@ -2173,6 +2224,10 @@ mod tests {
             "INSERT INTO orders (id, note) VALUES (1, 'It''s')"
         ));
         assert!(reported("", "UPDATE elsewhere SET state = 'It''s'"));
+        assert!(!reported(
+            "",
+            "UPDATE users SET bio = 'It''s' WHERE state IS NULL"
+        ));
         assert!(reported(
             "SAVEPOINT s; ROLLBACK TO SAVEPOINT s; RELEASE s;",
             used
@@ -2523,6 +2578,14 @@ mod tests {
             ),
             ("BEGIN; ALTER TABLE a DROP CONSTRAINT a_pkey;", &[DropPrimaryKey]),
             ("CREATE TABLE e (id int PRIMARY KEY); ALTER TABLE e DROP CONSTRAINT e_pkey", &[]),
+            (
+                "ALTER TABLE n RENAME CONSTRAINT n_named TO a_pkey; ALTER TABLE a RENAME TO z; ALTER TABLE n DROP CONSTRAINT a_pkey",
+                &[DropPrimaryKey],
+            ),
+            (
+                "ALTER TABLE a REPLICA IDENTITY USING INDEX a_u; ALTER TABLE b REPLICA IDENTITY USING INDEX a_u; ALTER TABLE a RENAME TO z; DROP INDEX a_u",
+                &[DropPrimaryKey],
+            ),
             ("BEGIN; ALTER TABLE a DROP CONSTRAINT a_pkey; ALTER TABLE b RENAME TO bb; COMMIT;", &[DropPrimaryKey]),
             ("CREATE UNIQUE INDEX ON a (id); ALTER TABLE a DROP CONSTRAINT a_pkey", &[DropPrimaryKey]),
             ("ALTER TABLE a REPLICA IDENTITY USING INDEX a_u; ALTER TABLE a DROP COLUMN id", &[]),
