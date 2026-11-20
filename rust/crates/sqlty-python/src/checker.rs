@@ -447,7 +447,11 @@ impl Checker<'_> {
             return;
         }
         let source = self.scan.source();
-        for found in &self.analysis(query).diagnostics {
+        let analysis = self.analysis(query);
+        for found in &analysis.diagnostics {
+            if !self.rules.shows(found) {
+                continue;
+            }
             let name = found.span.as_ref().and_then(|span| {
                 let start = query_offset(source, literals, span.start, false)?;
                 Some(start..query_offset(source, literals, span.end, true)?)

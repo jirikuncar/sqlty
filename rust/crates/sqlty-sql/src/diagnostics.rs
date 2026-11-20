@@ -29,6 +29,8 @@ pub struct NameDiagnostic {
     pub table: Option<String>,
     /// The column it is about: an unknown or ambiguous column, as the query spells it.
     pub column: Option<String>,
+    /// A rule reporting the same mistake: where it is on, this diagnostic is not shown.
+    pub shadowed_by: Option<Rule>,
 }
 
 #[derive(Default)]
@@ -91,12 +93,17 @@ impl Diagnostics {
         column: Option<&str>,
     ) {
         self.push(NameDiagnostic {
-            rule,
-            message: message.into(),
-            span: None,
-            replacement: None,
             table: table.map(str::to_string),
             column: column.map(str::to_string),
+            ..found(rule, message.into())
+        });
+    }
+
+    /// [`Diagnostics::record`], not shown where the rule `by` is on.
+    pub(crate) fn record_shadowed(&self, rule: Rule, message: impl Into<String>, by: Rule) {
+        self.push(NameDiagnostic {
+            shadowed_by: Some(by),
+            ..found(rule, message.into())
         });
     }
 
@@ -196,20 +203,26 @@ impl Drop for At {
     }
 }
 
+/// A diagnostic of `rule` saying `message`, about no name.
+fn found(rule: Rule, message: String) -> NameDiagnostic {
+    NameDiagnostic {
+        rule,
+        message,
+        span: None,
+        replacement: None,
+        table: None,
+        column: None,
+        shadowed_by: None,
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 
     fn found(rule: Rule, message: &str) -> NameDiagnostic {
-        NameDiagnostic {
-            rule,
-            message: message.to_string(),
-            span: None,
-            replacement: None,
-            table: None,
-            column: None,
-        }
+        super::found(rule, message.to_string())
     }
 
     #[test]
@@ -315,6 +328,7 @@ mod tests {
                 "chasm-join",
                 "unproven-join",
                 "entity-mismatch",
+                "foreign-key-mismatch",
                 "rejected-query",
             ]
         );

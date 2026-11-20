@@ -112,7 +112,7 @@ Promote `stale-type` to `error` once the converted modules are clean, and add
 `sqlty-ci`.
 
 Once the schema declares its primary, unique and foreign keys, fix the
-`fanout-aggregate` warnings, promote it to `error`, and consider turning on
+`fanout-aggregate` and `foreign-key-mismatch` warnings, promote them to `error`, and consider turning on
 `entity-mismatch` (off by default). See
 [Joins and aggregates](https://sqlty.kuncar.dev/guide/joins/).
 

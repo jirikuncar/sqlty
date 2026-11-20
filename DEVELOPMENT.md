@@ -227,13 +227,12 @@ src/sqlty/
 ├── _core.pyi            # Stub for sqlty._core (rust/crates/sqlty-ext/src/lib.rs)
 ├── _cli.py              # `sqlty` entry point: runs the Rust CLI, reports crashes
 ├── _config.py           # Configuration from sqlty.toml, pyproject.toml or Cargo.toml
-├── _check.py            # Python checks of check_source: row types, helper parameters
+├── _check.py            # Calls the Rust checks for check_source and breaking
 ├── _lint.py             # Lint rules: severity, diagnostics, RuleConfig
 ├── _decode.py           # Magic codec decoder
 ├── magic.py             # Magic codec registration
 ├── lexer.py             # Pygments lexer coloring the SQL in Python strings
-├── drivers/psycopg.py   # Typed psycopg helpers
-└── rules/               # One page per lint rule, printed by sqlty rule NAME
+└── drivers/psycopg.py   # Typed psycopg helpers
 rust/
 ├── Cargo.toml           # Workspace root: shared deps and package metadata
 ├── fuzz/                # cargo-fuzz target over the playground requests
@@ -241,6 +240,7 @@ rust/
     ├── sqlty-sql/       # No PyO3, no I/O: analyzer/ (type inference, nullability,
     │   │                # completion, hover), catalog/ (schemas, name index), ddl.rs
     │   └── rules/       # Inference rules (*.inference.toml), compiled by build.rs
+    ├── sqlty-rules/     # Lint rule registry, generated from docs/reference/rules/*.md
     ├── sqlty-python/    # Python source: ruff parser, rewriter, checker, fixer, row types
     ├── sqlty-format/    # sqlty format: query strings laid out by sqruff
     ├── sqlty-project/   # A project read from disk: settings, helpers, checks
