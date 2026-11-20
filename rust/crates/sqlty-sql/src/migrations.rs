@@ -89,7 +89,7 @@ struct Model {
     applied: FxHashMap<String, usize>,
     /// Tables, materialized views and indexes created by new statements: empty and unused.
     created: FxHashSet<String>,
-    /// The table of each index a new statement created.
+    /// The table of each index a new statement created, by its name in the schema of the table.
     index_tables: FxHashMap<String, String>,
     /// The tables the baseline and earlier statements create.
     tables: FxHashSet<String>,
@@ -203,7 +203,12 @@ impl Model {
                 }
                 if let Some(Statement::CreateIndex(index)) = &parsed {
                     if let Some(name) = &index.name {
-                        self.index_tables.insert(key(name), key(&index.table_name));
+                        let table = key(&index.table_name);
+                        let index = match table.rsplit_once('.') {
+                            Some((schema, _)) => format!("{schema}.{}", key(name)),
+                            None => key(name),
+                        };
+                        self.index_tables.insert(index, table);
                     }
                 }
                 let created = parsed.as_ref().and_then(created);
@@ -1598,8 +1603,9 @@ mod tests {
             "REINDEX TABLE CONCURRENTLY users",
             "REFRESH MATERIALIZED VIEW CONCURRENTLY mv",
             "CREATE TABLE t (id int); CREATE INDEX t_id ON t (id); CLUSTER t; VACUUM FULL t",
-            "CREATE TABLE t (id int); REINDEX TABLE t",
+            "CREATE TABLE t (id int); CREATE INDEX ON t (id); REINDEX TABLE t",
             "CREATE TABLE t (id int); CREATE INDEX t_id ON t (id); REINDEX INDEX t_id",
+            "CREATE TABLE s.t (id int); CREATE INDEX t_id ON s.t (id); REINDEX INDEX s.t_id",
             "CREATE TABLE t (id int); REINDEX (VERBOSE) TABLE t",
             "CREATE TABLE t (id int); CLUSTER (VERBOSE) t",
             "CREATE TABLE t (id int); CREATE INDEX i ON t (id); CLUSTER i ON t",
@@ -1613,6 +1619,8 @@ mod tests {
         for sql in [
             "REINDEX (VERBOSE) TABLE users",
             "REINDEX INDEX users_pkey",
+            "REINDEX SCHEMA public",
+            "CREATE TABLE s.t (id int); CREATE INDEX t_id ON s.t (id); REINDEX INDEX t_id",
             "CREATE INDEX users_email ON users (email); REINDEX INDEX users_email",
             "CLUSTER (VERBOSE) users",
             "CLUSTER users_pkey ON users",
@@ -1636,6 +1644,7 @@ mod tests {
             "VACUUM (FULL true) users (id)",
             "VACUUM FULL users, mv",
             "VACUUM FULL ANALYZE users",
+            "VACUUM (FULL)",
             "CREATE TABLE t (id int); VACUUM FULL t, users",
             "VACUUM FULL",
         ] {
