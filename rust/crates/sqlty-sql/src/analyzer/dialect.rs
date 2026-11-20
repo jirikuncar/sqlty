@@ -317,7 +317,6 @@ mod tests {
                 "metadata",
                 "--format-version",
                 "1",
-                "--offline",
                 "--manifest-path",
             ])
             .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"))
