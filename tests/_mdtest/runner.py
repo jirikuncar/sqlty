@@ -144,18 +144,14 @@ class Run:
                     )
                 return fixed.strip()
             case "formatted":
-                formatted = core.format_source(
-                    text, dialect=self.dialect, import_style=self.import_style
-                )
+                formatted = core.format_source(text, self._settings)
                 formatted = _parses(text, formatted)
-                again = core.format_source(
-                    formatted, dialect=self.dialect, import_style=self.import_style
-                )
+                again = core.format_source(formatted, self._settings)
                 if again != formatted:
                     raise AssertionError(f"format is not idempotent; a second run gives:\n{again}")
                 return formatted.strip()
             case "stripped":
-                stripped = core.strip_source(text, import_style=self.import_style)
+                stripped = core.strip_source(text, self._settings)
                 return _parses(text, stripped, same_strings=True).strip()
             case "decoded":
                 from sqlty._decode import decode
@@ -165,14 +161,7 @@ class Run:
             case "completions":
                 if unit.cursor is None:
                     raise AssertionError("`# completions:` needs a <CURSOR> in the code")
-                found = core.complete_source(
-                    text,
-                    *unit.cursor,
-                    dialect=self.dialect,
-                    schema_sql=self.schema_sql,
-                    import_style=self.import_style,
-                    helpers=self._helpers,
-                )
+                found = core.complete_source(text, *unit.cursor, self._settings)
                 if found is None or not found.items:
                     return "None"
                 lines = [f"{c.label} {c.kind} {c.detail or '-'}" for c in found.items]
@@ -188,16 +177,11 @@ class Run:
                     dialect=self.dialect,
                     schema_sql=self.schema_sql,
                     import_style=self.import_style,
-                    helper_starts=core._helper_starts(parsed, self._helpers),  # noqa: SLF001
+                    helper_starts=core._helper_starts(parsed, self._settings),  # noqa: SLF001
                 )
                 return "None" if hovered is None else hovered[2]
             case "highlighted":
-                found = core.highlight_source(
-                    text,
-                    dialect=self.dialect,
-                    import_style=self.import_style,
-                    helpers=self._helpers,
-                )
+                found = core.highlight_source(text, self._settings)
                 encoded = text.encode()
                 return (
                     "\n".join(
@@ -212,29 +196,10 @@ class Run:
                 raise AssertionError("errors are matched per line")
 
     def _fix(self, text: str) -> str:
-        return core.fix_source(
-            text,
-            dialect=self.dialect,
-            schema_sql=self.schema_sql,
-            import_style=self.import_style,
-            untyped=self.untyped,
-            rules=self.rules,
-            json_types=self.json_types,
-            param_types=self.param_types,
-            closed_params=self.closed_params,
-        )
+        return core.fix_source(text, self._settings)
 
     def _rewrite(self, text: str) -> str:
-        return core.rewrite_source(
-            text,
-            dialect=self.dialect,
-            schema_sql=self.schema_sql,
-            import_style=self.import_style,
-            untyped=self.untyped,
-            json_types=self.json_types,
-            param_types=self.param_types,
-            closed_params=self.closed_params,
-        )
+        return core.rewrite_source(text, self._settings)
 
     @cached_property
     def _imports(self) -> set[str]:
@@ -245,6 +210,22 @@ class Run:
             else set()
         )
         return {"import datetime", "import typing", "import uuid", style, *extra}
+
+    @cached_property
+    def _settings(self) -> core.Settings:
+        return core.Settings(
+            dialect=self.dialect,
+            schema_sql=self.schema_sql,
+            rules=self.rules,
+            import_style=self.import_style,
+            untyped=self.untyped,
+            helpers=self._helpers,
+            query_variants=self.query_variants,
+            coerce_row_types=self.coerce_row_types,
+            json_types=self.json_types,
+            param_types=self.param_types,
+            closed_params=self.closed_params,
+        )
 
     @cached_property
     def _helpers(self) -> core.HelperIndex | None:
@@ -295,30 +276,9 @@ class Run:
                     rules=self.rules,
                 )
         elif self.against_sql is not None:
-            found = core.breaking_source(
-                code.text,
-                schema_sql=self.schema_sql,
-                against_sql=self.against_sql,
-                dialect=self.dialect,
-                rules=self.rules,
-                import_style=self.import_style,
-                untyped=self.untyped,
-                helpers=self._helpers,
-                query_variants=self.query_variants,
-                coerce_row_types=self.coerce_row_types,
-            )
+            found = core.breaking_source(code.text, self._settings, against_sql=self.against_sql)
         else:
-            found = core.check_source(
-                code.text,
-                dialect=self.dialect,
-                schema_sql=self.schema_sql,
-                rules=self.rules,
-                import_style=self.import_style,
-                untyped=self.untyped,
-                helpers=self._helpers,
-                query_variants=self.query_variants,
-                coerce_row_types=self.coerce_row_types,
-            )
+            found = core.check_source(code.text, self._settings)
         parsed = core.ParsedSource(code.text)
 
         def column(offset: int, line: int) -> str:

@@ -31,7 +31,7 @@ from pygments.lexer import Lexer
 from pygments.lexers.python import PythonLexer
 from pygments.token import Comment, Keyword, Name, Number, Operator, String, _TokenType
 
-from sqlty.core import highlight_source
+from sqlty.core import Settings, highlight_source
 
 SQL_TOKENS: dict[str, _TokenType] = {
     "keyword": Keyword,
@@ -54,7 +54,9 @@ class SQLTyLexer(Lexer):
         char = [i for i, c in enumerate(text) for _ in c.encode()] + [len(text)]
         spans = [
             (char[h.start], char[h.end], SQL_TOKENS[h.kind])
-            for h in highlight_source(text, dialect=self.options.get("dialect", "postgres"))
+            for h in highlight_source(
+                text, Settings(dialect=self.options.get("dialect", "postgres"))
+            )
         ]
         found = 0
         for start, kind, value in PythonLexer(**self.options).get_tokens_unprocessed(text):

@@ -194,7 +194,7 @@ def test_a_composition_reading_another_module_needs_a_helper_index() -> None:
     from sqlty.core import ParsedSource, _helper_sites
 
     source = COMPOSING + 'run(sql.SQL("SELECT {} FROM t").format(cols.COLS))\n'
-    assert _helper_sites(ParsedSource(source), None, None) == [(None, [], "unchecked-query", None)]
+    assert _helper_sites(ParsedSource(source), None) == [(None, [], "unchecked-query", None)]
 
 
 def test_a_composition_nested_too_deep_is_unchecked() -> None:
@@ -204,4 +204,4 @@ def test_a_composition_nested_too_deep_is_unchecked() -> None:
     for _ in range(65):
         composed = f'sql.SQL("{{}}").format({composed})'
     source = COMPOSING + f"run({composed})\n"
-    assert _helper_sites(ParsedSource(source), None, None) == [(None, [], "unchecked-query", None)]
+    assert _helper_sites(ParsedSource(source), None) == [(None, [], "unchecked-query", None)]
