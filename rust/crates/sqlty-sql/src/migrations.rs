@@ -475,16 +475,18 @@ impl Model {
             .windows(2)
             .any(|pair| matches!(pair[0].as_str(), "::" | "as") && pair[1] == short);
         let positional = match parse(stmt) {
-            Some((Statement::Insert(insert), _)) if insert.columns.is_empty() => {
-                match &insert.table {
-                    TableObject::TableName(table) => {
-                        let table = key(table);
-                        self.types
-                            .keys()
-                            .any(|column| column.0 == table && typed(column))
-                    }
-                    _ => false,
-                }
+            Some((
+                Statement::Insert(Insert {
+                    table: TableObject::TableName(table),
+                    columns,
+                    ..
+                }),
+                _,
+            )) if columns.is_empty() => {
+                let table = key(&table);
+                self.types
+                    .keys()
+                    .any(|column| column.0 == table && typed(column))
             }
             _ => false,
         };
@@ -1829,7 +1831,8 @@ mod tests {
             CREATE TABLE bounded (at date NOT NULL, price int, CHECK (at >= '2026-10-01'));
             CREATE TABLE nullable (at date, CHECK (at >= '2026-10-01'));
             CREATE TABLE proven (at date CHECK (at IS NOT NULL), CHECK (at >= '2026-10-01'));
-            CREATE TABLE bare (at date);";
+            CREATE TABLE bare (at date);
+            CREATE TABLE keyed (at date, PRIMARY KEY (at), CHECK (at >= '2026-10-01'));";
         let bounds = "FOR VALUES FROM ('2026-10-01') TO ('2026-11-01')";
         let validated = "ALTER TABLE open ADD CONSTRAINT b CHECK (at >= '2026-10-01') NOT VALID;
             ALTER TABLE open VALIDATE CONSTRAINT b;";
@@ -1844,6 +1847,8 @@ mod tests {
                 &[Rule::ConstraintScan],
             ),
             ("", "proven", &[]),
+            ("ALTER TABLE keyed DROP CONSTRAINT gone;", "keyed", &[]),
+            ("ALTER TABLE bare DROP CONSTRAINT gone;", "bare", &[Rule::ConstraintScan]),
             (
                 "ALTER TABLE bare ADD CONSTRAINT nn CHECK (at IS NOT NULL) NOT VALID; ALTER TABLE bare VALIDATE CONSTRAINT nn;",
                 "bare",
