@@ -78,7 +78,19 @@ CREATE INDEX users_archive_email ON users_archive (email);
 SET lock_timeout = '1s';
 -- error: [constraint-scan] "`ATTACH PARTITION` scans `events_09` for rows outside its bounds"
 ALTER TABLE events ATTACH PARTITION events_09 FOR VALUES FROM ('2026-09-01') TO ('2026-10-01');
+ALTER TABLE events_10 ADD CONSTRAINT events_10_at CHECK (at IS NOT NULL) NOT VALID;
+ALTER TABLE events_10 VALIDATE CONSTRAINT events_10_at;
 ALTER TABLE events_10 ADD CONSTRAINT events_10_bounds CHECK (at >= '2026-10-01' AND at < '2026-11-01') NOT VALID;
 ALTER TABLE events_10 VALIDATE CONSTRAINT events_10_bounds;
 ALTER TABLE events ATTACH PARTITION events_10 FOR VALUES FROM ('2026-10-01') TO ('2026-11-01');
+```
+
+## A new partition scans the default partition
+
+```sql migration
+SET lock_timeout = '1s';
+-- error: [constraint-scan] "`ATTACH PARTITION` scans `events_rest`"
+ALTER TABLE events ATTACH PARTITION events_rest DEFAULT;
+-- error: [constraint-scan] "a new partition of `events` scans its default partition `events_rest`"
+CREATE TABLE events_10 PARTITION OF events FOR VALUES FROM ('2026-10-01') TO ('2026-11-01');
 ```

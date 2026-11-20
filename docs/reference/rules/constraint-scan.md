@@ -16,8 +16,10 @@ Default severity: **warn**
 Reports a new statement that makes PostgreSQL check every existing row while it
 holds a lock that blocks writes: a `FOREIGN KEY` or `CHECK` constraint added
 without `NOT VALID`, an `EXCLUDE` constraint, which has no `NOT VALID`,
-`SET NOT NULL` on a column without a validated `CHECK (column IS NOT NULL)`, and
-`ATTACH PARTITION` of a table without a validated `CHECK`.
+`SET NOT NULL` on a column without a validated `CHECK (column IS NOT NULL)`,
+`ATTACH PARTITION` of a table without a validated `CHECK` on the partition key
+and a `NOT NULL` key, and a new partition of a table that has a default
+partition, which PostgreSQL scans for rows of the new one.
 
 `against.sql`:
 
@@ -59,7 +61,8 @@ EXCLUSIVE`, which lets reads and writes go on.
 
 Add the constraint `NOT VALID`, then `VALIDATE CONSTRAINT` it as a separate
 statement. For `SET NOT NULL`, validate a `CHECK (column IS NOT NULL)` first;
-before `ATTACH PARTITION`, validate a `CHECK` that matches the partition bounds;
+before `ATTACH PARTITION`, make the key `NOT NULL` and validate a `CHECK` that
+matches the partition bounds;
 drop it afterwards if you like.
 
 ## Configuration

@@ -58,7 +58,7 @@ migrations/0042_index.sql:2: [missing-concurrently] `CREATE INDEX` blocks writes
 |------|-----|
 | `missing-concurrently` | `CREATE INDEX CONCURRENTLY`, `DROP INDEX CONCURRENTLY`; `UNIQUE` via `CREATE UNIQUE INDEX CONCURRENTLY` then `ADD CONSTRAINT ... USING INDEX` |
 | `concurrently-in-transaction` | move the statement out of `BEGIN` ... `COMMIT` (Django `atomic = False`, Alembic `autocommit_block()`) |
-| `constraint-scan` | add the constraint `NOT VALID`, then `VALIDATE CONSTRAINT`; for `SET NOT NULL`, validate a `CHECK (col IS NOT NULL)` first; before `ATTACH PARTITION`, validate a `CHECK` matching the bounds |
+| `constraint-scan` | add the constraint `NOT VALID`, then `VALIDATE CONSTRAINT`; for `SET NOT NULL`, validate a `CHECK (col IS NOT NULL)` first; before `ATTACH PARTITION`, make the key `NOT NULL` and validate a `CHECK` matching the bounds |
 | `table-rewrite` | add the column without a volatile default and backfill; change a type through a new column |
 | `add-required-column` | add the column nullable or with a constant `DEFAULT` |
 | `missing-lock-timeout` | start the migration with `SET lock_timeout = '2s';` |
