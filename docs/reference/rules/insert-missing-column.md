@@ -1,9 +1,9 @@
 ---
-order: 310
+order: 250
 group: "names"
 severity: "error"
 fixable: false
-summary: "INSERT leaves out a NOT NULL column that has no default"
+summary: "INSERT that leaves out a NOT NULL column without a default"
 origin: "SQL"
 ---
 

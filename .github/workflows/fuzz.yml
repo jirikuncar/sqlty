@@ -1,6 +1,6 @@
 name: Fuzz
 
-# On demand: the Python property tests, the analyzer compared with PostgreSQL among them.
+# On demand: the property tests of rust/fuzz, the analyzer compared with PostgreSQL among them.
 on:
   workflow_dispatch:
     inputs:
@@ -8,15 +8,11 @@ on:
         description: Examples per property
         default: "2000"
       seed:
-        description: Hypothesis seed (empty for a random one)
+        description: Seed (PROPTEST_RNG_SEED, empty for a random one)
         default: ""
 
 permissions:
   contents: read
-
-# `uv run` must not sync: that would build the extension again, through the release profile.
-env:
-  UV_NO_SYNC: "1"
 
 jobs:
   fuzz:
@@ -38,41 +34,28 @@ jobs:
 
     env:
       SQLTY_PG_DSN: postgresql://postgres:postgres@localhost:5432/postgres
-      SQLTY_FUZZ: "1"
       SQLTY_FUZZ_EXAMPLES: ${{ inputs.examples }}
+      SQLTY_FUZZ_PYTHON: ${{ github.workspace }}/.venv/bin/python
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: $/.github/actions/setup
         with:
-          version: "0.13.7"
-          enable-cache: true
-          # Built wheels (duckdb has none for 3.15) are kept with the lock; main writes them.
-          cache-dependency-glob: uv.lock
-          # Jobs install different groups: each keeps its own cache.
-          cache-suffix: ${{ github.job }}
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
           python-version: "3.14"
 
-      - name: Install Rust toolchain
-        run: rustup toolchain install
-
+      # Rewritten code runs against this checkout's `sqlty` package, without the extension.
       - name: Install the dependencies
-        run: uv sync --all-groups --no-group duckdb --no-install-project
+        run: uv sync --no-install-project --no-dev --extra psycopg
 
-      - name: Build Rust extension
-        run: uv run maturin develop --release --manifest-path rust/crates/sqlty-ext/Cargo.toml
+      - name: Build the property tests
+        run: cargo test --release --manifest-path rust/fuzz/Cargo.toml --test properties --no-run
 
-      # Every Python property test in one run: the analyzer against PostgreSQL, query
-      # variants, parameters and foreign-key-mismatch.
       - name: Fuzz
         env:
-          SEED: ${{ inputs.seed }}
+          PROPTEST_RNG_SEED: ${{ inputs.seed }}
         run: >-
-          uv run pytest -p no:randomly -q ${SEED:+"--hypothesis-seed=$SEED"}
-          tests/test_fuzz.py tests/test_query_variants_fuzz.py tests/test_params_fuzz.py
-          tests/fuzz_foreign_keys.py
+          cargo test --release --manifest-path rust/fuzz/Cargo.toml --test properties
+          -- --nocapture

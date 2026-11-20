@@ -1,5 +1,5 @@
 ---
-order: 420
+order: 160
 group: "query"
 severity: "ignore"
 fixable: false
