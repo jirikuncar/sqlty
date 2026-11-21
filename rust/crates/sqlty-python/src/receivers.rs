@@ -876,7 +876,12 @@ impl<'s, 'a> Resolver<'s, 'a> {
 
     /// The helper the method `name` of `class` is, on the class or on an instance.
     fn method_in(&self, class: &Class, name: &str) -> Option<&'s Helper> {
-        for base in self.order(class)?.iter() {
+        // A class whose bases have no order still has the methods it declares itself.
+        let order = self.order(class);
+        let classes = order
+            .as_deref()
+            .map_or(std::slice::from_ref(class), Vec::as_slice);
+        for base in classes {
             let key = format!("{}.{name}", base.name);
             let own = (base.module == self.module)
                 .then(|| self.own.get(&key))
@@ -1859,15 +1864,29 @@ impl<'s, 'a> Resolver<'s, 'a> {
         }
         let mut direct: Vec<Class> = Vec::new();
         let mut orders: Vec<Vec<Class>> = Vec::new();
-        for base in &known.bases {
+        for (index, base) in known.bases.iter().enumerate() {
             let (base, order) = match self.eval(base, Env::top(&class.module), 1) {
                 Some(Value::Type(base)) => {
                     let order = self.order(&base)?;
                     (base, (*order).clone())
                 }
                 Some(Value::Unresolved(base)) => (base.clone(), vec![base]),
+                // A base that is not followed is a class of its own, and the lookup of
+                // a method ends at it. Two classes of the module share one they both
+                // spell by the same dotted name, as `dict`, when the module binds the
+                // head of that name no more than once: a name bound again, and a base
+                // that is computed, is another class wherever it is written.
                 _ => {
-                    let unknown = Class::new(NOWHERE, "");
+                    let once = |name: &String| {
+                        let head = name.split('.').next().unwrap_or(name);
+                        let bound = facts.as_ref().and_then(|facts| facts.names.get(head));
+                        bound.is_none_or(|bound| bound.len() <= 1)
+                    };
+                    let spelled = match dotted_val(base).filter(once) {
+                        Some(name) => format!("{}:{name}", class.module),
+                        None => format!("{}:{}#{index}", class.module, class.name),
+                    };
+                    let unknown = Class::new(NOWHERE, &spelled);
                     (unknown.clone(), vec![unknown])
                 }
             };
@@ -1888,6 +1907,15 @@ impl<'s, 'a> Resolver<'s, 'a> {
         }
         // The class, and as many as a merge holds when it ends.
         (merged.len() <= MAX_ORDER + 2).then_some(merged)
+    }
+}
+
+/// The dotted name `val` is written as, when it is one.
+fn dotted_val(val: &Val) -> Option<String> {
+    match val {
+        Val::Name(name) => Some(name.clone()),
+        Val::Attr(base, attr) => Some(format!("{}.{attr}", dotted_val(base)?)),
+        _ => None,
     }
 }
 

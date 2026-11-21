@@ -1775,6 +1775,127 @@ def run(wrong: Wrong) -> None:
 # error:
 ```
 
+A class with such bases still has the helpers it declares itself.
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+class A: ...
+class B: ...
+class Left(A, B): ...
+class Right(B, A): ...
+
+class Wrong(Left, Right):
+    def one[T](self, query: Annotated[LiteralString, SQL], form: type[T], /) -> T | None: ...
+
+def run(wrong: Wrong) -> None:
+    # error: [column-type-mismatch]
+    wrong.one("SELECT name FROM users", int)
+```
+
+### Bases that are not followed
+
+A base that is not found, or one the standard library defines, is not read: each is a
+class of its own, so two of them are not the same base twice. The helpers the class
+declares itself are found, on `self` too; a method it does not declare may be one of
+such a base, and is skipped.
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+from missing.models import db, other
+
+class Store(dict, object):
+    def one[T](self, query: Annotated[LiteralString, SQL], form: type[T], /) -> T | None: ...
+
+    def first(self) -> None:
+        # error: [column-type-mismatch]
+        self.one("SELECT name FROM users", int)
+
+class Repo(db.Model, other.Base):
+    @staticmethod
+    def stat[T](query: Annotated[LiteralString, SQL], form: type[T], /) -> T | None: ...
+
+class Failed(Exception, dict):
+    def one[T](self, query: Annotated[LiteralString, SQL], form: type[T], /) -> T | None: ...
+
+def run(store: Store, repo: Repo) -> None:
+    # error: [column-type-mismatch]
+    store.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch]
+    Store().one("SELECT name FROM users", int)
+    # error: [column-type-mismatch]
+    Repo.stat("SELECT name FROM users", int)
+    # error: [column-type-mismatch]
+    Failed().one("SELECT name FROM users", int)
+    repo.get("SELECT name FROM users", int)
+```
+
+Two classes that name the same base share it: `Second` comes before `dict` for
+`Both`, and its helper is found. A base that is computed is another class wherever it
+is written, and may define the method before `Second` does.
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def make_one(): ...
+def make_two(): ...
+
+class First(dict): ...
+
+class Second(dict):
+    held: "Second"
+
+    def one[T](self, query: Annotated[LiteralString, SQL], form: type[T], /) -> T | None: ...
+
+class Both(First, Second): ...
+
+class Made(make_one()): ...
+
+class Other(make_two()):
+    held: "Other"
+
+    def one[T](self, query: Annotated[LiteralString, SQL], form: type[T], /) -> T | None: ...
+
+class Either(Made, Other): ...
+
+def run(both: Both, either: Either) -> None:
+    # error: [column-type-mismatch]
+    both.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch]
+    both.held.one("SELECT name FROM users", int)
+    either.one("SELECT name FROM users", int)
+    either.held.one("SELECT name FROM users", int)
+    Either().one("SELECT name FROM users", int)
+```
+
+A name the module binds twice may be another class at each class statement: the two
+bases are not shared.
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+from missing import models, other
+
+Base = models.Model
+
+class First(Base): ...
+
+Base = other.Model
+
+class Second(Base):
+    def one[T](self, query: Annotated[LiteralString, SQL], form: type[T], /) -> T | None: ...
+
+class Both(First, Second): ...
+
+def run(both: Both, second: Second) -> None:
+    both.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch]
+    second.one("SELECT name FROM users", int)
+```
+
 ## A registered method applies to subclasses
 
 ```toml
