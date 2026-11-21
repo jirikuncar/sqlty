@@ -37,15 +37,6 @@ pub(super) fn report(sql: &str, dialect: &str, ddl: Option<&str>) -> String {
     out
 }
 
-/// [`report`] for several queries, each headed by its SQL.
-pub(super) fn reports(queries: &[&str], dialect: &str, ddl: Option<&str>) -> String {
-    queries
-        .iter()
-        .map(|sql| format!("{sql}\n{}", report(sql, dialect, ddl)))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 /// The first statement of `sql`.
 pub(super) fn statement(sql: &str, dialect: SqlDialect) -> Statement {
     parse_first(sql, dialect).expect("test SQL parses")

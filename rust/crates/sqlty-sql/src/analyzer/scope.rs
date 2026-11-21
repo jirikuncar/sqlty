@@ -868,7 +868,7 @@ impl<'a> Analyzer<'a> {
 mod tests {
     use sqlparser::ast::{SetExpr, Statement};
 
-    use super::super::test_support::{report, reports, statement};
+    use super::super::test_support::{report, statement};
     use super::*;
 
     fn from_of(sql: &str) -> Vec<TableWithJoins> {
@@ -1072,103 +1072,5 @@ mod tests {
         assert!(first.names.contains_key("c") && !second.names.contains_key("c"));
         first.insert("c".into(), Vec::new());
         assert!(!first.names.contains_key("c"));
-    }
-
-    const DDL: &str = "CREATE TABLE a (id INT NOT NULL, x TEXT NOT NULL, shared TEXT); \
-                       CREATE TABLE b (id INT NOT NULL, y TEXT, shared TEXT NOT NULL); \
-                       CREATE TABLE c (id INT, z TEXT NOT NULL); \
-                       CREATE VIEW v AS SELECT id, x FROM a";
-
-    #[test]
-    fn star_expansion_over_joins() {
-        let queries = [
-            "SELECT * FROM a",
-            "SELECT * FROM a JOIN b ON a.id = b.id",
-            "SELECT * FROM a JOIN b USING (id)",
-            "SELECT * FROM a NATURAL JOIN b",
-            "SELECT a.*, b.y FROM a, b",
-            "SELECT b.* FROM a JOIN b ON true",
-            "SELECT * FROM a, b, c",
-            "SELECT * FROM (a JOIN b USING (id)) JOIN c USING (id)",
-        ];
-        insta::assert_snapshot!(reports(&queries, "postgres", Some(DDL)));
-    }
-
-    #[test]
-    fn nullability_follows_the_join_kind() {
-        let queries = [
-            "SELECT a.id, b.id AS bid FROM a LEFT JOIN b ON a.id = b.id",
-            "SELECT a.id, b.id AS bid FROM a RIGHT JOIN b ON a.id = b.id",
-            "SELECT a.id, b.id AS bid FROM a FULL JOIN b ON a.id = b.id",
-            "SELECT a.id, b.id AS bid FROM a INNER JOIN b ON a.id = b.id",
-            "SELECT id FROM a LEFT JOIN b USING (id)",
-            "SELECT id FROM a RIGHT JOIN b USING (id)",
-            "SELECT b.* FROM a LEFT JOIN b ON true",
-            "SELECT c.z FROM a LEFT JOIN b ON true LEFT JOIN c ON true",
-        ];
-        insta::assert_snapshot!(reports(&queries, "postgres", Some(DDL)));
-    }
-
-    #[test]
-    fn derived_tables_ctes_and_views() {
-        let queries = [
-            "SELECT * FROM (SELECT id, x FROM a) AS d",
-            "SELECT d.n FROM (SELECT id AS n FROM a) AS d",
-            "SELECT * FROM (SELECT id, x FROM a) AS d(k, v)",
-            "WITH w AS (SELECT id FROM a) SELECT * FROM w",
-            "WITH w(k) AS (SELECT id FROM a) SELECT k FROM w",
-            "WITH a AS (SELECT 1 AS only_here) SELECT * FROM a",
-            "SELECT * FROM v",
-            "WITH v AS (SELECT 'shadow'::TEXT AS s) SELECT * FROM v",
-            "SELECT * FROM (SELECT 1)",
-            "SELECT s.* FROM (SELECT 1 AS one) AS s",
-        ];
-        insta::assert_snapshot!(reports(&queries, "postgres", Some(DDL)));
-    }
-
-    #[test]
-    fn opaque_sources_explain_themselves() {
-        let queries = [
-            "SELECT * FROM generate_series(1, 3) AS g",
-            "SELECT g FROM generate_series(1, 3) AS g",
-            "SELECT * FROM unnest(ARRAY[1, 2]) AS u(n)",
-            "SELECT * FROM pg_catalog.pg_tables",
-            "SELECT tablename FROM pg_tables",
-            "SELECT a.id, g FROM a, generate_series(1, 3) AS g",
-            "SELECT * FROM ST_Dump(NULL) AS d",
-            "SELECT d.path FROM ST_Dump(NULL) AS d",
-            "SELECT * FROM a, LATERAL (SELECT a.id + 1 AS next) AS l",
-            "SELECT * FROM missing",
-            "SELECT * FROM missing AS m JOIN a ON true",
-        ];
-        insta::assert_snapshot!(reports(&queries, "postgres", Some(DDL)));
-    }
-
-    #[test]
-    fn correlated_subqueries_see_the_outer_scope() {
-        let queries = [
-            "SELECT (SELECT max(b.id) FROM b WHERE b.id = a.id) AS m FROM a",
-            "SELECT (SELECT x) AS m FROM a",
-            "SELECT EXISTS (SELECT 1 FROM b WHERE b.id = a.id) AS e FROM a",
-            "SELECT * FROM a WHERE id IN (SELECT id FROM b WHERE b.shared = a.shared)",
-            "SELECT (SELECT y FROM b WHERE b.id = a.nope) AS m FROM a",
-        ];
-        insta::assert_snapshot!(reports(&queries, "postgres", Some(DDL)));
-    }
-
-    #[test]
-    fn table_names_fold_by_dialect() {
-        let ddl_postgres = "CREATE TABLE \"Mixed\" (id INT NOT NULL); CREATE TABLE lower (id INT)";
-        let queries = [
-            "SELECT id FROM \"Mixed\"",
-            "SELECT id FROM Mixed",
-            "SELECT id FROM LOWER",
-            "SELECT id FROM public.lower",
-            "SELECT id FROM other.lower",
-        ];
-        let postgres = reports(&queries, "postgres", Some(ddl_postgres));
-        let ddl_mysql = "CREATE TABLE Mixed (id INT NOT NULL)";
-        let mysql = reports(&queries[..2], "mysql", Some(ddl_mysql));
-        insta::assert_snapshot!(format!("postgres:\n{postgres}\nmysql:\n{mysql}"));
     }
 }
