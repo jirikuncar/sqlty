@@ -586,6 +586,13 @@ mod tests {
         (loader, stmt)
     }
 
+    #[test]
+    fn changing_a_table_that_is_not_there_does_nothing() {
+        let mut loader = Loader::new(SqlDialect::Postgres);
+        loader.change_table("public.t".to_string(), |_| unreachable!());
+        assert!(loader.relations.is_empty());
+    }
+
     // Only dialects whose `ALTER` the loader does not read parse these.
     #[test]
     fn an_operation_it_cannot_follow_leaves_the_table_unknown() {
