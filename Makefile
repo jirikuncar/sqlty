@@ -90,6 +90,10 @@ bench-ab:  ## Interleaved A/B of `sqlty check`, BASE (default origin/main) vs th
 bench-baseline:  ## Re-record the CI-size baseline for this platform
 	uv run python benchmarks/bench_project.py --size ci --repeats 7 --update-baseline
 
+.PHONY: bench-corpus
+bench-corpus:  ## sqlty check on pinned real repositories (clones them); extra args via ARGS=
+	uv run python benchmarks/corpus.py $(ARGS)
+
 .PHONY: bench-codspeed
 bench-codspeed:  ## The benchmarks CodSpeed measures in CI, timed locally; needs a release build
 	uv run --group bench pytest benchmarks/ --codspeed -n 0 -p no:randomly --no-cov
