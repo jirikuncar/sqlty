@@ -12,8 +12,8 @@ use std::rc::Rc;
 use sqlparser::ast::InTarget;
 use sqlparser::ast::{
     visit_expressions, BinaryOperator, Expr, FromTable, FunctionArg, FunctionArgExpr,
-    FunctionArguments, JoinConstraint, JoinOperator, Select, SelectItem, SetExpr, Statement,
-    TableFactor, TableObject, TableWithJoins, Value,
+    FunctionArguments, JoinConstraint, JoinOperator, Select, SelectItem, SetExpr, SetOperator,
+    SetQuantifier, Statement, TableFactor, TableObject, TableWithJoins, Value,
 };
 use sqlparser::ast::{
     Assignment, AssignmentTarget, Function, Insert, LimitClause, ObjectName, OnConflictAction,
@@ -21,11 +21,11 @@ use sqlparser::ast::{
 };
 
 use crate::catalog::fold;
-use crate::placeholders::{self, Styles};
+use crate::placeholders::{self, Rewritten, Styles};
 
 use super::dialect::SqlDialect;
 use super::expr::{array_element, from_sql_type};
-use super::functions::arg_list;
+use super::functions::{arg_list, positional_args};
 use super::inference::{binary_rules, operand};
 use super::input::parser_input;
 use super::literals::strip;
@@ -135,6 +135,15 @@ impl Hints {
         }
     }
 
+    /// PostgreSQL resolves the parameter as text where nothing types it first.
+    fn add_untyped_text(&mut self, index: usize) {
+        self.0
+            .entry(index)
+            .or_default()
+            .untyped
+            .get_or_insert("TEXT");
+    }
+
     fn add(&mut self, index: usize, mut typed: Typed, nullability: Nullability) {
         let hint = self.0.entry(index).or_default();
         if hint.typed.python.is_none() && typed.python.is_some() {
@@ -157,7 +166,22 @@ impl Hints {
 /// (SQLAlchemy's `text()`), `@name` and `$name` in SQLite.
 pub fn analyze_params(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> Option<Vec<Param>> {
     let (dialect, schema) = super::route(sql, dialect, schema);
-    let dialect = SqlDialect::from_name(dialect);
+    params_of(sql, SqlDialect::from_name(dialect), schema, None)
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static PARSED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// [`analyze_params`] of `sql` as routed; `parsed` is the first statement of `sql` as
+/// written, which is used instead of parsing when no placeholder needs rewriting.
+pub(super) fn params_of(
+    sql: &str,
+    dialect: SqlDialect,
+    schema: Option<&SchemaData>,
+    parsed: Option<&Statement>,
+) -> Option<Vec<Param>> {
     let styles = Styles {
         question_marks: dialect != SqlDialect::Postgres,
         colon_names: matches!(dialect, SqlDialect::Sqlite | SqlDialect::Postgres),
@@ -165,32 +189,47 @@ pub fn analyze_params(sql: &str, dialect: &str, schema: Option<&SchemaData>) -> 
         dollar_numbers: dialect == SqlDialect::Postgres,
         backslash_escapes: dialect == SqlDialect::MySql,
     };
-    let read = |styles| {
-        let rewritten = placeholders::rewrite(sql, styles);
+    let rewritten = placeholders::rewrite(sql, styles);
+    let read = |rewritten: Rewritten| {
+        #[cfg(test)]
+        PARSED.with(|count| count.set(count.get() + 1));
         let input = parser_input(&rewritten.text, dialect);
         let stmt = parse(input.text(), dialect)?.into_iter().next()?;
         Some((stmt, rewritten.names))
     };
-    let (stmt, names) = read(styles).or_else(|| {
-        (dialect == SqlDialect::Postgres && sql.contains('?')).then(|| {
-            read(Styles {
-                question_marks: true,
-                ..styles
-            })
-        })?
-    })?;
+    let (owned, names);
+    let stmt = match parsed.filter(|_| rewritten.text == sql) {
+        Some(stmt) => {
+            names = rewritten.names;
+            stmt
+        }
+        None => {
+            (owned, names) = read(rewritten).or_else(|| {
+                (dialect == SqlDialect::Postgres && sql.contains('?')).then(|| {
+                    read(placeholders::rewrite(
+                        sql,
+                        Styles {
+                            question_marks: true,
+                            ..styles
+                        },
+                    ))
+                })?
+            })?;
+            &owned
+        }
+    };
     let analyzer = Analyzer::new(
         schema.unwrap_or_else(|| crate::catalog::empty(dialect)),
         dialect,
     );
     let mut hints = Hints::default();
-    let _ = visit_expressions(&stmt, |expr| {
+    let _ = visit_expressions(stmt, |expr| {
         if let Some(index) = placeholder_index(expr) {
             hints.0.entry(index).or_default();
         }
         ControlFlow::<()>::Continue(())
     });
-    analyzer.statement_params(&stmt, &mut hints);
+    analyzer.statement_params(stmt, &mut hints);
     let count = names
         .len()
         .max(hints.0.keys().next_back().copied().unwrap_or(0));
@@ -229,6 +268,14 @@ fn placeholder_index(expr: &Expr) -> Option<usize> {
         Expr::Nested(inner) => placeholder_index(inner),
         _ => None,
     }
+}
+
+/// The column an assignment stores in; empty, and so matching none, when it is no identifier.
+fn target_column(name: &ObjectName, dialect: SqlDialect) -> String {
+    name.0
+        .last()
+        .and_then(|part| part.as_ident())
+        .map_or_else(String::new, |ident| fold(ident, dialect))
 }
 
 fn is_typed(typed: &Typed) -> bool {
@@ -400,40 +447,25 @@ impl<'a> Analyzer<'a> {
                 .map(|ident| fold(ident, self.dialect))
                 .collect()
         };
-        match insert
-            .source
-            .as_deref()
-            .map(|query| (query, query.body.as_ref()))
-        {
-            Some((Query { with: None, .. }, SetExpr::Values(values))) => {
-                for row in &values.rows {
-                    for (position, expr) in row.content.iter().enumerate() {
-                        if let Some(column) = targets.get(position) {
-                            self.hint_stored(expr, &table, column, &Scope::new(), out);
-                        }
-                        self.walk_params(expr, &Scope::new(), out);
-                    }
-                }
-            }
-            Some((query, body)) => {
-                // `INSERT ... SELECT $1, $2`: a bare placeholder is stored in its column.
-                if let SetExpr::Select(select) = body {
-                    let (analyzer, select_scope) = self.scope_reading(&select.from);
-                    for (position, item) in select.projection.iter().enumerate() {
-                        // Past a `*`, the columns a value lands in are unknown.
-                        let (SelectItem::UnnamedExpr(expr)
-                        | SelectItem::ExprWithAlias { expr, .. }) = item
-                        else {
-                            break;
-                        };
-                        if let Some(column) = targets.get(position) {
-                            analyzer.hint_stored(expr, &table, column, &select_scope, out);
+        if let Some(source) = insert.source.as_deref() {
+            match (&source.with, source.body.as_ref()) {
+                (None, SetExpr::Values(values)) => {
+                    for row in &values.rows {
+                        for (position, expr) in row.content.iter().enumerate() {
+                            if let Some(column) = targets.get(position) {
+                                self.hint_stored(expr, &table, column, &Scope::new(), out);
+                            }
+                            self.walk_params(expr, &Scope::new(), out);
                         }
                     }
                 }
-                self.params_query(query, out);
+                (with, body) => {
+                    // PostgreSQL resolves `WITH ... VALUES ($1)` as text before it sees the target.
+                    let text = with.is_some() && matches!(body, SetExpr::Values(_));
+                    self.hint_rows(body, &table, &targets, text, out);
+                    self.params_query(source, out);
+                }
             }
-            None => {}
         }
         self.params_assignments(&insert.assignments, Some(&table), &scope, out);
         match &insert.on {
@@ -461,17 +493,123 @@ impl<'a> Analyzer<'a> {
         out: &mut Hints,
     ) {
         for assignment in assignments {
-            let column = match &assignment.target {
-                AssignmentTarget::ColumnName(name) => {
-                    name.0.last().and_then(|part| part.as_ident())
+            if let Some(table) = table {
+                match &assignment.target {
+                    AssignmentTarget::ColumnName(name) => {
+                        let column = target_column(name, self.dialect);
+                        self.hint_stored(&assignment.value, table, &column, scope, out);
+                    }
+                    // `SET (a, b) = ($1, $2)` or `= (SELECT $1, $2)`.
+                    AssignmentTarget::Tuple(names) => {
+                        let targets: Vec<String> = names
+                            .iter()
+                            .map(|name| target_column(name, self.dialect))
+                            .collect();
+                        match &assignment.value {
+                            Expr::Tuple(values) => {
+                                for (value, column) in values.iter().zip(&targets) {
+                                    self.hint_stored(value, table, column, scope, out);
+                                }
+                            }
+                            Expr::Subquery(query) => {
+                                self.hint_rows(&query.body, table, &targets, true, out);
+                            }
+                            Expr::Function(row)
+                                if object_name(&row.name).eq_ignore_ascii_case("row") =>
+                            {
+                                for (value, column) in
+                                    positional_args(&row.args).into_iter().zip(&targets)
+                                {
+                                    self.hint_stored(value, table, column, scope, out);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
                 }
-                AssignmentTarget::Tuple(_) => None,
-            };
-            if let (Some(table), Some(column)) = (table, column) {
-                let column = fold(column, self.dialect);
-                self.hint_stored(&assignment.value, table, &column, scope, out);
             }
             self.walk_params(&assignment.value, scope, out);
+        }
+    }
+
+    /// The rows `body` gives are stored in the `targets` columns of the schema `table`, by
+    /// position: a bare placeholder takes its column's type and nullability. Past a `*`, the
+    /// columns a value lands in are unknown. `text`: PostgreSQL resolves an untyped placeholder
+    /// here as text before it sees the target, as in a set operation or a sub-SELECT.
+    fn hint_rows(
+        &self,
+        body: &SetExpr,
+        table: &str,
+        targets: &[String],
+        text: bool,
+        out: &mut Hints,
+    ) {
+        match body {
+            SetExpr::Values(values) => {
+                for row in &values.rows {
+                    for (expr, column) in row.content.iter().zip(targets) {
+                        self.hint_stored(expr, table, column, &Scope::new(), out);
+                        if text {
+                            self.hint_untyped_text(expr, table, column, out);
+                        }
+                    }
+                }
+            }
+            SetExpr::Select(select) => {
+                let (analyzer, scope) = self.scope_reading(&select.from);
+                for (item, column) in select.projection.iter().zip(targets) {
+                    let (SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. }) =
+                        item
+                    else {
+                        break;
+                    };
+                    analyzer.hint_stored(expr, table, column, &scope, out);
+                    if text {
+                        analyzer.hint_untyped_text(expr, table, column, out);
+                    }
+                }
+            }
+            // Only `UNION` stores the rows of both sides, and `BY NAME` matches them by name.
+            SetExpr::SetOperation {
+                op,
+                set_quantifier,
+                left,
+                right,
+            } => {
+                self.hint_rows(left, table, targets, true, out);
+                let by_name = matches!(
+                    set_quantifier,
+                    SetQuantifier::ByName
+                        | SetQuantifier::AllByName
+                        | SetQuantifier::DistinctByName
+                );
+                if *op == SetOperator::Union && !by_name {
+                    self.hint_rows(right, table, targets, true, out);
+                }
+            }
+            SetExpr::Query(query) => self.hint_rows(&query.body, table, targets, text, out),
+            _ => {}
+        }
+    }
+
+    /// A bare placeholder stored in a column PostgreSQL can't assign text to is text to a
+    /// driver that sends it untyped (asyncpg).
+    fn hint_untyped_text(&self, value: &Expr, table: &str, column: &str, out: &mut Hints) {
+        if self.dialect != SqlDialect::Postgres {
+            return;
+        }
+        let Some(index) = placeholder_index(value) else {
+            return;
+        };
+        if let Some(col) = self
+            .schema
+            .table(table)
+            .and_then(|columns| columns.iter().find(|col| col.name == column))
+        {
+            let typed = col.typed(self.dialect);
+            if is_typed(&typed) && !is_text(&typed) {
+                out.add_untyped_text(index);
+            }
         }
     }
 
@@ -484,22 +622,14 @@ impl<'a> Analyzer<'a> {
         let Some(index) = self.shifted_placeholder(value, scope) else {
             return;
         };
-        if let Some(col) = self
-            .schema
-            .table(table)
-            .and_then(|columns| columns.iter().find(|col| col.name == column))
-        {
+        if let Some(col) = self.schema.column(table, column).flatten() {
             out.add_shifted(index, col.typed(self.dialect));
         }
     }
 
     /// Parameter `index` is stored in `column` of the schema `table`.
     fn hint_column(&self, table: &str, column: &str, index: usize, out: &mut Hints) {
-        let Some(col) = self
-            .schema
-            .table(table)
-            .and_then(|columns| columns.iter().find(|col| col.name == column))
-        else {
+        let Some(col) = self.schema.column(table, column).flatten() else {
             return;
         };
         out.add(
@@ -1286,7 +1416,7 @@ mod tests {
             (
                 "postgres",
                 "INSERT INTO users (id) SELECT 1 UNION SELECT %s",
-                vec!["-"],
+                vec!["int!"],
             ),
             ("postgres", "INSERT INTO users DEFAULT VALUES", vec![]),
             ("mysql", "INSERT INTO users SET name = %s", vec!["str!"]),
@@ -1308,7 +1438,23 @@ mod tests {
             (
                 "postgres",
                 "UPDATE users SET (name, age) = (%s, %s)",
-                vec!["-", "-"],
+                vec!["str!", "int?"],
+            ),
+            (
+                "postgres",
+                "UPDATE users SET (name, age) = f(%s)",
+                vec!["-"],
+            ),
+            (
+                "postgres",
+                "INSERT INTO users (id) SELECT %s UNION TABLE users",
+                vec!["int!"],
+            ),
+            // Only PostgreSQL and MySQL queries read `TABLE name` as `SELECT * FROM name`.
+            (
+                "sqlite",
+                "INSERT INTO users (id) SELECT ? UNION TABLE users",
+                vec!["int!"],
             ),
             (
                 "postgres",
@@ -1385,6 +1531,138 @@ mod tests {
             ("postgres", "SELECT f(%s, %s)", vec!["-", "int"]),
         ] {
             assert_eq!(found(dialect, sql), expected, "{sql}");
+        }
+    }
+
+    fn parses(f: impl FnOnce()) -> usize {
+        PARSED.with(|count| count.set(0));
+        f();
+        PARSED.with(std::cell::Cell::get)
+    }
+
+    #[test]
+    fn a_numbered_query_is_not_parsed_again() {
+        let sql = "SELECT $1::int, $2";
+        let parsed = crate::analyzer::parse(sql, "postgres");
+        let mut found = None;
+        assert_eq!(parses(|| found = parsed.params(sql, None)), 0);
+        let found = found.unwrap_or_default();
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].python_type.as_deref(), Some("int"));
+        let sql = "SELECT data ? 'a' FROM t";
+        let parsed = crate::analyzer::parse(sql, "postgres");
+        assert_eq!(parses(|| drop(parsed.params(sql, None))), 0);
+        let parsed = crate::analyzer::parse("SELECT 1", "sqlite");
+        assert_eq!(parses(|| drop(parsed.params("SELECT 1", None))), 0);
+    }
+
+    #[test]
+    fn a_rewritten_query_is_parsed_for_its_parameters() {
+        for (dialect, sql) in [
+            ("postgres", "SELECT %s::int"),
+            ("postgres", "SELECT %(name)s::int"),
+            ("postgres", "SELECT :name"),
+            ("postgres", "SELECT data ? 'a' FROM t WHERE x = ?"),
+            ("mysql", "SELECT ?"),
+            ("sqlite", "SELECT ?"),
+            ("sqlite", "SELECT :name"),
+            ("sqlite", "SELECT @name"),
+        ] {
+            let parsed = crate::analyzer::parse(sql, dialect);
+            let count = parses(|| drop(parsed.params(sql, None)));
+            assert!(count >= 1, "{dialect}: {sql}");
+        }
+    }
+
+    #[test]
+    fn free_function_parses_as_before() {
+        assert_eq!(
+            parses(|| drop(analyze_params("SELECT $1", "postgres", None))),
+            1
+        );
+        assert_eq!(
+            parses(|| drop(analyze_params("SELEC $1", "postgres", None))),
+            1
+        );
+        assert_eq!(
+            parses(|| drop(analyze_params("SELEC ?", "postgres", None))),
+            2
+        );
+    }
+
+    #[test]
+    fn parsed_params_equal_analyze_params() {
+        const QUERIES: &[&str] = &[
+            "",
+            "SELEC 1 %s",
+            "SELECT 1",
+            "SELECT $1",
+            "SELECT $2::int, $1",
+            "SELECT %s::int",
+            "SELECT %(a)s, %(b)s, %(a)s",
+            "SELECT * FROM users WHERE id = %s",
+            "SELECT * FROM users WHERE id = $1 AND name = $2",
+            "SELECT * FROM users WHERE name = :name AND age > @age",
+            "SELECT * FROM users WHERE id = ?",
+            "SELECT * FROM users WHERE id IN (%s, %s)",
+            "SELECT * FROM users WHERE tags @> %s",
+            "SELECT * FROM users WHERE data ? 'a'",
+            "SELECT * FROM users WHERE data ? 'a' AND id = ?",
+            "SELECT * FROM users LIMIT %s OFFSET %s",
+            "SELECT * FROM users WHERE born + INTERVAL '1 day' > %s",
+            "SELECT %s + INTERVAL '1 day'",
+            "SELECT SUBSTRING(%s FROM 1 FOR %s)",
+            "SELECT generate_series(1, 10, %s)",
+            "SELECT f(%s, %s)",
+            "SELECT 1 FROM users WHERE %s IN (SELECT x FROM things)",
+            "INSERT INTO users (id, name) VALUES (%s, %s)",
+            "INSERT INTO users (id, name) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET name = $3",
+            "UPDATE users SET name = %s WHERE id = %s",
+            "UPDATE users SET name = :n WHERE id = :i",
+            "DELETE FROM users WHERE id = %s LIMIT 1",
+            "WITH c AS (SELECT id FROM users WHERE id = %s) SELECT * FROM c",
+            "SELECT u.id FROM users u JOIN orders o ON o.user_id = u.id WHERE o.total > %s",
+            "CREATE TABLE t (a INT)",
+        ];
+        for dialect in ["postgres", "mysql", "sqlite"] {
+            let schema = load_schema(&schema_for(dialect), dialect);
+            for sql in QUERIES {
+                let parsed = crate::analyzer::parse(sql, dialect);
+                for schema in [None, Some(&*schema)] {
+                    assert_eq!(
+                        parsed.params(sql, schema),
+                        analyze_params(sql, dialect, schema),
+                        "{dialect}: {sql}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn parsed_params_follow_the_database_a_query_names() {
+        use crate::analyzer::{route, Databases};
+        let other = load_schema("CREATE TABLE events (n INTEGER NOT NULL)", "sqlite");
+        let schema = SchemaData::with_databases(
+            load_schema(&schema_for("postgres"), "postgres"),
+            Databases {
+                name: "default".to_string(),
+                absent: false,
+                others: vec![("other".to_string(), "sqlite", Some(other))],
+            },
+        );
+        let schema = schema.as_deref();
+        for sql in [
+            "-- sqlty: db=other\nSELECT n FROM events WHERE n = ?",
+            "-- sqlty: db=other\nSELECT $1::int",
+            "-- sqlty: db=missing\nSELECT id FROM users WHERE id = %s",
+        ] {
+            let (routed, routed_schema) = route(sql, "postgres", schema);
+            assert_eq!(
+                crate::analyzer::parse(sql, routed).params(sql, routed_schema),
+                analyze_params(sql, "postgres", schema),
+                "{sql}"
+            );
         }
     }
 }

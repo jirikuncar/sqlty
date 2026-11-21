@@ -92,28 +92,39 @@ pub fn may_hold(text: &str) -> bool {
 /// The driver calls of `body`, in source order.
 ///
 /// `imported` is `ParsedSource.imported_names` as `(local, dotted)` pairs, first binding first.
-/// `constant` finds what the module imports from checked modules, when they are known.
-pub fn find(
+pub fn find(source: &str, body: &[Stmt], imported: &Table) -> Vec<DriverCall> {
+    find_in(source, body, imported, &Scan::new(body), None)
+}
+
+/// Whether `call` can be a driver call: a method of a name, or any call when the module
+/// imports the bundled helpers.
+fn wanted(call: &ExprCall, helpers: bool) -> bool {
+    match call.func.as_ref() {
+        Expr::Attribute(attr) => {
+            (any_method(attr.attr.as_str()) && matches!(*attr.value, Expr::Name(_))) || helpers
+        }
+        Expr::Name(_) => helpers,
+        _ => false,
+    }
+}
+
+/// [`find`] over a walk of `body` that other checks share; `constant` finds what the module
+/// imports from checked modules, when they are known.
+pub fn find_in<'a>(
     source: &str,
-    body: &[Stmt],
+    body: &'a [Stmt],
     imported: &Table,
+    scan: &Scan<'a>,
     constant: Option<Constant<'_>>,
 ) -> Vec<DriverCall> {
     let helpers = imported.values().any(|name| {
         let dotted = format!("{name}.");
         dotted.starts_with(BUNDLED_MODULE) || BUNDLED_MODULE.starts_with(&dotted)
     });
-    let scan = Scan::new(body, |call| match call.func.as_ref() {
-        Expr::Attribute(attr) => {
-            (any_method(attr.attr.as_str()) && matches!(*attr.value, Expr::Name(_))) || helpers
-        }
-        Expr::Name(_) => helpers,
-        _ => false,
-    });
     let mut finder = Finder {
         ctx: Context {
             imported,
-            scan: &scan,
+            scan,
             constant,
         },
         body,
@@ -123,8 +134,10 @@ pub fn find(
         source,
         found: Vec::new(),
     };
-    for (call, stack) in &scan.calls {
-        finder.call(call, stack);
+    for &(call, scope) in &scan.calls {
+        if wanted(call, helpers) {
+            finder.call(call, scan.stack(scope));
+        }
     }
     let mut found = finder.found;
     found.sort_by_key(|call| call.query_span);

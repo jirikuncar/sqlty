@@ -1,5 +1,5 @@
 ---
-description: "Catch totals a join double-counts and joins on the wrong key: the sqlty rules that read primary, unique and foreign keys from your schema to check joins without a database."
+description: "Catch totals a join double-counts and joins on the wrong key: sqlty rules that read primary, unique and foreign keys from your schema, no database needed."
 ---
 
 # Joins and aggregates

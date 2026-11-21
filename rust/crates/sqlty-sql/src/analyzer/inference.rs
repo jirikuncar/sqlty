@@ -302,7 +302,7 @@ include!(concat!(env!("OUT_DIR"), "/inference_rules.rs"));
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
+pub(super) mod tests {
     use std::alloc::{GlobalAlloc, Layout, System};
     use std::cell::Cell;
 
@@ -408,6 +408,15 @@ mod tests {
 
     #[global_allocator]
     static ALLOCATOR: CountingAllocator = CountingAllocator;
+
+    /// The heap allocations of the current thread while `run` runs.
+    pub(crate) fn allocations(run: impl FnOnce()) -> usize {
+        let before = ALLOCATIONS.with(Cell::get);
+        COUNTING.with(|counting| counting.set(true));
+        run();
+        COUNTING.with(|counting| counting.set(false));
+        ALLOCATIONS.with(Cell::get) - before
+    }
 
     #[test]
     fn rule_dispatch_does_not_allocate() {

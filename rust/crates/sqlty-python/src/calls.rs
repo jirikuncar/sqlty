@@ -12,6 +12,7 @@ use ruff_python_ast::{Expr, ExprCall, Parameters, Stmt, StmtFunctionDef};
 use ruff_text_size::Ranged;
 
 use crate::compose::{self, Declared, Rendered};
+use crate::facts::ModuleFacts;
 use crate::helpers::{mentions, receiver_class, region};
 use crate::scopes::{dotted, Context, Key, Lines, Node, Param, Scan, Scope};
 use crate::types::info::Dict;
@@ -457,15 +458,25 @@ fn call_params(
     None
 }
 
-/// The calls of the helpers `source` defines or imports from the
+/// Whether a call of a helper can look like this: a name or a dotted attribute called.
+fn wanted(call: &ExprCall) -> bool {
+    match call.func.as_ref() {
+        Expr::Name(_) => true,
+        Expr::Attribute(attr) => dotted(&attr.value).is_some(),
+        _ => false,
+    }
+}
+
+/// The calls of the helpers the module defines or imports from the
 /// modules of `helpers`, by line. A query built in a way that is not modelled (see
 /// [`compose`]) is left unchecked.
-pub fn helper_calls<'a>(
-    source: &'a Source,
+pub fn helper_calls_in<'a>(
+    facts: &ModuleFacts<'a>,
     helpers: Option<&'a HelperIndex>,
     module: Option<&str>,
     variants: Option<usize>,
 ) -> Vec<Call<'a>> {
+    let source = facts.source;
     let text = &*source.text;
     let local = text.contains("Annotated") && text.contains("sqlty") && text.contains("SQL");
     let imported =
@@ -510,17 +521,13 @@ pub fn helper_calls<'a>(
     {
         return Vec::new();
     }
-    let scan = Scan::new(source.body(), |call: &ExprCall| match call.func.as_ref() {
-        Expr::Name(_) => true,
-        Expr::Attribute(attr) => dotted(&attr.value).is_some(),
-        _ => false,
-    });
+    let scan = facts.scan();
     let constant = |from: Option<&Source>, dotted: &str| {
         helpers?.fragment(from.unwrap_or(source), dotted, module)
     };
     let ctx = Context {
         imported: &source.imports,
-        scan: &scan,
+        scan,
         constant: Some(&constant),
     };
     let lines = Lines::new(text);
@@ -533,16 +540,20 @@ pub fn helper_calls<'a>(
             lookup(module, &format!("{original}.{name}"))
         }),
     };
-    let mut wanted: Vec<Option<bool>> = vec![None; scan.scopes.len()];
+    let mut scoped: Vec<Option<bool>> = vec![None; scan.scopes.len()];
     let composed = text.contains("psycopg");
     let mut psycopg: Option<compose::Scan<'a>> = None;
     let resolve = |from: &Source, dotted: &str| {
         helpers.and_then(|helpers| helpers.fragment(from, dotted, module))
     };
     let mut calls = Vec::new();
-    for (call, stack) in &scan.calls {
-        if let Some(&scope) = stack.last() {
-            let mentioned = *wanted[scope].get_or_insert_with(|| {
+    for &(call, scope) in &scan.calls {
+        if !wanted(call) {
+            continue;
+        }
+        let stack = scan.stack(scope);
+        if scope != 0 {
+            let mentioned = *scoped[scope].get_or_insert_with(|| {
                 let (start, end) = region(scan.scopes[scope], &lines, text.len());
                 pattern
                     .as_ref()
@@ -581,7 +592,7 @@ pub fn helper_calls<'a>(
             Expr::StringLiteral(literal) => Some(crate::parse::text(literal, text)),
             _ => None,
         };
-        if literal.is_none() && forwarded(query, stack, &scan, &annotated, &marker) {
+        if literal.is_none() && forwarded(query, stack, scan, &annotated, &marker) {
             continue;
         }
         let is_literal = literal.is_some();

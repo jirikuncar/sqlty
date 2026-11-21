@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 
 use ruff_python_ast::visitor::{walk_expr, Visitor};
-use ruff_python_ast::{ExceptHandler, Expr, Stmt, StmtImport, StmtImportFrom};
+use ruff_python_ast::{ExceptHandler, Expr, ExprCall, Stmt, StmtImport, StmtImportFrom};
 use ruff_text_size::Ranged;
 
 use crate::drivers::{self, DriverCall};
@@ -169,24 +169,9 @@ pub fn facts(source: &str) -> Option<Facts> {
     found.attributes = attributes;
     found.any_calls = any_calls;
     if drivers::may_hold(source) {
-        found.driver_calls = drivers::find(source, &module.body, &imported, None);
+        found.driver_calls = drivers::find(source, &module.body, &imported);
     }
     Some(found)
-}
-
-/// `(offset, callee)` of each `X[T](...)` of `body` whose `T` is `typing.Any`, by offset;
-/// `typing` is [`Imports::typing`] as a table.
-pub fn any_calls(body: &[Stmt], typing: &Table) -> Vec<(usize, String)> {
-    let aliases = Aliases(typing);
-    let mut calls = Calls {
-        aliases: &aliases,
-        names: Vec::new(),
-        attributes: Vec::new(),
-        any_calls: Vec::new(),
-    };
-    calls.visit_body(body);
-    calls.any_calls.sort_unstable();
-    calls.any_calls
 }
 
 enum ImportStmt<'a> {
@@ -294,15 +279,33 @@ impl<'a> Visitor<'a> for Calls<'_> {
             match call.func.as_ref() {
                 Expr::Name(name) => self.names.push(name.id.to_string()),
                 Expr::Attribute(attr) => self.attributes.push(attr.attr.to_string()),
-                Expr::Subscript(sub) if self.aliases.is_any(&sub.slice) => {
-                    self.any_calls
-                        .push((sub.value.start().to_usize(), callee(&sub.value)));
-                }
-                _ => {}
+                _ => self.any_calls.extend(any_call(call, self.aliases)),
             }
         }
         walk_expr(self, expr);
     }
+}
+
+/// `(offset, callee)` of `call` when it is `X[T](...)` with `T` being `typing.Any`.
+fn any_call(call: &ExprCall, aliases: &Aliases<'_>) -> Option<(usize, String)> {
+    let Expr::Subscript(sub) = call.func.as_ref() else {
+        return None;
+    };
+    aliases
+        .is_any(&sub.slice)
+        .then(|| (sub.value.start().to_usize(), callee(&sub.value)))
+}
+
+/// `(offset, callee)` of each `X[T](...)` among `calls` whose `T` is `typing.Any`, by offset.
+pub(crate) fn any_calls_among<'a>(
+    calls: impl Iterator<Item = &'a ExprCall>,
+    typing: &Table,
+) -> Vec<(usize, String)> {
+    let aliases = Aliases(typing);
+    let mut found: Vec<(usize, String)> =
+        calls.filter_map(|call| any_call(call, &aliases)).collect();
+    found.sort_unstable();
+    found
 }
 
 /// `expr` spelled as `ast.unparse` would end it: a dotted name, with `?` for a base that is not a name.

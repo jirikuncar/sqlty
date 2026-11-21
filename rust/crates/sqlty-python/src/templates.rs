@@ -31,28 +31,32 @@ pub struct Template {
 pub fn templates(source: &str) -> Option<Vec<Template>> {
     let parsed = crate::parse::module(source)?;
     let body = &parsed.syntax().body;
-    Some(of(source, body, &Imports::of(body).imported, None))
+    Some(of(source, body, &Imports::of(body).imported))
 }
 
 /// Every t-string of the module `body` of `source`, in source order.
-/// `constant` finds what the module imports from checked modules, when they are known.
-pub fn of(
+pub fn of(source: &str, body: &[Stmt], imported: &Table) -> Vec<Template> {
+    of_in(source, imported, &Scan::new(body), None)
+}
+
+/// [`of`] over a walk of the module that other checks share; `constant` finds what the
+/// module imports from checked modules, when they are known.
+pub fn of_in(
     source: &str,
-    body: &[Stmt],
     imported: &Table,
+    scan: &Scan<'_>,
     constant: Option<Constant<'_>>,
 ) -> Vec<Template> {
-    let scan = Scan::new(body, |_| false);
     let ctx = Context {
         imported,
-        scan: &scan,
+        scan,
         constant,
     };
     let lines = Lines::new(source);
     let mut found: Vec<Template> = scan
         .templates
         .iter()
-        .map(|(template, stack)| read(template, stack, &ctx, &lines, source))
+        .map(|&(template, scope)| read(template, scan.stack(scope), &ctx, &lines, source))
         .collect();
     found.sort_by_key(|template| template.span);
     found

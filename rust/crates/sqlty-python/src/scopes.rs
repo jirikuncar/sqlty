@@ -9,8 +9,10 @@ use crate::frozen::Table;
 use crate::types::symbols::Source;
 use ruff_python_ast::visitor::{walk_expr, walk_stmt, Visitor};
 use ruff_python_ast::{
-    self as ast, Expr, ExprCall, ExprTString, Number, Stmt, StmtClassDef, StmtFunctionDef, UnaryOp,
+    self as ast, Expr, ExprCall, ExprTString, Number, Operator, Stmt, StmtClassDef,
+    StmtFunctionDef, UnaryOp,
 };
+use ruff_text_size::Ranged;
 
 const BUILTINS: [&str; 5] = ["int", "str", "float", "bool", "bytes"];
 const SEQUENCES: [&str; 4] = ["list", "tuple", "set", "frozenset"];
@@ -61,41 +63,61 @@ pub enum Node<'a> {
     Class(&'a StmtClassDef),
 }
 
-/// What one walk of a module collects: its scopes, the classes names hold, and the calls
-/// `want` keeps, each with the scopes around it (innermost last, classes included).
+#[cfg(test)]
+thread_local! {
+    /// The walks [`Scan::new`] has made on this thread.
+    pub(crate) static WALKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// What one walk of a module collects: its scopes, the classes names hold, every call and
+/// t-string with its innermost scope, and every string literal.
 pub struct Scan<'a> {
     /// The scopes, by id.
     pub scopes: Vec<Node<'a>>,
+    /// The scopes around each scope's contents, innermost last, classes included.
+    paths: Vec<Vec<Scope>>,
     stack: Vec<Scope>,
     types: HashMap<(Scope, &'a str), Option<String>>,
     attributes: HashMap<(Scope, &'a str), Option<String>>,
-    /// The calls kept, with their scopes.
-    pub calls: Vec<(&'a ExprCall, Vec<Scope>)>,
-    /// Every t-string, with its scopes.
-    pub templates: Vec<(&'a ExprTString, Vec<Scope>)>,
+    operands: HashSet<usize>,
+    /// Every call, in visit order, with its innermost scope.
+    pub calls: Vec<(&'a ExprCall, Scope)>,
+    /// Every t-string, with its innermost scope.
+    pub templates: Vec<(&'a ExprTString, Scope)>,
+    /// Every string literal, f-string and t-string, and whether it is an operand of a `+`.
+    pub strings: Vec<(&'a Expr, bool)>,
     body: &'a [Stmt],
     /// [`crate::compose::constants`] of `body`, once asked.
     constants: OnceCell<HashMap<String, crate::compose::Binding>>,
 }
 
 impl<'a> Scan<'a> {
-    /// Walks `body`, keeping the calls `want` accepts.
-    pub fn new(body: &'a [Stmt], want: impl FnMut(&'a ExprCall) -> bool) -> Self {
+    /// Walks `body`.
+    pub fn new(body: &'a [Stmt]) -> Self {
+        #[cfg(test)]
+        WALKS.with(|count| count.set(count.get() + 1));
         let mut walker = Walker {
             scan: Self {
                 scopes: vec![Node::Module],
+                paths: vec![Vec::new()],
                 stack: Vec::new(),
                 types: HashMap::new(),
                 attributes: HashMap::new(),
+                operands: HashSet::new(),
                 calls: Vec::new(),
                 templates: Vec::new(),
+                strings: Vec::new(),
                 body,
                 constants: OnceCell::new(),
             },
-            want,
         };
         walker.visit_body(body);
         walker.scan
+    }
+
+    /// The scopes inside `scope`, outermost first, `scope` last; empty for the module.
+    pub fn stack(&self, scope: Scope) -> &[Scope] {
+        &self.paths[scope]
     }
 
     /// Whether `scope` is a class.
@@ -174,12 +196,11 @@ impl<'a> Scan<'a> {
     }
 }
 
-struct Walker<'a, W> {
+struct Walker<'a> {
     scan: Scan<'a>,
-    want: W,
 }
 
-impl<'a, W: FnMut(&'a ExprCall) -> bool> Visitor<'a> for Walker<'a, W> {
+impl<'a> Visitor<'a> for Walker<'a> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
         match stmt {
             Stmt::FunctionDef(node) => {
@@ -200,6 +221,7 @@ impl<'a, W: FnMut(&'a ExprCall) -> bool> Visitor<'a> for Walker<'a, W> {
                     );
                 }
                 self.scan.stack.push(scope);
+                self.scan.paths.push(self.scan.stack.clone());
                 walk_stmt(self, stmt);
                 self.scan.stack.pop();
                 return;
@@ -208,6 +230,7 @@ impl<'a, W: FnMut(&'a ExprCall) -> bool> Visitor<'a> for Walker<'a, W> {
                 let scope = self.scan.scopes.len();
                 self.scan.scopes.push(Node::Class(node));
                 self.scan.stack.push(scope);
+                self.scan.paths.push(self.scan.stack.clone());
                 walk_stmt(self, stmt);
                 self.scan.stack.pop();
                 return;
@@ -250,18 +273,28 @@ impl<'a, W: FnMut(&'a ExprCall) -> bool> Visitor<'a> for Walker<'a, W> {
 
     #[recursive::recursive]
     fn visit_expr(&mut self, expr: &'a Expr) {
+        let scope = self.scan.stack.last().copied().unwrap_or(0);
         match expr {
-            Expr::Call(call) if (self.want)(call) => {
-                self.scan.calls.push((call, self.scan.stack.clone()));
-            }
+            Expr::Call(call) => self.scan.calls.push((call, scope)),
             Expr::TString(template) => {
-                self.scan
-                    .templates
-                    .push((template, self.scan.stack.clone()));
+                self.scan.templates.push((template, scope));
+                self.string(expr);
             }
+            Expr::BinOp(op) if op.op == Operator::Add => {
+                self.scan.operands.insert(op.left.start().to_usize());
+                self.scan.operands.insert(op.right.start().to_usize());
+            }
+            Expr::StringLiteral(_) | Expr::FString(_) => self.string(expr),
             _ => {}
         }
         walk_expr(self, expr);
+    }
+}
+
+impl<'a> Walker<'a> {
+    fn string(&mut self, expr: &'a Expr) {
+        let operand = self.scan.operands.contains(&expr.start().to_usize());
+        self.scan.strings.push((expr, operand));
     }
 }
 
@@ -364,14 +397,11 @@ impl Context<'_, '_, '_> {
         if let Expr::Call(call) = value {
             return self.named(Some(source), &self::dotted(&call.func)?, 0);
         }
-        let scan = Scan::new(
-            if matches!(value, Expr::Name(_)) {
-                source.body()
-            } else {
-                &[]
-            },
-            |_| false,
-        );
+        let scan = Scan::new(if matches!(value, Expr::Name(_)) {
+            source.body()
+        } else {
+            &[]
+        });
         Context {
             imported: &source.imports,
             scan: &scan,
@@ -600,5 +630,37 @@ fn class_name(expr: Option<&Expr>) -> Option<String> {
                 .then(|| text.to_string())
         }
         expr => dotted(expr),
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use ruff_python_parser::parse_module;
+
+    #[test]
+    fn one_walk_collects_calls_templates_strings_and_stacks() {
+        let text = "class A:\n    def m(self):\n        f(lambda: g(1), [h(x) for x in y])\n\
+                    k = f'a{b}' + 'c'\nt = t'd'\ndef n():\n    return 'e'\n";
+        let parsed = parse_module(text).unwrap();
+        let scan = Scan::new(&parsed.syntax().body);
+        let names: Vec<(String, Scope)> = scan
+            .calls
+            .iter()
+            .map(|(call, scope)| (dotted(&call.func).unwrap(), *scope))
+            .collect();
+        let expected = [("f", 2), ("g", 2), ("h", 2)].map(|(n, s)| (n.to_string(), s));
+        assert_eq!(names, expected);
+        assert_eq!(scan.stack(0), &[] as &[Scope]);
+        assert_eq!(scan.stack(1), &[1]);
+        assert_eq!(scan.stack(2), &[1, 2]);
+        assert_eq!(scan.stack(3), &[3]);
+        assert_eq!(scan.templates.len(), 1);
+        assert_eq!(scan.templates[0].1, 0);
+        let strings: Vec<bool> = scan.strings.iter().map(|(_, operand)| *operand).collect();
+        assert_eq!(strings, [true, true, false, false]);
+        assert!(matches!(scan.strings[2].0, Expr::TString(_)));
+        assert!(matches!(scan.strings[3].0, Expr::StringLiteral(_)));
     }
 }

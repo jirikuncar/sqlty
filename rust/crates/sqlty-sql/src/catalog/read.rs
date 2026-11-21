@@ -396,6 +396,7 @@ pub(crate) fn load_with(
     let statements = ddl::statements(schema_sql, dialect == SqlDialect::MySql);
     let ops = read_statements(statements, dialect, &mut loader, &mut skipped);
     loader.run(ops);
+    loader.resolve_foreign_keys();
     skipped.append(&mut loader.skipped);
     let mut catalog = loader.build();
     if catalog.search_path.is_empty() {
