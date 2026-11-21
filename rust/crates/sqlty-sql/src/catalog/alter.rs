@@ -11,7 +11,9 @@ use sqlparser::ast::{
 
 use crate::analyzer::SqlDialect;
 
-use super::columns::{apply_check, mark_primary_key, nonnull_groups, raw_column, unique_key};
+use super::columns::{
+    apply_check, check_narrows, mark_primary_key, nonnull_groups, raw_column, unique_key,
+};
 use super::loader::{AlterFail, Loader, RawTable, Rel, Taint, TypeDef};
 use super::names::{fold, parts};
 
@@ -197,9 +199,8 @@ impl Loader {
                 constraint: TableConstraint::Check(check),
                 not_valid: false,
             } => {
-                let mut columns = table.columns.clone();
-                apply_check(&mut columns, &check.expr, self.dialect);
-                columns != table.columns || !nonnull_groups(&check.expr, self.dialect).is_empty()
+                check_narrows(&table.columns, &check.expr, self.dialect)
+                    || !nonnull_groups(&check.expr, self.dialect).is_empty()
             }
             AlterTableOperation::AddConstraint {
                 constraint: TableConstraint::ForeignKey(constraint),

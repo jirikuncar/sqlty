@@ -3,9 +3,11 @@
 //!
 //! Nothing here looks types up in the catalog; [`super::resolve`] does that.
 
+use std::ops::ControlFlow;
+
 use sqlparser::ast::{
-    ColumnDef, ColumnOption, DataType, Expr, FunctionArg, FunctionArgExpr, FunctionArguments,
-    GeneratedAs, Ident, IndexColumn, ObjectName,
+    visit_expressions, ColumnDef, ColumnOption, DataType, Expr, FunctionArg, FunctionArgExpr,
+    FunctionArguments, GeneratedAs, Ident, IndexColumn, ObjectName,
 };
 
 use rustc_hash::FxHashMap;
@@ -202,13 +204,45 @@ pub(super) fn add_values(existing: &mut Option<Vec<Value>>, found: Option<Vec<Va
 
 /// Apply a table-level `CHECK` to the column it limits.
 pub(super) fn apply_check(columns: &mut [RawColumn], expr: &Expr, dialect: SqlDialect) {
+    for (at, found) in checked(columns, expr, dialect) {
+        add_values(&mut columns[at].values, Some(found));
+    }
+}
+
+/// Whether [`apply_check`] would change a column.
+pub(super) fn check_narrows(columns: &[RawColumn], expr: &Expr, dialect: SqlDialect) -> bool {
+    checked(columns, expr, dialect)
+        .into_iter()
+        .any(|(at, found)| {
+            let mut values = columns[at].values.clone();
+            add_values(&mut values, Some(found));
+            values != columns[at].values
+        })
+}
+
+/// The columns a `CHECK` limits, by position, and the values it limits each to. Only the
+/// columns `expr` names are read, so a check per column of a wide table stays cheap.
+fn checked(columns: &[RawColumn], expr: &Expr, dialect: SqlDialect) -> Vec<(usize, Vec<Value>)> {
     if dialect == SqlDialect::MySql {
-        return;
+        return Vec::new();
     }
-    for column in columns {
-        let found = values::check_values(expr, &|ident| fold(ident, dialect) == column.name);
-        add_values(&mut column.values, found);
-    }
+    let mut named = Vec::new();
+    let _ = visit_expressions(expr, |expr| {
+        match expr {
+            Expr::Identifier(ident) => named.push(fold(ident, dialect)),
+            Expr::CompoundIdentifier(parts) => named.extend(parts.last().map(|p| fold(p, dialect))),
+            _ => {}
+        }
+        ControlFlow::<()>::Continue(())
+    });
+    let limits = |(at, column): (usize, &RawColumn)| {
+        if !named.contains(&column.name) {
+            return None;
+        }
+        let found = values::check_values(expr, &|ident| fold(ident, dialect) == column.name)?;
+        Some((at, found))
+    };
+    columns.iter().enumerate().filter_map(limits).collect()
 }
 
 /// The groups of columns a `CHECK` keeps at least one of non-null, conjunct by conjunct:

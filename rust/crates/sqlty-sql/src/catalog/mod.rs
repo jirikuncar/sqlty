@@ -1150,7 +1150,7 @@ mod tests {
         };
         let trigger =
             |i| format!("CREATE TRIGGER g{i} BEFORE INSERT ON t FOR EACH ROW SET NEW.a = 1;\n");
-        let cases: [(&str, &dyn Fn(usize) -> String); 8] = [
+        let cases: [(&str, &dyn Fn(usize) -> String); 9] = [
             ("postgres", &|n| {
                 each(n, &|i| format!("CREATE UNIQUE INDEX i{i} ON t (a, b);\n"))
             }),
@@ -1172,6 +1172,15 @@ mod tests {
             ("postgres", &|n| {
                 each(n, &|i| {
                     format!("ALTER TABLE t ADD CONSTRAINT k{i} CHECK (a IS NOT NULL OR b IS NOT NULL);\n")
+                })
+            }),
+            ("postgres", &|n| {
+                each(n, &|i| {
+                    format!(
+                        "ALTER TABLE t ADD COLUMN c{i} int;
+                        ALTER TABLE t ADD CONSTRAINT k{i} CHECK (t.c{i} IN (1, 2));
+                        ALTER TABLE t ADD CONSTRAINT n{i} CHECK (c{i} > 0);\n"
+                    )
                 })
             }),
             ("postgres", &|n| {
