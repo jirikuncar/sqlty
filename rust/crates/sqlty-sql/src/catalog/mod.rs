@@ -161,6 +161,30 @@ struct TableRelation {
     /// Columns of each `UNIQUE` constraint or unique index.
     unique: Vec<Vec<String>>,
     row_security: bool,
+    /// Positions in `columns`, by name and then position, so that a column is found in
+    /// O(log width).
+    by_name: Vec<u32>,
+}
+
+impl TableRelation {
+    fn indexed(mut self) -> Self {
+        let mut by_name: Vec<u32> = (0..self.columns.len() as u32).collect();
+        by_name.sort_by(|&a, &b| {
+            self.columns[a as usize]
+                .name
+                .cmp(&self.columns[b as usize].name)
+        });
+        self.by_name = by_name;
+        self
+    }
+
+    fn column(&self, name: &str) -> Option<&SchemaColumn> {
+        let at = self
+            .by_name
+            .partition_point(|&i| self.columns[i as usize].name.as_str() < name);
+        let column = &self.columns[*self.by_name.get(at)? as usize];
+        (column.name == name).then_some(column)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -310,6 +334,15 @@ impl Catalog {
     pub(crate) fn table(&self, name: &str) -> Option<&[SchemaColumn]> {
         match self.find(name)? {
             Relation::Table(table) => Some(&table.columns),
+            _ => None,
+        }
+    }
+
+    /// The column `column` of the table `name`: `None` when `table` would be, `Some(None)`
+    /// when the table has no such column.
+    pub(crate) fn column(&self, name: &str, column: &str) -> Option<Option<&SchemaColumn>> {
+        match self.find(name)? {
+            Relation::Table(table) => Some(table.column(column)),
             _ => None,
         }
     }
@@ -590,6 +623,28 @@ mod tests {
 
     fn pg(sql: &str) -> Catalog {
         load(sql, "postgres").0
+    }
+
+    #[test]
+    fn a_column_is_found_by_name_in_a_wide_table() {
+        let columns: Vec<String> = (0..300).rev().map(|i| format!("c{i} int")).collect();
+        let c = pg(&format!(
+            "CREATE TABLE t ({}); CREATE VIEW v AS SELECT 1 AS x;",
+            columns.join(", ")
+        ));
+        let names: Vec<&str> = c
+            .table("t")
+            .unwrap()
+            .iter()
+            .map(|col| col.name.as_str())
+            .collect();
+        for name in names {
+            assert_eq!(c.column("t", name).unwrap().unwrap().name, name);
+        }
+        assert!(c.column("t", "c300").unwrap().is_none());
+        assert!(c.column("t", "").unwrap().is_none());
+        assert!(c.column("v", "x").is_none());
+        assert!(c.column("nope", "c1").is_none());
     }
 
     #[test]
