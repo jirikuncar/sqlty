@@ -300,6 +300,29 @@ writes for them, such as `alembic upgrade head --sql > db/schema.sql`. A
 `pg_dump` schema is not judged: it describes the result, not how to get there.
 The statements are judged in every `--direction`.
 
+Every `schema` of the configuration is judged, each entry of
+`[tool.sqlty.databases]` included, and a migration takes the severities of
+`rules` with the `overrides` its own path matches. A schema that several
+configurations name is judged once, at the strictest severity of each rule among
+them, and a migration that several schemas list is reported once per statement.
+The `include` globs are relative to the directory of the configuration that names
+them, so no glob matches migrations outside that directory: for those, set `rules`
+in the configuration, or use an override without `include`.
+For example:
+
+```toml
+[[tool.sqlty.overrides]]
+include = ["migrations/**"]
+
+[tool.sqlty.overrides.rules]
+missing-concurrently = "error"
+```
+
+Each migration is judged against the schema the baseline gives every file of
+the head checked against its database, or the baseline's database of the same name
+when no file is. A snapshot records the databases of the directories of the files it
+checked.
+
 ## Baselines without git history
 
 ```bash
