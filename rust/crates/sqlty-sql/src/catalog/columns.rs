@@ -10,7 +10,7 @@ use sqlparser::ast::{
     FunctionArguments, GeneratedAs, Ident, IndexColumn, ObjectName,
 };
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::analyzer::SqlDialect;
 use crate::values::{self, Value};
@@ -226,10 +226,12 @@ fn checked(columns: &[RawColumn], expr: &Expr, dialect: SqlDialect) -> Vec<(usiz
     if dialect == SqlDialect::MySql {
         return Vec::new();
     }
-    let mut named = Vec::new();
+    let mut named = FxHashSet::default();
     let _ = visit_expressions(expr, |expr| {
         match expr {
-            Expr::Identifier(ident) => named.push(fold(ident, dialect)),
+            Expr::Identifier(ident) => {
+                named.insert(fold(ident, dialect));
+            }
             Expr::CompoundIdentifier(parts) => named.extend(parts.last().map(|p| fold(p, dialect))),
             _ => {}
         }
