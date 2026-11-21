@@ -2,7 +2,8 @@
 //! functions.
 //!
 //! [`Loader::run`] applies operations until nothing changes, so statements may appear in
-//! any order. It keeps the resolved [`super::Catalog`] current between operations.
+//! any order. It keeps the resolved [`super::Catalog`] that views read, updating only the
+//! relations that changed.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::ops::ControlFlow;
@@ -27,7 +28,7 @@ use super::columns::{
     merge_columns, nonnull_groups, raw_column, unique_key, RawColumn,
 };
 use super::names::{fold, key_of, lookup_key, parts, schema_for_new, type_key};
-use super::{Catalog, ForeignKey, TypeOverrides, BUILTIN_SCHEMAS};
+use super::{Catalog, ForeignKey, TypeOverrides};
 use crate::MAX_COLUMNS;
 
 #[derive(Clone, Default, PartialEq)]
@@ -168,11 +169,14 @@ pub(super) struct Loader {
     /// Functions whose latest definition could not be read.
     pub(super) unknown_functions: FxHashSet<String>,
     pub(super) search_path: Vec<String>,
-    /// The resolved catalog; a change to one relation updates it in place, any other
-    /// change drops it to be built again.
+    /// The resolved catalog; a change to one relation marks it stale, any other change
+    /// drops it to be built again.
     pub(super) cache: Option<Catalog>,
     /// Functions of the cached catalog that are stale; `snapshot` resolves them again.
     pub(super) stale_functions: FxHashSet<String>,
+    /// Relations of the cached catalog that are stale; `snapshot` resolves them again, so a
+    /// run of statements on one table resolves it once.
+    pub(super) stale_relations: FxHashSet<String>,
     /// Old name -> current name of a renamed type: columns declared with the old name
     /// have the type under its new one.
     pub(super) type_aliases: FxHashMap<String, String>,
@@ -202,9 +206,9 @@ pub(super) const MAX_SCHEMA_COLUMNS: usize = 1 << 21;
 /// schema's own length.
 pub(super) const MAX_RETRIED: usize = 1 << 24;
 
-/// The most columns the loader writes: each `ALTER` or index on a table resolves all its
-/// columns again, so a short schema could otherwise take minutes. Real ones write a few
-/// hundred thousand.
+/// The most columns the loader writes, counting a table's width for each `ALTER` or index
+/// on it: the statements that copy the table could otherwise take a short schema minutes.
+/// Real ones write a few hundred thousand.
 pub(super) const MAX_WRITTEN: usize = 1 << 22;
 
 impl Loader {
@@ -219,6 +223,7 @@ impl Loader {
             search_path: vec!["public".to_string()],
             cache: None,
             stale_functions: FxHashSet::default(),
+            stale_relations: FxHashSet::default(),
             skipped: Vec::new(),
             type_aliases: FxHashMap::default(),
             returned_by: FxHashMap::default(),
@@ -242,6 +247,7 @@ impl Loader {
             search_path: self.search_path.clone(),
             cache: None,
             stale_functions: self.stale_functions.clone(),
+            stale_relations: FxHashSet::default(),
             type_aliases: self.type_aliases.clone(),
             skipped: self.skipped.clone(),
             overrides: Arc::clone(&self.overrides),
@@ -297,6 +303,17 @@ impl Loader {
         let key = self.lookup(&self.relations, parts, path)?;
         let table = self.relations.get(&key)?.table()?;
         Some((key, table))
+    }
+
+    /// Change the table at `key` where it is, as `set_relation` with a changed copy would:
+    /// a statement per index, trigger or column would otherwise copy the table each time.
+    pub(super) fn change_table(&mut self, key: String, change: impl FnOnce(&mut RawTable)) {
+        if let Some(Rel::Table(table)) = self.relations.get_mut(&key) {
+            let mut table = std::mem::take(table);
+            self.held = self.held.saturating_sub(table.columns.len());
+            change(&mut table);
+            self.set_relation(key, Some(Rel::Table(table)));
+        }
     }
 
     /// Apply every op, retrying the ones whose dependencies are missing until a pass
@@ -399,47 +416,52 @@ impl Loader {
             }
             OpKind::Taint(what, name) => !self.taint(*what, name, &path),
             OpKind::UniqueIndex(name, unique) => {
-                let Some((key, table)) = self.table_of(name, &path) else {
+                let Some(key) = self.table_key(name, &path) else {
                     return false;
                 };
-                let mut table = table.clone();
-                table.unique.push(unique.clone());
-                self.set_relation(key, Some(Rel::Table(table)));
+                self.change_table(key, |table| table.unique.push(unique.clone()));
                 false
             }
             OpKind::RowTrigger(trigger) => {
-                let Some((key, table)) = self.table_of(&trigger.table, &path) else {
+                let Some(key) = self.table_key(&trigger.table, &path) else {
                     return false;
                 };
-                let mut table = table.clone();
-                if trigger.events.insert {
-                    for column in &mut table.columns {
-                        column.has_default = true;
-                    }
-                }
                 let name = trigger.name.last().map(|name| name.to_lowercase());
                 let name = name.unwrap_or_default();
-                table.row_triggers.retain(|(other, _)| *other != name);
-                table.row_triggers.push((name, trigger.events));
-                self.set_relation(key, Some(Rel::Table(table)));
+                self.change_table(key, |table| {
+                    if trigger.events.insert {
+                        for column in &mut table.columns {
+                            column.has_default = true;
+                        }
+                    }
+                    table.row_triggers.retain(|(other, _)| *other != name);
+                    table.row_triggers.push((name, trigger.events));
+                });
                 false
             }
             OpKind::DropTrigger(name, table) => {
                 let name = name.last().cloned().unwrap_or_default();
+                let fires =
+                    |table: &RawTable| table.row_triggers.iter().any(|(other, _)| *other == name);
                 let keys: Vec<String> = match table {
-                    Some(table) => self.table_key(table, &path).into_iter().collect(),
+                    Some(table) => self
+                        .table_of(table, &path)
+                        .filter(|(_, table)| fires(table))
+                        .map(|(key, _)| key)
+                        .into_iter()
+                        .collect(),
                     // MySQL names a trigger without its table.
-                    None => self.relations.keys().cloned().collect(),
+                    None => self
+                        .relations
+                        .iter()
+                        .filter(|(_, rel)| rel.table().is_some_and(fires))
+                        .map(|(key, _)| key.clone())
+                        .collect(),
                 };
                 for key in keys {
-                    let Some(Rel::Table(table)) = self.relations.get(&key) else {
-                        continue;
-                    };
-                    if table.row_triggers.iter().any(|(other, _)| *other == name) {
-                        let mut table = table.clone();
+                    self.change_table(key, |table| {
                         table.row_triggers.retain(|(other, _)| *other != name);
-                        self.set_relation(key, Some(Rel::Table(table)));
-                    }
+                    });
                 }
                 false
             }
@@ -827,30 +849,24 @@ impl Loader {
         }
     }
 
-    /// Set (or, with `None`, remove) one relation, keeping the resolved catalog current
-    /// without building it again.
+    /// Set (or, with `None`, remove) one relation; the next `snapshot` resolves it into the
+    /// cached catalog without building it again.
     pub(super) fn set_relation(&mut self, key: String, rel: Option<Rel>) {
-        let rel = rel.map(|rel| self.within_limits(&key, rel));
-        let dialect = self.dialect;
-        let resolved = self.cache.as_ref().map(|cache| {
-            rel.as_ref()
-                .map(|rel| cache.resolver(dialect).relation(&key, rel))
-        });
         match rel {
-            Some(rel) => self.relations.insert(key.clone(), rel),
+            Some(rel) => {
+                let rel = self.within_limits(&key, rel);
+                self.relations.insert(key.clone(), rel);
+            }
             None => {
                 self.held = self
                     .held
                     .saturating_sub(self.relations.get(&key).map_or(0, Rel::width));
-                self.relations.remove(&key)
+                self.relations.remove(&key);
             }
-        };
-        let (Some(resolved), Some(cache)) = (resolved, self.cache.as_mut()) else {
+        }
+        if self.cache.is_none() {
             return;
-        };
-        let user = !BUILTIN_SCHEMAS
-            .iter()
-            .any(|schema| key.starts_with(&format!("{schema}.")));
+        }
         let bare = key.split_once('.').map_or(key.as_str(), |(_, name)| name);
         let readers: Vec<String> = [key.as_str(), bare]
             .iter()
@@ -858,21 +874,10 @@ impl Loader {
             .flatten()
             .cloned()
             .collect();
-        match resolved {
-            Some(relation) => {
-                if cache.relations.insert(Arc::from(key), relation).is_none() && user {
-                    cache.user_relations += 1;
-                }
-            }
-            None => {
-                if cache.relations.remove(key.as_str()).is_some() && user {
-                    cache.user_relations -= 1;
-                }
-            }
-        }
         for reader in readers {
             self.refresh_function(reader);
         }
+        self.stale_relations.insert(key);
     }
 
     /// Move the relation at `from`, if any, to `to`, replacing what is there.
