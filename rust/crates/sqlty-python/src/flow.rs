@@ -631,8 +631,15 @@ impl<'a> Walk<'_, 'a> {
                 }
             }
             Stmt::With(node) => {
+                let body_end = node.body.last().map_or(start, |last| last.end().to_u32());
                 let state = self.header(state, start, &node.body);
-                self.block(&node.body, state, depth + 1)
+                // An exception can leave the body after any of its bindings, and the
+                // manager may swallow it (`contextlib.suppress`): what follows then
+                // runs, whatever ends the body.
+                let raised = self.any(state.clone(), start, body_end);
+                let mut outs = Outs::of(self.block(&node.body, state, depth + 1));
+                outs.push(Out::Next(raised));
+                outs.merged()
             }
             Stmt::Try(node) => {
                 let body_end = node.body.last().map_or(start, |last| last.end().to_u32());

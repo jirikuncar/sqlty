@@ -216,6 +216,8 @@ two agree on other code. It follows less than ty does:
 | A name a comprehension, a `lambda`, `global` or `nonlocal` binds | followed | skipped |
 | `self.db` assigned from a local variable of `__init__` | the inferred type | skipped; a parameter with an annotation is followed |
 | A class whose bases have no consistent order, or a base that is not found | an error, `Unknown` | skipped unless the class itself declares the method |
+| A name bound in the body of a `with`, read after it | the new value, unless `__exit__` is declared to return `bool` | the new value or the one before: any manager may swallow an exception |
+| What a function returns when the annotation names its own type parameter, `def first[T](x: T) -> T` | the type of the argument | skipped |
 | A module-level name read in a function | every binding of the module | every binding of the module must agree; an annotation states the class |
 | More than 64 bindings of a name reaching a call | followed | skipped |
 

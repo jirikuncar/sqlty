@@ -40,8 +40,8 @@ enum Form {
     Union,
     /// `Type[T]`.
     TypeOf,
-    /// `Manager[T]` whose `with` gives `T`.
-    Manager,
+    /// `Manager[T]` whose `with` gives `T`, `async with` when true.
+    Manager(bool),
 }
 
 /// The special forms, by module and name; `typing` stands for `typing_extensions` too.
@@ -57,11 +57,19 @@ const FORMS: [(&str, &str, Form); 16] = [
     ("typing", "ReadOnly", Form::Transparent),
     ("typing", "Union", Form::Union),
     ("typing", "Type", Form::TypeOf),
-    ("typing", "ContextManager", Form::Manager),
-    ("typing", "AsyncContextManager", Form::Manager),
-    ("contextlib", "AbstractContextManager", Form::Manager),
-    ("contextlib", "AbstractAsyncContextManager", Form::Manager),
-    ("contextlib", "_GeneratorContextManager", Form::Manager),
+    ("typing", "ContextManager", Form::Manager(false)),
+    ("typing", "AsyncContextManager", Form::Manager(true)),
+    ("contextlib", "AbstractContextManager", Form::Manager(false)),
+    (
+        "contextlib",
+        "AbstractAsyncContextManager",
+        Form::Manager(true),
+    ),
+    (
+        "contextlib",
+        "_GeneratorContextManager",
+        Form::Manager(false),
+    ),
 ];
 /// Modules whose names are read by name: every other name of theirs is unknown.
 const KNOWN: [&str; 7] = [
@@ -152,8 +160,10 @@ pub enum Value {
     },
     /// A module.
     Module(String),
-    /// A context manager whose `with` gives the value.
-    Manager(Box<Value>),
+    /// A context manager whose `with` gives the value, `async with` when true.
+    Manager(Box<Value>, bool),
+    /// What calling an `async def` gives: the value once awaited, nothing before.
+    Awaitable(Box<Value>),
     /// Any of the values, which differ: the bindings that reach a use, an import with a
     /// fallback, the members of a union. At most [`MAX_EITHER`], none of them `Either`.
     Either(Rc<[Value]>),
@@ -293,6 +303,8 @@ pub enum Val {
     Typed(Ann),
     /// `with value as`, `async with` when true.
     Entered(Box<Val>, bool),
+    /// `await value`.
+    Awaited(Box<Val>),
     /// The class of this name, defined at the top of the module.
     Class(String),
     /// A class defined in a function or in another class, by where its name is written.
@@ -318,6 +330,8 @@ pub struct Method {
     pub kind: Kind,
     /// `@contextmanager`, `@asynccontextmanager`.
     pub manager: bool,
+    /// `async def`.
+    pub asynchronous: bool,
     /// `@property`, `@cached_property`.
     pub property: bool,
 }
@@ -389,7 +403,12 @@ fn value(expr: &Expr, depth: u8) -> Val {
         ),
         Expr::Call(call) => {
             let callee = value(&call.func, depth + 1);
-            let cast = match &callee {
+            // `(await cast)(T, value)` names `cast` as `cast(T, value)` does.
+            let mut named = &callee;
+            while let Val::Awaited(awaited) = named {
+                named = awaited;
+            }
+            let cast = match named {
                 Val::Name(name) | Val::Attr(_, name) if name == "cast" => call
                     .arguments
                     .args
@@ -399,7 +418,7 @@ fn value(expr: &Expr, depth: u8) -> Val {
             };
             Val::Call(Box::new(callee), cast)
         }
-        Expr::Await(awaited) => value(&awaited.value, depth + 1),
+        Expr::Await(awaited) => Val::Awaited(Box::new(value(&awaited.value, depth + 1))),
         Expr::Named(named) => value(&named.value, depth + 1),
         Expr::NoneLiteral(_) => Val::None,
         _ => Val::Unknown,
@@ -457,6 +476,24 @@ fn bound(origin: Origin<'_>, name: &str, top: bool, module: Option<&str>) -> (Va
     }
 }
 
+/// `ann` with the names `named` accepts unknown, the rest of it kept: `Box[T]` is
+/// still a `Box`.
+fn without(ann: Ann, named: &impl Fn(&str) -> bool) -> Ann {
+    match ann {
+        Ann::Name(name) if named(&name) => Ann::Unknown,
+        Ann::Generic(head, _) if named(&head) => Ann::Unknown,
+        Ann::Generic(head, args) => {
+            let args = args.into_iter().map(|arg| without(arg, named));
+            Ann::Generic(head, args.collect())
+        }
+        Ann::Union(members) => {
+            let members = members.into_iter().map(|member| without(member, named));
+            Ann::Union(members.collect())
+        }
+        ann => ann,
+    }
+}
+
 fn decorated(function: &StmtFunctionDef, names: &[&str]) -> bool {
     function.decorator_list.iter().any(|decorator| {
         let expression = match &decorator.expression {
@@ -469,13 +506,20 @@ fn decorated(function: &StmtFunctionDef, names: &[&str]) -> bool {
 }
 
 fn method(function: &StmtFunctionDef, kind: Kind) -> Method {
+    // A type parameter of the function is a type of its own, whatever the module binds
+    // the name to: it is unknown where a return annotation names it.
+    let own = |name: &str| {
+        let head = name.split('.').next().unwrap_or(name);
+        let mut params = function.type_params.iter().flat_map(|params| params.iter());
+        params.any(|param| crate::scopes::type_parameter(param).as_str() == head)
+    };
     Method {
-        returns: function
-            .returns
-            .as_deref()
-            .map_or(Ann::Unknown, |returns| annotation(returns, 0)),
+        returns: function.returns.as_deref().map_or(Ann::Unknown, |returns| {
+            without(annotation(returns, 0), &own)
+        }),
         kind,
         manager: decorated(function, &["contextmanager", "asynccontextmanager"]),
+        asynchronous: function.is_async,
         property: decorated(function, &["property", "cached_property"]),
     }
 }
@@ -536,6 +580,10 @@ fn in_class(val: Val, scan: &Scan<'_>, scope: Scope, target: &str) -> Val {
         Val::Entered(entered, is_async) => match in_class(*entered, scan, scope, target) {
             Val::Unknown => Val::Unknown,
             entered => Val::Entered(Box::new(entered), is_async),
+        },
+        Val::Awaited(awaited) => match in_class(*awaited, scan, scope, target) {
+            Val::Unknown => Val::Unknown,
+            awaited => Val::Awaited(Box::new(awaited)),
         },
         Val::Declared(declared) if names_bound(&declared, scan, scope, aim) => Val::Unknown,
         other => other,
@@ -616,6 +664,9 @@ fn inside(val: Val, scan: &Scan<'_>, scope: Scope, this: &str, module: Option<&s
             Box::new(inside(*entered, scan, scope, this, module)),
             is_async,
         ),
+        Val::Awaited(awaited) => {
+            Val::Awaited(Box::new(inside(*awaited, scan, scope, this, module)))
+        }
         other => other,
     }
 }
@@ -1079,6 +1130,10 @@ impl<'s, 'a> Resolver<'s, 'a> {
                 let entered = self.eval(entered, env, depth + 1)?;
                 self.enter(&entered, *is_async, depth + 1)
             }
+            Val::Awaited(awaited) => {
+                let awaited = self.eval(awaited, env, depth + 1)?;
+                self.awaited(awaited)
+            }
             Val::Class(name) => Some(Value::Type(Class::new(env.module, name))),
             Val::Nested(site) => {
                 let local = env.module == self.module;
@@ -1153,9 +1208,10 @@ impl<'s, 'a> Resolver<'s, 'a> {
                 };
                 !local || (function && !env.stack.iter().any(bound) && !self.scan.shadows(0, name))
             }
-            Val::Attr(base, _) | Val::Entered(base, _) | Val::Call(base, None) => {
-                self.placeless(base, env)
-            }
+            Val::Attr(base, _)
+            | Val::Entered(base, _)
+            | Val::Awaited(base)
+            | Val::Call(base, None) => self.placeless(base, env),
             Val::Call(_, Some(_)) => false,
             _ => true,
         }
@@ -1661,7 +1717,7 @@ impl<'s, 'a> Resolver<'s, 'a> {
                     self.any(found?)
                 },
             ),
-            Value::Function { .. } | Value::Manager(_) => None,
+            Value::Function { .. } | Value::Manager(..) | Value::Awaitable(_) => None,
         }
     }
 
@@ -1761,15 +1817,36 @@ impl<'s, 'a> Resolver<'s, 'a> {
                 .contains(&head.rsplit('.').next().unwrap_or(head))
                 .then_some(())?;
             let yielded = self.declared(args.first()?, env, 0)?;
-            return Some(Value::Manager(Box::new(yielded)));
+            return Some(Value::Manager(Box::new(yielded), method.asynchronous));
         }
-        self.declared(&method.returns, env, 0)
+        let returned = self.declared(&method.returns, env, 0)?;
+        Some(match method.asynchronous {
+            true => Value::Awaitable(Box::new(returned)),
+            false => returned,
+        })
+    }
+
+    /// What `await awaited` gives: what an `async def` returns, and anything else as
+    /// it is, an awaitable of another kind being annotated with what it gives.
+    fn awaited(&self, awaited: Value) -> Option<Value> {
+        match awaited {
+            Value::Awaitable(inner) => Some(*inner),
+            Value::Either(members) => {
+                let found = members.iter().cloned().map(|member| match member {
+                    Value::Awaitable(inner) => *inner,
+                    member => member,
+                });
+                self.any(found.collect::<Vec<Value>>())
+            }
+            awaited => Some(awaited),
+        }
     }
 
     /// What `with entered as` binds.
     fn enter(&self, entered: &Value, is_async: bool, depth: u8) -> Option<Value> {
         match entered {
-            Value::Manager(inner) => Some((**inner).clone()),
+            // `with` enters one kind of manager, `async with` the other.
+            Value::Manager(inner, entered) => (*entered == is_async).then(|| (**inner).clone()),
             Value::Either(members) => {
                 self.once(Asked::Entered(Set(Rc::clone(members)), is_async), || {
                     let found: Option<Vec<Value>> = members
@@ -1782,7 +1859,12 @@ impl<'s, 'a> Resolver<'s, 'a> {
             Value::Instance(_) => {
                 let name = if is_async { "__aenter__" } else { "__enter__" };
                 let method = self.member(entered, name, depth + 1)?;
-                self.call(&method, None, Env::top(self.module), depth + 1)
+                let given = self.call(&method, None, Env::top(self.module), depth + 1)?;
+                // `async with` awaits what `__aenter__` gives.
+                match is_async {
+                    true => self.awaited(given),
+                    false => Some(given),
+                }
             }
             _ => None,
         }
@@ -1876,9 +1958,9 @@ impl<'s, 'a> Resolver<'s, 'a> {
                             self.declared(&Ann::Union(args.clone()), env, depth + 1)
                         }
                         Some(Ok(Form::TypeOf)) => type_of(args.first()?),
-                        Some(Ok(Form::Manager)) => {
+                        Some(Ok(Form::Manager(is_async))) => {
                             let inner = self.declared(args.first()?, env, depth + 1)?;
-                            Some(Value::Manager(Box::new(inner)))
+                            Some(Value::Manager(Box::new(inner), is_async))
                         }
                         Some(_) => None,
                         None => Some(Value::Instance(path)),

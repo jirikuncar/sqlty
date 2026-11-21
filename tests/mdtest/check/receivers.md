@@ -116,6 +116,65 @@ class Participant(Model):
 Participant.db.one("SELECT name FROM users", int)
 ```
 
+### An `async def` gives its value once awaited
+
+Calling an `async def` gives a coroutine, which has none of the methods of what it
+returns. Only `async with` enters an `@asynccontextmanager`, and only `with` a
+`@contextmanager`. ty: `CoroutineType[Any, Any, DB]`, and an error on each `with`.
+
+```python
+from pkg.db import make_later, transaction, transaction_later
+
+async def run() -> None:
+    make_later().one("SELECT name FROM users", int)
+    later = make_later()
+    later.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch]
+    (await later).one("SELECT name FROM users", int)
+    with transaction_later() as cursor:
+        cursor.one("SELECT name FROM users", int)
+    async with transaction() as cursor:
+        cursor.one("SELECT name FROM users", int)
+```
+
+### A type parameter of the function in what it returns
+
+A type parameter of a function is a type of its own, whatever class of that name the
+module has: it is unknown in what the function returns, and the rest of the annotation
+is kept, so `Cursor[T]` is a `Cursor`. ty: the type of the argument.
+
+```python
+from typing import Optional
+from pkg.db import DB
+
+class T(DB): ...
+
+def first[T](item: T) -> T: ...
+
+def all_of[T](items: list[T]) -> "T | None": ...
+
+def maybe[T](item: T) -> Optional[T]: ...
+
+class Cursor[R](DB): ...
+
+def cursor[T](row: type[T]) -> Cursor[T]: ...
+
+class Box:
+    def take[T](self, item: T) -> T: ...
+
+def plain(item: object) -> T: ...
+
+def run(box: Box) -> None:
+    first(object()).one("SELECT name FROM users", int)
+    all_of([]).one("SELECT name FROM users", int)
+    maybe(object()).one("SELECT name FROM users", int)
+    # error: [column-type-mismatch]
+    cursor(int).one("SELECT name FROM users", int)
+    box.take(object()).one("SELECT name FROM users", int)
+    # error: [column-type-mismatch]
+    plain(object()).one("SELECT name FROM users", int)
+```
+
 ## `with ... as` through `__enter__`
 
 ty: `Cursor`.
@@ -1651,6 +1710,41 @@ def ended(rows, db: DB) -> None:
     else:
         return
     db.one("SELECT name FROM users", int)
+```
+
+### A `with` body that is cut short
+
+A context manager may swallow an exception (`contextlib.suppress`), so the body of a
+`with` may end after any of its statements, and what follows it runs even when the
+body returns. ty: `DB | Other` for the first; it follows `suppress` only.
+
+```python
+import contextlib
+from pkg.db import DB
+
+class Other:
+    def one(self, query: str, form: type, /) -> None: ...
+
+def rebound(text: str) -> None:
+    db = Other()
+    with contextlib.suppress(ValueError):
+        db = DB.connect(int(text))
+    db.one("SELECT name FROM users", int)
+
+def narrowed(db: object, text: str) -> None:
+    if not isinstance(db, DB):
+        with contextlib.suppress(ValueError):
+            int(text)
+            return
+    db.one("SELECT name FROM users", int)
+
+def kept(db: DB, lock) -> None:
+    with lock:
+        other = DB()
+    # error: [column-type-mismatch]
+    db.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch]
+    other.one("SELECT name FROM users", int)
 ```
 
 ### An import with a fallback
