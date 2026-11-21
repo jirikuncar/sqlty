@@ -759,6 +759,29 @@ fn rarer_suggestions_highlights_and_placeholders() {
         parse_error("SELECT cast(a, b)", "postgres").as_deref(),
         Some("unsupported in this dialect")
     );
+    for sql in [
+        "UPDATE t SET (a, b) = (1, 2)",
+        "WITH x AS (SELECT 1) UPDATE t SET (a, b) = (1, 2)",
+        "INSERT INTO t SET (a, b) = (1, 2)",
+        "INSERT INTO t (a) VALUES (1) ON DUPLICATE KEY UPDATE (a, b) = (1, 2)",
+    ] {
+        assert_eq!(
+            parse_error(sql, "mysql").as_deref(),
+            Some("unsupported in this dialect"),
+            "{sql}"
+        );
+    }
+    assert_eq!(
+        parse_error(
+            "INSERT INTO t SET a = 1 ON DUPLICATE KEY UPDATE b = 2",
+            "mysql"
+        ),
+        None
+    );
+    assert_eq!(
+        parse_error("UPDATE t SET (a, b) = (1, 2)", "postgres"),
+        None
+    );
     let operators: Vec<_> = crate::highlight::highlight("SELECT a ~~~ b", "postgres")
         .into_iter()
         .map(|(range, _)| range)
