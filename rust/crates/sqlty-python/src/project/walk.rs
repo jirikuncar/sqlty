@@ -594,3 +594,42 @@ fn descendants(directory: &Path, files: &dyn Files) -> Result<Vec<(String, Kind)
     }
     Ok(found)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Tree;
+
+    impl Files for Tree {
+        fn read(&self, path: &Path) -> Read {
+            match path.to_str() {
+                Some("/repo/pyproject.toml") => {
+                    Read::Text(b"[tool.sqlty]\nextend-exclude = [\"a/b\"]\n".to_vec())
+                }
+                _ => Read::Missing,
+            }
+        }
+
+        fn list(&self, path: &Path) -> Listing {
+            match path.to_str() {
+                Some("/repo") => Listing::Entries(vec![
+                    ("a".to_string(), Kind::Dir),
+                    ("b".to_string(), Kind::Dir),
+                ]),
+                Some("/repo/a" | "/repo/b") => {
+                    Listing::Entries(vec![("f.py".to_string(), Kind::File)])
+                }
+                _ => Listing::Missing,
+            }
+        }
+    }
+
+    /// The exclude set is compiled once for a whole walk (check budget), not per directory.
+    #[test]
+    fn walk_compiles_its_exclude_set_once() {
+        let discovery = Discovery::new(Box::new(Tree), Path::new("/repo"));
+        discovery.walk(Path::new(".")).unwrap();
+        assert_eq!(discovery.excludes.sets(), 1);
+    }
+}
