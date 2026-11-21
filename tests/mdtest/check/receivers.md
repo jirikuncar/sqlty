@@ -984,6 +984,144 @@ def typed[T: db.one("SELECT name FROM users", int)](db: Website) -> None: ...
 def returns(db: Website) -> db.one("SELECT name FROM users", int): ...
 ```
 
+## The types that annotations name
+
+The annotation of a parameter is read where the function is defined, too: a name of it
+is what the scope around makes it, whatever the body of the function binds it to later.
+
+### A name the body binds
+
+```python
+from pkg.db import DB, Website
+
+Conn = Website
+
+def website(db: Conn) -> None:
+    Conn = DB
+    db.one("SELECT name FROM users", int)
+
+def helper(db: DB) -> None:
+    DB = Website
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    db.one("SELECT name FROM users", int)
+```
+
+### A name the body imports
+
+```python
+from pkg.db import DB, Website
+
+Conn = Website
+
+def website(db: Conn) -> None:
+    from pkg.db import DB as Conn
+    db.one("SELECT name FROM users", int)
+
+def helper(db: DB) -> None:
+    from pkg.db import Website as DB
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    db.one("SELECT name FROM users", int)
+```
+
+### An annotation in a string
+
+```python
+from pkg.db import DB, Website
+
+Conn = Website
+
+def website(db: "Conn") -> None:
+    Conn = DB
+    db.one("SELECT name FROM users", int)
+
+def helper(db: "DB") -> None:
+    DB = Website
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    db.one("SELECT name FROM users", int)
+```
+
+### A generic function
+
+A type parameter of the function is the one name of an annotation the function has
+itself: `T` is not the `DB` of the module.
+
+```python
+from pkg.db import DB, Website
+
+Conn = Website
+T = DB
+
+def website[T](db: Conn, other: T) -> None:
+    Conn = DB
+    db.one("SELECT name FROM users", int)
+    other.one("SELECT name FROM users", int)
+
+def helper[T](db: DB, other: T) -> None:
+    DB = Website
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    db.one("SELECT name FROM users", int)
+    other.one("SELECT name FROM users", int)
+```
+
+### A method, a nested function, a parameter read after a test
+
+```python
+from pkg.db import DB, Website
+
+class Service:
+    def helper(self, db: DB) -> None:
+        DB = Website
+        # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+        db.one("SELECT name FROM users", int)
+
+def outer() -> None:
+    Conn = DB
+
+    def website(db: Website | None) -> None:
+        Website = DB
+        if db is not None:
+            db.one("SELECT name FROM users", int)
+
+    def helper(db: Conn | None) -> None:
+        Conn = Website
+        if db is not None:
+            # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+            db.one("SELECT name FROM users", int)
+
+        def inner() -> None:
+            # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+            db.one("SELECT name FROM users", int)
+```
+
+### An annotation in the body is the function's
+
+```python
+from pkg.db import DB, Website
+
+def website() -> None:
+    DB = Website
+    db: DB = DB()
+    # error:
+    db.one("SELECT name FROM users", int)
+```
+
+### A name the body of the class binds
+
+The annotation of a method is read in the body of its class, whose names are not
+followed: `DB` there is not the `DB` of the module, whatever the method binds it to.
+
+```python
+from pkg.db import DB, Website
+
+class Service:
+    DB = Website
+
+    def method(self, db: DB) -> None:
+        DB = 1
+        # error:
+        db.one("SELECT name FROM users", int)
+```
+
 ## A name is what it was last bound to
 
 ty: `Cursor` inside the `with`, `DB` before; `DB | Cursor` after the `if`.

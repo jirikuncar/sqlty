@@ -308,6 +308,9 @@ pub enum Val {
     Call(Box<Val>, Option<Ann>),
     /// A declared type.
     Declared(Ann),
+    /// The declared type of a parameter whose annotation names something its function
+    /// binds: the annotation is read in the scope around the function, before any of it.
+    Around(Ann),
     /// A value of the annotated type: a parameter assigned to an attribute. Unlike a
     /// declaration, it does not state what else the attribute may hold.
     Typed(Ann),
@@ -643,13 +646,52 @@ fn type_parameter(class: &StmtClassDef, name: &str) -> bool {
 
 /// Whether `annotation` names something the body of the class `scope` binds.
 fn names_bound(annotation: &Ann, scan: &Scan<'_>, scope: Scope, target: Option<&str>) -> bool {
-    let own = |name: &str| class_binds(scan, scope, name, target);
-    let inner = |annotation: &Ann| names_bound(annotation, scan, scope, target);
+    names(annotation, &|name| class_binds(scan, scope, name, target))
+}
+
+/// Whether `own` holds for a name `annotation` spells.
+fn names(annotation: &Ann, own: &dyn Fn(&str) -> bool) -> bool {
+    let inner = |annotation: &Ann| names(annotation, own);
     match annotation {
         Ann::Name(name) => own(name),
         Ann::Generic(head, arguments) => own(head) || arguments.iter().any(inner),
         Ann::Union(members) => members.iter().any(inner),
         Ann::None | Ann::Unknown => false,
+    }
+}
+
+/// Whether `declared`, the annotation `origin` of a name of `scope` has, is read in the
+/// scope around: the annotation of a parameter is evaluated where the function is
+/// defined, so a name of it that the function binds is not that binding. A type
+/// parameter of the function is seen there, and is read as the function has it.
+fn read_around(declared: &Ann, origin: Origin<'_>, scan: &Scan<'_>, scope: Scope) -> bool {
+    let (Origin::Declared(written, None), Node::Function(function)) = (origin, scan.scopes[scope])
+    else {
+        return false;
+    };
+    fn head(name: &str) -> &str {
+        name.split('.').next().unwrap_or(name)
+    }
+    let params = function.type_params.iter().flat_map(|params| params.iter());
+    let bound = |name: &str| scan.bindings(scope, head(name)).is_some();
+    let own = |name: &str| {
+        params
+            .clone()
+            .any(|param| crate::scopes::type_parameter(param).as_str() == head(name))
+    };
+    function.parameters.range().contains(written.start())
+        && names(declared, &bound)
+        && !names(declared, &own)
+}
+
+/// `val`, the value `origin` gives a name of `scope`, with the annotation of a
+/// parameter marked when it is read in the scope around (see [`read_around`]).
+fn around(val: Val, origin: Origin<'_>, scan: &Scan<'_>, scope: Scope) -> Val {
+    match val {
+        Val::Declared(declared) if read_around(&declared, origin, scan, scope) => {
+            Val::Around(declared)
+        }
+        val => val,
     }
 }
 
@@ -833,6 +875,19 @@ impl<'e> Env<'e> {
             this: None,
             stack: &[],
             at: None,
+        }
+    }
+
+    /// The scope around the innermost one, where no statement is followed.
+    fn outer(self) -> Self {
+        let stack = self
+            .stack
+            .split_last()
+            .map_or(self.stack, |(_, outer)| outer);
+        Env {
+            stack,
+            at: None,
+            ..self
         }
     }
 }
@@ -1169,6 +1224,7 @@ impl<'s, 'a> Resolver<'s, 'a> {
             Val::Declared(declared) | Val::Typed(declared) => {
                 self.declared(declared, env, depth + 1)
             }
+            Val::Around(declared) => self.declared(declared, env.outer(), depth + 1),
             Val::Entered(entered, is_async) => {
                 let entered = self.eval(entered, env, depth + 1)?;
                 self.enter(&entered, *is_async, depth + 1)
@@ -1210,7 +1266,7 @@ impl<'s, 'a> Resolver<'s, 'a> {
     ) -> Option<Value> {
         let stated = bound
             .iter()
-            .find(|(val, _)| declared && matches!(val, Val::Declared(_)));
+            .find(|(val, _)| declared && matches!(val, Val::Declared(_) | Val::Around(_)));
         if let Some((stated, _)) = stated {
             return self.eval(stated, Env { at: None, ..env }, depth);
         }
@@ -1371,7 +1427,9 @@ impl<'s, 'a> Resolver<'s, 'a> {
                         .iter()
                         .enumerate()
                         .map(|(index, binding)| {
-                            bound(origin(index, binding), name, false, self.named)
+                            let origin = origin(index, binding);
+                            let (val, at) = bound(origin, name, false, self.named);
+                            (around(val, origin, self.scan, scope), at)
                         })
                         .collect();
                     self.agreed(&bound, true, env, 0)
@@ -1528,7 +1586,9 @@ impl<'s, 'a> Resolver<'s, 'a> {
         // A declaration alone states the type, read where no statement is: it asks
         // nothing of the names of the scope, and is kept by where it is written.
         let scope = env.stack.last().copied().unwrap_or(0);
-        if let ([(Origin::Declared(declared, _), _)], None) = (&reach.origins[..], reach.narrowed) {
+        if let ([(origin @ Origin::Declared(declared, _), _)], None) =
+            (&reach.origins[..], reach.narrowed)
+        {
             // A name the module makes a class is kept by how it is spelled.
             if let Expr::Name(spelled) = declared {
                 let name = spelled.id.as_str();
@@ -1543,7 +1603,12 @@ impl<'s, 'a> Resolver<'s, 'a> {
                 return known;
             }
             let left = self.fuel.replace(FUEL);
-            let found = self.declared(&annotation(declared, 0), Env { at: None, ..env }, 1);
+            let stated = annotation(declared, 0);
+            let env = match read_around(&stated, *origin, self.scan, scope) {
+                true => env.outer(),
+                false => env,
+            };
+            let found = self.declared(&stated, Env { at: None, ..env }, 1);
             self.fuel.set(left);
             let mut kept = self.kept.borrow_mut();
             let stated = &mut kept.entry(scope).or_default().stated;
@@ -1580,10 +1645,14 @@ impl<'s, 'a> Resolver<'s, 'a> {
         env: Env<'_>,
         depth: u8,
     ) -> Option<Value> {
+        let scope = env.stack.last().copied().unwrap_or(0);
         let bound: SmallVec<[(Val, Option<u32>); 2]> = reach
             .origins
             .iter()
-            .map(|(origin, _)| bound(*origin, name, top, self.named))
+            .map(|(origin, _)| {
+                let (val, at) = bound(*origin, name, top, self.named);
+                (around(val, *origin, self.scan, scope), at)
+            })
             .collect();
         let rebound = |scope: &Scope| self.scan.bindings(*scope, "isinstance").is_some();
         let tested = reach
@@ -1603,10 +1672,10 @@ impl<'s, 'a> Resolver<'s, 'a> {
             // An annotation that is not followed may still state a class (an alias of
             // a union, a type variable): only `object` and `Any` state none.
             let spelled = match val {
-                Val::Declared(Ann::Name(name)) => {
+                Val::Declared(Ann::Name(name)) | Val::Around(Ann::Name(name)) => {
                     name != "object" && name.rsplit('.').next() != Some("Any")
                 }
-                Val::Declared(_) => true,
+                Val::Declared(_) | Val::Around(_) => true,
                 _ => false,
             };
             match self.eval(val, Env { at: *at, ..env }, depth) {
