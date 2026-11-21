@@ -573,3 +573,10 @@ fn test_keep_lines_preserves_line_count() {
 fn a_module_without_queries_is_unchanged() {
     assert_eq!(rewrite_source("x", "postgres", None, None, false), "x");
 }
+
+#[test]
+fn a_backslash_before_a_crlf_joins_the_lines() {
+    let source = "q = \"--sql\\nSELECT 1\\\r\n::INTEGER\"\n";
+    let rewritten = rewrite_source(source, "postgres", None, None, false);
+    assert!(rewritten.contains("SQL[tuple[int]]("), "{rewritten:?}");
+}

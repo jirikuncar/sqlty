@@ -151,6 +151,12 @@ fn a_named_file_must_have_its_table() {
     ];
     let config = load_file(Path::new("/a/x.toml"), Path::new("/c"), &tree(&files)).unwrap();
     assert_eq!(config.table["schema"][0].as_str(), Some("../a/b/s.sql"));
+    let files = [
+        ("/a/x.toml", "extend = \"b/y.toml\""),
+        ("/a/b/y.toml", "schema = \"..\""),
+    ];
+    let config = load_file(Path::new("/a/x.toml"), Path::new("/a"), &tree(&files)).unwrap();
+    assert_eq!(config.table["schema"][0].as_str(), Some("."));
 }
 
 #[test]
