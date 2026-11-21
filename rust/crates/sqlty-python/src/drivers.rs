@@ -10,8 +10,9 @@ use ruff_python_ast::visitor::{
 use ruff_python_ast::{Comprehension, ExceptHandler, Expr, ExprCall, ExprContext, Stmt};
 use ruff_text_size::Ranged;
 
+use crate::arg_types::{ArgTypes, SourceTypes};
 use crate::frozen::Table;
-use crate::scopes::{dotted, is_scalar, qualified, Context, Lines, Node, Scan, Scope};
+use crate::scopes::{dotted, is_scalar, Lines, Node, Scan, Scope};
 pub use crate::scopes::{Key, Param};
 
 const CONNECTIONS: [(&str, &str); 13] = [
@@ -93,7 +94,14 @@ pub fn may_hold(text: &str) -> bool {
 ///
 /// `imported` is `ParsedSource.imported_names` as `(local, dotted)` pairs, first binding first.
 pub fn find(source: &str, body: &[Stmt], imported: &Table) -> Vec<DriverCall> {
-    find_in(source, body, imported, &Scan::new(body))
+    let scan = Scan::new(body);
+    find_in(
+        source,
+        body,
+        imported,
+        &scan,
+        &SourceTypes::imports_only(imported, &scan),
+    )
 }
 
 /// Whether `call` can be a driver call: a method of a name, or any call when the module
@@ -108,23 +116,21 @@ fn wanted(call: &ExprCall, helpers: bool) -> bool {
     }
 }
 
-/// [`find`] over a walk of `body` that other checks share.
+/// [`find`] over a walk of `body` that other checks share, its arguments typed by `types`.
 pub fn find_in<'a>(
     source: &str,
     body: &'a [Stmt],
     imported: &Table,
     scan: &Scan<'a>,
+    types: &dyn ArgTypes,
 ) -> Vec<DriverCall> {
     let helpers = imported.values().any(|name| {
         let dotted = format!("{name}.");
         dotted.starts_with(BUNDLED_MODULE) || BUNDLED_MODULE.starts_with(&dotted)
     });
     let mut finder = Finder {
-        ctx: Context {
-            imported,
-            scan,
-            constant: None,
-        },
+        scan,
+        types,
         body,
         bindings: HashMap::new(),
         resolving: HashSet::new(),
@@ -145,7 +151,8 @@ pub fn find_in<'a>(
 type Binding<'a> = (Option<&'a Expr>, Option<&'a Expr>);
 
 struct Finder<'a, 's> {
-    ctx: Context<'a, 's>,
+    scan: &'s Scan<'a>,
+    types: &'s dyn ArgTypes,
     body: &'a [Stmt],
     bindings: HashMap<Scope, HashMap<&'a str, Vec<Binding<'a>>>>,
     resolving: HashSet<(Scope, String)>,
@@ -157,12 +164,7 @@ struct Finder<'a, 's> {
 impl<'a> Finder<'a, '_> {
     fn call(&mut self, call: &'a ExprCall, stack: &[Scope]) {
         let chain: Vec<Scope> = std::iter::once(0)
-            .chain(
-                stack
-                    .iter()
-                    .copied()
-                    .filter(|&s| !self.ctx.scan.is_class(s)),
-            )
+            .chain(stack.iter().copied().filter(|&s| !self.scan.is_class(s)))
             .collect();
         if let Some(bundled) = self.bundled(call) {
             for (first, arg) in bundled {
@@ -214,7 +216,7 @@ impl<'a> Finder<'a, '_> {
                     .enumerate()
                     .map(|(i, item)| Param {
                         key: Key::Index(i + 1),
-                        kind: self.ctx.arg_type(item, stack),
+                        kind: self.types.arg_type(item, stack),
                     })
                     .collect();
                 self.push(call, first, query.clone(), Some(params), driver, None);
@@ -273,10 +275,10 @@ impl<'a> Finder<'a, '_> {
         };
         let params = match arg {
             None => Some(Vec::new()),
-            Some(arg) => self.ctx.literal_params(arg, stack),
+            Some(arg) => self.types.literal_params(arg, stack),
         };
         let kind = match (arg, &params) {
-            (Some(arg), None) => self.ctx.arg_type(arg, stack),
+            (Some(arg), None) => self.types.arg_type(arg, stack),
             _ => None,
         };
         let sequence = matches!(driver, "sqlite3" | "aiosqlite");
@@ -318,7 +320,7 @@ impl<'a> Finder<'a, '_> {
 
     /// The query and parameters of a call to a `sqlty.drivers.psycopg` helper.
     fn bundled(&self, call: &'a ExprCall) -> Option<Vec<(&'a Expr, Option<&'a Expr>)>> {
-        let name = qualified(dotted(&call.func), self.ctx.imported)?;
+        let name = self.types.qualified(&call.func)?;
         let scalar = match name.strip_prefix(BUNDLED_MODULE)? {
             "execute" => false,
             "scalar" => true,
@@ -347,7 +349,7 @@ impl<'a> Finder<'a, '_> {
     fn of(&mut self, scope: Scope) -> &HashMap<&'a str, Vec<Binding<'a>>> {
         if !self.bindings.contains_key(&scope) {
             let mut binder = Binder::default();
-            match self.ctx.scan.scopes[scope] {
+            match self.scan.scopes[scope] {
                 Node::Module | Node::Class(_) => binder.visit_body(self.body),
                 Node::Function(function) => {
                     let parameters = &function.parameters;
@@ -420,7 +422,7 @@ impl<'a> Finder<'a, '_> {
         chain: &[Scope],
     ) -> Option<&'static str> {
         if let Some(annotation) = annotation {
-            if let Some(name) = qualified(dotted(annotation), self.ctx.imported) {
+            if let Some(name) = self.types.qualified(annotation) {
                 if let Some((_, driver)) = CONNECTIONS
                     .iter()
                     .chain(&CURSORS)
@@ -437,7 +439,7 @@ impl<'a> Finder<'a, '_> {
         let Expr::Call(call) = value else {
             return None;
         };
-        if let Some(name) = qualified(dotted(&call.func), self.ctx.imported) {
+        if let Some(name) = self.types.qualified(&call.func) {
             if let Some((_, driver)) = CONNECTIONS.iter().find(|(known, _)| *known == name) {
                 return Some(driver);
             }

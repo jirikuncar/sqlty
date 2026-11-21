@@ -96,6 +96,28 @@ impl RuleConfig {
         }
     }
 
+    /// The configuration reporting what either does, each rule at the stricter severity.
+    pub fn strictest(&self, other: &Self) -> Self {
+        let rank = |severity| match severity {
+            Severity::Error => 2,
+            Severity::Warn => 1,
+            Severity::Ignore => 0,
+        };
+        let mut merged = self.clone();
+        for rule in Rule::ALL {
+            let (own, theirs) = (self.severity(rule), other.severity(rule));
+            merged.set(
+                rule,
+                if rank(theirs) > rank(own) {
+                    theirs
+                } else {
+                    own
+                },
+            );
+        }
+        merged
+    }
+
     /// The effective severity of a rule.
     pub fn severity(&self, rule: Rule) -> Severity {
         self.severity[rule.index()]
@@ -133,6 +155,33 @@ impl RuleConfig {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_strictest_severity_of_two_configurations_wins_in_either_order() {
+        let config = |severity: &str| {
+            let overrides = [("select-star".to_string(), severity.to_string())].into();
+            RuleConfig::from_overrides(Some(overrides)).unwrap()
+        };
+        for (left, right, expected) in [
+            ("ignore", "warn", Severity::Warn),
+            ("warn", "error", Severity::Error),
+            ("error", "ignore", Severity::Error),
+            ("ignore", "ignore", Severity::Ignore),
+        ] {
+            let merged = config(left).strictest(&config(right));
+            assert_eq!(merged.severity(Rule::SelectStar), expected);
+            assert_eq!(
+                merged.is_enabled(Rule::SelectStar),
+                expected != Severity::Ignore
+            );
+            assert_eq!(
+                config(right)
+                    .strictest(&config(left))
+                    .severity(Rule::SelectStar),
+                expected
+            );
+        }
+    }
 
     #[test]
     fn every_rule_name_round_trips() {

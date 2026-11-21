@@ -15,8 +15,9 @@ Default severity: **warn**
 
 Reports the first new statement of a transaction that locks a second table that
 has rows against writes (`SHARE` or a stronger lock: most `ALTER TABLE` forms,
-a foreign key on both tables, `CREATE INDEX` without `CONCURRENTLY`, `TRUNCATE`,
-`DROP TABLE`, `LOCK TABLE`), while an earlier statement of the transaction
+a foreign key on both tables, `CREATE INDEX`, `REINDEX` and
+`REFRESH MATERIALIZED VIEW` without `CONCURRENTLY`, `CLUSTER`, `VACUUM FULL`,
+`TRUNCATE`, `DROP TABLE`, `LOCK TABLE`), while an earlier statement of the transaction
 still holds the first. One statement that locks several tables, which it needs
 at once, is not reported. Once per transaction.
 
