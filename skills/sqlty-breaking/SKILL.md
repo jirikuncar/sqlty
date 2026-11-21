@@ -66,6 +66,9 @@ migrations/0042_index.sql:2: [missing-concurrently] `CREATE INDEX` blocks writes
 | `enum-value-in-transaction` | `COMMIT` after `ALTER TYPE ... ADD VALUE`, then use the value |
 | `concurrent-index-if-not-exists` | `DROP INDEX CONCURRENTLY IF EXISTS`, then `CREATE INDEX CONCURRENTLY` without `IF NOT EXISTS` |
 | `disable-trigger-all` | `DISABLE TRIGGER USER` or name the triggers |
+| `multi-table-lock` | one table per transaction |
+| `locked-backfill` | `COMMIT` the schema change, then backfill |
+| `unbatched-backfill` | update in batches: `WHERE id IN (SELECT id ... LIMIT 5000)` |
 
 Every `schema` of the configuration is judged, each `[tool.sqlty.databases]` entry
 included, with the severities of `rules` and of the `[[tool.sqlty.overrides]]` that

@@ -861,10 +861,21 @@ impl Workspace {
             .into_iter()
             .map(|query| {
                 let sql = &query.sql;
-                let row = analyzer::infer_type(sql, dialect, schema).or_else(|| {
-                    analyzer::returns_rows(sql, dialect).then(|| "unknown".to_string())
-                });
-                let mut params = analyzer::analyze_params(sql, dialect, schema).unwrap_or_default();
+                let (routed, routed_schema) = analyzer::route(sql, dialect, schema);
+                let parsed = analyzer::parse(sql, routed);
+                let row = parsed
+                    .columns(routed_schema)
+                    .as_deref()
+                    .and_then(analyzer::row_type)
+                    .or_else(|| {
+                        let rows = if routed == dialect {
+                            parsed.returns_rows()
+                        } else {
+                            analyzer::returns_rows(sql, dialect)
+                        };
+                        rows.then(|| "unknown".to_string())
+                    });
+                let mut params = parsed.params(sql, routed_schema).unwrap_or_default();
                 params.sort_by_key(|param| param.index);
                 let listed: Vec<String> = params
                     .iter()
@@ -1279,6 +1290,32 @@ mod tests {
         ];
         let sources = opened(&plain).schema_sources().expect("reads");
         assert!(Arc::ptr_eq(&sources[0].files[0], &sources[0].settings));
+    }
+
+    #[test]
+    fn queries_of_another_dialect_are_counted_and_typed() {
+        const CONFIG: &str = "[project]\nrequires-python = \">=3.15\"\n\n[tool.sqlty]\nschema = \"app.sql\"\n\n[tool.sqlty.databases.lite]\ndialect = \"sqlite\"\nschema = \"lite.sql\"\n";
+        let mut workspace = opened(&[
+            ("/repo/pyproject.toml", CONFIG),
+            ("/repo/app.sql", "CREATE TABLE users (id INT NOT NULL);"),
+            ("/repo/lite.sql", "CREATE TABLE events (n INTEGER NOT NULL);"),
+            (
+                "/repo/q.py",
+                "q = \"--sql sqlty: db=lite\\nSELECT n FROM events\"\nu = \"--sql sqlty: db=lite\\nSELECT nope FROM events\"\n",
+            ),
+        ]);
+        let counts = workspace.statistics_all().expect("counts");
+        assert_eq!(counts[0].get("typed"), Some(&1));
+        assert_eq!(counts[0].get("partially typed"), Some(&1));
+
+        let sql = "-- name: add\n-- sqlty: db=lite\nINSERT INTO events (n) VALUES (1);\n\n-- name: all\n-- sqlty: db=lite\nSELECT n FROM events;\n\n-- name: odd\n-- sqlty: db=lite\nSELECT nope FROM events;\n";
+        let listed = workspace
+            .query_types(Path::new("sql/lite.sql"), sql)
+            .expect("types");
+        assert_eq!(
+            listed,
+            ["add() -> None", "all() -> tuple[int]", "odd() -> unknown"]
+        );
     }
 
     #[test]
