@@ -31,7 +31,7 @@ ids = db.fetch_all("SELECT name FROM users", int)
 one = Db.fetch_one("SELECT name FROM users", int)
 ```
 
-## A `self` attribute is followed, an attribute of it is not
+## A `self` attribute is followed, and an attribute of it
 
 ```python
 from typing import Annotated, LiteralString
@@ -51,6 +51,7 @@ class Service:
     def run(self) -> None:
         # error: [column-type-mismatch]
         self.db.fetch_all("SELECT name FROM users", int)
+        # error: [column-type-mismatch]
         self.app.db.fetch_all("SELECT name FROM users", int)
 
         def later() -> None:

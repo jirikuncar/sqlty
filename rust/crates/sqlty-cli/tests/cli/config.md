@@ -42,6 +42,6 @@ sqlty: error: --config: invalid severity 'loud' for rule 'unknown-column' in [to
 
 $ sqlty check bad
 ? 2
-sqlty: error: [CWD]/bad/sqlty.toml: unknown key 'shema' in [tool.sqlty] (did you mean 'schema'?); expected one of: dialect, driver, schema, queries, query-format, rules, overrides, import-style, untyped, json-types, param-types, preview, max-query-variants, coerce-row-types, functions, types, format-command, extend, databases, exclude, extend-exclude, respect-gitignore
+sqlty: error: [CWD]/bad/sqlty.toml: unknown key 'shema' in [tool.sqlty] (did you mean 'schema'?); expected one of: dialect, driver, schema, queries, query-format, rules, overrides, import-style, untyped, json-types, param-types, preview, max-query-variants, coerce-row-types, functions, stub-paths, types, format-command, extend, databases, exclude, extend-exclude, respect-gitignore
 
 ```

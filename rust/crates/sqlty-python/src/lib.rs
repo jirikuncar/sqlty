@@ -52,6 +52,7 @@ pub mod drivers;
 pub mod edit;
 pub mod facts;
 pub mod fixer;
+pub(crate) mod flow;
 pub mod frozen;
 pub mod helpers;
 #[allow(missing_docs)]
@@ -60,11 +61,14 @@ pub mod json_types;
 pub mod locate;
 pub mod migrations;
 pub mod module;
+pub mod modules;
 pub mod options;
 pub mod params;
 pub mod parse;
 pub mod project;
 pub mod queries;
+#[allow(missing_docs)]
+pub mod receivers;
 pub mod report;
 pub mod rewriter;
 #[allow(missing_docs)]

@@ -13,8 +13,9 @@ use ruff_text_size::Ranged;
 
 use crate::compose::{self, Declared, Rendered};
 use crate::facts::ModuleFacts;
-use crate::helpers::{mentions, receiver_class, region};
-use crate::scopes::{dotted, Context, Key, Lines, Node, Param, Scan, Scope};
+use crate::helpers::{mentions, region};
+use crate::receivers::Resolver;
+use crate::scopes::{dotted, Context, Key, Node, Param, Scan, Scope};
 use crate::types::info::Dict;
 use crate::types::symbols::Source;
 use crate::variants::{query_variants, Found, Variant};
@@ -250,7 +251,7 @@ fn decorators(function: &StmtFunctionDef) -> impl Iterator<Item = Option<String>
 }
 
 /// How a method is called, by its decorators.
-fn method_kind(function: &StmtFunctionDef) -> Kind {
+pub(crate) fn method_kind(function: &StmtFunctionDef) -> Kind {
     let names: Vec<Option<String>> = decorators(function).collect();
     let has = |name: &str| names.iter().any(|found| found.as_deref() == Some(name));
     if has("staticmethod") {
@@ -338,7 +339,16 @@ pub(crate) fn definitions(source: &Source) -> Vec<(String, &StmtFunctionDef, Kin
             _ => None,
         })
     });
-    functions.chain(methods).collect()
+    let found: Vec<_> = functions.chain(methods).collect();
+    #[cfg(test)]
+    READ.with(|read| read.set(read.get() + found.len()));
+    found
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The definitions [`definitions`] gave this thread, for the tests of cost.
+    pub(crate) static READ: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// The sort key among definitions of one name: complete first, then not `@overload`.
@@ -458,20 +468,11 @@ fn call_params(
     None
 }
 
-/// Whether a call of a helper can look like this: a name or a dotted attribute called.
-fn wanted(call: &ExprCall) -> bool {
-    match call.func.as_ref() {
-        Expr::Name(_) => true,
-        Expr::Attribute(attr) => dotted(&attr.value).is_some(),
-        _ => false,
-    }
-}
-
 /// The calls of the helpers the module defines or imports from the
 /// modules of `helpers`, by line. A query built in a way that is not modelled (see
 /// [`compose`]) is left unchecked.
 pub fn helper_calls_in<'a>(
-    facts: &ModuleFacts<'a>,
+    facts: &'a ModuleFacts<'a>,
     helpers: Option<&'a HelperIndex>,
     module: Option<&str>,
     variants: Option<usize>,
@@ -492,11 +493,7 @@ pub fn helper_calls_in<'a>(
     if own.is_empty() && !imported {
         return Vec::new();
     }
-    let targets = if imported {
-        source.targets_in(module)
-    } else {
-        std::borrow::Cow::Owned(Default::default())
-    };
+    let targets = source.targets_in(module);
     let (functions, modules) = &*targets;
     let mut names: HashSet<String> = own
         .iter()
@@ -511,6 +508,8 @@ pub fn helper_calls_in<'a>(
             .collect();
         names.extend(renamed);
     }
+    // The receiver of a call is worked out only for a method some helper is named by.
+    let methods = names.clone();
     let mut names: Vec<String> = names.into_iter().collect();
     names.sort();
     // No pattern holds too many names: every scope is read.
@@ -528,17 +527,11 @@ pub fn helper_calls_in<'a>(
         scan,
         constant: Some(&constant),
     };
-    let lines = Lines::new(text);
+    let lines = &source.lines;
     let (annotated, marker) = marker_names(source);
     let lookup = |module: &str, name: &str| helpers.and_then(|helpers| helpers.get(module, name));
-    let method_of = |class: &str, name: &str| match class.rsplit_once('.') {
-        Some((prefix, class)) => lookup(&module_of(prefix, modules), &format!("{class}.{name}")),
-        None => own.get(&format!("{class}.{name}")).or_else(|| {
-            let (module, original) = functions.get(class)?;
-            lookup(module, &format!("{original}.{name}"))
-        }),
-    };
-    let mut scoped: Vec<Option<bool>> = vec![None; scan.scopes.len()];
+    let receivers = Resolver::new(source, module, helpers, &own, scan);
+    let mut wanted: Vec<Option<bool>> = vec![None; scan.scopes.len()];
     let composed = text.contains("psycopg");
     let mut psycopg: Option<compose::Scan<'a>> = None;
     let resolve = |from: &Source, dotted: &str| {
@@ -546,13 +539,14 @@ pub fn helper_calls_in<'a>(
     };
     let mut calls = Vec::new();
     for &(call, scope) in &scan.calls {
-        if !wanted(call) {
+        // A helper is called by a name or as an attribute.
+        if !matches!(call.func.as_ref(), Expr::Name(_) | Expr::Attribute(_)) {
             continue;
         }
         let stack = scan.stack(scope);
         if scope != 0 {
-            let mentioned = *scoped[scope].get_or_insert_with(|| {
-                let (start, end) = region(scan.scopes[scope], &lines, text.len());
+            let mentioned = *wanted[scope].get_or_insert_with(|| {
+                let (start, end) = region(scan.scopes[scope], lines, text.len());
                 pattern
                     .as_ref()
                     .is_none_or(|pattern| pattern.is_match(&text[start..end]))
@@ -568,16 +562,14 @@ pub fn helper_calls_in<'a>(
             }),
             // The scan keeps only calls of names and attributes.
             func => func.as_attribute_expr().and_then(|attr| {
-                let prefix = dotted(&attr.value).unwrap_or_default();
                 let name = attr.attr.as_str();
-                if let Some(found) = lookup(&module_of(&prefix, modules), name) {
-                    Some(found)
-                } else if let Some(found) = method_of(&prefix, name) {
-                    (found.kind != Kind::Instance).then_some(found)
-                } else {
-                    receiver_class(&attr.value, stack, &ctx)
-                        .and_then(|class| method_of(&class, name))
-                }
+                let function = dotted(&attr.value)
+                    .and_then(|prefix| lookup(&module_of(&prefix, modules), name));
+                function.or_else(|| {
+                    methods
+                        .contains(name)
+                        .then(|| receivers.method(&attr.value, name, stack))?
+                })
             }),
         };
         let Some(helper) = helper else {
@@ -757,5 +749,44 @@ mod tests {
     fn a_module_without_markers_has_no_helpers() {
         let source = Source::new("from typing import Annotated\nx = 1\n", (3, 14)).unwrap();
         assert!(index_functions(&source).is_empty());
+    }
+
+    /// The paths the checks of `text` read outside an index whose only helper is the
+    /// method `Db.one` of the module `db`.
+    fn read_for(text: &str) -> usize {
+        use crate::index::{Builder, Module};
+        use crate::modules::{File, Modules};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let helper = "from typing import Annotated, LiteralString\nfrom sqlty import SQL\nclass Db:\n    def one(self, query: Annotated[LiteralString, SQL]): ...\n";
+        let db = Arc::new(Module::new(Arc::from(helper), "db", (3, 14)));
+        let found = index_functions(db.source().unwrap());
+        let mut builder = Builder::new((3, 14));
+        builder.add_found("db", db, &found);
+        let read = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&read);
+        let roots = vec![std::path::PathBuf::from("/root")];
+        let reader = Arc::new(move |_: &std::path::Path| {
+            counted.fetch_add(1, Ordering::Relaxed);
+            File::Missing
+        });
+        builder.outside(Arc::new(Modules::new((3, 14), Vec::new(), roots, reader)));
+        let index = builder.build();
+        let source = Source::new(text, (3, 14)).unwrap().named(Some("app"));
+        let facts = ModuleFacts::new(&source);
+        let calls = helper_calls_in(&facts, Some(&index), Some("app"), None);
+        assert!(calls.is_empty(), "no call of a helper");
+        read.load(Ordering::Relaxed)
+    }
+
+    #[test]
+    fn a_receiver_is_worked_out_only_for_a_method_a_helper_is_named_by() {
+        // The scope names a helper (`one`), so its calls are read: only the receiver
+        // of `.one(...)` is looked for, never those of the calls around it.
+        let around = "import lib, other\ndef run(one):\n    lib.config.load('a')\n    other.thing().close()\n";
+        assert_eq!(read_for(around), 0);
+        let called = format!("{around}    lib.config.one('SELECT 1')\n");
+        assert!(read_for(&called) > 0, "`lib` is looked for under the root");
     }
 }

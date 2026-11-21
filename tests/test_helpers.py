@@ -223,6 +223,7 @@ def test_configured_functions(project, capsys):
     assert sorted(rules(capsys.readouterr().out)) == [
         ("instance.py", "column-type-mismatch"),
         ("library.py", "column-type-mismatch"),
+        ("method.py", "column-type-mismatch"),
         ("positional.py", "column-type-mismatch"),
     ]
 
@@ -241,6 +242,92 @@ def test_register_reads_unindexed_modules_from_roots(tmp_path):
     assert index.modules["pkg.h"]["run"].positional == ("sql", "form")
     assert index.modules["pkg.sub"]["run"].positional == ("conn", "sql", "form")
     assert index.modules["pkg.idx"]["run"].positional == ("form", "sql")
+
+
+def test_outside_reads_the_class_of_a_receiver_from_roots(tmp_path):
+    """`outside` roots give the class of a receiver: `lib-stubs`, a `.pyi`, then the `.py`."""
+    for name in ("lib", "lib-stubs", "plain"):
+        (tmp_path / name).mkdir()
+    (tmp_path / "lib" / "__init__.py").write_text("class Db:\n    def get(self, sql): ...\n")
+    (tmp_path / "lib-stubs" / "__init__.pyi").write_text(
+        "class Db:\n    def get(self, sql: str) -> None: ...\nclass Site:\n    db: Db\n"
+    )
+    (tmp_path / "plain" / "__init__.py").write_text(
+        "from lib import Db\nclass Site:\n    db: Db\n    def other(self): ...\n"
+    )
+    (tmp_path / "big.py").write_text("class Site:\n    db = None\n" + "#" * (300 << 10))
+    use = "from {} import Site\ndef run(site: Site) -> None:\n    site.db.get('SELECT 1 +')\n"
+    index = HelperIndex()
+    index.register("lib.Db.get", "sql", roots=[tmp_path])
+    for module, found in (("lib", 1), ("plain", 1), ("big", 0), ("missing", 0)):
+        assert len(check_source(use.format(module), Settings(helpers=index))) == found, module
+    # Without roots the library is not read: `Site` is known by its path only.
+    unread = HelperIndex()
+    unread.register("lib.Db.get", "sql")
+    assert check_source(use.format("lib"), Settings(helpers=unread)) == []
+    # `outside` gives the roots to what is registered after it.
+    read = HelperIndex()
+    read.outside([tmp_path])
+    read.register("lib.Db.get", "sql")
+    assert len(check_source(use.format("plain"), Settings(helpers=read))) == 1
+
+
+def test_a_module_that_is_not_text_ends_the_search_of_the_roots(tmp_path):
+    """A file that cannot be read is the module: the next root is not asked for it."""
+    for name in ("first", "second"):
+        (tmp_path / name).mkdir()
+    (tmp_path / "second" / "lib.py").write_text(
+        "class Db:\n    def get(self, sql): ...\nclass Site:\n    db: Db\n"
+    )
+    use = "from lib import Site\ndef run(site: Site) -> None:\n    site.db.get('SELECT 1 +')\n"
+    roots = [tmp_path / "first", tmp_path / "second"]
+    found = HelperIndex()
+    found.register("lib.Db.get", "sql", roots=roots)
+    assert len(check_source(use, Settings(helpers=found))) == 1
+    # A stub that is not text is no stub: the module is looked for on.
+    (tmp_path / "first" / "lib.pyi").write_bytes(b"\xff\xfe")
+    skipped = HelperIndex()
+    skipped.register("lib.Db.get", "sql", roots=roots)
+    assert len(check_source(use, Settings(helpers=skipped))) == 1
+    (tmp_path / "first" / "lib.pyi").unlink()
+    (tmp_path / "first" / "lib.py").write_bytes(b"\xff\xfe")
+    hidden = HelperIndex()
+    hidden.register("lib.Db.get", "sql", roots=roots)
+    assert check_source(use, Settings(helpers=hidden)) == []
+
+
+def test_register_reads_past_a_stub_that_lacks_the_helper(tmp_path):
+    """A stub describing part of a library leaves the rest to the library."""
+    for name in ("part", "part-stubs", "bad", "typings"):
+        (tmp_path / name).mkdir()
+    (tmp_path / "half.py").write_text("def fetch(sql, form): ...\ndef both(a, sql): ...\n")
+    (tmp_path / "half.pyi").write_text("def both(sql: str, a: int) -> None: ...\n")
+    (tmp_path / "part" / "__init__.py").write_text("def fetch(sql, form): ...\n")
+    (tmp_path / "part-stubs" / "__init__.pyi").write_text("VERSION: str\n")
+    (tmp_path / "bad" / "__init__.py").write_text("def fetch(sql, form): ...\n")
+    (tmp_path / "bad" / "__init__.pyi").write_text("def fetch(:\n")
+    index = HelperIndex()
+    index.add_stub("given", "VERSION: str\n")
+    index.add("given", "def fetch(sql, form): ...\n")
+    for module in ("half", "part", "bad", "given"):
+        index.register(f"{module}.fetch", "sql", "form", roots=[tmp_path])
+        assert index.modules[module]["fetch"].positional == ("sql", "form"), module
+    # What the stub does define is read from the stub.
+    index.register("half.both", "sql", roots=[tmp_path])
+    assert index.modules["half"]["both"].positional == ("sql", "a")
+
+
+def test_register_stops_at_a_stub_that_declares_the_class(tmp_path):
+    """A stub's class without the method ends the search: the library's parameters may differ."""
+    (tmp_path / "lib.py").write_text("class Engine:\n    def fetch(self, label, sql): ...\n")
+    (tmp_path / "lib.pyi").write_text(
+        "class Base:\n    def fetch(self, sql: str, label: str = ...) -> None: ...\n"
+        "class Engine(Base): ...\n"
+    )
+    index = HelperIndex()
+    index.register("lib.Engine.fetch", "sql", roots=[tmp_path])
+    found = index.modules["lib"]["Engine.fetch"]
+    assert found.positional == () and found.keywords == {"sql"}
 
 
 def test_register_follows_reexports(tmp_path):

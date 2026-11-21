@@ -114,6 +114,7 @@ A directory with more than one file reads the first of `sqlty.toml`,
 | [`max-query-variants`](#max-query-variants) | positive integer | `64` | `check` | With `preview`, the most variants of a query built in branches that `check` checks |
 | [`coerce-row-types`](#coerce-row-types) | list of strings | `[]` | `check` | `TypedDict`, `NamedTuple` and dataclass rows, as `module.Name`, the code validates with Pydantic |
 | [`functions`](#functions) | array of tables | `[]` | `check` | Helper functions whose string argument is a query |
+| [`stub-paths`](#stub-paths) | list of strings | `["typings"]` | `check` | Directories of `.pyi` stubs, read before the modules they describe to find the class of a helper method's receiver |
 | [`types`](#types) | table of SQL type or `table.column` = Python type | `{}` | `rewrite`, `check` | Python types a converter above the driver gives a SQL type or a column |
 | [`format-command`](#format-command) | list of strings | none | `rewrite`, `check --fix` | Formatter run on each file `rewrite` or `check --fix` changes, with the path appended |
 | [`extend`](#extend) | string | none | `rewrite`, `strip`, `check`, magic codec | Another configuration file this one is applied on top of, relative to this file |
@@ -357,6 +358,23 @@ query-param = "query"
 <!-- /generated:config-function-keys -->
 
 Entries without `import-path` or `query-param` are skipped with a warning.
+
+## `stub-paths`
+
+Directories, relative to the configuration file, holding `.pyi` stubs of the
+libraries the project calls. `typings/lib/__init__.pyi` describes `lib`, and is read
+before `lib` itself to find the
+[class of a helper method's receiver](../guide/helpers.md#stubs-for-untyped-libraries).
+A method whose query parameter a stub marks `Annotated[LiteralString, SQL]` is a helper.
+The directories are read in order: the first that describes a module gives its stub.
+`lib-stubs/` describes `lib` too, and a package is taken before a module of its name.
+Only the stubs of the packages a checked file or another such stub names are read, and
+at most 4096 stubs of a directory are listed, with a warning when it holds more.
+
+```toml
+[tool.sqlty]
+stub-paths = ["typings"]
+```
 
 ## `types`
 

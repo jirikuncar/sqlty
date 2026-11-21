@@ -1843,6 +1843,7 @@ dependencies = [
 name = "sqlty-project"
 version = "0.8.0"
 dependencies = [
+ "libc",
  "rayon",
  "regex",
  "sqlty-format",
@@ -1862,6 +1863,8 @@ dependencies = [
  "ruff_python_ast",
  "ruff_python_parser",
  "ruff_text_size",
+ "rustc-hash",
+ "smallvec",
  "sqlty-rules",
  "sqlty-sql",
  "stacker",
