@@ -1,4 +1,4 @@
-"""The mdtest format itself: parsing rules, error matching and ``--update-mdtest``."""
+"""The mdtest format itself: parsing rules and ``--update-mdtest``."""
 
 from __future__ import annotations
 
@@ -7,26 +7,26 @@ from pathlib import Path
 import pytest
 
 from tests._mdtest.parser import ParseError, parse
-from tests._mdtest.runner import MDTestFailure, Run
+from tests._mdtest.runner import MDTestFailure, Run, owns
 from tests._mdtest.updater import Updater
 
-SOURCE = '''\
+SOURCE = """\
 # Updater
 
 ## Grows to several lines
 
 ```python
-q = """--sql
-SELECT id::INTEGER FROM users"""
-# rewritten-file:
+q = \"\"\"--sql
+SELECT id::INTEGER FROM users\"\"\"
+# decoded:
 ```
 
 ## Shrinks to one line
 
 ```python
 q = "--sql\\nSELECT name::TEXT FROM users"
-# rewritten: stale line one
-# rewritten: stale line two
+# decoded: stale line one
+# decoded: stale line two
 ```
 
 ## Keeps indentation
@@ -35,76 +35,33 @@ q = "--sql\\nSELECT name::TEXT FROM users"
 def f():
     q = "--sql\\nSELECT 1::INTEGER"
     return q
-# rewritten:
-# stripped: stale
+# decoded: stale
 ```
 
-## Errors move above their line
-
-```python
-q = SQL[tuple[str]]("--sql\\nSELECT 1::INTEGER")  # error: [narrow-type]
-# error: [select-star]
-r = "--sql\\nSELECT 2::INTEGER"
-```
-
-## SQL assertions
+## Other kinds are left to the Rust runners
 
 ```sql
 SELECT id::INTEGER FROM users
 -- inferred: tuple[str]
 ```
-'''
+"""
 
-EXPECTED = '''\
-# Updater
-
-## Grows to several lines
-
-```python
-q = """--sql
-SELECT id::INTEGER FROM users"""
-# rewritten-file: from sqlty import SQL
-# rewritten-file: q = SQL[tuple[int]]("""--sql
-# rewritten-file: SELECT id::INTEGER FROM users""")
-```
-
-## Shrinks to one line
-
-```python
-q = "--sql\\nSELECT name::TEXT FROM users"
-# rewritten: q = SQL[tuple[str]]("--sql\\nSELECT name::TEXT FROM users")
-```
-
-## Keeps indentation
-
-```python
-def f():
-    q = "--sql\\nSELECT 1::INTEGER"
-    return q
-# rewritten: def f():
-# rewritten:     q = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")
-# rewritten:     return q
-# stripped: def f():
-# stripped:     q = "--sql\\nSELECT 1::INTEGER"
-# stripped:     return q
-```
-
-## Errors move above their line
-
-```python
-# error: [narrow-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
-q = SQL[tuple[str]]("--sql\\nSELECT 1::INTEGER")
-# error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
-r = "--sql\\nSELECT 2::INTEGER"
-```
-
-## SQL assertions
-
-```sql
-SELECT id::INTEGER FROM users
--- inferred: tuple[int]
-```
-'''
+EXPECTED = (
+    SOURCE.replace(
+        "# decoded:\n",
+        '# decoded: q = SQL[tuple[int]]("""--sql\n# decoded: SELECT id::INTEGER FROM users""")\n',
+    )
+    .replace(
+        "# decoded: stale line one\n# decoded: stale line two\n",
+        '# decoded: q = SQL[tuple[str]]("--sql\\nSELECT name::TEXT FROM users")\n',
+    )
+    .replace(
+        "# decoded: stale\n",
+        "# decoded: def f():\n"
+        '# decoded:     q = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")\n'
+        "# decoded:     return q\n",
+    )
+)
 
 
 def _run(path: Path, *, update: bool = False, reverse: bool = False) -> None:
@@ -140,14 +97,14 @@ def test_update_once_per_section(tmp_path: Path) -> None:
 def test_failure_report(tmp_path: Path) -> None:
     path = _write(tmp_path, SOURCE)
     reports = []
-    for section in parse(path):
+    for section in filter(owns, parse(path)):
         with pytest.raises(MDTestFailure) as excinfo:
             Run(section, None).run()
         reports.append(str(excinfo.value))
     report = "\n".join(reports)
-    assert f"{path}:8: `# rewritten-file:` failed" in report
-    assert f"{path}:34: unexpected diagnostic [stale-rewrite]" in report
-    assert f"{path}:34: unmatched assertion `# error: [select-star]`" in report
+    assert f"{path}:8: `# decoded:` failed" in report
+    assert f"{path}:15: `# decoded:` failed" in report
+    assert "inferred" not in report
 
 
 def test_names_join_headings(tmp_path: Path) -> None:
