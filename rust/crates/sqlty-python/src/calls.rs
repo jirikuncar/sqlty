@@ -11,9 +11,11 @@ use ruff_python_ast::visitor::{walk_expr, Visitor};
 use ruff_python_ast::{Expr, ExprCall, Parameters, Stmt, StmtFunctionDef};
 use ruff_text_size::Ranged;
 
+use crate::arg_types::ArgTypes;
 use crate::compose::{self, Declared, Rendered};
-use crate::helpers::{mentions, receiver_class, region};
-use crate::scopes::{dotted, Context, Key, Lines, Node, Param, Scan, Scope};
+use crate::facts::ModuleFacts;
+use crate::helpers::{mentions, region};
+use crate::scopes::{dotted, Key, Lines, Node, Param, Scan, Scope};
 use crate::types::info::Dict;
 use crate::types::symbols::Source;
 use crate::variants::{query_variants, Found, Variant};
@@ -414,11 +416,11 @@ fn call_params(
     helper: &Helper,
     call: &ExprCall,
     stack: &[Scope],
-    ctx: &Context<'_, '_>,
+    types: &dyn ArgTypes,
 ) -> Option<Vec<Param>> {
     if helper.params.is_some() {
         let arg = argument(helper, call, helper.params.as_deref())?;
-        return ctx.literal_params(arg, stack);
+        return types.literal_params(arg, stack);
     }
     let args = &call.arguments.args;
     if helper.rest.is_some() {
@@ -431,7 +433,7 @@ fn call_params(
                 .enumerate()
                 .map(|(i, arg)| Param {
                     key: Key::Index(i + 1),
-                    kind: ctx.arg_type(arg, stack),
+                    kind: types.arg_type(arg, stack),
                 })
                 .collect(),
         );
@@ -448,7 +450,7 @@ fn call_params(
                     let name = keyword.arg.as_ref()?.as_str();
                     (!helper.keywords.contains(name)).then(|| Param {
                         key: Key::Name(name.to_string()),
-                        kind: ctx.arg_type(&keyword.value, stack),
+                        kind: types.arg_type(&keyword.value, stack),
                     })
                 })
                 .collect(),
@@ -457,15 +459,27 @@ fn call_params(
     None
 }
 
-/// The calls of the helpers `source` defines or imports from the
-/// modules of `helpers`, by line. A query built in a way that is not modelled (see
-/// [`compose`]) is left unchecked.
-pub fn helper_calls<'a>(
-    source: &'a Source,
+/// Whether a call of a helper can look like this: a name or a dotted attribute called.
+fn wanted(call: &ExprCall) -> bool {
+    match call.func.as_ref() {
+        Expr::Name(_) => true,
+        Expr::Attribute(attr) => dotted(&attr.value).is_some(),
+        _ => false,
+    }
+}
+
+/// The calls of the helpers the module defines or imports from the
+/// modules of `helpers`, by line, their arguments typed by `types`, asked only when the
+/// module has some. A query built in a way that is not modelled (see [`compose`]) is left
+/// unchecked.
+pub fn helper_calls_in<'a, 't>(
+    facts: &ModuleFacts<'a>,
     helpers: Option<&'a HelperIndex>,
     module: Option<&str>,
     variants: Option<usize>,
+    types: &dyn Fn() -> &'t dyn ArgTypes,
 ) -> Vec<Call<'a>> {
+    let source = facts.source;
     let text = &*source.text;
     let local = text.contains("Annotated") && text.contains("sqlty") && text.contains("SQL");
     let imported =
@@ -510,17 +524,8 @@ pub fn helper_calls<'a>(
     {
         return Vec::new();
     }
-    let scan = Scan::new(source.body(), |call: &ExprCall| match call.func.as_ref() {
-        Expr::Name(_) => true,
-        Expr::Attribute(attr) => dotted(&attr.value).is_some(),
-        _ => false,
-    });
-    let constant = |dotted: &str| helpers?.fragment(source, dotted, module);
-    let ctx = Context {
-        imported: &source.imports,
-        scan: &scan,
-        constant: Some(&constant),
-    };
+    let scan = facts.scan();
+    let types = types();
     let lines = Lines::new(text);
     let (annotated, marker) = marker_names(source);
     let lookup = |module: &str, name: &str| helpers.and_then(|helpers| helpers.get(module, name));
@@ -531,16 +536,20 @@ pub fn helper_calls<'a>(
             lookup(module, &format!("{original}.{name}"))
         }),
     };
-    let mut wanted: Vec<Option<bool>> = vec![None; scan.scopes.len()];
+    let mut scoped: Vec<Option<bool>> = vec![None; scan.scopes.len()];
     let composed = text.contains("psycopg");
     let mut psycopg: Option<compose::Scan<'a>> = None;
     let resolve = |from: &Source, dotted: &str| {
         helpers.and_then(|helpers| helpers.fragment(from, dotted, module))
     };
     let mut calls = Vec::new();
-    for (call, stack) in &scan.calls {
-        if let Some(&scope) = stack.last() {
-            let mentioned = *wanted[scope].get_or_insert_with(|| {
+    for &(call, scope) in &scan.calls {
+        if !wanted(call) {
+            continue;
+        }
+        let stack = scan.stack(scope);
+        if scope != 0 {
+            let mentioned = *scoped[scope].get_or_insert_with(|| {
                 let (start, end) = region(scan.scopes[scope], &lines, text.len());
                 pattern
                     .as_ref()
@@ -564,7 +573,8 @@ pub fn helper_calls<'a>(
                 } else if let Some(found) = method_of(&prefix, name) {
                     (found.kind != Kind::Instance).then_some(found)
                 } else {
-                    receiver_class(&attr.value, stack, &ctx)
+                    types
+                        .receiver_class(&attr.value, stack)
                         .and_then(|class| method_of(&class, name))
                 }
             }),
@@ -579,7 +589,7 @@ pub fn helper_calls<'a>(
             Expr::StringLiteral(literal) => Some(crate::parse::text(literal, text)),
             _ => None,
         };
-        if literal.is_none() && forwarded(query, stack, &scan, &annotated, &marker) {
+        if literal.is_none() && forwarded(query, stack, scan, &annotated, &marker) {
             continue;
         }
         let is_literal = literal.is_some();
@@ -664,7 +674,7 @@ pub fn helper_calls<'a>(
             variants: built.variants,
             declared: built.declared,
             row: argument(helper, call, helper.row.as_deref()),
-            params: call_params(helper, call, stack, &ctx),
+            params: call_params(helper, call, stack, types),
             end_line: Some(lines.line(call.end().to_usize().saturating_sub(1))),
             driver: None,
             single: None,

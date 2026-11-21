@@ -740,14 +740,11 @@ fn lines_in_strings(source: &str) -> impl Iterator<Item = (&str, bool)> {
 }
 
 /// The names sqlty's `SQL` is bound to: `SQL` and its aliases, `sqlty.SQL` and the like.
-pub(crate) fn sql_names(source: &str, tokens: &[Token]) -> Vec<String> {
-    if !source.contains("sqlty") {
-        return Vec::new();
-    }
-    imports_of(source, tokens)
-        .into_iter()
+pub(crate) fn sql_names(imports: &[Import]) -> Vec<String> {
+    imports
+        .iter()
         .filter_map(|(from, name, binding)| match from.as_deref() {
-            Some("sqlty") if name == "SQL" => Some(binding),
+            Some("sqlty") if name == "SQL" => Some(binding.clone()),
             Some("sqlty") if name == "*" => Some("SQL".to_string()),
             None if name == "sqlty" => Some(format!("{binding}.SQL")),
             _ => None,
@@ -763,33 +760,32 @@ pub(crate) fn sqlty_imports(scan: &Scan) -> Vec<(String, String)> {
 
 /// `(name, binding)` pairs of the top-level `from module import ...` statements.
 fn from_imports(scan: &Scan, module: &str) -> Vec<(String, String)> {
-    top_level_imports(scan)
-        .into_iter()
+    scan.imports()
+        .iter()
         .filter(|(from, _, _)| from.as_deref() == Some(module))
-        .map(|(_, name, binding)| (name, binding))
+        .map(|(_, name, binding)| (name.clone(), binding.clone()))
         .collect()
 }
 
 /// `(binding, qualified name)` of the top-level imports that bind a name other than a
 /// module's own: `from decimal import Decimal` gives `("Decimal", "decimal.Decimal")`.
 pub(crate) fn imported_names(scan: &Scan) -> Vec<(String, String)> {
-    top_level_imports(scan)
-        .into_iter()
+    scan.imports()
+        .iter()
         .filter_map(|(from, name, binding)| match from {
-            Some(module) if name != "*" => Some((binding, format!("{module}.{name}"))),
-            None if name != binding => Some((binding, name)),
+            Some(module) if name != "*" => Some((binding.clone(), format!("{module}.{name}"))),
+            None if name != binding => Some((binding.clone(), name.clone())),
             _ => None,
         })
         .collect()
 }
 
-/// `(from, name, binding)` of every top-level import, `from` being the module of a
+/// `(from, name, binding)` of a top-level import, `from` being the module of a
 /// `from ... import`: `import os.path` binds `os`, `from a import b as c` binds `c`.
-fn top_level_imports(scan: &Scan) -> Vec<(Option<String>, String, String)> {
-    imports_of(scan.source(), &scan.tokens)
-}
+pub(crate) type Import = (Option<String>, String, String);
 
-fn imports_of(source: &str, tokens: &[Token]) -> Vec<(Option<String>, String, String)> {
+/// Every top-level [`Import`] of `source`.
+pub(crate) fn imports_of(source: &str, tokens: &[Token]) -> Vec<Import> {
     let text = |i: usize| {
         tokens
             .get(i)
@@ -864,7 +860,7 @@ impl Spelling {
         if !scan.source().contains("datetime") {
             return Self::default();
         }
-        let imports = top_level_imports(scan);
+        let imports = scan.imports();
         if !imports
             .iter()
             .any(|(from, _, binding)| from.is_some() && binding == "datetime")

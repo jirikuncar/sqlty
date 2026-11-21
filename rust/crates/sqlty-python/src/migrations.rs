@@ -12,10 +12,22 @@ pub fn check_migrations(
     files: &[&str],
     rules: &RuleConfig,
 ) -> Vec<Vec<Diagnostic>> {
-    sqlty_sql::migrations::check(baseline, files)
+    let files: Vec<(&str, &RuleConfig)> = files.iter().map(|sql| (*sql, rules)).collect();
+    check_migrations_with(baseline, &files)
+}
+
+/// [`check_migrations`] with the rules of each file: `[(sql, rules)]`, the severities of
+/// the overrides its path matches.
+pub fn check_migrations_with(
+    baseline: &str,
+    files: &[(&str, &RuleConfig)],
+) -> Vec<Vec<Diagnostic>> {
+    let sources: Vec<&str> = files.iter().map(|(sql, _)| *sql).collect();
+    sqlty_sql::migrations::check(baseline, &sources)
         .into_iter()
         .zip(files)
-        .map(|(found, sql)| {
+        .map(|(found, (sql, rules))| {
+            let newlines: Vec<usize> = sql.match_indices('\n').map(|(at, _)| at).collect();
             let found = found
                 .into_iter()
                 .filter(|finding| rules.is_enabled(finding.rule))
@@ -23,7 +35,7 @@ pub fn check_migrations(
                     rule: finding.rule,
                     message: finding.message,
                     severity: rules.severity(finding.rule),
-                    line: sql[..finding.span.start].matches('\n').count() + 1,
+                    line: newlines.partition_point(|&at| at < finding.span.start) + 1,
                     span: finding.span,
                     fix: Vec::new(),
                 })
@@ -72,6 +84,22 @@ mod tests {
             &migration[diagnostic.span.clone()],
             "CREATE INDEX i\n  ON users (bio)"
         );
+    }
+
+    #[test]
+    fn each_file_has_its_own_severities() {
+        let first = "SET lock_timeout = '1s';\nCREATE INDEX a ON users (bio);";
+        let second = "SET lock_timeout = '1s';\nCREATE INDEX b ON users (id);";
+        let (warn, error) = (
+            rules(&[("missing-concurrently", "warn")]),
+            rules(&[("missing-concurrently", "error")]),
+        );
+        let found = check_migrations_with(BASELINE, &[(first, &warn), (second, &error)]);
+        let severities: Vec<Vec<Severity>> = found
+            .iter()
+            .map(|found| found.iter().map(|d| d.severity).collect())
+            .collect();
+        assert_eq!(severities, [vec![Severity::Warn], vec![Severity::Error]]);
     }
 
     #[test]

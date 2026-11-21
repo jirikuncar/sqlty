@@ -1,11 +1,13 @@
 # Benchmarks
 
-Two scripts; both need the release extension:
+The scripts other than `ab.py` (which builds its own native binaries) need the release extension:
 `uv run maturin develop --release --manifest-path rust/crates/sqlty-ext/Cargo.toml`.
 
 | Script | What it measures | Make target |
 |--------|------------------|-------------|
-| `bench_project.py` | A generated large project: CLI wall time and peak RSS | `make bench-project`, `make bench-ci`, `make bench-baseline` |
+| `bench_project.py` | A generated large project: CLI wall time and peak RSS, and the language server's latency (`lsp.py`) | `make bench-project`, `make bench-ci`, `make bench-baseline` |
+| `ab.py` | `sqlty check` of a base ref vs the working tree, interleaved: CPU, wall, RSS, output identity, CPU per query across scales | `make bench-ab` |
+| `corpus.py` | `sqlty check` on pinned real repositories: wall time, peak RSS, diagnostics per rule | `make bench-corpus` |
 | `test_benchmarks.py` | Each query kind, the schema load, `rewrite_source`, `check_source`, and completion at 50, 540 and 5000 tables, through CodSpeed | `make bench-codspeed` |
 
 ## The synthetic project
@@ -28,24 +30,51 @@ maximum of `--repeats` runs (RSS from `wait4` of that child).
 
 - `check`: `sqlty check` over the project.
 - `rewrite_check`: `sqlty rewrite --check` (no files change).
+- `breaking`: `sqlty breaking --against HEAD` after three new schema statements, at most
+  three runs: each checks out the baseline.
+- `precommit`: `sqlty check` of 5 modules with queries, as a pre-commit hook passes them.
+- `precommit_rewrite`: `sqlty rewrite` of 5 modules with bare `--sql` strings, which it
+  writes; they are restored after each run.
+- `sql_files`: `sqlty check` of 500 aiosql query files (3 queries each) beside 200 modules.
+- `lsp_open`: `sqlty server` from `initialize` to the first diagnostics of an open
+  module of 100 queries; RSS of the server.
+- `lsp_edit`, `lsp_edit_p95`: a full-text change of that module to its diagnostics,
+  median and p95 of 20 edits.
+- `lsp_hover`, `lsp_completion`: request to response on a table name, total of 100
+  hovers and 20 completions.
 - `schema_load`: parse the 400-500 table schema through one `analyze_select`.
 - `schema_load_unresolved_alters`: 2000 tables plus 2000 `ALTER TABLE` on tables
   that do not exist.
 - `schema_load_5000`: the synthetic schema at 5000 tables, the size completion must
   survive. Its RSS bounds the catalog and its name index.
+- `check_empty`: `sqlty check` of the project's configuration and schema alone, its
+  startup and schema load.
 - `micro_us`: microseconds per `analyze_select` / `analyze_params` call for each
   query kind, schema cached.
+- `python_us_per_file`: Python type inference per file in microseconds (mean, median,
+  p99, max): `check_source` of the file, schema cached, minus the SQL inference of each
+  of its queries, timed as `check_source` of a module holding only that query minus one
+  holding none. That share also counts the per-call work of a one-query module, so
+  the Python figure is a lower bound. `ruff_mean` is `ruff check` of the project on one
+  thread per file, startup subtracted.
+
+The scenarios from `precommit` on run 3 times, not `--repeats`: they are short, and a
+run over budget is measured again.
 
 ```bash
 make bench-project                                              # full size, JSON on stdout
 uv run python benchmarks/bench_project.py --size full --keep /tmp/big  # keep the project
+uv run python benchmarks/bench_project.py --size ci --exe path/to/sqlty  # a native binary
 ```
 
 ## CI budget
 
 The `bench` job in `.github/workflows/tests.yml` builds the release extension
-and runs `make bench-ci` (about 20 s). It fails when a metric is over its budget
-in `baseline.json`:
+and runs `make bench-ci` (about 20 s). It fails when inference is over its budget
+(AGENTS.md "Check budget"): SQL when any query kind's `analyze_select` +
+`analyze_params` is slower than a database round trip (100 µs, scaled by the
+calibration loop over its 20 ms), Python when the `python_us_per_file` mean is over
+`ruff_mean`. It also fails when a metric is over its budget in `baseline.json`:
 
 - **Times** are divided by a calibration loop (a fixed pure-Python loop, best of
   5) timed in the same run, so a faster or slower runner moves baseline and
@@ -58,8 +87,23 @@ in `baseline.json`:
   budgeted as two sums (`analyze_select`, `analyze_params`).
 - A run over budget is measured again, up to three runs in all: another job on
   a shared runner can slow one run, and only the last run fails the job.
+- A metric missing from the baseline is reported, not budgeted, and named on
+  stderr: record the baseline again (below) after adding one.
 - The baseline is keyed by platform and size (`Darwin-ci`, `Linux-ci`). With no
   entry for the runner's platform the check passes and says so.
+
+## One query
+
+`one_query_us` is microseconds for `check_source` of a module holding one typical
+query of `one_query.sql` (point select, 3-table join, insert with parameters,
+aggregate), as `sqlty rewrite` types it, schema cached: what `sqlty check` spends per
+query, SQL and Python inference together. `make bench-ci` prints each against a
+database round trip (AGENTS.md "Check
+budget": 100 µs times the calibration over 20 ms), marked `OVER` or `under`. It is
+reported, not budgeted, until a one-query check fits: `ENFORCE_ONE_QUERY = True` in
+`bench_project.py` then fails the job, after measuring again up to three runs in all.
+`make bench-rust ARGS=one_query` times the same queries in Rust, with size sweeps
+(joins, selected columns, `IN` list items, `GROUP BY` keys).
 
 ## Updating the baseline
 
@@ -97,4 +141,24 @@ once, unmeasured, so a broken benchmark still fails the pull request.
 ```bash
 make bench-codspeed
 uv run pytest benchmarks/ --codspeed -p no:randomly --no-cov -k check_source  # one benchmark
+```
+
+## Real repositories
+
+`corpus.py` clones the repositories it pins (shallow, at one commit), writes a
+`sqlty.toml` for each and runs `sqlty check`:
+
+- `django`: no queries, so it measures what sqlty costs on a large codebase that
+  does not use it.
+- `goalert`: sqlc query files over its migration-built schema.
+- `liberapay`: raw SQL through postgres.py's `db.one`/`db.all`, called on an
+  attribute sqlty cannot type, so no query is found yet.
+
+The `Real repositories` workflow runs it weekly and on pull requests that change it,
+and shows the table in the job summary. Diagnostic counts that differ from
+`corpus.json` are listed, not failed: a fix moves them as a regression does. A crash
+or an `internal-error` fails. After an intended change, or when bumping a commit:
+
+```bash
+make bench-corpus ARGS=--update   # rewrites corpus.json
 ```

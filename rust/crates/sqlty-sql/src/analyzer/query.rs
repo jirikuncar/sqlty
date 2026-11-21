@@ -1,5 +1,7 @@
 //! Queries, set operations and projections: the output columns of a statement.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -11,7 +13,7 @@ use sqlparser::ast::{
 
 use sqlparser::tokenizer::Location;
 
-use crate::catalog::fold;
+use crate::catalog::{fold, Lookup};
 use crate::diagnostics::{Diagnostics, Rule};
 use crate::json::JsonShape;
 use crate::values;
@@ -27,7 +29,7 @@ use super::literals::strip;
 use super::names::{alias_name, column_name, object_name};
 use super::nullability::{Facts, Nullability};
 use super::operators::{common_of, common_type};
-use super::scope::{any_merging_join, Scope, Table, Virtuals};
+use super::scope::{any_merging_join, NameIndex, Scope, Table, Virtuals};
 use super::text_names::{item_texts, line_starts, offset, returning_start, text_column_name};
 use super::typed::Typed;
 use super::{Inferred, SchemaData};
@@ -109,7 +111,7 @@ impl Column {
 
 #[derive(Clone)]
 pub(super) struct Analyzer<'a> {
-    pub(super) schema: &'a SchemaData,
+    pub(super) schema: Rc<Lookup<'a>>,
     pub(super) dialect: SqlDialect,
     pub(super) virtuals: Virtuals,
     /// Why results are untyped, shared with the analyzers of subqueries and CTEs.
@@ -125,12 +127,14 @@ pub(super) struct Analyzer<'a> {
     pub(super) explain: Option<Explained>,
     /// The SQL as parsed, for MySQL and SQLite, which name a column by its expression's text.
     pub(super) source: Option<Rc<str>>,
+    /// The names of the wide schema views read so far.
+    pub(super) view_names: Rc<RefCell<HashMap<String, Rc<NameIndex>>>>,
 }
 
 impl<'a> Analyzer<'a> {
     pub(super) fn new(schema: &'a SchemaData, dialect: SqlDialect) -> Self {
         Analyzer {
-            schema,
+            schema: Rc::new(Lookup::new(schema)),
             dialect,
             virtuals: Virtuals::default(),
             diag: Diagnostics::default(),
@@ -139,6 +143,7 @@ impl<'a> Analyzer<'a> {
             facts: Facts::default(),
             explain: None,
             source: None,
+            view_names: Rc::default(),
         }
     }
 

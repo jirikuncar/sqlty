@@ -126,6 +126,14 @@ KINDS: list[tuple[str, str, list[tuple[str, str]] | None, str | None]] = [
 STYLES = ("typeddict", "dataclass", "tuple", "tuple", "helper", "execute", "execute", "bare")
 
 
+MIGRATION = """
+ALTER TABLE app.t0000 ADD COLUMN extra integer NOT NULL;
+CREATE INDEX t0001_name ON app.t0001 (name);
+ALTER TABLE app.t0002 DROP COLUMN name;
+"""
+"""Statements for ``sqlty breaking``: two the migration rules report, one that breaks queries."""
+
+
 def schema_sql(tables: int, seed: int = 0) -> str:
     """Schema of ``tables`` tables with ALTERs, views, enums, CHECKs and functions."""
     rng = random.Random(seed)
@@ -217,6 +225,7 @@ def generate(
     files: int = 10_000,
     queries: int = 3_000,
     tables: int = 500,
+    sql_files: int = 0,
     seed: int = 42,
 ) -> dict[str, int]:
     """Write the project under ``root`` and return its size.
@@ -232,8 +241,10 @@ def generate(
     root = Path(root)
     pkg = root / PKG
     pkg.mkdir(parents=True, exist_ok=True)
+    queries_key = 'queries = ["sql"]\n' if sql_files else ""
     (root / "pyproject.toml").write_text(
         '[tool.sqlty]\ndialect = "postgres"\nschema = "schema.sql"\nparam-types = true\n'
+        + queries_key
     )
     (root / "schema.sql").write_text(schema_sql(tables, seed))
     (pkg / "__init__.py").write_text("")
@@ -247,30 +258,52 @@ def generate(
     per_file = [0] * files
     for _ in range(queries):
         per_file[rng.randrange(files)] += 1
-    total_q = 0
     for n in range(files):
-        header = [
-            "from __future__ import annotations\n",
-            "from dataclasses import dataclass\n",
-            "from typing import Any, Literal, TypedDict\n",
-            "from sqlty import SQL\n",
-            f"from {PKG}.db import execute, fetch_all\n\n\n",
-        ]
-        classes: list[str] = []
-        stmts: list[str] = []
-        for j in range(per_file[n]):
-            cls, stmt = _query(rng, tables, n, j)
-            classes.append(cls)
-            stmts.append(stmt)
-            total_q += 1
-        plain = (
-            f"def handler_{n}(x: int) -> int:\n"
-            f"    values = [i * {n % 7 + 1} for i in range(x)]\n"
-            f"    return sum(values) + {n}\n"
-        )
-        body = "".join(classes) + "".join(stmts) + ("\n\n" if stmts else "") + plain
-        (pkg / f"mod{n:05d}.py").write_text("".join(header) + body)
-    return {"files": files, "queries": total_q, "tables": tables}
+        (pkg / f"mod{n:05d}.py").write_text(_module(rng, tables, n, per_file[n]))
+    if sql_files:
+        _write_sql_files(root / "sql", rng, sql_files, tables)
+    return {"files": files, "queries": queries, "tables": tables, "sql_files": sql_files}
+
+
+def write_module(path: str | Path, *, queries: int, tables: int, seed: int = 7) -> None:
+    """One module of ``queries`` queries, for a project ``generate`` wrote."""
+    Path(path).write_text(_module(random.Random(seed), tables, 99_999, queries))
+
+
+def _module(rng: random.Random, tables: int, n: int, queries: int) -> str:
+    header = (
+        "from __future__ import annotations\n"
+        "from dataclasses import dataclass\n"
+        "from typing import Any, Literal, TypedDict\n"
+        "from sqlty import SQL\n"
+        f"from {PKG}.db import execute, fetch_all\n\n\n"
+    )
+    classes: list[str] = []
+    stmts: list[str] = []
+    for j in range(queries):
+        cls, stmt = _query(rng, tables, n, j)
+        classes.append(cls)
+        stmts.append(stmt)
+    plain = (
+        f"def handler_{n}(x: int) -> int:\n"
+        f"    values = [i * {n % 7 + 1} for i in range(x)]\n"
+        f"    return sum(values) + {n}\n"
+    )
+    return header + "".join(classes) + "".join(stmts) + ("\n\n" if stmts else "") + plain
+
+
+def _write_sql_files(folder: Path, rng: random.Random, files: int, tables: int) -> None:
+    """aiosql query files of three queries each, from the kinds without parameters."""
+    kinds = [(name, sql) for name, sql, _fields, params in KINDS if params is None]
+    folder.mkdir(parents=True, exist_ok=True)
+    for n in range(files):
+        out = []
+        for j in range(3):
+            name, sql = kinds[rng.randrange(len(kinds))]
+            i = rng.randrange(1, tables)
+            sql = sql.format(t=f"t{i:04d}", p=f"t{i - 1:04d}", v=f"v{i:04d}", f=f"f{i:04d}")
+            out.append(f"-- name: {name}-{n}-{j}\n{sql};\n")
+        (folder / f"q{n:05d}.sql").write_text("\n".join(out))
 
 
 if __name__ == "__main__":

@@ -135,3 +135,9 @@ See [asyncpg_typed](motivation.md#asyncpg_typed).
 
 Python 3.14 and 3.15. Install with `pip install sqlty` or `uv add sqlty`. See
 [Installation](installation.md).
+
+## Is there training for sqlty?
+
+Yes. Team training covers adopting sqlty in an existing codebase, from the first
+`sqlty rewrite` to typed queries checked in CI. Write to
+[sqlty@kuncar.dev](mailto:sqlty@kuncar.dev?subject=SQLTy%20training).

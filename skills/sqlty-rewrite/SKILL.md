@@ -22,7 +22,7 @@ When it and `sqlty --help` disagree, trust the command.
 user_id = 1
 q = "--sql\nSELECT id::INTEGER, name::TEXT FROM users WHERE id = %s"
 # rewritten: user_id = 1
-# rewritten: q = SQL[tuple[int, str]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users WHERE id = %s")
+# rewritten: q = SQL[tuple[int, str], tuple[typing.Any]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users WHERE id = %s")
 ```
 
 ## What `rewrite` leaves alone

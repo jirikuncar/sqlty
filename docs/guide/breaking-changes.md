@@ -263,6 +263,10 @@ are copied into it: `INSERT ... SELECT`, `COPY ... FROM`, `MERGE` or
 | [`enum-value-in-transaction`](../reference/rules/enum-value-in-transaction.md) | an enum value used in the transaction that added it |
 | [`concurrent-index-if-not-exists`](../reference/rules/concurrent-index-if-not-exists.md) | `CREATE INDEX CONCURRENTLY IF NOT EXISTS` |
 | [`disable-trigger-all`](../reference/rules/disable-trigger-all.md) | `DISABLE TRIGGER ALL` |
+| [`multi-table-lock`](../reference/rules/multi-table-lock.md) | a transaction that locks several tables against writes |
+| [`locked-backfill`](../reference/rules/locked-backfill.md) | an `UPDATE` or `DELETE` of a table its transaction locked |
+| [`unbatched-backfill`](../reference/rules/unbatched-backfill.md) | an `UPDATE` or `DELETE` whose `WHERE` does not bound its rows |
+| [`drop-primary-key`](../reference/rules/drop-primary-key.md) | a dropped primary key or `REPLICA IDENTITY NOTHING`, leaving a table without a replica identity |
 
 `against.sql`:
 
@@ -287,6 +291,29 @@ The schema files are the migrations themselves, or the SQL a migration tool
 writes for them, such as `alembic upgrade head --sql > db/schema.sql`. A
 `pg_dump` schema is not judged: it describes the result, not how to get there.
 The statements are judged in every `--direction`.
+
+Every `schema` of the configuration is judged, each entry of
+`[tool.sqlty.databases]` included, and a migration takes the severities of
+`rules` with the `overrides` its own path matches. A schema that several
+configurations name is judged once, at the strictest severity of each rule among
+them, and a migration that several schemas list is reported once per statement.
+The `include` globs are relative to the directory of the configuration that names
+them, so no glob matches migrations outside that directory: for those, set `rules`
+in the configuration, or use an override without `include`.
+For example:
+
+```toml
+[[tool.sqlty.overrides]]
+include = ["migrations/**"]
+
+[tool.sqlty.overrides.rules]
+missing-concurrently = "error"
+```
+
+Each migration is judged against the schema the baseline gives every file of
+the head checked against its database, or the baseline's database of the same name
+when no file is. A snapshot records the databases of the directories of the files it
+checked.
 
 ## Baselines without git history
 

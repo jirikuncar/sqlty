@@ -74,77 +74,120 @@
     }
   },
   "Linux-ci": {
-    "calibration_s": 0.01759,
+    "calibration_s": 0.02484,
     "meta": {
       "files": 8000,
-      "generate_s": 0.3,
+      "generate_s": 0.33,
       "machine": "x86_64",
       "platform": "Linux",
-      "python": "3.15.1",
+      "python": "3.15.2",
       "queries": 2400,
       "size": "ci",
+      "sql_files": 0,
       "tables": 400
     },
     "metrics": {
+      "breaking": {
+        "exit": 1,
+        "rss_mb": 112.3,
+        "wall_s": 1.2817
+      },
       "check": {
         "exit": 1,
-        "rss_mb": 232.6,
-        "wall_s": 2.0534
+        "rss_mb": 85.5,
+        "wall_s": 0.2715
+      },
+      "lsp_completion": {
+        "wall_s": 0.0189
+      },
+      "lsp_edit": {
+        "wall_s": 0.0636
+      },
+      "lsp_edit_p95": {
+        "wall_s": 0.065
+      },
+      "lsp_hover": {
+        "wall_s": 0.0153
+      },
+      "lsp_open": {
+        "rss_mb": 85.3,
+        "wall_s": 0.1571
+      },
+      "precommit": {
+        "exit": 1,
+        "rss_mb": 67.2,
+        "wall_s": 0.0828
+      },
+      "precommit_rewrite": {
+        "exit": 0,
+        "rss_mb": 63.7,
+        "wall_s": 0.0793
       },
       "rewrite_check": {
         "exit": 1,
-        "rss_mb": 78.2,
-        "wall_s": 0.31
+        "rss_mb": 79.9,
+        "wall_s": 0.1831
       },
       "schema_load": {
         "exit": 0,
-        "rss_mb": 62.8,
-        "wall_s": 0.0946
+        "rss_mb": 67.0,
+        "wall_s": 0.1078
       },
       "schema_load_5000": {
         "exit": 0,
-        "rss_mb": 343.2,
-        "wall_s": 0.7348
+        "rss_mb": 129.7,
+        "wall_s": 0.6794
       },
       "schema_load_unresolved_alters": {
         "exit": 0,
-        "rss_mb": 66.6,
-        "wall_s": 0.0863
+        "rss_mb": 63.3,
+        "wall_s": 0.0907
+      },
+      "sql_files": {
+        "exit": 1,
+        "rss_mb": 70.0,
+        "wall_s": 0.183
       }
     },
     "micro_us": {
-      "analyze_params.aggregate": 17.0,
-      "analyze_params.array_param": 11.0,
-      "analyze_params.cte": 26.9,
-      "analyze_params.full_join": 15.2,
-      "analyze_params.function": 12.2,
-      "analyze_params.join": 19.9,
-      "analyze_params.json": 23.1,
-      "analyze_params.lateral": 25.9,
-      "analyze_params.left_join": 15.6,
-      "analyze_params.literal": 10.5,
-      "analyze_params.named_params": 13.0,
-      "analyze_params.params": 13.6,
-      "analyze_params.recursive_cte": 31.8,
-      "analyze_params.right_join": 15.1,
+      "analyze_params.aggregate": 17.4,
+      "analyze_params.array_param": 10.4,
+      "analyze_params.cte": 33.6,
+      "analyze_params.full_join": 14.9,
+      "analyze_params.function": 11.4,
+      "analyze_params.join": 20.3,
+      "analyze_params.json": 25.4,
+      "analyze_params.lateral": 30.7,
+      "analyze_params.left_join": 15.9,
+      "analyze_params.literal": 9.4,
+      "analyze_params.named_params": 13.4,
+      "analyze_params.params": 14.2,
+      "analyze_params.recursive_cte": 38.5,
+      "analyze_params.right_join": 14.8,
       "analyze_params.subquery": 15.2,
-      "analyze_params.view": 10.5,
-      "analyze_select.aggregate": 24.3,
-      "analyze_select.array_param": 13.0,
-      "analyze_select.cte": 30.8,
-      "analyze_select.full_join": 19.0,
-      "analyze_select.function": 14.9,
-      "analyze_select.join": 27.6,
-      "analyze_select.json": 33.0,
-      "analyze_select.lateral": 29.7,
-      "analyze_select.left_join": 20.9,
-      "analyze_select.literal": 17.5,
-      "analyze_select.named_params": 16.2,
-      "analyze_select.params": 18.4,
-      "analyze_select.recursive_cte": 39.2,
-      "analyze_select.right_join": 19.6,
-      "analyze_select.subquery": 24.3,
-      "analyze_select.view": 14.8
+      "analyze_params.view": 9.4,
+      "analyze_select.aggregate": 33.1,
+      "analyze_select.array_param": 14.9,
+      "analyze_select.cte": 46.8,
+      "analyze_select.full_join": 24.5,
+      "analyze_select.function": 15.6,
+      "analyze_select.join": 39.5,
+      "analyze_select.json": 62.3,
+      "analyze_select.lateral": 42.9,
+      "analyze_select.left_join": 28.6,
+      "analyze_select.literal": 20.6,
+      "analyze_select.named_params": 19.8,
+      "analyze_select.params": 23.4,
+      "analyze_select.recursive_cte": 55.7,
+      "analyze_select.right_join": 25.0,
+      "analyze_select.subquery": 34.2,
+      "analyze_select.view": 16.3
+    },
+    "one_query_us": {
+      "aggregate": 130.3,
+      "insert_params": 86.7,
+      "join_3": 105.1,
+      "point_select": 87.6
     }
   }
 }

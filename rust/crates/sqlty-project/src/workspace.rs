@@ -93,6 +93,19 @@ pub struct Workspace {
     configs: Mutex<Configured>,
 }
 
+/// A schema of a configuration under the paths: one database, and what each of its
+/// files is checked with.
+pub struct SchemaSource {
+    /// The directory whose configuration names it.
+    pub directory: PathBuf,
+    /// Its `[tool.sqlty.databases]` name, `default` for the project's own.
+    pub database: String,
+    /// What the database is checked with.
+    pub settings: Arc<FileSettings>,
+    /// For each of `settings.schema_files`: `settings` with the overrides its path matches.
+    pub files: Vec<Arc<FileSettings>>,
+}
+
 /// What completion reads of a buffer.
 pub struct Completion {
     /// The schema the buffer is checked against.
@@ -403,15 +416,13 @@ impl Workspace {
         Ok(found)
     }
 
-    /// The `.sql` files of named queries under the paths: those a `queries` key of their
-    /// projects matches, relative to the current directory when under it, sorted.
-    pub fn query_files(&mut self) -> Result<Vec<PathBuf>, String> {
+    /// The directories of the paths, then of the files read, once each.
+    fn directories(&self) -> Vec<PathBuf> {
         let mut directories: Vec<PathBuf> = self
             .paths
-            .clone()
-            .into_iter()
-            .map(|path| match self.kind(&path) {
-                Some(Kind::Dir) => path,
+            .iter()
+            .map(|path| match self.kind(path) {
+                Some(Kind::Dir) => path.clone(),
                 _ => path.parent().map(Path::to_path_buf).unwrap_or_default(),
             })
             .collect();
@@ -420,15 +431,74 @@ impl Workspace {
                 .iter()
                 .map(|path| path.parent().map(Path::to_path_buf).unwrap_or_default()),
         );
-        let roots: Vec<PathBuf> = self.paths.iter().map(|path| self.resolved(path)).collect();
         let mut seen = HashSet::new();
-        let mut found = std::collections::BTreeSet::new();
-        for directory in directories {
-            if !seen.insert(directory.clone()) {
+        directories.retain(|directory| seen.insert(directory.clone()));
+        directories
+    }
+
+    /// The schemas of the configurations under the paths, one per database that has schema
+    /// files, each configuration once.
+    pub fn schema_sources(&mut self) -> Result<Vec<SchemaSource>, String> {
+        let mut known: Vec<Arc<Directory>> = Vec::new();
+        let mut sources = Vec::new();
+        for directory in self.directories() {
+            let all = self.directory(&directory.join("_"))?;
+            if known.iter().any(|seen| Arc::ptr_eq(seen, &all)) {
                 continue;
             }
+            for (database, settings) in all.named() {
+                if settings.schema_files.is_empty() {
+                    continue;
+                }
+                let files = settings
+                    .schema_files
+                    .iter()
+                    .map(|file| all.schema_file(settings, file, &self.discovery))
+                    .collect();
+                sources.push(SchemaSource {
+                    directory: directory.clone(),
+                    database: database.to_string(),
+                    settings: Arc::clone(settings),
+                    files,
+                });
+            }
+            known.push(all);
+        }
+        Ok(sources)
+    }
+
+    /// The databases of the configuration of the directory of `path`, each with its
+    /// settings: the project's own first, under [`analyzer::DEFAULT`].
+    pub fn databases(&mut self, path: &Path) -> Result<Vec<(String, Arc<FileSettings>)>, String> {
+        let all = self.directory(path)?;
+        let named = all.named();
+        Ok(named
+            .map(|(name, settings)| (name.to_string(), Arc::clone(settings)))
+            .collect())
+    }
+
+    /// The settings of the database `name` of the configuration of the directory of
+    /// `path`, `None` when it has no such database.
+    pub fn database(
+        &mut self,
+        path: &Path,
+        name: &str,
+    ) -> Result<Option<Arc<FileSettings>>, String> {
+        let mut all = self.databases(path)?.into_iter();
+        Ok(all
+            .find(|(database, _)| database == name)
+            .map(|(_, settings)| settings))
+    }
+
+    /// The `.sql` files of named queries under the paths: those a `queries` key of their
+    /// projects matches, relative to the current directory when under it, sorted.
+    pub fn query_files(&mut self) -> Result<Vec<PathBuf>, String> {
+        let directories = self.directories();
+        let roots: Vec<PathBuf> = self.paths.iter().map(|path| self.resolved(path)).collect();
+        let mut found = std::collections::BTreeSet::new();
+        for directory in directories {
             let all = self.directory(&directory.join("_"))?;
-            for settings in all.all() {
+            for (_, settings) in all.named() {
                 let Some(base) = &settings.base else { continue };
                 if settings.queries.is_empty() {
                     continue;
@@ -791,10 +861,21 @@ impl Workspace {
             .into_iter()
             .map(|query| {
                 let sql = &query.sql;
-                let row = analyzer::infer_type(sql, dialect, schema).or_else(|| {
-                    analyzer::returns_rows(sql, dialect).then(|| "unknown".to_string())
-                });
-                let mut params = analyzer::analyze_params(sql, dialect, schema).unwrap_or_default();
+                let (routed, routed_schema) = analyzer::route(sql, dialect, schema);
+                let parsed = analyzer::parse(sql, routed);
+                let row = parsed
+                    .columns(routed_schema)
+                    .as_deref()
+                    .and_then(analyzer::row_type)
+                    .or_else(|| {
+                        let rows = if routed == dialect {
+                            parsed.returns_rows()
+                        } else {
+                            analyzer::returns_rows(sql, dialect)
+                        };
+                        rows.then(|| "unknown".to_string())
+                    });
+                let mut params = parsed.params(sql, routed_schema).unwrap_or_default();
                 params.sort_by_key(|param| param.index);
                 let listed: Vec<String> = params
                     .iter()
@@ -1043,6 +1124,25 @@ mod tests {
     }
 
     #[test]
+    fn checks_the_calls_of_a_helper_annotated_in_the_project() {
+        let mut workspace = opened(&[
+            ("/repo/pyproject.toml", "[tool.sqlty]\nschema = \"schema.sql\"\n"),
+            ("/repo/schema.sql", "CREATE TABLE users (id INT NOT NULL);"),
+            (
+                "/repo/db.py",
+                "from typing import Annotated, LiteralString\nfrom sqlty import SQL\n\ndef run(query: Annotated[LiteralString, SQL]) -> None: ...\n",
+            ),
+        ]);
+        let found = workspace
+            .check(
+                Path::new("/repo/use.py"),
+                "from db import run\n\nrun(\"SELECT nope FROM users\")\n",
+            )
+            .expect("checks");
+        assert_eq!(rules(&found), ["unknown-column"]);
+    }
+
+    #[test]
     fn a_linked_file_is_resolved_on_its_own() {
         let workspace = opened(&[
             ("/repo/pyproject.toml", "[tool.sqlty]\n"),
@@ -1162,6 +1262,78 @@ mod tests {
         assert_eq!(
             workspace.warnings(),
             ["Table and column names are not checked for duckdb"]
+        );
+    }
+
+    #[test]
+    fn schema_sources_are_each_configuration_once_with_the_overrides_of_their_files() {
+        const CONFIG: &str = "[tool.sqlty]\nschema = \"db/\"\n\
+            [tool.sqlty.databases.events]\nschema = \"events/\"\ninclude = [\"db/**\"]\n\
+            [[tool.sqlty.overrides]]\ninclude = [\"db/**\"]\nrules = { missing-concurrently = \"error\" }\n";
+        let files = [
+            ("/repo/pyproject.toml", CONFIG),
+            ("/repo/db/0001.sql", "CREATE TABLE users (id INT);"),
+            ("/repo/events/0001.sql", "CREATE TABLE events (id INT);"),
+            ("/repo/app/a.py", ""),
+            ("/repo/jobs/j.py", ""),
+        ];
+        let mut workspace = opened(&files);
+        let sources = workspace.schema_sources().expect("reads");
+        let named: Vec<_> = sources
+            .iter()
+            .map(|source| (source.directory.clone(), source.database.as_str()))
+            .collect();
+        let repo = PathBuf::from("/repo");
+        assert_eq!(named, [(repo.clone(), "default"), (repo, "events")]);
+        let rule =
+            |source: &SchemaSource| source.files[0].rules.get("missing-concurrently").cloned();
+        assert_eq!(rule(&sources[0]), Some("error".to_string()));
+        assert_eq!(rule(&sources[1]), None);
+        assert_eq!(
+            sources[1].files[0].schema_files,
+            sources[1].settings.schema_files
+        );
+        assert!(workspace
+            .database(Path::new("/repo/app/_"), "events")
+            .expect("reads")
+            .is_some_and(|events| Arc::ptr_eq(&events, &sources[1].settings)));
+        assert!(workspace
+            .database(Path::new("/repo/app/_"), "nope")
+            .expect("reads")
+            .is_none());
+
+        let plain = [
+            ("/repo/pyproject.toml", "[tool.sqlty]\nschema = \"db/\"\n"),
+            files[1],
+            files[3],
+        ];
+        let sources = opened(&plain).schema_sources().expect("reads");
+        assert!(Arc::ptr_eq(&sources[0].files[0], &sources[0].settings));
+    }
+
+    #[test]
+    fn queries_of_another_dialect_are_counted_and_typed() {
+        const CONFIG: &str = "[project]\nrequires-python = \">=3.15\"\n\n[tool.sqlty]\nschema = \"app.sql\"\n\n[tool.sqlty.databases.lite]\ndialect = \"sqlite\"\nschema = \"lite.sql\"\n";
+        let mut workspace = opened(&[
+            ("/repo/pyproject.toml", CONFIG),
+            ("/repo/app.sql", "CREATE TABLE users (id INT NOT NULL);"),
+            ("/repo/lite.sql", "CREATE TABLE events (n INTEGER NOT NULL);"),
+            (
+                "/repo/q.py",
+                "q = \"--sql sqlty: db=lite\\nSELECT n FROM events\"\nu = \"--sql sqlty: db=lite\\nSELECT nope FROM events\"\n",
+            ),
+        ]);
+        let counts = workspace.statistics_all().expect("counts");
+        assert_eq!(counts[0].get("typed"), Some(&1));
+        assert_eq!(counts[0].get("partially typed"), Some(&1));
+
+        let sql = "-- name: add\n-- sqlty: db=lite\nINSERT INTO events (n) VALUES (1);\n\n-- name: all\n-- sqlty: db=lite\nSELECT n FROM events;\n\n-- name: odd\n-- sqlty: db=lite\nSELECT nope FROM events;\n";
+        let listed = workspace
+            .query_types(Path::new("sql/lite.sql"), sql)
+            .expect("types");
+        assert_eq!(
+            listed,
+            ["add() -> None", "all() -> tuple[int]", "odd() -> unknown"]
         );
     }
 

@@ -36,12 +36,15 @@ For every REVIEW.md "Correctness" item that applies, write the input that would
 break the change and run it:
 
 ```bash
-uv run pytest 'tests/mdtest/<area>/<file>.md::<test>'   # one mdtest
+(cd rust && MDTEST_FILTER=<area>/<file> cargo test -p sqlty-python --test mdtest)  # one mdtest file
 uv run pytest tests/<file>.py -k <name>                   # one test
 (cd rust && cargo test -p <crate> <name>)                 # one Rust test
 uv run sqlty check <dir>                                  # end to end
 ```
 
+For a change on a check path, run `make bench-ci` (the SQL and Python inference
+budgets) and time the input it touches at 1x, 2x, ... 32x: the time may at most double
+per step (AGENTS.md "Check budget").
 Put scratch inputs in a temp dir, never in the repo. Run only affected tests; the
 author runs the full suite and coverage. Check the claims in commit messages and
 the PR body (numbers, "identical output", "no behavior change") against what you
