@@ -26,6 +26,14 @@ No Python files found
 $ sqlty rewrite empty
 No Python files found
 
+$ sqlty check --quiet empty
+$ sqlty rewrite --quiet empty
+$ sqlty check --statistics app
+? 1
+app/q.py:1: [unknown-column] column `nope` does not exist in `users`
+Found 1 error(s)
+Queries: 0 typed, 1 partially typed, 0 unparsed, 0 skipped
+
 $ sqlty check --show-files . generated
 app/q.py
 generated/q.py

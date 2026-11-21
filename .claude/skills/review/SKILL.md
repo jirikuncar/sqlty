@@ -36,7 +36,7 @@ For every REVIEW.md "Correctness" item that applies, write the input that would
 break the change and run it:
 
 ```bash
-uv run pytest 'tests/mdtest/<area>/<file>.md::<test>'   # one mdtest
+(cd rust && MDTEST_FILTER=<area>/<file> cargo test -p sqlty-python --test mdtest)  # one mdtest file
 uv run pytest tests/<file>.py -k <name>                   # one test
 (cd rust && cargo test -p <crate> <name>)                 # one Rust test
 uv run sqlty check <dir>                                  # end to end

@@ -1124,6 +1124,25 @@ mod tests {
     }
 
     #[test]
+    fn checks_the_calls_of_a_helper_annotated_in_the_project() {
+        let mut workspace = opened(&[
+            ("/repo/pyproject.toml", "[tool.sqlty]\nschema = \"schema.sql\"\n"),
+            ("/repo/schema.sql", "CREATE TABLE users (id INT NOT NULL);"),
+            (
+                "/repo/db.py",
+                "from typing import Annotated, LiteralString\nfrom sqlty import SQL\n\ndef run(query: Annotated[LiteralString, SQL]) -> None: ...\n",
+            ),
+        ]);
+        let found = workspace
+            .check(
+                Path::new("/repo/use.py"),
+                "from db import run\n\nrun(\"SELECT nope FROM users\")\n",
+            )
+            .expect("checks");
+        assert_eq!(rules(&found), ["unknown-column"]);
+    }
+
+    #[test]
     fn a_linked_file_is_resolved_on_its_own() {
         let workspace = opened(&[
             ("/repo/pyproject.toml", "[tool.sqlty]\n"),
