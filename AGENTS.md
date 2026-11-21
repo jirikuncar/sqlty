@@ -68,19 +68,23 @@ compiles them into the extension: rebuild it after editing one, or
 
 ## Check budget
 
-A type check must be faster than a round trip to the database, or asking the database
-(as [sqlx](https://github.com/launchbadge/sqlx) does at compile time) would be the
-better checker. The round trip is PostgreSQL typing the same query (Parse and Describe)
+SQL and Python type inference have separate budgets. SQL inference must be faster than a
+round trip to the database, or asking the database (as
+[sqlx](https://github.com/launchbadge/sqlx) does at compile time) would be the better
+checker. The round trip is PostgreSQL typing the same query (Parse and Describe)
 over a Unix socket: about 100 µs on a machine whose `bench_project.py` calibration loop
 takes 20 ms. Real setups are slower: 126 µs (socket) and 211 µs (TCP) on a loaded laptop
 ([Cybertec](https://www.cybertec-postgresql.com/en/?p=4197)), 230-400 µs within one
 cloud zone ([Bailis](https://bailis.org/blog/communication-costs-in-real-world-networks/)).
 
-| Check | Budget | Guarded by |
-|-------|--------|------------|
-| One query: `analyze_select` + `analyze_params`, schema loaded | 100 µs | `bench-ci` (fails) |
-| `sqlty check` of a project, minus startup and schema load | 100 µs per query | `bench-ci` (fails) |
-| One file in the editor: `check_source`, schema loaded | 100 µs per query in it | `bench-ci` `file_us_per_query` (reported) |
+Python inference (reading row types, wrappers, calls) must be no slower than
+`ruff check` of the same files on one thread: it parses with ruff's parser and makes one
+pass over the module, as a lint does.
+
+| Inference | Measured as | Budget | Guarded by |
+|-----------|-------------|--------|------------|
+| SQL, per query | `analyze_select` + `analyze_params`, schema loaded | 100 µs | `bench-ci` (fails) |
+| Python, per file | `check_source` minus the SQL of its queries, schema loaded | `ruff check` per file | `bench-ci` `python_us_per_file` mean (fails) |
 
 Cost grows at most linearly with input size: files, queries, tables, columns, statements,
 nesting and line length. No `Vec::contains` dedupe, no clone of a table per statement,

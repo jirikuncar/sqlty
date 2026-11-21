@@ -18,8 +18,9 @@ Reserve Important for findings that break behavior users rely on:
 - Wheel or sdist missing `sqlty_magic.pth`.
 - Hosts disagreeing: CLI, `sqlty server`, the wasm playground and VS Code web
   giving different diagnostics, fixes or types for the same file and settings.
-- A check slower than a database round trip, or cost that grows faster than linearly
-  with any input size (AGENTS.md "Check budget").
+- SQL inference slower than a database round trip, Python inference slower than
+  `ruff check`, or cost that grows faster than linearly with any input size (AGENTS.md
+  "Check budget").
 - A guard weakened: coverage gate, no-exec harness, clippy lints, an mdtest
   assertion removed or loosened, a test skipped, xfailed or deleted to get green.
 - Committed build output (`rust/target*`, `.so`, wasm, `*.snap.new`) or secrets.
@@ -64,11 +65,12 @@ Style, naming and refactoring suggestions are Nit at most.
 - **Concurrency.** rayon pools, locks and forks: no deadlock after `fork`, no
   default 2 MiB stacks for the parser, nothing that waits on a check from a
   completion request.
-- **Faster than the database.** A check stays under the round-trip budget of AGENTS.md
-  "Check budget" (100 µs per query) and scales at most linearly: double the input that
-  the change touches (files, queries, tables, columns, statements, nesting, line length)
-  up to 32x and compare times. Look for `contains` on a `Vec`, a clone or rescan per
-  item, and work repeated per query that could run once per file or schema.
+- **Faster than the database.** SQL inference stays under a database round trip (100 µs
+  per query) and Python inference under `ruff check` of the file (AGENTS.md "Check
+  budget"); both scale at most linearly: double the input that the change touches (files,
+  queries, tables, columns, statements, nesting, line length) up to 32x and compare times.
+  Look for `contains` on a `Vec`, a clone or rescan per item, and work repeated per query
+  that could run once per file or schema.
 - **Spans and fixes.** A fix edits only what its rule names, keeps the file
   parsable, and a second `--fix` changes nothing.
 - **Types match the database.** A new or changed inference rule cites the vendor

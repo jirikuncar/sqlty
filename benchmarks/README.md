@@ -36,12 +36,15 @@ maximum of `--repeats` runs (RSS from `wait4` of that child).
   that do not exist.
 - `schema_load_5000`: the synthetic schema at 5000 tables, the size completion must
   survive. Its RSS bounds the catalog and its name index.
-- `check_empty`: `sqlty check` of the project's configuration and schema alone, the
-  startup and schema load subtracted from `check` for the round-trip budget.
+- `check_empty`: `sqlty check` of the project's configuration and schema alone, its
+  startup and schema load.
 - `micro_us`: microseconds per `analyze_select` / `analyze_params` call for each
   query kind, schema cached.
-- `file_us_per_query`: `check_source` of each file with queries, schema cached, in
-  microseconds per query: median, p99, max and the files over the round trip.
+- `python_us_per_file`: Python type inference per file in microseconds (mean, median,
+  p99, max): `check_source` of the file, schema cached, minus the SQL inference of each
+  of its queries, timed as `check_source` of a module holding only that query minus one
+  holding none. `ruff_mean` is `ruff check` of the project on one thread per file,
+  startup subtracted.
 
 ```bash
 make bench-project                                              # full size, JSON on stdout
@@ -51,12 +54,11 @@ uv run python benchmarks/bench_project.py --size full --keep /tmp/big  # keep th
 ## CI budget
 
 The `bench` job in `.github/workflows/tests.yml` builds the release extension
-and runs `make bench-ci` (about 20 s). It fails when a check is slower than a
-database round trip (AGENTS.md "Check budget": 100 µs per query, scaled by the
-calibration loop over its 20 ms): any query kind's
-`analyze_select` + `analyze_params`, or `check` minus `check_empty` per query.
-`file_us_per_query` is reported, not budgeted yet. It also fails when a metric is
-over its budget in `baseline.json`:
+and runs `make bench-ci` (about 20 s). It fails when inference is over its budget
+(AGENTS.md "Check budget"): SQL when any query kind's `analyze_select` +
+`analyze_params` is slower than a database round trip (100 µs, scaled by the
+calibration loop over its 20 ms), Python when the `python_us_per_file` mean is over
+`ruff_mean`. It also fails when a metric is over its budget in `baseline.json`:
 
 - **Times** are divided by a calibration loop (a fixed pure-Python loop, best of
   5) timed in the same run, so a faster or slower runner moves baseline and
