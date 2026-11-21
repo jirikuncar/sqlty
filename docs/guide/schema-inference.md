@@ -131,24 +131,17 @@ What makes a column nullable or not:
 - **Parameters.** A placeholder echoed into a column (`SELECT %(key)s::text`) can be NULL,
   since a caller may bind `None`. In a call to a [marked helper](helpers.md) or a driver
   whose argument for it has a known type other than `None` (a literal, a name bound to
-  one, an annotated variable, a constant imported from a checked module, a `NewType` of a
-  known type), it is not: the column, or the JSON member it fills, follows the argument.
-  Where the argument is `None`, optional or of unknown type, and in `SQL[T]` strings, it
-  stays nullable.
+  one, an annotated variable, a constant imported from a checked module), it is not: the
+  column, or the JSON member it fills, follows the argument. An annotation is read as row
+  types read one, so a type alias or `NewType` of a known type counts as that type, from
+  the module or a checked module, imported absolutely or relatively. Where the argument
+  is `None`, optional or of unknown type, and in `SQL[T]` strings, it stays nullable.
 
-  A `NewType` is read only when it is
-  - a positional `typing.NewType` or `typing_extensions.NewType` call at module level,
-    when the module binds neither the name nor `NewType` again, in a block, a class
-    around the argument or a star import;
-  - of a class, not a generic such as `list[int]`;
-  - defined in the module or a checked module, imported absolutely or relatively, not
-    from an installed package or a stub;
-  - in a chain of at most nine `NewType`s.
-
-  A function that rebinds the name through `global` is not seen, as for row types.
-
-  Other annotations of unknown type, such as type aliases (`UserId = int`), `TypeVar`s,
-  `Any` or classes of unchecked packages, keep the placeholder nullable.
+  A name the module binds more than once, anywhere at module level, or binds in a class
+  or function around the argument, is of unknown type, and so is a `NewType` made with a
+  `NewType` the module binds again. A function that rebinds the name through `global`, or
+  binds it locally other than by an assignment or parameter (an import, `for`, `def`), is
+  not seen.
 
 [`nullable-mismatch`](../reference/rules/nullable-mismatch.md) reports a row type field
 that is not optional for a nullable column;

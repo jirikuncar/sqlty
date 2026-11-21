@@ -4,8 +4,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 
 use ruff_python_ast::token::TokenKind;
-use ruff_python_ast::visitor::{walk_expr, walk_stmt, Visitor};
-use ruff_python_ast::{ExceptHandler, Expr, ExprContext, ModModule, Operator, Stmt, StmtClassDef};
+use ruff_python_ast::visitor::{walk_except_handler, walk_expr, walk_pattern, walk_stmt, Visitor};
+use ruff_python_ast::{
+    self as ast, ExceptHandler, Expr, ExprContext, ModModule, Operator, Stmt, StmtClassDef,
+};
 use ruff_text_size::{Ranged, TextRange};
 
 use super::extract::classify;
@@ -39,8 +41,10 @@ pub struct Source {
     /// See [`crate::compose::constant`].
     pub(crate) constants: std::sync::OnceLock<HashMap<String, crate::compose::Binding>>,
     /// See [`bound_names`].
-    pub(crate) bound: std::sync::OnceLock<HashMap<String, usize>>,
-    /// See [`crate::scopes::module_kinds`].
+    bound: std::sync::OnceLock<HashMap<String, usize>>,
+    /// See [`module_types`].
+    local: std::sync::OnceLock<HashMap<String, Local>>,
+    /// The classes module-level names hold, see [`crate::arg_types`].
     pub(crate) kinds: std::sync::OnceLock<HashMap<String, Option<String>>>,
 }
 
@@ -74,11 +78,30 @@ impl Source {
             targets: std::sync::OnceLock::new(),
             constants: std::sync::OnceLock::new(),
             bound: std::sync::OnceLock::new(),
+            local: std::sync::OnceLock::new(),
             kinds: std::sync::OnceLock::new(),
             syntax,
             comments,
             version,
         })
+    }
+
+    /// How often the module binds `name` at module level, nested blocks included; `*` counts
+    /// star imports.
+    pub fn bound(&self, name: &str) -> usize {
+        let bound = self.bound.get_or_init(|| {
+            bound_names(self.body())
+                .into_iter()
+                .map(|(name, count)| (name.to_string(), count))
+                .collect()
+        });
+        bound.get(name).copied().unwrap_or(0)
+    }
+
+    /// [`module_types`] of the module, once.
+    fn local(&self) -> &HashMap<String, Local> {
+        self.local
+            .get_or_init(|| module_types(self.body(), &self.aliases, &self.imports))
     }
 
     /// The source as the module `module`.
@@ -285,56 +308,77 @@ fn is_type_expr(expr: &Expr) -> bool {
     }
 }
 
-/// `_bound_names`: how often each name is bound by a module-level statement; a function
-/// body nested in it binds none.
+/// `_bound_names`: how often each name is bound by a module-level statement, nested blocks
+/// included; the bodies of functions and classes bind none.
 struct Bound<'a> {
     counts: HashMap<&'a str, usize>,
 }
 
+impl<'a> Bound<'a> {
+    fn bind(&mut self, name: &'a str) {
+        *self.counts.entry(name).or_default() += 1;
+    }
+}
+
 impl<'a> Visitor<'a> for Bound<'a> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
-        if !matches!(stmt, Stmt::FunctionDef(_)) {
-            walk_stmt(self, stmt);
+        match stmt {
+            Stmt::FunctionDef(node) => self.bind(node.name.as_str()),
+            Stmt::ClassDef(node) => self.bind(node.name.as_str()),
+            Stmt::Import(ast::StmtImport { names, .. })
+            | Stmt::ImportFrom(ast::StmtImportFrom { names, .. }) => {
+                for alias in names {
+                    let name = alias.asname.as_ref().unwrap_or(&alias.name).as_str();
+                    self.bind(name.split('.').next().unwrap_or(name));
+                }
+            }
+            other => walk_stmt(self, other),
         }
     }
 
     fn visit_expr(&mut self, expr: &'a Expr) {
         if let Expr::Name(name) = expr {
             if name.ctx == ExprContext::Store {
-                *self.counts.entry(name.id.as_str()).or_default() += 1;
+                self.bind(name.id.as_str());
             }
         }
         walk_expr(self, expr);
+    }
+
+    fn visit_except_handler(&mut self, handler: &'a ExceptHandler) {
+        let ExceptHandler::ExceptHandler(node) = handler;
+        if let Some(name) = &node.name {
+            self.bind(name.as_str());
+        }
+        walk_except_handler(self, handler);
+    }
+
+    fn visit_pattern(&mut self, pattern: &'a ast::Pattern) {
+        match pattern {
+            ast::Pattern::MatchAs(ast::PatternMatchAs {
+                name: Some(name), ..
+            })
+            | ast::Pattern::MatchStar(ast::PatternMatchStar {
+                name: Some(name), ..
+            })
+            | ast::Pattern::MatchMapping(ast::PatternMatchMapping {
+                rest: Some(name), ..
+            }) => {
+                self.bind(name.as_str());
+            }
+            _ => {}
+        }
+        walk_pattern(self, pattern);
     }
 }
 
 /// How often each name is bound at module level, nested blocks included; `*` counts star
 /// imports.
-pub(crate) fn bound_names(body: &[Stmt]) -> HashMap<&str, usize> {
+fn bound_names(body: &[Stmt]) -> HashMap<&str, usize> {
     let mut bound = Bound {
         counts: HashMap::new(),
     };
-    for stmt in body {
-        match stmt {
-            Stmt::FunctionDef(node) => *bound.counts.entry(node.name.as_str()).or_default() += 1,
-            Stmt::ClassDef(node) => *bound.counts.entry(node.name.as_str()).or_default() += 1,
-            Stmt::Import(node) => {
-                for alias in &node.names {
-                    let name = alias.asname.as_ref().unwrap_or(&alias.name).as_str();
-                    let root = name.split('.').next().unwrap_or(name);
-                    *bound.counts.entry(root).or_default() += 1;
-                }
-            }
-            Stmt::ImportFrom(node) => {
-                for alias in &node.names {
-                    let name = alias.asname.as_ref().unwrap_or(&alias.name).as_str();
-                    let root = name.split('.').next().unwrap_or(name);
-                    *bound.counts.entry(root).or_default() += 1;
-                }
-            }
-            other => walk_stmt(&mut bound, other),
-        }
-    }
+    bound.visit_body(body);
     bound.counts
 }
 
@@ -371,7 +415,7 @@ enum Local {
 
 /// `_module_types`: the aliases, `NewType`s and plain classes of a module, by name; a name
 /// bound more than once, or a generic `type X[T] = ...`, is left out.
-fn module_types(body: &[Stmt], aliases: &Table) -> HashMap<String, Local> {
+fn module_types(body: &[Stmt], aliases: &Table, imports: &Table) -> HashMap<String, Local> {
     let mut found: HashMap<String, Local> = HashMap::new();
     for (index, stmt) in body.iter().enumerate() {
         if let Some((name, _)) = type_alias(stmt, aliases) {
@@ -382,13 +426,26 @@ fn module_types(body: &[Stmt], aliases: &Table) -> HashMap<String, Local> {
             }
         }
     }
+    let bound = bound_names(body);
+    let once = |name: &str| bound.get(name) == Some(&1);
     for (index, stmt) in body.iter().enumerate() {
         if let Some((name, _)) = newtype_assignment(stmt, aliases) {
-            found.insert(name.to_string(), Local::NewType(index));
+            // A `NewType` defined, or imported and bound again, is not `typing.NewType`.
+            let called = stmt
+                .as_assign_stmt()
+                .and_then(|node| crate::scopes::dotted(&node.value.as_call_expr()?.func));
+            let typing = called.as_ref().is_some_and(|called| {
+                matches!(
+                    crate::scopes::qualified(Some(called.clone()), imports).as_deref(),
+                    Some("typing.NewType" | "typing_extensions.NewType")
+                ) && once(called.split('.').next().unwrap_or_default())
+            });
+            if typing && !bound.contains_key("*") {
+                found.insert(name.to_string(), Local::NewType(index));
+            }
         }
     }
-    let bound = bound_names(body);
-    found.retain(|name, _| bound.get(name.as_str()) == Some(&1));
+    found.retain(|name, _| once(name));
     found
 }
 
@@ -434,19 +491,17 @@ fn newtype_assignment<'a>(stmt: &'a Stmt, aliases: &Table) -> Option<(&'a str, &
 /// A class is a stand-in deriving from what its bases resolve to, so `class Email(str)` fits
 /// a `str` field and an `int` column doesn't fit an `Email` one; with a base that is unknown,
 /// it is unknown.
-pub struct ModuleTypes {
-    pub source: Arc<Source>,
+pub struct ModuleTypes<S = Arc<Source>> {
+    pub source: S,
     /// Weak: the index keeps the types of its modules.
     index: Option<Weak<dyn Index>>,
     module: String,
-    local: HashMap<String, Local>,
     built: Mutex<HashMap<String, Option<Ty>>>,
     imported: Mutex<HashMap<String, Option<Ty>>>,
 }
 
-impl ModuleTypes {
-    pub fn new(source: Arc<Source>, index: Option<&Arc<dyn Index>>, module: Option<&str>) -> Self {
-        let local = module_types(source.body(), &source.aliases);
+impl<S: std::ops::Deref<Target = Source>> ModuleTypes<S> {
+    pub fn new(source: S, index: Option<&Arc<dyn Index>>, module: Option<&str>) -> Self {
         ModuleTypes {
             source,
             index: index.map(Arc::downgrade),
@@ -454,7 +509,6 @@ impl ModuleTypes {
                 .filter(|module| !module.is_empty())
                 .unwrap_or("__main__")
                 .to_string(),
-            local,
             built: Mutex::default(),
             imported: Mutex::default(),
         }
@@ -462,7 +516,7 @@ impl ModuleTypes {
 
     /// Whether `name` is an alias, `NewType` or plain class of the module.
     pub fn is_local(&self, name: &str) -> bool {
-        self.local.contains_key(name)
+        self.source.local().contains_key(name)
     }
 
     /// The type built for `name`, once; `None` while it is built, so one that refers to
@@ -479,12 +533,12 @@ impl ModuleTypes {
     }
 }
 
-impl Names for ModuleTypes {
+impl<S: std::ops::Deref<Target = Source>> Names for ModuleTypes<S> {
     fn get(&self, name: &str) -> Option<Found<'_>> {
         let body = self.source.body();
         let text = &*self.source.text;
         let resolver = self.source.resolver(Known::Imported);
-        match self.local.get(name).map(|local| (*local, body)) {
+        match self.source.local().get(name).map(|local| (*local, body)) {
             Some((Local::NewType(index), body)) => {
                 let (_, supertype) = newtype_assignment(&body[index], &self.source.aliases)?;
                 self.build(name, || {
@@ -521,6 +575,10 @@ impl Names for ModuleTypes {
                 Some(Found::Alias(value, text))
             }
             None => {
+                // An import the module binds again names something else.
+                if self.source.bound(name.split('.').next().unwrap_or(name)) > 1 {
+                    return None;
+                }
                 let index = self.index.as_ref()?.upgrade()?;
                 let lock = || self.imported.lock().unwrap_or_else(PoisonError::into_inner);
                 if let Some(found) = lock().get(name) {

@@ -27,6 +27,14 @@ const SPELLINGS: [(&str, &str, bool); 8] = [
         false,
     ),
 ];
+/// Bindings of `{head}` in a block that never runs.
+const NESTED: [&str; 5] = [
+    "if False:\n    {head} = {other}\n",
+    "if False:\n    def {head}(value):\n        return None\n",
+    "if False:\n    from decimal import Decimal as {head}\n",
+    "try:\n    pass\nexcept Exception as {head}:\n    pass\n",
+    "match 0:\n    case [{head}]:\n        pass\n",
+];
 const IMPORTS: &str = "import datetime\nfrom decimal import Decimal\nfrom uuid import UUID";
 const BASES: [&str; 8] = [
     "int",
@@ -72,8 +80,8 @@ struct Case {
     rebound: Option<usize>,
     /// The module binds what it imports from `ids` again, to another supertype.
     shadowed: bool,
-    /// The module binds the head of the annotation again in a block that never runs.
-    nested: bool,
+    /// How the module binds the head of the annotation again in a block that never runs.
+    nested: Option<usize>,
     /// `ids` and `app` are modules of a package, which imports relatively.
     package: bool,
     dotted: bool,
@@ -95,7 +103,7 @@ fn case(d: &mut Draw<'_>) -> Case {
         links,
         rebound,
         shadowed: d.int(0, 3) == 0,
-        nested: d.int(0, 3) == 0,
+        nested: (d.int(0, 3) == 0).then(|| d.int(0, NESTED.len() - 1)),
         package: d.bool(),
         dotted: d.bool(),
         call: d.bool(),
@@ -170,13 +178,13 @@ impl Case {
                 SPELLINGS[self.app].1
             ),
         };
-        let nested = if self.nested {
+        let nested = self.nested.map_or_else(String::new, |form| {
             let annotation = self.annotation();
             let head = annotation.split('.').next().unwrap_or_default();
-            format!("if False:\n    {head} = {other}\n")
-        } else {
-            String::new()
-        };
+            NESTED[form]
+                .replace("{head}", head)
+                .replace("{other}", other)
+        });
         let (parameter, argument) = match (annotation, self.call) {
             (Some(annotation), false) => (format!("v: {annotation}"), "v".to_string()),
             (Some(annotation), true) => ("raw".to_string(), format!("{annotation}(raw)")),
@@ -279,7 +287,7 @@ fn newtype_arguments_bind_as_their_supertype() {
             <[_; 3]>::try_from(engine::check_project(&files, &case.path("app"), &texts))
                 .expect("three checks");
         let shown = format!("{}\n{newtype:#?}\n{supertype:#?}\n{unknown:#?}", texts[0]);
-        if !case.real() || case.shadows() || case.nested {
+        if !case.real() || case.shadows() || case.nested.is_some() {
             prop_assert_eq!(&newtype, &unknown, "{}", shown);
         } else if case.rebound.is_none() {
             prop_assert_eq!(&newtype, &supertype, "{}", shown);

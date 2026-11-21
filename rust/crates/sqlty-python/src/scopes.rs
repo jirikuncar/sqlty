@@ -1,12 +1,10 @@
-//! The scopes of a module, the classes its names and `self` attributes hold, and the
-//! argument types read from them.
+//! The scopes of a module and the classes its names and `self` attributes hold, which
+//! [`crate::arg_types`] reads argument types from.
 
-use std::cell::OnceCell;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
 use crate::frozen::Table;
-use crate::types::symbols::Source;
 use ruff_python_ast::visitor::{walk_expr, walk_stmt, Visitor};
 use ruff_python_ast::{
     self as ast, Expr, ExprCall, ExprTString, Number, Operator, Stmt, StmtClassDef,
@@ -77,8 +75,8 @@ pub struct Scan<'a> {
     /// The scopes around each scope's contents, innermost last, classes included.
     paths: Vec<Vec<Scope>>,
     stack: Vec<Scope>,
-    types: HashMap<(Scope, &'a str), Option<String>>,
-    attributes: HashMap<(Scope, &'a str), Option<String>>,
+    pub(crate) types: HashMap<(Scope, &'a str), Option<String>>,
+    pub(crate) attributes: HashMap<(Scope, &'a str), Option<String>>,
     operands: HashSet<usize>,
     /// Every call, in visit order, with its innermost scope.
     pub calls: Vec<(&'a ExprCall, Scope)>,
@@ -86,11 +84,6 @@ pub struct Scan<'a> {
     pub templates: Vec<(&'a ExprTString, Scope)>,
     /// Every string literal, f-string and t-string, and whether it is an operand of a `+`.
     pub strings: Vec<(&'a Expr, bool)>,
-    body: &'a [Stmt],
-    /// [`crate::compose::constants`] of `body`, once asked.
-    constants: OnceCell<HashMap<String, crate::compose::Binding>>,
-    /// [`crate::types::symbols::bound_names`] of `body`, once asked.
-    bound: OnceCell<HashMap<&'a str, usize>>,
 }
 
 impl<'a> Scan<'a> {
@@ -109,9 +102,6 @@ impl<'a> Scan<'a> {
                 calls: Vec::new(),
                 templates: Vec::new(),
                 strings: Vec::new(),
-                body,
-                constants: OnceCell::new(),
-                bound: OnceCell::new(),
             },
         };
         walker.visit_body(body);
@@ -127,48 +117,6 @@ impl<'a> Scan<'a> {
     pub fn is_class(&self, scope: Scope) -> bool {
         matches!(self.scopes[scope], Node::Class(_))
     }
-
-    fn bindings(&self) -> &HashMap<String, crate::compose::Binding> {
-        self.constants
-            .get_or_init(|| crate::compose::constants(self.body))
-    }
-
-    /// The value of the one module-level assignment to `name`.
-    fn constant(&self, name: &str) -> Option<&'a Expr> {
-        crate::compose::value(self.body, self.bindings(), name)
-    }
-
-    /// How often the module binds `name`.
-    fn bound(&self, name: &str) -> usize {
-        let bound = self
-            .bound
-            .get_or_init(|| crate::types::symbols::bound_names(self.body));
-        bound.get(name).copied().unwrap_or(0)
-    }
-}
-
-/// How often `source` binds `name` at module level.
-fn bound(source: &Source, name: &str) -> usize {
-    let bound = source.bound.get_or_init(|| {
-        crate::types::symbols::bound_names(source.body())
-            .into_iter()
-            .map(|(name, count)| (name.to_string(), count))
-            .collect()
-    });
-    bound.get(name).copied().unwrap_or(0)
-}
-
-/// The class each module-level name of `source` holds, as [`Context::type_of`] reads it,
-/// walked once per module.
-pub(crate) fn module_kinds(source: &Source) -> &HashMap<String, Option<String>> {
-    source.kinds.get_or_init(|| {
-        Scan::new(source.body())
-            .types
-            .into_iter()
-            .filter(|((scope, _), _)| *scope == 0)
-            .map(|((_, name), kind)| (name.to_string(), kind))
-            .collect()
-    })
 }
 
 /// Remembers the class a name holds; `None` once it is ambiguous, as `_Scan._note` does.
@@ -328,225 +276,8 @@ impl<'a> Walker<'a> {
     }
 }
 
-/// The module that defines `NAME` or `module.NAME` imported by a module, this one for `None`,
-/// and its value there.
-pub type Constant<'s> = &'s dyn Fn(Option<&Source>, &str) -> Option<(&'s Source, &'s Expr)>;
-
-/// Reads argument types in the scopes of a [`Scan`].
-pub struct Context<'a, 's, 'c> {
-    /// `ParsedSource.imported_names`.
-    pub imported: &'s Table,
-    /// The scan of the module.
-    pub scan: &'s Scan<'a>,
-    /// Finds the value of an imported constant, when the checked modules are known.
-    pub constant: Option<Constant<'c>>,
-}
-
-impl Context<'_, '_, '_> {
-    /// The arguments a tuple or list literal, or a dict literal of string keys, passes.
-    pub fn literal_params(&self, arg: &Expr, stack: &[Scope]) -> Option<Vec<Param>> {
-        let items = match arg {
-            Expr::Tuple(tuple) => &tuple.elts,
-            Expr::List(list) => &list.elts,
-            Expr::Dict(dict) => {
-                let mut found = Vec::new();
-                for item in &dict.items {
-                    let Some(Expr::StringLiteral(key)) = &item.key else {
-                        return None;
-                    };
-                    found.push(Param {
-                        key: Key::Name(key.value.to_str().to_string()),
-                        kind: self.arg_type(&item.value, stack),
-                    });
-                }
-                return Some(found);
-            }
-            _ => return None,
-        };
-        if items.iter().any(|item| matches!(item, Expr::Starred(_))) {
-            return None;
-        }
-        Some(
-            items
-                .iter()
-                .enumerate()
-                .map(|(i, item)| Param {
-                    key: Key::Index(i + 1),
-                    kind: self.arg_type(item, stack),
-                })
-                .collect(),
-        )
-    }
-
-    /// The type `expr` has where the source says so.
-    pub fn arg_type(&self, expr: &Expr, stack: &[Scope]) -> Option<String> {
-        let name = match expr {
-            Expr::NoneLiteral(_) => "None",
-            Expr::List(ast::ExprList { elts: items, .. })
-            | Expr::Tuple(ast::ExprTuple { elts: items, .. })
-            | Expr::Set(ast::ExprSet { elts: items, .. }) => {
-                let types: HashSet<Option<String>> = items
-                    .iter()
-                    .map(|item| match item {
-                        Expr::Starred(_) => None,
-                        _ => self.arg_type(item, stack),
-                    })
-                    .collect();
-                if let [Some(only)] = types.iter().collect::<Vec<_>>().as_slice() {
-                    if only != "None" {
-                        return Some(format!("list[{only}]"));
-                    }
-                }
-                "list"
-            }
-            Expr::Name(name) => {
-                let name = name.id.as_str();
-                return self
-                    .class(self.type_of(stack, name), stack)
-                    .or_else(|| self.imported_constant(name, name, stack));
-            }
-            Expr::Attribute(_) => {
-                let dotted = dotted(expr)?;
-                let head = dotted.split('.').next().unwrap_or_default();
-                return self.imported_constant(&dotted, head, stack);
-            }
-            Expr::Call(call) => return self.class(dotted(&call.func), stack),
-            expr => literal_type(expr)?,
-        };
-        Some(name.to_string())
-    }
-
-    /// The type of the constant `dotted` imports from a checked module, unless `head` is
-    /// bound in `stack`.
-    fn imported_constant(&self, dotted: &str, head: &str, stack: &[Scope]) -> Option<String> {
-        let constant = self.constant?;
-        if self.binds(stack, head) {
-            return None;
-        }
-        let (source, value) = constant(None, dotted)?;
-        match value {
-            Expr::Call(call) => self.named(Some(source), &self::dotted(&call.func)?, &[], 0),
-            Expr::Name(name) => {
-                let kind = module_kinds(source).get(name.id.as_str())?.clone()?;
-                self.named(Some(source), &kind, &[], 0)
-            }
-            value => Context {
-                imported: &source.imports,
-                scan: &Scan::new(&[]),
-                constant: None,
-            }
-            .arg_type(value, &[]),
-        }
-    }
-
-    /// Whether `name` is a parameter of, or assigned in, the module or a function of `stack`.
-    fn binds(&self, stack: &[Scope], name: &str) -> bool {
-        stack
-            .iter()
-            .filter(|&&scope| !self.scan.is_class(scope))
-            .chain(std::iter::once(&0))
-            .any(|&scope| self.scan.types.contains_key(&(scope, name)))
-    }
-
-    /// The class a variable holds in `stack`.
-    pub fn type_of(&self, stack: &[Scope], name: &str) -> Option<String> {
-        stack
-            .iter()
-            .rev()
-            .filter(|&&scope| !self.scan.is_class(scope))
-            .chain(std::iter::once(&0))
-            .find_map(|&scope| self.scan.types.get(&(scope, name)))
-            .cloned()
-            .flatten()
-    }
-
-    /// The class `self.name` holds in the innermost class of `stack`.
-    pub fn attribute_type(&self, stack: &[Scope], name: &str) -> Option<String> {
-        let class = stack
-            .iter()
-            .rev()
-            .find(|&&scope| self.scan.is_class(scope))?;
-        self.scan.attributes.get(&(*class, name)).cloned().flatten()
-    }
-
-    /// The class an instance of `name` has in `stack`; a `NewType` has that of its supertype.
-    fn class(&self, name: Option<String>, stack: &[Scope]) -> Option<String> {
-        self.named(None, &name?, stack, 0)
-    }
-
-    /// The class of `name` spelled in `stack` of `from`, this module for `None`. A name
-    /// leads to a `NewType` only when its module binds it, and the `NewType` it calls, once,
-    /// and no scope of `stack` binds it.
-    fn named(
-        &self,
-        from: Option<&Source>,
-        name: &str,
-        stack: &[Scope],
-        depth: usize,
-    ) -> Option<String> {
-        let imported = from.map_or(self.imported, |source| &source.imports);
-        if let Some(found) = class_of(Some(name.to_string()), imported) {
-            return Some(found);
-        }
-        let once = |from: Option<&Source>, name: &str| {
-            let count = |name| match from {
-                None => self.scan.bound(name),
-                Some(source) => bound(source, name),
-            };
-            count(name) == 1 && count("*") == 0
-        };
-        let head = name.split('.').next().unwrap_or_default();
-        if depth > 8
-            || !once(from, head)
-            || stack
-                .iter()
-                .any(|&scope| self.scan.types.contains_key(&(scope, head)))
-        {
-            return None;
-        }
-        let local = match from {
-            None => self.scan.constant(name),
-            Some(source) => crate::compose::constant(source, name),
-        };
-        let (from, value) = match local {
-            Some(value) => (from, value),
-            None => {
-                let (source, value) = (self.constant?)(from, name)?;
-                (Some(source), value)
-            }
-        };
-        let (func, supertype) = newtype(value)?;
-        let imported = from.map_or(self.imported, |source| &source.imports);
-        let called = dotted(func)?;
-        (is_newtype(&called, imported) && once(from, called.split('.').next()?))
-            .then(|| self.named(from, &class_name(Some(supertype))?, &[], depth + 1))
-            .flatten()
-    }
-}
-
-/// The called name and the supertype of `value` when it is `NewType("name", T)`.
-fn newtype(value: &Expr) -> Option<(&Expr, &Expr)> {
-    let Expr::Call(call) = value else {
-        return None;
-    };
-    match &*call.arguments.args {
-        [Expr::StringLiteral(_), supertype] if call.arguments.keywords.is_empty() => {
-            Some((&call.func, supertype))
-        }
-        _ => None,
-    }
-}
-
-/// Whether `func` names `typing.NewType`.
-fn is_newtype(func: &str, imported: &Table) -> bool {
-    matches!(
-        qualified(Some(func.to_string()), imported).as_deref(),
-        Some("typing.NewType" | "typing_extensions.NewType")
-    )
-}
-
 /// The builtin class of a literal other than `None`.
-fn literal_type(expr: &Expr) -> Option<&'static str> {
+pub(crate) fn literal_type(expr: &Expr) -> Option<&'static str> {
     let number = |number: &ast::ExprNumberLiteral| match number.value {
         Number::Int(_) => Some("int"),
         Number::Float(_) => Some("float"),

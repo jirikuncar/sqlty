@@ -692,9 +692,10 @@ def insert(plain: Plain, twice: Twice, keyword: Keyword, loop: Loop, listed: kin
 
 #### Bound again anywhere
 
-A `NewType`, or the `NewType` it is made with, that the module binds again anywhere, in a
-block, a class or a star import, keeps the argument of unknown type, as Python may see the
-other binding.
+A `NewType`, or the `NewType` it is made with, that its module binds again anywhere, in a
+block, a class around the argument or a star import, by an assignment, import, definition,
+`except` or `match`, keeps the argument of unknown type, as Python may see the other
+binding.
 
 `decoy.py`:
 
@@ -705,6 +706,38 @@ def NewType(name, tp):
     return tp | None
 
 Id = NewType("Id", int)
+```
+
+`blocks.py`:
+
+```python
+import sys
+from typing import NewType
+
+if sys.platform == "win32":
+    from decoy import NewType
+
+Id = NewType("Id", int)
+```
+
+`defined.py`:
+
+```python
+import sys
+from typing import NewType
+
+Id = NewType("Id", int)
+Caught = NewType("Caught", int)
+Matched = NewType("Matched", int)
+if sys.platform == "win32":
+    def Id(value): return None
+try:
+    pass
+except Exception as Caught:
+    pass
+match sys.argv:
+    case [Matched]:
+        pass
 ```
 
 `starred.py`:
@@ -721,7 +754,9 @@ Id = NewType("Id", int)
 import sys
 from typing import NamedTuple, NewType
 
+import blocks
 import decoy
+import defined
 import starred
 from db import fetch_all
 
@@ -741,13 +776,52 @@ class Holder:
         # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
         fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=member)
 
-def insert(branch: Branch, decoyed: decoy.Id, starred: starred.Id) -> None:
+def insert(branch: Branch, decoyed: decoy.Id, starred: starred.Id, block: blocks.Id, defined: defined.Id, caught: defined.Caught, matched: defined.Matched) -> None:
     # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
     fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=branch)
     # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
     fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=decoyed)
     # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
     fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=starred)
+    # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=block)
+    # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=defined)
+    # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=caught)
+    # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=matched)
+```
+
+#### Type aliases
+
+An argument annotated with a type alias has the type the alias stands for.
+
+```python
+from typing import NamedTuple, NewType, Optional, TypeAlias
+
+from db import fetch_all
+
+UserId = int
+Typed: TypeAlias = int
+type Stated = int
+Maybe = int | None
+Older = Optional[int]
+Wrapped = NewType("Wrapped", UserId)
+
+class Row(NamedTuple):
+    id: int
+    owner_id: int
+
+def insert(user: UserId, typed: Typed, stated: Stated, wrapped: Wrapped, maybe: Maybe, older: Older) -> None:
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=user)
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=typed)
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=stated)
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=wrapped)
+    # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=maybe)
+    # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=older)
 ```
 
 #### Driver calls and t-strings

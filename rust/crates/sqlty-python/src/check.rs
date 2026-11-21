@@ -15,6 +15,7 @@ use ruff_text_size::Ranged;
 use sqlty_sql::analyzer::{self, Nullability};
 
 use crate::analyses::Analyses;
+use crate::arg_types::Project;
 use crate::calls::{helper_calls_in, is_marked, Call};
 use crate::checker::{self, Diagnostic};
 use crate::facts::ModuleFacts;
@@ -1231,19 +1232,18 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
     }
 
     let mut found = helper_calls_in(&facts, run.helpers, run.settings.module, run.variants);
-    let constant = |from: Option<&Source>, dotted: &str| {
-        run.helpers?
-            .fragment(from.unwrap_or(source), dotted, run.settings.module)
+    let types = std::cell::OnceCell::new();
+    let types = || {
+        types.get_or_init(|| {
+            facts.arg_types(run.helpers.map(|helpers| Project {
+                helpers,
+                module: run.settings.module,
+            }))
+        })
     };
     let mut driver_calls: Vec<Call<'_>> = Vec::new();
     if drivers::may_hold(text) {
-        for call in drivers::find_in(
-            text,
-            source.body(),
-            &source.imports,
-            facts.scan(),
-            Some(&constant),
-        ) {
+        for call in drivers::find_in(text, source.body(), &source.imports, facts.scan(), types()) {
             driver_calls.push(Call {
                 line: call.line,
                 query: Some(call.query),
@@ -1263,7 +1263,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
         }
     }
     if MARKED_TEMPLATE.is_match(text) {
-        for template in templates::of_in(text, &source.imports, facts.scan(), Some(&constant)) {
+        for template in templates::of_in(text, facts.scan(), types()) {
             let Some(query) = template.query.filter(|query| is_marked(query)) else {
                 continue;
             };
