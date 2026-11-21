@@ -167,15 +167,6 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// `table.column`, built only when diagnostics are collected.
-    fn label(&self, table: &str, column: &str) -> String {
-        if self.diag.enabled() {
-            format!("{table}.{column}")
-        } else {
-            String::new()
-        }
-    }
-
     /// A column of one source, when it has it.
     fn find_column(&self, table: &str, column: &str) -> Option<ColumnRef<'_>> {
         if let Some(found) = self.virtual_column(table, column) {
@@ -191,10 +182,11 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Where a column found in `table` comes from, for explaining why it is untyped.
-    fn origin(&self, found: &ColumnRef<'_>, table: &str, column: &str) -> Origin {
+    fn origin(found: &ColumnRef<'_>, table: &str, column: &str) -> Origin {
+        let label = || format!("{table}.{column}");
         match found {
-            ColumnRef::Virtual { local: false, .. } => Origin::View(self.label(table, column)),
-            ColumnRef::Schema(_) => Origin::Schema(self.label(table, column)),
+            ColumnRef::Virtual { local: false, .. } => Origin::View(label()),
+            ColumnRef::Schema(_) => Origin::Schema(label()),
             ColumnRef::Virtual { .. } | ColumnRef::System(_) => Origin::Local,
         }
     }
@@ -339,10 +331,9 @@ impl<'a> Analyzer<'a> {
 
     /// Type of a column: its qualifier's source, else the first source having it, the
     /// FROM clause before enclosing queries.
-    pub(super) fn resolve_column(&self, expr: &Expr, scope: &Scope) -> Option<(Typed, Origin)> {
+    pub(super) fn resolve_column(&self, expr: &Expr, scope: &Scope) -> Option<Typed> {
         let resolved = self.resolve_reference(expr, scope)?;
-        let origin = self.origin(&resolved.found, &resolved.table, &resolved.column);
-        Some((resolved.found.typed(self.dialect), origin))
+        Some(resolved.found.typed(self.dialect))
     }
 
     /// Typed column reference, recording why when it is untyped.
@@ -352,10 +343,10 @@ impl<'a> Analyzer<'a> {
         }
         match self.resolve_reference(expr, scope) {
             Some(resolved) => {
-                let origin = self.origin(&resolved.found, &resolved.table, &resolved.column);
                 let typed = resolved.found.typed(self.dialect);
                 let typed = self.narrowed_values(&resolved.reference, &resolved.column, typed);
                 if typed.python.is_none() && self.diag.enabled() {
+                    let origin = Self::origin(&resolved.found, &resolved.table, &resolved.column);
                     match (origin, &typed.sql) {
                         (Origin::Schema(column), sql_type) => self.diag.record(
                             Rule::UnknownType,
