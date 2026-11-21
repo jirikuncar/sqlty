@@ -31,6 +31,15 @@ INSERT INTO users (id, name, age) VALUES (?, ?, ?)
 -- params: 3: int (INT) NULL
 ```
 
+## INSERT ... SET
+
+```sql
+INSERT INTO users SET id = %s, name = %s, age = %s
+-- params: 1: int (INT) NOT NULL
+-- params: 2: str (VARCHAR(50)) NOT NULL
+-- params: 3: int (INT) NULL
+```
+
 ## Backslash escapes in strings
 
 ```sql
