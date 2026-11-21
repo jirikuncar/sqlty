@@ -680,3 +680,32 @@ def test_a_shared_schema_is_judged_at_the_strictest_severity(
     assert [(row["rule"], row["severity"]) for row in json.loads(result.stdout)] == [
         ("missing-concurrently", "error")
     ]
+
+
+@pytest.mark.parametrize("baseline", ["HEAD", "baseline.sql"])
+@pytest.mark.parametrize("strict", ["default", "events"])
+def test_a_migration_two_databases_list_is_reported_once_at_the_stricter_severity(
+    cli: Cli, migrations: Path, baseline: str, strict: str
+) -> None:
+    rules = {
+        name: 'rules.missing-concurrently = "error"\n' if name == strict else ""
+        for name in ("default", "events")
+    }
+    (migrations / "pyproject.toml").write_text(
+        f'[tool.sqlty]\nschema = "migrations/"\n{rules["default"]}'
+        '[tool.sqlty.databases.events]\nschema = ["events/", "migrations/"]\n' + rules["events"]
+    )
+    (migrations / "events").mkdir()
+    events = "CREATE TABLE events (id INT, at TIMESTAMP);\n"
+    (migrations / "events" / "0001_events.sql").write_text(events)
+    (migrations / "baseline.sql").write_text(OLD_SCHEMA + events)
+    git(migrations, "add", "pyproject.toml", "events")
+    git(migrations, "commit", "-q", "-m", "events")
+
+    result = cli(
+        ["breaking", "--against", baseline, "--output-format", "json"], {"cwd": migrations}
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    rows = [(r["file"], r["rule"], r["severity"]) for r in json.loads(result.stdout)]
+    assert rows == [("migrations/0002_index.sql", "missing-concurrently", "error")]

@@ -16,6 +16,7 @@
 
 use std::borrow::BorrowMut;
 use std::cell::OnceCell;
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -573,9 +574,9 @@ fn migration_sets(head: &mut Revision<Workspace>) -> Result<Vec<Migrations>, Str
         }
         let probe = routed
             .iter()
-            .find(|(_, schema)| match (schema, &source.settings.schema_sql) {
-                (Some(schema), Some(own)) => Arc::ptr_eq(schema, own),
-                _ => false,
+            .find(|(_, schema)| {
+                let both = schema.as_ref().zip(source.settings.schema_sql.as_ref());
+                both.is_some_and(|(schema, own)| Arc::ptr_eq(schema, own))
             })
             .map(|(path, _)| path.clone())
             .or_else(|| (source.database == analyzer::DEFAULT).then(|| source.directory.join("_")));
@@ -604,7 +605,8 @@ fn migrations(
     schemas: &mut dyn Schemas,
 ) -> Result<Vec<Finding>, String> {
     let disk = Shared(Arc::new(sqlty_project::Disk));
-    let mut findings = Vec::new();
+    let mut findings: Vec<Finding> = Vec::new();
+    let mut reported: HashMap<_, usize> = HashMap::new();
     for set in sets {
         let own = &set.settings;
         let other = match &set.probe {
@@ -631,13 +633,27 @@ fn migrations(
             .collect();
         let found = sqlty_python::migrations::check_migrations_with(&baseline, &checked);
         for (((path, ..), text), found) in set.files.iter().zip(texts).zip(found) {
-            findings.extend(found.into_iter().map(|diagnostic| Finding {
-                direction: Direction::Migration,
-                against: against.to_string(),
-                path: path.clone(),
-                diagnostic,
-                text: Arc::clone(text),
-            }));
+            for diagnostic in found {
+                // A file two databases list is one statement: report it once, the stricter.
+                let key = (path.clone(), diagnostic.rule, diagnostic.span.clone());
+                match reported.entry(key) {
+                    Entry::Occupied(at) => {
+                        if diagnostic.severity == Severity::Error {
+                            findings[*at.get()].diagnostic.severity = Severity::Error;
+                        }
+                    }
+                    Entry::Vacant(slot) => {
+                        slot.insert(findings.len());
+                        findings.push(Finding {
+                            direction: Direction::Migration,
+                            against: against.to_string(),
+                            path: path.clone(),
+                            diagnostic,
+                            text: Arc::clone(text),
+                        });
+                    }
+                }
+            }
         }
     }
     Ok(findings)
