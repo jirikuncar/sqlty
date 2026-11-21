@@ -3,10 +3,10 @@
 use sqlty_sql::migrations::{check, Finding, Rule};
 
 const USERS: &str = "CREATE TABLE users (id BIGINT PRIMARY KEY, email VARCHAR(100), \
-    bio TEXT, score NUMERIC(5, 2), whole NUMERIC(5), free NUMERIC, net CIDR, bits VARBIT(4), \
-    flags VARBIT, odd GEOMETRY(POINT, 4326), team_id BIGINT);\n\
-    CREATE TABLE teams (id BIGINT PRIMARY KEY);\n\
-    CREATE INDEX users_email ON users (email);";
+        bio TEXT, score NUMERIC(5, 2), whole NUMERIC(5), free NUMERIC, net CIDR, bits VARBIT(4), \
+        flags VARBIT, odd GEOMETRY(POINT, 4326), team_id BIGINT);\n\
+        CREATE TABLE teams (id BIGINT PRIMARY KEY);\n\
+        CREATE INDEX users_email ON users (email);";
 
 fn rules(baseline: &str, migration: &str) -> Vec<Rule> {
     check(baseline, &[migration])
@@ -142,16 +142,16 @@ fn statements_of_the_baseline_are_not_judged() {
 #[test]
 fn what_a_migration_creates_is_empty() {
     let migration = "CREATE TABLE t (id int);
-        CREATE INDEX t_id ON t (id);
-        ALTER TABLE t ADD COLUMN x int NOT NULL, ADD COLUMN y uuid DEFAULT gen_random_uuid();
-        ALTER TABLE public.t ALTER COLUMN x SET NOT NULL;
-        DROP INDEX t_id;
-        DROP INDEX CONCURRENTLY t_id;
-        CLUSTER t;
-        VACUUM FULL t;
-        DROP TABLE t;
-        CREATE MATERIALIZED VIEW mv AS SELECT 1;
-        REFRESH MATERIALIZED VIEW mv;";
+            CREATE INDEX t_id ON t (id);
+            ALTER TABLE t ADD COLUMN x int NOT NULL, ADD COLUMN y uuid DEFAULT gen_random_uuid();
+            ALTER TABLE public.t ALTER COLUMN x SET NOT NULL;
+            DROP INDEX t_id;
+            DROP INDEX CONCURRENTLY t_id;
+            CLUSTER t;
+            VACUUM FULL t;
+            DROP TABLE t;
+            CREATE MATERIALIZED VIEW mv AS SELECT 1;
+            REFRESH MATERIALIZED VIEW mv;";
     assert_eq!(rules(USERS, migration), []);
     let quoted = r#"CREATE TABLE "T" (id int); CLUSTER "T"; CLUSTER t;"#;
     assert_eq!(
@@ -170,8 +170,8 @@ fn a_table_copied_with_like_is_new() {
     ] {
         let migration = format!(
             "CREATE TABLE t ({like});
-            CREATE INDEX t_bio ON t (bio);
-            ALTER TABLE t ALTER COLUMN bio SET NOT NULL;"
+                CREATE INDEX t_bio ON t (bio);
+                ALTER TABLE t ALTER COLUMN bio SET NOT NULL;"
         );
         assert_eq!(rules(USERS, &migration), [], "{like}");
     }
@@ -180,10 +180,10 @@ fn a_table_copied_with_like_is_new() {
 #[test]
 fn a_table_copies_the_column_types_of_its_like_source() {
     let migration = "CREATE TABLE t (LIKE users INCLUDING ALL);
-        INSERT INTO t SELECT * FROM users;
-        SET lock_timeout = '1s';
-        ALTER TABLE t ALTER COLUMN email TYPE varchar(200);
-        ALTER TABLE t ALTER COLUMN email TYPE varchar(50);";
+            INSERT INTO t SELECT * FROM users;
+            SET lock_timeout = '1s';
+            ALTER TABLE t ALTER COLUMN email TYPE varchar(200);
+            ALTER TABLE t ALTER COLUMN email TYPE varchar(50);";
     assert_eq!(rules(USERS, migration), [Rule::TableRewrite]);
 }
 
@@ -214,9 +214,9 @@ fn rows_copied_into_a_new_table_end_its_exemption() {
     ] {
         let migration = format!(
             "SET lock_timeout = '1s';
-            CREATE TABLE t (id int);
-            {fill};
-            CREATE INDEX t_id ON t (id);"
+                CREATE TABLE t (id int);
+                {fill};
+                CREATE INDEX t_id ON t (id);"
         );
         assert_eq!(rules(USERS, &migration), expected, "{fill}");
     }
@@ -232,10 +232,10 @@ fn rows_copied_into_a_new_table_end_its_exemption() {
 #[test]
 fn new_tables_are_exempt_from_the_command_rules() {
     let migration = "CREATE TABLE t (id int);
-        ALTER TABLE t SET TABLESPACE fast;
-        ALTER TABLE t DISABLE TRIGGER ALL;
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS t_id ON t (id);
-        TRUNCATE t CASCADE;";
+            ALTER TABLE t SET TABLESPACE fast;
+            ALTER TABLE t DISABLE TRIGGER ALL;
+            CREATE INDEX CONCURRENTLY IF NOT EXISTS t_id ON t (id);
+            TRUNCATE t CASCADE;";
     assert_eq!(rules(USERS, migration), []);
 }
 
@@ -299,13 +299,13 @@ fn builds_and_rewrites_wait_for_a_lock_that_blocks_writes() {
         "CREATE TABLE t (id int); CREATE INDEX t_id ON t (id) TABLESPACE x; REINDEX INDEX t_id",
         "CREATE TABLE s.t (id int); CREATE INDEX ON s.t (id) TABLESPACE x; REINDEX TABLE s.t",
         "CREATE MATERIALIZED VIEW m2 AS SELECT 1 AS x WITH NO DATA;
-         CREATE UNIQUE INDEX m2_i ON m2 (x); REFRESH MATERIALIZED VIEW m2",
+             CREATE UNIQUE INDEX m2_i ON m2 (x); REFRESH MATERIALIZED VIEW m2",
         "CREATE TABLE t (id int PRIMARY KEY, a int UNIQUE, b int, c int,
-             CONSTRAINT named_u UNIQUE (b, c), UNIQUE (c, b));
-         REINDEX INDEX t_pkey; REINDEX INDEX t_a_key; REINDEX INDEX named_u;
-         REINDEX INDEX t_c_b_key",
+                 CONSTRAINT named_u UNIQUE (b, c), UNIQUE (c, b));
+             REINDEX INDEX t_pkey; REINDEX INDEX t_a_key; REINDEX INDEX named_u;
+             REINDEX INDEX t_c_b_key",
         "CREATE TABLE s.t (id int CONSTRAINT my_pk PRIMARY KEY, a int CONSTRAINT my_u UNIQUE);
-         REINDEX INDEX s.my_pk; REINDEX INDEX s.my_u",
+             REINDEX INDEX s.my_pk; REINDEX INDEX s.my_u",
         "CREATE TABLE t (id int, PRIMARY KEY (id)); REINDEX INDEX t_pkey",
     ] {
         assert_eq!(rules(&baseline, sql), [], "{sql}");
@@ -394,17 +394,17 @@ fn builds_and_rewrites_wait_for_a_lock_that_blocks_writes() {
 fn an_enum_value_is_used_only_after_its_transaction_commits() {
     let baseline = format!(
         "{USERS}\nCREATE TYPE status AS ENUM ('new');
-        CREATE TABLE orders (id BIGINT, state status, note TEXT);"
+            CREATE TABLE orders (id BIGINT, state status, note TEXT);"
     );
     let migration = |between: &str, using: &str| {
         format!(
             "SET lock_timeout = '1s';
-            BEGIN;
-            ALTER TYPE status ADD VALUE IF NOT EXISTS 'It''s';
-            {between}
-            {using};
-            {using};
-            COMMIT;"
+                BEGIN;
+                ALTER TYPE status ADD VALUE IF NOT EXISTS 'It''s';
+                {between}
+                {using};
+                {using};
+                COMMIT;"
         )
     };
     let used = "UPDATE orders SET state = 'It''s' WHERE id = 1";
@@ -454,9 +454,9 @@ fn an_enum_value_is_used_only_after_its_transaction_commits() {
 fn foreign_keys_decide_what_trigger_and_cascade_reach() {
     let baseline = format!(
         "{USERS}\nCREATE TABLE posts (id BIGINT, user_id BIGINT REFERENCES users (id));
-        CREATE TABLE tags (id BIGINT);
-        CREATE TABLE notes (id BIGINT);
-        ALTER TABLE notes ADD CONSTRAINT fk FOREIGN KEY (id) REFERENCES tags (id) NOT VALID;"
+            CREATE TABLE tags (id BIGINT);
+            CREATE TABLE notes (id BIGINT);
+            ALTER TABLE notes ADD CONSTRAINT fk FOREIGN KEY (id) REFERENCES tags (id) NOT VALID;"
     );
     for (migration, expected) in [
         ("ALTER TABLE posts DISABLE TRIGGER ALL", &[Rule::DisableTriggerAll][..]),
@@ -499,15 +499,15 @@ fn set_tablespace_names_one_table() {
 #[test]
 fn attaching_a_partition_scans_it_without_a_validated_check() {
     let baseline = "CREATE TABLE events (at date, price int) PARTITION BY RANGE (at);
-        CREATE TABLE open (at date, price int CHECK (price > 0));
-        CREATE TABLE bounded (at date NOT NULL, price int, CHECK (at >= '2026-10-01'));
-        CREATE TABLE nullable (at date, CHECK (at >= '2026-10-01'));
-        CREATE TABLE proven (at date CHECK (at IS NOT NULL), CHECK (at >= '2026-10-01'));
-        CREATE TABLE bare (at date);
-        CREATE TABLE keyed (at date, PRIMARY KEY (at), CHECK (at >= '2026-10-01'));";
+            CREATE TABLE open (at date, price int CHECK (price > 0));
+            CREATE TABLE bounded (at date NOT NULL, price int, CHECK (at >= '2026-10-01'));
+            CREATE TABLE nullable (at date, CHECK (at >= '2026-10-01'));
+            CREATE TABLE proven (at date CHECK (at IS NOT NULL), CHECK (at >= '2026-10-01'));
+            CREATE TABLE bare (at date);
+            CREATE TABLE keyed (at date, PRIMARY KEY (at), CHECK (at >= '2026-10-01'));";
     let bounds = "FOR VALUES FROM ('2026-10-01') TO ('2026-11-01')";
     let validated = "ALTER TABLE open ADD CONSTRAINT b CHECK (at >= '2026-10-01') NOT VALID;
-        ALTER TABLE open VALIDATE CONSTRAINT b;";
+            ALTER TABLE open VALIDATE CONSTRAINT b;";
     for (setup, table, expected) in [
         ("", "open", &[Rule::ConstraintScan][..]),
         ("", "bounded", &[]),
@@ -540,25 +540,25 @@ fn attaching_a_partition_scans_it_without_a_validated_check() {
         assert_eq!(rules(baseline, &migration), expected, "{setup} {table}");
     }
     let named = "SET lock_timeout = '1s';
-        ALTER TABLE bounded DROP CONSTRAINT b;
-        ALTER TABLE events ATTACH PARTITION bounded FOR VALUES FROM ('2026-10-01') TO ('2026-11-01');";
+            ALTER TABLE bounded DROP CONSTRAINT b;
+            ALTER TABLE events ATTACH PARTITION bounded FOR VALUES FROM ('2026-10-01') TO ('2026-11-01');";
     let named_baseline = baseline.replace(
         "CHECK (at >= '2026-10-01'));",
         "CONSTRAINT b CHECK (at >= '2026-10-01'));",
     );
     assert_eq!(rules(&named_baseline, named), [Rule::ConstraintScan]);
     let unknown_key = "SET lock_timeout = '1s';
-        ALTER TABLE logs ATTACH PARTITION bounded FOR VALUES FROM ('2026-10-01') TO ('2026-11-01');";
+            ALTER TABLE logs ATTACH PARTITION bounded FOR VALUES FROM ('2026-10-01') TO ('2026-11-01');";
     assert_eq!(rules(baseline, unknown_key), []);
 }
 
 #[test]
 fn a_new_partition_scans_the_default_partition() {
     let baseline = "CREATE TABLE events (at date NOT NULL) PARTITION BY RANGE (at);
-        CREATE TABLE events_rest PARTITION OF events DEFAULT;
-        CREATE TABLE logs (at date NOT NULL) PARTITION BY RANGE (at);
-        CREATE TABLE logs_rest (at date NOT NULL);
-        ALTER TABLE logs ATTACH PARTITION logs_rest DEFAULT;";
+            CREATE TABLE events_rest PARTITION OF events DEFAULT;
+            CREATE TABLE logs (at date NOT NULL) PARTITION BY RANGE (at);
+            CREATE TABLE logs_rest (at date NOT NULL);
+            ALTER TABLE logs ATTACH PARTITION logs_rest DEFAULT;";
     for (migration, expected) in [
         ("CREATE TABLE events_10 PARTITION OF events FOR VALUES FROM ('2026-10-01') TO ('2026-11-01')", &[Rule::ConstraintScan][..]),
         ("CREATE TABLE logs_10 (at date NOT NULL); ALTER TABLE logs ATTACH PARTITION logs_10 FOR VALUES FROM ('2026-10-01') TO ('2026-11-01')", &[Rule::ConstraintScan]),
@@ -584,11 +584,11 @@ fn a_new_partition_scans_the_default_partition() {
 #[test]
 fn hash_and_expression_keys_are_never_proven() {
     let baseline = "CREATE TABLE h (id int) PARTITION BY HASH (id);
-        CREATE TABLE h0 (id int NOT NULL, CHECK (id > 0));
-        CREATE TABLE e (name text) PARTITION BY RANGE (lower(name));
-        CREATE TABLE e0 (name text NOT NULL, CHECK (lower(name) >= 'a'));
-        CREATE TABLE q (\"At\" date) PARTITION BY RANGE (\"At\");
-        CREATE TABLE q0 (\"At\" date NOT NULL, CHECK (\"At\" >= '2026-10-01'));";
+            CREATE TABLE h0 (id int NOT NULL, CHECK (id > 0));
+            CREATE TABLE e (name text) PARTITION BY RANGE (lower(name));
+            CREATE TABLE e0 (name text NOT NULL, CHECK (lower(name) >= 'a'));
+            CREATE TABLE q (\"At\" date) PARTITION BY RANGE (\"At\");
+            CREATE TABLE q0 (\"At\" date NOT NULL, CHECK (\"At\" >= '2026-10-01'));";
     for (migration, expected) in [
         (
             "ALTER TABLE h ATTACH PARTITION h0 FOR VALUES WITH (MODULUS 4, REMAINDER 0)",
@@ -783,9 +783,9 @@ fn builds_and_rewrites_hold_their_locks_until_the_transaction_ends() {
         (
             format!(
                 "BEGIN; CREATE TABLE t (id int PRIMARY KEY); REINDEX INDEX t_pkey; CLUSTER t;
-                 VACUUM FULL t; CREATE INDEX ON t (id) TABLESPACE x; REINDEX TABLE t;
-                 CREATE MATERIALIZED VIEW m2 AS SELECT 1 AS x WITH NO DATA;
-                 REFRESH MATERIALIZED VIEW m2; {then_teams}"
+                     VACUUM FULL t; CREATE INDEX ON t (id) TABLESPACE x; REINDEX TABLE t;
+                     CREATE MATERIALIZED VIEW m2 AS SELECT 1 AS x WITH NO DATA;
+                     REFRESH MATERIALIZED VIEW m2; {then_teams}"
             ),
             &[],
         ),
@@ -799,15 +799,15 @@ fn builds_and_rewrites_hold_their_locks_until_the_transaction_ends() {
 fn a_table_keeps_a_replica_identity() {
     use Rule::*;
     let against = "CREATE TABLE a (id int PRIMARY KEY, u int NOT NULL UNIQUE);
-        CREATE TABLE b (id int, CONSTRAINT b_key PRIMARY KEY (id));
-        CREATE TABLE c (id int);
-        CREATE TABLE s.d (id int PRIMARY KEY);
-        CREATE UNIQUE INDEX a_u ON a (u);
-        CREATE TABLE n (id int CONSTRAINT n_named PRIMARY KEY);
-        CREATE TABLE s1.t (id int PRIMARY KEY, u int NOT NULL);
-        CREATE UNIQUE INDEX t_u ON s1.t (u);
-        CREATE TABLE s2.t (id int PRIMARY KEY, u int NOT NULL);
-        CREATE UNIQUE INDEX t_u ON s2.t (u);";
+            CREATE TABLE b (id int, CONSTRAINT b_key PRIMARY KEY (id));
+            CREATE TABLE c (id int);
+            CREATE TABLE s.d (id int PRIMARY KEY);
+            CREATE UNIQUE INDEX a_u ON a (u);
+            CREATE TABLE n (id int CONSTRAINT n_named PRIMARY KEY);
+            CREATE TABLE s1.t (id int PRIMARY KEY, u int NOT NULL);
+            CREATE UNIQUE INDEX t_u ON s1.t (u);
+            CREATE TABLE s2.t (id int PRIMARY KEY, u int NOT NULL);
+            CREATE UNIQUE INDEX t_u ON s2.t (u);";
     for (migration, expected) in [
         ("ALTER TABLE a DROP CONSTRAINT a_pkey", &[DropPrimaryKey][..]),
         ("ALTER TABLE b DROP CONSTRAINT b_key", &[DropPrimaryKey]),
@@ -898,10 +898,10 @@ fn a_table_keeps_a_replica_identity() {
 fn keys_added_by_alter_table_name_their_indexes() {
     use Rule::*;
     let baseline = "CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT UNIQUE, team_id BIGINT);
-        CREATE TABLE teams (id BIGINT, name TEXT);
-        ALTER TABLE ONLY teams ADD CONSTRAINT teams_pkey PRIMARY KEY (id);
-        ALTER TABLE teams ADD UNIQUE (name), ADD CONSTRAINT one CHECK (id > 0);
-        CREATE TABLE events (id int, at date) PARTITION BY RANGE (at);";
+            CREATE TABLE teams (id BIGINT, name TEXT);
+            ALTER TABLE ONLY teams ADD CONSTRAINT teams_pkey PRIMARY KEY (id);
+            ALTER TABLE teams ADD UNIQUE (name), ADD CONSTRAINT one CHECK (id > 0);
+            CREATE TABLE events (id int, at date) PARTITION BY RANGE (at);";
     let backfill = "UPDATE teams SET id = 1 WHERE id BETWEEN 1 AND 9; COMMIT;";
     for (migration, expected) in [
         (
@@ -928,8 +928,8 @@ fn keys_added_by_alter_table_name_their_indexes() {
         ),
         (
             "CREATE TABLE t (id int); ALTER TABLE t ADD CONSTRAINT t_pk PRIMARY KEY (id);
-             ALTER TABLE t ADD COLUMN u int UNIQUE, ADD COLUMN v int;
-             REINDEX INDEX t_pk; REINDEX INDEX t_u_key"
+                 ALTER TABLE t ADD COLUMN u int UNIQUE, ADD COLUMN v int;
+                 REINDEX INDEX t_pk; REINDEX INDEX t_u_key"
                 .to_string(),
             &[],
         ),
@@ -940,20 +940,20 @@ fn keys_added_by_alter_table_name_their_indexes() {
         ("CREATE INDEX events_at ON events (at)".to_string(), &[]),
         (
             "CREATE TABLE t (id int PRIMARY KEY); CREATE INDEX t_id ON t (id);
-             ALTER INDEX t_id RENAME TO t_x; ALTER TABLE t RENAME CONSTRAINT t_pkey TO t_pk;
-             REINDEX INDEX t_x; REINDEX INDEX t_pk"
+                 ALTER INDEX t_id RENAME TO t_x; ALTER TABLE t RENAME CONSTRAINT t_pkey TO t_pk;
+                 REINDEX INDEX t_x; REINDEX INDEX t_pk"
                 .to_string(),
             &[],
         ),
         (
             "BEGIN; ALTER TABLE users ADD COLUMN x int; ALTER INDEX teams_name_key RENAME TO tn;
-             REINDEX INDEX tn; COMMIT;"
+                 REINDEX INDEX tn; COMMIT;"
                 .to_string(),
             &[MissingConcurrently, MultiTableLock],
         ),
         (
             "ALTER TABLE teams DROP CONSTRAINT teams_name_key;
-             BEGIN; ALTER TABLE users ADD COLUMN x int; REINDEX INDEX teams_name_key; COMMIT;"
+                 BEGIN; ALTER TABLE users ADD COLUMN x int; REINDEX INDEX teams_name_key; COMMIT;"
                 .to_string(),
             &[MissingConcurrently],
         ),
@@ -975,7 +975,7 @@ fn only_single_column_keys_bound_a_backfill() {
     use Rule::*;
     let baseline = format!("{USERS} CREATE TABLE pairs (a int, b int, PRIMARY KEY (a, b));");
     let indexes = "CREATE UNIQUE INDEX CONCURRENTLY users_team_email ON users (team_id, email);
-        CREATE UNIQUE INDEX CONCURRENTLY users_lower_email ON users (lower(email));";
+            CREATE UNIQUE INDEX CONCURRENTLY users_lower_email ON users (lower(email));";
     for (migration, expected) in [
         (
             "BEGIN; ALTER TABLE users ADD COLUMN a int; ALTER TABLE teams ADD COLUMN b int; ALTER TABLE pairs ADD COLUMN c int; COMMIT;",
@@ -1021,15 +1021,15 @@ fn a_pg_dump_schema_is_not_a_migration() {
 #[test]
 fn a_validated_not_null_check_spares_the_scan() {
     let checked = "SET lock_timeout = '1s';
-        ALTER TABLE users ADD CONSTRAINT c CHECK (bio IS NOT NULL) NOT VALID;
-        ALTER TABLE users VALIDATE CONSTRAINT c;
-        ALTER TABLE users ALTER COLUMN bio SET NOT NULL;";
+            ALTER TABLE users ADD CONSTRAINT c CHECK (bio IS NOT NULL) NOT VALID;
+            ALTER TABLE users VALIDATE CONSTRAINT c;
+            ALTER TABLE users ALTER COLUMN bio SET NOT NULL;";
     assert_eq!(rules(USERS, checked), []);
     let unvalidated = "SET lock_timeout = '1s';
-        ALTER TABLE users ADD CONSTRAINT c CHECK ((bio IS NOT NULL)) NOT VALID;
-        ALTER TABLE users VALIDATE CONSTRAINT other;
-        ALTER TABLE users ADD CONSTRAINT d CHECK (users.bio IS NOT NULL) NOT VALID;
-        ALTER TABLE users ALTER COLUMN bio SET NOT NULL;";
+            ALTER TABLE users ADD CONSTRAINT c CHECK ((bio IS NOT NULL)) NOT VALID;
+            ALTER TABLE users VALIDATE CONSTRAINT other;
+            ALTER TABLE users ADD CONSTRAINT d CHECK (users.bio IS NOT NULL) NOT VALID;
+            ALTER TABLE users ALTER COLUMN bio SET NOT NULL;";
     assert_eq!(rules(USERS, unvalidated), [Rule::ConstraintScan]);
     let baseline = format!("{USERS}\nALTER TABLE users ADD CHECK (email IS NOT NULL);");
     let set = "SET lock_timeout = '1s'; ALTER TABLE users ALTER COLUMN email SET NOT NULL;";
@@ -1039,16 +1039,16 @@ fn a_validated_not_null_check_spares_the_scan() {
 #[test]
 fn concurrently_fails_in_a_transaction() {
     let migration = "SET lock_timeout = '1s';
-        BEGIN;
-        CREATE INDEX CONCURRENTLY a ON users (bio);
-        DROP INDEX CONCURRENTLY users_email;
-        COMMIT;
-        CREATE INDEX CONCURRENTLY b ON users (bio);
-        START TRANSACTION;
-        ALTER TABLE events DETACH PARTITION p CONCURRENTLY;
-        REINDEX INDEX CONCURRENTLY a;
-        REINDEX (CONCURRENTLY) INDEX a;
-        ROLLBACK;";
+            BEGIN;
+            CREATE INDEX CONCURRENTLY a ON users (bio);
+            DROP INDEX CONCURRENTLY users_email;
+            COMMIT;
+            CREATE INDEX CONCURRENTLY b ON users (bio);
+            START TRANSACTION;
+            ALTER TABLE events DETACH PARTITION p CONCURRENTLY;
+            REINDEX INDEX CONCURRENTLY a;
+            REINDEX (CONCURRENTLY) INDEX a;
+            ROLLBACK;";
     assert_eq!(
         rules(USERS, migration),
         [Rule::ConcurrentlyInTransaction; 5]
@@ -1060,7 +1060,7 @@ fn concurrently_fails_in_a_transaction() {
 #[test]
 fn lock_timeout_is_asked_once_per_file() {
     let migration = "ALTER TABLE users ADD COLUMN a int;
-        ALTER TABLE users ADD COLUMN b int;";
+            ALTER TABLE users ADD COLUMN b int;";
     assert_eq!(
         check(USERS, &[migration, migration]),
         [[Finding {
