@@ -52,18 +52,17 @@ parallel. CI's Lint job runs the commit hooks on all files.
 | Layer | Location | What it tests |
 |-------|----------|---------------|
 | **Unit** | `tests/test_*.py` | Invariants over the mdtest corpus, bindings, fuzzing, docs |
-| **mdtest** | `tests/mdtest/`, `docs/`, `README.md` | Type inference, rewrite, strip, lint ([format](AGENTS.md#markdown-tests-mdtest)) |
+| **mdtest** | `tests/mdtest/`, `docs/`, `README.md`, `skills/` | Type inference, rewrite, strip, lint ([format](AGENTS.md#markdown-tests-mdtest)), run by each crate's `tests/mdtest.rs` |
 | **E2E** | `tests/e2e/` | CLI in a subprocess, with `inline-snapshot` |
 | **Rust** | `rust/crates/*/` | Engine, CLI (`trycmd`), language server |
 
 ```bash
 uv run pytest                                          # all tests except timing
-uv run pytest tests/mdtest docs README.md               # mdtests
+make test-mdtest                                       # mdtests
 uv run pytest tests/ --ignore=tests/e2e --ignore=tests/mdtest  # unit tests
 uv run pytest tests/e2e/ -v                            # end-to-end tests
 uv run pytest tests/e2e/ --inline-snapshot=update      # accept new e2e output
 uv run pytest -k "integer cast"                        # filter by name
-uv run pytest tests/mdtest/rewrite/basic_rewrite.md -v # one file
 uv run pytest -m timing -n 0 -p no:randomly            # the tests that measure wall time
 uv run pytest -n 0 -p no:randomly                      # one process, in file order
 ```
@@ -83,7 +82,7 @@ make test-unit       # unit tests only
 make test-mdtest     # mdtest only
 make test-e2e        # e2e only
 make update-mdtest   # fill in mdtest assertions with actual values
-make test-coverage   # every Python and Rust test with coverage, and its gates
+make test-coverage   # each package's own tests with coverage, and its gate
 make check-no-exec-harness  # the CI check that guards the no-exec harness
 ```
 
@@ -93,13 +92,13 @@ make check-no-exec-harness  # the CI check that guards the no-exec harness
 cargo test --workspace --manifest-path rust/Cargo.toml
 ```
 
-CI runs them with [cargo-nextest](https://nexte.st/), which runs test binaries in
-parallel and reports each failure on its own, then runs the doctests that
-nextest skips:
+CI runs each crate's tests on their own with [cargo-nextest](https://nexte.st/), which
+runs test binaries in parallel and reports each failure on its own, then runs the
+doctests that nextest skips:
 
 ```bash
-cargo nextest run --workspace --manifest-path rust/Cargo.toml
-cargo test --doc --workspace --manifest-path rust/Cargo.toml
+cargo nextest run -p sqlty-sql --manifest-path rust/Cargo.toml
+cargo test --doc -p sqlty-sql --manifest-path rust/Cargo.toml
 ```
 
 `rust/crates/sqlty-cli/tests/cli/*.md` run the built `sqlty` binary with
@@ -114,6 +113,26 @@ TRYCMD=overwrite uv run cargo test -p sqlty-cli --test cli --manifest-path rust/
 
 It updates the files already in `.out/`; add new ones by hand, where `...` matches any lines.
 Output backslashes read as `/`, so keep `\n` out of what a case prints.
+
+### Packages in CI
+
+Each Rust crate under `rust/crates/` is a package, and so is the Python package
+(`src/sqlty` with the extension crate `sqlty-ext`). On a pull request,
+[`scripts/ci_changes.py`](scripts/ci_changes.py) picks the packages the changed files
+belong to, with every package that depends on one of them, and the Tests workflow runs
+only those; a push to `main` runs all of them. A change to a file no package owns runs
+everything, unless the script ignores it, as it does `plans/`.
+The required check is `CI`, which passes when every job the change needed passed.
+
+A package's coverage counts its own tests only: a crate's Rust tests, or for the Python
+package pytest and the extension crate's Rust tests. Each must run every line of its
+package, except the crates in `scripts/coverage-floors.txt`, whose tests may not miss
+more lines than their floor there. `make test-coverage PACKAGES=sqlty-lsp` runs the gate
+of one package.
+
+A release publishes the wheels and binaries `main` built from the same inputs (the
+`Release` workflow finds them by a hash of those inputs), and builds them only when
+`main` never did.
 
 ### Tests against the databases
 
@@ -262,7 +281,7 @@ rust/
     └── sqlty-bench/     # Criterion benchmarks (make bench-rust)
 editors/vscode/          # VS Code client of sqlty server; see its README
 tests/
-├── _mdtest/             # mdtest plugin: parser, runner over sqlty.core, --update-mdtest
+├── _mdtest/             # mdtest plugin: parser, the codec's `# decoded:`, --update-mdtest
 ├── mdtest/              # The specification, as Markdown tests
 ├── e2e/                 # CLI end-to-end tests and their fixtures
 └── type_oracle/         # Python row-type reader, the oracle for the Rust one

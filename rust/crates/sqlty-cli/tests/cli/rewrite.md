@@ -94,4 +94,6 @@ $ sqlty rewrite --check
 app/users.py:16: [fstring-skipped] f-string with --sql prefix skipped (f-strings cannot be statically rewritten)
 All files up to date
 
+$ sqlty rewrite --check --quiet
+
 ```

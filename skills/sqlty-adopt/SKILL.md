@@ -49,7 +49,7 @@ and a schema-qualified table matches an unqualified query:
 
 ```python
 query = "--sql\nSELECT id, name, created_at FROM users WHERE id = %s"
-# rewritten: query = SQL[tuple[int, str, datetime.datetime | None]]("--sql\nSELECT id, name, created_at FROM users WHERE id = %s")
+# rewritten: query = SQL[tuple[int, str, datetime.datetime | None], tuple[int | None]]("--sql\nSELECT id, name, created_at FROM users WHERE id = %s")
 ```
 
 ## 2. Convert one module

@@ -28,6 +28,10 @@ static RELEASE: AtomicBool = AtomicBool::new(false);
 static HOLD: AtomicBool = AtomicBool::new(false);
 /// Whether a check of a buffer holding `hold` started.
 static HELD: AtomicBool = AtomicBool::new(false);
+/// Lets a check of a buffer holding `pause` finish.
+static RESUME: AtomicBool = AtomicBool::new(false);
+/// Whether a check of a buffer holding `pause` started.
+static PAUSED: AtomicBool = AtomicBool::new(false);
 
 /// Reports each `bad`; its fix writes `good` and imports it, but fails on `nofix`. With a
 /// baseline, `old.py` of its root has a breaking change, and `gone.py`, which does not
@@ -52,6 +56,12 @@ impl Workspace for Fake {
             HELD.store(true, Ordering::SeqCst);
         }
         while text.contains("hold") && !HOLD.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        if text.contains("pause") {
+            PAUSED.store(true, Ordering::SeqCst);
+        }
+        while text.contains("pause") && !RESUME.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(5));
         }
         if text.contains("hang") {
@@ -1038,26 +1048,29 @@ fn malformed_and_unknown_messages_change_nothing() {
     client.shutdown();
 }
 
+/// Reports nothing and changes nothing.
+struct Plain;
+
+impl Workspace for Plain {
+    fn check(&mut self, _: &Path, _: &str) -> Result<Vec<Diagnostic>, String> {
+        Ok(Vec::new())
+    }
+    fn fix(&mut self, _: &Path, text: &str) -> Result<String, String> {
+        Ok(text.to_string())
+    }
+    fn format(&mut self, _: &Path, text: &str) -> Result<String, String> {
+        Ok(text.to_string())
+    }
+    fn rewrite(&mut self, _: &Path, text: &str) -> Result<String, String> {
+        Ok(text.to_string())
+    }
+    fn strip(&mut self, _: &Path, text: &str) -> Result<String, String> {
+        Ok(text.to_string())
+    }
+}
+
 #[test]
 fn a_workspace_has_no_breaking_changes_or_completion_unless_it_says() {
-    struct Plain;
-    impl Workspace for Plain {
-        fn check(&mut self, _: &Path, _: &str) -> Result<Vec<Diagnostic>, String> {
-            Ok(Vec::new())
-        }
-        fn fix(&mut self, _: &Path, text: &str) -> Result<String, String> {
-            Ok(text.to_string())
-        }
-        fn format(&mut self, _: &Path, text: &str) -> Result<String, String> {
-            Ok(text.to_string())
-        }
-        fn rewrite(&mut self, _: &Path, text: &str) -> Result<String, String> {
-            Ok(text.to_string())
-        }
-        fn strip(&mut self, _: &Path, text: &str) -> Result<String, String> {
-            Ok(text.to_string())
-        }
-    }
     assert_eq!(Plain.breaking(), Ok(Vec::new()));
     assert!(Plain.completion(Path::new("q.py")).is_none());
 }
@@ -1201,6 +1214,29 @@ fn a_check_of_an_older_version_is_dropped() {
 }
 
 #[test]
+fn a_check_of_a_closed_buffer_is_dropped() {
+    let mut client = Client::start(&json!({}));
+    client.open("file:///work/q.py", "pause\n");
+    while !PAUSED.load(Ordering::SeqCst) {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    client.open("file:///work/r.py", "bad\n");
+    client.notify(
+        "textDocument/didClose",
+        json!({"textDocument": {"uri": "file:///work/r.py"}}),
+    );
+    // Answered after the close is applied: the queued check then finds no buffer.
+    client.hover("file:///work/q.py", 0, 0);
+    RESUME.store(true, Ordering::SeqCst);
+    let published = client.notification("textDocument/publishDiagnostics");
+    assert_eq!(published["uri"], "file:///work/r.py");
+    assert_eq!(published["diagnostics"], json!([]));
+    let published = client.notification("textDocument/publishDiagnostics");
+    assert_eq!(published["uri"], "file:///work/q.py");
+    client.shutdown();
+}
+
+#[test]
 fn an_open_file_keeps_its_own_breaking_changes() {
     let root = std::env::temp_dir().join(format!("sqlty-lsp-open-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
@@ -1218,4 +1254,39 @@ fn an_open_file_keeps_its_own_breaking_changes() {
     assert_eq!(published["version"], 1);
     client.shutdown();
     std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// The test runs itself as the server, on its own standard input and output.
+#[test]
+fn stdio_serves_standard_input_and_output() {
+    const NAME: &str = "tests::stdio_serves_standard_input_and_output";
+    if std::env::var_os("SQLTY_LSP_STDIO").is_some() {
+        crate::stdio(|_: &Path, _: &Settings| Ok(Plain)).unwrap();
+        return;
+    }
+    let mut server = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", NAME, "--nocapture"])
+        .env("SQLTY_LSP_STDIO", "1")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = server.stdin.take().unwrap();
+    for message in [
+        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"capabilities": {}}}),
+        json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}),
+        json!({"jsonrpc": "2.0", "id": 2, "method": "shutdown"}),
+        json!({"jsonrpc": "2.0", "method": "exit"}),
+    ] {
+        let body = message.to_string();
+        std::io::Write::write_all(
+            &mut input,
+            format!("Content-Length: {}\r\n\r\n{body}", body.len()).as_bytes(),
+        )
+        .unwrap();
+    }
+    drop(input);
+    let output = server.wait_with_output().unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains(r#""id":2,"result":null"#));
 }
