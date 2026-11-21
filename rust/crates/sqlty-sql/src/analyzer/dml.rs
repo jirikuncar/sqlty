@@ -3,9 +3,9 @@
 use std::collections::HashSet;
 
 use sqlparser::ast::{
-    AssignmentTarget, Expr, FromTable, Ident, MergeAction, MergeClauseKind, ObjectName, OnConflict,
-    OnConflictAction, OnInsert, OutputClause, Query, SelectItem, SetExpr, Statement, TableObject,
-    TableWithJoins, UpdateTableFromKind,
+    Assignment, AssignmentTarget, Expr, FromTable, Ident, MergeAction, MergeClauseKind, ObjectName,
+    OnConflict, OnConflictAction, OnInsert, OutputClause, Query, SelectItem, SetExpr, Statement,
+    TableObject, TableWithJoins, UpdateTableFromKind,
 };
 
 use super::dialect::SqlDialect;
@@ -405,14 +405,7 @@ impl Analyzer<'_> {
                     .filter(|s| !untyped_values(s))
                     .map(|source| self.query_columns(source));
                 if let TableObject::TableName(name) = &insert.table {
-                    let assigned: Vec<ObjectName> = insert
-                        .assignments
-                        .iter()
-                        .flat_map(|assignment| match &assignment.target {
-                            AssignmentTarget::ColumnName(column) => vec![column.clone()],
-                            AssignmentTarget::Tuple(columns) => columns.clone(),
-                        })
-                        .collect();
+                    let assigned: Vec<ObjectName> = assigned_columns(&insert.assignments);
                     let columns = if insert.columns.is_empty() {
                         &assigned
                     } else {
@@ -439,14 +432,7 @@ impl Analyzer<'_> {
                         (&insert.on, self.dialect)
                     {
                         if let OnConflictAction::DoUpdate(update) = &on_conflict.action {
-                            let set: Vec<ObjectName> = update
-                                .assignments
-                                .iter()
-                                .flat_map(|assignment| match &assignment.target {
-                                    AssignmentTarget::ColumnName(column) => vec![column.clone()],
-                                    AssignmentTarget::Tuple(columns) => columns.clone(),
-                                })
-                                .collect();
+                            let set: Vec<ObjectName> = assigned_columns(&update.assignments);
                             self.check_target_columns(name, &set);
                             let mut upsert = scope.clone();
                             upsert.push(Source::named(
@@ -461,14 +447,7 @@ impl Analyzer<'_> {
                 }
             }
             Statement::Update(update) => {
-                let targets: Vec<ObjectName> = update
-                    .assignments
-                    .iter()
-                    .flat_map(|assignment| match &assignment.target {
-                        AssignmentTarget::ColumnName(column) => vec![column.clone()],
-                        AssignmentTarget::Tuple(columns) => columns.clone(),
-                    })
-                    .collect();
+                let targets: Vec<ObjectName> = assigned_columns(&update.assignments);
                 // A target of a join is a column of any of its tables.
                 if multi.is_some() {
                     let exprs = targets.iter().filter_map(|target| {
@@ -639,6 +618,17 @@ fn idents(name: &ObjectName) -> Option<Vec<Ident>> {
     name.0.iter().map(|part| part.as_ident().cloned()).collect()
 }
 
+/// The columns `assignments` set, those of `(a, b) = ...` included.
+fn assigned_columns(assignments: &[Assignment]) -> Vec<ObjectName> {
+    assignments
+        .iter()
+        .flat_map(|assignment| match &assignment.target {
+            AssignmentTarget::ColumnName(column) => vec![column.clone()],
+            AssignmentTarget::Tuple(columns) => columns.clone(),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -654,6 +644,20 @@ mod tests {
             .iter()
             .map(|source| format!("{}={:?}", source.reference, source.table))
             .collect()
+    }
+
+    #[test]
+    fn assigned_columns_spread_tuples() {
+        let Statement::Update(update) =
+            statement("UPDATE t SET (a, b) = (1, 2), c = 3", SqlDialect::Postgres)
+        else {
+            panic!("not an UPDATE");
+        };
+        let names: Vec<String> = assigned_columns(&update.assignments)
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(names, ["a", "b", "c"]);
     }
 
     #[test]
