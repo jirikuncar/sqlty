@@ -583,3 +583,214 @@ def test_a_baseline_with_the_same_schema_has_no_new_statements(cli: Cli, migrati
     result = cli(["breaking", "--against", "HEAD"], {"cwd": migrations})
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def configure(repo: Path, where: str, config: str) -> None:
+    """Move the configuration to `where`, committed, leaving the second migration uncommitted."""
+    (repo / "pyproject.toml").unlink()
+    (repo / where).mkdir(exist_ok=True)
+    (repo / where / "pyproject.toml").write_text(config)
+    git(repo, "add", "pyproject.toml", where)
+    git(repo, "commit", "-q", "-m", "config")
+
+
+def test_a_migration_is_reported_once_with_its_own_severity(cli: Cli, migrations: Path) -> None:
+    (migrations / "pyproject.toml").write_text(
+        '[tool.sqlty]\nschema = "migrations/"\n'
+        '[[tool.sqlty.overrides]]\ninclude = ["app/**"]\nrules.select-star = "error"\n'
+        '[[tool.sqlty.overrides]]\ninclude = ["migrations/**"]\n'
+        'rules.missing-concurrently = "error"\n'
+    )
+
+    result = cli(["breaking", "--against", "HEAD", "--output-format", "json"], {"cwd": migrations})
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert [(row["rule"], row["severity"]) for row in json.loads(result.stdout)] == [
+        ("missing-concurrently", "error")
+    ]
+
+
+@pytest.mark.parametrize("baseline", ["HEAD", "baseline.sql"])
+def test_migrations_of_a_database_without_files_are_judged(
+    cli: Cli, migrations: Path, baseline: str
+) -> None:
+    (migrations / "pyproject.toml").write_text(
+        '[tool.sqlty]\nschema = "migrations/"\n[tool.sqlty.databases.events]\nschema = "events/"\n'
+    )
+    (migrations / "events").mkdir()
+    events = "CREATE TABLE events (id INT, at TIMESTAMP);\n"
+    (migrations / "events" / "0001_events.sql").write_text(events)
+    (migrations / "baseline.sql").write_text(OLD_SCHEMA + events)
+    git(migrations, "add", "pyproject.toml", "events")
+    git(migrations, "commit", "-q", "-m", "events")
+    (migrations / "events" / "0002_index.sql").write_text(
+        "SET lock_timeout = '2s';\nCREATE INDEX events_at ON events (at);\n"
+    )
+
+    result = cli(["breaking", "--against", baseline], {"cwd": migrations})
+
+    assert any(
+        line.startswith("events/0002_index.sql:2: [missing-concurrently]") for line in lines(result)
+    ), result.stdout + result.stderr
+
+
+def test_migration_paths_are_normalized(cli: Cli, migrations: Path) -> None:
+    configure(migrations, "app", '[tool.sqlty]\nschema = "../migrations/"\n')
+
+    text = cli(["breaking", "--against", "HEAD"], {"cwd": migrations})
+    github = cli(
+        ["breaking", "--against", "HEAD", "--output-format", "github"], {"cwd": migrations}
+    )
+
+    assert lines(text)[0].startswith("migrations/0002_index.sql:2: [missing-concurrently]")
+    assert "file=migrations/0002_index.sql," in github.stdout, github.stdout
+
+
+def test_schemas_shared_by_two_configurations_are_judged_once(cli: Cli, migrations: Path) -> None:
+    config = '[tool.sqlty]\nschema = "../migrations/"\n'
+    configure(migrations, "app", config)
+    (migrations / "jobs").mkdir()
+    (migrations / "jobs" / "pyproject.toml").write_text(config)
+    (migrations / "jobs" / "j.py").write_text(OLD_CODE)
+    git(migrations, "add", "jobs")
+    git(migrations, "commit", "-q", "-m", "jobs")
+
+    result = cli(["breaking", "--against", "HEAD"], {"cwd": migrations})
+
+    assert [line.split(":")[0] for line in lines(result)[:-1]] == ["migrations/0002_index.sql"]
+
+
+@pytest.mark.parametrize("strict", ["app", "jobs"])
+def test_a_shared_schema_is_judged_at_the_strictest_severity(
+    cli: Cli, migrations: Path, strict: str
+) -> None:
+    config = '[tool.sqlty]\nschema = "../migrations/"\n'
+    configure(migrations, "app", config)
+    (migrations / "jobs").mkdir()
+    (migrations / "jobs" / "j.py").write_text(OLD_CODE)
+    for name in ("app", "jobs"):
+        rules = '[tool.sqlty.rules]\nmissing-concurrently = "error"\n' if name == strict else ""
+        (migrations / name / "pyproject.toml").write_text(config + rules)
+    git(migrations, "add", "app", "jobs")
+    git(migrations, "commit", "-q", "-m", "jobs")
+
+    result = cli(["breaking", "--against", "HEAD", "--output-format", "json"], {"cwd": migrations})
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert [(row["rule"], row["severity"]) for row in json.loads(result.stdout)] == [
+        ("missing-concurrently", "error")
+    ]
+
+
+@pytest.mark.parametrize("baseline", ["HEAD", "baseline.sql"])
+@pytest.mark.parametrize("strict", ["default", "events"])
+def test_a_migration_two_databases_list_is_reported_once_at_the_stricter_severity(
+    cli: Cli, migrations: Path, baseline: str, strict: str
+) -> None:
+    rules = {
+        name: f'rules.missing-concurrently = "{"error" if name == strict else "warn"}"\n'
+        for name in ("default", "events")
+    }
+    (migrations / "pyproject.toml").write_text(
+        f'[tool.sqlty]\nschema = "migrations/"\n{rules["default"]}'
+        '[tool.sqlty.databases.events]\nschema = ["events/", "migrations/"]\n' + rules["events"]
+    )
+    (migrations / "events").mkdir()
+    events = "CREATE TABLE events (id INT, at TIMESTAMP);\n"
+    (migrations / "events" / "0001_events.sql").write_text(events)
+    (migrations / "baseline.sql").write_text(OLD_SCHEMA + events)
+    git(migrations, "add", "pyproject.toml", "events")
+    git(migrations, "commit", "-q", "-m", "events")
+
+    result = cli(
+        ["breaking", "--against", baseline, "--output-format", "json"], {"cwd": migrations}
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    rows = [(r["file"], r["rule"], r["severity"]) for r in json.loads(result.stdout)]
+    assert rows == [("migrations/0002_index.sql", "missing-concurrently", "error")]
+
+
+def baseline_of(cli: Cli, repo: Path, against: str) -> str:
+    """`HEAD`, or a snapshot of it saved next to the repository."""
+    if against == "HEAD":
+        return against
+    saved = cli(["breaking", "--head", "HEAD", "--save", "../head.json"], {"cwd": repo})
+    assert saved.returncode == 0, saved.stderr
+    return "../head.json"
+
+
+def found_index(result: subprocess.CompletedProcess[str], path: str) -> bool:
+    return any(line.startswith(f"{path}:2: [missing-concurrently]") for line in lines(result))
+
+
+@pytest.mark.parametrize("against", ["HEAD", "snapshot"])
+def test_a_shared_schema_is_judged_against_the_baseline_of_each_of_its_files(
+    cli: Cli, migrations: Path, against: str
+) -> None:
+    config = '[tool.sqlty]\nschema = "../migrations/"\n'
+    configure(migrations, "jobs", config)
+    (migrations / "jobs" / "j.py").write_text(OLD_CODE)
+    git(migrations, "add", "jobs")
+    git(migrations, "commit", "-q", "-m", "jobs")
+    (migrations / "app" / "pyproject.toml").write_text(config)
+
+    result = cli(
+        ["breaking", "--against", baseline_of(cli, migrations, against)], {"cwd": migrations}
+    )
+
+    assert found_index(result, "migrations/0002_index.sql"), result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("against", ["HEAD", "snapshot"])
+def test_a_database_is_judged_against_the_baseline_of_each_file_routed_to_it(
+    cli: Cli, migrations: Path, against: str
+) -> None:
+    config = (
+        '[tool.sqlty]\nschema = "migrations/"\n'
+        '[tool.sqlty.databases.events]\nschema = "events/"\ninclude = [{}]\n'
+    )
+    (migrations / "pyproject.toml").write_text(config.format('"events/**"'))
+    (migrations / "events").mkdir()
+    (migrations / "events" / "0001_events.sql").write_text(
+        "CREATE TABLE events (id INT, at TIMESTAMP);\n"
+    )
+    (migrations / "events" / "q.py").write_text("x = 1\n")
+    (migrations / "a").mkdir()
+    (migrations / "a" / "x.py").write_text(OLD_CODE)
+    git(migrations, "add", "-A")
+    git(migrations, "commit", "-q", "-m", "events")
+    baseline = baseline_of(cli, migrations, against)
+    (migrations / "pyproject.toml").write_text(config.format('"a/**", "events/**"'))
+    (migrations / "events" / "0002_index.sql").write_text(
+        "SET lock_timeout = '2s';\nCREATE INDEX events_at ON events (at);\n"
+    )
+
+    result = cli(["breaking", "--against", baseline], {"cwd": migrations})
+
+    assert found_index(result, "events/0002_index.sql"), result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("against", ["HEAD", "snapshot"])
+def test_the_default_database_no_file_is_routed_to_is_asked_by_name(
+    cli: Cli, migrations: Path, against: str
+) -> None:
+    (migrations / "pyproject.toml").write_text(
+        '[tool.sqlty]\nschema = "migrations/"\n'
+        '[tool.sqlty.databases.events]\nschema = "events/"\ninclude = ["**"]\n'
+    )
+    (migrations / "events").mkdir()
+    (migrations / "events" / "0001_events.sql").write_text(
+        "CREATE TABLE events (id INT, at TIMESTAMP);\n"
+    )
+    (migrations / "tools").mkdir()
+    (migrations / "tools" / "pyproject.toml").write_text("[tool.sqlty]\n")
+    (migrations / "tools" / "t.py").write_text("x = 1\n")
+    git(migrations, "add", "pyproject.toml", "events", "tools")
+    git(migrations, "commit", "-q", "-m", "events")
+
+    result = cli(
+        ["breaking", "--against", baseline_of(cli, migrations, against)], {"cwd": migrations}
+    )
+
+    assert found_index(result, "migrations/0002_index.sql"), result.stdout + result.stderr
