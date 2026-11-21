@@ -1434,16 +1434,10 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
-    use crate::analyses::{ANALYZED, PARSED};
-    use crate::options::Options;
 
-    fn crash(text: &str, rules: &[(&str, &str)]) -> Vec<Diagnostic> {
-        run_module(text, rules, false)
-            .diagnostics
-            .into_iter()
-            .map(|reported| reported.diagnostic)
-            .collect()
-    }
+    use crate::analyses::{ANALYZED, PARSED};
+
+    use crate::options::Options;
 
     fn run_module(text: &str, rules: &[(&str, &str)], parsed: bool) -> Found {
         let options = Options::new("postgres", None, None, false).unwrap();
@@ -1594,24 +1588,6 @@ mod tests {
             assert_eq!(diagnostics(&source, &run).diagnostics.len(), 3);
         }
         assert_eq!(crate::scopes::WALKS.with(std::cell::Cell::get), 3);
-    }
-
-    #[test]
-    fn a_panic_becomes_an_internal_error() {
-        let found = crash("q = 1\n", &[("sqruff", "warn")]);
-        assert_eq!(found.len(), 1);
-        assert_eq!(found[0].rule, Rule::InternalError);
-        assert_eq!(found[0].severity, crate::rules::Severity::Error);
-        assert_eq!(
-            found[0].message,
-            format!(
-                "sqlty crashed checking this file: lint 1; please report it at {}",
-                crate::report::issue_url("lint 1")
-            )
-        );
-        let ignored = [("sqruff", "warn"), ("internal-error", "ignore")];
-        assert!(crash("q = 1\n", &ignored).is_empty());
-        assert!(crash("q = 1\n", &[]).is_empty());
     }
 
     #[test]

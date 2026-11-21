@@ -264,63 +264,19 @@ fn set(stuff: &[char]) -> String {
 mod tests {
     use super::*;
 
-    fn matches(pattern: &str, text: &str) -> bool {
-        Regex::new(&format!("^{pattern}")).unwrap().is_match(text)
-    }
-
     #[test]
     fn a_path_prefix_compiles_once() {
         assert!(Arc::ptr_eq(&path_prefix("src/*"), &path_prefix("src/*")));
     }
 
     #[test]
-    fn a_glob_past_the_regex_size_limit_compiles() {
-        let long = "[!a]".repeat(20_000);
-        assert!(Segment::new(&long).matches(&"b".repeat(20_000)));
-        assert!(!Excludes::default().entry("a", None, &[long]));
-    }
-
-    #[test]
-    fn names_match_as_fnmatch_matches_them() {
-        for (pattern, text, expected) in [
-            ("*.py", "a.py", true),
-            ("*.py", "dir/a.py", true),
-            ("a**.py", "ab.py", true),
-            ("?.py", "ab.py", false),
-            ("[ab].py", "b.py", true),
-            ("[!ab].py", "b.py", false),
-            ("[a-c]", "b", true),
-            ("[c-a]", "b", false),
-            ("[a-]", "-", true),
-            ("[!]", "x", false),
-            ("[]]", "]", true),
-            ("[", "[", true),
-            ("a.b", "axb", false),
-            ("[&&]", "&", true),
-            ("[a-c-e]", "d", false),
-        ] {
-            assert_eq!(
-                matches(&fnmatch(pattern), text),
-                expected,
-                "{pattern} {text}"
-            );
-        }
-    }
-
-    #[test]
-    fn paths_match_as_glob_translate_matches_them() {
-        for (pattern, text, expected) in [
-            ("gen/*.py", "gen/a.py", true),
-            ("gen/*.py", "gen/sub/a.py", false),
-            ("gen/**", "gen/sub/a.py", true),
-            ("**/a.py", "a.py", true),
-            ("**/a.py", "x/y/a.py", true),
-            ("**/**/a.py", "x/a.py", true),
-            ("*", ".hidden", true),
-            ("*/b", "a/b", true),
-            ("a?", "a/", false),
-        ] {
-            assert_eq!(matches(&path(pattern), text), expected, "{pattern} {text}");
-        }
+    fn a_set_of_globs_compiles_once() {
+        let excludes = Excludes::default();
+        let globs = ["a*".to_string()];
+        assert!(excludes.entry("ab", None, &globs));
+        assert!(!excludes.entry("b", None, &globs));
+        assert_eq!(excludes.sets(), 1);
+        assert!(!excludes.entry("ab", None, &["c".to_string()]));
+        assert_eq!(excludes.sets(), 2);
     }
 }

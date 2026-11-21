@@ -71,3 +71,48 @@ q = SQL[tuple[int]](r"--sql\nSELECT name FROM users")
 q = "--sql\nSELECT name FROM \"users\""
 # rewritten: q = SQL[tuple[str]]("--sql\nSELECT name FROM \"users\"")
 ```
+
+## Every escape is decoded before the query is read
+
+A query is typed only when its escapes decode to valid SQL: `\x31`, `\u0031`,
+`\U00000031` and the octal `\061` are all the digit `1`, and a backslash before a
+line break, in any of its spellings, joins the lines.
+
+```python
+a = "--sql\nSELECT \x31::INTEGER"
+b = "--sql\nSELECT \u0031::INTEGER"
+c = "--sql\nSELECT \U00000031::INTEGER"
+d = "--sql\nSELECT \061::INTEGER"
+e = "--sql\nSELECT\tid\r\n,\
+ 1::INTEGER FROM users"
+f = "--sql\nSELECT '\N{BULLET}\d'::TEXT"
+g = "--sql\nSELECT '\a\b\f\v\r\n'::TEXT"
+# rewritten: a = SQL[tuple[int]]("--sql\nSELECT \x31::INTEGER")
+# rewritten: b = SQL[tuple[int]]("--sql\nSELECT \u0031::INTEGER")
+# rewritten: c = SQL[tuple[int]]("--sql\nSELECT \U00000031::INTEGER")
+# rewritten: d = SQL[tuple[int]]("--sql\nSELECT \061::INTEGER")
+# rewritten: e = SQL[tuple[int, int]]("--sql\nSELECT\tid\r\n,\
+# rewritten:  1::INTEGER FROM users")
+# rewritten: f = SQL[tuple[str]]("--sql\nSELECT '\N{BULLET}\d'::TEXT")
+# rewritten: g = SQL[tuple[str]]("--sql\nSELECT '\a\b\f\v\r\n'::TEXT")
+```
+
+## Columns count escapes as written
+
+The range of a diagnostic is in the source: an escape before it is as long as it is
+written.
+
+```python
+from sqlty import SQL
+
+# error[45:49]: [unknown-column] "column `nope` does not exist in `users`"
+a = SQL[tuple[str]]("--sql\nSELECT \x6eame, nope FROM users")
+# error[47:51]: [unknown-column] "column `nope` does not exist in `users`"
+b = SQL[tuple[str]]("--sql\nSELECT \u006eame, nope FROM users")
+# error[43:47]: [unknown-column] "column `nope` does not exist in `users`"
+c = SQL[tuple[str]]("--sql\nSELECT name,\tnope FROM users")
+# error[45:49]: [unknown-column] "column `nope` does not exist in `users`"
+d = SQL[tuple[str]]("--sql\nSELECT na\x6de, nope" "\n FROM users")
+# error[48:64]: [unknown-column] "column `nope` does not exist in `users`"
+e = SQL[tuple[str]]("--sql\nSELECT 1::INTEGER, \x6e\x6f\x70\x65 FROM users")
+```

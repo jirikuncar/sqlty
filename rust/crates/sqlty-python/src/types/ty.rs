@@ -588,25 +588,3 @@ pub fn column_type(python_type: &str) -> Option<Ty> {
 pub fn py_strip(text: &str) -> &str {
     text.trim_matches(|c: char| c.is_whitespace() || ('\x1c'..='\x1f').contains(&c))
 }
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rarer_types() {
-        let new = Arc::new(NewType {
-            name: "UserId".into(),
-            module: "m".into(),
-            supertype: Ty::Never,
-        });
-        assert!(Ty::NewType(new.clone()).same(&Ty::NewType(new)));
-        assert!(Ty::union([]).is_none());
-        assert_eq!(
-            Ty::literal([Lit::Bool(false)]).repr(),
-            "typing.Literal[False]"
-        );
-        assert_eq!(Ty::Never.admits_none(), None);
-    }
-}

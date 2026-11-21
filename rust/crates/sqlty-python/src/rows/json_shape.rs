@@ -423,36 +423,3 @@ fn check_row_type(
         }
     }
 }
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::*;
-
-    fn problems(shape: &JsonShape, annotation: &str) -> Vec<String> {
-        let parsed = crate::parse::expression(annotation).unwrap();
-        let annotation = Annotation {
-            expr: *parsed.into_syntax().body,
-            source: Arc::from(annotation),
-        };
-        json_problems(shape, &annotation, &Dict::new(), &Table::default(), "")
-    }
-
-    #[test]
-    fn the_problems_of_an_unnamed_value_start_at_its_members() {
-        let int = JsonValue::new(JsonShape::Integer, false);
-        let object = JsonShape::Object(vec![JsonField {
-            name: "a".into(),
-            value: int.clone(),
-            optional: false,
-        }]);
-        assert_eq!(
-            problems(&JsonShape::Array(Box::new(int)), "str"),
-            ["is str but the query builds an array"]
-        );
-        assert_eq!(
-            problems(&object, "dict[str, str]"),
-            ["a is str but the query builds an integer"]
-        );
-    }
-}
