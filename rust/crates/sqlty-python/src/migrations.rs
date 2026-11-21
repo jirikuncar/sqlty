@@ -1,12 +1,13 @@
 //! The migration checks of `sqlty breaking`, with the user's severities and suppressions.
 
 use crate::checker::Diagnostic;
+use crate::rewriter::LineIndex;
 use crate::rules::{Rule, RuleConfig};
 use crate::suppress::{apply_sql, sql_ignores};
 
 /// The diagnostics of each of `files`, PostgreSQL migrations in the order they run, for the
-/// statements `baseline` does not have. `-- sqlty: ignore[rule]` on a statement's first line
-/// drops its diagnostic.
+/// statements `baseline` does not have. `-- sqlty: ignore[rule]` on a statement's first line,
+/// or alone on its line above the statement, drops its diagnostic.
 pub fn check_migrations(
     baseline: &str,
     files: &[&str],
@@ -16,19 +17,22 @@ pub fn check_migrations(
         .into_iter()
         .zip(files)
         .map(|(found, sql)| {
-            let found = found
+            let lines = LineIndex::new(sql);
+            let found: Vec<Diagnostic> = found
                 .into_iter()
                 .filter(|finding| rules.is_enabled(finding.rule))
                 .map(|finding| Diagnostic {
                     rule: finding.rule,
                     message: finding.message,
                     severity: rules.severity(finding.rule),
-                    line: sql[..finding.span.start].matches('\n').count() + 1,
+                    line: lines.line_at(finding.span.start),
                     span: finding.span,
                     fix: Vec::new(),
                 })
                 .collect();
-            apply_sql(&sql_ignores(sql), found, rules)
+            // Each finding spans its statement.
+            let statements: Vec<_> = found.iter().map(|found| found.span.clone()).collect();
+            apply_sql(&sql_ignores(sql, &statements), found, rules)
                 .into_iter()
                 .filter(|diagnostic| diagnostic.rule != Rule::UnusedIgnore)
                 .collect()
@@ -89,5 +93,19 @@ mod tests {
             &rules(&[("unused-ignore", "error")]),
         );
         assert!(found.len() == 1 && found[0].is_empty(), "{found:?}");
+        let above = "SET lock_timeout = '1s';\n-- sqlty: ignore[missing-concurrently]\nCREATE INDEX i ON users (bio);";
+        let found = check_migrations(BASELINE, &[above], &rules(&[]));
+        assert!(found[0].is_empty(), "{found:?}");
+        let apart = above.replace("]\nCREATE", "]\n\nCREATE");
+        let found = check_migrations(BASELINE, &[&apart], &rules(&[]));
+        assert_eq!(found[0].len(), 1, "{found:?}");
+        // A lone `\r` ends no line: the comment shares the first line, and covers it alone.
+        let cr = "SET lock_timeout = '1s';\r-- sqlty: ignore[missing-concurrently]\nSELECT 1;\nCREATE INDEX i ON users (bio);";
+        let found = check_migrations(BASELINE, &[cr], &rules(&[]));
+        assert_eq!(found[0].len(), 1, "{found:?}");
+        assert_eq!(found[0][0].line, 3, "{found:?}");
+        let block = "SET lock_timeout = '1s';\n-- sqlty: ignore[missing-concurrently]\n/* why */\nCREATE INDEX i\nON users (bio);";
+        let found = check_migrations(BASELINE, &[block], &rules(&[("unused-ignore", "error")]));
+        assert!(found[0].is_empty(), "{found:?}");
     }
 }

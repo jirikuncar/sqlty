@@ -157,7 +157,9 @@ SELEC id FROM users;
 ## Suppressions
 
 `-- sqlty: ignore` and `-- sqlty: ignore[rule]` silence their line, as `# sqlty: ignore`
-does in Python; one that silences nothing is `unused-ignore`.
+does in Python; one that silences nothing is `unused-ignore`. A comment alone on its
+line silences the statement that starts on the next line that is not a comment: `--`,
+or wholly `/* ... */`.
 
 ```sql
 -- name: legacy
@@ -167,6 +169,39 @@ SELECT id, nickname FROM users; -- sqlty: ignore[unknown-column]
 -- name: tidy
 -- error: [unused-ignore] "'-- sqlty: ignore' suppresses no diagnostic"
 SELECT id FROM users; -- sqlty: ignore
+
+-- name: above
+-- sqlty: ignore[unknown-column]
+SELECT id, nickname FROM users;
+
+-- name: nothing_below
+-- error: [unused-ignore] "'-- sqlty: ignore[unknown-column]' suppresses no diagnostic"
+-- sqlty: ignore[unknown-column]
+SELECT id FROM users;
+
+-- name: over_lines
+-- sqlty: ignore[unknown-table]
+SELECT id
+FROM nope;
+
+-- name: after_a_block_comment
+-- sqlty: ignore[unknown-column]
+/* kept for the old client */
+SELECT id,
+    nickname
+FROM users;
+
+-- name: inside_a_statement
+SELECT id,
+-- sqlty: ignore[unknown-column]
+    nickname
+FROM users;
+
+-- name: not_past_the_statement
+-- sqlty: ignore[unknown-column]
+SELECT nickname FROM users;
+-- error: [unknown-column]
+SELECT nickname FROM users;
 ```
 
 ## Format
