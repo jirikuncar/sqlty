@@ -8,7 +8,7 @@ sqlty-format 0
 sqlty-lsp 44
 sqlty-project 33
 sqlty-python 193
-sqlty-rules 7
+sqlty-rules 0
 sqlty-sql 411
 sqlty-wasm 34
 python 20
