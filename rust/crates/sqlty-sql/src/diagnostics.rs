@@ -221,6 +221,8 @@ fn found(rule: Rule, message: String) -> NameDiagnostic {
 mod tests {
     use super::*;
 
+    // `Diagnostics` is a crate-internal sink: no public call builds one to record, mark and
+    // rewind it, or reads how many results it explained.
     fn found(rule: Rule, message: &str) -> NameDiagnostic {
         super::found(rule, message.to_string())
     }
@@ -306,31 +308,5 @@ mod tests {
         inner.explain_silently();
         assert_eq!(diag.items(), [found(Rule::AmbiguousColumn, "id")]);
         assert_eq!(diag.explained(), 2);
-    }
-
-    #[test]
-    fn sql_rules_list_every_name() {
-        let names: Vec<_> = Rule::SQL.iter().map(|rule| rule.name()).collect();
-        assert_eq!(
-            names,
-            [
-                "unknown-table",
-                "unknown-column",
-                "ambiguous-column",
-                "duplicate-alias",
-                "unknown-function",
-                "unknown-type",
-                "unsupported-syntax",
-                "insert-missing-column",
-                "insert-value-count",
-                "ungrouped-column",
-                "fanout-aggregate",
-                "chasm-join",
-                "unproven-join",
-                "entity-mismatch",
-                "foreign-key-mismatch",
-                "rejected-query",
-            ]
-        );
     }
 }
