@@ -1021,8 +1021,10 @@ mod tests {
     fn a_wide_relation_resolves_columns_as_a_narrow_one() {
         let ddl = |width: usize| {
             let columns: Vec<String> = (0..width).map(|i| format!("c{i} int")).collect();
+            let constants: String = (0..width).map(|i| format!(", 1 AS c{i}")).collect();
             format!(
-                "CREATE TABLE w ({}, k text NOT NULL, \"K\" int); CREATE VIEW v AS SELECT * FROM w;",
+                "CREATE TABLE w ({}, k text NOT NULL, \"K\" int); CREATE VIEW v AS SELECT * FROM w;
+                CREATE VIEW s AS SELECT n.*{constants} FROM nope AS n;",
                 columns.join(", ")
             )
         };
@@ -1035,6 +1037,11 @@ mod tests {
                     "SELECT k, \"K\", c1 FROM v".to_string(),
                     format!(
                         "SELECT x FROM (SELECT c1 AS x, k AS x{} FROM w) AS d",
+                        filler(width)
+                    ),
+                    "SELECT bogus FROM s".to_string(),
+                    format!(
+                        "SELECT bogus FROM (SELECT n.*{} FROM w, nope AS n) AS d",
                         filler(width)
                     ),
                 ]
