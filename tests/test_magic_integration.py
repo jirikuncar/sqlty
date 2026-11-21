@@ -366,3 +366,5 @@ def test_the_codec_ignores_a_config_that_does_not_parse(
 def test_the_stream_reader_decodes_the_whole_stream(fresh_decoder):
     reader = codecs.getreader("sqlty")(io.BytesIO(b'q = "--sql\\nSELECT 1::INTEGER"\n'))
     assert "SQL[tuple[int]]" in reader.read()
+    reader.stream = io.BytesIO(b'q = "--sql\\nSELECT 1.5::FLOAT"\n')
+    assert "SQL[tuple[float]]" in reader.read()

@@ -18,8 +18,9 @@ def counts() -> dict[str, int]:
         for crate in (ROOT / "rust" / "crates").iterdir()
         if (crate / "src").is_dir()
     }
-    tests = sorted((ROOT / "tests").glob("test_*.py"))
-    found["python"] = sum(bool(PRIVATE.search(path.read_text())) for path in tests)
+    found["python"] = sum(
+        bool(PRIVATE.search(path.read_text())) for path in (ROOT / "tests").rglob("*.py")
+    )
     return found
 
 

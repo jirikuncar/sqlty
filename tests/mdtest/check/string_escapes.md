@@ -20,7 +20,7 @@ CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
 
 ## Decoded escapes
 
-Every query below is typed, so `stale-type` reports its real row type.
+Every query below is typed, so `narrow-type` reports its real row type.
 
 ```python
 from sqlty import SQL
