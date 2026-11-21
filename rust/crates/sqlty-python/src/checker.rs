@@ -117,6 +117,20 @@ pub fn check_source(
     check_source_with(&scan, options, rules, any_calls, &Analyses::new(options))
 }
 
+/// [`check_source`] with [`add_fix_imports`], scanning `source` once.
+pub fn check_source_with_imports(
+    source: &str,
+    options: &Options,
+    rules: &RuleConfig,
+    any_calls: &[usize],
+) -> Vec<Diagnostic> {
+    let scan = Scan::new(source, &options.style.wrapper_name);
+    let mut diagnostics =
+        check_source_with(&scan, options, rules, any_calls, &Analyses::new(options));
+    add_fix_imports(&scan, source, options, &mut diagnostics);
+    diagnostics
+}
+
 /// [`check_source`] of a scanned source, reading each query's analysis from `analyses`.
 pub(crate) fn check_source_with(
     scan: &Scan<'_>,
@@ -149,11 +163,15 @@ pub(crate) fn check_source_with(
 /// Adds to each fix the imports its new names need (the wrapper, `UNTYPED`, `datetime`, ...),
 /// which [`fix_source`](crate::fixer::fix_source) adds once for all fixes: one fix applied
 /// alone, as an editor's quick fix does, then leaves code that runs.
-pub fn add_fix_imports(source: &str, options: &Options, diagnostics: &mut [Diagnostic]) {
+pub(crate) fn add_fix_imports(
+    scan: &Scan<'_>,
+    source: &str,
+    options: &Options,
+    diagnostics: &mut [Diagnostic],
+) {
     if diagnostics.iter().all(|diag| diag.fix.is_empty()) {
         return;
     }
-    let scan = Scan::new(source, &options.style.wrapper_name);
     let modules = type_modules(options);
     let mut by_head: HashMap<String, Option<Edit>> = HashMap::new();
     for diag in diagnostics {
@@ -174,7 +192,7 @@ pub fn add_fix_imports(source: &str, options: &Options, diagnostics: &mut [Diagn
         let mut imports: Vec<Edit> = Vec::new();
         for head in heads {
             let edit = by_head.entry(head).or_insert_with_key(|head| {
-                let lines = wrapper_imports(&scan, &[head], &options.style, &modules);
+                let lines = wrapper_imports(scan, &[head], &options.style, &modules);
                 (!lines.is_empty()).then(|| import_edit(source, &lines))
             });
             if let Some(edit) = edit.as_ref().filter(|edit| !imports.contains(edit)) {

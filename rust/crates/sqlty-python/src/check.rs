@@ -1196,8 +1196,7 @@ pub fn unparsed(text: &str, run: &Run<'_>) -> Found {
     let (options, rules) = (run.settings.options, run.settings.rules);
     let mut found = Vec::new();
     if may_need_lexing(text, &options.style.wrapper_name) {
-        found = checker::check_source(text, options, rules, &[]);
-        checker::add_fix_imports(text, options, &mut found);
+        found = checker::check_source_with_imports(text, options, rules, &[]);
     }
     if rules.is_enabled(Rule::Sqruff) {
         let (severity, lines) = (
@@ -1265,7 +1264,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
     if may_need_lexing(text, wrapper) {
         let any_calls = any_calls(source, &options.style);
         base = checker::check_source_with(scanned(), options, rules, &any_calls, &analyses);
-        checker::add_fix_imports(text, options, &mut base);
+        checker::add_fix_imports(scanned(), text, options, &mut base);
     }
 
     let mut found = helper_calls(source, run.helpers, run.settings.module, run.variants);
