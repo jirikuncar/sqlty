@@ -3,7 +3,7 @@ order: 90
 group: "row-type"
 severity: "error"
 fixable: false
-summary: "Row type field is a Literal that does not cover the values its column can take"
+summary: "Row type field is a Literal that does not cover its column's values"
 origin: "Python"
 ---
 

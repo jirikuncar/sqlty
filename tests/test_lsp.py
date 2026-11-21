@@ -7,7 +7,7 @@ from typing import Any, cast
 
 import pytest
 
-from sqlty.core import format_source
+from sqlty.core import Settings, format_source
 
 HELPER = """\
 from typing import Annotated
@@ -211,7 +211,7 @@ def test_buffers_are_rewritten_and_stripped_with_project_settings(tmp_path: Path
         assert server.stop() == 0
     assert rewritten.startswith("import sqlty\n")
     assert 'sqlty.SQL[tuple[int, int]]("""--sql' in rewritten
-    assert formatted in format_source(plain, import_style="import sqlty")
+    assert formatted in format_source(plain, Settings(import_style="import sqlty"))
     assert server.published() == {}
 
 

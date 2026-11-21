@@ -234,8 +234,8 @@ pydantic. Standard-library classes come from the class graph of
 [typeshed](https://github.com/python/typeshed), the stubs type checkers read, and
 [Pydantic types](#pydantic-types) from a table, so a module with import-time side
 effects is not triggered by `sqlty check`. From Python, pass a `HelperIndex`
-filled with the modules (`index.add("pkg.ids", source)`) and the `module` name of
-the checked source as `check_source(..., helpers=index, module=...)`.
+filled with the modules (`index.add("pkg.ids", source)`) and the checked source with
+its module name: `check_source(ParsedSource(source, "pkg.app"), Settings(helpers=index))`.
 
 ### Classes
 

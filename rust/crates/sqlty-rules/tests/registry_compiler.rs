@@ -142,7 +142,7 @@ fn group_severity_and_origin_are_checked() {
     let message = error(&PAGE.replace("\"SQL\"", "\"rust\""));
     assert_eq!(
         message,
-        "chasm-join.md: unknown origin \"rust\" (expected SQL or Python)"
+        "chasm-join.md: unknown origin \"rust\" (expected SQL, Python or Migration)"
     );
 }
 

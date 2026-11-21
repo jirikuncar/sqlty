@@ -54,7 +54,7 @@ change to how the analyzer types operators.
 
 ## Stage 4
 
-`src/sqlty/_check.py` compares inferred columns with the row type the extractor read
+`check_source` (`src/sqlty/core.py`) compares inferred columns with the row type the extractor read
 (TypedDict, dataclass, ...). The comparison is host-neutral once the host hands over
 field names, types and optionality; the extraction stays in each host.
 

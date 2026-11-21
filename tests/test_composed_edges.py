@@ -8,7 +8,7 @@ import pytest
 
 from sqlty._helpers import HelperIndex
 from sqlty._source import ParsedSource
-from sqlty.core import check_source
+from sqlty.core import Settings, check_source
 
 SCHEMA = "CREATE TABLE t (id INTEGER NOT NULL, note TEXT);"
 RULES = {"dynamic-query": "warn", "unchecked-query": "warn"}
@@ -24,7 +24,9 @@ def run[T](q: Annotated[str, SQL], t: type[T] = int, params=None) -> list[T]: ..
 
 
 def found(body: str) -> list[tuple[int, str, str]]:
-    diagnostics = check_source(HEAD + body, schema_sql=SCHEMA, rules=RULES, query_variants=64)
+    diagnostics = check_source(
+        HEAD + body, Settings(schema_sql=SCHEMA, rules=RULES, query_variants=64)
+    )
     line = HEAD.count("\n")
     return [(d["line"] - line, d["rule"], d["message"]) for d in diagnostics]
 
@@ -80,7 +82,7 @@ def test_field_named_with_another_digit_is_not_read_as_a_keyword():
 
 def test_bare_generator_argument_spans_the_parentheses():
     source = HEAD + "def f(other):\n    run(q for q in other)\n"
-    (diagnostic,) = check_source(source, schema_sql=SCHEMA, rules=RULES)
+    (diagnostic,) = check_source(source, Settings(schema_sql=SCHEMA, rules=RULES))
     assert source[diagnostic["start"] : diagnostic["end"]] == "(q for q in other)"
 
 
@@ -103,5 +105,5 @@ def test_constants_of_a_large_module_are_read_once():
     for name, text in (("db", HEAD), ("parts", parts), ("app", app)):
         index.add(name, ParsedSource(text, name))
     started = time.perf_counter()
-    assert check_source(ParsedSource(app, "app"), schema_sql=SCHEMA, helpers=index) == []
+    assert check_source(ParsedSource(app, "app"), Settings(schema_sql=SCHEMA, helpers=index)) == []
     assert time.perf_counter() - started < 3
