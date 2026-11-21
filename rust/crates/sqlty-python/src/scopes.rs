@@ -78,6 +78,12 @@ pub struct Scan<'a> {
     /// The lambdas and generator expressions of a scope: code that runs when it is
     /// called or iterated, not where it is written.
     deferred: HashMap<Scope, Vec<TextRange>>,
+    /// The code in the body of a class that runs in a scope of its own, where the names
+    /// of the class are not seen: the body of a lambda, and a comprehension or generator
+    /// expression but for its first iterable.
+    sealed: HashMap<Scope, Vec<TextRange>>,
+    /// The bodies of the lambdas among them: they run when called, not where written.
+    called: HashMap<Scope, Vec<TextRange>>,
     /// The names each scope binds and the attributes the methods of each class bind, in
     /// order: reading those of one scope does not read those of every other.
     names: HashMap<Scope, Vec<&'a str>>,
@@ -175,6 +181,8 @@ impl<'a> Scan<'a> {
                 attributes: HashMap::new(),
                 shadows: HashMap::new(),
                 deferred: HashMap::new(),
+                sealed: HashMap::new(),
+                called: HashMap::new(),
                 names: HashMap::new(),
                 fields: HashMap::new(),
                 foreign: HashSet::new(),
@@ -198,6 +206,8 @@ impl<'a> Scan<'a> {
         listed.for_each(|names| names.sort_unstable());
         scan.shadows.values_mut().for_each(outermost);
         scan.deferred.values_mut().for_each(outermost);
+        scan.sealed.values_mut().for_each(outermost);
+        scan.called.values_mut().for_each(outermost);
         scan
     }
 
@@ -275,8 +285,42 @@ impl<'a> Scan<'a> {
         around(self.deferred.get(&scope)?, at)
     }
 
+    /// Whether `at` is in code of the class `scope` that does not see its names: the
+    /// body of a lambda, or a comprehension past its first iterable.
+    pub fn sealed(&self, scope: Scope, at: u32) -> bool {
+        self.sealed
+            .get(&scope)
+            .is_some_and(|ranges| around(ranges, at).is_some())
+    }
+
+    /// Whether `at` is in the body of a lambda written in the body of the class `scope`:
+    /// it runs when called, after the statements around the class have run.
+    pub fn called_later(&self, scope: Scope, at: u32) -> bool {
+        self.called
+            .get(&scope)
+            .is_some_and(|ranges| around(ranges, at).is_some())
+    }
+
     fn scope(&self) -> Scope {
         self.stack.last().copied().unwrap_or(0)
+    }
+
+    /// Records that `range` of the innermost scope, a class, runs in a scope of its own.
+    fn seal(&mut self, range: TextRange) {
+        let scope = self.scope();
+        if self.is_class(scope) && !range.is_empty() {
+            self.sealed.entry(scope).or_default().push(range);
+        }
+    }
+
+    /// Seals a comprehension `whole` but for the iterable of its first `for`, which is
+    /// read where the comprehension is written.
+    fn seal_comprehension(&mut self, whole: TextRange, generators: &[ast::Comprehension]) {
+        let Some(first) = generators.first() else {
+            return;
+        };
+        self.seal(TextRange::new(whole.start(), first.iter.start()));
+        self.seal(TextRange::new(first.iter.end(), whole.end()));
     }
 
     /// Records that the innermost scope binds `name` at `site`, from `effect` on.
@@ -550,6 +594,12 @@ impl<'a, W: FnMut(&'a ExprCall) -> bool> Visitor<'a> for Walker<'a, W> {
             }
             Expr::Named(named) => self.scan.bind(&named.target, Origin::Unknown, named.end()),
             Expr::Lambda(lambda) => {
+                self.scan.seal(lambda.body.range());
+                let scope = self.scan.scope();
+                if self.scan.is_class(scope) {
+                    let bodies = self.scan.called.entry(scope).or_default();
+                    bodies.push(lambda.body.range());
+                }
                 let scope = self.scan.scope();
                 self.scan
                     .deferred
@@ -568,6 +618,7 @@ impl<'a, W: FnMut(&'a ExprCall) -> bool> Visitor<'a> for Walker<'a, W> {
             Expr::ListComp(ast::ExprListComp { generators, .. })
             | Expr::SetComp(ast::ExprSetComp { generators, .. })
             | Expr::Generator(ast::ExprGenerator { generators, .. }) => {
+                self.scan.seal_comprehension(expr.range(), generators);
                 if expr.is_generator_expr() {
                     let scope = self.scan.scope();
                     self.scan
@@ -581,6 +632,7 @@ impl<'a, W: FnMut(&'a ExprCall) -> bool> Visitor<'a> for Walker<'a, W> {
                 }
             }
             Expr::DictComp(ast::ExprDictComp { generators, .. }) => {
+                self.scan.seal_comprehension(expr.range(), generators);
                 for generator in generators {
                     self.scan.shadow(&generator.target, expr.range());
                 }

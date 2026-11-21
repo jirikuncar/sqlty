@@ -1105,7 +1105,14 @@ impl<'s, 'a> Resolver<'s, 'a> {
             let node = self.scan.scopes[scope];
             let body: &[Stmt] = match node {
                 Node::Function(function) => &function.body,
-                Node::Class(class) if scope == innermost => &class.body,
+                // A lambda or a comprehension in the body of a class does not see the
+                // names of the class, as a method does not.
+                Node::Class(class)
+                    if scope == innermost
+                        && !env.at.is_some_and(|at| self.scan.sealed(scope, at)) =>
+                {
+                    &class.body
+                }
                 // A type parameter of a class is seen in its methods, unlike the names
                 // its body binds.
                 Node::Class(class) if type_parameter(class, name) => return Some(None),
@@ -1167,7 +1174,12 @@ impl<'s, 'a> Resolver<'s, 'a> {
                 }),
             });
         }
-        if env.stack.iter().any(|&scope| !self.scan.is_class(scope)) {
+        // A function reads the names of the module when it is called, whatever the
+        // order of its statements: so does the body of a lambda in a class.
+        let later = env
+            .at
+            .is_some_and(|at| self.scan.called_later(innermost, at));
+        if later || env.stack.iter().any(|&scope| !self.scan.is_class(scope)) {
             return None;
         }
         let bindings = self.scan.bindings(0, name)?;

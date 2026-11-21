@@ -453,6 +453,86 @@ def shadowed(db: DB, others) -> None:
 # error:
 ```
 
+## A lambda or a comprehension in the body of a class
+
+The body of a lambda and a comprehension run in a scope of their own, which does not see
+the names of the class around, as a method does not: `db` is there the name of the
+module. Only the iterable of the first `for` is read in the class.
+
+```python
+from pkg.db import DB
+
+class Plain:
+    def one(self, query, row): ...
+
+db = Plain()
+
+class Body:
+    db = DB()
+    # error: [column-type-mismatch]
+    db.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch]
+    first = [row for row in db.one("SELECT name FROM users", int)]
+    # error: [column-type-mismatch]
+    default = lambda found=db.one("SELECT name FROM users", int): found
+```
+
+```python
+from pkg.db import DB
+
+class Plain:
+    def one(self, query, row): ...
+
+db = Plain()
+
+class Body:
+    db = DB()
+    later = lambda: db.one("SELECT name FROM users", int)
+    each = [db.one("SELECT name FROM users", int) for _ in range(3)]
+    some = {db.one("SELECT name FROM users", int) for _ in range(3)}
+    keyed = {n: db.one("SELECT name FROM users", int) for n in range(3)}
+    lazy = (db.one("SELECT name FROM users", int) for _ in range(3))
+    second = [n for _ in range(3) for n in db.one("SELECT name FROM users", int)]
+    kept = [n for n in range(3) if db.one("SELECT name FROM users", int)]
+
+# error:
+```
+
+A lambda runs when it is called, so it reads the name of the module as a method does,
+whatever the order of the statements: here `db` may be the `Plain` assigned after the
+class. A comprehension runs where it is written.
+
+```python
+from pkg.db import DB
+
+class Plain:
+    def one(self, query, row): ...
+
+db = DB()
+
+class Body:
+    later = lambda: db.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch]
+    each = [db.one("SELECT name FROM users", int) for _ in range(3)]
+    inner = lambda: [db.one("SELECT name FROM users", int) for _ in range(3)]
+
+db = Plain()
+```
+
+A name the class does not hide is the module's there as anywhere.
+
+```python
+from pkg.db import DB
+
+db = DB()
+
+class Body:
+    # error: [column-type-mismatch]
+    later = lambda: db.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch]
+    each = [db.one("SELECT name FROM users", int) for _ in range(3)]
+```
+
 ## A name is what it was last bound to
 
 ty: `Cursor` inside the `with`, `DB` before; `DB | Cursor` after the `if`.
