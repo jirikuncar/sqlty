@@ -78,6 +78,7 @@ stale-type = "error"
 | [`multi-table-lock`](rules/multi-table-lock.md) | Migration | warn | no | Migration locks several tables against writes in one transaction |
 | [`locked-backfill`](rules/locked-backfill.md) | Migration | warn | no | Migration backfills a table its transaction has locked |
 | [`unbatched-backfill`](rules/unbatched-backfill.md) | Migration | warn | no | Migration updates or deletes the rows of a table in one statement |
+| [`drop-primary-key`](rules/drop-primary-key.md) | Migration | warn | no | Migration leaves a table without a replica identity |
 | [`unused-ignore`](rules/unused-ignore.md) | Suppression | warn | no | # sqlty: ignore comment that suppresses nothing |
 | [`internal-error`](rules/internal-error.md) | Internal | error | no | sqlty crashed checking the file |
 <!-- /generated:rules -->
