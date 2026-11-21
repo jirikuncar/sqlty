@@ -580,3 +580,13 @@ fn a_backslash_before_a_crlf_joins_the_lines() {
     let rewritten = rewrite_source(source, "postgres", None, None, false);
     assert!(rewritten.contains("SQL[tuple[int]]("), "{rewritten:?}");
 }
+
+#[test]
+fn an_unsupported_import_style_is_an_error() {
+    assert_eq!(
+        ImportStyle::parse(Some("import foo"))
+            .err()
+            .map(|e| e.to_string()),
+        Some("Unsupported import-style: 'import foo'".to_string())
+    );
+}

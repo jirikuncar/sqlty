@@ -219,3 +219,20 @@ fn rarer_sites_and_offsets() {
     assert_eq!(at.source_offset(dash + 1), Some(escape));
     assert_eq!(at.source_offset(dash), Some(named));
 }
+
+#[test]
+fn literals_lists_the_strings_of_each_query_in_source_order() {
+    let source = "a = \"--sql\\nSELECT 1\"\nb = (\"--sql\\nSELECT \"\n     \"2\")\nc = 'plain'\n";
+    let queries = Queries::new(source, &ImportStyle::parse(None).unwrap(), &[]);
+    let found: Vec<Vec<&str>> = queries
+        .literals()
+        .map(|strings| strings.iter().map(|r| &source[r.clone()]).collect())
+        .collect();
+    assert_eq!(
+        found,
+        [
+            vec!["\"--sql\\nSELECT 1\""],
+            vec!["\"--sql\\nSELECT \"", "\"2\""]
+        ]
+    );
+}
