@@ -17,9 +17,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from sqlty import _core
-from sqlty._helpers import HelperIndex
-from sqlty._source import ParsedSource
-from sqlty.core import Settings, check_source
+from sqlty.core import HelperIndex, ParsedSource, Settings, check_source
 from tests.test_rust_check import QUERIES, RULES, SCHEMAS, arguments
 from tests.test_rust_types import FUZZ, parses
 

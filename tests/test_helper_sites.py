@@ -15,9 +15,8 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from sqlty._helpers import HelperIndex
-from sqlty._source import ParsedSource
-from sqlty.core import _helper_sites
+from sqlty.core import HelperIndex, ParsedSource
+from tests._core_views import helper_sites as _helper_sites
 
 EXAMPLES = int(os.environ.get("SQLTY_FUZZ_EXAMPLES", "300"))
 HEADER = "from typing import Annotated\nfrom sqlty import SQL\n"

@@ -3,8 +3,8 @@
 import pytest
 
 from sqlty import _core
-from sqlty._lint import NAME_RULES
 from sqlty.core import Settings, check_source
+from tests._core_views import NAME_RULES
 from tests._json_shapes import json_shapes
 
 ALL_NAME_RULES = dict.fromkeys(NAME_RULES, "warn")
