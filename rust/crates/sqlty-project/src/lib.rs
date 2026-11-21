@@ -48,6 +48,10 @@ impl Files for Shared {
     fn size(&self, path: &Path) -> Option<u64> {
         self.0.size(path)
     }
+
+    fn read_within(&self, path: &Path, limit: u64) -> Read {
+        self.0.read_within(path, limit)
+    }
 }
 
 impl Shared {

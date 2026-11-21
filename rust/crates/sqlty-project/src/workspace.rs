@@ -706,15 +706,19 @@ impl Workspace {
                 .unwrap_or_else(PoisonError::into_inner)
                 .insert(path.to_path_buf());
             // A module too large to parse is not read at all.
+            let limit = sqlty_python::parse::MAX_LEN as u64;
             let size = files.size(path);
-            if size.is_some_and(|size| size > sqlty_python::parse::MAX_LEN as u64) {
+            if size.is_some_and(|size| size > limit) {
                 return Found::Unread;
             }
             // A file that is there and cannot be read ends the search as one that is
             // not text does, in every host: the module is there, and nothing is known
             // of it. A stub that is not text is no stub: the module is looked for on.
             let stub = path.extension().is_some_and(|extension| extension == "pyi");
-            match files.read(path) {
+            // The size may be unknown, or the file may have grown since it was asked:
+            // no more than is parsed is read.
+            match files.read_within(path, limit) {
+                Read::Text(data) if data.len() as u64 > limit => Found::Unread,
                 Read::Text(data) => match String::from_utf8(data) {
                     Ok(text) => Found::Text(text),
                     Err(_) if stub => Found::Missing,
@@ -1691,6 +1695,16 @@ mod tests {
                 data => data.len() as u64,
             })
         }
+
+        /// `<grown>` is a file larger than its size said: as much of it as is asked for.
+        fn read_within(&self, path: &Path, limit: u64) -> Read {
+            match self.read(path) {
+                Read::Text(data) if data == b"<grown>" => {
+                    Read::Text(vec![b'#'; usize::try_from(limit).unwrap() + 1])
+                }
+                found => found,
+            }
+        }
     }
 
     const STUB: &str = "from typing import Annotated, LiteralString\nfrom sqlty import SQL\nclass Db:\n    def one(self, sql: Annotated[LiteralString, SQL], form: type, /): ...\n";
@@ -2105,6 +2119,25 @@ mod tests {
             .is_some_and(|found| found.source().is_none()));
         assert_eq!(reads(&read, "vendor/big.py"), 0);
         assert_eq!(reads(&read, "vendor/small.py"), 1);
+    }
+
+    #[test]
+    fn a_library_that_gives_more_than_is_parsed_is_not_parsed() {
+        // Its size was small or unknown when asked: a file that grew since, or one whose
+        // size says nothing of what a read gives.
+        let (mut workspace, read) = stubbed(&[
+            ("/repo/vendor/grown.py", "<grown>"),
+            (
+                "/repo/pyproject.toml",
+                "[tool.sqlty]\nschema = \"schema.sql\"\nexclude = [\"vendor\"]\n",
+            ),
+        ]);
+        let settings = workspace.settings(Path::new("/repo/app.py")).unwrap();
+        let index = workspace.helpers(&settings);
+        assert!(index
+            .resolve("vendor.grown")
+            .is_some_and(|found| found.source().is_none()));
+        assert_eq!(reads(&read, "vendor/grown.py"), 1);
     }
 
     #[test]

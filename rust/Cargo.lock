@@ -1843,6 +1843,7 @@ dependencies = [
 name = "sqlty-project"
 version = "0.8.0"
 dependencies = [
+ "libc",
  "rayon",
  "regex",
  "sqlty-format",

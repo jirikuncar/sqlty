@@ -966,28 +966,23 @@ fn indexed(
     ModuleIndex(index.build())
 }
 
-/// The module at `path`, outside the checked tree; its size is asked before it is read.
+/// The module at `path`, outside the checked tree: read as the other hosts read it, no
+/// further than is parsed, and only where it is a regular file.
 fn read_module(path: &std::path::Path) -> sqlty_python::modules::File {
     use sqlty_python::modules::File;
-    let Ok(found) = std::fs::metadata(path) else {
-        return File::Missing;
-    };
-    if !found.is_file() {
-        return File::Missing;
-    }
-    if found.len() > sqlty_python::parse::MAX_LEN as u64 {
-        return File::Unread;
-    }
-    match std::fs::read_to_string(path) {
-        Ok(text) => File::Text(text),
-        // A stub that is not text is no stub: the module is looked for on.
-        Err(error)
-            if error.kind() == std::io::ErrorKind::InvalidData
-                && path.extension().is_some_and(|extension| extension == "pyi") =>
-        {
-            File::Missing
-        }
-        Err(_) => File::Unread,
+    use sqlty_python::project::{Files as _, Read};
+    let limit = sqlty_python::parse::MAX_LEN as u64;
+    match sqlty_project::Disk.read_within(path, limit) {
+        Read::Text(data) if data.len() as u64 > limit => File::Unread,
+        Read::Text(data) => match String::from_utf8(data) {
+            Ok(text) => File::Text(text),
+            // A stub that is not text is no stub: the module is looked for on.
+            Err(_) if path.extension().is_some_and(|extension| extension == "pyi") => File::Missing,
+            Err(_) => File::Unread,
+        },
+        // A file that is there and cannot be read.
+        Read::Missing if sqlty_project::Disk.size(path).is_some() => File::Unread,
+        Read::Missing | Read::Unread => File::Missing,
     }
 }
 
