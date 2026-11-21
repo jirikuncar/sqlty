@@ -65,7 +65,9 @@ CORPUS = {
 
 def clone(url: str, commit: str, into: Path) -> None:
     def git(*args: str) -> None:
-        done = subprocess.run(["git", *args], cwd=into, capture_output=True, text=True)
+        # Git LFS objects (liberapay's fonts) need credentials and are not code.
+        env = {**os.environ, "GIT_LFS_SKIP_SMUDGE": "1"}
+        done = subprocess.run(["git", *args], cwd=into, env=env, capture_output=True, text=True)
         if done.returncode:
             raise RuntimeError(f"git {' '.join(args)}: {done.stderr.strip()}")
 
