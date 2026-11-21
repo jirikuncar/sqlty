@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import sys
+from collections.abc import Callable
 from typing import NamedTuple
 
 from sqlty import _core
@@ -21,12 +23,15 @@ RULES: dict[str, Rule] = {name: Rule(name, *rest) for name, *rest in _core.rules
 NAME_RULES: tuple[str, ...] = tuple(_core.name_rules())
 
 
+def _console_script() -> Callable[[list[str] | None], None]:
+    """The ``sqlty`` command as the package declares it (``[project.scripts]``)."""
+    [script] = importlib.metadata.entry_points(group="console_scripts", name="sqlty")
+    return script.load()
+
+
 def main(argv: list[str]) -> None:
     """Run ``sqlty`` with ``argv`` in this process; a non-zero exit code is a ``SystemExit``."""
-    code = _core.cli(["sqlty", *argv])
-    sys.stdout.flush()
-    if code:
-        sys.exit(code)
+    _console_script()(argv)
 
 
 def helper_sites(parsed: ParsedSource, helpers: HelperIndex | None) -> list[tuple]:

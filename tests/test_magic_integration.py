@@ -5,7 +5,10 @@ that uses the --sql prefix and verifying it works correctly.
 """
 
 import codecs
-import subprocess
+import importlib
+import io
+import logging
+import runpy
 import sys
 import tempfile
 from pathlib import Path
@@ -280,29 +283,86 @@ def test_decode_script_mode_keeps_lines(body: str, first: str):
     assert "SQL[tuple[datetime.datetime]]" in text
 
 
-def _print_decoded(directory: Path, source: bytes) -> str:
-    """``python -m sqlty.magic`` run in ``directory``, whose config the codec reads."""
-    module = directory / "q.py"
-    module.write_bytes(source)
-    found = subprocess.run(
-        [sys.executable, "-m", "sqlty.magic", str(module)],
-        cwd=directory,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return found.stdout
+@pytest.fixture
+def fresh_decoder(monkeypatch: pytest.MonkeyPatch):
+    """``sqlty.magic`` over a decoder that has not read a config yet: it reads the nearest once."""
+
+    def reload():
+        sys.modules.pop("sqlty._decode", None)
+        return importlib.reload(importlib.import_module("sqlty.magic"))
+
+    yield reload()
+    reload()
 
 
-def test_decode_keeps_source_on_bad_import_style(tmp_path: Path):
+def _print_decoded(
+    directory: Path, source: bytes, monkeypatch: pytest.MonkeyPatch, *, stdout=None
+) -> None:
+    """``python -m sqlty.magic q.py`` run here, in ``directory``, whose config the codec reads."""
+    (directory / "q.py").write_bytes(source)
+    monkeypatch.chdir(directory)
+    monkeypatch.setattr(sys, "argv", ["sqlty.magic", "q.py"])
+    if stdout is not None:
+        monkeypatch.setattr(sys, "stdout", stdout)
+    with pytest.raises(SystemExit) as exit_:
+        runpy.run_module("sqlty.magic", run_name="__main__")
+    assert exit_.value.code == 0
+
+
+def test_decode_keeps_source_on_bad_import_style(
+    tmp_path, monkeypatch, capsysbinary, fresh_decoder
+):
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nimport-style = "from x import SQL"\n')
     source = b'q = "--sql\\nSELECT 1"\n'
-    assert _print_decoded(tmp_path, source) == source.decode()
+    _print_decoded(tmp_path, source, monkeypatch)
+    assert capsysbinary.readouterr().out == source
 
 
-def test_a_broken_config_leaves_the_import_style_unset(tmp_path: Path):
+def test_a_broken_config_leaves_the_import_style_unset(
+    tmp_path, monkeypatch, capsysbinary, fresh_decoder
+):
     (tmp_path / "pyproject.toml").write_text("[tool.sqlty]\ndialect = 1\n")
     source = b'q = "--sql\\nSELECT 1::INTEGER"\n'
-    assert _print_decoded(tmp_path, source) == (
-        'from sqlty import SQL; q = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")\n'
+    _print_decoded(tmp_path, source, monkeypatch)
+    assert capsysbinary.readouterr().out == (
+        b'from sqlty import SQL; q = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")\n'
     )
+
+
+def test_the_printed_module_goes_to_a_stdout_without_a_buffer(tmp_path, monkeypatch, fresh_decoder):
+    out = io.StringIO()
+    _print_decoded(tmp_path, b"x = 1\n", monkeypatch, stdout=out)
+    assert out.getvalue() == "x = 1\n"
+
+
+def test_the_codec_reads_functions_and_databases_of_the_config(
+    tmp_path, monkeypatch, caplog, capsysbinary, fresh_decoder
+):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.sqlty]\nimport-style = "import sqlty"\n'
+        'functions = [{import-path = "db.run"}, {import-path = "db.ok", query-param = "q"}]\n'
+        '[tool.sqlty.databases.logs]\nschema = "logs.sql"\n'
+    )
+    source = b'q = "--sql\\nSELECT 1::INTEGER"\n'
+    with caplog.at_level(logging.WARNING):
+        _print_decoded(tmp_path, source, monkeypatch)
+    assert capsysbinary.readouterr().out == (
+        b'import sqlty; q = sqlty.SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")\n'
+    )
+    assert "missing required fields" in caplog.text
+
+
+def test_the_codec_ignores_a_config_that_does_not_parse(
+    tmp_path, monkeypatch, caplog, capsysbinary, fresh_decoder
+):
+    (tmp_path / "pyproject.toml").write_text("[tool.sqlty\n")
+    source = b'q = "--sql\\nSELECT 1::INTEGER"\n'
+    with caplog.at_level(logging.WARNING):
+        _print_decoded(tmp_path, source, monkeypatch)
+    assert b"SQL[tuple[int]]" in capsysbinary.readouterr().out
+    assert "Failed to parse" in caplog.text
+
+
+def test_the_stream_reader_decodes_the_whole_stream(fresh_decoder):
+    reader = codecs.getreader("sqlty")(io.BytesIO(b'q = "--sql\\nSELECT 1::INTEGER"\n'))
+    assert "SQL[tuple[int]]" in reader.read()

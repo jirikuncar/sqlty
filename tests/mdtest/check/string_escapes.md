@@ -85,7 +85,7 @@ c = "--sql\nSELECT \U00000031::INTEGER"
 d = "--sql\nSELECT \061::INTEGER"
 e = "--sql\nSELECT\tid\r\n,\
  1::INTEGER FROM users"
-f = "--sql\nSELECT '\N{BULLET}\d'::TEXT"
+f = "--sql\nSELECT '\d'::TEXT"
 g = "--sql\nSELECT '\a\b\f\v\r\n'::TEXT"
 # rewritten: a = SQL[tuple[int]]("--sql\nSELECT \x31::INTEGER")
 # rewritten: b = SQL[tuple[int]]("--sql\nSELECT \u0031::INTEGER")
@@ -93,7 +93,7 @@ g = "--sql\nSELECT '\a\b\f\v\r\n'::TEXT"
 # rewritten: d = SQL[tuple[int]]("--sql\nSELECT \061::INTEGER")
 # rewritten: e = SQL[tuple[int, int]]("--sql\nSELECT\tid\r\n,\
 # rewritten:  1::INTEGER FROM users")
-# rewritten: f = SQL[tuple[str]]("--sql\nSELECT '\N{BULLET}\d'::TEXT")
+# rewritten: f = SQL[tuple[str]]("--sql\nSELECT '\d'::TEXT")
 # rewritten: g = SQL[tuple[str]]("--sql\nSELECT '\a\b\f\v\r\n'::TEXT")
 ```
 

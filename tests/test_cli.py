@@ -804,26 +804,28 @@ def test_check_exit_codes(tmp_path, monkeypatch, capsys) -> None:
     assert _run(["check", "wide.py"], capsys)[0] == 1
 
 
-def _crashing_cli(exception: str) -> subprocess.CompletedProcess[str]:
-    """``python -m sqlty`` whose engine entry point raises ``exception``."""
-    script = (
-        "import runpy\nfrom sqlty import _core\n"
-        f"class PanicException(BaseException): ...\n"
-        f"def crash(argv): raise {exception}\n"
-        "_core.cli = crash\n"
-        'runpy.run_module("sqlty", run_name="__main__")\n'
-    )
-    return subprocess.run(
-        [sys.executable, "-c", script, "version"], capture_output=True, text=True, check=False
-    )
+class PanicException(BaseException):
+    """What a Rust panic raises: not an ``Exception``."""
 
 
-def test_internal_error_exits_2() -> None:
-    found = _crashing_cli('RuntimeError("boom")')
+def _crash(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], exc: BaseException):
+    """Run ``sqlty version`` with the engine's entry point raising ``exc``: (exit code, stderr)."""
+    from sqlty import _core
 
-    assert found.returncode == 2
-    assert "internal error" in found.stderr
-    assert _issue_url("RuntimeError: boom") in found.stderr
+    def crash(argv: list[str]) -> int:
+        raise exc
+
+    monkeypatch.setattr(_core, "cli", crash)
+    code, _, err = _run(["version"], capsys)
+    return code, err
+
+
+def test_internal_error_exits_2(monkeypatch, capsys) -> None:
+    code, err = _crash(monkeypatch, capsys, RuntimeError("boom"))
+
+    assert code == 2
+    assert "internal error" in err
+    assert _issue_url("RuntimeError: boom") in err
 
 
 @pytest.mark.parametrize("files", [1, 5000])
@@ -844,18 +846,16 @@ def test_a_closed_pipe_is_not_an_internal_error(tmp_path, files) -> None:
     assert (found.returncode, found.stderr) == (1, "")
 
 
-def test_a_panic_is_an_internal_error() -> None:
-    found = _crashing_cli('PanicException("boom")')
+def test_a_panic_is_an_internal_error(monkeypatch, capsys) -> None:
+    code, err = _crash(monkeypatch, capsys, PanicException("boom"))
 
-    assert found.returncode == 2
-    assert _issue_url("PanicException: boom") in found.stderr
+    assert code == 2
+    assert _issue_url("PanicException: boom") in err
 
 
-def test_an_interrupt_is_not_an_internal_error() -> None:
-    found = _crashing_cli("KeyboardInterrupt")
-
-    assert "KeyboardInterrupt" in found.stderr
-    assert "internal error" not in found.stderr
+def test_an_interrupt_is_not_an_internal_error(monkeypatch, capsys) -> None:
+    with pytest.raises(KeyboardInterrupt):
+        _crash(monkeypatch, capsys, KeyboardInterrupt())
 
 
 def _issue_url(cause: str) -> str:
@@ -868,12 +868,12 @@ def _issue_url(cause: str) -> str:
 
 
 @pytest.mark.parametrize("message", ["boom\nmore", "\u00e9" * 3000])
-def test_issue_url_prefills_the_bug_report_form(message: str) -> None:
-    found = _crashing_cli(f"RuntimeError({message!r})")
+def test_issue_url_prefills_the_bug_report_form(monkeypatch, capsys, message: str) -> None:
+    _, err = _crash(monkeypatch, capsys, RuntimeError(message))
 
     url = _issue_url(f"RuntimeError: {message}")
-    assert url in found.stderr
-    assert "&environment=" in found.stderr.partition(url)[2]
+    assert url in err
+    assert "&environment=" in err.partition(url)[2]
 
 
 def _run(argv: list[str], capsys: pytest.CaptureFixture[str]) -> tuple[int, str, str]:
