@@ -13,7 +13,7 @@ use sqlparser::ast::{
 
 use sqlparser::tokenizer::Location;
 
-use crate::catalog::fold;
+use crate::catalog::{fold, Lookup};
 use crate::diagnostics::{Diagnostics, Rule};
 use crate::json::JsonShape;
 use crate::values;
@@ -111,7 +111,7 @@ impl Column {
 
 #[derive(Clone)]
 pub(super) struct Analyzer<'a> {
-    pub(super) schema: &'a SchemaData,
+    pub(super) schema: Rc<Lookup<'a>>,
     pub(super) dialect: SqlDialect,
     pub(super) virtuals: Virtuals,
     /// Why results are untyped, shared with the analyzers of subqueries and CTEs.
@@ -134,7 +134,7 @@ pub(super) struct Analyzer<'a> {
 impl<'a> Analyzer<'a> {
     pub(super) fn new(schema: &'a SchemaData, dialect: SqlDialect) -> Self {
         Analyzer {
-            schema,
+            schema: Rc::new(Lookup::new(schema)),
             dialect,
             virtuals: Virtuals::default(),
             diag: Diagnostics::default(),
