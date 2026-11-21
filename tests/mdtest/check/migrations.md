@@ -93,6 +93,15 @@ CLUSTER users;
 VACUUM (FULL, ANALYZE) users;
 ```
 
+An option turned off with `false` or `'off'` is off:
+
+```sql migration
+-- error: [missing-concurrently]
+-- error: [missing-lock-timeout]
+REINDEX (CONCURRENTLY false) TABLE users;
+VACUUM (FULL 'off') users;
+```
+
 One file reports the timeout once:
 
 ```sql migration

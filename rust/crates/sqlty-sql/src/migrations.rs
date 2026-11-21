@@ -825,7 +825,9 @@ impl Model {
             ["drop", "index", ..] if concurrently => Judged::concurrently(true),
             ["reindex", ..] => {
                 let original = stmt.tokens();
-                let (_, rest) = split_options(&original[1..]);
+                let (options, rest) = split_options(&original[1..]);
+                let concurrently = rest.iter().any(|t| t.eq_ignore_ascii_case("concurrently"))
+                    || is_option_on(options, "concurrently");
                 let waits = !concurrently && !self.is_new_target(rest);
                 if waits {
                     report(
@@ -852,14 +854,7 @@ impl Model {
                 let full = rest[..legacy]
                     .iter()
                     .any(|t| t.eq_ignore_ascii_case("full"))
-                    || options.iter().enumerate().any(|(at, option)| {
-                        option.eq_ignore_ascii_case("full")
-                            && !options.get(at + 1).is_some_and(|value| {
-                                ["false", "off", "0"]
-                                    .iter()
-                                    .any(|v| value.eq_ignore_ascii_case(v))
-                            })
-                    });
+                    || is_option_on(options, "full");
                 let tables = vacuum_tables(&rest[legacy..]);
                 let rewrites = full
                     && !(!tables.is_empty() && tables.iter().all(|t| self.created.contains(t)));
@@ -1266,6 +1261,20 @@ fn split_options<'a>(tokens: &'a [&'a str]) -> (&'a [&'a str], &'a [&'a str]) {
     }
 }
 
+/// Whether a parenthesised option list turns `name` on: `name`, or `name` and a value other
+/// than `false`, `off` or `0`, quoted or not.
+fn is_option_on(options: &[&str], name: &str) -> bool {
+    options.iter().enumerate().any(|(at, option)| {
+        option.eq_ignore_ascii_case(name)
+            && !options.get(at + 1).is_some_and(|value| {
+                let value = value.trim_matches('\'');
+                ["false", "off", "0"]
+                    .iter()
+                    .any(|off| value.eq_ignore_ascii_case(off))
+            })
+    })
+}
+
 fn is_vacuum_word(token: &str) -> bool {
     ["full", "freeze", "verbose", "analyze", "analyse"]
         .iter()
@@ -1601,6 +1610,7 @@ mod tests {
         for sql in [
             "CREATE INDEX CONCURRENTLY users_bio ON users (bio)",
             "REINDEX TABLE CONCURRENTLY users",
+            "REINDEX (CONCURRENTLY, VERBOSE) TABLE users",
             "REFRESH MATERIALIZED VIEW CONCURRENTLY mv",
             "CREATE TABLE t (id int); CREATE INDEX t_id ON t (id); CLUSTER t; VACUUM FULL t",
             "CREATE TABLE t (id int); CREATE INDEX ON t (id); REINDEX TABLE t",
@@ -1618,6 +1628,7 @@ mod tests {
         }
         for sql in [
             "REINDEX (VERBOSE) TABLE users",
+            "REINDEX (CONCURRENTLY false) TABLE users",
             "REINDEX INDEX users_pkey",
             "REINDEX SCHEMA public",
             "CREATE TABLE s.t (id int); CREATE INDEX t_id ON s.t (id); REINDEX INDEX t_id",
@@ -1657,6 +1668,7 @@ mod tests {
         for sql in [
             "VACUUM users",
             "VACUUM (FULL false) users",
+            "VACUUM (FULL 'off') users",
             "VACUUM (ANALYZE) users",
             "VACUUM",
         ] {
@@ -1930,11 +1942,14 @@ mod tests {
             START TRANSACTION;
             ALTER TABLE events DETACH PARTITION p CONCURRENTLY;
             REINDEX INDEX CONCURRENTLY a;
+            REINDEX (CONCURRENTLY) INDEX a;
             ROLLBACK;";
         assert_eq!(
             rules(USERS, migration),
-            [Rule::ConcurrentlyInTransaction; 4]
+            [Rule::ConcurrentlyInTransaction; 5]
         );
+        let off = "SET lock_timeout = '1s'; BEGIN; REINDEX (CONCURRENTLY 'off') INDEX a; COMMIT;";
+        assert_eq!(rules(USERS, off), [Rule::MissingConcurrently]);
     }
 
     #[test]
