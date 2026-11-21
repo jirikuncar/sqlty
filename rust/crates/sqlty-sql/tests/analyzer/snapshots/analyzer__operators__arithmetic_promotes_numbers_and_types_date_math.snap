@@ -1,5 +1,5 @@
 ---
-source: crates/sqlty-sql/src/analyzer/operators.rs
+source: crates/sqlty-sql/tests/analyzer/operators.rs
 expression: "lines.join(\"\\n\")"
 ---
 SMALLINT + SMALLINT = SMALLINT

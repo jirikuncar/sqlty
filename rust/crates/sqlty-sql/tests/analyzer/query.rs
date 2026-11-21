@@ -1,4 +1,5 @@
 use crate::support::*;
+use sqlty_sql::analyzer::{analyze_select, analyze_with_diagnostics, Column};
 
 const DDL: &str = "CREATE TABLE a (id INT NOT NULL, label TEXT, score NUMERIC(5, 2) NOT NULL); \
                    CREATE TABLE b (id BIGINT, label VARCHAR(20) NOT NULL, score DOUBLE PRECISION); \
@@ -151,4 +152,155 @@ fn dialects_name_and_type_the_same_query_differently() {
         .map(|dialect| format!("{dialect}:\n{}", reports(&sql, dialect, Some(ddl))))
         .collect();
     insta::assert_snapshot!(rendered.join("\n"));
+}
+
+const T: &str = "CREATE TABLE t (n INT NOT NULL, a INT, j JSONB, x INT NOT NULL, y BIGINT NOT NULL, z NUMERIC NOT NULL)";
+
+fn columns(sql: &str, dialect: &str) -> Vec<Column> {
+    let schema = load_schema(T, dialect);
+    analyze_select(sql, dialect, Some(&schema)).unwrap_or_else(|| panic!("{sql} has no columns"))
+}
+
+fn types(sql: &str) -> Vec<(String, Option<String>, Option<String>)> {
+    columns(sql, "postgres")
+        .into_iter()
+        .map(|c| (c.name.clone(), c.python_type.clone(), c.sql_type))
+        .collect()
+}
+
+#[test]
+fn display_type_is_optional_only_for_nullable_columns() {
+    let display = |sql: &str| columns(sql, "postgres")[0].display_type();
+    assert_eq!(display("SELECT n FROM t").as_deref(), Some("int"));
+    assert_eq!(display("SELECT $1::int").as_deref(), Some("int"));
+    assert_eq!(display("SELECT a FROM t").as_deref(), Some("int | None"));
+    assert_eq!(display("SELECT nope FROM t"), None);
+}
+
+#[test]
+fn display_type_does_not_double_none() {
+    let display = |sql: &str| columns(sql, "postgres")[0].display_type();
+    assert_eq!(
+        display("SELECT j FROM t UNION SELECT NULL FROM t").as_deref(),
+        Some("typing.Any")
+    );
+    assert_eq!(
+        display("SELECT a FROM t UNION SELECT NULL FROM t").as_deref(),
+        Some("int | None")
+    );
+}
+
+#[test]
+fn an_unreadable_wildcard_is_one_untyped_star_column() {
+    let found = columns("SELECT * FROM missing", "postgres");
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].name, "*");
+    assert_eq!(found[0].python_type, None);
+    let found = columns("SELECT nope FROM t", "postgres");
+    assert_eq!(found[0].name, "nope");
+    assert_eq!(found[0].python_type, None);
+    assert_eq!(
+        columns("SELECT n FROM t", "postgres")[0]
+            .python_type
+            .as_deref(),
+        Some("int")
+    );
+}
+
+#[test]
+fn a_column_carries_a_python_type_and_a_sql_type() {
+    assert_eq!(
+        types("SELECT y FROM t"),
+        [(
+            "y".to_string(),
+            Some("int".to_string()),
+            Some("BIGINT".to_string())
+        )]
+    );
+}
+
+#[test]
+fn set_operations_take_names_from_the_leftmost_select() {
+    let names = |sql: &str| -> Vec<String> {
+        columns(sql, "postgres")
+            .into_iter()
+            .map(|c| c.name)
+            .collect()
+    };
+    assert_eq!(names("SELECT 1 AS a"), ["a"]);
+    assert_eq!(names("SELECT 1 AS a UNION SELECT 2 AS b"), ["a"]);
+    assert_eq!(names("(SELECT 3 AS c) UNION SELECT 2 AS b"), ["c"]);
+    assert_eq!(names("VALUES (1)"), ["column1"]);
+}
+
+#[test]
+fn nested_set_operations_unify_every_branch() {
+    let sql_type = |sql: &str| columns(sql, "postgres")[0].sql_type.clone();
+    assert_eq!(sql_type("SELECT x FROM t").as_deref(), Some("INT"));
+    assert_eq!(
+        sql_type("SELECT x FROM t UNION SELECT y FROM t").as_deref(),
+        Some("BIGINT")
+    );
+    assert_eq!(
+        sql_type("SELECT x FROM t UNION SELECT y FROM t EXCEPT SELECT z FROM t").as_deref(),
+        Some("DECIMAL")
+    );
+    assert_eq!(
+        sql_type("(SELECT x FROM t UNION SELECT y FROM t) INTERSECT SELECT z FROM t").as_deref(),
+        Some("DECIMAL")
+    );
+    assert_eq!(
+        sql_type("SELECT x FROM t UNION (WITH c AS (SELECT z FROM t) SELECT * FROM c)").as_deref(),
+        Some("DECIMAL")
+    );
+}
+
+#[test]
+fn a_table_alias_list_renames_columns_by_position() {
+    let names = |dialect: &str| -> Vec<String> {
+        columns("SELECT * FROM (SELECT 1, 2, 3) AS s(X, Y)", dialect)
+            .into_iter()
+            .map(|c| c.name)
+            .collect()
+    };
+    assert_eq!(names("postgres"), ["x", "y", "?column?"]);
+    assert_eq!(names("mysql"), ["X", "Y", "3"]);
+}
+
+#[test]
+fn the_text_of_an_untyped_expression_is_cut_on_a_character_boundary() {
+    let message = |expr: &str| -> String {
+        let (_, diagnostics) =
+            analyze_with_diagnostics(&format!("SELECT {expr}"), "postgres", None);
+        diagnostics
+            .iter()
+            .find(|d| d.rule.name() == "unsupported-syntax")
+            .map(|d| d.message.clone())
+            .unwrap_or_default()
+    };
+    let operator = |argument: &str| format!("'{argument}' OPERATOR(pg_catalog.+) 1");
+    // `'' OPERATOR(pg_catalog.+) 1` is 27 characters.
+    let short = operator("a");
+    assert_eq!(
+        message(&short),
+        format!("expression `{short}` is not typed")
+    );
+    let exactly = operator(&"a".repeat(33));
+    assert_eq!(exactly.chars().count(), 60);
+    assert_eq!(
+        message(&exactly),
+        format!("expression `{exactly}` is not typed")
+    );
+    let long = operator(&"b".repeat(34));
+    let cut: String = long.chars().take(60).collect();
+    assert_eq!(
+        message(&long),
+        format!("expression `{cut}...` is not typed")
+    );
+    let wide = operator(&"é".repeat(70));
+    let cut: String = wide.chars().take(60).collect();
+    assert_eq!(
+        message(&wide),
+        format!("expression `{cut}...` is not typed")
+    );
 }

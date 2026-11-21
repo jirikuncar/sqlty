@@ -1,11 +1,11 @@
 ---
-source: crates/sqlty-sql/src/analyzer/operators.rs
+source: crates/sqlty-sql/tests/analyzer/operators.rs
 expression: "lines.join(\"\\n\")"
 ---
 INT + INT -> int | INT
 INT + BIGINT -> int | BIGINT
 SMALLINT + DECIMAL -> decimal.Decimal | DECIMAL
-BIGINT + DOUBLE -> float | DOUBLE
+BIGINT + DOUBLE PRECISION -> float | DOUBLE
 TEXT + VARCHAR -> str | TEXT
 VARCHAR + TEXT -> str | VARCHAR
 DATE + TIMESTAMP -> datetime.datetime | TIMESTAMP
@@ -13,9 +13,9 @@ TIMESTAMP + TIMESTAMPTZ -> datetime.datetime | TIMESTAMPTZ
 INT + TEXT -> conflict
 BOOLEAN + INT -> conflict
 DATE + TIME -> conflict
-ARRAY<INT> + ARRAY<BIGINT> -> list[int] | ARRAY<BIGINT>
-ARRAY<INT> + ARRAY<TEXT> -> conflict
-ARRAY<INT> + INT -> conflict
+INT[] + BIGINT[] -> list[int] | ARRAY<BIGINT>
+INT[] + TEXT[] -> conflict
+INT[] + INT -> conflict
 unknown + INT -> int | INT
 INT + unknown -> int | INT
 'str' + TEXT -> str | TEXT

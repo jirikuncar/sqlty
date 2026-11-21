@@ -790,15 +790,3 @@ fn untyped_column_message(column: &str, sql_type: &str) -> String {
         format!("column `{column}` has type `{sql_type}`, which has no Python type")
     }
 }
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn list_quotes_and_joins_names() {
-        assert_eq!(list(&["a", "b"]), "`a`, `b`");
-        assert_eq!(list(&[]), "");
-    }
-}

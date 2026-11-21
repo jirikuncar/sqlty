@@ -1,0 +1,61 @@
+---
+source: crates/sqlty-sql/tests/analyzer/scope.rs
+expression: "reports(&queries, \"postgres\", Some(SOURCES))"
+---
+SELECT a.id, b.id FROM a, b
+id: int | INT | NonNull
+id: int | INT | NonNull
+
+SELECT a.id, b.id, c.id FROM a JOIN b ON true LEFT JOIN c ON true
+id: int | INT | NonNull
+id: int | INT | NonNull
+id: int | INT | Nullable
+
+SELECT a.id, b.id, c.id FROM (a JOIN b ON true) JOIN c ON true
+id: int | INT | NonNull
+id: int | INT | NonNull
+id: int | INT | NonNull
+
+SELECT s.id, a.id FROM (SELECT 1 AS id) AS s, a
+id: int | ? | NonNull
+id: int | INT | NonNull
+
+SELECT * FROM a JOIN b USING (Id, kind)
+id: int | INT | NonNull
+kind: str | TEXT | NonNull
+x: int | INT | Nullable
+x: int | INT | Nullable
+
+SELECT * FROM a NATURAL JOIN b
+id: int | INT | NonNull
+kind: str | TEXT | NonNull
+x: int | INT | NonNull
+
+SELECT * FROM (a JOIN b USING (x)) JOIN c USING (y)
+*: ? | ? | Unknown
+[unsupported-syntax] `*` could not be expanded into columns
+
+SELECT * FROM a JOIN b ON a.id = b.id
+id: int | INT | NonNull
+kind: str | TEXT | Nullable
+x: int | INT | Nullable
+id: int | INT | NonNull
+kind: str | TEXT | Nullable
+x: int | INT | Nullable
+
+SELECT * FROM a CROSS JOIN b
+id: int | INT | NonNull
+kind: str | TEXT | Nullable
+x: int | INT | Nullable
+id: int | INT | NonNull
+kind: str | TEXT | Nullable
+x: int | INT | Nullable
+
+SELECT * FROM c JOIN (a JOIN b USING (id)) ON true
+id: int | INT | NonNull
+y: int | INT | Nullable
+id: int | INT | NonNull
+kind: str | TEXT | Nullable
+x: int | INT | Nullable
+kind: str | TEXT | Nullable
+x: int | INT | Nullable

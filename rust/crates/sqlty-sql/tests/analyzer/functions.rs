@@ -1,4 +1,5 @@
 use crate::support::*;
+use sqlty_sql::analyzer::analyze_select;
 
 const DDL: &str = "CREATE TABLE t (i INT NOT NULL, s SMALLINT, b BIGINT NOT NULL, \
                    n NUMERIC(10, 2) NOT NULL, f DOUBLE PRECISION, txt TEXT, \
@@ -86,4 +87,53 @@ fn function_availability_differs_by_dialect() {
     let mysql = reports(&queries, "mysql", Some(ddl));
     let postgres = reports(&queries, "postgres", None);
     insta::assert_snapshot!(format!("mysql:\n{mysql}\npostgres:\n{postgres}"));
+}
+
+#[test]
+fn sum_widens_in_postgres() {
+    let widen = |sql: &str| {
+        let declared = if sql == "DOUBLE" {
+            "DOUBLE PRECISION"
+        } else {
+            sql
+        };
+        let ddl = format!("CREATE TABLE t (c {declared})");
+        let schema = load_schema(&ddl, "postgres");
+        analyze_select("SELECT SUM(c) AS s FROM t", "postgres", Some(&schema))
+            .and_then(|columns| columns[0].sql_type.clone())
+    };
+    assert_eq!(widen("SMALLINT").as_deref(), Some("BIGINT"));
+    assert_eq!(widen("INT").as_deref(), Some("BIGINT"));
+    assert_eq!(widen("BIGINT").as_deref(), Some("DECIMAL"));
+    assert_eq!(widen("DECIMAL(10, 2)").as_deref(), Some("DECIMAL"));
+    assert_eq!(widen("REAL").as_deref(), Some("FLOAT"));
+    assert_eq!(widen("DOUBLE").as_deref(), Some("DOUBLE"));
+    assert_eq!(widen("INTERVAL").as_deref(), Some("INTERVAL"));
+    assert_eq!(widen("TEXT").as_deref(), Some("TEXT"));
+}
+
+#[test]
+fn extract_types_follow_the_dialect_and_field() {
+    let cases = [
+        ("postgres", "YEAR", Some("DECIMAL")),
+        ("generic", "EPOCH", Some("DECIMAL")),
+        ("mysql", "YEAR", Some("BIGINT")),
+        ("duckdb", "JULIAN", Some("DOUBLE")),
+        ("duckdb", "'yearweek'", Some("BIGINT")),
+        ("clickhouse", "YEAR", Some("USMALLINT")),
+        ("clickhouse", "NANOSECOND", Some("UINT")),
+        ("clickhouse", "TIMEZONE_HOUR", Some("INT")),
+        ("clickhouse", "JULIAN", None),
+        ("snowflake", "YEAR", None),
+    ];
+    for (dialect, field, expected) in cases {
+        let schema = load_schema("CREATE TABLE t (d TIMESTAMP)", dialect);
+        let found = analyze_select(
+            &format!("SELECT EXTRACT({field} FROM d) FROM t"),
+            dialect,
+            Some(&schema),
+        )
+        .and_then(|columns| columns[0].sql_type.clone());
+        assert_eq!(found.as_deref(), expected, "{dialect} {field}");
+    }
 }

@@ -1,4 +1,5 @@
 use crate::support::*;
+use sqlty_sql::analyzer::analyze_select;
 const DDL: &str = "CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy'); \
                    CREATE TYPE pair AS (x INT, y TEXT); \
                    CREATE DOMAIN positive AS INT CHECK (VALUE > 0); \
@@ -118,4 +119,57 @@ fn mysql_and_sqlite_expressions() {
     ];
     let sqlite = reports(&sqlite_queries, "sqlite", Some("CREATE TABLE t (x)"));
     insta::assert_snapshot!(format!("mysql:\n{mysql}\nsqlite:\n{sqlite}"));
+}
+
+/// `(python, sql)` of the only column of `sql`, against a table `t` with `ddl` columns.
+fn column_of(sql: &str, ddl: &str) -> (String, String) {
+    let schema = load_schema(&format!("CREATE TABLE t ({ddl})"), "postgres");
+    let columns = analyze_select(sql, "postgres", Some(&schema)).expect(sql);
+    (
+        columns[0].python_type.clone().unwrap_or_default(),
+        columns[0].sql_type.clone().unwrap_or_default(),
+    )
+}
+
+#[test]
+fn array_element_reads_the_inner_type() {
+    let ddl = "a INT[], b INT[3], c TEXT[][], d INT";
+    assert_eq!(column_of("SELECT a[1] FROM t", ddl).1, "INT");
+    assert_eq!(column_of("SELECT b[1] FROM t", ddl).1, "INT");
+    assert_eq!(column_of("SELECT c[1] FROM t", ddl).1, "ARRAY<TEXT>");
+    assert_eq!(column_of("SELECT d[1] FROM t", ddl).1, "");
+    assert_eq!(column_of("SELECT unnest(c) FROM t", ddl).1, "TEXT");
+}
+
+#[test]
+fn range_element_names_the_bound_type() {
+    for (range, bound) in [
+        ("INT4RANGE", "INT"),
+        ("INT8RANGE", "BIGINT"),
+        ("NUMRANGE", "DECIMAL"),
+        ("TSRANGE", "TIMESTAMP"),
+        ("TSTZRANGE", "TIMESTAMPTZ"),
+        ("DATERANGE", "DATE"),
+        ("INT4MULTIRANGE", "INT"),
+        ("DATEMULTIRANGE", "DATE"),
+    ] {
+        assert_eq!(
+            column_of("SELECT lower(r) FROM t", &format!("r {range}")).1,
+            bound,
+            "{range}"
+        );
+    }
+    // Not a range: `lower` is the string function.
+    assert_eq!(column_of("SELECT lower(r) FROM t", "r INT").1, "TEXT");
+}
+
+#[test]
+fn a_sql_type_gives_its_python_type_and_a_literal_has_none() {
+    assert_eq!(
+        column_of("SELECT 1::BIGINT FROM t", "d INT"),
+        ("int".into(), "BIGINT".into())
+    );
+    assert_eq!(column_of("SELECT 1 FROM t", "d INT").0, "int");
+    assert_eq!(column_of("SELECT 1 FROM t", "d INT").1, "");
+    assert_eq!(column_of("SELECT d::NOPE FROM t", "d INT").0, "");
 }

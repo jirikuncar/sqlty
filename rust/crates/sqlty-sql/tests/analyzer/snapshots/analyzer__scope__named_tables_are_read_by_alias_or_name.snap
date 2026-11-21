@@ -1,0 +1,22 @@
+---
+source: crates/sqlty-sql/tests/analyzer/scope.rs
+expression: "reports(&queries, \"postgres\", Some(SOURCES))"
+---
+SELECT 1 FROM Users
+?column?: int | ? | NonNull
+
+SELECT U.id FROM users AS U
+id: int | INT | NonNull
+
+SELECT users.id FROM public.users
+id: int | INT | NonNull
+
+SELECT users.id FROM users AS u
+id: int | INT | NonNull
+
+SELECT x.id FROM Public.T AS X
+id: int | INT | NonNull
+
+SELECT other.id FROM users
+id: ? | ? | Unknown
+[unknown-table] `other` is not a table or alias in the FROM clause

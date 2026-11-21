@@ -1,5 +1,5 @@
 ---
-source: crates/sqlty-sql/src/analyzer/names.rs
+source: crates/sqlty-sql/tests/analyzer/names.rs
 expression: "rendered.join(\"\\n\")"
 ---
 x => x
