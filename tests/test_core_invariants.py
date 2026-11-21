@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import builtins
 import collections
+import dataclasses
 import io
 import random
 import re
@@ -41,14 +42,14 @@ def _corpus(kind: str) -> list[Any]:
     for md in [*MARKDOWN, ROOT / "README.md"]:
         for section in parse(md):
             settings = section.settings
-            options = {
-                "dialect": settings.get("dialect", "postgres"),
-                "schema_sql": section.schema_sql,
-                "import_style": settings.get("import-style"),
-                "untyped": settings.get("untyped") == "sentinel",
-                "json_types": settings.get("json-types", "typing.Any"),
-                "param_types": settings.get("param-types", True),
-            }
+            options = core.Settings(
+                dialect=settings.get("dialect", "postgres"),
+                schema_sql=section.schema_sql,
+                import_style=settings.get("import-style"),
+                untyped=settings.get("untyped") == "sentinel",
+                json_types=settings.get("json-types", "typing.Any"),
+                param_types=settings.get("param-types", True),
+            )
             units = [u for u in section.units if u.lang == kind]
             for i, unit in enumerate(units):
                 name = f"{md.relative_to(ROOT)}::{section.name}" + (f"::{i}" if i else "")
@@ -78,74 +79,65 @@ def test_every_inference_rule_is_asserted() -> None:
 
 
 @pytest.mark.parametrize(("source", "options"), PYTHON)
-def test_rewrite_is_idempotent(source: str, options: dict) -> None:
-    once = core.rewrite_source(source, **options)
-    assert core.rewrite_source(once, **options) == once
+def test_rewrite_is_idempotent(source: str, options: core.Settings) -> None:
+    once = core.rewrite_source(source, options)
+    assert core.rewrite_source(once, options) == once
 
 
 @pytest.mark.parametrize(("source", "options"), PYTHON)
-def test_strip_is_idempotent(source: str, options: dict) -> None:
-    once = core.strip_source(source, import_style=options["import_style"])
-    assert core.strip_source(once, import_style=options["import_style"]) == once
+def test_strip_is_idempotent(source: str, options: core.Settings) -> None:
+    once = core.strip_source(source, options)
+    assert core.strip_source(once, options) == once
 
 
 @pytest.mark.parametrize("eol", ["\n", "\r\n"], ids=["lf", "crlf"])
 @pytest.mark.parametrize(("source", "options"), PYTHON)
-def test_strip_undoes_rewrite(source: str, options: dict, eol: str) -> None:
+def test_strip_undoes_rewrite(source: str, options: core.Settings, eol: str) -> None:
     """``strip(rewrite(x)) == x`` for sources that ``strip`` leaves alone.
 
     Other sqlty imports may be there: rewrite adds what is missing on lines of
     its own, which strip removes again. Strip also removes the lines it would
     add when they were written by hand, so those sources are skipped.
     """
-    style = options["import_style"]
+    style = options.import_style
     own_lines = {style or "from sqlty import SQL", "from sqlty import UNTYPED"}
     if (
         own_lines & {line.strip() for line in source.splitlines()}
-        or core.strip_source(source, import_style=style) != source
+        or core.strip_source(source, options) != source
     ):
         pytest.skip("source already uses sqlty")
     source = source.replace("\n", eol)
-    rewritten = core.rewrite_source(source, **options)
-    assert core.strip_source(rewritten, import_style=style) == source
+    rewritten = core.rewrite_source(source, options)
+    assert core.strip_source(rewritten, options) == source
 
 
 @pytest.mark.parametrize(("source", "options"), PYTHON)
-def test_fix_is_idempotent(source: str, options: dict) -> None:
-    once = core.fix_source(source, **options)
-    assert core.fix_source(once, **options) == once
+def test_fix_is_idempotent(source: str, options: core.Settings) -> None:
+    once = core.fix_source(source, options)
+    assert core.fix_source(once, options) == once
 
 
 @pytest.mark.parametrize(("source", "options"), PYTHON)
-def test_fix_leaves_nothing_stale(source: str, options: dict) -> None:
+def test_fix_leaves_nothing_stale(source: str, options: core.Settings) -> None:
     """After ``--fix`` only unfixable diagnostics remain: unwrapped or stale queries can't."""
-    fixed = core.fix_source(source, **options)
+    fixed = core.fix_source(source, options)
     stale = [
         d
-        for d in core.check_source(
-            fixed,
-            dialect=options["dialect"],
-            schema_sql=options["schema_sql"],
-            import_style=options["import_style"],
-            untyped=options["untyped"],
-        )
+        for d in core.check_source(fixed, options)
         if d["rule"] in ("stale-rewrite", "stale-type", "narrow-type")
     ]
     assert not stale
 
 
 @pytest.mark.parametrize(("source", "options"), PYTHON)
-def test_written_params_fit(source: str, options: dict) -> None:
+def test_written_params_fit(source: str, options: core.Settings) -> None:
     """``params-type-mismatch`` never reports a ``P`` that ``param-types`` writes."""
-    rewritten = core.rewrite_source(source, **(options | {"param_types": True}))
-    checked = {
-        key: value for key, value in options.items() if key not in ("json_types", "param_types")
-    }
+    rewritten = core.rewrite_source(source, dataclasses.replace(options, param_types=True))
 
     def mismatches(text: str) -> list[str]:
         return sorted(
             d["message"]
-            for d in core.check_source(text, **checked)
+            for d in core.check_source(text, options)
             if d["rule"] == "params-type-mismatch"
         )
 
@@ -153,16 +145,13 @@ def test_written_params_fit(source: str, options: dict) -> None:
 
 
 @pytest.mark.parametrize(("source", "options"), PYTHON)
-def test_diagnostics_underline_their_subject(source: str, options: dict) -> None:
+def test_diagnostics_underline_their_subject(source: str, options: core.Settings) -> None:
     """Each diagnostic underlines whole characters, at or below its line, the same with CRLF."""
-    checked = {
-        key: value for key, value in options.items() if key not in ("json_types", "param_types")
-    }
 
     def underlined(text: str) -> list[tuple[str, str, list[str]]]:
         parsed, data = ParsedSource(text), text.encode()
         found = []
-        for d in core.check_source(text, **checked):
+        for d in core.check_source(text, options):
             assert 0 <= d["start"] < d["end"] <= len(data), d
             assert parsed.position(d["start"])[0] >= d["line"], d
             edits = [data[start:end].decode() for start, end, _ in d["fix"]]
@@ -174,19 +163,16 @@ def test_diagnostics_underline_their_subject(source: str, options: dict) -> None
 
 
 @pytest.mark.parametrize(("source", "options"), PYTHON)
-def test_each_fix_stands_alone(source: str, options: dict) -> None:
+def test_each_fix_stands_alone(source: str, options: core.Settings) -> None:
     """A diagnostic's fix applied alone, as an editor's quick fix, binds every name it uses;
     then ``check --fix`` writes the lines it writes from the start, plus imports it would not add.
 
     ``json-types`` is left out: only ``check --fix`` generates ``TypedDict``s.
     """
-    options = options | {"json_types": "typing.Any"}
-    checked = {
-        key: value for key, value in options.items() if key not in ("json_types", "param_types")
-    }
-    expected = collections.Counter(core.fix_source(source, **options).splitlines())
+    options = dataclasses.replace(options, json_types="typing.Any")
+    expected = collections.Counter(core.fix_source(source, options).splitlines())
     data = source.encode()
-    for diagnostic in core.check_source(source, **checked):
+    for diagnostic in core.check_source(source, options):
         if not diagnostic["fix"]:
             continue
         fixed, end = b"", 0
@@ -196,7 +182,7 @@ def test_each_fix_stands_alone(source: str, options: dict) -> None:
             end = stop
         quick = (fixed + data[end:]).decode()
         assert _unbound(quick) <= _unbound(source), (diagnostic, quick)
-        alone = core.fix_source(quick, **options)
+        alone = core.fix_source(quick, options)
         extra = collections.Counter(alone.splitlines())
         extra.subtract(expected)
         assert all(n >= 0 for n in extra.values()), (diagnostic, alone)
@@ -228,19 +214,19 @@ def _unbound(source: str) -> set[str]:
     return loaded - bound
 
 
-def _check_outputs(source: str, options: dict) -> None:
+def _check_outputs(source: str, options: core.Settings) -> None:
     """``rewrite``, ``strip`` and ``check --fix`` keep valid Python valid and every
     comment, rewrite and strip keep every string as it is, and ``check --fix`` is idempotent."""
     original = without_generated(source)
     expected, kept = string_constants(original), comments(original)
-    rewritten = without_generated(core.rewrite_source(source, **options))
+    rewritten = without_generated(core.rewrite_source(source, options))
     assert (string_constants(rewritten), comments(rewritten)) == (expected, kept), rewritten
-    stripped = core.strip_source(source, import_style=options["import_style"])
+    stripped = core.strip_source(source, options)
     assert (string_constants(stripped), comments(stripped)) == (expected, kept), stripped
-    fixed = core.fix_source(source, **options)
+    fixed = core.fix_source(source, options)
     ast.parse(fixed)
     assert comments(without_generated(fixed)) == kept, fixed
-    assert core.fix_source(fixed, **options) == fixed
+    assert core.fix_source(fixed, options) == fixed
 
 
 def _tail(query: str) -> str:
@@ -252,11 +238,11 @@ _MARKER_LINE = re.compile(r"^.*--\s*sql\b.*\n", re.IGNORECASE | re.MULTILINE)
 
 
 @pytest.mark.parametrize(("source", "options"), PYTHON)
-def test_completion_finds_what_check_reads(source: str, options: dict) -> None:
+def test_completion_finds_what_check_reads(source: str, options: core.Settings) -> None:
     """Completing at the end of every string literal finds exactly the queries ``check`` reads,
     by marker or helper."""
     parsed = ParsedSource(source)
-    style = options["import_style"]
+    style = options.import_style
     tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
     templates = {token.start[0] for token in tokens if token.type == tokenize.TSTRING_START}
     expected = collections.Counter(
@@ -268,7 +254,7 @@ def test_completion_finds_what_check_reads(source: str, options: dict) -> None:
     )
     expected.update(
         _tail(query)
-        for _, queries, _, start in core._helper_sites(parsed, None, None)  # noqa: SLF001
+        for _, queries, _, start in core._helper_sites(parsed, None)  # noqa: SLF001
         if start is not None
         for query in queries
     )
@@ -281,7 +267,10 @@ def test_completion_finds_what_check_reads(source: str, options: dict) -> None:
             joined = False
             continue
         (row, col), quote = token.end, 3 if token.string.endswith(('"""', "'''")) else 1
-        if core.complete_source(source, row, col - quote + 1, import_style=style) is None:
+        if (
+            core.complete_source(source, row, col - quote + 1, core.Settings(import_style=style))
+            is None
+        ):
             joined = False
             continue
         value = ast.literal_eval(token.string)
@@ -294,23 +283,20 @@ def test_completion_finds_what_check_reads(source: str, options: dict) -> None:
 
 
 @pytest.mark.parametrize(("source", "options"), PYTHON)
-def test_outputs_parse(source: str, options: dict) -> None:
+def test_outputs_parse(source: str, options: core.Settings) -> None:
     _check_outputs(source, options)
 
 
 @pytest.mark.parametrize(("source", "options"), PYTHON)
-def test_crlf_outputs(source: str, options: dict) -> None:
+def test_crlf_outputs(source: str, options: core.Settings) -> None:
     """With CRLF line endings, every command gives the LF result with CRLF line endings."""
     source = source if source.endswith("\n") else source + "\n"
     crlf = source.replace("\n", "\r\n")
     _check_outputs(crlf, options)
     to_crlf = lambda text: text.replace("\n", "\r\n")  # noqa: E731
-    style = options["import_style"]
-    assert core.rewrite_source(crlf, **options) == to_crlf(core.rewrite_source(source, **options))
-    assert core.strip_source(crlf, import_style=style) == to_crlf(
-        core.strip_source(source, import_style=style)
-    )
-    assert core.fix_source(crlf, **options) == to_crlf(core.fix_source(source, **options))
+    assert core.rewrite_source(crlf, options) == to_crlf(core.rewrite_source(source, options))
+    assert core.strip_source(crlf, options) == to_crlf(core.strip_source(source, options))
+    assert core.fix_source(crlf, options) == to_crlf(core.fix_source(source, options))
 
 
 _FRAGMENTS = [
@@ -349,12 +335,7 @@ def test_fuzz_fragments() -> None:
             ast.parse(source)
         except SyntaxError:
             continue
-        options = {
-            "dialect": "postgres",
-            "schema_sql": None,
-            "import_style": None,
-            "untyped": rng.random() < 0.5,
-        }
+        options = core.Settings(untyped=rng.random() < 0.5)
         _check_outputs(source, options)
         checked += 1
     assert checked > 1000
@@ -373,7 +354,11 @@ def test_sum_of_an_unknown_schema_column_is_untyped() -> None:
 
 def _name_diagnostics(sql: str, **options: Any) -> list[Diagnostic]:
     """What ``check_source`` reports about the names of ``sql`` as a ``--sql`` string."""
-    return [d for d in core.check_source(_marked(sql), **options) if d["rule"] in NAME_RULES]
+    return [
+        d
+        for d in core.check_source(_marked(sql), core.Settings(**options))
+        if d["rule"] in NAME_RULES
+    ]
 
 
 def _marked(sql: str) -> str:
@@ -471,7 +456,9 @@ def test_infer_type_latency() -> None:
 @pytest.mark.parametrize("name", ["rewrite_source", "strip_source", "fix_source", "check_source"])
 def test_unsupported_import_style_raises(name: str) -> None:
     with pytest.raises(ValueError, match="Unsupported import-style: 'from x import SQL'"):
-        getattr(core, name)('q = "--sql\\nSELECT 1"', import_style="from x import SQL")
+        getattr(core, name)(
+            'q = "--sql\\nSELECT 1"', core.Settings(import_style="from x import SQL")
+        )
 
 
 @pytest.mark.parametrize("aggregate", ["SUM", "AVG"])
@@ -482,7 +469,8 @@ def test_user_type_check_of_an_aggregate_of_an_unknown_column(aggregate: str) ->
         f'q = SQL[Row]("--sql\\nSELECT {aggregate}(nope) AS total FROM users")\n'
     )
     assert [
-        d["rule"] for d in core.check_source(source, schema_sql="CREATE TABLE users (id INT);")
+        d["rule"]
+        for d in core.check_source(source, core.Settings(schema_sql="CREATE TABLE users (id INT);"))
     ] == ["unknown-column", "nullable-mismatch"]
 
 
@@ -492,7 +480,7 @@ def test_fix_suppression_follows_inserted_import(newline: str) -> None:
         '"""Doc."""\nr = "--sql\\nSELECT id FROM t"\n'
         'q = "--sql\\nSELECT * FROM t"  # sqlty: ignore[select-star]\n'
     ).replace("\n", newline)
-    fixed = core.fix_source(source, schema_sql="CREATE TABLE t (id INT);")
+    fixed = core.fix_source(source, core.Settings(schema_sql="CREATE TABLE t (id INT);"))
     assert fixed.count("from sqlty import SQL") == 1
     assert f'SELECT * FROM t")  # sqlty: ignore[select-star]{newline}' in fixed
 
@@ -511,4 +499,4 @@ def test_split_marker_is_not_skipped(source: str) -> None:
 
 def test_unsupported_import_style_still_raises_without_markers() -> None:
     with pytest.raises(ValueError):
-        core.check_source("x = 1\n", import_style="import nothing")
+        core.check_source("x = 1\n", core.Settings(import_style="import nothing"))

@@ -218,7 +218,7 @@ class TestParser:
 
     def test_merge_without_returning_not_wrapped(self):
         source = 'q = "--sql\\nMERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN DELETE"'
-        assert core.rewrite_source(source, untyped=True) == source
+        assert core.rewrite_source(source, core.Settings(untyped=True)) == source
 
 
 class TestQueryInput:
@@ -373,7 +373,7 @@ def test_returns_rows(sql: str, expected: bool):
 @pytest.mark.parametrize("imports", ["", "import not_installed\n"])
 def test_check_source_typeddict_inheritance_lines(imports: str):
     """typeddict-inheritance errors sit on the offending subclass's class line."""
-    from sqlty.core import check_source
+    from sqlty.core import Settings, check_source
 
     source = imports + (
         "from typing import TypedDict\n"
@@ -392,7 +392,7 @@ def test_check_source_typeddict_inheritance_lines(imports: str):
     offset = len(imports.splitlines())
     assert [
         (d["line"], d["message"])
-        for d in check_source(source, dialect="postgres")
+        for d in check_source(source, Settings(dialect="postgres"))
         if d["rule"] == "typeddict-inheritance"
     ] == [
         (5 + offset, "Middle cannot add key 'name' to closed base Base"),

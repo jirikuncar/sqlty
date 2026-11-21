@@ -299,6 +299,8 @@ pub(super) fn resolve(reference: &str, scope: &Scope) -> Table {
 #[derive(Clone, Default)]
 pub(super) struct Virtuals {
     tables: Rc<HashMap<String, Rc<[Column]>>>,
+    /// The names of the tables wider than [`INDEXED_WIDTH`].
+    names: Rc<HashMap<String, Rc<NameIndex>>>,
     /// Output columns no two rows of a table share, when known (see `output_key`).
     keys: Rc<HashMap<String, Vec<String>>>,
     /// Subqueries analyzed against exactly these tables; any insert starts a fresh memo.
@@ -316,6 +318,15 @@ impl Virtuals {
 
     pub(super) fn insert(&mut self, table: String, columns: Vec<Column>) {
         self.set_key(&table, None);
+        match NameIndex::of(&columns) {
+            Some(index) => {
+                Rc::make_mut(&mut self.names).insert(table.clone(), Rc::new(index));
+            }
+            None if self.names.contains_key(&table) => {
+                Rc::make_mut(&mut self.names).remove(&table);
+            }
+            None => {}
+        }
         Rc::make_mut(&mut self.tables).insert(table, columns.into());
         self.memo = SubqueryMemo::default();
     }
@@ -337,6 +348,42 @@ impl Virtuals {
     }
 }
 
+/// Narrower relations are scanned: building an index costs more than the lookups it saves.
+const INDEXED_WIDTH: usize = 64;
+
+/// The positions of a relation's columns by lower-cased name, in column order.
+pub(super) struct NameIndex(HashMap<String, Vec<u32>>);
+
+impl NameIndex {
+    pub(super) fn of(columns: &[Column]) -> Option<Self> {
+        (columns.len() > INDEXED_WIDTH).then(|| {
+            let mut names: HashMap<String, Vec<u32>> = HashMap::new();
+            for (at, column) in (0..).zip(columns) {
+                names
+                    .entry(column.name.to_lowercase())
+                    .or_default()
+                    .push(at);
+            }
+            NameIndex(names)
+        })
+    }
+
+    /// The first of `columns` (the ones indexed) whose name is `column` as `same` matches it,
+    /// which never matches names that differ in more than case.
+    fn find<'c>(
+        &self,
+        columns: &'c [Column],
+        column: &str,
+        same: impl Fn(&str) -> bool,
+    ) -> Option<&'c Column> {
+        self.0
+            .get(&*column.to_lowercase())?
+            .iter()
+            .map(|&at| &columns[at as usize])
+            .find(|col| same(&col.name))
+    }
+}
+
 /// The lower-case name of a function called in `FROM`, without its schema.
 fn function_name_of(name: &ObjectName) -> String {
     name.0
@@ -350,6 +397,56 @@ impl<'a> Analyzer<'a> {
     /// Columns of a CTE, derived table or schema view; a CTE hides a view of its name.
     pub(super) fn virtual_columns(&self, table: &str) -> Option<&[Column]> {
         self.virtuals.get(table).or_else(|| self.schema.view(table))
+    }
+
+    /// The first column of [`Self::virtual_columns`] named `column`, as `same_column`
+    /// matches it; `None` when `table` is not one.
+    pub(super) fn virtual_column(&self, table: &str, column: &str) -> Option<Option<&Column>> {
+        let columns = self.virtual_columns(table)?;
+        let index = self.name_index(table, columns);
+        let same = |name: &str| self.same_column(name, column);
+        Some(match index {
+            Some(index) => index.find(columns, column, same),
+            None => columns.iter().find(|col| same(&col.name)),
+        })
+    }
+
+    /// Whether [`Self::virtual_columns`] of `table` hold a `*` the analyzer could not read.
+    pub(super) fn has_unknown_star(&self, table: &str) -> bool {
+        let Some(columns) = self.virtual_columns(table) else {
+            return false;
+        };
+        match self.name_index(table, columns) {
+            Some(index) => index.0.get("*").is_some_and(|stars| {
+                stars
+                    .iter()
+                    .any(|&at| columns[at as usize].is_unknown_star())
+            }),
+            None => columns.iter().any(Column::is_unknown_star),
+        }
+    }
+
+    /// The index of `columns`, the virtual columns of `table`, when it is wide.
+    fn name_index(&self, table: &str, columns: &[Column]) -> Option<Rc<NameIndex>> {
+        match self.virtuals.names.get(table) {
+            Some(index) => Some(Rc::clone(index)),
+            None if self.virtuals.contains_key(table) => None,
+            None => self.view_index(table, columns),
+        }
+    }
+
+    fn view_index(&self, view: &str, columns: &[Column]) -> Option<Rc<NameIndex>> {
+        if columns.len() <= INDEXED_WIDTH {
+            return None;
+        }
+        if let Some(index) = self.view_names.borrow().get(view) {
+            return Some(Rc::clone(index));
+        }
+        let index = Rc::new(NameIndex::of(columns)?);
+        self.view_names
+            .borrow_mut()
+            .insert(view.to_string(), Rc::clone(&index));
+        Some(index)
     }
 
     /// Rows of a call to the function `name` with `args` arguments in `FROM`, when the
@@ -771,7 +868,7 @@ impl<'a> Analyzer<'a> {
 mod tests {
     use sqlparser::ast::{SetExpr, Statement};
 
-    use super::super::test_support::{reports, statement};
+    use super::super::test_support::{report, reports, statement};
     use super::*;
 
     fn from_of(sql: &str) -> Vec<TableWithJoins> {
@@ -921,6 +1018,45 @@ mod tests {
     }
 
     #[test]
+    fn a_wide_relation_resolves_columns_as_a_narrow_one() {
+        let ddl = |width: usize| {
+            let columns: Vec<String> = (0..width).map(|i| format!("c{i} int")).collect();
+            let constants: String = (0..width).map(|i| format!(", 1 AS c{i}")).collect();
+            format!(
+                "CREATE TABLE w ({}, k text NOT NULL, \"K\" int); CREATE VIEW v AS SELECT * FROM w;
+                CREATE VIEW s AS SELECT n.*{constants} FROM nope AS n;",
+                columns.join(", ")
+            )
+        };
+        let filler = |width: usize| (0..width).map(|i| format!(", c{i}")).collect::<String>();
+        for dialect in ["postgres", "sqlite"] {
+            let queries = |width: usize| {
+                [
+                    "WITH c AS (SELECT * FROM w) SELECT k, \"K\", c1, nope FROM c".to_string(),
+                    "SELECT K, c1 FROM (SELECT * FROM w) AS d".to_string(),
+                    "SELECT k, \"K\", c1 FROM v".to_string(),
+                    format!(
+                        "SELECT x FROM (SELECT c1 AS x, k AS x{} FROM w) AS d",
+                        filler(width)
+                    ),
+                    "SELECT bogus FROM s".to_string(),
+                    format!(
+                        "SELECT bogus FROM (SELECT n.*{} FROM w, nope AS n) AS d",
+                        filler(width)
+                    ),
+                ]
+            };
+            for (narrow, wide) in queries(2).iter().zip(queries(INDEXED_WIDTH)) {
+                assert_eq!(
+                    report(narrow, dialect, Some(&ddl(2))),
+                    report(&wide, dialect, Some(&ddl(INDEXED_WIDTH))),
+                    "{dialect}: {wide}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn virtuals_share_until_inserted_into() {
         let mut first = Virtuals::default();
         assert!(!first.contains_key("c"));
@@ -931,6 +1067,11 @@ mod tests {
         assert!(!second.contains_key("d"));
         assert_eq!(first.get("c").map(<[Column]>::len), Some(1));
         assert!(first.get("d").is_some_and(<[Column]>::is_empty));
+        let wide = (0..=INDEXED_WIDTH).map(|i| Column::unknown(&format!("c{i}")));
+        first.insert("c".into(), wide.collect());
+        assert!(first.names.contains_key("c") && !second.names.contains_key("c"));
+        first.insert("c".into(), Vec::new());
+        assert!(!first.names.contains_key("c"));
     }
 
     const DDL: &str = "CREATE TABLE a (id INT NOT NULL, x TEXT NOT NULL, shared TEXT); \
