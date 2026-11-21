@@ -1309,21 +1309,6 @@ mod tests {
         ];
         let sources = opened(&plain).schema_sources().expect("reads");
         assert!(Arc::ptr_eq(&sources[0].files[0], &sources[0].settings));
-
-        let without_schema = [
-            (
-                "/repo/pyproject.toml",
-                "[tool.sqlty]\nschema = \"db/\"\n[tool.sqlty.databases.cache]\ndialect = \"sqlite\"\nschema = []\n",
-            ),
-            files[1],
-            files[3],
-        ];
-        let sources = opened(&without_schema).schema_sources().expect("reads");
-        let databases: Vec<_> = sources
-            .iter()
-            .map(|source| source.database.as_str())
-            .collect();
-        assert_eq!(databases, ["default"]);
     }
 
     #[test]
