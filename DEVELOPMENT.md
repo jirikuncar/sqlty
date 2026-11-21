@@ -149,6 +149,9 @@ database rejects is skipped, with the reason.
   the rule page.
 - `variants`: generated functions run by a model for every input against the
   query variants sqlty reads.
+- `suppress`: `-- sqlty: ignore` comments in random `.sql` lines (blank lines,
+  comment runs, strings, `\r`, `\r\n`) against a model of which line each covers
+  and which diagnostics and `unused-ignore` it leaves.
 
 ```bash
 SQLTY_FUZZ_EXAMPLES=2000 SQLTY_PG_DSN=postgresql:///scratch SQLTY_FUZZ_PYTHON=.venv/bin/python \

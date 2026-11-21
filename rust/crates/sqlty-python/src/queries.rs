@@ -26,6 +26,7 @@ use sqlty_sql::analyzer::{database_name, parse, route_named, statement_ranges, u
 
 use crate::checker::{star_finding, unparsed_message, Diagnostic};
 use crate::options::Options;
+use crate::rewriter::LineIndex;
 use crate::rules::{Rule, RuleConfig, SQL_RULES};
 
 /// How a `.sql` file names its queries (`query-format`).
@@ -263,13 +264,14 @@ pub fn check_queries(
         None => (options.dialect.name(), None),
     };
     let mut found = Vec::new();
+    let lines = LineIndex::new(source);
     let mut report = |rule: Rule, message: String, span: Range<usize>| {
         if rules.is_enabled(rule) {
             found.push(Diagnostic {
                 rule,
                 message,
                 severity: rules.severity(rule),
-                line: source[..span.start].matches('\n').count() + 1,
+                line: lines.line_at(span.start),
                 span,
                 fix: Vec::new(),
             });

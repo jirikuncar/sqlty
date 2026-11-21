@@ -9,4 +9,5 @@ mod engine;
 mod foreign_keys;
 mod params;
 mod python;
+mod suppress;
 mod variants;

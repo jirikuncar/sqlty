@@ -107,7 +107,8 @@ pub fn unparsed_ignores(text: &str) -> Vec<Ignore> {
 
 /// The `-- sqlty: ignore` comments of a `.sql` file, the first of each line. One alone on its
 /// line covers the next line that is not a `--` comment; a blank line or the end of the file
-/// first leaves it covering its own line, where it suppresses nothing.
+/// first leaves it covering its own line, where it suppresses nothing. Lines end at `\n`, as
+/// the diagnostics of queries and migrations count them, so a lone `\r` ends none.
 pub fn sql_ignores(text: &str) -> Vec<Ignore> {
     #[expect(clippy::expect_used, reason = "the pattern is written here")]
     static IGNORE: LazyLock<regex::bytes::Regex> = LazyLock::new(|| {
@@ -117,16 +118,16 @@ pub fn sql_ignores(text: &str) -> Vec<Ignore> {
     if !text.contains("sqlty:") {
         return Vec::new();
     }
-    let lines = Lines::new(text);
     let mut found: Vec<Ignore> = Vec::new();
     let mut waiting: Vec<usize> = Vec::new();
-    for line in 1.. {
-        let start = lines.start(line, text.len());
-        if start == text.len() {
-            break;
-        }
-        let end = lines.start(line + 1, text.len());
-        let row = &text.as_bytes()[start..end];
+    let mut start = 0;
+    for (row, line) in text
+        .as_bytes()
+        .split_inclusive(|&byte| byte == b'\n')
+        .zip(1..)
+    {
+        let row_start = start;
+        start += row.len();
         if let Some(matched) = IGNORE.captures(row) {
             let whole = matched.get_match();
             let alone = row[..whole.start()].iter().all(u8::is_ascii_whitespace);
@@ -141,7 +142,7 @@ pub fn sql_ignores(text: &str) -> Vec<Ignore> {
                         .map(str::to_string)
                         .collect()
                 }),
-                span: (start + whole.start(), start + whole.end()),
+                span: (row_start + whole.start(), row_start + whole.end()),
             });
             if alone {
                 waiting.push(found.len() - 1);
@@ -369,7 +370,7 @@ mod tests {
             fix: Vec::new(),
         };
         let rules = RuleConfig::default().only(&[Rule::SelectStar, Rule::UnusedIgnore]);
-        let kept = apply_sql(&found, vec![diagnostic(Rule::SelectStar, 5)], &rules);
+        let kept = apply_sql(&found, vec![diagnostic(Rule::SelectStar, 4)], &rules);
         let messages: Vec<_> = kept.iter().map(|found| found.message.as_str()).collect();
         assert_eq!(
             messages,
@@ -417,6 +418,13 @@ mod tests {
         assert_eq!(
             covers("-- sqlty: ignore\nSELECT 1;\n-- sqlty: ignore\n\nSELECT 2;"),
             [(1, 2), (3, 3)]
+        );
+        // Diagnostics, the CLI and the language server end lines at `\n` only.
+        assert_eq!(covers("-- sqlty: ignore\rSELECT 1;\nSELECT 2;"), [(1, 2)]);
+        assert_eq!(covers("SELECT 1;\r-- sqlty: ignore\nSELECT 2;"), [(1, 1)]);
+        assert_eq!(
+            covers("SELECT 1;\r\r-- sqlty: ignore[a]\nSELECT 2;"),
+            [(1, 1)]
         );
         let many = "-- sqlty: ignore\n".repeat(1000) + "SELECT 1;";
         assert!(covers(&many).iter().all(|&(_, covered)| covered == 1001));
