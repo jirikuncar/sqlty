@@ -46,10 +46,6 @@ mod text;
 mod uri;
 mod worker;
 
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests;
-
 /// The code action kind of `sqlty check --fix`, run by `editor.codeActionsOnSave`.
 pub const FIX_ALL: &str = "source.fixAll.sqlty";
 

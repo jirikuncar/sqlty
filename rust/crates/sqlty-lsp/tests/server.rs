@@ -1,3 +1,10 @@
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a test fails on any unexpected answer"
+)]
+
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
@@ -9,7 +16,15 @@ use serde_json::{json, Value};
 
 use sqlty_sql::analyzer::{load_schema_with_skipped, Schema};
 
-use crate::{run, CompletionContext, Diagnostic, Edit, Settings, Severity, Workspace};
+use sqlty_lsp::{run, CompletionContext, Diagnostic, Edit, Settings, Severity, Workspace};
+
+/// The server's grace period for a running check at exit (`EXIT_GRACE` in lib.rs).
+const EXIT_GRACE: Duration = Duration::from_secs(1);
+
+/// The `file:` URI of an absolute path.
+fn uri(path: &Path) -> String {
+    url::Url::from_file_path(path).unwrap().to_string()
+}
 
 /// Users and orders, and 540 tables `t0`..`t539`.
 static SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
@@ -65,7 +80,7 @@ impl Workspace for Fake {
             std::thread::sleep(Duration::from_millis(5));
         }
         if text.contains("hang") {
-            std::thread::sleep(3 * crate::EXIT_GRACE);
+            std::thread::sleep(3 * EXIT_GRACE);
         }
         let severity = if text.contains("warned") {
             Severity::Warning
@@ -474,7 +489,7 @@ fn a_running_check_does_not_hold_up_exit() {
     client.open("file:///work/q.py", "hang bad\n");
     let stopping = std::time::Instant::now();
     let rest = client.shutdown();
-    assert!(stopping.elapsed() < 2 * crate::EXIT_GRACE);
+    assert!(stopping.elapsed() < 2 * EXIT_GRACE);
     assert!(
         !rest
             .iter()
@@ -536,15 +551,15 @@ fn breaking_changes_in_files_that_are_not_open_are_published() {
     let root = std::env::temp_dir().join(format!("sqlty-lsp-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(root.join("old.py"), "q = bio\n").unwrap();
-    let folder = crate::uri::from_path(&root).unwrap();
-    let old = crate::uri::from_path(&root.join("old.py")).unwrap();
+    let folder = uri(&root);
+    let old = uri(&root.join("old.py"));
     let options = json!({"breaking": {"against": "main", "direction": "both"}});
     let mut client = Client::with(
         &json!({}),
         &json!([{"uri": folder, "name": "work"}]),
         &options,
     );
-    let new = crate::uri::from_path(&root.join("new.py")).unwrap();
+    let new = uri(&root.join("new.py"));
     client.open(new.as_str(), "ok\n");
     let published = client.notification("textDocument/publishDiagnostics");
     assert_eq!(published["uri"], old.as_str());
@@ -574,7 +589,7 @@ fn breaking_changes_in_files_that_are_not_open_are_published() {
 
     client.notify(
         "workspace/didChangeWatchedFiles",
-        json!({"changes": [{"uri": crate::uri::from_path(&root.join("schema.sql")).unwrap(), "type": 2}]}),
+        json!({"changes": [{"uri": uri(&root.join("schema.sql")), "type": 2}]}),
     );
     let reloaded = loop {
         let published = client.notification("textDocument/publishDiagnostics");
@@ -1170,20 +1185,20 @@ fn breaking_changes_gone_after_a_reload_are_cleared_unless_open() {
     let root = std::env::temp_dir().join(format!("sqlty-lsp-once-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(root.join("old.py"), "q = bio\n").unwrap();
-    let folder = crate::uri::from_path(&root).unwrap();
-    let old = crate::uri::from_path(&root.join("old.py")).unwrap();
+    let folder = uri(&root);
+    let old = uri(&root.join("old.py"));
     let mut client = Client::with(
         &json!({}),
         &json!([{"uri": folder, "name": "work"}]),
         &json!({"breaking": {"against": "once"}}),
     );
-    let new = crate::uri::from_path(&root.join("new.py")).unwrap();
+    let new = uri(&root.join("new.py"));
     client.open(new.as_str(), "ok\n");
     let published = client.notification("textDocument/publishDiagnostics");
     assert_eq!(published["uri"], old.as_str());
     client.notify(
         "workspace/didChangeWatchedFiles",
-        json!({"changes": [{"uri": crate::uri::from_path(&root.join("schema.sql")).unwrap(), "type": 2}]}),
+        json!({"changes": [{"uri": uri(&root.join("schema.sql")), "type": 2}]}),
     );
     let cleared = loop {
         let published = client.notification("textDocument/publishDiagnostics");
@@ -1241,8 +1256,8 @@ fn an_open_file_keeps_its_own_breaking_changes() {
     let root = std::env::temp_dir().join(format!("sqlty-lsp-open-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(root.join("old.py"), "q = bio\n").unwrap();
-    let folder = crate::uri::from_path(&root).unwrap();
-    let old = crate::uri::from_path(&root.join("old.py")).unwrap();
+    let folder = uri(&root);
+    let old = uri(&root.join("old.py"));
     let mut client = Client::with(
         &json!({}),
         &json!([{"uri": folder, "name": "work"}]),
@@ -1259,9 +1274,9 @@ fn an_open_file_keeps_its_own_breaking_changes() {
 /// The test runs itself as the server, on its own standard input and output.
 #[test]
 fn stdio_serves_standard_input_and_output() {
-    const NAME: &str = "tests::stdio_serves_standard_input_and_output";
+    const NAME: &str = "stdio_serves_standard_input_and_output";
     if std::env::var_os("SQLTY_LSP_STDIO").is_some() {
-        crate::stdio(|_: &Path, _: &Settings| Ok(Plain)).unwrap();
+        sqlty_lsp::stdio(|_: &Path, _: &Settings| Ok(Plain)).unwrap();
         return;
     }
     let mut server = std::process::Command::new(std::env::current_exe().unwrap())
