@@ -9,6 +9,6 @@ sqlty-lsp 44
 sqlty-project 33
 sqlty-python 193
 sqlty-rules 7
-sqlty-sql 187
+sqlty-sql 190
 sqlty-wasm 34
 python 20

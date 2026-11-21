@@ -179,3 +179,10 @@ fn a_field_chain_splits_after_the_table_and_column() {
         Some("tuple[int | None]")
     );
 }
+
+#[test]
+fn a_scalar_subquery_is_named_by_the_leftmost_select_of_its_query() {
+    assert_eq!(name("(SELECT 1 AS y UNION SELECT 2 AS z)"), "y");
+    assert_eq!(name("((SELECT 1 AS y))"), "y");
+    assert_eq!(name("(VALUES (1))"), "values");
+}

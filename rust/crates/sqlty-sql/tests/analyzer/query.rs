@@ -1,5 +1,5 @@
 use crate::support::*;
-use sqlty_sql::analyzer::{analyze_select, analyze_with_diagnostics, Column};
+use sqlty_sql::analyzer::{analyze_select, analyze_with_diagnostics, expand_star, Column};
 
 const DDL: &str = "CREATE TABLE a (id INT NOT NULL, label TEXT, score NUMERIC(5, 2) NOT NULL); \
                    CREATE TABLE b (id BIGINT, label VARCHAR(20) NOT NULL, score DOUBLE PRECISION); \
@@ -303,4 +303,15 @@ fn the_text_of_an_untyped_expression_is_cut_on_a_character_boundary() {
         message(&wide),
         format!("expression `{cut}...` is not typed")
     );
+}
+
+#[test]
+fn a_star_is_expanded_in_the_leftmost_select_of_a_set_operation() {
+    let schema = load_schema("CREATE TABLE t (id INT NOT NULL, n TEXT)", "postgres");
+    let expand = |sql: &str| expand_star(sql, "postgres", Some(&schema));
+    assert_eq!(
+        expand("SELECT * FROM t UNION SELECT 1, 'a'").as_deref(),
+        Some("SELECT id::INT, n::TEXT FROM t UNION SELECT 1, 'a'")
+    );
+    assert_eq!(expand("VALUES (1)"), None);
 }

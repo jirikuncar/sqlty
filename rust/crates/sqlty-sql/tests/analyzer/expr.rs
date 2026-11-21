@@ -159,6 +159,8 @@ fn range_element_names_the_bound_type() {
             "{range}"
         );
     }
+    // Named like a range but not one that has bounds.
+    assert_eq!(column_of("SELECT lower(r) FROM t", "r FOORANGE").1, "");
     // Not a range: `lower` is the string function.
     assert_eq!(column_of("SELECT lower(r) FROM t", "r INT").1, "TEXT");
 }
