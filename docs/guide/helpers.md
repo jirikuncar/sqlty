@@ -212,7 +212,7 @@ two agree on other code. It follows less than ty does:
 | `isinstance(x, Db)` on a name of an unrelated class or of a type variable | the intersection | skipped; of a union, the members that are `Db` or a subclass of it |
 | `isinstance(x, (A, B))`, `type(x) is Db`, `match` class patterns, `TypeGuard` | narrowed | not narrowed |
 | A generic class, `Box[Db]().item` | `Db` | `Box` is followed, its type arguments are not |
-| A class defined in a function or in another class | followed | skipped |
+| A class defined in a function or in another class | followed | only the helpers it declares itself, when it is the only class of its name in the module and the scope around it binds that name once; its bases and attributes are not followed |
 | A name a comprehension, a `lambda`, `global` or `nonlocal` binds | followed | skipped |
 | `self.db` assigned from a local variable of `__init__` | the inferred type | skipped; a parameter with an annotation is followed |
 | A class whose bases have no consistent order, or a base that is not found | an error, `Unknown` | skipped unless the class itself declares the method |

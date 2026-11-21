@@ -1267,6 +1267,80 @@ def run() -> None:
 # error:
 ```
 
+### A class in a class or in a function declares its own helpers
+
+Of a class defined in another class or in a function, the helpers it declares itself
+are known: on `self` in its methods, and on the name where it is defined.
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+class Outer:
+    class Query:
+        def one[T](self, query: Annotated[LiteralString, SQL], form: type[T], /) -> T | None: ...
+
+        def first(self) -> None:
+            # error: [column-type-mismatch]
+            self.one("SELECT name FROM users", int)
+
+def run() -> None:
+    class Local:
+        def one[T](self, query: Annotated[LiteralString, SQL], form: type[T], /) -> T | None: ...
+
+        def first(self) -> None:
+            # error: [column-type-mismatch]
+            self.one("SELECT name FROM users", int)
+
+    made = Local()
+    # error: [column-type-mismatch]
+    made.one("SELECT name FROM users", int)
+```
+
+A name the scope around the class binds again may be another class by the time it is
+used, and two classes of one name are not told apart: both are skipped.
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def make(): ...
+
+def rebound() -> None:
+    class Local:
+        def one[T](self, query: Annotated[LiteralString, SQL], form: type[T], /) -> T | None: ...
+
+        def first(self) -> None:
+            self.one("SELECT name FROM users", int)
+
+    Local = make()
+    made = Local()
+    made.one("SELECT name FROM users", int)
+
+def one_of_two() -> None:
+    class Twice:
+        def one[T](self, query: Annotated[LiteralString, SQL], form: type[T], /) -> T | None: ...
+
+    made = Twice()
+    made.one("SELECT name FROM users", int)
+
+def other_of_two() -> None:
+    class Twice:
+        def one(self, query, form): ...
+
+        def first(self) -> None:
+            self.one("SELECT name FROM users", int)
+
+def shadowed(Hidden) -> None:
+    class Hidden:
+        def one[T](self, query: Annotated[LiteralString, SQL], form: type[T], /) -> T | None: ...
+
+    made = Hidden()
+    made.one("SELECT name FROM users", int)
+
+# error:
+```
+
 ### A lambda and a generator run later
 
 The body runs when it is called or iterated, so the name is whatever the function

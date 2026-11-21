@@ -88,6 +88,10 @@ const FUEL: u32 = 2000;
 /// The module of the class that stands for a base that is not known.
 const NOWHERE: &str = "\0";
 
+/// The module of a class defined in a function or in another class of the checked
+/// module, named by its scope: only the helpers it declares itself are known of it.
+const NESTED: &str = "\0nested";
+
 #[cfg(test)]
 thread_local! {
     /// The steps the resolvers of this thread took: values evaluated and classes asked
@@ -291,6 +295,8 @@ pub enum Val {
     Entered(Box<Val>, bool),
     /// The class of this name, defined at the top of the module.
     Class(String),
+    /// A class defined in a function or in another class, by where its name is written.
+    Nested(u32),
     /// The function of this name, defined at the top of the module.
     Function(String),
     /// `from module import original as local`, the module named in full.
@@ -433,8 +439,8 @@ fn imported(stmt: &Stmt, alias: &Alias, name: &str, module: Option<&str>) -> Val
 }
 
 /// What a binding of `name` gives it in the module `module`, and where the expression to
-/// evaluate is written. A class and a function are followed at the top of a module only:
-/// in a function they hide the name.
+/// evaluate is written. A function is followed at the top of a module only, and of a
+/// class defined elsewhere only the helpers it declares are (see [`Resolver::nested`]).
 fn bound(origin: Origin<'_>, name: &str, top: bool, module: Option<&str>) -> (Val, Option<u32>) {
     match origin {
         Origin::Declared(declared, _) => (Val::Declared(annotation(declared, 0)), None),
@@ -446,9 +452,8 @@ fn bound(origin: Origin<'_>, name: &str, top: bool, module: Option<&str>) -> (Va
         Origin::Class(_) if top => (Val::Class(name.to_string()), None),
         Origin::Function(_) if top => (Val::Function(name.to_string()), None),
         Origin::Import(stmt, alias) => (imported(stmt, alias, name, module), None),
-        Origin::Class(_) | Origin::Function(_) | Origin::Parameter | Origin::Unknown => {
-            (Val::Unknown, None)
-        }
+        Origin::Class(class) => (Val::Nested(class.name.start().to_u32()), None),
+        Origin::Function(_) | Origin::Parameter | Origin::Unknown => (Val::Unknown, None),
     }
 }
 
@@ -764,6 +769,8 @@ pub struct Resolver<'s, 'a> {
     globals: RefCell<HashMap<String, HashMap<String, Option<Value>>>>,
     /// What a dotted name of an annotation is, read where no scope binds its head.
     spelled: RefCell<HashMap<String, Option<Value>>>,
+    /// How many classes of the module have each name, counted once.
+    named_classes: RefCell<Option<HashMap<String, usize>>>,
     /// The helper each method of each class is: asked once.
     methods: RefCell<HashMap<String, HashMap<Class, Option<&'s Helper>>>>,
     /// What each lone declaration states, by where its annotation is written.
@@ -805,6 +812,7 @@ impl<'s, 'a> Resolver<'s, 'a> {
             agreed: RefCell::default(),
             reached: RefCell::default(),
             stated: RefCell::default(),
+            named_classes: RefCell::default(),
             methods: RefCell::default(),
             globals: RefCell::default(),
             spelled: RefCell::default(),
@@ -874,6 +882,37 @@ impl<'s, 'a> Resolver<'s, 'a> {
         found.filter(|found| !on_class || found.kind != Kind::Instance)
     }
 
+    /// The class of the scope `scope`, defined in a function or in another class, when
+    /// it is the only class of its name in the module and the scope around it binds
+    /// that name once: nothing else can then be meant by the name, or own its helpers.
+    fn nested(&self, scope: Scope) -> Option<Class> {
+        let Node::Class(class) = self.scan.scopes[scope] else {
+            return None;
+        };
+        let name = class.name.as_str();
+        let around = self.scan.parents[scope];
+        let ([only], false) = (
+            self.scan.bindings(around, name)?,
+            self.scan.shadows(around, name),
+        ) else {
+            return None;
+        };
+        if !matches!(only.origin, Origin::Class(_)) {
+            return None;
+        }
+        let mut named = self.named_classes.borrow_mut();
+        let counts = named.get_or_insert_with(|| {
+            let mut counts: HashMap<String, usize> = HashMap::new();
+            for node in &self.scan.scopes {
+                if let Node::Class(class) = node {
+                    *counts.entry(class.name.to_string()).or_default() += 1;
+                }
+            }
+            counts
+        });
+        (counts.get(name) == Some(&1)).then(|| Class::new(NESTED, &scope.to_string()))
+    }
+
     /// The helper the method `name` of `class` is, on the class or on an instance.
     fn method_in(&self, class: &Class, name: &str) -> Option<&'s Helper> {
         // A class whose bases have no order still has the methods it declares itself.
@@ -882,6 +921,15 @@ impl<'s, 'a> Resolver<'s, 'a> {
             .as_deref()
             .map_or(std::slice::from_ref(class), Vec::as_slice);
         for base in classes {
+            if base.module == NESTED {
+                // The helpers of the module are kept by the name of their class, which
+                // no other class of the module has (see `nested`).
+                let scope: Scope = base.name.parse().ok()?;
+                let Node::Class(class) = self.scan.scopes.get(scope)? else {
+                    return None;
+                };
+                return self.own.get(&format!("{}.{name}", class.name));
+            }
             let key = format!("{}.{name}", base.name);
             let own = (base.module == self.module)
                 .then(|| self.own.get(&key))
@@ -949,7 +997,7 @@ impl<'s, 'a> Resolver<'s, 'a> {
                 kept.unwrap_or_else(|| Arc::new(read()))
             })));
         }
-        if KNOWN.contains(&module) || module.is_empty() || module == NOWHERE {
+        if KNOWN.contains(&module) || module.is_empty() || module == NOWHERE || module == NESTED {
             return None;
         }
         if let Some(known) = self.read.borrow().get(module) {
@@ -1032,6 +1080,11 @@ impl<'s, 'a> Resolver<'s, 'a> {
                 self.enter(&entered, *is_async, depth + 1)
             }
             Val::Class(name) => Some(Value::Type(Class::new(env.module, name))),
+            Val::Nested(site) => {
+                let local = env.module == self.module;
+                let scope = self.scan.class_at(*site).filter(|_| local)?;
+                self.nested(scope).map(Value::Type)
+            }
             Val::Function(name) => Some(Value::Function {
                 module: env.module.to_string(),
                 class: None,
@@ -1159,11 +1212,15 @@ impl<'s, 'a> Resolver<'s, 'a> {
             if let (Node::Function(function), Some((class, top))) = (node, class) {
                 let rebound = bindings.is_some_and(|bindings| bindings.len() > 1);
                 if receiver_name(function) == Some(name) && !rebound {
-                    // A class in a function or in another class is not modelled.
-                    let class = Class::new(self.module, class.name.as_str());
+                    // Of a class in a function or in another class, only the helpers
+                    // it declares are known.
+                    let class = match top {
+                        true => Some(Class::new(self.module, class.name.as_str())),
+                        false => outer.and_then(|outer| self.nested(outer)),
+                    };
                     let on_class = method_kind(function) == Kind::Class
                         || matches!(function.name.as_str(), "__new__" | "__init_subclass__");
-                    return Some(top.then_some(match on_class {
+                    return Some(class.map(|class| match on_class {
                         true => Value::Type(class),
                         false => Value::Instance(class),
                     }));
@@ -2021,7 +2078,8 @@ mod tests {
             ["C"],
             "a class in a class or function is not modelled"
         );
-        assert_eq!(found.classes["C"].attrs["Inner"], [Val::Unknown]);
+        // Only by where it is written, for the helpers it declares itself.
+        assert_eq!(found.classes["C"].attrs["Inner"], [Val::Nested(73)]);
     }
 
     #[test]

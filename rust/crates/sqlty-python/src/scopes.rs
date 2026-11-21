@@ -99,6 +99,8 @@ pub struct Scan<'a> {
     pub strings: Vec<(&'a Expr, bool)>,
     /// The scopes around each scope's contents, innermost last, classes included.
     paths: Vec<Vec<Scope>>,
+    /// The scope of each class, by where its name is written.
+    classes: HashMap<u32, Scope>,
     operands: HashSet<usize>,
 }
 
@@ -204,6 +206,7 @@ impl<'a> Scan<'a> {
                 templates: Vec::new(),
                 strings: Vec::new(),
                 paths: vec![Vec::new()],
+                classes: HashMap::new(),
                 operands: HashSet::new(),
             },
         };
@@ -225,6 +228,11 @@ impl<'a> Scan<'a> {
         scan.sealed.values_mut().for_each(outermost);
         scan.called.values_mut().for_each(outermost);
         scan
+    }
+
+    /// The scope of the class whose name is written at offset `site`.
+    pub fn class_at(&self, site: u32) -> Option<Scope> {
+        self.classes.get(&site).copied()
     }
 
     /// Whether `scope` is a class.
@@ -439,6 +447,9 @@ impl<'a> Scan<'a> {
 
     fn enter(&mut self, node: Node<'a>) -> Scope {
         let scope = self.scopes.len();
+        if let Node::Class(class) = node {
+            self.classes.insert(class.name.start().to_u32(), scope);
+        }
         self.scopes.push(node);
         self.parents.push(self.scope());
         let mut path = self.stack.clone();
