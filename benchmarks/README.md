@@ -1,11 +1,12 @@
 # Benchmarks
 
-Two scripts; both need the release extension:
+The scripts other than `ab.py` (which builds its own native binaries) need the release extension:
 `uv run maturin develop --release --manifest-path rust/crates/sqlty-ext/Cargo.toml`.
 
 | Script | What it measures | Make target |
 |--------|------------------|-------------|
 | `bench_project.py` | A generated large project: CLI wall time and peak RSS | `make bench-project`, `make bench-ci`, `make bench-baseline` |
+| `ab.py` | `sqlty check` of a base ref vs the working tree, interleaved: CPU, wall, RSS, output identity, CPU per query across scales | `make bench-ab` |
 | `test_benchmarks.py` | Each query kind, the schema load, `rewrite_source`, `check_source`, and completion at 50, 540 and 5000 tables, through CodSpeed | `make bench-codspeed` |
 
 ## The synthetic project
@@ -28,6 +29,8 @@ maximum of `--repeats` runs (RSS from `wait4` of that child).
 
 - `check`: `sqlty check` over the project.
 - `rewrite_check`: `sqlty rewrite --check` (no files change).
+- `breaking`: `sqlty breaking --against HEAD` after three new schema statements, at most
+  three runs: each checks out the baseline.
 - `schema_load`: parse the 400-500 table schema through one `analyze_select`.
 - `schema_load_unresolved_alters`: 2000 tables plus 2000 `ALTER TABLE` on tables
   that do not exist.
@@ -60,6 +63,18 @@ in `baseline.json`:
   a shared runner can slow one run, and only the last run fails the job.
 - The baseline is keyed by platform and size (`Darwin-ci`, `Linux-ci`). With no
   entry for the runner's platform the check passes and says so.
+
+## One query
+
+`one_query_us` is microseconds for `check_source` of a module holding one typical
+query of `one_query.sql` (point select, 3-table join, insert with parameters,
+aggregate), as `sqlty rewrite` types it, schema cached: what `sqlty check` spends per
+query. `make bench-ci` prints each against a database round trip (AGENTS.md "Check
+budget": 100 µs times the calibration over 20 ms), marked `OVER` or `under`. It is
+reported, not budgeted, until a one-query check fits: `ENFORCE_ONE_QUERY = True` in
+`bench_project.py` then fails the job, after measuring again up to three runs in all.
+`make bench-rust ARGS=one_query` times the same queries in Rust, with size sweeps
+(joins, selected columns, `IN` list items, `GROUP BY` keys).
 
 ## Updating the baseline
 
