@@ -76,6 +76,10 @@ pub struct Scan<'a> {
     paths: Vec<Vec<Scope>>,
     stack: Vec<Scope>,
     pub(crate) types: HashMap<(Scope, &'a str), Option<String>>,
+    /// The parameters of each function its body does not assign.
+    pub(crate) parameters: HashSet<(Scope, &'a str)>,
+    /// The type parameters of each generic function and class.
+    pub(crate) generics: HashSet<(Scope, &'a str)>,
     pub(crate) attributes: HashMap<(Scope, &'a str), Option<String>>,
     operands: HashSet<usize>,
     /// Every call, in visit order, with its innermost scope.
@@ -97,6 +101,8 @@ impl<'a> Scan<'a> {
                 paths: vec![Vec::new()],
                 stack: Vec::new(),
                 types: HashMap::new(),
+                parameters: HashSet::new(),
+                generics: HashSet::new(),
                 attributes: HashMap::new(),
                 operands: HashSet::new(),
                 calls: Vec::new(),
@@ -138,12 +144,22 @@ fn note<'a>(
 }
 
 impl<'a> Scan<'a> {
+    fn generic(&mut self, scope: Scope, params: Option<&'a ast::TypeParams>) {
+        for param in params.iter().flat_map(|params| &params.type_params) {
+            self.generics.insert((scope, param.name().as_str()));
+        }
+    }
+
     /// Records `name = Cls(...)`, `name: Cls` and `self.attr = ...` in a method, as `_Scan._typed`.
     fn typed(&mut self, targets: &[&'a Expr], kind: &Option<String>) {
         let scope = self.stack.last().copied().unwrap_or(0);
         for target in targets {
             match target {
-                Expr::Name(name) => note(&mut self.types, (scope, name.id.as_str()), kind.clone()),
+                Expr::Name(name) => {
+                    let key = (scope, name.id.as_str());
+                    self.parameters.remove(&key);
+                    note(&mut self.types, key, kind.clone());
+                }
                 Expr::Attribute(attr) => {
                     let Expr::Name(base) = attr.value.as_ref() else {
                         continue;
@@ -192,12 +208,11 @@ impl<'a> Visitor<'a> for Walker<'a> {
                     .chain(&parameters.kwonlyargs)
                 {
                     let kind = class_name(parameter.parameter.annotation.as_deref());
-                    note(
-                        &mut self.scan.types,
-                        (scope, parameter.parameter.name.as_str()),
-                        kind,
-                    );
+                    let key = (scope, parameter.parameter.name.as_str());
+                    self.scan.parameters.insert(key);
+                    note(&mut self.scan.types, key, kind);
                 }
+                self.scan.generic(scope, node.type_params.as_deref());
                 self.scan.stack.push(scope);
                 self.scan.paths.push(self.scan.stack.clone());
                 walk_stmt(self, stmt);
@@ -207,6 +222,7 @@ impl<'a> Visitor<'a> for Walker<'a> {
             Stmt::ClassDef(node) => {
                 let scope = self.scan.scopes.len();
                 self.scan.scopes.push(Node::Class(node));
+                self.scan.generic(scope, node.type_params.as_deref());
                 self.scan.stack.push(scope);
                 self.scan.paths.push(self.scan.stack.clone());
                 walk_stmt(self, stmt);

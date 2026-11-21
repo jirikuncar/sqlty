@@ -309,14 +309,29 @@ fn is_type_expr(expr: &Expr) -> bool {
 }
 
 /// `_bound_names`: how often each name is bound by a module-level statement, nested blocks
-/// included; the bodies of functions and classes bind none.
+/// included; the bodies of functions and classes, and the `else` of `if TYPE_CHECKING`, bind
+/// none. Importing what a name already holds does not bind it again.
 struct Bound<'a> {
     counts: HashMap<&'a str, usize>,
+    imported: HashMap<&'a str, String>,
 }
 
 impl<'a> Bound<'a> {
     fn bind(&mut self, name: &'a str) {
         *self.counts.entry(name).or_default() += 1;
+    }
+
+    /// Binds `name` to what `target` names, `typing_extensions` read as `typing`.
+    fn import(&mut self, name: &'a str, target: String) {
+        let target = match target.strip_prefix("typing_extensions.") {
+            Some(rest) => format!("typing.{rest}"),
+            None => target,
+        };
+        if self.counts.get(name) == Some(&1) && self.imported.get(name) == Some(&target) {
+            return;
+        }
+        self.bind(name);
+        self.imported.insert(name, target);
     }
 }
 
@@ -325,13 +340,27 @@ impl<'a> Visitor<'a> for Bound<'a> {
         match stmt {
             Stmt::FunctionDef(node) => self.bind(node.name.as_str()),
             Stmt::ClassDef(node) => self.bind(node.name.as_str()),
-            Stmt::Import(ast::StmtImport { names, .. })
-            | Stmt::ImportFrom(ast::StmtImportFrom { names, .. }) => {
-                for alias in names {
-                    let name = alias.asname.as_ref().unwrap_or(&alias.name).as_str();
-                    self.bind(name.split('.').next().unwrap_or(name));
+            Stmt::Import(node) => {
+                for alias in &node.names {
+                    let target = alias.name.as_str();
+                    match &alias.asname {
+                        Some(name) => self.import(name.as_str(), target.to_string()),
+                        None => {
+                            let root = target.split('.').next().unwrap_or(target);
+                            self.import(root, root.to_string());
+                        }
+                    }
                 }
             }
+            Stmt::ImportFrom(node) => {
+                let module = node.module.as_ref().map_or("", |module| module.as_str());
+                let dots = ".".repeat(node.level as usize);
+                for alias in &node.names {
+                    let name = alias.asname.as_ref().unwrap_or(&alias.name).as_str();
+                    self.import(name, format!("{dots}{module}.{}", alias.name));
+                }
+            }
+            Stmt::If(node) if is_type_checking(&node.test) => self.visit_body(&node.body),
             other => walk_stmt(self, other),
         }
     }
@@ -377,6 +406,7 @@ impl<'a> Visitor<'a> for Bound<'a> {
 fn bound_names(body: &[Stmt]) -> HashMap<&str, usize> {
     let mut bound = Bound {
         counts: HashMap::new(),
+        imported: HashMap::new(),
     };
     bound.visit_body(body);
     bound.counts
@@ -440,7 +470,7 @@ fn module_types(body: &[Stmt], aliases: &Table, imports: &Table) -> HashMap<Stri
                     Some("typing.NewType" | "typing_extensions.NewType")
                 ) && once(called.split('.').next().unwrap_or_default())
             });
-            if typing && !bound.contains_key("*") {
+            if typing {
                 found.insert(name.to_string(), Local::NewType(index));
             }
         }
@@ -589,5 +619,14 @@ impl<S: std::ops::Deref<Target = Source>> Names for ModuleTypes<S> {
                 found.map(Found::Type)
             }
         }
+    }
+}
+
+/// `TYPE_CHECKING`, or an attribute of that name.
+fn is_type_checking(test: &Expr) -> bool {
+    match test {
+        Expr::Name(name) => name.id.as_str() == "TYPE_CHECKING",
+        Expr::Attribute(attr) => attr.attr.as_str() == "TYPE_CHECKING",
+        _ => false,
     }
 }

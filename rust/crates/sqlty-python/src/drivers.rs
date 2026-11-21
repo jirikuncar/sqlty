@@ -12,7 +12,7 @@ use ruff_text_size::Ranged;
 
 use crate::arg_types::{ArgTypes, SourceTypes};
 use crate::frozen::Table;
-use crate::scopes::{dotted, is_scalar, qualified, Lines, Node, Scan, Scope};
+use crate::scopes::{dotted, is_scalar, Lines, Node, Scan, Scope};
 pub use crate::scopes::{Key, Param};
 
 const CONNECTIONS: [(&str, &str); 13] = [
@@ -100,7 +100,7 @@ pub fn find(source: &str, body: &[Stmt], imported: &Table) -> Vec<DriverCall> {
         body,
         imported,
         &scan,
-        &SourceTypes::new(None, imported, &scan, None),
+        &SourceTypes::imports_only(imported, &scan),
     )
 }
 
@@ -129,7 +129,6 @@ pub fn find_in<'a>(
         dotted.starts_with(BUNDLED_MODULE) || BUNDLED_MODULE.starts_with(&dotted)
     });
     let mut finder = Finder {
-        imported,
         scan,
         types,
         body,
@@ -152,7 +151,6 @@ pub fn find_in<'a>(
 type Binding<'a> = (Option<&'a Expr>, Option<&'a Expr>);
 
 struct Finder<'a, 's> {
-    imported: &'s Table,
     scan: &'s Scan<'a>,
     types: &'s dyn ArgTypes,
     body: &'a [Stmt],
@@ -322,7 +320,7 @@ impl<'a> Finder<'a, '_> {
 
     /// The query and parameters of a call to a `sqlty.drivers.psycopg` helper.
     fn bundled(&self, call: &'a ExprCall) -> Option<Vec<(&'a Expr, Option<&'a Expr>)>> {
-        let name = qualified(dotted(&call.func), self.imported)?;
+        let name = self.types.qualified(&call.func)?;
         let scalar = match name.strip_prefix(BUNDLED_MODULE)? {
             "execute" => false,
             "scalar" => true,
@@ -424,7 +422,7 @@ impl<'a> Finder<'a, '_> {
         chain: &[Scope],
     ) -> Option<&'static str> {
         if let Some(annotation) = annotation {
-            if let Some(name) = qualified(dotted(annotation), self.imported) {
+            if let Some(name) = self.types.qualified(annotation) {
                 if let Some((_, driver)) = CONNECTIONS
                     .iter()
                     .chain(&CURSORS)
@@ -441,7 +439,7 @@ impl<'a> Finder<'a, '_> {
         let Expr::Call(call) = value else {
             return None;
         };
-        if let Some(name) = qualified(dotted(&call.func), self.imported) {
+        if let Some(name) = self.types.qualified(&call.func) {
             if let Some((_, driver)) = CONNECTIONS.iter().find(|(known, _)| *known == name) {
                 return Some(driver);
             }

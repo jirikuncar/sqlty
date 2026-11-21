@@ -139,9 +139,11 @@ What makes a column nullable or not:
 
   A name the module binds more than once, anywhere at module level, or binds in a class
   or function around the argument, is of unknown type, and so is a `NewType` made with a
-  `NewType` the module binds again. A function that rebinds the name through `global`, or
-  binds it locally other than by an assignment or parameter (an import, `for`, `def`), is
-  not seen.
+  `NewType` the module binds again. Importing what a name already holds (in `try` and
+  `except`, or another submodule of a package) and the `else` of `if TYPE_CHECKING` do not
+  count. A function that rebinds the name through `global`, binds it locally other than by
+  an assignment, parameter or type parameter (an import, `for`, `def`), or a star import
+  that binds it, is not seen.
 
 [`nullable-mismatch`](../reference/rules/nullable-mismatch.md) reports a row type field
 that is not optional for a nullable column;

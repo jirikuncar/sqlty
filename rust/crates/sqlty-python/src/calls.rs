@@ -11,7 +11,7 @@ use ruff_python_ast::visitor::{walk_expr, Visitor};
 use ruff_python_ast::{Expr, ExprCall, Parameters, Stmt, StmtFunctionDef};
 use ruff_text_size::Ranged;
 
-use crate::arg_types::{ArgTypes, Project};
+use crate::arg_types::ArgTypes;
 use crate::compose::{self, Declared, Rendered};
 use crate::facts::ModuleFacts;
 use crate::helpers::{mentions, region};
@@ -469,13 +469,15 @@ fn wanted(call: &ExprCall) -> bool {
 }
 
 /// The calls of the helpers the module defines or imports from the
-/// modules of `helpers`, by line. A query built in a way that is not modelled (see
-/// [`compose`]) is left unchecked.
-pub fn helper_calls_in<'a>(
+/// modules of `helpers`, by line, their arguments typed by `types`, asked only when the
+/// module has some. A query built in a way that is not modelled (see [`compose`]) is left
+/// unchecked.
+pub fn helper_calls_in<'a, 't>(
     facts: &ModuleFacts<'a>,
     helpers: Option<&'a HelperIndex>,
     module: Option<&str>,
     variants: Option<usize>,
+    types: &dyn Fn() -> &'t dyn ArgTypes,
 ) -> Vec<Call<'a>> {
     let source = facts.source;
     let text = &*source.text;
@@ -523,7 +525,7 @@ pub fn helper_calls_in<'a>(
         return Vec::new();
     }
     let scan = facts.scan();
-    let types = facts.arg_types(helpers.map(|helpers| Project { helpers, module }));
+    let types = types();
     let lines = Lines::new(text);
     let (annotated, marker) = marker_names(source);
     let lookup = |module: &str, name: &str| helpers.and_then(|helpers| helpers.get(module, name));
@@ -672,7 +674,7 @@ pub fn helper_calls_in<'a>(
             variants: built.variants,
             declared: built.declared,
             row: argument(helper, call, helper.row.as_deref()),
-            params: call_params(helper, call, stack, &types),
+            params: call_params(helper, call, stack, types),
             end_line: Some(lines.line(call.end().to_usize().saturating_sub(1))),
             driver: None,
             single: None,

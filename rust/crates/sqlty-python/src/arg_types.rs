@@ -1,7 +1,8 @@
 //! The types of the values a module passes to its queries. [`ArgTypes`] is the one seam
 //! between the checks that read arguments and the resolver behind them: driver calls,
 //! helper calls and t-strings ask it, and [`SourceTypes`] answers from the module's
-//! [`Scan`] and the names [`ModuleTypes`] resolves.
+//! [`Scan`] and the names [`ModuleTypes`] resolves. Scopes are those of the [`Scan`] the
+//! checks walk, so another resolver maps them to its own.
 
 use std::cell::{OnceCell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -11,7 +12,9 @@ use ruff_python_ast::{self as ast, Expr};
 
 use crate::frozen::Table;
 use crate::index::HelperIndex;
-use crate::scopes::{class_of, dotted, literal_type, Key, Node, Param, Scan, Scope, IMPORTED};
+use crate::scopes::{
+    class_of, dotted, literal_type, qualified, Key, Node, Param, Scan, Scope, IMPORTED,
+};
 use crate::types::pydantic::Known;
 use crate::types::symbols::{Index, ModuleTypes, Source};
 use crate::types::ty::Ty;
@@ -22,8 +25,13 @@ pub trait ArgTypes {
     /// (`int`, `uuid.UUID`, `list[int]`, `None`); `None` when the source does not say.
     fn arg_type(&self, expr: &Expr, stack: &[Scope]) -> Option<String>;
 
-    /// The class of `self`, or of a variable or `self` attribute with an evident type.
+    /// The class of `self`, or of a variable or `self` attribute with an evident type, spelled
+    /// as the module spells it, which is how its helper methods are looked up.
     fn receiver_class(&self, receiver: &Expr, stack: &[Scope]) -> Option<String>;
+
+    /// The dotted name the name or attribute `expr` stands for through the module's imports:
+    /// `psycopg.Connection` for `Connection` after `from psycopg import Connection`.
+    fn qualified(&self, expr: &Expr) -> Option<String>;
 
     /// The arguments a tuple or list literal, or a dict literal of string keys, passes.
     fn literal_params(&self, arg: &Expr, stack: &[Scope]) -> Option<Vec<Param>> {
@@ -80,6 +88,7 @@ pub struct SourceTypes<'a, 's> {
     index: Option<Arc<dyn Index>>,
     names: OnceCell<Option<ModuleTypes<&'s Source>>>,
     classes: RefCell<HashMap<String, Option<String>>>,
+    constants: RefCell<HashMap<String, Option<String>>>,
 }
 
 impl<'a, 's> SourceTypes<'a, 's> {
@@ -99,7 +108,13 @@ impl<'a, 's> SourceTypes<'a, 's> {
             index: project.map(|project| project.helpers.types()),
             names: OnceCell::new(),
             classes: RefCell::default(),
+            constants: RefCell::default(),
         }
+    }
+
+    /// The types of a module known only by its imports: builtin and imported classes.
+    pub fn imports_only(imported: &'s Table, scan: &'s Scan<'a>) -> Self {
+        SourceTypes::new(None, imported, scan, None)
     }
 
     /// The type of the constant `dotted` imports from a checked module, unless `head` is
@@ -109,6 +124,18 @@ impl<'a, 's> SourceTypes<'a, 's> {
         if self.binds(stack, head) {
             return None;
         }
+        if let Some(found) = self.constants.borrow().get(dotted) {
+            return found.clone();
+        }
+        let found = self.constant(project, dotted);
+        self.constants
+            .borrow_mut()
+            .insert(dotted.to_string(), found.clone());
+        found
+    }
+
+    /// [`Self::imported_constant`], uncached.
+    fn constant(&self, project: Project<'s>, dotted: &str) -> Option<String> {
         let (source, value) = project
             .helpers
             .fragment(self.source?, dotted, project.module)?;
@@ -116,7 +143,7 @@ impl<'a, 's> SourceTypes<'a, 's> {
             Expr::Call(call) => self::dotted(&call.func)?,
             Expr::Name(name) => module_kinds(source).get(name.id.as_str())?.clone()?,
             value => {
-                return SourceTypes::new(None, &source.imports, &Scan::new(&[]), None)
+                return SourceTypes::imports_only(&source.imports, &Scan::new(&[]))
                     .arg_type(value, &[]);
             }
         };
@@ -137,14 +164,28 @@ impl<'a, 's> SourceTypes<'a, 's> {
 
     /// The class a variable holds in `stack`.
     fn type_of(&self, stack: &[Scope], name: &str) -> Option<String> {
-        stack
+        self.variable(stack, name).and_then(|(_, kind, _)| kind)
+    }
+
+    /// The class a variable holds in `stack`, with the scopes its annotation is read in, and
+    /// whether the innermost of them is a function it is a parameter of.
+    fn variable<'t>(
+        &self,
+        stack: &'t [Scope],
+        name: &str,
+    ) -> Option<(&'t [Scope], Option<String>, bool)> {
+        let found = stack
             .iter()
+            .enumerate()
             .rev()
-            .filter(|&&scope| !self.scan.is_class(scope))
-            .chain(std::iter::once(&0))
-            .find_map(|&scope| self.scan.types.get(&(scope, name)))
-            .cloned()
-            .flatten()
+            .filter(|&(_, &scope)| !self.scan.is_class(scope))
+            .find_map(|(at, &scope)| Some((at + 1, scope, self.scan.types.get(&(scope, name))?)));
+        let (end, scope, kind) = match found {
+            Some(found) => found,
+            None => (0, 0, self.scan.types.get(&(0, name))?),
+        };
+        let parameter = self.scan.parameters.contains(&(scope, name));
+        Some((&stack[..end], kind.clone(), parameter))
     }
 
     /// The class `self.name` holds in the innermost class of `stack`.
@@ -158,14 +199,19 @@ impl<'a, 's> SourceTypes<'a, 's> {
 
     /// The class of an instance of the type spelled `name` in `stack`; a `NewType` or alias
     /// has that of the type it stands for. A name the module binds more than once, or a
-    /// scope of `stack` binds, is unknown.
-    fn class(&self, name: Option<String>, stack: &[Scope]) -> Option<String> {
+    /// scope of `stack` binds, is unknown; a `parameter` annotation is read around the
+    /// innermost scope, which only its type parameters reach.
+    fn class(&self, name: Option<String>, stack: &[Scope], parameter: bool) -> Option<String> {
         let name = name?;
         let head = name.split('.').next().unwrap_or_default();
+        let outer = &stack[..stack.len() - usize::from(parameter && !stack.is_empty())];
         if self.source.is_some_and(|source| source.bound(head) > 1)
-            || stack
+            || outer
                 .iter()
                 .any(|&scope| self.scan.types.contains_key(&(scope, head)))
+            || stack
+                .iter()
+                .any(|&scope| self.scan.generics.contains(&(scope, head)))
         {
             return None;
         }
@@ -213,7 +259,8 @@ impl ArgTypes for SourceTypes<'_, '_> {
             Expr::Name(name) => {
                 let name = name.id.as_str();
                 return self
-                    .class(self.type_of(stack, name), stack)
+                    .variable(stack, name)
+                    .and_then(|(scopes, kind, parameter)| self.class(kind, scopes, parameter))
                     .or_else(|| self.imported_constant(name, name, stack));
             }
             Expr::Attribute(_) => {
@@ -221,10 +268,14 @@ impl ArgTypes for SourceTypes<'_, '_> {
                 let head = dotted.split('.').next().unwrap_or_default();
                 return self.imported_constant(&dotted, head, stack);
             }
-            Expr::Call(call) => return self.class(dotted(&call.func), stack),
+            Expr::Call(call) => return self.class(dotted(&call.func), stack, false),
             expr => literal_type(expr)?,
         };
         Some(name.to_string())
+    }
+
+    fn qualified(&self, expr: &Expr) -> Option<String> {
+        qualified(dotted(expr), self.imported)
     }
 
     fn receiver_class(&self, receiver: &Expr, stack: &[Scope]) -> Option<String> {

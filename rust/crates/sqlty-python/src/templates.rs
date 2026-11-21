@@ -38,11 +38,7 @@ pub fn templates(source: &str) -> Option<Vec<Template>> {
 /// Every t-string of the module `body` of `source`, in source order.
 pub fn of(source: &str, body: &[Stmt], imported: &Table) -> Vec<Template> {
     let scan = Scan::new(body);
-    of_in(
-        source,
-        &scan,
-        &SourceTypes::new(None, imported, &scan, None),
-    )
+    of_in(source, &scan, &SourceTypes::imports_only(imported, &scan))
 }
 
 /// [`of`] over a walk of the module that other checks share, its fields typed by `types`.

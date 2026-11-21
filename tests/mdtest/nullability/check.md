@@ -693,9 +693,8 @@ def insert(plain: Plain, twice: Twice, keyword: Keyword, loop: Loop, listed: kin
 #### Bound again anywhere
 
 A `NewType`, or the `NewType` it is made with, that its module binds again anywhere, in a
-block, a class around the argument or a star import, by an assignment, import, definition,
-`except` or `match`, keeps the argument of unknown type, as Python may see the other
-binding.
+block or a class around the argument, by an assignment, import, definition, `except` or
+`match`, keeps the argument of unknown type, as Python may see the other binding.
 
 `decoy.py`:
 
@@ -740,16 +739,6 @@ match sys.argv:
         pass
 ```
 
-`starred.py`:
-
-```python
-from typing import NewType
-
-from decoy import *
-
-Id = NewType("Id", int)
-```
-
 ```python
 import sys
 from typing import NamedTuple, NewType
@@ -757,7 +746,6 @@ from typing import NamedTuple, NewType
 import blocks
 import decoy
 import defined
-import starred
 from db import fetch_all
 
 Branch = NewType("Branch", int)
@@ -776,13 +764,11 @@ class Holder:
         # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
         fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=member)
 
-def insert(branch: Branch, decoyed: decoy.Id, starred: starred.Id, block: blocks.Id, defined: defined.Id, caught: defined.Caught, matched: defined.Matched) -> None:
+def insert(branch: Branch, decoyed: decoy.Id, block: blocks.Id, defined: defined.Id, caught: defined.Caught, matched: defined.Matched) -> None:
     # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
     fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=branch)
     # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
     fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=decoyed)
-    # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
-    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=starred)
     # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
     fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=block)
     # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
@@ -791,6 +777,77 @@ def insert(branch: Branch, decoyed: decoy.Id, starred: starred.Id, block: blocks
     fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=caught)
     # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
     fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=matched)
+```
+
+#### Not bound again
+
+Importing what a name already holds, in `try` and `except` or as another submodule of a
+package, does not bind it again, nor does the `else` of `if TYPE_CHECKING`, which type
+checkers skip. An annotation of a parameter is read around its function, so a parameter
+named as the annotation's module does not hide it; a type parameter does.
+
+`pkg/__init__.py`:
+
+```python
+```
+
+`pkg/a.py`:
+
+```python
+import typing
+from typing import NewType
+
+OwnerId = NewType("OwnerId", int)
+if typing.TYPE_CHECKING:
+    pass
+else:
+    OwnerId = int
+```
+
+`pkg/b.py`:
+
+```python
+B = 1
+```
+
+```python
+import uuid
+from typing import TYPE_CHECKING, NamedTuple
+
+import pkg.a
+import pkg.b
+from db import fetch_all
+
+try:
+    from typing import NewType
+except ImportError:
+    from typing_extensions import NewType
+
+if TYPE_CHECKING:
+    from ids import OwnerId
+else:
+    OwnerId = int
+
+Tried = NewType("Tried", int)
+
+class Row(NamedTuple):
+    id: int
+    owner_id: int
+
+class RefRow(NamedTuple):
+    ref: uuid.UUID
+
+def insert(tried: Tried, dotted: pkg.a.OwnerId, checked: OwnerId) -> None:
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=tried)
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=dotted)
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=checked)
+
+def named(uuid: uuid.UUID) -> None:
+    # error: [param-type-mismatch] "parameter 'owner_id' expects int, got uuid.UUID"
+    fetch_all("SELECT id, owner_id FROM items WHERE owner_id = %(owner_id)s", Row, owner_id=uuid)
+
+def generic[Tried](tried: Tried) -> None:
+    fetch_all("SELECT ref FROM items WHERE ref = %(ref)s", RefRow, ref=tried)
 ```
 
 #### Type aliases

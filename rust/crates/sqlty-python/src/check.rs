@@ -1073,7 +1073,11 @@ pub fn sites(
     variants: Option<usize>,
 ) -> Vec<Site> {
     let facts = ModuleFacts::new(source);
-    let calls = helper_calls_in(&facts, helpers, module, variants);
+    let types = std::cell::OnceCell::new();
+    let types = || -> &dyn crate::arg_types::ArgTypes {
+        types.get_or_init(|| facts.arg_types(helpers.map(|helpers| Project { helpers, module })))
+    };
+    let calls = helper_calls_in(&facts, helpers, module, variants, &types);
     let mut read: Option<HashSet<String>> = None;
     let mut by_marker = |query: &str| {
         is_marked(query) && read.get_or_insert_with(|| facts.literals()).contains(query)
@@ -1231,9 +1235,8 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
         checker::add_fix_imports(text, options, &mut base);
     }
 
-    let mut found = helper_calls_in(&facts, run.helpers, run.settings.module, run.variants);
     let types = std::cell::OnceCell::new();
-    let types = || {
+    let types = || -> &dyn crate::arg_types::ArgTypes {
         types.get_or_init(|| {
             facts.arg_types(run.helpers.map(|helpers| Project {
                 helpers,
@@ -1241,6 +1244,13 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
             }))
         })
     };
+    let mut found = helper_calls_in(
+        &facts,
+        run.helpers,
+        run.settings.module,
+        run.variants,
+        &types,
+    );
     let mut driver_calls: Vec<Call<'_>> = Vec::new();
     if drivers::may_hold(text) {
         for call in drivers::find_in(text, source.body(), &source.imports, facts.scan(), types()) {
