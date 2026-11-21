@@ -321,6 +321,11 @@ def run() -> None:
     w = SQL[tuple[str], Wide]("--sql\nSELECT name FROM users WHERE id = %s")
 
 
+class Queries:
+    Wide = tuple[int]
+    w = SQL[tuple[str], Wide]("--sql\nSELECT name FROM users WHERE id = %s")
+
+
 q = SQL[tuple[str], T]("--sql\nSELECT name FROM users WHERE id = %s")
 p = SQL[tuple[str], Pair]("--sql\nSELECT name FROM users WHERE id = %s")
 # error:
