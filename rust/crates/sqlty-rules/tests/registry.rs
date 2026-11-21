@@ -1,7 +1,5 @@
 //! The generated `Rule` registry and the `RuleSet` and `Severity` types around it.
 
-#![expect(clippy::expect_used, reason = "a missing rule page fails the test")]
-
 use sqlty_rules::{Group, Rule, RuleSet, Severity, PAGES};
 
 #[test]

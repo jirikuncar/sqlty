@@ -1,10 +1,15 @@
 //! `format_source` and `lint_source`: what the layout and the lint report on query strings.
 
+#![expect(
+    clippy::expect_used,
+    reason = "a test fails on the first unexpected error"
+)]
+
 use sqlty_format::{format_source, lint_source};
 use sqlty_python::rewriter::ImportStyle;
 
 fn style() -> ImportStyle {
-    ImportStyle::parse(None).unwrap()
+    ImportStyle::parse(None).expect("the default style parses")
 }
 
 fn lint(source: &str) -> Vec<(&'static str, &str)> {

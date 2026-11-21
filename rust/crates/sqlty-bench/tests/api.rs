@@ -1,10 +1,5 @@
 //! The generated bench inputs are typed by the engine the benches time.
 
-#![expect(
-    clippy::expect_used,
-    reason = "bench input is generated, never user data"
-)]
-
 use sqlty_bench::{
     one_query_cases, one_query_module, one_query_schema, python_source, schema_sql, QUERIES,
 };
