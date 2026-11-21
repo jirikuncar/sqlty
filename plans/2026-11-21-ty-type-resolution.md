@@ -141,9 +141,18 @@ Linear in files, not in queries: a file with one query pays its whole index. RSS
 file kept by salsa; LRU eviction per file after its checks run. Binary +34 MB (CLI), wasm
 engine about doubles (prototype C). Measured with `make bench-ab` on `bench-ci` and the corpus
 (django, goalert, liberapay), CPU and RSS against main; per-file and per-query numbers reported.
-Decided 2026-11-21: the work ty does per file gets a per-file budget, linear in lines
-(proposed 1 ms per 100 lines, set from the corpus before phase 2 lands); SQL work keeps
-100 us per query. `bench-ci` gates both; AGENTS.md "Check budget" and REVIEW.md say so.
+Decided 2026-11-21: Python work gets a per-file budget; SQL work keeps 100 us per query.
+`perf/round-trip-budget` already gates Python per file at `ruff check` (one thread) on the
+same files. Against it, single thread, per file:
+
+| | 18-line modules (16k) | 168-line modules (1k) |
+|---|--:|--:|
+| `ruff check --isolated` 0.16.9 | 149 us | 775 us |
+| ty parse + index | 78 us | 1,500 us |
+| ty per-definition | 271 us | 1,780 us |
+
+ty alone is 1.8-2.3x ruff; the limit is Open question 1. `bench-ci` gates it, AGENTS.md
+"Check budget" and REVIEW.md say so.
 
 ## Phases
 
@@ -175,10 +184,13 @@ reporting ty's own diagnostics.
 
 ## Open questions
 
-1. Row types: (a) keep sqlty's reader (recommended); (b) members via `SemanticModel::attribute_completions`
+1. Per-file limit for ty: (a) 3x `ruff check` on the same files; (b) ruff parity, ty only
+   for files whose arguments or receivers sqlty cannot read itself; (c) an absolute limit
+   (e.g. 1 ms per 100 lines).
+2. Row types: (a) keep sqlty's reader (recommended); (b) members via `SemanticModel::attribute_completions`
    (types but no field order or `Required`/`ReadOnly`); (c) ask Astral to make class fields public.
-2. site-packages: (a) bundled driver stubs first, then the venv (recommended); (b) venv only;
+3. site-packages: (a) bundled driver stubs first, then the venv (recommended); (b) venv only;
    (c) bundled stubs only, environment-independent.
-3. wasm/VS Code web: (a) ship ty in the wasm engine (doubles download); (b) playground keeps
+4. wasm/VS Code web: (a) ship ty in the wasm engine (doubles download); (b) playground keeps
    today's resolver and may disagree with the CLI.
-4. ty off switch: (a) none, ty always; (b) `SQLTY_TY=0` for debugging only.
+5. ty off switch: (a) none, ty always; (b) `SQLTY_TY=0` for debugging only.
