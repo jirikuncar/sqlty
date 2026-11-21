@@ -106,7 +106,7 @@ queries inline as string literals.
 
 | Project | Language | Approach | Live database |
 |---------|----------|----------|---------------|
-| [sqlx](https://github.com/transact-rs/sqlx) | Rust | `query!` macros check inline SQL at compile time | Yes, or an offline cache |
+| [sqlx](https://github.com/transact-rs/sqlx) | Rust | `query!` macros check inline SQL at compile time ([compared](sqlx.md)) | Yes, or an offline cache |
 | [postgresql-typed](https://github.com/dylex/postgresql-typed) | Haskell | Template Haskell prepares each query at compile time | Yes |
 | [Doobie](https://github.com/typelevel/doobie) | Scala | `check` validates queries against declared types in tests | Yes |
 | [SafeQL](https://github.com/ts-safeql/safeql) | TypeScript | ESLint rule checks inline `sql` tags and fixes their type annotations | Yes |
