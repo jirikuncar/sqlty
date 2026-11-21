@@ -75,6 +75,9 @@ stale-type = "error"
 | [`enum-value-in-transaction`](rules/enum-value-in-transaction.md) | Migration | error | no | Migration uses an enum value in the transaction that added it |
 | [`concurrent-index-if-not-exists`](rules/concurrent-index-if-not-exists.md) | Migration | warn | no | Migration builds an index CONCURRENTLY with IF NOT EXISTS |
 | [`disable-trigger-all`](rules/disable-trigger-all.md) | Migration | warn | no | Migration disables every trigger of a table, foreign key checks included |
+| [`multi-table-lock`](rules/multi-table-lock.md) | Migration | warn | no | Migration locks several tables against writes in one transaction |
+| [`locked-backfill`](rules/locked-backfill.md) | Migration | warn | no | Migration backfills a table its transaction has locked |
+| [`unbatched-backfill`](rules/unbatched-backfill.md) | Migration | warn | no | Migration updates or deletes the rows of a table in one statement |
 | [`unused-ignore`](rules/unused-ignore.md) | Suppression | warn | no | # sqlty: ignore comment that suppresses nothing |
 | [`internal-error`](rules/internal-error.md) | Internal | error | no | sqlty crashed checking the file |
 <!-- /generated:rules -->

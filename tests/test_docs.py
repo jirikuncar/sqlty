@@ -61,13 +61,7 @@ def test_rules_table() -> None:
 
 def test_generated_reference_is_current() -> None:
     """The generated tables of ``docs/reference`` match the code (``make generate-docs``)."""
-    spec = importlib.util.spec_from_file_location(
-        "generate_docs", ROOT / "scripts" / "generate_docs.py"
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    stale = [p.name for p in module.generate(check=True)]
+    stale = [p.name for p in _script("generate_docs").generate(check=True)]
     assert not stale, f"run `make generate-docs`: {stale} out of date"
 
 
@@ -135,10 +129,11 @@ def test_readme_playground_links_are_current() -> None:
 
 
 def test_config_key_docs_cover_every_key() -> None:
-    from sqlty._config import DISCOVERY_KEYS, FUNCTION_KEY_DOCS, FUNCTION_KEYS, KEY_DOCS, TOOL_KEYS
+    from sqlty._config import DISCOVERY_KEYS, FUNCTION_KEYS, TOOL_KEYS
 
-    assert list(KEY_DOCS) == [*TOOL_KEYS, *DISCOVERY_KEYS]
-    assert list(FUNCTION_KEY_DOCS) == list(FUNCTION_KEYS)
+    docs = _script("generate_docs")
+    assert list(docs.KEY_DOCS) == [*TOOL_KEYS, *DISCOVERY_KEYS]
+    assert list(docs.FUNCTION_KEY_DOCS) == list(FUNCTION_KEYS)
 
 
 def test_python_api_doctest() -> None:
@@ -261,7 +256,8 @@ def test_links(page: Path) -> None:
     prose = re.sub(r"^(`{3,}).*?^\1", "", page.read_text(), flags=re.M | re.S)
     prose = re.sub(r"`[^`\n]*`", "", prose)
     links = re.findall(r"\]\(([^)#\s]+)(?:#[^)]*)?\)", prose)
-    broken = [link for link in links if "://" not in link and not (page.parent / link).exists()]
+    relative = [link for link in links if not re.match(r"[a-z][a-z0-9+.-]*:", link)]
+    broken = [link for link in relative if not (page.parent / link).exists()]
     assert not broken
 
 

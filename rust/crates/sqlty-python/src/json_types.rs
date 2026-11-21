@@ -11,13 +11,13 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 use ruff_python_ast::comparable::ComparableStmt;
-use ruff_python_ast::visitor::{walk_expr, Visitor};
-use ruff_python_ast::{Expr, ExprCall, Stmt};
+use ruff_python_ast::{Expr, Stmt};
 use ruff_text_size::Ranged;
 use sqlty_sql::analyzer::{self, Nullability};
 use sqlty_sql::json::{JsonField, JsonShape, JsonValue};
 
 use crate::options::Options;
+use crate::scopes::Scan;
 use crate::types::extract::class_start;
 use crate::types::stdlib::Version;
 use crate::types::symbols::Source;
@@ -26,18 +26,6 @@ use crate::unparse::{repr_str, unparse};
 /// The line above a generated class.
 pub const MARKER: &str = "# sqlty: generated";
 const ANY: &str = "typing.Any";
-
-struct Calls<'a>(Vec<&'a ExprCall>);
-
-impl<'a> Visitor<'a> for Calls<'a> {
-    #[recursive::recursive]
-    fn visit_expr(&mut self, expr: &'a Expr) {
-        if let Expr::Call(call) = expr {
-            self.0.push(call);
-        }
-        walk_expr(self, expr);
-    }
-}
 
 fn is_any(item: &Expr, text: &str) -> bool {
     matches!(unparse(item, text).as_str(), ANY | "Any")
@@ -49,11 +37,10 @@ pub fn add_json_types(text: &str, options: &Options<'_>, version: Version) -> St
         return text.to_string();
     };
     let wrapper = options.style.wrapper_name.as_str();
-    let mut calls = Calls(Vec::new());
-    calls.visit_body(source.body());
+    let scan = Scan::new(source.body());
     let mut module = Module::new(&source);
     let mut edits: Vec<(usize, usize, String)> = Vec::new();
-    for call in calls.0 {
+    for &(call, _) in &scan.calls {
         let (Expr::Subscript(func), Some(Expr::StringLiteral(query))) =
             (call.func.as_ref(), call.arguments.args.first())
         else {

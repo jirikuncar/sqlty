@@ -534,12 +534,8 @@ impl<'a> Analyzer<'a> {
         let Some((_, table, column)) = self.locate_column(expr, scope) else {
             return JsonShape::Any;
         };
-        self.virtual_columns(&table)
-            .and_then(|columns| {
-                columns
-                    .iter()
-                    .find(|col| self.same_column(&col.name, &column))
-            })
+        self.virtual_column(&table, &column)
+            .flatten()
             .and_then(|col| col.json.clone())
             .unwrap_or(JsonShape::Any)
     }
