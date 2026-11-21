@@ -86,6 +86,11 @@
       "tables": 400
     },
     "metrics": {
+      "breaking": {
+        "exit": 1,
+        "rss_mb": 98.3,
+        "wall_s": 0.7228
+      },
       "check": {
         "exit": 1,
         "rss_mb": 86.1,

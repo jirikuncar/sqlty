@@ -1,6 +1,6 @@
 [project]
 site_name = "SQLTy"
-site_description = "Type-safe SQL queries for Python with automatic type inference, source rewriting, and lint checks."
+site_description = "Type-safe raw SQL for Python: row and parameter types inferred from your SQL and schema, checked statically with no ORM or database."
 site_url = "https://sqlty.kuncar.dev/"
 repo_url = "https://github.com/jirikuncar/sqlty"
 repo_name = "jirikuncar/sqlty"
@@ -101,7 +101,7 @@ extend_pygments_lang = [
 
 [project.plugins.llmstxt]
 full_output = "llms-full.txt"
-markdown_description = "SQLTy type-checks SQL in Python: it infers row and parameter types from the schema, rewrites queries to typed helpers, and lints them, through a Rust engine with a Python API and CLI."
+markdown_description = "SQLTy is a static type checker for raw SQL in Python. It infers row and parameter types from your SQL and schema, rewrites query strings to typed `SQL[T]` helpers, and checks them with no ORM or database, through a Rust engine with a CLI, a Python API and a language server."
 
 [project.plugins.llmstxt.sections]
 "Reference" = [

@@ -65,3 +65,37 @@ def test_nested_expressions_scale_linearly(dialect: str, expr: str) -> None:
         sql, dialect=dialect, schema_sql="CREATE TABLE users (id INTEGER NOT NULL);"
     )
     assert time.perf_counter() - start < BOUND_SECONDS
+
+
+def _check_seconds(root, monkeypatch, count: int, key: str, files: dict[str, str]) -> float:
+    project = root / f"{key}{count}"
+    project.mkdir()
+    (project / "pyproject.toml").write_text(
+        f'[tool.sqlty]\ndialect = "postgres"\n{key} = "{files["dir"]}/"\n'
+    )
+    (project / "app").mkdir()
+    (project / "app" / "q.py").write_text('q = """--sql\nSELECT 1 AS x"""\n')
+    (project / files["dir"]).mkdir()
+    for i in range(count):
+        (project / files["dir"] / f"{i:05}.sql").write_text(files["text"].format(i=i))
+    monkeypatch.chdir(project)
+    best = float("inf")
+    for _ in range(2):
+        start = time.perf_counter()
+        assert _core.cli(["sqlty", "check", "-q", "."]) == 0
+        best = min(best, time.perf_counter() - start)
+    return best
+
+
+@pytest.mark.parametrize(
+    ("key", "files"),
+    [
+        ("schema", {"dir": "migrations", "text": "CREATE TABLE t{i} (id integer);\n"}),
+        ("queries", {"dir": "sql", "text": "-- name: q{i}\nSELECT 1 AS x;\n"}),
+    ],
+)
+def test_many_schema_or_query_files_scale_linearly(tmp_path, monkeypatch, key, files) -> None:
+    # 8x the files must cost well under the 64x a pairwise comparison of the paths would
+    small = _check_seconds(tmp_path, monkeypatch, 1000, key, files)
+    large = _check_seconds(tmp_path, monkeypatch, 8000, key, files)
+    assert large < 12 * small + 0.05
