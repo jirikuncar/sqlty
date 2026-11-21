@@ -290,3 +290,31 @@ REINDEX INDEX users_pkey;
 UPDATE users SET email = '' WHERE id BETWEEN 1 AND 9;
 COMMIT;
 ```
+
+## Indexes of keys a pg_dump schema adds
+
+`against.sql`:
+
+```sql
+CREATE TABLE teams (id BIGINT, name TEXT);
+ALTER TABLE ONLY teams ADD CONSTRAINT teams_pkey PRIMARY KEY (id);
+CREATE TABLE events (id INT, at DATE) PARTITION BY RANGE (at);
+```
+
+```sql migration
+BEGIN;
+SET LOCAL lock_timeout = '1s';
+-- error: [missing-concurrently]
+REINDEX INDEX teams_pkey;
+-- error: [locked-backfill] "locks `teams` against writes"
+UPDATE teams SET name = '' WHERE id BETWEEN 1 AND 9;
+COMMIT;
+```
+
+An index of a partitioned table can't be built `CONCURRENTLY`:
+
+```sql migration
+SET lock_timeout = '1s';
+-- error:
+CREATE INDEX events_at ON ONLY events (at);
+```

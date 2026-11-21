@@ -647,7 +647,7 @@ impl Model {
     }
 
     /// The tables with rows that a statement sqlparser does not read locks against writes, as
-    /// `judge_tokens` judges it. `REINDEX INDEX` of an index of unknown table names the index.
+    /// `judge_tokens` judges it. `REINDEX INDEX` of an index of unknown table locks none.
     fn write_locked_tokens(&self, stmt: &Raw, tokens: &[String]) -> Vec<String> {
         let original = stmt.tokens();
         let words: Vec<&str> = tokens.iter().map(String::as_str).collect();
@@ -663,7 +663,7 @@ impl Model {
                 match rest.first().map(|kind| kind.to_lowercase()).as_deref() {
                     _ if reindexes_concurrently(options, rest) => Vec::new(),
                     Some("table") => vec![name],
-                    Some("index") => vec![self.index_tables.get(&name).cloned().unwrap_or(name)],
+                    Some("index") => self.index_tables.get(&name).cloned().into_iter().collect(),
                     _ => Vec::new(),
                 }
             }
@@ -774,6 +774,23 @@ impl Model {
                 .into_iter()
                 .map(|name| (name, key(&create.name)))
                 .collect(),
+            Some(Statement::AlterTable(alter)) => {
+                let table = bare_name(&alter.name);
+                alter
+                    .operations
+                    .iter()
+                    .flat_map(|op| match op {
+                        AlterTableOperation::AddConstraint { constraint, .. } => {
+                            constraint_index(&table, constraint).into_iter().collect()
+                        }
+                        AlterTableOperation::AddColumn { column_def, .. } => {
+                            column_indexes(&table, column_def)
+                        }
+                        _ => Vec::new(),
+                    })
+                    .map(|name| (name, key(&alter.name)))
+                    .collect()
+            }
             Some(_) => Vec::new(),
             None => create_index(&stmt.tokens())
                 .and_then(|index| Some((index.name?, index.table)))
@@ -819,7 +836,9 @@ impl Model {
             );
         }
         let waits = !index.concurrently && !new;
-        if waits {
+        // PostgreSQL builds no index on a partitioned table `CONCURRENTLY`: build one on each
+        // partition, then on the parent, which `ON ONLY` leaves invalid and empty.
+        if waits && !self.partition_keys.contains_key(&index.table) {
             report(
                 Rule::MissingConcurrently,
                 format!(
@@ -1125,8 +1144,8 @@ impl Model {
                     && !rest.starts_with(&["all", "in"]) =>
             {
                 let table = set_tablespace_table(&stmt.tokens());
-                let created = self.created.contains(&table);
-                if !created {
+                let exempt = table.is_empty() || self.created.contains(&table);
+                if !exempt {
                     report(
                         Rule::TableRewrite,
                         format!(
@@ -1134,7 +1153,7 @@ impl Model {
                         ),
                     );
                 }
-                Judged::strong_unless(created)
+                Judged::strong_unless(exempt)
             }
             _ => Judged::default(),
         }
@@ -1624,11 +1643,12 @@ fn create_index(tokens: &[&str]) -> Option<NewIndex> {
     let concurrently = take("concurrently");
     let if_not_exists = take("if") && take("not") && take("exists");
     let on = rest.iter().position(|t| t.eq_ignore_ascii_case("on"))?;
+    let table = token_name(&rest[on + 1..], &["only"], &["using", "("]);
     Some(NewIndex {
         name: (on > 0).then(|| token_name(&rest[..on], &[], &[])),
-        table: token_name(&rest[on + 1..], &["only"], &["using", "("]),
         concurrently,
         if_not_exists,
+        table: Some(table).filter(|table| !table.is_empty())?,
     })
 }
 
@@ -1656,57 +1676,76 @@ fn created_by_tokens(tokens: &[&str]) -> Option<String> {
 /// PostgreSQL gives them: the constraint name, else `t_pkey` and `t_a_b_key`. A default name
 /// over 63 bytes, which PostgreSQL truncates, or of an expression, is left out.
 fn implicit_indexes(create: &CreateTable) -> Vec<String> {
-    let table = create
-        .name
-        .0
+    let table = bare_name(&create.name);
+    let mut found: Vec<String> = create
+        .columns
+        .iter()
+        .flat_map(|column| column_indexes(&table, column))
+        .collect();
+    found.extend(
+        create
+            .constraints
+            .iter()
+            .filter_map(|constraint| constraint_index(&table, constraint)),
+    );
+    found
+}
+
+/// The last part of `name`, folded: the table name PostgreSQL derives index names from.
+fn bare_name(name: &ObjectName) -> String {
+    name.0
         .last()
         .and_then(|part| part.as_ident())
+        .map(self::name)
+        .unwrap_or_default()
+}
+
+/// `constraint`, or `default` when it fits PostgreSQL's 63 bytes.
+fn index_name(constraint: Option<&sqlparser::ast::Ident>, default: String) -> Option<String> {
+    constraint
         .map(name)
-        .unwrap_or_default();
-    let named = |constraint: Option<&sqlparser::ast::Ident>, default: String| {
-        constraint
-            .map(name)
-            .or((default.len() <= 63).then_some(default))
-    };
-    let key_name = |columns: &[String]| format!("{table}_{}_key", columns.join("_"));
-    let mut found = Vec::new();
-    for column in &create.columns {
-        for option in &column.options {
-            let column = [name(&column.name)];
-            found.extend(match &option.option {
-                ColumnOption::PrimaryKey(pk) => named(
-                    option.name.as_ref().or(pk.name.as_ref()),
-                    format!("{table}_pkey"),
-                ),
-                ColumnOption::Unique(unique) => named(
-                    option.name.as_ref().or(unique.name.as_ref()),
-                    key_name(&column),
-                ),
-                _ => None,
-            });
-        }
-    }
-    for constraint in &create.constraints {
-        let columns = |columns: &[sqlparser::ast::IndexColumn]| -> Option<Vec<String>> {
-            columns
-                .iter()
-                .map(|column| match &column.column.expr {
-                    Expr::Identifier(ident) => Some(name(ident)),
-                    _ => None,
-                })
-                .collect()
-        };
-        found.extend(match constraint {
-            TableConstraint::PrimaryKey(pk) => named(pk.name.as_ref(), format!("{table}_pkey")),
-            TableConstraint::Unique(unique) => match (&unique.name, columns(&unique.columns)) {
-                (Some(constraint), _) => Some(name(constraint)),
-                (None, Some(columns)) => named(None, key_name(&columns)),
-                (None, None) => None,
-            },
+        .or((default.len() <= 63).then_some(default))
+}
+
+/// The indexes of the `PRIMARY KEY` and `UNIQUE` options of `column` of `table`.
+fn column_indexes(table: &str, column: &ColumnDef) -> Vec<String> {
+    column
+        .options
+        .iter()
+        .filter_map(|option| match &option.option {
+            ColumnOption::PrimaryKey(pk) => index_name(
+                option.name.as_ref().or(pk.name.as_ref()),
+                format!("{table}_pkey"),
+            ),
+            ColumnOption::Unique(unique) => index_name(
+                option.name.as_ref().or(unique.name.as_ref()),
+                format!("{table}_{}_key", name(&column.name)),
+            ),
             _ => None,
-        });
+        })
+        .collect()
+}
+
+/// The index of a `PRIMARY KEY` or `UNIQUE` table constraint of `table`.
+fn constraint_index(table: &str, constraint: &TableConstraint) -> Option<String> {
+    match constraint {
+        TableConstraint::PrimaryKey(pk) => index_name(pk.name.as_ref(), format!("{table}_pkey")),
+        TableConstraint::Unique(unique) => match &unique.name {
+            Some(constraint) => Some(name(constraint)),
+            None => {
+                let columns = unique
+                    .columns
+                    .iter()
+                    .map(|column| match &column.column.expr {
+                        Expr::Identifier(ident) => Some(name(ident)),
+                        _ => None,
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                index_name(None, format!("{table}_{}_key", columns.join("_")))
+            }
+        },
+        _ => None,
     }
-    found
 }
 
 /// Whether a `REINDEX` with `options` and the `rest` of its tokens runs `CONCURRENTLY`.
@@ -2078,10 +2117,6 @@ mod tests {
             ("REINDEX TABLE users", Rule::MissingConcurrently),
             (
                 "CREATE INDEX users_e ON users (email) TABLESPACE fast",
-                Rule::MissingConcurrently,
-            ),
-            (
-                "CREATE INDEX events_at ON ONLY events (at)",
                 Rule::MissingConcurrently,
             ),
             (
@@ -2563,7 +2598,7 @@ mod tests {
             ),
             (
                 format!("BEGIN; REINDEX INDEX elsewhere; {then_teams}"),
-                &[MissingConcurrently, MultiTableLock],
+                &[MissingConcurrently],
             ),
             (
                 format!("BEGIN; REFRESH MATERIALIZED VIEW mv; {then_teams}"),
@@ -2611,6 +2646,65 @@ mod tests {
             let migration = format!("SET lock_timeout = '1s'; {migration}");
             assert_eq!(rules(&baseline, &migration), expected, "{migration}");
         }
+    }
+
+    #[test]
+    fn keys_added_by_alter_table_name_their_indexes() {
+        use Rule::*;
+        let baseline =
+            "CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT UNIQUE, team_id BIGINT);
+            CREATE TABLE teams (id BIGINT, name TEXT);
+            ALTER TABLE ONLY teams ADD CONSTRAINT teams_pkey PRIMARY KEY (id);
+            ALTER TABLE teams ADD UNIQUE (name), ADD CONSTRAINT one CHECK (id > 0);
+            CREATE TABLE events (id int, at date) PARTITION BY RANGE (at);";
+        let backfill = "UPDATE teams SET id = 1 WHERE id BETWEEN 1 AND 9; COMMIT;";
+        for (migration, expected) in [
+            (
+                "BEGIN; ALTER TABLE teams ADD COLUMN x int; REINDEX INDEX teams_pkey; COMMIT;"
+                    .to_string(),
+                &[MissingConcurrently][..],
+            ),
+            (
+                format!("BEGIN; REINDEX INDEX teams_pkey; {backfill}"),
+                &[MissingConcurrently, LockedBackfill],
+            ),
+            (
+                format!("BEGIN; REINDEX INDEX teams_name_key; {backfill}"),
+                &[MissingConcurrently, LockedBackfill],
+            ),
+            (
+                "BEGIN; ALTER TABLE users ADD COLUMN x int; REINDEX INDEX users_email_key; COMMIT;"
+                    .to_string(),
+                &[MissingConcurrently],
+            ),
+            (
+                "BEGIN; ALTER TABLE teams ADD COLUMN x int; REINDEX INDEX nowhere; COMMIT;"
+                    .to_string(),
+                &[MissingConcurrently],
+            ),
+            (
+                "CREATE TABLE t (id int); ALTER TABLE t ADD CONSTRAINT t_pk PRIMARY KEY (id);
+                 ALTER TABLE t ADD COLUMN u int UNIQUE, ADD COLUMN v int;
+                 REINDEX INDEX t_pk; REINDEX INDEX t_u_key"
+                    .to_string(),
+                &[],
+            ),
+            (
+                "CREATE INDEX events_at ON ONLY events (at)".to_string(),
+                &[],
+            ),
+            ("CREATE INDEX events_at ON events (at)".to_string(), &[]),
+            ("CREATE INDEX ON".to_string(), &[]),
+            ("CREATE INDEX i ON ONLY".to_string(), &[]),
+            ("ALTER TABLE SET TABLESPACE x".to_string(), &[]),
+        ] {
+            let migration = format!("SET lock_timeout = '1s'; {migration}");
+            assert_eq!(rules(baseline, &migration), expected, "{migration}");
+        }
+        assert_eq!(
+            rules(baseline, "CREATE INDEX events_at ON ONLY events (at)"),
+            [MissingLockTimeout]
+        );
     }
 
     #[test]
