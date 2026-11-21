@@ -207,6 +207,18 @@ fn a_linked_file_is_checked_with_the_configuration_of_its_target() {
 }
 
 #[test]
+fn the_root_directory_has_settings_of_its_own() {
+    let mut workspace = project();
+    assert_eq!(
+        workspace
+            .settings(Path::new("/"))
+            .expect("settings")
+            .dialect,
+        "postgres"
+    );
+}
+
+#[test]
 fn checks_only_the_sql_files_queries_names() {
     let mut workspace = project();
     let text = "-- name: one\nSELECT nope FROM users;\n";
