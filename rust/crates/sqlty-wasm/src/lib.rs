@@ -361,7 +361,7 @@ const READ: [&str; 8] = [
     "types",
 ];
 
-/// `sqlty._config.MAX_QUERY_VARIANTS`.
+/// `sqlty_project::settings::MAX_QUERY_VARIANTS`.
 const MAX_QUERY_VARIANTS: usize = 64;
 
 /// The settings of the `sqlty.toml` text `config`, validated as `sqlty check` validates it.
