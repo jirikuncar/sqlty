@@ -4,7 +4,7 @@
 sqlty-bench 3
 sqlty-cli 31
 sqlty-ext 10
-sqlty-format 11
+sqlty-format 0
 sqlty-lsp 44
 sqlty-project 33
 sqlty-python 193
