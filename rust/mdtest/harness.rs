@@ -302,9 +302,11 @@ impl Updater {
     }
 
     fn lines(&self) -> Vec<String> {
-        std::fs::read_to_string(&self.path)
-            .unwrap()
-            .lines()
+        // Split on `\n` only: `str::lines` would turn a CRLF into LF in lines it does not edit.
+        let text = std::fs::read_to_string(&self.path).unwrap();
+        text.strip_suffix('\n')
+            .unwrap_or(&text)
+            .split('\n')
             .map(str::to_string)
             .collect()
     }
