@@ -254,7 +254,7 @@ are copied into it: `INSERT ... SELECT`, `COPY ... FROM`, `MERGE` or
 | Rule | Reports |
 |------|---------|
 | [`missing-concurrently`](../reference/rules/missing-concurrently.md) | an index built or dropped without `CONCURRENTLY` |
-| [`concurrently-in-transaction`](../reference/rules/concurrently-in-transaction.md) | `CONCURRENTLY` between `BEGIN` and `COMMIT` |
+| [`concurrently-in-transaction`](../reference/rules/concurrently-in-transaction.md) | `CONCURRENTLY` or `VACUUM` between `BEGIN` and `COMMIT` |
 | [`constraint-scan`](../reference/rules/constraint-scan.md) | a constraint, `SET NOT NULL` or a new partition that checks every row while it blocks writes |
 | [`table-rewrite`](../reference/rules/table-rewrite.md) | a statement that rewrites the table |
 | [`add-required-column`](../reference/rules/add-required-column.md) | a `NOT NULL` column without a default |
@@ -279,6 +279,14 @@ CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT NOT NULL);
 ALTER TABLE users ADD COLUMN token UUID DEFAULT gen_random_uuid(); -- sqlty: ignore[table-rewrite]
 -- error: [missing-concurrently] "`CREATE INDEX` blocks writes to `users` until the index is built"
 CREATE INDEX users_email ON users (email);
+```
+
+A comment alone on its line above a statement drops its findings too, with
+`--` or `/* ... */` comment lines between them but no blank line:
+
+```sql migration
+-- sqlty: ignore[missing-lock-timeout]
+ALTER TABLE users ADD COLUMN token UUID DEFAULT gen_random_uuid(); -- sqlty: ignore[table-rewrite]
 ```
 
 The findings name the migration and the baseline:

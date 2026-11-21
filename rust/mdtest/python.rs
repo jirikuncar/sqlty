@@ -409,10 +409,11 @@ impl<'s> Run<'s> {
             .map_err(|()| format!("unknown query-format {format}"))?;
         let options = Options::new(self.dialect, schema.map(|s| &**s), None, false)
             .map_err(|e| e.to_string())?;
-        let found = queries::check_queries(text, format, "queries", &options, &self.rules);
-        Ok(suppress::apply_sql(
-            &suppress::sql_ignores(text),
-            found,
+        Ok(queries::check_queries(
+            text,
+            format,
+            "queries",
+            &options,
             &self.rules,
         ))
     }

@@ -60,4 +60,4 @@ Judged by [`sqlty breaking`](../../guide/breaking-changes.md#migrations-that-loc
 in the `postgres` dialect, on the statements of the
 [schema](../../guide/schema-inference.md) files that the `--against` baseline does
 not have. A table created earlier in the migrations is new and empty, so it is not
-reported until rows are copied into it. `-- sqlty: ignore[locked-backfill]` on the first line of a statement drops it.
+reported until rows are copied into it. `-- sqlty: ignore[locked-backfill]` on the first line of a statement, or alone on its line above the statement, drops it.
