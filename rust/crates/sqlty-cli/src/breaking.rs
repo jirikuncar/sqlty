@@ -573,7 +573,6 @@ fn migration_sets(head: &mut Revision<Workspace>) -> Result<Vec<Migrations>, Str
         }
     }
     let mut seen: HashMap<Vec<PathBuf>, usize> = HashMap::new();
-    let mut probed = HashSet::new();
     let mut sets: Vec<Migrations> = Vec::new();
     for source in sources {
         let files = &source.settings.schema_files;
@@ -607,14 +606,12 @@ fn migration_sets(head: &mut Revision<Workspace>) -> Result<Vec<Migrations>, Str
             }
         };
         let schema = source.settings.schema_sql.as_ref().map(address);
-        // Configurations that share the text share its files: probe them once.
-        if probed.insert((at, schema)) {
-            let found = schema.and_then(|schema| routed.get(&schema));
-            let probes = &mut sets[at].probes;
-            match found {
-                Some(files) => probes.extend(files.iter().cloned().map(Probe::File)),
-                None => probes.push(Probe::Database(source.directory, source.database)),
-            }
+        // Each configuration reads its own text, so no file is probed twice.
+        let found = schema.and_then(|schema| routed.get(&schema));
+        let probes = &mut sets[at].probes;
+        match found {
+            Some(files) => probes.extend(files.iter().cloned().map(Probe::File)),
+            None => probes.push(Probe::Database(source.directory, source.database)),
         }
     }
     Ok(sets)
