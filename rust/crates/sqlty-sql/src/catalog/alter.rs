@@ -55,9 +55,8 @@ impl Loader {
                 not_valid,
             } = op
             {
-                if let Some(fk) = self.foreign_key(fk, &fk.columns, &key, &root, path, !not_valid) {
-                    root.foreign_keys.push(fk);
-                }
+                let fk = self.foreign_key(fk, &fk.columns, &key, &root, path, !not_valid);
+                root.foreign_keys.push(fk);
                 continue;
             }
             let added = match op {
@@ -75,9 +74,8 @@ impl Loader {
                 for option in &def.options {
                     if let ColumnOption::ForeignKey(fk) = &option.option {
                         let columns = [def.name.clone()];
-                        if let Some(fk) = self.foreign_key(fk, &columns, &key, &root, path, true) {
-                            root.foreign_keys.push(fk);
-                        }
+                        let fk = self.foreign_key(fk, &columns, &key, &root, path, true);
+                        root.foreign_keys.push(fk);
                     }
                 }
             }
@@ -205,15 +203,15 @@ impl Loader {
                 constraint: TableConstraint::ForeignKey(constraint),
                 not_valid,
             } => {
-                fk = self.foreign_key(
+                fk = Some(self.foreign_key(
                     constraint,
                     &constraint.columns,
                     &key,
                     table,
                     path,
                     !not_valid,
-                );
-                fk.is_some()
+                ));
+                true
             }
             _ => return false,
         };
