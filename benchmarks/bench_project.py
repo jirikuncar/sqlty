@@ -168,11 +168,71 @@ def run(size: str, repeats: int, keep: str | None) -> dict:
             },
             "calibration_s": round(calibrate(), 5),
             "metrics": metrics,
+            "one_query_us": one_query(spec["tables"]),
             "micro_us": micro(spec["tables"]),
         }
     finally:
         if not keep:
             shutil.rmtree(root, ignore_errors=True)
+
+
+# A check must beat a database round trip: about 100 us on a machine whose calibration loop
+# takes 20 ms (AGENTS.md "Check budget"); a slower runner gets a proportionally larger budget.
+ROUND_TRIP_US = 100
+ROUND_TRIP_CALIBRATION_S = 0.02
+# Turns on once a one-query check fits the budget: until then `one_query_us` is reported only.
+ENFORCE_ONE_QUERY = False
+ONE_QUERY_SQL = Path(__file__).parent / "one_query.sql"
+
+
+def one_query(tables: int, rounds: int = 200) -> dict[str, float]:
+    """Microseconds for ``check_source`` of a module holding one query of ``one_query.sql``
+    (also the Criterion group ``one_query``), as ``sqlty rewrite`` types it, schema loaded
+    once: what ``sqlty check`` spends per query."""
+    from sqlty import core
+
+    settings = core.Settings(schema_sql=core.load_schema(synth.schema_sql(tables)))
+    out: dict[str, float] = {}
+    for block in ONE_QUERY_SQL.read_text().split("-- name: ")[1:]:
+        name, sql = block.split("\n", 1)
+        name = name.strip()
+        module = core.rewrite_source(f'q = "--sql\\n{" ".join(sql.split())}"\n', settings)
+        if "SQL[" not in module or (found := core.check_source(module, settings)):
+            raise SystemExit(f"one_query.{name} is not a typed query without diagnostics: {found}")
+        best = float("inf")
+        for _ in range(5):
+            t = time.perf_counter()
+            for _ in range(rounds):
+                core.check_source(module, settings)
+            best = min(best, (time.perf_counter() - t) / rounds)
+        out[name] = round(best * 1e6, 1)
+    return out
+
+
+def one_query_lines(us: dict[str, float], calibration_s: float) -> tuple[list[str], bool]:
+    """Each ``one_query_us`` against the round trip budget, and whether one is over it."""
+    limit = ROUND_TRIP_US * calibration_s / ROUND_TRIP_CALIBRATION_S
+    lines = [
+        f"one_query.{name}: {v:.0f} us, {'OVER' if v > limit else 'under'} round trip {limit:.0f} us"
+        for name, v in sorted(us.items())
+    ]
+    return lines, any(v > limit for v in us.values())
+
+
+def check_one_query(result: dict, tables: int) -> bool:
+    """Print ``one_query_us`` against the round trip; ``False`` when ``ENFORCE_ONE_QUERY``
+    and a query is over it in each of ``ATTEMPTS`` measurements."""
+    us, cal = result["one_query_us"], result["calibration_s"]
+    lines, over = one_query_lines(us, cal)
+    for attempt in range(2, ATTEMPTS + 1):
+        if not (over and ENFORCE_ONE_QUERY):
+            break
+        print(f"one_query over budget, measuring again ({attempt}/{ATTEMPTS})", file=sys.stderr)
+        us, cal = one_query(tables), calibrate()
+        lines, over = one_query_lines(us, cal)
+    enforced = "budget" if ENFORCE_ONE_QUERY else "reported, not budgeted (ENFORCE_ONE_QUERY)"
+    print(f"one query vs round trip, {enforced}:", *lines, sep="\n  ", file=sys.stderr)
+    return not (over and ENFORCE_ONE_QUERY)
 
 
 def flatten(result: dict) -> dict[str, tuple[str, float]]:
@@ -254,6 +314,8 @@ def main() -> int:
     print(text)
     if args.out:
         Path(args.out).write_text(text + "\n")
+    if args.compare and not check_one_query(result, SIZES[args.size]["tables"]):
+        return 1
     if args.update_baseline:
         baselines[key] = result
         path.write_text(json.dumps(baselines, indent=2, sort_keys=True) + "\n")

@@ -82,6 +82,10 @@ bench-project:  ## Full-size synthetic project (10k files); needs a release buil
 bench-ci:  ## CI-size project; exits 1 when over the budget in benchmarks/baseline.json
 	uv run python benchmarks/bench_project.py --size ci --repeats 7 --compare --out bench-result.json
 
+.PHONY: bench-ab
+bench-ab:  ## Interleaved A/B of `sqlty check`, BASE (default origin/main) vs the working tree; extra args via ARGS=
+	uv run python benchmarks/ab.py --base $(or $(BASE),origin/main) $(ARGS)
+
 .PHONY: bench-baseline
 bench-baseline:  ## Re-record the CI-size baseline for this platform
 	uv run python benchmarks/bench_project.py --size ci --repeats 7 --update-baseline
@@ -91,7 +95,7 @@ bench-codspeed:  ## The benchmarks CodSpeed measures in CI, timed locally; needs
 	uv run --group bench pytest benchmarks/ --codspeed -n 0 -p no:randomly --no-cov
 
 .PHONY: bench-rust
-bench-rust:  ## Criterion: catalog load, analyzer, check/rewrite_source; extra args via ARGS=
+bench-rust:  ## Criterion: catalog load, analyzer, check/rewrite_source, one query; extra args via ARGS=
 	cargo bench --manifest-path rust/Cargo.toml -p sqlty-bench -- $(ARGS)
 
 # --- Docs ---

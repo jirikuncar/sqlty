@@ -1766,6 +1766,7 @@ name = "sqlty-bench"
 version = "0.8.0"
 dependencies = [
  "criterion",
+ "sqlty-project",
  "sqlty-python",
  "sqlty-sql",
 ]

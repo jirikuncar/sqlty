@@ -32,7 +32,7 @@ use sqlty_sql::analyzer::Schema;
 
 use crate::{
     github_annotation, json_diagnostic, pretty, report_unreadable, sarif_log, warn_all, Breaking,
-    Host, OutputFormat, EXIT_FOUND,
+    Host, Lines, OutputFormat, EXIT_FOUND,
 };
 
 mod snapshot;
@@ -714,11 +714,14 @@ fn report(host: &mut dyn Host, findings: &[Finding], head: &str, format: OutputF
     };
     match format {
         OutputFormat::Json | OutputFormat::Sarif => {
+            let mut lines = HashMap::new();
             let rows: Vec<_> = findings
                 .iter()
                 .map(|finding| {
-                    let mut row =
-                        json_diagnostic(&finding.path, &finding.diagnostic, &finding.text);
+                    let lines = lines
+                        .entry(finding.text.as_ptr())
+                        .or_insert_with(|| Lines::new(&finding.text));
+                    let mut row = json_diagnostic(&finding.path, &finding.diagnostic, lines);
                     if format == OutputFormat::Sarif {
                         row.message = message(finding);
                     }
