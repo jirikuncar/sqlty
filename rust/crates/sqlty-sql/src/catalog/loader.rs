@@ -20,7 +20,7 @@ use sqlparser::ast::{
 use crate::analyzer::{
     canonical_type, typed, view_columns, Column, Nullability, SkippedObject, SqlDialect,
 };
-use crate::ddl::{RowEvents, RowTrigger};
+use crate::ddl::{RowEvents, RowTrigger, LIKE_COLUMN};
 use crate::values::{self, Value};
 
 use super::columns::{
@@ -542,6 +542,27 @@ impl Loader {
 
     // ---- CREATE TABLE ---------------------------------------------------------------
 
+    /// Copies the columns of the `LIKE` table `source` into `table`. `Some(created)` ends
+    /// [`Self::create_table`]: `false` waits for a table it builds on, `true` gave up.
+    fn copy_like(
+        &mut self,
+        table: &mut RawTable,
+        source: &[String],
+        create: &CreateTable,
+        path: &[String],
+    ) -> Option<bool> {
+        let Some((_, from_table)) = self.table_of(source, path) else {
+            return Some(false);
+        };
+        if self.too_wide(table.columns.len() + from_table.columns.len()) {
+            self.give_up_as("limit", create, path);
+            return Some(true);
+        }
+        table.unknown |= from_table.unknown;
+        merge_columns(&mut table.columns, from_table.columns.clone());
+        None
+    }
+
     /// Returns whether the table was created; `false` waits for a table it builds on.
     pub(super) fn create_table(
         &mut self,
@@ -581,38 +602,36 @@ impl Loader {
                 table.parents.push(parent);
             }
         }
-        if self.postgres || self.dialect == SqlDialect::MySql {
-            let mut like_sources: Vec<Vec<String>> = likes.to_vec();
-            if let Some(
-                CreateTableLikeKind::Parenthesized(like) | CreateTableLikeKind::Plain(like),
-            ) = &create.like
-            {
-                like_sources.push(parts(&like.name, self.dialect));
-            }
-            for source in &like_sources {
-                let Some((_, from_table)) = self.table_of(source, path) else {
-                    return false;
-                };
-                if self.too_wide(table.columns.len() + from_table.columns.len()) {
-                    self.give_up_as("limit", create, path);
-                    return true;
-                }
-                table.unknown |= from_table.unknown;
-                merge_columns(&mut table.columns, from_table.columns.clone());
+        if let (
+            true,
+            Some(CreateTableLikeKind::Parenthesized(like) | CreateTableLikeKind::Plain(like)),
+        ) = (
+            self.postgres || self.dialect == SqlDialect::MySql,
+            &create.like,
+        ) {
+            let source = parts(&like.name, self.dialect);
+            if let Some(done) = self.copy_like(&mut table, &source, create, path) {
+                return done;
             }
         }
         // A PostgreSQL `PARTITION OF` column without a type only adds constraints; a SQLite
-        // column may have no type at all.
-        merge_columns(
-            &mut table.columns,
-            create
-                .columns
-                .iter()
-                .filter(|column| {
-                    column.data_type != DataType::Unspecified || self.dialect == SqlDialect::Sqlite
-                })
-                .map(|column| raw_column(column, self.dialect)),
-        );
+        // column may have no type at all. A `LIKE` item is a placeholder column (see
+        // `Statement::without_like`): the columns it copies go where it stands.
+        for column in &create.columns {
+            let like = fold(&column.name, self.dialect)
+                .strip_prefix(LIKE_COLUMN)
+                .and_then(|n| n.parse::<usize>().ok())
+                .and_then(|n| likes.get(n));
+            if let Some(source) = like {
+                if let Some(done) = self.copy_like(&mut table, source, create, path) {
+                    return done;
+                }
+            } else if column.data_type != DataType::Unspecified
+                || self.dialect == SqlDialect::Sqlite
+            {
+                merge_columns(&mut table.columns, [raw_column(column, self.dialect)]);
+            }
+        }
         // SQLite lets a PRIMARY KEY hold NULL, except in a WITHOUT ROWID or STRICT table or
         // as the sole `INTEGER` column, which is the rowid.
         let loose_keys =

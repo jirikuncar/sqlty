@@ -79,6 +79,26 @@ SELECT * FROM users_archive
 -- inferred: tuple[int, str | None, datetime.datetime | None]
 ```
 
+## LIKE columns go where LIKE stands
+
+PostgreSQL builds the table from the column list in order
+([CREATE TABLE](https://www.postgresql.org/docs/17/sql-createtable.html), `LIKE source_table`).
+
+`schema.sql`:
+
+```sql
+CREATE TABLE a (k INTEGER NOT NULL);
+CREATE TABLE b (y TEXT);
+CREATE TABLE copy (LIKE a INCLUDING ALL, x INTEGER, LIKE b);
+```
+
+```sql
+SELECT * FROM copy
+-- columns: k: int (INT)
+-- columns: x: int | None (INT)
+-- columns: y: str | None (TEXT)
+```
+
 ## The parent may come later
 
 `schema.sql`:
