@@ -208,10 +208,8 @@ two agree on other code. It follows less than ty does:
 |------|----|-------|
 | The result of an unannotated function, `x = make()` | the inferred return type | skipped: no function body is read for what it returns |
 | `db = Db() if ready else None`, `a or b`, a subscript, an unpacked tuple | the inferred type | skipped |
-| A name two reaching bindings give different classes | the union, and the method of each | skipped |
-| `try: from lib import Db` / `except ImportError: from lib2 import Db` | the union, and the method of each | skipped: the two imports are different classes |
-| `Db | Other`, `Union[Db, Other]` | the method of each member | skipped; `Db | None` is `Db` |
-| `isinstance(x, Db)` on a name of an unrelated class, of a union or of a type variable | the intersection | skipped |
+| A name that is of any of several classes: `Db | Other`, two reaching bindings, `try: from lib import Db` / `except ImportError: from lib2 import Db` | the method of each class, each call checked against its own signature | checked when every class reaches a helper and all of them take the query, the row type and the parameters the same way; skipped otherwise, and for more than 8 classes. `Db | None` is `Db` |
+| `isinstance(x, Db)` on a name of an unrelated class or of a type variable | the intersection | skipped; of a union, the members that are `Db` or a subclass of it |
 | `isinstance(x, (A, B))`, `type(x) is Db`, `match` class patterns, `TypeGuard` | narrowed | not narrowed |
 | A generic class, `Box[Db]().item` | `Db` | `Box` is followed, its type arguments are not |
 | A class defined in a function or in another class | followed | skipped |

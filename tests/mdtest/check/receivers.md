@@ -230,6 +230,55 @@ class Service:
         self.given.one("SELECT name FROM users", int)
 ```
 
+### An annotated parameter is one of the values assigned
+
+A parameter assigned to an attribute gives it the class it is annotated with, as any
+other value would: unlike `self.db: DB`, it does not declare what the attribute holds.
+An attribute another method assigns something else to is either, and its call is not
+checked. ty: `DB | Plain` for the first, `DB | None` for the second.
+
+```python
+from pkg.db import DB
+
+class Plain:
+    def one(self, query, row): ...
+
+class Service:
+    def __init__(self, given: DB) -> None:
+        self.db = given
+
+    def close(self) -> None:
+        self.db = Plain()
+
+    def run(self) -> None:
+        # error:
+        self.db.one("SELECT name FROM users", int)
+
+class Closing:
+    def __init__(self, given: DB) -> None:
+        self.db = given
+
+    def close(self) -> None:
+        self.db = None
+
+    def run(self) -> None:
+        # error: [column-type-mismatch]
+        self.db.one("SELECT name FROM users", int)
+
+class Declared:
+    db: DB
+
+    def __init__(self, given: DB) -> None:
+        self.db = given
+
+    def close(self) -> None:
+        self.db = Plain()
+
+    def run(self) -> None:
+        # error: [column-type-mismatch]
+        self.db.one("SELECT name FROM users", int)
+```
+
 ## Annotated returns
 
 ty: `DB`, and `Cursor` in the `with`.
@@ -284,15 +333,80 @@ class Service:
         given.one("SELECT name FROM users", int)
 ```
 
-## A union of classes is unknown
+## A union of classes
+
+A receiver that is of any of several classes is checked when each class reaches a helper
+and they take the query, the row type and the parameters the same way. ty: `DB | Cursor`.
 
 ```python
 from pkg.db import DB, Cursor
 
 def run(either: DB | Cursor) -> None:
+    # error: [column-type-mismatch]
     either.one("SELECT name FROM users", int)
+```
+
+A class without the helper, or with one that takes the call another way, leaves the call
+unchecked. ty: `DB | Website`, `DB | Reader`.
+
+`pkg/reader.py`:
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+class Reader:
+    def one[T](self, form: type[T], query: Annotated[LiteralString, SQL], /) -> T | None: ...
+
+class Deep:
+    reader: Reader
+```
+
+```python
+from pkg.db import DB, Website
+from pkg.reader import Reader
+
+def run(either: DB | Website, other: DB | Reader) -> None:
+    either.one("SELECT name FROM users", int)
+    other.one("SELECT name FROM users", int)
 
 # error:
+```
+
+An attribute of the union is the union of the attributes, and a call of it of what each
+gives. ty: `DB | Postgres`.
+
+```python
+from pkg.db import Model, Website, make
+
+def run(either: Website | Model, made: type[Website] | type[Model]) -> None:
+    # error: [column-type-mismatch]
+    either.db.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch]
+    made().db.one("SELECT name FROM users", int)
+```
+
+More than 8 classes are not followed.
+
+```python
+from pkg.db import DB
+
+class A1(DB): ...
+class A2(DB): ...
+class A3(DB): ...
+class A4(DB): ...
+class A5(DB): ...
+class A6(DB): ...
+class A7(DB): ...
+class A8(DB): ...
+class A9(DB): ...
+
+def eight(db: A1 | A2 | A3 | A4 | A5 | A6 | A7 | A8) -> None:
+    # error: [column-type-mismatch]
+    db.one("SELECT name FROM users", int)
+
+def nine(db: A1 | A2 | A3 | A4 | A5 | A6 | A7 | A8 | A9) -> None:
+    db.one("SELECT name FROM users", int)
 ```
 
 ## A name is what it was last bound to
@@ -312,6 +426,7 @@ def run(db=None, flag: bool = False) -> None:
     other = make()
     if flag:
         other = other.get_cursor().__enter__()
+    # error: [column-type-mismatch]
     other.one("SELECT name FROM users", int)
 ```
 
@@ -458,6 +573,7 @@ def unrelated(x: Cursor) -> None:
 
 def union(x: Cursor | DB) -> None:
     if isinstance(x, Postgres):
+        # error: [column-type-mismatch]
         x.one("SELECT name FROM users", int)
 
 def either(ready: bool, other) -> None:
@@ -1123,7 +1239,8 @@ def run(db: DB, other) -> None:
 
 ### Branches that disagree
 
-ty: `DB | Cursor`.
+The name is of either class, and both reach a helper that takes the call the same way
+(see [A union of classes](#a-union-of-classes)). ty: `DB | Cursor`.
 
 ```python
 from pkg.db import DB, Cursor
@@ -1133,6 +1250,21 @@ def run(ready: bool) -> None:
         db = DB()
     else:
         db = Cursor()
+    # error: [column-type-mismatch]
+    db.one("SELECT name FROM users", int)
+```
+
+Classes whose helpers take the call another way leave it unchecked. ty: `DB | Reader`.
+
+```python
+from pkg.db import DB
+from pkg.reader import Reader
+
+def run(ready: bool) -> None:
+    if ready:
+        db = DB()
+    else:
+        db = Reader()
     db.one("SELECT name FROM users", int)
 
 # error:
@@ -1224,9 +1356,9 @@ def ended(rows, db: DB) -> None:
 
 ### An import with a fallback
 
-The two imports bind the name to different classes, so the call is skipped, even when
-both classes have the helper. ty: `<class 'DB'> | <class 'Postgres'>` for `Client`, and
-`Postgres` for `db`, as `DB` is a subclass of it.
+The two imports bind the name to different classes: the call is checked when both reach
+a helper that takes it the same way. ty: `<class 'DB'> | <class 'Postgres'>` for
+`Client`, and `Postgres` for `db`, as `DB` is a subclass of it.
 
 ```python
 try:
@@ -1235,7 +1367,44 @@ except ImportError:
     from pkg.db import Postgres as Client
 
 def run(db: Client) -> None:
+    # error: [column-type-mismatch]
     db.one("SELECT name FROM users", int)
+```
+
+An import under a condition is read the same way.
+
+```python
+import sys
+
+if sys.platform == "win32":
+    from pkg.db import Cursor as Client
+else:
+    from pkg.db import DB as Client
+
+def run(db: Client) -> None:
+    # error: [column-type-mismatch]
+    db.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch]
+    Client().one("SELECT name FROM users", int)
+```
+
+Two helpers that take the call another way, or a fallback that is no class, leave it
+unchecked.
+
+```python
+try:
+    from pkg.db import DB as Client
+except ImportError:
+    from pkg.reader import Reader as Client
+
+try:
+    from pkg.db import DB as Maybe
+except ImportError:
+    Maybe = object
+
+def run(db: Client, other: Maybe) -> None:
+    db.one("SELECT name FROM users", int)
+    other.one("SELECT name FROM users", int)
 
 # error:
 ```
@@ -1485,6 +1654,37 @@ def run(db: Db, other: lazy.Db) -> None:
     db.fetch(sql="SELECT nope FROM users")
     # error: [unknown-column]
     other.fetch(sql="SELECT nope FROM users")
+```
+
+### A class of the module with the name of the imported one
+
+A class the module defines is that class, whatever the name was imported as before: its
+own method is not the registered one. Where the name may be either, the call is not
+checked.
+
+```python
+from star import Db
+
+class Db:
+    def fetch(self, sql): ...
+
+def run(db: Db) -> None:
+    # error:
+    db.fetch(sql="SELECT nope FROM users")
+    # error:
+    Db().fetch(sql="SELECT nope FROM users")
+```
+
+```python
+try:
+    from star import Db
+except ImportError:
+    class Db:
+        def fetch(self, sql): ...
+
+def run(db: Db) -> None:
+    # error:
+    db.fetch(sql="SELECT nope FROM users")
 ```
 
 ### A class in a class

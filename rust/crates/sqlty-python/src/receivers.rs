@@ -10,7 +10,7 @@
 //! what the class of its base or one of that class's bases declares.
 
 use std::cell::{Cell, OnceCell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -87,6 +87,13 @@ const FUEL: u32 = 2000;
 /// The module of the class that stands for a base that is not known.
 const NOWHERE: &str = "\0";
 
+#[cfg(test)]
+thread_local! {
+    /// The steps the resolvers of this thread took: values evaluated and classes asked
+    /// for a method.
+    pub(crate) static STEPS: Cell<usize> = const { Cell::new(0) };
+}
+
 /// A class: the module that defines it and its name there. A class of a module that is not
 /// read keeps the module and name it is imported by.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -121,7 +128,7 @@ impl Class {
 }
 
 /// What an expression evaluates to.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Value {
     /// An instance of the class.
     Instance(Class),
@@ -142,6 +149,82 @@ pub enum Value {
     Module(String),
     /// A context manager whose `with` gives the value.
     Manager(Box<Value>),
+    /// Any of the values, which differ: the bindings that reach a use, an import with a
+    /// fallback, the members of a union. At most [`MAX_EITHER`], none of them `Either`.
+    Either(Rc<[Value]>),
+}
+
+/// The most values a name is followed as at once: more leave it unknown, so that what is
+/// read of each stays bounded.
+const MAX_EITHER: usize = 8;
+
+/// The one value that is any of `values`: itself when they are the same, `None` for
+/// none or for more than are followed. With it, whether it is a new value of several.
+fn either(values: impl IntoIterator<Item = Value>) -> Option<(Value, bool)> {
+    let mut values = values.into_iter();
+    let first = values.next()?;
+    let mut found: Vec<Value> = Vec::new();
+    let mut values = values.peekable();
+    // The same value again, as the classes of one union give each other: itself.
+    while values.next_if(|value| *value == first).is_some() {}
+    if values.peek().is_none() {
+        return Some((first, false));
+    }
+    for value in std::iter::once(first).chain(values) {
+        match value {
+            Value::Either(members) => {
+                for member in members.iter() {
+                    if !found.contains(member) {
+                        found.push(member.clone());
+                    }
+                }
+            }
+            value if found.contains(&value) => {}
+            value => found.push(value),
+        }
+        if found.len() > MAX_EITHER {
+            return None;
+        }
+    }
+    match found.len() {
+        0 => None,
+        1 => found.pop().map(|only| (only, false)),
+        _ => Some((Value::Either(found.into()), true)),
+    }
+}
+
+/// Whether a call reads its query, row type and parameters the same way through `one`
+/// and through `other`: the helpers of two classes a receiver may be of.
+fn same_helper(one: &Helper, other: &Helper) -> bool {
+    std::ptr::eq(one, other)
+        || (one.positional == other.positional
+            && one.keywords == other.keywords
+            && one.query == other.query
+            && one.row == other.row
+            && one.kind == other.kind
+            && one.params == other.params
+            && one.rest == other.rest
+            && one.named == other.named
+            && one.database == other.database)
+}
+
+/// A value that is any of several, the same as another when it is the same in memory:
+/// the resolver keeps one of each, so that asking it again does not read its members.
+#[derive(Clone)]
+struct Set(Rc<[Value]>);
+
+impl PartialEq for Set {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for Set {}
+
+impl std::hash::Hash for Set {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.as_ptr().hash(state);
+    }
 }
 
 /// An annotation, as written.
@@ -167,6 +250,13 @@ enum Asked {
     Local(Scope, String),
     Global(String, String),
     Member(Class, String, Class),
+    /// What the function or method gives when called, bound to this receiver.
+    Returned(Class, Option<Class>),
+    /// The attribute of a value that is any of several, what it gives when called, and
+    /// what `with` binds when it is entered (`async with` when true).
+    Attr(Set, String),
+    Called(Set),
+    Entered(Set, bool),
     /// A name of a scope where the bindings written at these places reach, under the
     /// `isinstance` test written at that one.
     Reached(Scope, String, Vec<u32>, Option<u32>),
@@ -186,6 +276,9 @@ pub enum Val {
     Call(Box<Val>, Option<Ann>),
     /// A declared type.
     Declared(Ann),
+    /// A value of the annotated type: a parameter assigned to an attribute. Unlike a
+    /// declaration, it does not state what else the attribute may hold.
+    Typed(Ann),
     /// `with value as`, `async with` when true.
     Entered(Box<Val>, bool),
     /// The class of this name, defined at the top of the module.
@@ -493,7 +586,7 @@ fn inside(val: Val, scan: &Scan<'_>, scope: Scope, this: &str, module: Option<&s
         Val::Name(name) => match scan.bindings(scope, &name) {
             Some([only]) if hidden_by_class(scan, scope, only) => Val::Unknown,
             Some([only]) => match only.origin {
-                Origin::Declared(declared, _) => Val::Declared(annotation(declared, 0)),
+                Origin::Declared(declared, _) => Val::Typed(annotation(declared, 0)),
                 Origin::Import(stmt, alias) => imported(stmt, alias, &name, module),
                 _ => Val::Unknown,
             },
@@ -659,6 +752,10 @@ pub struct Resolver<'s, 'a> {
     shapes: RefCell<HashMap<Scope, Rc<flow::Shape<'s>>>>,
     /// What the bindings of a name or attribute, read in no order, give it: asked once.
     agreed: RefCell<HashMap<Asked, Option<Value>>>,
+    /// The helper a method of a value that is any of several classes calls: asked once.
+    called: RefCell<HashMap<(Set, String), Option<&'s Helper>>>,
+    /// The values that are any of several, one of each.
+    sets: RefCell<HashSet<Rc<[Value]>>>,
     fuel: Cell<u32>,
 }
 
@@ -688,6 +785,8 @@ impl<'s, 'a> Resolver<'s, 'a> {
             flows: RefCell::default(),
             shapes: RefCell::default(),
             agreed: RefCell::default(),
+            called: RefCell::default(),
+            sets: RefCell::default(),
             fuel: Cell::new(0),
         }
     }
@@ -695,20 +794,60 @@ impl<'s, 'a> Resolver<'s, 'a> {
     /// The helper that `receiver.name(...)` calls in the scopes `stack`: the method `name`
     /// of the class of `receiver`, or of the first class of its method resolution order
     /// that defines it.
+    ///
+    /// A receiver that is of any of several classes calls the helper when each class
+    /// reaches one and they take the call the same way.
     pub fn method(&self, receiver: &Expr, name: &str, stack: &[Scope]) -> Option<&'s Helper> {
-        let (class, on_class) = match self.value_of(receiver, stack)? {
+        let value = self.value_of(receiver, stack)?;
+        let Value::Either(members) = &value else {
+            return self.method_of(&value, name);
+        };
+        // The classes are asked once for the method, whatever the number of calls.
+        let key = (Set(Rc::clone(members)), name.to_string());
+        if let Some(known) = self.called.borrow().get(&key) {
+            return *known;
+        }
+        let found = self.method_of_each(members, name);
+        self.called.borrow_mut().insert(key, found);
+        found
+    }
+
+    fn method_of_each(&self, members: &[Value], name: &str) -> Option<&'s Helper> {
+        let mut found: Option<&'s Helper> = None;
+        for member in members {
+            let helper = self.method_of(member, name)?;
+            if found.is_some_and(|known| !same_helper(known, helper)) {
+                return None;
+            }
+            found = found.or(Some(helper));
+        }
+        found
+    }
+
+    fn method_of(&self, receiver: &Value, name: &str) -> Option<&'s Helper> {
+        #[cfg(test)]
+        STEPS.with(|steps| steps.set(steps.get() + 1));
+        let (class, on_class) = match receiver {
             Value::Instance(class) => (class, false),
             Value::Type(class) | Value::Unresolved(class) => (class, true),
             _ => return None,
         };
-        for base in self.order(&class)?.iter() {
+        for base in self.order(class)?.iter() {
             let key = format!("{}.{name}", base.name);
             let own = (base.module == self.module)
                 .then(|| self.own.get(&key))
                 .flatten();
+            // A class its module defines has the helpers of that module; a name known
+            // by its path only may be one the module re-exports.
+            let defined = self
+                .facts(&base.module)
+                .is_some_and(|facts| facts.classes.contains_key(&base.name));
             let found = own.or_else(|| {
-                self.helpers
-                    .and_then(|helpers| helpers.get(&base.module, &key))
+                let helpers = self.helpers?;
+                match defined {
+                    true => helpers.modules.get(&base.module)?.get(&key),
+                    false => helpers.get(&base.module, &key),
+                }
             });
             if let Some(found) = found {
                 return (!on_class || found.kind != Kind::Instance).then_some(found);
@@ -774,6 +913,19 @@ impl<'s, 'a> Resolver<'s, 'a> {
         found
     }
 
+    /// The one value that is any of `values`, as [`either`] gives it, kept once.
+    fn any(&self, values: impl IntoIterator<Item = Value>) -> Option<Value> {
+        let (found, new) = either(values)?;
+        let (Value::Either(members), true) = (&found, new) else {
+            return Some(found);
+        };
+        if let Some(kept) = self.sets.borrow().get(&members[..]) {
+            return Some(Value::Either(Rc::clone(kept)));
+        }
+        self.sets.borrow_mut().insert(Rc::clone(members));
+        Some(found)
+    }
+
     /// What `asked` is, worked out once with a budget of its own, so that the answer
     /// does not depend on who asks first. A question that asks itself has no answer.
     fn once(&self, asked: Asked, answer: impl FnOnce() -> Option<Value>) -> Option<Value> {
@@ -790,6 +942,8 @@ impl<'s, 'a> Resolver<'s, 'a> {
 
     /// Whether another step may be taken at `depth`.
     fn step(&self, depth: u8) -> Option<()> {
+        #[cfg(test)]
+        STEPS.with(|steps| steps.set(steps.get() + 1));
         let left = self.fuel.get().checked_sub(1)?;
         self.fuel.set(left);
         (depth < DEPTH).then_some(())
@@ -812,7 +966,9 @@ impl<'s, 'a> Resolver<'s, 'a> {
                 let callee = self.eval(callee, env, depth + 1)?;
                 self.call(&callee, cast.as_ref(), env, depth + 1)
             }
-            Val::Declared(declared) => self.declared(declared, env, depth + 1),
+            Val::Declared(declared) | Val::Typed(declared) => {
+                self.declared(declared, env, depth + 1)
+            }
             Val::Entered(entered, is_async) => {
                 let entered = self.eval(entered, env, depth + 1)?;
                 self.enter(&entered, *is_async, depth + 1)
@@ -849,7 +1005,7 @@ impl<'s, 'a> Resolver<'s, 'a> {
         if let Some((stated, _)) = stated {
             return self.eval(stated, Env { at: None, ..env }, depth);
         }
-        let mut found: Option<Value> = None;
+        let mut found: Vec<Value> = Vec::new();
         let mut last: Option<&Val> = None;
         for (val, at) in bound {
             // The same value read at no place gives what it gave: a name bound to it
@@ -860,12 +1016,12 @@ impl<'s, 'a> Resolver<'s, 'a> {
             }
             last = Some(val);
             let value = self.eval(val, Env { at: *at, ..env }, depth)?;
-            if found.as_ref().is_some_and(|known| *known != value) {
-                return None;
+            if !found.contains(&value) {
+                found.push(value);
             }
-            found = Some(value);
         }
-        found
+        // Bindings that differ: the name is any of what they give it.
+        self.any(found)
     }
 
     /// What the bindings of a name or attribute, read in no order, give it.
@@ -1054,7 +1210,7 @@ impl<'s, 'a> Resolver<'s, 'a> {
         let (Value::Type(class) | Value::Unresolved(class)) = class else {
             return None;
         };
-        let mut held: Option<Class> = None;
+        let mut held: Vec<Class> = Vec::new();
         let mut unknown = false;
         for (val, at) in &bound {
             // An annotation that is not followed may still state a class (an alias of
@@ -1067,27 +1223,48 @@ impl<'s, 'a> Resolver<'s, 'a> {
                 _ => false,
             };
             match self.eval(val, Env { at: *at, ..env }, depth) {
-                Some(Value::Instance(known)) => {
-                    if held.as_ref().is_some_and(|held| *held != known) {
+                Some(value @ (Value::Instance(_) | Value::Either(_))) => {
+                    let members = match &value {
+                        Value::Either(members) => &members[..],
+                        value => std::slice::from_ref(value),
+                    };
+                    for member in members {
+                        let Value::Instance(known) = member else {
+                            return None;
+                        };
+                        if !held.contains(known) {
+                            held.push(known.clone());
+                        }
+                    }
+                    if held.len() > MAX_EITHER {
                         return None;
                     }
-                    held = Some(known);
                 }
                 None if !spelled && !matches!(val, Val::None) => unknown = true,
                 _ => return None,
             }
         }
-        let held = match held {
-            Some(_) if unknown => return None,
-            Some(held) => held,
-            None => return Some(Value::Instance(class)),
-        };
-        if self.order(&held)?.contains(&class) {
-            return Some(Value::Instance(held));
+        if held.is_empty() {
+            return Some(Value::Instance(class));
         }
-        self.order(&class)?
-            .contains(&held)
-            .then_some(Value::Instance(class))
+        if unknown {
+            return None;
+        }
+        // The test keeps the classes that are the tested class or a subclass of it; a
+        // name that may be of a base of the tested class may be of the tested one.
+        let mut kept = Vec::new();
+        let mut base = false;
+        for known in held {
+            if self.order(&known)?.contains(&class) {
+                kept.push(Value::Instance(known));
+            } else if self.order(&class)?.contains(&known) {
+                base = true;
+            }
+        }
+        if base {
+            kept.push(Value::Instance(class));
+        }
+        self.any(kept)
     }
 
     /// What `name` is at the top of `module`, whatever the order of its statements. A
@@ -1114,14 +1291,19 @@ impl<'s, 'a> Resolver<'s, 'a> {
             self.helpers
                 .is_some_and(|helpers| helpers.registers(module, name))
         };
-        let read = match &found {
-            Some(Value::Type(class)) => {
+        let read_as = |value: &Value| match value {
+            Value::Type(class) => {
                 (class.module == module && class.name == name)
                     || registers(&class.module, &class.name)
             }
-            Some(Value::Unresolved(class)) => class.module == module && class.name == name,
+            Value::Unresolved(class) => class.module == module && class.name == name,
+            _ => true,
+        };
+        let read = match &found {
+            // Any of several: each has to be a class the registration applies to.
+            Some(Value::Either(members)) => members.iter().all(read_as),
+            Some(value) => read_as(value),
             None => false,
-            Some(_) => true,
         };
         match read || !registers(module, name) {
             true => found,
@@ -1203,6 +1385,17 @@ impl<'s, 'a> Resolver<'s, 'a> {
                 self.or_registered(&outer, attr, read)
             }
             Value::Instance(class) => self.member_of(class, attr, depth),
+            // The attribute of any of them: each has to have it.
+            Value::Either(members) => self.once(
+                Asked::Attr(Set(Rc::clone(members)), attr.to_string()),
+                || {
+                    let found: Option<Vec<Value>> = members
+                        .iter()
+                        .map(|member| self.member(member, attr, 0))
+                        .collect();
+                    self.any(found?)
+                },
+            ),
             Value::Function { .. } | Value::Manager(_) => None,
         }
     }
@@ -1249,6 +1442,21 @@ impl<'s, 'a> Resolver<'s, 'a> {
                 None => Some(Value::Instance(path.clone())),
             },
             Value::Type(class) => Some(Value::Instance(class.clone())),
+            // What any of them gives when called: each has to be followed.
+            // Without a type to cast to, it does not depend on where: asked once.
+            Value::Either(members) => {
+                let each = |depth: u8| {
+                    let found: Option<Vec<Value>> = members
+                        .iter()
+                        .map(|member| self.call(member, cast, env, depth))
+                        .collect();
+                    self.any(found?)
+                };
+                match cast {
+                    Some(_) => each(depth + 1),
+                    None => self.once(Asked::Called(Set(Rc::clone(members))), || each(0)),
+                }
+            }
             Value::Function {
                 module,
                 class,
@@ -1264,26 +1472,48 @@ impl<'s, 'a> Resolver<'s, 'a> {
                     this: receiver.as_ref(),
                     ..Env::top(module)
                 };
-                if method.manager {
-                    let Ann::Generic(head, args) = &method.returns else {
-                        return None;
-                    };
-                    YIELDING
-                        .contains(&head.rsplit('.').next().unwrap_or(head))
-                        .then_some(())?;
-                    let yielded = self.declared(args.first()?, env, depth + 1)?;
-                    return Some(Value::Manager(Box::new(yielded)));
-                }
-                self.declared(&method.returns, env, depth + 1)
+                let owner = Class::new(
+                    module,
+                    &match class {
+                        Some(class) => format!("{class}.{name}"),
+                        None => name.clone(),
+                    },
+                );
+                let asked = Asked::Returned(owner, receiver.clone());
+                self.once(asked, || self.returned(method, env))
             }
             _ => None,
         }
+    }
+
+    /// What calling `method` gives, its annotation read in `env`.
+    fn returned(&self, method: &Method, env: Env<'_>) -> Option<Value> {
+        if method.manager {
+            let Ann::Generic(head, args) = &method.returns else {
+                return None;
+            };
+            YIELDING
+                .contains(&head.rsplit('.').next().unwrap_or(head))
+                .then_some(())?;
+            let yielded = self.declared(args.first()?, env, 0)?;
+            return Some(Value::Manager(Box::new(yielded)));
+        }
+        self.declared(&method.returns, env, 0)
     }
 
     /// What `with entered as` binds.
     fn enter(&self, entered: &Value, is_async: bool, depth: u8) -> Option<Value> {
         match entered {
             Value::Manager(inner) => Some((**inner).clone()),
+            Value::Either(members) => {
+                self.once(Asked::Entered(Set(Rc::clone(members)), is_async), || {
+                    let found: Option<Vec<Value>> = members
+                        .iter()
+                        .map(|member| self.enter(member, is_async, 0))
+                        .collect();
+                    self.any(found?)
+                })
+            }
             Value::Instance(_) => {
                 let name = if is_async { "__aenter__" } else { "__enter__" };
                 let method = self.member(entered, name, depth + 1)?;
@@ -1307,6 +1537,13 @@ impl<'s, 'a> Resolver<'s, 'a> {
         };
         let type_of = |of: &Ann| match self.declared(of, env, depth + 1)? {
             Value::Instance(class) => Some(Value::Type(class)),
+            Value::Either(members) => {
+                let found = members.iter().map(|member| match member {
+                    Value::Instance(class) => Some(Value::Type(class.clone())),
+                    _ => None,
+                });
+                self.any(found.collect::<Option<Vec<Value>>>()?)
+            }
             _ => None,
         };
         match declared {
@@ -1317,21 +1554,31 @@ impl<'s, 'a> Resolver<'s, 'a> {
                     Some(_) => None,
                     None => Some(Value::Instance(path)),
                 },
+                // A name that is any of several classes: an instance of any of them.
+                Value::Either(members) => {
+                    let found = members.iter().map(|member| match member {
+                        Value::Type(class) => Some(Value::Instance(class.clone())),
+                        Value::Unresolved(path) if path.form().is_none() => {
+                            Some(Value::Instance(path.clone()))
+                        }
+                        _ => None,
+                    });
+                    self.any(found.collect::<Option<Vec<Value>>>()?)
+                }
                 _ => None,
             },
             Ann::Union(members) => {
-                let mut found: Option<Value> = None;
+                let mut found = Vec::new();
                 for member in members {
                     if matches!(member, Ann::None) {
                         continue;
                     }
-                    let value = self.declared(member, env, depth + 1)?;
-                    if found.as_ref().is_some_and(|known| *known != value) {
+                    found.push(self.declared(member, env, depth + 1)?);
+                    if found.len() > MAX_EITHER {
                         return None;
                     }
-                    found = Some(value);
                 }
-                found
+                self.any(found)
             }
             Ann::Generic(head, args) => {
                 let head = match named(head) {
@@ -1549,13 +1796,65 @@ mod tests {
     }
 
     #[test]
+    fn a_value_of_several_classes_is_asked_once_whatever_the_number_of_calls() {
+        // Eight classes, each with attributes and a method that give any of the eight:
+        // a chain through them reads each class once, not once per call or per link.
+        let union = "A1 | A2 | A3 | A4 | A5 | A6 | A7 | A8";
+        let steps = |calls: usize| {
+            let mut text =
+                "from typing import Annotated, LiteralString\nfrom sqlty import SQL\n".to_string();
+            for class in 1..=8 {
+                text.push_str(&format!(
+                    "class A{class}:\n    nxt: \"{union}\"\n    alt: \"{union}\"\n    def step(self) -> \"{union}\": ...\n    def run(self, q: Annotated[LiteralString, SQL]): ...\n    def plain(self, q): ...\n"
+                ));
+            }
+            for call in 0..calls {
+                text.push_str(&format!(
+                    "def f{call}(c, x: {union}):\n    y = x.step().nxt\n    if c:\n        y = x.alt.step()\n    y.nxt.step().alt.step().run('q')\n    y.plain('q')\n"
+                ));
+            }
+            let source = Source::new(text.as_str(), (3, 14)).expect("parses");
+            let scan = Scan::new(source.body(), |_| true);
+            // Every class reaches a helper for `run`, the same one; none for `plain`.
+            let own = crate::calls::index_functions(&source);
+            assert_eq!(own.iter().count(), 8);
+            let resolver = Resolver::new(&source, Some("m"), None, &own, &scan);
+            STEPS.with(|steps| steps.set(0));
+            let mut seen = 0;
+            for (call, stack) in &scan.calls {
+                let Some(attr) = call.func.as_attribute_expr() else {
+                    continue;
+                };
+                let name = attr.attr.as_str();
+                if !matches!(name, "run" | "plain") {
+                    continue;
+                }
+                let Some(Value::Either(members)) = resolver.value_of(&attr.value, stack) else {
+                    panic!("any of the classes")
+                };
+                assert_eq!(members.len(), 8);
+                let helper = resolver.method(&attr.value, name, stack);
+                assert_eq!(helper.is_some(), name == "run");
+                seen += 1;
+            }
+            assert_eq!(seen, 2 * calls);
+            STEPS.with(Cell::get)
+        };
+        let (one, small, large) = (steps(1), steps(200), steps(400));
+        assert!(one <= 1000, "{one}");
+        assert!(large - small <= small, "{small} then {large}");
+        assert!(large <= 2 * small, "{small} then {large}");
+        assert!((large - small) / 200 <= 80, "{small} then {large}");
+    }
+
+    #[test]
     fn a_self_attribute_is_what_its_method_binds_it_to() {
         let found = facts(
             "class C:\n    kind: K\n    def __init__(self, db: Db, other):\n        self.db = db\n        self.other = other\n        self.made = make()\n        local = make()\n        self.local = local\n        self.me = self\n    def one(self): ...\n    one = None\n",
         );
         let attrs = &found.classes["C"].attrs;
         assert_eq!(attrs["kind"], [Val::Declared(Ann::Name("K".to_string()))]);
-        assert_eq!(attrs["db"], [Val::Declared(Ann::Name("Db".to_string()))]);
+        assert_eq!(attrs["db"], [Val::Typed(Ann::Name("Db".to_string()))]);
         assert_eq!(
             attrs["other"],
             [Val::Unknown],
