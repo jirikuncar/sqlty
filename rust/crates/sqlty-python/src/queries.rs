@@ -28,6 +28,7 @@ use crate::checker::{star_finding, unparsed_message, Diagnostic};
 use crate::options::Options;
 use crate::rewriter::LineIndex;
 use crate::rules::{Rule, RuleConfig, SQL_RULES};
+use crate::suppress::{apply_sql, sql_ignores};
 
 /// How a `.sql` file names its queries (`query-format`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -250,7 +251,7 @@ fn is_sqlc(rest: &str) -> bool {
 
 /// Check each statement of each named query of `source`: `unparsed-query`, `select-star` and
 /// the name rules, at the name when the analyzer knows where it is written, else at the
-/// statement.
+/// statement; without what its `-- sqlty: ignore` comments drop, with their `unused-ignore`.
 pub fn check_queries(
     source: &str,
     format: Format,
@@ -289,10 +290,12 @@ pub fn check_queries(
         );
     }
     let names = rules.enabled().intersects(SQL_RULES);
+    let mut statements = Vec::new();
     for query in split(source, format, stem) {
         let body = query.sql.as_str();
         for statement in statement_ranges(body, dialect) {
             let at = query.body.start + statement.start..query.body.start + statement.end;
+            statements.push(at.clone());
             let parsed = parse(&body[statement.clone()], dialect);
             if let Some(error) = parsed.error() {
                 report(Rule::UnparsedQuery, unparsed_message(&error), at);
@@ -345,7 +348,7 @@ pub fn check_queries(
         }
     }
     found.sort_by_key(|diagnostic| diagnostic.span.start);
-    found
+    apply_sql(&sql_ignores(source, &statements), found, rules)
 }
 
 #[cfg(test)]

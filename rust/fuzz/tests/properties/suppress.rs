@@ -1,9 +1,11 @@
 //! `-- sqlty: ignore` in `.sql` files: random lines of comments, blank lines, statements,
 //! strings and dollar quotes spelling the comment, unicode, with `\n`, `\r\n` and `\r` endings.
-//! A model of the documented rule says which line each comment covers and what `apply_sql`
-//! keeps: a comment alone on its line covers the next line that is not a `--` comment, unless
-//! a blank line comes first; any other covers its own line. Lines end at `\n`, as the
-//! diagnostics, the CLI and the language server count them: a lone `\r` joins two drawn lines.
+//! A model of the documented rule says which lines each comment covers and what `apply_sql`
+//! keeps: a comment alone on its line covers the next line that is not a comment (`--` or
+//! wholly `/* ... */`), through the end of the statement that starts there, unless a blank
+//! line comes first; any other covers its own line. Lines end at `\n`, as the diagnostics,
+//! the CLI and the language server count them: a lone `\r` joins two drawn lines. The
+//! statements are those the splitter finds, the input `sql_ignores` is given.
 
 use proptest::prelude::*;
 use sqlty_python::checker::Diagnostic;
@@ -17,7 +19,7 @@ use crate::draw::{check, Draw};
 type Ignore = Option<(Option<&'static [&'static str]>, bool)>;
 
 #[rustfmt::skip]
-const LINES: [(&str, Ignore); 20] = [
+const LINES: [(&str, Ignore); 24] = [
     ("", None),
     ("  \t", None),
     ("-- note", None),
@@ -38,6 +40,10 @@ const LINES: [(&str, Ignore); 20] = [
     ("  -- sqlty: ignore[]", Some((Some(&[]), true))),
     ("-- sqlty: ignore[select-star", Some((None, true))),
     ("\x0b-- sqlty: ignore", Some((None, false))),
+    ("SELECT id", None),
+    ("FROM t;", None),
+    ("/* why */", None),
+    ("/* a */ SELECT 1", None),
 ];
 const ENDINGS: [&str; 3] = ["\n", "\r\n", "\r"];
 const RULES: [Rule; 2] = [Rule::SelectStar, Rule::UnknownColumn];
@@ -77,10 +83,14 @@ enum Class {
 }
 
 fn class(text: &str) -> Class {
-    let text = text.trim_start_matches(|c: char| c.is_ascii_whitespace());
+    let text = text.trim_matches(|c: char| c.is_ascii_whitespace());
+    let block = text.len() >= 4
+        && text.starts_with("/*")
+        && text.ends_with("*/")
+        && !text[2..text.len() - 2].contains("*/");
     if text.is_empty() {
         Class::Blank
-    } else if text.starts_with("--") {
+    } else if text.starts_with("--") || block {
         Class::Comment
     } else {
         Class::Other
@@ -100,8 +110,18 @@ fn joined(lines: &[(usize, &str)]) -> Vec<Vec<usize>> {
     found
 }
 
-/// `(line, covers, rules)` of each ignore comment, by the model.
-fn model(lines: &[(usize, &str)]) -> Vec<(usize, usize, Option<&'static [&'static str]>)> {
+type Model = Vec<(usize, usize, usize, Option<&'static [&'static str]>)>;
+
+/// `(line, covers, through, rules)` of each ignore comment, by the model, for `statements`
+/// of `text`.
+fn model(lines: &[(usize, &str)], text: &str, statements: &[std::ops::Range<usize>]) -> Model {
+    let line_of = |at: usize| {
+        text.as_bytes()[..at]
+            .iter()
+            .filter(|&&b| b == b'\n')
+            .count()
+            + 1
+    };
     let lines = joined(lines);
     let text = |line: &Vec<usize>| -> String {
         let parts: Vec<_> = line.iter().map(|&index| LINES[index].0).collect();
@@ -120,7 +140,7 @@ fn model(lines: &[(usize, &str)]) -> Vec<(usize, usize, Option<&'static [&'stati
         let before = parts[..part].iter().map(|&index| LINES[index].0);
         let alone = alone && before.collect::<String>().trim_ascii().is_empty();
         let line = at + 1;
-        let mut covers = line;
+        let (mut covers, mut through) = (line, line);
         if alone {
             for (below, parts) in lines.iter().enumerate().skip(at + 1) {
                 match class(&text(parts)) {
@@ -128,12 +148,17 @@ fn model(lines: &[(usize, &str)]) -> Vec<(usize, usize, Option<&'static [&'stati
                     Class::Comment => {}
                     Class::Other => {
                         covers = below + 1;
+                        through = statements
+                            .iter()
+                            .filter(|statement| line_of(statement.start) == covers)
+                            .map(|statement| line_of(statement.end.max(statement.start + 1) - 1))
+                            .fold(covers, usize::max);
                         break;
                     }
                 }
             }
         }
-        found.push((line, covers, rules));
+        found.push((line, covers, through, rules));
     }
     found
 }
@@ -161,18 +186,21 @@ fn sql_ignores_cover_the_line_the_model_says() {
             .iter()
             .flat_map(|&(index, ending)| [LINES[index].0, ending])
             .collect();
-        let expected = model(&case.lines);
-        let found = sql_ignores(&text);
+        let statements = sqlty_sql::analyzer::statement_ranges(&text, "postgres");
+        let expected = model(&case.lines, &text, &statements);
+        let found = sql_ignores(&text, &statements);
         let lines: Vec<_> = found
             .iter()
-            .map(|ignore| (ignore.line, ignore.covers))
+            .map(|ignore| (ignore.line, ignore.covers, ignore.through))
             .collect();
         let want: Vec<_> = expected
             .iter()
-            .map(|&(line, covers, _)| (line, covers))
+            .map(|&(line, covers, through, _)| (line, covers, through))
             .collect();
         prop_assert_eq!(&lines, &want, "{:?}", text);
-        prop_assert!(found.iter().all(|ignore| ignore.covers >= ignore.line));
+        prop_assert!(found
+            .iter()
+            .all(|ignore| ignore.line <= ignore.covers && ignore.covers <= ignore.through));
 
         // Each diagnostic is dropped by the first comment covering its line that names its
         // rule; every rule of a comment that dropped nothing is an `unused-ignore` on its line.
@@ -182,12 +210,13 @@ fn sql_ignores_cover_the_line_the_model_says() {
         for (k, &(line, rule)) in case.diagnostics.iter().enumerate() {
             let message = format!("d{k}");
             diagnostics.push(diagnostic(rule, line, message.clone()));
-            let by = expected.iter().find_map(|&(at, covers, names)| {
+            let by = expected.iter().find_map(|&(at, covers, through, names)| {
                 let named = match names {
                     None => true,
                     Some(names) => names.contains(&rule.name()),
                 };
-                (covers == line && named).then_some((at, names.map(|_| rule.name())))
+                let covered = (covers..=through).contains(&line);
+                (covered && named).then_some((at, names.map(|_| rule.name())))
             });
             match by {
                 Some(key) => {
@@ -196,8 +225,8 @@ fn sql_ignores_cover_the_line_the_model_says() {
                 None => want.push((rule.name(), line, message)),
             }
         }
-        let comment_lines: Vec<usize> = expected.iter().map(|&(line, _, _)| line).collect();
-        for &(line, _, names) in &expected {
+        let comment_lines: Vec<usize> = expected.iter().map(|&(line, ..)| line).collect();
+        for &(line, _, _, names) in &expected {
             let unused: Vec<Option<&str>> = match names {
                 None => vec![None],
                 Some(names) => names.iter().map(|name| Some(*name)).collect(),

@@ -2,6 +2,7 @@
 //! `.sql` files.
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -9,6 +10,7 @@ use ruff_python_ast::token::TokenKind;
 use ruff_python_parser::{lexer, Mode};
 
 use crate::checker::Diagnostic;
+use crate::rewriter::LineIndex;
 use crate::rows::Reported;
 use crate::rules::{Rule, RuleConfig};
 use crate::scopes::Lines;
@@ -20,9 +22,12 @@ use crate::types::symbols::Source;
 pub struct Ignore {
     /// The 1-based line it is on.
     pub line: usize,
-    /// The line whose diagnostics it suppresses: `line`, or for a `--` comment alone on its
-    /// line the next one that is not a comment.
+    /// The first line whose diagnostics it suppresses: `line`, or for a `--` comment alone on
+    /// its line the next one that is not a comment.
     pub covers: usize,
+    /// The last line it suppresses: `covers`, or the last line of the statement that starts
+    /// on `covers` when the comment is alone on its line above it.
+    pub through: usize,
     /// The rules it names; `None` suppresses every rule.
     pub rules: Option<Vec<String>>,
     /// The byte offsets of the comment.
@@ -69,6 +74,7 @@ pub fn ignores(source: &Source) -> Vec<Ignore> {
             Some(Ignore {
                 line,
                 covers: line,
+                through: line,
                 rules: rules_of(&text[range])?,
                 span: (range.start().to_usize(), range.end().to_usize()),
             })
@@ -95,6 +101,7 @@ pub fn unparsed_ignores(text: &str) -> Vec<Ignore> {
                     found.push(Ignore {
                         line,
                         covers: line,
+                        through: line,
                         rules,
                         span: (range.start().to_usize(), range.end().to_usize()),
                     });
@@ -106,10 +113,12 @@ pub fn unparsed_ignores(text: &str) -> Vec<Ignore> {
 }
 
 /// The `-- sqlty: ignore` comments of a `.sql` file, the first of each line. One alone on its
-/// line covers the next line that is not a `--` comment; a blank line or the end of the file
-/// first leaves it covering its own line, where it suppresses nothing. Lines end at `\n`, as
-/// the diagnostics of queries and migrations count them, so a lone `\r` ends none.
-pub fn sql_ignores(text: &str) -> Vec<Ignore> {
+/// line covers the next line that is not a comment (`--`, or wholly `/* ... */`), through the
+/// last line of the one of `statements` (byte ranges) that starts there; a blank line or the
+/// end of the file first leaves it covering its own line, where it suppresses nothing. Lines
+/// end at `\n`, as the diagnostics of queries and migrations count them, so a lone `\r` ends
+/// none. Strings and dollar quotes are not lexed: a line in one that spells the comment counts.
+pub fn sql_ignores(text: &str, statements: &[Range<usize>]) -> Vec<Ignore> {
     #[expect(clippy::expect_used, reason = "the pattern is written here")]
     static IGNORE: LazyLock<regex::bytes::Regex> = LazyLock::new(|| {
         regex::bytes::Regex::new(r"(?-u)--\s*sqlty:\s*ignore\b(?:\[([^\]]*)\])?")
@@ -120,6 +129,7 @@ pub fn sql_ignores(text: &str) -> Vec<Ignore> {
     }
     let mut found: Vec<Ignore> = Vec::new();
     let mut waiting: Vec<usize> = Vec::new();
+    let mut last_lines = None;
     let mut start = 0;
     for (row, line) in text
         .as_bytes()
@@ -134,6 +144,7 @@ pub fn sql_ignores(text: &str) -> Vec<Ignore> {
             found.push(Ignore {
                 line,
                 covers: line,
+                through: line,
                 rules: matched.get(1).map(|names| {
                     String::from_utf8_lossy(names.as_bytes())
                         .split(',')
@@ -149,16 +160,43 @@ pub fn sql_ignores(text: &str) -> Vec<Ignore> {
                 continue;
             }
         }
-        let row = row.trim_ascii_start();
+        let row = row.trim_ascii();
         if row.is_empty() {
             waiting.clear();
-        } else if !row.starts_with(b"--") {
+        } else if !is_comment(row) && !waiting.is_empty() {
+            let through = last_lines
+                .get_or_insert_with(|| statement_ends(text, statements))
+                .get(&line)
+                .map_or(line, |&last| last.max(line));
             for index in waiting.drain(..) {
                 found[index].covers = line;
+                found[index].through = through;
             }
         }
     }
     found
+}
+
+/// Whether a trimmed line is wholly a comment: `-- ...` or one `/* ... */`.
+fn is_comment(row: &[u8]) -> bool {
+    row.starts_with(b"--")
+        || row.strip_prefix(b"/*").is_some_and(|rest| {
+            rest.windows(2).position(|pair| pair == b"*/") == Some(rest.len().wrapping_sub(2))
+        })
+}
+
+/// The last line of the statements that start on each line, by their first line; built
+/// once per file, on the first comment that covers a line below it.
+fn statement_ends(text: &str, statements: &[Range<usize>]) -> HashMap<usize, usize> {
+    let lines = LineIndex::new(text);
+    let mut last: HashMap<usize, usize> = HashMap::new();
+    for statement in statements {
+        let first = lines.line_at(statement.start);
+        let end = lines.line_at(statement.end.saturating_sub(1).max(statement.start));
+        let entry = last.entry(first).or_insert(end);
+        *entry = (*entry).max(end);
+    }
+    last
 }
 
 /// What `fix_source` leaves alone, by line: the rules of each ignore comment (`None`: every
@@ -220,25 +258,39 @@ fn apply_marked(
     if ignores.is_empty() || diagnostics.iter().any(crashed) {
         return diagnostics;
     }
-    let mut covering: HashMap<usize, Vec<&Ignore>> = HashMap::new();
+    // The comments of each range of lines, and the ranges on each line: comments above one
+    // statement share a range, so each line is listed once per range that holds it.
+    let mut ranges: HashMap<(usize, usize), Vec<&Ignore>> = HashMap::new();
     for ignore in ignores {
-        covering.entry(ignore.covers).or_default().push(ignore);
+        let range = (ignore.covers, ignore.through);
+        ranges.entry(range).or_default().push(ignore);
+    }
+    let mut covering: HashMap<usize, Vec<&[&Ignore]>> = HashMap::new();
+    for (&(first, last), group) in &ranges {
+        for line in first..=last {
+            covering.entry(line).or_default().push(group);
+        }
     }
     let mut kept = Vec::new();
     let mut used: HashSet<(usize, Option<&str>)> = HashSet::new();
     for reported in diagnostics {
         let rule = reported.diagnostic.rule.name();
-        let found = covering
-            .get(&reported.diagnostic.line)
-            .into_iter()
-            .flatten()
-            .find_map(|ignore| match &ignore.rules {
+        let first_naming = |group: &&[&Ignore]| {
+            group.iter().find_map(|ignore| match &ignore.rules {
                 None => Some((ignore.line, None)),
                 Some(names) => names
                     .iter()
                     .any(|name| name == rule)
                     .then_some((ignore.line, Some(rule))),
-            });
+            })
+        };
+        // The first comment of the file that covers the line and names the rule.
+        let found = covering
+            .get(&reported.diagnostic.line)
+            .into_iter()
+            .flatten()
+            .filter_map(first_naming)
+            .min_by_key(|&(line, _)| line);
         match found {
             Some(key) => {
                 used.insert(key);
@@ -353,13 +405,13 @@ mod tests {
     fn sql_comments_suppress_on_their_line() {
         let text =
             "-- name: a\nSELECT 1; -- sqlty: ignore[x, y ]\r\n--sqlty:ignore\r-- sqlty: ignored\nSELECT 2;\n";
-        let found = sql_ignores(text);
+        let found = sql_ignores(text, &[]);
         assert_eq!(
             lines_and_rules(&found),
             [(2, Some(vec!["x", "y"])), (3, None)]
         );
         assert_eq!(&text[found[1].span.0..found[1].span.1], "--sqlty:ignore");
-        assert!(sql_ignores("SELECT 1").is_empty());
+        assert!(sql_ignores("SELECT 1", &[]).is_empty());
 
         let diagnostic = |rule, line| Diagnostic {
             rule,
@@ -382,7 +434,7 @@ mod tests {
     }
 
     fn covers(text: &str) -> Vec<(usize, usize)> {
-        sql_ignores(text)
+        sql_ignores(text, &[])
             .iter()
             .map(|ignore| (ignore.line, ignore.covers))
             .collect()
@@ -430,6 +482,57 @@ mod tests {
         assert!(covers(&many).iter().all(|&(_, covered)| covered == 1001));
     }
 
+    fn ranges(text: &str) -> Vec<(usize, usize, usize)> {
+        let statements = sqlty_sql::analyzer::statement_ranges(text, "postgres");
+        sql_ignores(text, &statements)
+            .iter()
+            .map(|ignore| (ignore.line, ignore.covers, ignore.through))
+            .collect()
+    }
+
+    #[test]
+    fn a_sql_comment_alone_on_its_line_covers_the_statement_below_it() {
+        assert_eq!(
+            ranges("-- sqlty: ignore\nSELECT id\nFROM nope\n;\nSELECT 2;"),
+            [(1, 2, 3)]
+        );
+        assert_eq!(
+            ranges("-- sqlty: ignore\n/* why */\n  /**/\nSELECT id\nFROM nope;"),
+            [(1, 4, 5)]
+        );
+        // Not wholly a comment: the statement starts on that line.
+        assert_eq!(ranges("-- sqlty: ignore\n/* a */ SELECT\n1;"), [(1, 2, 3)]);
+        assert_eq!(
+            ranges("-- sqlty: ignore\n/* a */ */\nSELECT 1;"),
+            [(1, 2, 3)]
+        );
+        assert_eq!(ranges("-- sqlty: ignore\n/*/\nSELECT 1;"), [(1, 2, 2)]);
+        // Two statements start on the line: the cover runs to the end of the longer.
+        assert_eq!(
+            ranges("-- sqlty: ignore\nSELECT 1; SELECT\n2;\nSELECT 3;"),
+            [(1, 2, 3)]
+        );
+        // Inside a statement, or on a statement's line, a comment covers one line.
+        assert_eq!(
+            ranges("SELECT a,\n-- sqlty: ignore\nb\nFROM t;"),
+            [(2, 3, 3)]
+        );
+        assert_eq!(ranges("SELECT a -- sqlty: ignore\nFROM t;"), [(1, 1, 1)]);
+        let text = "-- sqlty: ignore[unknown-table]\nSELECT id\nFROM nope;\n";
+        let diagnostic = Diagnostic {
+            rule: Rule::UnknownTable,
+            message: String::new(),
+            severity: crate::rules::Severity::Error,
+            line: 3,
+            span: 22..26,
+            fix: Vec::new(),
+        };
+        let statements = sqlty_sql::analyzer::statement_ranges(text, "postgres");
+        let rules = RuleConfig::default().only(&[Rule::UnknownTable, Rule::UnusedIgnore]);
+        let kept = apply_sql(&sql_ignores(text, &statements), vec![diagnostic], &rules);
+        assert!(kept.is_empty(), "{kept:?}");
+    }
+
     #[test]
     fn a_second_comment_for_one_statement_is_unused() {
         let text =
@@ -443,7 +546,7 @@ mod tests {
             fix: Vec::new(),
         };
         let rules = RuleConfig::default().only(&[Rule::SelectStar, Rule::UnusedIgnore]);
-        let kept = apply_sql(&sql_ignores(text), vec![diagnostic], &rules);
+        let kept = apply_sql(&sql_ignores(text, &[]), vec![diagnostic], &rules);
         let [unused] = kept.as_slice() else {
             panic!("{kept:?}");
         };
@@ -456,12 +559,14 @@ mod tests {
             Ignore {
                 line: 1,
                 covers: 1,
+                through: 1,
                 rules: None,
                 span: (0, 1),
             },
             Ignore {
                 line: 2,
                 covers: 2,
+                through: 2,
                 rules: Some(vec!["select-star".to_string()]),
                 span: (0, 1),
             },

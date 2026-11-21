@@ -281,7 +281,8 @@ ALTER TABLE users ADD COLUMN token UUID DEFAULT gen_random_uuid(); -- sqlty: ign
 CREATE INDEX users_email ON users (email);
 ```
 
-A comment alone on the line above a statement drops its findings too:
+A comment alone on its line above a statement drops its findings too, with
+`--` or `/* ... */` comment lines between them but no blank line:
 
 ```sql migration
 -- sqlty: ignore[missing-lock-timeout]

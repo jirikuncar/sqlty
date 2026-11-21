@@ -205,15 +205,19 @@ fn read(source: &str) -> (Option<BTreeSet<String>>, Option<String>) {
     let Some(source) = Source::new(source, VERSION) else {
         return (None, None);
     };
-    let scan = Scan::new(source.body(), |call| {
+    let scan = Scan::new(source.body());
+    let Some(&(call, scope)) = scan.calls.iter().find(|(call, _)| {
         call.func
             .as_name_expr()
             .is_some_and(|name| name.id.as_str() == "run")
-    });
-    let Some((call, stack)) = scan.calls.first() else {
+    }) else {
         return (None, None);
     };
-    let stack: Vec<_> = stack.iter().map(|scope| scan.scopes[*scope]).collect();
+    let stack: Vec<_> = scan
+        .stack(scope)
+        .iter()
+        .map(|scope| scan.scopes[*scope])
+        .collect();
     match query_variants(
         &source,
         &stack,

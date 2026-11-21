@@ -15,7 +15,7 @@ Default severity: **warn**
 
 Reports a `# sqlty: ignore` comment that suppresses no diagnostic. A bare
 comment is reported when nothing on its line is suppressed, or for a `--` comment
-alone on its line in a `.sql` file, nothing on the next line that is not a comment; a comment with a
+alone on its line in a `.sql` file, nothing in the statement below it; a comment with a
 rule list is reported once per listed rule that suppresses nothing.
 
 ```python

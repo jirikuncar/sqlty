@@ -1096,10 +1096,10 @@ fn check_source(
 }
 
 /// Check the named queries of a `.sql` file: `unparsed-query` and the name rules of each
-/// statement, without those a `-- sqlty: ignore` comment on their line, or alone on the line
-/// above, drops, with its `unused-ignore`. `query_format` is a `query-format` value (`"auto"`, `"aiosql"`, `"sqlc"`,
-/// `"pugsql"`, `"file"`); `name` is the file name without its extension, the name of a
-/// query of a file without headers.
+/// statement, without those a `-- sqlty: ignore` comment on their line, or alone on its line
+/// above their statement, drops, with its `unused-ignore`. `query_format` is a `query-format`
+/// value (`"auto"`, `"aiosql"`, `"sqlc"`, `"pugsql"`, `"file"`); `name` is the file name
+/// without its extension, the name of a query of a file without headers.
 ///
 /// Example:
 ///     check_queries("-- name: get-user^\nSELECT nope FROM users", schema_sql="CREATE TABLE users (id INT)")
@@ -1128,27 +1128,27 @@ fn check_queries(
         let schema = schema(schema_sql, dialect);
         let options = Options::new(dialect, schema.as_deref(), None, false)?;
         let rules = RuleConfig::from_overrides(rules).map_err(ConfigError::from)?;
-        let found = queries::check_queries(source, format, name, &options, &rules);
-        let ignores = sqlty_python::suppress::sql_ignores(source);
-        Ok(sqlty_python::suppress::apply_sql(&ignores, found, &rules)
-            .into_iter()
-            .map(|diag| DiagnosticOut {
-                rule: diag.rule.name(),
-                message: diag.message,
-                severity: diag.severity.as_str(),
-                line: diag.line,
-                start: diag.span.start,
-                end: diag.span.end,
-                fix: Vec::new(),
-            })
-            .collect())
+        Ok(
+            queries::check_queries(source, format, name, &options, &rules)
+                .into_iter()
+                .map(|diag| DiagnosticOut {
+                    rule: diag.rule.name(),
+                    message: diag.message,
+                    severity: diag.severity.as_str(),
+                    line: diag.line,
+                    start: diag.span.start,
+                    end: diag.span.end,
+                    fix: Vec::new(),
+                })
+                .collect(),
+        )
     })
 }
 
 /// What the new statements of PostgreSQL migrations lock, as `sqlty breaking` reports it:
 /// each of `files`, in the order the migrations run, is checked for the statements
 /// `baseline` (the schema of the `--against` revision) does not have, without those a
-/// `-- sqlty: ignore` comment on their first line, or alone on the line above, drops.
+/// `-- sqlty: ignore` comment on their first line, or alone on its line above, drops.
 ///
 /// Example:
 ///     check_migrations("CREATE TABLE users (id INT)", ["CREATE INDEX i ON users (id)"])

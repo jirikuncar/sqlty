@@ -45,6 +45,15 @@ A blank line between the comment and the statement ends it.
 ```sql migration
 SET lock_timeout = '1s';
 -- sqlty: ignore[missing-concurrently]
+/* built before the backfill */
+-- error:
+CREATE INDEX users_email
+    ON users (email);
+```
+
+```sql migration
+SET lock_timeout = '1s';
+-- sqlty: ignore[missing-concurrently]
 
 -- error: [missing-concurrently]
 CREATE INDEX users_email ON users (email);

@@ -7,7 +7,7 @@ use crate::suppress::{apply_sql, sql_ignores};
 
 /// The diagnostics of each of `files`, PostgreSQL migrations in the order they run, for the
 /// statements `baseline` does not have. `-- sqlty: ignore[rule]` on a statement's first line,
-/// or alone on the line above it, drops its diagnostic.
+/// or alone on its line above the statement, drops its diagnostic.
 pub fn check_migrations(
     baseline: &str,
     files: &[&str],
@@ -18,7 +18,7 @@ pub fn check_migrations(
         .zip(files)
         .map(|(found, sql)| {
             let lines = LineIndex::new(sql);
-            let found = found
+            let found: Vec<Diagnostic> = found
                 .into_iter()
                 .filter(|finding| rules.is_enabled(finding.rule))
                 .map(|finding| Diagnostic {
@@ -30,7 +30,9 @@ pub fn check_migrations(
                     fix: Vec::new(),
                 })
                 .collect();
-            apply_sql(&sql_ignores(sql), found, rules)
+            // Each finding spans its statement.
+            let statements: Vec<_> = found.iter().map(|found| found.span.clone()).collect();
+            apply_sql(&sql_ignores(sql, &statements), found, rules)
                 .into_iter()
                 .filter(|diagnostic| diagnostic.rule != Rule::UnusedIgnore)
                 .collect()
@@ -102,5 +104,8 @@ mod tests {
         let found = check_migrations(BASELINE, &[cr], &rules(&[]));
         assert_eq!(found[0].len(), 1, "{found:?}");
         assert_eq!(found[0][0].line, 3, "{found:?}");
+        let block = "SET lock_timeout = '1s';\n-- sqlty: ignore[missing-concurrently]\n/* why */\nCREATE INDEX i\nON users (bio);";
+        let found = check_migrations(BASELINE, &[block], &rules(&[("unused-ignore", "error")]));
+        assert!(found[0].is_empty(), "{found:?}");
     }
 }
