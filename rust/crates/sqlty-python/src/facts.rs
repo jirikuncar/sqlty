@@ -5,6 +5,7 @@ use std::collections::HashSet;
 
 use ruff_python_ast::{Expr, ExprCall};
 
+use crate::arg_types::{Project, SourceTypes};
 use crate::scopes::Scan;
 use crate::types::symbols::Source;
 
@@ -27,6 +28,16 @@ impl<'a> ModuleFacts<'a> {
     /// The walk of the module, made on first use.
     pub fn scan(&self) -> &Scan<'a> {
         self.scan.get_or_init(|| Scan::new(self.source.body()))
+    }
+
+    /// The types of the values the module passes, names of `project` included.
+    pub fn arg_types<'s>(&'s self, project: Option<Project<'s>>) -> SourceTypes<'a, 's> {
+        SourceTypes::new(
+            Some(self.source),
+            &self.source.imports,
+            self.scan(),
+            project,
+        )
     }
 
     /// `ParsedSource.literals`: the string literals that are not an operand of `+`, and the

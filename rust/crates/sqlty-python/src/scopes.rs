@@ -1,10 +1,9 @@
-//! The scopes of a module, the classes its names and `self` attributes hold, and the
-//! argument types read from them.
+//! The scopes of a module and the classes its names and `self` attributes hold, which
+//! [`crate::arg_types`] reads argument types from.
 
 use std::collections::{HashMap, HashSet};
 
 use crate::frozen::Table;
-use crate::types::symbols::Source;
 use ruff_python_ast::visitor::{walk_except_handler, walk_expr, walk_pattern, walk_stmt, Visitor};
 use ruff_python_ast::{
     self as ast, Expr, ExprCall, ExprTString, Number, Operator, Stmt, StmtClassDef,
@@ -371,17 +370,49 @@ impl<'a> Scan<'a> {
         &'n self,
         scope: Scope,
         name: &'n str,
-    ) -> impl Iterator<Item = Option<String>> + 'n {
+    ) -> impl Iterator<Item = &'n Binding<'a>> + 'n {
         let bindings = self.bindings(scope, name).unwrap_or(&[]);
-        bindings
-            .iter()
-            .filter(|binding| {
-                matches!(
-                    binding.origin,
-                    Origin::Declared(..) | Origin::Value(_) | Origin::Parameter
-                )
-            })
-            .map(|binding| kind(binding.origin))
+        bindings.iter().filter(|binding| {
+            matches!(
+                binding.origin,
+                Origin::Declared(..) | Origin::Value(_) | Origin::Parameter
+            )
+        })
+    }
+
+    /// The class `name` holds in `scope`: the one every assignment, annotation and
+    /// parameter of that name gives, spelled as the source spells it. `None` when the
+    /// scope has none of them, `Some(None)` when they differ or do not say.
+    pub(crate) fn kind_of(&self, scope: Scope, name: &str) -> Option<Option<String>> {
+        let mut kinds = self.typed(scope, name).map(|binding| kind(binding.origin));
+        let first = kinds.next()?;
+        Some(first.filter(|first| kinds.all(|other| other.as_ref() == Some(first))))
+    }
+
+    /// Whether `name` is a parameter of the function `scope` that its body does not
+    /// assign or annotate again.
+    pub(crate) fn parameter(&self, scope: Scope, name: &str) -> bool {
+        let Node::Function(function) = self.scopes[scope] else {
+            return false;
+        };
+        let mut typed = self.typed(scope, name);
+        let within = |binding: &Binding<'_>| {
+            let site = TextSize::from(binding.site);
+            function.parameters.range().contains(site)
+        };
+        typed.next().is_some_and(within) && typed.next().is_none()
+    }
+
+    /// Whether `name` is a type parameter of the generic function or class `scope`.
+    pub(crate) fn generic(&self, scope: Scope, name: &str) -> bool {
+        let params = match self.scopes[scope] {
+            Node::Function(function) => function.type_params.as_deref(),
+            _ => self
+                .class(scope)
+                .and_then(|class| class.type_params.as_deref()),
+        };
+        let mut params = params.into_iter().flat_map(|params| params.iter());
+        params.any(|param| type_parameter(param).as_str() == name)
     }
 
     /// The names `scope` binds, each with its bindings.
@@ -875,160 +906,8 @@ fn kind(origin: Origin<'_>) -> Option<String> {
     }
 }
 
-/// The module that defines an imported `NAME` or `module.NAME`, and its value there.
-pub type Constant<'s> = &'s dyn Fn(&str) -> Option<(&'s Source, &'s Expr)>;
-
-/// The class each module-level name of `source` holds, from one walk of the module.
-fn module_classes(source: &Source) -> HashMap<String, Option<String>> {
-    let scan = Scan::new(source.body());
-    let context = Context {
-        imported: &source.imports,
-        scan: &scan,
-        constant: None,
-    };
-    let class = |name: &str| context.class(context.type_of(&[], name));
-    scan.bound_in(0)
-        .map(|(name, _)| (name.to_string(), class(name)))
-        .collect()
-}
-
-/// Reads argument types in the scopes of a [`Scan`].
-pub struct Context<'a, 's> {
-    /// `ParsedSource.imported_names`.
-    pub imported: &'s Table,
-    /// The scan of the module.
-    pub scan: &'s Scan<'a>,
-    /// Finds the value of an imported constant, when the checked modules are known.
-    pub constant: Option<Constant<'s>>,
-}
-
-impl Context<'_, '_> {
-    /// The arguments a tuple or list literal, or a dict literal of string keys, passes.
-    pub fn literal_params(&self, arg: &Expr, stack: &[Scope]) -> Option<Vec<Param>> {
-        let items = match arg {
-            Expr::Tuple(tuple) => &tuple.elts,
-            Expr::List(list) => &list.elts,
-            Expr::Dict(dict) => {
-                let mut found = Vec::new();
-                for item in &dict.items {
-                    let Some(Expr::StringLiteral(key)) = &item.key else {
-                        return None;
-                    };
-                    found.push(Param {
-                        key: Key::Name(key.value.to_str().to_string()),
-                        kind: self.arg_type(&item.value, stack),
-                    });
-                }
-                return Some(found);
-            }
-            _ => return None,
-        };
-        if items.iter().any(|item| matches!(item, Expr::Starred(_))) {
-            return None;
-        }
-        Some(
-            items
-                .iter()
-                .enumerate()
-                .map(|(i, item)| Param {
-                    key: Key::Index(i + 1),
-                    kind: self.arg_type(item, stack),
-                })
-                .collect(),
-        )
-    }
-
-    /// The type `expr` has where the source says so.
-    pub fn arg_type(&self, expr: &Expr, stack: &[Scope]) -> Option<String> {
-        let name = match expr {
-            Expr::NoneLiteral(_) => "None",
-            Expr::List(ast::ExprList { elts: items, .. })
-            | Expr::Tuple(ast::ExprTuple { elts: items, .. })
-            | Expr::Set(ast::ExprSet { elts: items, .. }) => {
-                let types: HashSet<Option<String>> = items
-                    .iter()
-                    .map(|item| match item {
-                        Expr::Starred(_) => None,
-                        _ => self.arg_type(item, stack),
-                    })
-                    .collect();
-                if let [Some(only)] = types.iter().collect::<Vec<_>>().as_slice() {
-                    if only != "None" {
-                        return Some(format!("list[{only}]"));
-                    }
-                }
-                "list"
-            }
-            Expr::Name(name) => {
-                let name = name.id.as_str();
-                return self
-                    .class(self.type_of(stack, name))
-                    .or_else(|| self.imported_constant(name, name, stack));
-            }
-            Expr::Attribute(_) => {
-                let dotted = dotted(expr)?;
-                let head = dotted.split('.').next().unwrap_or_default();
-                return self.imported_constant(&dotted, head, stack);
-            }
-            Expr::Call(call) => return self.class(dotted(&call.func)),
-            expr => literal_type(expr)?,
-        };
-        Some(name.to_string())
-    }
-
-    /// The type of the constant `dotted` imports from a checked module, unless `head` is
-    /// bound in `stack`.
-    fn imported_constant(&self, dotted: &str, head: &str, stack: &[Scope]) -> Option<String> {
-        let constant = self.constant?;
-        if self.binds(stack, head) {
-            return None;
-        }
-        let (source, value) = constant(dotted)?;
-        if let Expr::Name(name) = value {
-            let classes = source.classes.get_or_init(|| module_classes(source));
-            return classes.get(name.id.as_str()).cloned().flatten();
-        }
-        Context {
-            imported: &source.imports,
-            scan: &Scan::new(&[]),
-            constant: None,
-        }
-        .arg_type(value, &[])
-    }
-
-    /// Whether `name` is assigned, annotated or a parameter in the module or in a
-    /// function of `stack`.
-    fn binds(&self, stack: &[Scope], name: &str) -> bool {
-        stack
-            .iter()
-            .filter(|&&scope| !self.scan.is_class(scope))
-            .chain(std::iter::once(&0))
-            .any(|&scope| self.scan.typed(scope, name).next().is_some())
-    }
-
-    /// The class a variable holds in `stack`: the one every assignment, annotation and
-    /// parameter of that name gives, in the innermost scope that has one.
-    pub fn type_of(&self, stack: &[Scope], name: &str) -> Option<String> {
-        let mut kinds = stack
-            .iter()
-            .rev()
-            .filter(|&&scope| !self.scan.is_class(scope))
-            .chain(std::iter::once(&0))
-            .map(|&scope| self.scan.typed(scope, name).peekable())
-            .find_map(|mut typed| typed.peek().is_some().then_some(typed))?;
-        let first = kinds.next()??;
-        kinds
-            .all(|other| other.as_ref() == Some(&first))
-            .then_some(first)
-    }
-
-    fn class(&self, name: Option<String>) -> Option<String> {
-        class_of(name, self.imported)
-    }
-}
-
 /// The builtin class of a literal other than `None`.
-fn literal_type(expr: &Expr) -> Option<&'static str> {
+pub(crate) fn literal_type(expr: &Expr) -> Option<&'static str> {
     let number = |number: &ast::ExprNumberLiteral| match number.value {
         Number::Int(_) => Some("int"),
         Number::Float(_) => Some("float"),

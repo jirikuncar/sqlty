@@ -8,9 +8,10 @@ use ruff_python_ast::{
 use ruff_python_parser::parse_expression;
 use ruff_text_size::Ranged;
 
+use crate::arg_types::{ArgTypes, SourceTypes};
 use crate::frozen::Table;
 use crate::module::Imports;
-use crate::scopes::{Context, Lines, Scan, Scope};
+use crate::scopes::{Lines, Scan, Scope};
 
 /// A t-string.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,21 +37,17 @@ pub fn templates(source: &str) -> Option<Vec<Template>> {
 
 /// Every t-string of the module `body` of `source`, in source order.
 pub fn of(source: &str, body: &[Stmt], imported: &Table) -> Vec<Template> {
-    of_in(source, imported, &Scan::new(body))
+    let scan = Scan::new(body);
+    of_in(source, &scan, &SourceTypes::imports_only(imported, &scan))
 }
 
-/// [`of`] over a walk of the module that other checks share.
-pub fn of_in(source: &str, imported: &Table, scan: &Scan<'_>) -> Vec<Template> {
-    let ctx = Context {
-        imported,
-        scan,
-        constant: None,
-    };
+/// [`of`] over a walk of the module that other checks share, its fields typed by `types`.
+pub fn of_in(source: &str, scan: &Scan<'_>, types: &dyn ArgTypes) -> Vec<Template> {
     let lines = Lines::new(source);
     let mut found: Vec<Template> = scan
         .templates
         .iter()
-        .map(|&(template, scope)| read(template, scan.stack(scope), &ctx, &lines, source))
+        .map(|&(template, scope)| read(template, scan.stack(scope), types, &lines, source))
         .collect();
     found.sort_by_key(|template| template.span);
     found
@@ -59,7 +56,7 @@ pub fn of_in(source: &str, imported: &Table, scan: &Scan<'_>) -> Vec<Template> {
 fn read(
     template: &ExprTString,
     stack: &[Scope],
-    ctx: &Context<'_, '_>,
+    types: &dyn ArgTypes,
     lines: &Lines,
     source: &str,
 ) -> Template {
@@ -102,7 +99,7 @@ fn read(
                         break 'parts;
                     }
                     query.push_str("%s");
-                    params.push(ctx.arg_type(&field.expression, stack));
+                    params.push(types.arg_type(&field.expression, stack));
                 }
             }
         }
