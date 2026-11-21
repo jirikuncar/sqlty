@@ -84,6 +84,73 @@ fn keeps_json_output_apart_from_what_fix_reports() {
     std::fs::remove_dir_all(&root).expect("removes");
 }
 
+#[test]
+fn writes_ascii_json_and_sarif_uris_for_any_file_name() {
+    let config = ("pyproject.toml", "[tool.sqlty]\nschema = \"schema.sql\"\n");
+    let query = "q = \"--sql\\nSELECT é😀 FROM users\"\n";
+    let root = project("escapes", &[config, SCHEMA, ("a b%.py", query)]);
+    let (code, out, _) = sqlty(&root, &["check", "--output-format", "json"], &[]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains(r#""message": "column `\u00e9\ud83d\ude00` does not exist in `users`""#),
+        "{out}"
+    );
+    assert!(out.is_ascii(), "{out}");
+    // An absolute path is a file URI with the characters of a URI escaped.
+    let absolute = root.join("a b%.py");
+    let args = [
+        "check",
+        "--output-format",
+        "sarif",
+        absolute.to_str().expect("UTF-8"),
+    ];
+    let (_, out, _) = sqlty(&root, &args, &[]);
+    let uri = format!("\"uri\": \"file://{}/a%20b%25.py\"", root.display());
+    assert!(out.contains(&uri), "{uri}\n{out}");
+    assert!(!out.contains("\"fixes\""), "{out}");
+    std::fs::remove_dir_all(&root).expect("removes");
+}
+
+/// A backslash in a file name is a character on Unix, and a separator in a relative URI.
+#[cfg(unix)]
+#[test]
+fn escapes_a_backslash_in_a_file_name_and_writes_it_as_a_slash_in_sarif() {
+    let config = ("pyproject.toml", "[tool.sqlty]\nschema = \"schema.sql\"\n");
+    let root = project("backslash", &[config, SCHEMA, (r"app\q.py", QUERIES.1)]);
+    let (_, out, _) = sqlty(&root, &["check", "--output-format", "json"], &[]);
+    assert!(out.contains(r#""file": "app\\q.py""#), "{out}");
+    let (_, out, _) = sqlty(&root, &["check", "--output-format", "sarif"], &[]);
+    assert!(out.contains(r#""uri": "app/q.py""#), "{out}");
+    std::fs::remove_dir_all(&root).expect("removes");
+}
+
+#[test]
+fn walks_as_the_discovery_flags_say() {
+    let config = ("pyproject.toml", "[tool.sqlty]\nschema = \"schema.sql\"\n");
+    let generated = ("app/gen.py", "q = \"--sql\\nSELECT nope FROM users\"\n");
+    let files = [
+        config,
+        SCHEMA,
+        ("app/q.py", "q = \"--sql\\nSELECT id FROM users\"\n"),
+        ("app/.gitignore", "gen.py\n"),
+        generated,
+        // A directory with a `.git` is a repository, whose `.gitignore` files apply.
+        ("app/.git/HEAD", ""),
+    ];
+    let root = project("walk", &files);
+    for (args, found) in [
+        (&["check", "--respect-gitignore"][..], 0),
+        (&["check", "--no-respect-gitignore"][..], 1),
+        (&["check", "--exclude", "gen.py"][..], 0),
+        (&["check", "-c", "exclude = [\"gen.py\"]"][..], 0),
+        (&["check", "-c", "extend-exclude = [\"gen.py\"]"][..], 0),
+    ] {
+        let (code, out, err) = sqlty(&root, args, &[]);
+        assert_eq!(code, found, "{args:?}: {out}{err}");
+    }
+    std::fs::remove_dir_all(&root).expect("removes");
+}
+
 /// Messages of the language server until one holds `wanted`, after sending `requests`.
 fn serve(root: &Path, requests: &[String], wanted: &str) -> (Vec<String>, i32) {
     use std::io::{BufRead, BufReader, Read, Write};
