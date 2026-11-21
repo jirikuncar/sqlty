@@ -533,6 +533,107 @@ class Body:
     each = [db.one("SELECT name FROM users", int) for _ in range(3)]
 ```
 
+## The decorators and bases of a class
+
+The decorators, the bases and the keywords of a class statement are read before its
+body runs, in the scope around it: a name the body binds is there what the module, or
+the function around, binds it to.
+
+```python
+from pkg.db import DB
+
+class Plain:
+    def one(self, query, row): ...
+
+def deco(*args): ...
+def base(*args): ...
+
+db = DB()
+
+# error: [column-type-mismatch]
+@deco(db.one("SELECT name FROM users", int))
+# error: [column-type-mismatch]
+class Hides(base(db.one("SELECT name FROM users", int))):
+    db = Plain()
+
+def run() -> None:
+    inner = DB()
+
+    # error: [column-type-mismatch]
+    @deco(inner.one("SELECT name FROM users", int))
+    class Local(
+        # error: [column-type-mismatch]
+        base(inner.one("SELECT name FROM users", int)),
+        # error: [column-type-mismatch]
+        metaclass=deco(inner.one("SELECT name FROM users", int)),
+    ):
+        inner = Plain()
+```
+
+```python
+from pkg.db import DB
+
+class Plain:
+    def one(self, query, row): ...
+
+def deco(*args): ...
+def base(*args): ...
+
+db = Plain()
+
+@deco(db.one("SELECT name FROM users", int))
+class Hides(base(db.one("SELECT name FROM users", int)), metaclass=deco(db.one("SELECT name FROM users", int))):
+    db = DB()
+
+def run() -> None:
+    inner = Plain()
+
+    @deco(inner.one("SELECT name FROM users", int))
+    class Local(base(inner.one("SELECT name FROM users", int))):
+        inner = DB()
+
+@deco(late.one("SELECT name FROM users", int))
+class Unbound(base(late.one("SELECT name FROM users", int))):
+    late = DB()
+
+class Generic[DB](base(DB.one("SELECT name FROM users", int))): ...
+
+# error:
+```
+
+A bound or a default of a type parameter is read in the scope around too, and so is a
+decorator, which the type parameters do not reach. The header of a class in a class
+reads the names of the class around it.
+
+```python
+from pkg.db import DB
+
+class Plain:
+    def one(self, query, row): ...
+
+def deco(*args): ...
+def base(*args): ...
+
+db = DB()
+T = DB()
+
+# error: [column-type-mismatch]
+class Bound[A: deco(db.one("SELECT name FROM users", int))]:
+    db = Plain()
+
+# error: [column-type-mismatch]
+@deco(T.one("SELECT name FROM users", int))
+class Decorated[T]:
+    pass
+
+class Outer:
+    held = DB()
+
+    # error: [column-type-mismatch]
+    class Inner[B](base(held.one("SELECT name FROM users", int))):
+        held = Plain()
+```
+
 ## A name is what it was last bound to
 
 ty: `Cursor` inside the `with`, `DB` before; `DB | Cursor` after the `if`.

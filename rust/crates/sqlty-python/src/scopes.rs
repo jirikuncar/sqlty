@@ -73,7 +73,8 @@ pub struct Scan<'a> {
     bound: HashMap<(Scope, &'a str), Vec<Binding<'a>>>,
     /// Every `self.name` a method binds, by its class, with the method.
     attributes: HashMap<(Scope, &'a str), Vec<(Origin<'a>, Scope)>>,
-    /// Where a comprehension or a lambda in a scope binds a name of its own.
+    /// Where a name is one of its own in a scope: in a comprehension or a lambda that
+    /// binds it, and in the header of a class that has it as a type parameter.
     shadows: HashMap<(Scope, &'a str), Vec<TextRange>>,
     /// The lambdas and generator expressions of a scope: code that runs when it is
     /// called or iterated, not where it is written.
@@ -266,14 +267,16 @@ impl<'a> Scan<'a> {
         })
     }
 
-    /// Whether `at` is inside a comprehension or a lambda of `scope` that binds `name`.
+    /// Whether `at` is inside a comprehension or a lambda of `scope` that binds `name`,
+    /// or in the header of a class whose type parameter it is.
     pub fn shadowed(&self, scope: Scope, name: &str, at: u32) -> bool {
         self.shadows
             .get(&(scope, name))
             .is_some_and(|ranges| around(ranges, at).is_some())
     }
 
-    /// Whether a comprehension or a lambda of `scope` binds `name` anywhere.
+    /// Whether a comprehension, a lambda or the type parameters of a class header of
+    /// `scope` bind `name` anywhere.
     pub fn shadows(&self, scope: Scope, name: &str) -> bool {
         self.shadows.contains_key(&(scope, name))
     }
@@ -482,10 +485,33 @@ impl<'a, W: FnMut(&'a ExprCall) -> bool> Visitor<'a> for Walker<'a, W> {
                     node.name.start(),
                     node.end(),
                 );
+                // The decorators, bases and keywords of a class are read in the scope
+                // around it, where the names its body binds are not seen. A type
+                // parameter is a name of its own there.
+                for decorator in &node.decorator_list {
+                    self.visit_decorator(decorator);
+                }
+                if let Some(type_params) = node.type_params.as_deref() {
+                    let end = node
+                        .arguments
+                        .as_deref()
+                        .map_or(type_params.end(), Ranged::end);
+                    let header = TextRange::new(type_params.start(), end);
+                    let around = self.scan.scope();
+                    for param in type_params {
+                        let name = type_parameter(param).as_str();
+                        let hidden = self.scan.shadows.entry((around, name)).or_default();
+                        hidden.push(header);
+                    }
+                    self.visit_type_params(type_params);
+                }
+                if let Some(arguments) = node.arguments.as_deref() {
+                    self.visit_arguments(arguments);
+                }
                 let scope = self.scan.enter(Node::Class(node));
                 self.scan.stack.push(scope);
                 self.bind_type_params(node.type_params.as_deref());
-                walk_stmt(self, stmt);
+                self.visit_body(&node.body);
                 self.scan.stack.pop();
                 return;
             }
