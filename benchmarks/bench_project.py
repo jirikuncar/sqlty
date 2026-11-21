@@ -34,7 +34,9 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent))
 import lsp  # noqa: E402
@@ -85,7 +87,11 @@ def _rss_mb(ru_maxrss: int) -> float:
 
 
 def run_measured(cmd: list[str], cwd: str) -> tuple[float, float, int]:
-    """Run ``cmd``; return ``(wall_seconds, peak_rss_mb, exit_code)`` of that child."""
+    """Run ``cmd``; return ``(wall_seconds, peak_rss_mb, exit_code)`` of that child.
+
+    Linux starts a child's peak RSS at its parent's, so sqlty runs only in children
+    (``in_child``): imported here, it would raise the peak of every command measured."""
+    assert "sqlty" not in sys.modules, "run sqlty in a child: in_child()"
     start = time.perf_counter()
     proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     _, status, usage = os.wait4(proc.pid, 0)
@@ -104,6 +110,13 @@ def summarize(runs: list[tuple[float, float, int]]) -> dict[str, float]:
         "rss_mb": round(max(r[1] for r in runs), 1),
         "exit": runs[0][2],
     }
+
+
+def in_child(worker: str, arg: str) -> Any:
+    """What ``worker`` (``python_us``, ``one_query`` or ``micro``) returns for ``arg``,
+    run in a child."""
+    cmd = [sys.executable, __file__, "--worker", worker, arg]
+    return json.loads(subprocess.run(cmd, check=True, capture_output=True).stdout)
 
 
 def worker_schema_load(schema_path: str) -> None:
@@ -152,13 +165,13 @@ def best_s(fn, rounds: int = 3) -> float:
     return best
 
 
-def python_us(root: Path, schema: str) -> list[float]:
+def python_us(root: Path) -> list[float]:
     """Microseconds of Python type inference per file: ``check_source`` of the file minus
     the SQL inference of its queries, each timed as ``check_source`` of a module that holds
     only that query, minus one without any. Schema cached."""
     from sqlty import core
 
-    settings = core.Settings(schema_sql=schema)
+    settings = core.Settings(schema_sql=(root / "schema.sql").read_text())
     empty = best_s(lambda: core.check_source(MODULE.format(query=""), settings), 20)
     sql: dict[str, float] = {}
 
@@ -234,13 +247,8 @@ def run(size: str, repeats: int, keep: str | None, exe: str) -> dict:
         metrics["breaking"] = measure(
             [exe, "breaking", "-q", "--against", "HEAD"], commit_then_migrate(root), min(repeats, 3)
         )
-        # In a child, so its schema cache and heap neither slow the timings below nor
-        # count in the RSS of the children measured above.
         (root / "schema.sql").write_text(schema)
-        worker = [sys.executable, __file__, "--worker-python", str(root)]
-        per_file = sorted(
-            json.loads(subprocess.run(worker, check=True, capture_output=True).stdout)
-        )
+        per_file = sorted(in_child("python_us", proj))
         ruff = ruff_us(root)
         return {
             "meta": {
@@ -253,8 +261,8 @@ def run(size: str, repeats: int, keep: str | None, exe: str) -> dict:
             },
             "calibration_s": round(calibrate(), 5),
             "metrics": metrics,
-            "one_query_us": one_query(spec["tables"]),
-            "micro_us": micro(spec["tables"]),
+            "one_query_us": in_child("one_query", str(spec["tables"])),
+            "micro_us": in_child("micro", str(spec["tables"])),
             "python_us_per_file": {
                 "mean": round(statistics.mean(per_file), 1),
                 "median": round(statistics.median(per_file), 1),
@@ -354,7 +362,7 @@ def check_one_query(result: dict, tables: int) -> bool:
         if not (over and ENFORCE_ONE_QUERY):
             break
         print(f"one_query over budget, measuring again ({attempt}/{ATTEMPTS})", file=sys.stderr)
-        us, cal = one_query(tables), calibrate()
+        us, cal = in_child("one_query", str(tables)), calibrate()
         lines, over = one_query_lines(us, cal)
     enforced = "budget" if ENFORCE_ONE_QUERY else "reported, not budgeted (ENFORCE_ONE_QUERY)"
     print(f"one query vs round trip, {enforced}:", *lines, sep="\n  ", file=sys.stderr)
@@ -438,11 +446,16 @@ def main() -> int:
         help="the sqlty to run: the wheel's script (default) or a native binary",
     )
     ap.add_argument("--worker-schema", help=argparse.SUPPRESS)
-    ap.add_argument("--worker-python", help=argparse.SUPPRESS)
+    ap.add_argument("--worker", nargs=2, help=argparse.SUPPRESS)
     args = ap.parse_args()
-    if args.worker_python:
-        root = Path(args.worker_python)
-        print(json.dumps(python_us(root, (root / "schema.sql").read_text())))
+    if args.worker:
+        name, arg = args.worker
+        workers: dict[str, Callable[[], object]] = {
+            "python_us": lambda: python_us(Path(arg)),
+            "one_query": lambda: one_query(int(arg)),
+            "micro": lambda: micro(int(arg)),
+        }
+        print(json.dumps(workers[name]()))
         return 0
     if args.worker_schema:
         worker_schema_load(args.worker_schema)

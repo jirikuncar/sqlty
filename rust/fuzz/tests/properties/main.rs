@@ -11,4 +11,5 @@ mod migrations;
 mod newtypes;
 mod params;
 mod python;
+mod suppress;
 mod variants;
