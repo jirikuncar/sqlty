@@ -608,14 +608,13 @@ fn migration_sets(head: &mut Revision<Workspace>) -> Result<Vec<Migrations>, Str
         };
         let schema = source.settings.schema_sql.as_ref().map(address);
         // Configurations that share the text share its files: probe them once.
-        if !probed.insert((at, schema)) {
-            continue;
-        }
-        let found = schema.and_then(|schema| routed.get(&schema));
-        let probes = &mut sets[at].probes;
-        match found {
-            Some(files) => probes.extend(files.iter().cloned().map(Probe::File)),
-            None => probes.push(Probe::Database(source.directory, source.database)),
+        if probed.insert((at, schema)) {
+            let found = schema.and_then(|schema| routed.get(&schema));
+            let probes = &mut sets[at].probes;
+            match found {
+                Some(files) => probes.extend(files.iter().cloned().map(Probe::File)),
+                None => probes.push(Probe::Database(source.directory, source.database)),
+            }
         }
     }
     Ok(sets)
@@ -1431,6 +1430,25 @@ mod tests {
         for directory in [root, old] {
             std::fs::remove_dir_all(directory).expect("removes");
         }
+    }
+
+    #[test]
+    fn a_schema_set_probes_the_files_of_each_configuration_naming_it() {
+        let root = project(
+            "shared",
+            &[
+                ("app/pyproject.toml", "[tool.sqlty]\nschema = \"../migrations/\"\n"),
+                ("jobs/pyproject.toml", "[tool.sqlty]\nschema = \"../migrations/\"\n"),
+                ("app/q.py", "x = 1\n"),
+                ("jobs/j.py", "x = 1\n"),
+                ("migrations/0001.sql", USERS),
+            ],
+        );
+        let sets = migration_sets(&mut open(&root)).expect("reads");
+        let file = |path: &str| Probe::File(PathBuf::from(path));
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].probes, [file("app/q.py"), file("jobs/j.py")]);
+        std::fs::remove_dir_all(&root).expect("removes");
     }
 
     #[test]
