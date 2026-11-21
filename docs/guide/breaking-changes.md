@@ -301,7 +301,7 @@ them, so no glob matches migrations outside that directory: for those, set `rule
 in the configuration, or use an override without `include`.
 For example:
 
-```toml ignore
+```toml
 [[tool.sqlty.overrides]]
 include = ["migrations/**"]
 
