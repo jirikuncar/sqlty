@@ -261,6 +261,22 @@ UPDATE events_09 SET at = at WHERE at BETWEEN '2026-09-01' AND '2026-09-02';
 COMMIT;
 ```
 
+## A replica identity set in the same statement
+
+```sql migration
+SET lock_timeout = '1s';
+-- error:
+ALTER TABLE users DROP CONSTRAINT users_pkey, REPLICA IDENTITY FULL;
+```
+
+## Dropping the primary key column
+
+```sql migration
+SET lock_timeout = '1s';
+-- error: [drop-primary-key] "`users` is left without a replica identity"
+ALTER TABLE users DROP COLUMN id;
+```
+
 ## A pinned key in one branch of OR bounds nothing
 
 ```sql migration

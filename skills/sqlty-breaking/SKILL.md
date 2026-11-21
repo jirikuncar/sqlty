@@ -69,6 +69,7 @@ migrations/0042_index.sql:2: [missing-concurrently] `CREATE INDEX` blocks writes
 | `multi-table-lock` | one table per transaction |
 | `locked-backfill` | `COMMIT` the schema change, then backfill |
 | `unbatched-backfill` | update in batches: `WHERE id IN (SELECT id ... LIMIT 5000)` |
+| `drop-primary-key` | add the new key in the same transaction, or `REPLICA IDENTITY USING INDEX` first |
 
 ## A dropped column
 
