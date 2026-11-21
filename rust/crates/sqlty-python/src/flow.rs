@@ -1214,4 +1214,16 @@ mod tests {
         let many = live(&[1, 2]);
         assert!(many.same(&many.clone()) && !many.same(&live(&[1, 2])));
     }
+
+    #[test]
+    fn a_binding_nested_too_deep_is_not_followed() {
+        let depth = usize::from(MAX_DEPTH) + 2;
+        let mut text = "def f(x):\n".to_string();
+        for level in 0..depth {
+            text.push_str(&format!("{}if c:\n", "    ".repeat(level + 1)));
+        }
+        text.push_str(&format!("{}x = a\n", "    ".repeat(depth + 1)));
+        text.push_str("    x.use()\n");
+        assert_eq!(held(&text, "x"), [""]);
+    }
 }

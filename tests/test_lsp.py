@@ -603,3 +603,36 @@ def test_server_reports_breaking_changes_against_a_baseline(repo: Path) -> None:
         ["git", "worktree", "list"], cwd=repo, capture_output=True, text=True
     ).stdout
     assert len(worktrees.splitlines()) == 1, "the baseline's worktree is removed on exit"
+
+
+def test_server_reads_a_stub_again_once_the_client_reports_it_written(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
+    (tmp_path / "schema.sql").write_text("CREATE TABLE users (id INTEGER);\n")
+    stub = tmp_path / "typings" / "lib" / "__init__.pyi"
+    stub.parent.mkdir(parents=True)
+    stub.write_text(
+        "from typing import Annotated, LiteralString\n"
+        "from sqlty import SQL\n\n"
+        "class Db:\n"
+        "    def one(self, sql: Annotated[LiteralString, SQL], form: type, /): ...\n"
+    )
+    text = 'from lib import Db\n\ndef run(db: Db) -> None:\n    db.one("SELECT nope FROM users", int)\n'
+    server = Server(tmp_path)
+    try:
+        server.start(tmp_path)
+        assert rules(server.check(tmp_path / "q.py", text)) == ["unknown-column"]
+        # A Python file reported shows the client watches them: what a check reads of
+        # the stubs is then kept until one is reported written.
+        watched = "workspace/didChangeWatchedFiles"
+        created = [{"uri": (tmp_path / "other.py").as_uri(), "type": 1}]
+        server.send({"method": watched, "params": {"changes": created}})
+        assert rules(server.check(tmp_path / "q.py", text + "\n")) == ["unknown-column"]
+        # The stub no longer marks the method: the open buffer is checked again.
+        stub.write_text("class Db:\n    def one(self, sql, form): ...\n")
+        written = [{"uri": stub.as_uri(), "type": 2}]
+        server.send({"method": watched, "params": {"changes": written}})
+        published = server.notification("textDocument/publishDiagnostics")
+        assert published["uri"] == (tmp_path / "q.py").as_uri()
+        assert published["diagnostics"] == []
+    finally:
+        assert server.stop() == 0

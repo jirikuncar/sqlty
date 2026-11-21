@@ -28,6 +28,9 @@ static RELEASE: AtomicBool = AtomicBool::new(false);
 static HOLD: AtomicBool = AtomicBool::new(false);
 /// Whether a check of a buffer holding `hold` started.
 static HELD: AtomicBool = AtomicBool::new(false);
+/// Lets a check of a buffer holding `stall` finish, and whether one started.
+static STALL: AtomicBool = AtomicBool::new(false);
+static STALLED: AtomicBool = AtomicBool::new(false);
 
 /// Reports each `bad`; its fix writes `good` and imports it, but fails on `nofix`. With a
 /// baseline, `old.py` of its root has a breaking change, and `gone.py`, which does not
@@ -57,6 +60,12 @@ impl Workspace for Fake {
             HELD.store(true, Ordering::SeqCst);
         }
         while text.contains("hold") && !HOLD.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        if text.contains("stall") {
+            STALLED.store(true, Ordering::SeqCst);
+        }
+        while text.contains("stall") && !STALL.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(5));
         }
         if text.contains("hang") {
@@ -561,6 +570,45 @@ fn a_stub_or_library_written_on_disk_is_read_again() {
         assert_eq!(client.opened.load(Ordering::SeqCst), 1, "not loaded again");
         client.shutdown();
     }
+}
+
+#[test]
+fn a_file_written_that_is_not_python_checks_nothing_again() {
+    let mut client = Client::start(&json!({}));
+    client.open("file:///work/q.py", "bad\n");
+    client.notification("textDocument/publishDiagnostics");
+    client.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({"changes": [{"uri": "file:///work/notes.txt", "type": 2}]}),
+    );
+    client.notify(
+        "textDocument/didSave",
+        json!({"textDocument": {"uri": "file:///work/notes.txt"}}),
+    );
+    let rest = client.shutdown();
+    assert!(!rest.contains(&"textDocument/publishDiagnostics".to_string()));
+}
+
+#[test]
+fn a_buffer_edited_while_a_stub_is_written_is_checked_once() {
+    let mut client = Client::start(&json!({}));
+    client.open("file:///work/q.py", "bad stall\n");
+    while !STALLED.load(Ordering::SeqCst) {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // Both wait for the check that runs: the edit, then the stub that says `bad` is fine.
+    client.change("file:///work/q.py", 2, "bad\n");
+    client.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({"changes": [{"uri": "file:///work/typings/lib.pyi", "type": 2}]}),
+    );
+    client.hover("file:///work/q.py", 0, 0);
+    STALL.store(true, Ordering::SeqCst);
+    let published = client.notification("textDocument/publishDiagnostics");
+    assert_eq!(published["version"], 2);
+    assert_eq!(published["diagnostics"], json!([]));
+    let rest = client.shutdown();
+    assert!(!rest.contains(&"textDocument/publishDiagnostics".to_string()));
 }
 
 #[test]
@@ -1254,6 +1302,10 @@ fn a_workspace_has_no_breaking_changes_or_completion_unless_it_says() {
     }
     assert_eq!(Plain.breaking(), Ok(Vec::new()));
     assert!(Plain.completion(Path::new("q.py")).is_none());
+    // Nor does it read stubs or libraries that could be written, or looked for.
+    Plain.watched(&[PathBuf::from("/work")]);
+    assert!(!Plain.changed(Path::new("/work/typings/lib.pyi")));
+    assert!(Plain.searched().is_empty());
 }
 
 impl Client {

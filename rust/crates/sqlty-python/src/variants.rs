@@ -1722,8 +1722,9 @@ pub fn query_variants<'a>(
         let body = Body::Stmts(frame.body);
         let paths = match walk.block(&frame, body, vec![Path::default()], Some(call), None, false) {
             Err(Halt::Reached(paths)) => paths,
-            Err(halt) => return Err(halt),
-            Ok(_) => Vec::new(),
+            // A call is in the body of the innermost function around it, so the walk
+            // ends at it or halts before.
+            walked => return walked.map(drop),
         };
         for path in paths {
             for (value, lines, _) in walk.values(Operand::Expr(query), &path, &frame)? {

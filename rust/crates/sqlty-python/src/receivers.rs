@@ -206,11 +206,8 @@ fn either(values: impl IntoIterator<Item = Value>) -> Option<(Value, bool)> {
             return None;
         }
     }
-    match found.len() {
-        0 => None,
-        1 => found.pop().map(|only| (only, false)),
-        _ => Some((Value::Either(found.into()), true)),
-    }
+    // The first and one that differs from it, or the members of an `Either`: several.
+    Some((Value::Either(found.into()), true))
 }
 
 /// Whether a call reads its query, row type and parameters the same way through `one`
@@ -750,10 +747,7 @@ fn class_facts(
         }
     }
     for (name, written) in scan.attributes_of(scope) {
-        for (origin, method) in written {
-            let Node::Function(function) = scan.scopes[*method] else {
-                continue;
-            };
+        for (origin, method, function) in written {
             let Some(this) = receiver_name(function) else {
                 continue;
             };
@@ -983,18 +977,16 @@ impl<'s, 'a> Resolver<'s, 'a> {
     /// it is the only class of its name in the module and the scope around it binds
     /// that name once: nothing else can then be meant by the name, or own its helpers.
     fn nested(&self, scope: Scope) -> Option<Class> {
-        let Node::Class(class) = self.scan.scopes[scope] else {
-            return None;
-        };
-        let name = class.name.as_str();
+        let name = self.scan.class(scope)?.name.as_str();
         let around = self.scan.parents[scope];
-        let ([only], false) = (
+        let once = matches!(
             self.scan.bindings(around, name)?,
-            self.scan.shadows(around, name),
-        ) else {
-            return None;
-        };
-        if !matches!(only.origin, Origin::Class(_)) {
+            [Binding {
+                origin: Origin::Class(_),
+                ..
+            }]
+        );
+        if !once || self.scan.shadows(around, name) {
             return None;
         }
         let mut named = self.named_classes.borrow_mut();
@@ -1021,10 +1013,7 @@ impl<'s, 'a> Resolver<'s, 'a> {
             if &*base.module == NESTED {
                 // The helpers of the module are kept by the name of their class, which
                 // no other class of the module has (see `nested`).
-                let scope: Scope = base.name.parse().ok()?;
-                let Node::Class(class) = self.scan.scopes.get(scope)? else {
-                    return None;
-                };
+                let class = self.scan.class(base.name.parse().ok()?)?;
                 return self.own.get(&format!("{}.{name}", class.name));
             }
             let key = format!("{}.{name}", base.name);
@@ -1055,15 +1044,6 @@ impl<'s, 'a> Resolver<'s, 'a> {
             }
         }
         None
-    }
-
-    /// The class an expression of the scopes `stack` holds an instance of, as
-    /// `module.Class`.
-    pub fn class_of(&self, receiver: &Expr, stack: &[Scope]) -> Option<String> {
-        match self.value_of(receiver, stack)? {
-            Value::Instance(class) => Some(format!("{}.{}", class.module, class.name)),
-            _ => None,
-        }
     }
 
     /// Forgets what was kept of the scopes that are not around a call in `stack`: no
@@ -1422,10 +1402,9 @@ impl<'s, 'a> Resolver<'s, 'a> {
 
     /// What `name` holds at `at` in `body`, the statements of `scope`, followed in the
     /// order they run: the scope is walked once for the name, whatever the number of
-    /// uses. `None` for a use that is not in the statements, and for one in a lambda or
-    /// a generator that may run after the name is bound again: a binding of the scope
-    /// takes effect after that code starts, or is in a loop around it. Every binding of
-    /// the scope then counts, as for a nested function.
+    /// uses. `None` for a use in a lambda or a generator that may run after the name is
+    /// bound again: a binding of the scope takes effect after that code starts, or is in
+    /// a loop around it. Every binding of the scope then counts, as for a nested function.
     fn held(
         &self,
         key: (Scope, usize),
@@ -1480,7 +1459,8 @@ impl<'s, 'a> Resolver<'s, 'a> {
                 flows.insert(id, flow.clone());
                 flow
             }
-        }?;
+        };
+        let flow = flow?;
         if let Some(start) = self.scan.deferred(scope, at) {
             if flow.binds_after(start, flow.loop_around(at)) {
                 return None;
@@ -1505,8 +1485,7 @@ impl<'s, 'a> Resolver<'s, 'a> {
         let ([only], false) = (bindings, shape.tests(name)) else {
             return None;
         };
-        let (first, last) = (body.first()?, body.last()?);
-        let (start, end) = (first.start().to_u32(), last.end().to_u32());
+        let start = body.first()?.start().to_u32();
         let parameter = only.site < start && only.effect <= start;
         if !parameter {
             let next = body.partition_point(|stmt| stmt.end().to_u32() <= only.site);
@@ -1519,9 +1498,6 @@ impl<'s, 'a> Resolver<'s, 'a> {
             if !plain || !within {
                 return None;
             }
-        }
-        if at < start || at >= end {
-            return Some(None);
         }
         // Code that runs later may run after a binding written from there on.
         if let Some(later) = self.scan.deferred(scope, at) {
@@ -2535,5 +2511,65 @@ mod tests {
         assert_eq!(extensions.form(), Some(Ok(Form::Receiver)));
         assert_eq!(Class::new("typing", "Any").form(), Some(Err(())));
         assert_eq!(Class::new("lib", "cast").form(), None);
+    }
+
+    #[test]
+    fn cast_is_named_through_an_await() {
+        let parsed = crate::parse::expression("(await cast)(DB, x)").expect("parses");
+        let cast = Val::Awaited(Box::new(Val::Name("cast".to_string())));
+        let to = Some(Ann::Name("DB".to_string()));
+        assert_eq!(
+            value(&parsed.syntax().body, 0),
+            Val::Call(Box::new(cast), to)
+        );
+    }
+
+    #[test]
+    fn an_awaited_value_in_a_class_body_is_read_as_any_other() {
+        // Python refuses `await` there; the parser does not.
+        let found = facts("class C:\n    D = int\n    x = await f()\n    y = await D()\n");
+        let called = Val::Call(Box::new(Val::Name("f".to_string())), None);
+        let attrs = &found.classes["C"].attrs;
+        assert_eq!(attrs["x"], [Val::Awaited(Box::new(called))]);
+        assert_eq!(attrs["y"], [Val::Unknown], "`D` is what the body binds");
+    }
+
+    #[test]
+    fn a_class_of_more_bases_than_are_followed_has_no_order() {
+        // The helper is a method of the first base: found through the order only.
+        let found = |bases: usize| {
+            let mut text = "from typing import Annotated, LiteralString\nfrom sqlty import SQL\nclass B0:\n    def run(self, q: Annotated[LiteralString, SQL]): ...\n".to_string();
+            for base in 1..bases {
+                text.push_str(&format!("class B{base}: ...\n"));
+            }
+            let names: Vec<String> = (0..bases).map(|base| format!("B{base}")).collect();
+            text.push_str(&format!(
+                "class C({}): ...\ndef f(c: C):\n    c.run('q')\n",
+                names.join(", ")
+            ));
+            let source = Source::new(text.as_str(), (3, 14)).expect("parses");
+            let scan = Scan::new(source.body());
+            let own = crate::calls::index_functions(&source);
+            let resolver = Resolver::new(&source, Some("m"), None, &own, &scan);
+            let &(call, scope) = scan.calls.last().expect("a call");
+            let attr = call.func.as_attribute_expr().expect("a method");
+            resolver
+                .method(&attr.value, "run", scan.stack(scope))
+                .is_some()
+        };
+        assert!(found(MAX_ORDER));
+        assert!(!found(MAX_ORDER + 1));
+    }
+
+    #[test]
+    fn an_order_of_more_classes_than_are_followed_is_not_merged() {
+        let orders = |count: usize| -> Vec<Vec<Class>> {
+            (0..count)
+                .map(|at| vec![class(&format!("C{at}"))])
+                .collect()
+        };
+        let merged = c3_merge(orders(MAX_ORDER + 1)).expect("merges");
+        assert_eq!(merged.len(), MAX_ORDER + 1);
+        assert_eq!(c3_merge(orders(MAX_ORDER + 2)), None);
     }
 }

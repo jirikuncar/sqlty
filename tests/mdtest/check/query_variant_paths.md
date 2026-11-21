@@ -123,3 +123,25 @@ def find(
     # error: [column-type-mismatch] "tuple[str] item 0 is str but query column 'n' infers int (variant: line 63)"
     return fetch_all("SELECT " + column + " FROM foos", tuple[str])
 ```
+
+## A call in the header of a function
+
+A default or a decorator is evaluated where the function is defined, so a call there
+takes the variants of the paths that reach the `def`, not of the body under it.
+
+```python
+from typing import LiteralString
+
+from db import fetch_all
+
+
+def find(by_n: bool) -> None:
+    column: LiteralString = "id"
+    if by_n:
+        column = "n"
+
+    # error: [column-type-mismatch] "tuple[str] item 0 is str but query column 'id' infers int"
+    # error: [column-type-mismatch] "tuple[str] item 0 is str but query column 'n' infers int (variant: line 9)"
+    def rows(found: list[tuple[str]] = fetch_all("SELECT " + column + " FROM foos", tuple[str])) -> None:
+        column = "nope"
+```

@@ -167,6 +167,15 @@ mod tests {
         assert!(piped.is_none_or(|read| read.is_none()), "a pipe is no file");
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_file_whose_read_fails_is_missing() {
+        // A regular file by what it says of itself, whose first bytes cannot be read.
+        let memory = Path::new("/proc/self/mem");
+        assert!(std::fs::metadata(memory).is_ok_and(|found| found.is_file()));
+        assert!(matches!(Disk.read_within(memory, 10), Read::Missing));
+    }
+
     #[test]
     fn a_relative_path_that_does_not_exist_stays() {
         let missing = Path::new("no-such-dir/x.py");

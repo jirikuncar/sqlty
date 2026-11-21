@@ -81,9 +81,10 @@ pub struct Scan<'a> {
     /// the names of the others, which most scopes are, are read one after the other.
     index: HashMap<(Scope, &'a str), usize>,
     /// Every `self.name` a method binds, by its class, with the method.
-    attributes: HashMap<(Scope, &'a str), Vec<(Origin<'a>, Scope)>>,
+    attributes: HashMap<(Scope, &'a str), Vec<Written<'a>>>,
     /// Where a name is one of its own in a scope: in a comprehension or a lambda that
-    /// binds it, and in the header of a class that has it as a type parameter.
+    /// binds it, and in the header of a class or a function that has it as a type
+    /// parameter.
     shadows: HashMap<(Scope, &'a str), Vec<TextRange>>,
     /// The lambdas and generator expressions of a scope: code that runs when it is
     /// called or iterated, not where it is written.
@@ -140,6 +141,10 @@ pub enum Origin<'a> {
     /// augmented assignment, a write through `global` or `nonlocal`.
     Unknown,
 }
+
+/// What a method assigns to an attribute of its first parameter: the value, and the
+/// method by its scope and its definition.
+pub type Written<'a> = (Origin<'a>, Scope, &'a StmtFunctionDef);
 
 /// A binding of a name: written at `site`, in effect from `effect`.
 #[derive(Clone, Copy)]
@@ -248,7 +253,15 @@ impl<'a> Scan<'a> {
 
     /// Whether `scope` is a class.
     pub fn is_class(&self, scope: Scope) -> bool {
-        matches!(self.scopes[scope], Node::Class(_))
+        self.class(scope).is_some()
+    }
+
+    /// The class `scope` is the body of.
+    pub fn class(&self, scope: Scope) -> Option<&'a StmtClassDef> {
+        match self.scopes.get(scope)? {
+            Node::Class(class) => Some(class),
+            _ => None,
+        }
     }
 
     /// Puts the bindings the walk met together: by scope, then by name, then by `site`.
@@ -382,10 +395,7 @@ impl<'a> Scan<'a> {
 
     /// The attributes the methods of the class `scope` bind on their first parameter, each
     /// with the method that does.
-    pub fn attributes_of(
-        &self,
-        scope: Scope,
-    ) -> impl Iterator<Item = (&'a str, &[(Origin<'a>, Scope)])> {
+    pub fn attributes_of(&self, scope: Scope) -> impl Iterator<Item = (&'a str, &[Written<'a>])> {
         let names = self.fields.get(&scope).map_or(&[][..], Vec::as_slice);
         names.iter().filter_map(move |&name| {
             read();
@@ -395,15 +405,15 @@ impl<'a> Scan<'a> {
     }
 
     /// Whether `at` is inside a comprehension or a lambda of `scope` that binds `name`,
-    /// or in the header of a class whose type parameter it is.
+    /// or in the header of a class or a function whose type parameter it is.
     pub fn shadowed(&self, scope: Scope, name: &str, at: u32) -> bool {
         self.shadows
             .get(&(scope, name))
             .is_some_and(|ranges| around(ranges, at).is_some())
     }
 
-    /// Whether a comprehension, a lambda or the type parameters of a class header of
-    /// `scope` bind `name` anywhere.
+    /// Whether a comprehension, a lambda or the type parameters of a class or function
+    /// header of `scope` bind `name` anywhere.
     pub fn shadows(&self, scope: Scope, name: &str) -> bool {
         self.shadows.contains_key(&(scope, name))
     }
@@ -451,11 +461,9 @@ impl<'a> Scan<'a> {
     /// Seals a comprehension `whole` but for the iterable of its first `for`, which is
     /// read where the comprehension is written.
     fn seal_comprehension(&mut self, whole: TextRange, generators: &[ast::Comprehension]) {
-        let Some(first) = generators.first() else {
-            return;
-        };
-        self.seal(TextRange::new(whole.start(), first.iter.start()));
-        self.seal(TextRange::new(first.iter.end(), whole.end()));
+        let read = generators.first().map_or(whole, |first| first.iter.range());
+        self.seal(TextRange::new(whole.start(), read.start()));
+        self.seal(TextRange::new(read.end(), whole.end()));
     }
 
     /// Records that the innermost scope binds `name` at `site`, from `effect` on.
@@ -509,7 +517,7 @@ impl<'a> Scan<'a> {
                         self.attributes
                             .entry((class, attr.attr.as_str()))
                             .or_default()
-                            .push((origin, method));
+                            .push((origin, method, function));
                     }
                 }
             }
@@ -576,6 +584,19 @@ impl<'a> Walker<'a> {
         self.scan.strings.push((expr, operand));
     }
 
+    /// Reads the type parameters of a `def` or a `class` in the scope around it, where
+    /// each is a name of its own from there to `end`, the end of the header.
+    fn header(&mut self, type_params: &'a ast::TypeParams, end: TextSize) {
+        let header = TextRange::new(type_params.start(), end);
+        let around = self.scan.scope();
+        for param in type_params {
+            let name = type_parameter(param).as_str();
+            let hidden = self.scan.shadows.entry((around, name)).or_default();
+            hidden.push(header);
+        }
+        self.visit_type_params(type_params);
+    }
+
     /// Binds the type parameters of a `def` or a `class` (`def f[T](x: T)`) in its scope:
     /// a name so bound is a type variable, not what the module binds it to.
     fn bind_type_params(&mut self, type_params: Option<&'a ast::TypeParams>) {
@@ -597,6 +618,22 @@ impl<'a> Visitor<'a> for Walker<'a> {
                     node.name.start(),
                     node.end(),
                 );
+                // The decorators, defaults and annotations of a function are read in the
+                // scope around it, where its parameters are not seen.
+                for decorator in &node.decorator_list {
+                    self.visit_decorator(decorator);
+                }
+                if let Some(type_params) = node.type_params.as_deref() {
+                    let end = node
+                        .returns
+                        .as_deref()
+                        .map_or(node.parameters.end(), Ranged::end);
+                    self.header(type_params, end);
+                }
+                self.visit_parameters(&node.parameters);
+                if let Some(returns) = node.returns.as_deref() {
+                    self.visit_annotation(returns);
+                }
                 let scope = self.scan.enter(Node::Function(node));
                 self.scan.stack.push(scope);
                 self.bind_type_params(node.type_params.as_deref());
@@ -610,7 +647,7 @@ impl<'a> Visitor<'a> for Walker<'a> {
                     self.scan
                         .bind_name(parameter.name().as_str(), origin, at, at);
                 }
-                walk_stmt(self, stmt);
+                self.visit_body(&node.body);
                 self.scan.stack.pop();
                 return;
             }
@@ -622,8 +659,7 @@ impl<'a> Visitor<'a> for Walker<'a> {
                     node.end(),
                 );
                 // The decorators, bases and keywords of a class are read in the scope
-                // around it, where the names its body binds are not seen. A type
-                // parameter is a name of its own there.
+                // around it, where the names its body binds are not seen.
                 for decorator in &node.decorator_list {
                     self.visit_decorator(decorator);
                 }
@@ -632,14 +668,7 @@ impl<'a> Visitor<'a> for Walker<'a> {
                         .arguments
                         .as_deref()
                         .map_or(type_params.end(), Ranged::end);
-                    let header = TextRange::new(type_params.start(), end);
-                    let around = self.scan.scope();
-                    for param in type_params {
-                        let name = type_parameter(param).as_str();
-                        let hidden = self.scan.shadows.entry((around, name)).or_default();
-                        hidden.push(header);
-                    }
-                    self.visit_type_params(type_params);
+                    self.header(type_params, end);
                 }
                 if let Some(arguments) = node.arguments.as_deref() {
                     self.visit_arguments(arguments);

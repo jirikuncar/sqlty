@@ -266,6 +266,76 @@ def unpacked(pair) -> None:
 # error:
 ```
 
+### An annotation nested too deep, and one that is not a name
+
+An annotation is read eight levels deep. A subscript of something that is not a dotted
+name states nothing.
+
+```python
+from typing import Optional
+from pkg.db import DB, make
+
+def eight(db: Optional[Optional[Optional[Optional[Optional[Optional[Optional[Optional[DB]]]]]]]]) -> None:
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    db.one("SELECT name FROM users", int)
+
+def nine(db: Optional[Optional[Optional[Optional[Optional[Optional[Optional[Optional[Optional[DB]]]]]]]]]) -> None:
+    db.one("SELECT name FROM users", int)
+
+def computed(db: make()[DB]) -> None:
+    db.one("SELECT name FROM users", int)
+```
+
+### A chain of attributes too long
+
+```python
+from pkg.db import DB
+
+class Node:
+    next: "Node"
+    db: DB
+
+def run(node: Node) -> None:
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    node.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.db.one("SELECT name FROM users", int)
+    node.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.db.one("SELECT name FROM users", int)
+```
+
+### What cannot be called, entered or awaited
+
+A special form of `typing` and an instance give nothing when called, a class nothing
+when entered, and a `@contextmanager` function that is not annotated with what it yields
+enters nothing that is known. `type[type[DB]]` is not followed, and neither is a name
+that is a class by one binding and an instance by another, nor an attribute no class
+declares. A value that is awaited without being what an `async def` gives is itself.
+
+```python
+from contextlib import contextmanager
+from typing import Optional
+from pkg.db import DB, Cursor, Website
+
+Mixed = DB
+Mixed = DB()
+
+@contextmanager
+def bare() -> Cursor: ...
+
+async def run(db: DB, site: Website, deep: type[type[DB]], mixed: Mixed) -> None:
+    Optional(db).one("SELECT name FROM users", int)
+    db().one("SELECT name FROM users", int)
+    site.nothing.one("SELECT name FROM users", int)
+    with bare() as cursor:
+        cursor.one("SELECT name FROM users", int)
+    with DB as entered:
+        entered.one("SELECT name FROM users", int)
+    deep().one("SELECT name FROM users", int)
+    mixed.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    (await db).one("SELECT name FROM users", int)
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    (made := DB()).one("SELECT name FROM users", int)
+```
+
 ## Attributes assigned in the class
 
 ty: `DB` for each.
@@ -338,6 +408,88 @@ class Declared:
         self.db.one("SELECT name FROM users", int)
 ```
 
+### A value written in the body of the class
+
+An attribute is what its value is in the body of the class: an attribute of another
+name, a call, a `cast`, what a `with` enters. A value that names something the body
+binds is not followed.
+
+```python
+from typing import cast
+from pkg import db as database
+from pkg.db import DB, Cursor, Website, make, transaction
+
+site: Website
+
+class Holder:
+    DB = Cursor
+    db = site.db
+    made = database.make()
+    kept = cast(Website, make())
+    hidden = cast(DB, make())
+    local = DB.connect()
+    with transaction() as cursor:
+        pass
+    with DB() as own:
+        pass
+
+def run(holder: Holder) -> None:
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    holder.db.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    holder.made.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    holder.kept.db.one("SELECT name FROM users", int)
+    holder.hidden.one("SELECT name FROM users", int)
+    holder.local.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    holder.cursor.one("SELECT name FROM users", int)
+    holder.own.one("SELECT name FROM users", int)
+```
+
+### A value a method assigns
+
+An attribute a method assigns is what the value is in the method: an attribute of
+`self`, what a `with` enters, what is awaited. A name the method binds more than once is
+not followed, a `@staticmethod` has no receiver, and an attribute of another parameter
+is not one of the class.
+
+```python
+from pkg.db import DB, Cursor, Website, make_later, transaction
+
+class App:
+    def __init__(self, site: Website, db: Cursor) -> None:
+        self.site = site
+        self.db = self.site.db
+        db = DB()
+        self.twice = db
+
+    def open(self) -> None:
+        with transaction() as self.cursor:
+            pass
+
+    async def later(self) -> None:
+        self.made = await make_later()
+
+    @staticmethod
+    def build(self) -> None:
+        self.static = DB()
+
+    def other(self, app: "App") -> None:
+        app.elsewhere = DB()
+
+def run(app: App) -> None:
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    app.db.one("SELECT name FROM users", int)
+    app.twice.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    app.cursor.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    app.made.one("SELECT name FROM users", int)
+    app.static.one("SELECT name FROM users", int)
+    app.elsewhere.one("SELECT name FROM users", int)
+```
+
 ## Annotated returns
 
 ty: `DB`, and `Cursor` in the `with`.
@@ -369,6 +521,44 @@ async def run(untyped) -> None:
     async with transaction_later() as cursor:
         # error: [column-type-mismatch]
         cursor.one("SELECT name FROM users", int)
+```
+
+### A decorator that is called, and a setter
+
+A decorator that is called is the one it calls. The `setter` and `deleter` of a property
+do not say what it returns, and a function one of them replaces is not a function.
+
+```python
+import functools
+from contextlib import contextmanager
+from typing import Iterator
+from pkg.db import DB, Cursor
+
+@functools.lru_cache(maxsize=None)
+def shared() -> DB: ...
+
+@contextmanager()
+def entered() -> Iterator[Cursor]: ...
+
+class Holder:
+    @property
+    def db(self) -> DB: ...
+
+    @db.setter
+    def db(self, value: Cursor) -> None: ...
+
+@Holder.db.setter
+def replace(holder: Holder) -> DB: ...
+
+def run(holder: Holder) -> None:
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    shared().one("SELECT name FROM users", int)
+    with entered() as cursor:
+        # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+        cursor.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    holder.db.one("SELECT name FROM users", int)
+    replace(holder).one("SELECT name FROM users", int)
 ```
 
 ## `T | None` is `T`
@@ -466,6 +656,74 @@ def eight(db: A1 | A2 | A3 | A4 | A5 | A6 | A7 | A8) -> None:
 
 def nine(db: A1 | A2 | A3 | A4 | A5 | A6 | A7 | A8 | A9) -> None:
     db.one("SELECT name FROM users", int)
+```
+
+### A member that is itself any of several classes
+
+A name that is any of several classes gives each of them to the union it is a member of,
+once.
+
+```python
+from pkg.db import DB, Cursor
+
+try:
+    from pkg.db import Postgres as Base
+except ImportError:
+    from pkg.db import DB as Base
+
+def run(either: Base | Cursor, other: DB | Base) -> None:
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    either.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    other.one("SELECT name FROM users", int)
+```
+
+### A union that is awaited, entered or called
+
+`await`, `with` and a call give what each member gives. A member that cannot be entered
+leaves what `with` binds unknown, and so does `type[...]` of a member that is not a class.
+
+```python
+from pkg.db import DB, Cursor, Postgres, Transaction, Website, make_later
+
+async def run(
+    flag: bool,
+    managers: Transaction | Postgres,
+    mixed: Transaction | Website,
+    made: type[DB | Cursor],
+    odd: type[DB | type[Cursor]],
+) -> None:
+    if flag:
+        later = make_later()
+    else:
+        later = DB()
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    (await later).one("SELECT name FROM users", int)
+    with managers as entered:
+        # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+        entered.one("SELECT name FROM users", int)
+    with mixed as unknown:
+        unknown.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    made().one("SELECT name FROM users", int)
+    odd().one("SELECT name FROM users", int)
+```
+
+### `cast` imported with a fallback
+
+Either `cast` is `cast`.
+
+```python
+from pkg.db import DB
+
+try:
+    from typing import cast
+except ImportError:
+    from typing_extensions import cast
+
+def run(value: object) -> None:
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    cast(DB, value).one("SELECT name FROM users", int)
 ```
 
 ## A name bound once
@@ -691,6 +949,39 @@ class Outer:
     # error: [column-type-mismatch]
     class Inner[B](base(held.one("SELECT name FROM users", int))):
         held = Plain()
+```
+
+## The decorators, defaults and annotations of a function
+
+They are read in the scope around the function, where its parameters are not seen: `db`
+is the `DB` of the module there, and `site` its `Website`.
+
+```python
+from pkg.db import DB, Website
+
+db: DB
+site: Website
+
+# error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+@db.one("SELECT name FROM users", int)
+def decorated(db: Website) -> None: ...
+
+@site.one("SELECT name FROM users", int)
+def other(site: DB) -> None: ...
+
+def default(
+    db: Website,
+    site: DB,
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    row=db.one("SELECT name FROM users", int),
+    none=site.one("SELECT name FROM users", int),
+) -> None: ...
+
+# error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+def typed[T: db.one("SELECT name FROM users", int)](db: Website) -> None: ...
+
+# error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+def returns(db: Website) -> db.one("SELECT name FROM users", int): ...
 ```
 
 ## A name is what it was last bound to
@@ -1086,6 +1377,71 @@ def run(x: object, ready: bool) -> None:
         x.one("SELECT name FROM users", int)
 
 # error:
+```
+
+### A test against what is no class, and more classes than are followed
+
+A test against a module, and one of a name that may hold a class, narrow nothing. The
+same class by two bindings is that class. A name of more than 8 classes is not followed,
+tested or not.
+
+```python
+from pkg import db as database
+from pkg.db import DB, Cursor, make
+
+shared = DB
+shared = DB()
+
+class A1(DB): ...
+class A2(DB): ...
+class A3(DB): ...
+class A4(DB): ...
+class A5(DB): ...
+class A6(DB): ...
+class A7(DB): ...
+class A8(DB): ...
+class A9(DB): ...
+
+def a_module(db: object) -> None:
+    if isinstance(db, database):
+        db.one("SELECT name FROM users", int)
+
+def a_class() -> None:
+    db = shared
+    if isinstance(db, DB):
+        db.one("SELECT name FROM users", int)
+
+def twice(flag: bool) -> None:
+    if flag:
+        db = DB()
+    else:
+        db = make()
+    if isinstance(db, DB):
+        # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+        db.one("SELECT name FROM users", int)
+
+def nine(n: int) -> None:
+    if n == 1:
+        db = A1()
+    elif n == 2:
+        db = A2()
+    elif n == 3:
+        db = A3()
+    elif n == 4:
+        db = A4()
+    elif n == 5:
+        db = A5()
+    elif n == 6:
+        db = A6()
+    elif n == 7:
+        db = A7()
+    elif n == 8:
+        db = A8()
+    else:
+        db = A9()
+    db.one("SELECT name FROM users", int)
+    if isinstance(db, DB):
+        db.one("SELECT name FROM users", int)
 ```
 
 ## Every binding counts
@@ -1881,6 +2237,156 @@ held.one("SELECT name FROM users", int)
 db.one("SELECT name FROM users", int)
 ```
 
+### More bindings than classes
+
+A name bound in more than 8 ways is followed while the bindings give no more than 8
+classes: here one.
+
+```python
+from typing import cast
+from pkg import db as database
+from pkg.db import DB, Website, make
+
+def m1() -> DB: ...
+def m2() -> DB: ...
+def m3() -> DB: ...
+def m4() -> DB: ...
+def m5() -> DB: ...
+def m6() -> DB: ...
+def m7() -> DB: ...
+
+def calls(n: int) -> None:
+    if n == 1:
+        db = m1()
+    elif n == 2:
+        db = m2()
+    elif n == 3:
+        db = m3()
+    elif n == 4:
+        db = m4()
+    elif n == 5:
+        db = m5()
+    elif n == 6:
+        db = m6()
+    elif n == 7:
+        db = m7()
+    elif n == 8:
+        db = make()
+    else:
+        db = DB()
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    db.one("SELECT name FROM users", int)
+
+def mixed(n: int, site: Website) -> None:
+    if n == 1:
+        db = site.db
+    elif n == 2:
+        db = cast(DB, n)
+    elif n == 3:
+        db: DB = n
+    elif n == 4:
+        db = m1()
+    elif n == 5:
+        db = m2()
+    elif n == 6:
+        db = m3()
+    elif n == 7:
+        db = database.make()
+    elif n == 8:
+        db = make()
+    else:
+        db = DB()
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    db.one("SELECT name FROM users", int)
+```
+
+### A parameter annotated with a name the class body binds
+
+The annotation is read in the body of the class, which is not followed: the parameter
+is unknown, in a function of the method and with another binding too.
+
+```python
+from pkg.db import DB, Cursor, make
+
+class Holder:
+    DB = Cursor
+
+    def nested(self, db: DB) -> None:
+        def inner() -> None:
+            db.one("SELECT name FROM users", int)
+
+        inner()
+
+    def rebound(self, db: DB, flag: bool) -> None:
+        if flag:
+            db = make()
+        db.one("SELECT name FROM users", int)
+
+# error:
+```
+
+### Both branches end
+
+```python
+from pkg.db import DB, make
+
+def run(flag: bool) -> None:
+    if flag:
+        db = DB()
+        return
+    else:
+        db = make()
+        raise ValueError
+    db.one("SELECT name FROM users", int)
+
+# error:
+```
+
+### A name one statement binds twice
+
+The bindings count in the order they take effect: `as` binds after `:=`.
+
+```python
+from pkg.db import Transaction
+
+def run() -> None:
+    with (cursor := Transaction()) as cursor:
+        # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+        cursor.one("SELECT name FROM users", int)
+```
+
+### A comprehension that unpacks, or binds no name
+
+```python
+from pkg.db import DB
+
+def run(db: DB, rows: list) -> None:
+    [db.one("SELECT name FROM users", int) for *db, _ in rows]
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    [db.one("SELECT name FROM users", int) for rows[0] in rows]
+```
+
+### A parameter specification and a variadic type parameter
+
+They are type parameters as any other.
+
+```python
+from pkg.db import DB
+
+class Ts(DB): ...
+class P(DB): ...
+
+def spread[*Ts, **P](db: DB) -> Ts: ...
+def spec[*Ts, **P](db: DB) -> P: ...
+def plain(db: DB) -> Ts: ...
+
+def run() -> None:
+    spread(DB()).one("SELECT name FROM users", int)
+    spec(DB()).one("SELECT name FROM users", int)
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    plain(DB()).one("SELECT name FROM users", int)
+```
+
 ## A diamond follows the method resolution order
 
 `Both` inherits `one` from `Right`: Python looks in `Left`, `Right`, then `Base`. ty:
@@ -2062,6 +2568,37 @@ def run(both: Both, second: Second) -> None:
     both.one("SELECT name FROM users", int)
     # error: [column-type-mismatch]
     second.one("SELECT name FROM users", int)
+```
+
+### A base written twice, a base with type arguments
+
+A base written with type arguments is the class. Python refuses a class with the same
+base twice, which has no order. A base that is not followed is one class by the dotted
+name it is written as, here `database.Missing`: `Same` has it once, after `DB`.
+
+```python
+from typing import Generic, TypeVar
+from pkg import db as database
+from pkg.db import DB
+
+T = TypeVar("T")
+
+class Box(DB, Generic[T]): ...
+class Wrapped(Box[int]): ...
+class Twice(DB, DB): ...
+class Odd(DB, database.Missing): ...
+class Same(Odd, database.Missing): ...
+
+def run(box: Box[int], wrapped: Wrapped, twice: Twice, odd: Odd, same: Same) -> None:
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    box.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    wrapped.one("SELECT name FROM users", int)
+    twice.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    odd.one("SELECT name FROM users", int)
+    # error: [column-type-mismatch] "int is expected but query column 'name' infers str"
+    same.one("SELECT name FROM users", int)
 ```
 
 ## A registered method applies to subclasses
@@ -2402,6 +2939,47 @@ def run(db: Other) -> None:
 # error:
 ```
 
+### A marked method of a class imported with a fallback
+
+The class is known by the path it is registered by. A method its definition marks is
+found through the names the module imports.
+
+```toml
+[[tool.sqlty.functions]]
+import-path = "shim.Db.fetch"
+query-param = "sql"
+```
+
+`shim/__init__.py`:
+
+```python
+try:
+    from shim._fast import Db
+except ImportError:
+    from shim._slow import Db
+```
+
+`shim/_slow.py`:
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+class Db:
+    def fetch(self, sql): ...
+    def one(self, sql: Annotated[LiteralString, SQL]): ...
+```
+
+```python
+from shim import Db
+
+def run(db: Db) -> None:
+    # error: [unknown-column] "column `nope` does not exist in `users`"
+    db.fetch(sql="SELECT nope FROM users")
+    # error: [unknown-column] "column `nope` does not exist in `users`"
+    db.one("SELECT nope FROM users")
+```
+
 ## Stubs
 
 `typings/lib/__init__.pyi`:
@@ -2498,6 +3076,40 @@ def run(site: Site) -> None:
     site.db.one("SELECT name FROM users", int)
     # error: [column-type-mismatch]
     connect().one("SELECT name FROM users", int)
+```
+
+### A stub that declares the class without the method
+
+The stub is what the library declares: the parameters of a method registered on a class
+the stub declares without it are not looked for in the library, so only a query passed by
+name is checked.
+
+```toml
+[[tool.sqlty.functions]]
+import-path = "partial.Db.fetch"
+query-param = "sql"
+```
+
+`typings/partial/__init__.pyi`:
+
+```python
+class Db: ...
+```
+
+`partial/__init__.py`:
+
+```python
+class Db:
+    def fetch(self, sql): ...
+```
+
+```python
+from partial import Db
+
+def run(db: Db) -> None:
+    # error: [unknown-column] "column `nope` does not exist in `users`"
+    db.fetch(sql="SELECT nope FROM users")
+    db.fetch("SELECT nope FROM users")
 ```
 
 ## `stub-paths`

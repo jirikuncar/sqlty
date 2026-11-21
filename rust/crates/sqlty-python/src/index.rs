@@ -1131,4 +1131,87 @@ mod tests {
         let index = fork.build();
         assert!(index.source("a").is_some() && index.source("b").is_some());
     }
+
+    const MARKED: &str = "from sqlty import SQL\nfrom typing import Annotated, LiteralString\ndef run(sql: Annotated[LiteralString, SQL]): ...\n";
+
+    fn module(name: &str, text: &str) -> Arc<Module> {
+        Arc::new(Module::new(Arc::from(text), name, (3, 14)))
+    }
+
+    #[test]
+    fn a_stub_that_does_not_parse_marks_no_helper() {
+        let broken = format!("{MARKED}def\n");
+        let mut builder = Builder::new((3, 14));
+        builder.add_stub("lib", module("lib", MARKED));
+        builder.add_stub("broken", module("broken", &broken));
+        let index = builder.build();
+        assert!(index.get("lib", "run").is_some());
+        assert!(index.get("broken", "run").is_none());
+        // Both are still the modules they describe.
+        let stubs: Vec<String> = index.stubs().into_iter().map(|stub| stub.0).collect();
+        assert_eq!(stubs, ["broken", "lib"]);
+    }
+
+    #[test]
+    fn a_stub_given_hides_the_one_read_on_demand() {
+        use crate::modules::{File, ReadFile, Stub};
+        use std::path::{Path, PathBuf};
+
+        let stub = |name: &str| Stub {
+            module: name.to_string(),
+            read_as: name.to_string(),
+            path: PathBuf::from(format!("/s/{name}.pyi")),
+        };
+        // `gone` was listed and then removed.
+        let reader: ReadFile = Arc::new(|path: &Path| match path.ends_with("gone.pyi") {
+            true => File::Missing,
+            false => File::Text(MARKED.to_string()),
+        });
+        let stubs = vec![stub("lib"), stub("gone"), stub("other")];
+        let outside = Arc::new(Modules::new((3, 14), stubs, Vec::new(), reader));
+        let mut builder = Builder::new((3, 14));
+        builder.add_found(
+            "app",
+            module("app", "import lib, gone, other\n"),
+            &Dict::new(),
+        );
+        builder.add_stub("lib", module("lib", "class Given: ...\n"));
+        builder.outside(outside);
+        let index = builder.build();
+        let stubs: Vec<(String, String)> = index
+            .stubs()
+            .into_iter()
+            .map(|(module, _, text)| (module, text.to_string()))
+            .collect();
+        let expected = [("lib", "class Given: ...\n"), ("other", MARKED)]
+            .map(|(module, text)| (module.to_string(), text.to_string()));
+        assert_eq!(stubs, expected);
+    }
+
+    #[test]
+    fn every_module_with_an_import_as_is_parsed_when_no_pattern_holds_the_helpers() {
+        // The names of the helpers are more than a pattern compiles.
+        let long = "f".repeat(4000);
+        let names: Vec<String> = (0..400).map(|at| format!("{long}{at:03}")).collect();
+        let text: String = names
+            .iter()
+            .map(|name| format!("def {name}(sql): ...\n"))
+            .collect();
+        let mut builder = Builder::new((3, 14));
+        builder.add_found("lib", module("lib", &text), &Dict::new());
+        for (name, text) in [
+            ("a", "import os as o\n"),
+            ("b", "from lib import other as fetch\n"),
+            ("c", "from lib import other\n"),
+        ] {
+            builder.add_found(name, module(name, text), &Dict::new());
+        }
+        for name in &names {
+            builder.register(&format!("lib.{name}"), "sql", None, None);
+        }
+        PARSED.with(|count| count.set(0));
+        let index = builder.build();
+        assert_eq!(PARSED.with(Cell::get), 2, "`a` and `b`, not `c`");
+        assert!(index.mentions("anything()"), "any text may call a helper");
+    }
 }

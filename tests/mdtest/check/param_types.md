@@ -180,6 +180,26 @@ def lookup(uid: UUID, born: date, age: bytes, other):
     execute("DELETE FROM users WHERE uid = %s", (born,))
 ```
 
+### A string annotation, and `Final` with a type
+
+An annotation written as a string names the same class, and a constant that is
+`Final[...]` has the type of its literal.
+
+```python
+from typing import Annotated, Final, LiteralString
+from sqlty import SQL
+
+def execute(query: Annotated[LiteralString, SQL], params: tuple[object, ...]) -> None: ...
+
+LIMIT: Final[bytes] = b"1"
+
+def lookup(age: "bytes") -> None:
+    # error: [param-type-mismatch] "parameter 1 expects int, got bytes"
+    execute("DELETE FROM users WHERE age = %s", (age,))
+    # error: [param-type-mismatch] "parameter 1 expects int, got bytes"
+    execute("DELETE FROM users WHERE age = %s", (LIMIT,))
+```
+
 ## Arrays
 
 `= ANY(%s)` takes a list.

@@ -2159,6 +2159,89 @@ mod tests {
     }
 
     #[test]
+    fn a_file_that_is_not_text_is_no_stub_and_a_library_nothing_is_known_of() {
+        let (mut workspace, files) = written(&[
+            ("/repo/typings/raw.pyi", ""),
+            ("/repo/vendor/raw.py", ""),
+            ("/repo/vendor/text.py", "x = 1\n"),
+            (
+                "/repo/pyproject.toml",
+                "[tool.sqlty]\nschema = \"schema.sql\"\nexclude = [\"vendor\"]\n",
+            ),
+        ]);
+        for path in ["/repo/typings/raw.pyi", "/repo/vendor/raw.py"] {
+            let tree = &mut files.0.lock().unwrap().0;
+            tree.insert(PathBuf::from(path), b"\xff\xfe".as_slice());
+        }
+        let settings = workspace.settings(Path::new("/repo/app.py")).unwrap();
+        let index = workspace.helpers(&settings);
+        // The library is there, which ends the search for it; the stub is not.
+        assert!(index
+            .resolve("vendor.raw")
+            .is_some_and(|found| found.source().is_none()));
+        assert!(index
+            .resolve("vendor.text")
+            .is_some_and(|found| found.source().is_some()));
+        assert!(index.resolve("raw").is_none());
+    }
+
+    #[test]
+    fn stubs_are_listed_in_the_packages_whose_names_are_modules() {
+        let (mut workspace, _) = stubbed(&[
+            ("/repo/typings/lib/sub/__init__.pyi", STUB),
+            ("/repo/typings/lib/sub/deep.pyi", STUB),
+            ("/repo/typings/lib/not-a-module/hidden.pyi", STUB),
+            ("/repo/typings/lib/README.md", "The stubs of lib.\n"),
+        ]);
+        let settings = workspace.settings(Path::new("/repo/app.py")).unwrap();
+        let index = workspace.helpers(&settings);
+        let stubs: Vec<String> = index.stubs().into_iter().map(|stub| stub.0).collect();
+        assert_eq!(stubs, ["lib", "lib.sub", "lib.sub.deep"]);
+        assert!(index.get("lib.sub.deep", "Db.one").is_some());
+    }
+
+    #[test]
+    fn a_library_under_a_root_that_is_a_link_is_found_by_where_the_link_leads() {
+        let config = "[tool.sqlty]\nschema = \"schema.sql\"\nexclude = [\"linked\"]\n[[tool.sqlty.functions]]\nimport-path = \"extra.fetch\"\nquery-param = \"sql\"\n";
+        let call = "import extra\nextra.fetch(\"SELECT nope FROM users\")\n";
+        let tree: Tree = Tree(
+            [
+                ("/repo/pyproject.toml", config),
+                ("/repo/schema.sql", "CREATE TABLE users (id INT NOT NULL);"),
+                ("/repo/linked/extra.py", "def fetch(sql): ...\n"),
+            ]
+            .into_iter()
+            .map(|(path, text)| (PathBuf::from(path), text.as_bytes()))
+            .collect(),
+        );
+        let files = Arc::new(Counted(Mutex::new(tree), Arc::default()));
+        let shared: Arc<dyn Files + Send + Sync> = files.clone();
+        let roots = vec![PathBuf::from("/repo/linked")];
+        let mut workspace =
+            Workspace::root(Path::new("/repo"), shared, (3, 14), roots).expect("opens");
+        let app = Path::new(APP);
+        assert_eq!(
+            rules(&workspace.check(app, call).unwrap()),
+            ["unknown-column"]
+        );
+        // The client names the file by where the link leads: `/real`.
+        files.write(
+            "/repo/linked/extra.py",
+            Some("def fetch(other, sql): ...\n"),
+        );
+        assert!(!workspace.changed(Path::new("/elsewhere/extra.py")));
+        assert!(workspace.changed(Path::new("/real/extra.py")));
+        assert_eq!(rules(&workspace.check(app, call).unwrap()), [""; 0]);
+        // The directory is every file under it.
+        files.write("/repo/linked/extra.py", Some("def fetch(sql): ...\n"));
+        assert!(workspace.changed(Path::new("/real")));
+        assert_eq!(
+            rules(&workspace.check(app, call).unwrap()),
+            ["unknown-column"]
+        );
+    }
+
+    #[test]
     fn warns_when_a_stub_path_holds_more_stubs_than_are_listed() {
         let names: Vec<(String, &'static str)> = (0..=MAX_STUBS)
             .map(|at| (format!("/repo/typings/m{at:05}.pyi"), ""))

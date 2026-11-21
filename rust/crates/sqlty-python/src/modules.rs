@@ -165,15 +165,14 @@ impl Modules {
     /// The files of the first root that holds `module`: the first of them, or `all`.
     fn find(&self, module: &str, all: bool) -> Vec<Arc<Module>> {
         let parts: Vec<&str> = module.split('.').collect();
-        let Some((top, rest)) = parts.split_first() else {
-            return Vec::new();
-        };
         if parts
             .iter()
             .any(|part| part.is_empty() || !part.chars().all(crate::types::generic::is_word))
         {
             return Vec::new();
         }
+        // A name has at least one part.
+        let (top, rest) = (parts[0], &parts[1..]);
         let mut held = Vec::new();
         for root in &self.roots {
             let places = [
@@ -186,7 +185,7 @@ impl Modules {
                 base.extend(rest);
                 let init = base.join(format!("__init__.{suffix}"));
                 // `lib-stubs` is a package: no file is named `lib-stubs.pyi`.
-                let file = (package == *top || !rest.is_empty())
+                let file = (package == top || !rest.is_empty())
                     .then(|| with_suffix(&base, suffix))
                     .flatten();
                 let found = self
@@ -562,5 +561,50 @@ mod tests {
         );
         drop(found.marked(texts.into_iter()));
         assert_eq!(read.lock().unwrap().len(), 2, "kept, not read again");
+    }
+
+    #[test]
+    fn without_roots_no_library_is_looked_for() {
+        let reader: ReadFile = Arc::new(|_: &Path| File::Text("class Db: ...\n".to_string()));
+        let found = Modules::new((3, 14), Vec::new(), Vec::new(), reader);
+        assert!(found.library("lib").is_none());
+        assert!(found.libraries("lib").is_empty());
+    }
+
+    #[test]
+    fn a_stub_that_is_gone_or_does_not_parse_marks_nothing() {
+        // `gone` was listed and then removed; `broken` marks a helper before it stops
+        // parsing.
+        let (found, read) = modules(
+            &[
+                ("gone", "gone.__init__", "/s/gone/__init__.pyi"),
+                ("broken", "broken", "/s/broken.pyi"),
+                ("other", "other", "/s/other.pyi"),
+            ],
+            &[("/s/broken.pyi", "from sqlty import SQL\nfrom typing import Annotated, LiteralString\ndef run(sql: Annotated[LiteralString, SQL]): ...\ndef\n")],
+        );
+        let texts = ["import gone, broken\n"];
+        assert_eq!(found.named(texts.into_iter()), ["broken", "gone"]);
+        assert!(found.marked(texts.into_iter()).is_empty());
+        assert_eq!(*read.lock().unwrap(), [PathBuf::from("/s/broken.pyi")]);
+    }
+
+    #[test]
+    fn every_stub_is_named_when_no_pattern_holds_their_packages() {
+        // The names of the packages are more than a pattern compiles: no text is
+        // searched, and each stub may be the one a text names.
+        let long = "m".repeat(4000);
+        let stubs: Vec<Stub> = (0..400)
+            .map(|at| Stub {
+                module: format!("{long}{at:03}"),
+                read_as: format!("{long}{at:03}"),
+                path: PathBuf::from(format!("/s/{at}.pyi")),
+            })
+            .collect();
+        let reader: ReadFile = Arc::new(|_: &Path| File::Missing);
+        let found = Modules::new((3, 14), stubs, Vec::new(), reader);
+        let named = found.named(std::iter::once("import os\n"));
+        assert_eq!(named.len(), 400);
+        assert!(named.is_sorted());
     }
 }
