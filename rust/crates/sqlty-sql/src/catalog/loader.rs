@@ -722,7 +722,7 @@ impl Loader {
     /// Point the foreign keys that name a table defined after them (`mysqldump` orders
     /// tables by name) at it, and drop those whose table never is.
     pub(super) fn resolve_foreign_keys(&mut self) {
-        let mut found = Vec::new();
+        let mut found = FxHashMap::default();
         for (key, rel) in &self.relations {
             let Some(table) = rel.table() else { continue };
             let targets: Vec<_> = table
@@ -737,30 +737,31 @@ impl Loader {
                 })
                 .collect();
             if !targets.is_empty() {
-                found.push((key.clone(), targets));
+                found.insert(key.clone(), targets);
             }
         }
         if found.is_empty() {
             return;
         }
         self.cache = None;
-        for (key, targets) in found {
-            if let Some(Rel::Table(table)) = self.relations.get_mut(&key) {
-                let mut targets = targets.into_iter();
-                table.foreign_keys.retain_mut(|fk| {
-                    if fk.waiting.take().is_none() {
-                        return true;
-                    }
-                    let Some((target, referred)) = targets.next().flatten() else {
-                        return false;
-                    };
-                    fk.key.table = target;
-                    if let Some(referred) = referred {
-                        fk.key.referred = referred;
-                    }
-                    true
-                });
-            }
+        for (key, rel) in &mut self.relations {
+            let (Rel::Table(table), Some(targets)) = (rel, found.remove(key)) else {
+                continue;
+            };
+            let mut targets = targets.into_iter();
+            table.foreign_keys.retain_mut(|fk| {
+                if fk.waiting.take().is_none() {
+                    return true;
+                }
+                let Some((target, referred)) = targets.next().flatten() else {
+                    return false;
+                };
+                fk.key.table = target;
+                if let Some(referred) = referred {
+                    fk.key.referred = referred;
+                }
+                true
+            });
         }
     }
 
