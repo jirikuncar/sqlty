@@ -93,6 +93,14 @@ CLUSTER users;
 VACUUM (FULL, ANALYZE) users;
 ```
 
+An index build sqlparser does not read, with a tablespace or `ON ONLY`, waits too:
+
+```sql migration
+-- error: [missing-concurrently]
+-- error: [missing-lock-timeout]
+CREATE INDEX users_email ON users (email) TABLESPACE fast;
+```
+
 An option turned off with `false` or `'off'` is off:
 
 ```sql migration
@@ -129,6 +137,8 @@ REINDEX (VERBOSE) INDEX t_id_2;
 CLUSTER (VERBOSE) t;
 CLUSTER t_id ON t;
 VACUUM (FULL, ANALYZE) t;
+CREATE TABLE teams (id BIGINT PRIMARY KEY);
+REINDEX INDEX teams_pkey;
 ```
 
 ## A pg_dump schema
