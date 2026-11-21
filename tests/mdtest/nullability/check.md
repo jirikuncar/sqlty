@@ -644,7 +644,11 @@ imported one the module binds again.
 ```python
 from typing import NewType
 
+from ids import OwnerId as Base
+
 Listed = NewType("Listed", list[int])
+Base = None
+Over = NewType("Over", Base)
 ```
 
 ```python
@@ -667,7 +671,7 @@ class Row(NamedTuple):
     id: int
     owner_id: int
 
-def insert(plain: Plain, twice: Twice, keyword: Keyword, loop: Loop, listed: kinds.Listed, rebound: Rebound, shadowed: ids.OwnerId) -> None:
+def insert(plain: Plain, twice: Twice, keyword: Keyword, loop: Loop, listed: kinds.Listed, rebound: Rebound, shadowed: ids.OwnerId, over: kinds.Over) -> None:
     # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
     fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=plain)
     # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
@@ -682,6 +686,8 @@ def insert(plain: Plain, twice: Twice, keyword: Keyword, loop: Loop, listed: kin
     fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=rebound)
     # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
     fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=shadowed)
+    # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=over)
 ```
 
 #### Driver calls and t-strings
