@@ -203,15 +203,15 @@ impl Loader {
                 constraint: TableConstraint::ForeignKey(constraint),
                 not_valid,
             } => {
-                fk = self.foreign_key(
+                fk = Some(self.foreign_key(
                     constraint,
                     &constraint.columns,
                     &key,
                     table,
                     path,
                     !not_valid,
-                );
-                fk.is_some()
+                ));
+                true
             }
             _ => return false,
         };
