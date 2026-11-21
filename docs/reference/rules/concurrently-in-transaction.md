@@ -3,7 +3,7 @@ order: 442
 group: "migration"
 severity: "error"
 fixable: false
-summary: "Migration runs CONCURRENTLY inside a transaction block"
+summary: "Migration runs CONCURRENTLY or VACUUM inside a transaction block"
 origin: "Migration"
 ---
 
@@ -13,8 +13,8 @@ Default severity: **error**
 
 ## What it does
 
-Reports a new statement that runs `CONCURRENTLY` between `BEGIN` (or
-`START TRANSACTION`) and `COMMIT` in the same migration file.
+Reports a new statement that runs `CONCURRENTLY`, or a `VACUUM`, between `BEGIN`
+(or `START TRANSACTION`) and `COMMIT` in the same migration file.
 
 `against.sql`:
 
@@ -29,10 +29,18 @@ CREATE INDEX CONCURRENTLY users_email ON users (email);
 COMMIT;
 ```
 
+```sql migration
+BEGIN;
+-- error: [concurrently-in-transaction] "PostgreSQL refuses `VACUUM` inside a transaction block: run it in a migration without one"
+VACUUM (ANALYZE) users;
+COMMIT;
+```
+
 ## Why is this bad?
 
 PostgreSQL refuses `CREATE INDEX CONCURRENTLY`, `DROP INDEX CONCURRENTLY`,
-`REINDEX CONCURRENTLY` and `DETACH PARTITION ... CONCURRENTLY` inside a
+`REINDEX CONCURRENTLY`, `DETACH PARTITION ... CONCURRENTLY` and
+[`VACUUM`](https://www.postgresql.org/docs/current/sql-vacuum.html) inside a
 transaction block, so the migration fails.
 
 ## How to fix
