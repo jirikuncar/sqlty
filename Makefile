@@ -89,7 +89,7 @@ bench-codspeed:  ## The benchmarks CodSpeed measures in CI, timed locally; needs
 	uv run --group bench pytest benchmarks/ --codspeed -n 0 -p no:randomly --no-cov
 
 .PHONY: bench-rust
-bench-rust:  ## Criterion: catalog load, analyzer, check/rewrite_source; extra args via ARGS=
+bench-rust:  ## Criterion: catalog load, analyzer, check/rewrite_source, one query; extra args via ARGS=
 	cargo bench --manifest-path rust/Cargo.toml -p sqlty-bench -- $(ARGS)
 
 # --- Docs ---

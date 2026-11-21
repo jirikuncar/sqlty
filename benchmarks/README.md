@@ -63,6 +63,18 @@ in `baseline.json`:
 - The baseline is keyed by platform and size (`Darwin-ci`, `Linux-ci`). With no
   entry for the runner's platform the check passes and says so.
 
+## One query
+
+`one_query_us` is microseconds for `check_source` of a module holding one typical
+query of `one_query.sql` (point select, 3-table join, insert with parameters,
+aggregate), as `sqlty rewrite` types it, schema cached: what `sqlty check` spends per
+query. `make bench-ci` prints each against a database round trip (AGENTS.md "Check
+budget": 100 µs times the calibration over 20 ms), marked `OVER` or `under`. It is
+reported, not budgeted, until a one-query check fits: `ENFORCE_ONE_QUERY = True` in
+`bench_project.py` then fails the job, after measuring again up to three runs in all.
+`make bench-rust ARGS=one_query` times the same queries in Rust, with size sweeps
+(joins, selected columns, `IN` list items, `GROUP BY` keys).
+
 ## Updating the baseline
 
 After an intended change in speed or memory, on the machine type you want to
