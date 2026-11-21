@@ -62,6 +62,26 @@ statements in a schema file, such as a `pg_dump --schema-only` dump or a
 migrations snapshot. It runs offline, in an editor, pre-commit or CI. See
 [Schema inference](guide/schema-inference.md).
 
+## How do I keep raw SQL queries in sync with schema.sql and mypy or Pyright?
+
+Point `schema` under `[tool.sqlty]` at your `schema.sql`, a migrations
+directory or both. `sqlty rewrite .` writes each query's row type into the source
+as `SQL[T]`, which mypy, Pyright and ty then check at every use of the rows.
+`sqlty check .` fails when a query names a table or column the schema lacks, or
+when `T` no longer matches what the query returns, and `--fix` updates stale
+annotations. Run both in pre-commit and CI, as
+[CI and pre-commit](recipes/ci.md) shows.
+
+## How do I check in GitHub Actions whether a migration breaks existing queries?
+
+Run `sqlty breaking --against origin/${{ github.base_ref }}` in the pull
+request's workflow, with `fetch-depth: 0` on checkout. It checks the base
+branch's queries against the new schema, and the new queries against the old
+schema, the two mixes a rolling deploy runs, and fails on a dropped column or a
+column made nullable that either side still reads. `--output-format github`
+annotates the lines in the diff. See [GitHub Actions](recipes/ci.md#github-actions)
+and [Breaking schema changes](guide/breaking-changes.md).
+
 ## Can sqlty catch totals that a join counts twice?
 
 Yes. `fanout-aggregate` reports a `SUM`, `AVG` or `COUNT` over a table whose
