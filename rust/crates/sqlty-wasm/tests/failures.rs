@@ -1,6 +1,12 @@
-use serde_json::{json, Value};
+//! Requests the engine cannot answer: bad JSON, a panic, and an instance that crashed before.
 
-use crate::run;
+#![expect(
+    clippy::unwrap_used,
+    reason = "a malformed answer fails the test"
+)]
+
+use serde_json::{json, Value};
+use sqlty_wasm::run;
 
 fn ask(request: &Value) -> Value {
     serde_json::from_str(&run(&request.to_string())).unwrap()
