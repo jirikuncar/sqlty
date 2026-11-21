@@ -214,8 +214,9 @@ make bench-corpus     # sqlty check on pinned real repositories (benchmarks/corp
   the budget rules.
 - `bench-rust` covers catalog load (50 to 5000 tables with functions), the
   analyzer per query kind, `check_source`/`rewrite_source` on 1k/4k queries,
-  name-index prefix lookups and `complete` at 50, 540 and 5000 tables, and
-  `query_at` in a module of 4000 queries. Use it to find where time goes and to
+  name-index prefix lookups and `complete` at 50, 540 and 5000 tables,
+  `query_at` in a module of 4000 queries, and the check of one query by size
+  (`one_query`). Use it to find where time goes and to
   compare a branch (`ARGS="--save-baseline main"`, then `ARGS="--baseline main"`).
 - `bench-codspeed` runs each query kind of `synth.KINDS` through
   `analyze_select`/`analyze_params`, the schema load, `rewrite_source`,

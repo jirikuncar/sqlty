@@ -44,7 +44,20 @@ bench-result.json
 !.claude/CLAUDE.md
 !.claude/skills/
 .claude/skills/*
+!.claude/skills/compare/
+!.claude/skills/fan-out/
+!.claude/skills/fix-ci/
+!.claude/skills/learn/
+!.claude/skills/make-rule/
+!.claude/skills/merge-queue/
+!.claude/skills/release/
+!.claude/skills/repro-issues/
 !.claude/skills/review/
+!.claude/skills/ship/
+!.claude/skills/simplify/
+!.claude/skills/spec/
+!.claude/skills/status/
+!.claude/skills/triage/
 
 # Hypothesis example database
 .hypothesis/
