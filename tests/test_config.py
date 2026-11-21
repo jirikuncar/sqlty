@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from sqlty import _config
-from sqlty._config import ConfigError, load_config, validate_tool_table
+from sqlty import _config, _core
+from sqlty._config import ConfigError, load_config
 
 
 def test_packaging_only_pyprojects_inherit_the_nearest_table(tmp_path):
@@ -204,8 +204,8 @@ def test_values_only_the_cli_checks_are_loaded_as_written(tmp_path: Path) -> Non
 
 
 def test_rules_must_be_a_table() -> None:
-    with pytest.raises(ConfigError, match="rules must be a table"):
-        validate_tool_table({"rules": ["select-star"]}, "pyproject.toml")
+    with pytest.raises(ValueError, match="rules must be a table"):
+        _core.validate_config({"rules": ["select-star"]}, "pyproject.toml")
 
 
 def test_unreadable_pyproject_is_skipped_with_a_warning(
@@ -228,15 +228,15 @@ def test_pyproject_that_is_not_utf8_is_skipped_with_a_warning(
 
 
 def test_values_of_a_parsed_table_are_validated() -> None:
-    with pytest.raises(ConfigError, match="import-style must be a string"):
-        validate_tool_table({"import-style": ("a", 1.5)}, "x")
-    with pytest.raises(ConfigError, match="unknown dialect 'None'"):
-        validate_tool_table({"dialect": None}, "x")
+    with pytest.raises(ValueError, match="import-style must be a string"):
+        _core.validate_config({"import-style": ("a", 1.5)}, "x")
+    with pytest.raises(ValueError, match="unknown dialect 'None'"):
+        _core.validate_config({"dialect": None}, "x")
 
 
 def test_tables_keep_their_value_types(tmp_path: Path) -> None:
     table = {"preview": True, "max-query-variants": 8, "rules": {"select-star": "ignore"}}
-    validate_tool_table(table, "x")
+    _core.validate_config(table, "x")
     (tmp_path / "sqlty.toml").write_text(
         'preview = true\nmax-query-variants = 8\nrules = { select-star = "ignore" }\n'
     )
@@ -258,9 +258,9 @@ def test_incomplete_function_entries_are_skipped(
 
 
 def test_unknown_dialect_is_an_error_with_a_suggestion() -> None:
-    with pytest.raises(ConfigError, match=r"unknown dialect 'postgress'.*did you mean 'postgres'"):
-        validate_tool_table({"dialect": "postgress"}, "pyproject.toml")
-    validate_tool_table({"dialect": "PostgreSQL"}, "pyproject.toml")
+    with pytest.raises(ValueError, match=r"unknown dialect 'postgress'.*did you mean 'postgres'"):
+        _core.validate_config({"dialect": "postgress"}, "pyproject.toml")
+    _core.validate_config({"dialect": "PostgreSQL"}, "pyproject.toml")
 
 
 def test_extend_applies_a_package_config_on_top_of_another(tmp_path: Path) -> None:
