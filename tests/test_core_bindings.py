@@ -54,6 +54,19 @@ def test_unknown_query_format() -> None:
         _core.check_queries("SELECT 1", query_format="bogus")
 
 
+def test_check_queries() -> None:
+    found = _core.check_queries(
+        "-- name: get-user^\nSELECT nope FROM users", schema_sql="CREATE TABLE users (id INT)"
+    )
+    assert [(diag["rule"], diag["line"]) for diag in found] == [("unknown-column", 2)]
+
+
+def test_driver_types() -> None:
+    assert ("INT4RANGE", "psycopg.types.range.Range[int]") in _core.driver_types(
+        "psycopg", "postgres"
+    )
+
+
 CONFIG = ("postgres", None, None, None, False, [], None, None)
 MODULE = ("x = 1\n", None, 3)
 
