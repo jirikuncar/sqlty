@@ -38,6 +38,10 @@ pub struct Source {
     pub(crate) targets: std::sync::OnceLock<crate::index::Targets>,
     /// See [`crate::compose::constant`].
     pub(crate) constants: std::sync::OnceLock<HashMap<String, crate::compose::Binding>>,
+    /// See [`bound_names`].
+    pub(crate) bound: std::sync::OnceLock<HashMap<String, usize>>,
+    /// See [`crate::scopes::module_kinds`].
+    pub(crate) kinds: std::sync::OnceLock<HashMap<String, Option<String>>>,
 }
 
 impl Source {
@@ -69,6 +73,8 @@ impl Source {
             module: None,
             targets: std::sync::OnceLock::new(),
             constants: std::sync::OnceLock::new(),
+            bound: std::sync::OnceLock::new(),
+            kinds: std::sync::OnceLock::new(),
             syntax,
             comments,
             version,
@@ -302,7 +308,9 @@ impl<'a> Visitor<'a> for Bound<'a> {
     }
 }
 
-fn bound_names(body: &[Stmt]) -> HashMap<&str, usize> {
+/// How often each name is bound at module level, nested blocks included; `*` counts star
+/// imports.
+pub(crate) fn bound_names(body: &[Stmt]) -> HashMap<&str, usize> {
     let mut bound = Bound {
         counts: HashMap::new(),
     };

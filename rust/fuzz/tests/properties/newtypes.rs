@@ -9,7 +9,7 @@ use crate::{engine, python};
 
 /// How a module spells `NewType`: its import or definition, the call, and whether it is
 /// `typing.NewType`.
-const SPELLINGS: [(&str, &str, bool); 7] = [
+const SPELLINGS: [(&str, &str, bool); 8] = [
     ("from typing import NewType", "NewType", true),
     ("import typing", "typing.NewType", true),
     ("import typing as t", "t.NewType", true),
@@ -18,6 +18,11 @@ const SPELLINGS: [(&str, &str, bool); 7] = [
     ("import typing_extensions as te", "te.NewType", true),
     (
         "def NewType(name, tp):\n    return object",
+        "NewType",
+        false,
+    ),
+    (
+        "from typing import NewType\n\ndef NewType(name, tp):\n    return object",
         "NewType",
         false,
     ),
@@ -67,6 +72,10 @@ struct Case {
     rebound: Option<usize>,
     /// The module binds what it imports from `ids` again, to another supertype.
     shadowed: bool,
+    /// The module binds the head of the annotation again in a block that never runs.
+    nested: bool,
+    /// `ids` and `app` are modules of a package, which imports relatively.
+    package: bool,
     dotted: bool,
     call: bool,
     /// A psycopg call rather than the configured helper.
@@ -86,6 +95,8 @@ fn case(d: &mut Draw<'_>) -> Case {
         links,
         rebound,
         shadowed: d.int(0, 3) == 0,
+        nested: d.int(0, 3) == 0,
+        package: d.bool(),
         dotted: d.bool(),
         call: d.bool(),
         driver: d.bool(),
@@ -137,10 +148,12 @@ impl Case {
 
     /// The module calling the helper, with the argument annotated `annotation`, or not.
     fn app(&self, annotation: Option<&str>) -> String {
-        let import = match (self.in_ids, self.dotted) {
-            (0, _) => String::new(),
-            (_, true) => "import ids".to_string(),
-            (n, false) => format!("from ids import N{}", n - 1),
+        let import = match (self.in_ids, self.dotted, self.package) {
+            (0, _, _) => String::new(),
+            (_, true, false) => "import ids".to_string(),
+            (_, true, true) => "from . import ids".to_string(),
+            (n, false, false) => format!("from ids import N{}", n - 1),
+            (n, false, true) => format!("from .ids import N{}", n - 1),
         };
         let other = BASES[(BASES
             .iter()
@@ -156,6 +169,13 @@ impl Case {
                 n - 1,
                 SPELLINGS[self.app].1
             ),
+        };
+        let nested = if self.nested {
+            let annotation = self.annotation();
+            let head = annotation.split('.').next().unwrap_or_default();
+            format!("if False:\n    {head} = {other}\n")
+        } else {
+            String::new()
         };
         let (parameter, argument) = match (annotation, self.call) {
             (Some(annotation), false) => (format!("v: {annotation}"), "v".to_string()),
@@ -174,7 +194,7 @@ impl Case {
         format!(
             "{}\n{IMPORTS}\nfrom typing import NamedTuple\n\nimport psycopg\n\n\
              from db import fetch_all\nfrom sqlty import SQL\n{import}\n\n\
-             {shadow}{}\n\nclass Row(NamedTuple):\n    v: {class}\n\n\
+             {shadow}{}\n{nested}\nclass Row(NamedTuple):\n    v: {class}\n\n\
              def run(conn: psycopg.Connection, {parameter}) -> None:\n    {call}\n",
             SPELLINGS[self.app].0,
             self.links(self.in_ids..self.links, self.app),
@@ -186,6 +206,15 @@ impl Case {
         self.shadowed && self.in_ids > 0
     }
 
+    /// The path of module `name`.
+    fn path(&self, name: &str) -> String {
+        if self.package {
+            format!("pkg/{name}.py")
+        } else {
+            format!("{name}.py")
+        }
+    }
+
     /// Whether every link is made with `typing.NewType`.
     fn real(&self) -> bool {
         (self.in_ids == 0 || SPELLINGS[self.ids].2)
@@ -194,16 +223,24 @@ impl Case {
 
     /// A program that fails unless Python resolves the annotation as [`Case::real`] says.
     fn oracle(&self) -> String {
+        let package = if self.package { "pkg" } else { "" };
         let module = |name: &str, text: &str| {
+            let name = match package {
+                "" => name.to_string(),
+                _ if name == "db" => name.to_string(),
+                package => format!("{package}.{name}"),
+            };
             format!(
-                "_m = types.ModuleType({name:?})\nsys.modules[{name:?}] = _m\nexec({}, _m.__dict__)\n",
+                "_m = types.ModuleType({name:?})\n_m.__package__ = {package:?}\n\
+                 sys.modules[{name:?}] = _m\nexec({}, _m.__dict__)\n",
                 python::literal(text)
             )
         };
         let (annotation, base) = (self.annotation(), self.base);
         let expected = if self.real() { "True" } else { "False" };
         format!(
-            "import sys, types, typing\n{}{}{}\
+            "import sys, types, typing\n_p = types.ModuleType(\"pkg\")\n_p.__path__ = []\n\
+             sys.modules[\"pkg\"] = _p\n{}{}{}\
              x = eval({annotation:?}, _m.__dict__)\nreal = isinstance(x, typing.NewType)\n\
              while isinstance(x, typing.NewType):\n    x = x.__supertype__\n\
              assert (real and x == eval({base:?}, _m.__dict__)) == {expected}, (real, x)\n",
@@ -216,7 +253,7 @@ impl Case {
 
 /// A `NewType` argument binds the query as its supertype does; one sqlty does not resolve is
 /// read as an argument of unknown type, never as one of another type, and so is one the
-/// module imports and then binds again.
+/// module imports, or binds anywhere, again.
 #[test]
 fn newtype_arguments_bind_as_their_supertype() {
     check(case, |case| {
@@ -225,11 +262,13 @@ fn newtype_arguments_bind_as_their_supertype() {
                 return Err(TestCaseError::fail(format!("{error}\n{}", case.oracle())));
             }
         }
+        let ids = case.path("ids");
         let files = [
             ("pyproject.toml", CONFIG.to_string()),
             ("schema.sql", SCHEMA.to_string()),
             ("db.py", DB.to_string()),
-            ("ids.py", case.ids()),
+            ("pkg/__init__.py", String::new()),
+            (ids.as_str(), case.ids()),
         ];
         let texts = [
             case.app(Some(&case.annotation())),
@@ -237,10 +276,10 @@ fn newtype_arguments_bind_as_their_supertype() {
             case.app(None),
         ];
         let [newtype, supertype, unknown] =
-            <[_; 3]>::try_from(engine::check_project(&files, "app.py", &texts))
+            <[_; 3]>::try_from(engine::check_project(&files, &case.path("app"), &texts))
                 .expect("three checks");
         let shown = format!("{}\n{newtype:#?}\n{supertype:#?}\n{unknown:#?}", texts[0]);
-        if !case.real() || case.shadows() {
+        if !case.real() || case.shadows() || case.nested {
             prop_assert_eq!(&newtype, &unknown, "{}", shown);
         } else if case.rebound.is_none() {
             prop_assert_eq!(&newtype, &supertype, "{}", shown);

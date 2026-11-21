@@ -89,6 +89,8 @@ pub struct Scan<'a> {
     body: &'a [Stmt],
     /// [`crate::compose::constants`] of `body`, once asked.
     constants: OnceCell<HashMap<String, crate::compose::Binding>>,
+    /// [`crate::types::symbols::bound_names`] of `body`, once asked.
+    bound: OnceCell<HashMap<&'a str, usize>>,
 }
 
 impl<'a> Scan<'a> {
@@ -109,6 +111,7 @@ impl<'a> Scan<'a> {
                 strings: Vec::new(),
                 body,
                 constants: OnceCell::new(),
+                bound: OnceCell::new(),
             },
         };
         walker.visit_body(body);
@@ -135,10 +138,37 @@ impl<'a> Scan<'a> {
         crate::compose::value(self.body, self.bindings(), name)
     }
 
-    /// Whether the module binds `name` other than by importing it.
-    fn rebinds(&self, name: &str) -> bool {
-        crate::compose::rebound(self.bindings(), name)
+    /// How often the module binds `name`.
+    fn bound(&self, name: &str) -> usize {
+        let bound = self
+            .bound
+            .get_or_init(|| crate::types::symbols::bound_names(self.body));
+        bound.get(name).copied().unwrap_or(0)
     }
+}
+
+/// How often `source` binds `name` at module level.
+fn bound(source: &Source, name: &str) -> usize {
+    let bound = source.bound.get_or_init(|| {
+        crate::types::symbols::bound_names(source.body())
+            .into_iter()
+            .map(|(name, count)| (name.to_string(), count))
+            .collect()
+    });
+    bound.get(name).copied().unwrap_or(0)
+}
+
+/// The class each module-level name of `source` holds, as [`Context::type_of`] reads it,
+/// walked once per module.
+pub(crate) fn module_kinds(source: &Source) -> &HashMap<String, Option<String>> {
+    source.kinds.get_or_init(|| {
+        Scan::new(source.body())
+            .types
+            .into_iter()
+            .filter(|((scope, _), _)| *scope == 0)
+            .map(|((_, name), kind)| (name.to_string(), kind))
+            .collect()
+    })
 }
 
 /// Remembers the class a name holds; `None` once it is ambiguous, as `_Scan._note` does.
@@ -372,7 +402,7 @@ impl Context<'_, '_, '_> {
             Expr::Name(name) => {
                 let name = name.id.as_str();
                 return self
-                    .class(self.type_of(stack, name))
+                    .class(self.type_of(stack, name), stack)
                     .or_else(|| self.imported_constant(name, name, stack));
             }
             Expr::Attribute(_) => {
@@ -380,7 +410,7 @@ impl Context<'_, '_, '_> {
                 let head = dotted.split('.').next().unwrap_or_default();
                 return self.imported_constant(&dotted, head, stack);
             }
-            Expr::Call(call) => return self.class(dotted(&call.func)),
+            Expr::Call(call) => return self.class(dotted(&call.func), stack),
             expr => literal_type(expr)?,
         };
         Some(name.to_string())
@@ -394,20 +424,19 @@ impl Context<'_, '_, '_> {
             return None;
         }
         let (source, value) = constant(None, dotted)?;
-        if let Expr::Call(call) = value {
-            return self.named(Some(source), &self::dotted(&call.func)?, 0);
+        match value {
+            Expr::Call(call) => self.named(Some(source), &self::dotted(&call.func)?, &[], 0),
+            Expr::Name(name) => {
+                let kind = module_kinds(source).get(name.id.as_str())?.clone()?;
+                self.named(Some(source), &kind, &[], 0)
+            }
+            value => Context {
+                imported: &source.imports,
+                scan: &Scan::new(&[]),
+                constant: None,
+            }
+            .arg_type(value, &[]),
         }
-        let scan = Scan::new(if matches!(value, Expr::Name(_)) {
-            source.body()
-        } else {
-            &[]
-        });
-        Context {
-            imported: &source.imports,
-            scan: &scan,
-            constant: None,
-        }
-        .arg_type(value, &[])
     }
 
     /// Whether `name` is a parameter of, or assigned in, the module or a function of `stack`.
@@ -440,18 +469,39 @@ impl Context<'_, '_, '_> {
         self.scan.attributes.get(&(*class, name)).cloned().flatten()
     }
 
-    /// The class an instance of `name` has; a `NewType` has that of its supertype.
-    fn class(&self, name: Option<String>) -> Option<String> {
-        self.named(None, &name?, 0)
+    /// The class an instance of `name` has in `stack`; a `NewType` has that of its supertype.
+    fn class(&self, name: Option<String>, stack: &[Scope]) -> Option<String> {
+        self.named(None, &name?, stack, 0)
     }
 
-    /// The class of `name` spelled in `from`, this module for `None`.
-    fn named(&self, from: Option<&Source>, name: &str, depth: usize) -> Option<String> {
+    /// The class of `name` spelled in `stack` of `from`, this module for `None`. A name
+    /// leads to a `NewType` only when its module binds it, and the `NewType` it calls, once,
+    /// and no scope of `stack` binds it.
+    fn named(
+        &self,
+        from: Option<&Source>,
+        name: &str,
+        stack: &[Scope],
+        depth: usize,
+    ) -> Option<String> {
         let imported = from.map_or(self.imported, |source| &source.imports);
         if let Some(found) = class_of(Some(name.to_string()), imported) {
             return Some(found);
         }
-        if depth > 8 {
+        let once = |from: Option<&Source>, name: &str| {
+            let count = |name| match from {
+                None => self.scan.bound(name),
+                Some(source) => bound(source, name),
+            };
+            count(name) == 1 && count("*") == 0
+        };
+        let head = name.split('.').next().unwrap_or_default();
+        if depth > 8
+            || !once(from, head)
+            || stack
+                .iter()
+                .any(|&scope| self.scan.types.contains_key(&(scope, head)))
+        {
             return None;
         }
         let local = match from {
@@ -461,23 +511,15 @@ impl Context<'_, '_, '_> {
         let (from, value) = match local {
             Some(value) => (from, value),
             None => {
-                let head = name.split('.').next().unwrap_or_default();
-                let rebound = match from {
-                    None => self.scan.rebinds(head),
-                    Some(source) => crate::compose::rebinds(source, head),
-                };
-                if rebound {
-                    return None;
-                }
-                imported.get(head)?;
                 let (source, value) = (self.constant?)(from, name)?;
                 (Some(source), value)
             }
         };
         let (func, supertype) = newtype(value)?;
         let imported = from.map_or(self.imported, |source| &source.imports);
-        is_newtype(func, imported)
-            .then(|| self.named(from, &class_name(Some(supertype))?, depth + 1))
+        let called = dotted(func)?;
+        (is_newtype(&called, imported) && once(from, called.split('.').next()?))
+            .then(|| self.named(from, &class_name(Some(supertype))?, &[], depth + 1))
             .flatten()
     }
 }
@@ -496,9 +538,9 @@ fn newtype(value: &Expr) -> Option<(&Expr, &Expr)> {
 }
 
 /// Whether `func` names `typing.NewType`.
-fn is_newtype(func: &Expr, imported: &Table) -> bool {
+fn is_newtype(func: &str, imported: &Table) -> bool {
     matches!(
-        qualified(dotted(func), imported).as_deref(),
+        qualified(Some(func.to_string()), imported).as_deref(),
         Some("typing.NewType" | "typing_extensions.NewType")
     )
 }

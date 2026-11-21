@@ -690,6 +690,66 @@ def insert(plain: Plain, twice: Twice, keyword: Keyword, loop: Loop, listed: kin
     fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=over)
 ```
 
+#### Bound again anywhere
+
+A `NewType`, or the `NewType` it is made with, that the module binds again anywhere, in a
+block, a class or a star import, keeps the argument of unknown type, as Python may see the
+other binding.
+
+`decoy.py`:
+
+```python
+from typing import NewType
+
+def NewType(name, tp):
+    return tp | None
+
+Id = NewType("Id", int)
+```
+
+`starred.py`:
+
+```python
+from typing import NewType
+
+from decoy import *
+
+Id = NewType("Id", int)
+```
+
+```python
+import sys
+from typing import NamedTuple, NewType
+
+import decoy
+import starred
+from db import fetch_all
+
+Branch = NewType("Branch", int)
+if sys.platform == "win32":
+    Branch = int | None
+Member = NewType("Member", int)
+
+class Row(NamedTuple):
+    id: int
+    owner_id: int
+
+class Holder:
+    Member = int | None
+
+    def insert(self, member: Member) -> None:
+        # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
+        fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=member)
+
+def insert(branch: Branch, decoyed: decoy.Id, starred: starred.Id) -> None:
+    # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=branch)
+    # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=decoyed)
+    # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=starred)
+```
+
 #### Driver calls and t-strings
 
 The arguments of a driver call and the fields of a t-string are read the same way,

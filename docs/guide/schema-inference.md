@@ -137,11 +137,15 @@ What makes a column nullable or not:
   stays nullable.
 
   A `NewType` is read only when it is
-  - a positional `typing.NewType` or `typing_extensions.NewType` call bound once at module
-    level, not in a function or class, nor a name the module binds again;
+  - a positional `typing.NewType` or `typing_extensions.NewType` call at module level,
+    when the module binds neither the name nor `NewType` again, in a block, a class
+    around the argument or a star import;
   - of a class, not a generic such as `list[int]`;
-  - defined in the module or a checked module, not an installed package or a stub;
+  - defined in the module or a checked module, imported absolutely or relatively, not
+    from an installed package or a stub;
   - in a chain of at most nine `NewType`s.
+
+  A function that rebinds the name through `global` is not seen, as for row types.
 
   Other annotations of unknown type, such as type aliases (`UserId = int`), `TypeVar`s,
   `Any` or classes of unchecked packages, keep the placeholder nullable.

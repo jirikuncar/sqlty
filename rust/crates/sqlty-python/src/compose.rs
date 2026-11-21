@@ -806,11 +806,6 @@ pub fn constant<'a>(source: &'a Source, name: &str) -> Option<&'a Expr> {
     value(source.body(), bindings(source), name)
 }
 
-/// Whether `source` binds `name` at module level other than by importing it.
-pub(crate) fn rebinds(source: &Source, name: &str) -> bool {
-    rebound(bindings(source), name)
-}
-
 fn bindings(source: &Source) -> &HashMap<String, Binding> {
     source.constants.get_or_init(|| constants(source.body()))
 }
@@ -824,11 +819,6 @@ pub(crate) enum Binding {
     Import,
     /// Otherwise, or more than once.
     Other,
-}
-
-/// Whether `table`, the [`constants`] of a module, binds `name` other than by importing it.
-pub(crate) fn rebound(table: &HashMap<String, Binding>, name: &str) -> bool {
-    matches!(table.get(name), Some(Binding::Value(_) | Binding::Other))
 }
 
 /// The value `table`, the [`constants`] of `body`, gives `name`.
