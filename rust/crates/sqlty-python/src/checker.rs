@@ -114,26 +114,40 @@ pub fn check_source(
     rules: &RuleConfig,
     any_calls: &[usize],
 ) -> Vec<Diagnostic> {
-    check_source_with(source, options, rules, any_calls, &Analyses::new(options))
+    let scan = Scan::new(source, &options.style.wrapper_name);
+    check_source_with(&scan, options, rules, any_calls, &Analyses::new(options))
 }
 
-/// [`check_source`], reading each query's analysis from `analyses`.
-pub(crate) fn check_source_with(
+/// [`check_source`] with [`add_fix_imports`], scanning `source` once.
+pub fn check_source_with_imports(
     source: &str,
+    options: &Options,
+    rules: &RuleConfig,
+    any_calls: &[usize],
+) -> Vec<Diagnostic> {
+    let scan = Scan::new(source, &options.style.wrapper_name);
+    let mut diagnostics =
+        check_source_with(&scan, options, rules, any_calls, &Analyses::new(options));
+    add_fix_imports(&scan, source, options, &mut diagnostics);
+    diagnostics
+}
+
+/// [`check_source`] of a scanned source, reading each query's analysis from `analyses`.
+pub(crate) fn check_source_with(
+    scan: &Scan<'_>,
     options: &Options,
     rules: &RuleConfig,
     any_calls: &[usize],
     analyses: &Analyses<'_>,
 ) -> Vec<Diagnostic> {
-    let scan = Scan::new(source, &options.style.wrapper_name);
     let mut checker = Checker {
-        scan: &scan,
+        scan,
         options,
         rules,
         any_calls: sorted(any_calls),
         diagnostics: Vec::new(),
-        spelling: Spelling::of(&scan),
-        imported: imported_names(&scan),
+        spelling: Spelling::of(scan),
+        imported: imported_names(scan),
         analyses,
     };
     if options.dialect == Dialect::MySql {
@@ -150,11 +164,15 @@ pub(crate) fn check_source_with(
 /// Adds to each fix the imports its new names need (the wrapper, `UNTYPED`, `datetime`, ...),
 /// which [`fix_source`](crate::fixer::fix_source) adds once for all fixes: one fix applied
 /// alone, as an editor's quick fix does, then leaves code that runs.
-pub fn add_fix_imports(source: &str, options: &Options, diagnostics: &mut [Diagnostic]) {
+pub(crate) fn add_fix_imports(
+    scan: &Scan<'_>,
+    source: &str,
+    options: &Options,
+    diagnostics: &mut [Diagnostic],
+) {
     if diagnostics.iter().all(|diag| diag.fix.is_empty()) {
         return;
     }
-    let scan = Scan::new(source, &options.style.wrapper_name);
     let modules = type_modules(options);
     let mut by_head: HashMap<String, Option<Edit>> = HashMap::new();
     for diag in diagnostics {
@@ -175,7 +193,7 @@ pub fn add_fix_imports(source: &str, options: &Options, diagnostics: &mut [Diagn
         let mut imports: Vec<Edit> = Vec::new();
         for head in heads {
             let edit = by_head.entry(head).or_insert_with_key(|head| {
-                let lines = wrapper_imports(&scan, &[head], &options.style, &modules);
+                let lines = wrapper_imports(scan, &[head], &options.style, &modules);
                 (!lines.is_empty()).then(|| import_edit(source, &lines))
             });
             if let Some(edit) = edit.as_ref().filter(|edit| !imports.contains(edit)) {
@@ -840,17 +858,23 @@ fn holds_start(starts: &[usize], span: &Range<usize>) -> bool {
 pub type WrappedQuery = (usize, String, Option<String>, (usize, usize));
 
 /// `(line, annotation, query, annotation_span)` for each `{wrapper}[T](...)` call; `query`
-/// is the string without its marker, `None` unless the call holds a marked string literal,
-/// and `annotation_span` holds the byte offsets of `T`.
-pub fn wrapped_queries(source: &str, style: &ImportStyle) -> Vec<WrappedQuery> {
-    let scan = Scan::new(source, &style.wrapper_name);
+/// is the [`marked_query`] the module's other checks analyze when a line break follows the
+/// marker, else the query after it; `None` unless the call holds
+/// a marked string literal, and `annotation_span` holds the byte offsets of `T`.
+pub(crate) fn wrapped_queries(scan: &Scan<'_>) -> Vec<WrappedQuery> {
+    let source = scan.source();
     scan.calls
         .iter()
         .map(|call| {
             let query = call.content(source).and_then(|content| {
                 let decoded = decode_escapes(&content);
                 let rest = after_marker(&decoded)?;
-                Some(strip_line_break(rest).unwrap_or(rest).trim().to_string())
+                // The text the module's other checks analyze, so the analysis is shared;
+                // a marker its query follows on the same line is read without it.
+                Some(match strip_line_break(rest) {
+                    Some(_) => format!("--sql{rest}"),
+                    None => rest.trim().to_string(),
+                })
             });
             (
                 scan.lines.line_at(call.span.start),
@@ -1381,6 +1405,33 @@ mod tests {
     }
 
     #[test]
+    fn test_stale_rewrite_fix_imports_the_wrapper() {
+        let options = Options {
+            dialect: "postgres".parse().unwrap(),
+            schema: None,
+            style: ImportStyle::or_default(None),
+            untyped: false,
+        };
+        let diags = check_source_with_imports(
+            r#"q = "--sql\nSELECT 1::INTEGER""#,
+            &options,
+            &RuleConfig::default(),
+            &[],
+        );
+        let [diag] = diags.as_slice() else {
+            panic!("{diags:?}")
+        };
+        assert_eq!(diag.rule, Rule::StaleRewrite);
+        assert!(
+            diag.fix
+                .iter()
+                .any(|edit| edit.replacement.contains("from sqlty import SQL")),
+            "{:?}",
+            diag.fix
+        );
+    }
+
+    #[test]
     fn test_stale_rewrite_agrees_with_rewrite() {
         for (source, line) in [
             ("q = \"\"\"\n--sql\nSELECT 1::INTEGER AS n\"\"\"", 1),
@@ -1856,15 +1907,15 @@ r = SQL[T](
 s = SQL[T]("plain")
 "#;
         let queries: Vec<(usize, Option<String>)> =
-            wrapped_queries(source, &ImportStyle::default())
+            wrapped_queries(&Scan::new(source, &ImportStyle::default().wrapper_name))
                 .into_iter()
                 .map(|(line, _, query, _)| (line, query))
                 .collect();
         assert_eq!(
             queries,
             vec![
-                (1, Some("SELECT 1".to_string())),
-                (3, Some("SELECT 2".to_string())),
+                (1, Some("--sql\nSELECT 1".to_string())),
+                (3, Some("--sql\nSELECT 2".to_string())),
                 (6, None),
             ]
         );

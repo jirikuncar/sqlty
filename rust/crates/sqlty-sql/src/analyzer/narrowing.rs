@@ -525,7 +525,7 @@ impl<'a> Analyzer<'a> {
     ) -> Vec<ColumnValues> {
         let known = self
             .resolve_column(column, scope)
-            .and_then(|(typed, _)| typed.values);
+            .and_then(|typed| typed.values);
         let (Some((reference, name, excluded)), Some(known)) =
             (self.column_values(column, constants, scope), known)
         else {
@@ -554,7 +554,7 @@ impl<'a> Analyzer<'a> {
             .map(|expr| crate::values::constant(expr))
             .collect::<Option<Vec<_>>>()?;
         let (reference, _, name) = self.locate_column(column, scope)?;
-        let typed = self.resolve_column(column, scope)?.0;
+        let typed = self.resolve_column(column, scope)?;
         if typed
             .sql()
             .is_some_and(|sql| sql.eq_ignore_ascii_case("CITEXT"))

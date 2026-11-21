@@ -42,6 +42,9 @@ uv run pytest tests/<file>.py -k <name>                   # one test
 uv run sqlty check <dir>                                  # end to end
 ```
 
+For a change on a check path, run `make bench-ci` (the SQL and Python inference
+budgets) and time the input it touches at 1x, 2x, ... 32x: the time may at most double
+per step (AGENTS.md "Check budget").
 Put scratch inputs in a temp dir, never in the repo. Run only affected tests; the
 author runs the full suite and coverage. Check the claims in commit messages and
 the PR body (numbers, "identical output", "no behavior change") against what you

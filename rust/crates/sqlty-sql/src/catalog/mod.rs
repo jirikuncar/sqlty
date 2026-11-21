@@ -35,6 +35,7 @@ mod columns;
 mod index;
 mod joins;
 mod loader;
+mod lookup;
 mod names;
 mod read;
 mod resolve;
@@ -43,6 +44,7 @@ mod resolve;
 pub(crate) use index::visited;
 pub use index::{Columns, NameRef, RelationKind, RelationRef};
 pub use joins::Join;
+pub(crate) use lookup::Lookup;
 pub(crate) use names::fold;
 pub(crate) use read::{load, load_with};
 
@@ -329,33 +331,6 @@ impl Catalog {
             .and_then(|key| self.relations.get(key))
     }
 
-    /// Columns of the table `name`, or `None` for a view, an unknown name or a table of
-    /// unknown shape.
-    pub(crate) fn table(&self, name: &str) -> Option<&[SchemaColumn]> {
-        match self.find(name)? {
-            Relation::Table(table) => Some(&table.columns),
-            _ => None,
-        }
-    }
-
-    /// The column `column` of the table `name`: `None` when `table` would be, `Some(None)`
-    /// when the table has no such column.
-    pub(crate) fn column(&self, name: &str, column: &str) -> Option<Option<&SchemaColumn>> {
-        match self.find(name)? {
-            Relation::Table(table) => Some(table.column(column)),
-            _ => None,
-        }
-    }
-
-    /// Groups of columns of the table `name` that a `CHECK` keeps at least one of
-    /// non-null, such as `CHECK (num_nonnulls(a, b) = 1)`.
-    pub(crate) fn nonnull_groups(&self, name: &str) -> &[Vec<String>] {
-        match self.find(name) {
-            Some(Relation::Table(table)) => &table.nonnull_groups,
-            _ => &[],
-        }
-    }
-
     /// The statements a `BEFORE ... FOR EACH ROW` trigger of the table `name` fires for:
     /// such a trigger may change any column of the row a `RETURNING` clause returns.
     pub(crate) fn row_triggers(&self, name: &str) -> RowEvents {
@@ -461,11 +436,6 @@ impl Catalog {
         None
     }
 
-    /// Whether the schema defines a table or view `name`, whatever is known of its shape.
-    pub(crate) fn defines(&self, name: &str) -> bool {
-        self.find(name).is_some()
-    }
-
     /// Whether `name` is a PostgreSQL system relation (`pg_catalog.x`,
     /// `information_schema.x`, a bare `pg_*`) that the catalog does not model, so its
     /// columns are unknown. A relation the schema or the built-ins define is never one.
@@ -476,14 +446,6 @@ impl Catalog {
                 Some((schema, _)) => BUILTIN_SCHEMAS.contains(&schema),
                 None => name.starts_with("pg_"),
             }
-    }
-
-    /// Output columns of the view `name`.
-    pub(crate) fn view(&self, name: &str) -> Option<&[Column]> {
-        match self.find(name)? {
-            Relation::View(columns) => Some(columns),
-            _ => None,
-        }
     }
 
     /// The domain or enum `name`; for a domain, its base type.
@@ -605,6 +567,28 @@ pub(crate) fn empty(dialect: SqlDialect) -> &'static Catalog {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    impl Catalog {
+        fn table(&self, name: &str) -> Option<&[SchemaColumn]> {
+            Lookup::new(self).table(name)
+        }
+
+        fn column(&self, name: &str, column: &str) -> Option<Option<&SchemaColumn>> {
+            Lookup::new(self).column(name, column)
+        }
+
+        fn view(&self, name: &str) -> Option<&[Column]> {
+            Lookup::new(self).view(name)
+        }
+
+        fn defines(&self, name: &str) -> bool {
+            Lookup::new(self).defines(name)
+        }
+
+        fn nonnull_groups(&self, name: &str) -> &[Vec<String>] {
+            Lookup::new(self).nonnull_groups(name)
+        }
+    }
     use crate::analyzer::canonical_type;
     use sqlparser::ast::Statement;
     use sqlparser::parser::Parser;

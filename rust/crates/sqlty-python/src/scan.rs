@@ -8,7 +8,7 @@ use std::borrow::Cow;
 use std::cell::OnceCell;
 use std::ops::Range;
 
-use crate::rewriter::{after_marker, decode_escapes, sql_names, LineIndex};
+use crate::rewriter::{after_marker, decode_escapes, imports_of, sql_names, Import, LineIndex};
 use crate::rules::Rule;
 use crate::template::template_content;
 use crate::tokens::{content, string_groups, tokenize, wrapper_calls, Call, Calls, Kind, Token};
@@ -38,6 +38,7 @@ pub(crate) struct Scan<'s> {
     /// The names sqlty's `SQL` is bound to (see [`sql_names`]).
     pub sql_names: Vec<String>,
     groups: OnceCell<Vec<Group>>,
+    imports: OnceCell<Vec<Import>>,
 }
 
 impl<'s> Scan<'s> {
@@ -45,7 +46,12 @@ impl<'s> Scan<'s> {
     pub(crate) fn new(source: impl Into<Cow<'s, str>>, wrapper: &str) -> Self {
         let text = source.into();
         let tokens = tokenize(&text);
-        let sql_names = sql_names(&text, &tokens);
+        let imports = OnceCell::new();
+        let sql_names = if text.contains("sqlty") {
+            sql_names(imports.get_or_init(|| imports_of(&text, &tokens)))
+        } else {
+            Vec::new()
+        };
         let calls = wrapper_calls(&text, &tokens, wrapper, &sql_names);
         let lines = LineIndex::new(&text);
         Self {
@@ -55,7 +61,14 @@ impl<'s> Scan<'s> {
             lines,
             sql_names,
             groups: OnceCell::new(),
+            imports,
         }
+    }
+
+    /// The top-level imports; found on first use.
+    pub(crate) fn imports(&self) -> &[Import] {
+        self.imports
+            .get_or_init(|| imports_of(&self.text, &self.tokens))
     }
 
     pub(crate) fn source(&self) -> &str {

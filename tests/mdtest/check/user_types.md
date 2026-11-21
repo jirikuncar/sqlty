@@ -328,3 +328,25 @@ first = SQL[First]("--sql\nSELECT id, p FROM shapes")
 # error: [unknown-type] "column `shapes.p` has type `POINT2`, which has no Python type"
 wrapped = SQL[Wrapped]("--sql\nSELECT id, p FROM shapes")
 ```
+
+## Row type of a query on the marker's line
+
+A row type is checked against the query that follows the marker on its line too.
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+```
+
+```python
+from typing import NamedTuple
+from sqlty import SQL
+
+class Row(NamedTuple):
+    id: str
+
+# error: [column-type-mismatch] "Row.id is str but query column 'id' infers int"
+tab = SQL[Row]("--sql\tSELECT 1::INTEGER AS id")
+# error: [column-type-mismatch] "Row.id is str but query column 'id' infers int"
+glued = SQL[Row]("--sqlSELECT 1::INTEGER AS id")
+```
