@@ -101,7 +101,7 @@ Yes, for the raw SQL you run through them, such as SQLAlchemy's `text()` with
 `:name` placeholders. sqlty types the value the driver returns, and some ORMs
 convert it first, for example SQLite dates to `datetime.date`.
 [Drivers and ORMs](guide/drivers-and-orms.md) lists those conversions and what
-to annotate.
+to annotate, and [Execute raw SQL](guide/execute-raw-sql.md) shows each driver.
 
 ## Can I keep queries in `.sql` files?
 
