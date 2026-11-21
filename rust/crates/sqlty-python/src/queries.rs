@@ -26,7 +26,9 @@ use sqlty_sql::analyzer::{database_name, parse, route_named, statement_ranges, u
 
 use crate::checker::{star_finding, unparsed_message, Diagnostic};
 use crate::options::Options;
+use crate::rewriter::LineIndex;
 use crate::rules::{Rule, RuleConfig, SQL_RULES};
+use crate::suppress::{apply_sql, sql_ignores};
 
 /// How a `.sql` file names its queries (`query-format`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -249,7 +251,7 @@ fn is_sqlc(rest: &str) -> bool {
 
 /// Check each statement of each named query of `source`: `unparsed-query`, `select-star` and
 /// the name rules, at the name when the analyzer knows where it is written, else at the
-/// statement.
+/// statement; without what its `-- sqlty: ignore` comments drop, with their `unused-ignore`.
 pub fn check_queries(
     source: &str,
     format: Format,
@@ -263,13 +265,14 @@ pub fn check_queries(
         None => (options.dialect.name(), None),
     };
     let mut found = Vec::new();
+    let lines = LineIndex::new(source);
     let mut report = |rule: Rule, message: String, span: Range<usize>| {
         if rules.is_enabled(rule) {
             found.push(Diagnostic {
                 rule,
                 message,
                 severity: rules.severity(rule),
-                line: source[..span.start].matches('\n').count() + 1,
+                line: lines.line_at(span.start),
                 span,
                 fix: Vec::new(),
             });
@@ -287,10 +290,12 @@ pub fn check_queries(
         );
     }
     let names = rules.enabled().intersects(SQL_RULES);
+    let mut statements = Vec::new();
     for query in split(source, format, stem) {
         let body = query.sql.as_str();
         for statement in statement_ranges(body, dialect) {
             let at = query.body.start + statement.start..query.body.start + statement.end;
+            statements.push(at.clone());
             let parsed = parse(&body[statement.clone()], dialect);
             if let Some(error) = parsed.error() {
                 report(Rule::UnparsedQuery, unparsed_message(&error), at);
@@ -343,7 +348,7 @@ pub fn check_queries(
         }
     }
     found.sort_by_key(|diagnostic| diagnostic.span.start);
-    found
+    apply_sql(&sql_ignores(source, &statements), found, rules)
 }
 
 #[cfg(test)]

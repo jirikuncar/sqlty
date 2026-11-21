@@ -10,4 +10,5 @@ mod foreign_keys;
 mod newtypes;
 mod params;
 mod python;
+mod suppress;
 mod variants;

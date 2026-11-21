@@ -31,6 +31,34 @@ CREATE INDEX users_email ON users (email);
 create table users (id bigint primary key, email text, team_id bigint);
 ```
 
+## An ignore comment on the line above
+
+```sql migration
+SET lock_timeout = '1s';
+-- sqlty: ignore[missing-concurrently]
+-- error:
+CREATE INDEX users_email ON users (email);
+```
+
+A blank line between the comment and the statement ends it.
+
+```sql migration
+SET lock_timeout = '1s';
+-- sqlty: ignore[missing-concurrently]
+/* built before the backfill */
+-- error:
+CREATE INDEX users_email
+    ON users (email);
+```
+
+```sql migration
+SET lock_timeout = '1s';
+-- sqlty: ignore[missing-concurrently]
+
+-- error: [missing-concurrently]
+CREATE INDEX users_email ON users (email);
+```
+
 ## A lock timeout set for one transaction
 
 ```sql migration
