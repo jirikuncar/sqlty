@@ -304,7 +304,10 @@ impl<'s> Analyzer<'s> {
             return None;
         }
         let column = |located: Located| {
-            let (table, keys) = self.schema.declared_foreign_keys(&located.table)?;
+            let (table, keys) = self
+                .schema
+                .catalog()
+                .declared_foreign_keys(&located.table)?;
             Some(Column {
                 row: located.row,
                 reference: located.reference,
