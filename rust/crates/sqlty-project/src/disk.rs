@@ -167,6 +167,16 @@ mod tests {
         assert!(piped.is_none_or(|read| read.is_none()), "a pipe is no file");
     }
 
+    #[test]
+    fn only_a_file_has_a_size() {
+        let root = std::env::temp_dir().join(format!("sqlty-disk-size-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("dir")).unwrap();
+        std::fs::write(root.join("a.py"), "x = 1\n").unwrap();
+        let sizes = ["a.py", "dir", "missing.py"].map(|name| Disk.size(&root.join(name)));
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(sizes, [Some(6), None, None]);
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn a_file_whose_read_fails_is_missing() {

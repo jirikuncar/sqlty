@@ -2377,6 +2377,35 @@ mod tests {
     }
 
     #[test]
+    fn each_project_reads_the_libraries_under_its_own_roots() {
+        let config = "[tool.sqlty]\nschema = \"schema.sql\"\nexclude = [\"linked\"]\n[[tool.sqlty.functions]]\nimport-path = \"extra.fetch\"\nquery-param = \"sql\"\n";
+        let call = "import extra\nextra.fetch(\"SELECT nope FROM users\")\n";
+        let schema = "CREATE TABLE users (id INT NOT NULL);";
+        let tree: Tree = Tree(
+            [
+                ("/repo/pyproject.toml", config),
+                ("/repo/schema.sql", schema),
+                ("/repo/sub/pyproject.toml", config),
+                ("/repo/sub/schema.sql", schema),
+                ("/repo/linked/extra.py", "def fetch(sql): ...\n"),
+            ]
+            .into_iter()
+            .map(|(path, text)| (PathBuf::from(path), text.as_bytes()))
+            .collect(),
+        );
+        let shared: Arc<dyn Files + Send + Sync> =
+            Arc::new(Counted(Mutex::new(tree), Arc::default()));
+        let roots = vec![PathBuf::from("/repo/linked")];
+        let mut workspace =
+            Workspace::root(Path::new("/repo"), shared, (3, 14), roots).expect("opens");
+        // The files of another project are checked in between: what the first read is kept.
+        for app in [APP, "/repo/sub/app.py", APP] {
+            let found = workspace.check(Path::new(app), call).unwrap();
+            assert_eq!(rules(&found), ["unknown-column"], "{app}");
+        }
+    }
+
+    #[test]
     fn warns_when_a_stub_path_holds_more_stubs_than_are_listed() {
         let names: Vec<(String, &'static str)> = (0..=MAX_STUBS)
             .map(|at| (format!("/repo/typings/m{at:05}.pyi"), ""))
