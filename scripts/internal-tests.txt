@@ -3,7 +3,7 @@
 # Lower a count whenever a test moves to the public API, until the line can go.
 sqlty-bench 0
 sqlty-cli 4
-sqlty-ext 10
+sqlty-ext 6
 sqlty-format 0
 sqlty-lsp 0
 sqlty-project 0
