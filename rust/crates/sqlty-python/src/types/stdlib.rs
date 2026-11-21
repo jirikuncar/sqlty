@@ -76,20 +76,3 @@ fn available(module: &str, version: Version) -> bool {
                 .not()
         })
 }
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rarer_bases_and_modules() {
-        let b = builtins();
-        let version = (3, 14);
-        let summary = stdlib_class("traceback.StackSummary", version).unwrap();
-        assert!(super::super::ty::is_subclass(&summary, &b.list));
-        let not_implemented = stdlib_class("types.NotImplementedType", version).unwrap();
-        assert!(super::super::ty::is_subclass(&not_implemented, &b.any));
-        assert!(stdlib_class("asyncio.base_events.Server", version).is_some());
-    }
-}

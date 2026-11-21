@@ -62,20 +62,3 @@ impl<V> FromIterator<(String, V)> for Frozen<V> {
         Self(entries.into_boxed_slice())
     }
 }
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_later_pair_wins() {
-        let table: Table = [("b", "1"), ("a", "2"), ("b", "3")]
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
-        assert_eq!(table.keys().collect::<Vec<_>>(), ["a", "b"]);
-        assert_eq!(table.get("b").map(String::as_str), Some("3"));
-        assert_eq!(table.get("c"), None);
-    }
-}

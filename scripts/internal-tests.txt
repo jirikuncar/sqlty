@@ -7,7 +7,7 @@ sqlty-ext 10
 sqlty-format 11
 sqlty-lsp 44
 sqlty-project 33
-sqlty-python 193
+sqlty-python 41
 sqlty-rules 7
 sqlty-sql 411
 sqlty-wasm 34

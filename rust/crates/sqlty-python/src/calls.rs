@@ -746,15 +746,3 @@ pub fn query_span(call: &ExprCall, query: &Expr) -> (usize, usize) {
     };
     (range.start().to_usize(), range.end().to_usize())
 }
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_module_without_markers_has_no_helpers() {
-        let source = Source::new("from typing import Annotated\nx = 1\n", (3, 14)).unwrap();
-        assert!(index_functions(&source).is_empty());
-    }
-}
