@@ -148,9 +148,10 @@ GET_USER = SQL[User]("--sql\\nSELECT id, name, email FROM users WHERE id = %s")
 **Setup:** `pip install sqlty` or `uv add sqlty`, then set `schema = "schema.sql"` \
 and `dialect = "postgres"` under `[tool.sqlty]` in `pyproject.toml`. PostgreSQL, \
 SQLite and MySQL are fully supported. DuckDB and other sqlparser-rs dialects work \
-on a best-effort basis. Coding agents can install the sqlty skills with \
-`/plugin marketplace add jirikuncar/sqlty` in Claude Code, or with the Codex \
-and Cursor plugin manifests.
+on a best-effort basis. In Claude Code, install the sqlty skills with \
+`/plugin marketplace add jirikuncar/sqlty`, then `/plugin install sqlty@sqlty`; \
+the Codex, Cursor and Copilot steps are in \
+[Coding agents](https://sqlty.kuncar.dev/recipes/agents/).
 """
 
 [project.plugins.llmstxt.sections]
