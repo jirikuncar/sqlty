@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from sqlty._config import ConfigError, validate_tool_table
+from sqlty import _core
 from sqlty.core import check_source
 from tests.type_oracle import (
     TypeInfo,
@@ -812,9 +812,9 @@ def test_application_imports_are_not_executed(marker_module) -> None:
 def test_type_modules_allow_imports() -> None:
     """``type-modules`` is gone: ``check`` imports no module, so the key is rejected."""
     with pytest.raises(
-        ConfigError, match="'type-modules' in \\[tool.sqlty\\]: removed, since `check`"
+        ValueError, match="'type-modules' in \\[tool.sqlty\\]: removed, since `check`"
     ):
-        validate_tool_table({"type-modules": ["app"]}, "pyproject.toml")
+        _core.validate_config({"type-modules": ["app"]}, "pyproject.toml")
 
 
 def test_checked_code_warnings_are_not_printed() -> None:

@@ -11,7 +11,7 @@ from functools import cached_property
 
 import sqlty.core as core
 from sqlty import _core
-from sqlty._config import MAX_QUERY_VARIANTS, driver_types, requires_closed
+from sqlty._lint import Diagnostic
 from sqlty._source import ParsedSource
 from tests._json_shapes import json_shapes
 
@@ -22,6 +22,14 @@ _CODING = re.compile(r"\A#.*coding[:=].*\n?")
 # `# completions:` lists the first ones, then `...`: the system catalogs make lists long.
 _COMPLETIONS_SHOWN = 10
 _ERROR_VALUE = re.compile(r'^(?:\[(?P<rule>[\w-]+)\])?\s*(?:"(?P<message>.*)")?$')
+_LOWER_BOUND = re.compile(r"(?:>=|~=|==)\s*(\d+)\.(\d+)")
+# Default of `max-query-variants`.
+_MAX_QUERY_VARIANTS = 64
+
+
+def _requires_closed(requires_python: str | None) -> bool:
+    """Whether ``requires-python`` rules out every Python before 3.15 (PEP 728 ``closed=True``)."""
+    return any((int(a), int(b)) >= (3, 15) for a, b in _LOWER_BOUND.findall(requires_python or ""))
 
 
 class MDTestFailure(Exception):
@@ -35,7 +43,9 @@ class Run:
         settings = section.settings
         self.dialect: str = settings.get("dialect", "postgres")
         self.schema_sql: str | core.Schema | None = section.schema_sql
-        types = driver_types(settings.get("driver"), self.dialect, settings.get("types"))
+        types = settings.get("types")
+        if settings.get("driver") and self.dialect == "postgres":
+            types = dict(_core.driver_types(settings["driver"], self.dialect)) | (types or {})
         if types:
             self.schema_sql = core.load_schema(
                 self.schema_sql or "", dialect=self.dialect, types=types
@@ -57,14 +67,14 @@ class Run:
         self.untyped: bool = settings.get("untyped") == "sentinel"
         self.json_types: str = settings.get("json-types", "typing.Any")
         self.param_types: bool = settings.get("param-types", True)
-        self.closed_params = requires_closed(
+        self.closed_params = _requires_closed(
             section.config.get("project", {}).get("requires-python")
         )
         self.rules: dict[str, str] | None = settings.get("rules")
         # Preview is on unless a section turns it off: the suite asserts it changes nothing else.
         self.preview: bool = settings.get("preview", True)
         self.query_variants: int | None = (
-            settings.get("max-query-variants", MAX_QUERY_VARIANTS) if self.preview else None
+            settings.get("max-query-variants", _MAX_QUERY_VARIANTS) if self.preview else None
         )
         self.coerce_row_types: list[str] = settings.get("coerce-row-types", [])
         # With an `against.sql` file, `# error:` asserts what `sqlty breaking` reports.
@@ -283,6 +293,18 @@ class Run:
             )
         return index
 
+    def _check_query_file(
+        self, text: str, schema_sql: str | core.Schema | None
+    ) -> list[Diagnostic]:
+        return _core.check_queries(
+            text,
+            dialect=self.dialect,
+            schema_sql=schema_sql,
+            rules=self.rules,
+            query_format=self.section.settings.get("query-format", "auto"),
+            name="queries",
+        )
+
     def _check(self, assertions: list[Assertion], unit: Unit) -> list[str]:
         code = unit.code
         if unit.migration:
@@ -290,28 +312,15 @@ class Run:
                 self.section.files.get("against.sql", ""), [code.text], rules=self.rules
             )
         elif unit.lang == "sql":
-            from sqlty._queries import breaking_query_file, check_query_file
-
-            query_format = self.section.settings.get("query-format", "auto")
+            found = self._check_query_file(code.text, self.schema_sql)
             if self.against_sql is not None:
-                found = breaking_query_file(
-                    code.text,
-                    name="queries",
-                    query_format=query_format,
-                    dialect=self.dialect,
-                    schema_sql=self.schema_sql,
-                    against_sql=self.against_sql,
-                    rules=self.rules,
-                )
-            else:
-                found = check_query_file(
-                    code.text,
-                    name="queries",
-                    query_format=query_format,
-                    dialect=self.dialect,
-                    schema_sql=self.schema_sql,
-                    rules=self.rules,
-                )
+                own = {(d["line"], d["rule"], d["message"]) for d in found}
+                found = [
+                    d
+                    for d in self._check_query_file(code.text, self.against_sql)
+                    if (d["line"], d["rule"], d["message"]) not in own
+                    and d["rule"] != "unused-ignore"
+                ]
         elif self.against_sql is not None:
             found = core.breaking_source(code.text, self._settings, against_sql=self.against_sql)
         else:
