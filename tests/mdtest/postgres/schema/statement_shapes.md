@@ -158,3 +158,35 @@ SELECT * FROM mv
 SELECT * FROM view
 -- columns: a: int | None (INT)
 ```
+
+## Column constraints the loader drops when the table does not parse
+
+A table constraint sqlparser cannot read makes the loader drop every constraint and column
+`CHECK` and `REFERENCES` clause (whatever follows it: schema-qualified targets, `MATCH`,
+`ON DELETE` and `ON UPDATE` actions, `DEFERRABLE`, `INITIALLY`) before reading the columns.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE s1 (
+    a INT CONSTRAINT c REFERENCES public.u (id) MATCH FULL ON DELETE SET NULL ON UPDATE NO ACTION DEFERRABLE INITIALLY DEFERRED DEFAULT 1,
+    b INT REFERENCES u NOT DEFERRABLE NOT NULL,
+    c INT CHECK (c > 0) NOT NULL,
+    d INT CONSTRAINT k CHECK (d > 0),
+    e INT REFERENCES app.u ON DELETE CASCADE ON UPDATE SET DEFAULT,
+    f INT REFERENCES u (id) ON DELETE SET NULL (f),
+    g INT CONSTRAINT r REFERENCES u,
+    CONSTRAINT bad NONSENSE GARBAGE (a)
+);
+```
+
+```sql
+SELECT * FROM s1
+-- columns: a: int | None (INT)
+-- columns: b: int (INT)
+-- columns: c: int (INT)
+-- columns: d: int | None (INT)
+-- columns: e: int | None (INT)
+-- columns: f: int | None (INT)
+-- columns: g: int | None (INT)
+```
