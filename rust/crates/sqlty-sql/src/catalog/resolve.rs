@@ -37,6 +37,7 @@ thread_local! {
 impl Loader {
     /// The catalog as it stands now.
     pub(super) fn snapshot(&mut self) -> &Catalog {
+        self.resolve_stale_relations();
         if !self.stale_functions.is_empty() {
             self.rebuild_functions();
         }
@@ -151,6 +152,41 @@ impl Loader {
     pub(super) fn refresh_function(&mut self, key: String) {
         if self.cache.is_some() {
             self.stale_functions.insert(key);
+        }
+    }
+
+    /// Resolve the stale relations of the cached catalog again, or drop them from it.
+    fn resolve_stale_relations(&mut self) {
+        let stale = std::mem::take(&mut self.stale_relations);
+        if let Some(cache) = self.cache.as_mut() {
+            let resolver = cache.resolver(self.dialect);
+            let resolved: Vec<_> = stale
+                .into_iter()
+                .map(|key| {
+                    let relation = self
+                        .relations
+                        .get(&key)
+                        .map(|rel| resolver.relation(&key, rel));
+                    (key, relation)
+                })
+                .collect();
+            for (key, relation) in resolved {
+                let user = !BUILTIN_SCHEMAS
+                    .iter()
+                    .any(|schema| key.starts_with(&format!("{schema}.")));
+                match relation {
+                    Some(relation) => {
+                        if cache.relations.insert(Arc::from(key), relation).is_none() && user {
+                            cache.user_relations += 1;
+                        }
+                    }
+                    None => {
+                        if cache.relations.remove(key.as_str()).is_some() && user {
+                            cache.user_relations -= 1;
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -389,78 +425,86 @@ impl<'a> Resolver<'a> {
     pub(super) fn relation(&self, key: &str, rel: &Rel) -> Relation {
         match rel {
             Rel::Table(table) if table.unknown => Relation::Unknown,
-            Rel::Table(table) => Relation::Table(TableRelation {
-                columns: table
-                    .columns
-                    .iter()
-                    .map(|c| {
-                        let mut column = SchemaColumn {
-                            primary_key: c.primary_key,
-                            foreign_key: table
-                                .foreign_keys
+            Rel::Table(table) => Relation::Table(
+                TableRelation {
+                    columns: table
+                        .columns
+                        .iter()
+                        .map(|c| {
+                            let mut column = SchemaColumn {
+                                primary_key: c.primary_key,
+                                foreign_key: table
+                                    .foreign_keys
+                                    .iter()
+                                    .any(|fk| fk.key.columns.contains(&c.name)),
+                                invisible: c.invisible,
+                                default: c.default.clone(),
+                                generated: c
+                                    .generated
+                                    .clone()
+                                    .filter(|expr| !reads_generated(expr, &table.columns)),
+                                ..self.column(
+                                    &c.name,
+                                    &c.ident,
+                                    &c.ty,
+                                    c.not_null,
+                                    c.has_default,
+                                    c.checks(),
+                                )
+                            };
+                            if let Some(python) = self.overrides.for_column(key, &c.name) {
+                                column.python_type = Some(python.to_string());
+                                column.values = None;
+                                column.allowed_values = None;
+                            }
+                            column
+                        })
+                        .collect(),
+                    // A group naming a dropped or renamed column no longer holds.
+                    nonnull_groups: table
+                        .nonnull_groups
+                        .iter()
+                        .filter(|group| {
+                            group
                                 .iter()
-                                .any(|fk| fk.key.columns.contains(&c.name)),
-                            invisible: c.invisible,
-                            default: c.default.clone(),
-                            generated: c
-                                .generated
-                                .clone()
-                                .filter(|expr| !reads_generated(expr, &table.columns)),
-                            ..self.column(
-                                &c.name,
-                                &c.ident,
-                                &c.ty,
-                                c.not_null,
-                                c.has_default,
-                                c.checks(),
-                            )
-                        };
-                        if let Some(python) = self.overrides.for_column(key, &c.name) {
-                            column.python_type = Some(python.to_string());
-                            column.values = None;
-                            column.allowed_values = None;
-                        }
-                        column
-                    })
-                    .collect(),
-                // A group naming a dropped or renamed column no longer holds.
-                nonnull_groups: table
-                    .nonnull_groups
-                    .iter()
-                    .filter(|group| {
-                        group
-                            .iter()
-                            .all(|name| table.columns.iter().any(|c| c.name == *name))
-                    })
-                    .cloned()
-                    .collect(),
-                row_triggers: table.row_triggers.iter().fold(
-                    RowEvents::default(),
-                    |all, (_, events)| RowEvents {
-                        insert: all.insert || events.insert,
-                        update: all.update || events.update,
-                    },
-                ),
-                foreign_keys: table
-                    .foreign_keys
-                    .iter()
-                    .filter(|fk| fk.immediate && fk.validated)
-                    .map(|fk| fk.key.clone())
-                    .collect(),
-                declared_foreign_keys: table.foreign_keys.iter().map(|fk| fk.key.clone()).collect(),
-                // A key naming a dropped or renamed column no longer holds.
-                unique: table
-                    .unique
-                    .iter()
-                    .filter(|key| {
-                        key.columns
-                            .iter()
-                            .all(|name| table.columns.iter().any(|c| c.name == *name))
-                    })
-                    .map(|key| key.columns.clone())
-                    .collect(),
-                row_security: table.row_security,
-            }),
+                                .all(|name| table.columns.iter().any(|c| c.name == *name))
+                        })
+                        .cloned()
+                        .collect(),
+                    row_triggers: table.row_triggers.iter().fold(
+                        RowEvents::default(),
+                        |all, (_, events)| RowEvents {
+                            insert: all.insert || events.insert,
+                            update: all.update || events.update,
+                        },
+                    ),
+                    foreign_keys: table
+                        .foreign_keys
+                        .iter()
+                        .filter(|fk| fk.immediate && fk.validated)
+                        .map(|fk| fk.key.clone())
+                        .collect(),
+                    declared_foreign_keys: table
+                        .foreign_keys
+                        .iter()
+                        .map(|fk| fk.key.clone())
+                        .collect(),
+                    // A key naming a dropped or renamed column no longer holds.
+                    unique: table
+                        .unique
+                        .iter()
+                        .filter(|key| {
+                            key.columns
+                                .iter()
+                                .all(|name| table.columns.iter().any(|c| c.name == *name))
+                        })
+                        .map(|key| key.columns.clone())
+                        .collect(),
+                    row_security: table.row_security,
+                    by_name: Vec::new(),
+                }
+                .indexed(),
+            ),
             Rel::View(columns) => Relation::View(columns.clone()),
         }
     }

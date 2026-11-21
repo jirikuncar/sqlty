@@ -1,4 +1,5 @@
 ---
+title: "Typed psycopg 3 queries"
 description: "How to get typed rows from psycopg 3 with sqlty.drivers.psycopg: the type checker sees SQL[T] rows, and the matching row factory builds T at runtime."
 ---
 
