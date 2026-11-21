@@ -19,7 +19,7 @@ from hypothesis import strategies as st
 
 import sqlty
 from sqlty._core import type_definitions
-from sqlty._source import ParsedSource
+from sqlty.core import ParsedSource
 from tests.test_rust_types import VERSION, python_definitions
 from tests.type_oracle import extract_type_definitions
 from tests.type_oracle.info import TypeInfo

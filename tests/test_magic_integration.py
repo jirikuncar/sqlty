@@ -5,6 +5,8 @@ that uses the --sql prefix and verifying it works correctly.
 """
 
 import codecs
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -114,7 +116,7 @@ SELECT 1::INTEGER
                 content = f.read()
 
             # Use the decode function to transform it
-            from sqlty._decode import decode
+            from sqlty.magic import decode
 
             decoded, _ = decode(content)
 
@@ -133,7 +135,7 @@ def test_magic_module_can_be_imported():
     # The codec is registered. Due to Python's codec caching,
     # it works for files imported AFTER magic is imported.
     # Test that the decode function works directly
-    from sqlty._decode import decode
+    from sqlty.magic import decode
 
     test_bytes = b'q = """--sql\nSELECT 1::INTEGER\n"""'
     result, _ = decode(test_bytes)
@@ -177,7 +179,7 @@ def test_codec_works_for_subsequently_imported_files():
 
 def test_decode_function():
     """Test the decode function directly."""
-    from sqlty._decode import decode
+    from sqlty.magic import decode
 
     # Test transforming a simple --sql string
     code = b'q = """--sql\nSELECT 1::INTEGER\n"""'
@@ -190,7 +192,7 @@ def test_decode_function():
 
 def test_decode_preserves_non_sql_strings():
     """Test that non-SQL strings are not transformed."""
-    from sqlty._decode import decode
+    from sqlty.magic import decode
 
     code = b'q = "Hello, World!"'
     result, length = decode(code)
@@ -203,7 +205,7 @@ def test_decode_preserves_non_sql_strings():
 
 def test_decode_handles_multiple_strings():
     """Test that multiple strings are handled correctly."""
-    from sqlty._decode import decode
+    from sqlty.magic import decode
 
     code = b"""
 q1 = \"\"\"--sql
@@ -227,7 +229,7 @@ SELECT id::INTEGER, name::TEXT
 
 def test_decode_accepts_buffer_types():
     """decode() accepts any bytes-like object, as the codec protocol requires."""
-    from sqlty._decode import decode
+    from sqlty.magic import decode
 
     src = b'q = "--sql\\nSELECT 1::INTEGER"'
     expected = decode(src)
@@ -236,7 +238,7 @@ def test_decode_accepts_buffer_types():
 
 
 def test_decoded_coding_declaration_is_utf8():
-    from sqlty._decode import decode
+    from sqlty.magic import decode
 
     text, _ = decode(b'# coding: sqlty\nq = "--sql\\nSELECT 1::INTEGER"\n')
     assert text == (
@@ -245,7 +247,7 @@ def test_decoded_coding_declaration_is_utf8():
 
 
 def test_decoded_coding_declaration_on_line_two():
-    from sqlty._decode import decode
+    from sqlty.magic import decode
 
     text, _ = decode(b'#!/usr/bin/env python\n# -*- coding: sqlty -*-\nq = "--sql\\nSELECT 1"\n')
     assert text.splitlines() == [
@@ -269,7 +271,7 @@ def test_decoded_coding_declaration_on_line_two():
 )
 def test_decode_script_mode_keeps_lines(body: str, first: str):
     """Running a script decodes ``"\\n" + rest`` and drops the first line (#111)."""
-    from sqlty._decode import decode
+    from sqlty.magic import decode
 
     source = "\n" + body + 'q = "--sql\\nSELECT NOW()::TIMESTAMP"\n'
     text, _ = decode(source.encode())
@@ -278,44 +280,29 @@ def test_decode_script_mode_keeps_lines(body: str, first: str):
     assert "SQL[tuple[datetime.datetime]]" in text
 
 
-def test_decode_keeps_source_on_bad_import_style(monkeypatch: pytest.MonkeyPatch):
-    from sqlty import _decode
+def _print_decoded(directory: Path, source: bytes) -> str:
+    """``python -m sqlty.magic`` run in ``directory``, whose config the codec reads."""
+    module = directory / "q.py"
+    module.write_bytes(source)
+    found = subprocess.run(
+        [sys.executable, "-m", "sqlty.magic", str(module)],
+        cwd=directory,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return found.stdout
 
-    monkeypatch.setattr(_decode, "_import_style", lambda: "from x import SQL")
+
+def test_decode_keeps_source_on_bad_import_style(tmp_path: Path):
+    (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\nimport-style = "from x import SQL"\n')
     source = b'q = "--sql\\nSELECT 1"\n'
-    assert _decode.decode(source)[0] == source.decode()
+    assert _print_decoded(tmp_path, source) == source.decode()
 
 
-def test_a_broken_config_leaves_the_import_style_unset(tmp_path, monkeypatch: pytest.MonkeyPatch):
-    from sqlty import _decode
-
+def test_a_broken_config_leaves_the_import_style_unset(tmp_path: Path):
     (tmp_path / "pyproject.toml").write_text("[tool.sqlty]\ndialect = 1\n")
-    monkeypatch.chdir(tmp_path)
-    _decode._import_style.cache_clear()
-    try:
-        assert _decode._import_style() is None
-    finally:
-        _decode._import_style.cache_clear()
-
-
-def test_stream_reader_decodes_what_it_reads():
-    import io
-
-    import sqlty.magic  # noqa: F401
-
-    reader = codecs.getreader("sqlty")(io.BytesIO(b'q = "--sql\\nSELECT 1::INTEGER"\n'))
-    assert "SQL[tuple[int]]" in reader.read()
-    reader.stream = io.BytesIO(b'r = "--sql\\nSELECT 1.5::REAL"\n')
-    assert "SQL[tuple[float]]" in reader.read()
-
-
-def test_main_prints_the_decoded_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    import io
-
-    from sqlty import magic
-
-    (tmp_path / "q.py").write_bytes(b'q = "--sql\\nSELECT 1::INTEGER"\n')
-    out = io.StringIO()
-    monkeypatch.setattr("sys.stdout", out)
-    assert magic.main([str(tmp_path / "q.py")]) == 0
-    assert "SQL[tuple[int]]" in out.getvalue()
+    source = b'q = "--sql\\nSELECT 1::INTEGER"\n'
+    assert _print_decoded(tmp_path, source) == (
+        'from sqlty import SQL; q = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")\n'
+    )

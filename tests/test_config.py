@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-import logging
 import os
 from pathlib import Path
 
 import pytest
 
-from sqlty import _config, _core
-from sqlty._config import ConfigError, load_config
+from sqlty import _core
+
+
+def load_config(directory: Path) -> tuple[dict, Path | None]:
+    """The nearest table and the directory of its file, as the engine reads them (keys as written)."""
+    found = _core.find_config(directory.resolve())
+    return (found[0], found[2].parent) if found else ({}, None)
 
 
 def test_packaging_only_pyprojects_inherit_the_nearest_table(tmp_path):
@@ -107,7 +111,7 @@ def test_cargo_toml_metadata_table_is_read(tmp_path: Path) -> None:
     assert load_config(crate)[0] == {"dialect": "mysql"}
 
     (crate / "Cargo.toml").write_text("[package.metadata.sqlty]\nbogus = 1\n")
-    with pytest.raises(ConfigError, match=r"Cargo\.toml: unknown key 'bogus'"):
+    with pytest.raises(ValueError, match=r"Cargo\.toml: unknown key 'bogus'"):
         load_config(crate)
 
 
@@ -134,7 +138,7 @@ def test_cargo_workspace_metadata_table_is_read(tmp_path: Path) -> None:
 def test_unknown_key_in_sqlty_toml_names_the_file(tmp_path: Path) -> None:
     (tmp_path / "sqlty.toml").write_text("bogus = 1\n")
 
-    with pytest.raises(ConfigError, match=r"sqlty\.toml: unknown key 'bogus'"):
+    with pytest.raises(ValueError, match=r"sqlty\.toml: unknown key 'bogus'"):
         load_config(tmp_path)
 
 
@@ -142,7 +146,7 @@ def test_unknown_keys_raise_config_error_naming_the_file(tmp_path):
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[tool.sqlty]\ndialect = "mysql"\nbogus = 1\n')
 
-    with pytest.raises(_config.ConfigError, match=r"pyproject\.toml: unknown key 'bogus'"):
+    with pytest.raises(ValueError, match=r"pyproject\.toml: unknown key 'bogus'"):
         load_config(tmp_path)
 
 
@@ -181,7 +185,7 @@ def test_unknown_keys_raise_config_error_naming_the_file(tmp_path):
 def test_invalid_settings(tmp_path, toml, message):
     (tmp_path / "pyproject.toml").write_text(toml)
 
-    with pytest.raises(_config.ConfigError, match=message):
+    with pytest.raises(ValueError, match=message):
         load_config(tmp_path)
 
 
@@ -192,7 +196,7 @@ def test_exclude_settings_are_loaded(tmp_path):
 
     config, _ = load_config(tmp_path)
 
-    assert (config["exclude"], config["extend_exclude"]) == (["a"], ["b"])
+    assert (config["exclude"], config["extend-exclude"]) == (["a"], ["b"])
 
 
 def test_values_only_the_cli_checks_are_loaded_as_written(tmp_path: Path) -> None:
@@ -208,23 +212,16 @@ def test_rules_must_be_a_table() -> None:
         _core.validate_config({"rules": ["select-star"]}, "pyproject.toml")
 
 
-def test_unreadable_pyproject_is_skipped_with_a_warning(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_unreadable_pyproject_is_reported_as_a_syntax_error(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text("[tool.sqlty\n")
-    with caplog.at_level(logging.WARNING):
-        config, root = load_config(tmp_path)
-    assert (config, root) == ({}, None)
-    assert "Failed to parse" in caplog.text
+    with pytest.raises(_core.ConfigSyntaxError, match=r"pyproject\.toml"):
+        _core.find_config(tmp_path.resolve())
 
 
-def test_pyproject_that_is_not_utf8_is_skipped_with_a_warning(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_pyproject_that_is_not_utf8_is_reported_as_a_syntax_error(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_bytes(b"[tool.sqlty]\ndialect = '\xff'\n")
-    with caplog.at_level(logging.WARNING):
-        assert load_config(tmp_path) == ({}, None)
-    assert "pyproject.toml: invalid utf-8" in caplog.text
+    with pytest.raises(_core.ConfigSyntaxError, match=r"pyproject.toml: invalid utf-8"):
+        _core.find_config(tmp_path.resolve())
 
 
 def test_values_of_a_parsed_table_are_validated() -> None:
@@ -241,20 +238,17 @@ def test_tables_keep_their_value_types(tmp_path: Path) -> None:
         'preview = true\nmax-query-variants = 8\nrules = { select-star = "ignore" }\n'
     )
     config, _ = load_config(tmp_path)
-    assert config == {"preview": True, "max_query_variants": 8, "rules": {"select-star": "ignore"}}
+    assert config == {"preview": True, "max-query-variants": 8, "rules": {"select-star": "ignore"}}
 
 
-def test_incomplete_function_entries_are_skipped(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_incomplete_function_entries_are_skipped(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text(
         '[tool.sqlty]\nfunctions = ["junk", {import-path = "db.run"},'
         ' {import-path = "db.ok", query-param = "q"}]\n'
     )
-    with caplog.at_level(logging.WARNING):
-        config, _ = load_config(tmp_path)
-    assert config["functions"] == [{"import_path": "db.ok", "query_param": "q"}]
-    assert "missing required fields" in caplog.text
+    table, skipped, _ = _core.find_config(tmp_path.resolve())
+    assert table["functions"] == [{"import-path": "db.ok", "query-param": "q"}]
+    assert len(skipped) == 2
 
 
 def test_unknown_dialect_is_an_error_with_a_suggestion() -> None:
@@ -284,7 +278,7 @@ def test_extend_applies_a_package_config_on_top_of_another(tmp_path: Path) -> No
             "dialect": "mysql",
             "schema": ["../../db/*.sql"],
             "queries": ["../../sql"],
-            "functions": [{"import_path": "billing.run", "query_param": "sql"}],
+            "functions": [{"import-path": "billing.run", "query-param": "sql"}],
             "rules": {"select-star": "ignore", "stale-type": "error"},
             "types": {"DATE": "str", "UUID": "str"},
         },
@@ -318,7 +312,7 @@ def test_extend_follows_a_chain_and_rereads_an_edited_base(tmp_path: Path) -> No
     (tmp_path / "mid.toml").write_text('extend = "base.toml"\nimport-style = "import sqlty"\n')
     (tmp_path / "sqlty.toml").write_text('extend = "mid.toml"\n')
 
-    assert load_config(tmp_path)[0] == {"dialect": "sqlite", "import_style": "import sqlty"}
+    assert load_config(tmp_path)[0] == {"dialect": "sqlite", "import-style": "import sqlty"}
 
     base.write_text('dialect = "mysql"\n')
     stat = base.stat()
@@ -343,5 +337,5 @@ def test_invalid_extend_is_an_error(tmp_path: Path, files: dict[str, str], messa
     for name, content in files.items():
         (tmp_path / name).write_text(content)
 
-    with pytest.raises(ConfigError, match=message):
+    with pytest.raises(ValueError, match=message):
         load_config(tmp_path)

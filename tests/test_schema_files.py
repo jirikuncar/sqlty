@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from sqlty._cli import main
+from tests._core_views import main
 
 
 def _tree(tmp_path: Path) -> None:

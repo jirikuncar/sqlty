@@ -23,9 +23,9 @@ from typing import Any
 import pytest
 
 import sqlty.core as core
-from sqlty._core import query_sites as _query_sites
-from sqlty._lint import NAME_RULES, Diagnostic
-from sqlty._source import ParsedSource
+from sqlty._core import query_sites
+from sqlty.core import Diagnostic, ParsedSource
+from tests._core_views import NAME_RULES, helper_sites
 from tests._mdtest.parser import parse
 from tests._mdtest.runner import comments, string_constants, without_generated
 
@@ -247,14 +247,14 @@ def test_completion_finds_what_check_reads(source: str, options: core.Settings) 
     templates = {token.start[0] for token in tokens if token.type == tokenize.TSTRING_START}
     expected = collections.Counter(
         _tail(text)
-        for line, kind, text in _query_sites(
+        for line, kind, text in query_sites(
             source, import_style=style, any_calls=parsed.any_calls(style)
         )
         if kind == "query" and line not in templates
     )
     expected.update(
         _tail(query)
-        for _, queries, _, start in core._helper_sites(parsed, None)  # noqa: SLF001
+        for _, queries, _, start in helper_sites(parsed, None)
         if start is not None
         for query in queries
     )

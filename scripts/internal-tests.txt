@@ -11,4 +11,4 @@ sqlty-python 193
 sqlty-rules 0
 sqlty-sql 411
 sqlty-wasm 0
-python 20
+python 0
