@@ -20,7 +20,7 @@ removes the dependence on function length (3.1 ms to 0.36 ms per query on 168-li
 | `scopes.rs` argument types (`arg_type`, `type_of`, `class_of`), `types/symbols.rs` aliases and `NewType` for parameters | 583 + part of 527 | `HasType` on the argument; `Parameter`/`Alias` definitions where the argument is a declared name |
 | `helpers.rs` `receiver_class`, receiver detection in `drivers.rs` | 107 + part of 671 | type of the receiver, class by `Type::definition()` qualified name; `definitions_for_attribute` for helper methods |
 | `index.rs` imported types/constants, `project/modules.rs`, `project/route.rs` | parts of 833 + 499 | ty's module resolver (`src` roots, stub paths, site-packages) |
-| `proto/typed-receivers-a` (unmerged) | +2050 | dropped |
+| `receivers.rs` from PR #1237 (typed receivers A, open) | ~+2050 | replaced |
 
 Stays: `types/extract.rs`, `resolve.rs`, `ty.rs`, `generic.rs`, `pydantic.rs` (row types:
 TypedDict/NamedTuple/dataclass/BaseModel fields and their order). ty 0.0.23 keeps
@@ -162,7 +162,7 @@ Each its own branch; a PR only on request.
 2. Per-file budget in AGENTS.md, REVIEW.md and `bench-ci`; `sqlty-ty` crate: `Db`, systems per host, bundled stubs, settings (`src`, `stub-paths`,
    site-packages), `catch_unwind` + time budget per file mapped to `internal-error`.
 3. Argument types through ty; delete `scopes.rs` argument code and the parameter part of `symbols.rs`.
-4. Receivers through ty; delete `receiver_class` and the driver receiver heuristics.
+4. Receivers through ty; delete `receiver_class`, the driver receiver heuristics and `receivers.rs` (#1237).
 5. Module resolution and imported constants through ty; delete `project/modules.rs`, `route.rs`.
 6. Python extension, LSP overlay, wasm: same mdtests in every host.
 
