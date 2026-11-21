@@ -171,7 +171,7 @@ pub fn complete(
                 .probe(schema)
                 .unwrap_or_else(|| scanned_columns(query, &before, schema));
             let blank = qualifier.is_none() && typed.is_empty();
-            let qualifier = qualifier.map(|q| q.to_lowercase());
+            let qualifier = qualifier.map(|q| q.trim_matches(['"', '`']).to_lowercase());
             let mut found: Vec<Candidate> = found
                 .into_iter()
                 .filter(|candidate| {
@@ -261,7 +261,8 @@ fn context(tokens: &[Tok], cursor: usize) -> Option<(Context, Range<usize>)> {
     let qualifier = match end.checked_sub(2).map(|i| (&tokens[i], &tokens[i + 1])) {
         Some((name, dot)) if name.word && dot.text == "." => {
             end -= 2;
-            Some(name.text.trim_matches(['"', '`']).to_string())
+            // Quotes stay: the catalog keeps the case of a quoted schema and folds the rest.
+            Some(name.text.clone())
         }
         _ => None,
     };
