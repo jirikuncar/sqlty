@@ -1405,6 +1405,33 @@ mod tests {
     }
 
     #[test]
+    fn test_stale_rewrite_fix_imports_the_wrapper() {
+        let options = Options {
+            dialect: "postgres".parse().unwrap(),
+            schema: None,
+            style: ImportStyle::or_default(None),
+            untyped: false,
+        };
+        let diags = check_source_with_imports(
+            r#"q = "--sql\nSELECT 1::INTEGER""#,
+            &options,
+            &RuleConfig::default(),
+            &[],
+        );
+        let [diag] = diags.as_slice() else {
+            panic!("{diags:?}")
+        };
+        assert_eq!(diag.rule, Rule::StaleRewrite);
+        assert!(
+            diag.fix
+                .iter()
+                .any(|edit| edit.replacement.contains("from sqlty import SQL")),
+            "{:?}",
+            diag.fix
+        );
+    }
+
+    #[test]
     fn test_stale_rewrite_agrees_with_rewrite() {
         for (source, line) in [
             ("q = \"\"\"\n--sql\nSELECT 1::INTEGER AS n\"\"\"", 1),
