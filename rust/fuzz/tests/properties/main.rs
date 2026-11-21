@@ -8,6 +8,7 @@ mod draw;
 mod engine;
 mod foreign_keys;
 mod migrations;
+mod newtypes;
 mod params;
 mod python;
 mod variants;
