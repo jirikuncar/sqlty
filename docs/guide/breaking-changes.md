@@ -306,8 +306,10 @@ include = ["migrations/**"]
 missing-concurrently = "error"
 ```
 
-A snapshot baseline records the schema of each file it checked, so it judges a
-named database only when a file is routed to it.
+Each migration is judged against the schema the baseline gives every file of
+the head checked against its database, or the baseline's database of the same name
+when no file is. A snapshot records the databases of the directories of the files it
+checked.
 
 ## Baselines without git history
 

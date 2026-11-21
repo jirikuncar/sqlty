@@ -72,8 +72,8 @@ included, with the severities of `rules` and of the `[[tool.sqlty.overrides]]` t
 match the migration's path (`include = ["migrations/**"]`, relative to the
 configuration's directory, so for migrations outside it set `rules` or use an override
 without `include`). A schema several configurations name is judged once, at the
-strictest severity. A snapshot baseline judges a named database only when a file is
-routed to it.
+strictest severity, against the baseline schema of each file checked against it (or
+of the database of the same name), and each statement is reported once.
 
 ## A dropped column
 

@@ -467,6 +467,16 @@ impl Workspace {
         Ok(sources)
     }
 
+    /// The databases of the configuration of the directory of `path`, each with its
+    /// settings: the project's own first, under [`analyzer::DEFAULT`].
+    pub fn databases(&mut self, path: &Path) -> Result<Vec<(String, Arc<FileSettings>)>, String> {
+        let all = self.directory(path)?;
+        let named = all.named();
+        Ok(named
+            .map(|(name, settings)| (name.to_string(), Arc::clone(settings)))
+            .collect())
+    }
+
     /// The settings of the database `name` of the configuration of the directory of
     /// `path`, `None` when it has no such database.
     pub fn database(
@@ -474,12 +484,10 @@ impl Workspace {
         path: &Path,
         name: &str,
     ) -> Result<Option<Arc<FileSettings>>, String> {
-        let all = self.directory(path)?;
-        let found = all
-            .named()
-            .find(|(database, _)| *database == name)
-            .map(|(_, settings)| Arc::clone(settings));
-        Ok(found)
+        let mut all = self.databases(path)?.into_iter();
+        Ok(all
+            .find(|(database, _)| database == name)
+            .map(|(_, settings)| settings))
     }
 
     /// The `.sql` files of named queries under the paths: those a `queries` key of their
