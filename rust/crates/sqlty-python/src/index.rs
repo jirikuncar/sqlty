@@ -213,10 +213,18 @@ impl Module {
     }
 
     fn parse(&self) -> Option<Source> {
+        #[cfg(test)]
+        PARSED.with(|count| count.set(count.get() + 1));
         stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
             Some(Source::new(Arc::clone(&self.text), self.version)?.named(Some(&self.name)))
         })
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many modules this thread parsed, to check that a build does not parse them all.
+    static PARSED: Cell<usize> = const { Cell::new(0) };
 }
 
 /// The stack a parse needs left, and the stack it grows by when less is left.
@@ -317,6 +325,19 @@ fn alternation(names: &HashSet<String>) -> Option<Regex> {
     let escaped: Vec<String> = sorted.iter().map(|name| regex::escape(name)).collect();
     (!escaped.is_empty())
         .then(|| Regex::new(&escaped.join("|")).ok())
+        .flatten()
+}
+
+/// A pattern matching the text that renames any of `names` in an import, `name as`;
+/// `None` for no name. Between the two, an import in parentheses may hold line ends
+/// and comments, and any import a backslash before a line end.
+fn renaming(names: &HashSet<String>) -> Option<Regex> {
+    let mut sorted: Vec<&String> = names.iter().collect();
+    sorted.sort();
+    let escaped: Vec<String> = sorted.iter().map(|name| regex::escape(name)).collect();
+    let pattern = format!(r"\b(?:{})(?:\s|\\|#[^\n]*)+as\b", escaped.join("|"));
+    (!escaped.is_empty())
+        .then(|| Regex::new(&pattern).ok())
         .flatten()
 }
 
@@ -514,9 +535,7 @@ impl Builder {
                 return None;
             }
             let found = self.defined_in(known, &module, name, query, row, depth);
-            let bound = known
-                .facts()
-                .is_some_and(|facts| facts.names.contains_key(head));
+            let bound = known.facts().is_some_and(|facts| facts.binds(head));
             ended.set(found.is_none() && bound);
             found
         };
@@ -580,11 +599,12 @@ impl Builder {
             // `Db = Other`: the class is read where it is defined, and the helper is
             // attached to it, so that its parameters are known.
             let facts = known.facts()?;
-            let [Val::Name(alias)] = facts.names.get(head)?.as_slice() else {
+            let bound = facts.bound(head)?;
+            let [Val::Name(alias)] = &*bound else {
                 return None;
             };
             // A name bound more than once may not be the class the assignment read.
-            let once = facts.names.get(alias).is_some_and(|bound| bound.len() == 1);
+            let once = facts.bound(alias).is_some_and(|bound| bound.len() == 1);
             let aliased = format!("{alias}{rest}");
             let (found, defined) = (once && alias != head)
                 .then(|| self.defined_in(known, module, &aliased, query, row, depth + 1))
@@ -610,14 +630,13 @@ impl Builder {
             if names.is_empty() {
                 break;
             }
-            let named = alternation(&names);
+            // Only `import ... name as ...` binds a helper to another name: a module
+            // whose text does not hold that is not parsed for its imports.
+            let named = renaming(&names);
             let mut renamed = Vec::new();
-            // Only `import ... as ...` binds a helper to another name.
-            let aliasing = self.sources().values().filter(|known| {
-                named
-                    .as_ref()
-                    .is_none_or(|named| named.is_match(&known.text))
-                    && AS.is_match(&known.text)
+            let aliasing = self.sources().values().filter(|known| match &named {
+                Some(named) => named.is_match(&known.text),
+                None => AS.is_match(&known.text),
             });
             for source in aliasing.filter_map(|known| known.load()) {
                 renamed.extend(
@@ -1010,6 +1029,39 @@ mod tests {
         let (small, large) = (read(100), read(200));
         assert!(small <= 2 * 100, "{small}");
         assert!(large <= 2 * small, "{small} then {large}");
+    }
+
+    #[test]
+    fn only_a_module_that_renames_a_helper_is_parsed_for_its_imports() {
+        // `as` is everywhere (`with ... as`, `except ... as`, `import numpy as np`):
+        // a build that parsed every such module parsed each file of a project again.
+        let texts = [
+            ("lib", "def get(sql): ...\n"),
+            ("a", "import os as o\nwith open(o.devnull) as f: pass\n"),
+            ("b", "from lib import get as fetch\n"),
+            (
+                "c",
+                "from lib import (\n    get  # the helper\n    as read,\n)\n",
+            ),
+            ("d", "from lib import get \\\n    as load\n"),
+            ("e", "from b import fetch as again\n"),
+            ("f", "get_as = 1\nfrom lib import other as get\n"),
+        ];
+        let mut builder = Builder::new((3, 14));
+        for (name, text) in texts {
+            let module = Arc::new(Module::new(Arc::from(text), name, (3, 14)));
+            builder.add_found(name, module, &Dict::new());
+        }
+        builder.register("lib.get", "sql", None, None);
+        PARSED.with(|count| count.set(0));
+        let index = builder.build();
+        // Three rounds: `b`, `c` and `d` rename `get`, then `e` renames `fetch`, then
+        // nothing new. `a` and `f` are never parsed, nor `lib` again.
+        assert_eq!(PARSED.with(Cell::get), 3 + 4 + 4);
+        for name in ["fetch", "read", "load", "again"] {
+            assert!(index.mentions(&format!("{name}('SELECT 1')")), "{name}");
+        }
+        assert!(!index.mentions("o.devnull") && !index.mentions("other()"));
     }
 
     #[test]

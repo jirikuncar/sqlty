@@ -15,7 +15,7 @@ use crate::compose::{self, Declared, Rendered};
 use crate::facts::ModuleFacts;
 use crate::helpers::{mentions, region};
 use crate::receivers::Resolver;
-use crate::scopes::{dotted, Context, Key, Lines, Node, Param, Scan, Scope};
+use crate::scopes::{dotted, Context, Key, Node, Param, Scan, Scope};
 use crate::types::info::Dict;
 use crate::types::symbols::Source;
 use crate::variants::{query_variants, Found, Variant};
@@ -527,7 +527,7 @@ pub fn helper_calls_in<'a>(
         scan,
         constant: Some(&constant),
     };
-    let lines = Lines::new(text);
+    let lines = &source.lines;
     let (annotated, marker) = marker_names(source);
     let lookup = |module: &str, name: &str| helpers.and_then(|helpers| helpers.get(module, name));
     let receivers = Resolver::new(source, module, helpers, &own, scan);
@@ -546,7 +546,7 @@ pub fn helper_calls_in<'a>(
         let stack = scan.stack(scope);
         if scope != 0 {
             let mentioned = *wanted[scope].get_or_insert_with(|| {
-                let (start, end) = region(scan.scopes[scope], &lines, text.len());
+                let (start, end) = region(scan.scopes[scope], lines, text.len());
                 pattern
                     .as_ref()
                     .is_none_or(|pattern| pattern.is_match(&text[start..end]))

@@ -13,6 +13,7 @@
 use ruff_python_ast::{self as ast, BoolOp, Expr, Stmt, UnaryOp};
 use ruff_text_size::Ranged;
 use rustc_hash::{FxHashMap, FxHashSet};
+use smallvec::SmallVec;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -21,7 +22,7 @@ use crate::scopes::{Binding, Origin};
 /// What a name holds at a use.
 pub struct Reach<'a> {
     /// The bindings that can be in effect; none when the use is not reached.
-    pub origins: Vec<(Origin<'a>, u32)>,
+    pub origins: SmallVec<[(Origin<'a>, u32); 2]>,
     /// The class of an `isinstance` test every path to the use passed, when the name was
     /// not bound again since.
     pub narrowed: Option<&'a Expr>,
@@ -31,7 +32,9 @@ pub struct Reach<'a> {
 /// any number of uses.
 pub struct Flow<'a> {
     shape: Rc<Shape<'a>>,
-    bindings: Vec<Binding<'a>>,
+    bindings: &'a [Binding<'a>],
+    /// The first binding, a parameter, is hidden: what it gives the name is unknown.
+    hidden: bool,
     /// Where the statements start and end.
     range: (u32, u32),
     /// The places a use can be in, in the order written: a plain statement, or the part
@@ -58,6 +61,40 @@ pub struct Shape<'a> {
 }
 
 impl<'a> Shape<'a> {
+    /// Whether `body` has the shape of no statements: plain ones that run one after the
+    /// other, none of which tests a name, branches or ends the scope. Such a body is
+    /// not walked for its shape.
+    pub fn plain(body: &[Stmt]) -> bool {
+        // Every kind is named: a new one does not compile until it is placed.
+        body.iter().all(|stmt| match stmt {
+            Stmt::If(_)
+            | Stmt::While(_)
+            | Stmt::For(_)
+            | Stmt::With(_)
+            | Stmt::Try(_)
+            | Stmt::Match(_)
+            | Stmt::Assert(_)
+            | Stmt::Return(_)
+            | Stmt::Raise(_)
+            | Stmt::Continue(_)
+            | Stmt::Break(_) => false,
+            Stmt::FunctionDef(_)
+            | Stmt::ClassDef(_)
+            | Stmt::Delete(_)
+            | Stmt::TypeAlias(_)
+            | Stmt::Assign(_)
+            | Stmt::AugAssign(_)
+            | Stmt::AnnAssign(_)
+            | Stmt::Import(_)
+            | Stmt::ImportFrom(_)
+            | Stmt::Global(_)
+            | Stmt::Nonlocal(_)
+            | Stmt::Expr(_)
+            | Stmt::Pass(_)
+            | Stmt::IpyEscapeCommand(_) => true,
+        })
+    }
+
     /// The shape of `body`, the statements of a scope.
     pub fn new(body: &'a [Stmt]) -> Self {
         let mut walk = Walk {
@@ -68,7 +105,7 @@ impl<'a> Shape<'a> {
             closing: 0,
             looped: None,
             deep: false,
-            marks: Vec::new(),
+            marks: SmallVec::new(),
             loops: Vec::new(),
             shape: None,
             found: Some(Shape::default()),
@@ -112,20 +149,21 @@ struct Place<'a> {
 impl<'a> Flow<'a> {
     /// The flow of `name` through `body`, the statements of the scope whose bindings of
     /// the name are `bindings` (see [`crate::scopes::Scan::bindings`]) and whose shape is
-    /// `shape`.
+    /// `shape`. With `hidden`, what the first binding gives the name is unknown.
     pub fn new(
         body: &'a [Stmt],
         shape: Rc<Shape<'a>>,
-        bindings: Vec<Binding<'a>>,
+        bindings: &'a [Binding<'a>],
+        hidden: bool,
         name: &str,
     ) -> Option<Self> {
         let (first, last) = (body.first()?, body.last()?);
         // The statements read: those a binding or a test of the name is in.
-        let mut marks: Vec<u32> = bindings.iter().map(|binding| binding.site).collect();
-        marks.extend(shape.tests.get(name).into_iter().flatten());
+        let mut marks: SmallVec<[u32; 8]> = bindings.iter().map(|binding| binding.site).collect();
+        marks.extend(shape.tests.get(name).into_iter().flatten().copied());
         marks.sort_unstable();
         let mut walk = Walk {
-            bindings: &bindings,
+            bindings,
             name,
             places: Vec::new(),
             quiet: false,
@@ -139,7 +177,7 @@ impl<'a> Flow<'a> {
         };
         // What is bound before the body: the parameters.
         let start = apply(
-            &bindings,
+            bindings,
             State::default(),
             0,
             first.start().to_u32(),
@@ -150,6 +188,7 @@ impl<'a> Flow<'a> {
         Some(Flow {
             shape,
             bindings,
+            hidden,
             range: (first.start().to_u32(), last.end().to_u32()),
             places,
         })
@@ -171,7 +210,7 @@ impl<'a> Flow<'a> {
         // A place the walk did not reach is dead code, or nested too deep to follow.
         let reached = self.place(at).filter(|_| !self.shape.unreached(at));
         let state = reached.map_or_else(State::default, |place| {
-            let bindings = &self.bindings;
+            let bindings = self.bindings;
             let state = apply(bindings, place.before.clone(), place.start, place.end, at);
             match place.turns {
                 Some(end) => any(bindings, state, place.start, end),
@@ -180,15 +219,19 @@ impl<'a> Flow<'a> {
         });
         if state.lost || state.twice {
             return Some(Reach {
-                origins: vec![(Origin::Unknown, at)],
+                origins: smallvec::smallvec![(Origin::Unknown, at)],
                 narrowed: None,
             });
         }
+        let origin = |index: usize| match self.hidden && index == 0 {
+            true => Origin::Unknown,
+            false => self.bindings[index].origin,
+        };
         Some(Reach {
             origins: state
                 .live
                 .iter()
-                .map(|&index| (self.bindings[index].origin, self.bindings[index].site))
+                .map(|&index| (origin(index), self.bindings[index].site))
                 .collect(),
             narrowed: state.narrowed,
         })
@@ -202,7 +245,7 @@ impl<'a> Flow<'a> {
     /// Whether a binding takes effect after `start`, or is written in `start..end`.
     pub fn binds_after(&self, start: u32, within: Option<(u32, u32)>) -> bool {
         work(1);
-        let bindings = &self.bindings;
+        let bindings = self.bindings;
         let before = bindings.partition_point(|binding| binding.site < start);
         let pending = before
             .checked_sub(1)
@@ -217,21 +260,68 @@ impl<'a> Flow<'a> {
 #[cfg(test)]
 fn reaching<'a>(
     body: &'a [Stmt],
-    bindings: &[Binding<'a>],
+    bindings: &'a [Binding<'a>],
     name: &str,
     at: u32,
 ) -> Option<Reach<'a>> {
-    Flow::new(body, Rc::new(Shape::new(body)), bindings.to_vec(), name)?.at(at)
+    Flow::new(body, Rc::new(Shape::new(body)), bindings, false, name)?.at(at)
 }
 
 /// The most bindings followed at once: a name more branches than this bind is unknown.
 const MAX_LIVE: usize = 64;
 
+/// Bindings by index, in the order written: none and one, the usual numbers, are kept
+/// in place.
+#[derive(Clone, Default)]
+enum Live {
+    #[default]
+    None,
+    One(usize),
+    Many(Rc<[usize]>),
+}
+
+impl Live {
+    /// Whether both are the same bindings, as far as is known without reading them.
+    fn same(&self, other: &Live) -> bool {
+        match (self, other) {
+            (Live::None, Live::None) => true,
+            (Live::One(one), Live::One(two)) => one == two,
+            (Live::Many(one), Live::Many(two)) => Rc::ptr_eq(one, two),
+            _ => false,
+        }
+    }
+}
+
+impl std::ops::Deref for Live {
+    type Target = [usize];
+
+    fn deref(&self) -> &[usize] {
+        match self {
+            Live::None => &[],
+            Live::One(index) => std::slice::from_ref(index),
+            Live::Many(indexes) => indexes,
+        }
+    }
+}
+
+impl FromIterator<usize> for Live {
+    fn from_iter<I: IntoIterator<Item = usize>>(indexes: I) -> Self {
+        let mut indexes = indexes.into_iter();
+        match (indexes.next(), indexes.next()) {
+            (None, _) => Live::None,
+            (Some(only), None) => Live::One(only),
+            (Some(first), Some(second)) => {
+                Live::Many([first, second].into_iter().chain(indexes).collect())
+            }
+        }
+    }
+}
+
 /// The bindings in effect, by index in the order written, and the class the name was
 /// tested to be of.
 #[derive(Clone, Default)]
 struct State<'a> {
-    live: Rc<[usize]>,
+    live: Live,
     narrowed: Option<&'a Expr>,
     /// The name was tested again after `narrowed`: it is of both classes, which is not
     /// followed.
@@ -256,10 +346,10 @@ impl<'a> State<'a> {
         let (one, two) = (&self.live[..], &other.live[..]);
         // The same bindings, or those of one side all written before the other's: the
         // usual ways branches end. Nothing is read of them then.
-        let live: Rc<[usize]> = if Rc::ptr_eq(&self.live, &other.live) || two.is_empty() {
-            Rc::clone(&self.live)
+        let live: Live = if self.live.same(&other.live) || two.is_empty() {
+            self.live.clone()
         } else if one.is_empty() {
-            Rc::clone(&other.live)
+            other.live.clone()
         } else {
             work(one.len() + two.len());
             if one[one.len() - 1] < two[0] {
@@ -277,13 +367,13 @@ impl<'a> State<'a> {
                 }
                 live.extend_from_slice(&one[a..]);
                 live.extend_from_slice(&two[b..]);
-                live.into()
+                live.into_iter().collect()
             }
         };
         let live = match live.len() > MAX_LIVE {
             true => {
                 self.lost = true;
-                live[..MAX_LIVE].into()
+                live[..MAX_LIVE].iter().copied().collect()
             }
             false => live,
         };
@@ -385,7 +475,7 @@ fn apply<'a>(
         work(1);
         if bindings[index].effect <= limit {
             return State {
-                live: Rc::from([index]),
+                live: Live::One(index),
                 ..State::default()
             };
         }
@@ -428,7 +518,7 @@ struct Walk<'s, 'a> {
     /// Statements nested too deep were met: what follows is not placed.
     deep: bool,
     /// Where the name is bound or tested, in order.
-    marks: Vec<u32>,
+    marks: SmallVec<[u32; 8]>,
     /// The loops around the statement, by their start, for the walk of no name.
     loops: Vec<u32>,
     /// The shape of the scope, for the walk of a name: the statements between two marks
@@ -787,7 +877,7 @@ mod tests {
         let bindings = scan.bindings(scope, name).unwrap_or(&[]);
         let needle = format!("{name}.use()");
         let shape = Rc::new(Shape::new(&function.body));
-        let flow = Flow::new(&function.body, shape, bindings.to_vec(), name).expect("a body");
+        let flow = Flow::new(&function.body, shape, bindings, false, name).expect("a body");
         text.match_indices(&needle)
             .map(|(at, _)| {
                 let at = u32::try_from(at).unwrap();
@@ -1036,8 +1126,8 @@ mod tests {
             let shape = Rc::new(Shape::new(&function.body));
             for at in 0..count {
                 let name = format!("x{at}");
-                let bindings = scan.bindings(1, &name).expect("bound").to_vec();
-                let flow = Flow::new(&function.body, Rc::clone(&shape), bindings, &name);
+                let bindings = scan.bindings(1, &name).expect("bound");
+                let flow = Flow::new(&function.body, Rc::clone(&shape), bindings, false, &name);
                 let used = text.find(&format!("{name}.use()")).expect("used");
                 let reach = flow.expect("a body").at(u32::try_from(used).unwrap());
                 assert_eq!(reach.expect("in the body").origins.len(), 1);
@@ -1074,5 +1164,54 @@ mod tests {
             panic!("a function")
         };
         assert!(reaching(&function.body, &[], "y", 9).is_none());
+    }
+    #[test]
+    fn a_plain_body_has_the_shape_of_no_statements() {
+        // What `Shape::plain` accepts is not walked: its shape must be the empty one.
+        let plain = "x = a\nx: C = b\nx += 1\nx.use(lambda: x)\ndel x\nimport m\npass\n\
+                     global g\ndef inner():\n    if x:\n        return x\n\
+                     class K:\n    for y in x:\n        break\ntype T = int\n";
+        let parsed = ruff_python_parser::parse_module(plain).unwrap();
+        let body = &parsed.syntax().body;
+        assert!(Shape::plain(body) && Shape::plain(&[]));
+        let shape = Shape::new(body);
+        assert!(shape.stops.is_empty() && shape.deep.is_none() && shape.tests.is_empty());
+        assert!(shape.dead.is_empty() && shape.breaks.is_empty());
+        // Every statement that tests a name, branches or ends the scope is walked.
+        for other in [
+            "if c:\n    pass\n",
+            "while c:\n    pass\n",
+            "for y in c:\n    pass\n",
+            "with c as y:\n    pass\n",
+            "try:\n    pass\nfinally:\n    pass\n",
+            "match c:\n    case _:\n        pass\n",
+            "assert isinstance(x, C)\n",
+            "return x\n",
+            "raise E\n",
+            "continue\n",
+            "break\n",
+        ] {
+            let text = format!("x = a\n{other}x.use()\n");
+            let parsed = ruff_python_parser::parse_unchecked(
+                &text,
+                ruff_python_parser::ParseOptions::from(ruff_python_parser::Mode::Module),
+            );
+            let module = parsed.syntax().as_module().expect("a module");
+            assert!(!Shape::plain(&module.body), "{other}");
+        }
+    }
+
+    #[test]
+    fn no_binding_or_one_is_held_in_place() {
+        let live = |indexes: &[usize]| indexes.iter().copied().collect::<Live>();
+        assert!(matches!(live(&[]), Live::None) && live(&[]).is_empty());
+        assert!(matches!(live(&[3]), Live::One(3)));
+        assert_eq!(&*live(&[3]), [3]);
+        assert_eq!(&*live(&[3, 1, 2]), [3, 1, 2]);
+        // The same without reading them: what is equal, but for two lists made apart.
+        assert!(live(&[]).same(&live(&[])) && live(&[3]).same(&live(&[3])));
+        assert!(!live(&[3]).same(&live(&[4])) && !live(&[]).same(&live(&[3])));
+        let many = live(&[1, 2]);
+        assert!(many.same(&many.clone()) && !many.same(&live(&[1, 2])));
     }
 }

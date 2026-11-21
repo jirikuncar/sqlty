@@ -69,8 +69,17 @@ pub struct Scan<'a> {
     /// The scope around each scope; the module is its own.
     pub parents: Vec<Scope>,
     stack: Vec<Scope>,
-    /// Every binding of a name in a scope, in source order.
-    bound: HashMap<(Scope, &'a str), Vec<Binding<'a>>>,
+    /// Every binding, as the walk meets it, with its scope and name.
+    written: Vec<(Scope, &'a str, Binding<'a>)>,
+    /// Every binding: those of a name of a scope lie together, by `site`.
+    bound: Vec<Binding<'a>>,
+    /// Each name of each scope and where its bindings are in `bound`: the names of a
+    /// scope lie together, from where `starts` says, in the order the scope binds them.
+    names: Vec<(&'a str, std::ops::Range<usize>)>,
+    starts: Vec<usize>,
+    /// Where each name is in `names`, for the scopes that bind [`FEW`] names or more:
+    /// the names of the others, which most scopes are, are read one after the other.
+    index: HashMap<(Scope, &'a str), usize>,
     /// Every `self.name` a method binds, by its class, with the method.
     attributes: HashMap<(Scope, &'a str), Vec<(Origin<'a>, Scope)>>,
     /// Where a name is one of its own in a scope: in a comprehension or a lambda that
@@ -85,9 +94,8 @@ pub struct Scan<'a> {
     sealed: HashMap<Scope, Vec<TextRange>>,
     /// The bodies of the lambdas among them: they run when called, not where written.
     called: HashMap<Scope, Vec<TextRange>>,
-    /// The names each scope binds and the attributes the methods of each class bind, in
-    /// order: reading those of one scope does not read those of every other.
-    names: HashMap<Scope, Vec<&'a str>>,
+    /// The attributes the methods of each class bind, in order: reading those of one
+    /// class does not read those of every other.
     fields: HashMap<Scope, Vec<&'a str>>,
     /// The names a function declares `global` or `nonlocal`.
     foreign: HashSet<(Scope, &'a str)>,
@@ -103,6 +111,10 @@ pub struct Scan<'a> {
     classes: HashMap<u32, Scope>,
     operands: HashSet<usize>,
 }
+
+/// The names a scope binds before they are looked up in a table: fewer are compared one
+/// after the other, where they lie together.
+const FEW: usize = 8;
 
 /// Where a name gets its value. Every form that binds a name is one of these: what is
 /// not read as a type is `Unknown`, so that it hides an earlier binding instead of
@@ -193,13 +205,16 @@ impl<'a> Scan<'a> {
                 scopes: vec![Node::Module],
                 parents: vec![0],
                 stack: Vec::new(),
-                bound: HashMap::new(),
+                written: Vec::new(),
+                bound: Vec::new(),
+                names: Vec::new(),
+                starts: Vec::new(),
+                index: HashMap::new(),
                 attributes: HashMap::new(),
                 shadows: HashMap::new(),
                 deferred: HashMap::new(),
                 sealed: HashMap::new(),
                 called: HashMap::new(),
-                names: HashMap::new(),
                 fields: HashMap::new(),
                 foreign: HashSet::new(),
                 calls: Vec::new(),
@@ -212,17 +227,13 @@ impl<'a> Scan<'a> {
         };
         walker.visit_body(body);
         let mut scan = walker.scan;
-        for bindings in scan.bound.values_mut() {
-            bindings.sort_by_key(|binding| binding.site);
-        }
-        for &(scope, name) in scan.bound.keys() {
-            scan.names.entry(scope).or_default().push(name);
-        }
+        scan.order();
         for &(scope, name) in scan.attributes.keys() {
             scan.fields.entry(scope).or_default().push(name);
         }
-        let listed = scan.names.values_mut().chain(scan.fields.values_mut());
-        listed.for_each(|names| names.sort_unstable());
+        scan.fields
+            .values_mut()
+            .for_each(|names| names.sort_unstable());
         scan.shadows.values_mut().for_each(outermost);
         scan.deferred.values_mut().for_each(outermost);
         scan.sealed.values_mut().for_each(outermost);
@@ -240,9 +251,103 @@ impl<'a> Scan<'a> {
         matches!(self.scopes[scope], Node::Class(_))
     }
 
+    /// Puts the bindings the walk met together: by scope, then by name, then by `site`.
+    /// The scopes are told apart by counting and the names by one lookup for each
+    /// binding, among the few names of the scope or in `index`, so that a module costs
+    /// what it binds: nothing is sorted by name.
+    fn order(&mut self) {
+        let written = std::mem::take(&mut self.written);
+        let scopes = self.scopes.len();
+        let mut next = vec![0; scopes + 1];
+        for (scope, _, _) in &written {
+            next[scope + 1] += 1;
+        }
+        for scope in 0..scopes {
+            next[scope + 1] += next[scope];
+        }
+        // The bindings by scope, each scope's as the walk met them.
+        let mut placed: Vec<usize> = vec![0; written.len()];
+        for (at, (scope, _, _)) in written.iter().enumerate() {
+            placed[next[*scope]] = at;
+            next[*scope] += 1;
+        }
+        // The name each one binds, among the names of all scopes, and how many do.
+        let mut index = HashMap::new();
+        let mut names: Vec<(&'a str, std::ops::Range<usize>)> = Vec::new();
+        let mut starts = vec![0; scopes + 1];
+        let mut group = vec![0; written.len()];
+        // The scope being read and where its names start.
+        let (mut reading, mut first) = (0, 0);
+        for (slot, &at) in placed.iter().enumerate() {
+            let (scope, name, _) = written[at];
+            if scope != reading {
+                (reading, first) = (scope, names.len());
+            }
+            let few = names.len() - first < FEW;
+            let known = match few {
+                true => names[first..]
+                    .iter()
+                    .position(|(known, _)| *known == name)
+                    .map(|found| first + found),
+                false => index.get(&(scope, name)).copied(),
+            };
+            let known = known.unwrap_or_else(|| {
+                names.push((name, 0..0));
+                starts[scope + 1] += 1;
+                let new = names.len() - 1;
+                if new - first + 1 == FEW {
+                    // No longer few: each binding left may bind another name.
+                    index.reserve(FEW + next[scope] - slot);
+                    let of_scope = names[first..].iter().enumerate();
+                    index.extend(of_scope.map(|(nth, (name, _))| ((scope, *name), first + nth)));
+                } else if !few {
+                    index.insert((scope, name), new);
+                }
+                new
+            });
+            names[known].1.end += 1;
+            group[slot] = known;
+        }
+        for scope in 0..scopes {
+            starts[scope + 1] += starts[scope];
+        }
+        let mut start = 0;
+        for (_, range) in &mut names {
+            let count = range.end;
+            *range = start..start;
+            start += count;
+        }
+        let nothing = Binding {
+            origin: Origin::Unknown,
+            site: 0,
+            effect: 0,
+        };
+        let mut bound = vec![nothing; written.len()];
+        for (slot, &at) in placed.iter().enumerate() {
+            let range = &mut names[group[slot]].1;
+            bound[range.end] = written[at].2;
+            range.end += 1;
+        }
+        for (_, range) in &names {
+            let of_name = &mut bound[range.clone()];
+            if !of_name.is_sorted_by_key(|binding| binding.site) {
+                of_name.sort_by_key(|binding| binding.site);
+            }
+        }
+        (self.bound, self.names, self.starts, self.index) = (bound, names, starts, index);
+    }
+
     /// Every binding of `name` in `scope`, by `site`; `None` when the scope does not bind it.
-    pub fn bindings<'n>(&'n self, scope: Scope, name: &'n str) -> Option<&'n [Binding<'a>]> {
-        self.bound.get(&(scope, name)).map(Vec::as_slice)
+    pub fn bindings(&self, scope: Scope, name: &str) -> Option<&[Binding<'a>]> {
+        let (start, end) = (self.starts[scope], self.starts[scope + 1]);
+        let known = match end - start < FEW {
+            true => {
+                let mut of_scope = self.names[start..end].iter();
+                start + of_scope.position(|(known, _)| *known == name)?
+            }
+            false => *self.index.get(&(scope, name))?,
+        };
+        Some(&self.bound[self.names[known].1.clone()])
     }
 
     /// What an argument type reads of `name` in `scope`: the class each of its
@@ -268,11 +373,10 @@ impl<'a> Scan<'a> {
 
     /// The names `scope` binds, each with its bindings.
     pub fn bound_in(&self, scope: Scope) -> impl Iterator<Item = (&'a str, &[Binding<'a>])> {
-        let names = self.names.get(&scope).map_or(&[][..], Vec::as_slice);
-        names.iter().filter_map(move |&name| {
+        let names = &self.names[self.starts[scope]..self.starts[scope + 1]];
+        names.iter().map(|(name, range)| {
             read();
-            let bindings = self.bound.get(&(scope, name))?;
-            Some((name, bindings.as_slice()))
+            (*name, &self.bound[range.clone()])
         })
     }
 
@@ -376,17 +480,11 @@ impl<'a> Scan<'a> {
                 .chain(std::iter::once(0))
                 .collect::<Vec<_>>();
             for outer in outer {
-                self.bound
-                    .entry((outer, name))
-                    .or_default()
-                    .push(binding(Origin::Unknown));
+                self.written.push((outer, name, binding(Origin::Unknown)));
             }
             return;
         }
-        self.bound
-            .entry((scope, name))
-            .or_default()
-            .push(binding(origin));
+        self.written.push((scope, name, binding(origin)));
     }
 
     /// Records what an assignment target binds: a name, an attribute of a method's first
@@ -969,6 +1067,9 @@ impl Lines {
 
 /// `a.b.c` for a dotted name, else `None`.
 pub fn dotted(expr: &Expr) -> Option<String> {
+    if let Expr::Name(name) = expr {
+        return Some(name.id.to_string());
+    }
     let mut parts = Vec::new();
     let mut node = expr;
     while let Expr::Attribute(attr) = node {
@@ -1046,5 +1147,44 @@ mod tests {
         assert_eq!(strings, [true, true, false, false]);
         assert!(matches!(scan.strings[2].0, Expr::TString(_)));
         assert!(matches!(scan.strings[3].0, Expr::StringLiteral(_)));
+    }
+    #[test]
+    fn a_scope_of_few_or_many_names_gives_each_its_bindings_in_order() {
+        // Below `FEW` names a scope is read name by name, from there on through the
+        // table: both give the same answers, on either side of the boundary.
+        for count in [1, FEW - 1, FEW, FEW + 1, 5 * FEW] {
+            let names: Vec<String> = (0..count).rev().map(|at| format!("n{at}")).collect();
+            // Each name twice in the module, in turn, and once more in a function that
+            // binds as many names of its own.
+            let twice: String = names.iter().map(|name| format!("{name} = 1\n")).collect();
+            let inner: String = names
+                .iter()
+                .map(|name| format!("    {name} = 2\n"))
+                .collect();
+            let text = format!("{twice}{twice}def f():\n{inner}");
+            let parsed = parse_module(&text).unwrap();
+            let scan = Scan::new(&parsed.syntax().body);
+            for (scope, times) in [(0, 2), (1, 1)] {
+                let own = if scope == 0 { count + 1 } else { count };
+                // In the order the scope binds them first, not by name.
+                let bound: Vec<&str> = scan.bound_in(scope).map(|(name, _)| name).collect();
+                assert_eq!(bound.len(), own, "{count} names in scope {scope}");
+                assert!(bound.iter().zip(&names).all(|(bound, name)| bound == name));
+                for name in &names {
+                    let bindings = scan.bindings(scope, name).expect("bound");
+                    assert_eq!(bindings.len(), times, "{name} of {count} in {scope}");
+                    assert!(bindings.is_sorted_by_key(|binding| binding.site));
+                    let written = |binding: &Binding| {
+                        let at = binding.site as usize;
+                        text[at..].starts_with(&format!("{name} ="))
+                    };
+                    assert!(bindings.iter().all(written));
+                }
+                assert!(scan.bindings(scope, "n").is_none());
+                assert!(scan.bindings(scope, "missing").is_none());
+            }
+            assert_eq!(scan.bindings(0, "f").map(<[_]>::len), Some(1));
+            assert!(scan.bindings(1, "f").is_none());
+        }
     }
 }
