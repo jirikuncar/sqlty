@@ -43,8 +43,9 @@ maximum of `--repeats` runs (RSS from `wait4` of that child).
 - `python_us_per_file`: Python type inference per file in microseconds (mean, median,
   p99, max): `check_source` of the file, schema cached, minus the SQL inference of each
   of its queries, timed as `check_source` of a module holding only that query minus one
-  holding none. `ruff_mean` is `ruff check` of the project on one thread per file,
-  startup subtracted.
+  holding none. That share also counts the per-call work of a one-query module, so
+  the Python figure is a lower bound. `ruff_mean` is `ruff check` of the project on one
+  thread per file, startup subtracted.
 
 ```bash
 make bench-project                                              # full size, JSON on stdout

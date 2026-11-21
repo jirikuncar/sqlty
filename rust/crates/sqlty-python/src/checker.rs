@@ -20,8 +20,9 @@ use crate::analyses::{Analyses, Analysis};
 use crate::edit::Edit;
 use crate::options::{Dialect, Options};
 use crate::rewriter::{
-    after_marker, ends_marker_line, extract_string_content, import_edit, imported_names,
-    marked_query, type_modules, wrapper_imports, wraps, ImportStyle, Spelling,
+    after_marker, decode_escapes, ends_marker_line, extract_string_content, import_edit,
+    imported_names, marked_query, strip_line_break, type_modules, wrapper_imports, wraps,
+    ImportStyle, Spelling,
 };
 use crate::rules::{Rule, RuleConfig, Severity, SQL_RULES};
 use crate::scan::Scan;
@@ -857,16 +858,24 @@ fn holds_start(starts: &[usize], span: &Range<usize>) -> bool {
 pub type WrappedQuery = (usize, String, Option<String>, (usize, usize));
 
 /// `(line, annotation, query, annotation_span)` for each `{wrapper}[T](...)` call; `query`
-/// is the [`marked_query`] the module's other checks analyze, `None` unless the call holds
+/// is the [`marked_query`] the module's other checks analyze when a line break follows the
+/// marker, else the query after it; `None` unless the call holds
 /// a marked string literal, and `annotation_span` holds the byte offsets of `T`.
 pub(crate) fn wrapped_queries(scan: &Scan<'_>) -> Vec<WrappedQuery> {
     let source = scan.source();
     scan.calls
         .iter()
         .map(|call| {
-            let query = call
-                .content(source)
-                .and_then(|content| marked_query(&content));
+            let query = call.content(source).and_then(|content| {
+                let decoded = decode_escapes(&content);
+                let rest = after_marker(&decoded)?;
+                // The text the module's other checks analyze, so the analysis is shared;
+                // a marker its query follows on the same line is read without it.
+                Some(match strip_line_break(rest) {
+                    Some(_) => format!("--sql{rest}"),
+                    None => rest.trim().to_string(),
+                })
+            });
             (
                 scan.lines.line_at(call.span.start),
                 call.row_type(source).to_string(),
