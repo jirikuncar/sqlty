@@ -141,14 +141,16 @@ Linear in files, not in queries: a file with one query pays its whole index. RSS
 file kept by salsa; LRU eviction per file after its checks run. Binary +34 MB (CLI), wasm
 engine about doubles (prototype C). Measured with `make bench-ab` on `bench-ci` and the corpus
 (django, goalert, liberapay), CPU and RSS against main; per-file and per-query numbers reported.
-The 100 us rule does not hold on 168-line files (Open question 1).
+Decided 2026-11-21: the work ty does per file gets a per-file budget, linear in lines
+(proposed 1 ms per 100 lines, set from the corpus before phase 2 lands); SQL work keeps
+100 us per query. `bench-ci` gates both; AGENTS.md "Check budget" and REVIEW.md say so.
 
 ## Phases
 
 Each its own branch; a PR only on request.
 
 1. Bump the `ruff_*` pins 0.0.21 to the release ty uses (0.0.23), alone.
-2. `sqlty-ty` crate: `Db`, systems per host, bundled stubs, settings (`src`, `stub-paths`,
+2. Per-file budget in AGENTS.md, REVIEW.md and `bench-ci`; `sqlty-ty` crate: `Db`, systems per host, bundled stubs, settings (`src`, `stub-paths`,
    site-packages), `catch_unwind` + time budget per file mapped to `internal-error`.
 3. Argument types through ty; delete `scopes.rs` argument code and the parameter part of `symbols.rs`.
 4. Receivers through ty; delete `receiver_class` and the driver receiver heuristics.
@@ -173,13 +175,10 @@ reporting ty's own diagnostics.
 
 ## Open questions
 
-1. Budget rule: (a) per query stays 100 us, ty only where sqlty's own reading fails;
-   (b) the rule becomes per file (e.g. 1 ms per 100 lines) for ty's index; (c) ty everywhere,
-   rule suspended for these paths.
-2. Row types: (a) keep sqlty's reader (recommended); (b) members via `SemanticModel::attribute_completions`
+1. Row types: (a) keep sqlty's reader (recommended); (b) members via `SemanticModel::attribute_completions`
    (types but no field order or `Required`/`ReadOnly`); (c) ask Astral to make class fields public.
-3. site-packages: (a) bundled driver stubs first, then the venv (recommended); (b) venv only;
+2. site-packages: (a) bundled driver stubs first, then the venv (recommended); (b) venv only;
    (c) bundled stubs only, environment-independent.
-4. wasm/VS Code web: (a) ship ty in the wasm engine (doubles download); (b) playground keeps
+3. wasm/VS Code web: (a) ship ty in the wasm engine (doubles download); (b) playground keeps
    today's resolver and may disagree with the CLI.
-5. ty off switch: (a) none, ty always; (b) `SQLTY_TY=0` for debugging only.
+4. ty off switch: (a) none, ty always; (b) `SQLTY_TY=0` for debugging only.
