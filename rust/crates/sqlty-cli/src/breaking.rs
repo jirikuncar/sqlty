@@ -33,7 +33,7 @@ use sqlty_sql::analyzer::{self, Schema};
 
 use crate::{
     github_annotation, json_diagnostic, pretty, report_unreadable, sarif_log, warn_all, Breaking,
-    Host, OutputFormat, EXIT_FOUND,
+    Host, Lines, OutputFormat, EXIT_FOUND,
 };
 
 mod snapshot;
@@ -149,8 +149,8 @@ pub type Types = Vec<(String, String)>;
 type Key = (Option<Arc<str>>, &'static str, Types);
 
 fn key_of(settings: &FileSettings) -> Key {
-    let (sql, dialect, types) = settings.schema_key();
-    (sql.map(Arc::from), dialect, types.to_vec())
+    let (_, dialect, types) = settings.schema_key();
+    (settings.schema_sql.clone(), dialect, types.to_vec())
 }
 
 /// The schema another revision gives a file.
@@ -814,11 +814,14 @@ fn report(host: &mut dyn Host, findings: &[Finding], head: &str, format: OutputF
     };
     match format {
         OutputFormat::Json | OutputFormat::Sarif => {
+            let mut lines = HashMap::new();
             let rows: Vec<_> = findings
                 .iter()
                 .map(|finding| {
-                    let mut row =
-                        json_diagnostic(&finding.path, &finding.diagnostic, &finding.text);
+                    let lines = lines
+                        .entry(finding.text.as_ptr())
+                        .or_insert_with(|| Lines::new(&finding.text));
+                    let mut row = json_diagnostic(&finding.path, &finding.diagnostic, lines);
                     if format == OutputFormat::Sarif {
                         row.message = message(finding);
                     }
@@ -1148,6 +1151,18 @@ mod tests {
             sql: Arc::from(sql),
             loaded: HashMap::new(),
         }
+    }
+
+    #[test]
+    fn a_schema_key_shares_the_schema_text() {
+        let config = ("pyproject.toml", "[tool.sqlty]\nschema = \"schema.sql\"\n");
+        let root = project("shared", &[config, ("schema.sql", NEW_SCHEMA)]);
+        let settings = open(&root).workspace.settings(&root.join("q.py"));
+        let settings = settings.expect("reads");
+        let text = settings.schema_sql.as_ref().expect("a schema");
+        let key = key_of(&settings).0.expect("a schema");
+        assert!(Arc::ptr_eq(&key, text));
+        std::fs::remove_dir_all(&root).expect("removes");
     }
 
     #[test]

@@ -28,7 +28,7 @@ from pygments.lexers import get_lexer_by_name
 import sqlty
 from sqlty._config import load_config
 from sqlty._lint import RULES
-from sqlty.core import check_source, rewrite_source
+from sqlty.core import Settings, check_source, rewrite_source
 
 ROOT = Path(__file__).resolve().parent.parent
 RULE_DOCS = ROOT / "docs" / "reference" / "rules"
@@ -61,13 +61,7 @@ def test_rules_table() -> None:
 
 def test_generated_reference_is_current() -> None:
     """The generated tables of ``docs/reference`` match the code (``make generate-docs``)."""
-    spec = importlib.util.spec_from_file_location(
-        "generate_docs", ROOT / "scripts" / "generate_docs.py"
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    stale = [p.name for p in module.generate(check=True)]
+    stale = [p.name for p in _script("generate_docs").generate(check=True)]
     assert not stale, f"run `make generate-docs`: {stale} out of date"
 
 
@@ -101,10 +95,12 @@ def test_playground_links_hold_their_example(page: Path) -> None:
         settings = tomllib.loads(session["config"])
         check_source(
             session["source"],
-            dialect=session["dialect"],
-            schema_sql=session["schema"] or None,
-            rules=settings.get("rules"),
-            import_style=settings.get("import-style"),
+            Settings(
+                dialect=session["dialect"],
+                schema_sql=session["schema"] or None,
+                rules=settings.get("rules"),
+                import_style=settings.get("import-style"),
+            ),
         )
 
 
@@ -114,7 +110,7 @@ def test_playground_link_of_a_rule_example() -> None:
     session = links.examples(text)[0]
     assert session["config"] == '[rules]\nsqruff = "warn"\n'
     assert session["source"].startswith("from sqlty import SQL\n\nquery = SQL[tuple[str, int]]")
-    found = check_source(session["source"], rules={"sqruff": "warn"})
+    found = check_source(session["source"], Settings(rules={"sqruff": "warn"}))
     assert [d["rule"] for d in found] == ["sqruff"]
     html = '<div class="language-python highlight"><pre><code>q</code></pre></div>'
     linked = links.link(html, [None, session], "../")
@@ -133,10 +129,11 @@ def test_readme_playground_links_are_current() -> None:
 
 
 def test_config_key_docs_cover_every_key() -> None:
-    from sqlty._config import DISCOVERY_KEYS, FUNCTION_KEY_DOCS, FUNCTION_KEYS, KEY_DOCS, TOOL_KEYS
+    from sqlty._config import DISCOVERY_KEYS, FUNCTION_KEYS, TOOL_KEYS
 
-    assert list(KEY_DOCS) == [*TOOL_KEYS, *DISCOVERY_KEYS]
-    assert list(FUNCTION_KEY_DOCS) == list(FUNCTION_KEYS)
+    docs = _script("generate_docs")
+    assert list(docs.KEY_DOCS) == [*TOOL_KEYS, *DISCOVERY_KEYS]
+    assert list(docs.FUNCTION_KEY_DOCS) == list(FUNCTION_KEYS)
 
 
 def test_python_api_doctest() -> None:
@@ -236,15 +233,15 @@ def test_examples_are_rewritten(example: Path) -> None:
     """Each example is current under its own ``[tool.sqlty]``."""
     config, config_dir = load_config(example)
     schema = config.get("schema")
-    options = {
-        "dialect": config.get("dialect", "postgres"),
-        "schema_sql": (config_dir / schema).read_text() if config_dir and schema else None,
-        "import_style": config.get("import_style"),
-    }
+    settings = Settings(
+        dialect=config.get("dialect", "postgres"),
+        schema_sql=(config_dir / schema).read_text() if config_dir and schema else None,
+        import_style=config.get("import_style"),
+    )
     for path in sorted(example.glob("*.py")):
         source = path.read_text()
-        assert rewrite_source(source, **options) == source, f"{path}: run sqlty rewrite"
-        stale = [d for d in check_source(source, **options) if str(d["rule"]).startswith("stale-")]
+        assert rewrite_source(source, settings) == source, f"{path}: run sqlty rewrite"
+        stale = [d for d in check_source(source, settings) if str(d["rule"]).startswith("stale-")]
         assert not stale, f"{path}: {stale}"
 
 
@@ -259,7 +256,8 @@ def test_links(page: Path) -> None:
     prose = re.sub(r"^(`{3,}).*?^\1", "", page.read_text(), flags=re.M | re.S)
     prose = re.sub(r"`[^`\n]*`", "", prose)
     links = re.findall(r"\]\(([^)#\s]+)(?:#[^)]*)?\)", prose)
-    broken = [link for link in links if "://" not in link and not (page.parent / link).exists()]
+    relative = [link for link in links if not re.match(r"[a-z][a-z0-9+.-]*:", link)]
+    broken = [link for link in relative if not (page.parent / link).exists()]
     assert not broken
 
 

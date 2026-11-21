@@ -9,7 +9,7 @@ import sys
 import pytest
 
 from sqlty._cli import main
-from sqlty.core import HelperIndex, check_source
+from sqlty.core import HelperIndex, ParsedSource, Settings, check_source
 
 SCHEMA = """\
 CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL);
@@ -165,7 +165,9 @@ def test_modules_are_parsed_once_and_only_when_referenced(monkeypatch):
     monkeypatch.setattr(ast, "parse", lambda s, *a, **k: parses.append(s) or real(s, *a, **k))
     source = row("from pkg.ids import UserId", id="UserId", id_col="name")
     for _ in range(3):
-        diagnostics = check_source(source, schema_sql=SCHEMA, helpers=index, module="app")
+        diagnostics = check_source(
+            ParsedSource(source, "app"), Settings(schema_sql=SCHEMA, helpers=index)
+        )
     assert [d["rule"] for d in diagnostics] == ["column-type-mismatch"]
     assert IDS not in parses
     assert not any("not_parsed_unless_referenced" in p for p in parses)
@@ -223,6 +225,6 @@ def test_reexport_hops_count_from_the_importing_module():
 
     def rules(hop: int) -> list[str]:
         source = row(f"from r{hop} import UserId", id="UserId", id_col="name")
-        return [d["rule"] for d in check_source(source, schema_sql=SCHEMA, helpers=index)]
+        return [d["rule"] for d in check_source(source, Settings(schema_sql=SCHEMA, helpers=index))]
 
     assert [rules(12), rules(4), rules(12)] == [[], ["column-type-mismatch"], []]

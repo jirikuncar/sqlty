@@ -72,6 +72,8 @@ pub use dialect::{SqlDialect, UnknownDialect};
 pub use explain::{explain_select, ColumnRules};
 use expr::from_sql_type;
 pub use hover::{hover, Hover};
+#[cfg(test)]
+pub(crate) use inference::tests::allocations;
 pub use inference::RuleRef;
 pub(crate) use input::iso_types;
 pub use nullability::Nullability;

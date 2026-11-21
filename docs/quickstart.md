@@ -1,4 +1,5 @@
 ---
+title: "Quickstart: type raw SQL in Python"
 description: "How to go from plain SQL strings in Python to typed, checked queries: mark them with --sql, run sqlty rewrite to add SQL[T], then run sqlty check."
 ---
 

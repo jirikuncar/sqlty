@@ -126,6 +126,14 @@ KINDS: list[tuple[str, str, list[tuple[str, str]] | None, str | None]] = [
 STYLES = ("typeddict", "dataclass", "tuple", "tuple", "helper", "execute", "execute", "bare")
 
 
+MIGRATION = """
+ALTER TABLE app.t0000 ADD COLUMN extra integer NOT NULL;
+CREATE INDEX t0001_name ON app.t0001 (name);
+ALTER TABLE app.t0002 DROP COLUMN name;
+"""
+"""Statements for ``sqlty breaking``: two the migration rules report, one that breaks queries."""
+
+
 def schema_sql(tables: int, seed: int = 0) -> str:
     """Schema of ``tables`` tables with ALTERs, views, enums, CHECKs and functions."""
     rng = random.Random(seed)
