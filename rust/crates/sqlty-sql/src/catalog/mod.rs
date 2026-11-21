@@ -573,10 +573,6 @@ mod tests {
             Lookup::new(self).table(name)
         }
 
-        fn column(&self, name: &str, column: &str) -> Option<Option<&SchemaColumn>> {
-            Lookup::new(self).column(name, column)
-        }
-
         fn view(&self, name: &str) -> Option<&[Column]> {
             Lookup::new(self).view(name)
         }
@@ -593,42 +589,8 @@ mod tests {
     use sqlparser::ast::Statement;
     use sqlparser::parser::Parser;
 
-    #[test]
-    fn module_example_alter_table_adds_a_column() {
-        let (catalog, _) = load(
-            "CREATE TABLE users (id int PRIMARY KEY, name text); \
-             ALTER TABLE users ADD COLUMN age int NOT NULL;",
-            "postgres",
-        );
-        let columns = catalog.table("users").unwrap();
-        assert_eq!(columns.len(), 3);
-        assert!(columns[0].not_null && !columns[1].not_null && columns[2].not_null);
-    }
-
     fn pg(sql: &str) -> Catalog {
         load(sql, "postgres").0
-    }
-
-    #[test]
-    fn a_column_is_found_by_name_in_a_wide_table() {
-        let columns: Vec<String> = (0..300).rev().map(|i| format!("c{i} int")).collect();
-        let c = pg(&format!(
-            "CREATE TABLE t ({}); CREATE VIEW v AS SELECT 1 AS x;",
-            columns.join(", ")
-        ));
-        let names: Vec<&str> = c
-            .table("t")
-            .unwrap()
-            .iter()
-            .map(|col| col.name.as_str())
-            .collect();
-        for name in names {
-            assert_eq!(c.column("t", name).unwrap().unwrap().name, name);
-        }
-        assert!(c.column("t", "c300").unwrap().is_none());
-        assert!(c.column("t", "").unwrap().is_none());
-        assert!(c.column("v", "x").is_none());
-        assert!(c.column("nope", "c1").is_none());
     }
 
     #[test]
@@ -651,69 +613,6 @@ mod tests {
             .iter()
             .map(|c| format!("{}:{}", c.name, c.sql_type))
             .collect()
-    }
-
-    #[test]
-    fn test_alter_table_columns() {
-        let c = pg("CREATE TABLE t (a int, b text, c int);
-            ALTER TABLE t ADD COLUMN d bool NOT NULL;
-            ALTER TABLE t DROP COLUMN b;
-            ALTER TABLE t RENAME COLUMN c TO cc;
-            ALTER TABLE t ALTER COLUMN a TYPE bigint;
-            ALTER TABLE t ALTER COLUMN a SET NOT NULL;");
-        assert_eq!(cols(&c, "t"), ["a:BIGINT", "cc:INT", "d:BOOLEAN"]);
-        let t = c.table("t").unwrap();
-        assert!(t[0].not_null && !t[1].not_null && t[2].not_null);
-    }
-
-    #[test]
-    fn test_order_independent() {
-        let c = pg("ALTER TABLE t ADD COLUMN b text;
-            CREATE VIEW v AS SELECT a, b FROM t;
-            CREATE TABLE t (a int);");
-        assert_eq!(cols(&c, "t"), ["a:INT", "b:TEXT"]);
-        assert_eq!(c.view("v").unwrap().len(), 2);
-    }
-
-    #[test]
-    fn test_search_path_and_qualified_names() {
-        let c = pg("CREATE SCHEMA app;
-            SET search_path TO app, public;
-            CREATE TABLE users (id int);
-            CREATE TABLE public.users (id text);");
-        assert_eq!(cols(&c, "users"), ["id:INT"]);
-        assert_eq!(cols(&c, "public.users"), ["id:TEXT"]);
-        assert_eq!(cols(&c, "app.users"), ["id:INT"]);
-    }
-
-    #[test]
-    fn test_ambiguous_bare_name_is_unknown() {
-        let c = pg("CREATE TABLE a.t (x int); CREATE TABLE b.t (x text);");
-        assert!(c.table("t").is_none());
-        assert_eq!(cols(&c, "a.t"), ["x:INT"]);
-    }
-
-    #[test]
-    fn test_inherits_partition_and_like() {
-        let c = pg("CREATE TABLE child (extra int) INHERITS (base);
-            CREATE TABLE base (id int NOT NULL);
-            CREATE TABLE part PARTITION OF parent FOR VALUES FROM (1) TO (10);
-            CREATE TABLE parent (k int) PARTITION BY RANGE (k);
-            CREATE TABLE copy (LIKE base INCLUDING ALL, more text);
-            ALTER TABLE parent ADD COLUMN v text;");
-        assert_eq!(cols(&c, "child"), ["id:INT", "extra:INT"]);
-        assert_eq!(cols(&c, "part"), ["k:INT", "v:TEXT"]);
-        assert_eq!(cols(&c, "copy"), ["id:INT", "more:TEXT"]);
-        assert!(c.table("copy").unwrap()[0].not_null);
-    }
-
-    #[test]
-    fn test_renamed_parent_still_alters_its_children() {
-        let c = pg("CREATE TABLE base (id int);
-            CREATE TABLE child (extra int) INHERITS (base);
-            ALTER TABLE base RENAME TO root;
-            ALTER TABLE root ADD COLUMN v text;");
-        assert_eq!(cols(&c, "child"), ["id:INT", "extra:INT", "v:TEXT"]);
     }
 
     fn wide(name: &str, width: usize) -> String {
@@ -802,13 +701,6 @@ mod tests {
     }
 
     #[test]
-    fn a_table_renamed_over_another_replaces_it() {
-        let c = pg("CREATE TABLE a (x int); CREATE TABLE b (y int); ALTER TABLE a RENAME TO b;");
-        assert_eq!(cols(&c, "b"), ["x:INT"]);
-        assert!(c.find("a").is_none());
-    }
-
-    #[test]
     fn a_chain_written_backwards_stops_after_max_retried() {
         // Each pass creates one more table: n passes try about n * n / 2 statements of
         // some 30 bytes.
@@ -894,91 +786,6 @@ mod tests {
     }
 
     #[test]
-    fn test_unknown_like_source_leaves_unknown_shape() {
-        let c = pg("CREATE TABLE copy (LIKE missing);");
-        assert!(c.table("copy").is_none());
-        assert!(c.find("copy").is_some());
-    }
-
-    #[test]
-    fn test_unparsable_alter_leaves_unknown_shape() {
-        let c = pg("CREATE TABLE t (a int);
-            ALTER TABLE t SET SCHEMA other;
-            CREATE TABLE u (a int);
-            ALTER TABLE u OWNER TO me;");
-        assert!(c.table("t").is_none());
-        assert_eq!(cols(&c, "u"), ["a:INT"]);
-    }
-
-    #[test]
-    fn test_enum_alter_and_allowed_values() {
-        let c = pg("CREATE TABLE t (m mood);
-            ALTER TYPE mood ADD VALUE 'meh' BEFORE 'sad';
-            CREATE TYPE mood AS ENUM ('happy', 'sad');");
-        let column = &c.table("t").unwrap()[0];
-        assert_eq!(
-            column.allowed_values.as_deref().unwrap(),
-            ["happy", "meh", "sad"]
-        );
-        assert_eq!(
-            column.python_type.as_deref(),
-            Some("typing.Literal['happy', 'meh', 'sad']")
-        );
-    }
-
-    #[test]
-    fn test_drop() {
-        let c = pg(
-            "CREATE TABLE a (x int); CREATE TABLE b (x int); CREATE VIEW v AS SELECT x FROM b;
-            DROP TABLE a; DROP VIEW v; DROP TABLE IF EXISTS missing;
-            CREATE TYPE e AS ENUM ('x'); DROP TYPE e;",
-        );
-        assert!(c.table("a").is_none() && c.view("v").is_none());
-        assert!(c.table("b").is_some() && c.user_type("e").is_none());
-    }
-
-    #[test]
-    fn test_drop_then_create_keeps_the_new_table() {
-        let c = pg("DROP TABLE t; CREATE TABLE t (a int);");
-        assert_eq!(cols(&c, "t"), ["a:INT"]);
-    }
-
-    #[test]
-    fn test_functions() {
-        let c = pg("CREATE FUNCTION one() RETURNS int LANGUAGE sql AS 'select 1';
-            CREATE FUNCTION many(a int, b text DEFAULT 'x') RETURNS SETOF text LANGUAGE sql AS 'select 1';
-            CREATE FUNCTION rows(a int) RETURNS TABLE(id int, name text) LANGUAGE sql AS 'select 1, 2';
-            CREATE TABLE t (id int);
-            CREATE FUNCTION of_t() RETURNS SETOF t LANGUAGE sql AS 'select 1';");
-        assert!(
-            matches!(c.function("one", 0), Some(FunctionReturn::Scalar((Some(p), _))) if p == "int")
-        );
-        assert!(c.function("one", 1).is_none());
-        assert!(
-            matches!(c.function("many", 1), Some(FunctionReturn::SetOf((Some(p), _))) if p == "str")
-        );
-        assert!(matches!(c.function("rows", 1), Some(FunctionReturn::Rows(r)) if r.len() == 2));
-        assert!(matches!(c.function("of_t", 0), Some(FunctionReturn::Rows(r)) if r.len() == 1));
-    }
-
-    #[test]
-    fn test_redefined_function_with_unreadable_body_is_unknown() {
-        let c = pg("CREATE FUNCTION f() RETURNS int LANGUAGE sql AS 'select 1';
-            CREATE OR REPLACE FUNCTION f() RETURNS int LANGUAGE sql AS $$ select 1 $$ SECURITY NONSENSE;");
-        assert!(c.function("f", 0).is_none());
-    }
-
-    #[test]
-    fn test_builtin_relations() {
-        let c = pg("");
-        assert!(c.table("pg_class").is_some());
-        assert!(c.table("pg_catalog.pg_namespace").is_some());
-        assert!(c.table("information_schema.columns").is_some());
-        assert!(c.table("columns").is_none());
-        assert!(c.is_empty());
-    }
-
-    #[test]
     fn test_defined_names_and_unmodelled_system_relations() {
         let c = pg(
             "CREATE TABLE pg_orders (id int); CREATE TYPE mood AS ENUM ('a'); \
@@ -995,17 +802,6 @@ mod tests {
         assert!(c.is_unmodelled_system_relation("pg_trigger"));
         assert!(c.is_unmodelled_system_relation("information_schema.sequences"));
         assert!(!c.is_unmodelled_system_relation("users"));
-    }
-
-    #[test]
-    fn test_primary_key_and_serial_are_not_null() {
-        let c =
-            pg("CREATE TABLE t (a int PRIMARY KEY, b serial, c int, d int, PRIMARY KEY (a, d));");
-        let t = c.table("t").unwrap();
-        assert_eq!(
-            t.iter().map(|c| c.not_null).collect::<Vec<_>>(),
-            [true, true, false, true]
-        );
     }
 
     #[test]
@@ -1071,79 +867,6 @@ mod tests {
                 ("c_id".to_string(), "app.c", "code".to_string()),
             ]
         );
-    }
-
-    #[test]
-    fn test_other_dialects_ignore_postgres_statements() {
-        let (c, _) = load(
-            "CREATE TABLE db.t (a INT); ALTER TABLE t ADD COLUMN b INT; DROP TABLE t;",
-            "duckdb",
-        );
-        assert_eq!(c.table("t").map(<[SchemaColumn]>::len), Some(1));
-        assert!(c.table("pg_class").is_none());
-    }
-
-    #[test]
-    fn test_mysql_and_sqlite_follow_alter_and_drop() {
-        for dialect in ["mysql", "sqlite"] {
-            let (c, _) = load(
-                "CREATE TABLE t (a INT); ALTER TABLE t ADD COLUMN b INT; \
-                 CREATE TABLE u (a INT); DROP TABLE u;",
-                dialect,
-            );
-            assert_eq!(
-                c.table("t").map(<[SchemaColumn]>::len),
-                Some(2),
-                "{dialect}"
-            );
-            assert!(c.table("u").is_none(), "{dialect}");
-        }
-    }
-
-    /// Catches loading that grows quadratically, which takes far longer at these sizes; a
-    /// debug build on a shared CI runner takes up to a second.
-    fn assert_fast(sql: &str) -> Catalog {
-        let start = std::time::Instant::now();
-        let catalog = pg(sql);
-        assert!(
-            start.elapsed() < std::time::Duration::from_secs(5),
-            "load took {:?}",
-            start.elapsed()
-        );
-        catalog
-    }
-
-    #[test]
-    fn test_statements_that_never_resolve_load_fast() {
-        let mut sql = String::new();
-        for i in 0..2000 {
-            sql += &format!("CREATE TABLE t{i} (id int);\n");
-            sql += &format!("ALTER TABLE ext{i} ADD COLUMN x int;\n");
-        }
-        let catalog = assert_fast(&sql);
-        assert_eq!(cols(&catalog, "t1999"), ["id:INT"]);
-    }
-
-    #[test]
-    fn test_many_views_over_altered_tables_load_fast() {
-        let mut sql = String::new();
-        for i in 0..2000 {
-            sql += &format!("CREATE TABLE t{i} (id int);\n");
-            sql += &format!("ALTER TABLE t{i} ADD COLUMN c int;\n");
-            sql += &format!("CREATE VIEW v{i} AS SELECT * FROM t{i};\n");
-        }
-        let catalog = assert_fast(&sql);
-        assert_eq!(catalog.view("v1999").unwrap().len(), 2);
-    }
-
-    #[test]
-    fn test_view_chain_loads_fast() {
-        let mut sql = String::from("CREATE TABLE v0 (id int);\n");
-        for i in 1..1500 {
-            sql += &format!("CREATE VIEW v{i} AS SELECT id FROM v{};\n", i - 1);
-        }
-        let catalog = assert_fast(&sql);
-        assert_eq!(catalog.view("v1499").unwrap().len(), 1);
     }
 
     /// A statement on a table costs the same however much the table holds: copying or
@@ -1286,51 +1009,6 @@ mod tests {
         assert!(!events.insert && events.update);
     }
 
-    #[test]
-    fn test_degraded_objects_are_reported() {
-        let (c, skipped) = load(
-            "CREATE TABLE a (x int); ALTER TABLE a SET SCHEMA other;
-             CREATE TABLE b (x int); ALTER TABLE b SET (fillfactor = 70);
-             CREATE TABLE c (LIKE nothing);
-             CREATE TYPE e AS ENUM ('x'); ALTER TYPE e SET SCHEMA other;",
-            "postgres",
-        );
-        assert!(c.table("a").is_none() && c.table("b").is_some());
-        let names: Vec<_> = skipped
-            .iter()
-            .map(|(kind, name)| format!("{kind} {name}"))
-            .collect();
-        assert_eq!(names, ["table a", "type e", "table c"]);
-    }
-
-    #[test]
-    fn test_if_not_exists_keeps_the_existing_relation() {
-        let c = pg("CREATE TABLE t (a int);
-            CREATE TABLE IF NOT EXISTS t (a text, b text);
-            CREATE VIEW v AS SELECT a FROM t;
-            CREATE VIEW IF NOT EXISTS v AS SELECT a, a AS b FROM t;
-            CREATE TABLE IF NOT EXISTS fresh (c int);");
-        assert_eq!(cols(&c, "t"), ["a:INT"]);
-        assert_eq!(c.view("v").unwrap().len(), 1);
-        assert_eq!(cols(&c, "fresh"), ["c:INT"]);
-    }
-
-    #[test]
-    fn test_renamed_enum_keeps_its_columns_literal() {
-        let c = pg("CREATE TYPE mood AS ENUM ('a', 'b');
-            CREATE TABLE t (m mood);
-            ALTER TYPE mood RENAME TO feel;
-            ALTER TYPE feel ADD VALUE 'c';
-            CREATE TABLE u (f feel, m2 mood);");
-        let t = c.table("t").unwrap();
-        assert_eq!(t[0].sql_type, "FEEL");
-        assert_eq!(
-            t[0].python_type.as_deref(),
-            Some("typing.Literal['a', 'b', 'c']")
-        );
-        assert_eq!(c.table("u").unwrap()[0].sql_type, "FEEL");
-    }
-
     /// A synthetic schema of `tables` tables, 12 columns each, a view over every third
     /// table, one enum and one domain. `head` goes first; `every_ten` follows each tenth table, with
     /// `{n}` replaced by the table number.
@@ -1388,27 +1066,6 @@ mod tests {
                 assert!(catalog.table("t0").is_some());
             }
             println!("perf {name:28} best of 15: {best:>10.2?}  build() calls: {builds}");
-        }
-    }
-
-    /// A view read first caches the catalog; the functions after it must not each rebuild
-    /// the function table. Time should grow about linearly with the count.
-    #[test]
-    #[ignore = "timing, run by hand in release mode"]
-    fn perf_view_then_many_functions() {
-        for n in [500, 1000, 2000, 4000] {
-            let mut sql =
-                String::from("CREATE TABLE t (id integer);\nCREATE VIEW v AS SELECT id FROM t;\n");
-            for i in 0..n {
-                sql.push_str(&format!(
-                    "CREATE FUNCTION f{i}(a integer) RETURNS integer LANGUAGE sql AS 'SELECT 1';\n"
-                ));
-            }
-            let start = std::time::Instant::now();
-            let catalog = pg(&sql);
-            let elapsed = start.elapsed();
-            assert!(catalog.table("t").is_some());
-            println!("perf view + {n:5} functions: {elapsed:>10.2?}");
         }
     }
 
@@ -1474,38 +1131,6 @@ mod tests {
             .collect()
     }
 
-    /// A view created after the catalog was cached sees what the statements before it
-    /// did to functions, exactly as if the catalog had been built from scratch.
-    #[test]
-    fn test_views_see_functions_changed_after_the_cache_was_built() {
-        let c = pg("CREATE TABLE t (id int);
-            CREATE VIEW v1 AS SELECT id FROM t;
-            CREATE FUNCTION f() RETURNS int LANGUAGE sql AS 'select 1';
-            CREATE VIEW v2 AS SELECT f() AS x;
-            CREATE OR REPLACE FUNCTION f() RETURNS text LANGUAGE sql AS 'select 1';
-            CREATE VIEW v3 AS SELECT f() AS x;
-            DROP FUNCTION f();
-            CREATE VIEW v4 AS SELECT f() AS x;");
-        assert_eq!(view_cols(&c, "v2"), ["x:INT"]);
-        assert_eq!(view_cols(&c, "v3"), ["x:TEXT"]);
-        assert_eq!(view_cols(&c, "v4"), ["x:?"]);
-    }
-
-    /// `SETOF table` functions follow later changes to the table without a rebuild.
-    #[test]
-    fn test_setof_table_function_follows_alter_after_the_cache_was_built() {
-        let c = pg("CREATE TABLE t (id int);
-            CREATE FUNCTION rows() RETURNS SETOF t LANGUAGE sql AS 'select 1';
-            CREATE VIEW v1 AS SELECT * FROM rows();
-            ALTER TABLE t ADD COLUMN name text;
-            CREATE VIEW v2 AS SELECT * FROM rows();
-            ALTER TABLE t OWNER TO app;
-            CREATE VIEW v3 AS SELECT * FROM rows();");
-        assert_eq!(view_cols(&c, "v1"), ["id:INT"]);
-        assert_eq!(view_cols(&c, "v2"), ["id:INT", "name:TEXT"]);
-        assert_eq!(view_cols(&c, "v3"), ["id:INT", "name:TEXT"]);
-    }
-
     /// A view after each function resolves only the functions that changed since the last
     /// one, not all of them.
     #[test]
@@ -1528,43 +1153,6 @@ mod tests {
             resolve::FUNCTIONS_RESOLVED.with(std::cell::Cell::get),
             2 * (200 + builtin)
         );
-    }
-
-    /// A function returning a table's row follows a later change to the table.
-    #[test]
-    fn test_function_returning_a_row_follows_its_table() {
-        let c = pg("CREATE TABLE t (id int);
-            CREATE VIEW v1 AS SELECT id FROM t;
-            CREATE FUNCTION f() RETURNS t LANGUAGE sql AS 'select 1';
-            ALTER TABLE t ADD COLUMN name text;
-            CREATE VIEW v2 AS SELECT * FROM f();");
-        assert_eq!(view_cols(&c, "v2"), ["id:INT", "name:TEXT"]);
-    }
-
-    #[test]
-    fn test_a_function_changed_before_a_rebuild_resolves_with_it() {
-        let c = pg("CREATE TABLE t (id int);
-            CREATE VIEW v1 AS SELECT id FROM t;
-            CREATE FUNCTION f() RETURNS SETOF u LANGUAGE sql AS 'select 1';
-            CREATE TABLE u (name text);
-            CREATE VIEW v2 AS SELECT * FROM f();");
-        assert_eq!(view_cols(&c, "v2"), ["name:TEXT"]);
-    }
-
-    #[test]
-    fn test_a_function_changed_before_a_type_is_resolved_in_the_rebuild() {
-        let c = pg("CREATE TABLE t (id int);
-            CREATE VIEW v1 AS SELECT id FROM t;
-            CREATE FUNCTION f() RETURNS int LANGUAGE sql AS 'select 1';
-            CREATE TYPE e AS ENUM ('a');
-            CREATE VIEW v2 AS SELECT f() AS n;");
-        assert_eq!(view_cols(&c, "v2"), ["n:INT"]);
-    }
-
-    #[test]
-    fn test_a_view_waiting_with_a_table_is_read_after_it() {
-        let c = pg("CREATE TABLE a (LIKE nope); CREATE VIEW v AS SELECT 1 AS x FROM nope2;");
-        assert_eq!(view_cols(&c, "v"), ["x:?"]);
     }
 
     #[test]

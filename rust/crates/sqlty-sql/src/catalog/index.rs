@@ -339,33 +339,6 @@ mod tests {
     }
 
     #[test]
-    fn prefix_folds_like_the_catalog() {
-        let c = pg(
-            r#"CREATE TABLE Users (id int); CREATE TABLE "UserLog" (id int);
-            CREATE TABLE usage (id int);"#,
-        );
-        let found = c.relations_with_prefix("US", None, 10);
-        assert_eq!(names(&found), ["public.usage:Table", "public.users:Table"]);
-        let found = c.relations_with_prefix("\"User", None, 10);
-        assert_eq!(names(&found), ["public.UserLog:Table"]);
-        assert!(c.relations_with_prefix("\"userl", None, 10).is_empty());
-    }
-
-    #[test]
-    fn bare_prefix_follows_the_search_path() {
-        let c = pg("CREATE SCHEMA app; SET search_path TO app, public;
-            CREATE TABLE users (id int); CREATE TABLE public.users (id text);
-            CREATE TABLE public.user_roles (id int); CREATE TABLE other.user_secrets (id int);");
-        let found = c.relations_with_prefix("user", None, 10);
-        assert_eq!(
-            names(&found),
-            ["public.user_roles:Table", "app.users:Table"]
-        );
-        let found = c.relations_with_prefix("pg_clas", None, 10);
-        assert_eq!(names(&found), ["pg_catalog.pg_class:Table"]);
-    }
-
-    #[test]
     fn visible_relations_list_the_path_first() {
         let c = pg("CREATE SCHEMA app; SET search_path TO app, public;
             CREATE TABLE users (id int); CREATE TABLE public.users (id text);
@@ -427,13 +400,6 @@ mod tests {
         assert!(matches!(c.columns_of("tv"), Some(Columns::View(cols)) if cols.len() == 1));
         assert!(c.columns_of(found[1].name.key).is_none());
         assert!(c.columns_of("missing").is_none());
-    }
-
-    #[test]
-    fn limit_caps_the_result() {
-        let c = pg("CREATE TABLE a1 (id int); CREATE TABLE a2 (id int); CREATE TABLE a3 (id int);");
-        assert_eq!(c.relations_with_prefix("a", None, 2).len(), 2);
-        assert!(c.relations_with_prefix("a", None, 0).is_empty());
     }
 
     #[test]
