@@ -1688,6 +1688,31 @@ class Box[DB]:
 # error:
 ```
 
+### A name the module declares, read in a class
+
+A name of the module is what the module declares it to be, whatever the class it is
+read in. `Self` at the top of a module names no class, in a class body or outside one.
+
+```python
+from typing import Self
+from pkg.db import DB, make_untyped
+
+held: Self = make_untyped()
+db: DB = make_untyped()
+
+class Sub(DB):
+    class Inner:
+        mine = held
+        mine.one("SELECT name FROM users", int)
+        held.one("SELECT name FROM users", int)
+        # error: [column-type-mismatch]
+        db.one("SELECT name FROM users", int)
+
+held.one("SELECT name FROM users", int)
+# error: [column-type-mismatch]
+db.one("SELECT name FROM users", int)
+```
+
 ## A diamond follows the method resolution order
 
 `Both` inherits `one` from `Right`: Python looks in `Left`, `Right`, then `Base`. ty:

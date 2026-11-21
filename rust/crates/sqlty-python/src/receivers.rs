@@ -764,6 +764,10 @@ pub struct Resolver<'s, 'a> {
     globals: RefCell<HashMap<String, HashMap<String, Option<Value>>>>,
     /// What a dotted name of an annotation is, read where no scope binds its head.
     spelled: RefCell<HashMap<String, Option<Value>>>,
+    /// The helper each method of each class is: asked once.
+    methods: RefCell<HashMap<String, HashMap<Class, Option<&'s Helper>>>>,
+    /// What each lone declaration states, by where its annotation is written.
+    stated: RefCell<FxHashMap<usize, Option<Value>>>,
     /// What a name holds where some of its bindings reach: asked once.
     reached: RefCell<FxHashMap<Reached, Option<Value>>>,
     /// The helper a method of a value that is any of several classes calls: asked once.
@@ -800,6 +804,8 @@ impl<'s, 'a> Resolver<'s, 'a> {
             shapes: RefCell::default(),
             agreed: RefCell::default(),
             reached: RefCell::default(),
+            stated: RefCell::default(),
+            methods: RefCell::default(),
             globals: RefCell::default(),
             spelled: RefCell::default(),
             called: RefCell::default(),
@@ -849,6 +855,27 @@ impl<'s, 'a> Resolver<'s, 'a> {
             Value::Type(class) | Value::Unresolved(class) => (class, true),
             _ => return None,
         };
+        // Asked at every call of the method: kept by the borrowed name and class.
+        let known = self
+            .methods
+            .borrow()
+            .get(name)
+            .map(|classes| classes.get(class).copied());
+        let found = match known {
+            Some(Some(found)) => found,
+            _ => {
+                let found = self.method_in(class, name);
+                let mut methods = self.methods.borrow_mut();
+                let classes = methods.entry(name.to_string()).or_default();
+                classes.insert(class.clone(), found);
+                found
+            }
+        };
+        found.filter(|found| !on_class || found.kind != Kind::Instance)
+    }
+
+    /// The helper the method `name` of `class` is, on the class or on an instance.
+    fn method_in(&self, class: &Class, name: &str) -> Option<&'s Helper> {
         for base in self.order(class)?.iter() {
             let key = format!("{}.{name}", base.name);
             let own = (base.module == self.module)
@@ -856,18 +883,18 @@ impl<'s, 'a> Resolver<'s, 'a> {
                 .flatten();
             // A class its module defines has the helpers of that module; a name known
             // by its path only may be one the module re-exports.
-            let defined = self
-                .facts(&base.module)
-                .is_some_and(|facts| facts.classes.contains_key(&base.name));
             let found = own.or_else(|| {
                 let helpers = self.helpers?;
+                let defined = self
+                    .facts(&base.module)
+                    .is_some_and(|facts| facts.classes.contains_key(&base.name));
                 match defined {
                     true => helpers.modules.get(&base.module)?.get(&key),
                     false => helpers.get(&base.module, &key),
                 }
             });
-            if let Some(found) = found {
-                return (!on_class || found.kind != Kind::Instance).then_some(found);
+            if found.is_some() {
+                return found;
             }
             // A base that is not read may define the method, and a class that defines it
             // itself hides the helper of its bases.
@@ -1186,7 +1213,13 @@ impl<'s, 'a> Resolver<'s, 'a> {
         let id = bindings.as_ptr().addr();
         let body = self.source.body();
         let reach = self.held((0, id), name, body, bindings, false, env.at?)?;
-        let env = Env { stack: &[], ..env };
+        // A name of the module is what the module makes it, whatever the class it is
+        // read in: `Self` there names no class.
+        let env = Env {
+            stack: &[],
+            this: None,
+            ..env
+        };
         Some(self.reached((name, id), &reach, true, env))
     }
 
@@ -1308,11 +1341,16 @@ impl<'s, 'a> Resolver<'s, 'a> {
             return None;
         }
         // A declaration alone states the type, read where no statement is: it asks
-        // nothing of the names of the scope, so nothing is kept of it.
+        // nothing of the names of the scope, and is kept by where it is written.
         if let ([(Origin::Declared(declared, _), _)], None) = (&reach.origins[..], reach.narrowed) {
+            let written = std::ptr::from_ref::<Expr>(declared).addr();
+            if let Some(known) = self.stated.borrow().get(&written) {
+                return known.clone();
+            }
             let left = self.fuel.replace(FUEL);
             let found = self.declared(&annotation(declared, 0), Env { at: None, ..env }, 1);
             self.fuel.set(left);
+            self.stated.borrow_mut().insert(written, found.clone());
             return found;
         }
         let scope = env.stack.last().copied().unwrap_or(0);
