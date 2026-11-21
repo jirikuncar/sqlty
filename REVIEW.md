@@ -105,7 +105,7 @@ Style, naming and refactoring suggestions are Nit at most.
 - **Performance claims** come with numbers from `make bench-ci`, `bench-rust` or a
   script in the PR, against the merge base, same machine, and identical output.
 - **Public surface**: new API in `sqlty.core.__all__` and
-  `docs/reference/python-api.md`; new config keys in `KEY_DOCS` and the playground
+  `docs/reference/python-api.md`; new config keys in `KEY_DOCS` (`scripts/generate_docs.py`) and the playground
   and VS Code settings; generated docs current (`make generate-docs`).
 
 ## Do not report

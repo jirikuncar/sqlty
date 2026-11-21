@@ -272,7 +272,7 @@ sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
   mdtest code block: new mdtests extend it automatically.
 - `docs/reference/configuration.md`, `cli.md` and `rules.md` hold tables between
   `<!-- generated:NAME -->` markers, rendered by `scripts/generate_docs.py` from `KEY_DOCS` in
-  `_config.py`, the clap commands of `sqlty-cli` and the rule pages. Edit those, then run
+  the script itself, the clap commands of `sqlty-cli` and the rule pages. Edit those, then run
   `make generate-docs`; `test_generated_reference_is_current` fails on drift.
 - `tests/test_docs.py` checks that every rule has a page in `docs/reference/rules/`, that
   relative links resolve, that `examples/` need no rewrite, and runs the
