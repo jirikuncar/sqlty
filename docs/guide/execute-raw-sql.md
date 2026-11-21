@@ -163,6 +163,7 @@ import aiosqlite
 
 
 async def rename(db: aiosqlite.Connection, name: str) -> None:
+    await db.execute("UPDATE users SET name = ? WHERE id = ?", (name, 1))
     # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
     await db.execute("UPDATE users SET name = ? WHERE id = ?", (name,))
 ```
@@ -185,8 +186,9 @@ class User(NamedTuple):
     name: str
 
 
-# error:
 by_name = SQL[User]("--sql\nSELECT id, name FROM users WHERE name = :name")
+# error: [unknown-column]
+by_email = SQL[User]("--sql\nSELECT id, name FROM users WHERE mail = :email")
 
 
 def find(conn: Connection, name: str) -> list[User]:
@@ -205,10 +207,12 @@ MySQL, write the marker as `-- sql`, see [Writing queries](writing-queries.md)):
 
 ```python
 from django.db import connection
+from sqlty import SQL
 
 
 def names() -> list[tuple[str]]:
     with connection.cursor() as cursor:
+        cursor.execute(SQL[tuple[str]]("--sql\nSELECT name FROM users"))
         # error: [unknown-table] "table `accounts` is not defined in the schema"
         cursor.execute("--sql\nSELECT name FROM accounts")
         return cursor.fetchall()
