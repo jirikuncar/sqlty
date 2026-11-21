@@ -313,13 +313,7 @@ mod tests {
     fn mysql_forwards_every_override() {
         let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
         let metadata = std::process::Command::new(cargo)
-            .args([
-                "metadata",
-                "--format-version",
-                "1",
-                "--offline",
-                "--manifest-path",
-            ])
+            .args(["metadata", "--format-version", "1", "--manifest-path"])
             .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"))
             .output()
             .unwrap();
