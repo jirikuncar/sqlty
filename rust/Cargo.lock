@@ -1820,10 +1820,14 @@ name = "sqlty-format"
 version = "0.8.0"
 dependencies = [
  "regex",
+ "ruff_python_ast",
+ "ruff_python_parser",
+ "ruff_text_size",
  "sqlty-python",
  "sqlty-sql",
  "sqruff-lib",
  "sqruff-lib-core",
+ "toml",
 ]
 
 [[package]]

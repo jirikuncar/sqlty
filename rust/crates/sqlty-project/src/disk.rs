@@ -177,6 +177,23 @@ mod tests {
     }
 
     #[test]
+    fn reads_files_and_resolves_the_part_that_exists() {
+        let root = std::env::temp_dir().join(format!("sqlty-disk-resolve-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("a.py"), "x = 1\n").unwrap();
+        let read = Disk.read(&root.join("a.py"));
+        let missing = Disk.read(&root.join("missing.py"));
+        let unlisted = Disk.list(&root.join("missing"));
+        let resolved = Disk.canonical(&root.join("missing/b.py"));
+        let canonical = std::fs::canonicalize(&root).unwrap();
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(matches!(read, Read::Text(text) if text == b"x = 1\n"));
+        assert!(matches!(missing, Read::Missing));
+        assert!(matches!(unlisted, Listing::Missing));
+        assert_eq!(resolved, canonical.join("missing/b.py"));
+    }
+
+    #[test]
     fn a_relative_path_that_does_not_exist_stays() {
         let missing = Path::new("no-such-dir/x.py");
         assert_eq!(Disk.canonical(missing), missing);

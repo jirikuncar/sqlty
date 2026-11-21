@@ -332,6 +332,13 @@ mod tests {
     }
 
     #[test]
+    fn a_query_of_concatenated_literals_is_not_formatted() {
+        let style = ImportStyle::parse(None).unwrap();
+        let source = "q = (\"--sql\\nselect a \" \"from t where b=%s\")\n";
+        assert_eq!(format_source(source, "postgres", &style), source);
+    }
+
+    #[test]
     fn a_query_past_max_tokens_is_neither_formatted_nor_linted() {
         let style = ImportStyle::parse(None).unwrap();
         let sum = |terms: usize| vec!["a"; terms].join("+");
