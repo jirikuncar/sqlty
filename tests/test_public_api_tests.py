@@ -7,6 +7,7 @@ ROOT = Path(__file__).parent.parent
 LIMITS = ROOT / "scripts" / "internal-tests.txt"
 PRIVATE = re.compile(
     r"^\s*(?:from|import)\s+sqlty(?:\.\w+)*\._(?!core\b)\w+"
+    r"|[\"']sqlty(?:\.\w+)*\._(?!core\b)\w+"  # a module named in a string: patch, import_module
     r"|^\s*from\s+sqlty(?:\.\w+)*\s+import\s+[^#\n]*\b_(?!core\b)\w+",
     re.MULTILINE,
 )

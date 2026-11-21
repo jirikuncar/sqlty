@@ -14,7 +14,6 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
-from urllib.parse import quote
 
 import pytest
 
@@ -825,7 +824,7 @@ def test_internal_error_exits_2(monkeypatch, capsys) -> None:
 
     assert code == 2
     assert "internal error" in err
-    assert _issue_url("RuntimeError: boom") in err
+    assert _issue_url("RuntimeError%3A%20boom", "RuntimeError%3A%20boom") in err
 
 
 @pytest.mark.parametrize("files", [1, 5000])
@@ -850,7 +849,7 @@ def test_a_panic_is_an_internal_error(monkeypatch, capsys) -> None:
     code, err = _crash(monkeypatch, capsys, PanicException("boom"))
 
     assert code == 2
-    assert _issue_url("PanicException: boom") in err
+    assert _issue_url("PanicException%3A%20boom", "PanicException%3A%20boom") in err
 
 
 def test_an_interrupt_is_not_an_internal_error(monkeypatch, capsys) -> None:
@@ -858,20 +857,32 @@ def test_an_interrupt_is_not_an_internal_error(monkeypatch, capsys) -> None:
         _crash(monkeypatch, capsys, KeyboardInterrupt())
 
 
-def _issue_url(cause: str) -> str:
-    """The new-issue link of a crash: the form prefilled with the first line, the cause and the versions."""
-    fields = {"title": f"Crash: {cause.splitlines()[0][:80]}", "output": cause[:2000]}
-    query = "&".join(f"{key}={quote(value, safe='')}" for key, value in fields.items())
+def _issue_url(title: str, output: str) -> str:
+    """The new-issue link of a crash: the form prefilled with the percent-encoded title and output."""
     return (
-        f"https://github.com/jirikuncar/sqlty/issues/new?template=bug_report.yml&{query}&version="
+        "https://github.com/jirikuncar/sqlty/issues/new?template=bug_report.yml"
+        f"&title=Crash%3A%20{title}&output={output}&version="
     )
 
 
-@pytest.mark.parametrize("message", ["boom\nmore", "\u00e9" * 3000])
-def test_issue_url_prefills_the_bug_report_form(monkeypatch, capsys, message: str) -> None:
+@pytest.mark.parametrize(
+    ("message", "title", "output"),
+    [
+        ("boom\nmore", "RuntimeError%3A%20boom", "RuntimeError%3A%20boom%0Amore"),
+        # 14 characters of "RuntimeError: ", then é up to 80 in the title and 2000 in the output
+        (
+            "\u00e9" * 3000,
+            "RuntimeError%3A%20" + "%C3%A9" * 66,
+            "RuntimeError%3A%20" + "%C3%A9" * 1986,
+        ),
+    ],
+)
+def test_issue_url_prefills_the_bug_report_form(
+    monkeypatch, capsys, message: str, title: str, output: str
+) -> None:
     _, err = _crash(monkeypatch, capsys, RuntimeError(message))
 
-    url = _issue_url(f"RuntimeError: {message}")
+    url = _issue_url(title, output)
     assert url in err
     assert "&environment=" in err.partition(url)[2]
 

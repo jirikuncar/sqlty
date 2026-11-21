@@ -24,8 +24,8 @@ import pytest
 
 import sqlty.core as core
 from sqlty._core import query_sites
-from sqlty.core import Diagnostic, ParsedSource
-from tests._core_views import NAME_RULES, helper_sites
+from sqlty.core import Diagnostic, ParsedSource, helper_sites
+from tests._core_views import NAME_RULES
 from tests._mdtest.parser import parse
 from tests._mdtest.runner import comments, string_constants, without_generated
 

@@ -1,4 +1,4 @@
-//! The `[tool.sqlty]` table for `sqlty._config`: loaded and validated by
+//! The `[tool.sqlty]` table for the host: loaded and validated by
 //! `sqlty_python::config`, converted to and from Python values here.
 
 use pyo3::create_exception;

@@ -191,16 +191,14 @@ COMPOSING = (
 
 
 def test_a_composition_reading_another_module_needs_a_helper_index() -> None:
-    from sqlty.core import ParsedSource
-    from tests._core_views import helper_sites
+    from sqlty.core import ParsedSource, helper_sites
 
     source = COMPOSING + 'run(sql.SQL("SELECT {} FROM t").format(cols.COLS))\n'
     assert helper_sites(ParsedSource(source), None) == [(None, [], "unchecked-query", None)]
 
 
 def test_a_composition_nested_too_deep_is_unchecked() -> None:
-    from sqlty.core import ParsedSource
-    from tests._core_views import helper_sites
+    from sqlty.core import ParsedSource, helper_sites
 
     composed = 'sql.SQL("x")'
     for _ in range(65):

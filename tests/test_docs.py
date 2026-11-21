@@ -44,7 +44,7 @@ ORACLE = sorted(
     m.name
     for m in pkgutil.walk_packages([str(ROOT / "tests" / "type_oracle")], "tests.type_oracle.")
 )
-WITH_EXAMPLES = {"sqlty", "sqlty.core", "sqlty._decode"}
+WITH_EXAMPLES = {"sqlty", "sqlty.core"}
 
 
 def test_rules_table() -> None:
@@ -394,7 +394,8 @@ def test_rule_docs_link_to_the_site(capsys: pytest.CaptureFixture[str]) -> None:
     """`sqlty rule` prints the rule pages with links a terminal user can open."""
     from sqlty._core import cli
 
-    docs_url = "https://sqlty.kuncar.dev/"
+    docs_url = tomllib.loads((ROOT / "zensical.toml").read_text())["project"]["site_url"]
+    checked = 0
 
     for name in RULES:
         assert cli(["sqlty", "rule", name]) == 0
@@ -403,3 +404,5 @@ def test_rule_docs_link_to_the_site(capsys: pytest.CaptureFixture[str]) -> None:
             if target.startswith(docs_url):
                 page = target.removeprefix(docs_url).partition("#")[0].rstrip("/")
                 assert (ROOT / "docs" / f"{page}.md").exists(), (name, target)
+                checked += 1
+    assert checked

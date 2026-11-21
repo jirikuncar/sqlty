@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import importlib.metadata
-import sys
 from collections.abc import Callable
 from typing import NamedTuple
 
 from sqlty import _core
-from sqlty.core import HelperIndex, ParsedSource
 
 
 class Rule(NamedTuple):
@@ -32,14 +30,3 @@ def _console_script() -> Callable[[list[str] | None], None]:
 def main(argv: list[str]) -> None:
     """Run ``sqlty`` with ``argv`` in this process; a non-zero exit code is a ``SystemExit``."""
     _console_script()(argv)
-
-
-def helper_sites(parsed: ParsedSource, helpers: HelperIndex | None) -> list[tuple]:
-    """The helper calls of a module as the engine reads them (``_core.module_calls``)."""
-    return _core.module_calls(
-        parsed.text,
-        version=sys.version_info[:2],
-        index=None if helpers is None else helpers.rust(),
-        name=parsed.module,
-        module=parsed.module,
-    )
