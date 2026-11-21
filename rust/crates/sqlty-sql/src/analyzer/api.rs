@@ -13,6 +13,7 @@ use super::dml::statement_returns_rows;
 use super::expr::from_sql_type;
 use super::input::{parser_input, Input};
 use super::names::alias_name;
+use super::params::{params_of, Param};
 use super::preprocess::{parse_input_as_written, parse_query, too_deep, MAX_DEPTH};
 use super::query::{Analyzer, Column};
 use super::star_expand::statement_stars;
@@ -221,6 +222,51 @@ impl Parsed {
         )
     }
 
+    /// [`returns_rows`] of the query.
+    ///
+    /// ```
+    /// use sqlty_sql::analyzer::parse;
+    ///
+    /// assert!(parse("SELECT 1", "postgres").returns_rows());
+    /// assert!(!parse("DELETE FROM t", "postgres").returns_rows());
+    /// assert!(parse("DELETE FROM t RETURNING id", "postgres").returns_rows());
+    /// ```
+    pub fn returns_rows(&self) -> bool {
+        match &self.stmts {
+            None => true,
+            Some(stmts) => stmts.first().is_some_and(statement_returns_rows),
+        }
+    }
+
+    /// [`analyze_select`] of the query, against `schema` as [`route`](super::route) chose it.
+    ///
+    /// ```
+    /// use sqlty_sql::analyzer::parse;
+    ///
+    /// let columns = parse("SELECT 1 AS one", "postgres").columns(None).unwrap();
+    /// assert_eq!(columns[0].name, "one");
+    /// assert!(parse("DELETE FROM t", "postgres").columns(None).is_none());
+    /// ```
+    pub fn columns(&self, schema: Option<&SchemaData>) -> Option<Vec<Column>> {
+        self.analyze_with_diagnostics(schema).0
+    }
+
+    /// [`analyze_params`](super::analyze_params) of `sql`, the text given to [`parse`],
+    /// against `schema` as [`route`](super::route) chose it. The tree is shared when the query has no
+    /// placeholder that needs rewriting (`$1` and none), else the rewritten text is parsed.
+    ///
+    /// ```
+    /// use sqlty_sql::analyzer::parse;
+    ///
+    /// let params = parse("SELECT %s::int", "postgres").params("SELECT %s::int", None).unwrap();
+    /// assert_eq!(params[0].python_type.as_deref(), Some("int"));
+    /// assert!(parse("SELEC", "postgres").params("SELEC", None).is_none());
+    /// ```
+    pub fn params(&self, sql: &str, schema: Option<&SchemaData>) -> Option<Vec<Param>> {
+        let shared = if self.as_written { self.first() } else { None };
+        params_of(sql, self.dialect, schema, shared)
+    }
+
     /// [`analyze_with_diagnostics`] of the query.
     pub fn analyze_with_diagnostics(
         &self,
@@ -315,4 +361,50 @@ pub fn returns_rows(sql: &str, dialect: &str) -> bool {
 /// its expression's text.
 pub(super) fn text_source(input: &str, dialect: SqlDialect) -> Option<std::rc::Rc<str>> {
     matches!(dialect, SqlDialect::MySql | SqlDialect::Sqlite).then(|| std::rc::Rc::from(input))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parsed_returns_rows_as_the_free_function_did() {
+        for sql in [
+            "SELECT 1",
+            "WITH c AS (SELECT 1) SELECT * FROM c",
+            "INSERT INTO t VALUES (1)",
+            "INSERT INTO t VALUES (1) RETURNING id",
+            "UPDATE t SET a = 1",
+            "DELETE FROM t RETURNING *",
+            "CREATE TABLE t (a INT)",
+            "BEGIN",
+            "",
+            "SELEC 1",
+        ] {
+            for dialect in ["postgres", "mysql", "sqlite"] {
+                assert_eq!(
+                    parse(sql, dialect).returns_rows(),
+                    returns_rows(sql, dialect),
+                    "{sql}"
+                );
+            }
+        }
+        assert!(returns_rows("DELETE FROM t RETURNING *", "postgres"));
+        assert!(returns_rows("SELEC 1", "postgres"));
+        assert!(!returns_rows("INSERT INTO t VALUES (1)", "postgres"));
+        assert!(!returns_rows("CREATE TABLE t (a INT)", "postgres"));
+        assert!(!returns_rows("BEGIN", "postgres"));
+        assert!(!returns_rows("", "postgres"));
+    }
+
+    #[test]
+    fn parsed_columns_equal_analyze_select() {
+        for sql in ["SELECT 1 AS a, 'x'", "DELETE FROM t", "SELEC 1", ""] {
+            assert_eq!(
+                parse(sql, "postgres").columns(None),
+                analyze_select(sql, "postgres", None),
+                "{sql}"
+            );
+        }
+    }
 }

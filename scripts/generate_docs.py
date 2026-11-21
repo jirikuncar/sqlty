@@ -5,7 +5,7 @@
 
 Only the text between ``<!-- generated:NAME -->`` and ``<!-- /generated:NAME -->``
 is owned by this script; everything else in the pages is hand-written. The
-sources are ``KEY_DOCS`` / ``FUNCTION_KEY_DOCS`` / ``DEFAULT_EXCLUDE`` in
+sources are ``KEY_DOCS`` / ``FUNCTION_KEY_DOCS`` below, ``DEFAULT_EXCLUDE`` in
 ``sqlty._config``, the clap commands of ``sqlty-cli`` (``sqlty._core.cli_reference``) and
 the rule pages' front matter (``sqlty._lint.RULES``).
 ``tests/test_docs.py`` runs the ``--check`` comparison.
@@ -18,6 +18,7 @@ import re
 import sys
 from collections.abc import Iterable
 from pathlib import Path
+from typing import NamedTuple
 
 ROOT = Path(__file__).resolve().parent.parent
 REFERENCE = ROOT / "docs" / "reference"
@@ -37,6 +38,184 @@ BLOCK = re.compile(
     r"(?P<open><!-- generated:(?P<name>[\w-]+) -->\n)(?P<body>.*?)(?P<close><!-- /generated:(?P=name) -->)",
     re.S,
 )
+
+
+class KeyDoc(NamedTuple):
+    """Reference documentation of one configuration key.
+
+    ``docs/reference/configuration.md`` renders its tables from these entries
+    (``make generate-docs``); ``tests/test_docs.py`` fails when the page drifts.
+    """
+
+    type: str
+    default: str
+    used_by: str
+    summary: str
+    required: bool = False
+
+
+KEY_DOCS: dict[str, KeyDoc] = {
+    "dialect": KeyDoc(
+        '`"postgres"`, `"sqlite"`, `"mysql"`, ...',
+        '`"postgres"`',
+        "`rewrite`, `check`",
+        "SQL dialect of queries and schema",
+    ),
+    "driver": KeyDoc(
+        '`"psycopg"`',
+        "none",
+        "`rewrite`, `check`",
+        "Driver whose own classes type the columns the default mapping leaves untyped: PostgreSQL ranges",
+    ),
+    "schema": KeyDoc(
+        "string or list of strings",
+        "none",
+        "`rewrite`, `check`",
+        "Schema `.sql` files, directories or globs, relative to the configuration file",
+    ),
+    "queries": KeyDoc(
+        "string or list of strings",
+        "none",
+        "`check`",
+        "`.sql` files of named queries (aiosql, sqlc, PugSQL), directories or globs, relative to the configuration file",
+    ),
+    "query-format": KeyDoc(
+        '`"auto"`, `"aiosql"`, `"sqlc"`, `"pugsql"`, `"file"`',
+        '`"auto"`',
+        "`check`",
+        "How `queries` files name their queries; `auto` reads each file's first header",
+    ),
+    "rules": KeyDoc(
+        "table of rule = severity",
+        "per-rule defaults",
+        "`check`",
+        'Severity per lint rule: `"error"`, `"warn"` or `"ignore"`',
+    ),
+    "overrides": KeyDoc(
+        "array of tables",
+        "`[]`",
+        "`check`",
+        "Rule severities for the files `include` matches and `exclude` does not, on top of `rules`",
+    ),
+    "import-style": KeyDoc(
+        "string",
+        '`"from sqlty import SQL"`',
+        "`rewrite`, `strip`, `check`, magic codec",
+        "How rewritten code imports and spells the wrapper",
+    ),
+    "untyped": KeyDoc(
+        '`"skip"`, `"sentinel"`',
+        '`"skip"`',
+        "`rewrite`",
+        "Whether queries of unknown row type are wrapped as `SQL[UNTYPED]`",
+    ),
+    "json-types": KeyDoc(
+        '`"typing.Any"`, `"typing.TypedDict"`',
+        '`"typing.Any"`',
+        "`rewrite`, `check --fix`",
+        "How a JSON column of known shape is typed: `typing.Any`, or a generated `TypedDict`",
+    ),
+    "param-types": KeyDoc(
+        "`true`, `false`",
+        "`true`",
+        "`rewrite`, `check --fix`",
+        "Whether `SQL[R]` calls get the type of their parameters, `SQL[R, P]`",
+    ),
+    "preview": KeyDoc(
+        "boolean",
+        "`false`",
+        "`check`",
+        "Turn on features still in preview: query variants",
+    ),
+    "max-query-variants": KeyDoc(
+        "positive integer",
+        "`64`",
+        "`check`",
+        "With `preview`, the most variants of a query built in branches that `check` checks",
+    ),
+    "coerce-row-types": KeyDoc(
+        "list of strings",
+        "`[]`",
+        "`check`",
+        "`TypedDict`, `NamedTuple` and dataclass rows, as `module.Name`, the code validates with Pydantic",
+    ),
+    "functions": KeyDoc(
+        "array of tables",
+        "`[]`",
+        "`check`",
+        "Helper functions whose string argument is a query",
+    ),
+    "types": KeyDoc(
+        "table of SQL type or `table.column` = Python type",
+        "`{}`",
+        "`rewrite`, `check`",
+        "Python types a converter above the driver gives a SQL type or a column",
+    ),
+    "format-command": KeyDoc(
+        "list of strings",
+        "none",
+        "`rewrite`, `check --fix`",
+        "Formatter run on each file `rewrite` or `check --fix` changes, with the path appended",
+    ),
+    "extend": KeyDoc(
+        "string",
+        "none",
+        "`rewrite`, `strip`, `check`, magic codec",
+        "Another configuration file this one is applied on top of, relative to this file",
+    ),
+    "databases": KeyDoc(
+        "table of tables",
+        "`{}`",
+        "`rewrite`, `check`",
+        "Named databases, each with its own `dialect`, `schema` and the files it applies to",
+    ),
+    "exclude": KeyDoc(
+        "list of globs",
+        "see [Default excludes](#exclude-and-extend-exclude)",
+        "`rewrite`, `strip`, `check`",
+        "Globs skipped while walking a directory; replaces the default list",
+    ),
+    "extend-exclude": KeyDoc(
+        "list of globs",
+        "`[]`",
+        "`rewrite`, `strip`, `check`",
+        "Globs skipped in addition to `exclude` or the defaults",
+    ),
+    "respect-gitignore": KeyDoc(
+        "boolean",
+        "`true`",
+        "`rewrite`, `strip`, `check`",
+        "Skip the files `.gitignore` ignores while walking a directory",
+    ),
+}
+"""Reference docs per key of ``[tool.sqlty]``, in documentation order."""
+
+FUNCTION_KEY_DOCS: dict[str, KeyDoc] = {
+    "import-path": KeyDoc(
+        "string",
+        "none",
+        "`check`",
+        'Module path and function name, for example `"app.db.sql"`; a method is `"pkg.db.Db.fetch_all"`. '
+        "A package that re-exports it, `pkg.Db.fetch_all`, works too. "
+        'Use `"__main__.sql"` or the file name for a script run directly',
+        required=True,
+    ),
+    "query-param": KeyDoc(
+        "string",
+        "none",
+        "`check`",
+        "Name of the parameter that holds the query",
+        required=True,
+    ),
+    "return-type-param": KeyDoc(
+        "string",
+        "none",
+        "`check`",
+        "Parameter whose argument, such as `return_tp=int`, is the row type of that call "
+        "instead of an inferred one; `check` compares it with the query columns",
+    ),
+}
+"""Reference docs per key of a ``[[tool.sqlty.functions]]`` entry."""
 
 
 def _cell(text: str) -> str:
@@ -60,8 +239,6 @@ def config_blocks() -> dict[str, str]:
     from sqlty._config import (
         DEFAULT_EXCLUDE,
         DISCOVERY_KEYS,
-        FUNCTION_KEY_DOCS,
-        KEY_DOCS,
         TOOL_KEYS,
     )
 

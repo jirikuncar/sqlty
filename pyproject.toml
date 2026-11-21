@@ -200,6 +200,10 @@ indent-style = "space"
 disable = ["MD013", "MD038"]
 exclude = ["site", ".vale", ".github", "tests", "scripts/compat/reports", "plans/2026-02-13-future.md", "rust/target"]
 
+# A front-matter `title:` is the page's <title> for search results, not a second heading.
+[tool.rumdl.MD025]
+front-matter-title = ""
+
 [tool.rumdl.per-file-ignores]
 # The logo and demo GIF need HTML for light/dark variants, width and centering.
 "README.md" = ["MD033"]

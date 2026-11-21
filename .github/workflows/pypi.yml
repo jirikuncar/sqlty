@@ -490,3 +490,88 @@ jobs:
           git add Formula/sqlty.rb
           git diff --cached --quiet || git commit -m "sqlty $VERSION"
           git push origin HEAD:main
+
+  # Installs the published release from each source on every supported platform and runs it.
+  verify-release:
+    name: Verify ${{ matrix.source }} on ${{ matrix.image || matrix.os }}
+    if: github.event_name == 'release' && github.event.action == 'published'
+    needs: [publish-to-pypi, publish-to-npm, publish-wasm-to-npm, publish-to-homebrew]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - { source: pypi, os: ubuntu-latest, pythons: 3.14 3.14t 3.15 3.15t }
+          - { source: pypi, os: ubuntu-24.04-arm, pythons: 3.14 3.14t 3.15 3.15t }
+          - { source: pypi, os: macos-15-intel, pythons: 3.14 3.15 3.15t }
+          - { source: pypi, os: macos-15, pythons: 3.14 3.15 3.15t }
+          - { source: pypi, os: windows-latest, pythons: 3.14 3.15 3.15t }
+          - { source: pypi, os: windows-11-arm, pythons: 3.14 3.15 3.15t }
+          - { source: pypi, os: ubuntu-latest, image: quay.io/pypa/musllinux_1_2_x86_64 }
+          - { source: pypi, os: ubuntu-24.04-arm, image: quay.io/pypa/musllinux_1_2_aarch64 }
+          - { source: npm, os: ubuntu-latest }
+          - { source: npm, os: ubuntu-24.04-arm }
+          - { source: npm, os: macos-15-intel }
+          - { source: npm, os: macos-15 }
+          - { source: npm, os: windows-latest }
+          - { source: npm, os: windows-11-arm }
+          - { source: homebrew, os: ubuntu-latest }
+          - { source: homebrew, os: macos-15-intel }
+          - { source: homebrew, os: macos-15 }
+      fail-fast: false
+
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+      SOURCE: ${{ matrix.source }}
+      PYTHONS: ${{ matrix.pythons }}
+      IMAGE: ${{ matrix.image }}
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # uv runs the script too: the Windows images have no python3.
+      - name: Install uv
+        if: ${{ !matrix.image }}
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+          enable-cache: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: matrix.source == 'npm'
+        with:
+          node-version: 24.22.1
+          package-manager-cache: false
+
+      # The Ubuntu images ship Homebrew without putting it on PATH.
+      - name: Put Homebrew on PATH
+        if: matrix.source == 'homebrew' && runner.os == 'Linux'
+        run: echo /home/linuxbrew/.linuxbrew/bin >> "$GITHUB_PATH"
+
+      - name: Install and run the release
+        run: |
+          version=${TAG#v}
+          if [ -n "$IMAGE" ]; then
+            docker run --rm -v "$PWD/scripts:/scripts:ro" -e VERSION="$version" "$IMAGE" sh -euc '
+              /opt/python/cp314-cp314/bin/python /scripts/verify_release.py pypi "$VERSION" \
+                /opt/python/cp314-cp314/bin/python /opt/python/cp314-cp314t/bin/python \
+                /opt/python/cp315-cp315/bin/python /opt/python/cp315-cp315t/bin/python'
+          elif [ -n "$PYTHONS" ]; then
+            uv python install $PYTHONS
+            # A bare 3.15 can resolve to the free-threaded build.
+            pythons=()
+            for v in $PYTHONS; do
+              req=$v; [[ $v == *t ]] || req=$v+gil
+              # A plain assignment fails the step when the interpreter is missing.
+              python=$(uv python find --system "$req")
+              pythons+=("$python")
+            done
+            uv run --no-project --python 3.14 scripts/verify_release.py pypi "$version" "${pythons[@]}"
+          else
+            uv run --no-project --python 3.14 scripts/verify_release.py "$SOURCE" "$version"
+          fi
