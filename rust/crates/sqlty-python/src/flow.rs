@@ -770,7 +770,7 @@ mod tests {
     /// of the bindings in effect, then `narrowed` when a test narrows it.
     fn held(text: &str, name: &str) -> Vec<String> {
         let source = Source::new(text, (3, 14)).expect("parses");
-        let scan = Scan::new(source.body(), |_| false);
+        let scan = Scan::new(source.body());
         let scope = (0..scan.scopes.len())
             .find(|&scope| matches!(scan.scopes[scope], Node::Function(_)))
             .expect("a function");
@@ -1022,7 +1022,7 @@ mod tests {
             }
             WORK.with(|work| work.set(0));
             let source = Source::new(text.as_str(), (3, 14)).expect("parses");
-            let scan = Scan::new(source.body(), |_| false);
+            let scan = Scan::new(source.body());
             let Node::Function(function) = scan.scopes[1] else {
                 panic!("a function")
             };
@@ -1062,7 +1062,7 @@ mod tests {
     #[test]
     fn a_use_outside_the_body_is_not_placed() {
         let source = Source::new("def f(x=y.use()):\n    pass\n", (3, 14)).unwrap();
-        let scan = Scan::new(source.body(), |_| false);
+        let scan = Scan::new(source.body());
         let Node::Function(function) = scan.scopes[1] else {
             panic!("a function")
         };

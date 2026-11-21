@@ -1065,6 +1065,31 @@ mod tests {
     }
 
     #[test]
+    fn foreign_keys_reach_tables_defined_later() {
+        let c = pg("SET search_path = app; \
+             CREATE TABLE a (b_id int REFERENCES b, c_id int REFERENCES c (code), gone int REFERENCES gone); \
+             CREATE TABLE app.b (id int PRIMARY KEY); \
+             CREATE TABLE app.c (code text UNIQUE);");
+        let keys: Vec<_> = c
+            .foreign_keys("app.a")
+            .map(|fk| {
+                (
+                    fk.columns.join(","),
+                    fk.table.as_str(),
+                    fk.referred.join(","),
+                )
+            })
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                ("b_id".to_string(), "app.b", "id".to_string()),
+                ("c_id".to_string(), "app.c", "code".to_string()),
+            ]
+        );
+    }
+
+    #[test]
     fn test_other_dialects_ignore_postgres_statements() {
         let (c, _) = load(
             "CREATE TABLE db.t (a INT); ALTER TABLE t ADD COLUMN b INT; DROP TABLE t;",
@@ -1150,7 +1175,7 @@ mod tests {
         };
         let trigger =
             |i| format!("CREATE TRIGGER g{i} BEFORE INSERT ON t FOR EACH ROW SET NEW.a = 1;\n");
-        let cases: [(&str, &dyn Fn(usize) -> String); 8] = [
+        let cases: [(&str, &dyn Fn(usize) -> String); 9] = [
             ("postgres", &|n| {
                 each(n, &|i| format!("CREATE UNIQUE INDEX i{i} ON t (a, b);\n"))
             }),
@@ -1172,6 +1197,15 @@ mod tests {
             ("postgres", &|n| {
                 each(n, &|i| {
                     format!("ALTER TABLE t ADD CONSTRAINT k{i} CHECK (a IS NOT NULL OR b IS NOT NULL);\n")
+                })
+            }),
+            ("postgres", &|n| {
+                each(n, &|i| {
+                    format!(
+                        "ALTER TABLE t ADD COLUMN c{i} int;
+                        ALTER TABLE t ADD CONSTRAINT k{i} CHECK (t.c{i} IN (1, 2));
+                        ALTER TABLE t ADD CONSTRAINT n{i} CHECK (c{i} > 0);\n"
+                    )
                 })
             }),
             ("postgres", &|n| {

@@ -66,6 +66,9 @@ pub(super) struct RawForeignKey {
     pub(super) immediate: bool,
     /// Not added `NOT VALID`, or validated since.
     pub(super) validated: bool,
+    /// The name and search path of a referenced table not defined yet, which
+    /// [`Loader::resolve_foreign_keys`] looks up once every table is.
+    pub(super) waiting: Option<Box<(Vec<String>, Vec<String>)>>,
 }
 
 #[derive(Clone)]
@@ -165,6 +168,9 @@ pub(super) struct Loader {
     pub(super) postgres: bool,
     pub(super) relations: FxHashMap<String, Rel>,
     pub(super) types: FxHashMap<String, TypeDef>,
+    /// The labels of enums past [`LARGE_ENUM`] labels, so `ADD VALUE` finds a duplicate
+    /// without a scan. Every writer of a type forgets its entry.
+    pub(super) enum_labels: FxHashMap<String, FxHashSet<String>>,
     pub(super) functions: FxHashMap<String, Vec<RawFunction>>,
     /// Functions whose latest definition could not be read.
     pub(super) unknown_functions: FxHashSet<String>,
@@ -202,6 +208,9 @@ pub(super) struct Loader {
 /// a short schema could otherwise fill memory.
 pub(super) const MAX_SCHEMA_COLUMNS: usize = 1 << 21;
 
+/// Enums with more labels than this are indexed for `ADD VALUE` (see [`Loader::enum_labels`]).
+pub(super) const LARGE_ENUM: usize = 64;
+
 /// The most bytes of statements [`Loader::run`] tries again, in all passes, besides the
 /// schema's own length.
 pub(super) const MAX_RETRIED: usize = 1 << 24;
@@ -218,6 +227,7 @@ impl Loader {
             postgres: dialect == SqlDialect::Postgres,
             relations: FxHashMap::default(),
             types: FxHashMap::default(),
+            enum_labels: FxHashMap::default(),
             functions: FxHashMap::default(),
             unknown_functions: FxHashSet::default(),
             search_path: vec!["public".to_string()],
@@ -242,6 +252,7 @@ impl Loader {
             postgres: self.postgres,
             relations: self.relations.clone(),
             types: self.types.clone(),
+            enum_labels: FxHashMap::default(),
             functions: self.functions.clone(),
             unknown_functions: self.unknown_functions.clone(),
             search_path: self.search_path.clone(),
@@ -393,6 +404,7 @@ impl Loader {
                 self.cache = None;
                 let key = self.new_key(name, &path);
                 self.type_aliases.remove(&key);
+                self.enum_labels.remove(&key);
                 self.types
                     .insert(key, TypeDef::Domain(base.clone(), values.clone()));
                 false
@@ -401,6 +413,7 @@ impl Loader {
                 self.cache = None;
                 let key = self.new_key(name, &path);
                 self.type_aliases.remove(&key);
+                self.enum_labels.remove(&key);
                 self.types.insert(key, def.clone());
                 false
             }
@@ -677,9 +690,7 @@ impl Loader {
         if !other_engine {
             let declared: Vec<RawForeignKey> = column_keys
                 .chain(table_keys)
-                .filter_map(|(fk, columns)| {
-                    self.foreign_key(fk, &columns, &key, &table, path, true)
-                })
+                .map(|(fk, columns)| self.foreign_key(fk, &columns, &key, &table, path, true))
                 .collect();
             table.foreign_keys = declared;
         }
@@ -689,8 +700,8 @@ impl Loader {
         true
     }
 
-    /// A foreign key of the table `key`, which `table` is, over `columns`; `None` when the
-    /// table it references is not defined.
+    /// A foreign key of the table `key`, which `table` is, over `columns`. One to a table
+    /// not defined yet waits for [`Loader::resolve_foreign_keys`].
     pub(super) fn foreign_key(
         &self,
         fk: &ForeignKeyConstraint,
@@ -699,29 +710,31 @@ impl Loader {
         table: &RawTable,
         path: &[String],
         validated: bool,
-    ) -> Option<RawForeignKey> {
-        let target = parts(&fk.foreign_table, self.dialect);
-        let (target, columns_of) = if self.new_key(&fk.foreign_table, path) == key {
-            (key.to_string(), table)
+    ) -> RawForeignKey {
+        let parts = parts(&fk.foreign_table, self.dialect);
+        let found = if self.new_key(&fk.foreign_table, path) == key {
+            Some((key.to_string(), table))
         } else {
-            self.table_of(&target, path)?
+            self.table_of(&parts, path)
         };
-        let referred: Vec<String> = if fk.referred_columns.is_empty() {
-            let mut key: Vec<_> = columns_of
-                .columns
-                .iter()
-                .filter(|c| c.primary_key)
-                .collect();
-            key.sort_by_key(|column| column.key_position);
-            key.into_iter().map(|column| column.name.clone()).collect()
-        } else {
-            fk.referred_columns
-                .iter()
-                .map(|ident| fold(ident, self.dialect))
-                .collect()
+        let referred: Vec<String> = fk
+            .referred_columns
+            .iter()
+            .map(|ident| fold(ident, self.dialect))
+            .collect();
+        let (target, referred, waiting) = match found {
+            Some((target, columns_of)) if referred.is_empty() => {
+                (target, primary_key(columns_of), None)
+            }
+            Some((target, _)) => (target, referred, None),
+            None => (
+                String::new(),
+                referred,
+                Some(Box::new((parts, path.to_vec()))),
+            ),
         };
         let characteristics = fk.characteristics.as_ref();
-        Some(RawForeignKey {
+        RawForeignKey {
             name: fk.name.as_ref().map(|name| fold(name, self.dialect)),
             key: ForeignKey {
                 columns: columns
@@ -734,7 +747,54 @@ impl Loader {
             immediate: characteristics.and_then(|c| c.deferrable) != Some(true)
                 && characteristics.and_then(|c| c.enforced) != Some(false),
             validated,
-        })
+            waiting,
+        }
+    }
+
+    /// Point the foreign keys that name a table defined after them (`mysqldump` orders
+    /// tables by name) at it, and drop those whose table never is.
+    pub(super) fn resolve_foreign_keys(&mut self) {
+        let mut found = FxHashMap::default();
+        for (key, rel) in &self.relations {
+            let Some(table) = rel.table() else { continue };
+            let targets: Vec<_> = table
+                .foreign_keys
+                .iter()
+                .filter_map(|fk| {
+                    let (parts, path) = fk.waiting.as_deref()?;
+                    Some(self.table_of(parts, path).map(|(target, columns_of)| {
+                        let referred = fk.key.referred.is_empty().then(|| primary_key(columns_of));
+                        (target, referred)
+                    }))
+                })
+                .collect();
+            if !targets.is_empty() {
+                found.insert(key.clone(), targets);
+            }
+        }
+        if found.is_empty() {
+            return;
+        }
+        self.cache = None;
+        for (key, rel) in &mut self.relations {
+            let (Rel::Table(table), Some(targets)) = (rel, found.remove(key)) else {
+                continue;
+            };
+            let mut targets = targets.into_iter();
+            table.foreign_keys.retain_mut(|fk| {
+                if fk.waiting.take().is_none() {
+                    return true;
+                }
+                let Some((target, referred)) = targets.next().flatten() else {
+                    return false;
+                };
+                fk.key.table = target;
+                if let Some(referred) = referred {
+                    fk.key.referred = referred;
+                }
+                true
+            });
+        }
     }
 
     // ---- CREATE VIEW ----------------------------------------------------------------
@@ -976,6 +1036,7 @@ impl Loader {
                 Some(key) => {
                     self.cache = None;
                     self.skipped.push(("type", name.join(".")));
+                    self.enum_labels.remove(&key);
                     self.types.insert(key, TypeDef::Unknown);
                     true
                 }
@@ -1033,6 +1094,7 @@ impl Loader {
                     }
                     ObjectType::Type => {
                         if let Some(key) = self.lookup(&self.types, &name_parts, path) {
+                            self.enum_labels.remove(&key);
                             self.types.remove(&key);
                         }
                     }
@@ -1043,6 +1105,7 @@ impl Loader {
                         self.relations.retain(|key, _| !key.starts_with(&prefix));
                         self.held = self.relations.values().map(Rel::width).sum();
                         self.types.retain(|key, _| !key.starts_with(&prefix));
+                        self.enum_labels.retain(|key, _| !key.starts_with(&prefix));
                         self.functions.retain(|key, _| !key.starts_with(&prefix));
                     }
                     _ => {}
@@ -1051,6 +1114,7 @@ impl Loader {
         }
         if let Statement::DropDomain(drop) = stmt {
             if let Some(key) = self.lookup(&self.types, &parts(&drop.name, self.dialect), path) {
+                self.enum_labels.remove(&key);
                 self.types.remove(&key);
             }
         }
@@ -1171,6 +1235,13 @@ impl Loader {
         overloads.push(function);
         self.refresh_function(key);
     }
+}
+
+/// The primary key columns of `table`, in key order.
+fn primary_key(table: &RawTable) -> Vec<String> {
+    let mut key: Vec<_> = table.columns.iter().filter(|c| c.primary_key).collect();
+    key.sort_by_key(|column| column.key_position);
+    key.into_iter().map(|column| column.name.clone()).collect()
 }
 
 /// Widen a `Literal` `column` taken from a text or integer column to `str` / `int`.

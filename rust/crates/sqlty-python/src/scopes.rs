@@ -7,7 +7,8 @@ use crate::frozen::Table;
 use crate::types::symbols::Source;
 use ruff_python_ast::visitor::{walk_except_handler, walk_expr, walk_pattern, walk_stmt, Visitor};
 use ruff_python_ast::{
-    self as ast, Expr, ExprCall, ExprTString, Number, Stmt, StmtClassDef, StmtFunctionDef, UnaryOp,
+    self as ast, Expr, ExprCall, ExprTString, Number, Operator, Stmt, StmtClassDef,
+    StmtFunctionDef, UnaryOp,
 };
 use ruff_text_size::{Ranged, TextRange, TextSize};
 
@@ -61,8 +62,7 @@ pub enum Node<'a> {
 }
 
 /// What one walk of a module collects: its scopes, every binding of every name in them,
-/// and the calls `want` keeps, each with the scopes around it (innermost last, classes
-/// included).
+/// every call and t-string with its innermost scope, and every string literal.
 pub struct Scan<'a> {
     /// The scopes, by id.
     pub scopes: Vec<Node<'a>>,
@@ -91,10 +91,15 @@ pub struct Scan<'a> {
     fields: HashMap<Scope, Vec<&'a str>>,
     /// The names a function declares `global` or `nonlocal`.
     foreign: HashSet<(Scope, &'a str)>,
-    /// The calls kept, with their scopes.
-    pub calls: Vec<(&'a ExprCall, Vec<Scope>)>,
-    /// Every t-string, with its scopes.
-    pub templates: Vec<(&'a ExprTString, Vec<Scope>)>,
+    /// Every call, in visit order, with its innermost scope.
+    pub calls: Vec<(&'a ExprCall, Scope)>,
+    /// Every t-string, with its innermost scope.
+    pub templates: Vec<(&'a ExprTString, Scope)>,
+    /// Every string literal, f-string and t-string, and whether it is an operand of a `+`.
+    pub strings: Vec<(&'a Expr, bool)>,
+    /// The scopes around each scope's contents, innermost last, classes included.
+    paths: Vec<Vec<Scope>>,
+    operands: HashSet<usize>,
 }
 
 /// Where a name gets its value. Every form that binds a name is one of these: what is
@@ -136,6 +141,12 @@ pub struct Binding<'a> {
 
 #[cfg(test)]
 thread_local! {
+    /// The walks [`Scan::new`] has made on this thread.
+    pub(crate) static WALKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+thread_local! {
     /// The names read by this thread when the names of a scope were asked for, for the
     /// tests of cost.
     pub(crate) static READ: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -171,8 +182,10 @@ fn around(ranges: &[TextRange], at: u32) -> Option<u32> {
 }
 
 impl<'a> Scan<'a> {
-    /// Walks `body`, keeping the calls `want` accepts.
-    pub fn new(body: &'a [Stmt], want: impl FnMut(&'a ExprCall) -> bool) -> Self {
+    /// Walks `body`.
+    pub fn new(body: &'a [Stmt]) -> Self {
+        #[cfg(test)]
+        WALKS.with(|count| count.set(count.get() + 1));
         let mut walker = Walker {
             scan: Self {
                 scopes: vec![Node::Module],
@@ -189,8 +202,10 @@ impl<'a> Scan<'a> {
                 foreign: HashSet::new(),
                 calls: Vec::new(),
                 templates: Vec::new(),
+                strings: Vec::new(),
+                paths: vec![Vec::new()],
+                operands: HashSet::new(),
             },
-            want,
         };
         walker.visit_body(body);
         let mut scan = walker.scan;
@@ -308,6 +323,11 @@ impl<'a> Scan<'a> {
         self.stack.last().copied().unwrap_or(0)
     }
 
+    /// The scopes inside `scope`, outermost first, `scope` last; empty for the module.
+    pub fn stack(&self, scope: Scope) -> &[Scope] {
+        &self.paths[scope]
+    }
+
     /// Records that `range` of the innermost scope, a class, runs in a scope of its own.
     fn seal(&mut self, range: TextRange) {
         let scope = self.scope();
@@ -421,13 +441,15 @@ impl<'a> Scan<'a> {
         let scope = self.scopes.len();
         self.scopes.push(node);
         self.parents.push(self.scope());
+        let mut path = self.stack.clone();
+        path.push(scope);
+        self.paths.push(path);
         scope
     }
 }
 
-struct Walker<'a, W> {
+struct Walker<'a> {
     scan: Scan<'a>,
-    want: W,
 }
 
 /// The name of a type parameter.
@@ -439,7 +461,12 @@ pub fn type_parameter(param: &ast::TypeParam) -> &ast::Identifier {
     }
 }
 
-impl<'a, W> Walker<'a, W> {
+impl<'a> Walker<'a> {
+    fn string(&mut self, expr: &'a Expr) {
+        let operand = self.scan.operands.contains(&expr.start().to_usize());
+        self.scan.strings.push((expr, operand));
+    }
+
     /// Binds the type parameters of a `def` or a `class` (`def f[T](x: T)`) in its scope:
     /// a name so bound is a type variable, not what the module binds it to.
     fn bind_type_params(&mut self, type_params: Option<&'a ast::TypeParams>) {
@@ -451,7 +478,7 @@ impl<'a, W> Walker<'a, W> {
     }
 }
 
-impl<'a, W: FnMut(&'a ExprCall) -> bool> Visitor<'a> for Walker<'a, W> {
+impl<'a> Visitor<'a> for Walker<'a> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
         match stmt {
             Stmt::FunctionDef(node) => {
@@ -610,14 +637,20 @@ impl<'a, W: FnMut(&'a ExprCall) -> bool> Visitor<'a> for Walker<'a, W> {
     #[recursive::recursive]
     fn visit_expr(&mut self, expr: &'a Expr) {
         match expr {
-            Expr::Call(call) if (self.want)(call) => {
-                self.scan.calls.push((call, self.scan.stack.clone()));
+            Expr::Call(call) => {
+                let scope = self.scan.scope();
+                self.scan.calls.push((call, scope));
             }
             Expr::TString(template) => {
-                self.scan
-                    .templates
-                    .push((template, self.scan.stack.clone()));
+                let scope = self.scan.scope();
+                self.scan.templates.push((template, scope));
+                self.string(expr);
             }
+            Expr::BinOp(op) if op.op == Operator::Add => {
+                self.scan.operands.insert(op.left.start().to_usize());
+                self.scan.operands.insert(op.right.start().to_usize());
+            }
+            Expr::StringLiteral(_) | Expr::FString(_) => self.string(expr),
             Expr::Named(named) => self.scan.bind(&named.target, Origin::Unknown, named.end()),
             Expr::Lambda(lambda) => {
                 self.scan.seal(lambda.body.range());
@@ -799,14 +832,11 @@ impl Context<'_, '_> {
             return None;
         }
         let (source, value) = constant(dotted)?;
-        let scan = Scan::new(
-            if matches!(value, Expr::Name(_)) {
-                source.body()
-            } else {
-                &[]
-            },
-            |_| false,
-        );
+        let scan = Scan::new(if matches!(value, Expr::Name(_)) {
+            source.body()
+        } else {
+            &[]
+        });
         Context {
             imported: &source.imports,
             scan: &scan,
@@ -973,5 +1003,37 @@ fn class_name(expr: Option<&Expr>) -> Option<String> {
                 .then(|| text.to_string())
         }
         expr => dotted(expr),
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use ruff_python_parser::parse_module;
+
+    #[test]
+    fn one_walk_collects_calls_templates_strings_and_stacks() {
+        let text = "class A:\n    def m(self):\n        f(lambda: g(1), [h(x) for x in y])\n\
+                    k = f'a{b}' + 'c'\nt = t'd'\ndef n():\n    return 'e'\n";
+        let parsed = parse_module(text).unwrap();
+        let scan = Scan::new(&parsed.syntax().body);
+        let names: Vec<(String, Scope)> = scan
+            .calls
+            .iter()
+            .map(|(call, scope)| (dotted(&call.func).unwrap(), *scope))
+            .collect();
+        let expected = [("f", 2), ("g", 2), ("h", 2)].map(|(n, s)| (n.to_string(), s));
+        assert_eq!(names, expected);
+        assert_eq!(scan.stack(0), &[] as &[Scope]);
+        assert_eq!(scan.stack(1), &[1]);
+        assert_eq!(scan.stack(2), &[1, 2]);
+        assert_eq!(scan.stack(3), &[3]);
+        assert_eq!(scan.templates.len(), 1);
+        assert_eq!(scan.templates[0].1, 0);
+        let strings: Vec<bool> = scan.strings.iter().map(|(_, operand)| *operand).collect();
+        assert_eq!(strings, [true, true, false, false]);
+        assert!(matches!(scan.strings[2].0, Expr::TString(_)));
+        assert!(matches!(scan.strings[3].0, Expr::StringLiteral(_)));
     }
 }

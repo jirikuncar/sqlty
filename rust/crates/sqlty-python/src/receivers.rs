@@ -678,7 +678,7 @@ fn class_facts(
 impl Facts {
     /// What `source` declares as the module `module`.
     pub fn of(source: &Source, module: Option<&str>) -> Facts {
-        let scan = Scan::new(source.body(), |_| false);
+        let scan = Scan::new(source.body());
         Self::from_scan(&scan, module)
     }
 
@@ -2033,14 +2033,15 @@ mod tests {
                 ));
             }
             let source = Source::new(text.as_str(), (3, 14)).expect("parses");
-            let scan = Scan::new(source.body(), |_| true);
+            let scan = Scan::new(source.body());
             // Every class reaches a helper for `run`, the same one; none for `plain`.
             let own = crate::calls::index_functions(&source);
             assert_eq!(own.iter().count(), 8);
             let resolver = Resolver::new(&source, Some("m"), None, &own, &scan);
             STEPS.with(|steps| steps.set(0));
             let mut seen = 0;
-            for (call, stack) in &scan.calls {
+            for &(call, scope) in &scan.calls {
+                let stack = scan.stack(scope);
                 let Some(attr) = call.func.as_attribute_expr() else {
                     continue;
                 };
@@ -2072,11 +2073,12 @@ mod tests {
         // number of statements around. A name assigned twice is walked.
         let text = "class Db:\n    def run(self, q): ...\ndef f(c, x: Db):\n    y = Db()\n    if c:\n        z = Db()\n    else:\n        z = x\n    x.run('q')\n    y.run('q')\n    z.run('q')\n";
         let source = Source::new(text, (3, 14)).expect("parses");
-        let scan = Scan::new(source.body(), |_| true);
+        let scan = Scan::new(source.body());
         let own = Dict::default();
         let resolver = Resolver::new(&source, Some("m"), None, &own, &scan);
         let mut flows = Vec::new();
-        for (call, stack) in &scan.calls {
+        for &(call, scope) in &scan.calls {
+            let stack = scan.stack(scope);
             let Some(attr) = call.func.as_attribute_expr() else {
                 continue;
             };

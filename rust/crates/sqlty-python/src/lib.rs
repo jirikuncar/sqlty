@@ -50,6 +50,7 @@ pub mod compose;
 pub mod config;
 pub mod drivers;
 pub mod edit;
+pub mod facts;
 pub mod fixer;
 pub(crate) mod flow;
 pub mod frozen;
