@@ -12,7 +12,7 @@ import pytest
 from sqlty._cli import main
 from sqlty._core import module_ignores, query_sites
 from sqlty._source import ParsedSource
-from sqlty.core import check_source
+from sqlty.core import Settings, check_source
 from tests.type_oracle.outline import classes, outline
 
 SCHEMA = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);\n"
@@ -71,7 +71,7 @@ def tokenized(monkeypatch: pytest.MonkeyPatch) -> list[object]:
 
 def test_check_source_parses_nothing(parses):
     source = HELPER + USER_TYPE.replace("from pkg.db import fetch_all\n", "")
-    diagnostics = check_source(source, schema_sql=SCHEMA)
+    diagnostics = check_source(source, Settings(schema_sql=SCHEMA))
     assert [d["rule"] for d in diagnostics] == []
     assert not parses
 
@@ -90,7 +90,7 @@ def test_helper_calls_bound_the_work(monkeypatch):
     real = ast.unparse
     monkeypatch.setattr(ast, "unparse", lambda node: unparsed.append(node) or real(node))
 
-    assert check_source(parsed, schema_sql=SCHEMA) == []
+    assert check_source(parsed, Settings(schema_sql=SCHEMA)) == []
     assert len(unparsed) <= 3
 
 
@@ -151,7 +151,9 @@ def test_wrapper_without_row_type_is_not_parsed(parses):
 
 def test_parsed_source_is_reused(parses):
     parsed = ParsedSource(HELPER + USER_TYPE)
-    assert check_source(parsed, schema_sql=SCHEMA) == check_source(parsed, schema_sql=SCHEMA)
+    assert check_source(parsed, Settings(schema_sql=SCHEMA)) == check_source(
+        parsed, Settings(schema_sql=SCHEMA)
+    )
     assert not parses
 
 

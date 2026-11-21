@@ -1,4 +1,5 @@
 ---
+title: "Type-check queries in .sql files"
 description: How to type-check named queries in .sql files used with aiosql, PugSQL or sqlc, with the same sqlty rules as for queries in Python strings.
 ---
 

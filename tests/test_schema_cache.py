@@ -25,14 +25,14 @@ def test_dialect_is_part_of_the_key() -> None:
 def test_source_without_queries_is_unchanged_by_schema() -> None:
     source = "def f():\n    return 1\n"
     schema = _schema(0)
-    assert core.check_source(source, schema_sql=schema) == core.check_source(source)
-    assert core.rewrite_source(source, schema_sql=schema) == source
-    assert core.fix_source(source, schema_sql=schema) == source
+    assert core.check_source(source, core.Settings(schema_sql=schema)) == core.check_source(source)
+    assert core.rewrite_source(source, core.Settings(schema_sql=schema)) == source
+    assert core.fix_source(source, core.Settings(schema_sql=schema)) == source
 
 
 def test_source_with_a_query_uses_the_schema() -> None:
     source = 'q = "--sql\\nSELECT * FROM t"\n'
-    assert "SQL[tuple[int]]" in core.rewrite_source(source, schema_sql=_schema(0))
+    assert "SQL[tuple[int]]" in core.rewrite_source(source, core.Settings(schema_sql=_schema(0)))
 
 
 def test_sources_skipped_for_lack_of_sql_have_no_schema_diagnostics() -> None:
@@ -51,8 +51,8 @@ def test_sources_skipped_for_lack_of_sql_have_no_schema_diagnostics() -> None:
     ]
     for source, kwargs in cases:
         if "sql" not in source.lower():
-            assert core.check_source(source, schema_sql=_schema(0), **kwargs) == (
-                core.check_source(source, **kwargs)
+            assert core.check_source(source, core.Settings(schema_sql=_schema(0), **kwargs)) == (
+                core.check_source(source, core.Settings(**kwargs))
             )
 
 
@@ -66,8 +66,8 @@ def test_a_loaded_schema_stands_in_for_its_text() -> None:
     )
     assert core.schema_skipped_objects(loaded, dialect="mysql") == [("table", "bad")]
     source = 'q = "--sql\\nSELECT a FROM t"\n'
-    assert core.rewrite_source(source, dialect="mysql", schema_sql=loaded) == (
-        core.rewrite_source(source, dialect="mysql", schema_sql=sql)
+    assert core.rewrite_source(source, core.Settings(dialect="mysql", schema_sql=loaded)) == (
+        core.rewrite_source(source, core.Settings(dialect="mysql", schema_sql=sql))
     )
 
 

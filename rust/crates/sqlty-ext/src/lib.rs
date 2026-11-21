@@ -1096,8 +1096,8 @@ fn check_source(
 }
 
 /// Check the named queries of a `.sql` file: `unparsed-query` and the name rules of each
-/// statement, without those a `-- sqlty: ignore` comment on their line drops, with its
-/// `unused-ignore`. `query_format` is a `query-format` value (`"auto"`, `"aiosql"`, `"sqlc"`,
+/// statement, without those a `-- sqlty: ignore` comment on their line, or alone on the line
+/// above, drops, with its `unused-ignore`. `query_format` is a `query-format` value (`"auto"`, `"aiosql"`, `"sqlc"`,
 /// `"pugsql"`, `"file"`); `name` is the file name without its extension, the name of a
 /// query of a file without headers.
 ///
