@@ -219,8 +219,7 @@ def run(size: str, repeats: int, keep: str | None, exe: str) -> dict:
         for name in ("pyproject.toml", "schema.sql"):
             shutil.copy(root / name, empty / name)
         metrics["check_empty"] = measure([exe, "check", "-q", str(empty)], str(empty), repeats)
-        per_file = sorted(python_us(root, (root / "schema.sql").read_text()))
-        ruff = ruff_us(root)
+        schema = (root / "schema.sql").read_text()
         metrics.update(scenarios(exe, root, spec))
         for name, text in (
             ("schema_load", (root / "schema.sql").read_text()),
@@ -235,6 +234,14 @@ def run(size: str, repeats: int, keep: str | None, exe: str) -> dict:
         metrics["breaking"] = measure(
             [exe, "breaking", "-q", "--against", "HEAD"], commit_then_migrate(root), min(repeats, 3)
         )
+        # In a child, so its schema cache and heap neither slow the timings below nor
+        # count in the RSS of the children measured above.
+        (root / "schema.sql").write_text(schema)
+        worker = [sys.executable, __file__, "--worker-python", str(root)]
+        per_file = sorted(
+            json.loads(subprocess.run(worker, check=True, capture_output=True).stdout)
+        )
+        ruff = ruff_us(root)
         return {
             "meta": {
                 "size": size,
@@ -431,7 +438,12 @@ def main() -> int:
         help="the sqlty to run: the wheel's script (default) or a native binary",
     )
     ap.add_argument("--worker-schema", help=argparse.SUPPRESS)
+    ap.add_argument("--worker-python", help=argparse.SUPPRESS)
     args = ap.parse_args()
+    if args.worker_python:
+        root = Path(args.worker_python)
+        print(json.dumps(python_us(root, (root / "schema.sql").read_text())))
+        return 0
     if args.worker_schema:
         worker_schema_load(args.worker_schema)
         return 0
