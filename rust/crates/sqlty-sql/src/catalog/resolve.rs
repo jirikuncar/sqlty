@@ -37,6 +37,7 @@ thread_local! {
 impl Loader {
     /// The catalog as it stands now.
     pub(super) fn snapshot(&mut self) -> &Catalog {
+        self.resolve_stale_relations();
         if !self.stale_functions.is_empty() {
             self.rebuild_functions();
         }
@@ -151,6 +152,41 @@ impl Loader {
     pub(super) fn refresh_function(&mut self, key: String) {
         if self.cache.is_some() {
             self.stale_functions.insert(key);
+        }
+    }
+
+    /// Resolve the stale relations of the cached catalog again, or drop them from it.
+    fn resolve_stale_relations(&mut self) {
+        let stale = std::mem::take(&mut self.stale_relations);
+        if let Some(cache) = self.cache.as_mut() {
+            let resolver = cache.resolver(self.dialect);
+            let resolved: Vec<_> = stale
+                .into_iter()
+                .map(|key| {
+                    let relation = self
+                        .relations
+                        .get(&key)
+                        .map(|rel| resolver.relation(&key, rel));
+                    (key, relation)
+                })
+                .collect();
+            for (key, relation) in resolved {
+                let user = !BUILTIN_SCHEMAS
+                    .iter()
+                    .any(|schema| key.starts_with(&format!("{schema}.")));
+                match relation {
+                    Some(relation) => {
+                        if cache.relations.insert(Arc::from(key), relation).is_none() && user {
+                            cache.user_relations += 1;
+                        }
+                    }
+                    None => {
+                        if cache.relations.remove(key.as_str()).is_some() && user {
+                            cache.user_relations -= 1;
+                        }
+                    }
+                }
+            }
         }
     }
 

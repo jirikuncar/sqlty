@@ -19,6 +19,11 @@ impl Loader {
     /// Returns `false` when the table (or a column it changes) is not defined yet.
     pub(super) fn alter_table(&mut self, alter: &AlterTable, path: &[String]) -> bool {
         let name = parts(&alter.name, self.dialect);
+        if let [op] = alter.operations.as_slice() {
+            if self.alter_in_place(op, alter.only, &name, path) {
+                return true;
+            }
+        }
         let Some((key, root)) = self.table_of(&name, path) else {
             if self.lookup(&self.relations, &name, path).is_none() {
                 return alter.if_exists;
@@ -134,6 +139,91 @@ impl Loader {
                     }
                 }
             }
+        }
+        true
+    }
+
+    /// Apply `op`, the only operation of an `ALTER TABLE`, to the table where it is, when it
+    /// can neither fail halfway nor change another table: a statement per column, key or
+    /// index would otherwise copy the table each time. `false` leaves it to `alter_table`.
+    fn alter_in_place(
+        &mut self,
+        op: &AlterTableOperation,
+        only: bool,
+        name: &[String],
+        path: &[String],
+    ) -> bool {
+        let Some((key, table)) = self.table_of(name, path) else {
+            return false;
+        };
+        if !only && self.inherited.contains(&key) {
+            return false;
+        }
+        let has = |column: &Ident| {
+            let name = fold(column, self.dialect);
+            table.columns.iter().any(|c| c.name == name)
+        };
+        let mut fk = None;
+        let changes = match op {
+            AlterTableOperation::AddColumn {
+                column_def,
+                column_position,
+                ..
+            } => {
+                let anchored = match column_position {
+                    Some(MySQLColumnPosition::After(after)) => has(after),
+                    _ => true,
+                };
+                // A key it declares may read the table as it was.
+                let refers = column_def
+                    .options
+                    .iter()
+                    .any(|option| matches!(option.option, ColumnOption::ForeignKey(_)));
+                let typed = column_def.data_type != DataType::Unspecified
+                    || self.dialect == SqlDialect::Sqlite;
+                if !anchored || refers || !typed {
+                    return false;
+                }
+                !has(&column_def.name)
+            }
+            AlterTableOperation::AddConstraint {
+                constraint: TableConstraint::Unique(unique),
+                ..
+            } => {
+                let name = unique.name.as_ref().or(unique.index_name.as_ref());
+                unique_key(name, &unique.columns, self.dialect).is_some()
+            }
+            AlterTableOperation::AddConstraint {
+                constraint: TableConstraint::Check(check),
+                not_valid: false,
+            } => {
+                let mut columns = table.columns.clone();
+                apply_check(&mut columns, &check.expr, self.dialect);
+                columns != table.columns || !nonnull_groups(&check.expr, self.dialect).is_empty()
+            }
+            AlterTableOperation::AddConstraint {
+                constraint: TableConstraint::ForeignKey(constraint),
+                not_valid,
+            } => {
+                fk = self.foreign_key(
+                    constraint,
+                    &constraint.columns,
+                    &key,
+                    table,
+                    path,
+                    !not_valid,
+                );
+                fk.is_some()
+            }
+            _ => return false,
+        };
+        // As in `alter_table`, a statement that changes nothing leaves the table as it is.
+        if changes {
+            let dialect = self.dialect;
+            self.change_table(key, |table| {
+                let _ = alter_op(table, op, true, &mut None, dialect);
+                table.foreign_keys.extend(fk);
+            });
         }
         true
     }
@@ -567,6 +657,13 @@ mod tests {
         }
         assert!(loader.taint(Taint::Type, &["e".to_string()], &path));
         assert!(loader.enum_labels.is_empty());
+    }
+
+    #[test]
+    fn changing_a_table_that_is_not_there_does_nothing() {
+        let mut loader = Loader::new(SqlDialect::Postgres);
+        loader.change_table("public.t".to_string(), |_| unreachable!());
+        assert!(loader.relations.is_empty());
     }
 
     // Only dialects whose `ALTER` the loader does not read parse these.
