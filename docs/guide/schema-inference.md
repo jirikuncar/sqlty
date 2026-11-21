@@ -136,6 +136,16 @@ What makes a column nullable or not:
   Where the argument is `None`, optional or of unknown type, and in `SQL[T]` strings, it
   stays nullable.
 
+  A `NewType` is read only when it is
+  - a positional `typing.NewType` or `typing_extensions.NewType` call bound once at module
+    level, not in a function or class, nor a name the module binds again;
+  - of a class, not a generic such as `list[int]`;
+  - defined in the module or a checked module, not an installed package or a stub;
+  - in a chain of at most nine `NewType`s.
+
+  Other annotations of unknown type, such as type aliases (`UserId = int`), `TypeVar`s,
+  `Any` or classes of unchecked packages, keep the placeholder nullable.
+
 [`nullable-mismatch`](../reference/rules/nullable-mismatch.md) reports a row type field
 that is not optional for a nullable column;
 [`redundant-optional`](../reference/rules/redundant-optional.md) (off by default) reports
