@@ -807,6 +807,9 @@ else:
 `pkg/b.py`:
 
 ```python
+import os
+import os.path
+
 B = 1
 ```
 
@@ -842,6 +845,7 @@ def insert(tried: Tried, dotted: pkg.a.OwnerId, checked: OwnerId) -> None:
     fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=tried)
     fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=dotted)
     fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=checked)
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=pkg.b.B)
 
 def named(uuid: uuid.UUID) -> None:
     # error: [param-type-mismatch] "parameter 'owner_id' expects int, got uuid.UUID"
