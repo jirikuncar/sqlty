@@ -1,0 +1,25 @@
+---
+source: crates/sqlty-sql/tests/analyzer/scope.rs
+expression: "reports(&queries, \"postgres\", Some(SOURCES))"
+---
+SELECT g.x FROM generate_series(1, 3) AS g
+x: ? | ? | Unknown
+[unknown-column] column `x` does not exist in `g`
+
+SELECT * FROM ST_Dump(NULL) AS g
+*: ? | ? | Unknown
+[unsupported-syntax] `*` reads table function st_dump, which sqlty does not read the columns of
+
+SELECT * FROM (SELECT 1)
+?column?: int | ? | NonNull
+
+SELECT * FROM unnest(ARRAY[1]) AS u
+u: int | INT | Nullable
+
+SELECT j.a FROM JSON_TABLE('[]', '$' COLUMNS (a int PATH '$')) AS J
+a: int | INT | Nullable
+
+SELECT * FROM users, unnest(ARRAY[1])
+id: int | INT | NonNull
+name: str | TEXT | Nullable
+unnest: int | INT | Nullable

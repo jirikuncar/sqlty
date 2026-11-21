@@ -1,0 +1,23 @@
+---
+source: crates/sqlty-sql/tests/analyzer/expr.rs
+expression: "reports(&queries, \"postgres\", Some(DDL))"
+---
+SELECT (p).x AS a, (p).y AS b, (t.p).x AS c FROM t
+a: int | INT | Nullable
+b: str | TEXT | Nullable
+c: int | INT | Nullable
+
+SELECT (p).nope AS a FROM t
+a: ? | ? | Nullable
+[unknown-column] type `pair` has no field `nope`
+
+SELECT j -> 'a' AS a, j ->> 'a' AS b, j #> '{a,b}' AS c, j #>> '{a,b}' AS d FROM t
+a: typing.Any | JSONB | Nullable
+b: str | TEXT | Nullable
+c: typing.Any | JSONB | Nullable
+d: str | TEXT | Nullable
+
+SELECT j['a'] AS a, j @> '{}' AS b, j ? 'a' AS c FROM t
+a: typing.Any | JSONB | Nullable
+b: bool | BOOLEAN | Nullable
+c: bool | BOOLEAN | Nullable

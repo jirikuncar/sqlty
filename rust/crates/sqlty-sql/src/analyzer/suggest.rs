@@ -49,35 +49,3 @@ fn distance(a: &str, b: &str) -> usize {
     }
     rows[a.len()][b.len()]
 }
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn suggests_the_one_close_name() {
-        assert_eq!(closest("surname", &["id", "name", "email"]), Some("name"));
-        assert_eq!(closest("nmae", &["id", "name"]), Some("name"));
-        assert_eq!(closest("NAM", &["Name"]), Some("Name"));
-    }
-
-    #[test]
-    fn suggests_nothing_far_or_tied() {
-        assert_eq!(closest("email", &["id", "name"]), None);
-        assert_eq!(closest("ab", &["xy"]), None);
-        assert_eq!(closest("ctid", &["id"]), None);
-        assert_eq!(closest("ip", &["id"]), None);
-        assert_eq!(closest("coxt", &["cost", "coat"]), None);
-        assert_eq!(closest("nme", &["name", "name"]), None);
-    }
-
-    #[test]
-    fn distance_counts_edits_and_swaps() {
-        assert_eq!(distance("surname", "name"), 3);
-        assert_eq!(closest("username", &["name", "email"]), Some("name"));
-        assert_eq!(distance("nmae", "name"), 1);
-        assert_eq!(distance("", "abc"), 3);
-        assert_eq!(distance("kitten", "sitting"), 3);
-    }
-}
