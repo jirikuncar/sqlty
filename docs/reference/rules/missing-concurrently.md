@@ -16,7 +16,9 @@ Default severity: **warn**
 Reports a new migration statement that builds or drops an index of a table that
 already has rows without `CONCURRENTLY`: `CREATE INDEX`, `DROP INDEX`, `REINDEX`,
 `ADD UNIQUE` or `ADD PRIMARY KEY` without `USING INDEX`, `DETACH PARTITION`, and
-`REFRESH MATERIALIZED VIEW`.
+`REFRESH MATERIALIZED VIEW`. An index of a partitioned table is not reported:
+PostgreSQL builds none `CONCURRENTLY`, so build it on each partition, then
+`CREATE INDEX ... ON ONLY` the parent and attach them.
 
 `against.sql`:
 

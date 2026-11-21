@@ -15,7 +15,9 @@ Default severity: **warn**
 
 Reports the first new statement of a migration file that takes a lock that
 blocks writes to a table that has rows (`ALTER TABLE`, `DROP TABLE`,
-`DROP INDEX`, `LOCK TABLE`, `TRUNCATE`) before the file sets `lock_timeout`. Once per file.
+`DROP INDEX`, `LOCK TABLE`, `TRUNCATE`, `CREATE INDEX`, `REINDEX` and
+`REFRESH MATERIALIZED VIEW` without `CONCURRENTLY`, `VACUUM FULL`, `CLUSTER`)
+before the file sets `lock_timeout`. Once per file.
 
 `against.sql`:
 
@@ -38,7 +40,8 @@ ALTER TABLE users ADD COLUMN bio TEXT;
 
 Even an instant `ALTER TABLE` waits for its lock behind any long query of the
 table, and every query that comes after it queues behind the waiting `ALTER`:
-the table looks down until the long query ends.
+the table looks down until the long query ends. An index build waiting for its
+SHARE lock queues writes the same way.
 
 ## How to fix
 

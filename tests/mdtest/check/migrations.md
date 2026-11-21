@@ -70,6 +70,105 @@ COMMIT;
 ALTER TABLE users ADD COLUMN about TEXT;
 ```
 
+## An index build waits for its lock
+
+`against.sql`:
+
+```sql
+CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT, team_id BIGINT);
+CREATE MATERIALIZED VIEW user_emails AS SELECT email FROM users;
+```
+
+```sql migration
+-- error: [missing-concurrently]
+-- error: [missing-lock-timeout]
+CREATE INDEX users_email ON users (email);
+```
+
+```sql migration
+SET lock_timeout = '1s';
+-- error: [missing-concurrently]
+CREATE INDEX users_email ON users (email);
+```
+
+```sql migration
+-- error: [missing-concurrently]
+-- error: [missing-lock-timeout]
+REINDEX TABLE users;
+```
+
+```sql migration
+-- error: [missing-concurrently]
+-- error: [missing-lock-timeout]
+REFRESH MATERIALIZED VIEW user_emails;
+```
+
+```sql migration
+-- error: [table-rewrite]
+-- error: [missing-lock-timeout]
+VACUUM FULL users;
+```
+
+```sql migration
+-- error: [table-rewrite]
+-- error: [missing-lock-timeout]
+CLUSTER users;
+```
+
+```sql migration
+-- error: [table-rewrite]
+-- error: [missing-lock-timeout]
+VACUUM (FULL, ANALYZE) users;
+```
+
+An index build sqlparser does not read, with a tablespace or `ON ONLY`, waits too:
+
+```sql migration
+-- error: [missing-concurrently]
+-- error: [missing-lock-timeout]
+CREATE INDEX users_email ON users (email) TABLESPACE fast;
+```
+
+An option turned off with `false` or `'off'` is off:
+
+```sql migration
+-- error: [missing-concurrently]
+-- error: [missing-lock-timeout]
+REINDEX (CONCURRENTLY false) TABLE users;
+VACUUM (FULL 'off') users;
+```
+
+One file reports the timeout once:
+
+```sql migration
+-- error: [missing-concurrently]
+-- error: [missing-lock-timeout]
+CREATE INDEX users_email ON users (email);
+-- error: [table-rewrite]
+CLUSTER users;
+```
+
+The concurrent forms and the tables the migration created wait for nothing:
+
+```sql migration
+-- error:
+CREATE INDEX CONCURRENTLY users_email ON users (email);
+REINDEX TABLE CONCURRENTLY users;
+REFRESH MATERIALIZED VIEW CONCURRENTLY user_emails;
+CREATE TABLE t (id INT);
+CREATE INDEX t_id ON t (id);
+CLUSTER t;
+VACUUM FULL t;
+REINDEX TABLE t;
+CREATE INDEX t_id_2 ON t (id);
+REINDEX (VERBOSE) INDEX t_id_2;
+CLUSTER (VERBOSE) t;
+CLUSTER t_id ON t;
+VACUUM (FULL, ANALYZE) t;
+CREATE TABLE teams (id BIGINT PRIMARY KEY);
+REINDEX INDEX teams_pkey;
+```
+
 ## A pg_dump schema
 
 ```sql migration
@@ -222,4 +321,44 @@ SET LOCAL lock_timeout = '1s';
 -- error:
 LOCK TABLE users, events;
 COMMIT;
+```
+
+## An index rebuild holds its lock until the transaction ends
+
+```sql migration
+BEGIN;
+SET LOCAL lock_timeout = '1s';
+-- error: [missing-concurrently]
+REINDEX INDEX users_pkey;
+-- error: [locked-backfill] "locks `users` against writes"
+UPDATE users SET email = '' WHERE id BETWEEN 1 AND 9;
+COMMIT;
+```
+
+## Indexes of keys a pg_dump schema adds
+
+`against.sql`:
+
+```sql
+CREATE TABLE teams (id BIGINT, name TEXT);
+ALTER TABLE ONLY teams ADD CONSTRAINT teams_pkey PRIMARY KEY (id);
+CREATE TABLE events (id INT, at DATE) PARTITION BY RANGE (at);
+```
+
+```sql migration
+BEGIN;
+SET LOCAL lock_timeout = '1s';
+-- error: [missing-concurrently]
+REINDEX INDEX teams_pkey;
+-- error: [locked-backfill] "locks `teams` against writes"
+UPDATE teams SET name = '' WHERE id BETWEEN 1 AND 9;
+COMMIT;
+```
+
+An index of a partitioned table can't be built `CONCURRENTLY`:
+
+```sql migration
+SET lock_timeout = '1s';
+-- error:
+CREATE INDEX events_at ON ONLY events (at);
 ```
