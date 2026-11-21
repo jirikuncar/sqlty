@@ -17,6 +17,7 @@ sqlparser = { version = "0.64", features = ["visitor"] }
 regex = "1"
 recursive = "0.1"
 rustc-hash = "2"
+smallvec = "1"
 mimalloc = { version = "0.1.52", default-features = false }
 libmimalloc-sys = { version = "0.1.49", default-features = false }
 thiserror = "2"

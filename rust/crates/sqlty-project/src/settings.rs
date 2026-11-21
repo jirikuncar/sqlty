@@ -80,6 +80,8 @@ pub struct FileSettings {
     pub coerce: HashSet<String>,
     /// `functions`, with those of every database.
     pub functions: Vec<Function>,
+    /// `stub-paths`, relative to `base`: `typings` without the key.
+    pub stub_paths: Vec<String>,
     /// `format-command`.
     pub format_command: Vec<String>,
     /// `queries`, relative to `base`.
@@ -539,6 +541,10 @@ fn settings(
         }),
         coerce: strings(table, "coerce-row-types").into_iter().collect(),
         functions: entries(table, None),
+        stub_paths: match table.get("stub-paths") {
+            Some(_) => strings(table, "stub-paths"),
+            None => vec!["typings".to_string()],
+        },
         format_command: strings(table, "format-command"),
         queries: strings(table, "queries"),
         query_format,

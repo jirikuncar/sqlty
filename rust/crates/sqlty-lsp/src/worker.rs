@@ -25,6 +25,8 @@ pub(crate) fn work<W, F>(
         roots,
         settings,
         loaded: HashMap::new(),
+        watched: None,
+        asked: Vec::new(),
     };
     while let Ok(first) = queue.recv() {
         // Jobs that arrived during the last check: the last edit of a buffer is checked once.
@@ -32,6 +34,20 @@ pub(crate) fn work<W, F>(
         for job in std::iter::once(first).chain(queue.try_iter()) {
             match job {
                 Job::Reload => workspaces.reload(shared),
+                Job::Watched(directories) => workspaces.watched(directories),
+                Job::Changed(paths, watched) => {
+                    if watched {
+                        workspaces.watched(Vec::new());
+                    }
+                    if workspaces.changed(&paths) {
+                        let open: Vec<Uri> = shared.documents().keys().cloned().collect();
+                        for uri in open {
+                            if !checks.contains(&uri) {
+                                checks.push(uri);
+                            }
+                        }
+                    }
+                }
                 Job::Source(id, uri, kinds) => {
                     let actions: Vec<_> = kinds
                         .into_iter()
@@ -58,6 +74,11 @@ struct Workspaces<'a, W, F> {
     settings: &'a Settings,
     /// By project root; an error is shown once, when the root is first loaded.
     loaded: HashMap<PathBuf, Result<W, String>>,
+    /// The directories the client watches the Python files of, once its watcher has
+    /// reported one or it took a registration: see [`Workspace::watched`].
+    watched: Option<Vec<PathBuf>>,
+    /// The directories outside the folders the client was asked to watch.
+    asked: Vec<PathBuf>,
 }
 
 impl<W, F> Workspaces<'_, W, F>
@@ -84,9 +105,52 @@ where
         let mut loaded = (self.open)(&root, self.settings);
         match &mut loaded {
             Err(message) => shared.message(MessageType::ERROR, format!("sqlty: {message}")),
-            Ok(workspace) => publish_breaking(workspace, shared),
+            Ok(workspace) => {
+                if let Some(watched) = &self.watched {
+                    workspace.watched(watched);
+                }
+                publish_breaking(workspace, shared);
+            }
         }
         self.loaded.insert(root, loaded);
+    }
+
+    /// The client's watcher reports the Python files written: every workspace, loaded now
+    /// or later, is told.
+    fn watched(&mut self, directories: Vec<PathBuf>) {
+        if self.watched.is_some() && directories.is_empty() {
+            return;
+        }
+        let watched = self.watched.get_or_insert_with(|| self.roots.to_vec());
+        watched.extend(directories);
+        for workspace in self.loaded.values_mut().flatten() {
+            workspace.watched(watched);
+        }
+    }
+
+    /// Ask the client to watch the directories outside its folders that `workspace`
+    /// looked for stubs and libraries in, each once.
+    fn watch(&mut self, searched: Vec<PathBuf>, shared: &Shared) {
+        let outside: Vec<PathBuf> = searched
+            .into_iter()
+            .filter(|directory| !self.roots.iter().any(|root| directory.starts_with(root)))
+            .filter(|directory| !self.asked.contains(directory))
+            .collect();
+        if !outside.is_empty() {
+            self.asked.extend(outside.iter().cloned());
+            shared.watch(outside);
+        }
+    }
+
+    /// Whether a loaded workspace read one of `paths`, which were written on disk.
+    fn changed(&mut self, paths: &[PathBuf]) -> bool {
+        let mut read = false;
+        for workspace in self.loaded.values_mut().flatten() {
+            for path in paths {
+                read |= workspace.changed(path);
+            }
+        }
+        read
     }
 
     /// Open every loaded workspace again: its settings or schema changed.
@@ -161,6 +225,7 @@ where
         }
     };
     let completion = enabled.then(|| workspace.completion(&path)).flatten();
+    let searched = workspace.searched();
     let mut documents = shared.documents();
     let Some(document) = documents.get_mut(&uri).filter(|d| d.version == version) else {
         return;
@@ -179,6 +244,7 @@ where
     if !unchanged {
         shared.refresh();
     }
+    workspaces.watch(searched, shared);
 }
 
 /// The edit of `kind`, [`FIX_ALL`](crate::FIX_ALL), [`FORMAT`], [`REWRITE`] or [`STRIP`], to the

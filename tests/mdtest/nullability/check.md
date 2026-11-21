@@ -465,6 +465,47 @@ def run(key) -> None:
     fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=key)
 ```
 
+#### A name bound in other ways
+
+What an argument holds is read from the assignments, annotations and parameters of its
+name. A `+=`, a loop over other values, a `del` or an import of the same name says
+nothing of its type, and is not counted.
+
+```python
+from typing import NamedTuple
+
+from db import fetch_all
+
+class Row(NamedTuple):
+    key: str
+
+def added() -> None:
+    key = "a"
+    key += "b"
+    fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=key)
+
+def looped(parts) -> None:
+    key = "a"
+    for key in parts:
+        fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=key)
+
+def deleted() -> None:
+    key = "a"
+    fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=key)
+    del key
+
+def imported() -> None:
+    key = "a"
+    fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=key)
+    from db import key
+
+def twice() -> None:
+    key = "a"
+    key = 1
+    # error: [nullable-mismatch] "Row.key is str but query column 'key' can be NULL"
+    fetch_all("SELECT %(key)s::TEXT AS key FROM users", Row, key=key)
+```
+
 ### A column an INSERT writes from a parameter
 
 A column an `INSERT` writes from a placeholder the call binds to a value that excludes
@@ -853,6 +894,80 @@ def named(uuid: uuid.UUID) -> None:
 
 def generic[Tried](tried: Tried) -> None:
     fetch_all("SELECT ref FROM items WHERE ref = %(ref)s", RefRow, ref=tried)
+```
+
+#### In a method
+
+A type parameter of the class around a method hides the name as one of the function does.
+
+```python
+import uuid
+from typing import NamedTuple, NewType
+
+from db import fetch_all
+
+Tried = NewType("Tried", int)
+
+class RefRow(NamedTuple):
+    ref: uuid.UUID
+
+class Plain:
+    def find(self, tried: Tried) -> None:
+        # error: [param-type-mismatch] "parameter 'ref' expects uuid.UUID, got int"
+        fetch_all("SELECT ref FROM items WHERE ref = %(ref)s", RefRow, ref=tried)
+
+class Generic[Tried]:
+    def find(self, tried: Tried) -> None:
+        fetch_all("SELECT ref FROM items WHERE ref = %(ref)s", RefRow, ref=tried)
+```
+
+#### A name declared `global` or `nonlocal`
+
+A function that declares a name `global` or `nonlocal` and assigns it passes what it
+assigns; a function that only reads the name passes what the scope around binds it to.
+
+```python
+from typing import NamedTuple
+from uuid import UUID, uuid4
+
+from db import fetch_all
+
+made = 1
+kept = 1
+drawn = uuid4()
+
+class RefRow(NamedTuple):
+    ref: UUID
+
+def make() -> None:
+    global made
+    made = uuid4()
+    fetch_all("SELECT ref FROM items WHERE ref = %(ref)s", RefRow, ref=made)
+
+def keep() -> None:
+    global kept
+    kept = UUID("12345678123456781234567812345678")
+
+def read() -> None:
+    # error: [param-type-mismatch] "parameter 'ref' expects uuid.UUID, got int"
+    fetch_all("SELECT ref FROM items WHERE ref = %(ref)s", RefRow, ref=kept)
+
+def draw() -> None:
+    global drawn
+    drawn = 1
+    # error: [param-type-mismatch] "parameter 'ref' expects uuid.UUID, got int"
+    fetch_all("SELECT ref FROM items WHERE ref = %(ref)s", RefRow, ref=drawn)
+
+def outer() -> None:
+    count = 1
+
+    def inner() -> None:
+        nonlocal count
+        count = UUID("12345678123456781234567812345678")
+        fetch_all("SELECT ref FROM items WHERE ref = %(ref)s", RefRow, ref=count)
+
+    # error: [param-type-mismatch] "parameter 'ref' expects uuid.UUID, got int"
+    fetch_all("SELECT ref FROM items WHERE ref = %(ref)s", RefRow, ref=count)
 ```
 
 #### Type aliases

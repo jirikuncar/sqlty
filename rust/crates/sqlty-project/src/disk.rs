@@ -35,6 +35,44 @@ impl Files for Disk {
         Listing::Entries(entries.collect())
     }
 
+    fn size(&self, path: &Path) -> Option<u64> {
+        let found = std::fs::metadata(path).ok()?;
+        found.is_file().then_some(found.len())
+    }
+
+    /// Only a regular file is read, and no further than `limit + 1` bytes: a link to a
+    /// device or a pipe would give bytes without end, or none ever.
+    fn read_within(&self, path: &Path, limit: u64) -> Read {
+        use std::io::Read as _;
+
+        // Opening a pipe waits for its writer: the open does not wait, and what was
+        // opened is asked what it is, so that the file read is the one asked about.
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            // Nor does a terminal become the one this process is controlled from.
+            options.custom_flags(libc::O_NONBLOCK | libc::O_NOCTTY);
+        }
+        // No such flag elsewhere: the path is asked first.
+        #[cfg(not(unix))]
+        if !std::fs::metadata(path).is_ok_and(|found| found.is_file()) {
+            return Read::Missing;
+        }
+        let Ok(file) = options.open(path) else {
+            return Read::Missing;
+        };
+        if !file.metadata().is_ok_and(|found| found.is_file()) {
+            return Read::Missing;
+        }
+        let mut data = Vec::new();
+        match file.take(limit.saturating_add(1)).read_to_end(&mut data) {
+            Ok(_) => Read::Text(data),
+            Err(_) => Read::Missing,
+        }
+    }
+
     fn is_link(&self, path: &Path) -> bool {
         std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink())
     }
@@ -98,9 +136,59 @@ mod tests {
         assert!(link && !plain);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_read_is_bounded_and_of_a_regular_file_only() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!("sqlty-disk-read-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("dir")).unwrap();
+        std::fs::write(root.join("long.py"), "x = 1\n".repeat(100)).unwrap();
+        // A device that gives bytes without end, and a pipe nothing writes to: reading
+        // either would not return.
+        symlink("/dev/zero", root.join("endless.py")).unwrap();
+        let pipe = root.join("pipe.py");
+        let made = std::process::Command::new("mkfifo").arg(&pipe).status();
+        let read = |name: &str| match Disk.read_within(&root.join(name), 10) {
+            Read::Text(data) => Some(data.len()),
+            _ => None,
+        };
+        let found = [
+            read("long.py"),
+            read("endless.py"),
+            read("dir"),
+            read("missing.py"),
+        ];
+        let piped = made
+            .is_ok_and(|status| status.success())
+            .then(|| read("pipe.py"));
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(found, [Some(11), None, None, None]);
+        assert!(piped.is_none_or(|read| read.is_none()), "a pipe is no file");
+    }
+
+    #[test]
+    fn only_a_file_has_a_size() {
+        let root = std::env::temp_dir().join(format!("sqlty-disk-size-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("dir")).unwrap();
+        std::fs::write(root.join("a.py"), "x = 1\n").unwrap();
+        let sizes = ["a.py", "dir", "missing.py"].map(|name| Disk.size(&root.join(name)));
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(sizes, [Some(6), None, None]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_file_whose_read_fails_is_missing() {
+        // A regular file by what it says of itself, whose first bytes cannot be read.
+        let memory = Path::new("/proc/self/mem");
+        assert!(std::fs::metadata(memory).is_ok_and(|found| found.is_file()));
+        assert!(matches!(Disk.read_within(memory, 10), Read::Missing));
+    }
+
     #[test]
     fn reads_files_and_resolves_the_part_that_exists() {
-        let root = std::env::temp_dir().join(format!("sqlty-disk-read-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("sqlty-disk-resolve-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("a.py"), "x = 1\n").unwrap();
         let read = Disk.read(&root.join("a.py"));

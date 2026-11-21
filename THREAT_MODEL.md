@@ -29,6 +29,11 @@ Untrusted:
 - Python source, and the SQL strings, t-strings and comments in it. Developers
   run `sqlty check` or open an editor on code they did not write: a pull
   request, a dependency, a cloned repository.
+- The stubs under `stub-paths` and the library modules a checked source
+  imports. To find the class of a helper method's receiver, `check` reads them
+  from the roots above, by the names the source gives: untrusted code chooses
+  which modules under those roots are parsed, never which directories are
+  searched, and nothing read is imported.
 - SQL schema and migration files named by `schema` and `queries`.
 - Everything the playground reads from its URL: the session in the hash, the
   `?steps=` deck and the engine version.
@@ -46,8 +51,9 @@ Untrusted:
 | Codec opt-in | `src/sqlty_magic.pth`, `src/sqlty/magic.py` | the codec acting on a file without `# coding: sqlty`, or with `SQLTY_NO_MAGIC` set |
 | Parsers and inference | `sqlty-sql`, `sqlty-format`, `parse.rs`, `scan.rs`, `queries.rs`, `compose.rs`, `variants.rs` | a crash, a stack overflow, super-linear time or unbounded memory from a small input |
 | Files read and written | `sqlty-project`, `config.rs`, `src/sqlty/_config.py` | `rewrite`, `strip`, `format` or `--fix` writing outside the given paths or through a symlink; reading a file sqlty was not configured to read |
+| Modules a source names | `modules.rs`, `receivers.rs`, `index.rs` in `sqlty-python`; `workspace.rs` in `sqlty-project` | an import, annotation or call in a checked source making sqlty read a file that is not a `.py` or `.pyi` module under a root (the directories of `stub-paths`, the project directory, the roots of the checked packages, `sys.path`); a module name leaving its root (`..`, a separator); a file over 256 KiB being read rather than skipped by its size; more than 256 KiB being read of any file; a device or a pipe being read at all (on Unix: on Windows a device is not told from a file); importing or running what is read; reads that grow faster than the names the source holds |
 | `sqlty breaking` | `breaking.rs` | a ref, path or file name becoming a git option or a pathspec other than a literal path |
-| Language server | `sqlty-lsp`, `sqlty-cli/src/server.rs`, `sqlty-ext/src/server.rs` | a document crashing or stalling the server; a URI that reads or writes outside the workspace |
+| Language server | `sqlty-lsp`, `sqlty-cli/src/server.rs`, `sqlty-ext/src/server.rs` | a document crashing or stalling the server; a URI that reads or writes outside the workspace; a file event doing more than making the server read again what a check reads; a watcher asked of the client for a directory that is neither a workspace folder, a `stub-paths` directory nor a root a module was looked for under |
 | Playground | `docs/assets/playground/`, `sqlty-wasm` | script injection from a share link or a deck; a link loading a deck, engine or model from another origin |
 | VS Code extension | `editors/vscode/src/` | running a binary or interpreter from the workspace (`sqlty.path`, `sqlty.interpreter`) before the workspace is trusted |
 | Runtime library | `src/sqlty/__init__.py`, `src/sqlty/drivers/` | a parameter value reaching SQL text instead of being bound; `row_factory` constructing anything other than the declared row type |

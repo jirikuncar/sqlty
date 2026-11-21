@@ -246,7 +246,7 @@ fn config_answers_the_sqlty_table_of_a_file() {
     );
     assert_eq!(
         config("/app/sqlty.toml", "dialet = \"sqlite\"")["error"],
-        "/app/sqlty.toml: unknown key 'dialet' in [tool.sqlty] (did you mean 'dialect'?); expected one of: dialect, driver, schema, queries, query-format, rules, overrides, import-style, untyped, json-types, param-types, preview, max-query-variants, coerce-row-types, functions, types, format-command, extend, databases, exclude, extend-exclude, respect-gitignore"
+        "/app/sqlty.toml: unknown key 'dialet' in [tool.sqlty] (did you mean 'dialect'?); expected one of: dialect, driver, schema, queries, query-format, rules, overrides, import-style, untyped, json-types, param-types, preview, max-query-variants, coerce-row-types, functions, stub-paths, types, format-command, extend, databases, exclude, extend-exclude, respect-gitignore"
     );
 }
 

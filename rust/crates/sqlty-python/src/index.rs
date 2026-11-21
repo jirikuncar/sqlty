@@ -4,15 +4,16 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
 
 use regex::Regex;
-use ruff_python_ast::Expr;
+use ruff_python_ast::{Expr, StmtFunctionDef};
 
 use crate::calls::{definitions, helper, index_functions, parameter_names, rank, Helper, Kind};
 use crate::frozen::{Frozen, Table};
 use crate::module::Import;
+use crate::modules::Modules;
+use crate::receivers::{Facts, Val};
 use crate::types::extract::extract_type_definitions;
 use crate::types::info::{Dict, TypeInfo};
 use crate::types::pydantic::Known;
@@ -98,24 +99,20 @@ type Typed = (Option<Ty>, usize);
 
 /// The row types of a module, by name.
 pub type Defs = Arc<Dict<Arc<TypeInfo>>>;
-/// The module files read for `register`, by path and module name.
-type Read = HashMap<(PathBuf, String), Option<Arc<Source>>>;
-
-/// Where `register` reads the modules that are not indexed: the roots to look under and
-/// how to read the text of a file, as the engine does no I/O.
-#[derive(Clone, Copy)]
-pub struct Roots<'a> {
-    pub paths: &'a [PathBuf],
-    pub read: &'a dyn Fn(&Path) -> Option<String>,
-}
-
 /// A module of the tree: its text, parsed when another module's lookup first reaches it.
 pub struct Module {
     pub text: Arc<str>,
     name: String,
     version: Version,
     parsed: OnceLock<Option<Arc<Source>>>,
+    facts: OnceLock<Option<Arc<Facts>>>,
+    defined: OnceLock<Defined>,
 }
+
+/// The functions and methods of a module by name (`Class.method`), in the order
+/// [`definitions`] gives them, each without its body: what a registered helper is read
+/// from, kept so that each registration does not read the module again.
+type Defined = HashMap<String, Vec<(StmtFunctionDef, Kind)>>;
 
 impl Module {
     /// `text` as the module `name`, not parsed yet.
@@ -125,6 +122,20 @@ impl Module {
             name: name.to_string(),
             version,
             parsed: OnceLock::new(),
+            facts: OnceLock::new(),
+            defined: OnceLock::new(),
+        }
+    }
+
+    /// The module `name` whose file is not read: nothing is known of it.
+    pub fn unread(name: &str, version: Version) -> Self {
+        Module {
+            text: Arc::from(""),
+            name: name.to_string(),
+            version,
+            parsed: OnceLock::from(None),
+            facts: OnceLock::from(None),
+            defined: OnceLock::new(),
         }
     }
 
@@ -135,6 +146,8 @@ impl Module {
             name: source.module.clone().unwrap_or_default(),
             version: source.version,
             parsed: OnceLock::from(Some(source)),
+            facts: OnceLock::new(),
+            defined: OnceLock::new(),
         }
     }
 
@@ -143,6 +156,52 @@ impl Module {
         self.parsed
             .get_or_init(|| self.parse().map(Arc::new))
             .as_ref()
+    }
+
+    /// What the module declares, for [`crate::receivers`]: read once and kept with the
+    /// module, for every index that holds it.
+    pub fn facts(&self) -> Option<&Arc<Facts>> {
+        self.facts_or(|| {
+            let source = self.source()?;
+            Some(Facts::of(source, Some(&self.name)))
+        })
+    }
+
+    /// [`Module::facts`], read by `read` when they are not kept yet: a caller that has
+    /// walked the module gives what its walk found.
+    pub fn facts_or(&self, read: impl FnOnce() -> Option<Facts>) -> Option<&Arc<Facts>> {
+        self.facts.get_or_init(|| read().map(Arc::new)).as_ref()
+    }
+
+    /// The definitions of the module by name, read once.
+    fn defined(&self) -> &Defined {
+        self.defined.get_or_init(|| {
+            let mut defined = Defined::new();
+            for (name, function, kind) in self
+                .source()
+                .into_iter()
+                .flat_map(|source| definitions(source))
+            {
+                let signature = StmtFunctionDef {
+                    body: Vec::new().into(),
+                    node_index: function.node_index.clone(),
+                    range: function.range,
+                    is_async: function.is_async,
+                    decorator_list: function.decorator_list.clone(),
+                    name: function.name.clone(),
+                    type_params: function.type_params.clone(),
+                    parameters: function.parameters.clone(),
+                    returns: function.returns.clone(),
+                };
+                defined.entry(name).or_default().push((signature, kind));
+            }
+            defined
+        })
+    }
+
+    /// The name the module is read as: `pkg.__init__` for a package.
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     /// The module as parsed so far, else parsed for the caller alone.
@@ -154,10 +213,18 @@ impl Module {
     }
 
     fn parse(&self) -> Option<Source> {
+        #[cfg(test)]
+        PARSED.with(|count| count.set(count.get() + 1));
         stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
             Some(Source::new(Arc::clone(&self.text), self.version)?.named(Some(&self.name)))
         })
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many modules this thread parsed, to check that a build does not parse them all.
+    static PARSED: Cell<usize> = const { Cell::new(0) };
 }
 
 /// The stack a parse needs left, and the stack it grows by when less is left.
@@ -229,9 +296,15 @@ pub struct HelperIndex {
     pub modules: HashMap<String, Dict<Helper>>,
     tree: Arc<Tree>,
     version: Version,
-    read: Arc<Mutex<Read>>,
+    /// The stubs the host gave the text of, read before any other module of their name.
+    stubs: Arc<HashMap<String, Arc<Module>>>,
+    /// The stubs of `stub-paths` and the libraries under the roots.
+    outside: Option<Arc<Modules>>,
     names: HashSet<String>,
     pattern: Option<Regex>,
+    /// The classes `[[tool.sqlty.functions]]` registers a method of, by path, and what
+    /// each path starts with (`lib`, `lib.Outer`, `lib.Outer.Inner`).
+    registered: HashSet<String>,
 }
 
 /// Whether a module of `text` may define helpers; no other is read for them.
@@ -255,6 +328,19 @@ fn alternation(names: &HashSet<String>) -> Option<Regex> {
         .flatten()
 }
 
+/// A pattern matching the text that renames any of `names` in an import, `name as`;
+/// `None` for no name. Between the two, an import in parentheses may hold line ends
+/// and comments, and any import a backslash before a line end.
+fn renaming(names: &HashSet<String>) -> Option<Regex> {
+    let mut sorted: Vec<&String> = names.iter().collect();
+    sorted.sort();
+    let escaped: Vec<String> = sorted.iter().map(|name| regex::escape(name)).collect();
+    let pattern = format!(r"\b(?:{})(?:\s|\\|#[^\n]*)+as\b", escaped.join("|"));
+    (!escaped.is_empty())
+        .then(|| Regex::new(&pattern).ok())
+        .flatten()
+}
+
 /// An index being filled.
 pub struct Builder {
     modules: HashMap<String, Dict<Helper>>,
@@ -262,7 +348,26 @@ pub struct Builder {
     tree: Option<Arc<Tree>>,
     added: HashMap<String, Arc<Module>>,
     version: Version,
-    read: Arc<Mutex<Read>>,
+    stubs: Arc<HashMap<String, Arc<Module>>>,
+    outside: Option<Arc<Modules>>,
+}
+
+/// The module `module`: its stub, else the checked module `sources` holds, else the
+/// library under a root. Every lookup of a module by name goes through here, so a helper
+/// that is registered, the class of a receiver and a helper a stub marks are read from
+/// the same file.
+fn resolve(
+    stubs: &HashMap<String, Arc<Module>>,
+    outside: Option<&Modules>,
+    sources: &HashMap<String, Arc<Module>>,
+    module: &str,
+) -> Option<Arc<Module>> {
+    stubs
+        .get(module)
+        .cloned()
+        .or_else(|| outside?.stub(module))
+        .or_else(|| sources.get(module).cloned())
+        .or_else(|| outside?.library(module))
 }
 
 impl Builder {
@@ -272,8 +377,46 @@ impl Builder {
             tree: None,
             added: HashMap::new(),
             version,
-            read: Arc::default(),
+            stubs: Arc::default(),
+            outside: None,
         }
+    }
+
+    /// Index the stub `source` (a `.pyi`) as module `module`: its classes are read before
+    /// those of any other module of that name, and the methods and functions it marks
+    /// `Annotated[LiteralString, SQL]` are helpers, as if `[[tool.sqlty.functions]]`
+    /// named them.
+    pub fn add_stub(&mut self, module: &str, source: Arc<Module>) {
+        if defines_helpers(&source.text) {
+            if let Some(parsed) = source.source() {
+                let known = self.modules.entry(module.to_string()).or_default();
+                for (name, helper) in helpers_of(parsed).iter() {
+                    let mut helper = helper.clone();
+                    helper.configured = true;
+                    known.insert(name, helper);
+                }
+            }
+        }
+        Arc::make_mut(&mut self.stubs).insert(module.to_string(), source);
+    }
+
+    /// Read the modules that are not indexed from `outside`: a stub of its `stub-paths`
+    /// before the indexed module of that name, a library under its roots after. The
+    /// helpers its stubs mark are indexed, for the packages some indexed module names.
+    pub fn outside(&mut self, outside: Arc<Modules>) {
+        let marked = outside.marked(self.sources().values().map(|module| &*module.text));
+        for (module, helpers) in marked {
+            let known = self.modules.entry(module).or_default();
+            for (name, helper) in helpers.iter() {
+                known.insert(name, helper.clone());
+            }
+        }
+        self.outside = Some(outside);
+    }
+
+    /// The roots the modules that are not indexed are read from.
+    pub fn roots(&self) -> Option<&[std::path::PathBuf]> {
+        self.outside.as_deref().map(Modules::roots)
     }
 
     fn sources(&self) -> &HashMap<String, Arc<Module>> {
@@ -299,24 +442,33 @@ impl Builder {
 
     /// `HelperIndex.register`: `import_path` (`pkg.mod.func` or `pkg.mod.Class.method`) as
     /// a helper taking its query as `query` and its row type as `row`, see
-    /// `[[tool.sqlty.functions]]`. Its definition is read from an indexed module, or from
-    /// the first of `roots` holding it.
+    /// `[[tool.sqlty.functions]]`. Its definition is read from its stub, an indexed module
+    /// or a library ([`Builder::outside`]).
     pub fn register(
         &mut self,
         import_path: &str,
         query: &str,
         row: Option<&str>,
-        roots: Roots<'_>,
         database: Option<&str>,
     ) {
         let parts: Vec<&str> = import_path.split('.').collect();
         for i in (1..parts.len()).rev() {
             let name = parts[i..].join(".");
-            let Some(mut found) = self.definition(&parts[..i], &name, query, row, roots, 0) else {
+            let Some((mut found, defined_in)) = self.definition(&parts[..i], &name, query, row, 0)
+            else {
                 continue;
             };
             found.configured = true;
             found.database = database.map(str::to_string);
+            // A receiver's class is known by the module that defines it.
+            if let Some((module, defined)) = defined_in.filter(|_| name.contains('.')) {
+                let mut found = found.clone();
+                found.name.clone_from(&defined);
+                self.modules
+                    .entry(module)
+                    .or_default()
+                    .insert(&defined, found);
+            }
             self.modules
                 .entry(parts[..i].join("."))
                 .or_default()
@@ -355,36 +507,84 @@ impl Builder {
     }
 
     /// The helper `name` of module `parts` defines, following the names it re-exports.
+    /// A place that holds the module without binding the name at all (a stub that
+    /// describes part of a library, one that does not parse) leaves it to the next: the
+    /// stub, the indexed module, then the files of the library.
     fn definition(
         &self,
         parts: &[&str],
         name: &str,
         query: &str,
         row: Option<&str>,
-        roots: Roots<'_>,
         depth: usize,
-    ) -> Option<Helper> {
+    ) -> Option<(Helper, Option<(String, String)>)> {
         let module = parts.join(".");
-        let source = match self.sources().get(&module) {
-            Some(known) => known.source()?.clone(),
-            None => self.module_source(parts, roots)?,
+        let outside = self.outside.as_deref();
+        let first = [
+            self.stubs.get(&module).cloned(),
+            outside.and_then(|outside| outside.stub(&module)),
+            self.sources().get(&module).cloned(),
+        ];
+        // A place that binds the head of the name without the helper (a class whose
+        // method is inherited, say) ends the search: another file's parameters could
+        // contradict the class the receivers are typed by.
+        let head = name.split('.').next().unwrap_or(name);
+        let ended = Cell::new(false);
+        let defined = |known: &Arc<Module>| {
+            if ended.get() {
+                return None;
+            }
+            let found = self.defined_in(known, &module, name, query, row, depth);
+            let bound = known.facts().is_some_and(|facts| facts.binds(head));
+            ended.set(found.is_none() && bound);
+            found
         };
+        if let Some(found) = first.iter().flatten().find_map(defined) {
+            return Some(found);
+        }
+        // The library file every lookup reads is kept; the others are read for this.
+        let outside = outside?;
+        if let Some(found) = outside.library(&module).as_ref().and_then(defined) {
+            return Some(found);
+        }
+        if ended.get() {
+            return None;
+        }
+        let others = outside.libraries(&module);
+        others.iter().skip(1).find_map(defined)
+    }
+
+    /// The helper `name` as `source`, the module `module`, defines or re-exports it.
+    fn defined_in(
+        &self,
+        known: &Module,
+        module: &str,
+        name: &str,
+        query: &str,
+        row: Option<&str>,
+        depth: usize,
+    ) -> Option<(Helper, Option<(String, String)>)> {
+        let source = known.source()?;
         let wanted: Vec<&str> = [Some(query), row].into_iter().flatten().collect();
-        let found = definitions(&source)
+        let found = known
+            .defined()
+            .get(name)
             .into_iter()
-            .filter(|(known, _, _)| known == name)
-            .min_by_key(|(_, function, _)| {
+            .flatten()
+            .min_by_key(|(function, _)| {
                 let names = parameter_names(function);
                 rank(function, wanted.iter().all(|name| names.contains(*name)))
             });
-        if let Some((_, function, kind)) = found {
-            return Some(helper(
+        if let Some((function, kind)) = found {
+            let found = helper(
                 name.to_string(),
                 function,
-                kind,
+                *kind,
                 query.to_string(),
                 row.map(str::to_string),
-            ));
+            );
+            let defined = (depth > 0).then(|| (module.to_string(), name.to_string()));
+            return Some((found, defined));
         }
         if depth > 8 {
             return None;
@@ -393,58 +593,26 @@ impl Builder {
             Some((head, rest)) => (head, format!(".{rest}")),
             None => (name, String::new()),
         };
-        let targets = source.targets_in(source.module.as_deref().or(Some(&module)));
+        let targets = source.targets_in(source.module.as_deref().or(Some(module)));
         let (exports, _) = &*targets;
-        let (target, original) = exports.get(head)?;
+        let Some((target, original)) = exports.get(head) else {
+            // `Db = Other`: the class is read where it is defined, and the helper is
+            // attached to it, so that its parameters are known.
+            let facts = known.facts()?;
+            let bound = facts.bound(head)?;
+            let [Val::Name(alias)] = &*bound else {
+                return None;
+            };
+            // A name bound more than once may not be the class the assignment read.
+            let once = facts.bound(alias).is_some_and(|bound| bound.len() == 1);
+            let aliased = format!("{alias}{rest}");
+            let (found, defined) = (once && alias != head)
+                .then(|| self.defined_in(known, module, &aliased, query, row, depth + 1))
+                .flatten()?;
+            return Some((found, defined.or(Some((module.to_string(), aliased)))));
+        };
         let parts: Vec<&str> = target.split('.').collect();
-        self.definition(
-            &parts,
-            &format!("{original}{rest}"),
-            query,
-            row,
-            roots,
-            depth + 1,
-        )
-    }
-
-    /// Module `parts` read from the first of `roots` holding it.
-    fn module_source(&self, parts: &[&str], roots: Roots<'_>) -> Option<Arc<Source>> {
-        let module = parts.join(".");
-        let (last, package) = parts.split_last()?;
-        for root in roots.paths {
-            let mut file: PathBuf = root.clone();
-            file.extend(package);
-            file.push(format!("{last}.py"));
-            let mut init: PathBuf = root.clone();
-            init.extend(parts);
-            init.push("__init__.py");
-            for (path, name) in [(file, module.clone()), (init, format!("{module}.__init__"))] {
-                let key = (path, name);
-                let known = lock(&self.read).get(&key).cloned();
-                let source = match known {
-                    Some(source) => source,
-                    None => {
-                        let source = match (roots.read)(&key.0) {
-                            None => None,
-                            Some(text) => {
-                                let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
-                                let Some(source) = Source::new(text, self.version) else {
-                                    // The first root holding the file ends the search.
-                                    return None;
-                                };
-                                Some(Arc::new(source.named(Some(&key.1))))
-                            }
-                        };
-                        lock(&self.read).insert(key, source.clone());
-                        source
-                    }
-                };
-                if source.is_some() {
-                    return source;
-                }
-            }
-        }
-        None
+        self.definition(&parts, &format!("{original}{rest}"), query, row, depth + 1)
     }
 
     /// The index, to check modules against.
@@ -462,14 +630,13 @@ impl Builder {
             if names.is_empty() {
                 break;
             }
-            let named = alternation(&names);
+            // Only `import ... name as ...` binds a helper to another name: a module
+            // whose text does not hold that is not parsed for its imports.
+            let named = renaming(&names);
             let mut renamed = Vec::new();
-            // Only `import ... as ...` binds a helper to another name.
-            let aliasing = self.sources().values().filter(|known| {
-                named
-                    .as_ref()
-                    .is_none_or(|named| named.is_match(&known.text))
-                    && AS.is_match(&known.text)
+            let aliasing = self.sources().values().filter(|known| match &named {
+                Some(named) => named.is_match(&known.text),
+                None => AS.is_match(&known.text),
             });
             for source in aliasing.filter_map(|known| known.load()) {
                 renamed.extend(
@@ -500,11 +667,25 @@ impl Builder {
                 reading: Mutex::default(),
             })
         });
+        let mut registered = HashSet::new();
+        for (module, helpers) in &self.modules {
+            for (name, _) in helpers.iter().filter(|(_, helper)| helper.configured) {
+                let Some((class, _)) = name.rsplit_once('.') else {
+                    continue;
+                };
+                let path = format!("{module}.{class}");
+                let ends = path.match_indices('.').map(|(at, _)| at);
+                registered.extend(ends.map(|at| path[..at].to_string()));
+                registered.insert(path);
+            }
+        }
         Arc::new(HelperIndex {
+            registered,
             modules: self.modules,
             tree,
             version: self.version,
-            read: self.read,
+            stubs: self.stubs,
+            outside: self.outside,
             names,
             pattern,
         })
@@ -519,8 +700,62 @@ impl HelperIndex {
             tree: Some(self.tree.clone()),
             added: HashMap::new(),
             version: self.version,
-            read: self.read.clone(),
+            stubs: self.stubs.clone(),
+            outside: self.outside.clone(),
         }
+    }
+
+    /// The module `module`, wherever it is read from: its stub, the checked tree, a
+    /// library. `None` for a module that is not found.
+    pub fn resolve(&self, module: &str) -> Option<Arc<Module>> {
+        resolve(
+            &self.stubs,
+            self.outside.as_deref(),
+            &self.tree.sources,
+            module,
+        )
+    }
+
+    /// Whether the index reads modules outside the checked tree.
+    pub fn reads_outside(&self) -> bool {
+        self.outside.is_some()
+    }
+
+    /// The stubs the index reads helpers from, each as the module it describes, the name
+    /// it is read as and its text: what [`Builder::add_stub`] takes to index them again,
+    /// as a snapshot of the checked files does.
+    pub fn stubs(&self) -> Vec<(String, String, Arc<str>)> {
+        let entry = |module: &str, stub: &Module| {
+            (
+                module.to_string(),
+                stub.name().to_string(),
+                Arc::clone(&stub.text),
+            )
+        };
+        let mut found: Vec<_> = self
+            .stubs
+            .iter()
+            .map(|(module, stub)| entry(module, stub))
+            .collect();
+        if let Some(outside) = &self.outside {
+            let texts = self.tree.sources.values().map(|module| &*module.text);
+            for module in outside.named(texts) {
+                if let Some(stub) = outside
+                    .stub(module)
+                    .filter(|_| !self.stubs.contains_key(module))
+                {
+                    found.push(entry(module, &stub));
+                }
+            }
+        }
+        found.sort();
+        found
+    }
+
+    /// What the module `module` declares, for [`crate::receivers`]. `None` for a module
+    /// that is not found or not read.
+    pub fn facts(&self, module: &str) -> Option<Arc<Facts>> {
+        self.resolve(module)?.facts().cloned()
     }
 
     /// The module `module` as it was added.
@@ -554,6 +789,12 @@ impl HelperIndex {
     /// The types and row types of the modules.
     pub fn types(&self) -> Arc<dyn Index> {
         self.tree.clone()
+    }
+
+    /// Whether `[[tool.sqlty.functions]]` registers a method of `module.class`, or of a
+    /// class in it (`module.class.Inner`).
+    pub fn registers(&self, module: &str, class: &str) -> bool {
+        !self.registered.is_empty() && self.registered.contains(&format!("{module}.{class}"))
     }
 
     /// `HelperIndex.get`: the helper `name` (maybe `Class.method`) of `module`, following
@@ -764,6 +1005,66 @@ mod tests {
     use super::*;
 
     #[test]
+    fn registering_reads_the_definitions_of_a_module_once() {
+        // Twice the registered methods of twice the classes: twice the definitions read.
+        let read = |count: usize| {
+            let text: String = (0..count)
+                .map(|at| format!("class C{at}:\n    def get(self, sql): ...\n"))
+                .collect();
+            let module = Arc::new(Module::new(Arc::from(text), "lib", (3, 14)));
+            let mut builder = Builder::new((3, 14));
+            builder.add_found("lib", module, &Dict::new());
+            crate::calls::READ.with(|read| read.set(0));
+            for at in 0..count {
+                builder.register(&format!("lib.C{at}.get"), "sql", None, None);
+            }
+            let index = builder.build();
+            let found = index
+                .get("lib", &format!("C{}.get", count - 1))
+                .expect("read");
+            assert_eq!(found.positional, ["sql"]);
+            assert!(index.registers("lib", "C0") && !index.registers("lib", "C"));
+            crate::calls::READ.with(Cell::get)
+        };
+        let (small, large) = (read(100), read(200));
+        assert!(small <= 2 * 100, "{small}");
+        assert!(large <= 2 * small, "{small} then {large}");
+    }
+
+    #[test]
+    fn only_a_module_that_renames_a_helper_is_parsed_for_its_imports() {
+        // `as` is everywhere (`with ... as`, `except ... as`, `import numpy as np`):
+        // a build that parsed every such module parsed each file of a project again.
+        let texts = [
+            ("lib", "def get(sql): ...\n"),
+            ("a", "import os as o\nwith open(o.devnull) as f: pass\n"),
+            ("b", "from lib import get as fetch\n"),
+            (
+                "c",
+                "from lib import (\n    get  # the helper\n    as read,\n)\n",
+            ),
+            ("d", "from lib import get \\\n    as load\n"),
+            ("e", "from b import fetch as again\n"),
+            ("f", "get_as = 1\nfrom lib import other as get\n"),
+        ];
+        let mut builder = Builder::new((3, 14));
+        for (name, text) in texts {
+            let module = Arc::new(Module::new(Arc::from(text), name, (3, 14)));
+            builder.add_found(name, module, &Dict::new());
+        }
+        builder.register("lib.get", "sql", None, None);
+        PARSED.with(|count| count.set(0));
+        let index = builder.build();
+        // Three rounds: `b`, `c` and `d` rename `get`, then `e` renames `fetch`, then
+        // nothing new. `a` and `f` are never parsed, nor `lib` again.
+        assert_eq!(PARSED.with(Cell::get), 3 + 4 + 4);
+        for name in ["fetch", "read", "load", "again"] {
+            assert!(index.mentions(&format!("{name}('SELECT 1')")), "{name}");
+        }
+        assert!(!index.mentions("o.devnull") && !index.mentions("other()"));
+    }
+
+    #[test]
     fn a_module_without_a_name_has_no_relative_imports() {
         let source = Source::new(
             "from . import a\nfrom .b import c\nfrom d import e\n",
@@ -829,5 +1130,88 @@ mod tests {
         assert!(!fork.add_found("b", b, &Dict::new()));
         let index = fork.build();
         assert!(index.source("a").is_some() && index.source("b").is_some());
+    }
+
+    const MARKED: &str = "from sqlty import SQL\nfrom typing import Annotated, LiteralString\ndef run(sql: Annotated[LiteralString, SQL]): ...\n";
+
+    fn module(name: &str, text: &str) -> Arc<Module> {
+        Arc::new(Module::new(Arc::from(text), name, (3, 14)))
+    }
+
+    #[test]
+    fn a_stub_that_does_not_parse_marks_no_helper() {
+        let broken = format!("{MARKED}def\n");
+        let mut builder = Builder::new((3, 14));
+        builder.add_stub("lib", module("lib", MARKED));
+        builder.add_stub("broken", module("broken", &broken));
+        let index = builder.build();
+        assert!(index.get("lib", "run").is_some());
+        assert!(index.get("broken", "run").is_none());
+        // Both are still the modules they describe.
+        let stubs: Vec<String> = index.stubs().into_iter().map(|stub| stub.0).collect();
+        assert_eq!(stubs, ["broken", "lib"]);
+    }
+
+    #[test]
+    fn a_stub_given_hides_the_one_read_on_demand() {
+        use crate::modules::{File, ReadFile, Stub};
+        use std::path::{Path, PathBuf};
+
+        let stub = |name: &str| Stub {
+            module: name.to_string(),
+            read_as: name.to_string(),
+            path: PathBuf::from(format!("/s/{name}.pyi")),
+        };
+        // `gone` was listed and then removed.
+        let reader: ReadFile = Arc::new(|path: &Path| match path.ends_with("gone.pyi") {
+            true => File::Missing,
+            false => File::Text(MARKED.to_string()),
+        });
+        let stubs = vec![stub("lib"), stub("gone"), stub("other")];
+        let outside = Arc::new(Modules::new((3, 14), stubs, Vec::new(), reader));
+        let mut builder = Builder::new((3, 14));
+        builder.add_found(
+            "app",
+            module("app", "import lib, gone, other\n"),
+            &Dict::new(),
+        );
+        builder.add_stub("lib", module("lib", "class Given: ...\n"));
+        builder.outside(outside);
+        let index = builder.build();
+        let stubs: Vec<(String, String)> = index
+            .stubs()
+            .into_iter()
+            .map(|(module, _, text)| (module, text.to_string()))
+            .collect();
+        let expected = [("lib", "class Given: ...\n"), ("other", MARKED)]
+            .map(|(module, text)| (module.to_string(), text.to_string()));
+        assert_eq!(stubs, expected);
+    }
+
+    #[test]
+    fn every_module_with_an_import_as_is_parsed_when_no_pattern_holds_the_helpers() {
+        // The names of the helpers are more than a pattern compiles.
+        let long = "f".repeat(4000);
+        let names: Vec<String> = (0..400).map(|at| format!("{long}{at:03}")).collect();
+        let text: String = names
+            .iter()
+            .map(|name| format!("def {name}(sql): ...\n"))
+            .collect();
+        let mut builder = Builder::new((3, 14));
+        builder.add_found("lib", module("lib", &text), &Dict::new());
+        for (name, text) in [
+            ("a", "import os as o\n"),
+            ("b", "from lib import other as fetch\n"),
+            ("c", "from lib import other\n"),
+        ] {
+            builder.add_found(name, module(name, text), &Dict::new());
+        }
+        for name in &names {
+            builder.register(&format!("lib.{name}"), "sql", None, None);
+        }
+        PARSED.with(|count| count.set(0));
+        let index = builder.build();
+        assert_eq!(PARSED.with(Cell::get), 2, "`a` and `b`, not `c`");
+        assert!(index.mentions("anything()"), "any text may call a helper");
     }
 }

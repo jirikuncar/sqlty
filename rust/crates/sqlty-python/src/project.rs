@@ -89,6 +89,20 @@ pub trait Files {
         normalized(path)
     }
 
+    /// The size of the file at `path` in bytes, when it is known without reading it: a
+    /// library module larger than is parsed is then never read.
+    fn size(&self, _path: &Path) -> Option<u64> {
+        None
+    }
+
+    /// At most `limit + 1` bytes of the file at `path`: what [`Self::read`] gives, for a
+    /// file that is read only when it is no longer than `limit`. A host that reads from
+    /// the file system stops there, and has no file where the path is a device, a pipe
+    /// or a directory, whose size says nothing of what a read of it gives.
+    fn read_within(&self, path: &Path, _limit: u64) -> Read {
+        self.read(path)
+    }
+
     /// Whether `path` itself may be a link, so resolving it takes more than resolving its
     /// directory.
     fn is_link(&self, _path: &Path) -> bool {

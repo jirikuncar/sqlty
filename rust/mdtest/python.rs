@@ -13,7 +13,7 @@ use ruff_python_ast::visitor::{walk_expr, Visitor};
 use ruff_python_ast::Expr;
 use ruff_text_size::Ranged;
 use sqlty_python::checker::Diagnostic;
-use sqlty_python::index::{defines_helpers, helpers_of, Builder, HelperIndex, Module, Roots};
+use sqlty_python::index::{defines_helpers, helpers_of, Builder, HelperIndex, Module};
 use sqlty_python::options::Options;
 use sqlty_python::rewriter::ImportStyle;
 use sqlty_python::rules::RuleConfig;
@@ -463,7 +463,50 @@ impl<'s> Run<'s> {
     }
 }
 
-/// The labelled `.py` files as modules (`pkg/db.py` is `pkg.db`), plus `functions`.
+/// The labelled `.pyi` files under `stub-paths`, by the name each is read as, as `sqlty
+/// check` lists them: the first directory of `stub-paths` holding a module gives its stub,
+/// `lib-stubs` describes `lib`, and `lib/__init__.pyi` is taken before `lib.pyi`. A `.pyi`
+/// under no directory of `stub-paths` is not read.
+fn stubs(section: &Section) -> Vec<(String, &String)> {
+    let paths = section
+        .setting("stub-paths")
+        .and_then(toml::Value::as_array);
+    let paths: Vec<&str> = match paths {
+        Some(paths) => paths.iter().filter_map(toml::Value::as_str).collect(),
+        None => vec!["typings"],
+    };
+    let mut found = Vec::new();
+    let mut described: HashSet<String> = HashSet::new();
+    for directory in paths {
+        let prefix = format!("{}/", directory.trim_end_matches('/'));
+        let mut under: Vec<(&str, &String)> = section
+            .files
+            .iter()
+            .filter_map(|(path, text)| {
+                Some((path.strip_suffix(".pyi")?.strip_prefix(&prefix)?, text))
+            })
+            .collect();
+        // A package before the module of its name.
+        under.sort_by_key(|(relative, _)| (!relative.ends_with("/__init__"), *relative));
+        for (relative, text) in under {
+            let (top, rest) = relative.split_once('/').unwrap_or((relative, ""));
+            let top = top.strip_suffix("-stubs").unwrap_or(top);
+            let name = match rest {
+                "" => top.to_string(),
+                rest => format!("{top}.{}", rest.replace('/', ".")),
+            };
+            let module = name.strip_suffix(".__init__").unwrap_or(&name);
+            if described.insert(module.to_string()) {
+                found.push((name, text));
+            }
+        }
+    }
+    found
+}
+
+/// The labelled `.py` files as modules (`pkg/db.py` is `pkg.db`), plus `functions`. A
+/// labelled `.pyi` under a directory of `stub-paths` is a stub (`typings/lib/__init__.pyi`
+/// is `lib`).
 fn helpers(section: &Section) -> Option<Arc<HelperIndex>> {
     let modules: Vec<(String, &String)> = section
         .files
@@ -498,10 +541,16 @@ fn helpers(section: &Section) -> Option<Arc<HelperIndex>> {
             functions.push(function(&f, Some(name)));
         }
     }
-    if modules.is_empty() && functions.is_empty() {
+    let stubs = stubs(section);
+    if modules.is_empty() && functions.is_empty() && stubs.is_empty() {
         return None;
     }
     let mut index = Builder::new(VERSION);
+    for (name, text) in stubs {
+        let module = name.strip_suffix(".__init__").unwrap_or(&name);
+        let stub = Module::new(Arc::from(text.as_str()), &name, VERSION);
+        index.add_stub(module, Arc::new(stub));
+    }
     for (module, text) in modules {
         let source = Module::new(Arc::from(text.as_str()), &module, VERSION);
         let found = defines_helpers(text)
@@ -512,11 +561,7 @@ fn helpers(section: &Section) -> Option<Arc<HelperIndex>> {
         index.add_found(name, Arc::new(source), &found);
     }
     for (path, query, row, database) in functions {
-        let roots = Roots {
-            paths: &[],
-            read: &|_| None,
-        };
-        index.register(&path, &query, row.as_deref(), roots, database.as_deref());
+        index.register(&path, &query, row.as_deref(), database.as_deref());
     }
     Some(index.build())
 }

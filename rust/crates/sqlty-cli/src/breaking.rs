@@ -26,7 +26,7 @@ use std::sync::Arc;
 use clap::ValueEnum;
 use sqlty_project::{Checker, FileSettings, Flags, Options, Shared, Workspace};
 use sqlty_python::checker::Diagnostic;
-use sqlty_python::index::{defines_helpers, helpers_of, Builder, HelperIndex, Module, Roots};
+use sqlty_python::index::{defines_helpers, helpers_of, Builder, HelperIndex, Module};
 use sqlty_python::project::{self, Discovery};
 use sqlty_python::rules::{RuleConfig, Severity};
 use sqlty_python::types::stdlib::Version;
@@ -352,7 +352,7 @@ pub enum Baseline {
         _checkout: Worktree,
     },
     /// A snapshot `--save` wrote.
-    Snapshot(Snapshot),
+    Snapshot(Box<Snapshot>),
     /// Schema files.
     SchemaFiles(String, SchemaFiles),
 }
@@ -371,7 +371,7 @@ impl Baseline {
     pub fn queries(&mut self) -> Option<&mut dyn Queries> {
         match self {
             Self::Revision { revision, .. } => Some(&mut **revision),
-            Self::Snapshot(snapshot) => Some(snapshot),
+            Self::Snapshot(snapshot) => Some(&mut **snapshot),
             Self::SchemaFiles(..) => None,
         }
     }
@@ -380,7 +380,7 @@ impl Baseline {
     pub fn schemas(&mut self) -> &mut dyn Schemas {
         match self {
             Self::Revision { revision, .. } => &mut **revision,
-            Self::Snapshot(snapshot) => snapshot,
+            Self::Snapshot(snapshot) => &mut **snapshot,
             Self::SchemaFiles(_, files) => files,
         }
     }
@@ -421,7 +421,7 @@ pub fn baselines(
             .is_some_and(|extension| extension == "json")
     {
         let snapshot = Snapshot::load(&path, Path::new(against), against, paths, version)?;
-        return Ok(vec![Baseline::Snapshot(snapshot)]);
+        return Ok(vec![Baseline::Snapshot(Box::new(snapshot))]);
     }
     if path.is_dir() {
         let mut snapshots: Vec<PathBuf> = std::fs::read_dir(&path)
@@ -437,7 +437,8 @@ pub fn baselines(
                 .map(|file| {
                     let label = file.file_stem().unwrap_or_default().to_string_lossy();
                     let shown = Path::new(against).join(file.file_name().unwrap_or_default());
-                    Snapshot::load(file, &shown, &label, paths, version).map(Baseline::Snapshot)
+                    Snapshot::load(file, &shown, &label, paths, version)
+                        .map(|snapshot| Baseline::Snapshot(Box::new(snapshot)))
                 })
                 .collect();
         }
@@ -703,20 +704,26 @@ pub(crate) fn index_of(files: &[File], version: Version) -> Arc<HelperIndex> {
     builder.build()
 }
 
-/// `index` with the `functions` of `settings` registered, found among its modules only.
-pub(crate) fn configured(index: &HelperIndex, settings: &FileSettings) -> Arc<HelperIndex> {
+/// A stub as a snapshot keeps it: the module it describes, the name it is read as, its text.
+pub(crate) type StubText = (String, String, Arc<str>);
+
+/// `index` with `stubs` read and the `functions` of `settings` registered, found among
+/// its modules and the stubs only.
+pub(crate) fn configured(
+    index: &HelperIndex,
+    settings: &FileSettings,
+    stubs: &[StubText],
+) -> Arc<HelperIndex> {
     let mut forked = index.fork();
-    let read = |_: &Path| None;
+    for (module, read_as, text) in stubs {
+        let stub = Module::new(Arc::clone(text), read_as, index.version());
+        forked.add_stub(module, Arc::new(stub));
+    }
     for function in &settings.functions {
-        let roots = Roots {
-            paths: &[],
-            read: &read,
-        };
         forked.register(
             &function.import_path,
             &function.query,
             function.row.as_deref(),
-            roots,
             function.database.as_deref(),
         );
     }

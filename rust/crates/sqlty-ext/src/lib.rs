@@ -835,7 +835,8 @@ struct DiagnosticOut {
 
 /// The modules of the checked paths as `sqlty_python::index` reads them, built from the
 /// steps that filled a `sqlty._helpers.HelperIndex`: `("add", module, text, name)` and
-/// `("register", import path, query parameter, row parameter, roots, database)`.
+/// `("register", import path, query parameter, row parameter, roots, database)`,
+/// `("stub", module, text, name)` and `("outside", "", "", None, roots)`.
 #[pyclass(frozen, name = "ModuleIndex", module = "sqlty._core")]
 struct ModuleIndex(Arc<sqlty_python::index::HelperIndex>);
 
@@ -909,7 +910,8 @@ fn indexed(
     steps: Vec<IndexStep>,
 ) -> ModuleIndex {
     use rayon::prelude::*;
-    use sqlty_python::index::{defines_helpers, helpers_of, Module, Roots};
+    use sqlty_python::index::{defines_helpers, helpers_of, Module};
+    use sqlty_python::modules::Modules;
     let mut unique: HashMap<(&str, &str), usize> = HashMap::new();
     let slots: Vec<Option<usize>> = steps
         .iter()
@@ -936,28 +938,52 @@ fn indexed(
         Some(pool) => pool.install(|| texts.into_par_iter().map(parse).collect()),
         None => texts.into_iter().map(parse).collect(),
     };
-    for ((_, first, second, third, roots, database), slot) in steps.into_iter().zip(slots) {
+    for ((kind, first, second, third, roots, database), slot) in steps.into_iter().zip(slots) {
         match slot {
             Some(slot) => {
                 let (source, found) = &parsed[slot];
                 index.add_found(&first, Arc::clone(source), found);
             }
+            // A `.pyi` of `stub-paths`: the module, its text and the name it is read as.
+            None if kind == "stub" => {
+                let name = third.as_deref().unwrap_or(&first);
+                let module = Module::new(Arc::from(second.as_str()), name, version);
+                index.add_stub(&first, Arc::new(module));
+            }
+            // The roots the modules that are not indexed are read from: the libraries a
+            // helper is registered in or a receiver's class is defined in.
             None => {
-                let roots = Roots {
-                    paths: &roots,
-                    read: &|path| std::fs::read_to_string(path).ok(),
-                };
-                index.register(
-                    &first,
-                    &second,
-                    third.as_deref(),
-                    roots,
-                    database.as_deref(),
-                );
+                if !roots.is_empty() && index.roots() != Some(roots.as_slice()) {
+                    let outside = Modules::new(version, Vec::new(), roots, Arc::new(read_module));
+                    index.outside(Arc::new(outside));
+                }
+                if kind == "register" {
+                    index.register(&first, &second, third.as_deref(), database.as_deref());
+                }
             }
         }
     }
     ModuleIndex(index.build())
+}
+
+/// The module at `path`, outside the checked tree: read as the other hosts read it, no
+/// further than is parsed, and only where it is a regular file.
+fn read_module(path: &std::path::Path) -> sqlty_python::modules::File {
+    use sqlty_python::modules::File;
+    use sqlty_python::project::{Files as _, Read};
+    let limit = sqlty_python::parse::MAX_LEN as u64;
+    match sqlty_project::Disk.read_within(path, limit) {
+        Read::Text(data) if data.len() as u64 > limit => File::Unread,
+        Read::Text(data) => match String::from_utf8(data) {
+            Ok(text) => File::Text(text),
+            // A stub that is not text is no stub: the module is looked for on.
+            Err(_) if path.extension().is_some_and(|extension| extension == "pyi") => File::Missing,
+            Err(_) => File::Unread,
+        },
+        // A file that is there and cannot be read.
+        Read::Missing if sqlty_project::Disk.size(path).is_some() => File::Unread,
+        Read::Missing | Read::Unread => File::Missing,
+    }
 }
 
 /// The helpers, types and row types of a tree, filled as `HelperIndex` is.

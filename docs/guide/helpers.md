@@ -104,11 +104,26 @@ ids = fetch_all("SELECT name FROM users", int)
 ## Methods
 
 Methods are marked the same way. `self` and `cls` are not counted when the
-arguments are bound. A call is checked when the receiver is evident: the class
-(`Db.fetch_one(...)`, for static and class methods), `self` inside the class,
-a variable assigned `Db(...)` or annotated `db: Db` in the same scope (or the
-module), and `self.db` when the class body annotates it or `__init__` assigns
-`Db(...)`. Other receivers, and inherited methods, are skipped.
+arguments are bound. A call is checked when the class of its receiver is declared,
+the way a type checker reads it: an annotation (`db: Db`, a parameter, `self.db: Db`),
+an instance assigned (`db = Db(...)`), an attribute the class or one of its bases
+declares (`website.db`, `self.app.db`), the return annotation of a call (`make()`,
+`Self`, `typing.cast`), and `with ... as` through `__enter__` or a `@contextmanager`
+function annotated `Iterator[T]`. `T | None` is read as `T`. A subclass has the helper
+methods of its bases, in Python's method resolution order, unless it or a base before
+the helper's class defines the method itself. Classes of other modules are read from
+their source, never imported.
+
+A name is followed through the statements of its function in order: it is what the
+bindings that reach the call give it, and a branch that ends in `return` or `raise` does
+not reach what follows. `isinstance(x, Db)` states the class of a name nothing else is
+known of, or known to be of a base of `Db`: in the branch it guards, after an `assert`,
+and after an `if not isinstance(x, Db):` that returns or raises.
+
+What no declaration states is skipped: an unannotated parameter, the result of an
+unannotated function, an attribute set from outside the class. So is a name that some
+binding reaching the call leaves unknown, or that two of them give different classes,
+or that more than 64 bindings reach at once.
 
 ```python
 from typing import Annotated, LiteralString
@@ -126,6 +141,90 @@ ids = db.fetch_all("SELECT name FROM users", int)
 # error: [column-type-mismatch]
 one = Db.fetch_one("SELECT name FROM users", int)
 ```
+
+### Stubs for untyped libraries
+
+A library without annotations declares nothing. Describe it with a stub, a `.pyi`
+file under `typings/` (or the directories of `stub-paths`), as for pyright and ty:
+the stub is read before the library. A method whose query parameter the stub marks
+is a helper, with no `[[tool.sqlty.functions]]` entry.
+
+`typings/lib/__init__.pyi`:
+
+```python
+from typing import Annotated, Any, ClassVar, LiteralString
+from sqlty import SQL
+
+class Cursor:
+    def one[T](self, sql: Annotated[LiteralString, SQL], form: type[T]) -> T | None: ...
+
+class Transaction:
+    def __enter__(self) -> Cursor: ...
+
+class Postgres:
+    def one[T](self, sql: Annotated[LiteralString, SQL], form: type[T]) -> T | None: ...
+    def get_cursor(self) -> Transaction: ...
+
+class Model:
+    db: ClassVar[Postgres]
+```
+
+```python
+from lib import Model
+
+class Participant(Model):
+    def name(self) -> None:
+        # error: [column-type-mismatch]
+        self.db.one("SELECT name FROM users", int)
+        with self.db.get_cursor() as cursor:
+            # error: [column-type-mismatch]
+            cursor.one("SELECT name FROM users", int)
+```
+
+The directories of `stub-paths` are read in order and the first that describes a module
+gives its stub; `lib-stubs/` describes `lib`, and `lib/__init__.pyi` is taken before
+`lib.pyi`. A stub is read when a checked file, or a stub that is read, names its
+package, so a directory of stubs for libraries the project does not use costs nothing. A library without a stub is read
+from the project directory, the roots of the checked packages and `sys.path`:
+`lib-stubs` before `lib`, a `.pyi` before the `.py` beside it.
+
+A marked parameter makes a helper in a checked file or a stub only. A library's own
+`.py` file gives the classes of receivers, and a helper only for a function that
+`[[tool.sqlty.functions]]` names.
+
+The language server asks the editor to report the `.py` and `.pyi` files that change on
+disk. With an editor that does, as VS Code does, it keeps the stubs and libraries it has
+read, and reads one again when the editor saves it or reports the change. With one that
+does not, it reads them again on every edit.
+
+### Differences from a type checker
+
+sqlty reads declarations to find which helper a call reaches, not to check types, and
+skips a call rather than guess. The cases in `tests/mdtest/check/receivers.md` each name
+what [ty](https://docs.astral.sh/ty/) reveals for the receiver; nothing checks that the
+two agree on other code. It follows less than ty does:
+
+| Code | ty | sqlty |
+|------|----|-------|
+| The result of an unannotated function, `x = make()` | the inferred return type | skipped: no function body is read for what it returns |
+| `db = Db() if ready else None`, `a or b`, a subscript, an unpacked tuple | the inferred type | skipped |
+| A name that is of any of several classes: `Db | Other`, two reaching bindings, `try: from lib import Db` / `except ImportError: from lib2 import Db` | the method of each class, each call checked against its own signature | checked when every class reaches a helper and all of them take the query, the row type and the parameters the same way; skipped otherwise, and for more than 8 classes. `Db | None` is `Db` |
+| `isinstance(x, Db)` on a name of an unrelated class or of a type variable | the intersection | skipped; of a union, the members that are `Db` or a subclass of it |
+| `isinstance(x, (A, B))`, `type(x) is Db`, `match` class patterns, `TypeGuard` | narrowed | not narrowed |
+| A generic class, `Box[Db]().item` | `Db` | `Box` is followed, its type arguments are not |
+| A class defined in a function or in another class | followed | only the helpers it declares itself, when it is the only class of its name in the module and the scope around it binds that name once; its bases and attributes are not followed |
+| A name a comprehension, a `lambda`, `global` or `nonlocal` binds | followed | skipped |
+| `self.db` assigned from a local variable of `__init__` | the inferred type | skipped; a parameter with an annotation is followed |
+| A class whose bases have no consistent order, or a base that is not found | an error, `Unknown` | skipped unless the class itself declares the method |
+| A name bound in the body of a `with`, read after it | the new value, unless `__exit__` is declared to return `bool` | the new value or the one before: any manager may swallow an exception |
+| What a function returns when the annotation names its own type parameter, `def first[T](x: T) -> T` | the type of the argument | skipped |
+| A module-level name read in a function | every binding of the module | every binding of the module must agree; an annotation states the class |
+| More than 64 bindings of a name reaching a call | followed | skipped |
+
+It follows one thing a type checker does not: a name imported from a module that is
+not found is known by the path it is imported by, so a helper registered as
+`lib.Db.fetch` in [`functions`](#helpers-you-cannot-annotate) is found on `db: Db`
+after `from lib import Db` without `lib` being installed.
 
 ## Helpers you cannot annotate
 

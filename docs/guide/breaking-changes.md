@@ -351,8 +351,12 @@ A schema file, such as the output of `pg_dump --schema-only` in CI, has no
 queries, so it is only checked forward: the new queries against that schema.
 
 !!! note "A snapshot holds source code"
-    A snapshot holds the full text of every checked Python and query file. Commit it where the
-    code may be read, or store it as a CI artifact.
+    A snapshot holds the full text of every checked Python and query file, and of every
+    [stub](helpers.md#stubs-for-untyped-libraries) a checked file names, directly or
+    through another stub. Commit it where the code may be read, or store it as a CI
+    artifact. Libraries are not kept: a helper method whose receiver's class is read from
+    a library, and a registered function defined in a library outside the checked paths,
+    are not found in a snapshot.
 
 ## Expand and contract
 

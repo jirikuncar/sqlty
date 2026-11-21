@@ -17,7 +17,7 @@ use sqlty_python::rules::RuleConfig;
 use sqlty_python::types::stdlib::Version;
 use sqlty_sql::analyzer::{self, Schema};
 
-use super::{configured, index_of, Against, File, Queries, Revision, Schemas};
+use super::{configured, index_of, Against, File, Queries, Revision, Schemas, StubText};
 
 const FORMAT: u64 = 1;
 
@@ -35,6 +35,8 @@ pub struct Snapshot {
     paths: HashMap<PathBuf, usize>,
     loaded: HashMap<usize, Schema>,
     index: Option<Arc<HelperIndex>>,
+    /// The stubs the files of some settings were checked with.
+    stubs: Vec<(Arc<FileSettings>, Vec<StubText>)>,
     version: Version,
 }
 
@@ -56,8 +58,24 @@ pub fn save<W: std::borrow::BorrowMut<Workspace>>(
         })
     };
     let mut entries = Vec::new();
+    // The stubs each settings read helpers from, found once per settings.
+    let mut stubs: Vec<(Arc<FileSettings>, Vec<Value>)> = Vec::new();
     for file in &files {
         let own = &file.settings;
+        let known = stubs.iter().position(|(of, _)| Arc::ptr_eq(of, own));
+        let read = match known {
+            Some(at) => stubs[at].1.clone(),
+            None => {
+                let read: Vec<Value> = revision
+                    .helpers(own)
+                    .stubs()
+                    .into_iter()
+                    .map(|(module, read_as, text)| json!([module, read_as, &*text]))
+                    .collect();
+                stubs.push((Arc::clone(own), read.clone()));
+                read
+            }
+        };
         let mut rules: Vec<_> = own.rules.iter().collect();
         rules.sort();
         let functions: Vec<Value> = own
@@ -86,6 +104,12 @@ pub fn save<W: std::borrow::BorrowMut<Workspace>>(
             "functions": functions,
             "query_format": format_name(own.query_format),
         });
+        let mut entry = entry;
+        // Written only when there are some: a snapshot of a project without stubs is
+        // what it was before stubs were read.
+        if !read.is_empty() {
+            entry["stubs"] = Value::Array(read);
+        }
         entries.push(index(&mut settings, entry));
     }
     let mut directories: BTreeSet<PathBuf> = BTreeSet::from([PathBuf::from(".")]);
@@ -201,6 +225,7 @@ impl Snapshot {
             paths: HashMap::new(),
             loaded: HashMap::new(),
             index: None,
+            stubs: Vec::new(),
             version,
         };
         for entry in get("schemas")?
@@ -251,7 +276,7 @@ impl Snapshot {
                 }
                 None => (None, Vec::new()),
             };
-            settings.push(Arc::new(FileSettings {
+            let own = Arc::new(FileSettings {
                 dialect: dialect(entry)?,
                 schema: schema.map(|at| snapshot.schema(at)).transpose()?,
                 schema_sql,
@@ -266,6 +291,7 @@ impl Snapshot {
                 variants: None,
                 coerce: HashSet::new(),
                 functions,
+                stub_paths: Vec::new(),
                 format_command: Vec::new(),
                 queries: Vec::new(),
                 query_format: text_of(entry, "query_format")
@@ -273,7 +299,25 @@ impl Snapshot {
                     .unwrap_or(Format::Auto),
                 base: None,
                 version,
-            }));
+            });
+            let stubs: Vec<StubText> = entry
+                .get("stubs")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|stub| {
+                    let field = |at: usize| stub.get(at).and_then(Value::as_str);
+                    Some((
+                        field(0)?.to_string(),
+                        field(1)?.to_string(),
+                        Arc::from(field(2)?),
+                    ))
+                })
+                .collect();
+            if !stubs.is_empty() {
+                snapshot.stubs.push((Arc::clone(&own), stubs));
+            }
+            settings.push(own);
         }
         let directories = get("directories")?
             .as_object()
@@ -393,8 +437,9 @@ impl Queries for Snapshot {
             .collect())
     }
 
-    /// A snapshot keeps the checked files, not the directories they were read from: its
-    /// `functions` are found among them only.
+    /// A snapshot keeps the checked files and the stubs they were checked with, not the
+    /// directories they were read from: its `functions` and the classes of its receivers
+    /// are found among them only.
     fn helpers(&mut self, settings: &FileSettings) -> Arc<HelperIndex> {
         let index = match &self.index {
             Some(index) => Arc::clone(index),
@@ -405,9 +450,14 @@ impl Queries for Snapshot {
                 index
             }
         };
-        match settings.functions.is_empty() {
+        let stubs = self
+            .stubs
+            .iter()
+            .find(|(of, _)| std::ptr::eq(&raw const **of, settings))
+            .map_or(&[][..], |(_, stubs)| stubs);
+        match settings.functions.is_empty() && stubs.is_empty() {
             true => index,
-            false => configured(&index, settings),
+            false => configured(&index, settings, stubs),
         }
     }
 }

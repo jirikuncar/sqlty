@@ -12,9 +12,7 @@ use ruff_python_ast::{self as ast, Expr};
 
 use crate::frozen::Table;
 use crate::index::HelperIndex;
-use crate::scopes::{
-    class_of, dotted, literal_type, qualified, Key, Node, Param, Scan, Scope, IMPORTED,
-};
+use crate::scopes::{class_of, dotted, literal_type, qualified, Key, Param, Scan, Scope, IMPORTED};
 use crate::types::pydantic::Known;
 use crate::types::symbols::{Index, ModuleTypes, Source};
 use crate::types::ty::Ty;
@@ -24,10 +22,6 @@ pub trait ArgTypes {
     /// The type `expr` has in the scopes `stack`, spelled as [`class_of`] spells a class
     /// (`int`, `uuid.UUID`, `list[int]`, `None`); `None` when the source does not say.
     fn arg_type(&self, expr: &Expr, stack: &[Scope]) -> Option<String>;
-
-    /// The class of `self`, or of a variable or `self` attribute with an evident type, spelled
-    /// as the module spells it, which is how its helper methods are looked up.
-    fn receiver_class(&self, receiver: &Expr, stack: &[Scope]) -> Option<String>;
 
     /// The dotted name the name or attribute `expr` stands for through the module's imports:
     /// `psycopg.Connection` for `Connection` after `from psycopg import Connection`.
@@ -159,12 +153,7 @@ impl<'a, 's> SourceTypes<'a, 's> {
             .iter()
             .filter(|&&scope| !self.scan.is_class(scope))
             .chain(std::iter::once(&0))
-            .any(|&scope| self.scan.types.contains_key(&(scope, name)))
-    }
-
-    /// The class a variable holds in `stack`.
-    fn type_of(&self, stack: &[Scope], name: &str) -> Option<String> {
-        self.variable(stack, name).and_then(|(_, kind, _)| kind)
+            .any(|&scope| self.scan.kind_of(scope, name).is_some())
     }
 
     /// The class a variable holds in `stack`, with the scopes its annotation is read in, and
@@ -179,22 +168,13 @@ impl<'a, 's> SourceTypes<'a, 's> {
             .enumerate()
             .rev()
             .filter(|&(_, &scope)| !self.scan.is_class(scope))
-            .find_map(|(at, &scope)| Some((at + 1, scope, self.scan.types.get(&(scope, name))?)));
+            .find_map(|(at, &scope)| Some((at + 1, scope, self.scan.kind_of(scope, name)?)));
         let (end, scope, kind) = match found {
             Some(found) => found,
-            None => (0, 0, self.scan.types.get(&(0, name))?),
+            None => (0, 0, self.scan.kind_of(0, name)?),
         };
-        let parameter = self.scan.parameters.contains(&(scope, name));
-        Some((&stack[..end], kind.clone(), parameter))
-    }
-
-    /// The class `self.name` holds in the innermost class of `stack`.
-    fn attribute_type(&self, stack: &[Scope], name: &str) -> Option<String> {
-        let class = stack
-            .iter()
-            .rev()
-            .find(|&&scope| self.scan.is_class(scope))?;
-        self.scan.attributes.get(&(*class, name)).cloned().flatten()
+        let parameter = self.scan.parameter(scope, name);
+        Some((&stack[..end], kind, parameter))
     }
 
     /// The class of an instance of the type spelled `name` in `stack`; a `NewType` or alias
@@ -208,10 +188,8 @@ impl<'a, 's> SourceTypes<'a, 's> {
         if self.source.is_some_and(|source| source.bound(head) > 1)
             || outer
                 .iter()
-                .any(|&scope| self.scan.types.contains_key(&(scope, head)))
-            || stack
-                .iter()
-                .any(|&scope| self.scan.generics.contains(&(scope, head)))
+                .any(|&scope| self.scan.kind_of(scope, head).is_some())
+            || stack.iter().any(|&scope| self.scan.generic(scope, head))
         {
             return None;
         }
@@ -277,42 +255,6 @@ impl ArgTypes for SourceTypes<'_, '_> {
     fn qualified(&self, expr: &Expr) -> Option<String> {
         qualified(dotted(expr), self.imported)
     }
-
-    fn receiver_class(&self, receiver: &Expr, stack: &[Scope]) -> Option<String> {
-        let base = match receiver {
-            Expr::Attribute(attr) => attr.value.as_ref(),
-            expr => expr,
-        };
-        let Expr::Name(base_name) = base else {
-            return None;
-        };
-        for pair in stack.windows(2).rev() {
-            let (Node::Class(class), Node::Function(method)) =
-                (self.scan.scopes[pair[0]], self.scan.scopes[pair[1]])
-            else {
-                continue;
-            };
-            let is_self = method
-                .parameters
-                .args
-                .first()
-                .is_some_and(|first| first.parameter.name.as_str() == base_name.id.as_str());
-            let is_static = method
-                .decorator_list
-                .iter()
-                .any(|d| dotted(&d.expression).as_deref() == Some("staticmethod"));
-            if is_self && !is_static {
-                return match receiver {
-                    Expr::Attribute(attr) => self.attribute_type(stack, attr.attr.as_str()),
-                    _ => Some(class.name.to_string()),
-                };
-            }
-        }
-        match receiver {
-            Expr::Name(name) => self.type_of(stack, name.id.as_str()),
-            _ => None,
-        }
-    }
 }
 
 /// The type `names` gives the dotted `name`.
@@ -344,11 +286,9 @@ fn spell(ty: &Ty) -> Option<String> {
 /// walked once per module.
 fn module_kinds(source: &Source) -> &HashMap<String, Option<String>> {
     source.kinds.get_or_init(|| {
-        Scan::new(source.body())
-            .types
-            .into_iter()
-            .filter(|((scope, _), _)| *scope == 0)
-            .map(|((_, name), kind)| (name.to_string(), kind))
+        let scan = Scan::new(source.body());
+        scan.bound_in(0)
+            .filter_map(|(name, _)| Some((name.to_string(), scan.kind_of(0, name)?)))
             .collect()
     })
 }

@@ -8,9 +8,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use rayon::prelude::*;
 use sqlty_python::calls::Helper;
 use sqlty_python::checker::{self, Diagnostic, SiteKind};
-use sqlty_python::index::{
-    defines_helpers, helpers_of, Builder, HelperIndex, Module as Indexed, Roots,
-};
+use sqlty_python::index::{defines_helpers, helpers_of, Builder, HelperIndex, Module as Indexed};
+use sqlty_python::modules::{File as Found, Modules, ReadFile, Stub};
 use sqlty_python::project::{
     self, helper_roots, normalized, Discovery, Files, FindError, Kind, Listing, Packages, Read,
 };
@@ -56,6 +55,28 @@ impl Module {
     }
 }
 
+/// What a configured index is built from: `functions`, the project directory, `stub-paths`.
+type IndexKey = (Vec<Function>, Option<PathBuf>, Vec<String>);
+/// What the modules outside the checked tree are found by: the roots, and the
+/// directories of `stub-paths`.
+type OutsideKey = (Vec<PathBuf>, Vec<PathBuf>);
+/// The paths some [`Modules`] asked for, read or missing: what its answers depend on.
+type Asked = Arc<Mutex<HashSet<PathBuf>>>;
+/// A directory as it is given, and as it resolves.
+type Place = (PathBuf, PathBuf);
+
+/// The stubs under some directories, and the directories as they resolve.
+type Listed = (Arc<Vec<Stub>>, Vec<Place>);
+
+/// The modules read outside the checked tree, and what a change on disk is compared with.
+struct Outside {
+    modules: Arc<Modules>,
+    asked: Asked,
+    /// The roots that are links.
+    roots: Vec<Place>,
+    stubs: Vec<Place>,
+}
+
 /// How [`Workspace::open`] reads the paths.
 pub struct Options {
     /// The command line's settings over the configuration files.
@@ -88,7 +109,15 @@ pub struct Workspace {
     modules: HashMap<PathBuf, Module>,
     unreadable: Vec<(PathBuf, String)>,
     index: Option<Arc<HelperIndex>>,
-    configured: HashMap<(Vec<Function>, Option<PathBuf>), Arc<HelperIndex>>,
+    configured: HashMap<IndexKey, Arc<HelperIndex>>,
+    /// The stubs and libraries read so far. An edit of a checked file leaves them: they
+    /// are read from files, which a workspace reads once.
+    outside: HashMap<OutsideKey, Outside>,
+    /// The folders the client reports the files written in, as given and as they
+    /// resolve; see [`Workspace::watched`].
+    watched: Option<Vec<PathBuf>>,
+    /// The stubs under the directories of some `stub-paths`, listed once.
+    stubs: HashMap<Vec<PathBuf>, Listed>,
     resolved: Mutex<HashMap<PathBuf, PathBuf>>,
     configs: Mutex<Configured>,
 }
@@ -173,6 +202,9 @@ impl Workspace {
             unreadable: Vec::new(),
             index: None,
             configured: HashMap::new(),
+            outside: HashMap::new(),
+            stubs: HashMap::new(),
+            watched: None,
             resolved: Mutex::default(),
             configs: Mutex::default(),
         };
@@ -254,6 +286,103 @@ impl Workspace {
         }
         self.index = None;
         self.configured.clear();
+        self.changed(path);
+        // Nobody says when a stub or a library outside the watched folders is written:
+        // each edit reads them again.
+        let folders = self.watched.as_deref().unwrap_or_default();
+        let inside = |path: &Path| folders.iter().any(|folder| path.starts_with(folder));
+        let within = |places: &[Place]| {
+            places
+                .iter()
+                .all(|(given, real)| inside(given) && inside(real))
+        };
+        self.stubs.retain(|_, (_, places)| within(places));
+        self.outside.retain(|_, outside| {
+            let asked = outside.asked.lock().unwrap_or_else(PoisonError::into_inner);
+            within(&outside.stubs) && asked.iter().all(|asked| inside(asked))
+        });
+    }
+
+    /// The client reports the Python files and stubs written under `folders` with
+    /// [`Workspace::changed`], so an edit no longer reads again the stubs and libraries
+    /// found there. Those found elsewhere are still read again by every edit.
+    pub fn watched(&mut self, folders: &[PathBuf]) {
+        let resolved = folders.iter().map(|folder| self.files.canonical(folder));
+        let watched = Some(folders.iter().cloned().chain(resolved).collect());
+        if self.watched != watched {
+            // What was written before the client watched is not reported: read it again.
+            self.stubs.clear();
+            self.outside.clear();
+            self.configured.clear();
+            self.watched = watched;
+        }
+    }
+
+    /// The directories the stubs and libraries read so far were looked for in: the
+    /// `stub-paths` directories, and the roots a path was asked for under, found or
+    /// not. A client may watch them.
+    pub fn searched(&self) -> Vec<PathBuf> {
+        let mut searched: Vec<PathBuf> = self.stubs.keys().flatten().cloned().collect();
+        for ((roots, stubs), outside) in &self.outside {
+            let asked = outside.asked.lock().unwrap_or_else(PoisonError::into_inner);
+            let under = |root: &&PathBuf| asked.iter().any(|asked| asked.starts_with(root));
+            searched.extend(roots.iter().filter(under).chain(stubs).cloned());
+        }
+        searched.sort();
+        searched.dedup();
+        searched
+    }
+
+    /// The file or directory at `path` was written, created or removed on disk: the stubs
+    /// listed and the libraries read that depend on it are read again by the next check.
+    /// A path nothing asked for changes nothing, and gives `false`.
+    pub fn changed(&mut self, path: &Path) -> bool {
+        let python = |kind: &std::ffi::OsStr| kind == "py" || kind == "pyi";
+        if !path.extension().is_none_or(python) {
+            return false;
+        }
+        let resolved = self.files.canonical(path);
+        // A directory is every file under it, and one above a `stub-paths` directory
+        // is that directory.
+        let holds = |asked: &Path| asked.starts_with(path) || asked.starts_with(&resolved);
+        let touches = |places: &[Place]| {
+            places.iter().any(|(given, real)| {
+                [given, real].iter().any(|place| {
+                    path.starts_with(place) || resolved.starts_with(place) || holds(place)
+                })
+            })
+        };
+        let cached = self.stubs.len() + self.outside.len();
+        self.stubs.retain(|_, (_, places)| !touches(places));
+        self.outside.retain(|_, outside| {
+            let asked = outside.asked.lock().unwrap_or_else(PoisonError::into_inner);
+            // What was asked for under a root that is a link, as the event names it.
+            let linked = outside.roots.iter().any(|(given, real)| {
+                [path, resolved.as_path()]
+                    .iter()
+                    .filter_map(|path| path.strip_prefix(real).ok())
+                    .any(|rest| match rest.as_os_str().is_empty() {
+                        true => asked.iter().any(|asked| asked.starts_with(given)),
+                        false => asked
+                            .iter()
+                            .any(|asked| asked.starts_with(given.join(rest))),
+                    })
+            });
+            !linked && !asked.iter().any(|asked| holds(asked)) && !touches(&outside.stubs)
+        });
+        let dropped = self.stubs.len() + self.outside.len() != cached;
+        if dropped {
+            self.configured.clear();
+        }
+        dropped
+    }
+
+    /// Each of `directories` as it is given and as it resolves, which differ for a link.
+    fn places(&self, directories: &[PathBuf]) -> Vec<Place> {
+        directories
+            .iter()
+            .map(|given| (given.clone(), self.files.canonical(given)))
+            .collect()
     }
 
     fn module(&self, path: &Path, text: Arc<str>, parse: bool) -> Module {
@@ -543,16 +672,83 @@ impl Workspace {
         index
     }
 
-    /// The index with the `functions` of `settings` registered.
+    /// The index with the `functions` of `settings` registered, the helpers the stubs of
+    /// its `stub-paths` mark, and the libraries a receiver's class is read from.
     pub fn helpers(&mut self, settings: &FileSettings) -> Arc<HelperIndex> {
         let index = self.index();
-        if settings.functions.is_empty() {
-            return index;
-        }
-        let key = (settings.functions.clone(), settings.base.clone());
+        let key = (
+            settings.functions.clone(),
+            settings.base.clone(),
+            settings.stub_paths.clone(),
+        );
         if let Some(found) = self.configured.get(&key) {
             return Arc::clone(found);
         }
+        let base = settings
+            .base
+            .as_deref()
+            .map(|base| self.files.canonical(base));
+        let stubs = self.stubs(base.as_deref(), &settings.stub_paths);
+        // Nothing is a helper: no call has a receiver to find the class of, and the
+        // index of the checked files serves as it is.
+        let plain = settings.functions.is_empty() && index.names().is_empty() && stubs.is_empty();
+        let forked = match plain {
+            true => index,
+            false => {
+                let mut forked = index.fork();
+                forked.outside(self.outside(base.as_deref(), &settings.stub_paths));
+                for function in &settings.functions {
+                    forked.register(
+                        &function.import_path,
+                        &function.query,
+                        function.row.as_deref(),
+                        function.database.as_deref(),
+                    );
+                }
+                forked.build()
+            }
+        };
+        self.configured.insert(key, Arc::clone(&forked));
+        forked
+    }
+
+    /// The directories `stub_paths` name in the project of `base`.
+    fn stub_directories(&self, base: Option<&Path>, stub_paths: &[String]) -> Vec<PathBuf> {
+        let project = base.map_or_else(|| self.files.canonical(&self.flags.cwd), Path::to_path_buf);
+        stub_paths
+            .iter()
+            .map(|directory| normalized(&project.join(directory)))
+            .collect()
+    }
+
+    /// The stubs under `stub_paths`, listed once and read when a lookup reaches one.
+    fn stubs(&mut self, base: Option<&Path>, stub_paths: &[String]) -> Arc<Vec<Stub>> {
+        let directories = self.stub_directories(base, stub_paths);
+        if let Some((listed, _)) = self.stubs.get(&directories) {
+            return Arc::clone(listed);
+        }
+        let mut stubs = Vec::new();
+        for directory in &directories {
+            let listed = stubs.len();
+            stubs_under(&self.files, directory, &mut Vec::new(), listed, &mut stubs);
+            if stubs.len() - listed > MAX_STUBS {
+                stubs.truncate(listed + MAX_STUBS);
+                self.schemas.warn(format!(
+                    "{} holds more than {MAX_STUBS} stubs: the rest are not read",
+                    directory.display()
+                ));
+            }
+        }
+        let stubs = Arc::new(stubs);
+        let places = self.places(&directories);
+        self.stubs.insert(directories, (Arc::clone(&stubs), places));
+        stubs
+    }
+
+    /// The modules outside the checked tree, for the files of the project of `base`: the
+    /// stubs under `stub_paths`, and the libraries under the project directory, the roots
+    /// of the checked packages and the host's `sys.path`.
+    fn outside(&mut self, base: Option<&Path>, stub_paths: &[String]) -> Arc<Modules> {
         let resolved: Vec<PathBuf> = self
             .order
             .iter()
@@ -561,31 +757,59 @@ impl Workspace {
         let checked = self
             .packages
             .checked_roots(&self.paths, &resolved, &self.flags.cwd);
-        let base = settings
-            .base
-            .as_deref()
-            .map(|base| self.files.canonical(base));
-        let roots = helper_roots(base.as_deref(), &checked, &self.extra_roots);
-        let files = self.files.clone();
-        let read = move |path: &Path| files.text(path);
-        let mut forked = index.fork();
-        for function in &settings.functions {
-            let roots = Roots {
-                paths: &roots,
-                read: &read,
-            };
-            let row = function.row.as_deref();
-            forked.register(
-                &function.import_path,
-                &function.query,
-                row,
-                roots,
-                function.database.as_deref(),
-            );
+        let roots = helper_roots(base, &checked, &self.extra_roots);
+        let key = (roots, self.stub_directories(base, stub_paths));
+        if let Some(found) = self.outside.get(&key) {
+            return Arc::clone(&found.modules);
         }
-        let forked = forked.build();
-        self.configured.insert(key, Arc::clone(&forked));
-        forked
+        // The roots of this project changed: what was read under the old ones is not
+        // asked for again.
+        self.outside
+            .retain(|(_, directories), _| *directories != key.1);
+        let stubs = self.stubs(base, stub_paths).to_vec();
+        let files = self.files.clone();
+        let asked = Asked::default();
+        let noted = Arc::clone(&asked);
+        let read: ReadFile = Arc::new(move |path: &Path| {
+            noted
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(path.to_path_buf());
+            // A module too large to parse is not read at all.
+            let limit = sqlty_python::parse::MAX_LEN as u64;
+            let size = files.size(path);
+            if size.is_some_and(|size| size > limit) {
+                return Found::Unread;
+            }
+            // A file that is there and cannot be read ends the search as one that is
+            // not text does, in every host: the module is there, and nothing is known
+            // of it. A stub that is not text is no stub: the module is looked for on.
+            let stub = path.extension().is_some_and(|extension| extension == "pyi");
+            // The size may be unknown, or the file may have grown since it was asked:
+            // no more than is parsed is read.
+            match files.read_within(path, limit) {
+                Read::Text(data) if data.len() as u64 > limit => Found::Unread,
+                Read::Text(data) => match String::from_utf8(data) {
+                    Ok(text) => Found::Text(text),
+                    Err(_) if stub => Found::Missing,
+                    Err(_) => Found::Unread,
+                },
+                Read::Missing if size.is_some() => Found::Unread,
+                // A host that has not fetched the file yet may have it later.
+                Read::Missing | Read::Unread => Found::Missing,
+            }
+        });
+        let found = Arc::new(Modules::new(self.version, stubs, key.0.clone(), read));
+        let mut roots = self.places(&key.0);
+        roots.retain(|(given, real)| given != real);
+        let outside = Outside {
+            modules: Arc::clone(&found),
+            asked,
+            roots,
+            stubs: self.places(&key.1),
+        };
+        self.outside.insert(key, outside);
+        found
     }
 
     fn directory(&mut self, path: &Path) -> Result<Arc<Directory>, String> {
@@ -1007,6 +1231,62 @@ fn pool() -> &'static rayon::ThreadPool {
             .expect("the check threads start")
     })
 }
+/// The most stubs one `stub-paths` directory gives, and how deep its packages nest.
+const MAX_STUBS: usize = 4096;
+const MAX_STUB_DEPTH: usize = 16;
+
+/// The `.pyi` files under `directory`, each as the module it describes, the name it is
+/// read as (`pkg.__init__` for a package) and its path; `pkg-stubs` describes `pkg`.
+/// Directories come before files, so that of `lib/__init__.pyi` and `lib.pyi` the package
+/// is listed first, and `lib-stubs` before `lib`. Nothing is read: `found` holds
+/// `listed` stubs of other directories.
+fn stubs_under(
+    files: &Shared,
+    directory: &Path,
+    package: &mut Vec<String>,
+    listed: usize,
+    found: &mut Vec<Stub>,
+) {
+    let Listing::Entries(mut entries) = files.list(directory) else {
+        return;
+    };
+    entries
+        .sort_by_key(|(name, kind)| (*kind == Kind::File, !name.ends_with("-stubs"), name.clone()));
+    for (name, kind) in entries {
+        // One more than is kept tells that there are more.
+        if found.len() - listed > MAX_STUBS {
+            return;
+        }
+        let path = directory.join(&name);
+        if let Some(stem) = name.strip_suffix(".pyi").filter(|_| kind == Kind::File) {
+            if package.is_empty() && stem == "__init__" {
+                continue;
+            }
+            let mut parts = package.clone();
+            parts.push(stem.to_string());
+            let read_as = parts.join(".");
+            if stem == "__init__" {
+                parts.pop();
+            }
+            found.push(Stub {
+                module: parts.join("."),
+                read_as,
+                path,
+            });
+        } else if kind == Kind::Dir && package.len() < MAX_STUB_DEPTH {
+            let part = match package.is_empty() {
+                true => name.strip_suffix("-stubs").unwrap_or(&name),
+                false => &name,
+            };
+            if !part.is_empty() && part.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                package.push(part.to_string());
+                stubs_under(files, &path, package, listed, found);
+                package.pop();
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1506,6 +1786,640 @@ mod tests {
             .check(Path::new("/repo/q.py"), text)
             .expect("checks");
         assert_eq!(rules(&found), ["unparsed-query"]);
+    }
+
+    /// Files that tell which of them were read, and their sizes.
+    struct Counted(Mutex<Tree>, Arc<Mutex<Vec<PathBuf>>>);
+
+    impl Counted {
+        /// Write `text` to `path`, as another program does; `None` removes the file.
+        fn write(&self, path: &str, text: Option<&'static str>) {
+            let files = &mut self.0.lock().unwrap().0;
+            match text {
+                Some(text) => files.insert(PathBuf::from(path), text.as_bytes()),
+                None => files.remove(Path::new(path)),
+            };
+        }
+    }
+
+    impl Files for Counted {
+        fn read(&self, path: &Path) -> Read {
+            let found = self.0.lock().unwrap().read(path);
+            if matches!(found, Read::Text(_)) {
+                self.1.lock().unwrap().push(path.to_path_buf());
+            }
+            found
+        }
+
+        fn list(&self, path: &Path) -> Listing {
+            self.0.lock().unwrap().list(path)
+        }
+
+        /// `/repo/linked` is a link to `/real`.
+        fn canonical(&self, path: &Path) -> PathBuf {
+            let path = normalized(path);
+            match path.strip_prefix("/repo/linked") {
+                Ok(rest) => Path::new("/real").join(rest),
+                Err(_) => path,
+            }
+        }
+
+        fn size(&self, path: &Path) -> Option<u64> {
+            self.0.lock().unwrap().0.get(path).map(|data| match *data {
+                b"<large>" => 1 << 30,
+                data => data.len() as u64,
+            })
+        }
+
+        /// `<grown>` is a file larger than its size said: as much of it as is asked for.
+        fn read_within(&self, path: &Path, limit: u64) -> Read {
+            match self.read(path) {
+                Read::Text(data) if data == b"<grown>" => {
+                    Read::Text(vec![b'#'; usize::try_from(limit).unwrap() + 1])
+                }
+                found => found,
+            }
+        }
+    }
+
+    const STUB: &str = "from typing import Annotated, LiteralString\nfrom sqlty import SQL\nclass Db:\n    def one(self, sql: Annotated[LiteralString, SQL], form: type, /): ...\n";
+    const PLAIN: &str = "class Db:\n    def one(self, sql, form): ...\n";
+    const CALL: &str =
+        "from lib import Db\ndef run(db: Db) -> None:\n    db.one(\"SELECT nope FROM users\", int)\n";
+
+    /// A project whose `typings` hold a stub of `lib` and one of `unused`, with `more`
+    /// files, and the paths it has read.
+    fn stubbed(more: &[(&str, &'static str)]) -> (Workspace, Arc<Mutex<Vec<PathBuf>>>) {
+        let (workspace, files) = written(more);
+        (workspace, Arc::clone(&files.1))
+    }
+
+    /// [`stubbed`], with the files to write to.
+    fn written(more: &[(&str, &'static str)]) -> (Workspace, Arc<Counted>) {
+        let mut files = vec![
+            (
+                "/repo/pyproject.toml",
+                "[tool.sqlty]\nschema = \"schema.sql\"\n",
+            ),
+            ("/repo/schema.sql", "CREATE TABLE users (id INT NOT NULL);"),
+            ("/repo/typings/lib/__init__.pyi", STUB),
+            ("/repo/typings/unused/__init__.pyi", STUB),
+            ("/repo/app.py", CALL),
+        ];
+        files.extend_from_slice(more);
+        let tree = Tree(
+            files
+                .iter()
+                .map(|(path, text)| (PathBuf::from(path), text.as_bytes()))
+                .collect(),
+        );
+        let files = Arc::new(Counted(Mutex::new(tree), Arc::default()));
+        let shared: Arc<dyn Files + Send + Sync> = files.clone();
+        let workspace =
+            Workspace::root(Path::new("/repo"), shared, (3, 14), Vec::new()).expect("opens");
+        (workspace, files)
+    }
+
+    fn reads(read: &Mutex<Vec<PathBuf>>, suffix: &str) -> usize {
+        let read = read.lock().unwrap();
+        read.iter().filter(|path| path.ends_with(suffix)).count()
+    }
+
+    #[test]
+    fn a_stub_marks_the_helpers_of_the_library_a_checked_file_names() {
+        let (mut workspace, read) = stubbed(&[]);
+        let found = workspace
+            .check(Path::new("/repo/app.py"), CALL)
+            .expect("checks");
+        assert_eq!(rules(&found), ["unknown-column"]);
+        assert_eq!(reads(&read, "typings/lib/__init__.pyi"), 1);
+        assert_eq!(
+            reads(&read, "typings/unused/__init__.pyi"),
+            0,
+            "listed only"
+        );
+        let settings = workspace.settings(Path::new("/repo/app.py")).unwrap();
+        let kept = workspace.helpers(&settings).stubs();
+        let modules: Vec<&str> = kept.iter().map(|(module, _, _)| module.as_str()).collect();
+        assert_eq!(modules, ["lib"], "what a snapshot keeps");
+    }
+
+    #[test]
+    fn the_stubs_and_libraries_read_survive_an_edit() {
+        let (mut workspace, read) = stubbed(&[("/repo/other.py", "x = 1\n")]);
+        workspace.watched(&[PathBuf::from("/repo")]);
+        let path = Path::new("/repo/app.py");
+        for edit in ["", "\n", "\n\n"] {
+            let text = format!("{CALL}{edit}");
+            let found = workspace.check(path, &text).expect("checks");
+            assert_eq!(rules(&found), ["unknown-column"], "{edit:?}");
+        }
+        workspace.update(Path::new("/repo/other.py"), "x = 2\n");
+        assert_eq!(
+            rules(&workspace.check(path, CALL).unwrap()),
+            ["unknown-column"]
+        );
+        assert_eq!(reads(&read, "typings/lib/__init__.pyi"), 1);
+    }
+
+    #[test]
+    fn a_project_without_helpers_reads_nothing_outside() {
+        let (mut workspace, read) = stubbed(&[]);
+        let settings = workspace.settings(Path::new("/repo/app.py")).unwrap();
+        let plain = FileSettings {
+            stub_paths: vec!["nowhere".to_string()],
+            ..(*settings).clone()
+        };
+        let index = workspace.helpers(&plain);
+        assert!(
+            !index.reads_outside(),
+            "the index of the checked files as it is"
+        );
+        assert!(workspace.outside.is_empty(), "no library is looked for");
+        assert_eq!(reads(&read, "__init__.pyi"), 0, "no stub is read");
+    }
+
+    const APP: &str = "/repo/app.py";
+
+    #[test]
+    fn a_stub_written_again_is_read_again() {
+        let (mut workspace, files) = written(&[]);
+        let app = Path::new(APP);
+        assert_eq!(
+            rules(&workspace.check(app, CALL).unwrap()),
+            ["unknown-column"]
+        );
+        files.write("/repo/typings/lib/__init__.pyi", Some(PLAIN));
+        assert!(workspace.changed(Path::new("/repo/typings/lib/__init__.pyi")));
+        assert_eq!(rules(&workspace.check(app, CALL).unwrap()), [""; 0]);
+        assert!(
+            !workspace.changed(Path::new("/repo/typings/lib/notes.txt")),
+            "not a module"
+        );
+    }
+
+    #[test]
+    fn a_stub_created_or_removed_is_seen() {
+        let (mut workspace, files) = written(&[]);
+        let (app, stub) = (Path::new(APP), "/repo/typings/lib/__init__.pyi");
+        files.write(stub, None);
+        assert_eq!(rules(&workspace.check(app, CALL).unwrap()), [""; 0]);
+        files.write(stub, Some(STUB));
+        assert!(workspace.changed(Path::new(stub)));
+        assert_eq!(
+            rules(&workspace.check(app, CALL).unwrap()),
+            ["unknown-column"]
+        );
+        files.write(stub, None);
+        assert!(workspace.changed(Path::new(stub)));
+        assert_eq!(rules(&workspace.check(app, CALL).unwrap()), [""; 0]);
+    }
+
+    #[test]
+    fn a_library_written_again_is_read_again() {
+        let (mut workspace, files) = written(&[
+            ("/repo/pyproject.toml", VENDOR),
+            ("/repo/vendor/db.py", "def fetch(sql): ...\n"),
+        ]);
+        let app = Path::new(APP);
+        assert_eq!(
+            rules(&workspace.check(app, FETCH).unwrap()),
+            ["unknown-column"]
+        );
+        files.write("/repo/vendor/db.py", Some("def fetch(other, sql): ...\n"));
+        assert!(workspace.changed(Path::new("/repo/vendor/db.py")));
+        assert_eq!(rules(&workspace.check(app, FETCH).unwrap()), [""; 0]);
+        let stub = "/repo/vendor/db.pyi";
+        files.write(stub, Some("def fetch(sql): ...\n"));
+        assert!(workspace.changed(Path::new(stub)), "asked for, and missing");
+        assert_eq!(
+            rules(&workspace.check(app, FETCH).unwrap()),
+            ["unknown-column"]
+        );
+    }
+
+    #[test]
+    fn a_file_nothing_read_changes_nothing() {
+        let (mut workspace, files) = written(&[("/repo/other.py", "x = 1\n")]);
+        workspace.watched(&[PathBuf::from("/repo")]);
+        let app = Path::new(APP);
+        assert_eq!(
+            rules(&workspace.check(app, CALL).unwrap()),
+            ["unknown-column"]
+        );
+        assert!(
+            !workspace.changed(Path::new("/repo/other.py")),
+            "a checked file"
+        );
+        assert!(!workspace.changed(Path::new("/elsewhere/lib.py")));
+        workspace.update(Path::new("/repo/other.py"), "x = 2\n");
+        assert_eq!(
+            rules(&workspace.check(app, CALL).unwrap()),
+            ["unknown-column"]
+        );
+        assert_eq!(reads(&files.1, "typings/lib/__init__.pyi"), 1);
+    }
+
+    #[test]
+    fn without_a_watcher_an_edit_reads_the_stubs_and_libraries_again() {
+        let (mut workspace, files) = written(&[]);
+        let (app, stub) = (Path::new(APP), "/repo/typings/lib/__init__.pyi");
+        assert_eq!(
+            rules(&workspace.check(app, CALL).unwrap()),
+            ["unknown-column"]
+        );
+        files.write(stub, Some(PLAIN));
+        let edited = format!("{CALL}\n");
+        assert_eq!(rules(&workspace.check(app, &edited).unwrap()), [""; 0]);
+        // With one, only what it reports is read again.
+        workspace.watched(&[PathBuf::from("/repo")]);
+        assert_eq!(rules(&workspace.check(app, CALL).unwrap()), [""; 0]);
+        files.write(stub, Some(STUB));
+        assert_eq!(rules(&workspace.check(app, &edited).unwrap()), [""; 0]);
+        assert!(workspace.changed(Path::new(stub)));
+        assert_eq!(
+            rules(&workspace.check(app, CALL).unwrap()),
+            ["unknown-column"]
+        );
+    }
+
+    const VENDOR: &str = "[tool.sqlty]\nschema = \"schema.sql\"\nexclude = [\"vendor\"]\n[[tool.sqlty.functions]]\nimport-path = \"vendor.db.fetch\"\nquery-param = \"sql\"\n";
+    const FETCH: &str = "from vendor import db\ndb.fetch(\"SELECT nope FROM users\")\n";
+
+    #[test]
+    fn what_is_read_outside_the_watched_folders_is_read_again_by_an_edit() {
+        let config = "[tool.sqlty]\nschema = \"schema.sql\"\nstub-paths = [\"../shared\"]\n";
+        let (mut workspace, files) = written(&[
+            ("/repo/pyproject.toml", config),
+            ("/shared/lib/__init__.pyi", STUB),
+        ]);
+        workspace.watched(&[PathBuf::from("/repo")]);
+        let app = Path::new(APP);
+        assert_eq!(
+            rules(&workspace.check(app, CALL).unwrap()),
+            ["unknown-column"]
+        );
+        files.write("/shared/lib/__init__.pyi", Some(PLAIN));
+        let edited = format!("{CALL}\n");
+        assert_eq!(rules(&workspace.check(app, &edited).unwrap()), [""; 0]);
+    }
+
+    #[test]
+    fn a_library_outside_the_watched_folders_is_read_again_by_an_edit() {
+        let (mut workspace, files) = written(&[
+            ("/repo/pyproject.toml", VENDOR),
+            ("/repo/vendor/db.py", "def fetch(sql): ...\n"),
+        ]);
+        workspace.watched(&[PathBuf::from("/repo/app")]);
+        let app = Path::new(APP);
+        assert_eq!(
+            rules(&workspace.check(app, FETCH).unwrap()),
+            ["unknown-column"]
+        );
+        files.write("/repo/vendor/db.py", Some("def fetch(other, sql): ...\n"));
+        let edited = format!("{FETCH}\n");
+        assert_eq!(rules(&workspace.check(app, &edited).unwrap()), [""; 0]);
+    }
+
+    #[test]
+    fn what_was_written_before_the_client_watched_is_read_again() {
+        let (mut workspace, files) = written(&[]);
+        let (app, stub) = (Path::new(APP), "/repo/typings/lib/__init__.pyi");
+        let folders = [PathBuf::from("/repo")];
+        assert_eq!(
+            rules(&workspace.check(app, CALL).unwrap()),
+            ["unknown-column"]
+        );
+        files.write(stub, Some(PLAIN));
+        workspace.watched(&folders);
+        assert_eq!(rules(&workspace.check(app, CALL).unwrap()), [""; 0]);
+        // The same folders again tell nothing new.
+        files.write(stub, Some(STUB));
+        workspace.watched(&folders);
+        assert_eq!(rules(&workspace.check(app, CALL).unwrap()), [""; 0]);
+        workspace.watched(&[PathBuf::from("/repo"), PathBuf::from("/site")]);
+        assert_eq!(
+            rules(&workspace.check(app, CALL).unwrap()),
+            ["unknown-column"]
+        );
+    }
+
+    #[test]
+    fn a_root_nothing_was_asked_for_under_is_not_searched() {
+        let files: Vec<(&str, &'static str)> = vec![
+            ("/repo/pyproject.toml", VENDOR),
+            ("/repo/schema.sql", "CREATE TABLE users (id INT NOT NULL);"),
+            ("/repo/vendor/db.py", "def fetch(sql): ...\n"),
+            ("/repo/app.py", FETCH),
+        ];
+        let tree = Tree(
+            files
+                .iter()
+                .map(|(path, text)| (PathBuf::from(path), text.as_bytes()))
+                .collect(),
+        );
+        let files: Arc<dyn Files + Send + Sync> = Arc::new(tree);
+        let roots = vec![PathBuf::from("/site"), PathBuf::from("/bin")];
+        let mut workspace =
+            Workspace::root(Path::new("/repo"), files, (3, 14), roots).expect("opens");
+        let found = workspace.check(Path::new(APP), FETCH).unwrap();
+        assert_eq!(rules(&found), ["unknown-column"]);
+        let searched = workspace.searched();
+        assert!(searched.contains(&PathBuf::from("/repo")), "{searched:?}");
+        let outside = |path: &&PathBuf| !path.starts_with("/repo");
+        assert_eq!(searched.iter().filter(outside).count(), 0, "{searched:?}");
+        let missing = "import nowhere\nnowhere.db.fetch(\"SELECT 1\")\n";
+        workspace
+            .check(Path::new(APP), &format!("{FETCH}{missing}"))
+            .unwrap();
+        let searched = workspace.searched();
+        assert!(searched.contains(&PathBuf::from("/site")), "{searched:?}");
+    }
+
+    #[test]
+    fn the_directories_searched_are_the_stub_paths_and_the_roots_asked() {
+        let (mut workspace, _) = written(&[]);
+        assert!(workspace.searched().is_empty(), "nothing is read yet");
+        workspace.check(Path::new(APP), CALL).unwrap();
+        let expected = ["/repo", "/repo/typings"].map(PathBuf::from);
+        assert_eq!(workspace.searched(), expected);
+    }
+
+    #[test]
+    fn a_directory_removed_is_every_file_under_it() {
+        let (mut workspace, files) = written(&[
+            ("/repo/pyproject.toml", VENDOR),
+            ("/repo/vendor/db.py", "def fetch(sql): ...\n"),
+        ]);
+        workspace.watched(&[PathBuf::from("/repo")]);
+        let app = Path::new(APP);
+        let both = format!("{CALL}{FETCH}");
+        let found = workspace.check(app, &both).unwrap();
+        assert_eq!(rules(&found), ["unknown-column", "unknown-column"]);
+        assert!(
+            !workspace.changed(Path::new("/repo/docs")),
+            "nothing was read there"
+        );
+        files.write("/repo/typings/lib/__init__.pyi", None);
+        assert!(workspace.changed(Path::new("/repo/typings/lib")));
+        let found = workspace.check(app, &both).unwrap();
+        assert_eq!(rules(&found), ["unknown-column"], "the stub is gone");
+        files.write("/repo/vendor/db.py", None);
+        assert!(workspace.changed(Path::new("/repo/vendor")), "a library");
+        assert_eq!(rules(&workspace.check(app, &both).unwrap()), [""; 0]);
+        assert!(workspace.changed(Path::new("/repo")), "above the stubs");
+    }
+
+    #[test]
+    fn a_change_is_found_by_the_path_a_link_resolves_to() {
+        let (mut workspace, files) = written(&[
+            (
+                "/repo/pyproject.toml",
+                "[tool.sqlty]\nschema = \"schema.sql\"\nstub-paths = [\"linked\"]\n",
+            ),
+            ("/repo/linked/lib/__init__.pyi", STUB),
+        ]);
+        workspace.watched(&[PathBuf::from("/repo")]);
+        let app = Path::new(APP);
+        assert_eq!(
+            rules(&workspace.check(app, CALL).unwrap()),
+            ["unknown-column"]
+        );
+        files.write("/repo/linked/lib/__init__.pyi", Some(PLAIN));
+        assert!(!workspace.changed(Path::new("/elsewhere/lib/__init__.pyi")));
+        assert!(workspace.changed(Path::new("/real/lib/__init__.pyi")));
+        assert_eq!(rules(&workspace.check(app, CALL).unwrap()), [""; 0]);
+    }
+
+    #[test]
+    fn the_libraries_of_roots_no_longer_current_are_dropped() {
+        let (mut workspace, _) = written(&[("/repo/pkg/__init__.py", ""), ("/repo/pkg/a.py", "")]);
+        workspace.watched(&[PathBuf::from("/repo")]);
+        let app = Path::new(APP);
+        assert_eq!(
+            rules(&workspace.check(app, CALL).unwrap()),
+            ["unknown-column"]
+        );
+        assert_eq!(workspace.outside.len(), 1);
+        workspace.update(Path::new("/other/deep/b.py"), "x = 1\n");
+        assert_eq!(
+            rules(&workspace.check(app, CALL).unwrap()),
+            ["unknown-column"]
+        );
+        assert_eq!(workspace.outside.len(), 1, "one set of roots a project");
+    }
+
+    #[test]
+    fn the_first_stub_path_wins_and_a_package_beats_a_module() {
+        let (mut workspace, _) = stubbed(&[
+            (
+                "/repo/pyproject.toml",
+                "[tool.sqlty]\nschema = \"schema.sql\"\nstub-paths = [\"first\", \"typings\"]\n",
+            ),
+            ("/repo/first/lib.pyi", PLAIN),
+            ("/repo/first/both.pyi", PLAIN),
+            ("/repo/first/both/__init__.pyi", STUB),
+            ("/repo/first/named-stubs/__init__.pyi", STUB),
+            ("/repo/first/named/__init__.pyi", PLAIN),
+            ("/repo/first/__init__.pyi", STUB),
+            ("/repo/use.py", "import both, named, lib\n"),
+        ]);
+        let settings = workspace.settings(Path::new("/repo/app.py")).unwrap();
+        let index = workspace.helpers(&settings);
+        assert!(
+            index.get("lib", "Db.one").is_none(),
+            "first/lib.pyi hides typings/lib"
+        );
+        assert!(index.get("both", "Db.one").is_some());
+        assert!(index.get("named", "Db.one").is_some());
+    }
+
+    #[test]
+    fn a_library_too_large_to_parse_is_not_read() {
+        let (mut workspace, read) = stubbed(&[
+            ("/repo/vendor/big.py", "<large>"),
+            ("/repo/vendor/small.py", "from lib import Db\n"),
+            (
+                "/repo/pyproject.toml",
+                "[tool.sqlty]\nschema = \"schema.sql\"\nexclude = [\"vendor\"]\n",
+            ),
+        ]);
+        let settings = workspace.settings(Path::new("/repo/app.py")).unwrap();
+        let index = workspace.helpers(&settings);
+        assert!(index
+            .resolve("vendor.small")
+            .is_some_and(|found| found.source().is_some()));
+        assert!(index
+            .resolve("vendor.big")
+            .is_some_and(|found| found.source().is_none()));
+        assert_eq!(reads(&read, "vendor/big.py"), 0);
+        assert_eq!(reads(&read, "vendor/small.py"), 1);
+    }
+
+    #[test]
+    fn a_library_that_gives_more_than_is_parsed_is_not_parsed() {
+        // Its size was small or unknown when asked: a file that grew since, or one whose
+        // size says nothing of what a read gives.
+        let (mut workspace, read) = stubbed(&[
+            ("/repo/vendor/grown.py", "<grown>"),
+            (
+                "/repo/pyproject.toml",
+                "[tool.sqlty]\nschema = \"schema.sql\"\nexclude = [\"vendor\"]\n",
+            ),
+        ]);
+        let settings = workspace.settings(Path::new("/repo/app.py")).unwrap();
+        let index = workspace.helpers(&settings);
+        assert!(index
+            .resolve("vendor.grown")
+            .is_some_and(|found| found.source().is_none()));
+        assert_eq!(reads(&read, "vendor/grown.py"), 1);
+    }
+
+    #[test]
+    fn a_library_that_cannot_be_read_is_there_and_unknown() {
+        // As the Python host reads it: the file ends the search for the module.
+        let (mut workspace, _) = stubbed(&[
+            ("/repo/vendor/gone.py", "<unreadable>"),
+            (
+                "/repo/pyproject.toml",
+                "[tool.sqlty]\nschema = \"schema.sql\"\nexclude = [\"vendor\"]\n",
+            ),
+        ]);
+        let settings = workspace.settings(Path::new("/repo/app.py")).unwrap();
+        let index = workspace.helpers(&settings);
+        assert!(index
+            .resolve("vendor.gone")
+            .is_some_and(|found| found.source().is_none()));
+        assert!(index.resolve("vendor.missing").is_none());
+    }
+
+    #[test]
+    fn a_file_that_is_not_text_is_no_stub_and_a_library_nothing_is_known_of() {
+        let (mut workspace, files) = written(&[
+            ("/repo/typings/raw.pyi", ""),
+            ("/repo/vendor/raw.py", ""),
+            ("/repo/vendor/text.py", "x = 1\n"),
+            (
+                "/repo/pyproject.toml",
+                "[tool.sqlty]\nschema = \"schema.sql\"\nexclude = [\"vendor\"]\n",
+            ),
+        ]);
+        for path in ["/repo/typings/raw.pyi", "/repo/vendor/raw.py"] {
+            let tree = &mut files.0.lock().unwrap().0;
+            tree.insert(PathBuf::from(path), b"\xff\xfe".as_slice());
+        }
+        let settings = workspace.settings(Path::new("/repo/app.py")).unwrap();
+        let index = workspace.helpers(&settings);
+        // The library is there, which ends the search for it; the stub is not.
+        assert!(index
+            .resolve("vendor.raw")
+            .is_some_and(|found| found.source().is_none()));
+        assert!(index
+            .resolve("vendor.text")
+            .is_some_and(|found| found.source().is_some()));
+        assert!(index.resolve("raw").is_none());
+    }
+
+    #[test]
+    fn stubs_are_listed_in_the_packages_whose_names_are_modules() {
+        let (mut workspace, _) = stubbed(&[
+            ("/repo/typings/lib/sub/__init__.pyi", STUB),
+            ("/repo/typings/lib/sub/deep.pyi", STUB),
+            ("/repo/typings/lib/not-a-module/hidden.pyi", STUB),
+            ("/repo/typings/lib/README.md", "The stubs of lib.\n"),
+        ]);
+        let settings = workspace.settings(Path::new("/repo/app.py")).unwrap();
+        let index = workspace.helpers(&settings);
+        let stubs: Vec<String> = index.stubs().into_iter().map(|stub| stub.0).collect();
+        assert_eq!(stubs, ["lib", "lib.sub", "lib.sub.deep"]);
+        assert!(index.get("lib.sub.deep", "Db.one").is_some());
+    }
+
+    #[test]
+    fn a_library_under_a_root_that_is_a_link_is_found_by_where_the_link_leads() {
+        let config = "[tool.sqlty]\nschema = \"schema.sql\"\nexclude = [\"linked\"]\n[[tool.sqlty.functions]]\nimport-path = \"extra.fetch\"\nquery-param = \"sql\"\n";
+        let call = "import extra\nextra.fetch(\"SELECT nope FROM users\")\n";
+        let tree: Tree = Tree(
+            [
+                ("/repo/pyproject.toml", config),
+                ("/repo/schema.sql", "CREATE TABLE users (id INT NOT NULL);"),
+                ("/repo/linked/extra.py", "def fetch(sql): ...\n"),
+            ]
+            .into_iter()
+            .map(|(path, text)| (PathBuf::from(path), text.as_bytes()))
+            .collect(),
+        );
+        let files = Arc::new(Counted(Mutex::new(tree), Arc::default()));
+        let shared: Arc<dyn Files + Send + Sync> = files.clone();
+        let roots = vec![PathBuf::from("/repo/linked")];
+        let mut workspace =
+            Workspace::root(Path::new("/repo"), shared, (3, 14), roots).expect("opens");
+        let app = Path::new(APP);
+        assert_eq!(
+            rules(&workspace.check(app, call).unwrap()),
+            ["unknown-column"]
+        );
+        // The client names the file by where the link leads: `/real`.
+        files.write(
+            "/repo/linked/extra.py",
+            Some("def fetch(other, sql): ...\n"),
+        );
+        assert!(!workspace.changed(Path::new("/elsewhere/extra.py")));
+        assert!(workspace.changed(Path::new("/real/extra.py")));
+        assert_eq!(rules(&workspace.check(app, call).unwrap()), [""; 0]);
+        // The directory is every file under it.
+        files.write("/repo/linked/extra.py", Some("def fetch(sql): ...\n"));
+        assert!(workspace.changed(Path::new("/real")));
+        assert_eq!(
+            rules(&workspace.check(app, call).unwrap()),
+            ["unknown-column"]
+        );
+    }
+
+    #[test]
+    fn each_project_reads_the_libraries_under_its_own_roots() {
+        let config = "[tool.sqlty]\nschema = \"schema.sql\"\nexclude = [\"linked\"]\n[[tool.sqlty.functions]]\nimport-path = \"extra.fetch\"\nquery-param = \"sql\"\n";
+        let call = "import extra\nextra.fetch(\"SELECT nope FROM users\")\n";
+        let schema = "CREATE TABLE users (id INT NOT NULL);";
+        let tree: Tree = Tree(
+            [
+                ("/repo/pyproject.toml", config),
+                ("/repo/schema.sql", schema),
+                ("/repo/sub/pyproject.toml", config),
+                ("/repo/sub/schema.sql", schema),
+                ("/repo/linked/extra.py", "def fetch(sql): ...\n"),
+            ]
+            .into_iter()
+            .map(|(path, text)| (PathBuf::from(path), text.as_bytes()))
+            .collect(),
+        );
+        let shared: Arc<dyn Files + Send + Sync> =
+            Arc::new(Counted(Mutex::new(tree), Arc::default()));
+        let roots = vec![PathBuf::from("/repo/linked")];
+        let mut workspace =
+            Workspace::root(Path::new("/repo"), shared, (3, 14), roots).expect("opens");
+        // The files of another project are checked in between: what the first read is kept.
+        for app in [APP, "/repo/sub/app.py", APP] {
+            let found = workspace.check(Path::new(app), call).unwrap();
+            assert_eq!(rules(&found), ["unknown-column"], "{app}");
+        }
+    }
+
+    #[test]
+    fn warns_when_a_stub_path_holds_more_stubs_than_are_listed() {
+        let names: Vec<(String, &'static str)> = (0..=MAX_STUBS)
+            .map(|at| (format!("/repo/typings/m{at:05}.pyi"), ""))
+            .collect();
+        let more: Vec<(&str, &'static str)> = names
+            .iter()
+            .map(|(path, text)| (&*Box::leak(path.clone().into_boxed_str()), *text))
+            .collect();
+        let (mut workspace, _) = stubbed(&more);
+        let settings = workspace.settings(Path::new("/repo/app.py")).unwrap();
+        let _ = workspace.helpers(&settings);
+        let warnings = workspace.warnings();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].ends_with("typings holds more than 4096 stubs: the rest are not read"));
     }
 
     fn tree(files: &[(&str, &'static [u8])]) -> Shared {

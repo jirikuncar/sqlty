@@ -1,5 +1,4 @@
-//! What finding helper calls reads of a module: which scopes mention a helper name, and the
-//! class of a call's receiver.
+//! What finding helper calls reads of a module: which scopes mention a helper name.
 
 use std::sync::{Arc, Mutex};
 

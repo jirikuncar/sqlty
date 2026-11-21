@@ -158,6 +158,7 @@ def test_unknown_keys_raise_config_error_naming_the_file(tmp_path):
             "did you mean 'import-path'?",
         ),
         ("[tool.sqlty]\nexclude = 'build'\n", "exclude must be a list of glob strings"),
+        ("[tool.sqlty]\nstub-paths = 'typings'\n", "stub-paths must be a list of directories"),
         ("[tool.sqlty]\ntypes = 'DATE'\n", "types must be a table"),
         ("[tool.sqlty.types]\nDATE = 1\n", "types must be a table"),
         ("[tool.sqlty.types]\nDATE = 'list['\n", "is not a Python type expression"),
