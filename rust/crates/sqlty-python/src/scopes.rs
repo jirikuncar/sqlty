@@ -99,6 +99,8 @@ pub struct Scan<'a> {
     fields: HashMap<Scope, Vec<&'a str>>,
     /// The names a function declares `global` or `nonlocal`.
     foreign: HashSet<(Scope, &'a str)>,
+    /// What a function assigns to the names it declares `global` or `nonlocal`.
+    assigned: HashMap<(Scope, &'a str), Vec<Origin<'a>>>,
     /// Every call, in visit order, with its innermost scope.
     pub calls: Vec<(&'a ExprCall, Scope)>,
     /// Every t-string, with its innermost scope.
@@ -221,6 +223,7 @@ impl<'a> Scan<'a> {
                 called: HashMap::new(),
                 fields: HashMap::new(),
                 foreign: HashSet::new(),
+                assigned: HashMap::new(),
                 calls: Vec::new(),
                 templates: Vec::new(),
                 strings: Vec::new(),
@@ -372,19 +375,21 @@ impl<'a> Scan<'a> {
         name: &'n str,
     ) -> impl Iterator<Item = &'n Binding<'a>> + 'n {
         let bindings = self.bindings(scope, name).unwrap_or(&[]);
-        bindings.iter().filter(|binding| {
-            matches!(
-                binding.origin,
-                Origin::Declared(..) | Origin::Value(_) | Origin::Parameter
-            )
-        })
+        bindings.iter().filter(|binding| types(binding.origin))
     }
 
     /// The class `name` holds in `scope`: the one every assignment, annotation and
     /// parameter of that name gives, spelled as the source spells it. `None` when the
     /// scope has none of them, `Some(None)` when they differ or do not say.
+    ///
+    /// A name the scope declares `global` or `nonlocal` is read by what the scope itself
+    /// assigns to it, which the scope it lands in does not count.
     pub(crate) fn kind_of(&self, scope: Scope, name: &str) -> Option<Option<String>> {
-        let mut kinds = self.typed(scope, name).map(|binding| kind(binding.origin));
+        let assigned = self.assigned.get(&(scope, name)).into_iter().flatten();
+        let own = self.typed(scope, name).map(|binding| binding.origin);
+        let mut kinds = own
+            .chain(assigned.copied().filter(|origin| types(*origin)))
+            .map(kind);
         let first = kinds.next()?;
         Some(first.filter(|first| kinds.all(|other| other.as_ref() == Some(first))))
     }
@@ -521,6 +526,8 @@ impl<'a> Scan<'a> {
             for outer in outer {
                 self.written.push((outer, name, binding(Origin::Unknown)));
             }
+            // An argument is typed by what the function itself assigns to the name.
+            self.assigned.entry((scope, name)).or_default().push(origin);
             return;
         }
         self.written.push((scope, name, binding(origin)));
@@ -869,6 +876,15 @@ impl<'a> Visitor<'a> for Walker<'a> {
         }
         walk_expr(self, expr);
     }
+}
+
+/// Whether a binding says something of the type of an argument: an assignment, an
+/// annotation or a parameter.
+fn types(origin: Origin<'_>) -> bool {
+    matches!(
+        origin,
+        Origin::Declared(..) | Origin::Value(_) | Origin::Parameter
+    )
 }
 
 /// Whether an annotation is `Final` with no type of its own.

@@ -921,6 +921,55 @@ class Generic[Tried]:
         fetch_all("SELECT ref FROM items WHERE ref = %(ref)s", RefRow, ref=tried)
 ```
 
+#### A name declared `global` or `nonlocal`
+
+A function that declares a name `global` or `nonlocal` and assigns it passes what it
+assigns; a function that only reads the name passes what the scope around binds it to.
+
+```python
+from typing import NamedTuple
+from uuid import UUID, uuid4
+
+from db import fetch_all
+
+made = 1
+kept = 1
+drawn = uuid4()
+
+class RefRow(NamedTuple):
+    ref: UUID
+
+def make() -> None:
+    global made
+    made = uuid4()
+    fetch_all("SELECT ref FROM items WHERE ref = %(ref)s", RefRow, ref=made)
+
+def keep() -> None:
+    global kept
+    kept = UUID("12345678123456781234567812345678")
+
+def read() -> None:
+    # error: [param-type-mismatch] "parameter 'ref' expects uuid.UUID, got int"
+    fetch_all("SELECT ref FROM items WHERE ref = %(ref)s", RefRow, ref=kept)
+
+def draw() -> None:
+    global drawn
+    drawn = 1
+    # error: [param-type-mismatch] "parameter 'ref' expects uuid.UUID, got int"
+    fetch_all("SELECT ref FROM items WHERE ref = %(ref)s", RefRow, ref=drawn)
+
+def outer() -> None:
+    count = 1
+
+    def inner() -> None:
+        nonlocal count
+        count = UUID("12345678123456781234567812345678")
+        fetch_all("SELECT ref FROM items WHERE ref = %(ref)s", RefRow, ref=count)
+
+    # error: [param-type-mismatch] "parameter 'ref' expects uuid.UUID, got int"
+    fetch_all("SELECT ref FROM items WHERE ref = %(ref)s", RefRow, ref=count)
+```
+
 #### Type aliases
 
 An argument annotated with a type alias has the type the alias stands for.
