@@ -37,6 +37,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+import lsp  # noqa: E402
 import synth  # noqa: E402
 
 BASELINE = Path(__file__).parent / "baseline.json"
@@ -44,6 +45,13 @@ SIZES = {
     "full": {"files": 10_000, "queries": 3_000, "tables": 500},
     "ci": {"files": 8_000, "queries": 2_400, "tables": 400},
 }
+# Query files of three queries each, beside 200 modules.
+SQL_FILES = 500
+# Modules a pre-commit hook passes, and the queries of the module open in the editor.
+PRECOMMIT_FILES = 5
+EDITOR_QUERIES = 100
+# Runs of each scenario: they are short, and a run over budget is measured again anyway.
+SCENARIO_REPEATS = 3
 # Times of 5 ms or less are noise on a shared runner: they are reported, not budgeted.
 MIN_BUDGETED_S = 0.005
 ATTEMPTS = 3
@@ -87,7 +95,10 @@ def run_measured(cmd: list[str], cwd: str) -> tuple[float, float, int]:
 
 
 def measure(cmd: list[str], cwd: str, repeats: int) -> dict[str, float]:
-    runs = [run_measured(cmd, cwd) for _ in range(repeats)]
+    return summarize([run_measured(cmd, cwd) for _ in range(repeats)])
+
+
+def summarize(runs: list[tuple[float, float, int]]) -> dict[str, float]:
     return {
         "wall_s": round(statistics.median(r[0] for r in runs), 4),
         "rss_mb": round(max(r[1] for r in runs), 1),
@@ -192,9 +203,8 @@ def commit_then_migrate(root: Path) -> str:
     return str(root)
 
 
-def run(size: str, repeats: int, keep: str | None) -> dict:
+def run(size: str, repeats: int, keep: str | None, exe: str) -> dict:
     spec = SIZES[size]
-    exe = shutil.which("sqlty") or str(Path(sys.executable).parent / "sqlty")
     root = Path(keep) if keep else Path(tempfile.mkdtemp(prefix="sqlty-bench-"))
     try:
         t = time.perf_counter()
@@ -211,6 +221,7 @@ def run(size: str, repeats: int, keep: str | None) -> dict:
         metrics["check_empty"] = measure([exe, "check", "-q", str(empty)], str(empty), repeats)
         per_file = sorted(python_us(root, (root / "schema.sql").read_text()))
         ruff = ruff_us(root)
+        metrics.update(scenarios(exe, root, spec))
         for name, text in (
             ("schema_load", (root / "schema.sql").read_text()),
             ("schema_load_unresolved_alters", synth.unresolved_alter_schema(2000)),
@@ -249,6 +260,43 @@ def run(size: str, repeats: int, keep: str | None) -> dict:
     finally:
         if not keep:
             shutil.rmtree(root, ignore_errors=True)
+
+
+def scenarios(exe: str, root: Path, spec: dict[str, int]) -> dict:
+    """The runs users wait on besides a full check: a pre-commit hook that checks or
+    rewrites the changed files, an editor, and query files."""
+    out: dict[str, dict[str, float]] = {}
+    repeats = SCENARIO_REPEATS
+    pkg = root / synth.PKG
+    texts = {f: f.read_text() for f in sorted(pkg.glob("mod*.py"))}
+    checked = [str(f.relative_to(root)) for f, s in texts.items() if "SQL[" in s]
+    out["precommit"] = measure([exe, "check", "-q", *checked[:PRECOMMIT_FILES]], str(root), repeats)
+    # Files with bare `--sql` strings, restored after each run so every run writes them.
+    bare = [f for f, s in texts.items() if '= "--sql' in s][:PRECOMMIT_FILES]
+    # Without paths, check and rewrite would run on the whole project.
+    assert checked and bare
+    runs = []
+    for _ in range(repeats):
+        runs.append(run_measured([exe, "rewrite", "-q", *map(str, bare)], str(root)))
+        for f in bare:
+            f.write_text(texts[f])
+    out["precommit_rewrite"] = summarize(runs)
+
+    editor = pkg / "editor.py"
+    synth.write_module(editor, queries=EDITOR_QUERIES, tables=spec["tables"])
+    table = "t" + editor.read_text().split("FROM t", 1)[1][:4]
+    try:
+        out.update(lsp.measure(exe, root, editor, table))
+    finally:
+        editor.unlink()
+
+    other = Path(tempfile.mkdtemp(prefix="sqlty-bench-sql-files-"))
+    try:
+        synth.generate(other, **{**spec, "files": 200, "queries": 50, "sql_files": SQL_FILES})
+        out["sql_files"] = measure([exe, "check", "-q", "."], str(other), repeats)
+    finally:
+        shutil.rmtree(other, ignore_errors=True)
+    return out
 
 
 # Turns on once a one-query check fits the budget: until then `one_query_us` is reported only.
@@ -313,7 +361,8 @@ def flatten(result: dict) -> dict[str, tuple[str, float]]:
     for name, m in result["metrics"].items():
         if m["wall_s"] >= MIN_BUDGETED_S:
             flat[f"{name}.wall"] = ("time", m["wall_s"] / cal)
-        flat[f"{name}.rss"] = ("rss", m["rss_mb"])
+        if "rss_mb" in m:
+            flat[f"{name}.rss"] = ("rss", m["rss_mb"])
     # Per-kind microsecond timings are too noisy to budget one by one: budget the sums.
     for fn in ("analyze_select", "analyze_params"):
         total_us = sum(us for name, us in result["micro_us"].items() if name.startswith(fn + "."))
@@ -325,6 +374,8 @@ def compare(result: dict, baseline: dict, time_tol: float, rss_tol: float) -> li
     """Human-readable lines for the metrics over budget (empty when within budget)."""
     new, old = flatten(result), flatten(baseline)
     failures = []
+    for name in sorted(new.keys() - old.keys()):
+        print(f"{name}: not in the baseline, not budgeted", file=sys.stderr)
     for name, (kind, base) in sorted(old.items()):
         if name not in new:
             continue
@@ -374,13 +425,19 @@ def main() -> int:
     ap.add_argument("--baseline", default=str(BASELINE))
     ap.add_argument("--time-tolerance", type=float, default=0.5)
     ap.add_argument("--rss-tolerance", type=float, default=0.25)
+    ap.add_argument(
+        "--exe",
+        default=shutil.which("sqlty") or str(Path(sys.executable).parent / "sqlty"),
+        help="the sqlty to run: the wheel's script (default) or a native binary",
+    )
     ap.add_argument("--worker-schema", help=argparse.SUPPRESS)
     args = ap.parse_args()
     if args.worker_schema:
         worker_schema_load(args.worker_schema)
         return 0
 
-    result = run(args.size, args.repeats, args.keep)
+    args.exe = str(Path(shutil.which(args.exe) or args.exe).absolute())
+    result = run(args.size, args.repeats, args.keep, args.exe)
     key = f"{result['meta']['platform']}-{args.size}"
     path = Path(args.baseline)
     baselines = json.loads(path.read_text()) if path.exists() else {}
@@ -404,7 +461,7 @@ def main() -> int:
                 sep="\n  ",
                 file=sys.stderr,
             )
-            result = run(args.size, args.repeats, args.keep)
+            result = run(args.size, args.repeats, args.keep, args.exe)
             failures = over(result)
     text = json.dumps(result, indent=2)
     print(text)
