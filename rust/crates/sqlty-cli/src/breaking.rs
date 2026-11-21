@@ -1435,10 +1435,16 @@ mod tests {
     #[test]
     fn a_schema_set_probes_the_files_of_each_configuration_naming_it() {
         let root = project(
-            "shared",
+            "siblings",
             &[
-                ("app/pyproject.toml", "[tool.sqlty]\nschema = \"../migrations/\"\n"),
-                ("jobs/pyproject.toml", "[tool.sqlty]\nschema = \"../migrations/\"\n"),
+                (
+                    "app/pyproject.toml",
+                    "[tool.sqlty]\nschema = \"../migrations/\"\n",
+                ),
+                (
+                    "jobs/pyproject.toml",
+                    "[tool.sqlty]\nschema = \"../migrations/\"\n",
+                ),
                 ("app/q.py", "x = 1\n"),
                 ("jobs/j.py", "x = 1\n"),
                 ("migrations/0001.sql", USERS),
