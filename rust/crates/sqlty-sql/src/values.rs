@@ -276,9 +276,9 @@ pub(crate) fn constant(expr: &Expr) -> Option<Value> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
-    use sqlparser::dialect::PostgreSqlDialect;
-    use sqlparser::parser::Parser;
 
+    // The set functions and the Literal spelling are crate-internal: no public call reaches
+    // them with sets this large, or with these spellings.
     fn strs(items: &[&str]) -> Vec<Value> {
         items.iter().map(|s| Value::Str((*s).to_string())).collect()
     }
@@ -290,15 +290,6 @@ mod tests {
         assert_eq!(intersect(many.clone(), &many), many);
         assert!(difference(&many, &many).is_empty());
         assert_eq!(difference(&many, &many[1..]), [Value::Int(0)]);
-    }
-
-    fn check(sql: &str) -> Option<Vec<Value>> {
-        let expr = Parser::new(&PostgreSqlDialect {})
-            .try_with_sql(sql)
-            .unwrap()
-            .parse_expr()
-            .unwrap();
-        check_values(&expr, &|ident| ident.value.eq_ignore_ascii_case("status"))
     }
 
     #[test]
@@ -330,54 +321,9 @@ mod tests {
     }
 
     #[test]
-    fn check_in_list_and_any_array() {
-        assert_eq!(check("status IN ('a', 'b')"), Some(strs(&["a", "b"])));
-        assert_eq!(
-            check("(status)::text = ANY ((ARRAY['a'::text, 'b'::text])::text[])"),
-            Some(strs(&["a", "b"]))
-        );
-    }
-
-    #[test]
-    fn check_in_list_drops_duplicates() {
-        assert_eq!(check("status IN ('a', 'b', 'a')"), Some(strs(&["a", "b"])));
-        assert_eq!(check("status = ANY (ARRAY['a', 'a'])"), Some(strs(&["a"])));
-    }
-
-    #[test]
-    fn check_or_and_null_arm() {
-        assert_eq!(
-            check("status = 'a' OR status = 'b' OR status IS NULL"),
-            Some(strs(&["a", "b"]))
-        );
-        assert_eq!(check("status = 'a' OR length(status) > 3"), None);
-    }
-
-    #[test]
-    fn check_and_keeps_what_it_understands() {
-        assert_eq!(
-            check("status IN ('a', 'b', 'c') AND status <> ''"),
-            Some(strs(&["a", "b", "c"]))
-        );
-        assert_eq!(
-            check("status IN ('a', 'b') AND status IN ('b', 'c')"),
-            Some(strs(&["b"]))
-        );
-        assert_eq!(check("status NOT IN ('a')"), None);
-    }
-
-    #[test]
-    fn rarer_values_and_checks() {
+    fn rarer_values() {
         let values = strs(&["a\rb", "c\td", "\u{1}"]);
         assert_eq!(parse(&render(&values).unwrap()), Some(values));
         assert_eq!(parse("typing.Literal['a' 'b']"), None);
-        assert_eq!(check("CAST(status = 'a' AS boolean)"), Some(strs(&["a"])));
-        assert_eq!(check("'a' = t.status"), Some(strs(&["a"])));
-        assert_eq!(
-            check("status = 'a' OR (status IS NULL)"),
-            Some(strs(&["a"]))
-        );
-        assert_eq!(check("status = ANY ($1)"), None);
-        assert_eq!(check("status = -'a'"), None);
     }
 }

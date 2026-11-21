@@ -957,152 +957,6 @@ impl Cols<'_, '_> {
 mod tests {
     use super::*;
 
-    fn sqls(sql: &str) -> Vec<String> {
-        split_statements(sql, false)
-            .iter()
-            .map(Statement::sql)
-            .collect()
-    }
-
-    fn stripped(sql: &str) -> Option<String> {
-        let sql = split_statements(sql, false)[0].without_constraints()?;
-        Some(sql.split_whitespace().collect::<Vec<_>>().join(" "))
-    }
-
-    #[test]
-    fn test_split_respects_quotes_and_bodies() {
-        assert_eq!(
-            sqls("SELECT ';' ; -- a;b\nCREATE FUNCTION f() AS $$ x; y; $$; /* ; */ SELECT $t$;$t$"),
-            [
-                "SELECT ';'",
-                "CREATE FUNCTION f() AS $$ x; y; $$",
-                "SELECT $t$;$t$"
-            ]
-        );
-        assert_eq!(
-            sqls("SELECT $1; SELECT 'it''s;'"),
-            ["SELECT $1", "SELECT 'it''s;'"]
-        );
-        assert_eq!(
-            sqls("SELECT E'a\\';b'; SELECT 1"),
-            ["SELECT E'a\\';b'", "SELECT 1"]
-        );
-    }
-
-    #[test]
-    fn test_creates_and_domain() {
-        let first = |sql| split_statements(sql, false).remove(0);
-        assert!(first("CREATE OR REPLACE MATERIALIZED VIEW v AS SELECT 1").creates("view"));
-        assert!(!first("CREATE TABLE view (a INT)").creates("view"));
-        assert!(first("create domain a.b as numeric(5, 2) not null default 0").creates("domain"));
-        assert_eq!(
-            first("CREATE DOMAIN app.\"p\" AS numeric(5, 2) NOT NULL DEFAULT 0").domain(),
-            Some(("app.\"p\"".to_string(), "numeric ( 5 , 2 )".to_string()))
-        );
-        assert_eq!(
-            first("CREATE DOMAIN d text COLLATE \"C\" CHECK (VALUE <> '')").domain(),
-            Some(("d".to_string(), "text".to_string()))
-        );
-        assert_eq!(first("CREATE DOMAIN d").domain(), None);
-    }
-
-    #[test]
-    fn test_domain_checks() {
-        let first = |sql| split_statements(sql, false).remove(0);
-        assert_eq!(
-            first(
-                "CREATE DOMAIN d text CHECK (VALUE IN ('a', 'b)')) CONSTRAINT c CHECK ((VALUE)::text <> 'x')"
-            )
-            .domain_checks(),
-            vec!["VALUE IN ('a', 'b)')", "(VALUE)::text <> 'x'"]
-        );
-        assert!(first("CREATE DOMAIN d text NOT NULL")
-            .domain_checks()
-            .is_empty());
-    }
-
-    #[test]
-    fn test_without_constraints() {
-        assert_eq!(
-            stripped(
-                "CREATE TABLE t (a INT CHECK (a > 0) NOT NULL, \
-                 b INT REFERENCES u(id) ON DELETE SET NULL (b) NOT NULL, c TEXT, \
-                 CONSTRAINT k CHECK (length(c) > 0), PRIMARY KEY (a))"
-            )
-            .as_deref(),
-            Some("CREATE TABLE t (a INT NOT NULL, b INT NOT NULL, c TEXT)")
-        );
-        assert_eq!(stripped("CREATE TABLE t (a INT, b TEXT)"), None);
-        assert_eq!(
-            stripped(
-                "CREATE TABLE t (a INT CONSTRAINT c REFERENCES public.u (id) MATCH FULL \
-                 ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED DEFAULT 1)"
-            )
-            .as_deref(),
-            Some("CREATE TABLE t (a INT DEFAULT 1)")
-        );
-    }
-
-    #[test]
-    fn test_mysql_views() {
-        let sql = "/*!50001 CREATE ALGORITHM=UNDEFINED */ /*!50013 DEFINER=`root`@`%` \
-                   SQL SECURITY DEFINER */ /*!50001 VIEW `v` AS select 1 AS `a` */ \
-                   /*!50002 WITH CASCADED CHECK OPTION */";
-        let stmt = &split_statements(sql, true)[0];
-        assert!(stmt.creates("view"));
-        assert_eq!(stmt.view_name(), "`v`");
-        let view = stmt.without_check_option().unwrap();
-        assert_eq!(
-            view.split_whitespace().collect::<Vec<_>>().join(" "),
-            "CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`%` SQL SECURITY DEFINER VIEW `v` AS select 1 AS `a`"
-        );
-        let stmt = &split_statements("CREATE DEFINER = CURRENT_USER VIEW v AS SELECT 1", true)[0];
-        assert!(stmt.creates("view"));
-        assert_eq!(stmt.without_check_option(), None);
-        assert!(split_statements("/* CREATE VIEW v AS SELECT 1 */", true).is_empty());
-    }
-
-    #[test]
-    fn test_without_partitioning() {
-        let sql = "CREATE TABLE t (id INT, PRIMARY KEY (id)) ENGINE=InnoDB \
-                   PARTITION BY RANGE (id) (PARTITION p0 VALUES LESS THAN (10))";
-        assert_eq!(
-            split_statements(sql, true)[0]
-                .without_partitioning()
-                .as_deref(),
-            Some("CREATE TABLE t (id INT, PRIMARY KEY (id)) ENGINE=InnoDB")
-        );
-        let sql = "CREATE TABLE t (id INT)";
-        assert_eq!(split_statements(sql, true)[0].without_partitioning(), None);
-    }
-
-    #[test]
-    fn test_respelled_mysql_alter() {
-        assert_eq!(
-            first("ALTER TABLE t ADD (a INT, b DECIMAL(5, 2) NOT NULL), ADD COLUMN (c INT)")
-                .respelled_mysql_alter()
-                .as_deref(),
-            Some(
-                "ALTER TABLE t ADD COLUMN a INT, ADD COLUMN b DECIMAL(5, 2) NOT NULL, \
-                 ADD COLUMN c INT"
-            )
-        );
-        assert_eq!(
-            first("ALTER TABLE t RENAME INDEX a TO b, RENAME COLUMN x TO y, RENAME KEY c TO d")
-                .respelled_mysql_alter()
-                .as_deref(),
-            Some("ALTER TABLE t RENAME COLUMN x TO y")
-        );
-        assert_eq!(
-            first("ALTER TABLE t ADD a INT").respelled_mysql_alter(),
-            None
-        );
-        assert_eq!(
-            first("ALTER TABLE t ADD PRIMARY KEY (a)").respelled_mysql_alter(),
-            None
-        );
-    }
-
     fn first(sql: &str) -> Statement<'_> {
         split_statements(sql, false).remove(0)
     }
@@ -1129,46 +983,6 @@ mod tests {
     }
 
     #[test]
-    fn test_search_path() {
-        let path = |sql: &str| first(sql).search_path();
-        let list = |names: &[&str]| Some(names.iter().map(ToString::to_string).collect());
-        assert_eq!(
-            path("SET search_path TO app, \"$user\", Public"),
-            list(&["app", "$user", "public"])
-        );
-        assert_eq!(path("SET LOCAL search_path = 'a'"), list(&["a"]));
-        assert_eq!(path("SET search_path TO DEFAULT"), list(&["public"]));
-        assert_eq!(
-            path("SELECT pg_catalog.set_config('search_path', 'a, b', false)"),
-            list(&["a", "b"])
-        );
-        assert_eq!(
-            path("SELECT pg_catalog.set_config('search_path', '', false)"),
-            Some(vec![])
-        );
-        assert_eq!(path("SET statement_timeout = 0"), None);
-        assert_eq!(path("SELECT 1"), None);
-    }
-
-    #[test]
-    fn test_without_like() {
-        let stmt = first("CREATE TABLE t (LIKE app.a INCLUDING ALL, x int, LIKE b)");
-        let (sql, likes) = stmt.without_like().unwrap();
-        assert_eq!(
-            sql.split_whitespace().collect::<String>(),
-            "CREATETABLEt(xint)"
-        );
-        assert_eq!(
-            likes,
-            vec![
-                vec!["app".to_string(), "a".to_string()],
-                vec!["b".to_string()]
-            ]
-        );
-        assert!(first("CREATE TABLE t (x int)").without_like().is_none());
-    }
-
-    #[test]
     fn test_create_table_any_and_lead_words() {
         assert!(first("CREATE TABLE p PARTITION OF q DEFAULT").is_create_table());
         assert!(!first("CREATE VIEW v AS SELECT 1").is_create_table());
@@ -1183,17 +997,6 @@ mod tests {
         fn one(sql: &str, mysql: bool) -> Statement<'_> {
             split_statements(sql, mysql).remove(0)
         }
-        assert_eq!(sqls("SELECT 'x"), ["SELECT 'x"]);
-        assert_eq!(
-            sqls("CREATE TABLE a$b (c INT); SELECT $1$"),
-            ["CREATE TABLE a$b (c INT)", "SELECT $1$"]
-        );
-        assert_eq!(sqls("/* a /* b; */ c; */ SELECT 1"), ["SELECT 1"]);
-        let mysql: Vec<String> = split_statements("# c;\nSELECT 1", true)
-            .iter()
-            .map(Statement::sql)
-            .collect();
-        assert_eq!(mysql, ["SELECT 1"]);
         assert!(!one("CREATE OR REPLACE", false).creates("table"));
         let (name, module, args) = one("CREATE VIRTUAL TABLE v USING m(a(b), c)", false)
             .virtual_table()
@@ -1210,25 +1013,5 @@ mod tests {
             .is_empty());
         let function = one("CREATE FUNCTION IF NOT EXISTS s.f()", false);
         assert_eq!(function.name_parts_after("function"), ["s", "f"]);
-        assert_eq!(
-            one("SET search_path FROM CURRENT", false).search_path(),
-            None
-        );
-        let alter = |sql| one(sql, true).respelled_mysql_alter();
-        assert_eq!(alter("ALTER TABLE t ADD c INT, RENAME INDEX a TO"), None);
-        assert_eq!(alter("ALTER TABLE t ADD (a INT"), None);
-        // The second rename, left alone, reads as it is.
-        assert_eq!(
-            alter("ALTER TABLE t RENAME INDEX a TO b, RENAME INDEX c TO d").unwrap(),
-            "ALTER TABLE t RENAME INDEX c TO d"
-        );
-        assert_eq!(
-            stripped("CREATE TABLE t (a INT, , CHECK (a > 0))").unwrap(),
-            "CREATE TABLE t (a INT)"
-        );
-        assert_eq!(
-            stripped("CREATE TABLE t (a INT REFERENCES u (a) NOT DEFERRABLE)").unwrap(),
-            "CREATE TABLE t (a INT )"
-        );
     }
 }
