@@ -165,6 +165,9 @@ pub(super) struct Loader {
     pub(super) postgres: bool,
     pub(super) relations: FxHashMap<String, Rel>,
     pub(super) types: FxHashMap<String, TypeDef>,
+    /// The labels of enums past [`LARGE_ENUM`] labels, so `ADD VALUE` finds a duplicate
+    /// without a scan. Every writer of a type forgets its entry.
+    pub(super) enum_labels: FxHashMap<String, FxHashSet<String>>,
     pub(super) functions: FxHashMap<String, Vec<RawFunction>>,
     /// Functions whose latest definition could not be read.
     pub(super) unknown_functions: FxHashSet<String>,
@@ -202,6 +205,9 @@ pub(super) struct Loader {
 /// a short schema could otherwise fill memory.
 pub(super) const MAX_SCHEMA_COLUMNS: usize = 1 << 21;
 
+/// Enums with more labels than this are indexed for `ADD VALUE` (see [`Loader::enum_labels`]).
+pub(super) const LARGE_ENUM: usize = 64;
+
 /// The most bytes of statements [`Loader::run`] tries again, in all passes, besides the
 /// schema's own length.
 pub(super) const MAX_RETRIED: usize = 1 << 24;
@@ -218,6 +224,7 @@ impl Loader {
             postgres: dialect == SqlDialect::Postgres,
             relations: FxHashMap::default(),
             types: FxHashMap::default(),
+            enum_labels: FxHashMap::default(),
             functions: FxHashMap::default(),
             unknown_functions: FxHashSet::default(),
             search_path: vec!["public".to_string()],
@@ -242,6 +249,7 @@ impl Loader {
             postgres: self.postgres,
             relations: self.relations.clone(),
             types: self.types.clone(),
+            enum_labels: FxHashMap::default(),
             functions: self.functions.clone(),
             unknown_functions: self.unknown_functions.clone(),
             search_path: self.search_path.clone(),
@@ -393,6 +401,7 @@ impl Loader {
                 self.cache = None;
                 let key = self.new_key(name, &path);
                 self.type_aliases.remove(&key);
+                self.enum_labels.remove(&key);
                 self.types
                     .insert(key, TypeDef::Domain(base.clone(), values.clone()));
                 false
@@ -401,6 +410,7 @@ impl Loader {
                 self.cache = None;
                 let key = self.new_key(name, &path);
                 self.type_aliases.remove(&key);
+                self.enum_labels.remove(&key);
                 self.types.insert(key, def.clone());
                 false
             }
@@ -976,6 +986,7 @@ impl Loader {
                 Some(key) => {
                     self.cache = None;
                     self.skipped.push(("type", name.join(".")));
+                    self.enum_labels.remove(&key);
                     self.types.insert(key, TypeDef::Unknown);
                     true
                 }
@@ -1033,6 +1044,7 @@ impl Loader {
                     }
                     ObjectType::Type => {
                         if let Some(key) = self.lookup(&self.types, &name_parts, path) {
+                            self.enum_labels.remove(&key);
                             self.types.remove(&key);
                         }
                     }
@@ -1043,6 +1055,7 @@ impl Loader {
                         self.relations.retain(|key, _| !key.starts_with(&prefix));
                         self.held = self.relations.values().map(Rel::width).sum();
                         self.types.retain(|key, _| !key.starts_with(&prefix));
+                        self.enum_labels.retain(|key, _| !key.starts_with(&prefix));
                         self.functions.retain(|key, _| !key.starts_with(&prefix));
                     }
                     _ => {}
@@ -1051,6 +1064,7 @@ impl Loader {
         }
         if let Statement::DropDomain(drop) = stmt {
             if let Some(key) = self.lookup(&self.types, &parts(&drop.name, self.dialect), path) {
+                self.enum_labels.remove(&key);
                 self.types.remove(&key);
             }
         }
