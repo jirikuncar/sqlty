@@ -20,6 +20,7 @@ sqlty-sql.workspace = true
 sqlty-python.workspace = true
 
 [dev-dependencies]
+sqlty-project.workspace = true
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 
 [[bench]]

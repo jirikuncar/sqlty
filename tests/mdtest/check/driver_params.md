@@ -271,6 +271,28 @@ async def main(now: datetime.datetime) -> None:
         sync.execute("SELECT %s + INTERVAL '1 day'", (datetime.date.today(),))
 ```
 
+### A placeholder PostgreSQL resolves as text
+
+Each side of a `UNION`, a sub-SELECT in `SET (a, b) = (SELECT ...)` and `VALUES` after a
+`WITH` clause resolve an untyped `$1` as `text` before PostgreSQL sees the column it is
+stored in, and `text` is not assigned to an `integer` column. A cast fixes it for asyncpg;
+psycopg sends the type of an `int`. A `text` column takes it as is.
+
+```python
+import asyncpg
+import psycopg
+
+async def main(name: str, age: int) -> None:
+    conn = await asyncpg.connect("postgres://x")
+    # error: [param-type-mismatch] "parameter 2 is an `text` to PostgreSQL, as asyncpg sends it untyped, so it cannot stand for a `int`: cast it, `$2::int`"
+    await conn.execute("UPDATE users SET (name, age) = (SELECT $1, $2)", name, age)
+    await conn.execute("UPDATE users SET (name, age) = (SELECT $1, $2::int)", name, age)
+    await conn.execute("UPDATE users SET (name, age) = ($1, $2)", name, age)
+    await conn.execute("INSERT INTO users (name, age) SELECT $1, $2", name, age)
+    with psycopg.connect("dbname=x") as sync:
+        sync.execute("UPDATE users SET (name, age) = (SELECT %s, %s)", (name, age))
+```
+
 ## Names are resolved per scope
 
 A module-level connection does not make a loop variable, a parameter or a comprehension variable

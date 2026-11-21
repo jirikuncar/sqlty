@@ -196,6 +196,72 @@ ON CONFLICT (id) DO UPDATE SET name = %s, age = %s
 -- params: 4: int (INT) NULL
 ```
 
+### INSERT ... SELECT
+
+Every row of a `UNION` is stored, so both sides take the target columns. Only the left
+side of `EXCEPT` and `INTERSECT` is.
+
+```sql
+INSERT INTO users (name, age) SELECT %s, %s UNION ALL SELECT %s, %s
+-- params: 1: str (TEXT) NOT NULL
+-- params: 2: int (INT) NULL
+-- params: 3: str (TEXT) NOT NULL
+-- params: 4: int (INT) NULL
+```
+
+```sql
+INSERT INTO users (name, age) SELECT %s, %s EXCEPT SELECT %s, %s
+-- params: 1: str (TEXT) NOT NULL
+-- params: 2: int (INT) NULL
+-- params: 3: None (None)
+-- params: 4: None (None)
+```
+
+`UNION BY NAME` matches the sides by name, not position:
+
+```sql
+INSERT INTO users (name, age) SELECT %s AS name, %s AS age UNION BY NAME SELECT %s AS age, %s AS name
+-- params: 1: str (TEXT) NOT NULL
+-- params: 2: int (INT) NULL
+-- params: 3: None (None)
+-- params: 4: None (None)
+```
+
+In a row, the values are typed one after another, each by its column and then by its
+expression:
+
+```sql
+INSERT INTO users (id, name) VALUES ($1 + 1, $1)
+-- params: 1: int (None) NOT NULL
+```
+
+A parenthesized query or one with a `WITH` clause is stored as well:
+
+```sql
+INSERT INTO users (name, age) (SELECT %s, %s)
+-- params: 1: str (TEXT) NOT NULL
+-- params: 2: int (INT) NULL
+```
+
+```sql
+INSERT INTO users (name, age) WITH n AS (SELECT 1) VALUES (%s, %s)
+-- params: 1: str (TEXT) NOT NULL
+-- params: 2: int (INT) NULL
+```
+
+```sql
+INSERT INTO users (name, age) (VALUES (%s, %s))
+-- params: 1: str (TEXT) NOT NULL
+-- params: 2: int (INT) NULL
+```
+
+`TABLE` stores rows without placeholders:
+
+```sql
+INSERT INTO users (name) SELECT %s UNION TABLE users
+-- params: 1: str (TEXT) NOT NULL
+```
+
 ## UPDATE and DELETE
 
 ```sql
@@ -209,6 +275,40 @@ UPDATE users SET name = %s, age = %s WHERE id = %s
 DELETE FROM orders WHERE user_id = %s AND total > %s
 -- params: 1: int (INT)
 -- params: 2: decimal.Decimal (DECIMAL(10, 2))
+```
+
+### Row assignments
+
+`SET (a, b) = (...)` stores each value in its column, by position, from a row or a
+subquery.
+
+```sql
+UPDATE users SET (name, age) = (%s, %s) WHERE id = %s
+-- params: 1: str (TEXT) NOT NULL
+-- params: 2: int (INT) NULL
+-- params: 3: int (INT)
+```
+
+```sql
+UPDATE users SET (name, age) = (SELECT %s, %s) WHERE id = %s
+-- params: 1: str (TEXT) NOT NULL
+-- params: 2: int (INT) NULL
+-- params: 3: int (INT)
+```
+
+```sql
+UPDATE users SET (age) = ROW(%s), (name, born) = ROW(%s, %s)
+-- params: 1: int (INT) NULL
+-- params: 2: str (TEXT) NOT NULL
+-- params: 3: datetime.date (DATE) NULL
+```
+
+A column the schema doesn't have types nothing:
+
+```sql
+UPDATE users SET (nope, age) = (SELECT %s, %s)
+-- params: 1: None (None)
+-- params: 2: int (INT) NULL
 ```
 
 ### A COALESCE fallback
