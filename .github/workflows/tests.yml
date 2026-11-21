@@ -19,6 +19,39 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Which packages the change affects, with the packages that depend on them
+  # (scripts/ci_changes.py). A push to main runs every package, so its caches stay whole.
+  changes:
+    name: Affected packages
+    runs-on: ubuntu-latest
+    outputs:
+      crates: ${{ steps.changes.outputs.crates }}
+      python: ${{ steps.changes.outputs.python }}
+      engine: ${{ steps.changes.outputs.engine }}
+      vscode: ${{ steps.changes.outputs.vscode }}
+      playground: ${{ steps.changes.outputs.playground }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - id: changes
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+        run: python3 scripts/ci_changes.py $BASE
+
+  # The one required check: it passes when every job the change needs passed.
+  ci:
+    name: CI
+    if: always()
+    needs: [changes, no-exec-harness, rust, test, free-threaded, wasm, pg-fidelity, mysql-fidelity, bench, codspeed, package, vscode, lint]
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          FAILED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: test "$FAILED" = false
+
   no-exec-harness:
     name: No-exec harness intact
     if: github.event_name == 'pull_request'
@@ -38,8 +71,53 @@ jobs:
             || cp scripts/check_no_exec_harness.py "$RUNNER_TEMP/harness.py"
           python3 "$RUNNER_TEMP/harness.py" "$BASE"
 
+  # Each crate's own tests, gated on the lines they never run (scripts/coverage.sh).
+  rust:
+    name: Rust ${{ matrix.crate.dir }}
+    needs: changes
+    if: needs.changes.outputs.crates != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        crate: ${{ fromJSON(needs.changes.outputs.crates) }}
+      fail-fast: false
+    env:
+      # Coverage builds on nightly for `#[coverage(off)]`.
+      RUSTUP_TOOLCHAIN: nightly-2026-11-01
+      CRATE: ${{ matrix.crate.dir }}
+      PACKAGE: ${{ matrix.crate.package }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component llvm-tools-preview
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: rust -> target
+          key: ${{ matrix.crate.dir }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install cargo-llvm-cov and cargo-nextest
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-llvm-cov@0.9.1,nextest@0.9.148
+
+      - name: Run the tests and check coverage
+        run: scripts/coverage.sh "$CRATE"
+
+      # On the toolchain of rust-toolchain.toml.
+      - name: Run the doctests
+        run: env -u RUSTUP_TOOLCHAIN cargo test --doc -p "$PACKAGE" --manifest-path rust/Cargo.toml
+
   test:
     name: Test Python ${{ matrix.python-version }}
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -66,10 +144,6 @@ jobs:
 
     env:
       SQLTY_PG_DSN: postgresql://postgres:postgres@localhost:5432/postgres
-      # Only explicit Hypothesis examples: coverage must not depend on what it generates.
-      PYTEST_ADDOPTS: ${{ matrix.coverage && '--cov --cov-append --cov-fail-under=0 --hypothesis-profile=coverage' || '' }}
-      # Absolute, so processes forked in a test's own directory write their data here too.
-      COVERAGE_FILE: ${{ github.workspace }}/.coverage
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -87,48 +161,39 @@ jobs:
       - name: Install the dependencies
         run: uv sync --all-groups --no-install-project
 
-      - name: Install cargo-llvm-cov
-        if: matrix.coverage
+      - name: Install cargo-llvm-cov and cargo-nextest
         uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
-          tool: cargo-llvm-cov@0.9.1
+          tool: ${{ matrix.coverage && 'cargo-llvm-cov@0.9.1,' || '' }}nextest@0.9.148
 
-      # Every later build is instrumented, and every test process writes a profile.
-      - name: Instrument the Rust build for coverage
+      # The `pg` tests too, each worker on its own database (tests/conftest.py), then the
+      # extension crate's Rust tests.
+      - name: Run the tests and check coverage
         if: matrix.coverage
-        working-directory: rust
-        run: cargo llvm-cov show-env | sed "s/^\([A-Z_]*\)='\(.*\)'$/\1=\2/" >> "$GITHUB_ENV"
+        env:
+          RUSTUP_TOOLCHAIN: nightly-2026-11-01
+        run: scripts/coverage.sh python
 
       - name: Build Rust extension
+        if: ${{ !matrix.coverage }}
         run: uv run maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
 
-      # The `pg` tests too: each worker gets its own database (tests/conftest.py).
       - name: Run tests
+        if: ${{ !matrix.coverage }}
         run: uv run pytest
 
       - name: Run timing tests
+        if: ${{ !matrix.coverage }}
         run: uv run pytest -m timing -n 0 -p no:randomly
 
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
-        with:
-          tool: nextest@0.9.148
-
-      - name: Run Rust unit tests
-        run: uv run cargo nextest run --workspace --manifest-path rust/Cargo.toml
-
-      - name: Check coverage
-        if: matrix.coverage
-        run: |
-          set -o pipefail
-          uv run coverage report
-          cd rust && cargo llvm-cov report --show-missing-lines | tee /dev/stderr | awk '/^Uncovered Lines:/ { missed = 1 } END { exit missed }'
-
-      - name: Run Rust doctests
-        run: uv run cargo test --doc --workspace --manifest-path rust/Cargo.toml
+      - name: Run the extension's Rust tests
+        if: ${{ !matrix.coverage }}
+        run: uv run cargo nextest run -p sqlty-core --manifest-path rust/Cargo.toml
 
   free-threaded:
     name: Threads on free-threaded Python ${{ matrix.python }}
+    needs: changes
+    if: needs.changes.outputs.engine == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -161,6 +226,8 @@ jobs:
   # has no notion of.
   wasm:
     name: Engine builds for WebAssembly
+    needs: changes
+    if: needs.changes.outputs.playground == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -193,6 +260,8 @@ jobs:
 
   pg-fidelity:
     name: PostgreSQL column names, types and nullability
+    needs: changes
+    if: needs.changes.outputs.engine == 'true'
     runs-on: ubuntu-latest
 
     services:
@@ -232,6 +301,8 @@ jobs:
 
   mysql-fidelity:
     name: MySQL column names and types
+    needs: changes
+    if: needs.changes.outputs.engine == 'true'
     runs-on: ubuntu-latest
 
     services:
@@ -272,6 +343,8 @@ jobs:
 
   bench:
     name: Performance budget
+    needs: changes
+    if: needs.changes.outputs.engine == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -304,6 +377,8 @@ jobs:
 
   codspeed:
     name: CodSpeed
+    needs: changes
+    if: needs.changes.outputs.engine == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -341,6 +416,8 @@ jobs:
 
   package:
     name: Package (wheel + sdist, Python ${{ matrix.python-version }})
+    needs: changes
+    if: needs.changes.outputs.engine == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -388,6 +465,8 @@ jobs:
 
   vscode:
     name: VS Code extension
+    needs: changes
+    if: needs.changes.outputs.vscode == 'true'
     runs-on: ubuntu-latest
 
     steps:

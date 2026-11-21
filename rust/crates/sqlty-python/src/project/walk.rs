@@ -1,7 +1,7 @@
 //! The files `sqlty check` reads: the `.py` files under a directory, without what the
 //! excludes and `.gitignore` leave out, and the files a `schema` or `queries` entry names.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -451,6 +451,7 @@ pub fn schema_files(
     files: &dyn Files,
 ) -> Result<(Vec<PathBuf>, Vec<String>), FindError> {
     let mut found: Vec<PathBuf> = Vec::new();
+    let mut seen = HashSet::new();
     let mut empty = Vec::new();
     for entry in entries {
         let path = base.join(entry);
@@ -468,7 +469,7 @@ pub fn schema_files(
             }
         };
         for file in matched {
-            if !found.contains(&file) {
+            if seen.insert(file.clone()) {
                 found.push(file);
             }
         }

@@ -7,6 +7,7 @@ mod analyzer;
 mod draw;
 mod engine;
 mod foreign_keys;
+mod newtypes;
 mod params;
 mod python;
 mod variants;

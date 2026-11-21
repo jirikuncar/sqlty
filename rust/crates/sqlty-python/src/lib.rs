@@ -39,6 +39,7 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
 
 pub(crate) mod analyses;
+pub mod arg_types;
 pub mod breaking;
 #[allow(missing_docs)]
 pub mod calls;
@@ -50,6 +51,7 @@ pub mod compose;
 pub mod config;
 pub mod drivers;
 pub mod edit;
+pub mod facts;
 pub mod fixer;
 pub mod frozen;
 pub mod helpers;

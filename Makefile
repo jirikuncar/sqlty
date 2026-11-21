@@ -51,8 +51,9 @@ test-unit:  ## Unit tests only (no e2e, no mdtest)
 	uv run pytest tests/ --ignore=tests/e2e --ignore=tests/mdtest -q
 
 .PHONY: test-mdtest
-test-mdtest:  ## mdtests and docs tests
-	uv run pytest tests/mdtest/ docs/ README.md -v
+test-mdtest:  ## mdtests: each crate's assertions, then the codec's in pytest
+	cd rust && cargo test -p sqlty-sql -p sqlty-python -p sqlty-format --test mdtest
+	uv run pytest tests/mdtest/ docs/ README.md skills/ -q
 
 .PHONY: test-e2e
 test-e2e:  ## End-to-end tests only
@@ -63,12 +64,13 @@ check-no-exec-harness:  ## Fail if this branch weakened the no-exec harness (AGE
 	uv run python scripts/check_no_exec_harness.py origin/main
 
 .PHONY: test-coverage
-test-coverage:  ## Every Python and Rust test with coverage and its gates; needs a nightly toolchain with llvm-tools, cargo-llvm-cov and cargo-nextest
-	scripts/coverage.sh
+test-coverage:  ## Each package's own tests with coverage and its gate (PACKAGES="python sqlty-sql" for some); needs a nightly toolchain with llvm-tools and cargo-llvm-cov
+	scripts/coverage.sh $(PACKAGES)
 
 .PHONY: update-mdtest
 update-mdtest:  ## Update mdtest assertions with actual values
-	uv run pytest tests/mdtest/ docs/ README.md tests/test_docs.py --update-mdtest -v
+	cd rust && MDTEST_UPDATE=1 cargo test -p sqlty-sql -p sqlty-python -p sqlty-format --test mdtest
+	uv run pytest tests/mdtest/ docs/ README.md skills/ tests/test_docs.py --update-mdtest -v
 
 # --- Benchmarks ---
 
@@ -80,16 +82,24 @@ bench-project:  ## Full-size synthetic project (10k files); needs a release buil
 bench-ci:  ## CI-size project; exits 1 when over the budget in benchmarks/baseline.json
 	uv run python benchmarks/bench_project.py --size ci --repeats 7 --compare --out bench-result.json
 
+.PHONY: bench-ab
+bench-ab:  ## Interleaved A/B of `sqlty check`, BASE (default origin/main) vs the working tree; extra args via ARGS=
+	uv run python benchmarks/ab.py --base $(or $(BASE),origin/main) $(ARGS)
+
 .PHONY: bench-baseline
 bench-baseline:  ## Re-record the CI-size baseline for this platform
 	uv run python benchmarks/bench_project.py --size ci --repeats 7 --update-baseline
+
+.PHONY: bench-corpus
+bench-corpus:  ## sqlty check on pinned real repositories (clones them); extra args via ARGS=
+	uv run python benchmarks/corpus.py $(ARGS)
 
 .PHONY: bench-codspeed
 bench-codspeed:  ## The benchmarks CodSpeed measures in CI, timed locally; needs a release build
 	uv run --group bench pytest benchmarks/ --codspeed -n 0 -p no:randomly --no-cov
 
 .PHONY: bench-rust
-bench-rust:  ## Criterion: catalog load, analyzer, check/rewrite_source; extra args via ARGS=
+bench-rust:  ## Criterion: catalog load, analyzer, check/rewrite_source, one query; extra args via ARGS=
 	cargo bench --manifest-path rust/Cargo.toml -p sqlty-bench -- $(ARGS)
 
 # --- Docs ---

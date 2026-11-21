@@ -237,7 +237,8 @@ winning. `--error`, `--warn`, `--ignore` and `-c rules.X=...` still win over
 both.
 
 An override changes severities only; `dialect`, `schema` and the other keys
-apply to the whole project. `check` and `check --fix` read it.
+apply to the whole project. `check` and `check --fix` read it, and `sqlty breaking`
+matches the migration files with it too.
 
 ## `import-style`
 

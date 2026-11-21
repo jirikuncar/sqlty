@@ -1074,8 +1074,7 @@ fn check_source(
         let schema = schema_for(source, schema_sql, dialect);
         let options = Options::new(dialect, schema.as_deref(), import_style, untyped)?;
         let rules = RuleConfig::from_overrides(rules).map_err(ConfigError::from)?;
-        let mut diagnostics = checker::check_source(source, &options, &rules, &any_calls);
-        checker::add_fix_imports(source, &options, &mut diagnostics);
+        let diagnostics = checker::check_source_with_imports(source, &options, &rules, &any_calls);
         Ok(diagnostics
             .into_iter()
             .map(|diag| DiagnosticOut {
@@ -1931,16 +1930,15 @@ fn call_variants(
 
     detach(py, || {
         let source = Source::new(source, version)?;
-        let scan = Scan::new(source.body(), |call| {
-            call.func.is_name_expr() && !call.arguments.args.is_empty()
-        });
+        let scan = Scan::new(source.body());
         let mut found: Vec<CallVariants> = scan
             .calls
             .iter()
-            .map(|(call, stack)| {
+            .filter(|(call, _)| call.func.is_name_expr() && !call.arguments.args.is_empty())
+            .map(|&(call, scope)| {
                 let query: &Expr = &call.arguments.args[0];
                 let at = sqlty_python::calls::query_span(call, query).0;
-                let stack: Vec<_> = stack.iter().map(|scope| scan.scopes[*scope]).collect();
+                let stack: Vec<_> = scan.stack(scope).iter().map(|s| scan.scopes[*s]).collect();
                 match query_variants(&source, &stack, call.range(), query, limit, None) {
                     None => (at, false, None, false, None),
                     Some(Found::Unchecked { composed, reason }) => {

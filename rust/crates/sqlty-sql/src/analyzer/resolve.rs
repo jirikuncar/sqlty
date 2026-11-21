@@ -167,38 +167,26 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// `table.column`, built only when diagnostics are collected.
-    fn label(&self, table: &str, column: &str) -> String {
-        if self.diag.enabled() {
-            format!("{table}.{column}")
-        } else {
-            String::new()
-        }
-    }
-
     /// A column of one source, when it has it.
     fn find_column(&self, table: &str, column: &str) -> Option<ColumnRef<'_>> {
-        if let Some(columns) = self.virtual_columns(table) {
-            return columns
-                .iter()
-                .find(|col| self.same_column(&col.name, column))
-                .map(|column| ColumnRef::Virtual {
-                    column,
-                    local: self.virtuals.contains_key(table),
-                });
+        if let Some(found) = self.virtual_column(table, column) {
+            return found.map(|column| ColumnRef::Virtual {
+                column,
+                local: self.virtuals.contains_key(table),
+            });
         }
-        let columns = self.schema.table(table)?;
-        match columns.iter().find(|col| col.name == column) {
+        match self.schema.column(table, column)? {
             Some(col) => Some(ColumnRef::Schema(col)),
             None => self.system_column(column).map(ColumnRef::System),
         }
     }
 
     /// Where a column found in `table` comes from, for explaining why it is untyped.
-    fn origin(&self, found: &ColumnRef<'_>, table: &str, column: &str) -> Origin {
+    fn origin(found: &ColumnRef<'_>, table: &str, column: &str) -> Origin {
+        let label = || format!("{table}.{column}");
         match found {
-            ColumnRef::Virtual { local: false, .. } => Origin::View(self.label(table, column)),
-            ColumnRef::Schema(_) => Origin::Schema(self.label(table, column)),
+            ColumnRef::Virtual { local: false, .. } => Origin::View(label()),
+            ColumnRef::Schema(_) => Origin::Schema(label()),
             ColumnRef::Virtual { .. } | ColumnRef::System(_) => Origin::Local,
         }
     }
@@ -343,10 +331,9 @@ impl<'a> Analyzer<'a> {
 
     /// Type of a column: its qualifier's source, else the first source having it, the
     /// FROM clause before enclosing queries.
-    pub(super) fn resolve_column(&self, expr: &Expr, scope: &Scope) -> Option<(Typed, Origin)> {
+    pub(super) fn resolve_column(&self, expr: &Expr, scope: &Scope) -> Option<Typed> {
         let resolved = self.resolve_reference(expr, scope)?;
-        let origin = self.origin(&resolved.found, &resolved.table, &resolved.column);
-        Some((resolved.found.typed(self.dialect), origin))
+        Some(resolved.found.typed(self.dialect))
     }
 
     /// Typed column reference, recording why when it is untyped.
@@ -356,10 +343,10 @@ impl<'a> Analyzer<'a> {
         }
         match self.resolve_reference(expr, scope) {
             Some(resolved) => {
-                let origin = self.origin(&resolved.found, &resolved.table, &resolved.column);
                 let typed = resolved.found.typed(self.dialect);
                 let typed = self.narrowed_values(&resolved.reference, &resolved.column, typed);
                 if typed.python.is_none() && self.diag.enabled() {
+                    let origin = Self::origin(&resolved.found, &resolved.table, &resolved.column);
                     match (origin, &typed.sql) {
                         (Origin::Schema(column), sql_type) => self.diag.record(
                             Rule::UnknownType,
@@ -552,12 +539,10 @@ impl<'a> Analyzer<'a> {
         }
         // Columns of a source that is itself unknown are explained where it is declared.
         let unreadable = candidates.iter().any(|source| {
-            source.table.named().is_none_or(|table| {
-                !self.knows_table(table)
-                    || self
-                        .virtual_columns(table)
-                        .is_some_and(|columns| columns.iter().any(Column::is_unknown_star))
-            })
+            source
+                .table
+                .named()
+                .is_none_or(|table| !self.knows_table(table) || self.has_unknown_star(table))
         });
         if unreadable {
             return self.diag.explain_silently();
@@ -778,10 +763,11 @@ impl<'a> Analyzer<'a> {
         {
             return self.diag.explain_silently();
         }
-        if tables.iter().filter_map(Table::named).any(|table| {
-            self.virtual_columns(table)
-                .is_some_and(|columns| columns.iter().any(Column::is_unknown_star))
-        }) {
+        if tables
+            .iter()
+            .filter_map(Table::named)
+            .any(|table| self.has_unknown_star(table))
+        {
             return self.explain_view_star(reference.as_deref(), scope);
         }
         self.diag.record(

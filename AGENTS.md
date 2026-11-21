@@ -66,6 +66,31 @@ compiles them into the extension: rebuild it after editing one, or
 `test_agent_skills_are_compiled_in` fails. A new skill gets a row in the table of
 `docs/recipes/agents.md`.
 
+## Check budget
+
+SQL and Python type inference have separate budgets. SQL inference must be faster than a
+round trip to the database, or asking the database (as
+[sqlx](https://github.com/launchbadge/sqlx) does at compile time) would be the better
+checker. The round trip is PostgreSQL typing the same query (Parse and Describe)
+over a Unix socket: about 100 µs on a machine whose `bench_project.py` calibration loop
+takes 20 ms. Real setups are slower: 126 µs (socket) and 211 µs (TCP) on a loaded laptop
+([Cybertec](https://www.cybertec-postgresql.com/en/?p=4197)), 230-400 µs within one
+cloud zone ([Bailis](https://bailis.org/blog/communication-costs-in-real-world-networks/)).
+
+Python inference (reading row types, wrappers, calls) must be no slower than
+`ruff check` of the same files on one thread: it parses with ruff's parser and makes one
+pass over the module, as a lint does.
+
+| Inference | Measured as | Budget | Guarded by |
+|-----------|-------------|--------|------------|
+| SQL, per query | `analyze_select` + `analyze_params`, schema loaded | 100 µs | `bench-ci` (fails) |
+| Python, per file | `check_source` minus the SQL of its queries, schema loaded | `ruff check` per file | `bench-ci` `python_us_per_file` mean (fails) |
+
+Cost grows at most linearly with input size: files, queries, tables, columns, statements,
+nesting and line length. No `Vec::contains` dedupe, no clone of a table per statement,
+no rescan of the source per query; use a `HashSet`, mutate in place, index once. Prove
+it by doubling the input up to 32x and comparing the time.
+
 ## Completion budget
 
 Completion runs on every keystroke against schemas of 500+ tables, so no per-keystroke
@@ -199,21 +224,21 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 
 | Assertion | Where | Compared with |
 |-----------|-------|---------------|
-| `-- inferred:` | in the `sql` block | `core.infer_type()` |
-| `-- expanded:` | in the `sql` block | `core.expand_star()` |
-| `-- columns:` | in the `sql` block | `core.analyze_select()`: `name: type (SQL_TYPE)` per line |
-| `-- json:` | in the `sql` block | `_core.analyze_columns()` (`tests/_json_shapes.py`): `name: shape` per JSON column of known shape |
-| `-- rules:` | in the `sql` block | `_core.explain_select()`: `name: type-rule-id / nullability-rule-id` per column, `-` for none |
-| `-- params:` | in the `sql` block | `core.analyze_params()`: `number-or-name: type (SQL_TYPE)` per parameter, then ` NULL` or ` NOT NULL` when known |
-| `# rewritten:` | `python`, whole code | `core.rewrite_source()` without imports |
-| `# rewritten-file:` | `python`, whole code | `core.rewrite_source()` |
-| `# stripped:` | `python`, whole code | `core.strip_source()` |
-| `# fixed:` | `python`, whole code | `core.fix_source()` (`sqlty check --fix`) |
+| `-- inferred:` | in the `sql` block | `analyzer::infer_type` |
+| `-- expanded:` | in the `sql` block | `analyzer::expand_star` |
+| `-- columns:` | in the `sql` block | `analyzer::analyze_select`: `name: type (SQL_TYPE)` per line |
+| `-- json:` | in the `sql` block | `analyzer::analyze_select`: `name: shape` per JSON column of known shape |
+| `-- rules:` | in the `sql` block | `analyzer::explain_select`: `name: type-rule-id / nullability-rule-id` per column, `-` for none |
+| `-- params:` | in the `sql` block | `analyzer::analyze_params`: `number-or-name: type (SQL_TYPE)` per parameter, then ` NULL` or ` NOT NULL` when known |
+| `# rewritten:` | `python`, whole code | `sqlty rewrite` without imports |
+| `# rewritten-file:` | `python`, whole code | `sqlty rewrite` |
+| `# stripped:` | `python`, whole code | `sqlty strip` |
+| `# fixed:` | `python`, whole code | `sqlty check --fix` |
 | `# decoded:` | `python`, whole code | magic codec `decode()` without imports or the `# coding:` line |
-| `# completions:` | `python`, at its `<CURSOR>` | `core.complete_source()`: `label kind detail` per item, the first ten then `...`; `None` for none |
-| `# hover:` | `python`, at its `<CURSOR>` | `_core.hover_source()`: the Markdown contents; `None` for none |
-| `# highlighted:` | `python`, whole code | `core.highlight_source()`: `kind text` per colored token, a line each; `None` for none |
-| `# error: [rule] "message"` | end of its line, or on the line above | `core.check_source()` |
+| `# completions:` | `python`, at its `<CURSOR>` | `locate::complete`: `label kind detail` per item, the first ten then `...`; `None` for none |
+| `# hover:` | `python`, at its `<CURSOR>` | `locate::hover`: the Markdown contents; `None` for none |
+| `# highlighted:` | `python`, whole code | `Queries::highlights`: `kind text` per colored token, a line each; `None` for none |
+| `# error: [rule] "message"` | end of its line, or on the line above | `sqlty check`; `sqlty breaking` with an `against.sql` |
 
 - Consecutive comments of one kind form a multi-line value.
 - `# error:` takes a rule, a message substring, or both. A test with any
@@ -223,14 +248,19 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
   and `end`): 1-based characters, the end one past the last. A column on another
   line than the diagnostic's is written `+1.5`. `make update-mdtest` drops ranges.
 
+Each crate runs the assertions it implements, from `rust/mdtest/`: sqlty-sql the
+SQL ones, sqlty-format `# formatted:` and the `sqruff` rule's diagnostics,
+sqlty-python the rest, and the SQL ones of `driver` sections. pytest runs
+`# decoded:`, which needs the Python codec.
+
 ### Workflow
 
 1. Write the code with empty assertions (`# rewritten:`, `# error:`).
 2. `make update-mdtest` fills them in; errors are written above their lines.
 3. Review the diff, then commit.
 
-`uv run pytest 'tests/mdtest/check/user_types.md::TypedDict - field type mismatch'`
-reruns one test; failures print this command.
+`MDTEST_FILTER=check/user_types cargo test -p sqlty-python --test mdtest` (in `rust/`)
+reruns one file; `MDTEST_UPDATE=1` writes the actual values.
 
 ## Documentation philosophy
 
@@ -267,7 +297,7 @@ sqlty strip .            # SQL[T]("--sql\n...") → "--sql\n..."
   mdtest code block: new mdtests extend it automatically.
 - `docs/reference/configuration.md`, `cli.md` and `rules.md` hold tables between
   `<!-- generated:NAME -->` markers, rendered by `scripts/generate_docs.py` from `KEY_DOCS` in
-  `_config.py`, the clap commands of `sqlty-cli` and the rule pages. Edit those, then run
+  the script itself, the clap commands of `sqlty-cli` and the rule pages. Edit those, then run
   `make generate-docs`; `test_generated_reference_is_current` fails on drift.
 - `tests/test_docs.py` checks that every rule has a page in `docs/reference/rules/`, that
   relative links resolve, that `examples/` need no rewrite, and runs the

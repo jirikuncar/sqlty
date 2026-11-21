@@ -35,6 +35,7 @@ mod columns;
 mod index;
 mod joins;
 mod loader;
+mod lookup;
 mod names;
 mod read;
 mod resolve;
@@ -43,6 +44,7 @@ mod resolve;
 pub(crate) use index::visited;
 pub use index::{Columns, NameRef, RelationKind, RelationRef};
 pub use joins::Join;
+pub(crate) use lookup::Lookup;
 pub(crate) use names::fold;
 pub(crate) use read::{load, load_with};
 
@@ -161,6 +163,30 @@ struct TableRelation {
     /// Columns of each `UNIQUE` constraint or unique index.
     unique: Vec<Vec<String>>,
     row_security: bool,
+    /// Positions in `columns`, by name and then position, so that a column is found in
+    /// O(log width).
+    by_name: Vec<u32>,
+}
+
+impl TableRelation {
+    fn indexed(mut self) -> Self {
+        let mut by_name: Vec<u32> = (0..self.columns.len() as u32).collect();
+        by_name.sort_by(|&a, &b| {
+            self.columns[a as usize]
+                .name
+                .cmp(&self.columns[b as usize].name)
+        });
+        self.by_name = by_name;
+        self
+    }
+
+    fn column(&self, name: &str) -> Option<&SchemaColumn> {
+        let at = self
+            .by_name
+            .partition_point(|&i| self.columns[i as usize].name.as_str() < name);
+        let column = &self.columns[*self.by_name.get(at)? as usize];
+        (column.name == name).then_some(column)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -305,24 +331,6 @@ impl Catalog {
             .and_then(|key| self.relations.get(key))
     }
 
-    /// Columns of the table `name`, or `None` for a view, an unknown name or a table of
-    /// unknown shape.
-    pub(crate) fn table(&self, name: &str) -> Option<&[SchemaColumn]> {
-        match self.find(name)? {
-            Relation::Table(table) => Some(&table.columns),
-            _ => None,
-        }
-    }
-
-    /// Groups of columns of the table `name` that a `CHECK` keeps at least one of
-    /// non-null, such as `CHECK (num_nonnulls(a, b) = 1)`.
-    pub(crate) fn nonnull_groups(&self, name: &str) -> &[Vec<String>] {
-        match self.find(name) {
-            Some(Relation::Table(table)) => &table.nonnull_groups,
-            _ => &[],
-        }
-    }
-
     /// The statements a `BEFORE ... FOR EACH ROW` trigger of the table `name` fires for:
     /// such a trigger may change any column of the row a `RETURNING` clause returns.
     pub(crate) fn row_triggers(&self, name: &str) -> RowEvents {
@@ -428,11 +436,6 @@ impl Catalog {
         None
     }
 
-    /// Whether the schema defines a table or view `name`, whatever is known of its shape.
-    pub(crate) fn defines(&self, name: &str) -> bool {
-        self.find(name).is_some()
-    }
-
     /// Whether `name` is a PostgreSQL system relation (`pg_catalog.x`,
     /// `information_schema.x`, a bare `pg_*`) that the catalog does not model, so its
     /// columns are unknown. A relation the schema or the built-ins define is never one.
@@ -443,14 +446,6 @@ impl Catalog {
                 Some((schema, _)) => BUILTIN_SCHEMAS.contains(&schema),
                 None => name.starts_with("pg_"),
             }
-    }
-
-    /// Output columns of the view `name`.
-    pub(crate) fn view(&self, name: &str) -> Option<&[Column]> {
-        match self.find(name)? {
-            Relation::View(columns) => Some(columns),
-            _ => None,
-        }
     }
 
     /// The domain or enum `name`; for a domain, its base type.
@@ -572,6 +567,28 @@ pub(crate) fn empty(dialect: SqlDialect) -> &'static Catalog {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    impl Catalog {
+        fn table(&self, name: &str) -> Option<&[SchemaColumn]> {
+            Lookup::new(self).table(name)
+        }
+
+        fn column(&self, name: &str, column: &str) -> Option<Option<&SchemaColumn>> {
+            Lookup::new(self).column(name, column)
+        }
+
+        fn view(&self, name: &str) -> Option<&[Column]> {
+            Lookup::new(self).view(name)
+        }
+
+        fn defines(&self, name: &str) -> bool {
+            Lookup::new(self).defines(name)
+        }
+
+        fn nonnull_groups(&self, name: &str) -> &[Vec<String>] {
+            Lookup::new(self).nonnull_groups(name)
+        }
+    }
     use crate::analyzer::canonical_type;
     use sqlparser::ast::Statement;
     use sqlparser::parser::Parser;
@@ -590,6 +607,28 @@ mod tests {
 
     fn pg(sql: &str) -> Catalog {
         load(sql, "postgres").0
+    }
+
+    #[test]
+    fn a_column_is_found_by_name_in_a_wide_table() {
+        let columns: Vec<String> = (0..300).rev().map(|i| format!("c{i} int")).collect();
+        let c = pg(&format!(
+            "CREATE TABLE t ({}); CREATE VIEW v AS SELECT 1 AS x;",
+            columns.join(", ")
+        ));
+        let names: Vec<&str> = c
+            .table("t")
+            .unwrap()
+            .iter()
+            .map(|col| col.name.as_str())
+            .collect();
+        for name in names {
+            assert_eq!(c.column("t", name).unwrap().unwrap().name, name);
+        }
+        assert!(c.column("t", "c300").unwrap().is_none());
+        assert!(c.column("t", "").unwrap().is_none());
+        assert!(c.column("v", "x").is_none());
+        assert!(c.column("nope", "c1").is_none());
     }
 
     #[test]
@@ -1010,6 +1049,31 @@ mod tests {
     }
 
     #[test]
+    fn foreign_keys_reach_tables_defined_later() {
+        let c = pg("SET search_path = app; \
+             CREATE TABLE a (b_id int REFERENCES b, c_id int REFERENCES c (code), gone int REFERENCES gone); \
+             CREATE TABLE app.b (id int PRIMARY KEY); \
+             CREATE TABLE app.c (code text UNIQUE);");
+        let keys: Vec<_> = c
+            .foreign_keys("app.a")
+            .map(|fk| {
+                (
+                    fk.columns.join(","),
+                    fk.table.as_str(),
+                    fk.referred.join(","),
+                )
+            })
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                ("b_id".to_string(), "app.b", "id".to_string()),
+                ("c_id".to_string(), "app.c", "code".to_string()),
+            ]
+        );
+    }
+
+    #[test]
     fn test_other_dialects_ignore_postgres_statements() {
         let (c, _) = load(
             "CREATE TABLE db.t (a INT); ALTER TABLE t ADD COLUMN b INT; DROP TABLE t;",
@@ -1080,6 +1144,146 @@ mod tests {
         }
         let catalog = assert_fast(&sql);
         assert_eq!(catalog.view("v1499").unwrap().len(), 1);
+    }
+
+    /// A statement on a table costs the same however much the table holds: copying or
+    /// resolving all of it each time made `n` indexes, keys, triggers or added columns on
+    /// one table take O(n²). Counts heap allocations, which a copy of the table makes in
+    /// proportion to its size.
+    #[test]
+    fn statements_on_one_table_do_not_copy_it() {
+        let head = "CREATE TABLE t (id int PRIMARY KEY, a int, b int);
+            CREATE VIEW v AS SELECT id FROM t;\n";
+        let each = |n: usize, statement: &dyn Fn(usize) -> String| -> String {
+            (0..n).map(statement).collect()
+        };
+        let trigger =
+            |i| format!("CREATE TRIGGER g{i} BEFORE INSERT ON t FOR EACH ROW SET NEW.a = 1;\n");
+        let cases: [(&str, &dyn Fn(usize) -> String); 9] = [
+            ("postgres", &|n| {
+                each(n, &|i| format!("CREATE UNIQUE INDEX i{i} ON t (a, b);\n"))
+            }),
+            ("postgres", &|n| {
+                each(n, &|i| format!("ALTER TABLE t ADD COLUMN c{i} int;\n"))
+            }),
+            ("postgres", &|n| {
+                each(n, &|i| {
+                    format!("ALTER TABLE t ADD CONSTRAINT u{i} UNIQUE (a, b);\n")
+                })
+            }),
+            ("postgres", &|n| {
+                each(n, &|i| {
+                    format!(
+                        "ALTER TABLE t ADD CONSTRAINT f{i} FOREIGN KEY (a) REFERENCES t (id);\n"
+                    )
+                })
+            }),
+            ("postgres", &|n| {
+                each(n, &|i| {
+                    format!("ALTER TABLE t ADD CONSTRAINT k{i} CHECK (a IS NOT NULL OR b IS NOT NULL);\n")
+                })
+            }),
+            ("postgres", &|n| {
+                each(n, &|i| {
+                    format!(
+                        "ALTER TABLE t ADD COLUMN c{i} int;
+                        ALTER TABLE t ADD CONSTRAINT k{i} CHECK (t.c{i} IN (1, 2));
+                        ALTER TABLE t ADD CONSTRAINT n{i} CHECK (c{i} > 0);\n"
+                    )
+                })
+            }),
+            ("postgres", &|n| {
+                each(n, &trigger) + &each(n, &|i| format!("DROP TRIGGER g{i} ON t;\n"))
+            }),
+            ("mysql", &|n| {
+                each(n, &|i| {
+                    format!("ALTER TABLE t ADD COLUMN c{i} int AFTER id;\n")
+                })
+            }),
+            ("mysql", &|n| {
+                each(n, &trigger) + &each(n, &|i| format!("DROP TRIGGER g{i};\n"))
+            }),
+        ];
+        for (dialect, statements) in cases {
+            let allocations = |n| {
+                let sql = format!("{head}{}", statements(n));
+                crate::analyzer::allocations(|| drop(load(&sql, dialect)))
+            };
+            // The first load also reads what every load shares.
+            allocations(0);
+            let (base, small, large) = (allocations(0), allocations(100), allocations(400));
+            // Linear: four times the statements, four times the work. A copy per statement
+            // made it more than ten.
+            assert!(
+                (large - base) < 5 * (small - base),
+                "{dialect} {:?}: {} then {} allocations",
+                statements(1),
+                small - base,
+                large - base
+            );
+        }
+    }
+
+    /// The statements a table takes in place change it as a copy would.
+    #[test]
+    fn statements_on_one_table_change_it_as_before() {
+        let c = pg("CREATE TABLE t (id int PRIMARY KEY, a int, b int);
+            CREATE TABLE p (id int); CREATE TABLE ch () INHERITS (p);
+            CREATE VIEW v0 AS SELECT * FROM t;
+            CREATE VIEW w AS SELECT id FROM t;
+            CREATE UNIQUE INDEX on_view ON w (id);
+            CREATE TRIGGER on_view BEFORE INSERT ON w FOR EACH ROW EXECUTE FUNCTION f();
+            ALTER TABLE t ADD COLUMN c int;
+            ALTER TABLE t ADD COLUMN c text;
+            ALTER TABLE t ADD COLUMN r int REFERENCES t;
+            ALTER TABLE t ADD CONSTRAINT u UNIQUE (a, b);
+            ALTER TABLE t ADD CONSTRAINT x UNIQUE (lower(b::text));
+            ALTER TABLE t ADD CONSTRAINT f FOREIGN KEY (a) REFERENCES t (id);
+            ALTER TABLE t ADD CONSTRAINT g FOREIGN KEY (b) REFERENCES missing (id);
+            ALTER TABLE t ADD COLUMN m int, ADD CONSTRAINT h FOREIGN KEY (m) REFERENCES t (id);
+            ALTER TABLE t ADD COLUMN n int, ADD CONSTRAINT i FOREIGN KEY (n) REFERENCES missing (id);
+            ALTER TABLE t ADD CONSTRAINT k1 CHECK (b IS NOT NULL);
+            ALTER TABLE t ADD CONSTRAINT k2 CHECK (a > 0);
+            ALTER TABLE t ADD CONSTRAINT k3 CHECK (a IS NOT NULL OR c IS NOT NULL);
+            CREATE TRIGGER g1 BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION f();
+            DROP TRIGGER g1 ON t;
+            DROP TRIGGER g1 ON t;
+            ALTER TABLE p ADD COLUMN b int;
+            ALTER TABLE ONLY p ADD COLUMN only_p int;
+            ALTER TABLE w ADD COLUMN z int;
+            DROP TABLE ch;
+            CREATE VIEW v1 AS SELECT * FROM t;
+            CREATE VIEW v2 AS SELECT * FROM p;");
+        assert_eq!(
+            cols(&c, "t"),
+            ["id:INT", "a:INT", "b:INT", "c:INT", "r:INT", "m:INT", "n:INT"]
+        );
+        assert_eq!(c.view("v0").unwrap().len(), 3);
+        assert_eq!(c.view("v1").unwrap().len(), 7);
+        assert_eq!(c.unique_keys("t").unwrap(), [vec!["id"], vec!["a", "b"]]);
+        let keys: Vec<_> = c.foreign_keys("t").map(|fk| fk.columns.clone()).collect();
+        assert_eq!(keys, [vec!["r"], vec!["a"], vec!["m"]]);
+        assert!(!c.row_triggers("t").insert);
+        let not_null: Vec<_> = c.table("t").unwrap().iter().map(|c| c.not_null).collect();
+        assert_eq!(not_null, [true, false, false, false, false, false, false]);
+        assert_eq!(c.nonnull_groups("t"), [vec!["b"], vec!["c", "a"]]);
+        assert_eq!(cols(&c, "p"), ["id:INT", "b:INT", "only_p:INT"]);
+        assert_eq!(c.view("v2").unwrap().len(), 3);
+        assert!(c.table("w").is_none() && c.find("ch").is_none());
+
+        let (c, _) = load(
+            "CREATE TABLE t (id INT, a INT);
+            CREATE TRIGGER g1 BEFORE INSERT ON t FOR EACH ROW SET NEW.a = 1;
+            CREATE TRIGGER g2 BEFORE UPDATE ON t FOR EACH ROW SET NEW.a = 1;
+            ALTER TABLE t ADD COLUMN b INT AFTER id;
+            ALTER TABLE t ADD COLUMN c INT AFTER missing;
+            ALTER TABLE t ADD COLUMN d INT FIRST;
+            DROP TRIGGER g1;",
+            "mysql",
+        );
+        assert_eq!(cols(&c, "t"), ["d:INT", "id:INT", "b:INT", "a:INT"]);
+        let events = c.row_triggers("t");
+        assert!(!events.insert && events.update);
     }
 
     #[test]

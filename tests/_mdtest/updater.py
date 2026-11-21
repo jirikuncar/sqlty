@@ -7,12 +7,9 @@ current ones. Sections may update in any order.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from .parser import Assertion
-
-_TRAILING_ERROR = re.compile(r"^(.*?\S)\s+#\s+error(?:\[[^\]]*\])?:.*$")
 
 
 class Updater:
@@ -27,31 +24,6 @@ class Updater:
         prefix = f"{assertion.indent}{assertion.comment} {assertion.kind}:"
         start = assertion.line - 1
         self._splice(start, start + assertion.span, [_join(prefix, v) for v in values])
-
-    def replace_errors(
-        self,
-        assertions: list[Assertion],
-        diagnostics: list[tuple[int, str, str, str]],
-        lang: str = "python",
-    ) -> None:
-        comment = "--" if lang == "sql" else "#"
-        if not self._claim(("errors", assertions[0].line)):
-            return
-        lines = self.path.read_text().splitlines()
-        for a in assertions:
-            start = a.line - 1
-            if a.trailing:
-                code = _TRAILING_ERROR.sub(r"\1", lines[self._at(start)])
-                self._splice(start, start + 1, [code])
-            else:
-                self._splice(start, start + 1, [])
-        if not diagnostics:
-            first = min(assertions, key=lambda a: a.line)
-            self._splice(first.line - 1, first.line - 1, [f"{first.indent}{comment} error:"])
-        for line, rule, message, _ in sorted(diagnostics):
-            target = self.path.read_text().splitlines()[self._at(line - 1)]
-            indent = target[: len(target) - len(target.lstrip())]
-            self._splice(line - 1, line - 1, [f'{indent}{comment} error: [{rule}] "{message}"'])
 
     def _claim(self, key: object) -> bool:
         if key in self._done:
