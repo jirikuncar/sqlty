@@ -4,21 +4,28 @@
 //! comments. Each new statement is judged against the tables the baseline and the earlier
 //! statements define: a table created by a new statement is empty, so nothing it does to it
 //! blocks anyone. Statements sqlparser does not read (`DROP INDEX CONCURRENTLY`, `REINDEX`,
-//! `CLUSTER`, `DETACH PARTITION`) are judged by their tokens.
+//! `CLUSTER`, `DETACH PARTITION`, `CREATE INDEX ... TABLESPACE`) are judged by their tokens.
 //!
 //! Lock levels and rewrites follow the PostgreSQL 17 documentation of
 //! [`ALTER TABLE`](https://www.postgresql.org/docs/17/sql-altertable.html),
-//! [`CREATE INDEX`](https://www.postgresql.org/docs/17/sql-createindex.html) and
-//! [explicit locking](https://www.postgresql.org/docs/17/explicit-locking.html).
+//! [`CREATE INDEX`](https://www.postgresql.org/docs/17/sql-createindex.html),
+//! [`REINDEX`](https://www.postgresql.org/docs/17/sql-reindex.html),
+//! [`CLUSTER`](https://www.postgresql.org/docs/17/sql-cluster.html),
+//! [`VACUUM`](https://www.postgresql.org/docs/17/sql-vacuum.html),
+//! [`REFRESH MATERIALIZED VIEW`](https://www.postgresql.org/docs/17/sql-refreshmaterializedview.html)
+//! and [explicit locking](https://www.postgresql.org/docs/17/explicit-locking.html): `CREATE
+//! INDEX` locks the table SHARE, `REINDEX` locks it SHARE and the index ACCESS EXCLUSIVE, and the
+//! others lock the table ACCESS EXCLUSIVE. All of them block writes.
 
 use std::ops::{ControlFlow, Range};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use sqlparser::ast::{
-    visit_expressions, AlterColumnOperation, AlterTableOperation, AlterType, AlterTypeOperation,
-    BinaryOperator, CascadeOption, CharacterLength, CheckConstraint, ColumnDef, ColumnOption,
-    CopySource, DataType, Delete, DetachPartitionMode, ExactNumberInfo, Expr, ForValues, FromTable,
-    InTarget, Insert, LockTableMode, Merge, ObjectName, ObjectType, SetExpr, Statement,
+    visit_expressions, AlterColumnOperation, AlterIndexOperation, AlterTable, AlterTableOperation,
+    AlterType, AlterTypeOperation, BinaryOperator, CascadeOption, CharacterLength, CheckConstraint,
+    ColumnDef, ColumnOption, CopySource, CreateTable, DataType, Delete, DetachPartitionMode,
+    ExactNumberInfo, Expr, ForValues, FromTable, InTarget, Insert, LockTableMode, Merge,
+    ObjectName, ObjectType, RenameTableNameKind, ReplicaIdentity, SetExpr, Statement,
     TableConstraint, TableFactor, TableObject,
 };
 
@@ -72,7 +79,9 @@ pub fn check(baseline: &str, files: &[&str]) -> Vec<Vec<Finding>> {
     let mut model = Model::default();
     for stmt in ddl::statements(baseline, false) {
         *model.applied.entry(stmt.normalized()).or_default() += 1;
-        if let Some((parsed, likes)) = model.parse_if_shaping(&stmt) {
+        let parsed = model.parse_if_shaping(&stmt);
+        model.record_indexes(&stmt, parsed.as_ref().map(|(parsed, _)| parsed));
+        if let Some((parsed, likes)) = parsed {
             model.apply(&parsed, &likes);
         }
     }
@@ -85,6 +94,9 @@ struct Model {
     applied: FxHashMap<String, usize>,
     /// Tables, materialized views and indexes created by new statements: empty and unused.
     created: FxHashSet<String>,
+    /// The table of each index the baseline or a new statement created, by its name in the
+    /// schema of the table.
+    index_tables: FxHashMap<String, String>,
     /// The tables the baseline and earlier statements create.
     tables: FxHashSet<String>,
     /// The declared type of each column.
@@ -108,6 +120,24 @@ struct Model {
     /// The partitioned tables whose partitions no `CHECK` can prove: hash partitioning or an
     /// expression in the key.
     unprovable: FxHashSet<String>,
+    /// The primary key of each table.
+    primary_keys: FxHashMap<String, PrimaryKey>,
+    /// The replica identity of each table that set one other than its primary key.
+    identities: FxHashMap<String, Identity>,
+    /// The columns of each unique index, by schema-qualified name.
+    unique_indexes: FxHashMap<String, Vec<String>>,
+}
+
+struct PrimaryKey {
+    name: String,
+    columns: Vec<String>,
+}
+
+enum Identity {
+    Full,
+    /// The schema-qualified name of the index.
+    Index(String),
+    Nothing,
 }
 
 struct Check {
@@ -134,6 +164,8 @@ struct Session {
     locked: Vec<String>,
     reported_tables: bool,
     reported_backfill: bool,
+    /// Primary keys the open transaction dropped and has not replaced yet, by table.
+    dropped_keys: Vec<(String, Finding)>,
 }
 
 impl Model {
@@ -146,7 +178,17 @@ impl Model {
         let spanned = ddl::statements(sql, false);
         for (span, stmt) in spanned.filter_map(|s| Some((s.range_in(sql)?, s))) {
             let tokens: Vec<String> = stmt.tokens().iter().map(|t| t.to_lowercase()).collect();
+            let open = session.transaction;
             if session.track(&tokens) {
+                if open && !session.transaction {
+                    let dropped = session.dropped_keys.drain(..).map(|(_, finding)| finding);
+                    if !matches!(
+                        tokens.first().map(String::as_str),
+                        Some("rollback" | "abort")
+                    ) {
+                        found.extend(dropped);
+                    }
+                }
                 continue;
             }
             let new = match self.applied.get_mut(&stmt.normalized()) {
@@ -157,6 +199,7 @@ impl Model {
                 _ => true,
             };
             let (parsed, likes) = parse(&stmt).unzip();
+            let dropped = dropped_indexes(parsed.as_ref(), &tokens);
             if new {
                 let mut report = |rule: Rule, message: String| {
                     found.push(Finding {
@@ -197,8 +240,11 @@ impl Model {
                 }
                 if session.transaction {
                     let held = session.locked.len();
-                    let locked = parsed.as_ref().map(|parsed| self.write_locked(parsed));
-                    for table in locked.unwrap_or_default() {
+                    let locked = match &parsed {
+                        Some(parsed) => self.write_locked(parsed),
+                        None => self.write_locked_tokens(&stmt, &tokens),
+                    };
+                    for table in locked {
                         if !session.locked.contains(&table) {
                             session.locked.push(table);
                         }
@@ -240,6 +286,30 @@ impl Model {
                         );
                     }
                 }
+                if let Some(Statement::AlterTable(alter)) = &parsed {
+                    let table = key(&alter.name);
+                    session
+                        .dropped_keys
+                        .retain(|(dropped, _)| *dropped != table || !restores_identity(alter));
+                }
+                let lost = parsed
+                    .as_ref()
+                    .and_then(|parsed| self.loses_identity(parsed))
+                    .or_else(|| dropped.iter().find_map(|index| self.identity_of(index)));
+                if let Some(table) = lost.filter(|table| !self.created.contains(table)) {
+                    let finding = Finding {
+                        rule: Rule::DropPrimaryKey,
+                        message: format!(
+                            "`{table}` is left without a replica identity: if it is published for logical replication, every `UPDATE` and `DELETE` of it fails until it has one; set `REPLICA IDENTITY USING INDEX` on a unique index first, or add the new primary key in the same transaction"
+                        ),
+                        span: span.clone(),
+                    };
+                    if session.transaction {
+                        session.dropped_keys.push((table, finding));
+                    } else {
+                        found.push(finding);
+                    }
+                }
                 if let Some(Statement::AlterType(AlterType {
                     name,
                     operation: AlterTypeOperation::AddValue(add),
@@ -248,7 +318,11 @@ impl Model {
                     let value = format!("'{}'", add.value.value.replace('\'', "''"));
                     session.added_values.push((value, name.clone()));
                 }
-                let created = parsed.as_ref().and_then(created);
+                self.record_indexes(&stmt, parsed.as_ref());
+                let created = match &parsed {
+                    Some(parsed) => created(parsed),
+                    None => created_by_tokens(&stmt.tokens()),
+                };
                 if let Some(created) = created.filter(|c| !self.tables.contains(c)) {
                     if matches!(&parsed, Some(Statement::CreateTable(create)) if create.temporary) {
                         self.temporary.insert(created.clone());
@@ -261,10 +335,27 @@ impl Model {
                     self.created.remove(&filled);
                 }
             }
+            for index in &dropped {
+                self.drop_index(index);
+            }
             if let Some(parsed) = &parsed {
+                if let Statement::AlterTable(alter) = parsed {
+                    for op in &alter.operations {
+                        if let AlterTableOperation::RenameTable { table_name } = op {
+                            let renamed = renamed_table(&key(&alter.name), table_name);
+                            for (table, _) in &mut session.dropped_keys {
+                                if *table == key(&alter.name) {
+                                    table.clone_from(&renamed);
+                                }
+                            }
+                        }
+                    }
+                }
                 self.apply(parsed, &likes.unwrap_or_default());
             }
         }
+        found.extend(session.dropped_keys.into_iter().map(|(_, finding)| finding));
+        found.sort_by_key(|finding| finding.span.start);
         found
     }
 
@@ -272,9 +363,15 @@ impl Model {
     fn parse_if_shaping(&self, stmt: &Raw) -> Option<(Statement, Vec<String>)> {
         let tokens = stmt.tokens();
         let shaping = match tokens.as_slice() {
+            [create, unique, ..]
+                if create.eq_ignore_ascii_case("create")
+                    && unique.eq_ignore_ascii_case("unique") =>
+            {
+                true
+            }
             [create, ..] if create.eq_ignore_ascii_case("create") => stmt.is_create_table(),
-            [alter, table, ..] => {
-                alter.eq_ignore_ascii_case("alter") && table.eq_ignore_ascii_case("table")
+            [alter, index, ..] if alter.eq_ignore_ascii_case("alter") => {
+                index.eq_ignore_ascii_case("table") || index.eq_ignore_ascii_case("index")
             }
             _ => false,
         };
@@ -308,6 +405,16 @@ impl Model {
                 for constraint in &create.constraints {
                     self.require_key(&table, constraint);
                     self.record_key(&table, constraint);
+                    self.record_primary_key(&table, constraint);
+                }
+                let inline_key = create.columns.iter().find(|column| {
+                    column
+                        .options
+                        .iter()
+                        .any(|option| matches!(option.option, ColumnOption::PrimaryKey(_)))
+                });
+                if let Some(column) = inline_key {
+                    self.record_column_key(&table, column);
                 }
                 if let Some(by) = &create.partition_by {
                     let by = by.to_string();
@@ -361,7 +468,24 @@ impl Model {
                     self.apply_op(&table, op);
                 }
             }
+            Statement::AlterIndex {
+                name: index,
+                operation: AlterIndexOperation::RenameIndex { index_name },
+            } => {
+                let old = key(index);
+                let new = qualify(&old, &last_name(index_name));
+                self.rename_index(&old, &new);
+            }
             Statement::CreateIndex(index) if index.unique && index.predicate.is_none() => {
+                if let Some(index_name) = &index.name {
+                    let columns = index
+                        .columns
+                        .iter()
+                        .map(|column| column_name(&column.column.expr))
+                        .collect();
+                    let qualified = qualify(&key(&index.table_name), &last_name(index_name));
+                    self.unique_indexes.insert(qualified, columns);
+                }
                 if let [column] = index.columns.as_slice() {
                     self.keys
                         .insert((key(&index.table_name), column_name(&column.column.expr)));
@@ -391,6 +515,9 @@ impl Model {
                     column_def.data_type.clone(),
                 );
                 self.require(table, column_def);
+                if is_key_column(column_def) {
+                    self.record_column_key(table, column_def);
+                }
             }
             AlterTableOperation::AlterColumn {
                 column_name,
@@ -414,6 +541,55 @@ impl Model {
                 if matches!(constraint, TableConstraint::PrimaryKey(_)) =>
             {
                 self.require_key(table, constraint);
+                self.record_primary_key(table, constraint);
+            }
+            AlterTableOperation::AddConstraint { constraint, .. }
+                if matches!(constraint, TableConstraint::PrimaryKeyUsingIndex(_)) =>
+            {
+                self.record_primary_key(table, constraint);
+            }
+            AlterTableOperation::ReplicaIdentity { identity } => {
+                let identity = match identity {
+                    ReplicaIdentity::Full => Identity::Full,
+                    ReplicaIdentity::Index(index) => Identity::Index(qualify(table, &name(index))),
+                    ReplicaIdentity::Nothing => Identity::Nothing,
+                    ReplicaIdentity::Default => {
+                        self.identities.remove(table);
+                        return;
+                    }
+                };
+                self.identities.insert(table.to_string(), identity);
+            }
+            AlterTableOperation::DropColumn { column_names, .. } => {
+                let dropped = column_names.iter().map(name).collect::<Vec<_>>();
+                let keyed = self
+                    .primary_keys
+                    .get(table)
+                    .is_some_and(|key| key.columns.iter().any(|column| dropped.contains(column)));
+                if keyed {
+                    self.primary_keys.remove(table);
+                }
+                if let Some(Identity::Index(index)) = self.identities.get(table) {
+                    let columns = self.index_columns(table, index).unwrap_or_default();
+                    if columns.iter().any(|column| dropped.contains(column)) {
+                        self.identities.insert(table.to_string(), Identity::Nothing);
+                    }
+                }
+            }
+            AlterTableOperation::RenameConstraint { old_name, new_name } => {
+                self.rename_index(
+                    &qualify(table, &name(old_name)),
+                    &qualify(table, &name(new_name)),
+                );
+            }
+            AlterTableOperation::RenameTable { table_name } => {
+                let renamed = renamed_table(table, table_name);
+                if let Some(primary_key) = self.primary_keys.remove(table) {
+                    self.primary_keys.insert(renamed.clone(), primary_key);
+                }
+                if let Some(identity) = self.identities.remove(table) {
+                    self.identities.insert(renamed, identity);
+                }
             }
             AlterTableOperation::AttachPartitionOf {
                 partition,
@@ -423,6 +599,7 @@ impl Model {
             }
             AlterTableOperation::DropConstraint { name: dropped, .. } => {
                 let dropped = name(dropped);
+                self.drop_index(&qualify(table, &dropped));
                 if let Some(checks) = self.checks.get_mut(table) {
                     checks.retain(|check| check.name.as_ref() != Some(&dropped));
                 }
@@ -509,6 +686,172 @@ impl Model {
                 words: words(&check.expr.to_string()),
                 valid,
             });
+    }
+
+    fn record_primary_key(&mut self, table: &str, constraint: &TableConstraint) {
+        let key = match constraint {
+            TableConstraint::PrimaryKey(key) => PrimaryKey {
+                name: key
+                    .name
+                    .as_ref()
+                    .map_or_else(|| default_key_name(table), name),
+                columns: key
+                    .columns
+                    .iter()
+                    .flat_map(|column| words(&column.column.expr.to_string()))
+                    .collect(),
+            },
+            TableConstraint::PrimaryKeyUsingIndex(key) => PrimaryKey {
+                name: name(key.name.as_ref().unwrap_or(&key.index_name)),
+                columns: self
+                    .unique_indexes
+                    .get(&qualify(table, &name(&key.index_name)))
+                    .cloned()
+                    .unwrap_or_default(),
+            },
+            _ => return,
+        };
+        self.primary_keys.insert(table.to_string(), key);
+    }
+
+    /// Record the primary key `column` declares.
+    fn record_column_key(&mut self, table: &str, column: &ColumnDef) {
+        let named = column
+            .options
+            .iter()
+            .find_map(|option| match option.option {
+                ColumnOption::PrimaryKey(_) => Some(option.name.as_ref()),
+                _ => None,
+            });
+        let key = PrimaryKey {
+            name: named
+                .flatten()
+                .map_or_else(|| default_key_name(table), name),
+            columns: vec![name(&column.name)],
+        };
+        self.primary_keys.insert(table.to_string(), key);
+    }
+
+    /// The columns of the unique index `index` of `table`, its primary key's included.
+    fn index_columns(&self, table: &str, index: &str) -> Option<Vec<String>> {
+        self.unique_indexes.get(index).cloned().or_else(|| {
+            self.primary_keys
+                .get(table)
+                .filter(|key| qualify(table, &key.name) == index)
+                .map(|key| key.columns.clone())
+        })
+    }
+
+    /// Forget the index named `index`, schema qualified, with the primary key or replica
+    /// identity it backs: a replica identity index that is dropped leaves the table with none.
+    fn drop_index(&mut self, index: &str) {
+        self.index_tables.remove(index);
+        self.primary_keys
+            .retain(|table, key| qualify(table, &key.name) != index);
+        self.unique_indexes.remove(index);
+        for identity in self.identities.values_mut() {
+            if matches!(identity, Identity::Index(name) if name == index) {
+                *identity = Identity::Nothing;
+            }
+        }
+    }
+
+    /// Follow a renamed constraint or index, schema qualified: a primary key and its index
+    /// share their name.
+    fn rename_index(&mut self, old: &str, new: &str) {
+        let renamed = new.rsplit('.').next().unwrap_or(new);
+        for (table, key) in &mut self.primary_keys {
+            if qualify(table, &key.name) == old {
+                key.name = renamed.to_string();
+            }
+        }
+        if let Some(columns) = self.unique_indexes.remove(old) {
+            self.unique_indexes.insert(new.to_string(), columns);
+        }
+        let table = self.index_tables.remove(old);
+        self.index_tables
+            .extend(table.map(|table| (new.to_string(), table)));
+        for identity in self.identities.values_mut() {
+            if let Identity::Index(name) = identity {
+                if name == old {
+                    *name = new.to_string();
+                }
+            }
+        }
+    }
+
+    /// Whether `table` has a replica identity: a table the migrations don't define is assumed
+    /// to have its primary key.
+    fn has_identity(&self, table: &str) -> bool {
+        match self.identities.get(table) {
+            Some(Identity::Full | Identity::Index(_)) => true,
+            Some(Identity::Nothing) => false,
+            None => self.primary_keys.contains_key(table) || !self.tables.contains(table),
+        }
+    }
+
+    /// Whether `op` on `table` drops its replica identity.
+    fn removes_identity(&self, table: &str, op: &AlterTableOperation) -> bool {
+        let identity = self.identities.get(table);
+        match op {
+            AlterTableOperation::DropConstraint { name: dropped, .. } => {
+                let dropped = name(dropped);
+                match identity {
+                    Some(Identity::Index(index)) => *index == qualify(table, &dropped),
+                    Some(_) => false,
+                    None => match self.primary_keys.get(table) {
+                        Some(key) => key.name == dropped,
+                        None => !self.tables.contains(table) && dropped == default_key_name(table),
+                    },
+                }
+            }
+            AlterTableOperation::DropColumn { column_names, .. } => {
+                let columns = match identity {
+                    Some(Identity::Index(index)) => self.index_columns(table, index),
+                    Some(_) => None,
+                    None => self.primary_keys.get(table).map(|key| key.columns.clone()),
+                };
+                let columns = columns.unwrap_or_default();
+                column_names
+                    .iter()
+                    .any(|column| columns.contains(&name(column)))
+            }
+            AlterTableOperation::ReplicaIdentity {
+                identity: ReplicaIdentity::Nothing,
+            } => self.has_identity(table),
+            AlterTableOperation::ReplicaIdentity {
+                identity: ReplicaIdentity::Default,
+            } => {
+                identity.is_some()
+                    && !self.primary_keys.contains_key(table)
+                    && self.tables.contains(table)
+            }
+            _ => false,
+        }
+    }
+
+    /// The table `stmt` leaves without a replica identity.
+    fn loses_identity(&self, stmt: &Statement) -> Option<String> {
+        let Statement::AlterTable(alter) = stmt else {
+            return None;
+        };
+        let table = key(&alter.name);
+        let mut lost = false;
+        for op in &alter.operations {
+            if restores_identity_op(op) {
+                lost = false;
+            } else if self.removes_identity(&table, op) {
+                lost = true;
+            }
+        }
+        lost.then_some(table)
+    }
+
+    /// The table whose replica identity is the index `index`, schema qualified.
+    fn identity_of(&self, index: &str) -> Option<String> {
+        self.identities.iter().find_map(|(table, identity)| {
+            matches!(identity, Identity::Index(name) if name == index).then(|| table.clone())
+        })
     }
 
     fn require(&mut self, table: &str, column: &ColumnDef) {
@@ -618,9 +961,54 @@ impl Model {
                 ..
             } => names.iter().map(key).collect(),
             Statement::CreateIndex(index) if !index.concurrently => vec![key(&index.table_name)],
+            Statement::RefreshMaterializedView(refresh) if !refresh.concurrently => {
+                vec![key(&refresh.name)]
+            }
+            Statement::Vacuum(vacuum) if vacuum.full => vacuum.table_name.iter().map(key).collect(),
             _ => Vec::new(),
         };
         tables.retain(|table| !self.created.contains(table));
+        tables
+    }
+
+    /// The tables with rows that a statement sqlparser does not read locks against writes, as
+    /// `judge_tokens` judges it. `REINDEX INDEX` of an index of unknown table locks none.
+    fn write_locked_tokens(&self, stmt: &Raw, tokens: &[String]) -> Vec<String> {
+        let original = stmt.tokens();
+        let words: Vec<&str> = tokens.iter().map(String::as_str).collect();
+        let mut tables = match words.as_slice() {
+            ["create", "index" | "unique", ..] => create_index(&original)
+                .filter(|index| !index.concurrently)
+                .map(|index| index.table)
+                .into_iter()
+                .collect(),
+            ["reindex", ..] => {
+                let (options, rest) = split_options(&original[1..]);
+                let name = token_name(rest.get(1..).unwrap_or_default(), &["concurrently"], &[]);
+                match rest.first().map(|kind| kind.to_lowercase()).as_deref() {
+                    _ if reindexes_concurrently(options, rest) => Vec::new(),
+                    Some("table") => vec![name],
+                    Some("index") => self.index_tables.get(&name).cloned().into_iter().collect(),
+                    _ => Vec::new(),
+                }
+            }
+            ["cluster", ..] => vec![cluster_table(&original[1..])],
+            ["vacuum", ..] => {
+                let (options, rest) = split_options(&original[1..]);
+                match vacuum_full(options, rest) {
+                    (true, tables) => tables,
+                    (false, _) => Vec::new(),
+                }
+            }
+            ["alter", "table", rest @ ..]
+                if rest.windows(2).any(|pair| pair == ["set", "tablespace"])
+                    && !rest.starts_with(&["all", "in"]) =>
+            {
+                vec![set_tablespace_table(&original)]
+            }
+            _ => Vec::new(),
+        };
+        tables.retain(|table| !table.is_empty() && !self.created.contains(table));
         tables
     }
 
@@ -699,33 +1087,108 @@ impl Model {
         }
     }
 
+    /// Record the table of each index `stmt` creates, explicitly or for a key of a new table.
+    fn record_indexes(&mut self, stmt: &Raw, parsed: Option<&Statement>) {
+        let indexes = match parsed {
+            Some(Statement::CreateIndex(index)) => index
+                .name
+                .iter()
+                .map(|name| (key(name), key(&index.table_name)))
+                .collect(),
+            Some(Statement::CreateTable(create)) => implicit_indexes(create)
+                .into_iter()
+                .map(|name| (name, key(&create.name)))
+                .collect(),
+            Some(Statement::AlterTable(alter)) => {
+                let table = last_name(&alter.name);
+                alter
+                    .operations
+                    .iter()
+                    .flat_map(|op| match op {
+                        AlterTableOperation::AddConstraint { constraint, .. } => {
+                            constraint_index(&table, constraint).into_iter().collect()
+                        }
+                        AlterTableOperation::AddColumn { column_def, .. } => {
+                            column_indexes(&table, column_def)
+                        }
+                        _ => Vec::new(),
+                    })
+                    .map(|name| (name, key(&alter.name)))
+                    .collect()
+            }
+            Some(_) => Vec::new(),
+            None => create_index(&stmt.tokens())
+                .and_then(|index| Some((index.name?, index.table)))
+                .into_iter()
+                .collect(),
+        };
+        for (name, table) in indexes {
+            self.index_tables.insert(qualify(&table, &name), table);
+        }
+    }
+
+    /// Whether the `TABLE t` or `INDEX i` a `REINDEX` names was created by a new statement.
+    fn is_new_target(&self, tokens: &[&str]) -> bool {
+        let name = token_name(tokens.get(1..).unwrap_or_default(), &["concurrently"], &[]);
+        match tokens.first().map(|kind| kind.to_lowercase()).as_deref() {
+            Some("table") => self.created.contains(&name),
+            Some("index") => self
+                .index_tables
+                .get(&name)
+                .is_some_and(|table| self.created.contains(table)),
+            _ => false,
+        }
+    }
+
+    /// `CREATE INDEX` on `index.table`, written `written`.
+    fn judge_index(
+        &self,
+        index: &NewIndex,
+        written: &str,
+        report: &mut impl FnMut(Rule, String),
+    ) -> Judged {
+        let new = self.created.contains(&index.table);
+        if index.concurrently && index.if_not_exists && !new {
+            report(
+                Rule::ConcurrentIndexIfNotExists,
+                format!(
+                    "a failed `CREATE INDEX CONCURRENTLY` leaves an invalid index on `{written}`, and `IF NOT EXISTS` then skips building it again: `DROP INDEX CONCURRENTLY IF EXISTS` first and create it without `IF NOT EXISTS`"
+                ),
+            );
+        }
+        let waits = !index.concurrently && !new;
+        // PostgreSQL builds no index on a partitioned table `CONCURRENTLY`: build one on each
+        // partition, then on the parent, which `ON ONLY` leaves invalid and empty.
+        if waits && !self.partition_keys.contains_key(&index.table) {
+            report(
+                Rule::MissingConcurrently,
+                format!(
+                    "`CREATE INDEX` blocks writes to `{written}` until the index is built: create it `CONCURRENTLY`"
+                ),
+            );
+        }
+        Judged {
+            concurrently: index.concurrently,
+            ..Judged::strong_unless(!waits)
+        }
+    }
+
     fn is_new(&self, name: &ObjectName) -> bool {
         self.created.contains(&key(name))
     }
 
     fn judge(&self, stmt: &Statement, report: &mut impl FnMut(Rule, String)) -> Judged {
         match stmt {
-            Statement::CreateIndex(index) => {
-                if index.concurrently && index.if_not_exists && !self.is_new(&index.table_name) {
-                    report(
-                        Rule::ConcurrentIndexIfNotExists,
-                        format!(
-                            "a failed `CREATE INDEX CONCURRENTLY` leaves an invalid index on `{}`, and `IF NOT EXISTS` then skips building it again: `DROP INDEX CONCURRENTLY IF EXISTS` first and create it without `IF NOT EXISTS`",
-                            index.table_name
-                        ),
-                    );
-                }
-                if !index.concurrently && !self.is_new(&index.table_name) {
-                    report(
-                        Rule::MissingConcurrently,
-                        format!(
-                            "`CREATE INDEX` blocks writes to `{}` until the index is built: create it `CONCURRENTLY`",
-                            index.table_name
-                        ),
-                    );
-                }
-                Judged::concurrently(index.concurrently)
-            }
+            Statement::CreateIndex(index) => self.judge_index(
+                &NewIndex {
+                    name: None,
+                    table: key(&index.table_name),
+                    concurrently: index.concurrently,
+                    if_not_exists: index.if_not_exists,
+                },
+                &index.table_name.to_string(),
+                report,
+            ),
             Statement::Drop {
                 object_type: ObjectType::Index,
                 names,
@@ -743,7 +1206,8 @@ impl Model {
                 ..
             } => Judged::strong_unless(names.iter().all(|name| self.is_new(name))),
             Statement::RefreshMaterializedView(refresh) => {
-                if !refresh.concurrently && !self.is_new(&refresh.name) {
+                let waits = !refresh.concurrently && !self.is_new(&refresh.name);
+                if waits {
                     report(
                         Rule::MissingConcurrently,
                         format!(
@@ -752,13 +1216,17 @@ impl Model {
                         ),
                     );
                 }
-                Judged::concurrently(refresh.concurrently)
+                Judged {
+                    concurrently: refresh.concurrently,
+                    ..Judged::strong_unless(!waits)
+                }
             }
             Statement::Vacuum(vacuum) if vacuum.full => {
-                if !vacuum.table_name.as_ref().is_some_and(|t| self.is_new(t)) {
+                let rewrites = !vacuum.table_name.as_ref().is_some_and(|t| self.is_new(t));
+                if rewrites {
                     report(Rule::TableRewrite, rewrite_command_message("VACUUM FULL"));
                 }
-                Judged::default()
+                Judged::strong_unless(!rewrites)
             }
             Statement::Lock(lock) => Judged::strong_unless(
                 !blocks_writes(lock.lock_mode.as_ref())
@@ -953,31 +1421,52 @@ impl Model {
         let words: Vec<&str> = tokens.iter().map(String::as_str).collect();
         match words.as_slice() {
             ["drop", "index", ..] if concurrently => Judged::concurrently(true),
+            ["create", "index" | "unique", ..] => match create_index(&stmt.tokens()) {
+                Some(index) => self.judge_index(&index, &index.table, report),
+                None => Judged::default(),
+            },
             ["reindex", ..] => {
-                if !concurrently {
+                let original = stmt.tokens();
+                let (options, rest) = split_options(&original[1..]);
+                let concurrently = reindexes_concurrently(options, rest);
+                let waits = !concurrently && !self.is_new_target(rest);
+                if waits {
                     report(
                         Rule::MissingConcurrently,
                         "`REINDEX` blocks writes to the table, and reads that use the index, until it finishes: reindex `CONCURRENTLY`".to_string(),
                     );
                 }
-                Judged::concurrently(concurrently)
+                Judged {
+                    concurrently,
+                    ..Judged::strong_unless(!waits)
+                }
             }
             ["cluster", ..] => {
-                let table = token_name(&stmt.tokens()[1..], &["verbose"], &["using"]);
-                if !self.created.contains(&table) {
+                let rewrites = !self.created.contains(&cluster_table(&stmt.tokens()[1..]));
+                if rewrites {
                     report(Rule::TableRewrite, rewrite_command_message("CLUSTER"));
                 }
-                Judged::default()
+                Judged::strong_unless(!rewrites)
+            }
+            ["vacuum", ..] => {
+                let original = stmt.tokens();
+                let (options, rest) = split_options(&original[1..]);
+                let (full, tables) = vacuum_full(options, rest);
+                let rewrites = full
+                    && !(!tables.is_empty() && tables.iter().all(|t| self.created.contains(t)));
+                if rewrites {
+                    report(Rule::TableRewrite, rewrite_command_message("VACUUM FULL"));
+                }
+                // SKIP_LOCKED skips a table it cannot lock at once instead of waiting.
+                Judged::strong_unless(!rewrites || is_option_on(options, "skip_locked"))
             }
             ["alter", "table", rest @ ..]
                 if rest.windows(2).any(|pair| pair == ["set", "tablespace"])
                     && !rest.starts_with(&["all", "in"]) =>
             {
-                let skip = ["if", "exists", "only"];
-                let ends = ["set", "add", "alter", "drop", "rename", "owner", ","];
-                let table = token_name(&stmt.tokens()[2..], &skip, &ends);
-                let created = self.created.contains(&table);
-                if !created {
+                let table = set_tablespace_table(&stmt.tokens());
+                let exempt = table.is_empty() || self.created.contains(&table);
+                if !exempt {
                     report(
                         Rule::TableRewrite,
                         format!(
@@ -985,7 +1474,7 @@ impl Model {
                         ),
                     );
                 }
-                Judged::strong_unless(created)
+                Judged::strong_unless(exempt)
             }
             _ => Judged::default(),
         }
@@ -1023,7 +1512,7 @@ impl Session {
 }
 
 /// What a statement does to the session: whether it runs `CONCURRENTLY`, and whether it
-/// takes an ACCESS EXCLUSIVE lock on a table that has rows.
+/// waits for a lock that blocks writes, SHARE or stronger, on a table that has rows.
 #[derive(Default)]
 struct Judged {
     concurrently: bool,
@@ -1425,6 +1914,89 @@ fn referenced_tables(stmt: &Statement) -> Vec<String> {
         .collect()
 }
 
+fn is_key_column(column: &ColumnDef) -> bool {
+    column
+        .options
+        .iter()
+        .any(|option| matches!(option.option, ColumnOption::PrimaryKey(_)))
+}
+
+/// `name` in the schema of `table`: indexes and constraints live in their table's schema.
+fn qualify(table: &str, name: &str) -> String {
+    match table.rsplit_once('.') {
+        Some((schema, _)) => format!("{schema}.{name}"),
+        None => name.to_string(),
+    }
+}
+
+/// The new name of `table` after `RENAME TO`, which keeps its schema.
+fn renamed_table(table: &str, renamed: &RenameTableNameKind) -> String {
+    let (RenameTableNameKind::As(renamed) | RenameTableNameKind::To(renamed)) = renamed;
+    match renamed.0.as_slice() {
+        [_] => qualify(table, &key(renamed)),
+        _ => key(renamed),
+    }
+}
+
+/// The schema-qualified indexes a `DROP INDEX` drops; sqlparser does not read it with
+/// `CONCURRENTLY`.
+fn dropped_indexes(parsed: Option<&Statement>, tokens: &[String]) -> Vec<String> {
+    match parsed {
+        Some(Statement::Drop {
+            object_type: ObjectType::Index,
+            names,
+            ..
+        }) => names.iter().map(key).collect(),
+        Some(_) => Vec::new(),
+        None => match tokens {
+            [drop, index, rest @ ..] if drop == "drop" && index == "index" => {
+                let names: String = rest
+                    .iter()
+                    .skip_while(|token| matches!(token.as_str(), "concurrently" | "if" | "exists"))
+                    .take_while(|token| !matches!(token.as_str(), "cascade" | "restrict" | ";"))
+                    .map(|token| token.trim_matches('"'))
+                    .collect();
+                names
+                    .split(',')
+                    .filter(|name| !name.is_empty())
+                    .map(|name| name.strip_prefix("public.").unwrap_or(name).to_string())
+                    .collect()
+            }
+            _ => Vec::new(),
+        },
+    }
+}
+
+/// The name PostgreSQL gives the primary key of `table` when it names none, cut to fit the
+/// 63 bytes of an identifier.
+fn default_key_name(table: &str) -> String {
+    let table = table.rsplit('.').next().unwrap_or(table);
+    let mut end = table.len().min(58);
+    while !table.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}_pkey", &table[..end])
+}
+
+/// Whether `alter` gives its table a replica identity again.
+fn restores_identity(alter: &AlterTable) -> bool {
+    alter.operations.iter().any(restores_identity_op)
+}
+
+fn restores_identity_op(op: &AlterTableOperation) -> bool {
+    match op {
+        AlterTableOperation::AddColumn { column_def, .. } => is_key_column(column_def),
+        AlterTableOperation::AddConstraint {
+            constraint: TableConstraint::PrimaryKey(_) | TableConstraint::PrimaryKeyUsingIndex(_),
+            ..
+        } => true,
+        AlterTableOperation::ReplicaIdentity { identity } => {
+            matches!(identity, ReplicaIdentity::Full | ReplicaIdentity::Index(_))
+        }
+        _ => false,
+    }
+}
+
 /// The lowercased words of `text`.
 fn words(text: &str) -> Vec<String> {
     text.split(|c: char| !c.is_alphanumeric() && c != '_')
@@ -1445,6 +2017,205 @@ fn token_name(tokens: &[&str], skip: &[&str], ends: &[&str]) -> String {
     match table.strip_prefix("public.") {
         Some(rest) => rest.to_string(),
         None => table,
+    }
+}
+
+/// A `CREATE [UNIQUE] INDEX` read from its tokens: names folded, the table without `public`.
+struct NewIndex {
+    name: Option<String>,
+    table: String,
+    concurrently: bool,
+    if_not_exists: bool,
+}
+
+/// `CREATE [UNIQUE] INDEX [CONCURRENTLY] [IF NOT EXISTS] [name] ON [ONLY] table ...`, for the
+/// forms sqlparser does not read, such as `TABLESPACE` or `ON ONLY`.
+fn create_index(tokens: &[&str]) -> Option<NewIndex> {
+    let mut rest = tokens;
+    let mut take = |word: &str| match rest.split_first() {
+        Some((first, after)) if first.eq_ignore_ascii_case(word) => {
+            rest = after;
+            true
+        }
+        _ => false,
+    };
+    if !take("create") || !(take("index") || take("unique") && take("index")) {
+        return None;
+    }
+    let concurrently = take("concurrently");
+    let if_not_exists = take("if") && take("not") && take("exists");
+    let on = rest.iter().position(|t| t.eq_ignore_ascii_case("on"))?;
+    let table = token_name(&rest[on + 1..], &["only"], &["using", "("]);
+    Some(NewIndex {
+        name: (on > 0).then(|| token_name(&rest[..on], &[], &[])),
+        concurrently,
+        if_not_exists,
+        table: Some(table).filter(|table| !table.is_empty())?,
+    })
+}
+
+/// The index or materialized view a statement sqlparser does not read creates, such as
+/// `CREATE MATERIALIZED VIEW m AS ... WITH NO DATA`.
+fn created_by_tokens(tokens: &[&str]) -> Option<String> {
+    let lower: Vec<String> = tokens.iter().take(3).map(|t| t.to_lowercase()).collect();
+    match lower
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
+        ["create", "materialized", "view"] => Some(token_name(
+            &tokens[3..],
+            &["if", "not", "exists"],
+            &["as", "(", "using", "with", "tablespace"],
+        ))
+        .filter(|name| !name.is_empty()),
+        _ => create_index(tokens).and_then(|index| index.name),
+    }
+}
+
+/// The indexes `CREATE TABLE` makes for its primary key and unique constraints, by the names
+/// PostgreSQL gives them: the constraint name, else `t_pkey` and `t_a_b_key`. A unique key's
+/// default name over 63 bytes, which PostgreSQL shortens, or of an expression, is left out.
+fn implicit_indexes(create: &CreateTable) -> Vec<String> {
+    let table = last_name(&create.name);
+    let mut found: Vec<String> = create
+        .columns
+        .iter()
+        .flat_map(|column| column_indexes(&table, column))
+        .collect();
+    found.extend(
+        create
+            .constraints
+            .iter()
+            .filter_map(|constraint| constraint_index(&table, constraint)),
+    );
+    found
+}
+
+/// `constraint`, or `default` when it fits PostgreSQL's 63 bytes.
+fn index_name(constraint: Option<&sqlparser::ast::Ident>, default: String) -> Option<String> {
+    constraint
+        .map(name)
+        .or((default.len() <= 63).then_some(default))
+}
+
+/// The indexes of the `PRIMARY KEY` and `UNIQUE` options of `column` of `table`.
+fn column_indexes(table: &str, column: &ColumnDef) -> Vec<String> {
+    column
+        .options
+        .iter()
+        .filter_map(|option| match &option.option {
+            ColumnOption::PrimaryKey(pk) => index_name(
+                option.name.as_ref().or(pk.name.as_ref()),
+                default_key_name(table),
+            ),
+            ColumnOption::Unique(unique) => index_name(
+                option.name.as_ref().or(unique.name.as_ref()),
+                format!("{table}_{}_key", name(&column.name)),
+            ),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The index of a `PRIMARY KEY` or `UNIQUE` table constraint of `table`.
+fn constraint_index(table: &str, constraint: &TableConstraint) -> Option<String> {
+    match constraint {
+        TableConstraint::PrimaryKey(pk) => index_name(pk.name.as_ref(), default_key_name(table)),
+        TableConstraint::Unique(unique) => match &unique.name {
+            Some(constraint) => Some(name(constraint)),
+            None => {
+                let columns = unique
+                    .columns
+                    .iter()
+                    .map(|column| match &column.column.expr {
+                        Expr::Identifier(ident) => Some(name(ident)),
+                        _ => None,
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                index_name(None, format!("{table}_{}_key", columns.join("_")))
+            }
+        },
+        _ => None,
+    }
+}
+
+/// Whether a `REINDEX` with `options` and the `rest` of its tokens runs `CONCURRENTLY`.
+fn reindexes_concurrently(options: &[&str], rest: &[&str]) -> bool {
+    rest.iter().any(|t| t.eq_ignore_ascii_case("concurrently"))
+        || is_option_on(options, "concurrently")
+}
+
+/// Whether a `VACUUM` with `options` and the `rest` of its tokens is `FULL`, and its tables.
+fn vacuum_full(options: &[&str], rest: &[&str]) -> (bool, Vec<String>) {
+    let legacy = rest.iter().take_while(|t| is_vacuum_word(t)).count();
+    let full = rest[..legacy]
+        .iter()
+        .any(|t| t.eq_ignore_ascii_case("full"))
+        || is_option_on(options, "full");
+    (full, vacuum_tables(&rest[legacy..]))
+}
+
+/// The table of `ALTER TABLE [IF EXISTS] [ONLY] t ... SET TABLESPACE`.
+fn set_tablespace_table(tokens: &[&str]) -> String {
+    let skip = ["if", "exists", "only"];
+    let ends = ["set", "add", "alter", "drop", "rename", "owner", ","];
+    token_name(tokens.get(2..).unwrap_or_default(), &skip, &ends)
+}
+
+/// `tokens` after a leading parenthesised option list, and the options inside it.
+fn split_options<'a>(tokens: &'a [&'a str]) -> (&'a [&'a str], &'a [&'a str]) {
+    match (tokens.first(), tokens.iter().position(|t| *t == ")")) {
+        (Some(&"("), Some(close)) => (&tokens[1..close], &tokens[close + 1..]),
+        _ => (&[], tokens),
+    }
+}
+
+/// Whether a parenthesised option list turns `name` on: `name`, or `name` and a value other
+/// than `false`, `off` or `0`, quoted or not, in any case.
+fn is_option_on(options: &[&str], name: &str) -> bool {
+    options.iter().enumerate().any(|(at, option)| {
+        option.eq_ignore_ascii_case(name)
+            && !options.get(at + 1).is_some_and(|value| {
+                let value = value.trim_matches(['\'', '"']);
+                ["false", "off", "0"]
+                    .iter()
+                    .any(|off| value.eq_ignore_ascii_case(off))
+            })
+    })
+}
+
+fn is_vacuum_word(token: &str) -> bool {
+    ["full", "freeze", "verbose", "analyze", "analyse"]
+        .iter()
+        .any(|word| token.eq_ignore_ascii_case(word))
+}
+
+/// The folded tables of a `VACUUM` list, without their column lists.
+fn vacuum_tables(tokens: &[&str]) -> Vec<String> {
+    let (mut names, mut current, mut depth) = (Vec::new(), Vec::new(), 0_usize);
+    for token in tokens {
+        match *token {
+            "(" => depth += 1,
+            ")" => depth = depth.saturating_sub(1),
+            "," if depth == 0 => names.push(token_name(&std::mem::take(&mut current), &[], &[])),
+            _ if depth == 0 => current.push(*token),
+            _ => {}
+        }
+    }
+    if !current.is_empty() {
+        names.push(token_name(&current, &[], &[]));
+    }
+    names
+}
+
+/// The table a `CLUSTER` names: `CLUSTER [(options)] t [USING i]`, or `CLUSTER i ON t`.
+fn cluster_table(tokens: &[&str]) -> String {
+    let (_, rest) = split_options(tokens);
+    match rest.iter().position(|t| t.eq_ignore_ascii_case("on")) {
+        Some(on) => token_name(&rest[on + 1..], &[], &[]),
+        None => token_name(rest, &["verbose"], &["using"]),
     }
 }
 
@@ -1473,6 +2244,12 @@ fn unqualified(parts: &[String]) -> String {
         [schema, rest @ ..] if schema == "public" && !rest.is_empty() => rest.join("."),
         _ => parts.join("."),
     }
+}
+
+/// The name of `object` without its schema: indexes and constraints are named per schema.
+fn last_name(object: &ObjectName) -> String {
+    let key = key(object);
+    key.rsplit('.').next().unwrap_or(&key).to_string()
 }
 
 fn name(ident: &sqlparser::ast::Ident) -> String {
@@ -1620,7 +2397,10 @@ mod tests {
     fn statements_of_the_baseline_are_not_judged() {
         let baseline = format!("BEGIN;\n{USERS}\nCREATE INDEX users_bio ON users (bio);\nCOMMIT;");
         let layout = "CREATE  INDEX users_bio\n  ON users (bio); -- moved\nCREATE INDEX users_bio ON users (bio);";
-        assert_eq!(rules(&baseline, layout), [Rule::MissingConcurrently]);
+        assert_eq!(
+            rules(&baseline, layout),
+            [Rule::MissingConcurrently, Rule::MissingLockTimeout]
+        );
         assert_eq!(check(&baseline, &[]), Vec::<Vec<Finding>>::new());
     }
 
@@ -1639,7 +2419,10 @@ mod tests {
             REFRESH MATERIALIZED VIEW mv;";
         assert_eq!(rules(USERS, migration), []);
         let quoted = r#"CREATE TABLE "T" (id int); CLUSTER "T"; CLUSTER t;"#;
-        assert_eq!(rules(USERS, quoted), [Rule::TableRewrite]);
+        assert_eq!(
+            rules(USERS, quoted),
+            [Rule::TableRewrite, Rule::MissingLockTimeout]
+        );
     }
 
     #[test]
@@ -1703,7 +2486,10 @@ mod tests {
             assert_eq!(rules(USERS, &migration), expected, "{fill}");
         }
         let created_as = "CREATE TABLE t AS SELECT id FROM users; CREATE INDEX t_id ON t (id);";
-        assert_eq!(rules(USERS, created_as), [MissingConcurrently]);
+        assert_eq!(
+            rules(USERS, created_as),
+            [MissingConcurrently, MissingLockTimeout]
+        );
         let no_data = created_as.replace(" FROM users", " FROM users WITH NO DATA");
         assert_eq!(rules(USERS, &no_data), []);
     }
@@ -1721,6 +2507,152 @@ mod tests {
     #[test]
     fn truncate_takes_a_strong_lock() {
         assert_eq!(rules(USERS, "TRUNCATE users"), [Rule::MissingLockTimeout]);
+    }
+
+    #[test]
+    fn builds_and_rewrites_wait_for_a_lock_that_blocks_writes() {
+        let baseline = format!(
+            "{USERS}\nCREATE MATERIALIZED VIEW mv AS SELECT 1;\nCREATE TABLE events (at timestamptz) PARTITION BY RANGE (at);"
+        );
+        for (sql, rule) in [
+            (
+                "CREATE INDEX users_bio ON users (bio)",
+                Rule::MissingConcurrently,
+            ),
+            ("REINDEX TABLE users", Rule::MissingConcurrently),
+            (
+                "CREATE INDEX users_e ON users (email) TABLESPACE fast",
+                Rule::MissingConcurrently,
+            ),
+            (
+                "CREATE INDEX users_e ON users USING gist (box(email) range_ops (siglen = 12))",
+                Rule::MissingConcurrently,
+            ),
+            (
+                "CREATE UNIQUE INDEX users_e ON users (email) WITH (deduplicate_items = off) TABLESPACE x WHERE id > 0",
+                Rule::MissingConcurrently,
+            ),
+            ("REFRESH MATERIALIZED VIEW mv", Rule::MissingConcurrently),
+            ("VACUUM FULL users", Rule::TableRewrite),
+            ("CLUSTER users", Rule::TableRewrite),
+        ] {
+            assert_eq!(
+                rules(&baseline, sql),
+                [rule, Rule::MissingLockTimeout],
+                "{sql}"
+            );
+            let set = format!("SET lock_timeout = '1s'; {sql}");
+            assert_eq!(rules(&baseline, &set), [rule], "{sql}");
+        }
+        for sql in [
+            "CREATE INDEX CONCURRENTLY users_bio ON users (bio)",
+            "REINDEX TABLE CONCURRENTLY users",
+            "REINDEX (CONCURRENTLY, VERBOSE) TABLE users",
+            "REFRESH MATERIALIZED VIEW CONCURRENTLY mv",
+            "CREATE TABLE t (id int); CREATE INDEX t_id ON t (id); CLUSTER t; VACUUM FULL t",
+            "CREATE TABLE t (id int); CREATE INDEX ON t (id); REINDEX TABLE t",
+            "CREATE TABLE t (id int); CREATE INDEX t_id ON t (id); REINDEX INDEX t_id",
+            "CREATE TABLE s.t (id int); CREATE INDEX t_id ON s.t (id); REINDEX INDEX s.t_id",
+            "CREATE TABLE t (id int); REINDEX (VERBOSE) TABLE t",
+            "CREATE TABLE t (id int); CLUSTER (VERBOSE) t",
+            "CREATE TABLE t (id int); CREATE INDEX i ON t (id); CLUSTER i ON t",
+            "CREATE TABLE t (id int); CLUSTER VERBOSE t USING t_pkey",
+            "CREATE TABLE t (id int); VACUUM (FULL) t",
+            "CREATE TABLE t (id int); VACUUM (FULL, ANALYZE) public.t (id)",
+            "CREATE TABLE t (id int); VACUUM FULL t, t",
+            "CREATE INDEX CONCURRENTLY users_e ON users (email) TABLESPACE x",
+            "CREATE TABLE t (id int); CREATE INDEX t_id ON t (id) TABLESPACE x; REINDEX INDEX t_id",
+            "CREATE TABLE s.t (id int); CREATE INDEX ON s.t (id) TABLESPACE x; REINDEX TABLE s.t",
+            "CREATE MATERIALIZED VIEW m2 AS SELECT 1 AS x WITH NO DATA;
+             CREATE UNIQUE INDEX m2_i ON m2 (x); REFRESH MATERIALIZED VIEW m2",
+            "CREATE TABLE t (id int PRIMARY KEY, a int UNIQUE, b int, c int,
+                 CONSTRAINT named_u UNIQUE (b, c), UNIQUE (c, b));
+             REINDEX INDEX t_pkey; REINDEX INDEX t_a_key; REINDEX INDEX named_u;
+             REINDEX INDEX t_c_b_key",
+            "CREATE TABLE s.t (id int CONSTRAINT my_pk PRIMARY KEY, a int CONSTRAINT my_u UNIQUE);
+             REINDEX INDEX s.my_pk; REINDEX INDEX s.my_u",
+            "CREATE TABLE t (id int, PRIMARY KEY (id)); REINDEX INDEX t_pkey",
+        ] {
+            assert_eq!(rules(&baseline, sql), [], "{sql}");
+        }
+        for sql in [
+            "REINDEX (VERBOSE) TABLE users",
+            "REINDEX (CONCURRENTLY false) TABLE users",
+            "REINDEX INDEX users_pkey",
+            "REINDEX SCHEMA public",
+            "CREATE TABLE s.t (id int); CREATE INDEX t_id ON s.t (id); REINDEX INDEX t_id",
+            "CREATE INDEX users_email ON users (email); REINDEX INDEX users_email",
+            "CLUSTER (VERBOSE) users",
+            "CLUSTER users_pkey ON users",
+            "CLUSTER",
+            "CREATE TABLE t (id int PRIMARY KEY); REINDEX INDEX t_id_key",
+            "CREATE TABLE t (id int, CHECK (id > 0), UNIQUE (id, (id + 1))); REINDEX INDEX t_id_key",
+        ] {
+            let rule = if sql.contains("CLUSTER") {
+                Rule::TableRewrite
+            } else {
+                Rule::MissingConcurrently
+            };
+            assert_eq!(
+                rules(&baseline, sql).last(),
+                Some(&Rule::MissingLockTimeout),
+                "{sql}"
+            );
+            assert!(rules(&baseline, sql).contains(&rule), "{sql}");
+        }
+        for sql in [
+            "VACUUM (FULL) users",
+            "VACUUM (FULL, ANALYZE) users",
+            "VACUUM (FULL true) users (id)",
+            "VACUUM FULL users, mv",
+            "VACUUM FULL ANALYZE users",
+            "VACUUM (FULL)",
+            "CREATE TABLE t (id int); VACUUM FULL t, users",
+            "VACUUM FULL",
+        ] {
+            assert_eq!(
+                rules(&baseline, sql),
+                [Rule::TableRewrite, Rule::MissingLockTimeout],
+                "{sql}"
+            );
+        }
+        for sql in [
+            "VACUUM users",
+            "VACUUM (FULL false) users",
+            "VACUUM (FULL 'off') users",
+            "VACUUM (FULL \"OFF\") users",
+            "VACUUM (ANALYZE) users",
+            "VACUUM",
+        ] {
+            assert_eq!(rules(&baseline, sql), [], "{sql}");
+        }
+        assert_eq!(
+            rules(&baseline, "VACUUM (FULL, SKIP_LOCKED) users"),
+            [Rule::TableRewrite]
+        );
+        assert_eq!(
+            rules(&baseline, "VACUUM (FULL, SKIP_LOCKED off) users"),
+            [Rule::TableRewrite, Rule::MissingLockTimeout]
+        );
+        let retry = "SET lock_timeout = '1s'; CREATE INDEX CONCURRENTLY IF NOT EXISTS users_e ON users (email) TABLESPACE x";
+        assert_eq!(rules(&baseline, retry), [Rule::ConcurrentIndexIfNotExists]);
+        for sql in [
+            "CREATE INDEX",
+            "CREATE UNIQUE TABLE t (id int)",
+            "CREATE MATERIALIZED VIEW",
+        ] {
+            assert_eq!(rules(&baseline, sql), [], "{sql}");
+        }
+        let twice = "CREATE INDEX users_bio ON users (bio); REINDEX TABLE users; CLUSTER users";
+        assert_eq!(
+            rules(&baseline, twice),
+            [
+                Rule::MissingConcurrently,
+                Rule::MissingLockTimeout,
+                Rule::MissingConcurrently,
+                Rule::TableRewrite
+            ]
+        );
     }
 
     #[test]
@@ -2043,6 +2975,262 @@ mod tests {
     }
 
     #[test]
+    fn builds_and_rewrites_hold_their_locks_until_the_transaction_ends() {
+        use Rule::*;
+        let baseline = format!("{USERS}\nCREATE MATERIALIZED VIEW mv AS SELECT 1 AS id;");
+        let then_teams = "ALTER TABLE teams ADD COLUMN q int; COMMIT;";
+        let then_backfill = "UPDATE users SET bio = '' WHERE id BETWEEN 1 AND 9; COMMIT;";
+        for (migration, expected) in [
+            (
+                format!("BEGIN; CREATE INDEX i ON users (bio) TABLESPACE x; {then_teams}"),
+                &[MissingConcurrently, MultiTableLock][..],
+            ),
+            (
+                format!("BEGIN; REINDEX TABLE users; {then_teams}"),
+                &[MissingConcurrently, MultiTableLock],
+            ),
+            (
+                format!("BEGIN; REINDEX (VERBOSE) INDEX users_email; {then_backfill}"),
+                &[MissingConcurrently, LockedBackfill],
+            ),
+            (
+                format!("BEGIN; REINDEX INDEX users_pkey; {then_backfill}"),
+                &[MissingConcurrently, LockedBackfill],
+            ),
+            (
+                format!("BEGIN; REINDEX INDEX teams_pkey; {then_backfill}"),
+                &[MissingConcurrently],
+            ),
+            (
+                format!("BEGIN; REINDEX INDEX elsewhere; {then_teams}"),
+                &[MissingConcurrently],
+            ),
+            (
+                format!("BEGIN; REFRESH MATERIALIZED VIEW mv; {then_teams}"),
+                &[MissingConcurrently, MultiTableLock],
+            ),
+            (
+                format!("BEGIN; CLUSTER users USING users_pkey; {then_teams}"),
+                &[TableRewrite, MultiTableLock],
+            ),
+            (
+                format!("BEGIN; ALTER TABLE users SET TABLESPACE x; {then_teams}"),
+                &[TableRewrite, MultiTableLock],
+            ),
+            (
+                format!("BEGIN; VACUUM (FULL, SKIP_LOCKED) users; {then_teams}"),
+                &[TableRewrite, MultiTableLock],
+            ),
+            (format!("BEGIN; VACUUM (FULL off) users; {then_teams}"), &[]),
+            (format!("BEGIN; VACUUM FULL; {then_teams}"), &[TableRewrite]),
+            (format!("BEGIN; CLUSTER; {then_teams}"), &[TableRewrite]),
+            (
+                format!("BEGIN; REINDEX SCHEMA public; {then_teams}"),
+                &[MissingConcurrently],
+            ),
+            (
+                format!("BEGIN; REINDEX TABLE CONCURRENTLY users; {then_teams}"),
+                &[ConcurrentlyInTransaction],
+            ),
+            (
+                format!(
+                    "BEGIN; CREATE INDEX CONCURRENTLY i ON users (bio) TABLESPACE x; {then_teams}"
+                ),
+                &[ConcurrentlyInTransaction],
+            ),
+            (
+                format!(
+                    "BEGIN; CREATE TABLE t (id int PRIMARY KEY); REINDEX INDEX t_pkey; CLUSTER t;
+                     VACUUM FULL t; CREATE INDEX ON t (id) TABLESPACE x; REINDEX TABLE t;
+                     CREATE MATERIALIZED VIEW m2 AS SELECT 1 AS x WITH NO DATA;
+                     REFRESH MATERIALIZED VIEW m2; {then_teams}"
+                ),
+                &[],
+            ),
+        ] {
+            let migration = format!("SET lock_timeout = '1s'; {migration}");
+            assert_eq!(rules(&baseline, &migration), expected, "{migration}");
+        }
+    }
+
+    #[test]
+    fn a_table_keeps_a_replica_identity() {
+        use Rule::*;
+        let against = "CREATE TABLE a (id int PRIMARY KEY, u int NOT NULL UNIQUE);
+            CREATE TABLE b (id int, CONSTRAINT b_key PRIMARY KEY (id));
+            CREATE TABLE c (id int);
+            CREATE TABLE s.d (id int PRIMARY KEY);
+            CREATE UNIQUE INDEX a_u ON a (u);
+            CREATE TABLE n (id int CONSTRAINT n_named PRIMARY KEY);
+            CREATE TABLE s1.t (id int PRIMARY KEY, u int NOT NULL);
+            CREATE UNIQUE INDEX t_u ON s1.t (u);
+            CREATE TABLE s2.t (id int PRIMARY KEY, u int NOT NULL);
+            CREATE UNIQUE INDEX t_u ON s2.t (u);";
+        for (migration, expected) in [
+            ("ALTER TABLE a DROP CONSTRAINT a_pkey", &[DropPrimaryKey][..]),
+            ("ALTER TABLE b DROP CONSTRAINT b_key", &[DropPrimaryKey]),
+            ("ALTER TABLE b DROP CONSTRAINT b_pkey", &[]),
+            ("ALTER TABLE s.d DROP CONSTRAINT d_pkey", &[DropPrimaryKey]),
+            ("ALTER TABLE a REPLICA IDENTITY NOTHING", &[DropPrimaryKey]),
+            ("ALTER TABLE a REPLICA IDENTITY USING INDEX a_u_key; ALTER TABLE a DROP CONSTRAINT a_pkey", &[]),
+            ("ALTER TABLE a REPLICA IDENTITY FULL; ALTER TABLE a REPLICA IDENTITY DEFAULT; ALTER TABLE a DROP CONSTRAINT a_pkey", &[DropPrimaryKey]),
+            ("BEGIN; ALTER TABLE a DROP CONSTRAINT a_pkey; ALTER TABLE a ADD PRIMARY KEY (u); COMMIT;", &[]),
+            ("BEGIN; ALTER TABLE a DROP CONSTRAINT a_pkey; ALTER TABLE a REPLICA IDENTITY FULL; COMMIT;", &[]),
+            ("BEGIN; ALTER TABLE a DROP CONSTRAINT a_pkey; ALTER TABLE b ADD PRIMARY KEY (id); COMMIT;", &[DropPrimaryKey]),
+            ("BEGIN; ALTER TABLE a DROP CONSTRAINT a_pkey; COMMIT; ALTER TABLE a ADD PRIMARY KEY (u);", &[DropPrimaryKey]),
+            ("BEGIN; ALTER TABLE a DROP CONSTRAINT a_pkey; ROLLBACK;", &[]),
+            ("ALTER TABLE a DROP CONSTRAINT a_pkey, ADD PRIMARY KEY USING INDEX a_u_key", &[]),
+            ("ALTER TABLE a DROP CONSTRAINT a_pkey, REPLICA IDENTITY FULL", &[]),
+            ("ALTER TABLE a RENAME TO z; ALTER TABLE z DROP CONSTRAINT a_pkey", &[DropPrimaryKey]),
+            ("ALTER TABLE a RENAME CONSTRAINT a_pkey TO a_old; ALTER TABLE a DROP CONSTRAINT a_old", &[DropPrimaryKey]),
+            ("ALTER INDEX a_pkey RENAME TO a_old; ALTER TABLE a DROP CONSTRAINT a_old", &[DropPrimaryKey]),
+            ("ALTER TABLE a REPLICA IDENTITY USING INDEX a_pkey; ALTER TABLE a DROP CONSTRAINT a_pkey", &[DropPrimaryKey]),
+            (
+                "ALTER TABLE a REPLICA IDENTITY USING INDEX a_u_key; ALTER TABLE a DROP CONSTRAINT a_pkey; ALTER TABLE a DROP CONSTRAINT a_u_key",
+                &[DropPrimaryKey],
+            ),
+            ("ALTER TABLE a REPLICA IDENTITY USING INDEX a_u_key; DROP INDEX a_u_key", &[DropPrimaryKey]),
+            ("ALTER TABLE a DROP COLUMN id", &[DropPrimaryKey]),
+            ("ALTER TABLE a DROP COLUMN u", &[]),
+            ("ALTER TABLE c DROP CONSTRAINT c_pkey", &[]),
+            ("ALTER TABLE c REPLICA IDENTITY NOTHING", &[]),
+            ("ALTER TABLE unknown DROP CONSTRAINT unknown_pkey", &[DropPrimaryKey]),
+            ("ALTER TABLE n DROP CONSTRAINT n_named", &[DropPrimaryKey]),
+            ("ALTER TABLE n DROP CONSTRAINT n_pkey", &[]),
+            (
+                "BEGIN; ALTER TABLE a DROP CONSTRAINT a_pkey; ALTER TABLE a ADD COLUMN nid bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY; COMMIT;",
+                &[],
+            ),
+            ("ALTER TABLE a DROP CONSTRAINT a_pkey, ADD COLUMN nid bigint PRIMARY KEY", &[]),
+            ("ALTER TABLE c ADD COLUMN id bigint PRIMARY KEY; ALTER TABLE c DROP CONSTRAINT c_pkey", &[DropPrimaryKey]),
+            ("ALTER TABLE a REPLICA IDENTITY USING INDEX a_u; DROP INDEX CONCURRENTLY a_u", &[DropPrimaryKey]),
+            ("ALTER TABLE a REPLICA IDENTITY USING INDEX a_u; ALTER TABLE a DROP COLUMN u", &[DropPrimaryKey]),
+            (
+                "ALTER TABLE a DROP CONSTRAINT a_pkey, ADD PRIMARY KEY USING INDEX a_u; ALTER TABLE a DROP COLUMN u",
+                &[DropPrimaryKey],
+            ),
+            (
+                "ALTER TABLE a REPLICA IDENTITY FULL; ALTER TABLE a DROP CONSTRAINT a_pkey; ALTER TABLE a REPLICA IDENTITY DEFAULT",
+                &[DropPrimaryKey],
+            ),
+            ("ALTER TABLE s1.t REPLICA IDENTITY USING INDEX t_u; DROP INDEX s2.t_u", &[]),
+            ("ALTER TABLE s1.t REPLICA IDENTITY USING INDEX t_u; DROP INDEX s1.t_u", &[DropPrimaryKey]),
+            (
+                "BEGIN; ALTER TABLE a DROP CONSTRAINT a_pkey; ALTER TABLE a RENAME TO z; ALTER TABLE z ADD PRIMARY KEY (u); COMMIT;",
+                &[],
+            ),
+            (
+                "ALTER TABLE tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt DROP CONSTRAINT tttttttttttttttttttttttttttttttttttttttttttttttttttttttttt_pkey",
+                &[DropPrimaryKey],
+            ),
+            (
+                "BEGIN; ALTER TABLE a DROP CONSTRAINT a_pkey; ALTER TABLE a ADD PRIMARY KEY USING INDEX a_u_key; COMMIT; ALTER TABLE a DROP CONSTRAINT a_u_key",
+                &[DropPrimaryKey],
+            ),
+            ("BEGIN; ALTER TABLE a DROP CONSTRAINT a_pkey;", &[DropPrimaryKey]),
+            ("CREATE TABLE e (id int PRIMARY KEY); ALTER TABLE e DROP CONSTRAINT e_pkey", &[]),
+            ("BEGIN; ALTER TABLE a DROP CONSTRAINT a_pkey; ALTER TABLE b RENAME TO bb; COMMIT;", &[DropPrimaryKey]),
+            ("CREATE UNIQUE INDEX ON a (id); ALTER TABLE a DROP CONSTRAINT a_pkey", &[DropPrimaryKey]),
+            ("ALTER TABLE a REPLICA IDENTITY USING INDEX a_u; ALTER TABLE a DROP COLUMN id", &[]),
+            ("ALTER TABLE a REPLICA IDENTITY FULL; ALTER TABLE a RENAME TO z; ALTER TABLE z DROP CONSTRAINT a_pkey", &[]),
+            ("ALTER TABLE a REPLICA IDENTITY USING INDEX a_pkey; ALTER TABLE a DROP COLUMN id", &[DropPrimaryKey]),
+            ("ALTER TABLE a REPLICA IDENTITY FULL; ALTER TABLE a DROP COLUMN id", &[]),
+            ("ALTER INDEX a_u RENAME TO a_v; ALTER TABLE a REPLICA IDENTITY USING INDEX a_v; DROP INDEX a_v", &[DropPrimaryKey]),
+            ("ALTER TABLE a REPLICA IDENTITY USING INDEX a_u; ALTER INDEX a_u RENAME TO a_v; DROP INDEX a_v", &[DropPrimaryKey]),
+            ("ALTER TABLE s1.t REPLICA IDENTITY USING INDEX t_u; ALTER INDEX a_u RENAME TO a_v", &[]),
+            ("ALTER TABLE a REPLICA IDENTITY FULL; ALTER TABLE a REPLICA IDENTITY NOTHING", &[DropPrimaryKey]),
+            ("ALTER TABLE a REPLICA IDENTITY NOTHING; ALTER TABLE a REPLICA IDENTITY NOTHING", &[DropPrimaryKey]),
+            ("ALTER TABLE a REPLICA IDENTITY FULL", &[]),
+            ("ALTER TABLE a REPLICA IDENTITY FULL; ALTER INDEX a_u RENAME TO a_v", &[]),
+            ("ALTER TABLE a RENAME TO s.z; ALTER TABLE s.z DROP CONSTRAINT a_pkey", &[DropPrimaryKey]),
+            (&format!("ALTER TABLE \"{0}é\" DROP CONSTRAINT \"{0}_pkey\"", "a".repeat(57)), &[DropPrimaryKey]),
+        ] {
+            let migration = format!("SET lock_timeout = '1s'; {migration}");
+            let found = rules(against, &migration);
+            let found: Vec<_> = found.into_iter().filter(|rule| *rule == DropPrimaryKey).collect();
+            assert_eq!(found, expected, "{migration}");
+        }
+    }
+
+    #[test]
+    fn keys_added_by_alter_table_name_their_indexes() {
+        use Rule::*;
+        let baseline =
+            "CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT UNIQUE, team_id BIGINT);
+            CREATE TABLE teams (id BIGINT, name TEXT);
+            ALTER TABLE ONLY teams ADD CONSTRAINT teams_pkey PRIMARY KEY (id);
+            ALTER TABLE teams ADD UNIQUE (name), ADD CONSTRAINT one CHECK (id > 0);
+            CREATE TABLE events (id int, at date) PARTITION BY RANGE (at);";
+        let backfill = "UPDATE teams SET id = 1 WHERE id BETWEEN 1 AND 9; COMMIT;";
+        for (migration, expected) in [
+            (
+                "BEGIN; ALTER TABLE teams ADD COLUMN x int; REINDEX INDEX teams_pkey; COMMIT;"
+                    .to_string(),
+                &[MissingConcurrently][..],
+            ),
+            (
+                format!("BEGIN; REINDEX INDEX teams_pkey; {backfill}"),
+                &[MissingConcurrently, LockedBackfill],
+            ),
+            (
+                format!("BEGIN; REINDEX INDEX teams_name_key; {backfill}"),
+                &[MissingConcurrently, LockedBackfill],
+            ),
+            (
+                "BEGIN; ALTER TABLE users ADD COLUMN x int; REINDEX INDEX users_email_key; COMMIT;"
+                    .to_string(),
+                &[MissingConcurrently],
+            ),
+            (
+                "BEGIN; ALTER TABLE teams ADD COLUMN x int; REINDEX INDEX nowhere; COMMIT;"
+                    .to_string(),
+                &[MissingConcurrently],
+            ),
+            (
+                "CREATE TABLE t (id int); ALTER TABLE t ADD CONSTRAINT t_pk PRIMARY KEY (id);
+                 ALTER TABLE t ADD COLUMN u int UNIQUE, ADD COLUMN v int;
+                 REINDEX INDEX t_pk; REINDEX INDEX t_u_key"
+                    .to_string(),
+                &[],
+            ),
+            (
+                "CREATE INDEX events_at ON ONLY events (at)".to_string(),
+                &[],
+            ),
+            ("CREATE INDEX events_at ON events (at)".to_string(), &[]),
+            (
+                "CREATE TABLE t (id int PRIMARY KEY); CREATE INDEX t_id ON t (id);
+                 ALTER INDEX t_id RENAME TO t_x; ALTER TABLE t RENAME CONSTRAINT t_pkey TO t_pk;
+                 REINDEX INDEX t_x; REINDEX INDEX t_pk"
+                    .to_string(),
+                &[],
+            ),
+            (
+                "BEGIN; ALTER TABLE users ADD COLUMN x int; ALTER INDEX teams_name_key RENAME TO tn;
+                 REINDEX INDEX tn; COMMIT;"
+                    .to_string(),
+                &[MissingConcurrently, MultiTableLock],
+            ),
+            (
+                "ALTER TABLE teams DROP CONSTRAINT teams_name_key;
+                 BEGIN; ALTER TABLE users ADD COLUMN x int; REINDEX INDEX teams_name_key; COMMIT;"
+                    .to_string(),
+                &[MissingConcurrently],
+            ),
+            ("CREATE INDEX ON".to_string(), &[]),
+            ("CREATE INDEX i ON ONLY".to_string(), &[]),
+            ("ALTER TABLE SET TABLESPACE x".to_string(), &[]),
+        ] {
+            let migration = format!("SET lock_timeout = '1s'; {migration}");
+            assert_eq!(rules(baseline, &migration), expected, "{migration}");
+        }
+        assert_eq!(
+            rules(baseline, "CREATE INDEX events_at ON ONLY events (at)"),
+            [MissingLockTimeout]
+        );
+    }
+
+    #[test]
     fn only_single_column_keys_bound_a_backfill() {
         use Rule::*;
         let baseline = format!("{USERS} CREATE TABLE pairs (a int, b int, PRIMARY KEY (a, b));");
@@ -2118,11 +3306,14 @@ mod tests {
             START TRANSACTION;
             ALTER TABLE events DETACH PARTITION p CONCURRENTLY;
             REINDEX INDEX CONCURRENTLY a;
+            REINDEX (CONCURRENTLY) INDEX a;
             ROLLBACK;";
         assert_eq!(
             rules(USERS, migration),
-            [Rule::ConcurrentlyInTransaction; 4]
+            [Rule::ConcurrentlyInTransaction; 5]
         );
+        let off = "SET lock_timeout = '1s'; BEGIN; REINDEX (CONCURRENTLY 'off') INDEX a; COMMIT;";
+        assert_eq!(rules(USERS, off), [Rule::MissingConcurrently]);
     }
 
     #[test]
