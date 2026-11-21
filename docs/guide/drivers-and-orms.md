@@ -1,4 +1,5 @@
 ---
+title: "Typed SQL with Python drivers and ORMs"
 description: Where an ORM or database driver returns a different Python type than the raw value sqlty infers, for SQLAlchemy, Django and others, and what to annotate.
 ---
 

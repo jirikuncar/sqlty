@@ -28,6 +28,8 @@ maximum of `--repeats` runs (RSS from `wait4` of that child).
 
 - `check`: `sqlty check` over the project.
 - `rewrite_check`: `sqlty rewrite --check` (no files change).
+- `breaking`: `sqlty breaking --against HEAD` after three new schema statements, at most
+  three runs: each checks out the baseline.
 - `schema_load`: parse the 400-500 table schema through one `analyze_select`.
 - `schema_load_unresolved_alters`: 2000 tables plus 2000 `ALTER TABLE` on tables
   that do not exist.

@@ -261,7 +261,8 @@ def test_links(page: Path) -> None:
     prose = re.sub(r"^(`{3,}).*?^\1", "", page.read_text(), flags=re.M | re.S)
     prose = re.sub(r"`[^`\n]*`", "", prose)
     links = re.findall(r"\]\(([^)#\s]+)(?:#[^)]*)?\)", prose)
-    broken = [link for link in links if "://" not in link and not (page.parent / link).exists()]
+    relative = [link for link in links if not re.match(r"[a-z][a-z0-9+.-]*:", link)]
+    broken = [link for link in relative if not (page.parent / link).exists()]
     assert not broken
 
 
